@@ -7,7 +7,7 @@
  * VARBINARY en `portal_course_material.contenido` y los certificados se
  * generaban al vuelo sin guardarse en ningún lado.
  *
- * ⚠️ USO EXCLUSIVO DE LA SECCIÓN FORMACIÓN DEL PORTAL TH. Este módulo y sus
+ * ⚠️ USO EXCLUSIVO DEL PORTAL TH. Este módulo y sus
  * variables `PORTAL_TH_SP_*` NO se reutilizan desde ningún otro módulo de
  * SynerLink (SGC, solicitudes, gestión documental, chat…): la credencial es
  * una app dedicada (SynerLink-PortalTH-Formacion) con `Sites.Selected` y rol
@@ -15,6 +15,12 @@
  * DENTRO de la carpeta base (FORMACION). Hay una prueba que falla si alguien
  * lo importa por fuera de `lib/portal/` o `app/api/portal/`
  * (`__tests__/formacion-storage-aislamiento.test.ts`).
+ *
+ * Desde 2026-10-08 (pedido de Cristian: botón "VISUALIZAR" de Políticas y
+ * reglamentos) `politicas-storage.ts` reutiliza el token y la configuración
+ * de esta app para LEER la carpeta POLITICAS Y REGLAMENTOS del mismo sitio.
+ * Sigue siendo el Portal TH y el mismo sitio; aquel módulo solo lista y pide
+ * vistas previas, nunca escribe.
  *
  * POR QUÉ NO SE USA EL CONECTOR `mcp-sharepoint-gss` (como el resto del
  * portal): ese conector es de SOLO LECTURA a propósito y su app de Entra ya
@@ -46,7 +52,7 @@ export interface ConfigFormacionSharePoint {
 }
 
 /** Variables obligatorias. La carpeta base tiene valor por defecto. */
-const VARIABLES_OBLIGATORIAS = [
+export const VARIABLES_OBLIGATORIAS = [
   'PORTAL_TH_SP_TENANT_ID',
   'PORTAL_TH_SP_CLIENT_ID',
   'PORTAL_TH_SP_CLIENT_SECRET',
@@ -229,7 +235,16 @@ export function _reiniciarCacheToken() {
   tokenCache = null;
 }
 
-async function obtenerToken(cfg: ConfigFormacionSharePoint, f: Fetch): Promise<string> {
+/**
+ * Token app-only de Graph (client credentials) con caché en memoria.
+ * Exportado SOLO para `politicas-storage.ts` (lectura de POLITICAS Y
+ * REGLAMENTOS del mismo sitio, también parte del Portal TH). El token nunca
+ * sale del servidor.
+ */
+export async function obtenerToken(
+  cfg: Pick<ConfigFormacionSharePoint, 'tenantId' | 'clientId' | 'clientSecret'>,
+  f: Fetch
+): Promise<string> {
   const clave = `${cfg.tenantId}|${cfg.clientId}`;
   if (tokenCache && tokenCache.clave === clave && tokenCache.vence > Date.now() + 60_000) return tokenCache.token;
 
@@ -342,6 +357,122 @@ export async function subirArchivoFormacion(
     throw error;
   }
   throw new FormacionStorageError('La subida terminó sin que Graph confirmara el archivo.');
+}
+
+/* ───────────── Subida DIRECTA del navegador (sin tope de tamaño) ─────────────
+ * Pedido de Cristian Baldión (2026-10-08): "quita ese límite de peso en los
+ * archivos, recuerda que todo queda en el sitio de Talento Humano".
+ *
+ * Para que un video de cientos de MB no pase por Next ni por IIS/ARR (que en
+ * producción corta en ~30 MB y tiene timeouts), el servidor solo ABRE una
+ * upload session de Graph en la ruta correcta y le entrega al navegador la
+ * `uploadUrl`. Esa URL ya viene preautorizada por Graph, es temporal y sirve
+ * SOLO para ese archivo: el token de la app nunca sale del servidor. El
+ * navegador sube por trozos (`lib/portal/subida-por-trozos.ts`) y, al
+ * terminar, el servidor comprueba el archivo resultante con
+ * `obtenerArchivoSubidoEnCarpeta` antes de registrarlo.
+ */
+
+export interface SesionSubida {
+  /** URL preautorizada de Graph para subir los trozos. Sin Bearer. */
+  uploadUrl: string;
+  /** Hasta cuándo vale la sesión (ISO), si Graph lo informa. */
+  expiracion: string | null;
+  /** Nombre (ya saneado) con el que se pidió el archivo. */
+  nombre: string;
+}
+
+/**
+ * Abre una upload session en `FORMACION/<curso>/<subcarpeta>/<nombre>` con
+ * `conflictBehavior=rename` (si ya existe uno con ese nombre, SharePoint le
+ * agrega " 1", " 2"… en vez de pisarlo). Devuelve SOLO lo que el navegador
+ * necesita.
+ */
+export async function crearSesionSubida(
+  params: { carpetaCurso: string; subcarpeta: SubcarpetaFormacion; nombreArchivo: string },
+  deps: { config?: ConfigFormacionSharePoint; fetch?: Fetch } = {}
+): Promise<SesionSubida> {
+  const cfg = deps.config ?? leerConfigFormacion();
+  const f = deps.fetch ?? fetch;
+  const nombre = nombreArchivoSeguro(params.nombreArchivo);
+  const ruta = rutaDentroDeFormacion(cfg.carpetaBase, params.carpetaCurso, params.subcarpeta, nombre);
+  const token = await obtenerToken(cfg, f);
+  const res = await f(
+    `${GRAPH}/sites/${encodeURIComponent(cfg.siteId)}/drive/root:/${codificarRuta(ruta)}:/createUploadSession`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'rename' } }),
+    }
+  );
+  const datos = (await res.json().catch(() => null)) as { uploadUrl?: string; expirationDateTime?: string } | null;
+  if (!res.ok || !datos?.uploadUrl) {
+    throw new FormacionStorageError(`No se pudo abrir la sesión de subida (${res.status}).`, res.status);
+  }
+  // Defensa: la URL que se le entrega al navegador tiene que ser https.
+  if (!/^https:\/\//i.test(datos.uploadUrl)) {
+    throw new FormacionStorageError('Graph devolvió una URL de subida no válida.');
+  }
+  return { uploadUrl: datos.uploadUrl, expiracion: datos.expirationDateTime ?? null, nombre };
+}
+
+/** El driveItem que se quiere registrar no está en la carpeta del curso. */
+export class ArchivoFueraDeCarpeta extends FormacionStorageError {
+  constructor() {
+    super('El archivo no está en la carpeta del curso.', 403);
+    this.name = 'ArchivoFueraDeCarpeta';
+  }
+}
+
+interface DriveItemConPadre extends DriveItemGraph {
+  parentReference?: { path?: string };
+}
+
+/** `/drives/x/root:/FORMACION/a%20b/materiales` → `FORMACION/a b/materiales`. */
+function rutaDelPadre(path: string | undefined): string | null {
+  const m = /root:(.*)$/.exec(path ?? '');
+  if (!m) return null;
+  let ruta = m[1];
+  try {
+    ruta = decodeURIComponent(ruta);
+  } catch {
+    // Graph ya la entregó decodificada.
+  }
+  return ruta.replace(/^\/+|\/+$/g, '');
+}
+
+/**
+ * Lee el archivo que el navegador acaba de subir y COMPRUEBA que esté justo
+ * en `FORMACION/<curso>/<subcarpeta>` y sea un archivo (no una carpeta). Así
+ * nadie puede registrar como material un driveItemId de otra carpeta del
+ * sitio. Lanza `FormacionStorageError` si no cumple.
+ */
+export async function obtenerArchivoSubidoEnCarpeta(
+  params: { driveItemId: string; carpetaCurso: string; subcarpeta: SubcarpetaFormacion; mime: string },
+  deps: { config?: ConfigFormacionSharePoint; fetch?: Fetch } = {}
+): Promise<ArchivoEnSharePoint> {
+  if (!/^[A-Za-z0-9!._-]{1,200}$/.test(params.driveItemId)) throw new FormacionStorageError('Id de archivo no válido.');
+  const cfg = deps.config ?? leerConfigFormacion();
+  const f = deps.fetch ?? fetch;
+  const esperada = [cfg.carpetaBase, params.carpetaCurso, params.subcarpeta];
+  for (const s of esperada) {
+    if (!esSegmentoValido(s)) throw new Error(`Segmento de ruta no válido: "${s}"`);
+  }
+  const token = await obtenerToken(cfg, f);
+  const res = await f(
+    `${GRAPH}/sites/${encodeURIComponent(cfg.siteId)}/drive/items/${encodeURIComponent(params.driveItemId)}` +
+      '?$select=id,name,size,webUrl,file,parentReference',
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!res.ok) throw new FormacionStorageError(`Graph no encontró el archivo subido (${res.status}).`, res.status);
+  const item = (await res.json()) as DriveItemConPadre;
+  if (!item.file) throw new FormacionStorageError('El elemento subido no es un archivo.');
+  const padre = rutaDelPadre(item.parentReference?.path);
+  if (!padre || padre.toLowerCase() !== esperada.join('/').toLowerCase()) {
+    throw new ArchivoFueraDeCarpeta();
+  }
+  if (!item.size || item.size <= 0) throw new FormacionStorageError('El archivo subido está vacío.');
+  return aReferencia(item, params.mime, item.size);
 }
 
 /**

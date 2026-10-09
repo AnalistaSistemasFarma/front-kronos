@@ -86,6 +86,29 @@ export const SGC_AUDIT_ACTIONS = {
   lecturaNoEntendi: 'divulgacion.no_entendi',
   lecturaUmbral: 'divulgacion.umbral_lectura',
   empresaConfigurada: 'configuracion.empresa',
+  // Sprint 8: encabezado obligatorio, codificación con herencia y listado maestro.
+  listadoMaestroImportado: 'listado_maestro.importado',
+  documentoImportado: 'documento.importado',
+  // Sprint 9: archivos del listado, relaciones por código, cierre de la carga inicial y correo.
+  cargaMasivaArchivos: 'listado_maestro.carga_archivos',
+  relacionPropuesta: 'relacion.propuesta',
+  relacionConfirmada: 'relacion.confirmada',
+  cargaInicialCerrada: 'carga_inicial.cerrada',
+  correoResumenDiario: 'correo.resumen_diario',
+  // Sprint 10: capacitación opcional por solicitud, material previo y recapacitación.
+  capacitacionBandera: 'capacitacion.bandera',
+  capacitacionRecapacitacion: 'capacitacion.recapacitacion',
+  // Sprint 11: copias no controladas y protección del visor.
+  copiaNoControladaSolicitada: 'copia_no_controlada.solicitada',
+  copiaNoControladaDecidida: 'copia_no_controlada.decidida',
+  visorEvento: 'documento.visor_evento',
+  // Sprint 12: aprobadores autorizados y firmante sustituto.
+  aprobadorAutorizado: 'aprobador.autorizado',
+  aprobadorRevocado: 'aprobador.revocado',
+  firmanteSustituido: 'firmante.sustituido',
+  // Sprint 13: firma propia.
+  firmaPropiaRegistrada: 'firma.propia_registrada',
+  firmaPropiaValidada: 'firma.propia_validada',
 } as const;
 
 export type SgcAuditAction = (typeof SGC_AUDIT_ACTIONS)[keyof typeof SGC_AUDIT_ACTIONS];

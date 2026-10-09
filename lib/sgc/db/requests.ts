@@ -52,9 +52,15 @@ import type { SgcUploader } from './documents';
 import { getCurrentFlowVersion, loadDefinition } from './flows';
 import { resolveElaboratorFor } from './elaborator';
 import { describeElaboratorChoice } from '../flows/elaborator';
+import { isHeaderMandatory } from './companySettings';
+import { guideInputOf, loadParentDocument } from './coding';
+import { inheritsParentNumber } from '../coding';
 import { activateReaders, checkReadThreshold, getDisseminationView, getMyReading } from './dissemination';
 import { getTrainingView } from './training';
+import { SGC_TRAINING_FLAG_SOURCE_LABELS, SGC_TRAINING_LOCKED_ROLES, effectiveRequiresTraining, parseTrainingChoice, trainingFlagSource } from '../training/flag';
 import { annulUnpublishedVersion, publishApprovedVersion, type SgcPublishResult } from './vigencia';
+import { assertApproversAuthorized, canApprove, getApproverPolicy, isApprovalStep, isSubstituteAssigner } from './approvers';
+import { SGC_AUTH_TYPE_SUBSTITUTES, isAuthorizedApprover, normalizeSubstitution, substitutionDenial } from '../approvers';
 
 /**
  * Solicitudes y «Tareas documentales» del SGC (Sprint 2): instancias del
@@ -83,6 +89,11 @@ function text(value: unknown, label: string, max: number, min = 1): string {
   if (s.length < min) throw new SgcError(min > 1 ? `${label} es obligatorio (mínimo ${min} caracteres).` : `${label} es obligatorio.`);
   if (s.length > max) throw new SgcError(`${label} admite máximo ${max} caracteres.`);
   return s;
+}
+
+/** Sprint 10: ¿la solicitud requiere capacitación? (confirmada → sugerida → tipo documental). */
+export function requiresTrainingOf(request: { requires_training?: boolean | null; requires_training_suggested?: boolean | null; documentType?: { requires_training: boolean } | null }): boolean {
+  return effectiveRequiresTraining({ confirmed: request.requires_training, suggested: request.requires_training_suggested, typeDefault: request.documentType?.requires_training ?? true });
 }
 
 function lower(email: string | null | undefined): string {
@@ -262,7 +273,7 @@ async function notifyTurn(ctx: EngineCtx, idTask: number, taskDef: { name: strin
  */
 async function advanceAfterResolved(ctx: EngineCtx, fromKey: string, now: Date, me: string): Promise<{ next: string; published: SgcPublishResult | null }> {
   const { tx, request, def } = ctx;
-  const condition = { requestType: request.request_type, requiresTraining: request.documentType?.requires_training ?? true };
+  const condition = { requestType: request.request_type, requiresTraining: requiresTrainingOf(request) };
   const step = resolveNextStep(def, fromKey, 'aprobar', condition);
   if (step.kind === 'task') {
     await activateTask(ctx, step.task, 1);
@@ -315,6 +326,10 @@ export interface SgcCreateRequestInput {
   idDocument?: unknown;
   idProcess?: unknown;
   idDocumentType?: unknown;
+  /** Sprint 8: documento padre de un formato o instructivo que hereda su número (guía de codificación). */
+  idParentDocument?: unknown;
+  /** Sprint 10: SUGERENCIA del solicitante: ¿requiere capacitación? (sí, no o vacío = según el tipo). */
+  requiresTraining?: unknown;
   /** IGNORADO desde el 2026-10-05: el elaborador sale de la configuración (resolveElaboratorFor). */
   elaboratorEmail?: unknown;
   formValues?: Record<string, unknown>;
@@ -380,6 +395,7 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
   let idDocument: number | null = null;
   let idProcess: number | null = null;
   let idDocumentType: number | null = null;
+  let idParentDocument: number | null = null;
   if (requestType === 'nuevo') {
     idProcess = Number(input.idProcess);
     idDocumentType = Number(input.idDocumentType);
@@ -389,6 +405,15 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
     ]);
     if (!proc) throw new SgcError('Seleccione un proceso activo de la empresa.');
     if (!type) throw new SgcError('Seleccione un tipo documental activo de la empresa.');
+    // Sprint 8: si el tipo hereda el número de su documento padre (guía de codificación), el padre es obligatorio.
+    const guide = await db.sgcCodingGuide.findUnique({ where: { id_company: idCompany } });
+    if (guide && inheritsParentNumber(guideInputOf(guide), type.code)) {
+      const raw = Number(input.idParentDocument);
+      if (!input.idParentDocument || !Number.isInteger(raw)) {
+        throw new SgcError(`Un documento de tipo ${type.name} hereda el número de su documento padre: seleccione el documento padre (por ejemplo, el procedimiento).`);
+      }
+      idParentDocument = (await loadParentDocument(db, idCompany, raw)).idDocument;
+    }
   } else {
     idDocument = Number(input.idDocument);
     const doc = Number.isInteger(idDocument) ? await db.sgcDocument.findFirst({ where: { id_document: idDocument, id_company: idCompany } }) : null;
@@ -432,6 +457,8 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
         id_document: idDocument,
         id_process_map: idProcess,
         id_document_type: idDocumentType,
+        id_parent_document: idParentDocument,
+        requires_training_suggested: parseTrainingChoice(input.requiresTraining),
         requester_email: lower(actor.email),
         elaborator_email: elaborator,
         status: 'abierta',
@@ -451,7 +478,7 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
       idTask: startTask.id_task,
       meta: { elaborator, source: resolved.choice!.source, matrix: resolved.matrixLabel, candidates: resolved.choice!.candidates, discarded: resolved.choice!.discarded },
     });
-    const next = resolveNextStep(def, start.key, 'aprobar', { requestType, requiresTraining: request.documentType?.requires_training ?? true });
+    const next = resolveNextStep(def, start.key, 'aprobar', { requestType, requiresTraining: requiresTrainingOf(request) });
     if (next.kind === 'task') await activateTask(ctx, next.task, 1);
     await writeSgcAudit(tx, {
       idCompany,
@@ -465,6 +492,7 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
         idDocument,
         idProcess,
         idDocumentType,
+        ...(idParentDocument ? { idParentDocument } : {}),
         elaborator,
         elaboratorSource: resolved.choice!.source,
         elaboratorMatrix: resolved.matrixLabel,
@@ -580,6 +608,14 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
     if (!def.transitions.some((t) => t.from === task.task_key && t.action === decision)) {
       throw new SgcError(decision === 'devolver' ? 'Esta tarea no se puede devolver.' : 'Esta tarea no tiene a dónde avanzar.', 409);
     }
+    // Sprint 10: con capacitación, la divulgación no abre sin el material (video y evaluación) registrado.
+    if (taskDef.role === 'material' && decision === 'aprobar' && !(await tx.sgcTraining.findFirst({ where: { id_request: request.id_request } }))) {
+      throw new SgcError('Registre primero el material de la capacitación (video o sesión y la evaluación en Microsoft Forms o Google Forms): la divulgación abre con él.', 409);
+    }
+    // Sprint 12: al APROBAR, la persona (titular o sustituto) debe seguir en la lista de aprobadores autorizados.
+    if (decision === 'aprobar' && isApprovalStep(taskDef) && chosenRow?.user_email && !(await canApprove(tx, request.id_company, me, request.id_process_map, new Date()))) {
+      throw new SgcError('Usted no está (o ya no está) en la lista de aprobadores autorizados de este proceso: Aseguramiento de Calidad puede asignar un sustituto autorizado.', 409);
+    }
     const isSubmit = taskDef.assignment === 'elaborador' && decision === 'aprobar';
     if (isSubmit) await assertReadyToSubmit(tx, request, def, task.task_key);
     if (isFirstWork && decision === 'aprobar') await assertAssignmentComplete(tx, request, def, task.name);
@@ -659,7 +695,7 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
     const after = task.assignees.map((a) => (a.id_task_assignee === chosen.id ? { ...toAssigneeState(a), status: (decision === 'aprobar' ? 'aprobado' : 'devuelto') as SgcAssigneeStatus } : toAssigneeState(a)));
     const outcome = taskOutcome(after);
     const ctx: EngineCtx = { tx, request, def, notifications, actor, subjectLabel: request.subject };
-    const condition = { requestType: request.request_type, requiresTraining: request.documentType?.requires_training ?? true };
+    const condition = { requestType: request.request_type, requiresTraining: requiresTrainingOf(request) };
     let next: string = task.task_key;
     let published: SgcPublishResult | null = null;
 
@@ -750,6 +786,8 @@ export async function setSigners(db: SgcDb, notifier: SgcNotifier, idRequest: nu
     }
     const eligible = new Set((await listEligibleUsers(tx, request.id_company)).map((u) => u.email));
     const desired = normalizeSigners(input.signers, { stepName: stepDef.name, elaboratorEmail: request.elaborator_email, requesterEmail: request.requester_email, eligibleEmails: eligible });
+    // Sprint 12: en APROBACIÓN solo quedan (ni se sugieren) los aprobadores autorizados del proceso.
+    await assertApproversAuthorized(tx, request, stepDef, desired.map((d) => d.email), new Date());
     const modes = parseSigningModes(request.signing_modes_json);
     const currentMode = signingModeFor(stepDef, modes);
     const newMode = input.mode === 'orden' || input.mode === 'paralelo' ? input.mode : currentMode;
@@ -790,7 +828,8 @@ export async function setSigners(db: SgcDb, notifier: SgcNotifier, idRequest: nu
     // Si el paso está en curso, se ajustan sus cupos pendientes (lo decidido se conserva).
     if (openTask) {
       const point = signaturePointFor(stepDef.signatureMeaning);
-      const removed = openTask.assignees.filter((a) => a.user_email && plan.remove.includes(lower(a.user_email)) && a.status === 'pendiente');
+      // Sprint 12: quitar al titular también anula el cupo pendiente de su sustituto.
+      const removed = openTask.assignees.filter((a) => a.status === 'pendiente' && ((a.user_email && plan.remove.includes(lower(a.user_email))) || (a.on_behalf_of && plan.remove.includes(lower(a.on_behalf_of)))));
       if (removed.length) {
         await tx.sgcTaskAssignee.updateMany({ where: { id_task_assignee: { in: removed.map((a) => a.id_task_assignee) } }, data: { status: 'reemplazado' } });
         await tx.sgcAuthorization.updateMany({ where: { id_task_assignee: { in: removed.map((a) => a.id_task_assignee) }, status: 'pendiente' }, data: { status: 'anulada' } });
@@ -916,7 +955,9 @@ export async function confirmSuggestions(db: SgcDb, notifier: SgcNotifier, idReq
     assertCanAssignParticipants(def, await assignerOf(tx, request, def, me, access), sgcAssignmentPolicy());
     const pending = await tx.sgcRequestSigner.findMany({ where: { id_request: idRequest, ...SGC_PENDING_SUGGESTION }, orderBy: [{ step_key: 'asc' }, { sign_order: 'asc' }] });
     const pendingScope = await tx.sgcDisseminationScope.findMany({ where: { id_request: idRequest, ...SGC_PENDING_SUGGESTION } });
-    if (pending.length === 0 && pendingScope.length === 0) throw new SgcError('No hay firmantes ni alcance sugeridos por confirmar.', 409);
+    // Sprint 10: la capacitación sugerida por el solicitante se confirma junto con firmantes y alcance.
+    const pendingTraining = request.requires_training === null && typeof request.requires_training_suggested === 'boolean';
+    if (pending.length === 0 && pendingScope.length === 0 && !pendingTraining) throw new SgcError('No hay firmantes, alcance ni capacitación sugeridos por confirmar.', 409);
     const active = await tx.sgcRequestSigner.findMany({ where: { id_request: idRequest, is_active: true } });
     const eligible = new Set((await listEligibleUsers(tx, request.id_company)).map((u) => u.email));
     const finalByStep = new Map<string, { email: string; stepKey: string }[]>();
@@ -930,6 +971,8 @@ export async function confirmSuggestions(db: SgcDb, notifier: SgcNotifier, idReq
       if (!stepDef) throw new SgcError(`El paso ${stepKey} no admite firmantes.`, 409);
       if (await tx.sgcTask.findFirst({ where: { id_request: idRequest, task_key: stepKey, status: 'abierta' } })) throw new SgcError(`«${stepDef.name}» ya está en curso: reasigne a las personas en lugar de confirmar.`, 409);
       normalizeSigners(list.map((x) => x.email), { stepName: stepDef.name, elaboratorEmail: request.elaborator_email, requesterEmail: request.requester_email, eligibleEmails: eligible });
+      // Sprint 12: lo sugerido para APROBACIÓN se confirma solo si son aprobadores autorizados.
+      await assertApproversAuthorized(tx, request, stepDef, list.map((x) => x.email), new Date());
     }
     const now = new Date();
     // El orden de lo confirmado sigue al de lo que ya estaba activo.
@@ -943,9 +986,13 @@ export async function confirmSuggestions(db: SgcDb, notifier: SgcNotifier, idReq
     for (const r of pendingScope) {
       await tx.sgcDisseminationScope.update({ where: { id_scope: r.id_scope }, data: { is_active: true, change_reason: `${r.change_reason ?? ''} · confirmada por ${me}`.slice(0, 1000) } });
     }
+    if (pendingTraining) {
+      await tx.sgcRequest.update({ where: { id_request: idRequest }, data: { requires_training: request.requires_training_suggested, training_confirmed_by: me, training_confirmed_at: now } });
+    }
     const lines = [
       ...pending.map((p) => `✓ ${def.tasks.find((t) => t.key === p.step_key)?.name ?? p.step_key}: ${p.user_email} (sugerido por ${p.added_by})`),
       ...pendingScope.map((r) => `✓ Alcance: ${r.scope_key} (sugerido por ${r.added_by})`),
+      ...(pendingTraining ? [`✓ Capacitación: ${request.requires_training_suggested ? 'sí' : 'no'} (sugerida por ${request.requester_email})`] : []),
     ];
     await addInteraction(tx, idRequest, 'firmantes', me, `Confirmó la sugerencia de firmantes y alcance.\n${lines.join('\n')}`, {
       meta: { confirmed: { signers: pending.map((p) => ({ stepKey: p.step_key, email: lower(p.user_email), suggestedBy: p.added_by })), scope: pendingScope.map((r) => r.scope_key) } },
@@ -956,13 +1003,13 @@ export async function confirmSuggestions(db: SgcDb, notifier: SgcNotifier, idReq
       action: SGC_AUDIT_ACTIONS.firmantesCambiados,
       entity: 'request',
       entityId: idRequest,
-      before: { status: 'sugerido', signers: pending.map((p) => ({ stepKey: p.step_key, email: lower(p.user_email), suggestedBy: p.added_by })), scope: pendingScope.map((r) => r.scope_key) },
+      before: { status: 'sugerido', signers: pending.map((p) => ({ stepKey: p.step_key, email: lower(p.user_email), suggestedBy: p.added_by })), scope: pendingScope.map((r) => r.scope_key), ...(pendingTraining ? { requiresTraining: request.requires_training_suggested } : {}) },
       after: { status: 'confirmado' },
       detail: 'Confirmación de la sugerencia del solicitante.',
       ip: actor.ip,
       userAgent: actor.userAgent,
     });
-    return { confirmed: pending.length, confirmedScope: pendingScope.length };
+    return { confirmed: pending.length, confirmedScope: pendingScope.length, confirmedTraining: pendingTraining };
   }, TX_OPTS);
 }
 
@@ -1027,6 +1074,126 @@ export async function reassignTask(
 }
 
 // ---------------------------------------------------------------------------
+// Sprint 12: FIRMANTE SUSTITUTO (R12) — solo el grupo exclusivo SGC-SUSTITUTOS
+// ---------------------------------------------------------------------------
+
+/**
+ * Asigna un SUSTITUTO a un cupo PENDIENTE de un paso con firmantes (titular
+ * ausente). Solo el grupo exclusivo SGC-SUSTITUTOS (María Camila y su
+ * suplente, D8), con motivo y periodo de ausencia. El sustituto cumple las
+ * mismas reglas que un firmante (segregación; en aprobación, aprobador
+ * autorizado). El cupo del titular queda «reemplazado» (y su autorización
+ * anulada); el nuevo cupo conserva el orden y lleva on_behalf_of, así la firma
+ * queda «Firmó X en sustitución de Y» en el registro, el PDF y el manifiesto.
+ * La lista de firmantes del documento NO cambia: si el paso vuelve a
+ * empezar (devolución), el cupo vuelve al titular.
+ */
+export async function assignSubstitute(db: SgcDb, notifier: SgcNotifier, idTask: number, raw: unknown, actor: SgcActor) {
+  const me = lower(actor.email);
+  const idTaskAssignee = Number((raw as { idAssignee?: unknown } | null)?.idAssignee);
+  if (!Number.isInteger(idTaskAssignee) || idTaskAssignee < 1) throw new SgcError('Indique el cupo (firmante) que se sustituye.');
+  const input = normalizeSubstitution(raw);
+  const head = await db.sgcTaskAssignee.findUnique({ where: { id_task_assignee: idTaskAssignee }, select: { id_task: true, task: { select: { id_request: true } } } });
+  if (!head || head.id_task !== idTask) throw new SgcError('Cupo no encontrado.', 404);
+  const notifications: SgcNotification[] = [];
+  const result = await db.$transaction(async (tx) => {
+    const request = await lockRequest(tx, head.task.id_request);
+    if (!(await isSubstituteAssigner(tx, request.id_company, me))) {
+      throw new SgcError('Solo el grupo exclusivo de Calidad «Firmantes sustitutos» (SGC-SUSTITUTOS) asigna un firmante sustituto.', 403);
+    }
+    const slot = await tx.sgcTaskAssignee.findUniqueOrThrow({ where: { id_task_assignee: idTaskAssignee }, include: { task: { include: { assignees: true, taskDef: true } } } });
+    const task = slot.task;
+    if (request.status !== 'abierta' || task.status !== 'abierta') throw new SgcError('La tarea no está abierta.', 409);
+    if (task.taskDef.assignment !== 'firmantes') throw new SgcError('El sustituto se asigna en los pasos de revisión o aprobación (en elaboración se reasigna la tarea).', 409);
+    if (slot.status !== 'pendiente' || !slot.user_email) throw new SgcError('Solo se sustituye a una persona con su firma PENDIENTE (no un cupo de grupo ni una firma ya decidida).', 409);
+    const def = await loadDefinition(tx, request.id_flow_version);
+    const stepDef = def.tasks.find((t) => t.key === task.task_key);
+    if (!stepDef) throw new SgcError('La tarea no existe en la versión del flujo.', 500);
+    // El titular es la persona a la que se sustituye (si el cupo ya era de un sustituto, el titular original).
+    const original = lower(slot.on_behalf_of ?? slot.user_email);
+    const approval = isApprovalStep(stepDef);
+    const now = new Date();
+    const policy = approval ? await getApproverPolicy(tx, request.id_company) : null;
+    const denial = substitutionDenial(input.toEmail, {
+      originalEmail: original,
+      requesterEmail: request.requester_email,
+      elaboratorEmail: request.elaborator_email,
+      taskPeople: task.assignees.filter((a) => a.user_email && a.status !== 'reemplazado' && a.status !== 'anulado').map((a) => a.user_email!),
+      eligible: new Set((await listEligibleUsers(tx, request.id_company)).map((u) => u.email)),
+      mustBeAuthorizedApprover: Boolean(policy?.applies),
+      isAuthorizedApprover: Boolean(policy && isAuthorizedApprover(policy.list, input.toEmail, request.id_process_map, now)),
+    });
+    if (denial) throw new SgcError(denial, 409);
+
+    await tx.sgcTaskAssignee.update({ where: { id_task_assignee: slot.id_task_assignee }, data: { status: 'reemplazado', decided_by: me, decided_at: now, comment: `Sustituido por ${input.toEmail}: ${input.reason}`.slice(0, 2000) } });
+    await tx.sgcAuthorization.updateMany({ where: { id_task_assignee: slot.id_task_assignee, status: 'pendiente' }, data: { status: 'anulada' } });
+    const created = await tx.sgcTaskAssignee.create({
+      data: { id_task: task.id_task, user_email: input.toEmail, sign_order: slot.sign_order, status: 'pendiente', signature_status: slot.signature_status, signature_meaning: slot.signature_meaning, on_behalf_of: original },
+    });
+    const authType = stepDef.isAuthorization && stepDef.authorizationTypeCode
+      ? await tx.sgcAuthorizationType.findUnique({ where: { id_company_code: { id_company: request.id_company, code: stepDef.authorizationTypeCode } } })
+      : null;
+    if (authType) await tx.sgcAuthorization.create({ data: { id_company: request.id_company, id_authorization_type: authType.id_authorization_type, id_request: request.id_request, id_task_assignee: created.id_task_assignee, assigned_email: input.toEmail } });
+    await tx.sgcSignerSubstitution.create({
+      data: {
+        id_company: request.id_company,
+        id_request: request.id_request,
+        id_task: task.id_task,
+        step_key: task.task_key,
+        id_task_assignee_original: slot.id_task_assignee,
+        id_task_assignee_new: created.id_task_assignee,
+        original_email: original,
+        substitute_email: input.toEmail,
+        reason: input.reason,
+        absence_from: input.absenceFrom,
+        absence_to: input.absenceTo,
+        assigned_by: me,
+        assigned_at: now,
+      },
+    });
+    const period = input.absenceFrom || input.absenceTo ? `\nAusencia: ${input.absenceFrom?.toISOString().slice(0, 10) ?? '¿?'} a ${input.absenceTo?.toISOString().slice(0, 10) ?? '¿?'}` : '';
+    await addInteraction(tx, request.id_request, 'reasignacion', me, `Asignó a ${input.toEmail} como SUSTITUTO de ${original} en «${task.name}» (firmará en sustitución).${period}\nMotivo: ${input.reason}`, {
+      idTask: task.id_task,
+      meta: { substitution: { from: original, to: input.toEmail, absenceFrom: input.absenceFrom?.toISOString().slice(0, 10) ?? null, absenceTo: input.absenceTo?.toISOString().slice(0, 10) ?? null } },
+    });
+    await writeSgcAudit(tx, {
+      idCompany: request.id_company,
+      actorEmail: me,
+      action: SGC_AUDIT_ACTIONS.firmanteSustituido,
+      entity: 'task_assignee',
+      entityId: created.id_task_assignee,
+      before: { idTaskAssignee: slot.id_task_assignee, email: slot.user_email, onBehalfOf: slot.on_behalf_of },
+      after: { idTaskAssignee: created.id_task_assignee, email: input.toEmail, onBehalfOf: original, stepKey: task.task_key },
+      detail: input.reason,
+      ip: actor.ip,
+      userAgent: actor.userAgent,
+    });
+    const fresh = await tx.sgcTaskAssignee.findMany({ where: { id_task: task.id_task } });
+    const inTurn = assigneesInTurn(fresh.map(toAssigneeState), (task.signing_mode as 'orden' | 'paralelo' | null) ?? null).filter((a) => a.id === created.id_task_assignee);
+    await notifyTurn({ tx, request, def, notifications, actor, subjectLabel: request.subject }, task.id_task, stepDef, inTurn, 'paralelo');
+    return { idAssignee: created.id_task_assignee };
+  }, TX_OPTS);
+  await send(notifier, notifications);
+  return result;
+}
+
+/** Sprint 12: sustituciones de la solicitud (para el expediente). */
+export async function listSubstitutions(db: SgcDb | Tx, idRequest: number) {
+  const rows = await db.sgcSignerSubstitution.findMany({ where: { id_request: idRequest }, orderBy: { id_signer_substitution: 'asc' } });
+  return rows.map((r) => ({
+    id: r.id_signer_substitution,
+    stepKey: r.step_key,
+    original: r.original_email,
+    substitute: r.substitute_email,
+    reason: r.reason,
+    absenceFrom: r.absence_from?.toISOString().slice(0, 10) ?? null,
+    absenceTo: r.absence_to?.toISOString().slice(0, 10) ?? null,
+    assignedBy: r.assigned_by,
+    assignedAt: r.assigned_at.toISOString(),
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // Cancelar la solicitud (acción, no paso)
 // ---------------------------------------------------------------------------
 
@@ -1045,7 +1212,7 @@ export async function cancelRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
     }
     // Sprint 4: en la divulgación y la capacitación (versión ya aprobada) solo Calidad cancela.
     const currentDef = def.tasks.find((t) => t.key === request.current_task_key);
-    const postApproval = Boolean(currentDef && (currentDef.assignment === 'alcance' || currentDef.role === 'capacitacion'));
+    const postApproval = Boolean(currentDef && (currentDef.assignment === 'alcance' || currentDef.role === 'capacitacion' || currentDef.role === 'material'));
     if (postApproval && !access?.canQuality) throw new SgcError('En la divulgación y la capacitación solo Aseguramiento de Calidad cancela la solicitud.', 403);
     const now = new Date();
     const open = await tx.sgcTask.findMany({ where: { id_request: idRequest, status: { in: ['abierta', 'sin_empezar', 'en_espera'] } }, include: { assignees: true } });
@@ -1173,6 +1340,8 @@ const detailInclude = {
   document: { include: { versions: { select: { id_document_version: true, version_number: true } } } },
   processMap: true,
   documentType: true,
+  // Sprint 8: documento padre del que hereda el número.
+  parentDocument: { select: { id_document: true, code: true, title: true } },
   tasks: { include: { assignees: { orderBy: { sign_order: 'asc' } }, taskDef: true }, orderBy: [{ id_task: 'asc' }] },
   signers: { orderBy: [{ step_key: 'asc' }, { sign_order: 'asc' }] },
   formValues: { include: { field: true } },
@@ -1200,6 +1369,8 @@ export interface SgcRequestPermissions {
   isRequester: boolean;
   isElaborator: boolean;
   isQuality: boolean;
+  /** Sprint 12: integrante del grupo exclusivo SGC-SUSTITUTOS (asigna firmantes sustitutos). */
+  canSubstitute: boolean;
 }
 
 /**
@@ -1225,7 +1396,8 @@ function involvementKind(row: DetailRow, email: string, pools: readonly string[]
     }
   }
   const poolPending = row.tasks.some((t) => t.status === 'abierta' && t.assignees.some((a) => !a.user_email && a.status === 'pendiente' && a.pool_type_code && pools.includes(a.pool_type_code)));
-  if (emails.has(me) || poolPending) return 'full';
+  // Sprint 12: el grupo SGC-SUSTITUTOS ve las solicitudes para resolver una ausencia.
+  if (emails.has(me) || poolPending || pools.includes(SGC_AUTH_TYPE_SUBSTITUTES)) return 'full';
   return reader ? 'reader' : null;
 }
 
@@ -1267,7 +1439,8 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
   const canAssign = canAssignParticipants(def, assigner, sgcAssignmentPolicy());
   // Quien no selecciona pero es el solicitante (o el elaborador) SUGIERE con la misma pantalla.
   const canSuggest = !canAssign && canSuggestParticipants(assigner);
-  const hasPending = row.signers.some(isPendingSuggestion) || (await db.sgcDisseminationScope.count({ where: { id_request: row.id_request, ...SGC_PENDING_SUGGESTION } })) > 0;
+  const trainingPending = row.requires_training === null && typeof row.requires_training_suggested === 'boolean';
+  const hasPending = trainingPending || row.signers.some(isPendingSuggestion) || (await db.sgcDisseminationScope.count({ where: { id_request: row.id_request, ...SGC_PENDING_SUGGESTION } })) > 0;
   const permissions: SgcRequestPermissions = {
     canNote: !readerOnly && (row.status === 'abierta' || row.status === 'en_espera'),
     canUploadDraft: isOpen && isElaborator && inElaboration,
@@ -1280,6 +1453,7 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
     isRequester,
     isElaborator,
     isQuality,
+    canSubstitute: isOpen && pools.includes(SGC_AUTH_TYPE_SUBSTITUTES),
   };
 
   const sigById = new Map(row.signatures.map((sg) => [sg.id_signature, sg]));
@@ -1333,6 +1507,9 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
         signatureStatusLabel: SGC_SIGNATURE_STATUS_LABELS[a.signature_status as SgcSignatureStatus] ?? a.signature_status,
         signatureMeaning: a.signature_meaning,
         signature: signatureOf(a.id_signature),
+        // Sprint 12: cupo de un SUSTITUTO «en sustitución de» el titular.
+        onBehalfOf: a.on_behalf_of,
+        onBehalfOfName: a.on_behalf_of ? nameOf(a.on_behalf_of) : null,
       })),
       myAction:
         myTurn && !blockedBySoD
@@ -1357,7 +1534,10 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
       assignedLabel:
         t.taskDef.assignment === 'alcance'
           ? `Personas del alcance de divulgación (${t.assignees.filter((a) => a.status !== 'reemplazado' && a.status !== 'anulado').length})`
-          : t.assignees.filter((a) => a.status !== 'reemplazado' && a.status !== 'anulado').map((a) => (a.user_email ? nameOf(a.user_email) : `Grupo ${a.pool_type_code}`)).join(', '),
+          : t.assignees
+              .filter((a) => a.status !== 'reemplazado' && a.status !== 'anulado')
+              .map((a) => (a.user_email ? `${nameOf(a.user_email)}${a.on_behalf_of ? ` (en sustitución de ${nameOf(a.on_behalf_of)})` : ''}` : `Grupo ${a.pool_type_code}`))
+              .join(', '),
     };
   });
 
@@ -1423,6 +1603,26 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
       document: row.document ? { id: row.document.id_document, code: row.document.code, title: row.document.title, status: row.document.status } : null,
       process: row.processMap ? { id: row.processMap.id_process_map, code: row.processMap.code, name: row.processMap.name } : null,
       documentType: row.documentType ? { id: row.documentType.id_document_type, code: row.documentType.code, name: row.documentType.name } : null,
+      // Sprint 8: documento padre (hereda su número) y formatos admitidos para el borrador.
+      parentDocument: row.parentDocument ? { id: row.parentDocument.id_document, code: row.parentDocument.code, title: row.parentDocument.title } : null,
+      // Sprint 10: capacitación de la solicitud (sugerida, confirmada o según el tipo documental).
+      trainingFlag: (() => {
+        const state = { confirmed: row.requires_training, suggested: row.requires_training_suggested, typeDefault: row.documentType?.requires_training ?? true };
+        const source = trainingFlagSource(state);
+        const locked = row.tasks.some((t) => SGC_TRAINING_LOCKED_ROLES.includes(t.taskDef.role));
+        return {
+          effective: effectiveRequiresTraining(state),
+          source,
+          sourceLabel: SGC_TRAINING_FLAG_SOURCE_LABELS[source],
+          suggested: row.requires_training_suggested,
+          confirmed: row.requires_training,
+          typeDefault: row.documentType?.requires_training ?? true,
+          confirmedBy: nameOf(row.training_confirmed_by),
+          confirmedAt: row.training_confirmed_at?.toISOString() ?? null,
+          canChange: isOpen && canAssign && !locked,
+        };
+      })(),
+      draftFormats: row.companyConfig.header_mandatory ? ['docx', 'doc'] : ['docx', 'doc', 'pdf'],
     },
     focusTaskId: focusTaskId ?? null,
     tasks,
@@ -1443,6 +1643,8 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
       withdrawReason: a.withdraw_reason,
     })),
     permissions,
+    // Sprint 12: sustituciones de firmantes (quién, por quién, motivo y periodo).
+    substitutions: readerOnly ? [] : await listSubstitutions(db, row.id_request),
     signatureNotice: SGC_SIGNATURE_NOTICE,
     // Sprint 3: borrador vigente (lo que se firma), revisiones del editor, firmas, chequeos y PDF controlado.
     currentDraft: (() => {
@@ -1457,6 +1659,7 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
       meaningLabel: SGC_SIGNATURE_LABELS[sg.meaning as keyof typeof SGC_SIGNATURE_LABELS] ?? sg.meaning,
       signerEmail: sg.signer_email,
       signerName: sg.signer_name ?? nameOf(sg.signer_email),
+      onBehalfOf: sg.on_behalf_of,
       signedAt: sg.signed_at.toISOString(),
       reason: sg.reason,
       contentName: sg.content_name,
@@ -1510,6 +1713,9 @@ export interface SgcInboxRow {
   assigned: string;
   isPool: boolean;
   isAuthorization: boolean;
+  /** Sprint 9: clave y rol del paso (para el tablero «Mis pendientes»). */
+  taskKey: string;
+  role: string;
 }
 
 /**
@@ -1568,6 +1774,8 @@ export async function listTaskInbox(
       assigned: r.user_email ? names.get(lower(r.user_email)) ?? r.user_email : `Grupo ${r.pool_type_code}`,
       isPool: !r.user_email,
       isAuthorization: t.taskDef.is_authorization || !r.user_email,
+      taskKey: t.task_key,
+      role: t.taskDef.role,
     });
   }
   return out;
@@ -1671,6 +1879,11 @@ export async function uploadAttachment(
     if (!DRAFT_EXT.test(fileName)) throw new SgcError('El borrador debe ser Word (.docx, .doc) o PDF.');
     // Sprint 6: el contenido debe ser de verdad un Word o un PDF (firma del archivo, no solo la extensión).
     if (!(isPdf(input.bytes) || isWord(input.bytes, fileName))) throw new SgcError('El borrador no es un Word o PDF válido.');
+    // Sprint 8 (Calidad OLP, 2026-10-07; memoria rn-sgc-borrador-solo-word): con el encabezado institucional
+    // obligatorio, el borrador de un documento nuevo o de una nueva versión va en Word o en el editor.
+    if (isPdf(input.bytes) && (await isHeaderMandatory(db, row.id_company))) {
+      throw new SgcError('El borrador va en Word (.docx) o en el editor de la app: un PDF no admite el encabezado institucional ni los campos del sistema. El PDF solo se usa en la carga inicial de documentos vigentes.', 415);
+    }
   } else if (BLOCKED_SUPPORT_EXT.test(fileName)) {
     throw new SgcError('Ese tipo de archivo no se admite como soporte (ejecutables, scripts o páginas web).');
   }
@@ -1794,4 +2007,42 @@ export async function getRequestForm(db: SgcDb, idCompany: number, flowCode = SG
     fields: def.formFields.filter((f) => f.taskKey === null),
     steps: def.tasks.map((t) => ({ key: t.key, name: t.name, stepOrder: t.stepOrder, isEnabled: t.isEnabled, signature: t.signatureMeaning })),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 10 — capacitación opcional por solicitud (la confirma quien crea el documento o Calidad)
+// ---------------------------------------------------------------------------
+
+export async function setTrainingFlag(db: SgcDb, idRequest: number, input: { requiresTraining?: unknown; reason?: unknown }, actor: SgcActor, access: SgcCompanyAccess | null) {
+  const me = lower(actor.email);
+  const value = parseTrainingChoice(input.requiresTraining);
+  if (value === null) throw new SgcError('Indique si la solicitud requiere capacitación (sí o no).');
+  return db.$transaction(async (tx) => {
+    const request = await lockRequest(tx, idRequest);
+    if (request.status !== 'abierta') throw new SgcError('La solicitud no está abierta.', 409);
+    const def = await loadDefinition(tx, request.id_flow_version);
+    if (!canAssignParticipants(def, await assignerOf(tx, request, def, me, access), sgcAssignmentPolicy())) {
+      throw new SgcError('La capacitación la SUGIERE el solicitante y la CONFIRMA quien crea el documento o Aseguramiento de Calidad.', 403);
+    }
+    const started = await tx.sgcTask.findFirst({ where: { id_request: idRequest, taskDef: { role: { in: [...SGC_TRAINING_LOCKED_ROLES] } } } });
+    if (started) throw new SgcError('La capacitación ya no se cambia: empezó la preparación del material, la divulgación o la capacitación.', 409);
+    const reason = typeof input.reason === 'string' ? input.reason.trim().slice(0, 1000) : '';
+    const now = new Date();
+    const before = { confirmed: request.requires_training, suggested: request.requires_training_suggested };
+    await tx.sgcRequest.update({ where: { id_request: idRequest }, data: { requires_training: value, training_confirmed_by: me, training_confirmed_at: now } });
+    await addInteraction(tx, idRequest, 'estado', me, `Confirmó que la solicitud ${value ? 'SÍ' : 'NO'} requiere capacitación.${typeof request.requires_training_suggested === 'boolean' ? ` (El solicitante sugirió: ${request.requires_training_suggested ? 'sí' : 'no'}.)` : ''}${reason ? `\nMotivo: ${reason}` : ''}`);
+    await writeSgcAudit(tx, {
+      idCompany: request.id_company,
+      actorEmail: me,
+      action: SGC_AUDIT_ACTIONS.capacitacionBandera,
+      entity: 'request',
+      entityId: idRequest,
+      before,
+      after: { confirmed: value },
+      detail: reason || null,
+      ip: actor.ip,
+      userAgent: actor.userAgent,
+    });
+    return { requiresTraining: value };
+  }, TX_OPTS);
 }

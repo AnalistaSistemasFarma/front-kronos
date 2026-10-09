@@ -116,7 +116,7 @@ export default function SgcTasksModal({ opened, onClose, requestId, tasks, users
                                   </ThemeIcon>
                                   <Text size='sm' style={{ minWidth: 0 }} lineClamp={1}>
                                     {task.isSequential ? `${a.signOrder}. ` : ''}
-                                    {a.email ? a.name || a.email : `Grupo ${a.poolTypeCode}${a.decidedBy ? ` · ${a.decidedBy}` : ''}`}
+                                    {a.email ? `${a.name || a.email}${a.onBehalfOf ? ` (en sustitución de ${a.onBehalfOfName ?? a.onBehalfOf})` : ''}` : `Grupo ${a.poolTypeCode}${a.decidedBy ? ` · ${a.decidedBy}` : ''}`}
                                   </Text>
                                   <Text size='xs' c='dimmed' style={{ whiteSpace: 'nowrap' }}>
                                     {a.statusLabel}

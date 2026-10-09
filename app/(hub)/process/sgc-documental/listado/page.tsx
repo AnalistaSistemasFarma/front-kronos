@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Alert, Badge, Button, Card, Group, Loader, Table, Text, TextInput } from '@mantine/core';
 import SgcSelect from '../../../../../components/sgc/SgcSelect';
 import { IconAlertTriangle, IconBuildingCommunity, IconFileUpload, IconHierarchy2, IconSearch } from '@tabler/icons-react';
+import { SgcMyCopies } from '../../../../../components/sgc/SgcUncontrolledCopies';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import { SgcConfidentialityBadge, SgcDocumentCode, SgcReviewBadge, SgcStatusBadge } from '../../../../../components/sgc/SgcBadges';
 import { sgcHref } from '../../../../../components/sgc/useSgcCompany';
@@ -30,6 +31,8 @@ const STATUS_OPTIONS = [
   { value: 'vigente', label: 'Vigentes' },
   { value: 'obsoleto', label: 'Obsoletos' },
   { value: 'anulado', label: 'Anulados' },
+  // Sprint 8: importados del listado maestro a los que aún les falta el PDF.
+  { value: 'pendiente_archivo', label: 'Pendientes de archivo' },
   { value: 'todos', label: 'Todos los estados' },
 ];
 
@@ -230,7 +233,15 @@ export default function ListadoMaestroPage() {
         </Group>
       )}
     >
-      {(company) => <ListadoMaestro company={company} />}
+      {(company) => (
+        <>
+          <ListadoMaestro company={company} />
+          {/* Sprint 11: en el listado maestro cada persona ve sus copias no controladas (no hay listado aparte). */}
+          <div style={{ marginTop: 16 }}>
+            <SgcMyCopies idCompany={company.idCompany} compact />
+          </div>
+        </>
+      )}
     </SgcShell>
   );
 }

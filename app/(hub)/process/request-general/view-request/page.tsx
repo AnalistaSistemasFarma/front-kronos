@@ -3254,6 +3254,7 @@ function ViewRequestPage() {
                   <IconAlertCircle size={16} />
                 )
               }
+              style={{ whiteSpace: 'pre-line' }}
             >
               {updateMessage.text}
             </Alert>

@@ -122,10 +122,12 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
       SET IDENTITY_INSERT [dbo].[company] ON;
       IF NOT EXISTS (SELECT 1 FROM [dbo].[company] WHERE id_company = ${CO}) INSERT INTO [dbo].[company] (id_company, company) VALUES (${CO}, N'EMPRESA S2 CI');
       SET IDENTITY_INSERT [dbo].[company] OFF;`);
+    // Sprint 8: esta suite usa borradores PDF y el encabezado opcional (modo configurable header_mandatory = 0);
+    // el encabezado OBLIGATORIO se prueba en tests/integration/sgc/s8.integration.test.ts.
     await prisma.sgcCompanyConfig.upsert({
       where: { id_company: CO },
-      create: { id_company: CO, is_active: true, storage_root: 'SGC/S2', activated_by: 'ci', activated_at: new Date() },
-      update: {},
+      create: { id_company: CO, is_active: true, header_mandatory: false, storage_root: 'SGC/S2', activated_by: 'ci', activated_at: new Date() },
+      update: { header_mandatory: false },
     });
     const proc = await prisma.process.create({ data: { process: `${SGC_PROCESS_NAME} (S2 CI)` } });
     const sub: Record<string, number> = {};
@@ -385,7 +387,7 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     await expect(confirmSuggestions(prisma, notifier, req1, actor(E.sol), await accessOf(E.sol))).rejects.toMatchObject({ status: 403 });
     // Sin el permiso de Calidad, el elaborador tampoco confirma (política tarea_y_calidad).
     await expect(confirmSuggestions(prisma, notifier, req1, actor(E.elab), null)).rejects.toMatchObject({ status: 403 });
-    expect(await confirmSuggestions(prisma, notifier, req1, actor(E.elab), elabAccess)).toEqual({ confirmed: 2, confirmedScope: 0 });
+    expect(await confirmSuggestions(prisma, notifier, req1, actor(E.elab), elabAccess)).toEqual({ confirmed: 2, confirmedScope: 0, confirmedTraining: false });
     await expect(confirmSuggestions(prisma, notifier, req1, actor(E.elab), elabAccess)).rejects.toMatchObject({ status: 409 });
     // Ya confirmados, el solicitante no los cambia.
     await expect(setSigners(prisma, notifier, req1, { stepKey: 'revision', signers: [E.rev1] }, actor(E.sol), await accessOf(E.sol))).rejects.toMatchObject({ status: 403 });

@@ -252,9 +252,113 @@ jobs:
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261001200000_sgc_s6_endurecimiento/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261003120000_sgc_correcciones_calidad/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261003120000_sgc_correcciones_calidad/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008100000_sgc_s8_encabezado_listado_maestro/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008100000_sgc_s8_encabezado_listado_maestro/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008110000_sgc_s9_archivos_relaciones_correo/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008110000_sgc_s9_archivos_relaciones_correo/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008120000_sgc_s10_capacitacion_opcional/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008120000_sgc_s10_capacitacion_opcional/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008130000_sgc_s11_copias_no_controladas/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008130000_sgc_s11_copias_no_controladas/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008140000_sgc_s12_aprobadores_sustitutos/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008140000_sgc_s12_aprobadores_sustitutos/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008150000_sgc_s13_firma_propia_registro/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008150000_sgc_s13_firma_propia_registro/migration.sql
 
       - name: Pruebas de integración + cobertura de lib/sgc/db (vitest)
         run: npm run test:integration -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/integracion/junit.xml
+
+      - name: Reversas del SGC (ida y vuelta, S8 en adelante)
+        # Cada reversa nueva se prueba contra la base efímera DESPUÉS de las
+        # pruebas (con datos reales de prueba): se corre dos veces (idempotente)
+        # declarando en la sesión que se aceptan sus pérdidas, y luego se vuelve
+        # a aplicar la migración (que también debe quedar igual). Las reversas
+        # se corren de la más nueva a la más antigua.
+        env:
+          DATABASE_URL: ${{ env.SGC_IT_DATABASE_URL }}
+        run: |
+          set -e
+          # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia"
+          reversa() {
+            { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
+            npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
+            npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
+          }
+          migra() {
+            npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
+            npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
+          }
+          # De la más nueva a la más antigua…
+          reversa prisma/manual/2026-10-08-sgc-s13-firma-propia-reversa.sql
+          reversa prisma/manual/2026-10-08-sgc-s12-aprobadores-sustitutos-reversa.sql
+          # Con firmas de sustitutos (integración del S12) la reversa CONSERVA signature.on_behalf_of.
+          echo "IF COL_LENGTH(N'sgc.signature', N'on_behalf_of') IS NULL THROW 50000, N'La reversa del S12 quitó signature.on_behalf_of con firmas de sustitutos.', 1;" > /tmp/s12-conserva.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/s12-conserva.sql
+          reversa prisma/manual/2026-10-08-sgc-s11-copias-no-controladas-reversa.sql
+          # La del S10 también retira el flujo con capacitación previa: se prueba sobre la empresa de su integración (101).
+          sed 's/DECLARE @IdCompany INT = 3;/DECLARE @IdCompany INT = 101;/' prisma/manual/2026-10-08-sgc-s10-capacitacion-opcional-reversa.sql > /tmp/reversa-s10.sql
+          reversa /tmp/reversa-s10.sql
+          reversa prisma/manual/2026-10-08-sgc-s9-archivos-relaciones-correo-reversa.sql
+          reversa prisma/manual/2026-10-08-sgc-s8-encabezado-listado-maestro-reversa.sql
+          # …y otra vez hacia adelante.
+          migra 20261008100000_sgc_s8_encabezado_listado_maestro
+          migra 20261008110000_sgc_s9_archivos_relaciones_correo
+          migra 20261008120000_sgc_s10_capacitacion_opcional
+          migra 20261008130000_sgc_s11_copias_no_controladas
+          migra 20261008140000_sgc_s12_aprobadores_sustitutos
+          migra 20261008150000_sgc_s13_firma_propia_registro
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-08-sgc-s8-guia-codificacion-olp.sql
+
+      - name: Portal TH — formulario propio (migración, siembra y reversa)
+        # 20261008160000_portal_formacion_formulario_propio: idempotente sobre
+        # el esquema de db push, siembra UNA vez el SST-01-FR-001 (40
+        # preguntas), su reversa es idempotente y la migración vuelve a crear
+        # todo desde cero.
+        env:
+          DATABASE_URL: ${{ env.SGC_IT_DATABASE_URL }}
+        run: |
+          set -e
+          M=prisma/migrations/20261008160000_portal_formacion_formulario_propio/migration.sql
+          R=prisma/manual/2026-10-08-portal-formulario-propio-reversa.sql
+          cat > /tmp/verifica-sst.sql <<'SQL'
+          DECLARE @f INT = (SELECT COUNT(*) FROM dbo.portal_formulario WHERE codigo = N'SST-01-FR-001');
+          DECLARE @v INT = (SELECT COUNT(*) FROM dbo.portal_formulario_version v JOIN dbo.portal_formulario f ON f.id = v.formulario_id WHERE f.codigo = N'SST-01-FR-001');
+          DECLARE @p INT = (SELECT COUNT(*) FROM dbo.portal_formulario_version v JOIN dbo.portal_formulario f ON f.id = v.formulario_id CROSS APPLY OPENJSON(v.definicion, N'$.preguntas') WHERE f.codigo = N'SST-01-FR-001');
+          IF @f <> 1 OR @v <> 1 OR @p <> 40 THROW 50000, N'La siembra del SST-01-FR-001 no quedó como se esperaba (1 formulario, 1 versión, 40 preguntas).', 1;
+          IF COL_LENGTH(N'dbo.portal_course_material', N'formulario_id') IS NULL THROW 50001, N'Falta portal_course_material.formulario_id.', 1;
+          SQL
+          cat > /tmp/verifica-reversa.sql <<'SQL'
+          IF OBJECT_ID(N'dbo.portal_formulario', N'U') IS NOT NULL OR COL_LENGTH(N'dbo.portal_course_material', N'formulario_id') IS NOT NULL
+            THROW 50002, N'La reversa del formulario propio no quitó todo.', 1;
+          SQL
+          x() { npx prisma db execute --schema prisma/schema.prisma --file "$1"; }
+          x "$M"; x "$M"; x /tmp/verifica-sst.sql
+          x "$R"; x "$R"; x /tmp/verifica-reversa.sql
+          x "$M"; x "$M"; x /tmp/verifica-sst.sql
+
+      - name: Portal TH — evaluaciones (migración y reversa)
+        # 20261009150000_portal_formulario_evaluacion: aditiva e idempotente
+        # (corre dos veces), su reversa es idempotente y la migración vuelve a
+        # crear la tabla de intentos. No toca ninguna tabla existente.
+        env:
+          DATABASE_URL: ${{ env.SGC_IT_DATABASE_URL }}
+        run: |
+          set -e
+          M=prisma/migrations/20261009150000_portal_formulario_evaluacion/migration.sql
+          R=prisma/manual/2026-10-09-portal-formulario-evaluacion-reversa.sql
+          cat > /tmp/verifica-intento.sql <<'SQL'
+          IF OBJECT_ID(N'dbo.portal_formulario_intento', N'U') IS NULL THROW 50010, N'Falta portal_formulario_intento.', 1;
+          IF COL_LENGTH(N'dbo.portal_formulario_intento', N'porcentaje') IS NULL THROW 50011, N'Falta portal_formulario_intento.porcentaje.', 1;
+          SQL
+          cat > /tmp/verifica-reversa-intento.sql <<'SQL'
+          IF OBJECT_ID(N'dbo.portal_formulario_intento', N'U') IS NOT NULL THROW 50012, N'La reversa de evaluaciones no quitó portal_formulario_intento.', 1;
+          IF OBJECT_ID(N'dbo.portal_formulario_version', N'U') IS NULL THROW 50013, N'La reversa de evaluaciones no debe tocar portal_formulario_version.', 1;
+          SQL
+          x() { npx prisma db execute --schema prisma/schema.prisma --file "$1"; }
+          x "$M"; x "$M"; x /tmp/verifica-intento.sql
+          x "$R"; x "$R"; x /tmp/verifica-reversa-intento.sql
+          x "$M"; x /tmp/verifica-intento.sql
 
       - name: Evidencia SGC (manifiesto + matriz de trazabilidad)
         if: always()

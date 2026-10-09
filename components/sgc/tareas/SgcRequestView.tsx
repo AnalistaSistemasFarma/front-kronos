@@ -50,12 +50,14 @@ import SgcAdditionalInfo from './SgcAdditionalInfo';
 import SgcAttachmentsCard from './SgcAttachmentsCard';
 import SgcInteractionHistory from './SgcInteractionHistory';
 import SgcSignersPanel from './SgcSignersPanel';
+import SgcSubstituteCard from './SgcSubstituteCard';
 import SgcTasksModal from './SgcTasksModal';
 import SgcSignModal from '../signature/SgcSignModal';
 import SgcSignaturesCard from '../signature/SgcSignaturesCard';
 import SgcDisseminationCard from './SgcDisseminationCard';
 import SgcReadingPanel from './SgcReadingPanel';
 import SgcTrainingCard from './SgcTrainingCard';
+import SgcTrainingFlagCard from './SgcTrainingFlagCard';
 import SgcCurrentDraftCard from './SgcCurrentDraftCard';
 import SgcDocumentLayoutCard from './SgcDocumentLayoutCard';
 import { draftEditorHref } from '../../../lib/sgc/draft/view';
@@ -109,6 +111,14 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
   const [signOpen, setSignOpen] = useState(false);
 
   const userOptions = useMemo(() => (users.data?.users ?? []).map((u) => ({ value: u.email, label: u.name ? `${u.name} (${u.email})` : u.email })), [users.data]);
+  // Sprint 12: en APROBACIÓN solo se ofrecen los aprobadores autorizados del proceso (si la lista aplica).
+  const approvers = useSgcFetch<{ restricted: boolean; users: { email: string; name: string | null }[] }>(
+    idCompany && (data?.permissions.canChangeSigners || data?.permissions.canSubstitute) ? `/api/sgc/users?company=${idCompany}&role=aprobador&process=${data.request.process?.id ?? ''}` : null
+  );
+  const approverOptions = useMemo(
+    () => (approvers.data?.restricted ? approvers.data.users.map((u) => ({ value: u.email, label: u.name ? `${u.name} (${u.email})` : u.email })) : null),
+    [approvers.data]
+  );
 
   const run = useCallback(
     async (fn: () => Promise<unknown>, ok: string) => {
@@ -424,7 +434,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
                             <Text size='sm'>
                               {request.document
                                 ? `${request.document.code} · ${request.document.title}`
-                                : `Nuevo · ${request.process?.code ?? ''} ${request.process?.name ?? ''} · ${request.documentType?.name ?? ''}`}
+                                : `Nuevo · ${request.process?.code ?? ''} ${request.process?.name ?? ''} · ${request.documentType?.name ?? ''}${request.parentDocument ? ` · hereda el número de ${request.parentDocument.code}` : ''}`}
                             </Text>
                           </div>
                         </Group>
@@ -551,9 +561,15 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           <SgcDisseminationCard idCompany={request.idCompany} view={data.dissemination} users={userOptions} onAction={onDisseminationAction} />
         )}
 
+        {/* Sprint 10: capacitación opcional por solicitud (sugerida por el solicitante, confirmada por quien crea el documento o Calidad). */}
+        {!data.readerOnly && request.trainingFlag && (
+          <SgcTrainingFlagCard flag={request.trainingFlag} onSet={(requiresTraining, reason) => run(() => sgcSend(`/api/sgc/requests/${request.id}/training-flag`, 'PUT', { requiresTraining, reason }), 'Capacitación de la solicitud confirmada.')} />
+        )}
+
         {data.training && (
           <SgcTrainingCard
             view={data.training}
+            onRetrain={(body) => run(() => sgcSend(`/api/sgc/requests/${request.id}/training/retraining`, 'POST', body), 'Recapacitación registrada.')}
             onSave={(body) => run(() => sgcSend(`/api/sgc/requests/${request.id}/training`, 'POST', body), 'Capacitación registrada.')}
             onUpload={(file) =>
               run(async () => {
@@ -573,6 +589,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           steps={data.steps}
           canEdit={permissions.canChangeSigners}
           users={userOptions.filter((u) => u.value !== request.elaboratorEmail.toLowerCase() && u.value !== request.requesterEmail.toLowerCase())}
+          approverUsers={approverOptions?.filter((u) => u.value !== request.elaboratorEmail.toLowerCase() && u.value !== request.requesterEmail.toLowerCase()) ?? null}
           suggestion={sugg.data?.suggestion ?? null}
           suggestOnly={permissions.signersSuggestOnly}
           canConfirm={permissions.canConfirmSuggestion}
@@ -582,6 +599,15 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           onSave={async (stepKey, signers, signingMode, reason) => {
             await run(() => sgcSend(`/api/sgc/requests/${request.id}/signers`, 'POST', { stepKey, signers, mode: signingMode, reason }), 'Firmantes actualizados.');
           }}
+        />
+
+        <SgcSubstituteCard
+          tasks={data.tasks}
+          substitutions={data.substitutions}
+          canSubstitute={permissions.canSubstitute}
+          users={userOptions.filter((u) => u.value !== request.elaboratorEmail.toLowerCase() && u.value !== request.requesterEmail.toLowerCase())}
+          approverUsers={approverOptions?.filter((u) => u.value !== request.elaboratorEmail.toLowerCase() && u.value !== request.requesterEmail.toLowerCase()) ?? null}
+          onAssign={(idTask, body) => run(() => sgcSend(`/api/sgc/tasks/${idTask}/substitute`, 'POST', body), 'Sustituto asignado: firmará en sustitución del titular.')}
         />
 
         <SgcDocumentLayoutCard
@@ -615,6 +641,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           currentDraft={data.currentDraft}
           canUploadDraft={permissions.canUploadDraft}
           canUploadSupport={permissions.canUploadSupport}
+          draftFormats={request.draftFormats}
           canWithdraw={(a) => request.status === 'abierta' && (a.uploadedByEmail.toLowerCase() === me || permissions.isElaborator || permissions.isQuality)}
           onUpload={async (file, purpose) => {
             let duplicateOf: { id: number; fileName: string }[] = [];

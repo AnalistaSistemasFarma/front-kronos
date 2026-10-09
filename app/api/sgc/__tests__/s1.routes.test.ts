@@ -21,12 +21,15 @@ const m = vi.hoisted(() => ({
   saveCatalogEntry: vi.fn(),
   downloadVerifiedPdf: vi.fn(),
   auditCreate: vi.fn(),
+  isViewerProtected: vi.fn(),
 }));
 
 vi.mock('next-auth', () => ({ getServerSession: m.getServerSession }));
 vi.mock('../../auth/[...nextauth]/route', () => ({ authOptions: {} }));
 vi.mock('../../../../lib/prisma', () => ({ prisma: { sgcAuditLog: { create: m.auditCreate } } }));
 vi.mock('../../../../lib/sgc/access', () => ({ getSgcAccessForUser: m.getSgcAccessForUser }));
+// Sprint 11: protección del visor por empresa (marca en mosaico).
+vi.mock('../../../../lib/sgc/db/companySettings', () => ({ isViewerProtected: m.isViewerProtected }));
 vi.mock('../../../../lib/sgc/db/documents', () => ({
   getAccessSubject: m.getAccessSubject,
   listMasterDocuments: m.listMasterDocuments,
@@ -180,11 +183,11 @@ describe('Rutas del SGC · carga inicial por Calidad', () => {
     const pdf = new File([new TextEncoder().encode('%PDF-1.7 x')], 'proc.pdf', { type: 'application/pdf' });
     const word = new File([new Uint8Array([0x50, 0x4b, 3, 4])], 'proc.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
     const res = await postDoc(
-      form({ company: '3', idProcess: '20', idDocumentType: '200', title: 'Control de documentos', confidentiality: 'publica', versionNumber: '2', effectiveDate: '2026-01-15', idOwnerDepartment: '3', pdf, source: word })
+      form({ company: '3', idProcess: '20', idDocumentType: '200', title: 'Control de documentos', confidentiality: 'publica', versionNumber: '2', effectiveDate: '2026-01-15', idOwnerDepartment: '3', idParentDocument: '55', pdf, source: word })
     );
     expect(res.status).toBe(201);
     const [, , input] = m.createInitialDocument.mock.calls[0];
-    expect(input).toMatchObject({ idCompany: 3, idProcess: 20, idDocumentType: 200, versionNumber: 2, effectiveDate: '2026-01-15', idOwnerDepartment: 3 });
+    expect(input).toMatchObject({ idCompany: 3, idProcess: 20, idDocumentType: 200, versionNumber: 2, effectiveDate: '2026-01-15', idOwnerDepartment: 3, idParentDocument: 55 });
     expect(input.pdf.fileName).toBe('proc.pdf');
     expect(input.pdf.bytes.length).toBeGreaterThan(0);
     expect(input.source.fileName).toBe('proc.docx');
@@ -196,7 +199,7 @@ describe('Rutas del SGC · carga inicial por Calidad', () => {
     const res = await postDoc(form({ company: '3', title: 'x' }));
     expect(res.status).toBe(400);
     expect((await res.json()).error).toContain('PDF');
-    expect(m.createInitialDocument.mock.calls[0][2]).toMatchObject({ versionNumber: 1, idOwnerDepartment: null, source: null });
+    expect(m.createInitialDocument.mock.calls[0][2]).toMatchObject({ versionNumber: 1, idOwnerDepartment: null, idParentDocument: null, source: null });
     m.createInitialDocument.mockRejectedValue(new Error('Login failed for user secreto'));
     const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const res2 = await postDoc(form({ company: '3' }));
@@ -257,8 +260,13 @@ describe('Rutas del SGC · visor sin descarga ni impresión', () => {
     asUser([lectura]);
     m.getVersionForViewer.mockResolvedValue(found());
     m.downloadVerifiedPdf.mockResolvedValue(await samplePdf());
+    m.isViewerProtected.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
     const res = await getFile(new Request('http://x/file', { headers: { 'x-forwarded-for': '10.9.9.9:4444' } }), params({ id: '7', versionId: '11' }));
     expect(res.status).toBe(200);
+    // Sprint 11: con la protección del visor el servidor lo indica (marca en mosaico) y el visor oculta sin foco.
+    expect(res.headers.get('x-sgc-proteccion')).toBe('1');
+    const unprotected = await getFile(new Request('http://x/file'), params({ id: '7', versionId: '11' }));
+    expect(unprotected.headers.get('x-sgc-proteccion')).toBe('0');
     expect(res.headers.get('content-type')).toBe('application/pdf');
     expect(res.headers.get('content-disposition')).toMatch(/^inline;/);
     expect(res.headers.get('cache-control')).toContain('no-store');

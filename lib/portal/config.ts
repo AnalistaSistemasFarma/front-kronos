@@ -143,8 +143,31 @@ export function formadoresDePortal(): string[] {
   return [...new Set(lista)];
 }
 
-/** Tope de un material de curso (documento). PDFs y Office pesan más que un anuncio. */
-export const MAX_MATERIAL_BYTES = 25 * 1024 * 1024;
+/**
+ * Tope OPCIONAL del archivo de un material, en bytes; `null` = sin tope.
+ *
+ * Hasta 2026-10-08 había un tope fijo de 25 MB. Cristian Baldión pidió
+ * quitarlo ("todo queda en el sitio de Talento Humano"): los videos de
+ * formación pesan cientos de MB. Desde entonces el navegador sube DIRECTO a
+ * SharePoint por una upload session de Graph (ver `formacion-storage.ts`), y
+ * el archivo no pasa ni por Next ni por IIS, así que no hay un límite técnico
+ * del portal que proteger.
+ *
+ * Si algún día Talento Humano quiere un tope, se pone en megas con
+ * `PORTAL_TH_MAX_UPLOAD_MB` (vacío, 0 o un valor no numérico = sin tope).
+ */
+export function maxMaterialBytes(env: NodeJS.ProcessEnv = process.env): number | null {
+  const crudo = (env.PORTAL_TH_MAX_UPLOAD_MB ?? '').trim();
+  if (!crudo) return null;
+  const megas = Number(crudo);
+  if (!Number.isFinite(megas) || megas <= 0) return null;
+  return Math.floor(megas * 1024 * 1024);
+}
+
+/** Mensaje cuando el archivo pasa el tope configurado (si lo hay). */
+export function mensajeArchivoMuyGrande(tope: number): string {
+  return `El archivo es muy grande. El tope configurado es ${Math.round(tope / (1024 * 1024))} MB.`;
+}
 /** Formatos que se aceptan como documento de un material. */
 export const MATERIAL_MIMES_PERMITIDOS = [
   'application/pdf',

@@ -920,7 +920,7 @@ model PortalCourseMaterial {
   id        Int          @id @default(autoincrement())
   course_id Int
   course    PortalCourse @relation(fields: [course_id], references: [id], onDelete: Cascade)
-  /// 'DOCUMENT' | 'LINK'. Texto y no enum: el provider sqlserver no los
+  /// 'DOCUMENT' | 'LINK' | 'FORM'. Texto y no enum: el provider sqlserver no los
   /// soporta (mismo criterio que el resto de este esquema).
   type      String       @db.NVarChar(20)
   title     String       @db.NVarChar(255)
@@ -948,7 +948,15 @@ model PortalCourseMaterial {
   required  Boolean      @default(true)
   created_at DateTime    @default(now())
 
-  progress PortalMaterialProgress[]
+  /// Solo si type = 'FORM' (formulario propio del portal, Cristian
+  /// 2026-10-08). Se responde con la versión VIGENTE del formulario.
+  formulario_id Int?
+  formulario    PortalFormulario? @relation(fields: [formulario_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  progress   PortalMaterialProgress[]
+  vistas     PortalMaterialVista[]
+  respuestas PortalFormularioRespuesta[]
+  intentos   PortalFormularioIntento[]
 
   @@index([course_id, orden])
   @@map("portal_course_material")
@@ -979,10 +987,142 @@ model PortalMaterialProgress {
   material       PortalCourseMaterial @relation(fields: [material_id], references: [id], onDelete: Cascade)
   student_email  String               @db.NVarChar(255)
   completed_at   DateTime             @default(now())
+  /// 'AUTO' (el servidor validó que revisó el material) | 'MANUAL' (lo marcó
+  /// un administrador/formador del Excel de permisos). Las filas anteriores
+  /// al 2026-10-08 quedan como 'MANUAL': las marcaba el propio estudiante.
+  origen         String               @default("MANUAL") @db.NVarChar(10)
+  /// Correo de quien lo marcó a mano (solo origen MANUAL desde 2026-10-08).
+  marcado_por    String?              @db.NVarChar(255)
 
   @@unique([material_id, student_email])
   @@index([student_email])
   @@map("portal_material_progress")
+  @@schema("dbo")
+}
+
+/// APERTURA de un material por un estudiante (Cristian, 2026-10-08): la
+/// registra el SERVIDOR al abrir el material y es contra su hora que se valida
+/// el reporte de "revisado" (ver `lib/portal/revision-material.ts`). El
+/// navegador solo conoce el `token`; no puede fijar la hora de apertura.
+model PortalMaterialVista {
+  id              Int                  @id @default(autoincrement())
+  token           String               @unique @db.NVarChar(36)
+  material_id     Int
+  material        PortalCourseMaterial @relation(fields: [material_id], references: [id], onDelete: Cascade)
+  student_email   String               @db.NVarChar(255)
+  abierta_at      DateTime             @default(now())
+  /// Páginas del PDF contadas por el servidor (null si no aplica o no se pudo).
+  paginas         Int?
+  reportada_at    DateTime?
+  segundos_vistos Int?
+  duracion_seg    Int?
+  /// Si el reporte se aceptó.
+  aceptada        Boolean?
+
+  @@index([material_id, student_email])
+  @@map("portal_material_vista")
+  @@schema("dbo")
+}
+
+/// ═══════════ FORMACIÓN — FORMULARIO PROPIO (Cristian Baldión, 2026-10-08) ═══════════
+/// "créame el formulario en el curso, así como el enlace que te pasé, pero
+/// que sea un formulario propio del curso": un material `FORM` que se
+/// responde DENTRO del portal. La definición (preguntas, tipo, obligatoria,
+/// opciones, orden) es un JSON VERSIONADO — ver `lib/portal/formulario.ts`.
+/// Editar el formulario crea una versión nueva; cada respuesta guarda la
+/// versión con la que se respondió.
+
+/// Un formulario (p. ej. SST-01-FR-001 PERFIL SOCIODEMOGRÁFICO SST).
+model PortalFormulario {
+  id             Int      @id @default(autoincrement())
+  /// Código del formato. Único: es como se identifica al importar.
+  codigo         String   @unique @db.NVarChar(60)
+  titulo         String   @db.NVarChar(255)
+  /// Número de la versión vigente (la que se responde).
+  version_actual Int      @default(1)
+  created_by     String   @db.NVarChar(255)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @default(now()) @updatedAt
+
+  versiones  PortalFormularioVersion[]
+  materiales PortalCourseMaterial[]
+
+  @@map("portal_formulario")
+  @@schema("dbo")
+}
+
+/// Una versión de la definición. Nunca se modifica: editar = versión nueva.
+model PortalFormularioVersion {
+  id            Int              @id @default(autoincrement())
+  formulario_id Int
+  formulario    PortalFormulario @relation(fields: [formulario_id], references: [id], onDelete: Cascade)
+  version       Int
+  /// JSON de la definición (`DefinicionFormulario`).
+  definicion    String           @db.NVarChar(Max)
+  created_by    String           @db.NVarChar(255)
+  created_at    DateTime         @default(now())
+
+  respuestas PortalFormularioRespuesta[]
+  intentos   PortalFormularioIntento[]
+
+  @@unique([formulario_id, version])
+  @@map("portal_formulario_version")
+  @@schema("dbo")
+}
+
+/// Respuesta de UNA persona a UN material formulario. DATOS PERSONALES
+/// SENSIBLES (Ley 1581 de 2012): solo las consultan las hojas ADMINISTRADORES
+/// y FORMADORES del Excel de permisos, y nunca se escriben en los logs.
+/// Se envía UNA vez (índice único); no se edita. Para corregir, un
+/// administrador/formador la reabre (la borra) y la persona responde de nuevo.
+model PortalFormularioRespuesta {
+  id                    Int                     @id @default(autoincrement())
+  material_id           Int
+  material              PortalCourseMaterial    @relation(fields: [material_id], references: [id], onDelete: Cascade)
+  formulario_version_id Int
+  version               PortalFormularioVersion @relation(fields: [formulario_version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// Correo de la SESIÓN (no el que se escriba en el formulario).
+  student_email         String                  @db.NVarChar(255)
+  /// JSON `{ [idPregunta]: "texto" | { otra: "texto" } }`.
+  respuestas            String                  @db.NVarChar(Max)
+  /// Prueba de la autorización de tratamiento de datos: qué versión del
+  /// texto aceptó y cuándo.
+  autorizacion_version  String?                 @db.NVarChar(60)
+  autorizado_at         DateTime?
+  enviada_at            DateTime                @default(now())
+
+  @@unique([material_id, student_email])
+  @@index([formulario_version_id])
+  @@map("portal_formulario_respuesta")
+  @@schema("dbo")
+}
+
+/// Un INTENTO de una EVALUACIÓN (formulario de tipo "evaluacion"): cada envío
+/// calificado, aprobado o no. Solo el intento aprobado crea además la fila de
+/// `PortalFormularioRespuesta` (que es la que completa el material), así que
+/// quien reprueba puede volver a intentar sin que Talento Humano reabra nada.
+/// DATOS PERSONALES (Ley 1581 de 2012): mismas reglas que las respuestas; nunca
+/// a los logs. No se editan.
+model PortalFormularioIntento {
+  id                    Int                     @id @default(autoincrement())
+  material_id           Int
+  material              PortalCourseMaterial    @relation(fields: [material_id], references: [id], onDelete: Cascade)
+  formulario_version_id Int
+  version               PortalFormularioVersion @relation(fields: [formulario_version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// Correo de la SESIÓN.
+  student_email         String                  @db.NVarChar(255)
+  /// JSON `{ [idPregunta]: "texto" }`.
+  respuestas            String                  @db.NVarChar(Max)
+  puntaje               Float
+  puntaje_max           Float
+  /// 0 a 100, 2 decimales.
+  porcentaje            Float
+  aprobado              Boolean
+  enviado_at            DateTime                @default(now())
+
+  @@index([material_id, student_email])
+  @@index([formulario_version_id])
+  @@map("portal_formulario_intento")
   @@schema("dbo")
 }
 
@@ -1320,6 +1460,39 @@ model SgcCompanyConfig {
   logo_data_url         String? @db.NVarChar(Max)
   dissemination_domains String? @db.NVarChar(500)
   read_threshold_pct    Int     @default(90)
+  // Sprint 8 (socialización con Calidad OLP, 2026-10-07): el encabezado
+  // institucional es OBLIGATORIO en documento nuevo y nueva versión (el
+  // borrador va en Word o en el editor; un PDF se rechaza). Es configuración
+  // por empresa (por defecto sí) para poder revertirlo sin tocar el código.
+  header_mandatory          Boolean   @default(true)
+  // Carga inicial de vigentes ABIERTA: solo mientras está abierta se cargan
+  // documentos vigentes sin el encabezado del sistema (uno a uno o desde el
+  // listado maestro en Excel). Calidad la cierra con motivo (Sprint 9).
+  initial_load_open         Boolean   @default(true)
+  initial_load_closed_by    String?   @db.NVarChar(255)
+  initial_load_closed_at    DateTime?
+  initial_load_close_reason String?   @db.NVarChar(1000)
+  // Sprint 9: POLÍTICA DE CORREO de la empresa: nunca (por defecto: solo campana
+  // y tablero) | vencimientos (solo los avisos de vencimiento) | resumen_diario
+  // (un correo al día con los pendientes de cada persona).
+  email_mode                String    @default("nunca") @db.NVarChar(20)
+  // Día del último resumen diario enviado (evita repetirlo el mismo día).
+  email_digest_last_date    DateTime? @db.Date
+  // Sprint 11: COPIAS NO CONTROLADAS — tipos documentales que las admiten
+  // (códigos separados por coma; por defecto formatos FO,FR), días de
+  // vigencia por defecto y máximo.
+  uncontrolled_copy_types    String?   @default("FO,FR") @db.NVarChar(200)
+  uncontrolled_copy_days     Int       @default(30)
+  uncontrolled_copy_max_days Int       @default(90)
+  // Sprint 11: protección del VISOR (marca de agua en mosaico, ocultar sin foco
+  // y registrar «Imprimir pantalla»). Encendida por defecto; reversible.
+  viewer_protection          Boolean   @default(true)
+  // Sprint 12: APROBADORES AUTORIZADOS — con la lista activa (y al menos una
+  // persona autorizada en la empresa), solo ellos quedan como aprobadores.
+  approver_list_enforced     Boolean   @default(true)
+  // Sprint 13: FIRMA PROPIA (cada persona registra la suya y Calidad la valida).
+  // APAGADA por defecto: encenderla requiere el aval de la Dra. Adriana Cárdenas.
+  self_signature_enabled     Boolean   @default(false)
 
   company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
 
@@ -1351,6 +1524,16 @@ model SgcCompanyConfig {
   icalTokens         SgcIcalToken[]
   accessRequests     SgcAccessRequest[]
 
+  // Sprint 8: importaciones del listado maestro (Excel de Calidad).
+  masterListImports SgcMasterListImport[]
+  // Sprint 9: cargas masivas de los PDF del listado maestro.
+  bulkUploads       SgcBulkUpload[]
+  // Sprint 11: copias no controladas.
+  uncontrolledCopies SgcUncontrolledCopyRequest[]
+  // Sprint 12: aprobadores autorizados y firmantes sustitutos.
+  approverAuthorizations SgcApproverAuthorization[]
+  signerSubstitutions    SgcSignerSubstitution[]
+
   @@map("company_config")
   @@schema("sgc")
 }
@@ -1370,6 +1553,14 @@ model SgcCodingGuide {
   prefix          String   @db.NVarChar(10)
   pattern         String   @db.NVarChar(200)
   sequence_digits Int      @default(3)
+  // Sprint 8: HERENCIA del número del documento padre (codificación de OLP:
+  // los formatos e instructivos heredan el número de su procedimiento). Sin
+  // child_pattern no hay herencia. Marcas: las del patrón más {CODIGO_PADRE} y
+  // {NUMERO_PADRE}; child_type_codes son los tipos documentales que heredan
+  // (códigos separados por coma). Ver lib/sgc/coding.ts.
+  child_pattern         String? @db.NVarChar(200)
+  child_type_codes      String? @db.NVarChar(200)
+  child_sequence_digits Int?
   updated_by      String?  @db.NVarChar(255)
   change_reason   String?  @db.NVarChar(1000)
   created_at      DateTime @default(now())
@@ -1421,6 +1612,8 @@ model SgcProcessMap {
   // Sprint 2
   responsibles  SgcResponsibleMatrix[]
   requests      SgcRequest[]
+  // Sprint 12: aprobadores autorizados del proceso.
+  approverAuthorizations SgcApproverAuthorization[]
 
   @@unique([id_company, code])
   @@map("process_map")
@@ -1494,6 +1687,13 @@ model SgcDocument {
   reviewAlertConfigs SgcReviewAlertConfig[]
   reviewAlerts       SgcReviewAlert[]
   accessRequests     SgcAccessRequest[]
+  // Sprint 8: solicitudes de documentos que heredan su número y filas del listado maestro que lo crearon.
+  childRequests      SgcRequest[]                @relation("SgcRequestParent")
+  importRows         SgcMasterListImportRow[]
+  // Sprint 9: archivos de la carga masiva que se le asignaron.
+  bulkUploadItems    SgcBulkUploadItem[]
+  // Sprint 11: copias no controladas solicitadas.
+  uncontrolledCopies SgcUncontrolledCopyRequest[]
 
   @@unique([id_company, code])
   @@index([id_company, status])
@@ -1821,11 +2021,21 @@ model SgcRequest {
   // pendiente | generado | error
   controlled_pdf_status String?   @db.NVarChar(20)
   controlled_pdf_error  String?   @db.NVarChar(1000)
+  // Sprint 8: documento padre del que hereda el número (formato o instructivo de un procedimiento).
+  id_parent_document    Int?
+  // Sprint 10: ¿requiere capacitación? La SUGIERE el solicitante y la CONFIRMA
+  // quien crea el documento o Calidad. NULL = sin sugerir / sin confirmar
+  // (manda la sugerencia y, si no hay, el tipo documental).
+  requires_training_suggested Boolean?
+  requires_training           Boolean?
+  training_confirmed_by       String?   @db.NVarChar(255)
+  training_confirmed_at       DateTime?
 
   companyConfig  SgcCompanyConfig   @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   process        SgcFlowProcess     @relation(fields: [id_flow_process], references: [id_flow_process], onDelete: NoAction, onUpdate: NoAction)
   version        SgcFlowVersion     @relation(fields: [id_flow_version], references: [id_flow_version], onDelete: NoAction, onUpdate: NoAction)
   document       SgcDocument?       @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+  parentDocument SgcDocument?       @relation("SgcRequestParent", fields: [id_parent_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
   processMap     SgcProcessMap?     @relation(fields: [id_process_map], references: [id_process_map], onDelete: NoAction, onUpdate: NoAction)
   documentType   SgcDocumentType?   @relation(fields: [id_document_type], references: [id_document_type], onDelete: NoAction, onUpdate: NoAction)
   tasks          SgcTask[]
@@ -1844,6 +2054,8 @@ model SgcRequest {
   // Correcciones 2026-10-03: composición del documento (firmas ubicadas) y avisos de umbral de lectura.
   documentLayouts      SgcDocumentLayout[]
   readThresholdNotices SgcReadThresholdNotice[]
+  // Sprint 10: recapacitaciones de quienes no aprobaron en los intentos permitidos.
+  retrainings          SgcRetraining[]
 
   @@index([id_company, status])
   @@index([requester_email])
@@ -1926,6 +2138,8 @@ model SgcTaskAssignee {
   created_at        DateTime  @default(now())
   // Sprint 3: firma electrónica con la que se decidió el cupo (sgc.signature).
   id_signature      Int?
+  // Sprint 12: el cupo es de un SUSTITUTO que firma en nombre de esta persona (ausente).
+  on_behalf_of      String?   @db.NVarChar(255)
 
   task           SgcTask            @relation(fields: [id_task], references: [id_task], onDelete: NoAction, onUpdate: NoAction)
   authorizations SgcAuthorization[]
@@ -2114,6 +2328,8 @@ model SgcSignature {
   prev_record_hash    String?  @db.Char(64)
   record_hash         String   @unique @db.Char(64)
   created_at          DateTime @default(now())
+  // Sprint 12: firma de un SUSTITUTO «en sustitución de» esta persona (entra al registro encadenado).
+  on_behalf_of        String?  @db.NVarChar(255)
 
   request  SgcRequest      @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
   assignee SgcTaskAssignee @relation(fields: [id_task_assignee], references: [id_task_assignee], onDelete: NoAction, onUpdate: NoAction)
@@ -2159,6 +2375,14 @@ model SgcSignatureMaster {
   revoked_at          DateTime?
   revoked_by          String?   @db.NVarChar(255)
   revoke_reason       String?   @db.NVarChar(1000)
+  // Sprint 13 (R13, FIRMA PROPIA): calidad = la registró Calidad (inducción) | propia = la registró su titular.
+  origin              String    @default("calidad") @db.NVarChar(20)
+  // dibujada | imagen (subida y recortada a la tinta). NULL en las registradas antes del S13.
+  capture_method      String?   @db.NVarChar(20)
+  // validada | pendiente. Una firma pendiente NO firma; Calidad la valida (una vez) o la revoca.
+  validation_status   String    @default("validada") @db.NVarChar(20)
+  validated_by        String?   @db.NVarChar(255)
+  validated_at        DateTime?
 
   companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
 
@@ -2304,10 +2528,14 @@ model SgcTraining {
   registered_at DateTime
   updated_by    String    @db.NVarChar(255)
   updated_at    DateTime
+  // Sprint 10: proveedor de la evaluación (microsoft | google) y máximo de intentos que cuentan.
+  evaluation_provider String? @db.NVarChar(20)
+  max_attempts        Int     @default(2)
 
-  request SgcRequest          @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
-  task    SgcTask             @relation(fields: [id_task], references: [id_task], onDelete: NoAction, onUpdate: NoAction)
-  uploads SgcTrainingUpload[]
+  request     SgcRequest          @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
+  task        SgcTask             @relation(fields: [id_task], references: [id_task], onDelete: NoAction, onUpdate: NoAction)
+  uploads     SgcTrainingUpload[]
+  retrainings SgcRetraining[]
 
   @@index([id_request])
   @@map("training")
@@ -2357,11 +2585,40 @@ model SgcTrainingResult {
   attempts           Int
   in_scope           Boolean
   completed_at_text  String? @db.NVarChar(40)
+  // Sprint 10: intento que cuenta, intentos de más (no cuentan) y si queda en recapacitación.
+  attempt_number      Int?
+  extra_attempts      Int     @default(0)
+  retraining_required Boolean @default(false)
 
   upload SgcTrainingUpload @relation(fields: [id_training_upload], references: [id_training_upload], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([id_training_upload])
   @@map("training_result")
+  @@schema("sgc")
+}
+
+// Sprint 10: RECAPACITACIÓN (presencial o virtual) de quien no aprobó la
+// evaluación en los intentos permitidos. La registra Calidad. SOLO INSERCIÓN.
+model SgcRetraining {
+  id_retraining Int      @id @default(autoincrement())
+  id_request    Int
+  id_training   Int
+  user_email    String   @db.NVarChar(255)
+  // presencial | virtual
+  mode          String   @db.NVarChar(20)
+  session_date  DateTime @db.Date
+  // asistio | aprobo | reprobo
+  result        String   @db.NVarChar(20)
+  notes         String?  @db.NVarChar(1000)
+  registered_by String   @db.NVarChar(255)
+  registered_at DateTime
+
+  request  SgcRequest  @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
+  training SgcTraining @relation(fields: [id_training], references: [id_training], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_request])
+  @@index([user_email])
+  @@map("retraining")
   @@schema("sgc")
 }
 
@@ -2411,6 +2668,12 @@ model SgcDocumentRelation {
   removed_by           String?   @db.NVarChar(255)
   removed_at           DateTime?
   remove_reason        String?   @db.NVarChar(1000)
+  // Sprint 9: de dónde sale (manual | codigo | listado) y si Calidad ya la
+  // confirmó (propuesta | confirmada). El mapa solo muestra las confirmadas.
+  origin               String    @default("manual") @db.NVarChar(20)
+  status               String    @default("confirmada") @db.NVarChar(20)
+  confirmed_by         String?   @db.NVarChar(255)
+  confirmed_at         DateTime?
 
   companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   source        SgcDocument      @relation("SgcRelationSource", fields: [id_source_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
@@ -2603,6 +2866,108 @@ model SgcReadThresholdNotice {
   @@unique([id_task, threshold_pct])
   @@index([id_request])
   @@map("read_threshold_notice")
+  @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 8: importación del LISTADO MAESTRO (Excel de
+// Calidad). Cada importación confirmada deja su encabezado y una fila por
+// cada fila del Excel (cargada o con su error). SOLO INSERCIÓN (trigger).
+// Los documentos se crean en estado «pendiente de archivo» con su código; la
+// versión y la fecha de vigencia del listado quedan en la fila y se usan al
+// cargar el PDF (Sprint 9).
+// ---------------------------------------------------------------------------
+model SgcMasterListImport {
+  id_master_list_import Int      @id @default(autoincrement())
+  id_company            Int
+  file_name             String   @db.NVarChar(260)
+  // Huella SHA-256 de las filas recibidas (JSON canónico).
+  rows_sha256           String   @db.Char(64)
+  rows_total            Int
+  rows_loaded           Int
+  rows_error            Int
+  imported_by           String   @db.NVarChar(255)
+  imported_at           DateTime
+  ip                    String?  @db.NVarChar(64)
+
+  companyConfig SgcCompanyConfig         @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  rows          SgcMasterListImportRow[]
+
+  @@index([id_company, imported_at])
+  @@map("master_list_import")
+  @@schema("sgc")
+}
+
+model SgcMasterListImportRow {
+  id_master_list_import_row Int       @id @default(autoincrement())
+  id_master_list_import     Int
+  row_number                Int
+  code                      String?   @db.NVarChar(60)
+  title                     String?   @db.NVarChar(300)
+  document_type_code        String?   @db.NVarChar(10)
+  process_code              String?   @db.NVarChar(10)
+  version_number            Int?
+  effective_date            DateTime? @db.Date
+  confidentiality           String?   @db.NVarChar(20)
+  parent_code               String?   @db.NVarChar(60)
+  // cargada | error
+  status                    String    @db.NVarChar(20)
+  errors                    String?   @db.NVarChar(2000)
+  warnings                  String?   @db.NVarChar(2000)
+  id_document               Int?
+
+  import   SgcMasterListImport @relation(fields: [id_master_list_import], references: [id_master_list_import], onDelete: NoAction, onUpdate: NoAction)
+  document SgcDocument?        @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_master_list_import])
+  @@index([id_document])
+  @@map("master_list_import_row")
+  @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 9: CARGA MASIVA de los PDF del listado maestro. Cada
+// tanda deja su encabezado y una fila por archivo (cargado o con su error y el
+// aviso si el nombre no coincide con el del listado). SOLO INSERCIÓN.
+// ---------------------------------------------------------------------------
+model SgcBulkUpload {
+  id_bulk_upload Int      @id @default(autoincrement())
+  id_company     Int
+  files_total    Int
+  created_by     String   @db.NVarChar(255)
+  created_at     DateTime
+  ip             String?  @db.NVarChar(64)
+
+  companyConfig SgcCompanyConfig    @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  items         SgcBulkUploadItem[]
+
+  @@index([id_company, created_at])
+  @@map("bulk_upload")
+  @@schema("sgc")
+}
+
+model SgcBulkUploadItem {
+  id_bulk_upload_item Int      @id @default(autoincrement())
+  id_bulk_upload      Int
+  file_name           String   @db.NVarChar(260)
+  size_bytes          Int
+  sha256              String?  @db.Char(64)
+  code                String?  @db.NVarChar(60)
+  id_document         Int?
+  id_document_version Int?
+  // cargado | error
+  status              String   @db.NVarChar(20)
+  warning             String?  @db.NVarChar(1000)
+  error               String?  @db.NVarChar(1000)
+  created_by          String   @db.NVarChar(255)
+  created_at          DateTime
+
+  bulkUpload SgcBulkUpload @relation(fields: [id_bulk_upload], references: [id_bulk_upload], onDelete: NoAction, onUpdate: NoAction)
+  document   SgcDocument?  @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_bulk_upload])
+  @@index([id_document])
+  @@map("bulk_upload_item")
   @@schema("sgc")
 }
 
@@ -2852,4 +3217,114 @@ model AgentCvSummary {
   @@unique([id_agent, week_start])
   @@map("agent_cv_summary")
   @@schema("dbo")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 11: COPIAS NO CONTROLADAS. Solicitud con
+// justificación, destino y días; decide SOLO el grupo SGC-COPIA-NC (nunca el
+// jefe del área), con motivo; autorizada, se imprime (o, si es para un tercero,
+// se baja) con la marca «COPIA NO CONTROLADA» hasta su vencimiento. La
+// solicitud no se borra (trigger) y cada impresión o descarga es un EVENTO de
+// solo inserción.
+// ---------------------------------------------------------------------------
+model SgcUncontrolledCopyRequest {
+  id_copy_request     Int       @id @default(autoincrement())
+  id_company          Int
+  id_document         Int
+  id_document_version Int
+  requester_email     String    @db.NVarChar(255)
+  justification       String    @db.NVarChar(1000)
+  // interno | tercero
+  destination         String    @db.NVarChar(20)
+  destination_detail  String?   @db.NVarChar(300)
+  days_requested      Int
+  // pendiente | autorizada | rechazada | cancelada
+  status              String    @default("pendiente") @db.NVarChar(20)
+  decided_by          String?   @db.NVarChar(255)
+  decided_at          DateTime?
+  decision_reason     String?   @db.NVarChar(1000)
+  expires_at          DateTime?
+  allow_download      Boolean   @default(false)
+  created_at          DateTime
+  ip                  String?   @db.NVarChar(64)
+
+  companyConfig SgcCompanyConfig           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  document      SgcDocument                @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+  events        SgcUncontrolledCopyEvent[]
+
+  @@index([id_company, status])
+  @@index([requester_email])
+  @@map("uncontrolled_copy_request")
+  @@schema("sgc")
+}
+
+model SgcUncontrolledCopyEvent {
+  id_copy_event   Int      @id @default(autoincrement())
+  id_copy_request Int
+  // impresion | descarga
+  event           String   @db.NVarChar(20)
+  actor_email     String   @db.NVarChar(255)
+  occurred_at     DateTime
+  ip              String?  @db.NVarChar(64)
+  user_agent      String?  @db.NVarChar(400)
+
+  request SgcUncontrolledCopyRequest @relation(fields: [id_copy_request], references: [id_copy_request], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_copy_request])
+  @@map("uncontrolled_copy_event")
+  @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 12: APROBADORES AUTORIZADOS por persona y proceso
+// (decisión D9), con vigencia y motivo; los administra Aseguramiento de
+// Calidad. No se borran: se revocan con motivo.
+// ---------------------------------------------------------------------------
+model SgcApproverAuthorization {
+  id_approver_authorization Int       @id @default(autoincrement())
+  id_company                Int
+  user_email                String    @db.NVarChar(255)
+  // NULL = todos los procesos de la empresa.
+  id_process_map            Int?
+  valid_from                DateTime  @db.Date
+  valid_to                  DateTime? @db.Date
+  reason                    String    @db.NVarChar(1000)
+  granted_by                String    @db.NVarChar(255)
+  granted_at                DateTime
+  revoked_by                String?   @db.NVarChar(255)
+  revoked_at                DateTime?
+  revoke_reason             String?   @db.NVarChar(1000)
+
+  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  process       SgcProcessMap?   @relation(fields: [id_process_map], references: [id_process_map], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_company, user_email])
+  @@map("approver_authorization")
+  @@schema("sgc")
+}
+
+// Sprint 12: FIRMANTE SUSTITUTO que asigna solo el grupo SGC-SUSTITUTOS (María
+// Camila y su suplente, D8) sobre un cupo pendiente, con motivo y periodo de
+// ausencia. SOLO INSERCIÓN.
+model SgcSignerSubstitution {
+  id_signer_substitution    Int       @id @default(autoincrement())
+  id_company                Int
+  id_request                Int
+  id_task                   Int
+  step_key                  String    @db.NVarChar(40)
+  id_task_assignee_original Int
+  id_task_assignee_new      Int
+  original_email            String    @db.NVarChar(255)
+  substitute_email          String    @db.NVarChar(255)
+  reason                    String    @db.NVarChar(1000)
+  absence_from              DateTime? @db.Date
+  absence_to                DateTime? @db.Date
+  assigned_by               String    @db.NVarChar(255)
+  assigned_at               DateTime
+
+  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_request])
+  @@map("signer_substitution")
+  @@schema("sgc")
 }

@@ -1,3 +1,4 @@
+import { trainingForTask } from './training';
 import type { Prisma } from '../../../app/generated/prisma';
 import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../audit';
 import { pickCurrentDraft, type SgcCurrentDraft } from '../draft/current';
@@ -72,7 +73,8 @@ export async function signedContentInTx(tx: Tx, idRequest: number, idTask: numbe
     return { kind: 'pdf_controlado', ref: expected.ref, name: version.pdf_file_name, sha256: version.pdf_sha256.trim() };
   }
   if (expected.kind === 'resultados_capacitacion') {
-    const training = await tx.sgcTraining.findUnique({ where: { id_task: idTask } });
+    // Sprint 10: la capacitación es de la solicitud (puede venir de la tarea del material).
+    const training = await trainingForTask(tx, idTask);
     const up = training ? await tx.sgcTrainingUpload.findFirst({ where: { id_training: training.id_training }, orderBy: { id_training_upload: 'desc' } }) : null;
     if (!up || expected.ref !== `training_upload:${up.id_training_upload}` || expected.sha256 !== up.sha256.trim()) {
       throw new SgcError('Los resultados de la capacitación cambiaron mientras firmaba: revíselos de nuevo antes de firmar.', 409);
@@ -96,7 +98,8 @@ async function lastRecordHash(tx: Tx, idCompany: number): Promise<string | null>
 
 async function activeMaster(tx: Tx, idCompany: number, email: string) {
   return tx.sgcSignatureMaster.findFirst({
-    where: { id_company: idCompany, user_email: email, revoked_at: null },
+    // Sprint 13: una firma pendiente de validación NO se estampa.
+    where: { id_company: idCompany, user_email: email, revoked_at: null, validation_status: 'validada' },
     orderBy: { version_number: 'desc' },
     select: { id_signature_master: true, image_sha256: true },
   });
@@ -130,6 +133,9 @@ export async function recordSignature(
   const current = await signedContentInTx(tx, p.request.id_request, p.idTask, p.idTaskAssignee, s.verifiedDraft);
   const email = p.actor.email.trim().toLowerCase();
   const master = await activeMaster(tx, p.request.id_company, email);
+  // Sprint 12: si el cupo es de un sustituto, la firma queda «en sustitución de» el titular.
+  const slot = await tx.sgcTaskAssignee.findUnique({ where: { id_task_assignee: p.idTaskAssignee }, select: { on_behalf_of: true } });
+  const onBehalfOf = slot?.on_behalf_of?.trim().toLowerCase() || null;
   const payload = buildSignaturePayload({
     idCompany: p.request.id_company,
     idRequest: p.request.id_request,
@@ -144,6 +150,7 @@ export async function recordSignature(
     masterSha256: master?.image_sha256?.trim() ?? null,
     ip: p.actor.ip ?? null,
     userAgent: p.actor.userAgent ?? null,
+    onBehalfOf,
   });
   const config = await tx.sgcCompanyConfig.findUniqueOrThrow({ where: { id_company: p.request.id_company } });
   const segments = evidenceFolderSegments(config.storage_root, p.request.id_request);
@@ -180,6 +187,7 @@ export async function recordSignature(
       evidence_sha256: evidenceSha,
       prev_record_hash: prev,
       record_hash: recordHash,
+      on_behalf_of: payload.onBehalfOf ?? null,
     },
   });
   await writeSgcAudit(tx, {
@@ -188,7 +196,7 @@ export async function recordSignature(
     action: SGC_AUDIT_ACTIONS.firmaRegistrada,
     entity: 'signature',
     entityId: row.id_signature,
-    after: { uid: payload.uid, idRequest: payload.idRequest, idTask: payload.idTask, meaning: payload.meaning, contentSha256: payload.content.sha256, recordHash, evidencePath, authMethod: payload.authMethod },
+    after: { uid: payload.uid, idRequest: payload.idRequest, idTask: payload.idTask, meaning: payload.meaning, contentSha256: payload.content.sha256, recordHash, evidencePath, authMethod: payload.authMethod, ...(payload.onBehalfOf ? { onBehalfOf: payload.onBehalfOf } : {}) },
     detail: payload.reason,
     ip: payload.ip,
     userAgent: payload.userAgent,

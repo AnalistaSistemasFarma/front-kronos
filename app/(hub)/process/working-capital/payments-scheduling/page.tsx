@@ -92,6 +92,7 @@ interface PaymentSchedulingTask {
   valor_pagar?: number | null;
   fecha_solicitada_pago: string;
   acreedor?: string | null;
+  subempresa?: string | null;
 }
 
 interface CompanyRow {
@@ -560,6 +561,7 @@ function PaymentSchedulingBoard() {
         const columns = [
             { header: 'ID Solicitud', key: 'id', width: 12 },
             { header: 'Empresa', key: 'empresa', width: 26 },
+            { header: 'Subempresa', key: 'subempresa', width: 26 },
             { header: 'Tipo', key: 'tipo', width: 22 },
             { header: 'Subtipo', key: 'subtipo', width: 24 },
             { header: 'Documento', key: 'documento', width: 16 },
@@ -576,6 +578,7 @@ function PaymentSchedulingBoard() {
             return {
                 id: r.id_solicitud,
                 empresa: r.empresa ?? '',
+                subempresa: r.subempresa ?? '',
                 tipo: r.tipo_solicitud ?? '',
                 subtipo: r.subtipo_solicitud ?? '',
                 documento: a.doc,
@@ -827,9 +830,9 @@ function PaymentSchedulingBoard() {
                 </Text>
             )}
             </Table.Td>
-            <Table.Td style={{ minWidth: 150, maxWidth: 220 }}>
-            <Group gap={6} wrap='nowrap'>
-                <IconBuilding size={16} className='text-gray-400' style={{ flexShrink: 0 }} />
+            <Table.Td style={{ minWidth: 170, maxWidth: 260 }}>
+            <Group gap={6} wrap='nowrap' align='flex-start'>
+                <IconBuilding size={16} className='text-gray-400' style={{ flexShrink: 0, marginTop: 2 }} />
                 <div style={{ minWidth: 0 }}>
                     <Text size='sm' fw={500} truncate>
                         {req.usuario_asignado}
@@ -837,6 +840,11 @@ function PaymentSchedulingBoard() {
                     <Text size='xs' c='dimmed' truncate>
                         {req.empresa}
                     </Text>
+                    {req.subempresa && (
+                        <Text size='xs' c='dimmed' truncate>
+                            {req.subempresa}
+                        </Text>
+                    )}
                 </div>
             </Group>
             </Table.Td>
@@ -959,10 +967,15 @@ function PaymentSchedulingBoard() {
             )}
             </UnstyledButton>
 
-            <Group gap={6} wrap='nowrap'>
-                <IconBuilding size={14} className='text-gray-400' style={{ flexShrink: 0 }} />
-                <Text size='sm' truncate>{req.empresa}</Text>
-                <Badge variant='light' color='indigo' size='xs' ml='auto' style={{ flexShrink: 0 }}>
+            <Group gap={6} wrap='nowrap' align='flex-start'>
+                <IconBuilding size={14} className='text-gray-400' style={{ flexShrink: 0, marginTop: 2 }} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                    <Text size='sm' truncate>{req.empresa}</Text>
+                    {req.subempresa && (
+                        <Text size='xs' c='dimmed' truncate>{req.subempresa}</Text>
+                    )}
+                </div>
+                <Badge variant='light' color='indigo' size='xs' style={{ flexShrink: 0 }}>
                 {req.usuario_asignado}
                 </Badge>
             </Group>
@@ -1303,7 +1316,7 @@ function PaymentSchedulingBoard() {
                 {filteredRequests.map(renderCard)}
                 </Stack>
             ) : (
-                <div className='overflow-x-auto'>
+                <Table.ScrollContainer minWidth={1100}>
                 <Table striped highlightOnHover verticalSpacing='sm' horizontalSpacing='md'>
                     <Table.Thead
                         style={{
@@ -1333,7 +1346,7 @@ function PaymentSchedulingBoard() {
                     </Table.Thead>
                     <Table.Tbody>{filteredRequests.map(renderRow)}</Table.Tbody>
                 </Table>
-                </div>
+                </Table.ScrollContainer>
             )}
             </Card>
         </div>

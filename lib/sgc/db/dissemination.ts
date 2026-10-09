@@ -324,6 +324,8 @@ export async function openReadingFile(db: SgcDb, idAssignee: number, viewer: { e
     state: version.status === 'vigente' ? ('vigente' as const) : version.status === 'obsoleto' ? ('obsoleto' as const) : version.status === 'anulado' ? ('anulado' as const) : ('divulgacion' as const),
     // 2026-10-03: fecha de emisión del encabezado institucional (se estampa en la copia).
     emission: emissionStampFor(version),
+    // Sprint 11: empresa (protección del visor por configuración).
+    idCompany: rec.request.id_company,
   };
 }
 
@@ -492,7 +494,12 @@ export async function getMyReading(db: SgcDb, idTask: number, email: string) {
   if (!rec) return null;
   const pdfReady = Boolean(rec.request.id_document_version && rec.request.controlled_pdf_status === 'generado');
   const version = pdfReady ? await db.sgcDocumentVersion.findUnique({ where: { id_document_version: rec.request.id_document_version! }, include: { document: { select: { code: true, title: true } } } }) : null;
+  // Sprint 10: con capacitación, la lectura muestra también el video y el enlace de la evaluación (material previo).
+  const training = await db.sgcTraining.findFirst({ where: { id_request: rec.id_request }, orderBy: { id_training: 'desc' } });
   return {
+    training: training
+      ? { title: training.title, videoUrl: training.video_url, formsUrl: training.forms_url, evaluationProvider: training.evaluation_provider, maxAttempts: training.max_attempts, sessionDate: training.session_date ? training.session_date.toISOString().slice(0, 10) : null }
+      : null,
     // Lo que se firma con «Leyó»: el PDF controlado de la versión (su SHA-256 registrado).
     content: version ? { ref: `version:${version.id_document_version}`, name: version.pdf_file_name, sha256: version.pdf_sha256.trim() } : null,
     document: version ? { code: version.document.code, title: version.document.title, versionNumber: version.version_number } : null,

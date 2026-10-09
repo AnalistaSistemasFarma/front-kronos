@@ -38,6 +38,9 @@ export const SGC_NOTIFICATION_TITLES = {
   revisionMenor: 'Revisión menor de Calidad en un documento · SynerLink',
   lecturaUmbral: 'Avance de lectura de un documento · SynerLink',
   lecturaNoEntendi: 'Una persona no entendió un documento · SynerLink',
+  // Sprint 11: copias no controladas.
+  copiaNoControlada: 'Solicitud de copia no controlada · SynerLink',
+  copiaNoControladaDecidida: 'Su copia no controlada fue decidida · SynerLink',
 } as const;
 
 export function taskUrl(idTask: number): string {

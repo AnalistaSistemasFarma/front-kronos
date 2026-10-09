@@ -143,7 +143,9 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
       SET IDENTITY_INSERT [dbo].[company] ON;
       IF NOT EXISTS (SELECT 1 FROM [dbo].[company] WHERE id_company = ${CO}) INSERT INTO [dbo].[company] (id_company, company) VALUES (${CO}, N'EMPRESA S4 CI');
       SET IDENTITY_INSERT [dbo].[company] OFF;`);
-    await prisma.sgcCompanyConfig.upsert({ where: { id_company: CO }, create: { id_company: CO, is_active: true, storage_root: 'SGC/S4', activated_by: 'ci', activated_at: new Date() }, update: { is_active: true } });
+    // Sprint 8: esta suite usa borradores PDF y el encabezado opcional (modo configurable header_mandatory = 0);
+    // el encabezado OBLIGATORIO se prueba en tests/integration/sgc/s8.integration.test.ts.
+    await prisma.sgcCompanyConfig.upsert({ where: { id_company: CO }, create: { id_company: CO, is_active: true, header_mandatory: false, storage_root: 'SGC/S4', activated_by: 'ci', activated_at: new Date() }, update: { is_active: true, header_mandatory: false } });
     const proc = await prisma.process.create({ data: { process: `${SGC_PROCESS_NAME} (S4 CI)` } });
     const sub: Record<string, number> = {};
     for (const perm of ['lectura', 'gestion', 'calidad', 'flujos'] as const) {
@@ -248,7 +250,7 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     // Lo sugerido sin confirmar no deja completar la primera tarea (la elaboración).
     await expect(decideTask(prisma, notifier, (await taskOf(reqA, 'elaboracion')).id_task, { decision: 'aprobar' }, actor(E.elab))).rejects.toThrow(/SUGERIDOS sin confirmar/);
     await expect(confirmSuggestions(prisma, notifier, reqA, actor(E.sol), await accessOf(E.sol))).rejects.toMatchObject({ status: 403 });
-    expect(await confirmSuggestions(prisma, notifier, reqA, actor(E.elab), await accessOf(E.elab))).toEqual({ confirmed: 0, confirmedScope: 1 });
+    expect(await confirmSuggestions(prisma, notifier, reqA, actor(E.elab), await accessOf(E.elab))).toEqual({ confirmed: 0, confirmedScope: 1, confirmedTraining: false });
     const tmp = await addScopeEntry(prisma, notifier, await accessOf(E.elab), reqA, { entry: { kind: 'persona', email: E.ajeno }, reason: 'Por error' }, actor(E.elab));
     await expect(addScopeEntry(prisma, notifier, await accessOf(E.elab), reqA, { entry: { kind: 'departamento', idDepartment: dept }, reason: 'Repetido' }, actor(E.elab))).rejects.toMatchObject({ status: 409 });
     await expect(addScopeEntry(prisma, notifier, await accessOf(E.elab), reqA, { entry: { kind: 'departamento', idDepartment: 999999 }, reason: 'No existe' }, actor(E.elab))).rejects.toThrow(/no existe/);
@@ -399,7 +401,8 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     await expect(saveTraining(prisma, await accessOf(E.sol), reqA, training, actor(E.sol))).rejects.toMatchObject({ status: 403 });
     await expect(uploadTrainingResults(prisma, upload, await accessOf(E.cal), reqA, { fileName: 'r.xlsx', bytes: await xlsx([HEAD]) }, actor(E.cal))).rejects.toThrow(/Registre primero/);
     await saveTraining(prisma, await accessOf(E.cal), reqA, training, actor(E.cal));
-    await expect(uploadTrainingResults(prisma, upload, await accessOf(E.cal), reqA, { fileName: 'r.csv', bytes: new Uint8Array([1]) }, actor(E.cal))).rejects.toThrow(/\.xlsx/);
+    // Sprint 10: también se acepta el CSV de Google Forms; otro formato se rechaza.
+    await expect(uploadTrainingResults(prisma, upload, await accessOf(E.cal), reqA, { fileName: 'r.pdf', bytes: new Uint8Array([1]) }, actor(E.cal))).rejects.toThrow(/\.xlsx/);
     const bytes = await xlsx([
       HEAD,
       [1, 'a', 'b', E.l1, 'L1', 9],
@@ -417,7 +420,8 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     await expect(prisma.$executeRawUnsafe(`DELETE FROM [sgc].[training_result]`)).rejects.toThrow(/solo inserción/);
     const view = (await getRequestDetail(prisma, reqA, await viewer(E.cal))).training!;
     expect(view).toMatchObject({ open: true, canManage: true, uploadsCount: 1, training: { instructor: 'Jefe de Calidad', minScorePct: 80 }, upload: { sha256: up.sha256, needsJustification: true } });
-    expect(Object.fromEntries(view.people.map((p) => [p.email, p.status]))).toEqual({ [E.l1]: 'aprobo', [E.l2]: 'reprobo', [E.l3]: 'sin_resultado', [E.rev]: 'aprobo' });
+    // Sprint 10: L2 reprobó en sus 2 intentos (los que cuentan por defecto) → queda en recapacitación.
+    expect(Object.fromEntries(view.people.map((p) => [p.email, p.status]))).toEqual({ [E.l1]: 'aprobo', [E.l2]: 'recapacitacion', [E.l3]: 'sin_resultado', [E.rev]: 'aprobo' });
     expect(view.people.find((p) => p.email === E.l2)).toMatchObject({ score: 7, attempts: 2 });
     expect(view.outOfScope.map((o) => o.email)).toEqual(['otro@x.co']);
   });
@@ -545,11 +549,11 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     const cal = await accessOf(E.cal);
     await expect(addScopeEntry(prisma, notifier, cal, reqA, { entry: { kind: 'empresa' }, reason: 'Después de cerrar' }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
     await expect(sendReadingReminders(prisma, notifier, cal, reqA, actor(E.cal))).rejects.toMatchObject({ status: 409 });
-    await expect(saveTraining(prisma, cal, reqA, { mode: 'video', title: 'Tarde para capacitar', videoUrl: 'https://v.x/1', formsUrl: 'https://f.x/1', maxScore: 10 }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
+    await expect(saveTraining(prisma, cal, reqA, { mode: 'video', title: 'Tarde para capacitar', videoUrl: 'https://v.x/1', formsUrl: 'https://forms.office.com/r/s4tarde', maxScore: 10 }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
     await expect(uploadTrainingResults(prisma, upload, cal, reqA, { fileName: 'r.xlsx', bytes: await xlsx([HEAD]) }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
     const otra = { ...cal, idCompany: 999 };
     await expect(addScopeEntry(prisma, notifier, otra, reqA, { entry: { kind: 'empresa' }, reason: 'Otra empresa' }, actor(E.cal))).rejects.toMatchObject({ status: 404 });
-    await expect(saveTraining(prisma, otra, reqA, { mode: 'video', title: 'Otra empresa', videoUrl: 'https://v.x/1', formsUrl: 'https://f.x/1', maxScore: 10 }, actor(E.cal))).rejects.toMatchObject({ status: 404 });
+    await expect(saveTraining(prisma, otra, reqA, { mode: 'video', title: 'Otra empresa', videoUrl: 'https://v.x/1', formsUrl: 'https://forms.office.com/r/s4tarde', maxScore: 10 }, actor(E.cal))).rejects.toMatchObject({ status: 404 });
     await expect(sendReadingReminders(prisma, notifier, otra, reqA, actor(E.cal))).rejects.toMatchObject({ status: 404 });
     await expect(addScopeEntry(prisma, notifier, cal, 99999999, { entry: { kind: 'empresa' }, reason: 'No existe' }, actor(E.cal))).rejects.toMatchObject({ status: 404 });
     expect(await recordReadingEvent(prisma, a1.id_task_assignee, { event: 'final' }, { email: E.l1 }, actor(E.l1))).toMatchObject({ status: 'leido' });

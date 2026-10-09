@@ -23,6 +23,8 @@
     "seed:dashboard-solicitudes": "node scripts/seed-dashboard-solicitante-solicitado.cjs"
   },
   "dependencies": {
+    "@dicebear/core": "9.4.3",
+    "@dicebear/lorelei": "9.4.3",
     "@ducanh2912/next-pwa": "^10.2.9",
     "@gsap/react": "^2.1.2",
     "@mantine/core": "^8.3.3",

@@ -1,13 +1,6 @@
 import type { Prisma } from '../../../app/generated/prisma';
 import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../audit';
-import {
-  buildCodeRoot,
-  buildDocumentCode,
-  getDocumentCodeError,
-  nextSequence,
-  normalizeDocumentCode,
-  parseSequenceFromCode,
-} from '../coding';
+import { getDocumentCodeError, normalizeDocumentCode, parseSequenceFromCode } from '../coding';
 import { isSgcConfidentiality, isSgcDocumentStatus, type SgcConfidentiality } from '../constants';
 import {
   getGrantInputError,
@@ -22,6 +15,7 @@ import type { SgcCompanyAccess } from '../permissions';
 import { computeReviewDueDate, formatCalendarDate, toCalendarDate } from '../review';
 import { buildVersionFileName, buildVersionFolderSegments, getControlledPdfError, getSourceFileError, sha256Hex } from '../storage';
 import type { SgcActor, SgcDb } from './catalogs';
+import { guideInputOf, resolveNewDocumentCode } from './coding';
 
 /**
  * Repositorio de documentos del SGC (esquema `sgc`): listado maestro, ficha,
@@ -319,6 +313,8 @@ export interface SgcInitialLoadInput {
   /** Fecha de vigencia de esa versión (YYYY-MM-DD). */
   effectiveDate: string;
   changeDescription?: string | null;
+  /** Sprint 8: documento padre, si el tipo hereda su número y el código se genera. */
+  idParentDocument?: number | null;
   pdf: { bytes: Uint8Array; fileName: string };
   source?: { bytes: Uint8Array; fileName: string; contentType: string } | null;
 }
@@ -354,6 +350,10 @@ async function prepareInitialLoad(db: SgcDb, input: SgcInitialLoadInput, now: Da
     db.sgcDocumentType.findFirst({ where: { id_document_type: input.idDocumentType, id_company: input.idCompany, is_active: true } }),
   ]);
   if (!config || !config.is_active) throw new SgcError('La empresa no está activa en el SGC.', 403);
+  // Sprint 9: cerrada la carga inicial, ya no se suben vigentes sin el encabezado del sistema.
+  if (!config.initial_load_open) {
+    throw new SgcError('La carga inicial de documentos vigentes está cerrada: los documentos nuevos entran por una solicitud documental (con el encabezado institucional).', 409);
+  }
   if (!process) throw new SgcError('Seleccione un proceso activo de la empresa.');
   if (!docType) throw new SgcError('Seleccione un tipo documental activo de la empresa.');
 
@@ -370,26 +370,18 @@ async function prepareInitialLoad(db: SgcDb, input: SgcInitialLoadInput, now: Da
     const codeError = getDocumentCodeError(manual);
     if (codeError) throw new SgcError(codeError);
     code = manual;
-    if (guide) sequence = parseSequenceFromCode(guideInput(guide), parts, code);
+    if (guide) sequence = parseSequenceFromCode(guideInputOf(guide), parts, code);
   } else {
     if (!guide) throw new SgcError('La empresa no tiene guía de codificación: indique el código o configure la guía.');
-    const g = guideInput(guide);
-    const root = buildCodeRoot(g, parts);
-    const existing = await db.sgcDocument.findMany({
-      where: { id_company: input.idCompany, code: { startsWith: root } },
-      select: { code: true },
-    });
-    sequence = nextSequence(g, parts, existing.map((e) => e.code));
-    code = buildDocumentCode(g, parts, sequence);
+    // Sprint 8: un formato o instructivo hereda el número de su documento padre (guía de la empresa).
+    const resolved = await resolveNewDocumentCode(db, { idCompany: input.idCompany, ...parts, idParentDocument: input.idParentDocument ?? null });
+    sequence = resolved.sequence;
+    code = resolved.code;
   }
   const dup = await db.sgcDocument.findFirst({ where: { id_company: input.idCompany, code }, select: { id_document: true } });
   if (dup) throw new SgcError(`Ya existe un documento con el código ${code} en la empresa.`, 409);
 
   return { title, effective, config, process, docType, idOwnerDepartment, code, sequence };
-}
-
-function guideInput(guide: { prefix: string; pattern: string; sequence_digits: number }) {
-  return { prefix: guide.prefix, pattern: guide.pattern, sequenceDigits: guide.sequence_digits };
 }
 
 /**

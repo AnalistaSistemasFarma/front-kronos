@@ -119,7 +119,9 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
       SET IDENTITY_INSERT [dbo].[company] ON;
       IF NOT EXISTS (SELECT 1 FROM [dbo].[company] WHERE id_company = ${CO}) INSERT INTO [dbo].[company] (id_company, company) VALUES (${CO}, N'EMPRESA S3 CI');
       SET IDENTITY_INSERT [dbo].[company] OFF;`);
-    await prisma.sgcCompanyConfig.upsert({ where: { id_company: CO }, create: { id_company: CO, is_active: true, storage_root: 'SGC/S3', activated_by: 'ci', activated_at: new Date() }, update: { is_active: true } });
+    // Sprint 8: esta suite usa borradores PDF y el encabezado opcional (modo configurable header_mandatory = 0);
+    // el encabezado OBLIGATORIO se prueba en tests/integration/sgc/s8.integration.test.ts.
+    await prisma.sgcCompanyConfig.upsert({ where: { id_company: CO }, create: { id_company: CO, is_active: true, header_mandatory: false, storage_root: 'SGC/S3', activated_by: 'ci', activated_at: new Date() }, update: { is_active: true, header_mandatory: false } });
     const proc = await prisma.process.create({ data: { process: `${SGC_PROCESS_NAME} (S3 CI)` } });
     const sub: Record<string, number> = {};
     for (const perm of ['lectura', 'gestion', 'calidad', 'flujos'] as const) {
@@ -166,7 +168,8 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
     expect(rows).toHaveLength(5);
     expect(new Set(rows.map((r) => r.esquema))).toEqual(new Set(['sgc']));
     const trg = await prisma.$queryRaw<{ name: string }[]>`SELECT name FROM sys.triggers WHERE name LIKE 'signature%' OR name IN ('draft_revision_solo_insercion','quality_check_solo_insercion') ORDER BY name`;
-    expect(trg.map((t) => t.name)).toEqual(['draft_revision_solo_insercion', 'quality_check_solo_insercion', 'signature_consent_solo_insercion', 'signature_master_sin_borrado', 'signature_master_solo_revocacion', 'signature_solo_insercion']);
+    // Sprint 13: el maestro también tiene el trigger de validación única de la firma propia.
+    expect(trg.map((t) => t.name)).toEqual(['draft_revision_solo_insercion', 'quality_check_solo_insercion', 'signature_consent_solo_insercion', 'signature_master_sin_borrado', 'signature_master_solo_revocacion', 'signature_master_validacion_una_vez', 'signature_solo_insercion']);
     const cols = await prisma.$queryRaw<{ n: number }[]>`SELECT COUNT(*) AS n FROM sys.columns WHERE (object_id = OBJECT_ID('sgc.task_assignee') AND name = 'id_signature') OR (object_id = OBJECT_ID('sgc.flow_form_field') AND name = 'quality_check') OR (object_id = OBJECT_ID('sgc.document_version') AND name = 'manifest_json') OR (object_id = OBJECT_ID('sgc.request') AND name = 'controlled_pdf_status')`;
     expect(Number(cols[0].n)).toBe(4);
   });

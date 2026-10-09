@@ -104,6 +104,18 @@ try {
     // Correcciones de Calidad (2026-10-03).
     ['document_layout', 'change_reason'],
     ['read_threshold_notice', 'recipients_json'],
+    // Sprint 8: historial del listado maestro.
+    ['master_list_import', 'file_name'],
+    ['master_list_import_row', 'errors'],
+    // Sprint 9: carga masiva de los PDF del listado.
+    ['bulk_upload', 'ip'],
+    ['bulk_upload_item', 'warning'],
+    // Sprint 10: recapacitaciones.
+    ['retraining', 'notes'],
+    // Sprint 11: cada impresión o descarga de una copia no controlada.
+    ['uncontrolled_copy_event', 'user_agent'],
+    // Sprint 12: cada sustitución de firmante.
+    ['signer_substitution', 'reason'],
   ]) {
     if (!tables.has(table)) continue;
     const tx = new sql.Transaction(pool);
