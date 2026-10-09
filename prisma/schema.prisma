@@ -956,6 +956,7 @@ model PortalCourseMaterial {
   progress   PortalMaterialProgress[]
   vistas     PortalMaterialVista[]
   respuestas PortalFormularioRespuesta[]
+  intentos   PortalFormularioIntento[]
 
   @@index([course_id, orden])
   @@map("portal_course_material")
@@ -1062,6 +1063,7 @@ model PortalFormularioVersion {
   created_at    DateTime         @default(now())
 
   respuestas PortalFormularioRespuesta[]
+  intentos   PortalFormularioIntento[]
 
   @@unique([formulario_id, version])
   @@map("portal_formulario_version")
@@ -1092,6 +1094,35 @@ model PortalFormularioRespuesta {
   @@unique([material_id, student_email])
   @@index([formulario_version_id])
   @@map("portal_formulario_respuesta")
+  @@schema("dbo")
+}
+
+/// Un INTENTO de una EVALUACIÓN (formulario de tipo "evaluacion"): cada envío
+/// calificado, aprobado o no. Solo el intento aprobado crea además la fila de
+/// `PortalFormularioRespuesta` (que es la que completa el material), así que
+/// quien reprueba puede volver a intentar sin que Talento Humano reabra nada.
+/// DATOS PERSONALES (Ley 1581 de 2012): mismas reglas que las respuestas; nunca
+/// a los logs. No se editan.
+model PortalFormularioIntento {
+  id                    Int                     @id @default(autoincrement())
+  material_id           Int
+  material              PortalCourseMaterial    @relation(fields: [material_id], references: [id], onDelete: Cascade)
+  formulario_version_id Int
+  version               PortalFormularioVersion @relation(fields: [formulario_version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// Correo de la SESIÓN.
+  student_email         String                  @db.NVarChar(255)
+  /// JSON `{ [idPregunta]: "texto" }`.
+  respuestas            String                  @db.NVarChar(Max)
+  puntaje               Float
+  puntaje_max           Float
+  /// 0 a 100, 2 decimales.
+  porcentaje            Float
+  aprobado              Boolean
+  enviado_at            DateTime                @default(now())
+
+  @@index([material_id, student_email])
+  @@index([formulario_version_id])
+  @@map("portal_formulario_intento")
   @@schema("dbo")
 }
 
