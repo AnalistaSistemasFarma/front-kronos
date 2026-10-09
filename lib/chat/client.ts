@@ -7,6 +7,8 @@
  * payloads que devuelven las rutas de app/api/chat) y los ayudantes de fetch.
  */
 
+import { notionAvatarVersion } from '../avatar/urls';
+
 /* ──────────────────────── Foto de un asistente ─────────────────────────── */
 
 /** Tope de la imagen ya reducida. 512×512 en JPEG no llega ni a 100 KB. */
@@ -29,6 +31,13 @@ export function agentAvatarSrc(agent: {
   avatarUrl: string | null;
   avatarVersion?: number | null;
 }): string | null {
+  // Avatar estilo Notion (Perfil → Avatar del asistente): manda sobre la foto
+  // subida si es MÁS RECIENTE. Así gana el último cambio, y la foto subida no
+  // se borra: vuelve sola al quitar el avatar o al subir otra foto después.
+  const versionNotion = notionAvatarVersion(agent.avatarUrl);
+  if (versionNotion !== null && (!agent.avatarVersion || versionNotion >= agent.avatarVersion)) {
+    return agent.avatarUrl;
+  }
   if (agent.avatarVersion) {
     return `/api/chat/agents/${encodeURIComponent(agent.code)}/avatar?v=${agent.avatarVersion}`;
   }

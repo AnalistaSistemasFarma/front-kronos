@@ -39,6 +39,12 @@ import { CustomColorPicker } from '../../../components/theme/CustomColorPicker';
 import { FONTS } from '../../../lib/theme/fonts';
 import { PALETTES } from '../../../lib/theme/palettes';
 import { DUO_PALETTES } from '../../../lib/theme/duoPalettes';
+import toast from 'react-hot-toast';
+import {
+  AvataresAgentesSection,
+  MiAvatarSection,
+  type Resultado,
+} from '../../../components/avatar/ProfileAvatarSections';
 
 interface UserProfile {
   id: string;
@@ -217,6 +223,28 @@ export default function ProfileSettingsPage() {
     setErrorMessage('');
   };
 
+  // Avatar estilo Notion: el resultado se muestra ARRIBA (alerta con color) y
+  // además como aviso emergente, para no depender del scroll.
+  const mostrarResultado = (r: Resultado) => {
+    if (r.tipo === 'ok') {
+      setErrorMessage('');
+      setSuccessMessage(r.mensaje);
+      toast.success(r.mensaje);
+    } else {
+      setSuccessMessage('');
+      setErrorMessage(r.mensaje);
+      toast.error(r.mensaje);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const aplicarImagen = async (image: string | null) => {
+    setFormData((prev) => ({ ...prev, image: image ?? '' }));
+    setProfile((prev) => (prev ? { ...prev, image } : prev));
+    // Refresca la sesión: el encabezado lee la foto del JWT.
+    await update();
+  };
+
   // Apariencia: paleta de color, modo claro/oscuro y tipografía
   const { theme, setThemeMode, palette, setPalette, font, setFont } = useTheme();
 
@@ -355,6 +383,10 @@ export default function ProfileSettingsPage() {
               </Stack>
             </form>
           </Card>
+
+          {/* Avatar estilo Notion (persona) y avatar de los asistentes a cargo */}
+          <MiAvatarSection onResultado={mostrarResultado} onImagen={aplicarImagen} />
+          <AvataresAgentesSection onResultado={mostrarResultado} />
 
           {/* Appearance Section */}
           <Card withBorder padding='lg' radius='md'>
