@@ -203,7 +203,9 @@ test.describe('Portal TH · Formación · evaluación', () => {
     await selector.getByTestId('crear-evaluacion').click();
     const c = page.getByTestId('constructor-formulario');
     await expect(c).toBeVisible();
-    await expect(c.getByTestId('suma-puntos')).toContainText('0 / 100');
+    // Reparto automático desde el inicio: 1 pregunta = 100 puntos.
+    await expect(c.getByTestId('puntos-auto')).toBeChecked();
+    await expect(c.getByTestId('suma-puntos')).toContainText('100 / 100');
 
     await c.getByTestId('titulo-formulario').fill('Evaluación Inducción Organizacional y SST');
     await c.getByLabel('Enunciado', { exact: true }).fill('Seleccione la opción correcta. Puntaje mínimo para aprobar: 80 %.');
@@ -212,7 +214,6 @@ test.describe('Portal TH · Formación · evaluación', () => {
     await q1.getByPlaceholder('Opción 1').fill('Esperar a que el trabajador se recupere');
     await q1.getByPlaceholder('Opción 2').fill('Reportarlo de inmediato al jefe directo y a la ARL');
     await q1.getByRole('radio', { name: 'Marcar la opción 2 como correcta' }).check();
-    await q1.getByLabel('Puntos').fill('60');
 
     await c.getByTestId('agregar-pregunta').click();
     const q2 = c.getByTestId('pregunta-2');
@@ -220,12 +221,19 @@ test.describe('Portal TH · Formación · evaluación', () => {
     await q2.getByPlaceholder('Opción 1').fill('Respeto');
     await q2.getByPlaceholder('Opción 2').fill('Tolerancia');
     await q2.getByRole('radio', { name: 'Marcar la opción 2 como correcta' }).check();
-    await q2.getByLabel('Puntos').fill('30');
-    await expect(c.getByTestId('suma-puntos')).toContainText('90 / 100');
+    // Con 2 preguntas, 100 ÷ 2 = 50 puntos cada una, sin escribir nada.
+    await expect(q1.getByLabel('Puntos')).toHaveValue('50');
+    await expect(q2.getByLabel('Puntos')).toHaveValue('50');
+    await expect(c.getByTestId('suma-puntos')).toContainText('100 / 100');
     await c.scrollIntoViewIfNeeded();
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/31-formador-constructor-evaluacion.png`, fullPage: true });
 
-    // Los puntos no suman 100: el aviso va ARRIBA, en rojo, y no se guarda nada.
+    // Reparto manual con puntos que no suman 100: el aviso va ARRIBA, en rojo, y no se guarda nada.
+    await c.getByText('Repartir los 100 puntos por igual entre las preguntas').click(); // interruptor de Mantine: se alterna por su etiqueta
+    await expect(c.getByTestId('puntos-auto')).not.toBeChecked();
+    await q1.getByLabel('Puntos').fill('60');
+    await q2.getByLabel('Puntos').fill('30');
+    await expect(c.getByTestId('suma-puntos')).toContainText('90 / 100');
     await c.getByTestId('guardar-formulario').click();
     await expect(c.getByTestId('errores-constructor')).toContainText('Los puntos deben sumar exactamente 100: hoy suman 90.');
     expect(creada).toBeNull();
@@ -233,8 +241,9 @@ test.describe('Portal TH · Formación · evaluación', () => {
     await expect(c.getByTestId('errores-constructor')).toBeInViewport();
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/32-formador-puntos-no-suman-100.png` });
 
-    // "Repartir por igual" y guardar.
-    await c.getByRole('button', { name: 'Repartir puntos por igual' }).click();
+    // Volver al reparto automático: 50 + 50 y guardar.
+    await c.getByText('Repartir los 100 puntos por igual entre las preguntas').click();
+    await expect(c.getByTestId('puntos-auto')).toBeChecked();
     await expect(c.getByTestId('suma-puntos')).toContainText('100 / 100');
     await c.getByTestId('guardar-formulario').click();
     await expect(selector.getByRole('alert').filter({ hasText: 'Evaluación creada' })).toContainText('Evaluación creada: Evaluación Inducción Organizacional y SST');

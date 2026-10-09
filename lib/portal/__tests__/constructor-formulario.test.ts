@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { construirDefinicion, estadoInicial, preguntaVacia, type Estado, type PreguntaEditable } from '../constructor-formulario';
+import {
+  construirDefinicion,
+  conReparto,
+  estadoInicial,
+  preguntaVacia,
+  puntosPorIgual,
+  repartirPuntos,
+  type Estado,
+  type PreguntaEditable,
+} from '../constructor-formulario';
 import { validarDefinicion } from '../formulario';
 
 // Constructor manual de formularios (Cristian Baldión, 2026-10-09).
@@ -8,7 +17,8 @@ function pregunta(parche: Partial<PreguntaEditable> = {}): PreguntaEditable {
   return { ...preguntaVacia('evaluacion', []), texto: 'Enunciado', opciones: ['A', 'B', 'C'], puntos: 100, correcta: 1, ...parche };
 }
 function evaluacion(parche: Partial<Estado> = {}): Estado {
-  return { ...estadoInicial('evaluacion'), titulo: 'Evaluación', codigo: 'EVA-1', preguntas: [pregunta()], ...parche };
+  // Reparto manual: estas pruebas fijan los puntos a mano; el automático se prueba aparte.
+  return { ...estadoInicial('evaluacion'), puntosAuto: false, titulo: 'Evaluación', codigo: 'EVA-1', preguntas: [pregunta()], ...parche };
 }
 
 describe('construirDefinicion: evaluación', () => {
@@ -160,5 +170,68 @@ describe('editar una definición existente conserva lo que el editor no muestra'
     expect(e.preguntas).toHaveLength(1);
     expect(e.preguntas[0]).toMatchObject({ puntos: 100, correcta: 1 });
     expect(construirDefinicion(e).definicion).toEqual(d);
+  });
+});
+
+describe('reparto automático de los 100 puntos (Cristian, 2026-10-09)', () => {
+  const calificadas = (e: Estado) => e.preguntas.map((p) => p.puntos);
+
+  it('100 ÷ número de preguntas: 10 preguntas = 10 puntos cada una', () => {
+    expect(puntosPorIgual(10)).toEqual(Array(10).fill(10));
+    expect(puntosPorIgual(4)).toEqual([25, 25, 25, 25]);
+    expect(puntosPorIgual(1)).toEqual([100]);
+    expect(puntosPorIgual(0)).toEqual([]);
+  });
+
+  it('si no divide exacto, la última se lleva el resto y la suma es exactamente 100', () => {
+    expect(puntosPorIgual(3)).toEqual([33.33, 33.33, 33.34]);
+    expect(puntosPorIgual(6)).toEqual([16.66, 16.66, 16.66, 16.66, 16.66, 16.7]);
+    for (let n = 1; n <= 60; n++) expect(Math.round(puntosPorIgual(n).reduce((s, x) => s + x, 0) * 100) / 100).toBe(100);
+  });
+
+  it('una evaluación nueva empieza con el reparto automático encendido', () => {
+    const e = estadoInicial('evaluacion');
+    expect(e.puntosAuto).toBe(true);
+    expect(calificadas(e)).toEqual([100]);
+  });
+
+  it('al agregar o quitar preguntas, se recalcula solo', () => {
+    let e = estadoInicial('evaluacion');
+    e = conReparto({ ...e, preguntas: [...e.preguntas, preguntaVacia('evaluacion', e.preguntas)] });
+    expect(calificadas(e)).toEqual([50, 50]);
+    e = conReparto({ ...e, preguntas: [...e.preguntas, preguntaVacia('evaluacion', e.preguntas)] });
+    expect(calificadas(e)).toEqual([33.33, 33.33, 33.34]);
+    e = conReparto({ ...e, preguntas: e.preguntas.slice(0, 1) });
+    expect(calificadas(e)).toEqual([100]);
+  });
+
+  it('las preguntas de datos (texto) no cuentan en el reparto', () => {
+    const e = repartirPuntos({
+      ...estadoInicial('evaluacion'),
+      preguntas: [pregunta({ puntos: '' }), { ...preguntaVacia('evaluacion', []), id: 'cargo', texto: 'Cargo', tipo: 'texto', puntos: '' }, pregunta({ id: 'q3', puntos: '' })],
+    });
+    expect(calificadas(e)).toEqual([50, '', 50]);
+  });
+
+  it('con el reparto apagado no toca los puntos que puso la persona', () => {
+    const e = conReparto({ ...evaluacion(), preguntas: [pregunta({ puntos: 70 }), pregunta({ id: 'q2', puntos: 30 })] });
+    expect(calificadas(e)).toEqual([70, 30]);
+  });
+
+  it('guardar con el reparto encendido da una evaluación válida que suma 100', () => {
+    const e = { ...estadoInicial('evaluacion'), titulo: 'Eva', codigo: 'EVA-9' };
+    const con10 = { ...e, preguntas: Array.from({ length: 10 }, (_, i) => pregunta({ id: 'q' + (i + 1), puntos: '' })) };
+    const d = construirDefinicion(con10).definicion!;
+    const puntos = d.preguntas.filter((p) => p.puntos !== undefined).map((p) => p.puntos);
+    expect(puntos).toEqual(Array(10).fill(10));
+  });
+
+  it('al editar, se enciende solo si ya estaban repartidos por igual', () => {
+    const igual = construirDefinicion(evaluacion({ preguntas: [pregunta({ puntos: 50 }), pregunta({ id: 'q2', puntos: 50 })] })).definicion!;
+    expect(estadoInicial('evaluacion', igual).puntosAuto).toBe(true);
+    const desigual = construirDefinicion(evaluacion({ preguntas: [pregunta({ puntos: 70 }), pregunta({ id: 'q2', puntos: 30 })] })).definicion!;
+    const reabierta = estadoInicial('evaluacion', desigual);
+    expect(reabierta.puntosAuto).toBe(false);
+    expect(calificadas(reabierta)).toEqual(['', '', 70, 30].slice(2));
   });
 });

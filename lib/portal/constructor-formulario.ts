@@ -53,6 +53,8 @@ export interface PreguntaEditable {
 
 export interface Estado {
   tipo: TipoFormulario;
+  /** Evaluación: los 100 puntos se reparten por igual entre las preguntas calificadas (Cristian, 2026-10-09). */
+  puntosAuto: boolean;
   codigo: string;
   titulo: string;
   descripcion: string;
@@ -90,7 +92,8 @@ export const preguntaVacia = (tipo: TipoFormulario, preguntas: PreguntaEditable[
 
 export function estadoInicial(tipo: TipoFormulario, definicion?: DefinicionFormulario): Estado {
   if (!definicion) {
-    return {
+    return conReparto({
+      puntosAuto: true,
       tipo,
       codigo: codigoNuevo(tipo),
       titulo: '',
@@ -100,7 +103,7 @@ export function estadoInicial(tipo: TipoFormulario, definicion?: DefinicionFormu
       datos: { nombre: tipo === 'evaluacion', correo: false, cedula: tipo === 'evaluacion' },
       preguntas: [preguntaVacia(tipo, [])],
       datosSensibles: false,
-    };
+    });
   }
   const datos: Record<DatoClave, boolean> = { nombre: false, correo: false, cedula: false };
   const preguntas: PreguntaEditable[] = [];
@@ -123,7 +126,8 @@ export function estadoInicial(tipo: TipoFormulario, definicion?: DefinicionFormu
       prellenar: p.prellenar,
     });
   }
-  return {
+  const base: Estado = {
+    puntosAuto: false,
     tipo: definicion.tipo === 'evaluacion' ? 'evaluacion' : 'encuesta',
     codigo: definicion.codigo,
     titulo: definicion.titulo,
@@ -135,12 +139,40 @@ export function estadoInicial(tipo: TipoFormulario, definicion?: DefinicionFormu
     datosSensibles: definicion.datosSensibles === true,
     autorizacion: definicion.autorizacion,
   };
+  // Al editar: el reparto automático se enciende solo si los puntos ya están repartidos por igual.
+  const calificadas = base.preguntas.filter((p) => esCalificada(base, p));
+  const igual = puntosPorIgual(calificadas.length);
+  const yaPorIgual = calificadas.length > 0 && calificadas.every((p, i) => p.puntos === igual[i]);
+  return { ...base, puntosAuto: base.tipo === 'evaluacion' && yaPorIgual };
 }
 
 export const esCalificada = (e: Estado, p: PreguntaEditable) => e.tipo === 'evaluacion' && p.tipo === 'seleccion';
 
+/**
+ * Reparto automático: 100 ÷ número de preguntas calificadas. Si no divide exacto
+ * (p. ej. 3 preguntas), la última se lleva el resto para que sumen EXACTAMENTE
+ * 100 (33,33 + 33,33 + 33,34).
+ */
+export function puntosPorIgual(n: number): number[] {
+  if (n <= 0) return [];
+  const base = Math.floor((PUNTOS_TOTAL / n) * 100) / 100;
+  const resto = redondear2(PUNTOS_TOTAL - base * (n - 1));
+  return Array.from({ length: n }, (_, i) => (i === n - 1 ? resto : base));
+}
+
+/** Aplica el reparto automático a las preguntas calificadas. */
+export function repartirPuntos(e: Estado): Estado {
+  const idx = e.preguntas.map((p, i) => (esCalificada(e, p) ? i : -1)).filter((i) => i >= 0);
+  const pts = puntosPorIgual(idx.length);
+  return { ...e, preguntas: e.preguntas.map((p, i) => (idx.includes(i) ? { ...p, puntos: pts[idx.indexOf(i)] } : p)) };
+}
+
+/** Si el estado tiene el reparto automático encendido, lo vuelve a calcular. */
+export const conReparto = (e: Estado): Estado => (e.tipo === 'evaluacion' && e.puntosAuto ? repartirPuntos(e) : e);
+
 /** Estado del editor → definición lista para validar y guardar, más los avisos con la numeración que ve la persona. */
-export function construirDefinicion(e: Estado): { definicion: DefinicionFormulario | null; errores: string[] } {
+export function construirDefinicion(entrada: Estado): { definicion: DefinicionFormulario | null; errores: string[] } {
+  const e = conReparto(entrada);
   const errores: string[] = [];
   if (!e.titulo.trim()) errores.push('Escriba el título del formulario.');
   if (!e.codigo.trim()) errores.push('Falta el código del formulario.');

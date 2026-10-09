@@ -32,6 +32,7 @@ import {
 import { PUNTOS_TOTAL, redondear2, type DefinicionFormulario, type TipoFormulario, type TipoPregunta } from '../../lib/portal/formulario';
 import {
   DATOS,
+  conReparto,
   construirDefinicion,
   esCalificada,
   estadoInicial,
@@ -107,6 +108,7 @@ export function ConstructorFormulario({
   const calificadas = e.preguntas.filter((p) => esCalificada(e, p)).length;
 
   const cambiar = (parche: Partial<Estado>) => setE((x) => ({ ...x, ...parche }));
+  const activarReparto = (auto: boolean) => setE((x) => conReparto({ ...x, puntosAuto: auto }));
   const cambiarPregunta = (i: number, parche: Partial<PreguntaEditable>) =>
     setE((x) => ({ ...x, preguntas: x.preguntas.map((p, j) => (j === i ? { ...p, ...parche } : p)) }));
   const mover = (i: number, delta: -1 | 1) =>
@@ -117,25 +119,12 @@ export function ConstructorFormulario({
       [copia[i], copia[j]] = [copia[j], copia[i]];
       return { ...x, preguntas: copia };
     });
-  const quitar = (i: number) => setE((x) => ({ ...x, preguntas: x.preguntas.filter((_, j) => j !== i) }));
-  const agregar = () => setE((x) => ({ ...x, preguntas: [...x.preguntas, preguntaVacia(x.tipo, x.preguntas)] }));
+  const quitar = (i: number) => setE((x) => conReparto({ ...x, preguntas: x.preguntas.filter((_, j) => j !== i) }));
+  const agregar = () => setE((x) => conReparto({ ...x, preguntas: [...x.preguntas, preguntaVacia(x.tipo, x.preguntas)] }));
 
   const cambiarTipoPregunta = (i: number, t: TipoPregunta) => {
     const p = e.preguntas[i];
-    cambiarPregunta(i, {
-      tipo: t,
-      opciones: t === 'seleccion' && p.opciones.length < 2 ? [...p.opciones, ...Array(2 - p.opciones.length).fill('')] : p.opciones,
-      correcta: t === 'seleccion' ? p.correcta : null,
-      puntos: t === 'seleccion' ? p.puntos : '',
-    });
-  };
-
-  const repartir = () => {
-    const idx = e.preguntas.map((p, i) => (esCalificada(e, p) ? i : -1)).filter((i) => i >= 0);
-    if (idx.length === 0) return;
-    const base = Math.floor((PUNTOS_TOTAL / idx.length) * 100) / 100;
-    const ultimo = redondear2(PUNTOS_TOTAL - base * (idx.length - 1));
-    setE((x) => ({ ...x, preguntas: x.preguntas.map((p, i) => (idx.includes(i) ? { ...p, puntos: i === idx[idx.length - 1] ? ultimo : base } : p)) }));
+    setE((x) => conReparto({ ...x, preguntas: x.preguntas.map((q, j) => (j === i ? { ...q, tipo: t, opciones: t === 'seleccion' && p.opciones.length < 2 ? [...p.opciones, ...Array(2 - p.opciones.length).fill('')] : p.opciones, correcta: t === 'seleccion' ? p.correcta : null, puntos: t === 'seleccion' ? p.puntos : '' } : q)) }));
   };
 
   const revisar = (): DefinicionFormulario | null => {
@@ -235,6 +224,12 @@ export function ConstructorFormulario({
               data-testid='nota-minima'
             />
             <Switch
+              label='Repartir los 100 puntos por igual entre las preguntas'
+              checked={e.puntosAuto}
+              onChange={(ev) => activarReparto(ev.currentTarget.checked)}
+              data-testid='puntos-auto'
+            />
+            <Switch
               label='Guardar como borrador (todavía no se puede responder)'
               checked={e.borrador}
               onChange={(ev) => cambiar({ borrador: ev.currentTarget.checked })}
@@ -268,9 +263,6 @@ export function ConstructorFormulario({
               <Badge color={redondear2(suma) === PUNTOS_TOTAL ? 'green' : 'red'} variant='light' size='lg' data-testid='suma-puntos'>
                 Puntos: {suma} / {PUNTOS_TOTAL}
               </Badge>
-              <Button size='xs' variant='default' onClick={repartir} disabled={calificadas === 0}>
-                Repartir puntos por igual
-              </Button>
             </Group>
           )}
         </Group>
@@ -323,6 +315,9 @@ export function ConstructorFormulario({
                     decimalScale={2}
                     w={140}
                     value={p.puntos}
+                    readOnly={e.puntosAuto}
+                    variant={e.puntosAuto ? 'filled' : 'default'}
+                    description={e.puntosAuto ? 'Automático' : undefined}
                     onChange={(v) => cambiarPregunta(i, { puntos: v === '' ? '' : Number(v) })}
                   />
                 )}
