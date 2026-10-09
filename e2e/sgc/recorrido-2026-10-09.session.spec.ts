@@ -58,11 +58,11 @@ test.describe.serial('Recorrido manual SGC 2026-10-09', () => {
     const draft = await page.request.post(`/api/sgc/requests/${idRequest}/draft`, { data: { html: '<p><strong>Nombre del documento:</strong> {{NOMBRE_DOCUMENTO}}</p><h2>1. OBJETIVO</h2><p>Recorrido manual (e2e).</p>', origin: 'plantilla', originRef: 'Plantilla institucional de procedimiento' } });
     expect([200, 201]).toContain(draft.status());
     await page.goto(`/process/sgc-documental/solicitudes/${idRequest}?empresa=${OLP}`);
+    await expect(page.getByTestId('sgc-firmas-documento')).toBeVisible({ timeout: 45_000 });
     const header = page.getByTestId('sgc-encabezado-institucional');
-    await expect(header).toBeVisible({ timeout: 45_000 });
     await expect(header).toBeChecked();
     testInfo.annotations.push({ type: 'encabezado', description: `casilla marcada; deshabilitada=${await header.isDisabled()}` });
-    await header.scrollIntoViewIfNeeded();
+    await page.getByTestId('sgc-firmas-documento').scrollIntoViewIfNeeded();
     await shot(page, testInfo, '04-solicitud-encabezado.png');
   });
 

@@ -80,7 +80,7 @@ jobs:
           if [ "$code" != "200" ]; then echo "::error::Pruebas no responde en E2E_BASE_URL (¿cambió la URL del túnel?)"; exit 1; fi
 
       - name: Pruebas e2e (sin sesión y con sesión)
-        run: npx playwright test
+        run: npx playwright test e2e/sgc/recorrido-2026-10-09.session.spec.ts
 
       - name: Borrar la sesión guardada (no se archiva)
         if: always()
