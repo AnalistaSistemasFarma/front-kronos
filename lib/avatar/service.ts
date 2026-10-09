@@ -17,6 +17,7 @@ import {
   upsertAvatarConfig,
   type AvatarConfigRow,
 } from './store';
+import { readAgentOwnerIds } from './responsables';
 import { parseAgentAvatarConfig, serializeAgentAvatarConfig, type AgentAvatarConfig } from './agente';
 import type { AvatarConfig } from './types';
 
@@ -113,7 +114,8 @@ export interface ManagedAgent {
  * Agentes cuyo avatar puede cambiar la persona. Regla (pendiente de
  * confirmar con Nicolás, ver el PR):
  *   - tiene que VER el agente en el chat (getChatAccess), y además
- *   - ser su RESPONSABLE en la hoja de vida (agent_profile.owner_email), o
+ *   - ser su RESPONSABLE en la hoja de vida (agent_profile.owner_email; si la
+ *     tabla no existe en la base, nadie es responsable), o
  *   - ser administrador (la misma reja que ya protege "cambiar la foto").
  * Tener permiso para CHATEAR con un agente no basta: su cara la ve toda la
  * empresa, así que no la puede cambiar cualquiera que hable con él.
@@ -123,11 +125,8 @@ export async function listManagedAgents(email: string): Promise<ManagedAgent[]> 
   if (!access.canUseChat || access.agents.length === 0) return [];
 
   const esAdmin = await checkAdminPrivileges(email);
-  const responsables = await prisma.agentProfile.findMany({
-    where: { id_agent: { in: access.agents.map((a) => a.idAgent) }, owner_email: email.trim() },
-    select: { id_agent: true },
-  });
-  const propios = new Set(responsables.map((r) => r.id_agent));
+  // Sin dbo.agent_profile (producción hoy) el conjunto llega vacío: solo administradores.
+  const propios = await readAgentOwnerIds(email, access.agents.map((a) => a.idAgent));
 
   const gestionables: Array<ChatAgentAccess & { motivo: MotivoGestion }> = [];
   for (const a of access.agents) {
