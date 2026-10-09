@@ -15,7 +15,7 @@ import { AvatarStoreUnavailableError, type AvatarOwnerType } from './store';
  *     guardar otro avatar cambia la URL y se pide el nuevo.
  */
 export function svgResponse(configJson: string, title: string, version: number, owner: AvatarOwnerType): NextResponse {
-  // Personas: solo Lorelei (v3). Asistentes: Lorelei (v3) o figura (v4).
+  // Personas: solo Lorelei (v3). Asistentes: Lorelei (v3, con cabezas-figura; un v4 heredado se convierte).
   let svg: string | null = null;
   if (owner === 'agent') {
     const config = parseAgentAvatarConfig(configJson);

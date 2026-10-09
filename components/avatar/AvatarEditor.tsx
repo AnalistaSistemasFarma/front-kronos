@@ -8,6 +8,7 @@ import {
   categoriasEditor,
   composeAvatarSvg,
   conValor,
+  esCabezaFigura,
   etiquetaOpcion,
   randomAvatarConfig,
   thumbDataUri,
@@ -23,8 +24,9 @@ import classes from './avatarEditor.module.css';
  * dibujo):
  *
  *   - lienzo al centro con el avatar y su fondo;
- *   - a un lado, un círculo por opción de Lorelei (cabello 48, cabeza 4, ojos
- *     24, cejas 13, boca 27 —asistentes: solo sonrisas—, nariz 6, gafas,
+ *   - a un lado, un círculo por opción de Lorelei (cabello 48, cabeza 4 —los
+ *     asistentes, además, las cabezas-figura de cabezas.ts—, ojos 24, cejas
+ *     13, boca 27 —asistentes: solo sonrisas—, nariz 6, gafas,
  *     aretes, barba, pecas, flores, colores y voltear) con su miniatura y la
  *     flecha ↕; al tocarlo se abre la cuadrícula de opciones (8 por página);
  *   - al otro lado, "Aleatorio" y "Descargar" (SVG o PNG).
@@ -53,7 +55,9 @@ export default function AvatarEditor({ config, onChange, owner = 'user', semilla
   const [pagina, setPagina] = useState(1);
   const [descarga, setDescarga] = useState(false);
 
-  const categorias = useMemo(() => categoriasEditor(owner), [owner]);
+  // Con una cabeza-figura (solo asistentes), el cabello ofrece además "Ninguno".
+  const conFigura = owner === 'agent' && esCabezaFigura(config.head);
+  const categorias = useMemo(() => categoriasEditor(owner, conFigura), [owner, conFigura]);
   const vista = useMemo(() => avatarDataUri(config), [config]);
 
   const mitad = Math.ceil(categorias.length / 2);
@@ -71,13 +75,16 @@ export default function AvatarEditor({ config, onChange, owner = 'user', semilla
   };
 
   // Aleatorio: partes nuevas (azar de DiceBear) conservando los colores elegidos.
-  // En los asistentes la semilla guardada sigue siendo su nombre.
+  // En los asistentes la semilla guardada sigue siendo su nombre y, si tienen
+  // una cabeza-figura, se conserva (con su regla de pelo).
   const aleatorio = () => {
-    const nuevo = randomAvatarConfig(
+    let nuevo = randomAvatarConfig(
       { hairColor: config.hairColor, skinColor: config.skinColor, backgroundColor: config.backgroundColor },
       owner
     );
-    onChange(semillaFija ? { ...nuevo, seed: semillaFija.slice(0, 64) } : nuevo);
+    if (semillaFija) nuevo = { ...nuevo, seed: semillaFija.slice(0, 64) };
+    if (conFigura) nuevo = conValor(nuevo, 'head', config.head);
+    onChange(nuevo);
   };
 
   const descargar = async (formato: 'SVG' | 'PNG') => {
