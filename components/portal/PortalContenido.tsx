@@ -23,7 +23,8 @@ const ID_SECCION_ANUNCIOS = 'portal-th-anuncios';
 const ID_SECCION_POLITICAS = 'portal-th-politicas';
 /** Acceso a FORMACIÓN. Desde 2026-09-30 (pedido de Cristian) Formación
  *  tiene su propia página (`/portal/formacion`) que se abre en una pestaña
- *  nueva; aquí solo queda este acceso. */
+ *  nueva; aquí solo queda este acceso. Desde el hub abre
+ *  `/process/portal-th/formacion`, dentro del layout de SynerLink. */
 const ID_SECCION_FORMACION = 'portal-th-formacion';
 /** No es una sección con scroll: es un botón del panel que abre su propia
  *  ventana de vista previa (ver `irASeccion`), igual que un documento. */
