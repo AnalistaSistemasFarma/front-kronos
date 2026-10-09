@@ -14,6 +14,7 @@ import {
   Drawer,
   Group,
   Indicator,
+  Menu,
   ScrollArea,
   Text,
   TextInput,
@@ -23,10 +24,14 @@ import {
 import {
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
+  IconMessageCircle,
   IconMessages,
   IconPin,
   IconPinFilled,
+  IconPlus,
   IconSearch,
+  IconSend,
+  IconUsersGroup,
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
 import AgentChatPanel from './AgentChatPanel';
@@ -40,8 +45,11 @@ import {
   type ChatStatusDto,
 } from '../../lib/chat/client';
 import {
+  CHAT_RAIL_CREATE_EVENT,
   CHAT_RAIL_OPEN_EVENT,
   agentKey,
+  chatCreateHref,
+  chatCreateOptions,
   buildRailItems,
   buildRailSections,
   conversationKey,
@@ -49,6 +57,8 @@ import {
   railItemHref,
   railOpenDetail,
   totalUnread,
+  type ChatCreateDetail,
+  type ChatCreateKind,
   type ChatRailItem,
   type ChatRailSection,
 } from '../../lib/chat/rail';
@@ -112,6 +122,72 @@ function claveActivaDeRuta(pathname: string, items: ChatRailItem[]): string | nu
     return item?.key ?? null;
   }
   return null;
+}
+
+/* ─────────────────────────── Botón "Nuevo" ─────────────────────────── */
+
+const OPCIONES_NUEVO: Record<ChatCreateKind, { texto: string; icono: typeof IconPlus }> = {
+  persona: { texto: 'Chat con una persona', icono: IconMessageCircle },
+  grupo: { texto: 'Grupo', icono: IconUsersGroup },
+  masivo: { texto: 'Mensaje a varios asistentes', icono: IconSend },
+};
+
+/**
+ * El "+" de la cabecera de la barra (pedido de Nicolás, 2026-10-06): un menú
+ * con todo lo que la persona puede crear. Cada opción abre el cuadro que YA
+ * existe en la página del chat; aquí no se duplica nada.
+ *
+ * En el celular el menú no atrapa el foco ni lo devuelve al cerrar (igual que
+ * el clip del compositor): mover el foco por programa en pantallas táctiles
+ * desplaza la página y cierra el menú solo.
+ */
+function MenuNuevo({
+  opciones,
+  tactil,
+  posicion,
+  onElegir,
+}: {
+  opciones: ChatCreateKind[];
+  tactil: boolean;
+  posicion: 'right-start' | 'bottom-end';
+  onElegir: (tipo: ChatCreateKind) => void;
+}) {
+  if (opciones.length === 0) return null;
+  return (
+    <Menu
+      position={posicion}
+      withArrow
+      shadow='md'
+      width={240}
+      trapFocus={!tactil}
+      returnFocus={!tactil}
+      menuItemTabIndex={0}
+    >
+      <Menu.Target>
+        <Tooltip label='Nuevo' position='right' withArrow openDelay={200} disabled={tactil}>
+          <ActionIcon
+            variant='subtle'
+            color='gray'
+            aria-label='Nuevo chat, grupo o mensaje'
+            className='chat-rail__nuevo'
+          >
+            <IconPlus size={20} />
+          </ActionIcon>
+        </Tooltip>
+      </Menu.Target>
+      <Menu.Dropdown className='chat-surface'>
+        <Menu.Label>Crear</Menu.Label>
+        {opciones.map((tipo) => {
+          const { texto, icono: Icono } = OPCIONES_NUEVO[tipo];
+          return (
+            <Menu.Item key={tipo} leftSection={<Icono size={16} />} onClick={() => onElegir(tipo)}>
+              {texto}
+            </Menu.Item>
+          );
+        })}
+      </Menu.Dropdown>
+    </Menu>
+  );
 }
 
 /* ───────────────────────────── Fila ───────────────────────────── */
@@ -317,6 +393,7 @@ export default function ChatRail() {
   const [mounted, setMounted] = useState(false);
   const [expandida, setExpandida] = useState(false);
   const [drawerAbierto, setDrawerAbierto] = useState(false);
+  const tactil = Boolean(useMediaQuery('(pointer: coarse)'));
   const [busqueda, setBusqueda] = useState('');
   const [openAgentId, setOpenAgentId] = useState<number | null>(null);
   const buscadorRef = useRef<HTMLInputElement>(null);
@@ -454,6 +531,35 @@ export default function ChatRail() {
 
   const onTogglePin = pins.setPinned;
 
+  const opcionesNuevo = useMemo(
+    () =>
+      chatCreateOptions({
+        canMessagePeople: overview.canMessagePeople,
+        canCreateGroups: overview.canCreateGroups,
+        canBroadcast: overview.canBroadcast,
+        totalAgents: overview.agents.length,
+      }),
+    [overview.canMessagePeople, overview.canCreateGroups, overview.canBroadcast, overview.agents.length]
+  );
+
+  // Igual que abrir un chat: en la página del chat se le pide que abra su
+  // cuadro sin navegar; desde otra pantalla se va a ella con `?nuevo=`.
+  const onNuevo = useCallback(
+    (tipo: ChatCreateKind) => {
+      setDrawerAbierto(false);
+      setOpenAgentId(null);
+      if (pathnameRef.current.startsWith('/process/chat')) {
+        const evento = new CustomEvent<ChatCreateDetail>(CHAT_RAIL_CREATE_EVENT, {
+          detail: { tipo },
+          cancelable: true,
+        });
+        if (!window.dispatchEvent(evento)) return;
+      }
+      router.push(chatCreateHref(tipo));
+    },
+    [router]
+  );
+
   if (!visible || !hayChats) return null;
 
   const avisoError = pins.error ? (
@@ -558,9 +664,10 @@ export default function ChatRail() {
           closeButtonProps={{ 'aria-label': 'Cerrar chats' }}
           classNames={{ content: 'chat-rail chat-rail--drawer', header: 'chat-rail__drawer-cabecera' }}
         >
-          <Box px='sm' pb='xs'>
-            {buscador}
-          </Box>
+          <Group px='sm' pb='xs' gap='xs' wrap='nowrap'>
+            <Box style={{ flex: 1, minWidth: 0 }}>{buscador}</Box>
+            <MenuNuevo opciones={opcionesNuevo} tactil={tactil} posicion='bottom-end' onElegir={onNuevo} />
+          </Group>
           {avisoError}
           <nav aria-label='Chats' className='chat-rail__nav'>
             {lista(true)}
@@ -586,6 +693,9 @@ export default function ChatRail() {
           <Text size='sm' fw={700} className='chat-rail__nombre'>
             Chats
           </Text>
+        )}
+        {expandida && (
+          <MenuNuevo opciones={opcionesNuevo} tactil={tactil} posicion='right-start' onElegir={onNuevo} />
         )}
         <Tooltip
           label={expandida ? 'Contraer' : 'Expandir'}
@@ -625,6 +735,12 @@ export default function ChatRail() {
               <IconSearch size={18} />
             </ActionIcon>
           </Tooltip>
+        </div>
+      )}
+
+      {!expandida && opcionesNuevo.length > 0 && (
+        <div className='chat-rail__cabecera chat-rail__cabecera--buscar'>
+          <MenuNuevo opciones={opcionesNuevo} tactil={tactil} posicion='right-start' onElegir={onNuevo} />
         </div>
       )}
 

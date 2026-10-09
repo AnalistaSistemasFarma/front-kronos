@@ -1336,6 +1336,8 @@ body.chat-inmersivo.con-chat-rail .chat-escritorio {
 
 .chat-rail__nombre {
   padding-left: 4px;
+  /* Empuja a la derecha el "+" (Nuevo) y el botón de contraer. */
+  margin-right: auto;
 }
 
 .chat-rail__scroll {
