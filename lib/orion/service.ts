@@ -2549,7 +2549,6 @@ export async function finalizeSignerTurn(
             jobTitle: identity.jobTitle,
           }
         : {}),
-      companySlug,
     };
 
     let accept = await acceptOrionSignerTurn(
