@@ -1,8 +1,15 @@
 import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '../../auth/[...nextauth]/route';
 import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
 
 export async function GET(req) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
 

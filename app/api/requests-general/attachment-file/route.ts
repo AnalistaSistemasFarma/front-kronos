@@ -1,3 +1,4 @@
+import { oneDriveRoot } from '@/lib/onedrive/root';
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
@@ -101,7 +102,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'No se pudo obtener token de OneDrive' }, { status: 502 });
     }
 
-    const folderSegments = ['SAPSEND', 'TEC', storagePath, `${entityType}-${requestId}`];
+    const folderSegments = [oneDriveRoot(), 'TEC', storagePath, `${entityType}-${requestId}`];
     const meta = await getOneDriveItemMeta(token, fileId);
     if (!meta) {
       return NextResponse.json({ error: 'Documento no encontrado' }, { status: 404 });

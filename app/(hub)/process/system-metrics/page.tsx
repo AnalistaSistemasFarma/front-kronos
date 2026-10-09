@@ -50,6 +50,8 @@ import { SignalTile } from '../../../../components/system-metrics/SignalTile';
 import { StatusHero, ToneChip } from '../../../../components/system-metrics/StatusHero';
 import { SystemMap, type MapData } from '../../../../components/system-metrics/SystemMap';
 import { UserBehavior } from '../../../../components/system-metrics/UserBehavior';
+import { AlertSubscriptionSwitch } from '../../../../components/system-metrics/AlertSubscriptionSwitch';
+import { MonitorBoard } from '../../../../components/system-metrics/MonitorBoard';
 import { UserConsumption } from '../../../../components/system-metrics/UserConsumption';
 import type { StatusTone } from '../../../../components/system-metrics/colors';
 import {
@@ -721,7 +723,7 @@ export default function SystemMetricsPage() {
               <h2 id="sm-alerts" className={styles.sectionTitle}>
                 Alertas tempranas
               </h2>
-              <span className={styles.sectionHint}>Llegan por la campana y push a quienes tienen este módulo</span>
+              <AlertSubscriptionSwitch />
             </div>
             <EarlyWarnings
               alerts={metrics.alerts ?? []}
@@ -831,13 +833,16 @@ export default function SystemMetricsPage() {
             </div>
           )}
           {overview && (
-            <div className={styles.card}>
-              <p className={styles.cardHint} style={{ marginTop: 0 }}>
+            <>
+              <p className={styles.cardHint} style={{ margin: '0 4px 10px' }}>
                 Personas → aplicaciones → máquinas desde donde se conectan → SQL Server. Cada Kronos muestra el estado de
                 su propia base; el nodo SQL Server, el del servidor completo (CPU, memoria y discos).
               </p>
-              <OverviewMap data={overview} />
-            </div>
+              {/* Cada mapa en su propio tablero: se arrastra, se acerca y se puede ampliar. */}
+              <MonitorBoard>
+                <OverviewMap data={overview} />
+              </MonitorBoard>
+            </>
           )}
         </section>
 
@@ -850,17 +855,17 @@ export default function SystemMetricsPage() {
               {dbLive?.databaseName ? `${dbLive.databaseName} · ` : ''}toque un servicio externo para ver su historia
             </span>
           </div>
-          <div className={styles.card}>
-            <p className={styles.cardHint} style={{ marginTop: 0 }}>
-              Personas → procesos de Kronos → su base de datos y servicios externos, y las otras aplicaciones que comparten el
-              mismo SQL Server. Es la misma tarjeta {dbLive?.databaseName ? `"${dbLive.databaseName}"` : 'de este Kronos'} de la
-              vista general, abierta en detalle.
-            </p>
+          <p className={styles.cardHint} style={{ margin: '0 4px 10px' }}>
+            Personas → procesos de Kronos → su base de datos y servicios externos, y las otras aplicaciones que comparten el
+            mismo SQL Server. Es la misma tarjeta {dbLive?.databaseName ? `"${dbLive.databaseName}"` : 'de este Kronos'} de la
+            vista general, abierta en detalle.
+          </p>
+          <MonitorBoard>
             <SystemMap
               data={mapData}
               onSelectExternal={(key, label) => setDetail({ kind: 'route', direction: 'out', key, title: label })}
             />
-          </div>
+          </MonitorBoard>
         </section>
         </Tabs.Panel>
 

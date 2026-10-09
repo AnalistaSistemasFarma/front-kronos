@@ -1,9 +1,7 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
-import axios from 'axios';
 import { useSession } from 'next-auth/react';
 import toast from 'react-hot-toast';
 import {
@@ -66,6 +64,7 @@ import {
 } from '../../../../../lib/help-desk/contactEmail';
 import { syncTicketContactEmailInSession } from '../../../../../lib/help-desk/ticketsBoardStorage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
+import TestAttachmentDeleteButton from '../../../../../components/attachments/TestAttachmentDeleteButton';
 
 interface Ticket {
   id_case: number;
@@ -205,7 +204,7 @@ function ViewTicketPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
-  const [folderContents, setFolderContents] = useState([]);
+  const [folderContents, setFolderContents] = useState<FolderFile[]>([]);
   const [newNote, setNewNote] = useState('');
   const [loadingNotes, setLoadingNotes] = useState(false);
   const [showResolution, setShowResolution] = useState(false);
@@ -378,15 +377,21 @@ function ViewTicketPage() {
     }
   }, [attachedFiles, ticket?.id_case]);
 
+  // Depende del id del caso, no del objeto `ticket`: cada edición hace setTicket({...ticket})
+  // y antes eso volvía a pedir categorías, departamentos, técnicos y notas.
+  const ticketCaseId = ticket?.id_case;
   useEffect(() => {
-    if (ticket) {
+    if (ticketCaseId) {
       fetchOptions();
-      if (canManageTickets) {
-        fetchSubprocessUsers();
-      }
       fetchNotes();
     }
-  }, [ticket, canManageTickets]);
+  }, [ticketCaseId]);
+
+  useEffect(() => {
+    if (ticketCaseId && canManageTickets) {
+      fetchSubprocessUsers();
+    }
+  }, [ticketCaseId, canManageTickets]);
 
   useEffect(() => {
     if (ticket?.id_category && !isEditing) {
@@ -593,56 +598,71 @@ function ViewTicketPage() {
     }
   };
 
-  async function GetToken() {
-    const token = await getMicrosoftToken();
+  /**
+   * Archivos recién subidos (id → archivo y momento de subida) que el listado de OneDrive aún
+   * puede no devolver: se muestran igual durante 2 minutos para que no "desaparezcan".
+   */
+  const recentUploadsRef = useRef(new Map<string, { file: FolderFile; at: number }>());
 
-    try {
-      const response = await axios.get(
-        `https://graph.microsoft.com/v1.0/drive/special/documents/children`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      const data = response.data;
-      console.log(data);
-    } catch (error) {
-      console.log(error);
+  const withRecentUploads = (listed: FolderFile[]): FolderFile[] => {
+    const listedIds = new Set(listed.map((f) => String(f.id)));
+    const now = Date.now();
+    const extras: FolderFile[] = [];
+    for (const [id, entry] of recentUploadsRef.current) {
+      if (listedIds.has(id) || now - entry.at > 120_000) recentUploadsRef.current.delete(id);
+      else extras.push(entry.file);
     }
-  }
+    return [...listed, ...extras];
+  };
+
+  const handleUploadComplete = (uploaded: UploadedFile) => {
+    const item = uploaded.graphItem;
+    if (item?.id) {
+      const file: FolderFile = {
+        id: item.id,
+        name: item.name || uploaded.file.name,
+        size: item.size ?? uploaded.file.size,
+        lastModifiedDateTime: item.lastModifiedDateTime || new Date().toISOString(),
+        webUrl: item.webUrl,
+        ...(item['@microsoft.graph.downloadUrl']
+          ? { '@microsoft.graph.downloadUrl': item['@microsoft.graph.downloadUrl'] }
+          : {}),
+      };
+      recentUploadsRef.current.set(String(file.id), { file, at: Date.now() });
+      setFolderContents((prev: FolderFile[]) =>
+        prev.some((f) => String(f.id) === String(file.id)) ? prev : [...prev, file]
+      );
+    }
+    // Confirmar con OneDrive cuando ya haya indexado el archivo.
+    window.setTimeout(() => void fetchFolderContents(), 1500);
+    window.setTimeout(() => void fetchFolderContents(), 5000);
+  };
+
+  // Botón de pruebas (solo testing/local): el archivo ya se borró en OneDrive, quitarlo de la lista.
+  const handleTestAttachmentDeleted = (fileId: string) => {
+    recentUploadsRef.current.delete(String(fileId));
+    setFolderContents((prev) => prev.filter((f) => String(f.id) !== String(fileId)));
+  };
 
   const fetchFolderContents = async () => {
     if (!ticket?.id_case) return;
 
-    const folderName = `Ticket-${ticket.id_case}`;
     try {
-      const token = await getMicrosoftToken();
-      if (!token) {
-        throw new Error('No se pudo obtener el token de acceso.');
+      // Lista el servidor (Ticket-<id> en MA): el token de Graph no sale del servidor.
+      const response = await fetch(
+        `/api/requests-general/list-attachments?requestId=${encodeURIComponent(String(ticket.id_case))}&storagePath=MA&entityType=Ticket`
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        files?: FolderFile[];
+      };
+      if (!response.ok) {
+        throw new Error(data.error || `Error listando adjuntos (HTTP ${response.status})`);
       }
-
-      const response = await axios.get(
-        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}:/children`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      const files = response.data.value.filter(
-        (item: Record<string, unknown>) => 'file' in item && !!item.file
-      );
-      setFolderContents(files);
+      setFolderContents(withRecentUploads(Array.isArray(data.files) ? data.files : []));
     } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        setFolderContents([]);
-        return;
-      }
       console.error('Error al listar los archivos de la carpeta:', error);
-      setFolderContents([]);
+      setFolderContents(withRecentUploads([]));
     }
   };
 
@@ -1708,6 +1728,14 @@ function ViewTicketPage() {
                       >
                         <IconUpload size={16} />
                       </ActionIcon>
+                      <TestAttachmentDeleteButton
+                        requestId={ticket.id_case}
+                        fileId={String(file.id)}
+                        fileName={file.name}
+                        storagePath='MA'
+                        entityType='Ticket'
+                        onDeleted={handleTestAttachmentDeleted}
+                      />
                     </Group>
                   </Flex>
                 </Card>
@@ -1718,6 +1746,7 @@ function ViewTicketPage() {
           <FileUpload
             ticketId={ticket.id_case}
             onFilesChange={setAttachedFiles}
+            onUploadComplete={handleUploadComplete}
             disabled={!canManageTickets || isTicketResolved()}
           />
         </Card>

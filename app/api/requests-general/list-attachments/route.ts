@@ -1,8 +1,12 @@
+import { oneDriveRoot } from '@/lib/onedrive/root';
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { useGetMicrosoftToken as getMicrosoftToken } from '@/components/microsoft-365/useGetMicrosoftToken';
 import { listOneDriveFolderFiles } from '@/lib/onedrive/graphFolderUpload';
+
+const STORAGE_PATHS = new Set(['SG', 'MA']);
+const ENTITY_TYPES = new Set(['Request', 'Ticket']);
 
 /**
  * Lista adjuntos de una solicitud en OneDrive (mismo token/ruta que upload).
@@ -24,6 +28,10 @@ export async function GET(req: Request) {
     if (!Number.isInteger(requestId) || requestId <= 0) {
       return NextResponse.json({ error: 'requestId inválido' }, { status: 400 });
     }
+    // Solo las carpetas de adjuntos de SynerLink (no cualquier ruta de OneDrive).
+    if (!STORAGE_PATHS.has(storagePath) || !ENTITY_TYPES.has(entityType)) {
+      return NextResponse.json({ error: 'Carpeta no válida' }, { status: 400 });
+    }
 
     const token = await getMicrosoftToken();
     if (!token) {
@@ -32,7 +40,7 @@ export async function GET(req: Request) {
 
     const folderName = `${entityType}-${requestId}`;
     const files = await listOneDriveFolderFiles(token, [
-      'SAPSEND',
+      oneDriveRoot(),
       'TEC',
       storagePath,
       folderName,
@@ -45,7 +53,7 @@ export async function GET(req: Request) {
     return NextResponse.json(
       {
         ok: true,
-        folder: `SAPSEND/TEC/${storagePath}/${folderName}`,
+        folder: `${oneDriveRoot()}/TEC/${storagePath}/${folderName}`,
         files,
       },
       {

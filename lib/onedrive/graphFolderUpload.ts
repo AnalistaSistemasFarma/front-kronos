@@ -116,17 +116,25 @@ export async function ensureOneDriveFolderPath(
  * Sube el contenido de un archivo a una carpeta YA existente (por id).
  * `content` puede ser un Blob/File (navegador) o un Buffer/Uint8Array
  * (servidor, p.ej. leído de un FormData de una API route).
+ *
+ * `conflictBehavior` (opcional): qué hace OneDrive si ya existe un archivo con ese nombre.
+ * Sin indicarlo se usa el de Graph (reemplazar). Con 'rename' OneDrive le pone otro nombre
+ * ("foto 1.png"); evita el 409 cuando dos subidas simultáneas eligen el mismo nombre.
  */
 export async function uploadFileToOneDriveFolder(
   token: string,
   folderId: string,
   fileName: string,
   content: BodyInit,
-  contentType?: string
+  contentType?: string,
+  conflictBehavior?: 'rename' | 'replace' | 'fail'
 ): Promise<GraphItemResponse> {
   const graph = graphBase();
+  const query = conflictBehavior
+    ? `?@microsoft.graph.conflictBehavior=${conflictBehavior}`
+    : '';
 
-  const response = await fetch(`${graph}items/${folderId}:/${encodeURIComponent(fileName)}:/content`, {
+  const response = await fetch(`${graph}items/${folderId}:/${encodeURIComponent(fileName)}:/content${query}`, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${token}`,

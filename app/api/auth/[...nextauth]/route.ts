@@ -15,6 +15,41 @@ const azureConfigured =
   Boolean(process.env.AZURE_AD_TENANT_ID) &&
   process.env.AZURE_AD_TENANT_ID !== 'your-tenant-id';
 
+type SessionUserRow = {
+  id: string;
+  role: string;
+  image: string | null;
+  themePalette: string | null;
+  colorScheme: string | null;
+  uiFont: string | null;
+  nit: string | null;
+};
+
+/**
+ * El callback jwt corre en CADA getServerSession (cada API) y antes consultaba [user] siempre.
+ * Se guarda la fila por correo unos segundos: rol, tema y foto siguen al día (máx. 60 s de
+ * retraso, o inmediato con update()) y la BD deja de recibir una consulta por llamada.
+ */
+const SESSION_USER_TTL_MS = 60_000;
+const sessionUserCache: Map<string, { row: SessionUserRow | undefined; at: number }> =
+  ((globalThis as Record<string, unknown>).__kronosSessionUserCache as never) ??
+  ((globalThis as Record<string, unknown>).__kronosSessionUserCache = new Map());
+
+async function loadSessionUser(email: string, fresh: boolean): Promise<SessionUserRow | undefined> {
+  const key = email.trim().toLowerCase();
+  const cached = sessionUserCache.get(key);
+  if (!fresh && cached && Date.now() - cached.at < SESSION_USER_TTL_MS) return cached.row;
+
+  const rows = await prisma.$queryRaw<SessionUserRow[]>`
+    SELECT TOP 1 id, role, image, themePalette, colorScheme, uiFont, nit
+    FROM [user]
+    WHERE LOWER(LTRIM(RTRIM(email))) = LOWER(LTRIM(RTRIM(${email})))
+  `;
+  const row = rows[0];
+  sessionUserCache.set(key, { row, at: Date.now() });
+  return row;
+}
+
 export const authOptions: AuthOptions = {
   adapter: PrismaAdapter(prisma),
   secret: process.env.NEXTAUTH_SECRET,
@@ -119,27 +154,15 @@ export const authOptions: AuthOptions = {
     strategy: 'jwt' as const,
   },
   callbacks: {
-    async jwt({ token, user }: { token: JWT; user?: User }) {
+    async jwt({ token, user, trigger }: { token: JWT; user?: User; trigger?: string }) {
       const email = (user?.email ?? token.email) as string | undefined;
 
       if (email) {
         try {
-          const rows = await prisma.$queryRaw<
-            Array<{
-              id: string;
-              role: string;
-              image: string | null;
-              themePalette: string | null;
-              colorScheme: string | null;
-              uiFont: string | null;
-              nit: string | null;
-            }>
-          >`
-            SELECT TOP 1 id, role, image, themePalette, colorScheme, uiFont, nit
-            FROM [user]
-            WHERE LOWER(LTRIM(RTRIM(email))) = LOWER(LTRIM(RTRIM(${email})))
-          `;
-          const dbUser = rows[0];
+          // Al iniciar sesión o con update() (cambio de perfil/tema) se lee siempre de la BD;
+          // en el resto de llamadas (cada getServerSession) se reutiliza la lectura reciente.
+          const fresh = Boolean(user) || trigger === 'update';
+          const dbUser = await loadSessionUser(email, fresh);
           token.email = email;
           // Id Kronos (cuid), no el sub de Azure/OIDC.
           if (dbUser?.id) {

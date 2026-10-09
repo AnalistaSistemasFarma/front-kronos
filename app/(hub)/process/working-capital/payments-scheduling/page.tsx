@@ -59,7 +59,6 @@ import { saveAs } from 'file-saver';
 import { PDFDocument } from 'pdf-lib';
 import ExcelJS from 'exceljs';
 import { addDataSheet, downloadWorkbook } from '../../../../../lib/dashboard/excel/excelHelpers';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 import { formatEstimatedPaymentDateShort } from '../../../../../lib/treasury/estimatedPaymentDate';
 
 function parseOrionFileIdFromAuthResolution(resolution?: string | null): string | null {
@@ -601,44 +600,31 @@ function PaymentSchedulingBoard() {
     };
 
     const downloadConsolidatedPdf = async (rows: PaymentSchedulingTask[]): Promise<number> => {
-        const token = await getMicrosoftToken();
-        if (!token) throw new Error('No se pudo obtener el token de acceso a OneDrive.');
-
-        const base = process.env.MICROSOFTGRAPHUSERROUTE;
         const merged = await PDFDocument.create();
         let mergedCount = 0;
 
         for (const r of rows) {
-            const folder = `Request-${r.id_solicitud}`;
-            let children: Array<{
-                id: string;
-                name?: string;
-                file?: unknown;
-                '@microsoft.graph.downloadUrl'?: string;
-            }> = [];
-            try {
-                const res = await axios.get(
-                    `${base}root:/SAPSEND/TEC/SG/${folder}:/children`,
-                    { headers: { Authorization: `Bearer ${token}` } }
-                );
-                children = res.data?.value ?? [];
-            } catch (err) {
-                if (axios.isAxiosError(err) && err.response?.status === 404) continue;
-                throw err;
-            }
-
-            const pdfs = children.filter(
-                (it) => it.file && /\.pdf$/i.test(String(it.name || ''))
+            // Lista y descarga por el servidor: el token de Graph no sale del servidor.
+            const listRes = await fetch(
+                `/api/requests-general/list-attachments?requestId=${encodeURIComponent(String(r.id_solicitud))}&storagePath=SG&entityType=Request`
             );
+            const listData = (await listRes.json().catch(() => ({}))) as {
+                error?: string;
+                files?: Array<{ id: string; name?: string; '@microsoft.graph.downloadUrl'?: string }>;
+            };
+            if (!listRes.ok) {
+                throw new Error(listData.error || `Error listando adjuntos (HTTP ${listRes.status})`);
+            }
+            const children = Array.isArray(listData.files) ? listData.files : [];
+
+            const pdfs = children.filter((it) => /\.pdf$/i.test(String(it.name || '')));
 
             for (const pdf of pdfs) {
-                const downloadUrl = pdf['@microsoft.graph.downloadUrl'];
-                const bytesRes = downloadUrl
-                    ? await axios.get(downloadUrl, { responseType: 'arraybuffer' })
-                    : await axios.get(`${base}items/${pdf.id}/content`, {
-                          responseType: 'arraybuffer',
-                          headers: { Authorization: `Bearer ${token}` },
-                      });
+                // El enlace temporal de descarga de Graph es directo y no lleva el token.
+                const downloadUrl =
+                    pdf['@microsoft.graph.downloadUrl'] ||
+                    `/api/requests-general/attachment-file?requestId=${encodeURIComponent(String(r.id_solicitud))}&fileId=${encodeURIComponent(pdf.id)}&storagePath=SG&entityType=Request&download=1`;
+                const bytesRes = await axios.get(downloadUrl, { responseType: 'arraybuffer' });
                 try {
                     const src = await PDFDocument.load(bytesRes.data, { ignoreEncryption: true });
                     const pages = await merged.copyPages(src, src.getPageIndices());

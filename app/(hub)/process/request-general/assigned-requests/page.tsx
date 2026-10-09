@@ -1,11 +1,10 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 import axios from 'axios';
-import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
+import toast from 'react-hot-toast';
 import { useSession } from 'next-auth/react';
 import {
   Title,
@@ -176,17 +175,15 @@ function RequestBoard() {
     process: '',
   });
   const [currentPage, setCurrentPage] = useState(1);
+  // Paginación en el servidor: `tickets` es solo la página actual; total y contadores vienen
+  // de SQL sobre el conjunto filtrado (antes se descargaba todo al navegador).
+  const [totalTickets, setTotalTickets] = useState(0);
+  const [statusCounts, setStatusCounts] = useState({ open: 0, resolved: 0 });
+  // Filtros con los que se cargó la lista (para cambiar de página y exportar).
+  const appliedFiltersRef = useRef<typeof filters | null>(null);
 
-  // Paginación en cliente: al cambiar el conjunto de tickets (nuevo fetch / filtros) vuelve a página 1.
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [tickets]);
-
-  const totalPages = Math.max(1, Math.ceil(tickets.length / ITEMS_PER_PAGE));
-  const pageItems = tickets.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE
-  );
+  const totalPages = Math.max(1, Math.ceil(totalTickets / ITEMS_PER_PAGE));
+  const pageItems = tickets;
   const [filtersExpanded, setFiltersExpanded] = useState(false);
 
   useEffect(() => {
@@ -262,22 +259,33 @@ function RequestBoard() {
     await fetchTicketsWithUserId(userId, filters);
   };
 
-  const fetchTicketsWithUserId = async (userIdToUse: number, filtersToUse?: typeof filters) => {
+  // El usuario lo toma el servidor de la sesión; aquí solo van los filtros.
+  const buildTicketParams = (filtersToUse?: typeof filters) => {
+    const params = new URLSearchParams();
+    if (filtersToUse) {
+      if (filtersToUse.id) params.append('id', filtersToUse.id);
+      if (filtersToUse.status) params.append('status', filtersToUse.status);
+      if (filtersToUse.company) params.append('company', filtersToUse.company);
+      if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
+      if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
+      if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
+      if (filtersToUse.process) params.append('process', filtersToUse.process);
+    }
+    return params;
+  };
+
+  const fetchTicketsWithUserId = async (
+    _userIdToUse: number,
+    filtersToUse?: typeof filters,
+    page = 1
+  ) => {
     try {
       setLoading(true);
+      appliedFiltersRef.current = filtersToUse ?? null;
 
-      const params = new URLSearchParams();
-      params.append('idUser', userIdToUse.toString());
-
-      if (filtersToUse) {
-        if (filtersToUse.id) params.append('id', filtersToUse.id); 
-        if (filtersToUse.status) params.append('status', filtersToUse.status);
-        if (filtersToUse.company) params.append('company', filtersToUse.company);
-        if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
-        if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
-        if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
-        if (filtersToUse.process) params.append('process', filtersToUse.process);
-      }
+      const params = buildTicketParams(filtersToUse);
+      params.append('page', String(page));
+      params.append('pageSize', String(ITEMS_PER_PAGE));
 
       const url = `/api/requests-general/request-assigned?${params.toString()}`;
 
@@ -285,10 +293,20 @@ function RequestBoard() {
 
       if (!response.ok) throw new Error('Failed to fetch assigned tickets');
 
-      const data = await response.json();
-      console.log('fetchTicketsWithUserId: Tickets asignados recibidos:', data.length, 'tickets');
-      setTickets(data);
-      fetchTasksForTickets(data);
+      const data = (await response.json()) as {
+        rows: Ticket[];
+        total: number;
+        counts: { open: number; resolved: number };
+      };
+      const rows = Array.isArray(data.rows) ? data.rows : [];
+      setTickets(rows);
+      setTotalTickets(Number(data.total) || 0);
+      setStatusCounts({
+        open: Number(data.counts?.open) || 0,
+        resolved: Number(data.counts?.resolved) || 0,
+      });
+      setCurrentPage(page);
+      fetchTasksForTickets(rows);
     } catch (err) {
       console.error('Error fetching assigned tickets:', err);
       setError('Unable to load assigned tickets. Please try again.');
@@ -299,7 +317,15 @@ function RequestBoard() {
 
   const fetchTasksForTickets = async (ticketsToUse: Ticket[]) => {
     try {
-      const response = await fetch('/api/requests-general/activities-requets');
+      // Solo las tareas de las solicitudes visibles (antes: la tabla completa de tareas).
+      const ids = [...new Set(ticketsToUse.map((t) => t.id))];
+      if (ids.length === 0) {
+        setTasksByRequest({});
+        return;
+      }
+      const response = await fetch(
+        `/api/requests-general/activities-requets?ids=${ids.join(',')}`
+      );
       if (!response.ok) throw new Error('Failed to fetch request tasks');
 
       const data: RequestTask[] = await response.json();
@@ -546,6 +572,18 @@ function RequestBoard() {
   );
 
   async function exportToExcel() {
+    // La tabla solo tiene la página visible: la exportación pide la lista completa con los
+    // mismos filtros (la ruta sin `page` devuelve todo).
+    const params = buildTicketParams(appliedFiltersRef.current ?? filters);
+    const response = await fetch(`/api/requests-general/request-assigned?${params.toString()}`);
+    if (!response.ok) {
+      toast.error('No se pudo generar el informe');
+      return;
+    }
+    const allTickets = (await response.json()) as Ticket[];
+
+    // exceljs (pesado) solo se descarga al exportar.
+    const { default: ExcelJS } = await import('exceljs');
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Datos');
 
@@ -562,9 +600,8 @@ function RequestBoard() {
     
     worksheet.columns = columnMapOrdered;
 
-    tickets.forEach((row) => worksheet.addRow(row));
-
-    tickets.forEach(item => {
+    // Una fila por solicitud (antes se agregaba cada una dos veces).
+    allTickets.forEach(item => {
       const row: Record<TicketKeys, any> = {} as Record<TicketKeys, any>;
 
       columnMapOrdered.forEach(col => {
@@ -632,7 +669,7 @@ function RequestBoard() {
                       Total de Solicitudes
                     </Text>
                     <Text size='lg' fw={600}>
-                      {tickets.length}
+                      {totalTickets}
                     </Text>
                   </div>
                 </Group>
@@ -664,7 +701,7 @@ function RequestBoard() {
                       Pendiente
                     </Text>
                     <Text size='lg' fw={600}>
-                      {tickets.filter((t) => t.status?.toLowerCase() === 'abierto').length}
+                      {statusCounts.open}
                     </Text>
                   </div>
                 </Group>
@@ -696,7 +733,7 @@ function RequestBoard() {
                       Completadas
                     </Text>
                     <Text size='lg' fw={600}>
-                      {tickets.filter((t) => t.status?.toLowerCase() === 'resuelto').length}
+                      {statusCounts.resolved}
                     </Text>
                   </div>
                 </Group>
@@ -723,7 +760,7 @@ function RequestBoard() {
                       />
                       <div>
                         <Text size='xs' c='dimmed'>
-                          Avance de tareas
+                          Avance de tareas{totalPages > 1 ? ' (esta página)' : ''}
                         </Text>
                         <Text size='lg' fw={600}>
                           {done}/{total}
@@ -1072,7 +1109,19 @@ function RequestBoard() {
 
           {totalPages > 1 && (
             <Group justify='center' mt='md'>
-              <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} />
+              <Pagination
+                total={totalPages}
+                value={currentPage}
+                onChange={(page) => {
+                  if (userId) {
+                    void fetchTicketsWithUserId(
+                      userId,
+                      appliedFiltersRef.current ?? filters,
+                      page
+                    );
+                  }
+                }}
+              />
             </Group>
           )}
         </Card>

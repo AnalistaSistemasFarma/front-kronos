@@ -50,6 +50,8 @@ type RowProps = OrionAttachmentSignActionsProps & {
   versionsSlot?: ReactNode;
   canDeleteAttachment?: boolean;
   onDeleteAttachment?: (fileId: string, fileName?: string | null) => void | Promise<void>;
+  /** Botón para borrar adjuntos de prueba (solo testing/local; lo arma la página). */
+  testDeleteSlot?: ReactNode;
   /** Llegó desde Autorizaciones a validar este documento: abre el modal de validación. */
   autoOpenReview?: boolean;
   /** PDF que salió de un Word en preparación: se muestra como sub-fila debajo de ese Word. */
@@ -124,6 +126,7 @@ export default function OrionAttachmentTableRow({
   versionsSlot,
   canDeleteAttachment = false,
   onDeleteAttachment,
+  testDeleteSlot,
   autoOpenReview = false,
   nestedUnderWord = false,
   ...props
@@ -451,6 +454,7 @@ export default function OrionAttachmentTableRow({
                 disabled={!downloadHref}
               />
               {deleteAction}
+              {testDeleteSlot}
             </Stack>
           </div>
         ) : !d.forSigning ? (
@@ -473,6 +477,7 @@ export default function OrionAttachmentTableRow({
                 disabled={!downloadHref}
               />
               {deleteAction}
+              {testDeleteSlot}
             </Stack>
           </div>
         ) : (
@@ -529,6 +534,7 @@ export default function OrionAttachmentTableRow({
               ) : null}
 
               {deleteAction}
+              {testDeleteSlot}
 
               {canAccessOriginalFile && originalFileHref ? (
                 <ActionLink
