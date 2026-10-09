@@ -179,6 +179,7 @@ export async function POST(req: Request) {
           signerEmails,
           currentSignerEmail: pending?.email ?? null,
           fileId,
+          fileName: nextState.fileName ?? current.fileName ?? null,
         })
       );
       fireAndForgetNotification(

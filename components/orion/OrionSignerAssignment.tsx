@@ -19,7 +19,12 @@ import {
 import { IconArrowDown, IconArrowUp, IconCheck, IconClock, IconX } from '@tabler/icons-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { OrionParticipant, OrionParticipantType } from '../../lib/orion/participants';
-import { parseUserOptionLabel, type OrionUserOption } from '../../lib/orion/participants';
+import {
+  parseUserOptionLabel,
+  resolveSignatureMarkId,
+  type OrionUserOption,
+} from '../../lib/orion/participants';
+import toast from 'react-hot-toast';
 
 type Props = {
   participants: OrionParticipant[];
@@ -45,6 +50,7 @@ type Props = {
   onReorder?: (order: number, direction: 'up' | 'down') => void;
   onToggleNotifyByEmail?: (order: number, value: boolean) => void;
   onToggleRequireFingerprint?: (order: number, value: boolean) => void;
+  onSignatureMarkIdChange?: (order: number, markId: number) => void;
   readOnly?: boolean;
 };
 
@@ -208,6 +214,7 @@ export default function OrionSignerAssignment({
   onReorder,
   onToggleNotifyByEmail,
   onToggleRequireFingerprint,
+  onSignatureMarkIdChange,
   readOnly = false,
 }: Props) {
   const [slotSource, setSlotSource] = useState<Record<number, 'internal' | 'external'>>({});
@@ -295,7 +302,7 @@ export default function OrionSignerAssignment({
                 <Group align='flex-start' wrap='nowrap' gap='sm'>
                   <ThemeIcon size={36} radius='xl' variant='light' color='blue' style={{ flexShrink: 0 }}>
                     <Text size='sm' fw={700}>
-                      {person.order}
+                      {resolveSignatureMarkId(person)}
                     </Text>
                   </ThemeIcon>
 

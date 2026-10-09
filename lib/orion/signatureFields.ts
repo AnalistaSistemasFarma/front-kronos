@@ -59,14 +59,14 @@ export type OrionSignatureFieldPayload = {
   kind?: OrionFieldKind;
 };
 
-export const DEFAULT_FIELD_WIDTH = 36;
-export const DEFAULT_FIELD_HEIGHT = 16;
+export const DEFAULT_FIELD_WIDTH = 24;
+export const DEFAULT_FIELD_HEIGHT = 12;
 export const DEFAULT_FIELD_X = 8;
 export const DEFAULT_FIELD_Y = 78;
 
-export const MIN_FIELD_WIDTH = 22;
+export const MIN_FIELD_WIDTH = 14;
 export const MAX_FIELD_WIDTH = 55;
-export const MIN_FIELD_HEIGHT = 12;
+export const MIN_FIELD_HEIGHT = 8;
 export const MAX_FIELD_HEIGHT = 36;
 
 /** Tamaño por defecto para firmas de validación (Elaboró / Revisó). */

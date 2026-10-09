@@ -3,22 +3,29 @@
 import { useRef, useState } from 'react';
 import { Alert, Button, FileButton, Group, Image, Stack, Text } from '@mantine/core';
 import { IconFingerprint, IconUpload } from '@tabler/icons-react';
-import { BIOMETRIC_CONSENT_COPY } from '../../lib/orion/signingLegalConsent';
 
 type Props = {
   value?: string | null;
   onChange: (dataUrl: string | null) => void;
   disabled?: boolean;
+  /** Ya hay huella reutilizada (local / sesión); no forzar nueva carga. */
+  fromSaved?: boolean;
 };
 
 /**
  * Captura de huella para SynerLink → Orion.
- * Orion estampa la imagen en cajas kind=fingerprint; aquí solo se aporta el data URL.
+ * Si ya hay imagen guardada, basta con aceptarla (o cambiarla).
  * La autorización biométrica (Ley 1581) se exige en SignerIdentityForm.
  */
-export default function FingerprintCapture({ value, onChange, disabled = false }: Props) {
+export default function FingerprintCapture({
+  value,
+  onChange,
+  disabled = false,
+  fromSaved = false,
+}: Props) {
   const [error, setError] = useState<string | null>(null);
   const resetRef = useRef<() => void>(null);
+  const hasImage = Boolean(value?.startsWith('data:image/'));
 
   const handleFile = (file: File | null) => {
     setError(null);
@@ -46,17 +53,23 @@ export default function FingerprintCapture({ value, onChange, disabled = false }
 
   return (
     <Stack gap='sm'>
-      <Alert color='orange' variant='light' title={BIOMETRIC_CONSENT_COPY.title}>
-        <Text size='xs'>{BIOMETRIC_CONSENT_COPY.body}</Text>
-      </Alert>
-      <Text size='sm' c='dimmed'>
-        Este documento exige huella dactilar. Suba una imagen clara del dedo (escáner o foto nítida).
-        Orion la colocará en la caja de huella del PDF.
-      </Text>
+      {hasImage && fromSaved ? (
+        <Alert color='teal' variant='light' title='Huella guardada'>
+          <Text size='xs'>
+            Ya tiene una huella registrada en este navegador. Acéptela para firmar este documento;
+            no es necesario volver a subirla. Puede cambiarla si lo desea.
+          </Text>
+        </Alert>
+      ) : (
+        <Text size='sm' c='dimmed'>
+          Este documento exige huella dactilar. Suba una imagen clara del dedo (escáner o foto
+          nítida). Se reutilizará en próximos documentos de este navegador.
+        </Text>
+      )}
 
-      {value?.startsWith('data:image/') ? (
+      {hasImage ? (
         <Image
-          src={value}
+          src={value!}
           alt='Vista previa de huella'
           mah={160}
           fit='contain'
@@ -100,11 +113,11 @@ export default function FingerprintCapture({ value, onChange, disabled = false }
               leftSection={<IconUpload size={16} />}
               disabled={disabled}
             >
-              {value ? 'Cambiar imagen' : 'Subir huella'}
+              {hasImage ? 'Cambiar imagen' : 'Subir huella'}
             </Button>
           )}
         </FileButton>
-        {value ? (
+        {hasImage ? (
           <Button
             variant='subtle'
             color='gray'
