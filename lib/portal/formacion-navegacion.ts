@@ -11,19 +11,17 @@
  * El origen viaja como `?desde=hub`. Solo se acepta ese valor exacto y las
  * dos rutas son FIJAS: el parámetro nunca se usa como URL, así que no hay
  * forma de convertir este enlace en un redireccionamiento abierto.
- *
- * Desde 2026-10-09 (lineamiento gráfico de SynerLink), quien entra por el hub
- * ya no va a `/portal/formacion` sino a `/process/portal-th/formacion`, que
- * vive DENTRO del layout del hub (header, barra lateral y menú). La página
- * abierta queda para la sesión por código. Un enlace viejo con `?desde=hub`
- * se redirige a la ruta del hub.
  */
 export type OrigenPortal = 'abierto' | 'hub';
 
 export const RUTA_FORMACION = '/portal/formacion';
+/**
+ * Formación DENTRO del hub (con el encabezado y el menú de SynerLink).
+ * Observación de Nicolás (2026-10-09): desde el módulo no debe salirse del hub.
+ */
+export const RUTA_FORMACION_HUB = '/process/portal-th/formacion';
 const RUTA_PORTAL_ABIERTO = '/portal';
 const RUTA_PORTAL_HUB = '/process/portal-th';
-export const RUTA_FORMACION_HUB = '/process/portal-th/formacion';
 
 /** La URL del acceso "Formación" según desde qué portal se abre. */
 export function urlFormacion(origen: OrigenPortal): string {

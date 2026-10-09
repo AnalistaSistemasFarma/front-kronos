@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import PortalFormacion from '../../../components/portal/PortalFormacion';
-import { origenDesdeParametro, RUTA_FORMACION_HUB, urlVolverAlPortal } from '../../../lib/portal/formacion-navegacion';
+import { RUTA_FORMACION_HUB, origenDesdeParametro, urlVolverAlPortal } from '../../../lib/portal/formacion-navegacion';
 
 /**
  * PORTAL DE TALENTO HUMANO — FORMACIÓN, en su propia página.
@@ -18,10 +18,6 @@ import { origenDesdeParametro, RUTA_FORMACION_HUB, urlVolverAlPortal } from '../
  * y la de SynerLink — las rutas `/api/portal/*` resuelven quién es (ver
  * `lib/portal/acceso.ts`). Vive fuera de `(hub)` por la misma razón que
  * `/portal`: adentro quedaría detrás del login de SynerLink.
- *
- * Quien viene del hub (`?desde=hub`, enlaces anteriores al 2026-10-09) se
- * manda a `/process/portal-th/formacion`, la misma Formación pero dentro del
- * layout de SynerLink (header, barra lateral y menú).
  */
 function PaginaFormacion() {
   const origen = origenDesdeParametro(useSearchParams().get('desde'));
@@ -29,11 +25,11 @@ function PaginaFormacion() {
   const [sinSesion, setSinSesion] = useState(false);
   const router = useRouter();
 
+  // Enlaces viejos (`?desde=hub`): quien viene del módulo del hub sigue en el
+  // hub, con el encabezado de SynerLink (Nicolás, 2026-10-09).
   useEffect(() => {
     if (origen === 'hub') router.replace(RUTA_FORMACION_HUB);
   }, [origen, router]);
-
-  if (origen === 'hub') return <p className='portal-th__estado'>Abriendo Formación en SynerLink…</p>;
 
   return (
     <div className='portal-th portal-th--formacion'>

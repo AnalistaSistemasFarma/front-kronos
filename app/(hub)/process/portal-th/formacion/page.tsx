@@ -2,23 +2,20 @@
 
 import { useState } from 'react';
 import PortalFormacion from '../../../../../components/portal/PortalFormacion';
-import { urlVolverAlPortal } from '../../../../../lib/portal/formacion-navegacion';
 
 /**
- * PORTAL DE TALENTO HUMANO — FORMACIÓN, como MÓDULO del hub.
+ * PORTAL DE TALENTO HUMANO — FORMACIÓN como parte del MÓDULO del hub.
  *
- * Lineamiento de SynerLink (Nicolás Rivera, 2026-10-09): toda pantalla que use
- * alguien con sesión de SynerLink va dentro del layout del hub —header, barra
- * lateral y menú—, para que no "parezca uno de nuestros módulos más". Antes,
- * el acceso "Formación" del módulo `/process/portal-th` abría
- * `/portal/formacion?desde=hub`, una página con barra propia y sin el header.
+ * Observación de Nicolás (2026-10-09): Formación abierta desde el módulo
+ * `/process/portal-th` caía en `/portal/formacion` (la página ABIERTA, fuera de
+ * `(hub)`), sin el encabezado ni el menú de SynerLink, y no parecía uno de
+ * nuestros módulos. Quien entra con su sesión de SynerLink ahora ve Formación
+ * aquí, dentro del layout del hub (Header + AppHubShell), con el mismo
+ * encabezado de módulo que el Portal de Talento Humano.
  *
- * El contenido es el MISMO componente (`PortalFormacion`) que usa la página
- * abierta `/portal/formacion`, que sigue existiendo para quien entra con el
- * código al correo (sin usuario de SynerLink) y por eso NO va detrás del login
- * del hub. Las rutas `/api/portal/*` no cambian: resuelven la sesión de
- * SynerLink y exigen el subproceso `/process/portal-th` (ver
- * `lib/portal/acceso.ts`).
+ * `/portal/formacion` sigue existiendo para quienes NO tienen usuario de
+ * SynerLink (sesión por código al correo). El contenido es el MISMO componente
+ * (`PortalFormacion`) en las dos, para que un arreglo no se quede a medias.
  */
 export default function FormacionModulo() {
   const [sinSesion, setSinSesion] = useState(false);
@@ -27,13 +24,14 @@ export default function FormacionModulo() {
     <div className='app-page-shell app-page-shell--fill min-h-screen'>
       <div className='portal-th portal-th--modulo'>
         <div className='portal-th__cuerpo portal-th__cuerpo--ancho'>
-          <a className='portal-th__volver portal-th__volver-portal' href={urlVolverAlPortal('hub')}>
-            ← Volver al Portal de Talento Humano
-          </a>
           <header className='portal-th__encabezado-modulo'>
             <h1>Formación</h1>
-            <p>Cursos, materiales y evaluaciones del Portal de Talento Humano.</p>
+            <p>Cursos, materiales, progreso y certificados del Portal de Talento Humano.</p>
           </header>
+
+          <a className='portal-th__volver portal-th__volver-portal' href='/process/portal-th'>
+            ← Volver al Portal de Talento Humano
+          </a>
 
           {sinSesion ? (
             <p className='portal-th__estado'>

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { origenDesdeParametro, RUTA_FORMACION_HUB, urlFormacion, urlVolverAlPortal } from '../formacion-navegacion';
+import { RUTA_FORMACION_HUB, origenDesdeParametro, urlFormacion, urlVolverAlPortal } from '../formacion-navegacion';
 
 describe('navegación de la página de Formación', () => {
-  it('el acceso del portal abierto lleva a /portal/formacion; el del hub, a la página dentro del hub', () => {
+  it('desde el portal abierto lleva a /portal/formacion; desde el hub, a Formación DENTRO del hub', () => {
     expect(urlFormacion('abierto')).toBe('/portal/formacion');
+    // Con el encabezado y el menú de SynerLink (Nicolás, 2026-10-09).
     expect(urlFormacion('hub')).toBe('/process/portal-th/formacion');
     expect(RUTA_FORMACION_HUB).toBe('/process/portal-th/formacion');
   });
