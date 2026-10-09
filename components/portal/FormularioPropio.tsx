@@ -23,28 +23,35 @@ import {
 import {
   IconAlertCircle,
   IconAlertTriangle,
+  IconChecklist,
   IconCircleCheck,
+  IconClipboardList,
   IconCode,
   IconDeviceFloppy,
   IconEye,
   IconFileImport,
   IconFileSpreadsheet,
   IconInfoCircle,
+  IconPencil,
   IconRotateClockwise,
   IconSearch,
   IconSend,
   IconShieldLock,
 } from '@tabler/icons-react';
 import { leerJson } from './PortalContenido';
+import { ConstructorFormulario } from './ConstructorFormulario';
 import {
   OPCIONES_SI_NO,
   MENSAJE_AUTORIZACION,
+  calificar,
+  esEvaluacion,
   textoDeRespuesta,
   validarPregunta,
   valoresIniciales,
   type DefinicionFormulario,
   type PreguntaFormulario,
   type Respuestas,
+  type TipoFormulario,
   type ValorRespuesta,
 } from '../../lib/portal/formulario';
 
@@ -100,7 +107,19 @@ interface DatosFormulario {
   formulario: { versionId: number; version: number; definicion: DefinicionFormulario };
   prellenado: { correo: string; nombre: string };
   enviadaEl: string | null;
+  /** Solo evaluaciones: intentos que ya hizo esta persona. */
+  intentos?: { usados: number; ultimo: { porcentaje: number; aprobado: boolean; enviadoEl: string } | null };
 }
+
+/** Resultado de una evaluación calificada por el servidor. */
+interface ResultadoNota {
+  porcentaje: number;
+  notaMinima: number;
+  aprobado: boolean;
+  intentos?: number;
+}
+
+const formatoNota = (n: number) => `${n.toLocaleString('es-CO', { maximumFractionDigits: 2 })} %`;
 
 const fechaLarga = (v: string) =>
   new Date(v).toLocaleString('es-CO', { dateStyle: 'long', timeStyle: 'short', timeZone: 'America/Bogota' });
@@ -227,7 +246,17 @@ function CuerpoFormulario({
   const [enviando, setEnviando] = useState(false);
   const [enviadaEl, setEnviadaEl] = useState<string | null>(datos.enviadaEl);
   const [recienEnviada, setRecienEnviada] = useState(false);
+  const [nota, setNota] = useState<ResultadoNota | null>(null);
+  const [vuelta, setVuelta] = useState(0);
+  const [subirAlAviso, setSubirAlAviso] = useState(0);
   const desplazable = useRef<HTMLDivElement | null>(null);
+  // Tras reprobar se limpian las respuestas (la página se acorta): subir DESPUÉS de pintar, al aviso rojo.
+  useEffect(() => {
+    if (subirAlAviso === 0) return;
+    // Instantáneo (no suave): en el celular el desplazamiento suave se interrumpía con el cambio de altura.
+    window.requestAnimationFrame(() => desplazable.current?.scrollTo({ top: 0 }));
+  }, [subirAlAviso]);
+  const evaluacion = esEvaluacion(definicion);
 
   const ponerValor = (id: string, valor: ValorRespuesta) => {
     setValores((v) => ({ ...v, [id]: valor }));
@@ -280,7 +309,16 @@ function CuerpoFormulario({
     const lista = validarTodo();
     if (Object.keys(lista).length > 0) return mostrarErrores(lista);
     if (previa) {
-      setAviso({ tipo: 'advertencia', texto: 'Vista previa: el formulario está completo. En la vista previa no se guarda nada.' });
+      if (evaluacion) {
+        // La vista previa del formador califica en el navegador con las correctas que ya conoce.
+        const r = calificar(definicion, valores);
+        setAviso({
+          tipo: r.calificadas === 0 ? 'advertencia' : r.aprobado ? 'ok' : 'error',
+          texto: `Vista previa: con estas respuestas obtendría ${formatoNota(r.porcentaje)} (${r.correctas} de ${r.calificadas} correctas) y ${r.aprobado ? 'aprobaría' : 'no aprobaría'} (mínimo ${formatoNota(r.notaMinima)}). No se guarda nada.`,
+        });
+      } else {
+        setAviso({ tipo: 'advertencia', texto: 'Vista previa: el formulario está completo. En la vista previa no se guarda nada.' });
+      }
       desplazable.current?.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
@@ -298,6 +336,25 @@ function CuerpoFormulario({
         return mostrarErrores(delServidor);
       }
       if (!res.ok) throw new Error(String(data?.error ?? 'No se pudieron enviar las respuestas.'));
+      const resultado = (data.evaluacion ?? null) as ResultadoNota | null;
+      if (resultado && !resultado.aprobado) {
+        // Reprobó: no queda completado; se limpian las respuestas calificadas y puede intentar de nuevo.
+        setNota(resultado);
+        setErrores({});
+        setValores((v) => {
+          const datosPersona: Respuestas = {};
+          for (const p of definicion.preguntas) if (p.puntos === undefined && v[p.id] !== undefined) datosPersona[p.id] = v[p.id];
+          return { ...valoresIniciales(definicion, datos.prellenado), ...datosPersona };
+        });
+        setVuelta((n) => n + 1);
+        setAviso({
+          tipo: 'error',
+          texto: `No aprobó la evaluación: obtuvo ${formatoNota(resultado.porcentaje)} y la nota mínima es ${formatoNota(resultado.notaMinima)}. Puede intentarlo de nuevo (intentos: ${resultado.intentos ?? 1}).`,
+        });
+        setSubirAlAviso((n) => n + 1);
+        return;
+      }
+      if (resultado) setNota(resultado);
       setEnviadaEl(String(data.enviadaEl ?? new Date().toISOString()));
       setRecienEnviada(true);
       desplazable.current?.scrollTo({ top: 0 });
@@ -319,17 +376,24 @@ function CuerpoFormulario({
           <>
             <IconCircleCheck size={48} color='var(--mantine-color-green-6)' aria-hidden='true' />
             <Text fw={700} fz='xl' ta='center' role='status'>
-              Respuestas enviadas
+              {nota ? 'Evaluación aprobada' : 'Respuestas enviadas'}
             </Text>
+            {nota && (
+              <Text fw={600} fz='lg' ta='center' c='green' data-testid='nota-obtenida'>
+                Su nota: {formatoNota(nota.porcentaje)}
+              </Text>
+            )}
             <Text ta='center' c='dimmed' maw={520}>
-              Gracias. Sus respuestas quedaron guardadas y el material quedó completado.
+              {nota
+                ? `Superó la nota mínima de ${formatoNota(nota.notaMinima)}. Sus respuestas quedaron guardadas y el material quedó completado.`
+                : 'Gracias. Sus respuestas quedaron guardadas y el material quedó completado.'}
             </Text>
           </>
         ) : (
           <>
             <IconInfoCircle size={48} color='var(--mantine-color-blue-6)' aria-hidden='true' />
             <Text fw={700} fz='xl' ta='center'>
-              Ya envió este formulario
+              {evaluacion ? 'Ya aprobó esta evaluación' : 'Ya envió este formulario'}
             </Text>
             <Text ta='center' c='dimmed' maw={520}>
               Lo envió el {fechaLarga(enviadaEl)}. Las respuestas no se pueden modificar; si necesita corregir algo, pida a Talento Humano que lo reabra.
@@ -361,6 +425,18 @@ function CuerpoFormulario({
         {previa && (
           <Alert color='blue' icon={<IconEye size={18} />}>
             Vista previa del formador: puede llenarlo para probarlo; no se guarda nada.
+          </Alert>
+        )}
+        {evaluacion && (
+          <Alert color='blue' icon={<IconInfoCircle size={18} />} data-testid='info-evaluacion'>
+            Evaluación: para aprobar necesita al menos {formatoNota(definicion.notaMinima ?? 80)}. Cada pregunta indica cuántos puntos vale.
+            {!previa && datos.intentos && datos.intentos.usados > 0 && (
+              <>
+                {' '}
+                Intentos anteriores: {datos.intentos.usados}
+                {datos.intentos.ultimo ? ` (última nota: ${formatoNota(datos.intentos.ultimo.porcentaje)})` : ''}.
+              </>
+            )}
           </Alert>
         )}
 
@@ -432,7 +508,7 @@ function CuerpoFormulario({
         )}
 
         <Paper withBorder radius='md' p='md'>
-          <Stack gap='lg'>
+          <Stack gap='lg' key={vuelta}>
             {definicion.preguntas.map((p, i) => (
               <CampoPregunta
                 key={p.id}
@@ -486,7 +562,7 @@ function CampoPregunta({
   // `size='md'` en los campos de texto (16 px): con menos, Safari en iPhone
   // hace zoom al enfocar — mismo arreglo que en /login (ver globals.css).
   const comun = {
-    label: `${numero}. ${p.texto}`,
+    label: `${numero}. ${p.texto}${p.puntos !== undefined ? ` (${p.puntos.toLocaleString('es-CO')} ${p.puntos === 1 ? 'punto' : 'puntos'})` : ''}`,
     description: p.ayuda,
     required: p.obligatoria,
     error,
@@ -567,7 +643,10 @@ interface TablaRespuestas {
   material: { id: number; titulo: string };
   formulario: { codigo: string; titulo: string; version: number };
   columnas: { id: string; texto: string }[];
-  filas: { id: number; correo: string; enviadaEl: string; version: number; autorizacionVersion: string | null; respuestas: Respuestas }[];
+  filas: { id: number; correo: string; enviadaEl: string; version: number; autorizacionVersion: string | null; respuestas: Respuestas; nota?: number | null; intentos?: number }[];
+  /** Evaluación: la tabla trae nota e intentos por persona. */
+  evaluacion?: boolean;
+  notaMinima?: number | null;
 }
 
 /**
@@ -709,13 +788,15 @@ export function PanelRespuestas({ materialId, titulo, onCerrar, onCambio }: { ma
                 highlightOnHover
                 stickyHeader
                 verticalSpacing='sm'
-                miw={(tabla.columnas.length + 3) * 160}
+                miw={(tabla.columnas.length + (tabla.evaluacion ? 5 : 3)) * 160}
                 data-testid='tabla-respuestas'
               >
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th miw={200}>Correo</Table.Th>
                     <Table.Th miw={160}>Enviado</Table.Th>
+                    {tabla.evaluacion && <Table.Th miw={110}>Nota</Table.Th>}
+                    {tabla.evaluacion && <Table.Th miw={100}>Intentos</Table.Th>}
                     {tabla.columnas.map((c, i) => (
                       <Table.Th key={c.id} title={`${i + 1}. ${c.texto}`} miw={140} maw={280}>
                         <Text inherit lineClamp={3}>
@@ -731,6 +812,8 @@ export function PanelRespuestas({ materialId, titulo, onCerrar, onCambio }: { ma
                     <Table.Tr key={f.id}>
                       <Table.Td style={QUIEBRE}>{f.correo}</Table.Td>
                       <Table.Td>{fechaLarga(f.enviadaEl)}</Table.Td>
+                      {tabla.evaluacion && <Table.Td>{f.nota === null || f.nota === undefined ? '—' : formatoNota(f.nota)}</Table.Td>}
+                      {tabla.evaluacion && <Table.Td>{f.intentos ?? '—'}</Table.Td>}
                       {tabla.columnas.map((c) => (
                         <Table.Td key={c.id} maw={280} style={QUIEBRE}>
                           {textoDeRespuesta(f.respuestas[c.id])}
@@ -770,10 +853,12 @@ export interface FormularioResumen {
 }
 
 /**
- * Selector de formulario para un material nuevo tipo "Formulario", con
- * IMPORTAR (archivo .json o pegado), VISTA PREVIA y EDITAR (el JSON de la
- * definición; guardar crea una versión nueva). El editor visual pregunta por
- * pregunta queda para una entrega posterior.
+ * Selector de formulario para un material nuevo tipo "Formulario":
+ *   - CREAR una ENCUESTA o una EVALUACIÓN a mano (constructor visual,
+ *     Cristian 2026-10-09), EDITAR de la misma forma (guardar crea una versión
+ *     nueva) y VISTA PREVIA;
+ *   - IMPORTAR (archivo .json o pegado) y EDITAR (JSON) para quien prefiera
+ *     trabajar con la definición completa.
  */
 export function SelectorFormulario({
   valor,
@@ -789,6 +874,15 @@ export function SelectorFormulario({
   const [erroresJson, setErroresJson] = useState<string[]>([]);
   const [guardando, setGuardando] = useState(false);
   const [previa, setPrevia] = useState<DefinicionFormulario | null>(null);
+  // Constructor visual: `definicion` presente = se está editando un formulario existente.
+  const [armador, setArmador] = useState<{ tipo: TipoFormulario; id?: number; definicion?: DefinicionFormulario } | null>(null);
+  const [erroresArmador, setErroresArmador] = useState<string[]>([]);
+  // El resultado de guardar va ARRIBA: tras cerrar el constructor se lleva a la persona hasta él.
+  const avisoResultado = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!aviso) return;
+    window.requestAnimationFrame(() => avisoResultado.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+  }, [aviso]);
 
   const cargar = useCallback(async (): Promise<FormularioResumen[]> => {
     try {
@@ -835,6 +929,50 @@ export function SelectorFormulario({
     if (d) setEditor({ modo: 'editar', id: valor, texto: JSON.stringify(d, null, 2) });
   };
 
+  const empezarEdicionVisual = async () => {
+    if (!valor) return;
+    setError(null);
+    setAviso(null);
+    setErroresArmador([]);
+    setEditor(null);
+    const d = await definicionDe(valor);
+    if (d) setArmador({ tipo: d.tipo === 'evaluacion' ? 'evaluacion' : 'encuesta', id: valor, definicion: d });
+  };
+
+  const guardarDesdeArmador = async (d: DefinicionFormulario) => {
+    if (!armador) return;
+    setGuardando(true);
+    setErroresArmador([]);
+    setError(null);
+    try {
+      const editando = armador.id !== undefined;
+      const res = await fetch(editando ? `/api/portal/formularios/${armador.id}` : '/api/portal/formularios', {
+        method: editando ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(d),
+      });
+      const data = await leerJson(res);
+      if (!res.ok) {
+        setErroresArmador(Array.isArray(data?.errores) && data.errores.length > 0 ? (data.errores as string[]) : [String(data?.error ?? 'No se pudo guardar.')]);
+        return;
+      }
+      const f = data.formulario as { id: number; titulo: string; version: number };
+      const que = d.tipo === 'evaluacion' ? 'Evaluación' : 'Encuesta';
+      setAviso(
+        editando
+          ? `Versión ${f.version} guardada: ${f.titulo}.`
+          : `${que} creada: ${f.titulo}.${d.borrador ? ' Quedó en borrador: nadie puede responderla hasta que la publique.' : ''}`
+      );
+      setArmador(null);
+      await cargar();
+      onCambio(f.id, f.titulo);
+    } catch (e) {
+      setErroresArmador([(e as Error).message]);
+    } finally {
+      setGuardando(false);
+    }
+  };
+
   const guardar = async () => {
     if (!editor) return;
     setGuardando(true);
@@ -870,7 +1008,7 @@ export function SelectorFormulario({
     <Stack gap='sm' w='100%' className='portal-th__mantine' data-testid='selector-formulario'>
       {/* Resultado de importar/guardar ARRIBA y con color (convención del equipo). */}
       {aviso && (
-        <Alert color='green' icon={<IconCircleCheck size={18} />} role='status'>
+        <Alert ref={avisoResultado} color='green' icon={<IconCircleCheck size={18} />} role='status'>
           {aviso}
         </Alert>
       )}
@@ -881,7 +1019,7 @@ export function SelectorFormulario({
       )}
       {lista && lista.length === 0 && (
         <Text size='sm' c='dimmed'>
-          Todavía no hay formularios: importe uno.
+          Todavía no hay formularios: cree uno o importe uno.
         </Text>
       )}
       {lista && lista.length > 0 && (
@@ -897,7 +1035,34 @@ export function SelectorFormulario({
           }}
         />
       )}
-      <Group gap='xs' wrap='wrap'>
+      <Group gap='xs' wrap='wrap' data-testid='acciones-formulario'>
+        <Button
+          variant='default'
+          leftSection={<IconClipboardList size={16} />}
+          onClick={() => {
+            setErroresArmador([]);
+            setEditor(null);
+            setArmador({ tipo: 'encuesta' });
+          }}
+          data-testid='crear-encuesta'
+        >
+          Crear encuesta
+        </Button>
+        <Button
+          variant='default'
+          leftSection={<IconChecklist size={16} />}
+          onClick={() => {
+            setErroresArmador([]);
+            setEditor(null);
+            setArmador({ tipo: 'evaluacion' });
+          }}
+          data-testid='crear-evaluacion'
+        >
+          Crear evaluación
+        </Button>
+        <Button variant='default' leftSection={<IconPencil size={16} />} onClick={() => void empezarEdicionVisual()} disabled={!valor} data-testid='editar-formulario'>
+          Editar
+        </Button>
         <Button variant='default' leftSection={<IconEye size={16} />} onClick={() => void verPrevia()} disabled={!valor}>
           Vista previa
         </Button>
@@ -909,12 +1074,25 @@ export function SelectorFormulario({
           leftSection={<IconFileImport size={16} />}
           onClick={() => {
             setErroresJson([]);
+            setArmador(null);
             setEditor({ modo: 'importar', texto: '' });
           }}
         >
           Importar formulario
         </Button>
       </Group>
+      {armador && (
+        <ConstructorFormulario
+          key={armador.id ?? `nuevo-${armador.tipo}`}
+          tipo={armador.tipo}
+          definicion={armador.definicion}
+          guardando={guardando}
+          erroresServidor={erroresArmador}
+          onGuardar={guardarDesdeArmador}
+          onVistaPrevia={(d) => setPrevia(d)}
+          onCancelar={() => setArmador(null)}
+        />
+      )}
       {editor && (
         <Paper withBorder radius='md' p='md'>
           <Stack gap='sm'>

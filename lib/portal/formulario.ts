@@ -29,6 +29,17 @@
  *
  * Tipos de pregunta: `texto`, `texto_largo`, `numero`, `fecha` (AAAA-MM-DD),
  * `seleccion` (única, con "Otra" si `permiteOtra`) y `si_no`.
+ *
+ * TIPOS DE FORMULARIO (Cristian, 2026-10-09): `tipo` = `encuesta` (por defecto;
+ * como el SST-01-FR-001) o `evaluacion`. Una EVALUACIÓN agrega:
+ *   - `notaMinima`   porcentaje para aprobar (1 a 100; por defecto 80);
+ *   - `borrador`     true = todavía no se puede responder (faltan respuestas
+ *                     correctas o puntos); se publica guardando sin `borrador`;
+ *   - por pregunta: `puntos` (los de todas las calificadas suman EXACTAMENTE
+ *     100) y `correcta` (posición, desde 0, de la opción correcta). Una
+ *     calificada es siempre de selección única y obligatoria. Las preguntas
+ *     SIN `puntos` (nombre, cédula…) son datos de la persona y no suman.
+ *   `correcta` NUNCA sale hacia el estudiante: ver `definicionPublica`.
  */
 
 export const TIPOS_PREGUNTA = ['texto', 'texto_largo', 'numero', 'fecha', 'seleccion', 'si_no'] as const;
@@ -49,7 +60,18 @@ export interface PreguntaFormulario {
   /** Se prellena desde la sesión del portal. */
   prellenar?: 'correo' | 'nombre';
   ayuda?: string;
+  /** Solo evaluaciones: puntos de la pregunta (las calificadas suman 100). */
+  puntos?: number;
+  /** Solo evaluaciones: posición (desde 0) de la opción correcta. Nunca se envía al estudiante. */
+  correcta?: number;
 }
+
+export type TipoFormulario = 'encuesta' | 'evaluacion';
+export const NOTA_MINIMA_POR_DEFECTO = 80;
+export const PUNTOS_TOTAL = 100;
+
+/** Redondeo a 2 decimales (puntos y porcentajes). */
+export const redondear2 = (n: number): number => Math.round(n * 100) / 100;
 
 export interface AutorizacionDatos {
   /** Se guarda con cada respuesta: prueba de QUÉ texto aceptó la persona. */
@@ -68,6 +90,12 @@ export interface DefinicionFormulario {
   descripcion?: string;
   datosSensibles?: boolean;
   autorizacion?: AutorizacionDatos;
+  /** Ausente = encuesta. */
+  tipo?: TipoFormulario;
+  /** Solo evaluaciones: porcentaje mínimo para aprobar. */
+  notaMinima?: number;
+  /** Solo evaluaciones: todavía no se puede responder. */
+  borrador?: boolean;
   preguntas: PreguntaFormulario[];
 }
 
@@ -78,6 +106,8 @@ export type Respuestas = Record<string, ValorRespuesta>;
 export const MAX_PREGUNTAS = 200;
 export const MAX_OPCIONES = 50;
 export const MAX_TEXTO_PREGUNTA = 500;
+/** Una opción puede ser un párrafo (p. ej. las evaluaciones con opciones largas). */
+export const MAX_TEXTO_OPCION = 500;
 export const MAX_TEXTO_RESPUESTA = 2000;
 export const MAX_TEXTO_LARGO_RESPUESTA = 4000;
 /** Tope de la definición serializada (NVARCHAR(MAX) aguanta más; esto es cordura). */
@@ -89,6 +119,7 @@ export const MENSAJE_FORMULARIO_SE_COMPLETA_AL_ENVIAR =
 export const MENSAJE_YA_ENVIADO =
   'Ya envió sus respuestas a este formulario. No se pueden modificar; si necesita corregir algo, pida a Talento Humano que lo reabra.';
 export const MENSAJE_AUTORIZACION = 'Debe leer y aceptar la autorización de tratamiento de datos personales para enviar el formulario.';
+export const MENSAJE_EVALUACION_EN_BORRADOR = 'Esta evaluación está en preparación. Estará disponible cuando Talento Humano la publique.';
 
 const ID = /^[A-Za-z][A-Za-z0-9_-]{0,39}$/;
 const FECHA = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -119,6 +150,19 @@ export function validarDefinicion(
   const descripcion = d.descripcion === undefined || d.descripcion === null ? undefined : textoLimpio(d.descripcion, 4000);
   if (descripcion === null) errores.push('"descripcion" no es válida.');
   const datosSensibles = d.datosSensibles === true;
+
+  if (d.tipo !== undefined && d.tipo !== 'encuesta' && d.tipo !== 'evaluacion') errores.push('"tipo" debe ser "encuesta" o "evaluacion".');
+  const tipoForm: TipoFormulario = d.tipo === 'evaluacion' ? 'evaluacion' : 'encuesta';
+  const borrador = d.borrador === true;
+  if (borrador && tipoForm !== 'evaluacion') errores.push('Solo una evaluación puede estar en borrador.');
+  let notaMinima: number | undefined;
+  if (tipoForm === 'evaluacion') {
+    const n = d.notaMinima === undefined || d.notaMinima === null ? NOTA_MINIMA_POR_DEFECTO : d.notaMinima;
+    if (typeof n !== 'number' || !Number.isFinite(n) || n < 1 || n > 100) errores.push('"notaMinima" debe ser un número entre 1 y 100.');
+    else notaMinima = redondear2(n);
+  } else if (d.notaMinima !== undefined && d.notaMinima !== null) {
+    errores.push('"notaMinima" es solo para evaluaciones.');
+  }
 
   let autorizacion: AutorizacionDatos | undefined;
   if (d.autorizacion !== undefined && d.autorizacion !== null) {
@@ -159,13 +203,41 @@ export function validarDefinicion(
       if (!tipo) return void errores.push(`Pregunta ${n}: "tipo" debe ser uno de ${TIPOS_PREGUNTA.join(', ')}.`);
       const pregunta: PreguntaFormulario = { id, texto, tipo, obligatoria: p.obligatoria === true };
       if (tipo === 'seleccion') {
-        const opciones = Array.isArray(p.opciones) ? p.opciones.map((o) => textoLimpio(o, 255)) : null;
+        const opciones = Array.isArray(p.opciones) ? p.opciones.map((o) => textoLimpio(o, MAX_TEXTO_OPCION)) : null;
         if (!opciones || opciones.length === 0 || opciones.length > MAX_OPCIONES || opciones.some((o) => o === null)) {
           return void errores.push(`Pregunta ${n}: "opciones" debe ser una lista de 1 a ${MAX_OPCIONES} textos.`);
         }
         if (new Set(opciones).size !== opciones.length) return void errores.push(`Pregunta ${n}: hay opciones repetidas.`);
         pregunta.opciones = opciones as string[];
         if (p.permiteOtra === true) pregunta.permiteOtra = true;
+      }
+      const hayPuntos = p.puntos !== undefined && p.puntos !== null;
+      const hayCorrecta = p.correcta !== undefined && p.correcta !== null;
+      if (tipoForm !== 'evaluacion') {
+        if (hayPuntos || hayCorrecta) return void errores.push(`Pregunta ${n}: "puntos" y "correcta" son solo para evaluaciones.`);
+      } else {
+        if (hayCorrecta && !hayPuntos) return void errores.push(`Pregunta ${n}: tiene "correcta" pero no "puntos".`);
+        if (hayPuntos) {
+          if (tipo !== 'seleccion' || p.permiteOtra === true) {
+            return void errores.push(`Pregunta ${n}: una pregunta con puntos debe ser de selección única, sin "otra respuesta".`);
+          }
+          if (pregunta.opciones!.length < 2) return void errores.push(`Pregunta ${n}: necesita al menos 2 opciones.`);
+          const pts = p.puntos;
+          if (typeof pts !== 'number' || !Number.isFinite(pts) || pts <= 0 || pts > PUNTOS_TOTAL || redondear2(pts) !== pts) {
+            return void errores.push(`Pregunta ${n}: "puntos" debe ser un número mayor que 0 y hasta ${PUNTOS_TOTAL}, con máximo 2 decimales.`);
+          }
+          pregunta.puntos = pts;
+          pregunta.obligatoria = true;
+          if (hayCorrecta) {
+            const c = p.correcta;
+            if (typeof c !== 'number' || !Number.isInteger(c) || c < 0 || c >= pregunta.opciones!.length) {
+              return void errores.push(`Pregunta ${n}: "correcta" no corresponde a una de las opciones.`);
+            }
+            pregunta.correcta = c;
+          } else if (!borrador) {
+            return void errores.push(`Pregunta ${n}: marque cuál es la respuesta correcta.`);
+          }
+        }
       }
       if (p.prellenar === 'correo' || p.prellenar === 'nombre') {
         if (prellenados.has(p.prellenar)) return void errores.push(`Pregunta ${n}: ya hay otra pregunta que prellena "${p.prellenar}".`);
@@ -178,8 +250,23 @@ export function validarDefinicion(
     });
   }
 
+  if (tipoForm === 'evaluacion' && !borrador && errores.length === 0) {
+    const calificadas = preguntas.filter((q) => q.puntos !== undefined);
+    if (calificadas.length === 0) {
+      errores.push('Una evaluación necesita al menos una pregunta con puntos.');
+    } else {
+      const suma = redondear2(calificadas.reduce((s, q) => s + (q.puntos ?? 0), 0));
+      if (suma !== PUNTOS_TOTAL) errores.push(`Los puntos de las preguntas deben sumar exactamente ${PUNTOS_TOTAL} (hoy suman ${suma}).`);
+    }
+  }
+
   if (errores.length > 0) return { ok: false, errores };
   const definicion: DefinicionFormulario = { formato: 1, codigo: codigo!, titulo: titulo!, preguntas };
+  if (tipoForm === 'evaluacion') {
+    definicion.tipo = 'evaluacion';
+    definicion.notaMinima = notaMinima!;
+    if (borrador) definicion.borrador = true;
+  }
   if (descripcion) definicion.descripcion = descripcion;
   if (datosSensibles) definicion.datosSensibles = true;
   if (autorizacion) definicion.autorizacion = autorizacion;
@@ -271,6 +358,65 @@ export function validarRespuestas(
   return errores.length > 0 ? { ok: false, errores } : { ok: true, respuestas };
 }
 
+export const esEvaluacion = (d: DefinicionFormulario): boolean => d.tipo === 'evaluacion';
+
+/** Suma de los puntos de las preguntas calificadas (100 en una evaluación completa). */
+export function puntosTotales(d: DefinicionFormulario): number {
+  return redondear2(d.preguntas.reduce((s, p) => s + (p.puntos ?? 0), 0));
+}
+
+/**
+ * La definición que ve el ESTUDIANTE: igual, pero SIN `correcta`. Es la única
+ * que sale por la ruta pública del material; las correctas solo viajan en las
+ * rutas de formadores.
+ */
+export function definicionPublica(d: DefinicionFormulario): DefinicionFormulario {
+  return { ...d, preguntas: d.preguntas.map(({ correcta: _correcta, ...resto }) => resto) };
+}
+
+export interface ResultadoEvaluacion {
+  puntaje: number;
+  puntajeMax: number;
+  /** 0 a 100, 2 decimales. */
+  porcentaje: number;
+  notaMinima: number;
+  aprobado: boolean;
+  correctas: number;
+  calificadas: number;
+}
+
+/**
+ * Califica las respuestas YA validadas de una evaluación. Solo cuentan las
+ * preguntas con puntos y respuesta correcta definidas.
+ */
+export function calificar(d: DefinicionFormulario, respuestas: Respuestas): ResultadoEvaluacion {
+  let puntaje = 0;
+  let puntajeMax = 0;
+  let correctas = 0;
+  let calificadas = 0;
+  for (const p of d.preguntas) {
+    if (p.puntos === undefined || p.correcta === undefined) continue;
+    calificadas += 1;
+    puntajeMax += p.puntos;
+    const v = respuestas[p.id];
+    if (typeof v === 'string' && p.opciones?.[p.correcta] === v) {
+      puntaje += p.puntos;
+      correctas += 1;
+    }
+  }
+  const notaMinima = d.notaMinima ?? NOTA_MINIMA_POR_DEFECTO;
+  const porcentaje = puntajeMax > 0 ? redondear2((puntaje / puntajeMax) * 100) : 0;
+  return {
+    puntaje: redondear2(puntaje),
+    puntajeMax: redondear2(puntajeMax),
+    porcentaje,
+    notaMinima,
+    aprobado: puntajeMax > 0 && porcentaje >= notaMinima,
+    correctas,
+    calificadas,
+  };
+}
+
 /** Cómo se muestra una respuesta en la tabla y en el Excel. */
 export function textoDeRespuesta(valor: ValorRespuesta | undefined): string {
   if (valor === undefined) return '';
@@ -296,6 +442,9 @@ export interface RespuestaGuardada {
   autorizacionVersion: string | null;
   autorizadoEl: Date | string | null;
   respuestas: Respuestas;
+  /** Solo evaluaciones: nota (%) del intento aprobado y cuántos intentos hizo. */
+  nota?: number | null;
+  intentos?: number;
 }
 
 /**
