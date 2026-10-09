@@ -1,6 +1,7 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
 import { jsonNoStore } from '../chat/http';
+import { composeAgentAvatarSvg, parseAgentAvatarConfig } from './agente';
 import { composeAvatarSvg, parseAvatarConfig } from './compose';
 import { AvatarStoreUnavailableError, type AvatarOwnerType } from './store';
 
@@ -14,9 +15,16 @@ import { AvatarStoreUnavailableError, type AvatarOwnerType } from './store';
  *     guardar otro avatar cambia la URL y se pide el nuevo.
  */
 export function svgResponse(configJson: string, title: string, version: number, owner: AvatarOwnerType): NextResponse {
-  const config = parseAvatarConfig(configJson, owner);
-  if (!config) return NextResponse.json({ error: 'Avatar inválido.' }, { status: 404 });
-  const svg = composeAvatarSvg(config, { title });
+  // Personas: solo Lorelei (v3). Asistentes: Lorelei (v3) o figura (v4).
+  let svg: string | null = null;
+  if (owner === 'agent') {
+    const config = parseAgentAvatarConfig(configJson);
+    if (config) svg = composeAgentAvatarSvg(config, { title });
+  } else {
+    const config = parseAvatarConfig(configJson, 'user');
+    if (config) svg = composeAvatarSvg(config, { title });
+  }
+  if (!svg) return NextResponse.json({ error: 'Avatar inválido.' }, { status: 404 });
   return new NextResponse(svg, {
     headers: {
       'Content-Type': 'image/svg+xml; charset=utf-8',

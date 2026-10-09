@@ -17,6 +17,7 @@ import {
   upsertAvatarConfig,
   type AvatarConfigRow,
 } from './store';
+import { esFigura, parseAgentAvatarConfig, serializeAgentAvatarConfig, type AgentAvatarConfig } from './agente';
 import type { AvatarConfig } from './types';
 
 /**
@@ -104,7 +105,8 @@ export interface ManagedAgent {
   avatarUrl: string | null;
   avatarVersion: number | null;
   motivo: MotivoGestion;
-  config: AvatarConfig | null;
+  /** Persona Lorelei (v3) o figura (v4: animal, planeta, constelación, estrella, robot). */
+  config: AgentAvatarConfig | null;
 }
 
 /**
@@ -151,7 +153,7 @@ export async function listManagedAgents(email: string): Promise<ManagedAgent[]> 
       avatarUrl: a.avatarUrl,
       avatarVersion: a.avatarVersion,
       motivo: a.motivo,
-      config: fila ? parseAvatarConfig(fila.configJson, 'agent') : null,
+      config: fila ? parseAgentAvatarConfig(fila.configJson) : null,
     };
   });
 }
@@ -162,13 +164,14 @@ export async function findManagedAgent(email: string, code: string): Promise<Man
   return lista.find((a) => a.code === code) ?? null;
 }
 
-export async function saveAgentAvatar(agent: ManagedAgent, email: string, config: AvatarConfig): Promise<string> {
+export async function saveAgentAvatar(agent: ManagedAgent, email: string, config: AgentAvatarConfig): Promise<string> {
   const fila = await prisma.agent.findUnique({ where: { id_agent: agent.idAgent }, select: { avatar_url: true } });
   const ahora = new Date();
   const anterior = isNotionAvatarUrl(fila?.avatar_url) ? null : fila?.avatar_url ?? null;
-  // Regla: la semilla de un asistente es SU NOMBRE (se fuerza aquí, no se confía en el cliente).
-  const conSemilla: AvatarConfig = { ...config, seed: agent.displayName.slice(0, 64) };
-  await upsertAvatarConfig('agent', String(agent.idAgent), serializeAvatarConfig(conSemilla), anterior, email, ahora);
+  // Regla: la semilla de una persona Lorelei de un asistente es SU NOMBRE (se fuerza aquí, no se
+  // confía en el cliente). Las figuras no usan semilla.
+  const final: AgentAvatarConfig = esFigura(config) ? config : { ...config, seed: agent.displayName.slice(0, 64) };
+  await upsertAvatarConfig('agent', String(agent.idAgent), serializeAgentAvatarConfig(final), anterior, email, ahora);
   const url = agentAvatarNotionUrl(agent.code, ahora.getTime());
   await prisma.agent.update({ where: { id_agent: agent.idAgent }, data: { avatar_url: url } });
   console.info(`[avatar] ${email} cambió el avatar del agente ${agent.code} -> ${url}`);

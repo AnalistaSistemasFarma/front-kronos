@@ -38,10 +38,40 @@ Decisión de Nicolás Rivera: el feature se adapta a lo que trae la librería. E
 
 ### Asistentes del chat
 
-Todos los avatares son **personas Lorelei**; ya no existen los tipos animal/planeta/constelación.
+Si el asistente es una **persona Lorelei** aplica lo siguiente (desde el 2026-10-08 también puede ser una figura: ver «Figuras para los asistentes»).
 
 - **Semilla = nombre del asistente** (Atlas, Galileo, Kepler, Mercurio, Orión, Sirio, Vega…). Es el avatar con el que abre el editor si aún no tiene uno, y el servidor guarda siempre `seed` = nombre del asistente.
 - **Bocas limitadas a `happy*`**: el editor solo las ofrece, el aleatorio solo las elige y el servidor rechaza cualquier otra (`parseAvatarConfig(…, 'agent')`).
+
+## Figuras para los asistentes (2026-10-08)
+
+Pedido de Nicolás Rivera (SynerLink c47): en **Perfil → Avatar de mis asistentes** el avatar de un asistente puede ser, además de una persona Lorelei, una **figura**. Solo cambia esa sección: el avatar de las personas (Mi avatar) sigue igual.
+
+![Figuras de asistentes](avatar-notion/figuras-asistentes.png)
+
+- **Selector de tipo** encima del editor: Persona · Animal · Planeta · Constelación · Estrella · Robot. *Persona* es el editor Lorelei de siempre (semilla = nombre del asistente, solo bocas `happy*`).
+- **Figuras** (`lib/avatar/figuras.ts`), cada una con su variante, expresión, accesorio y tres colores:
+
+| Tipo | Variantes | Accesorios |
+|---|---|---|
+| Animal (12) | gato, perro, zorro, búho, oso, conejo, panda, león, pingüino, koala, mono, pulpo | gafas, gafas de sol, audífonos, sombrero, gorra, flor |
+| Planeta (10) | Mercurio (con alas), Venus, Tierra, Marte, Júpiter, Saturno (anillos), Urano, Neptuno, Plutón (corazón), Luna | una luna, dos lunas, anillo, chispas, cohete, gafas de sol |
+| Constelación (12) | Orión, Osa Mayor, Casiopea, Escorpio, Lira (Vega), Can Mayor (Sirio), Cruz del Sur, Leo, Cisne, Osa Menor, Pléyades (Atlas), Géminis — con las coordenadas reales de sus estrellas | chispas, luna |
+| Estrella (5) | sol, estrella, destello, media luna, cometa | chispas, gafas de sol, gorro de fiesta |
+| Robot (4) | clásico, pantalla, redondo, cubo | chispas, gafas de sol, gorro de fiesta |
+
+- **Expresiones** (todas sonrientes): feliz, alegre, tranquilo, tierno, guiño, curioso, pícaro, gatuno; planetas y constelaciones admiten además *sin carita* (en la constelación, la estrella principal queda como destello).
+- **Colores**: relleno (blanco por defecto), acento (negro por defecto: manchas, narices, pantalla, líneas de la constelación) y fondo (los mismos de Lorelei). Por defecto es blanco y negro, con la línea negra de trazo parejo; la carita usa tinta clara u oscura según el color de debajo.
+- **Por defecto, determinista por el nombre**: al elegir un tipo, la figura sale del nombre del asistente (hash FNV-1a); los de OLP arrancan con lo suyo: Orión → Orión, Vega → Lira, Sirio → Can Mayor, Atlas → Pléyades, Mercurio → Mercurio, Galileo → Júpiter, Kepler → Marte.
+- **Modelo** (`dbo.avatar_config.config_json`, sin cambio de esquema): las figuras se guardan como versión 4, ~130 caracteres:
+
+  ```json
+  {"v":4,"kind":"planeta","variante":"saturno","cara":"feliz","extra":"lunas","relleno":"ffffff","acento":"000000","fondo":"f2f2f2"}
+  ```
+
+  Los configs v3 (persona Lorelei) siguen valiendo tal cual. `parseAgentAvatarConfig` (`lib/avatar/agente.ts`) valida v3 o v4 y rechaza todo lo demás: tipo desconocido, variante de otro tipo, carita o accesorio fuera del catálogo del tipo, colores que no sean hexadecimales de 6 dígitos, claves extra. Las personas (`parseAvatarConfig(…, 'user')`) no aceptan v4.
+- Se sigue pintando con `<img src="data:…">` y el endpoint `/api/avatar/agent/<code>` sirve el mismo SVG.
+- **Origen y licencia**: dibujo **propio de SynerLink**, sin dependencias nuevas. Se adaptó el motor de asistentes de la rama `feat/avatar-avatartion` (commit `8c53716`, también propio): misma geometría de animales y planetas y las coordenadas reales de las constelaciones; se quitaron el cuerpo de los animales (solo cabeza, como Lorelei) y las piezas de Noto (las caritas son nuevas y propias). Robots, estrellas y pulpo son nuevos. No hay activos de terceros en las figuras.
 
 ## Licencias
 
