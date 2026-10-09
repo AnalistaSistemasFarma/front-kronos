@@ -33,8 +33,11 @@ const combos = [
     { eyes: 'variant20', eyebrows: 'variant02', mouth: 'happy15', nose: 'variant02', glasses: 'variant02', hair: 'variant20', freckles: 'variant01', skinColor: 'ecad80', hairColor: 'a55728', backgroundColor: 'b6e3f4' },
   ],
 ];
+// Junto a cada figura, una cabeza Lorelei normal (Cabeza 1, misma cara) para comparar el trazo.
+const lorelei = { ...base, earrings: null, freckles: null, beard: null, hairAccessories: null, ...combos[0][1], hair: base.hair, head: 'variant01' };
+const comparar = `<img class="lor" src="${svgUri(composeAvatarSvg(lorelei))}" width="104" height="104" alt="" title="Lorelei · Cabeza 1">`;
 const figuras = CABEZAS_FIGURA.map((f) => {
-  const celdas = combos
+  const celdas = comparar + combos
     .map(([t, over]) => {
       const c = { ...base, earrings: null, freckles: null, beard: null, hairAccessories: null, ...over, head: 'figura:' + f.id };
       return `<img src="${svgUri(composeAvatarSvg(c))}" width="104" height="104" alt="" title="${escapar(t)}">`;
@@ -42,6 +45,15 @@ const figuras = CABEZAS_FIGURA.map((f) => {
     .join('');
   return `<figure class="fig"><div class="tres">${celdas}</div><figcaption>${escapar(f.label)}</figcaption></figure>`;
 }).join('');
+
+// Trazo de cerca: Lorelei y algunas figuras, grandes y sin cara, para ver el grosor.
+const sinCara = { ...base, eyes: 'variant01', hair: null, glasses: null, earrings: null, freckles: null, beard: null, hairAccessories: null };
+const cerca = [
+  ['Lorelei · Cabeza 1', { ...sinCara, hair: base.hair, head: 'variant01' }],
+  ...['gato', 'oso', 'saturno', 'orion', 'estrella', 'clasico'].map((id) => [id, { ...sinCara, head: 'figura:' + id }]),
+]
+  .map(([t, c]) => `<figure><img src="${svgUri(composeAvatarSvg(c))}" width="180" height="180" alt=""><figcaption>${escapar(t)}</figcaption></figure>`)
+  .join('');
 
 // El selector "Cabezas" de un asistente (miniaturas del editor, en orden).
 const actual = sugerenciaParaAgente('Orión');
@@ -67,16 +79,17 @@ const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>
 <style>
   body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:24px;background:#fff;color:#111;width:1380px}
   h1{font-size:20px;margin:0 0 4px} p{margin:0 0 14px;color:#555;font-size:13px} h2{font-size:15px;margin:22px 0 8px}
-  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px} .lor{outline:2px dashed #9ca3af;outline-offset:-2px}
   figure{margin:0;border:1px solid #e5e7eb;border-radius:12px;padding:8px;text-align:center}
   img{border-radius:50%} .tres,.dos{display:flex;gap:6px;justify-content:center}
   figcaption{font-size:12px;margin-top:6px;color:#333}
   .sel{display:flex;flex-wrap:wrap;gap:6px} .opt{width:92px;padding:6px} .opt img{border-radius:10px;background:#fff;border:1px solid #d1d5db}
   .olps{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-  .chicos{display:flex;gap:8px;justify-content:center;align-items:center;margin-top:6px}
+  .cerca{display:flex;gap:8px;flex-wrap:wrap} .chicos{display:flex;gap:8px;justify-content:center;align-items:center;margin-top:6px}
 </style></head><body>
 <h1>Cabezas-figura de los asistentes (Lorelei · DiceBear 9.4.3)</h1>
-<p>Opciones adicionales del selector «Cabezas», después de Cabeza 1…4. Sobre cada figura se componen las partes de Lorelei: ojos, cejas, boca, nariz, gafas, aretes, pecas, barba, flores y pelo (o «Ninguno»). Relleno = color de piel; acentos = color de cabello. Por figura: sin pelo · con gafas y aretes · con pelo, pecas y colores.</p>
+<p>Opciones adicionales del selector «Cabezas», después de Cabeza 1…4. Sobre cada figura se componen las partes de Lorelei: ojos, cejas, boca, nariz, gafas, aretes, pecas, barba, flores y pelo (o «Ninguno»). Relleno = color de piel; acentos = color de cabello. Por figura: <b>Lorelei Cabeza 1 (borde punteado, para comparar el trazo)</b> · sin pelo · con gafas y aretes · con pelo, pecas y colores. El contorno de las figuras usa el trazo de Lorelei: formas rellenas negras de grosor variable, con huecos y puntas afinadas, sin stroke ni degradados.</p>
+<h2>Trazo de cerca</h2><div class="cerca">${cerca}</div>
 <div class="grid">${figuras}</div>
 <h2>Selector «Cabezas» de un asistente (miniaturas del editor, en orden)</h2>
 <div class="sel">${selector}</div>
