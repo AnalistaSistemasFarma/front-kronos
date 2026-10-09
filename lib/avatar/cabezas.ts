@@ -1,4 +1,5 @@
 import * as lorelei from '@dicebear/lorelei';
+import { aPincel, pincel } from './pincel';
 
 /**
  * CABEZAS-FIGURA para los avatares de los ASISTENTES: animales, planetas,
@@ -29,8 +30,14 @@ import * as lorelei from '@dicebear/lorelei';
  * Dibujo de las figuras: propio de SynerLink (la geometría de las figuras del
  * #554, sin sus caritas). Se dibuja en un lienzo de 300 que se lleva al grupo
  * de la cabeza de Lorelei (lienzo 980, dentro de su translate(10 -60)), con
- * relleno = color de piel, acentos = color de cabello y línea negra, como
- * Lorelei. Código PURO: lo usan el editor (navegador) y el endpoint.
+ * relleno = color de piel y acentos = color de cabello, en relleno plano.
+ * TRAZO DE LORELEI (pedido de Nicolás, msg 15787): las figuras se escriben con
+ * stroke por comodidad, pero al componerse cada contorno se convierte
+ * (pincel.ts) en lo que hace Lorelei: formas rellenas de #000 de grosor
+ * variable, partidas con pequeños huecos y con las puntas afinadas, del mismo
+ * grosor medido en Lorelei (≈ 12,5 en su lienzo de 980). El SVG final no
+ * lleva ni stroke, ni degradados, ni transparencias.
+ * Código PURO: lo usan el editor (navegador) y el endpoint.
  */
 
 /* ───────────────────────────── Modelo ───────────────────────────── */
@@ -93,10 +100,8 @@ const TENTACULOS = (() => {
     'M182 214 C198 242 214 266 210 288 C206 298 188 298 190 288',
     'M152 222 C152 252 148 274 160 292 C166 298 176 292 170 284',
   ];
-  return (
-    ds.map((d) => `<path d="${d}" fill="none" stroke-width="20"/>`).join('') +
-    ds.map((d) => `<path d="${d}" fill="none" stroke="%R" stroke-width="13"/>`).join('')
-  );
+  // Cuerpo de cada tentáculo: forma rellena que se adelgaza hacia la punta; su contorno lo pone el pincel.
+  return ds.map((d) => `<path d="${pincel(d, { ancho: 15, variacion: 0, huecos: false, puntas: false, perfil: (u) => 1 - 0.5 * u })}"/>`).join('');
 })();
 
 const ANIMALES: CabezaFigura[] = [
@@ -175,8 +180,8 @@ const ANIMALES: CabezaFigura[] = [
       circulo(84, 62, 28, 'fill="%A"') +
       circulo(220, 62, 28, 'fill="%A"') +
       cabeza() +
-      '<ellipse cx="122" cy="146" rx="28" ry="34" fill="%A" fill-opacity=".28" stroke="none" transform="rotate(24 122 146)"/>' +
-      '<ellipse cx="194" cy="142" rx="28" ry="34" fill="%A" fill-opacity=".28" stroke="none" transform="rotate(-24 194 142)"/>',
+      '<ellipse cx="122" cy="146" rx="28" ry="34" fill="%S" stroke="none" transform="rotate(24 122 146)"/>' +
+      '<ellipse cx="194" cy="142" rx="28" ry="34" fill="%S" stroke="none" transform="rotate(-24 194 142)"/>',
   },
   {
     id: 'leon',
@@ -519,7 +524,7 @@ const CONSTELACIONES_C: CabezaFigura[] = CONSTELACIONES.map((c) => {
     id: c.id,
     label: c.label,
     grupo: 'constelacion' as const,
-    svg: circulo(152, 140, 118) + `<g opacity=".7">${linea(d, 2.6, '%A')}</g>` + estrellas + destello(px, py, 12),
+    svg: circulo(152, 140, 118) + linea(d, 2.6, '%A') + estrellas + destello(px, py, 12),
   };
 });
 
@@ -545,7 +550,7 @@ const MEDIA_LUNA = (() => {
   const sombra = `M${p1} A${R} ${R} 0 0 1 ${p2} A${r} ${r} 0 0 1 ${p1} Z`;
   return (
     circulo(cx1, cy1, R) +
-    `<path d="${sombra}" fill="%A" fill-opacity=".16" stroke="none"/>` +
+    `<path d="${sombra}" fill="%s" stroke="none"/>` +
     linea(`M${p2} A${r} ${r} 0 0 1 ${p1}`, 2.5)
   );
 })();
@@ -691,14 +696,38 @@ export function cabezaFiguraMarkup(valor: string, piel: string, cabello: string)
   return figuraMarkup(fig, piel, cabello);
 }
 
+/**
+ * Grosor del trazo de Lorelei 9.4.3 medido en su lienzo de 980 (contornos de
+ * las cabezas variant01…04: 2·área/perímetro entre 9,8 y 14) llevado al
+ * lienzo de 300 de las figuras (÷ ESCALA).
+ */
+export const GROSOR_LORELEI = 12.5;
+const GROSOR = GROSOR_LORELEI / ESCALA;
+
+/** Dibujo de cada figura ya con el trazo de Lorelei (fichas de color sin resolver), calculado una vez. */
+const CON_PINCEL = new Map<string, string>();
+function conPincel(fig: CabezaFigura): string {
+  let svg = CON_PINCEL.get(fig.id);
+  if (svg === undefined) {
+    svg = aPincel(fig.svg, GROSOR);
+    CON_PINCEL.set(fig.id, svg);
+  }
+  return svg;
+}
+
+/** Mezcla plana de dos colores "#rrggbb" (t = peso del segundo): tonos de sombra sin transparencias. */
+function mezcla(a: string, b: string, t: number): string {
+  const ca = parseInt(a.slice(1), 16);
+  const cb = parseInt(b.slice(1), 16);
+  const canal = (sh: number) => Math.round(((ca >> sh) & 255) * (1 - t) + ((cb >> sh) & 255) * t);
+  return '#' + ((canal(16) << 16) | (canal(8) << 8) | canal(0)).toString(16).padStart(6, '0');
+}
+
 /** Markup de la figura en el grupo de la cabeza de Lorelei (relleno = piel, acento = cabello). */
 function figuraMarkup(fig: CabezaFigura, piel: string, cabello: string): string {
-  const cuerpo = fig.svg.replace(/%R/g, piel).replace(/%A/g, cabello);
-  return (
-    `<g transform="${A_LORELEI}" fill="${piel}" stroke="#000" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round">` +
-    cuerpo +
-    '</g>'
-  );
+  const colores: Record<string, string> = { R: piel, A: cabello, S: mezcla(piel, cabello, 0.28), s: mezcla(piel, cabello, 0.16) };
+  const cuerpo = conPincel(fig).replace(/%([RASs])/g, (_m, k: string) => colores[k]);
+  return `<g transform="${A_LORELEI}" fill="${piel}">` + cuerpo + '</g>';
 }
 
 type EntradaLorelei = Parameters<typeof lorelei.create>[0];
