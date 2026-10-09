@@ -4,8 +4,9 @@
  *
  * Un avatar NO es una imagen guardada: es una CONFIGURACIÓN pequeña (las
  * opciones de Lorelei elegidas) que se convierte en SVG al vuelo con
- * `createAvatar(lorelei, opciones)`. Todos los avatares —personas y asistentes
- * del chat— son personas Lorelei; no hay otros tipos.
+ * `createAvatar(lorelei, opciones)`. Las personas son siempre Lorelei; los
+ * asistentes del chat pueden ser Lorelei o una FIGURA (animal, planeta,
+ * constelación, estrella, robot: ver figuras.ts y agente.ts).
  */
 
 /** Componentes de Lorelei que siempre se dibujan. */
