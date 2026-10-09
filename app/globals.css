@@ -3340,10 +3340,16 @@ body.chat-inmersivo .chat-page-thread--completa {
     align-items: flex-start;
   }
 
+  /* Columna izquierda: calendario, eventos del día y, debajo, los botones. Se estira a lo alto de la página para
+     que los botones sigan pegados arriba mientras se baja (como antes), con el calendario ya fuera de pantalla. */
+  .portal-th__lateral {
+    width: 264px;
+    flex-shrink: 0;
+    align-self: stretch;
+  }
+
   .portal-th__nav {
     flex-direction: column;
-    flex-shrink: 0;
-    width: 220px;
     position: sticky;
     top: 16px;
     overflow-x: visible;
@@ -5035,4 +5041,420 @@ body.chat-inmersivo .chat-page-thread--completa {
   border-radius: 0;
   background-color: #fff;
   color: var(--pth-tinta-2);
+}
+
+/* ── Calendario y eventos del día ───────────────────────────────────────────
+   Pedido de Cristian (2026-10-09): arriba a la izquierda, sobre los botones, un calendario de Colombia con
+   festivos y fechas importantes y, debajo, un recuadro con los eventos de cada día. Mismos colores y bordes
+   que los botones del panel de navegación. En celular se pliega (el botón "Calendario y eventos"). */
+.portal-th__lateral {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.portal-th__cal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.portal-th__cal-alternar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 10px;
+  background-color: #fff;
+  color: var(--pth-azul);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.portal-th__cal-alternar-fecha {
+  color: var(--pth-tinta-3);
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.portal-th__cal-cuerpo {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* En celular se pliega; en escritorio siempre está desplegado. */
+.portal-th__cal--plegado .portal-th__cal-cuerpo {
+  display: none;
+}
+
+@media (min-width: 760px) {
+  .portal-th__cal-alternar {
+    display: none;
+  }
+
+  .portal-th__cal--plegado .portal-th__cal-cuerpo {
+    display: flex;
+  }
+}
+
+.portal-th__cal-tarjeta {
+  padding: 12px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 12px;
+  background-color: #fff;
+}
+
+.portal-th__cal-cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.portal-th__cal-titulo {
+  color: var(--pth-azul);
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.portal-th__cal-flecha {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 8px;
+  background-color: #fff;
+  color: var(--pth-azul);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.portal-th__cal-flecha:hover {
+  border-color: var(--pth-azul);
+}
+
+.portal-th__cal-semana,
+.portal-th__cal-cuadricula {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.portal-th__cal-semana span {
+  padding: 2px 0 4px;
+  color: var(--pth-tinta-3);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.portal-th__cal-dia {
+  position: relative;
+  min-height: 34px;
+  padding: 0 0 6px;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background-color: transparent;
+  color: var(--pth-tinta);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.portal-th__cal-dia:hover {
+  background-color: var(--pth-azul-50);
+}
+
+.portal-th__cal-dia--fuera {
+  color: var(--pth-tinta-3);
+  opacity: 0.55;
+}
+
+.portal-th__cal-dia--festivo {
+  color: #c62828;
+  font-weight: 700;
+}
+
+.portal-th__cal-dia--hoy {
+  border-color: var(--pth-azul);
+}
+
+.portal-th__cal-dia--sel,
+.portal-th__cal-dia--sel:hover {
+  background-color: var(--pth-azul);
+  color: #fff;
+  opacity: 1;
+}
+
+.portal-th__cal-puntos {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 3px;
+  display: flex;
+  justify-content: center;
+  gap: 2px;
+}
+
+.portal-th__cal-punto {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: var(--pth-tinta-3);
+  flex-shrink: 0;
+}
+
+.portal-th__cal-punto--festivo {
+  background-color: #c62828;
+}
+
+.portal-th__cal-punto--laboral {
+  background-color: #1565c0;
+}
+
+.portal-th__cal-punto--conmemoracion {
+  background-color: #2e7d32;
+}
+
+.portal-th__cal-punto--empresa {
+  background-color: #ef6c00;
+}
+
+/* Sobre el día elegido (fondo azul) los puntos deben seguir viéndose. */
+.portal-th__cal-dia--sel .portal-th__cal-punto {
+  box-shadow: 0 0 0 1px #fff;
+}
+
+.portal-th__cal-pie {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.portal-th__cal-hoy {
+  padding: 4px 12px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 999px;
+  background-color: #fff;
+  color: var(--pth-azul);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.portal-th__cal-hoy:hover {
+  border-color: var(--pth-azul);
+}
+
+.portal-th__cal-leyenda {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--pth-tinta-3);
+  font-size: 0.68rem;
+}
+
+.portal-th__cal-leyenda li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.portal-th__cal-dia-titulo {
+  margin: 0 0 8px;
+  color: var(--pth-azul);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+/* Solo la primera letra: "Martes, 20 de octubre de 2026" (con capitalize saldría "De"). */
+.portal-th__cal-dia-titulo::first-letter {
+  text-transform: uppercase;
+}
+
+.portal-th__cal-aviso {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.portal-th__cal-aviso--ok {
+  border: 1px solid #a5d6b0;
+  background-color: #e6f4ea;
+  color: #1e6b34;
+}
+
+.portal-th__cal-aviso--error {
+  border: 1px solid #f1b5b1;
+  background-color: #fde8e7;
+  color: #b3261e;
+}
+
+.portal-th__cal-eventos {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.portal-th__cal-evento {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.portal-th__cal-evento .portal-th__cal-punto {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+}
+
+.portal-th__cal-evento-texto {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.portal-th__cal-evento-texto strong {
+  color: var(--pth-tinta);
+  font-size: 0.82rem;
+}
+
+.portal-th__cal-evento-texto small {
+  color: var(--pth-tinta-3);
+  font-size: 0.72rem;
+  white-space: pre-line;
+}
+
+.portal-th__cal-vacio {
+  margin: 0;
+  color: var(--pth-tinta-3);
+  font-size: 0.8rem;
+}
+
+.portal-th__cal-proximo {
+  color: var(--pth-tinta-2);
+}
+
+.portal-th__cal-confirmar {
+  display: inline-flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.portal-th__cal-mini {
+  padding: 2px 8px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 6px;
+  background-color: #fff;
+  color: var(--pth-tinta-3);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.portal-th__cal-mini:hover {
+  border-color: var(--pth-azul);
+  color: var(--pth-azul);
+}
+
+.portal-th__cal-mini--peligro {
+  border-color: #b3261e;
+  color: #b3261e;
+}
+
+.portal-th__cal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.portal-th__cal-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--pth-tinta-2);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+/* 16 px: con menos, Safari en iPhone hace zoom al enfocar el campo. */
+.portal-th__cal-form input,
+.portal-th__cal-form textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 8px;
+  color: var(--pth-tinta);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.portal-th__cal-form input:focus,
+.portal-th__cal-form textarea:focus {
+  outline: 2px solid var(--pth-azul);
+  outline-offset: 0;
+}
+
+.portal-th__cal-acciones {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.portal-th__cal-boton {
+  padding: 8px 14px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 10px;
+  background-color: #fff;
+  color: var(--pth-azul);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.portal-th__cal-boton:hover {
+  border-color: var(--pth-azul);
+}
+
+.portal-th__cal-boton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.portal-th__cal-boton--primario {
+  border-color: var(--pth-azul);
+  background-color: var(--pth-azul);
+  color: #fff;
+}
+
+.portal-th__cal-boton--ancho {
+  width: 100%;
+  margin-top: 12px;
 }

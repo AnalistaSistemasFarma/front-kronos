@@ -3328,3 +3328,23 @@ model SgcSignerSubstitution {
   @@map("signer_substitution")
   @@schema("sgc")
 }
+
+/// Evento de la EMPRESA en el calendario de la ventana principal del portal de Talento Humano
+/// (Cristian Baldión, 2026-10-09). Un evento = un día. Los festivos de Colombia y las fechas importantes
+/// NO se guardan aquí: se calculan (lib/portal/calendario.ts). Solo los editores del portal (los mismos
+/// que cargan anuncios) crean y borran; ver el calendario lo puede cualquiera que entre al portal.
+/// Borrado lógico: no se pierde quién lo quitó ni cuándo.
+model PortalEvento {
+  id           Int       @id @default(autoincrement())
+  fecha        DateTime  @db.Date
+  titulo       String    @db.NVarChar(160)
+  descripcion  String?   @db.NVarChar(1000)
+  created_by   String    @db.NVarChar(255)
+  created_at   DateTime  @default(now())
+  eliminado_at DateTime?
+  eliminado_by String?   @db.NVarChar(255)
+
+  @@index([fecha])
+  @@map("portal_evento")
+  @@schema("dbo")
+}
