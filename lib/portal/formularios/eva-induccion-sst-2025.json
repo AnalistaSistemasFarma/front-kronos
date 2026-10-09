@@ -169,7 +169,8 @@
         "1 año",
         "2 años"
       ],
-      "puntos": 10
+      "puntos": 10,
+      "correcta": 2
     }
   ]
 }

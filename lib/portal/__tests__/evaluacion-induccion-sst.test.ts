@@ -24,20 +24,19 @@ describe('evaluación de Inducción Organizacional y SST', () => {
     expect(d.preguntas.slice(0, 2).map((p) => p.id)).toEqual(['dato_nombre', 'dato_cedula']);
   });
 
-  it('la 7 está confirmada por Cristian (opción b); la 10 sigue SIN respuesta correcta; las demás, propuestas', () => {
+  it('la 7 (opción b) y la 10 (1 año) las confirmó Cristian; las demás son propuestas', () => {
     if (!r.ok) throw new Error('inválida');
     const por = Object.fromEntries(r.definicion.preguntas.map((p) => [p.id, p.correcta]));
     expect(por.q7).toBe(1);
     expect(r.definicion.preguntas.find((p) => p.id === 'q7')!.opciones![1]).toBe('Para la sede administrativa: Bahía Arbofarma; para la sede planta: Bahía Copetran');
-    expect(por.q10).toBeUndefined();
-    for (const id of ['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9']) expect(por[id]).toBeDefined();
+    expect(r.definicion.preguntas.find((p) => p.id === 'q10')!.opciones![por.q10!]).toBe('1 año');
+    for (const id of ['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10']) expect(por[id]).toBeDefined();
   });
 
-  it('al publicarla (quitar el borrador y marcar la 10) sería válida y calificaría', () => {
+  it('al publicarla (quitar el borrador) sería válida y calificaría', () => {
     if (!r.ok) throw new Error('inválida');
     const completa = JSON.parse(JSON_DEF);
     delete completa.borrador;
-    for (const p of completa.preguntas) if (p.id === 'q10') p.correcta = 0;
     const v = validarDefinicion(completa);
     expect(v.ok).toBe(true);
     if (!v.ok) return;
