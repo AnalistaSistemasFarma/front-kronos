@@ -302,7 +302,6 @@ function VistaCursoEstudiante({
     await onCambio();
   };
   // Respuestas de un formulario (solo administradores/formadores del Excel).
-  const [respuestasDe, setRespuestasDe] = useState<Material | null>(null);
 
   /** Un ENLACE cuenta como revisado al abrirlo (lo registra el servidor). */
   const abrirEnlace = (m: Material) => {
@@ -385,11 +384,7 @@ function VistaCursoEstudiante({
                   {!m.obligatorio && ' · opcional'}
                 </span>
               </div>
-              {m.tipo === 'FORM' && puedeMarcar && (
-                <Button size='xs' variant='default' leftSection={<IconTable size={14} />} onClick={() => setRespuestasDe(m)}>
-                  Ver respuestas
-                </Button>
-              )}
+              {/* Las respuestas de un formulario NO se ven aquí: solo en la «Vista formador» (Cristian, 2026-10-09). */}
               {completado && <InsigniaCompletado />}
             </li>
           );
@@ -433,17 +428,6 @@ function VistaCursoEstudiante({
           material={abierto}
           onCerrar={() => setAbierto(null)}
           onCompletado={() => alCompletar(abierto.titulo)}
-        />
-      )}
-      {respuestasDe && (
-        <PanelRespuestas
-          materialId={respuestasDe.id}
-          titulo={respuestasDe.titulo}
-          onCerrar={() => setRespuestasDe(null)}
-          onCambio={async () => {
-            await cargar();
-            await onCambio();
-          }}
         />
       )}
     </div>

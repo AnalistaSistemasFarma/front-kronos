@@ -203,7 +203,7 @@ test.describe('Portal TH · Formación · formulario propio', () => {
 
   test('administrador/formador del Excel: tabla de respuestas y exportación a Excel', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 860 });
-    await simular(page, { puedeMarcarManual: true });
+    await simular(page, { puedeMarcarManual: true, esFormador: true });
     const filas = [
       { correo: 'laura.gomez@gsslatam.com', nombre: 'GÓMEZ RUIZ LAURA', cc: '1020304050', edad: '36', sexo: 'FEMENINO', rh: 'O+', otra: null },
       { correo: 'carlos.mora@farmalogica.com', nombre: 'MORA PEÑA CARLOS', cc: '79876543', edad: '41', sexo: 'MASCULINO', rh: 'A+', otra: 'Prefiero describirlo' },
@@ -233,8 +233,10 @@ test.describe('Portal TH · Formación · formulario propio', () => {
       return r.fulfill({ contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', body: Buffer.from('PK'), headers: { 'Content-Disposition': 'attachment; filename="SST-01-FR-001-respuestas-curso-2.xlsx"' } });
     });
     await page.goto('/portal/formacion');
+    // Las respuestas se ven en la «Vista formador», no en la de estudiante (Cristian, 2026-10-09).
+    await page.getByRole('button', { name: 'Vista formador' }).click();
     await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
-    await page.getByRole('button', { name: 'Ver respuestas' }).click();
+    await page.getByRole('button', { name: 'Respuestas', exact: true }).first().click();
     const panel = page.getByTestId('panel-respuestas');
     await expect(panel.getByTestId('conteo-respuestas')).toHaveText(`3 respuesta(s) · ${curso.titulo}`);
     await expect(panel.getByTestId('tabla-respuestas').locator('tbody tr')).toHaveCount(3);
@@ -249,6 +251,20 @@ test.describe('Portal TH · Formación · formulario propio', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForTimeout(300);
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/12-celular-tabla-respuestas.png` });
+  });
+
+  test('un administrador/formador en «Vista estudiante» NO ve «Ver respuestas» (solo en «Vista formador»)', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 860 });
+    await simular(page, { puedeMarcarManual: true, esFormador: true });
+    await page.goto('/portal/formacion');
+    await page.getByRole('button', { name: 'Vista estudiante' }).click();
+    await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
+    await expect(page.getByTestId('abrir-formulario-4')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Ver respuestas' })).toHaveCount(0);
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/15-vista-estudiante-sin-ver-respuestas.png` });
+    await page.getByRole('button', { name: 'Vista formador' }).click();
+    await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
+    await expect(page.getByRole('button', { name: 'Respuestas', exact: true }).first()).toBeVisible();
   });
 
   test('estudiante sin permiso: no ve "Ver respuestas"', async ({ page }) => {
