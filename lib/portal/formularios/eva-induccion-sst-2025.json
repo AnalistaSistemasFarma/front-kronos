@@ -127,7 +127,8 @@
         "EEl único punto de encuentro es la entrada principal de cada sede",
         "Para la sede administrativa: Bahía Copetran; para la sede operativa: Bahía Arbofarma"
       ],
-      "puntos": 10
+      "puntos": 10,
+      "correcta": 1
     },
     {
       "id": "q8",
