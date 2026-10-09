@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext, type Browser, type Page } from '@playwright/test';
-import { STORAGE_STATE_2, STORAGE_STATE_3 } from '../../playwright.config';
+import { STORAGE_STATE, STORAGE_STATE_2, STORAGE_STATE_3 } from '../../playwright.config';
+import { cancelQuietly, takeElaboration } from './roles';
 
 /**
  * SGC documental · CORRECCIONES DE CALIDAD OLP (reunión 2026-10-02) CON
@@ -17,6 +18,8 @@ import { STORAGE_STATE_2, STORAGE_STATE_3 } from '../../playwright.config';
  *      son @gsslatam.com) sin crear lecturas (la solicitud no se aprueba).
  *   4. Navegación por área → tipo documental.
  *   5. REVISIÓN MENOR de Calidad durante la aprobación y verificación del PDF.
+ * Roles (reglas del 2026-10-05, ver ./roles.ts): qa.sgc3 pide, qa.sgc
+ * (Calidad) elabora y qa.sgc2 revisa, aprueba y verifica como Calidad.
  * Toda solicitud de prueba que llega a la divulgación usa SOLO personas QA y se
  * cancela al final (no se notifica a personas reales). Corre en el proyecto
  * `firma` (sin traza, capturas automáticas ni video): escribe contraseñas.
@@ -84,11 +87,19 @@ test.describe.serial('SGC documental · correcciones de Calidad OLP', () => {
   test.setTimeout(300_000);
   let idRequest = 0;
 
+  // Si una prueba falla a mitad, la solicitud de prueba no queda abierta en pruebas.
+  test.afterAll(async ({ browser }) => {
+    const p1 = await ctxFor(browser, STORAGE_STATE);
+    await cancelQuietly(p1.request, idRequest, 'Limpieza de la prueba e2e de las correcciones de Calidad (corrida interrumpida).');
+    await p1.context().close();
+  });
+
   test('[SGC-REQ-094][SGC-REQ-095][SGC-REQ-096][SGC-REQ-097] documento desde la plantilla institucional: el elaborador ubica las firmas en el documento y el PDF controlado sale con el encabezado, los campos de sistema y las firmas dentro', async ({ browser, page }, testInfo) => {
     const p2 = await ctxFor(browser, STORAGE_STATE_2);
     const p3 = await ctxFor(browser, STORAGE_STATE_3);
-    idRequest = await newRequest(page.request, 'E2E Calidad · firmas en el documento');
-    for (const stepKey of ['revision', 'aprobacion']) await ok(await page.request.post(`/api/sgc/requests/${idRequest}/signers`, { data: { stepKey, signers: [U3], mode: 'orden' } }));
+    idRequest = await newRequest(p3.request, 'E2E Calidad · firmas en el documento');
+    await takeElaboration(page.request, idRequest, U1);
+    for (const stepKey of ['revision', 'aprobacion']) await ok(await page.request.post(`/api/sgc/requests/${idRequest}/signers`, { data: { stepKey, signers: [U2], mode: 'orden' } }));
     await ok(await page.request.post(`/api/sgc/requests/${idRequest}/draft`, { data: { html: TEMPLATE, origin: 'plantilla', originRef: 'Plantilla institucional de procedimiento' } }));
     await addReaders(page.request, idRequest, [U1, U2, U3]);
     const layout = await ok<{ institutionalHeader: boolean; participants: { key: string }[]; suggested: unknown[]; canEdit: boolean }>(await page.request.get(`/api/sgc/requests/${idRequest}/layout`));
@@ -111,9 +122,9 @@ test.describe.serial('SGC documental · correcciones de Calidad OLP', () => {
     await expect(page.getByTestId('sgc-firmas-documento-conteo')).toHaveText('4 de 4 ubicada(s)');
     // Firmas (reautenticación) hasta la aprobación de Calidad.
     await ok(await sign(page.request, await taskId(page.request, idRequest, /^Elaboración/), 'elaboro', PW1));
-    await ok(await sign(p3.request, await taskId(p3.request, idRequest, /^Revisión/), 'reviso', PW3));
-    const apr = await taskId(p3.request, idRequest, /^Aprobación/);
-    await ok(await sign(p3.request, apr, 'aprobo', PW3));
+    await ok(await sign(p2.request, await taskId(p2.request, idRequest, /^Revisión/), 'reviso', PW2));
+    const apr = await taskId(p2.request, idRequest, /^Aprobación/);
+    await ok(await sign(p2.request, apr, 'aprobo', PW2));
     const res = await ok<{ controlledPdf: { status: string } }>(await sign(p2.request, apr, 'aprobo', PW2, { checklist: CHECKLIST }));
     expect(res.controlledPdf.status).toBe('generado');
     // El PDF controlado (copia del visor): encabezado y firmas dentro del documento.
@@ -166,9 +177,12 @@ test.describe.serial('SGC documental · correcciones de Calidad OLP', () => {
     }
   });
 
-  test('[SGC-REQ-098] «toda la empresa» solo incluye correos de la empresa: los QA (@gsslatam.com) quedan por fuera del alcance automático', async ({ page }) => {
-    const id = await newRequest(page.request, 'E2E Calidad · alcance por empresa');
+  test('[SGC-REQ-098] «toda la empresa» solo incluye correos de la empresa: los QA (@gsslatam.com) quedan por fuera del alcance automático', async ({ browser, page }) => {
+    const p3 = await ctxFor(browser, STORAGE_STATE_3);
+    const id = await newRequest(p3.request, 'E2E Calidad · alcance por empresa');
+    await p3.context().close();
     try {
+      await takeElaboration(page.request, id, U1);
       await ok(await page.request.post(`/api/sgc/requests/${id}/dissemination`, { data: { action: 'agregar', entry: { kind: 'empresa' }, reason: 'Prueba del alcance por empresa (no se aprueba)' } }), [201]);
       const view = await ok<{ dissemination: { companyDomains: string[] | null; outsideCompany: string[] } }>(await page.request.get(`/api/sgc/requests/${id}`));
       expect(view.dissemination.companyDomains).toEqual(['onelatampharma.com']);
@@ -194,6 +208,10 @@ test.describe.serial('SGC documental · correcciones de Calidad OLP', () => {
   });
 
   test('[SGC-REQ-102] Calidad hace una revisión menor durante la aprobación (con motivo) sin devolver el documento; el PDF controlado la declara y verifica', async ({ browser, page }) => {
+    // Desde el 2026-10-05 quien pide no elabora y Calidad (qa.sgc) no puede ser la elaboradora para hacer la
+    // revisión menor: con solo tres QA no hay quién pida (qa.sgc2 revisa y verifica como Calidad).
+    // Requiere un cuarto usuario QA solo con permiso de gestión (propuesta qa.sgc4).
+    test.skip(true, 'Requiere un cuarto usuario QA (qa.sgc4): con las reglas del 2026-10-05 tres usuarios no alcanzan para solicitante, elaborador, firmante y Calidad.');
     const p2 = await ctxFor(browser, STORAGE_STATE_2);
     const p3 = await ctxFor(browser, STORAGE_STATE_3);
     // Elabora qa.sgc3 (así Calidad, qa.sgc, no es la elaboradora); revisa y aprueba qa.sgc2.

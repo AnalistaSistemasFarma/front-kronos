@@ -1,15 +1,19 @@
 import { expect, test, type APIRequestContext, type Browser, type Page } from '@playwright/test';
-import { STORAGE_STATE_2, STORAGE_STATE_3 } from '../../playwright.config';
+import { STORAGE_STATE, STORAGE_STATE_2, STORAGE_STATE_3 } from '../../playwright.config';
+import { cancelQuietly, takeElaboration, U1 } from './roles';
 
 /**
  * SGC documental · Sprint 3 CON SESIÓN, contra PRUEBAS (KRONOSDB_PRUEBAS):
  * recorrido del flujo documental con la FIRMA ELECTRÓNICA PROPIA del SGC.
- *   - qa.sgc crea la solicitud, edita el borrador EN LA APP y firma «Elaboró»
- *     (primero con una contraseña errada: no se firma);
- *   - qa.sgc2 y qa.sgc3 firman «Revisó» EN PARALELO;
- *   - la aprobación va EN ORDEN (qa.sgc2 → qa.sgc3 → grupo de Calidad, que
- *     responde la lista de chequeo de estructura documental) desde
- *     Autorizaciones SGC y la tarea;
+ *   - qa.sgc3 crea la solicitud; el elaborador lo fija la configuración y
+ *     Calidad (qa.sgc) toma la elaboración (reglas del 2026-10-05, ver
+ *     ./roles.ts: quien pide no elabora, ni revisa, ni aprueba);
+ *   - qa.sgc edita el borrador EN LA APP y firma «Elaboró» (primero con una
+ *     contraseña errada: no se firma);
+ *   - qa.sgc2 firma «Revisó» (modo en paralelo; dos revisores distintos
+ *     requieren un cuarto usuario QA);
+ *   - la aprobación va EN ORDEN (qa.sgc2 → grupo de Calidad, que responde la
+ *     lista de chequeo de estructura documental) desde Autorizaciones SGC;
  *   - al cerrar la Aprobación sale el PDF CONTROLADO con su manifiesto, que
  *     se verifica, y el reporte de auditoría del documento lo muestra.
  * Este archivo corre en el proyecto `firma` (sin traza, capturas ni video):
@@ -84,18 +88,30 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
   test.skip(!hasThree || !PW1, 'Requiere los usuarios de pruebas qa.sgc, qa.sgc2 y qa.sgc3 (secretos E2E_SGC_USER*/E2E_SGC_PASSWORD*).');
   let idRequest = 0;
 
-  test('[SGC-REQ-028][SGC-REQ-032] qa.sgc crea la solicitud documental y la ve en su bandeja de Tareas documentales', async ({ page }) => {
-    await page.goto(`/process/sgc-documental/solicitudes/nueva?empresa=${OLP}`);
-    await chooseOption(page, 'sgc-nueva-proceso', /^GC · /);
-    await chooseOption(page, 'sgc-nueva-tipo-documental', /^PR · /);
-    await page.getByTestId('sgc-nueva-asunto').fill(`E2E S3 · procedimiento firmado ${new Date().toISOString()}`);
-    await page.getByTestId('sgc-nueva-justificacion').fill('Recorrido automático de la e2e del Sprint 3 (datos de prueba, firma electrónica).');
-    await chooseOption(page, 'sgc-campo-urgencia', 'Normal');
+  // Si una prueba falla a mitad, la solicitud de prueba no queda abierta en pruebas.
+  test.afterAll(async ({ browser }) => {
+    const p1 = await asUser(browser, STORAGE_STATE);
+    await cancelQuietly(p1.request, idRequest, 'Limpieza de la prueba e2e del S3 (corrida interrumpida).');
+    await p1.context().close();
+  });
+
+  test('[SGC-REQ-028][SGC-REQ-032] qa.sgc3 crea la solicitud documental, el elaborador sale de la configuración y Calidad (qa.sgc) la ve en su bandeja de Tareas documentales', async ({ browser, page }) => {
+    const p3 = await asUser(browser, STORAGE_STATE_3);
+    await p3.goto(`/process/sgc-documental/solicitudes/nueva?empresa=${OLP}`);
+    await chooseOption(p3, 'sgc-nueva-proceso', /^GC · /);
+    await chooseOption(p3, 'sgc-nueva-tipo-documental', /^PR · /);
+    await p3.getByTestId('sgc-nueva-asunto').fill(`E2E S3 · procedimiento firmado ${new Date().toISOString()}`);
+    await p3.getByTestId('sgc-nueva-justificacion').fill('Recorrido automático de la e2e del Sprint 3 (datos de prueba, firma electrónica).');
+    await chooseOption(p3, 'sgc-campo-urgencia', 'Normal');
     // Sprint 10: esta e2e prueba la firma (no la capacitación): la solicitud se crea sin capacitación.
-    await chooseOption(page, 'sgc-nueva-capacitacion', 'No requiere capacitación');
-    await page.getByTestId('sgc-nueva-crear').click();
-    await page.waitForURL(/\/process\/sgc-documental\/solicitudes\/\d+/, { timeout: 45_000 });
-    idRequest = Number(/solicitudes\/(\d+)/.exec(page.url())![1]);
+    await chooseOption(p3, 'sgc-nueva-capacitacion', 'No requiere capacitación');
+    // 2026-10-05: quien pide ya no elige al elaborador.
+    await expect(p3.getByTestId('sgc-nueva-elaborador')).toHaveCount(0);
+    await p3.getByTestId('sgc-nueva-crear').click();
+    await p3.waitForURL(/\/process\/sgc-documental\/solicitudes\/\d+/, { timeout: 45_000 });
+    idRequest = Number(/solicitudes\/(\d+)/.exec(p3.url())![1]);
+    await p3.context().close();
+    await takeElaboration(page.request, idRequest, U1);
     await page.goto(`/process/sgc-documental/tareas?empresa=${OLP}`);
     await expect(page.locator(`[data-testid="bandeja-fila"][data-request="${idRequest}"]`)).toContainText('Elaboración');
   });
@@ -113,7 +129,7 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
     await expect(page.getByTestId('sgc-borrador-mensaje')).toContainText('Revisión 1 guardada');
     await expect(page.getByTestId('sgc-borrador-fila')).toHaveCount(1);
     for (const [stepKey, mode] of [['revision', 'paralelo'], ['aprobacion', 'orden']] as const) {
-      const r = await page.request.post(`/api/sgc/requests/${idRequest}/signers`, { data: { stepKey, signers: [U2, U3], mode } });
+      const r = await page.request.post(`/api/sgc/requests/${idRequest}/signers`, { data: { stepKey, signers: [U2], mode } });
       expect(r.status()).toBe(200);
     }
   });
@@ -140,17 +156,19 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
     await expect(page.getByTestId('sgc-historial')).toContainText('firmó como «Elaboró»');
   });
 
-  test('[SGC-REQ-029][SGC-REQ-040] qa.sgc2 y qa.sgc3 firman «Revisó» EN PARALELO sobre el mismo contenido', async ({ browser }) => {
+  test('[SGC-REQ-029][SGC-REQ-040] qa.sgc2 firma «Revisó» (modo en paralelo) sobre el mismo contenido; qa.sgc3, que pidió, no revisa', async ({ browser }) => {
     const p2 = await asUser(browser, STORAGE_STATE_2);
     const p3 = await asUser(browser, STORAGE_STATE_3);
-    const r3 = await taskRow(p3.request, idRequest, /^Revisión/);
-    expect((await taskRow(p2.request, idRequest, /^Revisión/))?.status).toBe('abierta');
-    await signInTask(p3, r3!.idTask, /Resuelto — aprobar/, PW3, 'Revisé el contenido y es técnicamente correcto.');
+    // 2026-10-05: quien pidió no revisa ni aprueba (el servidor no le asigna la tarea).
+    expect((await taskRow(p3.request, idRequest, /^Revisión/))?.status).not.toBe('abierta');
     const draft = await draftOf(p2.request, idRequest);
     const r2 = await taskRow(p2.request, idRequest, /^Revisión/);
-    const res = await p2.request.post(`/api/sgc/tasks/${r2!.idTask}/sign`, { data: { meaning: 'reviso', reason: 'Revisado sin observaciones (e2e).', consentAccepted: true, password: PW2, draftRef: draft.ref, draftSha256: draft.sha256 } });
-    expect(res.status()).toBe(200);
-    expect(await res.json()).toMatchObject({ outcome: 'resuelta', next: 'aprobacion' });
+    expect(r2?.status).toBe('abierta');
+    await signInTask(p2, r2!.idTask, /Resuelto — aprobar/, PW2, 'Revisé el contenido y es técnicamente correcto.');
+    const after = (await (await p2.request.get(`/api/sgc/requests/${idRequest}`)).json()) as { request: { currentTaskKey: string } };
+    expect(after.request.currentTaskKey).toBe('aprobacion');
+    // Firmó sobre el mismo contenido que dejó el elaborador.
+    expect((await draftOf(p2.request, idRequest)).sha256).toBe(draft.sha256);
     await p2.context().close();
     await p3.context().close();
   });
@@ -164,9 +182,6 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
     await fillSignature(p2, PW2, 'Apruebo el documento para su emisión.');
     await p2.getByTestId('sgc-firma-confirmar').click();
     await expect(p2.getByTestId('sgc-autorizaciones-mensaje')).toContainText('Autorización registrada');
-
-    const a3 = await taskRow(p3.request, idRequest, /^Aprobación/);
-    await signInTask(p3, a3!.idTask, /Resuelto — autorizar/, PW3, 'Apruebo el documento para su emisión.');
 
     await p2.reload();
     const pool = p2.locator(`[data-testid="sgc-autorizacion-fila"][data-request="${idRequest}"][data-status="pendiente"]`).filter({ hasText: 'Verificación de estructura documental' });
@@ -185,7 +200,7 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
     };
     // Desde el Sprint 4 la divulgación está habilitada: la solicitud sigue ABIERTA en «Divulgación».
     expect(detail.request).toMatchObject({ status: 'abierta', currentTaskKey: 'divulgacion' });
-    expect(detail.signatures.map((s) => s.meaning)).toEqual(['elaboro', 'reviso', 'reviso', 'aprobo', 'aprobo', 'aprobo']);
+    expect(detail.signatures.map((s) => s.meaning)).toEqual(['elaboro', 'reviso', 'aprobo', 'aprobo']);
     expect(detail.qualityChecks[0]).toMatchObject({ result: 'conforme' });
     expect(detail.controlledPdf).toMatchObject({ status: 'generado' });
     await p2.context().close();
