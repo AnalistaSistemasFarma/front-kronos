@@ -1,0 +1,165 @@
+{
+ "commit": "1a1fd46",
+ "dicebear": "9.4.3",
+ "casos": [
+  {
+   "owner": "agent",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"Atlas\",\"hair\":\"variant37\",\"head\":\"variant01\",\"eyes\":\"variant22\",\"eyebrows\":\"variant06\",\"mouth\":\"happy02\",\"nose\":\"variant03\",\"glasses\":null,\"earrings\":null,\"beard\":null,\"freckles\":null,\"hairAccessories\":null,\"hairColor\":\"000000\",\"skinColor\":\"ffffff\",\"backgroundColor\":\"f2f2f2\",\"flip\":false}",
+   "svg": "9504b1a5f8a6e09cbcffe355421fd529df397942fe54fe8f720681c97b76b331",
+   "svgTitulo64": "a3eaf1f07f279c812e3d33df88d4cacdab4a092b69bb5651f847548fc7260eed",
+   "dataUri": "51eb887617c6df6cc564589e081e0a52fe6b17966c3bfef8af965356a1690cae",
+   "thumbs": "d402f5e02f6ab6627f5bb0925f1ea15aac74c7c3340522ddc265f09169928870",
+   "agente": "2618f5a8ed81718666d8559c7378d171dd3955f0486ca2584fb913b9bb95716d"
+  },
+  {
+   "owner": "agent",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"Galileo\",\"hair\":\"variant01\",\"head\":\"variant02\",\"eyes\":\"variant02\",\"eyebrows\":\"variant08\",\"mouth\":\"happy03\",\"nose\":\"variant03\",\"glasses\":null,\"earrings\":\"variant01\",\"beard\":null,\"freckles\":null,\"hairAccessories\":null,\"hairColor\":\"000000\",\"skinColor\":\"ffffff\",\"backgroundColor\":\"f2f2f2\",\"flip\":false}",
+   "svg": "f112f7a6b912fcc21b54c441411e352627c7e5a662d15f9852e9d9149175fd6e",
+   "svgTitulo64": "dfa6c3f330e984728eff38f4b7a2dec94d432302ac9e17a7e71b7c478b92a569",
+   "dataUri": "1a3d2d052f6ce757f4f38b3624d345b166fcbe524d217006deabb9140041d29a",
+   "thumbs": "9e408c4407176d61aba02608895a00364ca9461357c2b1de8eb427dff6b24716",
+   "agente": "83449af216d93b16207ebd35e63a995d7726fb3f5443e64f27f7b8808c7a8819"
+  },
+  {
+   "owner": "agent",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"Kepler\",\"hair\":\"variant06\",\"head\":\"variant03\",\"eyes\":\"variant23\",\"eyebrows\":\"variant12\",\"mouth\":\"happy08\",\"nose\":\"variant06\",\"glasses\":null,\"earrings\":null,\"beard\":null,\"freckles\":null,\"hairAccessories\":null,\"hairColor\":\"000000\",\"skinColor\":\"ffffff\",\"backgroundColor\":\"f2f2f2\",\"flip\":false}",
+   "svg": "c1902eeb76dba28272fdb18501b8554e1904ec025dfc93de3ef1862babb04ecd",
+   "svgTitulo64": "04333d04b192f1950c0bb14da4eba58aa43f83db67bbe3efdae8123dc54d109b",
+   "dataUri": "4d39daafecad4aa7755550f9a08a34dc24369fdcfb2569217e2eefb9cc2a2874",
+   "thumbs": "e43afcdc956e80f6ceec29a24ecc31f51e89324d30072510032c264274f789ee",
+   "agente": "23670f004ba7de921933491dee74bf41ac10d09a435d9f2ccab7e44fd026bca9"
+  },
+  {
+   "owner": "agent",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"Mercurio\",\"hair\":\"variant22\",\"head\":\"variant04\",\"eyes\":\"variant09\",\"eyebrows\":\"variant01\",\"mouth\":\"happy05\",\"nose\":\"variant02\",\"glasses\":null,\"earrings\":null,\"beard\":null,\"freckles\":null,\"hairAccessories\":null,\"hairColor\":\"000000\",\"skinColor\":\"ffffff\",\"backgroundColor\":\"f2f2f2\",\"flip\":false}",
+   "svg": "aed2fe2dccd57faf8194b2242c40f03a3553cea90318a63510e70b5b7b932e3f",
+   "svgTitulo64": "cf1767278076de9e154b988728f5a368c83eeb562cbbcf4e1031c8986a72bca0",
+   "dataUri": "e348b958b966d3e37e655231e7af8e7dc3d7cfd3b0c5193a80733ea1d4a05449",
+   "thumbs": "38618b00f5115fb23198aba3f700454549de6689de72f357039717c1e897b373",
+   "agente": "7a35cc7842df383f66c57f8ccff41bbf736de91348b477cc866363f579584201"
+  },
+  {
+   "owner": "agent",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"Orión\",\"hair\":\"variant30\",\"head\":\"variant02\",\"eyes\":\"variant16\",\"eyebrows\":\"variant08\",\"mouth\":\"happy15\",\"nose\":\"variant03\",\"glasses\":\"variant03\",\"earrings\":null,\"beard\":\"variant02\",\"freckles\":null,\"hairAccessories\":null,\"hairColor\":\"000000\",\"skinColor\":\"ffffff\",\"backgroundColor\":\"f2f2f2\",\"flip\":false}",
+   "svg": "f8758a02f6fac570f03d0f4eefc9dcc2a7843e46160a255476697195e8755bcb",
+   "svgTitulo64": "9d14e614ea3a8a4bdbcbf2e2221bfa1b2a917caaf83c7921a1540f8486ac5821",
+   "dataUri": "186a31a2c5e23a308d4abe834e42de4c7b912597d5e4dceac320d32da2d780d7",
+   "thumbs": "aa0cbb6b88de041acfed722788ad115828ebbae5ca4f4077208292b79a6b719a",
+   "agente": "165775b8a11f5c7b091c3d8a0ac13c57e20c3c8f744d69e5bf0fa303b6495957"
+  },
+  {
+   "owner": "agent",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"Sirio\",\"hair\":\"variant03\",\"head\":\"variant04\",\"eyes\":\"variant23\",\"eyebrows\":\"variant12\",\"mouth\":\"happy15\",\"nose\":\"variant02\",\"glasses\":null,\"earrings\":null,\"beard\":null,\"freckles\":null,\"hairAccessories\":null,\"hairColor\":\"000000\",\"skinColor\":\"ffffff\",\"backgroundColor\":\"f2f2f2\",\"flip\":false}",
+   "svg": "1eb3918adf25bb94f24da8d8bd93a442b0da123ed05e074ac932eb7ea7b55136",
+   "svgTitulo64": "50781c4450f84365475eb6c5584e3bf6133d37bd9bfc39edc02da9fb341b1b3c",
+   "dataUri": "476a78a72e097cee38e07e0fe26c744431fc52c1c635b4a2856f5268c9d41e6b",
+   "thumbs": "b58c2d9222a1bf08e28bce79a7f59a7f413c6d819ce3ecb0ef8904791a6bf1cf",
+   "agente": "551835e20788cf123cfe56504b4f7de2fe10a79e74a8bd6726cc23af3b9914bb"
+  },
+  {
+   "owner": "agent",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"Vega\",\"hair\":\"variant15\",\"head\":\"variant01\",\"eyes\":\"variant15\",\"eyebrows\":\"variant07\",\"mouth\":\"happy11\",\"nose\":\"variant06\",\"glasses\":null,\"earrings\":null,\"beard\":null,\"freckles\":null,\"hairAccessories\":null,\"hairColor\":\"000000\",\"skinColor\":\"ffffff\",\"backgroundColor\":\"f2f2f2\",\"flip\":false}",
+   "svg": "ccd038febffe6fc2c3453caab36d9ab66bcc6f94866ad81ae06e2aa3ae2753b8",
+   "svgTitulo64": "e037bd3eb9acbed666a3d7683c7ca91a3e4dcfd8f6d778efe5a83b7064e46684",
+   "dataUri": "c2c59041a398fe98871a5091e3011abd59c7c51650fbf689ff82ff2f30bdbaba",
+   "thumbs": "91c8313df07f33c26bcc0fe8e376a8c7379de4d017d6c1a39535ef9bc346cdf1",
+   "agente": "8ab27435697db9fcbf5731fcbf7408c332922fd8b3d43470cce306a77b54d950"
+  },
+  {
+   "owner": "user",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"nicolas\",\"hair\":\"variant45\",\"head\":\"variant01\",\"eyes\":\"variant09\",\"eyebrows\":\"variant04\",\"mouth\":\"happy15\",\"nose\":\"variant02\",\"glasses\":null,\"earrings\":null,\"beard\":null,\"freckles\":null,\"hairAccessories\":null,\"hairColor\":\"000000\",\"skinColor\":\"ffffff\",\"backgroundColor\":\"f2f2f2\",\"flip\":true}",
+   "svg": "5fed59388d76179cb10d786bfdcca013073590190808bdab4f2fec77828e6ed7",
+   "svgTitulo64": "f3e5914f0b00b63a0713c50f8cbebf484c83b9bf7e1399ec761d83d6d14feddf",
+   "dataUri": "95d2b3e0a93f9f5e0cec3b4a0f6c89137cb48b38599b2be1c39122367f028245",
+   "thumbs": "4d2029716f1e37bcd366ae853fc85ddb116717394f6b37b7aead182d29f88005"
+  },
+  {
+   "owner": "user",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"duo\",\"hair\":\"variant36\",\"head\":\"variant02\",\"eyes\":\"variant19\",\"eyebrows\":\"variant01\",\"mouth\":\"sad02\",\"nose\":\"variant03\",\"glasses\":\"variant02\",\"earrings\":\"variant01\",\"beard\":null,\"freckles\":null,\"hairAccessories\":null,\"hairColor\":\"000000\",\"skinColor\":\"ffffff\",\"backgroundColor\":\"f2f2f2\",\"flip\":false}",
+   "svg": "dfada1c1ce31f986167dcd268fd88cd63b6cd0a6f17d5eeea04b9dbdb4911ea4",
+   "svgTitulo64": "edad4abc54e46f2d0aeffba648a653c3c8e54e216f354f25915783db401d7d4d",
+   "dataUri": "892f55b11f0748b00221fa64449cb3931301ce34e737fdde7c41d8b46beefe14",
+   "thumbs": "038c49fdb6d4ec402dc2d33061e308775cff28fc5e272b4d51fe956d28bd5611"
+  },
+  {
+   "owner": "user",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"horus\",\"hair\":\"variant18\",\"head\":\"variant03\",\"eyes\":\"variant13\",\"eyebrows\":\"variant10\",\"mouth\":\"happy08\",\"nose\":\"variant05\",\"glasses\":null,\"earrings\":null,\"beard\":\"variant01\",\"freckles\":\"variant01\",\"hairAccessories\":\"flowers\",\"hairColor\":\"000000\",\"skinColor\":\"ffffff\",\"backgroundColor\":\"f2f2f2\",\"flip\":false}",
+   "svg": "a5531f515631e33f606c61ee81db709389841e96449d72fed07c31cab6b7c5ee",
+   "svgTitulo64": "28e86f0dc79d7310b4cea556025abe21b15e74db2df3a6a0598aa68eec13b732",
+   "dataUri": "14b87aeebdcb3671441ecd3e0791793f042970ea1c0e1f683119d0db9837e27c",
+   "thumbs": "9827edc1ff342f632b38c9cda21c35f869fb388fd8ba2cc7c7ecad76b4a66a0b"
+  },
+  {
+   "owner": "user",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"ana\",\"hair\":\"variant14\",\"head\":\"variant04\",\"eyes\":\"variant04\",\"eyebrows\":\"variant05\",\"mouth\":\"happy08\",\"nose\":\"variant01\",\"glasses\":null,\"earrings\":null,\"beard\":null,\"freckles\":null,\"hairAccessories\":null,\"hairColor\":\"a55728\",\"skinColor\":\"d08b5b\",\"backgroundColor\":\"transparent\",\"flip\":true}",
+   "svg": "c70eba1b6ef77ab101cfb20d3a17a3d20d28c0754219a7596d79cbd836407072",
+   "svgTitulo64": "68826d60a99b1edf1974f68023a178afedb744fb49b970d34d3f00db4c440350",
+   "dataUri": "bc566a3b4ffc101bb0c2c00cfec93e556aca88ae6e3ae52870bb873930fa435a",
+   "thumbs": "9b2a91aae18eb2c081e3cc290a0982aefb88e5e113b336ffd6fc969d9a84aa4a"
+  },
+  {
+   "owner": "user",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"x1\",\"hair\":\"variant30\",\"head\":\"variant01\",\"eyes\":\"variant07\",\"eyebrows\":\"variant09\",\"mouth\":\"happy07\",\"nose\":\"variant06\",\"glasses\":\"variant05\",\"earrings\":null,\"beard\":null,\"freckles\":null,\"hairAccessories\":\"flowers\",\"hairColor\":\"000000\",\"skinColor\":\"ffffff\",\"backgroundColor\":\"f2f2f2\",\"flip\":false}",
+   "svg": "f4bdd62ebd9ad06538e61c950be58a1907b11f878996e6a5b6a79b29c30d0705",
+   "svgTitulo64": "294d020955893f0d8055873b6978d39d3944b5e8d86a8ba1f377eca4aaec3f68",
+   "dataUri": "f1a4808273f6d7cf85708279a97b25114a7eaf0793f29d5692860459dfbea02e",
+   "thumbs": "b57aecabf1d9c1a0725658a6628137c132ecf8bea71acc9846dc0b527a9821bf"
+  },
+  {
+   "owner": "user",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"x2\",\"hair\":\"variant29\",\"head\":\"variant02\",\"eyes\":\"variant22\",\"eyebrows\":\"variant11\",\"mouth\":\"happy07\",\"nose\":\"variant01\",\"glasses\":\"variant01\",\"earrings\":\"variant01\",\"beard\":\"variant01\",\"freckles\":null,\"hairAccessories\":null,\"hairColor\":\"000000\",\"skinColor\":\"ffffff\",\"backgroundColor\":\"f2f2f2\",\"flip\":false}",
+   "svg": "35406d8c9ddc7b1f9349ba4ed3f83a503725e519eab35537b2e2130213a77104",
+   "svgTitulo64": "8e8cd23caccc785b0c1db5c96c2b31fb42e4e7f559502da809a4c19d8bc11bc3",
+   "dataUri": "2ee683c6900c2035a76371b1ba6f57410fbeca56d8d8963f4f22c1aaee808f74",
+   "thumbs": "ce0723f15df4bb8be4539230649ee9ecf07dace64fdfcb9463b8754416fc3dee"
+  },
+  {
+   "owner": "user",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"x3\",\"hair\":\"variant26\",\"head\":\"variant03\",\"eyes\":\"variant10\",\"eyebrows\":\"variant01\",\"mouth\":\"sad02\",\"nose\":\"variant04\",\"glasses\":null,\"earrings\":null,\"beard\":null,\"freckles\":null,\"hairAccessories\":null,\"hairColor\":\"000000\",\"skinColor\":\"ffffff\",\"backgroundColor\":\"f2f2f2\",\"flip\":true}",
+   "svg": "c430f704c604f7fcb686ae8c177d3dc37f766d319a1c6798141e5f53ce84878d",
+   "svgTitulo64": "8bc6003012c54d56301a6cffecf8d64eb965b70b742db92366194bcb7f776cd5",
+   "dataUri": "868fda98814cb1ae412ebebb3a75a175c35f18e44d59057c93a99852aeab385c",
+   "thumbs": "0311385dea073f57f8929a13a271e87377e8ced4c3a350385833ea539587e1d4"
+  },
+  {
+   "owner": "user",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"x4\",\"hair\":\"variant25\",\"head\":\"variant04\",\"eyes\":\"variant19\",\"eyebrows\":\"variant07\",\"mouth\":\"sad04\",\"nose\":\"variant03\",\"glasses\":null,\"earrings\":null,\"beard\":\"variant01\",\"freckles\":\"variant01\",\"hairAccessories\":\"flowers\",\"hairColor\":\"a55728\",\"skinColor\":\"d08b5b\",\"backgroundColor\":\"transparent\",\"flip\":false}",
+   "svg": "f1498231e9254eebb3be4d63a3f0643aac805e42229f986bce71c4fe98cf9611",
+   "svgTitulo64": "4e19acbf0a26c3eb01f2671ca2de3757bf3aa78fc7e484fa65fe219c9eb2516b",
+   "dataUri": "74923104d3862b269721656004ecced3829a5f2ea414da58f2e03a0e1178ada3",
+   "thumbs": "832f8fe3e35f32ce297e8a4d7f54cc5dad6f1590b8e45abc74b951c6e2547829"
+  },
+  {
+   "owner": "user",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"x5\",\"hair\":\"variant27\",\"head\":\"variant01\",\"eyes\":\"variant13\",\"eyebrows\":\"variant03\",\"mouth\":\"happy01\",\"nose\":\"variant06\",\"glasses\":null,\"earrings\":null,\"beard\":null,\"freckles\":null,\"hairAccessories\":null,\"hairColor\":\"000000\",\"skinColor\":\"ffffff\",\"backgroundColor\":\"f2f2f2\",\"flip\":false}",
+   "svg": "e5711e9ec37cd344af2708cfbd7d30d65e4121db5faf31db6e2d14972c0d3d27",
+   "svgTitulo64": "a830748657fc009c15fef4dc855ed64c8c3d8a2c89d0a8349081c278ef2c8628",
+   "dataUri": "c7a9aa28e3b06dc4603f1c5ca33c1d45a8eb4443c37c55736bd087348491dfeb",
+   "thumbs": "fd349c9ed60c5fff713d859366c3de86c22b700dc639f09e83700c872298dad0"
+  },
+  {
+   "owner": "user",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"x6\",\"hair\":\"variant26\",\"head\":\"variant02\",\"eyes\":\"variant04\",\"eyebrows\":\"variant04\",\"mouth\":\"happy13\",\"nose\":\"variant01\",\"glasses\":\"variant05\",\"earrings\":\"variant01\",\"beard\":null,\"freckles\":null,\"hairAccessories\":null,\"hairColor\":\"000000\",\"skinColor\":\"ffffff\",\"backgroundColor\":\"f2f2f2\",\"flip\":true}",
+   "svg": "fcde9eb928d3381407b9b8560998eb2841c890566cdc6e5216831961d39c5da9",
+   "svgTitulo64": "6ff04d4eac1502df08685ab339c25a15206ca6e3b36906991283feef2ce410b3",
+   "dataUri": "dffa56aaefae1f654cd9e324623b4926ff8d50558e241ee7d965f83a0ed34ec2",
+   "thumbs": "33f96937d749422007863700943667783a16f7c5d3b42386b2ff98d3a1bd8ff1"
+  },
+  {
+   "owner": "user",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"x7\",\"hair\":\"variant35\",\"head\":\"variant03\",\"eyes\":\"variant09\",\"eyebrows\":\"variant13\",\"mouth\":\"happy15\",\"nose\":\"variant05\",\"glasses\":null,\"earrings\":null,\"beard\":null,\"freckles\":null,\"hairAccessories\":null,\"hairColor\":\"000000\",\"skinColor\":\"ffffff\",\"backgroundColor\":\"f2f2f2\",\"flip\":false}",
+   "svg": "f5e8bffed572bc47674c04db1df37d4f431618fe8c75b79d687495bc2c57e2a1",
+   "svgTitulo64": "a0f96d4e6ddb5145c354cea894be696974c94a4f3512db0893c1a02340ca26e0",
+   "dataUri": "46c17ecef8fae07a0ce26a22e7c8666735b0db2c4e127ae790b2200e09d7f93b",
+   "thumbs": "c6989f0ccfc1b96f57948366b37161b9cbd9dff0aff37b174c57bdd6b4a69c0d"
+  },
+  {
+   "owner": "user",
+   "json": "{\"v\":3,\"estilo\":\"lorelei\",\"seed\":\"x8\",\"hair\":\"variant34\",\"head\":\"variant04\",\"eyes\":\"variant24\",\"eyebrows\":\"variant08\",\"mouth\":\"sad07\",\"nose\":\"variant02\",\"glasses\":null,\"earrings\":null,\"beard\":null,\"freckles\":null,\"hairAccessories\":null,\"hairColor\":\"a55728\",\"skinColor\":\"d08b5b\",\"backgroundColor\":\"transparent\",\"flip\":false}",
+   "svg": "fefee0fb427342820d3c6f016afd644e839183cf4e2f0055c22af0f054b2871b",
+   "svgTitulo64": "923e0bcdee07530532116d3b1d6e12de61d6ba8905edd604b86714f433cc82a2",
+   "dataUri": "87c2d1c9fae9cdd86aa5101fbbc61ff0ea8db6f84e8226005a9d3ac4968932b6",
+   "thumbs": "c176ea61dda797e670194db7f08c3a91f62db5b07df3244c9fbe9746e95c517a"
+  }
+ ]
+}

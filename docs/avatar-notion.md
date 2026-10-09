@@ -38,40 +38,41 @@ Decisión de Nicolás Rivera: el feature se adapta a lo que trae la librería. E
 
 ### Asistentes del chat
 
-Si el asistente es una **persona Lorelei** aplica lo siguiente (desde el 2026-10-08 también puede ser una figura: ver «Figuras para los asistentes»).
+En los asistentes aplica lo siguiente (desde el 2026-10-08 su cabeza también puede ser una figura: ver «Cabezas-figura para los asistentes»).
 
 - **Semilla = nombre del asistente** (Atlas, Galileo, Kepler, Mercurio, Orión, Sirio, Vega…). Es el avatar con el que abre el editor si aún no tiene uno, y el servidor guarda siempre `seed` = nombre del asistente.
 - **Bocas limitadas a `happy*`**: el editor solo las ofrece, el aleatorio solo las elige y el servidor rechaza cualquier otra (`parseAvatarConfig(…, 'agent')`).
 
-## Figuras para los asistentes (2026-10-08)
+## Cabezas-figura para los asistentes (2026-10-08)
 
-Pedido de Nicolás Rivera (SynerLink c47): en **Perfil → Avatar de mis asistentes** el avatar de un asistente puede ser, además de una persona Lorelei, una **figura**. Solo cambia esa sección: el avatar de las personas (Mi avatar) sigue igual.
+Pedido de Nicolás Rivera (SynerLink c47, mensajes 15785 y anteriores): en **Perfil → Avatar de mis asistentes**, las figuras (animales, planetas, constelaciones, estrellas, robots) son **opciones adicionales del selector «Cabezas»** de Lorelei, después de Cabeza 1…4, para que sean **compatibles con los demás accesorios**: sobre la figura se siguen componiendo ojos, cejas, boca, nariz, gafas, aretes, pecas, barba, flores y pelo (o «Ninguno»), con sus colores. Sustituye a la primera versión (#554), que las ponía en pestañas aparte con caritas propias. El avatar de las personas (Mi avatar) y su editor no cambian.
 
-![Figuras de asistentes](avatar-notion/figuras-asistentes.png)
+![Cabezas-figura de asistentes](avatar-notion/cabezas-figura.png)
 
-- **Selector de tipo** encima del editor: Persona · Animal · Planeta · Constelación · Estrella · Robot. *Persona* es el editor Lorelei de siempre (semilla = nombre del asistente, solo bocas `happy*`).
-- **Figuras** (`lib/avatar/figuras.ts`), cada una con su variante, expresión, accesorio y tres colores:
+| Grupo | Cabezas-figura (valor de `head`: `figura:<id>`) |
+|---|---|
+| Animal (12) | gato, perro, zorro, búho, oso, conejo, panda, león, pingüino, koala, mono, pulpo |
+| Planeta (10) | Mercurio (con alas), Venus, Tierra, Marte, Júpiter, Saturno (anillos), Urano (anillo vertical), Neptuno, Plutón (corazón), Luna |
+| Constelación (12) | Orión, Osa Mayor, Casiopea, Escorpio, Lira (Vega), Can Mayor (Sirio), Cruz del Sur, Leo, Cisne, Osa Menor, Pléyades (Atlas), Géminis — en la frente, con las coordenadas reales de sus estrellas |
+| Estrella (5) | sol, estrella, destello, media luna, cometa |
+| Robot (4) | clásico, pantalla, redondo, cubo |
 
-| Tipo | Variantes | Accesorios |
-|---|---|---|
-| Animal (12) | gato, perro, zorro, búho, oso, conejo, panda, león, pingüino, koala, mono, pulpo | gafas, gafas de sol, audífonos, sombrero, gorra, flor |
-| Planeta (10) | Mercurio (con alas), Venus, Tierra, Marte, Júpiter, Saturno (anillos), Urano, Neptuno, Plutón (corazón), Luna | una luna, dos lunas, anillo, chispas, cohete, gafas de sol |
-| Constelación (12) | Orión, Osa Mayor, Casiopea, Escorpio, Lira (Vega), Can Mayor (Sirio), Cruz del Sur, Leo, Cisne, Osa Menor, Pléyades (Atlas), Géminis — con las coordenadas reales de sus estrellas | chispas, luna |
-| Estrella (5) | sol, estrella, destello, media luna, cometa | chispas, gafas de sol, gorro de fiesta |
-| Robot (4) | clásico, pantalla, redondo, cubo | chispas, gafas de sol, gorro de fiesta |
-
-- **Expresiones** (todas sonrientes): feliz, alegre, tranquilo, tierno, guiño, curioso, pícaro, gatuno; planetas y constelaciones admiten además *sin carita* (en la constelación, la estrella principal queda como destello).
-- **Colores**: relleno (blanco por defecto), acento (negro por defecto: manchas, narices, pantalla, líneas de la constelación) y fondo (los mismos de Lorelei). Por defecto es blanco y negro, con la línea negra de trazo parejo; la carita usa tinta clara u oscura según el color de debajo.
-- **Por defecto, determinista por el nombre**: al elegir un tipo, la figura sale del nombre del asistente (hash FNV-1a); los de OLP arrancan con lo suyo: Orión → Orión, Vega → Lira, Sirio → Can Mayor, Atlas → Pléyades, Mercurio → Mercurio, Galileo → Júpiter, Kepler → Marte.
-- **Modelo** (`dbo.avatar_config.config_json`, sin cambio de esquema): las figuras se guardan como versión 4, ~130 caracteres:
+- **Cómo se compone** (`lib/avatar/cabezas.ts`): `loreleiCabezas` es un *style* propio de DiceBear que se usa con el mismo `createAvatar` de `@dicebear/core` 9.4.3 y que por dentro llama al `create` de la Lorelei instalada. Lorelei 9.4.3 no exporta sus componentes (su `package.json` solo expone `lib/index.js`), así que no se puede ampliar su componente `head` sin copiar ~150 KB de Lorelei; en cambio, el style pide a Lorelei renders auxiliares con alguna parte vacía y separa, por igualdad **exacta** de texto, los trazos de la cabeza, la cara (ojos, cejas, aretes, pecas, nariz, barba, boca, gafas) y el pelo de atrás/adelante. La figura reemplaza solo los trazos de la cabeza; si algo no cuadra, lanza un error (las pruebas recorren todas las figuras × los 48 pelos y comprueban que el SVG es el de Lorelei con la Cabeza 1 cambiada por la figura).
+- **Coordenadas**: las figuras se dibujan en un lienzo de 300 y se llevan al grupo de la cabeza de Lorelei (`matrix(2.85 …)`: el punto (152, 140) cae en (505, 470) del lienzo de 980, el centro de la cara a 3/4 de Lorelei), con línea negra como la de Lorelei y cabiendo en el círculo del avatar.
+- **Colores**: relleno de la figura = color de piel; acentos (orejas del panda, continentes, constelación, antenas…) = color de cabello; fondo = el de siempre. Blanco y negro por defecto.
+- **Pelo**: al elegir una figura, el pelo queda en «Ninguno» salvo en perro, oso y sol (donde el pelo de Lorelei tiene sentido); se puede poner cualquier pelo encima. Con una cabeza-figura, el selector de cabello ofrece «Ninguno»; al volver a Cabeza 1…4 sin pelo, se pone el pelo que DiceBear le da al nombre del asistente.
+- **Modelo** (`dbo.avatar_config.config_json`, sin cambio de esquema): sigue siendo la **versión 3**; la figura es un valor más de `head` y `hair` puede ser `null`:
 
   ```json
-  {"v":4,"kind":"planeta","variante":"saturno","cara":"feliz","extra":"lunas","relleno":"ffffff","acento":"000000","fondo":"f2f2f2"}
+  {"v":3,"estilo":"lorelei","seed":"Kepler","hair":null,"head":"figura:marte","eyes":"variant23",
+   "eyebrows":"variant12","mouth":"happy08","nose":"variant06","glasses":null,"earrings":null,"beard":null,
+   "freckles":null,"hairAccessories":null,"hairColor":"000000","skinColor":"ffffff","backgroundColor":"f2f2f2",
+   "flip":false}
   ```
 
-  Los configs v3 (persona Lorelei) siguen valiendo tal cual. `parseAgentAvatarConfig` (`lib/avatar/agente.ts`) valida v3 o v4 y rechaza todo lo demás: tipo desconocido, variante de otro tipo, carita o accesorio fuera del catálogo del tipo, colores que no sean hexadecimales de 6 dígitos, claves extra. Las personas (`parseAvatarConfig(…, 'user')`) no aceptan v4.
-- Se sigue pintando con `<img src="data:…">` y el endpoint `/api/avatar/agent/<code>` sirve el mismo SVG.
-- **Origen y licencia**: dibujo **propio de SynerLink**, sin dependencias nuevas. Se adaptó el motor de asistentes de la rama `feat/avatar-avatartion` (commit `8c53716`, también propio): misma geometría de animales y planetas y las coordenadas reales de las constelaciones; se quitaron el cuerpo de los animales (solo cabeza, como Lorelei) y las piezas de Noto (las caritas son nuevas y propias). Robots, estrellas y pulpo son nuevos. No hay activos de terceros en las figuras.
+  `parseAvatarConfig(…, 'agent')` acepta `figura:<id>` del catálogo y `hair: null` **solo** con una cabeza-figura; `parseAvatarConfig(…, 'user')` rechaza ambas cosas. Los v3 ya guardados se dibujan **byte a byte igual** (siguen saliendo de `createAvatar(lorelei, …)`; prueba con hashes generados en 1a1fd46: `lib/avatar/__tests__/fixtures/v3-1a1fd46.json`).
+- **Figuras v4 del #554**: el editor ya no las ofrece (se quitaron las pestañas Persona/Animal/Planeta/Constelación/Estrella/Robot y `FiguraEditor`). Lo guardado en v4 **no se borra**: `parseAgentAvatarConfig` lo sigue validando con las reglas de entonces y lo **convierte al leerlo** (`lib/avatar/figuras.ts`) a la cabeza-figura equivalente, sin pelo, con ojos y boca de Lorelei parecidos a la carita y los mismos colores (relleno → piel, acento → cabello). Al guardarlo desde el editor queda en v3. En KRONOSDB_PRUEBAS había uno (agente 1: gato).
+- **Origen y licencia**: dibujo **propio de SynerLink** (la geometría de las figuras del #554 / `feat/avatar-avatartion` 8c53716, sin sus caritas), sin dependencias nuevas.
 
 ## Licencias
 
@@ -106,4 +107,4 @@ Cada SVG generado lleva la atribución en su `<metadata>`. Del proyecto Avatarti
 
 ## Muestra
 
-`node scripts/avatar/muestra-lorelei.mjs docs/avatar-notion/lorelei-muestra` genera la hoja HTML y el PNG (Playwright).
+`node scripts/avatar/muestra-lorelei.mjs docs/avatar-notion/lorelei-muestra` genera la hoja HTML y el PNG (Playwright). Las cabezas-figura: `node scripts/avatar/muestra-cabezas-figura.mjs /tmp/avatares-cabezas-figura`.

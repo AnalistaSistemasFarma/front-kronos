@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { agentAvatarDataUri, agentAvatarPorDefecto, composeAgentAvatarSvg, kindDe, parseAgentAvatarConfig, serializeAgentAvatarConfig } from '../agente';
-import { composeAvatarSvg, parseAvatarConfig, serializeAvatarConfig, sugerenciaParaAgente } from '../compose';
+import { agentAvatarDataUri, composeAgentAvatarSvg, parseAgentAvatarConfig, serializeAgentAvatarConfig } from '../agente';
+import { composeAvatarSvg, esCabezaFigura, parseAvatarConfig, serializeAvatarConfig, sugerenciaParaAgente } from '../compose';
 import { svgResponse } from '../http';
 
 /**
- * El cambio de figuras es ADITIVO (aclaración de Nicolás Rivera, c47 msg 15776):
+ * El cambio de figuras es ADITIVO (aclaración de Nicolás Rivera, c47 msg 15776;
+ * desde el msg 15785 las figuras son cabezas de Lorelei, cabezas.ts):
  * los avatares de agentes YA guardados (config v3 de persona Lorelei, sin `kind`)
  * no se migran y se dibujan IDÉNTICOS a antes.
  *
@@ -60,7 +61,8 @@ describe('avatares de agentes existentes: idénticos antes y después de las fig
     it(`${nombre}: el config v3 guardado se trata como persona y se dibuja igual`, async () => {
       const config = parseAgentAvatarConfig(antes.json);
       expect(config).not.toBeNull();
-      expect(kindDe(config!)).toBe('persona');
+      // Sigue siendo una persona Lorelei (Cabeza 1…4), no una cabeza-figura.
+      expect(esCabezaFigura(config!.head)).toBe(false);
       expect('kind' in (config as object)).toBe(false);
       // Mismo JSON al volver a guardarlo: no hay migración de formato.
       expect(serializeAgentAvatarConfig(config!)).toBe(antes.json);
@@ -77,7 +79,6 @@ describe('avatares de agentes existentes: idénticos antes y después de las fig
 
   it('un agente sin avatar sigue arrancando con la persona Lorelei de hoy', () => {
     for (const nombre of Object.keys(ANTES)) {
-      expect(agentAvatarPorDefecto('persona', nombre)).toEqual(sugerenciaParaAgente(nombre));
       expect(serializeAvatarConfig(sugerenciaParaAgente(nombre))).toBe(ANTES[nombre].json);
     }
   });
