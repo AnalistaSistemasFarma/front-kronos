@@ -29,12 +29,14 @@ import {
   IconPlus,
   IconTrash,
 } from '@tabler/icons-react';
+import { ImportarDesdeForms } from './ImportarDesdeForms';
 import { PUNTOS_TOTAL, redondear2, type DefinicionFormulario, type TipoFormulario, type TipoPregunta } from '../../lib/portal/formulario';
 import {
   DATOS,
   conReparto,
   construirDefinicion,
   esCalificada,
+  estadoDesdeImportacion,
   estadoInicial,
   preguntaVacia,
   type DatoClave,
@@ -190,6 +192,16 @@ export function ConstructorFormulario({
             ? 'Evaluación: preguntas de selección única con la respuesta correcta y puntos que suman 100. El sistema califica y muestra la nota.'
             : 'Encuesta: respuestas libres o de selección, sin calificación (como el SST-01-FR-001 Perfil sociodemográfico).'}
         </Text>
+
+        {!editando && (
+          <ImportarDesdeForms
+            deshabilitado={guardando}
+            onImportado={(imp) => {
+              setErrores([]);
+              setE((x) => estadoDesdeImportacion(x.tipo, imp));
+            }}
+          />
+        )}
 
         <TextInput label='Título' required value={e.titulo} maxLength={255} onChange={(ev) => cambiar({ titulo: ev.currentTarget.value })} data-testid='titulo-formulario' />
         <TextInput

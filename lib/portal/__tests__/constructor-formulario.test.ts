@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { normalizarImportacion } from '../importar-forms';
 import {
+  claveDeDato,
   construirDefinicion,
   conReparto,
+  estadoDesdeImportacion,
   estadoInicial,
   preguntaVacia,
   puntosPorIgual,
@@ -233,5 +238,100 @@ describe('reparto automático de los 100 puntos (Cristian, 2026-10-09)', () => {
     const reabierta = estadoInicial('evaluacion', desigual);
     expect(reabierta.puntosAuto).toBe(false);
     expect(calificadas(reabierta)).toEqual(['', '', 70, 30].slice(2));
+  });
+});
+
+describe('importar desde Microsoft Forms (Cristian, 2026-10-09)', () => {
+  const CRUDO = JSON.parse(readFileSync(path.join(__dirname, 'fixtures', 'forms-evaluacion-induccion-crudo.json'), 'utf8'));
+  const imp = () => normalizarImportacion(CRUDO);
+
+  it('reconoce los datos de la persona por su enunciado', () => {
+    expect(claveDeDato('Nombre Completo')).toBe('nombre');
+    expect(claveDeDato('Nombres y apellidos:')).toBe('nombre');
+    expect(claveDeDato('Apellidos y nombres')).toBe('nombre');
+    expect(claveDeDato('Número de cédula')).toBe('cedula');
+    expect(claveDeDato('Cédula de ciudadanía')).toBe('cedula');
+    expect(claveDeDato('Número de documento')).toBe('cedula');
+    expect(claveDeDato('Correo electrónico')).toBe('correo');
+    expect(claveDeDato('E-mail')).toBe('correo');
+    // Una pregunta de contenido NO es un dato de la persona.
+    expect(claveDeDato('¿Cuál es el nombre del jefe de SST?')).toBeNull();
+    expect(claveDeDato('Describa el documento que debe presentar en la entrada de la planta')).toBeNull();
+  });
+
+  it('evaluación: nombre y cédula pasan a "Datos que se piden"; las 10 de selección entran sin correcta, en borrador', () => {
+    const e = estadoDesdeImportacion('evaluacion', imp());
+    expect(e).toMatchObject({ tipo: 'evaluacion', puntosAuto: true, borrador: true, datos: { nombre: true, cedula: true, correo: false } });
+    expect(e.titulo).toBe('Evaluación Inducción Organizacional y SST Farmalógica SA 2025');
+    expect(e.preguntas).toHaveLength(10);
+    expect(e.preguntas.map((p) => p.id)).toEqual(Array.from({ length: 10 }, (_, i) => 'q' + (i + 1)));
+    expect(e.preguntas.every((p) => p.tipo === 'seleccion' && p.correcta === null && p.opciones.length === 4)).toBe(true);
+    // 100 ÷ 10 = 10 puntos cada una, automático.
+    expect(e.preguntas.every((p) => p.puntos === 10)).toBe(true);
+  });
+
+  it('sin marcar las correctas no se puede guardar como publicada, pero sí como borrador', () => {
+    const e = estadoDesdeImportacion('evaluacion', imp());
+    const publicada = construirDefinicion({ ...e, borrador: false });
+    expect(publicada.definicion).toBeNull();
+    expect(publicada.errores).toContain('Pregunta 1: marque cuál es la respuesta correcta.');
+    const borrador = construirDefinicion(e);
+    expect(borrador.errores).toEqual([]);
+    expect(borrador.definicion).toMatchObject({ tipo: 'evaluacion', borrador: true, notaMinima: 80 });
+  });
+
+  it('al marcar las correctas queda una evaluación válida que suma 100 y se puede publicar', () => {
+    const e = estadoDesdeImportacion('evaluacion', imp());
+    const lista = { ...e, borrador: false, preguntas: e.preguntas.map((p) => ({ ...p, correcta: 0 })) };
+    const r = construirDefinicion(lista);
+    expect(r.errores).toEqual([]);
+    const d = r.definicion!;
+    expect(d.preguntas.slice(0, 2).map((p) => p.id)).toEqual(['dato_nombre', 'dato_cedula']);
+    expect(d.preguntas.filter((p) => p.puntos !== undefined)).toHaveLength(10);
+    expect(d.autorizacion?.pendienteValidacion).toBe(true);
+  });
+
+  it('encuesta: no es borrador ni lleva puntos; conserva texto, lista y obligatoriedad', () => {
+    const e = estadoDesdeImportacion('encuesta', {
+      titulo: 'Satisfacción',
+      descripcion: 'Cuéntenos',
+      advertencias: [],
+      preguntas: [
+        { texto: 'Correo electrónico', obligatoria: true, tipo: 'texto', opciones: [] },
+        { texto: '¿Qué le pareció?', obligatoria: false, tipo: 'texto_largo', opciones: [] },
+        { texto: '¿Volvería?', obligatoria: true, tipo: 'seleccion', opciones: ['Sí', 'No'] },
+      ],
+    });
+    expect(e).toMatchObject({ tipo: 'encuesta', borrador: false, datos: { correo: true, nombre: false, cedula: false } });
+    expect(e.preguntas.map((p) => [p.tipo, p.obligatoria])).toEqual([['texto_largo', false], ['seleccion', true]]);
+    const d = construirDefinicion(e).definicion!;
+    expect(d.tipo).toBeUndefined();
+    expect(JSON.stringify(d)).not.toMatch(/puntos|correcta|borrador/);
+  });
+
+  it('un dato repetido (dos "Nombre") solo se toma una vez; el segundo queda como pregunta', () => {
+    const e = estadoDesdeImportacion('encuesta', {
+      titulo: 'T', descripcion: '', advertencias: [],
+      preguntas: [
+        { texto: 'Nombre', obligatoria: true, tipo: 'texto', opciones: [] },
+        { texto: 'Nombre', obligatoria: true, tipo: 'texto', opciones: [] },
+      ],
+    });
+    expect(e.datos.nombre).toBe(true);
+    expect(e.preguntas).toHaveLength(1);
+  });
+
+  it('una evaluación importada sin preguntas de selección no queda en borrador', () => {
+    const e = estadoDesdeImportacion('evaluacion', { titulo: 'T', descripcion: '', advertencias: [], preguntas: [{ texto: 'Cargo', obligatoria: true, tipo: 'texto', opciones: [] }] });
+    expect(e.borrador).toBe(false);
+  });
+
+  it('lo importado se puede reabrir y editar como cualquier formulario guardado', () => {
+    const e = estadoDesdeImportacion('evaluacion', imp());
+    const d = construirDefinicion({ ...e, borrador: false, preguntas: e.preguntas.map((p) => ({ ...p, correcta: 1 })) }).definicion!;
+    const reabierto = estadoInicial('evaluacion', d);
+    expect(reabierto.preguntas).toHaveLength(10);
+    expect(reabierto.puntosAuto).toBe(true);
+    expect(construirDefinicion(reabierto).definicion).toEqual(d);
   });
 });
