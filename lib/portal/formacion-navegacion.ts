@@ -15,12 +15,17 @@
 export type OrigenPortal = 'abierto' | 'hub';
 
 export const RUTA_FORMACION = '/portal/formacion';
+/**
+ * Formación DENTRO del hub (con el encabezado y el menú de SynerLink).
+ * Observación de Nicolás (2026-10-09): desde el módulo no debe salirse del hub.
+ */
+export const RUTA_FORMACION_HUB = '/process/portal-th/formacion';
 const RUTA_PORTAL_ABIERTO = '/portal';
 const RUTA_PORTAL_HUB = '/process/portal-th';
 
 /** La URL del acceso "Formación" según desde qué portal se abre. */
 export function urlFormacion(origen: OrigenPortal): string {
-  return origen === 'hub' ? `${RUTA_FORMACION}?desde=hub` : RUTA_FORMACION;
+  return origen === 'hub' ? RUTA_FORMACION_HUB : RUTA_FORMACION;
 }
 
 /** Lee `?desde=` y lo reduce a uno de los dos orígenes conocidos. */
