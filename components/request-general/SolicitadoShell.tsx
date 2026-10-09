@@ -12,7 +12,7 @@ import {
 } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { Alert, Center, Loader } from '@mantine/core';
+import { Alert, Button, Center, Loader } from '@mantine/core';
 import { IconAlertCircle } from '@tabler/icons-react';
 import type {
   DashboardActivityRow,
@@ -20,6 +20,7 @@ import type {
   DashboardRequestRow,
 } from './RequestRoleDashboard';
 import { PROCESS_HUB_URL } from '../../lib/navigation/AppSectionContext';
+import { fetchWithRetry } from '../../lib/navigation/fetchWithRetry';
 import { SolicitadoTabProvider } from '../../lib/request-general/SolicitadoTabContext';
 import SolicitadoNav from './SolicitadoNav';
 import SolicitadoPeriodLabel from './SolicitadoPageHeading';
@@ -120,17 +121,26 @@ export function SolicitadoShell({ children }: { children: ReactNode }) {
           setError(null);
         }
 
-        const accessRes = await fetch(
+        const accessRes = await fetchWithRetry(
           '/api/requests-general/dashboard-access?kind=solicitado',
           { credentials: 'same-origin', cache: 'no-store' }
         );
         const accessData = await accessRes.json().catch(() => ({}));
-        if (!accessRes.ok || !accessData.allowed) {
+        // Solo un "no" definitivo del servidor manda a Procesos. Una falla temporal (red, ruta
+        // compilándose, 5xx) muestra el error con opción de reintentar en vez de redirigir.
+        if (accessRes.ok && !accessData.allowed) {
           router.replace(PROCESS_HUB_URL);
           return;
         }
+        if (accessRes.status === 401 || accessRes.status === 403) {
+          router.replace(PROCESS_HUB_URL);
+          return;
+        }
+        if (!accessRes.ok) {
+          throw new Error('No se pudo verificar el acceso. Intenta de nuevo.');
+        }
 
-        const res = await fetch('/api/requests-general/dashboard-solicitado', {
+        const res = await fetchWithRetry('/api/requests-general/dashboard-solicitado', {
           credentials: 'same-origin',
           cache: 'no-store',
         });
@@ -245,6 +255,9 @@ export function SolicitadoShell({ children }: { children: ReactNode }) {
     return (
       <Alert icon={<IconAlertCircle size={16} />} title='Dashboard personal' color='red' m='md'>
         {error}
+        <Button size='xs' variant='light' color='red' mt='sm' onClick={() => void loadData()}>
+          Reintentar
+        </Button>
       </Alert>
     );
   }

@@ -7,11 +7,11 @@ import {
   type LastAlert,
 } from './earlyWarnings';
 import { LOG_THRESHOLDS, type LogContext } from './logHealth';
-import { insertAlert, readRecentAlerts, readWatchWindow } from './store';
+import { insertAlert, readAlertSubscribers, readRecentAlerts, readWatchWindow } from './store';
 
 /**
  * Corre las alertas tempranas (lib/system-metrics/earlyWarnings.ts) y avisa por campana + push a
- * quienes tienen el módulo. La llama el colector cada minuto, solo en la instancia 0 y después
+ * quienes tienen el módulo Y activaron «Recibir alertas» (nadie por defecto). La llama el colector cada minuto, solo en la instancia 0 y después
  * de guardar su muestra, así que mira datos de hace segundos.
  *
  * El historial (system_metric_alert) es también el control de repetición: sin esa tabla la
@@ -26,7 +26,8 @@ type Pool = Awaited<ReturnType<typeof import('../mssqlPool').getPool>>;
 export type AlertNotification = { title: string; body: string; url: string; tag: string };
 
 export type AlertJobDeps = {
-  recipients: () => Promise<string[]>;
+  /** Quién recibe: tiene el módulo Y activó «Recibir alertas» (por defecto, nadie). */
+  recipients: (pool: Pool) => Promise<string[]>;
   notify: (emails: string[], payload: AlertNotification) => Promise<void>;
   /** Estado del log de la base para juzgarlo bien (logHealth.ts); sin él se usan umbrales fijos. */
   logContext?: (pool: Pool) => Promise<LogContext | null>;
@@ -54,7 +55,14 @@ export async function defaultAlertDeps(): Promise<AlertJobDeps> {
     import('./dbProbe'),
   ]);
   return {
-    recipients: listSystemMetricsRecipients,
+    recipients: async (pool) => {
+      // Sin la tabla de suscriptores (2026-10-09-...-suscriptores.sql) no se avisa a nadie.
+      const [withModule, subscribers] = await Promise.all([
+        listSystemMetricsRecipients(),
+        readAlertSubscribers(pool),
+      ]);
+      return withModule.filter((email) => subscribers.has(email));
+    },
     notify: async (emails, payload) => {
       await createAndSendNotifications(emails, payload);
     },
@@ -87,7 +95,7 @@ export async function runEarlyWarnings(
 
   let emails: string[] = [];
   try {
-    emails = await deps.recipients();
+    emails = await deps.recipients(pool);
   } catch (error) {
     console.warn('[system-metrics] No se pudo leer quién recibe las alertas:', error);
   }

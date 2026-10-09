@@ -19,7 +19,7 @@ export async function hasSystemMetricsAccess(userEmail: string): Promise<boolean
   return row !== null;
 }
 
-/** Correos (activos, sin repetir) de quienes tienen el módulo: reciben las alertas tempranas. */
+/** Correos (activos, sin repetir) de quienes tienen el módulo; reciben alertas solo si además las activaron. */
 export async function listSystemMetricsRecipients(): Promise<string[]> {
   const rows = await prisma.subprocessUserCompany.findMany({
     where: {

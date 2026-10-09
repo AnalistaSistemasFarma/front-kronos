@@ -2,7 +2,6 @@
 
 import { Suspense, useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 import axios from 'axios';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -77,6 +76,7 @@ import {
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
+import TestAttachmentDeleteButton from '../../../../../components/attachments/TestAttachmentDeleteButton';
 import {
   hydrateAttachments,
   mergeListedWithPending,
@@ -486,17 +486,17 @@ function ViewRequestPage() {
       });
   }, [id]);
 
-  useEffect(() => {
-    if (!request?.id) return;
+  // Con id en la URL, notas/tareas/formulario/adjuntos arrancan junto con el detalle
+  // (antes esperaban a que llegara view-request). Sin id en la URL, se usa la solicitud en caché.
+  const urlRequestId = id != null && String(id).trim() !== '' ? Number(id) : NaN;
+  const relatedRequestId =
+    Number.isInteger(urlRequestId) && urlRequestId > 0 ? urlRequestId : Number(request?.id) || null;
 
-    const urlId = id != null ? Number(id) : NaN;
-    // No cargar notas/archivos de otra solicitud si el cache aún no coincide con la URL.
-    if (Number.isInteger(urlId) && urlId > 0 && Number(request.id) !== urlId) {
-      return;
-    }
+  useEffect(() => {
+    if (!relatedRequestId) return;
 
     const controller = new AbortController();
-    const requestId = Number(request.id);
+    const requestId = relatedRequestId;
 
     const loadRelatedData = async () => {
       await Promise.all([
@@ -506,7 +506,7 @@ function ViewRequestPage() {
       ]);
     };
 
-    void fetchFolderContents();
+    void fetchFolderContents(requestId);
     void loadRelatedData();
     void fetch('/api/requests-general/attachment-permissions')
       .then((r) => r.json())
@@ -519,7 +519,7 @@ function ViewRequestPage() {
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     if (from === 'create-request' || orionActionParam === 'manage') {
       retryTimer = setTimeout(() => {
-        void fetchFolderContents();
+        void fetchFolderContents(requestId);
       }, 900);
     }
 
@@ -527,7 +527,7 @@ function ViewRequestPage() {
       controller.abort();
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [request?.id, id, from, orionActionParam]);
+  }, [relatedRequestId, from, orionActionParam]);
 
   // consult-request (empresas/categorías/procesos) solo al editar: no satura la carga inicial.
   const consultOptionsLoadedRef = useRef(false);
@@ -1096,12 +1096,14 @@ function ViewRequestPage() {
     }
   };
 
-  const fetchFolderContents = async () => {
-    if (!request?.id) return;
+  /** `forRequestId`: la carga inicial lo pasa desde la URL para no esperar el detalle. */
+  const fetchFolderContents = async (forRequestId?: number) => {
+    const requestId = forRequestId ?? request?.id;
+    if (!requestId) return;
 
     try {
       const response = await fetch(
-        `/api/requests-general/list-attachments?requestId=${encodeURIComponent(String(request.id))}&storagePath=SG&entityType=Request`
+        `/api/requests-general/list-attachments?requestId=${encodeURIComponent(String(requestId))}&storagePath=SG&entityType=Request`
       );
       const data = (await response.json().catch(() => ({}))) as {
         error?: string;
@@ -1112,7 +1114,7 @@ function ViewRequestPage() {
       }
 
       const files = Array.isArray(data.files) ? data.files : [];
-      setFolderContents((prev) => mergeListedWithPending(request.id, files, prev));
+      setFolderContents((prev) => mergeListedWithPending(requestId, files, prev));
     } catch (error) {
       if (error instanceof TypeError) {
         console.warn('No se pudo contactar el servidor para listar adjuntos; se conserva la caché.', error.message);
@@ -1120,7 +1122,7 @@ function ViewRequestPage() {
         console.error('Error al listar los archivos de la carpeta:', error);
       }
       // null = fallo de red: conservar caché / optimistas
-      setFolderContents((prev) => mergeListedWithPending(request.id, null, prev));
+      setFolderContents((prev) => mergeListedWithPending(requestId, null, prev));
     }
   };
 
@@ -1136,6 +1138,15 @@ function ViewRequestPage() {
       void fetchFolderContents();
     }, 5000);
   }, [request?.id]);
+
+  // Botón de pruebas (solo testing/local): el archivo ya se borró en OneDrive, quitarlo de la tabla.
+  const handleTestAttachmentDeleted = useCallback(
+    (fileId: string) => {
+      setFolderContents((prev) => prev.filter((f) => String(f.id) !== String(fileId)));
+      if (request?.id) removeFromAttachmentCache(request.id, fileId);
+    },
+    [request?.id]
+  );
 
   // Abre el modal de justificación; el borrado real va en handleDeleteAttachment.
   const [pendingDelete, setPendingDelete] = useState<{
@@ -1233,64 +1244,6 @@ function ViewRequestPage() {
       console.error('Error descargando archivos en ZIP:', error);
     }
   };
-
-  async function CheckOrCreateFolderAndUpload(
-    folderName: string,
-    files: { file: File }[],
-    token: string
-  ) {
-    let folderId: string;
-
-    try {
-      const getResponse = await axios.get(
-        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/SG/${folderName}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      if (getResponse.status === 200) {
-        folderId = (getResponse.data as { id: string }).id;
-      } else {
-        throw new Error('Error al verificar la existencia de la carpeta.');
-      }
-    } catch (getError: unknown) {
-      if (getError instanceof Error) {
-        console.error(getError.message);
-      } else {
-        console.error(getError);
-      }
-    }
-
-    if (files && files.length > 0) {
-      const uploadPromises = files.map((file: { file: File }) =>
-        axios.put(
-          `${process.env.MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${file.file.name}:/content`,
-          file.file,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': file.file.type,
-            },
-          }
-        )
-      );
-
-      const results = await Promise.all(uploadPromises);
-
-      results.forEach((response, index) => {
-        if (response.status === 201 || response.status === 200) {
-          console.log(`Archivo subido: ${files[index].file.name}`, response.data);
-        } else {
-          console.log(`Error al subir el archivo: ${files[index].file.name}`);
-        }
-      });
-    } else {
-      console.log('No hay archivos seleccionados para subir.');
-    }
-  }
 
   const handleFormChange = (field: string, value: string) => {
     setRequest((prev) => {
@@ -1540,22 +1493,8 @@ function ViewRequestPage() {
     }
 
     try {
-      if (attachedFiles.length > 0) {
-        const token = await getMicrosoftToken();
-        if (!token) {
-          throw new Error('No se pudo obtener el token de acceso para subir archivos.');
-        }
-
-        const folderName = `Request-${request?.id}`;
-        const filesToUpload = attachedFiles
-          .filter((file) => file.status === 'success')
-          .map((file) => ({ file: file.file }));
-
-        if (filesToUpload.length > 0) {
-          await CheckOrCreateFolderAndUpload(folderName, filesToUpload, token);
-        }
-      }
-
+      // Los adjuntos ya los subió FileUpload por el servidor al elegirlos (autoUpload):
+      // antes se volvían a subir aquí desde el navegador con el token de Graph.
       const isReturning = Number(resolutionData.estado) === RETURNED_STATUS_ID;
       const motivo = resolutionData.resolucion?.trim() || '';
 
@@ -3025,6 +2964,16 @@ function ViewRequestPage() {
                           onDocumentsUpdate={handleOrionDocumentsChange}
                           canDeleteAttachment={canDeleteAttachments}
                           onDeleteAttachment={requestDeleteAttachment}
+                          testDeleteSlot={
+                            request.id ? (
+                              <TestAttachmentDeleteButton
+                                requestId={request.id}
+                                fileId={String(file.id)}
+                                fileName={file.name}
+                                onDeleted={handleTestAttachmentDeleted}
+                              />
+                            ) : null
+                          }
                           nestedUnderWord={nested}
                           forceSignerUi={(() => {
                             const me = currentUserEmailNorm;
@@ -3077,6 +3026,16 @@ function ViewRequestPage() {
                           openUrl={openUrl}
                           canDeleteAttachment={canDeleteAttachments}
                           onDeleteAttachment={requestDeleteAttachment}
+                          testDeleteSlot={
+                            request.id ? (
+                              <TestAttachmentDeleteButton
+                                requestId={request.id}
+                                fileId={String(file.id)}
+                                fileName={file.name}
+                                onDeleted={handleTestAttachmentDeleted}
+                              />
+                            ) : null
+                          }
                           autoOpenReview={
                             orionActionParam === 'review' &&
                             String(orionFileIdParam || '') === fileId
@@ -3178,6 +3137,14 @@ function ViewRequestPage() {
                                     </ActionIcon>
                                   </Tooltip>
                                 ) : null}
+                                {!file.fromOrionBag ? (
+                                  <TestAttachmentDeleteButton
+                                    requestId={request.id}
+                                    fileId={fileId}
+                                    fileName={file.name}
+                                    onDeleted={handleTestAttachmentDeleted}
+                                  />
+                                ) : null}
                               </Group>
                             </Table.Td>
                           </>
@@ -3217,6 +3184,14 @@ function ViewRequestPage() {
                                 >
                                   <IconTrash size={16} />
                                 </ActionIcon>
+                              ) : null}
+                              {!file.fromOrionBag ? (
+                                <TestAttachmentDeleteButton
+                                  requestId={request.id}
+                                  fileId={fileId}
+                                  fileName={file.name}
+                                  onDeleted={handleTestAttachmentDeleted}
+                                />
                               ) : null}
                               </Group>
                             </Table.Td>

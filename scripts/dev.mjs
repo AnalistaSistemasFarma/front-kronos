@@ -150,6 +150,34 @@ function startNextDev() {
       if (!child.killed) child.kill(signal);
     });
   }
+
+  if (!process.argv.includes('--no-warm')) void warmUpRoutes();
+}
+
+// En dev cada página se compila la primera vez que alguien la abre (el login tardaba ~30 s y
+// el botón "Iniciar Sesión" parecía no hacer nada). Al arrancar se piden en segundo plano las
+// páginas de entrada para que ya estén compiladas. `--no-warm` lo desactiva.
+const WARM_ROUTES = ['/', '/login'];
+
+async function warmUpRoutes() {
+  const base = `http://localhost:${PORT}`;
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    try {
+      await fetch(base, { method: 'HEAD', signal: AbortSignal.timeout(5_000) });
+      break;
+    } catch {
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+  }
+  for (const route of WARM_ROUTES) {
+    try {
+      await fetch(`${base}${route}`, { signal: AbortSignal.timeout(180_000) });
+    } catch {
+      // Solo es calentamiento: si falla, la página se compila al abrirla como siempre.
+    }
+  }
+  console.log(`[dev] Páginas de entrada precompiladas: ${WARM_ROUTES.join(', ')}`);
 }
 
 ensurePortAvailable();

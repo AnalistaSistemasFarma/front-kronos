@@ -65,14 +65,20 @@ export function FlowLayer({
     if (!container) return;
 
     const measure = () => {
-      const box = container.getBoundingClientRect();
-      if (box.width === 0) {
+      const screenBox = container.getBoundingClientRect();
+      if (screenBox.width === 0 || container.offsetWidth === 0) {
         setDrawn(null);
         return;
       }
+      // Dentro del tablero con zoom (MonitorBoard) los rectángulos de pantalla vienen escalados,
+      // pero el SVG se dibuja dentro del mismo plano escalado: se pasa todo a medidas sin zoom.
+      const scale = screenBox.width / container.offsetWidth || 1;
+      const unscale = (r: DOMRect) =>
+        new DOMRect(r.left / scale, r.top / scale, r.width / scale, r.height / scale);
+      const box = unscale(screenBox);
       const rects = new Map<string, DOMRect>();
       container.querySelectorAll<HTMLElement>('[data-flow-node]').forEach((el) => {
-        rects.set(el.dataset.flowNode!, el.getBoundingClientRect());
+        rects.set(el.dataset.flowNode!, unscale(el.getBoundingClientRect()));
       });
 
       // Varias curvas que salen/llegan al mismo nodo se reparten a lo alto para no encimarse.

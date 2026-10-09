@@ -2,7 +2,6 @@
 
 import { Suspense, useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 import axios from 'axios';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -73,6 +72,7 @@ import {
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
+import TestAttachmentDeleteButton from '../../../../../components/attachments/TestAttachmentDeleteButton';
 import {
   hydrateAttachments,
   mergeListedWithPending,
@@ -409,7 +409,9 @@ function ViewRequestPage() {
         })
         .catch(() => setCanDeleteAttachments(false));
     }
-  }, [request]);
+    // Por id y no por el objeto: `request` se asigna dos veces al abrir (sessionStorage y API)
+    // y otra vez al guardar; antes cada vez se repetían notas, OneDrive, tareas y permisos.
+  }, [request?.id_request_general]);
 
   useEffect(() => {
     if (notesViewportRef.current) {
@@ -619,6 +621,15 @@ function ViewRequestPage() {
       void fetchFolderContents();
     }, 5000);
   }, [request?.id_request_general]);
+
+  // Botón de pruebas (solo testing/local): el archivo ya se borró en OneDrive, quitarlo de la tabla.
+  const handleTestAttachmentDeleted = useCallback(
+    (fileId: string) => {
+      setFolderContents((prev) => prev.filter((f) => String(f.id) !== String(fileId)));
+      if (request?.id_request_general) removeFromAttachmentCache(request.id_request_general, fileId);
+    },
+    [request?.id_request_general]
+  );
 
   // Abre el modal de justificación; el borrado real va en handleDeleteAttachment.
   const [pendingDelete, setPendingDelete] = useState<{
@@ -1024,64 +1035,6 @@ function ViewRequestPage() {
     [modalBusinessTasks]
   );
 
-  async function CheckOrCreateFolderAndUpload(
-    folderName: string,
-    files: { file: File }[],
-    token: string
-  ) {
-    let folderId: string;
-
-    try {
-      const getResponse = await axios.get(
-        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/SG/${folderName}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      if (getResponse.status === 200) {
-        folderId = (getResponse.data as { id: string }).id;
-      } else {
-        throw new Error('Error al verificar la existencia de la carpeta.');
-      }
-    } catch (getError: unknown) {
-      if (getError instanceof Error) {
-        console.error(getError.message);
-      } else {
-        console.error(getError);
-      }
-    }
-
-    if (files && files.length > 0) {
-      const uploadPromises = files.map((file: { file: File }) =>
-        axios.put(
-          `${process.env.MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${file.file.name}:/content`,
-          file.file,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': file.file.type,
-            },
-          }
-        )
-      );
-
-      const results = await Promise.all(uploadPromises);
-
-      results.forEach((response, index) => {
-        if (response.status === 201 || response.status === 200) {
-          console.log(`Archivo subido: ${files[index].file.name}`, response.data);
-        } else {
-          console.log(`Error al subir el archivo: ${files[index].file.name}`);
-        }
-      });
-    } else {
-      console.log('No hay archivos seleccionados para subir.');
-    }
-  }
-
   const handleStartEditing = () => {
     setOriginalRequest(request);
     setIsEditing(true);
@@ -1211,22 +1164,8 @@ function ViewRequestPage() {
     }
 
     try {
-      if (attachedFiles.length > 0) {
-        const token = await getMicrosoftToken();
-        if (!token) {
-          throw new Error('No se pudo obtener el token de acceso para subir archivos.');
-        }
-
-        const folderName = `Request-${request?.id_request_general}`;
-        const filesToUpload = attachedFiles
-          .filter((file) => file.status === 'success')
-          .map((file) => ({ file: file.file }));
-
-        if (filesToUpload.length > 0) {
-          await CheckOrCreateFolderAndUpload(folderName, filesToUpload, token);
-        }
-      }
-
+      // Los adjuntos ya los subió FileUpload por el servidor al elegirlos (autoUpload):
+      // antes se volvían a subir aquí desde el navegador con el token de Graph.
       const updateData = {
         id: request?.id,
 
@@ -2539,6 +2478,16 @@ function ViewRequestPage() {
                           onDocumentsUpdate={handleOrionDocumentsChange}
                           canDeleteAttachment={canDeleteAttachments}
                           onDeleteAttachment={requestDeleteAttachment}
+                          testDeleteSlot={
+                            request.id_request_general ? (
+                              <TestAttachmentDeleteButton
+                                requestId={request.id_request_general}
+                                fileId={String(file.id)}
+                                fileName={file.name}
+                                onDeleted={handleTestAttachmentDeleted}
+                              />
+                            ) : null
+                          }
                           nestedUnderWord={nested}
                           forceSignerUi={(() => {
                             const me = String(session?.user?.email || '')
@@ -2592,6 +2541,16 @@ function ViewRequestPage() {
                           openUrl={openUrl}
                           canDeleteAttachment={canDeleteAttachments}
                           onDeleteAttachment={requestDeleteAttachment}
+                          testDeleteSlot={
+                            request.id_request_general ? (
+                              <TestAttachmentDeleteButton
+                                requestId={request.id_request_general}
+                                fileId={String(file.id)}
+                                fileName={file.name}
+                                onDeleted={handleTestAttachmentDeleted}
+                              />
+                            ) : null
+                          }
                           autoOpenReview={
                             searchParams.get('orionAction') === 'review' &&
                             String(orionFileIdParam || '') === String(file.id)
@@ -2683,6 +2642,14 @@ function ViewRequestPage() {
                                 >
                                   Abrir
                                 </UnstyledButton>
+                                {!file.fromOrionBag && request?.id_request_general ? (
+                                  <TestAttachmentDeleteButton
+                                    requestId={request.id_request_general}
+                                    fileId={String(file.id)}
+                                    fileName={file.name}
+                                    onDeleted={handleTestAttachmentDeleted}
+                                  />
+                                ) : null}
                               </Group>
                             </Table.Td>
                           </>
@@ -2699,18 +2666,28 @@ function ViewRequestPage() {
                               ) : null}
                             </Table.Td>
                             <Table.Td data-label='Abrir'>
-                              <ActionIcon
-                                variant='subtle'
-                                color='blue'
-                                size='sm'
-                                component='a'
-                                href={openUrl}
-                                target='_blank'
-                                rel='noopener noreferrer'
-                                aria-label={`Ver archivo ${file.name}`}
-                              >
-                                <IconEye size={16} />
-                              </ActionIcon>
+                              <Group gap={6} wrap='nowrap'>
+                                <ActionIcon
+                                  variant='subtle'
+                                  color='blue'
+                                  size='sm'
+                                  component='a'
+                                  href={openUrl}
+                                  target='_blank'
+                                  rel='noopener noreferrer'
+                                  aria-label={`Ver archivo ${file.name}`}
+                                >
+                                  <IconEye size={16} />
+                                </ActionIcon>
+                                {!file.fromOrionBag && request?.id_request_general ? (
+                                  <TestAttachmentDeleteButton
+                                    requestId={request.id_request_general}
+                                    fileId={String(file.id)}
+                                    fileName={file.name}
+                                    onDeleted={handleTestAttachmentDeleted}
+                                  />
+                                ) : null}
+                              </Group>
                             </Table.Td>
                           </>
                         )}

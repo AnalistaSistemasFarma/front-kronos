@@ -976,9 +976,13 @@ export default function OrionSignaturePanel({
 
       if (!filePerms.canManageWorkflow) {
         setError(
-          filePerms.isFlowResponsible
-            ? 'No tiene permiso “Preparar firma”. Asígueselo en Administración → Usuarios.'
-            : 'Solo un preparador documento asignado al flujo (con permiso Preparar firma) puede preparar el documento.'
+          !filePerms.isFlowResponsible
+            ? 'Solo un preparador documento asignado al flujo (con permiso Preparar firma) puede preparar el documento.'
+            : !canManage
+              ? 'No tiene permiso “Preparar firma”. Asígueselo en Administración → Usuarios.'
+              : workflowLocked
+                ? 'Esta tarea o solicitud ya está cerrada. Abra la solicitud o su tarea pendiente para preparar el documento.'
+                : 'El documento ya tiene firmas o está finalizado; ya no se puede cambiar la preparación.'
         );
         return false;
       }

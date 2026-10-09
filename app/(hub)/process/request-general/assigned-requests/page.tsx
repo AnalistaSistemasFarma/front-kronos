@@ -1,11 +1,10 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 import axios from 'axios';
-import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
+import toast from 'react-hot-toast';
 import { useSession } from 'next-auth/react';
 import {
   Title,
@@ -210,29 +209,50 @@ function RequestBoard() {
     process: '',
   });
   const [currentPage, setCurrentPage] = useState(1);
+  // Paginación en el servidor: `tickets` es solo la página actual de solicitudes; total y
+  // contadores vienen de SQL sobre el conjunto filtrado (antes se descargaba todo al navegador).
+  // Las tareas asignadas llegan completas y se paginan en el cliente.
+  const [totalTickets, setTotalTickets] = useState(0);
+  const [statusCounts, setStatusCounts] = useState({ open: 0, resolved: 0 });
+  // Filtros con los que se cargó la lista (para cambiar de página y exportar).
+  const appliedFiltersRef = useRef<typeof filters | null>(null);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [tickets, assignedTasks, typeFilter]);
+  const byCreatedAtDesc = (a: { createdAt: string }, b: { createdAt: string }) =>
+    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
 
-  const allItems: AssignedItem[] = [
-    ...tickets.map(
-      (t): AssignedItem => ({ kind: 'request', key: `req-${t.id}`, data: t, createdAt: t.created_at })
-    ),
-    ...assignedTasks.map(
-      (t): AssignedItem => ({ kind: 'task', key: `task-${t.id}`, data: t, createdAt: t.created_at })
-    ),
-  ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-  const visibleItems = allItems.filter((item) =>
-    typeFilter === 'all' ? true : typeFilter === 'requests' ? item.kind === 'request' : item.kind === 'task'
-  );
-
-  const totalPages = Math.max(1, Math.ceil(visibleItems.length / ITEMS_PER_PAGE));
-  const pageItems = visibleItems.slice(
+  const requestPageItems: AssignedItem[] = tickets.map((t) => ({
+    kind: 'request',
+    key: `req-${t.id}`,
+    data: t,
+    createdAt: t.created_at,
+  }));
+  const taskItems: AssignedItem[] = assignedTasks
+    .map((t): AssignedItem => ({ kind: 'task', key: `task-${t.id}`, data: t, createdAt: t.created_at }))
+    .sort(byCreatedAtDesc);
+  const taskPageItems = taskItems.slice(
     (currentPage - 1) * ITEMS_PER_PAGE,
     currentPage * ITEMS_PER_PAGE
   );
+
+  const requestPages = Math.ceil(totalTickets / ITEMS_PER_PAGE);
+  const taskPages = Math.ceil(taskItems.length / ITEMS_PER_PAGE);
+  const totalPages = Math.max(
+    1,
+    typeFilter === 'requests'
+      ? requestPages
+      : typeFilter === 'tasks'
+        ? taskPages
+        : Math.max(requestPages, taskPages)
+  );
+
+  // En «Todos» cada página junta su página de solicitudes con su tramo de tareas.
+  const pageItems: AssignedItem[] =
+    typeFilter === 'requests'
+      ? requestPageItems
+      : typeFilter === 'tasks'
+        ? taskPageItems
+        : [...requestPageItems, ...taskPageItems].sort(byCreatedAtDesc);
+  const totalItemsCount = totalTickets + assignedTasks.length;
   const [filtersExpanded, setFiltersExpanded] = useState(false);
 
   useEffect(() => {
@@ -308,37 +328,79 @@ function RequestBoard() {
     await fetchAssignedWithUserId(userId, filters);
   };
 
+  // El usuario lo toma el servidor de la sesión; aquí solo van los filtros.
+  const buildTicketParams = (filtersToUse?: typeof filters) => {
+    const params = new URLSearchParams();
+    if (filtersToUse) {
+      if (filtersToUse.id) params.append('id', filtersToUse.id);
+      if (filtersToUse.status) params.append('status', filtersToUse.status);
+      if (filtersToUse.company) params.append('company', filtersToUse.company);
+      if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
+      if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
+      if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
+      if (filtersToUse.process) params.append('process', filtersToUse.process);
+    }
+    return params;
+  };
+
+  type RequestPage = {
+    rows: Ticket[];
+    total: number;
+    counts: { open: number; resolved: number };
+  };
+  const EMPTY_REQUEST_PAGE: RequestPage = { rows: [], total: 0, counts: { open: 0, resolved: 0 } };
+
+  // Página de solicitudes que hay en `tickets` (0 = ninguna cargada).
+  const loadedRequestPageRef = useRef(0);
+
+  const includesRequests = (filtersToUse?: typeof filters) =>
+    !TASK_ONLY_STATUSES.includes(filtersToUse?.status || '');
+
+  const fetchRequestPage = async (
+    filtersToUse: typeof filters | undefined,
+    page: number
+  ): Promise<RequestPage> => {
+    const params = buildTicketParams(filtersToUse);
+    params.append('page', String(page));
+    params.append('pageSize', String(ITEMS_PER_PAGE));
+    const res = await fetch(`/api/requests-general/request-assigned?${params.toString()}`);
+    if (!res.ok) throw new Error('Failed to fetch assigned tickets');
+    const data = await res.json();
+    return {
+      rows: Array.isArray(data.rows) ? data.rows : [],
+      total: Number(data.total) || 0,
+      counts: {
+        open: Number(data.counts?.open) || 0,
+        resolved: Number(data.counts?.resolved) || 0,
+      },
+    };
+  };
+
+  const applyRequestPage = (data: RequestPage, page: number) => {
+    setTickets(data.rows);
+    setTotalTickets(data.total);
+    setStatusCounts(data.counts);
+    loadedRequestPageRef.current = page;
+    fetchTasksForTickets(data.rows);
+  };
+
   const fetchAssignedWithUserId = async (userIdToUse: number, filtersToUse?: typeof filters) => {
     try {
       setLoading(true);
-
-      const params = new URLSearchParams();
-      params.append('idUser', userIdToUse.toString());
-
-      if (filtersToUse) {
-        if (filtersToUse.id) params.append('id', filtersToUse.id); 
-        if (filtersToUse.status) params.append('status', filtersToUse.status);
-        if (filtersToUse.company) params.append('company', filtersToUse.company);
-        if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
-        if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
-        if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
-        if (filtersToUse.process) params.append('process', filtersToUse.process);
-      }
+      appliedFiltersRef.current = filtersToUse ?? null;
+      setCurrentPage(1);
 
       const statusValue = filtersToUse?.status || '';
-      const includeRequests = !TASK_ONLY_STATUSES.includes(statusValue);
+      const includeRequests = includesRequests(filtersToUse);
       const includeTasks = !REQUEST_ONLY_STATUSES.includes(statusValue) && !filtersToUse?.process;
 
-      const taskParams = new URLSearchParams(params);
+      // activities-assigned aún filtra por ?idUser= (request-assigned usa la sesión).
+      const taskParams = buildTicketParams(filtersToUse);
       taskParams.delete('process');
+      taskParams.append('idUser', userIdToUse.toString());
 
       const [requestResult, taskResult] = await Promise.allSettled([
-        includeRequests
-          ? fetch(`/api/requests-general/request-assigned?${params.toString()}`).then((res) => {
-              if (!res.ok) throw new Error('Failed to fetch assigned tickets');
-              return res.json();
-            })
-          : Promise.resolve([]),
+        includeRequests ? fetchRequestPage(filtersToUse, 1) : Promise.resolve(EMPTY_REQUEST_PAGE),
         includeTasks
           ? fetch(`/api/requests-general/activities-assigned?${taskParams.toString()}`).then((res) => {
               if (!res.ok) throw new Error('Failed to fetch assigned tasks');
@@ -347,12 +409,15 @@ function RequestBoard() {
           : Promise.resolve([]),
       ]);
 
-      const requestData = requestResult.status === 'fulfilled' ? requestResult.value : [];
-      const taskData = taskResult.status === 'fulfilled' ? taskResult.value : [];
-
-      setTickets(requestData);
-      setAssignedTasks(taskData);
-      fetchTasksForTickets(requestData);
+      applyRequestPage(
+        requestResult.status === 'fulfilled' ? requestResult.value : EMPTY_REQUEST_PAGE,
+        1
+      );
+      setAssignedTasks(
+        taskResult.status === 'fulfilled' && Array.isArray(taskResult.value)
+          ? taskResult.value
+          : []
+      );
 
       if (requestResult.status === 'rejected' && taskResult.status === 'rejected') {
         setError('No se pudieron cargar las solicitudes y tareas asignadas. Intenta de nuevo.');
@@ -367,9 +432,39 @@ function RequestBoard() {
     }
   };
 
+  // Las solicitudes se piden por página al servidor; las tareas ya están en memoria.
+  const goToPage = async (page: number, type: TypeFilter = typeFilter) => {
+    setCurrentPage(page);
+    const applied = appliedFiltersRef.current ?? filters;
+    if (type === 'tasks' || !includesRequests(applied)) return;
+    if (loadedRequestPageRef.current === page) return;
+    try {
+      setLoading(true);
+      applyRequestPage(await fetchRequestPage(applied, page), page);
+    } catch (err) {
+      console.error('Error fetching assigned tickets page:', err);
+      setError('No se pudieron cargar las solicitudes asignadas. Intenta de nuevo.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const changeTypeFilter = (type: TypeFilter) => {
+    setTypeFilter(type);
+    void goToPage(1, type);
+  };
+
   const fetchTasksForTickets = async (ticketsToUse: Ticket[]) => {
     try {
-      const response = await fetch('/api/requests-general/activities-requets');
+      // Solo las tareas de las solicitudes visibles (antes: la tabla completa de tareas).
+      const ids = [...new Set(ticketsToUse.map((t) => t.id))];
+      if (ids.length === 0) {
+        setTasksByRequest({});
+        return;
+      }
+      const response = await fetch(
+        `/api/requests-general/activities-requets?ids=${ids.join(',')}`
+      );
       if (!response.ok) throw new Error('Failed to fetch request tasks');
 
       const data: RequestTask[] = await response.json();
@@ -591,12 +686,11 @@ function RequestBoard() {
     return getTasksProgress(allTasks);
   };
 
-  const pendingRequestsCount = tickets.filter((t) => t.status?.toLowerCase() === 'abierto').length;
   const pendingTasksCount = assignedTasks.filter((t) =>
     ['sin empezar', 'abierto'].includes(t.status_task?.toLowerCase())
   ).length;
   const completedCount =
-    tickets.filter((t) => t.status?.toLowerCase() === 'resuelto').length +
+    statusCounts.resolved +
     assignedTasks.filter((t) => t.status_task?.toLowerCase() === 'resuelto').length;
 
   const filterByStatus = (value: string, type: TypeFilter = 'all') => {
@@ -627,6 +721,18 @@ function RequestBoard() {
   );
 
   async function exportToExcel() {
+    // La tabla solo tiene la página visible: la exportación pide la lista completa con los
+    // mismos filtros (la ruta sin `page` devuelve todo).
+    const params = buildTicketParams(appliedFiltersRef.current ?? filters);
+    const response = await fetch(`/api/requests-general/request-assigned?${params.toString()}`);
+    if (!response.ok) {
+      toast.error('No se pudo generar el informe');
+      return;
+    }
+    const allTickets = (await response.json()) as Ticket[];
+
+    // exceljs (pesado) solo se descarga al exportar.
+    const { default: ExcelJS } = await import('exceljs');
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Datos');
 
@@ -643,9 +749,8 @@ function RequestBoard() {
     
     worksheet.columns = columnMapOrdered;
 
-    tickets.forEach((row) => worksheet.addRow(row));
-
-    tickets.forEach(item => {
+    // Una fila por solicitud (antes se agregaba cada una dos veces).
+    allTickets.forEach(item => {
       const row: Record<TicketKeys, any> = {} as Record<TicketKeys, any>;
 
       columnMapOrdered.forEach(col => {
@@ -831,10 +936,10 @@ function RequestBoard() {
                       Total Asignado
                     </Text>
                     <Text size='lg' fw={600}>
-                      {allItems.length}
+                      {totalItemsCount}
                     </Text>
                     <Text size='xs' c='dimmed'>
-                      {tickets.length} solicitudes · {assignedTasks.length} tareas
+                      {totalTickets} solicitudes · {assignedTasks.length} tareas
                     </Text>
                   </div>
                 </Group>
@@ -866,7 +971,7 @@ function RequestBoard() {
                       Solicitudes Pendientes
                     </Text>
                     <Text size='lg' fw={600}>
-                      {pendingRequestsCount}
+                      {statusCounts.open}
                     </Text>
                   </div>
                 </Group>
@@ -957,7 +1062,7 @@ function RequestBoard() {
                       />
                       <div>
                         <Text size='xs' c='dimmed'>
-                          Avance de tareas
+                          Avance de tareas{totalPages > 1 ? ' (esta página)' : ''}
                         </Text>
                         <Text size='lg' fw={600}>
                           {done}/{total}
@@ -1128,10 +1233,10 @@ function RequestBoard() {
             </Title>
             <SegmentedControl
               value={typeFilter}
-              onChange={(value) => setTypeFilter(value as TypeFilter)}
+              onChange={(value) => changeTypeFilter(value as TypeFilter)}
               data={[
-                { value: 'all', label: `Todos (${allItems.length})` },
-                { value: 'requests', label: `Solicitudes (${tickets.length})` },
+                { value: 'all', label: `Todos (${totalItemsCount})` },
+                { value: 'requests', label: `Solicitudes (${totalTickets})` },
                 { value: 'tasks', label: `Tareas (${assignedTasks.length})` },
               ]}
             />
@@ -1151,7 +1256,7 @@ function RequestBoard() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {visibleItems.length === 0 ? (
+                {pageItems.length === 0 ? (
                   <Table.Tr>
                     <Table.Td colSpan={7} className='text-center py-12 text-gray-500'>
                       <div className='flex flex-col items-center gap-3'>
@@ -1299,7 +1404,11 @@ function RequestBoard() {
 
           {totalPages > 1 && (
             <Group justify='center' mt='md'>
-              <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} />
+              <Pagination
+                total={totalPages}
+                value={currentPage}
+                onChange={(page) => void goToPage(page)}
+              />
             </Group>
           )}
         </Card>

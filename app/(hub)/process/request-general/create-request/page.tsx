@@ -1,10 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef, Suspense } from 'react';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useGetMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import Link from 'next/link';
@@ -66,11 +64,6 @@ import {
 } from '@tabler/icons-react';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
-import { sanitizeOneDriveName } from '../../../../../lib/onedriveName';
-import {
-  ensureOneDriveFolderPath,
-  uploadFileToOneDriveFolder,
-} from '../../../../../lib/onedrive/graphFolderUpload';
 import { isSapField } from '../../../../../lib/requests-general/sapSources';
 import {
   TABLE_FIELD_TYPE,
@@ -535,11 +528,22 @@ function RequestBoard() {
 
   const fetchTasksForTickets = async (ticketsToUse: Ticket[]) => {
     try {
-      const response = await fetch('/api/requests-general/activities-requets');
-      if (!response.ok) throw new Error('Failed to fetch request tasks');
-
-      const data: RequestTask[] = await response.json();
+      // Solo las tareas de las solicitudes listadas, en lotes de 500 ids (límite de la ruta);
+      // antes se descargaba la tabla completa de tareas.
       const ticketIds = new Set(ticketsToUse.map((t) => t.id));
+      const ids = [...ticketIds];
+      const batches: number[][] = [];
+      for (let i = 0; i < ids.length; i += 500) batches.push(ids.slice(i, i + 500));
+      const responses = await Promise.all(
+        batches.map((batch) =>
+          fetch(`/api/requests-general/activities-requets?ids=${batch.join(',')}`)
+        )
+      );
+      if (responses.some((r) => !r.ok)) throw new Error('Failed to fetch request tasks');
+
+      const data: RequestTask[] = (
+        await Promise.all(responses.map((r) => r.json() as Promise<RequestTask[]>))
+      ).flat();
       const grouped: Record<number, RequestTask[]> = {};
 
       for (const task of data) {
@@ -961,13 +965,7 @@ function RequestBoard() {
       let uploadOk = true;
       if (filesToUpload.length > 0) {
         try {
-          const token = await getMicrosoftToken();
-          if (!token) {
-            throw new Error('No se pudo obtener el token de acceso para subir archivos.');
-          }
-
-          const folderName = `Request-${requestId}`;
-          await CheckOrCreateFolderAndUpload(folderName, filesToUpload, token);
+          await uploadRequestFiles(requestId, filesToUpload);
 
           // SAPSEND: reenviar los adjuntos (si es solicitud de tesorería). No bloquea; el servidor
           // aplica el gate y lee los archivos desde OneDrive.
@@ -1043,40 +1041,39 @@ function RequestBoard() {
     }
   };
 
-  async function CheckOrCreateFolderAndUpload(
-    folderName: string,
-    files: { file: File; label?: string }[],
-    token: string
-  ) {
+  /**
+   * Sube los adjuntos de la solicitud recién creada por el servidor (upload-attachments →
+   * <raíz>/TEC/SG/Request-<id>): el token de Graph nunca llega al navegador. Un archivo por
+   * pedido, como FileUpload; el servidor limpia el nombre y evita sobrescribir.
+   */
+  async function uploadRequestFiles(requestId: number, files: { file: File; label?: string }[]) {
     try {
-      const folderId = await ensureOneDriveFolderPath(token, [
-        'SAPSEND',
-        'TEC',
-        'SG',
-        folderName,
-      ]);
-
-      if (!files?.length) {
-        console.log('No hay archivos seleccionados para subir.');
-        return;
-      }
+      if (!files?.length) return;
 
       const uploadNames = files.map((file) =>
-        sanitizeOneDriveName(
-          file.label ? `${file.label} - ${file.file.name}` : file.file.name
-        )
+        file.label ? `${file.label} - ${file.file.name}` : file.file.name
       );
 
       const results = await Promise.allSettled(
-        files.map((file, index) =>
-          uploadFileToOneDriveFolder(
-            token,
-            folderId,
-            uploadNames[index],
-            file.file,
-            file.file.type || 'application/octet-stream'
-          )
-        )
+        files.map(async (file, index) => {
+          const form = new FormData();
+          form.append('requestId', String(requestId));
+          form.append('storagePath', 'SG');
+          form.append('entityType', 'Request');
+          form.append('files', file.file, uploadNames[index]);
+          const res = await fetch('/api/requests-general/upload-attachments', {
+            method: 'POST',
+            body: form,
+          });
+          const data = (await res.json().catch(() => ({}))) as {
+            error?: string;
+            errors?: string[];
+          };
+          if (!res.ok || data.errors?.length) {
+            throw new Error(data.errors?.[0] || data.error || `HTTP ${res.status}`);
+          }
+          return data;
+        })
       );
 
       const failed: string[] = [];
@@ -1095,7 +1092,7 @@ function RequestBoard() {
         );
       }
     } catch (error) {
-      console.error('Error en CheckOrCreateFolderAndUpload:', error);
+      console.error('Error en uploadRequestFiles:', error);
       throw error;
     }
   }

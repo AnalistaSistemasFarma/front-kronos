@@ -63,6 +63,8 @@ const nextConfig: NextConfig = {
     MICROSOFTTENANTID: process.env.MICROSOFTTENANTID,
     MICROSOFTGRAPHUSERROUTE: process.env.MICROSOFTGRAPHUSERROUTE,
     MSCALLBACKURI: process.env.MSCALLBACKURI,
+    // Carpeta raíz de adjuntos en OneDrive (lib/onedrive/root.ts). Vacía = SAPSEND (producción).
+    ONEDRIVE_ROOT_FOLDER: process.env.ONEDRIVE_ROOT_FOLDER ?? '',
   },
 };
 

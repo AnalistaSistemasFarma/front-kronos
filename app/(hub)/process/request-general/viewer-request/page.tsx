@@ -251,11 +251,22 @@ function ViewerRequestGeneralPage() {
 
   const fetchTasksForTickets = async (ticketsToUse: Ticket[]) => {
     try {
-      const response = await fetch('/api/requests-general/activities-requets');
-      if (!response.ok) throw new Error('Failed to fetch request tasks');
-
-      const data: RequestTask[] = await response.json();
+      // Solo las tareas de las solicitudes listadas, en lotes de 500 ids (límite de la ruta);
+      // antes se descargaba la tabla completa de tareas.
       const ticketIds = new Set(ticketsToUse.map((t) => t.id));
+      const ids = [...ticketIds];
+      const batches: number[][] = [];
+      for (let i = 0; i < ids.length; i += 500) batches.push(ids.slice(i, i + 500));
+      const responses = await Promise.all(
+        batches.map((batch) =>
+          fetch(`/api/requests-general/activities-requets?ids=${batch.join(',')}`)
+        )
+      );
+      if (responses.some((r) => !r.ok)) throw new Error('Failed to fetch request tasks');
+
+      const data: RequestTask[] = (
+        await Promise.all(responses.map((r) => r.json() as Promise<RequestTask[]>))
+      ).flat();
       const grouped: Record<number, RequestTask[]> = {};
 
       for (const task of data) {
