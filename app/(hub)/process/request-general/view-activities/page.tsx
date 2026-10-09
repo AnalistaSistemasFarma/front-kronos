@@ -138,6 +138,7 @@ interface Request {
   id_status: number;
   status_task: string;
   assigned: string;
+  id_assigned?: number | null;
   category: string;
   process: string;
   assignedUserId?: number;
@@ -238,6 +239,8 @@ function ViewRequestPage() {
   const [request, setRequest] = useState<Request | null>(null);
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [assignedUsers, setAssignedUsers] = useState<Option[]>([]);
+  const [assignableUsers, setAssignableUsers] = useState<UserEmail[]>([]);
+  const [updatingAssigneeId, setUpdatingAssigneeId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -305,8 +308,6 @@ function ViewRequestPage() {
   const [orionDocuments, setOrionDocuments] = useState<Record<string, OrionSignatureState>>({});
 
   useEffect(() => {
-    // No usar selectedRequest de otra pantalla: suele ser solicitud (sin id_request_general)
-    // y pinta "Tarea #2147" vacío mientras el fetch falla.
     try {
       const storedRequest = sessionStorage.getItem('selectedRequest');
       if (storedRequest) {
@@ -339,7 +340,6 @@ function ViewRequestPage() {
         let res: Response;
         if (id) {
           res = await fetch(`/api/requests-general/view-activities?id=${id}`);
-          // Deep-link legacy / notificaciones: a veces llega id_request_general en lugar del id de tarea
           if (!res.ok) {
             const qs = new URLSearchParams({ requestId: String(id) });
             if (orionFileIdParam) qs.set('fileId', orionFileIdParam);
@@ -352,7 +352,6 @@ function ViewRequestPage() {
         }
 
         if (!res.ok) {
-          // Si venía el id de solicitud, ir al detalle de solicitud (no a una tarea fantasma).
           const maybeRequestId = Number(id || requestIdParam);
           if (Number.isInteger(maybeRequestId) && maybeRequestId > 0) {
             router.replace(
@@ -478,6 +477,7 @@ function ViewRequestPage() {
       const hasEditPermission = hasAdminRole || isAssignedUser;
 
       setCanEdit(hasEditPermission);
+      if (!hasEditPermission) setIsEditing(false);
     } catch (error) {
       console.error('Error checking permissions:', error);
       setCanEdit(false);
@@ -526,7 +526,6 @@ function ViewRequestPage() {
           if (da !== db) return da - db;
           return Number(a.id_note || 0) - Number(b.id_note || 0);
         });
-        // Historial de interacciones: solo notas humanas; progreso de documentos va en Archivos adjuntos.
         setNotes(list.filter((n) => !isOrionDocumentInteractionNote(n.note)));
       } else {
         console.error('Error al cargar notas');
@@ -549,6 +548,11 @@ function ViewRequestPage() {
           label: `${user.name} - ${user.email}`,
         }));
         setAvailableUsers(formattedUsers);
+        const formattedAssignable = data.users.map((user: { id: string; name: string }) => ({
+          value: String(user.id),
+          label: user.name,
+        }));
+        setAssignableUsers(formattedAssignable);
         return;
       }
       if (response.status === 499) return;
@@ -719,6 +723,31 @@ function ViewRequestPage() {
       setOriginalRequest(mappedData);
     } catch (err) {
       console.error('Error refreshing request data:', err);
+    }
+  };
+
+  const handleUpdateTaskAssigned = async (taskId: number, newUserId: string | null) => {
+    if (!newUserId) return;
+    try {
+      setUpdatingAssigneeId(taskId);
+      const response = await fetch('/api/requests-general/update-task-assigned', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: taskId, id_assigned: newUserId }),
+      });
+      if (response.ok) {
+        toast.success('Ejecutor actualizado exitosamente');
+        await fetchRequestData();
+        await fetchTasksRG();
+      } else {
+        const err = await response.json().catch(() => ({}));
+        toast.error(err.error || 'No se pudo actualizar el ejecutor');
+      }
+    } catch (error) {
+      console.error('Error updating task assignee:', error);
+      toast.error('No se pudo actualizar el ejecutor');
+    } finally {
+      setUpdatingAssigneeId(null);
     }
   };
 
@@ -1135,7 +1164,6 @@ function ViewRequestPage() {
     }
     */}
 
-    // Tareas secuenciales: si esta tarea está bloqueada (la anterior no está cerrada), no permitir
     const lockedNow = taskRQ.find((t) => t.id === request?.id)?.locked;
     if (lockedNow) {
       setUpdateMessage({
@@ -1277,7 +1305,6 @@ function ViewRequestPage() {
     }
   };
 
-  // Tarea actual bloqueada por secuencia (la anterior no está cerrada)
   const currentTaskLocked = taskRQ.find((t) => t.id === request?.id)?.locked ?? false;
 
   const formatFileSize = (bytes: number): string => {
@@ -1897,7 +1924,21 @@ function ViewRequestPage() {
                   Asignado a
                 </Text>
 
-                <Text size='sm'>{request.assigned}</Text>
+                {canEdit && !isRequestResolved() ? (
+                  <Select
+                    mt={4}
+                    data={assignableUsers}
+                    value={request.id_assigned ? String(request.id_assigned) : null}
+                    onChange={(value) => handleUpdateTaskAssigned(request.id, value)}
+                    searchable
+                    allowDeselect={false}
+                    disabled={updatingAssigneeId === request.id}
+                    placeholder='Seleccione un ejecutor'
+                    comboboxProps={{ withinPortal: true }}
+                  />
+                ) : (
+                  <Text size='sm'>{request.assigned}</Text>
+                )}
               </div>
 
               <Stack gap='md'>
@@ -2155,7 +2196,7 @@ function ViewRequestPage() {
                           color='blue'
                           onClick={handleStartEditing}
                           leftSection={<IconTicket size={16} />}
-                          disabled={isRequestResolved() || currentTaskLocked}
+                          disabled={isRequestResolved() || currentTaskLocked || !canEdit}
                         >
                           Editar Tarea
                         </Button>
@@ -2747,7 +2788,7 @@ function ViewRequestPage() {
                   color='blue'
                   onClick={handleStartEditing}
                   leftSection={<IconTicket size={16} />}
-                  disabled={isRequestResolved() || currentTaskLocked}
+                  disabled={isRequestResolved() || currentTaskLocked || !canEdit}
                 >
                   Editar Tarea
                 </Button>

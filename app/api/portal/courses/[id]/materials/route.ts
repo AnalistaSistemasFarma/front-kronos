@@ -26,8 +26,9 @@ function idDesdeParametro(valor: string): number | null {
  *
  *   POST /api/portal/courses/:id/materials   (multipart/form-data o JSON)
  *
- * Campos: `type` ('DOCUMENT' | 'LINK'), `title`, `required` ('true'/'false'),
- * y según el tipo: `file` (DOCUMENT) o `url` (LINK).
+ * Campos: `type` ('DOCUMENT' | 'LINK' | 'FORM'), `title`, `required`
+ * ('true'/'false'), y según el tipo: `file` (DOCUMENT), `url` (LINK) o
+ * `formularioId` (FORM, formulario propio — Cristian 2026-10-08).
  *
  * Desde 2026-10-08 (sin límite de peso, pedido de Cristian) el formulario del
  * formador manda JSON: el archivo ya lo subió el navegador DIRECTO a
@@ -66,10 +67,23 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const titulo = String(campo('title') ?? '').trim();
     const obligatorio = String(campo('required') ?? 'true') !== 'false';
 
-    if (tipo !== 'DOCUMENT' && tipo !== 'LINK') {
-      return NextResponse.json({ error: 'El tipo debe ser DOCUMENT o LINK.' }, { status: 400 });
+    if (tipo !== 'DOCUMENT' && tipo !== 'LINK' && tipo !== 'FORM') {
+      return NextResponse.json({ error: 'El tipo debe ser DOCUMENT, LINK o FORM.' }, { status: 400 });
     }
-    if (!titulo) return NextResponse.json({ error: 'Falta el título del material.' }, { status: 400 });
+
+    // FORMULARIO PROPIO (Cristian, 2026-10-08): un formulario ya importado en
+    // "Formularios"; sin título, se usa el del formulario.
+    let formularioId: number | null = null;
+    let tituloFormulario = '';
+    if (tipo === 'FORM') {
+      formularioId = Number(campo('formularioId'));
+      const formulario = Number.isInteger(formularioId) && formularioId > 0
+        ? await prisma.portalFormulario.findUnique({ where: { id: formularioId }, select: { id: true, titulo: true } })
+        : null;
+      if (!formulario) return NextResponse.json({ error: 'Elija un formulario existente.' }, { status: 400 });
+      tituloFormulario = formulario.titulo;
+    }
+    if (!titulo && !tituloFormulario) return NextResponse.json({ error: 'Falta el título del material.' }, { status: 400 });
     if (titulo.length > 255) {
       return NextResponse.json({ error: 'El título es muy largo (máximo 255 caracteres).' }, { status: 400 });
     }
@@ -79,6 +93,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       _max: { orden: true },
     });
     const orden = (ultimoOrden._max.orden ?? -1) + 1;
+
+    if (tipo === 'FORM') {
+      const material = await prisma.portalCourseMaterial.create({
+        data: {
+          course_id: courseId,
+          type: 'FORM',
+          title: (titulo || tituloFormulario).slice(0, 255),
+          orden,
+          required: obligatorio,
+          formulario_id: formularioId,
+        },
+      });
+      return NextResponse.json({ ok: true, material: { id: material.id } });
+    }
 
     if (tipo === 'LINK') {
       const url = String(campo('url') ?? '').trim();

@@ -87,7 +87,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         porcentaje,
         materiales: curso.materials.map((m) => ({
           id: m.id,
-          tipo: m.type as 'DOCUMENT' | 'LINK',
+          tipo: m.type as 'DOCUMENT' | 'LINK' | 'FORM',
+          formularioId: m.formulario_id,
           titulo: m.title,
           orden: m.orden,
           url: m.url,

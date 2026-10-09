@@ -37,6 +37,7 @@ import {
   RingProgress,
   Loader,
   Pagination,
+  SegmentedControl,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -66,6 +67,7 @@ import {
   IconTag,
   IconCalendarEvent,
   IconDownload,
+  IconListCheck,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
@@ -104,6 +106,33 @@ interface RequestTask {
   status_task: string;
   resolution?: string | null;
 }
+
+interface AssignedTask {
+  id: number;
+  id_task: number;
+  task: string;
+  id_request_general: number;
+  description: string;
+  subject_request: string;
+  id_company: number;
+  company: string;
+  created_at: string;
+  id_requester: number;
+  name_requester: string;
+  status_req: number;
+  id_status: number;
+  status_task: string;
+  assigned: string;
+}
+
+type AssignedItem =
+  | { kind: 'request'; key: string; data: Ticket; createdAt: string }
+  | { kind: 'task'; key: string; data: AssignedTask; createdAt: string };
+
+type TypeFilter = 'all' | 'requests' | 'tasks';
+
+const TASK_ONLY_STATUSES = ['4'];
+const REQUEST_ONLY_STATUSES = ['7'];
 
 interface Note {
   id_note: number;
@@ -144,6 +173,11 @@ function RequestBoard() {
   const subprocessId = searchParams.get('subprocess_id');
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [assignedTasks, setAssignedTasks] = useState<AssignedTask[]>([]);
+  const initialType = searchParams.get('type');
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>(
+    initialType === 'tasks' || initialType === 'requests' ? initialType : 'all'
+  );
   const [tasksByRequest, setTasksByRequest] = useState<Record<number, RequestTask[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -177,13 +211,25 @@ function RequestBoard() {
   });
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Paginación en cliente: al cambiar el conjunto de tickets (nuevo fetch / filtros) vuelve a página 1.
   useEffect(() => {
     setCurrentPage(1);
-  }, [tickets]);
+  }, [tickets, assignedTasks, typeFilter]);
 
-  const totalPages = Math.max(1, Math.ceil(tickets.length / ITEMS_PER_PAGE));
-  const pageItems = tickets.slice(
+  const allItems: AssignedItem[] = [
+    ...tickets.map(
+      (t): AssignedItem => ({ kind: 'request', key: `req-${t.id}`, data: t, createdAt: t.created_at })
+    ),
+    ...assignedTasks.map(
+      (t): AssignedItem => ({ kind: 'task', key: `task-${t.id}`, data: t, createdAt: t.created_at })
+    ),
+  ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  const visibleItems = allItems.filter((item) =>
+    typeFilter === 'all' ? true : typeFilter === 'requests' ? item.kind === 'request' : item.kind === 'task'
+  );
+
+  const totalPages = Math.max(1, Math.ceil(visibleItems.length / ITEMS_PER_PAGE));
+  const pageItems = visibleItems.slice(
     (currentPage - 1) * ITEMS_PER_PAGE,
     currentPage * ITEMS_PER_PAGE
   );
@@ -212,7 +258,7 @@ function RequestBoard() {
           if (id) {
             setUserId(id);
             setUserIdInitialized(true);
-            fetchTicketsWithUserId(id, filters);
+            fetchAssignedWithUserId(id, filters);
           } else {
             setUserIdInitialized(true);
           }
@@ -259,10 +305,10 @@ function RequestBoard() {
       console.log('fetchTickets: No se puede ejecutar sin userId');
       return;
     }
-    await fetchTicketsWithUserId(userId, filters);
+    await fetchAssignedWithUserId(userId, filters);
   };
 
-  const fetchTicketsWithUserId = async (userIdToUse: number, filtersToUse?: typeof filters) => {
+  const fetchAssignedWithUserId = async (userIdToUse: number, filtersToUse?: typeof filters) => {
     try {
       setLoading(true);
 
@@ -279,19 +325,43 @@ function RequestBoard() {
         if (filtersToUse.process) params.append('process', filtersToUse.process);
       }
 
-      const url = `/api/requests-general/request-assigned?${params.toString()}`;
+      const statusValue = filtersToUse?.status || '';
+      const includeRequests = !TASK_ONLY_STATUSES.includes(statusValue);
+      const includeTasks = !REQUEST_ONLY_STATUSES.includes(statusValue) && !filtersToUse?.process;
 
-      const response = await fetch(url);
+      const taskParams = new URLSearchParams(params);
+      taskParams.delete('process');
 
-      if (!response.ok) throw new Error('Failed to fetch assigned tickets');
+      const [requestResult, taskResult] = await Promise.allSettled([
+        includeRequests
+          ? fetch(`/api/requests-general/request-assigned?${params.toString()}`).then((res) => {
+              if (!res.ok) throw new Error('Failed to fetch assigned tickets');
+              return res.json();
+            })
+          : Promise.resolve([]),
+        includeTasks
+          ? fetch(`/api/requests-general/activities-assigned?${taskParams.toString()}`).then((res) => {
+              if (!res.ok) throw new Error('Failed to fetch assigned tasks');
+              return res.json();
+            })
+          : Promise.resolve([]),
+      ]);
 
-      const data = await response.json();
-      console.log('fetchTicketsWithUserId: Tickets asignados recibidos:', data.length, 'tickets');
-      setTickets(data);
-      fetchTasksForTickets(data);
+      const requestData = requestResult.status === 'fulfilled' ? requestResult.value : [];
+      const taskData = taskResult.status === 'fulfilled' ? taskResult.value : [];
+
+      setTickets(requestData);
+      setAssignedTasks(taskData);
+      fetchTasksForTickets(requestData);
+
+      if (requestResult.status === 'rejected' && taskResult.status === 'rejected') {
+        setError('No se pudieron cargar las solicitudes y tareas asignadas. Intenta de nuevo.');
+      } else {
+        setError(null);
+      }
     } catch (err) {
       console.error('Error fetching assigned tickets:', err);
-      setError('Unable to load assigned tickets. Please try again.');
+      setError('No se pudieron cargar las solicitudes y tareas asignadas. Intenta de nuevo.');
     } finally {
       setLoading(false);
     }
@@ -488,6 +558,8 @@ function RequestBoard() {
 
   const getStatusIcon = (status: string) => {
     switch (status?.toLowerCase()) {
+      case 'sin empezar':
+        return IconClock;
       case 'abierto':
         return IconProgress;
       case 'cancelado':
@@ -519,11 +591,20 @@ function RequestBoard() {
     return getTasksProgress(allTasks);
   };
 
-  const filterByStatus = (value: string) => {
+  const pendingRequestsCount = tickets.filter((t) => t.status?.toLowerCase() === 'abierto').length;
+  const pendingTasksCount = assignedTasks.filter((t) =>
+    ['sin empezar', 'abierto'].includes(t.status_task?.toLowerCase())
+  ).length;
+  const completedCount =
+    tickets.filter((t) => t.status?.toLowerCase() === 'resuelto').length +
+    assignedTasks.filter((t) => t.status_task?.toLowerCase() === 'resuelto').length;
+
+  const filterByStatus = (value: string, type: TypeFilter = 'all') => {
+    setTypeFilter(type);
     const nf = { ...filters, status: value };
     setFilters(nf);
     if (userId) {
-      fetchTicketsWithUserId(userId, nf);
+      fetchAssignedWithUserId(userId, nf);
     }
   };
 
@@ -582,6 +663,124 @@ function RequestBoard() {
     saveAs(blob, 'InformeSolicitudesAsignadas.xlsx');
   }
 
+  const formatAssignedDate = (raw: string) => {
+    if (!raw) return 'Sin fecha';
+
+    const date = new Date(raw);
+    if (isNaN(date.getTime())) return 'Fecha inválida';
+
+    const adjusted = new Date(date.getTime() + 5 * 60 * 60 * 1000);
+
+    return new Intl.DateTimeFormat('es-CO', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    }).format(adjusted);
+  };
+
+  const renderTypeBadge = (kind: AssignedItem['kind']) =>
+    kind === 'request' ? (
+      <Badge
+        variant='filled'
+        color='blue'
+        size='sm'
+        leftSection={<IconTicket size={12} />}
+        styles={{ root: { textTransform: 'none' }, label: { overflow: 'visible' } }}
+      >
+        Solicitud
+      </Badge>
+    ) : (
+      <Badge
+        variant='filled'
+        color='violet'
+        size='sm'
+        leftSection={<IconListCheck size={12} />}
+        styles={{ root: { textTransform: 'none' }, label: { overflow: 'visible' } }}
+      >
+        Tarea
+      </Badge>
+    );
+
+  const renderStatusBadge = (status: string) => {
+    const StatusIcon = getStatusIcon(status);
+    return (
+      <Badge
+        color={getStatusColor(status)}
+        variant='light'
+        size='sm'
+        leftSection={<StatusIcon size={12} />}
+        styles={{ label: { overflow: 'visible' } }}
+      >
+        {status}
+      </Badge>
+    );
+  };
+
+  const renderTaskRow = (key: string, task: AssignedTask) => (
+    <Table.Tr
+      key={key}
+      className='cursor-pointer transition-colors'
+      onClick={() => {
+        sessionStorage.setItem('selectedRequest', JSON.stringify(task));
+        window.open(
+          `/process/request-general/view-activities?id=${task.id}&from=assigned-activities`
+        );
+      }}
+    >
+      <Table.Td style={{ whiteSpace: 'nowrap' }}>{renderTypeBadge('task')}</Table.Td>
+      <Table.Td>
+        <Text size='sm' fw={700} c='var(--mantine-color-violet-light-color)'>
+          {task.id_request_general}
+        </Text>
+        <Text size='xs' c='dimmed' style={{ whiteSpace: 'nowrap' }}>
+          Tarea #{task.id_task ?? task.id}
+        </Text>
+      </Table.Td>
+      <Table.Td style={{ minWidth: 240, maxWidth: 320 }}>
+        <Text size='sm' fw={600} lineClamp={2}>
+          {task.task}
+        </Text>
+        <Text size='xs' c='dimmed' lineClamp={2}>
+          {task.subject_request}
+        </Text>
+      </Table.Td>
+      <Table.Td>
+        <Group gap={4} wrap='nowrap'>
+          <IconBuilding size={13} className='text-gray-400' />
+          <Text size='xs' c='dimmed'>
+            {task.company}
+          </Text>
+        </Group>
+      </Table.Td>
+      <Table.Td style={{ whiteSpace: 'nowrap' }}>{renderStatusBadge(task.status_task)}</Table.Td>
+      <Table.Td>
+        <Group gap={4} wrap='nowrap' align='flex-start'>
+          <IconCalendarEvent size={14} className='text-gray-400' style={{ marginTop: 2 }} />
+          <Text size='sm' c='dimmed'>
+            {formatAssignedDate(task.created_at)}
+          </Text>
+        </Group>
+      </Table.Td>
+      <Table.Td>
+        <Stack gap={4}>
+          <Group gap={4} wrap='nowrap'>
+            <IconUser size={14} className='text-gray-400' />
+            <Text size='sm'>{task.name_requester}</Text>
+          </Group>
+          <Group gap={4} wrap='nowrap'>
+            <IconUserCheck size={14} className='text-gray-400' />
+            <Text size='sm' c='dimmed'>
+              {task.assigned}
+            </Text>
+          </Group>
+        </Stack>
+      </Table.Td>
+    </Table.Tr>
+  );
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
@@ -597,86 +796,121 @@ function RequestBoard() {
                 className='text-3xl font-bold mb-2 flex items-center gap-3'
               >
                 <IconTicket size={32} className='text-blue-600' />
-                Solicitudes Asignadas
+                Solicitudes y Tareas Asignadas
               </Title>
               <Text size='lg' c='dimmed'>
-                Gestión de solicitudes asignadas a ti
+                Gestión de solicitudes y tareas asignadas a ti
               </Text>
             </div>
           </Flex>
 
-          <Grid>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+          <Grid columns={10}>
+            <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
               <Card
                 p='md'
                 radius='md'
                 withBorder
                 role='button'
-                aria-label='Mostrar todas las solicitudes'
+                aria-label='Mostrar todas las solicitudes y tareas'
                 onClick={() => filterByStatus('0')}
                 style={{
                   cursor: 'pointer',
                   backgroundColor: 'var(--mantine-color-blue-light)',
                   borderColor:
-                    filters.status === '0'
+                    filters.status === '0' && typeFilter === 'all'
                       ? 'var(--mantine-color-blue-filled)'
                       : 'transparent',
                   borderWidth: 2,
                   transition: 'border-color 150ms ease',
                 }}
               >
-                <Group>
+                <Group wrap='nowrap'>
                   <IconTicket size={24} color='var(--mantine-color-blue-light-color)' />
                   <div>
                     <Text size='xs' c='var(--mantine-color-blue-light-color)'>
-                      Total de Solicitudes
+                      Total Asignado
                     </Text>
                     <Text size='lg' fw={600}>
-                      {tickets.length}
+                      {allItems.length}
+                    </Text>
+                    <Text size='xs' c='dimmed'>
+                      {tickets.length} solicitudes · {assignedTasks.length} tareas
                     </Text>
                   </div>
                 </Group>
               </Card>
             </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+            <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
               <Card
                 p='md'
                 radius='md'
                 withBorder
                 role='button'
                 aria-label='Filtrar solicitudes pendientes'
-                onClick={() => filterByStatus('1')}
+                onClick={() => filterByStatus('1', 'requests')}
                 style={{
                   cursor: 'pointer',
                   backgroundColor: 'var(--mantine-color-orange-light)',
                   borderColor:
-                    filters.status === '1'
+                    filters.status === '1' && typeFilter === 'requests'
                       ? 'var(--mantine-color-orange-filled)'
                       : 'transparent',
                   borderWidth: 2,
                   transition: 'border-color 150ms ease',
                 }}
               >
-                <Group>
+                <Group wrap='nowrap'>
                   <IconProgress size={24} color='var(--mantine-color-orange-light-color)' />
                   <div>
                     <Text size='xs' c='var(--mantine-color-orange-light-color)'>
-                      Pendiente
+                      Solicitudes Pendientes
                     </Text>
                     <Text size='lg' fw={600}>
-                      {tickets.filter((t) => t.status?.toLowerCase() === 'abierto').length}
+                      {pendingRequestsCount}
                     </Text>
                   </div>
                 </Group>
               </Card>
             </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+            <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
               <Card
                 p='md'
                 radius='md'
                 withBorder
                 role='button'
-                aria-label='Filtrar solicitudes completadas'
+                aria-label='Mostrar tareas asignadas'
+                onClick={() => filterByStatus('0', 'tasks')}
+                style={{
+                  cursor: 'pointer',
+                  backgroundColor: 'var(--mantine-color-violet-light)',
+                  borderColor:
+                    typeFilter === 'tasks'
+                      ? 'var(--mantine-color-violet-filled)'
+                      : 'transparent',
+                  borderWidth: 2,
+                  transition: 'border-color 150ms ease',
+                }}
+              >
+                <Group wrap='nowrap'>
+                  <IconListCheck size={24} color='var(--mantine-color-violet-light-color)' />
+                  <div>
+                    <Text size='xs' c='var(--mantine-color-violet-light-color)'>
+                      Tareas Pendientes
+                    </Text>
+                    <Text size='lg' fw={600}>
+                      {pendingTasksCount}
+                    </Text>
+                  </div>
+                </Group>
+              </Card>
+            </Grid.Col>
+            <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
+              <Card
+                p='md'
+                radius='md'
+                withBorder
+                role='button'
+                aria-label='Filtrar solicitudes y tareas completadas'
                 onClick={() => filterByStatus('2')}
                 style={{
                   cursor: 'pointer',
@@ -689,20 +923,20 @@ function RequestBoard() {
                   transition: 'border-color 150ms ease',
                 }}
               >
-                <Group>
+                <Group wrap='nowrap'>
                   <IconCheck size={24} color='var(--mantine-color-green-light-color)' />
                   <div>
                     <Text size='xs' c='var(--mantine-color-green-light-color)'>
                       Completadas
                     </Text>
                     <Text size='lg' fw={600}>
-                      {tickets.filter((t) => t.status?.toLowerCase() === 'resuelto').length}
+                      {completedCount}
                     </Text>
                   </div>
                 </Group>
               </Card>
             </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+            <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
               <Card p='md' radius='md' withBorder>
                 {(() => {
                   const { total, done, percent } = getGlobalTasksProgress();
@@ -735,7 +969,7 @@ function RequestBoard() {
               </Card>
             </Grid.Col>
             {filters.process == '4' && (
-              <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+              <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
                 <Card p='md' radius='md' withBorder className='bg-green-50 border-green-200'>
                   <Group>
                     <Button
@@ -800,10 +1034,11 @@ function RequestBoard() {
                     clearable
                     data={[
                       { value: '0', label: 'Todos' },
+                      { value: '4', label: 'Sin Empezar (solo tareas)' },
                       { value: '1', label: 'Abierto' },
                       { value: '3', label: 'Cancelado' },
                       { value: '2', label: 'Resuelto' },
-                      { value: '7', label: 'Devuelta' },
+                      { value: '7', label: 'Devuelta (solo solicitudes)' },
                     ]}
                     value={filters.status}
                     onChange={(value) => handleFilterChange('status', value || '')}
@@ -866,8 +1101,9 @@ function RequestBoard() {
                       process: '',
                     };
                     setFilters(clearedFilters);
+                    setTypeFilter('all');
                     if (userId) {
-                      fetchTicketsWithUserId(userId, clearedFilters);
+                      fetchAssignedWithUserId(userId, clearedFilters);
                     }
                   }}
                   leftSection={<IconX size={16} />}
@@ -885,15 +1121,27 @@ function RequestBoard() {
         <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
           <LoadingOverlay visible={loading} />
 
-          <Title order={3} mb='md' className='flex items-center gap-2'>
-            <IconTicket size={20} />
-            Lista de Solicitudes Asignadas
-          </Title>
+          <Group justify='space-between' mb='md' wrap='wrap'>
+            <Title order={3} className='flex items-center gap-2'>
+              <IconTicket size={20} />
+              Lista de Solicitudes y Tareas Asignadas
+            </Title>
+            <SegmentedControl
+              value={typeFilter}
+              onChange={(value) => setTypeFilter(value as TypeFilter)}
+              data={[
+                { value: 'all', label: `Todos (${allItems.length})` },
+                { value: 'requests', label: `Solicitudes (${tickets.length})` },
+                { value: 'tasks', label: `Tareas (${assignedTasks.length})` },
+              ]}
+            />
+          </Group>
 
           <div className='overflow-x-auto'>
             <Table striped highlightOnHover>
               <Table.Thead>
                 <Table.Tr>
+                  <Table.Th style={{ whiteSpace: 'nowrap', width: 1 }}>Tipo</Table.Th>
                   <Table.Th>ID</Table.Th>
                   <Table.Th>Asunto</Table.Th>
                   <Table.Th>Proceso / Empresa</Table.Th>
@@ -903,24 +1151,31 @@ function RequestBoard() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {tickets.length === 0 ? (
+                {visibleItems.length === 0 ? (
                   <Table.Tr>
-                    <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
+                    <Table.Td colSpan={7} className='text-center py-12 text-gray-500'>
                       <div className='flex flex-col items-center gap-3'>
                         <IconTicket size={48} className='text-gray-300' />
                         <Text size='lg' fw={500}>
-                          No se encontraron solicitudes asignadas
+                          {typeFilter === 'tasks'
+                            ? 'No se encontraron tareas asignadas'
+                            : typeFilter === 'requests'
+                              ? 'No se encontraron solicitudes asignadas'
+                              : 'No se encontraron solicitudes ni tareas asignadas'}
                         </Text>
                         <Text size='sm' c='gray.5'>
-                          No tienes solicitudes asignadas actualmente
+                          No tienes elementos asignados con los filtros actuales
                         </Text>
                       </div>
                     </Table.Td>
                   </Table.Tr>
                 ) : (
-                  pageItems.map((ticket) => (
+                  pageItems.map((item) => {
+                    if (item.kind === 'task') return renderTaskRow(item.key, item.data);
+                    const ticket = item.data;
+                    return (
                     <Table.Tr
-                      key={ticket.id}
+                      key={item.key}
                       className='cursor-pointer transition-colors'
                       onClick={() => {
                         sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
@@ -929,6 +1184,7 @@ function RequestBoard() {
                         );
                       }}
                     >
+                      <Table.Td style={{ whiteSpace: 'nowrap' }}>{renderTypeBadge('request')}</Table.Td>
                       <Table.Td>
                         <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
                           {ticket.id}
@@ -1009,43 +1265,13 @@ function RequestBoard() {
                         </Stack>
                       </Table.Td>
                       <Table.Td style={{ whiteSpace: 'nowrap' }}>
-                        {(() => {
-                          const StatusIcon = getStatusIcon(ticket.status);
-                          return (
-                            <Badge
-                              color={getStatusColor(ticket.status)}
-                              variant='light'
-                              size='sm'
-                              leftSection={<StatusIcon size={12} />}
-                              styles={{ label: { overflow: 'visible' } }}
-                            >
-                              {ticket.status}
-                            </Badge>
-                          );
-                        })()}
+                        {renderStatusBadge(ticket.status)}
                       </Table.Td>
                       <Table.Td>
                         <Group gap={4} wrap='nowrap' align='flex-start'>
                           <IconCalendarEvent size={14} className='text-gray-400' style={{ marginTop: 2 }} />
                           <Text size='sm' c='dimmed'>
-                            {(() => {
-                              const raw = ticket.created_at;
-                              if (!raw) return 'Sin fecha';
-
-                              const date = new Date(raw);
-                              if (isNaN(date.getTime())) return 'Fecha inválida';
-
-                              const adjusted = new Date(date.getTime() + 5 * 60 * 60 * 1000);
-
-                              return new Intl.DateTimeFormat('es-CO', {
-                                day: 'numeric',
-                                month: 'long',
-                                year: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                hour12: true,
-                              }).format(adjusted);
-                            })()}
+                            {formatAssignedDate(ticket.created_at)}
                           </Text>
                         </Group>
                       </Table.Td>
@@ -1064,7 +1290,8 @@ function RequestBoard() {
                         </Stack>
                       </Table.Td>
                     </Table.Tr>
-                  ))
+                    );
+                  })
                 )}
               </Table.Tbody>
             </Table>

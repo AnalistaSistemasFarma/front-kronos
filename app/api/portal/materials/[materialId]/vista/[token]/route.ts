@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../../../lib/prisma';
 import { identificar } from '../../../../../../../lib/portal/acceso';
 import { marcarMaterialCompletado, recalcularProgresoDeMaterial } from '../../../../../../../lib/portal/formacion';
+import { MENSAJE_FORMULARIO_SE_COMPLETA_AL_ENVIAR } from '../../../../../../../lib/portal/formulario';
 import { leerReporte, reglaDeRevision, validarRevision } from '../../../../../../../lib/portal/revision-material';
 
 function idDesdeParametro(valor: string): number | null {
@@ -55,6 +56,9 @@ export async function POST(
     });
     if (!vista || vista.material_id !== materialId || vista.student_email !== quien.correo || vista.material.eliminado_at) {
       return NextResponse.json({ error: 'Apertura del material no encontrada.' }, { status: 404 });
+    }
+    if (vista.material.type === 'FORM') {
+      return NextResponse.json({ error: MENSAJE_FORMULARIO_SE_COMPLETA_AL_ENVIAR }, { status: 409 });
     }
 
     if (vista.aceptada !== true) {

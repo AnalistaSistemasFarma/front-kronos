@@ -114,7 +114,7 @@ describe('enforcement de empresa en las tools', () => {
     expect(meta.allowedCompanyIds).toEqual([1]);
     // Ya no es 100% solo lectura: hay una ruta de escritura acotada.
     expect(meta.readOnly).toBe(false);
-    expect(meta.capabilities.totalTools).toBe(29);
+    expect(meta.capabilities.totalTools).toBe(30);
     expect(meta.capabilities.write).toContain('kronos_categorize_case');
   });
 });
@@ -178,7 +178,7 @@ describe('superficie de tools — Kronos + Teams', () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
 
-    expect(names.length).toBe(29);
+    expect(names.length).toBe(30);
     // Las únicas tools que mutan datos son las dos de categorización.
     const writeTools = names.filter((n) => n.startsWith('kronos_categorize_'));
     expect(writeTools.sort()).toEqual(['kronos_categorize_case', 'kronos_categorize_request']);

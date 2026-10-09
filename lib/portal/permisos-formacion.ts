@@ -158,3 +158,20 @@ export async function correosConMarcadoManual(
 export async function puedeMarcarManual(correo: string): Promise<boolean> {
   return (await correosConMarcadoManual()).has(correo.trim().toLowerCase());
 }
+
+/* ─────────── Formulario propio: quién VE las respuestas (2026-10-08) ─────────── */
+
+/** Respuesta cuando alguien sin permiso pide las respuestas de un formulario. */
+export const MENSAJE_SIN_PERMISO_RESPUESTAS =
+  'Solo los administradores y formadores de Formación pueden consultar las respuestas de los formularios.';
+
+/**
+ * ¿Esta persona puede CONSULTAR y EXPORTAR las respuestas de los formularios
+ * propios? Pedido de Cristian Baldión (2026-10-08): las mismas hojas
+ * ADMINISTRADORES y FORMADORES del Excel de permisos — las respuestas traen
+ * datos personales sensibles (Ley 1581 de 2012). Misma lista, misma caché y
+ * mismo criterio de falla cerrada que el marcado manual.
+ */
+export async function puedeVerRespuestasFormulario(correo: string): Promise<boolean> {
+  return puedeMarcarManual(correo);
+}
