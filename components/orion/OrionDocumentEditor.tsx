@@ -13,17 +13,25 @@ import {
   SimpleGrid,
   Stack,
   Text,
+  ThemeIcon,
   UnstyledButton,
 } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import {
   IconCertificate,
+  IconCheck,
   IconDeviceFloppy,
-  IconPaperclip,
+  IconFileText,
   IconSend,
   IconWriting,
 } from '@tabler/icons-react';
 import type { SignatureFieldPlacement, SignatureFieldKind } from '../../lib/orion/signatureFields';
-import { normalizeFieldKind, splitValidatorFields } from '../../lib/orion/signatureFields';
+import {
+  isValidatorPlacementOrder,
+  normalizeFieldKind,
+  splitValidatorFields,
+  validatorPlacementOrder,
+} from '../../lib/orion/signatureFields';
 import type { OrionDocumentSignatureKind, OrionSignatureState } from '../../lib/orion/types';
 import {
   emptySignerSlot,
@@ -39,6 +47,7 @@ import OrionSignersList from './OrionSignersList';
 import PdfInlineViewer from './PdfInlineViewer';
 import SignaturePlacementCanvas from './SignaturePlacementCanvas';
 import { usePdfBlobPreview } from './usePdfBlobPreview';
+import { showEmailSentNotification } from '../../lib/notifications/showEmailSentNotification';
 
 type EditorStep = 0 | 1 | 2;
 
@@ -70,7 +79,7 @@ type Props = {
   openNonce?: number;
 };
 
-const EDITOR_HEIGHT = 'min(62vh, 680px)';
+const EDITOR_HEIGHT = '100%';
 
 function clampStep(step: number): EditorStep {
   return step <= 0 ? 0 : step >= 2 ? 2 : 1;
@@ -153,17 +162,45 @@ export default function OrionDocumentEditor({
     [initialFields]
   );
   const [fields, setFields] = useState<SignatureFieldPlacement[]>(signerInitialFields);
-  // Los validadores ya están en el PDF (SynerLink estampa su visto bueno, ubicado o
-  // automático): aquí solo se ubican firmantes y sus cajas se conservan al guardar.
-  const preservedValidatorFields = useMemo(
-    () => (state.validatorFields ?? []) as SignatureFieldPlacement[],
-    [state.validatorFields]
-  );
+  // Validadores que aprobaron: se ubica su visto bueno (chulito / firma guardada en la
+  // versión final). Orden de caja = 900 + orden del validador; no se envían a Orion.
+  const validatorParticipants = useMemo<OrionParticipant[]>(() => {
+    const review = state.review;
+    if (!review || review.status !== 'APROBADO') return [];
+    return [...review.approvals]
+      .filter((a) => a.decision === 'APROBADO' && a.email)
+      .sort((a, b) => a.order - b.order)
+      .map((a) => ({
+        order: validatorPlacementOrder(a.order),
+        email: normalizeEmail(a.email),
+        name: a.name || a.email,
+        role: 'Validador',
+        type: 'internal',
+      }));
+  }, [state.review]);
+  // Caja guardada de cada validador: por correo (sobrevive a cambios de orden) o por orden.
+  const validatorInitialFields = useMemo(() => {
+    const saved = (state.validatorFields ?? []) as SignatureFieldPlacement[];
+    return validatorParticipants.flatMap((v) => {
+      const field =
+        saved.find((f) => normalizeEmail(f.validatorEmail) === v.email) ??
+        saved.find((f) => !f.validatorEmail && f.signerOrder === v.order);
+      return field ? [{ ...field, signerOrder: v.order, kind: 'approval' as const }] : [];
+    });
+  }, [state.validatorFields, validatorParticipants]);
+  const [validatorFields, setValidatorFields] =
+    useState<SignatureFieldPlacement[]>(validatorInitialFields);
+  const placementFields = useMemo(() => [...fields, ...validatorFields], [fields, validatorFields]);
+  const handlePlacementChange = useCallback((next: SignatureFieldPlacement[]) => {
+    setFields(next.filter((f) => !isValidatorPlacementOrder(f.signerOrder)));
+    setValidatorFields(next.filter((f) => isValidatorPlacementOrder(f.signerOrder)));
+  }, []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signatureKind, setSignatureKind] = useState<OrionDocumentSignatureKind>(
     () => state.signatureKind || 'electronic'
   );
+  const isNarrowPrep = useMediaQuery('(max-width: 900px)');
 
   useEffect(() => {
     setSignatureKind(state.signatureKind || 'electronic');
@@ -171,6 +208,8 @@ export default function OrionDocumentEditor({
 
   const selectSignatureKind = useCallback(
     (kind: OrionDocumentSignatureKind) => {
+      // Firma digital (certificado) aún no operativa: solo permitir electrónica.
+      if (kind !== 'electronic') return;
       setSignatureKind(kind);
       onStateUpdate({
         ...state,
@@ -183,15 +222,27 @@ export default function OrionDocumentEditor({
   );
 
   useEffect(() => {
+    if (signatureKind !== 'electronic') {
+      setSignatureKind('electronic');
+    }
+  }, [signatureKind]);
+
+  useEffect(() => {
     setFields(signerInitialFields);
   }, [signerInitialFields]);
 
   useEffect(() => {
-    const known = orderedParticipants.some((p) => p.order === activeOrder);
+    setValidatorFields(validatorInitialFields);
+  }, [validatorInitialFields]);
+
+  useEffect(() => {
+    const known =
+      orderedParticipants.some((p) => p.order === activeOrder) ||
+      validatorParticipants.some((p) => p.order === activeOrder);
     if (orderedParticipants.length && !known) {
       setActiveOrder(orderedParticipants[0]!.order);
     }
-  }, [activeOrder, orderedParticipants]);
+  }, [activeOrder, orderedParticipants, validatorParticipants]);
 
   const signerStatuses = useMemo(() => {
     // Clave por orden de slot (mismo email puede aparecer varias veces).
@@ -216,20 +267,32 @@ export default function OrionDocumentEditor({
   );
   const effectiveRequireFingerprint = canUseFingerprint && anySignerNeedsFingerprint;
 
-  const allPlaced =
-    assignedParticipants.length > 0 &&
-    assignedParticipants.every((p) => {
-      const hasSig = fields.some(
-        (f) => f.signerOrder === p.order && normalizeFieldKind(f.kind) === 'signature'
-      );
+  /** Caja requerida por participante: firma (+huella) o solo validación. */
+  const participantHasRequiredBoxes = useCallback(
+    (p: OrionParticipant) => {
+      const kinds = fields
+        .filter((f) => f.signerOrder === p.order)
+        .map((f) => normalizeFieldKind(f.kind));
+      const hasValidation = kinds.includes('validation');
+      const hasSig = kinds.includes('signature');
+      // Solo validador: basta con caja de validación (sin firma ni huella).
+      if (hasValidation && !hasSig) return true;
       if (!hasSig) return false;
       if (!(canUseFingerprint && p.requireFingerprint)) return true;
-      return fields.some(
-        (f) => f.signerOrder === p.order && normalizeFieldKind(f.kind) === 'fingerprint'
-      );
-    });
+      return kinds.includes('fingerprint');
+    },
+    [canUseFingerprint, fields]
+  );
 
-  const placementParticipants = assignedParticipants;
+  const allPlaced =
+    assignedParticipants.length > 0 &&
+    assignedParticipants.every((p) => participantHasRequiredBoxes(p));
+
+  const placedCount = assignedParticipants.filter((p) => participantHasRequiredBoxes(p)).length;
+  const placementParticipants = useMemo(
+    () => [...assignedParticipants, ...validatorParticipants],
+    [assignedParticipants, validatorParticipants]
+  );
 
   const activeNeedsFingerprint =
     canUseFingerprint &&
@@ -264,9 +327,10 @@ export default function OrionDocumentEditor({
                 role: 'Firmante',
                 type,
                 cardCode: meta?.cardCode ?? null,
-                // Externos: correo con link por defecto. Internos: solo tarea.
-                notifyByEmail: type === 'external',
+                // Siempre notificar por correo al enviar a firma (sin checkbox en UI).
+                notifyByEmail: true,
                 requireFingerprint: Boolean(p.requireFingerprint),
+                signatureMarkId: p.signatureMarkId ?? p.order,
               }
             : p
         )
@@ -274,12 +338,6 @@ export default function OrionDocumentEditor({
     },
     []
   );
-
-  const handleToggleNotifyByEmail = useCallback((order: number, value: boolean) => {
-    setOrderedParticipants((prev) =>
-      prev.map((p) => (p.order === order ? { ...p, notifyByEmail: value } : p))
-    );
-  }, []);
 
   const handleToggleRequireFingerprint = useCallback((order: number, value: boolean) => {
     setOrderedParticipants((prev) =>
@@ -293,6 +351,28 @@ export default function OrionDocumentEditor({
         )
       );
     }
+  }, []);
+
+  const handleSignatureMarkIdChange = useCallback((order: number, markId: number) => {
+    setOrderedParticipants((prev) => {
+      const next = prev.map((p) =>
+        p.order === order ? { ...p, signatureMarkId: markId } : p
+      );
+      const signer = next.find((p) => p.order === order);
+      const name = signer?.name?.trim() || `Firma ${markId}`;
+      setFields((fields) =>
+        fields.map((f) => {
+          if (f.signerOrder !== order) return f;
+          const kind = normalizeFieldKind(f.kind);
+          if (kind === 'validation') return f;
+          if (kind === 'fingerprint') {
+            return { ...f, label: `Huella · ${markId} · ${name}` };
+          }
+          return { ...f, label: `Firma ${markId} · ${name}` };
+        })
+      );
+      return next;
+    });
   }, []);
 
   const handleClearSigner = useCallback((order: number) => {
@@ -322,8 +402,9 @@ export default function OrionDocumentEditor({
             role: 'Firmante' as const,
             type: 'internal' as const,
             cardCode: null,
-            notifyByEmail: false,
+            notifyByEmail: true,
             requireFingerprint: Boolean(slot1.requireFingerprint),
+            signatureMarkId: slot1.signatureMarkId ?? 1,
           };
           const without1 = next.filter((p) => p.order !== 1);
           return reindexParticipants(
@@ -372,6 +453,15 @@ export default function OrionDocumentEditor({
     if (pending.length > 0) {
       return `Asigne todos los firmantes (${pending.length} pendiente(s)).`;
     }
+    const marks = orderedParticipants.map((p) =>
+      Number.isFinite(Number(p.signatureMarkId)) && Number(p.signatureMarkId) >= 1
+        ? Math.trunc(Number(p.signatureMarkId))
+        : p.order
+    );
+    const unique = new Set(marks);
+    if (unique.size !== marks.length) {
+      return 'Cada firmante debe tener un ID de firma distinto.';
+    }
     return null;
   }, [orderedParticipants]);
 
@@ -394,8 +484,12 @@ export default function OrionDocumentEditor({
             order: p.order,
             type: p.type === 'external' ? 'external' : 'internal',
             ...(p.cardCode ? { cardCode: p.cardCode } : {}),
-            notifyByEmail: Boolean(p.notifyByEmail),
+            notifyByEmail: true,
             requireFingerprint: Boolean(p.requireFingerprint),
+            signatureMarkId:
+              Number.isFinite(Number(p.signatureMarkId)) && Number(p.signatureMarkId) >= 1
+                ? Math.trunc(Number(p.signatureMarkId))
+                : p.order,
           })),
       }),
     });
@@ -418,8 +512,12 @@ export default function OrionDocumentEditor({
           ...s,
           type: local.type || s.type || 'internal',
           cardCode: local.cardCode ?? s.cardCode ?? null,
-          notifyByEmail: Boolean(local.notifyByEmail),
+          notifyByEmail: true,
           requireFingerprint: Boolean(local.requireFingerprint),
+          signatureMarkId:
+            local.signatureMarkId != null
+              ? local.signatureMarkId
+              : s.signatureMarkId ?? s.order,
         };
       });
       onStateUpdate({
@@ -447,7 +545,7 @@ export default function OrionDocumentEditor({
         body: JSON.stringify({
           requestId,
           fileId,
-          signatureFields: [...fields, ...preservedValidatorFields],
+          signatureFields: [...fields, ...validatorFields],
         }),
       });
 
@@ -491,7 +589,7 @@ export default function OrionDocumentEditor({
         signatureFields: fields as OrionSignatureState['signatureFields'],
       });
     }
-  }, [fields, fileId, fileName, onStateUpdate, preservedValidatorFields, requestId, state]);
+  }, [fields, fileId, fileName, onStateUpdate, requestId, state, validatorFields]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -526,13 +624,30 @@ export default function OrionDocumentEditor({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'No se pudo enviar a firma');
       if (data.state) onStateUpdate(data.state as OrionSignatureState);
+      const authCreated = Number(data.authorizationsCreated) || 0;
+      const signerCount = Array.isArray(data.state?.signers)
+        ? data.state.signers.length
+        : undefined;
+      showEmailSentNotification({
+        title: '¡Documento enviado a firma!',
+        fileName: fileName || null,
+        message: [
+          fileName ? `Documento: ${fileName}` : null,
+          signerCount != null ? `${signerCount} firmante(s) notificado(s)` : null,
+          authCreated > 0
+            ? 'Se creó la autorización y se enviaron avisos (campana / correo).'
+            : 'Se notificó a los firmantes (campana / correo).',
+        ]
+          .filter(Boolean)
+          .join('. '),
+      });
       onClose?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al enviar');
     } finally {
       setSaving(false);
     }
-  }, [allPlaced, assignSigners, fileId, onClose, onStateUpdate, persistFields, requestId]);
+  }, [allPlaced, assignSigners, fileId, fileName, onClose, onStateUpdate, persistFields, requestId]);
 
   const goNext = useCallback(async () => {
     if (editorStep === 1) {
@@ -567,9 +682,14 @@ export default function OrionDocumentEditor({
   }
 
   return (
-    <Stack gap='md' style={{ height: EDITOR_HEIGHT }}>
-      <Box>
-        <Text size='xs' c='dimmed' mb='xs'>
+    <Stack gap='sm' style={{ height: EDITOR_HEIGHT, minHeight: 0, flex: 1 }}>
+      <Box px={4}>
+        <Text
+          size='xs'
+          c='dimmed'
+          mb={10}
+          style={{ letterSpacing: '0.02em', textTransform: 'uppercase', fontWeight: 600 }}
+        >
           {editorStepSubtitle(editorStep)}
         </Text>
         <OrionEditorSteps active={editorStep} />
@@ -583,173 +703,280 @@ export default function OrionDocumentEditor({
 
       <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {editorStep === 0 && (
-          <ScrollArea style={{ flex: 1 }} offsetScrollbars type='scroll'>
-            <Stack gap='md' maw={640}>
-              <Box>
-                <Text size='sm' fw={600} mb={4}>
-                  Archivo del documento *
-                </Text>
-                <Text size='xs' c='dimmed' mb='xs'>
-                  Formatos admitidos: PDF. El archivo ya está adjunto a esta solicitud.
-                </Text>
-                <Paper
-                  withBorder
-                  p='xl'
+          <Box
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: 'grid',
+              gridTemplateColumns: isNarrowPrep
+                ? '1fr'
+                : 'minmax(0, 1.45fr) minmax(300px, 0.75fr)',
+              gridTemplateRows: isNarrowPrep ? 'minmax(260px, 40vh) minmax(0, 1fr)' : undefined,
+              gap: 16,
+              alignItems: 'stretch',
+            }}
+          >
+            <Box
+              style={{
+                minHeight: 0,
+                minWidth: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+              }}
+            >
+              <Group gap={8} wrap='nowrap'>
+                <ThemeIcon
+                  size={32}
                   radius='md'
-                  style={{
-                    background: 'var(--app-surface-raised)',
-                    borderStyle: 'dashed',
-                    textAlign: 'center',
-                  }}
+                  variant='light'
+                  color='teal'
+                  style={{ flexShrink: 0 }}
                 >
-                  <Stack gap={6} align='center'>
-                    <IconPaperclip size={28} style={{ opacity: 0.65 }} />
-                    <Text size='sm' fw={600}>
-                      {fileName || 'Documento adjunto'}
-                    </Text>
-                    <Text size='xs' c='dimmed'>
-                      PDF listo para preparar firmantes
-                    </Text>
-                  </Stack>
-                </Paper>
-                {sharedPdfSrc ? (
-                  <Box mt='md'>
-                    <PdfInlineViewer
-                      src={sharedPdfSrc}
-                      fileName={fileName ?? undefined}
-                      minHeight={320}
-                    />
-                  </Box>
-                ) : null}
-              </Box>
-
-              <Box>
-                <Text size='sm' fw={600} mb={4}>
-                  Título
-                </Text>
-                <Paper withBorder p='sm' radius='md' style={{ background: 'var(--app-surface)' }}>
-                  <Text size='sm'>{documentTitle || fileName || 'Sin título'}</Text>
-                </Paper>
-              </Box>
-
-              <Box>
-                <Text size='sm' fw={600} mb={8}>
-                  Tipo de firma del documento
-                </Text>
-                <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
-                  <UnstyledButton
-                    onClick={() => selectSignatureKind('electronic')}
-                    style={{ textAlign: 'left', width: '100%' }}
-                    aria-pressed={signatureKind === 'electronic'}
-                  >
-                    <Paper
-                      withBorder
-                      p='sm'
-                      radius='md'
-                      style={{
-                        background:
-                          signatureKind === 'electronic'
-                            ? 'color-mix(in srgb, var(--app-accent) 10%, var(--app-surface))'
-                            : 'var(--app-surface)',
-                        borderColor:
-                          signatureKind === 'electronic'
-                            ? 'color-mix(in srgb, var(--app-accent) 45%, var(--app-border))'
-                            : undefined,
-                        borderWidth: signatureKind === 'electronic' ? 2 : 1,
-                      }}
-                    >
-                      <Group gap='xs' mb={4} justify='space-between' wrap='nowrap'>
-                        <Group gap='xs' wrap='nowrap'>
-                          <IconWriting size={16} />
-                          <Text size='sm' fw={700}>
-                            Firma electrónica
-                          </Text>
-                        </Group>
-                        {signatureKind === 'electronic' ? (
-                          <Text size='10px' fw={700} c='blue' tt='uppercase'>
-                            Principal
-                          </Text>
-                        ) : null}
-                      </Group>
-                      <Text size='xs' c='dimmed'>
-                        Rúbrica dibujada + identidad en GSS Firma. Es el flujo activo hoy (plazo
-                        24 h por turno).
-                      </Text>
-                    </Paper>
-                  </UnstyledButton>
-
-                  <UnstyledButton
-                    onClick={() => selectSignatureKind('digital')}
-                    style={{ textAlign: 'left', width: '100%' }}
-                    aria-pressed={signatureKind === 'digital'}
-                  >
-                    <Paper
-                      withBorder
-                      p='sm'
-                      radius='md'
-                      style={{
-                        background:
-                          signatureKind === 'digital'
-                            ? 'color-mix(in srgb, var(--app-accent) 10%, var(--app-surface))'
-                            : 'var(--app-surface)',
-                        borderColor:
-                          signatureKind === 'digital'
-                            ? 'color-mix(in srgb, var(--app-accent) 45%, var(--app-border))'
-                            : undefined,
-                        borderWidth: signatureKind === 'digital' ? 2 : 1,
-                      }}
-                    >
-                      <Group gap='xs' mb={4} wrap='nowrap'>
-                        <IconCertificate size={16} />
-                        <Text size='sm' fw={700}>
-                          Firma digital
-                        </Text>
-                      </Group>
-                      <Text size='xs' c='dimmed'>
-                        Certificado digital. Opción disponible para preparar; la firma con
-                        certificado se habilitará en Orion.
-                      </Text>
-                    </Paper>
-                  </UnstyledButton>
-                </SimpleGrid>
-                {signatureKind === 'digital' ? (
-                  <Alert color='yellow' variant='light' mt='sm'>
-                    Por ahora el firmante sigue usando rúbrica electrónica al confirmar. La firma
-                    digital con certificado quedará operativa cuando Orion la active.
-                  </Alert>
-                ) : (
-                  <Text size='xs' c='dimmed' mt='sm'>
-                    Procedencia SynerLink: el documento queda trazado en Orion con empresa y origen
-                    SynerLink.
+                  <IconFileText size={18} />
+                </ThemeIcon>
+                <Box style={{ flex: 1, minWidth: 0 }}>
+                  <Text size='sm' fw={700} lineClamp={1} style={{ letterSpacing: '-0.02em' }}>
+                    {fileName || 'Documento PDF'}
                   </Text>
+                  <Text size='xs' c='dimmed'>
+                    Revise el archivo antes de continuar
+                  </Text>
+                </Box>
+              </Group>
+
+              <Box style={{ flex: 1, minHeight: 0 }}>
+                {sharedPdfSrc ? (
+                  <PdfInlineViewer
+                    src={sharedPdfSrc}
+                    fileName={fileName ?? undefined}
+                    fill
+                    minHeight={480}
+                  />
+                ) : (
+                  <Paper
+                    withBorder
+                    radius='lg'
+                    style={{
+                      height: '100%',
+                      minHeight: 280,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: 'var(--app-surface-raised)',
+                    }}
+                  >
+                    <Text size='sm' c='dimmed'>
+                      No hay vista previa disponible
+                    </Text>
+                  </Paper>
                 )}
               </Box>
+            </Box>
 
-              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
+            <ScrollArea
+              style={{ minHeight: 0, height: '100%' }}
+              offsetScrollbars
+              type='scroll'
+              styles={{
+                viewport: { paddingRight: 4 },
+              }}
+            >
+              <Stack gap='md' pr={4}>
                 <Box>
-                  <Text size='sm' fw={600} mb={4}>
-                    Responsable
+                  <Text
+                    size='xs'
+                    fw={700}
+                    c='dimmed'
+                    tt='uppercase'
+                    mb={6}
+                    style={{ letterSpacing: '0.04em' }}
+                  >
+                    Título
                   </Text>
-                  <Paper withBorder p='sm' radius='md' style={{ background: 'var(--app-surface)' }}>
-                    <Text size='sm'>{currentUserName || currentUserEmail || '—'}</Text>
+                  <Paper
+                    withBorder
+                    p='md'
+                    radius='lg'
+                    style={{
+                      background: 'var(--app-surface)',
+                      boxShadow: '0 1px 2px color-mix(in srgb, #000 3%, transparent)',
+                    }}
+                  >
+                    <Text size='sm' fw={600} style={{ letterSpacing: '-0.01em', lineHeight: 1.4 }}>
+                      {documentTitle || fileName || 'Sin título'}
+                    </Text>
                   </Paper>
                 </Box>
-                <Box>
-                  <Text size='sm' fw={600} mb={4}>
-                    Departamento
-                  </Text>
-                  <Paper withBorder p='sm' radius='md' style={{ background: 'var(--app-surface)' }}>
-                    <Text size='sm'>{departmentLabel || 'Según su perfil SynerLink'}</Text>
-                  </Paper>
-                </Box>
-              </SimpleGrid>
 
-              <Alert color='blue' variant='light'>
-                Continúe para asignar firmantes (puede incluirse usted) y ubicar las firmas en el
-                PDF, igual que en GSS Firma.
-              </Alert>
-            </Stack>
-          </ScrollArea>
+                <Box>
+                  <Text
+                    size='xs'
+                    fw={700}
+                    c='dimmed'
+                    tt='uppercase'
+                    mb={8}
+                    style={{ letterSpacing: '0.04em' }}
+                  >
+                    Tipo de firma
+                  </Text>
+                  <Stack gap='sm'>
+                    <UnstyledButton
+                      onClick={() => selectSignatureKind('electronic')}
+                      style={{ textAlign: 'left', width: '100%' }}
+                      aria-pressed={signatureKind === 'electronic'}
+                    >
+                      <Paper
+                        withBorder
+                        p='md'
+                        radius='lg'
+                        style={{
+                          background:
+                            'color-mix(in srgb, var(--app-accent) 9%, var(--app-surface))',
+                          borderColor:
+                            'color-mix(in srgb, var(--app-accent) 50%, var(--app-border))',
+                          borderWidth: 1.5,
+                          boxShadow:
+                            '0 0 0 3px color-mix(in srgb, var(--app-accent) 12%, transparent)',
+                          transition: 'box-shadow 160ms ease, border-color 160ms ease',
+                        }}
+                      >
+                        <Group
+                          gap='sm'
+                          mb={8}
+                          justify='space-between'
+                          wrap='nowrap'
+                          align='flex-start'
+                        >
+                          <Group gap='sm' wrap='nowrap' align='flex-start'>
+                            <ThemeIcon size={36} radius='md' variant='filled' color='teal'>
+                              <IconWriting size={18} />
+                            </ThemeIcon>
+                            <Box>
+                              <Text size='sm' fw={700} style={{ letterSpacing: '-0.01em' }}>
+                                Firma electrónica
+                              </Text>
+                              <Text size='10px' fw={700} c='teal' tt='uppercase' mt={2}>
+                                Disponible
+                              </Text>
+                            </Box>
+                          </Group>
+                          <ThemeIcon size={22} radius='xl' color='teal' variant='filled'>
+                            <IconCheck size={14} stroke={2.5} />
+                          </ThemeIcon>
+                        </Group>
+                        <Text size='xs' c='dimmed' style={{ lineHeight: 1.5 }}>
+                          El firmante dibuja su firma en pantalla y confirma quién es (nombre y
+                          documento). Ideal para equipos internos y socios externos. Plazo: 24 h por
+                          turno.
+                        </Text>
+                      </Paper>
+                    </UnstyledButton>
+
+                    <Paper
+                      withBorder
+                      p='md'
+                      radius='lg'
+                      style={{
+                        background: 'var(--app-surface-raised)',
+                        opacity: 0.85,
+                        cursor: 'not-allowed',
+                      }}
+                      aria-disabled
+                      title='Firma digital con certificado: próximamente'
+                    >
+                      <Group gap='sm' mb={8} wrap='nowrap' align='flex-start'>
+                        <ThemeIcon size={36} radius='md' variant='light' color='gray'>
+                          <IconCertificate size={18} />
+                        </ThemeIcon>
+                        <Box>
+                          <Text size='sm' fw={700} style={{ letterSpacing: '-0.01em' }}>
+                            Firma digital
+                          </Text>
+                          <Text size='10px' fw={700} c='dimmed' tt='uppercase' mt={2}>
+                            Próximamente
+                          </Text>
+                        </Box>
+                      </Group>
+                      <Text size='xs' c='dimmed' style={{ lineHeight: 1.5 }}>
+                        Usa un certificado digital (token o archivo) para sellar el PDF con
+                        integridad criptográfica. Se habilitará cuando Orion soporte certificado;
+                        por ahora no se puede elegir.
+                      </Text>
+                    </Paper>
+                  </Stack>
+                </Box>
+
+                <SimpleGrid cols={1} spacing='sm'>
+                  <Box>
+                    <Text
+                      size='xs'
+                      fw={700}
+                      c='dimmed'
+                      tt='uppercase'
+                      mb={6}
+                      style={{ letterSpacing: '0.04em' }}
+                    >
+                      Responsable
+                    </Text>
+                    <Paper
+                      withBorder
+                      px='md'
+                      py='sm'
+                      radius='lg'
+                      style={{ background: 'var(--app-surface)' }}
+                    >
+                      <Text size='sm' fw={500}>
+                        {currentUserName || currentUserEmail || '—'}
+                      </Text>
+                    </Paper>
+                  </Box>
+                  <Box>
+                    <Text
+                      size='xs'
+                      fw={700}
+                      c='dimmed'
+                      tt='uppercase'
+                      mb={6}
+                      style={{ letterSpacing: '0.04em' }}
+                    >
+                      Departamento
+                    </Text>
+                    <Paper
+                      withBorder
+                      px='md'
+                      py='sm'
+                      radius='lg'
+                      style={{ background: 'var(--app-surface)' }}
+                    >
+                      <Text size='sm' fw={500}>
+                        {departmentLabel || 'Según su perfil SynerLink'}
+                      </Text>
+                    </Paper>
+                  </Box>
+                </SimpleGrid>
+
+                <Paper
+                  p='md'
+                  radius='lg'
+                  style={{
+                    background:
+                      'color-mix(in srgb, var(--app-accent) 8%, var(--app-surface-raised))',
+                    border:
+                      '1px solid color-mix(in srgb, var(--app-accent) 20%, var(--app-border))',
+                  }}
+                >
+                  <Text size='xs' fw={600} mb={4}>
+                    Siguiente paso
+                  </Text>
+                  <Text size='xs' c='dimmed' style={{ lineHeight: 1.5 }}>
+                    Asigne firmantes (puede incluirse usted) y luego ubique las firmas sobre el PDF.
+                    El documento queda trazado en Orion con origen SynerLink.
+                  </Text>
+                </Paper>
+              </Stack>
+            </ScrollArea>
+          </Box>
         )}
 
         {editorStep === 1 && !assignmentsEditable && (
@@ -761,9 +988,8 @@ export default function OrionDocumentEditor({
 
         {editorStep === 1 && assignmentsEditable && (
           <Alert color='blue' variant='light' mb='md'>
-            Cada firmante tendrá 24 horas para firmar cuando sea su turno. Elija por persona si
-            recibe correo con el link y si requiere huella. Al enviar a firma se crean las tareas;
-            el correo solo llega a quienes usted marque.
+            Cada firmante tendrá 24 horas para firmar cuando sea su turno. Al enviar a firma se
+            crean las tareas y se notifica por correo con el enlace para firmar.
           </Alert>
         )}
 
@@ -787,13 +1013,13 @@ export default function OrionDocumentEditor({
               onAssign={handleAssignSigner}
               onClear={handleClearSigner}
               onReorder={signerCount > 1 && assignmentsEditable ? reorderParticipant : undefined}
-              onToggleNotifyByEmail={
-                assignmentsEditable ? handleToggleNotifyByEmail : undefined
-              }
               onToggleRequireFingerprint={
                 assignmentsEditable && canUseFingerprint
                   ? handleToggleRequireFingerprint
                   : undefined
+              }
+              onSignatureMarkIdChange={
+                assignmentsEditable ? handleSignatureMarkIdChange : undefined
               }
             />
             {assignmentsEditable && !canUseFingerprint ? (
@@ -841,8 +1067,8 @@ export default function OrionDocumentEditor({
                   Orden de firma
                 </Text>
                 <Text size='xs' c='dimmed'>
-                  Seleccione la persona y ubique su firma en el PDF. El visto bueno de los
-                  validadores ya queda en el documento.
+                  Seleccione la persona y ubique su firma en el PDF. Los validadores que
+                  aprobaron también aparecen: ubique su visto bueno donde lo necesite.
                 </Text>
                 {activeNeedsFingerprint ? (
                   <SegmentedControl
@@ -861,10 +1087,10 @@ export default function OrionDocumentEditor({
               <ScrollArea style={{ flex: 1 }} offsetScrollbars type='scroll' scrollbarSize={8}>
                 <Box p='md'>
                   <OrionSignersList
-                    participants={assignedParticipants}
+                    participants={placementParticipants}
                     activeOrder={activeOrder}
                     onSelect={setActiveOrder}
-                    fields={fields}
+                    fields={placementFields}
                     signerStatuses={signerStatuses}
                     variant='placement'
                     sequential={sequential}
@@ -892,8 +1118,8 @@ export default function OrionDocumentEditor({
                 participants={placementParticipants}
                 activeOrder={activeOrder}
                 activeKind={activeFieldKind}
-                fields={fields}
-                onChange={setFields}
+                fields={placementFields}
+                onChange={handlePlacementChange}
               />
             </Box>
           </Box>
@@ -903,33 +1129,46 @@ export default function OrionDocumentEditor({
       <Group
         justify='space-between'
         wrap='wrap'
-        pt='xs'
-        style={{ borderTop: '1px solid var(--app-border-subtle)' }}
+        pt='sm'
+        mt={4}
+        style={{ borderTop: '1px solid var(--app-border-subtle)', flexShrink: 0 }}
       >
         {editorStep === 2 ? (
           <Text size='sm' c='dimmed' fw={500}>
-            {fields.length} de {placementParticipants.length} firma(s) ubicada(s)
+            {placedCount} de {assignedParticipants.length} firmante(s) con cajas listas
           </Text>
         ) : (
-          <Button variant='subtle' onClick={onClose} disabled={saving}>
+          <Button variant='subtle' color='gray' onClick={onClose} disabled={saving} radius='md'>
             Cancelar
           </Button>
         )}
 
         <Group>
           {editorStep > 0 && (
-            <Button variant='default' onClick={() => setEditorStep((s) => clampStep(s - 1))} disabled={saving}>
+            <Button
+              variant='default'
+              radius='md'
+              onClick={() => setEditorStep((s) => clampStep(s - 1))}
+              disabled={saving}
+            >
               Atrás
             </Button>
           )}
           {editorStep < 2 ? (
-            <Button onClick={() => void goNext()} loading={saving} disabled={!assignmentsEditable && editorStep === 1}>
+            <Button
+              radius='md'
+              size='md'
+              onClick={() => void goNext()}
+              loading={saving}
+              disabled={!assignmentsEditable && editorStep === 1}
+            >
               Continuar
             </Button>
           ) : (
             <>
               <Button
                 variant='default'
+                radius='md'
                 leftSection={saving ? <Loader size={14} /> : <IconDeviceFloppy size={16} />}
                 onClick={() => void handleSave()}
                 disabled={saving || !assignmentsEditable}
@@ -937,7 +1176,8 @@ export default function OrionDocumentEditor({
                 Guardar ubicaciones
               </Button>
               <Button
-                color='blue'
+                color='teal'
+                radius='md'
                 leftSection={saving ? <Loader size={14} /> : <IconSend size={16} />}
                 onClick={() => void handleSend()}
                 disabled={saving || !allPlaced || !assignmentsEditable}

@@ -5,6 +5,7 @@ import {
   Autocomplete,
   Badge,
   Box,
+  Button,
   Checkbox,
   Group,
   Loader,
@@ -13,13 +14,19 @@ import {
   SegmentedControl,
   Stack,
   Text,
+  TextInput,
   ThemeIcon,
   Tooltip,
 } from '@mantine/core';
 import { IconArrowDown, IconArrowUp, IconCheck, IconClock, IconX } from '@tabler/icons-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { OrionParticipant, OrionParticipantType } from '../../lib/orion/participants';
-import { parseUserOptionLabel, type OrionUserOption } from '../../lib/orion/participants';
+import {
+  parseUserOptionLabel,
+  resolveSignatureMarkId,
+  type OrionUserOption,
+} from '../../lib/orion/participants';
+import toast from 'react-hot-toast';
 
 type Props = {
   participants: OrionParticipant[];
@@ -45,6 +52,7 @@ type Props = {
   onReorder?: (order: number, direction: 'up' | 'down') => void;
   onToggleNotifyByEmail?: (order: number, value: boolean) => void;
   onToggleRequireFingerprint?: (order: number, value: boolean) => void;
+  onSignatureMarkIdChange?: (order: number, markId: number) => void;
   readOnly?: boolean;
 };
 
@@ -64,13 +72,16 @@ function statusFor(
   return { label: 'Sin asignar', color: 'gray', done: false };
 }
 
-type PartnerOption = {
+export type PartnerOption = {
   value: string;
   label: string;
   cardCode: string;
   cardName: string;
   email: string;
+  source: 'sap' | 'user';
 };
+
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 export function PartnerSearch({
   companyId,
@@ -85,6 +96,9 @@ export function PartnerSearch({
   const [options, setOptions] = useState<PartnerOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [sapWarning, setSapWarning] = useState<string | null>(null);
+  const [pending, setPending] = useState<PartnerOption | null>(null);
+  const [pendingEmail, setPendingEmail] = useState('');
 
   useEffect(() => {
     if (!companyId || q.trim().length < 2) {
@@ -110,25 +124,28 @@ export function PartnerSearch({
             return;
           }
           const raw = Array.isArray(data.options) ? data.options : [];
-          // Valor único por CardCode (evita crash de Autocomplete con emails duplicados/vacíos).
+          // Valor único (evita crash de Autocomplete con valores duplicados/vacíos).
           const seen = new Set<string>();
           const next: PartnerOption[] = [];
           for (const row of raw as PartnerOption[]) {
             const cardCode = String(row?.cardCode || '').trim();
+            const value = String(row?.value || cardCode).trim();
             const email = String(row?.email || '')
               .trim()
               .toLowerCase();
-            if (!cardCode || !email || !email.includes('@') || seen.has(cardCode)) continue;
-            seen.add(cardCode);
+            if ((!cardCode && row.source !== 'user') || !value || seen.has(value)) continue;
+            seen.add(value);
             next.push({
-              value: cardCode,
+              value,
               label: String(row.label || `${row.cardName || cardCode} <${email}>`),
               cardCode,
               cardName: String(row.cardName || cardCode),
-              email,
+              email: email.includes('@') ? email : '',
+              source: row.source === 'user' ? 'user' : 'sap',
             });
           }
           setOptions(next);
+          setSapWarning(typeof data.sapError === 'string' ? data.sapError : null);
         })
         .catch(() => {
           if (!cancelled) {
@@ -146,6 +163,63 @@ export function PartnerSearch({
     };
   }, [companyId, q]);
 
+  const confirmPending = () => {
+    const email = pendingEmail.trim().toLowerCase();
+    if (!pending || !EMAIL_RE.test(email)) {
+      setSearchError('Escriba un correo válido para este socio.');
+      return;
+    }
+    onPick({ ...pending, email });
+    setPending(null);
+    setPendingEmail('');
+    setSearchError(null);
+  };
+
+  if (pending) {
+    return (
+      <Stack gap={4}>
+        <Text size='xs'>
+          <b>{pending.cardName}</b> · {pending.cardCode} no tiene correo en SAP. Escriba el correo
+          donde recibirá la invitación a firmar:
+        </Text>
+        <Group gap='xs' wrap='nowrap'>
+          <TextInput
+            size='xs'
+            placeholder='correo@empresa.com'
+            aria-label='Correo del socio'
+            value={pendingEmail}
+            onChange={(e) => setPendingEmail(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') confirmPending();
+            }}
+            style={{ flex: 1 }}
+            autoFocus
+          />
+          <Button size='xs' onClick={confirmPending}>
+            Asignar
+          </Button>
+          <Button
+            size='xs'
+            variant='subtle'
+            color='gray'
+            onClick={() => {
+              setPending(null);
+              setPendingEmail('');
+              setSearchError(null);
+            }}
+          >
+            Cancelar
+          </Button>
+        </Group>
+        {searchError ? (
+          <Text size='xs' c='red'>
+            {searchError}
+          </Text>
+        ) : null}
+      </Stack>
+    );
+  }
+
   return (
     <Stack gap={4}>
       <Autocomplete
@@ -154,21 +228,23 @@ export function PartnerSearch({
             ? 'Buscar socio por nombre, código o correo…'
             : 'Falta empresa de la solicitud para buscar socios'
         }
-        data={options.map((o) => ({ value: o.cardCode, label: o.label }))}
+        data={options.map((o) => ({ value: o.value, label: o.label }))}
         value={q}
         onChange={setQ}
         disabled={disabled || !companyId}
-        limit={12}
+        limit={25}
         rightSection={loading ? <Loader size={14} /> : null}
         onOptionSubmit={(value) => {
           try {
-            const match = options.find(
-              (o) => o.cardCode === value || o.email === value || o.value === value
-            );
-            if (!match?.email) return;
-            onPick(match);
+            const match = options.find((o) => o.value === value);
+            if (!match) return;
             setQ('');
             setOptions([]);
+            if (!match.email) {
+              setPending(match);
+              return;
+            }
+            onPick(match);
           } catch (err) {
             console.error('[orion] PartnerSearch onOptionSubmit', err);
             setSearchError('No se pudo asignar este socio. Intente de nuevo.');
@@ -180,9 +256,14 @@ export function PartnerSearch({
           {searchError}
         </Text>
       ) : null}
+      {sapWarning && !searchError && q.trim().length >= 2 ? (
+        <Text size='xs' c='orange'>
+          {sapWarning}
+        </Text>
+      ) : null}
       {!loading && q.trim().length >= 2 && options.length === 0 && !searchError ? (
         <Text size='xs' c='dimmed'>
-          Sin resultados con correo válido en SAP.
+          Sin socios activos en SAP que coincidan.
         </Text>
       ) : null}
     </Stack>
@@ -208,6 +289,7 @@ export default function OrionSignerAssignment({
   onReorder,
   onToggleNotifyByEmail,
   onToggleRequireFingerprint,
+  onSignatureMarkIdChange,
   readOnly = false,
 }: Props) {
   const [slotSource, setSlotSource] = useState<Record<number, 'internal' | 'external'>>({});
@@ -295,7 +377,7 @@ export default function OrionSignerAssignment({
                 <Group align='flex-start' wrap='nowrap' gap='sm'>
                   <ThemeIcon size={36} radius='xl' variant='light' color='blue' style={{ flexShrink: 0 }}>
                     <Text size='sm' fw={700}>
-                      {person.order}
+                      {resolveSignatureMarkId(person)}
                     </Text>
                   </ThemeIcon>
 
@@ -360,10 +442,14 @@ export default function OrionSignerAssignment({
                             companyId={companyId}
                             disabled={readOnly}
                             onPick={(p) =>
-                              onAssign(person.order, p.email, p.cardName, {
-                                type: 'external',
-                                cardCode: p.cardCode,
-                              })
+                              onAssign(
+                                person.order,
+                                p.email,
+                                p.cardName,
+                                p.source === 'user'
+                                  ? { type: 'internal', cardCode: null }
+                                  : { type: 'external', cardCode: p.cardCode }
+                              )
                             }
                           />
                         ) : (
@@ -408,38 +494,47 @@ export default function OrionSignerAssignment({
                         Paso {person.order} en la secuencia
                       </Badge>
                     )}
-                    {person.email ? (
-                      <Stack gap={6} mt='sm'>
-                        <Checkbox
-                          size='xs'
-                          label='Enviar correo con link de firma'
-                          description={
-                            person.type === 'external'
-                              ? 'Recomendado para socios externos (URL Orion).'
-                              : 'Opcional; los internos también reciben tarea/notificación en SynerLink.'
-                          }
-                          checked={Boolean(person.notifyByEmail)}
-                          disabled={readOnly || !onToggleNotifyByEmail}
-                          onChange={(e) =>
-                            onToggleNotifyByEmail?.(person.order, e.currentTarget.checked)
-                          }
-                        />
-                        {canUseFingerprint ? (
-                          <Checkbox
-                            size='xs'
-                            label='Requiere huella dactilar'
-                            description='Coloque una caja de huella para este firmante en el PDF.'
-                            checked={Boolean(person.requireFingerprint)}
-                            disabled={readOnly || !onToggleRequireFingerprint}
-                            onChange={(e) =>
-                              onToggleRequireFingerprint?.(
-                                person.order,
-                                e.currentTarget.checked
-                              )
-                            }
-                          />
-                        ) : null}
-                      </Stack>
+                    <NumberInput
+                      mt='sm'
+                      size='xs'
+                      label='ID firma'
+                      description='Número visible en el documento (ej. 1, 2…).'
+                      value={resolveSignatureMarkId(person)}
+                      min={1}
+                      max={99}
+                      disabled={readOnly || !onSignatureMarkIdChange}
+                      w={120}
+                      onChange={(value) => {
+                        const next = typeof value === 'number' ? value : Number(value);
+                        if (!Number.isFinite(next) || next < 1) return;
+                        const markId = Math.trunc(next);
+                        const clash = slots.some(
+                          (other) =>
+                            other.order !== person.order &&
+                            resolveSignatureMarkId(other) === markId
+                        );
+                        if (clash) {
+                          toast.error(`El ID de firma ${markId} ya está en uso`);
+                          return;
+                        }
+                        onSignatureMarkIdChange?.(person.order, markId);
+                      }}
+                    />
+                    {person.email && canUseFingerprint ? (
+                      <Checkbox
+                        size='xs'
+                        mt='sm'
+                        label='Requiere huella dactilar'
+                        description='Coloque una caja de huella para este firmante en el PDF.'
+                        checked={Boolean(person.requireFingerprint)}
+                        disabled={readOnly || !onToggleRequireFingerprint}
+                        onChange={(e) =>
+                          onToggleRequireFingerprint?.(
+                            person.order,
+                            e.currentTarget.checked
+                          )
+                        }
+                      />
                     ) : null}
                   </Box>
 

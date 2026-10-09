@@ -22,6 +22,7 @@ import { fireAndForgetOrionDocumentEvent } from '@/lib/orion/documentEvents';
 import { resolveOrionVersionLabel } from '@/lib/orion/versionLabel';
 import { orionErrorMessage } from '@/lib/orion/errorCodes';
 import { orionErrorResponse } from '@/lib/orion/httpError';
+import { orionSendsSignerEmails } from '@/lib/orion/signerEmail';
 
 /** POST /api/integrations/orion/signers — asignar firmantes vía API Orion */
 export async function POST(req: Request) {
@@ -71,9 +72,12 @@ export async function POST(req: Request) {
         });
       }
 
+      const orionEmails = orionSendsSignerEmails();
       const res = await assignOrionSigners(current.orionDocumentId, {
         mode: payload.mode,
-        signers: payload.signers,
+        signers: orionEmails
+          ? payload.signers
+          : payload.signers.map((s) => ({ ...s, notifyByEmail: false })),
         actorEmail: session.user.email,
       });
 
@@ -98,11 +102,16 @@ export async function POST(req: Request) {
       // Huella/correo por orden (mismo email en 2 slots no debe pisarse).
       const fpByOrder = new Map<number, boolean>();
       const notifyByOrder = new Map<number, boolean>();
+      const markByOrder = new Map<number, number>();
       for (const s of payload.signers) {
         const order = Number(s.order);
         if (!Number.isFinite(order) || order < 1) continue;
         fpByOrder.set(order, Boolean(s.requireFingerprint));
         if (s.notifyByEmail != null) notifyByOrder.set(order, Boolean(s.notifyByEmail));
+        const mark = Number(
+          (s as { signatureMarkId?: number | null }).signatureMarkId
+        );
+        if (Number.isFinite(mark) && mark >= 1) markByOrder.set(order, Math.trunc(mark));
       }
       const nextSigners = (state.signers ?? []).map((s, index) => {
         const order = Number(s.order);
@@ -115,6 +124,12 @@ export async function POST(req: Request) {
           notifyByEmail: notifyByOrder.has(key)
             ? notifyByOrder.get(key)
             : s.notifyByEmail,
+          synerlinkNotify: notifyByOrder.has(key)
+            ? notifyByOrder.get(key)
+            : s.synerlinkNotify ?? s.notifyByEmail,
+          signatureMarkId: markByOrder.has(key)
+            ? markByOrder.get(key)
+            : s.signatureMarkId ?? key,
         };
       });
       state = {

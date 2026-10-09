@@ -49,6 +49,8 @@ export async function POST(req: Request) {
       typeof body.signatureDataUrl === 'string' ? body.signatureDataUrl.trim() : null;
     const fingerprintDataUrl =
       typeof body.fingerprintDataUrl === 'string' ? body.fingerprintDataUrl.trim() : null;
+    // Turno con huella: nueva imagen o la registrada en "Mi huella" de Orion.
+    const providesFingerprint = body.requireFingerprint === true;
     if (!Number.isInteger(requestId) || requestId <= 0) {
       return NextResponse.json({ error: 'requestId inválido' }, { status: 400 });
     }
@@ -74,60 +76,59 @@ export async function POST(req: Request) {
         { status: 422 }
       );
     }
-    if (fingerprintDataUrl?.startsWith('data:image/') && !acceptedBiometric) {
+    if (providesFingerprint && !acceptedBiometric) {
       return NextResponse.json(
         { error: BIOMETRIC_CONSENT_REQUIRED_MESSAGE },
         { status: 422 }
       );
     }
 
-    // Primera aceptación: persistir en perfil para no pedir por cada documento.
+    // Primera aceptación: persistir en perfil sin bloquear accept-sign.
     if (
       (!personHasSigning && body.acceptedTerms === true) ||
-      (!personHasBiometric &&
-        body.acceptedBiometric === true &&
-        fingerprintDataUrl?.startsWith('data:image/'))
+      (!personHasBiometric && body.acceptedBiometric === true && providesFingerprint)
     ) {
       const now = new Date().toISOString();
-      try {
-        await saveOrionPersonConsent(email, {
-          ...(!personHasSigning && body.acceptedTerms === true
-            ? {
-                legalConsentAccepted: true,
-                legalConsentKind: 'ELECTRONIC' as const,
-                legalConsentVersion: SIGNING_LEGAL_CONSENT_VERSION,
-                legalConsentAcceptedAt: now,
-              }
-            : {}),
-          ...(!personHasBiometric &&
-          body.acceptedBiometric === true &&
-          fingerprintDataUrl?.startsWith('data:image/')
-            ? {
-                biometricConsentAccepted: true,
-                biometricConsentVersion: BIOMETRIC_CONSENT_VERSION,
-                biometricConsentAcceptedAt: now,
-              }
-            : {}),
-        });
-      } catch {
+      void saveOrionPersonConsent(email, {
+        ...(!personHasSigning && body.acceptedTerms === true
+          ? {
+              legalConsentAccepted: true,
+              legalConsentKind: 'ELECTRONIC' as const,
+              legalConsentVersion: SIGNING_LEGAL_CONSENT_VERSION,
+              legalConsentAcceptedAt: now,
+            }
+          : {}),
+        ...(!personHasBiometric && body.acceptedBiometric === true && providesFingerprint
+          ? {
+              biometricConsentAccepted: true,
+              biometricConsentVersion: BIOMETRIC_CONSENT_VERSION,
+              biometricConsentAcceptedAt: now,
+            }
+          : {}),
+      }).catch(() => {
         /* no bloquear firma; el panel también intenta persistir */
-      }
+      });
     }
 
-    const identity = normalizeSignerIdentity(
-      {
-        fullName: typeof body.fullName === 'string' ? body.fullName : '',
-        idDocumentType: body.idDocumentType,
-        idNumber: typeof body.idNumber === 'string' ? body.idNumber : '',
-        companySlug: typeof body.companySlug === 'string' ? body.companySlug : null,
-        companyName: typeof body.companyName === 'string' ? body.companyName : null,
-        companyNit: typeof body.companyNit === 'string' ? body.companyNit : null,
-        jobTitle: typeof body.jobTitle === 'string' ? body.jobTitle : null,
-        acceptedTerms: true,
-        acceptedBiometric: acceptedBiometric ? true : undefined,
-      },
-      session.user.name || email
-    );
+    // Identidad: Orion es la fuente. Solo se reenvía lo que el usuario completó
+    // porque faltaba en su perfil Orion (Orion ignora lo que ya tiene).
+    const hasIdentityFields =
+      typeof body.fullName === 'string' && body.fullName.trim().length > 0;
+    const identity = hasIdentityFields
+      ? normalizeSignerIdentity(
+          {
+            fullName: body.fullName,
+            idDocumentType: body.idDocumentType,
+            idNumber: typeof body.idNumber === 'string' ? body.idNumber : '',
+            companyName: typeof body.companyName === 'string' ? body.companyName : null,
+            companyNit: typeof body.companyNit === 'string' ? body.companyNit : null,
+            jobTitle: typeof body.jobTitle === 'string' ? body.jobTitle : null,
+            acceptedTerms: true,
+            acceptedBiometric: acceptedBiometric ? true : undefined,
+          },
+          session.user.name || email
+        )
+      : { acceptedTerms: true, acceptedBiometric: acceptedBiometric ? true : undefined };
 
     const result = await withMssqlPool((pool) =>
       finalizeSignerTurn(pool, {
@@ -138,6 +139,10 @@ export async function POST(req: Request) {
         signatureDataUrl,
         fingerprintDataUrl,
         identity,
+        personConsent: {
+          hasSigningLegalConsent: personHasSigning || acceptedTerms,
+          hasBiometricConsent: personHasBiometric || acceptedBiometric,
+        },
       })
     );
 

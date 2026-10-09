@@ -1,11 +1,11 @@
 import type { OrionSignatureState } from './types';
 import { resolveOrionPdfUrl } from './documentVersions';
 
-export const WATERMARK_TEXT = 'DOCUMENTO VALIDADO';
+export const WATERMARK_TEXT = 'SYNERLINK-VALIDO';
 
 /**
- * Tras FIRMADO: registra la versión "DOCUMENTO VALIDADO" apuntando al PDF de Orion
- * (Orion ya estampa la marca de agua en el cierre total).
+ * Tras FIRMADO: registra la versión "SYNERLINK-VALIDO" apuntando al PDF de Orion
+ * (Kronos puede estampar patrón + sello al servir; Orion aporta el PDF base).
  */
 export async function ensureValidatedWatermarkVersion(params: {
   requestId: number;
@@ -25,9 +25,23 @@ export async function ensureValidatedWatermarkVersion(params: {
       v.kind === 'validated' ||
       String(v.label || '')
         .toUpperCase()
-        .includes(WATERMARK_TEXT)
+        .includes(WATERMARK_TEXT) ||
+      String(v.label || '')
+        .toUpperCase()
+        .includes('DOCUMENTO VALIDADO')
   );
-  if (existing) return params.state;
+  if (existing) {
+    // Normalizar label legacy
+    if (existing.label !== WATERMARK_TEXT) {
+      return {
+        ...params.state,
+        versions: (params.state.versions ?? []).map((v) =>
+          v.id === existing.id ? { ...v, label: WATERMARK_TEXT, kind: 'validated' } : v
+        ),
+      };
+    }
+    return params.state;
+  }
 
   const sourceUrl = resolveOrionPdfUrl(params.state) || params.state.signedFileUrl;
   if (!sourceUrl) return params.state;
