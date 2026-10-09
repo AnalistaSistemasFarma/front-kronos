@@ -1,9 +1,23 @@
 import sql from 'mssql';
 import sqlConfig from '../../../dbconfig';
 import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '../auth/[...nextauth]/route';
+import { getPaymentSchedulingCompanies } from '../../../lib/treasury/paymentSchedulingAccess';
 
 export async function GET(req) {
   try {
+    // Sesión obligatoria + permiso del subproceso "Programador de Pagos",
+    // limitado a las empresas en que el usuario lo tiene asignado.
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    }
+    const allowedCompanies = await getPaymentSchedulingCompanies(session.user.email);
+    if (allowedCompanies.length === 0) {
+      return NextResponse.json({ error: 'Sin permiso para el Programador de Pagos' }, { status: 403 });
+    }
+
     const pool = await sql.connect(sqlConfig);
 
     const { searchParams } = new URL(req.url);
@@ -15,6 +29,10 @@ export async function GET(req) {
     const company = searchParams.get('company');
     const date_from = searchParams.get('date_from');
     const date_to = searchParams.get('date_to');
+
+    if (company && company !== '0' && !allowedCompanies.includes(parseInt(company))) {
+      return NextResponse.json({ error: 'Sin permiso para esta empresa' }, { status: 403 });
+    }
 
     let query = `
       
@@ -106,6 +124,7 @@ export async function GET(req) {
             ON o.id = rfv.id_option
 
         WHERE tpc.task LIKE '%Programación de Pago%'
+          AND rg.id_company IN (${allowedCompanies.map((_, i) => `@allowed_company_${i}`).join(', ')})
 
     `;
 
@@ -196,6 +215,10 @@ export async function GET(req) {
     `;
 
     const request = pool.request();
+
+    allowedCompanies.forEach((id, i) => {
+      request.input(`allowed_company_${i}`, sql.Int, id);
+    });
 
     if (id_tarea) {
       request.input('id_tarea', sql.Int, parseInt(id_tarea));
