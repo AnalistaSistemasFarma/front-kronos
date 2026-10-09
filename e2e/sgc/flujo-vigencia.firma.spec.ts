@@ -78,7 +78,8 @@ async function throughApproval(p1: Page, p2: Page, idRequest: number, readers: s
   // Sprint 10: con el flujo de capacitación previa, Calidad registra el material ANTES de la divulgación.
   const d = await ok<{ request: { currentTaskKey: string } }>(await p1.request.get(`/api/sgc/requests/${idRequest}`));
   if (d.request.currentTaskKey === 'preparacion_capacitacion') {
-    await ok(await p2.request.post(`/api/sgc/requests/${idRequest}/training`, { data: TRAINING }));
+    // El material lo registra Aseguramiento de Calidad (permiso de Calidad del SGC: qa.sgc); la tarea la resuelve el grupo SGC-VERIF-CALIDAD (qa.sgc2).
+    await ok(await p1.request.post(`/api/sgc/requests/${idRequest}/training`, { data: TRAINING }));
     await ok(await p2.request.post(`/api/sgc/tasks/${await taskId(p2.request, idRequest, /^Preparación de la capacitación/)}/decision`, { data: { decision: 'aprobar', comment: 'Material listo (e2e).' } }));
   }
 }

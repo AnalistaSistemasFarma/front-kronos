@@ -132,7 +132,9 @@ test.describe.serial('SGC documental · correcciones de Calidad OLP', () => {
     const file = await page.request.get(`/api/sgc/documents/${d.controlledPdf.idDocument}/versions/${d.controlledPdf.idDocumentVersion}/file?modo=consulta`);
     expect(file.status()).toBe(200);
     const text = await pdfText(await file.body(), 2);
-    for (const t of ['NOMBRE DEL DOCUMENTO', 'CÓDIGO: OLP-', 'VERSIÓN: 1', 'PÁGINA 1 DE', 'ELABORÓ:', 'REVISÓ:', 'APROBÓ:', 'FECHA DE EMISIÓN:', 'Pendiente: en divulgación', 'PROCESO:', 'Firma electrónica · SynerLink', 'Elaboró ·', 'Revisó ·', 'Aprobó ·']) expect(text, t).toContain(t);
+    for (const t of ['NOMBRE DEL DOCUMENTO', 'CÓDIGO: OLP-', 'VERSIÓN: 1', 'PÁGINA 1 DE', 'ELABORÓ:', 'REVISÓ:', 'APROBÓ:', 'FECHA DE EMISIÓN:', 'Pendiente: en divulgación', 'PROCESO:']) expect(text, t).toContain(t);
+    // 2026-10-05 (#534): la caja de firma lleva solo la representación gráfica (trazo o nombre en cursiva), sin rótulos.
+    for (const t of ['Firma electrónica · SynerLink', 'Elaboró ·', 'Revisó ·', 'Aprobó ·']) expect(text, t).not.toContain(t);
     expect(await pdfText(await file.body(), 1)).toContain('estampadas dentro del documento');
     await p2.context().close();
     await p3.context().close();

@@ -112,8 +112,11 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
     idRequest = Number(/solicitudes\/(\d+)/.exec(p3.url())![1]);
     await p3.context().close();
     await takeElaboration(page.request, idRequest, U1);
-    await page.goto(`/process/sgc-documental/tareas?empresa=${OLP}`);
-    await expect(page.locator(`[data-testid="bandeja-fila"][data-request="${idRequest}"]`)).toContainText('Elaboración');
+    // La reasignación puede tardar en reflejarse en la bandeja: se recarga hasta verla.
+    await expect(async () => {
+      await page.goto(`/process/sgc-documental/tareas?empresa=${OLP}`);
+      await expect(page.locator(`[data-testid="bandeja-fila"][data-request="${idRequest}"]`)).toContainText('Elaboración', { timeout: 15_000 });
+    }).toPass({ timeout: 60_000 });
   });
 
   test('[SGC-REQ-047][SGC-REQ-048] el elaborador edita el borrador EN LA APP y cada guardado es una revisión con su SHA-256', async ({ page }) => {
