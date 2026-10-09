@@ -40,6 +40,7 @@ import {
 } from '@tabler/icons-react';
 import { leerJson } from './PortalContenido';
 import { ConstructorFormulario } from './ConstructorFormulario';
+import { COLOR_ESTADO, varColorEstado } from '@/lib/theme/estados';
 import {
   OPCIONES_SI_NO,
   MENSAJE_AUTORIZACION,
@@ -81,7 +82,9 @@ import {
  * VENTANA es la misma `portal-th__visor` de los demás materiales de Formación
  * (Cristian pidió que el formulario se abra ahí). Nada de colores ni estilos
  * propios: el CSS que queda es solo de distribución (tamaño de la ventana y
- * zona que se desplaza).
+ * zona que se desplaza). Colores: lo informativo usa el color principal de la
+ * paleta de cada persona; aprobó/no aprobó y demás resultados usan los colores
+ * de estado del tema (`lib/theme/estados.ts`), nunca un color escrito a mano.
  */
 
 /** Respuesta de "Otra" dentro del Radio.Group (no choca con ninguna opción real). */
@@ -90,8 +93,8 @@ const VALOR_OTRA = '__otra__';
 /** Correos y respuestas largas parten línea en la celda (como `NOWRAP` en el Listado maestro del SGC). */
 const QUIEBRE = { overflowWrap: 'anywhere' } as const;
 
-/** Color del `Alert` según el tipo de aviso (verde/rojo/amarillo, convención del equipo). */
-const COLOR_AVISO = { ok: 'green', error: 'red', advertencia: 'yellow' } as const;
+/** Color del `Alert` según el tipo de aviso: colores de estado del tema (convención del equipo). */
+const COLOR_AVISO = { ok: COLOR_ESTADO.exito, error: COLOR_ESTADO.error, advertencia: COLOR_ESTADO.advertencia } as const;
 const ICONO_AVISO = {
   ok: <IconCircleCheck size={18} />,
   error: <IconAlertCircle size={18} />,
@@ -201,7 +204,7 @@ export function VisorFormulario({
           </div>
         </header>
         {error && (
-          <Alert color='red' icon={<IconAlertCircle size={18} />} m='md' role='alert'>
+          <Alert color={COLOR_ESTADO.error} icon={<IconAlertCircle size={18} />} m='md' role='alert'>
             {error}
           </Alert>
         )}
@@ -374,12 +377,12 @@ function CuerpoFormulario({
       <Stack align='center' justify='center' gap='md' p='xl' className='portal-th__formulario-fin' data-testid='formulario-enviado'>
         {recienEnviada ? (
           <>
-            <IconCircleCheck size={48} color='var(--mantine-color-green-6)' aria-hidden='true' />
+            <IconCircleCheck size={48} color={varColorEstado('exito')} aria-hidden='true' />
             <Text fw={700} fz='xl' ta='center' role='status'>
               {nota ? 'Evaluación aprobada' : 'Respuestas enviadas'}
             </Text>
             {nota && (
-              <Text fw={600} fz='lg' ta='center' c='green' data-testid='nota-obtenida'>
+              <Text fw={600} fz='lg' ta='center' c={COLOR_ESTADO.exito} data-testid='nota-obtenida'>
                 Su nota: {formatoNota(nota.porcentaje)}
               </Text>
             )}
@@ -391,7 +394,7 @@ function CuerpoFormulario({
           </>
         ) : (
           <>
-            <IconInfoCircle size={48} color='var(--mantine-color-blue-6)' aria-hidden='true' />
+            <IconInfoCircle size={48} color='var(--mantine-primary-color-filled)' aria-hidden='true' />
             <Text fw={700} fz='xl' ta='center'>
               {evaluacion ? 'Ya aprobó esta evaluación' : 'Ya envió este formulario'}
             </Text>
@@ -423,12 +426,12 @@ function CuerpoFormulario({
       )}
       <Stack gap='md' p='md'>
         {previa && (
-          <Alert color='blue' icon={<IconEye size={18} />}>
+          <Alert icon={<IconEye size={18} />}>
             Vista previa del formador: puede llenarlo para probarlo; no se guarda nada.
           </Alert>
         )}
         {evaluacion && (
-          <Alert color='blue' icon={<IconInfoCircle size={18} />} data-testid='info-evaluacion'>
+          <Alert icon={<IconInfoCircle size={18} />} data-testid='info-evaluacion'>
             Evaluación: para aprobar necesita al menos {formatoNota(definicion.notaMinima ?? 80)}. Cada pregunta indica cuántos puntos vale.
             {!previa && datos.intentos && datos.intentos.usados > 0 && (
               <>
@@ -451,7 +454,7 @@ function CuerpoFormulario({
           )}
           <Text size='xs' c='dimmed' mt={4}>
             Los campos marcados con{' '}
-            <Text span c='red' inherit>
+            <Text span c='var(--mantine-color-error)' inherit>
               *
             </Text>{' '}
             son obligatorios.
@@ -473,7 +476,7 @@ function CuerpoFormulario({
                 {definicion.autorizacion.titulo}
               </Text>
               {definicion.autorizacion.pendienteValidacion && (
-                <Alert color='yellow' icon={<IconAlertTriangle size={18} />} p='xs' data-testid='autorizacion-pendiente'>
+                <Alert color={COLOR_ESTADO.advertencia} icon={<IconAlertTriangle size={18} />} p='xs' data-testid='autorizacion-pendiente'>
                   Texto pendiente de validación por Talento Humano o Jurídica
                 </Alert>
               )}
@@ -493,7 +496,7 @@ function CuerpoFormulario({
                 label={
                   <>
                     {definicion.autorizacion.casilla}{' '}
-                    <Text span c='red' inherit aria-hidden='true'>
+                    <Text span c='var(--mantine-color-error)' inherit aria-hidden='true'>
                       *
                     </Text>
                   </>
@@ -736,12 +739,12 @@ export function PanelRespuestas({ materialId, titulo, onCerrar, onCambio }: { ma
         {(error || aviso) && (
           <Stack gap='xs' px='md' pt='md'>
             {error && (
-              <Alert color='red' icon={<IconAlertCircle size={18} />} role='alert'>
+              <Alert color={COLOR_ESTADO.error} icon={<IconAlertCircle size={18} />} role='alert'>
                 {error}
               </Alert>
             )}
             {aviso && (
-              <Alert color='green' icon={<IconCircleCheck size={18} />} role='status'>
+              <Alert color={COLOR_ESTADO.exito} icon={<IconCircleCheck size={18} />} role='status'>
                 {aviso}
               </Alert>
             )}
@@ -769,7 +772,7 @@ export function PanelRespuestas({ materialId, titulo, onCerrar, onCambio }: { ma
           </Button>
         </Group>
         <Stack gap='xs' px='md'>
-          <Alert color='yellow' icon={<IconShieldLock size={18} />} p='xs'>
+          <Alert color={COLOR_ESTADO.advertencia} icon={<IconShieldLock size={18} />} p='xs'>
             Datos personales sensibles (Ley 1581 de 2012): uso exclusivo de Talento Humano y del SG-SST. No los reenvíe ni los publique.
           </Alert>
           <Text size='sm' c='dimmed' data-testid='conteo-respuestas'>
@@ -823,7 +826,7 @@ export function PanelRespuestas({ materialId, titulo, onCerrar, onCambio }: { ma
                         <Button
                           size='xs'
                           variant='light'
-                          color='red'
+                          color={COLOR_ESTADO.error}
                           leftSection={<IconRotateClockwise size={14} />}
                           onClick={() => void reabrir(f)}
                         >
@@ -1008,12 +1011,12 @@ export function SelectorFormulario({
     <Stack gap='sm' w='100%' className='portal-th__mantine' data-testid='selector-formulario'>
       {/* Resultado de importar/guardar ARRIBA y con color (convención del equipo). */}
       {aviso && (
-        <Alert ref={avisoResultado} color='green' icon={<IconCircleCheck size={18} />} role='status'>
+        <Alert ref={avisoResultado} color={COLOR_ESTADO.exito} icon={<IconCircleCheck size={18} />} role='status'>
           {aviso}
         </Alert>
       )}
       {error && (
-        <Alert color='red' icon={<IconAlertCircle size={18} />} role='alert'>
+        <Alert color={COLOR_ESTADO.error} icon={<IconAlertCircle size={18} />} role='alert'>
           {error}
         </Alert>
       )}
@@ -1102,7 +1105,7 @@ export function SelectorFormulario({
                 : 'Al guardar se crea una versión nueva; las respuestas ya enviadas conservan la versión con la que se respondieron.'}
             </Text>
             {erroresJson.length > 0 && (
-              <Alert color='red' icon={<IconAlertCircle size={18} />} title='Revise la definición'>
+              <Alert color={COLOR_ESTADO.error} icon={<IconAlertCircle size={18} />} title='Revise la definición'>
                 <List size='sm'>
                   {erroresJson.map((e) => (
                     <List.Item key={e}>{e}</List.Item>
@@ -1184,7 +1187,7 @@ export function PreviaDeMaterialFormulario({ formularioId, titulo, onCerrar }: {
   }, [formularioId]);
   if (error) {
     return (
-      <Alert color='red' icon={<IconAlertCircle size={18} />} role='alert' mb='sm'>
+      <Alert color={COLOR_ESTADO.error} icon={<IconAlertCircle size={18} />} role='alert' mb='sm'>
         {error}
       </Alert>
     );
