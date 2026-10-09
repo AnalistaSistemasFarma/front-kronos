@@ -1,23 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Alert, Avatar, Badge, Button, Card, Group, Loader, SegmentedControl, Stack, Text, Title } from '@mantine/core';
+import { Alert, Avatar, Badge, Button, Card, Group, Loader, Stack, Text, Title } from '@mantine/core';
 import { IconAlertTriangle, IconMoodSmile, IconRobot } from '@tabler/icons-react';
-import { parseAvatarConfig } from '../../lib/avatar/compose';
-import {
-  AGENT_AVATAR_KINDS,
-  ETIQUETA_AGENT_KIND,
-  agentAvatarPorDefecto,
-  esFigura,
-  kindDe,
-  parseAgentAvatarConfig,
-  type AgentAvatarConfig,
-  type AgentAvatarKind,
-} from '../../lib/avatar/agente';
+import { parseAvatarConfig, sugerenciaParaAgente } from '../../lib/avatar/compose';
+import { parseAgentAvatarConfig } from '../../lib/avatar/agente';
 import type { AvatarConfig } from '../../lib/avatar/types';
 import { agentAvatarSrc, agentInitials } from '../../lib/chat/client';
 import AvatarEditor, { configInicial } from './AvatarEditor';
-import FiguraEditor from './FiguraEditor';
 
 /**
  * Secciones del Perfil para el avatar estilo Notion: la de la persona y la de
@@ -172,9 +162,7 @@ interface AgenteGestionable {
 export function AvataresAgentesSection({ onResultado }: { onResultado: (r: Resultado) => void }) {
   const [agentes, setAgentes] = useState<AgenteGestionable[] | null>(null);
   const [editando, setEditando] = useState<string | null>(null);
-  const [config, setConfig] = useState<AgentAvatarConfig | null>(null);
-  // Lo editado en cada tipo mientras el editor está abierto: cambiar de tipo y volver no lo pierde.
-  const [porTipo, setPorTipo] = useState<Partial<Record<AgentAvatarKind, AgentAvatarConfig>>>({});
+  const [config, setConfig] = useState<AvatarConfig | null>(null);
   const [ocupado, setOcupado] = useState<'guardar' | 'quitar' | null>(null);
 
   useEffect(() => {
@@ -196,19 +184,9 @@ export function AvataresAgentesSection({ onResultado }: { onResultado: (r: Resul
   const abrir = (a: AgenteGestionable) => {
     setEditando(a.code);
     // Sin avatar guardado: Lorelei con la semilla del nombre del asistente (como siempre).
-    const inicial = parseAgentAvatarConfig(a.config) ?? agentAvatarPorDefecto('persona', a.displayName);
-    setConfig(inicial);
-    setPorTipo({ [kindDe(inicial)]: inicial });
+    // Un v4 heredado (figura del #554) llega ya convertido a su cabeza-figura.
+    setConfig(parseAgentAvatarConfig(a.config) ?? sugerenciaParaAgente(a.displayName));
   };
-
-  const cambiarConfig = (nueva: AgentAvatarConfig) => {
-    setConfig(nueva);
-    setPorTipo((prev) => ({ ...prev, [kindDe(nueva)]: nueva }));
-  };
-
-  // Otro tipo: lo que ya se editó en ese tipo o su figura por defecto (determinista por el nombre).
-  const cambiarTipo = (a: AgenteGestionable, kind: AgentAvatarKind) =>
-    cambiarConfig(porTipo[kind] ?? agentAvatarPorDefecto(kind, a.displayName));
 
   const actualizar = (code: string, cambios: Partial<AgenteGestionable>) =>
     setAgentes((prev) => (prev ?? []).map((a) => (a.code === code ? { ...a, ...cambios } : a)));
@@ -259,9 +237,10 @@ export function AvataresAgentesSection({ onResultado }: { onResultado: (r: Resul
         </Group>
       </Title>
       <Text size='sm' c='dimmed' mb='md'>
-        Asistentes del chat de los que usted es responsable (o todos, si es administrador). Su avatar puede ser una persona
-        estilo Notion (DiceBear · Lorelei) o una figura: animal, planeta, constelación, estrella o robot; siempre sonriente. Si aún no
-        tiene, el editor arranca con el que sale de su nombre. El cambio lo ve toda la empresa.
+        Asistentes del chat de los que usted es responsable (o todos, si es administrador). Su avatar es estilo Notion (DiceBear ·
+        Lorelei), siempre sonriente; en «Cabeza», además de las cuatro de persona, puede elegir un animal, planeta, constelación,
+        estrella o robot, y sobre él se siguen poniendo ojos, boca, gafas, pelo y demás. Si aún no tiene, el editor arranca con el
+        que sale de su nombre. El cambio lo ve toda la empresa.
       </Text>
 
       <Stack gap='md'>
@@ -288,25 +267,13 @@ export function AvataresAgentesSection({ onResultado }: { onResultado: (r: Resul
 
             {editando === a.code && config && (
               <Stack gap='md' mt='md'>
-                <SegmentedControl
-                  fullWidth
-                  radius='md'
-                  aria-label='Tipo de avatar'
-                  value={kindDe(config)}
-                  onChange={(v) => cambiarTipo(a, v as AgentAvatarKind)}
-                  data={AGENT_AVATAR_KINDS.map((k) => ({ value: k, label: ETIQUETA_AGENT_KIND[k] }))}
+                <AvatarEditor
+                  config={config}
+                  onChange={setConfig}
+                  owner='agent'
+                  semillaFija={a.displayName}
+                  nombreArchivo={`avatar-${a.code}`}
                 />
-                {esFigura(config) ? (
-                  <FiguraEditor config={config} onChange={cambiarConfig} nombreArchivo={`avatar-${a.code}`} />
-                ) : (
-                  <AvatarEditor
-                    config={config as AvatarConfig}
-                    onChange={cambiarConfig}
-                    owner='agent'
-                    semillaFija={a.displayName}
-                    nombreArchivo={`avatar-${a.code}`}
-                  />
-                )}
                 <Group justify='flex-end'>
                   <Button variant='subtle' color='gray' onClick={() => setEditando(null)} disabled={!!ocupado}>
                     Cancelar

@@ -1,5 +1,6 @@
 import { createAvatar } from '@dicebear/core';
 import * as lorelei from '@dicebear/lorelei';
+import { VALORES_CABEZA_FIGURA, esCabezaFigura, etiquetaCabezaFigura, figuraLlevaPelo, loreleiCabezas } from './cabezas';
 import type { AvatarConfig, AvatarOwner, ColorAvatar, ParteFija, ParteOpcional } from './types';
 
 /**
@@ -44,6 +45,19 @@ export const BOCAS_ASISTENTE: readonly string[] = CATALOGO.mouth.filter((m) => m
 export function bocasPara(owner: AvatarOwner): readonly string[] {
   return owner === 'agent' ? BOCAS_ASISTENTE : CATALOGO.mouth;
 }
+
+/**
+ * Cabezas de los asistentes: las 4 de Lorelei y, DESPUÉS, las cabezas-figura
+ * (animales, planetas, constelaciones, estrellas, robots: cabezas.ts).
+ */
+export const CABEZAS_ASISTENTE: readonly string[] = [...CATALOGO.head, ...VALORES_CABEZA_FIGURA];
+
+/** Cabezas válidas según el dueño del avatar (las personas: solo las de Lorelei). */
+export function cabezasPara(owner: AvatarOwner): readonly string[] {
+  return owner === 'agent' ? CABEZAS_ASISTENTE : CATALOGO.head;
+}
+
+export { esCabezaFigura };
 
 /**
  * Paletas. Por defecto el avatar queda en blanco y negro (piel blanca, cabello
@@ -103,7 +117,9 @@ const esColorValido = (c: unknown, admiteTransparente: boolean): c is string =>
  *   - solo la versión 3 / estilo 'lorelei' (las de motores anteriores no valen);
  *   - solo claves conocidas (una clave desconocida invalida todo);
  *   - cada parte debe existir en la definición de Lorelei instalada;
- *   - en los asistentes (owner 'agent'), la boca debe ser happy*;
+ *   - en los asistentes (owner 'agent'), la boca debe ser happy*; además
+ *     pueden tener una cabeza-figura ('figura:<id>') y, solo con ella, pelo
+ *     null ("Ninguno"). Las personas no aceptan ninguna de las dos cosas;
  *   - colores hexadecimales de 6 dígitos (minúsculas).
  */
 export function parseAvatarConfig(raw: unknown, owner: AvatarOwner = 'user'): AvatarConfig | null {
@@ -127,9 +143,14 @@ export function parseAvatarConfig(raw: unknown, owner: AvatarOwner = 'user'): Av
   if (typeof o.flip !== 'boolean') return null;
 
   const limpia: Record<string, unknown> = { v: 3, estilo: 'lorelei', seed: o.seed, flip: o.flip };
+  const conFigura = owner === 'agent' && esCabezaFigura(o.head);
   for (const p of PARTES_FIJAS) {
     const v = o[p];
-    const validos = p === 'mouth' ? bocasPara(owner) : CATALOGO[p];
+    if (p === 'hair' && v === null && conFigura) {
+      limpia[p] = null;
+      continue;
+    }
+    const validos = p === 'mouth' ? bocasPara(owner) : p === 'head' ? cabezasPara(owner) : CATALOGO[p];
     if (typeof v !== 'string' || !validos.includes(v)) return null;
     limpia[p] = v;
   }
@@ -159,7 +180,10 @@ export function serializeAvatarConfig(config: AvatarConfig): string {
 
 type Opciones = Record<string, unknown>;
 
-/** Configuración → opciones de `createAvatar(lorelei, …)`. Todo explícito. */
+/**
+ * Configuración → opciones de `createAvatar(lorelei, …)`. Todo explícito.
+ * Sin pelo (solo cabezas-figura): `hair: []`.
+ */
 export function opcionesLorelei(config: AvatarConfig): Opciones {
   const op: Opciones = {
     seed: config.seed,
@@ -168,7 +192,7 @@ export function opcionesLorelei(config: AvatarConfig): Opciones {
     skinColor: [config.skinColor],
     backgroundColor: [config.backgroundColor],
   };
-  for (const p of PARTES_FIJAS) op[p] = [config[p]];
+  for (const p of PARTES_FIJAS) op[p] = config[p] === null ? [] : [config[p]];
   for (const p of PARTES_OPCIONALES) {
     const v = config[p];
     op[p] = [v ?? CATALOGO[p][0]];
@@ -243,20 +267,28 @@ export function sugerenciaParaAgente(nombre: string): AvatarConfig {
 }
 
 /**
+ * Style de DiceBear para una configuración: Lorelei tal cual (Cabeza 1…4,
+ * byte a byte como siempre) o Lorelei con cabeza-figura (cabezas.ts).
+ */
+function estiloPara(config: AvatarConfig): typeof lorelei {
+  return esCabezaFigura(config.head) ? (loreleiCabezas as typeof lorelei) : lorelei;
+}
+
+/**
  * SVG completo del avatar. `size` fija width/height; sin él se estira a su
  * contenedor. `title` agrega <title> (escapado) para accesibilidad.
  */
 export function composeAvatarSvg(config: AvatarConfig, opts: { size?: number; title?: string } = {}): string {
   const op = opcionesLorelei(config);
   if (opts.size) op.size = opts.size;
-  const svg = createAvatar(lorelei, op).toString();
+  const svg = createAvatar(estiloPara(config), op).toString();
   if (!opts.title) return svg;
   return svg.replace(/^<svg([^>]*)>/, (m) => `${m}<title>${escapeXml(opts.title as string)}</title>`);
 }
 
 /** data: URI del avatar, para pintarlo con <img src> (nunca SVG en línea). */
 export function avatarDataUri(config: AvatarConfig): string {
-  return createAvatar(lorelei, opcionesLorelei(config)).toDataUri();
+  return createAvatar(estiloPara(config), opcionesLorelei(config)).toDataUri();
 }
 
 /**
@@ -281,11 +313,15 @@ export const RECORTES: Readonly<Record<CategoriaId, string>> = {
   flip: '0 0 980 980',
 };
 
+/** Recorte de la miniatura de una cabeza-figura: la figura entera (orejas, anillos, alas…). */
+const RECORTE_FIGURA = '40 20 900 900';
+
 /** Miniatura (data: URI): el avatar actual con UNA opción cambiada, recortado a su zona. */
 export function thumbDataUri(config: AvatarConfig, cat: CategoriaId, valor: string | null): string {
   const variante = conValor(config, cat, valor);
   if (cat !== 'backgroundColor') variante.backgroundColor = 'transparent';
-  const svg = composeAvatarSvg(variante).replace(/viewBox="[^"]*"/, `viewBox="${RECORTES[cat]}"`);
+  const recorte = cat === 'head' && esCabezaFigura(valor) ? RECORTE_FIGURA : RECORTES[cat];
+  const svg = composeAvatarSvg(variante).replace(/viewBox="[^"]*"/, `viewBox="${recorte}"`);
   return svgToDataUri(svg);
 }
 
@@ -329,10 +365,27 @@ export function valorCategoria(config: AvatarConfig, cat: CategoriaId): string |
   return config[cat] ?? null;
 }
 
-/** Copia de la configuración con UNA categoría cambiada al valor elegido en el editor. */
+/**
+ * Copia de la configuración con UNA categoría cambiada al valor elegido en el editor.
+ *
+ * Cabezas de los asistentes: al pasar a una cabeza-figura en la que el pelo no
+ * tiene sentido (casi todas), el pelo queda en "Ninguno" (se puede volver a
+ * poner); al volver a una cabeza de Lorelei sin pelo, se le pone el pelo que
+ * sale de su semilla (el nombre del asistente), porque una persona siempre
+ * lleva pelo.
+ */
 export function conValor(config: AvatarConfig, cat: CategoriaId, valor: string | null): AvatarConfig {
   if (cat === 'flip') return { ...config, flip: valor === 'volteado' };
+  if (cat === 'head' && typeof valor === 'string') {
+    if (esCabezaFigura(valor)) return { ...config, head: valor, hair: figuraLlevaPelo(valor) ? config.hair : null };
+    if (config.hair === null) return { ...config, head: valor, hair: peloDeRespaldo(config.seed) };
+  }
   return { ...config, [cat]: valor } as AvatarConfig;
+}
+
+/** Pelo de Lorelei para una semilla (determinista): el que DiceBear le daría a ese nombre. */
+function peloDeRespaldo(seed: string): string {
+  return configDesdeSemilla(seed || 'asistente', {}, 'agent').hair ?? CATALOGO.hair[0];
 }
 
 /** Nombre visible (español) de un valor de una categoría. */
@@ -343,6 +396,7 @@ export function etiquetaOpcion(cat: CategoriaId, valor: string | null): string {
     return PALETAS[cat].find((p) => p.color === valor)?.label ?? `#${valor}`;
   }
   if (cat === 'mouth') return `${valor.startsWith('sad') ? 'Seria' : 'Sonrisa'} ${numero(valor)}`;
+  if (cat === 'head' && esCabezaFigura(valor)) return etiquetaCabezaFigura(valor) ?? valor;
   if (cat === 'hairAccessories') return 'Flores';
   return `${NOMBRES[cat] ?? cat} ${numero(valor)}`;
 }
@@ -351,14 +405,22 @@ export function etiquetaOpcion(cat: CategoriaId, valor: string | null): string {
  * Categorías del editor, en el orden de los círculos: exactamente las
  * opciones de Lorelei — cabello 48, cabeza 4, ojos 24, cejas 13, boca 27
  * (asistentes: solo las 18 sonrientes), nariz 6, gafas, aretes, barba, pecas,
- * flores, colores y flip.
+ * flores, colores y flip. Los asistentes tienen además las cabezas-figura
+ * después de Cabeza 1…4 y, con una de ellas puesta, "Ninguno" en el cabello.
  */
-export function categoriasEditor(owner: AvatarOwner = 'user'): readonly CategoriaEditor[] {
+export function categoriasEditor(owner: AvatarOwner = 'user', conCabezaFigura = false): readonly CategoriaEditor[] {
+  const sinPelo = owner === 'agent' && conCabezaFigura;
+  const opcionesFija = (id: ParteFija): ReadonlyArray<string | null> => {
+    if (id === 'mouth') return bocasPara(owner);
+    if (id === 'head') return cabezasPara(owner);
+    if (id === 'hair' && sinPelo) return [null, ...CATALOGO.hair];
+    return CATALOGO[id];
+  };
   const fija = (id: ParteFija, label: string, title: string): CategoriaEditor => ({
     id,
     label,
     title,
-    opciones: id === 'mouth' ? bocasPara(owner) : CATALOGO[id],
+    opciones: opcionesFija(id),
     esColor: false,
   });
   const opcional = (id: ParteOpcional, label: string, title: string): CategoriaEditor => ({
