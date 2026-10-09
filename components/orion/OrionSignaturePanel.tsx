@@ -73,39 +73,6 @@ function normalizeEmail(email?: string | null): string {
     .toLowerCase();
 }
 
-const FINGERPRINT_STORAGE_PREFIX = 'orion-fingerprint:';
-
-function fingerprintStorageKey(email?: string | null): string {
-  return `${FINGERPRINT_STORAGE_PREFIX}${normalizeEmail(email) || '_'}`;
-}
-
-function readStoredFingerprint(email?: string | null): string | null {
-  if (typeof localStorage === 'undefined') return null;
-  try {
-    const raw = localStorage.getItem(fingerprintStorageKey(email));
-    if (!raw) return null;
-    const data = JSON.parse(raw) as { dataUrl?: string };
-    const url = String(data.dataUrl || '').trim();
-    return url.startsWith('data:image/') ? url : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredFingerprint(email: string | null | undefined, dataUrl: string | null) {
-  if (typeof localStorage === 'undefined') return;
-  try {
-    const key = fingerprintStorageKey(email);
-    if (!dataUrl?.startsWith('data:image/')) {
-      localStorage.removeItem(key);
-      return;
-    }
-    localStorage.setItem(key, JSON.stringify({ ts: Date.now(), dataUrl }));
-  } catch {
-    /* quota / private mode */
-  }
-}
-
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -227,7 +194,6 @@ export default function OrionSignaturePanel({
   const [personHasSigningConsent, setPersonHasSigningConsent] = useState(false);
   const [personHasBiometricConsent, setPersonHasBiometricConsent] = useState(false);
   const [fingerprintPreview, setFingerprintPreview] = useState<string | null>(null);
-  const [fingerprintFromSaved, setFingerprintFromSaved] = useState(false);
   const [identityError, setIdentityError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const userRoleRef = useRef<'coordinator' | 'signer' | 'waiting' | 'viewer'>('viewer');
@@ -615,24 +581,11 @@ export default function OrionSignaturePanel({
     return state.signers.find((s) => normalizeEmail(s.email) === me) ?? null;
   }, [currentUserEmail, state.signers]);
 
-  // Reutilizar huella guardada entre documentos (no pedir subirla otra vez).
+  // La huella solo permanece en memoria durante este turno; nunca se guarda en el navegador.
   useEffect(() => {
-    const stored = readStoredFingerprint(currentUserEmail);
-    if (stored) {
-      setFingerprintPreview(stored);
-      setFingerprintFromSaved(true);
-    }
+    setFingerprintPreview(null);
     setIdentityError(null);
   }, [mySigner?.order, activeFile?.fileId, currentUserEmail]);
-
-  const handleFingerprintChange = useCallback(
-    (dataUrl: string | null) => {
-      setFingerprintPreview(dataUrl);
-      setFingerprintFromSaved(false);
-      writeStoredFingerprint(currentUserEmail, dataUrl);
-    },
-    [currentUserEmail]
-  );
 
   const statusUpper = String(state.status || '').toUpperCase();
   const hasDocument = Boolean(state.orionDocumentId && state.embedUrl);
@@ -682,8 +635,6 @@ export default function OrionSignaturePanel({
           );
           return false;
         }
-        // Persistir para no pedirla de nuevo en el siguiente documento.
-        writeStoredFingerprint(currentUserEmail, fingerprintPreview);
         if (
           !personHasBiometricConsent &&
           identity &&
@@ -1817,9 +1768,8 @@ export default function OrionSignaturePanel({
               canFingerprintPermission ? (
                 <FingerprintCapture
                   value={fingerprintPreview}
-                  onChange={handleFingerprintChange}
+                  onChange={setFingerprintPreview}
                   disabled={acceptLoading}
-                  fromSaved={fingerprintFromSaved && Boolean(fingerprintPreview)}
                 />
               ) : (
                 <Alert color='orange' variant='light'>

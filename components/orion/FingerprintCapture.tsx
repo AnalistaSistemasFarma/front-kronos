@@ -8,20 +8,17 @@ type Props = {
   value?: string | null;
   onChange: (dataUrl: string | null) => void;
   disabled?: boolean;
-  /** Ya hay huella reutilizada (local / sesión); no forzar nueva carga. */
-  fromSaved?: boolean;
 };
 
 /**
  * Captura de huella para SynerLink → Orion.
- * Si ya hay imagen guardada, basta con aceptarla (o cambiarla).
+ * La imagen solo se mantiene en memoria durante este turno de firma.
  * La autorización biométrica (Ley 1581) se exige en SignerIdentityForm.
  */
 export default function FingerprintCapture({
   value,
   onChange,
   disabled = false,
-  fromSaved = false,
 }: Props) {
   const [error, setError] = useState<string | null>(null);
   const resetRef = useRef<() => void>(null);
@@ -53,19 +50,10 @@ export default function FingerprintCapture({
 
   return (
     <Stack gap='sm'>
-      {hasImage && fromSaved ? (
-        <Alert color='teal' variant='light' title='Huella guardada'>
-          <Text size='xs'>
-            Ya tiene una huella registrada en este navegador. Acéptela para firmar este documento;
-            no es necesario volver a subirla. Puede cambiarla si lo desea.
-          </Text>
-        </Alert>
-      ) : (
-        <Text size='sm' c='dimmed'>
-          Este documento exige huella dactilar. Suba una imagen clara del dedo (escáner o foto
-          nítida). Se reutilizará en próximos documentos de este navegador.
-        </Text>
-      )}
+      <Text size='sm' c='dimmed'>
+        Este documento exige huella dactilar. Suba una imagen clara del dedo (escáner o foto
+        nítida). La imagen se usa únicamente para este turno de firma.
+      </Text>
 
       {hasImage ? (
         <Image
