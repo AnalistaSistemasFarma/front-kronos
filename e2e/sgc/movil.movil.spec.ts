@@ -1,4 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { STORAGE_STATE_3 } from '../../playwright.config';
+import { takeElaboration, U1, U2 } from './roles';
 
 /**
  * SGC documental EN CELULAR (revisión móvil del 2026-10-03: «hay muchas cosas
@@ -17,7 +19,9 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
  *      Elaborador…): el valor queda guardado.
  *   5. Visor de la copia controlada: «Acercar» agranda la página también en
  *      el celular.
- * La solicitud de prueba usa solo personas QA y se cancela al final.
+ * La solicitud de prueba usa solo personas QA y se cancela al final. Roles
+ * (reglas del 2026-10-05, ver ./roles.ts): qa.sgc3 pide, qa.sgc (Calidad)
+ * elabora y qa.sgc2 revisa y aprueba.
  */
 const OLP = 3;
 const PW1 = process.env.E2E_USER_PASSWORD ?? '';
@@ -91,15 +95,18 @@ test.describe.serial('SGC documental · celular', () => {
     await ctx.close();
   });
 
-  test('[SGC-REQ-105] «Ubicar firmas» en el celular: documento a todo el ancho, tocar para ubicar, arrastrar con el dedo y desplazar el documento', async ({ page }) => {
+  test('[SGC-REQ-105] «Ubicar firmas» en el celular: documento a todo el ancho, tocar para ubicar, arrastrar con el dedo y desplazar el documento', async ({ browser, page }) => {
     const cat = await ok<{ processes: { id: number; code: string }[]; documentTypes: { id: number; code: string }[] }>(await page.request.get(`/api/sgc/catalogs?company=${OLP}`));
+    const asker = await browser.newContext({ storageState: STORAGE_STATE_3 });
     ({ idRequest } = await ok<{ idRequest: number }>(
-      await page.request.post('/api/sgc/requests', {
+      await asker.request.post('/api/sgc/requests', {
         data: { company: OLP, requestType: 'nuevo', subject: `E2E celular · ubicar firmas ${new Date().toISOString()}`, description: 'Recorrido automático de la e2e del SGC en celular (datos de prueba).', idProcess: cat.processes.find((p) => p.code === 'GC')!.id, idDocumentType: cat.documentTypes.find((t) => t.code === 'PR')!.id, requiresTraining: 'no', formValues: { urgencia: 'Normal' } },
       }),
       [201]
     ));
-    for (const stepKey of ['revision', 'aprobacion']) await ok(await page.request.post(`/api/sgc/requests/${idRequest}/signers`, { data: { stepKey, signers: [U3], mode: 'orden' } }));
+    await asker.close();
+    await takeElaboration(page.request, idRequest, U1);
+    for (const stepKey of ['revision', 'aprobacion']) await ok(await page.request.post(`/api/sgc/requests/${idRequest}/signers`, { data: { stepKey, signers: [U2], mode: 'orden' } }));
     await ok(await page.request.post(`/api/sgc/requests/${idRequest}/draft`, { data: { html: TEMPLATE, origin: 'plantilla', originRef: 'Plantilla institucional de procedimiento' } }));
 
     await page.goto(`/process/sgc-documental/solicitudes/${idRequest}?empresa=${OLP}`);
@@ -226,16 +233,18 @@ test.describe.serial('SGC documental · celular', () => {
       .toBe(true);
   });
 
-  test('[SGC-REQ-109] los selectores funcionan con el dedo cerca del final de la página: la nueva solicitud guarda prioridad, proceso, tipo y elaborador, y la prioridad se edita en la solicitud', async ({ page }) => {
+  test('[SGC-REQ-109] los selectores funcionan con el dedo cerca del final de la página: la nueva solicitud guarda prioridad, proceso y tipo (el elaborador sale de la configuración), y la prioridad se edita en la solicitud', async ({ browser }) => {
+    // Pide qa.sgc3 (sin permiso de Calidad): el elaborador lo fija la configuración, nunca quien pide.
+    const ctx3 = await browser.newContext({ storageState: STORAGE_STATE_3 });
+    const page = await ctx3.newPage();
     await page.goto(`/process/sgc-documental/solicitudes/nueva?empresa=${OLP}`);
     await expect(page.getByTestId('sgc-nueva-asunto')).toBeVisible({ timeout: 45_000 });
     await pick(page, 'sgc-nueva-proceso', /^GC · /);
     await pick(page, 'sgc-nueva-tipo-documental', /^PR · /);
     await page.getByTestId('sgc-nueva-asunto').fill(`E2E celular · selectores ${new Date().toISOString()}`);
     await page.getByTestId('sgc-nueva-justificacion').fill('Recorrido automático de la e2e del SGC en celular (selectores, datos de prueba).');
-    // Al final de la página: elaborador (lista larga con búsqueda) y prioridad (lista corta).
-    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-    await pick(page, 'sgc-nueva-elaborador', /qa\.sgc3@/);
+    // 2026-10-05: ya no hay selector de elaborador. Al final de la página: prioridad (lista corta).
+    await expect(page.getByTestId('sgc-nueva-elaborador')).toHaveCount(0);
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
     await pick(page, 'sgc-campo-urgencia', /^Alta$/);
     await page.getByTestId('sgc-nueva-crear').tap();
@@ -246,7 +255,8 @@ test.describe.serial('SGC documental · celular', () => {
       const d = await ok<Detail>(await page.request.get(`/api/sgc/requests/${id}`));
       expect(d.request.process.code).toBe('GC');
       expect(d.request.documentType.code).toBe('PR');
-      expect(d.request.elaboratorEmail).toBe(U3.toLowerCase());
+      expect(d.request.elaboratorEmail).toBeTruthy();
+      expect(d.request.elaboratorEmail.toLowerCase()).not.toBe(U3.toLowerCase());
       expect(d.formFields.find((f) => f.key === 'urgencia')?.value).toBe('Alta');
       // Editar la prioridad desde la solicitud (Información adicional, al final de la página).
       await expect(page.getByTestId('sgc-info-adicional')).toBeVisible({ timeout: 45_000 });
@@ -259,6 +269,7 @@ test.describe.serial('SGC documental · celular', () => {
         .toBe('Requerimiento regulatorio');
     } finally {
       await page.request.post(`/api/sgc/requests/${id}/cancel`, { data: { reason: 'Limpieza de la prueba e2e de selectores en celular.' } });
+      await ctx3.close();
     }
   });
 

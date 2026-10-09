@@ -1,5 +1,7 @@
 import ExcelJS from 'exceljs';
 import { expect, test, type APIRequestContext } from '@playwright/test';
+import { STORAGE_STATE_3 } from '../../playwright.config';
+import { takeElaboration, U1 } from './roles';
 
 /**
  * SGC documental · SPRINT 8 CON SESIÓN, contra PRUEBAS (KRONOSDB_PRUEBAS):
@@ -56,18 +58,21 @@ test.describe('SGC · Sprint 8 (con sesión)', () => {
     expect(after.imports).toHaveLength(before.imports.length);
   });
 
-  test('[SGC-REQ-111] el borrador de un documento nuevo no se admite en PDF', async ({ page }) => {
+  test('[SGC-REQ-111] el borrador de un documento nuevo no se admite en PDF', async ({ browser, page }) => {
     const api = page.request;
     const cat = await ok<{ processes: { id: number; code: string }[]; documentTypes: { id: number; code: string }[] }>(await api.get(`/api/sgc/catalogs?company=${OLP}`));
+    // Reglas del 2026-10-05 (./roles.ts): pide qa.sgc3 y elabora qa.sgc, así el rechazo es por el formato y no por el rol.
+    const asker = await browser.newContext({ storageState: STORAGE_STATE_3 });
     const { idRequest } = await ok<{ idRequest: number }>(
-      await api.post('/api/sgc/requests', { data: { company: OLP, requestType: 'nuevo', subject: `E2E S8 borrador PDF ${new Date().toISOString()}`, description: 'Prueba automática del Sprint 8: el borrador en PDF se rechaza (datos de prueba).', idProcess: cat.processes.find((p) => p.code === 'GC')!.id, idDocumentType: cat.documentTypes.find((t) => t.code === 'PR')!.id, formValues: { urgencia: 'Normal' } } }),
+      await asker.request.post('/api/sgc/requests', { data: { company: OLP, requestType: 'nuevo', subject: `E2E S8 borrador PDF ${new Date().toISOString()}`, description: 'Prueba automática del Sprint 8: el borrador en PDF se rechaza (datos de prueba).', idProcess: cat.processes.find((p) => p.code === 'GC')!.id, idDocumentType: cat.documentTypes.find((t) => t.code === 'PR')!.id, formValues: { urgencia: 'Normal' } } }),
       [201]
     );
+    await asker.close();
     try {
+      await takeElaboration(api, idRequest, U1);
       const res = await api.post(`/api/sgc/requests/${idRequest}/attachments`, { multipart: { purpose: 'borrador', file: { name: 'borrador.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF') } } });
-      // Solo el elaborador carga el borrador: si la sesión de prueba no lo es, el rechazo es 403 antes del formato.
-      expect([403, 415]).toContain(res.status());
-      if (res.status() === 415) expect((await res.json()).error).toContain('Word');
+      expect(res.status()).toBe(415);
+      expect((await res.json()).error).toContain('Word');
     } finally {
       await api.post(`/api/sgc/requests/${idRequest}/cancel`, { data: { reason: 'Limpieza de la prueba e2e del Sprint 8.' } });
     }

@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs';
 import { expect, test, type APIRequestContext, type Browser, type Page } from '@playwright/test';
-import { STORAGE_STATE_2, STORAGE_STATE_3 } from '../../playwright.config';
+import { STORAGE_STATE, STORAGE_STATE_2, STORAGE_STATE_3 } from '../../playwright.config';
+import { cancelQuietly, takeElaboration } from './roles';
 
 /**
  * SGC documental · Sprint 4 CON SESIÓN, contra PRUEBAS (KRONOSDB_PRUEBAS):
@@ -60,22 +61,25 @@ async function xlsx(rows: unknown[][]): Promise<Buffer> {
 const HEAD = ['Id', 'Hora de inicio', 'Hora de finalización', 'Correo electrónico', 'Nombre', 'Total de puntos'];
 
 /** Lleva una solicitud por elaboración, revisión y aprobación (API) y deja el alcance con las personas dadas. */
-async function throughApproval(p1: Page, p2: Page, p3: Page, idRequest: number, readers: string[]) {
-  for (const stepKey of ['revision', 'aprobacion']) await ok(await p1.request.post(`/api/sgc/requests/${idRequest}/signers`, { data: { stepKey, signers: [U3], mode: 'orden' } }));
+// Roles (reglas del 2026-10-05, ver ./roles.ts): qa.sgc3 pide, qa.sgc (Calidad) elabora y qa.sgc2 revisa, aprueba y verifica.
+async function throughApproval(p1: Page, p2: Page, idRequest: number, readers: string[]) {
+  await takeElaboration(p1.request, idRequest, U1);
+  for (const stepKey of ['revision', 'aprobacion']) await ok(await p1.request.post(`/api/sgc/requests/${idRequest}/signers`, { data: { stepKey, signers: [U2], mode: 'orden' } }));
   await ok(await p1.request.post(`/api/sgc/requests/${idRequest}/draft`, { data: { html: '<h1>Procedimiento e2e S4</h1><p>Contenido de prueba de la divulgación, la capacitación y la vigencia.</p>', origin: 'blanco', note: 'e2e S4' } }));
   for (const email of readers) {
     await ok(await p1.request.post(`/api/sgc/requests/${idRequest}/dissemination`, { data: { action: 'agregar', entry: { kind: 'persona', email }, reason: 'Alcance de la e2e del Sprint 4' } }), [201]);
   }
   await ok(await sign(p1.request, await taskId(p1.request, idRequest, /^Elaboración/), 'elaboro', PW1));
-  await ok(await sign(p3.request, await taskId(p3.request, idRequest, /^Revisión/), 'reviso', PW3));
-  const apr = await taskId(p3.request, idRequest, /^Aprobación/);
-  await ok(await sign(p3.request, apr, 'aprobo', PW3));
+  await ok(await sign(p2.request, await taskId(p2.request, idRequest, /^Revisión/), 'reviso', PW2));
+  const apr = await taskId(p2.request, idRequest, /^Aprobación/);
+  await ok(await sign(p2.request, apr, 'aprobo', PW2));
   const res = await ok<{ controlledPdf: { status: string } }>(await sign(p2.request, apr, 'aprobo', PW2, { checklist: CHECKLIST }));
   expect(res.controlledPdf.status).toBe('generado');
   // Sprint 10: con el flujo de capacitación previa, Calidad registra el material ANTES de la divulgación.
   const d = await ok<{ request: { currentTaskKey: string } }>(await p1.request.get(`/api/sgc/requests/${idRequest}`));
   if (d.request.currentTaskKey === 'preparacion_capacitacion') {
-    await ok(await p2.request.post(`/api/sgc/requests/${idRequest}/training`, { data: TRAINING }));
+    // El material lo registra Aseguramiento de Calidad (permiso de Calidad del SGC: qa.sgc); la tarea la resuelve el grupo SGC-VERIF-CALIDAD (qa.sgc2).
+    await ok(await p1.request.post(`/api/sgc/requests/${idRequest}/training`, { data: TRAINING }));
     await ok(await p2.request.post(`/api/sgc/tasks/${await taskId(p2.request, idRequest, /^Preparación de la capacitación/)}/decision`, { data: { decision: 'aprobar', comment: 'Material listo (e2e).' } }));
   }
 }
@@ -100,19 +104,27 @@ test.describe.serial('SGC documental · Sprint 4 · divulgación, capacitación 
   let idRequest = 0;
   let idDocument = 0;
   let code = '';
+  let id2 = 0;
+
+  // Si una prueba falla a mitad, las solicitudes de prueba no quedan abiertas en pruebas.
+  test.afterAll(async ({ browser }) => {
+    const p1 = await ctxFor(browser, STORAGE_STATE);
+    for (const id of [idRequest, id2]) await cancelQuietly(p1.request, id, 'Limpieza de la prueba e2e del Sprint 4 (corrida interrumpida).');
+    await p1.context().close();
+  });
 
   test('[SGC-REQ-052][SGC-REQ-053][SGC-REQ-054] el documento aprobado entra a la DIVULGACIÓN con una tarea de lectura por persona del alcance', async ({ browser, page }) => {
     const p2 = await ctxFor(browser, STORAGE_STATE_2);
     const p3 = await ctxFor(browser, STORAGE_STATE_3);
     const cat = await ok<{ processes: { id: number; code: string }[]; documentTypes: { id: number; code: string }[] }>(await page.request.get(`/api/sgc/catalogs?company=${OLP}`));
     const created = await ok<{ idRequest: number }>(
-      await page.request.post('/api/sgc/requests', {
+      await p3.request.post('/api/sgc/requests', {
         data: { company: OLP, requestType: 'nuevo', subject: `E2E S4 · lectura y vigencia ${new Date().toISOString()}`, description: 'Recorrido automático de la e2e del Sprint 4 (datos de prueba).', idProcess: cat.processes.find((p) => p.code === 'GC')!.id, idDocumentType: cat.documentTypes.find((t) => t.code === 'PR')!.id, requiresTraining: 'si', formValues: { urgencia: 'Normal' } },
       }),
       [201]
     );
     idRequest = created.idRequest;
-    await throughApproval(page, p2, p3, idRequest, [U1, U2, U3]);
+    await throughApproval(page, p2, idRequest, [U1, U2, U3]);
     const detail = await ok<{ request: { status: string; currentTaskKey: string }; dissemination: { readers: { email: string; status: string }[]; started: boolean }; controlledPdf: { idDocument: number } }>(await page.request.get(`/api/sgc/requests/${idRequest}`));
     expect(detail.request).toMatchObject({ status: 'abierta', currentTaskKey: 'divulgacion' });
     expect(detail.dissemination.readers.map((r) => r.email).sort()).toEqual([U1, U2, U3].map((e) => e.toLowerCase()).sort());
@@ -203,11 +215,11 @@ test.describe.serial('SGC documental · Sprint 4 · divulgación, capacitación 
     const p2 = await ctxFor(browser, STORAGE_STATE_2);
     const p3 = await ctxFor(browser, STORAGE_STATE_3);
     const created = await ok<{ idRequest: number }>(
-      await page.request.post('/api/sgc/requests', { data: { company: OLP, requestType: 'nueva_version', subject: `E2E S4 · nueva versión ${new Date().toISOString()}`, description: 'Nueva versión de la e2e del Sprint 4 (datos de prueba).', idDocument, formValues: { urgencia: 'Normal' } } }),
+      await p3.request.post('/api/sgc/requests', { data: { company: OLP, requestType: 'nueva_version', subject: `E2E S4 · nueva versión ${new Date().toISOString()}`, description: 'Nueva versión de la e2e del Sprint 4 (datos de prueba).', idDocument, formValues: { urgencia: 'Normal' } } }),
       [201]
     );
-    const id2 = created.idRequest;
-    await throughApproval(page, p2, p3, id2, [U1]);
+    id2 = created.idRequest;
+    await throughApproval(page, p2, id2, [U1]);
     // Mientras se divulga la V2, la V1 sigue vigente.
     expect((await ok<{ verdict: string }>(await page.request.get(`/api/sgc/verify?empresa=${OLP}&codigo=${encodeURIComponent(code)}&version=1`))).verdict).toBe('vigente');
     expect((await ok<{ verdict: string }>(await page.request.get(`/api/sgc/verify?empresa=${OLP}&codigo=${encodeURIComponent(code)}&version=2`))).verdict).toBe('en_divulgacion');
