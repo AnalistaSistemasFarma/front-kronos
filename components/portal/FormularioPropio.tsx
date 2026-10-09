@@ -1,6 +1,40 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Alert,
+  Box,
+  Button,
+  Checkbox,
+  FileInput,
+  Group,
+  List,
+  Loader,
+  NativeSelect,
+  Paper,
+  Radio,
+  ScrollArea,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Textarea,
+} from '@mantine/core';
+import {
+  IconAlertCircle,
+  IconAlertTriangle,
+  IconCircleCheck,
+  IconCode,
+  IconDeviceFloppy,
+  IconEye,
+  IconFileImport,
+  IconFileSpreadsheet,
+  IconInfoCircle,
+  IconRotateClockwise,
+  IconSearch,
+  IconSend,
+  IconShieldLock,
+} from '@tabler/icons-react';
 import { leerJson } from './PortalContenido';
 import {
   OPCIONES_SI_NO,
@@ -31,7 +65,31 @@ import {
  *
  * El correo y el nombre se prellenan desde la sesión: el nombre se puede
  * corregir; el correo no (la respuesta se guarda con el de la sesión).
+ *
+ * LINEAMIENTOS GRÁFICOS (Nicolás, 2026-10-08: "no lo voy a pasar si no tiene
+ * los mismos lineamientos gráficos que los otros módulos"): el CONTENIDO se
+ * arma con los mismos componentes de Mantine y el mismo tema que el resto de
+ * SynerLink —campos como en `app/formulario-externo/[id]/page.tsx`, tabla como
+ * en el Listado maestro del SGC, avisos con `Alert` de color arriba—. La
+ * VENTANA es la misma `portal-th__visor` de los demás materiales de Formación
+ * (Cristian pidió que el formulario se abra ahí). Nada de colores ni estilos
+ * propios: el CSS que queda es solo de distribución (tamaño de la ventana y
+ * zona que se desplaza).
  */
+
+/** Respuesta de "Otra" dentro del Radio.Group (no choca con ninguna opción real). */
+const VALOR_OTRA = '__otra__';
+
+/** Correos y respuestas largas parten línea en la celda (como `NOWRAP` en el Listado maestro del SGC). */
+const QUIEBRE = { overflowWrap: 'anywhere' } as const;
+
+/** Color del `Alert` según el tipo de aviso (verde/rojo/amarillo, convención del equipo). */
+const COLOR_AVISO = { ok: 'green', error: 'red', advertencia: 'yellow' } as const;
+const ICONO_AVISO = {
+  ok: <IconCircleCheck size={18} />,
+  error: <IconAlertCircle size={18} />,
+  advertencia: <IconAlertTriangle size={18} />,
+} as const;
 
 const ID_AUTORIZACION = 'autorizacion';
 
@@ -124,11 +182,18 @@ export function VisorFormulario({
           </div>
         </header>
         {error && (
-          <p className='portal-th__resultado portal-th__resultado--error' role='alert'>
+          <Alert color='red' icon={<IconAlertCircle size={18} />} m='md' role='alert'>
             {error}
-          </p>
+          </Alert>
         )}
-        {!datos && !error && <p className='portal-th__estado portal-th__formulario-cargando'>Cargando formulario…</p>}
+        {!datos && !error && (
+          <Group gap='xs' p='md'>
+            <Loader size='sm' />
+            <Text size='sm' c='dimmed'>
+              Cargando formulario…
+            </Text>
+          </Group>
+        )}
         {datos && (
           <CuerpoFormulario
             key={datos.formulario.versionId}
@@ -247,110 +312,153 @@ function CuerpoFormulario({
   };
 
   if (enviadaEl) {
+    // Misma confirmación que el formulario externo de SynerLink: ícono, título y texto atenuado.
     return (
-      <div className='portal-th__formulario-fin' data-testid='formulario-enviado'>
+      <Stack align='center' justify='center' gap='md' p='xl' className='portal-th__formulario-fin' data-testid='formulario-enviado'>
         {recienEnviada ? (
           <>
-            <div className='portal-th__formulario-fin-icono' aria-hidden='true'>
-              ✓
-            </div>
-            <h3 role='status'>Respuestas enviadas</h3>
-            <p>Gracias. Sus respuestas quedaron guardadas y el material quedó completado.</p>
+            <IconCircleCheck size={48} color='var(--mantine-color-green-6)' aria-hidden='true' />
+            <Text fw={700} fz='xl' ta='center' role='status'>
+              Respuestas enviadas
+            </Text>
+            <Text ta='center' c='dimmed' maw={520}>
+              Gracias. Sus respuestas quedaron guardadas y el material quedó completado.
+            </Text>
           </>
         ) : (
           <>
-            <h3>Ya envió este formulario</h3>
-            <p>Lo envió el {fechaLarga(enviadaEl)}. Las respuestas no se pueden modificar; si necesita corregir algo, pida a Talento Humano que lo reabra.</p>
+            <IconInfoCircle size={48} color='var(--mantine-color-blue-6)' aria-hidden='true' />
+            <Text fw={700} fz='xl' ta='center'>
+              Ya envió este formulario
+            </Text>
+            <Text ta='center' c='dimmed' maw={520}>
+              Lo envió el {fechaLarga(enviadaEl)}. Las respuestas no se pueden modificar; si necesita corregir algo, pida a Talento Humano que lo reabra.
+            </Text>
           </>
         )}
-        <button type='button' className='portal-th__certificado-boton' onClick={onCerrar}>
-          Volver al curso
-        </button>
-      </div>
+        <Button onClick={onCerrar}>Volver al curso</Button>
+      </Stack>
     );
   }
 
+  const errorAutorizacion = errores[ID_AUTORIZACION];
+
   return (
     <div className='portal-th__formulario' ref={desplazable} data-testid='formulario-propio'>
+      {/* Aviso de resultado ARRIBA, con color y pegado mientras se baja (convención del equipo). */}
       {aviso && (
-        <p
-          className={`portal-th__resultado portal-th__resultado--${aviso.tipo} portal-th__formulario-aviso`}
+        <Alert
+          className='portal-th__formulario-aviso'
+          color={COLOR_AVISO[aviso.tipo]}
+          icon={ICONO_AVISO[aviso.tipo]}
           role={aviso.tipo === 'error' ? 'alert' : 'status'}
           data-testid='aviso-formulario'
         >
           {aviso.texto}
-        </p>
+        </Alert>
       )}
-      {previa && <p className='portal-th__aviso'>Vista previa del formador: puede llenarlo para probarlo; no se guarda nada.</p>}
-      <div className='portal-th__formulario-encabezado'>
-        <h3>{definicion.titulo}</h3>
-        {definicion.descripcion && <p>{definicion.descripcion}</p>}
-        <p className='portal-th__formulario-obligatorio-nota'>
-          <span aria-hidden='true'>*</span> Obligatorio
-        </p>
-      </div>
+      <Stack gap='md' p='md'>
+        {previa && (
+          <Alert color='blue' icon={<IconEye size={18} />}>
+            Vista previa del formador: puede llenarlo para probarlo; no se guarda nada.
+          </Alert>
+        )}
 
-      {definicion.autorizacion && (
-        <section
-          id={`fp-${ID_AUTORIZACION}`}
-          className={`portal-th__formulario-autorizacion${errores[ID_AUTORIZACION] ? ' portal-th__formulario-pregunta--error' : ''}`}
-          aria-labelledby='fp-autorizacion-titulo'
-        >
-          <h4 id='fp-autorizacion-titulo'>{definicion.autorizacion.titulo}</h4>
-          {definicion.autorizacion.pendienteValidacion && (
-            <p className='portal-th__formulario-pendiente' data-testid='autorizacion-pendiente'>
-              Texto pendiente de validación por Talento Humano o Jurídica
-            </p>
+        <div>
+          <Text fw={700} fz='xl' role='heading' aria-level={3}>
+            {definicion.titulo}
+          </Text>
+          {definicion.descripcion && (
+            <Text size='sm' c='dimmed' mt={4}>
+              {definicion.descripcion}
+            </Text>
           )}
-          <div className='portal-th__formulario-autorizacion-texto'>
-            {definicion.autorizacion.texto.map((p, i) => (
-              <p key={i}>{p}</p>
+          <Text size='xs' c='dimmed' mt={4}>
+            Los campos marcados con{' '}
+            <Text span c='red' inherit>
+              *
+            </Text>{' '}
+            son obligatorios.
+          </Text>
+        </div>
+
+        {definicion.autorizacion && (
+          <Paper
+            withBorder
+            radius='md'
+            p='md'
+            component='section'
+            id={`fp-${ID_AUTORIZACION}`}
+            className={errorAutorizacion ? 'portal-th__formulario-pregunta--error' : undefined}
+            aria-labelledby='fp-autorizacion-titulo'
+          >
+            <Stack gap='sm'>
+              <Text id='fp-autorizacion-titulo' fw={600} role='heading' aria-level={4}>
+                {definicion.autorizacion.titulo}
+              </Text>
+              {definicion.autorizacion.pendienteValidacion && (
+                <Alert color='yellow' icon={<IconAlertTriangle size={18} />} p='xs' data-testid='autorizacion-pendiente'>
+                  Texto pendiente de validación por Talento Humano o Jurídica
+                </Alert>
+              )}
+              <ScrollArea.Autosize mah={220} type='auto' offsetScrollbars>
+                <Stack gap='xs'>
+                  {definicion.autorizacion.texto.map((p, i) => (
+                    <Text key={i} size='sm' c='dimmed'>
+                      {p}
+                    </Text>
+                  ))}
+                </Stack>
+              </ScrollArea.Autosize>
+              <Checkbox
+                checked={autoriza}
+                aria-required='true'
+                error={errorAutorizacion || undefined}
+                label={
+                  <>
+                    {definicion.autorizacion.casilla}{' '}
+                    <Text span c='red' inherit aria-hidden='true'>
+                      *
+                    </Text>
+                  </>
+                }
+                onChange={(e) => {
+                  setAutoriza(e.currentTarget.checked);
+                  if (e.currentTarget.checked) setErrores((x) => ({ ...x, [ID_AUTORIZACION]: '' }));
+                }}
+              />
+            </Stack>
+          </Paper>
+        )}
+
+        <Paper withBorder radius='md' p='md'>
+          <Stack gap='lg'>
+            {definicion.preguntas.map((p, i) => (
+              <CampoPregunta
+                key={p.id}
+                numero={i + 1}
+                pregunta={p}
+                valor={valores[p.id]}
+                error={errores[p.id]}
+                soloLectura={p.prellenar === 'correo'}
+                onCambio={(v) => ponerValor(p.id, v)}
+              />
             ))}
-          </div>
-          <label className='portal-th__formulario-casilla'>
-            <input
-              type='checkbox'
-              checked={autoriza}
-              aria-required='true'
-              aria-invalid={!!errores[ID_AUTORIZACION]}
-              onChange={(e) => {
-                setAutoriza(e.target.checked);
-                if (e.target.checked) setErrores((x) => ({ ...x, [ID_AUTORIZACION]: '' }));
-              }}
-            />
-            <span>
-              {definicion.autorizacion.casilla} <span className='portal-th__formulario-asterisco'>*</span>
-            </span>
-          </label>
-          {errores[ID_AUTORIZACION] && <p className='portal-th__formulario-error'>{errores[ID_AUTORIZACION]}</p>}
-        </section>
-      )}
+          </Stack>
+        </Paper>
 
-      <ol className='portal-th__formulario-preguntas'>
-        {definicion.preguntas.map((p, i) => (
-          <CampoPregunta
-            key={p.id}
-            numero={i + 1}
-            pregunta={p}
-            valor={valores[p.id]}
-            error={errores[p.id]}
-            soloLectura={p.prellenar === 'correo'}
-            onCambio={(v) => ponerValor(p.id, v)}
-          />
-        ))}
-      </ol>
-
-      <div className='portal-th__formulario-pie'>
-        <button
-          type='button'
-          className='portal-th__formulario-enviar'
-          onClick={() => void enviar()}
-          disabled={enviando}
-          data-testid='enviar-formulario'
-        >
-          {enviando ? 'Enviando…' : 'Enviar'}
-        </button>
-      </div>
+        <Group justify='flex-end'>
+          <Button
+            onClick={() => void enviar()}
+            loading={enviando}
+            disabled={enviando}
+            leftSection={<IconSend size={16} />}
+            data-testid='enviar-formulario'
+          >
+            Enviar
+          </Button>
+        </Group>
+      </Stack>
     </div>
   );
 }
@@ -370,86 +478,85 @@ function CampoPregunta({
   soloLectura: boolean;
   onCambio: (v: ValorRespuesta) => void;
 }) {
-  const idTitulo = `fp-${p.id}-titulo`;
-  const idError = `fp-${p.id}-error`;
-  const comun = {
-    'aria-labelledby': idTitulo,
-    'aria-required': p.obligatoria,
-    'aria-invalid': !!error,
-    'aria-describedby': error ? idError : undefined,
-  };
   const texto = typeof valor === 'string' ? valor : '';
   const opciones = p.tipo === 'si_no' ? [...OPCIONES_SI_NO] : (p.opciones ?? []);
   const esOtra = typeof valor === 'object' && valor !== null;
+  // Mismo patrón de campo que el resto de SynerLink: etiqueta arriba, asterisco
+  // rojo si es obligatoria, ayuda como descripción y error en rojo debajo.
+  // `size='md'` en los campos de texto (16 px): con menos, Safari en iPhone
+  // hace zoom al enfocar — mismo arreglo que en /login (ver globals.css).
+  const comun = {
+    label: `${numero}. ${p.texto}`,
+    description: p.ayuda,
+    required: p.obligatoria,
+    error,
+  };
 
   return (
-    <li id={`fp-${p.id}`} className={`portal-th__formulario-pregunta${error ? ' portal-th__formulario-pregunta--error' : ''}`}>
-      <div id={idTitulo} className='portal-th__formulario-titulo'>
-        <span className='portal-th__formulario-numero'>{numero}.</span> {p.texto}
-        {p.obligatoria && (
-          <span className='portal-th__formulario-asterisco' aria-label='Respuesta necesaria'>
-            {' '}
-            *
-          </span>
-        )}
-      </div>
-      {p.ayuda && <p className='portal-th__formulario-ayuda'>{p.ayuda}</p>}
-
+    <Box id={`fp-${p.id}`} className={`portal-th__formulario-pregunta${error ? ' portal-th__formulario-pregunta--error' : ''}`}>
       {p.tipo === 'seleccion' || p.tipo === 'si_no' ? (
-        <div role='radiogroup' {...comun} className='portal-th__formulario-opciones'>
-          {opciones.map((o) => (
-            <label key={o} className='portal-th__formulario-opcion'>
-              <input type='radio' name={`fp-${p.id}`} checked={!esOtra && texto === o} onChange={() => onCambio(o)} />
-              <span>{o}</span>
-            </label>
-          ))}
-          {p.permiteOtra && (
-            <div className='portal-th__formulario-opcion portal-th__formulario-opcion--otra'>
-              <label>
-                <input
-                  type='radio'
-                  name={`fp-${p.id}`}
-                  checked={esOtra}
-                  onChange={() => onCambio({ otra: esOtra ? (valor as { otra: string }).otra : '' })}
-                />
-                <span>Otra respuesta</span>
-              </label>
-              <input
-                type='text'
-                aria-label={`${p.texto}: otra respuesta`}
-                placeholder='Otras'
-                maxLength={2000}
-                value={esOtra ? (valor as { otra: string }).otra : ''}
-                onFocus={() => {
-                  if (!esOtra) onCambio({ otra: '' });
-                }}
-                onChange={(e) => onCambio({ otra: e.target.value })}
-              />
-            </div>
-          )}
-        </div>
-      ) : p.tipo === 'texto_largo' ? (
-        <textarea {...comun} rows={4} maxLength={4000} placeholder='Escriba su respuesta' value={texto} onChange={(e) => onCambio(e.target.value)} />
-      ) : (
-        <input
+        <Radio.Group
           {...comun}
+          size='md'
+          name={`fp-${p.id}`}
+          value={esOtra ? VALOR_OTRA : texto}
+          onChange={(v) => {
+            if (v === VALOR_OTRA) onCambio({ otra: esOtra ? (valor as { otra: string }).otra : '' });
+            else onCambio(v);
+          }}
+        >
+          <Stack gap='xs' mt='xs'>
+            {opciones.map((o) => (
+              <Radio key={o} value={o} label={o} size='sm' />
+            ))}
+            {p.permiteOtra && (
+              <Group gap='sm' wrap='wrap' align='center'>
+                <Radio value={VALOR_OTRA} label='Otra respuesta' size='sm' />
+                <TextInput
+                  aria-label={`${p.texto}: otra respuesta`}
+                  placeholder='Otras'
+                  maxLength={2000}
+                  size='md'
+                  flex='1 1 160px'
+                  value={esOtra ? (valor as { otra: string }).otra : ''}
+                  onFocus={() => {
+                    if (!esOtra) onCambio({ otra: '' });
+                  }}
+                  onChange={(e) => onCambio({ otra: e.currentTarget.value })}
+                />
+              </Group>
+            )}
+          </Stack>
+        </Radio.Group>
+      ) : p.tipo === 'texto_largo' ? (
+        <Textarea
+          {...comun}
+          size='md'
+          autosize
+          minRows={3}
+          maxRows={8}
+          maxLength={4000}
+          placeholder='Escriba su respuesta'
+          value={texto}
+          onChange={(e) => onCambio(e.currentTarget.value)}
+        />
+      ) : (
+        <TextInput
+          {...comun}
+          size='md'
           type={p.tipo === 'fecha' ? 'date' : 'text'}
           inputMode={p.tipo === 'numero' ? 'decimal' : p.prellenar === 'correo' ? 'email' : undefined}
           autoComplete={p.prellenar === 'correo' ? 'email' : p.prellenar === 'nombre' ? 'name' : 'off'}
           placeholder={p.tipo === 'fecha' ? undefined : 'Escriba su respuesta'}
           maxLength={2000}
           readOnly={soloLectura}
+          variant={soloLectura ? 'filled' : 'default'}
           title={soloLectura ? 'Se toma del correo con el que ingresó al portal' : undefined}
           value={texto}
-          onChange={(e) => onCambio(e.target.value)}
+          onChange={(e) => onCambio(e.currentTarget.value)}
         />
       )}
-      {error && (
-        <p id={idError} className='portal-th__formulario-error'>
-          {error}
-        </p>
-      )}
-    </li>
+    </Box>
   );
 }
 
@@ -546,78 +653,107 @@ export function PanelRespuestas({ materialId, titulo, onCerrar, onCambio }: { ma
             </button>
           </div>
         </header>
-        <div className='portal-th__respuestas-barra'>
-          <span className='portal-th__respuestas-conteo' data-testid='conteo-respuestas'>
-            {tabla ? `${tabla.filas.length} respuesta(s) · ${tabla.curso.titulo}` : 'Cargando…'}
-          </span>
-          <input
+        {/* Resultado de "Reabrir" ARRIBA y con color (convención del equipo). */}
+        {(error || aviso) && (
+          <Stack gap='xs' px='md' pt='md'>
+            {error && (
+              <Alert color='red' icon={<IconAlertCircle size={18} />} role='alert'>
+                {error}
+              </Alert>
+            )}
+            {aviso && (
+              <Alert color='green' icon={<IconCircleCheck size={18} />} role='status'>
+                {aviso}
+              </Alert>
+            )}
+          </Stack>
+        )}
+        {/* Barra como en el Listado maestro del SGC: buscador con ícono, conteo atenuado y acción principal. */}
+        <Group gap='sm' p='md' wrap='wrap' align='center'>
+          <TextInput
             type='search'
             aria-label='Buscar en las respuestas'
             placeholder='Buscar por correo o respuesta'
+            leftSection={<IconSearch size={16} />}
+            size='md'
             value={filtro}
-            onChange={(e) => setFiltro(e.target.value)}
+            onChange={(e) => setFiltro(e.currentTarget.value)}
+            flex='1 1 240px'
           />
-          <a
-            className='portal-th__certificado-boton portal-th__respuestas-exportar'
+          <Button
+            component='a'
             href={`/api/portal/materials/${materialId}/respuestas/excel`}
+            leftSection={<IconFileSpreadsheet size={16} />}
             data-testid='exportar-excel'
           >
-            ⬇ Exportar a Excel
-          </a>
-        </div>
-        <p className='portal-th__respuestas-sensibles'>
-          Datos personales sensibles (Ley 1581 de 2012): uso exclusivo de Talento Humano y del SG-SST. No los reenvíe ni los publique.
-        </p>
-        {error && (
-          <p className='portal-th__resultado portal-th__resultado--error' role='alert'>
-            {error}
-          </p>
-        )}
-        {aviso && (
-          <p className='portal-th__resultado portal-th__resultado--ok' role='status'>
-            {aviso}
-          </p>
-        )}
-        <div className='portal-th__respuestas-tabla-marco'>
+            Exportar a Excel
+          </Button>
+        </Group>
+        <Stack gap='xs' px='md'>
+          <Alert color='yellow' icon={<IconShieldLock size={18} />} p='xs'>
+            Datos personales sensibles (Ley 1581 de 2012): uso exclusivo de Talento Humano y del SG-SST. No los reenvíe ni los publique.
+          </Alert>
+          <Text size='sm' c='dimmed' data-testid='conteo-respuestas'>
+            {tabla ? `${tabla.filas.length} respuesta(s) · ${tabla.curso.titulo}` : 'Cargando…'}
+          </Text>
+        </Stack>
+        <ScrollArea flex={1} mih={0} type='auto' px='md' pb='md'>
           {tabla && tabla.filas.length === 0 ? (
-            <p className='portal-th__estado'>Todavía nadie ha enviado este formulario.</p>
+            <Text c='dimmed' ta='center' my='xl'>
+              Todavía nadie ha enviado este formulario.
+            </Text>
           ) : (
             tabla && (
-              <table className='portal-th__correos-tabla portal-th__respuestas-tabla' data-testid='tabla-respuestas'>
-                <thead>
-                  <tr>
-                    <th>Correo</th>
-                    <th>Enviado</th>
+              <Table
+                striped
+                highlightOnHover
+                stickyHeader
+                verticalSpacing='sm'
+                miw={(tabla.columnas.length + 3) * 160}
+                data-testid='tabla-respuestas'
+              >
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th miw={200}>Correo</Table.Th>
+                    <Table.Th miw={160}>Enviado</Table.Th>
                     {tabla.columnas.map((c, i) => (
-                      <th key={c.id} title={`${i + 1}. ${c.texto}`}>
-                        <span className='portal-th__respuestas-encabezado'>
+                      <Table.Th key={c.id} title={`${i + 1}. ${c.texto}`} miw={140} maw={280}>
+                        <Text inherit lineClamp={3}>
                           {i + 1}. {c.texto}
-                        </span>
-                      </th>
+                        </Text>
+                      </Table.Th>
                     ))}
-                    <th>Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
+                    <Table.Th>Acciones</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
                   {filas.map((f) => (
-                    <tr key={f.id}>
-                      <td>{f.correo}</td>
-                      <td>{fechaLarga(f.enviadaEl)}</td>
+                    <Table.Tr key={f.id}>
+                      <Table.Td style={QUIEBRE}>{f.correo}</Table.Td>
+                      <Table.Td>{fechaLarga(f.enviadaEl)}</Table.Td>
                       {tabla.columnas.map((c) => (
-                        <td key={c.id}>{textoDeRespuesta(f.respuestas[c.id])}</td>
+                        <Table.Td key={c.id} maw={280} style={QUIEBRE}>
+                          {textoDeRespuesta(f.respuestas[c.id])}
+                        </Table.Td>
                       ))}
-                      <td>
-                        <button type='button' className='portal-th__boton-chico' onClick={() => void reabrir(f)}>
+                      <Table.Td>
+                        <Button
+                          size='xs'
+                          variant='light'
+                          color='red'
+                          leftSection={<IconRotateClockwise size={14} />}
+                          onClick={() => void reabrir(f)}
+                        >
                           Reabrir
-                        </button>
-                      </td>
-                    </tr>
+                        </Button>
+                      </Table.Td>
+                    </Table.Tr>
                   ))}
-                </tbody>
-              </table>
+                </Table.Tbody>
+              </Table>
             )
           )}
-        </div>
+        </ScrollArea>
       </div>
     </div>
   );
@@ -728,113 +864,131 @@ export function SelectorFormulario({
   };
 
   return (
-    <div className='portal-th__formulario-selector' data-testid='selector-formulario'>
-      {lista && lista.length === 0 && <p className='portal-th__estado'>Todavía no hay formularios: importe uno.</p>}
+    // Dentro de la fila "Agregar material" de Formación; los controles son los de
+    // Mantine que usa el resto de SynerLink (`.portal-th__mantine` aísla los
+    // estilos de etiqueta de esa fila — ver globals.css).
+    <Stack gap='sm' w='100%' className='portal-th__mantine' data-testid='selector-formulario'>
+      {/* Resultado de importar/guardar ARRIBA y con color (convención del equipo). */}
+      {aviso && (
+        <Alert color='green' icon={<IconCircleCheck size={18} />} role='status'>
+          {aviso}
+        </Alert>
+      )}
+      {error && (
+        <Alert color='red' icon={<IconAlertCircle size={18} />} role='alert'>
+          {error}
+        </Alert>
+      )}
+      {lista && lista.length === 0 && (
+        <Text size='sm' c='dimmed'>
+          Todavía no hay formularios: importe uno.
+        </Text>
+      )}
       {lista && lista.length > 0 && (
-        <select
-          aria-label='Formulario'
-          value={valor ?? ''}
+        // Selector nativo de Mantine: en el celular abre la lista del sistema
+        // (mismo criterio que `SgcSelect` para el toque).
+        <NativeSelect
+          label='Formulario'
+          value={valor === null ? '' : String(valor)}
+          data={lista.map((f) => ({ value: String(f.id), label: `${f.titulo} · v${f.version}` }))}
           onChange={(e) => {
-            const f = lista.find((x) => x.id === Number(e.target.value));
+            const f = lista.find((x) => x.id === Number(e.currentTarget.value));
             onCambio(f ? f.id : null, f?.titulo ?? '');
           }}
-        >
-          {lista.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.titulo} · v{f.version}
-            </option>
-          ))}
-        </select>
+        />
       )}
-      <div className='portal-th__formulario-selector-acciones'>
-        <button type='button' className='portal-th__boton-secundario' onClick={() => void verPrevia()} disabled={!valor}>
+      <Group gap='xs' wrap='wrap'>
+        <Button variant='default' leftSection={<IconEye size={16} />} onClick={() => void verPrevia()} disabled={!valor}>
           Vista previa
-        </button>
-        <button type='button' className='portal-th__boton-secundario' onClick={() => void empezarEdicion()} disabled={!valor}>
+        </Button>
+        <Button variant='default' leftSection={<IconCode size={16} />} onClick={() => void empezarEdicion()} disabled={!valor}>
           Editar (JSON)
-        </button>
-        <button
-          type='button'
-          className='portal-th__boton-secundario'
+        </Button>
+        <Button
+          variant='default'
+          leftSection={<IconFileImport size={16} />}
           onClick={() => {
             setErroresJson([]);
             setEditor({ modo: 'importar', texto: '' });
           }}
         >
           Importar formulario
-        </button>
-      </div>
-      {aviso && (
-        <p className='portal-th__resultado portal-th__resultado--ok' role='status'>
-          {aviso}
-        </p>
-      )}
-      {error && (
-        <p className='portal-th__resultado portal-th__resultado--error' role='alert'>
-          {error}
-        </p>
-      )}
+        </Button>
+      </Group>
       {editor && (
-        <div className='portal-th__formulario-json'>
-          <p className='portal-th__estado'>
-            {editor.modo === 'importar'
-              ? 'Pegue la definición JSON del formulario o cárguela desde un archivo .json.'
-              : 'Al guardar se crea una versión nueva; las respuestas ya enviadas conservan la versión con la que se respondieron.'}
-          </p>
-          {editor.modo === 'importar' && (
-            <input
-              type='file'
-              accept='application/json,.json'
-              aria-label='Archivo JSON del formulario'
-              onChange={async (e) => {
-                const archivo = e.currentTarget.files?.[0];
-                if (archivo) setEditor({ modo: 'importar', texto: await archivo.text() });
-              }}
+        <Paper withBorder radius='md' p='md'>
+          <Stack gap='sm'>
+            <Text size='sm' c='dimmed'>
+              {editor.modo === 'importar'
+                ? 'Pegue la definición JSON del formulario o cárguela desde un archivo .json.'
+                : 'Al guardar se crea una versión nueva; las respuestas ya enviadas conservan la versión con la que se respondieron.'}
+            </Text>
+            {erroresJson.length > 0 && (
+              <Alert color='red' icon={<IconAlertCircle size={18} />} title='Revise la definición'>
+                <List size='sm'>
+                  {erroresJson.map((e) => (
+                    <List.Item key={e}>{e}</List.Item>
+                  ))}
+                </List>
+              </Alert>
+            )}
+            {editor.modo === 'importar' && (
+              <FileInput
+                label='Archivo JSON del formulario'
+                placeholder='Elegir archivo .json'
+                accept='application/json,.json'
+                leftSection={<IconFileImport size={16} />}
+                clearable
+                onChange={async (archivo) => {
+                  if (archivo) setEditor({ modo: 'importar', texto: await archivo.text() });
+                }}
+              />
+            )}
+            <Textarea
+              label='Definición JSON del formulario'
+              autosize
+              minRows={12}
+              maxRows={24}
+              spellCheck={false}
+              ff='monospace'
+              value={editor.texto}
+              onChange={(e) => setEditor({ ...editor, texto: e.currentTarget.value })}
             />
-          )}
-          <textarea
-            aria-label='Definición JSON del formulario'
-            rows={12}
-            spellCheck={false}
-            value={editor.texto}
-            onChange={(e) => setEditor({ ...editor, texto: e.target.value })}
-          />
-          {erroresJson.length > 0 && (
-            <ul className='portal-th__formulario-json-errores'>
-              {erroresJson.map((e) => (
-                <li key={e}>{e}</li>
-              ))}
-            </ul>
-          )}
-          <div className='portal-th__formacion-editar-acciones'>
-            <button
-              type='button'
-              className='portal-th__boton-secundario'
-              disabled={!editor.texto.trim()}
-              onClick={() => {
-                try {
-                  setPrevia(JSON.parse(editor.texto) as DefinicionFormulario);
-                  setErroresJson([]);
-                } catch {
-                  setErroresJson(['JSON mal formado.']);
-                }
-              }}
-            >
-              Vista previa del JSON
-            </button>
-            <button type='button' onClick={() => void guardar()} disabled={guardando || !editor.texto.trim()}>
-              {guardando ? 'Guardando…' : editor.modo === 'importar' ? 'Importar' : 'Guardar versión nueva'}
-            </button>
-            <button type='button' className='portal-th__boton-secundario' onClick={() => setEditor(null)} disabled={guardando}>
-              Cancelar
-            </button>
-          </div>
-        </div>
+            <Group gap='xs' justify='flex-end' wrap='wrap'>
+              <Button variant='default' onClick={() => setEditor(null)} disabled={guardando}>
+                Cancelar
+              </Button>
+              <Button
+                variant='default'
+                leftSection={<IconEye size={16} />}
+                disabled={!editor.texto.trim()}
+                onClick={() => {
+                  try {
+                    setPrevia(JSON.parse(editor.texto) as DefinicionFormulario);
+                    setErroresJson([]);
+                  } catch {
+                    setErroresJson(['JSON mal formado.']);
+                  }
+                }}
+              >
+                Vista previa del JSON
+              </Button>
+              <Button
+                leftSection={editor.modo === 'importar' ? <IconFileImport size={16} /> : <IconDeviceFloppy size={16} />}
+                onClick={() => void guardar()}
+                loading={guardando}
+                disabled={guardando || !editor.texto.trim()}
+              >
+                {editor.modo === 'importar' ? 'Importar' : 'Guardar versión nueva'}
+              </Button>
+            </Group>
+          </Stack>
+        </Paper>
       )}
       {previa && Array.isArray(previa.preguntas) && (
         <VisorFormulario titulo={`Vista previa · ${previa.titulo ?? ''}`} previa={previa} onCerrar={() => setPrevia(null)} />
       )}
-    </div>
+    </Stack>
   );
 }
 
@@ -852,9 +1006,9 @@ export function PreviaDeMaterialFormulario({ formularioId, titulo, onCerrar }: {
   }, [formularioId]);
   if (error) {
     return (
-      <p className='portal-th__resultado portal-th__resultado--error' role='alert'>
+      <Alert color='red' icon={<IconAlertCircle size={18} />} role='alert' mb='sm'>
         {error}
-      </p>
+      </Alert>
     );
   }
   if (!definicion) return null;

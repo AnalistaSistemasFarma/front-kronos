@@ -4249,16 +4249,18 @@ body.chat-inmersivo .chat-page-thread--completa {
   border-radius: 12px;
 }
 
-.portal-th__formacion-crear input[type='text'],
-.portal-th__formacion-crear input:not([type]),
-.portal-th__formacion-crear input[type='file'] {
+.portal-th__formacion-crear input[type='text']:where(:not(.portal-th__mantine *)),
+.portal-th__formacion-crear input:not([type]):where(:not(.portal-th__mantine *)),
+.portal-th__formacion-crear input[type='file']:where(:not(.portal-th__mantine *)) {
   padding: 8px 10px;
   border: 1px solid var(--pth-linea);
   border-radius: 8px;
   font: inherit;
 }
 
-.portal-th__formacion-crear button {
+/* `:where(:not(.portal-th__mantine *))`: no toca los controles de Mantine del
+   selector de formulario (sin subir la especificidad de la regla). */
+.portal-th__formacion-crear button:where(:not(.portal-th__mantine *)) {
   padding: 9px 16px;
   border: none;
   border-radius: 8px;
@@ -4267,7 +4269,7 @@ body.chat-inmersivo .chat-page-thread--completa {
   cursor: pointer;
 }
 
-.portal-th__formacion-crear button:disabled {
+.portal-th__formacion-crear button:disabled:where(:not(.portal-th__mantine *)) {
   opacity: 0.6;
   cursor: default;
 }
@@ -4280,7 +4282,7 @@ body.chat-inmersivo .chat-page-thread--completa {
   color: var(--pth-tinta-2);
 }
 
-.portal-th__formacion-crear textarea {
+.portal-th__formacion-crear textarea:where(:not(.portal-th__mantine *)) {
   flex: 1 1 100%;
   padding: 8px 10px;
   border: 1px solid var(--pth-linea);
@@ -4774,11 +4776,13 @@ body.chat-inmersivo .chat-page-thread--completa {
 }
 
 /* ── FORMACIÓN · FORMULARIO PROPIO (Cristian Baldión, 2026-10-08) ─────────────
-   Se responde DENTRO de la ventana de vista previa de los materiales. Un solo
-   botón "Enviar" al final; si faltan obligatorias, aviso arriba (pegado) y la
-   pregunta en rojo. En celular la ventana ocupa toda la pantalla. */
-.portal-th__visor-caja--formulario,
-.portal-th__visor-caja--respuestas {
+   Se responde DENTRO de la ventana de vista previa de los materiales. El
+   contenido usa los componentes de Mantine del resto de SynerLink (campos,
+   Alert, Table, Button) con el tema de la aplicación: aquí NO hay colores,
+   tipografías ni bordes propios — solo el tamaño de la ventana y la zona que
+   se desplaza (Nicolás, 2026-10-08: mismos lineamientos gráficos que los
+   demás módulos). En celular la ventana ocupa toda la pantalla. */
+.portal-th__visor-caja--formulario {
   width: min(860px, 96vw);
 }
 
@@ -4786,17 +4790,21 @@ body.chat-inmersivo .chat-page-thread--completa {
   width: min(1200px, 96vw);
 }
 
-.portal-th__formulario-cargando {
-  padding: 24px 16px;
+/* Fondo de ventana = el de los modales de Mantine en el resto de SynerLink
+   (token del tema, también en modo oscuro). La barra de título sigue siendo la
+   de las demás ventanas de Formación. */
+.portal-th__visor-caja--formulario,
+.portal-th__visor-caja--respuestas {
+  background-color: var(--mantine-color-body);
+  color: var(--mantine-color-text);
 }
 
+/* Zona que se desplaza; el aviso de resultado queda pegado arriba. */
 .portal-th__formulario {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 0 16px 24px;
-  background-color: var(--pth-azul-50);
   scroll-padding-top: 72px;
 }
 
@@ -4804,371 +4812,18 @@ body.chat-inmersivo .chat-page-thread--completa {
   position: sticky;
   top: 0;
   z-index: 2;
-  margin: 0 -16px !important;
-  border-radius: 0 !important;
-  box-shadow: 0 2px 8px rgba(15, 26, 44, 0.12);
-}
-
-.portal-th__formulario > .portal-th__aviso {
-  margin: 12px 0 0;
-}
-
-.portal-th__formulario-encabezado {
-  margin: 14px 0 12px;
-  padding: 16px;
-  border-top: 6px solid var(--pth-azul);
-  border-radius: 10px;
-  background-color: #fff;
-}
-
-.portal-th__formulario-encabezado h3 {
-  margin: 0 0 6px;
-  font-size: 1.15rem;
-  color: var(--pth-tinta);
-}
-
-.portal-th__formulario-encabezado p {
-  margin: 0 0 6px;
-  font-size: 0.86rem;
-  color: var(--pth-tinta-2);
-}
-
-.portal-th__formulario-obligatorio-nota,
-.portal-th__formulario-asterisco {
-  color: #b3261e;
-}
-
-.portal-th__formulario-autorizacion,
-.portal-th__formulario-pregunta {
-  margin: 0 0 12px;
-  padding: 14px 16px;
-  border: 1px solid var(--pth-linea);
-  border-radius: 10px;
-  background-color: #fff;
-}
-
-.portal-th__formulario-autorizacion h4 {
-  margin: 0 0 8px;
-  font-size: 0.95rem;
-  color: var(--pth-azul-700);
-}
-
-.portal-th__formulario-pendiente {
-  display: inline-block;
-  margin: 0 0 8px;
-  padding: 3px 8px;
-  border-radius: 6px;
-  font-size: 0.74rem;
-  font-weight: 700;
-  color: #7a4b00;
-  background-color: #fff3d6;
-  border: 1px solid #f0d08a;
-}
-
-.portal-th__formulario-autorizacion-texto {
-  max-height: 220px;
-  overflow-y: auto;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background-color: var(--pth-azul-50);
-  font-size: 0.8rem;
-  line-height: 1.45;
-  color: var(--pth-tinta-2);
-}
-
-.portal-th__formulario-autorizacion-texto p {
-  margin: 0 0 8px;
-}
-
-.portal-th__formulario-casilla {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  margin-top: 10px;
-  font-size: 0.86rem;
-  font-weight: 600;
-  color: var(--pth-tinta);
-  cursor: pointer;
-}
-
-.portal-th__formulario-casilla input {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  margin-top: 1px;
-  accent-color: var(--pth-azul);
-}
-
-.portal-th__formulario-preguntas {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.portal-th__formulario-pregunta--error {
-  border-color: #d93025;
-  box-shadow: inset 4px 0 0 #d93025;
-}
-
-.portal-th__formulario-titulo {
-  margin-bottom: 10px;
-  font-size: 0.9rem;
-  font-weight: 600;
-  line-height: 1.35;
-  color: var(--pth-tinta);
-  overflow-wrap: anywhere;
-}
-
-.portal-th__formulario-numero {
-  color: var(--pth-tinta-3);
-}
-
-.portal-th__formulario-ayuda {
-  margin: -4px 0 8px;
-  font-size: 0.8rem;
-  color: var(--pth-tinta-3);
-}
-
-.portal-th__formulario-pregunta input[type='text'],
-.portal-th__formulario-pregunta input[type='date'],
-.portal-th__formulario-pregunta textarea {
-  width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
-  padding: 9px 10px;
-  border: 1px solid var(--pth-linea);
-  border-radius: 8px;
-  /* 16 px: con menos, iOS hace zoom al enfocar. */
-  font-size: 16px;
-  font-family: inherit;
-  color: var(--pth-tinta);
-  background-color: #fff;
-}
-
-.portal-th__formulario-pregunta input[readonly] {
-  background-color: var(--pth-azul-50);
-  color: var(--pth-tinta-2);
-}
-
-.portal-th__formulario-pregunta input:focus,
-.portal-th__formulario-pregunta textarea:focus {
-  outline: 2px solid var(--pth-azul);
-  outline-offset: 1px;
-}
-
-.portal-th__formulario-opciones {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.portal-th__formulario-opcion,
-.portal-th__formulario-opcion--otra > label {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 36px;
-  font-size: 0.88rem;
-  color: var(--pth-tinta);
-  cursor: pointer;
-}
-
-.portal-th__formulario-opcion input[type='radio'],
-.portal-th__formulario-opcion--otra input[type='radio'] {
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-  accent-color: var(--pth-azul);
-}
-
-.portal-th__formulario-opcion--otra {
-  flex-wrap: wrap;
-}
-
-.portal-th__formulario-opcion--otra input[type='text'] {
-  flex: 1;
-  min-width: 160px;
-}
-
-.portal-th__formulario-error {
-  margin: 8px 0 0;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #b3261e;
-}
-
-.portal-th__formulario-pie {
-  display: flex;
-  justify-content: flex-start;
-  padding: 8px 0 0;
-}
-
-.portal-th__formulario-enviar {
-  min-width: 140px;
-  padding: 11px 26px;
-  border: 0;
-  border-radius: 8px;
-  background-color: var(--pth-azul);
-  color: #fff;
-  font-size: 0.95rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.portal-th__formulario-enviar:disabled {
-  opacity: 0.6;
-  cursor: progress;
+  border-radius: 0;
 }
 
 .portal-th__formulario-fin {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 32px 20px;
-  text-align: center;
 }
 
-.portal-th__formulario-fin h3 {
-  margin: 0;
-  font-size: 1.2rem;
-  color: #1a7d3c;
-}
-
-.portal-th__formulario-fin p {
-  max-width: 520px;
-  margin: 0 0 8px;
-  font-size: 0.9rem;
-  color: var(--pth-tinta-2);
-}
-
-.portal-th__formulario-fin-icono {
-  display: grid;
-  place-items: center;
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  font-size: 28px;
-  font-weight: 700;
-  color: #fff;
-  background-color: #1a7d3c;
-}
-
-/* Formador: elegir, importar y editar formularios. */
-.portal-th__formulario-selector {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 100%;
-}
-
-.portal-th__formulario-selector select {
-  max-width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--pth-linea);
-  border-radius: 8px;
-  font-size: 0.86rem;
-}
-
-.portal-th__formulario-selector-acciones {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.portal-th__formulario-json {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.portal-th__formulario-json textarea {
-  width: 100%;
-  box-sizing: border-box;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-}
-
-.portal-th__formulario-json-errores {
-  margin: 0;
-  padding-left: 18px;
-  font-size: 0.8rem;
-  color: #b3261e;
-}
-
-/* Respuestas (administradores/formadores). */
-.portal-th__respuestas-barra {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--pth-linea);
-}
-
-.portal-th__respuestas-conteo {
-  font-size: 0.84rem;
-  font-weight: 700;
-  color: var(--pth-azul-700);
-}
-
-.portal-th__respuestas-barra input[type='search'] {
-  flex: 1;
-  min-width: 160px;
-  padding: 7px 10px;
-  border: 1px solid var(--pth-linea);
-  border-radius: 8px;
-  font-size: 16px;
-}
-
-.portal-th__respuestas-exportar {
-  margin: 0 !important;
-}
-
-.portal-th__respuestas-sensibles {
-  margin: 0;
-  padding: 6px 14px;
-  font-size: 0.76rem;
-  color: #7a4b00;
-  background-color: #fff3d6;
-}
-
-.portal-th__respuestas-tabla-marco {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 0 14px 14px;
-}
-
-.portal-th__respuestas-tabla th,
-.portal-th__respuestas-tabla td {
-  min-width: 140px;
-  max-width: 280px;
-  vertical-align: top;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.portal-th__respuestas-encabezado {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
-  overflow: hidden;
-}
-
-.portal-th__respuestas-tabla thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background-color: #fff;
-  box-shadow: inset 0 -1px 0 var(--pth-linea);
-}
-
-.portal-th__material-respuestas {
-  flex-shrink: 0;
+/* La fila "Agregar material" de Formación pinta sus botones y campos por
+   etiqueta (`.portal-th__formacion-crear button`, `input`, `textarea`); el
+   selector de formulario usa los de Mantine, que no deben heredar eso. */
+.portal-th__formacion-crear .portal-th__mantine {
+  flex: 1 1 100%;
 }
 
 @media (max-width: 759px) {
@@ -5183,39 +4838,6 @@ body.chat-inmersivo .chat-page-thread--completa {
     height: 100dvh;
     border-radius: 0;
   }
-
-  .portal-th__formulario {
-    padding: 0 10px 20px;
-  }
-
-  .portal-th__formulario-aviso {
-    margin: 0 -10px !important;
-  }
-
-  .portal-th__formulario-pie {
-    justify-content: stretch;
-  }
-
-  .portal-th__formulario-enviar {
-    width: 100%;
-  }
-}
-
-/* Botón pequeño de acción ("Ver respuestas", "Reabrir"). */
-.portal-th__boton-chico {
-  padding: 6px 10px;
-  border: 1px solid var(--pth-azul);
-  border-radius: 8px;
-  background-color: #fff;
-  color: var(--pth-azul);
-  font-size: 0.78rem;
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.portal-th__boton-chico:hover {
-  background-color: var(--pth-azul-50);
 }
 
 /* El selector de tipo dentro del formulario de "Agregar material": que se

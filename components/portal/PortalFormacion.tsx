@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Button } from '@mantine/core';
+import { IconTable } from '@tabler/icons-react';
 import { leerJson } from './PortalContenido';
 import {
   SubidaCancelada,
@@ -384,9 +386,9 @@ function VistaCursoEstudiante({
                 </span>
               </div>
               {m.tipo === 'FORM' && puedeMarcar && (
-                <button type='button' className='portal-th__boton-chico portal-th__material-respuestas' onClick={() => setRespuestasDe(m)}>
+                <Button size='xs' variant='default' leftSection={<IconTable size={14} />} onClick={() => setRespuestasDe(m)}>
                   Ver respuestas
-                </button>
+                </Button>
               )}
               {completado && <InsigniaCompletado />}
             </li>
@@ -1470,9 +1472,9 @@ function FilaMaterialFormador({
         </div>
         <div className='portal-th__material-acciones'>
           {m.tipo === 'FORM' && puedeVerRespuestas && (
-            <button type='button' className='portal-th__boton-chico' onClick={() => onVerRespuestas?.(m)}>
+            <Button size='xs' variant='default' leftSection={<IconTable size={14} />} onClick={() => onVerRespuestas?.(m)}>
               Respuestas
-            </button>
+            </Button>
           )}
           <button
             type='button'
