@@ -267,3 +267,33 @@ Cubre (vitest, Prisma mockeado — no requiere DB real):
 - **Sanitización:** `kronos_list_users` nunca devuelve `password`/tokens.
 - **Inyección:** un texto malicioso viaja como **valor parametrizado** (no como SQL crudo) y el filtro de empresa permanece intacto; `companyId` no numérico es rechazado por el esquema.
 - **Config:** validación de keys (longitud, duplicados, `companyIds` lista/`"*"`, rechazo de arreglos vacíos y valores inválidos, presencia).
+
+
+---
+
+## Llaves restringidas de agentes y `kronos_request_ia_access` (2026-10-09)
+
+**Lista blanca por key.** Cada entrada de `MCP_API_KEYS` admite dos campos opcionales:
+
+```json
+{ "key": "<secreto>", "agent": "galileo", "companyIds": [3], "role": "agent",
+  "allowedTools": ["kronos_request_ia_access"], "agentCode": "galileo" }
+```
+
+- `allowedTools`: si existe, el servidor **solo registra** esas herramientas para la key (no aparecen las demás en `tools/list`) y además rechaza con **403** cualquier `tools/call` HTTP fuera de la lista (también en lotes JSON-RPC), con auditoría `denied`. Un nombre desconocido impide arrancar el servidor.
+- `agentCode`: `agent.code` del agente que presenta la key; obligatorio si la lista incluye `kronos_request_ia_access`.
+- Las keys **sin** estos campos (horus, nancy, test-local) siguen exactamente igual.
+- **Orden de despliegue:** primero el código, después las keys nuevas. Un servidor anterior ignora `allowedTools` y daría a la key acceso completo.
+
+**`kronos_request_ia_access`** `{requesterEmail, sistema, para_que, datos, solo_lectura?, companyId?}` radica una "Solicitud de conectores para agentes IA" a nombre de la persona:
+
+1. La persona debe existir, estar activa y tener asignado el agente de la key (subproceso del agente en `subprocess_user_company`, en empresas de `agent_company` y del alcance de la key). **GSS nunca es candidata.**
+2. 0 empresas → rechazo. 1 → esa. Varias → responde `elegir_empresa` con la lista; solo se acepta un `companyId` de esa lista.
+3. Proceso: el activo llamado `Solicitud de conectores para agentes IA` (configurable con `MCP_IA_ACCESS_PROCESS_NAME`) habilitado para la empresa. Se resuelve por nombre porque los ids cambian entre pruebas y producción.
+4. Sin duplicados: si la persona tiene una abierta del mismo sistema, devuelve `duplicada` con su número. Tope: 3 por persona, por día y por agente (marca `[agente:<code>]` en la descripción). Candado `sp_getapplock` por persona.
+5. Crea la solicitud, la vincula al proceso y crea las tareas **igual que la app** (`src/workflow.ts`, réplica de `lib/requests-general/createGeneralRequest.js`: solo activas, condiciones por opción, solo la primera secuencial, autorizaciones sin responsable con NULL) y las notificaciones de campana.
+
+`kronos_create_request` usa ahora la misma lógica de tareas (antes creaba todas las tareas del flujo de una vez).
+
+El script `sql/proceso-conectores-ia.template.sql` crea el proceso por empresa (copia de 249 con otro autorizador), idempotente y con verificación de `DB_NAME()`.
+

@@ -15,7 +15,30 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { loadConfig } from './config.js';
 import { extractBearer, resolveScope, type AuthScope } from './auth.js';
 import { createFileAuditLogger, type AuditLogger } from './audit.js';
-import { registerTools } from './tools/index.js';
+import { registerTools, TOOL_CAPABILITIES } from './tools/index.js';
+
+/** Nombres de todas las herramientas que el servidor sabe registrar. */
+export const KNOWN_TOOLS: ReadonlySet<string> = new Set([
+  ...TOOL_CAPABILITIES.readOnly,
+  ...TOOL_CAPABILITIES.write,
+]);
+
+/**
+ * Nombres de herramientas que una petición JSON-RPC intenta llamar
+ * (tools/call), soportando lotes. Sirve para rechazar en HTTP, antes de llegar
+ * al SDK, cualquier llamada fuera de la lista blanca de la key.
+ */
+export function calledToolNames(body: unknown): string[] {
+  const msgs = Array.isArray(body) ? body : [body];
+  const names: string[] = [];
+  for (const m of msgs) {
+    if (m && typeof m === 'object' && (m as { method?: unknown }).method === 'tools/call') {
+      const name = (m as { params?: { name?: unknown } }).params?.name;
+      names.push(typeof name === 'string' ? name : '');
+    }
+  }
+  return names;
+}
 
 /** Construye una instancia de McpServer ya configurada para un alcance. */
 export function buildMcpServer(
@@ -23,11 +46,13 @@ export function buildMcpServer(
   audit: AuditLogger,
   opts: { maxPageSize: number; defaultPageSize: number }
 ): McpServer {
+  const restricted = Array.isArray(scope.allowedTools);
   const server = new McpServer(
     { name: 'kronos-mcp', version: '1.0.0' },
     {
-      instructions:
-        'Servidor de SynerLink/Kronos. Todas las consultas/escrituras están limitadas a las empresas del alcance de la API key. 11 herramientas de lectura y 2 de escritura acotadas a categorización (kronos_categorize_case, kronos_categorize_request); el resto es solo lectura.',
+      instructions: restricted
+        ? `Servidor de SynerLink/Kronos con acceso RESTRINGIDO para el agente ${scope.agent}. Solo dispone de: ${scope.allowedTools!.join(', ')}.`
+        : 'Servidor de SynerLink/Kronos. Todas las consultas/escrituras están limitadas a las empresas del alcance de la API key. 11 herramientas de lectura y 2 de escritura acotadas a categorización (kronos_categorize_case, kronos_categorize_request); el resto es solo lectura.',
     }
   );
   registerTools(server, { scope, audit, ...opts });
@@ -38,6 +63,16 @@ export function createApp(
   config = loadConfig(),
   audit: AuditLogger = createFileAuditLogger(config.auditLogFile)
 ) {
+  // Una lista blanca con nombres desconocidos es un error de configuración:
+  // mejor no arrancar que dejar una key con herramientas que no existen.
+  for (const k of config.apiKeys) {
+    for (const t of k.allowedTools ?? []) {
+      if (!KNOWN_TOOLS.has(t)) {
+        throw new Error(`La key del agente "${k.agent}" lista una herramienta desconocida en allowedTools: ${t}`);
+      }
+    }
+  }
+
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
@@ -67,6 +102,32 @@ export function createApp(
         .status(401)
         .json({ jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized' }, id: null });
       return;
+    }
+
+    // Lista blanca: además de no registrar las demás herramientas, se rechaza
+    // en HTTP cualquier tools/call fuera de la lista (defensa en profundidad).
+    if (scope.allowedTools) {
+      const allowed = new Set(scope.allowedTools);
+      const denied = calledToolNames(req.body).filter((n) => !allowed.has(n));
+      if (denied.length > 0) {
+        void audit.log({
+          ts: new Date().toISOString(),
+          agent: scope.agent,
+          role: scope.role,
+          companyIds: scope.companyIds,
+          tool: denied.join(','),
+          params: {},
+          outcome: 'denied',
+          error: 'tool fuera de la lista blanca de la key',
+        });
+        const id = !Array.isArray(req.body) && req.body && typeof req.body === 'object' ? (req.body as { id?: unknown }).id ?? null : null;
+        res.status(403).json({
+          jsonrpc: '2.0',
+          error: { code: -32601, message: 'Herramienta no permitida para esta key' },
+          id,
+        });
+        return;
+      }
     }
 
     const server = buildMcpServer(scope, audit, {
