@@ -54,6 +54,9 @@ test.describe.serial('Recorrido manual SGC 2026-10-09', () => {
     await page.getByRole('tab', { name: 'Encabezado y divulgación' }).click();
     await expect(page.getByTestId('sgc-config-encabezado-obligatorio')).toContainText('Encabezado obligatorio');
     await shot(page, testInfo, '03-config-encabezado-obligatorio.png');
+    // El encabezado se ve en «Firmas en el documento», que aparece cuando hay borrador.
+    const draft = await page.request.post(`/api/sgc/requests/${idRequest}/draft`, { data: { html: '<p><strong>Nombre del documento:</strong> {{NOMBRE_DOCUMENTO}}</p><h2>1. OBJETIVO</h2><p>Recorrido manual (e2e).</p>', origin: 'plantilla', originRef: 'Plantilla institucional de procedimiento' } });
+    expect([200, 201]).toContain(draft.status());
     await page.goto(`/process/sgc-documental/solicitudes/${idRequest}?empresa=${OLP}`);
     const header = page.getByTestId('sgc-encabezado-institucional');
     await expect(header).toBeVisible({ timeout: 45_000 });
