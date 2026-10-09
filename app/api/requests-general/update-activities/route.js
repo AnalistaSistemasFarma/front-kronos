@@ -267,19 +267,20 @@ export async function POST(req) {
         }
       }
 
-      // Creación diferida (lazy) de la siguiente tarea secuencial: cuando esta tarea se cierra
-      // (Resuelto=2 o Cancelado=3), si la siguiente tarea del orden es secuencial y aún no existe
-      // en la solicitud, se instancia ahora y se notifica a su(s) responsable(s).
+      // Creación diferida (lazy) de la siguiente tarea secuencial: SOLO cuando esta tarea se
+      // RESUELVE/APRUEBA (Resuelto=2). Un rechazo/cancelación (id_status=3) NO avanza el flujo:
+      // la solicitud se detiene y no debe llegar a la siguiente tarea (p. ej. "Programación de
+      // Pago"). Antes se usaba CLOSED_STATUSES=[2,3], lo que hacía que una solicitud rechazada
+      // igual creara la siguiente tarea.
       const CLOSED_STATUSES = [2, 3];
-      const justClosed =
-        CLOSED_STATUSES.includes(Number(nextStatus)) &&
-        !CLOSED_STATUSES.includes(Number(prevStatus));
+      const justResolved =
+        Number(nextStatus) === 2 && !CLOSED_STATUSES.includes(Number(prevStatus));
 
-      console.log(`${TAG} 5) ¿Se acaba de cerrar la tarea? justClosed =`, justClosed, `(prevStatus=${prevStatus} -> nextStatus=${nextStatus})`);
+      console.log(`${TAG} 5) ¿Se acaba de RESOLVER la tarea (2)? justResolved =`, justResolved, `(prevStatus=${prevStatus} -> nextStatus=${nextStatus})`);
 
       // Creación diferida de la siguiente tarea secuencial.
       // Auths Orion por firmante no avanzan el workflow Fase B.
-      if (justClosed && !isFirmaAuthorization) {
+      if (justResolved && !isFirmaAuthorization) {
         await advanceSequentialTask(pool, {
           id_request_general: prevRow.id_request_general,
           id_task: prevRow.id_task,
@@ -287,8 +288,10 @@ export async function POST(req) {
           display_order: prevRow.display_order,
           subject_request: prevRow.subject_request,
         });
-      } else if (justClosed && isFirmaAuthorization) {
+      } else if (justResolved && isFirmaAuthorization) {
         console.log(`${TAG} 5b) Auth FIRMA/Orion: no se avanza workflow secuencial.`);
+      } else if (Number(nextStatus) === 3) {
+        console.log(`${TAG} 5c) Tarea rechazada/cancelada (3): el flujo se detiene, no se crea la siguiente tarea.`);
       }
 
       console.log(`${TAG} ✅ Respondiendo 200 (tarea ${id} actualizada).`);

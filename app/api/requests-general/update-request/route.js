@@ -21,6 +21,43 @@ export async function POST(req) {
       );
     }
 
+    // Al cerrar la solicitud (Resuelto=2 / Cancelado=3) todas sus tareas deben estar
+    // cerradas también. Si alguna sigue abierta, se bloquea el cierre y se informa
+    // cuáles faltan y su responsable.
+    if (isRequestClosedStatus(status)) {
+      const pendingTasks = await withMssqlPool(async (pool) => {
+        const result = await pool
+          .request()
+          .input('id', sql.Int, id)
+          .query(`
+            SELECT tpc.task AS task_name, u.name AS assigned_name, sc.status AS status_name
+            FROM task_request_general trg
+            INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
+            LEFT JOIN [user] u ON u.id = trg.id_assigned
+            INNER JOIN status_case sc ON sc.id_status_case = trg.id_status
+            WHERE trg.id_request_general = @id AND trg.id_status NOT IN (2, 3)
+            ORDER BY tpc.display_order, trg.id
+          `);
+        return result.recordset;
+      });
+
+      if (pendingTasks.length > 0) {
+        const lines = pendingTasks.map(
+          (t) =>
+            `• «${t.task_name}» — Responsable: ${t.assigned_name || 'Sin asignar'} (${t.status_name})`
+        );
+        return new Response(
+          JSON.stringify({
+            error:
+              'No se puede cerrar la solicitud porque hay tareas sin resolver o cancelar:\n' +
+              lines.join('\n'),
+            pendingTasks,
+          }),
+          { status: 409 }
+        );
+      }
+    }
+
     const { prevRow } = await withMssqlPool(async (pool) => {
       const transaction = new sql.Transaction(pool);
       await transaction.begin();
