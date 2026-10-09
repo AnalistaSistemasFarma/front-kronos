@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { calificar, definicionPublica, validarDefinicion } from '../formulario';
 
 // La evaluación de INDUCCIÓN ORGANIZACIONAL - SST que pidió Cristian (2026-10-09),
-// tal como se siembra en PRUEBAS: BORRADOR hasta que él confirme las correctas.
+// tal como se siembra en PRUEBAS: PUBLICADA, con las 10 correctas validadas por él.
 
 const RAIZ = path.join(__dirname, '..', '..', '..');
 const JSON_DEF = readFileSync(path.join(RAIZ, 'lib/portal/formularios/eva-induccion-sst-2025.json'), 'utf8');
@@ -13,11 +13,12 @@ const SQL = readFileSync(path.join(RAIZ, 'prisma/manual/2026-10-09-portal-prueba
 describe('evaluación de Inducción Organizacional y SST', () => {
   const r = validarDefinicion(JSON.parse(JSON_DEF));
 
-  it('es una definición válida: borrador, 10 preguntas de 10 puntos, nota mínima 80', () => {
+  it('es una definición válida y publicada: 10 preguntas de 10 puntos, nota mínima 80', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const d = r.definicion;
-    expect(d).toMatchObject({ tipo: 'evaluacion', notaMinima: 80, borrador: true });
+    expect(d).toMatchObject({ tipo: 'evaluacion', notaMinima: 80 });
+    expect(d.borrador).toBeUndefined();
     const calificadas = d.preguntas.filter((p) => p.puntos !== undefined);
     expect(calificadas).toHaveLength(10);
     expect(calificadas.every((p) => p.puntos === 10)).toBe(true);
@@ -33,15 +34,16 @@ describe('evaluación de Inducción Organizacional y SST', () => {
     for (const id of ['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10']) expect(por[id]).toBeDefined();
   });
 
-  it('al publicarla (quitar el borrador) sería válida y calificaría', () => {
+  it('califica: todas correctas = 100 % aprobada; 7 de 10 = 70 % no aprueba', () => {
     if (!r.ok) throw new Error('inválida');
     const completa = JSON.parse(JSON_DEF);
-    delete completa.borrador;
     const v = validarDefinicion(completa);
     expect(v.ok).toBe(true);
     if (!v.ok) return;
     const buenas = Object.fromEntries(v.definicion.preguntas.filter((p) => p.correcta !== undefined).map((p) => [p.id, p.opciones![p.correcta!]]));
     expect(calificar(v.definicion, buenas)).toMatchObject({ porcentaje: 100, aprobado: true });
+    const siete = Object.fromEntries(Object.entries(buenas).map(([id, v], i) => [id, i < 3 ? 'mal' : v]));
+    expect(calificar(v.definicion, siete)).toMatchObject({ porcentaje: 70, aprobado: false });
     expect(JSON.stringify(definicionPublica(v.definicion))).not.toMatch(/"correcta":/);
   });
 

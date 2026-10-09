@@ -17,7 +17,6 @@
   },
   "tipo": "evaluacion",
   "notaMinima": 80,
-  "borrador": true,
   "preguntas": [
     {
       "id": "dato_nombre",
