@@ -360,6 +360,27 @@ jobs:
           x "$R"; x "$R"; x /tmp/verifica-reversa-intento.sql
           x "$M"; x /tmp/verifica-intento.sql
 
+      - name: Portal TH — eventos del calendario (migración y reversa)
+        # 20261009180000_portal_eventos: aditiva e idempotente (corre dos veces), su reversa es idempotente y la
+        # migración vuelve a crear la tabla. No toca ninguna tabla existente.
+        env:
+          DATABASE_URL: ${{ env.SGC_IT_DATABASE_URL }}
+        run: |
+          set -e
+          M=prisma/migrations/20261009180000_portal_eventos/migration.sql
+          R=prisma/manual/2026-10-09-portal-eventos-reversa.sql
+          cat > /tmp/verifica-evento.sql <<'SQL'
+          IF OBJECT_ID(N'dbo.portal_evento', N'U') IS NULL THROW 50020, N'Falta portal_evento.', 1;
+          IF COL_LENGTH(N'dbo.portal_evento', N'eliminado_at') IS NULL THROW 50021, N'Falta portal_evento.eliminado_at.', 1;
+          SQL
+          cat > /tmp/verifica-reversa-evento.sql <<'SQL'
+          IF OBJECT_ID(N'dbo.portal_evento', N'U') IS NOT NULL THROW 50022, N'La reversa de eventos no quitó portal_evento.', 1;
+          SQL
+          x() { npx prisma db execute --schema prisma/schema.prisma --file "$1"; }
+          x "$M"; x "$M"; x /tmp/verifica-evento.sql
+          x "$R"; x "$R"; x /tmp/verifica-reversa-evento.sql
+          x "$M"; x /tmp/verifica-evento.sql
+
       - name: Evidencia SGC (manifiesto + matriz de trazabilidad)
         if: always()
         env:
