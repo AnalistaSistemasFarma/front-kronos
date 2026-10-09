@@ -3670,6 +3670,9 @@ body.chat-inmersivo .chat-page-thread--completa {
 .portal-th--modulo {
   min-height: 0;
   background-color: transparent;
+  /* Dentro del hub manda la tipografía de SynerLink (--font-sans del layout),
+     no la pila system-ui de la página abierta (lineamiento 2026-10-09). */
+  font-family: inherit;
 }
 
 .portal-th__encabezado-modulo {
