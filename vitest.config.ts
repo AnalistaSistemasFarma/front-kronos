@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url';
 // Solo cubrimos utilidades PURAS de `lib/` (sin dependencias de BD/red).
 // El servidor MCP tiene su propia suite en `mcp/` (no se incluye aquí).
 export default defineConfig({
+  // El tsconfig de Next usa jsx «preserve»; las pruebas del avatar importan
+  // componentes .tsx (cabezas.test.ts), así que Vitest debe transformar el JSX.
+  oxc: { jsx: { runtime: 'automatic' } },
   resolve: {
     alias: {
       // Replica el path alias "@/*" del tsconfig para que los imports funcionen.
