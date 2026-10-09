@@ -8,11 +8,11 @@
  * 2026-09-15 tienen la herramienta `usuarios_licencia_activa` (agregada a
  * pedido de Cristian Baldión para este mismo botón).
  *
- * Empresas sin conector propio (Abamia, Meditrack, Kelab: hoy solo tienen
- * credenciales sueltas en el `.env` de su SAPSEND, sin conector HTTP propio;
- * Bioselect y Farmadosis: sin ninguna app de Azure registrada) se devuelven
- * con estado `sin_acceso` en vez de omitirse, para que quede visible qué
- * falta configurar.
+ * Abamia, Meditrack, Kelab, Bioselect y Farmadosis usan el conector
+ * `conector-directorio-th` (una instancia por tenant, app de Entra con solo
+ * `User.Read.All`), apuntado con `PORTAL_TH_CONECTOR_<EMPRESA>`. Una empresa sin
+ * URL configurada, o cuyo conector falle, se devuelve con estado `sin_acceso`
+ * en vez de omitirse, para que quede visible qué falta configurar.
  */
 
 export interface UsuarioLicencia {
@@ -42,8 +42,8 @@ const EMPRESAS: ConectorEmpresa[] = [
   { empresa: 'ABAMIA', dominio: 'abamialabs.com', url: process.env.PORTAL_TH_CONECTOR_ABAMIA ?? null },
   { empresa: 'MEDITRACK', dominio: 'meditrack.com.co', url: process.env.PORTAL_TH_CONECTOR_MEDITRACK ?? null },
   { empresa: 'KELAB', dominio: 'kelabanalitica.com', url: process.env.PORTAL_TH_CONECTOR_KELAB ?? null },
-  { empresa: 'BIOSELECT', dominio: 'bioselect.com.co', url: null },
-  { empresa: 'FARMADOSIS', dominio: 'farmadosis.com.co', url: null },
+  { empresa: 'BIOSELECT', dominio: 'bioselect.com.co', url: process.env.PORTAL_TH_CONECTOR_BIOSELECT ?? null },
+  { empresa: 'FARMADOSIS', dominio: 'farmadosis.com.co', url: process.env.PORTAL_TH_CONECTOR_FARMADOSIS ?? null },
 ];
 
 let contadorLlamadas = 0;
