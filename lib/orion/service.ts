@@ -2534,7 +2534,10 @@ export async function finalizeSignerTurn(
     if (needsFingerprint && !biometricOk) {
       throw Object.assign(new Error(BIOMETRIC_CONSENT_REQUIRED_MESSAGE), { status: 422 });
     }
-    // Cliente omite signatureDataUrl si Orion ya tiene rúbrica (hasSignature).
+    const signerCtx = await getRequestOrionContext(pool, params.requestId);
+    // Mapa estático ORION_TENANT_MAP; el PR de sincronización lo cambia por el registro vivo.
+    const companySlug = signerCtx ? resolveOrionTenantId(signerCtx.id_company) : null;
+    // La rúbrica dibujada en el turno reemplaza la guardada en Orion; sin ella se usa la guardada.
     const biometricAcceptedAt = new Date().toISOString();
     const acceptPayload = {
       signatureDataUrl: params.signatureDataUrl,
@@ -2556,12 +2559,12 @@ export async function finalizeSignerTurn(
             fullName: identity.fullName,
             idDocumentType: identity.idDocumentType,
             idNumber: identity.idNumber,
-            companySlug: identity.companySlug,
             companyName: identity.companyName,
             companyNit: identity.companyNit,
             jobTitle: identity.jobTitle,
           }
         : {}),
+      companySlug,
     };
 
     let accept = await acceptOrionSignerTurn(
