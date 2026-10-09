@@ -1,6 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Group, Select, TextInput } from '@mantine/core';
+import { IconBuilding, IconSearch } from '@tabler/icons-react';
+import {
+  TODAS_LAS_EMPRESAS,
+  contarCorreos,
+  filtrarGruposCorreo,
+  opcionesEmpresa,
+  type GrupoCorreo,
+} from '../../lib/portal/correos-datos';
 import { filtrarExtensiones, type Extension } from '../../lib/portal/extensiones-datos';
 import { urlFormacion as urlPaginaFormacion, type OrigenPortal } from '../../lib/portal/formacion-navegacion';
 import PoliticasVisor from './PoliticasVisor';
@@ -46,14 +55,6 @@ interface Banner {
   titulo: string;
   /** Los anuncios se sirven desde la base, no desde SharePoint. */
   url: string;
-}
-/** Un correo con licencia activa de M365, agrupado por empresa. */
-interface GrupoCorreo {
-  empresa: string;
-  dominio: string;
-  /** 'sin_acceso' = todavía no hay conector configurado para ese tenant. */
-  estado: 'ok' | 'sin_acceso';
-  usuarios: { nombre: string; correo: string }[];
 }
 
 /**
@@ -369,6 +370,8 @@ export default function PortalContenido({
     setContactosAbierto(false);
     setContactoSeleccionado(null);
     setBusquedaExtension('');
+    setEmpresaCorreo(TODAS_LAS_EMPRESAS);
+    setBusquedaCorreo('');
   };
 
   // ── "Correos Corporativos" y "Extensiones Corporativas" dentro de Contactos
@@ -397,6 +400,14 @@ export default function PortalContenido({
     'No se pudo cargar las extensiones.'
   );
   const [busquedaExtension, setBusquedaExtension] = useState('');
+  // Filtro de Correos por empresa + buscador (Cristian, 2026-10-08). Mismos
+  // controles Mantine que la barra de filtros de Artículos.
+  const [empresaCorreo, setEmpresaCorreo] = useState(TODAS_LAS_EMPRESAS);
+  const [busquedaCorreo, setBusquedaCorreo] = useState('');
+  const correosFiltrados = useMemo(
+    () => (correosGrupos ? filtrarGruposCorreo(correosGrupos, empresaCorreo, busquedaCorreo) : []),
+    [correosGrupos, empresaCorreo, busquedaCorreo]
+  );
   const extensionesFiltradas = useMemo(
     () => (extensiones ? filtrarExtensiones(extensiones, busquedaExtension) : []),
     [extensiones, busquedaExtension]
@@ -760,8 +771,35 @@ export default function PortalContenido({
                       </button>
                     </div>
                   )}
+                  {correosGrupos && correosGrupos.length > 0 && (
+                    <Group gap='sm' wrap='wrap'>
+                      <TextInput
+                        placeholder='Buscar por nombre o correo'
+                        aria-label='Buscar correo por nombre o dirección'
+                        leftSection={<IconSearch size={16} />}
+                        value={busquedaCorreo}
+                        onChange={(e) => setBusquedaCorreo(e.currentTarget.value)}
+                        style={{ flex: '1 1 240px' }}
+                      />
+                      <Select
+                        aria-label='Filtrar por empresa'
+                        data={opcionesEmpresa(correosGrupos)}
+                        value={empresaCorreo}
+                        onChange={(v) => setEmpresaCorreo(v ?? TODAS_LAS_EMPRESAS)}
+                        allowDeselect={false}
+                        leftSection={<IconBuilding size={16} />}
+                        comboboxProps={{ withinPortal: true, zIndex: 1100 }}
+                        style={{ flex: '0 1 220px', minWidth: 180 }}
+                      />
+                    </Group>
+                  )}
+                  {correosGrupos && busquedaCorreo.trim() && correosFiltrados.length === 0 && (
+                    <p className='portal-th__estado'>
+                      Ningún correo coincide con «{busquedaCorreo.trim()}».
+                    </p>
+                  )}
                   {correosGrupos &&
-                    correosGrupos.map((grupo) => (
+                    correosFiltrados.map((grupo) => (
                       <section key={grupo.dominio} className='portal-th__correos-grupo'>
                         <h4 className='portal-th__correos-empresa'>
                           {grupo.empresa}
