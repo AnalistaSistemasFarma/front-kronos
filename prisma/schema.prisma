@@ -920,7 +920,7 @@ model PortalCourseMaterial {
   id        Int          @id @default(autoincrement())
   course_id Int
   course    PortalCourse @relation(fields: [course_id], references: [id], onDelete: Cascade)
-  /// 'DOCUMENT' | 'LINK'. Texto y no enum: el provider sqlserver no los
+  /// 'DOCUMENT' | 'LINK' | 'FORM'. Texto y no enum: el provider sqlserver no los
   /// soporta (mismo criterio que el resto de este esquema).
   type      String       @db.NVarChar(20)
   title     String       @db.NVarChar(255)
@@ -948,8 +948,14 @@ model PortalCourseMaterial {
   required  Boolean      @default(true)
   created_at DateTime    @default(now())
 
-  progress PortalMaterialProgress[]
-  vistas   PortalMaterialVista[]
+  /// Solo si type = 'FORM' (formulario propio del portal, Cristian
+  /// 2026-10-08). Se responde con la versión VIGENTE del formulario.
+  formulario_id Int?
+  formulario    PortalFormulario? @relation(fields: [formulario_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  progress   PortalMaterialProgress[]
+  vistas     PortalMaterialVista[]
+  respuestas PortalFormularioRespuesta[]
 
   @@index([course_id, orden])
   @@map("portal_course_material")
@@ -1014,6 +1020,78 @@ model PortalMaterialVista {
 
   @@index([material_id, student_email])
   @@map("portal_material_vista")
+  @@schema("dbo")
+}
+
+/// ═══════════ FORMACIÓN — FORMULARIO PROPIO (Cristian Baldión, 2026-10-08) ═══════════
+/// "créame el formulario en el curso, así como el enlace que te pasé, pero
+/// que sea un formulario propio del curso": un material `FORM` que se
+/// responde DENTRO del portal. La definición (preguntas, tipo, obligatoria,
+/// opciones, orden) es un JSON VERSIONADO — ver `lib/portal/formulario.ts`.
+/// Editar el formulario crea una versión nueva; cada respuesta guarda la
+/// versión con la que se respondió.
+
+/// Un formulario (p. ej. SST-01-FR-001 PERFIL SOCIODEMOGRÁFICO SST).
+model PortalFormulario {
+  id             Int      @id @default(autoincrement())
+  /// Código del formato. Único: es como se identifica al importar.
+  codigo         String   @unique @db.NVarChar(60)
+  titulo         String   @db.NVarChar(255)
+  /// Número de la versión vigente (la que se responde).
+  version_actual Int      @default(1)
+  created_by     String   @db.NVarChar(255)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @default(now()) @updatedAt
+
+  versiones  PortalFormularioVersion[]
+  materiales PortalCourseMaterial[]
+
+  @@map("portal_formulario")
+  @@schema("dbo")
+}
+
+/// Una versión de la definición. Nunca se modifica: editar = versión nueva.
+model PortalFormularioVersion {
+  id            Int              @id @default(autoincrement())
+  formulario_id Int
+  formulario    PortalFormulario @relation(fields: [formulario_id], references: [id], onDelete: Cascade)
+  version       Int
+  /// JSON de la definición (`DefinicionFormulario`).
+  definicion    String           @db.NVarChar(Max)
+  created_by    String           @db.NVarChar(255)
+  created_at    DateTime         @default(now())
+
+  respuestas PortalFormularioRespuesta[]
+
+  @@unique([formulario_id, version])
+  @@map("portal_formulario_version")
+  @@schema("dbo")
+}
+
+/// Respuesta de UNA persona a UN material formulario. DATOS PERSONALES
+/// SENSIBLES (Ley 1581 de 2012): solo las consultan las hojas ADMINISTRADORES
+/// y FORMADORES del Excel de permisos, y nunca se escriben en los logs.
+/// Se envía UNA vez (índice único); no se edita. Para corregir, un
+/// administrador/formador la reabre (la borra) y la persona responde de nuevo.
+model PortalFormularioRespuesta {
+  id                    Int                     @id @default(autoincrement())
+  material_id           Int
+  material              PortalCourseMaterial    @relation(fields: [material_id], references: [id], onDelete: Cascade)
+  formulario_version_id Int
+  version               PortalFormularioVersion @relation(fields: [formulario_version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// Correo de la SESIÓN (no el que se escriba en el formulario).
+  student_email         String                  @db.NVarChar(255)
+  /// JSON `{ [idPregunta]: "texto" | { otra: "texto" } }`.
+  respuestas            String                  @db.NVarChar(Max)
+  /// Prueba de la autorización de tratamiento de datos: qué versión del
+  /// texto aceptó y cuándo.
+  autorizacion_version  String?                 @db.NVarChar(60)
+  autorizado_at         DateTime?
+  enviada_at            DateTime                @default(now())
+
+  @@unique([material_id, student_email])
+  @@index([formulario_version_id])
+  @@map("portal_formulario_respuesta")
   @@schema("dbo")
 }
 

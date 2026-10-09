@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Button } from '@mantine/core';
+import { IconTable } from '@tabler/icons-react';
 import { leerJson } from './PortalContenido';
 import {
   SubidaCancelada,
@@ -16,6 +18,7 @@ import {
   segundosQueSuman,
   videoCompleto,
 } from '../../lib/portal/visor-revision';
+import { PanelRespuestas, PreviaDeMaterialFormulario, SelectorFormulario, VisorFormulario } from './FormularioPropio';
 
 /**
  * FORMACIÓN — sección "tipo Moodle" al final del portal de Talento Humano.
@@ -43,7 +46,9 @@ interface CursoResumen {
 
 interface Material {
   id: number;
-  tipo: 'DOCUMENT' | 'LINK';
+  /** FORM = formulario propio del portal (Cristian, 2026-10-08). */
+  tipo: 'DOCUMENT' | 'LINK' | 'FORM';
+  formularioId?: number | null;
   titulo: string;
   orden: number;
   url: string | null;
@@ -291,11 +296,13 @@ function VistaCursoEstudiante({
     }
   };
 
-  const alCompletar = async (titulo: string) => {
-    setAviso({ tipo: 'ok', texto: `"${titulo}" quedó completado.` });
+  const alCompletar = async (titulo: string, texto?: string) => {
+    setAviso({ tipo: 'ok', texto: texto ?? `"${titulo}" quedó completado.` });
     await cargar();
     await onCambio();
   };
+  // Respuestas de un formulario (solo administradores/formadores del Excel).
+  const [respuestasDe, setRespuestasDe] = useState<Material | null>(null);
 
   /** Un ENLACE cuenta como revisado al abrirlo (lo registra el servidor). */
   const abrirEnlace = (m: Material) => {
@@ -359,6 +366,15 @@ function VistaCursoEstudiante({
                   <a href={m.url ?? '#'} target='_blank' rel='noopener noreferrer' onClick={() => abrirEnlace(m)}>
                     {m.titulo}
                   </a>
+                ) : m.tipo === 'FORM' ? (
+                  <button
+                    type='button'
+                    className='portal-th__material-abrir'
+                    onClick={() => setAbierto(m)}
+                    data-testid={`abrir-formulario-${m.id}`}
+                  >
+                    {m.titulo}
+                  </button>
                 ) : (
                   <button type='button' className='portal-th__material-abrir' onClick={() => setAbierto(m)}>
                     {m.titulo}
@@ -369,6 +385,11 @@ function VistaCursoEstudiante({
                   {!m.obligatorio && ' · opcional'}
                 </span>
               </div>
+              {m.tipo === 'FORM' && puedeMarcar && (
+                <Button size='xs' variant='default' leftSection={<IconTable size={14} />} onClick={() => setRespuestasDe(m)}>
+                  Ver respuestas
+                </Button>
+              )}
               {completado && <InsigniaCompletado />}
             </li>
           );
@@ -377,7 +398,7 @@ function VistaCursoEstudiante({
       {!puedeMarcar && detalle.materiales.length > 0 && (
         <p className='portal-th__estado'>
           Las casillas se marcan automáticamente cuando revisa cada material: los videos hasta el final, los PDF hasta la
-          última página y los demás documentos y enlaces al abrirlos.
+          última página, los formularios al enviarlos y los demás documentos y enlaces al abrirlos.
         </p>
       )}
 
@@ -398,12 +419,31 @@ function VistaCursoEstudiante({
         )
       )}
 
-      {abierto && (
+      {abierto && abierto.tipo === 'FORM' && (
+        <VisorFormulario
+          materialId={abierto.id}
+          titulo={abierto.titulo}
+          onCerrar={() => setAbierto(null)}
+          onEnviado={() => alCompletar(abierto.titulo, `Respuestas enviadas: "${abierto.titulo}" quedó completado.`)}
+        />
+      )}
+      {abierto && abierto.tipo !== 'FORM' && (
         <VisorMaterial
           cursoId={detalle.curso.id}
           material={abierto}
           onCerrar={() => setAbierto(null)}
           onCompletado={() => alCompletar(abierto.titulo)}
+        />
+      )}
+      {respuestasDe && (
+        <PanelRespuestas
+          materialId={respuestasDe.id}
+          titulo={respuestasDe.titulo}
+          onCerrar={() => setRespuestasDe(null)}
+          onCambio={async () => {
+            await cargar();
+            await onCambio();
+          }}
         />
       )}
     </div>
@@ -412,6 +452,7 @@ function VistaCursoEstudiante({
 
 function etiquetaTipo(m: Material): string {
   if (m.tipo === 'LINK') return 'Enlace';
+  if (m.tipo === 'FORM') return 'Formulario';
   const mime = (m.mime ?? '').toLowerCase();
   if (mime.startsWith('video/')) return 'Video';
   return 'Documento';
@@ -977,7 +1018,10 @@ function VistaCursoFormador({
   const mensajeDeSubida = (e: unknown, porDefecto: string) =>
     e instanceof SubidaCancelada ? 'Subida cancelada. No se agregó nada al curso.' : (e as Error)?.message || porDefecto;
 
-  const [tipoNuevo, setTipoNuevo] = useState<'DOCUMENT' | 'LINK'>('DOCUMENT');
+  const [tipoNuevo, setTipoNuevo] = useState<'DOCUMENT' | 'LINK' | 'FORM'>('DOCUMENT');
+  const [formularioNuevo, setFormularioNuevo] = useState<{ id: number | null; titulo: string }>({ id: null, titulo: '' });
+  const [respuestasDe, setRespuestasDe] = useState<Material | null>(null);
+  const [previaDe, setPreviaDe] = useState<Material | null>(null);
   const [tituloNuevo, setTituloNuevo] = useState('');
   const [urlNueva, setUrlNueva] = useState('');
   const [archivoNuevo, setArchivoNuevo] = useState<File | null>(null);
@@ -985,7 +1029,8 @@ function VistaCursoFormador({
   const [subiendo, setSubiendo] = useState(false);
 
   const agregarMaterial = async () => {
-    if (!tituloNuevo.trim()) return;
+    if (!tituloNuevo.trim() && tipoNuevo !== 'FORM') return;
+    if (tipoNuevo === 'FORM' && !formularioNuevo.id) return;
     if (tipoNuevo === 'LINK' && !urlNueva.trim()) return;
     if (tipoNuevo === 'DOCUMENT' && !archivoNuevo) return;
 
@@ -998,6 +1043,7 @@ function VistaCursoFormador({
         required: String(obligatorioNuevo),
       };
       if (tipoNuevo === 'LINK') cuerpo.url = urlNueva;
+      else if (tipoNuevo === 'FORM') cuerpo.formularioId = formularioNuevo.id;
       else if (archivoNuevo) Object.assign(cuerpo, await subirDirecto(archivoNuevo));
 
       const res = await fetch(`/api/portal/courses/${cursoId}/materials`, {
@@ -1218,6 +1264,9 @@ function VistaCursoFormador({
             onMover={moverMaterial}
             onQuitar={quitarMaterial}
             onRecargar={cargar}
+            puedeVerRespuestas={detalle.puedeMarcarManual === true}
+            onVerRespuestas={setRespuestasDe}
+            onVerPrevia={setPreviaDe}
           />
         ))}
         {detalle.materiales.length === 0 && <p className='portal-th__estado'>Todavía no hay materiales.</p>}
@@ -1239,9 +1288,22 @@ function VistaCursoFormador({
           >
             Enlace
           </button>
+          <button
+            type='button'
+            className={tipoNuevo === 'FORM' ? 'portal-th__formacion-toggle-activo' : ''}
+            onClick={() => setTipoNuevo('FORM')}
+          >
+            Formulario
+          </button>
         </div>
-        <input placeholder='Título del material' value={tituloNuevo} onChange={(e) => setTituloNuevo(e.target.value)} />
-        {tipoNuevo === 'LINK' ? (
+        <input
+          placeholder={tipoNuevo === 'FORM' ? 'Título (opcional)' : 'Título del material'}
+          value={tituloNuevo}
+          onChange={(e) => setTituloNuevo(e.target.value)}
+        />
+        {tipoNuevo === 'FORM' ? (
+          <SelectorFormulario valor={formularioNuevo.id} onCambio={(id, titulo) => setFormularioNuevo({ id, titulo })} />
+        ) : tipoNuevo === 'LINK' ? (
           <input
             placeholder='https://…'
             value={urlNueva}
@@ -1258,6 +1320,13 @@ function VistaCursoFormador({
           {subiendo ? (subida ? 'Subiendo…' : 'Agregando…') : '+ Agregar material'}
         </button>
       </div>
+
+      {respuestasDe && (
+        <PanelRespuestas materialId={respuestasDe.id} titulo={respuestasDe.titulo} onCerrar={() => setRespuestasDe(null)} onCambio={cargar} />
+      )}
+      {previaDe?.formularioId && (
+        <PreviaDeMaterialFormulario formularioId={previaDe.formularioId} titulo={previaDe.titulo} onCerrar={() => setPreviaDe(null)} />
+      )}
 
       <h4>Progreso de los estudiantes</h4>
       {roster.length === 0 ? (
@@ -1315,9 +1384,15 @@ function FilaMaterialFormador({
   onMover,
   onQuitar,
   onRecargar,
+  puedeVerRespuestas = false,
+  onVerRespuestas,
+  onVerPrevia,
 }: {
   cursoId: number;
   material: Material;
+  puedeVerRespuestas?: boolean;
+  onVerRespuestas?: (m: Material) => void;
+  onVerPrevia?: (m: Material) => void;
   esPrimero: boolean;
   esUltimo: boolean;
   onGuardar: (materialId: number, cambios: Record<string, unknown>) => Promise<boolean>;
@@ -1328,7 +1403,7 @@ function FilaMaterialFormador({
 }) {
   const [editando, setEditando] = useState(false);
   const [titulo, setTitulo] = useState(m.titulo);
-  const [tipo, setTipo] = useState<'DOCUMENT' | 'LINK'>(m.tipo);
+  const [tipo, setTipo] = useState<'DOCUMENT' | 'LINK' | 'FORM'>(m.tipo);
   const [url, setUrl] = useState(m.url ?? '');
   const [archivo, setArchivo] = useState<File | null>(null);
   const [obligatorio, setObligatorio] = useState(m.obligatorio);
@@ -1357,7 +1432,7 @@ function FilaMaterialFormador({
       }
       // 2) Los demás campos.
       const cambios: Record<string, unknown> = { titulo, obligatorio };
-      if (tipo === 'LINK') {
+      if (tipo === 'LINK' && m.tipo !== 'FORM') {
         cambios.tipo = 'LINK';
         cambios.url = url;
       }
@@ -1376,20 +1451,31 @@ function FilaMaterialFormador({
     return (
       <li className='portal-th__material-item'>
         <div className='portal-th__material-info'>
-          <a
-            href={m.tipo === 'LINK' ? (m.url ?? '#') : materialUrl(cursoId, m.id)}
-            target='_blank'
-            rel='noopener noreferrer'
-          >
-            {m.titulo}
-          </a>
+          {m.tipo === 'FORM' ? (
+            <button type='button' className='portal-th__material-abrir' onClick={() => onVerPrevia?.(m)}>
+              {m.titulo}
+            </button>
+          ) : (
+            <a
+              href={m.tipo === 'LINK' ? (m.url ?? '#') : materialUrl(cursoId, m.id)}
+              target='_blank'
+              rel='noopener noreferrer'
+            >
+              {m.titulo}
+            </a>
+          )}
           <span className='portal-th__material-tipo'>
-            {m.tipo === 'LINK' ? 'Enlace' : 'Documento'}
+            {m.tipo === 'LINK' ? 'Enlace' : m.tipo === 'FORM' ? 'Formulario propio' : 'Documento'}
             {m.tipo === 'DOCUMENT' && m.nombreArchivo && ` · ${m.nombreArchivo}`}
             {!m.obligatorio && ' · opcional'}
           </span>
         </div>
         <div className='portal-th__material-acciones'>
+          {m.tipo === 'FORM' && puedeVerRespuestas && (
+            <Button size='xs' variant='default' leftSection={<IconTable size={14} />} onClick={() => onVerRespuestas?.(m)}>
+              Respuestas
+            </Button>
+          )}
           <button
             type='button'
             className='portal-th__icono-boton'
@@ -1430,7 +1516,7 @@ function FilaMaterialFormador({
   return (
     <li className='portal-th__material-item portal-th__material-item--editando'>
       <div className='portal-th__formacion-crear portal-th__formacion-editar'>
-        <div className='portal-th__formacion-toggle'>
+        <div className='portal-th__formacion-toggle' hidden={m.tipo === 'FORM'}>
           <button
             type='button'
             className={tipo === 'DOCUMENT' ? 'portal-th__formacion-toggle-activo' : ''}
@@ -1453,7 +1539,9 @@ function FilaMaterialFormador({
           maxLength={255}
           onChange={(e) => setTitulo(e.target.value)}
         />
-        {tipo === 'LINK' ? (
+        {m.tipo === 'FORM' ? (
+          <p className='portal-th__estado'>Formulario propio: las preguntas se editan en «Formularios» al agregar un material.</p>
+        ) : tipo === 'LINK' ? (
           <input aria-label='Enlace' placeholder='https://…' value={url} onChange={(e) => setUrl(e.target.value)} />
         ) : (
           <label className='portal-th__formacion-archivo'>

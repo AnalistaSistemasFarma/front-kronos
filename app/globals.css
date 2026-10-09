@@ -4435,16 +4435,18 @@ body.chat-inmersivo .chat-page-thread--completa {
   border-radius: 12px;
 }
 
-.portal-th__formacion-crear input[type='text'],
-.portal-th__formacion-crear input:not([type]),
-.portal-th__formacion-crear input[type='file'] {
+.portal-th__formacion-crear input[type='text']:where(:not(.portal-th__mantine *)),
+.portal-th__formacion-crear input:not([type]):where(:not(.portal-th__mantine *)),
+.portal-th__formacion-crear input[type='file']:where(:not(.portal-th__mantine *)) {
   padding: 8px 10px;
   border: 1px solid var(--pth-linea);
   border-radius: 8px;
   font: inherit;
 }
 
-.portal-th__formacion-crear button {
+/* `:where(:not(.portal-th__mantine *))`: no toca los controles de Mantine del
+   selector de formulario (sin subir la especificidad de la regla). */
+.portal-th__formacion-crear button:where(:not(.portal-th__mantine *)) {
   padding: 9px 16px;
   border: none;
   border-radius: 8px;
@@ -4453,7 +4455,7 @@ body.chat-inmersivo .chat-page-thread--completa {
   cursor: pointer;
 }
 
-.portal-th__formacion-crear button:disabled {
+.portal-th__formacion-crear button:disabled:where(:not(.portal-th__mantine *)) {
   opacity: 0.6;
   cursor: default;
 }
@@ -4466,7 +4468,7 @@ body.chat-inmersivo .chat-page-thread--completa {
   color: var(--pth-tinta-2);
 }
 
-.portal-th__formacion-crear textarea {
+.portal-th__formacion-crear textarea:where(:not(.portal-th__mantine *)) {
   flex: 1 1 100%;
   padding: 8px 10px;
   border: 1px solid var(--pth-linea);
@@ -4957,4 +4959,77 @@ body.chat-inmersivo .chat-page-thread--completa {
 
 .portal-th__curso-detalle > .portal-th__progreso-fila {
   margin-bottom: 12px;
+}
+
+/* ── FORMACIÓN · FORMULARIO PROPIO (Cristian Baldión, 2026-10-08) ─────────────
+   Se responde DENTRO de la ventana de vista previa de los materiales. El
+   contenido usa los componentes de Mantine del resto de SynerLink (campos,
+   Alert, Table, Button) con el tema de la aplicación: aquí NO hay colores,
+   tipografías ni bordes propios — solo el tamaño de la ventana y la zona que
+   se desplaza (Nicolás, 2026-10-08: mismos lineamientos gráficos que los
+   demás módulos). En celular la ventana ocupa toda la pantalla. */
+.portal-th__visor-caja--formulario {
+  width: min(860px, 96vw);
+}
+
+.portal-th__visor-caja--respuestas {
+  width: min(1200px, 96vw);
+}
+
+/* Fondo de ventana = el de los modales de Mantine en el resto de SynerLink
+   (token del tema, también en modo oscuro). La barra de título sigue siendo la
+   de las demás ventanas de Formación. */
+.portal-th__visor-caja--formulario,
+.portal-th__visor-caja--respuestas {
+  background-color: var(--mantine-color-body);
+  color: var(--mantine-color-text);
+}
+
+/* Zona que se desplaza; el aviso de resultado queda pegado arriba. */
+.portal-th__formulario {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-top: 72px;
+}
+
+.portal-th__formulario-aviso {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-radius: 0;
+}
+
+.portal-th__formulario-fin {
+  flex: 1;
+}
+
+/* La fila "Agregar material" de Formación pinta sus botones y campos por
+   etiqueta (`.portal-th__formacion-crear button`, `input`, `textarea`); el
+   selector de formulario usa los de Mantine, que no deben heredar eso. */
+.portal-th__formacion-crear .portal-th__mantine {
+  flex: 1 1 100%;
+}
+
+@media (max-width: 759px) {
+  .portal-th__visor:has(.portal-th__visor-caja--formulario),
+  .portal-th__visor:has(.portal-th__visor-caja--respuestas) {
+    padding: 0;
+  }
+
+  .portal-th__visor-caja--formulario,
+  .portal-th__visor-caja--respuestas {
+    width: 100vw;
+    height: 100dvh;
+    border-radius: 0;
+  }
+}
+
+/* El selector de tipo dentro del formulario de "Agregar material": que se
+   distinga cuál está elegido (con tres opciones ya no se adivina). */
+.portal-th__formacion-crear .portal-th__formacion-toggle button {
+  border-radius: 0;
+  background-color: #fff;
+  color: var(--pth-tinta-2);
 }

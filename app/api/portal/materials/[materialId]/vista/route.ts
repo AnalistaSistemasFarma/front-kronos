@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../../lib/prisma';
 import { identificar } from '../../../../../../lib/portal/acceso';
 import { formadoresDePortal } from '../../../../../../lib/portal/config';
+import { MENSAJE_FORMULARIO_SE_COMPLETA_AL_ENVIAR } from '../../../../../../lib/portal/formulario';
 import {
   contarPaginasPdf,
   marcarMaterialCompletado,
@@ -56,6 +57,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       },
     });
     if (!material) return NextResponse.json({ error: 'Material no encontrado.' }, { status: 404 });
+    // Formulario propio: se completa al ENVIAR sus respuestas, nunca al abrirlo
+    // (ver `POST .../materials/:materialId/formulario`).
+    if (material.type === 'FORM') {
+      return NextResponse.json({ error: MENSAJE_FORMULARIO_SE_COMPLETA_AL_ENVIAR }, { status: 409 });
+    }
     if (!material.course.active && !formadoresDePortal().includes(quien.correo.toLowerCase())) {
       return NextResponse.json({ error: 'Este curso no está disponible.' }, { status: 404 });
     }
