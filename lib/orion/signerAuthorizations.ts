@@ -245,12 +245,25 @@ export async function createOrionSignerAuthorizations(
     try {
       const emailAddr = await resolveEmailByUserId(user.id);
       if (emailAddr) {
+        const docLabel = String(params.fileName || '').trim();
+        const subjectLabel = String(params.subject || '').trim();
         await createAndSendNotifications([emailAddr], {
-          title: 'Autorizar firma · SynerLink',
-          body: `Solicitud #${params.requestId}${
-            params.fileName ? ` · ${params.fileName}` : ''
-          }${params.subject ? ` — ${params.subject}` : ''}. Autorice para ver y firmar el documento.`,
-          url: buildAppUrl('/process/authorization'),
+          title: docLabel
+            ? `Firmar: ${docLabel}`
+            : 'Autorizar firma · SynerLink',
+          body: [
+            `Solicitud #${params.requestId}`,
+            docLabel ? `Documento: ${docLabel}` : null,
+            subjectLabel ? subjectLabel : null,
+            'Autorice en Autorizaciones para ver y firmar este PDF.',
+          ]
+            .filter(Boolean)
+            .join(' · '),
+          url: buildAppUrl(
+            `/process/authorization?highlight=${encodeURIComponent(String(taskId))}${
+              fileId ? `&orionFileId=${encodeURIComponent(fileId)}` : ''
+            }`
+          ),
           tag: `orion-auth-${taskId}`,
         });
       }
