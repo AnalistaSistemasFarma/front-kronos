@@ -63,7 +63,12 @@ export async function GET(req) {
             MAX(CASE 
                 WHEN f.field_label = 'Acreedor'
                 THEN rfv.value_text
-            END) AS acreedor
+            END) AS acreedor,
+
+            MAX(CASE 
+                WHEN f.field_label = 'Subempresa'
+                THEN COALESCE(rfv.value_text, o.option_label)
+            END) AS subempresa
 
         FROM task_request_general trg
 
