@@ -1,9 +1,9 @@
 'use client';
 
-import { Suspense, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import PortalFormacion from '../../../components/portal/PortalFormacion';
-import { origenDesdeParametro, urlVolverAlPortal } from '../../../lib/portal/formacion-navegacion';
+import { RUTA_FORMACION_HUB, origenDesdeParametro, urlVolverAlPortal } from '../../../lib/portal/formacion-navegacion';
 
 /**
  * PORTAL DE TALENTO HUMANO — FORMACIÓN, en su propia página.
@@ -23,6 +23,13 @@ function PaginaFormacion() {
   const origen = origenDesdeParametro(useSearchParams().get('desde'));
   const volver = urlVolverAlPortal(origen);
   const [sinSesion, setSinSesion] = useState(false);
+  const router = useRouter();
+
+  // Enlaces viejos (`?desde=hub`): quien viene del módulo del hub sigue en el
+  // hub, con el encabezado de SynerLink (Nicolás, 2026-10-09).
+  useEffect(() => {
+    if (origen === 'hub') router.replace(RUTA_FORMACION_HUB);
+  }, [origen, router]);
 
   return (
     <div className='portal-th portal-th--formacion'>
