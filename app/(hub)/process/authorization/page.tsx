@@ -327,7 +327,8 @@ function AuthorizationBoard() {
         setLoading(true);
         setError(null);
         try {
-            const params = new URLSearchParams({ idUser: id });
+            // El servidor toma el usuario de la sesión; `id` solo indica que ya se resolvió.
+            const params = new URLSearchParams();
             params.set('status', f.status || '0');
             if (f.id) params.set('id', f.id);
             if (f.company) params.set('company', f.company);
@@ -383,10 +384,10 @@ function AuthorizationBoard() {
         }
     };
 
-    const fetchDepartments = async (userIdParam?: string) => {
+    const fetchDepartments = async (_userIdParam?: string) => {
         try {
-        const idUser = userIdParam || '';
-        const url = `/api/authorization/authorization-departments?userId=${idUser}`;
+        // El servidor toma el usuario de la sesión; no se envía ningún id.
+        const url = `/api/authorization/authorization-departments`;
 
         const response = await fetch(url);
         const data = await response.json();
