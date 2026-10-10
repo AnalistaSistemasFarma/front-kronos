@@ -89,8 +89,21 @@ const MODE_TEXT: Record<SgcWatermarkInfo['mode'], string> = {
 };
 
 /** Deja el texto en el rango que soporta la fuente estándar (WinAnsi / Latin-1). */
+/**
+ * E2E 2026-10-10: la puntuación tipográfica común (raya «—», comillas curvas,
+ * puntos suspensivos, flechas…) salía como «?» en el PDF controlado (p. ej.
+ * «Elaboró ? QA SGC» en el registro de trazabilidad). Se cambia por su
+ * equivalente Latin-1 antes de filtrar.
+ */
+const TYPOGRAPHIC: Readonly<Record<string, string>> = {
+  '\u2014': '-', '\u2013': '-', '\u2012': '-', '\u2010': '-', '\u2011': '-', '\u2212': '-',
+  '\u2018': "'", '\u2019': "'", '\u201A': "'", '\u201C': '"', '\u201D': '"', '\u201E': '"',
+  '\u2026': '...', '\u2022': '·', '\u2192': '->', '\u2190': '<-', '\u2265': '>=', '\u2264': '<=', '\u2248': '~',
+  '\u2009': ' ', '\u202F': ' ', '\u2007': ' ',
+};
+
 export function toWinAnsiSafe(text: string): string {
-  return Array.from(text ?? '')
+  return Array.from(Array.from(text ?? '').map((ch) => TYPOGRAPHIC[ch] ?? ch).join(''))
     .map((ch) => {
       const code = ch.codePointAt(0) ?? 63;
       if (code === 9 || code === 10 || code === 13) return ' ';
