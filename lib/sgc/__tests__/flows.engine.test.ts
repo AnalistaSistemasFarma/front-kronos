@@ -105,6 +105,23 @@ describe('SGC · motor de flujos: firmas en orden o en paralelo', () => {
     expect(taskOutcome([a(1, 'x', 1, 'anulado')])).toBe('abierta');
   });
 
+  it('[SGC-REQ-029] RN 2026-10-02: en PARALELO una devolución espera a que respondan todos los revisores; en ORDEN corta de inmediato', () => {
+    // Dos revisores en paralelo: uno devuelve y el otro sigue pendiente → la tarea sigue abierta (no se sube la v2).
+    const oneBack = [a(1, 'r1', 1, 'devuelto'), a(2, 'r2', 2)];
+    expect(taskOutcome(oneBack, 'paralelo')).toBe('abierta');
+    expect(taskOutcome(oneBack, null)).toBe('abierta');
+    expect(assigneesInTurn(oneBack, 'paralelo').map((x) => x.id)).toEqual([2]);
+    // Cuando el otro responde (apruebe o devuelva), vuelve a elaboración.
+    expect(taskOutcome([a(1, 'r1', 1, 'devuelto'), a(2, 'r2', 2, 'aprobado')], 'paralelo')).toBe('devuelta');
+    expect(taskOutcome([a(1, 'r1', 1, 'devuelto'), a(2, 'r2', 2, 'devuelto')], 'paralelo')).toBe('devuelta');
+    // Un cupo reemplazado o anulado no se espera.
+    expect(taskOutcome([a(1, 'r1', 1, 'devuelto'), a(2, 'r2', 2, 'reemplazado')], 'paralelo')).toBe('devuelta');
+    // Con una devolución nunca queda «resuelta», aunque el resto apruebe.
+    expect(taskOutcome([a(1, 'r1', 1, 'devuelto'), a(2, 'r2', 2, 'aprobado'), a(3, 'r3', 3, 'aprobado')], 'paralelo')).toBe('devuelta');
+    // En orden, la devolución corta la secuencia: los siguientes aún no estaban en turno.
+    expect(taskOutcome(oneBack, 'orden')).toBe('devuelta');
+  });
+
   it('[SGC-REQ-029] en orden, quien no está en turno recibe 409; en paralelo decide de una vez', () => {
     const actor = { email: 'R2@x.co', poolTypeCodes: [] };
     expect(() => pickAssigneeForDecision(list, 'orden', actor, { elaboratorEmail: 'e@x.co', allowElaborator: false })).toThrow(expect.objectContaining({ status: 409 }));
