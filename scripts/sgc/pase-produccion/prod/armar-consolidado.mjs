@@ -64,6 +64,15 @@ const part = (archivo, texto) => {
   return `${guard(archivo)}\nGO\n/* ===== ${archivo} ===== */\n${texto.trim()}\nGO`;
 };
 const file = (p) => part(p, read(p));
+// Componente condicional: cada lote (separado por GO) corre con sp_executesql solo si se cumple `cond`.
+const partCond = (archivo, texto, cond) => {
+  manifest.push(`${sha(texto)}  ${archivo}`);
+  const lotes = texto.split(/^\s*GO\s*$/im).map((b) => b.trim()).filter(Boolean);
+  const cuerpo = lotes
+    .map((b) => `IF ${cond}\n  EXEC sp_executesql N'${conFlags(b).replace(/'/g, "''")}';\nELSE PRINT N'${path.basename(archivo)}: nada que revertir, se omite.';`)
+    .join('\nGO\n');
+  return `${guard(archivo)}\nGO\n/* ===== ${archivo} (condicional: ${cond}) ===== */\n${cuerpo}\nGO`;
+};
 const replaceOnce = (texto, de, a, archivo) => {
   const n = texto.split(de).length - 1;
   if (n !== 1) throw new Error(`${archivo}: se esperaba 1 ocurrencia de «${de}» y hay ${n}`);
@@ -157,7 +166,11 @@ for (const f of ['2026-10-08-sgc-s13-firma-propia-reversa.sql', '2026-10-08-sgc-
   '2026-10-01-sgc-s4-divulgacion-reversa.sql', '2026-09-30-sgc-s3-firma-reversa.sql', '2026-09-30-sgc-s2-flujos-reversa.sql', '2026-09-30-sgc-s1-repositorio-reversa.sql',
   '2026-09-30-sgc-s0-cimientos-reversa.sql']) {
   const p = `${MAN}/${f}`;
-  r1.push(part(p, conFlags(read(p))));
+  // Re-ejecutable: cada reversa es idempotente mientras existan las tablas de los
+  // sprints anteriores (p. ej. la del S12 usa sgc.authorization_type, del S2). Si
+  // R1 se corta y se vuelve a correr, se omite lo que ya no tiene sobre qué actuar.
+  const cond = /s[01]-(cimientos|repositorio)-reversa/.test(f) ? "SCHEMA_ID(N'sgc') IS NOT NULL" : "OBJECT_ID(N'sgc.authorization_type', N'U') IS NOT NULL";
+  r1.push(partCond(p, read(p), cond));
 }
 r1.push(part('registro-migraciones (reversa)', `DELETE FROM [dbo].[_prisma_migrations] WHERE migration_name LIKE N'%[_]sgc[_]%' AND migration_name <> N'20260930100000_sgc_s0_retiro_gestion_documental';
 SELECT SCHEMA_ID(N'sgc') AS esquema_sgc, (SELECT COUNT(*) FROM sys.triggers WHERE parent_class = 0 AND name = N'sgc_proteger_esquema') AS trigger_bd,
