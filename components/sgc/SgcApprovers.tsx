@@ -142,8 +142,9 @@ export default function SgcApprovers({ idCompany, processes }: { idCompany: numb
                       {m.validFrom} → {m.validTo ?? 'sin vencimiento'}
                     </Text>
                   </Table.Td>
-                  <Table.Td>
-                    <Badge color={STATUS_COLOR[m.status]} variant='light' size='sm'>
+                  <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                    {/* D8 (E2E 2026-10-10): la tabla encogía la columna y la etiqueta salía «VIGE…» (mismo arreglo que «Tareas documentales»). */}
+                    <Badge color={STATUS_COLOR[m.status]} variant='light' size='sm' styles={{ label: { overflow: 'visible' } }}>
                       {STATUS_LABEL[m.status]}
                     </Badge>
                     {m.revokeReason && (

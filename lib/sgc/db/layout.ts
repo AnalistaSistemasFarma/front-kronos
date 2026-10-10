@@ -10,6 +10,7 @@ import {
   decodeLogoDataUrl,
   drawInstitutionalHeaders,
   hasChangeHistoryToken,
+  registerOnlyParticipants,
   suggestInstitutionalPlacements,
   type SgcChangeHistoryRow,
   type SgcInstitutionalHeaderData,
@@ -171,13 +172,16 @@ export async function getDocumentLayout(db: SgcDb, idRequest: number, viewer: Sg
   const canEdit = inElaboration(row) && lower(row.elaborator_email) === lower(viewer.email);
   // Sprint 8: con el encabezado obligatorio, el documento siempre lo usa (salvo un borrador PDF anterior a la regla).
   const institutionalHeader = headerMandatory ? draft?.format !== 'pdf' : layout.institutionalHeader;
+  // D6 (E2E 2026-10-10): quien va solo al registro de firmas no cuenta como «sin ubicar».
+  const inRegister = new Set(registerOnlyParticipants(participants, fields).map((p) => p.key));
   return {
     idRequest,
     institutionalHeader,
     headerMandatory,
     fields,
     participants,
-    missing: missingPlacements(participants, fields).map((p) => p.key),
+    missing: missingPlacements(participants, fields).filter((p) => !inRegister.has(p.key)).map((p) => p.key),
+    inRegister: [...inRegister],
     suggested: institutionalHeader ? suggestInstitutionalPlacements(participants, fields) : [],
     canEdit,
     draft: draft ? { name: draft.name, sha256: draft.sha256, format: draft.format } : null,
@@ -223,8 +227,9 @@ export async function saveDocumentLayout(db: SgcDb, idRequest: number, input: { 
       data: { id_request: idRequest, institutional_header: institutional, fields_json: fieldsJson, content_sha256: draft?.sha256 ?? null, saved_by: lower(actor.email), saved_at: now, change_reason: reason },
     });
     const placed = normalized.fields.length;
-    const missing = missingPlacements(participants, normalized.fields).length;
-    await addInteraction(tx, idRequest, 'estado', lower(actor.email), `Ubicó las firmas en el documento: ${placed} de ${participants.length} firma(s) ubicada(s)${missing ? ` (faltan ${missing})` : ''}.${institutional !== current.institutionalHeader ? `\nEncabezado institucional: ${institutional ? 'sí' : 'no'}.` : ''}${reason ? `\nMotivo: ${reason}` : ''}`, {
+    const register = registerOnlyParticipants(participants, normalized.fields).length;
+    const missing = missingPlacements(participants, normalized.fields).length - register;
+    await addInteraction(tx, idRequest, 'estado', lower(actor.email), `Ubicó las firmas en el documento: ${placed} de ${participants.length - register} firma(s) ubicada(s)${missing ? ` (faltan ${missing})` : ''}${register ? `; ${register} van solo al registro de firmas` : ''}.${institutional !== current.institutionalHeader ? `\nEncabezado institucional: ${institutional ? 'sí' : 'no'}.` : ''}${reason ? `\nMotivo: ${reason}` : ''}`, {
       meta: { idDocumentLayout: saved.id_document_layout, institutional, placed, missing },
     });
     await writeSgcAudit(tx, {
