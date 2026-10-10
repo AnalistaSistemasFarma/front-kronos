@@ -28,6 +28,8 @@ import { defineConfig, devices } from '@playwright/test';
  *                   así que corren sin traza, capturas ni video.
  *   (S2) Con E2E_USER_EMAIL2/3 y E2E_USER_PASSWORD2/3, `setup` también deja
  *   las sesiones 2 y 3 para el recorrido con varios revisores y aprobadores.
+ *   (2026-10-10) Con E2E_USER_EMAIL4/E2E_USER_PASSWORD4 deja la sesión 4: el
+ *   SOLICITANTE (qa.sgc4), que no puede ser el elaborador (RN 2026-10-05).
  * setup y con-sesion solo existen si hay E2E_USER_EMAIL y E2E_USER_PASSWORD.
  *
  * Reportes: reports/playwright/html (con capturas y trazas) y
@@ -39,6 +41,12 @@ export const STORAGE_STATE = 'reports/playwright/.auth/sesion.json';
 // Sprint 2: segundo y tercer usuario de pruebas (revisores/aprobadores del recorrido documental).
 export const STORAGE_STATE_2 = 'reports/playwright/.auth/sesion2.json';
 export const STORAGE_STATE_3 = 'reports/playwright/.auth/sesion3.json';
+// 2026-10-10: cuarto usuario de pruebas, SOLO SOLICITANTE (qa.sgc4). Desde las RN
+// del 2026-10-05 el elaborador sale de la matriz de responsables y nunca es el
+// solicitante: las solicitudes de la e2e las crea qa.sgc4 y las elabora qa.sgc
+// (fila de la matriz GC × PR en KRONOSDB_PRUEBAS), para que el respaldo de
+// Calidad no se las asigne a personas reales.
+export const STORAGE_STATE_4 = 'reports/playwright/.auth/sesion4.json';
 
 export default defineConfig({
   testDir: './e2e',
