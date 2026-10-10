@@ -1197,6 +1197,17 @@ export async function listSubstitutions(db: SgcDb | Tx, idRequest: number) {
 // Cancelar la solicitud (acción, no paso)
 // ---------------------------------------------------------------------------
 
+/**
+ * true si el paso actual es posterior a la aprobación (preparación del material,
+ * divulgación o capacitación): la versión ya está aprobada aunque la solicitud siga abierta.
+ */
+export async function isPostApprovalStep(db: SgcDb, idFlowVersion: number, currentTaskKey: string | null): Promise<boolean> {
+  if (!currentTaskKey) return false;
+  const def = await loadDefinition(db, idFlowVersion);
+  const t = def.tasks.find((x) => x.key === currentTaskKey);
+  return Boolean(t && (t.assignment === 'alcance' || t.role === 'capacitacion' || t.role === 'material'));
+}
+
 export async function cancelRequest(db: SgcDb, notifier: SgcNotifier, access: SgcCompanyAccess | null, idRequest: number, input: { reason: unknown }, actor: SgcActor) {
   const me = lower(actor.email);
   const reason = text(input.reason, 'El motivo de la cancelación', 1000, 5);

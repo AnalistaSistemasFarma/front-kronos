@@ -16,6 +16,7 @@ import { computeReviewDueDate, formatCalendarDate, toCalendarDate } from '../rev
 import { buildVersionFileName, buildVersionFolderSegments, getControlledPdfError, getSourceFileError, sha256Hex } from '../storage';
 import type { SgcActor, SgcDb } from './catalogs';
 import { guideInputOf, resolveNewDocumentCode } from './coding';
+import { withNewDocumentCodeLock } from './lock';
 
 /**
  * Repositorio de documentos del SGC (esquema `sgc`): listado maestro, ficha,
@@ -401,6 +402,12 @@ export async function createInitialDocument(
   actor: SgcActor,
   now: Date = new Date()
 ) {
+  // E2E 2026-10-10: el código (consecutivo de la guía) y la carpeta de OneDrive se reservan por empresa,
+  // para que una carga y una aprobación simultáneas no tomen el mismo código ni pisen el archivo.
+  return withNewDocumentCodeLock(db, input.idCompany, () => createInitialDocumentUnlocked(db, upload, input, actor, now));
+}
+
+async function createInitialDocumentUnlocked(db: SgcDb, upload: SgcUploader, input: SgcInitialLoadInput, actor: SgcActor, now: Date) {
   const p = await prepareInitialLoad(db, input, now);
   const segments = buildVersionFolderSegments({
     storageRoot: p.config.storage_root,

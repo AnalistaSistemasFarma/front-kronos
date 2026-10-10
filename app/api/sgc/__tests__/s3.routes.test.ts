@@ -11,7 +11,7 @@ const m = vi.hoisted(() => {
     'getServerSession', 'getSgcAccessForUser', 'getAccessSubject',
     'signTask', 'generateControlledVersion', 'verifyDocumentVersion', 'listSignatureMasters', 'registerSignatureMaster', 'revokeSignatureMaster',
     'listDraftRevisions', 'saveDraftRevision', 'getDraftRevision', 'getVigenteBaseHtml', 'importWordToHtml',
-    'getDocumentAuditReport', 'auditReportToCsv', 'requestOfTask', 'taskOfAuthorization', 'companyOfRequest', 'findUniqueOrThrow', 'sgcSignatureDeps',
+    'getDocumentAuditReport', 'auditReportToCsv', 'requestOfTask', 'taskOfAuthorization', 'companyOfRequest', 'isPostApprovalStep', 'findUniqueOrThrow', 'sgcSignatureDeps',
   ] as const;
   return Object.fromEntries(names.map((n) => [n, vi.fn()])) as Record<(typeof names)[number], ReturnType<typeof vi.fn>>;
 });
@@ -24,7 +24,7 @@ vi.mock('../../../../lib/sgc/db/documents', () => ({ getAccessSubject: m.getAcce
 vi.mock('../../../../lib/sgc/onedrive', () => ({ downloadSgcFile: vi.fn() }));
 vi.mock('../../../../lib/sgc/pdf/render', () => ({ docxToHtml: vi.fn() }));
 vi.mock('../../../../lib/sgc/signature/deps', () => ({ sgcSignatureDeps: m.sgcSignatureDeps }));
-vi.mock('../../../../lib/sgc/db/requests', () => ({ requestOfTask: m.requestOfTask, taskOfAuthorization: m.taskOfAuthorization, companyOfRequest: m.companyOfRequest }));
+vi.mock('../../../../lib/sgc/db/requests', () => ({ requestOfTask: m.requestOfTask, taskOfAuthorization: m.taskOfAuthorization, companyOfRequest: m.companyOfRequest, isPostApprovalStep: m.isPostApprovalStep }));
 vi.mock('../../../../lib/sgc/db/signatures', () => ({
   signTask: m.signTask, generateControlledVersion: m.generateControlledVersion, verifyDocumentVersion: m.verifyDocumentVersion,
   listSignatureMasters: m.listSignatureMasters, registerSignatureMaster: m.registerSignatureMaster, revokeSignatureMaster: m.revokeSignatureMaster,
@@ -181,16 +181,24 @@ describe('Rutas S3 · borrador editado en la app', () => {
 });
 
 describe('Rutas S3 · PDF controlado, verificación y reporte de auditoría', () => {
-  it('[SGC-REQ-045] reintentar el PDF controlado es de Calidad y solo con la solicitud aprobada', async () => {
+  it('[SGC-REQ-045] reintentar el PDF controlado es de Calidad y solo con la solicitud aprobada (también abierta en un paso posterior a la aprobación)', async () => {
     m.companyOfRequest.mockResolvedValue(OLP);
     asUser([gestion]);
     expect((await pdf.POST(req('/', {}), params({ id: '5' }))).status).toBe(403);
     asUser([calidad]);
-    m.findUniqueOrThrow.mockResolvedValueOnce({ status: 'abierta' });
+    m.findUniqueOrThrow.mockResolvedValueOnce({ status: 'abierta', current_task_key: 'revision', id_flow_version: 95 });
+    m.isPostApprovalStep.mockResolvedValueOnce(false);
     expect((await pdf.POST(req('/', {}), params({ id: '5' }))).status).toBe(409);
+    expect(m.generateControlledVersion).not.toHaveBeenCalled();
     m.findUniqueOrThrow.mockResolvedValueOnce({ status: 'en_espera' });
     m.generateControlledVersion.mockResolvedValue({ idDocumentVersion: 8, created: true });
     expect(await (await pdf.POST(req('/', {}), params({ id: '5' }))).json()).toEqual({ idDocumentVersion: 8, created: true });
+    // E2E 2026-10-10: con divulgación (S4) y capacitación previa (S10) la solicitud aprobada sigue ABIERTA:
+    // el reintento también vale en esos pasos (antes respondía 409 y el PDF quedaba sin forma de recuperarse).
+    m.findUniqueOrThrow.mockResolvedValueOnce({ status: 'abierta', current_task_key: 'preparacion_capacitacion', id_flow_version: 95 });
+    m.isPostApprovalStep.mockResolvedValueOnce(true);
+    expect((await pdf.POST(req('/', {}), params({ id: '5' }))).status).toBe(200);
+    expect(m.isPostApprovalStep).toHaveBeenLastCalledWith(expect.anything(), 95, 'preparacion_capacitacion');
     expect((await pdf.POST(req('/', {}), params({ id: 'x' }))).status).toBe(400);
   });
 
