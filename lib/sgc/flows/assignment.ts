@@ -23,11 +23,13 @@ export const SGC_ASSIGNMENT_POLICIES = ['tarea', 'calidad', 'tarea_o_calidad', '
 export type SgcAssignmentPolicy = (typeof SGC_ASSIGNMENT_POLICIES)[number];
 
 /**
- * Política por defecto: la MÁS SEGURA (quien ejecuta la primera tarea Y tiene
- * el permiso de Calidad). Se cambia con la variable de entorno
- * SGC_ASIGNACION_PERMISO (tarea | calidad | tarea_o_calidad | tarea_y_calidad).
+ * Política por defecto: la de la RN del 2026-10-05 (Nicolás): seleccionan y
+ * confirman quien crea el documento (ejecuta la primera tarea) O Aseguramiento
+ * de Calidad. Confirmada el 2026-10-10 para testing y producción. Se cambia
+ * con la variable de entorno SGC_ASIGNACION_PERMISO
+ * (tarea | calidad | tarea_o_calidad | tarea_y_calidad).
  */
-export const SGC_DEFAULT_ASSIGNMENT_POLICY: SgcAssignmentPolicy = 'tarea_y_calidad';
+export const SGC_DEFAULT_ASSIGNMENT_POLICY: SgcAssignmentPolicy = 'tarea_o_calidad';
 
 export function parseAssignmentPolicy(raw: string | null | undefined): SgcAssignmentPolicy {
   const v = (raw ?? '').trim().toLowerCase();

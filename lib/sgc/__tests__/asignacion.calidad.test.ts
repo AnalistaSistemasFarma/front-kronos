@@ -75,12 +75,19 @@ describe('SGC · selección de firmantes y alcance (reglas puras)', () => {
     }
   });
 
-  it('política por defecto (la más segura): quien ejecuta la primera tarea Y tiene el permiso de Calidad', () => {
-    expect(SGC_DEFAULT_ASSIGNMENT_POLICY).toBe('tarea_y_calidad');
+  it('política por defecto (RN 2026-10-05, confirmada el 2026-10-10): quien ejecuta la primera tarea O Calidad', () => {
+    expect(SGC_DEFAULT_ASSIGNMENT_POLICY).toBe('tarea_o_calidad');
     expect(canAssignParticipants(V3, who(ELAB, true))).toBe(true);
-    expect(assignmentDenial(V3, who(ELAB, false))).toMatch(/con el permiso de Aseguramiento de Calidad/);
-    expect(canAssignParticipants(V3, who(CAL, true))).toBe(false);
+    expect(canAssignParticipants(V3, who(ELAB, false))).toBe(true);
+    expect(canAssignParticipants(V3, who(CAL, true))).toBe(true);
     expect(canAssignParticipants(V3, who(REV, false))).toBe(false);
+  });
+
+  it('con tarea_y_calidad (la más estricta, por variable de entorno): quien ejecuta la primera tarea Y tiene el permiso de Calidad', () => {
+    expect(canAssignParticipants(V3, who(ELAB, true), 'tarea_y_calidad')).toBe(true);
+    expect(assignmentDenial(V3, who(ELAB, false), 'tarea_y_calidad')).toMatch(/con el permiso de Aseguramiento de Calidad/);
+    expect(canAssignParticipants(V3, who(CAL, true), 'tarea_y_calidad')).toBe(false);
+    expect(canAssignParticipants(V3, who(REV, false), 'tarea_y_calidad')).toBe(false);
   });
 
   it('la política es parametrizable: tarea, calidad, tarea_o_calidad', () => {
@@ -92,8 +99,9 @@ describe('SGC · selección de firmantes y alcance (reglas puras)', () => {
     expect(canAssignParticipants(V3, who(ELAB, false), 'tarea_o_calidad')).toBe(true);
     expect(canAssignParticipants(V3, who(REV, false), 'tarea_o_calidad')).toBe(false);
     expect(parseAssignmentPolicy('TAREA_O_CALIDAD')).toBe('tarea_o_calidad');
-    expect(parseAssignmentPolicy('cualquiera')).toBe('tarea_y_calidad');
-    expect(parseAssignmentPolicy(undefined)).toBe('tarea_y_calidad');
+    expect(parseAssignmentPolicy('TAREA_Y_CALIDAD')).toBe('tarea_y_calidad');
+    expect(parseAssignmentPolicy('cualquiera')).toBe('tarea_o_calidad');
+    expect(parseAssignmentPolicy(undefined)).toBe('tarea_o_calidad');
   });
 
   it('si la primera tarea la atiende el grupo de Calidad, ejecutarla = pertenecer al grupo (o haberla tenido)', () => {
@@ -225,6 +233,7 @@ describe('SGC · el solicitante solo SUGIERE; quien ejecuta la primera tarea y/o
   });
 
   it('quien no es solicitante, elaborador ni está habilitado no sugiere ni asigna (403); con tarea_o_calidad, Calidad sí asigna', async () => {
+    vi.stubEnv('SGC_ASIGNACION_PERMISO', 'tarea_y_calidad');
     await expect(setSigners(signersDb().db, notifier, 7, { stepKey: 'revision', signers: [APR] }, actor(REV), access(false))).rejects.toMatchObject({ status: 403 });
     await expect(setSigners(signersDb().db, notifier, 7, { stepKey: 'revision', signers: [REV] }, actor(CAL), access(true))).rejects.toMatchObject({ status: 403 });
     vi.stubEnv('SGC_ASIGNACION_PERMISO', 'tarea_o_calidad');
@@ -392,6 +401,7 @@ describe('SGC · el solicitante solo SUGIERE; quien ejecuta la primera tarea y/o
     });
 
     it('con tarea_y_calidad, una persona de la matriz sin permiso de Calidad no elabora (cae al respaldo)', async () => {
+      vi.stubEnv('SGC_ASIGNACION_PERMISO', 'tarea_y_calidad');
       const f = createDb({ matrix: [{ role: 'elaborador', process: 5, email: REV }], quality: [CAL] });
       await createRequest(f.db, notifier, access(true), input, actor(SOL));
       expect(elaboratorOf(f)).toBe(CAL);
