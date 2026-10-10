@@ -1,10 +1,13 @@
 import { expect, test, type APIRequestContext, type Browser, type Page } from '@playwright/test';
-import { STORAGE_STATE_2, STORAGE_STATE_3 } from '../../playwright.config';
+import { STORAGE_STATE_2, STORAGE_STATE_3, STORAGE_STATE_4 } from '../../playwright.config';
 
 /**
  * SGC documental · Sprint 3 CON SESIÓN, contra PRUEBAS (KRONOSDB_PRUEBAS):
  * recorrido del flujo documental con la FIRMA ELECTRÓNICA PROPIA del SGC.
- *   - qa.sgc crea la solicitud, edita el borrador EN LA APP y firma «Elaboró»
+ *   - qa.sgc4 (solo solicitante) crea la solicitud; desde las RN del
+ *     2026-10-05 el elaborador sale de la matriz de responsables (GC × PR →
+ *     qa.sgc en KRONOSDB_PRUEBAS) y nunca es el solicitante;
+ *   - qa.sgc edita el borrador EN LA APP y firma «Elaboró»
  *     (primero con una contraseña errada: no se firma);
  *   - qa.sgc2 y qa.sgc3 firman «Revisó» EN PARALELO;
  *   - la aprobación va EN ORDEN (qa.sgc2 → qa.sgc3 → grupo de Calidad, que
@@ -21,7 +24,9 @@ const PW2 = process.env.E2E_USER_PASSWORD2 ?? '';
 const PW3 = process.env.E2E_USER_PASSWORD3 ?? '';
 const U2 = process.env.E2E_USER_EMAIL2 ?? '';
 const U3 = process.env.E2E_USER_EMAIL3 ?? '';
-const hasThree = Boolean(U2 && PW2 && U3 && PW3);
+const U1 = process.env.E2E_USER_EMAIL ?? '';
+const U4 = process.env.E2E_USER_EMAIL4 ?? '';
+const hasThree = Boolean(U2 && PW2 && U3 && PW3 && U4);
 
 async function asUser(browser: Browser, storageState: string): Promise<Page> {
   const ctx = await browser.newContext({ storageState, locale: 'es-CO', timezoneId: 'America/Bogota' });
@@ -84,18 +89,22 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
   test.skip(!hasThree || !PW1, 'Requiere los usuarios de pruebas qa.sgc, qa.sgc2 y qa.sgc3 (secretos E2E_SGC_USER*/E2E_SGC_PASSWORD*).');
   let idRequest = 0;
 
-  test('[SGC-REQ-028][SGC-REQ-032] qa.sgc crea la solicitud documental y la ve en su bandeja de Tareas documentales', async ({ page }) => {
-    await page.goto(`/process/sgc-documental/solicitudes/nueva?empresa=${OLP}`);
-    await chooseOption(page, 'sgc-nueva-proceso', /^GC · /);
-    await chooseOption(page, 'sgc-nueva-tipo-documental', /^PR · /);
-    await page.getByTestId('sgc-nueva-asunto').fill(`E2E S3 · procedimiento firmado ${new Date().toISOString()}`);
-    await page.getByTestId('sgc-nueva-justificacion').fill('Recorrido automático de la e2e del Sprint 3 (datos de prueba, firma electrónica).');
-    await chooseOption(page, 'sgc-campo-urgencia', 'Normal');
+  test('[SGC-REQ-028][SGC-REQ-032] qa.sgc4 crea la solicitud documental y el elaborador de la matriz (qa.sgc) la ve en su bandeja de Tareas documentales', async ({ browser, page }) => {
+    const p4 = await asUser(browser, STORAGE_STATE_4);
+    await p4.goto(`/process/sgc-documental/solicitudes/nueva?empresa=${OLP}`);
+    await chooseOption(p4, 'sgc-nueva-proceso', /^GC · /);
+    await chooseOption(p4, 'sgc-nueva-tipo-documental', /^PR · /);
+    await p4.getByTestId('sgc-nueva-asunto').fill(`E2E S3 · procedimiento firmado ${new Date().toISOString()}`);
+    await p4.getByTestId('sgc-nueva-justificacion').fill('Recorrido automático de la e2e del Sprint 3 (datos de prueba, firma electrónica).');
+    await chooseOption(p4, 'sgc-campo-urgencia', 'Normal');
     // Sprint 10: esta e2e prueba la firma (no la capacitación): la solicitud se crea sin capacitación.
-    await chooseOption(page, 'sgc-nueva-capacitacion', 'No requiere capacitación');
-    await page.getByTestId('sgc-nueva-crear').click();
-    await page.waitForURL(/\/process\/sgc-documental\/solicitudes\/\d+/, { timeout: 45_000 });
-    idRequest = Number(/solicitudes\/(\d+)/.exec(page.url())![1]);
+    await chooseOption(p4, 'sgc-nueva-capacitacion', 'No requiere capacitación');
+    await p4.getByTestId('sgc-nueva-crear').click();
+    await p4.waitForURL(/\/process\/sgc-documental\/solicitudes\/\d+/, { timeout: 45_000 });
+    idRequest = Number(/solicitudes\/(\d+)/.exec(p4.url())![1]);
+    await p4.context().close();
+    const d = (await (await page.request.get(`/api/sgc/requests/${idRequest}`)).json()) as { request: { elaboratorEmail: string } };
+    expect(d.request.elaboratorEmail, 'la matriz de responsables (GC × PR) asigna la elaboración a qa.sgc').toBe(U1.toLowerCase());
     await page.goto(`/process/sgc-documental/tareas?empresa=${OLP}`);
     await expect(page.locator(`[data-testid="bandeja-fila"][data-request="${idRequest}"]`)).toContainText('Elaboración');
   });
