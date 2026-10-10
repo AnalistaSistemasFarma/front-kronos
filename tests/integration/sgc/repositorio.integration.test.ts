@@ -147,6 +147,23 @@ describe.skipIf(!url)('SGC · Sprint 1 · integración con SQL Server', () => {
     expect(uploads.length).toBe(before);
   });
 
+  it('[SGC-REQ-013] cargas SIMULTÁNEAS toman códigos distintos y nunca suben dos archivos a la misma carpeta (E2E 2026-10-10)', async () => {
+    // Antes, dos generaciones a la vez calculaban el mismo consecutivo: la segunda pisaba el PDF de la primera
+    // en OneDrive (subida por ruta) y luego fallaba por la restricción única. Ahora se serializan por empresa.
+    const slow: SgcUploader = async (segments, fileName, content, contentType) => {
+      await new Promise((r) => setTimeout(r, 300));
+      return upload(segments, fileName, content, contentType);
+    };
+    const before = uploads.length;
+    const results = await Promise.all(
+      ['Concurrente A', 'Concurrente B', 'Concurrente C'].map((title) => createInitialDocument(prisma, slow, { ...base(), title }, actor))
+    );
+    const codes = results.map((r) => r.code);
+    expect(new Set(codes).size).toBe(3);
+    const folders = uploads.slice(before).map((u) => u.segments.join('/'));
+    expect(new Set(folders).size).toBe(folders.length);
+  });
+
   it('[SGC-REQ-014] valida todo ANTES de subir: PDF real, fecha no futura, proceso y tipo de la empresa, empresa activa', async () => {
     const before = uploads.length;
     await expect(createInitialDocument(prisma, upload, { ...base(), pdf: { bytes: new TextEncoder().encode('no soy pdf'), fileName: 'x.pdf' } }, actor)).rejects.toThrow('PDF');
