@@ -40,6 +40,9 @@ jobs:
       E2E_USER_PASSWORD2: ${{ secrets.E2E_SGC_PASSWORD2 }}
       E2E_USER_EMAIL3: ${{ secrets.E2E_SGC_USER3 }}
       E2E_USER_PASSWORD3: ${{ secrets.E2E_SGC_PASSWORD3 }}
+      # 2026-10-10: el solicitante (qa.sgc4), que no puede ser el elaborador (RN 2026-10-05).
+      E2E_USER_EMAIL4: ${{ secrets.E2E_SGC_USER4 }}
+      E2E_USER_PASSWORD4: ${{ secrets.E2E_SGC_PASSWORD4 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -89,7 +92,7 @@ jobs:
       - name: Verificar que las contraseñas no quedaron en los reportes
         if: always()
         run: |
-          for PW in "$E2E_USER_PASSWORD" "$E2E_USER_PASSWORD2" "$E2E_USER_PASSWORD3"; do
+          for PW in "$E2E_USER_PASSWORD" "$E2E_USER_PASSWORD2" "$E2E_USER_PASSWORD3" "$E2E_USER_PASSWORD4"; do
             [ -z "$PW" ] && continue
             if grep -rIl --fixed-strings -- "$PW" reports/ 2>/dev/null; then
               echo "::error::Una contraseña aparece en un reporte: no se archiva la evidencia."
