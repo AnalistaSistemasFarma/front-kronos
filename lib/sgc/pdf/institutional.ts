@@ -148,6 +148,17 @@ export function titularOf<T extends Pick<SgcPlacementParticipant, 'key'>>(group:
   return group.find((p) => !isPoolKey(p.key)) ?? group[0];
 }
 
+/**
+ * Firmantes que NO necesitan caja propia porque van solo al «Registro de
+ * firmas» (3 o más del mismo significado, sin ser el titular y sin una caja
+ * ubicada a mano). D6 de la E2E del 2026-10-10: no cuentan como «sin ubicar».
+ */
+export function registerOnlyParticipants<T extends Pick<SgcPlacementParticipant, 'key' | 'meaning'>>(participants: readonly T[], fields: readonly Pick<SgcStoredField, 'signerKey'>[]): T[] {
+  const overflow = new Set<string>(overflowMeanings(participants));
+  const placed = new Set(fields.map((f) => f.signerKey));
+  return participants.filter((p) => overflow.has(p.meaning) && !placed.has(p.key) && titularOf(participants.filter((q) => q.meaning === p.meaning))?.key !== p.key);
+}
+
 /** Texto del encabezado para un significado: los nombres o, con 3 o más, «Titular y N más · ver registro de firmas». */
 export function headerNames(list: readonly string[]): string {
   if (list.length === 0) return 'No aplica';
