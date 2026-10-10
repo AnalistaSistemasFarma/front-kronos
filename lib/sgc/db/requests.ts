@@ -665,6 +665,10 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
       where: { id_task_assignee: chosen.id, status: 'pendiente' },
       data: { status: authorizationStatusFor(decision), decided_by: me, decided_at: now, decision_comment: comment || null },
     });
+    const mode = (task.signing_mode as 'orden' | 'paralelo' | null) ?? null;
+    const after = task.assignees.map((a) => (a.id_task_assignee === chosen.id ? { ...toAssigneeState(a), status: (decision === 'aprobar' ? 'aprobado' : 'devuelto') as SgcAssigneeStatus } : toAssigneeState(a)));
+    // RN 2026-10-02: en paralelo, una devolución espera a que respondan los demás firmantes.
+    const outcome = taskOutcome(after, mode);
     const signText = describeSignaturePoint(assignee.signature_meaning, signed ? 'firmada' : assignee.signature_status);
     const verb = isSubmit
       ? 'Envió el documento'
@@ -674,7 +678,9 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
           ? 'Cerró la capacitación'
           : decision === 'aprobar'
             ? 'Aprobó'
-            : 'Devolvió a elaboración';
+            : outcome === 'abierta'
+              ? 'Devolvió con observaciones (vuelve a elaboración cuando respondan todos los firmantes)'
+              : 'Devolvió a elaboración';
     const slotText = assignee.pool_type_code && !assignee.user_email ? ` como integrante del grupo ${assignee.pool_type_code}` : '';
     const signLines = signed
       ? `\nFirma electrónica: ${signText}. Motivo: ${signed.payload.reason}\nContenido firmado: ${signed.payload.content.name} · SHA-256 ${signed.payload.content.sha256}`
@@ -692,8 +698,6 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
       },
     });
 
-    const after = task.assignees.map((a) => (a.id_task_assignee === chosen.id ? { ...toAssigneeState(a), status: (decision === 'aprobar' ? 'aprobado' : 'devuelto') as SgcAssigneeStatus } : toAssigneeState(a)));
-    const outcome = taskOutcome(after);
     const ctx: EngineCtx = { tx, request, def, notifications, actor, subjectLabel: request.subject };
     const condition = { requestType: request.request_type, requiresTraining: requiresTrainingOf(request) };
     let next: string = task.task_key;
@@ -701,16 +705,23 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
 
     if (outcome === 'abierta') {
       // En la divulgación cada lectura es independiente: no se re-notifica a los demás lectores.
-      if (taskDef.assignment !== 'alcance') await notifyTurn(ctx, idTask, taskDef, after, (task.signing_mode as 'orden' | 'paralelo' | null) ?? null);
+      if (taskDef.assignment !== 'alcance') await notifyTurn(ctx, idTask, taskDef, after, mode);
       // 2026-10-03: aviso de avance de lectura por UMBRAL (una vez), en lugar de uno por cada lectura.
       else if (signed && assignee.signature_meaning === 'leyo') await checkReadThreshold(tx, request, idTask, taskDef.poolAuthorizationTypeCode, notifications, actor);
     } else if (outcome === 'resuelta') {
+      // D9 (E2E 2026-10-10): con pocos lectores el umbral (90 %) coincide con el 100 %: el aviso sale también al completar.
+      if (taskDef.assignment === 'alcance' && signed && assignee.signature_meaning === 'leyo') await checkReadThreshold(tx, request, idTask, taskDef.poolAuthorizationTypeCode, notifications, actor);
       const resolution = taskDef.assignment === 'alcance' ? 'Divulgación completa: todas las personas del alcance leyeron y firmaron.' : comment || `${task.name} aprobada.`;
       await tx.sgcTask.update({ where: { id_task: idTask }, data: { status: 'resuelta', ended_at: now, resolved_by: me, resolution } });
       ({ next, published } = await advanceAfterResolved(ctx, task.task_key, now, me));
     } else {
-      // Devuelta: los demás cupos pendientes se anulan y se reabre la tarea destino en una ronda nueva.
-      await tx.sgcTask.update({ where: { id_task: idTask }, data: { status: 'devuelta', ended_at: now, resolved_by: me, resolution: comment } });
+      // Devuelta: los demás cupos pendientes (solo EN ORDEN; en paralelo ya respondieron todos) se anulan
+      // y se reabre la tarea destino en una ronda nueva con las observaciones de todos los que devolvieron.
+      const observations = task.assignees
+        .map((a) => (a.id_task_assignee === chosen.id ? { status: 'devuelto', by: me, text: comment } : { status: a.status, by: a.decided_by, text: a.comment }))
+        .filter((o) => o.status === 'devuelto' && o.text);
+      const resolution = (observations.length > 1 ? observations.map((o) => `${o.by}: ${o.text}`).join('\n') : (observations[0]?.text ?? comment)).slice(0, 2000);
+      await tx.sgcTask.update({ where: { id_task: idTask }, data: { status: 'devuelta', ended_at: now, resolved_by: me, resolution } });
       const pendingIds = task.assignees.filter((a) => a.status === 'pendiente' && a.id_task_assignee !== chosen.id).map((a) => a.id_task_assignee);
       if (pendingIds.length) {
         await tx.sgcTaskAssignee.updateMany({ where: { id_task_assignee: { in: pendingIds } }, data: { status: 'anulado' } });
@@ -723,7 +734,7 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
       next = step.task.key;
       ctx.notifications.push({
         emails: recipients([request.elaborator_email, request.requester_email], me),
-        payload: { title: SGC_NOTIFICATION_TITLES.devuelta, body: `#${request.id_request} · ${task.name} — ${comment}`.slice(0, 400), url: requestUrl(request.id_request), tag: `sgc-request-${request.id_request}` },
+        payload: { title: SGC_NOTIFICATION_TITLES.devuelta, body: `#${request.id_request} · ${task.name} — ${resolution}`.slice(0, 400), url: requestUrl(request.id_request), tag: `sgc-request-${request.id_request}` },
       });
     }
     await writeSgcAudit(tx, {
@@ -1285,8 +1296,8 @@ export async function excludeReader(db: SgcDb, notifier: SgcNotifier, access: Sg
     await writeSgcAudit(tx, { idCompany: request.id_company, actorEmail: me, action: SGC_AUDIT_ACTIONS.lecturaExcluida, entity: 'read_record', entityId: idReadRecord, before: { status: 'pendiente' }, after: { status: 'excluido' }, detail: reason, ip: actor.ip, userAgent: actor.userAgent });
     const states = task.assignees.map((a) => (a.id_task_assignee === rec.id_task_assignee ? { ...toAssigneeState(a), status: 'anulado' as SgcAssigneeStatus } : toAssigneeState(a)));
     let next: string = task.task_key;
-    if (taskOutcome(states) !== 'resuelta') {
-      // 2026-10-03: excluir también cambia el porcentaje de lectura (umbral de aviso).
+    {
+      // 2026-10-03: excluir también cambia el porcentaje de lectura (umbral de aviso); D9: también si con eso se completa.
       const def = await loadDefinition(tx, request.id_flow_version);
       await checkReadThreshold(tx, request, task.id_task, def.tasks.find((t) => t.key === task.task_key)?.poolAuthorizationTypeCode ?? null, notifications, actor);
     }

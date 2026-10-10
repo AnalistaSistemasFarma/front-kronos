@@ -137,11 +137,19 @@ export function assigneesInTurn(assignees: readonly SgcAssigneeState[], mode: Sg
   return pending;
 }
 
-/** Resultado de la tarea según las decisiones de sus firmantes vigentes. */
-export function taskOutcome(assignees: readonly SgcAssigneeState[]): 'resuelta' | 'devuelta' | 'abierta' {
+/**
+ * Resultado de la tarea según las decisiones de sus firmantes vigentes.
+ * RN 2026-10-02 (validación asíncrona, sin secuencia): EN PARALELO una
+ * devolución NO cierra la tarea mientras otro firmante vigente siga
+ * pendiente; vuelve a elaboración (y se puede subir la nueva versión) solo
+ * cuando respondieron todos. EN ORDEN la devolución corta la secuencia de
+ * inmediato (los siguientes aún no están en turno).
+ */
+export function taskOutcome(assignees: readonly SgcAssigneeState[], mode: SgcSigningMode | null = null): 'resuelta' | 'devuelta' | 'abierta' {
   const live = assignees.filter(isLive);
-  if (live.some((a) => a.status === 'devuelto')) return 'devuelta';
-  if (live.length > 0 && live.every((a) => a.status === 'aprobado')) return 'resuelta';
+  const returned = live.some((a) => a.status === 'devuelto');
+  if (returned && (mode === 'orden' || !live.some((a) => a.status === 'pendiente'))) return 'devuelta';
+  if (!returned && live.length > 0 && live.every((a) => a.status === 'aprobado')) return 'resuelta';
   return 'abierta';
 }
 
