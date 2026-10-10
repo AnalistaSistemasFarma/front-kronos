@@ -37,6 +37,8 @@ export interface SgcLayoutData {
   fields: SgcStoredField[];
   participants: SgcPlacementParticipant[];
   missing: string[];
+  /** D6: firmantes que van solo al «Registro de firmas» (3 o más del mismo rol, sin ser el titular). */
+  inRegister?: string[];
   suggested: SgcStoredField[];
   canEdit: boolean;
   draft: { name: string; sha256: string; format: string } | null;

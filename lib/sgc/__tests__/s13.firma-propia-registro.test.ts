@@ -1,7 +1,7 @@
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { describe, expect, it } from 'vitest';
 import { buildControlledPdfWithLayout, readManifest, type SgcManifest, type SgcManifestSignature } from '../pdf/controlledPdf';
-import { SGC_SIGNATURE_REGISTER_MIN, headerNames, institutionalSignatureBoxesPct, overflowMeanings, suggestInstitutionalPlacements, titularOf } from '../pdf/institutional';
+import { SGC_SIGNATURE_REGISTER_MIN, headerNames, institutionalSignatureBoxesPct, overflowMeanings, registerOnlyParticipants, suggestInstitutionalPlacements, titularOf } from '../pdf/institutional';
 import type { SgcPlacementParticipant } from '../signature/fields';
 import {
   SGC_MASTER_STATUS_LABELS,
@@ -91,6 +91,16 @@ describe('SGC · S13 · registro de firmas', () => {
     const s = suggestInstitutionalPlacements(many, []).filter((f) => f.meaning === 'aprobo');
     expect(s.map((f) => f.signerKey)).toEqual(['aprobacion:a1']);
     expect(s[0].width).toBeCloseTo(box.width, 1);
+  });
+
+  it('[SGC-REQ-142] D6 (E2E 2026-10-10): quien va solo al registro de firmas no cuenta como «sin ubicar»', () => {
+    const many = [part('aprobacion:grupo:SGC-VERIF-CALIDAD', 'aprobo', 'Calidad'), part('aprobacion:a1', 'aprobo', 'A1'), part('aprobacion:a2', 'aprobo', 'A2'), part('revision:r', 'reviso', 'R')];
+    // 4 participantes: el titular (a1) y el revisor necesitan caja; a2 y el grupo van solo al registro.
+    expect(registerOnlyParticipants(many, []).map((p) => p.key).sort()).toEqual(['aprobacion:a2', 'aprobacion:grupo:SGC-VERIF-CALIDAD']);
+    // Si alguien del registro tiene caja ubicada a mano, sí cuenta como ubicada.
+    expect(registerOnlyParticipants(many, [{ signerKey: 'aprobacion:a2' }]).map((p) => p.key)).toEqual(['aprobacion:grupo:SGC-VERIF-CALIDAD']);
+    // Con menos de 3 del mismo rol, todos necesitan caja.
+    expect(registerOnlyParticipants(many.slice(1, 2), [])).toEqual([]);
   });
 
   const sig = (i: number, meaning = 'aprobo'): SgcManifestSignature => ({ uid: `u-${i}`, meaning, meaningLabel: meaning === 'aprobo' ? 'Aprobó' : 'Elaboró', signerName: `Firmante ${i}`, signerEmail: `f${i}@olp.co`, signedAt: '2026-11-20T15:00:00.000Z', reason: 'Apruebo', authMethod: 'contrasena_synerlink', contentSha256: 'a'.repeat(64), recordHash: String(i % 10).repeat(64), ...(i === 2 ? { onBehalfOf: 'titular@olp.co' } : {}) });
