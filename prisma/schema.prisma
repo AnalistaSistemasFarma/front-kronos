@@ -553,56 +553,6 @@ model CatalogField {
 }
 
 // ===================================================================
-// Módulo Gestión Documental (Fase 1) — infraestructura para la carga
-// inicial histórica de documentos, directo en estado "Vigente" (sin pasar
-// por flujo de aprobación todavía). Los 14 estados del ciclo de vida
-// documental (En creación, ... Eliminado) y el flujo de tareas que los
-// mueve son Fase 2: se instanciaron como tareas del motor de workflow YA
-// existente en este repo, que vive en SQL CRUDO (tablas process_category /
-// task_process_category / requests_general / task_request_general, ver
-// app/api/requests-general y lib/workflow) y NO está modelado en este
-// schema — se referencia por Int suelto (ver DocumentVersion.id_request_general
-// más abajo, mismo patrón que Document.id_process). El grafo de qué acción
-// mueve de un estado a otro vive en código (lib/document-management/
-// workflowStates.ts), no en estas tablas: ver el comentario de ese archivo
-// para el porqué (el motor genérico solo avanza linealmente por
-// display_order y no soporta ramas decididas en vivo ni retrocesos).
-//
-// Decisión de modelado (documentada también en el PR): estas 3 tablas SÍ
-// van en Prisma, no en SQL crudo, por 3 razones:
-//   1. Es el único mecanismo de este repo con migraciones versionadas y
-//      aplicadas por CI/CD (ver .github/workflows, "prisma generate" en el
-//      pase a producción); las tablas del motor de solicitudes generales
-//      preexisten en la BD y no se crean desde ninguna migración de este
-//      repo, así que ese camino no es reproducible para tablas NUEVAS.
-//   2. Ya hay precedente de catálogos nuevos en Prisma que se integran con
-//      el motor SQL crudo por REFERENCIA BLANDA (un Int sin relation()):
-//      ver SavedView.id_process / CatalogSource.id_process arriba. Se repite
-//      el mismo patrón aquí con Document.id_process.
-//   3. Cuando llegue la Fase 2, basta con seguir enlazando por ese Int
-//      (id_process → process_category.id) desde código servidor con SQL
-//      crudo (mssqlPool), igual que ya hacen otros módulos Prisma de este
-//      repo (p.ej. lib/access-control.ts usa prisma.$queryRaw sobre [user]).
-//
-// Acceso multiempresa: NO se crea una tabla de roles documentales nueva
-// (autor/revisor/aprobador). Se reusa subprocess_user_company con dos
-// subprocesos dedicados (lectura / escritura), exactamente igual que el
-// módulo de Registros Sanitarios — ver lib/document-management/access.ts.
-// ===================================================================
-
-// Catálogo de tipos de documento. Es GLOBAL (no por empresa): la nomenclatura
-// de políticas/procedimientos aplica igual en todo el grupo.
-
-// Documento vigente (encabezado). Multiempresa vía id_company. La carga
-// inicial (Fase 1) crea el Document + su primera DocumentVersion ya en
-// estado "Vigente"; no hay todavía transición de estados.
-
-// Una fila por versión subida a OneDrive. La migración histórica desde el
-// SGD (Fase 1, paso posterior a esta infraestructura) solo trae la versión
-// VIGENTE de cada documento como version_number = 1; el historial completo
-// de versiones anteriores queda en el SGD y no se migra.
-
-// ===================================================================
 // Módulo "Asistentes IA" — chat de agentes en SynerLink (Fase 2a: modelo de
 // datos y permisos). 2026-09-06.
 //
