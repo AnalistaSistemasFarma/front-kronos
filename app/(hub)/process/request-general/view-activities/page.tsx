@@ -252,6 +252,8 @@ function ViewRequestPage() {
   const userIdFetchRef = useRef(false);
   const [loadingUserId, setLoadingUserId] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
+  // Solo el responsable de la solicitud reasigna tareas (lo decide el servidor).
+  const [canReassignTask, setCanReassignTask] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loadingPermissions, setLoadingPermissions] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -725,6 +727,23 @@ function ViewRequestPage() {
       console.error('Error refreshing request data:', err);
     }
   };
+
+  useEffect(() => {
+    const taskId = request?.id;
+    if (!taskId) return;
+    let cancelled = false;
+    fetch(`/api/requests-general/update-task-assigned?id=${taskId}`)
+      .then((r) => (r.ok ? r.json() : { canReassign: false }))
+      .then((d) => {
+        if (!cancelled) setCanReassignTask(Boolean(d?.canReassign));
+      })
+      .catch(() => {
+        if (!cancelled) setCanReassignTask(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [request?.id]);
 
   const handleUpdateTaskAssigned = async (taskId: number, newUserId: string | null) => {
     if (!newUserId) return;
@@ -1924,7 +1943,7 @@ function ViewRequestPage() {
                   Asignado a
                 </Text>
 
-                {canEdit && !isRequestResolved() ? (
+                {canReassignTask && !isRequestResolved() ? (
                   <Select
                     mt={4}
                     data={assignableUsers}

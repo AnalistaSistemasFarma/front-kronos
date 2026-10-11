@@ -13,19 +13,22 @@ import {
   computeWorkload,
   isResponsible,
   isTaskReassignable,
+  requestResponsibleSql,
   validateReassignRequest,
   type ReassignScope,
   type WorkloadTask,
 } from '../../../../lib/request-general/workload';
 
 /**
- * Distribución de carga de tareas para el responsable de procesos.
- * GET  → delegados de su departamento, % de carga y tareas abiertas (todos los procesos).
+ * Distribución de carga de tareas para el RESPONSABLE DE LA SOLICITUD.
+ * GET  → delegados de su departamento, % de carga y tareas abiertas (todos los procesos);
+ *        solo las tareas de solicitudes de las que es responsable son reasignables.
  * POST { taskIds, toUserId, reason? } → reasignación masiva en una sola transacción.
  * Reglas en lib/request-general/workload.ts. Todo se valida con la sesión, no con el cliente.
  */
 
 const CLOSED_LIST = CLOSED_TASK_STATUS_IDS.join(',');
+const OWNS_RG = requestResponsibleSql('rg', '@u');
 
 type Pool = Parameters<Parameters<typeof withMssqlPool>[0]>[0];
 
@@ -37,10 +40,15 @@ interface Member {
 }
 
 async function loadScope(pool: Pool, userId: string) {
-  const procs = await pool
+  const owned = await pool
     .request()
     .input('u', sql.NVarChar(255), userId)
-    .query(`SELECT DISTINCT upc.id_process_category AS id FROM user_process_category_request_general upc WHERE upc.id_user = @u`);
+    .query(`SELECT DISTINCT rg.id AS id
+             FROM requests_general rg
+             INNER JOIN task_request_general trg ON trg.id_request_general = rg.id
+             INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
+             WHERE trg.id_status NOT IN (${CLOSED_LIST}) AND ISNULL(tpc.is_authorization, 0) = 0
+               AND ${OWNS_RG}`);
   const departments = await pool
     .request()
     .input('u', sql.NVarChar(255), userId)
@@ -60,7 +68,7 @@ async function loadScope(pool: Pool, userId: string) {
   const active = all.filter((m) => m.isActive);
   const scope: ReassignScope = {
     actorId: userId,
-    responsibleProcessIds: procs.recordset.map((r: { id: number }) => Number(r.id)),
+    ownedRequestIds: owned.recordset.map((r: { id: number }) => Number(r.id)),
     delegateIds: active.map((m) => m.id),
   };
   return { scope, members: active, departments: departments.recordset as { id: number; name: string }[] };
@@ -112,7 +120,7 @@ export async function GET() {
         isResponsible: true as const,
         actorId: user.id,
         departments,
-        responsibleProcessIds: scope.responsibleProcessIds,
+        ownedRequestCount: scope.ownedRequestIds.length,
         total: load.total,
         members: load.members.map(({ id, name, email, openTasks, percent }) => ({ id, name, email, openTasks, percent })),
         tasks: rows,
@@ -158,8 +166,11 @@ export async function POST(req: Request) {
             .input('id', sql.Int, id)
             .input('to', sql.NVarChar(255), toUserId)
             .input('from', sql.NVarChar(255), t.id_assigned)
+            .input('u', sql.NVarChar(255), user.id)
             .query(`UPDATE task_request_general SET id_assigned = @to
-                     WHERE id = @id AND id_assigned = @from AND id_status NOT IN (${CLOSED_LIST})`);
+                     WHERE id = @id AND id_assigned = @from AND id_status NOT IN (${CLOSED_LIST})
+                       AND EXISTS (SELECT 1 FROM requests_general rg
+                                   WHERE rg.id = task_request_general.id_request_general AND ${OWNS_RG})`);
           if (upd.rowsAffected[0] !== 1) throw Object.assign(new Error('CONFLICT'), { taskId: id });
           await new sql.Request(tx)
             .input('note', sql.NVarChar(sql.MAX), buildReassignNote({

@@ -64,7 +64,7 @@ interface WorkloadResponse {
 const REJECTION_TEXT: Record<string, string> = {
   NOT_FOUND: 'no existe',
   CLOSED: 'ya está cerrada',
-  PROCESS_NOT_OWNED: 'es de un proceso del que no eres responsable',
+  REQUEST_NOT_OWNED: 'es de una solicitud de la que no eres responsable',
   AUTHORIZATION_TASK: 'es una tarea de autorización',
   ASSIGNEE_OUTSIDE_AREA: 'su responsable actual no es de tu área',
   SAME_ASSIGNEE: 'ya está asignada a esa persona',
@@ -79,7 +79,8 @@ function loadColor(percent: number, fairShare: number) {
 
 /**
  * Botón «Distribuir carga» + panel. Solo se muestra si el servidor confirma que la
- * persona es responsable de procesos con delegados en su departamento.
+ * persona es responsable de al menos una solicitud con tareas abiertas y tiene
+ * compañeros activos en su departamento.
  */
 export default function WorkloadDistribution({ onReassigned }: { onReassigned?: () => void }) {
   const [data, setData] = useState<WorkloadResponse | null>(null);
@@ -252,7 +253,7 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
           <Text size='sm' c='dimmed'>
             Tareas abiertas de las personas de {data.departments?.map((d) => d.name).join(', ')} en todos los procesos.
             El porcentaje es la parte de las tareas abiertas del área que tiene cada persona. Solo puedes reasignar tareas de
-            los procesos de los que eres responsable.
+            las solicitudes de las que eres responsable; las demás aparecen con candado.
           </Text>
 
           {error && (
@@ -366,7 +367,7 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
                         {t.reassignable ? (
                           <Checkbox aria-label={`Seleccionar tarea ${t.id}`} checked={selected.has(t.id)} onChange={() => toggle(t.id)} />
                         ) : (
-                          <Tooltip label={t.is_authorization ? 'Tarea de autorización: no se reasigna aquí' : 'Proceso del que no eres responsable'}>
+                          <Tooltip label={t.is_authorization ? 'Tarea de autorización: no se reasigna aquí' : 'Solicitud de la que no eres responsable'}>
                             <IconLock size={16} color='var(--mantine-color-dimmed)' />
                           </Tooltip>
                         )}

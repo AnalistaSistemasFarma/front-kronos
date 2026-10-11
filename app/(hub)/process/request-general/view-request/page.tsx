@@ -1866,6 +1866,7 @@ function ViewRequestPage() {
       } else {
         const err = await response.json().catch(() => ({}));
         console.error('Error al actualizar asignado:', err.error || response.statusText);
+        toast.error(err.error || 'No se pudo actualizar el asignado');
       }
     } catch (error) {
       console.error('Error updating task assignee:', error);
