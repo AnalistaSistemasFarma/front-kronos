@@ -18,7 +18,15 @@
  *   ni En Borrador (6), en cualquier proceso.
  * - % de carga: tareas abiertas de la persona / total de tareas abiertas del grupo.
  * - Reasignable: tarea abierta de un delegado, de una solicitud de la que el actor es
- *   responsable y que no es de autorización; el destino debe ser otro delegado activo.
+ *   responsable; el destino debe ser otro delegado activo.
+ * - Autorizaciones (Nicolás Rivera, msg 16541): también se reasignan con la misma regla.
+ *   El aprobador ES task_request_general.id_assigned (bandeja «Autorizar» filtra por él),
+ *   así que reasignar mueve la aprobación al nuevo colaborador, que recibe la notificación
+ *   normal de actividad asignada; estado, secuencia y cadena no cambian. Salvaguardas:
+ *   · nunca al solicitante de la solicitud (autoaprobación) → SELF_APPROVAL_REQUESTER;
+ *   · nunca al propio actor (el responsable no se autoasigna la aprobación) → SELF_APPROVAL_ACTOR;
+ *   · las de FIRMA/Orion siguen fuera: el firmante va ligado a su correo/certificado y a
+ *     marcadores [orionAuth]/[orionFile:] (misma detección que update-activities) → SIGNATURE_AUTHORIZATION.
  */
 
 export const CLOSED_TASK_STATUS_IDS = [2, 3, 6] as const;
@@ -53,6 +61,27 @@ export interface WorkloadTask {
   id_request_general?: number | null;
   process?: string | null;
   is_authorization?: boolean | number | null;
+  id_requester?: string | null;
+  type_authorization?: string | null;
+  task?: string | null;
+  resolution?: string | null;
+}
+
+export function isAuthorizationTask(t: Pick<WorkloadTask, 'is_authorization'>): boolean {
+  return t.is_authorization === true || Number(t.is_authorization) === 1;
+}
+
+/** Autorización de firma (Orion/firma digital): alineado con update-activities/route.js. */
+export function isSignatureAuthorization(t: WorkloadTask): boolean {
+  if (!isAuthorizationTask(t)) return false;
+  const res = String(t.resolution ?? '');
+  return (
+    res.includes('[orionAuth]') ||
+    res.includes('[orionFile:') ||
+    String(t.type_authorization ?? '').toLowerCase().includes('firma') ||
+    /\bautorizar firma\b/i.test(String(t.task ?? '')) ||
+    /\bfirma digital\b/i.test(String(t.task ?? ''))
+  );
 }
 
 export interface MemberLoad extends WorkloadMember {
@@ -96,7 +125,9 @@ export type ReassignRejection =
   | 'NOT_FOUND'
   | 'CLOSED'
   | 'REQUEST_NOT_OWNED'
-  | 'AUTHORIZATION_TASK'
+  | 'SIGNATURE_AUTHORIZATION'
+  | 'SELF_APPROVAL_REQUESTER'
+  | 'SELF_APPROVAL_ACTOR'
   | 'ASSIGNEE_OUTSIDE_AREA'
   | 'SAME_ASSIGNEE';
 
@@ -126,9 +157,13 @@ export function taskRejection(
   if (!isOpenTaskStatus(task.id_status)) return 'CLOSED';
   if (task.id_request_general == null || !scope.ownedRequestIds.includes(Number(task.id_request_general)))
     return 'REQUEST_NOT_OWNED';
-  if (task.is_authorization === true || task.is_authorization === 1) return 'AUTHORIZATION_TASK';
+  if (isSignatureAuthorization(task)) return 'SIGNATURE_AUTHORIZATION';
   if (!task.id_assigned || !scope.delegateIds.includes(task.id_assigned)) return 'ASSIGNEE_OUTSIDE_AREA';
   if (task.id_assigned === toUserId) return 'SAME_ASSIGNEE';
+  if (isAuthorizationTask(task)) {
+    if (task.id_requester && String(task.id_requester).trim() === toUserId) return 'SELF_APPROVAL_REQUESTER';
+    if (toUserId === scope.actorId) return 'SELF_APPROVAL_ACTOR';
+  }
   return null;
 }
 
@@ -141,7 +176,9 @@ export const REJECTION_LABEL: Record<ReassignRejection, string> = {
   NOT_FOUND: 'no existe',
   CLOSED: 'ya está cerrada',
   REQUEST_NOT_OWNED: 'es de una solicitud de la que no eres responsable',
-  AUTHORIZATION_TASK: 'es una tarea de autorización',
+  SIGNATURE_AUTHORIZATION: 'es una autorización de firma (va ligada al firmante)',
+  SELF_APPROVAL_REQUESTER: 'es una autorización y el destino es el solicitante (autoaprobación)',
+  SELF_APPROVAL_ACTOR: 'es una autorización y no puedes asignártela a ti mismo',
   ASSIGNEE_OUTSIDE_AREA: 'su responsable actual no es de tu área',
   SAME_ASSIGNEE: 'ya está asignada a esa persona',
 };

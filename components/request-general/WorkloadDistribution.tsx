@@ -49,6 +49,8 @@ interface WorkloadTaskRow {
   company: string | null;
   start_date: string | null;
   is_authorization: boolean;
+  is_signature?: boolean;
+  id_requester?: string | null;
   reassignable: boolean;
 }
 
@@ -65,7 +67,9 @@ const REJECTION_TEXT: Record<string, string> = {
   NOT_FOUND: 'no existe',
   CLOSED: 'ya está cerrada',
   REQUEST_NOT_OWNED: 'es de una solicitud de la que no eres responsable',
-  AUTHORIZATION_TASK: 'es una tarea de autorización',
+  SIGNATURE_AUTHORIZATION: 'es una autorización de firma (va ligada al firmante)',
+  SELF_APPROVAL_REQUESTER: 'es una autorización y el destino es el solicitante (autoaprobación)',
+  SELF_APPROVAL_ACTOR: 'es una autorización y no puedes asignártela a ti mismo',
   ASSIGNEE_OUTSIDE_AREA: 'su responsable actual no es de tu área',
   SAME_ASSIGNEE: 'ya está asignada a esa persona',
 };
@@ -173,7 +177,12 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
   const allSelected = selectable.length > 0 && selectable.every((t) => selected.has(t.id));
   const selectedTasks = tasks.filter((t) => selected.has(t.id));
   const targetOptions = members.map((m) => ({ value: m.id, label: `${m.name} · ${m.percent}%` }));
-  const invalidTarget = toUserId != null && selectedTasks.some((t) => t.id_assigned === toUserId);
+  const sameTarget = toUserId != null && selectedTasks.some((t) => t.id_assigned === toUserId);
+  // Autorizaciones: nunca al solicitante (autoaprobación) ni a quien reasigna. El servidor lo vuelve a validar.
+  const selfApproval =
+    toUserId != null &&
+    selectedTasks.some((t) => t.is_authorization && (t.id_requester === toUserId || toUserId === data?.actorId));
+  const invalidTarget = sameTarget || selfApproval;
 
   const toggle = (id: number) =>
     setSelected((prev) => {
@@ -367,13 +376,20 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
                         {t.reassignable ? (
                           <Checkbox aria-label={`Seleccionar tarea ${t.id}`} checked={selected.has(t.id)} onChange={() => toggle(t.id)} />
                         ) : (
-                          <Tooltip label={t.is_authorization ? 'Tarea de autorización: no se reasigna aquí' : 'Solicitud de la que no eres responsable'}>
+                          <Tooltip label={t.is_signature ? 'Autorización de firma: va ligada al firmante' : 'Solicitud de la que no eres responsable'}>
                             <IconLock size={16} color='var(--mantine-color-dimmed)' />
                           </Tooltip>
                         )}
                       </Table.Td>
                       <Table.Td>
-                        <Text size='sm'>{t.task}</Text>
+                        <Group gap={6} wrap='nowrap'>
+                          <Text size='sm'>{t.task}</Text>
+                          {t.is_authorization && (
+                            <Badge size='xs' variant='light' color='violet'>
+                              Autorización
+                            </Badge>
+                          )}
+                        </Group>
                       </Table.Td>
                       <Table.Td>
                         <Text size='sm'>
@@ -415,7 +431,13 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
               value={toUserId}
               onChange={setToUserId}
               searchable
-              error={invalidTarget ? 'Hay tareas seleccionadas que ya son de esta persona' : undefined}
+              error={
+                sameTarget
+                  ? 'Hay tareas seleccionadas que ya son de esta persona'
+                  : selfApproval
+                    ? 'Hay autorizaciones seleccionadas: no pueden ir al solicitante ni a ti (autoaprobación)'
+                    : undefined
+              }
               data-testid='workload-target'
             />
             <Textarea label='Motivo (opcional)' placeholder='Queda en la bitácora de cada solicitud' value={reason} onChange={(e) => setReason(e.currentTarget.value)} autosize minRows={1} maxLength={500} />

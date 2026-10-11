@@ -13,6 +13,7 @@ import {
   computeWorkload,
   isResponsible,
   isTaskReassignable,
+  isSignatureAuthorization,
   requestResponsibleSql,
   validateReassignRequest,
   type ReassignScope,
@@ -47,7 +48,7 @@ async function loadScope(pool: Pool, userId: string) {
              FROM requests_general rg
              INNER JOIN task_request_general trg ON trg.id_request_general = rg.id
              INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
-             WHERE trg.id_status NOT IN (${CLOSED_LIST}) AND ISNULL(tpc.is_authorization, 0) = 0
+             WHERE trg.id_status NOT IN (${CLOSED_LIST})
                AND ${OWNS_RG}`);
   const departments = await pool
     .request()
@@ -84,10 +85,12 @@ async function sessionUser() {
 const TASK_SELECT = `
   SELECT trg.id, trg.id_assigned, trg.id_status, sc.status AS status_task, trg.start_date,
          tpc.task, tpc.id_process_category, ISNULL(tpc.is_authorization, 0) AS is_authorization,
+         taut.type_authorization, trg.resolution, rg.id_requester,
          pc.process, cr.category, rg.id AS id_request_general, rg.subject_request, rg.created_at,
          c.company
   FROM task_request_general trg
   INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
+  LEFT JOIN types_authorization taut ON taut.id = tpc.type_authorization
   LEFT JOIN process_category pc ON pc.id = tpc.id_process_category
   LEFT JOIN category_request cr ON cr.id = pc.id_category_request
   LEFT JOIN status_case sc ON sc.id_status_case = trg.id_status
@@ -110,11 +113,15 @@ export async function GET() {
         `${TASK_SELECT} WHERE trg.id_assigned IN (${inList}) AND trg.id_status NOT IN (${CLOSED_LIST})
          ORDER BY trg.id DESC`
       );
-      const rows = (tasks.recordset as (WorkloadTask & Record<string, unknown>)[]).map((t) => ({
-        ...t,
-        is_authorization: Boolean(t.is_authorization),
-        reassignable: isTaskReassignable(scope, t),
-      }));
+      const rows = (tasks.recordset as (WorkloadTask & Record<string, unknown>)[]).map(({ resolution: _r, type_authorization: _ta, ...t }) => {
+        const full = { ...t, resolution: _r as string | null, type_authorization: _ta as string | null };
+        return {
+          ...t,
+          is_authorization: Boolean(t.is_authorization),
+          is_signature: isSignatureAuthorization(full),
+          reassignable: isTaskReassignable(scope, full),
+        };
+      });
       const load = computeWorkload(members, rows);
       return {
         isResponsible: true as const,

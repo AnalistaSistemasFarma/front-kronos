@@ -3,6 +3,7 @@ import {
   buildReassignNote,
   computeWorkload,
   isRequestResponsible,
+  isSignatureAuthorization,
   isResponsible,
   isTaskReassignable,
   taskRejection,
@@ -60,7 +61,6 @@ describe('permisos de reasignación', () => {
     expect(taskRejection(scope, undefined, 'b')).toBe('NOT_FOUND');
     expect(taskRejection(scope, t(1, 'a', 2), 'b')).toBe('CLOSED');
     expect(taskRejection(scope, t(1, 'a', 4, 99), 'b')).toBe('REQUEST_NOT_OWNED');
-    expect(taskRejection(scope, t(1, 'a', 4, 10, 1), 'b')).toBe('AUTHORIZATION_TASK');
     expect(taskRejection(scope, t(1, 'zz'), 'b')).toBe('ASSIGNEE_OUTSIDE_AREA');
     expect(taskRejection(scope, t(1, 'b'), 'b')).toBe('SAME_ASSIGNEE');
     expect(taskRejection(scope, t(1, 'a'), 'b')).toBeNull();
@@ -101,6 +101,41 @@ describe('validateReassignRequest', () => {
   });
   it('acepta y deduplica', () => {
     expect(validateReassignRequest(scope, { taskIds: [1, 1, 3], toUserId: 'b' }, map, ['b'])).toEqual({ ok: true, taskIds: [1, 3] });
+  });
+});
+
+describe('autorizaciones (msg 16541)', () => {
+  const auth = (over: Partial<WorkloadTask> = {}): WorkloadTask => ({ ...t(20, 'a', 1, 10, 1), id_requester: 'r', ...over });
+  it('se reasignan con la misma regla a otro colaborador activo del área', () => {
+    expect(taskRejection(scope, auth(), 'b')).toBeNull();
+    expect(isTaskReassignable(scope, auth())).toBe(true);
+    expect(validateReassignRequest(scope, { taskIds: [20], toUserId: 'b' }, new Map([[20, auth()]]), ['b'])).toEqual({ ok: true, taskIds: [20] });
+  });
+  it('solo si el actor es responsable de la solicitud', () => {
+    expect(taskRejection(scope, auth({ id_request_general: 99 }), 'b')).toBe('REQUEST_NOT_OWNED');
+  });
+  it('bloquea la autoaprobación: destino = solicitante', () => {
+    const s2 = { ...scope, delegateIds: ['a', 'b', 'c', 'r'] };
+    expect(taskRejection(s2, auth(), 'r')).toBe('SELF_APPROVAL_REQUESTER');
+    expect(validateReassignRequest(s2, { taskIds: [20], toUserId: 'r' }, new Map([[20, auth()]]), ['r'])).toMatchObject({ status: 409, rejected: [{ id: 20, reason: 'SELF_APPROVAL_REQUESTER' }] });
+  });
+  it('bloquea que el responsable se asigne la aprobación a sí mismo', () => {
+    expect(taskRejection(scope, auth({ id_assigned: 'b' }), 'a')).toBe('SELF_APPROVAL_ACTOR');
+    // una tarea normal sí puede tomarla el actor
+    expect(taskRejection(scope, t(21, 'b'), 'a')).toBeNull();
+  });
+  it('el solicitante como destino solo se bloquea en autorizaciones', () => {
+    expect(taskRejection(scope, { ...t(22, 'a'), id_requester: 'b' }, 'b')).toBeNull();
+  });
+  it('las de firma/Orion siguen fuera', () => {
+    for (const o of [{ resolution: '[orionAuth] x' }, { resolution: '[orionFile:abc]' }, { type_authorization: 'Firma' }, { task: 'Autorizar firma' }, { task: 'Firma digital contrato' }]) {
+      expect(isSignatureAuthorization(auth(o))).toBe(true);
+      expect(taskRejection(scope, auth(o), 'b')).toBe('SIGNATURE_AUTHORIZATION');
+    }
+    expect(isSignatureAuthorization({ ...t(23, 'a'), task: 'Autorizar firma' })).toBe(false);
+  });
+  it('sin aprobador (id_assigned NULL) no se reasigna desde el panel', () => {
+    expect(taskRejection(scope, auth({ id_assigned: null }), 'b')).toBe('ASSIGNEE_OUTSIDE_AREA');
   });
 });
 
