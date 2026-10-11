@@ -160,7 +160,7 @@ AFTER UPDATE, DELETE
 AS
 BEGIN
   SET NOCOUNT ON;
-  IF NOT EXISTS (SELECT 1 FROM inserted)
+  IF EXISTS (SELECT 1 FROM deleted) AND NOT EXISTS (SELECT 1 FROM inserted)
     THROW 51102, N''sgc.generator_template_version no se borra: una configuración se rechaza o se reemplaza.'', 1;
   IF UPDATE([id_template]) OR UPDATE([version_number]) OR UPDATE([id_document_version]) OR UPDATE([body_html]) OR UPDATE([body_sha256]) OR UPDATE([fields_json]) OR UPDATE([change_reason]) OR UPDATE([proposed_by]) OR UPDATE([proposed_at])
     THROW 51103, N''El contenido y los campos de una versión de plantilla son inmutables: proponga una versión nueva.'', 1;
@@ -173,7 +173,7 @@ AFTER UPDATE, DELETE
 AS
 BEGIN
   SET NOCOUNT ON;
-  IF NOT EXISTS (SELECT 1 FROM inserted)
+  IF EXISTS (SELECT 1 FROM deleted) AND NOT EXISTS (SELECT 1 FROM inserted)
     THROW 51104, N''sgc.generated_document no se borra: un registro generado se anula con motivo.'', 1;
   IF UPDATE([id_company]) OR UPDATE([id_template]) OR UPDATE([id_template_version]) OR UPDATE([id_document]) OR UPDATE([id_document_version]) OR UPDATE([sequence_number]) OR UPDATE([code]) OR UPDATE([values_json]) OR UPDATE([pdf_item_id]) OR UPDATE([pdf_path]) OR UPDATE([pdf_sha256]) OR UPDATE([pdf_size]) OR UPDATE([generated_by]) OR UPDATE([generated_at])
     THROW 51105, N''Un registro generado es inmutable: solo se anula con motivo.'', 1;

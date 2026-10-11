@@ -33,13 +33,13 @@ import { sha256Hex } from '../../../lib/sgc/storage';
  * aprobación SOLO de Calidad y nunca la propia (también en la base), versiones
  * inmutables y «desactualizada» al cambiar el origen, solo campos permitidos,
  * registro numerado bajo bloqueo e inmutable, visor solo para quien lo generó
- * y Calidad, anulación y retiro. Empresa propia (id 112).
+ * y Calidad, anulación y retiro. Empresa propia (id 114).
  */
 const url = process.env.SGC_IT_DATABASE_URL;
 
 describe.skipIf(!url)('SGC · Generador de documentos con SQL Server', () => {
   const prisma = new PrismaClient({ datasources: { db: { url: url ?? '' } } });
-  const CO = 112;
+  const CO = 114;
   const E = {
     ana: 'ana.gen@onelatampharma.com',
     gest: 'gestion.gen@onelatampharma.com',
@@ -338,8 +338,12 @@ describe.skipIf(!url)('SGC · Generador de documentos con SQL Server', () => {
   it('[SGC-REQ-150] sin carpeta raíz no se emite; con el generador apagado no se configura ni se genera', async () => {
     const t = (await listAvailableTemplates(prisma, await accessOf(E.ana), await subjectOf(E.ana)))[0];
     await prisma.sgcCompanyConfig.update({ where: { id_company: CO }, data: { storage_root: '///' } });
-    await expect(generateFromTemplate(prisma, deps, await accessOf(E.ana), await subjectOf(E.ana), t.id, { modo: 'emitir', values: { destinatario: 'X' } }, actor(E.ana))).rejects.toThrow(/carpeta raíz/);
-    await prisma.sgcCompanyConfig.update({ where: { id_company: CO }, data: { storage_root: 'SGC/GEN', generator_enabled: false } });
+    try {
+      await expect(generateFromTemplate(prisma, deps, await accessOf(E.ana), await subjectOf(E.ana), t.id, { modo: 'emitir', values: { destinatario: 'X' } }, actor(E.ana))).rejects.toThrow(/carpeta raíz/);
+    } finally {
+      await prisma.sgcCompanyConfig.update({ where: { id_company: CO }, data: { storage_root: 'SGC/GEN' } });
+    }
+    await prisma.sgcCompanyConfig.update({ where: { id_company: CO }, data: { generator_enabled: false } });
     await expect(getTemplateForGeneration(prisma, await accessOf(E.ana), await subjectOf(E.ana), t.id)).rejects.toMatchObject({ status: 403 });
     await expect(proposeTemplateVersion(prisma, deps, notifier, await accessOf(E.gest), await subjectOf(E.gest), { idDocument: politica, reason: 'Con el generador apagado' }, actor(E.gest))).rejects.toMatchObject({ status: 403 });
     await prisma.sgcCompanyConfig.update({ where: { id_company: CO }, data: { generator_enabled: true } });
