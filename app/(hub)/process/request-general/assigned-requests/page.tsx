@@ -72,6 +72,7 @@ import {
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
+import WorkloadDistribution from '../../../../../components/request-general/WorkloadDistribution';
 import {
   buildTaskDisplayBadges,
   getSimplifiedTasksProgress,
@@ -802,6 +803,7 @@ function RequestBoard() {
                 Gestión de solicitudes y tareas asignadas a ti
               </Text>
             </div>
+            <WorkloadDistribution onReassigned={() => fetchTickets()} />
           </Flex>
 
           <Grid columns={10}>
