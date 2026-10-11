@@ -30,6 +30,10 @@ const sgcSecurityHeaders = [
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=()' },
 ];
 
+// Id del build (duo): el navegador lo compara con /api/build-id para recargar
+// en la siguiente navegación cuando hay un despliegue nuevo.
+const synerlinkBuildId = process.env.GITHUB_SHA?.slice(0, 12) || `b${Date.now().toString(36)}`;
+
 const nextConfig: NextConfig = {
   async headers() {
     return [
@@ -63,6 +67,7 @@ const nextConfig: NextConfig = {
     MICROSOFTTENANTID: process.env.MICROSOFTTENANTID,
     MICROSOFTGRAPHUSERROUTE: process.env.MICROSOFTGRAPHUSERROUTE,
     MSCALLBACKURI: process.env.MSCALLBACKURI,
+    NEXT_PUBLIC_SYNERLINK_BUILD_ID: synerlinkBuildId,
   },
 };
 

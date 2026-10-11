@@ -1,18 +1,13 @@
 'use client';
 
-import * as Sentry from '@sentry/nextjs';
-import NextError from 'next/error';
-import { useEffect } from 'react';
+import ErrorFallback from '../components/chunk-recovery/ErrorFallback';
 
+// En lugar del "Application error" crudo de Next mostramos la pantalla de SynerLink.
 export default function GlobalError({ error }: { error: Error & { digest?: string } }) {
-  useEffect(() => {
-    Sentry.captureException(error);
-  }, [error]);
-
   return (
     <html lang='es'>
-      <body>
-        <NextError statusCode={0} />
+      <body style={{ margin: 0 }}>
+        <ErrorFallback error={error} />
       </body>
     </html>
   );

@@ -5,6 +5,7 @@ import { Providers } from '../components/providers';
 import { ThemeInitScript } from '../components/theme/ThemeInitScript';
 import AppToaster from '../components/ui/AppToaster';
 import ServiceWorkerRegistrar from '../components/ServiceWorkerRegistrar';
+import ChunkErrorListener from '../components/chunk-recovery/ChunkErrorListener';
 
 export const metadata: Metadata = {
   title: 'SynerLink',
@@ -41,6 +42,7 @@ export default function RootLayout({
         <Providers>{children}</Providers>
         <AppToaster />
         <ServiceWorkerRegistrar />
+        <ChunkErrorListener />
       </body>
     </html>
   );
