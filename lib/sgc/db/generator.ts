@@ -415,7 +415,8 @@ async function renderRecordPdf(db: SgcDb, deps: Pick<SgcGeneratorDeps, 'htmlToPd
     const { width } = page.getSize();
     let size = 7;
     while (size > 4.5 && fonts.regular.widthOfTextAtSize(safeLegend, size) > width - 40) size -= 0.5;
-    page.drawText(safeLegend, { x: 20, y: 8, size, font: fonts.regular, color: rgb(0.1, 0.2, 0.45) });
+    // y = 20: por encima del pie que el visor estampa en cada consulta (y = 8, «COPIA CONTROLADA · …»).
+    page.drawText(safeLegend, { x: 20, y: 20, size, font: fonts.regular, color: rgb(0.1, 0.2, 0.45) });
   }
   pdf.setTitle(`${l.doc.code} - documento generado`);
   pdf.setProducer('SynerLink · SGC · Generador de documentos');

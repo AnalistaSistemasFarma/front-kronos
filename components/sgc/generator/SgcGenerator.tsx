@@ -710,8 +710,8 @@ export function SgcTemplatesManagement({ idCompany }: { idCompany: number }) {
                     <Table.Td>
                       <Stack gap={4}>
                         {t.versions.map((v) => (
-                          <Group key={v.id} gap={6} wrap='nowrap'>
-                            <Badge size='sm' color={VERSION_COLOR[v.status] ?? 'gray'} variant='light'>
+                          <Group key={v.id} gap={6} wrap='wrap'>
+                            <Badge size='sm' color={VERSION_COLOR[v.status] ?? 'gray'} variant='light' style={{ flexShrink: 0 }}>
                               v{v.versionNumber} · {v.statusLabel}
                             </Badge>
                             <Text size='xs' c='dimmed'>
