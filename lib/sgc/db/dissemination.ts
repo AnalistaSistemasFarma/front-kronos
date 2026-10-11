@@ -20,7 +20,9 @@ import { SgcError } from '../errors';
 import { SGC_NOTIFICATION_TITLES, recipients, requestUrl, taskUrl, type SgcNotification, type SgcNotifier } from '../notifications';
 import type { SgcCompanyAccess } from '../permissions';
 import { emissionStampFor } from '../watermark';
-import { getPoolMembers } from './authorizations';
+import { SGC_PENDING_SUGGESTION, assignmentDenial, canSuggestParticipants, firstTaskPeopleOf, isPendingSuggestion, sgcAssignmentPolicy } from '../flows/assignment';
+import { getPoolMembers, getPoolTypeCodes } from './authorizations';
+import { loadDefinition } from './flows';
 import type { SgcActor, SgcDb } from './catalogs';
 
 /**
@@ -168,9 +170,39 @@ async function loadForScope(db: SgcDb, idRequest: number) {
 }
 
 /**
- * Agrega una entrada al alcance. Antes de la divulgación: el elaborador o
- * Calidad. Durante la divulgación: solo Calidad (AMPLIAR), y las personas
- * nuevas reciben su tarea de lectura de inmediato. Después: no se cambia.
+ * 2026-10-05: el alcance lo confirma o asigna quien ejecuta la primera tarea
+ * y/o Aseguramiento de Calidad (SGC_ASIGNACION_PERMISO); el solicitante (o el
+ * elaborador sin ese permiso) solo lo SUGIERE antes de la divulgación (fila
+ * con is_active = 0 y sin removed_at, pendiente de confirmación).
+ */
+async function scopeRoleOf(
+  db: SgcDb,
+  access: SgcCompanyAccess,
+  request: { id_request: number; id_company: number; id_flow_version: number; requester_email: string; elaborator_email: string },
+  me: string,
+  disseminationStarted: boolean
+): Promise<'asignar' | 'sugerir'> {
+  const def = await loadDefinition(db, request.id_flow_version);
+  const tasks = await db.sgcTask.findMany({ where: { id_request: request.id_request }, include: { assignees: true } });
+  const assigner = {
+    email: me,
+    isQuality: access.canQuality,
+    poolTypeCodes: await getPoolTypeCodes(db, request.id_company, me),
+    requesterEmail: request.requester_email,
+    elaboratorEmail: request.elaborator_email,
+    firstTaskPeople: firstTaskPeopleOf(def, tasks),
+  };
+  const denial = assignmentDenial(def, assigner, sgcAssignmentPolicy());
+  if (!denial) return 'asignar';
+  if (canSuggestParticipants(assigner) && !disseminationStarted) return 'sugerir';
+  throw new SgcError(denial, 403);
+}
+
+/**
+ * Agrega una entrada al alcance. Antes y durante la divulgación: quien
+ * ejecuta la primera tarea y/o Aseguramiento de Calidad, nunca el solicitante
+ * (2026-10-05; antes, el elaborador o Calidad). Durante la divulgación se AMPLÍA y las
+ * personas nuevas reciben su tarea de lectura de inmediato. Después: no se cambia.
  */
 export async function addScopeEntry(db: SgcDb, notifier: SgcNotifier, access: SgcCompanyAccess, idRequest: number, input: { entry?: unknown; reason?: unknown } & Record<string, unknown>, actor: SgcActor) {
   const entry = normalizeScopeEntry(input.entry ?? input);
@@ -179,9 +211,8 @@ export async function addScopeEntry(db: SgcDb, notifier: SgcNotifier, access: Sg
   const me = lower(actor.email);
   if (request.status !== 'abierta') throw new SgcError('La solicitud no está abierta: el alcance ya no cambia.', 409);
   if (disseminationStarted && !openDissemination) throw new SgcError('La divulgación ya terminó: el alcance ya no cambia.', 409);
-  if (openDissemination ? !access.canQuality : !(access.canQuality || me === lower(request.elaborator_email))) {
-    throw new SgcError(openDissemination ? 'Durante la divulgación solo Aseguramiento de Calidad amplía el alcance.' : 'Solo el elaborador o Aseguramiento de Calidad definen el alcance de divulgación.', 403);
-  }
+  const role = await scopeRoleOf(db, access, request, me, disseminationStarted);
+  const suggesting = role === 'sugerir';
   const reason = reasonOf(input.reason, 5, 'El motivo');
   if (entry.kind === 'departamento') {
     if (!(await db.department.findUnique({ where: { id_department: entry.idDepartment! } }))) throw new SgcError('El departamento no existe.');
@@ -194,9 +225,9 @@ export async function addScopeEntry(db: SgcDb, notifier: SgcNotifier, access: Sg
   const notifications: SgcNotification[] = [];
   const result = await db.$transaction(async (tx) => {
     await tx.sgcRequest.update({ where: { id_request: idRequest }, data: { updated_at: new Date() } });
-    const dup = await tx.sgcDisseminationScope.findFirst({ where: { id_request: idRequest, scope_key: key, is_active: true } });
-    if (dup) throw new SgcError('Esa entrada ya está en el alcance.', 409);
-    const row = await tx.sgcDisseminationScope.create({ data: { id_request: idRequest, kind: entry.kind, id_department: entry.idDepartment, id_cargo: entry.idCargo, user_email: entry.userEmail, scope_key: key, added_by: me, change_reason: reason } });
+    const dup = await tx.sgcDisseminationScope.findFirst({ where: { id_request: idRequest, scope_key: key, OR: [{ is_active: true }, SGC_PENDING_SUGGESTION] } });
+    if (dup) throw new SgcError(dup.is_active ? 'Esa entrada ya está en el alcance.' : 'Esa entrada ya está sugerida: confírmela o reasígnela.', 409);
+    const row = await tx.sgcDisseminationScope.create({ data: { id_request: idRequest, kind: entry.kind, id_department: entry.idDepartment, id_cargo: entry.idCargo, user_email: entry.userEmail, scope_key: key, added_by: me, change_reason: reason, is_active: !suggesting } });
     let added: string[] = [];
     let withoutAccess: string[] = [];
     if (openDissemination) {
@@ -213,12 +244,12 @@ export async function addScopeEntry(db: SgcDb, notifier: SgcNotifier, access: Sg
         id_task: openDissemination?.id_task ?? null,
         kind: 'estado',
         author_email: me,
-        body: `Agregó al alcance de divulgación: ${SGC_SCOPE_KIND_LABELS[entry.kind]} ${entry.idDepartment ?? entry.idCargo ?? entry.userEmail ?? ''}.${openDissemination ? ` Nuevos lectores: ${added.length}.` : ''}${withoutAccess.length ? ` Sin acceso al SGC: ${withoutAccess.join(', ')}.` : ''}\nMotivo: ${reason}`.slice(0, 8000),
-        meta_json: JSON.stringify({ scope: key, added, withoutAccess }),
+        body: `${suggesting ? 'Sugirió agregar al alcance de divulgación (SUGERIDO, pendiente de confirmación)' : 'Agregó al alcance de divulgación'}: ${SGC_SCOPE_KIND_LABELS[entry.kind]} ${entry.idDepartment ?? entry.idCargo ?? entry.userEmail ?? ''}.${openDissemination ? ` Nuevos lectores: ${added.length}.` : ''}${withoutAccess.length ? ` Sin acceso al SGC: ${withoutAccess.join(', ')}.` : ''}\nMotivo: ${reason}`.slice(0, 8000),
+        meta_json: JSON.stringify({ scope: key, added, withoutAccess, status: suggesting ? 'sugerido' : 'confirmado' }),
       },
     });
-    await writeSgcAudit(tx, { idCompany: request.id_company, actorEmail: me, action: SGC_AUDIT_ACTIONS.alcanceAgregado, entity: 'dissemination_scope', entityId: row.id_scope, after: { idRequest, scope: key, added, withoutAccess }, detail: reason, ip: actor.ip, userAgent: actor.userAgent });
-    return { idScope: row.id_scope, added: added.length, withoutAccess };
+    await writeSgcAudit(tx, { idCompany: request.id_company, actorEmail: me, action: SGC_AUDIT_ACTIONS.alcanceAgregado, entity: 'dissemination_scope', entityId: row.id_scope, after: { idRequest, scope: key, added, withoutAccess, status: suggesting ? 'sugerido' : 'confirmado' }, detail: reason, ip: actor.ip, userAgent: actor.userAgent });
+    return { idScope: row.id_scope, added: added.length, withoutAccess, suggested: suggesting };
   });
   const real = notifications.filter((n) => n.emails.length);
   if (real.length) await notifier(real).catch((e) => console.error('[sgc/notificaciones]', e));
@@ -233,14 +264,16 @@ export async function removeScopeEntry(db: SgcDb, access: SgcCompanyAccess, idRe
   const me = lower(actor.email);
   if (request.status !== 'abierta') throw new SgcError('La solicitud no está abierta: el alcance ya no cambia.', 409);
   if (disseminationStarted) throw new SgcError('La divulgación ya empezó: para dejar a alguien por fuera, Calidad excluye su lectura con justificación.', 409);
-  if (!(access.canQuality || me === lower(request.elaborator_email))) throw new SgcError('Solo el elaborador o Aseguramiento de Calidad definen el alcance de divulgación.', 403);
+  const role = await scopeRoleOf(db, access, request, me, disseminationStarted);
   const row = await db.sgcDisseminationScope.findUnique({ where: { id_scope: idScope } });
   if (!row || row.id_request !== idRequest) throw new SgcError('Entrada del alcance no encontrada.', 404);
-  if (!row.is_active) throw new SgcError('La entrada ya estaba retirada.', 409);
+  if (!row.is_active && !isPendingSuggestion(row)) throw new SgcError('La entrada ya estaba retirada.', 409);
+  // Quien solo sugiere retira lo sugerido, nunca lo confirmado.
+  if (role === 'sugerir' && row.is_active) throw new SgcError('Esa entrada ya está confirmada: solo quien ejecuta la primera tarea y/o Aseguramiento de Calidad la retira.', 403);
   await db.$transaction(async (tx) => {
     await tx.sgcDisseminationScope.update({ where: { id_scope: idScope }, data: { is_active: false, removed_by: me, removed_at: new Date(), remove_reason: reason } });
     await tx.sgcInteraction.create({ data: { id_request: idRequest, kind: 'estado', author_email: me, body: `Retiró del alcance de divulgación: ${row.scope_key}.\nMotivo: ${reason}`, meta_json: JSON.stringify({ scope: row.scope_key }) } });
-    await writeSgcAudit(tx, { idCompany: request.id_company, actorEmail: me, action: SGC_AUDIT_ACTIONS.alcanceRetirado, entity: 'dissemination_scope', entityId: idScope, before: { active: true, scope: row.scope_key }, after: { active: false }, detail: reason, ip: actor.ip, userAgent: actor.userAgent });
+    await writeSgcAudit(tx, { idCompany: request.id_company, actorEmail: me, action: SGC_AUDIT_ACTIONS.alcanceRetirado, entity: 'dissemination_scope', entityId: idScope, before: { active: row.is_active, status: row.is_active ? 'confirmado' : 'sugerido', scope: row.scope_key }, after: { active: false }, detail: reason, ip: actor.ip, userAgent: actor.userAgent });
   });
   return { ok: true };
 }
@@ -342,7 +375,7 @@ export async function sendReadingReminders(db: SgcDb, notifier: SgcNotifier, acc
 // ---------------------------------------------------------------------------
 
 export interface SgcDisseminationView {
-  scope: { id: number; kind: SgcScopeKind; kindLabel: string; label: string; addedBy: string; addedAt: string; reason: string | null }[];
+  scope: { id: number; kind: SgcScopeKind; kindLabel: string; label: string; addedBy: string; addedAt: string; reason: string | null; suggested: boolean }[];
   scopeHistory: { id: number; label: string; isActive: boolean; addedBy: string; addedAt: string; removedBy: string | null; removedAt: string | null; removeReason: string | null }[];
   readers: {
     id: number;
@@ -380,7 +413,7 @@ export interface SgcDisseminationView {
 export async function getDisseminationView(
   db: SgcDb,
   request: { id_request: number; id_company: number; status: string; elaborator_email: string; tasks: { id_task: number; status: string; taskDef: { assignment: string } }[] },
-  viewer: { email: string; isQuality: boolean },
+  viewer: { email: string; isQuality: boolean; canAssign?: boolean; canSuggest?: boolean },
   names: (email: string | null) => string | null
 ): Promise<SgcDisseminationView> {
   const rows = await db.sgcDisseminationScope.findMany({ where: { id_request: request.id_request }, orderBy: { id_scope: 'asc' } });
@@ -404,6 +437,7 @@ export async function getDisseminationView(
           ? `Cargo: ${cargoName.get(r.id_cargo!) ?? r.id_cargo}`
           : `Persona: ${names(r.user_email) ?? r.user_email} (${r.user_email})`;
   const active = rows.filter((r) => r.is_active);
+  const pendingRows = rows.filter(isPendingSuggestion);
   const entries = active.map(toEntry);
   const dir = await buildScopeDirectory(db, request.id_company, entries);
   const { withoutAccess, outsideCompany } = resolveReaders(entries, dir);
@@ -415,9 +449,11 @@ export async function getDisseminationView(
   ]);
   const started = dTasks.length > 0;
   const openTask = current && current.status === 'abierta' ? current : null;
-  const isElaborator = lower(viewer.email) === lower(request.elaborator_email);
+  // 2026-10-05: el alcance lo selecciona quien ejecuta la primera tarea y/o Calidad (nunca el solicitante).
+  const canAssign = viewer.canAssign ?? viewer.isQuality;
   return {
-    scope: active.map((r) => ({ id: r.id_scope, kind: r.kind as SgcScopeKind, kindLabel: SGC_SCOPE_KIND_LABELS[r.kind as SgcScopeKind] ?? r.kind, label: labelOf(r), addedBy: names(r.added_by) ?? r.added_by, addedAt: r.added_at.toISOString(), reason: r.change_reason })),
+    // 2026-10-05: lo SUGERIDO aparece en la misma lista, marcado (no cuenta hasta confirmarse).
+    scope: [...active, ...pendingRows].map((r) => ({ id: r.id_scope, kind: r.kind as SgcScopeKind, kindLabel: SGC_SCOPE_KIND_LABELS[r.kind as SgcScopeKind] ?? r.kind, label: labelOf(r), addedBy: names(r.added_by) ?? r.added_by, addedAt: r.added_at.toISOString(), reason: r.change_reason, suggested: !r.is_active })),
     scopeHistory: rows.map((r) => ({ id: r.id_scope, label: labelOf(r), isActive: r.is_active, addedBy: r.added_by, addedAt: r.added_at.toISOString(), removedBy: r.removed_by, removedAt: r.removed_at?.toISOString() ?? null, removeReason: r.remove_reason })),
     readers: records.map((r) => ({
       id: r.id_read_record,
@@ -444,8 +480,8 @@ export async function getDisseminationView(
     started,
     open: Boolean(openTask),
     idTask: current?.id_task ?? null,
-    canEditScope: isOpen && (started ? Boolean(openTask) && viewer.isQuality : viewer.isQuality || isElaborator),
-    canRemoveScope: isOpen && !started && (viewer.isQuality || isElaborator),
+    canEditScope: isOpen && (started ? Boolean(openTask) && canAssign : canAssign || Boolean(viewer.canSuggest)),
+    canRemoveScope: isOpen && !started && (canAssign || Boolean(viewer.canSuggest)),
     canManage: Boolean(openTask) && viewer.isQuality,
   };
 }

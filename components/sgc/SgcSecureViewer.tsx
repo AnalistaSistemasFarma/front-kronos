@@ -28,6 +28,13 @@ export interface SgcSecureViewerProps {
    * documento completo cabe en pantalla). Con esto se habilita «Leído».
    */
   onReachedEnd?: (pages: number) => void;
+  /**
+   * 2026-10-05 («Ver documento» de los adjuntos de la solicitud): oculta
+   * Descargar e Imprimir aunque haya permiso excepcional (solo consulta).
+   */
+  hideDownloadPrint?: boolean;
+  /** 2026-10-05 (Generador de documentos): texto de la barra en vez de «Copia controlada · solo consulta». */
+  caption?: string;
 }
 
 /** Escala inicial del visor (página al 100 % del ancho disponible). */
@@ -102,7 +109,9 @@ async function printAuthorized(url: string) {
   setTimeout(() => frame.remove(), 60_000);
 }
 
-export default function SgcSecureViewer({ fileUrl, canDownload, canPrint, onReachedEnd }: SgcSecureViewerProps) {
+export default function SgcSecureViewer({ fileUrl, canDownload: canDownloadProp, canPrint: canPrintProp, onReachedEnd, hideDownloadPrint = false, caption }: SgcSecureViewerProps) {
+  const canDownload = canDownloadProp && !hideDownloadPrint;
+  const canPrint = canPrintProp && !hideDownloadPrint;
   const pagesRef = useRef<HTMLDivElement>(null);
   const bytesRef = useRef<Uint8Array | null>(null);
   const renderGenRef = useRef(0);
@@ -187,7 +196,7 @@ export default function SgcSecureViewer({ fileUrl, canDownload, canPrint, onReac
         <Group gap={6}>
           <IconLock size={16} />
           <Text size='sm' c='dimmed'>
-            Copia controlada · solo consulta{canDownload || canPrint ? ' (con permiso excepcional vigente)' : ''}
+            {caption ?? `Copia controlada · solo consulta${canDownload || canPrint ? ' (con permiso excepcional vigente)' : ''}`}
           </Text>
         </Group>
         <Group gap='xs'>

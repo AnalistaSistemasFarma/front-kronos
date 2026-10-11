@@ -68,6 +68,26 @@ export function normalizeScopeEntry(raw: unknown): SgcScopeEntry {
   return { kind, idDepartment: null, idCargo: null, userEmail: email };
 }
 
+/**
+ * Correo de la persona elegida en el campo «Persona» del alcance. Al elegir
+ * una opción, el Autocomplete de Mantine deja en el campo la ETIQUETA
+ * («Nombre (correo)»), no el valor; aquí se traduce al correo para que el
+ * servidor no responda «Indique el correo de la persona.».
+ */
+export function personEmailFromInput(text: string, options: readonly { value: string; label: string }[] = []): string {
+  const t = text.trim();
+  const byLabel = options.find((o) => o.label === t);
+  if (byLabel) return byLabel.value.trim();
+  const inParens = t.match(/\(([^()\s]+@[^()\s]+)\)$/);
+  return inParens ? inParens[1] : t;
+}
+
+/** ¿El texto del campo «Persona» corresponde a un correo válido? */
+export function isPersonEmail(text: string, options: readonly { value: string; label: string }[] = []): boolean {
+  const email = personEmailFromInput(text, options);
+  return EMAIL_RE.test(email) && email.length <= 255;
+}
+
 /** Clave estable de una entrada (para no repetirla en el alcance). */
 export function scopeKey(e: SgcScopeEntry): string {
   switch (e.kind) {

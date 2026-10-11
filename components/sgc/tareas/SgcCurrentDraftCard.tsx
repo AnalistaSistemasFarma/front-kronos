@@ -1,11 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { Alert, Badge, Button, Card, Code, Group, Stack, Text, Title } from '@mantine/core';
 import { IconArrowBackUp, IconEye, IconFileCheck, IconPencilCheck } from '@tabler/icons-react';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 import { buildRoundNotice, draftCardTitle, draftEditorHref, summarizeCurrentDraft } from '../../../lib/sgc/draft/view';
 import { formatDateCO } from './format';
+import SgcDocumentViewerModal from '../SgcDocumentViewerModal';
 
 /**
  * Tarjeta destacada «Documento a revisar / aprobar / elaborar» en la parte
@@ -19,6 +21,7 @@ import { formatDateCO } from './format';
  */
 export default function SgcCurrentDraftCard({ data, openTask, idTask, minorHref = null }: { data: SgcRequestDetail; openTask: { key: string; round: number } | null; idTask: number | null; minorHref?: string | null }) {
   const { request, currentDraft, attachments, draftRevisions, interactions, tasks } = data;
+  const [viewing, setViewing] = useState(false);
   const summary = summarizeCurrentDraft(currentDraft, attachments, draftRevisions);
   const notice = buildRoundNotice({ openTask, tasks, interactions, attachments, revisions: draftRevisions });
   if (!summary && !notice) return null;
@@ -71,7 +74,7 @@ export default function SgcCurrentDraftCard({ data, openTask, idTask, minorHref 
                 Ver documento
               </Button>
             ) : (
-              <Button component='a' href={href} size='md' leftSection={<IconEye size={18} />} data-testid='sgc-ver-documento'>
+              <Button onClick={() => setViewing(true)} size='md' leftSection={<IconEye size={18} />} data-testid='sgc-ver-documento'>
                 Ver documento
               </Button>
             ))}
@@ -112,6 +115,7 @@ export default function SgcCurrentDraftCard({ data, openTask, idTask, minorHref 
           </Stack>
         </Alert>
       )}
+      {currentDraft?.kind !== 'borrador_editor' && <SgcDocumentViewerModal fileUrl={viewing ? href : null} title={summary?.name ?? 'Documento'} onClose={() => setViewing(false)} />}
     </Card>
   );
 }

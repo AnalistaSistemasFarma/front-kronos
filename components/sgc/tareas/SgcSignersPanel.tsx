@@ -3,13 +3,16 @@
 import { useState } from 'react';
 import { Alert, Badge, Button, Card, Group, MultiSelect, SegmentedControl, Stack, Text, Textarea, Title } from '@mantine/core';
 import { sgcTouchComboboxProps } from '../SgcSelect';
-import { IconBulb, IconPencil, IconUsersGroup } from '@tabler/icons-react';
+import { IconBulb, IconCheck, IconPencil, IconUsersGroup } from '@tabler/icons-react';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 import type { SgcMatrixSuggestion } from '../../../lib/sgc/flows/matrix';
 
 /**
- * Revisores y aprobadores del documento. Los asigna y cambia el ELABORADOR
- * (decisión de Nicolás del 2026-09-30); el modo de firma (en orden o en
+ * Revisores y aprobadores del documento (2026-10-05, decisión de Nicolás).
+ * El solicitante los elige con esta misma pantalla, pero quedan SUGERIDOS;
+ * quien ejecuta la primera tarea (quien crea el documento, de Calidad) y/o
+ * Calidad los confirma con un clic («Aprobar sugerencia») o los reasigna.
+ * Solo lo confirmado entra a las tareas. El modo de firma (en orden o en
  * paralelo) se elige en cada documento. La matriz de responsables solo
  * SUGIERE. Cada cambio pide motivo y queda en el historial.
  */
@@ -20,17 +23,23 @@ export interface SgcSignersPanelProps {
   canEdit: boolean;
   users: { value: string; label: string }[];
   suggestion: SgcMatrixSuggestion[] | null;
+  /** Lo que guarde esta persona queda SUGERIDO (solicitante). */
+  suggestOnly?: boolean;
+  /** Puede confirmar con un clic lo sugerido (quien ejecuta la primera tarea y/o Calidad). */
+  canConfirm?: boolean;
+  onConfirm?: () => Promise<void>;
   onSave: (stepKey: string, signers: string[], mode: 'orden' | 'paralelo', reason: string) => Promise<void>;
 }
 
 const ROLE_OF_STEP: Record<string, 'revisor' | 'aprobador'> = { revision: 'revisor', aprobacion: 'aprobador' };
 
-function StepEditor({ step, canEdit, users, suggestion, onSave }: { step: Step } & Omit<SgcSignersPanelProps, 'steps'>) {
+function StepEditor({ step, canEdit, users, suggestion, suggestOnly, onSave }: { step: Step } & Omit<SgcSignersPanelProps, 'steps' | 'canConfirm' | 'onConfirm'>) {
   const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState<string[]>(step.signers.map((s) => s.email));
+  const [value, setValue] = useState<string[]>((step.signers.length ? step.signers : step.suggested).map((s) => s.email));
   const [mode, setMode] = useState<'orden' | 'paralelo'>((step.mode as 'orden' | 'paralelo') ?? 'paralelo');
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
+  // Sugerir (o reemplazar una sugerencia) no pide motivo; cambiar lo confirmado, sí.
   const initial = step.signers.length === 0;
   const role = ROLE_OF_STEP[step.key];
   const hint = suggestion?.find((s) => s.role === role);
@@ -49,9 +58,9 @@ function StepEditor({ step, canEdit, users, suggestion, onSave }: { step: Step }
             </Badge>
           )}
         </Group>
-        {canEdit && !editing && (
+        {canEdit && !editing && !(suggestOnly && step.signers.length > 0) && (
           <Button size='xs' variant='light' leftSection={<IconPencil size={14} />} onClick={() => setEditing(true)} data-testid={`sgc-editar-firmantes-${step.key}`}>
-            {initial ? 'Asignar' : 'Cambiar'}
+            {suggestOnly ? (step.suggested.length ? 'Cambiar sugerencia' : 'Sugerir') : initial ? (step.suggested.length ? 'Reasignar' : 'Asignar') : 'Cambiar'}
           </Button>
         )}
       </Group>
@@ -64,6 +73,23 @@ function StepEditor({ step, canEdit, users, suggestion, onSave }: { step: Step }
                 {s.name || s.email}
               </Text>
             ))}
+          </Stack>
+        ) : step.suggested.length ? (
+          <Stack gap={2} data-testid={`sgc-firmantes-sugeridos-${step.key}`}>
+            {step.suggested.map((s) => (
+              <Group key={s.email} gap={6}>
+                <Text size='sm'>
+                  {step.mode === 'orden' ? `${s.order}. ` : '• '}
+                  {s.name || s.email}
+                </Text>
+                <Badge variant='light' color='orange' size='xs'>
+                  Sugerido
+                </Badge>
+              </Group>
+            ))}
+            <Text size='xs' c='dimmed'>
+              Sugerido por {step.suggested[0].addedBy}. Pendiente de confirmación: aún no firma nadie.
+            </Text>
           </Stack>
         ) : (
           <Text size='sm' c='dimmed'>
@@ -130,6 +156,29 @@ function StepEditor({ step, canEdit, users, suggestion, onSave }: { step: Step }
   );
 }
 
+function ConfirmButton({ onConfirm }: { onConfirm: () => Promise<void> }) {
+  const [saving, setSaving] = useState(false);
+  return (
+    <Button
+      size='xs'
+      color='teal'
+      loading={saving}
+      leftSection={<IconCheck size={14} />}
+      onClick={async () => {
+        setSaving(true);
+        try {
+          await onConfirm();
+        } finally {
+          setSaving(false);
+        }
+      }}
+      data-testid='sgc-aprobar-sugerencia'
+    >
+      Aprobar sugerencia
+    </Button>
+  );
+}
+
 export default function SgcSignersPanel(props: SgcSignersPanelProps) {
   if (props.steps.length === 0) return null;
   return (
@@ -139,13 +188,23 @@ export default function SgcSignersPanel(props: SgcSignersPanelProps) {
         Revisores y aprobadores
       </Title>
       <Text size='sm' c='dimmed' mb='md'>
-        {props.canEdit
-          ? 'Como elaborador, usted asigna quién revisa y quién aprueba, y elige si firman en orden o en paralelo. Puede cambiarlos durante el proceso; cada cambio queda en el historial con su motivo.'
-          : 'Los asigna y cambia el elaborador del documento.'}
+        {props.suggestOnly
+          ? 'Usted sugiere quién revisa y quién aprueba, y si firman en orden o en paralelo. Lo que elija queda «Sugerido» hasta que lo confirme o lo reasigne quien crea el documento (Aseguramiento de Calidad).'
+          : props.canEdit
+            ? 'Usted confirma o asigna quién revisa y quién aprueba, y elige si firman en orden o en paralelo. Puede cambiarlos durante el proceso; cada cambio queda en el historial con su motivo.'
+            : 'Los confirma y cambia quien crea el documento (Aseguramiento de Calidad); el solicitante solo los sugiere.'}
       </Text>
+      {props.canConfirm && props.onConfirm && (
+        <Alert color='orange' variant='light' icon={<IconBulb size={16} />} mb='md' title='Hay firmantes o alcance sugeridos por el solicitante' data-testid='sgc-sugerencia-pendiente'>
+          <Group justify='space-between' gap='xs'>
+            <Text size='sm'>Revise lo marcado como «Sugerido». Puede aprobar la sugerencia completa (firmantes y alcance) o reasignar cada paso.</Text>
+            <ConfirmButton onConfirm={props.onConfirm} />
+          </Group>
+        </Alert>
+      )}
       <Stack gap='sm'>
         {props.steps.map((s) => (
-          <StepEditor key={`${s.key}-${s.signers.map((x) => x.email).join(',')}-${s.mode}`} step={s} {...props} />
+          <StepEditor key={`${s.key}-${s.signers.map((x) => x.email).join(',')}-${s.suggested.map((x) => x.email).join(',')}-${s.mode}`} step={s} canEdit={props.canEdit} users={props.users} suggestion={props.suggestion} suggestOnly={props.suggestOnly} onSave={props.onSave} />
         ))}
       </Stack>
     </Card>

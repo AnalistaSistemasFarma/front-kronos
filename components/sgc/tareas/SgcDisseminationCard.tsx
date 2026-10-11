@@ -5,7 +5,7 @@ import { Alert, Autocomplete, Badge, Button, Card, Group, Modal, Progress, Stack
 import SgcSelect, { sgcTouchComboboxProps } from '../SgcSelect';
 import { IconBell, IconPlus, IconSpeakerphone, IconUserMinus, IconX } from '@tabler/icons-react';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
-import { SGC_SCOPE_KIND_LABELS, type SgcScopeKind } from '../../../lib/sgc/dissemination/scope';
+import { SGC_SCOPE_KIND_LABELS, isPersonEmail, personEmailFromInput, type SgcScopeKind } from '../../../lib/sgc/dissemination/scope';
 import { useSgcFetch } from '../useSgcFetch';
 import { formatDateCO } from './format';
 
@@ -13,9 +13,9 @@ import { formatDateCO } from './format';
  * DIVULGACIÓN de la solicitud (Sprint 4, paso 4): alcance (toda la empresa,
  * departamentos, cargos o personas), cobertura de lectura (quién leyó, quién
  * falta), recordatorios, exclusión justificada y cierre por Calidad. Lo ven
- * el solicitante, el elaborador y Calidad; el alcance lo define el
- * elaborador o Calidad antes de la divulgación y durante ella solo Calidad
- * lo amplía.
+ * el solicitante, el elaborador y Calidad. El solicitante SUGIERE el alcance
+ * (queda marcado «Sugerido») y quien ejecuta la primera tarea y/o Calidad lo
+ * confirma o reasigna (2026-10-05); durante la divulgación Calidad lo amplía.
  */
 export interface SgcDisseminationCardProps {
   idCompany: number;
@@ -46,7 +46,7 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
         : [];
 
   const add = async () => {
-    const entry = kind === 'departamento' ? { kind, idDepartment: Number(target) } : kind === 'cargo' ? { kind, idCargo: Number(target) } : kind === 'persona' ? { kind, email: email.trim() } : { kind };
+    const entry = kind === 'departamento' ? { kind, idDepartment: Number(target) } : kind === 'cargo' ? { kind, idCargo: Number(target) } : kind === 'persona' ? { kind, email: personEmailFromInput(email, users) } : { kind };
     const ok = await onAction({ action: 'agregar', entry, reason }, view.open ? 'Alcance ampliado: las personas nuevas recibieron su tarea de lectura.' : 'Alcance de divulgación actualizado.');
     if (ok) {
       setTarget(null);
@@ -55,7 +55,7 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
     }
   };
 
-  const ready = reason.trim().length >= 5 && (kind === 'empresa' || (kind === 'persona' ? email.includes('@') : Boolean(target)));
+  const ready = reason.trim().length >= 5 && (kind === 'empresa' || (kind === 'persona' ? isPersonEmail(email, users) : Boolean(target)));
 
   return (
     <Card shadow='sm' p='xl' radius='md' withBorder mt='6' data-testid='sgc-divulgacion'>
@@ -87,6 +87,11 @@ export default function SgcDisseminationCard({ idCompany, view, users, onAction 
             <Group key={s.id} justify='space-between' wrap='nowrap'>
               <Text size='sm'>
                 {s.label}{' '}
+                {s.suggested && (
+                  <Badge variant='light' color='orange' size='xs' data-testid='sgc-alcance-sugerido'>
+                    Sugerido
+                  </Badge>
+                )}{' '}
                 <Text span size='xs' c='dimmed'>
                   · {s.addedBy} · {formatDateCO(s.addedAt)}
                 </Text>

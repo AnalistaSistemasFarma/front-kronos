@@ -20,7 +20,7 @@ import {
   Title,
 } from '@mantine/core';
 import SgcSelect from '../../../../../../components/sgc/SgcSelect';
-import { IconAlertTriangle, IconArrowLeft, IconBan, IconCheck, IconEdit, IconEye, IconFilePlus, IconKey } from '@tabler/icons-react';
+import { IconAlertTriangle, IconArrowLeft, IconBan, IconCheck, IconEdit, IconEye, IconFileExport, IconFilePlus, IconKey } from '@tabler/icons-react';
 import SgcShell from '../../../../../../components/sgc/SgcShell';
 import SgcSecureViewer from '../../../../../../components/sgc/SgcSecureViewer';
 import SgcDocumentRelations from '../../../../../../components/sgc/relations/SgcDocumentRelations';
@@ -152,6 +152,18 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
                 data-testid='sgc-ficha-nueva-version'
               >
                 Solicitar nueva versión
+              </Button>
+            )}
+            {/* 2026-10-05: generar a partir de esta plantilla NO es un cambio del documento: sin motivo de cambio. */}
+            {d.status === 'vigente' && current && (company.canManage || company.canQuality) && (
+              <Button
+                component={Link}
+                href={sgcHref(`${SGC_BASE_URL}/generador/${d.idDocument}`, company.idCompany)}
+                variant='light'
+                leftSection={<IconFileExport size={16} />}
+                data-testid='sgc-ficha-generar'
+              >
+                Generar documento
               </Button>
             )}
             {permissions.canAdminister && d.status !== 'anulado' && (

@@ -8,6 +8,7 @@ import {
   IconCalendarDue,
   IconChecklist,
   IconFileCertificate,
+  IconFileExport,
   IconFilePlus,
   IconFileUpload,
   IconGitBranch,
@@ -22,6 +23,7 @@ import SgcModuleCard, { type SgcModuleCardProps } from '../../../../components/s
 import SgcShell from '../../../../components/sgc/SgcShell';
 import { sgcHref } from '../../../../components/sgc/useSgcCompany';
 import { SGC_BASE_URL } from '../../../../lib/sgc/constants';
+import { canUseSgcGenerator } from '../../../../lib/sgc/generator';
 import type { SgcCompanyAccess } from '../../../../lib/sgc/permissions';
 
 /**
@@ -138,6 +140,17 @@ function accesosDocumentos(company: SgcCompanyAccess): SgcModuleCardProps[] {
       sprint: 'Sprint 2',
       href: sgcHref(`${SGC_BASE_URL}/autorizaciones`, id),
     },
+    ...(canUseSgcGenerator(company)
+      ? [
+          {
+            title: 'Generador de documentos',
+            description: 'Genere un documento a partir de un vigente: copia de trabajo editable y PDF con su encabezado.',
+            icon: <IconFileExport size={24} />,
+            sprint: 'Generador',
+            href: sgcHref(`${SGC_BASE_URL}/generador`, id),
+          },
+        ]
+      : []),
     ...(company.canAdminFlows || company.canQuality
       ? [
           {

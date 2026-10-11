@@ -4,9 +4,11 @@ import {
   SGC_SCOPE_KIND_LABELS,
   defaultScope,
   getReadSignError,
+  isPersonEmail,
   isSgcScopeKind,
   normalizeReadingEvent,
   normalizeScopeEntry,
+  personEmailFromInput,
   resolveReaders,
   scopeKey,
   summarizeCoverage,
@@ -91,6 +93,23 @@ describe('SGC · S4 · alcance de divulgación', () => {
     expect(isSgcScopeKind('cargo')).toBe(true);
     expect(isSgcScopeKind(3)).toBe(false);
     expect(Object.keys(SGC_SCOPE_KIND_LABELS)).toHaveLength(4);
+  });
+
+  it('[SGC-REQ-053] la persona elegida en el Autocomplete («Nombre (correo)») se traduce a su correo', () => {
+    const users = [
+      { value: 'ana@olp.co', label: 'Ana Velásquez (ana@olp.co)' },
+      { value: 'luis@olp.co', label: 'luis@olp.co' },
+    ];
+    // Mantine deja la ETIQUETA en el campo al elegir la opción: antes viajaba tal cual y el servidor respondía «Indique el correo».
+    expect(() => normalizeScopeEntry({ kind: 'persona', email: 'Ana Velásquez (ana@olp.co)' })).toThrow(/correo/);
+    expect(personEmailFromInput('Ana Velásquez (ana@olp.co)', users)).toBe('ana@olp.co');
+    expect(normalizeScopeEntry({ kind: 'persona', email: personEmailFromInput('Ana Velásquez (ana@olp.co)', users) }).userEmail).toBe('ana@olp.co');
+    expect(personEmailFromInput('luis@olp.co', users)).toBe('luis@olp.co');
+    expect(personEmailFromInput(' otra@pisa.com.mx ', users)).toBe('otra@pisa.com.mx');
+    expect(personEmailFromInput('Sin Lista (x@y.co)')).toBe('x@y.co');
+    expect(isPersonEmail('Ana Velásquez (ana@olp.co)', users)).toBe(true);
+    expect(isPersonEmail('Ana Velásquez', users)).toBe(false);
+    expect(isPersonEmail('ana@', users)).toBe(false);
   });
 
   it('[SGC-REQ-053][SGC-REQ-054] resuelve lectores sin repetir, en orden, con su origen; quien no tiene acceso al SGC queda aparte', () => {
