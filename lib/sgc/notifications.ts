@@ -41,6 +41,9 @@ export const SGC_NOTIFICATION_TITLES = {
   // Sprint 11: copias no controladas.
   copiaNoControlada: 'Solicitud de copia no controlada · SynerLink',
   copiaNoControladaDecidida: 'Su copia no controlada fue decidida · SynerLink',
+  // Generador de documentos (2026-10-10).
+  plantillaPropuesta: 'Plantilla del generador por aprobar · SynerLink',
+  plantillaDecidida: 'Su plantilla del generador fue decidida · SynerLink',
 } as const;
 
 export function taskUrl(idTask: number): string {
