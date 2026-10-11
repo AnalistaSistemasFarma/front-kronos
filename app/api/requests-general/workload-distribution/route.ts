@@ -11,6 +11,7 @@ import {
   CLOSED_TASK_STATUS_IDS,
   buildReassignNote,
   computeWorkload,
+  isAuthorizationTask,
   isResponsible,
   isTaskReassignable,
   isSignatureAuthorization,
@@ -23,7 +24,8 @@ import {
 /**
  * Distribución de carga de tareas para el RESPONSABLE DE LA SOLICITUD.
  * GET  → delegados de su departamento, % de carga y tareas abiertas (todos los procesos);
- *        solo las tareas de solicitudes de las que es responsable son reasignables.
+ *        solo las tareas de solicitudes de las que es responsable son reasignables
+ *        (incluidas las autorizaciones, SynerLink c47 msg 16541; nunca al solicitante: 422).
  * POST { taskIds, toUserId, reason? } → reasignación masiva en una sola transacción.
  * Reglas en lib/request-general/workload.ts. Todo se valida con la sesión, no con el cliente.
  */
@@ -169,6 +171,7 @@ export async function POST(req: Request) {
       try {
         for (const id of v.taskIds) {
           const t = byId.get(id)!;
+          const isAuth = isAuthorizationTask(t);
           const upd = await new sql.Request(tx)
             .input('id', sql.Int, id)
             .input('to', sql.NVarChar(255), toUserId)
@@ -177,7 +180,9 @@ export async function POST(req: Request) {
             .query(`UPDATE task_request_general SET id_assigned = @to
                      WHERE id = @id AND id_assigned = @from AND id_status NOT IN (${CLOSED_LIST})
                        AND EXISTS (SELECT 1 FROM requests_general rg
-                                   WHERE rg.id = task_request_general.id_request_general AND ${OWNS_RG})`);
+                                   WHERE rg.id = task_request_general.id_request_general AND ${OWNS_RG}
+                                     -- anti-autoaprobación: una autorización nunca va a quien creó la solicitud
+                                     AND NOT (${isAuth ? 1 : 0} = 1 AND rg.id_requester = @to))`);
           if (upd.rowsAffected[0] !== 1) throw Object.assign(new Error('CONFLICT'), { taskId: id });
           await new sql.Request(tx)
             .input('note', sql.NVarChar(sql.MAX), buildReassignNote({
@@ -187,6 +192,7 @@ export async function POST(req: Request) {
               toName: names.get(toUserId) ?? toUserId,
               actorName: names.get(user.id) ?? user.name,
               reason,
+              isAuthorization: isAuth,
             }))
             .input('req', sql.Int, t.id_request_general)
             .input('pc', sql.Int, t.id_process_category)

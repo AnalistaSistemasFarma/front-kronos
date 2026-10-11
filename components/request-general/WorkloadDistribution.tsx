@@ -385,9 +385,9 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
                         <Group gap={6} wrap='nowrap'>
                           <Text size='sm'>{t.task}</Text>
                           {t.is_authorization && (
-                            <Badge size='xs' variant='light' color='violet'>
-                              Autorización
-                            </Badge>
+                            <Tooltip label='Autorización: quien la reciba queda como aprobador. No puede ir a quien creó la solicitud.'>
+                              <Badge size='xs' variant='light' color='blue'>Autorización</Badge>
+                            </Tooltip>
                           )}
                         </Group>
                       </Table.Td>

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  SELF_APPROVAL_ERROR,
+  authorizationDecisionBlock,
   buildReassignNote,
+  isSelfApproval,
   computeWorkload,
   isRequestResponsible,
   isSignatureAuthorization,
@@ -57,7 +60,7 @@ describe('permisos de reasignación', () => {
     expect(isResponsible({ ownedRequestIds: [1], delegateIds: [] })).toBe(false);
     expect(isResponsible(scope)).toBe(true);
   });
-  it('rechaza cerradas, solicitudes ajenas, autorizaciones, asignados fuera del área y mismo destino', () => {
+  it('rechaza cerradas, solicitudes ajenas, asignados fuera del área y mismo destino', () => {
     expect(taskRejection(scope, undefined, 'b')).toBe('NOT_FOUND');
     expect(taskRejection(scope, t(1, 'a', 2), 'b')).toBe('CLOSED');
     expect(taskRejection(scope, t(1, 'a', 4, 99), 'b')).toBe('REQUEST_NOT_OWNED');
@@ -117,7 +120,7 @@ describe('autorizaciones (msg 16541)', () => {
   it('bloquea la autoaprobación: destino = solicitante', () => {
     const s2 = { ...scope, delegateIds: ['a', 'b', 'c', 'r'] };
     expect(taskRejection(s2, auth(), 'r')).toBe('SELF_APPROVAL_REQUESTER');
-    expect(validateReassignRequest(s2, { taskIds: [20], toUserId: 'r' }, new Map([[20, auth()]]), ['r'])).toMatchObject({ status: 409, rejected: [{ id: 20, reason: 'SELF_APPROVAL_REQUESTER' }] });
+    expect(validateReassignRequest(s2, { taskIds: [20], toUserId: 'r' }, new Map([[20, auth()]]), ['r'])).toMatchObject({ status: 422, rejected: [{ id: 20, reason: 'SELF_APPROVAL_REQUESTER' }] });
   });
   it('bloquea que el responsable se asigne la aprobación a sí mismo', () => {
     expect(taskRejection(scope, auth({ id_assigned: 'b' }), 'a')).toBe('SELF_APPROVAL_ACTOR');
@@ -146,5 +149,66 @@ describe('buildReassignNote', () => {
     expect(n).toContain('de Ana a Beto');
     expect(n).toContain('Realizada por Caro');
     expect(n).toContain('Motivo: vacaciones');
+  });
+});
+
+describe('autorizaciones (SynerLink c47 msg 16541)', () => {
+  const auth = (id: number, who: string, extra: Partial<WorkloadTask> = {}): WorkloadTask => ({
+    ...t(id, who, 4, 10, 1),
+    id_requester: 'c',
+    ...extra,
+  });
+  it('una autorización abierta de una solicitud propia es reasignable con la misma regla', () => {
+    expect(taskRejection(scope, auth(1, 'a'), 'b')).toBeNull();
+    expect(isTaskReassignable(scope, auth(1, 'a'))).toBe(true);
+    expect(isTaskReassignable(scope, { ...auth(1, 'a'), is_authorization: true })).toBe(true);
+  });
+  it('no se reasignan autorizaciones ya aprobadas (2) o rechazadas (3)', () => {
+    expect(taskRejection(scope, auth(1, 'a', { id_status: 2 }), 'b')).toBe('CLOSED');
+    expect(taskRejection(scope, auth(1, 'a', { id_status: 3 }), 'b')).toBe('CLOSED');
+  });
+  it('sigue exigiendo ser responsable de la solicitud y destino del área', () => {
+    expect(taskRejection(scope, auth(1, 'a', { id_request_general: 99 }), 'b')).toBe('REQUEST_NOT_OWNED');
+    expect(validateReassignRequest(scope, { taskIds: [1], toUserId: 'zz' }, new Map([[1, auth(1, 'a')]]), ['zz'])).toMatchObject({ status: 422 });
+  });
+  it('autoaprobación: no se reasigna al creador de la solicitud (422 con mensaje claro)', () => {
+    expect(isSelfApproval(auth(1, 'a'), 'c')).toBe(true);
+    expect(isSelfApproval(auth(1, 'a'), 'b')).toBe(false);
+    expect(isSelfApproval({ is_authorization: 0, id_requester: 'c' }, 'c')).toBe(false);
+    expect(isSelfApproval({ is_authorization: 1, id_requester: null }, 'c')).toBe(false);
+    expect(taskRejection(scope, auth(1, 'a'), 'c')).toBe('SELF_APPROVAL_REQUESTER');
+    const map = new Map([[1, auth(1, 'a')], [3, t(3, 'b')]]);
+    const r = validateReassignRequest(scope, { taskIds: [1, 3], toUserId: 'c' }, map, ['c']);
+    expect(r).toEqual({ ok: false, status: 422, error: SELF_APPROVAL_ERROR, rejected: [{ id: 1, reason: 'SELF_APPROVAL_REQUESTER' }] });
+  });
+  it('una tarea normal sí puede ir al creador de la solicitud (la regla es solo para autorizaciones)', () => {
+    expect(taskRejection(scope, { ...t(1, 'a'), id_requester: 'c' }, 'c')).toBeNull();
+  });
+  it('las firmas/validaciones de documento Orion no se reasignan aquí', () => {
+    expect(taskRejection(scope, auth(1, 'a', { resolution: '[orionAuth] x' }), 'b')).toBe('SIGNATURE_AUTHORIZATION');
+    expect(taskRejection(scope, auth(1, 'a', { resolution: '[orionReview] [orionFile:9]' }), 'b')).toBe('SIGNATURE_AUTHORIZATION');
+  });
+  it('la nota de bitácora deja al nuevo como aprobador y al anterior sin permiso', () => {
+    const n = buildReassignNote({ taskName: 'Autorizar compra', taskId: 5, fromName: 'Ana', toName: 'Beto', actorName: 'Ana', isAuthorization: true });
+    expect(n).toContain('Reasignación de autorización');
+    expect(n).toContain('pasó de Ana a Beto, que queda como aprobador');
+    expect(n).toContain('Ana ya no puede aprobarla');
+  });
+});
+
+describe('aprobador efectivo tras reasignar (authorizationDecisionBlock)', () => {
+  it('el nuevo asignado puede aprobar/rechazar', () => {
+    expect(authorizationDecisionBlock({ sessionUserId: 'b', currentAssignee: 'b', currentStatus: 4 })).toBeNull();
+  });
+  it('el asignado anterior ya no puede (403)', () => {
+    expect(authorizationDecisionBlock({ sessionUserId: 'a', currentAssignee: 'b', currentStatus: 4 })).toMatchObject({ status: 403 });
+  });
+  it('sin sesión 401; ya aprobada o rechazada 409', () => {
+    expect(authorizationDecisionBlock({ sessionUserId: null, currentAssignee: 'b', currentStatus: 4 })).toMatchObject({ status: 401 });
+    expect(authorizationDecisionBlock({ sessionUserId: 'b', currentAssignee: 'b', currentStatus: 2 })).toMatchObject({ status: 409 });
+    expect(authorizationDecisionBlock({ sessionUserId: 'b', currentAssignee: 'b', currentStatus: 3 })).toMatchObject({ status: 409 });
+  });
+  it('autorización del pool (sin asignar) la decide quien tenga sesión', () => {
+    expect(authorizationDecisionBlock({ sessionUserId: 'c', currentAssignee: null, currentStatus: 4 })).toBeNull();
   });
 });

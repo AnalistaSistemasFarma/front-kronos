@@ -7,6 +7,8 @@ import {
 } from '../../../../lib/notificationEvents.js';
 import { syncAuthorizationToSapsend } from '../../../../lib/sapsend/authorizationStatus.js';
 import { advanceSequentialTask } from '../../../../lib/workflow/advanceSequentialTask.js';
+import { resolveSessionUser } from '../../../../lib/chat/http';
+import { authorizationDecisionBlock } from '../../../../lib/request-general/workload';
 
 export async function POST(req) {
   const TAG = '[update-activities]';
@@ -50,7 +52,7 @@ export async function POST(req) {
       const prevResult = await new sql.Request(transaction)
         .input('id', sql.Int, id)
         .query(`
-          SELECT trg.id_status, trg.id_request_general, trg.id_task, trg.resolution,
+          SELECT trg.id_status, trg.id_request_general, trg.id_task, trg.resolution, trg.id_assigned,
                  rg.subject_request,
                  tpc.task, tpc.is_sequential, tpc.display_order, tpc.id_process_category,
                  tpc.is_authorization, taut.type_authorization,
@@ -81,6 +83,23 @@ export async function POST(req) {
       const taskName = String(prevRow?.task || '').toLowerCase();
       const isAuthorizationTask =
         Number(prevRow?.is_authorization) === 1 || prevRow?.is_authorization === true;
+      // Aprobador efectivo (c47 msg 16541): una autorización asignada solo la aprueba/rechaza su
+      // asignado ACTUAL (el usuario sale de la sesión). Si se reasignó, el anterior ya no puede.
+      let executorId = id_assigned;
+      if (isAuthorizationTask && [2, 3].includes(Number(id_status))) {
+        const sessionUser = await resolveSessionUser();
+        const block = authorizationDecisionBlock({
+          sessionUserId: sessionUser?.id ?? null,
+          currentAssignee: prevRow?.id_assigned ?? null,
+          currentStatus: prevRow?.id_status ?? null,
+        });
+        if (block) {
+          await transaction.rollback();
+          console.warn(`${TAG} ✖ Decisión de autorización bloqueada (${block.status}) tarea ${id}.`);
+          return new Response(JSON.stringify({ error: block.error }), { status: block.status });
+        }
+        executorId = sessionUser.id;
+      }
       const isSequentialTask =
         Number(prevRow?.is_sequential) === 1 || prevRow?.is_sequential === true;
       const isOrionSignerAuth =
@@ -216,7 +235,7 @@ export async function POST(req) {
       request.input(
         'id_executor_final',
         sql.NVarChar(1000),
-        id_assigned
+        executorId
       );
 
       await request.query(updateQuery);
@@ -235,7 +254,7 @@ export async function POST(req) {
             requestId: prevRow?.id_request_general,
             subject: prevRow?.subject_request,
             taskName: prevRow?.task,
-            executorUserId: id_assigned,
+            executorUserId: executorId,
           })
         );
       }
@@ -247,7 +266,7 @@ export async function POST(req) {
           syncAuthorizationToSapsend(
             prevRow?.id_request_general,
             Number(nextStatus) === 2,
-            id_assigned,
+            executorId,
             resolution
           )
         );
@@ -269,7 +288,7 @@ export async function POST(req) {
           await new sql.Request(pool)
             .input('note', sql.Text, noteText)
             .input('id_request', sql.Int, prevRow?.id_request_general)
-            .input('created_by', sql.NVarChar, id_assigned)
+            .input('created_by', sql.NVarChar, executorId)
             .query(`
               INSERT INTO notes (note, id_request, created_by)
               VALUES (@note, @id_request, @created_by)

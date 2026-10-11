@@ -3,6 +3,9 @@ import { authOptions } from '../../auth/[...nextauth]/route';
 import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
 import { resolveUserIdByEmail } from '../../../../lib/request-general/dashboardAccess';
 import {
+  CLOSED_TASK_STATUS_IDS,
+  SELF_APPROVAL_ERROR,
+  buildReassignNote,
   isAuthorizationTask,
   isSignatureAuthorization,
   requestResponsibleSql,
@@ -16,6 +19,9 @@ import {
  * Cambio individual del asignado de una tarea (task_request_general).
  * Regla (SynerLink c47, msg 16540): solo el RESPONSABLE DE LA SOLICITUD puede reasignar
  * sus tareas (ver lib/request-general/workload.ts). El actor sale de la sesión, no del cliente.
+ * AUTORIZACIONES (c47 msg 16541): misma regla; además no se reasignan cerradas
+ * (aprobadas/rechazadas), ni firmas/validaciones Orion, ni al creador de la solicitud
+ * (anti-autoaprobación → 422). La reasignación queda en notes (bitácora).
  * GET ?id=<taskId> → { canReassign } para que la UI muestre u oculte el selector.
  */
 
@@ -34,8 +40,8 @@ async function loadTask(pool, taskId, userId) {
     .request()
     .input('id', sql.Int, taskId)
     .input('u', sql.NVarChar(255), userId)
-    .query(`SELECT trg.id_request_general, rg.subject_request, sc.status, trg.id_assigned, trg.resolution,
-                   rg.id_requester, tpc.task, ISNULL(tpc.is_authorization, 0) AS is_authorization, taut.type_authorization,
+    .query(`SELECT trg.id_request_general, rg.subject_request, sc.status, trg.id_status, trg.id_assigned, trg.resolution,
+                   rg.id_requester, tpc.task, tpc.id_process_category, ISNULL(tpc.is_authorization, 0) AS is_authorization, taut.type_authorization,
                    CASE WHEN ${requestResponsibleSql('rg', '@u')} THEN 1 ELSE 0 END AS is_owner
             FROM task_request_general trg
             INNER JOIN requests_general rg ON rg.id = trg.id_request_general
@@ -54,7 +60,9 @@ export async function GET(req) {
     if (!Number.isInteger(taskId) || taskId <= 0) return json({ error: 'id inválido' }, 400);
     const row = await withMssqlPool((pool) => loadTask(pool, taskId, userId));
     if (!row) return json({ error: 'Tarea no encontrada' }, 404);
-    return json({ canReassign: row.is_owner === 1 && !isSignatureAuthorization(row) }, 200);
+    const isAuth = isAuthorizationTask(row);
+    const blocked = isSignatureAuthorization(row) || (isAuth && CLOSED_TASK_STATUS_IDS.includes(Number(row.id_status)));
+    return json({ canReassign: row.is_owner === 1 && !blocked, isAuthorization: isAuth }, 200);
   } catch (err) {
     console.error('[update-task-assigned] GET', err);
     return json({ error: 'Error del servidor' }, 500);
@@ -83,21 +91,71 @@ export async function POST(req) {
       if (isSignatureAuthorization(row))
         return { status: 409, body: { error: 'Las autorizaciones de firma van ligadas al firmante y no se reasignan' } };
       if (isAuthorizationTask(row) && (String(row.id_requester ?? '').trim() === idAssigned || idAssigned === userId))
-        return { status: 422, body: { error: 'Una autorización no puede asignarse al solicitante ni a quien reasigna (autoaprobación)' } };
+        return { status: 422, body: { error: SELF_APPROVAL_ERROR } };
       if (String(row.status || '').toLowerCase() === 'resuelto')
         return { status: 409, body: { error: 'No se puede modificar el asignado de una tarea resuelta' } };
+      const isAuth = isAuthorizationTask(row);
+      if (isAuth && CLOSED_TASK_STATUS_IDS.includes(Number(row.id_status)))
+        return { status: 409, body: { error: 'La autorización ya fue aprobada, rechazada o cerrada; no se puede reasignar' } };
+      if (isAuth && String(row.id_assigned ?? '') === idAssigned)
+        return { status: 409, body: { error: 'La autorización ya está asignada a esa persona' } };
 
       const dest = await pool
         .request()
         .input('to', sql.NVarChar(255), idAssigned)
-        .query('SELECT TOP 1 id FROM [user] WHERE id = @to AND isActive = 1');
+        .query('SELECT TOP 1 id, name FROM [user] WHERE id = @to AND isActive = 1');
       if (!dest.recordset.length) return { status: 422, body: { error: 'El nuevo asignado debe ser un usuario activo' } };
 
-      await pool
-        .request()
-        .input('id', sql.Int, id)
-        .input('id_assigned', sql.NVarChar(255), idAssigned)
-        .query('UPDATE task_request_general SET id_assigned = @id_assigned WHERE id = @id');
+      if (!isAuth) {
+        await pool
+          .request()
+          .input('id', sql.Int, id)
+          .input('id_assigned', sql.NVarChar(255), idAssigned)
+          .query('UPDATE task_request_general SET id_assigned = @id_assigned WHERE id = @id');
+      } else {
+        // Autorización: cambio condicionado (sigue abierta, mismo asignado, no al solicitante) + nota, atómico.
+        const names = await pool
+          .request()
+          .input('a', sql.NVarChar(255), userId)
+          .input('f', sql.NVarChar(255), row.id_assigned ?? '')
+          .query('SELECT id, LTRIM(RTRIM(name)) AS name FROM [user] WHERE id IN (@a, @f)');
+        const nameOf = (uid) => names.recordset.find((u) => u.id === uid)?.name ?? (uid || 'sin asignar');
+        const tx = new sql.Transaction(pool);
+        await tx.begin();
+        try {
+          const upd = await new sql.Request(tx)
+            .input('id', sql.Int, id)
+            .input('to', sql.NVarChar(255), idAssigned)
+            .input('from', sql.NVarChar(255), row.id_assigned ?? null)
+            .query(`UPDATE trg SET id_assigned = @to
+                     FROM task_request_general trg
+                     INNER JOIN requests_general rg ON rg.id = trg.id_request_general
+                     WHERE trg.id = @id AND trg.id_status NOT IN (${CLOSED_TASK_STATUS_IDS.join(',')})
+                       AND ((@from IS NULL AND trg.id_assigned IS NULL) OR trg.id_assigned = @from)
+                       AND ISNULL(rg.id_requester, '') <> @to`);
+          if (upd.rowsAffected[0] !== 1) throw new Error('CONFLICT');
+          await new sql.Request(tx)
+            .input('note', sql.NVarChar(sql.MAX), buildReassignNote({
+              taskName: row.task ?? 'Autorización',
+              taskId: id,
+              fromName: nameOf(row.id_assigned),
+              toName: dest.recordset[0].name?.trim() || idAssigned,
+              actorName: nameOf(userId),
+              isAuthorization: true,
+            }))
+            .input('req', sql.Int, row.id_request_general)
+            .input('pc', sql.Int, row.id_process_category ?? null)
+            .input('by', sql.NVarChar(255), userId)
+            .query(`INSERT INTO notes (note, id_request, created_by, creation_date, id_process_category)
+                     VALUES (@note, @req, @by, GETDATE(), @pc)`);
+          await tx.commit();
+        } catch (e) {
+          await tx.rollback().catch(() => undefined);
+          if (e.message === 'CONFLICT')
+            return { status: 409, body: { error: 'La autorización cambió mientras la reasignabas; actualiza e intenta de nuevo' } };
+          throw e;
+        }
+      }
 
       fireAndForgetNotification(
         notifyActivityAssigned({
@@ -105,6 +163,7 @@ export async function POST(req) {
           userId: idAssigned,
           requestId: row.id_request_general,
           subject: row.subject_request,
+          taskName: row.task,
         })
       );
       return { status: 200, body: { success: true, message: 'Asignado actualizado correctamente' } };

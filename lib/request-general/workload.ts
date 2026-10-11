@@ -10,8 +10,8 @@
  *   «Asignado» que muestra la solicitud y quien la recibe en «Solicitudes asignadas».
  *   No es el creador (id_requester) ni el responsable de procesos en abstracto: el
  *   permiso se ancla a cada solicitud (task_request_general.id_request_general).
- * - Distribuidor: responsable de al menos una solicitud con tareas abiertas no de
- *   autorización, y que pertenece a un departamento (department_user).
+ * - Distribuidor: responsable de al menos una solicitud con tareas abiertas, y que
+ *   pertenece a un departamento (department_user).
  * - Delegados: usuarios ACTIVOS que comparten algún departamento con el responsable
  *   (incluido él mismo).
  * - Tarea abierta: task_request_general cuyo estado no es Resuelto (2), Cancelado (3)
@@ -26,7 +26,10 @@
  *   · nunca al solicitante de la solicitud (autoaprobación) → SELF_APPROVAL_REQUESTER;
  *   · nunca al propio actor (el responsable no se autoasigna la aprobación) → SELF_APPROVAL_ACTOR;
  *   · las de FIRMA/Orion siguen fuera: el firmante va ligado a su correo/certificado y a
- *     marcadores [orionAuth]/[orionFile:] (misma detección que update-activities) → SIGNATURE_AUTHORIZATION.
+ *     marcadores [orionAuth]/[orionFile:]/[orionReview] (misma detección que update-activities) → SIGNATURE_AUTHORIZATION;
+ *   · ya aprobadas/rechazadas (cerradas) no se reasignan;
+ *   · update-activities solo deja aprobar/rechazar al asignado ACTUAL (usuario de sesión):
+ *     el anterior recibe 403 (ver authorizationDecisionBlock).
  */
 
 export const CLOSED_TASK_STATUS_IDS = [2, 3, 6] as const;
@@ -74,15 +77,28 @@ export function isAuthorizationTask(t: Pick<WorkloadTask, 'is_authorization'>): 
 /** Autorización de firma (Orion/firma digital): alineado con update-activities/route.js. */
 export function isSignatureAuthorization(t: WorkloadTask): boolean {
   if (!isAuthorizationTask(t)) return false;
-  const res = String(t.resolution ?? '');
   return (
-    res.includes('[orionAuth]') ||
-    res.includes('[orionFile:') ||
+    isOrionSignatureTask(t) ||
     String(t.type_authorization ?? '').toLowerCase().includes('firma') ||
     /\bautorizar firma\b/i.test(String(t.task ?? '')) ||
     /\bfirma digital\b/i.test(String(t.task ?? ''))
   );
 }
+
+/** Firma o validación de documento Orion: el firmante está ligado al documento. */
+export function isOrionSignatureTask(t: Pick<WorkloadTask, 'resolution'>): boolean {
+  const r = String(t.resolution ?? '');
+  return r.includes('[orionAuth]') || r.includes('[orionFile:') || r.includes('[orionReview]');
+}
+
+/** ¿Reasignar esta autorización a toUserId sería autoaprobación (destino = solicitante)? */
+export function isSelfApproval(t: Pick<WorkloadTask, 'is_authorization' | 'id_requester'>, toUserId: string): boolean {
+  const req = String(t.id_requester ?? '').trim();
+  return isAuthorizationTask(t) && !!req && req === String(toUserId ?? '').trim();
+}
+
+export const SELF_APPROVAL_ERROR =
+  'Una autorización no puede asignarse a quien creó la solicitud ni a quien la reasigna: nadie aprueba su propia solicitud.';
 
 export interface MemberLoad extends WorkloadMember {
   openTasks: number;
@@ -209,6 +225,8 @@ export function validateReassignRequest(
   const rejected = taskIds
     .map((id) => ({ id, reason: taskRejection(scope, tasksById.get(id), toUserId) }))
     .filter((r): r is { id: number; reason: ReassignRejection } => r.reason !== null);
+  if (rejected.some((r) => r.reason === 'SELF_APPROVAL_REQUESTER' || r.reason === 'SELF_APPROVAL_ACTOR'))
+    return { ok: false, status: 422, error: SELF_APPROVAL_ERROR, rejected };
   if (rejected.length > 0)
     return { ok: false, status: 409, error: 'Algunas tareas no se pueden reasignar; no se cambió ninguna', rejected };
   return { ok: true, taskIds };
@@ -221,7 +239,33 @@ export function buildReassignNote(p: {
   toName: string;
   actorName: string;
   reason?: string | null;
+  isAuthorization?: boolean;
 }): string {
   const motivo = p.reason?.trim() ? ` Motivo: ${p.reason.trim().slice(0, 500)}` : '';
+  if (p.isAuthorization)
+    return `Reasignación de autorización: «${p.taskName}» (#${p.taskId}) pasó de ${p.fromName} a ${p.toName}, que queda como aprobador; ${p.fromName} ya no puede aprobarla ni rechazarla. Realizada por ${p.actorName}.${motivo}`;
   return `Reasignación por distribución de carga: la tarea «${p.taskName}» (#${p.taskId}) pasó de ${p.fromName} a ${p.toName}. Realizada por ${p.actorName}.${motivo}`;
+}
+
+/**
+ * ¿Puede el usuario de la sesión aprobar (2) o rechazar (3) esta autorización?
+ * Solo su asignado actual; si está sin asignar (pool por tipo), cualquiera con sesión
+ * (la bandeja ya filtra el pool). Una autorización cerrada no se vuelve a decidir.
+ */
+export function authorizationDecisionBlock(p: {
+  sessionUserId: string | null | undefined;
+  currentAssignee: string | null | undefined;
+  currentStatus: number | null | undefined;
+}): { status: number; error: string } | null {
+  const me = String(p.sessionUserId ?? '').trim();
+  if (!me) return { status: 401, error: 'No autorizado' };
+  if (p.currentStatus != null && [2, 3].includes(Number(p.currentStatus)))
+    return { status: 409, error: 'Esta autorización ya fue aprobada o rechazada.' };
+  const assignee = String(p.currentAssignee ?? '').trim();
+  if (assignee && assignee !== me)
+    return {
+      status: 403,
+      error: 'Esta autorización está asignada a otra persona: solo su aprobador actual puede aprobarla o rechazarla.',
+    };
+  return null;
 }
