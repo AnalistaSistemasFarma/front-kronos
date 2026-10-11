@@ -11,8 +11,10 @@ import {
   CLOSED_TASK_STATUS_IDS,
   buildReassignNote,
   computeWorkload,
+  isAuthorizationTask,
   isResponsible,
   isTaskReassignable,
+  isSignatureAuthorization,
   requestResponsibleSql,
   validateReassignRequest,
   type ReassignScope,
@@ -22,7 +24,8 @@ import {
 /**
  * Distribución de carga de tareas para el RESPONSABLE DE LA SOLICITUD.
  * GET  → delegados de su departamento, % de carga y tareas abiertas (todos los procesos);
- *        solo las tareas de solicitudes de las que es responsable son reasignables.
+ *        solo las tareas de solicitudes de las que es responsable son reasignables
+ *        (incluidas las autorizaciones, SynerLink c47 msg 16541; nunca al solicitante: 422).
  * POST { taskIds, toUserId, reason? } → reasignación masiva en una sola transacción.
  * Reglas en lib/request-general/workload.ts. Todo se valida con la sesión, no con el cliente.
  */
@@ -47,7 +50,7 @@ async function loadScope(pool: Pool, userId: string) {
              FROM requests_general rg
              INNER JOIN task_request_general trg ON trg.id_request_general = rg.id
              INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
-             WHERE trg.id_status NOT IN (${CLOSED_LIST}) AND ISNULL(tpc.is_authorization, 0) = 0
+             WHERE trg.id_status NOT IN (${CLOSED_LIST})
                AND ${OWNS_RG}`);
   const departments = await pool
     .request()
@@ -84,10 +87,12 @@ async function sessionUser() {
 const TASK_SELECT = `
   SELECT trg.id, trg.id_assigned, trg.id_status, sc.status AS status_task, trg.start_date,
          tpc.task, tpc.id_process_category, ISNULL(tpc.is_authorization, 0) AS is_authorization,
+         taut.type_authorization, trg.resolution, rg.id_requester,
          pc.process, cr.category, rg.id AS id_request_general, rg.subject_request, rg.created_at,
          c.company
   FROM task_request_general trg
   INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
+  LEFT JOIN types_authorization taut ON taut.id = tpc.type_authorization
   LEFT JOIN process_category pc ON pc.id = tpc.id_process_category
   LEFT JOIN category_request cr ON cr.id = pc.id_category_request
   LEFT JOIN status_case sc ON sc.id_status_case = trg.id_status
@@ -110,11 +115,15 @@ export async function GET() {
         `${TASK_SELECT} WHERE trg.id_assigned IN (${inList}) AND trg.id_status NOT IN (${CLOSED_LIST})
          ORDER BY trg.id DESC`
       );
-      const rows = (tasks.recordset as (WorkloadTask & Record<string, unknown>)[]).map((t) => ({
-        ...t,
-        is_authorization: Boolean(t.is_authorization),
-        reassignable: isTaskReassignable(scope, t),
-      }));
+      const rows = (tasks.recordset as (WorkloadTask & Record<string, unknown>)[]).map(({ resolution: _r, type_authorization: _ta, ...t }) => {
+        const full = { ...t, resolution: _r as string | null, type_authorization: _ta as string | null };
+        return {
+          ...t,
+          is_authorization: Boolean(t.is_authorization),
+          is_signature: isSignatureAuthorization(full),
+          reassignable: isTaskReassignable(scope, full),
+        };
+      });
       const load = computeWorkload(members, rows);
       return {
         isResponsible: true as const,
@@ -162,6 +171,7 @@ export async function POST(req: Request) {
       try {
         for (const id of v.taskIds) {
           const t = byId.get(id)!;
+          const isAuth = isAuthorizationTask(t);
           const upd = await new sql.Request(tx)
             .input('id', sql.Int, id)
             .input('to', sql.NVarChar(255), toUserId)
@@ -170,7 +180,9 @@ export async function POST(req: Request) {
             .query(`UPDATE task_request_general SET id_assigned = @to
                      WHERE id = @id AND id_assigned = @from AND id_status NOT IN (${CLOSED_LIST})
                        AND EXISTS (SELECT 1 FROM requests_general rg
-                                   WHERE rg.id = task_request_general.id_request_general AND ${OWNS_RG})`);
+                                   WHERE rg.id = task_request_general.id_request_general AND ${OWNS_RG}
+                                     -- anti-autoaprobación: una autorización nunca va a quien creó la solicitud
+                                     AND NOT (${isAuth ? 1 : 0} = 1 AND rg.id_requester = @to))`);
           if (upd.rowsAffected[0] !== 1) throw Object.assign(new Error('CONFLICT'), { taskId: id });
           await new sql.Request(tx)
             .input('note', sql.NVarChar(sql.MAX), buildReassignNote({
@@ -180,6 +192,7 @@ export async function POST(req: Request) {
               toName: names.get(toUserId) ?? toUserId,
               actorName: names.get(user.id) ?? user.name,
               reason,
+              isAuthorization: isAuth,
             }))
             .input('req', sql.Int, t.id_request_general)
             .input('pc', sql.Int, t.id_process_category)
