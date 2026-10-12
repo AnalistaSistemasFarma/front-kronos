@@ -7,6 +7,7 @@ import axios from 'axios';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { useSession } from 'next-auth/react';
+import { useMediaQuery } from '@mantine/hooks';
 import {
   Title,
   Paper,
@@ -174,6 +175,7 @@ function RequestBoard() {
   const subprocessId = searchParams.get('subprocess_id');
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const isMobile = useMediaQuery('(max-width: 48em)') ?? false;
   const [assignedTasks, setAssignedTasks] = useState<AssignedTask[]>([]);
   const initialType = searchParams.get('type');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>(
@@ -784,22 +786,28 @@ function RequestBoard() {
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
-      <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
+      <div className='max-w-7xl mx-auto py-4 px-3 sm:py-8 sm:px-6 lg:px-8'>
+        <Card shadow='sm' p={{ base: 'md', sm: 'xl' }} radius='md' withBorder mb='6'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
           </Breadcrumbs>
 
-          <Flex justify='space-between' align='center' mb='4'>
-            <div>
+          <Flex
+            direction={{ base: 'column', sm: 'row' }}
+            justify='space-between'
+            align={{ base: 'stretch', sm: 'center' }}
+            gap='md'
+            mb='md'
+          >
+            <div style={{ minWidth: 0 }}>
               <Title
                 order={1}
-                className='text-3xl font-bold mb-2 flex items-center gap-3'
+                className='text-2xl sm:text-3xl font-bold mb-2 flex items-center gap-2 sm:gap-3'
               >
-                <IconTicket size={32} className='text-blue-600' />
+                <IconTicket size={28} className='text-blue-600 shrink-0' />
                 Solicitudes y Tareas Asignadas
               </Title>
-              <Text size='lg' c='dimmed'>
+              <Text size='md' c='dimmed'>
                 Gestión de solicitudes y tareas asignadas a ti
               </Text>
             </div>
@@ -807,7 +815,7 @@ function RequestBoard() {
           </Flex>
 
           <Grid columns={10}>
-            <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
+            <Grid.Col span={{ base: 5, md: 2 }}>
               <Card
                 p='md'
                 radius='md'
@@ -842,7 +850,7 @@ function RequestBoard() {
                 </Group>
               </Card>
             </Grid.Col>
-            <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
+            <Grid.Col span={{ base: 5, md: 2 }}>
               <Card
                 p='md'
                 radius='md'
@@ -874,7 +882,7 @@ function RequestBoard() {
                 </Group>
               </Card>
             </Grid.Col>
-            <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
+            <Grid.Col span={{ base: 5, md: 2 }}>
               <Card
                 p='md'
                 radius='md'
@@ -906,7 +914,7 @@ function RequestBoard() {
                 </Group>
               </Card>
             </Grid.Col>
-            <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
+            <Grid.Col span={{ base: 5, md: 2 }}>
               <Card
                 p='md'
                 radius='md'
@@ -938,7 +946,7 @@ function RequestBoard() {
                 </Group>
               </Card>
             </Grid.Col>
-            <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
+            <Grid.Col span={{ base: 5, md: 2 }}>
               <Card p='md' radius='md' withBorder>
                 {(() => {
                   const { total, done, percent } = getGlobalTasksProgress();
@@ -971,7 +979,7 @@ function RequestBoard() {
               </Card>
             </Grid.Col>
             {filters.process == '4' && (
-              <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
+              <Grid.Col span={{ base: 5, md: 2 }}>
                 <Card p='md' radius='md' withBorder className='bg-green-50 border-green-200'>
                   <Group>
                     <Button
@@ -1123,12 +1131,15 @@ function RequestBoard() {
         <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
           <LoadingOverlay visible={loading} />
 
-          <Group justify='space-between' mb='md' wrap='wrap'>
-            <Title order={3} className='flex items-center gap-2'>
+          <Group justify='space-between' mb='md' wrap='wrap' gap='sm'>
+            <Title order={3} className='flex items-center gap-2 text-lg sm:text-xl'>
               <IconTicket size={20} />
               Lista de Solicitudes y Tareas Asignadas
             </Title>
             <SegmentedControl
+              fullWidth={isMobile}
+              size={isMobile ? 'xs' : 'sm'}
+              w={{ base: '100%', sm: 'auto' }}
               value={typeFilter}
               onChange={(value) => setTypeFilter(value as TypeFilter)}
               data={[
@@ -1139,7 +1150,91 @@ function RequestBoard() {
             />
           </Group>
 
-          <div className='overflow-x-auto'>
+          {/* Móvil: tarjetas apiladas en lugar de la tabla ancha */}
+          <Stack gap='xs' hiddenFrom='md' data-testid='assigned-mobile-list'>
+            {visibleItems.length === 0 ? (
+              <Text size='sm' c='dimmed' ta='center' py='xl'>
+                {typeFilter === 'tasks'
+                  ? 'No se encontraron tareas asignadas'
+                  : typeFilter === 'requests'
+                    ? 'No se encontraron solicitudes asignadas'
+                    : 'No se encontraron solicitudes ni tareas asignadas'}
+              </Text>
+            ) : (
+              pageItems.map((item) => {
+                const isTask = item.kind === 'task';
+                const t = isTask ? (item.data as AssignedTask) : null;
+                const r = isTask ? null : (item.data as Ticket);
+                const open = () => {
+                  sessionStorage.setItem('selectedRequest', JSON.stringify(item.data));
+                  window.open(
+                    isTask
+                      ? `/process/request-general/view-activities?id=${t!.id}&from=assigned-activities`
+                      : `/process/request-general/view-request?id=${r!.id}&from=assigned-requests`
+                  );
+                };
+                const progress =
+                  r && tasksByRequest[r.id]?.length ? getTasksProgress(tasksByRequest[r.id]) : null;
+                return (
+                  <Paper
+                    key={item.key}
+                    withBorder
+                    radius='md'
+                    p='sm'
+                    role='button'
+                    tabIndex={0}
+                    onClick={open}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') open();
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <Group justify='space-between' wrap='nowrap' gap='xs' mb={4}>
+                      <Group gap={6} wrap='nowrap' style={{ minWidth: 0 }}>
+                        {renderTypeBadge(isTask ? 'task' : 'request')}
+                        <Text size='sm' fw={700}>
+                          #{isTask ? t!.id_request_general : r!.id}
+                        </Text>
+                      </Group>
+                      {renderStatusBadge(isTask ? t!.status_task : r!.status)}
+                    </Group>
+                    <Text size='sm' fw={600} lineClamp={2} style={{ overflowWrap: 'anywhere' }}>
+                      {isTask ? t!.task : r!.subject}
+                    </Text>
+                    {isTask && (
+                      <Text size='xs' c='dimmed' lineClamp={1}>
+                        {t!.subject_request}
+                      </Text>
+                    )}
+                    {progress && (
+                      <Group gap={8} wrap='nowrap' mt={6}>
+                        <Progress
+                          value={progress.percent}
+                          color={progress.percent === 100 ? 'green' : 'blue'}
+                          size='sm'
+                          radius='xl'
+                          style={{ flex: 1 }}
+                        />
+                        <Text size='xs' c='dimmed' fw={500}>
+                          {progress.done}/{progress.total}
+                        </Text>
+                      </Group>
+                    )}
+                    <Text size='xs' c='dimmed' mt={6} style={{ overflowWrap: 'anywhere' }}>
+                      {[isTask ? null : r!.process, isTask ? t!.company : r!.company, formatAssignedDate(isTask ? t!.created_at : r!.created_at)]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </Text>
+                    <Text size='xs' c='dimmed' style={{ overflowWrap: 'anywhere' }}>
+                      {isTask ? t!.name_requester : r!.requester} → {isTask ? t!.assigned : r!.user}
+                    </Text>
+                  </Paper>
+                );
+              })
+            )}
+          </Stack>
+
+          <Box visibleFrom='md' className='overflow-x-auto'>
             <Table striped highlightOnHover>
               <Table.Thead>
                 <Table.Tr>
@@ -1297,11 +1392,11 @@ function RequestBoard() {
                 )}
               </Table.Tbody>
             </Table>
-          </div>
+          </Box>
 
           {totalPages > 1 && (
             <Group justify='center' mt='md'>
-              <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} />
+              <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} siblings={isMobile ? 0 : 1} size={isMobile ? 'sm' : 'md'} />
             </Group>
           )}
         </Card>
