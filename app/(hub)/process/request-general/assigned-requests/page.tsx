@@ -802,7 +802,9 @@ function RequestBoard() {
             <div style={{ minWidth: 0 }}>
               <Title
                 order={1}
-                className='text-2xl sm:text-3xl font-bold mb-2 flex items-center gap-2 sm:gap-3'
+                fz={{ base: 24, sm: 30 }}
+                lh={1.2}
+                className='font-bold mb-2 flex items-center gap-2 sm:gap-3'
               >
                 <IconTicket size={28} className='text-blue-600 shrink-0' />
                 Solicitudes y Tareas Asignadas
