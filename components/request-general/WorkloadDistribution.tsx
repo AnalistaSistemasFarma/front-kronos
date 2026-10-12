@@ -283,7 +283,7 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
         size='min(1200px, 92vw)'
         radius={isDesktop ? 'md' : 0}
         padding={0}
-        transitionProps={{ transition: isDesktop ? 'fade' : 'slide-up', duration: 200 }}
+        transitionProps={{ transition: 'fade', duration: 150 }}
         closeButtonProps={{ size: 'lg', 'aria-label': 'Cerrar' }}
         styles={{
           header: { paddingInline: 16, minHeight: 56, borderBottom: '1px solid var(--mantine-color-default-border)' },
@@ -560,9 +560,9 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
         fullScreen={!isDesktop}
         centered
         radius={isDesktop ? 'md' : 0}
-        size='md'
+        size={isDesktop ? 'md' : '100%'}
         zIndex={300}
-        transitionProps={{ transition: isDesktop ? 'fade' : 'slide-up', duration: 200 }}
+        transitionProps={{ transition: 'fade', duration: 150 }}
         closeButtonProps={{ size: 'lg', 'aria-label': 'Cerrar' }}
         title={
           <Text fw={600} size='lg'>
