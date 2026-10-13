@@ -460,8 +460,8 @@ export default function OrionReviewPanel({
           content: {
             maxWidth: 'min(1600px, 98vw)',
             width: '98vw',
-            height: '96vh',
-            maxHeight: '96vh',
+            height: 'min(96dvh, 96vh)',
+            maxHeight: 'min(96dvh, 96vh)',
             display: 'flex',
             flexDirection: 'column',
           },

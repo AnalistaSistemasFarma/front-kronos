@@ -459,26 +459,25 @@ export default function SignaturePlacementCanvas({
         <Group justify='space-between' align='center' gap='xs' mt={4} wrap='wrap'>
           <Text size='xs' c='dimmed' style={{ flex: '1 1 260px' }}>
             Clic para colocar · arrastre para mover · esquina inferior para redimensionar (
-            {kindBounds.minW}–{kindBounds.maxW}% × {kindBounds.minH}–{kindBounds.maxH}%) · Ctrl +
-            rueda para hacer zoom.
+            {kindBounds.minW}–{kindBounds.maxW}% × {kindBounds.minH}–{kindBounds.maxH}%). Usa los botones para hacer zoom.
           </Text>
           <Group gap={4} wrap='nowrap'>
             <Tooltip label='Alejar' withArrow>
               <ActionIcon
                 variant='default'
-                size='sm'
+                size={44}
                 aria-label='Alejar'
                 disabled={zoom <= ZOOM_MIN}
                 onClick={() => changeZoom((z) => z - ZOOM_STEP)}
               >
-                <IconZoomOut size={14} />
+                <IconZoomOut size={18} />
               </ActionIcon>
             </Tooltip>
             <Tooltip label='Volver al 100%' withArrow>
               <UnstyledButton
                 onClick={() => changeZoom(() => 1)}
                 aria-label='Volver al 100%'
-                style={{ minWidth: 44, textAlign: 'center' }}
+                style={{ minWidth: 44, minHeight: 44, textAlign: 'center' }}
               >
                 <Text size='xs' fw={600}>
                   {Math.round(zoom * 100)}%
@@ -488,12 +487,12 @@ export default function SignaturePlacementCanvas({
             <Tooltip label='Acercar' withArrow>
               <ActionIcon
                 variant='default'
-                size='sm'
+                size={44}
                 aria-label='Acercar'
                 disabled={zoom >= ZOOM_MAX}
                 onClick={() => changeZoom((z) => z + ZOOM_STEP)}
               >
-                <IconZoomIn size={14} />
+                <IconZoomIn size={18} />
               </ActionIcon>
             </Tooltip>
           </Group>
