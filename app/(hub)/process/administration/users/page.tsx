@@ -65,6 +65,7 @@ import {
 import { isDeleteAttachmentsSubprocess } from '@/lib/attachments/access';
 import { isValentineWallSubprocess } from '@/lib/valentine/constants';
 import { describeSgcPermissionMarker, isSgcPermissionMarkerSubprocess } from '@/lib/sgc/constants';
+import { describeOtPermissionMarker, isOtPermissionMarkerSubprocess } from '@/lib/ordenes-trabajo/constants';
 
 const AVATAR_COLORS = ['blue', 'teal', 'violet', 'indigo', 'cyan', 'grape', 'orange'] as const;
 
@@ -2139,6 +2140,8 @@ function UserManagement() {
                                   <Badge size='xs' variant='light' color='teal' mt={4}>
                                     {isSgcPermissionMarkerSubprocess(subprocess)
                                       ? describeSgcPermissionMarker(subprocess.subprocess_url)
+                                      : isOtPermissionMarkerSubprocess(subprocess)
+                                      ? describeOtPermissionMarker(subprocess.subprocess_url)
                                       : isValentineWallSubprocess(subprocess)
                                       ? 'Permiso OLP: corazón en el header (muro Dosis de Amor)'
                                       : isOrionFirmaPrepareSubprocess(subprocess)

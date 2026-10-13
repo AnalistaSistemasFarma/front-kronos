@@ -28,6 +28,8 @@ export default defineConfig({
       'app/api/authorization/**/*.test.ts',
       // `app/api/portal/politicas/**`: Políticas y reglamentos del Portal TH (sesión obligatoria, Graph simulado).
       'app/api/portal/**/*.test.ts',
+      // `app/api/ordenes-trabajo/**`: Órdenes de Trabajo (permisos en el servidor, sin edición ni borrado).
+      'app/api/ordenes-trabajo/**/*.test.ts',
       'components/sgc/**/*.test.ts',
     ],
     exclude: ['node_modules', '.next', 'mcp', 'dist'],
@@ -65,6 +67,10 @@ export default defineConfig({
         // SGC documental: reglas de negocio con umbral propio (ver abajo).
         'lib/sgc/**/*.ts',
         'app/api/sgc/**/route.ts',
+        // Órdenes de Trabajo: reglas puras y rutas (la capa de datos se prueba en integración).
+        'lib/ordenes-trabajo/constants.ts',
+        'lib/ordenes-trabajo/rules.ts',
+        'app/api/ordenes-trabajo/**/route.ts',
       ],
       exclude: [
         '**/__tests__/**',

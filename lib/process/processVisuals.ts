@@ -73,6 +73,7 @@ const HEADER_ICONS: Array<{ test: RegExp; icon: TablerIcon }> = [
   { test: /venta|purchase|compra/, icon: IconBuildingStore },
   { test: /admin|administr/, icon: IconSettings },
   { test: /solicitud/, icon: IconClipboardList },
+  { test: /producci[oó]n/, icon: IconBuildingFactory },
   { test: /gesti[oó]n|proceso/, icon: IconFolders },
 ];
 
@@ -89,6 +90,7 @@ const SUB_RULES: Array<{ test: RegExp; icon: TablerIcon }> = [
   { test: /actividad|tarea/, icon: IconListCheck },
   { test: /dashboard|tablero/, icon: IconLayoutDashboard },
   { test: /autoriz/, icon: IconShieldCheck },
+  { test: /[oó]rden(es)?\s+de\s+trabajo/, icon: IconListCheck },
   { test: /orden/, icon: IconReceipt },
   { test: /oferta/, icon: IconRosetteDiscount },
   { test: /inventario|stock/, icon: IconPackages },

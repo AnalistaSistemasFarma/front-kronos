@@ -264,6 +264,14 @@ jobs:
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008140000_sgc_s12_aprobadores_sustitutos/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008150000_sgc_s13_firma_propia_registro/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008150000_sgc_s13_firma_propia_registro/migration.sql
+          # Órdenes de Trabajo (P0): tablas + triggers de integridad, y la siembra de Farmalógica (ambas dos veces: idempotentes).
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013180000_ordenes_trabajo_p0/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013180000_ordenes_trabajo_p0/migration.sql
+          # La base efímera nace sin empresas: se crea Farmalógica (id 1, como en las pruebas de integración) antes de la siembra.
+          printf '%s\n' "SET IDENTITY_INSERT [dbo].[company] ON;" "IF NOT EXISTS (SELECT 1 FROM [dbo].[company] WHERE id_company = 1) INSERT INTO [dbo].[company] (id_company, company) VALUES (1, N'FARMALOGICA S.A.');" "SET IDENTITY_INSERT [dbo].[company] OFF;" > /tmp/ot-empresa.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/ot-empresa.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-13-ordenes-trabajo-p0-farmalogica.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-13-ordenes-trabajo-p0-farmalogica.sql
 
       - name: Pruebas de integración + cobertura de lib/sgc/db (vitest)
         run: npm run test:integration -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/integracion/junit.xml
@@ -309,6 +317,35 @@ jobs:
           migra 20261008140000_sgc_s12_aprobadores_sustitutos
           migra 20261008150000_sgc_s13_firma_propia_registro
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-08-sgc-s8-guia-codificacion-olp.sql
+
+      - name: Órdenes de Trabajo — reversa (ida y vuelta)
+        # Con las órdenes que dejaron las pruebas de integración: la reversa SIN la
+        # bandera de pérdida debe negarse; con la bandera quita todo (dos veces,
+        # idempotente) y luego la migración y la siembra vuelven a crearlo.
+        env:
+          DATABASE_URL: ${{ env.SGC_IT_DATABASE_URL }}
+        run: |
+          set -e
+          M=prisma/migrations/20261013180000_ordenes_trabajo_p0/migration.sql
+          S=prisma/manual/2026-10-13-ordenes-trabajo-p0-farmalogica.sql
+          R=prisma/manual/2026-10-13-ordenes-trabajo-p0-reversa.sql
+          x() { npx prisma db execute --schema prisma/schema.prisma --file "$1"; }
+          if x "$R"; then echo "La reversa debió negarse sin ot_reversa_acepta_perdida"; exit 1; fi
+          { echo "EXEC sp_set_session_context N'ot_reversa_acepta_perdida', 1;"; cat "$R"; } > /tmp/ot-reversa.sql
+          x /tmp/ot-reversa.sql; x /tmp/ot-reversa.sql
+          cat > /tmp/ot-verifica-reversa.sql <<'SQL'
+          IF OBJECT_ID(N'dbo.ot_registro', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.ot_actividad', N'U') IS NOT NULL
+             OR EXISTS (SELECT 1 FROM dbo.subprocess WHERE subprocess_url LIKE N'/process/ordenes-trabajo%')
+            THROW 50020, N'La reversa de Órdenes de Trabajo no quitó todo.', 1;
+          SQL
+          x /tmp/ot-verifica-reversa.sql
+          x "$M"; x "$M"; x "$S"; x "$S"
+          cat > /tmp/ot-verifica.sql <<'SQL'
+          IF (SELECT COUNT(*) FROM dbo.ot_actividad WHERE id_company = 1) <> 5 THROW 50021, N'La siembra de Farmalógica no dejó 5 actividades.', 1;
+          IF (SELECT COUNT(*) FROM dbo.subprocess WHERE subprocess_url IN (N'/process/ordenes-trabajo', N'/process/ordenes-trabajo/gestion')) <> 2 THROW 50022, N'Faltan los subprocesos.', 1;
+          IF OBJECT_ID(N'dbo.TR_ot_registro_inmutable', N'TR') IS NULL THROW 50023, N'Falta el trigger de inmutabilidad.', 1;
+          SQL
+          x /tmp/ot-verifica.sql
 
       - name: Portal TH — formulario propio (migración, siembra y reversa)
         # 20261008160000_portal_formacion_formulario_propio: idempotente sobre

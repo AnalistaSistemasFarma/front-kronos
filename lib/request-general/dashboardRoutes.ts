@@ -5,6 +5,7 @@ import {
 import { isDeleteAttachmentsSubprocess } from '../attachments/access';
 import { isValentineWallSubprocess } from '../valentine/constants';
 import { isSgcPermissionMarkerSubprocess } from '../sgc/constants';
+import { isOtPermissionMarkerSubprocess } from '../ordenes-trabajo/constants';
 import {
   isAuditConfigureMarkerSubprocess,
   isAuditConversationsMarkerSubprocess,
@@ -27,6 +28,7 @@ export function isHubHiddenRequestDashboardSubprocess(subprocess: {
     isDeleteAttachmentsSubprocess(subprocess) ||
     isValentineWallSubprocess(subprocess) ||
     isSgcPermissionMarkerSubprocess(subprocess) ||
+    isOtPermissionMarkerSubprocess(subprocess) ||
     isAuditConversationsMarkerSubprocess(subprocess) ||
     isAuditConfigureMarkerSubprocess(subprocess)
   ) {
