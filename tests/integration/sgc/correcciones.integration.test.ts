@@ -395,6 +395,25 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
     await expect(recordReadingDoubt(prisma, notifier, a1.id_task_assignee, { body: 'Una duda tardía sobre el documento.' }, await viewer(E.l1), actor(E.l1))).rejects.toThrow(/ya cerró/);
   });
 
+  it('[SGC-REQ-099] D9 (E2E 2026-10-10): si el umbral coincide con el 100 % (pocos lectores), el aviso sale al completar la lectura', async () => {
+    await saveCompanySettings(prisma, CO, { readThresholdPct: 90, reason: 'Umbral del 90 % para la prueba D9' }, actor(E.cal));
+    const r6 = await newRequest('Umbral que coincide con el cien por ciento');
+    await addScopeEntry(prisma, notifier, await accessOf(E.elab), r6, { entry: { kind: 'persona', email: E.l1 }, reason: 'Único lector' }, actor(E.elab));
+    await approve(r6);
+    const t = await taskOf(r6, 'divulgacion');
+    const a1 = t.assignees.find((a) => a.user_email === E.l1)!;
+    await openReadingFile(prisma, a1.id_task_assignee, await viewer(E.l1), actor(E.l1));
+    await recordReadingEvent(prisma, a1.id_task_assignee, { event: 'final', pages: 4 }, { email: E.l1 }, actor(E.l1));
+    sent.length = 0;
+    await signTask(prisma, deps, t.id_task, firma('leyo', { idAssignee: a1.id_task_assignee }), actor(E.l1));
+    expect((await taskOf(r6, 'divulgacion')).status).toBe('resuelta');
+    const notices = await prisma.sgcReadThresholdNotice.findMany({ where: { id_task: t.id_task } });
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({ threshold_pct: 90, read_count: 1, counted: 1 });
+    expect(sent.filter((n) => n.payload.title.includes('Avance de lectura'))).toHaveLength(1);
+    await saveCompanySettings(prisma, CO, { readThresholdPct: 50, reason: 'Vuelve el umbral de la prueba' }, actor(E.cal));
+  });
+
   it('[SGC-REQ-094][SGC-REQ-096][SGC-REQ-102][SGC-REQ-103] bordes: vista previa de una nueva versión con borrador PDF, historial agregado sin la marca, borrador alterado, revisión menor sobre un PDF y logo válido', async () => {
     // Validaciones y acciones del motor que la composición no cambia (formulario, reorden de firmantes, devolución en paralelo).
     await expect(createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nuevo', subject: 'Valor no permitido', description: 'Prueba de validación del formulario.', idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Inexistente' } }, actor(E.sol))).rejects.toThrow(/no permitida/);
@@ -404,8 +423,26 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
     expect((await latestLayout(prisma, r5)).fields).toEqual([]);
     expect((await getDocumentLayout(prisma, r5, await viewer(E.elab))).participants.filter((p) => p.meaning === 'reviso').map((p) => p.email)).toEqual([E.apr, E.rev]);
     await signTask(prisma, deps, (await taskOf(r5, 'elaboracion')).id_task, firma('elaboro'), actor(E.elab));
-    await decideTask(prisma, notifier, (await taskOf(r5, 'revision')).id_task, { decision: 'devolver', comment: 'Ajustar el alcance antes de seguir.' }, actor(E.rev));
-    expect((await taskOf(r5, 'elaboracion')).status).toBe('abierta');
+    // RN 2026-10-02 (D3 de la E2E del 2026-10-10): en PARALELO una devolución espera a que respondan TODOS los revisores.
+    const revR5 = (await taskOf(r5, 'revision')).id_task;
+    const firstBack = await decideTask(prisma, notifier, revR5, { decision: 'devolver', comment: 'Ajustar el alcance antes de seguir.' }, actor(E.rev));
+    expect(firstBack).toMatchObject({ outcome: 'abierta', next: 'revision' });
+    const waiting = await taskOf(r5, 'revision');
+    expect(waiting.status).toBe('abierta');
+    expect(waiting.assignees.map((a) => [a.user_email, a.status])).toEqual([
+      [E.apr, 'pendiente'],
+      [E.rev, 'devuelto'],
+    ]);
+    expect((await taskOf(r5, 'elaboracion')).status).toBe('resuelta');
+    // Mientras falte un revisor, el elaborador NO sube la v2.
+    await expect(uploadAttachment(prisma, upload, r5, { purpose: 'borrador', ...docx('v2 antes de tiempo') }, await viewer(E.elab), actor(E.elab))).rejects.toMatchObject({ status: 409 });
+    // El otro revisor sí puede responder (su cupo sigue vigente); cuando responde, vuelve a elaboración con las observaciones.
+    await signTask(prisma, deps, revR5, firma('reviso'), actor(E.apr));
+    const back5 = await taskOf(r5, 'revision');
+    expect(back5).toMatchObject({ status: 'devuelta', resolution: 'Ajustar el alcance antes de seguir.' });
+    expect(back5.assignees.every((a) => a.status !== 'anulado')).toBe(true);
+    expect(await taskOf(r5, 'elaboracion')).toMatchObject({ status: 'abierta', round: 2 });
+    await uploadAttachment(prisma, upload, r5, { purpose: 'borrador', ...docx('v2 cuando respondieron todos') }, await viewer(E.elab), actor(E.elab));
     // Nueva versión del vigente con borrador PDF: la vista previa es el mismo PDF (sin encabezado) y valida páginas.
     const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nueva_version', subject: 'Nueva versión con borrador PDF', description: 'Cambio de prueba con borrador PDF.', idDocument: idDoc, formValues: { urgencia: 'Normal' } }, actor(E.sol));
     await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev], mode: 'paralelo' }, actor(E.elab), await accessOf(E.elab));

@@ -34,12 +34,12 @@ rem Reversa completa
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\iis-setup-maintenance.ps1 -Rollback
 ```
 
-- `main.yml` activa la página **solo** en el camino de cambio de esquema, que es el que detiene las apps. Al final de **todo** deploy corre `maintenance-off.ps1` con `if: always()`: si la app responde 200 la quita, y si no, la deja.
+- `main.yml` y `deploy-testing.yml` activan la página en **todo** deploy, antes de instalar dependencias y compilar (desde 2026-10-10). Al final de **todo** deploy corre `maintenance-off.ps1` con `if: always()`: si la app responde 200 la quita, y si no, la deja.
 - La reversa total también se puede hacer con `appcmd restore backup "antes-mantenimiento-<fecha>"`, más la copia del `web.config` que queda en `C:\inetpub\synerlink-mantenimiento-respaldos\<fecha>\`.
 
 ## Entorno de pruebas (.230)
 
-`deploy-testing.yml` **no** usa esto. La URL de pruebas es un túnel trycloudflare que apunta directo a `localhost:3030`, sin pasar por IIS. El sitio IIS `rp-kronos-test` (:8450, `kronos-test.gsslatam.com`) existe en la .230 y sirve para probar la página. Su configuración es `testing/rp-kronos-test.web.config`:
+`deploy-testing.yml` la activa en el sitio IIS `rp-kronos-test`. La URL de pruebas es un túnel trycloudflare que apunta directo a `localhost:3030`, sin pasar por IIS. El sitio IIS `rp-kronos-test` (:8450, `kronos-test.gsslatam.com`) existe en la .230 y sirve para probar la página. Su configuración es `testing/rp-kronos-test.web.config`:
 
 ```bat
 cd /d C:\Users\nicolas.rivera\projects\front-kronos-test
