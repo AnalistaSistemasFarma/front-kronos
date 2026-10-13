@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import bcrypt from 'bcryptjs';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PrismaClient } from '../../../app/generated/prisma';
 import { getSgcAccessForUser } from '../../../lib/sgc/access';
 import { SGC_PROCESS_NAME, SGC_SUBPROCESS_NAMES, SGC_SUBPROCESS_URLS } from '../../../lib/sgc/constants';
@@ -51,6 +51,9 @@ describe.skipIf(!url)('[SGC-REQ-146][SGC-REQ-147] SGC · excepción de Calidad c
   const changeRows = () => prisma.sgcConfigChangeLog.count({ where: { id_company: CO, action: SGC_QUALITY_SELF_REVIEW_ACTION } });
 
   beforeAll(async () => {
+    // La política vigente en pruebas y producción (RN 2026-10-05, confirmada el 2026-10-10): quien
+    // ejecuta la primera tarea O Calidad. La config de integración trae tarea_y_calidad por defecto.
+    vi.stubEnv('SGC_ASIGNACION_PERMISO', 'tarea_o_calidad');
     await prisma.$executeRawUnsafe(`
       SET IDENTITY_INSERT [dbo].[company] ON;
       IF NOT EXISTS (SELECT 1 FROM [dbo].[company] WHERE id_company = ${CO}) INSERT INTO [dbo].[company] (id_company, company) VALUES (${CO}, N'EMPRESA EXCEPCION CALIDAD CI');
@@ -85,6 +88,7 @@ describe.skipIf(!url)('[SGC-REQ-146][SGC-REQ-147] SGC · excepción de Calidad c
   });
 
   afterAll(async () => {
+    vi.unstubAllEnvs();
     await prisma.sgcCompanyConfig.update({ where: { id_company: CO }, data: { is_active: false } }).catch(() => undefined);
     await prisma.$disconnect();
   });
