@@ -22,6 +22,8 @@ export interface SgcSignersPanelProps {
   steps: Step[];
   canEdit: boolean;
   users: { value: string; label: string }[];
+  /** Excepción de Calidad (2026-10-13): personas que se ofrecen en REVISIÓN (incluye al solicitante/elaborador de Calidad cuando aplica); sin ella, `users`. */
+  reviewerUsers?: { value: string; label: string }[] | null;
   /** Sprint 12: personas que se ofrecen en APROBACIÓN (aprobadores autorizados); null = la lista no aplica. */
   approverUsers?: { value: string; label: string }[] | null;
   suggestion: SgcMatrixSuggestion[] | null;
@@ -35,7 +37,7 @@ export interface SgcSignersPanelProps {
 
 const ROLE_OF_STEP: Record<string, 'revisor' | 'aprobador'> = { revision: 'revisor', aprobacion: 'aprobador' };
 
-function StepEditor({ step, canEdit, users, approverUsers, suggestion, suggestOnly, onSave }: { step: Step } & Omit<SgcSignersPanelProps, 'steps' | 'canConfirm' | 'onConfirm'>) {
+function StepEditor({ step, canEdit, users, reviewerUsers, approverUsers, suggestion, suggestOnly, onSave }: { step: Step } & Omit<SgcSignersPanelProps, 'steps' | 'canConfirm' | 'onConfirm'>) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState<string[]>((step.signers.length ? step.signers : step.suggested).map((s) => s.email));
   const [mode, setMode] = useState<'orden' | 'paralelo'>((step.mode as 'orden' | 'paralelo') ?? 'paralelo');
@@ -46,7 +48,7 @@ function StepEditor({ step, canEdit, users, approverUsers, suggestion, suggestOn
   const role = ROLE_OF_STEP[step.key];
   const hint = suggestion?.find((s) => s.role === role);
   const restricted = role === 'aprobador' && Boolean(approverUsers);
-  const people = restricted ? approverUsers! : users;
+  const people = restricted ? approverUsers! : role === 'revisor' && reviewerUsers ? reviewerUsers : users;
 
   return (
     <Card withBorder radius='md' p='md' data-testid={`sgc-firmantes-${step.key}`}>
@@ -213,7 +215,7 @@ export default function SgcSignersPanel(props: SgcSignersPanelProps) {
       )}
       <Stack gap='sm'>
         {props.steps.map((s) => (
-          <StepEditor key={`${s.key}-${s.signers.map((x) => x.email).join(',')}-${s.suggested.map((x) => x.email).join(',')}-${s.mode}`} step={s} canEdit={props.canEdit} users={props.users} approverUsers={props.approverUsers ?? null} suggestion={props.suggestion} suggestOnly={props.suggestOnly} onSave={props.onSave} />
+          <StepEditor key={`${s.key}-${s.signers.map((x) => x.email).join(',')}-${s.suggested.map((x) => x.email).join(',')}-${s.mode}`} step={s} canEdit={props.canEdit} users={props.users} reviewerUsers={props.reviewerUsers ?? null} approverUsers={props.approverUsers ?? null} suggestion={props.suggestion} suggestOnly={props.suggestOnly} onSave={props.onSave} />
         ))}
       </Stack>
     </Card>

@@ -14,6 +14,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/integration/**/*.test.ts'],
+    // Las pruebas de integración del SGC se escribieron con la política más estricta de asignación
+    // de firmantes (quien crea el documento Y Calidad). Desde el 2026-10-10 el código usa por defecto
+    // `tarea_o_calidad` (RN 2026-10-05); aquí se fija la estricta para que sigan ejerciendo esos bloqueos.
+    env: { SGC_ASIGNACION_PERMISO: 'tarea_y_calidad' },
     testTimeout: 60_000,
     hookTimeout: 120_000,
     fileParallelism: false,

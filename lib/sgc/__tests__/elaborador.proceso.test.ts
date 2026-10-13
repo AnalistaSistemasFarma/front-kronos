@@ -38,13 +38,15 @@ describe('SGC · elaborador por configuración del proceso (reglas puras)', () =
     expect(r.discarded[2].reason).toMatch(/Aseguramiento de Calidad/);
   });
 
-  it('respaldo en Calidad sin el solicitante; sin nadie, null', () => {
+  it('respaldo en Calidad; el solicitante de Calidad es un candidato más (excepción del 2026-10-13); sin nadie, null', () => {
     expect(resolveElaborator(base({ quality: new Set([SOL, Q]) }))?.email).toBe(Q);
-    expect(resolveElaborator(base({ quality: new Set([SOL]) }))).toBeNull();
+    expect(resolveElaborator(base({ quality: new Set([SOL]) }))?.email).toBe(SOL);
+    expect(resolveElaborator(base({ quality: new Set() }))).toBeNull();
   });
 
-  it('mayúsculas y espacios no cuelan al solicitante', () => {
-    expect(resolveElaborator(base({ matrixPeople: [' SOL@X.CO '], quality: new Set([' Sol@x.co']) }))).toBeNull();
+  it('mayúsculas y espacios no cuelan al solicitante que no es de Calidad', () => {
+    expect(resolveElaborator(base({ matrixPeople: [' SOL@X.CO '], quality: new Set() }))).toBeNull();
+    expect(resolveElaborator(base({ matrixPeople: [' SOL@X.CO '], quality: new Set([' Sol@x.co']) }))?.email).toBe(SOL);
   });
 
   it('el historial dice de dónde salió y que Calidad puede reasignar', () => {

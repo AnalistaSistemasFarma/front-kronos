@@ -20,7 +20,7 @@ import { addInteraction, decideTask, requestOfTask } from './requests';
 import { cargoOf, composeContent, effectiveInstitutional, latestLayout, loadVerifiedDraft, personLabel } from './layout';
 import { isHeaderMandatory } from './companySettings';
 import { minorRevisionChain } from './drafts';
-import { withSgcAppLock } from './lock';
+import { withNewDocumentCodeLock, withSgcAppLock } from './lock';
 import { getReadSignError, type SgcReadStatus } from '../dissemination/scope';
 import type { SgcSignatureRow, SgcSignedContent } from '../signature/record';
 import { buildVerifyUrl } from '../pdf/qr';
@@ -258,9 +258,15 @@ async function markPdfError(db: SgcDb, idRequest: number, idCompany: number, mes
 export async function generateControlledVersion(db: SgcDb, deps: SgcSignatureDeps, idRequest: number, actor: SgcActor): Promise<{ idDocument: number; idDocumentVersion: number; pdfSha256: string; created: boolean }> {
   // Sprint 6: una sola generación a la vez por solicitud (la última firma y un reintento de Calidad
   // podían correr juntas, subir el mismo archivo dos veces y dejar el PDF distinto de su huella).
-  return withSgcAppLock(db, `sgc-pdf-controlado-${idRequest}`, { waitMs: 0, busyMessage: 'El PDF controlado de esta solicitud ya se está generando. Espere un momento y recargue.', holdMs: 180_000 }, () =>
-    generateControlledVersionUnlocked(db, deps, idRequest, actor)
-  );
+  const generate = () =>
+    withSgcAppLock(db, `sgc-pdf-controlado-${idRequest}`, { waitMs: 0, busyMessage: 'El PDF controlado de esta solicitud ya se está generando. Espere un momento y recargue.', holdMs: 180_000 }, () =>
+      generateControlledVersionUnlocked(db, deps, idRequest, actor)
+    );
+  // E2E 2026-10-10: un documento NUEVO toma el siguiente código de la guía; dos aprobaciones a la vez
+  // tomaban el mismo y la segunda pisaba el PDF de la primera en OneDrive. Se serializa por empresa.
+  const head = await db.sgcRequest.findUniqueOrThrow({ where: { id_request: idRequest }, select: { id_company: true, id_document: true, controlled_pdf_status: true, id_document_version: true } });
+  if (head.id_document || (head.controlled_pdf_status === 'generado' && head.id_document_version)) return generate();
+  return withNewDocumentCodeLock(db, head.id_company, generate);
 }
 
 async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDeps, idRequest: number, actor: SgcActor): Promise<{ idDocument: number; idDocumentVersion: number; pdfSha256: string; created: boolean }> {
@@ -314,6 +320,10 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
       code = resolved.code;
       title = request.subject.slice(0, 300);
       versionNumber = 1;
+      // Defensa adicional: nunca subir a la carpeta de un código que ya es de otro documento.
+      if (await db.sgcDocument.findFirst({ where: { id_company: request.id_company, code }, select: { id_document: true } })) {
+        throw new SgcError(`El código ${code} ya está asignado a otro documento: reintente la generación del PDF controlado.`, 409);
+      }
     }
 
     const changeValue = request.formValues.find((v) => v.field.field_key === 'resumen_cambios')?.value_text ?? null;
