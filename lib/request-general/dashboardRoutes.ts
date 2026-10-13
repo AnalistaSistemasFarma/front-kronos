@@ -5,7 +5,7 @@ import {
 import { isDeleteAttachmentsSubprocess } from '../attachments/access';
 import { isValentineWallSubprocess } from '../valentine/constants';
 import { isSgcPermissionMarkerSubprocess } from '../sgc/constants';
-import { isOtPermissionMarkerSubprocess } from '../ordenes-trabajo/constants';
+import { isOtPermissionMarkerSubprocess } from '../bitacora-proceso/constants';
 import {
   isAuditConfigureMarkerSubprocess,
   isAuditConversationsMarkerSubprocess,

@@ -3333,7 +3333,8 @@ model SgcSignerSubstitution {
 }
 
 // =============================================================================
-// Órdenes de Trabajo (P0, 2026-10-13) — bitácora de proceso de planta pedida
+// Bitácora de Proceso (antes «Órdenes de Trabajo»; P0, 2026-10-13). Las tablas
+// conservan el prefijo ot_ a propósito (nombre interno, sin mover el esquema) — bitácora de proceso de planta pedida
 // por Farmalógica (Amanda Casiano) para cerrar una desviación de auditoría:
 // «no se evidencia registro de las intervenciones durante todo el proceso».
 // Una orden de trabajo = un turno (producto, lote, turno y operarios). Los
@@ -3351,6 +3352,8 @@ model OtActividad {
   exige_observacion Boolean  @default(false)
   orden             Int      @default(0)
   activo            Boolean  @default(true)
+  // Clave de un ícono de la lista cerrada OT_ICONOS (lib/bitacora-proceso/constants.ts); opcional.
+  icono             String?  @db.NVarChar(40)
   created_by        String   @db.NVarChar(50)
   created_at        DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
 
@@ -3379,7 +3382,10 @@ model OtOrdenTrabajo {
   sap_op_snapshot    String?   @db.NVarChar(Max)
   // ABIERTA | CERRADA
   estado             String    @default("ABIERTA") @db.NVarChar(10)
+  // Supervisor: quien abre la bitácora (user.id).
   abierta_por        String    @db.NVarChar(50)
+  // Inspector (user.id), elegido al abrir; registra igual que los auxiliares.
+  id_inspector       String?   @db.NVarChar(50)
   abierta_en         DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
   cerrada_por        String?   @db.NVarChar(50)
   cerrada_en         DateTime? @db.DateTime2

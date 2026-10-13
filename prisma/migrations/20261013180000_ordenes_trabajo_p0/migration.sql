@@ -3,7 +3,7 @@
 
   Bitácora de proceso de planta pedida por Farmalógica (Amanda Casiano) para
   cerrar la desviación de auditoría «no se evidencia registro de las
-  intervenciones durante todo el proceso». Plan: proyectos/ordenes-trabajo-synerlink.md
+  intervenciones durante todo el proceso». Plan: proyectos/bitacora-proceso-synerlink.md
   (vault de horus).
 
   Crea 4 tablas NUEVAS en dbo (no toca ninguna tabla existente):
@@ -25,8 +25,8 @@
   antes del pase, primero en KRONOSDB_PRUEBAS y luego en KRONOSDB en ventana
   controlada. IDEMPOTENTE: cada objeto se crea solo si no existe (también corre
   sobre el esquema que deja `prisma db push` en la CI).
-  Permisos y catálogo inicial: prisma/manual/2026-10-13-ordenes-trabajo-p0-farmalogica.sql
-  REVERSA: prisma/manual/2026-10-13-ordenes-trabajo-p0-reversa.sql
+  Permisos y catálogo inicial: prisma/manual/2026-10-13-bitacora-proceso-p0-farmalogica.sql (luego se renombró el módulo a «Bitácora de Proceso»)
+  REVERSA: prisma/manual/2026-10-13-bitacora-proceso-p0-reversa.sql
 */
 
 SET XACT_ABORT ON;
