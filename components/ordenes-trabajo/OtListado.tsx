@@ -174,10 +174,10 @@ export default function OtListado({ company }: { company: OtCompanyAccess }) {
       {company.canManage && !desktop && (
         <Box pos='fixed' bottom={0} left={0} right={0} p='md' bg='var(--mantine-color-body)' style={{ borderTop: '1px solid var(--mantine-color-default-border)', zIndex: 150 }}>
           <Group grow gap='sm'>
-            <Button variant='default' size='lg' component={Link} href={otHref(`${OT_BASE_URL}/gestion`, company.idCompany)} leftSection={<IconSettings size={18} />}>
+            <Button variant='default' size='md' h={52} component={Link} href={otHref(`${OT_BASE_URL}/gestion`, company.idCompany)} leftSection={<IconSettings size={18} />}>
               Catálogo
             </Button>
-            <Button size='lg' leftSection={<IconPlus size={20} />} onClick={() => setNueva(true)} data-testid='ot-nueva'>
+            <Button size='md' h={52} leftSection={<IconPlus size={18} />} onClick={() => setNueva(true)} data-testid='ot-nueva'>
               Nueva orden
             </Button>
           </Group>

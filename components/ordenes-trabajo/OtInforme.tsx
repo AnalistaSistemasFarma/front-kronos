@@ -7,7 +7,7 @@ import { IconAlertTriangle, IconArrowLeft, IconChevronRight, IconPrinter } from 
 import { OT_BASE_URL } from '../../lib/ordenes-trabajo/constants';
 import type { OrdenDetalle } from '../../lib/ordenes-trabajo/db';
 import type { OtCompanyAccess } from '../../lib/ordenes-trabajo/rules';
-import { codigoOt, fmtFecha, fmtFechaHora, otHref, turnoLabel, useOtFetch } from './otClient';
+import { codigoOt, fmtFecha, fmtFechaHora, fmtFechaHoraSeg, otHref, turnoLabel, useOtFetch } from './otClient';
 
 /**
  * Informe de la orden de trabajo (soporte de calidad, R9 P0): encabezado,
@@ -132,7 +132,7 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
                   {o.registros.map((r, i) => (
                     <Table.Tr key={r.id}>
                       <Table.Td>{i + 1}</Table.Td>
-                      <Table.Td style={{ whiteSpace: 'nowrap' }}>{fmtFechaHora(r.registradoEn)}</Table.Td>
+                      <Table.Td style={{ whiteSpace: 'nowrap' }}>{fmtFechaHoraSeg(r.registradoEn)}</Table.Td>
                       <Table.Td>{r.actividad}</Table.Td>
                       <Table.Td>{r.usuario}</Table.Td>
                       <Table.Td style={{ overflowWrap: 'anywhere' }}>{r.observacion ?? ''}</Table.Td>
@@ -147,7 +147,7 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
                       <Group justify='space-between' wrap='nowrap'>
                         <Text fw={600}>{i + 1}. {r.actividad}</Text>
                       </Group>
-                      <Text size='sm'>{fmtFechaHora(r.registradoEn)} · {r.usuario}</Text>
+                      <Text size='sm'>{fmtFechaHoraSeg(r.registradoEn)} · {r.usuario}</Text>
                       {r.observacion && <Text size='sm' c='dimmed' style={{ overflowWrap: 'anywhere' }}>{r.observacion}</Text>}
                     </Card>
                   ))}
@@ -173,11 +173,11 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
         style={desktop ? undefined : { borderTop: '1px solid var(--mantine-color-default-border)', zIndex: 150 }}
       >
         <Group grow={!desktop} justify='flex-end' gap='sm'>
-          <Button variant='default' size='lg' leftSection={<IconArrowLeft size={20} />} component={Link} href={otHref(`${OT_BASE_URL}/${o.id}`, company.idCompany)}>
+          <Button variant='default' size={desktop ? 'lg' : 'md'} h={desktop ? undefined : 52} leftSection={<IconArrowLeft size={18} />} component={Link} href={otHref(`${OT_BASE_URL}/${o.id}`, company.idCompany)}>
             Volver
           </Button>
-          <Button size='lg' leftSection={<IconPrinter size={20} />} onClick={() => window.print()} data-testid='ot-imprimir'>
-            Imprimir / PDF
+          <Button size={desktop ? 'lg' : 'md'} h={desktop ? undefined : 52} leftSection={<IconPrinter size={18} />} onClick={() => window.print()} data-testid='ot-imprimir'>
+            {desktop ? 'Imprimir / PDF' : 'Imprimir'}
           </Button>
         </Group>
       </Box>
