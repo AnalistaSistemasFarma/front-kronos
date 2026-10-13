@@ -19,9 +19,13 @@ SET NOCOUNT ON;
 IF DB_NAME() NOT IN (N'KRONOSDB', N'KRONOSDB_PRUEBAS', N'kronos_ci')
   THROW 51320, N'Base no esperada: esta reversa solo corre en KRONOSDB, KRONOSDB_PRUEBAS o kronos_ci.', 1;
 
+/* SQL dinámico: SQL Server no garantiza el corto circuito del AND, y si la tabla ya no existe
+   (segunda corrida) un SELECT directo fallaría con «Invalid object name». */
+DECLARE @HayOrdenes BIT = 0;
 IF OBJECT_ID(N'dbo.ot_orden_trabajo', N'U') IS NOT NULL
-   AND EXISTS (SELECT 1 FROM [dbo].[ot_orden_trabajo])
-   AND ISNULL(CAST(SESSION_CONTEXT(N'ot_reversa_acepta_perdida') AS INT), 0) <> 1
+  EXEC sp_executesql N'SELECT @h = CASE WHEN EXISTS (SELECT 1 FROM [dbo].[ot_orden_trabajo]) THEN 1 ELSE 0 END',
+                     N'@h BIT OUTPUT', @h = @HayOrdenes OUTPUT;
+IF @HayOrdenes = 1 AND ISNULL(CAST(SESSION_CONTEXT(N'ot_reversa_acepta_perdida') AS INT), 0) <> 1
   THROW 51321, N'Hay órdenes de trabajo registradas. Respalde ot_* y declare ot_reversa_acepta_perdida = 1 para continuar.', 1;
 
 SELECT DB_NAME() AS base, 'antes' AS momento, name AS objeto, type_desc FROM sys.objects
