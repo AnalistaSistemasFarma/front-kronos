@@ -30,6 +30,7 @@ interface Settings {
   uncontrolledCopies?: { types: string[]; days: number; maxDays: number };
   viewerProtection?: boolean;
   approverListEnforced?: boolean;
+  qualitySelfReview?: boolean;
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -54,6 +55,8 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
   const [copyMaxDays, setCopyMaxDays] = useState<number | string>(90);
   const [viewerProtection, setViewerProtection] = useState(true);
   const [approverListEnforced, setApproverListEnforced] = useState(true);
+  // Excepción de Calidad (2026-10-13, punto 3): apagada por defecto.
+  const [qualitySelfReview, setQualitySelfReview] = useState(false);
   const [closeReason, setCloseReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
@@ -70,6 +73,7 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
     }
     setViewerProtection(data.viewerProtection ?? true);
     setApproverListEnforced(data.approverListEnforced ?? true);
+    setQualitySelfReview(data.qualitySelfReview ?? false);
   }, [data]);
 
   if (error) {
@@ -91,7 +95,7 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
     setBusy(true);
     setFeedback(null);
     try {
-      const body: Record<string, unknown> = { company: idCompany, reason, disseminationDomains: domains, readThresholdPct: Number(threshold), emailMode, uncontrolledCopyTypes: copyTypes, uncontrolledCopyDays: Number(copyDays), uncontrolledCopyMaxDays: Number(copyMaxDays), viewerProtection, approverListEnforced };
+      const body: Record<string, unknown> = { company: idCompany, reason, disseminationDomains: domains, readThresholdPct: Number(threshold), emailMode, uncontrolledCopyTypes: copyTypes, uncontrolledCopyDays: Number(copyDays), uncontrolledCopyMaxDays: Number(copyMaxDays), viewerProtection, approverListEnforced, qualitySelfReview };
       if (logo) body.logoDataUrl = await fileToDataUrl(logo);
       await sgcSend('/api/sgc/company-settings', 'PUT', body);
       setFeedback({ ok: true, text: 'Configuración guardada y registrada en la auditoría.' });
@@ -208,6 +212,13 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
           checked={approverListEnforced}
           onChange={(e) => setApproverListEnforced(e.currentTarget.checked)}
           data-testid='sgc-config-aprobadores'
+        />
+        <Switch
+          label='Aseguramiento de Calidad puede revisar el documento que elaboró'
+          description='Excepción a la segregación de funciones solo para Calidad (apagada por defecto). La aprobación no cambia: nunca la hace quien elaboró. Quien hace la solicitud, si es de Calidad, siempre puede elaborarla y revisarla.'
+          checked={qualitySelfReview}
+          onChange={(e) => setQualitySelfReview(e.currentTarget.checked)}
+          data-testid='sgc-config-calidad-revisa'
         />
         <NumberInput label='Umbral de aviso de avance de lectura (%)' description='Al llegar a este porcentaje de lectura se avisa una vez al creador del documento y a Calidad.' min={1} max={100} value={threshold} onChange={setThreshold} w={320} data-testid='sgc-config-umbral' />
         <Textarea label='Motivo del cambio' description='Mínimo 10 caracteres: queda en el control de cambios.' autosize minRows={2} value={reason} onChange={(e) => setReason(e.currentTarget.value)} autoComplete='off' data-testid='sgc-config-empresa-motivo' />
