@@ -125,8 +125,8 @@ export default function OtShell({ section, subtitle, requireManage, compact, act
             </Breadcrumbs>
             <Group justify='space-between' align='flex-end' wrap='wrap' gap='md'>
               <div style={{ minWidth: 0 }}>
-                <Title order={1} className='text-2xl sm:text-3xl font-bold mb-1 flex items-center gap-3' data-testid='ot-titulo'>
-                  <IconListCheck size={30} className='text-blue-600' />
+                <Title order={1} fz={{ base: 26, sm: 30 }} className='font-bold mb-1 flex items-center gap-3' data-testid='ot-titulo'>
+                  <IconListCheck size={28} className='text-blue-600' style={{ flexShrink: 0 }} />
                   {section ?? 'Órdenes de Trabajo'}
                 </Title>
                 <Text size='md' c='dimmed'>

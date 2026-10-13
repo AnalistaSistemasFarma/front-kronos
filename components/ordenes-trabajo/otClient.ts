@@ -71,6 +71,13 @@ export function fmtFechaHora(iso: string | null | undefined): string {
   }).format(new Date(iso));
 }
 
+/** Fecha y hora con segundos (cronología del informe). */
+export function fmtFechaHoraSeg(iso: string): string {
+  return new Intl.DateTimeFormat('es-CO', {
+    timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).format(new Date(iso));
+}
+
 export function fmtHora(iso: string): string {
   return new Intl.DateTimeFormat('es-CO', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date(iso));
 }

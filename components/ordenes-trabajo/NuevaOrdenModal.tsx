@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ActionIcon,
   Alert,
   Badge,
   Box,
@@ -188,9 +189,9 @@ export default function NuevaOrdenModal({
                     Lote {sapOp.U_Cod_Lote ?? '—'} · Vence {fmtFecha(sapOp.U_FecVen_lote)} · Bodega {sapOp.Warehouse ?? '—'}
                   </Text>
                 </div>
-                <Button variant='subtle' color='gray' size='md' leftSection={<IconX size={16} />} onClick={quitarOp}>
-                  Quitar
-                </Button>
+                <ActionIcon variant='subtle' color='gray' size='xl' onClick={quitarOp} aria-label='Quitar la OP' title='Quitar la OP' data-testid='ot-op-quitar'>
+                  <IconX size={20} />
+                </ActionIcon>
               </Group>
             </Card>
           ) : (
@@ -278,7 +279,7 @@ export default function NuevaOrdenModal({
             <Text fw={500} size='md'>
               Operarios <Text span c='red'>*</Text>
             </Text>
-            <Badge variant='light' size='lg'>{operarios.length} seleccionados</Badge>
+            <Badge variant='light' size='lg'>{operarios.length === 1 ? '1 seleccionado' : `${operarios.length} seleccionados`}</Badge>
           </Group>
           <Text size='xs' c='dimmed' mb={6}>
             Solo los operarios de la lista podrán registrar en esta orden. Cada operario entra con su propio usuario.

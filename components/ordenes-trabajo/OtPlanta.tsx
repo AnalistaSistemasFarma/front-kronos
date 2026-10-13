@@ -136,33 +136,28 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
         style={{ zIndex: 20 }}
         data-testid='ot-encabezado'
       >
-        <Breadcrumbs separator={<IconChevronRight size={14} />} mb={6} style={{ flexWrap: 'wrap' }}>
-          <Anchor component={Link} href='/process' size='sm'>
-            Procesos
-          </Anchor>
-          <Anchor component={Link} href={otHref(OT_BASE_URL, company.idCompany)} size='sm'>
-            Órdenes de Trabajo
-          </Anchor>
-          <Text size='sm'>{codigoOt(o.consecutivo)}</Text>
-        </Breadcrumbs>
-        <Group justify='space-between' wrap='nowrap' align='flex-start' gap='xs'>
-          <div style={{ minWidth: 0 }}>
-            <Title order={1} size='h3' lineClamp={2}>
-              {o.producto}
-            </Title>
-            <Text size='md' mt={2}>
-              Lote <b>{o.lote}</b> · Turno <b>{turnoLabel(o.turno)}</b>
-              {o.sapOpDocNum ? <> · OP <b>{o.sapOpDocNum}</b></> : null}
-            </Text>
-            {o.area && <Text size='sm' c='dimmed'>{o.area}</Text>}
-          </div>
-          <Stack gap={4} align='flex-end'>
-            <Text fw={700}>{codigoOt(o.consecutivo)}</Text>
-            <Badge color={abierta ? 'green' : 'gray'} variant='light' size='lg' data-testid='ot-estado'>
-              {abierta ? 'Abierta' : 'Cerrada'}
-            </Badge>
-          </Stack>
+        <Group justify='space-between' wrap='nowrap' align='center' gap='xs' mb={6}>
+          <Breadcrumbs separator={<IconChevronRight size={14} />} style={{ flexWrap: 'wrap', minWidth: 0 }}>
+            <Anchor component={Link} href='/process' size='sm' visibleFrom='sm'>
+              Procesos
+            </Anchor>
+            <Anchor component={Link} href={otHref(OT_BASE_URL, company.idCompany)} size='sm'>
+              Órdenes de Trabajo
+            </Anchor>
+            <Text size='sm' fw={700}>{codigoOt(o.consecutivo)}</Text>
+          </Breadcrumbs>
+          <Badge color={abierta ? 'green' : 'gray'} variant='light' size='lg' style={{ flexShrink: 0 }} data-testid='ot-estado'>
+            {abierta ? 'Abierta' : 'Cerrada'}
+          </Badge>
         </Group>
+        <Title order={1} size='h3' lineClamp={2}>
+          {o.producto}
+        </Title>
+        <Text size='md' mt={2}>
+          Lote <b>{o.lote}</b> · Turno <b>{turnoLabel(o.turno)}</b>
+          {o.sapOpDocNum ? <> · OP <b>{o.sapOpDocNum}</b></> : null}
+        </Text>
+        {o.area && <Text size='sm' c='dimmed'>{o.area}</Text>}
       </Card>
 
       {aviso && (
@@ -275,14 +270,15 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
         style={mobile ? { borderTop: '1px solid var(--mantine-color-default-border)', zIndex: 150 } : undefined}
       >
         <Group grow={mobile} justify='flex-end' gap='sm'>
-          <Button variant='default' size='lg' leftSection={<IconPrinter size={20} />} component={Link} href={informeHref} data-testid='ot-informe'>
-            Informe / PDF
+          <Button variant='default' size={mobile ? 'md' : 'lg'} h={mobile ? 52 : undefined} leftSection={<IconPrinter size={18} />} component={Link} href={informeHref} data-testid='ot-informe'>
+            {mobile ? 'Informe' : 'Informe / PDF'}
           </Button>
           {abierta && o.puedeGestionar && (
             <Button
               color='red'
-              size='lg'
-              leftSection={<IconLock size={20} />}
+              size={mobile ? 'md' : 'lg'}
+              h={mobile ? 52 : undefined}
+              leftSection={<IconLock size={18} />}
               onClick={() => {
                 setModalError(null);
                 setObsCierre('');
@@ -290,7 +286,7 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
               }}
               data-testid='ot-cerrar'
             >
-              Cerrar orden
+              {mobile ? 'Cerrar' : 'Cerrar orden'}
             </Button>
           )}
         </Group>
