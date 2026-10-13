@@ -425,7 +425,7 @@ describe('SGC · el solicitante solo SUGIERE; quien ejecuta la primera tarea y/o
     it('si nadie distinto del solicitante (que no es de Calidad) puede elaborar, la solicitud no nace (409) y no se escribe nada', async () => {
       const f = createDb({ matrix: [{ role: 'elaborador', process: 5, email: SOL }], quality: [] });
       await expect(createRequest(f.db, notifier, access(true), input, actor(SOL))).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/No hay quién elabore/) });
-      expect(f.writes('sgcRequest')).toEqual([]);
+      expect(f.calls.filter((c) => c.model === 'sgcInteraction' && c.method === 'create')).toEqual([]);
     });
   });
 
@@ -437,6 +437,18 @@ describe('SGC · el solicitante solo SUGIERE; quien ejecuta la primera tarea y/o
         sgcRequest: { findUniqueOrThrow: () => requestRow },
         subprocessUserCompany: { findMany: subprocessRows },
       });
+
+    it('la divulgación (alcance) NO se reasigna, ni siquiera Calidad: 409 y no se escribe nada (2026-10-13)', async () => {
+      const f = fakeDb({
+        sgcTask: { findUnique: () => ({ id_request: 7 }), findUniqueOrThrow: () => ({ ...elabTask('alcance'), name: 'Divulgación', assignees: [{ id_task_assignee: 40, user_email: REV, status: 'pendiente', sign_order: 1, signature_status: 'pendiente', signature_meaning: 'leyo' }] }) },
+        sgcRequest: { findUniqueOrThrow: () => requestRow },
+        subprocessUserCompany: { findMany: subprocessRows },
+      });
+      await expect(reassignTask(f.db, notifier, access(true), 4, { toEmail: APR, reason: 'Que lea otra persona' }, actor(CAL))).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/La divulgación no se reasigna/) });
+      await expect(reassignTask(f.db, notifier, access(true), 4, { toEmail: APR, reason: 'Que lea otra persona' }, actor(REV))).rejects.toMatchObject({ status: 409 });
+      expect(f.writes('sgcTaskAssignee')).toEqual([]);
+      expect(f.calls.filter((c) => c.model === 'sgcInteraction' && c.method === 'create')).toEqual([]);
+    });
 
     it('el solicitante no reasigna la elaboración (ni con permiso de Calidad): 403', async () => {
       const f = reassignDb();

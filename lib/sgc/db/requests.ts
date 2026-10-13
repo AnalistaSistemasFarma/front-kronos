@@ -1069,6 +1069,8 @@ export async function reassignTask(
     const request = await lockRequest(tx, head.id_request);
     const task = await tx.sgcTask.findUniqueOrThrow({ where: { id_task: idTask }, include: { assignees: true, taskDef: true } });
     if (request.status !== 'abierta' || task.status !== 'abierta') throw new SgcError('La tarea no está abierta.', 409);
+    // 2026-10-13 (prod): reasignar la divulgación dejaba la lectura «reemplazada» y «Leído» deshabilitado.
+    if (task.taskDef.assignment === 'alcance') throw new SgcError('La divulgación no se reasigna: cada persona del alcance firma su propia lectura. Calidad ajusta el alcance.', 409);
     if (task.taskDef.multi_assignee || task.taskDef.assignment === 'calidad') throw new SgcError('En los pasos con firmantes el elaborador cambia a las personas (no se reasigna la tarea).', 409);
     const current = task.assignees.find((a) => a.status === 'pendiente');
     if (!current) throw new SgcError('La tarea no tiene un responsable pendiente.', 409);
@@ -1583,6 +1585,7 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
       role: tDef?.role ?? t.taskDef.role,
       canReturn: def.transitions.some((x) => x.from === t.task_key && x.action === 'devolver'),
       canReassign:
+        t.taskDef.assignment !== 'alcance' &&
         t.status === 'abierta' &&
         single &&
         isOpen &&
