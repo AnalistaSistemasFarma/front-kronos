@@ -452,8 +452,28 @@ export default function OrionReviewPanel({
         onClose={closeDecide}
         centered
         radius='lg'
-        size='xl'
+        size='100%'
+        padding='md'
         closeOnClickOutside={!busy}
+        overlayProps={{ blur: 3, backgroundOpacity: 0.45 }}
+        styles={{
+          content: {
+            maxWidth: 'min(1600px, 98vw)',
+            width: '98vw',
+            height: '96vh',
+            maxHeight: '96vh',
+            display: 'flex',
+            flexDirection: 'column',
+          },
+          header: { flexShrink: 0 },
+          body: {
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          },
+        }}
         title={
           <Group gap={8} wrap='nowrap'>
             <ThemeIcon size={26} radius='xl' variant='light' color='violet'>
@@ -468,9 +488,9 @@ export default function OrionReviewPanel({
           </Group>
         }
       >
-        <Stack gap='sm'>
+        <Stack gap='sm' style={{ flex: 1, minHeight: 0 }}>
           {approvals.length > 0 ? (
-            <Group gap={6}>
+            <Group gap={6} style={{ flexShrink: 0 }}>
               {approvals.map((a) => (
                 <Badge
                   key={`decide-${a.order}-${a.email}`}
@@ -497,9 +517,13 @@ export default function OrionReviewPanel({
                 border: '1px solid var(--mantine-color-default-border)',
                 borderRadius: 8,
                 overflow: 'hidden',
+                flex: 1,
+                minHeight: 0,
+                display: 'flex',
+                flexDirection: 'column',
               }}
             >
-              <Group justify='flex-end' px='xs' py={4}>
+              <Group justify='flex-end' px='xs' py={4} style={{ flexShrink: 0 }}>
                 <Button
                   size='compact-xs'
                   variant='subtle'
@@ -518,7 +542,8 @@ export default function OrionReviewPanel({
                 style={{
                   display: 'block',
                   width: '100%',
-                  height: returning ? '45vh' : '62vh',
+                  flex: 1,
+                  minHeight: 240,
                   border: 0,
                   borderTop: '1px solid var(--mantine-color-default-border)',
                 }}
@@ -531,7 +556,7 @@ export default function OrionReviewPanel({
           )}
 
           {returning ? (
-            <Stack gap='xs'>
+            <Stack gap='xs' style={{ flexShrink: 0 }}>
               <Text size='sm' c='dimmed'>
                 El preparador deberá subir una versión corregida y la validación empezará de nuevo
                 desde el primer validador.
@@ -573,7 +598,7 @@ export default function OrionReviewPanel({
               </Group>
             </Stack>
           ) : (
-            <Group justify='space-between'>
+            <Group justify='space-between' style={{ flexShrink: 0 }}>
               <Button variant='default' disabled={Boolean(busy)} onClick={closeDecide}>
                 Cerrar
               </Button>
