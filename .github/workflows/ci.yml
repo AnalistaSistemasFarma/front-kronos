@@ -173,13 +173,69 @@ jobs:
           retention-days: 90
 
   # ---------------------------------------------------------------------------
+  # ¿Hace falta la integración con SQL Server? (decide en ~10 s, sin npm ci)
+  #
+  # En un PR, lista los archivos cambiados (API de GitHub) y corre
+  # scripts/ci/integracion-relevante.mjs: responde «true» si el PR toca el SGC,
+  # Órdenes de Trabajo, prisma/**, package.json/lock, la configuración de las
+  # pruebas, este workflow, o cualquier archivo del árbol de importaciones de
+  # tests/integration, lib/sgc y lib/ordenes-trabajo. En push y
+  # workflow_dispatch, o ante cualquier error, responde «true» (corre todo).
+  # ---------------------------------------------------------------------------
+  cambios:
+    name: Cambios — ¿corre la integración?
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      relevante: ${{ steps.decidir.outputs.relevante }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Listar archivos cambiados del PR
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          # Incluye el nombre anterior de los archivos renombrados. Si falla, no
+          # se crea la lista y el script decide «true» (corre todo).
+          if gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" \
+               --jq '.[] | .filename, (.previous_filename // empty)' > /tmp/cambiados.txt; then
+            echo "$(wc -l < /tmp/cambiados.txt) ruta(s) cambiada(s)"
+            # La API devuelve como máximo 3000 archivos: con más, se corre todo.
+            if [ "$(wc -l < /tmp/cambiados.txt)" -ge 3000 ]; then rm -f /tmp/cambiados.txt; fi
+          else
+            rm -f /tmp/cambiados.txt
+          fi
+
+      - name: Decidir
+        id: decidir
+        run: |
+          node scripts/ci/integracion-relevante.mjs /tmp/cambiados.txt 2> /tmp/motivo.txt >> "$GITHUB_OUTPUT"
+          cat /tmp/motivo.txt
+          { echo "## Integración con SQL Server"; echo ""; sed 's/^\[integracion-relevante\] //' /tmp/motivo.txt; } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
   # SGC documental: integración contra un SQL Server EFÍMERO (contenedor
   # oficial de Microsoft). Crea la base desde el esquema de Prisma (incluido el
   # esquema SQL `sgc`), aplica las migraciones del Sprint 0 (deben ser
   # idempotentes) y prueba el acceso real contra la base.
+  #
+  # Solo corre si el job `cambios` lo pide. La condición va a nivel de JOB (no
+  # en un paso) para no levantar el contenedor de SQL Server cuando no hace
+  # falta: los `services` arrancan antes que cualquier paso. Un job omitido por
+  # `if:` queda «Skipped», que GitHub cuenta como aprobado si algún día este
+  # check pasa a ser obligatorio en la protección de ramas (hoy no lo es). Si
+  # `cambios` fallara, su salida queda vacía y la integración corre igual
+  # (`!= 'false'`), así que un error del filtro nunca la apaga en silencio.
   # ---------------------------------------------------------------------------
   sgc-integracion:
     name: SGC — integración (SQL Server efímero)
+    needs: cambios
+    if: ${{ !cancelled() && needs.cambios.outputs.relevante != 'false' }}
     runs-on: ubuntu-latest
     services:
       mssql:
