@@ -20,10 +20,17 @@
  * cambia).
  */
 
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { Box, Loader, ScrollArea, Stack, Text } from '@mantine/core';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import { ActionIcon, Box, Group, Loader, ScrollArea, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { IconCircleCheckFilled } from '@tabler/icons-react';
+import { IconCircleCheckFilled, IconZoomIn, IconZoomOut } from '@tabler/icons-react';
 import {
   clampFieldSize,
   createFieldId,
@@ -116,6 +123,17 @@ type DragState = {
 const CLICK_SUPPRESS_MS = 280;
 const MOVE_THRESHOLD_PX = 4;
 
+const PAGE_BASE_WIDTH = 720;
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 4;
+const ZOOM_STEP = 0.25;
+/** Se renderiza a más resolución que la vista base para que la letra se lea al hacer zoom. */
+const PDF_RENDER_SCALE = 2.5;
+
+function clampZoom(z: number) {
+  return Math.round(clamp(z, ZOOM_MIN, ZOOM_MAX) * 100) / 100;
+}
+
 export default function SgcSignaturePlacementCanvas({
   pdfSrc,
   documentId,
@@ -125,7 +143,11 @@ export default function SgcSignaturePlacementCanvas({
   fields,
   onChange,
 }: Props) {
-  const { pages, loading, error } = usePdfPageImages(pdfSrc);
+  const { pages, loading, error } = usePdfPageImages(pdfSrc, PDF_RENDER_SCALE);
+  const [zoom, setZoom] = useState(1);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  // Centro visible (fracción del contenido) que se conserva al cambiar el zoom.
+  const pendingScrollRef = useRef<{ x: number; y: number } | null>(null);
   const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const imgRefs = useRef<Record<number, HTMLImageElement | null>>({});
   const fieldsRef = useRef(fields);
@@ -318,6 +340,44 @@ export default function SgcSignaturePlacementCanvas({
     };
   }, [endInteraction, updateFieldFromPointer]);
 
+  const changeZoom = useCallback((next: (current: number) => number) => {
+    setZoom((current) => {
+      const target = clampZoom(next(current));
+      if (target === current) return current;
+      const vp = viewportRef.current;
+      if (vp && vp.scrollWidth > 0 && vp.scrollHeight > 0) {
+        pendingScrollRef.current = {
+          x: (vp.scrollLeft + vp.clientWidth / 2) / vp.scrollWidth,
+          y: (vp.scrollTop + vp.clientHeight / 2) / vp.scrollHeight,
+        };
+      }
+      return target;
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    const vp = viewportRef.current;
+    const anchor = pendingScrollRef.current;
+    if (!vp || !anchor) return;
+    pendingScrollRef.current = null;
+    vp.scrollLeft = anchor.x * vp.scrollWidth - vp.clientWidth / 2;
+    vp.scrollTop = anchor.y * vp.scrollHeight - vp.clientHeight / 2;
+  }, [zoom]);
+
+  // Ctrl + rueda: zoom (listener no pasivo para poder evitar el zoom del navegador).
+  const hasPages = pages.length > 0;
+  useEffect(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    function onWheel(e: WheelEvent) {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      changeZoom((z) => z + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP));
+    }
+    vp.addEventListener('wheel', onWheel, { passive: false });
+    return () => vp.removeEventListener('wheel', onWheel);
+  }, [changeZoom, hasPages, loading]);
+
   const startMove = (
     e: ReactPointerEvent<HTMLDivElement>,
     field: SignatureFieldPlacement,
@@ -419,10 +479,48 @@ export default function SgcSignaturePlacementCanvas({
             guardada, en pequeño.
           </Text>
         ) : null}
-        <Text size='xs' c='dimmed' mt={4}>
-          {coarse ? 'Toque el documento para colocar · arrastre la caja con el dedo para moverla · esquina inferior para redimensionar (' : 'Clic para colocar · arrastre para mover · esquina inferior para redimensionar ('}
-          {kindBounds.minW}–{kindBounds.maxW}% × {kindBounds.minH}–{kindBounds.maxH}%).
-        </Text>
+        <Group justify='space-between' align='center' gap='xs' mt={4} wrap='wrap'>
+          <Text size='xs' c='dimmed' style={{ flex: '1 1 260px' }}>
+            {coarse ? 'Toque el documento para colocar · arrastre la caja con el dedo para moverla · esquina inferior para redimensionar (' : 'Clic para colocar · arrastre para mover · esquina inferior para redimensionar ('}
+            {kindBounds.minW}–{kindBounds.maxW}% × {kindBounds.minH}–{kindBounds.maxH}%) · Ctrl +
+            rueda para hacer zoom.
+          </Text>
+          <Group gap={4} wrap='nowrap'>
+            <Tooltip label='Alejar' withArrow>
+              <ActionIcon
+                variant='default'
+                size='sm'
+                aria-label='Alejar'
+                disabled={zoom <= ZOOM_MIN}
+                onClick={() => changeZoom((z) => z - ZOOM_STEP)}
+              >
+                <IconZoomOut size={14} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label='Volver al 100%' withArrow>
+              <UnstyledButton
+                onClick={() => changeZoom(() => 1)}
+                aria-label='Volver al 100%'
+                style={{ minWidth: 44, textAlign: 'center' }}
+              >
+                <Text size='xs' fw={600}>
+                  {Math.round(zoom * 100)}%
+                </Text>
+              </UnstyledButton>
+            </Tooltip>
+            <Tooltip label='Acercar' withArrow>
+              <ActionIcon
+                variant='default'
+                size='sm'
+                aria-label='Acercar'
+                disabled={zoom >= ZOOM_MAX}
+                onClick={() => changeZoom((z) => z + ZOOM_STEP)}
+              >
+                <IconZoomIn size={14} />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
+        </Group>
       </Box>
       <ScrollArea
         style={{ flex: 1, minHeight: 0 }}
@@ -430,11 +528,12 @@ export default function SgcSignaturePlacementCanvas({
         offsetScrollbars
         type='scroll'
         scrollbarSize={10}
+        viewportRef={viewportRef}
         styles={{
           viewport: { paddingBottom: 16 },
         }}
       >
-        <Stack gap='lg' p='md' align='center' pb='xl'>
+        <Stack gap='lg' p='md' align='flex-start' pb='xl'>
           {pages.map((page) => (
             <Box
               key={page.page}
@@ -444,8 +543,11 @@ export default function SgcSignaturePlacementCanvas({
               onClick={(e) => handlePageClick(page.page, e)}
               style={{
                 position: 'relative',
-                width: '100%',
-                maxWidth: 720,
+                // Márgenes auto: centrada si cabe; con zoom se desborda solo hacia la derecha (scroll).
+                marginInline: 'auto',
+                flexShrink: 0,
+                width: zoom <= 1 ? '100%' : PAGE_BASE_WIDTH * zoom,
+                maxWidth: zoom <= 1 ? PAGE_BASE_WIDTH * zoom : 'none',
                 cursor: interacting ? 'grabbing' : 'crosshair',
                 boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
                 borderRadius: 4,
