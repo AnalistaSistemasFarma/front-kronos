@@ -485,6 +485,8 @@ function RequestBoard() {
   };
 
   const { visibleFields, selectedOptionIds } = computeVisibility();
+  // La firma digital se configura después de crear la solicitud; no se muestra al crearla.
+  const displayedFields = visibleFields.filter((f) => f.field_type !== ORION_SIGNATURE_FIELD_TYPE);
 
   const isFileVisible = (doc: { conditions: number[] }) =>
     doc.conditions.length === 0 || doc.conditions.some((c) => selectedOptionIds.has(c));
@@ -2068,11 +2070,11 @@ function RequestBoard() {
 
             <Divider />
 
-            {visibleFields.length > 0 && (
+            {displayedFields.length > 0 && (
               <Stack gap='md'>
                 <Text fw={600}>Información adicional</Text>
                 <Grid>
-                  {visibleFields.map((field) => {
+                  {displayedFields.map((field) => {
                     const rawValue = fieldValues[field.id];
                     const clearFieldError = () => {
                       if (formErrors[`field_${field.id}`]) {
@@ -2095,19 +2097,9 @@ function RequestBoard() {
                       field.field_type === 'money' ||
                       /valor a pagar|monto/i.test(field.field_label);
                     const isTableField = field.field_type === TABLE_FIELD_TYPE;
-                    const isOrionSignatureField = field.field_type === ORION_SIGNATURE_FIELD_TYPE;
                     return (
-                      <Grid.Col
-                        span={{ base: 12, md: isTableField || isOrionSignatureField ? 12 : 6 }}
-                        key={field.id}
-                      >
-                        {isOrionSignatureField ? (
-                          <Alert color='blue' title={field.field_label} icon={<IconLink size={16} />}>
-                            Puede adjuntar archivos como de costumbre. Si tiene permiso “Preparar
-                            firma”, después de crear la solicitud podrá marcar PDFs para firmar o
-                            solo ver y configurar firmantes.
-                          </Alert>
-                        ) : isTableField ? (
+                      <Grid.Col span={{ base: 12, md: isTableField ? 12 : 6 }} key={field.id}>
+                        {isTableField ? (
                           <TableFieldInput
                             label={field.field_label}
                             required={field.required}
