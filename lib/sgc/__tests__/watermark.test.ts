@@ -24,6 +24,8 @@ describe('SGC · marca de agua de copia controlada', () => {
 
   it('[SGC-REQ-017] deja el texto apto para la fuente estándar (tildes sí, emojis no)', () => {
     expect(toWinAnsiSafe('Gestión 🖥️\tCalidad')).toBe('Gestión ?? Calidad');
+    // E2E 2026-10-10: la puntuación tipográfica se convierte (antes salía «?» en el PDF controlado).
+    expect(toWinAnsiSafe('Elaboró — QA · «x» “y” ‘z’ … → ≥ 1–2')).toBe('Elaboró - QA · «x» "y" \'z\' ... -> >= 1-2');
     expect(formatBogotaDateTime(new Date('2026-01-01T03:00:00Z'))).toBe('2025-12-31 22:00');
   });
 

@@ -119,6 +119,13 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
     () => (approvers.data?.restricted ? approvers.data.users.map((u) => ({ value: u.email, label: u.name ? `${u.name} (${u.email})` : u.email })) : null),
     [approvers.data]
   );
+  // 2026-10-05: el elaborador y el solicitante no firman lo suyo. Excepción de Calidad (2026-10-13): en REVISIÓN,
+  // el servidor indica quiénes de ellos sí pueden quedar (Calidad; el elaborador solo si la empresa lo habilitó).
+  const elaboratorLc = data?.request.elaboratorEmail.toLowerCase() ?? '';
+  const requesterLc = data?.request.requesterEmail.toLowerCase() ?? '';
+  const reviewExempt = useMemo(() => new Set(data?.segregation?.reviewExempt ?? []), [data?.segregation]);
+  const signerOptions = useMemo(() => userOptions.filter((u) => u.value !== elaboratorLc && u.value !== requesterLc), [userOptions, elaboratorLc, requesterLc]);
+  const reviewerOptions = useMemo(() => userOptions.filter((u) => (u.value !== elaboratorLc && u.value !== requesterLc) || reviewExempt.has(u.value)), [userOptions, elaboratorLc, requesterLc, reviewExempt]);
 
   const run = useCallback(
     async (fn: () => Promise<unknown>, ok: string) => {
@@ -588,8 +595,9 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
         <SgcSignersPanel
           steps={data.steps}
           canEdit={permissions.canChangeSigners}
-          users={userOptions.filter((u) => u.value !== request.elaboratorEmail.toLowerCase() && u.value !== request.requesterEmail.toLowerCase())}
-          approverUsers={approverOptions?.filter((u) => u.value !== request.elaboratorEmail.toLowerCase() && u.value !== request.requesterEmail.toLowerCase()) ?? null}
+          users={signerOptions}
+          reviewerUsers={reviewerOptions}
+          approverUsers={approverOptions?.filter((u) => u.value !== elaboratorLc && u.value !== requesterLc) ?? null}
           suggestion={sugg.data?.suggestion ?? null}
           suggestOnly={permissions.signersSuggestOnly}
           canConfirm={permissions.canConfirmSuggestion}
@@ -605,8 +613,9 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           tasks={data.tasks}
           substitutions={data.substitutions}
           canSubstitute={permissions.canSubstitute}
-          users={userOptions.filter((u) => u.value !== request.elaboratorEmail.toLowerCase() && u.value !== request.requesterEmail.toLowerCase())}
-          approverUsers={approverOptions?.filter((u) => u.value !== request.elaboratorEmail.toLowerCase() && u.value !== request.requesterEmail.toLowerCase()) ?? null}
+          users={signerOptions}
+          reviewerUsers={reviewerOptions}
+          approverUsers={approverOptions?.filter((u) => u.value !== elaboratorLc && u.value !== requesterLc) ?? null}
           onAssign={(idTask, body) => run(() => sgcSend(`/api/sgc/tasks/${idTask}/substitute`, 'POST', body), 'Sustituto asignado: firmará en sustitución del titular.')}
         />
 

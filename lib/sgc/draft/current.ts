@@ -79,7 +79,7 @@ export function pickCurrentDraft(attachments: readonly SgcDraftAttachmentRow[], 
 
 /** Error si el borrador no sirve para generar el PDF controlado (se valida al enviarlo a revisión). */
 export function getDraftForSubmitError(draft: SgcCurrentDraft | null): string | null {
-  if (!draft) return 'Cargue el borrador del documento (Word o PDF) o edítelo en la app antes de enviarlo.';
-  if (draft.format === 'doc') return 'El borrador vigente es un Word antiguo (.doc): guárdelo como .docx o PDF para poder generar el PDF controlado.';
+  if (!draft) return 'Cargue el borrador del documento en Word (.docx) o edítelo en la app antes de enviarlo.';
+  if (draft.format === 'doc') return 'El borrador vigente es un Word antiguo (.doc): guárdelo como .docx para poder generar el PDF controlado.';
   return null;
 }

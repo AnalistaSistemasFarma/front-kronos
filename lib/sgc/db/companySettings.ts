@@ -40,6 +40,35 @@ export async function isViewerProtected(db: Pick<SgcDb, 'sgcCompanyConfig'>, idC
   return c?.viewer_protection ?? true;
 }
 
+/**
+ * Excepción de Calidad, punto 3 (RN 2026-10-13): «Calidad revisa lo que
+ * elabora». Ajuste POR EMPRESA, APAGADO por defecto, que cambia Aseguramiento
+ * de Calidad con motivo. SIN MIGRACIÓN: el valor vigente es el de la última
+ * fila de sgc.config_change_log (solo inserción, protegida por trigger) con
+ * esta acción; así cada cambio queda, además, en el control de cambios.
+ */
+export const SGC_QUALITY_SELF_REVIEW_ACTION = 'empresa.calidad_revisa_lo_que_elabora';
+
+type ConfigLogReader = { sgcConfigChangeLog: Pick<SgcDb['sgcConfigChangeLog'], 'findFirst'> };
+
+export function parseQualitySelfReview(afterJson: string | null | undefined): boolean {
+  try {
+    const v = JSON.parse(afterJson ?? 'null') as { qualitySelfReview?: unknown } | null;
+    return v?.qualitySelfReview === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function isQualitySelfReviewEnabled(db: ConfigLogReader, idCompany: number): Promise<boolean> {
+  const last = await db.sgcConfigChangeLog.findFirst({
+    where: { entity: 'company_config', entity_id: String(idCompany), id_company: idCompany, action: SGC_QUALITY_SELF_REVIEW_ACTION },
+    orderBy: { id_config_change: 'desc' },
+    select: { after_json: true },
+  });
+  return parseQualitySelfReview(last?.after_json);
+}
+
 export interface SgcCompanySettings {
   idCompany: number;
   hasLogo: boolean;
@@ -57,6 +86,8 @@ export interface SgcCompanySettings {
   viewerProtection: boolean;
   /** Sprint 12: lista de aprobadores autorizados activa (aplica cuando hay al menos uno registrado). */
   approverListEnforced: boolean;
+  /** Excepción de Calidad (2026-10-13, punto 3): Calidad puede revisar el documento que elaboró. Apagado por defecto. */
+  qualitySelfReview: boolean;
 }
 
 export async function getCompanySettings(db: SgcDb, idCompany: number): Promise<SgcCompanySettings> {
@@ -77,6 +108,7 @@ export async function getCompanySettings(db: SgcDb, idCompany: number): Promise<
     uncontrolledCopies: copyConfigOf(c),
     viewerProtection: c.viewer_protection,
     approverListEnforced: c.approver_list_enforced,
+    qualitySelfReview: await isQualitySelfReviewEnabled(db, idCompany),
   };
 }
 
@@ -86,7 +118,7 @@ function logoSummary(dataUrl: string | null): { bytes: number; sha256: string } 
   return { bytes: d.bytes.length, sha256: sha256HexOf(d.bytes) };
 }
 
-export async function saveCompanySettings(db: SgcDb, idCompany: number, input: { logoDataUrl?: unknown; removeLogo?: unknown; disseminationDomains?: unknown; readThresholdPct?: unknown; emailMode?: unknown; uncontrolledCopyTypes?: unknown; uncontrolledCopyDays?: unknown; uncontrolledCopyMaxDays?: unknown; viewerProtection?: unknown; approverListEnforced?: unknown; reason?: unknown }, actor: SgcActor): Promise<SgcCompanySettings> {
+export async function saveCompanySettings(db: SgcDb, idCompany: number, input: { logoDataUrl?: unknown; removeLogo?: unknown; disseminationDomains?: unknown; readThresholdPct?: unknown; emailMode?: unknown; uncontrolledCopyTypes?: unknown; uncontrolledCopyDays?: unknown; uncontrolledCopyMaxDays?: unknown; viewerProtection?: unknown; approverListEnforced?: unknown; qualitySelfReview?: unknown; reason?: unknown }, actor: SgcActor): Promise<SgcCompanySettings> {
   const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
   if (reason.length < 10) throw new SgcError('Explique el motivo del cambio (mínimo 10 caracteres): queda en el control de cambios.');
   const current = await db.sgcCompanyConfig.findUnique({ where: { id_company: idCompany }, select: { logo_data_url: true, dissemination_domains: true, read_threshold_pct: true, email_mode: true, uncontrolled_copy_types: true, uncontrolled_copy_days: true, uncontrolled_copy_max_days: true, viewer_protection: true, approver_list_enforced: true } });
@@ -132,16 +164,34 @@ export async function saveCompanySettings(db: SgcDb, idCompany: number, input: {
   if (maxDays !== current.uncontrolled_copy_max_days) data.uncontrolled_copy_max_days = maxDays;
   if (typeof input.viewerProtection === 'boolean' && input.viewerProtection !== current.viewer_protection) data.viewer_protection = input.viewerProtection;
   if (typeof input.approverListEnforced === 'boolean' && input.approverListEnforced !== current.approver_list_enforced) data.approver_list_enforced = input.approverListEnforced;
-  if (Object.keys(data).length === 0) throw new SgcError('No hay cambios para guardar.');
+  const selfReviewBefore = await isQualitySelfReviewEnabled(db, idCompany);
+  const selfReviewChange = typeof input.qualitySelfReview === 'boolean' && input.qualitySelfReview !== selfReviewBefore ? input.qualitySelfReview : null;
+  if (Object.keys(data).length === 0 && selfReviewChange === null) throw new SgcError('No hay cambios para guardar.');
   await db.$transaction(async (tx) => {
     await tx.sgcCompanyConfig.update({ where: { id_company: idCompany }, data: { ...data, updated_at: new Date() } });
+    if (selfReviewChange !== null) {
+      await tx.sgcConfigChangeLog.create({
+        data: {
+          id_company: idCompany,
+          actor_email: actor.email,
+          entity: 'company_config',
+          entity_id: String(idCompany),
+          action: SGC_QUALITY_SELF_REVIEW_ACTION,
+          reason: reason.slice(0, 1000),
+          before_json: JSON.stringify({ qualitySelfReview: selfReviewBefore }),
+          after_json: JSON.stringify({ qualitySelfReview: selfReviewChange }),
+          ip: actor.ip ?? null,
+          user_agent: actor.userAgent ?? null,
+        },
+      });
+    }
     await writeSgcAudit(tx, {
       idCompany,
       actorEmail: actor.email,
       action: SGC_AUDIT_ACTIONS.empresaConfigurada,
       entity: 'company_config',
       entityId: idCompany,
-      before: { logo: logoSummary(current.logo_data_url), disseminationDomains: current.dissemination_domains, readThresholdPct: current.read_threshold_pct, emailMode: current.email_mode, uncontrolledCopies: { types: current.uncontrolled_copy_types, days: current.uncontrolled_copy_days, maxDays: current.uncontrolled_copy_max_days }, viewerProtection: current.viewer_protection, approverListEnforced: current.approver_list_enforced },
+      before: { logo: logoSummary(current.logo_data_url), disseminationDomains: current.dissemination_domains, readThresholdPct: current.read_threshold_pct, emailMode: current.email_mode, uncontrolledCopies: { types: current.uncontrolled_copy_types, days: current.uncontrolled_copy_days, maxDays: current.uncontrolled_copy_max_days }, viewerProtection: current.viewer_protection, approverListEnforced: current.approver_list_enforced, qualitySelfReview: selfReviewBefore },
       after: {
         logo: 'logo_data_url' in data ? logoSummary(data.logo_data_url ?? null) : logoSummary(current.logo_data_url),
         disseminationDomains: 'dissemination_domains' in data ? data.dissemination_domains : current.dissemination_domains,
@@ -150,6 +200,7 @@ export async function saveCompanySettings(db: SgcDb, idCompany: number, input: {
         uncontrolledCopies: { types: data.uncontrolled_copy_types ?? current.uncontrolled_copy_types, days, maxDays },
         viewerProtection: data.viewer_protection ?? current.viewer_protection,
         approverListEnforced: data.approver_list_enforced ?? current.approver_list_enforced,
+        qualitySelfReview: selfReviewChange ?? selfReviewBefore,
       },
       detail: reason.slice(0, 1000),
       ip: actor.ip,
