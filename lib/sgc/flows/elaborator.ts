@@ -15,10 +15,14 @@
  * Entre varios candidatos del mismo nivel gana quien tiene MENOS solicitudes
  * abiertas como elaborador (empate: el orden de la matriz o el alfabético).
  *
- * Nunca queda el solicitante. Si la política exige que quien crea el
+ * Nunca queda el solicitante, SALVO que sea de Calidad (excepción del
+ * 2026-10-13, lib/sgc/flows/segregation.ts): entonces cuenta como un
+ * candidato más (no se le prefiere ni se le obliga). Si la política exige que quien crea el
  * documento sea de Calidad (tarea_y_calidad), solo cuentan los de Calidad.
  * Calidad puede redirigir después con «Reasignar» (mecanismo existente).
  */
+
+import { requesterMayElaborate } from './segregation';
 
 export type SgcElaboratorSource = 'matriz' | 'calidad';
 
@@ -56,18 +60,19 @@ function pickLeastLoaded(candidates: readonly string[], load: ReadonlyMap<string
 /** Elige al elaborador según la configuración; null si nadie cumple (la solicitud no puede nacer). */
 export function resolveElaborator(input: SgcElaboratorInput): SgcElaboratorChoice | null {
   const requester = low(input.requesterEmail);
+  const qualityLow = new Set([...input.quality].map(low));
   const discarded: { email: string; reason: string }[] = [];
   const matrix: string[] = [];
   for (const raw of input.matrixPeople) {
     const e = low(raw);
     if (!e || matrix.includes(e) || discarded.some((d) => d.email === e)) continue;
-    if (e === requester) discarded.push({ email: e, reason: 'es quien hace la solicitud' });
+    if (e === requester && !requesterMayElaborate(e, requester, qualityLow)) discarded.push({ email: e, reason: 'es quien hace la solicitud' });
     else if (!input.eligible.has(e)) discarded.push({ email: e, reason: 'no tiene permiso de gestión documental en el SGC de la empresa' });
     else if (input.requireQuality && !input.quality.has(e)) discarded.push({ email: e, reason: 'no tiene el permiso de Aseguramiento de Calidad' });
     else matrix.push(e);
   }
   if (matrix.length) return { email: pickLeastLoaded(matrix, input.openLoad), source: 'matriz', candidates: matrix, discarded };
-  const quality = [...input.quality].map(low).filter((e) => e && e !== requester).sort();
+  const quality = [...qualityLow].filter((e) => e && requesterMayElaborate(e, requester, qualityLow)).sort();
   if (quality.length) return { email: pickLeastLoaded(quality, input.openLoad), source: 'calidad', candidates: quality, discarded };
   return null;
 }
