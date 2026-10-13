@@ -138,7 +138,6 @@ interface Request {
   id_status: number;
   status_task: string;
   assigned: string;
-  id_assigned?: number | null;
   category: string;
   process: string;
   assignedUserId?: number;
@@ -239,8 +238,6 @@ function ViewRequestPage() {
   const [request, setRequest] = useState<Request | null>(null);
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [assignedUsers, setAssignedUsers] = useState<Option[]>([]);
-  const [assignableUsers, setAssignableUsers] = useState<UserEmail[]>([]);
-  const [updatingAssigneeId, setUpdatingAssigneeId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -253,7 +250,6 @@ function ViewRequestPage() {
   const [loadingUserId, setLoadingUserId] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
   // Solo el responsable de la solicitud reasigna tareas (lo decide el servidor).
-  const [canReassignTask, setCanReassignTask] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loadingPermissions, setLoadingPermissions] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -550,11 +546,6 @@ function ViewRequestPage() {
           label: `${user.name} - ${user.email}`,
         }));
         setAvailableUsers(formattedUsers);
-        const formattedAssignable = data.users.map((user: { id: string; name: string }) => ({
-          value: String(user.id),
-          label: user.name,
-        }));
-        setAssignableUsers(formattedAssignable);
         return;
       }
       if (response.status === 499) return;
@@ -725,48 +716,6 @@ function ViewRequestPage() {
       setOriginalRequest(mappedData);
     } catch (err) {
       console.error('Error refreshing request data:', err);
-    }
-  };
-
-  useEffect(() => {
-    const taskId = request?.id;
-    if (!taskId) return;
-    let cancelled = false;
-    fetch(`/api/requests-general/update-task-assigned?id=${taskId}`)
-      .then((r) => (r.ok ? r.json() : { canReassign: false }))
-      .then((d) => {
-        if (!cancelled) setCanReassignTask(Boolean(d?.canReassign));
-      })
-      .catch(() => {
-        if (!cancelled) setCanReassignTask(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [request?.id]);
-
-  const handleUpdateTaskAssigned = async (taskId: number, newUserId: string | null) => {
-    if (!newUserId) return;
-    try {
-      setUpdatingAssigneeId(taskId);
-      const response = await fetch('/api/requests-general/update-task-assigned', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: taskId, id_assigned: newUserId }),
-      });
-      if (response.ok) {
-        toast.success('Ejecutor actualizado exitosamente');
-        await fetchRequestData();
-        await fetchTasksRG();
-      } else {
-        const err = await response.json().catch(() => ({}));
-        toast.error(err.error || 'No se pudo actualizar el ejecutor');
-      }
-    } catch (error) {
-      console.error('Error updating task assignee:', error);
-      toast.error('No se pudo actualizar el ejecutor');
-    } finally {
-      setUpdatingAssigneeId(null);
     }
   };
 
@@ -1943,21 +1892,7 @@ function ViewRequestPage() {
                   Asignado a
                 </Text>
 
-                {canReassignTask && !isRequestResolved() ? (
-                  <Select
-                    mt={4}
-                    data={assignableUsers}
-                    value={request.id_assigned ? String(request.id_assigned) : null}
-                    onChange={(value) => handleUpdateTaskAssigned(request.id, value)}
-                    searchable
-                    allowDeselect={false}
-                    disabled={updatingAssigneeId === request.id}
-                    placeholder='Seleccione un ejecutor'
-                    comboboxProps={{ withinPortal: true }}
-                  />
-                ) : (
-                  <Text size='sm'>{request.assigned}</Text>
-                )}
+                <Text size='sm'>{request.assigned}</Text>
               </div>
 
               <Stack gap='md'>
