@@ -22,6 +22,8 @@ export interface SgcSubstituteCardProps {
   substitutions: Detail['substitutions'];
   canSubstitute: boolean;
   users: { value: string; label: string }[];
+  /** Excepción de Calidad (2026-10-13): personas que se ofrecen como sustitutas en REVISIÓN; sin ella, `users`. */
+  reviewerUsers?: { value: string; label: string }[] | null;
   /** Personas que se ofrecen en un paso de APROBACIÓN (aprobadores autorizados), si la lista aplica. */
   approverUsers: { value: string; label: string }[] | null;
   onAssign: (idTask: number, body: { idAssignee: number; toEmail: string; reason: string; absenceFrom: string | null; absenceTo: string | null }) => Promise<boolean>;
@@ -33,9 +35,10 @@ interface Target {
   taskName: string;
   holder: string;
   isApproval: boolean;
+  isReview: boolean;
 }
 
-export default function SgcSubstituteCard({ tasks, substitutions, canSubstitute, users, approverUsers, onAssign }: SgcSubstituteCardProps) {
+export default function SgcSubstituteCard({ tasks, substitutions, canSubstitute, users, reviewerUsers, approverUsers, onAssign }: SgcSubstituteCardProps) {
   const [target, setTarget] = useState<Target | null>(null);
   const [to, setTo] = useState<string | null>(null);
   const [reason, setReason] = useState('');
@@ -49,12 +52,12 @@ export default function SgcSubstituteCard({ tasks, substitutions, canSubstitute,
         .flatMap((t) =>
           t.assignees
             .filter((a) => a.status === 'pendiente' && a.email)
-            .map((a) => ({ idTask: t.id, idAssignee: a.id, taskName: t.name, holder: a.onBehalfOf ? `${a.name ?? a.email} (sustituto de ${a.onBehalfOfName ?? a.onBehalfOf})` : a.name ?? a.email ?? '', isApproval: t.signatureMeaning === 'aprobo' }))
+            .map((a) => ({ idTask: t.id, idAssignee: a.id, taskName: t.name, holder: a.onBehalfOf ? `${a.name ?? a.email} (sustituto de ${a.onBehalfOfName ?? a.onBehalfOf})` : a.name ?? a.email ?? '', isApproval: t.signatureMeaning === 'aprobo', isReview: t.signatureMeaning === 'reviso' }))
         )
     : [];
   if (!canSubstitute && substitutions.length === 0) return null;
 
-  const people = target?.isApproval && approverUsers ? approverUsers : users;
+  const people = target?.isApproval ? approverUsers ?? users : target?.isReview && reviewerUsers ? reviewerUsers : users;
   const close = () => {
     setTarget(null);
     setTo(null);
