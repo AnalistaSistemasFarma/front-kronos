@@ -52,7 +52,8 @@ import type { SgcUploader } from './documents';
 import { getCurrentFlowVersion, loadDefinition } from './flows';
 import { resolveElaboratorFor } from './elaborator';
 import { describeElaboratorChoice } from '../flows/elaborator';
-import { isHeaderMandatory } from './companySettings';
+import { isHeaderMandatory, isQualitySelfReviewEnabled } from './companySettings';
+import { elaboratorMayReview, requesterMayElaborate, reviewExemptions, signerSegregationDenial, signerStepKind, type SgcSegregationContext } from '../flows/segregation';
 import { guideInputOf, loadParentDocument } from './coding';
 import { inheritsParentNumber } from '../coding';
 import { activateReaders, checkReadThreshold, getDisseminationView, getMyReading } from './dissemination';
@@ -116,6 +117,25 @@ export async function listEligibleUsers(db: SgcDb | Tx, idCompany: number): Prom
   const map = new Map<string, string | null>();
   for (const r of rows) map.set(lower(r.companyUser.user.email), r.companyUser.user.name);
   return [...map.entries()].map(([email, name]) => ({ email, name })).sort((a, b) => (a.name ?? a.email).localeCompare(b.name ?? b.email, 'es'));
+}
+
+/** Personas con el permiso de Aseguramiento de Calidad del SGC en la empresa (activas, en minúscula). */
+export async function listQualityEmails(db: SgcDb | Tx, idCompany: number): Promise<Set<string>> {
+  const rows = await db.subprocessUserCompany.findMany({
+    where: { subprocess: { subprocess_url: SGC_SUBPROCESS_URLS.calidad }, companyUser: { company: { id_company: idCompany }, user: { isActive: true } } },
+    select: { companyUser: { select: { user: { select: { email: true } } } } },
+  });
+  return new Set(rows.map((r) => lower(r.companyUser.user.email)).filter(Boolean));
+}
+
+/**
+ * Contexto de segregación de la solicitud con la EXCEPCIÓN PARA CALIDAD del
+ * 2026-10-13 (lib/sgc/flows/segregation.ts): quiénes son de Calidad hoy y si
+ * la empresa habilitó que Calidad revise lo que elabora.
+ */
+export async function segregationOf(db: SgcDb | Tx, request: { id_company: number; requester_email: string; elaborator_email: string }): Promise<SgcSegregationContext> {
+  const [quality, qualitySelfReview] = await Promise.all([listQualityEmails(db, request.id_company), isQualitySelfReviewEnabled(db, request.id_company)]);
+  return { requesterEmail: lower(request.requester_email), elaboratorEmail: lower(request.elaborator_email), quality, qualitySelfReview };
 }
 
 async function namesFor(db: SgcDb | Tx, emails: Iterable<string | null | undefined>): Promise<Map<string, string | null>> {
@@ -589,10 +609,12 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
     const isFirstWork = firstWorkTask(def)?.key === task.task_key;
     const pools = await getPoolTypeCodes(tx, request.id_company, me);
     const states = task.assignees.map(toAssigneeState);
+    // Excepción de Calidad (2026-10-13, punto 3): en REVISIÓN, el elaborador de Calidad decide si la empresa lo habilitó.
+    const selfReview = me === lower(request.elaborator_email) && signerStepKind(taskDef) === 'revision' ? elaboratorMayReview('revision', await segregationOf(tx, request)) : false;
     const chosen = pickAssigneeForDecision(states, (task.signing_mode as 'orden' | 'paralelo' | null) ?? null, { email: me, poolTypeCodes: pools }, {
       elaboratorEmail: request.elaborator_email,
       // La lectura («Leyó») no es revisión ni aprobación: el elaborador también lee.
-      allowElaborator: taskDef.assignment === 'solicitante' || taskDef.assignment === 'elaborador' || taskDef.assignment === 'alcance',
+      allowElaborator: taskDef.assignment === 'solicitante' || taskDef.assignment === 'elaborador' || taskDef.assignment === 'alcance' || selfReview,
     });
     if (input.idAssignee && input.idAssignee !== chosen.id) {
       throw new SgcError('Esa autorización no es la que le corresponde decidir ahora (firma en orden).', 409);
@@ -796,7 +818,7 @@ export async function setSigners(db: SgcDb, notifier: SgcNotifier, idRequest: nu
       throw new SgcError(`Los firmantes de «${stepDef.name}» ya están confirmados. ${denial}`, 403);
     }
     const eligible = new Set((await listEligibleUsers(tx, request.id_company)).map((u) => u.email));
-    const desired = normalizeSigners(input.signers, { stepName: stepDef.name, elaboratorEmail: request.elaborator_email, requesterEmail: request.requester_email, eligibleEmails: eligible });
+    const desired = normalizeSigners(input.signers, { stepName: stepDef.name, elaboratorEmail: request.elaborator_email, requesterEmail: request.requester_email, eligibleEmails: eligible, kind: signerStepKind(stepDef), segregation: await segregationOf(tx, request) });
     // Sprint 12: en APROBACIÓN solo quedan (ni se sugieren) los aprobadores autorizados del proceso.
     await assertApproversAuthorized(tx, request, stepDef, desired.map((d) => d.email), new Date());
     const modes = parseSigningModes(request.signing_modes_json);
@@ -971,6 +993,7 @@ export async function confirmSuggestions(db: SgcDb, notifier: SgcNotifier, idReq
     if (pending.length === 0 && pendingScope.length === 0 && !pendingTraining) throw new SgcError('No hay firmantes, alcance ni capacitación sugeridos por confirmar.', 409);
     const active = await tx.sgcRequestSigner.findMany({ where: { id_request: idRequest, is_active: true } });
     const eligible = new Set((await listEligibleUsers(tx, request.id_company)).map((u) => u.email));
+    const segregation = await segregationOf(tx, request);
     const finalByStep = new Map<string, { email: string; stepKey: string }[]>();
     for (const r of [...active, ...pending]) {
       const list = finalByStep.get(r.step_key) ?? [];
@@ -981,7 +1004,7 @@ export async function confirmSuggestions(db: SgcDb, notifier: SgcNotifier, idReq
       const stepDef = def.tasks.find((t) => t.key === stepKey && t.assignment === 'firmantes');
       if (!stepDef) throw new SgcError(`El paso ${stepKey} no admite firmantes.`, 409);
       if (await tx.sgcTask.findFirst({ where: { id_request: idRequest, task_key: stepKey, status: 'abierta' } })) throw new SgcError(`«${stepDef.name}» ya está en curso: reasigne a las personas en lugar de confirmar.`, 409);
-      normalizeSigners(list.map((x) => x.email), { stepName: stepDef.name, elaboratorEmail: request.elaborator_email, requesterEmail: request.requester_email, eligibleEmails: eligible });
+      normalizeSigners(list.map((x) => x.email), { stepName: stepDef.name, elaboratorEmail: request.elaborator_email, requesterEmail: request.requester_email, eligibleEmails: eligible, kind: signerStepKind(stepDef), segregation });
       // Sprint 12: lo sugerido para APROBACIÓN se confirma solo si son aprobadores autorizados.
       await assertApproversAuthorized(tx, request, stepDef, list.map((x) => x.email), new Date());
     }
@@ -1046,6 +1069,8 @@ export async function reassignTask(
     const request = await lockRequest(tx, head.id_request);
     const task = await tx.sgcTask.findUniqueOrThrow({ where: { id_task: idTask }, include: { assignees: true, taskDef: true } });
     if (request.status !== 'abierta' || task.status !== 'abierta') throw new SgcError('La tarea no está abierta.', 409);
+    // 2026-10-13 (prod): reasignar la divulgación dejaba la lectura «reemplazada» y «Leído» deshabilitado.
+    if (task.taskDef.assignment === 'alcance') throw new SgcError('La divulgación no se reasigna: cada persona del alcance firma su propia lectura. Calidad ajusta el alcance.', 409);
     if (task.taskDef.multi_assignee || task.taskDef.assignment === 'calidad') throw new SgcError('En los pasos con firmantes el elaborador cambia a las personas (no se reasigna la tarea).', 409);
     const current = task.assignees.find((a) => a.status === 'pendiente');
     if (!current) throw new SgcError('La tarea no tiene un responsable pendiente.', 409);
@@ -1062,13 +1087,23 @@ export async function reassignTask(
         403
       );
     }
-    if (isElaboration && to === lower(request.requester_email)) throw new SgcError('Quien hace la solicitud no puede quedar como elaborador de su propia solicitud.', 409);
+    // Excepción de Calidad (2026-10-13, punto 1): el solicitante SÍ puede quedar como elaborador si es de Calidad.
+    const segregation = isElaboration ? await segregationOf(tx, request) : null;
+    if (isElaboration && !requesterMayElaborate(to, request.requester_email, segregation!.quality)) {
+      throw new SgcError('Quien hace la solicitud no puede quedar como elaborador de su propia solicitud (solo se permite a Aseguramiento de Calidad).', 409);
+    }
     if (to === lower(current.user_email)) throw new SgcError('La tarea ya está asignada a esa persona.');
     const eligible = new Set((await listEligibleUsers(tx, request.id_company)).map((u) => u.email));
     if (!eligible.has(to)) throw new SgcError(`${to} no tiene permiso de gestión documental en el SGC de esta empresa.`);
     if (task.taskDef.assignment === 'elaborador') {
-      const isSigner = await tx.sgcRequestSigner.count({ where: { id_request: request.id_request, user_email: to, is_active: true } });
-      if (isSigner) throw new SgcError('Esa persona es firmante del documento: el elaborador no puede revisar ni aprobar su propio documento.', 409);
+      // Quien pasa a elaborar no puede seguir como firmante de lo suyo, salvo la revisión de Calidad habilitada (punto 3).
+      const signerRows = await tx.sgcRequestSigner.findMany({ where: { id_request: request.id_request, user_email: to, is_active: true }, select: { step_key: true } });
+      if (signerRows.length) {
+        const def = await loadDefinition(tx, request.id_flow_version);
+        const asElaborator: SgcSegregationContext = { ...segregation!, elaboratorEmail: to };
+        const blocked = signerRows.some((r) => signerSegregationDenial(to, signerStepKind(def.tasks.find((t) => t.key === r.step_key)), r.step_key, asElaborator) !== null);
+        if (blocked) throw new SgcError('Esa persona es firmante del documento: el elaborador no puede revisar ni aprobar su propio documento.', 409);
+      }
       await tx.sgcRequest.update({ where: { id_request: request.id_request }, data: { elaborator_email: to } });
     }
     await tx.sgcTaskAssignee.update({ where: { id_task_assignee: current.id_task_assignee }, data: { status: 'reemplazado', decided_by: me, decided_at: new Date(), comment: `Reasignada: ${reason}` } });
@@ -1125,10 +1160,12 @@ export async function assignSubstitute(db: SgcDb, notifier: SgcNotifier, idTask:
     const approval = isApprovalStep(stepDef);
     const now = new Date();
     const policy = approval ? await getApproverPolicy(tx, request.id_company) : null;
+    // Excepción de Calidad (2026-10-13): en REVISIÓN, el solicitante (o el elaborador, si la empresa lo habilitó) de Calidad puede sustituir.
+    const exempt = signerStepKind(stepDef) === 'revision' ? new Set(reviewExemptions(await segregationOf(tx, request))) : new Set<string>();
     const denial = substitutionDenial(input.toEmail, {
       originalEmail: original,
-      requesterEmail: request.requester_email,
-      elaboratorEmail: request.elaborator_email,
+      requesterEmail: exempt.has(lower(request.requester_email)) ? '' : request.requester_email,
+      elaboratorEmail: exempt.has(lower(request.elaborator_email)) ? '' : request.elaborator_email,
       taskPeople: task.assignees.filter((a) => a.user_email && a.status !== 'reemplazado' && a.status !== 'anulado').map((a) => a.user_email!),
       eligible: new Set((await listEligibleUsers(tx, request.id_company)).map((u) => u.email)),
       mustBeAuthorizedApprover: Boolean(policy?.applies),
@@ -1548,6 +1585,7 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
       role: tDef?.role ?? t.taskDef.role,
       canReturn: def.transitions.some((x) => x.from === t.task_key && x.action === 'devolver'),
       canReassign:
+        t.taskDef.assignment !== 'alcance' &&
         t.status === 'abierta' &&
         single &&
         isOpen &&
@@ -1665,6 +1703,11 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
       withdrawReason: a.withdraw_reason,
     })),
     permissions,
+    // Excepción de Calidad (2026-10-13): solicitante y/o elaborador que SÍ pueden quedar como revisores.
+    segregation: readerOnly ? { reviewExempt: [] as string[], qualitySelfReview: false } : await (async () => {
+      const ctx = await segregationOf(db, row);
+      return { reviewExempt: reviewExemptions(ctx), qualitySelfReview: ctx.qualitySelfReview };
+    })(),
     // Sprint 12: sustituciones de firmantes (quién, por quién, motivo y periodo).
     substitutions: readerOnly ? [] : await listSubstitutions(db, row.id_request),
     signatureNotice: SGC_SIGNATURE_NOTICE,

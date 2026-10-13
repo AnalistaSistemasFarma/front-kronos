@@ -17,6 +17,9 @@ import type { SgcFlowDefinition, SgcTaskDefinition } from './definition';
  *  - ni el solicitante ni el elaborador pueden quedar como revisores ni
  *    aprobadores de su propia solicitud (lo valida normalizeSigners); el
  *    revisor sí puede ser también aprobador (acuerdo del 2026-09-30).
+ *    EXCEPCIÓN PARA CALIDAD (2026-10-13): en la REVISIÓN sí puede quedar el
+ *    solicitante de Calidad y, si la empresa lo habilitó, el elaborador de
+ *    Calidad (lib/sgc/flows/segregation.ts). La aprobación no cambia.
  */
 
 export const SGC_ASSIGNMENT_POLICIES = ['tarea', 'calidad', 'tarea_o_calidad', 'tarea_y_calidad'] as const;
