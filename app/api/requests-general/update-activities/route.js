@@ -9,6 +9,7 @@ import { syncAuthorizationToSapsend } from '../../../../lib/sapsend/authorizatio
 import { advanceSequentialTask } from '../../../../lib/workflow/advanceSequentialTask.js';
 import { resolveSessionUser } from '../../../../lib/chat/http';
 import { authorizationDecisionBlock } from '../../../../lib/request-general/workload';
+import { orionInternalTaskSql } from '../../../../lib/orion/internalTasks';
 
 export async function POST(req) {
   const TAG = '[update-activities]';
@@ -142,6 +143,7 @@ export async function POST(req) {
                 ISNULL(tpc2.display_order, 0) < @display_order
                 OR (ISNULL(tpc2.display_order, 0) = @display_order AND trg2.id_task < @id_task)
               )
+              AND NOT ${orionInternalTaskSql('trg2', 'tpc2')}
             ORDER BY ISNULL(tpc2.display_order, 0) DESC, trg2.id_task DESC
           `);
         const pred = predResult.recordset[0];

@@ -350,6 +350,7 @@ export async function GET(req: Request) {
               documentStatus: statusUpper || 'BORRADOR',
               fileId: fid,
               fileName: doc.fileName,
+              allowOpen: false,
             });
           }
         }
