@@ -64,9 +64,10 @@ export const DEFAULT_FIELD_HEIGHT = 12;
 export const DEFAULT_FIELD_X = 8;
 export const DEFAULT_FIELD_Y = 78;
 
-export const MIN_FIELD_WIDTH = 14;
+/** Firma y huella pueden quedar tan pequeñas como el visto bueno del validador. */
+export const MIN_FIELD_WIDTH = 2;
 export const MAX_FIELD_WIDTH = 55;
-export const MIN_FIELD_HEIGHT = 8;
+export const MIN_FIELD_HEIGHT = 1;
 export const MAX_FIELD_HEIGHT = 36;
 
 /** Tamaño por defecto para firmas de validación (Elaboró / Revisó). */
@@ -121,7 +122,7 @@ export function sizeBoundsForKind(kind?: SignatureFieldKind | null): {
   if (k === 'validation') return { minW: 6, maxW: 28, minH: 3, maxH: 14 };
   // Visto bueno: puede quedar tan pequeño como una inicial (en el PDF queda solo el chulito/firma).
   if (k === 'approval') return { minW: 2, maxW: 30, minH: 1, maxH: 14 };
-  if (k === 'fingerprint') return { minW: 8, maxW: 28, minH: 10, maxH: 32 };
+  if (k === 'fingerprint') return { minW: MIN_FIELD_WIDTH, maxW: 28, minH: MIN_FIELD_HEIGHT, maxH: 32 };
   return {
     minW: MIN_FIELD_WIDTH,
     maxW: MAX_FIELD_WIDTH,
