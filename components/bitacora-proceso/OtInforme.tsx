@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Alert, Anchor, Box, Breadcrumbs, Button, Card, Divider, Group, Loader, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
+import { Alert, Anchor, Box, Breadcrumbs, Button, Card, Divider, Group, Image, Loader, Paper, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { IconAlertTriangle, IconArrowLeft, IconChevronRight, IconPrinter } from '@tabler/icons-react';
 import { OT_BASE_URL, otNombreCompleto } from '../../lib/bitacora-proceso/constants';
@@ -85,7 +85,7 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
             </Title>
             <Text fw={600}>Bitácora {codigoOt(o.consecutivo)}</Text>
             <Text size='sm' c='dimmed'>
-              Estado: {o.estado === 'ABIERTA' ? 'Abierta (parcial)' : 'Cerrada'} · Generado el {fmtFechaHora(new Date().toISOString())}
+              Estado: {o.estado === 'ABIERTA' ? 'Abierta (parcial)' : o.firmas.some((f) => f.rol === 'INSPECTOR') ? 'Cerrada y verificada' : 'Cerrada, pendiente de verificación'} · Generado el {fmtFechaHora(new Date().toISOString())}
             </Text>
           </div>
           <Divider />
@@ -160,8 +160,40 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
             </>
           )}
           <Divider />
+          <Title order={2} size='h4'>Firmas electrónicas</Title>
+          <SimpleGrid cols={{ base: 1, xs: 2 }} spacing='md' data-testid='ot-informe-firmas'>
+            {(['SUPERVISOR', 'INSPECTOR'] as const).map((rol) => {
+              const f = o.firmas.find((x) => x.rol === rol);
+              return (
+                <Card key={rol} withBorder radius='md' p='sm'>
+                  <Text size='xs' c='dimmed' tt='uppercase' fw={600}>
+                    {rol === 'SUPERVISOR' ? 'Cerró — Supervisor' : 'Verificó — Inspector'}
+                  </Text>
+                  {f ? (
+                    <>
+                      {f.imagen ? (
+                        <Paper radius='sm' bg='white' p={4} my={4} maw={260}>
+                          <Image src={f.imagen} alt={`Firma de ${f.nombre}`} h={64} fit='contain' />
+                        </Paper>
+                      ) : (
+                        <Text size='sm' c='dimmed' my={4}>(sin imagen de firma registrada)</Text>
+                      )}
+                      <Text fw={600}>{f.nombre}</Text>
+                      <Text size='sm'>{fmtFechaHoraSeg(f.firmadoEn)}</Text>
+                      <Text size='xs' c='dimmed' style={{ overflowWrap: 'anywhere' }}>
+                        Firma electrónica: reautenticación con contraseña de SynerLink · huella SHA-256 {f.contentSha256.slice(0, 16)}…
+                      </Text>
+                    </>
+                  ) : (
+                    <Text c='dimmed' my='sm'>Pendiente</Text>
+                  )}
+                </Card>
+              );
+            })}
+          </SimpleGrid>
+          <Divider />
           <Text size='xs' c='dimmed'>
-            SynerLink · Bitácora de Proceso · {codigoOt(o.consecutivo)} · Soporte generado desde el sistema; no requiere firma manuscrita en esta versión.
+            SynerLink · Bitácora de Proceso · {codigoOt(o.consecutivo)} · Soporte generado desde el sistema con firmas electrónicas (Ley 527 de 1999, Decreto 2364 de 2012).
           </Text>
         </Stack>
       </Card>

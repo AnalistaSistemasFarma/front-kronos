@@ -11,6 +11,7 @@ import {
   Button,
   Card,
   Group,
+  Image,
   Loader,
   Modal,
   Paper,
@@ -21,13 +22,14 @@ import {
   Title,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { IconAlertTriangle, IconCheck, IconChevronRight, IconLock, IconPrinter, IconHandClick } from '@tabler/icons-react';
+import { IconAlertTriangle, IconCheck, IconChevronRight, IconLock, IconPrinter, IconHandClick, IconSignature } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
-import { OT_BASE_URL, OT_LIMITS } from '../../lib/bitacora-proceso/constants';
+import { OT_BASE_URL, OT_LIMITS, otPictograma } from '../../lib/bitacora-proceso/constants';
 import type { OrdenDetalle } from '../../lib/bitacora-proceso/db';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import { OtIconoActividad } from './otIconos';
-import { codigoOt, fmtFechaHora, fmtHora, otHref, otSend, turnoLabel, useOtFetch } from './otClient';
+import FirmaBitacoraModal from './FirmaBitacoraModal';
+import { codigoOt, fmtFechaHora, fmtFechaHoraSeg, fmtHora, otHref, otSend, turnoLabel, useOtFetch } from './otClient';
 
 /**
  * Pantalla de planta (pantalla 3): el auxiliar o el inspector registra la intervención con UN
@@ -50,8 +52,7 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
   const [obs, setObs] = useState('');
   const [busy, setBusy] = useState(false);
   const [aviso, setAviso] = useState<{ ok: boolean; text: string } | null>(null);
-  const [cerrar, setCerrar] = useState(false);
-  const [obsCierre, setObsCierre] = useState('');
+  const [firmar, setFirmar] = useState<'SUPERVISOR' | 'INSPECTOR' | null>(null);
   const [modalError, setModalError] = useState<string | null>(null);
 
   const o = detalle.data?.orden;
@@ -88,22 +89,24 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
     }
   };
 
-  const cerrarOrden = async () => {
-    if (!o) return;
-    setBusy(true);
-    setModalError(null);
-    try {
-      await otSend(`/api/bitacora-proceso/${o.id}/cerrar?company=${company.idCompany}`, 'POST', { observacion: obsCierre.trim() || undefined });
-      const text = `Bitácora ${codigoOt(o.consecutivo)} cerrada. Ya no admite registros.`;
-      setAviso({ ok: true, text });
-      toast.success(text);
-      setCerrar(false);
-      await detalle.reload(true);
-    } catch (e) {
-      setModalError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
+  /** Cierre firmado (supervisor, «Cerró») o verificación firmada (inspector, «Verificó»). Lanza el error para que el modal lo muestre arriba. */
+  const firmarBitacora = async ({ password, observacion }: { password: string; observacion: string }) => {
+    if (!o || !firmar) return;
+    const accion = firmar === 'SUPERVISOR' ? 'cerrar' : 'verificar';
+    await otSend(`/api/bitacora-proceso/${o.id}/${accion}?company=${company.idCompany}`, 'POST', {
+      password,
+      acepto: true,
+      ...(firmar === 'SUPERVISOR' ? { observacion: observacion || undefined } : {}),
+    });
+    const text =
+      firmar === 'SUPERVISOR'
+        ? `Bitácora ${codigoOt(o.consecutivo)} cerrada y firmada («Cerró»). Ya no admite registros; falta la verificación del inspector.`
+        : `Bitácora ${codigoOt(o.consecutivo)} verificada y firmada («Verificó»).`;
+    setFirmar(null);
+    setAviso({ ok: true, text });
+    toast.success(text);
+    await detalle.reload(true);
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   if (detalle.loading && !o) {
@@ -122,6 +125,10 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
   }
 
   const abierta = o.estado === 'ABIERTA';
+  const firmaSup = o.firmas.find((f) => f.rol === 'SUPERVISOR');
+  const firmaInsp = o.firmas.find((f) => f.rol === 'INSPECTOR');
+  const estadoLabel = abierta ? 'Abierta' : firmaInsp ? 'Verificada' : 'Por verificar';
+  const estadoColor = abierta ? 'green' : firmaInsp ? 'blue' : 'yellow';
   const registrosDesc = [...o.registros].reverse();
   const informeHref = otHref(`${OT_BASE_URL}/${o.id}/informe`, company.idCompany);
 
@@ -150,8 +157,8 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
             </Anchor>
             <Text size='sm' fw={700}>{codigoOt(o.consecutivo)}</Text>
           </Breadcrumbs>
-          <Badge color={abierta ? 'green' : 'gray'} variant='light' size='lg' style={{ flexShrink: 0 }} data-testid='ot-estado'>
-            {abierta ? 'Abierta' : 'Cerrada'}
+          <Badge color={estadoColor} variant='light' size='lg' style={{ flexShrink: 0 }} data-testid='ot-estado'>
+            {estadoLabel}
           </Badge>
         </Group>
         <Title order={1} size='h3' lineClamp={2}>
@@ -182,7 +189,8 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
 
       {!abierta && (
         <Alert color='gray' icon={<IconLock size={18} />} title='Bitácora cerrada' data-testid='ot-cerrada'>
-          Cerrada el {fmtFechaHora(o.cerradaEn)} por {o.cerradaPor ?? '—'}. Ya no admite registros.
+          Cerrada y firmada el {fmtFechaHora(o.cerradaEn)} por {o.cerradaPor ?? '—'}. Ya no admite registros.
+          {firmaInsp ? ` Verificada por ${firmaInsp.nombre}.` : ' Pendiente la verificación del inspector.'}
           {o.observacionCierre ? ` Observación: ${o.observacionCierre}` : ''}
         </Alert>
       )}
@@ -204,7 +212,7 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
               <Button
                 key={a.id_actividad}
                 size='xl'
-                h={72}
+                h={80}
                 variant='light'
                 fullWidth
                 onClick={() => {
@@ -212,7 +220,7 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
                   setObs('');
                   setElegida(a);
                 }}
-                leftSection={<OtIconoActividad icono={a.icono} size={30} />}
+                leftSection={<OtIconoActividad icono={a.icono} size={otPictograma(a.icono) ? 52 : 30} />}
                 styles={{ label: { whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.2 } }}
                 data-testid='ot-actividad'
               >
@@ -252,6 +260,37 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
           </Stack>
         )}
       </Card>
+
+      {!abierta && (
+        <Card withBorder radius='md' p={{ base: 'sm', sm: 'md' }} data-testid='ot-firmas'>
+          <Text fw={700} size='lg' mb='xs'>Firmas electrónicas</Text>
+          <SimpleGrid cols={{ base: 1, xs: 2 }} spacing='sm'>
+            {(['SUPERVISOR', 'INSPECTOR'] as const).map((rol) => {
+              const f = rol === 'SUPERVISOR' ? firmaSup : firmaInsp;
+              return (
+                <Paper key={rol} withBorder radius='md' p='sm' data-testid={`ot-firma-${rol.toLowerCase()}`}>
+                  <Text size='xs' c='dimmed' tt='uppercase' fw={600}>
+                    {rol === 'SUPERVISOR' ? 'Cerró (supervisor)' : 'Verificó (inspector)'}
+                  </Text>
+                  {f ? (
+                    <>
+                      {f.imagen && (
+                        <Paper radius='sm' bg='white' p={4} my={4} maw={240}>
+                          <Image src={f.imagen} alt={`Firma de ${f.nombre}`} h={56} fit='contain' />
+                        </Paper>
+                      )}
+                      <Text fw={600}>{f.nombre}</Text>
+                      <Text size='sm'>{fmtFechaHoraSeg(f.firmadoEn)}</Text>
+                    </>
+                  ) : (
+                    <Text c='dimmed'>Pendiente{rol === 'INSPECTOR' && o.inspector ? ` — ${o.inspector.name}` : ''}</Text>
+                  )}
+                </Paper>
+              );
+            })}
+          </SimpleGrid>
+        </Card>
+      )}
 
       <Card withBorder radius='md' p={{ base: 'sm', sm: 'md' }}>
         <Text fw={700} size='lg' mb='xs'>Encabezado</Text>
@@ -297,20 +336,27 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
           <Button variant='default' size={mobile ? 'md' : 'lg'} h={mobile ? 52 : undefined} leftSection={<IconPrinter size={18} />} component={Link} href={informeHref} data-testid='ot-informe'>
             {mobile ? 'Informe' : 'Informe / PDF'}
           </Button>
-          {abierta && o.puedeGestionar && (
+          {o.puedeCerrar && (
             <Button
               color='red'
               size={mobile ? 'md' : 'lg'}
               h={mobile ? 52 : undefined}
               leftSection={<IconLock size={18} />}
-              onClick={() => {
-                setModalError(null);
-                setObsCierre('');
-                setCerrar(true);
-              }}
+              onClick={() => setFirmar('SUPERVISOR')}
               data-testid='ot-cerrar'
             >
-              {mobile ? 'Cerrar' : 'Cerrar bitácora'}
+              {mobile ? 'Cerrar y firmar' : 'Cerrar y firmar'}
+            </Button>
+          )}
+          {o.puedeVerificar && (
+            <Button
+              size={mobile ? 'md' : 'lg'}
+              h={mobile ? 52 : undefined}
+              leftSection={<IconSignature size={18} />}
+              onClick={() => setFirmar('INSPECTOR')}
+              data-testid='ot-verificar'
+            >
+              {mobile ? 'Verificar' : 'Verificar y firmar'}
             </Button>
           )}
         </Group>
@@ -362,44 +408,14 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
         )}
       </Modal>
 
-      <Modal
-        opened={cerrar}
-        onClose={() => !busy && setCerrar(false)}
-        title={<Text fw={700} size='lg'>Cerrar bitácora {codigoOt(o.consecutivo)}</Text>}
-        centered
-        size='md'
-        data-testid='ot-cerrar-modal'
-      >
-        <Stack gap='md'>
-          {modalError && (
-            <Alert color='red' icon={<IconAlertTriangle size={18} />}>
-              {modalError}
-            </Alert>
-          )}
-          <Alert color='yellow' icon={<IconAlertTriangle size={18} />}>
-            Al cerrar se guarda la hora final del servidor y la bitácora ya no admite registros. Esta acción no se puede deshacer.
-          </Alert>
-          <Textarea
-            size='md'
-            label='Observación de cierre (opcional)'
-            autosize
-            minRows={2}
-            maxRows={6}
-            maxLength={OT_LIMITS.observacionCierre}
-            value={obsCierre}
-            onChange={(e) => setObsCierre(e.currentTarget.value)}
-            data-testid='ot-observacion-cierre'
-          />
-          <Group grow gap='sm'>
-            <Button variant='default' size='lg' h={56} onClick={() => setCerrar(false)} disabled={busy}>
-              Cancelar
-            </Button>
-            <Button color='red' size='lg' h={56} onClick={cerrarOrden} loading={busy} data-testid='ot-confirmar-cierre'>
-              Cerrar bitácora
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
+      <FirmaBitacoraModal
+        opened={firmar !== null}
+        onClose={() => setFirmar(null)}
+        rol={firmar ?? 'SUPERVISOR'}
+        titulo={firmar === 'INSPECTOR' ? `Verificar bitácora ${codigoOt(o.consecutivo)}` : `Cerrar bitácora ${codigoOt(o.consecutivo)}`}
+        conObservacion={firmar === 'SUPERVISOR'}
+        onFirmar={firmarBitacora}
+      />
     </Stack>
   );
 }

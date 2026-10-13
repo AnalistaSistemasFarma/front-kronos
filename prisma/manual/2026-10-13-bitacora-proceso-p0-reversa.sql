@@ -1,6 +1,7 @@
 /*
   REVERSA — Bitácora de Proceso (P0; nació como «Órdenes de Trabajo»). Deshace las migraciones
-  20261013180000_ordenes_trabajo_p0 y 20261013220000_bitacora_proceso_inspector_iconos y el
+  20261013180000_ordenes_trabajo_p0, 20261013220000_bitacora_proceso_inspector_iconos y
+  20261013233000_bitacora_proceso_firmas, y el
   script 2026-10-13-bitacora-proceso-p0-farmalogica.sql (subprocesos con la URL nueva o la vieja):
     - quita los permisos otorgados (subprocess_user_company) de los 2 subprocesos,
     - borra los 2 subprocesos y el proceso «Producción» si quedó vacío,
@@ -52,11 +53,13 @@ BEGIN TRY
   WHERE p.process = N'Producción'
     AND NOT EXISTS (SELECT 1 FROM [dbo].[subprocess] s WHERE s.id_process = p.id_process);
 
+  IF OBJECT_ID(N'dbo.TR_ot_firma_inmutable', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_firma_inmutable];
   IF OBJECT_ID(N'dbo.TR_ot_registro_inmutable', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_registro_inmutable];
   IF OBJECT_ID(N'dbo.TR_ot_orden_operario_inmutable', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_orden_operario_inmutable];
   IF OBJECT_ID(N'dbo.TR_ot_orden_trabajo_sin_borrar', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_orden_trabajo_sin_borrar];
   IF OBJECT_ID(N'dbo.TR_ot_orden_trabajo_cerrada', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_orden_trabajo_cerrada];
 
+  IF OBJECT_ID(N'dbo.ot_firma', N'U') IS NOT NULL DROP TABLE [dbo].[ot_firma];
   IF OBJECT_ID(N'dbo.ot_registro', N'U') IS NOT NULL DROP TABLE [dbo].[ot_registro];
   IF OBJECT_ID(N'dbo.ot_orden_operario', N'U') IS NOT NULL DROP TABLE [dbo].[ot_orden_operario];
   IF OBJECT_ID(N'dbo.ot_orden_trabajo', N'U') IS NOT NULL DROP TABLE [dbo].[ot_orden_trabajo];

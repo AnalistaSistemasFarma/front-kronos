@@ -17,8 +17,9 @@
          /process/bitacora-proceso/gestion  Bitácora de Proceso: Gestión (marcador; supervisor:
                                             abrir, cerrar, registrar en cualquiera, catálogo)
     3. Catálogo de Farmalógica (id_company = 1): 13 intervenciones de la especificación
-       («Descargue autoclave» venía repetido) + «Otra» (observación obligatoria), con ícono
-       de Tabler (no son los pictogramas del documento).
+       («Descargue autoclave» venía repetido) + «Otra» (observación obligatoria). Las 3
+       alimentaciones usan los pictogramas del documento (public/bitacora-proceso/); el resto,
+       íconos de Tabler.
     4. NO otorga permisos a nadie.
 
   Las tablas conservan el prefijo ot_ (nombre interno).
@@ -74,9 +75,9 @@ BEGIN TRY
   /* 3) Catálogo de Farmalógica (idempotente por nombre). Debe coincidir con OT_CATALOGO_FARMALOGICA. */
   DECLARE @Acts TABLE (nombre NVARCHAR(120), exige BIT, orden INT, icono NVARCHAR(40));
   INSERT INTO @Acts (nombre, exige, orden, icono) VALUES
-    (N'Alimentación Tapón',                 0,  10, N'tapon'),
-    (N'Alimentación MPrima',                0,  20, N'materia-prima'),
-    (N'Alimentación Agrafe',                0,  30, N'agrafe'),
+    (N'Alimentación Tapón',                 0,  10, N'pictograma-tapon'),
+    (N'Alimentación MPrima',                0,  20, N'pictograma-mprima'),
+    (N'Alimentación Agrafe',                0,  30, N'pictograma-agrafe'),
     (N'Controles en proceso',               0,  40, N'control'),
     (N'Descargue Autoclave',                0,  50, N'autoclave'),
     (N'Descargue de UV',                    0,  60, N'uv'),

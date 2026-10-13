@@ -97,11 +97,22 @@ export function otNombreCompleto(companyName: string | null | undefined): string
 
 /**
  * Íconos opcionales de las actividades (lista cerrada: la base guarda solo la
- * clave). Son íconos de Tabler elegidos por afinidad; NO son los pictogramas
- * del documento de Farmalógica (origen y licencia desconocidos). Más adelante
- * la empresa podrá cargar los suyos.
+ * clave). Dos clases:
+ *   - PICTOGRAMAS de la especificación de Farmalógica (imágenes estáticas en
+ *     public/bitacora-proceso/; Nicolás, 2026-10-13: «sí, cópialos, son para eso»);
+ *   - íconos de Tabler elegidos por afinidad para el resto.
+ * Cargar imágenes propias desde la pantalla queda para el P1 (requiere almacenamiento).
  */
+export const OT_PICTOGRAMAS = {
+  'pictograma-tapon': '/bitacora-proceso/alimentacion-tapon.webp',
+  'pictograma-mprima': '/bitacora-proceso/alimentacion-mprima.webp',
+  'pictograma-agrafe': '/bitacora-proceso/alimentacion-agrafe.webp',
+} as const;
+
 export const OT_ICONOS = {
+  'pictograma-tapon': 'Pictograma: alimentación de tapón',
+  'pictograma-mprima': 'Pictograma: alimentación de materia prima',
+  'pictograma-agrafe': 'Pictograma: alimentación de agrafe',
   tapon: 'Tapón',
   'materia-prima': 'Materia prima',
   agrafe: 'Agrafe',
@@ -123,20 +134,25 @@ export const OT_ICONOS = {
 
 export type OtIcono = keyof typeof OT_ICONOS;
 
+/** Ruta de la imagen si el ícono es un pictograma; null si es un ícono de Tabler. */
+export function otPictograma(icono: string | null | undefined): string | null {
+  return icono && Object.prototype.hasOwnProperty.call(OT_PICTOGRAMAS, icono) ? OT_PICTOGRAMAS[icono as keyof typeof OT_PICTOGRAMAS] : null;
+}
+
 export function isOtIcono(v: unknown): v is OtIcono {
   return typeof v === 'string' && Object.prototype.hasOwnProperty.call(OT_ICONOS, v);
 }
 
 /**
  * Catálogo inicial de Farmalógica según su especificación oficial (2026-10-13):
- * 3 alimentaciones con pictograma + 11 intervenciones («Descargue autoclave»
+ * 3 alimentaciones con su pictograma + 10 intervenciones («Descargue autoclave»
  * venía repetido) + «Otra» (observación obligatoria). Debe coincidir con
  * prisma/manual/2026-10-13-bitacora-proceso-p0-farmalogica.sql.
  */
 export const OT_CATALOGO_FARMALOGICA: ReadonlyArray<{ nombre: string; icono: OtIcono; orden: number; exigeObservacion: boolean }> = [
-  { nombre: 'Alimentación Tapón', icono: 'tapon', orden: 10, exigeObservacion: false },
-  { nombre: 'Alimentación MPrima', icono: 'materia-prima', orden: 20, exigeObservacion: false },
-  { nombre: 'Alimentación Agrafe', icono: 'agrafe', orden: 30, exigeObservacion: false },
+  { nombre: 'Alimentación Tapón', icono: 'pictograma-tapon', orden: 10, exigeObservacion: false },
+  { nombre: 'Alimentación MPrima', icono: 'pictograma-mprima', orden: 20, exigeObservacion: false },
+  { nombre: 'Alimentación Agrafe', icono: 'pictograma-agrafe', orden: 30, exigeObservacion: false },
   { nombre: 'Controles en proceso', icono: 'control', orden: 40, exigeObservacion: false },
   { nombre: 'Descargue Autoclave', icono: 'autoclave', orden: 50, exigeObservacion: false },
   { nombre: 'Descargue de UV', icono: 'uv', orden: 60, exigeObservacion: false },
@@ -149,3 +165,7 @@ export const OT_CATALOGO_FARMALOGICA: ReadonlyArray<{ nombre: string; icono: OtI
   { nombre: 'Refrigerio/almuerzo/cena', icono: 'refrigerio', orden: 130, exigeObservacion: false },
   { nombre: 'Otra', icono: 'otra', orden: 990, exigeObservacion: true },
 ];
+
+/** Significado de cada firma de la bitácora (supervisor al cerrar, inspector al verificar). */
+export const OT_FIRMA_SIGNIFICADO = { SUPERVISOR: 'Cerró', INSPECTOR: 'Verificó' } as const;
+export type OtFirmaRol = keyof typeof OT_FIRMA_SIGNIFICADO;
