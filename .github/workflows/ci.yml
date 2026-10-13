@@ -12,7 +12,7 @@ name: CI — Compuerta de calidad
 
 on:
   pull_request:
-    branches: [testing, main]
+    branches: [testing, main, tmp/ci-603-base]
   push:
     branches: [chore/fase0-quality-gate]
   workflow_dispatch: {}
