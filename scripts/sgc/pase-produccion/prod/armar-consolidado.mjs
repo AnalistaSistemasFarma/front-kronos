@@ -8,7 +8,7 @@
  *
  * Salida (en --out, por defecto scripts/sgc/pase-produccion/prod/salida):
  *   F0-verificacion-previa.sql   solo lectura; THROW si algo no está como se espera
- *   F1-ddl-antes-del-codigo.sql  esquema sgc completo (14 migraciones, idempotentes)
+ *   F1-ddl-antes-del-codigo.sql  esquema sgc del primer pase (S0–S13: 14 migraciones, idempotentes)
  *   F2-despues-del-codigo.sql    retiro del módulo viejo, registro de migraciones,
  *                                datos de OLP y correo de avisos apagado
  *   R1-reversa-sgc.sql           reversa del SGC (datos + esquema), de la más nueva a la más antigua
@@ -82,7 +82,12 @@ const replaceOnce = (texto, de, a, archivo) => {
 const MIG = 'prisma/migrations';
 const MAN = 'prisma/manual';
 const SQLD = 'scripts/sgc/pase-produccion/sql';
-const migraciones = fs.readdirSync(MIG).filter((d) => /_sgc_/.test(d)).sort();
+// El consolidado es el del PRIMER pase del SGC (S0–S13, en producción desde el
+// 2026-10-10). Las migraciones posteriores (S14 en adelante) van en su propio
+// pase con aplicar-sql.mjs, así que se corta en la última del S13: si no, el
+// conteo de migraciones y de tablas de F1 y la reversa R1 dejan de cuadrar.
+const ULTIMA_MIGRACION_CONSOLIDADO = '20261008150000_sgc_s13_firma_propia_registro';
+const migraciones = fs.readdirSync(MIG).filter((d) => /_sgc_/.test(d) && d <= ULTIMA_MIGRACION_CONSOLIDADO).sort();
 const ddl = migraciones.filter((d) => d !== '20260930100000_sgc_s0_retiro_gestion_documental');
 if (ddl.length !== 14) throw new Error(`Se esperaban 14 migraciones DDL del SGC y hay ${ddl.length}`);
 
