@@ -110,3 +110,19 @@ export function codigoOt(consecutivo: number): string {
 export function otHref(path: string, idCompany: number | null | undefined): string {
   return idCompany ? `${path}?empresa=${idCompany}` : path;
 }
+
+/** Fecha YYYY-MM-DD en hora de Colombia. */
+export function fechaIsoColombia(iso: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(iso));
+  const v = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+  return `${v('year')}-${v('month')}-${v('day')}`;
+}
+
+/**
+ * Nombre sugerido del PDF del informe (A8): Bitacora_<código>_<lote>_<fecha de apertura>,
+ * p. ej. «Bitacora_BP-0009_1800726_2026-10-14». Solo caracteres seguros para un archivo.
+ */
+export function nombreArchivoInforme(consecutivo: number, lote: string, abiertaEn: string): string {
+  const limpio = (t: string) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9.-]+/g, '-').replace(/^-+|-+$/g, '');
+  return `Bitacora_${codigoOt(consecutivo)}_${limpio(lote) || 'sin-lote'}_${fechaIsoColombia(abiertaEn)}`;
+}

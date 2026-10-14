@@ -27,7 +27,7 @@ export async function GET(request: Request) {
   }
 }
 
-/** POST /api/bitacora-proceso — abre una bitácora (solo Gestión) y avisa al inspector designado (campana + push). */
+/** POST /api/bitacora-proceso — abre una bitácora (solo Gestión) y avisa al jefe de producción designado (campana + push). */
 export async function POST(request: Request) {
   try {
     const ctx = await getOtRequestContext(request);

@@ -10,7 +10,20 @@ import { normalizeDocumentCode } from './coding';
  * código MÁS LARGO que coincida, para que «OLP-GCC-02-FO01 …» no se cruce con
  * OLP-GCC-02. Después del código, el resto del nombre se compara con el
  * nombre del documento en el listado: si no se parecen, se AVISA (no bloquea).
+ *
+ * S16 (R33): además de PDF, la carga inicial acepta los originales en WORD
+ * (.docx) y EXCEL (.xlsx) ya aprobados: se convierten a PDF para el visor y el
+ * original se conserva con su huella (lib/sgc/db/bulkUpload.ts).
  */
+
+/** Formatos de la carga masiva (S16: Word y Excel además de PDF). */
+export const SGC_BULK_EXTENSIONS = ['pdf', 'docx', 'xlsx'] as const;
+export type SgcBulkKind = (typeof SGC_BULK_EXTENSIONS)[number];
+
+export function bulkKindOf(fileName: string): SgcBulkKind | null {
+  const m = /\.(pdf|docx|xlsx)$/i.exec(fileName.trim());
+  return m ? (m[1].toLowerCase() as SgcBulkKind) : null;
+}
 
 export interface SgcBulkCandidate {
   idDocument: number;
@@ -70,7 +83,7 @@ export function baseName(fileName: string): string {
  */
 export function matchBulkFile(fileName: string, candidates: readonly SgcBulkCandidate[]): SgcBulkMatch {
   const base: SgcBulkMatch = { fileName, idDocument: null, code: null, title: null, status: 'error', error: null, warning: null, similarity: null };
-  if (!/\.pdf$/i.test(fileName.trim())) return { ...base, error: 'Solo se cargan archivos PDF.' };
+  if (!bulkKindOf(fileName)) return { ...base, error: 'Solo se cargan archivos PDF, Word (.docx) o Excel (.xlsx).' };
   const name = normalizeDocumentCode(baseName(fileName));
   let best: SgcBulkCandidate | null = null;
   for (const c of candidates) {

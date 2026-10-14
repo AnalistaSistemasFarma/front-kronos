@@ -55,7 +55,7 @@ export default function OtListado({ company }: { company: OtCompanyAccess }) {
       {company.canManage && desktop && (
         <Group justify='flex-end' gap='sm'>
           <Button variant='default' size='md' leftSection={<IconSettings size={18} />} component={Link} href={otHref(`${OT_BASE_URL}/gestion`, company.idCompany)}>
-            Catálogo de actividades
+            Catálogo y operarios
           </Button>
           <Button size='md' leftSection={<IconPlus size={18} />} onClick={() => setNueva(true)} data-testid='ot-nueva'>
             Nueva bitácora
@@ -106,7 +106,7 @@ export default function OtListado({ company }: { company: OtCompanyAccess }) {
                   {o.sapOpDocNum && <Badge variant='outline' size='md'>OP {o.sapOpDocNum}</Badge>}
                   {o.area && <Badge variant='outline' color='gray' size='md'>{o.area}</Badge>}
                   <Badge variant='light' color='blue' size='md'>{o.registros} registros</Badge>
-                  {!company.canManage && !o.soyOperario && <Badge variant='light' color='yellow' size='md'>No figura como auxiliar</Badge>}
+                  {!company.canManage && !o.soyOperario && <Badge variant='light' color='yellow' size='md'>Solo consulta</Badge>}
                 </Group>
                 <Text size='sm' c='dimmed' mt={8}>
                   Abierta {haceCuanto(o.abiertaEn)} por {o.abiertaPor}

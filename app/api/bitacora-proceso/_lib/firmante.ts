@@ -1,97 +1,71 @@
 import { prisma } from '../../../../lib/prisma';
 import { synerlinkPasswordVerifier, type PasswordVerifier } from '../../../../lib/auth/verifyPassword';
-import { getOrionConfig } from '../../../../lib/orion/config';
-import { loadOrionUserSignature } from '../../../../lib/orion/client';
-import type { FirmaActor } from '../../../../lib/bitacora-proceso/db';
-import {
-  assertNoBloqueado,
-  imagenFirmaSegura,
-  limiteReautenticacion,
-  parseFirma,
-  type LimiteReautenticacion,
-} from '../../../../lib/bitacora-proceso/firmas';
-import { OtError } from '../../../../lib/bitacora-proceso/rules';
-import { FirmaImagenError } from '../../../../lib/firma-gss/png';
-import { parseFirmaNueva, registrarFirmaGss, type FirmaGssResultado, type RegistroFirmaGss } from '../../../../lib/firma-gss/miFirma';
-import { firmaGssDeps } from '../../../../lib/firma-gss/server';
+import { getOtAccessForUser, type FirmaActor } from '../../../../lib/bitacora-proceso/db';
+import { assertNoBloqueado, limiteReautenticacion, parseConfirmacion, type LimiteReautenticacion } from '../../../../lib/bitacora-proceso/firmas';
+import { companyOtAccess, OtError, type OtCompanyAccess } from '../../../../lib/bitacora-proceso/rules';
 import type { OtRequestContext } from './context';
 
 /**
- * Prepara a quien firma: consentimiento aceptado, contraseña de SynerLink
- * correcta (con límite de intentos) y su firma REGISTRADA en GSS Firma como
- * imagen visible. Si GSS Firma no responde o la persona no tiene firma
- * registrada, firma igual (la firma electrónica es la reautenticación + el
- * significado + la hora + la huella; la imagen es solo su representación) y
- * así una caída de Orión no frena el cierre en planta.
+ * Prepara a quien CONFIRMA «Cerró» o «Verificó» (A4, 2026-10-14).
  *
- * Firma nueva (2026-10-14): si la persona no tiene firma registrada (o quiere
- * cambiarla), el cuerpo trae `firmaNueva: { imagen, metodo }` (dibujada o
- * IMAGEN de su firma manuscrita). DESPUÉS de verificar la contraseña se sanea,
- * se guarda en SU maestro de GSS Firma (para la próxima vez), queda auditada y
- * se usa en esta firma. Si GSS Firma no la guarda, se firma igual con esa
- * imagen y se devuelve un aviso.
+ * La tablet de planta usa una CUENTA COMPARTIDA, así que la sesión NO sirve para
+ * confirmar (Nicolás, 2026-10-14): la persona elige SU nombre (cuerpo `firmante`
+ * = su user.id), marca la casilla y escribe SU contraseña de SynerLink. El
+ * servidor la valida contra la cuenta de ESA persona (usuario activo de la
+ * empresa), con límite de intentos por persona, y devuelve sus datos y su acceso
+ * al módulo. La confirmación se guarda con el id de esa persona, no el de la sesión.
+ *
+ * Ya no se usa la imagen de la firma de GSS Firma ni su consentimiento (GSS Firma
+ * y el SGC quedan intactos).
  */
 export interface FirmanteDeps {
   verificar: PasswordVerifier;
-  firmaRegistrada: (email: string) => Promise<string | null>;
   limite: LimiteReautenticacion;
-  registrarFirma: (input: RegistroFirmaGss) => Promise<FirmaGssResultado>;
-}
-
-const TIMEOUT_FIRMA_MS = 6000;
-
-async function firmaRegistradaOrion(email: string): Promise<string | null> {
-  if (!getOrionConfig().enabled) return null;
-  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), TIMEOUT_FIRMA_MS));
-  const carga = loadOrionUserSignature(email)
-    .then((r) => (r.ok ? (r.data?.dataUrl ?? null) : null))
-    .catch(() => null);
-  return Promise.race([carga, timeout]);
+  /** Usuario ACTIVO de la empresa con ese id, o null. */
+  persona: (idUser: string, idCompany: number) => Promise<{ id: string; email: string; name: string | null } | null>;
+  /** Acceso al módulo de esa persona (por correo). */
+  acceso: (email: string) => Promise<OtCompanyAccess[]>;
 }
 
 export function firmanteDeps(): FirmanteDeps {
   return {
     verificar: synerlinkPasswordVerifier(prisma),
-    firmaRegistrada: firmaRegistradaOrion,
     limite: limiteReautenticacion,
-    registrarFirma: (input) => registrarFirmaGss(firmaGssDeps(), input),
+    persona: async (idUser, idCompany) => {
+      const cu = await prisma.companyUser.findFirst({
+        where: { id_company: idCompany, id_user: idUser, user: { isActive: true } },
+        select: { user: { select: { id: true, email: true, name: true } } },
+      });
+      return cu?.user ?? null;
+    },
+    acceso: (email) => getOtAccessForUser(prisma, email),
   };
 }
 
 export async function prepararFirmante(
   ctx: OtRequestContext,
+  idCompany: number,
   body: Record<string, unknown> | null,
   userAgent: string | null,
   deps: FirmanteDeps = firmanteDeps()
-): Promise<FirmaActor & { avisoFirma: string | null }> {
-  const { password } = parseFirma(body);
-  let firmaNueva;
-  try {
-    firmaNueva = parseFirmaNueva(body?.firmaNueva);
-  } catch (e) {
-    if (e instanceof FirmaImagenError) throw new OtError(e.message, 400);
-    throw e;
-  }
-  assertNoBloqueado(deps.limite, ctx.email);
-  const ok = await deps.verificar(ctx.email, password);
+): Promise<FirmaActor> {
+  const { idFirmante, password } = parseConfirmacion(body);
+  const persona = await deps.persona(idFirmante, idCompany);
+  if (!persona) throw new OtError('La persona elegida no es un usuario activo de la empresa.', 400);
+  assertNoBloqueado(deps.limite, persona.email);
+  const ok = await deps.verificar(persona.email, password);
   if (!ok) {
-    deps.limite.registrarFallo(ctx.email);
-    throw new OtError('Contraseña incorrecta: la firma no se registró.', 403);
+    deps.limite.registrarFallo(persona.email);
+    throw new OtError('Contraseña incorrecta: la confirmación no se registró.', 403);
   }
-  deps.limite.limpiar(ctx.email);
-  let nueva: FirmaGssResultado | null = null;
-  if (firmaNueva) {
-    try {
-      nueva = await deps.registrarFirma({ idUser: ctx.actor.idUser, email: ctx.email, firma: firmaNueva, origen: 'bitacora-proceso', ip: ctx.actor.ip, userAgent });
-    } catch (e) {
-      if (e instanceof FirmaImagenError) throw new OtError(e.message, 400);
-      throw e;
-    }
-  }
-  const [u, imagen] = await Promise.all([
-    prisma.user.findFirst({ where: { id: ctx.actor.idUser }, select: { name: true } }),
-    nueva ? Promise.resolve(nueva.dataUrl) : deps.firmaRegistrada(ctx.email),
-  ]);
-  const avisoFirma = nueva && !nueva.guardada ? 'Su firma quedó en esta bitácora, pero GSS Firma no la guardó para la próxima vez. Regístrela luego en «Mi perfil».' : null;
-  return { ...ctx.actor, userAgent, nombre: u?.name?.trim() || ctx.email, imagen: imagenFirmaSegura(imagen), avisoFirma };
+  deps.limite.limpiar(persona.email);
+  const access = companyOtAccess(await deps.acceso(persona.email), idCompany);
+  return {
+    idUser: persona.id,
+    email: persona.email,
+    ip: ctx.actor.ip,
+    userAgent,
+    nombre: persona.name?.trim() || persona.email,
+    access,
+  };
 }

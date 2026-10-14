@@ -10,10 +10,11 @@ import { prepararFirmante } from '../../_lib/firmante';
 export const dynamic = 'force-dynamic';
 
 /**
- * POST /api/bitacora-proceso/[id]/cerrar?company=1  { observacion?, password, acepto: true }
- *   [+ firmaNueva: { imagen, metodo }]
- * Cierre con FIRMA ELECTRÓNICA del supervisor («Cerró»): solo Gestión. Después
- * avisa al INSPECTOR (campana + push) con el enlace directo para verificar.
+ * POST /api/bitacora-proceso/[id]/cerrar?company=1  { firmante, confirmo: true, password, observacion? }
+ * Cierre con CONFIRMACIÓN «Cerró» (A4). La sesión puede ser la cuenta compartida
+ * de planta: quien confirma elige su nombre (`firmante`) y escribe SU contraseña;
+ * debe ser supervisor (Gestión) en la empresa. Después avisa al JEFE DE
+ * PRODUCCIÓN (campana + push) con el enlace directo para verificar.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -21,14 +22,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (ctx instanceof Response) return ctx;
     const id = parseId((await params).id);
     if (!id) return jsonNoStore({ error: 'Bitácora no válida' }, 400);
-    const access = requireCompany(ctx, parseCompanyParam(request.url), 'canManage');
+    const access = requireCompany(ctx, parseCompanyParam(request.url));
     if (access instanceof Response) return access;
     const body = await readJson(request);
     const { observacion } = parseCierre(body);
-    const firmante = await prepararFirmante(ctx, body, readClientOrigin(request).userAgent);
+    const firmante = await prepararFirmante(ctx, access.idCompany, body, readClientOrigin(request).userAgent);
     const firma = await cerrarYFirmar(prisma, id, access, observacion, firmante);
-    await avisarInspector(() => datosAvisoInspector(prisma, id, access.idCompany, ctx.actor).then((a) => (a ? avisoPorVerificar(a) : [])));
-    return jsonNoStore({ ok: true, firma, avisoFirma: firmante.avisoFirma });
+    await avisarInspector(() => datosAvisoInspector(prisma, id, access.idCompany, firmante).then((a) => (a ? avisoPorVerificar(a) : [])));
+    return jsonNoStore({ ok: true, firma, firmante: firmante.nombre });
   } catch (error) {
     return errorResponse(error, 'cerrar');
   }

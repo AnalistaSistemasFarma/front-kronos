@@ -8,10 +8,15 @@
  * Tablas (nombre interno `ot_*`, ver prisma/schema.prisma y las migraciones
  * 20261013180000_ordenes_trabajo_p0, ..._inspector_iconos y ..._firmas):
  *   ot_orden_trabajo   una bitácora = un turno (código visible BP-0001 por empresa)
- *   ot_orden_operario  auxiliares de la bitácora
- *   ot_registro        intervenciones (hora del SERVIDOR, UTC; inmutables)
+ *   ot_orden_operador  operarios SIN usuario programados en la bitácora (desde 2026-10-14)
+ *   ot_operador        maestro de operarios por empresa
+ *   ot_orden_operario  auxiliares CON usuario (solo bitácoras anteriores al 2026-10-14)
+ *   ot_registro        intervenciones (hora del SERVIDOR, UTC; inmutables): operario
+ *                      elegido (id_operador/operador_nombre) y usuario de la sesión (id_user)
  *   ot_actividad       catálogo de intervenciones por empresa
- *   ot_firma           firmas «Cerró» (SUPERVISOR) y «Verificó» (INSPECTOR)
+ *   ot_firma           confirmaciones «Cerró» (SUPERVISOR) y «Verificó» (rol interno
+ *                      INSPECTOR = JEFE DE PRODUCCIÓN; desde 2026-10-14 es un check con
+ *                      contraseña, sin imagen)
  *
  * Reglas de estas tools:
  *   - TODO el SQL pasa por queryReadOnly (candado assertReadOnlySql) y filtra
@@ -42,8 +47,10 @@ export const ACTIVIDAD_RECIENTE_MINUTOS_DEFECTO = 60;
 /** Ventana máxima hacia atrás de kronos_bitacora_actividad_reciente (días). */
 export const ACTIVIDAD_RECIENTE_MAX_DIAS = 31;
 
-const TURNO_LABEL: Record<string, string> = { MANANA: 'Mañana', TARDE: 'Tarde', NOCHE: 'Noche' };
+const TURNO_LABEL: Record<string, string> = { MANANA: 'Mañana (06–14)', TARDE: 'Tarde (14–22)', NOCHE: 'Noche (22–06)' };
 const SIGNIFICADO: Record<string, string> = { SUPERVISOR: 'Cerró', INSPECTOR: 'Verificó' };
+/** Rol visible: en la base el verificador es INSPECTOR, pero en SynerLink es el «Jefe de producción». */
+const ROL_VISIBLE: Record<string, string> = { SUPERVISOR: 'supervisor', INSPECTOR: 'jefe_produccion' };
 
 export interface BitacoraToolDeps {
   scope: AuthScope;
@@ -152,16 +159,17 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
   // -------------------------------------------------------------------------
   server.tool(
     'kronos_list_bitacoras',
-    'Lista las bitácoras de proceso (módulo «Bitácora de Proceso» de SynerLink: una bitácora = un turno de planta) de las empresas del alcance, más recientes primero. Filtros: empresa, estado (abierta, cerrada = cerrada por el supervisor y pendiente de verificar, verificada = con firma «Verificó» del inspector), rango de fechas de apertura, producto, lote, supervisor, inspector y orden de producción de SAP. Devuelve el código BP-xxxx, producto, lote, turno, horas de apertura y cierre (UTC), supervisor, inspector, número de auxiliares y de registros, estado de las firmas y la última actividad. Solo lectura.',
+    'Lista las bitácoras de proceso (módulo «Bitácora de Proceso» de SynerLink: una bitácora = un turno de planta) de las empresas del alcance, más recientes primero. Filtros: empresa, estado (abierta, cerrada = cerrada por el supervisor y pendiente de verificar, verificada = con «Verificó» del jefe de producción), rango de fechas de apertura, producto, lote, supervisor, jefe de producción y orden de producción de SAP. Devuelve el código BP-xxxx, producto, lote, turno con horario, área, horas de apertura y cierre (UTC), supervisor, jefe de producción, número de operarios y de registros, estado de las confirmaciones («Cerró» / «Verificó») y la última actividad. Solo lectura.',
     {
       companyId: z.number().int().positive().optional().describe('Empresa a consultar; se interseca con el alcance de la key.'),
-      estado: z.enum(['abierta', 'cerrada', 'verificada']).optional().describe('abierta | cerrada (pendiente de verificación) | verificada.'),
+      estado: z.enum(['abierta', 'cerrada', 'verificada']).optional().describe('abierta | cerrada (pendiente de verificación del jefe de producción) | verificada.'),
       desde: isoDate.optional().describe('Apertura desde (ISO 8601 o YYYY-MM-DD, UTC).'),
       hasta: isoDate.optional().describe('Apertura hasta (ISO 8601 o YYYY-MM-DD; con solo fecha incluye todo ese día UTC).'),
       producto: z.string().trim().min(1).max(200).optional().describe('Texto contenido en el producto o en el código de artículo.'),
       lote: z.string().trim().min(1).max(50).optional().describe('Texto contenido en el lote.'),
       supervisor: z.string().trim().min(1).max(255).optional().describe('Id de usuario, o texto del nombre o del correo de quien abrió la bitácora.'),
-      inspector: z.string().trim().min(1).max(255).optional().describe('Id de usuario, o texto del nombre o del correo del inspector.'),
+      jefeProduccion: z.string().trim().min(1).max(255).optional().describe('Id de usuario, o texto del nombre o del correo del jefe de producción (quien verifica).'),
+      inspector: z.string().trim().min(1).max(255).optional().describe('Obsoleto: alias de jefeProduccion.'),
       ordenProduccion: z.number().int().positive().optional().describe('Número (DocNum) de la orden de producción de SAP asociada.'),
       limit: z.number().int().optional().describe('Tamaño de página (se limita al máximo del servidor).'),
       offset: z.number().int().optional(),
@@ -193,7 +201,8 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
         }
         if (args.lote) where.push(Prisma.sql`o.lote LIKE ${likeContains(args.lote)}`);
         if (args.supervisor) where.push(personaClause('o.abierta_por', 'us', args.supervisor));
-        if (args.inspector) where.push(personaClause('o.id_inspector', 'ui', args.inspector));
+        const jefe = args.jefeProduccion ?? args.inspector;
+        if (jefe) where.push(personaClause('o.id_inspector', 'ui', jefe));
         if (args.ordenProduccion !== undefined) where.push(Prisma.sql`o.sap_op_docnum = ${args.ordenProduccion}`);
         const whereSql = Prisma.join(where, ' AND ');
 
@@ -203,7 +212,8 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
                  o.estado, o.abierta_en, o.cerrada_en,
                  o.abierta_por AS supervisor_id, us.name AS supervisor_nombre,
                  o.id_inspector AS inspector_id, ui.name AS inspector_nombre,
-                 (SELECT COUNT(*) FROM ot_orden_operario oo WHERE oo.id_orden_trabajo = o.id_orden_trabajo) AS auxiliares,
+                 (SELECT COUNT(*) FROM ot_orden_operador op WHERE op.id_orden_trabajo = o.id_orden_trabajo)
+                   + (SELECT COUNT(*) FROM ot_orden_operario oo WHERE oo.id_orden_trabajo = o.id_orden_trabajo) AS operarios,
                  (SELECT COUNT(*) FROM ot_registro r WHERE r.id_orden_trabajo = o.id_orden_trabajo) AS registros,
                  (SELECT MAX(r.registrado_en) FROM ot_registro r WHERE r.id_orden_trabajo = o.id_orden_trabajo) AS ultimo_registro_en,
                  (SELECT MAX(f.firmado_en) FROM ot_firma f WHERE f.id_orden_trabajo = o.id_orden_trabajo) AS ultima_firma_en,
@@ -238,8 +248,8 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
             abierta_en: iso(r.abierta_en),
             cerrada_en: iso(r.cerrada_en),
             supervisor: { id: r.supervisor_id, nombre: txt(r.supervisor_nombre) },
-            inspector: r.inspector_id ? { id: r.inspector_id, nombre: txt(r.inspector_nombre) } : null,
-            auxiliares: num(r.auxiliares),
+            jefe_produccion: r.inspector_id ? { id: r.inspector_id, nombre: txt(r.inspector_nombre) } : null,
+            operarios: num(r.operarios),
             registros: num(r.registros),
             firmas: estadoFirmas(cerro, verifico),
             ultima_actividad_en: maxIso(r.abierta_en, r.ultimo_registro_en, r.cerrada_en, r.ultima_firma_en),
@@ -257,7 +267,7 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
   // -------------------------------------------------------------------------
   server.tool(
     'kronos_get_bitacora',
-    'Trae UNA bitácora de proceso completa: encabezado (código BP-xxxx, producto, lote, turno, área, orden de producción de SAP y su copia, estado, horas de apertura y cierre, observación de cierre), participantes (supervisor, inspector y auxiliares), todos los registros en orden cronológico (actividad, hora del servidor en UTC, usuario y observación) y las firmas «Cerró» y «Verificó» con nombre y hora. Indique id, o código (BP-0003) más companyId si la key ve varias empresas. Nunca devuelve imágenes de firma, huellas ni IP. Solo lectura.',
+    'Trae UNA bitácora de proceso completa: encabezado (código BP-xxxx, producto, lote, turno con horario, área, orden de producción de SAP y su copia, estado, horas de apertura y cierre, observación de cierre), participantes (supervisor, jefe de producción y operarios), todos los registros en orden cronológico (actividad, hora del servidor en UTC, operario que la hizo, usuario de la sesión que la registró y observación) y las confirmaciones «Cerró» (supervisor) y «Verificó» (jefe de producción) con nombre y hora. Indique id, o código (BP-0003) más companyId si la key ve varias empresas. Nunca devuelve imágenes de firma, huellas ni IP. Solo lectura.',
     {
       id: z.number().int().positive().optional().describe('Id interno de la bitácora (campo id de kronos_list_bitacoras).'),
       codigo: z.string().trim().min(1).max(20).optional().describe('Código visible, p. ej. BP-0003 (el consecutivo es por empresa).'),
@@ -309,7 +319,7 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
         const h = headers[0]!;
         const idOrden = num(h.id_orden_trabajo);
 
-        const [auxiliares, registros, firmas] = await Promise.all([
+        const [auxiliares, operadores, registros, firmas] = await Promise.all([
           q<Record<string, unknown>>(Prisma.sql`
             SELECT oo.id_user, u.name, u.email
             FROM ot_orden_operario oo
@@ -318,9 +328,17 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
             ORDER BY u.name
           `),
           q<Record<string, unknown>>(Prisma.sql`
+            SELECT op.id_operador, m.nombre, m.activo
+            FROM ot_orden_operador op
+            INNER JOIN ot_operador m ON m.id_operador = op.id_operador
+            WHERE op.id_orden_trabajo = ${idOrden}
+            ORDER BY m.nombre
+          `),
+          q<Record<string, unknown>>(Prisma.sql`
             SELECT TOP (${MAX_REGISTROS_POR_BITACORA + 1})
                    CAST(r.id_registro AS NVARCHAR(20)) AS id_registro, r.id_actividad, r.actividad_nombre,
-                   r.registrado_en, r.observacion, r.id_user, u.name AS usuario_nombre
+                   r.registrado_en, r.observacion, r.id_user, u.name AS usuario_nombre,
+                   r.id_operador, r.operador_nombre
             FROM ot_registro r
             LEFT JOIN [user] u ON u.id = r.id_user
             WHERE r.id_orden_trabajo = ${idOrden}
@@ -349,11 +367,12 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
           actividad: r.actividad_nombre,
           id_actividad: num(r.id_actividad),
           registrado_en: iso(r.registrado_en),
-          usuario: { id: r.id_user, nombre: txt(r.usuario_nombre) },
+          operario: r.id_operador != null ? { id: num(r.id_operador), nombre: txt(r.operador_nombre) } : null,
+          usuario_sesion: { id: r.id_user, nombre: txt(r.usuario_nombre) },
           observacion: r.observacion ?? null,
         }));
         const firmasOut = firmas.map((f) => ({
-          rol: f.rol,
+          rol: ROL_VISIBLE[String(f.rol)] ?? f.rol,
           significado: f.significado ?? SIGNIFICADO[String(f.rol)] ?? null,
           nombre: f.signer_name ?? null,
           email: f.signer_email ?? null,
@@ -361,8 +380,8 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
           firmado_en: iso(f.firmado_en),
           metodo_autenticacion: f.auth_method ?? null,
         }));
-        const verifico = firmasOut.some((f) => f.rol === 'INSPECTOR');
-        const cerro = firmasOut.some((f) => f.rol === 'SUPERVISOR');
+        const verifico = firmas.some((f) => f.rol === 'INSPECTOR');
+        const cerro = firmas.some((f) => f.rol === 'SUPERVISOR');
 
         return {
           result: {
@@ -390,8 +409,9 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
             },
             participantes: {
               supervisor: { id: h.supervisor_id, nombre: txt(h.supervisor_nombre), email: h.supervisor_email ?? null },
-              inspector: h.inspector_id ? { id: h.inspector_id, nombre: txt(h.inspector_nombre), email: h.inspector_email ?? null } : null,
-              auxiliares: auxiliares.map((a) => ({ id: a.id_user, nombre: txt(a.name), email: a.email ?? null })),
+              jefe_produccion: h.inspector_id ? { id: h.inspector_id, nombre: txt(h.inspector_nombre), email: h.inspector_email ?? null } : null,
+              operarios: operadores.map((a) => ({ id: num(a.id_operador), nombre: txt(a.nombre), activo: Boolean(a.activo) })),
+              auxiliares_con_usuario: auxiliares.map((a) => ({ id: a.id_user, nombre: txt(a.name), email: a.email ?? null })),
             },
             registros: regs,
             registros_truncados: truncado,
@@ -407,7 +427,7 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
   // -------------------------------------------------------------------------
   server.tool(
     'kronos_bitacora_actividad_reciente',
-    'Monitoreo en tiempo real de la Bitácora de Proceso: devuelve los registros (intervenciones) hechos desde una hora dada, de las bitácoras de las empresas del alcance (por defecto solo las abiertas y los últimos 60 minutos), en orden cronológico, con el código BP-xxxx, producto, lote, turno, actividad, usuario, hora del servidor (UTC) y observación. Para seguir consultando sin repetir, envíe en despuesDeRegistro el valor siguiente_cursor de la respuesta anterior. Solo lectura.',
+    'Monitoreo en tiempo real de la Bitácora de Proceso: devuelve los registros (intervenciones) hechos desde una hora dada, de las bitácoras de las empresas del alcance (por defecto solo las abiertas y los últimos 60 minutos), en orden cronológico, con el código BP-xxxx, producto, lote, turno, actividad, operario que la hizo, usuario de la sesión, hora del servidor (UTC) y observación. Para seguir consultando sin repetir, envíe en despuesDeRegistro el valor siguiente_cursor de la respuesta anterior. Solo lectura.',
     {
       desde: isoDate.optional().describe('Registros desde esta hora (ISO 8601, UTC). Por defecto, hace 60 minutos. Máximo 31 días atrás.'),
       despuesDeRegistro: z.string().trim().regex(/^\d{1,19}$/).optional().describe('Cursor: solo registros con id mayor a este (siguiente_cursor de la llamada anterior).'),
@@ -434,7 +454,7 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
         const rows = await q<Record<string, unknown>>(Prisma.sql`
           SELECT TOP (${limit})
                  CAST(r.id_registro AS NVARCHAR(20)) AS id_registro, r.registrado_en, r.actividad_nombre,
-                 r.observacion, r.id_user, u.name AS usuario_nombre,
+                 r.observacion, r.id_user, u.name AS usuario_nombre, r.id_operador, r.operador_nombre,
                  o.id_orden_trabajo, o.consecutivo, o.id_company, c.company,
                  o.producto, o.lote, o.turno, o.estado
           FROM ot_registro r
@@ -449,7 +469,8 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
           id: String(r.id_registro),
           registrado_en: iso(r.registrado_en),
           actividad: r.actividad_nombre,
-          usuario: { id: r.id_user, nombre: txt(r.usuario_nombre) },
+          operario: r.id_operador != null ? { id: num(r.id_operador), nombre: txt(r.operador_nombre) } : null,
+          usuario_sesion: { id: r.id_user, nombre: txt(r.usuario_nombre) },
           observacion: r.observacion ?? null,
           bitacora: {
             id: num(r.id_orden_trabajo),
@@ -483,7 +504,7 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
   // -------------------------------------------------------------------------
   server.tool(
     'kronos_list_bitacora_actividades',
-    'Lista el catálogo de intervenciones de la Bitácora de Proceso por empresa (alimentación de tolva, mantenimiento, refrigerio, «Otra», etc.), en el orden en que se muestran en planta, indicando si exigen observación. Por defecto solo las activas. Solo lectura.',
+    'Lista el catálogo de intervenciones de la Bitácora de Proceso por empresa (alimentación de tolva, mantenimiento, refrigerio, «Otra», etc.), en el orden en que se muestran en planta. La observación es opcional en todas. Por defecto solo las activas. Solo lectura.',
     {
       companyId: z.number().int().positive().optional().describe('Empresa a consultar; se interseca con el alcance de la key.'),
       incluirInactivas: z.boolean().optional().describe('Incluir actividades desactivadas. Por defecto false.'),
@@ -495,7 +516,7 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
         if (!args.incluirInactivas) where.push(Prisma.sql`a.activo = 1`);
         const rows = await q<Record<string, unknown>>(Prisma.sql`
           SELECT TOP 500 a.id_actividad, a.id_company, c.company, a.nombre, a.icono,
-                 a.orden, a.exige_observacion, a.activo
+                 a.orden, a.activo
           FROM ot_actividad a
           INNER JOIN company c ON c.id_company = a.id_company
           WHERE ${Prisma.join(where, ' AND ')}
@@ -508,7 +529,6 @@ export function registerBitacoraTools(server: McpServer, deps: BitacoraToolDeps)
           nombre: a.nombre,
           icono: a.icono ?? null,
           orden: num(a.orden),
-          exige_observacion: Boolean(a.exige_observacion),
           activo: Boolean(a.activo),
         }));
         return { result: { count: data.length, data }, rows: data.length };
