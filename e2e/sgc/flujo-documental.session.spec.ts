@@ -134,7 +134,8 @@ test.describe('SGC documental · Sprint 2 · paridad visual con SynerLink', () =
     // D5 (E2E 2026-10-10): «Tareas documentales» se alineó con la vista de TAREAS de la pantalla
     // unificada (mismas columnas e indicadores de tareas). La única diferencia permitida es el
     // indicador «Solicitudes Pendientes», que no aplica a una bandeja que solo tiene tareas.
-    expect(sgc.headers).toEqual(synerlink.headers);
+    // S14 (R21, decisión de Nicolás del 2026-10-13): en el SGC la columna «Asunto» se llama «Nombre del documento».
+    expect(sgc.headers).toEqual(synerlink.headers.map((h) => (h === 'Asunto' ? 'Nombre del documento' : h)));
     // (El anillo «Avance de tareas» expone su porcentaje, que depende de los datos de cada bandeja.)
     const labels = (k: string[]) => k.filter((x) => !/^\d+%$/.test(x));
     expect(labels(sgc.kpis)).toEqual(labels(synerlink.kpis).filter((k) => k !== 'Solicitudes Pendientes'));

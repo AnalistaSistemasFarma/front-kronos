@@ -77,9 +77,16 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
   const [grantExpires, setGrantExpires] = useState('');
 
   if (detail.error) {
+    // S14 (R23): quien no puede consultar el documento recibe un mensaje claro y la opción de solicitar acceso.
     return (
-      <Alert color='red' icon={<IconAlertTriangle size={18} />} title='Documento' data-testid='sgc-ficha-error'>
-        {detail.error}
+      <Alert color='orange' icon={<IconAlertTriangle size={18} />} title='Documento' data-testid='sgc-ficha-error'>
+        <Stack gap='xs'>
+          <Text size='sm'>{detail.error}</Text>
+          <Text size='sm'>Si necesita consultarlo, pida el acceso a Aseguramiento de Calidad con su justificación.</Text>
+          <Button size='xs' variant='light' w='fit-content' component={Link} href={sgcHref(`${SGC_BASE_URL}/accesos`, company.idCompany, { documento: id })} data-testid='sgc-ficha-solicitar-acceso'>
+            Solicitar acceso
+          </Button>
+        </Stack>
       </Alert>
     );
   }
@@ -242,6 +249,7 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
             fileUrl={`/api/sgc/documents/${d.idDocument}/versions/${viewing.id}/file`}
             canDownload={permissions.canDownload && viewing.isCurrent}
             canPrint={permissions.canPrint && viewing.isCurrent}
+            requestAccessHref={sgcHref(`${SGC_BASE_URL}/accesos`, company.idCompany, { documento: String(d.idDocument) })}
           />
         </Card>
       )}

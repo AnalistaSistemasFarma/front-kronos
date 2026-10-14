@@ -316,3 +316,24 @@ export function fromPlacements(placements: readonly SignatureFieldPlacement[], p
     .filter((p) => p.signerOrder >= 1 && p.signerOrder <= participants.length)
     .map((p) => ({ id: p.id, signerKey: participants[p.signerOrder - 1].key, page: p.page, x: p.x, y: p.y, width: p.width, height: p.height, label: p.label ?? null }));
 }
+
+/**
+ * S16 (R35, «menos clics»): después de ubicar la caja de una persona, la
+ * pantalla pasa sola a la SIGUIENTE persona que aún no tiene caja (en el
+ * orden de firma, dando la vuelta). Si todas tienen caja, se queda donde está.
+ */
+export function nextOrderWithoutBox(orders: readonly number[], fields: readonly Pick<SignatureFieldPlacement, 'signerOrder'>[], current: number): number {
+  const placed = new Set(fields.map((f) => f.signerOrder));
+  const sorted = [...orders].sort((a, b) => a - b);
+  const idx = sorted.indexOf(current);
+  for (let i = 1; i <= sorted.length; i++) {
+    const candidate = sorted[(idx + i + sorted.length) % sorted.length];
+    if (!placed.has(candidate)) return candidate;
+  }
+  return current;
+}
+
+/** ¿La persona `order` acaba de recibir su PRIMERA caja (para avanzar a la siguiente)? */
+export function justPlaced(before: readonly Pick<SignatureFieldPlacement, 'signerOrder'>[], after: readonly Pick<SignatureFieldPlacement, 'signerOrder'>[], order: number): boolean {
+  return !before.some((f) => f.signerOrder === order) && after.some((f) => f.signerOrder === order);
+}

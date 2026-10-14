@@ -207,6 +207,8 @@ model Department {
   sgcProcesses        SgcProcessMap[]
   sgcOwnedDocuments   SgcDocument[]
   sgcDocumentAccesses SgcDocumentAccess[]
+  // S15: líderes aprobadores por departamento (sgc.approver_authorization.id_department).
+  sgcApproverLeaders  SgcApproverAuthorization[]
 
   @@map("department")
   @@schema("dbo")
@@ -1496,6 +1498,9 @@ model SgcCompanyConfig {
   // Sprint 13: FIRMA PROPIA (cada persona registra la suya y Calidad la valida).
   // APAGADA por defecto: encenderla requiere el aval de la Dra. Adriana Cárdenas.
   self_signature_enabled     Boolean   @default(false)
+  // Generador de documentos desde plantillas aprobadas por Calidad (2026-10-10).
+  // APAGADO por defecto: lo enciende el SQL de datos de cada entorno.
+  generator_enabled          Boolean   @default(false)
 
   company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
 
@@ -1536,6 +1541,11 @@ model SgcCompanyConfig {
   // Sprint 12: aprobadores autorizados y firmantes sustitutos.
   approverAuthorizations SgcApproverAuthorization[]
   signerSubstitutions    SgcSignerSubstitution[]
+  // S16: plantillas de encabezado por tipo documental.
+  headerTemplates        SgcHeaderTemplate[]
+  // Generador de documentos (2026-10-10): plantillas y registros generados.
+  generatorTemplates     SgcGeneratorTemplate[]
+  generatedDocuments     SgcGeneratedDocument[]
 
   @@map("company_config")
   @@schema("sgc")
@@ -1638,8 +1648,15 @@ model SgcDocumentType {
   is_active         Boolean  @default(true)
   created_at        DateTime @default(now())
   updated_at        DateTime @updatedAt
+  // S16 (R31, D20): plantilla de encabezado del tipo (NULL = la por defecto de la empresa).
+  id_header_template Int?
+  // S16 (R32, D17): formatos del borrador del tipo («docx», «docx,xlsx»…; NULL = solo Word).
+  draft_extensions   String? @db.NVarChar(100)
+  /// S19 (R34): tipo de PLANTILLAS GUÍA del Generador (lo generado no lleva código documental).
+  generator_guide    Boolean @default(false, map: "document_type_generator_guide_df")
 
-  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  companyConfig  SgcCompanyConfig   @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  headerTemplate SgcHeaderTemplate? @relation(fields: [id_header_template], references: [id_header_template], onDelete: NoAction, onUpdate: NoAction)
   documents     SgcDocument[]
   // Sprint 2
   responsibles  SgcResponsibleMatrix[]
@@ -1697,6 +1714,9 @@ model SgcDocument {
   bulkUploadItems    SgcBulkUploadItem[]
   // Sprint 11: copias no controladas solicitadas.
   uncontrolledCopies SgcUncontrolledCopyRequest[]
+  // Generador de documentos (2026-10-10): plantilla que parte de este vigente y registros generados.
+  generatorTemplates SgcGeneratorTemplate[]
+  generatedDocuments SgcGeneratedDocument[]
 
   @@unique([id_company, code])
   @@index([id_company, status])
@@ -1735,6 +1755,8 @@ model SgcDocumentVersion {
   // Correcciones 2026-10-03: composición del PDF controlado (encabezado
   // institucional, posición del campo «Fecha de emisión» y firmas ubicadas).
   layout_json           String?   @db.NVarChar(Max)
+  // S16 (R33): huella SHA-256 del ARCHIVO ORIGINAL (Word o Excel) de la carga inicial.
+  source_sha256         String?   @db.Char(64)
 
   document SgcDocument @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
   // Sprint 5: avisos de vencimiento de la versión.
@@ -1849,6 +1871,10 @@ model SgcFlowVersion {
   published_by    String?   @db.NVarChar(255)
   published_at    DateTime?
   retired_at      DateTime?
+  // S15 (DOC v7): modelo de roles de la versión. NULL = calidad_asigna (hasta el
+  // DOC v6); solicitante_elabora = el solicitante elabora y asigna firmantes de su
+  // departamento y Calidad autoriza la creación (lib/sgc/flows/roleModel.ts).
+  role_model      String?   @db.NVarChar(30)
 
   process     SgcFlowProcess      @relation(fields: [id_flow_process], references: [id_flow_process], onDelete: NoAction, onUpdate: NoAction)
   tasks       SgcFlowTaskDef[]
@@ -2539,6 +2565,9 @@ model SgcTraining {
   task        SgcTask             @relation(fields: [id_task], references: [id_task], onDelete: NoAction, onUpdate: NoAction)
   uploads     SgcTrainingUpload[]
   retrainings SgcRetraining[]
+  // S17 (R30): evaluación propia de SynerLink (banco de preguntas e intentos).
+  questions   SgcTrainingQuestion[]
+  attempts    SgcTrainingAttempt[]
 
   @@index([id_request])
   @@map("training")
@@ -2960,6 +2989,8 @@ model SgcBulkUploadItem {
   id_document_version Int?
   // cargado | error
   status              String   @db.NVarChar(20)
+  // S16 (R33): formato del archivo cargado (pdf | docx | xlsx); NULL = pdf (antes del S16).
+  source_kind         String?  @db.NVarChar(10)
   warning             String?  @db.NVarChar(1000)
   error               String?  @db.NVarChar(1000)
   created_by          String   @db.NVarChar(255)
@@ -3297,9 +3328,14 @@ model SgcApproverAuthorization {
   revoked_by                String?   @db.NVarChar(255)
   revoked_at                DateTime?
   revoke_reason             String?   @db.NVarChar(1000)
+  // S15 (R19, D16): LÍDER que aprueba los documentos de un DEPARTAMENTO (flujo DOC
+  // v7). NULL = autorización por proceso del S12. La lista por departamento solo
+  // restringe si la empresa enciende el ajuste (apagado por defecto).
+  id_department             Int?
 
   companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   process       SgcProcessMap?   @relation(fields: [id_process_map], references: [id_process_map], onDelete: NoAction, onUpdate: NoAction)
+  department    Department?      @relation(fields: [id_department], references: [id_department], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([id_company, user_email])
   @@map("approver_authorization")
@@ -3481,4 +3517,210 @@ model OtFirma {
   @@unique([id_orden_trabajo, rol], map: "UQ_ot_firma_rol")
   @@map("ot_firma")
   @@schema("dbo")
+}
+
+/// S16 (R31, D20): PLANTILLA DE ENCABEZADO por tipo documental (rótulos y fila
+/// inferior del encabezado institucional). Una por defecto por empresa. No se
+/// borra: se desactiva. Cada cambio queda en sgc.config_change_log con motivo.
+model SgcHeaderTemplate {
+  id_header_template Int      @id @default(autoincrement())
+  id_company         Int
+  code               String   @db.NVarChar(30)
+  name               String   @db.NVarChar(150)
+  config_json        String   @db.NVarChar(Max)
+  is_default         Boolean  @default(false)
+  is_active          Boolean  @default(true)
+  version            Int      @default(1)
+  created_by         String   @db.NVarChar(255)
+  created_at         DateTime @default(now())
+  updated_by         String   @db.NVarChar(255)
+  updated_at         DateTime @default(now())
+
+  companyConfig SgcCompanyConfig  @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  documentTypes SgcDocumentType[]
+
+  @@unique([id_company, code])
+  @@map("header_template")
+  @@schema("sgc")
+}
+
+/// S17 (R30): PREGUNTA del banco de la evaluación propia de SynerLink (la arma
+/// el creador del documento o Calidad). Se reemplaza mientras nadie ha
+/// presentado la evaluación; con intentos, el banco queda congelado.
+model SgcTrainingQuestion {
+  id_training_question Int      @id @default(autoincrement())
+  id_training          Int
+  sort_order           Int
+  // unica | multiple | vf
+  kind                 String   @db.NVarChar(20)
+  text                 String   @db.NVarChar(1000)
+  points               Decimal  @db.Decimal(9, 2)
+  created_by           String   @db.NVarChar(255)
+  created_at           DateTime @default(now())
+
+  training SgcTraining         @relation(fields: [id_training], references: [id_training], onDelete: NoAction, onUpdate: NoAction)
+  options  SgcTrainingOption[]
+  answers  SgcTrainingAnswer[]
+
+  @@index([id_training])
+  @@map("training_question")
+  @@schema("sgc")
+}
+
+/// S17 (R30): OPCIÓN de una pregunta. «is_correct» nunca viaja al navegador del lector.
+model SgcTrainingOption {
+  id_training_option   Int     @id @default(autoincrement())
+  id_training_question Int
+  sort_order           Int
+  text                 String  @db.NVarChar(500)
+  is_correct           Boolean @default(false)
+
+  question SgcTrainingQuestion @relation(fields: [id_training_question], references: [id_training_question], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_training_question])
+  @@map("training_option")
+  @@schema("sgc")
+}
+
+/// S17 (R30): INTENTO calificado en el servidor (solo inserción, con huella).
+model SgcTrainingAttempt {
+  id_training_attempt Int      @id @default(autoincrement())
+  id_training         Int
+  user_email          String   @db.NVarChar(255)
+  attempt_number      Int
+  score               Decimal  @db.Decimal(9, 2)
+  max_score           Decimal  @db.Decimal(9, 2)
+  percent             Decimal  @db.Decimal(5, 1)
+  passed              Boolean
+  min_score_pct       Decimal  @db.Decimal(5, 2)
+  bank_sha256         String   @db.Char(64)
+  record_sha256       String   @db.Char(64)
+  submitted_at        DateTime
+  ip                  String?  @db.NVarChar(64)
+  user_agent          String?  @db.NVarChar(500)
+
+  training SgcTraining         @relation(fields: [id_training], references: [id_training], onDelete: NoAction, onUpdate: NoAction)
+  answers  SgcTrainingAnswer[]
+
+  @@unique([id_training, user_email, attempt_number])
+  @@map("training_attempt")
+  @@schema("sgc")
+}
+
+/// S17 (R30): RESPUESTA de un intento (solo inserción).
+model SgcTrainingAnswer {
+  id_training_answer   Int     @id @default(autoincrement())
+  id_training_attempt  Int
+  id_training_question Int
+  selected_json        String  @db.NVarChar(400)
+  is_correct           Boolean
+  points               Decimal @db.Decimal(9, 2)
+
+  attempt  SgcTrainingAttempt  @relation(fields: [id_training_attempt], references: [id_training_attempt], onDelete: NoAction, onUpdate: NoAction)
+  question SgcTrainingQuestion @relation(fields: [id_training_question], references: [id_training_question], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_training_attempt])
+  @@map("training_answer")
+  @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — GENERADOR DE DOCUMENTOS desde plantillas aprobadas por
+// Calidad (2026-10-10; ver lib/sgc/generator.ts). La plantilla parte de un
+// documento VIGENTE (Word o editor) con campos {{CAMPO:Etiqueta}}; cada
+// configuración es una versión que congela contenido y campos y que aprueba
+// SOLO Aseguramiento de Calidad. Lo generado es un REGISTRO inmutable con su
+// propio consecutivo. Nada se borra (triggers).
+// ---------------------------------------------------------------------------
+model SgcGeneratorTemplate {
+  id_template        Int       @id @default(autoincrement())
+  id_company         Int
+  id_document        Int
+  name               String    @db.NVarChar(300)
+  description        String?   @db.NVarChar(1000)
+  // activa | retirada
+  status             String    @default("activa") @db.NVarChar(20)
+  // Versión APROBADA vigente de la configuración (sin relación: la escribe el código al aprobar).
+  current_version_id Int?
+  // Último consecutivo de registro emitido (se incrementa bajo bloqueo).
+  last_sequence      Int       @default(0)
+  created_by         String    @db.NVarChar(255)
+  created_at         DateTime
+  retired_by         String?   @db.NVarChar(255)
+  retired_at         DateTime?
+  retire_reason      String?   @db.NVarChar(1000)
+
+  companyConfig SgcCompanyConfig              @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  document      SgcDocument                   @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+  versions      SgcGeneratorTemplateVersion[]
+  generated     SgcGeneratedDocument[]
+
+  @@unique([id_company, id_document])
+  @@map("generator_template")
+  @@schema("sgc")
+}
+
+model SgcGeneratorTemplateVersion {
+  id_template_version Int       @id @default(autoincrement())
+  id_template         Int
+  version_number      Int
+  // pendiente | aprobada | rechazada | reemplazada
+  status              String    @default("pendiente") @db.NVarChar(20)
+  // Versión del documento de origen cuyo contenido se congeló.
+  id_document_version Int
+  // Contenido congelado (HTML limpio con las marcas) y su huella. INMUTABLE (trigger).
+  body_html           String    @db.NVarChar(Max)
+  body_sha256         String    @db.Char(64)
+  // Campos editables (JSON: clave, etiqueta, tipo, obligatorio, largo, ayuda). INMUTABLE.
+  fields_json         String    @db.NVarChar(Max)
+  change_reason       String    @db.NVarChar(1000)
+  proposed_by         String    @db.NVarChar(255)
+  proposed_at         DateTime
+  decided_by          String?   @db.NVarChar(255)
+  decided_at          DateTime?
+  decision_reason     String?   @db.NVarChar(1000)
+
+  template  SgcGeneratorTemplate   @relation(fields: [id_template], references: [id_template], onDelete: NoAction, onUpdate: NoAction)
+  generated SgcGeneratedDocument[]
+
+  @@unique([id_template, version_number])
+  @@index([id_template, status])
+  @@map("generator_template_version")
+  @@schema("sgc")
+}
+
+model SgcGeneratedDocument {
+  id_generated        Int       @id @default(autoincrement())
+  id_company          Int
+  id_template         Int
+  id_template_version Int
+  id_document         Int
+  id_document_version Int
+  sequence_number     Int
+  code                String    @db.NVarChar(80)
+  // Valores de los campos (JSON). INMUTABLE (trigger).
+  values_json         String    @db.NVarChar(Max)
+  pdf_item_id         String    @db.NVarChar(200)
+  pdf_path            String    @db.NVarChar(600)
+  pdf_sha256          String    @db.Char(64)
+  pdf_size            Int
+  // emitido | anulado
+  status              String    @default("emitido") @db.NVarChar(20)
+  generated_by        String    @db.NVarChar(255)
+  generated_at        DateTime
+  ip                  String?   @db.NVarChar(64)
+  annulled_by         String?   @db.NVarChar(255)
+  annulled_at         DateTime?
+  annul_reason        String?   @db.NVarChar(1000)
+
+  companyConfig   SgcCompanyConfig            @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  template        SgcGeneratorTemplate        @relation(fields: [id_template], references: [id_template], onDelete: NoAction, onUpdate: NoAction)
+  templateVersion SgcGeneratorTemplateVersion @relation(fields: [id_template_version], references: [id_template_version], onDelete: NoAction, onUpdate: NoAction)
+  document        SgcDocument                 @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_company, code])
+  @@unique([id_template, sequence_number])
+  @@index([id_company, generated_by])
+  @@map("generated_document")
+  @@schema("sgc")
 }
