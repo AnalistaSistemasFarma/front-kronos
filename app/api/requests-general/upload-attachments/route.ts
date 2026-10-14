@@ -10,6 +10,9 @@ import {
 } from '@/lib/onedrive/graphFolderUpload';
 import { sanitizeOneDriveName } from '@/lib/onedriveName';
 
+const STORAGE_PATHS = new Set(['SG', 'MA']);
+const ENTITY_TYPES = new Set(['Request', 'Ticket']);
+
 /**
  * Sube adjuntos a OneDrive (servidor → Graph), ruta:
  * SAPSEND/TEC/<storagePath>/<entityType>-<requestId>
@@ -30,6 +33,10 @@ export async function POST(req: Request) {
 
     if (!Number.isInteger(requestId) || requestId <= 0) {
       return NextResponse.json({ error: 'requestId inválido' }, { status: 400 });
+    }
+    // Solo las carpetas de adjuntos de SynerLink (no cualquier ruta de OneDrive).
+    if (!STORAGE_PATHS.has(storagePath) || !ENTITY_TYPES.has(entityType)) {
+      return NextResponse.json({ error: 'Carpeta no válida' }, { status: 400 });
     }
 
     const rawFiles = form.getAll('files');

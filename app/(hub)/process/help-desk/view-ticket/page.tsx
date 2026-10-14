@@ -2,8 +2,6 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
-import axios from 'axios';
 import { useSession } from 'next-auth/react';
 import toast from 'react-hot-toast';
 import {
@@ -205,7 +203,7 @@ function ViewTicketPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
-  const [folderContents, setFolderContents] = useState([]);
+  const [folderContents, setFolderContents] = useState<FolderFile[]>([]);
   const [newNote, setNewNote] = useState('');
   const [loadingNotes, setLoadingNotes] = useState(false);
   const [showResolution, setShowResolution] = useState(false);
@@ -593,54 +591,23 @@ function ViewTicketPage() {
     }
   };
 
-  async function GetToken() {
-    const token = await getMicrosoftToken();
-
-    try {
-      const response = await axios.get(
-        `https://graph.microsoft.com/v1.0/drive/special/documents/children`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      const data = response.data;
-      console.log(data);
-    } catch (error) {
-      console.log(error);
-    }
-  }
-
   const fetchFolderContents = async () => {
     if (!ticket?.id_case) return;
 
-    const folderName = `Ticket-${ticket.id_case}`;
     try {
-      const token = await getMicrosoftToken();
-      if (!token) {
-        throw new Error('No se pudo obtener el token de acceso.');
+      // Lista el servidor (Ticket-<id> en MA): el token de Graph no sale del servidor.
+      const response = await fetch(
+        `/api/requests-general/list-attachments?requestId=${encodeURIComponent(String(ticket.id_case))}&storagePath=MA&entityType=Ticket`
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        files?: FolderFile[];
+      };
+      if (!response.ok) {
+        throw new Error(data.error || `Error listando adjuntos (HTTP ${response.status})`);
       }
-
-      const response = await axios.get(
-        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}:/children`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      const files = response.data.value.filter(
-        (item: Record<string, unknown>) => 'file' in item && !!item.file
-      );
-      setFolderContents(files);
+      setFolderContents(Array.isArray(data.files) ? data.files : []);
     } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        setFolderContents([]);
-        return;
-      }
       console.error('Error al listar los archivos de la carpeta:', error);
       setFolderContents([]);
     }

@@ -2,8 +2,6 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
-import axios from 'axios';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { useSession } from 'next-auth/react';

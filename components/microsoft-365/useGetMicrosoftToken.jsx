@@ -1,5 +1,8 @@
-'use server';
-
+// Solo servidor. NO usar 'use server': lo convierte en una acción que cualquier navegador puede
+// invocar (incluso sin sesión) para obtener el token de Graph de la aplicación. El navegador usa
+// /api/requests-general/{list,upload}-attachments y attachment-file. `server-only` hace fallar el
+// build si un componente cliente lo importa.
+import 'server-only';
 import axios from 'axios';
 
 // Datos de la app registrados en Azure

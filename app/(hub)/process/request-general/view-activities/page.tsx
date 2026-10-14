@@ -2,7 +2,6 @@
 
 import { Suspense, useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 import axios from 'axios';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -992,64 +991,6 @@ function ViewRequestPage() {
     [modalBusinessTasks]
   );
 
-  async function CheckOrCreateFolderAndUpload(
-    folderName: string,
-    files: { file: File }[],
-    token: string
-  ) {
-    let folderId: string;
-
-    try {
-      const getResponse = await axios.get(
-        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/SG/${folderName}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      if (getResponse.status === 200) {
-        folderId = (getResponse.data as { id: string }).id;
-      } else {
-        throw new Error('Error al verificar la existencia de la carpeta.');
-      }
-    } catch (getError: unknown) {
-      if (getError instanceof Error) {
-        console.error(getError.message);
-      } else {
-        console.error(getError);
-      }
-    }
-
-    if (files && files.length > 0) {
-      const uploadPromises = files.map((file: { file: File }) =>
-        axios.put(
-          `${process.env.MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${file.file.name}:/content`,
-          file.file,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': file.file.type,
-            },
-          }
-        )
-      );
-
-      const results = await Promise.all(uploadPromises);
-
-      results.forEach((response, index) => {
-        if (response.status === 201 || response.status === 200) {
-          console.log(`Archivo subido: ${files[index].file.name}`, response.data);
-        } else {
-          console.log(`Error al subir el archivo: ${files[index].file.name}`);
-        }
-      });
-    } else {
-      console.log('No hay archivos seleccionados para subir.');
-    }
-  }
-
   const handleStartEditing = () => {
     setOriginalRequest(request);
     setIsEditing(true);
@@ -1179,22 +1120,7 @@ function ViewRequestPage() {
     }
 
     try {
-      if (attachedFiles.length > 0) {
-        const token = await getMicrosoftToken();
-        if (!token) {
-          throw new Error('No se pudo obtener el token de acceso para subir archivos.');
-        }
-
-        const folderName = `Request-${request?.id_request_general}`;
-        const filesToUpload = attachedFiles
-          .filter((file) => file.status === 'success')
-          .map((file) => ({ file: file.file }));
-
-        if (filesToUpload.length > 0) {
-          await CheckOrCreateFolderAndUpload(folderName, filesToUpload, token);
-        }
-      }
-
+      // Los adjuntos ya los subió FileUpload por el servidor al elegirlos (autoUpload).
       const updateData = {
         id: request?.id,
 
