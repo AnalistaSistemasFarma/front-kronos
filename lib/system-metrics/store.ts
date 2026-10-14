@@ -650,7 +650,8 @@ export type UserRankingRow = {
 };
 
 /** Usuarios ordenados por tiempo de servidor consumido en el rango. */
-export async function readUserRanking(pool: Pool, range: RangeKey, limit = 100): Promise<UserRankingRow[]> {
+// Tope alto a propósito: el monitor muestra a TODAS las personas con actividad en el rango.
+export async function readUserRanking(pool: Pool, range: RangeKey, limit = 2000): Promise<UserRankingRow[]> {
   const { minutes } = RANGES[range];
   const r = await pool.request().input('minutes', sql.Int, minutes).query(`
       SELECT user_email, MAX(user_name) AS user_name, top_module,
@@ -862,6 +863,36 @@ export async function insertAlert(pool: Pool, raisedAt: Date, host: string, w: E
       ) VALUES (
         @raised_at, @host, @alert_key, @rule, @severity, @title, @happening, @why, @risk, @action, @notified
       )`);
+}
+
+// ---------------------------------------------------------------------------
+// Quién recibe las alertas (tabla de 2026-10-09-system-metrics-alertas-suscriptores.sql)
+// Nadie las recibe hasta activar «Recibir alertas» en el monitor.
+// ---------------------------------------------------------------------------
+
+/** Correos (en minúsculas) que activaron «Recibir alertas». */
+export async function readAlertSubscribers(pool: Pool): Promise<Set<string>> {
+  const r = await pool.request().query(`SELECT email FROM dbo.system_metric_alert_subscriber`);
+  return new Set(r.recordset.map((row) => String(row.email).trim().toLowerCase()).filter(Boolean));
+}
+
+export async function isAlertSubscriber(pool: Pool, email: string): Promise<boolean> {
+  const r = await pool
+    .request()
+    .input('email', sql.NVarChar(320), email.trim().toLowerCase().slice(0, 320))
+    .query(`SELECT 1 AS yes FROM dbo.system_metric_alert_subscriber WHERE email = @email`);
+  return r.recordset.length > 0;
+}
+
+export async function setAlertSubscription(pool: Pool, email: string, enabled: boolean): Promise<void> {
+  const request = pool.request().input('email', sql.NVarChar(320), email.trim().toLowerCase().slice(0, 320));
+  if (enabled) {
+    await request.query(`
+      IF NOT EXISTS (SELECT 1 FROM dbo.system_metric_alert_subscriber WHERE email = @email)
+        INSERT INTO dbo.system_metric_alert_subscriber (email) VALUES (@email)`);
+  } else {
+    await request.query(`DELETE FROM dbo.system_metric_alert_subscriber WHERE email = @email`);
+  }
 }
 
 function nullableNumber(value: unknown): number | null {

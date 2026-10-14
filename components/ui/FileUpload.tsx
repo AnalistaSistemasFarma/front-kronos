@@ -24,9 +24,6 @@ import {
   IconCheck,
   IconCloudUpload,
 } from '@tabler/icons-react';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../microsoft-365/useGetMicrosoftToken';
-import { sanitizeOneDriveName } from '../../lib/onedriveName';
-import { ensureOneDriveFolderPath, uploadFileToOneDriveFolder } from '../../lib/onedrive/graphFolderUpload';
 import toast from 'react-hot-toast';
 
 export interface UploadedFile {
@@ -57,11 +54,6 @@ interface FileUploadProps {
   storagePath?: string;
   entityType?: string;
   autoUpload?: boolean;
-  /**
-   * Si true (default), sube vía API servidor → OneDrive (más fiable).
-   * Si false, usa Graph directo desde el navegador (legado).
-   */
-  useServerUpload?: boolean;
 }
 
 const ALLOWED_TYPES = [
@@ -87,7 +79,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
   storagePath = 'MA',
   entityType = 'Ticket',
   autoUpload = true,
-  useServerUpload = true,
 }) => {
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -150,37 +141,27 @@ const FileUpload: React.FC<FileUploadProps> = ({
         prev.map((f) => (f.id === fileId ? { ...f, status: 'uploading', progress: 0 } : f))
       );
 
-      let graphItem: UploadedFile['graphItem'];
+      // Siempre por el servidor: el token de Graph nunca llega al navegador.
+      const form = new FormData();
+      form.append('requestId', String(ticketId));
+      form.append('storagePath', storagePath);
+      form.append('entityType', entityType);
+      form.append('files', file, file.name);
 
-      if (useServerUpload) {
-        const form = new FormData();
-        form.append('requestId', String(ticketId));
-        form.append('storagePath', storagePath);
-        form.append('entityType', entityType);
-        form.append('files', file, file.name);
-
-        const res = await fetch('/api/requests-general/upload-attachments', {
-          method: 'POST',
-          body: form,
-        });
-        const data = (await res.json().catch(() => ({}))) as {
-          error?: string;
-          uploaded?: UploadedFile['graphItem'][];
-        };
-        if (!res.ok) {
-          throw new Error(data.error || `Error al subir el archivo (HTTP ${res.status})`);
-        }
-        graphItem = data.uploaded?.[0];
-        if (!graphItem?.id) {
-          throw new Error(data.error || 'El servidor no confirmó el archivo en OneDrive');
-        }
-      } else {
-        const token = await getMicrosoftToken();
-        if (!token) {
-          throw new Error('No se pudo obtener el token de acceso');
-        }
-        const folderName = `${entityType}-${ticketId}`;
-        await CheckOrCreateFolderAndUpload(folderName, [{ file }], token, storagePath);
+      const res = await fetch('/api/requests-general/upload-attachments', {
+        method: 'POST',
+        body: form,
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        uploaded?: UploadedFile['graphItem'][];
+      };
+      if (!res.ok) {
+        throw new Error(data.error || `Error al subir el archivo (HTTP ${res.status})`);
+      }
+      const graphItem = data.uploaded?.[0];
+      if (!graphItem?.id) {
+        throw new Error(data.error || 'El servidor no confirmó el archivo en OneDrive');
       }
 
       setFiles((prev) =>
@@ -198,9 +179,13 @@ const FileUpload: React.FC<FileUploadProps> = ({
         graphItem,
       };
       queueMicrotask(() => {
-        onUploadCompleteRef.current?.(completed);
+        const onComplete = onUploadCompleteRef.current;
+        onComplete?.(completed);
         toast.success(`Documento adjunto: ${file.name}`);
-        // Limpiar de la cola de subida tras éxito: la tabla de adjuntos es la fuente de verdad.
+        // Limpiar de la cola de subida tras éxito solo si la pantalla refresca su tabla de
+        // adjuntos (onUploadComplete): ahí la tabla es la fuente de verdad. Sin ese refresco,
+        // quitarlo de la cola hacía que el archivo "desapareciera" hasta recargar la página.
+        if (!onComplete) return;
         window.setTimeout(() => {
           setFiles((prev) => prev.filter((f) => f.id !== fileId || f.status !== 'success'));
         }, 1200);
@@ -223,42 +208,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
       );
     } finally {
       clearInterval(progressInterval);
-    }
-  };
-
-  // Ruta base histórica de este componente (tickets de SAPSEND). La lógica de
-  // "obtener o crear carpeta anidada + subir archivo" ahora vive en
-  // lib/onedrive/graphFolderUpload.ts (genérica, por segmentos de ruta), para
-  // que otros módulos (p.ej. el chat o el SGC documental) puedan reusarla sin duplicar
-  // las llamadas a Graph. El comportamiento para este componente no cambia:
-  // sigue subiendo a SAPSEND/TEC/<storagePath>/<folderName>.
-  const CheckOrCreateFolderAndUpload = async (
-    folderName: string,
-    files: { file: File }[],
-    token: string,
-    storagePath: string
-  ) => {
-    try {
-      const folderId = await ensureOneDriveFolderPath(token, ['SAPSEND', 'TEC', storagePath, folderName]);
-
-      // Subir archivos a la carpeta
-      if (files && files.length > 0) {
-        const uploadPromises = files.map((fileWrapper) => {
-          const uploadName = sanitizeOneDriveName(fileWrapper.file.name);
-          return uploadFileToOneDriveFolder(
-            token,
-            folderId,
-            uploadName,
-            fileWrapper.file,
-            fileWrapper.file.type
-          );
-        });
-
-        await Promise.all(uploadPromises);
-      }
-    } catch (error) {
-      console.error('Error en la operación:', error);
-      throw error;
     }
   };
 

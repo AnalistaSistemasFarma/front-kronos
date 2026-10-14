@@ -20,7 +20,7 @@ const DETAIL_BLOCKS: Array<{ field: 'happening' | 'why' | 'risk' | 'action'; lab
 
 /**
  * Historial de alertas tempranas (lib/system-metrics/earlyWarnings.ts). Cada alerta se envió por
- * campana y push a quienes tienen el módulo; aquí se lee el detalle completo.
+ * campana y push a quienes activaron «Recibir alertas»; aquí se lee el detalle completo.
  */
 export function EarlyWarnings({
   alerts,

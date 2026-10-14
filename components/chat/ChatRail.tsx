@@ -29,7 +29,11 @@ import {
   IconSearch,
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
-import AgentChatPanel from './AgentChatPanel';
+import dynamic from 'next/dynamic';
+
+// El panel (hilo, editor, voz, markdown) solo se descarga al abrir un asistente: la barra
+// va en la cabecera de TODAS las páginas.
+const AgentChatPanel = dynamic(() => import('./AgentChatPanel'), { ssr: false });
 import { useChatOverview } from './useChatOverview';
 import { useChatPins } from './useChatPins';
 import { useTituloDeEstado } from './useTituloDeEstado';
@@ -319,6 +323,9 @@ export default function ChatRail() {
   const [drawerAbierto, setDrawerAbierto] = useState(false);
   const [busqueda, setBusqueda] = useState('');
   const [openAgentId, setOpenAgentId] = useState<number | null>(null);
+  // Tras abrirlo una vez se queda montado (conserva la animación de cierre y el estado).
+  const [panelUsado, setPanelUsado] = useState(false);
+  if (openAgentId !== null && !panelUsado) setPanelUsado(true);
   const buscadorRef = useRef<HTMLInputElement>(null);
   const enfocarBuscador = useRef(false);
 
@@ -516,7 +523,7 @@ export default function ChatRail() {
     </Tooltip>
   );
 
-  const panel = (
+  const panel = panelUsado && (
     <AgentChatPanel
       agent={openAgent}
       status={openAgent ? overview.statusByAgent.get(openAgent.idAgent) ?? null : null}
