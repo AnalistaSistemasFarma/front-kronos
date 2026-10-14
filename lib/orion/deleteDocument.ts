@@ -1,3 +1,4 @@
+import { oneDriveRoot } from '@/lib/onedrive/root';
 import 'server-only';
 import sql from 'mssql';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/microsoft-365/useGetMicrosoftToken.jsx';
@@ -22,7 +23,7 @@ type SqlPool = import('mssql').ConnectionPool;
 
 /** Carpeta de adjuntos de la solicitud general (igual que list-attachments / attachment-file). */
 function requestFolderSegments(requestId: number): string[] {
-  return ['SAPSEND', 'TEC', 'SG', `Request-${requestId}`];
+  return [oneDriveRoot(), 'TEC', 'SG', `Request-${requestId}`];
 }
 
 export type DeleteRequestDocumentResult = {

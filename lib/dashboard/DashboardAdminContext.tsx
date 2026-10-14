@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useSession } from 'next-auth/react';
+import { fetchWithRetry } from '../navigation/fetchWithRetry';
 
 export interface DashboardAdminContextValue {
   isDashboardAdmin: boolean;
@@ -18,7 +19,8 @@ export interface DashboardAdminContextValue {
 const DashboardAdminContext = createContext<DashboardAdminContextValue | null>(null);
 
 async function fetchDashboardAccess(): Promise<boolean> {
-  const res = await fetch('/api/dashboard/access', { credentials: 'same-origin' });
+  // Con reintento: una falla temporal al entrar se tomaba como "no es admin" y mandaba a Procesos.
+  const res = await fetchWithRetry('/api/dashboard/access', { credentials: 'same-origin' });
   if (res.status === 401) return false;
   if (!res.ok) return false;
   const data = await res.json();

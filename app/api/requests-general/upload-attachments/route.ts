@@ -1,3 +1,4 @@
+import { oneDriveRoot } from '@/lib/onedrive/root';
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
@@ -9,6 +10,9 @@ import {
   uploadFileToOneDriveFolder,
 } from '@/lib/onedrive/graphFolderUpload';
 import { sanitizeOneDriveName } from '@/lib/onedriveName';
+
+const STORAGE_PATHS = new Set(['SG', 'MA']);
+const ENTITY_TYPES = new Set(['Request', 'Ticket']);
 
 /**
  * Sube adjuntos a OneDrive (servidor → Graph), ruta:
@@ -30,6 +34,10 @@ export async function POST(req: Request) {
 
     if (!Number.isInteger(requestId) || requestId <= 0) {
       return NextResponse.json({ error: 'requestId inválido' }, { status: 400 });
+    }
+    // Solo las carpetas de adjuntos de SynerLink (no cualquier ruta de OneDrive).
+    if (!STORAGE_PATHS.has(storagePath) || !ENTITY_TYPES.has(entityType)) {
+      return NextResponse.json({ error: 'Carpeta no válida' }, { status: 400 });
     }
 
     const rawFiles = form.getAll('files');
@@ -55,7 +63,7 @@ export async function POST(req: Request) {
     }
 
     const folderName = `${entityType}-${requestId}`;
-    const folderSegments = ['SAPSEND', 'TEC', storagePath, folderName];
+    const folderSegments = [oneDriveRoot(), 'TEC', storagePath, folderName];
     const folderId = await ensureOneDriveFolderPath(token, folderSegments);
     const existingNames = await listOneDriveFolderFileNames(token, folderSegments);
 
@@ -83,12 +91,15 @@ export async function POST(req: Request) {
           continue;
         }
 
+        // 'rename': si otra subida simultánea ya tomó este nombre, OneDrive le pone uno
+        // distinto en vez de responder 409 (pasaba al reintentar mientras la primera seguía).
         const item = await uploadFileToOneDriveFolder(
           token,
           folderId,
           uploadName,
           bytes,
-          file.type || 'application/octet-stream'
+          file.type || 'application/octet-stream',
+          'rename'
         );
 
         const size =
@@ -113,7 +124,7 @@ export async function POST(req: Request) {
         });
 
         console.log(
-          `[upload-attachments] OK request=${requestId} folder=${folderName} name=${uploadName} bytes=${bytes.byteLength} id=${item.id}`
+          `[upload-attachments] OK request=${requestId} folder=${folderName} name=${item.name || uploadName} bytes=${bytes.byteLength} id=${item.id}`
         );
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Error al subir';
@@ -131,7 +142,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      folder: `SAPSEND/TEC/${storagePath}/${folderName}`,
+      folder: `${oneDriveRoot()}/TEC/${storagePath}/${folderName}`,
       uploaded,
       errors: errors.length ? errors : undefined,
     });

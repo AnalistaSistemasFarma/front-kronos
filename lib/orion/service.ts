@@ -1000,6 +1000,12 @@ export async function applyOrionWebhookToRequest(
   let tasksUpdated = 0;
   const requestClosed = false;
 
+  // Auth Kronos del siguiente firmante SOLO al avanzar de turno (alguien acaba de firmar).
+  // Antes se abría en cada sync EN_PROCESO y, como findExisting ignoraba status=2,
+  // recreaba PENDIENTE → bucle Autorizaciones ↔ Firmar.
+  const turnAdvanced = newlyCompletedSigners(previousSigners, state.signers).length > 0;
+
+  // Un webhook repetido sin cambio de estado ni de turno no reabre la tarea que el usuario cerró.
   const syncResult = await syncOrionSignerTasks(pool, {
     requestId: params.requestId,
     state,
@@ -1008,14 +1014,10 @@ export async function applyOrionWebhookToRequest(
     documentStatus: statusUpper,
     fileId,
     fileName: state.fileName,
+    allowOpen: statusChanged || turnAdvanced,
   });
 
   tasksUpdated += syncResult.tasksClosed + syncResult.tasksOpened;
-
-  // Auth Kronos del siguiente firmante SOLO al avanzar de turno (alguien acaba de firmar).
-  // Antes se abría en cada sync EN_PROCESO y, como findExisting ignoraba status=2,
-  // recreaba PENDIENTE → bucle Autorizaciones ↔ Firmar.
-  const turnAdvanced = newlyCompletedSigners(previousSigners, state.signers).length > 0;
   if (
     turnAdvanced &&
     statusUpper !== 'RECHAZADO' &&
