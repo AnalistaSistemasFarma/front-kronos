@@ -1258,7 +1258,7 @@ function RequestBoard() {
 
           {/* Móvil: tarjetas apiladas en lugar de la tabla ancha */}
           <Stack gap='xs' hiddenFrom='md' data-testid='assigned-mobile-list'>
-            {visibleItems.length === 0 ? (
+            {pageItems.length === 0 ? (
               <Text size='sm' c='dimmed' ta='center' py='xl'>
                 {typeFilter === 'tasks'
                   ? 'No se encontraron tareas asignadas'
