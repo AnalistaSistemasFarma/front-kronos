@@ -343,7 +343,7 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     await expect(createRequest(prisma, notifier, await accessOf(E.lector), base, actor(E.lector))).rejects.toMatchObject({ status: 403 });
     const solAccess = await accessOf(E.sol);
     await expect(createRequest(prisma, notifier, solAccess, { ...base, requestType: 'anulacion' }, actor(E.sol))).rejects.toThrow(/Tipo de solicitud/);
-    await expect(createRequest(prisma, notifier, solAccess, { ...base, subject: 'x' }, actor(E.sol))).rejects.toThrow(/nombre del documento/);
+    await expect(createRequest(prisma, notifier, solAccess, { ...base, subject: 'x' }, actor(E.sol))).rejects.toThrow(/asunto/);
     await expect(createRequest(prisma, notifier, solAccess, { ...base, description: 'corta' }, actor(E.sol))).rejects.toThrow(/justificación/);
     await expect(createRequest(prisma, notifier, solAccess, { ...base, formValues: {} }, actor(E.sol))).rejects.toThrow(/Prioridad/);
     await expect(createRequest(prisma, notifier, solAccess, { ...base, formValues: { urgencia: 'Inventada' } }, actor(E.sol))).rejects.toThrow(/opción no permitida/);
@@ -581,7 +581,7 @@ describe.skipIf(!url)('SGC · Sprint 2 · flujos, tareas y autorizaciones con SQ
     await expect(decideTask(prisma, notifier, apr.id_task, { decision: 'aprobar' }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
     await decideTask(prisma, notifier, apr.id_task, { decision: 'aprobar', signature: await sig(apr.id_task) }, actor(E.rev1));
     const detailCal = await getTaskDetail(prisma, apr.id_task, await viewer(E.cal));
-    expect(detailCal.tasks.find((t) => t.id === apr.id_task)!.myAction).toEqual({ idAssignee: expect.any(Number), kind: 'decidir', signatureMeaning: 'aprobo', checklist: [], qualityVerification: true });
+    expect(detailCal.tasks.find((t) => t.id === apr.id_task)!.myAction).toEqual({ idAssignee: expect.any(Number), kind: 'decidir', signatureMeaning: 'aprobo', checklist: [] });
     await expect(decideTask(prisma, notifier, apr.id_task, { decision: 'aprobar' }, actor(E.elab))).rejects.toMatchObject({ status: 403 });
     // 2026-10-05: quien hizo la solicitud no toma el cupo de Calidad de su propia solicitud aunque esté en el grupo.
     const calidadType = (await listAuthorizationTypes(prisma, CO)).find((x) => x.code === 'SGC-VERIF-CALIDAD')!;

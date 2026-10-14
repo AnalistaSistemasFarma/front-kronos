@@ -9,7 +9,6 @@ import {
   IconChecklist,
   IconCopy,
   IconFileCertificate,
-  IconFileExport,
   IconFilePlus,
   IconFileUpload,
   IconGitBranch,
@@ -47,7 +46,7 @@ const DIMENSIONES = [
   { value: 'capacitacion', label: 'Capacitación', enabled: false },
 ] as const;
 
-function accesosDocumentos(company: SgcCompanyAccess, selfSignature = false, generator = false): SgcModuleCardProps[] {
+function accesosDocumentos(company: SgcCompanyAccess, selfSignature = false): SgcModuleCardProps[] {
   const id = company.idCompany;
   const cards: SgcModuleCardProps[] = [
     {
@@ -99,19 +98,6 @@ function accesosDocumentos(company: SgcCompanyAccess, selfSignature = false, gen
       sprint: 'Sprint 11',
       href: sgcHref(`${SGC_BASE_URL}/copias`, id),
     },
-    // 2026-10-10: «Generador de documentos» solo cuando la empresa lo encendió.
-    ...(generator
-      ? [
-          {
-            title: 'Generador de documentos',
-            description: 'Genere cartas, políticas y otros documentos desde plantillas aprobadas por Calidad, llenando solo los campos permitidos.',
-            icon: <IconFileExport size={24} />,
-            sprint: 'Generador',
-            href: sgcHref(`${SGC_BASE_URL}/generador`, id),
-            ...(company.canQuality ? { badge: 'Calidad aprueba' } : {}),
-          },
-        ]
-      : []),
     // Sprint 13: «Mi firma» solo cuando la empresa encendió la firma propia (aval de Adriana Cárdenas).
     ...(selfSignature
       ? [
@@ -203,10 +189,9 @@ function accesosDocumentos(company: SgcCompanyAccess, selfSignature = false, gen
 
 function DocumentCards({ company }: { company: SgcCompanyAccess }) {
   const own = useSgcFetch<{ enabled: boolean }>(`/api/sgc/signature/own?company=${company.idCompany}`);
-  const generator = useSgcFetch<{ enabled: boolean }>(`/api/sgc/generator?company=${company.idCompany}`);
   return (
     <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing='lg'>
-      {accesosDocumentos(company, Boolean(own.data?.enabled), Boolean(generator.data?.enabled)).map((a) => (
+      {accesosDocumentos(company, Boolean(own.data?.enabled)).map((a) => (
         <SgcModuleCard key={a.title} {...a} />
       ))}
     </SimpleGrid>

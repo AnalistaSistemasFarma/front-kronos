@@ -33,7 +33,7 @@ function RequestList({ company }: { company: SgcCompanyAccess }) {
           <Table.Thead>
             <Table.Tr>
               <Table.Th>ID</Table.Th>
-              <Table.Th>Nombre del documento</Table.Th>
+              <Table.Th>Asunto</Table.Th>
               <Table.Th>Tipo</Table.Th>
               <Table.Th>Paso actual</Table.Th>
               <Table.Th>Elaborador</Table.Th>

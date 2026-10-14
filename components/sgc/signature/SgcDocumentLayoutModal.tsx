@@ -7,8 +7,6 @@ import { IconCircleCheckFilled, IconDeviceFloppy } from '@tabler/icons-react';
 import {
   SGC_FIELD_KIND,
   fromPlacements,
-  justPlaced,
-  nextOrderWithoutBox,
   toPlacements,
   type SgcPlacementParticipant,
   type SgcStoredField,
@@ -29,12 +27,6 @@ import SgcSignersPlacementList from './SgcSignersPlacementList';
  * controlado. Lo propio del SGC: el documento es la VISTA PREVIA del
  * documento final (/api/sgc/requests/<id>/layout/preview) y se guarda en
  * /api/sgc/requests/<id>/layout (no en Orión).
- *
- * S16 (R35, D22): el área del documento es más grande (la página se muestra
- * hasta 1.000 px de ancho, también en SynerLink: el cambio se hizo en ambos
- * lienzos y la prueba de paridad sigue igual) y hay menos clics: al ubicar la
- * caja de una persona se pasa sola a la siguiente sin caja (solo en este
- * contenedor; no cambia el marcado compartido).
  */
 
 export interface SgcLayoutData {
@@ -98,15 +90,11 @@ export default function SgcDocumentLayoutModal({ opened, onClose, layout, onSave
     setError(null);
   }, [opened, initial]);
 
-  // S16 (R35, «menos clics»): al ubicar la primera caja de una persona, pasa sola a la siguiente sin caja.
-  // Es comportamiento del contenedor del SGC: el lienzo y la lista conservan el marcado de SynerLink (prueba de paridad).
   const handlePlacementChange = useCallback(
     (next: SignatureFieldPlacement[]) => {
-      if (!layout.canEdit) return;
-      if (justPlaced(fields, next, activeOrder)) setActiveOrder(nextOrderWithoutBox(persons.map((p) => p.order), next, activeOrder));
-      setFields(next);
+      if (layout.canEdit) setFields(next);
     },
-    [layout.canEdit, activeOrder, persons, fields]
+    [layout.canEdit]
   );
 
   const placedCount = persons.filter((p) => fields.some((f) => f.signerOrder === p.order)).length;

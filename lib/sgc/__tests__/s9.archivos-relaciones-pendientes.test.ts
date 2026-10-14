@@ -29,9 +29,7 @@ describe('SGC · S9 · carga masiva de PDF por código', () => {
     expect(matchBulkFile('olp-gcc-02-fo01_recoleccion_devoluciones.PDF', docs)).toMatchObject({ idDocument: 2, status: 'cargable', warning: null });
     expect(matchBulkFile('C:\\Calidad\\OLP-GCC-02.pdf', docs)).toMatchObject({ idDocument: 1, similarity: null, warning: null });
     expect(matchBulkFile('OLP-GCC-021 otro.pdf', docs)).toMatchObject({ status: 'error', error: expect.stringContaining('no empieza con el código') });
-    // S16 (R33): también Word y Excel; otro formato, no.
-    expect(matchBulkFile('OLP-GCC-02.docx', docs)).toMatchObject({ status: 'cargable', idDocument: 1 });
-    expect(matchBulkFile('OLP-GCC-02.odt', docs)).toMatchObject({ status: 'error', error: 'Solo se cargan archivos PDF, Word (.docx) o Excel (.xlsx).' });
+    expect(matchBulkFile('OLP-GCC-02.docx', docs)).toMatchObject({ status: 'error', error: 'Solo se cargan archivos PDF.' });
     expect(matchBulkFile('OLP-DT-01 Manual.pdf', docs)).toMatchObject({ status: 'error', error: expect.stringContaining('ya tiene su archivo') });
     expect(matchBulkFile('OLP-DT-09.pdf', docs)).toMatchObject({ status: 'error', error: expect.stringContaining('anulado') });
   });

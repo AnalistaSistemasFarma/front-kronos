@@ -232,9 +232,8 @@ function AuthorizationBoard() {
     setBusy(true);
     setMsg(null);
     try {
-      const res = await sgcSend<{ outcome?: string }>(`/api/sgc/authorizations/${row.id}/decision`, 'POST', { decision, comment });
-      // S15 (R15): rechazar la autorización de la CREACIÓN cierra la solicitud (no vuelve a elaboración).
-      setMsg({ ok: true, text: decision === 'autorizar' ? 'Autorización registrada.' : res?.outcome === 'rechazada' ? 'Rechazada: la creación del documento no se autorizó y la solicitud quedó cerrada.' : 'Rechazada: el documento volvió a elaboración.' });
+      await sgcSend(`/api/sgc/authorizations/${row.id}/decision`, 'POST', { decision, comment });
+      setMsg({ ok: true, text: decision === 'autorizar' ? 'Autorización registrada.' : 'Rechazada: el documento volvió a elaboración.' });
       setAuthorize(null);
       setReject(null);
       setComment('');
@@ -318,7 +317,7 @@ function AuthorizationBoard() {
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>ID</Table.Th>
-                <Table.Th>Nombre del documento</Table.Th>
+                <Table.Th>Asunto</Table.Th>
                 <Table.Th>Empresa</Table.Th>
                 <Table.Th>Tipo de autorización</Table.Th>
                 <Table.Th>Solicitante</Table.Th>
@@ -519,8 +518,6 @@ function AuthorizationBoard() {
             draft={d.currentDraft}
             draftHref={draftHref}
             checklist={focus.myAction!.checklist}
-            idCompany={signFor.row.idCompany}
-            qualityVerification={Boolean(focus.myAction!.qualityVerification)}
             submitLabel='Firmar y autorizar'
             onSign={async (payload) => {
               const res = await sgcSend<{ controlledPdf?: { status: string | null; error?: string } }>(`/api/sgc/authorizations/${signFor.row.id}/sign`, 'POST', payload);

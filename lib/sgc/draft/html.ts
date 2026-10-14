@@ -23,21 +23,6 @@ const ALLOWED = new Set([
 const VOID = new Set(['br', 'hr', 'img']);
 const DROP_WITH_CONTENT = new Set(['script', 'style', 'iframe', 'object', 'embed', 'svg', 'math', 'template', 'noscript', 'head', 'title', 'textarea', 'select', 'button', 'form', 'frame', 'frameset', 'applet', 'audio', 'video', 'canvas', 'xml']);
 const CELL_ATTRS = /\b(colspan|rowspan)\s*=\s*["']?(\d{1,2})["']?/gi;
-/**
- * S16 (R32): clases de presentación de las hojas de Excel (negrita, alineación,
- * relleno, bordes, ancho…), que genera el propio SGC con un prefijo fijo y cuya
- * hoja de estilos arma el servidor (lib/sgc/pdf/viewable.ts). Una clase no
- * ejecuta código ni carga recursos: se conservan solo las que siguen el patrón.
- */
-const SHEET_CLASS = /\bclass\s*=\s*(["'])([^"']*)\1/i;
-const SHEET_CLASS_TOKEN = /^sgc-[a-z0-9-]{1,30}$/;
-function sheetClasses(attrs: string): string {
-  const m = SHEET_CLASS.exec(attrs);
-  if (!m) return '';
-  const tokens = m[2].split(/\s+/).filter(Boolean);
-  if (!tokens.length || tokens.length > 12 || !tokens.every((t) => SHEET_CLASS_TOKEN.test(t))) return '';
-  return ` class="${tokens.join(' ')}"`;
-}
 
 // 2026-10-03: 6 MB para admitir las imágenes incrustadas (logo) de un Word convertido.
 export const SGC_DRAFT_MAX_HTML_BYTES = 6 * 1024 * 1024;
@@ -99,7 +84,6 @@ export function sanitizeDraftHtml(input: string): string {
     if (name === 'td' || name === 'th') {
       for (const a of attrs.matchAll(CELL_ATTRS)) kept += ` ${a[1].toLowerCase()}="${Number(a[2])}"`;
     }
-    if (name === 'td' || name === 'th' || name === 'table' || name === 'tr' || name === 'h2') kept += sheetClasses(attrs);
     out.push(`<${name}${kept}>`);
     open.push(name);
   }

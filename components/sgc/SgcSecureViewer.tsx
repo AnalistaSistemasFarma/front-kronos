@@ -1,10 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import { Alert, Button, Group, Loader, Stack, Text } from '@mantine/core';
-import { IconAlertTriangle, IconDownload, IconEye, IconKey, IconLock, IconPrinter, IconRefresh, IconZoomIn, IconZoomOut } from '@tabler/icons-react';
-import { SGC_VIEWER_VEIL_TEXT, sgcViewerError, type SgcViewerError } from '../../lib/sgc/viewerError';
+import { IconAlertTriangle, IconDownload, IconLock, IconPrinter, IconZoomIn, IconZoomOut } from '@tabler/icons-react';
 
 /**
  * VISOR SEGURO del SGC: muestra el PDF controlado SIN barra del navegador,
@@ -48,8 +46,6 @@ export interface SgcSecureViewerProps {
    * Descargar e Imprimir aunque haya permiso excepcional (solo consulta).
    */
   hideDownloadPrint?: boolean;
-  /** S14 (R23): enlace para solicitar acceso si el servidor responde que no tiene permiso. */
-  requestAccessHref?: string | null;
 }
 
 /** Escala inicial del visor (página al 100 % del ancho disponible). */
@@ -124,7 +120,7 @@ export async function printAuthorized(url: string) {
   setTimeout(() => frame.remove(), 60_000);
 }
 
-export default function SgcSecureViewer({ fileUrl, canDownload: canDownloadProp, canPrint: canPrintProp, onReachedEnd, hideDownloadPrint = false, requestAccessHref = null }: SgcSecureViewerProps) {
+export default function SgcSecureViewer({ fileUrl, canDownload: canDownloadProp, canPrint: canPrintProp, onReachedEnd, hideDownloadPrint = false }: SgcSecureViewerProps) {
   const canDownload = canDownloadProp && !hideDownloadPrint;
   const canPrint = canPrintProp && !hideDownloadPrint;
   const pagesRef = useRef<HTMLDivElement>(null);
@@ -133,10 +129,9 @@ export default function SgcSecureViewer({ fileUrl, canDownload: canDownloadProp,
   const endRef = useRef(false);
   const [progress, setProgress] = useState(0);
   const [scale, setScale] = useState(BASE_SCALE);
-  const [state, setState] = useState<{ tipo: 'cargando' } | { tipo: 'listo'; pages: number } | { tipo: 'error'; error: SgcViewerError }>({
+  const [state, setState] = useState<{ tipo: 'cargando' } | { tipo: 'listo'; pages: number } | { tipo: 'error'; mensaje: string }>({
     tipo: 'cargando',
   });
-  const [attempt, setAttempt] = useState(0);
   const [printError, setPrintError] = useState<string | null>(null);
   // Sprint 11: protección del visor (la indica el servidor) y documento oculto mientras la ventana no está activa.
   const [protect, setProtect] = useState(false);
@@ -159,10 +154,7 @@ export default function SgcSecureViewer({ fileUrl, canDownload: canDownloadProp,
     setState({ tipo: 'cargando' });
     fetch(fileUrl, { cache: 'no-store' })
       .then(async (res) => {
-        if (!res.ok) {
-          const apiMessage = ((await res.json().catch(() => ({}))) as { error?: string })?.error ?? null;
-          throw Object.assign(new Error(apiMessage || `Error ${res.status}`), { sgcViewerError: sgcViewerError(res.status, apiMessage) });
-        }
+        if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `Error ${res.status}`);
         if (!cancelled) setProtect(res.headers.get('X-Sgc-Proteccion') === '1');
         return new Uint8Array(await res.arrayBuffer());
       })
@@ -172,16 +164,12 @@ export default function SgcSecureViewer({ fileUrl, canDownload: canDownloadProp,
         const pages = await renderPdf(bytes.slice(), scale, pagesRef.current, () => cancelled);
         if (!cancelled) setState({ tipo: 'listo', pages });
       })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        const known = (err as { sgcViewerError?: SgcViewerError } | null)?.sgcViewerError;
-        setState({ tipo: 'error', error: known ?? sgcViewerError(null, err instanceof Error ? err.message : String(err)) });
-      });
+      .catch((err: unknown) => !cancelled && setState({ tipo: 'error', mensaje: err instanceof Error ? err.message : String(err) }));
     return () => {
       cancelled = true;
     };
-    // El zoom se maneja aparte para no volver a pedir (ni auditar) el archivo; «Reintentar» sí lo pide de nuevo.
-  }, [fileUrl, attempt]);
+    // El zoom se maneja aparte para no volver a pedir (ni auditar) el archivo.
+  }, [fileUrl]);
 
   const rerender = useCallback(async (nextScale: number) => {
     setScale(nextScale);
@@ -301,22 +289,8 @@ export default function SgcSecureViewer({ fileUrl, canDownload: canDownloadProp,
         </Alert>
       )}
       {state.tipo === 'error' && (
-        <Alert color={state.error.kind === 'sin_permiso' ? 'orange' : 'red'} icon={state.error.kind === 'sin_permiso' ? <IconKey size={18} /> : <IconAlertTriangle size={18} />} title={state.error.title} data-testid='sgc-visor-error' data-kind={state.error.kind}>
-          <Stack gap='xs'>
-            <Text size='sm'>{state.error.message}</Text>
-            <Group gap='xs'>
-              {state.error.kind === 'sin_permiso' && requestAccessHref && (
-                <Button size='xs' variant='light' component={Link} href={requestAccessHref} leftSection={<IconKey size={14} />} data-testid='sgc-visor-solicitar-acceso'>
-                  Solicitar acceso
-                </Button>
-              )}
-              {state.error.kind === 'tecnico' && (
-                <Button size='xs' variant='light' leftSection={<IconRefresh size={14} />} onClick={() => setAttempt((n) => n + 1)} data-testid='sgc-visor-reintentar'>
-                  Reintentar
-                </Button>
-              )}
-            </Group>
-          </Stack>
+        <Alert color='red' icon={<IconAlertTriangle size={18} />} title='No se pudo abrir el documento'>
+          {state.mensaje}
         </Alert>
       )}
       {state.tipo === 'cargando' && (
@@ -334,22 +308,7 @@ export default function SgcSecureViewer({ fileUrl, canDownload: canDownloadProp,
       )}
       {protect && veiled && (
         <Alert color='gray' icon={<IconLock size={18} />} data-testid='sgc-visor-oculto'>
-          <Stack gap='xs'>
-            <Text size='sm'>{SGC_VIEWER_VEIL_TEXT}</Text>
-            <Button
-              size='xs'
-              variant='light'
-              w='fit-content'
-              leftSection={<IconEye size={14} />}
-              onClick={() => {
-                window.focus();
-                setVeiled(false);
-              }}
-              data-testid='sgc-visor-mostrar'
-            >
-              Mostrar el documento
-            </Button>
-          </Stack>
+          El documento se oculta mientras la ventana no está activa. Vuelva a esta ventana para seguir leyendo.
         </Alert>
       )}
       <div

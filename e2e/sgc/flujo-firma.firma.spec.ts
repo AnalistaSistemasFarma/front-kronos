@@ -1,6 +1,5 @@
 import { expect, test, type APIRequestContext, type Browser, type Page } from '@playwright/test';
 import { STORAGE_STATE_2, STORAGE_STATE_3, STORAGE_STATE_4 } from '../../playwright.config';
-import { authorizeCreation, flowRoleModel } from './flujo-v7';
 
 /**
  * SGC documental · Sprint 3 CON SESIÓN, contra PRUEBAS (KRONOSDB_PRUEBAS):
@@ -59,15 +58,10 @@ async function fillSignature(page: Page, password: string, reason: string, check
   await page.getByTestId('sgc-firma-motivo').fill(reason);
   await expect(page.getByTestId('sgc-firma-confirmar')).toBeDisabled();
   await page.getByTestId('sgc-firma-consentimiento').check();
-  // S7 (SGC-REQ-110) y S14 (SGC-REQ-151): la contraseña de la firma no se autocompleta — en Chromium es un campo de
-  // TEXTO enmascarado (sin ningún type=password en el formulario, el gestor de contraseñas no lo ve), con nombre
-  // único, sin campo de usuario oculto; arranca vacía y de solo lectura.
+  // S7 (SGC-REQ-110): la contraseña de la firma no se autocompleta — arranca vacía, de solo lectura y con new-password.
   const pw = page.getByTestId('sgc-firma-contrasena');
-  await expect(pw).toHaveAttribute('type', 'text');
-  await expect(pw).toHaveAttribute('autocomplete', 'off');
-  await expect(pw).toHaveAttribute('name', /^sgc-firma-reautenticacion-[a-z0-9]{8}$/);
-  expect(await pw.evaluate((el) => getComputedStyle(el).getPropertyValue('-webkit-text-security'))).toBe('disc');
-  await expect(page.getByTestId('sgc-firma-form').locator('input[type="password"], input[autocomplete="username"], input[autocomplete="current-password"]')).toHaveCount(0);
+  await expect(pw).toHaveAttribute('autocomplete', 'new-password');
+  await expect(pw).not.toHaveAttribute('name', /^(password|current-password)$/);
   await expect(pw).toHaveValue('');
   await expect(pw).toHaveAttribute('readonly', '');
   await pw.click();
@@ -96,9 +90,7 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
   let idRequest = 0;
 
   test('[SGC-REQ-028][SGC-REQ-032] qa.sgc4 crea la solicitud documental y el elaborador de la matriz (qa.sgc) la ve en su bandeja de Tareas documentales', async ({ browser, page }) => {
-    // S15 (DOC v7): quien pide elabora, así que la pide qa.sgc (con sus selectores) y qa.sgc2 autoriza la creación.
-    const v7 = (await flowRoleModel(page.request)) === 'solicitante_elabora';
-    const p4 = v7 ? page : await asUser(browser, STORAGE_STATE_4);
+    const p4 = await asUser(browser, STORAGE_STATE_4);
     await p4.goto(`/process/sgc-documental/solicitudes/nueva?empresa=${OLP}`);
     await chooseOption(p4, 'sgc-nueva-proceso', /^GC · /);
     await chooseOption(p4, 'sgc-nueva-tipo-documental', /^PR · /);
@@ -110,10 +102,9 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
     await p4.getByTestId('sgc-nueva-crear').click();
     await p4.waitForURL(/\/process\/sgc-documental\/solicitudes\/\d+/, { timeout: 45_000 });
     idRequest = Number(/solicitudes\/(\d+)/.exec(p4.url())![1]);
-    if (v7) await authorizeCreation(browser, idRequest);
-    else await p4.context().close();
+    await p4.context().close();
     const d = (await (await page.request.get(`/api/sgc/requests/${idRequest}`)).json()) as { request: { elaboratorEmail: string } };
-    expect(d.request.elaboratorEmail, v7 ? 'DOC v7: quien pide (qa.sgc) elabora' : 'la matriz de responsables (GC × PR) asigna la elaboración a qa.sgc').toBe(U1.toLowerCase());
+    expect(d.request.elaboratorEmail, 'la matriz de responsables (GC × PR) asigna la elaboración a qa.sgc').toBe(U1.toLowerCase());
     await page.goto(`/process/sgc-documental/tareas?empresa=${OLP}`);
     await expect(page.locator(`[data-testid="bandeja-fila"][data-request="${idRequest}"]`)).toContainText('Elaboración');
   });

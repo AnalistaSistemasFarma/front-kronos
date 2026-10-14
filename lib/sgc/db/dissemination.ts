@@ -498,16 +498,7 @@ export async function getMyReading(db: SgcDb, idTask: number, email: string) {
   const training = await db.sgcTraining.findFirst({ where: { id_request: rec.id_request }, orderBy: { id_training: 'desc' } });
   return {
     training: training
-      ? {
-          title: training.title,
-          videoUrl: training.video_url,
-          formsUrl: training.forms_url,
-          evaluationProvider: training.evaluation_provider,
-          maxAttempts: training.max_attempts,
-          sessionDate: training.session_date ? training.session_date.toISOString().slice(0, 10) : null,
-          // S17 (R30): la evaluación en SynerLink se presenta en la misma pantalla, después de firmar «Leído».
-          evaluationUrl: training.evaluation_provider === 'synerlink' ? `/api/sgc/reading/${rec.id_task_assignee}/evaluation` : null,
-        }
+      ? { title: training.title, videoUrl: training.video_url, formsUrl: training.forms_url, evaluationProvider: training.evaluation_provider, maxAttempts: training.max_attempts, sessionDate: training.session_date ? training.session_date.toISOString().slice(0, 10) : null }
       : null,
     // Lo que se firma con «Leyó»: el PDF controlado de la versión (su SHA-256 registrado).
     content: version ? { ref: `version:${version.id_document_version}`, name: version.pdf_file_name, sha256: version.pdf_sha256.trim() } : null,

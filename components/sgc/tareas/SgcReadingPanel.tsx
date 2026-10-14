@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { Alert, Anchor, Badge, Button, Card, Group, Modal, Stack, Text, Textarea, Title } from '@mantine/core';
-import SgcEvaluationTaker from './SgcEvaluationTaker';
 import { IconBook, IconCheck, IconHelpCircle, IconLock, IconSignature } from '@tabler/icons-react';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 import SgcSecureViewer from '../SgcSecureViewer';
@@ -117,11 +116,6 @@ export default function SgcReadingPanel({ idTask, requestId, reading, canSign, o
                 </Text>
               )}
               {reading.training.sessionDate && <Text size='sm'>Sesión: {reading.training.sessionDate}</Text>}
-              {reading.training.evaluationUrl && reading.status !== 'leido' && (
-                <Text size='sm' data-testid='sgc-lectura-evaluacion-espera'>
-                  Evaluación en SynerLink: se habilita aquí mismo después de firmar «Leído» (tiene {reading.training.maxAttempts} intento(s)).
-                </Text>
-              )}
               {reading.training.formsUrl && (
                 <Text size='sm'>
                   Evaluación:{' '}
@@ -134,8 +128,6 @@ export default function SgcReadingPanel({ idTask, requestId, reading, canSign, o
             </Stack>
           </Alert>
         )}
-        {/* S17 (R30): la evaluación propia de SynerLink se presenta en la misma pantalla, después de la lectura firmada. */}
-        {reading.training?.evaluationUrl && reading.status === 'leido' && <SgcEvaluationTaker url={reading.training.evaluationUrl} />}
         {(pending || canDoubt) && (
           <Group>
             {pending && (
