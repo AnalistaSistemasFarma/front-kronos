@@ -167,19 +167,20 @@ function TaskBoard() {
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
-      <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6' data-testid='bandeja-cabecera'>
+      {/* S14 (SGC-REQ-032): cabecera igual a la de «Solicitudes y Tareas Asignadas» de SynerLink desde el #4f12039 (título adaptable al celular). */}
+      <div className='max-w-7xl mx-auto py-4 px-3 sm:py-8 sm:px-6 lg:px-8'>
+        <Card shadow='sm' p={{ base: 'md', sm: 'xl' }} radius='md' withBorder mb='6' data-testid='bandeja-cabecera'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
           </Breadcrumbs>
 
-          <Flex justify='space-between' align='center' mb='4'>
-            <div>
-              <Title order={1} className='text-3xl font-bold mb-2 flex items-center gap-3' data-testid='bandeja-titulo'>
-                <IconTicket size={32} className='text-blue-600' />
+          <Flex direction={{ base: 'column', sm: 'row' }} justify='space-between' align={{ base: 'stretch', sm: 'center' }} gap='md' mb='md'>
+            <div style={{ minWidth: 0 }}>
+              <Title order={1} fz={{ base: 24, sm: 30 }} lh={1.2} className='font-bold mb-2 flex items-center gap-2 sm:gap-3' data-testid='bandeja-titulo'>
+                <IconTicket size={28} className='text-blue-600 shrink-0' />
                 Tareas documentales
               </Title>
-              <Text size='lg' c='dimmed'>
+              <Text size='md' c='dimmed'>
                 Gestión de Tareas documentales asignadas a ti
               </Text>
             </div>
@@ -332,7 +333,7 @@ function TaskBoard() {
                 <Table.Tr>
                   <Table.Th style={{ whiteSpace: 'nowrap', width: 1 }}>Tipo</Table.Th>
                   <Table.Th>ID</Table.Th>
-                  <Table.Th>Asunto</Table.Th>
+                  <Table.Th>Nombre del documento</Table.Th>
                   <Table.Th>Proceso / Empresa</Table.Th>
                   <Table.Th>Estado</Table.Th>
                   <Table.Th>Fecha</Table.Th>

@@ -1,32 +1,47 @@
 'use client';
 
 import Link from 'next/link';
-import { Alert, Anchor, Box, Breadcrumbs, Button, Card, Divider, Group, Image, Loader, Paper, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
+import { useEffect } from 'react';
+import { Alert, Anchor, Box, Breadcrumbs, Button, Card, Divider, Group, Loader, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { IconAlertTriangle, IconArrowLeft, IconChevronRight, IconPrinter } from '@tabler/icons-react';
-import { OT_BASE_URL, otNombreCompleto } from '../../lib/bitacora-proceso/constants';
+import { IconAlertTriangle, IconArrowLeft, IconChevronRight, IconPrinter, IconSquare, IconSquareCheck } from '@tabler/icons-react';
+import { OT_BASE_URL, OT_FIRMA_SIGNIFICADO, OT_JEFE_PRODUCCION_LABEL, OT_ROL_LABEL, otNombreCompleto } from '../../lib/bitacora-proceso/constants';
 import type { OrdenDetalle } from '../../lib/bitacora-proceso/db';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
-import { codigoOt, fmtFecha, fmtFechaHora, fmtFechaHoraSeg, otHref, turnoLabel, useOtFetch } from './otClient';
+import { codigoOt, fmtFecha, fmtFechaHora, fmtFechaHoraSeg, nombreArchivoInforme, otHref, turnoLabel, useOtFetch } from './otClient';
 
 /**
- * Informe de la bitácora (soporte de calidad, R9 P0): encabezado,
- * cronología y cierre. «Imprimir / Guardar PDF» usa el diálogo del navegador;
- * la hoja de impresión solo muestra el informe (en blanco y negro, sin menú).
+ * Informe de la bitácora (soporte de calidad, R9 P0; se imprime para el batch
+ * record): encabezado, cronología y, AL FINAL, la verificación («Cerró» /
+ * «Verificó»). «Imprimir / Guardar PDF» usa el diálogo del navegador; la hoja de
+ * impresión solo muestra el informe (en blanco y negro, sin menú).
+ *   - A7: el bloque de verificación nunca se parte entre páginas (break-inside: avoid).
+ *   - A8: el título del documento (nombre sugerido del PDF) es
+ *     Bitacora_<código>_<lote>_<fecha>.
  * En el celular la cronología va en tarjetas (sin desplazamiento lateral).
  */
 const PRINT_CSS = `
 @media print {
   @page { size: A4; margin: 14mm; }
+  html, body { background: #fff !important; }
   body * { visibility: hidden !important; }
   .ot-informe, .ot-informe * { visibility: visible !important; }
-  .ot-informe { position: absolute; inset: 0 auto auto 0; width: 100%; color: #000 !important; background: #fff !important; }
+  /* Solo queda la hoja: se ocultan los hermanos de sus contenedores (menú, encabezado,
+     botones) para que no generen páginas en blanco, y los contenedores no agregan alto. */
+  body *:not(:has(.ot-informe)):not(.ot-informe):not(.ot-informe *) { display: none !important; }
+  body *:has(.ot-informe) { min-height: 0 !important; height: auto !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; background: #fff !important; box-shadow: none !important; border: 0 !important; }
+  .ot-informe { width: 100%; color: #000 !important; background: #fff !important; border: 0 !important; padding: 0 !important; }
   .ot-informe .mantine-Card-root, .ot-informe .mantine-Paper-root { box-shadow: none !important; background: #fff !important; border-color: #999 !important; }
   .ot-informe .mantine-Text-root, .ot-informe .mantine-Title-root, .ot-informe td, .ot-informe th { color: #000 !important; }
   .ot-no-print { display: none !important; }
   .ot-solo-impresion { display: block !important; }
   .ot-tabla-impresion { display: table !important; }
   .ot-tarjetas-pantalla { display: none !important; }
+  .ot-tabla-impresion { width: 100%; table-layout: fixed; }
+  .ot-tabla-impresion th, .ot-tabla-impresion td { font-size: 9.5pt !important; padding: 4px 6px !important; overflow-wrap: anywhere; }
+  .ot-tabla-impresion thead { display: table-header-group; }
+  .ot-tabla-impresion tr { break-inside: avoid; page-break-inside: avoid; }
+  .ot-bloque-final { break-inside: avoid; page-break-inside: avoid; }
 }`;
 
 function Campo({ label, value }: { label: string; value: React.ReactNode }) {
@@ -42,6 +57,24 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
   const desktop = useMediaQuery('(min-width: 48em)') ?? false;
   const { data, error, loading } = useOtFetch<{ orden: OrdenDetalle }>(`/api/bitacora-proceso/${idOrden}?company=${company.idCompany}`);
   const o = data?.orden;
+
+  // A8: el navegador propone el título del documento como nombre del PDF.
+  const titulo = o ? nombreArchivoInforme(o.consecutivo, o.lote, o.abiertaEn) : null;
+  useEffect(() => {
+    if (!titulo || typeof window === 'undefined') return;
+    const anterior = document.title;
+    const poner = () => {
+      document.title = titulo;
+    };
+    poner();
+    // Otros componentes del marco (p. ej. el título de estado del chat) pueden
+    // reescribir el título: se vuelve a poner justo antes de imprimir (Ctrl+P incluido).
+    window.addEventListener('beforeprint', poner);
+    return () => {
+      window.removeEventListener('beforeprint', poner);
+      document.title = anterior;
+    };
+  }, [titulo]);
 
   if (loading && !o) {
     return (
@@ -102,10 +135,11 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
             <Campo label='Hora inicio' value={fmtFechaHoraSeg(o.abiertaEn)} />
             <Campo label='Hora final' value={o.cerradaEn ? fmtFechaHoraSeg(o.cerradaEn) : 'Pendiente (abierta)'} />
             <Campo label='Supervisor' value={o.abiertaPor} />
-            <Campo label='Inspector' value={o.inspector?.name ?? '—'} />
-            <Campo label='Auxiliares' value={o.operarios.map((p) => p.name).join(', ')} />
+            <Campo label={OT_JEFE_PRODUCCION_LABEL} value={o.inspector?.name ?? '—'} />
             {o.cerradaPor && <Campo label='Cerrada por' value={o.cerradaPor} />}
           </SimpleGrid>
+          {o.operadores.length > 0 && <Campo label='Operarios' value={o.operadores.map((p) => p.nombre).join(', ')} />}
+          {o.operarios.length > 0 && <Campo label='Auxiliares (con usuario)' value={o.operarios.map((p) => p.name).join(', ')} />}
           {o.observacionCierre && <Campo label='Observación de cierre' value={o.observacionCierre} />}
           <Divider />
           <Title order={2} size='h4'>Cronología de intervenciones ({o.registros.length})</Title>
@@ -125,11 +159,12 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
               >
                 <Table.Thead>
                   <Table.Tr>
-                    <Table.Th>#</Table.Th>
-                    <Table.Th>Fecha y hora</Table.Th>
-                    <Table.Th>Actividad</Table.Th>
-                    <Table.Th>Usuario</Table.Th>
-                    <Table.Th>Observación</Table.Th>
+                    <Table.Th w='5%'>#</Table.Th>
+                    <Table.Th w='21%'>Fecha y hora</Table.Th>
+                    <Table.Th w='23%'>Actividad</Table.Th>
+                    <Table.Th w='17%'>Operario</Table.Th>
+                    <Table.Th w='14%'>Registró (sesión)</Table.Th>
+                    <Table.Th w='20%'>Observación</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -138,6 +173,7 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
                       <Table.Td>{i + 1}</Table.Td>
                       <Table.Td style={{ whiteSpace: 'nowrap' }}>{fmtFechaHoraSeg(r.registradoEn)}</Table.Td>
                       <Table.Td>{r.actividad}</Table.Td>
+                      <Table.Td>{r.operador ?? '—'}</Table.Td>
                       <Table.Td>{r.usuario}</Table.Td>
                       <Table.Td style={{ overflowWrap: 'anywhere' }}>{r.observacion ?? ''}</Table.Td>
                     </Table.Tr>
@@ -151,7 +187,8 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
                       <Group justify='space-between' wrap='nowrap'>
                         <Text fw={600}>{i + 1}. {r.actividad}</Text>
                       </Group>
-                      <Text size='sm'>{fmtFechaHoraSeg(r.registradoEn)} · {r.usuario}</Text>
+                      <Text size='sm'>{fmtFechaHoraSeg(r.registradoEn)} · {r.operador ?? r.usuario}</Text>
+                      {r.operador && <Text size='xs' c='dimmed'>Registró: {r.usuario}</Text>}
                       {r.observacion && <Text size='sm' c='dimmed' style={{ overflowWrap: 'anywhere' }}>{r.observacion}</Text>}
                     </Card>
                   ))}
@@ -160,41 +197,41 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
             </>
           )}
           <Divider />
-          <Title order={2} size='h4'>Firmas electrónicas</Title>
-          <SimpleGrid cols={{ base: 1, xs: 2 }} spacing='md' data-testid='ot-informe-firmas'>
-            {(['SUPERVISOR', 'INSPECTOR'] as const).map((rol) => {
-              const f = o.firmas.find((x) => x.rol === rol);
-              return (
-                <Card key={rol} withBorder radius='md' p='sm'>
-                  <Text size='xs' c='dimmed' tt='uppercase' fw={600}>
-                    {rol === 'SUPERVISOR' ? 'Cerró — Supervisor' : 'Verificó — Inspector'}
-                  </Text>
-                  {f ? (
-                    <>
-                      {f.imagen ? (
-                        <Paper radius='sm' bg='white' p={4} my={4} maw={260}>
-                          <Image src={f.imagen} alt={`Firma de ${f.nombre}`} h={64} fit='contain' />
-                        </Paper>
-                      ) : (
-                        <Text size='sm' c='dimmed' my={4}>(sin imagen de firma registrada)</Text>
-                      )}
-                      <Text fw={600}>{f.nombre}</Text>
-                      <Text size='sm'>{fmtFechaHoraSeg(f.firmadoEn)}</Text>
-                      <Text size='xs' c='dimmed' style={{ overflowWrap: 'anywhere' }}>
-                        Firma electrónica: reautenticación con contraseña de SynerLink · huella SHA-256 {f.contentSha256.slice(0, 16)}…
+          {/* A7: verificación AL FINAL y en un bloque que no se parte entre páginas. */}
+          <div className='ot-bloque-final' data-testid='ot-informe-firmas'>
+            <Title order={2} size='h4' mb='sm'>Verificación</Title>
+            <SimpleGrid cols={{ base: 1, xs: 2 }} spacing='md'>
+              {(['SUPERVISOR', 'INSPECTOR'] as const).map((rol) => {
+                const f = o.firmas.find((x) => x.rol === rol);
+                const Icono = f ? IconSquareCheck : IconSquare;
+                return (
+                  <Card key={rol} withBorder radius='md' p='sm'>
+                    <Group gap={8} wrap='nowrap' align='center'>
+                      <Icono size={26} stroke={1.8} />
+                      <div style={{ minWidth: 0 }}>
+                        <Text fw={700}>{OT_FIRMA_SIGNIFICADO[rol]}</Text>
+                        <Text size='xs' c='dimmed' tt='uppercase' fw={600}>{OT_ROL_LABEL[rol]}</Text>
+                      </div>
+                    </Group>
+                    {f ? (
+                      <>
+                        <Text fw={600} mt={6}>{f.nombre}</Text>
+                        <Text size='sm'>{fmtFechaHoraSeg(f.firmadoEn)}</Text>
+                        <Text size='xs' c='dimmed'>Confirmado con la contraseña de SynerLink de la persona.</Text>
+                      </>
+                    ) : (
+                      <Text c='dimmed' mt={6}>
+                        Pendiente{rol === 'INSPECTOR' && o.inspector ? ` — ${o.inspector.name}` : ''}
                       </Text>
-                    </>
-                  ) : (
-                    <Text c='dimmed' my='sm'>Pendiente</Text>
-                  )}
-                </Card>
-              );
-            })}
-          </SimpleGrid>
-          <Divider />
-          <Text size='xs' c='dimmed'>
-            SynerLink · Bitácora de Proceso · {codigoOt(o.consecutivo)} · Soporte generado desde el sistema con firmas electrónicas (Ley 527 de 1999, Decreto 2364 de 2012).
-          </Text>
+                    )}
+                  </Card>
+                );
+              })}
+            </SimpleGrid>
+            <Text size='xs' c='dimmed' mt='md'>
+              SynerLink · Bitácora de Proceso · {codigoOt(o.consecutivo)} · Soporte generado desde el sistema. Fechas y horas del servidor (hora de Colombia).
+            </Text>
+          </div>
         </Stack>
       </Card>
 
@@ -212,7 +249,10 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
           <Button variant='default' size={desktop ? 'lg' : 'md'} h={desktop ? undefined : 52} leftSection={<IconArrowLeft size={18} />} component={Link} href={otHref(`${OT_BASE_URL}/${o.id}`, company.idCompany)}>
             Volver
           </Button>
-          <Button size={desktop ? 'lg' : 'md'} h={desktop ? undefined : 52} leftSection={<IconPrinter size={18} />} onClick={() => window.print()} data-testid='ot-imprimir'>
+          <Button size={desktop ? 'lg' : 'md'} h={desktop ? undefined : 52} leftSection={<IconPrinter size={18} />} onClick={() => {
+              if (titulo) document.title = titulo;
+              window.print();
+            }} data-testid='ot-imprimir'>
             {desktop ? 'Imprimir / PDF' : 'Imprimir'}
           </Button>
         </Group>

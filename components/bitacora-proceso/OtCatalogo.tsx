@@ -1,25 +1,27 @@
 'use client';
 
 import { useState } from 'react';
-import { Alert, Badge, Button, Card, Group, Loader, NumberInput, Stack, Switch, Text, TextInput, Title } from '@mantine/core';
-import { IconAlertTriangle, IconArrowDown, IconArrowUp, IconCheck, IconPlus } from '@tabler/icons-react';
+import { Alert, Badge, Button, Card, Group, Loader, NumberInput, Stack, Switch, Tabs, Text, TextInput, Title } from '@mantine/core';
+import { IconAlertTriangle, IconArrowDown, IconArrowUp, IconCheck, IconListCheck, IconMapPin, IconPlus, IconUsers } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { OT_ICONOS, OT_LIMITS } from '../../lib/bitacora-proceso/constants';
 import SgcSelect from '../sgc/SgcSelect';
 import { OtIconoActividad } from './otIconos';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import { otSend, useOtFetch } from './otClient';
+import { OtAreas, OtOperadores } from './OtMaestros';
 
 /**
- * Catálogo de actividades (pantalla 4, solo Gestión). Celular primero: una
- * tarjeta por actividad con interruptores grandes (Activa, Exige observación) y
- * flechas para ordenar. Las actividades NO se borran: se desactivan (el
- * historial de registros conserva su nombre).
+ * Catálogo de la bitácora (pantalla 4, solo Gestión), en pestañas:
+ *   - Actividades: una tarjeta por actividad con interruptor «Activa», ícono y
+ *     flechas para ordenar. Las actividades NO se borran: se desactivan (el
+ *     historial conserva su nombre). La observación es opcional en todas (2026-10-14).
+ *   - Operarios (A1): maestro de operarios SIN usuario de SynerLink.
+ *   - Áreas (A5): áreas predefinidas de la empresa.
  */
 interface Actividad {
   id_actividad: number;
   nombre: string;
-  exige_observacion: boolean;
   orden: number;
   activo: boolean;
   icono: string | null;
@@ -28,9 +30,35 @@ interface Actividad {
 const ICONOS_DATA = Object.entries(OT_ICONOS).map(([value, label]) => ({ value, label }));
 
 export default function OtCatalogo({ company }: { company: OtCompanyAccess }) {
+  return (
+    <Tabs defaultValue='actividades' keepMounted={false} variant='outline' radius='md'>
+      <Tabs.List grow mb='md'>
+        <Tabs.Tab value='actividades' leftSection={<IconListCheck size={18} />} data-testid='ot-tab-actividades'>
+          Actividades
+        </Tabs.Tab>
+        <Tabs.Tab value='operarios' leftSection={<IconUsers size={18} />} data-testid='ot-tab-operarios'>
+          Operarios
+        </Tabs.Tab>
+        <Tabs.Tab value='areas' leftSection={<IconMapPin size={18} />} data-testid='ot-tab-areas'>
+          Áreas
+        </Tabs.Tab>
+      </Tabs.List>
+      <Tabs.Panel value='actividades'>
+        <CatalogoActividades company={company} />
+      </Tabs.Panel>
+      <Tabs.Panel value='operarios'>
+        <OtOperadores company={company} />
+      </Tabs.Panel>
+      <Tabs.Panel value='areas'>
+        <OtAreas company={company} />
+      </Tabs.Panel>
+    </Tabs>
+  );
+}
+
+function CatalogoActividades({ company }: { company: OtCompanyAccess }) {
   const { data, error, loading, reload } = useOtFetch<{ actividades: Actividad[] }>(`/api/bitacora-proceso/actividades?company=${company.idCompany}&todas=1`);
   const [nombre, setNombre] = useState('');
-  const [exige, setExige] = useState(false);
   const [orden, setOrden] = useState<number | string>('');
   const [icono, setIcono] = useState<string | null>(null);
   const [busy, setBusy] = useState<number | 'nueva' | null>(null);
@@ -43,12 +71,11 @@ export default function OtCatalogo({ company }: { company: OtCompanyAccess }) {
     setMsg(null);
     try {
       const siguiente = orden === '' ? (lista.length ? Math.max(...lista.map((a) => a.orden)) + 10 : 10) : Number(orden);
-      await otSend('/api/bitacora-proceso/actividades', 'POST', { company: company.idCompany, nombre, exige_observacion: exige, orden: siguiente, icono });
+      await otSend('/api/bitacora-proceso/actividades', 'POST', { company: company.idCompany, nombre, orden: siguiente, icono });
       const text = `Actividad «${nombre.trim()}» agregada.`;
       setMsg({ ok: true, text });
       toast.success(text);
       setNombre('');
-      setExige(false);
       setOrden('');
       setIcono(null);
       await reload(true);
@@ -59,7 +86,7 @@ export default function OtCatalogo({ company }: { company: OtCompanyAccess }) {
     }
   };
 
-  const cambiar = async (a: Actividad, cambio: Partial<Pick<Actividad, 'activo' | 'exige_observacion' | 'orden' | 'icono'>>, text: string) => {
+  const cambiar = async (a: Actividad, cambio: Partial<Pick<Actividad, 'activo' | 'orden' | 'icono'>>, text: string) => {
     setBusy(a.id_actividad);
     setMsg(null);
     try {
@@ -97,10 +124,7 @@ export default function OtCatalogo({ company }: { company: OtCompanyAccess }) {
         <Title order={2} size='h4' mb='sm'>Agregar actividad</Title>
         <Stack gap='sm'>
           <TextInput size='md' label='Nombre' maxLength={OT_LIMITS.actividadNombre} value={nombre} onChange={(e) => setNombre(e.currentTarget.value)} data-testid='ot-catalogo-nombre' />
-          <Group grow wrap='wrap' align='flex-end'>
-            <NumberInput size='md' label='Orden' description='Vacío = al final' min={0} max={100000} value={orden} onChange={setOrden} miw={140} />
-            <Switch size='lg' label='Exige observación' checked={exige} onChange={(e) => setExige(e.currentTarget.checked)} />
-          </Group>
+          <NumberInput size='md' label='Orden' description='Vacío = al final' min={0} max={100000} value={orden} onChange={setOrden} w={{ base: '100%', sm: 220 }} />
           <SgcSelect
             size='md'
             label='Ícono (opcional)'
@@ -122,7 +146,7 @@ export default function OtCatalogo({ company }: { company: OtCompanyAccess }) {
         Actividades <Badge variant='light' ml={4}>{lista.length}</Badge>
       </Title>
       <Text size='sm' c='dimmed'>
-        Las actividades no se borran: desactive las que ya no se usan. El orden define la posición de los botones en la pantalla de planta. Los íconos son de una lista fija; más adelante se podrán cargar pictogramas propios.
+        Las actividades no se borran: desactive las que ya no se usan. El orden define la posición de los botones en la pantalla de planta. La observación es opcional en todas. Los íconos son de una lista fija; más adelante se podrán cargar pictogramas propios.
       </Text>
       {loading && !data ? (
         <Loader />
@@ -138,7 +162,6 @@ export default function OtCatalogo({ company }: { company: OtCompanyAccess }) {
                   </Group>
                   <Group gap={6} mt={4}>
                     <Badge variant='light' color={a.activo ? 'green' : 'gray'}>{a.activo ? 'Activa' : 'Inactiva'}</Badge>
-                    {a.exige_observacion && <Badge variant='light' color='orange'>Exige observación</Badge>}
                     <Badge variant='outline' color='gray'>Orden {a.orden}</Badge>
                   </Group>
                 </div>
@@ -158,13 +181,6 @@ export default function OtCatalogo({ company }: { company: OtCompanyAccess }) {
                   checked={a.activo}
                   disabled={busy !== null}
                   onChange={(e) => cambiar(a, { activo: e.currentTarget.checked }, `«${a.nombre}» ${e.currentTarget.checked ? 'activada' : 'desactivada'}.`)}
-                />
-                <Switch
-                  size='lg'
-                  label='Exige observación'
-                  checked={a.exige_observacion}
-                  disabled={busy !== null}
-                  onChange={(e) => cambiar(a, { exige_observacion: e.currentTarget.checked }, `«${a.nombre}» actualizada.`)}
                 />
               </Group>
               <SgcSelect

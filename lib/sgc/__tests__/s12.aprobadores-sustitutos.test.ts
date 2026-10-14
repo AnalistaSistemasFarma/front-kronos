@@ -31,7 +31,7 @@ const auth = (over: Partial<SgcApproverAuthorizationRow> = {}): SgcApproverAutho
 describe('SGC · S12 · aprobadores autorizados', () => {
   it('[SGC-REQ-132] la autorización exige correo, motivo y una vigencia coherente; el proceso es opcional (todos)', () => {
     const today = new Date('2026-10-08T15:00:00Z');
-    expect(normalizeApproverAuthorization({ email: ' Jefe@OLP.co ', reason: 'Jefe del área de calidad' }, today)).toEqual({ email: 'jefe@olp.co', idProcessMap: null, validFrom: d('2026-10-08'), validTo: null, reason: 'Jefe del área de calidad' });
+    expect(normalizeApproverAuthorization({ email: ' Jefe@OLP.co ', reason: 'Jefe del área de calidad' }, today)).toEqual({ email: 'jefe@olp.co', idProcessMap: null, idDepartment: null, validFrom: d('2026-10-08'), validTo: null, reason: 'Jefe del área de calidad' });
     expect(normalizeApproverAuthorization({ email: 'a@b.co', idProcessMap: '7', validFrom: '2026-10-10', validTo: '2026-12-31', reason: 'Directora técnica' }, today)).toMatchObject({ idProcessMap: 7, validFrom: d('2026-10-10'), validTo: d('2026-12-31') });
     expect(() => normalizeApproverAuthorization({ email: 'x', reason: 'motivo largo' }, today)).toThrow(/correo válido/);
     expect(() => normalizeApproverAuthorization({ email: 'a@b.co', reason: 'no' }, today)).toThrow(/motivo/);

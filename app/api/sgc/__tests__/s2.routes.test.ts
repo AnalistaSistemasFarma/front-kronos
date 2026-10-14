@@ -231,7 +231,7 @@ describe('Rutas S2 · matriz y Autorizaciones SGC', () => {
     expect(status(await authTypeRevoke.POST(req('/', null), params({ id: '2' })))).toBe(400);
   });
 
-  it('[SGC-REQ-033] autorizar/rechazar decide el cupo exacto con el mismo motor de la tarea (autorizar = aprobar, rechazar = devolver)', async () => {
+  it('[SGC-REQ-033] autorizar/rechazar decide el cupo exacto con el mismo motor de la tarea (autorizar = aprobar; rechazar lo resuelve el motor: devolver, o cerrar en la autorización de la creación del DOC v7)', async () => {
     asUser([gestion]);
     m.taskOfAuthorization.mockResolvedValue({ idTask: 40, idAssignee: 77, idCompany: OLP });
     m.decideTask.mockResolvedValue({ outcome: 'abierta' });
@@ -239,7 +239,7 @@ describe('Rutas S2 · matriz y Autorizaciones SGC', () => {
     expect(m.decideTask.mock.calls[0][2]).toBe(40);
     expect(m.decideTask.mock.calls[0][3]).toEqual({ decision: 'aprobar', comment: 'ok', idAssignee: 77 });
     await authDecision.POST(req('/', { decision: 'rechazar', comment: 'corregir anexo' }), params({ id: '5' }));
-    expect(m.decideTask.mock.calls[1][3]).toMatchObject({ decision: 'devolver' });
+    expect(m.decideTask.mock.calls[1][3]).toMatchObject({ decision: 'rechazar', comment: 'corregir anexo', idAssignee: 77 });
     expect(status(await authDecision.POST(req('/', { decision: 'otra' }), params({ id: '5' })))).toBe(400);
     expect(status(await authDecision.POST(req('/', {}), params({ id: 'x' })))).toBe(400);
     m.taskOfAuthorization.mockResolvedValue({ idTask: 40, idAssignee: 77, idCompany: 1 });

@@ -5,7 +5,8 @@
   script 2026-10-13-bitacora-proceso-p0-farmalogica.sql (subprocesos con la URL nueva o la vieja):
     - quita los permisos otorgados (subprocess_user_company) de los 2 subprocesos,
     - borra los 2 subprocesos y el proceso «Producción» si quedó vacío,
-    - borra los triggers y las 4 tablas ot_* (con sus datos).
+    - borra los triggers y las tablas ot_* (con sus datos), incluidas las de la migración
+      20261014140000 (operarios y áreas) si ya se corrió.
 
   PÉRDIDA DE DATOS: si ya hay órdenes de trabajo, el script se DETIENE salvo que la
   sesión declare que acepta perderlas (los registros son soporte de calidad):
@@ -52,6 +53,16 @@ BEGIN TRY
   JOIN @ProcessIds x ON x.id_process = p.id_process
   WHERE p.process = N'Producción'
     AND NOT EXISTS (SELECT 1 FROM [dbo].[subprocess] s WHERE s.id_process = p.id_process);
+
+  /* Objetos de la migración 20261014140000 (operarios y áreas), si existen: dependen de ot_*. */
+  IF OBJECT_ID(N'dbo.TR_ot_orden_operador_inmutable', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_orden_operador_inmutable];
+  IF OBJECT_ID(N'dbo.TR_ot_operador_sin_borrar', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_operador_sin_borrar];
+  IF OBJECT_ID(N'dbo.TR_ot_area_sin_borrar', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_area_sin_borrar];
+  IF OBJECT_ID(N'dbo.ot_orden_operador', N'U') IS NOT NULL DROP TABLE [dbo].[ot_orden_operador];
+  IF OBJECT_ID(N'dbo.ot_registro_id_operador_fkey', N'F') IS NOT NULL ALTER TABLE [dbo].[ot_registro] DROP CONSTRAINT [ot_registro_id_operador_fkey];
+  IF OBJECT_ID(N'dbo.ot_orden_trabajo_id_area_fkey', N'F') IS NOT NULL ALTER TABLE [dbo].[ot_orden_trabajo] DROP CONSTRAINT [ot_orden_trabajo_id_area_fkey];
+  IF OBJECT_ID(N'dbo.ot_operador', N'U') IS NOT NULL DROP TABLE [dbo].[ot_operador];
+  IF OBJECT_ID(N'dbo.ot_area', N'U') IS NOT NULL DROP TABLE [dbo].[ot_area];
 
   IF OBJECT_ID(N'dbo.TR_ot_firma_inmutable', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_firma_inmutable];
   IF OBJECT_ID(N'dbo.TR_ot_registro_inmutable', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_registro_inmutable];
