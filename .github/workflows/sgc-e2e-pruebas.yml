@@ -14,9 +14,33 @@ name: SGC — e2e con sesión en PRUEBAS
 # contraseña no aparezca en ningún artefacto antes de archivarlos, y la sesión
 # guardada (cookies) nunca se archiva.
 
+#
+# Solo corre cuando el commit que llega a `testing` toca el SGC (decisión de
+# Nicolás, 2026-10-14: «solo cuando sean nuevos feats del SGC»). Con cambios de
+# otros módulos (Bitácora de Proceso, Portal, chat, MCP…) no se dispara, para no
+# ocupar ~30 min esperando el despliegue. El filtro `paths` de GitHub compara el
+# push completo (antes..después), así que un merge de PR cuenta todos sus
+# archivos. Siempre se puede correr a mano con workflow_dispatch.
+
 on:
   push:
     branches: [testing]
+    paths:
+      # Código del SGC documental
+      - 'lib/sgc/**'
+      - 'app/api/sgc/**'
+      - 'app/(hub)/process/sgc-documental/**'
+      - 'components/sgc/**'
+      - 'scripts/sgc/**'
+      # SQL del SGC: scripts manuales y carpetas de migración con «sgc» en el nombre
+      - 'prisma/manual/*sgc*'
+      - 'prisma/migrations/*sgc*/**'
+      # Las propias pruebas e2e del SGC, su configuración y la evidencia
+      - 'e2e/sgc/**'
+      - 'playwright.config.ts'
+      - 'scripts/evidencia/**'
+      # Este workflow
+      - '.github/workflows/sgc-e2e-pruebas.yml'
   workflow_dispatch: {}
 
 permissions:

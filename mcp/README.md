@@ -54,7 +54,7 @@ Los catálogos son globales (compartidos por todas las empresas), así que se ex
 
 ---
 
-## 2. Tools disponibles (29: 21 lectura + 8 escritura)
+## 2. Tools disponibles (34: 25 lectura + 9 escritura)
 
 ### 2.1 Lectura (21)
 
@@ -76,6 +76,13 @@ Los catálogos son globales (compartidos por todas las empresas), así que se ex
 | `teams_list_meetings` | Lista reuniones online recientes del usuario Graph configurado. |
 | `teams_list_transcripts` | Lista las transcripciones disponibles para una reunión (`meetingId` o `joinUrl`). |
 | `teams_get_transcript` | Descarga la transcripción más reciente o una específica. Por defecto usa el formato sin atribución de hablante permitido por el tenant. |
+
+| `kronos_list_bitacoras` | Bitácora de Proceso (planta): lista bitácoras (una por turno) con código `BP-xxxx`, producto, lote, turno, supervisor, inspector, auxiliares, registros, estado de firmas y última actividad. Filtros: `companyId`, `estado` (`abierta`/`cerrada`/`verificada`), `desde`/`hasta`, `producto`, `lote`, `supervisor`, `inspector`, `ordenProduccion`. |
+| `kronos_get_bitacora` | Una bitácora (`id` o `codigo` + `companyId`): encabezado, participantes, registros cronológicos y firmas «Cerró»/«Verificó». **Nunca** devuelve la imagen de la firma, huellas SHA-256, IP ni navegador. |
+| `kronos_bitacora_actividad_reciente` | Monitoreo en tiempo real: registros desde una hora (`desde`, por defecto 60 min; máx. 31 días) de las bitácoras abiertas, con cursor `despuesDeRegistro`/`siguiente_cursor`. |
+| `kronos_list_bitacora_actividades` | Catálogo de intervenciones de la bitácora por empresa. |
+
+Las tools de bitácora (`src/tools/bitacoraProceso.ts`) son de solo lectura (pasan por `queryReadOnly`), filtran por `ot_orden_trabajo.id_company` / `ot_actividad.id_company` y devuelven horas en UTC. En una base sin las tablas `ot_*` responden «El módulo Bitácora de Proceso aún no está instalado».
 
 **Paginación:** todas usan `limit`/`offset` con tope máximo (`MCP_MAX_PAGE_SIZE`, default 200) y default (`MCP_DEFAULT_PAGE_SIZE`, default 50).
 

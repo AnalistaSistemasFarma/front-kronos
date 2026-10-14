@@ -2957,7 +2957,7 @@ function ViewRequestPage() {
                     ) : (
                       <>
                         <Table.Th>Documento</Table.Th>
-                        <Table.Th style={{ width: 100 }}>Abrir</Table.Th>
+                        <Table.Th style={{ width: 140 }}>Abrir</Table.Th>
                       </>
                     )}
                   </Table.Tr>
@@ -3196,16 +3196,32 @@ function ViewRequestPage() {
                             </Table.Td>
                             <Table.Td data-label='Abrir'>
                               <Group gap={6} wrap='nowrap'>
-                              <ViewOnlineButton
-                                fileName={file.name}
+                              {file.webUrl ? (
+                                <ViewOnlineButton
+                                  fileName={file.name}
+                                  href={file.webUrl}
+                                  inlineSrc={buildSynerLinkAttachmentFileUrl({
+                                    requestId: request.id,
+                                    fileId,
+                                  })}
+                                  webUrl={file.webUrl}
+                                  downloadUrl={openUrl}
+                                />
+                              ) : null}
+                              <UnstyledButton
+                                component='a'
                                 href={openUrl}
-                                inlineSrc={buildSynerLinkAttachmentFileUrl({
-                                  requestId: request.id,
-                                  fileId,
-                                })}
-                                webUrl={file.webUrl}
-                                downloadUrl={openUrl}
-                              />
+                                target='_blank'
+                                rel='noopener noreferrer'
+                                aria-label={`Abrir ${file.name}`}
+                                style={{
+                                  fontSize: 13,
+                                  color: 'var(--mantine-color-blue-6)',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                Abrir
+                              </UnstyledButton>
                               {canDeleteAttachments ? (
                                 <ActionIcon
                                   variant='subtle'
