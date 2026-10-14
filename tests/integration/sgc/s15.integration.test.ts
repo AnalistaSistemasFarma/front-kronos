@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import bcrypt from 'bcryptjs';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PrismaClient } from '../../../app/generated/prisma';
 import { getSgcAccessForUser } from '../../../lib/sgc/access';
 import { SGC_PROCESS_NAME, SGC_SUBPROCESS_NAMES, SGC_SUBPROCESS_URLS } from '../../../lib/sgc/constants';
@@ -103,6 +103,8 @@ describe.skipIf(!url)('SGC · S15 · modelo de roles DOC v7 con SQL Server', () 
   const authorize = async (idRequest: number, by = E.cal1) => decideTask(prisma, notifier, (await taskOf(idRequest, 'autorizacion_creacion')).id_task, { decision: 'aprobar', comment: 'Creación autorizada' }, actor(by));
 
   beforeAll(async () => {
+    // La política vigente en pruebas y producción para el modelo anterior (RN 2026-10-05): quien ejecuta la primera tarea O Calidad.
+    vi.stubEnv('SGC_ASIGNACION_PERMISO', 'tarea_o_calidad');
     await prisma.$executeRawUnsafe(`
       SET IDENTITY_INSERT [dbo].[company] ON;
       IF NOT EXISTS (SELECT 1 FROM [dbo].[company] WHERE id_company = ${CO}) INSERT INTO [dbo].[company] (id_company, company) VALUES (${CO}, N'EMPRESA S15 CI');
@@ -154,6 +156,7 @@ describe.skipIf(!url)('SGC · S15 · modelo de roles DOC v7 con SQL Server', () 
   });
 
   afterAll(async () => {
+    vi.unstubAllEnvs();
     await prisma.sgcCompanyConfig.update({ where: { id_company: CO }, data: { is_active: false } }).catch(() => undefined);
     await prisma.$disconnect();
   });

@@ -642,6 +642,12 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
     const isFirstWork = assignmentStepKey(def, firstWorkTask(def)?.key ?? null) === task.task_key;
     const pools = await getPoolTypeCodes(tx, request.id_company, me);
     const states = task.assignees.map(toAssigneeState);
+    // S15 (D15): si el solicitante es de Calidad, la AUTORIZACIÓN de su propia solicitud la decide otra persona de Calidad
+    // (se valida antes de elegir el cupo: en el DOC v7 el solicitante también es el elaborador).
+    if (taskDef.isAuthorization && taskDef.assignment === 'calidad') {
+      const denial = creationAuthorizationDenial(me, request.requester_email);
+      if (denial) throw new SgcError(denial, 403);
+    }
     // Excepción de Calidad (2026-10-13, punto 3): en REVISIÓN, el elaborador de Calidad decide si la empresa lo habilitó.
     const selfReview = me === lower(request.elaborator_email) && signerStepKind(taskDef) === 'revision' ? elaboratorMayReview('revision', await segregationOf(tx, request)) : false;
     const chosen = pickAssigneeForDecision(states, (task.signing_mode as 'orden' | 'paralelo' | null) ?? null, { email: me, poolTypeCodes: pools }, {
@@ -657,11 +663,6 @@ export async function decideTask(db: SgcDb, notifier: SgcNotifier, idTask: numbe
     const chosenRow = task.assignees.find((a) => a.id_task_assignee === chosen.id);
     if (taskDef.assignment === 'firmantes' && chosenRow && !chosenRow.user_email) {
       const denial = poolSlotRoleDenial(me, { requesterEmail: request.requester_email, elaboratorEmail: request.elaborator_email });
-      if (denial) throw new SgcError(denial, 403);
-    }
-    // S15 (D15): si el solicitante es de Calidad, la AUTORIZACIÓN de su propia solicitud la decide otra persona de Calidad.
-    if (taskDef.isAuthorization && taskDef.assignment === 'calidad') {
-      const denial = creationAuthorizationDenial(me, request.requester_email);
       if (denial) throw new SgcError(denial, 403);
     }
     // S15 (D18): quien ya decidió su cupo personal en esta tarea no toma también el cupo del grupo (el cierre de Calidad es de otra persona).

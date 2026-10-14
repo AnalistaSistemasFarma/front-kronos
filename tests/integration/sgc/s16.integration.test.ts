@@ -3,7 +3,7 @@ import path from 'node:path';
 import bcrypt from 'bcryptjs';
 import ExcelJS from 'exceljs';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PrismaClient } from '../../../app/generated/prisma';
 import { getSgcAccessForUser } from '../../../lib/sgc/access';
 import { SGC_PROCESS_NAME, SGC_SUBPROCESS_NAMES, SGC_SUBPROCESS_URLS } from '../../../lib/sgc/constants';
@@ -79,6 +79,8 @@ describe.skipIf(!url)('SGC · S16 · encabezados por tipo y Excel con SQL Server
   let procGC = 0;
 
   beforeAll(async () => {
+    // Política vigente (RN 2026-10-05): la matriz asigna al elaborador aunque no sea de Calidad.
+    vi.stubEnv('SGC_ASIGNACION_PERMISO', 'tarea_o_calidad');
     await prisma.$executeRawUnsafe(`
       SET IDENTITY_INSERT [dbo].[company] ON;
       IF NOT EXISTS (SELECT 1 FROM [dbo].[company] WHERE id_company = ${CO}) INSERT INTO [dbo].[company] (id_company, company) VALUES (${CO}, N'EMPRESA S16 CI');
@@ -106,6 +108,7 @@ describe.skipIf(!url)('SGC · S16 · encabezados por tipo y Excel con SQL Server
   });
 
   afterAll(async () => {
+    vi.unstubAllEnvs();
     await prisma.sgcCompanyConfig.update({ where: { id_company: CO }, data: { is_active: false } }).catch(() => undefined);
     await prisma.$disconnect();
   });
