@@ -20,7 +20,13 @@ export type SgcFlowRole = (typeof SGC_FLOW_ROLES)[number];
  * ALCANCE DE DIVULGACIÓN de la solicitud (departamentos, cargos, personas o
  * toda la empresa), cada una con su propio cupo de lectura firmada.
  */
-export const SGC_FLOW_ASSIGNMENTS = ['solicitante', 'elaborador', 'firmantes', 'calidad', 'alcance'] as const;
+/**
+ * S15 (flujo DOC v7, RN 2026-10-13): «creador» = la persona que elabora el
+ * documento, para los pasos que no son la elaboración (preparar y dictar la
+ * capacitación, R27). Se distingue de «elaborador» para que el motor no los
+ * confunda con el paso de elaboración (borrador, envío a revisión).
+ */
+export const SGC_FLOW_ASSIGNMENTS = ['solicitante', 'elaborador', 'firmantes', 'calidad', 'alcance', 'creador'] as const;
 export type SgcFlowAssignment = (typeof SGC_FLOW_ASSIGNMENTS)[number];
 
 export const SGC_SIGNING_MODES = ['orden', 'paralelo'] as const;
@@ -29,8 +35,37 @@ export type SgcSigningMode = (typeof SGC_SIGNING_MODES)[number];
 export const SGC_SIGNATURE_MEANINGS = ['elaboro', 'reviso', 'aprobo', 'leyo', 'capacito'] as const;
 export type SgcSignatureMeaning = (typeof SGC_SIGNATURE_MEANINGS)[number];
 
-export const SGC_FLOW_ACTIONS = ['aprobar', 'devolver', 'cancelar'] as const;
+/** S15 (R15): «rechazar» = Calidad NO autoriza la creación; cierra la solicitud (cancelada) con su motivo. */
+export const SGC_FLOW_ACTIONS = ['aprobar', 'devolver', 'cancelar', 'rechazar'] as const;
 export type SgcFlowAction = (typeof SGC_FLOW_ACTIONS)[number];
+
+/**
+ * S15 — MODELO DE ROLES de una versión del flujo (se guarda en
+ * sgc.flow_version.role_model; NULL = «calidad_asigna»):
+ *  - calidad_asigna (hasta el DOC v6): el elaborador sale de la matriz de
+ *    responsables o de Calidad; el solicitante solo sugiere firmantes y quien
+ *    ejecuta la primera tarea o Calidad los confirma (RN 2026-10-05).
+ *  - solicitante_elabora (DOC v7, RN 2026-10-13): quien hace la solicitud la
+ *    elabora; el elaborador asigna revisores y aprobadores de SU departamento
+ *    (un revisor también puede ser de Calidad); Calidad autoriza la creación.
+ * Las solicitudes en curso conservan la versión (y el modelo) con que nacieron.
+ */
+export const SGC_ROLE_MODELS = ['calidad_asigna', 'solicitante_elabora'] as const;
+export type SgcRoleModel = (typeof SGC_ROLE_MODELS)[number];
+
+export const SGC_ROLE_MODEL_LABELS: Record<SgcRoleModel, string> = {
+  calidad_asigna: 'Elaborador por configuración; Calidad confirma los firmantes (hasta DOC v6)',
+  solicitante_elabora: 'El solicitante elabora y asigna firmantes de su departamento; Calidad autoriza la creación (DOC v7)',
+};
+
+export function parseRoleModel(raw: unknown): SgcRoleModel {
+  return raw === 'solicitante_elabora' ? 'solicitante_elabora' : 'calidad_asigna';
+}
+
+/** ¿La versión del flujo usa el modelo del DOC v7 (el solicitante elabora)? */
+export function requesterElaborates(def: Pick<SgcFlowDefinition, 'roleModel'> | null | undefined): boolean {
+  return def?.roleModel === 'solicitante_elabora';
+}
 
 export const SGC_TERMINAL_STATUSES = ['completada', 'cancelada'] as const;
 export type SgcTerminalStatus = (typeof SGC_TERMINAL_STATUSES)[number];
@@ -65,6 +100,7 @@ export const SGC_ASSIGNMENT_LABELS: Record<SgcFlowAssignment, string> = {
   firmantes: 'Firmantes que asigna el elaborador',
   calidad: 'Grupo de Aseguramiento de Calidad',
   alcance: 'Personas del alcance de divulgación',
+  creador: 'El creador del documento (quien lo elabora)',
 };
 
 export const SGC_SIGNATURE_LABELS: Record<SgcSignatureMeaning, string> = {
@@ -79,6 +115,7 @@ export const SGC_ACTION_LABELS: Record<SgcFlowAction, string> = {
   aprobar: 'Aprobar / enviar',
   devolver: 'Devolver',
   cancelar: 'Cancelar solicitud',
+  rechazar: 'Rechazar (no autoriza; cierra la solicitud)',
 };
 
 export const SGC_FIELD_TYPE_LABELS: Record<SgcFieldType, string> = {
@@ -144,6 +181,8 @@ export interface SgcFlowDefinition {
   tasks: SgcTaskDefinition[];
   transitions: SgcTransitionDefinition[];
   formFields: SgcFormFieldDefinition[];
+  /** S15: modelo de roles de la versión (sin el campo = «calidad_asigna»). */
+  roleModel?: SgcRoleModel;
 }
 
 const KEY_RE = /^[a-z][a-z0-9_]{1,39}$/;
@@ -200,7 +239,11 @@ function int(value: unknown, label: string, min: number, max: number, nullable =
  */
 export function normalizeFlowDefinition(input: unknown): SgcFlowDefinition {
   if (!input || typeof input !== 'object') throw new SgcError('La definición del flujo es inválida.');
-  const raw = input as { tasks?: unknown; transitions?: unknown; formFields?: unknown };
+  const raw = input as { tasks?: unknown; transitions?: unknown; formFields?: unknown; roleModel?: unknown };
+  if (raw.roleModel !== undefined && raw.roleModel !== null && !(SGC_ROLE_MODELS as readonly string[]).includes(String(raw.roleModel))) {
+    throw new SgcError(`Modelo de roles no permitido (${String(raw.roleModel)}).`);
+  }
+  const roleModel = parseRoleModel(raw.roleModel);
   if (!Array.isArray(raw.tasks) || raw.tasks.length === 0) throw new SgcError('El flujo debe tener al menos una tarea.');
   if (raw.tasks.length > 30) throw new SgcError('El flujo admite máximo 30 tareas.');
 
@@ -292,6 +335,11 @@ export function normalizeFlowDefinition(input: unknown): SgcFlowDefinition {
     }
     if (action === 'aprobar' && terminalStatus === 'cancelada') throw new SgcError(`${label}: "aprobar" no puede cancelar la solicitud.`);
     if (action === 'cancelar' && (to || terminalStatus !== 'cancelada')) throw new SgcError(`${label}: "cancelar" cierra la solicitud como cancelada.`);
+    if (action === 'rechazar') {
+      if (to || terminalStatus !== 'cancelada') throw new SgcError(`${label}: "rechazar" cierra la solicitud (no autorizada) como cancelada.`);
+      const owner = tasks.find((t) => t.key === from)!;
+      if (owner.assignment !== 'calidad' && !owner.isAuthorization) throw new SgcError(`${label}: solo una tarea de autorización (o del grupo de Calidad) puede rechazar la solicitud.`);
+    }
     const id = `${from}:${action}`;
     if (seen.has(id)) throw new SgcError(`${label}: ya existe una transición "${action}" desde "${from}".`);
     seen.add(id);
@@ -358,6 +406,11 @@ export function normalizeFlowDefinition(input: unknown): SgcFlowDefinition {
   });
   formFields.sort((a, b) => a.sortOrder - b.sortOrder);
 
+  if (roleModel === 'solicitante_elabora') {
+    if (!tasks.some((t) => t.assignment === 'elaborador' && t.isEnabled)) throw new SgcError('El modelo «el solicitante elabora» necesita un paso de elaboración (asignación «elaborador»).');
+    return { tasks, transitions, formFields, roleModel };
+  }
+  if (tasks.some((t) => t.assignment === 'creador')) throw new SgcError('La asignación «el creador del documento» solo se usa con el modelo «el solicitante elabora» (DOC v7).');
   return { tasks, transitions, formFields };
 }
 
@@ -378,6 +431,7 @@ export function requiredAuthorizationTypes(def: SgcFlowDefinition): string[] {
 export function describeDefinitionChanges(before: SgcFlowDefinition | null, after: SgcFlowDefinition): string[] {
   if (!before) return [`Definición inicial con ${after.tasks.length} tareas, ${after.transitions.length} transiciones y ${after.formFields.length} campos.`];
   const out: string[] = [];
+  if (parseRoleModel(before.roleModel) !== parseRoleModel(after.roleModel)) out.push(`Modelo de roles: ${SGC_ROLE_MODEL_LABELS[parseRoleModel(before.roleModel)]} → ${SGC_ROLE_MODEL_LABELS[parseRoleModel(after.roleModel)]}.`);
   const bTasks = new Map(before.tasks.map((t) => [t.key, t]));
   const aTasks = new Map(after.tasks.map((t) => [t.key, t]));
   for (const [k, t] of aTasks) {

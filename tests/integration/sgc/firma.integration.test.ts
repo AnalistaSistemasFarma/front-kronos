@@ -329,7 +329,10 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
     expect(sha256HexOf(pdfBytes)).toBe(version.pdf_sha256);
     expect(uploads.find((u) => u.id === version.pdf_item_id)!.segments).toEqual(['SGC', 'S3', 'PR', version.document.code, 'v1']);
     const manifest = (await readManifest(pdfBytes))!;
-    expect(manifest.signatures.map((s) => s.meaning)).toEqual(['elaboro', 'reviso', 'aprobo', 'aprobo']);
+    // S14 (R20): la verificación de Calidad (lista de chequeo) no se estampa: el manifiesto lleva elaboró, revisó y el aprobador.
+    expect(manifest.signatures.map((s) => s.meaning)).toEqual(['elaboro', 'reviso', 'aprobo']);
+    expect(manifest.signatures.map((s) => s.signerEmail)).not.toContain(E.cal);
+    expect(manifest.placements?.map((p) => p.uid) ?? []).not.toContain((await prisma.sgcSignature.findFirstOrThrow({ where: { id_request: reqA, signer_email: E.cal } })).signature_uid.trim());
     expect(manifest).toMatchObject({ code: version.document.code, versionNumber: 1, idRequest: reqA, signedContent: { sha256: version.signed_content_sha256 } });
     expect(JSON.parse(version.manifest_json!)).toEqual(manifest);
     expect(await generateControlledVersion(prisma, deps, reqA, actor(E.cal))).toMatchObject({ idDocumentVersion: version.id_document_version, created: false });
@@ -468,7 +471,7 @@ describe.skipIf(!url)('SGC · Sprint 3 · firma electrónica propia, PDF control
     expect((await prisma.sgcDocument.findUniqueOrThrow({ where: { id_document: doc.idDocument } })).current_version_id).not.toBe(v2.id_document_version);
     const manifest = (await readManifest(store.get(v2.pdf_item_id)!))!;
     // Solo las firmas de la RONDA final (la primera quedó sobre el borrador anterior).
-    expect(manifest.signatures.map((s) => s.meaning)).toEqual(['elaboro', 'reviso', 'reviso', 'aprobo', 'aprobo']);
+    expect(manifest.signatures.map((s) => s.meaning)).toEqual(['elaboro', 'reviso', 'reviso', 'aprobo']);
     const aprSig = await prisma.sgcSignature.findFirstOrThrow({ where: { id_request: idRequest, signer_email: E.apr }, orderBy: { id_signature: 'desc' } });
     expect(aprSig.id_signature_master).not.toBeNull();
     expect(await verifyCompanySignatureChain(prisma, CO)).toMatchObject({ ok: true });

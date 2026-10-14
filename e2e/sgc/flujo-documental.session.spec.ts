@@ -131,17 +131,14 @@ test.describe('SGC documental · Sprint 2 · paridad visual con SynerLink', () =
     expect(sgc.card).toBe(synerlink.card);
     expect(sgc.kpiStyle).toBe(synerlink.kpiStyle);
     expect(sgc.filters).toBe(synerlink.filters);
-    // 2026-10-09: la pantalla unificada de SynerLink («Solicitudes y Tareas Asignadas») cambió sus
-    // indicadores y columnas (mezcla solicitudes y tareas). «Tareas documentales» conserva la copia
-    // congelada de la pantalla de tareas: se exigen las columnas comunes y la diferencia de contenido
-    // queda anotada en el reporte, a la espera de la decisión de alinear el SGC a la pantalla nueva.
-    for (const h of ['Asunto', 'Estado', 'Fecha', 'Solicitante / Asignado']) {
-      expect(sgc.headers).toContain(h);
-      expect(synerlink.headers).toContain(h);
-    }
-    if (JSON.stringify(sgc.kpis) !== JSON.stringify(synerlink.kpis) || JSON.stringify(sgc.headers) !== JSON.stringify(synerlink.headers)) {
-      testInfo.annotations.push({ type: 'paridad-contenido', description: `SynerLink: ${synerlink.kpis.join(' | ')} / ${synerlink.headers.join(' | ')} — SGC: ${sgc.kpis.join(' | ')} / ${sgc.headers.join(' | ')}` });
-    }
+    // D5 (E2E 2026-10-10): «Tareas documentales» se alineó con la vista de TAREAS de la pantalla
+    // unificada (mismas columnas e indicadores de tareas). La única diferencia permitida es el
+    // indicador «Solicitudes Pendientes», que no aplica a una bandeja que solo tiene tareas.
+    // S14 (R21, decisión de Nicolás del 2026-10-13): en el SGC la columna «Asunto» se llama «Nombre del documento».
+    expect(sgc.headers).toEqual(synerlink.headers.map((h) => (h === 'Asunto' ? 'Nombre del documento' : h)));
+    // (El anillo «Avance de tareas» expone su porcentaje, que depende de los datos de cada bandeja.)
+    const labels = (k: string[]) => k.filter((x) => !/^\d+%$/.test(x));
+    expect(labels(sgc.kpis)).toEqual(labels(synerlink.kpis).filter((k) => k !== 'Solicitudes Pendientes'));
   });
 });
 

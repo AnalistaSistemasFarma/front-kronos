@@ -203,7 +203,7 @@ export async function getCurrentDraftHtml(db: SgcDb, deps: { download: (itemId: 
     if (sha256HexOf(rev.content_html) !== current.sha256) throw new SgcError('La revisión no coincide con su huella registrada (SHA-256). Avise a Tecnología.', 409);
     return { html: rev.content_html, originRef: current.name, baseSha256: current.sha256 };
   }
-  if (current.format !== 'docx') throw new SgcError('El borrador vigente es un PDF: la revisión menor se hace sobre un Word o un borrador editado en la app. Devuélvalo con observaciones.', 409);
+  if (current.format !== 'docx') throw new SgcError(`El borrador vigente es un ${current.format === 'xlsx' ? 'Excel' : 'PDF'}: la revisión menor se hace sobre un Word o un borrador editado en la app. Devuélvalo con observaciones.`, 409);
   const bytes = await deps.download(current.itemId!);
   if (sha256HexOf(bytes) !== current.sha256) throw new SgcError('El borrador guardado no coincide con su huella registrada (SHA-256). Avise a Tecnología.', 409);
   return { html: await deps.docxToHtml(bytes), originRef: current.name, baseSha256: current.sha256 };

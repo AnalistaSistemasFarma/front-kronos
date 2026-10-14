@@ -18,6 +18,7 @@ import {
   Group,
   Loader,
   LoadingOverlay,
+  RingProgress,
   Stack,
   Table,
   Text,
@@ -35,6 +36,7 @@ import {
   IconClock,
   IconFilter,
   IconFlag,
+  IconListCheck,
   IconProgress,
   IconRefresh,
   IconTicket,
@@ -48,15 +50,17 @@ import { useSgcRowLink } from '../../../../../components/sgc/useSgcRowLink';
 import type { SgcInboxRow } from '../../../../../lib/sgc/db/requests';
 
 /**
- * «Tareas documentales» — bandeja propia del SGC. COPIA CONGELADA
- * (2026-09-30) de «Tareas Asignadas» de SynerLink
- * (app/(hub)/process/request-general/assigned-activities): misma cabecera,
- * mismos indicadores, filtros y columnas, sobre /api/sgc/tasks. Una fila por
- * cupo de la persona (incluye los cupos de grupo de Calidad).
+ * «Tareas documentales» — bandeja propia del SGC. COPIA de la vista de
+ * TAREAS de «Solicitudes y Tareas Asignadas» de SynerLink
+ * (app/(hub)/process/request-general/assigned-requests?type=tasks, unificada
+ * el 2026-10-09): misma cabecera, indicadores (los de tareas), filtros y
+ * columnas, sobre /api/sgc/tasks. Una fila por cupo de la persona (incluye
+ * los cupos de grupo de Calidad). D5 de la E2E del 2026-10-10.
  */
 
 const STATUS_FILTER = [
   { value: 'todas', label: 'Todos' },
+  { value: 'pendientes', label: 'Pendientes' },
   { value: 'sin_empezar', label: 'Sin Empezar' },
   { value: 'abierta', label: 'Abierto' },
   { value: 'cancelada', label: 'Cancelado' },
@@ -111,7 +115,7 @@ function TaskBoard() {
       all.filter(
         (t) =>
           (!applied.id || String(t.idRequest) === applied.id.trim()) &&
-          (!applied.status || applied.status === 'todas' || t.status === applied.status) &&
+          (!applied.status || applied.status === 'todas' || t.status === applied.status || (applied.status === 'pendientes' && (t.status === 'sin_empezar' || t.status === 'abierta'))) &&
           (!applied.company || String(t.idCompany) === applied.company) &&
           inRange(t.createdAt, applied.date_from, applied.date_to)
       ),
@@ -150,37 +154,62 @@ function TaskBoard() {
   );
 
   const count = (status: string) => all.filter((t) => t.status === status).length;
+  const pending = count('sin_empezar') + count('abierta');
+  // Avance como en SynerLink: resueltas sobre las vigentes (sin las canceladas).
+  const done = count('resuelta');
+  const live = all.length - count('cancelada');
+  const progress = live > 0 ? Math.round((done / live) * 100) : 0;
+  const filterByStatus = (status: string) => {
+    const next = { ...applied, status };
+    setFilters(next);
+    setApplied(next);
+  };
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
-      <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6' data-testid='bandeja-cabecera'>
+      {/* S14 (SGC-REQ-032): cabecera igual a la de «Solicitudes y Tareas Asignadas» de SynerLink desde el #4f12039 (título adaptable al celular). */}
+      <div className='max-w-7xl mx-auto py-4 px-3 sm:py-8 sm:px-6 lg:px-8'>
+        <Card shadow='sm' p={{ base: 'md', sm: 'xl' }} radius='md' withBorder mb='6' data-testid='bandeja-cabecera'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
           </Breadcrumbs>
 
-          <Flex justify='space-between' align='center' mb='4'>
-            <div>
-              <Title order={1} className='text-3xl font-bold mb-2 flex items-center gap-3' data-testid='bandeja-titulo'>
-                <IconTicket size={32} className='text-blue-600' />
+          <Flex direction={{ base: 'column', sm: 'row' }} justify='space-between' align={{ base: 'stretch', sm: 'center' }} gap='md' mb='md'>
+            <div style={{ minWidth: 0 }}>
+              <Title order={1} fz={{ base: 24, sm: 30 }} lh={1.2} className='font-bold mb-2 flex items-center gap-2 sm:gap-3' data-testid='bandeja-titulo'>
+                <IconTicket size={28} className='text-blue-600 shrink-0' />
                 Tareas documentales
               </Title>
-              <Text size='lg' c='dimmed'>
+              <Text size='md' c='dimmed'>
                 Gestión de Tareas documentales asignadas a ti
               </Text>
             </div>
           </Flex>
 
-          <Grid>
+          <Grid columns={10}>
             {[
-              { label: 'Total de Tareas', value: all.length, icon: IconTicket, color: 'blue' },
-              { label: 'Sin Empezar', value: count('sin_empezar'), icon: IconClock, color: 'gray' },
-              { label: 'En Ejecución', value: count('abierta'), icon: IconProgress, color: 'blue' },
-              { label: 'Completadas', value: count('resuelta'), icon: IconCheck, color: 'green' },
+              { label: 'Total Asignado', value: all.length, sub: `${all.length} tareas`, icon: IconTicket, color: 'blue', status: 'todas', aria: 'Mostrar todas las tareas' },
+              { label: 'Tareas Pendientes', value: pending, icon: IconListCheck, color: 'violet', status: 'pendientes', aria: 'Filtrar tareas pendientes' },
+              { label: 'Completadas', value: count('resuelta'), icon: IconCheck, color: 'green', status: 'resuelta', aria: 'Filtrar tareas completadas' },
             ].map((k) => (
-              <Grid.Col key={k.label} span={{ base: 12, sm: 6, md: 3 }}>
-                <Card p='md' radius='md' withBorder style={{ backgroundColor: `var(--mantine-color-${k.color}-light)` }} data-testid='bandeja-indicador'>
-                  <Group>
+              <Grid.Col key={k.label} span={{ base: 10, sm: 5, md: 2 }}>
+                <Card
+                  p='md'
+                  radius='md'
+                  withBorder
+                  role='button'
+                  aria-label={k.aria}
+                  onClick={() => filterByStatus(k.status)}
+                  style={{
+                    cursor: 'pointer',
+                    backgroundColor: `var(--mantine-color-${k.color}-light)`,
+                    borderColor: (applied.status || 'todas') === k.status ? `var(--mantine-color-${k.color}-filled)` : 'transparent',
+                    borderWidth: 2,
+                    transition: 'border-color 150ms ease',
+                  }}
+                  data-testid='bandeja-indicador'
+                >
+                  <Group wrap='nowrap'>
                     <k.icon size={24} color={`var(--mantine-color-${k.color}-light-color)`} />
                     <div>
                       <Text size='xs' c={`var(--mantine-color-${k.color}-light-color)`}>
@@ -189,11 +218,41 @@ function TaskBoard() {
                       <Text size='lg' fw={600}>
                         {k.value}
                       </Text>
+                      {k.sub && (
+                        <Text size='xs' c='dimmed'>
+                          {k.sub}
+                        </Text>
+                      )}
                     </div>
                   </Group>
                 </Card>
               </Grid.Col>
             ))}
+            <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
+              <Card p='md' radius='md' withBorder>
+                <Group wrap='nowrap'>
+                  <RingProgress
+                    size={56}
+                    thickness={6}
+                    roundCaps
+                    sections={[{ value: progress, color: progress === 100 ? 'green' : 'blue' }]}
+                    label={
+                      <Text size='xs' ta='center' fw={700}>
+                        {progress}%
+                      </Text>
+                    }
+                  />
+                  <div>
+                    <Text size='xs' c='dimmed'>
+                      Avance de tareas
+                    </Text>
+                    <Text size='lg' fw={600}>
+                      {done}/{live}
+                    </Text>
+                  </div>
+                </Group>
+              </Card>
+            </Grid.Col>
           </Grid>
         </Card>
 
@@ -272,10 +331,10 @@ function TaskBoard() {
             <Table striped highlightOnHover data-testid='bandeja-tabla'>
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>ID Solicitud</Table.Th>
-                  <Table.Th>Tarea</Table.Th>
-                  <Table.Th>Asunto</Table.Th>
-                  <Table.Th>Empresa</Table.Th>
+                  <Table.Th style={{ whiteSpace: 'nowrap', width: 1 }}>Tipo</Table.Th>
+                  <Table.Th>ID</Table.Th>
+                  <Table.Th>Nombre del documento</Table.Th>
+                  <Table.Th>Proceso / Empresa</Table.Th>
                   <Table.Th>Estado</Table.Th>
                   <Table.Th>Fecha</Table.Th>
                   <Table.Th>Solicitante / Asignado</Table.Th>
@@ -291,7 +350,7 @@ function TaskBoard() {
                           No se encontraron tareas asignadas
                         </Text>
                         <Text size='sm' c='gray.5'>
-                          No tienes tareas asignadas actualmente
+                          No tienes elementos asignados con los filtros actuales
                         </Text>
                       </div>
                     </Table.Td>
@@ -308,25 +367,31 @@ function TaskBoard() {
                         data-task={task.idTask}
                         data-status={task.status}
                       >
+                        <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                          <Badge variant='filled' color='violet' size='sm' leftSection={<IconListCheck size={12} />} styles={{ root: { textTransform: 'none' }, label: { overflow: 'visible' } }}>
+                            Tarea
+                          </Badge>
+                        </Table.Td>
                         <Table.Td>
-                          <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
+                          <Text size='sm' fw={700} c='var(--mantine-color-violet-light-color)'>
                             {task.idRequest}
                           </Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size='sm' fw={500} lineClamp={2}>
-                            {task.task}
+                          <Text size='xs' c='dimmed' style={{ whiteSpace: 'nowrap' }}>
+                            Tarea #{task.idTask}
                           </Text>
                         </Table.Td>
-                        <Table.Td style={{ minWidth: 220, maxWidth: 320 }}>
-                          <Text size='sm' lineClamp={2}>
+                        <Table.Td style={{ minWidth: 240, maxWidth: 320 }}>
+                          <Text size='sm' fw={600} lineClamp={2}>
+                            {task.task}
+                          </Text>
+                          <Text size='xs' c='dimmed' lineClamp={2}>
                             {task.subject}
                           </Text>
                         </Table.Td>
                         <Table.Td>
-                          <Group gap={4} className='flex'>
-                            <IconBuilding size={12} className='text-gray-400' />
-                            <Text size='sm' className='max-w-xs truncate'>
+                          <Group gap={4} wrap='nowrap'>
+                            <IconBuilding size={13} className='text-gray-400' />
+                            <Text size='xs' c='dimmed'>
                               {task.company}
                             </Text>
                           </Group>
