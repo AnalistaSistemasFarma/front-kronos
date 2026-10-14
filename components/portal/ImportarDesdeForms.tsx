@@ -161,11 +161,13 @@ export function ImportarDesdeForms({
 
       for (let i = 0; i < INTENTOS_MAX; i++) {
         await esperar(ESPERA_MS, c.signal);
-        if (c.signal.aborted || !vivo.current) return;
+        if (c.signal.aborted) throw new DOMException('Cancelada', 'AbortError');
+        if (!vivo.current) return;
         const r = await conReintentos(() => fetch(`/api/portal/formularios/importar-forms/${id}`, { cache: 'no-store', signal: c.signal }), c.signal);
         const s = (await leerJson(r)) as unknown as EstadoImportacion & { error?: string };
         if (!r.ok) throw new Error(String(s?.error ?? 'No se pudo consultar la importación.'));
-        if (c.signal.aborted || !vivo.current) return;
+        if (c.signal.aborted) throw new DOMException('Cancelada', 'AbortError');
+        if (!vivo.current) return;
         setProgreso(s.progreso);
         setEtapa(s.etapa);
         if (s.estado === 'error') throw new Error(s.error ?? 'No se pudo importar el formulario.');
