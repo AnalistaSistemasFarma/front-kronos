@@ -2,7 +2,6 @@
 
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import axios from 'axios';
 import { saveAs } from 'file-saver';
 import toast from 'react-hot-toast';
 import { useSession } from 'next-auth/react';

@@ -8,9 +8,21 @@ function isInternalPage(pathname: string): boolean {
   return INTERNAL_PAGES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
+// APIs que exigen sesión aquí, además de lo que valide cada ruta (varias no lo hacían).
+const SESSION_API_PREFIXES = ['/api/requests-general'];
+
+function requiresSessionApi(pathname: string): boolean {
+  return SESSION_API_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
 export default withAuth(
   function middleware(req) {
     const { pathname } = req.nextUrl;
+
+    if (!req.nextauth.token && requiresSessionApi(pathname)) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    }
+
     const role = req.nextauth.token?.role;
     const isSupplier = role === SUPPLIER_ROLE;
 
