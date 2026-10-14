@@ -17,6 +17,7 @@ import {
   type SgcSystemToken,
 } from '../pdf/institutional';
 import { wrapDraftForPdf, type SgcDocxToHtml, type SgcHtmlToPdf } from '../pdf/render';
+import { xlsxToSheet } from '../pdf/viewable';
 import {
   missingPlacements,
   normalizeSgcFields,
@@ -26,6 +27,7 @@ import {
   type SgcPlacementParticipant,
   type SgcStoredField,
 } from '../signature/fields';
+import { isQualityVerificationPool } from '../signature/qualityVerification';
 import { sha256HexOf } from '../signature/record';
 import { isPdf } from '../storage';
 import { toWinAnsiSafe } from '../watermark';
@@ -33,6 +35,7 @@ import type { SgcActor, SgcDb } from './catalogs';
 import { resolveNewDocumentCode } from './coding';
 import { isHeaderMandatory } from './companySettings';
 import { loadDefinition } from './flows';
+import { headerTemplateForType } from './headerTemplates';
 import { addInteraction, assertCanView, type SgcViewer } from './requests';
 import { currentDraftInTx } from './signatureRecord';
 
@@ -99,8 +102,8 @@ async function namesOf(db: Db, emails: Iterable<string>): Promise<Map<string, st
 
 /**
  * Personas (o grupo) cuya firma va en el documento, en el orden del flujo:
- * el elaborador, los revisores, los aprobadores y el grupo de verificación de
- * Calidad de la aprobación.
+ * el elaborador, los revisores y los aprobadores. S14 (R20): el grupo de
+ * verificación de Calidad de la aprobación ya NO (es una lista de chequeo).
  */
 export async function layoutParticipants(db: Db, row: { id_flow_version: number; elaborator_email: string; signers: { step_key: string; user_email: string; sign_order: number; is_active: boolean }[] }): Promise<SgcPlacementParticipant[]> {
   const def = await loadDefinition(db as Tx, row.id_flow_version);
@@ -121,7 +124,8 @@ export async function layoutParticipants(db: Db, row: { id_flow_version: number;
       const e = lower(s.user_email);
       out.push({ key: sgcSignerKey(t.key, e), meaning, name: names.get(e) ?? e, email: e, role });
     }
-    if (t.poolAuthorizationTypeCode) {
+    // S14 (R20): la verificación de Calidad del paso «Aprobó» es una lista de chequeo: no lleva caja en el documento.
+    if (t.poolAuthorizationTypeCode && !isQualityVerificationPool(meaning, t.poolAuthorizationTypeCode)) {
       out.push({ key: sgcSignerKey(t.key, null, t.poolAuthorizationTypeCode), meaning, name: 'Aseguramiento de Calidad (grupo)', email: t.poolAuthorizationTypeCode, role });
     }
   }
@@ -292,6 +296,8 @@ export async function changeHistoryRows(db: Db, idDocument: number | null, curre
 export interface SgcComposeInput {
   idCompany: number;
   idDocument: number | null;
+  /** S16 (R31): tipo documental (su plantilla de encabezado; sin él, la por defecto de la empresa). */
+  idDocumentType?: number | null;
   draft: { format: string; bytes: Uint8Array | null; html: string | null };
   institutional: boolean;
   code: string;
@@ -314,15 +320,22 @@ export interface SgcComposeInput {
  * el espacio del encabezado. Devuelve el PDF y los datos del encabezado (que
  * se dibuja después, sobre el PDF final o la vista previa).
  */
-export async function composeContent(db: Db, deps: Pick<SgcLayoutDeps, 'htmlToPdf' | 'docxToHtml'>, input: SgcComposeInput): Promise<{ contentPdf: Uint8Array; header: SgcInstitutionalHeaderData | null; sourceHtml: string | null }> {
+export async function composeContent(
+  db: Db,
+  deps: Pick<SgcLayoutDeps, 'htmlToPdf' | 'docxToHtml'>,
+  input: SgcComposeInput
+): Promise<{ contentPdf: Uint8Array; header: SgcInstitutionalHeaderData | null; sourceHtml: string | null; headerTemplate: { id: number; code: string; version: number } | null }> {
   if (input.draft.format === 'pdf') {
     if (!input.draft.bytes || !isPdf(input.draft.bytes)) throw new SgcError('El borrador PDF no es un PDF válido.', 409);
-    return { contentPdf: input.draft.bytes, header: null, sourceHtml: null };
+    return { contentPdf: input.draft.bytes, header: null, sourceHtml: null, headerTemplate: null };
   }
   let html: string;
+  let sheetCss: string | undefined;
   if (input.draft.format === 'docx') html = await deps.docxToHtml(input.draft.bytes!);
   else if (input.draft.format === 'html') html = sanitizeDraftHtml(input.draft.html ?? '');
-  else throw new SgcError('El borrador debe ser PDF, Word (.docx) o editado en la app.', 409);
+  // S16 (R32, D17): un FORMATO en Excel se compone desde sus hojas (tablas), sin pasar por Word.
+  else if (input.draft.format === 'xlsx') ({ html, css: sheetCss } = await xlsxToSheet(input.draft.bytes!));
+  else throw new SgcError('El borrador debe ser PDF, Word (.docx), Excel (.xlsx) o editado en la app.', 409);
   const history = buildChangeHistoryHtml(await changeHistoryRows(db, input.idDocument, { versionNumber: input.versionNumber, date: input.changeDate, reason: input.changeReason }));
   const values: Partial<Record<SgcSystemToken, string>> = {
     CODIGO: input.code,
@@ -337,10 +350,14 @@ export async function composeContent(db: Db, deps: Pick<SgcLayoutDeps, 'htmlToPd
   };
   let body = applySystemFieldTokens(html, values, history);
   if (input.institutional && !hasChangeHistoryToken(html)) body += `<h2>HISTORIAL DE CAMBIOS</h2>${history}`;
-  const contentPdf = await deps.htmlToPdf(wrapDraftForPdf({ title: input.title, code: input.code, contentHtml: body, institutional: input.institutional }));
+  const contentPdf = await deps.htmlToPdf(wrapDraftForPdf({ title: input.title, code: input.code, contentHtml: body, institutional: input.institutional, sheet: input.draft.format === 'xlsx', extraCss: sheetCss }));
   let header: SgcInstitutionalHeaderData | null = null;
+  let headerTemplate: { id: number; code: string; version: number } | null = null;
   if (input.institutional) {
     const config = await db.sgcCompanyConfig.findUnique({ where: { id_company: input.idCompany }, select: { logo_data_url: true } });
+    // S16 (R31): rótulos y fila inferior de la plantilla del tipo documental.
+    const tpl = await headerTemplateForType(db, input.idCompany, input.idDocumentType ?? null);
+    headerTemplate = tpl.ref;
     header = {
       company: input.company,
       title: input.title,
@@ -353,9 +370,10 @@ export async function composeContent(db: Db, deps: Pick<SgcLayoutDeps, 'htmlToPd
       aprobo: input.aprobo,
       emissionText: input.emissionText,
       logo: decodeLogoDataUrl(config?.logo_data_url ?? null),
+      template: tpl.config,
     };
   }
-  return { contentPdf, header, sourceHtml: input.draft.format === 'html' ? html : null };
+  return { contentPdf, header, sourceHtml: input.draft.format === 'html' ? html : null, headerTemplate };
 }
 
 const previewCache = new Map<string, { bytes: Uint8Array; at: number }>();
@@ -381,7 +399,8 @@ export async function buildLayoutPreview(db: SgcDb, deps: SgcLayoutDeps, idReque
   const people = participants.filter((p) => p.email.includes('@'));
   const cargos = await cargoOf(db, request.id_company, people.map((p) => p.email));
   const label = (m: SgcPlacedMeaning) => participants.filter((p) => p.meaning === m).map((p) => (p.email.includes('@') ? personLabel(p.name, p.email, cargos.get(p.email)) : p.name));
-  const key = [idRequest, draft.sha256, institutional ? 1 : 0, runningHeader ? 1 : 0, sha256HexOf(JSON.stringify([label('elaboro'), label('reviso'), label('aprobo')]))].join(':');
+  const tplRef = institutional ? (await headerTemplateForType(db, request.id_company, request.id_document_type)).ref : null;
+  const key = [idRequest, draft.sha256, institutional ? 1 : 0, runningHeader ? 1 : 0, tplRef ? `${tplRef.id}.${tplRef.version}` : 'def', sha256HexOf(JSON.stringify([label('elaboro'), label('reviso'), label('aprobo')]))].join(':');
   const hit = previewCache.get(key);
   if (hit && Date.now() - hit.at < PREVIEW_TTL_MS) return hit.bytes;
 
@@ -408,6 +427,7 @@ export async function buildLayoutPreview(db: SgcDb, deps: SgcLayoutDeps, idReque
   const composed = await composeContent(db, deps, {
     idCompany: request.id_company,
     idDocument: request.document?.id_document ?? null,
+    idDocumentType: request.id_document_type,
     draft: { format: draft.format, bytes, html },
     institutional,
     code,
