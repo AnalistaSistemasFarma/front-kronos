@@ -41,7 +41,7 @@ test.describe('SGC · Sprint 15 (con sesión)', () => {
       await expect(p2.getByTestId('sgc-tarea-titulo')).toContainText(`Tarea #${auth!.idTask}`, { timeout: 45_000 });
       await p2.getByTestId('sgc-editar-tarea').click();
       await p2.getByTestId('sgc-decision').click();
-      await expect(p2.getByRole('option', { name: /autorizar la creación/ })).toBeVisible();
+      await expect(p2.getByRole('option', { name: /— autorizar la creación/ })).toBeVisible();
       await p2.getByRole('option', { name: /no autorizar la creación/ }).click();
       await expect(p2.getByTestId('sgc-rechazo-documento')).toBeVisible();
       await p2.getByTestId('sgc-resolucion').fill('Prueba e2e: ya existe un documento vigente que cubre el tema.');
@@ -62,8 +62,9 @@ test.describe('SGC · Sprint 15 (con sesión)', () => {
     expect(typeof settings.trainingClosedByQuality).toBe('boolean');
     await page.goto(`/process/sgc-documental/configuracion?empresa=${OLP}`);
     await page.getByRole('tab', { name: 'Encabezado y divulgación' }).click();
-    await expect(page.getByTestId('sgc-config-lideres-departamento')).toBeVisible({ timeout: 45_000 });
-    await expect(page.getByTestId('sgc-config-calidad-cierra-capacitacion')).toBeVisible();
+    // El input del Switch de Mantine es invisible (opacity 0): basta con que exista.
+    await expect(page.getByTestId('sgc-config-lideres-departamento')).toBeAttached({ timeout: 45_000 });
+    await expect(page.getByTestId('sgc-config-calidad-cierra-capacitacion')).toBeAttached();
     await page.getByRole('tab', { name: 'Aprobadores autorizados' }).click();
     await expect(page.getByTestId('sgc-aprobadores-lideres-estado')).toBeVisible();
     await page.getByTestId('sgc-aprobadores-alcance').click();
