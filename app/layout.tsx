@@ -36,7 +36,7 @@ export default function RootLayout({
       </head>
       <body
         className='antialiased min-h-screen'
-        style={{ background: 'var(--background)', color: 'var(--foreground)' }}
+        style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)' }}
       >
         <Providers>{children}</Providers>
         <AppToaster />

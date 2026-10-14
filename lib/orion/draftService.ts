@@ -1,3 +1,4 @@
+import { oneDriveRoot } from '@/lib/onedrive/root';
 import 'server-only';
 import { randomUUID } from 'crypto';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/microsoft-365/useGetMicrosoftToken';
@@ -107,7 +108,7 @@ export const MAX_DRAFT_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 /** Carpeta de adjuntos de la solicitud (misma que `attachment-file`). */
 function requestFolderSegments(requestId: number): string[] {
-  return ['SAPSEND', 'TEC', 'SG', `Request-${requestId}`];
+  return [oneDriveRoot(), 'TEC', 'SG', `Request-${requestId}`];
 }
 
 /** Copias congeladas: subcarpeta de la solicitud (las carpetas no salen en la lista de adjuntos). */

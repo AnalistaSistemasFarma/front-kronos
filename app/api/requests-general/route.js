@@ -1,13 +1,21 @@
 import sql from 'mssql';
 import sqlConfig from '../../../dbconfig';
 import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '../auth/[...nextauth]/route';
 
 export async function GET(req) {
   try {
+    // El usuario sale de la sesión, nunca de ?idUser= (permitiría ver las solicitudes de otro).
+    const session = await getServerSession(authOptions);
+    const idUser = session?.user?.id ? String(session.user.id) : '';
+    if (!idUser) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    }
+
     const pool = await sql.connect(sqlConfig);
 
     const { searchParams } = new URL(req.url);
-    const idUser = searchParams.get('idUser');
     const id = searchParams.get('id');
     const status = searchParams.get('status');
     const company = searchParams.get('company');

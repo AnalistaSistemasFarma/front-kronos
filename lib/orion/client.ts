@@ -114,6 +114,22 @@ export type OrionResult<T> = {
   code?: string;
 };
 
+/**
+ * Tope de espera por llamada a Orion. Sin esto, un Orion (o túnel) que no contesta deja la
+ * pantalla esperando indefinidamente; al vencer se trata como "no responde" (activa el respaldo).
+ * Las lecturas son rápidas; las escrituras pueden subir PDFs, por eso tienen más margen.
+ */
+const ORION_READ_TIMEOUT_MS = 15_000;
+const ORION_WRITE_TIMEOUT_MS = 60_000;
+
+function orionTimeoutSignal(init?: RequestInit): AbortSignal {
+  const method = String(init?.method || 'GET').toUpperCase();
+  const timeout = AbortSignal.timeout(
+    method === 'GET' || method === 'HEAD' ? ORION_READ_TIMEOUT_MS : ORION_WRITE_TIMEOUT_MS
+  );
+  return init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+}
+
 async function orionFetch<T>(path: string, init?: RequestInit): Promise<OrionResult<T>> {
   const cfg = getOrionConfig();
   if (!cfg.apiBaseUrl || !cfg.integrationApiKey) {
@@ -134,6 +150,7 @@ async function orionFetch<T>(path: string, init?: RequestInit): Promise<OrionRes
         ...(init?.headers ?? {}),
       },
       cache: 'no-store',
+      signal: orionTimeoutSignal(init),
     });
 
   let res: Response;
@@ -739,6 +756,7 @@ export async function fetchOrionProtectedFile(url: string): Promise<{
     const res = await fetch(absoluteUrl, {
       headers: { Authorization: `Bearer ${cfg.integrationApiKey}` },
       cache: 'no-store',
+      signal: AbortSignal.timeout(ORION_WRITE_TIMEOUT_MS),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
@@ -760,7 +778,7 @@ export async function fetchOrionProtectedFile(url: string): Promise<{
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Error de red';
     const unreachable =
-      /fetch failed|ECONNREFUSED|ENOTFOUND|ECONNRESET|ETIMEDOUT/i.test(message);
+      /fetch failed|ECONNREFUSED|ENOTFOUND|ECONNRESET|ETIMEDOUT|aborted due to timeout/i.test(message);
     if (unreachable && !isOrionFallbackActive() && getOrionFallbackUrl()) {
       activateOrionFallback();
       return fetchOrionProtectedFile(url);

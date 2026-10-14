@@ -8,8 +8,9 @@ import { formatInt, formatMs, formatValue, initialsOf } from './format';
 import type { UserRow } from './types';
 import styles from './monitor.module.css';
 
-const MAX_USERS = 6;
-const MAX_MODULES = 7;
+// Se muestran TODAS las personas y TODOS los módulos (antes: 6 y 7, y el resto agrupado en
+// "Otras N personas" / "Otros módulos"). Las constantes de "otros" quedan por si una fila vieja
+// llega sin módulo.
 const OTHER_USERS = 'otros-usuarios';
 const OTHER_MODULES_KEY = 'Otros módulos';
 
@@ -33,17 +34,10 @@ export function UserBehavior({ users, rangeMinutes }: { users: UserRow[]; rangeM
   const colorOf = (label: string) => moduleFlowColor(label, isDark);
 
   const model = useMemo(() => {
-    const top = users.slice(0, MAX_USERS);
-    const rest = users.slice(MAX_USERS);
+    const top = users;
+    const rest: UserRow[] = [];
 
-    // Módulos más usados por las personas que se muestran.
-    const moduleTotals = new Map<string, number>();
-    for (const u of users) {
-      for (const m of u.modules) moduleTotals.set(m.label, (moduleTotals.get(m.label) ?? 0) + m.totalMs);
-    }
-    const ranked = Array.from(moduleTotals.entries()).sort((a, b) => b[1] - a[1]);
-    const shown = new Set(ranked.slice(0, MAX_MODULES).map(([label]) => label));
-    const moduleOf = (label: string) => (shown.has(label) ? label : OTHER_MODULES_KEY);
+    const moduleOf = (label: string) => label || OTHER_MODULES_KEY;
 
     type Source = { id: string; name: string; email: string | null; totalMs: number; requests: number; modules: Map<string, number> };
     const sources: Source[] = top.map((u) => {

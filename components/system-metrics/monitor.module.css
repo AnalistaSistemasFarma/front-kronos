@@ -1417,3 +1417,88 @@
   height: 30px;
   font-size: 11px;
 }
+
+/* ───────── Tablero de los mapas (MonitorBoard): muro que se arrastra y se amplía ───────── */
+
+.boardShell {
+  margin-top: 0;
+  border-radius: var(--sm-radius);
+  border: 1px solid var(--sm-hairline);
+  background: var(--sm-card); /* fondo normal, como cualquier tarjeta */
+  box-shadow: var(--sm-shadow);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.boardShellExpanded {
+  position: fixed;
+  inset: 0;
+  z-index: 190; /* debajo de la hoja de detalle (Drawer, 200) */
+  margin: 0;
+  border-radius: 0;
+  border: 0;
+  background: var(--sm-card);
+}
+
+/* Un tablero por mapa: blanco como una tarjeta, sin patrón de fondo. */
+.boardToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--sm-hairline);
+  background: var(--sm-card);
+}
+
+.boardHint {
+  font-size: 12px;
+  color: var(--sm-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.boardZoom {
+  min-width: 44px;
+  text-align: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--sm-muted);
+}
+
+.boardViewport {
+  position: relative;
+  height: min(72vh, 820px);
+  min-height: 420px;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none; /* un dedo mueve el tablero; dos hacen zoom */
+  background: var(--sm-card);
+}
+
+.boardShellExpanded .boardViewport {
+  height: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.boardViewportDragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.boardPlane {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+  display: grid;
+  grid-auto-flow: row dense;
+  align-items: start;
+  gap: 28px;
+  padding-bottom: 40px;
+}

@@ -13,6 +13,7 @@ import {
 import { usePathname } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { SUBPROCESS_ASSIGNMENTS_CHANGED } from './subprocessAssignmentsEvents';
+import { fetchWithRetry } from '../navigation/fetchWithRetry';
 
 export interface ProcessRecord {
   id_process: number;
@@ -62,7 +63,9 @@ export function ProcessDataProvider({ children }: { children: ReactNode }) {
       }
       setError(null);
 
-      const response = await fetch('/api/processes', { cache: 'no-store' });
+      // Con reintento: si la primera carga fallaba (p. ej. recién entrando), Procesos quedaba vacío
+      // hasta refrescar la página.
+      const response = await fetchWithRetry('/api/processes', { cache: 'no-store' });
       if (!response.ok) {
         throw new Error('Error al obtener los procesos');
       }

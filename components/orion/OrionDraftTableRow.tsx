@@ -43,6 +43,8 @@ type Props = {
   openUrl?: string | null;
   canDeleteAttachment?: boolean;
   onDeleteAttachment?: (fileId: string, fileName?: string | null) => void | Promise<void>;
+  /** Botón para borrar adjuntos de prueba (solo testing/local; lo arma la página). */
+  testDeleteSlot?: ReactNode;
   /** Llegó desde Autorizaciones a validar este documento: abre el tablero. */
   autoOpenReview?: boolean;
   /** Tras convertir a PDF: la página recarga los adjuntos para mostrar el PDF debajo del Word. */
@@ -146,6 +148,7 @@ export default function OrionDraftTableRow({
   openUrl,
   canDeleteAttachment = false,
   onDeleteAttachment,
+  testDeleteSlot,
   autoOpenReview = false,
   onConverted,
 }: Props) {
@@ -508,6 +511,7 @@ export default function OrionDraftTableRow({
                 onClick={() => void onDeleteAttachment(fileId, fileName)}
               />
             ) : null}
+            {testDeleteSlot}
           </Stack>
         </div>
         <Modal
