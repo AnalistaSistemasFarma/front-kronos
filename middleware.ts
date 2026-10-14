@@ -11,7 +11,14 @@ function isInternalPage(pathname: string): boolean {
 // APIs que exigen sesión aquí, además de lo que valide cada ruta (varias no lo hacían).
 const SESSION_API_PREFIXES = ['/api/requests-general'];
 
-function requiresSessionApi(pathname: string): boolean {
+// Rutas que también aceptan la API key de integración (Authorization: Bearer). Con Bearer
+// la valida la propia ruta (requireDashboardAdminOrIntegrationApi); sin Bearer exigen sesión.
+const INTEGRATION_KEY_API_PATHS = new Set(['/api/requests-general/view-requests']);
+
+function requiresSessionApi(pathname: string, authorization: string | null): boolean {
+  if (INTEGRATION_KEY_API_PATHS.has(pathname) && /^Bearer\s+\S/i.test(authorization || '')) {
+    return false;
+  }
   return SESSION_API_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
@@ -19,7 +26,7 @@ export default withAuth(
   function middleware(req) {
     const { pathname } = req.nextUrl;
 
-    if (!req.nextauth.token && requiresSessionApi(pathname)) {
+    if (!req.nextauth.token && requiresSessionApi(pathname, req.headers.get('authorization'))) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
