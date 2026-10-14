@@ -137,7 +137,8 @@ test.describe.serial('SGC documental · celular', () => {
     // El documento usa casi todo el ancho (antes quedaba en ~40 px detrás de la lista «Orden de firma»).
     const vw = page.viewportSize()!.width;
     expect(img.width).toBeGreaterThan(vw * 0.75);
-    await expect(page.getByTestId('sgc-ubicar-firmante-movil')).toHaveCount(4);
+    // S14 (R20): elaboró, revisó y aprobó; la verificación de Calidad es lista de chequeo y no lleva caja.
+    await expect(page.getByTestId('sgc-ubicar-firmante-movil')).toHaveCount(3);
     await expect(page.getByTestId('sgc-ubicar-documento')).toContainText('Toque el documento para colocar');
 
     // Tocar para ubicar: con «Elaboró» elegido, un toque en el documento lleva su caja ahí.

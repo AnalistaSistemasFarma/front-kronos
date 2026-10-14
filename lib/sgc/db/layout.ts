@@ -26,6 +26,7 @@ import {
   type SgcPlacementParticipant,
   type SgcStoredField,
 } from '../signature/fields';
+import { isQualityVerificationPool } from '../signature/qualityVerification';
 import { sha256HexOf } from '../signature/record';
 import { isPdf } from '../storage';
 import { toWinAnsiSafe } from '../watermark';
@@ -99,8 +100,8 @@ async function namesOf(db: Db, emails: Iterable<string>): Promise<Map<string, st
 
 /**
  * Personas (o grupo) cuya firma va en el documento, en el orden del flujo:
- * el elaborador, los revisores, los aprobadores y el grupo de verificación de
- * Calidad de la aprobación.
+ * el elaborador, los revisores y los aprobadores. S14 (R20): el grupo de
+ * verificación de Calidad de la aprobación ya NO (es una lista de chequeo).
  */
 export async function layoutParticipants(db: Db, row: { id_flow_version: number; elaborator_email: string; signers: { step_key: string; user_email: string; sign_order: number; is_active: boolean }[] }): Promise<SgcPlacementParticipant[]> {
   const def = await loadDefinition(db as Tx, row.id_flow_version);
@@ -121,7 +122,8 @@ export async function layoutParticipants(db: Db, row: { id_flow_version: number;
       const e = lower(s.user_email);
       out.push({ key: sgcSignerKey(t.key, e), meaning, name: names.get(e) ?? e, email: e, role });
     }
-    if (t.poolAuthorizationTypeCode) {
+    // S14 (R20): la verificación de Calidad del paso «Aprobó» es una lista de chequeo: no lleva caja en el documento.
+    if (t.poolAuthorizationTypeCode && !isQualityVerificationPool(meaning, t.poolAuthorizationTypeCode)) {
       out.push({ key: sgcSignerKey(t.key, null, t.poolAuthorizationTypeCode), meaning, name: 'Aseguramiento de Calidad (grupo)', email: t.poolAuthorizationTypeCode, role });
     }
   }

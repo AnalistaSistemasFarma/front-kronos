@@ -187,7 +187,8 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
           data-testid='sgc-nueva-capacitacion'
         />
         <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true'
-          label='Asunto'
+          label='Nombre del documento'
+          description='Es el nombre con el que el documento queda en el listado maestro y en su encabezado.'
           required
           value={subjectTouched || !prefill.tipo ? subject : subject || suggestedSubject}
           onChange={(e) => {

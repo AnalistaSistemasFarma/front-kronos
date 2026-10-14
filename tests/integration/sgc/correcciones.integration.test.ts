@@ -200,7 +200,7 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
       [`elaboracion:${E.elab}`, 'elaboro'],
       [`revision:${E.rev}`, 'reviso'],
       [`aprobacion:${E.apr}`, 'aprobo'],
-      ['aprobacion:grupo:SGC-VERIF-CALIDAD', 'aprobo'],
+      // S14 (R20): la verificación de Calidad es una lista de chequeo: no lleva caja en el documento.
     ]);
     const v0 = await getDocumentLayout(prisma, r1, await viewer(E.elab));
     expect(v0).toMatchObject({ canEdit: true, institutionalHeader: false, fields: [], suggested: [], saves: 0 });

@@ -317,7 +317,7 @@ function AuthorizationBoard() {
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>ID</Table.Th>
-                <Table.Th>Asunto</Table.Th>
+                <Table.Th>Nombre del documento</Table.Th>
                 <Table.Th>Empresa</Table.Th>
                 <Table.Th>Tipo de autorización</Table.Th>
                 <Table.Th>Solicitante</Table.Th>
@@ -518,6 +518,8 @@ function AuthorizationBoard() {
             draft={d.currentDraft}
             draftHref={draftHref}
             checklist={focus.myAction!.checklist}
+            idCompany={signFor.row.idCompany}
+            qualityVerification={Boolean(focus.myAction!.qualityVerification)}
             submitLabel='Firmar y autorizar'
             onSign={async (payload) => {
               const res = await sgcSend<{ controlledPdf?: { status: string | null; error?: string } }>(`/api/sgc/authorizations/${signFor.row.id}/sign`, 'POST', payload);

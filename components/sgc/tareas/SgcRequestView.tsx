@@ -44,7 +44,7 @@ import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 import type { SgcSignatureMeaning } from '../../../lib/sgc/flows/definition';
 import { sgcStatusColor } from '../../../lib/sgc/flows/engine';
 import type { SgcMatrixSuggestion } from '../../../lib/sgc/flows/matrix';
-import { sgcSend, useSgcFetch } from '../useSgcFetch';
+import { isSgcHttpError, sgcSend, useSgcFetch } from '../useSgcFetch';
 import { formatDateCO } from './format';
 import SgcAdditionalInfo from './SgcAdditionalInfo';
 import SgcAttachmentsCard from './SgcAttachmentsCard';
@@ -313,7 +313,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
                   await sendMessage(
                     `Nueva Nota en la Solicitud documental #${request.id} - ${request.subject}`,
                     emails.join('; '),
-                    [{ 'ID de la Solicitud': request.id, Asunto: request.subject, Proceso: request.flow.name, Empresa: request.company, Nota: body }],
+                    [{ 'ID de la Solicitud': request.id, 'Nombre del documento': request.subject, Proceso: request.flow.name, Empresa: request.company, Nota: body }],
                     `Este es un mensaje automático del módulo Documentos de SynerLink. Se ha agregado una nueva nota a la solicitud #${request.id}.`,
                     'https://farmalogica.com.co/imagenes/logos/logo20.png',
                     []
@@ -348,7 +348,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
                 </div>
                 <div>
                   <Text size='sm' color='gray.6' fw={500}>
-                    Asunto
+                    Nombre del documento
                   </Text>
                   <Card withBorder radius='md' p='md' mt='xs'>
                     <Group>
@@ -737,9 +737,21 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
             draft={signContent}
             draftHref={myAction.signatureMeaning === 'capacito' ? null : draftHref}
             checklist={myAction.checklist}
+            idCompany={request.idCompany}
+            qualityVerification={Boolean(myAction.qualityVerification)}
+            justification={
+              myAction.signatureMeaning === 'capacito' && data.training?.upload?.needsJustification
+                ? { required: true, summary: `Del alcance: ${data.training.upload.summary.failed} reprobaron y ${data.training.upload.summary.missing.length} no tienen resultado.` }
+                : null
+            }
             submitLabel={myAction.kind === 'enviar' ? 'Firmar y enviar a revisión' : myAction.signatureMeaning === 'capacito' ? 'Firmar «Capacitó» y cerrar' : undefined}
             onSign={async (payload) => {
-              const res = await sgcSend<{ controlledPdf?: { status: string | null; error?: string }; published?: { code: string; versionNumber: number; obsolete: { versionNumber: number } | null } | null }>(`/api/sgc/tasks/${focus.id}/sign`, 'POST', { ...payload, comment: payload.comment || resolution, idAssignee: myAction.idAssignee });
+              const res = await sgcSend<{ controlledPdf?: { status: string | null; error?: string }; published?: { code: string; versionNumber: number; obsolete: { versionNumber: number } | null } | null }>(`/api/sgc/tasks/${focus.id}/sign`, 'POST', { ...payload, comment: payload.comment || resolution, idAssignee: myAction.idAssignee }).catch((e: unknown) => {
+                // S14 (R29): si lo firmado cambió (otra persona cargó otros resultados o un borrador nuevo), se recarga
+                // la tarea para que el formulario muestre el contenido vigente y se firme de nuevo sobre él.
+                if (isSgcHttpError(e) && e.status === 409) reload();
+                throw e;
+              });
               setSignOpen(false);
               setIsEditing(false);
               setDecision(null);

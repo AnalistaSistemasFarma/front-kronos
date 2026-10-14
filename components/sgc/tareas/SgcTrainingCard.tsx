@@ -3,9 +3,19 @@
 import { useEffect, useState } from 'react';
 import { Alert, Anchor, Badge, Button, Card, Code, FileButton, Grid, Group, NumberInput, Stack, Table, Text, TextInput, Textarea, Title } from '@mantine/core';
 import SgcSelect from '../SgcSelect';
-import { IconFileSpreadsheet, IconSchool, IconUpload } from '@tabler/icons-react';
+import { IconCalendarEvent, IconDownload, IconFileSpreadsheet, IconSchool, IconUpload } from '@tabler/icons-react';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
-import { SGC_TRAINING_DEFAULT_MAX_ATTEMPTS, SGC_TRAINING_DEFAULT_MIN_PCT, SGC_TRAINING_MODE_LABELS, type SgcTrainingMode } from '../../../lib/sgc/training/results';
+import { SGC_TRAINING_DEFAULT_MAX_ATTEMPTS, SGC_TRAINING_DEFAULT_MIN_PCT, SGC_TRAINING_MODE_LABELS, SGC_TRAINING_RESULTS_TEMPLATE_CSV, SGC_TRAINING_RESULTS_TEMPLATE_NAME, type SgcTrainingMode } from '../../../lib/sgc/training/results';
+
+/** S14 (R29): plantilla estándar de resultados (CSV con los encabezados que el SGC reconoce), generada en el navegador. */
+function downloadResultsTemplate() {
+  const url = URL.createObjectURL(new Blob([SGC_TRAINING_RESULTS_TEMPLATE_CSV], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = SGC_TRAINING_RESULTS_TEMPLATE_NAME;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 import { formatDateCO } from './format';
 
 /**
@@ -125,7 +135,8 @@ export default function SgcTrainingCard({ view, onSave, onUpload, onRetrain }: S
               <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Enlace de la evaluación en Microsoft Forms o Google Forms (https)' required value={form.formsUrl} onChange={(e) => set('formsUrl', e.currentTarget.value)} data-testid='sgc-capacitacion-forms' />
             </Grid.Col>
             <Grid.Col span={{ base: 12, md: 4 }}>
-              <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Fecha de la sesión (AAAA-MM-DD)' value={form.sessionDate} onChange={(e) => set('sessionDate', e.currentTarget.value)} data-testid='sgc-capacitacion-fecha' />
+              {/* S14 (R28): fecha con calendario, igual que los filtros de fecha de SynerLink (campo de fecha nativo: calendario también en el celular). */}
+              <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' type='date' label='Fecha de la sesión' leftSection={<IconCalendarEvent size={16} />} value={form.sessionDate} onChange={(e) => set('sessionDate', e.currentTarget.value)} data-testid='sgc-capacitacion-fecha' />
             </Grid.Col>
             <Grid.Col span={{ base: 12, md: 4 }}>
               <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Quién dicta' value={form.instructor} onChange={(e) => set('instructor', e.currentTarget.value)} />
@@ -175,6 +186,11 @@ export default function SgcTrainingCard({ view, onSave, onUpload, onRetrain }: S
               )}
             </FileButton>
           )}
+          {view.canUpload && (
+            <Button variant='subtle' leftSection={<IconDownload size={14} />} onClick={downloadResultsTemplate} data-testid='sgc-capacitacion-plantilla'>
+              Plantilla estándar de resultados
+            </Button>
+          )}
         </Group>
       )}
       {!t && !view.canManage && <Text size='sm' c='dimmed'>Calidad aún no registra la capacitación.</Text>}
@@ -193,8 +209,19 @@ export default function SgcTrainingCard({ view, onSave, onUpload, onRetrain }: S
           <Text size='sm' data-testid='sgc-capacitacion-resumen'>
             Del alcance: {up.summary.passed} aprobaron, {up.summary.failed} reprobaron, {up.summary.missing.length} sin resultado · fuera del alcance: {up.summary.outOfScope} · filas no leídas: {up.summary.rejected.length}
           </Text>
+          {up.summary.rejected.length > 0 && (
+            <Alert color='orange' data-testid='sgc-capacitacion-filas-no-leidas'>
+              <Text size='sm'>Filas del archivo que no se leyeron (no cuentan):</Text>
+              {up.summary.rejected.slice(0, 8).map((r) => (
+                <Text key={r.row} size='xs'>
+                  Fila {r.row}: {r.reason}
+                </Text>
+              ))}
+              {up.summary.rejected.length > 8 && <Text size='xs'>… y {up.summary.rejected.length - 8} más.</Text>}
+            </Alert>
+          )}
           {up.needsJustification && view.open && (
-            <Alert color='yellow'>Hay personas que reprobaron o no presentaron: al cerrar la capacitación escriba la justificación en la resolución de la tarea.</Alert>
+            <Alert color='yellow'>Hay personas que reprobaron o no presentaron: al cerrar la capacitación con la firma «Capacitó», el mismo formulario le pide la justificación.</Alert>
           )}
           <Table.ScrollContainer minWidth={560}>
             <Table striped data-testid='sgc-capacitacion-resultados'>
@@ -256,7 +283,7 @@ export default function SgcTrainingCard({ view, onSave, onUpload, onRetrain }: S
                   <SgcSelect label='Modalidad' data={[{ value: 'presencial', label: 'Presencial' }, { value: 'virtual', label: 'Virtual' }]} value={retrain.mode} onChange={(v) => setRetrain({ ...retrain, mode: v ?? 'presencial' })} allowDeselect={false} />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, md: 3 }}>
-                  <TextInput label='Fecha (AAAA-MM-DD)' value={retrain.sessionDate} onChange={(e) => setRetrain({ ...retrain, sessionDate: e.currentTarget.value })} autoComplete='off' />
+                  <TextInput type='date' label='Fecha' leftSection={<IconCalendarEvent size={16} />} value={retrain.sessionDate} onChange={(e) => setRetrain({ ...retrain, sessionDate: e.currentTarget.value })} autoComplete='off' data-testid='sgc-recapacitacion-fecha' />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, md: 3 }}>
                   <SgcSelect label='Resultado' data={[{ value: 'asistio', label: 'Asistió' }, { value: 'aprobo', label: 'Aprobó' }, { value: 'reprobo', label: 'Reprobó' }]} value={retrain.result} onChange={(v) => setRetrain({ ...retrain, result: v ?? 'asistio' })} allowDeselect={false} />

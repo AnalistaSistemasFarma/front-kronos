@@ -103,8 +103,10 @@ test.describe.serial('SGC documental · correcciones de Calidad OLP', () => {
     await addReaders(page.request, idRequest, [U1, U2, U3]);
     const layout = await ok<{ institutionalHeader: boolean; participants: { key: string }[]; suggested: unknown[]; canEdit: boolean }>(await page.request.get(`/api/sgc/requests/${idRequest}/layout`));
     expect(layout).toMatchObject({ institutionalHeader: true, canEdit: true });
-    expect(layout.participants).toHaveLength(4);
-    expect(layout.suggested).toHaveLength(4);
+    // S14 (R20): la verificación de Calidad (lista de chequeo) no lleva caja en el documento.
+    expect(layout.participants).toHaveLength(3);
+    expect(layout.participants.map((p) => p.key)).not.toContain('aprobacion:grupo:SGC-VERIF-CALIDAD');
+    expect(layout.suggested).toHaveLength(3);
     // Pantalla «Ubicar firmas» (copia congelada de SynerLink).
     await page.goto(`/process/sgc-documental/solicitudes/${idRequest}?empresa=${OLP}`);
     await expect(page.getByTestId('sgc-firmas-documento')).toBeVisible({ timeout: 45_000 });
@@ -114,11 +116,11 @@ test.describe.serial('SGC documental · correcciones de Calidad OLP', () => {
     await expect(modal.getByText('Orden de firma')).toBeVisible();
     await expect(modal.getByAltText('Página 1')).toBeVisible({ timeout: 60_000 });
     await expect(page.getByTestId('sgc-ubicar-sugeridas')).toBeVisible();
-    await expect(page.getByTestId('sgc-ubicar-conteo')).toHaveText('4 de 4 firmante(s) con cajas listas');
+    await expect(page.getByTestId('sgc-ubicar-conteo')).toHaveText('3 de 3 firmante(s) con cajas listas');
     await testInfo.attach('sgc-ubicar-firmas.png', { body: await page.screenshot({ fullPage: false }), contentType: 'image/png' });
     await page.getByTestId('sgc-ubicar-guardar').click();
     await expect(page.getByTestId('sgc-mensaje')).toContainText('Ubicación de firmas guardada', { timeout: 30_000 });
-    await expect(page.getByTestId('sgc-firmas-documento-conteo')).toHaveText('4 de 4 ubicada(s)');
+    await expect(page.getByTestId('sgc-firmas-documento-conteo')).toHaveText('3 de 3 ubicada(s)');
     // Firmas (reautenticación) hasta la aprobación de Calidad.
     await ok(await sign(page.request, await taskId(page.request, idRequest, /^Elaboración/), 'elaboro', PW1));
     await ok(await sign(p3.request, await taskId(p3.request, idRequest, /^Revisión/), 'reviso', PW3));
@@ -133,7 +135,9 @@ test.describe.serial('SGC documental · correcciones de Calidad OLP', () => {
     const text = await pdfText(await file.body(), 2);
     // 2026-10-05 (#2579799): la caja de firma muestra solo la representación gráfica del trazo
     // (o el nombre si no hay trazo); ya no lleva «Firma electrónica · SynerLink» ni el significado.
-    for (const t of ['NOMBRE DEL DOCUMENTO', 'CÓDIGO: OLP-', 'VERSIÓN: 1', 'PÁGINA 1 DE', 'ELABORÓ:', 'REVISÓ:', 'APROBÓ:', 'FECHA DE EMISIÓN:', 'Pendiente: en divulgación', 'PROCESO:', 'QA SGC Pruebas 3', 'QA SGC Pruebas 2']) expect(text, t).toContain(t);
+    for (const t of ['NOMBRE DEL DOCUMENTO', 'CÓDIGO: OLP-', 'VERSIÓN: 1', 'PÁGINA 1 DE', 'ELABORÓ:', 'REVISÓ:', 'APROBÓ:', 'FECHA DE EMISIÓN:', 'Pendiente: en divulgación', 'PROCESO:', 'QA SGC Pruebas 3']) expect(text, t).toContain(t);
+    // S14 (R20): quien verificó por Calidad (qa.sgc2, cupo de grupo) no aparece como firma ni en «Aprobó».
+    expect(text).not.toContain('QA SGC Pruebas 2');
     expect(await pdfText(await file.body(), 1)).toContain('estampadas dentro del documento');
     await p2.context().close();
     await p3.context().close();

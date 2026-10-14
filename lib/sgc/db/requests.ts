@@ -5,6 +5,7 @@ import { SGC_SUBPROCESS_URLS } from '../constants';
 import { SgcError } from '../errors';
 import { SGC_SIGNATURE_LABELS, type SgcFlowDefinition, type SgcTaskDefinition } from '../flows/definition';
 import { SGC_DOCUMENT_FLOW_CODE, SGC_DOCUMENT_REQUEST_TYPE_LABELS, isSgcDocumentRequestType } from '../flows/documentFlow';
+import { isQualityVerificationSlot } from '../signature/qualityVerification';
 import {
   SGC_PENDING_SUGGESTION,
   approvalStepsWithoutQualityPool,
@@ -281,7 +282,9 @@ async function notifyTurn(ctx: EngineCtx, idTask: number, taskDef: { name: strin
   }
   for (const code of new Set(turn.filter((a) => !a.userEmail && a.poolTypeCode).map((a) => a.poolTypeCode!))) {
     const members = recipients(await getPoolMembers(ctx.tx, ctx.request.id_company, code), ctx.actor.email);
-    if (members.length) ctx.notifications.push({ emails: members, payload: { title: SGC_NOTIFICATION_TITLES.autorizacionPendiente, body, url: '/process/sgc-documental/autorizaciones', tag: `sgc-task-${idTask}-grupo` } });
+    // S14 (R26): el aviso del cupo de grupo dice lo que es (una tarea como la preparación de la capacitación no
+    // es una «autorización») y lleva a la TAREA, que también está en «Tareas documentales» y se resuelve ahí.
+    if (members.length) ctx.notifications.push({ emails: members, payload: { title: taskDef.isAuthorization ? SGC_NOTIFICATION_TITLES.autorizacionPendiente : SGC_NOTIFICATION_TITLES.tareaAsignada, body, url: taskUrl(idTask), tag: `sgc-task-${idTask}-grupo` } });
   }
 }
 
@@ -405,7 +408,8 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
   const idCompany = input.idCompany;
   if (!isSgcDocumentRequestType(input.requestType)) throw new SgcError('Tipo de solicitud inválido.');
   const requestType = input.requestType;
-  const subject = text(input.subject, 'El asunto', 300, 5);
+  // S14 (R21): el campo se llama «Nombre del documento» (antes «Asunto»); el documento vigente lleva este nombre.
+  const subject = text(input.subject, 'El nombre del documento', 300, 5);
   const description = text(input.description, 'La justificación', 4000, 10);
   // 2026-10-05 (demo PiSA): el solicitante NO elige al elaborador. Si la petición trae
   // elaboratorEmail (pantalla vieja o llamada directa a la API), se IGNORA y queda en la auditoría.
@@ -1578,6 +1582,8 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
               // Sprint 3: aprobar/enviar exige firma electrónica con este significado.
               signatureMeaning: myTurn.signature_meaning,
               checklist,
+              // S14 (R20): el cupo de verificación de Calidad es una lista de chequeo; no se estampa en el documento.
+              qualityVerification: isQualityVerificationSlot(myTurn),
             }
           : null,
       myWaiting: !myTurn && mine.length > 0,
