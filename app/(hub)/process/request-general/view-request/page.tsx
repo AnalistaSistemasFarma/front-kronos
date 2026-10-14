@@ -103,13 +103,17 @@ import {
   resolveOrionPdfUrl,
 } from '../../../../../lib/orion/documentVersions';
 import { resolveOrionPdfAccessUrl } from '../../../../../lib/orion/signedFileAccess';
-import { resolveRequestPdfAccessUrl } from '../../../../../lib/attachments/fileUrl';
+import {
+  buildSynerLinkAttachmentFileUrl,
+  resolveRequestPdfAccessUrl,
+} from '../../../../../lib/attachments/fileUrl';
 import { mergeOneDriveWithOrionDocuments } from '../../../../../lib/orion/attachmentList';
 import type { OrionSignatureState } from '../../../../../lib/orion/types';
 import { buildOrionParticipants } from '../../../../../lib/orion/participants';
 import OrionSignaturePanel from '../../../../../components/orion/OrionSignaturePanel';
 import { OrionSignatureProvider } from '../../../../../components/orion/OrionSignatureContext';
 import OrionAttachmentTableRow from '../../../../../components/orion/OrionAttachmentTableRow';
+import ViewOnlineButton from '../../../../../components/orion/ViewOnlineButton';
 import OrionDraftTableRow from '../../../../../components/orion/OrionDraftTableRow';
 import { nestDraftPdfRows } from '../../../../../lib/orion/attachmentNesting';
 import { isWordDraftFileName } from '../../../../../lib/orion/draftState';
@@ -3138,20 +3142,16 @@ function ViewRequestPage() {
                             >
                               <Group gap={6} wrap='nowrap'>
                                 {file.webUrl ? (
-                                  <Tooltip label='Ver en línea (sin descargar)'>
-                                    <ActionIcon
-                                      variant='subtle'
-                                      color='blue'
-                                      size='sm'
-                                      component='a'
-                                      href={file.webUrl}
-                                      target='_blank'
-                                      rel='noopener noreferrer'
-                                      aria-label={`Ver en línea ${file.name}`}
-                                    >
-                                      <IconEye size={16} />
-                                    </ActionIcon>
-                                  </Tooltip>
+                                  <ViewOnlineButton
+                                    fileName={file.name}
+                                    href={file.webUrl}
+                                    inlineSrc={buildSynerLinkAttachmentFileUrl({
+                                      requestId: request.id,
+                                      fileId,
+                                    })}
+                                    webUrl={file.webUrl}
+                                    downloadUrl={openUrl}
+                                  />
                                 ) : null}
                                 <UnstyledButton
                                   component='a'
@@ -3197,20 +3197,16 @@ function ViewRequestPage() {
                             <Table.Td data-label='Abrir'>
                               <Group gap={6} wrap='nowrap'>
                               {file.webUrl ? (
-                                <Tooltip label='Ver en línea (sin descargar)'>
-                                  <ActionIcon
-                                    variant='subtle'
-                                    color='blue'
-                                    size='sm'
-                                    component='a'
-                                    href={file.webUrl}
-                                    target='_blank'
-                                    rel='noopener noreferrer'
-                                    aria-label={`Ver en línea ${file.name}`}
-                                  >
-                                    <IconEye size={16} />
-                                  </ActionIcon>
-                                </Tooltip>
+                                <ViewOnlineButton
+                                  fileName={file.name}
+                                  href={file.webUrl}
+                                  inlineSrc={buildSynerLinkAttachmentFileUrl({
+                                    requestId: request.id,
+                                    fileId,
+                                  })}
+                                  webUrl={file.webUrl}
+                                  downloadUrl={openUrl}
+                                />
                               ) : null}
                               <UnstyledButton
                                 component='a'
