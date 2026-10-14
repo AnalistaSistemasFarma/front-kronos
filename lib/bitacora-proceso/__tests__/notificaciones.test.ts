@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Avisos de la Bitácora de Proceso al INSPECTOR (campana + push), sobre el notificador compartido. Sin correos.
+// Avisos de la Bitácora de Proceso al JEFE DE PRODUCCIÓN (rol interno «inspector») (campana + push), sobre el notificador compartido. Sin correos.
 
 const { createAndSendNotifications } = vi.hoisted(() => ({ createAndSendNotifications: vi.fn() }));
 vi.mock('../../notifications.js', () => ({ createAndSendNotifications }));
@@ -20,28 +20,31 @@ const aviso: AvisoInspector = {
 
 beforeEach(() => createAndSendNotifications.mockReset());
 
-describe('Bitácora de Proceso · avisos al inspector', () => {
+describe('Bitácora de Proceso · avisos al jefe de producción', () => {
   it('enlace directo a la bitácora con la empresa', () => {
     expect(bitacoraUrl(42, 1)).toBe('/process/bitacora-proceso/42?empresa=1');
   });
 
-  it('al cerrar: «por verificar» al inspector, con enlace, lote y producto', () => {
+  it('al cerrar: «por verificar» al jefe de producción, con enlace, lote y producto', () => {
     const [n] = avisoPorVerificar(aviso);
     expect(n.emails).toEqual(['inspector@farmalogica.com']);
     expect(n.payload.title).toBe(OT_NOTIF_TITULOS.porVerificar);
     expect(n.payload.url).toBe('/process/bitacora-proceso/42?empresa=1');
-    expect(n.payload.body).toContain('Supervisor Planta cerró y firmó la bitácora N.º 7 (Cefazolina 1 g, lote 1565426)');
+    expect(n.payload.body).toContain('Supervisor Planta cerró la bitácora N.º 7 (Cefazolina 1 g, lote 1565426) («Cerró»)');
+    expect(n.payload.body).not.toMatch(/firm|inspector/i);
     expect(n.payload.body).toContain('«Verificó»');
     // Sin «#número»: la campana no la confunde con un ticket.
     expect(n.payload.body).not.toContain('#');
     expect(n.payload.tag).toBe('ot-42-verificar');
   });
 
-  it('al abrir: aviso de designación al inspector', () => {
+  it('al abrir: aviso de designación al jefe de producción', () => {
     const [n] = avisoInspectorAsignado(aviso);
     expect(n.emails).toEqual(['inspector@farmalogica.com']);
     expect(n.payload.title).toBe(OT_NOTIF_TITULOS.inspectorAsignado);
-    expect(n.payload.body).toContain('lo designó inspector');
+    expect(n.payload.body).toContain('lo designó jefe de producción');
+    expect(n.payload.title).toBe('Fue designado jefe de producción de una bitácora · SynerLink');
+    expect(`${n.payload.title} ${n.payload.body}`).not.toMatch(/inspector|firm/i);
     expect(n.payload.tag).toBe('ot-42-inspector');
   });
 

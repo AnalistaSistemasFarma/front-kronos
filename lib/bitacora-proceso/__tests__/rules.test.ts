@@ -5,8 +5,12 @@ import {
   describeOtPermissionMarker,
   isOtIcono,
   isOtPermissionMarkerSubprocess,
+  OT_ACTIVIDADES_A6,
+  OT_AREAS_FARMALOGICA,
   OT_CATALOGO_FARMALOGICA,
   OT_ICONOS,
+  OT_ROL_LABEL,
+  OT_TURNO_LABEL,
   OT_SUBPROCESS_NAMES,
   OT_SUBPROCESS_URLS,
   otNombreCompleto,
@@ -14,6 +18,7 @@ import {
 } from '../constants';
 import {
   assertActividadRegistrable,
+  assertOperadorDeLaOrden,
   assertPuedeRegistrar,
   buildSapOpFilter,
   companyOtAccess,
@@ -21,12 +26,18 @@ import {
   isEstado,
   isOtError,
   OtError,
+  parseAgregarOperadores,
   parseCambioActividad,
+  parseCambioArea,
+  parseCambioOperador,
   parseCierre,
   parseNuevaActividad,
+  parseNuevaArea,
   parseNuevaOrden,
+  parseNuevoOperador,
   parseNuevoRegistro,
   resolveOtAccess,
+  resolverArea,
 } from '../rules';
 import { isHubHiddenRequestDashboardSubprocess } from '../../request-general/dashboardRoutes';
 
@@ -87,31 +98,48 @@ describe('Bitácora de Proceso · permisos', () => {
     expect(errorOf(() => assertPuedeRegistrar({ estado: 'CERRADA', operarios: [] }, 'u9', supervisor)).status).toBe(409);
   });
 
-  it('quien no es auxiliar ni inspector y no tiene Gestión recibe 403; el inspector sí registra', () => {
+  it('bitácora anterior (auxiliares con usuario): quien no figura y no tiene Gestión recibe 403; el jefe de producción sí registra', () => {
     const e = errorOf(() => assertPuedeRegistrar({ estado: 'ABIERTA', operarios: ['u1'], inspector: 'u3' }, 'u2', operario));
     expect(e.status).toBe(403);
-    expect(e.message).toMatch(/no figura como auxiliar ni como inspector/);
+    expect(e.message).toMatch(/no figura como auxiliar ni como jefe de producción/);
     expect(() => assertPuedeRegistrar({ estado: 'ABIERTA', operarios: ['u1'], inspector: 'u3' }, 'u3', operario)).not.toThrow();
     expect(errorOf(() => assertPuedeRegistrar({ estado: 'CERRADA', operarios: [], inspector: 'u3' }, 'u3', operario)).status).toBe(409);
     expect(() => assertPuedeRegistrar({ estado: 'ABIERTA', operarios: ['u1'] }, 'u1', operario)).not.toThrow();
     expect(() => assertPuedeRegistrar({ estado: 'ABIERTA', operarios: [] }, 'u2', supervisor)).not.toThrow();
   });
+
+  it('A1: con operarios programados registra cualquier sesión con el permiso (cuenta compartida de planta)', () => {
+    expect(() => assertPuedeRegistrar({ estado: 'ABIERTA', operarios: [], operadores: [7] }, 'u-planta', operario)).not.toThrow();
+    expect(errorOf(() => assertPuedeRegistrar({ estado: 'CERRADA', operarios: [], operadores: [7] }, 'u-planta', operario)).status).toBe(409);
+  });
+
+  it('A1: el operario elegido debe estar programado; es obligatorio si la bitácora tiene operarios', () => {
+    expect(() => assertOperadorDeLaOrden([7, 8], 7)).not.toThrow();
+    expect(errorOf(() => assertOperadorDeLaOrden([7, 8], null)).message).toMatch(/Elija primero su nombre/);
+    expect(errorOf(() => assertOperadorDeLaOrden([7, 8], 9)).status).toBe(403);
+    expect(() => assertOperadorDeLaOrden([], null)).not.toThrow();
+    expect(errorOf(() => assertOperadorDeLaOrden([], 7)).status).toBe(400);
+  });
 });
 
 describe('Bitácora de Proceso · validación', () => {
-  const base = { company: FARMA, producto: ' Cefazolina 1 g ', lote: '1565426', turno: 'manana', operarios: ['u1', 'u1', ' u2 '], inspector: ' u9 ' };
+  const base = { company: FARMA, producto: ' Cefazolina 1 g ', lote: '1565426', turno: 'manana', operadores: [7, 7, '8'], idArea: 3, inspector: ' u9 ' };
 
-  it('abre sin OP de SAP (opcional), normaliza turno y operarios', () => {
+  it('abre sin OP de SAP (opcional), normaliza turno, operarios (sin usuario) y área del catálogo', () => {
     const input = parseNuevaOrden(base);
-    expect(input).toMatchObject({ idCompany: FARMA, producto: 'Cefazolina 1 g', lote: '1565426', turno: 'MANANA', sapOp: null, area: null, itemCode: null });
-    expect(input.operarios).toEqual(['u1', 'u2']);
+    expect(input).toMatchObject({ idCompany: FARMA, producto: 'Cefazolina 1 g', lote: '1565426', turno: 'MANANA', sapOp: null, idArea: 3, itemCode: null });
+    expect(input.operadores).toEqual([7, 8]);
     expect(input.inspector).toBe('u9');
+    expect(parseNuevaOrden({ ...base, idArea: undefined }).idArea).toBeNull();
+    // El área ya no es texto libre: un texto en `area` se ignora.
+    expect(parseNuevaOrden({ ...base, area: 'Texto libre' })).not.toHaveProperty('area');
   });
 
-  it('el inspector es obligatorio', () => {
-    expect(errorOf(() => parseNuevaOrden({ ...base, inspector: '' })).message).toMatch(/inspector/);
-    expect(errorOf(() => parseNuevaOrden({ ...base, inspector: undefined })).message).toMatch(/inspector/);
-    expect(errorOf(() => parseNuevaOrden({ ...base, inspector: 'x'.repeat(51) })).message).toMatch(/Inspector no válido/);
+  it('el jefe de producción es obligatorio', () => {
+    expect(errorOf(() => parseNuevaOrden({ ...base, inspector: '' })).message).toMatch(/jefe de producción/);
+    expect(errorOf(() => parseNuevaOrden({ ...base, inspector: undefined })).message).toMatch(/jefe de producción/);
+    expect(errorOf(() => parseNuevaOrden({ ...base, inspector: 'x'.repeat(51) })).message).toMatch(/Jefe de producción no válido/);
+    expect(parseNuevaOrden({ ...base, inspector: undefined, jefeProduccion: 'u5' }).inspector).toBe('u5');
   });
 
   it('exige producto, lote, turno válido y al menos un operario', () => {
@@ -120,12 +148,13 @@ describe('Bitácora de Proceso · validación', () => {
     expect(errorOf(() => parseNuevaOrden({ ...base, producto: '  ' })).message).toMatch(/producto/);
     expect(errorOf(() => parseNuevaOrden({ ...base, lote: '' })).message).toMatch(/lote/);
     expect(errorOf(() => parseNuevaOrden({ ...base, turno: 'MADRUGADA' })).message).toMatch(/turno/);
-    expect(errorOf(() => parseNuevaOrden({ ...base, operarios: [] })).message).toMatch(/auxiliar/);
-    expect(errorOf(() => parseNuevaOrden({ ...base, operarios: 'u1' })).message).toMatch(/auxiliar/);
-    expect(errorOf(() => parseNuevaOrden({ ...base, operarios: Array.from({ length: 51 }, (_, i) => `u${i}`) })).message).toMatch(/Máximo/);
-    expect(errorOf(() => parseNuevaOrden({ ...base, operarios: ['x'.repeat(51)] })).message).toMatch(/no válido/);
+    expect(errorOf(() => parseNuevaOrden({ ...base, operadores: [] })).message).toMatch(/al menos un operario/);
+    expect(errorOf(() => parseNuevaOrden({ ...base, operadores: 7 })).message).toMatch(/al menos un operario/);
+    expect(errorOf(() => parseNuevaOrden({ ...base, operadores: Array.from({ length: 51 }, (_, i) => i + 1) })).message).toMatch(/máximo/);
+    expect(errorOf(() => parseNuevaOrden({ ...base, operadores: ['abc'] })).message).toMatch(/no válido/);
+    expect(errorOf(() => parseNuevaOrden({ ...base, operadores: [0] })).message).toMatch(/no válido/);
     expect(errorOf(() => parseNuevaOrden({ ...base, lote: 'x'.repeat(51) })).message).toMatch(/máximo 50/);
-    expect(errorOf(() => parseNuevaOrden({ ...base, area: 'x'.repeat(101) })).message).toMatch(/área/);
+    expect(errorOf(() => parseNuevaOrden({ ...base, idArea: -1 })).message).toMatch(/área/);
   });
 
   it('guarda una copia acotada de la OP de SAP (solo los campos conocidos)', () => {
@@ -141,21 +170,65 @@ describe('Bitácora de Proceso · validación', () => {
   });
 
   it('IGNORA cualquier hora o usuario que envíe el cliente en el registro', () => {
-    const input = parseNuevoRegistro({ id_actividad: 3, observacion: ' ok ', registrado_en: '2020-01-01T00:00:00Z', fecha: 'ayer', id_user: 'otro' });
-    expect(input).toEqual({ idActividad: 3, observacion: 'ok' });
-    expect(parseNuevoRegistro({ idActividad: '4' })).toEqual({ idActividad: 4, observacion: null });
+    const input = parseNuevoRegistro({ id_actividad: 3, id_operador: 7, observacion: ' ok ', registrado_en: '2020-01-01T00:00:00Z', fecha: 'ayer', id_user: 'otro' });
+    expect(input).toEqual({ idActividad: 3, idOperador: 7, observacion: 'ok' });
+    expect(parseNuevoRegistro({ idActividad: '4' })).toEqual({ idActividad: 4, idOperador: null, observacion: null });
+    expect(errorOf(() => parseNuevoRegistro({ id_actividad: 1, id_operador: 'x' })).message).toMatch(/operario/);
     expect(errorOf(() => parseNuevoRegistro({})).message).toMatch(/actividad/);
     expect(errorOf(() => parseNuevoRegistro(null)).status).toBe(400);
     expect(errorOf(() => parseNuevoRegistro({ id_actividad: 1, observacion: 'x'.repeat(501) })).message).toMatch(/500/);
   });
 
-  it('la observación es obligatoria cuando la actividad lo exige; no se registra en una inactiva', () => {
+  it('la observación es OPCIONAL en todas (también en «Otra»); no se registra en una inactiva', () => {
     const otra = { activo: true, exige_observacion: true, nombre: 'Otra' };
-    expect(errorOf(() => assertActividadRegistrable(otra, null)).message).toMatch(/exige una observación/);
-    expect(() => assertActividadRegistrable(otra, 'Cambio de filtro')).not.toThrow();
-    expect(() => assertActividadRegistrable({ ...otra, exige_observacion: false }, null)).not.toThrow();
-    expect(errorOf(() => assertActividadRegistrable({ ...otra, activo: false }, 'x')).status).toBe(400);
-    expect(errorOf(() => assertActividadRegistrable(null, null)).status).toBe(400);
+    expect(() => assertActividadRegistrable(otra)).not.toThrow();
+    expect(errorOf(() => assertActividadRegistrable({ ...otra, activo: false })).status).toBe(400);
+    expect(errorOf(() => assertActividadRegistrable(null)).status).toBe(400);
+  });
+
+  it('A1: maestro de operarios (nombre obligatorio, documento opcional, solo cambia nombre/documento/activo)', () => {
+    expect(parseNuevoOperador({ company: FARMA, nombre: '  Pepito   Pérez ', documento: ' 123 ' })).toEqual({ idCompany: FARMA, nombre: 'Pepito Pérez', documento: '123' });
+    expect(parseNuevoOperador({ company: FARMA, nombre: 'Ana' }).documento).toBeNull();
+    expect(errorOf(() => parseNuevoOperador({ company: FARMA, nombre: ' ' })).message).toMatch(/nombre/);
+    expect(errorOf(() => parseNuevoOperador({ nombre: 'Ana' })).message).toMatch(/empresa/);
+    expect(errorOf(() => parseNuevoOperador({ company: FARMA, nombre: 'x'.repeat(121) })).status).toBe(400);
+    expect(parseCambioOperador({ company: FARMA, id_operador: 7, activo: false })).toEqual({ idCompany: FARMA, idOperador: 7, activo: false });
+    expect(parseCambioOperador({ company: FARMA, id_operador: 7, documento: '' })).toEqual({ idCompany: FARMA, idOperador: 7, documento: null });
+    expect(errorOf(() => parseCambioOperador({ company: FARMA, id_operador: 7 })).message).toMatch(/No hay cambios/);
+    expect(errorOf(() => parseCambioOperador({ company: FARMA })).status).toBe(400);
+    expect(parseAgregarOperadores({ operadores: [3, '3', 4] })).toEqual([3, 4]);
+    expect(errorOf(() => parseAgregarOperadores({ operadores: [] })).status).toBe(400);
+  });
+
+  it('A5: área del catálogo (obligatoria si la empresa tiene áreas; sin texto libre)', () => {
+    const areas = [{ id_area: 3, nombre: 'Envase y agrafado' }];
+    expect(resolverArea(areas, 3)).toEqual(areas[0]);
+    expect(errorOf(() => resolverArea(areas, null)).message).toMatch(/Seleccione el área/);
+    expect(errorOf(() => resolverArea(areas, 9)).status).toBe(400);
+    expect(resolverArea([], null)).toBeNull();
+    expect(errorOf(() => resolverArea([], 3)).status).toBe(400);
+    expect(parseNuevaArea({ company: FARMA, nombre: ' Envase y agrafado ' })).toEqual({ idCompany: FARMA, nombre: 'Envase y agrafado', orden: 0 });
+    expect(parseCambioArea({ company: FARMA, id_area: 3, activo: false })).toEqual({ idCompany: FARMA, idArea: 3, activo: false });
+    expect(errorOf(() => parseCambioArea({ company: FARMA, id_area: 3 })).status).toBe(400);
+    expect(OT_AREAS_FARMALOGICA).toEqual(['Envase y agrafado']);
+  });
+
+  it('A3 y A9: etiquetas de jefe de producción y turnos con horario', () => {
+    expect(OT_ROL_LABEL).toEqual({ SUPERVISOR: 'Supervisor', INSPECTOR: 'Jefe de producción' });
+    expect(OT_TURNO_LABEL).toEqual({ MANANA: 'Mañana (06–14)', TARDE: 'Tarde (14–22)', NOCHE: 'Noche (22–06)' });
+  });
+
+  it('A6: actividades nuevas con ícono válido (alistamiento primero; despeje y aseo al final, antes de «Otra»)', () => {
+    expect(OT_ACTIVIDADES_A6.map((a) => a.nombre)).toEqual(['Alistamiento inicial', 'Despeje de área (fin de lote)', 'Aseo de área']);
+    expect(OT_ACTIVIDADES_A6.every((a) => isOtIcono(a.icono))).toBe(true);
+    const primera = Math.min(...OT_CATALOGO_FARMALOGICA.map((a) => a.orden));
+    expect(OT_ACTIVIDADES_A6[0].orden).toBeLessThan(primera);
+    const otra = OT_CATALOGO_FARMALOGICA.find((a) => a.nombre === 'Otra')!.orden;
+    const ultimaNormal = Math.max(...OT_CATALOGO_FARMALOGICA.filter((a) => a.nombre !== 'Otra').map((a) => a.orden));
+    for (const a of OT_ACTIVIDADES_A6.slice(1)) {
+      expect(a.orden).toBeGreaterThan(ultimaNormal);
+      expect(a.orden).toBeLessThan(otra);
+    }
   });
 
   it('cierre: observación opcional con límite', () => {
@@ -220,5 +293,17 @@ describe('Bitácora de Proceso · catálogo de Farmalógica', () => {
       icono: m[4],
     }));
     expect(filas).toEqual(OT_CATALOGO_FARMALOGICA.map((a) => ({ nombre: a.nombre, exigeObservacion: a.exigeObservacion, orden: a.orden, icono: a.icono })));
+  });
+
+  it('la siembra del 2026-10-14 coincide con OT_ACTIVIDADES_A6 y el área predefinida, y no duplica lo creado en vivo', () => {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- ruta fija del repositorio, no viene de un usuario
+    const sql = readFileSync(fileURLToPath(new URL('../../../prisma/manual/2026-10-14-bitacora-proceso-ajustes-farmalogica.sql', import.meta.url)), 'utf8');
+    const filas = [...sql.matchAll(/\(N'([^']+)',\s*N'([a-z-]+)',\s*(\d+)\)/g)].map((m) => ({ nombre: m[1], icono: m[2], orden: Number(m[3]) }));
+    expect(filas).toEqual(OT_ACTIVIDADES_A6.map((a) => ({ nombre: a.nombre, icono: a.icono, orden: a.orden })));
+    for (const area of OT_AREAS_FARMALOGICA) expect(sql).toContain(`N'${area}'`);
+    // Alias de lo que Nicolás creó en vivo en pruebas: no se insertan de nuevo.
+    expect(sql).toContain("N'Despeje del área'");
+    expect(sql).toContain("N'Aseo del área'");
+    expect(sql).toMatch(/@DesactivarFinDeLote BIT = 0/);
   });
 });

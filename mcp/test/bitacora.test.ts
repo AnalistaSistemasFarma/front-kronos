@@ -57,7 +57,7 @@ const ORDEN = {
   inspector_email: 'ins@example.com',
   cerrada_por_id: 'u-sup',
   cerrada_por_nombre: 'Supervisora',
-  auxiliares: 2,
+  operarios: 2,
   registros: 5,
   ultimo_registro_en: new Date('2026-10-14T17:30:00.000Z'),
   ultima_firma_en: new Date('2026-10-14T18:05:00.000Z'),
@@ -80,10 +80,13 @@ function seedBitacora(m: MockPrisma, opts: { ordenes?: unknown[] } = {}) {
       if (t.includes('from ot_orden_operario oo\n') || /from ot_orden_operario oo\s+left join/i.test(q.text)) {
         return [{ id_user: 'u-a1', name: 'Aux 1', email: 'a1@example.com' }];
       }
+      if (/from ot_orden_operador op\s+inner join ot_operador/i.test(q.text)) {
+        return [{ id_operador: 7, nombre: 'Pepito Pérez', activo: true }];
+      }
       if (/from ot_registro r\s+left join \[user\]/i.test(q.text)) {
         return [
-          { id_registro: '11', id_actividad: 1, actividad_nombre: 'Alimentación de tolva', registrado_en: new Date('2026-10-14T12:00:00Z'), observacion: null, id_user: 'u-a1', usuario_nombre: 'Aux 1' },
-          { id_registro: '12', id_actividad: 14, actividad_nombre: 'Otra', registrado_en: new Date('2026-10-14T13:00:00Z'), observacion: 'Limpieza', id_user: 'u-ins', usuario_nombre: 'Inspector' },
+          { id_registro: '11', id_actividad: 1, actividad_nombre: 'Alimentación de tolva', registrado_en: new Date('2026-10-14T12:00:00Z'), observacion: null, id_user: 'u-a1', usuario_nombre: 'Aux 1', id_operador: null, operador_nombre: null },
+          { id_registro: '12', id_actividad: 14, actividad_nombre: 'Otra', registrado_en: new Date('2026-10-14T13:00:00Z'), observacion: 'Limpieza', id_user: 'u-planta', usuario_nombre: 'Producción Planta', id_operador: 7, operador_nombre: 'Pepito Pérez' },
         ];
       }
       if (/from ot_registro r\s+inner join ot_orden_trabajo/i.test(q.text)) {
@@ -173,8 +176,10 @@ describe('kronos_list_bitacoras', () => {
     expect(b.codigo).toBe('BP-0003');
     expect(b.estado).toBe('verificada');
     expect(b.firmas).toBe('cerrada_y_verificada');
-    expect(b.turno).toBe('Mañana');
-    expect(b.auxiliares).toBe(2);
+    expect(b.turno).toBe('Mañana (06–14)');
+    expect(b.operarios).toBe(2);
+    expect(b.jefe_produccion).toEqual({ id: 'u-ins', nombre: 'Inspector' });
+    expect(b).not.toHaveProperty('inspector');
     expect(b.registros).toBe(5);
     expect(b.abierta_en).toBe('2026-10-14T11:00:00.000Z');
     expect(b.ultima_actividad_en).toBe('2026-10-14T18:05:00.000Z');
@@ -189,7 +194,7 @@ describe('kronos_list_bitacoras', () => {
       producto: "CEFA'; DROP TABLE x --",
       lote: '15%',
       supervisor: 'amanda',
-      inspector: 'u-ins',
+      jefeProduccion: 'u-ins',
       ordenProduccion: 14045,
     });
     const q = bitacoraQueries()[0]!;
@@ -229,18 +234,25 @@ describe('kronos_get_bitacora', () => {
     const out = data as {
       found: boolean;
       bitacora: Record<string, unknown>;
-      participantes: { auxiliares: unknown[]; inspector: { nombre: string } };
-      registros: { id: string; registrado_en: string; actividad: string }[];
-      firmas: { significado: string; nombre: string }[];
+      participantes: { auxiliares_con_usuario: unknown[]; operarios: { nombre: string }[]; jefe_produccion: { nombre: string } };
+      registros: { id: string; registrado_en: string; actividad: string; operario: { nombre: string } | null; usuario_sesion: { nombre: string } }[];
+      firmas: { significado: string; nombre: string; rol: string }[];
     };
     expect(out.found).toBe(true);
     expect(out.bitacora.codigo).toBe('BP-0003');
     expect(out.bitacora.estado).toBe('verificada');
     expect(out.bitacora.orden_produccion_sap_copia).toEqual({ ItemNo: 'PTCZ0121', DocumentNumber: 14045 });
-    expect(out.participantes.auxiliares).toHaveLength(1);
-    expect(out.participantes.inspector.nombre).toBe('Inspector');
+    expect(out.participantes.auxiliares_con_usuario).toHaveLength(1);
+    expect(out.participantes.operarios.map((o) => o.nombre)).toEqual(['Pepito Pérez']);
+    expect(out.participantes.jefe_produccion.nombre).toBe('Inspector');
     expect(out.registros.map((r) => r.id)).toEqual(['11', '12']);
+    expect(out.registros[0]!.operario).toBeNull();
+    expect(out.registros[1]!.operario?.nombre).toBe('Pepito Pérez');
+    expect(out.registros[1]!.usuario_sesion.nombre).toBe('Producción Planta');
     expect(out.firmas.map((f) => f.significado)).toEqual(['Cerró', 'Verificó']);
+    expect(out.firmas.map((f) => f.rol)).toEqual(['supervisor', 'jefe_produccion']);
+    // Ninguna llave de salida llama «inspector» a quien verifica.
+    expect(JSON.stringify(out.participantes)).not.toMatch(/"inspector":/i);
 
     // Nunca se piden ni se devuelven la imagen, las huellas, la IP ni el navegador.
     const sqlFirmas = bitacoraQueries().find((q) => /from ot_firma f\s+where/i.test(q.text))!;
