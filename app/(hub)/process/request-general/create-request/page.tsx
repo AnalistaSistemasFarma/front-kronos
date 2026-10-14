@@ -98,6 +98,10 @@ import SapOptionSelect from './SapOptionSelect';
 import TableFieldInput from './TableFieldInput';
 import { formatEstimatedPaymentDate } from '../../../../../lib/treasury/estimatedPaymentDate';
 import toast from 'react-hot-toast';
+import {
+  buildTaskDisplayBadges,
+  getSimplifiedTasksProgress,
+} from '@/lib/orion/taskProgress';
 
 interface RequestTask {
   id: number;
@@ -105,6 +109,7 @@ interface RequestTask {
   task: string;
   id_status: number;
   status_task: string;
+  resolution?: string | null;
 }
 
 interface Ticket {
@@ -1195,12 +1200,7 @@ function RequestBoard() {
     }
   };
 
-  const getTasksProgress = (tasks: RequestTask[]) => {
-    const total = tasks.length;
-    const done = tasks.filter((t) => t.status_task?.toLowerCase() === 'resuelto').length;
-    const percent = total === 0 ? 0 : Math.round((done / total) * 100);
-    return { total, done, percent };
-  };
+  const getTasksProgress = (tasks: RequestTask[]) => getSimplifiedTasksProgress(tasks);
 
   const getGlobalTasksProgress = () => {
     const allTasks = Object.values(tasksByRequest).flat();
@@ -1671,12 +1671,12 @@ function RequestBoard() {
                               );
                             })()}
                             <Group gap={6} wrap='wrap'>
-                              {tasksByRequest[ticket.id].map((task) => {
-                                const { color, Icon } = getTaskVisual(task.status_task);
+                              {buildTaskDisplayBadges(tasksByRequest[ticket.id]).map((badge) => {
+                                const { color, Icon } = getTaskVisual(badge.statusKey);
                                 return (
                                   <Tooltip
-                                    key={task.id}
-                                    label={`${task.task} · ${task.status_task}`}
+                                    key={badge.key}
+                                    label={`${badge.label} · ${badge.statusLabel}`}
                                     withArrow
                                   >
                                     <Badge
@@ -1685,12 +1685,19 @@ function RequestBoard() {
                                       size='sm'
                                       radius='sm'
                                       styles={{
-                                        root: { textTransform: 'none', fontWeight: 500, cursor: 'default' },
-                                        label: { overflow: 'hidden', textOverflow: 'ellipsis' },
+                                        root: {
+                                          textTransform: 'none',
+                                          fontWeight: 500,
+                                          cursor: 'default',
+                                        },
+                                        label: {
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis',
+                                        },
                                       }}
                                       leftSection={<Icon size={13} />}
                                     >
-                                      {task.task}
+                                      {badge.label}
                                     </Badge>
                                   </Tooltip>
                                 );
