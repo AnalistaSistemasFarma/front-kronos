@@ -7,9 +7,19 @@ type Props = {
   initialImage?: string | null;
   onSave: (dataUrl: string) => void;
   saving?: boolean;
+  /** Texto de ayuda bajo el panel (por defecto, el de las solicitudes). */
+  hint?: string;
+  /** Texto del botón de guardar (por defecto «Guardar firma»). */
+  saveLabel?: string;
 };
 
-export default function SignaturePad({ initialImage, onSave, saving = false }: Props) {
+export default function SignaturePad({
+  initialImage,
+  onSave,
+  saving = false,
+  hint = 'Dibuje su firma con el mouse o el dedo. Se usará al firmar documentos en esta solicitud.',
+  saveLabel = 'Guardar firma',
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
   const [isEmpty, setIsEmpty] = useState(true);
@@ -130,14 +140,14 @@ export default function SignaturePad({ initialImage, onSave, saving = false }: P
         />
       </div>
       <Text size='xs' c='dimmed'>
-        Dibuje su firma con el mouse o el dedo. Se usará al firmar documentos en esta solicitud.
+        {hint}
       </Text>
       <Group>
         <Button variant='default' onClick={clear} disabled={saving}>
           Limpiar
         </Button>
         <Button onClick={save} disabled={isEmpty || saving} loading={saving}>
-          Guardar firma
+          {saveLabel}
         </Button>
       </Group>
     </Stack>

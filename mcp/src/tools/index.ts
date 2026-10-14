@@ -26,6 +26,7 @@ import {
   processOwnerEmails,
 } from '../workflow.js';
 import { registerIaAccessTool } from './iaAccess.js';
+import { BITACORA_TOOLS, registerBitacoraTools } from './bitacoraProceso.js';
 
 interface ToolContext {
   scope: AuthScope;
@@ -314,6 +315,16 @@ export const ENTITY_METADATA = {
     companyColumn: 'company_user.id_company (vía relación)',
     fields: Object.keys(USER_SAFE_SELECT),
   },
+  bitacoras: {
+    description:
+      'Bitácora de Proceso (planta): una bitácora = un turno (ot_orden_trabajo), con auxiliares (ot_orden_operario), registros de intervenciones con hora del servidor en UTC (ot_registro, inmutables), catálogo de actividades (ot_actividad) y firmas «Cerró»/«Verificó» (ot_firma). Solo lectura vía kronos_list_bitacoras, kronos_get_bitacora, kronos_bitacora_actividad_reciente y kronos_list_bitacora_actividades. Nunca se exponen imágenes de firma, huellas ni IP.',
+    companyColumn: 'ot_orden_trabajo.id_company / ot_actividad.id_company',
+    fields: [
+      'id', 'codigo (BP-xxxx, consecutivo por empresa)', 'id_company', 'company', 'producto', 'item_code', 'lote',
+      'turno', 'area', 'orden_produccion_sap', 'estado (abierta|cerrada|verificada)', 'abierta_en', 'cerrada_en',
+      'supervisor', 'inspector', 'auxiliares', 'registros', 'firmas', 'ultima_actividad_en',
+    ],
+  },
   attachments: {
     description:
       'Adjuntos/documentos de una solicitud. El CONTENIDO binario NO se guarda en la base de datos: los archivos se suben a OneDrive (MS Graph) en la carpeta determinística SAPSEND/TEC/SG/Request-<id>. kronos_list_attachments devuelve DOS cosas: (a) "required_files" = la DEFINICIÓN de qué archivos exige el proceso (file_process_category: etiqueta, obligatoriedad, condición) y (b) "files" = los archivos REALES cargados en OneDrive (name, size, tipo, fechas, file_id y download_url temporal). kronos_get_attachment resuelve el archivo real (download_url y, opcional, base64) o la definición del proceso.',
@@ -327,7 +338,8 @@ export const ENTITY_METADATA = {
 } as const;
 
 /**
- * Capacidades del servidor: 29 tools en total = 21 de LECTURA + 8 de ESCRITURA.
+ * Capacidades del servidor: 34 tools en total = 25 de LECTURA (incluye 4 de la
+ * Bitácora de Proceso) + 9 de ESCRITURA.
  *
  * Las de escritura están acotadas (categorización, creación de solicitudes,
  * notas, resolución de tareas, adjuntos en OneDrive y formulario dinámico),
@@ -335,7 +347,7 @@ export const ENTITY_METADATA = {
  * candado de solo lectura del resto del servidor.
  */
 export const TOOL_CAPABILITIES = {
-  totalTools: 30,
+  totalTools: 34,
   readOnly: [
     'kronos_metadata',
     'kronos_list_requests',
@@ -358,6 +370,7 @@ export const TOOL_CAPABILITIES = {
     'teams_list_meetings',
     'teams_list_transcripts',
     'teams_get_transcript',
+    ...BITACORA_TOOLS,
   ],
   write: [
     'kronos_categorize_case',
@@ -403,6 +416,16 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
 
   // Radicación de solicitudes de conectores IA a nombre de una persona.
   registerIaAccessTool(server, ctx);
+
+  // Bitácora de Proceso (planta): 4 tools de SOLO LECTURA (src/tools/bitacoraProceso.ts).
+  registerBitacoraTools(server, {
+    scope: ctx.scope,
+    maxPageSize: ctx.maxPageSize,
+    defaultPageSize: ctx.defaultPageSize,
+    withAudit: (tool, params, fn) => withAudit(ctx, tool, params, fn),
+    companyClause,
+    isMissingTableError,
+  });
 
   // ---------------------------------------------------------------------------
   // Teams / transcripciones

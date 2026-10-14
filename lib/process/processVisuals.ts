@@ -90,7 +90,7 @@ const SUB_RULES: Array<{ test: RegExp; icon: TablerIcon }> = [
   { test: /actividad|tarea/, icon: IconListCheck },
   { test: /dashboard|tablero/, icon: IconLayoutDashboard },
   { test: /autoriz/, icon: IconShieldCheck },
-  { test: /[oó]rden(es)?\s+de\s+trabajo/, icon: IconListCheck },
+  { test: /bit[aá]cora|[oó]rden(es)?\s+de\s+trabajo/, icon: IconListCheck },
   { test: /orden/, icon: IconReceipt },
   { test: /oferta/, icon: IconRosetteDiscount },
   { test: /inventario|stock/, icon: IconPackages },

@@ -28,8 +28,10 @@ export default defineConfig({
       'app/api/authorization/**/*.test.ts',
       // `app/api/portal/politicas/**`: Políticas y reglamentos del Portal TH (sesión obligatoria, Graph simulado).
       'app/api/portal/**/*.test.ts',
-      // `app/api/ordenes-trabajo/**`: Órdenes de Trabajo (permisos en el servidor, sin edición ni borrado).
-      'app/api/ordenes-trabajo/**/*.test.ts',
+      // `app/api/bitacora-proceso/**`: Órdenes de Trabajo (permisos en el servidor, sin edición ni borrado).
+      'app/api/bitacora-proceso/**/*.test.ts',
+      // `app/api/firma-gss/**`: «Mi firma» en GSS Firma (solo la propia, reautenticación, imagen saneada).
+      'app/api/firma-gss/**/*.test.ts',
       'components/sgc/**/*.test.ts',
     ],
     exclude: ['node_modules', '.next', 'mcp', 'dist'],
@@ -68,9 +70,16 @@ export default defineConfig({
         'lib/sgc/**/*.ts',
         'app/api/sgc/**/route.ts',
         // Órdenes de Trabajo: reglas puras y rutas (la capa de datos se prueba en integración).
-        'lib/ordenes-trabajo/constants.ts',
-        'lib/ordenes-trabajo/rules.ts',
-        'app/api/ordenes-trabajo/**/route.ts',
+        'lib/bitacora-proceso/constants.ts',
+        'lib/bitacora-proceso/rules.ts',
+        'lib/bitacora-proceso/firmas.ts',
+        'lib/bitacora-proceso/notificaciones.ts',
+        'app/api/bitacora-proceso/**/route.ts',
+        // Firma GSS: saneamiento de la imagen y registro de la firma propia.
+        'lib/firma-gss/png.ts',
+        'lib/firma-gss/sniff.ts',
+        'lib/firma-gss/miFirma.ts',
+        'app/api/firma-gss/**/route.ts',
       ],
       exclude: [
         '**/__tests__/**',

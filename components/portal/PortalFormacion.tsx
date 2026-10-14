@@ -301,7 +301,10 @@ function VistaCursoEstudiante({
     await cargar();
     await onCambio();
   };
-  // Respuestas de un formulario (solo administradores/formadores del Excel).
+  // «Ver respuestas» en esta vista: SOLO para quien está en las hojas ADMINISTRADORES/FORMADORES del Excel
+  // de permisos pero NO es formador del portal (`PORTAL_TH_FORMADORES`). Esa persona no tiene «Vista formador»
+  // y, sin esto, perdería el acceso a las respuestas. Los formadores las ven en su vista (Cristian, 2026-10-09).
+  const verRespuestasAqui = puedeMarcar && detalle?.esFormador !== true;
   const [respuestasDe, setRespuestasDe] = useState<Material | null>(null);
 
   /** Un ENLACE cuenta como revisado al abrirlo (lo registra el servidor). */
@@ -385,7 +388,7 @@ function VistaCursoEstudiante({
                   {!m.obligatorio && ' · opcional'}
                 </span>
               </div>
-              {m.tipo === 'FORM' && puedeMarcar && (
+              {m.tipo === 'FORM' && verRespuestasAqui && (
                 <Button size='xs' variant='default' leftSection={<IconTable size={14} />} onClick={() => setRespuestasDe(m)}>
                   Ver respuestas
                 </Button>
