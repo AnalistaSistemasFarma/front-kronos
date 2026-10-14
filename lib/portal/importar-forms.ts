@@ -32,14 +32,16 @@ export function validarEnlaceForms(texto: unknown): { ok: true; url: string } | 
   }
 }
 
-export type TipoPreguntaImportada = 'texto' | 'texto_largo' | 'fecha' | 'seleccion';
+export type TipoPreguntaImportada = 'texto' | 'texto_largo' | 'fecha' | 'seleccion' | 'seleccion_multiple';
 
 export interface PreguntaImportada {
   texto: string;
   obligatoria: boolean;
   tipo: TipoPreguntaImportada;
-  /** Solo `seleccion`. */
+  /** Solo `seleccion` y `seleccion_multiple`. */
   opciones: string[];
+  /** Solo `seleccion`: en Forms era una lista desplegable (se conserva como tal). */
+  lista?: boolean;
 }
 
 export interface ImportacionForms {
@@ -146,7 +148,7 @@ export function normalizarImportacion(crudo: unknown): ImportacionForms {
       preguntas.push({ texto: enunciado, obligatoria: q.obligatoria === true, tipo, opciones: [] });
       return;
     }
-    if (tipo === 'seleccion') {
+    if (tipo === 'seleccion' || tipo === 'multiple') {
       const vistas = new Set<string>();
       const opciones: string[] = [];
       let recortada = false;
@@ -171,7 +173,14 @@ export function normalizarImportacion(crudo: unknown): ImportacionForms {
       if (opciones.length === 0) return void advertencias.push(`Pregunta ${n} «${corto(enunciado)}»: no tiene opciones; no se importó.`);
       if (opciones.length > MAX_OPCIONES) advertencias.push(`Pregunta ${n}: solo se importaron las primeras ${MAX_OPCIONES} opciones.`);
       if (recortada) advertencias.push(`Pregunta ${n}: alguna opción se recortó a ${MAX_TEXTO_OPCION} caracteres.`);
-      preguntas.push({ texto: enunciado, obligatoria: q.obligatoria === true, tipo: 'seleccion', opciones: opciones.slice(0, MAX_OPCIONES) });
+      const multiple = tipo === 'multiple';
+      preguntas.push({
+        texto: enunciado,
+        obligatoria: q.obligatoria === true,
+        tipo: multiple ? 'seleccion_multiple' : 'seleccion',
+        opciones: opciones.slice(0, MAX_OPCIONES),
+        ...(!multiple && q.lista === true ? { lista: true } : {}),
+      });
       return;
     }
     advertencias.push(`Pregunta ${n} «${corto(enunciado)}»: es de tipo ${NOMBRE_TIPO[tipo] ?? NOMBRE_TIPO.otro} y no se puede importar; agréguela a mano si la necesita.`);

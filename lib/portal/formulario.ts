@@ -42,7 +42,7 @@
  *   `correcta` NUNCA sale hacia el estudiante: ver `definicionPublica`.
  */
 
-export const TIPOS_PREGUNTA = ['texto', 'texto_largo', 'numero', 'fecha', 'seleccion', 'si_no'] as const;
+export const TIPOS_PREGUNTA = ['texto', 'texto_largo', 'numero', 'fecha', 'seleccion', 'seleccion_multiple', 'si_no'] as const;
 export type TipoPregunta = (typeof TIPOS_PREGUNTA)[number];
 
 /** Las dos opciones de `si_no`, tal como las muestra Microsoft Forms. */
@@ -53,17 +53,24 @@ export interface PreguntaFormulario {
   texto: string;
   tipo: TipoPregunta;
   obligatoria: boolean;
-  /** Solo `seleccion`. */
+  /** Solo `seleccion` y `seleccion_multiple`. */
   opciones?: string[];
   /** Solo `seleccion`: agrega "Otra respuesta" con texto libre. */
   permiteOtra?: boolean;
+  /** Solo `seleccion`: cómo se muestran las opciones. Ausente = botones de opción; `lista` = lista desplegable. */
+  presentacion?: 'lista';
   /** Se prellena desde la sesión del portal. */
   prellenar?: 'correo' | 'nombre';
   ayuda?: string;
   /** Solo evaluaciones: puntos de la pregunta (las calificadas suman 100). */
   puntos?: number;
-  /** Solo evaluaciones: posición (desde 0) de la opción correcta. Nunca se envía al estudiante. */
+  /** Solo evaluaciones, `seleccion`: posición (desde 0) de la opción correcta. Nunca se envía al estudiante. */
   correcta?: number;
+  /**
+   * Solo evaluaciones, `seleccion_multiple`: posiciones (desde 0) de TODAS las opciones correctas. Se acierta solo si la
+   * persona marca exactamente esas (ni una de menos ni una de más): todo o nada. Nunca se envía al estudiante.
+   */
+  correctas?: number[];
 }
 
 export type TipoFormulario = 'encuesta' | 'evaluacion';
@@ -99,8 +106,8 @@ export interface DefinicionFormulario {
   preguntas: PreguntaFormulario[];
 }
 
-/** Respuesta a una pregunta: texto, o la opción "Otra" con su texto. */
-export type ValorRespuesta = string | { otra: string };
+/** Respuesta a una pregunta: texto, la opción "Otra" con su texto, o —en `seleccion_multiple`— la lista de opciones marcadas. */
+export type ValorRespuesta = string | { otra: string } | string[];
 export type Respuestas = Record<string, ValorRespuesta>;
 
 export const MAX_PREGUNTAS = 200;
@@ -202,24 +209,33 @@ export function validarDefinicion(
       const tipo = TIPOS_PREGUNTA.includes(p.tipo as TipoPregunta) ? (p.tipo as TipoPregunta) : null;
       if (!tipo) return void errores.push(`Pregunta ${n}: "tipo" debe ser uno de ${TIPOS_PREGUNTA.join(', ')}.`);
       const pregunta: PreguntaFormulario = { id, texto, tipo, obligatoria: p.obligatoria === true };
-      if (tipo === 'seleccion') {
+      const esSeleccion = tipo === 'seleccion' || tipo === 'seleccion_multiple';
+      if (esSeleccion) {
         const opciones = Array.isArray(p.opciones) ? p.opciones.map((o) => textoLimpio(o, MAX_TEXTO_OPCION)) : null;
         if (!opciones || opciones.length === 0 || opciones.length > MAX_OPCIONES || opciones.some((o) => o === null)) {
           return void errores.push(`Pregunta ${n}: "opciones" debe ser una lista de 1 a ${MAX_OPCIONES} textos.`);
         }
         if (new Set(opciones).size !== opciones.length) return void errores.push(`Pregunta ${n}: hay opciones repetidas.`);
         pregunta.opciones = opciones as string[];
-        if (p.permiteOtra === true) pregunta.permiteOtra = true;
+        if (p.permiteOtra === true) {
+          if (tipo === 'seleccion_multiple') return void errores.push(`Pregunta ${n}: una selección múltiple no admite "otra respuesta".`);
+          pregunta.permiteOtra = true;
+        }
+      }
+      if (p.presentacion !== undefined && p.presentacion !== null) {
+        if (p.presentacion !== 'lista') return void errores.push(`Pregunta ${n}: "presentacion" solo puede ser "lista".`);
+        if (tipo !== 'seleccion') return void errores.push(`Pregunta ${n}: la lista desplegable es solo para la selección única.`);
+        pregunta.presentacion = 'lista';
       }
       const hayPuntos = p.puntos !== undefined && p.puntos !== null;
-      const hayCorrecta = p.correcta !== undefined && p.correcta !== null;
+      const hayCorrecta = (p.correcta !== undefined && p.correcta !== null) || (p.correctas !== undefined && p.correctas !== null);
       if (tipoForm !== 'evaluacion') {
-        if (hayPuntos || hayCorrecta) return void errores.push(`Pregunta ${n}: "puntos" y "correcta" son solo para evaluaciones.`);
+        if (hayPuntos || hayCorrecta) return void errores.push(`Pregunta ${n}: "puntos", "correcta" y "correctas" son solo para evaluaciones.`);
       } else {
         if (hayCorrecta && !hayPuntos) return void errores.push(`Pregunta ${n}: tiene "correcta" pero no "puntos".`);
         if (hayPuntos) {
-          if (tipo !== 'seleccion' || p.permiteOtra === true) {
-            return void errores.push(`Pregunta ${n}: una pregunta con puntos debe ser de selección única, sin "otra respuesta".`);
+          if (!esSeleccion || p.permiteOtra === true) {
+            return void errores.push(`Pregunta ${n}: una pregunta con puntos debe ser de selección (única o múltiple), sin "otra respuesta".`);
           }
           if (pregunta.opciones!.length < 2) return void errores.push(`Pregunta ${n}: necesita al menos 2 opciones.`);
           const pts = p.puntos;
@@ -229,11 +245,26 @@ export function validarDefinicion(
           pregunta.puntos = pts;
           pregunta.obligatoria = true;
           if (hayCorrecta) {
-            const c = p.correcta;
-            if (typeof c !== 'number' || !Number.isInteger(c) || c < 0 || c >= pregunta.opciones!.length) {
-              return void errores.push(`Pregunta ${n}: "correcta" no corresponde a una de las opciones.`);
+            const total = pregunta.opciones!.length;
+            if (tipo === 'seleccion_multiple') {
+              if (p.correcta !== undefined && p.correcta !== null) return void errores.push(`Pregunta ${n}: una selección múltiple usa "correctas" (lista), no "correcta".`);
+              const cs = p.correctas;
+              const valida =
+                Array.isArray(cs) &&
+                cs.length >= 1 &&
+                cs.length <= total &&
+                cs.every((c) => typeof c === 'number' && Number.isInteger(c) && c >= 0 && c < total) &&
+                new Set(cs as number[]).size === cs.length;
+              if (!valida) return void errores.push(`Pregunta ${n}: "correctas" debe ser una lista de posiciones distintas de las opciones (al menos una).`);
+              pregunta.correctas = [...(cs as number[])].sort((a, b) => a - b);
+            } else {
+              if (p.correctas !== undefined && p.correctas !== null) return void errores.push(`Pregunta ${n}: "correctas" es solo para la selección múltiple.`);
+              const c = p.correcta;
+              if (typeof c !== 'number' || !Number.isInteger(c) || c < 0 || c >= total) {
+                return void errores.push(`Pregunta ${n}: "correcta" no corresponde a una de las opciones.`);
+              }
+              pregunta.correcta = c;
             }
-            pregunta.correcta = c;
           } else if (!borrador) {
             return void errores.push(`Pregunta ${n}: marque cuál es la respuesta correcta.`);
           }
@@ -294,15 +325,23 @@ function esNumero(v: string): boolean {
 export function estaVacia(valor: ValorRespuesta | undefined | null): boolean {
   if (valor === undefined || valor === null) return true;
   if (typeof valor === 'string') return valor.trim() === '';
+  if (Array.isArray(valor)) return valor.length === 0;
   return typeof valor.otra !== 'string' || valor.otra.trim() === '';
 }
 
 /** Error de UNA pregunta, o null si está bien. */
 export function validarPregunta(p: PreguntaFormulario, valor: ValorRespuesta | undefined | null): string | null {
   if (estaVacia(valor)) {
-    if (valor && typeof valor === 'object') return 'Escriba su otra respuesta.';
+    if (valor && typeof valor === 'object' && !Array.isArray(valor)) return 'Escriba su otra respuesta.';
     return p.obligatoria ? MENSAJE_OBLIGATORIA : null;
   }
+  if (Array.isArray(valor)) {
+    if (p.tipo !== 'seleccion_multiple') return 'Respuesta no válida.';
+    const marcadas = valor.map((x) => (typeof x === 'string' ? x.trim() : null));
+    if (marcadas.some((x) => x === null || !p.opciones?.includes(x))) return 'Elija solo entre las opciones.';
+    return new Set(marcadas).size === marcadas.length ? null : 'Hay opciones repetidas.';
+  }
+  if (p.tipo === 'seleccion_multiple') return 'Respuesta no válida.';
   if (typeof valor === 'object') {
     if (p.tipo !== 'seleccion' || !p.permiteOtra) return 'Respuesta no válida.';
     return valor!.otra.trim().length > MAX_TEXTO_RESPUESTA ? `Máximo ${MAX_TEXTO_RESPUESTA} caracteres.` : null;
@@ -341,6 +380,7 @@ export function validarRespuestas(
     const bruto = entrada[p.id];
     let valor: ValorRespuesta | null = null;
     if (typeof bruto === 'string') valor = bruto;
+    else if (Array.isArray(bruto) && bruto.length <= MAX_OPCIONES && bruto.every((x) => typeof x === 'string')) valor = bruto as string[];
     else if (bruto && typeof bruto === 'object' && !Array.isArray(bruto) && typeof (bruto as { otra?: unknown }).otra === 'string') {
       valor = { otra: (bruto as { otra: string }).otra };
     } else if (bruto !== undefined && bruto !== null) {
@@ -353,7 +393,7 @@ export function validarRespuestas(
       continue;
     }
     if (estaVacia(valor)) continue;
-    respuestas[p.id] = typeof valor === 'string' ? valor.trim() : { otra: valor!.otra.trim() };
+    respuestas[p.id] = typeof valor === 'string' ? valor.trim() : Array.isArray(valor) ? valor.map((x) => x.trim()) : { otra: valor!.otra.trim() };
   }
   return errores.length > 0 ? { ok: false, errores } : { ok: true, respuestas };
 }
@@ -371,7 +411,7 @@ export function puntosTotales(d: DefinicionFormulario): number {
  * rutas de formadores.
  */
 export function definicionPublica(d: DefinicionFormulario): DefinicionFormulario {
-  return { ...d, preguntas: d.preguntas.map(({ correcta: _correcta, ...resto }) => resto) };
+  return { ...d, preguntas: d.preguntas.map(({ correcta: _correcta, correctas: _correctas, ...resto }) => resto) };
 }
 
 export interface ResultadoEvaluacion {
@@ -395,11 +435,20 @@ export function calificar(d: DefinicionFormulario, respuestas: Respuestas): Resu
   let correctas = 0;
   let calificadas = 0;
   for (const p of d.preguntas) {
-    if (p.puntos === undefined || p.correcta === undefined) continue;
+    const definida = p.correcta !== undefined || (p.correctas !== undefined && p.correctas.length > 0);
+    if (p.puntos === undefined || !definida) continue;
     calificadas += 1;
     puntajeMax += p.puntos;
     const v = respuestas[p.id];
-    if (typeof v === 'string' && p.opciones?.[p.correcta] === v) {
+    let acierta = false;
+    if (p.tipo === 'seleccion_multiple') {
+      // Todo o nada: exactamente las opciones correctas, ni una de menos ni una de más.
+      const esperadas = new Set((p.correctas ?? []).map((i) => p.opciones?.[i]));
+      acierta = Array.isArray(v) && v.length === esperadas.size && v.every((x) => esperadas.has(x));
+    } else {
+      acierta = typeof v === 'string' && p.correcta !== undefined && p.opciones?.[p.correcta] === v;
+    }
+    if (acierta) {
       puntaje += p.puntos;
       correctas += 1;
     }
@@ -420,6 +469,7 @@ export function calificar(d: DefinicionFormulario, respuestas: Respuestas): Resu
 /** Cómo se muestra una respuesta en la tabla y en el Excel. */
 export function textoDeRespuesta(valor: ValorRespuesta | undefined): string {
   if (valor === undefined) return '';
+  if (Array.isArray(valor)) return valor.join('; ');
   return typeof valor === 'string' ? valor : `Otra: ${valor.otra}`;
 }
 

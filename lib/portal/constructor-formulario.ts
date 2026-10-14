@@ -47,7 +47,12 @@ export interface PreguntaEditable {
   permiteOtra: boolean;
   ayuda: string;
   puntos: number | '';
+  /** Selección única de una evaluación: posición de la opción correcta. */
   correcta: number | null;
+  /** Selección múltiple de una evaluación: posiciones de TODAS las opciones correctas. */
+  correctas: number[];
+  /** Selección única: se muestra como lista desplegable en vez de botones de opción. */
+  lista: boolean;
   /** Se conserva al editar; este editor no lo cambia. */
   prellenar?: 'correo' | 'nombre';
 }
@@ -89,6 +94,8 @@ export const preguntaVacia = (tipo: TipoFormulario, preguntas: PreguntaEditable[
   ayuda: '',
   puntos: '',
   correcta: null,
+  correctas: [],
+  lista: false,
 });
 
 export function estadoInicial(tipo: TipoFormulario, definicion?: DefinicionFormulario): Estado {
@@ -124,6 +131,8 @@ export function estadoInicial(tipo: TipoFormulario, definicion?: DefinicionFormu
       ayuda: p.ayuda ?? '',
       puntos: p.puntos ?? '',
       correcta: p.correcta ?? null,
+      correctas: p.correctas ? [...p.correctas] : [],
+      lista: p.presentacion === 'lista',
       prellenar: p.prellenar,
     });
   }
@@ -147,7 +156,8 @@ export function estadoInicial(tipo: TipoFormulario, definicion?: DefinicionFormu
   return { ...base, puntosAuto: base.tipo === 'evaluacion' && yaPorIgual };
 }
 
-export const esCalificada = (e: Estado, p: PreguntaEditable) => e.tipo === 'evaluacion' && p.tipo === 'seleccion';
+export const esSeleccion = (p: PreguntaEditable) => p.tipo === 'seleccion' || p.tipo === 'seleccion_multiple';
+export const esCalificada = (e: Estado, p: PreguntaEditable) => e.tipo === 'evaluacion' && esSeleccion(p);
 
 /**
  * Reparto automático: 100 ÷ número de preguntas calificadas. Si no divide exacto
@@ -200,19 +210,23 @@ export function construirDefinicion(entrada: Estado): { definicion: DefinicionFo
     const q: PreguntaFormulario = { id: p.id, texto: p.texto.trim(), tipo: p.tipo, obligatoria: esCalificada(e, p) ? true : p.obligatoria };
     if (p.prellenar) q.prellenar = p.prellenar;
     if (p.ayuda.trim()) q.ayuda = p.ayuda.trim();
-    if (p.tipo === 'seleccion') {
-      // Las opciones vacías se descartan; la correcta se reubica entre las que quedan.
+    if (esSeleccion(p)) {
+      const multiple = p.tipo === 'seleccion_multiple';
+      // Las opciones vacías se descartan; las correctas se reubican entre las que quedan.
       const limpias: string[] = [];
       let correcta: number | undefined;
+      const correctasNuevas: number[] = [];
       p.opciones.forEach((o, j) => {
         if (!o.trim()) return;
         if (p.correcta === j) correcta = limpias.length;
+        if (p.correctas.includes(j)) correctasNuevas.push(limpias.length);
         limpias.push(o.trim());
       });
       if (limpias.length < (evaluacion ? 2 : 1)) errores.push(`Pregunta ${n}: agregue al menos ${evaluacion ? 'dos opciones' : 'una opción'}.`);
       if (new Set(limpias).size !== limpias.length) errores.push(`Pregunta ${n}: hay opciones repetidas.`);
       q.opciones = limpias;
-      if (p.permiteOtra && !evaluacion) q.permiteOtra = true;
+      if (p.permiteOtra && !evaluacion && !multiple) q.permiteOtra = true;
+      if (p.lista && !multiple) q.presentacion = 'lista';
       if (evaluacion) {
         const pts = p.puntos === '' ? NaN : Number(p.puntos);
         if (!Number.isFinite(pts) || pts <= 0) errores.push(`Pregunta ${n}: asigne los puntos (mayor que 0).`);
@@ -220,7 +234,10 @@ export function construirDefinicion(entrada: Estado): { definicion: DefinicionFo
           q.puntos = redondear2(pts);
           suma += q.puntos;
         }
-        if (correcta === undefined && !e.borrador) errores.push(`Pregunta ${n}: marque cuál es la respuesta correcta.`);
+        if (multiple) {
+          if (correctasNuevas.length === 0 && !e.borrador) errores.push(`Pregunta ${n}: marque cuáles son las respuestas correctas.`);
+          else if (correctasNuevas.length > 0) q.correctas = correctasNuevas;
+        } else if (correcta === undefined && !e.borrador) errores.push(`Pregunta ${n}: marque cuál es la respuesta correcta.`);
         else if (correcta !== undefined) q.correcta = correcta;
       }
     }
@@ -322,14 +339,16 @@ export function estadoDesdeImportacion(tipo: TipoFormulario, imp: ImportacionFor
       texto: p.texto,
       tipo: p.tipo,
       obligatoria: p.obligatoria,
-      opciones: p.tipo === 'seleccion' ? [...p.opciones] : [],
+      opciones: p.tipo === 'seleccion' || p.tipo === 'seleccion_multiple' ? [...p.opciones] : [],
       permiteOtra: false,
       ayuda: '',
       puntos: '',
       correcta: null,
+      correctas: [],
+      lista: p.tipo === 'seleccion' && p.lista === true,
     });
   }
-  const hayCalificables = preguntas.some((p) => p.tipo === 'seleccion');
+  const hayCalificables = preguntas.some((p) => esSeleccion(p));
   return conReparto({
     ...base,
     puntosAuto: true,
