@@ -58,10 +58,15 @@ async function fillSignature(page: Page, password: string, reason: string, check
   await page.getByTestId('sgc-firma-motivo').fill(reason);
   await expect(page.getByTestId('sgc-firma-confirmar')).toBeDisabled();
   await page.getByTestId('sgc-firma-consentimiento').check();
-  // S7 (SGC-REQ-110): la contraseña de la firma no se autocompleta — arranca vacía, de solo lectura y con new-password.
+  // S7 (SGC-REQ-110) y S14 (SGC-REQ-151): la contraseña de la firma no se autocompleta — en Chromium es un campo de
+  // TEXTO enmascarado (sin ningún type=password en el formulario, el gestor de contraseñas no lo ve), con nombre
+  // único, sin campo de usuario oculto; arranca vacía y de solo lectura.
   const pw = page.getByTestId('sgc-firma-contrasena');
-  await expect(pw).toHaveAttribute('autocomplete', 'new-password');
-  await expect(pw).not.toHaveAttribute('name', /^(password|current-password)$/);
+  await expect(pw).toHaveAttribute('type', 'text');
+  await expect(pw).toHaveAttribute('autocomplete', 'off');
+  await expect(pw).toHaveAttribute('name', /^sgc-firma-reautenticacion-[a-z0-9]{8}$/);
+  expect(await pw.evaluate((el) => getComputedStyle(el).getPropertyValue('-webkit-text-security'))).toBe('disc');
+  await expect(page.getByTestId('sgc-firma-form').locator('input[type="password"], input[autocomplete="username"], input[autocomplete="current-password"]')).toHaveCount(0);
   await expect(pw).toHaveValue('');
   await expect(pw).toHaveAttribute('readonly', '');
   await pw.click();
