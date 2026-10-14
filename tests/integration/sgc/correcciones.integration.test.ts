@@ -268,7 +268,9 @@ describe.skipIf(!url)('SGC · correcciones de Calidad con SQL Server', () => {
     expect(layout.emission?.page).toBe(2);
     const manifest = (await readManifest(store.get(v.pdf_item_id)!))!;
     expect(manifest.institutionalHeader).toBe(true);
-    expect(manifest.placements).toHaveLength(4);
+    // S14 (R20): elaboró, revisó y aprobó; la verificación de Calidad no se estampa (sigue en sgc.signature).
+    expect(manifest.placements).toHaveLength(3);
+    expect(await prisma.sgcSignature.count({ where: { id_request: r1 } })).toBeGreaterThan(manifest.signatures.length);
     const elabSig = await prisma.sgcSignature.findFirstOrThrow({ where: { id_request: r1, meaning: 'elaboro' } });
     expect(manifest.placements!.find((p) => p.uid === elabSig.signature_uid.trim())).toMatchObject({ page: 1, x: 8, y: 14 });
     expect(layout.placements).toEqual(manifest.placements);
