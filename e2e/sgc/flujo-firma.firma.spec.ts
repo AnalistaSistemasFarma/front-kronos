@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext, type Browser, type Page } from '@playwright/test';
 import { STORAGE_STATE_2, STORAGE_STATE_3, STORAGE_STATE_4 } from '../../playwright.config';
+import { authorizeCreation, flowRoleModel } from './flujo-v7';
 
 /**
  * SGC documental · Sprint 3 CON SESIÓN, contra PRUEBAS (KRONOSDB_PRUEBAS):
@@ -95,7 +96,9 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
   let idRequest = 0;
 
   test('[SGC-REQ-028][SGC-REQ-032] qa.sgc4 crea la solicitud documental y el elaborador de la matriz (qa.sgc) la ve en su bandeja de Tareas documentales', async ({ browser, page }) => {
-    const p4 = await asUser(browser, STORAGE_STATE_4);
+    // S15 (DOC v7): quien pide elabora, así que la pide qa.sgc (con sus selectores) y qa.sgc2 autoriza la creación.
+    const v7 = (await flowRoleModel(page.request)) === 'solicitante_elabora';
+    const p4 = v7 ? page : await asUser(browser, STORAGE_STATE_4);
     await p4.goto(`/process/sgc-documental/solicitudes/nueva?empresa=${OLP}`);
     await chooseOption(p4, 'sgc-nueva-proceso', /^GC · /);
     await chooseOption(p4, 'sgc-nueva-tipo-documental', /^PR · /);
@@ -107,9 +110,10 @@ test.describe.serial('SGC documental · Sprint 3 · recorrido con firma electró
     await p4.getByTestId('sgc-nueva-crear').click();
     await p4.waitForURL(/\/process\/sgc-documental\/solicitudes\/\d+/, { timeout: 45_000 });
     idRequest = Number(/solicitudes\/(\d+)/.exec(p4.url())![1]);
-    await p4.context().close();
+    if (v7) await authorizeCreation(browser, idRequest);
+    else await p4.context().close();
     const d = (await (await page.request.get(`/api/sgc/requests/${idRequest}`)).json()) as { request: { elaboratorEmail: string } };
-    expect(d.request.elaboratorEmail, 'la matriz de responsables (GC × PR) asigna la elaboración a qa.sgc').toBe(U1.toLowerCase());
+    expect(d.request.elaboratorEmail, v7 ? 'DOC v7: quien pide (qa.sgc) elabora' : 'la matriz de responsables (GC × PR) asigna la elaboración a qa.sgc').toBe(U1.toLowerCase());
     await page.goto(`/process/sgc-documental/tareas?empresa=${OLP}`);
     await expect(page.locator(`[data-testid="bandeja-fila"][data-request="${idRequest}"]`)).toContainText('Elaboración');
   });

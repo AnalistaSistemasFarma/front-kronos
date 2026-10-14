@@ -28,10 +28,27 @@ function lower(email: string | null | undefined): string {
 const TRAINING_ROLES = ['material', 'capacitacion'];
 
 async function openTrainingTask(db: Db, idRequest: number) {
-  const request = await db.sgcRequest.findUnique({ where: { id_request: idRequest }, include: { tasks: { include: { taskDef: true }, orderBy: { id_task: 'asc' } } } });
+  const request = await db.sgcRequest.findUnique({ where: { id_request: idRequest }, include: { tasks: { include: { taskDef: true, assignees: true }, orderBy: { id_task: 'asc' } } } });
   if (!request) throw new SgcError('Solicitud no encontrada.', 404);
   const task = request.tasks.filter((t) => TRAINING_ROLES.includes(t.taskDef.role)).at(-1) ?? null;
   return { request, task };
+}
+
+/**
+ * S15 (DOC v7, R27): el CREADOR del documento prepara y dicta la capacitación
+ * y carga los resultados: en un paso asignado al «creador», la persona con el
+ * cupo personal de la tarea (aunque se le haya reasignado) lo gestiona igual
+ * que Aseguramiento de Calidad. En las versiones anteriores, solo Calidad.
+ */
+export function isTrainingCreator(task: { taskDef: { assignment: string }; assignees: { user_email: string | null; status: string }[] } | null, email: string): boolean {
+  if (!task || task.taskDef.assignment !== 'creador') return false;
+  const me = lower(email);
+  return task.assignees.some((a) => a.user_email && lower(a.user_email) === me && a.status !== 'reemplazado' && a.status !== 'anulado');
+}
+
+function assertTrainingManager(access: SgcCompanyAccess, task: Parameters<typeof isTrainingCreator>[0], email: string, what: string): void {
+  if (access.canQuality || isTrainingCreator(task, email)) return;
+  throw new SgcError(`Solo Aseguramiento de Calidad${task?.taskDef.assignment === 'creador' ? ' o el creador del documento' : ''} ${what}.`, 403);
 }
 
 /**
@@ -57,10 +74,10 @@ export async function trainingScopeEmails(db: Db, idRequest: number): Promise<st
 
 /** Registra o ajusta la capacitación (Calidad, con la tarea de capacitación abierta). */
 export async function saveTraining(db: SgcDb, access: SgcCompanyAccess, idRequest: number, raw: unknown, actor: SgcActor) {
-  if (!access.canQuality) throw new SgcError('Solo Aseguramiento de Calidad registra la capacitación.', 403);
   const cfg = normalizeTrainingConfig(raw);
   const { request, task } = await openTrainingTask(db, idRequest);
   if (access.idCompany !== request.id_company) throw new SgcError('Solicitud no encontrada.', 404);
+  assertTrainingManager(access, task, actor.email, 'registra la capacitación');
   if (request.status !== 'abierta' || !task || task.status !== 'abierta') throw new SgcError('La solicitud no está en el paso de capacitación (preparación del material o resultados).', 409);
   const now = new Date();
   const me = lower(actor.email);
@@ -125,9 +142,9 @@ export async function uploadTrainingResults(
   file: { fileName: string; bytes: Uint8Array },
   actor: SgcActor
 ) {
-  if (!access.canQuality) throw new SgcError('Solo Aseguramiento de Calidad carga los resultados de la capacitación.', 403);
   const { request, task } = await openTrainingTask(db, idRequest);
   if (access.idCompany !== request.id_company) throw new SgcError('Solicitud no encontrada.', 404);
+  assertTrainingManager(access, task, actor.email, 'carga los resultados de la capacitación');
   // Sprint 10: los resultados se cargan en la tarea de CAPACITACIÓN (no en la de preparación del material).
   if (request.status !== 'abierta' || !task || task.status !== 'abierta' || task.taskDef.role !== 'capacitacion') throw new SgcError('La solicitud no está en el paso de capacitación.', 409);
   const training = await trainingOfRequest(db, idRequest);
@@ -234,6 +251,8 @@ export interface SgcTrainingView {
   canUpload: boolean;
   /** Sprint 10: Calidad registra recapacitaciones (también después del cierre). */
   canRetrain: boolean;
+  /** S15 (R27): la prepara y la dicta el creador del documento (DOC v7). */
+  byCreator: boolean;
   training: {
     id: number;
     mode: SgcTrainingMode;
@@ -278,8 +297,8 @@ export interface SgcTrainingView {
 
 export async function getTrainingView(
   db: SgcDb,
-  request: { id_request: number; status: string; tasks: { id_task: number; status: string; taskDef: { role: string } }[] },
-  viewer: { isQuality: boolean },
+  request: { id_request: number; status: string; tasks: { id_task: number; status: string; taskDef: { role: string; assignment: string }; assignees: { user_email: string | null; status: string }[] }[] },
+  viewer: { isQuality: boolean; email?: string },
   names: (email: string | null) => string | null
 ): Promise<SgcTrainingView | null> {
   const task = request.tasks.filter((t) => TRAINING_ROLES.includes(t.taskDef.role)).at(-1) ?? null;
@@ -292,6 +311,9 @@ export async function getTrainingView(
   const open = request.status === 'abierta' && task.status === 'abierta';
   const phase = task.taskDef.role === 'material' ? ('material' as const) : ('resultados' as const);
   const summary = up ? uploadSummary(up) : null;
+  // S15 (R27): el creador del documento gestiona la capacitación de su paso, igual que Calidad.
+  const creator = viewer.email ? isTrainingCreator(task, viewer.email) : false;
+  const manager = viewer.isQuality || creator;
   const retrainingsOf = (email: string) =>
     (training?.retrainings ?? [])
       .filter((x) => lower(x.user_email) === email)
@@ -300,9 +322,10 @@ export async function getTrainingView(
     idTask: task.id_task,
     open,
     phase,
-    canManage: open && viewer.isQuality,
-    canUpload: open && viewer.isQuality && phase === 'resultados',
-    canRetrain: viewer.isQuality && Boolean(up),
+    canManage: open && manager,
+    canUpload: open && manager && phase === 'resultados',
+    canRetrain: (viewer.isQuality || (creator && open)) && Boolean(up),
+    byCreator: task.taskDef.assignment === 'creador',
     training: training
       ? {
           id: training.id_training,
@@ -353,10 +376,11 @@ export const SGC_RETRAINING_RESULTS = ['asistio', 'aprobo', 'reprobo'] as const;
  * Se puede registrar también después de cerrar la capacitación. Solo inserción.
  */
 export async function recordRetraining(db: SgcDb, access: SgcCompanyAccess, idRequest: number, raw: unknown, actor: SgcActor) {
-  if (!access.canQuality) throw new SgcError('Solo Aseguramiento de Calidad registra la recapacitación.', 403);
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const request = await db.sgcRequest.findUnique({ where: { id_request: idRequest } });
-  if (!request || request.id_company !== access.idCompany) throw new SgcError('Solicitud no encontrada.', 404);
+  const { request, task } = await openTrainingTask(db, idRequest);
+  if (request.id_company !== access.idCompany) throw new SgcError('Solicitud no encontrada.', 404);
+  // S15 (R27): el creador registra la recapacitación mientras su tarea está abierta; Calidad, también después del cierre.
+  if (!access.canQuality && !(isTrainingCreator(task, actor.email) && task?.status === 'abierta')) throw new SgcError('Solo Aseguramiento de Calidad (o el creador del documento, con la capacitación abierta) registra la recapacitación.', 403);
   const training = await trainingOfRequest(db, idRequest);
   const up = training ? await db.sgcTrainingUpload.findFirst({ where: { id_training: training.id_training }, orderBy: { id_training_upload: 'desc' }, include: { results: true } }) : null;
   if (!training || !up) throw new SgcError('La capacitación aún no tiene resultados cargados.', 409);

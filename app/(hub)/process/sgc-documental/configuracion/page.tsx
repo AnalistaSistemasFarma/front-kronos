@@ -326,7 +326,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
         </Tabs.Panel>
 
         <Tabs.Panel value='aprobadores'>
-          <SgcApprovers idCompany={company.idCompany} processes={(data?.processes ?? []).filter((p) => p.isActive).map((p) => ({ id: p.id, code: p.code, name: p.name }))} />
+          <SgcApprovers idCompany={company.idCompany} processes={(data?.processes ?? []).filter((p) => p.isActive).map((p) => ({ id: p.id, code: p.code, name: p.name }))} departments={data?.departments ?? []} />
         </Tabs.Panel>
 
         <Tabs.Panel value='empresa'>

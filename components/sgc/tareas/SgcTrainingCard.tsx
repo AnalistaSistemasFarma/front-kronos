@@ -31,6 +31,28 @@ export interface SgcTrainingCardProps {
   onUpload: (file: File) => Promise<boolean>;
   /** Sprint 10: registra la recapacitación de una persona. */
   onRetrain?: (body: Record<string, unknown>) => Promise<boolean>;
+  /** S15 (R27): personas para «Quién dicta» (selector; también «Externo»). */
+  users?: { value: string; label: string }[];
+}
+
+/** S15 (R27): opción «Externo» de «Quién dicta». */
+const EXTERNAL = '__externo__';
+const EXTERNAL_PREFIX = 'Externo: ';
+
+/** Valor guardado (texto) → selección del formulario. */
+export function instructorChoiceOf(saved: string | null | undefined, users: { value: string; label: string }[]): { choice: string | null; external: string } {
+  const v = (saved ?? '').trim();
+  if (!v) return { choice: null, external: '' };
+  const user = users.find((u) => u.label === v || u.value === v.toLowerCase());
+  if (user) return { choice: user.value, external: '' };
+  return { choice: EXTERNAL, external: v.startsWith(EXTERNAL_PREFIX) ? v.slice(EXTERNAL_PREFIX.length) : v };
+}
+
+/** Selección del formulario → valor que se guarda (texto legible, hasta 200 caracteres). */
+export function instructorValueOf(choice: string | null, external: string, users: { value: string; label: string }[]): string {
+  if (!choice) return '';
+  if (choice === EXTERNAL) return external.trim() ? `${EXTERNAL_PREFIX}${external.trim()}`.slice(0, 200) : '';
+  return (users.find((u) => u.value === choice)?.label ?? choice).slice(0, 200);
 }
 
 const STATUS: Record<string, { label: string; color: string }> = {
@@ -40,8 +62,10 @@ const STATUS: Record<string, { label: string; color: string }> = {
   sin_resultado: { label: 'Sin resultado', color: 'gray' },
 };
 
-export default function SgcTrainingCard({ view, onSave, onUpload, onRetrain }: SgcTrainingCardProps) {
+export default function SgcTrainingCard({ view, onSave, onUpload, onRetrain, users = [] }: SgcTrainingCardProps) {
   const t = view.training;
+  const [instructor, setInstructor] = useState(() => instructorChoiceOf(t?.instructor, users));
+  useEffect(() => setInstructor(instructorChoiceOf(t?.instructor, users)), [t?.instructor, users]);
   const [form, setForm] = useState({
     mode: (t?.mode ?? 'mixta') as SgcTrainingMode,
     title: t?.title ?? '',
@@ -73,7 +97,9 @@ export default function SgcTrainingCard({ view, onSave, onUpload, onRetrain }: S
       </Group>
       <Text size='sm' c='dimmed' mb='md'>
         {view.phase === 'material'
-          ? 'Antes de la divulgación, Calidad registra el material: el video o la sesión y la evaluación en Microsoft Forms o Google Forms. La lectura los muestra debajo del documento.'
+          ? view.byCreator
+            ? 'Antes de la divulgación, el creador del documento registra el material: el video o la sesión, quién la dicta y la evaluación en Microsoft Forms o Google Forms. La lectura los muestra debajo del documento.'
+            : 'Antes de la divulgación, Calidad registra el material: el video o la sesión y la evaluación en Microsoft Forms o Google Forms. La lectura los muestra debajo del documento.'
           : 'Participan las personas del alcance de la divulgación. Cuentan los primeros intentos de la evaluación; quien no aprueba en ellos queda en recapacitación. Al cerrarla con la firma «Capacitó», la versión pasa a vigente y la anterior a obsoleta.'}
       </Text>
 
@@ -139,7 +165,20 @@ export default function SgcTrainingCard({ view, onSave, onUpload, onRetrain }: S
               <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' type='date' label='Fecha de la sesión' leftSection={<IconCalendarEvent size={16} />} value={form.sessionDate} onChange={(e) => set('sessionDate', e.currentTarget.value)} data-testid='sgc-capacitacion-fecha' />
             </Grid.Col>
             <Grid.Col span={{ base: 12, md: 4 }}>
-              <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Quién dicta' value={form.instructor} onChange={(e) => set('instructor', e.currentTarget.value)} />
+              {/* S15 (R27): «Quién dicta» se elige entre las personas (o «Externo» con su nombre). */}
+              <SgcSelect
+                label='Quién dicta'
+                placeholder='Seleccione la persona'
+                searchable
+                clearable
+                data={[...users, { value: EXTERNAL, label: 'Externo (escriba el nombre)' }]}
+                value={instructor.choice}
+                onChange={(v) => setInstructor({ choice: v, external: v === EXTERNAL ? instructor.external : '' })}
+                data-testid='sgc-capacitacion-quien-dicta'
+              />
+              {instructor.choice === EXTERNAL && (
+                <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' mt='xs' placeholder='Nombre de quien dicta (externo)' value={instructor.external} onChange={(e) => setInstructor({ choice: EXTERNAL, external: e.currentTarget.value })} data-testid='sgc-capacitacion-quien-dicta-externo' />
+              )}
             </Grid.Col>
             <Grid.Col span={{ base: 6, md: 2 }}>
               <NumberInput label='Puntaje máximo' min={1} max={1000} value={form.maxScore} onChange={(v) => set('maxScore', v)} data-testid='sgc-capacitacion-maximo' />
@@ -157,7 +196,7 @@ export default function SgcTrainingCard({ view, onSave, onUpload, onRetrain }: S
           <Group>
             <Button
               onClick={async () => {
-                const ok = await onSave(form);
+                const ok = await onSave({ ...form, instructor: instructorValueOf(instructor.choice, instructor.external, users) });
                 if (ok) setEditing(false);
               }}
               data-testid='sgc-capacitacion-guardar'
@@ -193,7 +232,7 @@ export default function SgcTrainingCard({ view, onSave, onUpload, onRetrain }: S
           )}
         </Group>
       )}
-      {!t && !view.canManage && <Text size='sm' c='dimmed'>Calidad aún no registra la capacitación.</Text>}
+      {!t && !view.canManage && <Text size='sm' c='dimmed'>{view.byCreator ? 'El creador del documento aún no registra la capacitación.' : 'Calidad aún no registra la capacitación.'}</Text>}
 
       {up && (
         <Stack gap='xs'>

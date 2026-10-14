@@ -323,6 +323,9 @@ jobs:
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008140000_sgc_s12_aprobadores_sustitutos/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008150000_sgc_s13_firma_propia_registro/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261008150000_sgc_s13_firma_propia_registro/migration.sql
+          # S15: modelo de roles del DOC v7 (role_model, líderes por departamento y la acción «rechazar»).
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014100000_sgc_s15_modelo_roles/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014100000_sgc_s15_modelo_roles/migration.sql
           # Bitácora de Proceso (antes Órdenes de Trabajo; P0): tablas + triggers de integridad, inspector e íconos, y la siembra de Farmalógica (ambas dos veces: idempotentes).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013180000_ordenes_trabajo_p0/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013180000_ordenes_trabajo_p0/migration.sql
@@ -350,7 +353,7 @@ jobs:
         run: |
           set -e
           # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
-          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia"
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento"
           reversa() {
             { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
@@ -361,6 +364,14 @@ jobs:
             npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
           }
           # De la más nueva a la más antigua…
+          # S15: primero los datos (el DOC v7 de la empresa de su integración, 116) y luego el esquema.
+          # Sin las banderas, la reversa del esquema debe NEGARSE (hay solicitudes v7 abiertas y líderes por departamento).
+          sed 's/DECLARE @IdCompany INT = 3;/DECLARE @IdCompany INT = 116;/' prisma/manual/2026-10-14-sgc-s15-flujo-doc-v7-reversa.sql > /tmp/reversa-s15-datos.sql
+          reversa /tmp/reversa-s15-datos.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-14-sgc-s15-modelo-roles-reversa.sql; then echo "La reversa del S15 debió negarse sin sus banderas"; exit 1; fi
+          reversa prisma/manual/2026-10-14-sgc-s15-modelo-roles-reversa.sql
+          echo "IF COL_LENGTH(N'sgc.flow_version', N'role_model') IS NOT NULL OR COL_LENGTH(N'sgc.approver_authorization', N'id_department') IS NOT NULL THROW 50000, N'La reversa del S15 no quitó las columnas.', 1;" > /tmp/s15-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/s15-quitado.sql
           reversa prisma/manual/2026-10-08-sgc-s13-firma-propia-reversa.sql
           reversa prisma/manual/2026-10-08-sgc-s12-aprobadores-sustitutos-reversa.sql
           # Con firmas de sustitutos (integración del S12) la reversa CONSERVA signature.on_behalf_of.
@@ -379,6 +390,7 @@ jobs:
           migra 20261008130000_sgc_s11_copias_no_controladas
           migra 20261008140000_sgc_s12_aprobadores_sustitutos
           migra 20261008150000_sgc_s13_firma_propia_registro
+          migra 20261014100000_sgc_s15_modelo_roles
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-08-sgc-s8-guia-codificacion-olp.sql
 
       - name: Bitácora de Proceso — reversa (ida y vuelta)

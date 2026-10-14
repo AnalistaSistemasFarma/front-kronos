@@ -207,6 +207,8 @@ model Department {
   sgcProcesses        SgcProcessMap[]
   sgcOwnedDocuments   SgcDocument[]
   sgcDocumentAccesses SgcDocumentAccess[]
+  // S15: líderes aprobadores por departamento (sgc.approver_authorization.id_department).
+  sgcApproverLeaders  SgcApproverAuthorization[]
 
   @@map("department")
   @@schema("dbo")
@@ -1849,6 +1851,10 @@ model SgcFlowVersion {
   published_by    String?   @db.NVarChar(255)
   published_at    DateTime?
   retired_at      DateTime?
+  // S15 (DOC v7): modelo de roles de la versión. NULL = calidad_asigna (hasta el
+  // DOC v6); solicitante_elabora = el solicitante elabora y asigna firmantes de su
+  // departamento y Calidad autoriza la creación (lib/sgc/flows/roleModel.ts).
+  role_model      String?   @db.NVarChar(30)
 
   process     SgcFlowProcess      @relation(fields: [id_flow_process], references: [id_flow_process], onDelete: NoAction, onUpdate: NoAction)
   tasks       SgcFlowTaskDef[]
@@ -3297,9 +3303,14 @@ model SgcApproverAuthorization {
   revoked_by                String?   @db.NVarChar(255)
   revoked_at                DateTime?
   revoke_reason             String?   @db.NVarChar(1000)
+  // S15 (R19, D16): LÍDER que aprueba los documentos de un DEPARTAMENTO (flujo DOC
+  // v7). NULL = autorización por proceso del S12. La lista por departamento solo
+  // restringe si la empresa enciende el ajuste (apagado por defecto).
+  id_department             Int?
 
   companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   process       SgcProcessMap?   @relation(fields: [id_process_map], references: [id_process_map], onDelete: NoAction, onUpdate: NoAction)
+  department    Department?      @relation(fields: [id_department], references: [id_department], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([id_company, user_email])
   @@map("approver_authorization")

@@ -232,8 +232,9 @@ function AuthorizationBoard() {
     setBusy(true);
     setMsg(null);
     try {
-      await sgcSend(`/api/sgc/authorizations/${row.id}/decision`, 'POST', { decision, comment });
-      setMsg({ ok: true, text: decision === 'autorizar' ? 'Autorización registrada.' : 'Rechazada: el documento volvió a elaboración.' });
+      const res = await sgcSend<{ outcome?: string }>(`/api/sgc/authorizations/${row.id}/decision`, 'POST', { decision, comment });
+      // S15 (R15): rechazar la autorización de la CREACIÓN cierra la solicitud (no vuelve a elaboración).
+      setMsg({ ok: true, text: decision === 'autorizar' ? 'Autorización registrada.' : res?.outcome === 'rechazada' ? 'Rechazada: la creación del documento no se autorizó y la solicitud quedó cerrada.' : 'Rechazada: el documento volvió a elaboración.' });
       setAuthorize(null);
       setReject(null);
       setComment('');

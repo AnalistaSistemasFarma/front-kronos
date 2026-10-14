@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext, type Browser, type Page } from '@playwright/test';
-import { STORAGE_STATE_2, STORAGE_STATE_3, STORAGE_STATE_4 } from '../../playwright.config';
+import { STORAGE_STATE_2, STORAGE_STATE_3 } from '../../playwright.config';
+import { createRequestElaboratedByQaSgc } from './flujo-v7';
 
 /**
  * SGC documental · CORRECCIONES DE CALIDAD OLP (reunión 2026-10-02) CON
@@ -58,16 +59,19 @@ async function sign(api: APIRequestContext, idTask: number, meaning: string, pas
   return api.post(`/api/sgc/tasks/${idTask}/sign`, { data: { meaning, reason: `Firma ${meaning} de la e2e de las correcciones de Calidad.`, consentAccepted: true, password, ...extra } });
 }
 
-/** Crea la solicitud como qa.sgc4 (solicitante) y comprueba que la elabore qa.sgc (matriz GC × PR). */
-async function newRequest(api: APIRequestContext, subject: string): Promise<number> {
+/**
+ * Crea una solicitud que ELABORA qa.sgc (`api` = sesión de qa.sgc): con el DOC v6 la pide qa.sgc4 y la
+ * asigna la matriz GC × PR; con el DOC v7 (S15) la pide qa.sgc y qa.sgc2 (Calidad) autoriza la creación.
+ */
+async function newRequest(browser: Browser, api: APIRequestContext, subject: string): Promise<number> {
   const cat = await ok<{ processes: { id: number; code: string }[]; documentTypes: { id: number; code: string }[] }>(await api.get(`/api/sgc/catalogs?company=${OLP}`));
-  const created = await ok<{ idRequest: number }>(
-    await api.post('/api/sgc/requests', { data: { company: OLP, requestType: 'nuevo', subject: `${subject} ${new Date().toISOString()}`, description: 'Recorrido automático de la e2e de las correcciones de Calidad (datos de prueba).', idProcess: cat.processes.find((p) => p.code === 'GC')!.id, idDocumentType: cat.documentTypes.find((t) => t.code === 'PR')!.id, requiresTraining: 'no', formValues: { urgencia: 'Normal' } } }),
-    [201]
+  const { idRequest } = await createRequestElaboratedByQaSgc(
+    browser,
+    api,
+    { requestType: 'nuevo', subject: `${subject} ${new Date().toISOString()}`, description: 'Recorrido automático de la e2e de las correcciones de Calidad (datos de prueba).', idProcess: cat.processes.find((p) => p.code === 'GC')!.id, idDocumentType: cat.documentTypes.find((t) => t.code === 'PR')!.id, requiresTraining: 'no', formValues: { urgencia: 'Normal' } },
+    { elaboratorEmail: U1 }
   );
-  const d = await ok<{ request: { elaboratorEmail: string } }>(await api.get(`/api/sgc/requests/${created.idRequest}`));
-  expect(d.request.elaboratorEmail, 'la matriz de responsables (GC × PR) asigna la elaboración a qa.sgc').toBe(U1.toLowerCase());
-  return created.idRequest;
+  return idRequest;
 }
 
 async function addReaders(api: APIRequestContext, idRequest: number, emails: string[]) {
@@ -94,10 +98,8 @@ test.describe.serial('SGC documental · correcciones de Calidad OLP', () => {
   test('[SGC-REQ-094][SGC-REQ-095][SGC-REQ-096][SGC-REQ-097] documento desde la plantilla institucional: el elaborador ubica las firmas en el documento y el PDF controlado sale con el encabezado, los campos de sistema y las firmas dentro', async ({ browser, page }, testInfo) => {
     const p2 = await ctxFor(browser, STORAGE_STATE_2);
     const p3 = await ctxFor(browser, STORAGE_STATE_3);
-    const p4 = await ctxFor(browser, STORAGE_STATE_4);
-    // 2026-10-10 (RN 2026-10-05): el elaborador sale de la matriz de responsables y nunca es el solicitante.
-    idRequest = await newRequest(p4.request, 'E2E Calidad · firmas en el documento');
-    await p4.context().close();
+    // 2026-10-10 (RN 2026-10-05) y S15 (DOC v7): la solicitud la elabora qa.sgc (ver e2e/sgc/flujo-v7.ts).
+    idRequest = await newRequest(browser, page.request, 'E2E Calidad · firmas en el documento');
     for (const stepKey of ['revision', 'aprobacion']) await ok(await page.request.post(`/api/sgc/requests/${idRequest}/signers`, { data: { stepKey, signers: [U3], mode: 'orden' } }));
     await ok(await page.request.post(`/api/sgc/requests/${idRequest}/draft`, { data: { html: TEMPLATE, origin: 'plantilla', originRef: 'Plantilla institucional de procedimiento' } }));
     await addReaders(page.request, idRequest, [U1, U2, U3]);
@@ -183,9 +185,7 @@ test.describe.serial('SGC documental · correcciones de Calidad OLP', () => {
   });
 
   test('[SGC-REQ-098] «toda la empresa» solo incluye correos de la empresa: los QA (@gsslatam.com) quedan por fuera del alcance automático', async ({ browser, page }) => {
-    const p4 = await ctxFor(browser, STORAGE_STATE_4);
-    const id = await newRequest(p4.request, 'E2E Calidad · alcance por empresa');
-    await p4.context().close();
+    const id = await newRequest(browser, page.request, 'E2E Calidad · alcance por empresa');
     try {
       await ok(await page.request.post(`/api/sgc/requests/${id}/dissemination`, { data: { action: 'agregar', entry: { kind: 'empresa' }, reason: 'Prueba del alcance por empresa (no se aprueba)' } }), [201]);
       const view = await ok<{ dissemination: { companyDomains: string[] | null; outsideCompany: string[] } }>(await page.request.get(`/api/sgc/requests/${id}`));
@@ -217,9 +217,7 @@ test.describe.serial('SGC documental · correcciones de Calidad OLP', () => {
     // Elabora qa.sgc3 (así Calidad, qa.sgc, no es la elaboradora); revisa y aprueba qa.sgc2.
     // 2026-10-10 (RN 2026-10-05): solicita qa.sgc4 y la matriz asigna la elaboración a qa.sgc,
     // que confirma firmantes y alcance (elaborador con Calidad) y la reasigna a qa.sgc3.
-    const p4 = await ctxFor(browser, STORAGE_STATE_4);
-    const id = await newRequest(p4.request, 'E2E Calidad · revisión menor');
-    await p4.context().close();
+    const id = await newRequest(browser, page.request, 'E2E Calidad · revisión menor');
     try {
       for (const stepKey of ['revision', 'aprobacion']) await ok(await page.request.post(`/api/sgc/requests/${id}/signers`, { data: { stepKey, signers: [U2], mode: 'orden' } }));
       await addReaders(page.request, id, [U3]);
