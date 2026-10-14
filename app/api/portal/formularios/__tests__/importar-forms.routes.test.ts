@@ -105,7 +105,7 @@ describe('GET /api/portal/formularios/importar-forms/:id', () => {
   });
 
   it('listo: devuelve el resultado NORMALIZADO, nunca lo bruto del servicio', async () => {
-    const sucio = { ...CRUDO, scriptMalicioso: '<script>alert(1)</script>', preguntas: [...CRUDO.preguntas, { titulo: 'Marque varias', tipo: 'multiple', obligatoria: true, opciones: ['a'], extra: 'x' }] };
+    const sucio = { ...CRUDO, scriptMalicioso: '<script>alert(1)</script>', preguntas: [...CRUDO.preguntas, { titulo: 'Califique del 1 al 5', tipo: 'otro', obligatoria: true, opciones: ['a'], extra: 'x' }] };
     vi.stubGlobal('fetch', vi.fn(async () => json(200, { estado: 'listo', progreso: 100, etapa: 'Listo', resultado: sucio })));
     const data = await (await consultar(get(), p(ID))).json();
     expect(data.estado).toBe('listo');

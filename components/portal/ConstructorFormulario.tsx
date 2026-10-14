@@ -36,6 +36,7 @@ import {
   conReparto,
   construirDefinicion,
   esCalificada,
+  esSeleccion,
   estadoDesdeImportacion,
   estadoInicial,
   preguntaVacia,
@@ -62,16 +63,27 @@ import {
  * no muestra (autorización de datos, "otra respuesta", ayudas, prellenado).
  */
 
-const TIPOS_ENCUESTA: { value: TipoPregunta; label: string }[] = [
+/**
+ * Lo que elige quien arma el formulario. «Lista desplegable» no es un tipo aparte en la definición: es una selección
+ * única que se muestra como lista (`presentacion: 'lista'`).
+ */
+type TipoUi = TipoPregunta | 'lista';
+const tipoUi = (p: PreguntaEditable): TipoUi => (p.tipo === 'seleccion' && p.lista ? 'lista' : p.tipo);
+
+const TIPOS_ENCUESTA: { value: TipoUi; label: string }[] = [
   { value: 'texto', label: 'Texto corto' },
   { value: 'texto_largo', label: 'Texto largo' },
   { value: 'numero', label: 'Número' },
   { value: 'fecha', label: 'Fecha' },
-  { value: 'seleccion', label: 'Selección única' },
+  { value: 'seleccion', label: 'Selección única (botones)' },
+  { value: 'lista', label: 'Selección única (lista desplegable)' },
+  { value: 'seleccion_multiple', label: 'Selección múltiple' },
   { value: 'si_no', label: 'Sí / No' },
 ];
-const TIPOS_EVALUACION: { value: TipoPregunta; label: string }[] = [
+const TIPOS_EVALUACION: { value: TipoUi; label: string }[] = [
   { value: 'seleccion', label: 'Selección única (con puntos)' },
+  { value: 'lista', label: 'Lista desplegable (con puntos)' },
+  { value: 'seleccion_multiple', label: 'Selección múltiple (con puntos)' },
   { value: 'texto', label: 'Texto corto (dato, sin puntos)' },
   { value: 'texto_largo', label: 'Texto largo (dato, sin puntos)' },
   { value: 'numero', label: 'Número (dato, sin puntos)' },
@@ -124,9 +136,31 @@ export function ConstructorFormulario({
   const quitar = (i: number) => setE((x) => conReparto({ ...x, preguntas: x.preguntas.filter((_, j) => j !== i) }));
   const agregar = () => setE((x) => conReparto({ ...x, preguntas: [...x.preguntas, preguntaVacia(x.tipo, x.preguntas)] }));
 
-  const cambiarTipoPregunta = (i: number, t: TipoPregunta) => {
-    const p = e.preguntas[i];
-    setE((x) => conReparto({ ...x, preguntas: x.preguntas.map((q, j) => (j === i ? { ...q, tipo: t, opciones: t === 'seleccion' && p.opciones.length < 2 ? [...p.opciones, ...Array(2 - p.opciones.length).fill('')] : p.opciones, correcta: t === 'seleccion' ? p.correcta : null, puntos: t === 'seleccion' ? p.puntos : '' } : q)) }));
+  const cambiarTipoPregunta = (i: number, elegido: TipoUi) => {
+    const t: TipoPregunta = elegido === 'lista' ? 'seleccion' : elegido;
+    setE((x) =>
+      conReparto({
+        ...x,
+        preguntas: x.preguntas.map((q, j) => {
+          if (j !== i) return q;
+          const seleccion = t === 'seleccion' || t === 'seleccion_multiple';
+          const faltan = seleccion && q.opciones.length < 2 ? 2 - q.opciones.length : 0;
+          // Al pasar de única a múltiple (o al revés) se conserva la respuesta correcta que ya estaba marcada.
+          const correcta = t === 'seleccion' ? (q.correcta ?? q.correctas[0] ?? null) : null;
+          const correctas = t === 'seleccion_multiple' ? (q.correctas.length > 0 ? q.correctas : q.correcta !== null ? [q.correcta] : []) : [];
+          return {
+            ...q,
+            tipo: t,
+            lista: elegido === 'lista',
+            opciones: [...q.opciones, ...Array(faltan).fill('')],
+            correcta,
+            correctas,
+            permiteOtra: t === 'seleccion' ? q.permiteOtra : false,
+            puntos: seleccion ? q.puntos : '',
+          };
+        }),
+      })
+    );
   };
 
   const revisar = (): DefinicionFormulario | null => {
@@ -319,11 +353,11 @@ export function ConstructorFormulario({
                 <NativeSelect
                   label='Tipo de pregunta'
                   w={280}
-                  value={p.tipo}
+                  value={tipoUi(p)}
                   data={evaluacion ? TIPOS_EVALUACION : TIPOS_ENCUESTA}
-                  onChange={(ev) => cambiarTipoPregunta(i, ev.currentTarget.value as TipoPregunta)}
+                  onChange={(ev) => cambiarTipoPregunta(i, ev.currentTarget.value as TipoUi)}
                 />
-                {evaluacion && p.tipo === 'seleccion' && (
+                {evaluacion && esSeleccion(p) && (
                   <NumberInput
                     label='Puntos'
                     required
@@ -343,21 +377,35 @@ export function ConstructorFormulario({
                 )}
               </Group>
 
-              {p.tipo === 'seleccion' && (
+              {esSeleccion(p) && (
                 <Stack gap='xs'>
                   <Text size='sm' fw={500}>
-                    Opciones {evaluacion && <Text span size='xs' c='dimmed'>(marque la respuesta correcta)</Text>}
+                    Opciones{' '}
+                    {evaluacion && (
+                      <Text span size='xs' c='dimmed'>
+                        {p.tipo === 'seleccion_multiple' ? '(marque TODAS las respuestas correctas; se acierta solo si la persona marca exactamente esas)' : '(marque la respuesta correcta)'}
+                      </Text>
+                    )}
                   </Text>
                   {p.opciones.map((o, j) => (
                     <Group key={j} gap='xs' wrap='nowrap' align='center'>
-                      {evaluacion && (
-                        <Radio
-                          checked={p.correcta === j}
-                          onChange={() => cambiarPregunta(i, { correcta: j })}
-                          aria-label={`Marcar la opción ${j + 1} como correcta`}
-                          name={`correcta-${p.id}`}
-                        />
-                      )}
+                      {evaluacion &&
+                        (p.tipo === 'seleccion_multiple' ? (
+                          <Checkbox
+                            checked={p.correctas.includes(j)}
+                            onChange={(ev) =>
+                              cambiarPregunta(i, { correctas: ev.currentTarget.checked ? [...p.correctas, j] : p.correctas.filter((c) => c !== j) })
+                            }
+                            aria-label={`Marcar la opción ${j + 1} como correcta`}
+                          />
+                        ) : (
+                          <Radio
+                            checked={p.correcta === j}
+                            onChange={() => cambiarPregunta(i, { correcta: j })}
+                            aria-label={`Marcar la opción ${j + 1} como correcta`}
+                            name={`correcta-${p.id}`}
+                          />
+                        ))}
                       <Textarea
                         flex={1}
                         autosize
@@ -377,6 +425,7 @@ export function ConstructorFormulario({
                           cambiarPregunta(i, {
                             opciones: p.opciones.filter((_, k) => k !== j),
                             correcta: p.correcta === null ? null : p.correcta === j ? null : p.correcta > j ? p.correcta - 1 : p.correcta,
+                            correctas: p.correctas.filter((c) => c !== j).map((c) => (c > j ? c - 1 : c)),
                           })
                         }
                       >
@@ -388,7 +437,7 @@ export function ConstructorFormulario({
                     <Button size='xs' variant='default' leftSection={<IconPlus size={14} />} onClick={() => cambiarPregunta(i, { opciones: [...p.opciones, ''] })}>
                       Agregar opción
                     </Button>
-                    {!evaluacion && (
+                    {!evaluacion && p.tipo === 'seleccion' && (
                       <Checkbox size='xs' label='Permitir "Otra respuesta"' checked={p.permiteOtra} onChange={(ev) => cambiarPregunta(i, { permiteOtra: ev.currentTarget.checked })} />
                     )}
                   </Group>

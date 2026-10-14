@@ -559,21 +559,58 @@ function CampoPregunta({
 }) {
   const texto = typeof valor === 'string' ? valor : '';
   const opciones = p.tipo === 'si_no' ? [...OPCIONES_SI_NO] : (p.opciones ?? []);
-  const esOtra = typeof valor === 'object' && valor !== null;
+  const esOtra = typeof valor === 'object' && valor !== null && !Array.isArray(valor);
+  const marcadas = Array.isArray(valor) ? valor : [];
   // Mismo patrón de campo que el resto de SynerLink: etiqueta arriba, asterisco
   // rojo si es obligatoria, ayuda como descripción y error en rojo debajo.
   // `size='md'` en los campos de texto (16 px): con menos, Safari en iPhone
   // hace zoom al enfocar — mismo arreglo que en /login (ver globals.css).
   const comun = {
     label: `${numero}. ${p.texto}${p.puntos !== undefined ? ` (${p.puntos.toLocaleString('es-CO')} ${p.puntos === 1 ? 'punto' : 'puntos'})` : ''}`,
-    description: p.ayuda,
+    description: p.tipo === 'seleccion_multiple' ? [p.ayuda, 'Puede marcar varias opciones.'].filter(Boolean).join(' ') : p.ayuda,
     required: p.obligatoria,
     error,
   };
 
   return (
     <Box id={`fp-${p.id}`} className={`portal-th__formulario-pregunta${error ? ' portal-th__formulario-pregunta--error' : ''}`}>
-      {p.tipo === 'seleccion' || p.tipo === 'si_no' ? (
+      {p.tipo === 'seleccion_multiple' ? (
+        <Checkbox.Group {...comun} size='md' value={marcadas} onChange={(v) => onCambio(v)} data-testid={`multiple-${p.id}`}>
+          <Stack gap='xs' mt='xs'>
+            {opciones.map((o) => (
+              <Checkbox key={o} value={o} label={o} size='sm' />
+            ))}
+          </Stack>
+        </Checkbox.Group>
+      ) : p.tipo === 'seleccion' && p.presentacion === 'lista' ? (
+        <Stack gap='xs'>
+          <NativeSelect
+            {...comun}
+            size='md'
+            data={[
+              { value: '', label: 'Seleccione una opción' },
+              ...opciones.map((o) => ({ value: o, label: o })),
+              ...(p.permiteOtra ? [{ value: VALOR_OTRA, label: 'Otra respuesta' }] : []),
+            ]}
+            value={esOtra ? VALOR_OTRA : texto}
+            onChange={(e) => {
+              const v = e.currentTarget.value;
+              if (v === VALOR_OTRA) onCambio({ otra: esOtra ? (valor as { otra: string }).otra : '' });
+              else onCambio(v);
+            }}
+          />
+          {p.permiteOtra && esOtra && (
+            <TextInput
+              aria-label={`${p.texto}: otra respuesta`}
+              placeholder='Escriba su otra respuesta'
+              maxLength={2000}
+              size='md'
+              value={(valor as { otra: string }).otra}
+              onChange={(e) => onCambio({ otra: e.currentTarget.value })}
+            />
+          )}
+        </Stack>
+      ) : p.tipo === 'seleccion' || p.tipo === 'si_no' ? (
         <Radio.Group
           {...comun}
           size='md'

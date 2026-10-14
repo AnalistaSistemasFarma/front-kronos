@@ -78,7 +78,7 @@ describe('validarDefinicion: evaluación', () => {
     expect(errores(evaluacion({}, [{ ...base, puntos: -5, correcta: 0 }])).join(' ')).toMatch(/mayor que 0/);
     expect(errores(evaluacion({}, [{ ...base, puntos: 10.123, correcta: 0 }])).join(' ')).toMatch(/2 decimales/);
     expect(errores(evaluacion({}, [{ ...base, puntos: 100, correcta: 0, permiteOtra: true }])).join(' ')).toMatch(/sin "otra respuesta"/);
-    expect(errores(evaluacion({}, [{ id: 'q1', texto: 'Uno', tipo: 'texto', obligatoria: true, puntos: 100 }])).join(' ')).toMatch(/selección única/);
+    expect(errores(evaluacion({}, [{ id: 'q1', texto: 'Uno', tipo: 'texto', obligatoria: true, puntos: 100 }])).join(' ')).toMatch(/selección \(única o múltiple\)/);
     expect(errores(evaluacion({}, [{ ...base, opciones: ['solo'], puntos: 100, correcta: 0 }])).join(' ')).toMatch(/al menos 2 opciones/);
     expect(errores(evaluacion({}, [{ ...base, correcta: 0 }])).join(' ')).toMatch(/tiene "correcta" pero no "puntos"/);
   });
