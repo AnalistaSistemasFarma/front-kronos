@@ -3,7 +3,7 @@ import './globals.css';
 import '@mantine/core/styles.css';
 import { Providers } from '../components/providers';
 import { ThemeInitScript } from '../components/theme/ThemeInitScript';
-import { Toaster } from 'react-hot-toast';
+import AppToaster from '../components/ui/AppToaster';
 import ServiceWorkerRegistrar from '../components/ServiceWorkerRegistrar';
 
 export const metadata: Metadata = {
@@ -39,17 +39,7 @@ export default function RootLayout({
         style={{ background: 'var(--background)', color: 'var(--foreground)' }}
       >
         <Providers>{children}</Providers>
-        <Toaster
-          position='top-right'
-          gutter={12}
-          toastOptions={{
-            style: {
-              background: 'transparent',
-              boxShadow: 'none',
-              padding: 0,
-            },
-          }}
-        />
+        <AppToaster />
         <ServiceWorkerRegistrar />
       </body>
     </html>
