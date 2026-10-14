@@ -1,5 +1,7 @@
 import { prisma } from '../../../lib/prisma';
-import { crearOrden, listOrdenes } from '../../../lib/bitacora-proceso/db';
+import { crearOrden, datosAvisoInspector, listOrdenes } from '../../../lib/bitacora-proceso/db';
+import { avisoInspectorAsignado } from '../../../lib/bitacora-proceso/notificaciones';
+import { avisarInspector } from './_lib/aviso';
 import { parseNuevaOrden } from '../../../lib/bitacora-proceso/rules';
 import { errorResponse, getOtRequestContext, jsonNoStore, parseCompanyParam, readJson, requireCompany } from './_lib/context';
 
@@ -25,7 +27,7 @@ export async function GET(request: Request) {
   }
 }
 
-/** POST /api/bitacora-proceso — abre una bitácora (solo Gestión). */
+/** POST /api/bitacora-proceso — abre una bitácora (solo Gestión) y avisa al inspector designado (campana + push). */
 export async function POST(request: Request) {
   try {
     const ctx = await getOtRequestContext(request);
@@ -34,8 +36,10 @@ export async function POST(request: Request) {
     const access = requireCompany(ctx, input.idCompany, 'canManage');
     if (access instanceof Response) return access;
     const orden = await crearOrden(prisma, input, ctx.actor);
+    await avisarInspector(() => datosAvisoInspector(prisma, orden.id, access.idCompany, ctx.actor).then((a) => (a ? avisoInspectorAsignado(a) : [])));
     return jsonNoStore({ orden }, 201);
   } catch (error) {
     return errorResponse(error, 'create');
   }
 }
+

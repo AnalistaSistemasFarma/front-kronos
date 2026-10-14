@@ -4,16 +4,19 @@ import { useEffect, useState } from 'react';
 import { Alert, Box, Button, Checkbox, Group, Image, Loader, Modal, Paper, PasswordInput, Stack, Text, Textarea } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { IconAlertTriangle, IconSignature } from '@tabler/icons-react';
-import SignaturePad from '../orion/SignaturePad';
+import CapturaFirma, { type FirmaCapturada } from '../firma-gss/CapturaFirma';
 import { SIGNING_LEGAL_COPY } from '../../lib/orion/signingLegalConsent';
 import { OT_FIRMA_SIGNIFICADO, OT_LIMITS, type OtFirmaRol } from '../../lib/bitacora-proceso/constants';
 
 /**
  * Firma electrónica de la bitácora («Cerró» del supervisor o «Verificó» del
  * inspector). Reutiliza las piezas de SynerLink: consentimiento de firma
- * electrónica de GSS Firma, firma REGISTRADA de la persona en GSS Firma (si no
- * tiene, puede dibujarla con el mismo panel de Orión y guardarla allá) y la
- * contraseña de SynerLink. Celular primero: pantalla completa en el celular.
+ * electrónica de GSS Firma, firma REGISTRADA de la persona en GSS Firma y la
+ * contraseña de SynerLink. Si no tiene firma registrada (o quiere cambiarla),
+ * aquí mismo la DIBUJA o SUBE una imagen de su firma manuscrita: viaja con la
+ * firma y, tras verificar la contraseña, el servidor la guarda en SU maestro de
+ * GSS Firma para la próxima vez (con auditoría). Celular primero: pantalla
+ * completa en el celular.
  */
 type EstadoFirma = { tipo: 'cargando' } | { tipo: 'con'; dataUrl: string } | { tipo: 'sin' } | { tipo: 'no-disponible' };
 
@@ -30,15 +33,15 @@ export default function FirmaBitacoraModal({
   rol: OtFirmaRol;
   titulo: string;
   conObservacion?: boolean;
-  onFirmar: (datos: { password: string; observacion: string }) => Promise<void>;
+  onFirmar: (datos: { password: string; observacion: string; firmaNueva: FirmaCapturada | null }) => Promise<void>;
 }) {
   const mobile = useMediaQuery('(max-width: 48em)') ?? false;
   const [acepto, setAcepto] = useState(false);
   const [password, setPassword] = useState('');
   const [observacion, setObservacion] = useState('');
   const [firma, setFirma] = useState<EstadoFirma>({ tipo: 'cargando' });
-  const [dibujar, setDibujar] = useState(false);
-  const [guardandoFirma, setGuardandoFirma] = useState(false);
+  const [capturando, setCapturando] = useState(false);
+  const [nueva, setNueva] = useState<FirmaCapturada | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const copy = SIGNING_LEGAL_COPY.ELECTRONIC;
@@ -48,15 +51,16 @@ export default function FirmaBitacoraModal({
     setAcepto(false);
     setPassword('');
     setObservacion('');
-    setDibujar(false);
+    setCapturando(false);
+    setNueva(null);
     setError(null);
     setFirma({ tipo: 'cargando' });
     let activo = true;
-    fetch('/api/integrations/orion/signature-embed', { cache: 'no-store' })
+    fetch('/api/firma-gss/mi-firma', { cache: 'no-store' })
       .then(async (res) => {
-        const body = (await res.json().catch(() => ({}))) as { hasSignature?: boolean; dataUrl?: string | null };
+        const body = (await res.json().catch(() => ({}))) as { disponible?: boolean; hasSignature?: boolean; dataUrl?: string | null };
         if (!activo) return;
-        if (!res.ok) setFirma({ tipo: 'no-disponible' });
+        if (!res.ok || !body.disponible) setFirma({ tipo: 'no-disponible' });
         else if (body.hasSignature && body.dataUrl) setFirma({ tipo: 'con', dataUrl: body.dataUrl });
         else setFirma({ tipo: 'sin' });
       })
@@ -66,32 +70,13 @@ export default function FirmaBitacoraModal({
     };
   }, [opened]);
 
-  const guardarFirma = async (dataUrl: string) => {
-    setGuardandoFirma(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/integrations/orion/signature-embed', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signatureDataUrl: dataUrl, method: 'drawn' }),
-      });
-      if (!res.ok) throw new Error('No se pudo guardar la firma en GSS Firma. Puede firmar igual sin imagen.');
-      setFirma({ tipo: 'con', dataUrl });
-      setDibujar(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setGuardandoFirma(false);
-    }
-  };
-
   const firmar = async () => {
     if (!acepto) return setError('Debe leer y aceptar las condiciones de la firma electrónica.');
     if (!password) return setError('Escriba su contraseña de SynerLink para firmar.');
     setBusy(true);
     setError(null);
     try {
-      await onFirmar({ password, observacion: observacion.trim() });
+      await onFirmar({ password, observacion: observacion.trim(), firmaNueva: nueva });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setPassword('');
@@ -136,24 +121,55 @@ export default function FirmaBitacoraModal({
         )}
 
         <Box>
-          <Text fw={500} mb={4}>Su firma registrada (GSS Firma)</Text>
+          <Text fw={500} mb={4}>Su firma (GSS Firma)</Text>
           {firma.tipo === 'cargando' && <Loader size='sm' />}
-          {firma.tipo === 'con' && (
-            <Paper withBorder radius='md' p='xs' bg='white' maw={320} data-testid='ot-firma-registrada'>
-              <Image src={firma.dataUrl} alt='Firma registrada' h={90} fit='contain' />
-            </Paper>
-          )}
-          {firma.tipo === 'sin' && !dibujar && (
+
+          {nueva ? (
             <Stack gap={6}>
-              <Text size='sm' c='dimmed'>No tiene una firma registrada. Puede dibujarla ahora (queda en GSS Firma para todo SynerLink) o firmar sin imagen.</Text>
-              <Button variant='light' size='md' onClick={() => setDibujar(true)} data-testid='ot-firma-dibujar'>
-                Dibujar mi firma
+              <Paper withBorder radius='md' p='xs' bg='white' maw={320} data-testid='ot-firma-nueva'>
+                <Image src={nueva.imagen} alt='Su nueva firma' h={90} fit='contain' />
+              </Paper>
+              <Text size='sm' c='dimmed'>Se usará en esta firma y se guardará en GSS Firma para la próxima vez.</Text>
+              <Button variant='subtle' size='sm' w='fit-content' onClick={() => { setNueva(null); setCapturando(true); }} disabled={busy}>
+                Volver a capturarla
               </Button>
             </Stack>
-          )}
-          {firma.tipo === 'sin' && dibujar && <SignaturePad onSave={guardarFirma} saving={guardandoFirma} />}
-          {firma.tipo === 'no-disponible' && (
-            <Text size='sm' c='dimmed'>No se pudo consultar GSS Firma en este momento: la firma electrónica se registra igual, sin imagen.</Text>
+          ) : capturando ? (
+            <Stack gap={6}>
+              <CapturaFirma onCapturada={(f) => { setNueva(f); setCapturando(false); }} />
+              {firma.tipo === 'con' && (
+                <Button variant='subtle' size='sm' w='fit-content' onClick={() => setCapturando(false)}>
+                  Seguir con mi firma registrada
+                </Button>
+              )}
+            </Stack>
+          ) : (
+            <>
+              {firma.tipo === 'con' && (
+                <Stack gap={6}>
+                  <Paper withBorder radius='md' p='xs' bg='white' maw={320} data-testid='ot-firma-registrada'>
+                    <Image src={firma.dataUrl} alt='Firma registrada' h={90} fit='contain' />
+                  </Paper>
+                  <Button variant='subtle' size='sm' w='fit-content' onClick={() => setCapturando(true)} data-testid='ot-firma-cambiar'>
+                    Usar otra firma (dibujarla o subir imagen)
+                  </Button>
+                </Stack>
+              )}
+              {(firma.tipo === 'sin' || firma.tipo === 'no-disponible') && (
+                <Stack gap={6}>
+                  <Text size='sm' c='dimmed'>
+                    {firma.tipo === 'sin'
+                      ? 'No tiene una firma registrada. Dibújela o suba una imagen de su firma manuscrita: queda en GSS Firma para todo SynerLink. También puede firmar sin imagen.'
+                      : 'No se pudo consultar GSS Firma en este momento. Puede dibujar o subir su firma para esta bitácora, o firmar sin imagen.'}
+                  </Text>
+                  <Group grow={mobile} gap='sm'>
+                    <Button variant='light' size='md' onClick={() => setCapturando(true)} data-testid='ot-firma-dibujar'>
+                      Dibujar o subir mi firma
+                    </Button>
+                  </Group>
+                </Stack>
+              )}
+            </>
           )}
         </Box>
 

@@ -7,6 +7,7 @@ const m = vi.hoisted(() => {
   const names = [
     'getServerSession', 'getOtAccessForUser', 'getActiveUserId', 'listOrdenes', 'crearOrden', 'getOrdenDetalle',
     'crearRegistro', 'cerrarYFirmar', 'verificarYFirmar', 'prepararFirmante', 'listActividades', 'crearActividad', 'cambiarActividad', 'listUsuariosEmpresa', 'buscarOpsLiberadas',
+    'datosAvisoInspector', 'createAndSendNotifications',
   ] as const;
   return Object.fromEntries(names.map((n) => [n, vi.fn()])) as Record<(typeof names)[number], ReturnType<typeof vi.fn>>;
 });
@@ -18,7 +19,10 @@ vi.mock('../../../../lib/bitacora-proceso/db', () => ({
   getOtAccessForUser: m.getOtAccessForUser, getActiveUserId: m.getActiveUserId, listOrdenes: m.listOrdenes, crearOrden: m.crearOrden,
   getOrdenDetalle: m.getOrdenDetalle, crearRegistro: m.crearRegistro, cerrarYFirmar: m.cerrarYFirmar, verificarYFirmar: m.verificarYFirmar, listActividades: m.listActividades,
   crearActividad: m.crearActividad, cambiarActividad: m.cambiarActividad, listUsuariosEmpresa: m.listUsuariosEmpresa,
+  datosAvisoInspector: m.datosAvisoInspector,
 }));
+// El notificador compartido (campana + push): se simula para ver QUÉ se avisa y a QUIÉN.
+vi.mock('../../../../lib/notifications.js', () => ({ createAndSendNotifications: m.createAndSendNotifications }));
 vi.mock('../../../../lib/bitacora-proceso/sap', () => ({ buscarOpsLiberadas: m.buscarOpsLiberadas }));
 vi.mock('../_lib/firmante', () => ({ prepararFirmante: m.prepararFirmante }));
 
@@ -47,8 +51,12 @@ const send = (method: string, body: unknown, q = '') => new Request(`http://x/ap
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 const nueva = { company: FARMA, producto: 'Cefazolina', lote: 'L1', turno: 'TARDE', operarios: ['u1'], inspector: 'u2' };
 
+const avisoBase = { idOrden: 9, idCompany: FARMA, consecutivo: 1, producto: 'Cefazolina', lote: 'L1', inspectorEmail: 'inspector@farmalogica.com', actorNombre: 'Supervisor', actorEmail: 'op@farmalogica.com' };
+
 beforeEach(() => {
   for (const fn of Object.values(m)) fn.mockReset();
+  m.datosAvisoInspector.mockImplementation(async (_db: unknown, idOrden: number) => ({ ...avisoBase, idOrden }));
+  m.createAndSendNotifications.mockResolvedValue({ saved: 1, pushed: 1 });
 });
 
 describe('Bitácora de Proceso · rutas', () => {
@@ -167,6 +175,55 @@ describe('Bitácora de Proceso · rutas', () => {
     expect((await verificar.POST(send('POST', { password: 'x', acepto: true }, '?company=1'), params('7'))).status).toBe(403);
     expect((await verificar.POST(send('POST', {}, '?company=3'), params('7'))).status).toBe(403);
     expect((await verificar.POST(send('POST', {}, '?company=1'), params('x'))).status).toBe(400);
+  });
+
+  it('AVISOS: al abrir se avisa al inspector designado; al cerrar firmado, que la verifique (campana + push, enlace directo)', async () => {
+    asUser([supervisor]);
+    m.crearOrden.mockResolvedValue({ id: 9, consecutivo: 1 });
+    expect((await lista.POST(send('POST', nueva))).status).toBe(201);
+    expect(m.datosAvisoInspector).toHaveBeenCalledWith(expect.anything(), 9, FARMA, { idUser: 'u1', email: 'op@farmalogica.com', ip: '10.0.0.9' });
+    expect(m.createAndSendNotifications).toHaveBeenCalledTimes(1);
+    const [to1, p1] = m.createAndSendNotifications.mock.calls[0];
+    expect(to1).toEqual(['inspector@farmalogica.com']);
+    expect(p1).toMatchObject({ title: 'Fue designado inspector de una bitácora · SynerLink', url: '/process/bitacora-proceso/9?empresa=1' });
+
+    m.prepararFirmante.mockResolvedValue({ idUser: 'u1', email: 'op@farmalogica.com', ip: '10.0.0.9', nombre: 'Supervisor', imagen: null, avisoFirma: null });
+    m.cerrarYFirmar.mockResolvedValue({ firmadoEn: '2026-10-14T13:00:00.000Z', contentSha256: 'a'.repeat(64) });
+    const res = await cerrar.POST(send('POST', { password: 'x', acepto: true }, '?company=1'), params('7'));
+    expect(res.status).toBe(200);
+    expect(m.createAndSendNotifications).toHaveBeenCalledTimes(2);
+    const [to2, p2] = m.createAndSendNotifications.mock.calls[1];
+    expect(to2).toEqual(['inspector@farmalogica.com']);
+    expect(p2).toMatchObject({ title: 'Bitácora por verificar · SynerLink', url: '/process/bitacora-proceso/7?empresa=1', tag: 'ot-7-verificar' });
+  });
+
+  it('AVISOS: si el aviso falla, la bitácora se abre/cierra igual; un cierre fallido no avisa; verificar no avisa', async () => {
+    asUser([supervisor]);
+    m.crearOrden.mockResolvedValue({ id: 9, consecutivo: 1 });
+    m.createAndSendNotifications.mockRejectedValue(new Error('push caído'));
+    expect((await lista.POST(send('POST', nueva))).status).toBe(201);
+    m.datosAvisoInspector.mockRejectedValueOnce(new Error('BD'));
+    m.prepararFirmante.mockResolvedValue({ idUser: 'u1', email: 'op@farmalogica.com', ip: null, nombre: 'S', imagen: null, avisoFirma: null });
+    m.cerrarYFirmar.mockResolvedValue({ firmadoEn: '2026-10-14T13:00:00.000Z', contentSha256: 'a'.repeat(64) });
+    expect((await cerrar.POST(send('POST', { password: 'x', acepto: true }, '?company=1'), params('7'))).status).toBe(200);
+
+    m.createAndSendNotifications.mockReset();
+    m.cerrarYFirmar.mockRejectedValueOnce(new OtError('La bitácora ya está cerrada.', 409));
+    expect((await cerrar.POST(send('POST', { password: 'x', acepto: true }, '?company=1'), params('7'))).status).toBe(409);
+    // Sin inspector activo: no hay a quién avisar.
+    m.datosAvisoInspector.mockResolvedValueOnce({ ...avisoBase, inspectorEmail: null });
+    expect((await cerrar.POST(send('POST', { password: 'x', acepto: true }, '?company=1'), params('7'))).status).toBe(200);
+    m.verificarYFirmar.mockResolvedValue({ firmadoEn: '2026-10-14T13:10:00.000Z', contentSha256: 'b'.repeat(64) });
+    expect((await verificar.POST(send('POST', { password: 'x', acepto: true }, '?company=1'), params('7'))).status).toBe(200);
+    expect(m.createAndSendNotifications).not.toHaveBeenCalled();
+  });
+
+  it('el aviso de firma (GSS Firma no la guardó) vuelve en la respuesta del cierre', async () => {
+    asUser([supervisor]);
+    m.prepararFirmante.mockResolvedValue({ idUser: 'u1', email: 'op@farmalogica.com', ip: null, nombre: 'S', imagen: 'data:image/png;base64,AA==', avisoFirma: 'GSS Firma no la guardó' });
+    m.cerrarYFirmar.mockResolvedValue({ firmadoEn: '2026-10-14T13:00:00.000Z', contentSha256: 'a'.repeat(64) });
+    const res = await cerrar.POST(send('POST', { password: 'x', acepto: true, firmaNueva: { imagen: 'data:image/png;base64,AA==', metodo: 'uploaded' } }, '?company=1'), params('7'));
+    expect((await res.json()).avisoFirma).toBe('GSS Firma no la guardó');
   });
 
   it('catálogo: el operario lee solo las activas; el supervisor agrega y cambia', async () => {
