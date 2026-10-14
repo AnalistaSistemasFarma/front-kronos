@@ -13,6 +13,7 @@ import {
 import { filtrarExtensiones, type Extension } from '../../lib/portal/extensiones-datos';
 import { urlFormacion as urlPaginaFormacion, type OrigenPortal } from '../../lib/portal/formacion-navegacion';
 import PoliticasVisor from './PoliticasVisor';
+import PortalCalendario from './PortalCalendario';
 import PortalNavegacion, { useSeccionActiva, type SeccionNav } from './PortalNavegacion';
 
 /** Cada cuánto rota sola la imagen principal del carrusel de anuncios. */
@@ -482,7 +483,11 @@ export default function PortalContenido({
   return (
     <>
       <div className='portal-th__layout'>
-        <PortalNavegacion secciones={secciones} activa={activa} onSeleccionar={irASeccion} />
+        {/* Columna izquierda: calendario y eventos del día ARRIBA, y debajo los botones de cada sección. */}
+        <aside className='portal-th__lateral'>
+          <PortalCalendario puedeEditar={puedeEditar} />
+          <PortalNavegacion secciones={secciones} activa={activa} onSeleccionar={irASeccion} />
+        </aside>
 
         <div className='portal-th__contenido'>
           {/* La sección se pinta si hay anuncios O si esta persona los administra:

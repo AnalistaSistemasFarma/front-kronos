@@ -22,7 +22,9 @@ export default function SgcDocumentLayoutCard({ requestId, onMessage }: { reques
   if (error || !data) return null;
   if (data.participants.length === 0 && !data.canEdit) return null;
   const placed = data.fields.length;
-  const total = data.participants.length;
+  // D6 (E2E 2026-10-10): con 3 o más del mismo rol, los que no son titulares van al registro de firmas (no a una caja).
+  const inRegister = data.inRegister?.length ?? 0;
+  const total = data.participants.length - inRegister;
   const isPdf = data.draft?.format === 'pdf';
 
   const save = async (body: Record<string, unknown>, ok: string) => {
@@ -82,6 +84,11 @@ export default function SgcDocumentLayoutCard({ requestId, onMessage }: { reques
               ? 'Las firmas sin ubicar irán en el recuadro «Firma» de su rol en el encabezado institucional.'
               : 'Las firmas sin ubicar irán en la portada de control del PDF (respaldo). Ubíquelas para que queden dentro del documento.'}
           </Alert>
+        )}
+        {inRegister > 0 && (
+          <Text size='xs' c='dimmed' data-testid='sgc-firmas-registro'>
+            {inRegister} firma(s) más van al «Registro de firmas» al final del documento (3 o más firmantes del mismo rol).
+          </Text>
         )}
         <Group justify='space-between' wrap='wrap'>
           <Text size='xs' c='dimmed'>

@@ -1,5 +1,5 @@
 import { expect, test as setup, type Page } from '@playwright/test';
-import { STORAGE_STATE, STORAGE_STATE_2, STORAGE_STATE_3 } from '../../playwright.config';
+import { STORAGE_STATE, STORAGE_STATE_2, STORAGE_STATE_3, STORAGE_STATE_4 } from '../../playwright.config';
 
 /**
  * Inicia sesión una sola vez con cada usuario de pruebas del SGC y guarda la
@@ -21,12 +21,14 @@ setup('inicio de sesión del usuario de pruebas', async ({ page }) => {
   await login(page, process.env.E2E_USER_EMAIL!, process.env.E2E_USER_PASSWORD!, STORAGE_STATE);
 });
 
-setup('inicio de sesión de los usuarios de pruebas 2 y 3 (Sprint 2)', async ({ browser }) => {
+setup('inicio de sesión de los usuarios de pruebas 2, 3 y 4 (solicitante)', async ({ browser }) => {
   const users = [
     [process.env.E2E_USER_EMAIL2, process.env.E2E_USER_PASSWORD2, STORAGE_STATE_2],
     [process.env.E2E_USER_EMAIL3, process.env.E2E_USER_PASSWORD3, STORAGE_STATE_3],
+    // 2026-10-10: el solicitante (qa.sgc4), distinto del elaborador (RN 2026-10-05).
+    [process.env.E2E_USER_EMAIL4, process.env.E2E_USER_PASSWORD4, STORAGE_STATE_4],
   ] as const;
-  setup.skip(users.some(([e, p]) => !e || !p), 'Sin credenciales de los usuarios de pruebas 2 y 3.');
+  setup.skip(users.some(([e, p]) => !e || !p), 'Sin credenciales de los usuarios de pruebas 2, 3 y 4.');
   for (const [email, password, path] of users) {
     const context = await browser.newContext();
     await login(await context.newPage(), email!, password!, path);
