@@ -86,7 +86,7 @@ const certificadoUrl = (code: string) => `/api/portal/certificates/${encodeURICo
  * para que la página de Formación (que vive aparte del portal desde
  * 2026-09-30) pueda mandar a la persona a ingresar primero.
  */
-export default function PortalFormacion({ onSinSesion }: { onSinSesion?: () => void } = {}) {
+export default function PortalFormacion({ onSinSesion, cursoInicialId }: { onSinSesion?: () => void; cursoInicialId?: number | null } = {}) {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cursos, setCursos] = useState<CursoResumen[]>([]);
@@ -95,6 +95,8 @@ export default function PortalFormacion({ onSinSesion }: { onSinSesion?: () => v
   // En una ref: si se pasa como función en línea, no debe re-disparar la carga.
   const onSinSesionRef = useRef(onSinSesion);
   onSinSesionRef.current = onSinSesion;
+  // true cuando la lista de cursos llegó de verdad (no cuando se cortó por falta de sesión).
+  const cursosCargados = useRef(false);
 
   const cargarCursos = useCallback(async () => {
     setError(null);
@@ -106,6 +108,7 @@ export default function PortalFormacion({ onSinSesion }: { onSinSesion?: () => v
       }
       const data = await leerJson(res);
       if (!res.ok) throw new Error(String(data?.error ?? 'No se pudieron cargar los cursos.'));
+      cursosCargados.current = true;
       setCursos(Array.isArray(data.cursos) ? (data.cursos as CursoResumen[]) : []);
       setEsFormador(data.esFormador === true);
     } catch (e) {
@@ -121,6 +124,15 @@ export default function PortalFormacion({ onSinSesion }: { onSinSesion?: () => v
 
   const [cursoAbiertoId, setCursoAbiertoId] = useState<number | null>(null);
   const [cursoGestionId, setCursoGestionId] = useState<number | null>(null);
+
+  // Invitación a un curso (Cristian, 2026-10-14): `/portal/formacion?curso=N` abre ese curso apenas cargan los cursos, UNA vez.
+  const abrioInicial = useRef(false);
+  useEffect(() => {
+    if (cargando || abrioInicial.current || !cursoInicialId || !cursosCargados.current) return;
+    abrioInicial.current = true;
+    if (cursos.some((c) => c.id === cursoInicialId && c.activo)) setCursoAbiertoId(cursoInicialId);
+    else setError('El curso al que lo invitaron ya no está disponible.');
+  }, [cargando, cursos, cursoInicialId]);
 
   if (cargando) return <p className='portal-th__estado'>Cargando formación…</p>;
 
@@ -1135,6 +1147,20 @@ function VistaCursoFormador({
   };
 
   const [editandoCurso, setEditandoCurso] = useState(false);
+  // Menú de edición OCULTO por defecto (Cristian, 2026-10-14): al entrar solo se ven el nombre del curso y el progreso de los
+  // estudiantes; el botón «Editar» muestra título, publicar, materiales y agregar material.
+  const [modoEdicion, setModoEdicion] = useState(false);
+  // Invitar a una persona al curso por correo.
+  const [invitando, setInvitando] = useState(false);
+  const [correoInvitar, setCorreoInvitar] = useState('');
+  const [enviandoInvitacion, setEnviandoInvitacion] = useState(false);
+  const [resultadoInvitacion, setResultadoInvitacion] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
+  const panelInvitar = useRef<HTMLFormElement | null>(null);
+  // El resultado de enviar queda a la vista: si el formulario quedó fuera de pantalla, se baja hasta él.
+  useEffect(() => {
+    if (!resultadoInvitacion) return;
+    window.requestAnimationFrame(() => panelInvitar.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+  }, [resultadoInvitacion]);
   const [tituloCurso, setTituloCurso] = useState('');
   const [descripcionCurso, setDescripcionCurso] = useState('');
   const [guardandoCurso, setGuardandoCurso] = useState(false);
@@ -1188,6 +1214,35 @@ function VistaCursoFormador({
   };
 
   if (error) return <p className='portal-th__error'>{error}</p>;
+  const enviarInvitacion = async () => {
+    const correo = correoInvitar.trim();
+    if (!correo) {
+      setResultadoInvitacion({ tipo: 'error', texto: 'Escriba el correo de la persona.' });
+      return;
+    }
+    setEnviandoInvitacion(true);
+    setResultadoInvitacion(null);
+    try {
+      const res = await fetch(`/api/portal/courses/${cursoId}/invitar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ correo }),
+      });
+      const data = await leerJson(res);
+      if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo enviar la invitación.'));
+      setCorreoInvitar('');
+      setResultadoInvitacion({
+        tipo: 'ok',
+        texto: `Invitación enviada a ${String(data.correo ?? correo)}. ${data.yaInscrito ? 'Ya estaba inscrita en el curso.' : 'Quedó inscrita en el curso.'}`,
+      });
+      await cargar();
+    } catch (e) {
+      setResultadoInvitacion({ tipo: 'error', texto: (e as Error).message });
+    } finally {
+      setEnviandoInvitacion(false);
+    }
+  };
+
   if (!detalle || !roster) return <p className='portal-th__estado'>Cargando…</p>;
 
   return (
@@ -1236,19 +1291,37 @@ function VistaCursoFormador({
         <div className='portal-th__formacion-gestion-barra'>
           <div className='portal-th__formacion-titulo'>
             <h3>{detalle.curso.titulo}</h3>
+            {modoEdicion && (
+              <button
+                type='button'
+                className='portal-th__icono-boton'
+                title='Editar título y descripción'
+                aria-label='Editar título y descripción'
+                onClick={empezarEdicionCurso}
+              >
+                ✎
+              </button>
+            )}
+          </div>
+          <div className='portal-th__formacion-gestion-acciones'>
+            {modoEdicion && (
+              <button type='button' onClick={() => void publicar(!detalle.curso.activo)}>
+                {detalle.curso.activo ? 'Pasar a borrador' : 'Publicar curso'}
+              </button>
+            )}
             <button
               type='button'
-              className='portal-th__icono-boton'
-              title='Editar título y descripción'
-              aria-label='Editar título y descripción'
-              onClick={empezarEdicionCurso}
+              className={modoEdicion ? 'portal-th__formacion-toggle-activo' : ''}
+              aria-expanded={modoEdicion}
+              onClick={() => {
+                if (modoEdicion) setEditandoCurso(false);
+                setModoEdicion(!modoEdicion);
+              }}
+              data-testid='alternar-edicion'
             >
-              ✎
+              {modoEdicion ? 'Cerrar edición' : 'Editar'}
             </button>
           </div>
-          <button type='button' onClick={() => void publicar(!detalle.curso.activo)}>
-            {detalle.curso.activo ? 'Pasar a borrador' : 'Publicar curso'}
-          </button>
         </div>
       )}
       {!editandoCurso && detalle.curso.descripcion && (
@@ -1258,6 +1331,8 @@ function VistaCursoFormador({
         <p className='portal-th__aviso'>Este curso está en borrador: los estudiantes todavía no lo ven.</p>
       )}
 
+      {modoEdicion && (
+      <div data-testid='menu-edicion'>
       <h4>Materiales</h4>
       <ul className='portal-th__material-lista'>
         {detalle.materiales.map((m, i) => (
@@ -1328,6 +1403,8 @@ function VistaCursoFormador({
           {subiendo ? (subida ? 'Subiendo…' : 'Agregando…') : '+ Agregar material'}
         </button>
       </div>
+      </div>
+      )}
 
       {respuestasDe && (
         <PanelRespuestas materialId={respuestasDe.id} titulo={respuestasDe.titulo} onCerrar={() => setRespuestasDe(null)} onCambio={cargar} />
@@ -1336,11 +1413,70 @@ function VistaCursoFormador({
         <PreviaDeMaterialFormulario formularioId={previaDe.formularioId} titulo={previaDe.titulo} onCerrar={() => setPreviaDe(null)} />
       )}
 
-      <h4>Progreso de los estudiantes</h4>
+      <div className='portal-th__progreso-cabecera'>
+        <h4>Progreso de los estudiantes</h4>
+        <button
+          type='button'
+          className='portal-th__boton-secundario'
+          aria-expanded={invitando}
+          onClick={() => {
+            setResultadoInvitacion(null);
+            setInvitando(!invitando);
+          }}
+          data-testid='invitar-curso'
+        >
+          Invitar al Curso
+        </button>
+      </div>
+      {invitando && (
+        <form
+          ref={panelInvitar}
+          className='portal-th__invitar'
+          data-testid='invitar-form'
+          onSubmit={(ev) => {
+            ev.preventDefault();
+            void enviarInvitacion();
+          }}
+        >
+          {/* El resultado va ARRIBA del formulario y con color, a la vista donde se hizo clic. */}
+          {resultadoInvitacion && (
+            <p
+              className={`portal-th__invitar-aviso portal-th__invitar-aviso--${resultadoInvitacion.tipo}`}
+              role={resultadoInvitacion.tipo === 'error' ? 'alert' : 'status'}
+              data-testid='invitar-aviso'
+            >
+              {resultadoInvitacion.texto}
+            </p>
+          )}
+          <label>
+            Correo de la persona a invitar
+            <input
+              type='email'
+              inputMode='email'
+              autoComplete='off'
+              placeholder='nombre@gsslatam.com'
+              maxLength={255}
+              value={correoInvitar}
+              onChange={(e) => setCorreoInvitar(e.target.value)}
+              data-testid='invitar-correo'
+              autoFocus
+            />
+          </label>
+          <p className='portal-th__estado'>Recibirá un mensaje con el enlace al curso y quedará inscrita.</p>
+          <div className='portal-th__invitar-acciones'>
+            <button type='button' className='portal-th__boton-secundario' onClick={() => setInvitando(false)} disabled={enviandoInvitacion}>
+              Cerrar
+            </button>
+            <button type='submit' disabled={enviandoInvitacion} data-testid='invitar-enviar'>
+              {enviandoInvitacion ? 'Enviando…' : 'Enviar'}
+            </button>
+          </div>
+        </form>
+      )}
       {roster.length === 0 ? (
         <p className='portal-th__estado'>Todavía no hay estudiantes inscritos.</p>
       ) : (
-        <div className='portal-th__correos'>
+        <div className='portal-th__correos portal-th__roster-contenedor'>
           <table className='portal-th__correos-tabla portal-th__roster-tabla'>
             <thead>
               <tr>
