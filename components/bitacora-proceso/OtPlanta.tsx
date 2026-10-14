@@ -29,6 +29,7 @@ import type { OrdenDetalle } from '../../lib/bitacora-proceso/db';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import { OtIconoActividad } from './otIconos';
 import FirmaBitacoraModal from './FirmaBitacoraModal';
+import type { FirmaCapturada } from '../firma-gss/CapturaFirma';
 import { codigoOt, fmtFechaHora, fmtFechaHoraSeg, fmtHora, otHref, otSend, turnoLabel, useOtFetch } from './otClient';
 
 /**
@@ -90,18 +91,20 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
   };
 
   /** Cierre firmado (supervisor, «Cerró») o verificación firmada (inspector, «Verificó»). Lanza el error para que el modal lo muestre arriba. */
-  const firmarBitacora = async ({ password, observacion }: { password: string; observacion: string }) => {
+  const firmarBitacora = async ({ password, observacion, firmaNueva }: { password: string; observacion: string; firmaNueva: FirmaCapturada | null }) => {
     if (!o || !firmar) return;
     const accion = firmar === 'SUPERVISOR' ? 'cerrar' : 'verificar';
-    await otSend(`/api/bitacora-proceso/${o.id}/${accion}?company=${company.idCompany}`, 'POST', {
+    const r = await otSend<{ avisoFirma?: string | null }>(`/api/bitacora-proceso/${o.id}/${accion}?company=${company.idCompany}`, 'POST', {
       password,
       acepto: true,
       ...(firmar === 'SUPERVISOR' ? { observacion: observacion || undefined } : {}),
+      ...(firmaNueva ? { firmaNueva } : {}),
     });
-    const text =
+    const base =
       firmar === 'SUPERVISOR'
-        ? `Bitácora ${codigoOt(o.consecutivo)} cerrada y firmada («Cerró»). Ya no admite registros; falta la verificación del inspector.`
+        ? `Bitácora ${codigoOt(o.consecutivo)} cerrada y firmada («Cerró»). Ya no admite registros; se avisó al inspector para que la verifique.`
         : `Bitácora ${codigoOt(o.consecutivo)} verificada y firmada («Verificó»).`;
+    const text = r.avisoFirma ? `${base} ${r.avisoFirma}` : base;
     setFirmar(null);
     setAviso({ ok: true, text });
     toast.success(text);

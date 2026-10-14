@@ -45,6 +45,7 @@ import {
   MiAvatarSection,
   type Resultado,
 } from '../../../components/avatar/ProfileAvatarSections';
+import MiFirmaGssSection from '../../../components/firma-gss/MiFirmaGssSection';
 
 interface UserProfile {
   id: string;
@@ -387,6 +388,9 @@ export default function ProfileSettingsPage() {
           {/* Avatar estilo Notion (persona) y avatar de los asistentes a cargo */}
           <MiAvatarSection onResultado={mostrarResultado} onImagen={aplicarImagen} />
           <AvataresAgentesSection onResultado={mostrarResultado} />
+
+          {/* Mi firma en GSS Firma: dibujada o imagen de la firma manuscrita (2026-10-14) */}
+          <MiFirmaGssSection onResultado={mostrarResultado} />
 
           {/* Appearance Section */}
           <Card withBorder padding='lg' radius='md'>

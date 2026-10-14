@@ -1,5 +1,7 @@
 import { prisma } from '../../../../../lib/prisma';
-import { cerrarYFirmar } from '../../../../../lib/bitacora-proceso/db';
+import { cerrarYFirmar, datosAvisoInspector } from '../../../../../lib/bitacora-proceso/db';
+import { avisoPorVerificar } from '../../../../../lib/bitacora-proceso/notificaciones';
+import { avisarInspector } from '../../_lib/aviso';
 import { parseCierre } from '../../../../../lib/bitacora-proceso/rules';
 import { readClientOrigin } from '../../../../../lib/sgc/clientOrigin';
 import { errorResponse, getOtRequestContext, jsonNoStore, parseCompanyParam, parseId, readJson, requireCompany } from '../../_lib/context';
@@ -9,7 +11,9 @@ export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/bitacora-proceso/[id]/cerrar?company=1  { observacion?, password, acepto: true }
- * Cierre con FIRMA ELECTRÓNICA del supervisor («Cerró»): solo Gestión.
+ *   [+ firmaNueva: { imagen, metodo }]
+ * Cierre con FIRMA ELECTRÓNICA del supervisor («Cerró»): solo Gestión. Después
+ * avisa al INSPECTOR (campana + push) con el enlace directo para verificar.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -23,7 +27,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const { observacion } = parseCierre(body);
     const firmante = await prepararFirmante(ctx, body, readClientOrigin(request).userAgent);
     const firma = await cerrarYFirmar(prisma, id, access, observacion, firmante);
-    return jsonNoStore({ ok: true, firma });
+    await avisarInspector(() => datosAvisoInspector(prisma, id, access.idCompany, ctx.actor).then((a) => (a ? avisoPorVerificar(a) : [])));
+    return jsonNoStore({ ok: true, firma, avisoFirma: firmante.avisoFirma });
   } catch (error) {
     return errorResponse(error, 'cerrar');
   }

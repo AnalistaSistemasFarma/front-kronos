@@ -7,7 +7,7 @@ import { prepararFirmante } from '../../_lib/firmante';
 export const dynamic = 'force-dynamic';
 
 /**
- * POST /api/bitacora-proceso/[id]/verificar?company=1  { password, acepto: true }
+ * POST /api/bitacora-proceso/[id]/verificar?company=1  { password, acepto: true [, firmaNueva: { imagen, metodo }] }
  * Verificación con FIRMA ELECTRÓNICA del inspector designado («Verificó»), después del cierre.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -20,7 +20,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (access instanceof Response) return access;
     const firmante = await prepararFirmante(ctx, await readJson(request), readClientOrigin(request).userAgent);
     const firma = await verificarYFirmar(prisma, id, access, firmante);
-    return jsonNoStore({ ok: true, firma });
+    return jsonNoStore({ ok: true, firma, avisoFirma: firmante.avisoFirma });
   } catch (error) {
     return errorResponse(error, 'verificar');
   }

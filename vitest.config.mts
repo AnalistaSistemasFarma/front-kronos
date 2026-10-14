@@ -30,6 +30,8 @@ export default defineConfig({
       'app/api/portal/**/*.test.ts',
       // `app/api/bitacora-proceso/**`: Órdenes de Trabajo (permisos en el servidor, sin edición ni borrado).
       'app/api/bitacora-proceso/**/*.test.ts',
+      // `app/api/firma-gss/**`: «Mi firma» en GSS Firma (solo la propia, reautenticación, imagen saneada).
+      'app/api/firma-gss/**/*.test.ts',
       'components/sgc/**/*.test.ts',
     ],
     exclude: ['node_modules', '.next', 'mcp', 'dist'],
@@ -71,7 +73,13 @@ export default defineConfig({
         'lib/bitacora-proceso/constants.ts',
         'lib/bitacora-proceso/rules.ts',
         'lib/bitacora-proceso/firmas.ts',
+        'lib/bitacora-proceso/notificaciones.ts',
         'app/api/bitacora-proceso/**/route.ts',
+        // Firma GSS: saneamiento de la imagen y registro de la firma propia.
+        'lib/firma-gss/png.ts',
+        'lib/firma-gss/sniff.ts',
+        'lib/firma-gss/miFirma.ts',
+        'app/api/firma-gss/**/route.ts',
       ],
       exclude: [
         '**/__tests__/**',

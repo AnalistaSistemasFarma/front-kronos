@@ -13,7 +13,11 @@ import {
   listActividades,
   listOrdenes,
   listUsuariosEmpresa,
+  datosAvisoInspector,
 } from '../../../lib/bitacora-proceso/db';
+import { avisoPorVerificar } from '../../../lib/bitacora-proceso/notificaciones';
+import { codificarPng } from '../../../lib/firma-gss/png';
+import { FIRMA_GSS_AUDIT_ACTION, registrarFirmaGss } from '../../../lib/firma-gss/miFirma';
 import { isOtError, parseNuevaOrden, type OtCompanyAccess } from '../../../lib/bitacora-proceso/rules';
 
 /**
@@ -246,5 +250,35 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
     expect(await status(cambiarActividad(prisma, { idActividad: nueva.id_actividad, idCompany: OLP, activo: true }))).toBe(404);
     const o = await crearOrden(prisma, parseNuevaOrden({ company: FARMA, producto: 'PRUEBA IT', lote: `C-${sufijo}`, turno: 'MANANA', operarios: [operarioId], inspector: inspectorId }), actor(supervisorId));
     expect(await status(crearRegistro(prisma, o.id, operario, { idActividad: nueva.id_actividad, observacion: null }, actor(operarioId)))).toBe(400);
+  });
+
+  it('AVISO al inspector: correo del inspector ACTIVO, encabezado y nombre de quien cierra; nada de otra empresa', async () => {
+    const o = await crearOrden(prisma, parseNuevaOrden({ company: FARMA, producto: 'PRUEBA AVISO', lote: `AV-${sufijo}`, turno: 'MANANA', operarios: [operarioId], inspector: inspectorId }), actor(supervisorId));
+    const a = await datosAvisoInspector(prisma, o.id, FARMA, actor(supervisorId));
+    expect(a).toMatchObject({ idOrden: o.id, idCompany: FARMA, consecutivo: o.consecutivo, producto: 'PRUEBA AVISO', lote: `AV-${sufijo}`, inspectorEmail: `inspector.${sufijo}@farmalogica.com`, actorNombre: 'supervisor IT' });
+    expect(avisoPorVerificar(a!)[0].emails).toEqual([`inspector.${sufijo}@farmalogica.com`]);
+    expect(await datosAvisoInspector(prisma, o.id, OLP, actor(supervisorId))).toBeNull();
+    // Inspector desactivado: no se le avisa.
+    await prisma.user.update({ where: { id: inspectorId }, data: { isActive: false } });
+    try {
+      expect((await datosAvisoInspector(prisma, o.id, FARMA, actor(supervisorId)))?.inspectorEmail).toBeNull();
+    } finally {
+      await prisma.user.update({ where: { id: inspectorId }, data: { isActive: true } });
+    }
+  });
+
+  it('MI FIRMA (GSS Firma): la auditoría queda en user_audit_log con la huella, sin la imagen', async () => {
+    const rgba = new Uint8Array(4 * 4 * 4).fill(255);
+    rgba.set([0, 0, 0, 255], 0);
+    const imagen = `data:image/png;base64,${codificarPng({ width: 4, height: 4, rgba }).toString('base64')}`;
+    const r = await registrarFirmaGss(
+      { guardar: async () => ({ ok: true }), auditar: (row) => prisma.userAuditLog.create({ data: row }) },
+      { idUser: supervisorId, email: `supervisor.${sufijo}@farmalogica.com`, firma: { imagen, metodo: 'uploaded' }, origen: 'bitacora-proceso', ip: '10.0.0.1', userAgent: 'vitest' }
+    );
+    const rows = await prisma.userAuditLog.findMany({ where: { user_id: supervisorId, action: FIRMA_GSS_AUDIT_ACTION } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].performed_by).toBe(`supervisor.${sufijo}@farmalogica.com`);
+    expect(JSON.parse(rows[0].details ?? '{}')).toMatchObject({ sha256: r.sha256, metodo: 'uploaded', origen: 'bitacora-proceso', guardadaEnGssFirma: true });
+    expect(rows[0].details).not.toContain('base64');
   });
 });

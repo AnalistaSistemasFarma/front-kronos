@@ -1,5 +1,6 @@
 import type { PrismaClient } from '../../app/generated/prisma';
 import { OT_DIAS_CERRADAS, OT_SUBPROCESS_URLS } from './constants';
+import type { AvisoInspector } from './notificaciones';
 import {
   assertInspectorDistinto,
   assertPuedeCerrar,
@@ -367,6 +368,38 @@ export async function crearRegistro(
     });
     return { id: r.id_registro.toString(), registradoEn: r.registrado_en.toISOString(), actividad: r.actividad_nombre };
   });
+}
+
+/**
+ * Datos para avisar al INSPECTOR (campana + push): su correo (usuario activo),
+ * el encabezado de la bitácora y el nombre de quien hizo la acción. null si la
+ * bitácora no existe en la empresa.
+ */
+export async function datosAvisoInspector(
+  db: OtDb,
+  idOrden: number,
+  idCompany: number,
+  actor: Pick<OtActor, 'idUser' | 'email'>
+): Promise<AvisoInspector | null> {
+  const o = await db.otOrdenTrabajo.findFirst({
+    where: { id_orden_trabajo: idOrden, id_company: idCompany },
+    select: { id_orden_trabajo: true, id_company: true, consecutivo: true, producto: true, lote: true, id_inspector: true },
+  });
+  if (!o) return null;
+  const ids = [actor.idUser, o.id_inspector ?? ''].filter(Boolean);
+  const users = await db.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, email: true, isActive: true } });
+  const insp = users.find((u) => u.id === o.id_inspector && u.isActive);
+  const yo = users.find((u) => u.id === actor.idUser);
+  return {
+    idOrden: o.id_orden_trabajo,
+    idCompany: o.id_company,
+    consecutivo: o.consecutivo,
+    producto: o.producto,
+    lote: o.lote,
+    inspectorEmail: insp?.email ?? null,
+    actorNombre: yo?.name?.trim() || actor.email,
+    actorEmail: actor.email,
+  };
 }
 
 /** Datos de la persona que firma (nombre de la base e imagen de su firma registrada en GSS Firma). */
