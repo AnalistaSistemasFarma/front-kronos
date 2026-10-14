@@ -2953,7 +2953,7 @@ function ViewRequestPage() {
                     ) : (
                       <>
                         <Table.Th>Documento</Table.Th>
-                        <Table.Th style={{ width: 100 }}>Abrir</Table.Th>
+                        <Table.Th style={{ width: 140 }}>Abrir</Table.Th>
                       </>
                     )}
                   </Table.Tr>
@@ -3196,18 +3196,36 @@ function ViewRequestPage() {
                             </Table.Td>
                             <Table.Td data-label='Abrir'>
                               <Group gap={6} wrap='nowrap'>
-                              <ActionIcon
-                                variant='subtle'
-                                color='blue'
-                                size='sm'
+                              {file.webUrl ? (
+                                <Tooltip label='Ver en línea (sin descargar)'>
+                                  <ActionIcon
+                                    variant='subtle'
+                                    color='blue'
+                                    size='sm'
+                                    component='a'
+                                    href={file.webUrl}
+                                    target='_blank'
+                                    rel='noopener noreferrer'
+                                    aria-label={`Ver en línea ${file.name}`}
+                                  >
+                                    <IconEye size={16} />
+                                  </ActionIcon>
+                                </Tooltip>
+                              ) : null}
+                              <UnstyledButton
                                 component='a'
                                 href={openUrl}
                                 target='_blank'
                                 rel='noopener noreferrer'
-                                aria-label={`Ver archivo ${file.name}`}
+                                aria-label={`Abrir ${file.name}`}
+                                style={{
+                                  fontSize: 13,
+                                  color: 'var(--mantine-color-blue-6)',
+                                  fontWeight: 600,
+                                }}
                               >
-                                <IconEye size={16} />
-                              </ActionIcon>
+                                Abrir
+                              </UnstyledButton>
                               {canDeleteAttachments ? (
                                 <ActionIcon
                                   variant='subtle'
