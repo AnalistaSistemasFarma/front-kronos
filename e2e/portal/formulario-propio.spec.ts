@@ -267,6 +267,14 @@ test.describe('Portal TH · Formación · formulario propio', () => {
     await expect(page.getByRole('button', { name: 'Respuestas', exact: true }).first()).toBeVisible();
   });
 
+  test('administrador del Excel que NO es formador: conserva «Ver respuestas» en su única vista', async ({ page }) => {
+    await simular(page, { puedeMarcarManual: true, esFormador: false });
+    await page.goto('/portal/formacion');
+    await expect(page.getByRole('button', { name: 'Vista formador' })).toHaveCount(0);
+    await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
+    await expect(page.getByRole('button', { name: 'Ver respuestas' })).toBeVisible();
+  });
+
   test('estudiante sin permiso: no ve "Ver respuestas"', async ({ page }) => {
     await simular(page, { puedeMarcarManual: false });
     await page.goto('/portal/formacion');
