@@ -25,6 +25,7 @@ import {
   userCanManageOrionRequest,
 } from './service';
 import { buildOrionReviewResolution } from './signerAuthMarkers';
+import { isRequestClosedForOrion } from './internalTasks';
 import type { OrionReviewState, OrionSignatureState } from './types';
 import { nextOrionSubversionLabel, resolveOrionVersionLabel } from './versionLabel';
 
@@ -206,6 +207,7 @@ export async function openReviewTask(
 ): Promise<void> {
   const pending = currentPendingApproval(params.review);
   if (!pending?.userId) return;
+  if (await isRequestClosedForOrion(pool, params.requestId)) return;
   const templateId = await ensureReviewTaskTemplateId(pool, params.requestId);
   const needle = `[orionReviewFile:${params.fileId}]`;
 

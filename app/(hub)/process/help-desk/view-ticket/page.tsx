@@ -31,6 +31,7 @@ import {
   ActionIcon,
   Box,
   TagsInput,
+  Tooltip,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -53,6 +54,8 @@ import {
   IconFileSpreadsheet,
   IconPhoto,
   IconAt,
+  IconEye,
+  IconDownload,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
@@ -1716,18 +1719,38 @@ function ViewTicketPage() {
                       <Badge color='teal' size='sm'>
                         Almacenado
                       </Badge>
-                      <ActionIcon
-                        variant='subtle'
-                        color='blue'
-                        size='sm'
-                        component='a'
-                        href={file.webUrl}
-                        target='_blank'
-                        rel='noopener noreferrer'
-                        aria-label={`Descargar archivo ${file.name}`}
-                      >
-                        <IconUpload size={16} />
-                      </ActionIcon>
+                      {file.webUrl ? (
+                        <Tooltip label='Ver en línea (sin descargar)'>
+                          <ActionIcon
+                            variant='subtle'
+                            color='blue'
+                            size='sm'
+                            component='a'
+                            href={file.webUrl}
+                            target='_blank'
+                            rel='noopener noreferrer'
+                            aria-label={`Ver en línea ${file.name}`}
+                          >
+                            <IconEye size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                      ) : null}
+                      {file['@microsoft.graph.downloadUrl'] || file.webUrl ? (
+                        <Tooltip label='Descargar'>
+                          <ActionIcon
+                            variant='subtle'
+                            color='blue'
+                            size='sm'
+                            component='a'
+                            href={file['@microsoft.graph.downloadUrl'] || file.webUrl}
+                            target='_blank'
+                            rel='noopener noreferrer'
+                            aria-label={`Descargar archivo ${file.name}`}
+                          >
+                            <IconDownload size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                      ) : null}
                       <TestAttachmentDeleteButton
                         requestId={ticket.id_case}
                         fileId={String(file.id)}

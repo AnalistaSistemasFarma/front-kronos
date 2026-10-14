@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  ActionIcon,
   Badge,
   Button,
   Group,
@@ -13,7 +12,6 @@ import {
   UnstyledButton,
 } from '@mantine/core';
 import {
-  IconEye,
   IconFile,
   IconPencil,
   IconSignature,
@@ -40,6 +38,7 @@ import OrionReviewPanel from './OrionReviewPanel';
 import { knownReadyForSigning } from '../../lib/orion/reviewState';
 import { esEstadoFinalOrion } from '../../lib/orion/deletePolicy';
 import DocStageTrack from './DocStageTrack';
+import ViewOnlineButton from './ViewOnlineButton';
 
 type RowProps = OrionAttachmentSignActionsProps & {
   rowNumber?: number | string;
@@ -319,21 +318,14 @@ export default function OrionAttachmentTableRow({
             ) : null}
           </div>
           {viewOnlineHref ? (
-            <Tooltip label='Ver en línea (sin descargar)'>
-              <ActionIcon
-                variant='subtle'
-                color='blue'
-                size='md'
-                component='a'
-                href={viewOnlineHref}
-                target='_blank'
-                rel='noopener noreferrer'
-                aria-label={`Ver en línea ${props.fileName}`}
-                style={{ flexShrink: 0, marginTop: 1, minWidth: 36, minHeight: 36 }}
-              >
-                <IconEye size={16} />
-              </ActionIcon>
-            </Tooltip>
+            <ViewOnlineButton
+              fileName={props.fileName}
+              href={viewOnlineHref}
+              inlineSrc={viewOnlineHref}
+              downloadUrl={downloadHref}
+              size='md'
+              style={{ flexShrink: 0, marginTop: 1, minWidth: 36, minHeight: 36 }}
+            />
           ) : null}
         </Group>
       </Table.Td>

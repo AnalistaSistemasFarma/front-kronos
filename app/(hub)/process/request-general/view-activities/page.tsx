@@ -99,7 +99,10 @@ import {
   resolveOrionPdfUrl,
 } from '../../../../../lib/orion/documentVersions';
 import { resolveOrionPdfAccessUrl } from '../../../../../lib/orion/signedFileAccess';
-import { resolveRequestPdfAccessUrl } from '../../../../../lib/attachments/fileUrl';
+import {
+  buildSynerLinkAttachmentFileUrl,
+  resolveRequestPdfAccessUrl,
+} from '../../../../../lib/attachments/fileUrl';
 import { mergeOneDriveWithOrionDocuments } from '../../../../../lib/orion/attachmentList';
 import type { OrionSignatureState } from '../../../../../lib/orion/types';
 import { buildOrionParticipants } from '../../../../../lib/orion/participants';
@@ -112,6 +115,7 @@ import { isSynerlinkWorkflowLocked } from '../../../../../lib/orion/workflowLock
 import OrionSignaturePanel from '../../../../../components/orion/OrionSignaturePanel';
 import { OrionSignatureProvider } from '../../../../../components/orion/OrionSignatureContext';
 import OrionAttachmentTableRow from '../../../../../components/orion/OrionAttachmentTableRow';
+import ViewOnlineButton from '../../../../../components/orion/ViewOnlineButton';
 import OrionDraftTableRow from '../../../../../components/orion/OrionDraftTableRow';
 import { nestDraftPdfRows } from '../../../../../lib/orion/attachmentNesting';
 import { isWordDraftFileName } from '../../../../../lib/orion/draftState';
@@ -2354,7 +2358,7 @@ function ViewRequestPage() {
                     ) : (
                       <>
                         <Table.Th>Documento</Table.Th>
-                        <Table.Th style={{ width: 100 }}>Abrir</Table.Th>
+                        <Table.Th style={{ width: 120 }}>Abrir</Table.Th>
                       </>
                     )}
                   </Table.Tr>
@@ -2568,20 +2572,16 @@ function ViewRequestPage() {
                             >
                               <Group gap={6} wrap='nowrap'>
                                 {file.webUrl ? (
-                                  <Tooltip label='Ver en línea (sin descargar)'>
-                                    <ActionIcon
-                                      variant='subtle'
-                                      color='blue'
-                                      size='sm'
-                                      component='a'
-                                      href={file.webUrl}
-                                      target='_blank'
-                                      rel='noopener noreferrer'
-                                      aria-label={`Ver en línea ${file.name}`}
-                                    >
-                                      <IconEye size={16} />
-                                    </ActionIcon>
-                                  </Tooltip>
+                                  <ViewOnlineButton
+                                    fileName={file.name}
+                                    href={file.webUrl}
+                                    inlineSrc={buildSynerLinkAttachmentFileUrl({
+                                      requestId: request.id_request_general,
+                                      fileId,
+                                    })}
+                                    webUrl={file.webUrl}
+                                    downloadUrl={openUrl}
+                                  />
                                 ) : null}
                                 <UnstyledButton
                                   component='a'
@@ -2621,18 +2621,32 @@ function ViewRequestPage() {
                             </Table.Td>
                             <Table.Td data-label='Abrir'>
                               <Group gap={6} wrap='nowrap'>
-                                <ActionIcon
-                                  variant='subtle'
-                                  color='blue'
-                                  size='sm'
+                                {file.webUrl ? (
+                                  <ViewOnlineButton
+                                    fileName={file.name}
+                                    href={file.webUrl}
+                                    inlineSrc={buildSynerLinkAttachmentFileUrl({
+                                      requestId: request.id_request_general,
+                                      fileId,
+                                    })}
+                                    webUrl={file.webUrl}
+                                    downloadUrl={openUrl}
+                                  />
+                                ) : null}
+                                <UnstyledButton
                                   component='a'
                                   href={openUrl}
                                   target='_blank'
                                   rel='noopener noreferrer'
-                                  aria-label={`Ver archivo ${file.name}`}
+                                  aria-label={`Abrir ${file.name}`}
+                                  style={{
+                                    fontSize: 13,
+                                    color: 'var(--mantine-color-blue-6)',
+                                    fontWeight: 600,
+                                  }}
                                 >
-                                  <IconEye size={16} />
-                                </ActionIcon>
+                                  Abrir
+                                </UnstyledButton>
                                 {!file.fromOrionBag && request?.id_request_general ? (
                                   <TestAttachmentDeleteButton
                                     requestId={request.id_request_general}
