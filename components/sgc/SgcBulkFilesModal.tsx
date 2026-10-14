@@ -97,7 +97,7 @@ export default function SgcBulkFilesModal({ opened, onClose, idCompany, onLoaded
   const bad = rows?.filter((r) => r.status === 'error').length ?? 0;
 
   return (
-    <Modal opened={opened} onClose={close} title='Cargar archivos (PDF) del listado maestro' size='lg'>
+    <Modal opened={opened} onClose={close} title='Cargar archivos (PDF, Word o Excel) del listado maestro' size='lg'>
       <Stack gap='sm' data-testid='sgc-archivos-importar'>
         {error && (
           <Alert color='red' title='Error' icon={<IconAlertTriangle size={18} />}>
@@ -150,7 +150,8 @@ export default function SgcBulkFilesModal({ opened, onClose, idCompany, onLoaded
         {loading && !dryRun && files.length > 0 && <Progress value={(done / files.length) * 100} animated />}
 
         <Group>
-          <FileButton onChange={pick} accept='application/pdf' multiple>
+          {/* S16 (R33): también los originales en Word y Excel ya aprobados (se convierten a PDF para el visor y se conservan con su huella). */}
+          <FileButton onChange={pick} accept='application/pdf,.pdf,.docx,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' multiple>
             {(props) => (
               <Button {...props} variant='default' leftSection={<IconUpload size={16} />} data-testid='sgc-archivos-subir'>
                 Subir archivos
@@ -161,7 +162,7 @@ export default function SgcBulkFilesModal({ opened, onClose, idCompany, onLoaded
 
         {files.length > 0 && (
           <Text size='sm'>
-            Archivos: <b>{files.length}</b> PDF seleccionados. El nombre de cada archivo debe empezar con el código del documento (por ejemplo «OLP-GCC-02 Almacenamiento.pdf»).
+            Archivos: <b>{files.length}</b> seleccionados (PDF, Word o Excel). El nombre de cada archivo debe empezar con el código del documento (por ejemplo «OLP-GCC-02 Almacenamiento.pdf» o «OLP-GCC-02-FO01 Registro.xlsx»). Un Word o un Excel se convierte a PDF para el visor y el original se guarda con su huella.
           </Text>
         )}
 

@@ -1,77 +1,90 @@
 import { createHash } from 'node:crypto';
-import { SIGNING_LEGAL_CONSENT_REQUIRED_MESSAGE, SIGNING_LEGAL_CONSENT_VERSION } from '../orion/signingLegalConsent';
 import { OtError, type OtCompanyAccess } from './rules';
 
 /**
- * FIRMA ELECTRÓNICA de la Bitácora de Proceso — reglas PURAS (probadas con Vitest).
+ * CONFIRMACIÓN de cierre y verificación de la Bitácora de Proceso — reglas PURAS
+ * (probadas con Vitest).
  *
- * Nicolás (2026-10-13): «recuerda que las firmas también son digitales, para eso
- * tenemos firmas ya construidas». Se reutilizan las piezas de SynerLink:
- *   - reautenticación con la contraseña de SynerLink (lib/auth/verifyPassword.ts,
- *     la misma regla del inicio de sesión);
- *   - el consentimiento de firma ELECTRÓNICA de GSS Firma (Ley 527/1999, Decreto
- *     2364/2012; lib/orion/signingLegalConsent.ts), con su versión;
- *   - la firma REGISTRADA de la persona en GSS Firma (Orión) como imagen visible.
- * Lo propio de la bitácora es solo la evidencia (ot_firma, solo inserción):
- * significado, hora del servidor y huella SHA-256 del contenido firmado.
+ * Revisión con Farmalógica (2026-10-14, A4): por ahora NO es una firma
+ * electrónica con imagen. Es un CHECK («Cerró» del supervisor y «Verificó» del
+ * jefe de producción) con nombre, fecha y hora del servidor, respaldado por la
+ * contraseña de SynerLink de quien confirma. La validación formal de firmas que
+ * exige la norma queda para después. GSS Firma y el SGC no se tocan: la bitácora
+ * solo deja de usar la imagen de la firma y el consentimiento de GSS Firma.
  *
- * Flujo: el SUPERVISOR cierra firmando («Cerró»); después el INSPECTOR de la
- * bitácora verifica firmando («Verificó»). Son personas distintas.
+ * Tablet con CUENTA COMPARTIDA de planta (Nicolás, 2026-10-14): la sesión no
+ * sirve para confirmar. Quien confirma ELIGE SU NOMBRE y escribe SU PROPIA
+ * contraseña; el servidor la valida contra la cuenta de esa persona y guarda SU
+ * id de usuario (no el de la sesión).
+ *
+ * La evidencia sigue en `ot_firma` (solo inserción): rol, significado, persona,
+ * hora del servidor y huella SHA-256 del contenido. En la base el verificador
+ * conserva el rol `INSPECTOR` (no se renombran columnas).
  */
-import { OT_FIRMA_SIGNIFICADO, type OtFirmaRol } from './constants';
-export { OT_FIRMA_SIGNIFICADO, type OtFirmaRol };
+import { OT_CONFIRMACION_TEXTO, OT_FIRMA_SIGNIFICADO, type OtFirmaRol } from './constants';
+export { OT_CONFIRMACION_TEXTO, OT_FIRMA_SIGNIFICADO, type OtFirmaRol };
 export const OT_FIRMA_AUTH_METHOD = 'contrasena_synerlink';
-export const OT_FIRMA_CONSENT_VERSION = SIGNING_LEGAL_CONSENT_VERSION;
+/** Versión de la confirmación (check) que se guarda en ot_firma.consent_version. */
+export const OT_CONFIRMACION_VERSION = 'bitacora-check-2026-10-14';
 
 export const OT_REAUTH_MAX_FALLOS = 5;
 export const OT_REAUTH_VENTANA_MIN = 15;
 
-export interface FirmaInput {
+export interface ConfirmacionInput {
+  /** user.id de la persona que confirma (elegida de la lista, no la sesión). */
+  idFirmante: string;
   password: string;
 }
 
-/** Cuerpo de una firma: contraseña y aceptación expresa del consentimiento. */
-export function parseFirma(body: Record<string, unknown> | null): FirmaInput {
-  if (!body) throw new OtError('Se esperaba un JSON con la firma.', 400);
-  if (body.acepto !== true) throw new OtError(SIGNING_LEGAL_CONSENT_REQUIRED_MESSAGE, 400);
+/** Cuerpo de una confirmación: persona elegida, casilla marcada y su contraseña. */
+export function parseConfirmacion(body: Record<string, unknown> | null): ConfirmacionInput {
+  if (!body) throw new OtError('Se esperaba un JSON con la confirmación.', 400);
+  const idFirmante = typeof body.firmante === 'string' ? body.firmante.trim() : '';
+  if (!idFirmante) throw new OtError('Elija su nombre para confirmar.', 400);
+  if (idFirmante.length > 50) throw new OtError('Persona no válida.', 400);
+  if (body.confirmo !== true) throw new OtError('Marque la casilla de confirmación.', 400);
   const password = typeof body.password === 'string' ? body.password : '';
-  if (!password) throw new OtError('Escriba su contraseña de SynerLink para firmar.', 400);
+  if (!password) throw new OtError('Escriba su contraseña de SynerLink para confirmar.', 400);
   if (password.length > 200) throw new OtError('Contraseña no válida.', 400);
-  return { password };
+  return { idFirmante, password };
 }
 
-/** Al abrir: el inspector no puede ser el supervisor que abre (segregación de funciones). */
+/** Al abrir: el jefe de producción no puede ser el supervisor que abre (segregación de funciones). */
 export function assertInspectorDistinto(inspector: string, supervisor: string): void {
   if (inspector === supervisor) {
-    throw new OtError('El inspector debe ser una persona distinta del supervisor que abre la bitácora.', 400);
+    throw new OtError('El jefe de producción debe ser una persona distinta del supervisor que abre la bitácora.', 400);
   }
 }
 
-/** Cierre firmado («Cerró»): solo Gestión, bitácora ABIERTA y quien firma no es el inspector. */
+/**
+ * Cierre («Cerró»): la persona que confirma debe tener Gestión (supervisor) en la
+ * empresa, la bitácora debe estar ABIERTA y quien confirma no es el jefe de producción.
+ * `access` es el acceso de QUIEN CONFIRMA (no el de la sesión).
+ */
 export function assertPuedeCerrar(
   orden: { estado: string; inspector: string | null },
   idUser: string,
-  access: OtCompanyAccess
+  access: OtCompanyAccess | null
 ): void {
-  if (!access.canManage) throw new OtError('Solo el supervisor (Bitácora de Proceso: Gestión) cierra la bitácora.', 403);
+  if (!access?.canManage) throw new OtError('Solo un supervisor (Bitácora de Proceso: Gestión) cierra la bitácora.', 403);
   if (orden.estado !== 'ABIERTA') throw new OtError('La bitácora ya está cerrada.', 409);
   if (orden.inspector && orden.inspector === idUser) {
-    throw new OtError('El inspector de esta bitácora no puede cerrarla: la cierra el supervisor y él la verifica.', 403);
+    throw new OtError('El jefe de producción de esta bitácora no puede cerrarla: la cierra el supervisor y él la verifica.', 403);
   }
 }
 
-/** Verificación firmada («Verificó»): solo el inspector designado, después del cierre firmado, una vez. */
+/** Verificación («Verificó»): solo el jefe de producción designado, después del cierre, una vez. */
 export function assertPuedeVerificar(
   orden: { estado: string; inspector: string | null },
   firmas: ReadonlyArray<{ rol: string; id_user: string }>,
   idUser: string
 ): void {
   if (!orden.inspector || orden.inspector !== idUser) {
-    throw new OtError('Solo el inspector designado en esta bitácora puede verificarla.', 403);
+    throw new OtError('Solo el jefe de producción designado en esta bitácora puede verificarla.', 403);
   }
   if (orden.estado !== 'CERRADA') throw new OtError('La bitácora se verifica después de que el supervisor la cierre.', 409);
   const sup = firmas.find((f) => f.rol === 'SUPERVISOR');
-  if (!sup) throw new OtError('Falta la firma de cierre del supervisor.', 409);
+  if (!sup) throw new OtError('Falta la confirmación de cierre del supervisor.', 409);
   if (sup.id_user === idUser) throw new OtError('Quien cerró la bitácora no puede verificarla.', 403);
   if (firmas.some((f) => f.rol === 'INSPECTOR')) throw new OtError('La bitácora ya fue verificada.', 409);
 }
@@ -80,7 +93,7 @@ export function sha256(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
-/** Contenido que se firma (orden de llaves fijo): encabezado, auxiliares, registros y cierre. */
+/** Contenido que se confirma (orden de llaves fijo): encabezado, auxiliares, operarios, registros y cierre. */
 export interface ContenidoFirmable {
   idOrden: number;
   idCompany: number;
@@ -95,14 +108,16 @@ export interface ContenidoFirmable {
   inspector: string | null;
   abiertaEn: string;
   auxiliares: string[];
-  registros: Array<{ id: string; actividad: string; usuario: string; registradoEn: string; observacion: string | null }>;
+  /** Operarios sin usuario programados (ids del maestro). */
+  operadores?: number[];
+  registros: Array<{ id: string; actividad: string; usuario: string; registradoEn: string; observacion: string | null; operador?: number | null }>;
   observacionCierre: string | null;
   cerradaPor?: string | null;
   cerradaEn?: string | null;
   firmaSupervisorSha256?: string | null;
 }
 
-/** Huella SHA-256 del contenido firmado (JSON canónico: llaves en orden fijo, auxiliares ordenados). */
+/** Huella SHA-256 del contenido confirmado (JSON canónico: llaves en orden fijo, auxiliares ordenados). */
 export function huellaContenido(c: ContenidoFirmable): string {
   const canon = {
     idOrden: c.idOrden,
@@ -118,21 +133,14 @@ export function huellaContenido(c: ContenidoFirmable): string {
     inspector: c.inspector,
     abiertaEn: c.abiertaEn,
     auxiliares: [...c.auxiliares].sort(),
-    registros: c.registros.map((r) => ({ id: r.id, actividad: r.actividad, usuario: r.usuario, registradoEn: r.registradoEn, observacion: r.observacion })),
+    operadores: [...(c.operadores ?? [])].sort((a, b) => a - b),
+    registros: c.registros.map((r) => ({ id: r.id, actividad: r.actividad, usuario: r.usuario, operador: r.operador ?? null, registradoEn: r.registradoEn, observacion: r.observacion })),
     observacionCierre: c.observacionCierre,
     cerradaPor: c.cerradaPor ?? null,
     cerradaEn: c.cerradaEn ?? null,
     firmaSupervisorSha256: c.firmaSupervisorSha256 ?? null,
   };
   return sha256(JSON.stringify(canon));
-}
-
-/** Imagen de la firma registrada: solo PNG/JPEG en data URL y de tamaño razonable; si no, se omite. */
-export function imagenFirmaSegura(dataUrl: string | null | undefined): string | null {
-  if (!dataUrl || typeof dataUrl !== 'string') return null;
-  if (!/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) return null;
-  if (dataUrl.length > 1_500_000) return null;
-  return dataUrl;
 }
 
 /**
@@ -167,6 +175,6 @@ export const limiteReautenticacion = new LimiteReautenticacion();
 
 export function assertNoBloqueado(limite: LimiteReautenticacion, email: string, now = Date.now()): void {
   if (limite.bloqueado(email, now)) {
-    throw new OtError(`Firma bloqueada: ${OT_REAUTH_MAX_FALLOS} intentos con contraseña incorrecta en ${OT_REAUTH_VENTANA_MIN} minutos. Espere e intente de nuevo.`, 429);
+    throw new OtError(`Confirmación bloqueada: ${OT_REAUTH_MAX_FALLOS} intentos con contraseña incorrecta en ${OT_REAUTH_VENTANA_MIN} minutos. Espere e intente de nuevo.`, 429);
   }
 }

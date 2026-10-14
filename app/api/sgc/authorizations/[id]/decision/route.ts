@@ -8,7 +8,8 @@ export const dynamic = 'force-dynamic';
 /**
  * POST /api/sgc/authorizations/<id>/decision — { decision: 'autorizar' | 'rechazar', comment }.
  * Autorizar = aprobar el cupo en su tarea; rechazar = devolver a elaboración
- * (con observaciones obligatorias). Se decide con el MISMO motor de la tarea.
+ * (con observaciones obligatorias) o, en la autorización de la creación del
+ * DOC v7 (S15, R15), cerrar la solicitud. Se decide con el MISMO motor de la tarea.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -17,7 +18,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const id = parseId((await params).id);
     const body = await readJson(request);
     if (!id || !body) return jsonNoStore({ error: 'Petición inválida' }, 400);
-    const decision = body.decision === 'autorizar' ? 'aprobar' : body.decision === 'rechazar' ? 'devolver' : null;
+    // S15: «rechazar» lo resuelve el motor: cierra la solicitud si el paso lo define (autorización de la creación) y si no, devuelve.
+    const decision = body.decision === 'autorizar' ? 'aprobar' : body.decision === 'rechazar' ? 'rechazar' : null;
     if (!decision) return jsonNoStore({ error: 'Decisión inválida: autorizar o rechazar' }, 400);
     const target = await taskOfAuthorization(prisma, id);
     if (!ctx.access.some((a) => a.idCompany === target.idCompany && a.canRead)) return jsonNoStore({ error: 'Autorización no encontrada' }, 404);

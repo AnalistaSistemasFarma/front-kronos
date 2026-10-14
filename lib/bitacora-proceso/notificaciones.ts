@@ -8,9 +8,10 @@ import { OT_BASE_URL } from './constants';
  * Mismo patrón que lib/sgc/notifications.ts. NO envía correos.
  *
  * Eventos (Nicolás, 2026-10-14: «el que debe verificar no le llegó como
- * notificación push»):
- *   - Al ABRIR: aviso al inspector designado.
- *   - Al CERRAR firmado («Cerró»): aviso al inspector para que verifique, con
+ * notificación push»). Quien verifica es el JEFE DE PRODUCCIÓN (antes
+ * «inspector»; en la base sigue siendo `id_inspector`):
+ *   - Al ABRIR: aviso al jefe de producción designado.
+ *   - Al CERRAR («Cerró»): aviso al jefe de producción para que verifique, con
  *     enlace directo a la bitácora.
  * Nunca se notifica a quien hizo la acción y nunca rompe la acción.
  */
@@ -23,7 +24,7 @@ export interface OtNotificacion {
 export type OtNotifier = (n: OtNotificacion[]) => Promise<void>;
 
 export const OT_NOTIF_TITULOS = {
-  inspectorAsignado: 'Fue designado inspector de una bitácora · SynerLink',
+  inspectorAsignado: 'Fue designado jefe de producción de una bitácora · SynerLink',
   porVerificar: 'Bitácora por verificar · SynerLink',
 } as const;
 
@@ -61,7 +62,7 @@ export function avisoInspectorAsignado(a: AvisoInspector): OtNotificacion[] {
       emails,
       payload: {
         title: OT_NOTIF_TITULOS.inspectorAsignado,
-        body: `${a.actorNombre} abrió ${referencia(a)} y lo designó inspector. Al cierre del supervisor le corresponde verificarla y firmar «Verificó».`,
+        body: `${a.actorNombre} abrió ${referencia(a)} y lo designó jefe de producción. Al cierre del supervisor le corresponde verificarla («Verificó»).`,
         url: bitacoraUrl(a.idOrden, a.idCompany),
         tag: `ot-${a.idOrden}-inspector`,
       },
@@ -77,7 +78,7 @@ export function avisoPorVerificar(a: AvisoInspector): OtNotificacion[] {
       emails,
       payload: {
         title: OT_NOTIF_TITULOS.porVerificar,
-        body: `${a.actorNombre} cerró y firmó ${referencia(a)}. Ábrala para verificarla y firmar «Verificó».`,
+        body: `${a.actorNombre} cerró ${referencia(a)} («Cerró»). Ábrala para verificarla («Verificó»).`,
         url: bitacoraUrl(a.idOrden, a.idCompany),
         tag: `ot-${a.idOrden}-verificar`,
       },
