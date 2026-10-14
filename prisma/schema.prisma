@@ -112,6 +112,9 @@ model Company {
   chatGroups      ChatConversation[]
   // SGC documental — configuración de activación por empresa (esquema `sgc`).
   sgcCompanyConfig SgcCompanyConfig?
+  // Órdenes de Trabajo (bitácora de proceso de planta, 2026-10-13).
+  otActividades    OtActividad[]
+  otOrdenesTrabajo OtOrdenTrabajo[]
 
   @@map("company")
   @@schema("dbo")
@@ -3327,4 +3330,135 @@ model SgcSignerSubstitution {
   @@index([id_request])
   @@map("signer_substitution")
   @@schema("sgc")
+}
+
+// =============================================================================
+// Bitácora de Proceso (antes «Órdenes de Trabajo»; P0, 2026-10-13). Las tablas
+// conservan el prefijo ot_ a propósito (nombre interno, sin mover el esquema) — bitácora de proceso de planta pedida
+// por Farmalógica (Amanda Casiano) para cerrar una desviación de auditoría:
+// «no se evidencia registro de las intervenciones durante todo el proceso».
+// Una orden de trabajo = un turno (producto, lote, turno y operarios). Los
+// operarios registran actividades del catálogo con la HORA DEL SERVIDOR
+// (SYSUTCDATETIME) y su usuario de sesión. Los registros NO se editan ni se
+// borran (ALCOA+): no hay rutas de edición/borrado y la base lo impide con un
+// trigger (migración 20261013180000_ordenes_trabajo_p0). La OP de SAP es
+// opcional y solo se guarda una copia (snapshot); nada se escribe en SAP.
+// =============================================================================
+
+model OtActividad {
+  id_actividad      Int      @id @default(autoincrement())
+  id_company        Int
+  nombre            String   @db.NVarChar(120)
+  exige_observacion Boolean  @default(false)
+  orden             Int      @default(0)
+  activo            Boolean  @default(true)
+  // Clave de un ícono de la lista cerrada OT_ICONOS (lib/bitacora-proceso/constants.ts); opcional.
+  icono             String?  @db.NVarChar(40)
+  created_by        String   @db.NVarChar(50)
+  created_at        DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  company   Company      @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  registros OtRegistro[]
+
+  @@index([id_company, activo, orden], map: "IX_ot_actividad_company")
+  @@map("ot_actividad")
+  @@schema("dbo")
+}
+
+model OtOrdenTrabajo {
+  id_orden_trabajo   Int       @id @default(autoincrement())
+  id_company         Int
+  consecutivo        Int
+  producto           String    @db.NVarChar(200)
+  item_code          String?   @db.NVarChar(50)
+  lote               String    @db.NVarChar(50)
+  // MANANA | TARDE | NOCHE
+  turno              String    @db.NVarChar(10)
+  area               String?   @db.NVarChar(100)
+  sap_op_absentry    Int?
+  sap_op_docnum      Int?
+  // Copia JSON de la OP de SAP al abrir (ItemNo, ProductDescription, U_Cod_Lote,
+  // U_FecVen_lote, PlannedQuantity, Warehouse): el soporte no cambia si cambia la OP.
+  sap_op_snapshot    String?   @db.NVarChar(Max)
+  // ABIERTA | CERRADA
+  estado             String    @default("ABIERTA") @db.NVarChar(10)
+  // Supervisor: quien abre la bitácora (user.id).
+  abierta_por        String    @db.NVarChar(50)
+  // Inspector (user.id), elegido al abrir; registra igual que los auxiliares.
+  id_inspector       String?   @db.NVarChar(50)
+  abierta_en         DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  cerrada_por        String?   @db.NVarChar(50)
+  cerrada_en         DateTime? @db.DateTime2
+  observacion_cierre String?   @db.NVarChar(1000)
+
+  company   Company           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  operarios OtOrdenOperario[]
+  registros OtRegistro[]
+  firmas    OtFirma[]
+
+  @@unique([id_company, consecutivo], map: "UQ_ot_orden_trabajo_consecutivo")
+  @@index([id_company, estado], map: "IX_ot_orden_trabajo_estado")
+  @@index([id_company, lote], map: "IX_ot_orden_trabajo_lote")
+  @@map("ot_orden_trabajo")
+  @@schema("dbo")
+}
+
+model OtOrdenOperario {
+  id_orden_operario Int    @id @default(autoincrement())
+  id_orden_trabajo  Int
+  id_user           String @db.NVarChar(50)
+
+  orden OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_orden_trabajo, id_user], map: "UQ_ot_orden_operario")
+  @@map("ot_orden_operario")
+  @@schema("dbo")
+}
+
+model OtRegistro {
+  id_registro      BigInt   @id @default(autoincrement())
+  id_orden_trabajo Int
+  id_actividad     Int
+  // Copia del nombre de la actividad al registrar (el soporte no cambia si se renombra).
+  actividad_nombre String   @db.NVarChar(120)
+  id_user          String   @db.NVarChar(50)
+  // Hora del SERVIDOR de base de datos: el cliente nunca la envía.
+  registrado_en    DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  observacion      String?  @db.NVarChar(500)
+  ip               String?  @db.NVarChar(64)
+
+  orden     OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
+  actividad OtActividad    @relation(fields: [id_actividad], references: [id_actividad], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_orden_trabajo, registrado_en], map: "IX_ot_registro_orden")
+  @@map("ot_registro")
+  @@schema("dbo")
+}
+
+// Firma electrónica de la bitácora (SUPERVISOR «Cerró» e INSPECTOR «Verificó»),
+// SOLO INSERCIÓN (trigger TR_ot_firma_inmutable). Reutiliza la reautenticación de
+// SynerLink, el consentimiento de GSS Firma y la firma registrada en GSS Firma.
+model OtFirma {
+  id_firma         Int      @id @default(autoincrement())
+  id_orden_trabajo Int
+  // SUPERVISOR | INSPECTOR
+  rol              String   @db.NVarChar(12)
+  significado      String   @db.NVarChar(20)
+  id_user          String   @db.NVarChar(50)
+  signer_email     String   @db.NVarChar(255)
+  signer_name      String?  @db.NVarChar(255)
+  firmado_en       DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  content_sha256   String   @db.Char(64)
+  auth_method      String   @db.NVarChar(40)
+  consent_version  String   @db.NVarChar(60)
+  firma_png        String?  @db.NVarChar(Max)
+  firma_sha256     String?  @db.Char(64)
+  ip               String?  @db.NVarChar(64)
+  user_agent       String?  @db.NVarChar(400)
+
+  orden OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_orden_trabajo, rol], map: "UQ_ot_firma_rol")
+  @@map("ot_firma")
+  @@schema("dbo")
 }
