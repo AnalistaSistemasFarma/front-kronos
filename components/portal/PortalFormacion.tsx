@@ -275,10 +275,15 @@ function VistaCursoEstudiante({
   }, [cargar]);
 
   const puedeMarcar = detalle?.puedeMarcarManual === true;
+  // «Vista estudiante» se ve como la ve un estudiante: un FORMADOR la usa para probar el curso, así que ahí las casillas
+  // van bloqueadas (se marcan solas al revisar cada material), igual que para un estudiante (Cristian, 2026-10-14).
+  // Quien está en el Excel de permisos pero NO es formador no tiene «Vista formador»: conserva el marcado a mano.
+  // El servidor sigue exigiendo el permiso (403) y el marcado manual solo afecta al progreso de quien lo usa.
+  const casillasEditables = puedeMarcar && detalle?.esFormador !== true;
 
   /** Marcado MANUAL: solo administradores/formadores (el servidor lo exige). */
   const alternarMaterial = async (materialId: number, completado: boolean) => {
-    if (!puedeMarcar) return;
+    if (!casillasEditables) return;
     setMarcando(materialId);
     setAviso(null);
     try {
@@ -341,7 +346,7 @@ function VistaCursoEstudiante({
           const completado = m.completadoEl !== null;
           return (
             <li key={m.id} className='portal-th__material-item'>
-              {puedeMarcar ? (
+              {casillasEditables ? (
                 <button
                   type='button'
                   className={`portal-th__material-check${completado ? ' portal-th__material-check--hecho' : ''}`}
@@ -398,7 +403,7 @@ function VistaCursoEstudiante({
           );
         })}
       </ul>
-      {!puedeMarcar && detalle.materiales.length > 0 && (
+      {!casillasEditables && detalle.materiales.length > 0 && (
         <p className='portal-th__estado'>
           Las casillas se marcan automáticamente cuando revisa cada material: los videos hasta el final, los PDF hasta la
           última página, los formularios al enviarlos y los demás documentos y enlaces al abrirlos.

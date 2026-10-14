@@ -56,7 +56,7 @@ function material(id: number, titulo: string, completado: boolean, mime: string)
 }
 
 /** 1 = video (4 s), 2 = PDF de 1 página, 3 = PDF de 5 páginas. */
-async function simular(page: Page, opciones: { puedeMarcarManual: boolean; completados: number[] }) {
+async function simular(page: Page, opciones: { puedeMarcarManual: boolean; completados: number[]; esFormador?: boolean }) {
   const estado = { completados: new Set(opciones.completados) };
   const pdf1 = await pdfDePaginas(1);
   const pdf5 = await pdfDePaginas(5);
@@ -68,7 +68,7 @@ async function simular(page: Page, opciones: { puedeMarcarManual: boolean; compl
     ];
     return {
       curso,
-      esFormador: false,
+      esFormador: opciones.esFormador === true,
       puedeMarcarManual: opciones.puedeMarcarManual,
       porcentaje: Math.round((estado.completados.size / materiales.length) * 100),
       materiales,
@@ -80,7 +80,7 @@ async function simular(page: Page, opciones: { puedeMarcarManual: boolean; compl
   await page.route('**/api/portal/courses', (r) =>
     r.fulfill({
       json: {
-        esFormador: false,
+        esFormador: opciones.esFormador === true,
         cursos: [{ ...curso, totalMateriales: 3, totalInscritos: 4, inscrito: true, porcentaje: detalle().porcentaje, certificado: null }],
       },
     })
@@ -242,6 +242,16 @@ test.describe('Portal TH · Formación · completado automático', () => {
     await abrirCurso(page);
     await expect(page.locator('.portal-th__progreso-fila').getByTestId('insignia-completado')).toBeVisible();
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/4-curso-completado.png`, fullPage: true });
+  });
+
+  test('un FORMADOR en «Vista estudiante» ve las casillas bloqueadas, como un estudiante', async ({ page }) => {
+    await simular(page, { puedeMarcarManual: true, esFormador: true, completados: [1] });
+    await abrirCurso(page);
+    // Mismas casillas bloqueadas que ve un estudiante (se marcan solas); sin botones de marcado a mano.
+    await expect(page.getByRole('checkbox')).toHaveCount(3);
+    await expect(page.getByRole('button', { name: /como completado|como pendiente/ })).toHaveCount(0);
+    await expect(page.getByText('Las casillas se marcan automáticamente cuando revisa cada material')).toBeVisible();
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/6-formador-vista-estudiante-casillas-bloqueadas.png`, fullPage: true });
   });
 
   test('administrador/formador: casillas editables a mano', async ({ page }) => {
