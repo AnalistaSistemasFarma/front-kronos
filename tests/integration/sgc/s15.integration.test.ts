@@ -18,7 +18,7 @@ import { createRequest, decideTask, getRequestDetail, reassignTask, setSigners, 
 import { signTask, type SgcSignatureDeps } from '../../../lib/sgc/db/signatures';
 import { saveTraining, uploadTrainingResults } from '../../../lib/sgc/db/training';
 import { normalizeFlowDefinition, type SgcFlowDefinition } from '../../../lib/sgc/flows/definition';
-import { canApproveFor, substituteApproverCheck } from '../../../lib/sgc/db/roleModel';
+import { canApproveFor, signerScopeFor, substituteApproverCheck } from '../../../lib/sgc/db/roleModel';
 import { SGC_DOCUMENT_FLOW_V7 } from '../../../lib/sgc/flows/documentFlow';
 import type { SgcNotification, SgcNotifier } from '../../../lib/sgc/notifications';
 import { synerlinkPasswordVerifier } from '../../../lib/sgc/signature/reauth';
@@ -261,6 +261,11 @@ describe.skipIf(!url)('SGC · S15 · modelo de roles DOC v7 con SQL Server', () 
     const r = await newRequest(E.sol, 'Procedimiento con líder obligatorio');
     await authorize(r);
     await expect(setSigners(prisma, notifier, r, { stepKey: 'aprobacion', signers: [E.jefe], mode: 'orden' }, actor(E.sol), await accessOf(E.sol))).rejects.toThrow(/no tiene líderes aprobadores cargados/);
+    // La pantalla tampoco ofrece aprobadores y avisa; sin departamento del elaborador, avisa a TI; el modelo anterior no restringe.
+    const req0 = await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: r } });
+    expect(await signerScopeFor(prisma, req0, { roleModel: 'solicitante_elabora' })).toMatchObject({ restricted: true, leadersEnforced: true, approvers: [], notice: expect.stringMatching(/líder/) });
+    expect(await signerScopeFor(prisma, { ...req0, elaborator_email: 'sin.departamento@ci.test' }, { roleModel: 'solicitante_elabora' })).toMatchObject({ departments: [], notice: expect.stringMatching(/no tiene departamento/) });
+    expect(await signerScopeFor(prisma, req0, {})).toBeNull();
     const cal = await accessOf(E.cal1);
     await expect(grantApproverAuthorization(prisma, cal, { email: E.otro, idDepartment: deptProd, reason: 'Líder de producción (no pertenece)' }, actor(E.cal1))).rejects.toThrow(/no pertenece a ese departamento/);
     await expect(grantApproverAuthorization(prisma, cal, { email: E.jefe, idDepartment: deptProd, idProcessMap: procGC, reason: 'Ambos a la vez' }, actor(E.cal1))).rejects.toThrow(/por departamento o por proceso/);

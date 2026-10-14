@@ -226,6 +226,8 @@ describe.skipIf(!url)('SGC · S17–S18 · evaluaciones propias con SQL Server',
     expect((await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: idRequest } })).current_task_key).toBe('capacitacion');
     await expect(uploadTrainingResults(prisma, upload, await accessOf(E.cal), idRequest, { fileName: 'r.csv', bytes: new TextEncoder().encode('x') }, actor(E.cal))).rejects.toThrow(/Consolidar resultados/);
     await expect(consolidateEvaluation(prisma, upload, await accessOf(E.otro), idRequest, actor(E.otro))).rejects.toMatchObject({ status: 403 });
+    await expect(consolidateEvaluation(prisma, upload, { ...(await accessOf(E.cal)), idCompany: CO + 1000 }, idRequest, actor(E.cal))).rejects.toMatchObject({ status: 404 });
+    await expect(getTrainingReport(prisma, { ...(await accessOf(E.cal)), idCompany: CO + 1000 }, idRequest, actor(E.cal))).rejects.toMatchObject({ status: 404 });
     const res = await consolidateEvaluation(prisma, upload, await accessOf(E.cal), idRequest, actor(E.cal));
     expect(res.summary).toEqual({ inScope: 2, passed: 1, failed: 1, retraining: 1, missing: 0 });
     const up = await prisma.sgcTrainingUpload.findUniqueOrThrow({ where: { id_training_upload: res.idTrainingUpload }, include: { results: { orderBy: { user_email: 'asc' } } } });

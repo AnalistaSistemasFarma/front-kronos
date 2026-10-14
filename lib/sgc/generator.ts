@@ -28,9 +28,14 @@ import type { SgcCompanyAccess } from './permissions';
  *     «desactualizada» hasta que Calidad apruebe una versión nueva.
  *   - Lo que se genera es un REGISTRO (información documentada conservada,
  *     ISO 9001 7.5.3), no un documento nuevo del listado maestro: lleva su
- *     propio código consecutivo (<CÓDIGO>-G0001), la versión de la plantilla y
- *     del documento de origen, el encabezado institucional del origen y una
- *     leyenda de trazabilidad. Es INMUTABLE (se anula con motivo, nunca se
+ *     propio consecutivo de registro (GEN-012-0001), la versión de la
+ *     plantilla y del documento de origen, el encabezado institucional del
+ *     origen y una leyenda de trazabilidad.
+ *   - S19 (R34, RN del 2026-10-13): el Generador es SOLO para documentos SIN
+ *     CODIFICACIÓN. La plantilla parte de un vigente de un tipo documental
+ *     marcado como «plantilla guía»; lo que se genera NO lleva código
+ *     documental (el encabezado y {{CODIGO}} dicen «Sin codificación»). Los
+ *     documentos codificados van siempre por solicitud. Es INMUTABLE (se anula con motivo, nunca se
  *     edita ni se borra) y se consulta en el VISOR, sin descarga
  *     (RN «Ver documento sin descarga»).
  */
@@ -77,12 +82,13 @@ export const SGC_TEMPLATE_VERSION_STATUS_LABELS: Record<SgcTemplateVersionStatus
 };
 
 /** Estado de uso de una plantilla (para la persona que genera). */
-export type SgcTemplateState = 'disponible' | 'sin_aprobar' | 'desactualizada' | 'documento_no_vigente' | 'retirada';
+export type SgcTemplateState = 'disponible' | 'sin_aprobar' | 'desactualizada' | 'documento_no_vigente' | 'tipo_no_guia' | 'retirada';
 export const SGC_TEMPLATE_STATE_LABELS: Record<SgcTemplateState, string> = {
   disponible: 'Disponible',
   sin_aprobar: 'Sin versión aprobada',
   desactualizada: 'Desactualizada',
   documento_no_vigente: 'Documento de origen no vigente',
+  tipo_no_guia: 'Origen codificado (no es plantilla guía)',
   retirada: 'Retirada',
 };
 
@@ -288,8 +294,11 @@ export function templateState(t: {
   approvedVersion: { idDocumentVersion: number } | null;
   documentStatus: string;
   documentCurrentVersionId: number | null;
+  /** S19 (R34): ¿el tipo documental del origen es de plantillas guía? (omitido = sí, compatibilidad). */
+  guideType?: boolean;
 }): SgcTemplateState {
   if (t.templateStatus !== 'activa') return 'retirada';
+  if (t.guideType === false) return 'tipo_no_guia';
   if (!t.approvedVersion) return 'sin_aprobar';
   if (t.documentStatus !== 'vigente') return 'documento_no_vigente';
   if (t.documentCurrentVersionId !== t.approvedVersion.idDocumentVersion) return 'desactualizada';
@@ -305,6 +314,8 @@ export function templateStateMessage(state: SgcTemplateState): string {
       return 'La plantilla aún no tiene una versión aprobada por Calidad.';
     case 'documento_no_vigente':
       return 'El documento de origen de la plantilla ya no está vigente.';
+    case 'tipo_no_guia':
+      return SGC_GENERATOR_CODED_MESSAGE;
     case 'desactualizada':
       return 'El documento de origen tiene una versión nueva: Calidad debe aprobar la plantilla actualizada antes de generar.';
     default:
@@ -312,10 +323,21 @@ export function templateStateMessage(state: SgcTemplateState): string {
   }
 }
 
-/** Código del registro generado: <CÓDIGO DEL ORIGEN>-G0001. */
-export function generatedCode(documentCode: string, sequence: number): string {
+/** S19 (R34): por qué un documento codificado no puede ser origen del Generador. */
+export const SGC_GENERATOR_CODED_MESSAGE = 'El Generador es solo para documentos sin codificación: el tipo documental del origen no está marcado como «plantilla guía». Los documentos codificados van por solicitud.';
+
+/** S19 (R34): texto que reemplaza al código documental en lo que se genera. */
+export const SGC_GENERATOR_NO_CODE = 'Sin codificación';
+
+/**
+ * Consecutivo del REGISTRO generado (S19, R34): GEN-<plantilla>-<consecutivo>,
+ * p. ej. GEN-012-0001. No reutiliza el código documental del origen: lo
+ * generado no lleva codificación del listado maestro.
+ */
+export function generatedCode(idTemplate: number, sequence: number): string {
+  if (!Number.isInteger(idTemplate) || idTemplate < 1) throw new Error('Plantilla inválida.');
   if (!Number.isInteger(sequence) || sequence < 1) throw new Error('Consecutivo inválido.');
-  return `${documentCode}-G${String(sequence).padStart(4, '0')}`;
+  return `GEN-${String(idTemplate).padStart(3, '0')}-${String(sequence).padStart(4, '0')}`;
 }
 
 /** Fecha y hora de Colombia (UTC-5, sin horario de verano) como «YYYY-MM-DD HH:mm». */

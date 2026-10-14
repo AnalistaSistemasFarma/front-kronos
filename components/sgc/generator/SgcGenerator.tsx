@@ -437,7 +437,8 @@ type SourceResponse = {
 };
 
 export function SgcTemplateProposalForm({ idCompany, initialDocument = null, onDone }: { idCompany: number; initialDocument?: string | null; onDone: (m: Msg) => void }) {
-  const docs = useSgcFetch<{ documents: { idDocument: number; code: string; title: string; versionNumber: number | null }[] }>(`/api/sgc/documents?company=${idCompany}`);
+  // S19 (R34): solo vigentes de tipos «plantilla guía» (sin codificación); los codificados van por solicitud.
+  const docs = useSgcFetch<{ guideTypes: string[]; documents: { idDocument: number; code: string; title: string; versionNumber: number | null; documentType: string }[] }>(`/api/sgc/generator/source?company=${idCompany}&vista=fuentes`);
   const [idDocument, setIdDocument] = useState<string | null>(initialDocument);
   const source = useSgcFetch<SourceResponse>(idDocument ? `/api/sgc/generator/source?company=${idCompany}&documento=${idDocument}` : null);
   const [fields, setFields] = useState<SgcGeneratorField[]>([]);
@@ -449,7 +450,7 @@ export function SgcTemplateProposalForm({ idCompany, initialDocument = null, onD
     setFields(source.data?.fields ?? []);
     setName(source.data?.template?.name ?? source.data?.document.title ?? '');
   }, [source.data]);
-  const options = useMemo(() => (docs.data?.documents ?? []).map((d) => ({ value: String(d.idDocument), label: `${d.code} · V${d.versionNumber ?? '-'} · ${d.title}` })), [docs.data]);
+  const options = useMemo(() => (docs.data?.documents ?? []).map((d) => ({ value: String(d.idDocument), label: `${d.title} · ${d.documentType} · V${d.versionNumber ?? '-'}` })), [docs.data]);
   const update = (key: string, patch: Partial<SgcGeneratorField>) => setFields((prev) => prev.map((f) => (f.key === key ? { ...f, ...patch } : f)));
   const submit = async () => {
     setBusy(true);
@@ -470,7 +471,12 @@ export function SgcTemplateProposalForm({ idCompany, initialDocument = null, onD
       <Text size='sm' c='dimmed'>
         La plantilla parte de un documento VIGENTE en Word o del editor. Marque en su contenido lo que la persona puede cambiar con {'{{CAMPO:Etiqueta}}'} (o {'{{CAMPO:Etiqueta|fecha}}'}); todo lo demás queda fijo. La aprueba Aseguramiento de Calidad.
       </Text>
-      <SgcSelect label='Documento vigente de origen' required searchable data={options} value={idDocument} onChange={setIdDocument} nothingFoundMessage='No hay documentos vigentes' data-testid='sgc-plantilla-documento' />
+      <Alert color='blue' variant='light' icon={<IconAlertTriangle size={16} />} data-testid='sgc-plantilla-solo-sin-codificacion'>
+        El Generador es solo para documentos <b>sin codificación</b>: la plantilla parte de un vigente de un tipo documental marcado como «plantilla guía»
+        {docs.data?.guideTypes.length ? ` (${docs.data.guideTypes.join(', ')})` : ''} y lo que se genera no lleva código documental. Los documentos codificados van por solicitud.
+        {docs.data && docs.data.guideTypes.length === 0 && ' Hoy ningún tipo documental está marcado: Aseguramiento de Calidad lo marca en Configuración del SGC.'}
+      </Alert>
+      <SgcSelect label='Documento vigente de origen' required searchable data={options} value={idDocument} onChange={setIdDocument} nothingFoundMessage='No hay plantillas guía vigentes' data-testid='sgc-plantilla-documento' />
       {source.loading && (
         <Group justify='center'>
           <Loader size='sm' />

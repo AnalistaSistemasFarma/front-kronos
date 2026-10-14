@@ -59,6 +59,7 @@ export interface SgcCatalogs {
     idHeaderTemplate: number | null;
     /** S16 (R32): formatos admitidos para el borrador («docx», «xlsx»). */
     draftExtensions: string[];
+    generatorGuide: boolean;
   }[];
   departments: { id: number; name: string }[];
 }
@@ -125,6 +126,7 @@ export async function getCatalogs(db: SgcDb, idCompany: number, includeInactive 
       isActive: d.is_active,
       idHeaderTemplate: d.id_header_template,
       draftExtensions: parseDraftExtensions(d.draft_extensions),
+      generatorGuide: d.generator_guide,
     })),
     departments: departments.map((d) => ({ id: d.id_department, name: d.department })),
   };
@@ -298,7 +300,7 @@ export async function saveCatalogEntry(
       };
       if (data.alert_months >= data.review_months) throw new SgcError('La alerta debe ser menor que el periodo de revisión.');
       // S16 (R31 y R32): plantilla de encabezado y formatos del borrador del tipo (si llegan).
-      const extra: { id_header_template?: number | null; draft_extensions?: string | null } = {};
+      const extra: { id_header_template?: number | null; draft_extensions?: string | null; generator_guide?: boolean } = {};
       if (body.idHeaderTemplate !== undefined) {
         const idTemplate = body.idHeaderTemplate === null || body.idHeaderTemplate === '' ? null : Number(body.idHeaderTemplate);
         if (idTemplate !== null) {
@@ -309,6 +311,8 @@ export async function saveCatalogEntry(
         extra.id_header_template = idTemplate;
       }
       if (body.draftExtensions !== undefined) extra.draft_extensions = normalizeDraftExtensions(body.draftExtensions);
+      // S19 (R34): tipo de plantillas guía del Generador (sin codificación).
+      if (body.generatorGuide !== undefined) extra.generator_guide = boolOr(body.generatorGuide, false);
       if (id === null) {
         const saved = await tx.sgcDocumentType.create({ data: { id_company: idCompany, ...data, ...extra } });
         await audit(SGC_AUDIT_ACTIONS.maestroCreado, 'document_type', saved.id_document_type, null, saved);
@@ -331,6 +335,23 @@ export async function saveCatalogEntry(
             reason,
             before_json: JSON.stringify({ idHeaderTemplate: before.id_header_template, draftExtensions: before.draft_extensions }),
             after_json: JSON.stringify({ idHeaderTemplate: saved.id_header_template, draftExtensions: saved.draft_extensions }),
+            ip: actor.ip ?? null,
+            user_agent: actor.userAgent ?? null,
+          },
+        });
+      }
+      // S19 (R34): marcar o desmarcar un tipo como plantilla guía del Generador queda en el control de cambios (con motivo).
+      if ('generator_guide' in extra && extra.generator_guide !== before.generator_guide) {
+        await tx.sgcConfigChangeLog.create({
+          data: {
+            id_company: idCompany,
+            actor_email: actor.email,
+            entity: 'document_type',
+            entity_id: String(id),
+            action: 'tipo_documental.generador_guia',
+            reason,
+            before_json: JSON.stringify({ generatorGuide: before.generator_guide }),
+            after_json: JSON.stringify({ generatorGuide: saved.generator_guide }),
             ip: actor.ip ?? null,
             user_agent: actor.userAgent ?? null,
           },

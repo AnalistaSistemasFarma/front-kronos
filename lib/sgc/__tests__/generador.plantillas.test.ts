@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  SGC_GENERATOR_CODED_MESSAGE,
+  SGC_GENERATOR_NO_CODE,
+  SGC_TEMPLATE_STATE_LABELS,
   SGC_GENERATOR_MAX_FIELDS,
   SGC_GENERATOR_MAX_LENGTH,
   canApproveTemplate,
@@ -139,14 +142,16 @@ describe('SGC · Generador · estado de la plantilla y registro', () => {
     expect(templateState({ ...ok, approvedVersion: null })).toBe('sin_aprobar');
     expect(templateState({ ...ok, documentStatus: 'obsoleto' })).toBe('documento_no_vigente');
     expect(templateState({ ...ok, documentCurrentVersionId: 8 })).toBe('desactualizada');
+    expect(templateState({ ...ok, guideType: true })).toBe('disponible');
     expect(templateStateMessage('disponible')).toBe('');
     for (const s of ['retirada', 'sin_aprobar', 'documento_no_vigente', 'desactualizada'] as const) expect(templateStateMessage(s)).not.toBe('');
   });
 
   it('[SGC-REQ-175] código consecutivo del registro, nombre del archivo y leyenda de trazabilidad', () => {
-    expect(generatedCode('OLP-GC-PLT-001', 1)).toBe('OLP-GC-PLT-001-G0001');
-    expect(generatedCode('OLP-GC-PLT-001', 12345)).toBe('OLP-GC-PLT-001-G12345');
-    expect(() => generatedCode('X', 0)).toThrow();
+    expect(generatedCode(12, 1)).toBe('GEN-012-0001');
+    expect(generatedCode(1234, 12345)).toBe('GEN-1234-12345');
+    expect(() => generatedCode(1, 0)).toThrow();
+    expect(() => generatedCode(0, 1)).toThrow();
     expect(generatedFileName('A/B:C-G0001')).toBe('A-B-C-G0001.pdf');
     expect(formatGeneratedAt(new Date('2026-10-10T15:04:00Z'))).toBe('2026-10-10 10:04');
     const base = { documentCode: 'OLP-GC-PLT-001', documentVersion: 2, templateVersion: 3, approvedBy: 'María Camila', approvedAt: new Date('2026-10-09T15:00:00Z'), user: 'Ana', at: new Date('2026-10-10T15:04:00Z') };
@@ -165,5 +170,25 @@ describe('SGC · Generador · estado de la plantilla y registro', () => {
     expect(parseGeneratorMode(1)).toBeNull();
     expect([generatorSourceFormat('Carta V2.DOCX'), generatorSourceFormat('borrador.html'), generatorSourceFormat('x.htm'), generatorSourceFormat('x.pdf'), generatorSourceFormat(null)]).toEqual(['docx', 'html', 'html', null, null]);
     expect(SGC_GENERATOR_MAX_LENGTH.fecha).toBe(10);
+  });
+});
+
+describe('SGC · Generador · S19 (R34): solo documentos sin codificación', () => {
+  const ok = { templateStatus: 'activa', approvedVersion: { idDocumentVersion: 7 }, documentStatus: 'vigente', documentCurrentVersionId: 7 };
+
+  it('[SGC-REQ-179] una plantilla cuyo origen es de un tipo codificado (no «plantilla guía») no genera; retirada sigue mandando', () => {
+    expect(templateState({ ...ok, guideType: false })).toBe('tipo_no_guia');
+    expect(templateState({ ...ok, guideType: false, templateStatus: 'retirada' })).toBe('retirada');
+    expect(templateStateMessage('tipo_no_guia')).toBe(SGC_GENERATOR_CODED_MESSAGE);
+    expect(SGC_GENERATOR_CODED_MESSAGE).toMatch(/sin codificación/);
+    expect(SGC_GENERATOR_CODED_MESSAGE).toMatch(/por solicitud/);
+    expect(SGC_TEMPLATE_STATE_LABELS.tipo_no_guia).toMatch(/codificado/);
+  });
+
+  it('[SGC-REQ-179] el registro generado no lleva el código documental del origen', () => {
+    expect(SGC_GENERATOR_NO_CODE).toBe('Sin codificación');
+    const code = generatedCode(3, 7);
+    expect(code).toBe('GEN-003-0007');
+    expect(code).not.toMatch(/PLT|FO|-G\d/);
   });
 });

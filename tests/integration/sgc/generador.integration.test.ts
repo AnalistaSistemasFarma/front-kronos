@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PrismaClient } from '../../../app/generated/prisma';
 import { getSgcAccessForUser } from '../../../lib/sgc/access';
 import { SGC_PROCESS_NAME, SGC_SUBPROCESS_NAMES, SGC_SUBPROCESS_URLS } from '../../../lib/sgc/constants';
-import { getCatalogs } from '../../../lib/sgc/db/catalogs';
+import { getCatalogs, saveCatalogEntry } from '../../../lib/sgc/db/catalogs';
 import { createInitialDocument, getAccessSubject, type SgcUploader } from '../../../lib/sgc/db/documents';
 import {
   annulGenerated,
@@ -18,6 +18,7 @@ import {
   listAvailableTemplates,
   listGeneratedForQuality,
   listMyGenerated,
+  listTemplateSources,
   listTemplatesForManagement,
   proposeTemplateVersion,
   qualityEmails,
@@ -141,6 +142,49 @@ describe.skipIf(!url)('SGC · Generador de documentos con SQL Server', () => {
     expect((await qualityEmails(prisma, CO)).sort()).toEqual([E.cal, E.mc].sort());
   });
 
+  it('[SGC-REQ-179] S19 (R34): el Generador es solo para documentos sin codificación; un tipo codificado no es origen hasta que Calidad lo marca como plantilla guía (con motivo)', async () => {
+    const gest = await accessOf(E.gest);
+    const subj = await subjectOf(E.gest);
+    // La migración del S19 es idempotente y deja todos los tipos SIN marcar.
+    await prisma.$executeRawUnsafe(fs.readFileSync(path.join(process.cwd(), 'prisma/migrations/20261014130000_sgc_s19_generador_sin_codificacion/migration.sql'), 'utf8'));
+    expect(await prisma.sgcDocumentType.count({ where: { id_company: CO, generator_guide: true } })).toBe(0);
+    await expect(getTemplateSource(prisma, deps, gest, subj, carta)).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/solo para documentos sin codificación/) });
+    await expect(proposeTemplateVersion(prisma, deps, notifier, gest, subj, { idDocument: carta, reason: 'Plantilla desde un formato codificado' }, actor(E.gest))).rejects.toMatchObject({ status: 409 });
+    expect(await listTemplateSources(prisma, gest, subj)).toEqual({ guideTypes: [], documents: [] });
+    await expect(listTemplateSources(prisma, await accessOf(E.ana), await subjectOf(E.ana))).rejects.toMatchObject({ status: 403 });
+    // Calidad marca el tipo como plantilla guía: queda en el control de cambios con su motivo.
+    const fo = (await getCatalogs(prisma, CO)).documentTypes.find((t) => t.code === 'FO')!;
+    expect(fo.generatorGuide).toBe(false);
+    const { id, code, name, pluralName, requiresTraining, reviewMonths, alertMonths, sortOrder, isActive } = fo;
+    await saveCatalogEntry(prisma, CO, 'document-types', { id, code, name, pluralName, requiresTraining, reviewMonths, alertMonths, sortOrder, isActive, generatorGuide: true, reason: 'Plantillas guía sin codificación para el Generador (R34)' }, actor(E.cal));
+    await saveCatalogEntry(prisma, CO, 'document-types', { id, code, name, pluralName, requiresTraining, reviewMonths, alertMonths, sortOrder, isActive, generatorGuide: true, reason: 'Se guarda de nuevo sin cambiar la marca' }, actor(E.cal));
+    expect((await getCatalogs(prisma, CO)).documentTypes.find((t) => t.code === 'FO')!.generatorGuide).toBe(true);
+    const log = await prisma.sgcConfigChangeLog.findMany({ where: { id_company: CO, action: 'tipo_documental.generador_guia' } });
+    expect(log).toHaveLength(1);
+    expect(JSON.parse(log[0].after_json!)).toEqual({ generatorGuide: true });
+    const sources = await listTemplateSources(prisma, gest, subj);
+    expect(sources.guideTypes).toEqual([fo.name]);
+    // Los vigentes del tipo marcado que la persona puede consultar (el confidencial no aparece).
+    expect(sources.documents.map((d) => d.code).sort()).toEqual(['GEN-GC-FO01', 'GEN-GC-FO02', 'GEN-GC-FO04']);
+    expect(sources.documents.find((d) => d.code === 'GEN-GC-FO01')).toMatchObject({ idDocument: carta, versionNumber: 1, documentType: fo.name });
+    // SQL del pase (OLP): sin el tipo PLT no marca nada; con él lo marca una sola vez (idempotente) y su reversa lo desmarca.
+    const pltGuide = async () => (await prisma.sgcDocumentType.findFirst({ where: { id_company: CO, code: 'PLT' }, select: { generator_guide: true } }))?.generator_guide ?? null;
+    await prisma.$executeRawUnsafe(seed('2026-10-14-sgc-s19-generador-guia-olp.sql'));
+    expect(await pltGuide()).toBeNull();
+    await prisma.$executeRawUnsafe(seed('2026-10-03-sgc-tipo-plantilla-olp.sql'));
+    expect(await pltGuide()).toBe(false);
+    await prisma.$executeRawUnsafe(seed('2026-10-14-sgc-s19-generador-guia-olp.sql'));
+    await prisma.$executeRawUnsafe(seed('2026-10-14-sgc-s19-generador-guia-olp.sql'));
+    expect(await pltGuide()).toBe(true);
+    expect(await prisma.sgcConfigChangeLog.count({ where: { id_company: CO, action: 'tipo_documental.generador_guia' } })).toBe(2);
+    await prisma.$executeRawUnsafe(seed('2026-10-14-sgc-s19-generador-guia-olp-reversa.sql'));
+    await prisma.$executeRawUnsafe(seed('2026-10-14-sgc-s19-generador-guia-olp-reversa.sql'));
+    expect(await pltGuide()).toBe(false);
+    expect(await prisma.sgcConfigChangeLog.count({ where: { id_company: CO, action: 'tipo_documental.generador_guia' } })).toBe(3);
+    // FO sigue marcado (la reversa de OLP solo toca PLT).
+    expect((await getCatalogs(prisma, CO)).documentTypes.find((t) => t.code === 'FO')!.generatorGuide).toBe(true);
+  });
+
   it('[SGC-REQ-171] la plantilla parte de un vigente en Word con sus campos detectados; solo PDF, sin permiso o no consultable no sirven', async () => {
     await expect(getTemplateSource(prisma, deps, await accessOf(E.ana), await subjectOf(E.ana), carta)).rejects.toMatchObject({ status: 403 });
     const src = await getTemplateSource(prisma, deps, await accessOf(E.gest), await subjectOf(E.gest), carta);
@@ -225,7 +269,9 @@ describe.skipIf(!url)('SGC · Generador de documentos con SQL Server', () => {
     expect(printed[0]).toContain('Señor(a) &lt;b&gt;Ana&lt;/b&gt; &amp; Cía');
     expect(printed[0]).toContain('Uno<br>Dos');
     expect(printed[0]).toContain('Texto fijo aprobado por Calidad.');
-    expect(printed[0]).toContain('Carta GEN-GC-FO01 V1');
+    // S19 (R34): lo generado no lleva el código documental del origen.
+    expect(printed[0]).toContain('Carta Sin codificación V—');
+    expect(printed[0]).not.toContain('Carta GEN-GC-FO01');
     expect(printed[0]).not.toContain('{{HISTORIAL_CAMBIOS}}');
     expect(await prisma.sgcGeneratedDocument.count({ where: { id_company: CO } })).toBe(before);
     expect(await prisma.sgcAuditLog.count({ where: { id_company: CO, action: 'generador.vista_previa', actor_email: E.ana } })).toBe(1);
@@ -237,14 +283,16 @@ describe.skipIf(!url)('SGC · Generador de documentos con SQL Server', () => {
     const [t] = await listAvailableTemplates(prisma, ana, subj);
     const values = { destinatario: 'Ana Pérez', fecha: '2026-10-10' };
     const first = await generateFromTemplate(prisma, deps, ana, subj, t.id, { modo: 'emitir', values }, actor(E.ana));
-    expect(first.record).toMatchObject({ code: 'GEN-GC-FO01-G0001' });
-    expect(uploads.at(-1)).toEqual({ segments: ['SGC', 'GEN', 'GENERADOS', 'GEN-GC-FO01'], fileName: 'GEN-GC-FO01-G0001.pdf' });
+    // S19 (R34): consecutivo de REGISTRO, sin el código documental del origen.
+    const pre = `GEN-${String(t.id).padStart(3, '0')}`;
+    expect(first.record).toMatchObject({ code: `${pre}-0001` });
+    expect(uploads.at(-1)).toEqual({ segments: ['SGC', 'GEN', 'GENERADOS', 'GEN-GC-FO01'], fileName: `${pre}-0001.pdf` });
     // Dos emisiones a la vez no toman el mismo número.
     const [a, b] = await Promise.all([
       generateFromTemplate(prisma, deps, ana, subj, t.id, { modo: 'emitir', values }, actor(E.ana)),
       generateFromTemplate(prisma, deps, await accessOf(E.otro), await subjectOf(E.otro), t.id, { modo: 'emitir', values }, actor(E.otro)),
     ]);
-    expect([a.record!.code, b.record!.code].sort()).toEqual(['GEN-GC-FO01-G0002', 'GEN-GC-FO01-G0003']);
+    expect([a.record!.code, b.record!.code].sort()).toEqual([`${pre}-0002`, `${pre}-0003`]);
     const row = await prisma.sgcGeneratedDocument.findUniqueOrThrow({ where: { id_generated: first.record!.id } });
     expect(row).toMatchObject({ status: 'emitido', generated_by: E.ana, sequence_number: 1, ip: '10.12.12.12' });
     expect(row.pdf_sha256).toBe(sha256Hex(store.get(row.pdf_item_id)!));
@@ -310,7 +358,7 @@ describe.skipIf(!url)('SGC · Generador de documentos con SQL Server', () => {
     printed.length = 0;
     const r = await generateFromTemplate(prisma, deps, ana, subj, t.id, { modo: 'emitir', values: { destinatario: 'Luis' } }, actor(E.ana));
     // El consecutivo sigue (no se reinicia con la versión nueva de la plantilla).
-    expect(r.record!.code).toBe('GEN-GC-FO01-G0004');
+    expect(r.record!.code).toBe(`GEN-${String(t.id).padStart(3, '0')}-0004`);
     expect(printed[0]).toContain('Nueva carta para Luis');
     const row = await prisma.sgcGeneratedDocument.findUniqueOrThrow({ where: { id_generated: r.record!.id } });
     expect(row.id_document_version).toBe(v2.id_document_version);

@@ -276,7 +276,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
               <Button
                 size='xs'
                 leftSection={<IconPlus size={14} />}
-                onClick={() => setEditing({ entity: 'document-types', form: { code: '', name: '', pluralName: '', requiresTraining: true, reviewMonths: 36, alertMonths: 2, sortOrder: 0, isActive: true, idHeaderTemplate: null, draftExtensions: 'docx', reason: '' } })}
+                onClick={() => setEditing({ entity: 'document-types', form: { code: '', name: '', pluralName: '', requiresTraining: true, reviewMonths: 36, alertMonths: 2, sortOrder: 0, isActive: true, idHeaderTemplate: null, draftExtensions: 'docx', generatorGuide: false, reason: '' } })}
               >
                 Nuevo tipo documental
               </Button>
@@ -308,7 +308,14 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                       <Table.Td>{t.requiresTraining ? 'Obligatoria' : 'No'}</Table.Td>
                       <Table.Td>{(t.draftExtensions ?? ['docx']).map((x) => (x === 'xlsx' ? 'Excel' : 'Word')).join(' y ')}</Table.Td>
                       <Table.Td>{t.idHeaderTemplate ? templates.data?.templates.find((x) => x.id === t.idHeaderTemplate)?.name ?? `#${t.idHeaderTemplate}` : 'Por defecto'}</Table.Td>
-                      <Table.Td>{activeBadge(t.isActive)}</Table.Td>
+                      <Table.Td>
+                        {activeBadge(t.isActive)}
+                        {t.generatorGuide && (
+                          <Badge ml={4} variant='light' color='grape' data-testid='sgc-tipo-generador-guia'>
+                            Plantilla guía
+                          </Badge>
+                        )}
+                      </Table.Td>
                       <Table.Td>
                         {editButton('document-types', {
                           id: t.id,
@@ -322,6 +329,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                           isActive: t.isActive,
                           idHeaderTemplate: t.idHeaderTemplate ?? null,
                           draftExtensions: (t.draftExtensions ?? ['docx']).join(','),
+                          generatorGuide: !!t.generatorGuide,
                         })}
                       </Table.Td>
                     </Table.Tr>
@@ -388,6 +396,14 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                   onChange={(v) => set('idHeaderTemplate', v ? Number(v) : null)}
                   allowDeselect={false}
                   data-testid='sgc-tipo-plantilla-encabezado'
+                />
+                {/* S19 (R34): el Generador es solo para documentos sin codificación. */}
+                <Checkbox
+                  label='Plantilla guía del Generador (sin codificación)'
+                  description='Los vigentes de este tipo pueden ser origen de una plantilla del Generador y lo que se genera no lleva código documental. Los documentos codificados van por solicitud.'
+                  checked={!!editing.form.generatorGuide}
+                  onChange={(e) => set('generatorGuide', e.currentTarget.checked)}
+                  data-testid='sgc-tipo-generador-guia-check'
                 />
               </>
             )}

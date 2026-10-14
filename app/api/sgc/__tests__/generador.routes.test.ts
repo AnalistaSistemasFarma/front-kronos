@@ -14,6 +14,7 @@ const m = vi.hoisted(() => {
     'listTemplatesForManagement',
     'listGeneratedForQuality',
     'getTemplateSource',
+    'listTemplateSources',
     'proposeTemplateVersion',
     'getTemplateForGeneration',
     'generateFromTemplate',
@@ -44,6 +45,7 @@ vi.mock('../../../../lib/sgc/db/generator', () => ({
   listTemplatesForManagement: m.listTemplatesForManagement,
   listGeneratedForQuality: m.listGeneratedForQuality,
   getTemplateSource: m.getTemplateSource,
+  listTemplateSources: m.listTemplateSources,
   proposeTemplateVersion: m.proposeTemplateVersion,
   getTemplateForGeneration: m.getTemplateForGeneration,
   generateFromTemplate: m.generateFromTemplate,
@@ -135,6 +137,11 @@ describe('Rutas del Generador de documentos', () => {
     expect((await source.GET(get('?company=9&documento=7'))).status).toBe(403);
     m.getTemplateSource.mockRejectedValue(new SgcError('solo PDF', 409));
     expect((await source.GET(get('?company=3&documento=7'))).status).toBe(409);
+    // S19 (R34): las fuentes posibles (vigentes de tipos «plantilla guía», sin codificación).
+    m.listTemplateSources.mockResolvedValue({ guideTypes: ['Plantilla guía'], documents: [{ idDocument: 7 }] });
+    expect(await (await source.GET(get('?company=3&vista=fuentes'))).json()).toEqual({ guideTypes: ['Plantilla guía'], documents: [{ idDocument: 7 }] });
+    expect(m.listTemplateSources).toHaveBeenCalledWith(PRISMA, lectura, expect.anything());
+    expect((await source.GET(get('?company=9&vista=fuentes'))).status).toBe(403);
 
     m.proposeTemplateVersion.mockResolvedValue({ idTemplate: 1, versionNumber: 1 });
     expect((await templates.POST(post({ company: 3, idDocument: 7, reason: 'x' }))).status).toBe(201);

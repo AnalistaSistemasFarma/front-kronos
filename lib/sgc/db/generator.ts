@@ -15,6 +15,8 @@ import {
   detectTemplateFields,
   fillTemplate,
   generatedCode,
+  SGC_GENERATOR_CODED_MESSAGE,
+  SGC_GENERATOR_NO_CODE,
   generatedFileName,
   generatorLegend,
   generatorSourceFormat,
@@ -94,7 +96,7 @@ const documentSelect = {
   title: true,
   status: true,
   current_version_id: true,
-  documentType: { select: { code: true, name: true } },
+  documentType: { select: { code: true, name: true, generator_guide: true } },
   process: { select: { code: true, name: true } },
   companyConfig: { select: { storage_root: true, company: { select: { company: true } } } },
 } as const;
@@ -108,7 +110,9 @@ async function loadVisibleDocument(db: SgcDb, access: SgcCompanyAccess, subject:
 }
 
 /** Contenido VIGENTE (Word convertido o HTML del editor), limpio. RN «borrador solo Word»: un vigente con solo PDF no sirve. */
-async function vigenteContent(db: SgcDb, deps: Pick<SgcGeneratorDeps, 'download' | 'docxToHtml'>, doc: { status: string; current_version_id: number | null; code: string }) {
+async function vigenteContent(db: SgcDb, deps: Pick<SgcGeneratorDeps, 'download' | 'docxToHtml'>, doc: { status: string; current_version_id: number | null; code: string; documentType: { generator_guide: boolean } }) {
+  // S19 (R34): solo un tipo de PLANTILLAS GUÍA (sin codificación); los codificados van por solicitud.
+  if (!doc.documentType.generator_guide) throw new SgcError(SGC_GENERATOR_CODED_MESSAGE, 409);
   if (doc.status !== 'vigente' || !doc.current_version_id) throw new SgcError('La plantilla solo parte de un documento VIGENTE.', 409);
   const version = await db.sgcDocumentVersion.findUniqueOrThrow({ where: { id_document_version: doc.current_version_id } });
   const format = version.source_item_id ? generatorSourceFormat(version.source_file_name) : null;
@@ -139,6 +143,32 @@ export async function getTemplateSource(db: SgcDb, deps: Pick<SgcGeneratorDeps, 
     fields: detectTemplateFields(html),
     template: template ? { id: template.id_template, name: template.name, status: template.status } : null,
   };
+}
+
+/**
+ * S19 (R34): documentos que pueden ser ORIGEN de una plantilla — vigentes de
+ * un tipo documental marcado como «plantilla guía» (sin codificación) y que la
+ * persona puede consultar. Los codificados van por solicitud y no aparecen.
+ */
+export async function listTemplateSources(db: SgcDb, access: SgcCompanyAccess, subject: SgcAccessSubject) {
+  if (!canProposeTemplate(access)) throw new SgcError('Solo gestión documental o Aseguramiento de Calidad configuran plantillas.', 403);
+  await assertEnabled(db, access.idCompany);
+  const [rows, guideTypes] = await Promise.all([
+    db.sgcDocument.findMany({
+      where: { id_company: access.idCompany, status: 'vigente', current_version_id: { not: null }, documentType: { generator_guide: true } },
+      select: { id_document: true, code: true, title: true, current_version_id: true, documentType: { select: { name: true } } },
+      orderBy: { code: 'asc' },
+    }),
+    db.sgcDocumentType.findMany({ where: { id_company: access.idCompany, generator_guide: true, is_active: true }, select: { name: true }, orderBy: { sort_order: 'asc' } }),
+  ]);
+  const versions = rows.length ? await db.sgcDocumentVersion.findMany({ where: { id_document_version: { in: rows.map((r) => r.current_version_id!) } }, select: { id_document_version: true, version_number: true } }) : [];
+  const byId = new Map(versions.map((v) => [v.id_document_version, v.version_number]));
+  const documents = [];
+  for (const r of rows) {
+    if (!(await canViewDocument(db, [access], subject, r.id_document))) continue;
+    documents.push({ idDocument: r.id_document, code: r.code, title: r.title, versionNumber: byId.get(r.current_version_id!) ?? null, documentType: r.documentType.name });
+  }
+  return { guideTypes: guideTypes.map((t) => t.name), documents };
 }
 
 /**
@@ -254,7 +284,7 @@ export async function retireTemplate(db: SgcDb, access: SgcCompanyAccess, idTemp
 }
 
 const templateInclude = {
-  document: { select: { id_document: true, code: true, title: true, status: true, current_version_id: true, documentType: { select: { code: true, name: true } } } },
+  document: { select: { id_document: true, code: true, title: true, status: true, current_version_id: true, documentType: { select: { code: true, name: true, generator_guide: true } } } },
   versions: { orderBy: { version_number: 'desc' as const } },
   _count: { select: { generated: true } },
 } as const;
@@ -263,7 +293,7 @@ type TemplateRow = Prisma.SgcGeneratorTemplateGetPayload<{ include: typeof templ
 
 function toTemplateView(t: TemplateRow, docVersions: ReadonlyMap<number, number>) {
   const approved = t.versions.find((v) => v.id_template_version === t.current_version_id && v.status === 'aprobada') ?? null;
-  const state = templateState({ templateStatus: t.status, approvedVersion: approved ? { idDocumentVersion: approved.id_document_version } : null, documentStatus: t.document.status, documentCurrentVersionId: t.document.current_version_id });
+  const state = templateState({ templateStatus: t.status, approvedVersion: approved ? { idDocumentVersion: approved.id_document_version } : null, documentStatus: t.document.status, documentCurrentVersionId: t.document.current_version_id, guideType: t.document.documentType.generator_guide });
   return {
     id: t.id_template,
     name: t.name,
@@ -360,7 +390,7 @@ async function loadForGeneration(db: SgcDb, access: SgcCompanyAccess, subject: S
   if (!t || !(await canViewDocument(db, [access], subject, t.id_document))) throw new SgcError('Plantilla no encontrada.', 404);
   const doc = await db.sgcDocument.findUniqueOrThrow({ where: { id_document: t.id_document }, select: documentSelect });
   const approved = t.current_version_id ? await db.sgcGeneratorTemplateVersion.findFirst({ where: { id_template_version: t.current_version_id, id_template: t.id_template, status: 'aprobada' } }) : null;
-  const state = templateState({ templateStatus: t.status, approvedVersion: approved ? { idDocumentVersion: approved.id_document_version } : null, documentStatus: doc.status, documentCurrentVersionId: doc.current_version_id });
+  const state = templateState({ templateStatus: t.status, approvedVersion: approved ? { idDocumentVersion: approved.id_document_version } : null, documentStatus: doc.status, documentCurrentVersionId: doc.current_version_id, guideType: doc.documentType.generator_guide });
   if (state !== 'disponible' || !approved) throw new SgcError(templateStateMessage(state), 409);
   const docVersion = await db.sgcDocumentVersion.findUniqueOrThrow({ where: { id_document_version: approved.id_document_version } });
   return { template: t, doc, approved, docVersion, fields: parseTemplateFields(approved.fields_json) };
@@ -390,19 +420,19 @@ async function renderRecordPdf(db: SgcDb, deps: Pick<SgcGeneratorDeps, 'htmlToPd
 
   let body = fillTemplate(l.approved.body_html, l.fields, values);
   const history = hasChangeHistoryToken(body) ? buildChangeHistoryHtml(await changeHistoryRows(db, l.doc.id_document, { versionNumber: l.docVersion.version_number, date: effective, reason: l.docVersion.change_description ?? '' })) : null;
-  body = applySystemFieldTokens(body, { CODIGO: l.doc.code, VERSION: String(l.docVersion.version_number), NOMBRE_DOCUMENTO: l.doc.title, PROCESO: process, TIPO_DOCUMENTAL: l.doc.documentType.name, EMPRESA: company, ELABORO: elaboro.join(', '), REVISO: reviso.join(', '), APROBO: aprobo.join(', ') }, history);
-  const contentPdf = await deps.htmlToPdf(wrapDraftForPdf({ title: l.doc.title, code: l.doc.code, contentHtml: body, institutional }));
+  body = applySystemFieldTokens(body, { CODIGO: SGC_GENERATOR_NO_CODE, VERSION: '—', NOMBRE_DOCUMENTO: l.doc.title, PROCESO: process, TIPO_DOCUMENTAL: l.doc.documentType.name, EMPRESA: company, ELABORO: elaboro.join(', '), REVISO: reviso.join(', '), APROBO: aprobo.join(', ') }, history);
+  const contentPdf = await deps.htmlToPdf(wrapDraftForPdf({ title: l.doc.title, code: SGC_GENERATOR_NO_CODE, contentHtml: body, institutional }));
 
   const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
   const pdf = await PDFDocument.load(contentPdf, { ignoreEncryption: true });
   const fonts = { regular: await pdf.embedFont(StandardFonts.Helvetica), bold: await pdf.embedFont(StandardFonts.HelveticaBold) };
   if (institutional) {
     const config = await db.sgcCompanyConfig.findUnique({ where: { id_company: l.doc.id_company }, select: { logo_data_url: true } });
-    const header: SgcInstitutionalHeaderData = { company, title: l.doc.title, code: l.doc.code, versionLabel: String(l.docVersion.version_number), process, documentType: l.doc.documentType.name, elaboro, reviso, aprobo, emissionText: effective, logo: decodeLogoDataUrl(config?.logo_data_url ?? null) };
+    const header: SgcInstitutionalHeaderData = { company, title: l.doc.title, code: SGC_GENERATOR_NO_CODE, versionLabel: '—', process, documentType: l.doc.documentType.name, elaboro, reviso, aprobo, emissionText: effective, logo: decodeLogoDataUrl(config?.logo_data_url ?? null) };
     await drawInstitutionalHeaders(pdf, pdf.getPages(), header, fonts);
   } else {
     // Sin encabezado institucional (vigente de la carga inicial): la misma línea superior del PDF controlado.
-    const top = toWinAnsiSafe(`${l.doc.code} · Versión ${l.docVersion.version_number} · ${l.doc.title} · ${company}`);
+    const top = toWinAnsiSafe(`${SGC_GENERATOR_NO_CODE} · ${l.doc.title} · ${company}`);
     for (const page of pdf.getPages()) {
       const { width, height } = page.getSize();
       let size = 7.5;
@@ -418,7 +448,7 @@ async function renderRecordPdf(db: SgcDb, deps: Pick<SgcGeneratorDeps, 'htmlToPd
     // y = 20: por encima del pie que el visor estampa en cada consulta (y = 8, «COPIA CONTROLADA · …»).
     page.drawText(safeLegend, { x: 20, y: 20, size, font: fonts.regular, color: rgb(0.1, 0.2, 0.45) });
   }
-  pdf.setTitle(`${l.doc.code} - documento generado`);
+  pdf.setTitle(`${l.doc.title} - documento generado`);
   pdf.setProducer('SynerLink · SGC · Generador de documentos');
   return pdf.save();
 }
@@ -450,7 +480,7 @@ export async function generateFromTemplate(db: SgcDb, deps: Pick<SgcGeneratorDep
     const fresh = await tx.sgcGeneratorTemplate.findUniqueOrThrow({ where: { id_template: loaded.template.id_template } });
     if (fresh.status !== 'activa' || fresh.current_version_id !== loaded.approved.id_template_version) throw new SgcError('La plantilla cambió mientras se generaba: recargue e intente de nuevo.', 409);
     const sequence = fresh.last_sequence + 1;
-    const code = generatedCode(loaded.doc.code, sequence);
+    const code = generatedCode(fresh.id_template, sequence);
     const bytes = await renderRecordPdf(db, deps, loaded, values, legendFor(code));
     const root = loaded.doc.companyConfig.storage_root.split('/').map((s) => sanitizeOneDriveName(s)).filter(Boolean);
     if (root.length === 0) throw new SgcError('La empresa no tiene carpeta raíz del SGC (storage_root).', 409);

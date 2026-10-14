@@ -1652,6 +1652,8 @@ model SgcDocumentType {
   id_header_template Int?
   // S16 (R32, D17): formatos del borrador del tipo («docx», «docx,xlsx»…; NULL = solo Word).
   draft_extensions   String? @db.NVarChar(100)
+  /// S19 (R34): tipo de PLANTILLAS GUÍA del Generador (lo generado no lleva código documental).
+  generator_guide    Boolean @default(false, map: "document_type_generator_guide_df")
 
   companyConfig  SgcCompanyConfig   @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   headerTemplate SgcHeaderTemplate? @relation(fields: [id_header_template], references: [id_header_template], onDelete: NoAction, onUpdate: NoAction)
