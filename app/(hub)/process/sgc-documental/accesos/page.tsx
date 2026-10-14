@@ -40,7 +40,8 @@ function Accesos({ company }: { company: SgcCompanyAccess }) {
   const rowLink = useSgcRowLink();
   const data = useSgcFetch<AccessData>(`/api/sgc/access-requests?company=${company.idCompany}`);
   const [mode, setMode] = useState<'lista' | 'codigo'>('lista');
-  const [idDocument, setIdDocument] = useState<string | null>(null);
+  // S14 (R23): «Solicitar acceso» desde el visor o la ficha llega con ?documento=<id> y lo deja elegido.
+  const [idDocument, setIdDocument] = useState<string | null>(() => (typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('documento')));
   const [code, setCode] = useState('');
   const [justification, setJustification] = useState('');
   const [busy, setBusy] = useState(false);

@@ -123,7 +123,8 @@ type DragState = {
 const CLICK_SUPPRESS_MS = 280;
 const MOVE_THRESHOLD_PX = 4;
 
-const PAGE_BASE_WIDTH = 720;
+// S16 (R35, D22): página más grande para ubicar las firmas (antes 720 px); el mismo valor en el SGC y en SynerLink (paridad).
+const PAGE_BASE_WIDTH = 1000;
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 4;
 const ZOOM_STEP = 0.25;
