@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Group, List, Paper, Progress, Stack, Text, TextInput } from '@mantine/core';
-import { IconAlertCircle, IconAlertTriangle, IconCircleCheck, IconCloudDownload } from '@tabler/icons-react';
+import { IconAlertCircle, IconAlertTriangle, IconCircleCheck, IconCloudDownload, IconX } from '@tabler/icons-react';
 import { leerJson } from './PortalContenido';
 import { claveDeDato } from '../../lib/portal/constructor-formulario';
 import { validarEnlaceForms, type EstadoImportacion, type ImportacionForms } from '../../lib/portal/importar-forms';
@@ -19,6 +19,12 @@ import { validarEnlaceForms, type EstadoImportacion, type ImportacionForms } fro
 const ESPERA_MS = 600;
 /** ~90 s: más que eso es que algo se trabó. */
 const INTENTOS_MAX = 150;
+/** Fallas SEGUIDAS de red o del servidor (502/503/504) que se toleran antes de rendirse. */
+const REINTENTOS_MAX = 3;
+
+/** Error que vale la pena reintentar: la red, o el importador que no respondió esta vez. */
+class ErrorTransitorio extends Error {}
+const esTransitorio = (status: number) => status === 502 || status === 503 || status === 504;
 
 const NOMBRE_DATO = { nombre: 'nombre', correo: 'correo', cedula: 'cédula' } as const;
 
@@ -32,59 +38,134 @@ function datosDeLaPersona(imp: ImportacionForms): string[] {
   return [...claves].map((k) => NOMBRE_DATO[k]);
 }
 
-const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Espera `ms`, o termina antes si se cancela. */
+const esperar = (ms: number, señal: AbortSignal) =>
+  new Promise<void>((ok) => {
+    const t = setTimeout(ok, ms);
+    señal.addEventListener('abort', () => {
+      clearTimeout(t);
+      ok();
+    }, { once: true });
+  });
 
-export function ImportarDesdeForms({ onImportado, deshabilitado }: { onImportado: (i: ImportacionForms) => void; deshabilitado?: boolean }) {
+/**
+ * `fetch` que reintenta las fallas TRANSITORIAS (red caída un momento, 502/503/504) hasta
+ * REINTENTOS_MAX veces, con espera creciente. Un error definitivo (400, 403, 404…) no se reintenta.
+ */
+async function conReintentos(hacer: () => Promise<Response>, señal: AbortSignal): Promise<Response> {
+  for (let intento = 0; ; intento++) {
+    try {
+      const res = await hacer();
+      if (!esTransitorio(res.status) || intento >= REINTENTOS_MAX) return res;
+    } catch (e) {
+      if (señal.aborted || (e as Error).name === 'AbortError') throw e;
+      if (intento >= REINTENTOS_MAX) throw new ErrorTransitorio('No hay conexión con el importador. Revise su red e intente de nuevo.');
+    }
+    await esperar(1000 * (intento + 1), señal);
+    if (señal.aborted) throw new DOMException('Cancelada', 'AbortError');
+  }
+}
+
+export function ImportarDesdeForms({
+  onImportado,
+  deshabilitado,
+  hayContenido = false,
+}: {
+  onImportado: (i: ImportacionForms) => void;
+  deshabilitado?: boolean;
+  /** El constructor ya tiene algo escrito: importar lo REEMPLAZA, así que se pide confirmación antes. */
+  hayContenido?: boolean;
+}) {
   const [url, setUrl] = useState('');
   const [trabajando, setTrabajando] = useState(false);
   const [progreso, setProgreso] = useState(0);
   const [etapa, setEtapa] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [listo, setListo] = useState<{ titulo: string; preguntas: number; datos: string[]; advertencias: string[] } | null>(null);
+  const [confirmar, setConfirmar] = useState(false);
+  const [cancelada, setCancelada] = useState(false);
   const vivo = useRef(true);
   const avisos = useRef<HTMLDivElement | null>(null);
+  const control = useRef<AbortController | null>(null);
+  const trabajo = useRef<string | null>(null);
 
   useEffect(() => {
     vivo.current = true;
     return () => {
       vivo.current = false;
+      control.current?.abort();
     };
   }, []);
 
+  /** Cancela la importación en curso: deja de consultar y le pide al importador que suelte el navegador. */
+  const cancelar = () => {
+    control.current?.abort();
+    const id = trabajo.current;
+    if (id) void fetch(`/api/portal/formularios/importar-forms/${id}`, { method: 'DELETE', keepalive: true }).catch(() => undefined);
+  };
+
   // Los avisos van ARRIBA: al aparecer uno, se lleva a la persona hasta él.
   useEffect(() => {
-    if (!error && !listo) return;
+    if (!error && !listo && !confirmar && !cancelada) return;
     window.requestAnimationFrame(() => avisos.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
-  }, [error, listo]);
+  }, [error, listo, confirmar, cancelada]);
 
-  const importar = async () => {
+  /** Botón «Importar»: si ya hay algo escrito, primero se confirma (importar lo reemplaza). */
+  const pedirImportar = () => {
     setError(null);
     setListo(null);
+    setCancelada(false);
     const enlace = validarEnlaceForms(url);
     if (!enlace.ok) {
       setError(enlace.error);
       return;
     }
+    if (hayContenido) {
+      setConfirmar(true);
+      return;
+    }
+    void importar();
+  };
+
+  const importar = async () => {
+    setConfirmar(false);
+    setError(null);
+    setListo(null);
+    setCancelada(false);
+    const enlace = validarEnlaceForms(url);
+    if (!enlace.ok) {
+      setError(enlace.error);
+      return;
+    }
+    const c = new AbortController();
+    control.current = c;
+    trabajo.current = null;
     setTrabajando(true);
     setProgreso(2);
     setEtapa('Iniciando la importación');
     try {
-      const res = await fetch('/api/portal/formularios/importar-forms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: enlace.url }),
-      });
+      const res = await conReintentos(
+        () =>
+          fetch('/api/portal/formularios/importar-forms', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: enlace.url }),
+            signal: c.signal,
+          }),
+        c.signal
+      );
       const inicio = await leerJson(res);
       if (!res.ok) throw new Error(String(inicio?.error ?? 'No se pudo iniciar la importación.'));
       const id = String(inicio.id);
+      trabajo.current = id;
 
       for (let i = 0; i < INTENTOS_MAX; i++) {
-        await esperar(ESPERA_MS);
-        if (!vivo.current) return;
-        const r = await fetch(`/api/portal/formularios/importar-forms/${id}`, { cache: 'no-store' });
+        await esperar(ESPERA_MS, c.signal);
+        if (c.signal.aborted || !vivo.current) return;
+        const r = await conReintentos(() => fetch(`/api/portal/formularios/importar-forms/${id}`, { cache: 'no-store', signal: c.signal }), c.signal);
         const s = (await leerJson(r)) as unknown as EstadoImportacion & { error?: string };
         if (!r.ok) throw new Error(String(s?.error ?? 'No se pudo consultar la importación.'));
-        if (!vivo.current) return;
+        if (c.signal.aborted || !vivo.current) return;
         setProgreso(s.progreso);
         setEtapa(s.etapa);
         if (s.estado === 'error') throw new Error(s.error ?? 'No se pudo importar el formulario.');
@@ -96,8 +177,14 @@ export function ImportarDesdeForms({ onImportado, deshabilitado }: { onImportado
       }
       throw new Error('La importación tardó demasiado. Intente de nuevo.');
     } catch (e) {
-      if (vivo.current) setError((e as Error).message);
+      if (!vivo.current) return;
+      if (c.signal.aborted || (e as Error).name === 'AbortError') {
+        setCancelada(true);
+        return;
+      }
+      setError((e as Error).message);
     } finally {
+      if (control.current === c) control.current = null;
       if (vivo.current) setTrabajando(false);
     }
   };
@@ -108,6 +195,26 @@ export function ImportarDesdeForms({ onImportado, deshabilitado }: { onImportado
         {/* Avisos ARRIBA y con color (convención del equipo). */}
         <div ref={avisos}>
           <Stack gap='xs'>
+            {confirmar && (
+              <Alert color='yellow' icon={<IconAlertTriangle size={18} />} title='¿Reemplazar lo que ya escribió?' data-testid='importar-confirmar'>
+                <Stack gap='xs'>
+                  <Text size='sm'>Importar reemplaza el título, la descripción y las preguntas que ya escribió abajo. Esto no se puede deshacer.</Text>
+                  <Group gap='xs'>
+                    <Button size='xs' color='yellow' onClick={() => void importar()} data-testid='importar-confirmar-si'>
+                      Reemplazar e importar
+                    </Button>
+                    <Button size='xs' variant='default' onClick={() => setConfirmar(false)} data-testid='importar-confirmar-no'>
+                      Cancelar
+                    </Button>
+                  </Group>
+                </Stack>
+              </Alert>
+            )}
+            {cancelada && (
+              <Alert color='gray' icon={<IconAlertCircle size={18} />} role='status' data-testid='importar-cancelada'>
+                Importación cancelada. No se cambió nada de lo que tenía escrito.
+              </Alert>
+            )}
             {error && (
               <Alert color='red' icon={<IconAlertCircle size={18} />} role='alert' data-testid='importar-error'>
                 {error}
@@ -144,9 +251,12 @@ export function ImportarDesdeForms({ onImportado, deshabilitado }: { onImportado
           placeholder='https://forms.cloud.microsoft/…'
           value={url}
           disabled={trabajando || deshabilitado}
-          onChange={(e) => setUrl(e.currentTarget.value)}
+          onChange={(e) => {
+            setUrl(e.currentTarget.value);
+            setConfirmar(false);
+          }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !trabajando && url.trim()) void importar();
+            if (e.key === 'Enter' && !trabajando && url.trim()) pedirImportar();
           }}
           data-testid='enlace-forms'
         />
@@ -166,11 +276,16 @@ export function ImportarDesdeForms({ onImportado, deshabilitado }: { onImportado
         )}
 
         <Group justify='flex-end'>
+          {trabajando && (
+            <Button variant='default' leftSection={<IconX size={16} />} onClick={cancelar} data-testid='importar-cancelar'>
+              Cancelar importación
+            </Button>
+          )}
           <Button
             leftSection={<IconCloudDownload size={16} />}
             loading={trabajando}
-            disabled={trabajando || deshabilitado || !url.trim()}
-            onClick={() => void importar()}
+            disabled={trabajando || deshabilitado || !url.trim() || confirmar}
+            onClick={pedirImportar}
             data-testid='importar-forms-boton'
           >
             Importar desde Microsoft Forms

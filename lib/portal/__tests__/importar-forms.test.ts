@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { normalizarImportacion, sinLetra, sinNumeracion, validarEnlaceForms } from '../importar-forms';
+import { normalizarImportacion, sinMarcadoresDeOpciones, sinNumeracionDePreguntas, validarEnlaceForms } from '../importar-forms';
 
 // Importar desde Microsoft Forms (Cristian Baldión, 2026-10-09).
 
@@ -43,17 +43,75 @@ describe('validarEnlaceForms', () => {
   });
 });
 
-describe('sinNumeracion / sinLetra', () => {
-  it('quita la numeración del autor y la letra escrita a mano', () => {
-    expect(sinNumeracion('1. Según el reglamento')).toBe('Según el reglamento');
-    expect(sinNumeracion('12) ¿Cuál es?')).toBe('¿Cuál es?');
-    expect(sinNumeracion('7.¿Cuáles son?')).toBe('¿Cuáles son?');
-    expect(sinNumeracion('Nombre Completo')).toBe('Nombre Completo');
-    expect(sinNumeracion('2026 fue un año')).toBe('2026 fue un año');
-    expect(sinLetra('d. Solo está prohibido')).toBe('Solo está prohibido');
-    expect(sinLetra('a) Primera')).toBe('Primera');
-    expect(sinLetra('Alta prioridad')).toBe('Alta prioridad');
-    expect(sinLetra('b.')).toBe('b.'); // ya trimmada: una letra sola no se toca
+describe('marcadores de lista (sinNumeracionDePreguntas / sinMarcadoresDeOpciones)', () => {
+  it('quita la numeración del autor solo si las preguntas numeradas van 1, 2, 3…', () => {
+    expect(sinNumeracionDePreguntas(['Nombre Completo', '1. Según el reglamento', '2) ¿Cuál es?', '3.¿Cuáles son?'])).toEqual([
+      'Nombre Completo',
+      'Según el reglamento',
+      '¿Cuál es?',
+      '¿Cuáles son?',
+    ]);
+    // Una sola pregunta numerada, o números fuera de secuencia: no se toca nada.
+    expect(sinNumeracionDePreguntas(['1. Única', 'Otra'])).toEqual(['1. Única', 'Otra']);
+    expect(sinNumeracionDePreguntas(['2. Uno', '5. Dos'])).toEqual(['2. Uno', '5. Dos']);
+    expect(sinNumeracionDePreguntas(['2026 fue un año', 'Nombre'])).toEqual(['2026 fue un año', 'Nombre']);
+  });
+
+  it('nunca toca decimales ni dosis en los enunciados (farmacia)', () => {
+    const t = ['1.5 mg de dexametasona: ¿cuál es la vía?', '0.9 % NaCl: ¿cuál es su osmolaridad?', '2.5 ml cada 8 horas'];
+    expect(sinNumeracionDePreguntas(t)).toEqual(t);
+    // Mezclado con preguntas numeradas: las numeradas se limpian, el decimal queda intacto.
+    expect(sinNumeracionDePreguntas(['1. ¿Qué es?', '1.5 mg es la dosis', '2. ¿Y esto?'])).toEqual(['¿Qué es?', '1.5 mg es la dosis', '¿Y esto?']);
+  });
+
+  it('opciones con letra en secuencia en TODAS: se quitan ("a) Sí / b) No")', () => {
+    expect(sinMarcadoresDeOpciones(['a) Sí', 'b) No'])).toEqual(['Sí', 'No']);
+    expect(sinMarcadoresDeOpciones(['A. Primera', 'B. Segunda', 'C. Tercera'])).toEqual(['Primera', 'Segunda', 'Tercera']);
+    expect(sinMarcadoresDeOpciones(['1. Uno', '2) Dos', '3. Tres'])).toEqual(['Uno', 'Dos', 'Tres']);
+  });
+
+  it('abreviaturas y nombres de laboratorio no se tocan ("E. coli", "B. Braun")', () => {
+    const micro = ['E. coli', 'S. aureus', 'P. aeruginosa', 'K. pneumoniae'];
+    expect(sinMarcadoresDeOpciones(micro)).toEqual(micro);
+    const labs = ['B. Braun', 'Baxter', 'Fresenius Kabi'];
+    expect(sinMarcadoresDeOpciones(labs)).toEqual(labs);
+    // Una sola opción con "letra" (aunque coincida con su posición) no basta.
+    const una = ['Solo está prohibido A', 'Está prohibido B', 'No está permitido C', 'd. Solo está prohibido D'];
+    expect(sinMarcadoresDeOpciones(una)).toEqual(una);
+    // Letras que no van en secuencia, o mezcla de mayúsculas y minúsculas: tampoco.
+    expect(sinMarcadoresDeOpciones(['b. Uno', 'c. Dos'])).toEqual(['b. Uno', 'c. Dos']);
+    expect(sinMarcadoresDeOpciones(['a. Uno', 'B. Dos'])).toEqual(['a. Uno', 'B. Dos']);
+  });
+
+  it('decimales y concentraciones en las opciones no se tocan ("1.5 mg", "0.9 % NaCl")', () => {
+    const dosis = ['1.5 mg', '2.5 mg', '3.5 mg'];
+    expect(sinMarcadoresDeOpciones(dosis)).toEqual(dosis);
+    const sol = ['0.9 % NaCl', '5 % dextrosa', 'Lactato de Ringer'];
+    expect(sinMarcadoresDeOpciones(sol)).toEqual(sol);
+    expect(sinMarcadoresDeOpciones(['1.5', '2.5'])).toEqual(['1.5', '2.5']);
+  });
+
+  it('normalizarImportacion aplica las mismas reglas de punta a punta', () => {
+    const i = normalizarImportacion({
+      preguntas: [
+        { titulo: '1. ¿Qué microorganismo es gramnegativo?', tipo: 'seleccion', obligatoria: true, opciones: ['E. coli', 'S. aureus', 'B. subtilis'] },
+        { titulo: '2. ¿Cuál es la concentración de la solución salina normal?', tipo: 'seleccion', obligatoria: true, opciones: ['0.9 % NaCl', '1.5 mg', '3 % NaCl'] },
+        { titulo: '3. ¿Acepta?', tipo: 'seleccion', obligatoria: true, opciones: ['a) Sí', 'b) No'] },
+        { titulo: '4. Proveedor', tipo: 'seleccion', obligatoria: false, opciones: ['Baxter', 'B. Braun'] },
+      ],
+    });
+    expect(i.preguntas.map((p) => p.texto)).toEqual([
+      '¿Qué microorganismo es gramnegativo?',
+      '¿Cuál es la concentración de la solución salina normal?',
+      '¿Acepta?',
+      'Proveedor',
+    ]);
+    expect(i.preguntas[0].opciones).toEqual(['E. coli', 'S. aureus', 'B. subtilis']);
+    expect(i.preguntas[1].opciones).toEqual(['0.9 % NaCl', '1.5 mg', '3 % NaCl']);
+    expect(i.preguntas[2].opciones).toEqual(['Sí', 'No']);
+    // "B. Braun" en la segunda posición coincide con la letra «b»: no se quita, pero se avisa para revisar.
+    expect(i.preguntas[3].opciones).toEqual(['Baxter', 'B. Braun']);
+    expect(i.advertencias.join(' ')).toMatch(/Pregunta 4: la opción «B\. Braun» parece traer una letra/);
   });
 });
 
@@ -62,7 +120,10 @@ describe('normalizarImportacion', () => {
     const i = normalizarImportacion(CRUDO);
     expect(i.titulo).toBe('Evaluación Inducción Organizacional y SST Farmalógica SA 2025');
     expect(i.preguntas).toHaveLength(12);
-    expect(i.advertencias).toEqual([]);
+    // Solo la cuarta opción de la pregunta 4 trae "d." escrita a mano: no se quita (las demás no la
+    // traen), pero se avisa para que quien importa la revise.
+    expect(i.advertencias).toHaveLength(1);
+    expect(i.advertencias[0]).toMatch(/^Pregunta 4: la opción «d\. Solo está prohibido/);
     expect(i.preguntas.slice(0, 2).map((p) => [p.texto, p.tipo])).toEqual([
       ['Nombre Completo', 'texto'],
       ['Número de cédula', 'texto'],
@@ -73,8 +134,8 @@ describe('normalizarImportacion', () => {
     expect(sel[0].texto.startsWith('Según el reglamento')).toBe(true);
     // La lista desplegable (pregunta 4) se importó con sus 4 opciones.
     expect(sel[3].opciones[3]).toMatch(/^Reportarlo inmediatamente al jefe directo/);
-    // La letra escrita a mano en una opción ("d. Solo está prohibido…") se quitó.
-    expect(sel[1].opciones.every((o) => !/^[a-d]\./.test(o))).toBe(true);
+    // La letra suelta ("d. Solo está prohibido…") se conserva: no es una lista en secuencia.
+    expect(sel[1].opciones[3]).toMatch(/^d\. Solo está prohibido/);
   });
 
   it('lo que no se puede importar queda como advertencia y no entra', () => {

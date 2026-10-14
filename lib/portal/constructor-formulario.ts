@@ -278,12 +278,27 @@ const NOMBRES_DE_PERSONA = new Set([
   'apellidos y nombres',
 ]);
 
+/**
+ * Enunciados (ya normalizados) que SON el número de documento: "cedula", "numero de cedula",
+ * "no de cedula de ciudadania", "n documento", "documento de identidad", "cc"… Lista cerrada a propósito.
+ */
+const ES_CEDULA = new Set(
+  ['', 'numero de ', 'numero ', 'num de ', 'nro de ', 'nro ', 'no de ', 'no ', 'n de ', 'n ', 'su numero de ', 'tu numero de '].flatMap((pre) =>
+    ['cedula', 'cedula de ciudadania', 'cedula de identidad', 'documento', 'documento de identidad', 'documento de identificacion', 'identificacion', 'cc', 'c c'].flatMap(
+      (base) => ['', ' sin puntos', ' sin puntos ni espacios'].map((suf) => pre + base + suf)
+    )
+  )
+);
+
 export function claveDeDato(texto: string): DatoClave | null {
   const t = normalizar(texto);
   if (t.length > 40) return null;
   if (NOMBRES_DE_PERSONA.has(t)) return 'nombre';
   if (/^(correo|e ?mail)( electronico| corporativo| institucional)?$/.test(t)) return 'correo';
-  if (/(cedula|numero de documento|documento de identidad|n documento)/.test(t)) return 'cedula';
+  // EXACTO: solo cuando la pregunta ES el número de documento ("Número de cédula", "Cédula de ciudadanía",
+  // "No. de documento de identidad"…). Una pregunta que solo MENCIONA la cédula ("¿Tiene su cédula
+  // vigente?", "Adjunte copia de la cédula") sigue siendo una pregunta normal.
+  if (ES_CEDULA.has(t)) return 'cedula';
   return null;
 }
 

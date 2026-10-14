@@ -161,3 +161,66 @@ test.describe('Portal TH · Formación · importar desde Microsoft Forms', () =>
     expect(d.borrador).toBeUndefined();
   });
 });
+
+test.describe('Portal TH · Formación · importar desde Forms · correcciones de la revisión (2026-10-14)', () => {
+  test('si ya hay algo escrito, pide confirmación antes de reemplazarlo («Cancelar» no llama al servidor)', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    const estado = await preparar(page, { terminar: 'listo' });
+    const c = await abrirConstructor(page, 'evaluacion');
+    await c.getByTestId('titulo-formulario').fill('Mi evaluación a mano');
+    const imp = c.getByTestId('importar-forms');
+    await imp.getByTestId('enlace-forms').fill(FORMS);
+    await imp.getByTestId('importar-forms-boton').click();
+    await expect(imp.getByTestId('importar-confirmar')).toContainText('¿Reemplazar lo que ya escribió?');
+    await imp.getByTestId('importar-confirmar-no').click();
+    await expect(imp.getByTestId('importar-confirmar')).toHaveCount(0);
+    expect(estado.enlaceEnviado).toBeNull();
+    await expect(c.getByTestId('titulo-formulario')).toHaveValue('Mi evaluación a mano');
+
+    await imp.getByTestId('importar-forms-boton').click();
+    await imp.getByTestId('importar-confirmar-si').click();
+    await expect(imp.getByTestId('importar-listo')).toBeVisible();
+    await expect(c.getByTestId('titulo-formulario')).toHaveValue(IMPORTADO.titulo);
+  });
+
+  test('«Cancelar importación» deja de consultar, avisa y no cambia lo escrito', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await preparar(page, { terminar: 'listo' });
+    const cancelados: string[] = [];
+    await page.route('**/api/portal/formularios/importar-forms/' + ID, (r) => {
+      if (r.request().method() === 'DELETE') {
+        cancelados.push(ID);
+        return r.fulfill({ json: { ok: true } });
+      }
+      return r.fulfill({ json: { estado: 'en_curso', progreso: 35, etapa: 'Esperando las preguntas' } });
+    });
+    const c = await abrirConstructor(page, 'evaluacion');
+    const imp = c.getByTestId('importar-forms');
+    await imp.getByTestId('enlace-forms').fill(FORMS);
+    await imp.getByTestId('importar-forms-boton').click();
+    await expect(imp.getByTestId('importar-porcentaje')).toHaveText('35 %');
+    await imp.getByTestId('importar-cancelar').click();
+    await expect(imp.getByTestId('importar-cancelada')).toBeVisible();
+    await expect(imp.getByTestId('importar-progreso')).toHaveCount(0);
+    await expect.poll(() => cancelados.length).toBe(1);
+    await expect(c.getByTestId('titulo-formulario')).toHaveValue('');
+  });
+
+  test('una falla transitoria (503) al consultar el avance se reintenta y la importación termina', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await preparar(page, { terminar: 'listo' });
+    let sondeos = 0;
+    await page.route('**/api/portal/formularios/importar-forms/' + ID, (r) => {
+      sondeos++;
+      if (sondeos === 1) return r.fulfill({ status: 503, json: { error: 'El importador de Microsoft Forms no está disponible en este momento.' } });
+      return r.fulfill({ json: { estado: 'listo', progreso: 100, etapa: 'Listo', resultado: IMPORTADO } });
+    });
+    const c = await abrirConstructor(page, 'evaluacion');
+    const imp = c.getByTestId('importar-forms');
+    await imp.getByTestId('enlace-forms').fill(FORMS);
+    await imp.getByTestId('importar-forms-boton').click();
+    await expect(imp.getByTestId('importar-listo')).toBeVisible();
+    await expect(imp.getByTestId('importar-error')).toHaveCount(0);
+    expect(sondeos).toBeGreaterThanOrEqual(2);
+  });
+});

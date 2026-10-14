@@ -15,7 +15,7 @@ vi.mock('@/lib/portal/acceso', () => ({ identificar }));
 
 import { NextRequest } from 'next/server';
 import { POST as iniciar } from '../importar-forms/route';
-import { GET as consultar } from '../importar-forms/[trabajoId]/route';
+import { DELETE as cancelar, GET as consultar } from '../importar-forms/[trabajoId]/route';
 
 const post = (body: unknown) =>
   new NextRequest(new URL('/api/portal/formularios/importar-forms', 'http://localhost'), {
@@ -111,7 +111,8 @@ describe('GET /api/portal/formularios/importar-forms/:id', () => {
     expect(data.estado).toBe('listo');
     expect(data.progreso).toBe(100);
     expect(data.resultado.preguntas).toHaveLength(12);
-    expect(data.resultado.advertencias).toHaveLength(1);
+    // La de selección múltiple, y la letra suelta «d.» de la pregunta 4 del Forms real (que no se quita).
+    expect(data.resultado.advertencias).toHaveLength(2);
     expect(JSON.stringify(data)).not.toMatch(/scriptMalicioso|extra|<script>/);
   });
 
@@ -126,5 +127,30 @@ describe('GET /api/portal/formularios/importar-forms/:id', () => {
     expect((await consultar(get(), p(ID))).status).toBe(404);
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED'); }));
     expect((await consultar(get(), p(ID))).status).toBe(503);
+  });
+});
+
+describe('DELETE /api/portal/formularios/importar-forms/:id (cancelar)', () => {
+  const del = (id = ID) => new NextRequest(new URL('/api/portal/formularios/importar-forms/' + id, 'http://localhost'), { method: 'DELETE' });
+
+  it('formador: le pide al servicio cancelar ese trabajo y responde 200 aunque el servicio falle', async () => {
+    const f = vi.fn().mockResolvedValue(json(200, { ok: true }));
+    vi.stubGlobal('fetch', f);
+    expect((await cancelar(del(), p(ID))).status).toBe(200);
+    expect(f).toHaveBeenCalledWith(`http://127.0.0.1:3046/importar/${ID}`, expect.objectContaining({ method: 'DELETE' }));
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
+    expect((await cancelar(del(), p(ID))).status).toBe(200);
+  });
+
+  it('sin sesión 401, sin ser formador 403, id inválido 400 (y no llama al servicio)', async () => {
+    const f = vi.fn();
+    vi.stubGlobal('fetch', f);
+    identificar.mockResolvedValue(null);
+    expect((await cancelar(del(), p(ID))).status).toBe(401);
+    identificar.mockResolvedValue({ correo: 'estudiante@gsslatam.com', via: 'codigo' });
+    expect((await cancelar(del(), p(ID))).status).toBe(403);
+    identificar.mockResolvedValue({ correo: FORMADOR, via: 'codigo' });
+    expect((await cancelar(del('../../x'), p('../../x'))).status).toBe(400);
+    expect(f).not.toHaveBeenCalled();
   });
 });

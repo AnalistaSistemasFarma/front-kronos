@@ -259,6 +259,15 @@ describe('importar desde Microsoft Forms (Cristian, 2026-10-09)', () => {
     expect(claveDeDato('Describa el documento que debe presentar en la entrada de la planta')).toBeNull();
   });
 
+  it('la cédula solo se reconoce cuando la pregunta ES el número de documento (no si solo la menciona)', () => {
+    for (const t of ['Cédula', 'No. de cédula', 'Nro. de cédula de ciudadanía', 'N° documento', 'Documento de identidad', 'Número de identificación', 'C.C.', 'Número de documento sin puntos']) {
+      expect(claveDeDato(t), t).toBe('cedula');
+    }
+    for (const t of ['¿Tiene su cédula vigente?', 'Adjunte copia de la cédula', 'Ciudad de expedición de la cédula', 'Tipo de documento', 'Fecha de expedición del documento']) {
+      expect(claveDeDato(t), t).toBeNull();
+    }
+  });
+
   it('evaluación: nombre y cédula pasan a "Datos que se piden"; las 10 de selección entran sin correcta, en borrador', () => {
     const e = estadoDesdeImportacion('evaluacion', imp());
     expect(e).toMatchObject({ tipo: 'evaluacion', puntosAuto: true, borrador: true, datos: { nombre: true, cedula: true, correo: false } });

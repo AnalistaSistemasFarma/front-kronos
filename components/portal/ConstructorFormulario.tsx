@@ -196,6 +196,11 @@ export function ConstructorFormulario({
         {!editando && (
           <ImportarDesdeForms
             deshabilitado={guardando}
+            hayContenido={
+              e.titulo.trim() !== '' ||
+              e.descripcion.trim() !== '' ||
+              e.preguntas.some((p) => p.texto.trim() !== '' || p.opciones.some((o) => o.trim() !== ''))
+            }
             onImportado={(imp) => {
               setErrores([]);
               setE((x) => estadoDesdeImportacion(x.tipo, imp));

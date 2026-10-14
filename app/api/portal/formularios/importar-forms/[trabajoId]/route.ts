@@ -12,6 +12,9 @@ const ID_TRABAJO = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
  *   GET /api/portal/formularios/importar-forms/:id
  *     →  { estado: 'en_curso' | 'listo' | 'error', progreso: 0-100, etapa, resultado?, error? }
  *
+ *   DELETE /api/portal/formularios/importar-forms/:id  →  cancela la importación (el servicio cierra
+ *     su navegador). Es de mejor esfuerzo: si el trabajo ya terminó o venció, igual responde 200.
+ *
  * Solo FORMADORES. Lo que devuelve el servicio es dato de un tercero: se NORMALIZA y acota
  * (`normalizarImportacion`) antes de enviarlo al navegador; nunca se reenvía en bruto.
  */
@@ -47,4 +50,22 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   } catch {
     return NextResponse.json({ error: 'El importador de Microsoft Forms no está disponible en este momento.' }, { status: 503 });
   }
+}
+
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ trabajoId: string }> }) {
+  const quien = await identificar(request);
+  if (!quien) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
+  if (!formadoresDePortal().includes(quien.correo.toLowerCase())) {
+    return NextResponse.json({ error: 'Solo un formador puede importar formularios.' }, { status: 403 });
+  }
+  const id = (await params).trabajoId;
+  if (!ID_TRABAJO.test(id)) return NextResponse.json({ error: 'Importación no válida.' }, { status: 400 });
+  const base = urlImportador();
+  if (!base) return NextResponse.json({ ok: true }, { headers: SIN_CACHE });
+  try {
+    await fetch(`${base}/importar/${id}`, { method: 'DELETE', signal: AbortSignal.timeout(5_000), cache: 'no-store' });
+  } catch {
+    // Mejor esfuerzo: el trabajo vence solo a los 10 minutos en el servicio.
+  }
+  return NextResponse.json({ ok: true }, { headers: SIN_CACHE });
 }

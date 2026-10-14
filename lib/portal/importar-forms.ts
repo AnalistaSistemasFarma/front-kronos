@@ -61,10 +61,58 @@ const limpiar = (v: unknown, max: number): string => {
   return v.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 };
 
-/** Forms numera las preguntas y a veces el autor también: "3. 1. Según…" → "Según…". */
-export const sinNumeracion = (t: string): string => t.replace(/^\d{1,3}\s*[.)]\s*/, '');
-/** Algunas opciones traen la letra escrita a mano: "d. Solo está prohibido…". */
-export const sinLetra = (t: string): string => t.replace(/^[a-hA-H]\s*[.)]\s+/, '');
+/**
+ * MARCADORES DE LISTA escritos a mano por el autor del Forms ("1. Según…", "a) Sí", "d. Solo…").
+ *
+ * Solo se quitan cuando es CLARO que son una lista: todos los textos los traen y van en secuencia
+ * (1, 2, 3… o a, b, c…). Nunca se toca un decimal ("1.5 mg", "0.9 % NaCl") ni una abreviatura
+ * ("E. coli", "B. Braun"): un texto de laboratorio mal recortado cambia el sentido de la pregunta.
+ */
+/** "1. ", "2) ", "7.¿…" — el punto NO puede ir seguido de un dígito (decimales). */
+const MARCA_NUMERO = /^(\d{1,3})(?:\)\s*|\.(?!\d)\s*)(?=\S)/;
+/** "a. ", "b) " — tras el punto exige espacio ("E.coli" no es marcador). */
+const MARCA_LETRA = /^([a-zA-Z])(?:\)\s*|\.\s+)(?=\S)/;
+
+const LETRAS = 'abcdefghijklmnopqrstuvwxyz';
+
+/**
+ * Opciones de UNA pregunta: quita la letra o el número de cada opción solo si TODAS lo traen y van en
+ * secuencia desde el principio (a, b, c… en minúscula o en mayúscula, o 1, 2, 3…). Si no, las deja igual.
+ */
+export function sinMarcadoresDeOpciones(opciones: string[]): string[] {
+  if (opciones.length < 2) return opciones;
+  const letras = opciones.map((o) => MARCA_LETRA.exec(o));
+  if (letras.every(Boolean)) {
+    const ls = letras.map((m) => m![1]);
+    const minus = ls.every((l) => l === l.toLowerCase());
+    const mayus = ls.every((l) => l === l.toUpperCase());
+    if ((minus || mayus) && ls.every((l, i) => l.toLowerCase() === LETRAS[i])) {
+      return opciones.map((o, i) => o.slice(letras[i]![0].length));
+    }
+  }
+  const numeros = opciones.map((o) => MARCA_NUMERO.exec(o));
+  if (numeros.every(Boolean) && numeros.every((m, i) => Number(m![1]) === i + 1)) {
+    return opciones.map((o, i) => o.slice(numeros[i]![0].length));
+  }
+  return opciones;
+}
+
+/**
+ * Enunciados de TODO el formulario: quita la numeración del autor solo si las preguntas numeradas son al
+ * menos dos y van 1, 2, 3… en orden (las que no traen número, como "Nombre Completo", no cuentan).
+ */
+export function sinNumeracionDePreguntas(titulos: string[]): string[] {
+  const marcas = titulos.map((t) => MARCA_NUMERO.exec(t));
+  const numeradas = marcas.filter(Boolean) as RegExpExecArray[];
+  if (numeradas.length < 2 || !numeradas.every((m, i) => Number(m[1]) === i + 1)) return titulos;
+  return titulos.map((t, i) => (marcas[i] ? t.slice(marcas[i]![0].length) : t));
+}
+
+/** ¿La opción i trae una letra que coincide con su posición ("d." en la cuarta) aunque las demás no? */
+const pareceLetraSuelta = (o: string, i: number) => {
+  const m = MARCA_LETRA.exec(o);
+  return !!m && m[1].toLowerCase() === LETRAS[i];
+};
 
 const corto = (t: string) => (t.length > 50 ? `${t.slice(0, 50)}…` : t);
 
@@ -83,10 +131,12 @@ export function normalizarImportacion(crudo: unknown): ImportacionForms {
   }
   if (lista.length > MAX_PREGUNTAS) advertencias.push(`Solo se importaron las primeras ${MAX_PREGUNTAS} preguntas.`);
 
-  lista.slice(0, MAX_PREGUNTAS).forEach((cruda, i) => {
+  const crudas = lista.slice(0, MAX_PREGUNTAS).map((c) => (c && typeof c === 'object' ? c : {}) as Record<string, unknown>);
+  const titulos = sinNumeracionDePreguntas(crudas.map((q) => limpiar(q.titulo, 2000)));
+
+  crudas.forEach((q, i) => {
     const n = i + 1;
-    const q = (cruda && typeof cruda === 'object' ? cruda : {}) as Record<string, unknown>;
-    const texto = sinNumeracion(limpiar(q.titulo, 2000));
+    const texto = titulos[i];
     if (!texto) return void advertencias.push(`Pregunta ${n}: no tiene enunciado; no se importó.`);
     if (texto.length > MAX_TEXTO_PREGUNTA) advertencias.push(`Pregunta ${n}: el enunciado se recortó a ${MAX_TEXTO_PREGUNTA} caracteres.`);
     const enunciado = texto.slice(0, MAX_TEXTO_PREGUNTA);
@@ -100,8 +150,17 @@ export function normalizarImportacion(crudo: unknown): ImportacionForms {
       const vistas = new Set<string>();
       const opciones: string[] = [];
       let recortada = false;
-      for (const o of Array.isArray(q.opciones) ? q.opciones : []) {
-        const bruta = sinLetra(limpiar(o, 2000));
+      const limpias = (Array.isArray(q.opciones) ? q.opciones : []).map((o) => limpiar(o, 2000)).filter(Boolean);
+      const sinMarcas = sinMarcadoresDeOpciones(limpias);
+      if (sinMarcas === limpias) {
+        const suelta = limpias.find((o, k) => pareceLetraSuelta(o, k));
+        if (suelta) {
+          advertencias.push(
+            `Pregunta ${n}: la opción «${corto(suelta)}» parece traer una letra escrita a mano; no se quitó porque las demás opciones no la traen. Revísela.`
+          );
+        }
+      }
+      for (const bruta of sinMarcas) {
         if (!bruta) continue;
         const op = bruta.slice(0, MAX_TEXTO_OPCION);
         if (op !== bruta) recortada = true;
