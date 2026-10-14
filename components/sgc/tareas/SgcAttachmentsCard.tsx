@@ -148,15 +148,7 @@ export default function SgcAttachmentsCard({ requestId, attachments, currentDraf
             value={file}
             onChange={setFile}
             accept={purpose === 'borrador' ? draftFormats.map((f) => `.${f}`).join(',') : undefined}
-            description={
-              purpose === 'borrador' && !draftFormats.includes('pdf')
-                ? draftFormats.includes('xlsx')
-                  ? draftFormats.includes('docx')
-                    ? 'El borrador va en Word (.docx) o en Excel (.xlsx), sin convertirlo: el sistema le pone el encabezado institucional.'
-                    : 'El borrador va en Excel (.xlsx), sin convertirlo: el sistema le pone el encabezado institucional.'
-                  : 'El borrador va en Word (.docx): el sistema le pone el encabezado institucional.'
-                : undefined
-            }
+            description={purpose === 'borrador' && !draftFormats.includes('pdf') ? 'El borrador va en Word (.docx): el sistema le pone el encabezado institucional.' : undefined}
             style={{ flex: 1, minWidth: 240 }}
             clearable
             data-testid='sgc-adjunto-archivo'

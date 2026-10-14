@@ -88,7 +88,7 @@ export function summarizeCurrentDraft(draft: SgcDraftViewDraft | null, attachmen
     author = rev?.savedBy ?? null;
   } else {
     const att = attachments.find((a) => a.id === id);
-    origin = draft.format === 'pdf' ? 'Archivo PDF cargado' : draft.format === 'xlsx' ? 'Archivo Excel cargado' : 'Archivo Word cargado';
+    origin = draft.format === 'pdf' ? 'Archivo PDF cargado' : 'Archivo Word cargado';
     author = att?.uploadedBy ?? null;
   }
   return { name: draft.name, origin, author, at: draft.at, shortSha: draft.sha256.slice(0, 12), sha256: draft.sha256 };

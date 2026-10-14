@@ -1,8 +1,5 @@
 import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../audit';
-import { bulkKindOf, matchBulkFile, matchBulkFiles, type SgcBulkCandidate, type SgcBulkMatch } from '../bulkUpload';
-import { wrapDraftForPdf, type SgcDocxToHtml, type SgcHtmlToPdf } from '../pdf/render';
-import { xlsxToSheet } from '../pdf/viewable';
-import { isXlsx as isZip } from '../training/xlsx';
+import { matchBulkFile, matchBulkFiles, type SgcBulkCandidate, type SgcBulkMatch } from '../bulkUpload';
 import { SgcError } from '../errors';
 import { computeReviewDueDate } from '../review';
 import { buildVersionFileName, buildVersionFolderSegments, getControlledPdfError, sha256Hex } from '../storage';
@@ -17,23 +14,7 @@ import type { SgcUploader } from './documents';
  * (desde ahí el visor lo muestra con la marca de la copia controlada). Si el
  * nombre del archivo no se parece al del listado, se avisa. Cada tanda y cada
  * archivo quedan en sgc.bulk_upload(_item), de solo inserción.
- *
- * S16 (R33): un original en Word (.docx) o Excel (.xlsx) se convierte a PDF
- * para el visor (Word: mammoth → Chrome; Excel: sus hojas con su presentación
- * → Chrome, nunca pasa por Word) y el ORIGINAL se guarda junto a él con su
- * huella SHA-256 (document_version.source_*).
  */
-
-/** Conversión a PDF de un original Word o Excel de la carga inicial. */
-export interface SgcBulkConvertDeps {
-  docxToHtml: SgcDocxToHtml;
-  htmlToPdf: SgcHtmlToPdf;
-}
-
-const SOURCE_CONTENT_TYPES = {
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-} as const;
 
 async function candidatesOf(db: SgcDb, idCompany: number): Promise<SgcBulkCandidate[]> {
   const docs = await db.sgcDocument.findMany({ where: { id_company: idCompany }, select: { id_document: true, code: true, title: true, status: true } });
@@ -49,7 +30,7 @@ async function assertInitialLoadOpen(db: SgcDb, idCompany: number) {
 /** VISTA PREVIA: con qué documento se empareja cada archivo (no guarda nada). */
 export async function previewBulkUpload(db: SgcDb, idCompany: number, input: { fileNames?: unknown }): Promise<SgcBulkMatch[]> {
   const names = Array.isArray(input.fileNames) ? input.fileNames.filter((n): n is string => typeof n === 'string' && n.trim().length > 0).map((n) => n.trim().slice(0, 260)) : [];
-  if (!names.length) throw new SgcError('Seleccione los archivos (PDF, Word o Excel) que va a cargar.');
+  if (!names.length) throw new SgcError('Seleccione los PDF que va a cargar.');
   if (names.length > 500) throw new SgcError('Máximo 500 archivos por carga.');
   return matchBulkFiles(names, await candidatesOf(db, idCompany));
 }
@@ -85,8 +66,7 @@ export async function uploadBulkFile(
   idBulkUpload: number,
   file: { fileName: string; bytes: Uint8Array },
   actor: SgcActor,
-  now: Date = new Date(),
-  convert: SgcBulkConvertDeps | null = null
+  now: Date = new Date()
 ): Promise<SgcBulkFileResult> {
   const batch = Number.isInteger(idBulkUpload) ? await db.sgcBulkUpload.findFirst({ where: { id_bulk_upload: idBulkUpload, id_company: idCompany } }) : null;
   if (!batch) throw new SgcError('La carga no existe.', 404);
@@ -95,30 +75,15 @@ export async function uploadBulkFile(
   const fileName = (file.fileName ?? '').replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 260) || 'archivo.pdf';
   const email = actor.email.toLowerCase();
   const sha = file.bytes.length ? sha256Hex(file.bytes) : null;
-  const kind = bulkKindOf(fileName);
   const fail = async (error: string, match: SgcBulkMatch | null = null): Promise<SgcBulkFileResult> => {
     await db.sgcBulkUploadItem.create({
-      data: { id_bulk_upload: idBulkUpload, file_name: fileName, size_bytes: file.bytes.length, sha256: sha, code: match?.code ?? null, id_document: match?.idDocument ?? null, status: 'error', source_kind: kind, error: error.slice(0, 1000), created_by: email, created_at: now },
+      data: { id_bulk_upload: idBulkUpload, file_name: fileName, size_bytes: file.bytes.length, sha256: sha, code: match?.code ?? null, id_document: match?.idDocument ?? null, status: 'error', error: error.slice(0, 1000), created_by: email, created_at: now },
     });
     return { fileName, status: 'error', code: match?.code ?? null, idDocument: match?.idDocument ?? null, idVersion: null, warning: null, error };
   };
   const match = matchBulkFile(fileName, await candidatesOf(db, idCompany));
   if (match.status === 'error') return fail(match.error!, match);
-  // S16 (R33): un original Word o Excel se convierte a PDF para el visor; el original se conserva con su huella.
-  let pdfBytes = file.bytes;
-  let original: { bytes: Uint8Array; ext: 'docx' | 'xlsx' } | null = null;
-  if (kind === 'docx' || kind === 'xlsx') {
-    if (!isZip(file.bytes)) return fail(`El archivo no es un ${kind === 'docx' ? 'Word (.docx)' : 'Excel (.xlsx)'} válido.`, match);
-    if (!convert) return fail('La conversión a PDF no está disponible en este servidor: cargue el PDF.', match);
-    try {
-      const html = kind === 'docx' ? { html: await convert.docxToHtml(file.bytes), css: undefined } : await xlsxToSheet(file.bytes);
-      pdfBytes = await convert.htmlToPdf(wrapDraftForPdf({ title: fileName, code: match.code ?? '', contentHtml: html.html, sheet: kind === 'xlsx', extraCss: html.css }));
-    } catch {
-      return fail(`No se pudo convertir el ${kind === 'docx' ? 'Word' : 'Excel'} a PDF: revise que se abra sin contraseña o cargue el PDF.`, match);
-    }
-    original = { bytes: file.bytes, ext: kind };
-  }
-  const pdfError = getControlledPdfError(pdfBytes);
+  const pdfError = getControlledPdfError(file.bytes);
   if (pdfError) return fail(pdfError, match);
   const doc = await db.sgcDocument.findUniqueOrThrow({ where: { id_document: match.idDocument! }, include: { documentType: true, companyConfig: true } });
   const listed = await db.sgcMasterListImportRow.findFirst({ where: { id_document: doc.id_document, status: 'cargada' }, orderBy: { id_master_list_import_row: 'desc' } });
@@ -126,10 +91,7 @@ export async function uploadBulkFile(
   const version = listed.version_number;
   const segments = buildVersionFolderSegments({ storageRoot: doc.companyConfig.storage_root, documentTypeCode: doc.documentType.code, code: doc.code, versionNumber: version });
   const pdfName = buildVersionFileName(doc.code, version, 'x.pdf', 'pdf');
-  const pdfSha = sha256Hex(pdfBytes);
-  const item = await upload(segments, pdfName, pdfBytes, 'application/pdf');
-  const sourceName = original ? buildVersionFileName(doc.code, version, `x.${original.ext}`, original.ext === 'docx' ? 'docx' : 'xlsx') : null;
-  const sourceItem = original && sourceName ? await upload(segments, sourceName, original.bytes, SOURCE_CONTENT_TYPES[original.ext]) : null;
+  const item = await upload(segments, pdfName, file.bytes, 'application/pdf');
   const reviewDue = computeReviewDueDate(listed.effective_date, doc.documentType.review_months);
   try {
     return await db.$transaction(async (tx) => {
@@ -143,14 +105,9 @@ export async function uploadBulkFile(
           pdf_item_id: item.id,
           pdf_path: `${segments.join('/')}/${pdfName}`,
           pdf_file_name: pdfName,
-          pdf_sha256: pdfSha,
-          pdf_size: pdfBytes.length,
-          // S16 (R33): el ORIGINAL Word o Excel, con su huella.
-          source_item_id: sourceItem?.id ?? null,
-          source_path: sourceItem && sourceName ? `${segments.join('/')}/${sourceName}` : null,
-          source_file_name: sourceName,
-          source_sha256: original ? sha : null,
-          change_description: original ? `Carga inicial del documento vigente (listado maestro), desde su original en ${original.ext === 'docx' ? 'Word' : 'Excel'}.` : 'Carga inicial del documento vigente (listado maestro).',
+          pdf_sha256: sha!,
+          pdf_size: file.bytes.length,
+          change_description: 'Carga inicial del documento vigente (listado maestro).',
           effective_date: listed.effective_date,
           review_due_date: reviewDue,
           created_by: actor.email,
@@ -158,7 +115,7 @@ export async function uploadBulkFile(
       });
       await tx.sgcDocument.update({ where: { id_document: doc.id_document }, data: { current_version_id: v.id_document_version } });
       await tx.sgcBulkUploadItem.create({
-        data: { id_bulk_upload: idBulkUpload, file_name: fileName, size_bytes: file.bytes.length, sha256: sha, code: doc.code, id_document: doc.id_document, id_document_version: v.id_document_version, status: 'cargado', source_kind: kind, warning: match.warning?.slice(0, 1000) ?? null, created_by: email, created_at: now },
+        data: { id_bulk_upload: idBulkUpload, file_name: fileName, size_bytes: file.bytes.length, sha256: sha, code: doc.code, id_document: doc.id_document, id_document_version: v.id_document_version, status: 'cargado', warning: match.warning?.slice(0, 1000) ?? null, created_by: email, created_at: now },
       });
       await writeSgcAudit(tx, {
         idCompany,
@@ -167,8 +124,8 @@ export async function uploadBulkFile(
         entity: 'document',
         entityId: doc.id_document,
         before: { status: 'pendiente_archivo' },
-        after: { status: 'vigente', version, idVersion: v.id_document_version, file: fileName, sha256: sha, ...(original ? { original: original.ext, pdfSha256: pdfSha } : {}) },
-        detail: `Carga masiva (tanda ${idBulkUpload}): ${doc.code} V${version} desde «${fileName}» (SHA-256 ${sha})${original ? `; PDF para el visor SHA-256 ${pdfSha}` : ''}.${match.warning ? ` Aviso: ${match.warning}` : ''}`.slice(0, 1000),
+        after: { status: 'vigente', version, idVersion: v.id_document_version, file: fileName, sha256: sha },
+        detail: `Carga masiva (tanda ${idBulkUpload}): ${doc.code} V${version} desde «${fileName}» (SHA-256 ${sha}).${match.warning ? ` Aviso: ${match.warning}` : ''}`.slice(0, 1000),
         ip: actor.ip,
         userAgent: actor.userAgent,
       });

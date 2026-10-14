@@ -222,10 +222,7 @@ describe.skipIf(!url)('SGC · Sprint 13 con SQL Server', () => {
     const req = await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: r } });
     const version = await prisma.sgcDocumentVersion.findUniqueOrThrow({ where: { id_document_version: req.id_document_version! } });
     const manifest = (await readManifest(store.get(version.pdf_item_id)!))!;
-    // S14 (R20): la verificación de Calidad (lista de chequeo) no va al registro de firmas del documento; sigue en sgc.signature.
-    expect(sigs.some((s) => s.signer_email === E.cal)).toBe(true);
-    expect(manifest.signatureRegister).toEqual(sigs.filter((s) => s.signer_email !== E.cal).map((s) => s.signature_uid.trim()));
-    expect(manifest.signatures.map((s) => s.signerEmail)).not.toContain(E.cal);
+    expect(manifest.signatureRegister).toEqual(sigs.map((s) => s.signature_uid.trim()));
     const pages = (await PDFDocument.load(store.get(version.pdf_item_id)!)).getPageCount();
     expect(pages).toBeGreaterThanOrEqual(4);
   });

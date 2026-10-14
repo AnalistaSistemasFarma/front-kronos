@@ -381,8 +381,7 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     expect((await getRequestDetail(prisma, reqA, await viewer(E.elab))).dissemination).toMatchObject({ canManage: true, canEditScope: true, canRemoveScope: false });
   });
 
-  it('[SGC-REQ-056][SGC-REQ-057][SGC-REQ-152] cuando todos los del alcance firman, la divulgación se cierra sola y pasa a la capacitación (y el grupo de Calidad recibe el aviso de la TAREA)', async () => {
-    sent.length = 0;
+  it('[SGC-REQ-056][SGC-REQ-057] cuando todos los del alcance firman, la divulgación se cierra sola y pasa a la capacitación', async () => {
     for (const email of [E.l2, E.l3, E.rev]) {
       const { idTask, idAssignee } = await readToEnd(reqA, email);
       await signTask(prisma, deps, idTask, firma('leyo', { idAssignee }), actor(email));
@@ -394,10 +393,6 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     const cap = await taskOf(reqA, 'capacitacion');
     expect(cap.status).toBe('abierta');
     expect(cap.assignees).toEqual([expect.objectContaining({ user_email: null, pool_type_code: 'SGC-VERIF-CALIDAD', signature_meaning: 'capacito' })]);
-    // S14 (R26): el aviso del cupo de grupo de una tarea que no es autorización dice «Tarea documental asignada» y lleva a la tarea.
-    const capNotice = sent.find((n) => n.payload.url === `/process/sgc-documental/tareas/${cap.id_task}`);
-    expect(capNotice).toMatchObject({ emails: expect.arrayContaining([E.cal]), payload: { title: expect.stringContaining('Tarea documental asignada') } });
-    expect(sent.some((n) => n.payload.url === '/process/sgc-documental/autorizaciones')).toBe(false);
     expect(await prisma.sgcDocument.findUniqueOrThrow({ where: { id_document: idDoc } })).toMatchObject({ current_version_id: idV1 });
   });
 

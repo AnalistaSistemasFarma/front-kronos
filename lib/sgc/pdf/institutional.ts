@@ -1,7 +1,6 @@
 import { rgb, type PDFDocument, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib';
 import { toWinAnsiSafe } from '../watermark';
 import type { SgcPlacedMeaning, SgcPlacementParticipant, SgcStoredField } from '../signature/fields';
-import { SGC_DEFAULT_HEADER_TEMPLATE, headerBottomText, type SgcHeaderTemplateConfig } from '../headerTemplates';
 
 /**
  * PLANTILLA INSTITUCIONAL del SGC (correcciones de Calidad OLP, 2026-10-02) —
@@ -59,8 +58,6 @@ export interface SgcInstitutionalHeaderData {
   emissionText: string;
   /** Logo de la empresa (PNG o JPEG) o null. */
   logo: { bytes: Uint8Array; kind: 'png' | 'jpg' } | null;
-  /** S16 (R31): rótulos y fila inferior de la plantilla del tipo documental (sin ella, la institucional de siempre). */
-  template?: SgcHeaderTemplateConfig | null;
 }
 
 export interface SgcRect {
@@ -234,7 +231,6 @@ export async function drawInstitutionalHeaders(pdf: PDFDocument, pages: readonly
     }
   }
   const total = pages.length;
-  const t = data.template ?? SGC_DEFAULT_HEADER_TEMPLATE;
   let emission: SgcRect | null = null;
   pages.forEach((page, i) => {
     const { width, height } = page.getSize();
@@ -243,15 +239,15 @@ export async function drawInstitutionalHeaders(pdf: PDFDocument, pages: readonly
       const g = firstPageHeaderGeometry(width, height);
       [g.logo, g.title, g.code, ...g.labels, ...g.firmas, g.emission, g.process].forEach((r) => cell(page, r));
       drawLogo(page, logo, g.logo, data.company, fonts.bold);
-      drawLines(page, fonts.regular, [t.titleLabel], g.title, { size: 6.5, top: 10, color: MUTED });
+      drawLines(page, fonts.regular, ['NOMBRE DEL DOCUMENTO'], g.title, { size: 6.5, top: 10, color: MUTED });
       const titleLines = splitTitle(data.title, fonts.bold, 10.5, g.title.width - 8);
       drawLines(page, fonts.bold, titleLines, { ...g.title, height: g.title.height - 10 }, { size: 10.5, top: 12 });
-      drawLines(page, fonts.bold, [`${t.codeLabel}: ${data.code}`, `${t.versionLabel}: ${data.versionLabel}`, pageLabel], g.code, { size: 8, top: 13 });
+      drawLines(page, fonts.bold, [`CÓDIGO: ${data.code}`, `VERSIÓN: ${data.versionLabel}`, pageLabel], g.code, { size: 8, top: 13 });
       const labels: [string, string][] = [
-        [`${t.elaboroLabel}:`, names(data.elaboro)],
-        [`${t.revisoLabel}:`, names(data.reviso)],
-        [`${t.aproboLabel}:`, names(data.aprobo)],
-        [`${t.emissionLabel}:`, ''],
+        ['ELABORÓ:', names(data.elaboro)],
+        ['REVISÓ:', names(data.reviso)],
+        ['APROBÓ:', names(data.aprobo)],
+        ['FECHA DE EMISIÓN:', ''],
       ];
       labels.forEach(([label, value], c) => {
         drawLines(page, fonts.bold, [label], g.labels[c], { size: 7, top: 9 });
@@ -262,7 +258,7 @@ export async function drawInstitutionalHeaders(pdf: PDFDocument, pages: readonly
       });
       drawLines(page, fonts.regular, [data.emissionText], g.emission, { size: 7.5, top: 16, color: MUTED });
       emission = { x: g.emission.x + 1, y: g.emission.y + 1, width: g.emission.width - 2, height: g.emission.height - 2 };
-      drawLines(page, fonts.bold, [headerBottomText(t, data)], g.process, { size: 7.5, top: 12 });
+      drawLines(page, fonts.bold, [`PROCESO: ${data.process}    ·    TIPO DOCUMENTAL: ${data.documentType}`], g.process, { size: 7.5, top: 12 });
       return;
     }
     const w = width - MARGIN_X * 2;
@@ -273,7 +269,7 @@ export async function drawInstitutionalHeaders(pdf: PDFDocument, pages: readonly
     [logoR, titleR, codeR].forEach((r) => cell(page, r));
     drawLogo(page, logo, logoR, data.company, fonts.bold);
     drawLines(page, fonts.bold, [data.title], titleR, { size: 8.5, top: 17 });
-    drawLines(page, fonts.bold, [`${t.codeLabel}: ${data.code} · ${t.versionLabel}: ${data.versionLabel}`, pageLabel], codeR, { size: 7, top: 11 });
+    drawLines(page, fonts.bold, [`CÓDIGO: ${data.code} · VERSIÓN: ${data.versionLabel}`, pageLabel], codeR, { size: 7, top: 11 });
   });
   return { emission };
 }

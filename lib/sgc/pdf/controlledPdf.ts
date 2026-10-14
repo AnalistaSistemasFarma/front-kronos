@@ -471,9 +471,6 @@ export async function buildControlledPdfWithLayout(contentPdf: Uint8Array, manif
   const bySignature = new Map(manifest.signatures.map((s) => [s.uid, s]));
   const placements = (manifest.placements ?? []).filter((p) => bySignature.has(p.uid) && p.page >= 1 && p.page <= total);
   drawCover(new Writer(out, fonts, runningHeader), manifest, mSha, new Set(placements.map((p) => p.uid)));
-  // S14 (R22): la portada puede ocupar más de una página (descripción larga, revisiones menores, firmas sin
-  // ubicar): el contenido empieza DESPUÉS de la última página de la portada, no siempre en la 2.
-  const coverPages = out.getPageCount();
 
   const copied = await out.copyPages(content, content.getPageIndices());
   const header = options.header ?? null;
@@ -492,8 +489,8 @@ export async function buildControlledPdfWithLayout(contentPdf: Uint8Array, manif
   let emission: SgcControlledLayout['emission'] = null;
   if (header) {
     const drawn = await drawInstitutionalHeaders(out, copied, header, fonts);
-    // El contenido empieza justo después de la portada de control (página coverPages + 1 del PDF controlado).
-    if (drawn.emission) emission = { ...drawn.emission, page: coverPages + 1 };
+    // El contenido empieza en la página 2 del PDF controlado (la 1 es la portada de control).
+    if (drawn.emission) emission = { ...drawn.emission, page: 2 };
   }
   // Cada firma en la caja que ubicó el elaborador.
   for (const p of placements) {

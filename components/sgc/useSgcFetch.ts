@@ -32,21 +32,7 @@ export function useSgcFetch<T>(url: string | null) {
   return { data, error, loading, reload };
 }
 
-/** Error de una API del SGC con su código HTTP (S14: el 409 de «lo firmado cambió» recarga la tarea). */
-export class SgcHttpError extends Error {
-  readonly status: number;
-  constructor(message: string, status: number) {
-    super(message);
-    this.name = 'SgcHttpError';
-    this.status = status;
-  }
-}
-
-export function isSgcHttpError(e: unknown): e is SgcHttpError {
-  return e instanceof SgcHttpError;
-}
-
-/** POST/PATCH JSON; devuelve el cuerpo o lanza (SgcHttpError) con el mensaje de la API. */
+/** POST/PATCH JSON; devuelve el cuerpo o lanza con el mensaje de la API. */
 export async function sgcSend<T = unknown>(url: string, method: 'POST' | 'PATCH' | 'PUT', body: unknown): Promise<T> {
   const res = await fetch(url, {
     method,
@@ -54,6 +40,6 @@ export async function sgcSend<T = unknown>(url: string, method: 'POST' | 'PATCH'
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new SgcHttpError((data as { error?: string }).error || `Error ${res.status}`, res.status);
+  if (!res.ok) throw new Error((data as { error?: string }).error || `Error ${res.status}`);
   return data as T;
 }

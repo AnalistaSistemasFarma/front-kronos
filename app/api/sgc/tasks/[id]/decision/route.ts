@@ -6,10 +6,8 @@ import { errorResponse, getSgcRequestContext, jsonNoStore, parseId, readJson } f
 export const dynamic = 'force-dynamic';
 
 /**
- * POST /api/sgc/tasks/<id>/decision — { decision: 'aprobar' | 'devolver' | 'rechazar', comment, linkedDocumentId? }.
+ * POST /api/sgc/tasks/<id>/decision — { decision: 'aprobar' | 'devolver', comment }.
  * En Elaboración, «aprobar» es «enviar a revisión». Devolver exige observaciones.
- * S15 (R15): en la autorización de la creación, «rechazar» cierra la solicitud con
- * su motivo y, opcionalmente, el documento vigente que ya cubre el tema.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -20,7 +18,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!id || !body) return jsonNoStore({ error: 'Petición inválida' }, 400);
     const { idCompany } = await requestOfTask(prisma, id);
     if (!ctx.access.some((a) => a.idCompany === idCompany && a.canRead)) return jsonNoStore({ error: 'Tarea no encontrada' }, 404);
-    return jsonNoStore(await decideTask(prisma, sgcNotifier, id, { decision: body.decision, comment: body.comment, linkedDocumentId: body.linkedDocumentId }, ctx.actor));
+    return jsonNoStore(await decideTask(prisma, sgcNotifier, id, { decision: body.decision, comment: body.comment }, ctx.actor));
   } catch (error) {
     return errorResponse(error, 'tasks:decision');
   }

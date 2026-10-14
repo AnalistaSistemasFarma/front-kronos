@@ -11,8 +11,7 @@ import type { SgcContentKind, SgcSignedContent } from '../signature/record';
  * una ronda nueva y las firmas anteriores quedan sobre el contenido anterior.
  */
 
-// S16 (R32, D17): «xlsx» = un formato en Excel (no se convierte a Word).
-export type SgcDraftFormat = 'pdf' | 'docx' | 'doc' | 'html' | 'xlsx';
+export type SgcDraftFormat = 'pdf' | 'docx' | 'doc' | 'html';
 
 export interface SgcCurrentDraft extends SgcSignedContent {
   format: SgcDraftFormat;
@@ -43,7 +42,6 @@ export function draftFormatOf(fileName: string): SgcDraftFormat | null {
   if (n.endsWith('.pdf')) return 'pdf';
   if (n.endsWith('.docx')) return 'docx';
   if (n.endsWith('.doc')) return 'doc';
-  if (n.endsWith('.xlsx')) return 'xlsx';
   return null;
 }
 
@@ -81,7 +79,7 @@ export function pickCurrentDraft(attachments: readonly SgcDraftAttachmentRow[], 
 
 /** Error si el borrador no sirve para generar el PDF controlado (se valida al enviarlo a revisión). */
 export function getDraftForSubmitError(draft: SgcCurrentDraft | null): string | null {
-  if (!draft) return 'Cargue el borrador del documento (Word .docx, o Excel .xlsx si el tipo documental lo admite) o edítelo en la app antes de enviarlo.';
+  if (!draft) return 'Cargue el borrador del documento en Word (.docx) o edítelo en la app antes de enviarlo.';
   if (draft.format === 'doc') return 'El borrador vigente es un Word antiguo (.doc): guárdelo como .docx para poder generar el PDF controlado.';
   return null;
 }

@@ -1,6 +1,5 @@
 import { SgcError } from '../errors';
-import { requesterElaborates, type SgcFlowDefinition, type SgcTaskDefinition } from './definition';
-import { roleModelAssignmentDenial } from './roleModel';
+import type { SgcFlowDefinition, SgcTaskDefinition } from './definition';
 
 /**
  * SELECCIÓN de revisores, aprobadores y alcance de divulgación — funciones PURAS.
@@ -73,8 +72,6 @@ export function executesFirstTask(def: SgcFlowDefinition, input: SgcAssignerInpu
 
 /** Motivo por el que la persona NO puede seleccionar firmantes ni alcance, o null si puede. */
 export function assignmentDenial(def: SgcFlowDefinition, input: SgcAssignerInput, policy: SgcAssignmentPolicy = SGC_DEFAULT_ASSIGNMENT_POLICY): string | null {
-  // S15 (DOC v7, R17): el elaborador (que es el solicitante) asigna; Calidad, como excepción. No aplica la política del entorno.
-  if (requesterElaborates(def)) return roleModelAssignmentDenial(input);
   const me = input.email.trim().toLowerCase();
   if (me === input.requesterEmail.trim().toLowerCase()) {
     return 'Quien hace la solicitud solo sugiere a los revisores, los aprobadores y la divulgación: los confirma o reasigna quien ejecuta la primera tarea (Aseguramiento de Calidad).';

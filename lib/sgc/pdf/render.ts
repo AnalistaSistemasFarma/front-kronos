@@ -27,16 +27,7 @@ function escapeHtml(value: string): string {
  * arriba el espacio del encabezado institucional que el sistema dibuja después
  * (más alto en la primera página; ver lib/sgc/pdf/institutional.ts).
  */
-/** Hoja de estilos de las hojas de Excel: solo reglas «.sgc-…{…}» sin «<», «@» ni «url(» (la arma lib/sgc/pdf/viewable.ts). */
-function sheetCss(css: string | undefined): string {
-  if (!css) return '';
-  return css
-    .split('\n')
-    .filter((rule) => /^[a-z.,\s-]*\.sgc-[a-z0-9-]+[^{]*\{[^{}<@]*\}$/i.test(rule.trim()) && !/url\(|expression|import/i.test(rule))
-    .join('\n');
-}
-
-export function wrapDraftForPdf(params: { title: string; code: string; contentHtml: string; institutional?: boolean; sheet?: boolean; extraCss?: string }): string {
+export function wrapDraftForPdf(params: { title: string; code: string; contentHtml: string; institutional?: boolean }): string {
   const page = params.institutional
     ? `@page { size: A4; margin: ${SGC_INSTITUTIONAL_OTHER_TOP_CM}cm 2cm 2.2cm 2cm; }
   @page :first { margin-top: ${SGC_INSTITUTIONAL_FIRST_TOP_CM}cm; }`
@@ -54,16 +45,7 @@ export function wrapDraftForPdf(params: { title: string; code: string; contentHt
   th { background: #f0f0f0; font-weight: 600; }
   ul, ol { margin: 0 0 8pt 18pt; padding: 0; }
   blockquote { border-left: 3px solid #ccc; margin: 8pt 0; padding-left: 10pt; color: #444; }
-  img { max-width: 100%; height: auto; }${
-    params.sheet
-      ? `
-  /* S16 (R32): hojas de un formato en Excel — tablas compactas que caben en el ancho de la página. */
-  table.sgc-hoja { table-layout: auto; font-size: 8pt; }
-  table.sgc-hoja th, table.sgc-hoja td { padding: 2pt 4pt; font-size: 8pt; word-break: break-word; }
-  h2.sgc-hoja-nombre { font-size: 10pt; color: #555; }
-  ${sheetCss(params.extraCss)}`
-      : ''
-  }
+  img { max-width: 100%; height: auto; }
 </style></head>
 <body>${sanitizeDraftHtml(params.contentHtml)}</body></html>`;
 }

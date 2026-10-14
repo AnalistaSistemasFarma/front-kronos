@@ -182,7 +182,7 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
             </Button>
             {/* Sprint 9: los PDF de los documentos «pendientes de archivo», emparejados por su código. */}
             <Button variant='light' leftSection={<IconFiles size={16} />} onClick={() => setFilesOpen(true)} disabled={(pendingFiles.data?.documents.length ?? 0) === 0} data-testid='sgc-carga-archivos-abrir'>
-              Cargar archivos (PDF, Word o Excel){pendingFiles.data?.documents.length ? ` · ${pendingFiles.data.documents.length} pendientes` : ''}
+              Cargar archivos (PDF){pendingFiles.data?.documents.length ? ` · ${pendingFiles.data.documents.length} pendientes` : ''}
             </Button>
           </Group>
         </Group>

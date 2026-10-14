@@ -2,14 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
-import { ActionIcon, Alert, Anchor, Autocomplete, Button, Card, Checkbox, Code, Group, Image, Modal, ScrollArea, SegmentedControl, Stack, Text, TextInput, Textarea } from '@mantine/core';
+import { Alert, Anchor, Autocomplete, Button, Card, Checkbox, Code, Group, Modal, PasswordInput, ScrollArea, SegmentedControl, Stack, Text, TextInput, Textarea } from '@mantine/core';
 import { sgcTouchComboboxProps } from '../SgcSelect';
-import { IconAlertCircle, IconEye, IconEyeOff, IconLock, IconSignature } from '@tabler/icons-react';
+import { IconAlertCircle, IconLock, IconSignature } from '@tabler/icons-react';
 import type { SgcSignatureMeaning } from '../../../lib/sgc/flows/definition';
 import { SGC_SIGNATURE_LABELS } from '../../../lib/sgc/flows/definition';
-import { sgcFieldNonce, sgcMaskedInputStyle, sgcSignaturePasswordProps, supportsTextSecurity } from '../../../lib/sgc/autofill';
-import { sgcStampPreviewOf, type SgcStampPreview } from '../../../lib/sgc/signature/stampPreview';
-import { useSgcFetch } from '../useSgcFetch';
+import { sgcSignaturePasswordProps } from '../../../lib/sgc/autofill';
 import {
   SGC_CHECK_ANSWER_LABELS,
   SGC_SIGNATURE_AUTH_METHOD_LABEL,
@@ -54,37 +52,9 @@ export interface SgcSignModalProps {
   checklist?: { key: string; label: string; required: boolean; helpText: string | null }[];
   submitLabel?: string;
   onSign: (payload: SgcSignPayload) => Promise<void>;
-  /**
-   * S14 (R25): empresa de la solicitud. Con ella el formulario muestra, igual
-   * en la tarea y en Autorizaciones, la firma registrada (trazo validado) que
-   * se estampará en el documento, o avisa que no tiene una.
-   */
-  idCompany?: number | null;
-  /** S14 (R29): «Capacitó» con reprobados o sin resultado — la justificación se pide aquí mismo (mínimo 10 caracteres). */
-  justification?: { required: boolean; summary: string } | null;
-  /** S14 (R20): el cupo es la verificación de Calidad (lista de chequeo): no se estampa en el documento. */
-  qualityVerification?: boolean;
 }
 
-/** S14 (R25): vista de la firma que se estampará (o el aviso de que no hay una). */
-function StampPreview({ preview }: { preview: SgcStampPreview }) {
-  if (preview.kind === 'none') return null;
-  return (
-    <Card withBorder radius='md' p='sm' data-testid='sgc-firma-trazo-vista' data-kind={preview.kind}>
-      <Text size='xs' c='dimmed'>
-        {preview.title}
-      </Text>
-      {preview.kind === 'trazo' && preview.imagePng ? (
-        <Image src={preview.imagePng} alt='Su firma registrada' h={56} w='auto' fit='contain' mt={4} data-testid='sgc-firma-trazo-imagen' />
-      ) : null}
-      <Text size='xs' c='dimmed' mt={4}>
-        {preview.body}
-      </Text>
-    </Card>
-  );
-}
-
-export default function SgcSignModal({ opened, onClose, title, meaning, draft, draftHref, checklist = [], submitLabel, onSign, idCompany = null, justification = null, qualityVerification = false }: SgcSignModalProps) {
+export default function SgcSignModal({ opened, onClose, title, meaning, draft, draftHref, checklist = [], submitLabel, onSign }: SgcSignModalProps) {
   const [reason, setReason] = useState('');
   const [comment, setComment] = useState('');
   const [password, setPassword] = useState('');
@@ -99,25 +69,11 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
   const sessionEmail = session?.user?.email ?? '';
   // La contraseña queda de solo lectura hasta que la persona la toca: el navegador no rellena campos de solo lectura.
   const [passwordUnlocked, setPasswordUnlocked] = useState(false);
-  // S14 (R24): campo de texto enmascarado donde el navegador lo soporta (sin type=password, el gestor no lo ve),
-  // con un nombre nuevo en cada apertura; se decide en el cliente (null = aún no se sabe: se muestra el respaldo).
-  const [textSecurity, setTextSecurity] = useState<boolean | null>(null);
-  const [nonce, setNonce] = useState('inicial');
-  const [showPassword, setShowPassword] = useState(false);
-  // S14 (R25): la firma registrada de la persona (la misma en la tarea y en Autorizaciones).
-  const own = useSgcFetch<{ active: { imagePng: string | null } | null; pending: { imagePng: string | null } | null }>(opened && idCompany && !qualityVerification ? `/api/sgc/signature/own?company=${idCompany}` : null);
-  const preview = sgcStampPreviewOf(meaning, qualityVerification, idCompany ? (own.data ? { active: own.data.active, pending: own.data.pending } : null) : null);
 
   useEffect(() => {
-    setTextSecurity(supportsTextSecurity());
-  }, []);
-
-  useEffect(() => {
-    // Al abrir y al cerrar: la contraseña arranca vacía, oculta y bloqueada (si el navegador alcanzó a rellenarla, se borra).
+    // Al abrir y al cerrar: la contraseña arranca vacía y bloqueada (si el navegador alcanzó a rellenarla, se borra).
     setPassword('');
     setPasswordUnlocked(false);
-    setShowPassword(false);
-    if (opened) setNonce(sgcFieldNonce());
     if (!opened) setError(null);
   }, [opened]);
   // Si el navegador alcanzó a rellenar el motivo con el correo, se limpia: el motivo lo escribe la persona.
@@ -133,8 +89,7 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
     return true;
   });
   const anyNoCumple = checklist.some((c) => answers[c.key]?.answer === 'no_cumple');
-  const justificationMissing = Boolean(justification?.required) && comment.trim().length < 10;
-  const ready = Boolean(draft) && reason.trim().length >= 5 && !looksLikeAutofilledEmail(reason, sessionEmail) && consent && password.length > 0 && checklistComplete && !anyNoCumple && !justificationMissing;
+  const ready = Boolean(draft) && reason.trim().length >= 5 && !looksLikeAutofilledEmail(reason, sessionEmail) && consent && password.length > 0 && checklistComplete && !anyNoCumple;
 
   const submit = async () => {
     if (!ready || !draft) return;
@@ -253,24 +208,7 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
           {...sgcNoAutofill('signature-reason')}
           data-testid='sgc-firma-motivo'
         />
-        {justification?.required ? (
-          <Textarea
-            label='Justificación del cierre'
-            description={`${justification.summary} Escriba por qué se cierra así (mínimo 10 caracteres); queda en el historial.`}
-            required
-            autosize
-            minRows={2}
-            {...sgcNoAutofill('signature-justification')}
-            value={comment}
-            onChange={(e) => setComment(e.currentTarget.value)}
-            error={comment.length > 0 && justificationMissing ? 'Mínimo 10 caracteres.' : undefined}
-            data-testid='sgc-firma-justificacion'
-          />
-        ) : (
-          <Textarea label='Comentario para el historial (opcional)' autosize minRows={2} {...sgcNoAutofill('signature-comment')} value={comment} onChange={(e) => setComment(e.currentTarget.value)} data-testid='sgc-firma-comentario' />
-        )}
-
-        <StampPreview preview={preview} />
+        <Textarea label='Comentario para el historial (opcional)' autosize minRows={2} {...sgcNoAutofill('signature-comment')} value={comment} onChange={(e) => setComment(e.currentTarget.value)} data-testid='sgc-firma-comentario' />
 
         <Card withBorder radius='md' p='sm' bg='var(--app-surface-raised)'>
           <Text fw={600} size='sm'>
@@ -282,45 +220,33 @@ export default function SgcSignModal({ opened, onClose, title, meaning, draft, d
           <Checkbox mt='xs' checked={consent} onChange={(e) => setConsent(e.currentTarget.checked)} label={SGC_SIGNATURE_CONSENT.checkbox} data-testid='sgc-firma-consentimiento' />
         </Card>
 
-        {/* Respaldo (navegador sin texto enmascarado): campo de contraseña clásico con usuario explícito, para que el gestor no tome el «Motivo» como usuario. */}
-        {textSecurity === false && (
-          <input
-            type='email'
-            name='username'
-            autoComplete='username'
-            value={sessionEmail}
-            readOnly
-            tabIndex={-1}
-            aria-label='Usuario que firma'
-            data-testid='sgc-firma-usuario'
-            style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0 }}
-          />
-        )}
-        <TextInput
+        {/* Usuario explícito para el gestor de contraseñas (solo lectura, fuera de la vista): es la persona de la sesión. */}
+        <input
+          type='email'
+          name='username'
+          autoComplete='username'
+          value={sessionEmail}
+          readOnly
+          tabIndex={-1}
+          aria-label='Usuario que firma'
+          data-testid='sgc-firma-usuario'
+          style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0 }}
+        />
+        <PasswordInput
           label='Contraseña de SynerLink'
           description={SGC_SIGNATURE_AUTH_METHOD_LABEL}
           leftSection={<IconLock size={16} />}
-          {...sgcSignaturePasswordProps({ nonce, textSecurity: textSecurity !== false })}
-          type={textSecurity === false ? (showPassword ? 'text' : 'password') : 'text'}
-          styles={{ input: sgcMaskedInputStyle(textSecurity !== false, !showPassword) }}
-          rightSection={
-            <ActionIcon variant='subtle' color='gray' onClick={() => setShowPassword((v) => !v)} aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'} data-testid='sgc-firma-contrasena-ver'>
-              {showPassword ? <IconEyeOff size={16} /> : <IconEye size={16} />}
-            </ActionIcon>
-          }
+          {...sgcSignaturePasswordProps()}
           readOnly={!passwordUnlocked}
           onFocus={() => setPasswordUnlocked(true)}
           onPointerDown={() => setPasswordUnlocked(true)}
           value={password}
           onChange={(e) => setPassword(e.currentTarget.value)}
-          onCopy={(e) => e.preventDefault()}
-          onCut={(e) => e.preventDefault()}
           onKeyDown={(e) => {
             if (e.key === 'Enter') void submit();
           }}
           required
           data-testid='sgc-firma-contrasena'
-          data-enmascarado={textSecurity === false ? 'contrasena' : 'texto'}
         />
         {error && (
           <Alert color='red' icon={<IconAlertCircle size={16} />} data-testid='sgc-firma-error'>
