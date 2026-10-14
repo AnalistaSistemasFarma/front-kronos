@@ -66,6 +66,35 @@ test.describe('Portal TH · Políticas y reglamentos · VISUALIZAR', () => {
     await expect(visor).toBeHidden();
   });
 
+  test('el botón «POLÍTICAS Y REGLAMENTOS» del panel abre la misma ventana que VISUALIZAR (Cristian, 2026-10-14)', async ({ page }) => {
+    await simular(page);
+    await page.goto('/portal');
+    const visor = page.getByTestId('politicas-visor');
+    await expect(visor).toHaveCount(0);
+
+    await page.getByRole('navigation', { name: 'Secciones del portal' }).getByRole('button', { name: 'Políticas y reglamentos' }).click();
+    await expect(visor).toBeVisible();
+    // Es la ventana de siempre: lista de archivos a la izquierda y vista previa al elegir uno.
+    await expect(visor.getByRole('button', { name: /Reglamento Interno de Trabajo/ })).toBeVisible();
+    await expect(visor.getByText('Formatos')).toBeVisible();
+    await visor.getByRole('button', { name: /Reglamento Interno de Trabajo/ }).click();
+    await expect(visor.locator('iframe')).toHaveAttribute('src', /embed\.aspx\?e2e=1&id=A2/);
+    await page.keyboard.press('Escape');
+    await expect(visor).toBeHidden();
+
+    // VISUALIZAR sigue igual y abre la misma ventana.
+    await page.getByRole('button', { name: 'VISUALIZAR' }).click();
+    await expect(visor).toBeVisible();
+  });
+
+  test('celular: el botón del panel también abre la ventana de políticas', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await simular(page);
+    await page.goto('/portal');
+    await page.getByRole('navigation', { name: 'Secciones del portal' }).getByRole('button', { name: 'Políticas y reglamentos' }).click();
+    await expect(page.getByTestId('politicas-visor')).toBeVisible();
+  });
+
   test('error al listar y carpeta vacía se ven en la ventana', async ({ page }) => {
     await simular(page, { listaFalla: true });
     await page.goto('/portal');
