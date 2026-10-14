@@ -115,6 +115,8 @@ model Company {
   // Órdenes de Trabajo (bitácora de proceso de planta, 2026-10-13).
   otActividades    OtActividad[]
   otOrdenesTrabajo OtOrdenTrabajo[]
+  otOperadores     OtOperador[]
+  otAreas          OtArea[]
 
   @@map("company")
   @@schema("dbo")
@@ -3410,11 +3412,17 @@ model OtOrdenTrabajo {
   cerrada_por        String?   @db.NVarChar(50)
   cerrada_en         DateTime? @db.DateTime2
   observacion_cierre String?   @db.NVarChar(1000)
+  // Área del catálogo (A5, 2026-10-14); `area` guarda la copia del nombre.
+  id_area            Int?
 
-  company   Company           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
-  operarios OtOrdenOperario[]
-  registros OtRegistro[]
-  firmas    OtFirma[]
+  company    Company           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  areaRef    OtArea?           @relation(fields: [id_area], references: [id_area], onDelete: NoAction, onUpdate: NoAction)
+  // Auxiliares CON usuario (modelo anterior al 2026-10-14; se conserva para las bitácoras viejas).
+  operarios  OtOrdenOperario[]
+  // Operarios SIN usuario programados por el supervisor (A1, 2026-10-14).
+  operadores OtOrdenOperador[]
+  registros  OtRegistro[]
+  firmas     OtFirma[]
 
   @@unique([id_company, consecutivo], map: "UQ_ot_orden_trabajo_consecutivo")
   @@index([id_company, estado], map: "IX_ot_orden_trabajo_estado")
@@ -3446,15 +3454,76 @@ model OtRegistro {
   registrado_en    DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
   observacion      String?  @db.NVarChar(500)
   ip               String?  @db.NVarChar(64)
+  // Operario (sin usuario) que eligió su nombre en la tablet (A1). `id_user` es el usuario de la SESIÓN.
+  id_operador      Int?
+  operador_nombre  String?  @db.NVarChar(120)
 
   orden     OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
   actividad OtActividad    @relation(fields: [id_actividad], references: [id_actividad], onDelete: NoAction, onUpdate: NoAction)
+  operador  OtOperador?    @relation(fields: [id_operador], references: [id_operador], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([id_orden_trabajo, registrado_en], map: "IX_ot_registro_orden")
   @@map("ot_registro")
   @@schema("dbo")
 }
 
+// Maestro de operarios SIN usuario de SynerLink, por empresa (A1, 2026-10-14). No se borran: se desactivan.
+model OtOperador {
+  id_operador Int       @id @default(autoincrement())
+  id_company  Int
+  nombre      String    @db.NVarChar(120)
+  documento   String?   @db.NVarChar(30)
+  activo      Boolean   @default(true)
+  created_by  String    @db.NVarChar(50)
+  created_at  DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  updated_by  String?   @db.NVarChar(50)
+  updated_at  DateTime? @db.DateTime2
+
+  company   Company           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  ordenes   OtOrdenOperador[]
+  registros OtRegistro[]
+
+  @@unique([id_company, nombre], map: "UQ_ot_operador_nombre")
+  @@map("ot_operador")
+  @@schema("dbo")
+}
+
+// Catálogo de áreas por empresa (A5, 2026-10-14). No se borran: se desactivan.
+model OtArea {
+  id_area    Int      @id @default(autoincrement())
+  id_company Int
+  nombre     String   @db.NVarChar(100)
+  orden      Int      @default(0)
+  activo     Boolean  @default(true)
+  created_by String   @db.NVarChar(50)
+  created_at DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  company Company          @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  ordenes OtOrdenTrabajo[]
+
+  @@unique([id_company, nombre], map: "UQ_ot_area_nombre")
+  @@map("ot_area")
+  @@schema("dbo")
+}
+
+// Operarios programados en una bitácora (solo se agregan: TR_ot_orden_operador_inmutable).
+model OtOrdenOperador {
+  id_orden_operador Int      @id @default(autoincrement())
+  id_orden_trabajo  Int
+  id_operador       Int
+  agregado_por      String   @db.NVarChar(50)
+  agregado_en       DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  orden    OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
+  operador OtOperador     @relation(fields: [id_operador], references: [id_operador], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_orden_trabajo, id_operador], map: "UQ_ot_orden_operador")
+  @@map("ot_orden_operador")
+  @@schema("dbo")
+}
+
+// Desde el 2026-10-14 «Cerró»/«Verificó» son un CHECK con contraseña, sin imagen (firma_png
+// queda NULL); el verificador (rol INSPECTOR) se muestra como «Jefe de producción».
 // Firma electrónica de la bitácora (SUPERVISOR «Cerró» e INSPECTOR «Verificó»),
 // SOLO INSERCIÓN (trigger TR_ot_firma_inmutable). Reutiliza la reautenticación de
 // SynerLink, el consentimiento de GSS Firma y la firma registrada en GSS Firma.

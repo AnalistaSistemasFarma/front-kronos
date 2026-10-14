@@ -330,11 +330,16 @@ jobs:
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013220000_bitacora_proceso_inspector_iconos/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013233000_bitacora_proceso_firmas/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013233000_bitacora_proceso_firmas/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014140000_bitacora_proceso_operadores_areas/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014140000_bitacora_proceso_operadores_areas/migration.sql
           # La base efímera nace sin empresas: se crea Farmalógica (id 1, como en las pruebas de integración) antes de la siembra.
           printf '%s\n' "SET IDENTITY_INSERT [dbo].[company] ON;" "IF NOT EXISTS (SELECT 1 FROM [dbo].[company] WHERE id_company = 1) INSERT INTO [dbo].[company] (id_company, company) VALUES (1, N'FARMALOGICA S.A.');" "SET IDENTITY_INSERT [dbo].[company] OFF;" > /tmp/ot-empresa.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/ot-empresa.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-13-bitacora-proceso-p0-farmalogica.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-13-bitacora-proceso-p0-farmalogica.sql
+          # Ajustes del 2026-10-14 (área predefinida, actividades A6 sin duplicar, observación opcional): dos veces, idempotente.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-14-bitacora-proceso-ajustes-farmalogica.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-14-bitacora-proceso-ajustes-farmalogica.sql
 
       - name: Pruebas de integración + cobertura de lib/sgc/db (vitest)
         run: npm run test:integration -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/integracion/junit.xml

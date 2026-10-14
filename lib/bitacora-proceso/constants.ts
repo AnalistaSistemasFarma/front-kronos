@@ -36,10 +36,21 @@ export const OT_SUBPROCESS_NAMES: Record<OtPermission, string> = {
 export const OT_TURNOS = ['MANANA', 'TARDE', 'NOCHE'] as const;
 export type OtTurno = (typeof OT_TURNOS)[number];
 
+/** Horario de cada turno (A9, reunión con Farmalógica del 2026-10-14). */
+export const OT_TURNO_HORARIO: Record<OtTurno, string> = {
+  MANANA: '06–14',
+  TARDE: '14–22',
+  NOCHE: '22–06',
+};
+
+/** Nombre del turno, sin horario. */
+export const OT_TURNO_NOMBRE: Record<OtTurno, string> = { MANANA: 'Mañana', TARDE: 'Tarde', NOCHE: 'Noche' };
+
+/** Etiqueta visible del turno con su horario: «Mañana (06–14)». */
 export const OT_TURNO_LABEL: Record<OtTurno, string> = {
-  MANANA: 'Mañana',
-  TARDE: 'Tarde',
-  NOCHE: 'Noche',
+  MANANA: `${OT_TURNO_NOMBRE.MANANA} (${OT_TURNO_HORARIO.MANANA})`,
+  TARDE: `${OT_TURNO_NOMBRE.TARDE} (${OT_TURNO_HORARIO.TARDE})`,
+  NOCHE: `${OT_TURNO_NOMBRE.NOCHE} (${OT_TURNO_HORARIO.NOCHE})`,
 };
 
 export const OT_ESTADOS = ['ABIERTA', 'CERRADA'] as const;
@@ -55,6 +66,9 @@ export const OT_LIMITS = {
   observacionCierre: 1000,
   actividadNombre: 120,
   maxOperarios: 50,
+  operadorNombre: 120,
+  operadorDocumento: 30,
+  areaNombre: 100,
 } as const;
 
 /** Días de bitácoras cerradas que muestra el listado (P0). */
@@ -126,6 +140,9 @@ export const OT_ICONOS = {
   'ajuste-mantenimiento': 'Ajuste (mantenimiento)',
   formato: 'Cambio de formato',
   refrigerio: 'Alimentación del personal',
+  alistamiento: 'Alistamiento inicial',
+  despeje: 'Despeje de área',
+  aseo: 'Aseo de área',
   frasco: 'Frasco o vial',
   laboratorio: 'Laboratorio',
   equipo: 'Equipo',
@@ -144,10 +161,13 @@ export function isOtIcono(v: unknown): v is OtIcono {
 }
 
 /**
- * Catálogo inicial de Farmalógica según su especificación oficial (2026-10-13):
+ * Catálogo de Farmalógica según su especificación oficial (2026-10-13):
  * 3 alimentaciones con su pictograma + 10 intervenciones («Descargue autoclave»
- * venía repetido) + «Otra» (observación obligatoria). Debe coincidir con
+ * venía repetido) + «Otra». Debe coincidir con
  * prisma/manual/2026-10-13-bitacora-proceso-p0-farmalogica.sql.
+ * El 2026-10-14 (A6) se agregan «Alistamiento inicial» (primero), «Despeje de
+ * área (fin de lote)» y «Aseo de área» (al final): ver OT_ACTIVIDADES_A6.
+ * `exigeObservacion` es histórico (siembra del 10-13): desde el 2026-10-14 la observación es OPCIONAL en todas y la regla ya no lo aplica.
  */
 export const OT_CATALOGO_FARMALOGICA: ReadonlyArray<{ nombre: string; icono: OtIcono; orden: number; exigeObservacion: boolean }> = [
   { nombre: 'Alimentación Tapón', icono: 'pictograma-tapon', orden: 10, exigeObservacion: false },
@@ -166,6 +186,33 @@ export const OT_CATALOGO_FARMALOGICA: ReadonlyArray<{ nombre: string; icono: OtI
   { nombre: 'Otra', icono: 'otra', orden: 990, exigeObservacion: true },
 ];
 
-/** Significado de cada firma de la bitácora (supervisor al cerrar, inspector al verificar). */
+/** Actividades nuevas de la reunión del 2026-10-14 (A6). Siembra idempotente por nombre. */
+export const OT_ACTIVIDADES_A6: ReadonlyArray<{ nombre: string; icono: OtIcono; orden: number }> = [
+  { nombre: 'Alistamiento inicial', icono: 'alistamiento', orden: 5 },
+  { nombre: 'Despeje de área (fin de lote)', icono: 'despeje', orden: 900 },
+  { nombre: 'Aseo de área', icono: 'aseo', orden: 910 },
+];
+
+/** Área predefinida de Farmalógica (A5): por ahora la única. */
+export const OT_AREAS_FARMALOGICA: ReadonlyArray<string> = ['Envase y agrafado'];
+
+/**
+ * Significado de cada confirmación de la bitácora (supervisor al cerrar, jefe de
+ * producción al verificar). En la base el rol del verificador sigue siendo
+ * `INSPECTOR` (no se renombran columnas); en pantalla, avisos, informe y MCP se
+ * muestra «Jefe de producción» (Nicolás, 2026-10-14).
+ */
 export const OT_FIRMA_SIGNIFICADO = { SUPERVISOR: 'Cerró', INSPECTOR: 'Verificó' } as const;
 export type OtFirmaRol = keyof typeof OT_FIRMA_SIGNIFICADO;
+
+/** Etiqueta visible de cada rol. */
+export const OT_ROL_LABEL: Record<OtFirmaRol, string> = { SUPERVISOR: 'Supervisor', INSPECTOR: 'Jefe de producción' };
+
+/** Etiqueta del rol del verificador (columna interna `id_inspector`). */
+export const OT_JEFE_PRODUCCION_LABEL = 'Jefe de producción';
+
+/** Texto de la casilla de confirmación por rol (A4: check, no firma con imagen). */
+export const OT_CONFIRMACION_TEXTO: Record<OtFirmaRol, string> = {
+  SUPERVISOR: 'Confirmo que revisé los registros de este turno y cierro la bitácora («Cerró»).',
+  INSPECTOR: 'Confirmo que verifiqué la bitácora cerrada por el supervisor («Verificó»).',
+};

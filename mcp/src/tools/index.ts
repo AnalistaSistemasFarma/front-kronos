@@ -317,12 +317,12 @@ export const ENTITY_METADATA = {
   },
   bitacoras: {
     description:
-      'Bitácora de Proceso (planta): una bitácora = un turno (ot_orden_trabajo), con auxiliares (ot_orden_operario), registros de intervenciones con hora del servidor en UTC (ot_registro, inmutables), catálogo de actividades (ot_actividad) y firmas «Cerró»/«Verificó» (ot_firma). Solo lectura vía kronos_list_bitacoras, kronos_get_bitacora, kronos_bitacora_actividad_reciente y kronos_list_bitacora_actividades. Nunca se exponen imágenes de firma, huellas ni IP.',
+      'Bitácora de Proceso (planta): una bitácora = un turno (ot_orden_trabajo) con supervisor, jefe de producción (quien verifica) y operarios sin usuario de SynerLink (ot_orden_operador, maestro ot_operador; las bitácoras anteriores al 2026-10-14 tienen auxiliares con usuario en ot_orden_operario), registros de intervenciones con hora del servidor en UTC, el operario que la hizo y el usuario de la sesión que la registró (ot_registro, inmutables), catálogo de actividades (ot_actividad) y confirmaciones «Cerró» (supervisor) / «Verificó» (jefe de producción) (ot_firma). Solo lectura vía kronos_list_bitacoras, kronos_get_bitacora, kronos_bitacora_actividad_reciente y kronos_list_bitacora_actividades. Nunca se exponen imágenes de firma, huellas ni IP.',
     companyColumn: 'ot_orden_trabajo.id_company / ot_actividad.id_company',
     fields: [
       'id', 'codigo (BP-xxxx, consecutivo por empresa)', 'id_company', 'company', 'producto', 'item_code', 'lote',
       'turno', 'area', 'orden_produccion_sap', 'estado (abierta|cerrada|verificada)', 'abierta_en', 'cerrada_en',
-      'supervisor', 'inspector', 'auxiliares', 'registros', 'firmas', 'ultima_actividad_en',
+      'supervisor', 'jefe_produccion', 'operarios', 'registros (operario + usuario_sesion)', 'firmas (confirmaciones Cerró/Verificó)', 'ultima_actividad_en',
     ],
   },
   attachments: {
