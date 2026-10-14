@@ -53,9 +53,9 @@ describe('SGC · S4 · configuración de la capacitación', () => {
 describe('SGC · S4 · Excel de resultados de Forms', () => {
   it('[SGC-REQ-059] reconoce los encabezados de Forms en español e inglés (sin tildes ni mayúsculas) y explica cuáles faltan', () => {
     expect(normalizeHeader('  Correo   Electrónico ')).toBe('correo electronico');
-    expect(detectResultColumns(FORMS_ES)).toEqual({ email: 3, score: 5, name: 4, completedAt: 2 });
-    expect(detectResultColumns(['ID', 'Start time', 'Completion time', 'Email', 'Name', 'Total points'])).toEqual({ email: 3, score: 5, name: 4, completedAt: 2 });
-    expect(detectResultColumns(['Correo', 'Nota'])).toEqual({ email: 0, score: 1, name: null, completedAt: null });
+    expect(detectResultColumns(FORMS_ES)).toEqual({ email: 3, score: 5, name: 4, completedAt: 2, questionPoints: [] });
+    expect(detectResultColumns(['ID', 'Start time', 'Completion time', 'Email', 'Name', 'Total points'])).toEqual({ email: 3, score: 5, name: 4, completedAt: 2, questionPoints: [] });
+    expect(detectResultColumns(['Correo', 'Nota'])).toEqual({ email: 0, score: 1, name: null, completedAt: null, questionPoints: [] });
     expect(() => detectResultColumns(['Nombre', 'Total de puntos'])).toThrow(/Correo electrónico/);
     expect(() => detectResultColumns(['Correo', 'Nombre'])).toThrow(/Total de puntos/);
   });

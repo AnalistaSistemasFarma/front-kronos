@@ -57,6 +57,8 @@ export function bogotaDay(at: Date): Date {
 export interface SgcApproverAuthorizationInput {
   email: string;
   idProcessMap: number | null;
+  /** S15 (R19): líder de un departamento (flujo DOC v7); excluye el proceso. */
+  idDepartment: number | null;
   validFrom: Date;
   validTo: Date | null;
   reason: string;
@@ -68,10 +70,13 @@ export function normalizeApproverAuthorization(raw: unknown, today: Date): SgcAp
   const e = email(r.email, 'Aprobador');
   const proc = r.idProcessMap === undefined || r.idProcessMap === null || r.idProcessMap === '' ? null : Number(r.idProcessMap);
   if (proc !== null && (!Number.isInteger(proc) || proc <= 0)) throw new SgcError('Proceso inválido.');
+  const dept = r.idDepartment === undefined || r.idDepartment === null || r.idDepartment === '' ? null : Number(r.idDepartment);
+  if (dept !== null && (!Number.isInteger(dept) || dept <= 0)) throw new SgcError('Departamento inválido.');
+  if (dept !== null && proc !== null) throw new SgcError('Un líder aprobador se registra por departamento o por proceso, no por ambos.');
   const validFrom = dayOf(r.validFrom, 'Vigente desde', true) ?? bogotaDay(today);
   const validTo = dayOf(r.validTo, 'Vigente hasta', true);
   if (validTo && validTo.getTime() < validFrom.getTime()) throw new SgcError('La vigencia termina antes de empezar.');
-  return { email: e, idProcessMap: proc, validFrom, validTo, reason: reasonOf(r.reason, 'Escriba el motivo de la autorización') };
+  return { email: e, idProcessMap: proc, idDepartment: dept, validFrom, validTo, reason: reasonOf(r.reason, 'Escriba el motivo de la autorización') };
 }
 
 export interface SgcApproverAuthorizationRow {

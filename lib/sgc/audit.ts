@@ -109,6 +109,18 @@ export const SGC_AUDIT_ACTIONS = {
   // Sprint 13: firma propia.
   firmaPropiaRegistrada: 'firma.propia_registrada',
   firmaPropiaValidada: 'firma.propia_validada',
+  // Generador de documentos desde plantillas aprobadas por Calidad (2026-10-10).
+  generadorPlantillaPropuesta: 'generador.plantilla_propuesta',
+  generadorPlantillaDecidida: 'generador.plantilla_decidida',
+  generadorPlantillaRetirada: 'generador.plantilla_retirada',
+  generadorVistaPrevia: 'generador.vista_previa',
+  generadorDocumento: 'generador.documento_generado',
+  generadorDocumentoAnulado: 'generador.documento_anulado',
+  // S16: plantillas de encabezado por tipo documental.
+  encabezadoPlantilla: 'encabezado.plantilla',
+  // S17–S18: evaluaciones propias en SynerLink.
+  evaluacionBanco: 'evaluacion.banco',
+  evaluacionIntento: 'evaluacion.intento',
 } as const;
 
 export type SgcAuditAction = (typeof SGC_AUDIT_ACTIONS)[keyof typeof SGC_AUDIT_ACTIONS];
