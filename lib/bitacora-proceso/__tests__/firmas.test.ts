@@ -8,15 +8,14 @@ import {
   assertPuedeCerrar,
   assertPuedeVerificar,
   huellaContenido,
-  imagenFirmaSegura,
   LimiteReautenticacion,
-  OT_FIRMA_CONSENT_VERSION,
+  OT_CONFIRMACION_TEXTO,
+  OT_CONFIRMACION_VERSION,
   OT_FIRMA_SIGNIFICADO,
-  parseFirma,
+  parseConfirmacion,
   type ContenidoFirmable,
 } from '../firmas';
 import { isOtError, OtError } from '../rules';
-import { SIGNING_LEGAL_CONSENT_VERSION } from '../../orion/signingLegalConsent';
 
 const sup = { idCompany: 1, companyName: 'FARMALOGICA S.A.', canOperate: true, canManage: true };
 const op = { ...sup, canManage: false };
@@ -38,35 +37,39 @@ const base: ContenidoFirmable = {
   observacionCierre: null,
 };
 
-describe('Bitácora de Proceso · firma electrónica (reglas)', () => {
-  it('reutiliza el consentimiento de firma electrónica de GSS Firma y define los significados', () => {
-    expect(OT_FIRMA_CONSENT_VERSION).toBe(SIGNING_LEGAL_CONSENT_VERSION);
+describe('Bitácora de Proceso · confirmación «Cerró» / «Verificó» (reglas, A4)', () => {
+  it('es un check propio de la bitácora: sin consentimiento de GSS Firma ni Ley 527', () => {
+    expect(OT_CONFIRMACION_VERSION).toBe('bitacora-check-2026-10-14');
     expect(OT_FIRMA_SIGNIFICADO).toEqual({ SUPERVISOR: 'Cerró', INSPECTOR: 'Verificó' });
+    expect(JSON.stringify(OT_CONFIRMACION_TEXTO)).not.toMatch(/527|firma electr/i);
   });
 
-  it('exige aceptar el consentimiento y escribir la contraseña', () => {
-    expect(errorOf(() => parseFirma(null)).status).toBe(400);
-    expect(errorOf(() => parseFirma({ password: 'x' })).message).toMatch(/aceptar/);
-    expect(errorOf(() => parseFirma({ password: 'x', acepto: 'true' })).message).toMatch(/aceptar/);
-    expect(errorOf(() => parseFirma({ acepto: true })).message).toMatch(/contraseña/);
-    expect(errorOf(() => parseFirma({ acepto: true, password: 'x'.repeat(201) })).status).toBe(400);
-    expect(parseFirma({ acepto: true, password: 's3creta' })).toEqual({ password: 's3creta' });
+  it('exige elegir la persona, marcar la casilla y escribir la contraseña', () => {
+    const ok = { firmante: ' u1 ', confirmo: true, password: 's3creta' };
+    expect(errorOf(() => parseConfirmacion(null)).status).toBe(400);
+    expect(errorOf(() => parseConfirmacion({ ...ok, firmante: '' })).message).toMatch(/Elija su nombre/);
+    expect(errorOf(() => parseConfirmacion({ ...ok, firmante: 'x'.repeat(51) })).status).toBe(400);
+    expect(errorOf(() => parseConfirmacion({ ...ok, confirmo: 'true' })).message).toMatch(/casilla/);
+    expect(errorOf(() => parseConfirmacion({ ...ok, password: '' })).message).toMatch(/contraseña/);
+    expect(errorOf(() => parseConfirmacion({ ...ok, password: 'x'.repeat(201) })).status).toBe(400);
+    expect(parseConfirmacion(ok)).toEqual({ idFirmante: 'u1', password: 's3creta' });
   });
 
-  it('segregación: el inspector no es el supervisor que abre ni quien cierra', () => {
+  it('segregación: el jefe de producción no es el supervisor que abre ni quien cierra', () => {
     expect(errorOf(() => assertInspectorDistinto('u1', 'u1')).status).toBe(400);
     expect(() => assertInspectorDistinto('u2', 'u1')).not.toThrow();
     expect(errorOf(() => assertPuedeCerrar({ estado: 'ABIERTA', inspector: 'u1' }, 'u1', sup)).status).toBe(403);
   });
 
-  it('cierre: solo Gestión y solo si está abierta', () => {
+  it('cierre: quien confirma debe tener Gestión (su acceso, no el de la sesión) y la bitácora estar abierta', () => {
     expect(errorOf(() => assertPuedeCerrar({ estado: 'ABIERTA', inspector: 'i' }, 'u1', op)).status).toBe(403);
+    expect(errorOf(() => assertPuedeCerrar({ estado: 'ABIERTA', inspector: 'i' }, 'u1', null)).message).toMatch(/supervisor/);
     expect(errorOf(() => assertPuedeCerrar({ estado: 'CERRADA', inspector: 'i' }, 'u1', sup)).status).toBe(409);
     expect(() => assertPuedeCerrar({ estado: 'ABIERTA', inspector: 'i' }, 'u1', sup)).not.toThrow();
     expect(() => assertPuedeCerrar({ estado: 'ABIERTA', inspector: null }, 'u1', sup)).not.toThrow();
   });
 
-  it('verificación: solo el inspector designado, después del cierre firmado y una sola vez', () => {
+  it('verificación: solo el jefe de producción designado, después del cierre y una sola vez', () => {
     const cerrada = { estado: 'CERRADA', inspector: 'i' };
     const firmaSup = [{ rol: 'SUPERVISOR', id_user: 's' }];
     expect(errorOf(() => assertPuedeVerificar(cerrada, firmaSup, 'otro')).status).toBe(403);
@@ -78,24 +81,20 @@ describe('Bitácora de Proceso · firma electrónica (reglas)', () => {
     expect(() => assertPuedeVerificar(cerrada, firmaSup, 'i')).not.toThrow();
   });
 
-  it('la huella SHA-256 es estable (no depende del orden de los auxiliares) y cambia si cambia el contenido', () => {
+  it('la huella SHA-256 es estable (no depende del orden de auxiliares ni operarios) y cambia si cambia el contenido', () => {
     const h = huellaContenido(base);
     expect(h).toMatch(/^[0-9a-f]{64}$/);
     expect(huellaContenido({ ...base, auxiliares: ['a', 'b'] })).toBe(h);
+    const conOps = huellaContenido({ ...base, operadores: [8, 7] });
+    expect(huellaContenido({ ...base, operadores: [7, 8] })).toBe(conOps);
+    expect(conOps).not.toBe(h);
+    expect(huellaContenido({ ...base, registros: [{ ...base.registros[0], operador: 7 }] })).not.toBe(h);
     expect(huellaContenido({ ...base, registros: [{ ...base.registros[0], observacion: 'x' }] })).not.toBe(h);
     expect(huellaContenido({ ...base, lote: 'L2' })).not.toBe(h);
     expect(huellaContenido({ ...base, firmaSupervisorSha256: 'abc' })).not.toBe(h);
   });
 
-  it('solo acepta imágenes PNG/JPEG en data URL de tamaño razonable', () => {
-    expect(imagenFirmaSegura('data:image/png;base64,iVBORw0KGgo=')).toBe('data:image/png;base64,iVBORw0KGgo=');
-    expect(imagenFirmaSegura('data:image/svg+xml;base64,PHN2Zz4=')).toBeNull();
-    expect(imagenFirmaSegura('javascript:alert(1)')).toBeNull();
-    expect(imagenFirmaSegura(null)).toBeNull();
-    expect(imagenFirmaSegura(`data:image/png;base64,${'A'.repeat(1_600_000)}`)).toBeNull();
-  });
-
-  it('bloquea la firma tras 5 contraseñas incorrectas en 15 minutos (y se libera después)', () => {
+  it('bloquea la confirmación tras 5 contraseñas incorrectas en 15 minutos (y se libera después)', () => {
     const lim = new LimiteReautenticacion(5, 15 * 60_000);
     const t0 = 1_000_000;
     for (let i = 0; i < 4; i++) lim.registrarFallo('Sup@F.com', t0);

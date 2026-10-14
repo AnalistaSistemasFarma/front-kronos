@@ -1,32 +1,35 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-// Preparación de quien firma (consentimiento, contraseña con límite y firma registrada de GSS Firma), con dependencias simuladas.
+// Preparación de quien CONFIRMA «Cerró» / «Verificó» (A4, 2026-10-14): la persona
+// elegida (no la sesión de la tablet), su contraseña con límite de intentos y su
+// acceso al módulo. Sin imagen de firma ni GSS Firma. Dependencias simuladas.
 
-const m = vi.hoisted(() => ({ findFirst: vi.fn() }));
-vi.mock('../../../../lib/prisma', () => ({ prisma: { user: { findFirst: m.findFirst } } }));
-vi.mock('../../../../lib/orion/config', () => ({ getOrionConfig: () => ({ enabled: false }) }));
-vi.mock('../../../../lib/orion/client', () => ({ loadOrionUserSignature: vi.fn() }));
+vi.mock('../../../../lib/prisma', () => ({ prisma: {} }));
 
 import { prepararFirmante, type FirmanteDeps } from '../_lib/firmante';
 import { LimiteReautenticacion } from '../../../../lib/bitacora-proceso/firmas';
 import type { OtRequestContext } from '../_lib/context';
 
+const FARMA = 1;
+// La sesión es la cuenta COMPARTIDA de planta.
 const ctx: OtRequestContext = {
-  email: 'sup@farmalogica.com',
+  email: 'produccion@farmalogica.com',
   access: [],
-  actor: { idUser: 'u1', email: 'sup@farmalogica.com', ip: '10.0.0.9' },
+  actor: { idUser: 'u-planta', email: 'produccion@farmalogica.com', ip: '10.0.0.9' },
 };
-const PNG = 'data:image/png;base64,iVBORw0KGgo=';
+const sup = { id: 'u-sup', email: 'sup@farmalogica.com', name: ' Supervisora Planta ' };
+const accesoSup = [{ idCompany: FARMA, companyName: 'FARMALOGICA S.A.', canOperate: true, canManage: true }];
 
-function deps(ok: boolean, imagen: string | null = PNG): FirmanteDeps & { verificar: ReturnType<typeof vi.fn>; registrarFirma: ReturnType<typeof vi.fn>; firmaRegistrada: ReturnType<typeof vi.fn> } {
-  return {
+function deps(ok: boolean, persona: typeof sup | null = sup) {
+  const d = {
     verificar: vi.fn().mockResolvedValue(ok),
-    firmaRegistrada: vi.fn().mockResolvedValue(imagen),
     limite: new LimiteReautenticacion(5, 15 * 60_000),
-    registrarFirma: vi.fn().mockResolvedValue({ dataUrl: NUEVA, sha256: 'c'.repeat(64), guardada: true }),
+    persona: vi.fn().mockResolvedValue(persona),
+    acceso: vi.fn().mockResolvedValue(accesoSup),
   };
+  return d as FirmanteDeps & typeof d;
 }
-const NUEVA = 'data:image/png;base64,iVBORw0KGgoAAAA=';
+const body = { firmante: 'u-sup', confirmo: true, password: 'propia' };
 
 async function status(p: Promise<unknown>): Promise<number> {
   try {
@@ -37,75 +40,56 @@ async function status(p: Promise<unknown>): Promise<number> {
   }
 }
 
-beforeEach(() => {
-  m.findFirst.mockReset();
-  m.findFirst.mockResolvedValue({ name: 'Supervisor Planta' });
-});
-
-describe('Bitácora de Proceso · quien firma', () => {
-  it('con consentimiento y contraseña correcta: nombre de la base e imagen de la firma registrada', async () => {
+describe('Bitácora de Proceso · quien confirma', () => {
+  it('valida la contraseña de LA PERSONA ELEGIDA (no la de la sesión) y devuelve su id, nombre y acceso', async () => {
     const d = deps(true);
-    const f = await prepararFirmante(ctx, { acepto: true, password: 'ok' }, 'vitest', d);
-    expect(f).toEqual({ idUser: 'u1', email: 'sup@farmalogica.com', ip: '10.0.0.9', userAgent: 'vitest', nombre: 'Supervisor Planta', imagen: PNG, avisoFirma: null });
-    expect(d.registrarFirma).not.toHaveBeenCalled();
-    expect(d.verificar).toHaveBeenCalledWith('sup@farmalogica.com', 'ok');
+    const f = await prepararFirmante(ctx, FARMA, body, 'vitest', d);
+    expect(d.persona).toHaveBeenCalledWith('u-sup', FARMA);
+    expect(d.verificar).toHaveBeenCalledWith('sup@farmalogica.com', 'propia');
+    expect(d.acceso).toHaveBeenCalledWith('sup@farmalogica.com');
+    expect(f).toEqual({
+      idUser: 'u-sup',
+      email: 'sup@farmalogica.com',
+      ip: '10.0.0.9',
+      userAgent: 'vitest',
+      nombre: 'Supervisora Planta',
+      access: accesoSup[0],
+    });
+    expect(f.idUser).not.toBe(ctx.actor.idUser);
   });
 
-  it('sin consentimiento no verifica la contraseña (400)', async () => {
+  it('sin acceso al módulo en la empresa, access es null (la capa de datos rechaza el cierre)', async () => {
     const d = deps(true);
-    expect(await status(prepararFirmante(ctx, { password: 'ok' }, null, d))).toBe(400);
+    d.acceso.mockResolvedValue([{ ...accesoSup[0], idCompany: 3 }]);
+    expect((await prepararFirmante(ctx, FARMA, body, null, d)).access).toBeNull();
+  });
+
+  it('persona que no es usuario activo de la empresa: 400 sin verificar contraseña', async () => {
+    const d = deps(true, null);
+    expect(await status(prepararFirmante(ctx, FARMA, body, null, d))).toBe(400);
     expect(d.verificar).not.toHaveBeenCalled();
   });
 
-  it('contraseña incorrecta: 403; a los 5 fallos se bloquea (429) aunque luego acierte', async () => {
-    const d = deps(false);
-    for (let i = 0; i < 5; i++) expect(await status(prepararFirmante(ctx, { acepto: true, password: 'mala' }, null, d))).toBe(403);
-    d.verificar.mockResolvedValue(true);
-    expect(await status(prepararFirmante(ctx, { acepto: true, password: 'buena' }, null, d))).toBe(429);
-  });
-
-  it('sin firma registrada (o con una imagen no segura) firma igual, sin imagen', async () => {
-    expect((await prepararFirmante(ctx, { acepto: true, password: 'ok' }, null, deps(true, null))).imagen).toBeNull();
-    expect((await prepararFirmante(ctx, { acepto: true, password: 'ok' }, null, deps(true, 'data:image/svg+xml;base64,PHN2Zz4='))).imagen).toBeNull();
-    m.findFirst.mockResolvedValue(null);
-    expect((await prepararFirmante(ctx, { acepto: true, password: 'ok' }, null, deps(true))).nombre).toBe('sup@farmalogica.com');
-  });
-
-  it('FIRMA NUEVA (dibujada o imagen): DESPUÉS de la contraseña se guarda en SU maestro de GSS Firma y se usa en esta firma', async () => {
-    const d = deps(true, null);
-    const f = await prepararFirmante(ctx, { acepto: true, password: 'ok', firmaNueva: { imagen: 'data:image/png;base64,xx', metodo: 'uploaded' } }, 'vitest', d);
-    expect(d.registrarFirma).toHaveBeenCalledWith({
-      idUser: 'u1',
-      email: 'sup@farmalogica.com',
-      firma: { imagen: 'data:image/png;base64,xx', metodo: 'uploaded' },
-      origen: 'bitacora-proceso',
-      ip: '10.0.0.9',
-      userAgent: 'vitest',
-    });
-    expect(f.imagen).toBe(NUEVA);
-    expect(f.avisoFirma).toBeNull();
-    expect(d.firmaRegistrada).not.toHaveBeenCalled();
-  });
-
-  it('FIRMA NUEVA: con contraseña incorrecta NO se guarda; con método inválido es 400 sin verificar', async () => {
-    const d = deps(false);
-    expect(await status(prepararFirmante(ctx, { acepto: true, password: 'mala', firmaNueva: { imagen: 'data:x', metodo: 'drawn' } }, null, d))).toBe(403);
-    expect(d.registrarFirma).not.toHaveBeenCalled();
-    const d2 = deps(true);
-    expect(await status(prepararFirmante(ctx, { acepto: true, password: 'ok', firmaNueva: { imagen: 'data:x', metodo: 'tipografica' } }, null, d2))).toBe(400);
-    expect(d2.verificar).not.toHaveBeenCalled();
-  });
-
-  it('FIRMA NUEVA: imagen no válida es 400; si GSS Firma no la guarda, firma con ella y avisa', async () => {
-    const { FirmaImagenError } = await import('../../../../lib/firma-gss/png');
+  it('exige casilla y contraseña (400) antes de consultar nada', async () => {
     const d = deps(true);
-    d.registrarFirma.mockRejectedValueOnce(new FirmaImagenError('La firma debe llegar como imagen PNG.'));
-    expect(await status(prepararFirmante(ctx, { acepto: true, password: 'ok', firmaNueva: { imagen: 'data:x', metodo: 'drawn' } }, null, d))).toBe(400);
-    d.registrarFirma.mockResolvedValueOnce({ dataUrl: NUEVA, sha256: 'c'.repeat(64), guardada: false, error: 'caído' });
-    const f = await prepararFirmante(ctx, { acepto: true, password: 'ok', firmaNueva: { imagen: 'data:x', metodo: 'drawn' } }, null, d);
-    expect(f.imagen).toBe(NUEVA);
-    expect(f.avisoFirma).toMatch(/GSS Firma no la guardó/);
-    d.registrarFirma.mockRejectedValueOnce(new Error('BD'));
-    await expect(prepararFirmante(ctx, { acepto: true, password: 'ok', firmaNueva: { imagen: 'data:x', metodo: 'drawn' } }, null, d)).rejects.toThrow('BD');
+    expect(await status(prepararFirmante(ctx, FARMA, { ...body, confirmo: false }, null, d))).toBe(400);
+    expect(await status(prepararFirmante(ctx, FARMA, { ...body, password: '' }, null, d))).toBe(400);
+    expect(await status(prepararFirmante(ctx, FARMA, { ...body, firmante: '' }, null, d))).toBe(400);
+    expect(d.persona).not.toHaveBeenCalled();
+  });
+
+  it('contraseña incorrecta: 403; a los 5 fallos de ESA persona se bloquea (429) aunque luego acierte', async () => {
+    const d = deps(false);
+    for (let i = 0; i < 5; i++) expect(await status(prepararFirmante(ctx, FARMA, body, null, d))).toBe(403);
+    d.verificar.mockResolvedValue(true);
+    expect(await status(prepararFirmante(ctx, FARMA, body, null, d))).toBe(429);
+    // El bloqueo es por persona: la sesión compartida no queda bloqueada para otro supervisor.
+    d.persona.mockResolvedValue({ id: 'u-sup2', email: 'sup2@farmalogica.com', name: 'Otro' });
+    expect(await status(prepararFirmante(ctx, FARMA, { ...body, firmante: 'u-sup2' }, null, d))).toBe(0);
+  });
+
+  it('sin nombre en la base usa el correo', async () => {
+    const d = deps(true, { ...sup, name: '  ' });
+    expect((await prepararFirmante(ctx, FARMA, body, null, d)).nombre).toBe('sup@farmalogica.com');
   });
 });

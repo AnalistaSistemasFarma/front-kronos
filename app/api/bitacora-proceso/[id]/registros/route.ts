@@ -6,9 +6,10 @@ import { errorResponse, getOtRequestContext, jsonNoStore, parseCompanyParam, par
 export const dynamic = 'force-dynamic';
 
 /**
- * POST /api/bitacora-proceso/[id]/registros?company=1  { id_actividad, observacion? }
- * Registra una intervención. La hora la pone la base de datos y el usuario sale
- * de la sesión: cualquier hora o usuario que envíe el cliente se ignora.
+ * POST /api/bitacora-proceso/[id]/registros?company=1  { id_operador, id_actividad, observacion? }
+ * Registra una intervención (A1, A2: el operario elige su nombre y la actividad).
+ * La hora la pone la base de datos; el usuario de la sesión se guarda aparte del
+ * operario elegido. Cualquier hora o usuario que envíe el cliente se ignora.
  * No existe PUT ni DELETE: los registros no se editan ni se borran.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {

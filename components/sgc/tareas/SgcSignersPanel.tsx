@@ -27,6 +27,10 @@ export interface SgcSignersPanelProps {
   /** Sprint 12: personas que se ofrecen en APROBACIÓN (aprobadores autorizados); null = la lista no aplica. */
   approverUsers?: { value: string; label: string }[] | null;
   suggestion: SgcMatrixSuggestion[] | null;
+  /** S15 (DOC v7, R17): aviso de que solo se ofrecen personas del departamento de quien elabora. */
+  scopeNotice?: string | null;
+  /** S15: solicitud del DOC v7 (el elaborador asigna; no hay sugerencias que Calidad confirme). */
+  requesterElaborates?: boolean;
   /** Lo que guarde esta persona queda SUGERIDO (solicitante). */
   suggestOnly?: boolean;
   /** Puede confirmar con un clic lo sugerido (quien ejecuta la primera tarea y/o Calidad). */
@@ -37,7 +41,7 @@ export interface SgcSignersPanelProps {
 
 const ROLE_OF_STEP: Record<string, 'revisor' | 'aprobador'> = { revision: 'revisor', aprobacion: 'aprobador' };
 
-function StepEditor({ step, canEdit, users, reviewerUsers, approverUsers, suggestion, suggestOnly, onSave }: { step: Step } & Omit<SgcSignersPanelProps, 'steps' | 'canConfirm' | 'onConfirm'>) {
+function StepEditor({ step, canEdit, users, reviewerUsers, approverUsers, suggestion, suggestOnly, onSave }: { step: Step } & Omit<SgcSignersPanelProps, 'steps' | 'canConfirm' | 'onConfirm' | 'scopeNotice' | 'requesterElaborates'>) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState<string[]>((step.signers.length ? step.signers : step.suggested).map((s) => s.email));
   const [mode, setMode] = useState<'orden' | 'paralelo'>((step.mode as 'orden' | 'paralelo') ?? 'paralelo');
@@ -203,8 +207,15 @@ export default function SgcSignersPanel(props: SgcSignersPanelProps) {
           ? 'Usted sugiere quién revisa y quién aprueba, y si firman en orden o en paralelo. Lo que elija queda «Sugerido» hasta que lo confirme o lo reasigne quien crea el documento (Aseguramiento de Calidad).'
           : props.canEdit
             ? 'Usted confirma o asigna quién revisa y quién aprueba, y elige si firman en orden o en paralelo. Puede cambiarlos durante el proceso; cada cambio queda en el historial con su motivo.'
-            : 'Los confirma y cambia quien crea el documento (Aseguramiento de Calidad); el solicitante solo los sugiere.'}
+            : props.requesterElaborates
+              ? 'Los asigna quien elabora el documento, entre las personas de su departamento (un revisor también puede ser de Aseguramiento de Calidad).'
+              : 'Los confirma y cambia quien crea el documento (Aseguramiento de Calidad); el solicitante solo los sugiere.'}
       </Text>
+      {props.canEdit && props.scopeNotice && (
+        <Alert color='blue' variant='light' mb='md' data-testid='sgc-firmantes-departamento'>
+          {props.scopeNotice}
+        </Alert>
+      )}
       {props.canConfirm && props.onConfirm && (
         <Alert color='orange' variant='light' icon={<IconBulb size={16} />} mb='md' title='Hay firmantes o alcance sugeridos por el solicitante' data-testid='sgc-sugerencia-pendiente'>
           <Group justify='space-between' gap='xs'>

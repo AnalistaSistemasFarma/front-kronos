@@ -22,21 +22,35 @@ import {
 } from '@mantine/core';
 import { useDebouncedValue, useMediaQuery } from '@mantine/hooks';
 import { IconAlertTriangle, IconSearch, IconX } from '@tabler/icons-react';
-import { OT_LIMITS, OT_TURNOS, OT_TURNO_LABEL, type OtTurno } from '../../lib/bitacora-proceso/constants';
+import { OT_LIMITS, OT_TURNO_HORARIO, OT_TURNO_LABEL, OT_TURNO_NOMBRE, OT_TURNOS, type OtTurno } from '../../lib/bitacora-proceso/constants';
 import type { SapOpSnapshot } from '../../lib/bitacora-proceso/rules';
 import { fmtFecha, otSend, useOtFetch } from './otClient';
 
 /**
- * «Nueva bitácora» (solo supervisor). Hora inicio = la del servidor al abrir. Diseño para CELULAR primero:
- * modal a pantalla completa en el celular, campos de 16 px (sin zoom de iOS),
- * turno con botones grandes, auxiliares con casillas e inspector con opciones (sin combobox: en el
- * celular la lista de un Select se cierra sola, ver gotcha-select-mantine-movil)
- * y la OP de SAP con búsqueda + lista de resultados tocables. La OP es OPCIONAL.
+ * «Nueva bitácora» (solo supervisor, «desde afuera»). Hora inicio = la del servidor al abrir.
+ * Reunión con Farmalógica del 2026-10-14: los OPERARIOS no tienen usuario (A1: se
+ * eligen del maestro de la empresa), el ÁREA sale del catálogo (A5: precargada si
+ * hay una sola) y quien verifica es el JEFE DE PRODUCCIÓN (A3, usuario de SynerLink).
+ * Diseño para CELULAR primero: modal a pantalla completa en el celular, campos de
+ * 16 px (sin zoom de iOS), turno con botones grandes, listas con casillas u opciones
+ * (sin combobox: en el celular la lista de un Select se cierra sola, ver
+ * gotcha-select-mantine-movil) y la OP de SAP con búsqueda + resultados tocables. La OP es OPCIONAL.
  */
 interface Usuario {
   id: string;
   name: string;
   email: string;
+}
+
+interface OperadorMaestro {
+  id_operador: number;
+  nombre: string;
+  documento: string | null;
+}
+
+interface AreaCatalogo {
+  id_area: number;
+  nombre: string;
 }
 
 export default function NuevaOrdenModal({
@@ -52,6 +66,8 @@ export default function NuevaOrdenModal({
 }) {
   const mobile = useMediaQuery('(max-width: 48em)') ?? false;
   const usuarios = useOtFetch<{ usuarios: Usuario[] }>(opened ? `/api/bitacora-proceso/usuarios?company=${idCompany}` : null);
+  const maestro = useOtFetch<{ operadores: OperadorMaestro[] }>(opened ? `/api/bitacora-proceso/operadores?company=${idCompany}` : null);
+  const areasCat = useOtFetch<{ areas: AreaCatalogo[] }>(opened ? `/api/bitacora-proceso/areas?company=${idCompany}` : null);
 
   const [sapOp, setSapOp] = useState<SapOpSnapshot | null>(null);
   const [opQuery, setOpQuery] = useState('');
@@ -64,7 +80,7 @@ export default function NuevaOrdenModal({
   const [itemCode, setItemCode] = useState<string | null>(null);
   const [lote, setLote] = useState('');
   const [turno, setTurno] = useState<OtTurno | ''>('');
-  const [area, setArea] = useState('');
+  const [idArea, setIdArea] = useState<string | null>(null);
   const [operarios, setOperarios] = useState<string[]>([]);
   const [filtroOp, setFiltroOp] = useState('');
   const [inspector, setInspector] = useState<string | null>(null);
@@ -82,13 +98,19 @@ export default function NuevaOrdenModal({
     setItemCode(null);
     setLote('');
     setTurno('');
-    setArea('');
+    setIdArea(null);
     setOperarios([]);
     setFiltroOp('');
     setInspector(null);
     setFiltroInsp('');
     setError(null);
   }, [opened]);
+
+  // A5: si la empresa tiene una sola área activa, viene seleccionada.
+  const areas = areasCat.data?.areas ?? [];
+  useEffect(() => {
+    if (opened && areas.length === 1) setIdArea(String(areas[0].id_area));
+  }, [opened, areas]);
 
   useEffect(() => {
     if (!opened || sapOp || opDebounced.length < 2) {
@@ -127,12 +149,13 @@ export default function NuevaOrdenModal({
   };
 
   const lista = useMemo(() => {
-    const all = usuarios.data?.usuarios ?? [];
+    const all = maestro.data?.operadores ?? [];
     const f = filtroOp.trim().toLowerCase();
-    const filtrados = f ? all.filter((u) => u.name.toLowerCase().includes(f) || u.email.toLowerCase().includes(f)) : all;
+    const filtrados = f ? all.filter((u) => u.nombre.toLowerCase().includes(f) || (u.documento ?? '').toLowerCase().includes(f)) : all;
     // Los ya elegidos siempre arriba, para verlos sin buscar.
-    return [...filtrados.filter((u) => operarios.includes(u.id)), ...filtrados.filter((u) => !operarios.includes(u.id))];
-  }, [usuarios.data, filtroOp, operarios]);
+    const elegido = (u: OperadorMaestro) => operarios.includes(String(u.id_operador));
+    return [...filtrados.filter(elegido), ...filtrados.filter((u) => !elegido(u))];
+  }, [maestro.data, filtroOp, operarios]);
 
   const listaInsp = useMemo(() => {
     const all = usuarios.data?.usuarios ?? [];
@@ -141,7 +164,14 @@ export default function NuevaOrdenModal({
     return [...filtrados.filter((u) => u.id === inspector), ...filtrados.filter((u) => u.id !== inspector)];
   }, [usuarios.data, filtroInsp, inspector]);
 
-  const faltantes = [!producto.trim() && 'producto', !lote.trim() && 'lote', !turno && 'turno', operarios.length === 0 && 'al menos un auxiliar', !inspector && 'inspector'].filter(Boolean);
+  const faltantes = [
+    !producto.trim() && 'producto',
+    !lote.trim() && 'lote',
+    !turno && 'turno',
+    areas.length > 0 && !idArea && 'área',
+    operarios.length === 0 && 'al menos un operario',
+    !inspector && 'jefe de producción',
+  ].filter(Boolean);
 
   const submit = async () => {
     if (faltantes.length) {
@@ -157,8 +187,8 @@ export default function NuevaOrdenModal({
         itemCode,
         lote,
         turno,
-        area,
-        operarios,
+        idArea: idArea ? Number(idArea) : null,
+        operadores: operarios.map(Number),
         inspector,
         sapOp,
       });
@@ -273,54 +303,82 @@ export default function NuevaOrdenModal({
             size='lg'
             value={turno}
             onChange={(v) => setTurno(v as OtTurno)}
-            data={OT_TURNOS.map((t) => ({ value: t, label: OT_TURNO_LABEL[t] }))}
+            data={OT_TURNOS.map((t) => ({
+              value: t,
+              label: (
+                <Box component='span' display='block' lh={1.2} aria-label={OT_TURNO_LABEL[t]}>
+                  <Text span fw={600} display='block'>{OT_TURNO_NOMBRE[t]}</Text>
+                  <Text span size='sm' display='block'>{OT_TURNO_HORARIO[t]}</Text>
+                </Box>
+              ),
+            }))}
             data-testid='ot-turno'
           />
         </Box>
-        <TextInput
-          size='md'
-          label='Área'
-          placeholder='Ej.: Llenado estéril'
-          maxLength={OT_LIMITS.area}
-          value={area}
-          onChange={(e) => setArea(e.currentTarget.value)}
-          data-testid='ot-area'
-        />
+        <Box>
+          <Text fw={500} size='md' mb={4}>
+            Área {areas.length > 0 && <Text span c='red'>*</Text>}
+          </Text>
+          {areasCat.loading ? (
+            <Loader size='sm' />
+          ) : areasCat.error ? (
+            <Alert color='red'>{areasCat.error}</Alert>
+          ) : areas.length === 0 ? (
+            <Text size='sm' c='dimmed'>La empresa no tiene áreas en el catálogo: la bitácora queda sin área.</Text>
+          ) : (
+            <Radio.Group value={idArea} onChange={setIdArea}>
+              <Stack gap={6} data-testid='ot-area'>
+                {areas.map((a) => (
+                  <Radio.Card key={a.id_area} value={String(a.id_area)} radius='md' p='sm' withBorder>
+                    <Group wrap='nowrap' gap='sm' mih={40}>
+                      <Radio.Indicator size='md' />
+                      <Text fw={500}>{a.nombre}</Text>
+                    </Group>
+                  </Radio.Card>
+                ))}
+              </Stack>
+            </Radio.Group>
+          )}
+        </Box>
 
         <Box>
           <Group justify='space-between' mb={4}>
             <Text fw={500} size='md'>
-              Auxiliares <Text span c='red'>*</Text>
+              Operarios <Text span c='red'>*</Text>
             </Text>
             <Badge variant='light' size='lg'>{operarios.length === 1 ? '1 seleccionado' : `${operarios.length} seleccionados`}</Badge>
           </Group>
           <Text size='xs' c='dimmed' mb={6}>
-            Solo los auxiliares y el inspector podrán registrar en esta bitácora. Cada persona entra con su propio usuario.
+            Los operarios no tienen usuario: en la tablet cada uno toca su nombre y la actividad. Se administran en el catálogo (Operarios).
           </Text>
           <TextInput
             size='md'
-            placeholder='Buscar persona'
+            placeholder='Buscar operario'
             leftSection={<IconSearch size={18} />}
             value={filtroOp}
             onChange={(e) => setFiltroOp(e.currentTarget.value)}
             mb={6}
             data-testid='ot-operarios-buscar'
           />
-          {usuarios.loading ? (
+          {maestro.loading ? (
             <Loader size='sm' />
-          ) : usuarios.error ? (
-            <Alert color='red'>{usuarios.error}</Alert>
+          ) : maestro.error ? (
+            <Alert color='red'>{maestro.error}</Alert>
+          ) : (maestro.data?.operadores ?? []).length === 0 ? (
+            <Alert color='yellow' icon={<IconAlertTriangle size={16} />}>
+              No hay operarios activos en el maestro. Agréguelos en el catálogo (Operarios) antes de abrir la bitácora.
+            </Alert>
           ) : (
             <ScrollArea.Autosize mah={mobile ? 320 : 260} type='auto' offsetScrollbars>
               <Checkbox.Group value={operarios} onChange={setOperarios}>
                 <Stack gap={6} data-testid='ot-operarios'>
                   {lista.map((u) => (
-                    <Checkbox.Card key={u.id} value={u.id} radius='md' p='sm' withBorder>
+                    <Checkbox.Card key={u.id_operador} value={String(u.id_operador)} radius='md' p='sm' withBorder>
                       <Group wrap='nowrap' gap='sm' mih={40}>
                         <Checkbox.Indicator size='md' />
                         <div style={{ minWidth: 0 }}>
-                          <Text fw={500} truncate>{u.name}</Text>
-                          <Text size='xs' c='dimmed' truncate>{u.email}</Text>
+                          <Text fw={500} truncate>{u.nombre}</Text>
+                          {u.documento && <Text size='xs' c='dimmed' truncate>Doc. {u.documento}</Text>}
                         </div>
                       </Group>
                     </Checkbox.Card>
@@ -334,7 +392,10 @@ export default function NuevaOrdenModal({
 
         <Box>
           <Text fw={500} size='md' mb={4}>
-            Inspector <Text span c='red'>*</Text>
+            Jefe de producción <Text span c='red'>*</Text>
+          </Text>
+          <Text size='xs' c='dimmed' mb={6}>
+            Verifica la bitácora después del cierre («Verificó») con su contraseña de SynerLink.
           </Text>
           <TextInput
             size='md'
