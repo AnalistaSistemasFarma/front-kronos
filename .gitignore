@@ -19,6 +19,12 @@
 
 # next.js
 /.next/
+# Copias del build y respaldos dentro del checkout (.next-antes-*, .next.bak-*,
+# _respaldos-*): Tailwind v4 escanea todo lo que no esté ignorado aquí y esas
+# copias agotaron el tiempo de PostCSS en el build de prod (2026-10-14).
+/.next*/
+/_respaldos*/
+*.bak
 /out/
 
 # production
