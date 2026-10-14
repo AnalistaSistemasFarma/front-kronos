@@ -8,11 +8,12 @@
  * Imprime en stdout `relevante=true|false` (formato de $GITHUB_OUTPUT) y en
  * stderr el motivo. Responde «true» si cualquiera de las rutas cambiadas:
  *
- *   1. coincide con una ruta FIJA de la lista de abajo (SGC, Órdenes de
- *      Trabajo, Prisma, configuración de pruebas, el propio workflow…), o
+ *   1. coincide con una ruta FIJA de la lista de abajo (SGC, Bitácora de
+ *      Proceso, Prisma —incluye las migraciones del Portal TH que el job
+ *      prueba—, configuración de pruebas, el propio workflow…), o
  *   2. pertenece al ÁRBOL DE IMPORTACIONES de las pruebas de integración:
  *      se parte de tests/integration/** y se siguen los import/require locales
- *      (relativos y con alias «@/»); también desde lib/sgc y lib/ordenes-trabajo. Así, si mañana lib/sgc empieza a usar otra
+ *      (relativos y con alias «@/»); también desde lib/sgc y lib/bitacora-proceso. Así, si mañana lib/sgc empieza a usar otra
  *      utilidad compartida, el filtro la incluye solo, sin mantener una lista.
  *
  * Criterio de seguridad: ante CUALQUIER duda (no hay lista de archivos, la
@@ -33,10 +34,11 @@ const RUTAS_FIJAS = [
   'scripts/sgc/',
   'scripts/evidencia/',
   'tests/integration/',
-  // Órdenes de Trabajo (también tiene pruebas de integración y reversa en el job)
-  'lib/ordenes-trabajo/',
-  'app/api/ordenes-trabajo/',
-  // Base de datos: esquema, migraciones (SGC, OT y Portal TH se prueban en el job) y SQL manual
+  // Bitácora de Proceso (antes Órdenes de Trabajo): sus pruebas de integración
+  // (tests/integration/bitacora-proceso) y su reversa viven en este mismo job.
+  'lib/bitacora-proceso/',
+  'app/api/bitacora-proceso/',
+  // Base de datos: esquema, migraciones (SGC, Bitácora y Portal TH se prueban en el job) y SQL manual
   'prisma/',
   // Utilidades compartidas de las que depende el SGC (también las detecta el árbol de importaciones)
   'lib/prisma.ts',
@@ -59,7 +61,7 @@ const RUTAS_FIJAS = [
 ];
 
 // Raíces del árbol de importaciones (ver punto 2 de la cabecera).
-const RAICES = ['tests/integration', 'lib/sgc', 'lib/ordenes-trabajo'];
+const RAICES = ['tests/integration', 'lib/sgc', 'lib/bitacora-proceso'];
 
 const EXTENSIONES = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts'];
 const PATRON_IMPORT = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)['"]([^'"]+)['"]/g;
@@ -129,4 +131,4 @@ try { arbol = arbolDeIntegracion(); } catch (e) { salir(true, `no se pudo calcul
 const porImportacion = cambiados.filter((f) => arbol.has(f));
 if (porImportacion.length) salir(true, `lo importan las pruebas de integración: ${porImportacion.slice(0, 10).join(', ')}`);
 
-salir(false, `${cambiados.length} archivo(s) cambiado(s), ninguno toca el SGC, Órdenes de Trabajo, Prisma ni lo que importan las pruebas de integración (${arbol.size} rutas en el árbol)`);
+salir(false, `${cambiados.length} archivo(s) cambiado(s), ninguno toca el SGC, la Bitácora de Proceso, Prisma ni lo que importan las pruebas de integración (${arbol.size} rutas en el árbol)`);
