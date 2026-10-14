@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const m = vi.hoisted(() => {
   const names = [
     'getServerSession', 'getOtAccessForUser', 'getActiveUserId', 'listOrdenes', 'crearOrden', 'getOrdenDetalle',
-    'crearRegistro', 'cerrarOrden', 'listActividades', 'crearActividad', 'cambiarActividad', 'listUsuariosEmpresa', 'buscarOpsLiberadas',
+    'crearRegistro', 'cerrarYFirmar', 'verificarYFirmar', 'prepararFirmante', 'listActividades', 'crearActividad', 'cambiarActividad', 'listUsuariosEmpresa', 'buscarOpsLiberadas',
   ] as const;
   return Object.fromEntries(names.map((n) => [n, vi.fn()])) as Record<(typeof names)[number], ReturnType<typeof vi.fn>>;
 });
@@ -16,10 +16,11 @@ vi.mock('../../auth/[...nextauth]/route', () => ({ authOptions: {} }));
 vi.mock('../../../../lib/prisma', () => ({ prisma: { tag: 'prisma' } }));
 vi.mock('../../../../lib/bitacora-proceso/db', () => ({
   getOtAccessForUser: m.getOtAccessForUser, getActiveUserId: m.getActiveUserId, listOrdenes: m.listOrdenes, crearOrden: m.crearOrden,
-  getOrdenDetalle: m.getOrdenDetalle, crearRegistro: m.crearRegistro, cerrarOrden: m.cerrarOrden, listActividades: m.listActividades,
+  getOrdenDetalle: m.getOrdenDetalle, crearRegistro: m.crearRegistro, cerrarYFirmar: m.cerrarYFirmar, verificarYFirmar: m.verificarYFirmar, listActividades: m.listActividades,
   crearActividad: m.crearActividad, cambiarActividad: m.cambiarActividad, listUsuariosEmpresa: m.listUsuariosEmpresa,
 }));
 vi.mock('../../../../lib/bitacora-proceso/sap', () => ({ buscarOpsLiberadas: m.buscarOpsLiberadas }));
+vi.mock('../_lib/firmante', () => ({ prepararFirmante: m.prepararFirmante }));
 
 import { OtError } from '../../../../lib/bitacora-proceso/rules';
 import { SapError } from '../../../../lib/sap/serviceLayer';
@@ -27,6 +28,7 @@ import * as lista from '../route';
 import * as detalle from '../[id]/route';
 import * as registros from '../[id]/registros/route';
 import * as cerrar from '../[id]/cerrar/route';
+import * as verificar from '../[id]/verificar/route';
 import * as actividades from '../actividades/route';
 import * as sapOp from '../sap-op/route';
 import * as usuarios from '../usuarios/route';
@@ -60,7 +62,7 @@ describe('Bitácora de Proceso · rutas', () => {
   });
 
   it('no existen rutas de edición ni de borrado de órdenes ni registros', () => {
-    for (const mod of [lista, detalle, registros, cerrar]) {
+    for (const mod of [lista, detalle, registros, cerrar, verificar]) {
       expect(mod).not.toHaveProperty('PUT');
       expect(mod).not.toHaveProperty('DELETE');
       expect(mod).not.toHaveProperty('PATCH');
@@ -96,7 +98,8 @@ describe('Bitácora de Proceso · rutas', () => {
     ]);
     expect(all.map((r) => r.status)).toEqual(all.map(() => 403));
     expect(m.crearOrden).not.toHaveBeenCalled();
-    expect(m.cerrarOrden).not.toHaveBeenCalled();
+    expect(m.cerrarYFirmar).not.toHaveBeenCalled();
+    expect(m.prepararFirmante).not.toHaveBeenCalled();
     expect(m.buscarOpsLiberadas).not.toHaveBeenCalled();
   });
 
@@ -136,10 +139,34 @@ describe('Bitácora de Proceso · rutas', () => {
     m.getOrdenDetalle.mockResolvedValue({ id: 7 });
     expect((await detalle.GET(get('?company=1'), params('7'))).status).toBe(200);
     expect((await detalle.GET(get('?company=1'), params('0'))).status).toBe(400);
-    m.cerrarOrden.mockResolvedValue(undefined);
-    const res = await cerrar.POST(send('POST', { observacion: 'Fin de lote' }, '?company=1'), params('7'));
+    const firmante = { idUser: 'u1', email: 'op@farmalogica.com', ip: '10.0.0.9', nombre: 'Supervisor', imagen: null };
+    m.prepararFirmante.mockResolvedValue(firmante);
+    m.cerrarYFirmar.mockResolvedValue({ firmadoEn: '2026-10-13T22:00:00.000Z', contentSha256: 'a'.repeat(64) });
+    const body = { observacion: 'Fin de lote', password: 'secreta', acepto: true };
+    const res = await cerrar.POST(send('POST', body, '?company=1'), params('7'));
     expect(res.status).toBe(200);
-    expect(m.cerrarOrden.mock.calls[0][3]).toBe('Fin de lote');
+    expect(m.prepararFirmante.mock.calls[0][1]).toEqual(body);
+    expect(m.cerrarYFirmar.mock.calls[0][3]).toBe('Fin de lote');
+    expect(m.cerrarYFirmar.mock.calls[0][4]).toBe(firmante);
+    // La contraseña nunca vuelve en la respuesta.
+    expect(JSON.stringify(await res.json())).not.toContain('secreta');
+    m.prepararFirmante.mockRejectedValueOnce(new OtError('Contraseña incorrecta: la firma no se registró.', 403));
+    const mala = await cerrar.POST(send('POST', { password: 'x', acepto: true }, '?company=1'), params('7'));
+    expect(mala.status).toBe(403);
+    expect(m.cerrarYFirmar).toHaveBeenCalledTimes(1);
+  });
+
+  it('verificar: cualquier participante con el módulo llega a la ruta; la regla del inspector la aplica la capa de datos', async () => {
+    asUser([operario]);
+    m.prepararFirmante.mockResolvedValue({ idUser: 'u1', email: 'op@farmalogica.com', ip: null, nombre: 'Inspector', imagen: null });
+    m.verificarYFirmar.mockResolvedValue({ firmadoEn: '2026-10-13T22:10:00.000Z', contentSha256: 'b'.repeat(64) });
+    const ok = await verificar.POST(send('POST', { password: 'x', acepto: true }, '?company=1'), params('7'));
+    expect(ok.status).toBe(200);
+    expect(m.verificarYFirmar.mock.calls[0][1]).toBe(7);
+    m.verificarYFirmar.mockRejectedValueOnce(new OtError('Solo el inspector designado en esta bitácora puede verificarla.', 403));
+    expect((await verificar.POST(send('POST', { password: 'x', acepto: true }, '?company=1'), params('7'))).status).toBe(403);
+    expect((await verificar.POST(send('POST', {}, '?company=3'), params('7'))).status).toBe(403);
+    expect((await verificar.POST(send('POST', {}, '?company=1'), params('x'))).status).toBe(400);
   });
 
   it('catálogo: el operario lee solo las activas; el supervisor agrega y cambia', async () => {

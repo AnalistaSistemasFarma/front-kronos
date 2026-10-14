@@ -3394,6 +3394,7 @@ model OtOrdenTrabajo {
   company   Company           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   operarios OtOrdenOperario[]
   registros OtRegistro[]
+  firmas    OtFirma[]
 
   @@unique([id_company, consecutivo], map: "UQ_ot_orden_trabajo_consecutivo")
   @@index([id_company, estado], map: "IX_ot_orden_trabajo_estado")
@@ -3431,5 +3432,33 @@ model OtRegistro {
 
   @@index([id_orden_trabajo, registrado_en], map: "IX_ot_registro_orden")
   @@map("ot_registro")
+  @@schema("dbo")
+}
+
+// Firma electrónica de la bitácora (SUPERVISOR «Cerró» e INSPECTOR «Verificó»),
+// SOLO INSERCIÓN (trigger TR_ot_firma_inmutable). Reutiliza la reautenticación de
+// SynerLink, el consentimiento de GSS Firma y la firma registrada en GSS Firma.
+model OtFirma {
+  id_firma         Int      @id @default(autoincrement())
+  id_orden_trabajo Int
+  // SUPERVISOR | INSPECTOR
+  rol              String   @db.NVarChar(12)
+  significado      String   @db.NVarChar(20)
+  id_user          String   @db.NVarChar(50)
+  signer_email     String   @db.NVarChar(255)
+  signer_name      String?  @db.NVarChar(255)
+  firmado_en       DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  content_sha256   String   @db.Char(64)
+  auth_method      String   @db.NVarChar(40)
+  consent_version  String   @db.NVarChar(60)
+  firma_png        String?  @db.NVarChar(Max)
+  firma_sha256     String?  @db.Char(64)
+  ip               String?  @db.NVarChar(64)
+  user_agent       String?  @db.NVarChar(400)
+
+  orden OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_orden_trabajo, rol], map: "UQ_ot_firma_rol")
+  @@map("ot_firma")
   @@schema("dbo")
 }

@@ -70,6 +70,7 @@ export default defineConfig({
         // Órdenes de Trabajo: reglas puras y rutas (la capa de datos se prueba en integración).
         'lib/bitacora-proceso/constants.ts',
         'lib/bitacora-proceso/rules.ts',
+        'lib/bitacora-proceso/firmas.ts',
         'app/api/bitacora-proceso/**/route.ts',
       ],
       exclude: [

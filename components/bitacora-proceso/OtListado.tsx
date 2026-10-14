@@ -134,6 +134,7 @@ export default function OtListado({ company }: { company: OtCompanyAccess }) {
                 <Table.Th>OP</Table.Th>
                 <Table.Th>Cerrada</Table.Th>
                 <Table.Th>Registros</Table.Th>
+                <Table.Th>Estado</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -146,6 +147,9 @@ export default function OtListado({ company }: { company: OtCompanyAccess }) {
                   <Table.Td>{o.sapOpDocNum ?? '—'}</Table.Td>
                   <Table.Td>{fmtFechaHora(o.cerradaEn)}</Table.Td>
                   <Table.Td>{o.registros}</Table.Td>
+                  <Table.Td>
+                    <Badge color={o.verificada ? 'blue' : 'yellow'} variant='light'>{o.verificada ? 'Verificada' : 'Por verificar'}</Badge>
+                  </Table.Td>
                 </Table.Tr>
               ))}
             </Table.Tbody>
@@ -158,7 +162,7 @@ export default function OtListado({ company }: { company: OtCompanyAccess }) {
               <Card withBorder radius='md' p='md'>
                 <Group justify='space-between' wrap='nowrap'>
                   <Text fw={700}>{codigoOt(o.consecutivo)}</Text>
-                  <Badge color='gray' variant='light'>Cerrada</Badge>
+                  <Badge color={o.verificada ? 'blue' : 'yellow'} variant='light'>{o.verificada ? 'Verificada' : 'Por verificar'}</Badge>
                 </Group>
                 <Text fw={500} lineClamp={2}>{o.producto}</Text>
                 <Text size='sm'>

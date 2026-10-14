@@ -3,7 +3,8 @@ import { PrismaClient } from '../../../app/generated/prisma';
 import { OT_PROCESS_NAME, OT_SUBPROCESS_NAMES, OT_SUBPROCESS_URLS } from '../../../lib/bitacora-proceso/constants';
 import {
   cambiarActividad,
-  cerrarOrden,
+  cerrarYFirmar,
+  verificarYFirmar,
   crearActividad,
   crearOrden,
   crearRegistro,
@@ -50,6 +51,7 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
   let idOtra = 0;
 
   const actor = (idUser: string) => ({ idUser, email: `${idUser}@it`, ip: '10.0.0.1' });
+  const firmante = (idUser: string, imagen: string | null = null) => ({ ...actor(idUser), userAgent: 'vitest', nombre: `Nombre ${idUser}`, imagen });
 
   beforeAll(async () => {
     await prisma.$executeRawUnsafe(`
@@ -150,8 +152,8 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
     expect((await getOrdenDetalle(prisma, o.id, ajeno, ajenoId))?.puedeRegistrar).toBe(false);
 
     // Cierre: solo una vez; después no se admiten registros.
-    await cerrarOrden(prisma, o.id, supervisor, 'Fin del turno', actor(supervisorId));
-    expect(await status(cerrarOrden(prisma, o.id, supervisor, null, actor(supervisorId)))).toBe(409);
+    await cerrarYFirmar(prisma, o.id, supervisor, 'Fin del turno', firmante(supervisorId));
+    expect(await status(cerrarYFirmar(prisma, o.id, supervisor, null, firmante(supervisorId)))).toBe(409);
     expect(await status(crearRegistro(prisma, o.id, operario, { idActividad: idTolva, observacion: null }, actor(operarioId)))).toBe(409);
     const cerrada = await getOrdenDetalle(prisma, o.id, supervisor, supervisorId);
     expect(cerrada).toMatchObject({ estado: 'CERRADA', observacionCierre: 'Fin del turno', puedeRegistrar: false });
@@ -165,7 +167,7 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
     await expect(prisma.$executeRaw`DELETE FROM dbo.ot_registro WHERE id_orden_trabajo = ${o.id}`).rejects.toThrow(/no se pueden editar ni borrar/);
     await expect(prisma.$executeRaw`DELETE FROM dbo.ot_orden_operario WHERE id_orden_trabajo = ${o.id}`).rejects.toThrow(/operarios/);
     await expect(prisma.$executeRaw`DELETE FROM dbo.ot_orden_trabajo WHERE id_orden_trabajo = ${o.id}`).rejects.toThrow(/no se pueden borrar/);
-    await cerrarOrden(prisma, o.id, supervisor, null, actor(supervisorId));
+    await cerrarYFirmar(prisma, o.id, supervisor, null, firmante(supervisorId));
     await expect(prisma.$executeRaw`UPDATE dbo.ot_orden_trabajo SET estado = N'ABIERTA' WHERE id_orden_trabajo = ${o.id}`).rejects.toThrow(/cerrada no se puede modificar/);
     await expect(prisma.$executeRaw`UPDATE dbo.ot_orden_trabajo SET turno = N'OTRO' WHERE id_orden_trabajo = ${o.id}`).rejects.toThrow();
     const det = await getOrdenDetalle(prisma, o.id, supervisor, supervisorId);
@@ -184,12 +186,48 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
     expect(await status(crearOrden(prisma, parseNuevaOrden({ company: FARMA, producto: 'X', lote: 'X', turno: 'NOCHE', operarios: [operarioId], inspector: 'no-existe' }), actor(supervisorId)))).toBe(400);
   });
 
+  it('FIRMAS: el supervisor cierra firmando («Cerró»), el inspector verifica («Verificó»); huellas encadenadas; la base impide editarlas', async () => {
+    const PNG = 'data:image/png;base64,iVBORw0KGgo=';
+    // Al abrir, el inspector no puede ser el supervisor.
+    expect(await status(crearOrden(prisma, parseNuevaOrden({ company: FARMA, producto: 'X', lote: 'X', turno: 'NOCHE', operarios: [operarioId], inspector: supervisorId }), actor(supervisorId)))).toBe(400);
+    const o = await crearOrden(prisma, parseNuevaOrden({ company: FARMA, producto: 'PRUEBA IT FIRMAS', lote: `F-${sufijo}`, turno: 'MANANA', operarios: [operarioId], inspector: inspectorId }), actor(supervisorId));
+    await crearRegistro(prisma, o.id, operario, { idActividad: idTolva, observacion: null }, actor(operarioId));
+    // Antes del cierre no se verifica; el operario no cierra; el inspector no cierra.
+    expect(await status(verificarYFirmar(prisma, o.id, inspector, firmante(inspectorId)))).toBe(409);
+    expect(await status(cerrarYFirmar(prisma, o.id, operario, null, firmante(operarioId)))).toBe(403);
+    const inspectorConGestion: OtCompanyAccess = { ...inspector, canManage: true };
+    expect(await status(cerrarYFirmar(prisma, o.id, inspectorConGestion, null, firmante(inspectorId)))).toBe(403);
+
+    const c = await cerrarYFirmar(prisma, o.id, supervisor, 'Fin', firmante(supervisorId, PNG));
+    expect(c.contentSha256).toMatch(/^[0-9a-f]{64}$/);
+    let det = await getOrdenDetalle(prisma, o.id, inspector, inspectorId);
+    expect(det).toMatchObject({ estado: 'CERRADA', puedeVerificar: true, puedeCerrar: false });
+    expect(det?.firmas).toEqual([expect.objectContaining({ rol: 'SUPERVISOR', significado: 'Cerró', nombre: `Nombre ${supervisorId}`, imagen: PNG, contentSha256: c.contentSha256 })]);
+    expect((await getOrdenDetalle(prisma, o.id, operario, operarioId))?.puedeVerificar).toBe(false);
+
+    // Solo el inspector designado verifica, y una sola vez.
+    expect(await status(verificarYFirmar(prisma, o.id, operario, firmante(operarioId)))).toBe(403);
+    const v = await verificarYFirmar(prisma, o.id, inspector, firmante(inspectorId));
+    expect(v.contentSha256).not.toBe(c.contentSha256);
+    expect(await status(verificarYFirmar(prisma, o.id, inspector, firmante(inspectorId)))).toBe(409);
+    det = await getOrdenDetalle(prisma, o.id, inspector, inspectorId);
+    expect(det?.firmas.map((f) => [f.rol, f.significado])).toEqual([['SUPERVISOR', 'Cerró'], ['INSPECTOR', 'Verificó']]);
+    expect(det?.puedeVerificar).toBe(false);
+    expect((await listOrdenes(prisma, FARMA, supervisorId)).find((x) => x.id === o.id)?.verificada).toBe(true);
+
+    const fila = await prisma.otFirma.findFirst({ where: { id_orden_trabajo: o.id, rol: 'SUPERVISOR' } });
+    expect(fila).toMatchObject({ auth_method: 'contrasena_synerlink', consent_version: 'co-ley527-d2364-v1', ip: '10.0.0.1', user_agent: 'vitest' });
+    expect(fila?.firma_sha256).toMatch(/^[0-9a-f]{64}$/);
+    await expect(prisma.$executeRaw`UPDATE dbo.ot_firma SET signer_name = N'otro' WHERE id_orden_trabajo = ${o.id}`).rejects.toThrow(/firmas de la bitácora no se pueden editar/);
+    await expect(prisma.$executeRaw`DELETE FROM dbo.ot_firma WHERE id_orden_trabajo = ${o.id}`).rejects.toThrow(/firmas de la bitácora no se pueden editar/);
+  });
+
   it('aísla por empresa: una orden de Farmalógica no se ve ni se registra desde OLP', async () => {
     const o = await crearOrden(prisma, parseNuevaOrden({ company: FARMA, producto: 'PRUEBA IT', lote: `E-${sufijo}`, turno: 'TARDE', operarios: [operarioId], inspector: inspectorId }), actor(supervisorId));
     const olp: OtCompanyAccess = { idCompany: OLP, companyName: 'ONELATAMPHARMA', canOperate: true, canManage: true };
     expect(await getOrdenDetalle(prisma, o.id, olp, supervisorId)).toBeNull();
     expect(await status(crearRegistro(prisma, o.id, olp, { idActividad: idTolva, observacion: null }, actor(supervisorId)))).toBe(404);
-    expect(await status(cerrarOrden(prisma, o.id, olp, null, actor(supervisorId)))).toBe(404);
+    expect(await status(cerrarYFirmar(prisma, o.id, olp, null, firmante(supervisorId)))).toBe(404);
     expect((await listOrdenes(prisma, OLP, supervisorId)).some((x) => x.id === o.id)).toBe(false);
     // Una actividad de otra empresa no sirve en una orden de Farmalógica.
     const actOlp = await crearActividad(prisma, { idCompany: OLP, nombre: `OLP ${sufijo}`, exigeObservacion: false, orden: 1, icono: null }, actor(supervisorId));

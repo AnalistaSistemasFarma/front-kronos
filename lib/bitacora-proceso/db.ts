@@ -1,6 +1,18 @@
 import type { PrismaClient } from '../../app/generated/prisma';
 import { OT_DIAS_CERRADAS, OT_SUBPROCESS_URLS } from './constants';
 import {
+  assertInspectorDistinto,
+  assertPuedeCerrar,
+  assertPuedeVerificar,
+  huellaContenido,
+  OT_FIRMA_AUTH_METHOD,
+  OT_FIRMA_CONSENT_VERSION,
+  OT_FIRMA_SIGNIFICADO,
+  sha256,
+  type ContenidoFirmable,
+  type OtFirmaRol,
+} from './firmas';
+import {
   assertActividadRegistrable,
   assertPuedeRegistrar,
   OtError,
@@ -26,6 +38,7 @@ export interface OtActor {
   idUser: string;
   email: string;
   ip: string | null;
+  userAgent?: string | null;
 }
 
 /** Acceso efectivo por empresa de la persona (solo usuarios activos). */
@@ -91,6 +104,7 @@ export interface OrdenResumen {
   cerradaEn: string | null;
   registros: number;
   soyOperario: boolean;
+  verificada: boolean;
 }
 
 /**
@@ -122,6 +136,7 @@ export async function listOrdenes(db: OtDb, idCompany: number, idUser: string, n
       cerrada_en: true,
       id_inspector: true,
       operarios: { select: { id_user: true } },
+      firmas: { select: { rol: true } },
       _count: { select: { registros: true } },
     },
   });
@@ -141,6 +156,7 @@ export async function listOrdenes(db: OtDb, idCompany: number, idUser: string, n
     cerradaEn: r.cerrada_en ? r.cerrada_en.toISOString() : null,
     registros: r._count.registros,
     soyOperario: r.id_inspector === idUser || r.operarios.some((o) => o.id_user === idUser),
+    verificada: r.firmas.some((f) => f.rol === 'INSPECTOR'),
   }));
 }
 
@@ -173,6 +189,7 @@ export async function crearOrden(db: OtDb, input: NuevaOrdenInput, actor: OtActo
     throw new OtError('El inspector seleccionado no es un usuario activo de la empresa.', 400);
   }
 
+  assertInspectorDistinto(input.inspector, actor.idUser);
   return db.$transaction(async (tx) => {
     const next = await tx.$queryRaw<Array<{ siguiente: number }>>`
       SELECT ISNULL(MAX(consecutivo), 0) + 1 AS siguiente
@@ -225,8 +242,23 @@ export interface OrdenDetalle {
   operarios: Array<{ id: string; name: string; email: string }>;
   inspector: { id: string; name: string } | null;
   registros: Array<{ id: string; actividad: string; usuario: string; registradoEn: string; observacion: string | null }>;
+  firmas: FirmaVista[];
   puedeRegistrar: boolean;
   puedeGestionar: boolean;
+  /** La persona puede cerrar firmando (Gestión, abierta y no es el inspector). */
+  puedeCerrar: boolean;
+  /** La persona es el inspector y falta su firma de verificación. */
+  puedeVerificar: boolean;
+}
+
+export interface FirmaVista {
+  rol: OtFirmaRol;
+  significado: string;
+  nombre: string;
+  email: string;
+  firmadoEn: string;
+  contentSha256: string;
+  imagen: string | null;
 }
 
 /** Detalle de una orden de la empresa indicada, con su cronología (o null si no es de esa empresa). */
@@ -236,6 +268,7 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
     include: {
       operarios: { select: { id_user: true } },
       registros: { orderBy: [{ registrado_en: 'asc' }, { id_registro: 'asc' }] },
+      firmas: { orderBy: { id_firma: 'asc' } },
     },
   });
   if (!o) return null;
@@ -271,8 +304,23 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
       registradoEn: r.registrado_en.toISOString(),
       observacion: r.observacion,
     })),
+    firmas: o.firmas.map((f) => ({
+      rol: f.rol as OtFirmaRol,
+      significado: f.significado,
+      nombre: f.signer_name ?? f.signer_email,
+      email: f.signer_email,
+      firmadoEn: f.firmado_en.toISOString(),
+      contentSha256: f.content_sha256,
+      imagen: f.firma_png,
+    })),
     puedeRegistrar: o.estado === 'ABIERTA' && (access.canManage || operarioIds.includes(idUser) || o.id_inspector === idUser),
     puedeGestionar: access.canManage,
+    puedeCerrar: o.estado === 'ABIERTA' && access.canManage && o.id_inspector !== idUser,
+    puedeVerificar:
+      o.estado === 'CERRADA' &&
+      o.id_inspector === idUser &&
+      o.firmas.some((f) => f.rol === 'SUPERVISOR' && f.id_user !== idUser) &&
+      !o.firmas.some((f) => f.rol === 'INSPECTOR'),
   };
 }
 
@@ -321,30 +369,130 @@ export async function crearRegistro(
   });
 }
 
+/** Datos de la persona que firma (nombre de la base e imagen de su firma registrada en GSS Firma). */
+export interface FirmaActor extends OtActor {
+  nombre: string | null;
+  imagen: string | null;
+}
+
+type Tx = Parameters<Parameters<OtDb['$transaction']>[0]>[0];
+
+/** Contenido firmable leído DENTRO de la transacción (con la fila de la bitácora ya bloqueada). */
+async function contenidoDe(tx: Tx, idOrden: number, idCompany: number) {
+  const o = await tx.otOrdenTrabajo.findFirst({
+    where: { id_orden_trabajo: idOrden, id_company: idCompany },
+    include: {
+      operarios: { select: { id_user: true } },
+      registros: { orderBy: [{ registrado_en: 'asc' }, { id_registro: 'asc' }] },
+      firmas: { select: { rol: true, id_user: true, content_sha256: true } },
+    },
+  });
+  if (!o) throw new OtError('Bitácora no encontrada.', 404);
+  const contenido: ContenidoFirmable = {
+    idOrden: o.id_orden_trabajo,
+    idCompany: o.id_company,
+    consecutivo: o.consecutivo,
+    producto: o.producto,
+    itemCode: o.item_code,
+    lote: o.lote,
+    turno: o.turno,
+    area: o.area,
+    sapOpDocNum: o.sap_op_docnum,
+    supervisor: o.abierta_por,
+    inspector: o.id_inspector,
+    abiertaEn: o.abierta_en.toISOString(),
+    auxiliares: o.operarios.map((x) => x.id_user),
+    registros: o.registros.map((r) => ({
+      id: r.id_registro.toString(),
+      actividad: r.actividad_nombre,
+      usuario: r.id_user,
+      registradoEn: r.registrado_en.toISOString(),
+      observacion: r.observacion,
+    })),
+    observacionCierre: o.observacion_cierre,
+  };
+  return { o, contenido };
+}
+
+async function insertarFirma(tx: Tx, idOrden: number, rol: OtFirmaRol, contentSha256: string, actor: FirmaActor) {
+  return tx.otFirma.create({
+    data: {
+      id_orden_trabajo: idOrden,
+      rol,
+      significado: OT_FIRMA_SIGNIFICADO[rol],
+      id_user: actor.idUser,
+      signer_email: actor.email,
+      signer_name: actor.nombre,
+      content_sha256: contentSha256,
+      auth_method: OT_FIRMA_AUTH_METHOD,
+      consent_version: OT_FIRMA_CONSENT_VERSION,
+      firma_png: actor.imagen,
+      firma_sha256: actor.imagen ? sha256(actor.imagen) : null,
+      ip: actor.ip ? actor.ip.slice(0, 64) : null,
+      user_agent: actor.userAgent ? actor.userAgent.slice(0, 400) : null,
+    },
+    select: { id_firma: true, firmado_en: true, content_sha256: true },
+  });
+}
+
 /**
- * Cierra la orden (R8). UPDATE condicional (solo si sigue ABIERTA): si otra
- * persona la cerró antes, responde 409. Se hace con SQL directo porque la tabla
- * tiene un trigger de UPDATE (Prisma usa OUTPUT sin INTO, que SQL Server no
- * admite en ese caso).
+ * CIERRE FIRMADO (R8 + firma «Cerró» del supervisor). La contraseña ya se
+ * verificó en la ruta. En una transacción: bloquea la fila, valida, calcula la
+ * huella del contenido, cierra (UPDATE condicional por SQL: la tabla tiene
+ * trigger de UPDATE) e inserta la firma. Si cualquier paso falla, no se cierra.
  */
-export async function cerrarOrden(
+export async function cerrarYFirmar(
   db: OtDb,
   idOrden: number,
   access: OtCompanyAccess,
   observacion: string | null,
-  actor: OtActor
-): Promise<void> {
-  const existe = await db.otOrdenTrabajo.findFirst({
-    where: { id_orden_trabajo: idOrden, id_company: access.idCompany },
-    select: { estado: true },
+  actor: FirmaActor
+): Promise<{ firmadoEn: string; contentSha256: string }> {
+  return db.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<Array<{ estado: string; id_inspector: string | null }>>`
+      SELECT estado, id_inspector FROM [dbo].[ot_orden_trabajo] WITH (UPDLOCK, ROWLOCK)
+      WHERE id_orden_trabajo = ${idOrden} AND id_company = ${access.idCompany}`;
+    if (locked.length === 0) throw new OtError('Bitácora no encontrada.', 404);
+    assertPuedeCerrar({ estado: locked[0].estado, inspector: locked[0].id_inspector }, actor.idUser, access);
+    const { contenido } = await contenidoDe(tx, idOrden, access.idCompany);
+    const huella = huellaContenido({ ...contenido, observacionCierre: observacion, cerradaPor: actor.idUser });
+    const n = await tx.$executeRaw`
+      UPDATE [dbo].[ot_orden_trabajo]
+      SET estado = N'CERRADA', cerrada_por = ${actor.idUser}, cerrada_en = SYSUTCDATETIME(), observacion_cierre = ${observacion}
+      WHERE id_orden_trabajo = ${idOrden} AND id_company = ${access.idCompany} AND estado = N'ABIERTA'`;
+    if (n === 0) throw new OtError('La bitácora ya está cerrada.', 409);
+    const f = await insertarFirma(tx, idOrden, 'SUPERVISOR', huella, actor);
+    return { firmadoEn: f.firmado_en.toISOString(), contentSha256: f.content_sha256 };
   });
-  if (!existe) throw new OtError('Bitácora no encontrada.', 404);
-  if (existe.estado !== 'ABIERTA') throw new OtError('La bitácora ya está cerrada.', 409);
-  const n = await db.$executeRaw`
-    UPDATE [dbo].[ot_orden_trabajo]
-    SET estado = N'CERRADA', cerrada_por = ${actor.idUser}, cerrada_en = SYSUTCDATETIME(), observacion_cierre = ${observacion}
-    WHERE id_orden_trabajo = ${idOrden} AND id_company = ${access.idCompany} AND estado = N'ABIERTA'`;
-  if (n === 0) throw new OtError('La bitácora ya está cerrada.', 409);
+}
+
+/**
+ * VERIFICACIÓN FIRMADA («Verificó» del inspector designado), después del cierre.
+ * La huella encadena la del supervisor y la hora de cierre.
+ */
+export async function verificarYFirmar(
+  db: OtDb,
+  idOrden: number,
+  access: OtCompanyAccess,
+  actor: FirmaActor
+): Promise<{ firmadoEn: string; contentSha256: string }> {
+  return db.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<Array<{ estado: string }>>`
+      SELECT estado FROM [dbo].[ot_orden_trabajo] WITH (UPDLOCK, ROWLOCK)
+      WHERE id_orden_trabajo = ${idOrden} AND id_company = ${access.idCompany}`;
+    if (locked.length === 0) throw new OtError('Bitácora no encontrada.', 404);
+    const { o, contenido } = await contenidoDe(tx, idOrden, access.idCompany);
+    assertPuedeVerificar({ estado: o.estado, inspector: o.id_inspector }, o.firmas, actor.idUser);
+    const sup = o.firmas.find((f) => f.rol === 'SUPERVISOR');
+    const huella = huellaContenido({
+      ...contenido,
+      cerradaPor: o.cerrada_por,
+      cerradaEn: o.cerrada_en ? o.cerrada_en.toISOString() : null,
+      firmaSupervisorSha256: sup?.content_sha256 ?? null,
+    });
+    const f = await insertarFirma(tx, idOrden, 'INSPECTOR', huella, actor);
+    return { firmadoEn: f.firmado_en.toISOString(), contentSha256: f.content_sha256 };
+  });
 }
 
 // ---------------------------------------------------------------------------
