@@ -111,6 +111,9 @@ export const SGC_AUDIT_ACTIONS = {
   firmaPropiaValidada: 'firma.propia_validada',
   // S16: plantillas de encabezado por tipo documental.
   encabezadoPlantilla: 'encabezado.plantilla',
+  // S17–S18: evaluaciones propias en SynerLink.
+  evaluacionBanco: 'evaluacion.banco',
+  evaluacionIntento: 'evaluacion.intento',
 } as const;
 
 export type SgcAuditAction = (typeof SGC_AUDIT_ACTIONS)[keyof typeof SGC_AUDIT_ACTIONS];

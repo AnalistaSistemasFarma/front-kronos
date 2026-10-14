@@ -2554,6 +2554,9 @@ model SgcTraining {
   task        SgcTask             @relation(fields: [id_task], references: [id_task], onDelete: NoAction, onUpdate: NoAction)
   uploads     SgcTrainingUpload[]
   retrainings SgcRetraining[]
+  // S17 (R30): evaluación propia de SynerLink (banco de preguntas e intentos).
+  questions   SgcTrainingQuestion[]
+  attempts    SgcTrainingAttempt[]
 
   @@index([id_request])
   @@map("training")
@@ -3527,5 +3530,85 @@ model SgcHeaderTemplate {
 
   @@unique([id_company, code])
   @@map("header_template")
+  @@schema("sgc")
+}
+
+/// S17 (R30): PREGUNTA del banco de la evaluación propia de SynerLink (la arma
+/// el creador del documento o Calidad). Se reemplaza mientras nadie ha
+/// presentado la evaluación; con intentos, el banco queda congelado.
+model SgcTrainingQuestion {
+  id_training_question Int      @id @default(autoincrement())
+  id_training          Int
+  sort_order           Int
+  // unica | multiple | vf
+  kind                 String   @db.NVarChar(20)
+  text                 String   @db.NVarChar(1000)
+  points               Decimal  @db.Decimal(9, 2)
+  created_by           String   @db.NVarChar(255)
+  created_at           DateTime @default(now())
+
+  training SgcTraining         @relation(fields: [id_training], references: [id_training], onDelete: NoAction, onUpdate: NoAction)
+  options  SgcTrainingOption[]
+  answers  SgcTrainingAnswer[]
+
+  @@index([id_training])
+  @@map("training_question")
+  @@schema("sgc")
+}
+
+/// S17 (R30): OPCIÓN de una pregunta. «is_correct» nunca viaja al navegador del lector.
+model SgcTrainingOption {
+  id_training_option   Int     @id @default(autoincrement())
+  id_training_question Int
+  sort_order           Int
+  text                 String  @db.NVarChar(500)
+  is_correct           Boolean @default(false)
+
+  question SgcTrainingQuestion @relation(fields: [id_training_question], references: [id_training_question], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_training_question])
+  @@map("training_option")
+  @@schema("sgc")
+}
+
+/// S17 (R30): INTENTO calificado en el servidor (solo inserción, con huella).
+model SgcTrainingAttempt {
+  id_training_attempt Int      @id @default(autoincrement())
+  id_training         Int
+  user_email          String   @db.NVarChar(255)
+  attempt_number      Int
+  score               Decimal  @db.Decimal(9, 2)
+  max_score           Decimal  @db.Decimal(9, 2)
+  percent             Decimal  @db.Decimal(5, 1)
+  passed              Boolean
+  min_score_pct       Decimal  @db.Decimal(5, 2)
+  bank_sha256         String   @db.Char(64)
+  record_sha256       String   @db.Char(64)
+  submitted_at        DateTime
+  ip                  String?  @db.NVarChar(64)
+  user_agent          String?  @db.NVarChar(500)
+
+  training SgcTraining         @relation(fields: [id_training], references: [id_training], onDelete: NoAction, onUpdate: NoAction)
+  answers  SgcTrainingAnswer[]
+
+  @@unique([id_training, user_email, attempt_number])
+  @@map("training_attempt")
+  @@schema("sgc")
+}
+
+/// S17 (R30): RESPUESTA de un intento (solo inserción).
+model SgcTrainingAnswer {
+  id_training_answer   Int     @id @default(autoincrement())
+  id_training_attempt  Int
+  id_training_question Int
+  selected_json        String  @db.NVarChar(400)
+  is_correct           Boolean
+  points               Decimal @db.Decimal(9, 2)
+
+  attempt  SgcTrainingAttempt  @relation(fields: [id_training_attempt], references: [id_training_attempt], onDelete: NoAction, onUpdate: NoAction)
+  question SgcTrainingQuestion @relation(fields: [id_training_question], references: [id_training_question], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_training_attempt])
+  @@map("training_answer")
   @@schema("sgc")
 }

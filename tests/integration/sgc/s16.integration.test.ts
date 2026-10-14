@@ -147,6 +147,18 @@ describe.skipIf(!url)('SGC · S16 · encabezados por tipo y Excel con SQL Server
     expect((await headerTemplateForType(prisma, CO, typePR)).ref).toMatchObject({ code: 'INSTITUCIONAL' });
     await expect(saveCatalogEntry(prisma, CO, 'document-types', { id: fo.id, code: fo.code, name: fo.name, pluralName: fo.pluralName, reviewMonths: 36, alertMonths: 2, draftExtensions: 'pdf', reason: 'Formato no admitido' }, actor(E.cal))).rejects.toThrow(/no admitido/);
     expect(await prisma.sgcConfigChangeLog.count({ where: { id_company: CO, entity: 'document_type', entity_id: String(fo.id), action: 'tipo_documental.encabezado_formatos' } })).toBe(2);
+    // Errores: no existe, ya es la por defecto, inactiva.
+    await expect(setDefaultHeaderTemplate(prisma, CO, 999_999, { reason: 'No existe' }, actor(E.cal))).rejects.toMatchObject({ status: 404 });
+    await expect(setDefaultHeaderTemplate(prisma, CO, def.id, { reason: 'Ya es la por defecto' }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
+    const off = await saveHeaderTemplate(prisma, CO, { code: 'INACTIVA', name: 'Plantilla que se desactiva', config: {}, reason: 'Plantilla de prueba' }, actor(E.cal));
+    await saveHeaderTemplate(prisma, CO, { id: off.id, name: 'Plantilla que se desactiva', config: {}, isActive: false, reason: 'Se desactiva' }, actor(E.cal));
+    await expect(setDefaultHeaderTemplate(prisma, CO, off.id, { reason: 'Inactiva' }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
+    await expect(saveHeaderTemplate(prisma, CO, { id: 999_999, name: 'No existe', reason: 'No existe' }, actor(E.cal))).rejects.toMatchObject({ status: 404 });
+    await expect(saveHeaderTemplate(prisma, CO, { code: 'X1', name: 'ab', reason: 'Nombre corto' }, actor(E.cal))).rejects.toThrow(/nombre/);
+    await expect(buildHeaderTemplatePreview(prisma, CO, { idTemplate: 999_999 })).rejects.toMatchObject({ status: 404 });
+    await expect(buildHeaderTemplatePreview(prisma, 999_999, {})).rejects.toMatchObject({ status: 404 });
+    // Inactiva: el tipo que la tenga usa la por defecto.
+    expect((await headerTemplateForType(prisma, CO, null)).ref).toMatchObject({ code: 'INSTITUCIONAL' });
     // Cambiar la por defecto: queda una sola.
     await setDefaultHeaderTemplate(prisma, CO, created.id, { reason: 'Prueba de la por defecto' }, actor(E.cal));
     expect((await listHeaderTemplates(prisma, CO)).filter((t) => t.isDefault).map((t) => t.code)).toEqual(['FORMATO']);

@@ -35,6 +35,7 @@ export const SGC_SCHEMA_MIGRATIONS = [
   '20261008150000_sgc_s13_firma_propia_registro',
   '20261014100000_sgc_s15_modelo_roles',
   '20261014110000_sgc_s16_encabezados_excel',
+  '20261014120000_sgc_s17_evaluaciones',
 ];
 
 export function sha256Hex(content) {

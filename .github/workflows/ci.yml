@@ -329,6 +329,9 @@ jobs:
           # S16: plantillas de encabezado por tipo, Excel en el borrador y originales de la carga inicial.
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014110000_sgc_s16_encabezados_excel/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014110000_sgc_s16_encabezados_excel/migration.sql
+          # S17–S18: evaluaciones propias en SynerLink (banco, intentos y respuestas de solo inserción).
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014120000_sgc_s17_evaluaciones/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014120000_sgc_s17_evaluaciones/migration.sql
           # Bitácora de Proceso (antes Órdenes de Trabajo; P0): tablas + triggers de integridad, inspector e íconos, y la siembra de Farmalógica (ambas dos veces: idempotentes).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013180000_ordenes_trabajo_p0/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013180000_ordenes_trabajo_p0/migration.sql
@@ -356,7 +359,7 @@ jobs:
         run: |
           set -e
           # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
-          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados"
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones"
           reversa() {
             { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
@@ -367,6 +370,11 @@ jobs:
             npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
           }
           # De la más nueva a la más antigua…
+          # S17: con intentos de la integración, sin la bandera debe negarse.
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-14-sgc-s17-evaluaciones-reversa.sql; then echo "La reversa del S17 debió negarse sin su bandera"; exit 1; fi
+          reversa prisma/manual/2026-10-14-sgc-s17-evaluaciones-reversa.sql
+          echo "IF OBJECT_ID(N'[sgc].[training_attempt]', N'U') IS NOT NULL OR EXISTS (SELECT 1 FROM [sgc].[training] WHERE [evaluation_provider] = N'synerlink') THROW 50000, N'La reversa del S17 no quitó lo suyo.', 1;" > /tmp/s17-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/s17-quitado.sql
           # S16: datos de su empresa de integración (117) y luego el esquema (sin la bandera debe negarse).
           sed 's/DECLARE @IdCompany INT = 3;/DECLARE @IdCompany INT = 117;/' prisma/manual/2026-10-14-sgc-s16-encabezados-excel-olp-reversa.sql > /tmp/reversa-s16-datos.sql
           reversa /tmp/reversa-s16-datos.sql
@@ -402,6 +410,7 @@ jobs:
           migra 20261008150000_sgc_s13_firma_propia_registro
           migra 20261014100000_sgc_s15_modelo_roles
           migra 20261014110000_sgc_s16_encabezados_excel
+          migra 20261014120000_sgc_s17_evaluaciones
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-08-sgc-s8-guia-codificacion-olp.sql
 
       - name: Bitácora de Proceso — reversa (ida y vuelta)

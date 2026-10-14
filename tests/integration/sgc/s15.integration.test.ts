@@ -18,6 +18,7 @@ import { createRequest, decideTask, getRequestDetail, reassignTask, setSigners, 
 import { signTask, type SgcSignatureDeps } from '../../../lib/sgc/db/signatures';
 import { saveTraining, uploadTrainingResults } from '../../../lib/sgc/db/training';
 import { normalizeFlowDefinition, type SgcFlowDefinition } from '../../../lib/sgc/flows/definition';
+import { canApproveFor, substituteApproverCheck } from '../../../lib/sgc/db/roleModel';
 import { SGC_DOCUMENT_FLOW_V7 } from '../../../lib/sgc/flows/documentFlow';
 import type { SgcNotification, SgcNotifier } from '../../../lib/sgc/notifications';
 import { synerlinkPasswordVerifier } from '../../../lib/sgc/signature/reauth';
@@ -267,10 +268,23 @@ describe.skipIf(!url)('SGC · S15 · modelo de roles DOC v7 con SQL Server', () 
     await expect(setSigners(prisma, notifier, r, { stepKey: 'aprobacion', signers: [E.par], mode: 'orden' }, actor(E.sol), await accessOf(E.sol))).rejects.toThrow(/no es líder aprobador vigente/);
     expect(await setSigners(prisma, notifier, r, { stepKey: 'aprobacion', signers: [E.jefe], mode: 'orden' }, actor(E.sol), await accessOf(E.sol))).toEqual({ changed: true });
     expect((await getRequestDetail(prisma, r, await viewer(E.sol))).signerScope).toMatchObject({ leadersEnforced: true, approvers: [E.jefe] });
+    // Al decidir la aprobación y al sustituir a un aprobador se aplica la misma lista (y la del S12 en el modelo anterior).
+    const req = await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: r } });
+    const v7 = { roleModel: 'solicitante_elabora' as const };
+    expect(await canApproveFor(prisma, req, v7, E.jefe, new Date())).toBe(true);
+    expect(await canApproveFor(prisma, req, v7, E.par, new Date())).toBe(false);
+    expect(await canApproveFor(prisma, req, {}, E.par, new Date())).toBe(true);
+    const aprob = { assignment: 'firmantes', signatureMeaning: 'aprobo' } as const;
+    expect(await substituteApproverCheck(prisma, req, v7, aprob, E.par, new Date())).toEqual({ mustBeAuthorizedApprover: true, isAuthorizedApprover: false });
+    expect(await substituteApproverCheck(prisma, req, v7, aprob, E.jefe, new Date())).toEqual({ mustBeAuthorizedApprover: true, isAuthorizedApprover: true });
+    expect(await substituteApproverCheck(prisma, req, {}, aprob, E.par, new Date())).toEqual({ mustBeAuthorizedApprover: true, isAuthorizedApprover: true });
+    expect(await substituteApproverCheck(prisma, req, v7, { assignment: 'firmantes', signatureMeaning: 'reviso' }, E.otro, new Date())).toEqual({ mustBeAuthorizedApprover: false, isAuthorizedApprover: false });
     // La lista del S12 (por proceso) sigue vacía: los líderes no la activan.
     expect((await getApproverPolicy(prisma, CO)).applies).toBe(false);
     expect(await listApproverAuthorizations(prisma, cal)).toMatchObject({ applies: false, departmentEnforced: true, departmentLeaders: 1 });
     await saveCompanySettings(prisma, CO, { approverDepartmentEnforced: false, reason: 'Prueba: vuelve a sin restricción (D16)' }, actor(E.cal1));
+    expect(await canApproveFor(prisma, req, v7, E.par, new Date())).toBe(true);
+    expect(await substituteApproverCheck(prisma, req, v7, aprob, E.par, new Date())).toEqual({ mustBeAuthorizedApprover: false, isAuthorizedApprover: true });
   });
 
   it('[SGC-REQ-159][SGC-REQ-162] de punta a punta: firmas del departamento, el CREADOR prepara y dicta la capacitación y Calidad la cierra (D18); la versión queda vigente', async () => {

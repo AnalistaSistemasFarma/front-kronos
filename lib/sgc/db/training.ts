@@ -8,6 +8,7 @@ import { SGC_EVALUATION_PROVIDER_LABELS, SGC_TRAINING_MODE_LABELS, evaluateTrain
 import { readTrainingRows } from '../training/xlsx';
 import type { SgcActor, SgcDb } from './catalogs';
 import type { SgcUploader } from './documents';
+import { evaluationProgress, type SgcEvaluationProgress } from './evaluation';
 
 /**
  * CAPACITACIÓN del SGC (Sprint 4, paso 5 del flujo documental): registro de
@@ -84,6 +85,14 @@ export async function saveTraining(db: SgcDb, access: SgcCompanyAccess, idReques
   return db.$transaction(async (tx) => {
     const found = await trainingOfRequest(tx, idRequest);
     const prev = found ? await tx.sgcTraining.findUnique({ where: { id_training: found.id_training }, include: { uploads: { select: { id_training_upload: true }, take: 1 } } }) : null;
+    // S17 (R30): con la evaluación en SynerLink el puntaje máximo es la suma del banco de preguntas; con intentos presentados no se cambia de proveedor.
+    if (prev && prev.evaluation_provider !== cfg.evaluationProvider && (await tx.sgcTrainingAttempt.count({ where: { id_training: prev.id_training } }))) {
+      throw new SgcError('Ya hay personas que presentaron la evaluación en SynerLink: no se cambia el proveedor de la evaluación.', 409);
+    }
+    if (cfg.evaluationProvider === 'synerlink') {
+      const bank = prev ? await tx.sgcTrainingQuestion.findMany({ where: { id_training: prev.id_training }, select: { points: true } }) : [];
+      if (bank.length) cfg.maxScore = Math.round(bank.reduce((s, q) => s + Number(q.points), 0) * 100) / 100;
+    }
     if (prev && prev.uploads.length && (Number(prev.max_score) !== cfg.maxScore || Number(prev.min_score_pct) !== cfg.minScorePct || prev.max_attempts !== cfg.maxAttempts)) {
       throw new SgcError('Ya hay resultados cargados: para cambiar el puntaje máximo, la nota mínima o los intentos, cárguelos de nuevo después de guardar (se evalúan con la configuración vigente al cargarlos).', 409);
     }
@@ -149,6 +158,8 @@ export async function uploadTrainingResults(
   if (request.status !== 'abierta' || !task || task.status !== 'abierta' || task.taskDef.role !== 'capacitacion') throw new SgcError('La solicitud no está en el paso de capacitación.', 409);
   const training = await trainingOfRequest(db, idRequest);
   if (!training) throw new SgcError('Registre primero la capacitación (modalidad, video o sesión, evaluación y nota mínima).', 409);
+  // S17 (R30): con la evaluación en SynerLink los resultados se consolidan en la app (no se carga un Excel de Forms).
+  if (training.evaluation_provider === 'synerlink') throw new SgcError('Esta capacitación evalúa en SynerLink: use «Consolidar resultados de la evaluación» (no se carga un Excel).', 409);
   const fileName = file.fileName.replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 200) || 'resultados.xlsx';
   if (!/\.(xlsx|csv)$/i.test(fileName)) throw new SgcError('El archivo de resultados debe ser un Excel (.xlsx) o un CSV exportado de Microsoft Forms o Google Forms.');
   const rows = await readTrainingRows(file.bytes, fileName);
@@ -253,6 +264,8 @@ export interface SgcTrainingView {
   canRetrain: boolean;
   /** S15 (R27): la prepara y la dicta el creador del documento (DOC v7). */
   byCreator: boolean;
+  /** S17–S18 (R30): avance de la evaluación propia de SynerLink (preguntas, intentos por persona). */
+  evaluation: SgcEvaluationProgress | null;
   training: {
     id: number;
     mode: SgcTrainingMode;
@@ -326,6 +339,7 @@ export async function getTrainingView(
     canUpload: open && manager && phase === 'resultados',
     canRetrain: (viewer.isQuality || (creator && open)) && Boolean(up),
     byCreator: task.taskDef.assignment === 'creador',
+    evaluation: training && training.evaluation_provider === 'synerlink' && (viewer.isQuality || creator) ? await evaluationProgress(db, training.id_training, training.max_attempts, scope) : null,
     training: training
       ? {
           id: training.id_training,

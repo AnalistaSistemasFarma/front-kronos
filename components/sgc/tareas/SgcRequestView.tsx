@@ -618,6 +618,9 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           <SgcTrainingCard
             view={data.training}
             users={userOptions}
+            requestId={request.id}
+            onChanged={reload}
+            onConsolidate={() => run(() => sgcSend(`/api/sgc/requests/${request.id}/training/consolidate`, 'POST', {}), 'Resultados de la evaluación consolidados: el Excel de resultados quedó guardado con su huella.')}
             onRetrain={(body) => run(() => sgcSend(`/api/sgc/requests/${request.id}/training/retraining`, 'POST', body), 'Recapacitación registrada.')}
             onSave={(body) => run(() => sgcSend(`/api/sgc/requests/${request.id}/training`, 'POST', body), 'Capacitación registrada.')}
             onUpload={(file) =>

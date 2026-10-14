@@ -46,7 +46,9 @@ export const SGC_TRAINING_DEFAULT_MAX_ATTEMPTS = 2;
 /** Sprint 10: proveedores de evaluación permitidos y sus dominios (enlaces permanentes, no temporales). */
 export const SGC_EVALUATION_PROVIDERS = ['microsoft', 'google'] as const;
 export type SgcEvaluationProvider = (typeof SGC_EVALUATION_PROVIDERS)[number];
-export const SGC_EVALUATION_PROVIDER_LABELS: Record<SgcEvaluationProvider, string> = { microsoft: 'Microsoft Forms', google: 'Google Forms' };
+/** S17 (R30): «synerlink» = evaluación propia de SynerLink (preguntas, intentos y calificación en el servidor). */
+export type SgcEvaluationSource = SgcEvaluationProvider | 'synerlink';
+export const SGC_EVALUATION_PROVIDER_LABELS: Record<SgcEvaluationSource, string> = { microsoft: 'Microsoft Forms', google: 'Google Forms', synerlink: 'Evaluación en SynerLink' };
 export const SGC_EVALUATION_HOSTS: Readonly<Record<SgcEvaluationProvider, readonly string[]>> = {
   microsoft: ['forms.office.com', 'forms.microsoft.com', 'forms.cloud.microsoft'],
   google: ['docs.google.com', 'forms.gle'],
@@ -81,7 +83,7 @@ export interface SgcTrainingConfig {
   minScorePct: number;
   notes: string | null;
   /** Sprint 10: proveedor de la evaluación y máximo de intentos que cuentan. */
-  evaluationProvider: SgcEvaluationProvider;
+  evaluationProvider: SgcEvaluationSource;
   maxAttempts: number;
 }
 
@@ -125,12 +127,15 @@ export function normalizeTrainingConfig(raw: unknown): SgcTrainingConfig {
   }
   if ((mode === 'video' || mode === 'mixta') && !videoUrl) throw new SgcError('Indique el enlace del video de la capacitación.');
   if ((mode === 'sesion' || mode === 'mixta') && !sessionDate) throw new SgcError('Indique la fecha de la sesión de capacitación.');
-  if (!formsUrl) throw new SgcError('Indique el enlace de la evaluación en Microsoft Forms o Google Forms.');
-  const evaluationProvider = evaluationProviderOf(formsUrl);
+  // S17 (R30): con la evaluación propia de SynerLink no hay enlace de Forms; el puntaje máximo sale del banco de preguntas.
+  const own = r.evaluationProvider === 'synerlink';
+  if (own && formsUrl) throw new SgcError('Con la evaluación en SynerLink no se usa un enlace de Forms: quítelo o elija Forms.');
+  if (!own && !formsUrl) throw new SgcError('Indique el enlace de la evaluación en Microsoft Forms o Google Forms.');
+  const evaluationProvider: SgcEvaluationSource | null = own ? 'synerlink' : evaluationProviderOf(formsUrl!);
   if (!evaluationProvider) throw new SgcError('La evaluación debe estar en Microsoft Forms o en Google Forms (enlace permanente del formulario).');
   const attemptsRaw = r.maxAttempts === undefined || r.maxAttempts === null || r.maxAttempts === '' ? SGC_TRAINING_DEFAULT_MAX_ATTEMPTS : Number(r.maxAttempts);
   if (!Number.isInteger(attemptsRaw) || attemptsRaw < 1 || attemptsRaw > 5) throw new SgcError('El máximo de intentos de la evaluación debe estar entre 1 y 5.');
-  const maxScore = Number(r.maxScore);
+  const maxScore = own && (r.maxScore === undefined || r.maxScore === null || r.maxScore === '') ? 1 : Number(r.maxScore);
   if (!Number.isFinite(maxScore) || maxScore <= 0 || maxScore > 1000) throw new SgcError('El puntaje máximo de la evaluación debe estar entre 1 y 1000.');
   const minRaw = r.minScorePct === undefined || r.minScorePct === null || r.minScorePct === '' ? SGC_TRAINING_DEFAULT_MIN_PCT : Number(r.minScorePct);
   if (!Number.isFinite(minRaw) || minRaw < 1 || minRaw > 100) throw new SgcError('La nota mínima debe ser un porcentaje entre 1 y 100.');
