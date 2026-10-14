@@ -109,6 +109,8 @@ export const SGC_AUDIT_ACTIONS = {
   // Sprint 13: firma propia.
   firmaPropiaRegistrada: 'firma.propia_registrada',
   firmaPropiaValidada: 'firma.propia_validada',
+  // S16: plantillas de encabezado por tipo documental.
+  encabezadoPlantilla: 'encabezado.plantilla',
 } as const;
 
 export type SgcAuditAction = (typeof SGC_AUDIT_ACTIONS)[keyof typeof SGC_AUDIT_ACTIONS];

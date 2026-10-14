@@ -1,12 +1,14 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Alert, Badge, Button, Card, Checkbox, Group, Loader, Modal, NumberInput, Stack, Table, Tabs, Text, TextInput, Textarea } from '@mantine/core';
+import { Alert, Badge, Button, Card, Checkbox, Group, Loader, Modal, MultiSelect, NumberInput, Stack, Table, Tabs, Text, TextInput, Textarea } from '@mantine/core';
 import SgcSelect from '../../../../../components/sgc/SgcSelect';
 import { IconAlertTriangle, IconCheck, IconEdit, IconPlus } from '@tabler/icons-react';
 import SgcCargoMembers from '../../../../../components/sgc/SgcCargoMembers';
 import SgcApprovers from '../../../../../components/sgc/SgcApprovers';
 import SgcCompanySettings from '../../../../../components/sgc/SgcCompanySettings';
+import SgcHeaderTemplates from '../../../../../components/sgc/SgcHeaderTemplates';
+import { SGC_DRAFT_EXTENSIONS, SGC_DRAFT_EXTENSION_LABELS } from '../../../../../lib/sgc/headerTemplates';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import { sgcSend, useSgcFetch } from '../../../../../components/sgc/useSgcFetch';
 import { SGC_CHILD_CODING_TOKENS, SGC_CODING_TOKENS, buildChildCode, buildDocumentCode, parseChildTypeCodes, validateCodingGuide } from '../../../../../lib/sgc/coding';
@@ -28,6 +30,8 @@ type Form = Record<string, string | number | boolean | null>;
 
 function Configuracion({ company }: { company: SgcCompanyAccess }) {
   const catalogs = useSgcFetch<SgcCatalogs>(`/api/sgc/catalogs?company=${company.idCompany}&all=1`);
+  // S16 (R31): plantillas de encabezado para elegir la de cada tipo documental.
+  const templates = useSgcFetch<{ templates: { id: number; code: string; name: string; isActive: boolean; isDefault: boolean }[] }>(`/api/sgc/header-templates?company=${company.idCompany}`);
   const [feedback, setFeedback] = useState<{ color: 'green' | 'red'; text: string } | null>(null);
   const [editing, setEditing] = useState<{ entity: Entity; form: Form } | null>(null);
   const [guide, setGuide] = useState<Form | null>(null);
@@ -130,6 +134,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
           <Tabs.Tab value='tipos-documentales'>Tipos documentales</Tabs.Tab>
           <Tabs.Tab value='cargos'>Personas por cargo</Tabs.Tab>
           <Tabs.Tab value='aprobadores'>Aprobadores autorizados</Tabs.Tab>
+          <Tabs.Tab value='encabezados'>Encabezados</Tabs.Tab>
           <Tabs.Tab value='empresa'>Encabezado y divulgación</Tabs.Tab>
         </Tabs.List>
 
@@ -271,7 +276,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
               <Button
                 size='xs'
                 leftSection={<IconPlus size={14} />}
-                onClick={() => setEditing({ entity: 'document-types', form: { code: '', name: '', pluralName: '', requiresTraining: true, reviewMonths: 36, alertMonths: 2, sortOrder: 0, isActive: true, reason: '' } })}
+                onClick={() => setEditing({ entity: 'document-types', form: { code: '', name: '', pluralName: '', requiresTraining: true, reviewMonths: 36, alertMonths: 2, sortOrder: 0, isActive: true, idHeaderTemplate: null, draftExtensions: 'docx', reason: '' } })}
               >
                 Nuevo tipo documental
               </Button>
@@ -285,6 +290,8 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                     <Table.Th>Revisión</Table.Th>
                     <Table.Th>Alerta</Table.Th>
                     <Table.Th>Capacitación</Table.Th>
+                    <Table.Th>Borrador</Table.Th>
+                    <Table.Th>Encabezado</Table.Th>
                     <Table.Th>Estado</Table.Th>
                     <Table.Th />
                   </Table.Tr>
@@ -299,6 +306,8 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                       <Table.Td>{t.reviewMonths} meses</Table.Td>
                       <Table.Td>{t.alertMonths} meses antes</Table.Td>
                       <Table.Td>{t.requiresTraining ? 'Obligatoria' : 'No'}</Table.Td>
+                      <Table.Td>{(t.draftExtensions ?? ['docx']).map((x) => (x === 'xlsx' ? 'Excel' : 'Word')).join(' y ')}</Table.Td>
+                      <Table.Td>{t.idHeaderTemplate ? templates.data?.templates.find((x) => x.id === t.idHeaderTemplate)?.name ?? `#${t.idHeaderTemplate}` : 'Por defecto'}</Table.Td>
                       <Table.Td>{activeBadge(t.isActive)}</Table.Td>
                       <Table.Td>
                         {editButton('document-types', {
@@ -311,6 +320,8 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                           alertMonths: t.alertMonths,
                           sortOrder: t.sortOrder,
                           isActive: t.isActive,
+                          idHeaderTemplate: t.idHeaderTemplate ?? null,
+                          draftExtensions: (t.draftExtensions ?? ['docx']).join(','),
                         })}
                       </Table.Td>
                     </Table.Tr>
@@ -327,6 +338,10 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
 
         <Tabs.Panel value='aprobadores'>
           <SgcApprovers idCompany={company.idCompany} processes={(data?.processes ?? []).filter((p) => p.isActive).map((p) => ({ id: p.id, code: p.code, name: p.name }))} departments={data?.departments ?? []} />
+        </Tabs.Panel>
+
+        <Tabs.Panel value='encabezados'>
+          <SgcHeaderTemplates idCompany={company.idCompany} />
         </Tabs.Panel>
 
         <Tabs.Panel value='empresa'>
@@ -356,6 +371,24 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                   <NumberInput label='Alerta (meses antes)' min={0} max={24} value={Number(editing.form.alertMonths)} onChange={(v) => set('alertMonths', Number(v))} />
                 </Group>
                 <Checkbox label='Capacitación obligatoria' checked={!!editing.form.requiresTraining} onChange={(e) => set('requiresTraining', e.currentTarget.checked)} />
+                {/* S16 (R32, D17): formatos del borrador (Excel sin convertirlo a Word) y (R31, D20) plantilla de encabezado. */}
+                <MultiSelect
+                  label='Formatos del borrador'
+                  description='El borrador de un documento nuevo o de una nueva versión. Excel se compone tal cual (nunca se convierte a Word).'
+                  data={SGC_DRAFT_EXTENSIONS.map((x) => ({ value: x, label: SGC_DRAFT_EXTENSION_LABELS[x] }))}
+                  value={String(editing.form.draftExtensions ?? 'docx').split(',').filter(Boolean)}
+                  onChange={(v) => set('draftExtensions', v.length ? v.join(',') : 'docx')}
+                  data-testid='sgc-tipo-formatos-borrador'
+                />
+                <SgcSelect
+                  label='Plantilla de encabezado'
+                  description='Sin plantilla propia, el tipo usa la plantilla por defecto de la empresa (pestaña «Encabezados»).'
+                  data={[{ value: '', label: 'Por defecto de la empresa' }, ...(templates.data?.templates ?? []).filter((x) => x.isActive).map((x) => ({ value: String(x.id), label: `${x.name} (${x.code})` }))]}
+                  value={editing.form.idHeaderTemplate ? String(editing.form.idHeaderTemplate) : ''}
+                  onChange={(v) => set('idHeaderTemplate', v ? Number(v) : null)}
+                  allowDeselect={false}
+                  data-testid='sgc-tipo-plantilla-encabezado'
+                />
               </>
             )}
             {editing.entity === 'processes' && (

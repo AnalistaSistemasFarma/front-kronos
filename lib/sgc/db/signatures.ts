@@ -371,6 +371,7 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
     const composed = await composeContent(db, deps, {
       idCompany: request.id_company,
       idDocument: request.document?.id_document ?? null,
+      idDocumentType: request.documentType.id_document_type,
       draft: { format: draft.format, bytes, html },
       institutional,
       code,
@@ -390,6 +391,8 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
     const source: { bytes: Uint8Array; ext: string; contentType: string } | null =
       draft.format === 'docx'
         ? { bytes: bytes!, ext: 'docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }
+        : draft.format === 'xlsx'
+          ? { bytes: bytes!, ext: 'xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }
         : draft.format === 'html'
           ? { bytes: new TextEncoder().encode(html!), ext: 'html', contentType: 'text/html; charset=utf-8' }
           : null;
@@ -517,7 +520,7 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
           id_request: idRequest,
           signed_content_sha256: draft.sha256,
           manifest_json: JSON.stringify(manifest),
-          layout_json: JSON.stringify(built.layout),
+          layout_json: JSON.stringify({ ...built.layout, ...(composed.headerTemplate ? { headerTemplate: composed.headerTemplate } : {}) }),
         },
       });
       await tx.sgcRequest.update({

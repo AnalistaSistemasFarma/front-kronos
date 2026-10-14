@@ -1538,6 +1538,8 @@ model SgcCompanyConfig {
   // Sprint 12: aprobadores autorizados y firmantes sustitutos.
   approverAuthorizations SgcApproverAuthorization[]
   signerSubstitutions    SgcSignerSubstitution[]
+  // S16: plantillas de encabezado por tipo documental.
+  headerTemplates        SgcHeaderTemplate[]
 
   @@map("company_config")
   @@schema("sgc")
@@ -1640,8 +1642,13 @@ model SgcDocumentType {
   is_active         Boolean  @default(true)
   created_at        DateTime @default(now())
   updated_at        DateTime @updatedAt
+  // S16 (R31, D20): plantilla de encabezado del tipo (NULL = la por defecto de la empresa).
+  id_header_template Int?
+  // S16 (R32, D17): formatos del borrador del tipo («docx», «docx,xlsx»…; NULL = solo Word).
+  draft_extensions   String? @db.NVarChar(100)
 
-  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  companyConfig  SgcCompanyConfig   @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  headerTemplate SgcHeaderTemplate? @relation(fields: [id_header_template], references: [id_header_template], onDelete: NoAction, onUpdate: NoAction)
   documents     SgcDocument[]
   // Sprint 2
   responsibles  SgcResponsibleMatrix[]
@@ -1737,6 +1744,8 @@ model SgcDocumentVersion {
   // Correcciones 2026-10-03: composición del PDF controlado (encabezado
   // institucional, posición del campo «Fecha de emisión» y firmas ubicadas).
   layout_json           String?   @db.NVarChar(Max)
+  // S16 (R33): huella SHA-256 del ARCHIVO ORIGINAL (Word o Excel) de la carga inicial.
+  source_sha256         String?   @db.Char(64)
 
   document SgcDocument @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
   // Sprint 5: avisos de vencimiento de la versión.
@@ -2966,6 +2975,8 @@ model SgcBulkUploadItem {
   id_document_version Int?
   // cargado | error
   status              String   @db.NVarChar(20)
+  // S16 (R33): formato del archivo cargado (pdf | docx | xlsx); NULL = pdf (antes del S16).
+  source_kind         String?  @db.NVarChar(10)
   warning             String?  @db.NVarChar(1000)
   error               String?  @db.NVarChar(1000)
   created_by          String   @db.NVarChar(255)
@@ -3492,4 +3503,29 @@ model OtFirma {
   @@unique([id_orden_trabajo, rol], map: "UQ_ot_firma_rol")
   @@map("ot_firma")
   @@schema("dbo")
+}
+
+/// S16 (R31, D20): PLANTILLA DE ENCABEZADO por tipo documental (rótulos y fila
+/// inferior del encabezado institucional). Una por defecto por empresa. No se
+/// borra: se desactiva. Cada cambio queda en sgc.config_change_log con motivo.
+model SgcHeaderTemplate {
+  id_header_template Int      @id @default(autoincrement())
+  id_company         Int
+  code               String   @db.NVarChar(30)
+  name               String   @db.NVarChar(150)
+  config_json        String   @db.NVarChar(Max)
+  is_default         Boolean  @default(false)
+  is_active          Boolean  @default(true)
+  version            Int      @default(1)
+  created_by         String   @db.NVarChar(255)
+  created_at         DateTime @default(now())
+  updated_by         String   @db.NVarChar(255)
+  updated_at         DateTime @default(now())
+
+  companyConfig SgcCompanyConfig  @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  documentTypes SgcDocumentType[]
+
+  @@unique([id_company, code])
+  @@map("header_template")
+  @@schema("sgc")
 }

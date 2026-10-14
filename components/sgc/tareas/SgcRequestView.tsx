@@ -302,7 +302,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
             openTask={task ? { key: task.key, round: task.round } : null}
             idTask={mode === 'tarea' ? focus?.id ?? null : null}
             minorHref={
-              permissions.isQuality && !permissions.isElaborator && request.status === 'abierta' && task?.status === 'abierta' && task.signatureMeaning === 'aprobo' && data.currentDraft && data.currentDraft.format !== 'pdf'
+              permissions.isQuality && !permissions.isElaborator && request.status === 'abierta' && task?.status === 'abierta' && task.signatureMeaning === 'aprobo' && data.currentDraft && data.currentDraft.format !== 'pdf' && data.currentDraft.format !== 'xlsx'
                 ? draftEditorHref(request.id, request.idCompany, mode === 'tarea' ? focus?.id : null)
                 : null
             }

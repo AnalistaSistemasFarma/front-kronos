@@ -145,7 +145,7 @@ describe.skipIf(!url)('SGC · S15 · modelo de roles DOC v7 con SQL Server', () 
     const vig = await createInitialDocument(
       prisma,
       upload,
-      { idCompany: CO, idProcess: procGC, idDocumentType: typePR, title: 'Procedimiento vigente de la prueba S15', confidentiality: 'publico', versionNumber: 1, effectiveDate: '2026-10-01', pdf: { bytes: await pdfOf('Vigente S15'), fileName: 'vigente.pdf' } },
+      { idCompany: CO, idProcess: procGC, idDocumentType: typePR, title: 'Procedimiento vigente de la prueba S15', confidentiality: 'publica', versionNumber: 1, effectiveDate: '2026-10-01', pdf: { bytes: await pdfOf('Vigente S15'), fileName: 'vigente.pdf' } },
       actor(E.cal1)
     );
     idVigente = vig.idDocument;

@@ -326,6 +326,9 @@ jobs:
           # S15: modelo de roles del DOC v7 (role_model, líderes por departamento y la acción «rechazar»).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014100000_sgc_s15_modelo_roles/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014100000_sgc_s15_modelo_roles/migration.sql
+          # S16: plantillas de encabezado por tipo, Excel en el borrador y originales de la carga inicial.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014110000_sgc_s16_encabezados_excel/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014110000_sgc_s16_encabezados_excel/migration.sql
           # Bitácora de Proceso (antes Órdenes de Trabajo; P0): tablas + triggers de integridad, inspector e íconos, y la siembra de Farmalógica (ambas dos veces: idempotentes).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013180000_ordenes_trabajo_p0/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013180000_ordenes_trabajo_p0/migration.sql
@@ -353,7 +356,7 @@ jobs:
         run: |
           set -e
           # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
-          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento"
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados"
           reversa() {
             { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
@@ -364,6 +367,13 @@ jobs:
             npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
           }
           # De la más nueva a la más antigua…
+          # S16: datos de su empresa de integración (117) y luego el esquema (sin la bandera debe negarse).
+          sed 's/DECLARE @IdCompany INT = 3;/DECLARE @IdCompany INT = 117;/' prisma/manual/2026-10-14-sgc-s16-encabezados-excel-olp-reversa.sql > /tmp/reversa-s16-datos.sql
+          reversa /tmp/reversa-s16-datos.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-14-sgc-s16-encabezados-excel-reversa.sql; then echo "La reversa del S16 debió negarse sin su bandera"; exit 1; fi
+          reversa prisma/manual/2026-10-14-sgc-s16-encabezados-excel-reversa.sql
+          echo "IF OBJECT_ID(N'[sgc].[header_template]', N'U') IS NOT NULL OR COL_LENGTH(N'sgc.document_type', N'draft_extensions') IS NOT NULL OR COL_LENGTH(N'sgc.document_version', N'source_sha256') IS NULL THROW 50000, N'La reversa del S16 no quitó lo suyo o quitó la huella de los originales.', 1;" > /tmp/s16-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/s16-quitado.sql
           # S15: primero los datos (el DOC v7 de la empresa de su integración, 116) y luego el esquema.
           # Sin las banderas, la reversa del esquema debe NEGARSE (hay solicitudes v7 abiertas y líderes por departamento).
           sed 's/DECLARE @IdCompany INT = 3;/DECLARE @IdCompany INT = 116;/' prisma/manual/2026-10-14-sgc-s15-flujo-doc-v7-reversa.sql > /tmp/reversa-s15-datos.sql
@@ -391,6 +401,7 @@ jobs:
           migra 20261008140000_sgc_s12_aprobadores_sustitutos
           migra 20261008150000_sgc_s13_firma_propia_registro
           migra 20261014100000_sgc_s15_modelo_roles
+          migra 20261014110000_sgc_s16_encabezados_excel
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-08-sgc-s8-guia-codificacion-olp.sql
 
       - name: Bitácora de Proceso — reversa (ida y vuelta)

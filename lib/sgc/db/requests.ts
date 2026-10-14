@@ -48,6 +48,9 @@ import { findDuplicateBySha } from '../draft/view';
 import { checklistFieldsFor, normalizeChecklist } from '../signature/checklist';
 import { SGC_SIGNATURE_NOTICE, SGC_SIGNATURE_STATUS_LABELS, describeSignaturePoint, signaturePointFor, type SgcSignatureStatus } from '../signature/signaturePoint';
 import { isPdf, isWord, sha256Hex } from '../storage';
+import { draftFormatsFor, parseDraftExtensions } from '../headerTemplates';
+import { xlsxToSheet } from '../pdf/viewable';
+import { isXlsx as isXlsxWorkbook } from '../training/xlsx';
 import { currentDraftInTx, recordQualityCheck, recordSignature, type SgcSignatureRequest } from './signatureRecord';
 import { getPoolMembers, getPoolTypeCodes } from './authorizations';
 import type { SgcActor, SgcDb } from './catalogs';
@@ -84,7 +87,7 @@ type Tx = Prisma.TransactionClient;
 const TX_OPTS = { maxWait: 10_000, timeout: 30_000 } as const;
 
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
-const DRAFT_EXT = /\.(docx|doc|pdf)$/i;
+const DRAFT_EXT = /\.(docx|doc|pdf|xlsx)$/i;
 /** Sprint 6: soportes que no se admiten (se ejecutan o se abren como página en el navegador). */
 const BLOCKED_SUPPORT_EXT = /\.(exe|bat|cmd|com|msi|scr|ps1|vbs|vbe|js|jse|wsf|hta|jar|html?|svg|xhtml|lnk|dll)$/i;
 
@@ -1789,7 +1792,8 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
           canChange: isOpen && canAssign && !locked,
         };
       })(),
-      draftFormats: row.companyConfig.header_mandatory ? ['docx', 'doc'] : ['docx', 'doc', 'pdf'],
+      // S16 (R32): los formatos del tipo documental (Word por defecto; Excel si Calidad lo habilitó) y PDF solo sin encabezado obligatorio.
+      draftFormats: draftFormatsFor(row.documentType?.draft_extensions ?? null, row.companyConfig.header_mandatory),
     },
     focusTaskId: focusTaskId ?? null,
     tasks,
@@ -2046,9 +2050,21 @@ export async function uploadAttachment(
     if (lower(row.elaborator_email) !== lower(actor.email)) throw new SgcError('Solo el elaborador carga el borrador del documento.', 403);
     const open = row.tasks.find((t) => t.status === 'abierta' && t.taskDef.assignment === 'elaborador');
     if (!open) throw new SgcError('El borrador se carga durante la elaboración.', 409);
-    if (!DRAFT_EXT.test(fileName)) throw new SgcError('El borrador debe ser Word (.docx, .doc) o PDF.');
+    if (!DRAFT_EXT.test(fileName)) throw new SgcError('El borrador debe ser Word (.docx, .doc), Excel (.xlsx, si el tipo documental lo admite) o PDF.');
+    // S16 (R32, D17): formatos admitidos por el TIPO DOCUMENTAL (por defecto solo Word; p. ej. «Formato»: Word y Excel).
+    const allowed = parseDraftExtensions((await db.sgcDocumentType.findFirst({ where: { id_document_type: row.id_document_type ?? -1 }, select: { draft_extensions: true } }))?.draft_extensions);
+    const isExcel = /\.xlsx$/i.test(fileName);
+    if (isExcel) {
+      if (!allowed.includes('xlsx')) throw new SgcError('Este tipo documental no admite borradores en Excel: súbalo en Word (.docx). Aseguramiento de Calidad lo habilita en Configuración → Tipos documentales.', 415);
+      if (!isXlsxWorkbook(input.bytes)) throw new SgcError('El borrador no es un Excel (.xlsx) válido.');
+      await xlsxToSheet(input.bytes).catch(() => {
+        throw new SgcError('No se pudo leer el Excel: guárdelo de nuevo como libro de Excel (.xlsx) sin contraseña.', 415);
+      });
+    } else if (/\.(docx|doc)$/i.test(fileName) && !allowed.includes('docx')) {
+      throw new SgcError('Este tipo documental recibe el borrador en Excel (.xlsx).', 415);
+    }
     // Sprint 6: el contenido debe ser de verdad un Word o un PDF (firma del archivo, no solo la extensión).
-    if (!(isPdf(input.bytes) || isWord(input.bytes, fileName))) throw new SgcError('El borrador no es un Word o PDF válido.');
+    if (!isExcel && !(isPdf(input.bytes) || isWord(input.bytes, fileName))) throw new SgcError('El borrador no es un Word o PDF válido.');
     // Sprint 8 (Calidad OLP, 2026-10-07; memoria rn-sgc-borrador-solo-word): con el encabezado institucional
     // obligatorio, el borrador de un documento nuevo o de una nueva versión va en Word o en el editor.
     if (isPdf(input.bytes) && (await isHeaderMandatory(db, row.id_company))) {
