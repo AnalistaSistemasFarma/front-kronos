@@ -1498,6 +1498,9 @@ model SgcCompanyConfig {
   // Sprint 13: FIRMA PROPIA (cada persona registra la suya y Calidad la valida).
   // APAGADA por defecto: encenderla requiere el aval de la Dra. Adriana Cárdenas.
   self_signature_enabled     Boolean   @default(false)
+  // Generador de documentos desde plantillas aprobadas por Calidad (2026-10-10).
+  // APAGADO por defecto: lo enciende el SQL de datos de cada entorno.
+  generator_enabled          Boolean   @default(false)
 
   company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
 
@@ -1540,6 +1543,9 @@ model SgcCompanyConfig {
   signerSubstitutions    SgcSignerSubstitution[]
   // S16: plantillas de encabezado por tipo documental.
   headerTemplates        SgcHeaderTemplate[]
+  // Generador de documentos (2026-10-10): plantillas y registros generados.
+  generatorTemplates     SgcGeneratorTemplate[]
+  generatedDocuments     SgcGeneratedDocument[]
 
   @@map("company_config")
   @@schema("sgc")
@@ -1706,6 +1712,9 @@ model SgcDocument {
   bulkUploadItems    SgcBulkUploadItem[]
   // Sprint 11: copias no controladas solicitadas.
   uncontrolledCopies SgcUncontrolledCopyRequest[]
+  // Generador de documentos (2026-10-10): plantilla que parte de este vigente y registros generados.
+  generatorTemplates SgcGeneratorTemplate[]
+  generatedDocuments SgcGeneratedDocument[]
 
   @@unique([id_company, code])
   @@index([id_company, status])
@@ -3610,5 +3619,106 @@ model SgcTrainingAnswer {
 
   @@index([id_training_attempt])
   @@map("training_answer")
+  @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — GENERADOR DE DOCUMENTOS desde plantillas aprobadas por
+// Calidad (2026-10-10; ver lib/sgc/generator.ts). La plantilla parte de un
+// documento VIGENTE (Word o editor) con campos {{CAMPO:Etiqueta}}; cada
+// configuración es una versión que congela contenido y campos y que aprueba
+// SOLO Aseguramiento de Calidad. Lo generado es un REGISTRO inmutable con su
+// propio consecutivo. Nada se borra (triggers).
+// ---------------------------------------------------------------------------
+model SgcGeneratorTemplate {
+  id_template        Int       @id @default(autoincrement())
+  id_company         Int
+  id_document        Int
+  name               String    @db.NVarChar(300)
+  description        String?   @db.NVarChar(1000)
+  // activa | retirada
+  status             String    @default("activa") @db.NVarChar(20)
+  // Versión APROBADA vigente de la configuración (sin relación: la escribe el código al aprobar).
+  current_version_id Int?
+  // Último consecutivo de registro emitido (se incrementa bajo bloqueo).
+  last_sequence      Int       @default(0)
+  created_by         String    @db.NVarChar(255)
+  created_at         DateTime
+  retired_by         String?   @db.NVarChar(255)
+  retired_at         DateTime?
+  retire_reason      String?   @db.NVarChar(1000)
+
+  companyConfig SgcCompanyConfig              @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  document      SgcDocument                   @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+  versions      SgcGeneratorTemplateVersion[]
+  generated     SgcGeneratedDocument[]
+
+  @@unique([id_company, id_document])
+  @@map("generator_template")
+  @@schema("sgc")
+}
+
+model SgcGeneratorTemplateVersion {
+  id_template_version Int       @id @default(autoincrement())
+  id_template         Int
+  version_number      Int
+  // pendiente | aprobada | rechazada | reemplazada
+  status              String    @default("pendiente") @db.NVarChar(20)
+  // Versión del documento de origen cuyo contenido se congeló.
+  id_document_version Int
+  // Contenido congelado (HTML limpio con las marcas) y su huella. INMUTABLE (trigger).
+  body_html           String    @db.NVarChar(Max)
+  body_sha256         String    @db.Char(64)
+  // Campos editables (JSON: clave, etiqueta, tipo, obligatorio, largo, ayuda). INMUTABLE.
+  fields_json         String    @db.NVarChar(Max)
+  change_reason       String    @db.NVarChar(1000)
+  proposed_by         String    @db.NVarChar(255)
+  proposed_at         DateTime
+  decided_by          String?   @db.NVarChar(255)
+  decided_at          DateTime?
+  decision_reason     String?   @db.NVarChar(1000)
+
+  template  SgcGeneratorTemplate   @relation(fields: [id_template], references: [id_template], onDelete: NoAction, onUpdate: NoAction)
+  generated SgcGeneratedDocument[]
+
+  @@unique([id_template, version_number])
+  @@index([id_template, status])
+  @@map("generator_template_version")
+  @@schema("sgc")
+}
+
+model SgcGeneratedDocument {
+  id_generated        Int       @id @default(autoincrement())
+  id_company          Int
+  id_template         Int
+  id_template_version Int
+  id_document         Int
+  id_document_version Int
+  sequence_number     Int
+  code                String    @db.NVarChar(80)
+  // Valores de los campos (JSON). INMUTABLE (trigger).
+  values_json         String    @db.NVarChar(Max)
+  pdf_item_id         String    @db.NVarChar(200)
+  pdf_path            String    @db.NVarChar(600)
+  pdf_sha256          String    @db.Char(64)
+  pdf_size            Int
+  // emitido | anulado
+  status              String    @default("emitido") @db.NVarChar(20)
+  generated_by        String    @db.NVarChar(255)
+  generated_at        DateTime
+  ip                  String?   @db.NVarChar(64)
+  annulled_by         String?   @db.NVarChar(255)
+  annulled_at         DateTime?
+  annul_reason        String?   @db.NVarChar(1000)
+
+  companyConfig   SgcCompanyConfig            @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  template        SgcGeneratorTemplate        @relation(fields: [id_template], references: [id_template], onDelete: NoAction, onUpdate: NoAction)
+  templateVersion SgcGeneratorTemplateVersion @relation(fields: [id_template_version], references: [id_template_version], onDelete: NoAction, onUpdate: NoAction)
+  document        SgcDocument                 @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_company, code])
+  @@unique([id_template, sequence_number])
+  @@index([id_company, generated_by])
+  @@map("generated_document")
   @@schema("sgc")
 }
