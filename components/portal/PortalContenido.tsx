@@ -468,6 +468,12 @@ export default function PortalContenido({
   const activa = useSeccionActiva(idsSecciones);
 
   const irASeccion = (id: string) => {
+    if (id === ID_SECCION_POLITICAS) {
+      // Pedido de Cristian (2026-10-14): el botón del panel abre lo mismo que VISUALIZAR (la ventana con todos los
+      // archivos y su vista previa), en vez de solo desplazar la página hasta la sección.
+      setPoliticasAbierto(true);
+      return;
+    }
     if (id === ID_SECCION_CONTACTOS) {
       setContactosAbierto(true);
       return;
