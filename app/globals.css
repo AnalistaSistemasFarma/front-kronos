@@ -5055,9 +5055,38 @@ body.chat-inmersivo .chat-page-thread--completa {
 }
 
 .portal-th__cal {
+  /* Tokens del calendario: en claro, los mismos colores del portal; en oscuro, los del tema de SynerLink
+     (los que Mantine y applyAppThemeToDocument fijan en :root), para no dejar tarjetas blancas ni campos
+     con texto oscuro sobre fondo oscuro. */
+  --pthc-fondo: #fff;
+  --pthc-hover: var(--pth-azul-50);
+  --pthc-tinta: var(--pth-tinta);
+  --pthc-tinta-2: var(--pth-tinta-2);
+  --pthc-tinta-3: var(--pth-tinta-3);
+  --pthc-linea: var(--pth-linea);
+  --pthc-azul: var(--pth-azul);
+  --pthc-sel-fondo: var(--pth-azul);
+  --pthc-sel-tinta: #fff;
+  --pthc-festivo: #c62828;
+
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* Solo dentro del hub (/process/portal-th): la página abierta /portal siempre es clara. */
+html.dark .portal-th--modulo .portal-th__cal,
+[data-mantine-color-scheme='dark'] .portal-th--modulo .portal-th__cal {
+  --pthc-fondo: var(--app-surface, var(--mantine-color-body));
+  --pthc-hover: var(--app-surface-raised, var(--mantine-color-default-hover));
+  --pthc-tinta: var(--app-text, var(--mantine-color-text));
+  --pthc-tinta-2: var(--app-text, var(--mantine-color-text));
+  --pthc-tinta-3: var(--app-text-muted, var(--mantine-color-dimmed));
+  --pthc-linea: var(--app-border, var(--mantine-color-default-border));
+  --pthc-azul: var(--app-accent, var(--mantine-color-anchor));
+  --pthc-sel-fondo: var(--app-accent, var(--mantine-color-anchor));
+  --pthc-sel-tinta: #0b1220;
+  --pthc-festivo: #ff8a80;
 }
 
 .portal-th__cal-alternar {
@@ -5067,10 +5096,10 @@ body.chat-inmersivo .chat-page-thread--completa {
   gap: 8px;
   width: 100%;
   padding: 10px 14px;
-  border: 1px solid var(--pth-linea);
+  border: 1px solid var(--pthc-linea);
   border-radius: 10px;
-  background-color: #fff;
-  color: var(--pth-azul);
+  background-color: var(--pthc-fondo);
+  color: var(--pthc-azul);
   font-size: 0.78rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -5080,7 +5109,7 @@ body.chat-inmersivo .chat-page-thread--completa {
 }
 
 .portal-th__cal-alternar-fecha {
-  color: var(--pth-tinta-3);
+  color: var(--pthc-tinta-3);
   font-size: 0.72rem;
   font-weight: 500;
   text-transform: none;
@@ -5110,9 +5139,9 @@ body.chat-inmersivo .chat-page-thread--completa {
 
 .portal-th__cal-tarjeta {
   padding: 12px;
-  border: 1px solid var(--pth-linea);
+  border: 1px solid var(--pthc-linea);
   border-radius: 12px;
-  background-color: #fff;
+  background-color: var(--pthc-fondo);
 }
 
 .portal-th__cal-cabecera {
@@ -5124,7 +5153,7 @@ body.chat-inmersivo .chat-page-thread--completa {
 }
 
 .portal-th__cal-titulo {
-  color: var(--pth-azul);
+  color: var(--pthc-azul);
   font-size: 0.9rem;
   font-weight: 700;
   text-transform: capitalize;
@@ -5133,17 +5162,17 @@ body.chat-inmersivo .chat-page-thread--completa {
 .portal-th__cal-flecha {
   width: 30px;
   height: 30px;
-  border: 1px solid var(--pth-linea);
+  border: 1px solid var(--pthc-linea);
   border-radius: 8px;
-  background-color: #fff;
-  color: var(--pth-azul);
+  background-color: var(--pthc-fondo);
+  color: var(--pthc-azul);
   font-size: 1.1rem;
   line-height: 1;
   cursor: pointer;
 }
 
 .portal-th__cal-flecha:hover {
-  border-color: var(--pth-azul);
+  border-color: var(--pthc-azul);
 }
 
 .portal-th__cal-semana,
@@ -5155,7 +5184,7 @@ body.chat-inmersivo .chat-page-thread--completa {
 
 .portal-th__cal-semana span {
   padding: 2px 0 4px;
-  color: var(--pth-tinta-3);
+  color: var(--pthc-tinta-3);
   font-size: 0.7rem;
   font-weight: 700;
   text-align: center;
@@ -5168,33 +5197,33 @@ body.chat-inmersivo .chat-page-thread--completa {
   border: 2px solid transparent;
   border-radius: 8px;
   background-color: transparent;
-  color: var(--pth-tinta);
+  color: var(--pthc-tinta);
   font-size: 0.78rem;
   cursor: pointer;
 }
 
 .portal-th__cal-dia:hover {
-  background-color: var(--pth-azul-50);
+  background-color: var(--pthc-hover);
 }
 
 .portal-th__cal-dia--fuera {
-  color: var(--pth-tinta-3);
+  color: var(--pthc-tinta-3);
   opacity: 0.55;
 }
 
 .portal-th__cal-dia--festivo {
-  color: #c62828;
+  color: var(--pthc-festivo);
   font-weight: 700;
 }
 
 .portal-th__cal-dia--hoy {
-  border-color: var(--pth-azul);
+  border-color: var(--pthc-azul);
 }
 
 .portal-th__cal-dia--sel,
 .portal-th__cal-dia--sel:hover {
-  background-color: var(--pth-azul);
-  color: #fff;
+  background-color: var(--pthc-sel-fondo);
+  color: var(--pthc-sel-tinta);
   opacity: 1;
 }
 
@@ -5213,7 +5242,7 @@ body.chat-inmersivo .chat-page-thread--completa {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background-color: var(--pth-tinta-3);
+  background-color: var(--pthc-tinta-3);
   flex-shrink: 0;
 }
 
@@ -5249,17 +5278,17 @@ body.chat-inmersivo .chat-page-thread--completa {
 
 .portal-th__cal-hoy {
   padding: 4px 12px;
-  border: 1px solid var(--pth-linea);
+  border: 1px solid var(--pthc-linea);
   border-radius: 999px;
-  background-color: #fff;
-  color: var(--pth-azul);
+  background-color: var(--pthc-fondo);
+  color: var(--pthc-azul);
   font-size: 0.72rem;
   font-weight: 700;
   cursor: pointer;
 }
 
 .portal-th__cal-hoy:hover {
-  border-color: var(--pth-azul);
+  border-color: var(--pthc-azul);
 }
 
 .portal-th__cal-leyenda {
@@ -5269,7 +5298,7 @@ body.chat-inmersivo .chat-page-thread--completa {
   margin: 0;
   padding: 0;
   list-style: none;
-  color: var(--pth-tinta-3);
+  color: var(--pthc-tinta-3);
   font-size: 0.68rem;
 }
 
@@ -5281,7 +5310,7 @@ body.chat-inmersivo .chat-page-thread--completa {
 
 .portal-th__cal-dia-titulo {
   margin: 0 0 8px;
-  color: var(--pth-azul);
+  color: var(--pthc-azul);
   font-size: 0.84rem;
   font-weight: 700;
 }
@@ -5341,24 +5370,24 @@ body.chat-inmersivo .chat-page-thread--completa {
 }
 
 .portal-th__cal-evento-texto strong {
-  color: var(--pth-tinta);
+  color: var(--pthc-tinta);
   font-size: 0.82rem;
 }
 
 .portal-th__cal-evento-texto small {
-  color: var(--pth-tinta-3);
+  color: var(--pthc-tinta-3);
   font-size: 0.72rem;
   white-space: pre-line;
 }
 
 .portal-th__cal-vacio {
   margin: 0;
-  color: var(--pth-tinta-3);
+  color: var(--pthc-tinta-3);
   font-size: 0.8rem;
 }
 
 .portal-th__cal-proximo {
-  color: var(--pth-tinta-2);
+  color: var(--pthc-tinta-2);
 }
 
 .portal-th__cal-confirmar {
@@ -5369,17 +5398,22 @@ body.chat-inmersivo .chat-page-thread--completa {
 
 .portal-th__cal-mini {
   padding: 2px 8px;
-  border: 1px solid var(--pth-linea);
+  border: 1px solid var(--pthc-linea);
   border-radius: 6px;
-  background-color: #fff;
-  color: var(--pth-tinta-3);
+  background-color: var(--pthc-fondo);
+  color: var(--pthc-tinta-3);
   font-size: 0.72rem;
   cursor: pointer;
 }
 
 .portal-th__cal-mini:hover {
-  border-color: var(--pth-azul);
-  color: var(--pth-azul);
+  border-color: var(--pthc-azul);
+  color: var(--pthc-azul);
+}
+
+.portal-th__cal-mini:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .portal-th__cal-mini--peligro {
@@ -5398,7 +5432,7 @@ body.chat-inmersivo .chat-page-thread--completa {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  color: var(--pth-tinta-2);
+  color: var(--pthc-tinta-2);
   font-size: 0.74rem;
   font-weight: 700;
 }
@@ -5408,9 +5442,10 @@ body.chat-inmersivo .chat-page-thread--completa {
 .portal-th__cal-form textarea {
   width: 100%;
   padding: 8px 10px;
-  border: 1px solid var(--pth-linea);
+  border: 1px solid var(--pthc-linea);
   border-radius: 8px;
-  color: var(--pth-tinta);
+  background-color: var(--pthc-fondo);
+  color: var(--pthc-tinta);
   font: inherit;
   font-size: 16px;
   font-weight: 400;
@@ -5418,7 +5453,7 @@ body.chat-inmersivo .chat-page-thread--completa {
 
 .portal-th__cal-form input:focus,
 .portal-th__cal-form textarea:focus {
-  outline: 2px solid var(--pth-azul);
+  outline: 2px solid var(--pthc-azul);
   outline-offset: 0;
 }
 
@@ -5430,17 +5465,17 @@ body.chat-inmersivo .chat-page-thread--completa {
 
 .portal-th__cal-boton {
   padding: 8px 14px;
-  border: 1px solid var(--pth-linea);
+  border: 1px solid var(--pthc-linea);
   border-radius: 10px;
-  background-color: #fff;
-  color: var(--pth-azul);
+  background-color: var(--pthc-fondo);
+  color: var(--pthc-azul);
   font-size: 0.78rem;
   font-weight: 700;
   cursor: pointer;
 }
 
 .portal-th__cal-boton:hover {
-  border-color: var(--pth-azul);
+  border-color: var(--pthc-azul);
 }
 
 .portal-th__cal-boton:disabled {
@@ -5449,7 +5484,7 @@ body.chat-inmersivo .chat-page-thread--completa {
 }
 
 .portal-th__cal-boton--primario {
-  border-color: var(--pth-azul);
+  border-color: var(--pthc-azul);
   background-color: var(--pth-azul);
   color: #fff;
 }

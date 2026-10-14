@@ -207,3 +207,58 @@ test.describe('Portal TH · calendario de la ventana principal', () => {
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/57-calendario-celular-desplegado.png`, fullPage: true });
   });
 });
+
+test.describe('Portal TH · calendario · correcciones de la revisión (2026-10-14)', () => {
+  test('al cambiar de mes, el día elegido pasa al mes nuevo (no se queda en el mes anterior)', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await preparar(page, { editor: false });
+    await page.goto('/portal');
+    await page.locator('[data-fecha="2026-10-20"]').click();
+    await page.getByTestId('mes-siguiente').click();
+    await expect(page.getByTestId('mes-titulo')).toHaveText('noviembre 2026');
+    await expect(page.getByTestId('eventos-titulo')).toHaveText('domingo, 1 de noviembre de 2026');
+    await expect(page.locator('[data-fecha="2026-11-01"]')).toHaveAttribute('aria-pressed', 'true');
+    // De vuelta al mes de hoy, el elegido es hoy.
+    await page.getByTestId('mes-anterior').click();
+    await expect(page.getByTestId('eventos-titulo')).toHaveText('viernes, 9 de octubre de 2026');
+  });
+
+  test('una respuesta lenta del mes anterior no pisa los eventos del mes actual', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await preparar(page, { editor: false });
+    // Octubre responde tarde; noviembre, de inmediato.
+    await page.route('**/api/portal/eventos?**', async (r) => {
+      const desde = new URL(r.request().url()).searchParams.get('desde')!;
+      if (desde === '2026-09-28') {
+        await new Promise((ok) => setTimeout(ok, 1500));
+        return r.fulfill({ json: { eventos: [{ id: 50, fecha: '2026-11-03', titulo: 'Evento VIEJO de octubre', descripcion: null, tipo: 'empresa' }], puedeEditar: false } }).catch(() => undefined);
+      }
+      return r.fulfill({ json: { eventos: [{ id: 51, fecha: '2026-11-03', titulo: 'Evento de noviembre', descripcion: null, tipo: 'empresa' }], puedeEditar: false } });
+    });
+    await page.goto('/portal');
+    await page.getByTestId('mes-siguiente').click();
+    await page.locator('[data-fecha="2026-11-03"]').click();
+    await expect(page.getByTestId('evento-item')).toContainText('Evento de noviembre');
+    await page.waitForTimeout(2000);
+    await expect(page.getByTestId('evento-item')).toContainText('Evento de noviembre');
+    await expect(page.getByText('Evento VIEJO de octubre')).toHaveCount(0);
+  });
+
+  test('«Quitar» queda deshabilitado mientras se borra (sin doble DELETE)', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    const estado = await preparar(page, { editor: true });
+    await page.route('**/api/portal/eventos/*', async (r) => {
+      estado.quitados.push(Number(r.request().url().split('/').pop()));
+      await new Promise((ok) => setTimeout(ok, 800));
+      estado.eventos = [];
+      return r.fulfill({ json: { ok: true } });
+    });
+    await page.goto('/portal');
+    await page.locator('[data-fecha="2026-10-20"]').click();
+    await page.getByTestId('quitar-evento').click();
+    await page.getByTestId('confirmar-quitar').click();
+    await expect(page.getByTestId('confirmar-quitar')).toBeDisabled();
+    await expect(page.getByTestId('calendario-aviso')).toContainText('Evento quitado');
+    expect(estado.quitados).toEqual([1]);
+  });
+});

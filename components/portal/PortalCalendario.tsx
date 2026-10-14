@@ -54,6 +54,7 @@ export default function PortalCalendario({ puedeEditar }: { puedeEditar: boolean
   const [nuevo, setNuevo] = useState<{ titulo: string; descripcion: string } | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [quitando, setQuitando] = useState<number | null>(null);
+  const [borrando, setBorrando] = useState(false); // DELETE en curso: evita el doble clic en «Quitar»
   const [puedeEditarServidor, setPuedeEditarServidor] = useState(false);
   const avisoRef = useRef<HTMLDivElement | null>(null);
 
@@ -69,22 +70,32 @@ export default function PortalCalendario({ puedeEditar }: { puedeEditar: boolean
   const desde = celdas[0]?.fecha;
   const hasta = celdas[celdas.length - 1]?.fecha;
 
-  const cargarEmpresa = useCallback(async () => {
-    if (!desde || !hasta) return;
-    try {
-      const res = await fetch(`/api/portal/eventos?desde=${desde}&hasta=${hasta}`, { cache: 'no-store' });
-      if (res.status === 401) return setEmpresa([]);
-      const data = await lectura(res);
-      if (!res.ok) throw new Error(String(data.error ?? 'No se pudieron cargar los eventos de la empresa.'));
-      setEmpresa(Array.isArray(data.eventos) ? (data.eventos as EventoDia[]) : []);
-      setPuedeEditarServidor(data.puedeEditar === true);
-    } catch (e) {
-      setAviso({ tipo: 'error', texto: (e as Error).message });
-    }
-  }, [desde, hasta]);
+  // Al cambiar de mes rápido, una respuesta lenta del mes ANTERIOR no debe pisar la del mes actual: cada
+  // carga cancela la anterior (AbortController) y, por si la respuesta ya venía en camino, se ignora.
+  const cargarEmpresa = useCallback(
+    async (señal: AbortSignal) => {
+      if (!desde || !hasta) return;
+      try {
+        const res = await fetch(`/api/portal/eventos?desde=${desde}&hasta=${hasta}`, { cache: 'no-store', signal: señal });
+        if (señal.aborted) return;
+        if (res.status === 401) return setEmpresa([]);
+        const data = await lectura(res);
+        if (señal.aborted) return;
+        if (!res.ok) throw new Error(String(data.error ?? 'No se pudieron cargar los eventos de la empresa.'));
+        setEmpresa(Array.isArray(data.eventos) ? (data.eventos as EventoDia[]) : []);
+        setPuedeEditarServidor(data.puedeEditar === true);
+      } catch (e) {
+        if (señal.aborted || (e as Error).name === 'AbortError') return;
+        setAviso({ tipo: 'error', texto: (e as Error).message });
+      }
+    },
+    [desde, hasta]
+  );
 
   useEffect(() => {
-    void cargarEmpresa();
+    const control = new AbortController();
+    void cargarEmpresa(control.signal);
+    return () => control.abort();
   }, [cargarEmpresa]);
 
   // El aviso va ARRIBA: al aparecer uno, se lleva a la persona hasta él.
@@ -108,6 +119,10 @@ export default function PortalCalendario({ puedeEditar }: { puedeEditar: boolean
   const irAlMes = (delta: -1 | 1) => {
     const v = mesVecino(visible.año, visible.mes, delta);
     setVisible(v);
+    // El día elegido pasa al mes nuevo: hoy si cae en ese mes; si no, el día 1.
+    const prefijo = `${v.año}-${mes2(v.mes)}`;
+    setSeleccionado(hoy.startsWith(prefijo) ? hoy : `${prefijo}-01`);
+    setQuitando(null);
     setAviso(null);
     setNuevo(null);
   };
@@ -149,8 +164,9 @@ export default function PortalCalendario({ puedeEditar }: { puedeEditar: boolean
   };
 
   const quitar = async (e: EventoDia) => {
-    if (e.id === undefined) return;
+    if (e.id === undefined || borrando) return;
     setAviso(null);
+    setBorrando(true);
     try {
       const res = await fetch(`/api/portal/eventos/${e.id}`, { method: 'DELETE' });
       const data = await lectura(res);
@@ -160,6 +176,7 @@ export default function PortalCalendario({ puedeEditar }: { puedeEditar: boolean
     } catch (err) {
       setAviso({ tipo: 'error', texto: (err as Error).message });
     } finally {
+      setBorrando(false);
       setQuitando(null);
     }
   };
@@ -269,10 +286,10 @@ export default function PortalCalendario({ puedeEditar }: { puedeEditar: boolean
                   {e.tipo === 'empresa' && editar && (
                     quitando === e.id ? (
                       <span className='portal-th__cal-confirmar'>
-                        <button type='button' className='portal-th__cal-mini portal-th__cal-mini--peligro' onClick={() => void quitar(e)} data-testid='confirmar-quitar'>
-                          Quitar
+                        <button type='button' className='portal-th__cal-mini portal-th__cal-mini--peligro' onClick={() => void quitar(e)} disabled={borrando} aria-busy={borrando} data-testid='confirmar-quitar'>
+                          {borrando ? 'Quitando…' : 'Quitar'}
                         </button>
-                        <button type='button' className='portal-th__cal-mini' onClick={() => setQuitando(null)}>
+                        <button type='button' className='portal-th__cal-mini' onClick={() => setQuitando(null)} disabled={borrando}>
                           No
                         </button>
                       </span>
