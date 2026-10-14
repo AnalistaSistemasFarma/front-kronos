@@ -1774,7 +1774,7 @@ export default function OrionSignaturePanel({
             setIdentityModalOpen(true);
           }
         }}
-        title='Dibuje su firma'
+        title='Dibuje o suba su firma'
         size='md'
         centered
         zIndex={430}

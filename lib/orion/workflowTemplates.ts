@@ -2,11 +2,15 @@ import 'server-only';
 import sql from 'mssql';
 import type { FirmaAuthTemplate } from './signerAuthorizations';
 import type { OrionSignatureTaskTemplate } from './signerTasks';
+import {
+  ORION_AUTH_TASK_NAME as AUTH_TASK_NAME,
+  ORION_AUTH_TASK_ORDER,
+  ORION_SIGN_TASK_NAME as SIGN_TASK_NAME,
+  ORION_SIGN_TASK_ORDER,
+} from './internalTasks';
 
 type SqlPool = import('mssql').ConnectionPool;
 
-const AUTH_TASK_NAME = 'Autorizar firma digital';
-const SIGN_TASK_NAME = 'Firmar documento';
 const AUTH_TYPE_NAME = 'Firma — Empleado';
 
 async function resolveProcessCategoryId(
@@ -54,7 +58,6 @@ async function lookupAuthTemplate(
     INNER JOIN task_process_category tpc ON tpc.id_process_category = pcr.id_process_category
     INNER JOIN types_authorization tp ON tp.id = tpc.type_authorization
     WHERE pcr.id_request_general = @id_request
-      AND tpc.active = 1
       AND tpc.is_authorization = 1
       AND tpc.type_authorization IS NOT NULL
       AND (
@@ -63,6 +66,7 @@ async function lookupAuthTemplate(
         OR LOWER(tpc.task) LIKE N'%autorizaci%'
       )
     ORDER BY
+      tpc.active DESC,
       CASE WHEN LOWER(tpc.task) LIKE N'%previa%' THEN 1 ELSE 0 END,
       CASE WHEN ISNULL(tpc.is_sequential, 0) = 0 THEN 0 ELSE 1 END,
       CASE
@@ -90,13 +94,12 @@ async function lookupSignTemplate(
     FROM process_category_request_general pcr
     INNER JOIN task_process_category tpc ON tpc.id_process_category = pcr.id_process_category
     WHERE pcr.id_request_general = @id_request
-      AND tpc.active = 1
       AND ISNULL(tpc.is_authorization, 0) = 0
       AND (
         LOWER(tpc.task) LIKE N'%firma%'
         OR LOWER(tpc.task) LIKE N'%firmar%'
       )
-    ORDER BY ISNULL(tpc.display_order, 0), tpc.id
+    ORDER BY tpc.active DESC, ISNULL(tpc.display_order, 0), tpc.id
   `);
   return result.recordset[0] ?? null;
 }
@@ -105,6 +108,8 @@ async function lookupSignTemplate(
  * En solicitudes normales (sin proceso FIRMA) asegura plantillas de:
  * - autorización is_authorization (notificación → Autorizaciones)
  * - tarea de firma (Tareas asignadas)
+ * Se crean inactivas y no se reactivan: el proceso de firma no es un paso del flujo,
+ * así que no se instancian al crear la solicitud ni al avanzar tareas secuenciales.
  */
 export async function ensureOrionSignerWorkflowTemplates(
   pool: SqlPool,
@@ -154,8 +159,7 @@ export async function ensureOrionSignerWorkflowTemplates(
           .input('typeId', sql.Int, typeId)
           .query(`
             UPDATE task_process_category
-            SET active = 1,
-                is_authorization = 1,
+            SET is_authorization = 1,
                 type_authorization = @typeId
             WHERE id = @id
           `);
@@ -165,11 +169,12 @@ export async function ensureOrionSignerWorkflowTemplates(
           .input('task', sql.NVarChar(1000), AUTH_TASK_NAME)
           .input('pc', sql.Int, processId)
           .input('typeId', sql.Int, typeId)
+          .input('ord', sql.Int, ORION_AUTH_TASK_ORDER)
           .query(`
             INSERT INTO task_process_category
               (task, id_process_category, active, cost, is_sequential, display_order, is_authorization, type_authorization)
             OUTPUT INSERTED.id
-            VALUES (@task, @pc, 1, 0, 0, 910, 1, @typeId)
+            VALUES (@task, @pc, 0, 0, 0, @ord, 1, @typeId)
           `);
         authTaskId = Number(inserted.recordset[0]?.id);
         created.auth = true;
@@ -209,19 +214,11 @@ export async function ensureOrionSignerWorkflowTemplates(
 
     let signTaskId = Number(existingSign.recordset[0]?.id);
     if (Number.isInteger(signTaskId) && signTaskId > 0) {
-      await pool
-        .request()
-        .input('id', sql.Int, signTaskId)
-        .query(`
-          UPDATE task_process_category
-          SET active = 1, is_authorization = 0
-          WHERE id = @id
-        `);
       signTemplate = {
         id: signTaskId,
         task: String(existingSign.recordset[0]?.task || SIGN_TASK_NAME),
         id_process_category: Number(existingSign.recordset[0]?.id_process_category) || processId,
-        display_order: existingSign.recordset[0]?.display_order ?? 920,
+        display_order: existingSign.recordset[0]?.display_order ?? ORION_SIGN_TASK_ORDER,
         is_sequential: Boolean(existingSign.recordset[0]?.is_sequential),
       };
     } else {
@@ -229,11 +226,12 @@ export async function ensureOrionSignerWorkflowTemplates(
         .request()
         .input('task', sql.NVarChar(1000), SIGN_TASK_NAME)
         .input('pc', sql.Int, processId)
+        .input('ord', sql.Int, ORION_SIGN_TASK_ORDER)
         .query(`
           INSERT INTO task_process_category
             (task, id_process_category, active, cost, is_sequential, display_order, is_authorization)
           OUTPUT INSERTED.id, INSERTED.task, INSERTED.id_process_category, INSERTED.display_order, INSERTED.is_sequential
-          VALUES (@task, @pc, 1, 0, 0, 920, 0)
+          VALUES (@task, @pc, 0, 0, 0, @ord, 0)
         `);
       const row = inserted.recordset[0];
       signTaskId = Number(row?.id);
@@ -243,7 +241,7 @@ export async function ensureOrionSignerWorkflowTemplates(
           id: signTaskId,
           task: String(row.task || SIGN_TASK_NAME),
           id_process_category: Number(row.id_process_category) || processId,
-          display_order: row.display_order ?? 920,
+          display_order: row.display_order ?? ORION_SIGN_TASK_ORDER,
           is_sequential: Boolean(row.is_sequential),
         };
       }

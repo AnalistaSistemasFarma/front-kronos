@@ -1,7 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Group, Stack, Text } from '@mantine/core';
+import { Button, FileButton, Group, Stack, Text } from '@mantine/core';
+import { IconUpload } from '@tabler/icons-react';
+import { SignatureFileError, signatureFileToCanvas } from './signatureFile';
+
+const UPLOAD_PADDING_PX = 10;
 
 type Props = {
   initialImage?: string | null;
@@ -13,6 +17,8 @@ export default function SignaturePad({ initialImage, onSave, saving = false }: P
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
   const [isEmpty, setIsEmpty] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const getCtx = useCallback(() => canvasRef.current?.getContext('2d', { willReadFrequently: true }), []);
 
@@ -102,6 +108,34 @@ export default function SignaturePad({ initialImage, onSave, saving = false }: P
     const rect = canvas.getBoundingClientRect();
     paintBackground(ctx, rect.width, rect.height);
     setIsEmpty(true);
+    setUploadError(null);
+  };
+
+  const loadFile = async (file: File | null) => {
+    if (!file) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const signature = await signatureFileToCanvas(file);
+      const canvas = canvasRef.current;
+      const ctx = getCtx();
+      if (!canvas || !ctx) return;
+      const rect = canvas.getBoundingClientRect();
+      paintBackground(ctx, rect.width, rect.height);
+      const maxW = Math.max(1, rect.width - UPLOAD_PADDING_PX * 2);
+      const maxH = Math.max(1, rect.height - UPLOAD_PADDING_PX * 2);
+      const scale = Math.min(maxW / signature.width, maxH / signature.height);
+      const w = signature.width * scale;
+      const h = signature.height * scale;
+      ctx.drawImage(signature, (rect.width - w) / 2, (rect.height - h) / 2, w, h);
+      setIsEmpty(false);
+    } catch (err) {
+      setUploadError(
+        err instanceof SignatureFileError ? err.message : 'No se pudo cargar la firma desde el archivo.'
+      );
+    } finally {
+      setUploading(false);
+    }
   };
 
   const save = () => {
@@ -130,13 +164,32 @@ export default function SignaturePad({ initialImage, onSave, saving = false }: P
         />
       </div>
       <Text size='xs' c='dimmed'>
-        Dibuje su firma con el mouse o el dedo. Se usará al firmar documentos en esta solicitud.
+        Dibuje su firma con el mouse o el dedo, o súbala desde un archivo (imagen, foto o PDF). Se
+        usará al firmar documentos en esta solicitud.
       </Text>
+      {uploadError && (
+        <Text size='xs' c='red'>
+          {uploadError}
+        </Text>
+      )}
       <Group>
-        <Button variant='default' onClick={clear} disabled={saving}>
+        <Button variant='default' onClick={clear} disabled={saving || uploading}>
           Limpiar
         </Button>
-        <Button onClick={save} disabled={isEmpty || saving} loading={saving}>
+        <FileButton accept='image/*,application/pdf,.pdf' onChange={(file) => void loadFile(file)}>
+          {(props) => (
+            <Button
+              {...props}
+              variant='light'
+              leftSection={<IconUpload size={14} />}
+              loading={uploading}
+              disabled={saving}
+            >
+              Subir archivo
+            </Button>
+          )}
+        </FileButton>
+        <Button onClick={save} disabled={isEmpty || saving || uploading} loading={saving}>
           Guardar firma
         </Button>
       </Group>
