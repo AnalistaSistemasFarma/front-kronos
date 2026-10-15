@@ -25,7 +25,7 @@ const base: DatosAcuseHtml = {
   empresa: 'ONE LATAM PHARMA',
   creada: '2026-10-15T19:30:00Z',
   responsable: 'María Camila Pérez, Laura Ayala',
-  logoUrl: 'https://synerlink.ejemplo.com/logo.png',
+  logoUrl: 'https://synerlink.ejemplo.com/email/logo-synerlink.png',
 };
 
 describe('Acuse HTML · escape y URL', () => {
@@ -51,18 +51,26 @@ describe('Acuse HTML · escape y URL', () => {
     expect(sin).not.toContain(ACUSE_HTML_BOTON);
   });
 
-  it('el botón y el enlace alterno llevan la URL de la solicitud (con & escapado en el atributo)', () => {
+  it('solo el botón lleva la URL (VML para Outlook + enlace); ninguna URL visible en el texto', () => {
     const html = fragmentoAcuse(base);
     const href = 'href="https://synerlink.ejemplo.com/process/request-general/view-request?id=812&amp;from=general-requests"';
-    expect(html.split(href).length - 1).toBe(3); // VML (Outlook), botón y enlace alterno
+    expect(html.split(href).length - 1).toBe(2); // v:roundrect (Outlook escritorio) y <a> píldora
+    expect(html).toContain('<v:roundrect');
+    expect(html).toContain('border-radius:980px');
     expect(html).toContain(ACUSE_HTML_BOTON);
+    expect(html).not.toContain('Si el botón no funciona');
+    // Fuera de atributos no hay ninguna URL (texto visible).
+    const visible = html.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, ' ');
+    expect(visible).not.toMatch(/https?:\/\//);
   });
 
   it('logo absoluto desde la base del ambiente; sin base, nombre en texto', () => {
-    expect(logoAcuseUrl('https://synerlink.ejemplo.com/')).toBe('https://synerlink.ejemplo.com/logo.png');
+    expect(logoAcuseUrl('https://synerlink.ejemplo.com/')).toBe('https://synerlink.ejemplo.com/email/logo-synerlink.png');
     expect(logoAcuseUrl('')).toBeNull();
     expect(fragmentoAcuse({ ...base, logoUrl: null })).not.toContain('<img');
-    expect(fragmentoAcuse(base)).toContain('src="https://synerlink.ejemplo.com/logo.png"');
+    expect(fragmentoAcuse(base)).toContain('src="https://synerlink.ejemplo.com/email/logo-synerlink.png" width="160" height="33"');
+    // Modo oscuro (Apple Mail / Outlook iOS): versión blanca del logo vigente.
+    expect(fragmentoAcuse(base)).toContain('src="https://synerlink.ejemplo.com/email/logo-synerlink-blanco.png"');
   });
 });
 
@@ -84,14 +92,18 @@ describe('Acuse HTML · contenido', () => {
     expect(datosTarjeta({ ...base, responsable: null, empresa: '' }).map(([k]) => k)).toEqual(['Proceso', 'Fecha de creación']);
   });
 
-  it('email-safe: tablas, estilos en línea, ancho máximo 600 px, sin <style> ni scripts', () => {
+  it('email-safe estilo Apple: tablas, estilos en línea, máx. 560 px, tipografía del sistema, modo oscuro, sin scripts', () => {
     const html = fragmentoAcuse(base);
     expect(html).toContain('role="presentation"');
-    expect(html).toContain('max-width:600px');
-    expect(html).not.toMatch(/<style|<script|class="[^"]*"\s+style=""/);
+    expect(html).toContain('max-width:560px');
+    expect(html).toContain('-apple-system,BlinkMacSystemFont');
+    expect(html).toContain('background-color:#f5f5f7');
+    expect(html).toContain('border-radius:18px');
+    expect(html).toContain('@media (prefers-color-scheme: dark)');
+    expect(html).not.toMatch(/<script/);
     const doc = documentoAcuse(base);
     expect(doc).toMatch(/^<!DOCTYPE html>/);
-    expect(doc).toContain('<meta name="color-scheme" content="light only">');
+    expect(doc).toContain('<meta name="color-scheme" content="light dark">');
   });
 
   it('fecha larga en hora de Colombia', () => {
@@ -101,7 +113,7 @@ describe('Acuse HTML · contenido', () => {
 
   it('las dos variantes (HTML y texto plano) dicen lo mismo', () => {
     const t = textoAcuse({ id: 812, titulo: base.titulo, enlace: base.enlace, firma: base.firma });
-    for (const x of ['#812', base.titulo, 'Quedamos atentos.', 'Laura Ayala']) {
+    for (const x of ['#812', base.titulo, 'Laura Ayala']) {
       expect(t).toContain(x);
       expect(fragmentoAcuse(base)).toContain(x);
     }

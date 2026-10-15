@@ -5,10 +5,13 @@
  * Única fuente del HTML del acuse: la usa el servidor (Graph: createReply(All) → PATCH del cuerpo
  * → send) y la vista previa del navegador (iframe aislado, como el visor del hilo). Módulo PURO.
  *
- * Misma familia visual de los correos de notificación de SynerLink (MBX: logo + título + tabla
- * «etiqueta → valor» + cierre) y de la plantilla GSS del conector de Outlook (templates/default.html):
- * tarjeta de 600 px, solo tablas y estilos en línea (Outlook de escritorio, web y celular), tokens
- * de gss-design (azul #1a3c6e, tinta #0f1a2c/#38445a/#6a7689, línea #d8dde6, fondo #f5f7fa).
+ * Estilo Apple (Nicolás, 2026-10-15 15:10: «hazlo estilo Apple»): fondo #f5f5f7, columna centrada
+ * con mucho aire, logo vigente de SynerLink pequeño y centrado, titular grande, tarjeta blanca
+ * redondeada con filas livianas y un único botón tipo píldora en el azul del logo (#2d2e82).
+ * SIN URLs visibles (Nicolás, 15:05: «no pongas URLs en el correo, solo botones»): el botón es
+ * a prueba de Outlook de escritorio (VML) y no necesita enlace alterno.
+ * Apto para correo: tablas y estilos en línea, máximo 600 px, fluido en celular; modo oscuro con
+ * fondos explícitos + reglas prefers-color-scheme para Apple Mail / Outlook iOS y macOS.
  *
  * TODO valor dinámico pasa por escaparHtml (título, nombres, empresa…) y el enlace solo se acepta
  * http(s): nada que llegue del correo o de la solicitud puede inyectar HTML.
@@ -34,21 +37,10 @@ export interface DatosAcuseHtml {
 export const ACUSE_HTML_TITULO = 'Se creó una solicitud a partir de este correo';
 export const ACUSE_HTML_BOTON = 'Ver solicitud en SynerLink';
 export const ACUSE_ORGANIZACION = 'Group Shared Services Latinoamérica';
+export const LOGO_ACUSE_RUTA = '/email/logo-synerlink.png';
+export const LOGO_ACUSE_ANCHO = 160;
+export const LOGO_ACUSE_ALTO = 33;
 
-/** Tokens de gss-design usados en el correo (en línea: los clientes de correo no leen variables CSS). */
-const C = {
-  azul: '#1a3c6e',
-  azul700: '#15315a',
-  celeste: '#2e8fd0',
-  tinta: '#0f1a2c',
-  tinta2: '#38445a',
-  tinta3: '#6a7689',
-  linea: '#d8dde6',
-  fondoSuave: '#f5f7fa',
-  fondo: '#eef1f5',
-  blanco: '#ffffff',
-} as const;
-const FUENTE = "font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;";
 
 /** Escapa los cinco caracteres con significado en HTML (también dentro de atributos). */
 export function escaparHtml(v: unknown): string {
@@ -72,10 +64,14 @@ export function urlSegura(v: string | null | undefined): string | null {
   }
 }
 
-/** Logo de SynerLink servido por la propia app (public/logo.png, 817×176), absoluto para el correo. */
+/**
+ * Logo vigente de SynerLink para correo: public/email/logo-synerlink.png, rasterizado de
+ * public/Logo_Principal.svg (el de Header y login) a 440×92, porque Outlook de escritorio no pinta
+ * SVG. Se muestra a 160×33 (nítido en pantallas 2×). URL absoluta con la base del ambiente.
+ */
 export function logoAcuseUrl(base: string | null | undefined): string | null {
   const b = String(base ?? '').trim().replace(/\/+$/, '');
-  return b ? urlSegura(`${b}/logo.png`) : null;
+  return b ? urlSegura(`${b}${LOGO_ACUSE_RUTA}`) : null;
 }
 
 /** «15 de octubre de 2026» (hora de Colombia). */
@@ -88,10 +84,39 @@ export function fechaLarga(v: Date | string | null | undefined): string {
 
 const limpio = (v: unknown) => String(v ?? '').replace(/\s+/g, ' ').trim();
 
-function filaDato(etiqueta: string, valor: string): string {
+
+/** Paleta estilo Apple con el azul del logo vigente (Logo_Principal.svg). */
+const C = {
+  fondo: '#f5f5f7',
+  tarjeta: '#ffffff',
+  tinta: '#1d1d1f',
+  gris: '#6e6e73',
+  gris2: '#86868b',
+  separador: '#e8e8ed',
+  marca: '#2d2e82',
+  marca2: '#1d70b7',
+} as const;
+const FUENTE = `font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text','Helvetica Neue',Helvetica,Arial,sans-serif;`;
+
+/** Modo oscuro para los clientes que leen <style> (Apple Mail, Outlook iOS/macOS). El resto usa los fondos explícitos. */
+const ESTILO_OSCURO = `<style>
+@media (prefers-color-scheme: dark) {
+  .sl-fondo { background-color:#000000 !important; }
+  .sl-tarjeta { background-color:#1c1c1e !important; }
+  .sl-tinta { color:#f5f5f7 !important; }
+  .sl-gris { color:#a1a1a6 !important; }
+  .sl-sep { border-color:#38383a !important; }
+  .sl-num { color:#8e9cff !important; }
+  .sl-logo-claro { display:none !important; }
+  .sl-logo-oscuro { display:block !important; max-height:none !important; overflow:visible !important; }
+}
+</style>`;
+
+function filaDato(etiqueta: string, valor: string, primera: boolean): string {
+  const borde = primera ? '' : `border-top:1px solid ${C.separador};`;
   return `<tr>
-<td valign="top" style="padding:6px 12px 6px 0;width:118px;${FUENTE}font-size:13px;line-height:1.4;color:${C.tinta3};">${escaparHtml(etiqueta)}</td>
-<td valign="top" style="padding:6px 0;${FUENTE}font-size:14px;line-height:1.4;color:${C.tinta};font-weight:600;">${escaparHtml(valor)}</td>
+<td class="sl-gris sl-sep" valign="top" style="${borde}padding:14px 12px 14px 0;width:120px;${FUENTE}font-size:14px;line-height:1.4;color:${C.gris};">${escaparHtml(etiqueta)}</td>
+<td class="sl-tinta sl-sep" valign="top" align="right" style="${borde}padding:14px 0;${FUENTE}font-size:14px;line-height:1.4;color:${C.tinta};font-weight:500;text-align:right;">${escaparHtml(valor)}</td>
 </tr>`;
 }
 
@@ -107,20 +132,20 @@ export function datosTarjeta(d: DatosAcuseHtml): Array<[string, string]> {
   return filas.filter(([, v]) => v);
 }
 
+/** Botón píldora a prueba de Outlook de escritorio (VML) y del resto (tabla + enlace). Sin URL visible. */
 function boton(href: string | null): string {
-  const texto = escaparHtml(ACUSE_HTML_BOTON);
   if (!href) return '';
+  const texto = escaparHtml(ACUSE_HTML_BOTON);
   const h = escaparHtml(href);
-  // Botón «a prueba de balas»: VML para Outlook de escritorio (Word), tabla para el resto.
-  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:4px 0 0 0;">
-<tr><td align="left">
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto;">
+<tr><td align="center">
 <!--[if mso]>
-<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${h}" style="height:44px;v-text-anchor:middle;width:260px;" arcsize="14%" stroke="f" fillcolor="${C.azul}">
-<w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI,Arial,sans-serif;font-size:15px;font-weight:bold;">${texto}</center>
+<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${h}" style="height:48px;v-text-anchor:middle;width:280px;" arcsize="50%" stroke="f" fillcolor="${C.marca}">
+<w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI,Arial,sans-serif;font-size:16px;font-weight:bold;">${texto}</center>
 </v:roundrect>
 <![endif]-->
 <!--[if !mso]><!-- -->
-<a href="${h}" target="_blank" rel="noopener" style="display:inline-block;background-color:${C.azul};color:#ffffff;${FUENTE}font-size:15px;font-weight:700;line-height:44px;padding:0 28px;border-radius:6px;text-decoration:none;mso-hide:all;">${texto}</a>
+<a href="${h}" target="_blank" rel="noopener" style="display:inline-block;background-color:${C.marca};color:#ffffff;${FUENTE}font-size:16px;font-weight:600;line-height:48px;padding:0 32px;border-radius:980px;text-decoration:none;letter-spacing:-0.01em;mso-hide:all;">${texto}</a>
 <!--<![endif]-->
 </td></tr>
 </table>`;
@@ -136,62 +161,52 @@ export function fragmentoAcuse(d: DatosAcuseHtml): string {
   const titulo = limpio(d.titulo) || '(sin título)';
   const firma = limpio(d.firma);
   const id = escaparHtml(limpio(d.id));
-  const cabecera = logo
-    ? `<img src="${escaparHtml(logo)}" width="150" height="32" alt="SynerLink" style="display:block;width:150px;max-width:150px;height:auto;border:0;outline:none;text-decoration:none;">`
-    : `<span style="${FUENTE}font-size:22px;font-weight:700;color:${C.azul};">Syner</span><span style="${FUENTE}font-size:22px;font-weight:700;color:${C.celeste};">link</span>`;
+  const img = (src: string, clase: string) =>
+    `<img class="${clase}" src="${escaparHtml(src)}" width="${LOGO_ACUSE_ANCHO}" height="${LOGO_ACUSE_ALTO}" alt="SynerLink" style="display:block;margin:0 auto;width:${LOGO_ACUSE_ANCHO}px;max-width:${LOGO_ACUSE_ANCHO}px;height:auto;border:0;outline:none;text-decoration:none;">`;
+  const logoOscuro = logo && logo.endsWith(LOGO_ACUSE_RUTA) ? logo.replace(/\.png$/, '-blanco.png') : null;
+  const marca = logo
+    ? img(logo, 'sl-logo-claro') +
+      (logoOscuro
+        ? `<!--[if !mso]><!-- --><div class="sl-logo-oscuro" style="display:none;max-height:0;overflow:hidden;mso-hide:all;">${img(logoOscuro, '')}</div><!--<![endif]-->`
+        : '')
+    : `<span style="${FUENTE}font-size:20px;font-weight:600;color:${C.marca};">Syner</span><span style="${FUENTE}font-size:20px;font-weight:600;color:${C.marca2};">Link</span>`;
+  const filas = datosTarjeta(d);
 
   return `<div class="synerlink-acuse" style="margin:0;padding:0;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.fondo}" style="background-color:${C.fondo};border-collapse:collapse;">
-<tr><td align="center" style="padding:20px 12px;">
-<!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.blanco}" style="width:100%;max-width:600px;background-color:${C.blanco};border:1px solid ${C.linea};border-radius:8px;border-collapse:separate;">
-<tr><td bgcolor="${C.blanco}" style="padding:20px 28px 16px 28px;background-color:${C.blanco};border-radius:8px 8px 0 0;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-<td valign="middle" align="left">${cabecera}</td>
-<td valign="middle" align="right" style="${FUENTE}font-size:11px;line-height:1.3;color:${C.tinta3};letter-spacing:0.3px;">${escaparHtml(ACUSE_ORGANIZACION)}</td>
-</tr></table>
+${ESTILO_OSCURO}
+<table class="sl-fondo" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.fondo}" style="background-color:${C.fondo};border-collapse:collapse;">
+<tr><td align="center" style="padding:40px 16px 32px 16px;">
+<!--[if mso]><table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:560px;">
+<tr><td align="center" style="padding:0 0 32px 0;">${marca}</td></tr>
+<tr><td class="sl-tinta" align="center" style="padding:0 8px;${FUENTE}font-size:30px;line-height:1.15;font-weight:700;letter-spacing:-0.02em;color:${C.tinta};">${escaparHtml(ACUSE_HTML_TITULO)}</td></tr>
+<tr><td class="sl-gris" align="center" style="padding:14px 16px 32px 16px;${FUENTE}font-size:17px;line-height:1.5;color:${C.gris};">A partir de este hilo de correo se registró la siguiente solicitud en SynerLink.</td></tr>
+<tr><td>
+<table class="sl-tarjeta" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.tarjeta}" style="background-color:${C.tarjeta};border-radius:18px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border-collapse:separate;">
+<tr><td style="padding:28px 28px 8px 28px;">
+<div class="sl-gris" style="${FUENTE}font-size:13px;line-height:1.4;font-weight:600;letter-spacing:0.02em;color:${C.gris2};">Solicitud</div>
+<div class="sl-num" style="${FUENTE}font-size:40px;line-height:1.1;font-weight:700;letter-spacing:-0.02em;color:${C.marca};">#${id}</div>
+<div class="sl-tinta" style="padding-top:8px;${FUENTE}font-size:19px;line-height:1.35;font-weight:600;letter-spacing:-0.01em;color:${C.tinta};">${escaparHtml(titulo)}</div>
 </td></tr>
-<tr><td bgcolor="${C.azul}" style="background-color:${C.azul};height:4px;line-height:4px;font-size:0;mso-line-height-rule:exactly;">&nbsp;</td></tr>
-<tr><td style="padding:26px 28px 6px 28px;">
-<h1 style="margin:0;${FUENTE}font-size:21px;line-height:1.3;font-weight:700;color:${C.azul};">${escaparHtml(ACUSE_HTML_TITULO)}</h1>
-</td></tr>
-<tr><td style="padding:8px 28px 18px 28px;${FUENTE}font-size:15px;line-height:1.6;color:${C.tinta2};">
-Cordial saludo.<br>Les informamos que, a partir de este hilo de correo, se registró la siguiente solicitud en SynerLink.
-</td></tr>
-<tr><td style="padding:0 28px;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.fondoSuave}" style="background-color:${C.fondoSuave};border:1px solid ${C.linea};border-left:4px solid ${C.azul};border-radius:6px;border-collapse:separate;">
-<tr><td style="padding:16px 18px 6px 18px;">
-<div style="${FUENTE}font-size:11px;line-height:1.4;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:${C.tinta3};">Solicitud</div>
-<div style="${FUENTE}font-size:26px;line-height:1.25;font-weight:700;color:${C.azul};">#${id}</div>
-<div style="padding-top:4px;${FUENTE}font-size:16px;line-height:1.4;font-weight:600;color:${C.tinta};">${escaparHtml(titulo)}</div>
-</td></tr>
-<tr><td style="padding:6px 18px 14px 18px;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid ${C.linea};">
-${datosTarjeta(d).map(([k, v]) => filaDato(k, v)).join('\n')}
-</table>
-</td></tr>
-</table>
-</td></tr>
-<tr><td style="padding:22px 28px 6px 28px;">${boton(href)}</td></tr>
 ${
-  href
-    ? `<tr><td style="padding:4px 28px 0 28px;${FUENTE}font-size:12px;line-height:1.5;color:${C.tinta3};">Si el botón no funciona, copie este enlace en su navegador:<br><a href="${escaparHtml(href)}" target="_blank" rel="noopener" style="color:${C.azul};word-break:break-all;">${escaparHtml(href)}</a></td></tr>`
-    : ''
+  filas.length
+    ? `<tr><td style="padding:12px 28px 14px 28px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+${filas.map(([k, v], i) => filaDato(k, v, i === 0)).join('\n')}
+</table>
+</td></tr>`
+    : '<tr><td style="padding:0 0 20px 0;font-size:0;line-height:0;">&nbsp;</td></tr>'
 }
-<tr><td style="padding:18px 28px 4px 28px;${FUENTE}font-size:14px;line-height:1.6;color:${C.tinta2};">
-El seguimiento se hará por <strong style="color:${C.tinta};">SynerLink</strong>. Si necesitan agregar información, respondan a este mismo correo y quedará como nota de la solicitud.<br><br>Quedamos atentos.
+</table>
 </td></tr>
-<tr><td style="padding:16px 28px 0 28px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="border-top:1px solid ${C.linea};height:1px;line-height:1px;font-size:0;">&nbsp;</td></tr></table></td></tr>
-<tr><td style="padding:14px 28px 22px 28px;${FUENTE}font-size:14px;line-height:1.5;color:${C.tinta2};">
-${firma ? `<strong style="color:${C.tinta};">${escaparHtml(firma)}</strong><br>` : ''}${escaparHtml(ACUSE_ORGANIZACION)}
+<tr><td align="center" style="padding:32px 0 8px 0;">${boton(href)}</td></tr>
+<tr><td class="sl-gris" align="center" style="padding:20px 16px 0 16px;${FUENTE}font-size:15px;line-height:1.55;color:${C.gris};">El seguimiento se hará por SynerLink. Si necesitan agregar información, respondan a este mismo correo y quedará como nota de la solicitud.</td></tr>
+<tr><td style="padding:36px 0 0 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td class="sl-sep" style="border-top:1px solid #d2d2d7;height:1px;line-height:1px;font-size:0;">&nbsp;</td></tr></table></td></tr>
+<tr><td class="sl-gris" align="center" style="padding:18px 16px 0 16px;${FUENTE}font-size:12px;line-height:1.6;color:${C.gris2};">
+${firma ? `<span class="sl-tinta" style="color:${C.gris};font-weight:600;">${escaparHtml(firma)}</span><br>` : ''}${escaparHtml(ACUSE_ORGANIZACION)}<br>Mensaje generado desde SynerLink al registrar la solicitud.
 </td></tr>
 </table>
 <!--[if mso]></td></tr></table><![endif]-->
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;">
-<tr><td align="center" style="padding:12px 16px 0 16px;${FUENTE}font-size:11px;line-height:1.5;color:${C.tinta3};">
-${escaparHtml(ACUSE_ORGANIZACION)} · Farmalógica · Laboratorios Ryan · OneLATAM Pharma · Abamia · Meditrack · Kelab<br>Mensaje generado desde SynerLink al registrar la solicitud.
-</td></tr>
-</table>
 </td></tr>
 </table>
 </div>`;
@@ -200,8 +215,6 @@ ${escaparHtml(ACUSE_ORGANIZACION)} · Farmalógica · Laboratorios Ryan · OneLA
 /**
  * Documento completo (vista previa y referencia visual). En el envío real se usa el fragmento,
  * insertado dentro del cuerpo del borrador de respuesta, para conservar el historial citado.
- * Modo oscuro: se declara «solo claro» y todos los fondos van explícitos (bgcolor + estilo), de
- * modo que los clientes que invierten colores mantengan el contraste de la tarjeta.
  */
 export function documentoAcuse(d: DatosAcuseHtml): string {
   return `<!DOCTYPE html>
@@ -209,8 +222,8 @@ export function documentoAcuse(d: DatosAcuseHtml): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="color-scheme" content="light only">
-<meta name="supported-color-schemes" content="light only">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
 <title>${escaparHtml(ACUSE_HTML_TITULO)}</title>
 </head>
 <body style="margin:0;padding:0;background-color:${C.fondo};-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
