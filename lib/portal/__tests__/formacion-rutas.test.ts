@@ -156,6 +156,63 @@ describe('GET /api/portal/courses/:id/materials/:materialId/file', () => {
     expect(String(graph.mock.calls.at(-1)?.[0])).toContain('/drive/items/ITEM99/content');
   });
 
+  describe('rangos (Cristian, 2026-10-14: videos largos con el índice al final)', () => {
+    const material = { id: 99, file_name: 'induccion.mp4', mime: 'video/mp4', sp_drive_item_id: 'ITEM99', contenido: null, course: { active: true } };
+    const conRango = (rango: string, signal?: AbortSignal) =>
+      new Request('https://portal.test/x', { headers: { Range: rango }, ...(signal ? { signal } : {}) }) as unknown as NextRequest;
+
+    it('sin Range: 200 completo y avisa que acepta rangos (Accept-Ranges)', async () => {
+      db.portalCourseMaterial.findFirst.mockResolvedValue(material);
+      const res = await descargarMaterial(req, p);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('accept-ranges')).toBe('bytes');
+      expect(res.headers.get('content-range')).toBeNull();
+    });
+
+    it('con Range: se lo pasa a SharePoint y responde 206 con Content-Range y el largo del tramo', async () => {
+      db.portalCourseMaterial.findFirst.mockResolvedValue(material);
+      graph.mockImplementation(async (url: string | URL | Request, init?: RequestInit) => {
+        if (String(url).includes('login.microsoftonline.com')) return Response.json({ access_token: 'tok', expires_in: 3600 });
+        expect((init?.headers as Record<string, string>).Range).toBe('bytes=-8');
+        return new Response('MOOVMOOV', { status: 206, headers: { 'content-type': 'video/mp4', 'content-length': '8', 'content-range': 'bytes 822160452-822160459/822160460' } });
+      });
+      const res = await descargarMaterial(conRango('bytes=-8'), p);
+      expect(res.status).toBe(206);
+      expect(res.headers.get('content-range')).toBe('bytes 822160452-822160459/822160460');
+      expect(res.headers.get('content-length')).toBe('8');
+      expect(res.headers.get('accept-ranges')).toBe('bytes');
+      expect(res.headers.get('content-type')).toBe('video/mp4');
+      expect(await res.text()).toBe('MOOVMOOV');
+    });
+
+    it('rango fuera del archivo: 416 con el tamaño total', async () => {
+      db.portalCourseMaterial.findFirst.mockResolvedValue(material);
+      graph.mockImplementation(async (url: string | URL | Request) =>
+        String(url).includes('login.microsoftonline.com')
+          ? Response.json({ access_token: 'tok', expires_in: 3600 })
+          : new Response(null, { status: 416, headers: { 'content-range': 'bytes */14243133' } })
+      );
+      const res = await descargarMaterial(conRango('bytes=999999999-'), p);
+      expect(res.status).toBe(416);
+      expect(res.headers.get('content-range')).toBe('bytes */14243133');
+    });
+
+    it('un Range raro (varios rangos) se ignora: 200 completo y sin Range hacia SharePoint', async () => {
+      db.portalCourseMaterial.findFirst.mockResolvedValue(material);
+      const res = await descargarMaterial(conRango('bytes=0-1,5-9'), p);
+      expect(res.status).toBe(200);
+      const llamada = graph.mock.calls.at(-1)!;
+      expect((llamada[1] as RequestInit).headers).not.toHaveProperty('Range');
+    });
+
+    it('pasa la señal del navegador para cortar la descarga si cierra la conexión', async () => {
+      db.portalCourseMaterial.findFirst.mockResolvedValue(material);
+      const control = new AbortController();
+      await descargarMaterial(conRango('bytes=0-1', control.signal), p);
+      expect((graph.mock.calls.at(-1)![1] as RequestInit).signal).toBeDefined();
+    });
+  });
+
   it('material antiguo (sin referencia) se sigue sirviendo desde la base', async () => {
     db.portalCourseMaterial.findFirst.mockResolvedValue({
       id: 99, file_name: 'viejo.pdf', mime: 'application/pdf', sp_drive_item_id: null, contenido: Buffer.from('OLD'), course: { active: true },
