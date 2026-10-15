@@ -40,8 +40,11 @@ export interface ModeloOrganigrama {
 
 export const MODELO: ModeloOrganigrama = datos as unknown as ModeloOrganigrama;
 export const NOMBRE_FRANJAS = ['ESTRATÉGICO', 'TÁCTICO', 'OPERATIVO'] as const;
-/** La empresa del organigrama: lo que se muestra por defecto al pulsar un cargo. */
-export const EMPRESA_DEL_ORGANIGRAMA = 'Farmalógica';
+/**
+ * La empresa cuyas personas se muestran POR DEFECTO al pulsar un cargo (Cristian, 2026-10-15: GSS). El organigrama dibujado es el
+ * de Farmalógica, pero la ventana arranca con GSS y un interruptor permite incluir a las demás empresas.
+ */
+export const EMPRESA_POR_DEFECTO = 'GSS';
 
 /** Una persona de BASE PERSONAL tal como se muestra. NUNCA lleva la cédula. */
 export interface PersonaOrganigrama {

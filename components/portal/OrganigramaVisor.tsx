@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  EMPRESA_DEL_ORGANIGRAMA,
+  EMPRESA_POR_DEFECTO,
   MODELO,
   NOMBRE_FRANJAS,
   coincideBusqueda,
@@ -17,7 +17,7 @@ import {
  *
  * Dibuja el organigrama del PDF GTH-01-FR-005-5 (franjas, cuadros y conectores) como un gráfico vectorial con zoom y búsqueda.
  * Al pulsar un cargo se abre una ventana pequeña con las personas de BASE PERSONAL que lo tienen: empresa, nombre, área, cargo
- * y correo corporativo. Por defecto solo las de Farmalógica; hay un interruptor para incluir las de otras empresas.
+ * y correo corporativo. Por defecto solo las de GSS (pedido de Cristian); hay un interruptor para incluir las de otras empresas.
  * Los avisos (error de carga) van arriba, con color. Mismo marco y estilo que las demás ventanas del portal.
  */
 
@@ -110,7 +110,7 @@ export default function OrganigramaVisor({ onCerrar }: { onCerrar: () => void })
   };
 
   const gente = seleccionado ? (personas?.[seleccionado.id] ?? []) : [];
-  const deLaEmpresa = gente.filter((p) => normalizarEmpresa(p.empresa) === normalizarEmpresa(EMPRESA_DEL_ORGANIGRAMA));
+  const deLaEmpresa = gente.filter((p) => normalizarEmpresa(p.empresa) === normalizarEmpresa(EMPRESA_POR_DEFECTO));
   const deOtras = gente.length - deLaEmpresa.length;
   const visibles = otrasEmpresas ? gente : deLaEmpresa;
 
@@ -179,7 +179,7 @@ export default function OrganigramaVisor({ onCerrar }: { onCerrar: () => void })
         <p className='portal-th__org-ayuda'>
           Pulse un cargo para ver quiénes lo ocupan. Arrastre para moverse; acerque con «+».{' '}
           <span className='portal-th__org-leyenda'>
-            <i className='portal-th__org-muestra portal-th__org-muestra--con' aria-hidden='true' /> con personas de {EMPRESA_DEL_ORGANIGRAMA}
+            <i className='portal-th__org-muestra portal-th__org-muestra--con' aria-hidden='true' /> con personas de {EMPRESA_POR_DEFECTO}
           </span>
           <span className='portal-th__org-leyenda'>
             <i className='portal-th__org-muestra portal-th__org-muestra--otras' aria-hidden='true' /> solo de otras empresas
@@ -232,7 +232,7 @@ export default function OrganigramaVisor({ onCerrar }: { onCerrar: () => void })
             {MODELO.nodos.map((n) => {
               const t = textos.get(n.id)!;
               const lista = personas?.[n.id] ?? [];
-              const gentes = lista.filter((p) => normalizarEmpresa(p.empresa) === normalizarEmpresa(EMPRESA_DEL_ORGANIGRAMA)).length;
+              const gentes = lista.filter((p) => normalizarEmpresa(p.empresa) === normalizarEmpresa(EMPRESA_POR_DEFECTO)).length;
               const deOtrasN = lista.length - gentes;
               const cx = n.x + n.w / 2;
               const cy = n.y + n.h / 2;
@@ -250,7 +250,7 @@ export default function OrganigramaVisor({ onCerrar }: { onCerrar: () => void })
                   )}
                   role='button'
                   tabIndex={0}
-                  aria-label={`${n.texto}${personas ? (gentes > 0 ? `, ${gentes} ${gentes === 1 ? 'persona' : 'personas'} de ${EMPRESA_DEL_ORGANIGRAMA}` : deOtrasN > 0 ? ', solo personas de otras empresas' : ', sin personas registradas') : ''}`}
+                  aria-label={`${n.texto}${personas ? (gentes > 0 ? `, ${gentes} ${gentes === 1 ? 'persona' : 'personas'} de ${EMPRESA_POR_DEFECTO}` : deOtrasN > 0 ? ', solo personas de otras empresas' : ', sin personas registradas') : ''}`}
                   onClick={() => abrirNodo(n)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
@@ -299,7 +299,7 @@ export default function OrganigramaVisor({ onCerrar }: { onCerrar: () => void })
                 <p className='portal-th__estado' data-testid='organigrama-sin-personas'>
                   {gente.length === 0
                     ? 'No hay personas registradas con este cargo en BASE PERSONAL.'
-                    : `No hay personas de ${EMPRESA_DEL_ORGANIGRAMA} con este cargo.`}
+                    : `No hay personas de ${EMPRESA_POR_DEFECTO} con este cargo.`}
                 </p>
               )}
               <ul>

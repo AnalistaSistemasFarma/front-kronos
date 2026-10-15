@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  EMPRESA_DEL_ORGANIGRAMA,
+  EMPRESA_POR_DEFECTO,
   EQUIVALENCIAS,
   MODELO,
   TAMANO_TEXTO_MAX,
@@ -99,8 +99,8 @@ describe('personasPorNodo', () => {
   it('con la lista de BASE PERSONAL vacía no hay enlaces y no falla', () => {
     expect(personasPorNodo(MODELO.nodos, [])).toEqual({});
   });
-  it('la empresa del organigrama es Farmalógica', () => {
-    expect(EMPRESA_DEL_ORGANIGRAMA).toBe('Farmalógica');
+  it('la empresa que se muestra por defecto es GSS (pedido de Cristian, 2026-10-15)', () => {
+    expect(EMPRESA_POR_DEFECTO).toBe('GSS');
   });
 });
 

@@ -21,11 +21,11 @@ const SOLO_OTRAS = nodo('Analista de Mercadeo');
 
 const personas = {
   [GERENTE_CALIDAD.id]: [
-    { empresa: 'Farmalógica', nombre: 'PEREZ GOMEZ ANA MARIA', area: 'CALIDAD', cargo: 'GERENTE DE CALIDAD', correo: 'ana.perez@farmalogica.com' },
-    { empresa: 'GSS', nombre: 'RUIZ SOTO LUIS', area: 'CALIDAD', cargo: 'GERENTE DE CALIDAD', correo: 'luis.ruiz@gsslatam.com' },
+    { empresa: 'GSS', nombre: 'PEREZ GOMEZ ANA MARIA', area: 'CALIDAD', cargo: 'GERENTE DE CALIDAD', correo: 'ana.perez@gsslatam.com' },
+    { empresa: 'Farmalógica', nombre: 'RUIZ SOTO LUIS', area: 'CALIDAD', cargo: 'GERENTE DE CALIDAD', correo: 'luis.ruiz@farmalogica.com' },
   ],
-  [JEFE_VALIDACIONES.id]: [{ empresa: 'Farmalógica', nombre: 'LOPEZ DIAZ MARTA', area: 'VALIDACIONES', cargo: 'JEFE DE VALIDACIONES', correo: 'No Aplica' }],
-  [SOLO_OTRAS.id]: [{ empresa: 'GSS', nombre: 'MORA PINTO JUAN', area: 'MERCADEO', cargo: 'ANALISTA DE MERCADEO', correo: 'juan.mora@gsslatam.com' }],
+  [JEFE_VALIDACIONES.id]: [{ empresa: 'GSS', nombre: 'LOPEZ DIAZ MARTA', area: 'VALIDACIONES', cargo: 'JEFE DE VALIDACIONES', correo: 'No Aplica' }],
+  [SOLO_OTRAS.id]: [{ empresa: 'Ryan', nombre: 'MORA PINTO JUAN', area: 'MERCADEO', cargo: 'ANALISTA DE MERCADEO', correo: 'juan.mora@ryanlab.com' }],
 };
 
 async function simular(page: Page, opciones: { falla?: boolean } = {}) {
@@ -76,7 +76,7 @@ test.describe('Portal TH · Organigrama', () => {
     await expect(visor.getByText('TÁCTICO')).toBeVisible();
     await expect(visor.getByText('OPERATIVO')).toBeVisible();
     await expect(visor.getByText('DIRECTOR GENERAL', { exact: false }).first()).toBeAttached();
-    // con personas de Farmalógica = borde azul; solo de otras empresas = punteado; el resto, gris
+    // con personas de GSS = borde azul; solo de otras empresas = punteado; el resto, gris
     await expect(visor.locator('.portal-th__org-nodo--con')).toHaveCount(2);
     await expect(visor.locator('.portal-th__org-nodo--otras')).toHaveCount(1);
     await visor.getByTestId('zoom-ajustar').click();
@@ -86,7 +86,7 @@ test.describe('Portal TH · Organigrama', () => {
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/102-organigrama-zoom.png` });
   });
 
-  test('al pulsar un cargo se abre la ventanita con sus personas (solo Farmalógica) y se pueden incluir otras empresas', async ({ page }) => {
+  test('al pulsar un cargo se abre la ventanita con sus personas (solo GSS) y se pueden incluir otras empresas', async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 900 });
     await simular(page);
     const visor = await abrir(page);
@@ -97,12 +97,12 @@ test.describe('Portal TH · Organigrama', () => {
     const ventana = page.getByTestId('organigrama-personas');
     await expect(ventana).toBeVisible();
     await expect(ventana).toContainText('Gerente de Calidad');
-    // Los 5 datos pedidos, de la persona de Farmalógica
+    // Los 5 datos pedidos, de la persona de GSS
     const persona = ventana.getByTestId('organigrama-persona');
     await expect(persona).toHaveCount(1);
     for (const etiqueta of ['Empresa', 'Apellidos y Nombres', 'Área / Dependencia', 'Cargo', 'Correo corporativo']) await expect(persona).toContainText(etiqueta);
     await expect(persona).toContainText('PEREZ GOMEZ ANA MARIA');
-    await expect(persona.getByRole('link', { name: 'ana.perez@farmalogica.com' })).toHaveAttribute('href', 'mailto:ana.perez@farmalogica.com');
+    await expect(persona.getByRole('link', { name: 'ana.perez@gsslatam.com' })).toHaveAttribute('href', 'mailto:ana.perez@gsslatam.com');
     await expect(persona).not.toContainText('RUIZ SOTO');
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/103-organigrama-personas.png` });
 
@@ -121,7 +121,7 @@ test.describe('Portal TH · Organigrama', () => {
 
     // Un cargo con personas SOLO de otras empresas: lo dice y permite verlas.
     await visor.locator(`[data-nodo="${SOLO_OTRAS.id}"]`).click();
-    await expect(page.getByTestId('organigrama-sin-personas')).toHaveText('No hay personas de Farmalógica con este cargo.');
+    await expect(page.getByTestId('organigrama-sin-personas')).toHaveText('No hay personas de GSS con este cargo.');
     await ventana.getByText('Incluir 1 persona de otras empresas con este cargo').click();
     await expect(ventana).toContainText('MORA PINTO JUAN');
   });

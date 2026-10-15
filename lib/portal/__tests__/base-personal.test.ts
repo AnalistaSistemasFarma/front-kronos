@@ -103,9 +103,8 @@ describe('leerBasePersonal (Graph simulado)', () => {
     const urls = f.mock.calls.map((c) => String(c[0]));
     expect(urls.some((u) => u.includes('/usedRange?$select=values'))).toBe(true);
     // solo lectura: ninguna llamada que no sea GET (el token es un POST de login)
-    for (const c of f.mock.calls) {
-      const init = c[1] as RequestInit | undefined;
-      if (!String(c[0]).startsWith('https://login.microsoftonline.com/')) expect(init?.method ?? 'GET').toBe('GET');
+    for (const c of f.mock.calls as unknown as [string, RequestInit | undefined][]) {
+      if (!String(c[0]).startsWith('https://login.microsoftonline.com/')) expect(c[1]?.method ?? 'GET').toBe('GET');
     }
   });
   it('la guarda en caché unos minutos y la vuelve a pedir pasado ese tiempo', async () => {
