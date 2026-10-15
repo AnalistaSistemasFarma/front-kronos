@@ -27,10 +27,11 @@ import { IconAlertTriangle, IconCheck, IconFlask, IconPaperclip, IconRefresh, Ic
 import toast from 'react-hot-toast';
 import SgcSelect from '../sgc/SgcSelect';
 import { ALERTA_TEXTO, type AlertaFila, type FilaSimulacion, type ResultadoCreacion } from '../../lib/correo/types';
-import { correoApi, tamano, urlSolicitud, type ProcesoCorreo } from './correoClient';
+import { correoApi, tamano, urlSolicitud, type CategoriaCorreo, type ProcesoCorreo } from './correoClient';
+import { categoriaDeProceso, opcionesCategorias, opcionesProcesos, opcionesProcesosAgrupadas } from './catalogoOpciones';
 
 /**
- * Simulación de la creación masiva: una fila EDITABLE por hilo (empresa, proceso,
+ * Simulación de la creación masiva: una fila EDITABLE por hilo (empresa, categoría → proceso,
  * solicitante, título, descripción, adjuntos), con alertas de duplicado, remitente
  * sin usuario, externo o autosolicitud. Nada se crea hasta «Crear N solicitudes»;
  * luego se recorre el lote fila por fila con avance y un resumen con enlaces.
@@ -38,7 +39,8 @@ import { correoApi, tamano, urlSolicitud, type ProcesoCorreo } from './correoCli
 
 const PRED_KEY = 'correo:proceso-predeterminado';
 
-type Fila = FilaSimulacion & { adjuntosElegidos: string[] };
+/** idCategoria: solo del navegador, para la cascada Categoría → Proceso (como «Nueva solicitud»). */
+type Fila = FilaSimulacion & { adjuntosElegidos: string[]; idCategoria: number | null };
 
 function leerPred(empresa: number): number | null {
   try {
@@ -119,6 +121,7 @@ export default function SimulacionModal({ opened, mensajesIds, empresas, empresa
   const [pred, setPred] = useState<number | null>(null);
   const [filas, setFilas] = useState<Fila[]>([]);
   const [procesos, setProcesos] = useState<ProcesoCorreo[]>([]);
+  const [categorias, setCategorias] = useState<CategoriaCorreo[]>([]);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [etiquetar, setEtiquetar] = useState(true);
@@ -132,7 +135,8 @@ export default function SimulacionModal({ opened, mensajesIds, empresas, empresa
       try {
         const r = await correoApi.simular(mensajesIds, emp, procPred);
         setProcesos(r.procesos);
-        setFilas(r.filas.map((f) => ({ ...f, adjuntosElegidos: f.adjuntos.map((a) => a.id) })));
+        setCategorias(r.categorias ?? []);
+        setFilas(r.filas.map((f) => ({ ...f, adjuntosElegidos: f.adjuntos.map((a) => a.id), idCategoria: categoriaDeProceso(r.procesos, f.idProcess) })));
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setFilas([]);
@@ -153,10 +157,8 @@ export default function SimulacionModal({ opened, mensajesIds, empresas, empresa
     void simular(empresaInicial, p);
   }, [opened, empresaInicial, simular]);
 
-  const procesoData = useMemo(
-    () => procesos.map((p) => ({ value: String(p.id), label: p.categoria ? `${p.nombre} · ${p.categoria}` : p.nombre })),
-    [procesos]
-  );
+  const categoriaData = useMemo(() => opcionesCategorias(categorias), [categorias]);
+  const procesoAgrupado = useMemo(() => opcionesProcesosAgrupadas(categorias, procesos), [categorias, procesos]);
   const responsables = useMemo(() => new Map(procesos.map((p) => [p.id, p.responsables ?? []])), [procesos]);
 
   const actualizar = (i: number, cambio: Partial<Fila>) =>
@@ -285,12 +287,30 @@ export default function SimulacionModal({ opened, mensajesIds, empresas, empresa
       />
     ),
     proceso: (
-      <Stack gap={2}>
+      <Stack gap={4}>
+        <Select
+          aria-label='Categoría'
+          placeholder='Elija la categoría'
+          searchable
+          data={categoriaData}
+          value={f.idCategoria ? String(f.idCategoria) : null}
+          onChange={(v) => {
+            const c = v ? Number(v) : null;
+            if (c === f.idCategoria) return;
+            actualizar(i, { idCategoria: c, idProcess: null, procesoSugeridoPor: null });
+          }}
+          nothingFoundMessage='Sin categorías'
+          comboboxProps={{ withinPortal: true }}
+          size='sm'
+          data-testid='correo-sim-categoria'
+        />
         <Select
           aria-label='Proceso'
-          placeholder='Elija el proceso'
+          placeholder={f.idCategoria ? 'Elija el proceso' : 'Primero elija la categoría'}
           searchable
-          data={procesoData}
+          disabled={!f.idCategoria}
+          data={opcionesProcesos(procesos, f.idCategoria)}
+          nothingFoundMessage='Esta categoría no tiene procesos activos'
           value={f.idProcess ? String(f.idProcess) : null}
           onChange={(v) => actualizar(i, { idProcess: v ? Number(v) : null, procesoSugeridoPor: null })}
           comboboxProps={{ withinPortal: true }}
@@ -355,6 +375,8 @@ export default function SimulacionModal({ opened, mensajesIds, empresas, empresa
                 if (!v) return;
                 const n = Number(v);
                 setEmpresa(n);
+                setProcesos([]);
+                setCategorias([]);
                 const p = leerPred(n);
                 setPred(p);
                 void simular(n, p);
@@ -370,7 +392,7 @@ export default function SimulacionModal({ opened, mensajesIds, empresas, empresa
             placeholder='Ninguno'
             searchable
             clearable
-            data={procesoData}
+            data={procesoAgrupado}
             value={pred ? String(pred) : null}
             onChange={(v) => {
               const n = v ? Number(v) : null;
@@ -409,7 +431,7 @@ export default function SimulacionModal({ opened, mensajesIds, empresas, empresa
                   <Table.Thead>
                     <Table.Tr>
                       <Table.Th w={60}>Incluir</Table.Th>
-                      <Table.Th w={240}>Proceso</Table.Th>
+                      <Table.Th w={260}>Categoría y proceso</Table.Th>
                       <Table.Th w={240}>Solicitante</Table.Th>
                       <Table.Th>Título y descripción</Table.Th>
                       <Table.Th w={200}>Adjuntos</Table.Th>
@@ -455,7 +477,7 @@ export default function SimulacionModal({ opened, mensajesIds, empresas, empresa
                         </Group>
                         {alertasDe(f)}
                         <Text size='xs' fw={600}>
-                          Proceso
+                          Categoría y proceso
                         </Text>
                         {c.proceso}
                         <Text size='xs' fw={600}>

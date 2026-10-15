@@ -75,7 +75,7 @@ describe.skipIf(!url)('Correo · integración con SQL Server', () => {
 
   it('permiso: solo con el subproceso «Correo» en la empresa; proveedores e inactivos nunca', async () => {
     const a = await getCorreoAccess(prisma, correoA);
-    expect(a).toMatchObject({ idUser: idA, empresas: [{ idCompany: idEmpresa }] });
+    expect(a).toMatchObject({ idUser: idA, empresas: [{ idCompany: idEmpresa }], empresasSolicitud: [{ idCompany: idEmpresa }] });
     expect(await getCorreoAccess(prisma, correoB)).toBeNull();
     expect(await getCorreoAccess(prisma, `prov.${s}@externo.com`)).toBeNull();
     expect(await getCorreoAccess(prisma, `inactivo.${s}@gsslatam.com`)).toBeNull();

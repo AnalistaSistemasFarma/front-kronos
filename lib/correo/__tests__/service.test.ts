@@ -52,7 +52,22 @@ function graphFalso(handler: (url: string, init: RequestInit) => { status?: numb
   return { f: f as unknown as typeof fetch, urls };
 }
 
-const yo: AccesoCorreo = { idUser: 'op1', nombre: 'Laura', email: 'laura@gsslatam.com', empresas: [{ idCompany: 1, companyName: 'GSS' }] };
+const yo: AccesoCorreo = {
+  idUser: 'op1',
+  nombre: 'Laura',
+  email: 'laura@gsslatam.com',
+  empresas: [{ idCompany: 1, companyName: 'GSS' }],
+  // Pertenece también a OLP (sin el módulo Correo allí): puede crear solicitudes de OLP.
+  empresasSolicitud: [{ idCompany: 1, companyName: 'GSS' }, { idCompany: 2, companyName: 'OLP' }],
+};
+const catalogo = {
+  categorias: [{ id: 5, categoria: 'Jurídica' }, { id: 6, categoria: 'Tesorería' }],
+  procesos: [
+    { id: 10, nombre: 'Elaboración y revisión de contratos', idCategoria: 5, categoria: 'Jurídica', responsables: ['María Camila'] },
+    { id: 20, nombre: 'Solicitud de poderes', idCategoria: 5, categoria: 'Jurídica' },
+    { id: 30, nombre: 'Solicitud de Pago', idCategoria: 6, categoria: 'Tesorería' },
+  ],
+};
 
 const auditDb = { emailAudit: { findMany: vi.fn(async () => [] as Array<{ created_at: Date }>) } };
 
@@ -61,7 +76,7 @@ function deps(extra: Partial<CorreoDeps> = {}): CorreoDeps {
     db: auditDb as never,
     cfg: readCorreoConfig({ CORREO_MODO: 'mock' }),
     kronos: {
-      procesosEmpresa: vi.fn(async () => [{ id: 10, nombre: 'Elaboración y revisión de contratos', responsables: ['María Camila'] }, { id: 20, nombre: 'Solicitud de poderes' }]),
+      catalogoEmpresa: vi.fn(async () => catalogo),
       solicitudVisible: vi.fn(async () => ({ id: 77, asunto: 'X', idCompany: 1, estado: 1 })),
       insertarNota: vi.fn(async () => 1),
     },
@@ -165,7 +180,28 @@ describe('Correo · simulación', () => {
     expect(marca.alertas).toEqual(expect.arrayContaining(['EXTERNO', 'SIN_USUARIO']));
     expect(otrosi).toMatchObject({ duplicadoDe: 41, incluir: false });
     expect(d.crearSolicitud).not.toHaveBeenCalled();
+    // Devuelve el catálogo COMPLETO de la empresa (categorías y procesos), no solo el sugerido.
+    expect(s.categorias.map((c) => c.categoria)).toEqual(['Jurídica', 'Tesorería']);
+    expect(s.procesos.map((p) => p.id)).toEqual([10, 20, 30]);
     await expect(simular(d, yo, { mensajesIds: ['mock-msg-0001AAAA'], idCompany: 9, procesoPredeterminado: null })).rejects.toMatchObject({ status: 403 });
+  });
+
+  it('empresa: cualquiera a la que pertenece (como «Nueva solicitud»), no solo la del buzón', async () => {
+    const d = deps();
+    const s = await simular(d, yo, { mensajesIds: ['mock-msg-0001AAAA'], idCompany: 2, procesoPredeterminado: null });
+    expect(d.kronos.catalogoEmpresa).toHaveBeenCalledWith(2);
+    expect(s.filas[0].idCompany).toBe(2);
+  });
+
+  it('la palabra clave solo propone: sin coincidencia queda el predeterminado y cualquier proceso del catálogo es válido', async () => {
+    const d = deps();
+    const s = await simular(d, yo, { mensajesIds: ['mock-msg-0001AAAA', 'mock-msg-0004AAAA'], idCompany: 1, procesoPredeterminado: 30 });
+    expect(s.filas[0]).toMatchObject({ idProcess: 10, procesoSugeridoPor: 'palabra-clave' });
+    expect(s.filas[1]).toMatchObject({ idProcess: 30, procesoSugeridoPor: 'predeterminado' });
+    // Se puede crear en un proceso distinto del sugerido (otra categoría).
+    const r = await crearDesdeFila(d, yo, { ...filaBase, idProcess: 30 }, null);
+    expect(r.ok).toBe(true);
+    expect(d.crearSolicitud).toHaveBeenCalledWith(expect.objectContaining({ process: 30, company: 1 }));
   });
 });
 

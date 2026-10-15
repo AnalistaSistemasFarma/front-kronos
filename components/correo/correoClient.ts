@@ -6,7 +6,10 @@ import type { AdjuntoInfo, Carpeta, Direccion, FilaSimulacion, MensajeResumen, R
 
 export interface EstadoCorreo {
   usuario: { id: string; nombre: string; email: string };
+  /** Empresas donde puede crear solicitudes (las mismas de «Nueva solicitud»). */
   empresas: Array<{ idCompany: number; companyName: string }>;
+  /** Empresa del módulo Correo (la predeterminada al abrir). */
+  empresaBuzon?: number | null;
   conexion: {
     modo: 'off' | 'mock' | 'graph';
     /** ¿Su empresa (inquilino) ya tiene el módulo habilitado? */
@@ -47,8 +50,14 @@ export interface ProcesoCorreo {
   id: number;
   nombre: string;
   descripcion?: string | null;
+  idCategoria?: number;
   categoria?: string;
   responsables?: string[];
+}
+
+export interface CategoriaCorreo {
+  id: number;
+  categoria: string;
 }
 
 export class CorreoApiError extends Error {
@@ -82,10 +91,10 @@ export const correoApi = {
   notas: (conversationId: string) => post<{ agregadas: number; idRequest: number }>('/api/correo/hilo/notas', { conversationId }),
   vincular: (conversationId: string, idRequest: number) => post<{ vinculo: VinculoHilo }>('/api/correo/hilo/vincular', { conversationId, idRequest }),
   simular: (mensajesIds: string[], empresa: number, procesoPredeterminado: number | null) =>
-    post<{ filas: FilaSimulacion[]; procesos: ProcesoCorreo[] }>('/api/correo/simular', { mensajesIds, empresa, procesoPredeterminado }),
+    post<{ filas: FilaSimulacion[]; categorias: CategoriaCorreo[]; procesos: ProcesoCorreo[] }>('/api/correo/simular', { mensajesIds, empresa, procesoPredeterminado }),
   crear: (fila: Record<string, unknown>) => post<ResultadoCreacion>('/api/correo/crear', fila),
   usuarios: (empresa: number, q: string) => get<{ usuarios: Array<{ id: string; nombre: string; correo: string }> }>(`/api/correo/usuarios?${new URLSearchParams({ empresa: String(empresa), q })}`),
-  procesos: (empresa: number) => get<{ procesos: ProcesoCorreo[] }>(`/api/correo/procesos?empresa=${empresa}`),
+  procesos: (empresa: number) => get<{ categorias: CategoriaCorreo[]; procesos: ProcesoCorreo[] }>(`/api/correo/procesos?empresa=${empresa}`),
   vinculos: (idRequest: number) => get<{ vinculos: VinculoHilo[] }>(`/api/correo/vinculos?solicitud=${idRequest}`),
   responder: async (p: { mensajeId: string; texto: string; todos: boolean; archivos: File[] }) => {
     const fd = new FormData();

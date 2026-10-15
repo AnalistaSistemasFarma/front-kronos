@@ -70,7 +70,22 @@ async function simular(page: Page, opciones: { disponible?: boolean } = {}) {
     respuestas.push(r.request().postData() ?? '');
     return r.fulfill({ json: { ok: true, notaEnSolicitud: null } });
   });
-  await page.route('**/api/correo/simular', (r) => r.fulfill({ json: { filas, procesos: [{ id: 10, nombre: 'Elaboración y revisión de contratos', categoria: 'Jurídica', responsables: ['María Camila'] }, { id: 20, nombre: 'Solicitud de poderes', categoria: 'Jurídica' }] } }));
+  await page.route('**/api/correo/simular', (r) =>
+    r.fulfill({
+      json: {
+        filas,
+        categorias: [
+          { id: 5, categoria: 'Jurídica' },
+          { id: 6, categoria: 'Tesorería' },
+        ],
+        procesos: [
+          { id: 10, nombre: 'Elaboración y revisión de contratos', idCategoria: 5, categoria: 'Jurídica', responsables: ['María Camila'] },
+          { id: 20, nombre: 'Solicitud de poderes', idCategoria: 5, categoria: 'Jurídica' },
+          { id: 30, nombre: 'Solicitud de Pago', idCategoria: 6, categoria: 'Tesorería' },
+        ],
+      },
+    })
+  );
   await page.route('**/api/correo/usuarios**', (r) => r.fulfill({ json: { usuarios: [{ id: 'u2', nombre: 'Usuario Dos', correo: 'dos@onelatampharma.com' }] } }));
   await page.route('**/api/correo/crear', async (r) => {
     const body = r.request().postDataJSON();
@@ -152,9 +167,16 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     expect(creadas).toHaveLength(0);
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/03-simulacion.png` });
 
-    // Completar la fila 2: proceso y solicitante; incluirla.
+    // La sugerencia por palabra clave fija categoría y proceso de la fila 1 (editable).
+    await expect(modal.getByTestId('correo-sim-categoria').first()).toHaveValue('Jurídica');
+    // Completar la fila 2: categoría → proceso (cascada, como «Nueva solicitud») y solicitante; incluirla.
     const fila2 = modal.getByTestId('correo-sim-fila').nth(1);
+    await expect(fila2.getByTestId('correo-sim-proceso')).toBeDisabled();
+    await fila2.getByTestId('correo-sim-categoria').click();
+    await expect(page.getByRole('option', { name: 'Tesorería' })).toBeVisible();
+    await page.getByRole('option', { name: 'Jurídica' }).click();
     await fila2.getByTestId('correo-sim-proceso').click();
+    await expect(page.getByRole('option', { name: /Solicitud de Pago/ })).toHaveCount(0);
     await page.getByRole('option', { name: /Solicitud de poderes/ }).click();
     await fila2.getByTestId('correo-sim-solicitante').fill('Usuario');
     await page.getByRole('option', { name: /Usuario Dos/ }).click();
