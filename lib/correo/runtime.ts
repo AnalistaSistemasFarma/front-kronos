@@ -24,6 +24,11 @@ export function dominiosGrupo(): string[] {
   return [...new Set([...dominiosAutorizados(), 'groupsharedservices.com', 'unidossis.com.co'])];
 }
 
+/** Base absoluta del ambiente para el enlace del acuse (la misma del inicio de sesión). */
+export function appBaseUrl(env: Record<string, string | undefined> = process.env): string {
+  return String(env.NEXTAUTH_URL || env.APP_URL || env.NEXT_PUBLIC_APP_URL || '').trim().replace(/\/+$/, '');
+}
+
 async function subirAdjuntos(idRequest: number, archivos: ArchivoAdjunto[]): Promise<{ subidos: number; fallidos: string[] }> {
   const token = await getMicrosoftToken();
   const segments = [oneDriveRoot(), 'TEC', 'SG', `Request-${idRequest}`];
@@ -58,5 +63,6 @@ export function correoDeps(): CorreoDeps {
     },
     subirAdjuntos,
     dominiosGrupo: dominiosGrupo(),
+    appBaseUrl: appBaseUrl(),
   };
 }

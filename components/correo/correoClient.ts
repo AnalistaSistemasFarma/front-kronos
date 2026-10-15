@@ -1,6 +1,7 @@
 'use client';
 
-import type { AdjuntoInfo, Carpeta, Direccion, FilaSimulacion, MensajeResumen, ResultadoCreacion, VinculoHilo } from '../../lib/correo/types';
+import { rutaSolicitud, type OpcionesAcuse } from '../../lib/correo/acuse';
+import type { AdjuntoInfo, Carpeta, Direccion, FilaSimulacion, MensajeResumen, ResultadoAcuse, ResultadoCreacion, VinculoHilo } from '../../lib/correo/types';
 
 /** Cliente del navegador para /api/correo/**. Nunca envía un buzón: el servidor usa el de la sesión. */
 
@@ -89,7 +90,11 @@ export const correoApi = {
   mensajes: (params: Record<string, string>) => get<{ mensajes: MensajeLista[]; siguiente: string | null }>(`/api/correo/mensajes?${new URLSearchParams(params)}`),
   hilo: (id: string, remotas = false) => get<{ hilo: HiloVista }>(`/api/correo/hilo?${new URLSearchParams({ id, ...(remotas ? { remotas: '1' } : {}) })}`),
   notas: (conversationId: string) => post<{ agregadas: number; idRequest: number }>('/api/correo/hilo/notas', { conversationId }),
-  vincular: (conversationId: string, idRequest: number) => post<{ vinculo: VinculoHilo }>('/api/correo/hilo/vincular', { conversationId, idRequest }),
+  vincular: (conversationId: string, idRequest: number, acuse?: OpcionesAcuse) =>
+    post<{ vinculo: VinculoHilo; acuse?: ResultadoAcuse }>('/api/correo/hilo/vincular', { conversationId, idRequest, ...(acuse ? { acuse } : {}) }),
+  /** «Reintentar respuesta»: acuse del hilo ya vinculado (idempotente en el servidor). */
+  reintentarAcuse: (conversationId: string, todos: boolean, confirmarExterno: boolean) =>
+    post<{ acuse: ResultadoAcuse }>('/api/correo/acuse', { conversationId, todos, confirmarExterno }),
   simular: (mensajesIds: string[], empresa: number, procesoPredeterminado: number | null) =>
     post<{ filas: FilaSimulacion[]; categorias: CategoriaCorreo[]; procesos: ProcesoCorreo[] }>('/api/correo/simular', { mensajesIds, empresa, procesoPredeterminado }),
   crear: (fila: Record<string, unknown>) => post<ResultadoCreacion>('/api/correo/crear', fila),
@@ -109,7 +114,7 @@ export const correoApi = {
 export const urlAdjunto = (mensajeId: string, adjuntoId: string, ver = false) =>
   `/api/correo/adjunto?${new URLSearchParams({ mensaje: mensajeId, adjunto: adjuntoId, ...(ver ? { ver: '1' } : {}) })}`;
 
-export const urlSolicitud = (id: number) => `/process/request-general/view-request?id=${id}&from=general-requests`;
+export const urlSolicitud = (id: number) => rutaSolicitud(id);
 
 export const PREVISUALIZABLES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'application/pdf']);
 

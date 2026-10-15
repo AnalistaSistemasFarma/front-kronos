@@ -232,10 +232,10 @@ export function notaDesdeCorreo(m: MensajeCompleto, max: number): string {
 }
 
 /** Nota de la solicitud con una respuesta enviada desde SynerLink. */
-export function notaDesdeRespuesta(p: { operador: string; para: string[]; texto: string; adjuntos: string[]; todos: boolean }, max: number): string {
+export function notaDesdeRespuesta(p: { operador: string; para: string[]; texto: string; adjuntos: string[]; todos: boolean; automatica?: boolean }, max: number): string {
   const adj = p.adjuntos.length ? `\nAdjuntos: ${p.adjuntos.join(', ')}` : '';
   return extracto(
-    `Respuesta enviada desde SynerLink (módulo Correo) por ${p.operador}${p.todos ? ' a todos' : ''}${p.para.length ? ` — para: ${p.para.join(', ')}` : ''}.${adj}\n\n${p.texto.trim()}`,
+    `${p.automatica ? 'Respuesta automática (acuse de creación del caso)' : 'Respuesta'} enviada desde SynerLink (módulo Correo) por ${p.operador}${p.todos ? ' a todos' : ''}${p.para.length ? ` — para: ${p.para.join(', ')}` : ''}.${adj}\n\n${p.texto.trim()}`,
     max
   );
 }
