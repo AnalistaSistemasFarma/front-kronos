@@ -17,6 +17,8 @@ import { MockMailProvider } from './mock';
 import { agruparPorHilo, filaDesdeHilo, notaDesdeCorreo, notaDesdeRespuesta, type FilaCrear, type ProcesoOpcion } from './rules';
 import { sanitizeEmailHtml } from './sanitize';
 import { claveAcuse, enlaceSolicitud, textoAcuse, type OpcionesAcuse } from './acuse';
+import { fragmentoAcuse, logoAcuseUrl } from './plantillas/acuse.html';
+import type { SolicitudVisible } from './kronos';
 import type { ArchivoAdjunto, Direccion, FilaSimulacion, MailProvider, MensajeCompleto, ResultadoAcuse, ResultadoCreacion, VinculoHilo } from './types';
 
 /**
@@ -28,7 +30,7 @@ import type { ArchivoAdjunto, Direccion, FilaSimulacion, MailProvider, MensajeCo
 export interface KronosPort {
   /** Categorías y procesos de «Nueva solicitud» en la empresa (misma regla de la pantalla normal). */
   catalogoEmpresa(idCompany: number): Promise<CatalogoCorreo>;
-  solicitudVisible(idUser: string, idRequest: number): Promise<{ id: number; asunto: string; idCompany: number; estado: number } | null>;
+  solicitudVisible(idUser: string, idRequest: number): Promise<SolicitudVisible | null>;
   insertarNota(idRequest: number, nota: string, idUser: string): Promise<number>;
 }
 
@@ -560,20 +562,31 @@ export async function enviarAcuse(
     }
     reservado = { idLink: vinculo.id, clave };
 
-    let idCompany = p.idCompany ?? null;
-    let titulo = p.titulo ?? vinculo.asunto ?? '';
-    if (idCompany == null || !titulo) {
-      let sol: Awaited<ReturnType<KronosPort['solicitudVisible']>> = null;
-      try {
-        sol = await d.kronos.solicitudVisible(acceso.idUser, vinculo.idRequest);
-      } catch {
-        sol = null;
-      }
-      idCompany = idCompany ?? sol?.idCompany ?? null;
-      titulo = titulo || sol?.asunto || '';
+    // Datos de la tarjeta (empresa, proceso, fecha, responsable): si la consulta falla, el acuse
+    // sale igual con lo que se sepa.
+    let sol: SolicitudVisible | null = null;
+    try {
+      sol = await d.kronos.solicitudVisible(acceso.idUser, vinculo.idRequest);
+    } catch {
+      sol = null;
     }
-    const texto = textoAcuse({ id: vinculo.idRequest, titulo, enlace: enlaceSolicitud(d.appBaseUrl ?? '', vinculo.idRequest), firma: acceso.nombre, idCompany });
-    await prov.responder(destino.id, { texto, todos: p.todos, adjuntos: [] });
+    const idCompany = p.idCompany ?? sol?.idCompany ?? null;
+    const titulo = p.titulo || vinculo.asunto || sol?.asunto || '';
+    const enlace = enlaceSolicitud(d.appBaseUrl ?? '', vinculo.idRequest);
+    const texto = textoAcuse({ id: vinculo.idRequest, titulo, enlace, firma: acceso.nombre, idCompany });
+    const html = fragmentoAcuse({
+      id: vinculo.idRequest,
+      titulo,
+      enlace,
+      firma: acceso.nombre,
+      empresa: sol?.empresa ?? acceso.empresas.find((e) => e.idCompany === idCompany)?.companyName ?? null,
+      categoria: sol?.categoria ?? null,
+      proceso: sol?.proceso ?? null,
+      creada: sol?.creada ?? null,
+      responsable: sol?.responsable ?? null,
+      logoUrl: logoAcuseUrl(d.appBaseUrl),
+    });
+    await prov.responder(destino.id, { texto, html, todos: p.todos, adjuntos: [] });
     // Ya salió: la reserva queda como constancia. Lo que sigue no debe invitar a reenviarlo.
     reservado = null;
 

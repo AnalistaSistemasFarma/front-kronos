@@ -38,7 +38,8 @@ import {
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { CORREO_MAX_ADJUNTO_RESPUESTA_BYTES, CORREO_MAX_ADJUNTOS_RESPUESTA } from '../../lib/correo/constants';
-import { ACUSE_A_TODOS, ACUSE_ETIQUETA, enlaceSolicitud, textoAcuse } from '../../lib/correo/acuse';
+import { ACUSE_A_TODOS, ACUSE_ETIQUETA, enlaceSolicitud } from '../../lib/correo/acuse';
+import { fragmentoAcuse, logoAcuseUrl } from '../../lib/correo/plantillas/acuse.html';
 import type { ResultadoAcuse } from '../../lib/correo/types';
 import { correoApi, fechaLarga, PREVISUALIZABLES, tamano, urlAdjunto, urlSolicitud, type HiloVista } from './correoClient';
 import HtmlSeguro from './HtmlSeguro';
@@ -289,22 +290,22 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
                 {confirmarInforme && envioHabilitado && !hilo.vinculo.acuseEnviadoEn && (
                   <Stack gap={6} mt='xs' data-testid='correo-hilo-informar-confirmar'>
                     <Text size='xs' fw={600}>
-                      Se responderá a todos los participantes del hilo con este texto:
+                      Se responderá a todos los participantes del hilo con este correo (encima del historial):
                     </Text>
-                    <Text
-                      size='xs'
-                      p='xs'
-                      bg='var(--mantine-color-body)'
-                      style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', borderRadius: 'var(--mantine-radius-sm)', border: '1px solid var(--mantine-color-default-border)' }}
-                      data-testid='correo-hilo-informar-previa'
-                    >
-                      {textoAcuse({
-                        id: hilo.vinculo.idRequest,
-                        titulo: hilo.vinculo.asunto ?? hilo.asunto ?? '',
-                        enlace: enlaceSolicitud(typeof window !== 'undefined' ? window.location.origin : '', hilo.vinculo.idRequest),
-                        firma: nombreOperador,
-                      })}
-                    </Text>
+                    <div data-testid='correo-hilo-informar-previa'>
+                      <HtmlSeguro
+                        html={fragmentoAcuse({
+                          id: hilo.vinculo.idRequest,
+                          titulo: hilo.vinculo.asunto ?? hilo.asunto ?? '',
+                          enlace: enlaceSolicitud(typeof window !== 'undefined' ? window.location.origin : '', hilo.vinculo.idRequest),
+                          firma: nombreOperador,
+                          creada: hilo.vinculo.creadoEn,
+                          logoUrl: logoAcuseUrl(typeof window !== 'undefined' ? window.location.origin : ''),
+                        })}
+                        remotas
+                        titulo='Vista previa de la respuesta en el hilo'
+                      />
+                    </div>
                     <Group gap='xs'>
                       <Button size='xs' color='teal' loading={reintentando} onClick={() => reintentarAcuse(true)} data-testid='correo-hilo-informar-enviar'>
                         Enviar a todos

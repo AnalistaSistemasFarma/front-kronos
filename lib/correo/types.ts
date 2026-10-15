@@ -66,9 +66,15 @@ export interface ArchivoAdjunto {
 }
 
 export interface RespuestaEntrada {
+  /** Texto plano (nota del caso y vista en clientes sin HTML). */
   texto: string;
   todos: boolean;
   adjuntos: ArchivoAdjunto[];
+  /**
+   * Bloque HTML propio (acuse con plantilla). Si viene, se responde con borrador + PATCH del cuerpo
+   * para dejarlo encima del historial citado; si no, el texto va como `comment`.
+   */
+  html?: string;
 }
 
 /**

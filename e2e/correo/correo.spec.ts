@@ -230,12 +230,17 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     await expect(chk.nth(1)).toBeChecked();
     // Vista previa del texto (global).
     await modal.getByTestId('correo-sim-acuse-ver-global').click();
-    const previa = modal.getByTestId('correo-sim-acuse-previa-global');
-    await expect(previa).toContainText('Cordial saludo.');
-    await expect(previa).toContainText('Les informamos que a partir de este hilo de correo se creó la solicitud #(número) — Revisión de contrato de arrendamiento en SynerLink.');
-    await expect(previa).toContainText('/process/request-general/view-request?id=(número)');
-    await expect(previa).toContainText('Quedamos atentos.');
+    // Vista previa = la plantilla HTML del correo, en un iframe aislado (como el visor del hilo).
+    const previa = modal.getByTestId('correo-sim-acuse-previa-global').locator('iframe').contentFrame().locator('body');
+    await expect(previa).toContainText('Se creó una solicitud a partir de este correo');
+    await expect(previa).toContainText('#(número)');
+    await expect(previa).toContainText('Revisión de contrato de arrendamiento');
+    await expect(previa).toContainText('Jurídica · Elaboración y revisión de contratos');
+    await expect(previa).toContainText('GROUP SHARED SERVICES');
+    await expect(previa.getByRole('link', { name: 'Ver solicitud en SynerLink' })).toHaveAttribute('href', /\/process\/request-general\/view-request\?id=N/);
+    await expect(previa).toContainText('respondan a este mismo correo y quedará como nota de la solicitud');
     await expect(previa).toContainText('Laura');
+    await expect(previa).toContainText('Group Shared Services Latinoamérica');
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/07-acuse-previa.png` });
     // Apagar la global apaga todas; encenderla las vuelve a encender.
     const global = modal.getByText('Informar en el hilo a todos los participantes', { exact: true });
@@ -276,9 +281,11 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     const drawer = page.getByTestId('correo-hilo');
     await expect(drawer.getByTestId('correo-hilo-vinculo')).toBeVisible();
     await drawer.getByTestId('correo-hilo-informar').click();
-    const previa = drawer.getByTestId('correo-hilo-informar-previa');
-    await expect(previa).toContainText('se creó la solicitud #321 — Revisión de contrato de arrendamiento en SynerLink.');
-    await expect(previa).toContainText('view-request?id=321');
+    const previa = drawer.getByTestId('correo-hilo-informar-previa').locator('iframe').contentFrame().locator('body');
+    await expect(previa).toContainText('Se creó una solicitud a partir de este correo');
+    await expect(previa).toContainText('#321');
+    await expect(previa).toContainText('Revisión de contrato de arrendamiento');
+    await expect(previa.getByRole('link', { name: 'Ver solicitud en SynerLink' })).toHaveAttribute('href', /view-request\?id=321/);
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/09-informar-hilo.png` });
     await drawer.getByTestId('correo-hilo-informar-enviar').click();
     await expect(drawer.getByTestId('correo-hilo-resultado')).toContainText('Se informó en el hilo a todos los participantes');

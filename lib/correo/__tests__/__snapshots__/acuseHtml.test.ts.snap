@@ -1,0 +1,93 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Acuse HTML · contenido > snapshot del correo completo 1`] = `
+"<!DOCTYPE html>
+<html lang="es" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light only">
+<meta name="supported-color-schemes" content="light only">
+<title>Se creó una solicitud a partir de este correo</title>
+</head>
+<body style="margin:0;padding:0;background-color:#eef1f5;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+<div class="synerlink-acuse" style="margin:0;padding:0;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#eef1f5" style="background-color:#eef1f5;border-collapse:collapse;">
+<tr><td align="center" style="padding:20px 12px;">
+<!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:600px;background-color:#ffffff;border:1px solid #d8dde6;border-radius:8px;border-collapse:separate;">
+<tr><td bgcolor="#ffffff" style="padding:20px 28px 16px 28px;background-color:#ffffff;border-radius:8px 8px 0 0;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+<td valign="middle" align="left"><img src="https://synerlink.ejemplo.com/logo.png" width="150" height="32" alt="SynerLink" style="display:block;width:150px;max-width:150px;height:auto;border:0;outline:none;text-decoration:none;"></td>
+<td valign="middle" align="right" style="font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:11px;line-height:1.3;color:#6a7689;letter-spacing:0.3px;">Group Shared Services Latinoamérica</td>
+</tr></table>
+</td></tr>
+<tr><td bgcolor="#1a3c6e" style="background-color:#1a3c6e;height:4px;line-height:4px;font-size:0;mso-line-height-rule:exactly;">&nbsp;</td></tr>
+<tr><td style="padding:26px 28px 6px 28px;">
+<h1 style="margin:0;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:21px;line-height:1.3;font-weight:700;color:#1a3c6e;">Se creó una solicitud a partir de este correo</h1>
+</td></tr>
+<tr><td style="padding:8px 28px 18px 28px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#38445a;">
+Cordial saludo.<br>Les informamos que, a partir de este hilo de correo, se registró la siguiente solicitud en SynerLink.
+</td></tr>
+<tr><td style="padding:0 28px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f5f7fa" style="background-color:#f5f7fa;border:1px solid #d8dde6;border-left:4px solid #1a3c6e;border-radius:6px;border-collapse:separate;">
+<tr><td style="padding:16px 18px 6px 18px;">
+<div style="font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:11px;line-height:1.4;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:#6a7689;">Solicitud</div>
+<div style="font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:26px;line-height:1.25;font-weight:700;color:#1a3c6e;">#812</div>
+<div style="padding-top:4px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.4;font-weight:600;color:#0f1a2c;">Revisión de contrato de arrendamiento</div>
+</td></tr>
+<tr><td style="padding:6px 18px 14px 18px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #d8dde6;">
+<tr>
+<td valign="top" style="padding:6px 12px 6px 0;width:118px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.4;color:#6a7689;">Proceso</td>
+<td valign="top" style="padding:6px 0;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.4;color:#0f1a2c;font-weight:600;">Jurídica · Elaboración y revisión de contratos</td>
+</tr>
+<tr>
+<td valign="top" style="padding:6px 12px 6px 0;width:118px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.4;color:#6a7689;">Empresa</td>
+<td valign="top" style="padding:6px 0;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.4;color:#0f1a2c;font-weight:600;">ONE LATAM PHARMA</td>
+</tr>
+<tr>
+<td valign="top" style="padding:6px 12px 6px 0;width:118px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.4;color:#6a7689;">Fecha de creación</td>
+<td valign="top" style="padding:6px 0;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.4;color:#0f1a2c;font-weight:600;">15 de octubre de 2026</td>
+</tr>
+<tr>
+<td valign="top" style="padding:6px 12px 6px 0;width:118px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.4;color:#6a7689;">Responsable</td>
+<td valign="top" style="padding:6px 0;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.4;color:#0f1a2c;font-weight:600;">María Camila Pérez, Laura Ayala</td>
+</tr>
+</table>
+</td></tr>
+</table>
+</td></tr>
+<tr><td style="padding:22px 28px 6px 28px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:4px 0 0 0;">
+<tr><td align="left">
+<!--[if mso]>
+<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="https://synerlink.ejemplo.com/process/request-general/view-request?id=812&amp;from=general-requests" style="height:44px;v-text-anchor:middle;width:260px;" arcsize="14%" stroke="f" fillcolor="#1a3c6e">
+<w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI,Arial,sans-serif;font-size:15px;font-weight:bold;">Ver solicitud en SynerLink</center>
+</v:roundrect>
+<![endif]-->
+<!--[if !mso]><!-- -->
+<a href="https://synerlink.ejemplo.com/process/request-general/view-request?id=812&amp;from=general-requests" target="_blank" rel="noopener" style="display:inline-block;background-color:#1a3c6e;color:#ffffff;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:700;line-height:44px;padding:0 28px;border-radius:6px;text-decoration:none;mso-hide:all;">Ver solicitud en SynerLink</a>
+<!--<![endif]-->
+</td></tr>
+</table></td></tr>
+<tr><td style="padding:4px 28px 0 28px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12px;line-height:1.5;color:#6a7689;">Si el botón no funciona, copie este enlace en su navegador:<br><a href="https://synerlink.ejemplo.com/process/request-general/view-request?id=812&amp;from=general-requests" target="_blank" rel="noopener" style="color:#1a3c6e;word-break:break-all;">https://synerlink.ejemplo.com/process/request-general/view-request?id=812&amp;from=general-requests</a></td></tr>
+<tr><td style="padding:18px 28px 4px 28px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.6;color:#38445a;">
+El seguimiento se hará por <strong style="color:#0f1a2c;">SynerLink</strong>. Si necesitan agregar información, respondan a este mismo correo y quedará como nota de la solicitud.<br><br>Quedamos atentos.
+</td></tr>
+<tr><td style="padding:16px 28px 0 28px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="border-top:1px solid #d8dde6;height:1px;line-height:1px;font-size:0;">&nbsp;</td></tr></table></td></tr>
+<tr><td style="padding:14px 28px 22px 28px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#38445a;">
+<strong style="color:#0f1a2c;">Laura Ayala</strong><br>Group Shared Services Latinoamérica
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;">
+<tr><td align="center" style="padding:12px 16px 0 16px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:11px;line-height:1.5;color:#6a7689;">
+Group Shared Services Latinoamérica · Farmalógica · Laboratorios Ryan · OneLATAM Pharma · Abamia · Meditrack · Kelab<br>Mensaje generado desde SynerLink al registrar la solicitud.
+</td></tr>
+</table>
+</td></tr>
+</table>
+</div>
+</body>
+</html>"
+`;

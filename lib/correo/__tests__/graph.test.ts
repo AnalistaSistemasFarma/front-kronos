@@ -144,6 +144,38 @@ describe('Correo · GraphMailProvider (siempre el buzón de la sesión)', () => 
     expect(JSON.parse(String(calls[1].init.body))).toMatchObject({ name: 'a.txt', contentBytes: Buffer.from('hola').toString('base64') });
   });
 
+  it('con html: createReply → (lee el cuerpo si no vino) → PATCH con el bloque encima del historial → send; si falla, borra el borrador', async () => {
+    const { f, calls } = fakeFetch((url, init) => {
+      if (url.endsWith('/createReply')) return { status: 201, body: { id: 'DRAFTHTMLAA' } };
+      if (url.includes('$select=body')) return { body: { body: { contentType: 'html', content: '<html><body><p>citado</p></body></html>' } } };
+      if (init.method === 'PATCH') return { status: 200, body: {} };
+      return { status: 202 };
+    });
+    const p = new GraphMailProvider(MB, tok, f);
+    await p.responder(ID, { texto: 'plano', html: '<div>ACUSE</div>', todos: false, adjuntos: [] });
+    expect(calls.map((c) => `${c.init.method ?? 'GET'} ${c.url.replace(`${BASE}/messages/`, '')}`)).toEqual([
+      `POST ${encodeURIComponent(ID)}/createReply`,
+      'GET DRAFTHTMLAA?$select=body',
+      'PATCH DRAFTHTMLAA',
+      'POST DRAFTHTMLAA/send',
+    ]);
+    expect((calls[0].init.headers as Record<string, string>).Prefer).toContain('html');
+    const content = JSON.parse(String(calls[2].init.body)).body.content as string;
+    expect(content).toMatch(/^<html><body>\n<div>ACUSE<\/div>[\s\S]*<p>citado<\/p><\/body><\/html>$/);
+
+    const { f: f2, calls: c2 } = fakeFetch((url, init) => {
+      if (url.endsWith('/createReplyAll')) return { status: 201, body: { id: 'DRAFTHTMLBB', body: { contentType: 'html', content: '<body></body>' } } };
+      if (init.method === 'PATCH') return { status: 500, body: {} };
+      return { status: 204 };
+    });
+    await expect(new GraphMailProvider(MB, tok, f2).responder(ID, { texto: 'x', html: '<div>A</div>', todos: true, adjuntos: [] })).rejects.toBeTruthy();
+    expect(c2.map((c) => `${c.init.method ?? 'GET'} ${c.url.replace(`${BASE}/messages/`, '')}`)).toEqual([
+      `POST ${encodeURIComponent(ID)}/createReplyAll`,
+      'PATCH DRAFTHTMLBB',
+      'DELETE DRAFTHTMLBB',
+    ]);
+  });
+
   it('categorizar agrega «SynerLink #N» sin borrar las categorías existentes ni repetir', async () => {
     const { f, calls } = fakeFetch((url, init) => (init.method === 'PATCH' ? { status: 200, body: {} } : { body: { categories: ['Rojo'] } }));
     await new GraphMailProvider(MB, tok, f).categorizar(ID, 'SynerLink #7');

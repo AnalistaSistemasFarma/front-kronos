@@ -205,8 +205,8 @@ describe('Correo · acuse al vincular', () => {
 });
 
 describe('Correo · acuse con Microsoft Graph simulado', () => {
-  it('usa /replyAll del buzón de la SESIÓN con el texto en HTML (sin correo real)', async () => {
-    const urls: Array<{ url: string; body: string }> = [];
+  it('createReplyAll del buzón de la SESIÓN → PATCH con la plantilla ENCIMA del historial → send (sin correo real)', async () => {
+    const urls: Array<{ url: string; body: string; method: string }> = [];
     const msg = (id: string, de: string, fecha: string) => ({
       id,
       conversationId: 'conv-graph-1AAAA',
@@ -225,8 +225,14 @@ describe('Correo · acuse con Microsoft Graph simulado', () => {
     });
     const f = vi.fn(async (url: string, init: RequestInit = {}) => {
       if (url.includes('login.microsoftonline.com')) return new Response(JSON.stringify({ access_token: 'APP', expires_in: 3600 }), { status: 200 });
-      urls.push({ url, body: String(init.body ?? '') });
-      if (url.includes('/reply')) return new Response(null, { status: 202 });
+      urls.push({ url, body: String(init.body ?? ''), method: String(init.method ?? 'GET') });
+      if (url.endsWith('/createReplyAll')) {
+        return new Response(
+          JSON.stringify({ id: 'DRAFT-ACUSE-1AAAA', body: { contentType: 'html', content: '<html><head></head><body><div id="divRplyFwdMsg">De: uno</div><p>Hola</p></body></html>' } }),
+          { status: 201 }
+        );
+      }
+      if (url.includes('/DRAFT-ACUSE-1AAAA')) return new Response(null, { status: url.endsWith('/send') ? 202 : 200 });
       if (url.includes('/messages?')) return new Response(JSON.stringify({ value: [msg('graph-msg-1AAAA', 'uno@gsslatam.com', '2026-10-14T10:00:00Z')] }), { status: 200 });
       return new Response(JSON.stringify({ value: [] }), { status: 200 });
     });
@@ -245,12 +251,25 @@ describe('Correo · acuse con Microsoft Graph simulado', () => {
     // Como lo manda la interfaz («Informar en el hilo a todos los participantes»): /replyAll.
     const r = await enviarAcuse(d, yo, { conversationId: 'conv-graph-1AAAA', ...ACUSE_A_TODOS, ip: null });
     expect(r).toMatchObject({ estado: 'ENVIADO', idRequest: 900 });
-    const reply = urls.find((u) => u.url.endsWith('/replyAll'));
-    expect(reply?.url).toBe('https://graph.microsoft.com/v1.0/users/laura%40gsslatam.com/messages/graph-msg-1AAAA/replyAll');
-    const comment = JSON.parse(reply!.body).comment as string;
-    expect(comment).toContain('solicitud #900 — Revisión de contrato en SynerLink.<br>');
-    expect(comment).not.toContain('<script');
-    expect(urls.some((u) => u.url.endsWith('/reply'))).toBe(false);
+    const base = 'https://graph.microsoft.com/v1.0/users/laura%40gsslatam.com/messages';
+    const graph = urls.filter((u) => !u.url.includes('/messages?'));
+    expect(graph.map((u) => `${u.method} ${u.url}`)).toEqual([
+      `POST ${base}/graph-msg-1AAAA/createReplyAll`,
+      `PATCH ${base}/DRAFT-ACUSE-1AAAA`,
+      `POST ${base}/DRAFT-ACUSE-1AAAA/send`,
+    ]);
+    const patch = JSON.parse(graph[1].body) as { body: { contentType: string; content: string } };
+    expect(patch.body.contentType).toBe('HTML');
+    const html = patch.body.content;
+    // La plantilla va dentro de <body>, ANTES del historial citado, que se conserva intacto.
+    expect(html.indexOf('Se creó una solicitud a partir de este correo')).toBeGreaterThan(html.indexOf('<body>'));
+    expect(html.indexOf('Se creó una solicitud a partir de este correo')).toBeLessThan(html.indexOf('<div id="divRplyFwdMsg">De: uno</div><p>Hola</p>'));
+    expect(html).toContain('#900');
+    expect(html).toContain('Revisión de contrato');
+    expect(html).toContain('href="https://synerlink-pruebas.ejemplo.com/process/request-general/view-request?id=900&amp;from=general-requests"');
+    expect(html).not.toContain('<script');
+    // Ni /reply ni /replyAll con comment (texto plano): siempre el borrador con HTML.
+    expect(urls.some((u) => /\/(reply|replyAll)$/.test(u.url))).toBe(false);
   });
 });
 
