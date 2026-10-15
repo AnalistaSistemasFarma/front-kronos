@@ -236,6 +236,7 @@ test.describe('Portal TH · Formación · formulario propio', () => {
     // Las respuestas se ven en la «Vista formador», no en la de estudiante (Cristian, 2026-10-09).
     await page.getByRole('button', { name: 'Vista formador' }).click();
     await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
+    await page.getByTestId('alternar-edicion').click();
     await page.getByRole('button', { name: 'Respuestas', exact: true }).first().click();
     const panel = page.getByTestId('panel-respuestas');
     await expect(panel.getByTestId('conteo-respuestas')).toHaveText(`3 respuesta(s) · ${curso.titulo}`);
@@ -264,6 +265,7 @@ test.describe('Portal TH · Formación · formulario propio', () => {
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/15-vista-estudiante-sin-ver-respuestas.png` });
     await page.getByRole('button', { name: 'Vista formador' }).click();
     await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
+    await page.getByTestId('alternar-edicion').click();
     await expect(page.getByRole('button', { name: 'Respuestas', exact: true }).first()).toBeVisible();
   });
 
@@ -293,6 +295,7 @@ test.describe('Portal TH · Formación · formulario propio', () => {
     await page.goto('/portal/formacion');
     await page.getByRole('button', { name: 'Vista formador' }).click();
     await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
+    await page.getByTestId('alternar-edicion').click();
     await page.getByRole('button', { name: 'Formulario', exact: true }).click();
     const selector = page.getByTestId('selector-formulario');
     await expect(selector.getByRole('combobox', { name: 'Formulario' })).toHaveValue('1');

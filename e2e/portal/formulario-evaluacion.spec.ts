@@ -194,6 +194,7 @@ test.describe('Portal TH · Formación · evaluación', () => {
     await page.goto('/portal/formacion');
     await page.getByRole('button', { name: 'Vista formador' }).click();
     await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
+    await page.getByTestId('alternar-edicion').click();
     await page.getByRole('button', { name: 'Formulario', exact: true }).click();
     const selector = page.getByTestId('selector-formulario');
     await expect(selector.getByTestId('crear-encuesta')).toBeVisible();
@@ -270,6 +271,7 @@ test.describe('Portal TH · Formación · evaluación', () => {
     await page.goto('/portal/formacion');
     await page.getByRole('button', { name: 'Vista formador' }).click();
     await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
+    await page.getByTestId('alternar-edicion').click();
     await page.getByRole('button', { name: 'Formulario', exact: true }).click();
 
     const selector = page.getByTestId('selector-formulario');
