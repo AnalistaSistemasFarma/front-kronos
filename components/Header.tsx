@@ -19,6 +19,7 @@ import {
 import { useState, useEffect, useContext, useMemo } from 'react';
 import { useTheme } from './providers';
 import NotificationBell from './NotificationBell';
+import CorreoHeaderIcon from './correo/CorreoHeaderIcon';
 import ChatRail from './chat/ChatRail';
 import ChatPulse from './chat/ChatPulse';
 import ValentineWallRoot from './valentine/ValentineWallRoot';
@@ -329,6 +330,8 @@ export default function Header() {
                   📳 en cualquier pantalla). No pinta nada. */}
               <ChatPulse />
               <ValentineWallRoot />
+              {/* Acceso directo al Correo (2026-10-15): solo con el permiso del módulo. */}
+              <CorreoHeaderIcon />
               <NotificationBell />
               <ActionIcon
                 variant='subtle'
