@@ -1,5 +1,6 @@
 import type { PrismaClient } from '../../app/generated/prisma';
 import { CORREO_SUBPROCESS_URL, type CorreoAuditAccion, type CorreoTipoMensaje } from './constants';
+import { claveAcuse } from './acuse';
 import { CorreoError } from './errors';
 import type { UsuarioSynerLink } from './rules';
 import type { VinculoHilo } from './types';
@@ -240,7 +241,12 @@ export async function vincularExistente(
 export async function vinculoDeHilo(db: CorreoDb, idUser: string, conversationId: string): Promise<(VinculoHilo & { lastSyncedAt: string | null }) | null> {
   const r = await db.emailThreadLink.findUnique({ where: { id_user_conversation_id: { id_user: idUser, conversation_id: conversationId } } });
   if (!r || r.estado !== 'ACTIVO') return null;
-  return { ...aVinculo(r), lastSyncedAt: r.last_synced_at?.toISOString() ?? null };
+  const v = aVinculo(r);
+  // ¿Ya se informó en el hilo? (la reserva del acuse queda como constancia con su fecha)
+  const acuse = v.idRequest
+    ? await db.emailThreadMessage.findFirst({ where: { id_link: r.id, internet_message_id: claveAcuse(v.idRequest, r.id) }, select: { created_at: true } })
+    : null;
+  return { ...v, lastSyncedAt: r.last_synced_at?.toISOString() ?? null, acuseEnviadoEn: acuse?.created_at.toISOString() ?? null };
 }
 
 /** internetMessageIds ya registrados (en cualquier hilo). */
@@ -265,6 +271,20 @@ export async function registrarCorreo(
     if (esUnico(e)) return false;
     throw e;
   }
+}
+
+/**
+ * Reserva el acuse de una solicitud en un hilo ANTES de enviarlo (idempotencia): una fila
+ * RESPUESTA con la clave sintética «synerlink-acuse:<solicitud>:<vínculo>» en el índice
+ * único global. false → ya se envió (o se está enviando): no se manda dos veces.
+ */
+export async function reservarAcuse(db: CorreoDb, idLink: number, clave: string): Promise<boolean> {
+  return registrarCorreo(db, { idLink, internetMessageId: clave, tipo: 'RESPUESTA', recibido: null });
+}
+
+/** Libera la reserva de un acuse que NO salió (para poder reintentarlo). */
+export async function liberarAcuse(db: CorreoDb, idLink: number, clave: string): Promise<void> {
+  await db.emailThreadMessage.deleteMany({ where: { id_link: idLink, internet_message_id: clave } });
 }
 
 export async function marcarSincronizado(db: CorreoDb, idLink: number): Promise<void> {

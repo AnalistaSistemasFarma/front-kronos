@@ -20,6 +20,10 @@ import {
   vinculosDeSolicitud,
 } from '../../../lib/correo/db';
 import { isCorreoError } from '../../../lib/correo/errors';
+import { readCorreoConfig } from '../../../lib/correo/config';
+import { claveAcuse } from '../../../lib/correo/acuse';
+import { enviarAcuse, type CorreoDeps } from '../../../lib/correo/service';
+import type { MailProvider, MensajeCompleto } from '../../../lib/correo/types';
 
 /**
  * Integración del módulo Correo contra un SQL Server real (CI: `prisma db push`
@@ -140,6 +144,85 @@ describe.skipIf(!url)('Correo · integración con SQL Server', () => {
     await expect(
       prisma.$executeRawUnsafe(`INSERT INTO dbo.email_thread_link (id_user, mailbox, conversation_id, id_request, estado, origen, created_by) VALUES (N'${idA}', N'x', N'CK2-${s}', 1, N'OTRO', N'CREADA', N'${idA}')`)
     ).rejects.toThrow();
+  });
+
+  /** Buzón falso (sin Graph ni correo real): un hilo con un correo del remitente; cuenta los envíos. */
+  function buzonFalso(conv: string, falla = false) {
+    const enviados: string[] = [];
+    const m = {
+      id: `MSG-${s}-AAAA`,
+      conversationId: conv,
+      internetMessageId: `<acuse-origen.${conv}@x>`,
+      asunto: 'Contrato',
+      de: { nombre: 'Uno', correo: 'uno@gsslatam.com' },
+      para: [{ nombre: 'Laura', correo: correoA }],
+      cc: [],
+      fecha: '2026-10-14T10:00:00Z',
+      leido: true,
+      conAdjuntos: false,
+      extracto: '',
+      categorias: [],
+      html: '<p>x</p>',
+      adjuntos: [],
+    } as MensajeCompleto;
+    const prov = {
+      hilo: async () => [m],
+      responder: async (id: string) => {
+        await new Promise((r) => setTimeout(r, 20));
+        if (falla) throw new Error('Graph 503');
+        enviados.push(id);
+      },
+    } as unknown as MailProvider;
+    return { prov, enviados };
+  }
+
+  function depsIT(prov: MailProvider): CorreoDeps {
+    return {
+      db: prisma,
+      cfg: readCorreoConfig({ CORREO_MODO: 'mock' }),
+      kronos: { catalogoEmpresa: async () => ({ categorias: [], procesos: [] }), solicitudVisible: async () => null, insertarNota: async () => 1 },
+      crearSolicitud: async () => ({ id_request: 0, processEmail: null, processEmails: [], taskEmails: [] }),
+      notificarNueva: () => undefined,
+      subirAdjuntos: async () => ({ subidos: 0, fallidos: [] }),
+      dominiosGrupo: ['gsslatam.com'],
+      appBaseUrl: 'https://synerlink-it.local',
+      proveedor: async () => prov,
+    };
+  }
+
+  it('acuse idempotente: con envíos simultáneos sale UNO solo por solicitud e hilo, y queda registrado', async () => {
+    const conv = `CONV-${s}-1`; // vinculado a la 4242 (prueba de conversión)
+    const acceso = (await getCorreoAccess(prisma, correoA))!;
+    const { prov, enviados } = buzonFalso(conv);
+    const d = depsIT(prov);
+    const p = { conversationId: conv, todos: false, confirmarExterno: false, ip: '10.0.0.9' };
+    const r = await Promise.all([enviarAcuse(d, acceso, p), enviarAcuse(d, acceso, p), enviarAcuse(d, acceso, p)]);
+    expect(r.filter((x) => x.estado === 'ENVIADO')).toHaveLength(1);
+    expect(r.filter((x) => x.estado === 'YA_ENVIADO')).toHaveLength(2);
+    expect(enviados).toHaveLength(1);
+    // Un cuarto intento posterior (p. ej. «Reintentar respuesta») tampoco reenvía.
+    expect((await enviarAcuse(d, acceso, p)).estado).toBe('YA_ENVIADO');
+    expect(enviados).toHaveLength(1);
+    const link = await prisma.emailThreadLink.findUnique({ where: { id_user_conversation_id: { id_user: idA, conversation_id: conv } } });
+    const fila = await prisma.emailThreadMessage.findFirst({ where: { internet_message_id: claveAcuse(4242, link!.id) } });
+    expect(fila).toMatchObject({ id_link: link!.id, tipo: 'RESPUESTA' });
+    expect(await prisma.emailAudit.count({ where: { id_user: idA, accion: 'ACUSE_HILO', id_request: 4242 } })).toBe(1);
+  });
+
+  it('acuse fallido: libera la reserva y el reintento envía una sola vez', async () => {
+    const conv = `CONV-${s}-2`;
+    const link = await prisma.emailThreadLink.findUnique({ where: { id_user_conversation_id: { id_user: idA, conversation_id: conv } } });
+    await activarHilo(prisma, link!.id, 4343);
+    const acceso = (await getCorreoAccess(prisma, correoA))!;
+    const p = { conversationId: conv, todos: false, confirmarExterno: false, ip: null };
+    const malo = buzonFalso(conv, true);
+    expect(await enviarAcuse(depsIT(malo.prov), acceso, p)).toMatchObject({ estado: 'ERROR', idRequest: 4343 });
+    expect((await correosRegistrados(prisma, [claveAcuse(4343, link!.id)])).size).toBe(0);
+    expect(await prisma.emailAudit.count({ where: { id_user: idA, accion: 'ACUSE_HILO_FALLIDO', id_request: 4343 } })).toBe(1);
+    const bueno = buzonFalso(conv);
+    expect((await enviarAcuse(depsIT(bueno.prov), acceso, p)).estado).toBe('ENVIADO');
+    expect((await enviarAcuse(depsIT(bueno.prov), acceso, p)).estado).toBe('YA_ENVIADO');
+    expect(bueno.enviados).toHaveLength(1);
   });
 
   it('auditoría inmutable (sin cuerpos de correo)', async () => {
