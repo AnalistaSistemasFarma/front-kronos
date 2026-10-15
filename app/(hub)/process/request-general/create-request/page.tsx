@@ -89,7 +89,10 @@ function readSelectedCompanyId(): string | null {
 }
 import SapOptionSelect from './SapOptionSelect';
 import TableFieldInput from './TableFieldInput';
-import { formatEstimatedPaymentDate } from '../../../../../lib/treasury/estimatedPaymentDate';
+import {
+  formatEstimatedPaymentDate,
+  formatEstimatedPaymentDateShort,
+} from '../../../../../lib/treasury/estimatedPaymentDate';
 import toast from 'react-hot-toast';
 import {
   buildTaskDisplayBadges,
@@ -1236,28 +1239,149 @@ function RequestBoard() {
 
     type TicketKeys = keyof Ticket;
 
-    const columnMapOrdered: { key: TicketKeys; header: string }[] = [
-      { key: "requester", header: "nombre_solicitante" },
-      { key: "subject", header: "cargo" },
-      { key: "description", header: "conocimiento_experiencia_obligatoria" },
-      { key: "email", header: "correo_electronico_firmante_1" },
-      { key: "phone", header: "numero_celular_firmante_1" },
-      { key: "identification", header: "numero_documento_firmante_1" }
-    ];
-    
-    worksheet.columns = columnMapOrdered;
+    const formatDate = (raw: any) => {
+      if (!raw) return '';
+      const d = new Date(raw);
+      if (isNaN(d.getTime())) return String(raw);
+      return new Intl.DateTimeFormat('es-CO', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(d);
+    };
 
-    tickets.forEach((row) => worksheet.addRow(row));
+    const dateKeys: TicketKeys[] = ['created_at', 'date_resolution'];
+
+    const columnMapOrdered: { key: TicketKeys; header: string; width: number }[] = [
+      { key: 'requester', header: 'Solicitante', width: 24 },
+      { key: 'user', header: 'Asignado', width: 24 },
+      { key: 'company', header: 'Empresa', width: 24 },
+      { key: 'process', header: 'Proceso', width: 22 },
+      { key: 'category', header: 'Categoría', width: 22 },
+      { key: 'subject', header: 'Asunto', width: 30 },
+      { key: 'description', header: 'Descripción', width: 40 },
+      { key: 'status', header: 'Estado', width: 18 },
+      { key: 'executor_final', header: 'Ejecutor final', width: 24 },
+      { key: 'resolution', header: 'Resolución', width: 40 },
+      { key: 'date_resolution', header: 'Fecha de resolución', width: 20 },
+      { key: 'created_at', header: 'Fecha de creación', width: 20 },
+    ];
+
+    worksheet.columns = columnMapOrdered;
 
     tickets.forEach(item => {
       const row: Record<TicketKeys, any> = {} as Record<TicketKeys, any>;
 
       columnMapOrdered.forEach(col => {
-        row[col.key] = item[col.key];
+        const value = item[col.key];
+        row[col.key] = dateKeys.includes(col.key) ? formatDate(value) : value;
       });
 
       worksheet.addRow(row);
     });
+
+    worksheet.getRow(1).font = { bold: true };
+
+    // Segunda hoja: "Solicitudes de Pago". Trae los campos extra (pivote de
+    // request_form_value) para las solicitudes del proceso "Solicitud de Pago"
+    // que estén en el panel. El endpoint filtra por proceso, así que basta con
+    // mandarle los ids de los tickets cargados.
+    try {
+      const ids = tickets.map((t) => t.id).filter((n) => Number.isInteger(n));
+      if (ids.length > 0) {
+        const response = await fetch('/api/requests-general/payment-report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids }),
+        });
+
+        if (response.ok) {
+          const paymentRows: Array<{
+            id_solicitud: number;
+            asunto?: string | null;
+            empresa?: string | null;
+            subempresa?: string | null;
+            creador_solicitud?: string | null;
+            estado?: string | null;
+            fecha_creación_solicitud?: string | null;
+            tipo_solicitud?: string | null;
+            subtipo_solicitud?: string | null;
+            valor_pagar?: string | null;
+            fecha_solicitada_pago?: string | null;
+            acreedor?: string | null;
+          }> = await response.json().catch(() => []);
+
+          if (Array.isArray(paymentRows) && paymentRows.length > 0) {
+            const splitAcreedor = (value?: string | null) => {
+              const r = String(value || '').trim();
+              const idx = r.indexOf(' - ');
+              if (idx === -1) return { doc: '', name: r };
+              return { doc: r.slice(0, idx).trim(), name: r.slice(idx + 3).trim() };
+            };
+            const formatReqDate = (raw?: string | null) => {
+              if (!raw) return '';
+              const d = new Date(raw);
+              if (isNaN(d.getTime())) return String(raw);
+              return new Intl.DateTimeFormat('es-CO', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                timeZone: 'UTC',
+              }).format(d);
+            };
+
+            const paySheet = workbook.addWorksheet('Solicitudes de Pago');
+            paySheet.columns = [
+              { key: 'id', header: 'ID Solicitud', width: 12 },
+              { key: 'empresa', header: 'Empresa', width: 24 },
+              { key: 'subempresa', header: 'Subempresa', width: 22 },
+              { key: 'tipo', header: 'Tipo', width: 22 },
+              { key: 'subtipo', header: 'Subtipo', width: 24 },
+              { key: 'documento', header: 'Documento', width: 16 },
+              { key: 'acreedor', header: 'Acreedor', width: 30 },
+              { key: 'valor', header: 'Valor a Pagar', width: 16 },
+              { key: 'fecha_solicitada', header: 'Fecha Solicitada de Pago', width: 22 },
+              { key: 'fecha_estimada', header: 'Fecha Estimada de Pago', width: 24 },
+              { key: 'estado', header: 'Estado', width: 16 },
+              { key: 'solicitante', header: 'Solicitante', width: 24 },
+              { key: 'asunto', header: 'Asunto', width: 30 },
+            ];
+
+            paymentRows.forEach((r) => {
+              const a = splitAcreedor(r.acreedor);
+              const valor = Number(String(r.valor_pagar ?? '').replace(/[^\d.-]/g, ''));
+              paySheet.addRow({
+                id: r.id_solicitud,
+                empresa: r.empresa ?? '',
+                subempresa: r.subempresa ?? '',
+                tipo: r.tipo_solicitud ?? '',
+                subtipo: r.subtipo_solicitud ?? '',
+                documento: a.doc,
+                acreedor: a.name,
+                valor: Number.isFinite(valor) ? valor : '',
+                fecha_solicitada: formatReqDate(r.fecha_solicitada_pago),
+                fecha_estimada: formatEstimatedPaymentDateShort(
+                  r.empresa,
+                  r.fecha_creación_solicitud
+                ),
+                estado: r.estado ?? '',
+                solicitante: r.creador_solicitud ?? '',
+                asunto: r.asunto ?? '',
+              });
+            });
+
+            paySheet.getRow(1).font = { bold: true };
+            paySheet.getColumn('valor').numFmt = '#,##0';
+          }
+        } else {
+          console.error('No se pudo obtener el reporte de pagos:', response.status);
+        }
+      }
+    } catch (e) {
+      console.error('Error generando la hoja de Solicitudes de Pago:', e);
+    }
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], {
