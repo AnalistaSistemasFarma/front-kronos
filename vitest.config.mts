@@ -32,6 +32,8 @@ export default defineConfig({
       'app/api/bitacora-proceso/**/*.test.ts',
       // `app/api/firma-gss/**`: «Mi firma» en GSS Firma (solo la propia, reautenticación, imagen saneada).
       'app/api/firma-gss/**/*.test.ts',
+      // `app/api/correo/**`: módulo Correo (sesión y permiso, aislamiento por persona, límites; Graph simulado).
+      'app/api/correo/**/*.test.ts',
       'components/sgc/**/*.test.ts',
     ],
     exclude: ['node_modules', '.next', 'mcp', 'dist'],
@@ -80,6 +82,16 @@ export default defineConfig({
         'lib/firma-gss/sniff.ts',
         'lib/firma-gss/miFirma.ts',
         'app/api/firma-gss/**/route.ts',
+        // Módulo Correo: reglas, saneado, Graph, OAuth, cifrado, servicio y rutas (la capa de datos, en integración).
+        'lib/correo/config.ts',
+        'lib/correo/crypto.ts',
+        'lib/correo/graph.ts',
+        'lib/correo/oauth.ts',
+        'lib/correo/rules.ts',
+        'lib/correo/sanitize.ts',
+        'lib/correo/service.ts',
+        'lib/correo/mock.ts',
+        'app/api/correo/**/route.ts',
       ],
       exclude: [
         '**/__tests__/**',

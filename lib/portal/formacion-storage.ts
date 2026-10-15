@@ -479,24 +479,68 @@ export async function obtenerArchivoSubidoEnCarpeta(
  * Descarga un archivo por su driveItemId para servirlo por el portal (proxy):
  * el navegador nunca ve una URL de SharePoint.
  */
+/**
+ * Un solo rango de bytes (`bytes=0-1023`, `bytes=500-`, `bytes=-500`). Lo que no sea eso (varios rangos, otra unidad,
+ * basura) se IGNORA y se entrega el archivo completo: es lo que haría un servidor sin soporte de rangos.
+ */
+export function rangoValido(encabezado: string | null | undefined): string | null {
+  const t = (encabezado ?? '').trim();
+  const m = /^bytes=(\d{0,15})-(\d{0,15})$/.exec(t);
+  if (!m || (m[1] === '' && m[2] === '')) return null;
+  if (m[1] !== '' && m[2] !== '' && Number(m[1]) > Number(m[2])) return null;
+  return t;
+}
+
+export interface ArchivoDescargado {
+  cuerpo: ReadableStream<Uint8Array> | null;
+  /** Bytes de ESTA respuesta (si se pidió un rango, solo los de ese tramo). */
+  tamano: number | null;
+  mime: string | null;
+  /** 200 = completo; 206 = el tramo pedido; 416 = rango fuera del archivo. */
+  estado: 200 | 206 | 416;
+  /** `bytes <inicio>-<fin>/<total>` (206) o `bytes asterisco/<total>` (416). */
+  contentRange: string | null;
+}
+
+/**
+ * Descarga un archivo por su driveItemId para servirlo por el portal (proxy):
+ * el navegador nunca ve una URL de SharePoint.
+ *
+ * RANGOS (Cristian, 2026-10-14): un video MP4 largo suele traer su índice (`moov`) al FINAL del archivo. Sin soporte
+ * de rangos el navegador tiene que bajar TODO el video antes de saber su duración (pantalla negra y 00:00 / 00:00,
+ * y el `moov` de un archivo de 800 MB no llega nunca). Con `rango` se le pasa a SharePoint, que responde 206.
+ * `signal` corta la descarga a SharePoint cuando el navegador cierra la conexión (al adelantar o cerrar el visor).
+ */
 export async function descargarArchivoFormacion(
   driveItemId: string,
-  deps: { config?: ConfigFormacionSharePoint; fetch?: Fetch } = {}
-): Promise<{ cuerpo: ReadableStream<Uint8Array> | null; tamano: number | null; mime: string | null }> {
+  deps: { config?: ConfigFormacionSharePoint; fetch?: Fetch; rango?: string | null; signal?: AbortSignal } = {}
+): Promise<ArchivoDescargado> {
   if (!/^[A-Za-z0-9!._-]{1,200}$/.test(driveItemId)) throw new FormacionStorageError('Id de archivo no válido.');
   const cfg = deps.config ?? leerConfigFormacion();
   const f = deps.fetch ?? fetch;
   const token = await obtenerToken(cfg, f);
+  const rango = rangoValido(deps.rango);
   const res = await f(
     `${GRAPH}/sites/${encodeURIComponent(cfg.siteId)}/drive/items/${encodeURIComponent(driveItemId)}/content`,
-    { headers: { Authorization: `Bearer ${token}` }, redirect: 'follow' }
+    {
+      headers: { Authorization: `Bearer ${token}`, ...(rango ? { Range: rango } : {}) },
+      redirect: 'follow',
+      ...(deps.signal ? { signal: deps.signal } : {}),
+    }
   );
+  if (res.status === 416) {
+    await res.body?.cancel().catch(() => undefined);
+    return { cuerpo: null, tamano: null, mime: null, estado: 416, contentRange: res.headers.get('content-range') };
+  }
   if (!res.ok) throw new FormacionStorageError(`Graph no entregó el archivo (${res.status}).`, res.status);
   const largo = Number(res.headers.get('content-length'));
+  const parcial = res.status === 206 && rango !== null;
   return {
     cuerpo: res.body,
     tamano: Number.isFinite(largo) && largo > 0 ? largo : null,
     mime: res.headers.get('content-type'),
+    estado: parcial ? 206 : 200,
+    contentRange: parcial ? res.headers.get('content-range') : null,
   };
 }
 

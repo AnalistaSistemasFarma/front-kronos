@@ -84,6 +84,7 @@ import {
   removeFromAttachmentCache,
 } from '../../../../../lib/attachments/pendingOptimistic';
 import AiSummarizeButton from './AiSummarizeButton';
+import CorreoHiloVinculado from '../../../../../components/correo/CorreoHiloVinculado';
 import {
   TABLE_FIELD_TYPE,
   parseTableConfig,
@@ -2479,6 +2480,8 @@ function ViewRequestPage() {
                       muestra si el navegador soporta la API. */}
                   <Group mt='sm'>
                     <AiSummarizeButton request={request} notes={notes} tasks={taskRQ} />
+                    {/* Módulo Correo: hilo de Outlook propio vinculado a esta solicitud. */}
+                    <CorreoHiloVinculado requestId={id} />
                   </Group>
                 </div>
 
@@ -2586,17 +2589,9 @@ function ViewRequestPage() {
                       <IconCheck size={18} className='text-green-6' />
                       Resolución de la Solicitud - Finalizar Solicitud
                     </Title>
-                    {!isRequestResolved() && isEditing && canEdit && (
-                      <ActionIcon
-                        variant='subtle'
-                        onClick={() => setShowResolution(!showResolution)}
-                      >
-                        {showResolution ? <IconX size={16} /> : <IconCheck size={16} />}
-                      </ActionIcon>
-                    )}
                   </Group>
 
-                  {!isRequestResolved() && isEditing && showResolution && canEdit && (
+                  {!isRequestResolved() && isEditing && canEdit && (
                     <Stack>
                       <Select
                         label='Estado de la solicitud'

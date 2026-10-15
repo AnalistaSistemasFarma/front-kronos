@@ -26,6 +26,9 @@ function idDesdeParametro(valor: string): number | null {
 /**
  * Sirve el ARCHIVO de un material tipo DOCUMENT.
  *
+ * Soporta RANGOS de bytes (`Range: bytes=…` → 206 con `Content-Range`), imprescindibles para reproducir un video largo
+ * cuyo índice MP4 está al final del archivo (Cristian, 2026-10-14). Se pasan a SharePoint, que los atiende.
+ *
  * Desde 2026-09-30 el archivo vive en SharePoint (FORMACION) y este endpoint
  * hace de PROXY con la sesión del portal: el navegador nunca recibe una URL de
  * SharePoint. Los materiales subidos ANTES del cambio (sin
@@ -56,14 +59,26 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const disposicion = `inline; filename*=UTF-8''${encodeURIComponent(material.file_name ?? 'material')}`;
 
     if (material.sp_drive_item_id) {
-      const archivo = await descargarArchivoFormacion(material.sp_drive_item_id);
+      const archivo = await descargarArchivoFormacion(material.sp_drive_item_id, {
+        rango: request.headers.get('range'),
+        // Si el navegador cierra la conexión (adelantó el video o cerró el visor) se corta la descarga a SharePoint.
+        signal: request.signal,
+      });
+      if (archivo.estado === 416) {
+        return new NextResponse(null, {
+          status: 416,
+          headers: { 'Accept-Ranges': 'bytes', ...(archivo.contentRange ? { 'Content-Range': archivo.contentRange } : {}) },
+        });
+      }
       const headers: Record<string, string> = {
         'Content-Type': material.mime || archivo.mime || 'application/octet-stream',
         'Content-Disposition': disposicion,
         'Cache-Control': 'private, max-age=300',
+        'Accept-Ranges': 'bytes',
       };
       if (archivo.tamano) headers['Content-Length'] = String(archivo.tamano);
-      return new NextResponse(archivo.cuerpo, { headers });
+      if (archivo.contentRange) headers['Content-Range'] = archivo.contentRange;
+      return new NextResponse(archivo.cuerpo, { status: archivo.estado, headers });
     }
 
     // Material anterior al cambio a SharePoint: bytes en la base (en desuso).
