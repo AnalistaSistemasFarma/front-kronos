@@ -92,6 +92,10 @@ export default async function config(phase: string): Promise<NextConfig> {
     return {
       ...nextConfig,
       experimental: { ...nextConfig.experimental, webpackMemoryOptimizations: true },
+      // Aun así seguía subiendo a 4+ GB en una jornada (2026-10-15). Soltar antes las páginas
+      // compiladas que no se usan (por defecto 60 s y 5 páginas): volver a una página vieja
+      // la recompila, pero la memoria no se acumula durante el día.
+      onDemandEntries: { maxInactiveAge: 25 * 1000, pagesBufferLength: 2 },
     };
   }
 

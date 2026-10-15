@@ -35,6 +35,7 @@ import {
   IconMoon,
 } from '@tabler/icons-react';
 import { useTheme } from '../../../components/providers';
+import StartPageSection from '../../../components/profile/StartPageSection';
 import { CustomColorPicker } from '../../../components/theme/CustomColorPicker';
 import { FONTS } from '../../../lib/theme/fonts';
 import { PALETTES } from '../../../lib/theme/palettes';
@@ -592,6 +593,9 @@ export default function ProfileSettingsPage() {
               </div>
             </Stack>
           </Card>
+
+          {/* Accesibilidad: página de inicio personalizada (2026-10-15) */}
+          <StartPageSection onResultado={mostrarResultado} />
 
           {/* Change Password Section */}
           <Card withBorder padding='lg' radius='md'>

@@ -1,16 +1,18 @@
 'use client';
 
-import { Text } from '@mantine/core';
+import { IconCalendar } from '@tabler/icons-react';
 import { useSolicitadoData } from './SolicitadoShell';
 import { getFilterLabel } from '../../lib/dashboard/dateRange';
+import { panelStyles } from '../ui/panel/Panel';
 
-/** Solo la línea de fechas (sin sticky). */
+/** Línea de periodo encima del título grande. */
 export default function SolicitadoPeriodLabel() {
   const { dateFilter, appliedRange } = useSolicitadoData();
 
   return (
-    <Text size='sm' c='dimmed' fw={500} mb='xs'>
+    <span className={panelStyles.eyebrow}>
+      <IconCalendar size={15} stroke={2} />
       {getFilterLabel(dateFilter)} · {appliedRange}
-    </Text>
+    </span>
   );
 }

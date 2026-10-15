@@ -1,9 +1,8 @@
 'use client';
 
 import { useMemo } from 'react';
-import { Alert, Box, Group, Paper, Text, ThemeIcon } from '@mantine/core';
+import { Alert, Box, Group, Paper, Text } from '@mantine/core';
 import {
-  IconChartLine,
   IconMinus,
   IconTrendingDown,
   IconTrendingUp,
@@ -18,6 +17,7 @@ import {
   type TimeTrendSummary,
 } from '../../lib/request-general/solicitadoAnalytics';
 import type { ResolutionTrend } from '../../lib/dashboard/resolutionTimeSeries';
+import { panelStyles } from '../ui/panel/Panel';
 
 function resolveTrend(changePct: number | null | undefined): ResolutionTrend | null {
   if (changePct == null) return null;
@@ -89,36 +89,25 @@ export function PersonalTimeTrendBlock({
 
   if (!chart || points.length === 0) {
     return (
-      <Paper p='md' radius='lg' withBorder style={{ borderColor: palette.blue100 }}>
-        <Text fw={700} mb={4} style={{ color: palette.primary }}>
-          {title}
-        </Text>
-        <Text size='xs' c='dimmed' mb='md'>
-          {description}
-        </Text>
+      <div className={panelStyles.card}>
+        <h3 className={panelStyles.cardTitle}>{title}</h3>
+        <p className={panelStyles.cardHint}>{description}</p>
         <Alert color='gray' variant='light'>
           {emptyMessage}
         </Alert>
-      </Paper>
+      </div>
     );
   }
 
   return (
-    <Paper p='md' radius='lg' withBorder style={{ borderColor: palette.blue100 }}>
+    <div className={panelStyles.card}>
       <Group justify='space-between' align='flex-start' wrap='wrap' gap='sm' mb='md'>
-        <Group gap='sm' align='flex-start' style={{ flex: 1, minWidth: 200 }}>
-          <ThemeIcon size={44} radius='md' variant='gradient' gradient={palette.gradient}>
-            <IconChartLine size={22} />
-          </ThemeIcon>
-          <Box>
-            <Text fw={700} style={{ color: palette.primary }}>
-              {title}
-            </Text>
-            <Text size='xs' c='dimmed' mt={2}>
-              {description}
-            </Text>
-          </Box>
-        </Group>
+        <Box style={{ flex: 1, minWidth: 200 }}>
+          <h3 className={panelStyles.cardTitle}>{title}</h3>
+          <p className={panelStyles.cardHint} style={{ marginBottom: 0 }}>
+            {description}
+          </p>
+        </Box>
 
         {last ? (
           <Paper
@@ -216,7 +205,7 @@ export function PersonalTimeTrendBlock({
         </Text>{' '}
         = más rápido
       </Text>
-    </Paper>
+    </div>
   );
 }
 

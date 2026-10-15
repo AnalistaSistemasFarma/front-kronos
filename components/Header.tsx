@@ -51,19 +51,23 @@ export default function Header() {
   const loadingDashboardAdmin = dashboardAdmin?.loadingDashboardAdmin ?? false;
   const hasSolicitanteAccess = roleNav?.hasSolicitanteAccess ?? false;
   const hasSolicitadoAccess = roleNav?.hasSolicitadoAccess ?? false;
+  const hasEquipoAccess = roleNav?.hasEquipoAccess ?? false;
   const loadingRoleNav = roleNav?.loadingRoleNav ?? false;
   const solicitanteUrl =
     roleNav?.solicitanteUrl ?? '/process/request-general/dashboard-solicitante';
-  const solicitadoUrl =
+  const solicitadoBaseUrl =
     roleNav?.solicitadoUrl ?? '/process/request-general/dashboard-solicitado';
   const { theme, toggleTheme } = useTheme();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const showDashboardNav = !loadingDashboardAdmin && isDashboardAdmin;
   const showSolicitanteNav = !loadingRoleNav && hasSolicitanteAccess;
-  const showSolicitadoNav = !loadingRoleNav && hasSolicitadoAccess;
+  // El Dashboard personal también lo ve el líder sin el permiso: entra directo a «Mi equipo».
+  const showSolicitadoNav = !loadingRoleNav && (hasSolicitadoAccess || hasEquipoAccess);
+  const solicitadoUrl =
+    hasSolicitadoAccess || !hasEquipoAccess ? solicitadoBaseUrl : `${solicitadoBaseUrl}/equipo`;
   const [dashMenuOpen, setDashMenuOpen] = useState(false);
   const isSolicitanteActive = pathname.startsWith(solicitanteUrl);
-  const isSolicitadoActive = pathname.startsWith(solicitadoUrl);
+  const isSolicitadoActive = pathname.startsWith(solicitadoBaseUrl);
   const isRoleDashActive = isSolicitanteActive || isSolicitadoActive;
 
   const homeUrl = showSolicitadoNav

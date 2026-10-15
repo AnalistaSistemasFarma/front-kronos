@@ -6,8 +6,6 @@ import {
   Alert,
   Badge,
   Group,
-  Paper,
-  SimpleGrid,
   Stack,
   Table,
   Text,
@@ -25,7 +23,7 @@ import {
   IconTrendingUp,
 } from '@tabler/icons-react';
 import { ChartContainer } from '../dashboard/ChartContainer';
-import { ChartCard } from '../dashboard/actividades/ActividadesUi';
+import { PanelCard, panelStyles as ps } from '../ui/panel/Panel';
 import { useChartViewport } from '../dashboard/useChartViewport';
 import {
   buildAreaLineChart,
@@ -64,7 +62,8 @@ function formatDate(value?: string | null) {
   return d.toLocaleDateString('es-CO');
 }
 
-export function SolicitadoActividadesView() {
+/** `showList=false`: sin la tabla (en «Mi trabajo» las pendientes ya van en lista). */
+export function SolicitadoActividadesView({ showList = true }: { showList?: boolean } = {}) {
   const router = useRouter();
   const { activities, activityCounts } = useSolicitadoData();
   const entranceKey = useSolicitadoChartEntranceKey();
@@ -135,7 +134,7 @@ export function SolicitadoActividadesView() {
 
   return (
     <>
-      <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing='md' mb='md'>
+      <div className={ps.grid4} style={{ marginBottom: 16 }}>
         <PersonalInsightCard
           label='Mi tiempo promedio'
           value={
@@ -168,13 +167,12 @@ export function SolicitadoActividadesView() {
           icon={<IconBuilding size={20} />}
           color='teal'
         />
-      </SimpleGrid>
+      </div>
 
-      <SimpleGrid cols={{ base: 1, lg: 2 }} spacing='md' mb='md'>
-        <ChartCard
+      <div className={ps.grid2} style={{ marginBottom: 16 }}>
+        <PanelCard
           title='Mi demora por proceso'
           description='Cuánto te demoras en promedio en actividades de cada proceso'
-          height='auto'
         >
           {timeByProcessChart ? (
             <ChartContainer
@@ -204,12 +202,11 @@ export function SolicitadoActividadesView() {
               Cuando completes actividades verás aquí tu tiempo por proceso.
             </Alert>
           )}
-        </ChartCard>
+        </PanelCard>
 
-        <ChartCard
+        <PanelCard
           title='Empresas de mis actividades'
           description='Distribución de tus tareas por empresa'
-          height='auto'
         >
           {companyPie ? (
             <ChartContainer
@@ -224,14 +221,13 @@ export function SolicitadoActividadesView() {
               Sin empresas asociadas todavía.
             </Alert>
           )}
-        </ChartCard>
-      </SimpleGrid>
+        </PanelCard>
+      </div>
 
-      <SimpleGrid cols={{ base: 1, lg: 2 }} spacing='md' mb='md'>
-        <ChartCard
+      <div className={ps.grid2} style={{ marginBottom: 16 }}>
+        <PanelCard
           title='Actividades por proceso'
           description='En qué procesos tienes más carga'
-          height='auto'
         >
           {countByProcessChart ? (
             <ChartContainer
@@ -248,12 +244,11 @@ export function SolicitadoActividadesView() {
               Aún no hay actividades para graficar.
             </Alert>
           )}
-        </ChartCard>
+        </PanelCard>
 
-        <ChartCard
+        <PanelCard
           title='Cada cuándo me asignan una'
           description='Frecuencia de nuevas actividades asignadas a ti'
-          height='auto'
         >
           {frequencyChart ? (
             <ChartContainer
@@ -280,8 +275,8 @@ export function SolicitadoActividadesView() {
               Sin fechas de inicio suficientes.
             </Alert>
           )}
-        </ChartCard>
-      </SimpleGrid>
+        </PanelCard>
+      </div>
 
       <PersonalTimeTrendBlock
         title='Cómo va mi tiempo en actividades'
@@ -291,7 +286,8 @@ export function SolicitadoActividadesView() {
         entranceKey={`trend-${entranceKey}`}
       />
 
-      <Paper shadow='sm' p='md' radius='lg' withBorder mt='md'>
+      {showList ? (
+      <div className={ps.card} style={{ marginTop: 16 }}>
         <Group justify='space-between' mb='md' wrap='wrap'>
           <Group gap='xs'>
             <ThemeIcon variant='light' color='violet' radius='md'>
@@ -367,7 +363,8 @@ export function SolicitadoActividadesView() {
             </Table>
           </div>
         )}
-      </Paper>
+      </div>
+      ) : null}
     </>
   );
 }
