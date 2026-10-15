@@ -723,15 +723,33 @@ function RequestBoard() {
 
     type TicketKeys = keyof Ticket;
 
-    const columnMapOrdered: { key: TicketKeys; header: string }[] = [
-      { key: "requester", header: "nombre_solicitante" },
-      { key: "subject", header: "cargo" },
-      { key: "description", header: "conocimiento_experiencia_obligatoria" },
-      { key: "email", header: "correo_electronico_firmante_1" },
-      { key: "phone", header: "numero_celular_firmante_1" },
-      { key: "identification", header: "numero_documento_firmante_1" }
+    const formatDate = (raw: any) => {
+      if (!raw) return '';
+      const d = new Date(raw);
+      if (isNaN(d.getTime())) return String(raw);
+      return new Intl.DateTimeFormat('es-CO', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(d);
+    };
+
+    const dateKeys: TicketKeys[] = ['created_at'];
+
+    const columnMapOrdered: { key: TicketKeys; header: string; width: number }[] = [
+      { key: 'requester', header: 'Solicitante', width: 24 },
+      { key: 'user', header: 'Asignado', width: 24 },
+      { key: 'company', header: 'Empresa', width: 24 },
+      { key: 'process', header: 'Proceso', width: 22 },
+      { key: 'category', header: 'Categoría', width: 22 },
+      { key: 'subject', header: 'Asunto', width: 30 },
+      { key: 'description', header: 'Descripción', width: 40 },
+      { key: 'status', header: 'Estado', width: 18 },
+      { key: 'created_at', header: 'Fecha de creación', width: 20 },
     ];
-    
+
     worksheet.columns = columnMapOrdered;
 
     // Una fila por solicitud (antes se agregaba cada una dos veces).
@@ -739,11 +757,14 @@ function RequestBoard() {
       const row: Record<TicketKeys, any> = {} as Record<TicketKeys, any>;
 
       columnMapOrdered.forEach(col => {
-        row[col.key] = item[col.key];
+        const value = item[col.key];
+        row[col.key] = dateKeys.includes(col.key) ? formatDate(value) : value;
       });
 
       worksheet.addRow(row);
     });
+
+    worksheet.getRow(1).font = { bold: true };
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], {
