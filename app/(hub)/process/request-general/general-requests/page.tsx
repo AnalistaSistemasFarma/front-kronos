@@ -3,6 +3,8 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 import Link from 'next/link';
 import {
   Title,
@@ -545,6 +547,61 @@ function RequestGeneralPage() {
       </Text>
     )
   );
+
+  async function exportToExcel() {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Datos');
+
+    type TicketKeys = keyof Ticket;
+
+    const formatDate = (raw: any) => {
+      if (!raw) return '';
+      const d = new Date(raw);
+      if (isNaN(d.getTime())) return String(raw);
+      return new Intl.DateTimeFormat('es-CO', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(d);
+    };
+
+    const dateKeys: TicketKeys[] = ['created_at'];
+
+    const columnMapOrdered: { key: TicketKeys; header: string; width: number }[] = [
+      { key: 'requester', header: 'Solicitante', width: 24 },
+      { key: 'user', header: 'Asignado', width: 24 },
+      { key: 'company', header: 'Empresa', width: 24 },
+      { key: 'category', header: 'Categoría', width: 22 },
+      { key: 'subject', header: 'Asunto', width: 30 },
+      { key: 'description', header: 'Descripción', width: 40 },
+      { key: 'status', header: 'Estado', width: 18 },
+      { key: 'created_at', header: 'Fecha de creación', width: 20 },
+    ];
+
+    worksheet.columns = columnMapOrdered;
+
+    tickets.forEach(item => {
+      const row: Record<TicketKeys, any> = {} as Record<TicketKeys, any>;
+
+      columnMapOrdered.forEach(col => {
+        const value = item[col.key];
+        row[col.key] = dateKeys.includes(col.key) ? formatDate(value) : value;
+      });
+
+      worksheet.addRow(row);
+    });
+
+    worksheet.getRow(1).font = { bold: true };
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+
+    saveAs(blob, 'InformeSolicitudes.xlsx');
+  }
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>

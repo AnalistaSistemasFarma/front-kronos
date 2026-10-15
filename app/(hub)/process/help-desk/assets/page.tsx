@@ -774,60 +774,70 @@ function AssetsBoard() {
             </Button>
           </Flex>
 
-          <Grid>
+          {/*
+            Grid de CSS puro con auto-fit en vez de Grid/Grid.Col con breakpoints
+            (base/xs/sm/md/lg): el número de tarjetas por fila se recalcula de
+            forma continua según el ancho real disponible, sin puntos de quiebre
+            fijos donde todo "salta" de layout al redimensionar. Cada tarjeta
+            nunca baja de 170px, así que el valor de "Costo Equipos" (montos
+            largos) tiene espacio para no recortarse.
+          */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+              gap: 'var(--mantine-spacing-md)',
+            }}
+          >
             {summaryCards.map((card) => {
               const clickable = card.statusId !== undefined;
               const active = clickable && filters.estado === card.statusId;
               return (
-                <Grid.Col key={card.label} span={{ base: 12, xs: 6, sm: 4, lg: 2 }}>
-                  <Card
-                    p='md'
-                    radius='md'
-                    withBorder
-                    role={clickable ? 'button' : undefined}
-                    aria-label={clickable ? `Filtrar por ${card.label}` : undefined}
-                    onClick={clickable ? () => filterByStatus(card.statusId as string) : undefined}
-                    style={{
-                      cursor: clickable ? 'pointer' : 'default',
-                      height: '100%',
-                      backgroundColor: `var(--mantine-color-${card.color}-light)`,
-                      borderColor: active
-                        ? `var(--mantine-color-${card.color}-filled)`
-                        : 'transparent',
-                      borderWidth: 2,
-                      transition: 'border-color 150ms ease',
-                    }}
-                  >
-                    <Group wrap='nowrap'>
-                      <card.Icon size={24} color={`var(--mantine-color-${card.color}-light-color)`} />
-                      <div style={{ minWidth: 0 }}>
-                        <Text size='xs' c={`var(--mantine-color-${card.color}-light-color)`}>
-                          {card.label}
-                        </Text>
-                        <Text size='lg' fw={600} style={{ wordBreak: 'break-word' }}>
-                          {card.value}
-                        </Text>
-                      </div>
-                    </Group>
-                  </Card>
-                </Grid.Col>
+                <Card
+                  key={card.label}
+                  p='md'
+                  radius='md'
+                  withBorder
+                  role={clickable ? 'button' : undefined}
+                  aria-label={clickable ? `Filtrar por ${card.label}` : undefined}
+                  onClick={clickable ? () => filterByStatus(card.statusId as string) : undefined}
+                  style={{
+                    cursor: clickable ? 'pointer' : 'default',
+                    backgroundColor: `var(--mantine-color-${card.color}-light)`,
+                    borderColor: active
+                      ? `var(--mantine-color-${card.color}-filled)`
+                      : 'transparent',
+                    borderWidth: 2,
+                    transition: 'border-color 150ms ease',
+                  }}
+                >
+                  <Group wrap='nowrap'>
+                    <card.Icon size={24} color={`var(--mantine-color-${card.color}-light-color)`} />
+                    <div style={{ minWidth: 0 }}>
+                      <Text size='xs' c={`var(--mantine-color-${card.color}-light-color)`}>
+                        {card.label}
+                      </Text>
+                      <Text size='lg' fw={600} style={{ wordBreak: 'break-word' }}>
+                        {card.value}
+                      </Text>
+                    </div>
+                  </Group>
+                </Card>
               );
             })}
 
-            <Grid.Col span={{ base: 12, xs: 6, sm: 4, lg: 2 }}>
-              <Card p='md' radius='md' withBorder style={{ height: '100%' }}>
-                <Button
-                  onClick={() => exportToExcel()}
-                  fullWidth
-                  h='100%'
-                  leftSection={<IconDownload size={18} />}
-                  className='bg-green-500 hover:bg-green-700'
-                >
-                  XLSX
-                </Button>
-              </Card>
-            </Grid.Col>
-          </Grid>
+            <Card p='md' radius='md' withBorder>
+              <Button
+                onClick={() => exportToExcel()}
+                fullWidth
+                h='100%'
+                leftSection={<IconDownload size={18} />}
+                className='bg-green-500 hover:bg-green-700'
+              >
+                XLSX
+              </Button>
+            </Card>
+          </div>
         </Card>
 
         {error && (
