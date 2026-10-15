@@ -115,6 +115,45 @@ describe.skipIf(!url)('Correo · integración con SQL Server', () => {
     await reservarHilo(prisma, { idUser: idA, mailbox: correoA, conversationId: `CONV-${s}-2`, asunto: 'y', correos: [{ internetMessageId: `<m2.${s}@x>`, recibido: null }] });
   });
 
+  it('correo enviado a sí mismo: dos copias con el mismo internetMessageId no chocan entre sí', async () => {
+    const imid = `<propio.${s}@x>`;
+    const r = await reservarHilo(prisma, {
+      idUser: idA,
+      mailbox: correoA,
+      conversationId: `CONV-${s}-propio`,
+      asunto: 'prueba 2',
+      correos: [{ internetMessageId: imid, recibido: null }, { internetMessageId: imid, recibido: null }],
+      solicitudExiste: async () => true,
+    });
+    expect(await prisma.emailThreadMessage.count({ where: { id_link: r.idLink } })).toBe(1);
+    await liberarHilo(prisma, r.idLink);
+  });
+
+  it('duplicado VIGENTE: el error trae el número de la solicitud', async () => {
+    const imid = `<vig.${s}@x>`;
+    const r = await reservarHilo(prisma, { idUser: idA, mailbox: correoA, conversationId: `CONV-${s}-vig`, asunto: 'x', correos: [{ internetMessageId: imid, recibido: null }] });
+    await activarHilo(prisma, r.idLink, 5151);
+    const e = await reservarHilo(prisma, { idUser: idB, mailbox: correoB, conversationId: `OTRO-${s}-vig`, asunto: 'x', correos: [{ internetMessageId: imid, recibido: null }], solicitudExiste: async () => true }).catch((x) => x);
+    expect(e).toMatchObject({ code: 'DUPLICADO', idRequest: 5151 });
+    expect(String(e.message)).toContain('#5151');
+  });
+
+  it('vínculo huérfano (solicitud borrada o reserva caída) no bloquea: se limpia y se crea', async () => {
+    const imid = `<huerf.${s}@x>`;
+    const conv = `CONV-${s}-huerf`;
+    const r = await reservarHilo(prisma, { idUser: idA, mailbox: correoA, conversationId: conv, asunto: 'x', correos: [{ internetMessageId: imid, recibido: null }] });
+    await activarHilo(prisma, r.idLink, 999999901);
+    // La solicitud ya no existe: mismo hilo y mismo correo se pueden volver a convertir.
+    const r2 = await reservarHilo(prisma, { idUser: idA, mailbox: correoA, conversationId: conv, asunto: 'x', correos: [{ internetMessageId: imid, recibido: null }], solicitudExiste: async () => false });
+    expect(r2.limpiados).toEqual([r.idLink]);
+    expect(await prisma.emailThreadLink.count({ where: { id: r.idLink } })).toBe(0);
+    // Reserva en CREANDO que quedó colgada hace más de 5 minutos: también se limpia.
+    await prisma.emailThreadLink.update({ where: { id: r2.idLink }, data: { created_at: new Date(Date.now() - 10 * 60_000) } });
+    const r3 = await reservarHilo(prisma, { idUser: idB, mailbox: correoB, conversationId: `OTRO-${s}-huerf`, asunto: 'x', correos: [{ internetMessageId: imid, recibido: null }], solicitudExiste: async () => true });
+    expect(r3.limpiados).toEqual([r2.idLink]);
+    await liberarHilo(prisma, r3.idLink);
+  });
+
   it('aislamiento: los vínculos de una persona no los ve otra', async () => {
     const conv = `CONV-${s}-1`;
     expect((await vinculosDeHilos(prisma, idA, [conv])).get(conv)?.idRequest).toBe(4242);
@@ -180,7 +219,7 @@ describe.skipIf(!url)('Correo · integración con SQL Server', () => {
     return {
       db: prisma,
       cfg: readCorreoConfig({ CORREO_MODO: 'mock' }),
-      kronos: { catalogoEmpresa: async () => ({ categorias: [], procesos: [] }), solicitudVisible: async () => null, insertarNota: async () => 1 },
+      kronos: { catalogoEmpresa: async () => ({ categorias: [], procesos: [] }), solicitudVisible: async () => null, solicitudExiste: async () => true, insertarNota: async () => 1 },
       crearSolicitud: async () => ({ id_request: 0, processEmail: null, processEmails: [], taskEmails: [] }),
       notificarNueva: () => undefined,
       subirAdjuntos: async () => ({ subidos: 0, fallidos: [] }),

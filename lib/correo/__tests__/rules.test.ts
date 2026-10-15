@@ -55,6 +55,17 @@ describe('Correo · reglas de la simulación', () => {
     expect(sugerirProceso('Hola', procesos, 999)).toEqual({ id: null, por: null });
   });
 
+  it('correo enviado a sí mismo: la copia de Enviados y la de Bandeja de entrada (mismo internetMessageId) son UN correo', () => {
+    const g = agruparPorHilo([
+      msg({ id: 'INBOXAAAAA', internetMessageId: '<propio@x>', fecha: '2026-10-15T20:50:35Z' }),
+      msg({ id: 'SENTAAAAAA', internetMessageId: '<propio@x>', fecha: '2026-10-15T20:50:34Z' }),
+    ]);
+    expect(g).toHaveLength(1);
+    expect(g[0]).toHaveLength(1);
+    const f = filaDesdeHilo(g[0], ctx());
+    expect(f.mensajesIds).toHaveLength(1);
+  });
+
   it('agrupa por hilo, del más antiguo al más reciente', () => {
     const g = agruparPorHilo([msg({ id: 'B', fecha: '2026-10-15T00:00:00Z' }), msg({ id: 'X', conversationId: 'OTROAAAAAA' }), msg({ id: 'A', fecha: '2026-10-13T00:00:00Z' })]);
     expect(g.map((x) => x.map((m) => m.id))).toEqual([['A', 'B'], ['X']]);

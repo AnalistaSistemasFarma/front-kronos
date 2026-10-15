@@ -165,35 +165,125 @@ export interface Reclamo {
 }
 
 /**
+ * Una reserva en CREANDO más vieja que esto es un intento que murió a mitad de camino
+ * (proceso caído, compensación fallida): ya no bloquea y se limpia al reintentar.
+ */
+export const RESERVA_HUERFANA_MS = 5 * 60_000;
+
+/** ¿La solicitud existe todavía en requests_general? */
+export type SolicitudExiste = (idRequest: number) => Promise<boolean>;
+
+type FilaVinculo = { id: number; id_request: number | null; estado: string; created_at: Date };
+
+/** Mensaje de duplicado con el número de la solicitud (la UI ofrece abrirla). */
+export function errorDuplicado(idRequest: number | null): CorreoError {
+  return idRequest
+    ? new CorreoError(`Este correo ya fue convertido en la solicitud #${idRequest}.`, 409, 'DUPLICADO', idRequest)
+    : new CorreoError('Este correo ya fue convertido en una solicitud.', 409, 'DUPLICADO');
+}
+
+/**
+ * Estado real de un vínculo: VIGENTE (ACTIVO con la solicitud existente), EN_CURSO (reserva
+ * reciente) u HUERFANO (ACTIVO cuya solicitud ya no existe, o reserva vieja que nunca se activó).
+ */
+async function estadoVinculo(l: FilaVinculo, existe: SolicitudExiste | undefined, ahora: number): Promise<'VIGENTE' | 'EN_CURSO' | 'HUERFANO'> {
+  if (l.estado === 'ACTIVO') {
+    if (!l.id_request) return 'HUERFANO';
+    // Sin verificador (llamadores antiguos) se asume que existe: nunca se borra por duda.
+    return !existe || (await existe(l.id_request)) ? 'VIGENTE' : 'HUERFANO';
+  }
+  return ahora - l.created_at.getTime() > RESERVA_HUERFANA_MS ? 'HUERFANO' : 'EN_CURSO';
+}
+
+/** Borra un vínculo huérfano y sus correos registrados (para poder volver a convertir). */
+async function limpiarVinculo(db: CorreoDb, idLink: number): Promise<void> {
+  await db.$transaction(async (tx) => {
+    await tx.emailThreadMessage.deleteMany({ where: { id_link: idLink } });
+    await tx.emailThreadLink.deleteMany({ where: { id: idLink } });
+  });
+}
+
+/**
  * Reserva el hilo ANTES de crear la solicitud (idempotencia): crea el vínculo en
- * estado CREANDO y registra los correos de origen. Si el hilo ya está vinculado
- * para este usuario, o alguno de los correos ya pertenece a otra solicitud,
- * responde 409 sin crear nada.
+ * estado CREANDO y registra los correos de origen en UNA transacción. Bloquea (409) solo
+ * si el hilo o alguno de los correos pertenece a una solicitud que TODAVÍA EXISTE (el
+ * error trae su número) o a una conversión en curso. Los vínculos huérfanos (solicitud
+ * borrada o intento caído a mitad de camino) se limpian y se permite crear.
+ *
+ * Las copias de un mismo correo (p. ej. «Enviados» y «Bandeja de entrada» cuando la
+ * persona se escribe a sí misma) comparten internetMessageId: se registran UNA vez.
  */
 export async function reservarHilo(
   db: CorreoDb,
-  p: { idUser: string; mailbox: string; conversationId: string; asunto: string; correos: Array<{ internetMessageId: string; recibido: string | null }> }
-): Promise<Reclamo> {
+  p: {
+    idUser: string;
+    mailbox: string;
+    conversationId: string;
+    asunto: string;
+    correos: Array<{ internetMessageId: string; recibido: string | null }>;
+    solicitudExiste?: SolicitudExiste;
+  }
+): Promise<Reclamo & { limpiados: number[] }> {
+  const ahora = Date.now();
+  const limpiados: number[] = [];
+  const correos = [
+    ...new Map(
+      p.correos
+        .filter((c) => c.internetMessageId)
+        .map((c) => ({ ...c, internetMessageId: c.internetMessageId.slice(0, 512) }))
+        .map((c) => [c.internetMessageId, c] as const)
+    ).values(),
+  ];
+
   const existente = await db.emailThreadLink.findUnique({
     where: { id_user_conversation_id: { id_user: p.idUser, conversation_id: p.conversationId } },
   });
-  if (existente?.estado === 'ACTIVO') throw new CorreoError(`Este hilo ya está vinculado a la solicitud #${existente.id_request}.`, 409, 'DUPLICADO');
-  if (existente) throw new CorreoError('Este hilo se está convirtiendo en este momento. Espere unos segundos.', 409, 'EN_CURSO');
+  if (existente) {
+    const e = await estadoVinculo(existente, p.solicitudExiste, ahora);
+    if (e === 'VIGENTE') throw errorDuplicado(existente.id_request);
+    if (e === 'EN_CURSO') throw new CorreoError('Este hilo se está convirtiendo en este momento. Espere unos segundos.', 409, 'EN_CURSO');
+    await limpiarVinculo(db, existente.id);
+    limpiados.push(existente.id);
+  }
+
+  // Correos ya registrados en OTROS vínculos (de esta u otra persona).
+  if (correos.length) {
+    const previos = await db.emailThreadMessage.findMany({
+      where: { internet_message_id: { in: correos.map((c) => c.internetMessageId) } },
+      select: { link: { select: { id: true, id_request: true, estado: true, created_at: true } } },
+    });
+    const vinculos = new Map(previos.map((r) => [r.link.id, r.link] as const));
+    for (const l of vinculos.values()) {
+      if (limpiados.includes(l.id)) continue;
+      const e = await estadoVinculo(l, p.solicitudExiste, ahora);
+      if (e === 'VIGENTE') throw errorDuplicado(l.id_request);
+      if (e === 'EN_CURSO') throw new CorreoError('Este correo se está convirtiendo en este momento. Espere unos segundos.', 409, 'EN_CURSO');
+      await limpiarVinculo(db, l.id);
+      limpiados.push(l.id);
+    }
+  }
+
   try {
-    return await db.$transaction(async (tx) => {
-      const link = await tx.emailThreadLink.create({
+    const link = await db.$transaction(async (tx) => {
+      const l = await tx.emailThreadLink.create({
         data: { id_user: p.idUser, mailbox: p.mailbox, conversation_id: p.conversationId, estado: 'CREANDO', origen: 'CREADA', asunto: p.asunto.slice(0, 255), created_by: p.idUser },
       });
-      for (const c of p.correos) {
-        if (!c.internetMessageId) continue;
+      for (const c of correos) {
         await tx.emailThreadMessage.create({
-          data: { id_link: link.id, internet_message_id: c.internetMessageId.slice(0, 512), tipo: 'ORIGEN', received_at: c.recibido ? new Date(c.recibido) : null },
+          data: { id_link: l.id, internet_message_id: c.internetMessageId, tipo: 'ORIGEN', received_at: c.recibido ? new Date(c.recibido) : null },
         });
       }
-      return { idLink: link.id };
+      return l;
     });
+    return { idLink: link.id, limpiados };
   } catch (e) {
-    if (esUnico(e)) throw new CorreoError('Este correo ya fue convertido en una solicitud.', 409, 'DUPLICADO');
+    // Carrera con otra conversión simultánea: se informa a qué solicitud quedó (si ya la hay).
+    if (esUnico(e)) {
+      const otro = correos.length
+        ? await db.emailThreadMessage.findFirst({ where: { internet_message_id: { in: correos.map((c) => c.internetMessageId) } }, select: { link: { select: { id_request: true } } } })
+        : null;
+      throw errorDuplicado(otro?.link.id_request ?? null);
+    }
     throw e;
   }
 }
@@ -232,7 +322,10 @@ export async function vincularExistente(
     });
     return aVinculo(r);
   } catch (e) {
-    if (esUnico(e)) throw new CorreoError('Este hilo ya está vinculado a una solicitud.', 409, 'DUPLICADO');
+    if (esUnico(e)) {
+      const otro = await db.emailThreadLink.findUnique({ where: { id_user_conversation_id: { id_user: p.idUser, conversation_id: p.conversationId } }, select: { id_request: true } });
+      throw errorDuplicado(otro?.id_request ?? null);
+    }
     throw e;
   }
 }

@@ -270,7 +270,14 @@ export default function SimulacionModal({
         });
         out.push(r);
       } catch (e) {
-        out.push({ conversationId: f.conversationId, ok: false, error: e instanceof Error ? e.message : String(e), duplicado: (e as { code?: string }).code === 'DUPLICADO' });
+        const err = e as { code?: string; idRequest?: number };
+        out.push({
+          conversationId: f.conversationId,
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+          duplicado: err.code === 'DUPLICADO',
+          ...(err.code === 'DUPLICADO' && typeof err.idRequest === 'number' ? { idRequest: err.idRequest } : {}),
+        });
       }
       setCreando({ hechas: out.length, total: lote.length });
     }
@@ -350,8 +357,16 @@ export default function SimulacionModal({
             </Text>
           ))}
           {fallidas.map((r) => (
-            <Text size='sm' c='red.8' key={r.conversationId}>
+            <Text size='sm' c='red.8' key={r.conversationId} data-testid='correo-sim-fallida'>
               {asunto(r.conversationId)}: {r.error}
+              {r.duplicado && r.idRequest ? (
+                <>
+                  {' '}
+                  <Anchor href={urlSolicitud(r.idRequest)} target='_blank' data-testid='correo-sim-abrir-existente'>
+                    Abrir la solicitud #{r.idRequest}
+                  </Anchor>
+                </>
+              ) : null}
             </Text>
           ))}
         </Stack>
