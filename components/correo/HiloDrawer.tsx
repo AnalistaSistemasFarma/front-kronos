@@ -8,6 +8,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Divider,
   Drawer,
   FileInput,
@@ -37,6 +38,7 @@ import {
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { CORREO_MAX_ADJUNTO_RESPUESTA_BYTES, CORREO_MAX_ADJUNTOS_RESPUESTA } from '../../lib/correo/constants';
+import type { ResultadoAcuse } from '../../lib/correo/types';
 import { correoApi, fechaLarga, PREVISUALIZABLES, tamano, urlAdjunto, urlSolicitud, type HiloVista } from './correoClient';
 import HtmlSeguro from './HtmlSeguro';
 
@@ -56,7 +58,7 @@ export interface HiloDrawerProps {
   envioHabilitado?: boolean;
 }
 
-type Resultado = { color: 'green' | 'red' | 'yellow'; texto: string } | null;
+type Resultado = { color: 'green' | 'red' | 'yellow'; texto: string; reintentarAcuse?: { confirmarExterno: boolean } } | null;
 
 export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, onCambio, envioHabilitado = true }: HiloDrawerProps) {
   const desktop = useMediaQuery('(min-width: 48em)') ?? true;
@@ -72,6 +74,9 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
   const [sincronizando, setSincronizando] = useState(false);
   const [idVincular, setIdVincular] = useState<number | string>('');
   const [vinculando, setVinculando] = useState(false);
+  const [acuseVincular, setAcuseVincular] = useState(true);
+  const [acuseTodos, setAcuseTodos] = useState(false);
+  const [reintentando, setReintentando] = useState(false);
 
   const cargar = useCallback(
     async (conRemotas: boolean) => {
@@ -98,6 +103,8 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
     setArchivos([]);
     setTodos(false);
     setIdVincular('');
+    setAcuseVincular(true);
+    setAcuseTodos(false);
     if (conversationId) void cargar(false);
   }, [conversationId, cargar]);
 
@@ -144,12 +151,39 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
     }
   };
 
+  /** Mensaje del vínculo + estado del acuse (con «Reintentar respuesta» si no salió). */
+  const resultadoAcuse = (base: string, a: ResultadoAcuse | undefined): Resultado => {
+    if (!a || a.estado === 'DESHABILITADO') return { color: 'green', texto: base };
+    if (a.estado === 'ENVIADO' || a.estado === 'YA_ENVIADO') return { color: 'green', texto: `${base} Se respondió en el hilo con el número del caso.` };
+    const reintentable = a.estado === 'ERROR' || a.codigo === 'EXTERNO_SIN_CONFIRMAR';
+    return {
+      color: 'yellow',
+      texto: `${base} No se respondió en el hilo: ${a.mensaje ?? 'error'}`,
+      ...(reintentable ? { reintentarAcuse: { confirmarExterno: a.codigo === 'EXTERNO_SIN_CONFIRMAR' } } : {}),
+    };
+  };
+
+  const reintentarAcuse = async (confirmarExterno: boolean) => {
+    if (!hilo) return;
+    setReintentando(true);
+    try {
+      const { acuse } = await correoApi.reintentarAcuse(hilo.conversationId, acuseTodos, confirmarExterno);
+      setResultado(resultadoAcuse('', acuse));
+      onCambio();
+    } catch (e) {
+      setResultado({ color: 'red', texto: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setReintentando(false);
+    }
+  };
+
   const vincular = async () => {
     if (!hilo || !Number(idVincular)) return;
     setVinculando(true);
     try {
-      const r = await correoApi.vincular(hilo.conversationId, Number(idVincular));
-      setResultado({ color: 'green', texto: `Hilo vinculado a la solicitud #${r.vinculo.idRequest}.` });
+      const enviar = envioHabilitado && acuseVincular;
+      const r = await correoApi.vincular(hilo.conversationId, Number(idVincular), enviar ? { enviar: true, todos: acuseTodos, confirmarExterno: false } : undefined);
+      setResultado(resultadoAcuse(`Hilo vinculado a la solicitud #${r.vinculo.idRequest}.`, r.acuse));
       onCambio();
       void cargar(remotas);
     } catch (e) {
@@ -183,7 +217,23 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
             onClose={() => setResultado(null)}
             data-testid='correo-hilo-resultado'
           >
-            {resultado.texto}
+            <Stack gap={6}>
+              <Text size='sm'>{resultado.texto.trim()}</Text>
+              {resultado.reintentarAcuse && (
+                <Group>
+                  <Button
+                    size='xs'
+                    variant='light'
+                    color='orange'
+                    loading={reintentando}
+                    onClick={() => reintentarAcuse(resultado.reintentarAcuse!.confirmarExterno)}
+                    data-testid='correo-hilo-reintentar-acuse'
+                  >
+                    {resultado.reintentarAcuse.confirmarExterno ? 'Confirmar y responder' : 'Reintentar respuesta'}
+                  </Button>
+                </Group>
+              )}
+            </Stack>
           </Alert>
         )}
         {error && (
@@ -246,6 +296,24 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
                       Vincular a una existente
                     </Button>
                   </Group>
+                  {envioHabilitado && (
+                    <Group gap='md' wrap='wrap'>
+                      <Checkbox
+                        size='xs'
+                        label='Al vincular, responder automáticamente en el hilo'
+                        checked={acuseVincular}
+                        onChange={(e) => setAcuseVincular(e.currentTarget.checked)}
+                        data-testid='correo-hilo-acuse'
+                      />
+                      <Checkbox
+                        size='xs'
+                        label='Responder a todos'
+                        checked={acuseTodos}
+                        disabled={!acuseVincular}
+                        onChange={(e) => setAcuseTodos(e.currentTarget.checked)}
+                      />
+                    </Group>
+                  )}
                 </Stack>
               </Card>
             )}

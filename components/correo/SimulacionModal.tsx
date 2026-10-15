@@ -8,11 +8,13 @@ import {
   Button,
   Card,
   Checkbox,
+  Collapse,
   Group,
   Loader,
   Modal,
   Progress,
   ScrollArea,
+  SegmentedControl,
   Select,
   Stack,
   Switch,
@@ -23,10 +25,11 @@ import {
   Tooltip,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { IconAlertTriangle, IconCheck, IconFlask, IconPaperclip, IconRefresh, IconX } from '@tabler/icons-react';
+import { IconAlertTriangle, IconCheck, IconFlask, IconMailForward, IconPaperclip, IconRefresh, IconX } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import SgcSelect from '../sgc/SgcSelect';
-import { ALERTA_TEXTO, type AlertaFila, type FilaSimulacion, type ResultadoCreacion } from '../../lib/correo/types';
+import { rutaSolicitud, textoAcuse } from '../../lib/correo/acuse';
+import { ALERTA_TEXTO, type AlertaFila, type FilaSimulacion, type ResultadoAcuse, type ResultadoCreacion } from '../../lib/correo/types';
 import { correoApi, tamano, urlSolicitud, type CategoriaCorreo, type ProcesoCorreo } from './correoClient';
 import { categoriaDeProceso, opcionesCategorias, opcionesProcesos, opcionesProcesosAgrupadas } from './catalogoOpciones';
 
@@ -39,8 +42,25 @@ import { categoriaDeProceso, opcionesCategorias, opcionesProcesos, opcionesProce
 
 const PRED_KEY = 'correo:proceso-predeterminado';
 
-/** idCategoria: solo del navegador, para la cascada Categoría → Proceso (como «Nueva solicitud»). */
-type Fila = FilaSimulacion & { adjuntosElegidos: string[]; idCategoria: number | null };
+/**
+ * idCategoria: solo del navegador, para la cascada Categoría → Proceso (como «Nueva solicitud»).
+ * acuse: responder en el hilo al crear (sigue la casilla global; se puede cambiar por fila). En
+ * una fila de remitente EXTERNO arranca apagado y marcarlo es la confirmación explícita.
+ */
+type Fila = FilaSimulacion & { adjuntosElegidos: string[]; idCategoria: number | null; acuse: boolean; verAcuse: boolean };
+
+const esExterna = (f: Pick<FilaSimulacion, 'alertas'>) => f.alertas.includes('EXTERNO');
+
+/** Texto de la vista previa: el mismo del servidor, con el número aún por asignar. */
+function previaAcuse(titulo: string, firma: string, idCompany: number): string {
+  const origen = typeof window !== 'undefined' ? window.location.origin : '';
+  return textoAcuse({ id: '(número)', titulo, enlace: `${origen}${rutaSolicitud(0).replace('id=0', 'id=(número)')}`, firma, idCompany });
+}
+
+/** ¿El acuse de este resultado necesita atención (aviso + «Reintentar respuesta»)? */
+function acuseConAviso(a: ResultadoAcuse | undefined): boolean {
+  return Boolean(a && (a.estado === 'ERROR' || a.estado === 'OMITIDO'));
+}
 
 function leerPred(empresa: number): number | null {
   try {
@@ -112,10 +132,24 @@ export interface SimulacionModalProps {
   idOperador?: string;
   /** Marcar en Outlook con «SynerLink #N» (Mail.ReadWrite) habilitado en el ambiente. */
   etiquetarHabilitado?: boolean;
+  /** Responder desde SynerLink (CORREO_ENVIO_HABILITADO): sin él no hay acuse en el hilo. */
+  envioHabilitado?: boolean;
+  /** Nombre de quien crea (firma del acuse en la vista previa). */
+  nombreOperador?: string;
   onClose: (huboCreadas: boolean) => void;
 }
 
-export default function SimulacionModal({ opened, mensajesIds, empresas, empresaInicial, idOperador, etiquetarHabilitado = true, onClose }: SimulacionModalProps) {
+export default function SimulacionModal({
+  opened,
+  mensajesIds,
+  empresas,
+  empresaInicial,
+  idOperador,
+  etiquetarHabilitado = true,
+  envioHabilitado = true,
+  nombreOperador = '',
+  onClose,
+}: SimulacionModalProps) {
   const desktop = useMediaQuery('(min-width: 62em)') ?? false;
   const [empresa, setEmpresa] = useState(empresaInicial);
   const [pred, setPred] = useState<number | null>(null);
@@ -125,6 +159,10 @@ export default function SimulacionModal({ opened, mensajesIds, empresas, empresa
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [etiquetar, setEtiquetar] = useState(true);
+  const [acuseGlobal, setAcuseGlobal] = useState(true);
+  const acuseGlobalRef = useRef(true);
+  const [acuseTodos, setAcuseTodos] = useState(false);
+  const [reintentando, setReintentando] = useState<string | null>(null);
   const [creando, setCreando] = useState<{ hechas: number; total: number } | null>(null);
   const [resultados, setResultados] = useState<ResultadoCreacion[] | null>(null);
 
@@ -136,7 +174,15 @@ export default function SimulacionModal({ opened, mensajesIds, empresas, empresa
         const r = await correoApi.simular(mensajesIds, emp, procPred);
         setProcesos(r.procesos);
         setCategorias(r.categorias ?? []);
-        setFilas(r.filas.map((f) => ({ ...f, adjuntosElegidos: f.adjuntos.map((a) => a.id), idCategoria: categoriaDeProceso(r.procesos, f.idProcess) })));
+        setFilas(
+          r.filas.map((f) => ({
+            ...f,
+            adjuntosElegidos: f.adjuntos.map((a) => a.id),
+            idCategoria: categoriaDeProceso(r.procesos, f.idProcess),
+            acuse: acuseGlobalRef.current && !esExterna(f),
+            verAcuse: false,
+          }))
+        );
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setFilas([]);
@@ -199,6 +245,8 @@ export default function SimulacionModal({ opened, mensajesIds, empresas, empresa
           descripcion: f.descripcion,
           adjuntosIds: f.adjuntosElegidos,
           etiquetar: etiquetar && etiquetarHabilitado,
+          // Fila externa: marcar «Responder» en ella ES la confirmación explícita.
+          acuse: { enviar: envioHabilitado && f.acuse, todos: acuseTodos, confirmarExterno: f.acuse && esExterna(f) },
         });
         out.push(r);
       } catch (e) {
@@ -213,10 +261,58 @@ export default function SimulacionModal({ opened, mensajesIds, empresas, empresa
     else toast.error(`Se crearon ${ok} de ${out.length} solicitudes. Revise el detalle.`);
   };
 
+  /** Casilla global: la aplica a todas las filas (las externas siguen apagadas hasta confirmarlas una a una). */
+  const cambiarAcuseGlobal = (v: boolean) => {
+    setAcuseGlobal(v);
+    acuseGlobalRef.current = v;
+    setFilas((prev) => prev.map((f) => ({ ...f, acuse: v && !esExterna(f) })));
+  };
+
+  const reintentarAcuse = async (r: ResultadoCreacion) => {
+    const confirmar = r.acuse?.codigo === 'EXTERNO_SIN_CONFIRMAR';
+    setReintentando(r.conversationId);
+    try {
+      const { acuse } = await correoApi.reintentarAcuse(r.conversationId, acuseTodos, confirmar);
+      setResultados((prev) => prev?.map((x) => (x.conversationId === r.conversationId ? { ...x, acuse } : x)) ?? prev);
+      if (acuse.estado === 'ENVIADO' || acuse.estado === 'YA_ENVIADO') toast.success(`Respuesta enviada en el hilo de la solicitud #${r.idRequest}.`);
+      else toast.error(acuse.mensaje ?? 'No se pudo enviar la respuesta.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReintentando(null);
+    }
+  };
+
+  const estadoAcuse = (r: ResultadoCreacion) => {
+    const a = r.acuse;
+    if (!a || a.estado === 'DESHABILITADO') return null;
+    if (a.estado === 'ENVIADO' || a.estado === 'YA_ENVIADO') return <Text span size='sm' c='teal.8'>{' · respuesta enviada en el hilo'}</Text>;
+    return (
+      <Group gap={6} mt={2} wrap='wrap' data-testid='correo-sim-acuse-aviso'>
+        <Text span size='sm' c='orange.8'>
+          <IconAlertTriangle size={14} style={{ verticalAlign: 'middle' }} /> La solicitud quedó creada, pero no se respondió en el hilo: {a.mensaje ?? 'error'}
+        </Text>
+        {(a.estado === 'ERROR' || a.codigo === 'EXTERNO_SIN_CONFIRMAR') && (
+          <Button
+            size='compact-xs'
+            variant='light'
+            color='orange'
+            leftSection={<IconMailForward size={14} />}
+            loading={reintentando === r.conversationId}
+            onClick={() => reintentarAcuse(r)}
+            data-testid='correo-sim-reintentar-acuse'
+          >
+            {a.codigo === 'EXTERNO_SIN_CONFIRMAR' ? 'Confirmar y responder' : 'Reintentar respuesta'}
+          </Button>
+        )}
+      </Group>
+    );
+  };
+
   const resumen = resultados && (() => {
     const ok = resultados.filter((r) => r.ok);
     const fallidas = resultados.filter((r) => !r.ok);
-    const conAvisos = ok.filter((r) => (r.adjuntosFallidos?.length ?? 0) > 0 || r.etiquetado === false);
+    const conAvisos = ok.filter((r) => (r.adjuntosFallidos?.length ?? 0) > 0 || r.etiquetado === false || acuseConAviso(r.acuse));
     const color = fallidas.length ? 'red' : conAvisos.length ? 'yellow' : 'green';
     const asunto = (conv: string) => filas.find((f) => f.conversationId === conv)?.titulo ?? conv;
     return (
@@ -231,6 +327,7 @@ export default function SimulacionModal({ opened, mensajesIds, empresas, empresa
               {r.adjuntosSubidos ? ` · ${r.adjuntosSubidos} adjunto(s)` : ''}
               {r.adjuntosFallidos?.length ? ` · adjuntos con error: ${r.adjuntosFallidos.join('; ')}` : ''}
               {r.etiquetado === false && etiquetar ? ' · no se pudo etiquetar en Outlook' : ''}
+              {estadoAcuse(r)}
             </Text>
           ))}
           {fallidas.map((r) => (
@@ -338,6 +435,36 @@ export default function SimulacionModal({ opened, mensajesIds, empresas, empresa
       </Stack>
     ),
     titulo: <TextInput aria-label='Título' value={f.titulo} maxLength={255} onChange={(e) => actualizar(i, { titulo: e.currentTarget.value })} size='sm' data-testid='correo-sim-titulo' />,
+    acuse: !envioHabilitado ? null : (
+      <Stack gap={4}>
+        <Checkbox
+          size='sm'
+          label={esExterna(f) ? 'Responder (remitente externo: lo confirmo)' : 'Responder en el hilo'}
+          checked={f.acuse}
+          disabled={Boolean(creando)}
+          onChange={(e) => actualizar(i, { acuse: e.currentTarget.checked })}
+          data-testid='correo-sim-acuse-fila'
+        />
+        {f.acuse && (
+          <>
+            <Anchor component='button' type='button' size='xs' onClick={() => actualizar(i, { verAcuse: !f.verAcuse })} data-testid='correo-sim-acuse-ver'>
+              {f.verAcuse ? 'Ocultar vista previa' : 'Ver la respuesta'}
+            </Anchor>
+            <Collapse in={f.verAcuse}>
+              <Text
+                size='xs'
+                p='xs'
+                bg='var(--mantine-color-gray-0)'
+                style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', borderRadius: 'var(--mantine-radius-sm)', border: '1px solid var(--mantine-color-gray-3)' }}
+                data-testid='correo-sim-acuse-previa'
+              >
+                {previaAcuse(f.titulo, nombreOperador, empresa)}
+              </Text>
+            </Collapse>
+          </>
+        )}
+      </Stack>
+    ),
     descripcion: (
       <Textarea aria-label='Descripción' value={f.descripcion} maxLength={1000} autosize minRows={2} maxRows={6} onChange={(e) => actualizar(i, { descripcion: e.currentTarget.value })} size='sm' />
     ),
@@ -435,6 +562,7 @@ export default function SimulacionModal({ opened, mensajesIds, empresas, empresa
                       <Table.Th w={240}>Solicitante</Table.Th>
                       <Table.Th>Título y descripción</Table.Th>
                       <Table.Th w={200}>Adjuntos</Table.Th>
+                      {envioHabilitado && <Table.Th w={220}>Respuesta en el hilo</Table.Th>}
                       <Table.Th w={170}>Alertas</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
@@ -453,6 +581,7 @@ export default function SimulacionModal({ opened, mensajesIds, empresas, empresa
                             </Stack>
                           </Table.Td>
                           <Table.Td>{adjuntosDe(f, i)}</Table.Td>
+                          {envioHabilitado && <Table.Td>{c.acuse}</Table.Td>}
                           <Table.Td>{alertasDe(f)}</Table.Td>
                         </Table.Tr>
                       );
@@ -499,6 +628,17 @@ export default function SimulacionModal({ opened, mensajesIds, empresas, empresa
                           </Text>
                         </Group>
                         {adjuntosDe(f, i)}
+                        {c.acuse && (
+                          <>
+                            <Group gap={4}>
+                              <IconMailForward size={14} />
+                              <Text size='xs' fw={600}>
+                                Respuesta en el hilo
+                              </Text>
+                            </Group>
+                            {c.acuse}
+                          </>
+                        )}
                       </Stack>
                     </Card>
                   );
@@ -512,6 +652,42 @@ export default function SimulacionModal({ opened, mensajesIds, empresas, empresa
                 </Text>
                 <Progress value={(creando.hechas / creando.total) * 100} animated />
               </Stack>
+            )}
+            {envioHabilitado ? (
+              <Card withBorder radius='md' p='sm' data-testid='correo-sim-acuse'>
+                <Stack gap={6}>
+                  <Group justify='space-between' wrap='wrap' gap='sm'>
+                    <Switch
+                      checked={acuseGlobal}
+                      onChange={(e) => cambiarAcuseGlobal(e.currentTarget.checked)}
+                      label='Responder automáticamente en el hilo'
+                      description='Al crear cada solicitud se le responde al remitente con el número del caso y el enlace.'
+                      disabled={Boolean(creando)}
+                      data-testid='correo-sim-acuse-global'
+                    />
+                    <SegmentedControl
+                      size='xs'
+                      value={acuseTodos ? 'todos' : 'remitente'}
+                      onChange={(v) => setAcuseTodos(v === 'todos')}
+                      data={[
+                        { value: 'remitente', label: 'Responder' },
+                        { value: 'todos', label: 'Responder a todos' },
+                      ]}
+                      disabled={Boolean(creando) || !acuseGlobal}
+                      data-testid='correo-sim-acuse-todos'
+                    />
+                  </Group>
+                  {filas.some(esExterna) && (
+                    <Text size='xs' c='dimmed'>
+                      A los remitentes externos no se les responde salvo que lo confirme en su fila.
+                    </Text>
+                  )}
+                </Stack>
+              </Card>
+            ) : (
+              <Text size='xs' c='dimmed' data-testid='correo-sim-acuse-deshabilitado'>
+                La respuesta automática en el hilo no está habilitada en este ambiente.
+              </Text>
             )}
             <Group justify='space-between' wrap='wrap' gap='sm'>
               {etiquetarHabilitado ? (

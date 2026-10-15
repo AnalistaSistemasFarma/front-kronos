@@ -7,7 +7,7 @@ const m = vi.hoisted(() => {
   const names = [
     'getServerSession', 'getCorreoAccess', 'vinculosDeHilos', 'vinculosDeSolicitud', 'buscarUsuariosEmpresa',
     'usuariosPorCorreo', 'usuarioDeEmpresa', 'solicitudesDeCorreos', 'reservarHilo', 'activarHilo', 'liberarHilo', 'vincularExistente', 'vinculoDeHilo',
-    'correosRegistrados', 'registrarCorreo', 'marcarSincronizado', 'hilosParaSincronizar', 'auditar', 'correoDeps',
+    'correosRegistrados', 'registrarCorreo', 'marcarSincronizado', 'hilosParaSincronizar', 'auditar', 'correoDeps', 'reservarAcuse', 'liberarAcuse',
   ] as const;
   return Object.fromEntries(names.map((n) => [n, vi.fn()])) as Record<(typeof names)[number], ReturnType<typeof vi.fn>>;
 });
@@ -36,6 +36,7 @@ import * as crear from '../crear/route';
 import * as usuarios from '../usuarios/route';
 import * as procesos from '../procesos/route';
 import * as vinculos from '../vinculos/route';
+import * as acuse from '../acuse/route';
 import { codificarCursor, limpiarTokensApp } from '../../../../lib/correo/graph';
 
 const yo = {
@@ -118,6 +119,7 @@ describe('Correo · rutas: sesión y permiso', () => {
     ['usuarios', () => usuarios.GET(get('/usuarios?empresa=1'))],
     ['procesos', () => procesos.GET(get('/procesos?empresa=1'))],
     ['vinculos', () => vinculos.GET(get('/vinculos?solicitud=1'))],
+    ['acuse', () => acuse.POST(post('/acuse', {}))],
     ['responder', () => responder.POST(new Request('http://x/api/correo/responder', { method: 'POST', body: new FormData(), headers: H }))],
   ];
 
@@ -206,6 +208,15 @@ describe('Correo · rutas: aislamiento por persona (anti-IDOR)', () => {
     comoUsuario();
     expect((await vincular.POST(post('/hilo/vincular', { conversationId: 'mock-conv-01AAAA' }))).status).toBe(400);
     expect((await vincular.POST(post('/hilo/vincular', { conversationId: 'mock-conv-01AAAA', idRequest: 5 }))).status).toBe(404);
+  });
+
+  it('acuse («Reintentar respuesta»): hilo inválido 400; hilo ajeno o sin vínculo no envía nada', async () => {
+    comoUsuario();
+    expect((await acuse.POST(post('/acuse', { conversationId: '../x' }))).status).toBe(400);
+    const r = await acuse.POST(post('/acuse', { conversationId: 'mock-conv-01AAAA' }));
+    expect(r.status).toBe(200);
+    expect((await r.json()).acuse).toMatchObject({ estado: 'OMITIDO', codigo: 'SIN_VINCULO' });
+    expect(m.reservarAcuse).not.toHaveBeenCalled();
   });
 
   it('notas de un hilo no vinculado: 404', async () => {

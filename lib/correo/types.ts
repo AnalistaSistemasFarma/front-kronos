@@ -135,6 +135,22 @@ export interface ResultadoCreacion {
   adjuntosSubidos?: number;
   adjuntosFallidos?: string[];
   etiquetado?: boolean;
+  /** Acuse automático en el hilo (si se pidió). */
+  acuse?: ResultadoAcuse;
+}
+
+/**
+ * Resultado del acuse automático en el hilo. La solicitud existe en todos los casos:
+ * un ERROR u OMITIDO solo afecta la respuesta, que se puede reintentar.
+ */
+export interface ResultadoAcuse {
+  estado: 'ENVIADO' | 'YA_ENVIADO' | 'OMITIDO' | 'DESHABILITADO' | 'ERROR';
+  /** EXTERNO_SIN_CONFIRMAR: hay destinatarios fuera del grupo y no se confirmó. */
+  codigo?: 'EXTERNO_SIN_CONFIRMAR' | 'NO_SOLICITADO' | 'SIN_VINCULO';
+  mensaje?: string;
+  /** Destinatarios (solo en ENVIADO o EXTERNO_SIN_CONFIRMAR). */
+  para?: string[];
+  idRequest?: number;
 }
 
 export interface VinculoHilo {

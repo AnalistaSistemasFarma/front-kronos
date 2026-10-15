@@ -101,7 +101,7 @@ test.describe('Correo · sin sesión', () => {
     for (const ruta of ['/api/correo', '/api/correo/carpetas', '/api/correo/mensajes', '/api/correo/hilo?id=CONV-01AAAA', '/api/correo/adjunto?mensaje=a&adjunto=b', '/api/correo/usuarios?empresa=1', '/api/correo/vinculos?solicitud=1', '/api/correo/procesos?empresa=1']) {
       expect((await request.get(ruta, { maxRedirects: 0 })).status(), ruta).toBe(401);
     }
-    for (const ruta of ['/api/correo/simular', '/api/correo/crear', '/api/correo/hilo/notas', '/api/correo/hilo/vincular', '/api/correo/responder']) {
+    for (const ruta of ['/api/correo/simular', '/api/correo/crear', '/api/correo/hilo/notas', '/api/correo/hilo/vincular', '/api/correo/responder', '/api/correo/acuse']) {
       expect((await request.post(ruta, { data: {} })).status(), ruta).toBe(401);
     }
   });
@@ -191,6 +191,95 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     expect(creadas[1]).toMatchObject({ idProcess: 20, idSolicitante: 'u2' });
     expect(JSON.stringify(creadas)).not.toMatch(/"idUser"|"mailbox"/);
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/04-resultado.png` });
+  });
+
+  test('acuse en el hilo: casilla global, vista previa, «Responder a todos», externos y «Reintentar respuesta»', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await simular(page);
+    // Fila 2 de un remitente EXTERNO ya completa (sin solicitante sería excluida de todos modos).
+    const filasAcuse = [
+      filas[0],
+      { ...filas[1], remitente: { nombre: 'Asesor', correo: 'asesor@externo-ejemplo.com' }, idProcess: 20, idSolicitante: 'u2', solicitanteNombre: 'Usuario Dos', alertas: ['EXTERNO'], incluir: true },
+    ];
+    await page.route('**/api/correo/simular', (r) => {
+      return r.fulfill({ json: { filas: filasAcuse, categorias: [{ id: 5, categoria: 'Jurídica' }], procesos: [{ id: 10, nombre: 'Elaboración y revisión de contratos', idCategoria: 5, categoria: 'Jurídica' }, { id: 20, nombre: 'Solicitud de poderes', idCategoria: 5, categoria: 'Jurídica' }] } });
+    });
+    const creadas: Array<Record<string, unknown>> = [];
+    await page.route('**/api/correo/crear', (r) => {
+      const body = r.request().postDataJSON();
+      creadas.push(body);
+      const id = 800 + creadas.length;
+      const acuse = creadas.length === 1 ? { estado: 'ERROR', idRequest: id, mensaje: 'Graph 503' } : { estado: 'ENVIADO', idRequest: id, para: ['asesor@externo-ejemplo.com'] };
+      return r.fulfill({ status: 201, json: { conversationId: body.conversationId, ok: true, idRequest: id, adjuntosSubidos: 0, adjuntosFallidos: [], etiquetado: true, acuse } });
+    });
+    const reintentos: Array<Record<string, unknown>> = [];
+    await page.route('**/api/correo/acuse', (r) => {
+      reintentos.push(r.request().postDataJSON());
+      return r.fulfill({ json: { acuse: { estado: 'ENVIADO', idRequest: 801, para: ['uno@gsslatam.com'] } } });
+    });
+
+    await page.goto('/process/correo');
+    await page.getByTestId('correo-seleccionar').first().check();
+    await page.getByTestId('correo-simular').click();
+    const modal = page.getByTestId('correo-simulacion');
+    await expect(modal.getByTestId('correo-sim-fila')).toHaveCount(2);
+    // Global encendida por defecto; la fila externa arranca apagada.
+    await expect(modal.getByTestId('correo-sim-acuse-global')).toBeChecked();
+    const chk = modal.getByTestId('correo-sim-acuse-fila');
+    await expect(chk.nth(0)).toBeChecked();
+    await expect(chk.nth(1)).not.toBeChecked();
+    // Vista previa del texto.
+    await modal.getByTestId('correo-sim-acuse-ver').first().click();
+    const previa = modal.getByTestId('correo-sim-acuse-previa').first();
+    await expect(previa).toContainText('Cordial saludo,');
+    await expect(previa).toContainText('con el número #(número) — Revisión de contrato de arrendamiento');
+    await expect(previa).toContainText('/process/request-general/view-request?id=(número)');
+    await expect(previa).toContainText('Quedamos atentos.');
+    await expect(previa).toContainText('Laura');
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/07-acuse-previa.png` });
+    // Apagar la global apaga todas; encenderla no enciende la externa.
+    await modal.getByTestId('correo-sim-acuse-global').click();
+    await expect(chk.nth(0)).not.toBeChecked();
+    await modal.getByTestId('correo-sim-acuse-global').click();
+    await expect(chk.nth(0)).toBeChecked();
+    await expect(chk.nth(1)).not.toBeChecked();
+    // Confirmar explícitamente la externa y elegir «Responder a todos».
+    await chk.nth(1).check();
+    await modal.getByText('Responder a todos').click();
+    await modal.getByTestId('correo-sim-crear').click();
+    await expect(modal.getByTestId('correo-sim-resultado')).toContainText('Se crearon 2 de 2 solicitudes');
+    expect(creadas[0].acuse).toEqual({ enviar: true, todos: true, confirmarExterno: false });
+    expect(creadas[1].acuse).toEqual({ enviar: true, todos: true, confirmarExterno: true });
+    // Falló el envío de la 801: la solicitud existe, aviso + «Reintentar respuesta».
+    await expect(modal.getByTestId('correo-sim-acuse-aviso')).toContainText('La solicitud quedó creada');
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/08-acuse-aviso.png` });
+    await modal.getByTestId('correo-sim-reintentar-acuse').click();
+    await expect(modal.getByTestId('correo-sim-acuse-aviso')).toHaveCount(0);
+    await expect(modal.getByText('respuesta enviada en el hilo')).toHaveCount(2);
+    expect(reintentos).toEqual([{ conversationId: 'CONV-01AAAA', todos: true, confirmarExterno: false }]);
+  });
+
+  test('acuse: sin CORREO_ENVIO_HABILITADO no se ofrece ni se pide', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const { creadas } = await simular(page);
+    await page.route('**/api/correo', (r) =>
+      r.fulfill({
+        json: {
+          usuario: { id: 'u-op', nombre: 'Laura', email: 'laura@gsslatam.com' },
+          empresas: [{ idCompany: 1, companyName: 'GROUP SHARED SERVICES' }],
+          conexion: { modo: 'graph', disponible: true, correo: 'laura@gsslatam.com', envioHabilitado: false, etiquetarHabilitado: true, sincronizacionAutomatica: false },
+        },
+      })
+    );
+    await page.goto('/process/correo');
+    await page.getByTestId('correo-seleccionar').first().check();
+    await page.getByTestId('correo-simular').click();
+    const modal = page.getByTestId('correo-simulacion');
+    await expect(modal.getByTestId('correo-sim-acuse-deshabilitado')).toBeVisible();
+    await expect(modal.getByTestId('correo-sim-acuse-fila')).toHaveCount(0);
+    await modal.getByTestId('correo-sim-crear').click();
+    await expect(modal.getByTestId('correo-sim-resultado')).toBeVisible();
+    expect((creadas[0] as { acuse: { enviar: boolean } }).acuse.enviar).toBe(false);
   });
 
   test('celular: bandeja en tarjetas, hilo a pantalla completa y simulación en tarjetas', async ({ page }) => {

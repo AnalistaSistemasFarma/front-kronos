@@ -513,6 +513,8 @@ export default function CorreoPage() {
           empresaInicial={idEmpresa}
           idOperador={estado.usuario.id}
           etiquetarHabilitado={estado.conexion.etiquetarHabilitado}
+          envioHabilitado={estado.conexion.envioHabilitado}
+          nombreOperador={estado.usuario.nombre}
           onClose={(huboCreadas) => {
             setSimulacion(null);
             // Se refresca al CERRAR (no durante la creación): el resumen no se desmonta.

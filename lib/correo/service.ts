@@ -16,7 +16,8 @@ import { GraphMailProvider, mailboxForSession, tokenApp } from './graph';
 import { MockMailProvider } from './mock';
 import { agruparPorHilo, filaDesdeHilo, notaDesdeCorreo, notaDesdeRespuesta, type FilaCrear, type ProcesoOpcion } from './rules';
 import { sanitizeEmailHtml } from './sanitize';
-import type { ArchivoAdjunto, Direccion, FilaSimulacion, MailProvider, MensajeCompleto, ResultadoCreacion, VinculoHilo } from './types';
+import { claveAcuse, enlaceSolicitud, textoAcuse, type OpcionesAcuse } from './acuse';
+import type { ArchivoAdjunto, Direccion, FilaSimulacion, MailProvider, MensajeCompleto, ResultadoAcuse, ResultadoCreacion, VinculoHilo } from './types';
 
 /**
  * Orquestación del módulo Correo. Las dependencias se inyectan (base, Graph,
@@ -65,6 +66,8 @@ export interface CorreoDeps {
   /** Sube adjuntos a OneDrive en la carpeta de la solicitud. */
   subirAdjuntos: (idRequest: number, archivos: ArchivoAdjunto[]) => Promise<{ subidos: number; fallidos: string[] }>;
   dominiosGrupo: string[];
+  /** Base absoluta de SynerLink en el ambiente (enlace del acuse), p. ej. NEXTAUTH_URL. */
+  appBaseUrl?: string;
   fetchFn?: typeof fetch;
   now?: () => number;
   /** Proveedor a la medida (pruebas). */
@@ -72,6 +75,15 @@ export interface CorreoDeps {
 }
 
 const now = (d: CorreoDeps) => (d.now ? d.now() : Date.now());
+
+/** Ejecuta un paso secundario sin dejar que su fallo cambie el resultado. */
+async function sinFallar(f: () => unknown): Promise<void> {
+  try {
+    await f();
+  } catch {
+    /* secundario */
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Buzón de la sesión
@@ -169,7 +181,7 @@ async function clasificarPendientes(d: CorreoDeps, acceso: AccesoCorreo, mensaje
   const registrados = await data.correosRegistrados(d.db, mensajes.map((m) => m.internetMessageId));
   const sinRegistrar = mensajes.filter((m) => m.internetMessageId && !registrados.has(m.internetMessageId));
   const respuestas = await d.db.emailAudit.findMany({
-    where: { id_user: acceso.idUser, accion: 'RESPONDER', conversation_id: mensajes[0]?.conversationId ?? '' },
+    where: { id_user: acceso.idUser, accion: { in: ['RESPONDER', 'ACUSE_HILO'] }, conversation_id: mensajes[0]?.conversationId ?? '' },
     select: { created_at: true },
   });
   const tiempos = respuestas.map((r) => r.created_at.getTime());
@@ -252,7 +264,14 @@ export async function sincronizarHilo(
 }
 
 /** Vincula el hilo a una solicitud existente en la que la persona participa. */
-export async function vincularHilo(d: CorreoDeps, acceso: AccesoCorreo, conversationId: string, idRequest: number, ip: string | null): Promise<VinculoHilo> {
+export async function vincularHilo(
+  d: CorreoDeps,
+  acceso: AccesoCorreo,
+  conversationId: string,
+  idRequest: number,
+  ip: string | null,
+  acuse?: OpcionesAcuse
+): Promise<VinculoHilo & { acuse?: ResultadoAcuse }> {
   const sol = await d.kronos.solicitudVisible(acceso.idUser, idRequest);
   if (!sol) throw new CorreoError('No encontró la solicitud o no participa en ella.', 404);
   if (!puedeUsarEmpresa(acceso, sol.idCompany)) throw new CorreoError('La solicitud es de una empresa a la que usted no pertenece.', 403);
@@ -261,7 +280,9 @@ export async function vincularHilo(d: CorreoDeps, acceso: AccesoCorreo, conversa
   if (mensajes.length === 0) throw new CorreoError('No se encontró el hilo en su buzón.', 404);
   const v = await data.vincularExistente(d.db, { idUser: acceso.idUser, mailbox: buzon(acceso), conversationId, idRequest, asunto: sol.asunto });
   await data.auditar(d.db, { idUser: acceso.idUser, accion: 'VINCULAR', conversationId, idRequest, detalle: 'Hilo vinculado a una solicitud existente', ip });
-  return v;
+  if (!acuse?.enviar) return v;
+  const r = await enviarAcuse(d, acceso, { conversationId, ...acuse, ip, prov, titulo: sol.asunto, idCompany: sol.idCompany, hilo: mensajes });
+  return { ...v, acuse: r };
 }
 
 // ---------------------------------------------------------------------------
@@ -356,7 +377,7 @@ export async function simular(
 export async function crearDesdeFila(
   d: CorreoDeps,
   acceso: AccesoCorreo,
-  fila: FilaCrear & { mensajesIds: string[] },
+  fila: FilaCrear & { mensajesIds: string[]; acuse?: OpcionesAcuse },
   ip: string | null
 ): Promise<ResultadoCreacion> {
   if (!puedeUsarEmpresa(acceso, fila.idCompany)) throw new CorreoError('Usted no pertenece a esa empresa.', 403);
@@ -459,7 +480,129 @@ export async function crearDesdeFila(
     detalle: `Empresa ${fila.idCompany}, proceso ${fila.idProcess}, solicitante ${solicitante.id}, ${elegidos.length} correo(s), adjuntos ${subidos}/${fila.adjuntosIds.length}`,
     ip,
   });
-  return { conversationId: fila.conversationId, ok: true, idRequest, adjuntosSubidos: subidos, adjuntosFallidos: fallidos, etiquetado };
+  // Acuse en el hilo: SOLO después de crear la solicitud; nunca la deshace ni lanza.
+  const acuse = fila.acuse?.enviar
+    ? await enviarAcuse(d, acceso, { conversationId: fila.conversationId, ...fila.acuse, ip, prov, titulo: fila.titulo, idCompany: fila.idCompany, hilo })
+    : undefined;
+  return { conversationId: fila.conversationId, ok: true, idRequest, adjuntosSubidos: subidos, adjuntosFallidos: fallidos, etiquetado, ...(acuse ? { acuse } : {}) };
+}
+
+// ---------------------------------------------------------------------------
+// Acuse automático en el hilo
+// ---------------------------------------------------------------------------
+
+/**
+ * Mensaje del hilo al que se responde: el más reciente del remitente de origen (para que el
+ * acuse le llegue a quien pidió); si no hay, el más reciente que no sea de la persona.
+ */
+export function mensajeParaAcuse(hilo: MensajeCompleto[], propio: string): MensajeCompleto | null {
+  const recibidos = [...hilo].sort((a, b) => a.fecha.localeCompare(b.fecha)).filter((m) => m.de.correo.toLowerCase() !== propio);
+  if (recibidos.length === 0) return null;
+  const origen = recibidos[0].de.correo.toLowerCase();
+  return [...recibidos].reverse().find((m) => m.de.correo.toLowerCase() === origen) ?? recibidos[recibidos.length - 1];
+}
+
+/** Destinatarios de la respuesta (como los arma Outlook): el remitente, o todos sin la persona. */
+export function destinatariosAcuse(m: MensajeCompleto, propio: string, todos: boolean): string[] {
+  const base = todos ? [m.de, ...m.para, ...m.cc] : [m.de];
+  return [...new Set(base.map((x) => x.correo.trim().toLowerCase()).filter((c) => c && c !== propio))];
+}
+
+/**
+ * Responde en el hilo que la solicitud quedó creada. Reglas (Nicolás, 2026-10-15):
+ * respeta CORREO_ENVIO_HABILITADO; idempotente por solicitud + hilo (reserva en
+ * email_thread_message ANTES de enviar; si el envío falla, se libera para reintentar);
+ * no va a destinatarios externos sin confirmación explícita; queda en la auditoría y
+ * como nota del caso. NUNCA lanza: la solicitud ya existe y el resultado va al resumen.
+ */
+export async function enviarAcuse(
+  d: CorreoDeps,
+  acceso: AccesoCorreo,
+  p: {
+    conversationId: string;
+    todos: boolean;
+    confirmarExterno: boolean;
+    ip: string | null;
+    prov?: MailProvider;
+    titulo?: string | null;
+    idCompany?: number | null;
+    hilo?: MensajeCompleto[];
+  }
+): Promise<ResultadoAcuse> {
+  if (!d.cfg.envioHabilitado) return { estado: 'DESHABILITADO', mensaje: 'Responder desde SynerLink no está habilitado en este ambiente.' };
+  let reservado: { idLink: number; clave: string } | null = null;
+  let idRequest: number | undefined;
+  try {
+    const vinculo = await data.vinculoDeHilo(d.db, acceso.idUser, p.conversationId);
+    if (!vinculo || !vinculo.idRequest) return { estado: 'OMITIDO', codigo: 'SIN_VINCULO', mensaje: 'El hilo no está vinculado a una solicitud.' };
+    idRequest = vinculo.idRequest;
+    const propio = buzon(acceso);
+    const prov = p.prov ?? (await proveedorDe(d, acceso));
+    const hilo = p.hilo ?? (await prov.hilo(p.conversationId));
+    const destino = mensajeParaAcuse(hilo, propio);
+    if (!destino) return { estado: 'OMITIDO', idRequest, mensaje: 'El hilo no tiene correos recibidos a los cuales responder.' };
+    const para = destinatariosAcuse(destino, propio, p.todos);
+    if (para.length === 0) return { estado: 'OMITIDO', idRequest, mensaje: 'No hay destinatarios para la respuesta.' };
+    const externos = para.filter((c) => !d.dominiosGrupo.includes(c.split('@')[1] ?? ''));
+    if (externos.length > 0 && !p.confirmarExterno) {
+      return {
+        estado: 'OMITIDO',
+        codigo: 'EXTERNO_SIN_CONFIRMAR',
+        idRequest,
+        para: externos,
+        mensaje: `No se respondió: hay destinatarios externos al grupo (${externos.join(', ')}). Confírmelo para enviar.`,
+      };
+    }
+
+    const clave = claveAcuse(vinculo.idRequest, vinculo.id);
+    if (!(await data.reservarAcuse(d.db, vinculo.id, clave))) {
+      return { estado: 'YA_ENVIADO', idRequest, mensaje: 'La respuesta automática ya se había enviado en este hilo.' };
+    }
+    reservado = { idLink: vinculo.id, clave };
+
+    let idCompany = p.idCompany ?? null;
+    let titulo = p.titulo ?? vinculo.asunto ?? '';
+    if (idCompany == null || !titulo) {
+      let sol: Awaited<ReturnType<KronosPort['solicitudVisible']>> = null;
+      try {
+        sol = await d.kronos.solicitudVisible(acceso.idUser, vinculo.idRequest);
+      } catch {
+        sol = null;
+      }
+      idCompany = idCompany ?? sol?.idCompany ?? null;
+      titulo = titulo || sol?.asunto || '';
+    }
+    const texto = textoAcuse({ id: vinculo.idRequest, titulo, enlace: enlaceSolicitud(d.appBaseUrl ?? '', vinculo.idRequest), firma: acceso.nombre, idCompany });
+    await prov.responder(destino.id, { texto, todos: p.todos, adjuntos: [] });
+    // Ya salió: la reserva queda como constancia. Lo que sigue no debe invitar a reenviarlo.
+    reservado = null;
+
+    await sinFallar(() =>
+      data.auditar(d.db, {
+        idUser: acceso.idUser,
+        mailbox: propio,
+        accion: 'ACUSE_HILO',
+        mensajeId: destino.id,
+        conversationId: p.conversationId,
+        internetMessageId: destino.internetMessageId,
+        idRequest: vinculo.idRequest,
+        detalle: `Acuse automático${p.todos ? ' a todos' : ''} enviado (${para.length} destinatario(s))`,
+        ip: p.ip,
+      })
+    );
+    await sinFallar(() =>
+      d.kronos.insertarNota(vinculo.idRequest, notaDesdeRespuesta({ operador: acceso.nombre, para, texto, adjuntos: [], todos: p.todos, automatica: true }, CORREO_MAX_NOTA), acceso.idUser)
+    );
+    return { estado: 'ENVIADO', idRequest, para };
+  } catch (e) {
+    const mensaje = e instanceof Error ? e.message : 'No se pudo enviar la respuesta.';
+    const r = reservado;
+    if (r) await sinFallar(() => data.liberarAcuse(d.db, r.idLink, r.clave));
+    await sinFallar(() =>
+      data.auditar(d.db, { idUser: acceso.idUser, mailbox: buzon(acceso), accion: 'ACUSE_HILO_FALLIDO', conversationId: p.conversationId, idRequest: idRequest ?? null, detalle: mensaje, ip: p.ip })
+    );
+    return { estado: 'ERROR', idRequest, mensaje };
+  }
 }
 
 /** Tarea de fondo (APAGADA por defecto): pasa a notas los correos nuevos de los hilos vinculados. */
