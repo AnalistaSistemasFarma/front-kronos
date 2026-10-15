@@ -100,13 +100,15 @@ describe.skipIf(!url)('Correo · integración con SQL Server', () => {
     const r = await reservarHilo(prisma, { idUser: idA, mailbox: correoA, conversationId: conv, asunto: 'Contrato', correos: [{ internetMessageId: imid, recibido: '2026-10-14T10:00:00Z' }] });
     // Mientras se crea, otra conversión del mismo hilo espera.
     expect(await codigo(reservarHilo(prisma, { idUser: idA, mailbox: correoA, conversationId: conv, asunto: 'x', correos: [] }))).toBe('EN_CURSO');
-    // Otra persona que recibió el MISMO correo no puede crear otra solicitud.
-    expect(await codigo(reservarHilo(prisma, { idUser: idB, mailbox: correoB, conversationId: `OTRO-${s}`, asunto: 'x', correos: [{ internetMessageId: imid, recibido: null }] }))).toBe('DUPLICADO');
+    // Otra persona que recibió el MISMO correo no puede crear otra solicitud (mientras se crea: EN_CURSO).
+    expect(await codigo(reservarHilo(prisma, { idUser: idB, mailbox: correoB, conversationId: `OTRO-${s}`, asunto: 'x', correos: [{ internetMessageId: imid, recibido: null }] }))).toBe('EN_CURSO');
     expect(await prisma.emailThreadLink.count({ where: { id_user: idB } })).toBe(0);
     // Mientras está CREANDO no cuenta como duplicado visible.
     expect((await solicitudesDeCorreos(prisma, [imid])).size).toBe(0);
     await activarHilo(prisma, r.idLink, 4242);
     expect((await solicitudesDeCorreos(prisma, [imid])).get(imid)).toBe(4242);
+    expect(await codigo(reservarHilo(prisma, { idUser: idB, mailbox: correoB, conversationId: `OTRO-${s}`, asunto: 'x', correos: [{ internetMessageId: imid, recibido: null }] }))).toBe('DUPLICADO');
+    expect(await prisma.emailThreadLink.count({ where: { id_user: idB } })).toBe(0);
     expect(await codigo(reservarHilo(prisma, { idUser: idA, mailbox: correoA, conversationId: conv, asunto: 'x', correos: [] }))).toBe('DUPLICADO');
     // Liberar una reserva fallida deja reintentar.
     const r2 = await reservarHilo(prisma, { idUser: idA, mailbox: correoA, conversationId: `CONV-${s}-2`, asunto: 'y', correos: [{ internetMessageId: `<m2.${s}@x>`, recibido: null }] });
