@@ -38,6 +38,7 @@ import {
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { CORREO_MAX_ADJUNTO_RESPUESTA_BYTES, CORREO_MAX_ADJUNTOS_RESPUESTA } from '../../lib/correo/constants';
+import { ACUSE_A_TODOS, ACUSE_ETIQUETA, enlaceSolicitud, textoAcuse } from '../../lib/correo/acuse';
 import type { ResultadoAcuse } from '../../lib/correo/types';
 import { correoApi, fechaLarga, PREVISUALIZABLES, tamano, urlAdjunto, urlSolicitud, type HiloVista } from './correoClient';
 import HtmlSeguro from './HtmlSeguro';
@@ -56,11 +57,13 @@ export interface HiloDrawerProps {
   onCambio: () => void;
   /** Responder desde SynerLink (Mail.Send) habilitado en el ambiente. */
   envioHabilitado?: boolean;
+  /** Nombre de la persona (firma del texto «Informar en el hilo»). */
+  nombreOperador?: string;
 }
 
 type Resultado = { color: 'green' | 'red' | 'yellow'; texto: string; reintentarAcuse?: { confirmarExterno: boolean } } | null;
 
-export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, onCambio, envioHabilitado = true }: HiloDrawerProps) {
+export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, onCambio, envioHabilitado = true, nombreOperador = '' }: HiloDrawerProps) {
   const desktop = useMediaQuery('(min-width: 48em)') ?? true;
   const [hilo, setHilo] = useState<HiloVista | null>(null);
   const [cargando, setCargando] = useState(false);
@@ -75,7 +78,7 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
   const [idVincular, setIdVincular] = useState<number | string>('');
   const [vinculando, setVinculando] = useState(false);
   const [acuseVincular, setAcuseVincular] = useState(true);
-  const [acuseTodos, setAcuseTodos] = useState(false);
+  const [confirmarInforme, setConfirmarInforme] = useState(false);
   const [reintentando, setReintentando] = useState(false);
 
   const cargar = useCallback(
@@ -104,7 +107,7 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
     setTodos(false);
     setIdVincular('');
     setAcuseVincular(true);
-    setAcuseTodos(false);
+    setConfirmarInforme(false);
     if (conversationId) void cargar(false);
   }, [conversationId, cargar]);
 
@@ -154,7 +157,7 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
   /** Mensaje del vínculo + estado del acuse (con «Reintentar respuesta» si no salió). */
   const resultadoAcuse = (base: string, a: ResultadoAcuse | undefined): Resultado => {
     if (!a || a.estado === 'DESHABILITADO') return { color: 'green', texto: base };
-    if (a.estado === 'ENVIADO' || a.estado === 'YA_ENVIADO') return { color: 'green', texto: `${base} Se respondió en el hilo con el número del caso.` };
+    if (a.estado === 'ENVIADO' || a.estado === 'YA_ENVIADO') return { color: 'green', texto: `${base} Se informó en el hilo a todos los participantes.` };
     const reintentable = a.estado === 'ERROR' || a.codigo === 'EXTERNO_SIN_CONFIRMAR';
     return {
       color: 'yellow',
@@ -167,9 +170,11 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
     if (!hilo) return;
     setReintentando(true);
     try {
-      const { acuse } = await correoApi.reintentarAcuse(hilo.conversationId, acuseTodos, confirmarExterno);
+      const { acuse } = await correoApi.reintentarAcuse(hilo.conversationId, ACUSE_A_TODOS.todos, confirmarExterno || ACUSE_A_TODOS.confirmarExterno);
       setResultado(resultadoAcuse('', acuse));
+      setConfirmarInforme(false);
       onCambio();
+      void cargar(remotas);
     } catch (e) {
       setResultado({ color: 'red', texto: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -182,7 +187,7 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
     setVinculando(true);
     try {
       const enviar = envioHabilitado && acuseVincular;
-      const r = await correoApi.vincular(hilo.conversationId, Number(idVincular), enviar ? { enviar: true, todos: acuseTodos, confirmarExterno: false } : undefined);
+      const r = await correoApi.vincular(hilo.conversationId, Number(idVincular), enviar ? ACUSE_A_TODOS : undefined);
       setResultado(resultadoAcuse(`Hilo vinculado a la solicitud #${r.vinculo.idRequest}.`, r.acuse));
       onCambio();
       void cargar(remotas);
@@ -261,6 +266,16 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
                       {hilo.vinculo.origen === 'CREADA' ? ' (creada desde este hilo)' : ''}
                     </Text>
                   </Group>
+                  {envioHabilitado &&
+                    (hilo.vinculo.acuseEnviadoEn ? (
+                      <Button size='xs' variant='default' disabled leftSection={<IconCheck size={14} />} data-testid='correo-hilo-informado'>
+                        Informado el {new Date(hilo.vinculo.acuseEnviadoEn).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}
+                      </Button>
+                    ) : (
+                      <Button size='xs' variant='light' color='teal' onClick={() => setConfirmarInforme((v) => !v)} data-testid='correo-hilo-informar'>
+                        Informar en el hilo
+                      </Button>
+                    ))}
                   {hilo.pendientes > 0 ? (
                     <Button size='xs' leftSection={<IconNotes size={14} />} onClick={agregarNotas} loading={sincronizando} data-testid='correo-hilo-agregar-notas'>
                       Agregar {hilo.pendientes} correo(s) nuevo(s) al caso
@@ -271,6 +286,35 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
                     </Badge>
                   )}
                 </Group>
+                {confirmarInforme && envioHabilitado && !hilo.vinculo.acuseEnviadoEn && (
+                  <Stack gap={6} mt='xs' data-testid='correo-hilo-informar-confirmar'>
+                    <Text size='xs' fw={600}>
+                      Se responderá a todos los participantes del hilo con este texto:
+                    </Text>
+                    <Text
+                      size='xs'
+                      p='xs'
+                      bg='var(--mantine-color-body)'
+                      style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', borderRadius: 'var(--mantine-radius-sm)', border: '1px solid var(--mantine-color-default-border)' }}
+                      data-testid='correo-hilo-informar-previa'
+                    >
+                      {textoAcuse({
+                        id: hilo.vinculo.idRequest,
+                        titulo: hilo.vinculo.asunto ?? hilo.asunto ?? '',
+                        enlace: enlaceSolicitud(typeof window !== 'undefined' ? window.location.origin : '', hilo.vinculo.idRequest),
+                        firma: nombreOperador,
+                      })}
+                    </Text>
+                    <Group gap='xs'>
+                      <Button size='xs' color='teal' loading={reintentando} onClick={() => reintentarAcuse(true)} data-testid='correo-hilo-informar-enviar'>
+                        Enviar a todos
+                      </Button>
+                      <Button size='xs' variant='default' onClick={() => setConfirmarInforme(false)}>
+                        Cancelar
+                      </Button>
+                    </Group>
+                  </Stack>
+                )}
               </Card>
             ) : (
               <Card withBorder radius='md' p='sm' data-testid='correo-hilo-sin-vinculo'>
@@ -297,22 +341,13 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
                     </Button>
                   </Group>
                   {envioHabilitado && (
-                    <Group gap='md' wrap='wrap'>
-                      <Checkbox
-                        size='xs'
-                        label='Al vincular, responder automáticamente en el hilo'
-                        checked={acuseVincular}
-                        onChange={(e) => setAcuseVincular(e.currentTarget.checked)}
-                        data-testid='correo-hilo-acuse'
-                      />
-                      <Checkbox
-                        size='xs'
-                        label='Responder a todos'
-                        checked={acuseTodos}
-                        disabled={!acuseVincular}
-                        onChange={(e) => setAcuseTodos(e.currentTarget.checked)}
-                      />
-                    </Group>
+                    <Checkbox
+                      size='xs'
+                      label={`Al vincular, ${ACUSE_ETIQUETA.charAt(0).toLowerCase()}${ACUSE_ETIQUETA.slice(1)}`}
+                      checked={acuseVincular}
+                      onChange={(e) => setAcuseVincular(e.currentTarget.checked)}
+                      data-testid='correo-hilo-acuse'
+                    />
                   )}
                 </Stack>
               </Card>

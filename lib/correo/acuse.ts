@@ -13,19 +13,28 @@
 
 export const ACUSE_PLANTILLAS = {
   predeterminada: [
-    'Cordial saludo,',
+    'Cordial saludo.',
     '',
-    'Le confirmamos que su solicitud fue registrada en SynerLink con el número #{id} — {titulo}.',
+    'Les informamos que a partir de este hilo de correo se creó la solicitud #{id} — {titulo} en SynerLink.',
     '',
-    'A partir de ahora el seguimiento se hará por SynerLink: {enlace}',
+    'El seguimiento se hará por SynerLink: {enlace}',
     '',
-    'Si necesita agregar información, responda a este mismo correo y quedará como nota del caso.',
+    'Si necesitan agregar información, respondan a este mismo correo y quedará como nota de la solicitud.',
     '',
     'Quedamos atentos.',
     '',
     '{firma}',
   ].join('\n'),
 } as const satisfies Record<string, string>;
+
+/** Rótulo de la casilla y del botón (Nicolás, 2026-10-15 14:23: «informar a todos»). */
+export const ACUSE_ETIQUETA = 'Informar en el hilo a todos los participantes';
+
+/**
+ * Opciones con las que la interfaz informa en el hilo: SIEMPRE «Responder a todos» y con los
+ * participantes externos incluidos (la casilla/botón dice explícitamente «a todos los participantes»).
+ */
+export const ACUSE_A_TODOS: OpcionesAcuse = { enviar: true, todos: true, confirmarExterno: true };
 
 export type ClavePlantillaAcuse = keyof typeof ACUSE_PLANTILLAS;
 

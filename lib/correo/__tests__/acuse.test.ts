@@ -11,7 +11,7 @@ const db = vi.hoisted(() => {
 });
 vi.mock('../db', () => db);
 
-import { ACUSE_PLANTILLAS, claveAcuse, enlaceSolicitud, parseOpcionesAcuse, textoAcuse } from '../acuse';
+import { ACUSE_A_TODOS, ACUSE_PLANTILLAS, claveAcuse, enlaceSolicitud, parseOpcionesAcuse, textoAcuse } from '../acuse';
 import { readCorreoConfig } from '../config';
 import { limpiarTokensApp } from '../graph';
 import { enviadosSimulados, reiniciarBuzonSimulado } from '../mock';
@@ -77,17 +77,17 @@ beforeEach(() => {
 });
 
 describe('Correo · plantilla del acuse', () => {
-  it('formal, con «usted», número, título, enlace del ambiente y firma', () => {
+  it('formal (plural, a todos), número, título, enlace del ambiente y firma', () => {
     const t = textoAcuse({ id: 812, titulo: '  Revisión   de contrato ', enlace: enlaceSolicitud('https://synerlink.ejemplo.com/', 812), firma: 'Laura Ayala' });
     expect(t).toBe(
       [
-        'Cordial saludo,',
+        'Cordial saludo.',
         '',
-        'Le confirmamos que su solicitud fue registrada en SynerLink con el número #812 — Revisión de contrato.',
+        'Les informamos que a partir de este hilo de correo se creó la solicitud #812 — Revisión de contrato en SynerLink.',
         '',
-        'A partir de ahora el seguimiento se hará por SynerLink: https://synerlink.ejemplo.com/process/request-general/view-request?id=812&from=general-requests',
+        'El seguimiento se hará por SynerLink: https://synerlink.ejemplo.com/process/request-general/view-request?id=812&from=general-requests',
         '',
-        'Si necesita agregar información, responda a este mismo correo y quedará como nota del caso.',
+        'Si necesitan agregar información, respondan a este mismo correo y quedará como nota de la solicitud.',
         '',
         'Quedamos atentos.',
         '',
@@ -128,7 +128,7 @@ describe('Correo · acuse al crear desde la simulación', () => {
     expect(enviados).toHaveLength(1);
     // Al correo MÁS RECIENTE del remitente en el hilo, solo a él.
     expect(enviados[0]).toMatchObject({ mensajeId: 'mock-msg-0002AAAA', todos: false });
-    expect(enviados[0].texto).toContain('número #500 — Revisión de contrato');
+    expect(enviados[0].texto).toContain('solicitud #500 — Revisión de contrato en SynerLink');
     expect(enviados[0].texto).toContain('https://synerlink-pruebas.ejemplo.com/process/request-general/view-request?id=500&from=general-requests');
     expect(enviados[0].texto.endsWith('Laura Ayala')).toBe(true);
     expect(db.auditar).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ accion: 'ACUSE_HILO', idRequest: 500, conversationId: 'mock-conv-01AAAA', ip: '10.0.0.1' }));
@@ -205,7 +205,7 @@ describe('Correo · acuse al vincular', () => {
 });
 
 describe('Correo · acuse con Microsoft Graph simulado', () => {
-  it('usa /reply del buzón de la SESIÓN con el texto en HTML (sin correo real)', async () => {
+  it('usa /replyAll del buzón de la SESIÓN con el texto en HTML (sin correo real)', async () => {
     const urls: Array<{ url: string; body: string }> = [];
     const msg = (id: string, de: string, fecha: string) => ({
       id,
@@ -242,14 +242,15 @@ describe('Correo · acuse con Microsoft Graph simulado', () => {
       }
     );
     db.vinculoDeHilo.mockResolvedValue(vinculo(900, 'conv-graph-1AAAA'));
-    const r = await enviarAcuse(d, yo, { conversationId: 'conv-graph-1AAAA', todos: false, confirmarExterno: false, ip: null });
+    // Como lo manda la interfaz («Informar en el hilo a todos los participantes»): /replyAll.
+    const r = await enviarAcuse(d, yo, { conversationId: 'conv-graph-1AAAA', ...ACUSE_A_TODOS, ip: null });
     expect(r).toMatchObject({ estado: 'ENVIADO', idRequest: 900 });
-    const reply = urls.find((u) => u.url.endsWith('/reply'));
-    expect(reply?.url).toBe('https://graph.microsoft.com/v1.0/users/laura%40gsslatam.com/messages/graph-msg-1AAAA/reply');
+    const reply = urls.find((u) => u.url.endsWith('/replyAll'));
+    expect(reply?.url).toBe('https://graph.microsoft.com/v1.0/users/laura%40gsslatam.com/messages/graph-msg-1AAAA/replyAll');
     const comment = JSON.parse(reply!.body).comment as string;
-    expect(comment).toContain('número #900 — Revisión de contrato.<br>');
+    expect(comment).toContain('solicitud #900 — Revisión de contrato en SynerLink.<br>');
     expect(comment).not.toContain('<script');
-    expect(urls.some((u) => u.url.includes('replyAll'))).toBe(false);
+    expect(urls.some((u) => u.url.endsWith('/reply'))).toBe(false);
   });
 });
 

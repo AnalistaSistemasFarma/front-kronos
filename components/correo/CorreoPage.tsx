@@ -494,6 +494,7 @@ export default function CorreoPage() {
       <HiloDrawer
         conversationId={hiloAbierto}
         envioHabilitado={estado.conexion.envioHabilitado}
+        nombreOperador={estado.usuario.nombre}
         onClose={() => {
           setHiloAbierto(null);
           if (hayCambios) {

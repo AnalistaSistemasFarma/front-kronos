@@ -160,4 +160,6 @@ export interface VinculoHilo {
   asunto: string | null;
   creadoEn: string;
   origen: 'CREADA' | 'VINCULADA';
+  /** Fecha en que se informó en el hilo (acuse); null si aún no. Solo en la vista del hilo. */
+  acuseEnviadoEn?: string | null;
 }

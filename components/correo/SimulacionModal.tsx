@@ -8,13 +8,11 @@ import {
   Button,
   Card,
   Checkbox,
-  Collapse,
   Group,
   Loader,
   Modal,
   Progress,
   ScrollArea,
-  SegmentedControl,
   Select,
   Stack,
   Switch,
@@ -28,7 +26,7 @@ import { useMediaQuery } from '@mantine/hooks';
 import { IconAlertTriangle, IconCheck, IconFlask, IconMailForward, IconPaperclip, IconRefresh, IconX } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import SgcSelect from '../sgc/SgcSelect';
-import { rutaSolicitud, textoAcuse } from '../../lib/correo/acuse';
+import { ACUSE_A_TODOS, ACUSE_ETIQUETA, rutaSolicitud, textoAcuse } from '../../lib/correo/acuse';
 import { ALERTA_TEXTO, type AlertaFila, type FilaSimulacion, type ResultadoAcuse, type ResultadoCreacion } from '../../lib/correo/types';
 import { correoApi, tamano, urlSolicitud, type CategoriaCorreo, type ProcesoCorreo } from './correoClient';
 import { categoriaDeProceso, opcionesCategorias, opcionesProcesos, opcionesProcesosAgrupadas } from './catalogoOpciones';
@@ -44,8 +42,8 @@ const PRED_KEY = 'correo:proceso-predeterminado';
 
 /**
  * idCategoria: solo del navegador, para la cascada Categoría → Proceso (como «Nueva solicitud»).
- * acuse: responder en el hilo al crear (sigue la casilla global; se puede cambiar por fila). En
- * una fila de remitente EXTERNO arranca apagado y marcarlo es la confirmación explícita.
+ * acuse: informar en el hilo a TODOS los participantes al crear (sigue la casilla global; se
+ * puede apagar por fila). Nicolás, 2026-10-15 14:23: «informar a todos».
  */
 type Fila = FilaSimulacion & { adjuntosElegidos: string[]; idCategoria: number | null; acuse: boolean; verAcuse: boolean };
 
@@ -161,7 +159,7 @@ export default function SimulacionModal({
   const [etiquetar, setEtiquetar] = useState(true);
   const [acuseGlobal, setAcuseGlobal] = useState(true);
   const acuseGlobalRef = useRef(true);
-  const [acuseTodos, setAcuseTodos] = useState(false);
+  const [verPrevia, setVerPrevia] = useState(false);
   const [reintentando, setReintentando] = useState<string | null>(null);
   const [creando, setCreando] = useState<{ hechas: number; total: number } | null>(null);
   const [resultados, setResultados] = useState<ResultadoCreacion[] | null>(null);
@@ -179,7 +177,7 @@ export default function SimulacionModal({
             ...f,
             adjuntosElegidos: f.adjuntos.map((a) => a.id),
             idCategoria: categoriaDeProceso(r.procesos, f.idProcess),
-            acuse: acuseGlobalRef.current && !esExterna(f),
+            acuse: acuseGlobalRef.current,
             verAcuse: false,
           }))
         );
@@ -245,8 +243,8 @@ export default function SimulacionModal({
           descripcion: f.descripcion,
           adjuntosIds: f.adjuntosElegidos,
           etiquetar: etiquetar && etiquetarHabilitado,
-          // Fila externa: marcar «Responder» en ella ES la confirmación explícita.
-          acuse: { enviar: envioHabilitado && f.acuse, todos: acuseTodos, confirmarExterno: f.acuse && esExterna(f) },
+          // «Informar en el hilo a todos los participantes»: responder a todos (externos incluidos).
+          acuse: { ...ACUSE_A_TODOS, enviar: envioHabilitado && f.acuse },
         });
         out.push(r);
       } catch (e) {
@@ -261,20 +259,19 @@ export default function SimulacionModal({
     else toast.error(`Se crearon ${ok} de ${out.length} solicitudes. Revise el detalle.`);
   };
 
-  /** Casilla global: la aplica a todas las filas (las externas siguen apagadas hasta confirmarlas una a una). */
+  /** Casilla global: la aplica a todas las filas. */
   const cambiarAcuseGlobal = (v: boolean) => {
     setAcuseGlobal(v);
     acuseGlobalRef.current = v;
-    setFilas((prev) => prev.map((f) => ({ ...f, acuse: v && !esExterna(f) })));
+    setFilas((prev) => prev.map((f) => ({ ...f, acuse: v })));
   };
 
   const reintentarAcuse = async (r: ResultadoCreacion) => {
-    const confirmar = r.acuse?.codigo === 'EXTERNO_SIN_CONFIRMAR';
     setReintentando(r.conversationId);
     try {
-      const { acuse } = await correoApi.reintentarAcuse(r.conversationId, acuseTodos, confirmar);
+      const { acuse } = await correoApi.reintentarAcuse(r.conversationId, ACUSE_A_TODOS.todos, ACUSE_A_TODOS.confirmarExterno);
       setResultados((prev) => prev?.map((x) => (x.conversationId === r.conversationId ? { ...x, acuse } : x)) ?? prev);
-      if (acuse.estado === 'ENVIADO' || acuse.estado === 'YA_ENVIADO') toast.success(`Respuesta enviada en el hilo de la solicitud #${r.idRequest}.`);
+      if (acuse.estado === 'ENVIADO' || acuse.estado === 'YA_ENVIADO') toast.success(`Se informó en el hilo de la solicitud #${r.idRequest}.`);
       else toast.error(acuse.mensaje ?? 'No se pudo enviar la respuesta.');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -286,7 +283,7 @@ export default function SimulacionModal({
   const estadoAcuse = (r: ResultadoCreacion) => {
     const a = r.acuse;
     if (!a || a.estado === 'DESHABILITADO') return null;
-    if (a.estado === 'ENVIADO' || a.estado === 'YA_ENVIADO') return <Text span size='sm' c='teal.8'>{' · respuesta enviada en el hilo'}</Text>;
+    if (a.estado === 'ENVIADO' || a.estado === 'YA_ENVIADO') return <Text span size='sm' c='teal.8'>{' · informado en el hilo a todos'}</Text>;
     return (
       <Group gap={6} mt={2} wrap='wrap' data-testid='correo-sim-acuse-aviso'>
         <Text span size='sm' c='orange.8'>
@@ -439,7 +436,7 @@ export default function SimulacionModal({
       <Stack gap={4}>
         <Checkbox
           size='sm'
-          label={esExterna(f) ? 'Responder (remitente externo: lo confirmo)' : 'Responder en el hilo'}
+          label={esExterna(f) ? 'Informar en el hilo (incluye externos)' : 'Informar en el hilo'}
           checked={f.acuse}
           disabled={Boolean(creando)}
           onChange={(e) => actualizar(i, { acuse: e.currentTarget.checked })}
@@ -450,17 +447,17 @@ export default function SimulacionModal({
             <Anchor component='button' type='button' size='xs' onClick={() => actualizar(i, { verAcuse: !f.verAcuse })} data-testid='correo-sim-acuse-ver'>
               {f.verAcuse ? 'Ocultar vista previa' : 'Ver la respuesta'}
             </Anchor>
-            <Collapse in={f.verAcuse}>
+            {f.verAcuse && (
               <Text
                 size='xs'
                 p='xs'
-                bg='var(--mantine-color-gray-0)'
-                style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', borderRadius: 'var(--mantine-radius-sm)', border: '1px solid var(--mantine-color-gray-3)' }}
+                bg='var(--mantine-color-default-hover)'
+                style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', borderRadius: 'var(--mantine-radius-sm)', border: '1px solid var(--mantine-color-default-border)' }}
                 data-testid='correo-sim-acuse-previa'
               >
                 {previaAcuse(f.titulo, nombreOperador, empresa)}
               </Text>
-            </Collapse>
+            )}
           </>
         )}
       </Stack>
@@ -554,13 +551,13 @@ export default function SimulacionModal({
             </Alert>
             {desktop ? (
               <ScrollArea type='auto'>
-                <Table verticalSpacing='sm' striped withTableBorder miw={1100} data-testid='correo-sim-tabla'>
+                <Table verticalSpacing='sm' striped withTableBorder miw={envioHabilitado ? 1360 : 1100} data-testid='correo-sim-tabla'>
                   <Table.Thead>
                     <Table.Tr>
                       <Table.Th w={60}>Incluir</Table.Th>
                       <Table.Th w={260}>Categoría y proceso</Table.Th>
                       <Table.Th w={240}>Solicitante</Table.Th>
-                      <Table.Th>Título y descripción</Table.Th>
+                      <Table.Th miw={280}>Título y descripción</Table.Th>
                       <Table.Th w={200}>Adjuntos</Table.Th>
                       {envioHabilitado && <Table.Th w={220}>Respuesta en el hilo</Table.Th>}
                       <Table.Th w={170}>Alertas</Table.Th>
@@ -657,29 +654,32 @@ export default function SimulacionModal({
               <Card withBorder radius='md' p='sm' data-testid='correo-sim-acuse'>
                 <Stack gap={6}>
                   <Group justify='space-between' wrap='wrap' gap='sm'>
-                    <Switch
+                    <Checkbox
                       checked={acuseGlobal}
                       onChange={(e) => cambiarAcuseGlobal(e.currentTarget.checked)}
-                      label='Responder automáticamente en el hilo'
-                      description='Al crear cada solicitud se le responde al remitente con el número del caso y el enlace.'
+                      label={ACUSE_ETIQUETA}
+                      description='Al crear cada solicitud se responde a todos en el hilo con el número, el título y el enlace de SynerLink.'
                       disabled={Boolean(creando)}
                       data-testid='correo-sim-acuse-global'
                     />
-                    <SegmentedControl
-                      size='xs'
-                      value={acuseTodos ? 'todos' : 'remitente'}
-                      onChange={(v) => setAcuseTodos(v === 'todos')}
-                      data={[
-                        { value: 'remitente', label: 'Responder' },
-                        { value: 'todos', label: 'Responder a todos' },
-                      ]}
-                      disabled={Boolean(creando) || !acuseGlobal}
-                      data-testid='correo-sim-acuse-todos'
-                    />
+                    <Anchor component='button' type='button' size='xs' onClick={() => setVerPrevia((v) => !v)} data-testid='correo-sim-acuse-ver-global'>
+                      {verPrevia ? 'Ocultar vista previa' : 'Ver el texto'}
+                    </Anchor>
                   </Group>
-                  {filas.some(esExterna) && (
-                    <Text size='xs' c='dimmed'>
-                      A los remitentes externos no se les responde salvo que lo confirme en su fila.
+                  {verPrevia && (
+                    <Text
+                      size='xs'
+                      p='xs'
+                      bg='var(--mantine-color-default-hover)'
+                      style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', borderRadius: 'var(--mantine-radius-sm)', border: '1px solid var(--mantine-color-default-border)' }}
+                      data-testid='correo-sim-acuse-previa-global'
+                    >
+                      {previaAcuse(filas[0]?.titulo ?? '(título de la solicitud)', nombreOperador, empresa)}
+                    </Text>
+                  )}
+                  {filas.some(esExterna) && acuseGlobal && (
+                    <Text size='xs' c='orange.8'>
+                      Hay hilos con participantes externos al grupo: también recibirán la respuesta. Apague la casilla de esa fila si no desea informarles.
                     </Text>
                   )}
                 </Stack>
