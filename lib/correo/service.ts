@@ -25,9 +25,25 @@ import type { ArchivoAdjunto, Direccion, FilaSimulacion, MailProvider, MensajeCo
  */
 
 export interface KronosPort {
-  procesosEmpresa(idCompany: number): Promise<Array<ProcesoOpcion & { responsables?: string[]; categoria?: string }>>;
+  /** Categorías y procesos de «Nueva solicitud» en la empresa (misma regla de la pantalla normal). */
+  catalogoEmpresa(idCompany: number): Promise<CatalogoCorreo>;
   solicitudVisible(idUser: string, idRequest: number): Promise<{ id: number; asunto: string; idCompany: number; estado: number } | null>;
   insertarNota(idRequest: number, nota: string, idUser: string): Promise<number>;
+}
+
+export type ProcesoCorreo = ProcesoOpcion & { idCategoria?: number; categoria?: string; responsables?: string[] };
+export interface CatalogoCorreo {
+  categorias: Array<{ id: number; categoria: string }>;
+  procesos: ProcesoCorreo[];
+}
+
+/**
+ * ¿Puede crear (o vincular) solicitudes de esa empresa desde el Correo? Las mismas
+ * empresas que «Nueva solicitud»: aquellas a las que pertenece (company_user), no
+ * solo la del buzón. El acceso al módulo sigue dependiendo del subproceso «Correo».
+ */
+export function puedeUsarEmpresa(acceso: AccesoCorreo, idCompany: number): boolean {
+  return acceso.empresasSolicitud.some((e) => e.idCompany === idCompany);
 }
 
 export interface CrearSolicitudPort {
@@ -239,7 +255,7 @@ export async function sincronizarHilo(
 export async function vincularHilo(d: CorreoDeps, acceso: AccesoCorreo, conversationId: string, idRequest: number, ip: string | null): Promise<VinculoHilo> {
   const sol = await d.kronos.solicitudVisible(acceso.idUser, idRequest);
   if (!sol) throw new CorreoError('No encontró la solicitud o no participa en ella.', 404);
-  if (!acceso.empresas.some((e) => e.idCompany === sol.idCompany)) throw new CorreoError('La solicitud es de una empresa donde no tiene el módulo Correo.', 403);
+  if (!puedeUsarEmpresa(acceso, sol.idCompany)) throw new CorreoError('La solicitud es de una empresa a la que usted no pertenece.', 403);
   const prov = await proveedorDe(d, acceso);
   const mensajes = await prov.hilo(conversationId);
   if (mensajes.length === 0) throw new CorreoError('No se encontró el hilo en su buzón.', 404);
@@ -295,9 +311,8 @@ export async function responder(
 // Simulación y creación
 // ---------------------------------------------------------------------------
 
-export interface Simulacion {
+export interface Simulacion extends CatalogoCorreo {
   filas: FilaSimulacion[];
-  procesos: Array<ProcesoOpcion & { responsables?: string[]; categoria?: string }>;
 }
 
 export async function simular(
@@ -305,13 +320,13 @@ export async function simular(
   acceso: AccesoCorreo,
   p: { mensajesIds: string[]; idCompany: number; procesoPredeterminado: number | null; ip?: string | null }
 ): Promise<Simulacion> {
-  if (!acceso.empresas.some((e) => e.idCompany === p.idCompany)) throw new CorreoError('No tiene el módulo Correo en esa empresa.', 403);
+  if (!puedeUsarEmpresa(acceso, p.idCompany)) throw new CorreoError('Usted no pertenece a esa empresa.', 403);
   const prov = await proveedorDe(d, acceso);
   const mensajes: MensajeCompleto[] = [];
   for (const id of p.mensajesIds) mensajes.push(await prov.mensaje(id));
   const grupos = agruparPorHilo(mensajes);
-  const [procesos, usuarios, porCorreo, vinculos] = await Promise.all([
-    d.kronos.procesosEmpresa(p.idCompany),
+  const [catalogo, usuarios, porCorreo, vinculos] = await Promise.all([
+    d.kronos.catalogoEmpresa(p.idCompany),
     data.usuariosPorCorreo(d.db, mensajes.map((m) => m.de.correo)),
     data.solicitudesDeCorreos(d.db, mensajes.map((m) => m.internetMessageId)),
     data.vinculosDeHilos(d.db, acceso.idUser, grupos.map((g) => g[0].conversationId)),
@@ -323,14 +338,14 @@ export async function simular(
     filaDesdeHilo(g, {
       idOperador: acceso.idUser,
       idCompany: p.idCompany,
-      procesos,
+      procesos: catalogo.procesos,
       procesoPredeterminado: p.procesoPredeterminado,
       usuarios,
       duplicados,
       dominiosGrupo: d.dominiosGrupo,
     })
   );
-  return { filas, procesos };
+  return { filas, categorias: catalogo.categorias, procesos: catalogo.procesos };
 }
 
 /**
@@ -344,8 +359,8 @@ export async function crearDesdeFila(
   fila: FilaCrear & { mensajesIds: string[] },
   ip: string | null
 ): Promise<ResultadoCreacion> {
-  if (!acceso.empresas.some((e) => e.idCompany === fila.idCompany)) throw new CorreoError('No tiene el módulo Correo en esa empresa.', 403);
-  const procesos = await d.kronos.procesosEmpresa(fila.idCompany);
+  if (!puedeUsarEmpresa(acceso, fila.idCompany)) throw new CorreoError('Usted no pertenece a esa empresa.', 403);
+  const { procesos } = await d.kronos.catalogoEmpresa(fila.idCompany);
   if (!procesos.some((x) => x.id === fila.idProcess)) throw new CorreoError('El proceso no está activo en la empresa elegida.', 400);
   const solicitante = await data.usuarioDeEmpresa(d.db, fila.idSolicitante, fila.idCompany);
   if (!solicitante) throw new CorreoError('El solicitante no es un usuario activo de la empresa elegida.', 400);

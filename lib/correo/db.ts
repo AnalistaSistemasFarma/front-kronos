@@ -25,12 +25,21 @@ export interface AccesoCorreo {
   idUser: string;
   nombre: string;
   email: string;
+  /** Empresas con el subproceso «Correo» (dan acceso al módulo). */
   empresas: EmpresaCorreo[];
+  /**
+   * Empresas donde puede crear solicitudes desde el Correo: aquellas a las que
+   * pertenece (company_user), igual que en «Nueva solicitud».
+   */
+  empresasSolicitud: EmpresaCorreo[];
 }
 
 /** Acceso al módulo: usuario activo con el subproceso «Correo» en al menos una empresa. */
 export async function getCorreoAccess(db: CorreoDb, email: string): Promise<AccesoCorreo | null> {
-  const user = await db.user.findFirst({ where: { email, isActive: true }, select: { id: true, name: true, email: true, role: true } });
+  const user = await db.user.findFirst({
+    where: { email, isActive: true },
+    select: { id: true, name: true, email: true, role: true, companyUsers: { select: { company: { select: { id_company: true, company: true } } } } },
+  });
   if (!user || user.role === 'supplier') return null;
   const grants = await db.subprocessUserCompany.findMany({
     where: { companyUser: { id_user: user.id }, subprocess: { subprocess_url: CORREO_SUBPROCESS_URL } },
@@ -42,11 +51,17 @@ export async function getCorreoAccess(db: CorreoDb, email: string): Promise<Acce
     empresas.set(c.id_company, { idCompany: c.id_company, companyName: c.company });
   }
   if (empresas.size === 0) return null;
+  const porNombre = (a: EmpresaCorreo, b: EmpresaCorreo) => a.companyName.localeCompare(b.companyName);
+  const solicitud = new Map<number, EmpresaCorreo>(empresas);
+  for (const cu of user.companyUsers ?? []) {
+    solicitud.set(cu.company.id_company, { idCompany: cu.company.id_company, companyName: cu.company.company.trim() });
+  }
   return {
     idUser: user.id,
     nombre: user.name?.trim() || user.email,
     email: user.email,
-    empresas: [...empresas.values()].sort((a, b) => a.companyName.localeCompare(b.companyName)),
+    empresas: [...empresas.values()].sort(porNombre),
+    empresasSolicitud: [...solicitud.values()].sort(porNombre),
   };
 }
 

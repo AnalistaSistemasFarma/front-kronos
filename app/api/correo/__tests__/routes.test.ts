@@ -38,7 +38,13 @@ import * as procesos from '../procesos/route';
 import * as vinculos from '../vinculos/route';
 import { codificarCursor, limpiarTokensApp } from '../../../../lib/correo/graph';
 
-const yo = { idUser: 'op1', nombre: 'Laura', email: 'laura@gsslatam.com', empresas: [{ idCompany: 1, companyName: 'GSS' }] };
+const yo = {
+  idUser: 'op1',
+  nombre: 'Laura',
+  email: 'laura@gsslatam.com',
+  empresas: [{ idCompany: 1, companyName: 'GSS' }],
+  empresasSolicitud: [{ idCompany: 1, companyName: 'GSS' }, { idCompany: 2, companyName: 'OLP' }],
+};
 let cfgEnv: Record<string, string> = { CORREO_MODO: 'mock' };
 let fetchFn: typeof fetch | undefined;
 const GRAPH_ENV = {
@@ -51,7 +57,13 @@ const GRAPH_ENV = {
 };
 const BASE = 'https://graph.microsoft.com/v1.0/users/laura%40gsslatam.com';
 const kronos = {
-  procesosEmpresa: vi.fn(async () => [{ id: 10, nombre: 'Contratos' }]),
+  catalogoEmpresa: vi.fn(async () => ({
+    categorias: [{ id: 5, categoria: 'Jurídica' }, { id: 6, categoria: 'Tesorería' }],
+    procesos: [
+      { id: 10, nombre: 'Contratos', idCategoria: 5, categoria: 'Jurídica' },
+      { id: 30, nombre: 'Solicitud de Pago', idCategoria: 6, categoria: 'Tesorería' },
+    ],
+  })),
   solicitudVisible: vi.fn(async () => null),
   insertarNota: vi.fn(async () => 1),
 };
@@ -139,7 +151,17 @@ describe('Correo · rutas: aislamiento por persona (anti-IDOR)', () => {
     expect((await vinculos.GET(get('/vinculos?solicitud=abc'))).status).toBe(400);
   });
 
-  it('usuarios y procesos solo de empresas donde tiene el módulo', async () => {
+  it('procesos: el catálogo completo de «Nueva solicitud» en cualquier empresa a la que pertenece', async () => {
+    comoUsuario();
+    const r = await procesos.GET(get('/procesos?empresa=2'));
+    expect(r.status).toBe(200);
+    const body = await r.json();
+    expect(body.categorias).toHaveLength(2);
+    expect(body.procesos.map((p: { id: number }) => p.id)).toEqual([10, 30]);
+    expect(kronos.catalogoEmpresa).toHaveBeenLastCalledWith(2);
+  });
+
+  it('usuarios y procesos solo de empresas a las que pertenece', async () => {
     comoUsuario();
     expect((await usuarios.GET(get('/usuarios?empresa=3'))).status).toBe(403);
     expect((await procesos.GET(get('/procesos?empresa=3'))).status).toBe(403);
@@ -227,7 +249,7 @@ describe('Correo · rutas: adjuntos, respuesta y límites', () => {
   it('estado: empresas y modo (simulado)', async () => {
     comoUsuario();
     const body = await (await estado.GET(get(''))).json();
-    expect(body).toMatchObject({ empresas: [{ idCompany: 1 }], conexion: { modo: 'mock', disponible: true, correo: 'laura@gsslatam.com' } });
+    expect(body).toMatchObject({ empresas: [{ idCompany: 1 }, { idCompany: 2 }], empresaBuzon: 1, conexion: { modo: 'mock', disponible: true, correo: 'laura@gsslatam.com' } });
     expect(JSON.stringify(body)).not.toMatch(/token/i);
   });
 });

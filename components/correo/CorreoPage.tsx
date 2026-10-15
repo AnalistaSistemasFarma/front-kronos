@@ -181,7 +181,8 @@ export default function CorreoPage() {
       } catch {
         /* sin almacenamiento */
       }
-      const match = e.empresas.find((c) => String(c.idCompany) === pref) ?? e.empresas[0];
+      const match =
+        e.empresas.find((c) => String(c.idCompany) === pref) ?? e.empresas.find((c) => c.idCompany === e.empresaBuzon) ?? e.empresas[0];
       if (match) setEmpresaState(String(match.idCompany));
     } catch (e) {
       setErrorEstado({ status: e instanceof CorreoApiError ? e.status : 500, mensaje: e instanceof Error ? e.message : String(e) });
