@@ -78,6 +78,7 @@ function deps(extra: Partial<CorreoDeps> = {}): CorreoDeps {
     kronos: {
       catalogoEmpresa: vi.fn(async () => catalogo),
       solicitudVisible: vi.fn(async () => ({ id: 77, asunto: 'X', idCompany: 1, estado: 1 })),
+      solicitudExiste: vi.fn(async () => true),
       insertarNota: vi.fn(async () => 1),
     },
     crearSolicitud: vi.fn(async () => ({ id_request: 500, processEmail: 'p@x', processEmails: ['p@x'], taskEmails: ['t@x'] })),
@@ -139,6 +140,21 @@ describe('Correo · crear solicitudes desde la simulación', () => {
     expect(d.crearSolicitud).not.toHaveBeenCalled();
   });
 
+  it('duplicado con el número de la solicitud existente (para ofrecer abrirla)', async () => {
+    db.reservarHilo.mockRejectedValue(new CorreoError('Este correo ya fue convertido en la solicitud #10065.', 409, 'DUPLICADO', 10065));
+    await expect(crearDesdeFila(deps(), yo, filaBase, null)).rejects.toMatchObject({ code: 'DUPLICADO', idRequest: 10065, message: expect.stringContaining('#10065') });
+  });
+
+  it('la reserva verifica que la solicitud vinculada exista y audita los vínculos huérfanos limpiados', async () => {
+    db.reservarHilo.mockResolvedValue({ idLink: 3, limpiados: [9] });
+    const d = deps();
+    await crearDesdeFila(d, yo, filaBase, null);
+    const arg = db.reservarHilo.mock.calls[0][1] as { solicitudExiste: (id: number) => Promise<boolean> };
+    await arg.solicitudExiste(123);
+    expect(d.kronos.solicitudExiste).toHaveBeenCalledWith(123);
+    expect(db.auditar).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ accion: 'VINCULO_HUERFANO', detalle: expect.stringContaining('9') }));
+  });
+
   it('si falla la creación libera la reserva (se puede reintentar)', async () => {
     const d = deps({ crearSolicitud: vi.fn(async () => { throw new Error('BD caída'); }) });
     await expect(crearDesdeFila(d, yo, filaBase, null)).rejects.toThrow('BD caída');
@@ -184,6 +200,14 @@ describe('Correo · simulación', () => {
     expect(s.categorias.map((c) => c.categoria)).toEqual(['Jurídica', 'Tesorería']);
     expect(s.procesos.map((p) => p.id)).toEqual([10, 20, 30]);
     await expect(simular(d, yo, { mensajesIds: ['mock-msg-0001AAAA'], idCompany: 9, procesoPredeterminado: null })).rejects.toMatchObject({ status: 403 });
+  });
+
+  it('un vínculo cuya solicitud ya no existe NO marca duplicado (huérfano)', async () => {
+    db.solicitudesDeCorreos.mockResolvedValue(new Map([['<mock-5.04@correo.simulado>', 41]]));
+    const d = deps({ kronos: { ...deps().kronos, solicitudExiste: vi.fn(async () => false) } });
+    const s = await simular(d, yo, { mensajesIds: ['mock-msg-0005AAAA'], idCompany: 1, procesoPredeterminado: null });
+    expect(s.filas[0].duplicadoDe).toBeNull();
+    expect(d.kronos.solicitudExiste).toHaveBeenCalledWith(41);
   });
 
   it('empresa: cualquiera a la que pertenece (como «Nueva solicitud»), no solo la del buzón', async () => {

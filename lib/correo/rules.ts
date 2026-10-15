@@ -84,7 +84,14 @@ export function dominio(correo: string): string {
 /** Agrupa mensajes por hilo (conversationId), cada grupo del más antiguo al más reciente. */
 export function agruparPorHilo(mensajes: MensajeCompleto[]): MensajeCompleto[][] {
   const grupos = new Map<string, MensajeCompleto[]>();
+  // Copias del MISMO correo (Enviados + Bandeja de entrada cuando la persona se escribe a
+  // sí misma) comparten internetMessageId: cuentan como un solo correo.
+  const vistos = new Set<string>();
   for (const m of mensajes) {
+    if (m.internetMessageId) {
+      if (vistos.has(m.internetMessageId)) continue;
+      vistos.add(m.internetMessageId);
+    }
     const k = m.conversationId || m.id;
     const g = grupos.get(k) ?? [];
     g.push(m);

@@ -37,6 +37,7 @@ function deps(extra: Partial<CorreoDeps> = {}, env: Record<string, string> = { C
     kronos: {
       catalogoEmpresa: vi.fn(async () => catalogo),
       solicitudVisible: vi.fn(async () => ({ id: 77, asunto: 'Contrato existente', idCompany: 1, estado: 1 })),
+      solicitudExiste: vi.fn(async () => true),
       insertarNota: vi.fn(async () => 1),
     },
     crearSolicitud: vi.fn(async () => ({ id_request: 500, processEmail: null, processEmails: [], taskEmails: [] })),
