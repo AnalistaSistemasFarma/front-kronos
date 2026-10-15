@@ -5,7 +5,9 @@ import {
   SGC_FLOW_CATEGORIES,
   describeDefinitionChanges,
   normalizeFlowDefinition,
+  parseRoleModel,
   requiredAuthorizationTypes,
+  type SgcFlowAction,
   type SgcFlowDefinition,
 } from '../flows/definition';
 import type { SgcActor, SgcDb } from './catalogs';
@@ -83,12 +85,16 @@ export async function writeConfigChange(db: Tx, change: SgcConfigChange, actor: 
 
 /** Definición guardada de una versión, en la forma del motor. */
 export async function loadDefinition(db: Tx, idFlowVersion: number): Promise<SgcFlowDefinition> {
-  const [tasks, transitions, fields] = await Promise.all([
+  const [version, tasks, transitions, fields] = await Promise.all([
+    db.sgcFlowVersion.findUnique({ where: { id_flow_version: idFlowVersion }, select: { role_model: true } }),
     db.sgcFlowTaskDef.findMany({ where: { id_flow_version: idFlowVersion }, orderBy: { step_order: 'asc' } }),
     db.sgcFlowTransition.findMany({ where: { id_flow_version: idFlowVersion }, orderBy: { id_flow_transition: 'asc' } }),
     db.sgcFlowFormField.findMany({ where: { id_flow_version: idFlowVersion }, orderBy: [{ sort_order: 'asc' }, { id_flow_form_field: 'asc' }] }),
   ]);
+  // S15: el modelo de roles solo se agrega con el DOC v7 (las definiciones anteriores quedan iguales).
+  const roleModel = parseRoleModel(version?.role_model);
   return {
+    ...(roleModel === 'solicitante_elabora' ? { roleModel } : {}),
     tasks: tasks.map((t) => ({
       key: t.task_key,
       name: t.name,
@@ -108,7 +114,7 @@ export async function loadDefinition(db: Tx, idFlowVersion: number): Promise<Sgc
     })),
     transitions: transitions.map((t) => ({
       from: t.from_task_key,
-      action: t.action as 'aprobar' | 'devolver' | 'cancelar',
+      action: t.action as SgcFlowAction,
       to: t.to_task_key,
       terminalStatus: (t.terminal_status as 'completada' | 'cancelada' | null) ?? null,
     })),
@@ -259,6 +265,8 @@ async function writeDefinitionRows(tx: Prisma.TransactionClient, idFlowVersion: 
   await tx.sgcFlowFormField.deleteMany({ where: { id_flow_version: idFlowVersion } });
   await tx.sgcFlowTransition.deleteMany({ where: { id_flow_version: idFlowVersion } });
   await tx.sgcFlowTaskDef.deleteMany({ where: { id_flow_version: idFlowVersion } });
+  // S15: el modelo de roles va con la versión (NULL = calidad_asigna).
+  await tx.sgcFlowVersion.update({ where: { id_flow_version: idFlowVersion }, data: { role_model: def.roleModel === 'solicitante_elabora' ? def.roleModel : null } });
   for (const t of def.tasks) {
     await tx.sgcFlowTaskDef.create({
       data: {

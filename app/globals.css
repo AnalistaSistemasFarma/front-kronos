@@ -1,5 +1,13 @@
 @import 'tailwindcss';
 
+/* Tailwind v4 escanea todo lo que no esté en .gitignore. Las copias del build
+   (.next-antes-*, .next.bak-*) y los respaldos dentro del checkout lo hacían
+   leer GB de JS y agotaban el tiempo de PostCSS en el build de producción
+   (pase SGC S14, 2026-10-14). Se excluyen aquí además de en .gitignore. */
+@source not "../.next*";
+@source not "../_respaldos*";
+@source not "../**/*.bak";
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* Tokens base (sobrescritos por applyAppThemeToDocument + Mantine) */

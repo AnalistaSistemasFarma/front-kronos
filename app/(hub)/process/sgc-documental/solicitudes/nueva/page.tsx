@@ -21,6 +21,8 @@ import { SgcCopyRequestForm } from '../../../../../../components/sgc/SgcUncontro
  */
 interface FormInfo {
   flow: { code: string; name: string; version: number };
+  /** S15: con el DOC v7 el solicitante elabora y Calidad autoriza primero la creación. */
+  roleModel?: 'calidad_asigna' | 'solicitante_elabora';
   requestTypes: { value: string; label: string }[];
   fields: SgcFormFieldDefinition[];
   steps: { key: string; name: string; isEnabled: boolean }[];
@@ -102,6 +104,11 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
           Flujo «{form.data.flow.name}» versión {form.data.flow.version}: {form.data.steps.map((s) => s.name + (s.isEnabled ? '' : ' (Sprint 4)')).join(' → ')}.
         </Text>
       )}
+      {form.data?.roleModel === 'solicitante_elabora' && (
+        <Alert color='blue' variant='light' icon={<IconAlertCircle size={16} />} mb='md' data-testid='sgc-nueva-modelo-v7'>
+          Usted elaborará el documento: Aseguramiento de Calidad primero autoriza su creación (o la rechaza si ya existe un documento que cubre el tema). Luego usted carga el borrador y asigna a los revisores y aprobadores de su departamento.
+        </Alert>
+      )}
       {(error || form.error) && (
         <Alert color='red' icon={<IconAlertCircle size={16} />} mb='md' data-testid='sgc-nueva-error'>
           {error ?? form.error}
@@ -175,7 +182,7 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
         )}
         <SgcSelect
           label='¿Requiere capacitación?'
-          description='Su sugerencia: la confirma quien crea el documento o Calidad. Los formatos y los manuales de uso suelen requerirla.'
+          description={form.data?.roleModel === 'solicitante_elabora' ? 'Usted la prepara y la dicta como creador del documento. Los formatos y los manuales de uso suelen requerirla.' : 'Su sugerencia: la confirma quien crea el documento o Calidad. Los formatos y los manuales de uso suelen requerirla.'}
           data={[
             { value: 'tipo', label: 'Según el tipo documental' },
             { value: 'si', label: 'Sí, requiere capacitación' },
@@ -187,7 +194,8 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
           data-testid='sgc-nueva-capacitacion'
         />
         <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true'
-          label='Asunto'
+          label='Nombre del documento'
+          description='Es el nombre con el que el documento queda en el listado maestro y en su encabezado.'
           required
           value={subjectTouched || !prefill.tipo ? subject : subject || suggestedSubject}
           onChange={(e) => {

@@ -46,7 +46,9 @@ export const SGC_TRAINING_DEFAULT_MAX_ATTEMPTS = 2;
 /** Sprint 10: proveedores de evaluación permitidos y sus dominios (enlaces permanentes, no temporales). */
 export const SGC_EVALUATION_PROVIDERS = ['microsoft', 'google'] as const;
 export type SgcEvaluationProvider = (typeof SGC_EVALUATION_PROVIDERS)[number];
-export const SGC_EVALUATION_PROVIDER_LABELS: Record<SgcEvaluationProvider, string> = { microsoft: 'Microsoft Forms', google: 'Google Forms' };
+/** S17 (R30): «synerlink» = evaluación propia de SynerLink (preguntas, intentos y calificación en el servidor). */
+export type SgcEvaluationSource = SgcEvaluationProvider | 'synerlink';
+export const SGC_EVALUATION_PROVIDER_LABELS: Record<SgcEvaluationSource, string> = { microsoft: 'Microsoft Forms', google: 'Google Forms', synerlink: 'Evaluación en SynerLink' };
 export const SGC_EVALUATION_HOSTS: Readonly<Record<SgcEvaluationProvider, readonly string[]>> = {
   microsoft: ['forms.office.com', 'forms.microsoft.com', 'forms.cloud.microsoft'],
   google: ['docs.google.com', 'forms.gle'],
@@ -81,7 +83,7 @@ export interface SgcTrainingConfig {
   minScorePct: number;
   notes: string | null;
   /** Sprint 10: proveedor de la evaluación y máximo de intentos que cuentan. */
-  evaluationProvider: SgcEvaluationProvider;
+  evaluationProvider: SgcEvaluationSource;
   maxAttempts: number;
 }
 
@@ -125,12 +127,15 @@ export function normalizeTrainingConfig(raw: unknown): SgcTrainingConfig {
   }
   if ((mode === 'video' || mode === 'mixta') && !videoUrl) throw new SgcError('Indique el enlace del video de la capacitación.');
   if ((mode === 'sesion' || mode === 'mixta') && !sessionDate) throw new SgcError('Indique la fecha de la sesión de capacitación.');
-  if (!formsUrl) throw new SgcError('Indique el enlace de la evaluación en Microsoft Forms o Google Forms.');
-  const evaluationProvider = evaluationProviderOf(formsUrl);
+  // S17 (R30): con la evaluación propia de SynerLink no hay enlace de Forms; el puntaje máximo sale del banco de preguntas.
+  const own = r.evaluationProvider === 'synerlink';
+  if (own && formsUrl) throw new SgcError('Con la evaluación en SynerLink no se usa un enlace de Forms: quítelo o elija Forms.');
+  if (!own && !formsUrl) throw new SgcError('Indique el enlace de la evaluación en Microsoft Forms o Google Forms.');
+  const evaluationProvider: SgcEvaluationSource | null = own ? 'synerlink' : evaluationProviderOf(formsUrl!);
   if (!evaluationProvider) throw new SgcError('La evaluación debe estar en Microsoft Forms o en Google Forms (enlace permanente del formulario).');
   const attemptsRaw = r.maxAttempts === undefined || r.maxAttempts === null || r.maxAttempts === '' ? SGC_TRAINING_DEFAULT_MAX_ATTEMPTS : Number(r.maxAttempts);
   if (!Number.isInteger(attemptsRaw) || attemptsRaw < 1 || attemptsRaw > 5) throw new SgcError('El máximo de intentos de la evaluación debe estar entre 1 y 5.');
-  const maxScore = Number(r.maxScore);
+  const maxScore = own && (r.maxScore === undefined || r.maxScore === null || r.maxScore === '') ? 1 : Number(r.maxScore);
   if (!Number.isFinite(maxScore) || maxScore <= 0 || maxScore > 1000) throw new SgcError('El puntaje máximo de la evaluación debe estar entre 1 y 1000.');
   const minRaw = r.minScorePct === undefined || r.minScorePct === null || r.minScorePct === '' ? SGC_TRAINING_DEFAULT_MIN_PCT : Number(r.minScorePct);
   if (!Number.isFinite(minRaw) || minRaw < 1 || minRaw > 100) throw new SgcError('La nota mínima debe ser un porcentaje entre 1 y 100.');
@@ -167,10 +172,21 @@ const DONE_HEADERS = ['hora de finalizacion', 'completion time', 'fecha de final
 
 export interface SgcResultColumns {
   email: number;
+  /** Columna del total (−1 si no hay y se suman los puntos por pregunta). */
   score: number;
+  /** S14 (R29): columnas «Puntos: <pregunta>» de Forms, que se suman cuando el Excel no trae el total. */
+  questionPoints: number[];
   name: number | null;
   completedAt: number | null;
 }
+
+/** S14 (R29): plantilla estándar de resultados (la que se enlaza en los errores y en la tarjeta de capacitación). */
+export const SGC_TRAINING_RESULTS_TEMPLATE_NAME = 'plantilla-resultados-capacitacion-sgc.csv';
+export const SGC_TRAINING_RESULTS_TEMPLATE_CSV = '\uFEFFCorreo electrónico;Nombre;Total de puntos;Hora de finalización\r\npersona@empresa.com;Nombre Apellido;8;2026-10-14 10:30\r\n';
+const TEMPLATE_HINT = 'Use la exportación de Forms sin cambiar los encabezados o la «Plantilla estándar de resultados» de la tarjeta de capacitación (columnas «Correo electrónico», «Nombre», «Total de puntos» y «Hora de finalización»).';
+
+// S14 (R29): «Puntos: Pregunta 1» / «Puntos - Pregunta 1» (Forms en español) y «Points: …» / «Points - …» (inglés).
+const QUESTION_POINTS_RE = /^(puntos|points|puntuacion|puntaje)\s*[:\-–]\s*\S/;
 
 /** Ubica las columnas del Excel (índices base 0) o explica qué falta. */
 export function detectResultColumns(headers: readonly unknown[]): SgcResultColumns {
@@ -184,11 +200,30 @@ export function detectResultColumns(headers: readonly unknown[]): SgcResultColum
   };
   const email = find(EMAIL_HEADERS);
   const score = find(SCORE_HEADERS);
-  const missing = [email < 0 ? '«Correo electrónico» (o «Email»)' : null, score < 0 ? '«Total de puntos» (o «Total points», «Puntaje», «Nota»)' : null].filter(Boolean);
-  if (missing.length) throw new SgcError(`El Excel no tiene la(s) columna(s) ${missing.join(' y ')}. Exporte las respuestas de la evaluación desde Microsoft Forms («Abrir en Excel») sin cambiar los encabezados.`);
+  // S14 (R29): una evaluación con calificación MANUAL de Forms puede exportarse sin «Total de puntos» pero con los
+  // puntos de cada pregunta: se suman.
+  const questionPoints = score < 0 ? norm.map((h, i) => (QUESTION_POINTS_RE.test(h) ? i : -1)).filter((i) => i >= 0) : [];
+  const missing = [
+    email < 0 ? '«Correo electrónico» (o «Email»; si el formulario es anónimo, active en Forms «Registrar nombre»)' : null,
+    score < 0 && questionPoints.length === 0 ? '«Total de puntos» (o «Total points», «Puntaje», «Nota», o los «Puntos: <pregunta>» de cada pregunta)' : null,
+  ].filter(Boolean);
+  if (missing.length) throw new SgcError(`El archivo no tiene la(s) columna(s) ${missing.join(' y ')}. ${TEMPLATE_HINT}`);
   const name = find(NAME_HEADERS);
   const done = find(DONE_HEADERS);
-  return { email, score, name: name >= 0 ? name : null, completedAt: done >= 0 ? done : null };
+  return { email, score, questionPoints, name: name >= 0 ? name : null, completedAt: done >= 0 ? done : null };
+}
+
+/**
+ * S14 (R29): fila de encabezados. Forms la pone en la primera fila, pero un
+ * Excel guardado a mano puede traer un título o filas vacías arriba: se toma
+ * la primera de las 10 primeras que tenga una columna de correo.
+ */
+export function findHeaderRow(rows: readonly (readonly unknown[])[]): number {
+  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+    const norm = (rows[i] ?? []).map(normalizeHeader);
+    if (norm.some((h) => EMAIL_HEADERS.includes(h))) return i;
+  }
+  return 0;
 }
 
 /** «8», «8,5» u «8.5» (hasta 6 enteros y 4 decimales, signo opcional). */
@@ -258,9 +293,11 @@ export interface SgcTrainingEvaluation {
   };
 }
 
-/** Momento de la respuesta para ordenar los intentos (fecha de Excel, ISO o «d/m/aaaa h:mm:ss»); null si no se entiende. */
+/** Momento de la respuesta para ordenar los intentos (fecha de Excel, número de serie de Excel, ISO o «d/m/aaaa h:mm:ss»); null si no se entiende. */
 export function attemptTime(value: unknown): number | null {
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.getTime();
+  // S14 (R29): una fecha guardada como número de serie de Excel (días desde 1899-12-30).
+  if (typeof value === 'number') return Number.isFinite(value) && value > 20000 && value < 80000 ? Math.round((value - 25569) * 86_400_000) : null;
   const s = cellText(value).trim();
   if (!s) return null;
   const [datePart, timePart = ''] = s.split(/\s+/);
@@ -274,6 +311,19 @@ export function attemptTime(value: unknown): number | null {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** S14 (R29): suma de los «Puntos: <pregunta>» de una fila; null si ninguna pregunta trae puntos. */
+function sumQuestionPoints(row: readonly unknown[], columns: readonly number[]): number | null {
+  let total = 0;
+  let any = false;
+  for (const c of columns) {
+    const v = parseScore(row[c]);
+    if (v === null) continue;
+    any = true;
+    total += v;
+  }
+  return any ? Math.round(total * 100) / 100 : null;
+}
+
 /**
  * Evalúa las filas del Excel (la primera es el encabezado) contra el alcance
  * de la capacitación y la nota mínima. Aprobado ⇔ puntaje ≥ nota mínima %
@@ -283,16 +333,17 @@ export function evaluateTrainingResults(
   rows: readonly (readonly unknown[])[],
   opts: { maxScore: number; minScorePct: number; scopeEmails: readonly string[]; maxAttempts?: number | null }
 ): SgcTrainingEvaluation {
-  if (rows.length < 2) throw new SgcError('El Excel no tiene respuestas (solo encabezados o vacío).');
-  if (rows.length > 5001) throw new SgcError('El Excel supera 5.000 respuestas.');
-  const cols = detectResultColumns(rows[0]);
+  const headerRow = findHeaderRow(rows);
+  if (rows.length - headerRow < 2) throw new SgcError(`El archivo no tiene respuestas (solo encabezados o vacío). ${TEMPLATE_HINT}`);
+  if (rows.length - headerRow > 5001) throw new SgcError('El archivo supera 5.000 respuestas.');
+  const cols = detectResultColumns(rows[headerRow]);
   const scope = new Set(opts.scopeEmails.map((e) => e.trim().toLowerCase()));
   const limit = opts.maxAttempts && opts.maxAttempts > 0 ? opts.maxAttempts : Number.POSITIVE_INFINITY;
   const attempts = new Map<string, { score: number; name: string | null; completedAt: string | null; time: number | null; row: number }[]>();
   const rejected: { row: number; reason: string }[] = [];
   let dataRows = 0;
-  rows.slice(1).forEach((r, i) => {
-    const rowNumber = i + 2;
+  rows.slice(headerRow + 1).forEach((r, i) => {
+    const rowNumber = headerRow + i + 2;
     if (!r || r.every((c) => cellText(c).trim() === '')) return;
     dataRows++;
     const email = cellText(r[cols.email]).trim().toLowerCase().replace(/^mailto:/, '');
@@ -300,7 +351,7 @@ export function evaluateTrainingResults(
       rejected.push({ row: rowNumber, reason: 'correo vacío o inválido' });
       return;
     }
-    const score = parseScore(r[cols.score]);
+    const score = cols.score >= 0 ? parseScore(r[cols.score]) : sumQuestionPoints(r, cols.questionPoints);
     if (score === null || score < 0) {
       rejected.push({ row: rowNumber, reason: 'puntaje vacío o inválido' });
       return;
@@ -316,7 +367,15 @@ export function evaluateTrainingResults(
     list.push({ score, name, completedAt, time: doneRaw === null ? null : attemptTime(doneRaw), row: rowNumber });
     attempts.set(email, list);
   });
-  if (dataRows === 0) throw new SgcError('El Excel no tiene respuestas (solo encabezados o vacío).');
+  if (dataRows === 0) throw new SgcError(`El archivo no tiene respuestas (solo encabezados o vacío). ${TEMPLATE_HINT}`);
+  // S14 (R29): si NINGUNA fila trae puntaje es una evaluación con calificación manual aún sin publicar (o un formulario
+  // sin puntos): se explica qué hacer en vez de mostrar «0 aprobaron».
+  if (attempts.size === 0 && rejected.length === dataRows && rejected.every((x) => x.reason === 'puntaje vacío o inválido')) {
+    throw new SgcError(`Ninguna fila trae puntaje («${cols.score >= 0 ? cellText(rows[headerRow][cols.score]) : 'Puntos'}» está vacío). Si la evaluación tiene preguntas de calificación manual, califíquelas y publique las puntuaciones en Forms antes de exportar; si el formulario no es un cuestionario con puntos, conviértalo en cuestionario. ${TEMPLATE_HINT}`);
+  }
+  if (attempts.size === 0 && rejected.length === dataRows && rejected.every((x) => x.reason === 'correo vacío o inválido')) {
+    throw new SgcError(`Ninguna fila trae un correo válido: el formulario parece anónimo. En Forms active «Registrar nombre» (o «Recopilar correos electrónicos» en Google Forms) para saber quién respondió. ${TEMPLATE_HINT}`);
+  }
   const results: SgcTrainingResultRow[] = [];
   for (const [email, list] of attempts) {
     // Orden de los intentos: por la hora de respuesta si todas la traen; si no, por el orden del archivo.
@@ -364,4 +423,14 @@ export function evaluateTrainingResults(
 /** ¿Hace falta justificar el cierre de la capacitación? (hay personas del alcance sin aprobar). */
 export function trainingNeedsJustification(summary: SgcTrainingEvaluation['summary']): boolean {
   return summary.failed > 0 || summary.missing.length > 0;
+}
+
+/**
+ * S14 (R29): mensaje del 409 al cerrar la capacitación cuando los resultados
+ * cambiaron desde que se abrió la tarea (otra persona cargó otro Excel): dice
+ * QUÉ cambió y que la tarea se recarga para revisarlo y firmar de nuevo.
+ */
+export function trainingResultsChangedMessage(up: { fileName: string; uploadedBy: string; uploadedAt: Date; passed: number; failed: number; missing: number }): string {
+  const at = new Date(up.uploadedAt.getTime() - 5 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
+  return `Los resultados cambiaron desde que abrió la tarea: ${up.uploadedBy} cargó «${up.fileName}» el ${at} (hora Colombia) — del alcance, ${up.passed} aprobaron, ${up.failed} reprobaron y ${up.missing} sin resultado. La tarea se recargó con esos resultados: revíselos y firme de nuevo.`;
 }
