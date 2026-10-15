@@ -48,6 +48,8 @@ test.describe('Portal TH · AYUDAS', () => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await simular(page);
     await page.goto('/portal');
+    // allInnerTexts no espera: sin esto, en un servidor frío leía la lista antes de que el panel se pintara.
+    await expect(panel(page).getByRole('button', { name: 'Ayudas' })).toBeVisible();
     const nombres = await panel(page).getByRole('button').allInnerTexts();
     const i = nombres.findIndex((n) => /contactos/i.test(n));
     expect(i).toBeGreaterThanOrEqual(0);
