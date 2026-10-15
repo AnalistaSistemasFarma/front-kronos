@@ -84,6 +84,7 @@ import {
   removeFromAttachmentCache,
 } from '../../../../../lib/attachments/pendingOptimistic';
 import AiSummarizeButton from './AiSummarizeButton';
+import CorreoHiloVinculado from '../../../../../components/correo/CorreoHiloVinculado';
 import {
   TABLE_FIELD_TYPE,
   parseTableConfig,
@@ -2479,6 +2480,8 @@ function ViewRequestPage() {
                       muestra si el navegador soporta la API. */}
                   <Group mt='sm'>
                     <AiSummarizeButton request={request} notes={notes} tasks={taskRQ} />
+                    {/* Módulo Correo: hilo de Outlook propio vinculado a esta solicitud. */}
+                    <CorreoHiloVinculado requestId={id} />
                   </Group>
                 </div>
 

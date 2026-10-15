@@ -3793,3 +3793,79 @@ model SgcGeneratedDocument {
   @@map("generated_document")
   @@schema("sgc")
 }
+
+// ---------------------------------------------------------------------------
+// Módulo «Correo» (2026-10-15): bandeja de Outlook de cada persona (Graph con la app
+// de aplicación del inquilino; el buzón SIEMPRE es el de la sesión), simulación y
+// creación masiva de solicitudes, hilos vinculados a casos.
+// Migración: prisma/migrations/20261015120000_correo_modulo. NO se guardan cuerpos
+// de correo: solo identificadores, el asunto de la solicitud y la auditoría.
+// ---------------------------------------------------------------------------
+
+/// Vínculo hilo de correo (conversationId del buzón de la persona) ↔ solicitud general.
+/// Idempotente: un hilo por persona queda vinculado a una sola solicitud.
+model EmailThreadLink {
+  id              Int       @id @default(autoincrement())
+  id_user         String    @db.NVarChar(50)
+  mailbox         String    @db.NVarChar(320)
+  conversation_id String    @db.NVarChar(512)
+  // NULL mientras la solicitud se está creando (estado CREANDO).
+  id_request      Int?
+  // CREANDO | ACTIVO
+  estado          String    @default("ACTIVO") @db.NVarChar(10)
+  // CREADA (la solicitud nació del correo) | VINCULADA (a una solicitud existente)
+  origen          String    @db.NVarChar(10)
+  asunto          String?   @db.NVarChar(255)
+  created_by      String    @db.NVarChar(50)
+  created_at      DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  last_synced_at  DateTime? @db.DateTime2
+
+  mensajes EmailThreadMessage[]
+
+  @@unique([id_user, conversation_id], map: "UQ_email_thread_link_hilo")
+  @@index([id_request], map: "IX_email_thread_link_request")
+  @@map("email_thread_link")
+  @@schema("dbo")
+}
+
+/// Correos (internetMessageId) ya registrados en un hilo vinculado: origen de la
+/// solicitud, notas agregadas y respuestas. ÚNICO global: un mismo correo no crea
+/// dos solicitudes ni dos notas, aunque llegue a varios buzones.
+model EmailThreadMessage {
+  id                  BigInt    @id @default(autoincrement())
+  id_link             Int
+  internet_message_id String    @db.NVarChar(512)
+  // ORIGEN | NOTA | RESPUESTA
+  tipo                String    @db.NVarChar(10)
+  received_at         DateTime? @db.DateTime2
+  created_at          DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  link EmailThreadLink @relation(fields: [id_link], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([internet_message_id], map: "UQ_email_thread_message_imid")
+  @@index([id_link], map: "IX_email_thread_message_link")
+  @@map("email_thread_message")
+  @@schema("dbo")
+}
+
+/// Auditoría del módulo Correo: CADA lectura del buzón (bandeja, hilo, adjunto),
+/// conversiones, vínculos, respuestas y notas. Inmutable (trigger); sin cuerpos de correo.
+model EmailAudit {
+  id                  BigInt   @id @default(autoincrement())
+  id_user             String   @db.NVarChar(50)
+  // Buzón consultado (siempre el del usuario de la sesión).
+  mailbox             String?  @db.NVarChar(320)
+  accion              String   @db.NVarChar(30)
+  mensaje_id          String?  @db.NVarChar(512)
+  conversation_id     String?  @db.NVarChar(512)
+  internet_message_id String?  @db.NVarChar(512)
+  id_request          Int?
+  detalle             String?  @db.NVarChar(1000)
+  ip                  String?  @db.NVarChar(64)
+  created_at          DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  @@index([id_user, created_at], map: "IX_email_audit_user")
+  @@index([id_request], map: "IX_email_audit_request")
+  @@map("email_audit")
+  @@schema("dbo")
+}

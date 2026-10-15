@@ -38,6 +38,8 @@ const RUTAS_FIJAS = [
   // (tests/integration/bitacora-proceso) y su reversa viven en este mismo job.
   'lib/bitacora-proceso/',
   'app/api/bitacora-proceso/',
+  // Módulo Correo: su integración (tests/integration/correo) y su reversa viven en este job.
+  'lib/correo/',
   // Base de datos: esquema, migraciones (SGC, Bitácora y Portal TH se prueban en el job) y SQL manual
   'prisma/',
   // Utilidades compartidas de las que depende el SGC (también las detecta el árbol de importaciones)
@@ -61,7 +63,7 @@ const RUTAS_FIJAS = [
 ];
 
 // Raíces del árbol de importaciones (ver punto 2 de la cabecera).
-const RAICES = ['tests/integration', 'lib/sgc', 'lib/bitacora-proceso'];
+const RAICES = ['tests/integration', 'lib/sgc', 'lib/bitacora-proceso', 'lib/correo'];
 
 const EXTENSIONES = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts'];
 const PATRON_IMPORT = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)['"]([^'"]+)['"]/g;
