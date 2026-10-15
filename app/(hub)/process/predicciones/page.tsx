@@ -10,7 +10,6 @@ import {
   Breadcrumbs,
   Card,
   Group,
-  List,
   Loader,
   SimpleGrid,
   Stack,
@@ -21,14 +20,30 @@ import {
 } from '@mantine/core';
 import {
   IconAlertTriangle,
-  IconBulb,
   IconChartLine,
+  IconChecklist,
   IconChevronRight,
+  IconPackage,
+  IconTarget,
 } from '@tabler/icons-react';
 import { Line } from 'react-chartjs-2';
 import '../../../../lib/charts/register';
 import CarteraCaja, { type Cartera } from './CarteraCaja';
 import LotesRegistros, { type LotesRegistrosData } from './LotesRegistros';
+import DecisionesArticulo, { MOSTRAR_DECISIONES_POR_ARTICULO } from './DecisionesArticulo';
+import { DECISIONES_EMPRESAS } from '../../../../lib/predictivo/decisiones';
+import {
+  ComoLeer,
+  KpiCard,
+  ListaAlertas,
+  SEMAFORO,
+  Seccion,
+  SemaforoPill,
+  tonoClase,
+  usePrediccionesChartTheme,
+  type Semaforo,
+  type TarjetaKpi,
+} from './ui';
 
 /**
  * Predicciones — una pestaña por empresa (Farmalógica, Ryan, OLP, Abamia,
@@ -41,17 +56,6 @@ import LotesRegistros, { type LotesRegistrosData } from './LotesRegistros';
  * Acceso: subproceso '/process/predicciones' asignado en cada empresa
  * (lib/predictivo/access.ts).
  */
-
-type Semaforo = 'verde' | 'amarillo' | 'rojo';
-
-interface Tarjeta {
-  id: string;
-  titulo: string;
-  valor: string;
-  detalle: string;
-  semaforo: Semaforo;
-  frase: string;
-}
 
 interface Alerta {
   prioridad: 'alta' | 'media' | 'baja';
@@ -84,7 +88,7 @@ interface Prediccion {
   aviso?: string | null;
   fuente: { ventas_desde: string; ultimo_mes_completo: string };
   resumen: string;
-  tarjetas: Tarjeta[];
+  tarjetas: TarjetaKpi[];
   mes_pasado?: MesPasado | null;
   top_productos?: Producto[];
   ventas: {
@@ -98,18 +102,6 @@ interface Prediccion {
   cartera?: Cartera | null;
   lotes_registros?: LotesRegistrosData | null;
 }
-
-const SEMAFORO: Record<Semaforo, { color: string; emoji: string; texto: string }> = {
-  verde: { color: 'green', emoji: '🟢', texto: 'Bien' },
-  amarillo: { color: 'yellow', emoji: '🟡', texto: 'Revisar' },
-  rojo: { color: 'red', emoji: '🔴', texto: 'Actuar' },
-};
-
-const PRIORIDAD: Record<Alerta['prioridad'], { color: string; texto: string }> = {
-  alta: { color: 'red', texto: 'Urgente' },
-  media: { color: 'yellow', texto: 'Pronto' },
-  baja: { color: 'gray', texto: 'Informativo' },
-};
 
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
@@ -217,6 +209,9 @@ function PanelEmpresa({ companyId }: { companyId: number }) {
     })();
   }, [companyId]);
 
+  const chartTheme = usePrediccionesChartTheme();
+  const { series } = chartTheme;
+
   const chartData = useMemo(() => {
     if (!data) return null;
     const { historia, parciales, pronostico } = data.ventas;
@@ -232,7 +227,7 @@ function PanelEmpresa({ companyId }: { companyId: number }) {
           label: 'Máximo probable',
           data: [...pad(nHist - 1), ultimoReal, ...pronostico.map((p) => p.max)],
           borderColor: 'transparent',
-          backgroundColor: 'rgba(28, 126, 214, 0.15)',
+          backgroundColor: series.banda,
           pointRadius: 0,
           fill: '+1',
         },
@@ -246,8 +241,8 @@ function PanelEmpresa({ companyId }: { companyId: number }) {
         {
           label: 'Vendido',
           data: [...historia.map((h) => h.real), ...pad(pronostico.length)],
-          borderColor: '#1c7ed6',
-          backgroundColor: '#1c7ed6',
+          borderColor: series.vendido,
+          backgroundColor: series.vendido,
           borderWidth: 3,
           pointRadius: 2,
           tension: 0.25,
@@ -256,8 +251,8 @@ function PanelEmpresa({ companyId }: { companyId: number }) {
         {
           label: 'Proyectado',
           data: [...pad(nHist - 1), ultimoReal, ...pronostico.map((p) => p.esperado)],
-          borderColor: '#f76707',
-          backgroundColor: '#f76707',
+          borderColor: series.proyectado,
+          backgroundColor: series.proyectado,
           borderDash: [6, 5],
           borderWidth: 3,
           pointRadius: 3,
@@ -267,15 +262,15 @@ function PanelEmpresa({ companyId }: { companyId: number }) {
         {
           label: 'Registrado hasta hoy (incompleto)',
           data: [...pad(nHist), ...pronostico.map((p) => parcialPorMes.get(p.mes) ?? null)],
-          borderColor: '#868e96',
-          backgroundColor: '#868e96',
+          borderColor: series.registrado,
+          backgroundColor: series.registrado,
           showLine: false,
           pointRadius: 4,
           pointStyle: 'triangle' as const,
         },
       ],
     };
-  }, [data]);
+  }, [data, series]);
 
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
@@ -310,23 +305,27 @@ function PanelEmpresa({ companyId }: { companyId: number }) {
     );
   }
 
+  const mesPasado = data.mes_pasado;
+
   const ventasInventario = (
       <Stack className="py-6" gap="lg">
         {/* 1. Encabezado con la frase resumen */}
-        <Card shadow="sm" p="lg" radius="md" withBorder>
-          <Breadcrumbs separator={<IconChevronRight size={16} />} mb="sm">
+        <Card p="lg" radius="md" withBorder>
+          <Breadcrumbs separator={<IconChevronRight size={14} />} mb="sm">
             {breadcrumbItems}
           </Breadcrumbs>
-          <Group gap="sm" wrap="nowrap" align="flex-start">
-            <ThemeIcon size={40} radius="md" variant="light">
+          <Group gap="md" wrap="nowrap" align="flex-start">
+            <ThemeIcon size={44} radius="md" variant="light" visibleFrom="xs">
               <IconChartLine size={24} />
             </ThemeIcon>
-            <div>
-              <Title order={2}>Predicciones · {data.empresa}</Title>
-              <Text size="lg" mt={6} fw={500}>
+            <div style={{ minWidth: 0 }}>
+              <Title order={2} className="pred-hero__title">
+                Predicciones · {data.empresa}
+              </Title>
+              <Text size="md" mt={8} fw={500} maw={880}>
                 {data.resumen}
               </Text>
-              <Text size="xs" c="dimmed" mt={6}>
+              <Text size="xs" c="dimmed" mt={8}>
                 Actualizado el {data.generado} · con ventas desde {data.fuente.ventas_desde} · piloto
               </Text>
               {data.aviso && (
@@ -340,73 +339,40 @@ function PanelEmpresa({ companyId }: { companyId: number }) {
 
         {/* 2. Tarjetas con semáforo */}
         <SimpleGrid cols={{ base: 1, xs: 2, lg: 4 }} spacing="md">
-          {data.tarjetas.map((t) => {
-            const s = SEMAFORO[t.semaforo];
-            return (
-              <Card
-                key={t.id}
-                withBorder
-                radius="md"
-                p="md"
-                style={{ borderLeft: `6px solid var(--mantine-color-${s.color}-6)` }}
-              >
-                <Group justify="space-between" wrap="nowrap" align="flex-start">
-                  <Text size="sm" c="dimmed" fw={600}>
-                    {t.titulo}
-                  </Text>
-                  <Badge color={s.color} variant="light" size="sm">
-                    {s.emoji} {s.texto}
-                  </Badge>
-                </Group>
-                <Text fz={26} fw={700} mt={4}>
-                  {t.valor}
-                </Text>
-                <Text size="sm">{t.frase}</Text>
-                <Text size="xs" c="dimmed" mt={4}>
-                  {t.detalle}
-                </Text>
-              </Card>
-            );
-          })}
+          {data.tarjetas.map((t) => (
+            <KpiCard key={t.id} t={t} />
+          ))}
         </SimpleGrid>
 
         {/* 2b. ¿Cómo le fue al pronóstico el mes pasado? */}
-        {data.mes_pasado && (
-          <Card
-            withBorder
-            radius="md"
-            p="md"
-            style={{
-              borderLeft: `6px solid var(--mantine-color-${SEMAFORO[data.mes_pasado.semaforo].color}-6)`,
-            }}
+        {mesPasado && (
+          <Seccion
+            titulo="¿Cómo le fue al pronóstico el mes pasado?"
+            icono={<IconTarget size={20} />}
+            extra={<SemaforoPill semaforo={mesPasado.semaforo} />}
+            className={`pred-accent ${tonoClase(SEMAFORO[mesPasado.semaforo].tono)}`}
           >
-            <Group justify="space-between" wrap="nowrap" align="flex-start">
-              <Title order={4}>¿Cómo le fue al pronóstico el mes pasado?</Title>
-              <Badge color={SEMAFORO[data.mes_pasado.semaforo].color} variant="light" size="sm">
-                {SEMAFORO[data.mes_pasado.semaforo].emoji} {SEMAFORO[data.mes_pasado.semaforo].texto}
-              </Badge>
-            </Group>
-            <Text size="md" mt={6} fw={500}>
-              {data.mes_pasado.frase}
+            <Text size="md" fw={500}>
+              {mesPasado.frase}
             </Text>
             <Text size="xs" c="dimmed" mt={4}>
-              {data.mes_pasado.detalle}
+              {mesPasado.detalle}
               {data.ventas.frase_modelo ? ` ${data.ventas.frase_modelo}` : ''}
             </Text>
-          </Card>
+          </Seccion>
         )}
 
         {/* 3. Gráfica real vs proyectado */}
         {chartData && (
-          <Card withBorder radius="md" p="md">
-            <Title order={4}>Ventas netas por mes: lo vendido y lo que se espera</Title>
-            <Text size="sm" c="dimmed" mb="sm">
-              La franja azul clara es el rango probable del pronóstico.
-            </Text>
-            <div style={{ height: 320 }}>
+          <Seccion
+            titulo="Ventas netas por mes: lo vendido y lo que se espera"
+            subtitulo="La franja sombreada es el rango probable del pronóstico."
+            icono={<IconChartLine size={20} />}
+          >
+            <div className="pred-chart" style={{ height: chartTheme.compacto ? 280 : 340 }}>
               <Line
                 data={chartData}
-                options={{
+                options={chartTheme.tematizar<'line'>({
                   responsive: true,
                   maintainAspectRatio: false,
                   interaction: { mode: 'index', intersect: false },
@@ -414,6 +380,10 @@ function PanelEmpresa({ companyId }: { companyId: number }) {
                     legend: {
                       position: 'bottom',
                       labels: {
+                        usePointStyle: true,
+                        boxWidth: 8,
+                        boxHeight: 8,
+                        padding: chartTheme.compacto ? 10 : 16,
                         filter: (item) =>
                           item.text !== 'Máximo probable' && item.text !== 'Mínimo probable',
                       },
@@ -428,22 +398,19 @@ function PanelEmpresa({ companyId }: { companyId: number }) {
                     },
                   },
                   scales: {
-                    x: { ticks: { maxTicksLimit: 12 } },
+                    x: { ticks: { maxTicksLimit: chartTheme.compacto ? 6 : 12 }, grid: { display: false } },
                     y: { beginAtZero: true, ticks: { callback: (v) => millones(Number(v)) } },
                   },
-                }}
+                })}
               />
             </div>
-          </Card>
+          </Seccion>
         )}
 
         {/* 3b. Productos principales (indica cuándo la venta es intermitente) */}
         {data.top_productos && data.top_productos.length > 0 && (
-          <Card withBorder radius="md" p="md">
-            <Title order={4} mb="sm">
-              Productos que más venden: lo que se espera
-            </Title>
-            <Stack gap="xs">
+          <Seccion titulo="Productos que más venden: lo que se espera" icono={<IconPackage size={20} />}>
+            <Stack gap="md">
               {data.top_productos.map((p) => (
                 <div key={p.codigo}>
                   <Group gap="xs" wrap="wrap">
@@ -465,67 +432,32 @@ function PanelEmpresa({ companyId }: { companyId: number }) {
                 </div>
               ))}
             </Stack>
-          </Card>
+          </Seccion>
         )}
 
         {/* 4. Alertas accionables */}
-        <Card withBorder radius="md" p="md">
-          <Title order={4} mb="sm">
-            Qué hacer ahora
-          </Title>
+        <Seccion titulo="Qué hacer ahora" icono={<IconChecklist size={20} />}>
           {data.alertas.length === 0 ? (
-            <Text c="dimmed">No hay alertas. 🟢</Text>
+            <Text c="dimmed">No hay alertas.</Text>
           ) : (
-            <Stack gap="sm">
-              {data.alertas.map((a, i) => {
-                const p = PRIORIDAD[a.prioridad];
-                return (
-                  <Alert
-                    key={i}
-                    color={p.color}
-                    variant="light"
-                    radius="md"
-                    title={
-                      <Group gap="xs">
-                        <Badge color={p.color} size="sm">
-                          {p.texto}
-                        </Badge>
-                        <Text size="sm" fw={600} component="span">
-                          {a.titulo}
-                        </Text>
-                      </Group>
-                    }
-                  >
-                    <Text size="sm">👉 {a.accion}</Text>
-                  </Alert>
-                );
-              })}
-            </Stack>
+            <ListaAlertas alertas={data.alertas} />
           )}
-        </Card>
+        </Seccion>
 
         {/* 5. Cómo leer esto */}
-        <Card withBorder radius="md" p="md">
-          <Group gap="xs" mb="xs">
-            <IconBulb size={20} />
-            <Title order={4}>¿Cómo leer esto?</Title>
-          </Group>
-          <List size="sm" spacing={4}>
-            {data.como_leer.map((t, i) => (
-              <List.Item key={i}>{t}</List.Item>
-            ))}
-          </List>
-        </Card>
+        <ComoLeer items={data.como_leer} />
       </Stack>
   );
 
-  if (!data.cartera && !data.lotes_registros) return <div>{ventasInventario}</div>;
+  const hayDecisiones = MOSTRAR_DECISIONES_POR_ARTICULO && DECISIONES_EMPRESAS.includes(companyId);
+  if (!data.cartera && !data.lotes_registros && !hayDecisiones) return <div>{ventasInventario}</div>;
   return (
     <Tabs defaultValue="ventas" variant="pills" mt="md" keepMounted={false}>
       <Tabs.List>
         <Tabs.Tab value="ventas">Ventas e inventario</Tabs.Tab>
         {data.cartera && <Tabs.Tab value="cartera">Cartera y caja</Tabs.Tab>}
         {data.lotes_registros && <Tabs.Tab value="lotes">Lotes y registros</Tabs.Tab>}
+        {hayDecisiones && <Tabs.Tab value="decisiones">Decisiones por artículo</Tabs.Tab>}
       </Tabs.List>
       <Tabs.Panel value="ventas">{ventasInventario}</Tabs.Panel>
       {data.cartera && (
@@ -536,6 +468,11 @@ function PanelEmpresa({ companyId }: { companyId: number }) {
       {data.lotes_registros && (
         <Tabs.Panel value="lotes" pt="md">
           <LotesRegistros data={data.lotes_registros} />
+        </Tabs.Panel>
+      )}
+      {hayDecisiones && (
+        <Tabs.Panel value="decisiones" pt="md">
+          <DecisionesArticulo companyId={companyId} />
         </Tabs.Panel>
       )}
     </Tabs>

@@ -84,6 +84,7 @@ import {
   removeFromAttachmentCache,
 } from '../../../../../lib/attachments/pendingOptimistic';
 import AiSummarizeButton from './AiSummarizeButton';
+import CorreoHiloVinculado from '../../../../../components/correo/CorreoHiloVinculado';
 import {
   TABLE_FIELD_TYPE,
   parseTableConfig,
@@ -1805,6 +1806,7 @@ function ViewRequestPage() {
       } else {
         const err = await response.json().catch(() => ({}));
         console.error('Error al actualizar asignado:', err.error || response.statusText);
+        toast.error(err.error || 'No se pudo actualizar el asignado');
       }
     } catch (error) {
       console.error('Error updating task assignee:', error);
@@ -2474,6 +2476,8 @@ function ViewRequestPage() {
                       muestra si el navegador soporta la API. */}
                   <Group mt='sm'>
                     <AiSummarizeButton request={request} notes={notes} tasks={taskRQ} />
+                    {/* Módulo Correo: hilo de Outlook propio vinculado a esta solicitud. */}
+                    <CorreoHiloVinculado requestId={id} />
                   </Group>
                 </div>
 

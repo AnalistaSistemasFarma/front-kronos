@@ -68,6 +68,7 @@ import {
 } from '../../../../../lib/requests-general/tableField';
 import TableColumnsEditor from '../_components/TableColumnsEditor';
 import WorkflowValidatorsModal from '../../../../../components/request-general/WorkflowValidatorsModal';
+import { FlowConnector } from '../../../../../components/ui/flow/FlowConnector';
 import toast from 'react-hot-toast';
 
 interface WorkFlow {
@@ -1519,7 +1520,7 @@ function ViewWorkFlowPage() {
               </Card>
 
               <Flex justify='center' align='center'>
-                <div className='w-1 h-8 bg-gradient-to-b from-indigo-300 to-teal-300 rounded-full'></div>
+                <FlowConnector height={32} tone={isEditing ? 'editing' : 'ok'} />
               </Flex>
 
               <Card
@@ -2102,16 +2103,7 @@ function ViewWorkFlowPage() {
 
                         {index < (isEditing ? editedTasks.length : tasks.length) - 1 && (
                           <div className='flex justify-center py-3'>
-                            <div
-                              className={`
-                                w-1 h-12 rounded-full transition-all duration-300
-                                ${
-                                  task.active === 1
-                                    ? 'bg-gradient-to-b from-amber-400 to-amber-200'
-                                    : 'bg-gray-300'
-                                }
-                              `}
-                            />
+                            <FlowConnector active={task.active === 1} tone={isEditing ? 'editing' : 'ok'} />
                           </div>
                         )}
                       </div>

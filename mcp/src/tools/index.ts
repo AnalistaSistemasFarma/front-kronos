@@ -19,12 +19,14 @@ import {
   type GraphFile,
 } from '../graph.js';
 import { sanitizeOneDriveName } from '../onedriveName.js';
+import { loadTeamsGraphConfig, TeamsGraphClient } from '../teams.js';
 import {
   instantiateInitialTasks,
   insertNewRequestNotifications,
   processOwnerEmails,
 } from '../workflow.js';
 import { registerIaAccessTool } from './iaAccess.js';
+import { BITACORA_TOOLS, registerBitacoraTools } from './bitacoraProceso.js';
 
 interface ToolContext {
   scope: AuthScope;
@@ -158,6 +160,16 @@ function getGraphClient(): GraphClient | null {
     graphClientSingleton = cfg ? new GraphClient(cfg) : null;
   }
   return graphClientSingleton;
+}
+
+/** Cliente Teams app-only compartido y lazily inicializado. */
+let teamsGraphClientSingleton: TeamsGraphClient | null | undefined;
+function getTeamsGraphClient(): TeamsGraphClient | null {
+  if (teamsGraphClientSingleton === undefined) {
+    const cfg = loadTeamsGraphConfig();
+    teamsGraphClientSingleton = cfg ? new TeamsGraphClient(cfg) : null;
+  }
+  return teamsGraphClientSingleton;
 }
 
 /** Tamaño máximo para devolver contenido base64 inline en get_attachment. */
@@ -303,6 +315,16 @@ export const ENTITY_METADATA = {
     companyColumn: 'company_user.id_company (vía relación)',
     fields: Object.keys(USER_SAFE_SELECT),
   },
+  bitacoras: {
+    description:
+      'Bitácora de Proceso (planta): una bitácora = un turno (ot_orden_trabajo) con supervisor, jefe de producción (quien verifica) y operarios sin usuario de SynerLink (ot_orden_operador, maestro ot_operador; las bitácoras anteriores al 2026-10-14 tienen auxiliares con usuario en ot_orden_operario), registros de intervenciones con hora del servidor en UTC, el operario que la hizo y el usuario de la sesión que la registró (ot_registro, inmutables), catálogo de actividades (ot_actividad) y confirmaciones «Cerró» (supervisor) / «Verificó» (jefe de producción) (ot_firma). Solo lectura vía kronos_list_bitacoras, kronos_get_bitacora, kronos_bitacora_actividad_reciente y kronos_list_bitacora_actividades. Nunca se exponen imágenes de firma, huellas ni IP.',
+    companyColumn: 'ot_orden_trabajo.id_company / ot_actividad.id_company',
+    fields: [
+      'id', 'codigo (BP-xxxx, consecutivo por empresa)', 'id_company', 'company', 'producto', 'item_code', 'lote',
+      'turno', 'area', 'orden_produccion_sap', 'estado (abierta|cerrada|verificada)', 'abierta_en', 'cerrada_en',
+      'supervisor', 'jefe_produccion', 'operarios', 'registros (operario + usuario_sesion)', 'firmas (confirmaciones Cerró/Verificó)', 'ultima_actividad_en',
+    ],
+  },
   attachments: {
     description:
       'Adjuntos/documentos de una solicitud. El CONTENIDO binario NO se guarda en la base de datos: los archivos se suben a OneDrive (MS Graph) en la carpeta determinística SAPSEND/TEC/SG/Request-<id>. kronos_list_attachments devuelve DOS cosas: (a) "required_files" = la DEFINICIÓN de qué archivos exige el proceso (file_process_category: etiqueta, obligatoriedad, condición) y (b) "files" = los archivos REALES cargados en OneDrive (name, size, tipo, fechas, file_id y download_url temporal). kronos_get_attachment resuelve el archivo real (download_url y, opcional, base64) o la definición del proceso.',
@@ -316,7 +338,8 @@ export const ENTITY_METADATA = {
 } as const;
 
 /**
- * Capacidades del servidor: 26 tools en total = 18 de LECTURA + 8 de ESCRITURA.
+ * Capacidades del servidor: 34 tools en total = 25 de LECTURA (incluye 4 de la
+ * Bitácora de Proceso) + 9 de ESCRITURA.
  *
  * Las de escritura están acotadas (categorización, creación de solicitudes,
  * notas, resolución de tareas, adjuntos en OneDrive y formulario dinámico),
@@ -324,7 +347,7 @@ export const ENTITY_METADATA = {
  * candado de solo lectura del resto del servidor.
  */
 export const TOOL_CAPABILITIES = {
-  totalTools: 27,
+  totalTools: 34,
   readOnly: [
     'kronos_metadata',
     'kronos_list_requests',
@@ -344,6 +367,10 @@ export const TOOL_CAPABILITIES = {
     'kronos_list_categories',
     'kronos_list_users',
     'kronos_search',
+    'teams_list_meetings',
+    'teams_list_transcripts',
+    'teams_get_transcript',
+    ...BITACORA_TOOLS,
   ],
   write: [
     'kronos_categorize_case',
@@ -389,6 +416,71 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
 
   // Radicación de solicitudes de conectores IA a nombre de una persona.
   registerIaAccessTool(server, ctx);
+
+  // Bitácora de Proceso (planta): 4 tools de SOLO LECTURA (src/tools/bitacoraProceso.ts).
+  registerBitacoraTools(server, {
+    scope: ctx.scope,
+    maxPageSize: ctx.maxPageSize,
+    defaultPageSize: ctx.defaultPageSize,
+    withAudit: (tool, params, fn) => withAudit(ctx, tool, params, fn),
+    companyClause,
+    isMissingTableError,
+  });
+
+  // ---------------------------------------------------------------------------
+  // Teams / transcripciones
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'teams_list_meetings',
+    'Lista las reuniones de Teams del usuario configurado en Microsoft Graph, más recientes primero. Requiere permisos de aplicación Calendars.Read; solo devuelve reuniones online por defecto.',
+    {
+      daysBack: z.number().int().min(0).max(365).default(30).describe('Días hacia atrás. Por defecto 30.'),
+      daysForward: z.number().int().min(0).max(365).default(0).describe('Días hacia adelante. Por defecto 0.'),
+      limit: z.number().int().min(1).max(100).default(25).describe('Máximo de reuniones. Por defecto 25.'),
+      onlyOnline: z.boolean().default(true).describe('Solo reuniones de Teams online. Por defecto true.'),
+    },
+    async (args) =>
+      withAudit(ctx, 'teams_list_meetings', args, async () => {
+        const graph = getTeamsGraphClient();
+        if (!graph) throw new Error('Teams/Graph no está configurado: falta MICROSOFTGRAPHUSERROUTE o MICROSOFTGRAPHUSERID.');
+        const meetings = await graph.listMeetings(args);
+        return { result: { count: meetings.length, meetings }, rows: meetings.length };
+      })
+  );
+
+  server.tool(
+    'teams_list_transcripts',
+    'Lista las transcripciones disponibles para una reunión de Teams. Indique meetingId o joinUrl. Requiere OnlineMeetingTranscript.Read.All con consentimiento de administrador.',
+    {
+      meetingId: z.string().trim().min(1).optional().describe('Id onlineMeeting de Microsoft Graph.'),
+      joinUrl: z.string().trim().min(1).optional().describe('URL de unión de Teams; el MCP resuelve el meetingId.'),
+    },
+    async (args) =>
+      withAudit(ctx, 'teams_list_transcripts', args, async () => {
+        const graph = getTeamsGraphClient();
+        if (!graph) throw new Error('Teams/Graph no está configurado: falta MICROSOFTGRAPHUSERROUTE o MICROSOFTGRAPHUSERID.');
+        const result = await graph.listTranscripts(args.meetingId, args.joinUrl);
+        return { result, rows: result.transcripts.length };
+      })
+  );
+
+  server.tool(
+    'teams_get_transcript',
+    'Obtiene el contenido de una transcripción de Teams. Por defecto devuelve texto con timestamps sin nombres de hablantes, formato permitido por el tenant actual; use format=vtt solo si el tenant habilitó speaker attribution.',
+    {
+      meetingId: z.string().trim().min(1).optional().describe('Id onlineMeeting de Microsoft Graph.'),
+      joinUrl: z.string().trim().min(1).optional().describe('URL de unión de Teams; el MCP resuelve el meetingId.'),
+      transcriptId: z.string().trim().min(1).optional().describe('Id de una transcripción concreta; por defecto la más reciente.'),
+      format: z.enum(['text', 'vtt']).default('text').describe('text (sin speaker attribution) o vtt (con speaker attribution).'),
+    },
+    async (args) =>
+      withAudit(ctx, 'teams_get_transcript', args, async () => {
+        const graph = getTeamsGraphClient();
+        if (!graph) throw new Error('Teams/Graph no está configurado: falta MICROSOFTGRAPHUSERROUTE o MICROSOFTGRAPHUSERID.');
+        const result = await graph.getTranscript(args);
+        return { result, rows: result.content ? 1 : 0 };
+      })
+  );
 
   // ---------------------------------------------------------------------------
   // kronos_metadata

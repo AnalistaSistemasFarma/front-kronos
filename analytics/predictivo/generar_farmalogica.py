@@ -29,6 +29,13 @@ Uso:
   python3 analytics/predictivo/generar_farmalogica.py            # escribe lib/predictivo/farmalogica.json
   python3 analytics/predictivo/generar_farmalogica.py --hoy 2026-09-24 --out /tmp/x.json
   python3 analytics/predictivo/generar_farmalogica.py --sin-sap   # solo SharePoint
+  python3 analytics/predictivo/generar_farmalogica.py --decisiones /tmp/dec_fl.json  # + decisiones por artículo
+Opciones de la FASE 1 de decisiones por artículo (apagadas por defecto: el job
+nocturno no las pasa, así que el snapshot no cambia):
+  --decisiones [RUTA]  escribe además el JSON de decisiones D1, D2, D3 y D7
+                       (decisiones_articulo.py) para publicar_decisiones.js.
+  --sugerido-neto      el "sugerido pedir" descuenta las OC abiertas y suma lo
+                       comprometido con clientes (datos de SAP, arreglo aprobado 2026-09-30).
   FAR_CACHE_DIR=/otra/ruta python3 analytics/predictivo/generar_farmalogica.py
 
 Dependencias: Python 3.9+ y numpy (nada más: sin pandas/statsmodels, para que
@@ -62,6 +69,8 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 
 import numpy as np
+
+from decisiones_articulo import sugerido_pedir
 
 CACHE_DIR = os.environ.get("FAR_CACHE_DIR", "/Users/horus/.horus/cache")
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -200,6 +209,18 @@ def cargar_ventas_sap(desde="2024-01-01"):
             "cliente": r.get("Nombre") or "",
         })
     return ventas
+
+
+def reposicion_sap():
+    """{ItemCode: {oc, comprometido, lead_time}} desde el maestro de artículos de SAP (solo lectura)."""
+    from lotes_registros_farmalogica import _sap
+    filas = _sap("sap_query", {
+        "entity": "Items", "maxPageSize": 0,
+        "filter": "QuantityOnStock gt 0 or QuantityOrderedFromVendors gt 0 or QuantityOrderedByCustomers gt 0",
+        "select": "ItemCode,QuantityOrderedFromVendors,QuantityOrderedByCustomers,LeadTime"})
+    return {r["ItemCode"]: {"oc": float(r.get("QuantityOrderedFromVendors") or 0),
+                            "comprometido": float(r.get("QuantityOrderedByCustomers") or 0),
+                            "lead_time": int(r["LeadTime"]) if r.get("LeadTime") else None} for r in filas}
 
 
 def conciliar(v_sp, v_sap):
@@ -391,6 +412,10 @@ def main():
     ap.add_argument("--out", default=DEFAULT_OUT)
     ap.add_argument("--sin-sap", action="store_true", help="No consultar SAP (solo caché SharePoint)")
     ap.add_argument("--sin-cartera", action="store_true", help="No calcular la sección Cartera y caja")
+    ap.add_argument("--decisiones", nargs="?", const="", default=None, metavar="RUTA",
+                    help="Escribe también el JSON de decisiones por artículo (F1)")
+    ap.add_argument("--sugerido-neto", action="store_true",
+                    help="El sugerido de pedido descuenta OC abiertas y suma lo comprometido (SAP)")
     args = ap.parse_args()
     hoy = date.fromisoformat(args.hoy) if args.hoy else date.today()
 
@@ -448,6 +473,7 @@ def main():
     unid = defaultdict(lambda: defaultdict(float))
     valor12 = defaultdict(float)
     unid12 = defaultdict(float)
+    lineas12 = []
     hace12 = add_months(completos[-1], -11)
     for v in ventas:
         if v["tipo"] != "Articulos" or not v["ref"]:
@@ -460,6 +486,7 @@ def main():
         if ym >= hace12:
             valor12[v["ref"]] += v["total"]
             unid12[v["ref"]] += v["cant"]
+            lineas12.append((v["ref"], v["cant"], v["total"]))
 
     def serie_ref(ref):
         return np.array([max(unid[ref].get(m, 0.0), 0.0) for m in completos])
@@ -520,6 +547,12 @@ def main():
         if mensual > 0:
             ritmo[ref] = mensual / 30.0
 
+    reposicion = {}
+    if not args.sin_sap and (args.sugerido_neto or args.decisiones is not None):
+        try:
+            reposicion = reposicion_sap()
+        except Exception as e:  # noqa: BLE001
+            print(f"aviso: no se pudieron leer OC/comprometido de SAP ({e}); el sugerido no los descuenta")
     productos_inv = []
     sin_stock = []  # se venden con regularidad pero no tienen existencias aprobadas
     for ref, diaria in ritmo.items():
@@ -535,8 +568,9 @@ def main():
         if dias is None:
             continue
         nivel = "rojo" if dias < LEAD_TIME_DIAS else "amarillo" if dias < 60 else "verde"
-        pedir = max(0.0, COBERTURA_OBJETIVO_DIAS * diaria - st - cuarentena.get(ref, 0.0))
-        pedir = int(math.ceil(pedir / 10.0) * 10)
+        rep_ref = reposicion.get(ref, {}) if args.sugerido_neto else {}
+        pedir = sugerido_pedir(diaria, st, cuarentena.get(ref, 0.0), rep_ref.get("oc", 0.0),
+                               rep_ref.get("comprometido", 0.0), COBERTURA_OBJETIVO_DIAS)
         fecha_pedido = hoy + timedelta(days=max(0, int(dias - LEAD_TIME_DIAS)))
         productos_inv.append({
             "codigo": ref, "nombre": desc_ref.get(ref) or nombre_inv.get(ref, ref),
@@ -545,6 +579,9 @@ def main():
             "nivel": nivel, "sugerido_pedir": pedir, "pedir_antes_de": fecha_pedido.isoformat(),
             "intermitente": ref in intermitentes,
         })
+        if args.sugerido_neto:
+            productos_inv[-1].update(oc_abiertas=round(rep_ref.get("oc", 0.0)),
+                                     comprometido=round(rep_ref.get("comprometido", 0.0)))
     productos_inv.sort(key=lambda p: p["dias_cobertura"])
     en_riesgo_quiebre = [p for p in productos_inv if p["nivel"] != "verde"]
 
@@ -795,6 +832,45 @@ def main():
     if mes_pasado:
         print(mes_pasado["frase"])
     print(f"Productos en riesgo de agotarse: {len(en_riesgo_quiebre)} | lotes en riesgo: {len(lotes_riesgo)}")
+    if args.decisiones is not None:
+        escribir_decisiones(args.decisiones or "/tmp/predictivo_decisiones_farmalogica.json", hoy, completos,
+                            unid, valor12, unid12, lineas12, {**nombre_inv, **desc_ref}, stock, cuarentena,
+                            reposicion, args.sin_sap)
+
+
+def escribir_decisiones(ruta, hoy, completos, unid, valor12, unid12, lineas12, nombres, stock, cuarentena,
+                        reposicion, sin_sap):
+    """Decisiones por artículo (F1): D1, D2, D3 (lotes reales de SAP) y D7 (registros sanitarios)."""
+    from decisiones_articulo import construir_decisiones, precio_promedio
+    from lotes_registros_farmalogica import cargar_lotes_sap, cargar_registros_sap, cargar_registros_sharepoint
+    lotes, registros = None, None
+    if not sin_sap:
+        try:
+            lotes = [{"codigo": l["codigo"], "lote": l["lote"], "cantidad": l["cantidad"], "vence": l["vence"]}
+                     for l in cargar_lotes_sap()]
+        except Exception as e:  # noqa: BLE001
+            print(f"aviso: sin lotes de SAP ({e}); se omite D3")
+        try:
+            registros = cargar_registros_sap()
+        except Exception as e:  # noqa: BLE001
+            print(f"aviso: registros sanitarios desde SAP no disponibles ({e}); se usa SharePoint")
+    if registros is None:
+        try:
+            registros = cargar_registros_sharepoint(CACHE_DIR)
+        except Exception as e:  # noqa: BLE001
+            print(f"aviso: sin registros sanitarios ({e}); se omite D7")
+    dec = construir_decisiones(company_id=1, hoy=hoy, completos=completos, unid=unid, valor12=valor12,
+                               unid12=unid12, nombres=nombres, stock=stock, cuarentena=cuarentena,
+                               items_sap=reposicion, lotes=lotes, registros=registros,
+                               precio=precio_promedio(lineas12))
+    dec["empresa"] = "Farmalógica S.A."
+    if not reposicion:
+        dec["aviso"] = "Sin OC abiertas ni comprometido de SAP: la posición de inventario es solo el stock."
+    os.makedirs(os.path.dirname(os.path.abspath(ruta)), exist_ok=True)
+    with open(ruta, "w", encoding="utf-8") as fh:
+        json.dump(dec, fh, ensure_ascii=False)
+        fh.write("\n")
+    print(f"Decisiones -> {ruta}: {len(dec['filas'])} filas {dec['resumen']}")
 
 
 if __name__ == "__main__":

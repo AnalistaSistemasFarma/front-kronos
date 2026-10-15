@@ -5,6 +5,7 @@ import {
   type MantineColorsTuple,
 } from '@mantine/core';
 import { darkTokens, lightTokens } from './tokens';
+import { COLOR_ESTADO } from './estados';
 
 /** Escala dark navy (alineada a --app-bg / --app-surface) */
 const appDark: MantineColorsTuple = [
@@ -22,6 +23,8 @@ const appDark: MantineColorsTuple = [
 
 const makeShared = (primaryColor: string) => ({
   primaryColor,
+  // Colores de estado (éxito/error/advertencia): fijos, no dependen de la paleta.
+  other: { estados: COLOR_ESTADO },
   defaultRadius: 'md' as const,
   // Una sola fuente de verdad: `--font-sans` en app/globals.css. Así la
   // preferencia de tipografía por perfil solo tendrá que redefinir esa

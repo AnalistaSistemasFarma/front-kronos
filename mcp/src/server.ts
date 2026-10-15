@@ -4,7 +4,7 @@
  * - Transporte: Streamable HTTP en la ruta /mcp (patrón del MCP de SAP).
  * - Autenticación: API key por agente (Bearer). Sin login humano.
  * - Alcance: cada key se filtra SIEMPRE por sus empresas permitidas.
- * - 13 tools: 11 de LECTURA (candado assertReadOnlySql intacto) + 2 de
+ * - 24 tools: 19 de LECTURA (candado assertReadOnlySql intacto) + 5 de
  *   ESCRITURA acotadas a categorización, por una ruta de escritura separada
  *   (src/write.ts), transaccional, parametrizada y auditada.
  */
@@ -52,7 +52,7 @@ export function buildMcpServer(
     {
       instructions: restricted
         ? `Servidor de SynerLink/Kronos con acceso RESTRINGIDO para el agente ${scope.agent}. Solo dispone de: ${scope.allowedTools!.join(', ')}.`
-        : 'Servidor de SynerLink/Kronos. Todas las consultas/escrituras están limitadas a las empresas del alcance de la API key. 11 herramientas de lectura y 2 de escritura acotadas a categorización (kronos_categorize_case, kronos_categorize_request); el resto es solo lectura.',
+        : 'Servidor de SynerLink/Kronos. Las consultas SQL siguen limitadas a las empresas del alcance de la API key. Incluye herramientas de lectura de reuniones/transcripciones de Teams mediante Microsoft Graph; estas usan el usuario Graph configurado en el servidor y requieren permisos de aplicación con consentimiento de administrador.',
     }
   );
   registerTools(server, { scope, audit, ...opts });

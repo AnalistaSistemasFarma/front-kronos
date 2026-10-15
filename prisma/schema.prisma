@@ -7,7 +7,10 @@ datasource db {
   provider          = "sqlserver"
   url               = env("DATABASE_URL")
   shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
-  // Varios esquemas SQL: dbo (todo lo existente) y sgc (SGC documental aislado).
+  // Varios esquemas SQL (multiSchema, GA en Prisma 6): todo lo existente vive
+  // en `dbo`; el Sistema de Gestión de Calidad (SGC) documental vive aislado
+  // en su propio esquema `sgc` (decisión de Nicolás, 2026-09-30). Por eso cada
+  // modelo declara su @@schema; los de `dbo` no cambian de tabla ni de datos.
   schemas           = ["dbo", "sgc"]
 }
 
@@ -29,7 +32,6 @@ model Account {
 
   @@unique([provider, providerAccountId])
   @@map("account")
-
   @@schema("dbo")
 }
 
@@ -41,7 +43,6 @@ model Session {
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("session")
-
   @@schema("dbo")
 }
 
@@ -85,7 +86,6 @@ model User {
   chatPins                ChatPin[]
 
   @@map("user")
-
   @@schema("dbo")
 }
 
@@ -96,7 +96,6 @@ model VerificationToken {
 
   @@unique([identifier, token])
   @@map("verification_token")
-
   @@schema("dbo")
 }
 
@@ -108,12 +107,18 @@ model Company {
   sap_endpoints   sap_endpoints[]
   cargoAliases    CargoAlias[]
   cargoJerarquias CargoJerarquia[]
+  // Modulo "Asistentes IA" (chat de agentes) — back-relations requeridas por Prisma.
   agentCompanies  AgentCompany[]
   chatGroups      ChatConversation[]
+  // SGC documental — configuración de activación por empresa (esquema `sgc`).
+  sgcCompanyConfig SgcCompanyConfig?
+  // Órdenes de Trabajo (bitácora de proceso de planta, 2026-10-13).
+  otActividades    OtActividad[]
+  otOrdenesTrabajo OtOrdenTrabajo[]
+  otOperadores     OtOperador[]
+  otAreas          OtArea[]
 
   @@map("company")
-  sgcCompanyConfig SgcCompanyConfig?
-
   @@schema("dbo")
 }
 
@@ -126,7 +131,6 @@ model CompanyUser {
   subprocesses    SubprocessUserCompany[]
 
   @@map("company_user")
-
   @@schema("dbo")
 }
 
@@ -137,7 +141,6 @@ model Process {
   subprocesses Subprocess[]
 
   @@map("process")
-
   @@schema("dbo")
 }
 
@@ -152,7 +155,6 @@ model Subprocess {
   agents                  Agent[]
 
   @@map("subprocess")
-
   @@schema("dbo")
 }
 
@@ -164,7 +166,6 @@ model SubprocessUserCompany {
   subprocess                 Subprocess  @relation(fields: [id_subprocess], references: [id_subprocess], onDelete: Cascade)
 
   @@map("subprocess_user_company")
-
   @@schema("dbo")
 }
 
@@ -178,7 +179,6 @@ model UserAuditLog {
   user         User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@map("user_audit_log")
-
   @@schema("dbo")
 }
 
@@ -188,7 +188,6 @@ model StatusCase {
   cases          Case[]
 
   @@map("status_case")
-
   @@schema("dbo")
 }
 
@@ -198,7 +197,6 @@ model Active {
   Renamedcase Case[]
 
   @@map("active")
-
   @@schema("dbo")
 }
 
@@ -207,14 +205,14 @@ model Department {
   department      String           @unique
   cases           Case[]
   departmentUsers DepartmentUser[]
-
-  @@map("department")
+  // SGC documental (esquema `sgc`) — back-relations requeridas por Prisma; no cambian dbo.department.
   sgcProcesses        SgcProcessMap[]
   sgcOwnedDocuments   SgcDocument[]
   sgcDocumentAccesses SgcDocumentAccess[]
   // S15: líderes aprobadores por departamento (sgc.approver_authorization.id_department).
   sgcApproverLeaders  SgcApproverAuthorization[]
 
+  @@map("department")
   @@schema("dbo")
 }
 
@@ -226,7 +224,6 @@ model DepartmentUser {
   department    Department @relation(fields: [id_department], references: [id_department])
 
   @@map("department_user")
-
   @@schema("dbo")
 }
 
@@ -236,7 +233,6 @@ model TypesAuthorization {
   userTypes          UserTypesAuthorization[]
 
   @@map("types_authorization")
-
   @@schema("dbo")
 }
 
@@ -248,7 +244,6 @@ model UserTypesAuthorization {
   user               User               @relation(fields: [id_user], references: [id])
 
   @@map("user_types_authorization")
-
   @@schema("dbo")
 }
 
@@ -259,7 +254,6 @@ model Category {
   subcategories Subcategory[]
 
   @@map("category")
-
   @@schema("dbo")
 }
 
@@ -272,7 +266,6 @@ model Subcategory {
   category       Category?      @relation(fields: [id_category], references: [id_category], onDelete: NoAction, onUpdate: NoAction, map: "FK__subcatego__id_ca__0D7A0286")
 
   @@map("subcategory")
-
   @@schema("dbo")
 }
 
@@ -284,7 +277,6 @@ model Activity {
   categoryCase   CategoryCase[] @relation("CategoryCaseActive")
 
   @@map("activity")
-
   @@schema("dbo")
 }
 
@@ -313,7 +305,6 @@ model Case {
   notes            Note[]
 
   @@map("case")
-
   @@schema("dbo")
 }
 
@@ -329,7 +320,6 @@ model CategoryCase {
   activity         Activity    @relation("CategoryCaseActive", fields: [id_activity], references: [id_activity], onUpdate: NoAction, map: "fk_category_case_active")
 
   @@map("category_case")
-
   @@schema("dbo")
 }
 
@@ -340,7 +330,6 @@ model Note {
   case    Case   @relation(fields: [id_case], references: [id_case], onDelete: Cascade)
 
   @@map("notes")
-
   @@schema("dbo")
 }
 
@@ -351,7 +340,6 @@ model LogCaseHelpDesk {
   case    Case   @relation(fields: [id_case], references: [id_case], onDelete: Cascade)
 
   @@map("logs_case_help_desk")
-
   @@schema("dbo")
 }
 
@@ -375,7 +363,6 @@ model sap_endpoints {
   // empresa (ej. ART_CHG_LOG en OLP). Null = la empresa no registra el log.
   articles_log_object           String?
   company                       Company  @relation(fields: [id_company], references: [id_company], onDelete: Cascade)
-
   @@schema("dbo")
 }
 
@@ -399,7 +386,6 @@ model Cargo {
   jerarquiasHijas    CargoJerarquia[] @relation("CargoPadre")
 
   @@map("cargo")
-
   @@schema("dbo")
 }
 
@@ -415,7 +401,6 @@ model CargoAlias {
   company        Company? @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
 
   @@map("cargo_alias")
-
   @@schema("dbo")
 }
 
@@ -435,7 +420,6 @@ model CargoJerarquia {
 
   @@unique([id_company, id_cargo])
   @@map("cargo_jerarquia")
-
   @@schema("dbo")
 }
 
@@ -447,7 +431,6 @@ model sysdiagrams {
   definition   Bytes?
 
   @@unique([principal_id, name], map: "UK_principal_name")
-
   @@schema("dbo")
 }
 
@@ -480,7 +463,6 @@ model SavedView {
   filters SavedViewFilter[]
 
   @@map("saved_view")
-
   @@schema("dbo")
 }
 
@@ -501,7 +483,6 @@ model SavedViewFilter {
   savedView            SavedView @relation(fields: [id_saved_view], references: [id_saved_view], onDelete: Cascade)
 
   @@map("saved_view_filter")
-
   @@schema("dbo")
 }
 
@@ -515,7 +496,6 @@ model SavedViewColumn {
   savedView            SavedView @relation(fields: [id_saved_view], references: [id_saved_view], onDelete: Cascade)
 
   @@map("saved_view_column")
-
   @@schema("dbo")
 }
 
@@ -534,7 +514,6 @@ model CatalogSource {
 
   @@unique([object_name])
   @@map("catalog_source")
-
   @@schema("dbo")
 }
 
@@ -550,7 +529,36 @@ model CatalogField {
   source            CatalogSource @relation(fields: [id_catalog_source], references: [id_catalog_source], onDelete: Cascade)
 
   @@map("catalog_field")
+  @@schema("dbo")
+}
 
+// ===================================================================
+// Métricas diarias del SAP Business One Service Layer (OLP) — 2026-09-03.
+// Reemplaza el Excel manual que se venía sacando a mano: cuenta líneas del
+// log del balanceador del Service Layer (puerto 50000, recibe todo el
+// tráfico, no hace falta sumar los nodos 50001-50010) en serfarma07
+// (192.168.10.7) y las deja acá vía:
+//   - Backfill histórico: prisma/seeds/run-service-layer-metrics-backfill.mjs
+//   - Job diario: Tarea Programada de Windows en pce0023 (no en serfarma07,
+//     ver lib/service-layer-metrics/collectDailyMetric.ts) que hace SSH
+//     puntual a serfarma07 para contar el log del día ya cerrado y hace
+//     upsert acá.
+//
+// `company` es texto libre (SIN FK a la tabla `company`) a propósito: hoy
+// solo se llena "OLP", pero la idea es poder sumar otras empresas más
+// adelante sin tener que resolver primero su id_company real (referencia
+// blanda, sin relation()).
+// ===================================================================
+model ServiceLayerDailyMetric {
+  id                Int      @id @default(autoincrement())
+  company           String   @db.NVarChar(50)
+  metric_date       DateTime @db.Date
+  transaction_count Int
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  @@unique([company, metric_date])
+  @@map("service_layer_daily_metrics")
   @@schema("dbo")
 }
 
@@ -558,9 +566,8 @@ model CatalogField {
 // Módulo "Asistentes IA" — chat de agentes en SynerLink (Fase 2a: modelo de
 // datos y permisos). 2026-09-06.
 //
-// AISLAMIENTO: este módulo es independiente del de Gestión Documental (SGD).
-// No comparte ni modifica ninguna de sus tablas; lo único común son las
-// tablas de plataforma que ya existían (`user`, `company`, y el esquema de
+// AISLAMIENTO: este módulo no comparte ni modifica tablas de otros módulos;
+// lo único común son las tablas de plataforma que ya existían (`user`, `company`, y el esquema de
 // permisos process -> subprocess -> subprocess_user_company).
 //
 // -------------------------------------------------------------------
@@ -599,7 +606,7 @@ model CatalogField {
 // FK, renombrar el agente no mueve su permiso, y un subproceso no puede ser
 // el permiso de dos agentes (índice único filtrado UX_agent_id_subprocess).
 // Hay precedente de subprocesos que son solo marcadores de permiso y no
-// páginas reales (p.ej. /process/document-management/manage/regulatory).
+// páginas reales.
 //
 // `agent_company` es OTRA cosa: es la AGRUPACIÓN (las "carpetas" de la
 // interfaz), no el permiso. Dice a qué empresas pertenece un agente —
@@ -657,10 +664,17 @@ model Agent {
   deliveries       ChatMessageDelivery[]
   statuses         ChatAgentStatus[]
   turnUsage        ChatAgentTurnUsage[]
+  // Auditoría de agentes → Inventario (F1): back-relations requeridas por Prisma.
+  inventories      AgentInventory[]
+  auditFindings    AgentAuditFinding[]
+  // Auditoría de agentes → Hoja de vida (F2): back-relations requeridas por Prisma.
+  profile          AgentProfile?
+  metricsDaily     AgentMetricsDaily[]
+  cvEntries        AgentCvEntry[]
+  cvSummaries      AgentCvSummary[]
 
   @@unique([code])
   @@map("agent")
-
   @@schema("dbo")
 }
 
@@ -679,7 +693,6 @@ model AgentCompany {
   @@unique([id_agent, id_company])
   @@index([id_company])
   @@map("agent_company")
-
   @@schema("dbo")
 }
 
@@ -744,7 +757,6 @@ model ChatConversation {
   @@index([id_agent])
   @@index([kind, archived, last_message_at(sort: Desc)])
   @@map("chat_conversation")
-
   @@schema("dbo")
 }
 
@@ -769,7 +781,6 @@ model ChatPin {
 
   @@unique([id_user, target_key], map: "chat_pin_user_target_key")
   @@map("chat_pin")
-
   @@schema("dbo")
 }
 
@@ -810,11 +821,344 @@ model ChatParticipant {
   @@index([id_user])
   @@index([id_agent])
   @@map("chat_participant")
-
   @@schema("dbo")
 }
 
 /// Un mensaje del hilo.
+/// Anuncios del PORTAL DE TALENTO HUMANO, cargados desde el propio portal.
+///
+/// En la base y no en SharePoint: el conector que lee ese sitio es de SOLO
+/// LECTURA a propósito, y darle escritura significaría poder escribir en todo
+/// el tenant con una credencial que ya tiene de más. Para subir un anuncio no
+/// vale la pena abrir esa puerta.
+model PortalBanner {
+  id          Int      @id @default(autoincrement())
+  file_name   String   @db.NVarChar(255)
+  mime        String   @db.NVarChar(100)
+  contenido   Bytes    @db.VarBinary(Max)
+  /// Para ordenarlos a mano más adelante sin migrar otra vez.
+  orden       Int      @default(0)
+  /// Quién lo subió: si aparece un anuncio que nadie reconoce, hay que poder
+  /// saber de dónde salió.
+  uploaded_by String   @db.NVarChar(255)
+  created_at  DateTime @default(now())
+
+  @@index([orden, id(sort: Desc)])
+  @@map("portal_banner")
+  @@schema("dbo")
+}
+
+/// Códigos de un solo uso del PORTAL DE TALENTO HUMANO.
+///
+/// El portal no usa la sesión de SynerLink: entra cualquier colaborador con
+/// correo de una empresa del grupo (o de la lista de excepciones), y la
+/// identidad se comprueba con un código enviado a ese correo.
+///
+/// Vive en la base y no en memoria porque producción corre en clúster de dos
+/// instancias: un código emitido por una y verificado por la otra fallaría de
+/// forma intermitente.
+model PortalAccessCode {
+  id         Int       @id @default(autoincrement())
+  /// Siempre en minúsculas: es como se consulta.
+  email      String    @db.NVarChar(255)
+  /// SHA-256 del código. NUNCA el código en claro: quien lea la tabla —o un
+  /// respaldo— no puede entrar con lo que ve.
+  code_hash  String    @db.NVarChar(64)
+  created_at DateTime  @default(now())
+  expires_at DateTime
+  /// Marca de uso: un código sirve UNA vez.
+  used_at    DateTime?
+  /// Intentos fallidos. Seis dígitos sin tope se prueban en minutos.
+  attempts   Int       @default(0)
+
+  @@index([email, id(sort: Desc)])
+  @@index([expires_at])
+  @@map("portal_access_code")
+  @@schema("dbo")
+}
+
+/// ══════════════════ PORTAL DE TALENTO HUMANO — FORMACIÓN ═══════════════════
+/// Pedido de Cristian Baldión (2026-09-18): una sección "tipo Moodle" al
+/// final del portal — cursos con materiales (documento o enlace), una barra
+/// de progreso que ve el formador Y el estudiante, y un certificado al llegar
+/// al 100%.
+///
+/// La identidad sigue siendo un CORREO, nunca un FK a `User`: el portal lo
+/// usa gente sin usuario en SynerLink (ver `lib/portal/acceso.ts`). Por eso
+/// tanto el formador (`created_by`) como el estudiante (`student_email`) se
+/// guardan como texto, igual que `uploaded_by` en `portal_banner`.
+///
+/// Un curso "publicado" (`active = true`) es visible para cualquier persona
+/// identificada en el portal, que se autoinscribe al abrirlo — no hay
+/// aprobación de un formador para entrar, a propósito: es lo más simple que
+/// no bloquea a nadie. Si más adelante Talento Humano pide inscripción con
+/// aprobación, es un campo de estado nuevo en `PortalCourseEnrollment`, no un
+/// cambio de estas tablas.
+
+/// Un curso.
+model PortalCourse {
+  id          Int      @id @default(autoincrement())
+  title       String   @db.NVarChar(255)
+  description String?  @db.NVarChar(Max)
+  active      Boolean  @default(true)
+  /// Correo de quien lo creó (el formador).
+  created_by  String   @db.NVarChar(255)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now()) @updatedAt
+  /// Carpeta del curso dentro de FORMACION en SharePoint (`<slug>-<id>`).
+  /// Se fija en la primera subida y no cambia si el curso se renombra.
+  sp_folder_name String? @db.NVarChar(200)
+
+  materials    PortalCourseMaterial[]
+  enrollments  PortalCourseEnrollment[]
+  certificates PortalCertificate[]
+
+  @@index([active, id(sort: Desc)])
+  @@map("portal_course")
+  @@schema("dbo")
+}
+
+/// Un material del curso: un documento cargado (bytes en la base, igual que
+/// `portal_banner.contenido` — se reutiliza el mismo mecanismo en vez de
+/// inventar uno nuevo, ver `app/api/portal/courses/[id]/materials/route.ts`)
+/// o un enlace externo (cuestionario de Google/Microsoft Forms, video,
+/// cualquier URL).
+model PortalCourseMaterial {
+  id        Int          @id @default(autoincrement())
+  course_id Int
+  course    PortalCourse @relation(fields: [course_id], references: [id], onDelete: Cascade)
+  /// 'DOCUMENT' | 'LINK' | 'FORM'. Texto y no enum: el provider sqlserver no los
+  /// soporta (mismo criterio que el resto de este esquema).
+  type      String       @db.NVarChar(20)
+  title     String       @db.NVarChar(255)
+  /// Para mostrar los materiales en el orden que definió el formador.
+  orden     Int          @default(0)
+  /// Solo si type = 'LINK'.
+  url       String?      @db.NVarChar(1000)
+  /// Solo si type = 'DOCUMENT'. El archivo vive en SharePoint
+  /// (TalentoHumano/FORMACION/<curso>/materiales) — aquí solo la referencia.
+  file_name String?      @db.NVarChar(255)
+  mime      String?      @db.NVarChar(100)
+  sp_drive_item_id String? @db.NVarChar(200)
+  sp_web_url       String? @db.NVarChar(1000)
+  file_size        BigInt?
+  /// Quitado del curso por el formador (borrado LÓGICO): el archivo se movió
+  /// a FORMACION/ELIMINADOS/<curso>/materiales en SharePoint. Pedido de
+  /// Cristian (2026-09-30): nada se borra de SharePoint.
+  eliminado_at     DateTime?
+  eliminado_por    String? @db.NVarChar(255)
+  /// EN DESUSO desde 2026-09-30 (migración 20260930120000): ya no se escribe.
+  /// Solo se lee para servir materiales subidos antes del cambio a
+  /// SharePoint. Pendiente de retiro en un PR posterior.
+  contenido Bytes?       @db.VarBinary(Max)
+  /// Si hace falta marcarlo como completado para que el curso llegue a 100%.
+  required  Boolean      @default(true)
+  created_at DateTime    @default(now())
+
+  /// Solo si type = 'FORM' (formulario propio del portal, Cristian
+  /// 2026-10-08). Se responde con la versión VIGENTE del formulario.
+  formulario_id Int?
+  formulario    PortalFormulario? @relation(fields: [formulario_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  progress   PortalMaterialProgress[]
+  vistas     PortalMaterialVista[]
+  respuestas PortalFormularioRespuesta[]
+  intentos   PortalFormularioIntento[]
+
+  @@index([course_id, orden])
+  @@map("portal_course_material")
+  @@schema("dbo")
+}
+
+/// Quién está inscrito en qué curso. Autoinscripción al abrir un curso
+/// publicado — ver nota arriba.
+model PortalCourseEnrollment {
+  id             Int          @id @default(autoincrement())
+  course_id      Int
+  course         PortalCourse @relation(fields: [course_id], references: [id], onDelete: Cascade)
+  student_email  String       @db.NVarChar(255)
+  enrolled_at    DateTime     @default(now())
+
+  @@unique([course_id, student_email])
+  @@map("portal_course_enrollment")
+  @@schema("dbo")
+}
+
+/// Progreso de UN estudiante en UN material. El % del curso se calcula
+/// contando filas de esta tabla contra el total de materiales — no se guarda
+/// un porcentaje aparte para no tener dos fuentes de verdad que se puedan
+/// desincronizar.
+model PortalMaterialProgress {
+  id             Int                  @id @default(autoincrement())
+  material_id    Int
+  material       PortalCourseMaterial @relation(fields: [material_id], references: [id], onDelete: Cascade)
+  student_email  String               @db.NVarChar(255)
+  completed_at   DateTime             @default(now())
+  /// 'AUTO' (el servidor validó que revisó el material) | 'MANUAL' (lo marcó
+  /// un administrador/formador del Excel de permisos). Las filas anteriores
+  /// al 2026-10-08 quedan como 'MANUAL': las marcaba el propio estudiante.
+  origen         String               @default("MANUAL") @db.NVarChar(10)
+  /// Correo de quien lo marcó a mano (solo origen MANUAL desde 2026-10-08).
+  marcado_por    String?              @db.NVarChar(255)
+
+  @@unique([material_id, student_email])
+  @@index([student_email])
+  @@map("portal_material_progress")
+  @@schema("dbo")
+}
+
+/// APERTURA de un material por un estudiante (Cristian, 2026-10-08): la
+/// registra el SERVIDOR al abrir el material y es contra su hora que se valida
+/// el reporte de "revisado" (ver `lib/portal/revision-material.ts`). El
+/// navegador solo conoce el `token`; no puede fijar la hora de apertura.
+model PortalMaterialVista {
+  id              Int                  @id @default(autoincrement())
+  token           String               @unique @db.NVarChar(36)
+  material_id     Int
+  material        PortalCourseMaterial @relation(fields: [material_id], references: [id], onDelete: Cascade)
+  student_email   String               @db.NVarChar(255)
+  abierta_at      DateTime             @default(now())
+  /// Páginas del PDF contadas por el servidor (null si no aplica o no se pudo).
+  paginas         Int?
+  reportada_at    DateTime?
+  segundos_vistos Int?
+  duracion_seg    Int?
+  /// Si el reporte se aceptó.
+  aceptada        Boolean?
+
+  @@index([material_id, student_email])
+  @@map("portal_material_vista")
+  @@schema("dbo")
+}
+
+/// ═══════════ FORMACIÓN — FORMULARIO PROPIO (Cristian Baldión, 2026-10-08) ═══════════
+/// "créame el formulario en el curso, así como el enlace que te pasé, pero
+/// que sea un formulario propio del curso": un material `FORM` que se
+/// responde DENTRO del portal. La definición (preguntas, tipo, obligatoria,
+/// opciones, orden) es un JSON VERSIONADO — ver `lib/portal/formulario.ts`.
+/// Editar el formulario crea una versión nueva; cada respuesta guarda la
+/// versión con la que se respondió.
+
+/// Un formulario (p. ej. SST-01-FR-001 PERFIL SOCIODEMOGRÁFICO SST).
+model PortalFormulario {
+  id             Int      @id @default(autoincrement())
+  /// Código del formato. Único: es como se identifica al importar.
+  codigo         String   @unique @db.NVarChar(60)
+  titulo         String   @db.NVarChar(255)
+  /// Número de la versión vigente (la que se responde).
+  version_actual Int      @default(1)
+  created_by     String   @db.NVarChar(255)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @default(now()) @updatedAt
+
+  versiones  PortalFormularioVersion[]
+  materiales PortalCourseMaterial[]
+
+  @@map("portal_formulario")
+  @@schema("dbo")
+}
+
+/// Una versión de la definición. Nunca se modifica: editar = versión nueva.
+model PortalFormularioVersion {
+  id            Int              @id @default(autoincrement())
+  formulario_id Int
+  formulario    PortalFormulario @relation(fields: [formulario_id], references: [id], onDelete: Cascade)
+  version       Int
+  /// JSON de la definición (`DefinicionFormulario`).
+  definicion    String           @db.NVarChar(Max)
+  created_by    String           @db.NVarChar(255)
+  created_at    DateTime         @default(now())
+
+  respuestas PortalFormularioRespuesta[]
+  intentos   PortalFormularioIntento[]
+
+  @@unique([formulario_id, version])
+  @@map("portal_formulario_version")
+  @@schema("dbo")
+}
+
+/// Respuesta de UNA persona a UN material formulario. DATOS PERSONALES
+/// SENSIBLES (Ley 1581 de 2012): solo las consultan las hojas ADMINISTRADORES
+/// y FORMADORES del Excel de permisos, y nunca se escriben en los logs.
+/// Se envía UNA vez (índice único); no se edita. Para corregir, un
+/// administrador/formador la reabre (la borra) y la persona responde de nuevo.
+model PortalFormularioRespuesta {
+  id                    Int                     @id @default(autoincrement())
+  material_id           Int
+  material              PortalCourseMaterial    @relation(fields: [material_id], references: [id], onDelete: Cascade)
+  formulario_version_id Int
+  version               PortalFormularioVersion @relation(fields: [formulario_version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// Correo de la SESIÓN (no el que se escriba en el formulario).
+  student_email         String                  @db.NVarChar(255)
+  /// JSON `{ [idPregunta]: "texto" | { otra: "texto" } }`.
+  respuestas            String                  @db.NVarChar(Max)
+  /// Prueba de la autorización de tratamiento de datos: qué versión del
+  /// texto aceptó y cuándo.
+  autorizacion_version  String?                 @db.NVarChar(60)
+  autorizado_at         DateTime?
+  enviada_at            DateTime                @default(now())
+
+  @@unique([material_id, student_email])
+  @@index([formulario_version_id])
+  @@map("portal_formulario_respuesta")
+  @@schema("dbo")
+}
+
+/// Un INTENTO de una EVALUACIÓN (formulario de tipo "evaluacion"): cada envío
+/// calificado, aprobado o no. Solo el intento aprobado crea además la fila de
+/// `PortalFormularioRespuesta` (que es la que completa el material), así que
+/// quien reprueba puede volver a intentar sin que Talento Humano reabra nada.
+/// DATOS PERSONALES (Ley 1581 de 2012): mismas reglas que las respuestas; nunca
+/// a los logs. No se editan.
+model PortalFormularioIntento {
+  id                    Int                     @id @default(autoincrement())
+  material_id           Int
+  material              PortalCourseMaterial    @relation(fields: [material_id], references: [id], onDelete: Cascade)
+  formulario_version_id Int
+  version               PortalFormularioVersion @relation(fields: [formulario_version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// Correo de la SESIÓN.
+  student_email         String                  @db.NVarChar(255)
+  /// JSON `{ [idPregunta]: "texto" }`.
+  respuestas            String                  @db.NVarChar(Max)
+  puntaje               Float
+  puntaje_max           Float
+  /// 0 a 100, 2 decimales.
+  porcentaje            Float
+  aprobado              Boolean
+  enviado_at            DateTime                @default(now())
+
+  @@index([material_id, student_email])
+  @@index([formulario_version_id])
+  @@map("portal_formulario_intento")
+  @@schema("dbo")
+}
+
+/// Certificado emitido al llegar al 100% de un curso. `course_title` y
+/// `student_name` quedan CONGELADOS al momento de emitir: si el curso cambia
+/// de nombre después, el certificado ya entregado no debe cambiar con él.
+/// `code` es lo que valida `GET /api/portal/certificates/[code]` — sirve para
+/// reimprimir el mismo PDF sin regenerarlo con datos distintos.
+model PortalCertificate {
+  id            Int          @id @default(autoincrement())
+  code          String       @unique @db.NVarChar(40)
+  course_id     Int
+  course        PortalCourse @relation(fields: [course_id], references: [id])
+  student_email String       @db.NVarChar(255)
+  student_name  String       @db.NVarChar(255)
+  course_title  String       @db.NVarChar(255)
+  issued_at     DateTime     @default(now())
+  /// PDF archivado en SharePoint (TalentoHumano/FORMACION/<curso>/certificados).
+  sp_drive_item_id String? @db.NVarChar(200)
+  sp_web_url       String? @db.NVarChar(1000)
+  file_name        String? @db.NVarChar(255)
+  file_size        BigInt?
+
+  @@unique([course_id, student_email])
+  @@index([student_email])
+  @@map("portal_certificate")
+  @@schema("dbo")
+}
+
 model ChatMessage {
   id              Int    @id @default(autoincrement())
   id_conversation Int
@@ -824,8 +1168,6 @@ model ChatMessage {
   /// MARKDOWN CRUDO. NUNCA HTML: el HTML se guarda tal cual y se renderiza
   /// en el cliente, así que almacenarlo abriría un XSS almacenado. El
   /// render a HTML es responsabilidad de la interfaz, sanitizando.
-  /// (Contraste deliberado con DocumentVersion.content_html, que sí es HTML
-  /// porque lo produce un editor propio y no un agente.)
   body            String @db.NVarChar(Max)
 
   /// Autor PERSONA. En un hilo directo es siempre el dueño y se puede deducir
@@ -892,7 +1234,6 @@ model ChatMessage {
   @@index([id_agent_author])
   @@index([id_reply_to])
   @@map("chat_message")
-
   @@schema("dbo")
 }
 
@@ -920,12 +1261,11 @@ model ChatMessageDelivery {
   @@id([id_message, id_agent])
   @@index([id_agent, delivered_at, id_message])
   @@map("chat_message_delivery")
-
   @@schema("dbo")
 }
 
-/// Adjunto de un mensaje. El archivo vive en OneDrive (mismo criterio que
-/// DocumentVersion del SGD); aquí solo queda la referencia.
+/// Adjunto de un mensaje. El archivo vive en OneDrive; aquí solo queda la
+/// referencia.
 model ChatAttachment {
   id               Int      @id @default(autoincrement())
   id_message       Int
@@ -940,7 +1280,6 @@ model ChatAttachment {
 
   @@index([id_message])
   @@map("chat_attachment")
-
   @@schema("dbo")
 }
 
@@ -1007,7 +1346,6 @@ model ChatAgentTurnUsage {
   @@index([id_agent, created_at])
   @@index([created_at])
   @@map("chat_agent_turn_usage")
-
   @@schema("dbo")
 }
 
@@ -1040,7 +1378,6 @@ model ChatAgentStatus {
 
   @@id([id_conversation, id_agent])
   @@map("chat_agent_status")
-
   @@schema("dbo")
 }
 
@@ -1062,7 +1399,6 @@ model ChatVoiceCall {
 
   @@index([id_conversation])
   @@map("chat_voice_call")
-
   @@schema("dbo")
 }
 
@@ -1075,7 +1411,6 @@ model ChatVoiceEvent {
   message    ChatMessage   @relation(fields: [id_message], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@map("chat_voice_event")
-
   @@schema("dbo")
 }
 
@@ -1095,14 +1430,24 @@ model BalanceRun {
   @@index([id_company, id])
   @@index([status])
   @@map("balance_run")
-
   @@schema("dbo")
 }
 
-// ===========================================================================
-// SGC documental (esquema sgc) — traído de testing para la promoción.
-// ===========================================================================
-
+// ===================================================================
+// SGC documental (Sistema de Gestión de Calidad) — Sprint 0, 2026-09-30.
+// Plan: proyectos/sgc-olp-gestion-documental.md del vault de horus.
+//
+// AISLAMIENTO: todas las tablas del SGC viven en el esquema SQL `sgc`
+// (no en `dbo`), para que ningún cambio de SynerLink general toque el
+// módulo validado y viceversa. Lo único compartido son las tablas de
+// plataforma (usuarios, empresas, permisos por subproceso).
+//
+// Multiempresa desde el diseño, activación por empresa: una empresa solo
+// ve el SGC si tiene fila aquí con is_active = 1 (además del permiso por
+// subproceso). Al inicio solo se activa One Latam Pharma (id_company = 3).
+// Activar otra empresa es un cambio controlado: ver la skill
+// sgc-activar-empresa.
+// ===================================================================
 model SgcCompanyConfig {
   id_company        Int      @id
   is_active         Boolean  @default(false)
@@ -1208,6 +1553,16 @@ model SgcCompanyConfig {
   @@schema("sgc")
 }
 
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 1: repositorio y listado maestro (esquema `sgc`).
+// Todo cuelga de sgc.company_config (solo una empresa ACTIVADA tiene maestros).
+// Nada se borra: los maestros se desactivan (is_active) y los documentos se
+// anulan; cada cambio queda en sgc.audit_log (solo inserción).
+// ---------------------------------------------------------------------------
+
+// Guía de codificación de la empresa (una por empresa). El patrón admite las
+// marcas {PREFIJO}, {TIPO_PROCESO}, {PROCESO}, {TIPO} y {CONSECUTIVO}
+// (obligatoria); ver lib/sgc/coding.ts.
 model SgcCodingGuide {
   id_company      Int      @id
   prefix          String   @db.NVarChar(10)
@@ -1232,6 +1587,7 @@ model SgcCodingGuide {
   @@schema("sgc")
 }
 
+// Tipo de proceso (estratégico, misional, soporte, funciones y responsabilidades…).
 model SgcProcessType {
   id_process_type Int      @id @default(autoincrement())
   id_company      Int
@@ -1251,6 +1607,7 @@ model SgcProcessType {
   @@schema("sgc")
 }
 
+// Proceso del mapa de procesos (con su área/departamento dueño).
 model SgcProcessMap {
   id_process_map  Int      @id @default(autoincrement())
   id_company      Int
@@ -1278,6 +1635,7 @@ model SgcProcessMap {
   @@schema("sgc")
 }
 
+// Tipo documental (manual, procedimiento, instructivo, formato…).
 model SgcDocumentType {
   id_document_type  Int      @id @default(autoincrement())
   id_company        Int
@@ -1313,6 +1671,8 @@ model SgcDocumentType {
   @@schema("sgc")
 }
 
+// Documento controlado. current_version_id apunta a la versión VIGENTE (sin
+// FK para no crear un ciclo documento↔versión; lo mantiene lib/sgc).
 model SgcDocument {
   id_document         Int       @id @default(autoincrement())
   id_company          Int
@@ -1366,6 +1726,8 @@ model SgcDocument {
   @@schema("sgc")
 }
 
+// Versión de un documento: archivo PDF controlado (y fuente Word opcional) en
+// la carpeta propia de la empresa, SGC/<EMPRESA>/<TIPO>/<CODIGO>/v<n>/.
 model SgcDocumentVersion {
   id_document_version Int       @id @default(autoincrement())
   id_document         Int
@@ -1407,6 +1769,9 @@ model SgcDocumentVersion {
   @@schema("sgc")
 }
 
+// Acceso a un documento por departamento o por persona. Consulta (can_view) y
+// permisos EXCEPCIONALES de descarga/impresión, con vencimiento. No se borra:
+// se revoca (revoked_at).
 model SgcDocumentAccess {
   id_document_access Int       @id @default(autoincrement())
   id_document        Int
@@ -1432,6 +1797,9 @@ model SgcDocumentAccess {
   @@schema("sgc")
 }
 
+// Registro de auditoría del SGC: SOLO INSERCIÓN. Un trigger INSTEAD OF
+// UPDATE, DELETE (migración 20260930150000_sgc_s1_repositorio) rechaza
+// cualquier cambio o borrado, sin importar el usuario de base de datos.
 model SgcAuditLog {
   id_audit_log  BigInt   @id @default(autoincrement())
   id_company    Int?
@@ -1453,6 +1821,19 @@ model SgcAuditLog {
   @@schema("sgc")
 }
 
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 2: administración de flujos validados, Tareas
+// documentales y Autorizaciones SGC (esquema `sgc`).
+//
+// COPIA CONGELADA, en tablas propias, del motor de flujos, de la vista interna
+// de solicitudes y del mecanismo de autorizaciones de SynerLink general (plan,
+// estrategia B): nada de esto lee ni escribe process_category,
+// task_process_category, requests_general, task_request_general, notes ni
+// types_authorization. Las personas se guardan por correo (como en el S1).
+// ---------------------------------------------------------------------------
+
+// Proceso validado (documental; a futuro control de cambios, desviaciones,
+// CAPA…). Su definición vive en versiones (SgcFlowVersion).
 model SgcFlowProcess {
   id_flow_process Int      @id @default(autoincrement())
   id_company      Int
@@ -1476,6 +1857,9 @@ model SgcFlowProcess {
   @@schema("sgc")
 }
 
+// Versión de la definición de un flujo: borrador → vigente → retirada. Solo
+// se edita un BORRADOR; publicar deja la anterior retirada. Una instancia en
+// curso conserva la versión con la que arrancó (SgcRequest.id_flow_version).
 model SgcFlowVersion {
   id_flow_version Int       @id @default(autoincrement())
   id_flow_process Int
@@ -1505,6 +1889,7 @@ model SgcFlowVersion {
   @@schema("sgc")
 }
 
+// Tarea (paso) de una versión del flujo.
 model SgcFlowTaskDef {
   id_flow_task_def             Int     @id @default(autoincrement())
   id_flow_version              Int
@@ -1541,6 +1926,8 @@ model SgcFlowTaskDef {
   @@schema("sgc")
 }
 
+// Transición entre tareas: acción (aprobar | devolver | cancelar) y destino
+// (to_task_key) o cierre (terminal_status: completada | cancelada).
 model SgcFlowTransition {
   id_flow_transition Int     @id @default(autoincrement())
   id_flow_version    Int
@@ -1556,6 +1943,7 @@ model SgcFlowTransition {
   @@schema("sgc")
 }
 
+// Campo de formulario de la solicitud (task_key null) o de una tarea.
 model SgcFlowFormField {
   id_flow_form_field Int     @id @default(autoincrement())
   id_flow_version    Int
@@ -1579,6 +1967,9 @@ model SgcFlowFormField {
   @@schema("sgc")
 }
 
+// Matriz de responsables: SOLO SUGIERE quién elabora, revisa y aprueba por
+// proceso/área y tipo documental (por persona o por cargo). El elaborador
+// decide. Nada se borra: se desactiva con motivo (registro de cambios).
 model SgcResponsibleMatrix {
   id_responsible   Int      @id @default(autoincrement())
   id_company       Int
@@ -1605,6 +1996,9 @@ model SgcResponsibleMatrix {
   @@schema("sgc")
 }
 
+// Registro de cambios de configuración de flujos, matriz y autorizaciones:
+// SOLO INSERCIÓN (trigger que rechaza UPDATE y DELETE). Quién, cuándo, qué
+// (antes/después), motivo y referencia al control de cambios.
 model SgcConfigChangeLog {
   id_config_change BigInt   @id @default(autoincrement())
   id_company       Int
@@ -1628,6 +2022,7 @@ model SgcConfigChangeLog {
   @@schema("sgc")
 }
 
+// Instancia de un flujo validado. Para el documental: la solicitud documental.
 model SgcRequest {
   id_request         Int       @id @default(autoincrement())
   id_company         Int
@@ -1700,6 +2095,8 @@ model SgcRequest {
   @@schema("sgc")
 }
 
+// Firmantes configurados por el ELABORADOR para un paso (revisión,
+// aprobación), con su orden. No se borran: se retiran con quién, cuándo y por qué.
 model SgcRequestSigner {
   id_request_signer Int       @id @default(autoincrement())
   id_request        Int
@@ -1720,6 +2117,7 @@ model SgcRequestSigner {
   @@schema("sgc")
 }
 
+// Tarea de una instancia (una por paso y por ronda: devolver abre una ronda nueva).
 model SgcTask {
   id_task          Int       @id @default(autoincrement())
   id_request       Int
@@ -1750,6 +2148,9 @@ model SgcTask {
   @@schema("sgc")
 }
 
+// Responsable (firmante) de una tarea. user_email null = cupo de un GRUPO de
+// autorización (lo toma cualquiera del grupo). Guarda la decisión y el punto de
+// firma (la firma electrónica propia llega en el Sprint 3).
 model SgcTaskAssignee {
   id_task_assignee  Int       @id @default(autoincrement())
   id_task           Int
@@ -1800,6 +2201,9 @@ model SgcFormValue {
   @@schema("sgc")
 }
 
+// Historial PROPIO de interacciones (equivalente aislado de dbo.notes): notas,
+// cambios de estado, adjuntos, reasignaciones, cambios de firmantes,
+// devoluciones y decisiones. SOLO INSERCIÓN (trigger).
 model SgcInteraction {
   id_interaction BigInt   @id @default(autoincrement())
   id_request     Int
@@ -1819,6 +2223,8 @@ model SgcInteraction {
   @@schema("sgc")
 }
 
+// Adjuntos de la solicitud en OneDrive (carpeta propia de la empresa). No se
+// borran: se retiran (withdrawn_at) con motivo.
 model SgcAttachment {
   id_attachment   Int       @id @default(autoincrement())
   id_request      Int
@@ -1844,6 +2250,10 @@ model SgcAttachment {
   @@schema("sgc")
 }
 
+// Autorizaciones SGC — COPIA CONGELADA del mecanismo de autorizaciones de
+// SynerLink (types_authorization / user_types_authorization / tareas de
+// autorización), en tablas propias. No usa el tipo "Autorización de
+// documento" (id 8) de SynerLink general.
 model SgcAuthorizationType {
   id_authorization_type Int      @id @default(autoincrement())
   id_company            Int
@@ -1864,6 +2274,7 @@ model SgcAuthorizationType {
   @@schema("sgc")
 }
 
+// Quién pertenece al grupo de un tipo de autorización. No se borra: se revoca.
 model SgcAuthorizationTypeUser {
   id_authorization_type_user Int       @id @default(autoincrement())
   id_authorization_type      Int
@@ -1881,6 +2292,7 @@ model SgcAuthorizationTypeUser {
   @@schema("sgc")
 }
 
+// Registro de cada autorización pedida (una por firmante y ronda).
 model SgcAuthorization {
   id_authorization      Int       @id @default(autoincrement())
   id_company            Int
@@ -1906,6 +2318,15 @@ model SgcAuthorization {
   @@schema("sgc")
 }
 
+// ---------------------------------------------------------------------------
+// SGC · Sprint 3 — firma electrónica PROPIA (copia aislada de GSS Firma/Orión,
+// sin llamarla), lista de chequeo de Calidad y edición en la app del borrador.
+// ---------------------------------------------------------------------------
+
+/// Firma electrónica del SGC. SOLO INSERCIÓN (trigger): reautenticación con la
+/// contraseña de SynerLink (nunca se guarda), significado, motivo, sello de
+/// tiempo del servidor, hash del contenido firmado, evidencia en el espacio
+/// propio de la empresa y encadenamiento de registros (record_hash).
 model SgcSignature {
   id_signature        Int      @id @default(autoincrement())
   signature_uid       String   @unique @db.Char(36)
@@ -1951,6 +2372,7 @@ model SgcSignature {
   @@schema("sgc")
 }
 
+/// Aceptación del consentimiento legal de firma por persona y versión del texto. SOLO INSERCIÓN.
 model SgcSignatureConsent {
   id_signature_consent Int      @id @default(autoincrement())
   id_company           Int
@@ -1968,6 +2390,8 @@ model SgcSignatureConsent {
   @@schema("sgc")
 }
 
+/// Maestro de firmas (trazo registrado por Calidad en la inducción), versionado.
+/// No se borra (trigger): se revoca con motivo.
 model SgcSignatureMaster {
   id_signature_master Int       @id @default(autoincrement())
   id_company          Int
@@ -1998,6 +2422,8 @@ model SgcSignatureMaster {
   @@schema("sgc")
 }
 
+/// Revisiones del borrador editado en la app (Tiptap). SOLO INSERCIÓN: cada
+/// guardado es una revisión nueva (control de versiones del borrador).
 model SgcDraftRevision {
   id_draft_revision Int      @id @default(autoincrement())
   id_request        Int
@@ -2023,6 +2449,8 @@ model SgcDraftRevision {
   @@schema("sgc")
 }
 
+/// Lista de chequeo de estructura documental de Calidad dentro de la
+/// aprobación (respuestas de cada verificación). SOLO INSERCIÓN.
 model SgcQualityCheck {
   id_quality_check Int      @id @default(autoincrement())
   id_request       Int
@@ -2043,6 +2471,12 @@ model SgcQualityCheck {
   @@schema("sgc")
 }
 
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 4: divulgación, capacitación y vigencia.
+// ---------------------------------------------------------------------------
+
+// Alcance de divulgación de una solicitud: toda la empresa, departamentos,
+// cargos o personas. Nada se borra: una entrada se retira con motivo.
 model SgcDisseminationScope {
   id_scope      Int       @id @default(autoincrement())
   id_request    Int
@@ -2067,6 +2501,8 @@ model SgcDisseminationScope {
   @@schema("sgc")
 }
 
+// Lectura obligatoria de una persona del alcance (un cupo de la tarea de
+// divulgación): abrió, llegó al final, firmó «Leyó». No se borra.
 model SgcReadRecord {
   id_read_record      Int       @id @default(autoincrement())
   id_request          Int
@@ -2103,6 +2539,8 @@ model SgcReadRecord {
   @@schema("sgc")
 }
 
+// Capacitación de una solicitud (paso 5): sesión y/o video, evaluación de
+// Microsoft Forms y nota mínima. Una por tarea; no se borra.
 model SgcTraining {
   id_training   Int       @id @default(autoincrement())
   id_request    Int
@@ -2138,6 +2576,7 @@ model SgcTraining {
   @@schema("sgc")
 }
 
+// Cada carga del Excel de resultados (SOLO INSERCIÓN): la vigente es la última.
 model SgcTrainingUpload {
   id_training_upload Int      @id @default(autoincrement())
   id_training        Int
@@ -2168,6 +2607,7 @@ model SgcTrainingUpload {
   @@schema("sgc")
 }
 
+// Resultado por persona de una carga (SOLO INSERCIÓN).
 model SgcTrainingResult {
   id_training_result Int     @id @default(autoincrement())
   id_training_upload Int
@@ -2191,6 +2631,8 @@ model SgcTrainingResult {
   @@schema("sgc")
 }
 
+// Sprint 10: RECAPACITACIÓN (presencial o virtual) de quien no aprobó la
+// evaluación en los intentos permitidos. La registra Calidad. SOLO INSERCIÓN.
 model SgcRetraining {
   id_retraining Int      @id @default(autoincrement())
   id_request    Int
@@ -2214,6 +2656,8 @@ model SgcRetraining {
   @@schema("sgc")
 }
 
+// Personas por cargo en la empresa, para el alcance «por cargo» (SynerLink no
+// vincula persona↔cargo). Lo mantiene Calidad; no se borra: se desactiva.
 model SgcCargoMember {
   id_cargo_member Int       @id @default(autoincrement())
   id_company      Int
@@ -2234,6 +2678,16 @@ model SgcCargoMember {
   @@schema("sgc")
 }
 
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 5: mapa de relaciones, vencimientos y accesos
+// (esquema `sgc`). Nada se borra: las relaciones se retiran con motivo, los
+// avisos de vencimiento quedan como registro (una fila por aviso, clave única
+// para que cada aviso salga una sola vez) y las solicitudes de acceso se
+// deciden o cancelan.
+// ---------------------------------------------------------------------------
+
+// Relación tipada entre dos documentos de la misma empresa (nunca hacia
+// módulos de proceso): procedimiento_padre | formato | anexo | referencia.
 model SgcDocumentRelation {
   id_document_relation Int       @id @default(autoincrement())
   id_company           Int
@@ -2266,6 +2720,7 @@ model SgcDocumentRelation {
   @@schema("sgc")
 }
 
+// Posiciones guardadas de los nodos del mapa de relaciones, por persona.
 model SgcGraphLayout {
   id_graph_layout Int      @id @default(autoincrement())
   id_company      Int
@@ -2280,6 +2735,9 @@ model SgcGraphLayout {
   @@schema("sgc")
 }
 
+// Configuración de los avisos anticipados de vencimiento: por empresa (la
+// general), por tipo documental o, excepcionalmente, por documento (gana la
+// más específica). scope_key = empresa | tipo:<id> | documento:<id>.
 model SgcReviewAlertConfig {
   id_review_alert_config Int      @id @default(autoincrement())
   id_company             Int
@@ -2311,6 +2769,9 @@ model SgcReviewAlertConfig {
   @@schema("sgc")
 }
 
+// Cada aviso de vencimiento (enviado u omitido por haber pasado su día sin
+// correr el programador). alert_key ÚNICA: un aviso sale una sola vez aunque
+// el programador corra varias veces o en paralelo. No se borra.
 model SgcReviewAlert {
   id_review_alert     Int       @id @default(autoincrement())
   id_company          Int
@@ -2344,6 +2805,8 @@ model SgcReviewAlert {
   @@schema("sgc")
 }
 
+// Enlace iCal PRIVADO por persona (solo lectura) para suscribir el calendario
+// de vencimientos en Outlook. Se guarda solo el SHA-256 del token; se revoca.
 model SgcIcalToken {
   id_ical_token Int       @id @default(autoincrement())
   id_company    Int
@@ -2362,6 +2825,10 @@ model SgcIcalToken {
   @@schema("sgc")
 }
 
+// Solicitud de acceso a un documento de otra área (con justificación). Calidad
+// la aprueba (se crea el acceso en document_access) o la rechaza con motivo.
+// Si el código pedido no existe o no se puede consultar, id_document queda
+// NULL y a quien pide no se le revela nada.
 model SgcAccessRequest {
   id_access_request  Int       @id @default(autoincrement())
   id_company         Int
@@ -2388,6 +2855,14 @@ model SgcAccessRequest {
   @@schema("sgc")
 }
 
+// ---------------------------------------------------------------------------
+// SGC documental — Correcciones de Calidad OLP (reunión 2026-10-02).
+// ---------------------------------------------------------------------------
+
+/// Composición del documento de una solicitud: encabezado institucional y
+/// ubicación de las firmas que el ELABORADOR hace sobre el documento (copia
+/// congelada del mecanismo de SynerLink). Cada guardado es una fila NUEVA
+/// (la última manda). SOLO INSERCIÓN.
 model SgcDocumentLayout {
   id_document_layout   Int      @id @default(autoincrement())
   id_request           Int
@@ -2407,6 +2882,8 @@ model SgcDocumentLayout {
   @@schema("sgc")
 }
 
+/// Aviso de avance de lectura de una divulgación al llegar al umbral (sale UNA
+/// sola vez por tarea y umbral). SOLO INSERCIÓN.
 model SgcReadThresholdNotice {
   id_read_threshold_notice Int      @id @default(autoincrement())
   id_request               Int
@@ -2426,6 +2903,14 @@ model SgcReadThresholdNotice {
   @@schema("sgc")
 }
 
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 8: importación del LISTADO MAESTRO (Excel de
+// Calidad). Cada importación confirmada deja su encabezado y una fila por
+// cada fila del Excel (cargada o con su error). SOLO INSERCIÓN (trigger).
+// Los documentos se crean en estado «pendiente de archivo» con su código; la
+// versión y la fecha de vigencia del listado quedan en la fila y se usan al
+// cargar el PDF (Sprint 9).
+// ---------------------------------------------------------------------------
 model SgcMasterListImport {
   id_master_list_import Int      @id @default(autoincrement())
   id_company            Int
@@ -2474,6 +2959,11 @@ model SgcMasterListImportRow {
   @@schema("sgc")
 }
 
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 9: CARGA MASIVA de los PDF del listado maestro. Cada
+// tanda deja su encabezado y una fila por archivo (cargado o con su error y el
+// aviso si el nombre no coincide con el del listado). SOLO INSERCIÓN.
+// ---------------------------------------------------------------------------
 model SgcBulkUpload {
   id_bulk_upload Int      @id @default(autoincrement())
   id_company     Int
@@ -2517,6 +3007,262 @@ model SgcBulkUploadItem {
   @@schema("sgc")
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// AUDITORÍA DE AGENTES → INVENTARIO (F1, solo lectura)
+//
+// Pedido de Nicolás (2026-10-01/02): por cada agente registrado en SynerLink,
+// qué MCP (con empresa y si lee o escribe), herramientas, skills y canales
+// tiene, y qué riesgos salen de eso. Lo llena un RECOLECTOR central que corre
+// por SSH desde la Mac de horus (cada noche y a pedido con "Re-escanear") y
+// publica en POST /api/chat/auditoria/inventario con su propia llave.
+//
+// NUNCA SE GUARDAN SECRETOS: ni tokens, ni contraseñas, ni valores de
+// variables de entorno. El recolector solo manda nombres, destinos (host:puerto)
+// y "requiere autenticación sí/no"; el endpoint además pasa todo texto por un
+// filtro que oculta lo que parezca una credencial (lib/agent-audit/inventory.ts).
+//
+// Solo agrega tablas (no toca las existentes). Migración:
+// prisma/migrations/20261002120000_auditoria_inventario_agentes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Solicitud de escaneo. La crea el botón "Re-escanear" (origin='manual',
+/// status='pendiente', la toma el recolector) o el propio recolector en la
+/// corrida nocturna (origin='programado'). Cada fila de inventario cuelga de
+/// una solicitud: así se sabe de qué corrida salió cada dato.
+model AgentScanRequest {
+  id             Int       @id @default(autoincrement())
+  /// 'manual' | 'programado'
+  origin         String    @db.NVarChar(20)
+  /// 'pendiente' | 'en_curso' | 'completado' | 'fallido'
+  status         String    @db.NVarChar(20)
+  /// Correo de quien pidió el escaneo (NULL en los programados).
+  requested_by   String?   @db.NVarChar(255)
+  requested_at   DateTime  @default(now())
+  started_at     DateTime?
+  finished_at    DateTime?
+  /// Equipo desde el que corrió el recolector.
+  collector_host String?   @db.NVarChar(120)
+  agents_scanned Int       @default(0)
+  /// Resumen de lo que no se pudo leer (equipos sin conexión, etc.).
+  error_summary  String?   @db.NVarChar(2000)
+
+  inventories AgentInventory[]
+
+  @@index([status, requested_at])
+  @@map("agent_scan_request")
+  @@schema("dbo")
+}
+
+/// Foto del inventario de UN agente en UNA corrida. Lo vigente es la fila más
+/// reciente por agente; las anteriores quedan como historia (base de la hoja
+/// de vida de F2).
+model AgentInventory {
+  id                     Int      @id @default(autoincrement())
+  id_agent               Int
+  id_scan_request        Int
+  scanned_at             DateTime
+  /// 'claude-code' | 'openclaw'
+  kind                   String   @db.NVarChar(30)
+  /// Equipo donde corre (etiqueta legible, p. ej. 'Mac mini de Pedro').
+  host                   String   @db.NVarChar(120)
+  /// Carpeta o identificador del agente dentro del equipo (sin rutas a secretos).
+  location               String?  @db.NVarChar(300)
+  model                  String?  @db.NVarChar(120)
+  /// 'activo' | 'detenido' | 'sin-servicio' | 'desconocido'
+  service_status         String?  @db.NVarChar(30)
+  /// Cómo ejecuta comandos: 'sin-aprobacion' | 'con-aprobacion' | 'restringido' | 'desconocido'
+  exec_mode              String?  @db.NVarChar(60)
+  /// false = ejecuta comandos del sistema sin pedir aprobación (hallazgo H-01).
+  exec_requires_approval Boolean?
+  /// JSON: herramientas permitidas/negadas declaradas (nombres, sin argumentos).
+  tools_json             String?  @db.NVarChar(Max)
+  /// JSON: nombres de skills instalados.
+  skills_json            String?  @db.NVarChar(Max)
+  /// JSON: canales [{tipo, detalle}] (sin tokens ni ids de chat).
+  channels_json          String?  @db.NVarChar(Max)
+  /// Si el agente no se pudo leer en esta corrida, el motivo.
+  scan_error             String?  @db.NVarChar(500)
+  created_at             DateTime @default(now())
+
+  agent       Agent               @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+  scanRequest AgentScanRequest    @relation(fields: [id_scan_request], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  mcps        AgentInventoryMcp[]
+
+  @@index([id_agent, scanned_at])
+  @@index([id_scan_request])
+  @@map("agent_inventory")
+  @@schema("dbo")
+}
+
+/// Un servidor MCP configurado en el agente, con su empresa y si puede
+/// escribir. Normalizado (y no dentro de un JSON) porque es por donde se
+/// filtra y se calcula el riesgo.
+model AgentInventoryMcp {
+  id           Int     @id @default(autoincrement())
+  id_inventory Int
+  name         String  @db.NVarChar(120)
+  /// 'http' | 'stdio' | 'sse' | 'desconocido'
+  transport    String  @db.NVarChar(20)
+  /// host:puerto/ruta del HTTP, o el ejecutable del stdio. Nunca la cadena de conexión.
+  target       String? @db.NVarChar(300)
+  company      String? @db.NVarChar(120)
+  /// 'lectura' | 'escritura' | 'desconocido'
+  access       String  @db.NVarChar(20)
+  /// 'requerida' | 'ninguna' | 'local' (stdio, no expuesto en red) | 'desconocida'.
+  auth         String  @db.NVarChar(30)
+  /// Herramientas de escritura detectadas (nombres separados por coma).
+  write_tools  String? @db.NVarChar(1000)
+
+  inventory AgentInventory @relation(fields: [id_inventory], references: [id], onDelete: Cascade)
+
+  @@index([id_inventory])
+  @@map("agent_inventory_mcp")
+  @@schema("dbo")
+}
+
+/// Hallazgo de riesgo calculado AUTOMÁTICAMENTE por el endpoint de ingesta a
+/// partir del inventario (no lo escribe nadie a mano). Uno por agente + regla +
+/// sujeto: si en el siguiente escaneo ya no aparece, pasa a 'resuelto'.
+model AgentAuditFinding {
+  id            Int       @id @default(autoincrement())
+  id_agent      Int
+  /// Código estable de la regla, p. ej. 'mcp-escritura-sin-auth'.
+  rule_code     String    @db.NVarChar(60)
+  /// 'critico' | 'alto' | 'medio' | 'bajo'
+  severity      String    @db.NVarChar(20)
+  /// Sobre qué recae (nombre del MCP, del canal…); '' si es del agente entero.
+  subject       String    @db.NVarChar(200)
+  title         String    @db.NVarChar(300)
+  detail        String?   @db.NVarChar(1000)
+  /// 'abierto' | 'resuelto'
+  status        String    @db.NVarChar(20)
+  first_seen_at DateTime
+  last_seen_at  DateTime
+  resolved_at   DateTime?
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_agent, rule_code, subject])
+  @@index([status, severity])
+  @@map("agent_audit_finding")
+  @@schema("dbo")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUDITORÍA DE AGENTES → HOJA DE VIDA (F2)
+//
+// Pedido de Nicolás (2026-10-01): una ficha por agente con su propósito, su
+// dueño, quién lo usa, qué tiene (inventario de F1), sus métricas, su historial
+// y sus hallazgos, que se actualiza sola. Las métricas salen cada noche de lo
+// que ya registra la auditoría (chat_message y chat_agent_turn_usage); el
+// resumen semanal lo redacta una IA SOLO con datos estructurados, nunca con el
+// texto de las conversaciones.
+//
+// Solo agrega tablas (no toca `agent`). Migración:
+// prisma/migrations/20261002180000_auditoria_hoja_de_vida_agentes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Propósito y dueño del agente. Lo edita quien tenga el permiso de configurar
+/// (subproceso /process/chat/auditoria/configurar). Una fila por agente.
+model AgentProfile {
+  id_agent    Int      @id
+  purpose     String?  @db.NVarChar(1000)
+  owner_name  String?  @db.NVarChar(160)
+  owner_email String?  @db.NVarChar(255)
+  /// Correo de quien hizo el último cambio.
+  updated_by  String?  @db.NVarChar(255)
+  updated_at  DateTime @default(now())
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("agent_profile")
+  @@schema("dbo")
+}
+
+/// Métricas de un agente en un día (hora de Colombia). Las recalcula el job
+/// nocturno sobre una ventana de días: se borran y se vuelven a escribir, así
+/// que repetir la corrida no duplica nada.
+model AgentMetricsDaily {
+  id                    Int      @id @default(autoincrement())
+  id_agent              Int
+  day                   DateTime @db.Date
+  /// Mensajes de personas en los hilos del agente.
+  messages_received     Int      @default(0)
+  /// Mensajes que publicó el agente.
+  messages_sent         Int      @default(0)
+  /// Personas distintas que le escribieron ese día.
+  active_users          Int      @default(0)
+  conversations         Int      @default(0)
+  /// Turnos con consumo reportado, ya DEDUPLICADOS: un turno que atendió varias
+  /// conversaciones se reporta una vez por conversación con la misma cifra
+  /// (mismo session_id + turn_started_at) y aquí cuenta una sola vez.
+  turns                 Int      @default(0)
+  input_tokens          BigInt   @default(0)
+  cache_creation_tokens BigInt   @default(0)
+  cache_read_tokens     BigInt   @default(0)
+  output_tokens         BigInt   @default(0)
+  total_tokens          BigInt   @default(0)
+  computed_at           DateTime @default(now())
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_agent, day])
+  @@index([day])
+  @@map("agent_metrics_daily")
+  @@schema("dbo")
+}
+
+/// Entrada de la línea de tiempo de la hoja de vida. `source_ref` es único por
+/// agente y hace idempotente la reconstrucción (p. ej. 'alta', 'inv:123',
+/// 'hal-abre:<ms>', 'hal-cierra:<ms>', 'perfil:<ms>').
+model AgentCvEntry {
+  id          Int      @id @default(autoincrement())
+  id_agent    Int
+  occurred_at DateTime
+  /// 'alta' | 'inventario' | 'hallazgo_abierto' | 'hallazgo_cerrado' | 'perfil'
+  kind        String   @db.NVarChar(30)
+  title       String   @db.NVarChar(300)
+  detail      String?  @db.NVarChar(2000)
+  source_ref  String   @db.NVarChar(120)
+  created_by  String?  @db.NVarChar(255)
+  created_at  DateTime @default(now())
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_agent, source_ref])
+  @@index([id_agent, occurred_at(sort: Desc)])
+  @@map("agent_cv_entry")
+  @@schema("dbo")
+}
+
+/// Resumen semanal redactado con IA a partir SOLO de datos estructurados
+/// (métricas, inventario, hallazgos, historial). `week_start` = lunes de la
+/// semana resumida (hora de Colombia).
+model AgentCvSummary {
+  id           Int      @id @default(autoincrement())
+  id_agent     Int
+  week_start   DateTime @db.Date
+  summary      String   @db.NVarChar(4000)
+  model        String?  @db.NVarChar(120)
+  /// Huella (sha256) de los datos con que se redactó, para auditar qué vio la IA.
+  input_hash   String?  @db.NVarChar(64)
+  generated_at DateTime @default(now())
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_agent, week_start])
+  @@map("agent_cv_summary")
+  @@schema("dbo")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 11: COPIAS NO CONTROLADAS. Solicitud con
+// justificación, destino y días; decide SOLO el grupo SGC-COPIA-NC (nunca el
+// jefe del área), con motivo; autorizada, se imprime (o, si es para un tercero,
+// se baja) con la marca «COPIA NO CONTROLADA» hasta su vencimiento. La
+// solicitud no se borra (trigger) y cada impresión o descarga es un EVENTO de
+// solo inserción.
+// ---------------------------------------------------------------------------
 model SgcUncontrolledCopyRequest {
   id_copy_request     Int       @id @default(autoincrement())
   id_company          Int
@@ -2565,6 +3311,11 @@ model SgcUncontrolledCopyEvent {
   @@schema("sgc")
 }
 
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 12: APROBADORES AUTORIZADOS por persona y proceso
+// (decisión D9), con vigencia y motivo; los administra Aseguramiento de
+// Calidad. No se borran: se revocan con motivo.
+// ---------------------------------------------------------------------------
 model SgcApproverAuthorization {
   id_approver_authorization Int       @id @default(autoincrement())
   id_company                Int
@@ -2593,6 +3344,9 @@ model SgcApproverAuthorization {
   @@schema("sgc")
 }
 
+// Sprint 12: FIRMANTE SUSTITUTO que asigna solo el grupo SGC-SUSTITUTOS (María
+// Camila y su suplente, D8) sobre un cupo pendiente, con motivo y periodo de
+// ausencia. SOLO INSERCIÓN.
 model SgcSignerSubstitution {
   id_signer_substitution    Int       @id @default(autoincrement())
   id_company                Int
@@ -2614,6 +3368,224 @@ model SgcSignerSubstitution {
   @@index([id_request])
   @@map("signer_substitution")
   @@schema("sgc")
+}
+
+/// Evento de la EMPRESA en el calendario de la ventana principal del portal de Talento Humano
+/// (Cristian Baldión, 2026-10-09). Un evento = un día. Los festivos de Colombia y las fechas importantes
+/// NO se guardan aquí: se calculan (lib/portal/calendario.ts). Solo los editores del portal (los mismos
+/// que cargan anuncios) crean y borran; ver el calendario lo puede cualquiera que entre al portal.
+/// Borrado lógico: no se pierde quién lo quitó ni cuándo.
+model PortalEvento {
+  id           Int       @id @default(autoincrement())
+  fecha        DateTime  @db.Date
+  titulo       String    @db.NVarChar(160)
+  descripcion  String?   @db.NVarChar(1000)
+  created_by   String    @db.NVarChar(255)
+  created_at   DateTime  @default(now())
+  eliminado_at DateTime?
+  eliminado_by String?   @db.NVarChar(255)
+
+  @@index([fecha])
+  @@map("portal_evento")
+  @@schema("dbo")
+}
+
+// =============================================================================
+// Bitácora de Proceso (antes «Órdenes de Trabajo»; P0, 2026-10-13). Las tablas
+// conservan el prefijo ot_ a propósito (nombre interno, sin mover el esquema) — bitácora de proceso de planta pedida
+// por Farmalógica (Amanda Casiano) para cerrar una desviación de auditoría:
+// «no se evidencia registro de las intervenciones durante todo el proceso».
+// Una orden de trabajo = un turno (producto, lote, turno y operarios). Los
+// operarios registran actividades del catálogo con la HORA DEL SERVIDOR
+// (SYSUTCDATETIME) y su usuario de sesión. Los registros NO se editan ni se
+// borran (ALCOA+): no hay rutas de edición/borrado y la base lo impide con un
+// trigger (migración 20261013180000_ordenes_trabajo_p0). La OP de SAP es
+// opcional y solo se guarda una copia (snapshot); nada se escribe en SAP.
+// =============================================================================
+
+model OtActividad {
+  id_actividad      Int      @id @default(autoincrement())
+  id_company        Int
+  nombre            String   @db.NVarChar(120)
+  exige_observacion Boolean  @default(false)
+  orden             Int      @default(0)
+  activo            Boolean  @default(true)
+  // Clave de un ícono de la lista cerrada OT_ICONOS (lib/bitacora-proceso/constants.ts); opcional.
+  icono             String?  @db.NVarChar(40)
+  created_by        String   @db.NVarChar(50)
+  created_at        DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  company   Company      @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  registros OtRegistro[]
+
+  @@index([id_company, activo, orden], map: "IX_ot_actividad_company")
+  @@map("ot_actividad")
+  @@schema("dbo")
+}
+
+model OtOrdenTrabajo {
+  id_orden_trabajo   Int       @id @default(autoincrement())
+  id_company         Int
+  consecutivo        Int
+  producto           String    @db.NVarChar(200)
+  item_code          String?   @db.NVarChar(50)
+  lote               String    @db.NVarChar(50)
+  // MANANA | TARDE | NOCHE
+  turno              String    @db.NVarChar(10)
+  area               String?   @db.NVarChar(100)
+  sap_op_absentry    Int?
+  sap_op_docnum      Int?
+  // Copia JSON de la OP de SAP al abrir (ItemNo, ProductDescription, U_Cod_Lote,
+  // U_FecVen_lote, PlannedQuantity, Warehouse): el soporte no cambia si cambia la OP.
+  sap_op_snapshot    String?   @db.NVarChar(Max)
+  // ABIERTA | CERRADA
+  estado             String    @default("ABIERTA") @db.NVarChar(10)
+  // Supervisor: quien abre la bitácora (user.id).
+  abierta_por        String    @db.NVarChar(50)
+  // Inspector (user.id), elegido al abrir; registra igual que los auxiliares.
+  id_inspector       String?   @db.NVarChar(50)
+  abierta_en         DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  cerrada_por        String?   @db.NVarChar(50)
+  cerrada_en         DateTime? @db.DateTime2
+  observacion_cierre String?   @db.NVarChar(1000)
+  // Área del catálogo (A5, 2026-10-14); `area` guarda la copia del nombre.
+  id_area            Int?
+
+  company    Company           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  areaRef    OtArea?           @relation(fields: [id_area], references: [id_area], onDelete: NoAction, onUpdate: NoAction)
+  // Auxiliares CON usuario (modelo anterior al 2026-10-14; se conserva para las bitácoras viejas).
+  operarios  OtOrdenOperario[]
+  // Operarios SIN usuario programados por el supervisor (A1, 2026-10-14).
+  operadores OtOrdenOperador[]
+  registros  OtRegistro[]
+  firmas     OtFirma[]
+
+  @@unique([id_company, consecutivo], map: "UQ_ot_orden_trabajo_consecutivo")
+  @@index([id_company, estado], map: "IX_ot_orden_trabajo_estado")
+  @@index([id_company, lote], map: "IX_ot_orden_trabajo_lote")
+  @@map("ot_orden_trabajo")
+  @@schema("dbo")
+}
+
+model OtOrdenOperario {
+  id_orden_operario Int    @id @default(autoincrement())
+  id_orden_trabajo  Int
+  id_user           String @db.NVarChar(50)
+
+  orden OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_orden_trabajo, id_user], map: "UQ_ot_orden_operario")
+  @@map("ot_orden_operario")
+  @@schema("dbo")
+}
+
+model OtRegistro {
+  id_registro      BigInt   @id @default(autoincrement())
+  id_orden_trabajo Int
+  id_actividad     Int
+  // Copia del nombre de la actividad al registrar (el soporte no cambia si se renombra).
+  actividad_nombre String   @db.NVarChar(120)
+  id_user          String   @db.NVarChar(50)
+  // Hora del SERVIDOR de base de datos: el cliente nunca la envía.
+  registrado_en    DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  observacion      String?  @db.NVarChar(500)
+  ip               String?  @db.NVarChar(64)
+  // Operario (sin usuario) que eligió su nombre en la tablet (A1). `id_user` es el usuario de la SESIÓN.
+  id_operador      Int?
+  operador_nombre  String?  @db.NVarChar(120)
+
+  orden     OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
+  actividad OtActividad    @relation(fields: [id_actividad], references: [id_actividad], onDelete: NoAction, onUpdate: NoAction)
+  operador  OtOperador?    @relation(fields: [id_operador], references: [id_operador], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_orden_trabajo, registrado_en], map: "IX_ot_registro_orden")
+  @@map("ot_registro")
+  @@schema("dbo")
+}
+
+// Maestro de operarios SIN usuario de SynerLink, por empresa (A1, 2026-10-14). No se borran: se desactivan.
+model OtOperador {
+  id_operador Int       @id @default(autoincrement())
+  id_company  Int
+  nombre      String    @db.NVarChar(120)
+  documento   String?   @db.NVarChar(30)
+  activo      Boolean   @default(true)
+  created_by  String    @db.NVarChar(50)
+  created_at  DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  updated_by  String?   @db.NVarChar(50)
+  updated_at  DateTime? @db.DateTime2
+
+  company   Company           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  ordenes   OtOrdenOperador[]
+  registros OtRegistro[]
+
+  @@unique([id_company, nombre], map: "UQ_ot_operador_nombre")
+  @@map("ot_operador")
+  @@schema("dbo")
+}
+
+// Catálogo de áreas por empresa (A5, 2026-10-14). No se borran: se desactivan.
+model OtArea {
+  id_area    Int      @id @default(autoincrement())
+  id_company Int
+  nombre     String   @db.NVarChar(100)
+  orden      Int      @default(0)
+  activo     Boolean  @default(true)
+  created_by String   @db.NVarChar(50)
+  created_at DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  company Company          @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  ordenes OtOrdenTrabajo[]
+
+  @@unique([id_company, nombre], map: "UQ_ot_area_nombre")
+  @@map("ot_area")
+  @@schema("dbo")
+}
+
+// Operarios programados en una bitácora (solo se agregan: TR_ot_orden_operador_inmutable).
+model OtOrdenOperador {
+  id_orden_operador Int      @id @default(autoincrement())
+  id_orden_trabajo  Int
+  id_operador       Int
+  agregado_por      String   @db.NVarChar(50)
+  agregado_en       DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  orden    OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
+  operador OtOperador     @relation(fields: [id_operador], references: [id_operador], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_orden_trabajo, id_operador], map: "UQ_ot_orden_operador")
+  @@map("ot_orden_operador")
+  @@schema("dbo")
+}
+
+// Desde el 2026-10-14 «Cerró»/«Verificó» son un CHECK con contraseña, sin imagen (firma_png
+// queda NULL); el verificador (rol INSPECTOR) se muestra como «Jefe de producción».
+// Firma electrónica de la bitácora (SUPERVISOR «Cerró» e INSPECTOR «Verificó»),
+// SOLO INSERCIÓN (trigger TR_ot_firma_inmutable). Reutiliza la reautenticación de
+// SynerLink, el consentimiento de GSS Firma y la firma registrada en GSS Firma.
+model OtFirma {
+  id_firma         Int      @id @default(autoincrement())
+  id_orden_trabajo Int
+  // SUPERVISOR | INSPECTOR
+  rol              String   @db.NVarChar(12)
+  significado      String   @db.NVarChar(20)
+  id_user          String   @db.NVarChar(50)
+  signer_email     String   @db.NVarChar(255)
+  signer_name      String?  @db.NVarChar(255)
+  firmado_en       DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  content_sha256   String   @db.Char(64)
+  auth_method      String   @db.NVarChar(40)
+  consent_version  String   @db.NVarChar(60)
+  firma_png        String?  @db.NVarChar(Max)
+  firma_sha256     String?  @db.Char(64)
+  ip               String?  @db.NVarChar(64)
+  user_agent       String?  @db.NVarChar(400)
+
+  orden OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_orden_trabajo, rol], map: "UQ_ot_firma_rol")
+  @@map("ot_firma")
+  @@schema("dbo")
 }
 
 /// S16 (R31, D20): PLANTILLA DE ENCABEZADO por tipo documental (rótulos y fila
@@ -2721,6 +3693,14 @@ model SgcTrainingAnswer {
   @@schema("sgc")
 }
 
+// ---------------------------------------------------------------------------
+// SGC documental — GENERADOR DE DOCUMENTOS desde plantillas aprobadas por
+// Calidad (2026-10-10; ver lib/sgc/generator.ts). La plantilla parte de un
+// documento VIGENTE (Word o editor) con campos {{CAMPO:Etiqueta}}; cada
+// configuración es una versión que congela contenido y campos y que aprueba
+// SOLO Aseguramiento de Calidad. Lo generado es un REGISTRO inmutable con su
+// propio consecutivo. Nada se borra (triggers).
+// ---------------------------------------------------------------------------
 model SgcGeneratorTemplate {
   id_template        Int       @id @default(autoincrement())
   id_company         Int
@@ -2812,4 +3792,80 @@ model SgcGeneratedDocument {
   @@index([id_company, generated_by])
   @@map("generated_document")
   @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// Módulo «Correo» (2026-10-15): bandeja de Outlook de cada persona (Graph con la app
+// de aplicación del inquilino; el buzón SIEMPRE es el de la sesión), simulación y
+// creación masiva de solicitudes, hilos vinculados a casos.
+// Migración: prisma/migrations/20261015120000_correo_modulo. NO se guardan cuerpos
+// de correo: solo identificadores, el asunto de la solicitud y la auditoría.
+// ---------------------------------------------------------------------------
+
+/// Vínculo hilo de correo (conversationId del buzón de la persona) ↔ solicitud general.
+/// Idempotente: un hilo por persona queda vinculado a una sola solicitud.
+model EmailThreadLink {
+  id              Int       @id @default(autoincrement())
+  id_user         String    @db.NVarChar(50)
+  mailbox         String    @db.NVarChar(320)
+  conversation_id String    @db.NVarChar(512)
+  // NULL mientras la solicitud se está creando (estado CREANDO).
+  id_request      Int?
+  // CREANDO | ACTIVO
+  estado          String    @default("ACTIVO") @db.NVarChar(10)
+  // CREADA (la solicitud nació del correo) | VINCULADA (a una solicitud existente)
+  origen          String    @db.NVarChar(10)
+  asunto          String?   @db.NVarChar(255)
+  created_by      String    @db.NVarChar(50)
+  created_at      DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  last_synced_at  DateTime? @db.DateTime2
+
+  mensajes EmailThreadMessage[]
+
+  @@unique([id_user, conversation_id], map: "UQ_email_thread_link_hilo")
+  @@index([id_request], map: "IX_email_thread_link_request")
+  @@map("email_thread_link")
+  @@schema("dbo")
+}
+
+/// Correos (internetMessageId) ya registrados en un hilo vinculado: origen de la
+/// solicitud, notas agregadas y respuestas. ÚNICO global: un mismo correo no crea
+/// dos solicitudes ni dos notas, aunque llegue a varios buzones.
+model EmailThreadMessage {
+  id                  BigInt    @id @default(autoincrement())
+  id_link             Int
+  internet_message_id String    @db.NVarChar(512)
+  // ORIGEN | NOTA | RESPUESTA
+  tipo                String    @db.NVarChar(10)
+  received_at         DateTime? @db.DateTime2
+  created_at          DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  link EmailThreadLink @relation(fields: [id_link], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([internet_message_id], map: "UQ_email_thread_message_imid")
+  @@index([id_link], map: "IX_email_thread_message_link")
+  @@map("email_thread_message")
+  @@schema("dbo")
+}
+
+/// Auditoría del módulo Correo: CADA lectura del buzón (bandeja, hilo, adjunto),
+/// conversiones, vínculos, respuestas y notas. Inmutable (trigger); sin cuerpos de correo.
+model EmailAudit {
+  id                  BigInt   @id @default(autoincrement())
+  id_user             String   @db.NVarChar(50)
+  // Buzón consultado (siempre el del usuario de la sesión).
+  mailbox             String?  @db.NVarChar(320)
+  accion              String   @db.NVarChar(30)
+  mensaje_id          String?  @db.NVarChar(512)
+  conversation_id     String?  @db.NVarChar(512)
+  internet_message_id String?  @db.NVarChar(512)
+  id_request          Int?
+  detalle             String?  @db.NVarChar(1000)
+  ip                  String?  @db.NVarChar(64)
+  created_at          DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  @@index([id_user, created_at], map: "IX_email_audit_user")
+  @@index([id_request], map: "IX_email_audit_request")
+  @@map("email_audit")
+  @@schema("dbo")
 }

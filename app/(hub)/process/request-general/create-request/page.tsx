@@ -5,15 +5,13 @@ import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
-import Link from 'next/link';
 import {
-  Title,
   Paper,
   Stack,
-  Alert,
-  Breadcrumbs,
-  Anchor,
   Table,
+  Tooltip,
+  Title,
+  Alert,
   TextInput,
   NumberInput,
   Select,
@@ -28,18 +26,13 @@ import {
   Divider,
   LoadingOverlay,
   ActionIcon,
-  Tooltip,
   Collapse,
   Box,
-  Flex,
   ScrollArea,
-  Progress,
-  RingProgress,
   Loader,
 } from '@mantine/core';
 import {
   IconAlertCircle,
-  IconChevronRight,
   IconSearch,
   IconPlus,
   IconFilter,
@@ -48,14 +41,14 @@ import {
   IconRefresh,
   IconFileDescription,
   IconCalendarEvent,
-  IconUser,
   IconFlag,
+  IconUser,
   IconClock,
-  IconBuilding,
-  IconProgress,
   IconCircleCheckFilled,
   IconCircleDot,
   IconCircle,
+  IconBuilding,
+  IconProgress,
   IconUserCheck,
   IconTag,
   IconDownload,
@@ -91,6 +84,15 @@ import SapOptionSelect from './SapOptionSelect';
 import TableFieldInput from './TableFieldInput';
 import { formatEstimatedPaymentDate } from '../../../../../lib/treasury/estimatedPaymentDate';
 import toast from 'react-hot-toast';
+import {
+  FilterPanel,
+  ProgressRingTile,
+  RequestProgressBar,
+  RequestsHeader,
+  RequestsPage,
+  StatFilterTile,
+} from '../../../../../components/request-general/list/RequestListUi';
+import { panelStyles } from '../../../../../components/ui/panel/Panel';
 import {
   buildTaskDisplayBadges,
   getSimplifiedTasksProgress,
@@ -1212,24 +1214,6 @@ function RequestBoard() {
     }
   };
 
-  const breadcrumbItems = [
-    { title: 'Procesos', href: '/process' },
-    { title: 'Solicitudes Generales', href: '#' },
-    { title: 'Panel de Solicitudes', href: '#' },
-  ].map((item, index) =>
-    item.href !== '#' ? (
-      <Link key={index} href={item.href} passHref>
-        <Anchor component='span' className='hover:text-blue-600 transition-colors'>
-          {item.title}
-        </Anchor>
-      </Link>
-    ) : (
-      <Text key={index} component='span' c='dimmed'>
-        {item.title}
-      </Text>
-    )
-  );
-
   async function exportToExcel() {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Datos');
@@ -1267,213 +1251,86 @@ function RequestBoard() {
     saveAs(blob, 'InformeSolicitudes.xlsx');
   }
 
+  const globalProgress = getGlobalTasksProgress();
+
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
-      <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        {/* Header Section */}
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
-          <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
-            {breadcrumbItems}
-          </Breadcrumbs>
-
-          <Flex justify='space-between' align='center' mb='4'>
-            <div>
-              <Title
-                order={1}
-                className='text-3xl font-bold mb-2 flex items-center gap-3'
-              >
-                <IconFileDescription size={32} className='text-blue-600' />
-                Solicitudes Generales
-              </Title>
-              <Text size='lg' c='dimmed'>
-                Gestión y seguimiento de solicitudes generales
-              </Text>
-            </div>
-
+    <RequestsPage>
+      <RequestsHeader
+        crumbs={[
+          { title: 'Procesos', href: '/process' },
+          { title: 'Solicitudes Generales' },
+          { title: 'Panel de Solicitudes' },
+        ]}
+        title='Solicitudes Generales'
+        subtitle='Gestión y seguimiento de solicitudes generales'
+        actions={
+          <>
             <Button
+              variant='default'
+              radius='xl'
+              leftSection={<IconDownload size={16} />}
+              onClick={() => exportToExcel()}
+            >
+              Descargar XLSX
+            </Button>
+            <Button
+              radius='xl'
+              leftSection={<IconPlus size={16} />}
               onClick={() => setModalOpened(true)}
-              size='lg'
-              leftSection={<IconPlus size={18} />}
-              className='bg-blue-600 hover:bg-blue-700'
             >
               Crear Nueva Solicitud
             </Button>
-          </Flex>
+          </>
+        }
+      />
 
-          <Grid>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card
-                p='md'
-                radius='md'
-                withBorder
-                role='button'
-                aria-label='Mostrar todas las solicitudes'
-                onClick={() => filterByStatus('')}
-                style={{
-                  cursor: 'pointer',
-                  backgroundColor: 'var(--mantine-color-blue-light)',
-                  borderColor:
-                    filters.status === ''
-                      ? 'var(--mantine-color-blue-filled)'
-                      : 'transparent',
-                  borderWidth: 2,
-                  transition: 'border-color 150ms ease',
-                }}
-              >
-                <Group>
-                  <IconFileDescription size={24} color='var(--mantine-color-blue-light-color)' />
-                  <div>
-                    <Text size='xs' c='var(--mantine-color-blue-light-color)'>
-                      Total de Solicitudes
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {tickets.length}
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card
-                p='md'
-                radius='md'
-                withBorder
-                role='button'
-                aria-label='Filtrar solicitudes pendientes'
-                onClick={() => filterByStatus('1')}
-                style={{
-                  cursor: 'pointer',
-                  backgroundColor: 'var(--mantine-color-orange-light)',
-                  borderColor:
-                    filters.status === '1'
-                      ? 'var(--mantine-color-orange-filled)'
-                      : 'transparent',
-                  borderWidth: 2,
-                  transition: 'border-color 150ms ease',
-                }}
-              >
-                <Group>
-                  <IconProgress size={24} color='var(--mantine-color-orange-light-color)' />
-                  <div>
-                    <Text size='xs' c='var(--mantine-color-orange-light-color)'>
-                      Pendientes
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {tickets.filter((t) => t.status?.toLowerCase() === 'abierto').length}
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card
-                p='md'
-                radius='md'
-                withBorder
-                role='button'
-                aria-label='Filtrar solicitudes completadas'
-                onClick={() => filterByStatus('2')}
-                style={{
-                  cursor: 'pointer',
-                  backgroundColor: 'var(--mantine-color-green-light)',
-                  borderColor:
-                    filters.status === '2'
-                      ? 'var(--mantine-color-green-filled)'
-                      : 'transparent',
-                  borderWidth: 2,
-                  transition: 'border-color 150ms ease',
-                }}
-              >
-                <Group>
-                  <IconCheck size={24} color='var(--mantine-color-green-light-color)' />
-                  <div>
-                    <Text size='xs' c='var(--mantine-color-green-light-color)'>
-                      Completadas
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {tickets.filter((t) => t.status?.toLowerCase() === 'resuelto').length}
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder>
-                {(() => {
-                  const { total, done, percent } = getGlobalTasksProgress();
-                  return (
-                    <Group wrap='nowrap'>
-                      <RingProgress
-                        size={56}
-                        thickness={6}
-                        roundCaps
-                        sections={[
-                          { value: percent, color: percent === 100 ? 'green' : 'blue' },
-                        ]}
-                        label={
-                          <Text size='xs' ta='center' fw={700}>
-                            {percent}%
-                          </Text>
-                        }
-                      />
-                      <div>
-                        <Text size='xs' c='dimmed'>
-                          Avance de tareas
-                        </Text>
-                        <Text size='lg' fw={600}>
-                          {done}/{total}
-                        </Text>
-                      </div>
-                    </Group>
-                  );
-                })()}
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder>
-                <Group>
-                  <Button
-                    onClick={() => exportToExcel()}
-                    size='lg'
-                    leftSection={<IconDownload size={18} />}
-                    className='bg-green-500 hover:bg-green-700'
-                  >
-                    Descargar XLSX
-                  </Button>
-                </Group>
-              </Card>
-            </Grid.Col>
-          </Grid>
-        </Card>
+      <div className={panelStyles.grid4}>
+        <StatFilterTile
+          icon={<IconFileDescription size={20} />}
+          label='Total de solicitudes'
+          value={tickets.length}
+          tone='info'
+          active={filters.status === ''}
+          onClick={() => filterByStatus('')}
+          ariaLabel='Mostrar todas las solicitudes'
+        />
+        <StatFilterTile
+          icon={<IconProgress size={20} />}
+          label='Pendientes'
+          value={tickets.filter((t) => t.status?.toLowerCase() === 'abierto').length}
+          tone='warning'
+          active={filters.status === '1'}
+          onClick={() => filterByStatus('1')}
+          ariaLabel='Filtrar solicitudes pendientes'
+        />
+        <StatFilterTile
+          icon={<IconCheck size={20} />}
+          label='Completadas'
+          value={tickets.filter((t) => t.status?.toLowerCase() === 'resuelto').length}
+          tone='ok'
+          active={filters.status === '2'}
+          onClick={() => filterByStatus('2')}
+          ariaLabel='Filtrar solicitudes completadas'
+        />
+        <ProgressRingTile
+          label='Avance de tareas'
+          done={globalProgress.done}
+          total={globalProgress.total}
+          percent={globalProgress.percent}
+        />
+      </div>
 
-        {error && (
-          <Alert
-            icon={<IconAlertCircle size={20} />}
-            title='Error'
-            color='red'
-            mb='md'
-            className='border-red-200 bg-red-50'
-          >
-            {error}
-          </Alert>
-        )}
+      {error && (
+        <Alert icon={<IconAlertCircle size={20} />} title='Error' color='red' radius='lg' mt='md'>
+          {error}
+        </Alert>
+      )}
 
-        <Card shadow='sm' p='lg' radius='md' withBorder mb='6'>
-          <Group justify='space-between' mb='md'>
-            <Title order={3} className='flex items-center gap-2'>
-              <IconFilter size={20} />
-              Filtros de Búsqueda
-            </Title>
-            <ActionIcon
-              variant='subtle'
-              onClick={() => setFiltersExpanded(!filtersExpanded)}
-              aria-label={filtersExpanded ? 'Ocultar filtros' : 'Mostrar filtros'}
-              data-testid='filter-toggle'
-            >
-              {filtersExpanded ? <IconX size={16} /> : <IconFilter size={16} />}
-            </ActionIcon>
-          </Group>
-
+      <FilterPanel
+        expanded={filtersExpanded}
+        onToggle={() => setFiltersExpanded(!filtersExpanded)}
+        icon={<IconFilter size={18} />}
+      >
           <Collapse in={filtersExpanded}>
             <Box mt='md'>
               <Grid>
@@ -1587,7 +1444,7 @@ function RequestBoard() {
               </Group>
             </Box>
           </Collapse>
-        </Card>
+      </FilterPanel>
 
         {/* Enhanced Table */}
         <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
@@ -1648,25 +1505,7 @@ function RequestBoard() {
                         </Text>
                         {tasksByRequest[ticket.id]?.length ? (
                           <Stack gap={6} mt={8}>
-                            {(() => {
-                              const { total, done, percent } = getTasksProgress(
-                                tasksByRequest[ticket.id]
-                              );
-                              return (
-                                <Group gap={8} wrap='nowrap'>
-                                  <Progress
-                                    value={percent}
-                                    color={percent === 100 ? 'green' : 'blue'}
-                                    size='sm'
-                                    radius='xl'
-                                    style={{ flex: 1, maxWidth: 120 }}
-                                  />
-                                  <Text size='xs' c='dimmed' fw={500} style={{ whiteSpace: 'nowrap' }}>
-                                    {done}/{total}
-                                  </Text>
-                                </Group>
-                              );
-                            })()}
+                            <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
                             <Group gap={6} wrap='wrap'>
                               {buildTaskDisplayBadges(tasksByRequest[ticket.id]).map((badge) => {
                                 const { color, Icon } = getTaskVisual(badge.statusKey);
@@ -2329,8 +2168,7 @@ function RequestBoard() {
             </Group>
           </Stack>
         </Modal>
-      </div>
-    </div>
+    </RequestsPage>
   );
 }
 
