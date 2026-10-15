@@ -31,6 +31,11 @@ import {
 } from './formacion-storage';
 
 export const CARPETA_POLITICAS_POR_DEFECTO = 'POLITICAS Y REGLAMENTOS';
+/**
+ * AYUDAS (Cristian Baldión, 2026-10-15): videos de ayuda en la carpeta `FORMACION/AYUDAS` de la misma biblioteca. Usa
+ * esta MISMA lectura (solo lectura, misma app de Entra): lo único que cambia es la carpeta. Aquí SÍ son dos niveles.
+ */
+export const CARPETA_AYUDAS_POR_DEFECTO = 'FORMACION/AYUDAS';
 /** Cuánto se recuerda el listado. Corto: Talento Humano publica cuando quiere. */
 export const POLITICAS_CACHE_MS = 2 * 60_000;
 /** Niveles de subcarpetas que se recorren (la raíz es el 0). */
@@ -95,6 +100,20 @@ export function leerConfigPoliticas(env: NodeJS.ProcessEnv = process.env): Confi
   };
 }
 
+/**
+ * Configuración de la carpeta de AYUDAS: `PORTAL_TH_SP_HELP_FOLDER` (por defecto `FORMACION/AYUDAS`). Cada nivel de la ruta
+ * se valida como un nombre de carpeta (sin `..`, sin caracteres prohibidos) y se admiten hasta 3 niveles.
+ */
+export function leerConfigAyudas(env: NodeJS.ProcessEnv = process.env): ConfigPoliticas {
+  const base = leerConfigPoliticas({ ...env, PORTAL_TH_SP_POLICIES_FOLDER: undefined });
+  const ruta = (env.PORTAL_TH_SP_HELP_FOLDER ?? '').trim() || CARPETA_AYUDAS_POR_DEFECTO;
+  const niveles = ruta.split('/');
+  if (niveles.length > 3 || !niveles.every(esSegmentoValido)) {
+    throw new FormacionStorageNoConfigurado(`PORTAL_TH_SP_HELP_FOLDER no es una ruta de carpeta válida: "${ruta}"`);
+  }
+  return { ...base, carpeta: ruta };
+}
+
 /** Un driveItemId de SharePoint: letras, dígitos y `!._-`. */
 export function esIdValido(id: string): boolean {
   return /^[A-Za-z0-9!._-]{1,200}$/.test(id);
@@ -116,11 +135,12 @@ const extension = (nombre: string) => {
 
 const codificarRuta = (ruta: string) => ruta.split('/').map(encodeURIComponent).join('/');
 
-let cache: { clave: string; cuando: number; listado: ListadoPoliticas } | null = null;
+/** Una entrada por carpeta (Políticas y Ayudas no se pisan la caché una a la otra). */
+const cache = new Map<string, { cuando: number; listado: ListadoPoliticas }>();
 
 /** Solo para pruebas. */
 export function _reiniciarCachePoliticas() {
-  cache = null;
+  cache.clear();
 }
 
 /**
@@ -134,7 +154,8 @@ export async function listarPoliticas(
   const f = deps.fetch ?? fetch;
   const ahora = deps.ahora ?? Date.now;
   const clave = `${cfg.siteId}|${cfg.carpeta}`;
-  if (cache && cache.clave === clave && ahora() - cache.cuando < POLITICAS_CACHE_MS) return cache.listado;
+  const guardado = cache.get(clave);
+  if (guardado && ahora() - guardado.cuando < POLITICAS_CACHE_MS) return guardado.listado;
 
   const token = await obtenerToken(cfg, f);
   const auth = { Authorization: `Bearer ${token}` };
@@ -194,7 +215,7 @@ export async function listarPoliticas(
     (a, b) => a.carpeta.localeCompare(b.carpeta, 'es') || a.nombre.localeCompare(b.nombre, 'es', { numeric: true })
   );
   const listado = { carpeta: cfg.carpeta, archivos, truncado };
-  cache = { clave, cuando: ahora(), listado };
+  cache.set(clave, { cuando: ahora(), listado });
   return listado;
 }
 
