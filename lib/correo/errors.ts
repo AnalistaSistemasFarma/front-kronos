@@ -3,7 +3,9 @@ export class CorreoError extends Error {
   constructor(
     message: string,
     public readonly status: number = 400,
-    public readonly code?: string
+    public readonly code?: string,
+    /** Solicitud relacionada (p. ej. la que ya tiene este correo, en un DUPLICADO). */
+    public readonly idRequest?: number
   ) {
     super(message);
     this.name = 'CorreoError';

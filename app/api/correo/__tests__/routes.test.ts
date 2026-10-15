@@ -66,6 +66,7 @@ const kronos = {
     ],
   })),
   solicitudVisible: vi.fn(async () => null),
+  solicitudExiste: vi.fn(async () => true),
   insertarNota: vi.fn(async () => 1),
 };
 
