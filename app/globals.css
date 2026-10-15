@@ -1,5 +1,13 @@
 @import 'tailwindcss';
 
+/* Tailwind v4 escanea todo lo que no esté en .gitignore. Las copias del build
+   (.next-antes-*, .next.bak-*) y los respaldos dentro del checkout lo hacían
+   leer GB de JS y agotaban el tiempo de PostCSS en el build de producción
+   (pase SGC S14, 2026-10-14). Se excluyen aquí además de en .gitignore. */
+@source not "../.next*";
+@source not "../_respaldos*";
+@source not "../**/*.bak";
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* Tokens base (sobrescritos por applyAppThemeToDocument + Mantine) */
@@ -5492,4 +5500,145 @@ html.dark .portal-th--modulo .portal-th__cal,
 .portal-th__cal-boton--ancho {
   width: 100%;
   margin-top: 12px;
+}
+
+/* ── Restablecer un curso a un estudiante (Cristian, 2026-10-14) ───────────── */
+.portal-th__aviso--accion {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid #a5d6b0;
+  border-radius: 8px;
+  background-color: #e6f4ea;
+  color: #1e6b34;
+}
+
+.portal-th__restablecer-confirmar {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  font-size: 0.78rem;
+}
+
+/* ── Formación: «Editar» y «Invitar al Curso» (Cristian, 2026-10-14) ───────── */
+.portal-th__formacion-gestion-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.portal-th__progreso-cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin: 24px 0 8px;
+}
+
+.portal-th__progreso-cabecera h4 {
+  margin: 0;
+}
+
+.portal-th__invitar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 14px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 12px;
+  background-color: #fff;
+}
+
+.portal-th__invitar label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--pth-tinta-2);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+/* 16 px: con menos, Safari en iPhone hace zoom al enfocar el campo. */
+.portal-th__invitar input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 8px;
+  color: var(--pth-tinta);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.portal-th__invitar input:focus {
+  outline: 2px solid var(--pth-azul);
+  outline-offset: 0;
+}
+
+.portal-th__invitar .portal-th__estado {
+  margin: 0;
+}
+
+.portal-th__invitar-acciones {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.portal-th__invitar-aviso {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.portal-th__invitar-aviso--ok {
+  border: 1px solid #a5d6b0;
+  background-color: #e6f4ea;
+  color: #1e6b34;
+}
+
+.portal-th__invitar-aviso--error {
+  border: 1px solid #f1b5b1;
+  background-color: #fde8e7;
+  color: #b3261e;
+}
+
+/* La tabla de progreso es más ancha que un celular: se desplaza DENTRO de su caja, no la página entera. */
+.portal-th__roster-contenedor {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Botones de «Invitar al Curso»: mismo estilo que «Editar» (borde azul, fondo blanco); «Enviar» va relleno. */
+.portal-th__progreso-cabecera button,
+.portal-th__invitar-acciones button {
+  padding: 8px 14px;
+  border: 1px solid var(--pth-azul);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--pth-azul);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.portal-th__invitar-acciones button[type='submit'] {
+  background: var(--pth-azul);
+  color: #fff;
+  font-weight: 700;
+}
+
+.portal-th__progreso-cabecera button:hover,
+.portal-th__invitar-acciones button:hover:not(:disabled) {
+  border-color: var(--pth-azul-700);
+}
+
+.portal-th__invitar-acciones button:disabled {
+  opacity: 0.6;
+  cursor: default;
 }

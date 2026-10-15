@@ -355,6 +355,13 @@ jobs:
           # Ajustes del 2026-10-14 (área predefinida, actividades A6 sin duplicar, observación opcional): dos veces, idempotente.
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-14-bitacora-proceso-ajustes-farmalogica.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-14-bitacora-proceso-ajustes-farmalogica.sql
+          # Módulo Correo (2026-10-15): migración, permiso del menú y tarea de fondo APAGADA, dos veces (idempotencia).
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261015120000_correo_modulo/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261015120000_correo_modulo/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-15-correo-permiso.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-15-correo-permiso.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-15-correo-tarea-sincronizacion-APAGADA.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-15-correo-tarea-sincronizacion-APAGADA.sql
 
       - name: Pruebas de integración + cobertura de lib/sgc/db (vitest)
         run: npm run test:integration -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/integracion/junit.xml
@@ -465,6 +472,36 @@ jobs:
           IF OBJECT_ID(N'dbo.TR_ot_firma_inmutable', N'TR') IS NULL THROW 50025, N'Falta el trigger de inmutabilidad de las firmas.', 1;
           SQL
           x /tmp/ot-verifica.sql
+
+      - name: Correo — reversa (ida y vuelta)
+        env:
+          DATABASE_URL: ${{ env.SGC_IT_DATABASE_URL }}
+        run: |
+          set -e
+          M=prisma/migrations/20261015120000_correo_modulo/migration.sql
+          S=prisma/manual/2026-10-15-correo-permiso.sql
+          R=prisma/manual/2026-10-15-correo-reversa.sql
+          x() { npx prisma db execute --schema prisma/schema.prisma --file "$1"; }
+          # Las pruebas de integración dejaron hilos y auditoría: sin la bandera, la reversa se niega.
+          if x "$R"; then echo "La reversa debió negarse sin correo_reversa_acepta_perdida"; exit 1; fi
+          { echo "EXEC sp_set_session_context N'correo_reversa_acepta_perdida', 1;"; cat "$R"; } > /tmp/correo-reversa.sql
+          x /tmp/correo-reversa.sql; x /tmp/correo-reversa.sql
+          cat > /tmp/correo-verifica-reversa.sql <<'SQL'
+          IF OBJECT_ID(N'dbo.email_thread_link', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.email_audit', N'U') IS NOT NULL
+             OR EXISTS (SELECT 1 FROM dbo.subprocess WHERE subprocess_url = N'/process/correo')
+            THROW 50030, N'La reversa del módulo Correo no quitó todo.', 1;
+          SQL
+          x /tmp/correo-verifica-reversa.sql
+          # Sin la migración, el permiso se niega a correr.
+          if x "$S"; then echo "El permiso debió negarse sin la migración"; exit 1; fi
+          x "$M"; x "$M"; x "$S"; x "$S"
+          cat > /tmp/correo-verifica.sql <<'SQL'
+          IF (SELECT COUNT(*) FROM dbo.subprocess WHERE subprocess_url = N'/process/correo') <> 1 THROW 50031, N'Falta el subproceso Correo.', 1;
+          IF EXISTS (SELECT 1 FROM dbo.subprocess_user_company suc JOIN dbo.subprocess s ON s.id_subprocess = suc.id_subprocess WHERE s.subprocess_url = N'/process/correo') THROW 50032, N'El permiso no debe otorgarse a nadie por defecto.', 1;
+          IF OBJECT_ID(N'dbo.TR_email_audit_inmutable', N'TR') IS NULL THROW 50033, N'Falta el trigger de la auditoría.', 1;
+          IF OBJECT_ID(N'dbo.CK_email_thread_link_activo', N'C') IS NULL THROW 50034, N'Falta el CHECK del vínculo activo.', 1;
+          SQL
+          x /tmp/correo-verifica.sql
 
       - name: Portal TH — formulario propio (migración, siembra y reversa)
         # 20261008160000_portal_formacion_formulario_propio: idempotente sobre

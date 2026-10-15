@@ -136,6 +136,7 @@ test.describe('Portal TH · selección múltiple y lista desplegable', () => {
     await page.goto('/portal/formacion');
     await page.getByRole('button', { name: 'Vista formador' }).click();
     await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
+    await page.getByTestId('alternar-edicion').click();
     await page.getByRole('button', { name: 'Formulario', exact: true }).click();
     await page.getByTestId('crear-evaluacion').click();
     const c = page.getByTestId('constructor-formulario');
@@ -195,6 +196,7 @@ test.describe('Portal TH · selección múltiple y lista desplegable', () => {
     await page.goto('/portal/formacion');
     await page.getByRole('button', { name: 'Vista formador' }).click();
     await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
+    await page.getByTestId('alternar-edicion').click();
     await page.getByRole('button', { name: 'Formulario', exact: true }).click();
     await page.getByTestId('crear-evaluacion').click();
     const c = page.getByTestId('constructor-formulario');
