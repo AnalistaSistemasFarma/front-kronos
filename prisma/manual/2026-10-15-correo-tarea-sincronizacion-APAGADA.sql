@@ -23,11 +23,12 @@ IF OBJECT_ID(N'dbo.email_thread_link', N'U') IS NULL
 
 DECLARE @Actor NVARCHAR(255) = N'nicolas.rivera@gsslatam.com';
 
+/* Todo por SQL dinámico: si scheduled_job no existe (base de la CI), no se compila nada contra ella. */
 IF OBJECT_ID(N'[dbo].[scheduled_job]', N'U') IS NOT NULL
-   AND NOT EXISTS (SELECT 1 FROM [dbo].[scheduled_job] WHERE job_type = N'correo_sincronizar_hilos')
 BEGIN
   DECLARE @Next DATETIME = DATEADD(MINUTE, 15, GETDATE());
-  EXEC sp_executesql N'INSERT INTO [dbo].[scheduled_job] (name, job_type, payload, cron_expression, next_run_date, active, source_module, created_by, created_at)
+  EXEC sp_executesql N'IF NOT EXISTS (SELECT 1 FROM [dbo].[scheduled_job] WHERE job_type = N''correo_sincronizar_hilos'')
+    INSERT INTO [dbo].[scheduled_job] (name, job_type, payload, cron_expression, next_run_date, active, source_module, created_by, created_at)
     VALUES (N''Correo · correos nuevos de hilos vinculados → notas del caso'', N''correo_sincronizar_hilos'', N''{"limite":50}'', N''*/15 * * * *'', @Next, 0, N''correo'', @Actor, GETDATE());',
     N'@Next DATETIME, @Actor NVARCHAR(255)', @Next = @Next, @Actor = @Actor;
 END;
