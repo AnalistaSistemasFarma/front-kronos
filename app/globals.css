@@ -5763,6 +5763,19 @@ html.dark .portal-th--modulo .portal-th__cal,
   vector-effect: non-scaling-stroke;
 }
 
+/* Color del cuadro = nivel del cargo (los mismos tonos del organigrama en papel). */
+.portal-th__org-nodo--estrategico rect {
+  fill: #f2dcda;
+}
+
+.portal-th__org-nodo--tactico rect {
+  fill: #dbeef3;
+}
+
+.portal-th__org-nodo--operativo rect {
+  fill: #d7e3bf;
+}
+
 .portal-th__org-nodo--con rect {
   stroke: var(--pth-azul);
   stroke-width: 2.4px;

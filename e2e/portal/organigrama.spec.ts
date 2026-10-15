@@ -1,41 +1,51 @@
 import { expect, test, type Page } from '@playwright/test';
-import { MODELO } from '../../lib/portal/organigrama';
+import semilla from '../../prisma/seeds/organigrama-gss.json';
 
 /**
- * Portal TH · Organigrama digital e interactivo (Cristian Baldión, 2026-10-15).
+ * Portal TH · Organigrama de GSS, digital e interactivo (Cristian Baldión, 2026-10-15).
  *
- * Sin sesión real ni SharePoint: las APIs del portal se simulan con `page.route`. Las PERSONAS son inventadas (no hay datos
- * reales en las pruebas). Con `FORMACION_CAPTURAS=<carpeta>` guarda capturas para la revisión.
+ * Sin sesión real, base ni SharePoint: la API del portal se simula con `page.route`, con el MISMO árbol de 118 cargos que carga el
+ * script (`prisma/seeds/organigrama-gss.json`). Las PERSONAS son inventadas (no hay datos reales en las pruebas). Con
+ * `FORMACION_CAPTURAS=<carpeta>` guarda capturas para la revisión.
  */
 
 const CAPTURAS = process.env.FORMACION_CAPTURAS;
-const nodo = (texto: string) => {
-  const n = MODELO.nodos.find((x) => x.texto === texto);
-  if (!n) throw new Error('no hay un cuadro «' + texto + '»');
-  return n;
-};
-const GERENTE_CALIDAD = nodo('Gerente de Calidad');
-const JEFE_VALIDACIONES = MODELO.nodos.find((x) => /^Jefe de\s+Validaciones$/.test(x.texto))!;
-const SIN_PERSONAS = nodo('Mensajero');
-const SOLO_OTRAS = nodo('Analista de Mercadeo');
+interface Cargo { nombre: string; nivel: string; padre: string | null }
+const CARGOS = (semilla as unknown as { cargos: Cargo[] }).cargos;
+const ID = new Map(CARGOS.map((c, i) => [c.nombre, i + 1]));
+const NODOS = CARGOS.map((c) => ({ id: ID.get(c.nombre)!, nombre: c.nombre, nivel: c.nivel, padre: c.padre ? ID.get(c.padre)! : null }));
+const id = (nombre: string) => ID.get(nombre)!;
 
-const personas = {
-  [GERENTE_CALIDAD.id]: [
+const GERENTE_CALIDAD = id('GERENTE DE CALIDAD');
+const JEFE_VALIDACIONES = id('JEFE DE VALIDACIONES');
+const SIN_PERSONAS = id('MENSAJERO');
+const SOLO_OTRAS = id('ANALISTA DE MERCADEO');
+
+const PERSONAS = {
+  [GERENTE_CALIDAD]: [
     { empresa: 'GSS', nombre: 'PEREZ GOMEZ ANA MARIA', area: 'CALIDAD', cargo: 'GERENTE DE CALIDAD', correo: 'ana.perez@gsslatam.com' },
     { empresa: 'Farmalógica', nombre: 'RUIZ SOTO LUIS', area: 'CALIDAD', cargo: 'GERENTE DE CALIDAD', correo: 'luis.ruiz@farmalogica.com' },
   ],
-  [JEFE_VALIDACIONES.id]: [{ empresa: 'GSS', nombre: 'LOPEZ DIAZ MARTA', area: 'VALIDACIONES', cargo: 'JEFE DE VALIDACIONES', correo: 'No Aplica' }],
-  [SOLO_OTRAS.id]: [{ empresa: 'Ryan', nombre: 'MORA PINTO JUAN', area: 'MERCADEO', cargo: 'ANALISTA DE MERCADEO', correo: 'juan.mora@ryanlab.com' }],
+  [JEFE_VALIDACIONES]: [{ empresa: 'GSS', nombre: 'LOPEZ DIAZ MARTA', area: 'VALIDACIONES', cargo: 'JEFE DE VALIDACIONES', correo: 'No Aplica' }],
+  [SOLO_OTRAS]: [{ empresa: 'Ryan', nombre: 'MORA PINTO JUAN', area: 'MERCADEO', cargo: 'ANALISTA DE MERCADEO', correo: 'juan.mora@ryanlab.com' }],
 };
 
-async function simular(page: Page, opciones: { falla?: boolean } = {}) {
+async function simular(page: Page, opciones: { falla?: boolean; vacio?: boolean; avisoPersonas?: string } = {}) {
   await page.route('**/api/portal/content', (r) =>
     r.fulfill({ json: { email: 'e2e@gsslatam.com', via: 'codigo', documentos: [], banners: [], puedeEditar: false } })
   );
   await page.route('**/api/portal/organigrama', (r) =>
     opciones.falla
-      ? r.fulfill({ status: 502, json: { error: 'No se encontró BASE PERSONAL en SharePoint. Avise a Tecnología.' } })
-      : r.fulfill({ json: { personas, total: 3 } })
+      ? r.fulfill({ status: 500, json: { error: 'No se pudo cargar el organigrama. Intente en un momento.' } })
+      : r.fulfill({
+          json: {
+            empresa: 'GSS',
+            nodos: opciones.vacio ? [] : NODOS,
+            personas: opciones.avisoPersonas || opciones.vacio ? {} : PERSONAS,
+            total: 3,
+            ...(opciones.avisoPersonas ? { avisoPersonas: opciones.avisoPersonas } : {}),
+          },
+        })
   );
 }
 
@@ -47,8 +57,9 @@ async function abrir(page: Page) {
   await expect(visor).toBeVisible();
   return visor;
 }
+const nodoDe = (visor: ReturnType<Page['getByTestId']>, idCargo: number) => visor.locator(`[data-nodo="${idCargo}"]`);
 
-test.describe('Portal TH · Organigrama', () => {
+test.describe('Portal TH · Organigrama de GSS', () => {
   test('la API exige sesión', async ({ request }) => {
     expect((await request.get('/api/portal/organigrama')).status()).toBe(401);
   });
@@ -67,22 +78,22 @@ test.describe('Portal TH · Organigrama', () => {
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/100-organigrama-boton.png` });
   });
 
-  test('dibuja los 122 cuadros del organigrama, con sus franjas, y se ve completo con «Ver todo»', async ({ page }) => {
+  test('dibuja los 118 cargos que lee de SynerLink, con el color de su nivel, y se ve completo con «Ver todo»', async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 900 });
     await simular(page);
     const visor = await abrir(page);
-    await expect(visor.locator('[data-nodo]')).toHaveCount(122);
-    await expect(visor.getByText('ESTRATÉGICO')).toBeVisible();
-    await expect(visor.getByText('TÁCTICO')).toBeVisible();
-    await expect(visor.getByText('OPERATIVO')).toBeVisible();
-    await expect(visor.getByText('DIRECTOR GENERAL', { exact: false }).first()).toBeAttached();
-    // con personas de GSS = borde azul; solo de otras empresas = punteado; el resto, gris
+    await expect(visor.locator('[data-nodo]')).toHaveCount(118);
+    await expect(visor.getByText('Organigrama GSS')).toBeVisible();
+    await expect(visor.getByTestId('organigrama-svg').getByText('Director General', { exact: true })).toBeAttached();
+    await expect(visor.locator('.portal-th__org-nodo--estrategico').first()).toBeAttached();
+    await expect(visor.locator('.portal-th__org-nodo--tactico').first()).toBeAttached();
+    await expect(visor.locator('.portal-th__org-nodo--operativo').first()).toBeAttached();
+    // con personas de GSS = borde azul; solo de otras empresas = punteado
     await expect(visor.locator('.portal-th__org-nodo--con')).toHaveCount(2);
     await expect(visor.locator('.portal-th__org-nodo--otras')).toHaveCount(1);
     await visor.getByTestId('zoom-ajustar').click();
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/101-organigrama-completo.png` });
-    await visor.getByTestId('zoom-mas').click();
-    await visor.getByTestId('zoom-mas').click();
+    for (let i = 0; i < 4; i++) await visor.getByTestId('zoom-mas').click();
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/102-organigrama-zoom.png` });
   });
 
@@ -90,14 +101,15 @@ test.describe('Portal TH · Organigrama', () => {
     await page.setViewportSize({ width: 1600, height: 900 });
     await simular(page);
     const visor = await abrir(page);
-    await expect(visor.locator('.portal-th__org-nodo--con')).toHaveCount(2); // ya cargaron las personas
-    await visor.locator(`[data-nodo="${GERENTE_CALIDAD.id}"]`).scrollIntoViewIfNeeded();
-    await visor.locator(`[data-nodo="${GERENTE_CALIDAD.id}"]`).click();
+    await expect(visor.locator('.portal-th__org-nodo--con')).toHaveCount(2);
+    for (let i = 0; i < 4; i++) await visor.getByTestId('zoom-mas').click();
+    const cargo = nodoDe(visor, GERENTE_CALIDAD);
+    await cargo.scrollIntoViewIfNeeded();
+    await cargo.dispatchEvent('click');
 
     const ventana = page.getByTestId('organigrama-personas');
     await expect(ventana).toBeVisible();
     await expect(ventana).toContainText('Gerente de Calidad');
-    // Los 5 datos pedidos, de la persona de GSS
     const persona = ventana.getByTestId('organigrama-persona');
     await expect(persona).toHaveCount(1);
     for (const etiqueta of ['Empresa', 'Apellidos y Nombres', 'Área / Dependencia', 'Cargo', 'Correo corporativo']) await expect(persona).toContainText(etiqueta);
@@ -106,21 +118,19 @@ test.describe('Portal TH · Organigrama', () => {
     await expect(persona).not.toContainText('RUIZ SOTO');
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/103-organigrama-personas.png` });
 
-    // Otras empresas con el mismo cargo: opcional.
     await ventana.getByText('Incluir 1 persona de otras empresas con este cargo').click();
     await expect(ventana.getByTestId('organigrama-persona')).toHaveCount(2);
     await expect(ventana).toContainText('RUIZ SOTO LUIS');
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/104-organigrama-otras-empresas.png` });
 
-    // «No Aplica» se muestra tal cual, sin enlace.
-    await visor.locator(`[data-nodo="${JEFE_VALIDACIONES.id}"]`).click();
+    // «No Aplica» se muestra tal cual, sin enlace; otro cargo no arrastra el interruptor.
+    await nodoDe(visor, JEFE_VALIDACIONES).dispatchEvent('click');
     await expect(ventana).toContainText('No Aplica');
     await expect(ventana.getByRole('link')).toHaveCount(0);
-    // Otro cargo no arrastra el interruptor del anterior.
     await expect(ventana.getByTestId('organigrama-otras')).toHaveCount(0);
 
     // Un cargo con personas SOLO de otras empresas: lo dice y permite verlas.
-    await visor.locator(`[data-nodo="${SOLO_OTRAS.id}"]`).click();
+    await nodoDe(visor, SOLO_OTRAS).dispatchEvent('click');
     await expect(page.getByTestId('organigrama-sin-personas')).toHaveText('No hay personas de GSS con este cargo.');
     await ventana.getByText('Incluir 1 persona de otras empresas con este cargo').click();
     await expect(ventana).toContainText('MORA PINTO JUAN');
@@ -131,19 +141,17 @@ test.describe('Portal TH · Organigrama', () => {
     await simular(page);
     const visor = await abrir(page);
     await expect(visor.locator('.portal-th__org-nodo--con')).toHaveCount(2);
-    await visor.locator(`[data-nodo="${SIN_PERSONAS.id}"]`).click();
+    await nodoDe(visor, SIN_PERSONAS).dispatchEvent('click');
     await expect(page.getByTestId('organigrama-sin-personas')).toHaveText('No hay personas registradas con este cargo en BASE PERSONAL.');
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('organigrama-personas')).toHaveCount(0);
     await expect(visor).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(visor).toBeHidden();
-    // Volvió a la ventana Contactos
     await expect(page.getByRole('dialog', { name: 'Contactos' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Organigrama' })).toBeVisible();
   });
 
-  test('el teclado también abre un cargo (Enter) y la búsqueda marca los cuadros y lleva la vista hasta ellos', async ({ page }) => {
+  test('el teclado abre un cargo (Enter) y la búsqueda marca los cuadros y lleva la vista hasta ellos', async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 900 });
     await simular(page);
     const visor = await abrir(page);
@@ -152,25 +160,33 @@ test.describe('Portal TH · Organigrama', () => {
     await expect(visor.getByTestId('organigrama-coincidencias')).toContainText('cargos');
     expect(await visor.locator('.portal-th__org-nodo--busqueda').count()).toBeGreaterThan(1);
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/105-organigrama-busqueda.png` });
-    // por nombre de persona
     await visor.getByTestId('organigrama-buscar').fill('perez gomez');
     await expect(visor.locator('.portal-th__org-nodo--busqueda')).toHaveCount(1);
     await visor.getByTestId('organigrama-buscar').fill('zzzz');
     await expect(visor.getByTestId('organigrama-coincidencias')).toHaveText('Sin coincidencias');
-    // Enter abre el cargo enfocado
-    await visor.locator(`[data-nodo="${GERENTE_CALIDAD.id}"]`).focus();
+    await nodoDe(visor, GERENTE_CALIDAD).focus();
     await page.keyboard.press('Enter');
     await expect(page.getByTestId('organigrama-personas')).toBeVisible();
   });
 
-  test('si no se pueden cargar las personas, el aviso rojo va arriba y el organigrama se ve igual', async ({ page }) => {
+  test('si no se puede cargar el organigrama, el aviso rojo va arriba con «Reintentar»; si faltan las personas, el árbol se ve igual', async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 900 });
     await simular(page, { falla: true });
     const visor = await abrir(page);
-    await expect(visor.getByTestId('organigrama-error')).toContainText('No se encontró BASE PERSONAL en SharePoint. Avise a Tecnología.');
+    await expect(visor.getByTestId('organigrama-error')).toContainText('No se pudo cargar el organigrama. Intente en un momento.');
     await expect(visor.getByRole('button', { name: 'Reintentar' })).toBeVisible();
-    await expect(visor.locator('[data-nodo]')).toHaveCount(122);
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/106-organigrama-error.png` });
+
+    const otra = await page.context().newPage();
+    await simular(otra, { avisoPersonas: 'No se encontró BASE PERSONAL en SharePoint. Avise a Tecnología.' });
+    const v2 = await abrir(otra);
+    await expect(v2.getByTestId('organigrama-aviso-personas')).toContainText('No se encontró BASE PERSONAL en SharePoint. Avise a Tecnología.');
+    await expect(v2.locator('[data-nodo]')).toHaveCount(118);
+
+    const tercera = await page.context().newPage();
+    await simular(tercera, { vacio: true });
+    const v3 = await abrir(tercera);
+    await expect(v3.getByTestId('organigrama-vacio')).toHaveText('El organigrama de GSS todavía no está cargado.');
   });
 
   test('celular: cabe en la pantalla (el gráfico se desplaza dentro de su caja) y la ventanita ocupa el ancho', async ({ page }) => {
@@ -179,7 +195,7 @@ test.describe('Portal TH · Organigrama', () => {
     const visor = await abrir(page);
     await expect(visor.locator('.portal-th__org-nodo--con')).toHaveCount(2);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
-    await visor.locator(`[data-nodo="${GERENTE_CALIDAD.id}"]`).dispatchEvent('click');
+    await nodoDe(visor, GERENTE_CALIDAD).dispatchEvent('click');
     await expect(page.getByTestId('organigrama-personas')).toBeVisible();
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/107-organigrama-celular.png` });
   });

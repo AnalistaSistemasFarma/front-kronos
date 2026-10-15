@@ -2,37 +2,40 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ALTO_CUADRO,
   EMPRESA_POR_DEFECTO,
-  MODELO,
-  NOMBRE_FRANJAS,
   coincideBusqueda,
+  disenarOrganigrama,
+  nombreLegible,
   normalizarEmpresa,
   textoDelNodo,
-  type NodoOrganigrama,
+  type NodoCargo,
   type PersonaOrganigrama,
 } from '../../lib/portal/organigrama';
 
 /**
- * ORGANIGRAMA de Farmalógica, digital e interactivo (Cristian Baldión, 2026-10-15).
+ * ORGANIGRAMA de GSS, digital e interactivo (Cristian Baldión, 2026-10-15).
  *
- * Dibuja el organigrama del PDF GTH-01-FR-005-5 (franjas, cuadros y conectores) como un gráfico vectorial con zoom y búsqueda.
- * Al pulsar un cargo se abre una ventana pequeña con las personas de BASE PERSONAL que lo tienen: empresa, nombre, área, cargo
- * y correo corporativo. Por defecto solo las de GSS (pedido de Cristian); hay un interruptor para incluir las de otras empresas.
- * Los avisos (error de carga) van arriba, con color. Mismo marco y estilo que las demás ventanas del portal.
+ * El árbol se LEE de SynerLink (módulo Organigrama) y se dibuja aquí como un gráfico vectorial con zoom y búsqueda. Al pulsar un
+ * cargo se abre una ventana pequeña con las personas de BASE PERSONAL que lo tienen: empresa, nombre, área, cargo y correo corporativo.
+ * Por defecto solo las de GSS; un interruptor permite incluir las de otras empresas. Color del cuadro = nivel (estratégico, táctico,
+ * operativo). Los avisos van arriba, con color. Mismo marco y estilo que las demás ventanas del portal.
  */
 
-const ZOOM_INICIAL = 3;
+const ZOOM_INICIAL = 4;
 const ZOOM_MIN = 1;
-const ZOOM_MAX = 8;
-
+const ZOOM_MAX = 10;
 const unir = (...c: (string | false | undefined)[]) => c.filter(Boolean).join(' ');
+const CLASE_NIVEL: Record<string, string> = { 'Estratégico': 'estrategico', Estrategico: 'estrategico', 'Táctico': 'tactico', Tactico: 'tactico', Operativo: 'operativo' };
 
 export default function OrganigramaVisor({ onCerrar }: { onCerrar: () => void }) {
-  const [personas, setPersonas] = useState<Record<string, PersonaOrganigrama[]> | null>(null);
+  const [nodos, setNodos] = useState<NodoCargo[] | null>(null);
+  const [personas, setPersonas] = useState<Record<string, PersonaOrganigrama[]>>({});
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [avisoPersonas, setAvisoPersonas] = useState<string | null>(null);
   const [zoom, setZoom] = useState(ZOOM_INICIAL);
-  const [seleccionado, setSeleccionado] = useState<NodoOrganigrama | null>(null);
+  const [seleccionado, setSeleccionado] = useState<NodoCargo | null>(null);
   const [otrasEmpresas, setOtrasEmpresas] = useState(false);
   const [busqueda, setBusqueda] = useState('');
   const contenedor = useRef<HTMLDivElement | null>(null);
@@ -49,8 +52,10 @@ export default function OrganigramaVisor({ onCerrar }: { onCerrar: () => void })
       } catch {
         data = {};
       }
-      if (!res.ok) throw new Error(String(data.error ?? 'No se pudieron cargar los datos de las personas.'));
+      if (!res.ok) throw new Error(String(data.error ?? 'No se pudo cargar el organigrama.'));
+      setNodos(Array.isArray(data.nodos) ? (data.nodos as NodoCargo[]) : []);
       setPersonas((data.personas ?? {}) as Record<string, PersonaOrganigrama[]>);
+      setAvisoPersonas(typeof data.avisoPersonas === 'string' ? data.avisoPersonas : null);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -78,27 +83,42 @@ export default function OrganigramaVisor({ onCerrar }: { onCerrar: () => void })
     };
   }, [onCerrar, seleccionado]);
 
-  const [vx, vy, vw, vh] = MODELO.vista;
-  const textos = useMemo(() => new Map(MODELO.nodos.map((n) => [n.id, textoDelNodo(n)])), []);
+  const diseno = useMemo(() => (nodos && nodos.length > 0 ? disenarOrganigrama(nodos) : null), [nodos]);
+  const nodoPorId = useMemo(() => new Map((nodos ?? []).map((n) => [n.id, n])), [nodos]);
   const coincidencias = useMemo(
-    () => new Set(busqueda.trim() ? MODELO.nodos.filter((n) => coincideBusqueda(n, personas?.[n.id], busqueda)).map((n) => n.id) : []),
-    [busqueda, personas]
+    () => new Set(busqueda.trim() && nodos ? nodos.filter((n) => coincideBusqueda(n, personas[n.id], busqueda)).map((n) => n.id) : []),
+    [busqueda, personas, nodos]
   );
+
+  // Al abrir, la vista queda centrada en la cima (el Director General), no en el borde izquierdo de un dibujo muy ancho.
+  const centrado = useRef(false);
+  useEffect(() => {
+    if (!diseno || centrado.current || !contenedor.current) return;
+    centrado.current = true;
+    const raiz = nodos?.find((n) => n.padre === null);
+    const cuadro = diseno.cuadros.find((c) => c.id === raiz?.id);
+    const c = contenedor.current;
+    if (!cuadro) return;
+    window.requestAnimationFrame(() => {
+      const escala = c.scrollWidth / diseno.vista[2];
+      c.scrollLeft = Math.max(0, (cuadro.x + cuadro.w / 2 - diseno.vista[0]) * escala - c.clientWidth / 2);
+    });
+  }, [diseno, nodos]);
 
   // Buscar lleva la vista al primer cuadro que coincide.
   useEffect(() => {
-    if (coincidencias.size === 0 || !contenedor.current) return;
-    const primero = MODELO.nodos.filter((n) => coincidencias.has(n.id)).sort((a, b) => a.x - b.x)[0];
+    if (coincidencias.size === 0 || !contenedor.current || !diseno) return;
+    const cuadro = diseno.cuadros.filter((c) => coincidencias.has(c.id)).sort((a, b) => a.x - b.x)[0];
+    if (!cuadro) return;
     const c = contenedor.current;
-    const escala = c.scrollWidth / vw;
-    c.scrollTo({ left: Math.max(0, (primero.x + primero.w / 2 - vx) * escala - c.clientWidth / 2), top: Math.max(0, (primero.y + primero.h / 2 - vy) * escala - c.clientHeight / 2), behavior: 'smooth' });
-  }, [coincidencias, vw, vx, vy]);
+    const escala = c.scrollWidth / diseno.vista[2];
+    c.scrollTo({ left: Math.max(0, (cuadro.x + cuadro.w / 2 - diseno.vista[0]) * escala - c.clientWidth / 2), top: Math.max(0, (cuadro.y + cuadro.h / 2 - diseno.vista[1]) * escala - c.clientHeight / 3), behavior: 'smooth' });
+  }, [coincidencias, diseno]);
 
   const cambiarZoom = (nuevo: number) => {
     const c = contenedor.current;
     const z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, nuevo));
     if (c) {
-      // Conserva el punto que está en el centro de la ventana.
       const cx = (c.scrollLeft + c.clientWidth / 2) / c.scrollWidth;
       const cy = (c.scrollTop + c.clientHeight / 2) / c.scrollHeight;
       setZoom(z);
@@ -109,12 +129,11 @@ export default function OrganigramaVisor({ onCerrar }: { onCerrar: () => void })
     } else setZoom(z);
   };
 
-  const gente = seleccionado ? (personas?.[seleccionado.id] ?? []) : [];
-  const deLaEmpresa = gente.filter((p) => normalizarEmpresa(p.empresa) === normalizarEmpresa(EMPRESA_POR_DEFECTO));
+  const gente = seleccionado ? (personas[seleccionado.id] ?? []) : [];
+  const deLaEmpresa = gente.filter((p) => normalizarEmpresa(p.empresa).includes(normalizarEmpresa(EMPRESA_POR_DEFECTO)));
   const deOtras = gente.length - deLaEmpresa.length;
   const visibles = otrasEmpresas ? gente : deLaEmpresa;
-
-  const abrirNodo = (n: NodoOrganigrama) => {
+  const abrirNodo = (n: NodoCargo) => {
     setOtrasEmpresas(false);
     setSeleccionado(n);
   };
@@ -131,7 +150,7 @@ export default function OrganigramaVisor({ onCerrar }: { onCerrar: () => void })
     >
       <div className='portal-th__visor-caja portal-th__visor-caja--organigrama' data-testid='organigrama-visor'>
         <header className='portal-th__visor-barra'>
-          <strong>Organigrama Farmalógica S.A.</strong>
+          <strong>Organigrama {EMPRESA_POR_DEFECTO}</strong>
           <div className='portal-th__visor-acciones'>
             <button type='button' onClick={onCerrar} aria-label='Cerrar'>
               ✕
@@ -143,6 +162,14 @@ export default function OrganigramaVisor({ onCerrar }: { onCerrar: () => void })
         {error && (
           <div className='portal-th__alerta portal-th__alerta--error' role='alert' data-testid='organigrama-error'>
             <span>{error}</span>
+            <button type='button' onClick={() => void cargar()}>
+              Reintentar
+            </button>
+          </div>
+        )}
+        {avisoPersonas && (
+          <div className='portal-th__alerta portal-th__alerta--error' role='alert' data-testid='organigrama-aviso-personas'>
+            <span>{avisoPersonas}</span>
             <button type='button' onClick={() => void cargar()}>
               Reintentar
             </button>
@@ -208,83 +235,72 @@ export default function OrganigramaVisor({ onCerrar }: { onCerrar: () => void })
             arrastre.current = null;
           }}
         >
-          <svg
-            viewBox={`${vx} ${vy} ${vw} ${vh}`}
-            style={{ width: `${zoom * 100}%` }}
-            role='group'
-            aria-label='Organigrama de Farmalógica S.A.'
-            data-testid='organigrama-svg'
-          >
-            {MODELO.bandas.map((b, i) => (
-              <g key={i}>
-                <rect x={b.x} y={b.y} width={b.w} height={b.h} fill={b.fill} />
-                <g transform={`translate(${vx + 20} ${b.y + b.h / 2})`}>
-                  <rect x={0} y={-Math.min(b.h, 260) / 2} width={70} height={Math.min(b.h, 260)} fill={b.fill} stroke='#000' strokeWidth={1.2} vectorEffect='non-scaling-stroke' />
-                  <text transform='rotate(-90)' textAnchor='middle' dominantBaseline='central' x={0} y={35} fontSize={28} fill='#000'>
-                    {NOMBRE_FRANJAS[i] ?? ''}
-                  </text>
-                </g>
-              </g>
-            ))}
-            {MODELO.conectores.map((c, i) => (
-              <path key={i} d={c.d} fill='none' stroke='#000' strokeWidth={1.2} vectorEffect='non-scaling-stroke' />
-            ))}
-            {MODELO.nodos.map((n) => {
-              const t = textos.get(n.id)!;
-              const lista = personas?.[n.id] ?? [];
-              const gentes = lista.filter((p) => normalizarEmpresa(p.empresa) === normalizarEmpresa(EMPRESA_POR_DEFECTO)).length;
-              const deOtrasN = lista.length - gentes;
-              const cx = n.x + n.w / 2;
-              const cy = n.y + n.h / 2;
-              const alto = t.lineas.length * t.tam * 1.2;
-              return (
-                <g
-                  key={n.id}
-                  data-nodo={n.id}
-                  className={unir(
-                    'portal-th__org-nodo',
-                    gentes > 0 && 'portal-th__org-nodo--con',
-                    gentes === 0 && deOtrasN > 0 && 'portal-th__org-nodo--otras',
-                    seleccionado?.id === n.id && 'portal-th__org-nodo--activo',
-                    coincidencias.has(n.id) && 'portal-th__org-nodo--busqueda'
-                  )}
-                  role='button'
-                  tabIndex={0}
-                  aria-label={`${n.texto}${personas ? (gentes > 0 ? `, ${gentes} ${gentes === 1 ? 'persona' : 'personas'} de ${EMPRESA_POR_DEFECTO}` : deOtrasN > 0 ? ', solo personas de otras empresas' : ', sin personas registradas') : ''}`}
-                  onClick={() => abrirNodo(n)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      abrirNodo(n);
-                    }
-                  }}
-                >
-                  <rect x={n.x} y={n.y} width={n.w} height={n.h} rx={Math.min(18, n.w / 3, n.h / 3)} />
-                  <text
-                    textAnchor='middle'
-                    fontSize={t.tam}
-                    transform={n.v ? `rotate(-90 ${cx} ${cy})` : undefined}
-                    className='portal-th__org-texto'
+          {diseno && (
+            <svg viewBox={diseno.vista.join(' ')} style={{ width: `${zoom * 100}%` }} role='group' aria-label={`Organigrama de ${EMPRESA_POR_DEFECTO}`} data-testid='organigrama-svg'>
+              {diseno.caminos.map((d, i) => (
+                <path key={i} d={d} fill='none' stroke='#374151' strokeWidth={1.4} vectorEffect='non-scaling-stroke' />
+              ))}
+              {diseno.cuadros.map((c) => {
+                const n = nodoPorId.get(c.id);
+                if (!n) return null;
+                const t = textoDelNodo(n.nombre, c);
+                const lista = personas[n.id] ?? [];
+                const gentes = lista.filter((p) => normalizarEmpresa(p.empresa).includes(normalizarEmpresa(EMPRESA_POR_DEFECTO))).length;
+                const deOtrasN = lista.length - gentes;
+                const cx = c.x + c.w / 2;
+                const cy = c.y + c.h / 2;
+                const alto = t.lineas.length * t.tam * 1.2;
+                const nivel = n.nivel ? CLASE_NIVEL[n.nivel] : undefined;
+                return (
+                  <g
+                    key={c.id}
+                    data-nodo={c.id}
+                    className={unir(
+                      'portal-th__org-nodo',
+                      nivel && `portal-th__org-nodo--${nivel}`,
+                      gentes > 0 && 'portal-th__org-nodo--con',
+                      gentes === 0 && deOtrasN > 0 && 'portal-th__org-nodo--otras',
+                      seleccionado?.id === c.id && 'portal-th__org-nodo--activo',
+                      coincidencias.has(c.id) && 'portal-th__org-nodo--busqueda'
+                    )}
+                    role='button'
+                    tabIndex={0}
+                    aria-label={`${nombreLegible(n.nombre)}${gentes > 0 ? `, ${gentes} ${gentes === 1 ? 'persona' : 'personas'} de ${EMPRESA_POR_DEFECTO}` : deOtrasN > 0 ? ', solo personas de otras empresas' : ', sin personas registradas'}`}
+                    onClick={() => abrirNodo(n)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        abrirNodo(n);
+                      }
+                    }}
                   >
-                    {t.lineas.map((l, i) => (
-                      <tspan key={i} x={cx} y={cy - alto / 2 + t.tam * 1.2 * (i + 0.5) + t.tam * 0.35}>
-                        {l}
-                      </tspan>
-                    ))}
-                  </text>
-                </g>
-              );
-            })}
-          </svg>
-          {cargando && <p className='portal-th__estado portal-th__org-cargando'>Cargando las personas de cada cargo…</p>}
+                    <rect x={c.x} y={c.y} width={c.w} height={ALTO_CUADRO} rx={14} />
+                    <text textAnchor='middle' fontSize={t.tam} className='portal-th__org-texto'>
+                      {t.lineas.map((l, i) => (
+                        <tspan key={i} x={cx} y={cy - alto / 2 + t.tam * 1.2 * (i + 0.5) + t.tam * 0.35}>
+                          {l}
+                        </tspan>
+                      ))}
+                    </text>
+                  </g>
+                );
+              })}
+            </svg>
+          )}
+          {cargando && <p className='portal-th__estado portal-th__org-cargando'>Cargando el organigrama…</p>}
+          {!cargando && !error && nodos && nodos.length === 0 && (
+            <p className='portal-th__estado' data-testid='organigrama-vacio'>
+              El organigrama de {EMPRESA_POR_DEFECTO} todavía no está cargado.
+            </p>
+          )}
         </div>
 
         {/* Ventana pequeña con las personas del cargo elegido. */}
         {seleccionado && (
-          <div className='portal-th__org-ventana' role='dialog' aria-label={`Personas con el cargo ${seleccionado.texto}`} data-testid='organigrama-personas'>
+          <div className='portal-th__org-ventana' role='dialog' aria-label={`Personas con el cargo ${nombreLegible(seleccionado.nombre)}`} data-testid='organigrama-personas'>
             <header>
               <div>
-                <strong>{seleccionado.texto}</strong>
+                <strong>{nombreLegible(seleccionado.nombre)}</strong>
                 <small>
                   {visibles.length} {visibles.length === 1 ? 'persona' : 'personas'}
                 </small>
@@ -294,12 +310,9 @@ export default function OrganigramaVisor({ onCerrar }: { onCerrar: () => void })
               </button>
             </header>
             <div className='portal-th__org-ventana-cuerpo'>
-              {!personas && !error && <p className='portal-th__estado'>Cargando…</p>}
-              {personas && visibles.length === 0 && (
+              {visibles.length === 0 && (
                 <p className='portal-th__estado' data-testid='organigrama-sin-personas'>
-                  {gente.length === 0
-                    ? 'No hay personas registradas con este cargo en BASE PERSONAL.'
-                    : `No hay personas de ${EMPRESA_POR_DEFECTO} con este cargo.`}
+                  {gente.length === 0 ? 'No hay personas registradas con este cargo en BASE PERSONAL.' : `No hay personas de ${EMPRESA_POR_DEFECTO} con este cargo.`}
                 </p>
               )}
               <ul>
