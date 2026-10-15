@@ -5642,3 +5642,14 @@ html.dark .portal-th--modulo .portal-th__cal,
   opacity: 0.6;
   cursor: default;
 }
+
+/* ── Heinsohn Nómina (Cristian, 2026-10-15): botón-enlace con el estilo de los botones de «Contactos» ── */
+a.portal-th__contactos-boton--enlace {
+  display: block;
+  text-decoration: none;
+}
+
+a.portal-th__contactos-boton--enlace:focus-visible {
+  outline: 2px solid var(--pth-azul);
+  outline-offset: 2px;
+}

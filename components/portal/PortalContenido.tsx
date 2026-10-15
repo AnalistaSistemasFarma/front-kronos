@@ -12,6 +12,7 @@ import {
 } from '../../lib/portal/correos-datos';
 import { filtrarExtensiones, type Extension } from '../../lib/portal/extensiones-datos';
 import { urlFormacion as urlPaginaFormacion, type OrigenPortal } from '../../lib/portal/formacion-navegacion';
+import HeinsohnVentana from './HeinsohnVentana';
 import PoliticasVisor, { TEXTOS_AYUDAS } from './PoliticasVisor';
 import PortalCalendario from './PortalCalendario';
 import PortalNavegacion, { useSeccionActiva, type SeccionNav } from './PortalNavegacion';
@@ -32,6 +33,8 @@ const ID_SECCION_FORMACION = 'portal-th-formacion';
 const ID_SECCION_CONTACTOS = 'portal-th-contactos';
 /** Botón del panel, debajo de Contactos: abre la ventana de vídeos de ayuda (carpeta FORMACION/AYUDAS). Sin sección en la página. */
 const ID_SECCION_AYUDAS = 'portal-th-ayudas';
+/** Botón del panel: abre una ventana con un botón por empresa hacia su acceso al portal de nómina de Heinsohn. Sin sección en la página. */
+const ID_SECCION_HEINSOHN = 'portal-th-heinsohn';
 
 /**
  * EL CONTENIDO DEL PORTAL DE TALENTO HUMANO — anuncios y documentos.
@@ -372,6 +375,9 @@ export default function PortalContenido({
   /** Ventana «AYUDAS» (Cristian, 2026-10-15): los videos de la carpeta FORMACION/AYUDAS, con la misma ventana de Políticas. */
   const [ayudasAbierto, setAyudasAbierto] = useState(false);
   const cerrarAyudas = useCallback(() => setAyudasAbierto(false), []);
+  /** Ventana «HEINSOHN NÓMINA» (Cristian, 2026-10-15). */
+  const [heinsohnAbierto, setHeinsohnAbierto] = useState(false);
+  const cerrarHeinsohn = useCallback(() => setHeinsohnAbierto(false), []);
   const [contactoSeleccionado, setContactoSeleccionado] = useState<'correos' | 'extensiones' | null>(null);
   const cerrarContactos = () => {
     setContactosAbierto(false);
@@ -464,6 +470,7 @@ export default function PortalContenido({
     { id: ID_SECCION_FORMACION, etiqueta: 'Formación' },
     { id: ID_SECCION_CONTACTOS, etiqueta: 'Contactos' },
     { id: ID_SECCION_AYUDAS, etiqueta: 'Ayudas' },
+    { id: ID_SECCION_HEINSOHN, etiqueta: 'Heinsohn Nómina' },
     // Cuando el portal tenga más secciones, se agregan acá — el panel de
     // navegación no necesita ningún otro cambio.
   ];
@@ -486,6 +493,10 @@ export default function PortalContenido({
     }
     if (id === ID_SECCION_AYUDAS) {
       setAyudasAbierto(true);
+      return;
+    }
+    if (id === ID_SECCION_HEINSOHN) {
+      setHeinsohnAbierto(true);
       return;
     }
     if (id === ID_SECCION_FORMACION) {
@@ -679,6 +690,7 @@ export default function PortalContenido({
 
       {politicasAbierto && <PoliticasVisor onCerrar={cerrarPoliticas} />}
       {ayudasAbierto && <PoliticasVisor onCerrar={cerrarAyudas} textos={TEXTOS_AYUDAS} />}
+      {heinsohnAbierto && <HeinsohnVentana onCerrar={cerrarHeinsohn} />}
 
       {/* VENTANA DE CONTACTOS — mismo marco que la vista previa de documentos,
           pero con dos botones adentro en vez de un PDF. Correos: directorio de
