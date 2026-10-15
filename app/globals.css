@@ -5670,3 +5670,154 @@ html.dark .portal-th--modulo .portal-th__cal,
   color: var(--pthc-tinta-3);
   font-size: 0.7rem;
 }
+
+/* ── Ventana emergente «Hoy» (Cristian, 2026-10-15) ───────────────────────── */
+.portal-th__hoy {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: grid;
+  place-items: center;
+  padding: 2vmin;
+  background-color: rgba(15, 26, 44, 0.5);
+}
+
+.portal-th__hoy-caja {
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 94vw);
+  max-height: min(86vh, 640px);
+  overflow: hidden;
+  background-color: #fff;
+  border-radius: 14px;
+  box-shadow: 0 18px 50px rgba(15, 26, 44, 0.35);
+  animation: portal-th-hoy-entra 220ms ease-out;
+}
+
+.portal-th__hoy-barra {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  background-color: var(--pth-azul);
+  color: #fff;
+}
+
+.portal-th__hoy-barra > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.portal-th__hoy-barra strong {
+  font-size: 1rem;
+}
+
+.portal-th__hoy-barra small {
+  opacity: 0.88;
+  font-size: 0.78rem;
+}
+
+.portal-th__hoy-barra button {
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.portal-th__hoy-cuerpo {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px;
+}
+
+.portal-th__hoy-imagen {
+  display: block;
+  width: 100%;
+  max-height: 150px;
+  margin: 0 0 12px;
+  border-radius: 10px;
+  object-fit: contain;
+}
+
+.portal-th__hoy-eventos {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.portal-th__hoy-eventos > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.portal-th__hoy-eventos > li > div {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.portal-th__hoy-eventos > li > div > strong {
+  color: var(--pthc-tinta);
+  font-size: 0.92rem;
+}
+
+.portal-th__hoy-eventos > li > div > small {
+  color: var(--pthc-tinta-3);
+  font-size: 0.74rem;
+}
+
+.portal-th__hoy-eventos .portal-th__cal-punto {
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+/* Barra que se vacía en 15 s. */
+.portal-th__hoy-tiempo {
+  height: 4px;
+  background-color: var(--pth-linea);
+}
+
+.portal-th__hoy-tiempo span {
+  display: block;
+  height: 100%;
+  background-color: var(--pth-azul);
+  transform-origin: left center;
+  animation-name: portal-th-hoy-tiempo;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes portal-th-hoy-tiempo {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes portal-th-hoy-entra {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-th__hoy-caja {
+    animation: none;
+  }
+}
