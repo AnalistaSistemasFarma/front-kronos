@@ -275,11 +275,10 @@ function VistaCursoEstudiante({
   }, [cargar]);
 
   const puedeMarcar = detalle?.puedeMarcarManual === true;
-  // «Vista estudiante» se ve como la ve un estudiante: un FORMADOR la usa para probar el curso, así que ahí las casillas
-  // van bloqueadas (se marcan solas al revisar cada material), igual que para un estudiante (Cristian, 2026-10-14).
-  // Quien está en el Excel de permisos pero NO es formador no tiene «Vista formador»: conserva el marcado a mano.
-  // El servidor sigue exigiendo el permiso (403) y el marcado manual solo afecta al progreso de quien lo usa.
-  const casillasEditables = puedeMarcar && detalle?.esFormador !== true;
+  // Quien administra el portal (hojas ADMINISTRADORES y FORMADORES del Excel de permisos) marca y desmarca a mano TAMBIÉN en
+  // «Vista estudiante»: no se le pone ningún bloqueo (Cristian, 2026-10-14, deshaciendo el cambio del 2026-10-13). El marcado
+  // manual solo afecta al progreso de quien lo usa, y el servidor sigue exigiendo el permiso (403 a los demás).
+  const casillasEditables = puedeMarcar;
 
   /** Marcado MANUAL: solo administradores/formadores (el servidor lo exige). */
   const alternarMaterial = async (materialId: number, completado: boolean) => {
@@ -968,6 +967,10 @@ function VistaCursoFormador({
   // Error de una ACCIÓN (guardar, quitar, reemplazar): se muestra arriba sin
   // tapar la vista, para que el formador no pierda lo que estaba editando.
   const [errorAccion, setErrorAccion] = useState<string | null>(null);
+  // Resultado de restablecer un curso a un estudiante: arriba y con color, como los demás avisos de acción.
+  const [avisoAccion, setAvisoAccion] = useState<string | null>(null);
+  const [restableciendo, setRestableciendo] = useState<string | null>(null);
+  const [trabajandoRestablecer, setTrabajandoRestablecer] = useState(false);
 
   const cargar = useCallback(async () => {
     setError(null);
@@ -1188,6 +1191,32 @@ function VistaCursoFormador({
   };
 
   if (error) return <p className='portal-th__error'>{error}</p>;
+  const restablecerEstudiante = async (fila: FilaRoster) => {
+    setTrabajandoRestablecer(true);
+    setErrorAccion(null);
+    setAvisoAccion(null);
+    try {
+      const res = await fetch(`/api/portal/courses/${cursoId}/restablecer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ correo: fila.correo }),
+      });
+      const data = await leerJson(res);
+      if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo restablecer el curso.'));
+      setRestableciendo(null);
+      await cargar();
+      await onCambio();
+      const n = (v: unknown, uno: string, varios: string) => `${Number(v ?? 0)} ${Number(v ?? 0) === 1 ? uno : varios}`;
+      setAvisoAccion(
+        `Curso restablecido para ${fila.nombre}: se borraron ${n(data.progresos, 'avance', 'avances')}, ${n(data.respuestas, 'respuesta de formularios', 'respuestas de formularios')} y ${n(data.certificados, 'certificado', 'certificados')}. Puede volver a hacerlo desde cero.`
+      );
+    } catch (e) {
+      setErrorAccion((e as Error).message);
+    } finally {
+      setTrabajandoRestablecer(false);
+    }
+  };
+
   if (!detalle || !roster) return <p className='portal-th__estado'>Cargando…</p>;
 
   return (
@@ -1198,6 +1227,11 @@ function VistaCursoFormador({
       {errorAccion && (
         <p className='portal-th__error portal-th__error--accion' role='alert'>
           {errorAccion}
+        </p>
+      )}
+      {avisoAccion && (
+        <p className='portal-th__aviso portal-th__aviso--accion' role='status' data-testid='aviso-restablecer'>
+          {avisoAccion}
         </p>
       )}
       {subida && <ProgresoSubida subida={subida} onCancelar={() => cancelarSubidaRef.current?.abort()} />}
@@ -1348,6 +1382,7 @@ function VistaCursoFormador({
                 <th>Correo</th>
                 <th>Progreso</th>
                 <th>Certificado</th>
+                {detalle.puedeMarcarManual === true && <th>Acciones</th>}
               </tr>
             </thead>
             <tbody>
@@ -1367,6 +1402,35 @@ function VistaCursoFormador({
                       '—'
                     )}
                   </td>
+                  {detalle.puedeMarcarManual === true && (
+                    <td>
+                      {restableciendo === f.correo ? (
+                        <span className='portal-th__restablecer-confirmar' data-testid='restablecer-confirmar'>
+                          <span>¿Borrar su progreso, sus respuestas y su certificado?</span>
+                          <Button size='xs' color='red' loading={trabajandoRestablecer} onClick={() => void restablecerEstudiante(f)} data-testid='restablecer-si'>
+                            Sí, restablecer
+                          </Button>
+                          <Button size='xs' variant='default' disabled={trabajandoRestablecer} onClick={() => setRestableciendo(null)}>
+                            No
+                          </Button>
+                        </span>
+                      ) : (
+                        <Button
+                          size='xs'
+                          variant='default'
+                          aria-label={`Restablecer el curso para ${f.nombre}`}
+                          onClick={() => {
+                            setAvisoAccion(null);
+                            setErrorAccion(null);
+                            setRestableciendo(f.correo);
+                          }}
+                          data-testid='restablecer-curso'
+                        >
+                          Restablecer
+                        </Button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

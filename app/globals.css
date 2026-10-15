@@ -5501,3 +5501,21 @@ html.dark .portal-th--modulo .portal-th__cal,
   width: 100%;
   margin-top: 12px;
 }
+
+/* ── Restablecer un curso a un estudiante (Cristian, 2026-10-14) ───────────── */
+.portal-th__aviso--accion {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid #a5d6b0;
+  border-radius: 8px;
+  background-color: #e6f4ea;
+  color: #1e6b34;
+}
+
+.portal-th__restablecer-confirmar {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  font-size: 0.78rem;
+}
