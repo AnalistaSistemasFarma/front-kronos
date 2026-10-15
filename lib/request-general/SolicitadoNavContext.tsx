@@ -19,6 +19,8 @@ import { SUBPROCESS_ASSIGNMENTS_CHANGED } from '../process/subprocessAssignments
 export interface RequestRoleNavContextValue {
   hasSolicitanteAccess: boolean;
   hasSolicitadoAccess: boolean;
+  /** Líder de proceso: ve la pestaña «Mi equipo» del Dashboard personal. */
+  hasEquipoAccess: boolean;
   loadingRoleNav: boolean;
   /** @deprecated usar loadingRoleNav */
   loadingSolicitadoAccess: boolean;
@@ -29,7 +31,7 @@ export interface RequestRoleNavContextValue {
 
 const RequestRoleNavContext = createContext<RequestRoleNavContextValue | null>(null);
 
-async function fetchRoleAccess(kind: 'solicitante' | 'solicitado'): Promise<boolean> {
+async function fetchRoleAccess(kind: 'solicitante' | 'solicitado' | 'equipo'): Promise<boolean> {
   const res = await fetch(`/api/requests-general/dashboard-access?kind=${kind}`, {
     credentials: 'same-origin',
     cache: 'no-store',
@@ -44,6 +46,7 @@ export function RequestRoleNavProvider({ children }: { children: ReactNode }) {
   const { data: session, status } = useSession();
   const [hasSolicitanteAccess, setHasSolicitanteAccess] = useState(false);
   const [hasSolicitadoAccess, setHasSolicitadoAccess] = useState(false);
+  const [hasEquipoAccess, setHasEquipoAccess] = useState(false);
   const [loadingRoleNav, setLoadingRoleNav] = useState(true);
 
   const refreshRoleNav = useCallback(async () => {
@@ -52,18 +55,21 @@ export function RequestRoleNavProvider({ children }: { children: ReactNode }) {
     if (status !== 'authenticated' || !session?.user?.email) {
       setHasSolicitanteAccess(false);
       setHasSolicitadoAccess(false);
+      setHasEquipoAccess(false);
       setLoadingRoleNav(false);
       return;
     }
 
     setLoadingRoleNav(true);
     try {
-      const [solicitante, solicitado] = await Promise.all([
+      const [solicitante, solicitado, equipo] = await Promise.all([
         fetchRoleAccess('solicitante'),
         fetchRoleAccess('solicitado'),
+        fetchRoleAccess('equipo'),
       ]);
       setHasSolicitanteAccess(solicitante);
       setHasSolicitadoAccess(solicitado);
+      setHasEquipoAccess(equipo);
     } finally {
       setLoadingRoleNav(false);
     }
@@ -88,13 +94,14 @@ export function RequestRoleNavProvider({ children }: { children: ReactNode }) {
     () => ({
       hasSolicitanteAccess,
       hasSolicitadoAccess,
+      hasEquipoAccess,
       loadingRoleNav,
       loadingSolicitadoAccess: loadingRoleNav,
       solicitanteUrl: DASHBOARD_SOLICITANTE_URL,
       solicitadoUrl: DASHBOARD_SOLICITADO_URL,
       refreshRoleNav,
     }),
-    [hasSolicitanteAccess, hasSolicitadoAccess, loadingRoleNav, refreshRoleNav]
+    [hasSolicitanteAccess, hasSolicitadoAccess, hasEquipoAccess, loadingRoleNav, refreshRoleNav]
   );
 
   return (

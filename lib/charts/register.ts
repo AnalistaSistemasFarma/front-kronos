@@ -19,6 +19,7 @@ import {
   chartFontFamily,
   chartLabelColor,
 } from './defaults';
+import { errorBarsPlugin } from './errorBarsPlugin';
 
 let registered = false;
 
@@ -38,7 +39,8 @@ export function registerCharts(): void {
     DoughnutController,
     Filler,
     Tooltip,
-    Legend
+    Legend,
+    errorBarsPlugin
   );
 
   ChartJS.defaults.font = {
