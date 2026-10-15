@@ -14,7 +14,7 @@ const PDF_MIN = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n',
 
 interface Estado {
   mensajes: MensajeCompleto[];
-  enviados: Array<{ mensajeId: string; todos: boolean; texto: string; adjuntos: string[] }>;
+  enviados: Array<{ mensajeId: string; todos: boolean; texto: string; adjuntos: string[]; html?: string }>;
 }
 
 const estados: Map<string, Estado> =
@@ -146,7 +146,7 @@ export class MockMailProvider implements MailProvider {
   async responder(mensajeId: string, entrada: RespuestaEntrada): Promise<void> {
     const m = await this.mensaje(mensajeId);
     const e = estado(this.yo);
-    e.enviados.push({ mensajeId, todos: entrada.todos, texto: entrada.texto, adjuntos: entrada.adjuntos.map((a) => a.nombre) });
+    e.enviados.push({ mensajeId, todos: entrada.todos, texto: entrada.texto, adjuntos: entrada.adjuntos.map((a) => a.nombre), ...(entrada.html ? { html: entrada.html } : {}) });
     const n = e.mensajes.length + 100;
     e.mensajes.push({
       ...m,

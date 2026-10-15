@@ -50,6 +50,12 @@ export interface SolicitudVisible {
   asunto: string;
   idCompany: number;
   estado: number;
+  /** Datos para la tarjeta del acuse (opcionales: el acuse sale aunque falten). */
+  empresa?: string | null;
+  categoria?: string | null;
+  proceso?: string | null;
+  creada?: Date | string | null;
+  responsable?: string | null;
 }
 
 /**
@@ -63,9 +69,33 @@ export async function solicitudVisible(idUser: string, idRequest: number): Promi
       .request()
       .input('id', sql.Int, idRequest)
       .input('user', sql.NVarChar(255), idUser)
-      .query<{ id: number; subject_request: string; id_company: number; status_req: number }>(`
-        SELECT TOP 1 rg.id, rg.subject_request, rg.id_company, rg.status_req
+      .query<{
+        id: number;
+        subject_request: string;
+        id_company: number;
+        status_req: number;
+        company: string | null;
+        category: string | null;
+        process: string | null;
+        created_at: Date | null;
+        responsables: string | null;
+      }>(`
+        SELECT TOP 1 rg.id, rg.subject_request, rg.id_company, rg.status_req, rg.created_at,
+          c.company, cr.category, pc.process, resp.responsables
         FROM requests_general rg
+        LEFT JOIN company c ON c.id_company = rg.id_company
+        LEFT JOIN process_category_request_general pcrg ON pcrg.id_request_general = rg.id
+        LEFT JOIN process_category pc ON pc.id = pcrg.id_process_category
+        LEFT JOIN category_request cr ON cr.id = pc.id_category_request
+        OUTER APPLY (
+          SELECT STUFF((
+            SELECT ', ' + up.name
+            FROM user_process_category_request_general upcrg
+            INNER JOIN [user] up ON up.id = upcrg.id_user
+            WHERE upcrg.id_process_category = pc.id
+            FOR XML PATH(''), TYPE
+          ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS responsables
+        ) resp
         WHERE rg.id = @id AND (
           rg.id_requester = @user
           OR EXISTS (SELECT 1 FROM task_request_general t WHERE t.id_request_general = rg.id AND t.id_assigned = @user)
@@ -77,7 +107,19 @@ export async function solicitudVisible(idUser: string, idRequest: number): Promi
         )
       `);
     const x = r.recordset[0];
-    return x ? { id: x.id, asunto: x.subject_request, idCompany: x.id_company, estado: x.status_req } : null;
+    return x
+      ? {
+          id: x.id,
+          asunto: x.subject_request,
+          idCompany: x.id_company,
+          estado: x.status_req,
+          empresa: x.company,
+          categoria: x.category,
+          proceso: x.process,
+          creada: x.created_at,
+          responsable: x.responsables,
+        }
+      : null;
   });
 }
 

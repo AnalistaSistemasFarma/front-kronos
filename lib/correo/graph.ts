@@ -1,6 +1,7 @@
 import { CORREO_PAGE_SIZE, GRAPH_BASE } from './constants';
 import type { Inquilino } from './config';
 import { CorreoError } from './errors';
+import { insertarSobreHistorial } from './plantillas/acuse.html';
 import type {
   AdjuntoInfo,
   ArchivoAdjunto,
@@ -364,8 +365,12 @@ export class GraphMailProvider implements MailProvider {
 
   async responder(mensajeId: string, entrada: RespuestaEntrada): Promise<void> {
     const mid = encodeURIComponent(assertGraphId(mensajeId));
-    const comment = textoAHtml(entrada.texto);
     const json = { 'Content-Type': 'application/json' };
+    if (entrada.html) {
+      await this.responderConHtml(mid, entrada, entrada.html);
+      return;
+    }
+    const comment = textoAHtml(entrada.texto);
     if (entrada.adjuntos.length === 0) {
       await this.call(`${this.me}/messages/${mid}/${entrada.todos ? 'replyAll' : 'reply'}`, {
         method: 'POST',
@@ -394,6 +399,51 @@ export class GraphMailProvider implements MailProvider {
       });
     }
     await this.call(`${this.me}/messages/${draftId}/send`, { method: 'POST' });
+  }
+
+  /**
+   * Respuesta con cuerpo HTML propio (acuse con plantilla): createReply(All) → PATCH del cuerpo con
+   * el bloque ENCIMA del historial citado que trae el borrador → adjuntos → send. Si algo falla
+   * antes de enviar, el borrador se borra para no dejarlo en Borradores.
+   */
+  private async responderConHtml(mid: string, entrada: RespuestaEntrada, fragmento: string): Promise<void> {
+    const json = { 'Content-Type': 'application/json' };
+    const html = 'outlook.body-content-type="html"';
+    const draft = await this.json<{ id?: string; body?: { contentType?: string; content?: string } }>(
+      `${this.me}/messages/${mid}/${entrada.todos ? 'createReplyAll' : 'createReply'}`,
+      { method: 'POST', headers: json, body: JSON.stringify({}) },
+      html
+    );
+    const draftId = encodeURIComponent(assertGraphId(String(draft.id ?? '')));
+    const url = `${this.me}/messages/${draftId}`;
+    try {
+      let cuerpo = draft.body?.content;
+      if (cuerpo == null || String(draft.body?.contentType ?? '').toLowerCase() !== 'html') {
+        const leido = await this.json<{ body?: { content?: string } }>(`${url}?$select=body`, undefined, html);
+        cuerpo = leido.body?.content ?? '';
+      }
+      await this.call(url, {
+        method: 'PATCH',
+        headers: json,
+        body: JSON.stringify({ body: { contentType: 'HTML', content: insertarSobreHistorial(cuerpo, fragmento) } }),
+      });
+      for (const a of entrada.adjuntos) {
+        await this.call(`${url}/attachments`, {
+          method: 'POST',
+          headers: json,
+          body: JSON.stringify({
+            '@odata.type': '#microsoft.graph.fileAttachment',
+            name: a.nombre,
+            contentType: a.tipo,
+            contentBytes: a.bytes.toString('base64'),
+          }),
+        });
+      }
+    } catch (e) {
+      await this.call(url, { method: 'DELETE' }).catch(() => undefined);
+      throw e;
+    }
+    await this.call(`${url}/send`, { method: 'POST' });
   }
 
   async categorizar(mensajeId: string, categoria: string): Promise<void> {
