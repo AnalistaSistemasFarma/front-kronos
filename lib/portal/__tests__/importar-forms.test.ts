@@ -143,7 +143,6 @@ describe('normalizarImportacion', () => {
       titulo: 'T',
       variasPaginas: true,
       preguntas: [
-        { titulo: 'Marque varias', tipo: 'multiple', obligatoria: true, opciones: ['a', 'b'] },
         { titulo: 'Califique', tipo: 'otro', obligatoria: false, opciones: [] },
         { titulo: '', tipo: 'texto', obligatoria: true, opciones: [] },
         { titulo: 'Sin opciones', tipo: 'seleccion', obligatoria: true, opciones: [] },
@@ -151,9 +150,37 @@ describe('normalizarImportacion', () => {
       ],
     });
     expect(i.preguntas.map((p) => p.texto)).toEqual(['Esta sí']);
-    expect(i.advertencias).toHaveLength(5);
+    expect(i.advertencias).toHaveLength(4);
     expect(i.advertencias[0]).toMatch(/varias páginas/);
-    expect(i.advertencias.join(' ')).toMatch(/selección múltiple/);
+    expect(i.advertencias.join(' ')).toMatch(/escala, clasificación u otro tipo/);
+  });
+
+  it('selección múltiple (Cristian, 2026-10-14): se importa con sus opciones, limpias y sin repetidas', () => {
+    const i = normalizarImportacion({
+      titulo: 'PTEE',
+      preguntas: [
+        { titulo: 'Seleccione 3 elementos de un PTEE', tipo: 'multiple', obligatoria: true, opciones: ['Uno', ' Dos ', 'Dos', 'Tres', ''] },
+        { titulo: 'Sin opciones', tipo: 'multiple', obligatoria: true, opciones: [] },
+      ],
+    });
+    expect(i.preguntas).toEqual([{ texto: 'Seleccione 3 elementos de un PTEE', obligatoria: true, tipo: 'seleccion_multiple', opciones: ['Uno', 'Dos', 'Tres'] }]);
+    expect(i.advertencias).toHaveLength(1);
+    expect(i.advertencias[0]).toMatch(/Sin opciones.*no tiene opciones/);
+  });
+
+  it('la lista desplegable se conserva como lista; en una selección múltiple la marca se ignora', () => {
+    const i = normalizarImportacion({
+      preguntas: [
+        { titulo: 'Elija', tipo: 'seleccion', lista: true, obligatoria: false, opciones: ['a', 'b'] },
+        { titulo: 'Botones', tipo: 'seleccion', obligatoria: false, opciones: ['a', 'b'] },
+        { titulo: 'Varias', tipo: 'multiple', lista: true, obligatoria: false, opciones: ['a', 'b'] },
+      ],
+    });
+    expect(i.preguntas.map((p) => [p.tipo, p.lista === true])).toEqual([
+      ['seleccion', true],
+      ['seleccion', false],
+      ['seleccion_multiple', false],
+    ]);
   });
 
   it('acota lo que viene del servicio: recorta, quita repetidas y caracteres de control', () => {
