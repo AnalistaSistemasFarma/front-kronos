@@ -135,6 +135,10 @@ describe('Correo · GraphMailProvider (siempre el buzón de la sesión)', () => 
     expect(calls[0].url).toBe(`${BASE}/messages/${encodeURIComponent(ID)}/reply`);
     expect(JSON.parse(String(calls[0].init.body))).toEqual({ comment: 'ok &lt;b&gt;' });
     calls.length = 0;
+    // Con el HTML ya saneado del Markdown, ese es el comentario (mismo flujo de envío).
+    await p.responder(ID, { texto: 'ok negrita', comentarioHtml: '<p>ok <strong>negrita</strong></p>', todos: false, adjuntos: [] });
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ comment: '<p>ok <strong>negrita</strong></p>' });
+    calls.length = 0;
     await p.responder(ID, { texto: 'va', todos: true, adjuntos: [{ nombre: 'a.txt', tipo: 'text/plain', bytes: Buffer.from('hola') }] });
     expect(calls.map((c) => c.url.replace(`${BASE}/messages/`, ''))).toEqual([
       `${encodeURIComponent(ID)}/createReplyAll`,

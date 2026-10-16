@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
+  ActionIcon,
   Alert,
   Anchor,
   Badge,
@@ -11,26 +12,32 @@ import {
   Button,
   Card,
   Checkbox,
+  Chip,
+  CloseButton,
+  Drawer,
   Group,
   Loader,
+  NavLink,
+  Popover,
   Stack,
-  Switch,
-  Table,
   Text,
   TextInput,
   Title,
   Tooltip,
-  UnstyledButton,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import {
+  IconAdjustmentsHorizontal,
   IconAlertTriangle,
+  IconCheck,
   IconChevronRight,
-  IconFilter,
   IconFlask,
+  IconFolders,
+  IconInbox,
   IconLink,
   IconLock,
   IconMail,
+  IconMailOpened,
   IconPaperclip,
   IconRefresh,
   IconSearch,
@@ -38,15 +45,18 @@ import {
 } from '@tabler/icons-react';
 import SgcSelect from '../sgc/SgcSelect';
 import type { Carpeta } from '../../lib/correo/types';
-import { CorreoApiError, correoApi, fechaCorta, urlSolicitud, type EstadoCorreo, type MensajeLista } from './correoClient';
+import { CorreoApiError, correoApi, fechaCorta, fechaLarga, urlSolicitud, type EstadoCorreo, type MensajeLista } from './correoClient';
 import HiloDrawer from './HiloDrawer';
 import SimulacionModal from './SimulacionModal';
+import { AvatarPersona, carpetasOrdenadas, IconoCarpeta } from './ui';
+import css from './correo.module.css';
 
 /**
- * Módulo «Correo»: la bandeja de Outlook de la persona dentro de SynerLink
- * (solo SU buzón: el servidor lo toma de la sesión), con filtros, hilos, respuesta y la
- * creación masiva de solicitudes con simulación. Celular primero: en pantallas
- * angostas la bandeja se muestra en tarjetas y el hilo ocupa toda la pantalla.
+ * Módulo «Correo»: la bandeja de Outlook de la persona dentro de SynerLink (solo SU buzón:
+ * el servidor lo toma de la sesión), con la distribución de Gmail: carpetas a la izquierda,
+ * buscador arriba con filtros rápidos, lista densa (remitente, asunto + extracto, adjuntos y
+ * fecha a la derecha, acciones al pasar el mouse) y la barra de selección para crear
+ * solicitudes con simulación. En el celular: la lista primero y las carpetas en un panel.
  */
 
 const EMPRESA_KEY = 'correo:empresa';
@@ -79,8 +89,8 @@ function aParams(f: Filtros, cursor?: string | null): Record<string, string> {
 function Encabezado({ estado, empresa, setEmpresa }: { estado: EstadoCorreo; empresa: string | null; setEmpresa: (v: string | null) => void }) {
   const { conexion } = estado;
   return (
-    <Card shadow='sm' p={{ base: 'md', sm: 'xl' }} radius='md' withBorder mb='md'>
-      <Breadcrumbs separator={<IconChevronRight size={16} />} mb='sm' style={{ flexWrap: 'wrap' }}>
+    <Card shadow='sm' p={{ base: 'md', sm: 'lg' }} radius='md' withBorder mb='md'>
+      <Breadcrumbs separator={<IconChevronRight size={16} />} mb='xs' style={{ flexWrap: 'wrap' }}>
         <Anchor component={Link} href='/process'>
           Procesos
         </Anchor>
@@ -88,14 +98,14 @@ function Encabezado({ estado, empresa, setEmpresa }: { estado: EstadoCorreo; emp
       </Breadcrumbs>
       <Group justify='space-between' align='flex-end' wrap='wrap' gap='md'>
         <div style={{ minWidth: 0 }}>
-          <Title order={1} fz={{ base: 26, sm: 30 }} className='font-bold mb-1 flex items-center gap-3' data-testid='correo-titulo'>
-            <IconMail size={28} className='text-blue-600' style={{ flexShrink: 0 }} />
+          <Title order={1} fz={{ base: 24, sm: 28 }} className='font-bold mb-1 flex items-center gap-3' data-testid='correo-titulo'>
+            <IconMail size={26} className='text-blue-600' style={{ flexShrink: 0 }} />
             Correo
           </Title>
-          <Text size='md' c='dimmed'>
-            Su bandeja de Outlook: revise hilos, responda y convierta correos en solicitudes
-          </Text>
-          <Group gap='xs' mt={6}>
+          <Group gap='xs'>
+            <Text size='sm' c='dimmed' visibleFrom='sm'>
+              Su bandeja de Outlook: revise hilos, responda y convierta correos en solicitudes
+            </Text>
             {conexion.modo === 'mock' && (
               <Badge color='grape' variant='light' leftSection={<IconFlask size={12} />} data-testid='correo-modo-simulado'>
                 Buzón simulado (pruebas)
@@ -108,19 +118,17 @@ function Encabezado({ estado, empresa, setEmpresa }: { estado: EstadoCorreo; emp
             )}
           </Group>
         </div>
-        <Group gap='sm' align='flex-end' wrap='wrap' w={{ base: '100%', sm: 'auto' }}>
-          {estado.empresas.length > 1 && (
-            <SgcSelect
-              label='Empresa de las solicitudes'
-              size='md'
-              data={estado.empresas.map((c) => ({ value: String(c.idCompany), label: c.companyName }))}
-              value={empresa}
-              onChange={setEmpresa}
-              allowDeselect={false}
-              w={{ base: '100%', sm: 240 }}
-            />
-          )}
-        </Group>
+        {estado.empresas.length > 1 && (
+          <SgcSelect
+            label='Empresa de las solicitudes'
+            size='sm'
+            data={estado.empresas.map((c) => ({ value: String(c.idCompany), label: c.companyName }))}
+            value={empresa}
+            onChange={setEmpresa}
+            allowDeselect={false}
+            w={{ base: '100%', sm: 240 }}
+          />
+        )}
       </Group>
     </Card>
   );
@@ -153,6 +161,41 @@ function AvisoPrivacidad() {
   );
 }
 
+/** Carpetas de la barra lateral (escritorio) o del panel (celular). */
+function ListaCarpetas({ carpetas, actual, onElegir }: { carpetas: Carpeta[]; actual: string | null; onElegir: (id: string | null) => void }) {
+  const orden = carpetasOrdenadas(carpetas);
+  const items = orden.length ? orden : [{ id: '', nombre: 'Bandeja de entrada', etiqueta: 'Recibidos', tipo: 'entrada' as const, total: 0, noLeidos: 0 }];
+  return (
+    <Stack gap={2} data-testid='correo-carpetas'>
+      {items.map((c) => {
+        const activa = c.tipo === 'entrada' ? !actual || actual === c.id : actual === c.id;
+        const cuenta = c.tipo === 'borradores' ? c.total : c.noLeidos;
+        return (
+          <NavLink
+            key={c.id || c.tipo}
+            active={activa}
+            label={c.etiqueta}
+            leftSection={<IconoCarpeta tipo={c.tipo} />}
+            rightSection={
+              cuenta > 0 ? (
+                <Text size='xs' fw={activa || c.tipo === 'entrada' ? 700 : 500}>
+                  {cuenta.toLocaleString('es-CO')}
+                </Text>
+              ) : null
+            }
+            onClick={() => onElegir(c.tipo === 'entrada' ? null : c.id)}
+            fw={activa ? 700 : 500}
+            styles={{ root: { borderRadius: 'var(--mantine-radius-xl)', paddingBlock: 6 }, label: { fontSize: 14 } }}
+            title={c.nombre}
+            data-testid='correo-carpeta'
+            data-activa={activa ? '1' : '0'}
+          />
+        );
+      })}
+    </Stack>
+  );
+}
+
 export default function CorreoPage() {
   const desktop = useMediaQuery('(min-width: 62em)') ?? false;
   const [estado, setEstado] = useState<EstadoCorreo | null>(null);
@@ -170,6 +213,7 @@ export default function CorreoPage() {
   const [simulacion, setSimulacion] = useState<string[] | null>(null);
   const [hayCambios, setHayCambios] = useState(false);
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
+  const [panelCarpetas, setPanelCarpetas] = useState(false);
 
   const cargarEstado = useCallback(async () => {
     try {
@@ -211,15 +255,18 @@ export default function CorreoPage() {
     } finally {
       setCargando(false);
     }
-  }, [cargarEstado]);
+  }, []);
 
-  useEffect(() => {
-    if (!listo) return;
+  const cargarCarpetas = useCallback(() => {
     correoApi
       .carpetas()
       .then((r) => setCarpetas(r.carpetas))
       .catch(() => setCarpetas([]));
-  }, [listo]);
+  }, []);
+
+  useEffect(() => {
+    if (listo) cargarCarpetas();
+  }, [listo, cargarCarpetas]);
 
   useEffect(() => {
     if (!listo) return;
@@ -245,16 +292,33 @@ export default function CorreoPage() {
     });
   const todosMarcados = mensajes.length > 0 && mensajes.every((m) => seleccion.has(m.id));
 
-  const carpetaData = useMemo(
-    () => carpetas.map((c) => ({ value: c.id, label: c.noLeidos ? `${c.nombre} (${c.noLeidos})` : c.nombre })),
-    [carpetas]
-  );
-
-  const aplicar = () => setFiltros({ ...borrador });
-  const limpiar = () => {
-    setBorrador(FILTROS_VACIOS);
-    setFiltros(FILTROS_VACIOS);
+  const aplicar = () => {
+    setFiltros({ ...borrador });
+    setFiltrosAbiertos(false);
   };
+  /** Cambia un filtro y lo aplica de una vez (chips, carpeta, quitar un filtro activo). */
+  const cambiar = (parcial: Partial<Filtros>) => {
+    const n = { ...filtros, ...borrador, ...parcial };
+    setBorrador(n);
+    setFiltros(n);
+  };
+  const limpiar = () => {
+    const n = { ...FILTROS_VACIOS, carpeta: filtros.carpeta };
+    setBorrador(n);
+    setFiltros(n);
+    setFiltrosAbiertos(false);
+  };
+  const refrescar = () => {
+    void cargarMensajes(filtros);
+    cargarCarpetas();
+  };
+
+  const carpetaActual = useMemo(() => {
+    const orden = carpetasOrdenadas(carpetas);
+    return filtros.carpeta ? orden.find((c) => c.id === filtros.carpeta) : orden.find((c) => c.tipo === 'entrada');
+  }, [carpetas, filtros.carpeta]);
+
+  const hayFiltros = Boolean(filtros.buscar.trim() || filtros.desde || filtros.hasta || filtros.de.trim() || filtros.noLeidos || filtros.conAdjuntos);
 
   if (errorEstado) {
     return (
@@ -275,218 +339,364 @@ export default function CorreoPage() {
 
   const idEmpresa = Number(empresa) || estado.empresas[0]?.idCompany;
 
-  const filaMensaje = (m: MensajeLista) => (
-    <Group gap={6} wrap='nowrap' style={{ minWidth: 0 }}>
-      {!m.leido && <Box w={8} h={8} style={{ borderRadius: 8, background: 'var(--mantine-color-blue-6)', flexShrink: 0 }} aria-label='No leído' />}
-      <Stack gap={0} style={{ minWidth: 0 }}>
-        <Text size='sm' fw={m.leido ? 500 : 700} truncate>
-          {m.asunto || '(Sin asunto)'}
-        </Text>
-        <Text size='xs' c='dimmed' lineClamp={1}>
-          {m.extracto}
-        </Text>
-      </Stack>
-    </Group>
+  const badgeSolicitud = (m: MensajeLista) =>
+    m.solicitud ? (
+      <Badge
+        size='sm'
+        color='teal'
+        variant='light'
+        leftSection={<IconLink size={10} />}
+        component='a'
+        href={urlSolicitud(m.solicitud)}
+        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+        style={{ cursor: 'pointer', flexShrink: 0 }}
+        data-testid='correo-badge-solicitud'
+      >
+        #{m.solicitud}
+      </Badge>
+    ) : null;
+
+  const abrir = (m: MensajeLista) => setHiloAbierto(m.conversationId);
+  const teclaFila = (e: React.KeyboardEvent, m: MensajeLista) => {
+    if (e.key === 'Enter') abrir(m);
+    if (e.key === ' ' && e.target === e.currentTarget) {
+      e.preventDefault();
+      toggle(m.id);
+    }
+  };
+
+  // ---------------------------------------------------------------- buscador y chips
+  const filtrosAvanzados = (
+    <Stack gap='sm' data-testid='correo-filtros' w={{ base: 'calc(100vw - 48px)', xs: 340 }}>
+      <TextInput
+        type='email'
+        label='De'
+        placeholder='persona@empresa.com'
+        value={borrador.de}
+        onChange={(e) => setBorrador({ ...borrador, de: e.currentTarget.value })}
+        onKeyDown={(e) => e.key === 'Enter' && aplicar()}
+      />
+      <Group grow gap='sm'>
+        <TextInput type='date' label='Desde' value={borrador.desde} onChange={(e) => setBorrador({ ...borrador, desde: e.currentTarget.value })} />
+        <TextInput type='date' label='Hasta' value={borrador.hasta} onChange={(e) => setBorrador({ ...borrador, hasta: e.currentTarget.value })} />
+      </Group>
+      <Group justify='space-between'>
+        <Button variant='subtle' leftSection={<IconX size={14} />} onClick={limpiar}>
+          Limpiar filtros
+        </Button>
+        <Button onClick={aplicar} leftSection={<IconSearch size={16} />} data-testid='correo-aplicar'>
+          Buscar
+        </Button>
+      </Group>
+    </Stack>
   );
 
-  const etiquetas = (m: MensajeLista) => (
-    <Group gap={4} wrap='nowrap'>
-      {m.conAdjuntos && <IconPaperclip size={14} aria-label='Con adjuntos' />}
-      {m.solicitud && (
-        <Badge
-          size='sm'
-          color='teal'
-          variant='light'
-          leftSection={<IconLink size={10} />}
-          component='a'
-          href={urlSolicitud(m.solicitud)}
-          onClick={(e: React.MouseEvent) => e.stopPropagation()}
-          style={{ cursor: 'pointer' }}
-          data-testid='correo-badge-solicitud'
-        >
-          #{m.solicitud}
-        </Badge>
-      )}
-    </Group>
+  const buscador = (
+    <TextInput
+      className={css.busqueda}
+      radius='xl'
+      size={desktop ? 'md' : 'sm'}
+      placeholder='Buscar en el correo'
+      aria-label='Buscar en el correo'
+      leftSection={<IconSearch size={18} />}
+      value={borrador.buscar}
+      onChange={(e) => setBorrador({ ...borrador, buscar: e.currentTarget.value })}
+      onKeyDown={(e) => e.key === 'Enter' && aplicar()}
+      rightSectionWidth={borrador.buscar ? 68 : 40}
+      rightSection={
+        <Group gap={0} wrap='nowrap'>
+          {borrador.buscar && <CloseButton size='sm' aria-label='Borrar la búsqueda' onClick={() => cambiar({ buscar: '' })} />}
+          <Popover opened={filtrosAbiertos} onChange={setFiltrosAbiertos} position='bottom-end' shadow='md' withinPortal trapFocus>
+            <Popover.Target>
+              <Tooltip label='Mostrar opciones de búsqueda'>
+                <ActionIcon variant='subtle' color='gray' radius='xl' onClick={() => setFiltrosAbiertos((v) => !v)} aria-label='Opciones de búsqueda' data-testid='correo-mas-filtros'>
+                  <IconAdjustmentsHorizontal size={18} />
+                </ActionIcon>
+              </Tooltip>
+            </Popover.Target>
+            <Popover.Dropdown>{filtrosAvanzados}</Popover.Dropdown>
+          </Popover>
+        </Group>
+      }
+      style={{ flex: 1, minWidth: 0 }}
+      data-testid='correo-buscar'
+    />
   );
+
+  const chipsActivos: Array<{ k: string; texto: string; quitar: Partial<Filtros> }> = [];
+  if (filtros.buscar.trim()) chipsActivos.push({ k: 'buscar', texto: `«${filtros.buscar.trim()}»`, quitar: { buscar: '' } });
+  if (filtros.de.trim()) chipsActivos.push({ k: 'de', texto: `De: ${filtros.de.trim()}`, quitar: { de: '' } });
+  if (filtros.desde) chipsActivos.push({ k: 'desde', texto: `Desde ${filtros.desde}`, quitar: { desde: '' } });
+  if (filtros.hasta) chipsActivos.push({ k: 'hasta', texto: `Hasta ${filtros.hasta}`, quitar: { hasta: '' } });
+
+  const chips = (
+    <div className={css.chips} data-testid='correo-chips'>
+      <Chip size='sm' checked={filtros.noLeidos} onChange={(v) => cambiar({ noLeidos: v })} icon={<IconCheck size={14} />} data-testid='correo-chip-no-leidos'>
+        No leídos
+      </Chip>
+      <Chip size='sm' checked={filtros.conAdjuntos} onChange={(v) => cambiar({ conAdjuntos: v })} icon={<IconCheck size={14} />} data-testid='correo-chip-adjuntos'>
+        Con adjuntos
+      </Chip>
+      {chipsActivos.map((c) => (
+        <Badge
+          key={c.k}
+          variant='light'
+          size='lg'
+          radius='xl'
+          style={{ textTransform: 'none', flexShrink: 0, fontWeight: 500 }}
+          rightSection={<CloseButton size='xs' aria-label={`Quitar ${c.texto}`} onClick={() => cambiar(c.quitar)} />}
+          data-testid='correo-chip-activo'
+        >
+          {c.texto}
+        </Badge>
+      ))}
+      {hayFiltros && (
+        <Button size='compact-sm' variant='subtle' onClick={limpiar} style={{ flexShrink: 0 }}>
+          Quitar filtros
+        </Button>
+      )}
+    </div>
+  );
+
+  // ---------------------------------------------------------------- barra de herramientas / selección
+  const barra = (
+    <div className={`${css.toolbar} ${seleccion.size > 0 ? css.toolbarSeleccion : ''}`}>
+      {desktop && (
+        <Tooltip label={todosMarcados ? 'Quitar selección' : 'Seleccionar todos'}>
+          <Checkbox
+            aria-label='Seleccionar todos'
+            checked={todosMarcados}
+            indeterminate={seleccion.size > 0 && !todosMarcados}
+            onChange={() => setSeleccion(todosMarcados ? new Set() : new Set(mensajes.map((m) => m.id)))}
+            mx={6}
+            data-testid='correo-seleccionar-todos'
+          />
+        </Tooltip>
+      )}
+      {seleccion.size > 0 ? (
+        <Group justify='space-between' wrap='nowrap' gap='xs' style={{ flex: 1, minWidth: 0 }} data-testid='correo-barra-seleccion'>
+          <Group gap='xs' wrap='nowrap' style={{ minWidth: 0 }}>
+            {!desktop && <CloseButton aria-label='Quitar selección' onClick={() => setSeleccion(new Set())} />}
+            <Text size='sm' fw={600} truncate>
+              {seleccion.size} correo(s) seleccionado(s)
+            </Text>
+          </Group>
+          <Group gap='xs' wrap='nowrap'>
+            {desktop && (
+              <Button variant='subtle' size='compact-sm' onClick={() => setSeleccion(new Set())}>
+                Quitar selección
+              </Button>
+            )}
+            <Button size={desktop ? 'compact-md' : 'compact-sm'} leftSection={<IconFlask size={16} />} onClick={() => setSimulacion([...seleccion])} data-testid='correo-simular'>
+              {desktop ? 'Simular / Crear solicitudes' : 'Crear solicitudes'}
+            </Button>
+          </Group>
+        </Group>
+      ) : (
+        <Group justify='space-between' wrap='nowrap' gap='xs' style={{ flex: 1, minWidth: 0 }}>
+          <Group gap={4} wrap='nowrap'>
+            <Tooltip label='Actualizar'>
+              <ActionIcon variant='subtle' color='gray' radius='xl' size='lg' onClick={refrescar} aria-label='Actualizar' data-testid='correo-actualizar'>
+                <IconRefresh size={18} />
+              </ActionIcon>
+            </Tooltip>
+            <Text size='sm' fw={600} truncate>
+              {carpetaActual?.etiqueta ?? 'Recibidos'}
+            </Text>
+          </Group>
+          <Text size='xs' c='dimmed' style={{ flexShrink: 0 }}>
+            {mensajes.length > 0 ? `${mensajes.length.toLocaleString('es-CO')}${siguiente ? '+' : ''} correo(s)` : ''}
+          </Text>
+        </Group>
+      )}
+    </div>
+  );
+
+  // ---------------------------------------------------------------- filas
+  const filaEscritorio = (m: MensajeLista) => {
+    const sel = seleccion.has(m.id);
+    return (
+      <div
+        key={m.id}
+        className={css.fila}
+        data-leido={m.leido ? '1' : '0'}
+        data-seleccionado={sel ? '1' : '0'}
+        onClick={() => abrir(m)}
+        onKeyDown={(e) => teclaFila(e, m)}
+        role='row'
+        tabIndex={0}
+        aria-label={`${m.leido ? '' : 'No leído. '}${m.de.nombre}: ${m.asunto || '(Sin asunto)'}`}
+        data-testid='correo-fila'
+      >
+        <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex' }}>
+          <Checkbox aria-label={`Seleccionar ${m.asunto}`} checked={sel} onChange={() => toggle(m.id)} data-testid='correo-seleccionar' />
+        </div>
+        <div className={`${css.de} ${m.leido ? '' : css.fuerte}`} title={m.de.correo}>
+          {m.de.nombre || m.de.correo}
+        </div>
+        <div className={css.asunto}>
+          {badgeSolicitud(m)}
+          <span className={css.asuntoTexto}>
+            <span className={m.leido ? undefined : css.fuerte}>{m.asunto || '(Sin asunto)'}</span>
+            {m.extracto && <span className={css.extracto}> — {m.extracto}</span>}
+          </span>
+        </div>
+        <div className={css.meta}>
+          <span className={css.fecha}>
+            {m.conAdjuntos && <IconPaperclip size={15} aria-label='Con adjuntos' />}
+            <Tooltip label={fechaLarga(m.fecha)} openDelay={400}>
+              <span>{fechaCorta(m.fecha)}</span>
+            </Tooltip>
+          </span>
+          <span className={css.acciones} onClick={(e) => e.stopPropagation()}>
+            <Tooltip label='Abrir el hilo'>
+              <ActionIcon variant='subtle' color='gray' radius='xl' onClick={() => abrir(m)} aria-label={`Abrir ${m.asunto}`} data-testid='correo-fila-abrir'>
+                <IconMailOpened size={18} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label='Convertir en solicitud'>
+              <ActionIcon variant='subtle' color='gray' radius='xl' onClick={() => setSimulacion([m.id])} aria-label={`Convertir en solicitud ${m.asunto}`} data-testid='correo-fila-crear'>
+                <IconFlask size={18} />
+              </ActionIcon>
+            </Tooltip>
+          </span>
+        </div>
+      </div>
+    );
+  };
+
+  const filaMovil = (m: MensajeLista) => {
+    const sel = seleccion.has(m.id);
+    const fuerte = m.leido ? undefined : css.fuerte;
+    return (
+      <div key={m.id} className={css.filaMovil} data-seleccionado={sel ? '1' : '0'} onClick={() => abrir(m)} data-testid='correo-fila'>
+        <button
+          type='button'
+          className={css.avatarSel}
+          role='checkbox'
+          aria-checked={sel}
+          aria-label={`Seleccionar ${m.asunto}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggle(m.id);
+          }}
+          data-testid='correo-seleccionar'
+        >
+          {sel ? (
+            <span className={css.avatarMarcado}>
+              <IconCheck size={20} />
+            </span>
+          ) : (
+            <AvatarPersona nombre={m.de.nombre} correo={m.de.correo} size={40} />
+          )}
+        </button>
+        <div className={css.cuerpoMovil}>
+          <div className={css.lineaMovil}>
+            <Text size='sm' className={`${css.truncar} ${fuerte ?? ''}`}>
+              {m.de.nombre || m.de.correo}
+            </Text>
+            <Text size='xs' c={m.leido ? 'dimmed' : undefined} className={fuerte} style={{ flexShrink: 0 }}>
+              {fechaCorta(m.fecha)}
+            </Text>
+          </div>
+          <Text size='sm' className={`${css.truncar} ${fuerte ?? ''}`}>
+            {m.asunto || '(Sin asunto)'}
+          </Text>
+          <div className={css.lineaMovil}>
+            <Text size='sm' c='dimmed' className={css.truncar}>
+              {m.extracto}
+            </Text>
+            <Group gap={4} wrap='nowrap' style={{ flexShrink: 0 }}>
+              {m.conAdjuntos && <IconPaperclip size={14} aria-label='Con adjuntos' />}
+              {badgeSolicitud(m)}
+            </Group>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const vacio = (
+    <Stack align='center' gap='xs' p='xl' data-testid='correo-vacio'>
+      <IconInbox size={40} color='var(--mantine-color-dimmed)' />
+      <Text c='dimmed' ta='center'>
+        {hayFiltros ? 'No hay correos con estos filtros.' : 'No hay correos en esta carpeta.'}
+      </Text>
+    </Stack>
+  );
+
+  const bandeja = (
+    <Card withBorder radius='md' p={0} className={css.bandeja}>
+      {barra}
+      {errorLista && (
+        <Alert color='red' icon={<IconAlertTriangle size={18} />} title='No se pudieron cargar los correos' m='sm' data-testid='correo-error-lista'>
+          {errorLista}
+        </Alert>
+      )}
+      {mensajes.length === 0 && !cargando && !errorLista ? (
+        vacio
+      ) : (
+        <div role='grid' aria-label='Correos' data-testid='correo-lista'>
+          {mensajes.map((m) => (desktop ? filaEscritorio(m) : filaMovil(m)))}
+        </div>
+      )}
+      {cargando && (
+        <Group justify='center' p='md'>
+          <Loader size='sm' />
+        </Group>
+      )}
+      {siguiente && !cargando && (
+        <Group justify='center' p='sm'>
+          <Button variant='light' onClick={() => cargarMensajes(filtros, siguiente)} data-testid='correo-cargar-mas'>
+            Cargar más correos
+          </Button>
+        </Group>
+      )}
+    </Card>
+  );
+
+  const elegirCarpeta = (id: string | null) => {
+    cambiar({ carpeta: id });
+    setPanelCarpetas(false);
+  };
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
-      <div className='max-w-7xl mx-auto py-3 sm:py-8 px-3 sm:px-6 lg:px-8'>
+      <div className='max-w-[1600px] mx-auto py-3 sm:py-6 px-3 sm:px-6 lg:px-8'>
         <Encabezado estado={estado} empresa={empresa} setEmpresa={setEmpresa} />
 
         {!listo ? (
           <NoDisponible estado={estado} />
+        ) : desktop ? (
+          <div className={css.layout}>
+            <aside className={css.sidebar}>
+              <Stack gap='md'>
+                <ListaCarpetas carpetas={carpetas} actual={filtros.carpeta} onElegir={elegirCarpeta} />
+                <AvisoPrivacidad />
+              </Stack>
+            </aside>
+            <Stack gap='sm' style={{ minWidth: 0 }}>
+              {buscador}
+              {chips}
+              {bandeja}
+            </Stack>
+          </div>
         ) : (
-          <Stack gap='md'>
+          <Stack gap='sm'>
+            <Group gap='xs' wrap='nowrap'>
+              <Tooltip label='Carpetas'>
+                <ActionIcon variant='default' radius='xl' size={36} onClick={() => setPanelCarpetas(true)} aria-label='Carpetas' data-testid='correo-menu-carpetas'>
+                  <IconFolders size={18} />
+                </ActionIcon>
+              </Tooltip>
+              {buscador}
+            </Group>
+            {chips}
+            {bandeja}
             <AvisoPrivacidad />
-            <Card withBorder radius='md' p='sm'>
-              <Stack gap='sm'>
-                <Group gap='sm' align='flex-end' wrap='wrap'>
-                  <SgcSelect
-                    label='Carpeta'
-                    data={carpetaData}
-                    value={borrador.carpeta}
-                    placeholder='Bandeja de entrada'
-                    clearable
-                    onChange={(v) => {
-                      const n = { ...borrador, carpeta: v };
-                      setBorrador(n);
-                      setFiltros(n);
-                    }}
-                    w={{ base: '100%', sm: 220 }}
-                  />
-                  <TextInput
-                    label='Buscar'
-                    placeholder='Asunto, texto o remitente'
-                    leftSection={<IconSearch size={16} />}
-                    value={borrador.buscar}
-                    onChange={(e) => setBorrador({ ...borrador, buscar: e.currentTarget.value })}
-                    onKeyDown={(e) => e.key === 'Enter' && aplicar()}
-                    style={{ flex: 1, minWidth: 200 }}
-                    data-testid='correo-buscar'
-                  />
-                  <Button variant='light' leftSection={<IconFilter size={16} />} onClick={() => setFiltrosAbiertos((v) => !v)} data-testid='correo-mas-filtros'>
-                    Filtros
-                  </Button>
-                  <Button onClick={aplicar} leftSection={<IconSearch size={16} />} data-testid='correo-aplicar'>
-                    Aplicar
-                  </Button>
-                  <Tooltip label='Actualizar'>
-                    <Button variant='default' onClick={() => cargarMensajes(filtros)} aria-label='Actualizar'>
-                      <IconRefresh size={16} />
-                    </Button>
-                  </Tooltip>
-                </Group>
-                {filtrosAbiertos && (
-                  <Group gap='sm' align='flex-end' wrap='wrap' data-testid='correo-filtros'>
-                    <TextInput type='date' label='Desde' value={borrador.desde} onChange={(e) => setBorrador({ ...borrador, desde: e.currentTarget.value })} w={{ base: '47%', sm: 170 }} />
-                    <TextInput type='date' label='Hasta' value={borrador.hasta} onChange={(e) => setBorrador({ ...borrador, hasta: e.currentTarget.value })} w={{ base: '47%', sm: 170 }} />
-                    <TextInput
-                      type='email'
-                      label='De (correo)'
-                      placeholder='persona@empresa.com'
-                      value={borrador.de}
-                      onChange={(e) => setBorrador({ ...borrador, de: e.currentTarget.value })}
-                      w={{ base: '100%', sm: 240 }}
-                    />
-                    <Switch label='No leídos' checked={borrador.noLeidos} onChange={(e) => setBorrador({ ...borrador, noLeidos: e.currentTarget.checked })} />
-                    <Switch label='Con adjuntos' checked={borrador.conAdjuntos} onChange={(e) => setBorrador({ ...borrador, conAdjuntos: e.currentTarget.checked })} />
-                    <Button variant='subtle' leftSection={<IconX size={14} />} onClick={limpiar}>
-                      Limpiar filtros
-                    </Button>
-                  </Group>
-                )}
-              </Stack>
-            </Card>
-
-            {seleccion.size > 0 && (
-              <Card withBorder radius='md' p='sm' bg='var(--mantine-color-blue-light)' style={{ position: 'sticky', top: 8, zIndex: 5 }} data-testid='correo-barra-seleccion'>
-                <Group justify='space-between' wrap='wrap' gap='xs'>
-                  <Text size='sm' fw={600}>
-                    {seleccion.size} correo(s) seleccionado(s)
-                  </Text>
-                  <Group gap='xs'>
-                    <Button variant='default' size='sm' onClick={() => setSeleccion(new Set())}>
-                      Quitar selección
-                    </Button>
-                    <Button size='sm' leftSection={<IconFlask size={16} />} onClick={() => setSimulacion([...seleccion])} data-testid='correo-simular'>
-                      Simular creación de solicitudes
-                    </Button>
-                  </Group>
-                </Group>
-              </Card>
-            )}
-
-            {errorLista && (
-              <Alert color='red' icon={<IconAlertTriangle size={18} />} title='No se pudieron cargar los correos' data-testid='correo-error-lista'>
-                {errorLista}
-              </Alert>
-            )}
-
-            {mensajes.length === 0 && !cargando && !errorLista ? (
-              <Card withBorder radius='md' p='lg'>
-                <Text c='dimmed' ta='center'>
-                  No hay correos con estos filtros.
-                </Text>
-              </Card>
-            ) : desktop ? (
-              <Card withBorder radius='md' p={0}>
-                <Table highlightOnHover verticalSpacing='xs' data-testid='correo-lista'>
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th w={40}>
-                        <Checkbox
-                          aria-label='Seleccionar todos'
-                          checked={todosMarcados}
-                          indeterminate={seleccion.size > 0 && !todosMarcados}
-                          onChange={() => setSeleccion(todosMarcados ? new Set() : new Set(mensajes.map((m) => m.id)))}
-                        />
-                      </Table.Th>
-                      <Table.Th w={220}>De</Table.Th>
-                      <Table.Th>Asunto</Table.Th>
-                      <Table.Th w={110}></Table.Th>
-                      <Table.Th w={100}>Fecha</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {mensajes.map((m) => (
-                      <Table.Tr key={m.id} style={{ cursor: 'pointer' }} onClick={() => setHiloAbierto(m.conversationId)} data-testid='correo-fila'>
-                        <Table.Td onClick={(e) => e.stopPropagation()}>
-                          <Checkbox aria-label={`Seleccionar ${m.asunto}`} checked={seleccion.has(m.id)} onChange={() => toggle(m.id)} data-testid='correo-seleccionar' />
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size='sm' fw={m.leido ? 400 : 700} truncate maw={210}>
-                            {m.de.nombre}
-                          </Text>
-                        </Table.Td>
-                        <Table.Td style={{ maxWidth: 0 }}>{filaMensaje(m)}</Table.Td>
-                        <Table.Td>{etiquetas(m)}</Table.Td>
-                        <Table.Td>
-                          <Text size='xs' c='dimmed'>
-                            {fechaCorta(m.fecha)}
-                          </Text>
-                        </Table.Td>
-                      </Table.Tr>
-                    ))}
-                  </Table.Tbody>
-                </Table>
-              </Card>
-            ) : (
-              <Stack gap='xs' data-testid='correo-lista'>
-                {mensajes.map((m) => (
-                  <Card key={m.id} withBorder radius='md' p='sm' data-testid='correo-fila'>
-                    <Group wrap='nowrap' align='flex-start' gap='sm'>
-                      <Checkbox mt={4} aria-label={`Seleccionar ${m.asunto}`} checked={seleccion.has(m.id)} onChange={() => toggle(m.id)} data-testid='correo-seleccionar' />
-                      <UnstyledButton onClick={() => setHiloAbierto(m.conversationId)} style={{ flex: 1, minWidth: 0 }}>
-                        <Group justify='space-between' wrap='nowrap' gap={4}>
-                          <Text size='sm' fw={m.leido ? 500 : 700} truncate>
-                            {m.de.nombre}
-                          </Text>
-                          <Text size='xs' c='dimmed' style={{ flexShrink: 0 }}>
-                            {fechaCorta(m.fecha)}
-                          </Text>
-                        </Group>
-                        {filaMensaje(m)}
-                        <Box mt={4}>{etiquetas(m)}</Box>
-                      </UnstyledButton>
-                    </Group>
-                  </Card>
-                ))}
-              </Stack>
-            )}
-            {cargando && (
-              <Group justify='center' p='md'>
-                <Loader size='sm' />
-              </Group>
-            )}
-            {siguiente && !cargando && (
-              <Group justify='center'>
-                <Button variant='light' onClick={() => cargarMensajes(filtros, siguiente)} data-testid='correo-cargar-mas'>
-                  Cargar más correos
-                </Button>
-              </Group>
-            )}
+            <Drawer opened={panelCarpetas} onClose={() => setPanelCarpetas(false)} position='left' size='80%' title='Carpetas' data-testid='correo-carpetas-drawer'>
+              <ListaCarpetas carpetas={carpetas} actual={filtros.carpeta} onElegir={elegirCarpeta} />
+            </Drawer>
           </Stack>
         )}
       </div>
@@ -495,6 +705,7 @@ export default function CorreoPage() {
         conversationId={hiloAbierto}
         envioHabilitado={estado.conexion.envioHabilitado}
         nombreOperador={estado.usuario.nombre}
+        correoOperador={estado.usuario.email}
         onClose={() => {
           setHiloAbierto(null);
           if (hayCambios) {
@@ -527,7 +738,6 @@ export default function CorreoPage() {
           }}
         />
       )}
-
     </div>
   );
 }
