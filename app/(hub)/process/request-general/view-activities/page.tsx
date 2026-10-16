@@ -253,6 +253,7 @@ function ViewRequestPage() {
   const userIdFetchRef = useRef(false);
   const [loadingUserId, setLoadingUserId] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
+  // Solo el responsable de la solicitud reasigna tareas (lo decide el servidor).
   const [isAdmin, setIsAdmin] = useState(false);
   const [loadingPermissions, setLoadingPermissions] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);

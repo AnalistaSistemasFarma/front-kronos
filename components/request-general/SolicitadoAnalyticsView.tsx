@@ -6,8 +6,6 @@ import {
   Alert,
   Badge,
   Group,
-  Paper,
-  SimpleGrid,
   Stack,
   Table,
   Text,
@@ -25,7 +23,7 @@ import {
   IconBriefcase,
 } from '@tabler/icons-react';
 import { ChartContainer } from '../dashboard/ChartContainer';
-import { ChartCard } from '../dashboard/actividades/ActividadesUi';
+import { PanelCard, panelStyles as ps } from '../ui/panel/Panel';
 import { useChartViewport } from '../dashboard/useChartViewport';
 import {
   buildAreaLineChart,
@@ -64,7 +62,8 @@ function formatDate(value?: string | null) {
   return d.toLocaleDateString('es-CO');
 }
 
-export function SolicitadoProcesosView() {
+/** `showList=false`: sin la tabla (en «Mi trabajo» las pendientes ya van en lista). */
+export function SolicitadoProcesosView({ showList = true }: { showList?: boolean } = {}) {
   const router = useRouter();
   const { requests } = useSolicitadoData();
   const entranceKey = useSolicitadoChartEntranceKey();
@@ -135,7 +134,7 @@ export function SolicitadoProcesosView() {
 
   return (
     <>
-      <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing='md' mb='md'>
+      <div className={ps.grid4} style={{ marginBottom: 16 }}>
         <PersonalInsightCard
           label='Mi tiempo promedio'
           value={
@@ -168,13 +167,12 @@ export function SolicitadoProcesosView() {
           icon={<IconBuilding size={20} />}
           color='teal'
         />
-      </SimpleGrid>
+      </div>
 
-      <SimpleGrid cols={{ base: 1, lg: 2 }} spacing='md' mb='md'>
-        <ChartCard
+      <div className={ps.grid2} style={{ marginBottom: 16 }}>
+        <PanelCard
           title='Mi demora por tipo de proceso'
           description='Promedio de cuánto te tomas en cerrar cada proceso'
-          height='auto'
         >
           {timeByProcessChart ? (
             <ChartContainer
@@ -204,12 +202,11 @@ export function SolicitadoProcesosView() {
               Cuando finalices procesos verás aquí tu tiempo promedio por tipo.
             </Alert>
           )}
-        </ChartCard>
+        </PanelCard>
 
-        <ChartCard
+        <PanelCard
           title='Empresas que me solicitan'
           description='De dónde vienen la mayoría de tus procesos'
-          height='auto'
         >
           {companyPie ? (
             <ChartContainer
@@ -224,14 +221,13 @@ export function SolicitadoProcesosView() {
               Sin empresas asociadas todavía.
             </Alert>
           )}
-        </ChartCard>
-      </SimpleGrid>
+        </PanelCard>
+      </div>
 
-      <SimpleGrid cols={{ base: 1, lg: 2 }} spacing='md' mb='md'>
-        <ChartCard
+      <div className={ps.grid2} style={{ marginBottom: 16 }}>
+        <PanelCard
           title='Qué procesos tengo / me llegan más'
           description='Volumen por tipo de proceso'
-          height='auto'
         >
           {countByProcessChart ? (
             <ChartContainer
@@ -248,12 +244,11 @@ export function SolicitadoProcesosView() {
               Aún no hay procesos para graficar.
             </Alert>
           )}
-        </ChartCard>
+        </PanelCard>
 
-        <ChartCard
+        <PanelCard
           title='Cada cuándo me llega uno'
           description='Frecuencia de nuevas solicitudes hacia ti'
-          height='auto'
         >
           {frequencyChart ? (
             <ChartContainer
@@ -280,8 +275,8 @@ export function SolicitadoProcesosView() {
               Sin fechas de creación suficientes.
             </Alert>
           )}
-        </ChartCard>
-      </SimpleGrid>
+        </PanelCard>
+      </div>
 
       <PersonalTimeTrendBlock
         title='Cómo va mi tiempo de cierre'
@@ -291,7 +286,7 @@ export function SolicitadoProcesosView() {
         entranceKey={`trend-${entranceKey}`}
       />
 
-      <Paper shadow='sm' p='md' radius='lg' withBorder mt='md' mb='md'>
+      <div className={ps.card} style={{ marginTop: 16, marginBottom: 16 }}>
         <Group gap='xs' mb='md'>
           <ThemeIcon variant='light' color='violet' radius='md'>
             <IconBriefcase size={16} />
@@ -349,9 +344,10 @@ export function SolicitadoProcesosView() {
             ))}
           </Stack>
         )}
-      </Paper>
+      </div>
 
-      <Paper shadow='sm' p='md' radius='lg' withBorder>
+      {showList ? (
+      <div className={ps.card}>
         <Group justify='space-between' mb='md' wrap='wrap'>
           <Title order={4}>Listado de mis procesos</Title>
           <TextInput
@@ -415,7 +411,8 @@ export function SolicitadoProcesosView() {
             </Table>
           </div>
         )}
-      </Paper>
+      </div>
+      ) : null}
     </>
   );
 }

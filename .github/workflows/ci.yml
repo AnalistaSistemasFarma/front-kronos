@@ -173,13 +173,72 @@ jobs:
           retention-days: 90
 
   # ---------------------------------------------------------------------------
+  # ¿Hace falta la integración con SQL Server? (decide en ~10 s, sin npm ci)
+  #
+  # En un PR, lista los archivos cambiados (API de GitHub) y corre
+  # scripts/ci/integracion-relevante.mjs: responde «true» si el PR toca el SGC,
+  # la Bitácora de Proceso, prisma/** (esquema y migraciones, incluidas las del
+  # Portal TH que este job prueba), package.json/lock, la configuración de las
+  # pruebas, este workflow, o cualquier archivo del árbol de importaciones de
+  # tests/integration, lib/sgc y lib/bitacora-proceso. Con código ajeno (otro
+  # módulo, el MCP, documentación…) se omite (decisión de Nicolás, 2026-10-14:
+  # solo con feats/cambios del SGC). En workflow_dispatch, o ante cualquier
+  # error, responde «true» (corre todo).
+  # ---------------------------------------------------------------------------
+  cambios:
+    name: Cambios — ¿corre la integración?
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      relevante: ${{ steps.decidir.outputs.relevante }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Listar archivos cambiados del PR
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          # Incluye el nombre anterior de los archivos renombrados. Si falla, no
+          # se crea la lista y el script decide «true» (corre todo).
+          if gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" \
+               --jq '.[] | .filename, (.previous_filename // empty)' > /tmp/cambiados.txt; then
+            echo "$(wc -l < /tmp/cambiados.txt) ruta(s) cambiada(s)"
+            # La API devuelve como máximo 3000 archivos: con más, se corre todo.
+            if [ "$(wc -l < /tmp/cambiados.txt)" -ge 3000 ]; then rm -f /tmp/cambiados.txt; fi
+          else
+            rm -f /tmp/cambiados.txt
+          fi
+
+      - name: Decidir
+        id: decidir
+        run: |
+          node scripts/ci/integracion-relevante.mjs /tmp/cambiados.txt 2> /tmp/motivo.txt >> "$GITHUB_OUTPUT"
+          cat /tmp/motivo.txt
+          { echo "## Integración con SQL Server"; echo ""; sed 's/^\[integracion-relevante\] //' /tmp/motivo.txt; } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
   # SGC documental: integración contra un SQL Server EFÍMERO (contenedor
   # oficial de Microsoft). Crea la base desde el esquema de Prisma (incluido el
   # esquema SQL `sgc`), aplica las migraciones del Sprint 0 (deben ser
   # idempotentes) y prueba el acceso real contra la base.
+  #
+  # Solo corre si el job `cambios` lo pide. La condición va a nivel de JOB (no
+  # en un paso) para no levantar el contenedor de SQL Server cuando no hace
+  # falta: los `services` arrancan antes que cualquier paso. Un job omitido por
+  # `if:` queda «Skipped», que GitHub cuenta como aprobado si algún día este
+  # check pasa a ser obligatorio en la protección de ramas (hoy no lo es). Si
+  # `cambios` fallara, su salida queda vacía y la integración corre igual
+  # (`!= 'false'`), así que un error del filtro nunca la apaga en silencio.
   # ---------------------------------------------------------------------------
   sgc-integracion:
     name: SGC — integración (SQL Server efímero)
+    needs: cambios
+    if: ${{ !cancelled() && needs.cambios.outputs.relevante != 'false' }}
     runs-on: ubuntu-latest
     services:
       mssql:
@@ -279,6 +338,36 @@ jobs:
           # S19: el Generador solo para documentos sin codificación (tipo «plantilla guía»).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014130000_sgc_s19_generador_sin_codificacion/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014130000_sgc_s19_generador_sin_codificacion/migration.sql
+          # Bitácora de Proceso (antes Órdenes de Trabajo; P0): tablas + triggers de integridad, inspector e íconos, y la siembra de Farmalógica (ambas dos veces: idempotentes).
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013180000_ordenes_trabajo_p0/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013180000_ordenes_trabajo_p0/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013220000_bitacora_proceso_inspector_iconos/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013220000_bitacora_proceso_inspector_iconos/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013233000_bitacora_proceso_firmas/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013233000_bitacora_proceso_firmas/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014140000_bitacora_proceso_operadores_areas/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014140000_bitacora_proceso_operadores_areas/migration.sql
+          # Cuatro actores, cuatro vistos buenos y PIN (2026-10-15): dos veces (idempotente).
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261015180000_bitacora_proceso_cuatro_actores/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261015180000_bitacora_proceso_cuatro_actores/migration.sql
+          # La base efímera nace sin empresas: se crea Farmalógica (id 1, como en las pruebas de integración) antes de la siembra.
+          printf '%s\n' "SET IDENTITY_INSERT [dbo].[company] ON;" "IF NOT EXISTS (SELECT 1 FROM [dbo].[company] WHERE id_company = 1) INSERT INTO [dbo].[company] (id_company, company) VALUES (1, N'FARMALOGICA S.A.');" "SET IDENTITY_INSERT [dbo].[company] OFF;" > /tmp/ot-empresa.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/ot-empresa.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-13-bitacora-proceso-p0-farmalogica.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-13-bitacora-proceso-p0-farmalogica.sql
+          # Ajustes del 2026-10-14 (área predefinida, actividades A6 sin duplicar, observación opcional): dos veces, idempotente.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-14-bitacora-proceso-ajustes-farmalogica.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-14-bitacora-proceso-ajustes-farmalogica.sql
+          # Script SOLO PRUEBAS que desactiva «Fin de lote» (guardado por DB_NAME()): dos veces.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-15-bitacora-proceso-pruebas-fin-de-lote.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-15-bitacora-proceso-pruebas-fin-de-lote.sql
+          # Módulo Correo (2026-10-15): migración, permiso del menú y tarea de fondo APAGADA, dos veces (idempotencia).
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261015120000_correo_modulo/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261015120000_correo_modulo/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-15-correo-permiso.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-15-correo-permiso.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-15-correo-tarea-sincronizacion-APAGADA.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-15-correo-tarea-sincronizacion-APAGADA.sql
 
       - name: Pruebas de integración + cobertura de lib/sgc/db (vitest)
         run: npm run test:integration -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/integracion/junit.xml
@@ -356,6 +445,155 @@ jobs:
           migra 20261014120000_sgc_s17_evaluaciones
           migra 20261014130000_sgc_s19_generador_sin_codificacion
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-08-sgc-s8-guia-codificacion-olp.sql
+
+      - name: Bitácora de Proceso — reversa (ida y vuelta)
+        # Con las órdenes que dejaron las pruebas de integración: la reversa SIN la
+        # bandera de pérdida debe negarse; con la bandera quita todo (dos veces,
+        # idempotente) y luego la migración y la siembra vuelven a crearlo.
+        env:
+          DATABASE_URL: ${{ env.SGC_IT_DATABASE_URL }}
+        run: |
+          set -e
+          M=prisma/migrations/20261013180000_ordenes_trabajo_p0/migration.sql
+          M2=prisma/migrations/20261013220000_bitacora_proceso_inspector_iconos/migration.sql
+          M3=prisma/migrations/20261013233000_bitacora_proceso_firmas/migration.sql
+          S=prisma/manual/2026-10-13-bitacora-proceso-p0-farmalogica.sql
+          R=prisma/manual/2026-10-13-bitacora-proceso-p0-reversa.sql
+          x() { npx prisma db execute --schema prisma/schema.prisma --file "$1"; }
+          # 1) Reversa de los cuatro actores (2026-10-15): con los vistos buenos y PIN de la integración debe negarse
+          #    sin su bandera; con ella, dos veces; luego la migración vuelve a aplicarse dos veces.
+          M4=prisma/migrations/20261015180000_bitacora_proceso_cuatro_actores/migration.sql
+          R4=prisma/manual/2026-10-15-bitacora-proceso-cuatro-actores-reversa.sql
+          if x "$R4"; then echo "La reversa de los cuatro actores debió negarse sin su bandera"; exit 1; fi
+          { echo "EXEC sp_set_session_context N'ot_cuatro_actores_reversa_acepta_perdida', 1;"; cat "$R4"; } > /tmp/ot-r4.sql
+          x /tmp/ot-r4.sql; x /tmp/ot-r4.sql
+          cat > /tmp/ot-verifica-r4.sql <<'SQL'
+          IF COL_LENGTH(N'dbo.ot_orden_trabajo', N'id_jefe_produccion') IS NOT NULL OR OBJECT_ID(N'dbo.ot_pin', N'U') IS NOT NULL OR COL_LENGTH(N'dbo.ot_firma', N'id_operador') IS NOT NULL
+             OR EXISTS (SELECT 1 FROM sys.triggers WHERE name LIKE N'TR[_]ot[_]%' AND is_disabled = 1)
+            THROW 50030, N'La reversa de los cuatro actores no quitó lo suyo o dejó un trigger apagado.', 1;
+          SQL
+          x /tmp/ot-verifica-r4.sql
+          x "$M4"; x "$M4"
+          # 2) Reversa general del P0.
+          if x "$R"; then echo "La reversa debió negarse sin ot_reversa_acepta_perdida"; exit 1; fi
+          { echo "EXEC sp_set_session_context N'ot_reversa_acepta_perdida', 1;"; cat "$R"; } > /tmp/ot-reversa.sql
+          x /tmp/ot-reversa.sql; x /tmp/ot-reversa.sql
+          cat > /tmp/ot-verifica-reversa.sql <<'SQL'
+          IF OBJECT_ID(N'dbo.ot_registro', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.ot_actividad', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.ot_firma', N'U') IS NOT NULL
+             OR EXISTS (SELECT 1 FROM dbo.subprocess WHERE subprocess_url LIKE N'/process/bitacora-proceso%')
+            THROW 50020, N'La reversa de la Bitácora de Proceso no quitó todo.', 1;
+          SQL
+          x /tmp/ot-verifica-reversa.sql
+          x "$M"; x "$M"; x "$M2"; x "$M2"; x "$M3"; x "$M3"; x "$S"; x "$S"
+          cat > /tmp/ot-verifica.sql <<'SQL'
+          IF (SELECT COUNT(*) FROM dbo.ot_actividad WHERE id_company = 1) <> 14 THROW 50021, N'La siembra de Farmalógica no dejó 14 actividades.', 1;
+          IF EXISTS (SELECT 1 FROM dbo.ot_actividad WHERE id_company = 1 AND icono IS NULL) THROW 50024, N'Hay actividades sembradas sin ícono.', 1;
+          IF (SELECT COUNT(*) FROM dbo.subprocess WHERE subprocess_url IN (N'/process/bitacora-proceso', N'/process/bitacora-proceso/gestion')) <> 2 THROW 50022, N'Faltan los subprocesos.', 1;
+          IF OBJECT_ID(N'dbo.TR_ot_registro_inmutable', N'TR') IS NULL THROW 50023, N'Falta el trigger de inmutabilidad.', 1;
+          IF OBJECT_ID(N'dbo.TR_ot_firma_inmutable', N'TR') IS NULL THROW 50025, N'Falta el trigger de inmutabilidad de las firmas.', 1;
+          SQL
+          x /tmp/ot-verifica.sql
+
+      - name: Correo — reversa (ida y vuelta)
+        env:
+          DATABASE_URL: ${{ env.SGC_IT_DATABASE_URL }}
+        run: |
+          set -e
+          M=prisma/migrations/20261015120000_correo_modulo/migration.sql
+          S=prisma/manual/2026-10-15-correo-permiso.sql
+          R=prisma/manual/2026-10-15-correo-reversa.sql
+          x() { npx prisma db execute --schema prisma/schema.prisma --file "$1"; }
+          # Las pruebas de integración dejaron hilos y auditoría: sin la bandera, la reversa se niega.
+          if x "$R"; then echo "La reversa debió negarse sin correo_reversa_acepta_perdida"; exit 1; fi
+          { echo "EXEC sp_set_session_context N'correo_reversa_acepta_perdida', 1;"; cat "$R"; } > /tmp/correo-reversa.sql
+          x /tmp/correo-reversa.sql; x /tmp/correo-reversa.sql
+          cat > /tmp/correo-verifica-reversa.sql <<'SQL'
+          IF OBJECT_ID(N'dbo.email_thread_link', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.email_audit', N'U') IS NOT NULL
+             OR EXISTS (SELECT 1 FROM dbo.subprocess WHERE subprocess_url = N'/process/correo')
+            THROW 50030, N'La reversa del módulo Correo no quitó todo.', 1;
+          SQL
+          x /tmp/correo-verifica-reversa.sql
+          # Sin la migración, el permiso se niega a correr.
+          if x "$S"; then echo "El permiso debió negarse sin la migración"; exit 1; fi
+          x "$M"; x "$M"; x "$S"; x "$S"
+          cat > /tmp/correo-verifica.sql <<'SQL'
+          IF (SELECT COUNT(*) FROM dbo.subprocess WHERE subprocess_url = N'/process/correo') <> 1 THROW 50031, N'Falta el subproceso Correo.', 1;
+          IF EXISTS (SELECT 1 FROM dbo.subprocess_user_company suc JOIN dbo.subprocess s ON s.id_subprocess = suc.id_subprocess WHERE s.subprocess_url = N'/process/correo') THROW 50032, N'El permiso no debe otorgarse a nadie por defecto.', 1;
+          IF OBJECT_ID(N'dbo.TR_email_audit_inmutable', N'TR') IS NULL THROW 50033, N'Falta el trigger de la auditoría.', 1;
+          IF OBJECT_ID(N'dbo.CK_email_thread_link_activo', N'C') IS NULL THROW 50034, N'Falta el CHECK del vínculo activo.', 1;
+          SQL
+          x /tmp/correo-verifica.sql
+
+      - name: Portal TH — formulario propio (migración, siembra y reversa)
+        # 20261008160000_portal_formacion_formulario_propio: idempotente sobre
+        # el esquema de db push, siembra UNA vez el SST-01-FR-001 (40
+        # preguntas), su reversa es idempotente y la migración vuelve a crear
+        # todo desde cero.
+        env:
+          DATABASE_URL: ${{ env.SGC_IT_DATABASE_URL }}
+        run: |
+          set -e
+          M=prisma/migrations/20261008160000_portal_formacion_formulario_propio/migration.sql
+          R=prisma/manual/2026-10-08-portal-formulario-propio-reversa.sql
+          cat > /tmp/verifica-sst.sql <<'SQL'
+          DECLARE @f INT = (SELECT COUNT(*) FROM dbo.portal_formulario WHERE codigo = N'SST-01-FR-001');
+          DECLARE @v INT = (SELECT COUNT(*) FROM dbo.portal_formulario_version v JOIN dbo.portal_formulario f ON f.id = v.formulario_id WHERE f.codigo = N'SST-01-FR-001');
+          DECLARE @p INT = (SELECT COUNT(*) FROM dbo.portal_formulario_version v JOIN dbo.portal_formulario f ON f.id = v.formulario_id CROSS APPLY OPENJSON(v.definicion, N'$.preguntas') WHERE f.codigo = N'SST-01-FR-001');
+          IF @f <> 1 OR @v <> 1 OR @p <> 40 THROW 50000, N'La siembra del SST-01-FR-001 no quedó como se esperaba (1 formulario, 1 versión, 40 preguntas).', 1;
+          IF COL_LENGTH(N'dbo.portal_course_material', N'formulario_id') IS NULL THROW 50001, N'Falta portal_course_material.formulario_id.', 1;
+          SQL
+          cat > /tmp/verifica-reversa.sql <<'SQL'
+          IF OBJECT_ID(N'dbo.portal_formulario', N'U') IS NOT NULL OR COL_LENGTH(N'dbo.portal_course_material', N'formulario_id') IS NOT NULL
+            THROW 50002, N'La reversa del formulario propio no quitó todo.', 1;
+          SQL
+          x() { npx prisma db execute --schema prisma/schema.prisma --file "$1"; }
+          x "$M"; x "$M"; x /tmp/verifica-sst.sql
+          x "$R"; x "$R"; x /tmp/verifica-reversa.sql
+          x "$M"; x "$M"; x /tmp/verifica-sst.sql
+
+      - name: Portal TH — evaluaciones (migración y reversa)
+        # 20261009150000_portal_formulario_evaluacion: aditiva e idempotente
+        # (corre dos veces), su reversa es idempotente y la migración vuelve a
+        # crear la tabla de intentos. No toca ninguna tabla existente.
+        env:
+          DATABASE_URL: ${{ env.SGC_IT_DATABASE_URL }}
+        run: |
+          set -e
+          M=prisma/migrations/20261009150000_portal_formulario_evaluacion/migration.sql
+          R=prisma/manual/2026-10-09-portal-formulario-evaluacion-reversa.sql
+          cat > /tmp/verifica-intento.sql <<'SQL'
+          IF OBJECT_ID(N'dbo.portal_formulario_intento', N'U') IS NULL THROW 50010, N'Falta portal_formulario_intento.', 1;
+          IF COL_LENGTH(N'dbo.portal_formulario_intento', N'porcentaje') IS NULL THROW 50011, N'Falta portal_formulario_intento.porcentaje.', 1;
+          SQL
+          cat > /tmp/verifica-reversa-intento.sql <<'SQL'
+          IF OBJECT_ID(N'dbo.portal_formulario_intento', N'U') IS NOT NULL THROW 50012, N'La reversa de evaluaciones no quitó portal_formulario_intento.', 1;
+          IF OBJECT_ID(N'dbo.portal_formulario_version', N'U') IS NULL THROW 50013, N'La reversa de evaluaciones no debe tocar portal_formulario_version.', 1;
+          SQL
+          x() { npx prisma db execute --schema prisma/schema.prisma --file "$1"; }
+          x "$M"; x "$M"; x /tmp/verifica-intento.sql
+          x "$R"; x "$R"; x /tmp/verifica-reversa-intento.sql
+          x "$M"; x /tmp/verifica-intento.sql
+
+      - name: Portal TH — eventos del calendario (migración y reversa)
+        # 20261009180000_portal_eventos: aditiva e idempotente (corre dos veces), su reversa es idempotente y la
+        # migración vuelve a crear la tabla. No toca ninguna tabla existente.
+        env:
+          DATABASE_URL: ${{ env.SGC_IT_DATABASE_URL }}
+        run: |
+          set -e
+          M=prisma/migrations/20261009180000_portal_eventos/migration.sql
+          R=prisma/manual/2026-10-09-portal-eventos-reversa.sql
+          cat > /tmp/verifica-evento.sql <<'SQL'
+          IF OBJECT_ID(N'dbo.portal_evento', N'U') IS NULL THROW 50020, N'Falta portal_evento.', 1;
+          IF COL_LENGTH(N'dbo.portal_evento', N'eliminado_at') IS NULL THROW 50021, N'Falta portal_evento.eliminado_at.', 1;
+          SQL
+          cat > /tmp/verifica-reversa-evento.sql <<'SQL'
+          IF OBJECT_ID(N'dbo.portal_evento', N'U') IS NOT NULL THROW 50022, N'La reversa de eventos no quitó portal_evento.', 1;
+          SQL
+          x() { npx prisma db execute --schema prisma/schema.prisma --file "$1"; }
+          x "$M"; x "$M"; x /tmp/verifica-evento.sql
+          x "$R"; x "$R"; x /tmp/verifica-reversa-evento.sql
+          x "$M"; x /tmp/verifica-evento.sql
 
       - name: Evidencia SGC (manifiesto + matriz de trazabilidad)
         if: always()

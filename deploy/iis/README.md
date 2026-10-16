@@ -34,12 +34,21 @@ rem Reversa completa
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\iis-setup-maintenance.ps1 -Rollback
 ```
 
-- `main.yml` activa la página **solo** en el camino de cambio de esquema, que es el que detiene las apps. Al final de **todo** deploy corre `maintenance-off.ps1` con `if: always()`: si la app responde 200 la quita, y si no, la deja.
+- `main.yml` y `deploy-testing.yml` activan la página en **todo** deploy, antes de instalar dependencias y compilar (desde 2026-10-10). Al final de **todo** deploy corre `maintenance-off.ps1` con `if: always()`: si la app responde 200 la quita, y si no, la deja.
 - La reversa total también se puede hacer con `appcmd restore backup "antes-mantenimiento-<fecha>"`, más la copia del `web.config` que queda en `C:\inetpub\synerlink-mantenimiento-respaldos\<fecha>\`.
 
 ## Entorno de pruebas (.230)
 
-`deploy-testing.yml` **no** usa esto. La URL de pruebas es un túnel trycloudflare que apunta directo a `localhost:3030`, sin pasar por IIS. El sitio IIS `rp-kronos-test` (:8450) existe en la .230, pero no es la entrada que se usa.
+`deploy-testing.yml` la activa en el sitio IIS `rp-kronos-test`. La URL de pruebas es un túnel trycloudflare que apunta directo a `localhost:3030`, sin pasar por IIS. El sitio IIS `rp-kronos-test` (:8450, `kronos-test.gsslatam.com`) existe en la .230 y sirve para probar la página. Su configuración es `testing/rp-kronos-test.web.config`:
+
+```bat
+cd /d C:\Users\nicolas.rivera\projects\front-kronos-test
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\iis-setup-maintenance.ps1 -SiteName rp-kronos-test -SitePath C:\inetpub\testrp\rp-kronos-test -HostName kronos-test.gsslatam.com -Port 8450 -WebConfigSource deploy\iis\testing\rp-kronos-test.web.config
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\maintenance-on.ps1  -SitePath C:\inetpub\testrp\rp-kronos-test
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\maintenance-off.ps1 -SitePath C:\inetpub\testrp\rp-kronos-test -HealthUrl http://localhost:3030/
+```
+
+El binding usa SNI, así que por IP no responde. Para probar desde otro equipo: `curl -sk --resolve kronos-test.gsslatam.com:8450:192.168.11.230 https://kronos-test.gsslatam.com:8450/`.
 
 El diseño se validó el 2026-10-07 en un sitio IIS temporal de la .230, que se borró al terminar:
 

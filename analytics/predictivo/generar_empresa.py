@@ -25,6 +25,13 @@ Inventario (solo donde el conector entrega todo en una llamada):
 Uso:
   python3 analytics/predictivo/generar_empresa.py --empresa ryan --out /tmp/ryan.json
   python3 analytics/predictivo/generar_empresa.py --empresa olp --hoy 2026-09-24
+  python3 analytics/predictivo/generar_empresa.py --empresa olp --decisiones   # + decisiones por artículo
+Opciones de la FASE 1 de decisiones por artículo (apagadas por defecto: el
+job nocturno no las pasa, así que su salida no cambia):
+  --decisiones [RUTA]  escribe además el JSON de decisiones (D1, D2, D7) para
+                       publicar_decisiones.js (por defecto /tmp/predictivo_decisiones_<empresa>.json).
+  --sugerido-neto      el "sugerido pedir" descuenta las OC abiertas y suma lo
+                       comprometido con clientes (arreglo aprobado 2026-09-30).
 Variables: SAP_MCP_HOST (por defecto http://192.168.10.5).
 """
 import argparse
@@ -44,6 +51,7 @@ from generar_farmalogica import (  # noqa: E402
     MESES_ES, LEAD_TIME_DIAS, COBERTURA_OBJETIVO_DIAS, pesos, pesos_corto, pct1, num,
     mes_nombre, add_months, ym_key, forecast, es_intermitente, pronosticar, evaluar_mes_pasado,
 )
+from decisiones_articulo import sugerido_pedir  # noqa: E402
 
 SAP_MCP_HOST = os.environ.get("SAP_MCP_HOST", "http://192.168.10.5")
 DESDE = "2023-01-01"
@@ -145,15 +153,30 @@ def ventas_documentos(sap):
 
 
 def inventario(sap):
-    items = sap.call("sap_query", {"entity": "Items", "filter": "QuantityOnStock gt 0",
-                                   "select": "ItemCode,ItemName,ItemWarehouseInfoCollection",
+    """Existencias por almacén + datos de reposición por artículo.
+
+    Devuelve (stock aprobado, cuarentena, nombres, reposicion) donde reposicion =
+    {ItemCode: {"oc": OC abiertas, "comprometido": pedidos de clientes sin
+    despachar, "lead_time": días de SAP o None}}. Se incluyen también los
+    artículos sin existencias pero con OC o pedidos (su stock es 0).
+    """
+    items = sap.call("sap_query", {"entity": "Items",
+                                   "filter": ("QuantityOnStock gt 0 or QuantityOrderedFromVendors gt 0 "
+                                              "or QuantityOrderedByCustomers gt 0"),
+                                   "select": ("ItemCode,ItemName,QuantityOrderedFromVendors,"
+                                              "QuantityOrderedByCustomers,LeadTime,ItemWarehouseInfoCollection"),
                                    "maxPageSize": 0})["value"]
     alm = sap.call("sap_query", {"entity": "Warehouses", "select": "WarehouseCode,WarehouseName",
                                  "maxPageSize": 0})["value"]
     nombre_alm = {a["WarehouseCode"]: (a.get("WarehouseName") or "").lower() for a in alm}
-    stock, cuarentena, nombres = defaultdict(float), defaultdict(float), {}
+    stock, cuarentena, nombres, reposicion = defaultdict(float), defaultdict(float), {}, {}
     for it in items:
         nombres[it["ItemCode"]] = (it.get("ItemName") or "").strip()
+        reposicion[it["ItemCode"]] = {
+            "oc": float(it.get("QuantityOrderedFromVendors") or 0),
+            "comprometido": float(it.get("QuantityOrderedByCustomers") or 0),
+            "lead_time": int(it["LeadTime"]) if it.get("LeadTime") else None,
+        }
         for w in it.get("ItemWarehouseInfoCollection") or []:
             q = float(w.get("InStock") or 0)
             nom = nombre_alm.get(w.get("WarehouseCode"), "")
@@ -163,7 +186,7 @@ def inventario(sap):
                 stock[it["ItemCode"]] += q
             elif "cuarentena" in nom:
                 cuarentena[it["ItemCode"]] += q
-    return stock, cuarentena, nombres
+    return stock, cuarentena, nombres, reposicion
 
 
 # ----------------------------------------------------------------- principal
@@ -172,6 +195,10 @@ def main():
     ap.add_argument("--empresa", required=True, choices=sorted(EMPRESAS))
     ap.add_argument("--hoy", help="Fecha de corte YYYY-MM-DD (por defecto hoy)")
     ap.add_argument("--out", help="Archivo de salida (por defecto /tmp/predictivo_<empresa>.json)")
+    ap.add_argument("--decisiones", nargs="?", const="", default=None, metavar="RUTA",
+                    help="Escribe también el JSON de decisiones por artículo (F1)")
+    ap.add_argument("--sugerido-neto", action="store_true",
+                    help="El sugerido de pedido descuenta OC abiertas y suma lo comprometido")
     args = ap.parse_args()
     cfg = EMPRESAS[args.empresa]
     hoy = date.fromisoformat(args.hoy) if args.hoy else date.today()
@@ -260,6 +287,7 @@ def main():
 
     # ---- productos (solo con ventas por línea)
     top_productos, ritmo, intermitentes, desc_ref = [], {}, set(), {}
+    unid, valor12, unid12, lineas12 = {}, {}, defaultdict(float), []
     if cfg["fuente"] == "vista":
         unid = defaultdict(lambda: defaultdict(float))
         valor12 = defaultdict(float)
@@ -274,6 +302,8 @@ def main():
             unid[v["ref"]][ym] += v["cant"]
             if ym >= hace12:
                 valor12[v["ref"]] += v["total"]
+                unid12[v["ref"]] += v["cant"]
+                lineas12.append((v["ref"], v["cant"], v["total"]))
 
         def serie_ref(ref):
             return np.array([max(unid[ref].get(m, 0.0), 0.0) for m in completos])
@@ -313,9 +343,10 @@ def main():
 
     # ---- inventario
     productos_inv, sin_stock, error_inv = [], [], None
+    stock, cuarentena, nombre_inv, reposicion = None, {}, {}, {}
     if cfg["inventario"] and ritmo:
         try:
-            stock, cuarentena, nombre_inv = inventario(sap)
+            stock, cuarentena, nombre_inv, reposicion = inventario(sap)
         except Exception as exc:  # sin inventario se sigue solo con ventas
             error_inv = str(exc)[:200]
             print(f"AVISO: inventario no disponible ({error_inv})")
@@ -329,8 +360,9 @@ def main():
                     continue
                 dias = st / diaria
                 nivel = "rojo" if dias < LEAD_TIME_DIAS else "amarillo" if dias < 60 else "verde"
-                pedir = max(0.0, COBERTURA_OBJETIVO_DIAS * diaria - st - cuarentena.get(ref, 0.0))
-                pedir = int(math.ceil(pedir / 10.0) * 10)
+                rep_ref = reposicion.get(ref, {}) if args.sugerido_neto else {}
+                pedir = sugerido_pedir(diaria, st, cuarentena.get(ref, 0.0), rep_ref.get("oc", 0.0),
+                                       rep_ref.get("comprometido", 0.0), COBERTURA_OBJETIVO_DIAS)
                 fecha_pedido = hoy + timedelta(days=max(0, int(dias - LEAD_TIME_DIAS)))
                 productos_inv.append({
                     "codigo": ref, "nombre": desc_ref.get(ref) or nombre_inv.get(ref, ref),
@@ -339,6 +371,9 @@ def main():
                     "sugerido_pedir": pedir, "pedir_antes_de": fecha_pedido.isoformat(),
                     "intermitente": ref in intermitentes,
                 })
+                if args.sugerido_neto:
+                    productos_inv[-1].update(oc_abiertas=round(rep_ref.get("oc", 0.0)),
+                                             comprometido=round(rep_ref.get("comprometido", 0.0)))
             productos_inv.sort(key=lambda p: p["dias_cobertura"])
     con_inventario = cfg["inventario"] and error_inv is None and bool(ritmo)
     en_riesgo = [p for p in productos_inv if p["nivel"] != "verde"]
@@ -479,12 +514,45 @@ def main():
         json.dump(salida, fh, ensure_ascii=False, indent=1)
         fh.write("\n")
     print(f"OK -> {out_path}")
+    if args.decisiones is not None:
+        escribir_decisiones(args, cfg, sap, hoy, completos, unid, valor12, unid12, lineas12,
+                            {**nombre_inv, **desc_ref}, stock, cuarentena, reposicion)
     print(f"{cfg['nombre']}: {resumen}")
     print(f"Historia {ym_key(completos[0])}..{ym_key(completos[-1])} ({n_meses} meses) | fuente {fuente_ventas}")
     print(f"Modelo {pv['modelo']} | WAPE {pv['error_medio']:.1%} | confiabilidad {pv['confiabilidad']} "
           f"(modelo sin ajuste: {conf_modelo}) | inventario {con_inventario} | en riesgo {len(en_riesgo)}")
     if mes_pasado:
         print(mes_pasado["frase"])
+
+
+def escribir_decisiones(args, cfg, sap, hoy, completos, unid, valor12, unid12, lineas12, nombres, stock,
+                        cuarentena, reposicion):
+    """Decisiones por artículo (F1): D1 reabastecer, D2 quiebre a 30 días, D7 registro sanitario."""
+    from decisiones_articulo import construir_decisiones, precio_promedio
+    if stock is None:
+        print("AVISO: sin inventario no se calculan decisiones por artículo")
+        return
+    registros = None
+    try:
+        filas = sap.call("sap_query", {"entity": "FAR_RegiSanitario", "maxPageSize": 0, "select": (
+            "DocEntry,U_Referencia,U_Registro_Sanitario,U_Fecha_Vencimiento,"
+            "U_Estado_Comercializacion,U_Obsoleto")})["value"]
+        registros = [{"ref": r.get("U_Referencia"), "registro": r.get("U_Registro_Sanitario"),
+                      "vence": r.get("U_Fecha_Vencimiento"), "estado": r.get("U_Estado_Comercializacion"),
+                      "obsoleto": r.get("U_Obsoleto")} for r in filas]
+    except Exception as exc:  # noqa: BLE001 - la empresa puede no tener la tabla de registros
+        print(f"AVISO: registros sanitarios no disponibles ({str(exc)[:150]}); se omite D7")
+    dec = construir_decisiones(company_id=cfg["company_id"], hoy=hoy, completos=completos, unid=unid,
+                               valor12=valor12, unid12=unid12, nombres=nombres, stock=stock,
+                               cuarentena=cuarentena, items_sap=reposicion, lotes=None, registros=registros,
+                               precio=precio_promedio(lineas12))
+    dec["empresa"] = cfg["nombre"]
+    ruta = args.decisiones or f"/tmp/predictivo_decisiones_{args.empresa}.json"
+    os.makedirs(os.path.dirname(os.path.abspath(ruta)), exist_ok=True)
+    with open(ruta, "w", encoding="utf-8") as fh:
+        json.dump(dec, fh, ensure_ascii=False)
+        fh.write("\n")
+    print(f"Decisiones -> {ruta}: {len(dec['filas'])} filas {dec['resumen']}")
 
 
 if __name__ == "__main__":

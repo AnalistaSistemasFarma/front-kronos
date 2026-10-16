@@ -1,7 +1,7 @@
 'use client';
 
-import { SolicitadoProcesosView } from '../../../../../components/request-general/SolicitadoAnalyticsView';
+import { PersonalWorkView } from '../../../../../components/request-general/PersonalWorkView';
 
 export default function DashboardSolicitadoPage() {
-  return <SolicitadoProcesosView />;
+  return <PersonalWorkView />;
 }

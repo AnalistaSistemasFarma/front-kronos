@@ -3,6 +3,10 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
 import { isFirmaRequestCategoryOrProcess } from '../../../../lib/orion/access';
+import {
+  SQL_CATEGORIAS_CREACION,
+  SQL_PROCESOS_CREACION,
+} from '../../../../lib/requests-general/catalogoCreacion';
 
 export async function GET(req) {
   try {
@@ -18,16 +22,7 @@ export async function GET(req) {
       FROM company c
     `;
 
-    let queryCategories = `
-      SELECT 
-        c.id_company, cr.id, c.company, cr.category
-      FROM company_category_request ccr
-      INNER JOIN company c 
-        ON c.id_company = ccr.id_company
-      INNER JOIN category_request cr 
-        ON cr.id = ccr.id_category_request
-      WHERE cr.active = 1
-    `;
+    let queryCategories = SQL_CATEGORIAS_CREACION;
 
     if (companyId) {
       queryCategories += ` AND c.id_company = @companyId`;
@@ -53,22 +48,8 @@ export async function GET(req) {
 
     queryProcessCategoriesNew += ` ORDER BY process`;
 
-    const queryProcessCategories = `
-      SELECT
-        pc.id as id_process,
-        pc.process,
-        pc.id_category_request,
-        cr.category,
-        u.email,
-        pc.description,
-		    pc.active
-      FROM process_category pc
-      INNER JOIN category_request cr
-        ON cr.id = pc.id_category_request
-      LEFT JOIN [user] u
-        ON u.id = pc.assigned
-      ORDER BY pc.process
-    `;
+    // Misma consulta que usa el módulo Correo (lib/requests-general/catalogoCreacion).
+    const queryProcessCategories = SQL_PROCESOS_CREACION;
 
     const queryAssignedUsers = `
       SELECT DISTINCT

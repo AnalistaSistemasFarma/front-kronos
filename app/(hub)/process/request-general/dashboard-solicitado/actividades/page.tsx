@@ -1,7 +1,7 @@
-'use client';
+import { redirect } from 'next/navigation';
+import { DASHBOARD_SOLICITADO_URL } from '../../../../../../lib/request-general/dashboardRoutes';
 
-import { SolicitadoActividadesView } from '../../../../../../components/request-general/SolicitadoActividadesView';
-
+/** «Mis actividades» ahora vive en «Mi trabajo»; se conserva la ruta por enlaces guardados. */
 export default function SolicitadoActividadesPage() {
-  return <SolicitadoActividadesView />;
+  redirect(DASHBOARD_SOLICITADO_URL);
 }

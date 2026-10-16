@@ -1,102 +1,60 @@
 'use client';
 
-import { Group, Paper, Text, ThemeIcon, Title, UnstyledButton } from '@mantine/core';
-import { IconClipboardList, IconChecklist } from '@tabler/icons-react';
+import { IconChecklist, IconUsersGroup } from '@tabler/icons-react';
 import {
   useSolicitadoTab,
   type SolicitadoTab,
 } from '../../lib/request-general/SolicitadoTabContext';
-import { useDashboardChartPalette } from '../dashboard/useDashboardChartPalette';
+import { useSolicitadoData } from './SolicitadoShell';
+import { panelStyles } from '../ui/panel/Panel';
 
 const navItems: {
   tab: SolicitadoTab;
   label: string;
   description: string;
-  icon: typeof IconClipboardList;
+  icon: typeof IconChecklist;
 }[] = [
   {
     tab: 'procesos',
-    label: 'Mis procesos',
-    description: 'Solicitudes que gestionas',
-    icon: IconClipboardList,
+    label: 'Mi trabajo',
+    description: 'Tus actividades y las solicitudes de tus procesos',
+    icon: IconChecklist,
   },
   {
-    tab: 'actividades',
-    label: 'Mis actividades',
-    description: 'Tareas asignadas a ti',
-    icon: IconChecklist,
+    tab: 'equipo',
+    label: 'Mi equipo',
+    description: 'Carga de tus colaboradores',
+    icon: IconUsersGroup,
   },
 ];
 
-/** Título + submenú. Pensado para ir en sticky. */
+/** Pestañas tipo píldora (mismo estilo del Monitor del sistema). */
 export default function SolicitadoNav() {
   const { activeTab, setActiveTab } = useSolicitadoTab();
-  const { palette } = useDashboardChartPalette();
+  const { access } = useSolicitadoData();
+  const items = navItems.filter((item) => (item.tab === 'equipo' ? access.equipo : access.personal));
+
+  if (items.length < 2) return null;
 
   return (
-    <Paper
-      p={{ base: 'xs', sm: 'sm' }}
-      radius='lg'
-      withBorder
-      style={{
-        background: palette.chartPanelBg,
-        borderColor: palette.blue100,
-      }}
-    >
-      <Title order={3} mb='xs' style={{ color: palette.primary, lineHeight: 1.2 }}>
-        Dashboard personal
-      </Title>
-      <Group gap='xs' wrap='wrap' grow>
-        {navItems.map((item) => {
-          const isActive = activeTab === item.tab;
-          const Icon = item.icon;
-
-          return (
-            <UnstyledButton
-              key={item.tab}
-              type='button'
-              onClick={() => setActiveTab(item.tab)}
-              className='dashboard-nav-item'
-              style={{ flex: '1 1 140px', minWidth: 0 }}
-            >
-              <Paper
-                p='xs'
-                radius='md'
-                withBorder
-                style={{
-                  borderColor: isActive ? palette.borderAccentStrong : palette.blue100,
-                  background: isActive ? palette.blue50 : 'transparent',
-                }}
-              >
-                <Group gap='sm' wrap='nowrap'>
-                  <ThemeIcon
-                    size={32}
-                    radius='md'
-                    variant={isActive ? 'gradient' : 'light'}
-                    gradient={isActive ? palette.gradient : undefined}
-                    color='blue'
-                  >
-                    <Icon size={16} />
-                  </ThemeIcon>
-                  <div style={{ minWidth: 0 }}>
-                    <Text
-                      size='sm'
-                      fw={700}
-                      lineClamp={1}
-                      style={{ color: isActive ? palette.primary : palette.blue800 }}
-                    >
-                      {item.label}
-                    </Text>
-                    <Text size='xs' c='dimmed' lineClamp={1} visibleFrom='sm'>
-                      {item.description}
-                    </Text>
-                  </div>
-                </Group>
-              </Paper>
-            </UnstyledButton>
-          );
-        })}
-      </Group>
-    </Paper>
+    <nav className={panelStyles.tabList} aria-label='Secciones del Dashboard personal'>
+      {items.map((item) => {
+        const isActive = activeTab === item.tab;
+        const Icon = item.icon;
+        return (
+          <button
+            key={item.tab}
+            type='button'
+            title={item.description}
+            aria-current={isActive ? 'page' : undefined}
+            className={`${panelStyles.tab} ${isActive ? panelStyles.tabActive : ''}`}
+            onClick={() => setActiveTab(item.tab)}
+          >
+            <Icon size={16} stroke={2} />
+            {item.label}
+          </button>
+        );
+      })}
+    </nav>
   );
 }

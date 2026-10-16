@@ -35,6 +35,7 @@ import {
   IconMoon,
 } from '@tabler/icons-react';
 import { useTheme } from '../../../components/providers';
+import StartPageSection from '../../../components/profile/StartPageSection';
 import { CustomColorPicker } from '../../../components/theme/CustomColorPicker';
 import { FONTS } from '../../../lib/theme/fonts';
 import { PALETTES } from '../../../lib/theme/palettes';
@@ -45,6 +46,7 @@ import {
   MiAvatarSection,
   type Resultado,
 } from '../../../components/avatar/ProfileAvatarSections';
+import MiFirmaGssSection from '../../../components/firma-gss/MiFirmaGssSection';
 
 interface UserProfile {
   id: string;
@@ -388,6 +390,9 @@ export default function ProfileSettingsPage() {
           <MiAvatarSection onResultado={mostrarResultado} onImagen={aplicarImagen} />
           <AvataresAgentesSection onResultado={mostrarResultado} />
 
+          {/* Mi firma en GSS Firma: dibujada o imagen de la firma manuscrita (2026-10-14) */}
+          <MiFirmaGssSection onResultado={mostrarResultado} />
+
           {/* Appearance Section */}
           <Card withBorder padding='lg' radius='md'>
             <Title order={3} mb='md'>
@@ -588,6 +593,9 @@ export default function ProfileSettingsPage() {
               </div>
             </Stack>
           </Card>
+
+          {/* Accesibilidad: página de inicio personalizada (2026-10-15) */}
+          <StartPageSection onResultado={mostrarResultado} />
 
           {/* Change Password Section */}
           <Card withBorder padding='lg' radius='md'>

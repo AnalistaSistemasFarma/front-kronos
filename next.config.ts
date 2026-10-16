@@ -1,6 +1,5 @@
 import type { NextConfig } from 'next';
-import withPWA from '@ducanh2912/next-pwa';
-import { withSentryConfig } from '@sentry/nextjs/config';
+import { PHASE_DEVELOPMENT_SERVER } from 'next/constants';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -31,7 +30,12 @@ const sgcSecurityHeaders = [
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=()' },
 ];
 
+// Id único por build: lo comparten el HTML/JS del cliente y el servidor
+// (/api/health/version) para detectar que hay una versión nueva desplegada.
+const appBuildId = `${(process.env.GITHUB_SHA ?? 'local').slice(0, 12)}-${Date.now().toString(36)}`;
+
 const nextConfig: NextConfig = {
+  generateBuildId: async () => appBuildId,
   async headers() {
     return [
       { source: '/process/sgc-documental/:path*', headers: sgcSecurityHeaders },
@@ -59,6 +63,7 @@ const nextConfig: NextConfig = {
   // Solo variables que el cliente necesita (sin prefijo NEXT_PUBLIC_).
   // Los secretos (p. ej. MICROSOFTCLIENTSECRET) deben quedar solo en .env y usarse en servidor.
   env: {
+    APP_BUILD_ID: appBuildId,
     API_EMAIL: process.env.API_EMAIL,
     MICROSOFTCLIENTID: process.env.MICROSOFTCLIENTID,
     MICROSOFTTENANTID: process.env.MICROSOFTTENANTID,
@@ -77,18 +82,41 @@ const nextConfig: NextConfig = {
 // `public/sw.js` con el suyo y pasará a mandar `worker/index.js`: ambos
 // archivos deben estar sincronizados antes de hacer ese cambio.
 // Sentry: sin subida de source maps (no hay auth token en los servidores) ni telemetria.
-export default withSentryConfig(
-  withPWA({
-    dest: 'public',
-    register: true,
-    disable: true,
-    customWorkerSrc: 'worker',
-  })(nextConfig),
-  {
-    org: 'farmalogica',
-    project: 'kronos-synerlink',
-    silent: true,
-    telemetry: false,
-    sourcemaps: { disable: true },
-  },
-);
+// En `next dev` ambos quedan fuera: Sentry solo se habilita en producción (lib/sentry.ts)
+// y next-pwa está desactivado, pero cargarlos encarece cada arranque y recompilación.
+export default async function config(phase: string): Promise<NextConfig> {
+  if (phase === PHASE_DEVELOPMENT_SERVER) {
+    // En local el servidor de desarrollo crecía a 3+ GB de RAM y con el equipo sin memoria libre
+    // todo se volvía lento. Esta opción de Next reduce bastante ese consumo a cambio de
+    // compilar un poco más despacio la primera vez cada página.
+    return {
+      ...nextConfig,
+      experimental: { ...nextConfig.experimental, webpackMemoryOptimizations: true },
+      // Aun así seguía subiendo a 4+ GB en una jornada (2026-10-15). Soltar antes las páginas
+      // compiladas que no se usan (por defecto 60 s y 5 páginas): volver a una página vieja
+      // la recompila, pero la memoria no se acumula durante el día.
+      onDemandEntries: { maxInactiveAge: 25 * 1000, pagesBufferLength: 2 },
+    };
+  }
+
+  const [{ default: withPWA }, { withSentryConfig }] = await Promise.all([
+    import('@ducanh2912/next-pwa'),
+    import('@sentry/nextjs/config'),
+  ]);
+
+  return withSentryConfig(
+    withPWA({
+      dest: 'public',
+      register: true,
+      disable: true,
+      customWorkerSrc: 'worker',
+    })(nextConfig),
+    {
+      org: 'farmalogica',
+      project: 'kronos-synerlink',
+      silent: true,
+      telemetry: false,
+      sourcemaps: { disable: true },
+    },
+  );
+}

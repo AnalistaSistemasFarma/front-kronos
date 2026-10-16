@@ -333,11 +333,11 @@ describe('lista blanca de herramientas (MCP en memoria)', () => {
     expect(inserts(/INSERT INTO/)).toHaveLength(0);
   });
 
-  it('una key sin allowedTools (horus, nancy, test-local) sigue viendo las 30', async () => {
+  it('una key sin allowedTools (horus, nancy, test-local) sigue viendo las 34', async () => {
     const legacy: AuthScope = { agent: 'horus', role: 'admin', allCompanies: true, companyIds: [] };
     const client = await connectClient(buildMcpServer(legacy, noopAudit, { maxPageSize: 200, defaultPageSize: 50 }));
     const { tools } = await client.listTools();
-    expect(tools.length).toBe(27);
+    expect(tools.length).toBe(34);
     expect(tools.map((t) => t.name)).toContain('kronos_create_request');
     expect(tools.map((t) => t.name)).toContain(TOOL);
   });
@@ -427,8 +427,8 @@ describe('lista blanca por HTTP directo', () => {
     expect(res.status).toBe(403);
   });
 
-  it('tools/list por HTTP: la restringida ve 1, la vieja ve 30', async () => {
+  it('tools/list por HTTP: la restringida ve 1, la vieja ve 34', async () => {
     expect(await listNames(AGENT_KEY)).toEqual([TOOL]);
-    expect((await listNames(LEGACY_KEY)).length).toBe(27);
+    expect((await listNames(LEGACY_KEY)).length).toBe(34);
   });
 });

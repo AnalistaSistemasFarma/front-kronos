@@ -1,0 +1,302 @@
+/*
+ * Listados de solicitudes con el diseño de los paneles (components/ui/panel).
+ * Debe vivir dentro de panelStyles.root (de ahí salen --pn-* y los tonos).
+ */
+
+/* ---------- Encabezado ---------- */
+
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pn-muted);
+}
+
+.crumbs a {
+  color: var(--pn-info-ink);
+  text-decoration: none;
+}
+
+.crumbs a:hover {
+  text-decoration: underline;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.titleIcon {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--pn-info) 75%, #fff), var(--pn-info));
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--pn-info) 35%, transparent);
+}
+
+.subtitle {
+  margin: 6px 0 0;
+  font-size: 15px;
+  color: var(--pn-muted);
+}
+
+/* ---------- Indicadores que filtran ---------- */
+
+.statTile {
+  appearance: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+  background: var(--pn-card);
+  border-radius: var(--pn-radius);
+  box-shadow: var(--pn-shadow);
+  border: 1px solid var(--pn-hairline);
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.statTile:hover {
+  border-color: color-mix(in srgb, var(--tone) 45%, transparent);
+}
+
+.statTile:focus-visible {
+  outline: 2px solid var(--pn-info);
+  outline-offset: 2px;
+}
+
+.statTileActive {
+  border-color: var(--tone);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 18%, transparent), var(--pn-shadow);
+}
+
+.statIcon {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: var(--tone-ink);
+  background: color-mix(in srgb, var(--tone) 14%, transparent);
+}
+
+.statLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pn-muted);
+}
+
+.statValue {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.statStatic {
+  cursor: default;
+}
+
+.statStatic:hover {
+  border-color: var(--pn-hairline);
+}
+
+.ringSvg {
+  flex: 0 0 auto;
+  width: 48px;
+  height: 48px;
+}
+
+.ringTrack {
+  stroke: var(--pn-fill-strong);
+}
+
+.ringValue {
+  stroke: var(--tone);
+  transition: stroke-dashoffset 600ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ringText {
+  font-size: 13px;
+  font-weight: 700;
+  fill: var(--pn-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .statTile,
+  .ringValue {
+    transition: none;
+  }
+}
+
+/* ---------- Filtros ---------- */
+
+.filterHead {
+  appearance: none;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  width: 100%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0;
+  text-align: left;
+}
+
+.filterHead:focus-visible {
+  outline: 2px solid var(--pn-info);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+
+.filterTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filterChevron {
+  color: var(--pn-muted);
+  transition: transform 160ms ease;
+}
+
+.filterChevronOpen {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .filterChevron {
+    transition: none;
+  }
+}
+
+/* ---------- Barra de avance de tareas ---------- */
+
+/* "Se rellena": crece desde 0 al cargar y, mientras no termina, un destello la recorre.
+   Completa (tono ok) queda quieta. */
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--mantine-color-dimmed);
+  white-space: nowrap;
+}
+
+.progressTrack {
+  position: relative;
+  flex: 1 1 auto;
+  max-width: 140px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--pn-fill-strong);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+}
+
+.progressFill {
+  position: relative;
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--tone) 65%, #fff), var(--tone));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--tone) 45%, transparent);
+  transform-origin: left center;
+  overflow: hidden;
+}
+
+.progressFill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 45%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+  opacity: 0;
+  transform: translateX(-100%);
+}
+
+.progressDone .progressFill::after {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .progressFill {
+    animation: pn-fill 900ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .progress:not(.progressDone) .progressFill::after {
+    animation: pn-sweep 2.2s ease-in-out 900ms infinite;
+  }
+}
+
+@keyframes pn-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Pasa en el 70 % del ciclo y descansa el resto. */
+@keyframes pn-sweep {
+  0% {
+    opacity: 1;
+    transform: translateX(-100%);
+  }
+  70% {
+    opacity: 1;
+    transform: translateX(240%);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(240%);
+  }
+}
+
+/* ---------- Extras de indicadores ---------- */
+
+/* Grilla que acomoda 4 o 5 indicadores según el ancho. */
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.statHint {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--pn-muted);
+}
+
+/* Acento violeta (Tareas pendientes en Solicitudes asignadas). */
+.toneViolet {
+  --tone: #af52de;
+  --tone-ink: #8944ab;
+}
+
+:global([data-mantine-color-scheme='dark']) .toneViolet {
+  --tone: #bf5af2;
+  --tone-ink: #da8fff;
+}
