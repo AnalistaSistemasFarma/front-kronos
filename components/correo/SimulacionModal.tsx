@@ -26,7 +26,9 @@ import { useMediaQuery } from '@mantine/hooks';
 import { IconAlertTriangle, IconCheck, IconFlask, IconMailForward, IconPaperclip, IconRefresh, IconX } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import SgcSelect from '../sgc/SgcSelect';
-import { ACUSE_A_TODOS, ACUSE_ETIQUETA, rutaSolicitud, textoAcuse } from '../../lib/correo/acuse';
+import { ACUSE_A_TODOS, ACUSE_ETIQUETA, rutaSolicitud } from '../../lib/correo/acuse';
+import { fragmentoAcuse, logoAcuseUrl } from '../../lib/correo/plantillas/acuse.html';
+import HtmlSeguro from './HtmlSeguro';
 import { ALERTA_TEXTO, type AlertaFila, type FilaSimulacion, type ResultadoAcuse, type ResultadoCreacion } from '../../lib/correo/types';
 import { correoApi, tamano, urlSolicitud, type CategoriaCorreo, type ProcesoCorreo } from './correoClient';
 import { categoriaDeProceso, opcionesCategorias, opcionesProcesos, opcionesProcesosAgrupadas } from './catalogoOpciones';
@@ -49,10 +51,21 @@ type Fila = FilaSimulacion & { adjuntosElegidos: string[]; idCategoria: number |
 
 const esExterna = (f: Pick<FilaSimulacion, 'alertas'>) => f.alertas.includes('EXTERNO');
 
-/** Texto de la vista previa: el mismo del servidor, con el número aún por asignar. */
-function previaAcuse(titulo: string, firma: string, idCompany: number): string {
+/** HTML de la vista previa: la misma plantilla del servidor, con el número aún por asignar. */
+function previaAcuse(p: { titulo: string; firma: string; empresa?: string | null; proceso?: ProcesoCorreo | null; responsables?: string[] }): string {
   const origen = typeof window !== 'undefined' ? window.location.origin : '';
-  return textoAcuse({ id: '(número)', titulo, enlace: `${origen}${rutaSolicitud(0).replace('id=0', 'id=(número)')}`, firma, idCompany });
+  return fragmentoAcuse({
+    id: '(número)',
+    titulo: p.titulo,
+    enlace: `${origen}${rutaSolicitud(0).replace('id=0', 'id=N')}`,
+    firma: p.firma,
+    empresa: p.empresa ?? null,
+    categoria: p.proceso?.categoria ?? null,
+    proceso: p.proceso?.nombre ?? null,
+    creada: new Date(),
+    responsable: p.responsables?.length ? p.responsables.join(', ') : null,
+    logoUrl: logoAcuseUrl(origen),
+  });
 }
 
 /** ¿El acuse de este resultado necesita atención (aviso + «Reintentar respuesta»)? */
@@ -204,6 +217,15 @@ export default function SimulacionModal({
   const categoriaData = useMemo(() => opcionesCategorias(categorias), [categorias]);
   const procesoAgrupado = useMemo(() => opcionesProcesosAgrupadas(categorias, procesos), [categorias, procesos]);
   const responsables = useMemo(() => new Map(procesos.map((p) => [p.id, p.responsables ?? []])), [procesos]);
+  const nombreEmpresa = empresas.find((e) => e.idCompany === empresa)?.companyName ?? null;
+  const previaFila = (f: Fila) =>
+    previaAcuse({
+      titulo: f.titulo,
+      firma: nombreOperador,
+      empresa: nombreEmpresa,
+      proceso: procesos.find((p) => p.id === f.idProcess) ?? null,
+      responsables: f.idProcess ? responsables.get(f.idProcess) : undefined,
+    });
 
   const actualizar = (i: number, cambio: Partial<Fila>) =>
     setFilas((prev) =>
@@ -248,7 +270,14 @@ export default function SimulacionModal({
         });
         out.push(r);
       } catch (e) {
-        out.push({ conversationId: f.conversationId, ok: false, error: e instanceof Error ? e.message : String(e), duplicado: (e as { code?: string }).code === 'DUPLICADO' });
+        const err = e as { code?: string; idRequest?: number };
+        out.push({
+          conversationId: f.conversationId,
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+          duplicado: err.code === 'DUPLICADO',
+          ...(err.code === 'DUPLICADO' && typeof err.idRequest === 'number' ? { idRequest: err.idRequest } : {}),
+        });
       }
       setCreando({ hechas: out.length, total: lote.length });
     }
@@ -328,8 +357,16 @@ export default function SimulacionModal({
             </Text>
           ))}
           {fallidas.map((r) => (
-            <Text size='sm' c='red.8' key={r.conversationId}>
+            <Text size='sm' c='red.8' key={r.conversationId} data-testid='correo-sim-fallida'>
               {asunto(r.conversationId)}: {r.error}
+              {r.duplicado && r.idRequest ? (
+                <>
+                  {' '}
+                  <Anchor href={urlSolicitud(r.idRequest)} target='_blank' data-testid='correo-sim-abrir-existente'>
+                    Abrir la solicitud #{r.idRequest}
+                  </Anchor>
+                </>
+              ) : null}
             </Text>
           ))}
         </Stack>
@@ -448,15 +485,9 @@ export default function SimulacionModal({
               {f.verAcuse ? 'Ocultar vista previa' : 'Ver la respuesta'}
             </Anchor>
             {f.verAcuse && (
-              <Text
-                size='xs'
-                p='xs'
-                bg='var(--mantine-color-default-hover)'
-                style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', borderRadius: 'var(--mantine-radius-sm)', border: '1px solid var(--mantine-color-default-border)' }}
-                data-testid='correo-sim-acuse-previa'
-              >
-                {previaAcuse(f.titulo, nombreOperador, empresa)}
-              </Text>
+              <div data-testid='correo-sim-acuse-previa'>
+                <HtmlSeguro html={previaFila(f)} remotas titulo='Vista previa de la respuesta en el hilo' />
+              </div>
             )}
           </>
         )}
@@ -667,15 +698,9 @@ export default function SimulacionModal({
                     </Anchor>
                   </Group>
                   {verPrevia && (
-                    <Text
-                      size='xs'
-                      p='xs'
-                      bg='var(--mantine-color-default-hover)'
-                      style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', borderRadius: 'var(--mantine-radius-sm)', border: '1px solid var(--mantine-color-default-border)' }}
-                      data-testid='correo-sim-acuse-previa-global'
-                    >
-                      {previaAcuse(filas[0]?.titulo ?? '(título de la solicitud)', nombreOperador, empresa)}
-                    </Text>
+                    <div data-testid='correo-sim-acuse-previa-global'>
+                      <HtmlSeguro html={filas[0] ? previaFila(filas[0]) : previaAcuse({ titulo: '(título de la solicitud)', firma: nombreOperador, empresa: nombreEmpresa })} remotas titulo='Vista previa de la respuesta en el hilo' />
+                    </div>
                   )}
                   {filas.some(esExterna) && acuseGlobal && (
                     <Text size='xs' c='orange.8'>

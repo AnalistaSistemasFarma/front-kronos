@@ -66,9 +66,15 @@ export interface ArchivoAdjunto {
 }
 
 export interface RespuestaEntrada {
+  /** Texto plano (nota del caso y vista en clientes sin HTML). */
   texto: string;
   todos: boolean;
   adjuntos: ArchivoAdjunto[];
+  /**
+   * Bloque HTML propio (acuse con plantilla). Si viene, se responde con borrador + PATCH del cuerpo
+   * para dejarlo encima del historial citado; si no, el texto va como `comment`.
+   */
+  html?: string;
 }
 
 /**
@@ -84,6 +90,11 @@ export interface MailProvider {
   adjunto(mensajeId: string, adjuntoId: string): Promise<ArchivoAdjunto>;
   responder(mensajeId: string, entrada: RespuestaEntrada): Promise<void>;
   categorizar(mensajeId: string, categoria: string): Promise<void>;
+  /**
+   * No leídos de la Bandeja de entrada (icono del Correo en la cabecera). Opcional:
+   * si el proveedor no lo trae, se calcula con carpetas().
+   */
+  noLeidosBandeja?(): Promise<number>;
 }
 
 /** Fila de la simulación (una por hilo). */

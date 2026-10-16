@@ -65,7 +65,9 @@ export class CorreoApiError extends Error {
   constructor(
     message: string,
     public readonly status: number,
-    public readonly code?: string
+    public readonly code?: string,
+    /** Solicitud relacionada (en un DUPLICADO: la que ya tiene este correo). */
+    public readonly idRequest?: number
   ) {
     super(message);
   }
@@ -75,7 +77,7 @@ async function leer<T>(res: Response): Promise<T> {
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
     const msg = typeof body.error === 'string' ? body.error : res.status === 401 ? 'Su sesión expiró.' : `Error ${res.status}`;
-    throw new CorreoApiError(msg, res.status, typeof body.code === 'string' ? body.code : undefined);
+    throw new CorreoApiError(msg, res.status, typeof body.code === 'string' ? body.code : undefined, typeof body.idRequest === 'number' ? body.idRequest : undefined);
   }
   return body as T;
 }

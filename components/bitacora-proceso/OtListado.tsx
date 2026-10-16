@@ -7,7 +7,7 @@ import { Alert, Badge, Box, Button, Card, Group, Loader, SimpleGrid, Stack, Tabl
 import { useMediaQuery } from '@mantine/hooks';
 import { IconAlertTriangle, IconCheck, IconChevronRight, IconPlus, IconSearch, IconSettings } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
-import { OT_BASE_URL, OT_DIAS_CERRADAS } from '../../lib/bitacora-proceso/constants';
+import { OT_BASE_URL, OT_DIAS_CERRADAS, OT_ROL_LABEL } from '../../lib/bitacora-proceso/constants';
 import type { OrdenResumen } from '../../lib/bitacora-proceso/db';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import NuevaOrdenModal from './NuevaOrdenModal';
@@ -19,6 +19,12 @@ import { codigoOt, fmtFechaHora, haceCuanto, otHref, turnoLabel, useOtFetch } fr
  * CERRADAS de los últimos 30 días (tarjetas en el celular, tabla en escritorio).
  * El botón «Nueva bitácora» (solo Gestión) queda fijo abajo en el celular.
  */
+/** Estado de los vistos buenos de una cerrada (B2): «Completa» o qué falta. */
+function estadoVistos(o: OrdenResumen): string {
+  if (o.verificada) return 'Completa';
+  return o.pendiente ? `Falta: ${OT_ROL_LABEL[o.pendiente].toLowerCase()}` : 'Por revisar';
+}
+
 export default function OtListado({ company }: { company: OtCompanyAccess }) {
   const router = useRouter();
   const desktop = useMediaQuery('(min-width: 48em)') ?? false;
@@ -148,7 +154,7 @@ export default function OtListado({ company }: { company: OtCompanyAccess }) {
                   <Table.Td>{fmtFechaHora(o.cerradaEn)}</Table.Td>
                   <Table.Td>{o.registros}</Table.Td>
                   <Table.Td>
-                    <Badge color={o.verificada ? 'blue' : 'yellow'} variant='light'>{o.verificada ? 'Verificada' : 'Por verificar'}</Badge>
+                    <Badge color={o.verificada ? 'blue' : 'yellow'} variant='light'>{estadoVistos(o)}</Badge>
                   </Table.Td>
                 </Table.Tr>
               ))}
@@ -162,7 +168,7 @@ export default function OtListado({ company }: { company: OtCompanyAccess }) {
               <Card withBorder radius='md' p='md'>
                 <Group justify='space-between' wrap='nowrap'>
                   <Text fw={700}>{codigoOt(o.consecutivo)}</Text>
-                  <Badge color={o.verificada ? 'blue' : 'yellow'} variant='light'>{o.verificada ? 'Verificada' : 'Por verificar'}</Badge>
+                  <Badge color={o.verificada ? 'blue' : 'yellow'} variant='light'>{estadoVistos(o)}</Badge>
                 </Group>
                 <Text fw={500} lineClamp={2}>{o.producto}</Text>
                 <Text size='sm'>

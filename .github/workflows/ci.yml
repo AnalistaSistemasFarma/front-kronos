@@ -347,6 +347,9 @@ jobs:
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013233000_bitacora_proceso_firmas/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014140000_bitacora_proceso_operadores_areas/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014140000_bitacora_proceso_operadores_areas/migration.sql
+          # Cuatro actores, cuatro vistos buenos y PIN (2026-10-15): dos veces (idempotente).
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261015180000_bitacora_proceso_cuatro_actores/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261015180000_bitacora_proceso_cuatro_actores/migration.sql
           # La base efímera nace sin empresas: se crea Farmalógica (id 1, como en las pruebas de integración) antes de la siembra.
           printf '%s\n' "SET IDENTITY_INSERT [dbo].[company] ON;" "IF NOT EXISTS (SELECT 1 FROM [dbo].[company] WHERE id_company = 1) INSERT INTO [dbo].[company] (id_company, company) VALUES (1, N'FARMALOGICA S.A.');" "SET IDENTITY_INSERT [dbo].[company] OFF;" > /tmp/ot-empresa.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/ot-empresa.sql
@@ -355,6 +358,9 @@ jobs:
           # Ajustes del 2026-10-14 (área predefinida, actividades A6 sin duplicar, observación opcional): dos veces, idempotente.
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-14-bitacora-proceso-ajustes-farmalogica.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-14-bitacora-proceso-ajustes-farmalogica.sql
+          # Script SOLO PRUEBAS que desactiva «Fin de lote» (guardado por DB_NAME()): dos veces.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-15-bitacora-proceso-pruebas-fin-de-lote.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-15-bitacora-proceso-pruebas-fin-de-lote.sql
           # Módulo Correo (2026-10-15): migración, permiso del menú y tarea de fondo APAGADA, dos veces (idempotencia).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261015120000_correo_modulo/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261015120000_correo_modulo/migration.sql
@@ -454,6 +460,21 @@ jobs:
           S=prisma/manual/2026-10-13-bitacora-proceso-p0-farmalogica.sql
           R=prisma/manual/2026-10-13-bitacora-proceso-p0-reversa.sql
           x() { npx prisma db execute --schema prisma/schema.prisma --file "$1"; }
+          # 1) Reversa de los cuatro actores (2026-10-15): con los vistos buenos y PIN de la integración debe negarse
+          #    sin su bandera; con ella, dos veces; luego la migración vuelve a aplicarse dos veces.
+          M4=prisma/migrations/20261015180000_bitacora_proceso_cuatro_actores/migration.sql
+          R4=prisma/manual/2026-10-15-bitacora-proceso-cuatro-actores-reversa.sql
+          if x "$R4"; then echo "La reversa de los cuatro actores debió negarse sin su bandera"; exit 1; fi
+          { echo "EXEC sp_set_session_context N'ot_cuatro_actores_reversa_acepta_perdida', 1;"; cat "$R4"; } > /tmp/ot-r4.sql
+          x /tmp/ot-r4.sql; x /tmp/ot-r4.sql
+          cat > /tmp/ot-verifica-r4.sql <<'SQL'
+          IF COL_LENGTH(N'dbo.ot_orden_trabajo', N'id_jefe_produccion') IS NOT NULL OR OBJECT_ID(N'dbo.ot_pin', N'U') IS NOT NULL OR COL_LENGTH(N'dbo.ot_firma', N'id_operador') IS NOT NULL
+             OR EXISTS (SELECT 1 FROM sys.triggers WHERE name LIKE N'TR[_]ot[_]%' AND is_disabled = 1)
+            THROW 50030, N'La reversa de los cuatro actores no quitó lo suyo o dejó un trigger apagado.', 1;
+          SQL
+          x /tmp/ot-verifica-r4.sql
+          x "$M4"; x "$M4"
+          # 2) Reversa general del P0.
           if x "$R"; then echo "La reversa debió negarse sin ot_reversa_acepta_perdida"; exit 1; fi
           { echo "EXEC sp_set_session_context N'ot_reversa_acepta_perdida', 1;"; cat "$R"; } > /tmp/ot-reversa.sql
           x /tmp/ot-reversa.sql; x /tmp/ot-reversa.sql

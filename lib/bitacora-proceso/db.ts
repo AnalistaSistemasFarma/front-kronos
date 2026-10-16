@@ -1,17 +1,23 @@
 import type { PrismaClient } from '../../app/generated/prisma';
 import { OT_DIAS_CERRADAS, OT_SUBPROCESS_URLS } from './constants';
-import type { AvisoInspector } from './notificaciones';
+import type { AvisoBitacora } from './notificaciones';
 import {
-  assertInspectorDistinto,
-  assertPuedeCerrar,
-  assertPuedeVerificar,
+  assertActoresDistintos,
+  assertPuedeConfirmar,
   huellaContenido,
   OT_CONFIRMACION_VERSION,
-  OT_FIRMA_AUTH_METHOD,
   OT_FIRMA_SIGNIFICADO,
+  OT_VISTOS_BUENOS,
+  rolVisible,
+  siguienteVistoBueno,
+  vistosCompletos,
+  vistosDados,
+  vistosRequeridos,
   type ContenidoFirmable,
   type OtFirmaRol,
+  type OtMetodoConfirmacion,
 } from './firmas';
+import { assertPinUsable, compararPin, hashPin, mensajePinIncorrecto } from './pin';
 import {
   assertActividadRegistrable,
   assertOperadorDeLaOrden,
@@ -22,6 +28,7 @@ import {
   type CambioActividadInput,
   type CambioAreaInput,
   type CambioOperadorInput,
+  type ImportarOperadoresInput,
   type NuevaActividadInput,
   type NuevaAreaInput,
   type NuevaOrdenInput,
@@ -113,7 +120,10 @@ export interface OrdenResumen {
   operadores: number;
   /** La sesión puede registrar en ella (supervisor, bitácora con operarios programados o auxiliar del modelo anterior). */
   soyOperario: boolean;
+  /** Cerrada y con todos los vistos buenos que le corresponden (B2). */
   verificada: boolean;
+  /** Siguiente visto bueno pendiente (null si están todos). */
+  pendiente: OtFirmaRol | null;
 }
 
 /**
@@ -144,8 +154,10 @@ export async function listOrdenes(db: OtDb, idCompany: number, idUser: string, n
       abierta_por: true,
       cerrada_en: true,
       id_inspector: true,
+      id_jefe_produccion: true,
       operarios: { select: { id_user: true } },
-      firmas: { select: { rol: true } },
+      operadores: { select: { id_operador: true } },
+      firmas: { select: { rol: true, significado: true, id_user: true } },
       _count: { select: { registros: true, operadores: true } },
     },
   });
@@ -165,12 +177,15 @@ export async function listOrdenes(db: OtDb, idCompany: number, idUser: string, n
     cerradaEn: r.cerrada_en ? r.cerrada_en.toISOString() : null,
     registros: r._count.registros,
     operadores: r._count.operadores,
-    soyOperario: r._count.operadores > 0 || r.id_inspector === idUser || r.operarios.some((o) => o.id_user === idUser),
-    verificada: r.firmas.some((f) => f.rol === 'INSPECTOR'),
+    soyOperario: r._count.operadores > 0 || r.id_inspector === idUser || r.id_jefe_produccion === idUser || r.operarios.some((o) => o.id_user === idUser),
+    ...(() => {
+      const actores = { estado: r.estado, inspector: r.id_inspector, jefe: r.id_jefe_produccion, operadores: r.operadores.map((x) => x.id_operador) };
+      return { verificada: vistosCompletos(actores, r.firmas), pendiente: siguienteVistoBueno(actores, r.firmas) };
+    })(),
   }));
 }
 
-/** Usuarios activos de la empresa (candidatos a jefe de producción). */
+/** Usuarios activos de la empresa (candidatos a inspector y a jefe de producción). */
 export async function listUsuariosEmpresa(db: OtDb, idCompany: number) {
   const rows = await db.companyUser.findMany({
     where: { id_company: idCompany, user: { isActive: true } },
@@ -215,18 +230,22 @@ async function operadoresActivos(db: Pick<OtDb, 'otOperador'>, idCompany: number
  * activo de la empresa, distinto de quien abre.
  */
 export async function crearOrden(db: OtDb, input: NuevaOrdenInput, actor: OtActor): Promise<{ id: number; consecutivo: number }> {
-  const [jefe, ops, areas] = await Promise.all([
-    db.companyUser.findFirst({ where: { id_company: input.idCompany, id_user: input.inspector, user: { isActive: true } }, select: { id_user: true } }),
+  const activo = (idUser: string) =>
+    db.companyUser.findFirst({ where: { id_company: input.idCompany, id_user: idUser, user: { isActive: true } }, select: { id_user: true } });
+  const [insp, jefe, ops, areas] = await Promise.all([
+    activo(input.inspector),
+    activo(input.jefeProduccion),
     operadoresActivos(db, input.idCompany, input.operadores),
     db.otArea.findMany({ where: { id_company: input.idCompany, activo: true }, select: { id_area: true, nombre: true } }),
   ]);
   if (ops.length !== input.operadores.length) {
     throw new OtError('Algún operario seleccionado no existe o está inactivo en el maestro de la empresa.', 400);
   }
+  if (!insp) throw new OtError('El inspector seleccionado no es un usuario activo de la empresa.', 400);
   if (!jefe) throw new OtError('El jefe de producción seleccionado no es un usuario activo de la empresa.', 400);
   const area = resolverArea(areas, input.idArea);
 
-  assertInspectorDistinto(input.inspector, actor.idUser);
+  assertActoresDistintos({ supervisor: actor.idUser, inspector: input.inspector, jefe: input.jefeProduccion });
   return db.$transaction(async (tx) => {
     const next = await tx.$queryRaw<Array<{ siguiente: number }>>`
       SELECT ISNULL(MAX(consecutivo), 0) + 1 AS siguiente
@@ -249,6 +268,7 @@ export async function crearOrden(db: OtDb, input: NuevaOrdenInput, actor: OtActo
         estado: 'ABIERTA',
         abierta_por: actor.idUser,
         id_inspector: input.inspector,
+        id_jefe_produccion: input.jefeProduccion,
       },
       select: { id_orden_trabajo: true, consecutivo: true },
     });
@@ -280,20 +300,31 @@ export interface OrdenDetalle {
   operarios: Array<{ id: string; name: string; email: string }>;
   /** Operarios SIN usuario programados (A1). */
   operadores: Array<{ id: number; nombre: string; activo: boolean }>;
-  /** Jefe de producción (columna interna id_inspector). */
+  /** Inspector (B1, 2026-10-15). Las bitácoras del #617 no lo tienen. */
   inspector: { id: string; name: string } | null;
+  /** Jefe de producción (B1; columna id_jefe_produccion). */
+  jefe: { id: string; name: string } | null;
   /** `operador` = operario elegido en la tablet; `usuario` = usuario de la sesión que registró. */
   registros: Array<{ id: string; actividad: string; operador: string | null; usuario: string; registradoEn: string; observacion: string | null }>;
+  /** Vistos buenos dados (rol VISIBLE: las filas viejas «Verificó» salen como JEFE_PROD). */
   firmas: FirmaVista[];
+  /** Los cuatro vistos buenos en orden, con su estado (B2). */
+  vistos: VistoBuenoVista[];
+  /** Siguiente visto bueno pendiente (null si están todos). */
+  siguiente: OtFirmaRol | null;
+  /** Cerrada y con todos los vistos buenos que le corresponden. */
+  completa: boolean;
+  /** user.id de la SESIÓN (para saber si quien confirma está en su propia sesión). */
+  idUsuarioSesion: string;
   puedeRegistrar: boolean;
   puedeGestionar: boolean;
   /** Se puede iniciar el cierre (abierta). Quien confirma elige su nombre; el servidor valida que sea supervisor. */
   puedeCerrar: boolean;
-  /** Cerrada por el supervisor y falta la verificación del jefe de producción. */
+  /** Cerrada y falta algún visto bueno posterior (inspector o jefe). */
   puedeVerificar: boolean;
 }
 
-/** Confirmación («Cerró» / «Verificó»). Sin imagen de firma (A4): las filas viejas la conservan en la base. */
+/** Visto bueno dado (sin imagen de firma, huella visible ni IP en pantalla). */
 export interface FirmaVista {
   rol: OtFirmaRol;
   significado: string;
@@ -301,6 +332,31 @@ export interface FirmaVista {
   email: string;
   firmadoEn: string;
   contentSha256: string;
+  /** sesion_propia | pin_tablet | operario_tablet | contrasena_synerlink (modelo anterior). */
+  metodo: string;
+}
+
+export interface VistoBuenoVista {
+  rol: OtFirmaRol;
+  /** dado | pendiente | no_aplica (p. ej. sin inspector en bitácoras del #617). */
+  estado: 'dado' | 'pendiente' | 'no_aplica';
+  /** Persona designada (inspector o jefe) cuando está pendiente. */
+  designado: string | null;
+  firma: FirmaVista | null;
+}
+
+function firmaVista(f: { rol: string; significado: string; signer_name: string | null; signer_email: string; firmado_en: Date; content_sha256: string; auth_method: string }): FirmaVista | null {
+  const rol = rolVisible(f);
+  if (!rol) return null;
+  return {
+    rol,
+    significado: f.significado,
+    nombre: f.signer_name ?? f.signer_email,
+    email: f.signer_email,
+    firmadoEn: f.firmado_en.toISOString(),
+    contentSha256: f.content_sha256,
+    metodo: f.auth_method,
+  };
 }
 
 /** Detalle de una orden de la empresa indicada, con su cronología (o null si no es de esa empresa). */
@@ -315,10 +371,22 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
     },
   });
   if (!o) return null;
-  const ids = [o.abierta_por, o.cerrada_por ?? '', o.id_inspector ?? '', ...o.operarios.map((x) => x.id_user), ...o.registros.map((r) => r.id_user)];
+  const ids = [o.abierta_por, o.cerrada_por ?? '', o.id_inspector ?? '', o.id_jefe_produccion ?? '', ...o.operarios.map((x) => x.id_user), ...o.registros.map((r) => r.id_user)];
   const nombres = await nombresDeUsuarios(db, ids);
   const nombre = (id: string | null) => (id ? (nombres.get(id)?.name ?? id) : null);
+  const persona = (id: string | null) => (id ? { id, name: nombres.get(id)?.name ?? id } : null);
   const operarioIds = o.operarios.map((x) => x.id_user);
+  const actores = { estado: o.estado, inspector: o.id_inspector, jefe: o.id_jefe_produccion, operadores: o.operadores.map((x) => x.operador.id_operador) };
+  const firmas = o.firmas.map(firmaVista).filter((f): f is FirmaVista => f !== null);
+  const dados = vistosDados(o.firmas);
+  const requeridos = vistosRequeridos(actores);
+  const siguiente = siguienteVistoBueno(actores, o.firmas);
+  const vistos: VistoBuenoVista[] = OT_VISTOS_BUENOS.map((rol) => {
+    const f = dados[rol];
+    const designado = rol === 'INSPECTOR' ? nombre(o.id_inspector) : rol === 'JEFE_PROD' ? nombre(o.id_jefe_produccion) : null;
+    if (f) return { rol, estado: 'dado', designado, firma: firmaVista(f) };
+    return { rol, estado: requeridos.includes(rol) ? 'pendiente' : 'no_aplica', designado, firma: null };
+  });
   return {
     id: o.id_orden_trabajo,
     idCompany: o.id_company,
@@ -342,7 +410,8 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
     operadores: o.operadores
       .map((x) => ({ id: x.operador.id_operador, nombre: x.operador.nombre, activo: x.operador.activo }))
       .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
-    inspector: o.id_inspector ? { id: o.id_inspector, name: nombres.get(o.id_inspector)?.name ?? o.id_inspector } : null,
+    inspector: persona(o.id_inspector),
+    jefe: persona(o.id_jefe_produccion),
     registros: o.registros.map((r) => ({
       id: r.id_registro.toString(),
       actividad: r.actividad_nombre,
@@ -351,19 +420,17 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
       registradoEn: r.registrado_en.toISOString(),
       observacion: r.observacion,
     })),
-    firmas: o.firmas.map((f) => ({
-      rol: f.rol as OtFirmaRol,
-      significado: f.significado,
-      nombre: f.signer_name ?? f.signer_email,
-      email: f.signer_email,
-      firmadoEn: f.firmado_en.toISOString(),
-      contentSha256: f.content_sha256,
-    })),
+    firmas,
+    vistos,
+    siguiente,
+    completa: o.estado === 'CERRADA' && siguiente === null,
+    idUsuarioSesion: idUser,
     puedeRegistrar:
-      o.estado === 'ABIERTA' && (access.canManage || o.operadores.length > 0 || operarioIds.includes(idUser) || o.id_inspector === idUser),
+      o.estado === 'ABIERTA' &&
+      (access.canManage || o.operadores.length > 0 || operarioIds.includes(idUser) || o.id_inspector === idUser || o.id_jefe_produccion === idUser),
     puedeGestionar: access.canManage,
     puedeCerrar: o.estado === 'ABIERTA',
-    puedeVerificar: o.estado === 'CERRADA' && o.firmas.some((f) => f.rol === 'SUPERVISOR') && !o.firmas.some((f) => f.rol === 'INSPECTOR'),
+    puedeVerificar: o.estado === 'CERRADA' && siguiente !== null,
   };
 }
 
@@ -381,8 +448,8 @@ export async function crearRegistro(
   actor: OtActor
 ): Promise<{ id: string; registradoEn: string; actividad: string; operador: string | null }> {
   return db.$transaction(async (tx) => {
-    const locked = await tx.$queryRaw<Array<{ estado: string; id_inspector: string | null }>>`
-      SELECT estado, id_inspector FROM [dbo].[ot_orden_trabajo] WITH (UPDLOCK, ROWLOCK)
+    const locked = await tx.$queryRaw<Array<{ estado: string; id_inspector: string | null; id_jefe_produccion: string | null }>>`
+      SELECT estado, id_inspector, id_jefe_produccion FROM [dbo].[ot_orden_trabajo] WITH (UPDLOCK, ROWLOCK)
       WHERE id_orden_trabajo = ${idOrden} AND id_company = ${access.idCompany}`;
     if (locked.length === 0) throw new OtError('Bitácora no encontrada.', 404);
     const [operarios, programados] = await Promise.all([
@@ -391,7 +458,7 @@ export async function crearRegistro(
     ]);
     const operadores = programados.map((x) => x.id_operador);
     assertPuedeRegistrar(
-      { estado: locked[0].estado, operarios: operarios.map((x) => x.id_user), inspector: locked[0].id_inspector, operadores },
+      { estado: locked[0].estado, operarios: operarios.map((x) => x.id_user), inspector: locked[0].id_inspector, jefe: locked[0].id_jefe_produccion, operadores },
       actor.idUser,
       access
     );
@@ -426,24 +493,24 @@ export async function crearRegistro(
 }
 
 /**
- * Datos para avisar al JEFE DE PRODUCCIÓN (campana + push): su correo (usuario activo),
- * el encabezado de la bitácora y el nombre de quien hizo la acción. null si la
- * bitácora no existe en la empresa.
+ * Datos para los AVISOS (campana + push) al inspector y al jefe de producción: sus
+ * correos (usuarios activos), el encabezado de la bitácora y el nombre de quien hizo
+ * la acción. null si la bitácora no existe en la empresa.
  */
-export async function datosAvisoInspector(
+export async function datosAviso(
   db: OtDb,
   idOrden: number,
   idCompany: number,
-  actor: Pick<OtActor, 'idUser' | 'email'>
-): Promise<AvisoInspector | null> {
+  actor: Pick<OtActor, 'idUser' | 'email'> & { nombre?: string | null }
+): Promise<AvisoBitacora | null> {
   const o = await db.otOrdenTrabajo.findFirst({
     where: { id_orden_trabajo: idOrden, id_company: idCompany },
-    select: { id_orden_trabajo: true, id_company: true, consecutivo: true, producto: true, lote: true, id_inspector: true },
+    select: { id_orden_trabajo: true, id_company: true, consecutivo: true, producto: true, lote: true, id_inspector: true, id_jefe_produccion: true },
   });
   if (!o) return null;
-  const ids = [actor.idUser, o.id_inspector ?? ''].filter(Boolean);
+  const ids = [actor.idUser, o.id_inspector ?? '', o.id_jefe_produccion ?? ''].filter(Boolean);
   const users = await db.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, email: true, isActive: true } });
-  const insp = users.find((u) => u.id === o.id_inspector && u.isActive);
+  const activo = (id: string | null) => users.find((u) => u.id === id && u.isActive)?.email ?? null;
   const yo = users.find((u) => u.id === actor.idUser);
   return {
     idOrden: o.id_orden_trabajo,
@@ -451,20 +518,31 @@ export async function datosAvisoInspector(
     consecutivo: o.consecutivo,
     producto: o.producto,
     lote: o.lote,
-    inspectorEmail: insp?.email ?? null,
-    actorNombre: yo?.name?.trim() || actor.email,
+    inspectorEmail: activo(o.id_inspector),
+    jefeEmail: activo(o.id_jefe_produccion),
+    actorNombre: actor.nombre?.trim() || yo?.name?.trim() || actor.email,
     actorEmail: actor.email,
   };
 }
 
 /**
- * Persona que CONFIRMA («Cerró» / «Verificó»): la elegida en la lista y validada
- * con SU contraseña (no la sesión, que en la tablet es la cuenta compartida de
- * planta). `access` es el acceso al módulo de ESA persona en la empresa.
+ * Quien da el visto bueno (B2/B3), ya validado en la ruta: la persona elegida (con su
+ * sesión propia o su PIN) o el operario elegido en la tablet. `access` es el acceso al
+ * módulo de ESA persona (null para el operario). La sesión se guarda aparte.
  */
-export interface FirmaActor extends OtActor {
+export interface ConfirmanteActor {
+  rol: OtFirmaRol;
+  /** user.id de la persona (null para el operario). */
+  idUser: string | null;
+  idOperador: number | null;
+  email: string;
   nombre: string | null;
   access: OtCompanyAccess | null;
+  metodo: OtMetodoConfirmacion;
+  /** Usuario y correo de la SESIÓN desde la que se confirmó. */
+  sesion: { idUser: string; email: string };
+  ip: string | null;
+  userAgent: string | null;
 }
 
 type Tx = Parameters<Parameters<OtDb['$transaction']>[0]>[0];
@@ -477,7 +555,7 @@ async function contenidoDe(tx: Tx, idOrden: number, idCompany: number) {
       operarios: { select: { id_user: true } },
       operadores: { select: { id_operador: true } },
       registros: { orderBy: [{ registrado_en: 'asc' }, { id_registro: 'asc' }] },
-      firmas: { select: { rol: true, id_user: true, content_sha256: true } },
+      firmas: { select: { rol: true, significado: true, id_user: true, id_operador: true, content_sha256: true }, orderBy: { id_firma: 'asc' } },
     },
   });
   if (!o) throw new OtError('Bitácora no encontrada.', 404);
@@ -493,6 +571,7 @@ async function contenidoDe(tx: Tx, idOrden: number, idCompany: number) {
     sapOpDocNum: o.sap_op_docnum,
     supervisor: o.abierta_por,
     inspector: o.id_inspector,
+    jefeProduccion: o.id_jefe_produccion,
     abiertaEn: o.abierta_en.toISOString(),
     auxiliares: o.operarios.map((x) => x.id_user),
     operadores: o.operadores.map((x) => x.id_operador),
@@ -505,90 +584,185 @@ async function contenidoDe(tx: Tx, idOrden: number, idCompany: number) {
       observacion: r.observacion,
     })),
     observacionCierre: o.observacion_cierre,
+    cerradaPor: o.cerrada_por,
+    cerradaEn: o.cerrada_en ? o.cerrada_en.toISOString() : null,
+    vistosPrevios: o.firmas.map((f) => ({ rol: rolVisible(f) ?? f.rol, sha256: f.content_sha256 })),
   };
   return { o, contenido };
 }
 
-async function insertarFirma(tx: Tx, idOrden: number, rol: OtFirmaRol, contentSha256: string, actor: FirmaActor) {
-  return tx.otFirma.create({
-    data: {
-      id_orden_trabajo: idOrden,
-      rol,
-      significado: OT_FIRMA_SIGNIFICADO[rol],
-      id_user: actor.idUser,
-      signer_email: actor.email,
-      signer_name: actor.nombre,
-      content_sha256: contentSha256,
-      auth_method: OT_FIRMA_AUTH_METHOD,
-      consent_version: OT_CONFIRMACION_VERSION,
-      firma_png: null,
-      firma_sha256: null,
-      ip: actor.ip ? actor.ip.slice(0, 64) : null,
-      user_agent: actor.userAgent ? actor.userAgent.slice(0, 400) : null,
-    },
-    select: { id_firma: true, firmado_en: true, content_sha256: true },
-  });
-}
-
 /**
- * CIERRE CONFIRMADO (R8 + «Cerró» del supervisor, A4). La contraseña de QUIEN
- * CONFIRMA ya se verificó en la ruta. En una transacción: bloquea la fila,
- * valida que esa persona sea supervisor (Gestión) y no el jefe de producción,
- * calcula la huella, cierra (UPDATE condicional por SQL: la tabla tiene trigger
- * de UPDATE) e inserta la confirmación. Si cualquier paso falla, no se cierra.
+ * VISTO BUENO (B2). En una transacción: bloquea la fila, aplica el orden y la
+ * designación (assertPuedeConfirmar), calcula la huella (encadena los vistos
+ * anteriores) e inserta la evidencia en ot_firma. El del SUPERVISOR además CIERRA la
+ * bitácora («Cerró»): UPDATE condicional por SQL (la tabla tiene trigger de UPDATE).
+ * Si cualquier paso falla, no queda nada.
  */
-export async function cerrarYFirmar(
+export async function confirmarVistoBueno(
   db: OtDb,
   idOrden: number,
   access: OtCompanyAccess,
   observacion: string | null,
-  actor: FirmaActor
-): Promise<{ firmadoEn: string; contentSha256: string }> {
-  return db.$transaction(async (tx) => {
-    const locked = await tx.$queryRaw<Array<{ estado: string; id_inspector: string | null }>>`
-      SELECT estado, id_inspector FROM [dbo].[ot_orden_trabajo] WITH (UPDLOCK, ROWLOCK)
-      WHERE id_orden_trabajo = ${idOrden} AND id_company = ${access.idCompany}`;
-    if (locked.length === 0) throw new OtError('Bitácora no encontrada.', 404);
-    assertPuedeCerrar({ estado: locked[0].estado, inspector: locked[0].id_inspector }, actor.idUser, actor.access);
-    const { contenido } = await contenidoDe(tx, idOrden, access.idCompany);
-    const huella = huellaContenido({ ...contenido, observacionCierre: observacion, cerradaPor: actor.idUser });
-    const n = await tx.$executeRaw`
-      UPDATE [dbo].[ot_orden_trabajo]
-      SET estado = N'CERRADA', cerrada_por = ${actor.idUser}, cerrada_en = SYSUTCDATETIME(), observacion_cierre = ${observacion}
-      WHERE id_orden_trabajo = ${idOrden} AND id_company = ${access.idCompany} AND estado = N'ABIERTA'`;
-    if (n === 0) throw new OtError('La bitácora ya está cerrada.', 409);
-    const f = await insertarFirma(tx, idOrden, 'SUPERVISOR', huella, actor);
-    return { firmadoEn: f.firmado_en.toISOString(), contentSha256: f.content_sha256 };
-  });
-}
-
-/**
- * VERIFICACIÓN CONFIRMADA («Verificó» del jefe de producción designado), después
- * del cierre. La huella encadena la del supervisor y la hora de cierre.
- */
-export async function verificarYFirmar(
-  db: OtDb,
-  idOrden: number,
-  access: OtCompanyAccess,
-  actor: FirmaActor
-): Promise<{ firmadoEn: string; contentSha256: string }> {
+  c: ConfirmanteActor
+): Promise<{ rol: OtFirmaRol; firmadoEn: string; contentSha256: string; nombre: string; siguiente: OtFirmaRol | null }> {
   return db.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<Array<{ estado: string }>>`
       SELECT estado FROM [dbo].[ot_orden_trabajo] WITH (UPDLOCK, ROWLOCK)
       WHERE id_orden_trabajo = ${idOrden} AND id_company = ${access.idCompany}`;
     if (locked.length === 0) throw new OtError('Bitácora no encontrada.', 404);
     const { o, contenido } = await contenidoDe(tx, idOrden, access.idCompany);
-    assertPuedeVerificar({ estado: o.estado, inspector: o.id_inspector }, o.firmas, actor.idUser);
-    const sup = o.firmas.find((f) => f.rol === 'SUPERVISOR');
-    const huella = huellaContenido({
-      ...contenido,
-      cerradaPor: o.cerrada_por,
-      cerradaEn: o.cerrada_en ? o.cerrada_en.toISOString() : null,
-      firmaSupervisorSha256: sup?.content_sha256 ?? null,
+    const actores = { estado: o.estado, inspector: o.id_inspector, jefe: o.id_jefe_produccion, operadores: o.operadores.map((x) => x.id_operador) };
+    assertPuedeConfirmar(actores, o.firmas, { rol: c.rol, idUser: c.idUser, idOperador: c.idOperador, access: c.access });
+
+    let nombre = c.nombre ?? c.email;
+    if (c.rol === 'OPERARIO') {
+      const op = (await operadoresActivos(tx, access.idCompany, [c.idOperador ?? 0]))[0];
+      if (!op) throw new OtError('El operario elegido está inactivo en el maestro. Pida al supervisor que lo revise.', 403);
+      nombre = op.nombre;
+    }
+
+    let huella: string;
+    if (c.rol === 'SUPERVISOR') {
+      huella = huellaContenido({ ...contenido, observacionCierre: observacion, cerradaPor: c.idUser, cerradaEn: null });
+      const n = await tx.$executeRaw`
+        UPDATE [dbo].[ot_orden_trabajo]
+        SET estado = N'CERRADA', cerrada_por = ${c.idUser}, cerrada_en = SYSUTCDATETIME(), observacion_cierre = ${observacion}
+        WHERE id_orden_trabajo = ${idOrden} AND id_company = ${access.idCompany} AND estado = N'ABIERTA'`;
+      if (n === 0) throw new OtError('La bitácora ya está cerrada.', 409);
+    } else {
+      huella = huellaContenido(contenido);
+    }
+
+    const f = await tx.otFirma.create({
+      data: {
+        id_orden_trabajo: idOrden,
+        rol: c.rol,
+        significado: OT_FIRMA_SIGNIFICADO[c.rol],
+        // El operario no tiene usuario: id_user = la sesión desde la que tocó su nombre.
+        id_user: c.idUser ?? c.sesion.idUser,
+        signer_email: c.email,
+        signer_name: nombre,
+        content_sha256: huella,
+        auth_method: c.metodo,
+        consent_version: OT_CONFIRMACION_VERSION,
+        firma_png: null,
+        firma_sha256: null,
+        id_operador: c.rol === 'OPERARIO' ? c.idOperador : null,
+        id_user_sesion: c.sesion.idUser,
+        ip: c.ip ? c.ip.slice(0, 64) : null,
+        user_agent: c.userAgent ? c.userAgent.slice(0, 400) : null,
+      },
+      select: { firmado_en: true, content_sha256: true },
     });
-    const f = await insertarFirma(tx, idOrden, 'INSPECTOR', huella, actor);
-    return { firmadoEn: f.firmado_en.toISOString(), contentSha256: f.content_sha256 };
+    const despues = [...o.firmas, { rol: c.rol, significado: OT_FIRMA_SIGNIFICADO[c.rol], id_user: c.idUser ?? c.sesion.idUser }];
+    const estado = c.rol === 'SUPERVISOR' ? 'CERRADA' : o.estado;
+    return {
+      rol: c.rol,
+      firmadoEn: f.firmado_en.toISOString(),
+      contentSha256: f.content_sha256,
+      nombre,
+      siguiente: siguienteVistoBueno({ ...actores, estado }, despues),
+    };
   });
+}
+
+// ---------------------------------------------------------------------------
+// PIN personal de la bitácora (B3)
+// ---------------------------------------------------------------------------
+
+export const OT_PIN_AUDIT = {
+  configurado: 'BITACORA_PIN_CONFIGURADO',
+  restablecido: 'BITACORA_PIN_RESTABLECIDO',
+  bloqueado: 'BITACORA_PIN_BLOQUEADO',
+} as const;
+
+/** Estado del PIN de una persona (nunca el hash). */
+export async function estadoPin(db: OtDb, idUser: string): Promise<{ configurado: boolean; bloqueado: boolean; intentosFallidos: number }> {
+  const f = await db.otPin.findUnique({ where: { id_user: idUser }, select: { pin_hash: true, bloqueado: true, intentos_fallidos: true } });
+  return { configurado: Boolean(f?.pin_hash), bloqueado: Boolean(f?.bloqueado), intentosFallidos: f?.intentos_fallidos ?? 0 };
+}
+
+/** La persona configura (o cambia) SU PIN desde su sesión: queda desbloqueado y con 0 intentos. */
+export async function configurarPin(db: OtDb, idUser: string, pin: string, por: { email: string; ip: string | null }): Promise<void> {
+  const pin_hash = await hashPin(pin);
+  const ahora = new Date();
+  await db.$transaction([
+    db.otPin.upsert({
+      where: { id_user: idUser },
+      create: { id_user: idUser, pin_hash, intentos_fallidos: 0, bloqueado: false, configurado_en: ahora },
+      update: { pin_hash, intentos_fallidos: 0, bloqueado: false, ultimo_fallo_en: null, configurado_en: ahora, updated_at: ahora },
+    }),
+    db.userAuditLog.create({ data: { user_id: idUser, action: OT_PIN_AUDIT.configurado, performed_by: por.email, details: JSON.stringify({ origen: 'bitacora-proceso', ip: por.ip }) } }),
+  ]);
+}
+
+/**
+ * Valida el PIN de la persona (B3). Lleva el contador en la base: un acierto lo pone en
+ * 0; cada fallo suma y al quinto queda BLOQUEADO (y se audita).
+ */
+export async function verificarPinPersona(db: OtDb, idUser: string, pin: string, nombre: string, sesionEmail: string): Promise<void> {
+  const fila = await db.otPin.findUnique({ where: { id_user: idUser }, select: { pin_hash: true, intentos_fallidos: true, bloqueado: true } });
+  assertPinUsable(fila, nombre);
+  const r = await compararPin(fila, pin);
+  if (r.ok) {
+    if (fila.intentos_fallidos > 0) await db.otPin.update({ where: { id_user: idUser }, data: { intentos_fallidos: 0, updated_at: new Date() } });
+    return;
+  }
+  const ahora = new Date();
+  await db.otPin.update({ where: { id_user: idUser }, data: { intentos_fallidos: { increment: 1 }, bloqueado: r.bloquear, ultimo_fallo_en: ahora, updated_at: ahora } });
+  if (r.bloquear) {
+    await db.userAuditLog.create({ data: { user_id: idUser, action: OT_PIN_AUDIT.bloqueado, performed_by: sesionEmail, details: JSON.stringify({ origen: 'bitacora-proceso', intentos: r.intentos }) } });
+  }
+  throw mensajePinIncorrecto(r);
+}
+
+/**
+ * Un supervisor (Gestión en la empresa) o un administrador RESTABLECE el PIN de una
+ * persona de la empresa: lo borra y lo desbloquea. Nadie fija el PIN de otro: la persona
+ * lo vuelve a configurar desde su sesión.
+ */
+export async function restablecerPin(db: OtDb, idCompany: number, idUser: string, por: { idUser: string; email: string }): Promise<void> {
+  const cu = await db.companyUser.findFirst({ where: { id_company: idCompany, id_user: idUser }, select: { id_user: true } });
+  if (!cu) throw new OtError('La persona no pertenece a esta empresa.', 404);
+  const ahora = new Date();
+  await db.$transaction([
+    db.otPin.upsert({
+      where: { id_user: idUser },
+      create: { id_user: idUser, pin_hash: null, intentos_fallidos: 0, bloqueado: false, restablecido_por: por.idUser, restablecido_en: ahora },
+      update: { pin_hash: null, intentos_fallidos: 0, bloqueado: false, ultimo_fallo_en: null, restablecido_por: por.idUser, restablecido_en: ahora, updated_at: ahora },
+    }),
+    db.userAuditLog.create({ data: { user_id: idUser, action: OT_PIN_AUDIT.restablecido, performed_by: por.email, details: JSON.stringify({ origen: 'bitacora-proceso', idCompany }) } }),
+  ]);
+}
+
+/** Usuarios activos de la empresa con el estado de su PIN (para restablecer). Sin hashes. */
+export async function listPinsEmpresa(db: OtDb, idCompany: number) {
+  const usuarios = await listUsuariosEmpresa(db, idCompany);
+  if (usuarios.length === 0) return [];
+  const pins = await db.otPin.findMany({
+    where: { id_user: { in: usuarios.map((u) => u.id) } },
+    select: { id_user: true, pin_hash: true, bloqueado: true, intentos_fallidos: true, configurado_en: true },
+  });
+  const byUser = new Map(pins.map((p) => [p.id_user, p]));
+  return usuarios.map((u) => {
+    const p = byUser.get(u.id);
+    return {
+      ...u,
+      configurado: Boolean(p?.pin_hash),
+      bloqueado: Boolean(p?.bloqueado),
+      intentosFallidos: p?.intentos_fallidos ?? 0,
+      configuradoEn: p?.configurado_en ? p.configurado_en.toISOString() : null,
+    };
+  });
+}
+
+/** Persona activa de la empresa (para confirmar), o null. */
+export async function personaActivaEmpresa(db: OtDb, idUser: string, idCompany: number) {
+  const cu = await db.companyUser.findFirst({
+    where: { id_company: idCompany, id_user: idUser, user: { isActive: true } },
+    select: { user: { select: { id: true, email: true, name: true } } },
+  });
+  return cu?.user ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -707,6 +881,34 @@ export async function agregarOperadores(db: OtDb, idOrden: number, access: OtCom
     }
     return { agregados: nuevos.length };
   });
+}
+
+/**
+ * Importación del maestro de operarios (B8, «Catálogo → Operarios → Importar»).
+ * Crea solo los nombres que NO existen en la empresa (sin distinguir mayúsculas; los
+ * existentes, activos o no, se informan y no se tocan). Con `simular` no escribe.
+ */
+export async function importarOperadores(db: OtDb, input: ImportarOperadoresInput, actor: OtActor) {
+  const existentes = await db.otOperador.findMany({ where: { id_company: input.idCompany }, select: { id_operador: true, nombre: true, activo: true } });
+  const porNombre = new Map(existentes.map((e) => [e.nombre.toLocaleLowerCase('es'), e]));
+  const nuevos = input.filas.filter((f) => !porNombre.has(f.nombre.toLocaleLowerCase('es')));
+  const yaEstan = input.filas
+    .filter((f) => porNombre.has(f.nombre.toLocaleLowerCase('es')))
+    .map((f) => ({ linea: f.linea, nombre: porNombre.get(f.nombre.toLocaleLowerCase('es'))!.nombre, activo: porNombre.get(f.nombre.toLocaleLowerCase('es'))!.activo }));
+  if (!input.simular && nuevos.length > 0) {
+    await db.$transaction(async (tx) => {
+      await tx.otOperador.createMany({
+        data: nuevos.map((f) => ({ id_company: input.idCompany, nombre: f.nombre, documento: f.documento, activo: true, created_by: actor.idUser })),
+      });
+    });
+  }
+  return {
+    simulado: input.simular,
+    crear: nuevos.map((f) => ({ linea: f.linea, nombre: f.nombre, documento: f.documento })),
+    existentes: yaEstan,
+    errores: input.errores,
+    creados: input.simular ? 0 : nuevos.length,
+  };
 }
 
 // ---------------------------------------------------------------------------

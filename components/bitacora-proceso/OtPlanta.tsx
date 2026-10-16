@@ -39,11 +39,20 @@ import {
   IconUserPlus,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
-import { OT_BASE_URL, OT_FIRMA_SIGNIFICADO, OT_JEFE_PRODUCCION_LABEL, OT_LIMITS, OT_ROL_LABEL, otPictograma } from '../../lib/bitacora-proceso/constants';
+import {
+  OT_BASE_URL,
+  OT_INSPECTOR_LABEL,
+  OT_JEFE_PRODUCCION_LABEL,
+  OT_LIMITS,
+  OT_METODO_LABEL,
+  OT_ROL_LABEL,
+  otPictograma,
+  type OtFirmaRol,
+} from '../../lib/bitacora-proceso/constants';
 import type { OrdenDetalle } from '../../lib/bitacora-proceso/db';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import { OtIconoActividad } from './otIconos';
-import ConfirmacionBitacoraModal, { type Confirmante } from './ConfirmacionBitacoraModal';
+import ConfirmacionBitacoraModal, { type Confirmante, type DatosConfirmacion } from './ConfirmacionBitacoraModal';
 import { codigoOt, fmtFechaHora, fmtFechaHoraSeg, fmtHora, otHref, otSend, turnoLabel, useOtFetch } from './otClient';
 
 /**
@@ -54,7 +63,9 @@ import { codigoOt, fmtFechaHora, fmtFechaHoraSeg, fmtHora, otHref, otSend, turno
  *     observación es opcional (botón aparte, antes de tocar la actividad).
  *   - Tras cada registro se vuelve al paso 1, para que el siguiente operario se
  *     identifique (la tablet la comparten varios).
- *   - A4: «Cerró» / «Verificó» con un check y la contraseña de quien confirma.
+ *   - B2/B3 (2026-10-15): cuatro VISTOS BUENOS (operario → supervisor, que cierra →
+ *     inspector → jefe de producción) con «Sí, confirmo»: sin contraseña desde la
+ *     sesión propia, o con el PIN personal desde la cuenta compartida de la tablet.
  * Celular/tablet primero: encabezado fijo, botones de 72-80 px (con guantes),
  * aviso del resultado arriba y en color. Los registros NO se editan ni se borran.
  */
@@ -69,7 +80,15 @@ interface OperadorMaestro {
   nombre: string;
 }
 
-type Confirmar = 'SUPERVISOR' | 'INSPECTOR' | null;
+type Confirmar = OtFirmaRol | null;
+
+/** Texto del botón de cada visto bueno. */
+const BOTON_VISTO: Record<OtFirmaRol, string> = {
+  OPERARIO: 'Visto bueno del operario',
+  SUPERVISOR: 'Cerrar bitácora',
+  INSPECTOR: 'Visto bueno del inspector',
+  JEFE_PROD: 'Visto bueno del jefe',
+};
 
 export default function OtPlanta({ company, idOrden }: { company: OtCompanyAccess; idOrden: number }) {
   const mobile = useMediaQuery('(max-width: 48em)') ?? false;
@@ -121,20 +140,24 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
     }
   };
 
-  /** Cierre («Cerró») o verificación («Verificó»). Lanza el error para que el modal lo muestre arriba. */
-  const confirmarBitacora = async ({ firmante, password, observacion }: { firmante: string; password: string; observacion: string }) => {
+  /** Visto bueno (B2/B3). Lanza el error para que el modal lo muestre arriba. */
+  const confirmarBitacora = async ({ persona, operador: idOperador, pin, observacion }: DatosConfirmacion) => {
     if (!o || !confirmar) return;
-    const accion = confirmar === 'SUPERVISOR' ? 'cerrar' : 'verificar';
-    const r = await otSend<{ firmante?: string }>(`/api/bitacora-proceso/${o.id}/${accion}?company=${company.idCompany}`, 'POST', {
-      firmante,
-      password,
+    const rol = confirmar;
+    const r = await otSend<{ firmante?: string; siguiente?: OtFirmaRol | null }>(`/api/bitacora-proceso/${o.id}/confirmar?company=${company.idCompany}`, 'POST', {
+      rol,
       confirmo: true,
-      ...(confirmar === 'SUPERVISOR' ? { observacion: observacion || undefined } : {}),
+      ...(persona ? { persona } : {}),
+      ...(idOperador ? { operador: idOperador } : {}),
+      ...(pin ? { pin } : {}),
+      ...(rol === 'SUPERVISOR' && observacion ? { observacion } : {}),
     });
+    const quien = r.firmante ?? '';
+    const sig = r.siguiente ? ` Sigue: ${OT_ROL_LABEL[r.siguiente].toLowerCase()} (se le avisó).` : ' Ya tiene todos sus vistos buenos.';
     const text =
-      confirmar === 'SUPERVISOR'
-        ? `Bitácora ${codigoOt(o.consecutivo)} cerrada («Cerró»: ${r.firmante ?? ''}). Ya no admite registros; se avisó al jefe de producción para que la verifique.`
-        : `Bitácora ${codigoOt(o.consecutivo)} verificada («Verificó»: ${r.firmante ?? ''}).`;
+      rol === 'SUPERVISOR'
+        ? `Bitácora ${codigoOt(o.consecutivo)} cerrada («Cerró»: ${quien}). Ya no admite registros.${sig}`
+        : `Visto bueno del ${OT_ROL_LABEL[rol].toLowerCase()} registrado (${quien}).${sig}`;
     setConfirmar(null);
     setAviso({ ok: true, text });
     toast.success(text);
@@ -145,8 +168,9 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
   const personasConfirman = useMemo<Confirmante[]>(() => {
     if (!o) return [];
     if (confirmar === 'INSPECTOR') return o.inspector ? [o.inspector] : [];
-    // El jefe de producción de la bitácora no puede cerrarla (segregación).
-    return (supervisores.data?.supervisores ?? []).filter((p) => p.id !== o.inspector?.id);
+    if (confirmar === 'JEFE_PROD') return o.jefe ? [o.jefe] : [];
+    // El inspector y el jefe de la bitácora no pueden cerrarla (segregación).
+    return (supervisores.data?.supervisores ?? []).filter((p) => p.id !== o.inspector?.id && p.id !== o.jefe?.id);
   }, [o, confirmar, supervisores.data]);
 
   if (detalle.loading && !o) {
@@ -165,10 +189,8 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
   }
 
   const abierta = o.estado === 'ABIERTA';
-  const firmaSup = o.firmas.find((f) => f.rol === 'SUPERVISOR');
-  const firmaJefe = o.firmas.find((f) => f.rol === 'INSPECTOR');
-  const estadoLabel = abierta ? 'Abierta' : firmaJefe ? 'Verificada' : 'Por verificar';
-  const estadoColor = abierta ? 'green' : firmaJefe ? 'blue' : 'yellow';
+  const estadoLabel = abierta ? 'Abierta' : o.completa ? 'Completa' : `Falta: ${OT_ROL_LABEL[o.siguiente ?? 'JEFE_PROD'].toLowerCase()}`;
+  const estadoColor = abierta ? 'green' : o.completa ? 'blue' : 'yellow';
   const registrosDesc = [...o.registros].reverse();
   const informeHref = otHref(`${OT_BASE_URL}/${o.id}/informe`, company.idCompany);
   const paso: 1 | 2 = conOperadores && !operador ? 1 : 2;
@@ -222,13 +244,13 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
       {!abierta && (
         <Alert color='gray' icon={<IconLock size={18} />} title='Bitácora cerrada' data-testid='ot-cerrada'>
           Cerrada el {fmtFechaHora(o.cerradaEn)} por {o.cerradaPor ?? '—'}. Ya no admite registros.
-          {firmaJefe ? ` Verificada por ${firmaJefe.nombre}.` : ' Pendiente la verificación del jefe de producción.'}
+          {o.completa ? ' Tiene todos sus vistos buenos.' : o.siguiente ? ` Falta el visto bueno del ${OT_ROL_LABEL[o.siguiente].toLowerCase()}.` : ''}
           {o.observacionCierre ? ` Observación: ${o.observacionCierre}` : ''}
         </Alert>
       )}
       {abierta && !o.puedeRegistrar && (
         <Alert color='yellow' icon={<IconAlertTriangle size={18} />} data-testid='ot-no-operario'>
-          Usted no figura como auxiliar ni como jefe de producción de esta bitácora: puede consultarla, pero no registrar. Pida al supervisor que lo incluya.
+          Usted no figura como auxiliar, inspector ni jefe de producción de esta bitácora: puede consultarla, pero no registrar. Pida al supervisor que lo incluya.
         </Alert>
       )}
 
@@ -358,36 +380,37 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
         )}
       </Card>
 
-      {!abierta && (
-        <Card withBorder radius='md' p={{ base: 'sm', sm: 'md' }} data-testid='ot-firmas'>
-          <Text fw={700} size='lg' mb='xs'>Verificación</Text>
-          <SimpleGrid cols={{ base: 1, xs: 2 }} spacing='sm'>
-            {(['SUPERVISOR', 'INSPECTOR'] as const).map((rol) => {
-              const f = rol === 'SUPERVISOR' ? firmaSup : firmaJefe;
-              const Icono = f ? IconSquareCheck : IconSquare;
-              return (
-                <Paper key={rol} withBorder radius='md' p='sm' data-testid={`ot-firma-${rol.toLowerCase()}`}>
-                  <Group gap={8} wrap='nowrap'>
-                    <Icono size={24} />
-                    <div>
-                      <Text fw={700}>{OT_FIRMA_SIGNIFICADO[rol]}</Text>
-                      <Text size='xs' c='dimmed' tt='uppercase' fw={600}>{OT_ROL_LABEL[rol]}</Text>
-                    </div>
-                  </Group>
-                  {f ? (
-                    <>
-                      <Text fw={600} mt={4}>{f.nombre}</Text>
-                      <Text size='sm'>{fmtFechaHoraSeg(f.firmadoEn)}</Text>
-                    </>
-                  ) : (
-                    <Text c='dimmed' mt={4}>Pendiente{rol === 'INSPECTOR' && o.inspector ? ` — ${o.inspector.name}` : ''}</Text>
-                  )}
-                </Paper>
-              );
-            })}
-          </SimpleGrid>
-        </Card>
-      )}
+      {/* B2: los cuatro vistos buenos, en orden, con quién, cuándo y cómo. */}
+      <Card withBorder radius='md' p={{ base: 'sm', sm: 'md' }} data-testid='ot-firmas'>
+        <Text fw={700} size='lg' mb='xs'>Vistos buenos</Text>
+        <SimpleGrid cols={{ base: 1, xs: 2, md: 4 }} spacing='sm'>
+          {o.vistos.map((v) => {
+            const Icono = v.estado === 'dado' ? IconSquareCheck : IconSquare;
+            return (
+              <Paper key={v.rol} withBorder radius='md' p='sm' data-testid={`ot-firma-${v.rol.toLowerCase()}`} data-estado={v.estado}>
+                <Group gap={8} wrap='nowrap'>
+                  <Icono size={26} color={v.estado === 'dado' ? 'var(--mantine-color-green-7)' : undefined} />
+                  <div>
+                    <Text fw={700}>{OT_ROL_LABEL[v.rol]}</Text>
+                    {v.rol === 'SUPERVISOR' && <Text size='xs' c='dimmed' fw={600}>CERRÓ</Text>}
+                  </div>
+                </Group>
+                {v.firma ? (
+                  <>
+                    <Text fw={600} mt={4}>{v.firma.nombre}</Text>
+                    <Text size='sm'>{fmtFechaHoraSeg(v.firma.firmadoEn)}</Text>
+                    <Text size='xs' c='dimmed'>{OT_METODO_LABEL[v.firma.metodo] ?? v.firma.metodo}</Text>
+                  </>
+                ) : v.estado === 'no_aplica' ? (
+                  <Text c='dimmed' mt={4}>No aplica</Text>
+                ) : (
+                  <Text c='dimmed' mt={4}>Pendiente{v.designado ? ` — ${v.designado}` : ''}</Text>
+                )}
+              </Paper>
+            );
+          })}
+        </SimpleGrid>
+      </Card>
 
       <Card withBorder radius='md' p={{ base: 'sm', sm: 'md' }}>
         <Group justify='space-between' mb='xs' wrap='wrap'>
@@ -412,8 +435,12 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
             <Text>{o.abiertaPor}</Text>
           </div>
           <div>
-            <Text size='xs' c='dimmed' tt='uppercase' fw={600}>{OT_JEFE_PRODUCCION_LABEL}</Text>
+            <Text size='xs' c='dimmed' tt='uppercase' fw={600}>{OT_INSPECTOR_LABEL}</Text>
             <Text>{o.inspector?.name ?? '—'}</Text>
+          </div>
+          <div>
+            <Text size='xs' c='dimmed' tt='uppercase' fw={600}>{OT_JEFE_PRODUCCION_LABEL}</Text>
+            <Text>{o.jefe?.name ?? '—'}</Text>
           </div>
         </SimpleGrid>
         {o.operadores.length > 0 && (
@@ -456,14 +483,18 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
           <Button variant='default' size={mobile ? 'md' : 'lg'} h={mobile ? 52 : undefined} leftSection={<IconPrinter size={18} />} component={Link} href={informeHref} data-testid='ot-informe'>
             {mobile ? 'Informe' : 'Informe / PDF'}
           </Button>
-          {o.puedeCerrar && (
-            <Button color='red' size={mobile ? 'md' : 'lg'} h={mobile ? 52 : undefined} leftSection={<IconLock size={18} />} onClick={() => setConfirmar('SUPERVISOR')} data-testid='ot-cerrar'>
-              {mobile ? 'Cerrar' : 'Cerrar bitácora'}
-            </Button>
-          )}
-          {o.puedeVerificar && (
-            <Button size={mobile ? 'md' : 'lg'} h={mobile ? 52 : undefined} leftSection={<IconSquareCheck size={18} />} onClick={() => setConfirmar('INSPECTOR')} data-testid='ot-verificar'>
-              Verificar
+          {o.siguiente && (
+            <Button
+              color={o.siguiente === 'SUPERVISOR' ? 'red' : undefined}
+              size={mobile ? 'md' : 'lg'}
+              h={mobile ? 52 : undefined}
+              leftSection={o.siguiente === 'SUPERVISOR' ? <IconLock size={18} /> : <IconSquareCheck size={18} />}
+              onClick={() => setConfirmar(o.siguiente)}
+              styles={{ label: { whiteSpace: 'normal', lineHeight: 1.15 } }}
+              data-testid={o.siguiente === 'SUPERVISOR' ? 'ot-cerrar' : 'ot-visto-bueno'}
+              data-rol={o.siguiente}
+            >
+              {BOTON_VISTO[o.siguiente]}
             </Button>
           )}
         </Group>
@@ -473,10 +504,11 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
         opened={confirmar !== null}
         onClose={() => setConfirmar(null)}
         rol={confirmar ?? 'SUPERVISOR'}
-        titulo={confirmar === 'INSPECTOR' ? `Verificar bitácora ${codigoOt(o.consecutivo)}` : `Cerrar bitácora ${codigoOt(o.consecutivo)}`}
+        titulo={confirmar === 'SUPERVISOR' || !confirmar ? `Cerrar bitácora ${codigoOt(o.consecutivo)}` : `${BOTON_VISTO[confirmar]} · ${codigoOt(o.consecutivo)}`}
         personas={personasConfirman}
+        operadores={o.operadores}
+        idUsuarioSesion={o.idUsuarioSesion}
         cargando={confirmar === 'SUPERVISOR' && supervisores.loading}
-        conObservacion={confirmar === 'SUPERVISOR'}
         onConfirmar={confirmarBitacora}
       />
 

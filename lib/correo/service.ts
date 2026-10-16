@@ -17,6 +17,8 @@ import { MockMailProvider } from './mock';
 import { agruparPorHilo, filaDesdeHilo, notaDesdeCorreo, notaDesdeRespuesta, type FilaCrear, type ProcesoOpcion } from './rules';
 import { sanitizeEmailHtml } from './sanitize';
 import { claveAcuse, enlaceSolicitud, textoAcuse, type OpcionesAcuse } from './acuse';
+import { fragmentoAcuse, logoAcuseUrl } from './plantillas/acuse.html';
+import type { SolicitudVisible } from './kronos';
 import type { ArchivoAdjunto, Direccion, FilaSimulacion, MailProvider, MensajeCompleto, ResultadoAcuse, ResultadoCreacion, VinculoHilo } from './types';
 
 /**
@@ -28,7 +30,9 @@ import type { ArchivoAdjunto, Direccion, FilaSimulacion, MailProvider, MensajeCo
 export interface KronosPort {
   /** Categorías y procesos de «Nueva solicitud» en la empresa (misma regla de la pantalla normal). */
   catalogoEmpresa(idCompany: number): Promise<CatalogoCorreo>;
-  solicitudVisible(idUser: string, idRequest: number): Promise<{ id: number; asunto: string; idCompany: number; estado: number } | null>;
+  solicitudVisible(idUser: string, idRequest: number): Promise<SolicitudVisible | null>;
+  /** ¿La solicitud sigue existiendo? (un vínculo a una solicitud borrada es huérfano y no bloquea). */
+  solicitudExiste(idRequest: number): Promise<boolean>;
   insertarNota(idRequest: number, nota: string, idUser: string): Promise<number>;
 }
 
@@ -352,8 +356,12 @@ export async function simular(
     data.solicitudesDeCorreos(d.db, mensajes.map((m) => m.internetMessageId)),
     data.vinculosDeHilos(d.db, acceso.idUser, grupos.map((g) => g[0].conversationId)),
   ]);
-  const duplicados = new Map<string, number>(porCorreo);
-  for (const [conv, v] of vinculos) duplicados.set(conv, v.idRequest);
+  // Solo bloquean las solicitudes que siguen existiendo (un vínculo huérfano se limpia al crear).
+  const candidatas = [...new Set([...porCorreo.values(), ...[...vinculos.values()].map((v) => v.idRequest)].filter(Boolean))];
+  const vigentes = new Set<number>();
+  for (const id of candidatas) if (await d.kronos.solicitudExiste(id)) vigentes.add(id);
+  const duplicados = new Map<string, number>([...porCorreo].filter(([, id]) => vigentes.has(id)));
+  for (const [conv, v] of vinculos) if (vigentes.has(v.idRequest)) duplicados.set(conv, v.idRequest);
   await auditarLectura(d, acceso, { accion: 'SIMULAR', detalle: `${mensajes.length} correo(s) leídos para simular` }, p.ip ?? null);
   const filas = grupos.map((g) =>
     filaDesdeHilo(g, {
@@ -398,7 +406,17 @@ export async function crearDesdeFila(
     conversationId: fila.conversationId,
     asunto: fila.titulo,
     correos: elegidos.map((m) => ({ internetMessageId: m.internetMessageId, recibido: m.fecha })),
+    solicitudExiste: (id) => d.kronos.solicitudExiste(id),
   });
+  if (reserva.limpiados?.length) {
+    await data.auditar(d.db, {
+      idUser: acceso.idUser,
+      accion: 'VINCULO_HUERFANO',
+      conversationId: fila.conversationId,
+      detalle: `Vínculo(s) huérfano(s) limpiado(s) antes de crear: ${reserva.limpiados.join(', ')}`,
+      ip,
+    });
+  }
 
   let idRequest: number;
   try {
@@ -560,20 +578,31 @@ export async function enviarAcuse(
     }
     reservado = { idLink: vinculo.id, clave };
 
-    let idCompany = p.idCompany ?? null;
-    let titulo = p.titulo ?? vinculo.asunto ?? '';
-    if (idCompany == null || !titulo) {
-      let sol: Awaited<ReturnType<KronosPort['solicitudVisible']>> = null;
-      try {
-        sol = await d.kronos.solicitudVisible(acceso.idUser, vinculo.idRequest);
-      } catch {
-        sol = null;
-      }
-      idCompany = idCompany ?? sol?.idCompany ?? null;
-      titulo = titulo || sol?.asunto || '';
+    // Datos de la tarjeta (empresa, proceso, fecha, responsable): si la consulta falla, el acuse
+    // sale igual con lo que se sepa.
+    let sol: SolicitudVisible | null = null;
+    try {
+      sol = await d.kronos.solicitudVisible(acceso.idUser, vinculo.idRequest);
+    } catch {
+      sol = null;
     }
-    const texto = textoAcuse({ id: vinculo.idRequest, titulo, enlace: enlaceSolicitud(d.appBaseUrl ?? '', vinculo.idRequest), firma: acceso.nombre, idCompany });
-    await prov.responder(destino.id, { texto, todos: p.todos, adjuntos: [] });
+    const idCompany = p.idCompany ?? sol?.idCompany ?? null;
+    const titulo = p.titulo || vinculo.asunto || sol?.asunto || '';
+    const enlace = enlaceSolicitud(d.appBaseUrl ?? '', vinculo.idRequest);
+    const texto = textoAcuse({ id: vinculo.idRequest, titulo, enlace, firma: acceso.nombre, idCompany });
+    const html = fragmentoAcuse({
+      id: vinculo.idRequest,
+      titulo,
+      enlace,
+      firma: acceso.nombre,
+      empresa: sol?.empresa ?? acceso.empresas.find((e) => e.idCompany === idCompany)?.companyName ?? null,
+      categoria: sol?.categoria ?? null,
+      proceso: sol?.proceso ?? null,
+      creada: sol?.creada ?? null,
+      responsable: sol?.responsable ?? null,
+      logoUrl: logoAcuseUrl(d.appBaseUrl),
+    });
+    await prov.responder(destino.id, { texto, html, todos: p.todos, adjuntos: [] });
     // Ya salió: la reserva queda como constancia. Lo que sigue no debe invitar a reenviarlo.
     reservado = null;
 
