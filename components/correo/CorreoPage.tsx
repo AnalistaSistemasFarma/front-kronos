@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   ActionIcon,
@@ -8,7 +8,6 @@ import {
   Anchor,
   Badge,
   Box,
-  Breadcrumbs,
   Button,
   Card,
   Checkbox,
@@ -45,8 +44,9 @@ import {
 } from '@tabler/icons-react';
 import SgcSelect from '../sgc/SgcSelect';
 import type { Carpeta } from '../../lib/correo/types';
-import { CorreoApiError, correoApi, fechaCorta, fechaLarga, urlSolicitud, type EstadoCorreo, type MensajeLista } from './correoClient';
-import HiloDrawer from './HiloDrawer';
+import { CorreoApiError, correoApi, esCancelada, fechaCorta, fechaLarga, urlSolicitud, type EstadoCorreo, type MensajeLista } from './correoClient';
+import { EsqueletoCarpetas, EsqueletoFilas } from './Esqueletos';
+import HiloCorreo from './HiloCorreo';
 import SimulacionModal from './SimulacionModal';
 import { AvatarPersona, carpetasOrdenadas, IconoCarpeta } from './ui';
 import css from './correo.module.css';
@@ -57,7 +57,18 @@ import css from './correo.module.css';
  * buscador arriba con filtros rápidos, lista densa (remitente, asunto + extracto, adjuntos y
  * fecha a la derecha, acciones al pasar el mouse) y la barra de selección para crear
  * solicitudes con simulación. En el celular: la lista primero y las carpetas en un panel.
+ * Desde el 2026-10-16 usa toda la pantalla (encabezado de una línea, zonas con desplazamiento
+ * propio) y el hilo se abre EN EL LUGAR de la lista, con `?hilo=<id>` en la dirección: el botón
+ * «atrás» del navegador vuelve a la lista y el enlace se puede reabrir (solo en el buzón propio).
  */
+
+/** Ids de Graph (base64 con variantes URL), igual que en el servidor. */
+const ID_HILO_RE = /^[A-Za-z0-9+=_-]{8,512}$/;
+
+function hiloDeLaUrl(): string | null {
+  const h = new URLSearchParams(window.location.search).get('hilo');
+  return h && ID_HILO_RE.test(h) ? h : null;
+}
 
 const EMPRESA_KEY = 'correo:empresa';
 
@@ -86,51 +97,49 @@ function aParams(f: Filtros, cursor?: string | null): Record<string, string> {
   return p;
 }
 
+/** Encabezado de UNA línea (como Gmail, para dejar la pantalla a la bandeja): título, buzón y empresa. */
 function Encabezado({ estado, empresa, setEmpresa }: { estado: EstadoCorreo; empresa: string | null; setEmpresa: (v: string | null) => void }) {
   const { conexion } = estado;
   return (
-    <Card shadow='sm' p={{ base: 'md', sm: 'lg' }} radius='md' withBorder mb='md'>
-      <Breadcrumbs separator={<IconChevronRight size={16} />} mb='xs' style={{ flexWrap: 'wrap' }}>
-        <Anchor component={Link} href='/process'>
+    <Group className={css.encabezado} justify='space-between' wrap='nowrap' gap='sm' data-testid='correo-encabezado'>
+      <Group gap={8} wrap='nowrap' style={{ minWidth: 0 }}>
+        <Anchor component={Link} href='/process' size='sm' c='dimmed' visibleFrom='sm' style={{ flexShrink: 0 }}>
           Procesos
         </Anchor>
-        <Text>Correo</Text>
-      </Breadcrumbs>
-      <Group justify='space-between' align='flex-end' wrap='wrap' gap='md'>
-        <div style={{ minWidth: 0 }}>
-          <Title order={1} fz={{ base: 24, sm: 28 }} className='font-bold mb-1 flex items-center gap-3' data-testid='correo-titulo'>
-            <IconMail size={26} className='text-blue-600' style={{ flexShrink: 0 }} />
-            Correo
-          </Title>
-          <Group gap='xs'>
-            <Text size='sm' c='dimmed' visibleFrom='sm'>
-              Su bandeja de Outlook: revise hilos, responda y convierta correos en solicitudes
-            </Text>
-            {conexion.modo === 'mock' && (
-              <Badge color='grape' variant='light' leftSection={<IconFlask size={12} />} data-testid='correo-modo-simulado'>
-                Buzón simulado (pruebas)
-              </Badge>
-            )}
-            {conexion.disponible && (
-              <Badge color='teal' variant='light' leftSection={<IconMail size={12} />} style={{ textTransform: 'none' }} data-testid='correo-buzon'>
-                {conexion.correo}
-              </Badge>
-            )}
-          </Group>
-        </div>
-        {estado.empresas.length > 1 && (
-          <SgcSelect
-            label='Empresa de las solicitudes'
-            size='sm'
-            data={estado.empresas.map((c) => ({ value: String(c.idCompany), label: c.companyName }))}
-            value={empresa}
-            onChange={setEmpresa}
-            allowDeselect={false}
-            w={{ base: '100%', sm: 240 }}
-          />
+        <IconChevronRight size={14} color='var(--mantine-color-dimmed)' style={{ flexShrink: 0 }} className='hidden sm:block' />
+        <Title order={1} fz={20} fw={700} className='flex items-center gap-2' style={{ flexShrink: 0 }} data-testid='correo-titulo'>
+          <IconMail size={22} className='text-blue-600' style={{ flexShrink: 0 }} />
+          Correo
+        </Title>
+        {conexion.modo === 'mock' && (
+          <Badge color='grape' variant='light' leftSection={<IconFlask size={12} />} style={{ flexShrink: 0 }} data-testid='correo-modo-simulado'>
+            {/* En el celular solo el ícono: no cabe junto al buzón. */}
+            <span className='hidden sm:inline'>Buzón simulado (pruebas)</span>
+            <span className='sm:hidden'>Pruebas</span>
+          </Badge>
+        )}
+        {conexion.disponible && (
+          <Badge color='teal' variant='light' leftSection={<IconMail size={12} />} style={{ textTransform: 'none', minWidth: 0 }} data-testid='correo-buzon'>
+            {conexion.correo}
+          </Badge>
         )}
       </Group>
-    </Card>
+      {estado.empresas.length > 1 && (
+        <Tooltip label='Empresa de las solicitudes que cree desde el correo' openDelay={300}>
+          <div style={{ flexShrink: 0 }}>
+            <SgcSelect
+              aria-label='Empresa de las solicitudes'
+              size='xs'
+              data={estado.empresas.map((c) => ({ value: String(c.idCompany), label: c.companyName }))}
+              value={empresa}
+              onChange={setEmpresa}
+              allowDeselect={false}
+              w={{ base: 150, sm: 240 }}
+            />
+          </div>
+        </Tooltip>
+      )}
+    </Group>
   );
 }
 
@@ -162,8 +171,20 @@ function AvisoPrivacidad() {
 }
 
 /** Carpetas de la barra lateral (escritorio) o del panel (celular). */
-function ListaCarpetas({ carpetas, actual, onElegir }: { carpetas: Carpeta[]; actual: string | null; onElegir: (id: string | null) => void }) {
+function ListaCarpetas({
+  carpetas,
+  actual,
+  cargando,
+  onElegir,
+}: {
+  carpetas: Carpeta[];
+  actual: string | null;
+  cargando: boolean;
+  onElegir: (id: string | null) => void;
+}) {
   const orden = carpetasOrdenadas(carpetas);
+  // Primera consulta de carpetas (con sus no leídos): la forma de la lista, no un «Recibidos» suelto que luego salta.
+  if (!orden.length && cargando) return <EsqueletoCarpetas />;
   const items = orden.length ? orden : [{ id: '', nombre: 'Bandeja de entrada', etiqueta: 'Recibidos', tipo: 'entrada' as const, total: 0, noLeidos: 0 }];
   return (
     <Stack gap={2} data-testid='correo-carpetas'>
@@ -206,12 +227,20 @@ export default function CorreoPage() {
   const [borrador, setBorrador] = useState<Filtros>(FILTROS_VACIOS);
   const [mensajes, setMensajes] = useState<MensajeLista[]>([]);
   const [siguiente, setSiguiente] = useState<string | null>(null);
-  const [cargando, setCargando] = useState(false);
+  /** Filtros a los que corresponde la lista mostrada: si no son los actuales, la lista es de otra carpeta/búsqueda y NO se muestra. */
+  const [listaDe, setListaDe] = useState<Filtros | null>(null);
+  /** 'refresco' = misma carpeta (lista atenuada); 'mas' = «Cargar más» (esqueletos al final); 'nueva' = otra carpeta/búsqueda. */
+  const [carga, setCarga] = useState<'nueva' | 'refresco' | 'mas' | null>(null);
+  const peticion = useRef<{ id: number; ctrl: AbortController | null }>({ id: 0, ctrl: null });
+  const [cargandoCarpetas, setCargandoCarpetas] = useState(false);
+  const peticionCarpetas = useRef<AbortController | null>(null);
   const [errorLista, setErrorLista] = useState<string | null>(null);
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
+  /** Hilo abierto EN EL LUGAR de la lista; vive en la dirección (?hilo=) para que «atrás» vuelva a la lista. */
   const [hiloAbierto, setHiloAbierto] = useState<string | null>(null);
   const [simulacion, setSimulacion] = useState<string[] | null>(null);
   const [hayCambios, setHayCambios] = useState(false);
+  const [versionHilo, setVersionHilo] = useState(0);
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
   const [panelCarpetas, setPanelCarpetas] = useState(false);
 
@@ -235,34 +264,90 @@ export default function CorreoPage() {
 
   useEffect(() => {
     void cargarEstado();
-    // Enlace desde una solicitud: /process/correo?hilo=<conversationId>
-    const hilo = new URLSearchParams(window.location.search).get('hilo');
-    if (hilo && /^[A-Za-z0-9+=_-]{8,512}$/.test(hilo)) setHiloAbierto(hilo);
-    if (hilo) window.history.replaceState(null, '', window.location.pathname);
+    // Enlace desde una solicitud o compartido: /process/correo?hilo=<conversationId> (siempre del buzón propio).
+    const leer = () => setHiloAbierto(hiloDeLaUrl());
+    leer();
+    window.addEventListener('popstate', leer);
+    return () => window.removeEventListener('popstate', leer);
   }, [cargarEstado]);
+
+  const abrirHilo = useCallback((id: string) => {
+    if (!ID_HILO_RE.test(id)) return;
+    const url = `${window.location.pathname}?${new URLSearchParams({ hilo: id })}`;
+    // Abierto desde la lista: una entrada nueva en el historial, para que «atrás» vuelva a la lista.
+    if (hiloDeLaUrl()) window.history.replaceState({ ...window.history.state, correoHilo: true }, '', url);
+    else window.history.pushState({ ...window.history.state, correoHilo: true }, '', url);
+    setHiloAbierto(id);
+  }, []);
+
+  const cerrarHilo = useCallback(() => {
+    // Si el hilo se abrió desde la lista, se vuelve con el historial (como «atrás»); si llegó por enlace, se reemplaza.
+    if (window.history.state?.correoHilo) window.history.back();
+    else {
+      window.history.replaceState(window.history.state, '', window.location.pathname);
+      setHiloAbierto(null);
+    }
+  }, []);
 
   const listo = Boolean(estado?.conexion.disponible);
 
-  const cargarMensajes = useCallback(async (f: Filtros, cursor?: string | null) => {
-    setCargando(true);
+  /**
+   * Carrera de respuestas: si la persona cambia rápido de carpeta (Recibidos → Enviados → Recibidos), solo vale la
+   * ÚLTIMA consulta. La anterior se cancela (AbortController) y, si igual llega, se descarta por su número de petición.
+   */
+  const cargarMensajes = useCallback(async (f: Filtros, opciones: { cursor?: string | null; refresco?: boolean } = {}) => {
+    const { cursor = null, refresco = false } = opciones;
+    peticion.current.ctrl?.abort();
+    const ctrl = new AbortController();
+    const id = ++peticion.current.id;
+    peticion.current.ctrl = ctrl;
+    setCarga(cursor ? 'mas' : refresco ? 'refresco' : 'nueva');
     setErrorLista(null);
     try {
-      const r = await correoApi.mensajes(aParams(f, cursor));
+      const r = await correoApi.mensajes(aParams(f, cursor), ctrl.signal);
+      if (id !== peticion.current.id) return;
       setMensajes((prev) => (cursor ? [...prev, ...r.mensajes] : r.mensajes));
       setSiguiente(r.siguiente);
+      setListaDe(f);
     } catch (e) {
+      if (id !== peticion.current.id || esCancelada(e)) return;
       setErrorLista(e instanceof Error ? e.message : String(e));
+      if (!cursor) {
+        setMensajes([]);
+        setSiguiente(null);
+        setListaDe(f);
+      }
     } finally {
-      setCargando(false);
+      if (id === peticion.current.id) setCarga(null);
     }
   }, []);
 
   const cargarCarpetas = useCallback(() => {
+    peticionCarpetas.current?.abort();
+    const ctrl = new AbortController();
+    peticionCarpetas.current = ctrl;
+    setCargandoCarpetas(true);
     correoApi
-      .carpetas()
-      .then((r) => setCarpetas(r.carpetas))
-      .catch(() => setCarpetas([]));
+      .carpetas(ctrl.signal)
+      .then((r) => {
+        if (peticionCarpetas.current === ctrl) setCarpetas(r.carpetas);
+      })
+      .catch((e) => {
+        if (peticionCarpetas.current === ctrl && !esCancelada(e)) setCarpetas([]);
+      })
+      .finally(() => {
+        if (peticionCarpetas.current === ctrl) setCargandoCarpetas(false);
+      });
   }, []);
+
+  // Al salir del módulo se cancela lo que esté en vuelo.
+  useEffect(
+    () => () => {
+      peticion.current.ctrl?.abort();
+      peticionCarpetas.current?.abort();
+    },
+    []
+  );
 
   useEffect(() => {
     if (listo) cargarCarpetas();
@@ -273,6 +358,13 @@ export default function CorreoPage() {
     setSeleccion(new Set());
     void cargarMensajes(filtros);
   }, [listo, filtros, cargarMensajes]);
+
+  // Al volver a la lista (← o «atrás» del navegador) tras cambios en el hilo, la carpeta se actualiza.
+  useEffect(() => {
+    if (hiloAbierto || !hayCambios) return;
+    setHayCambios(false);
+    void cargarMensajes(filtros, { refresco: true });
+  }, [hiloAbierto, hayCambios, filtros, cargarMensajes]);
 
   const setEmpresa = (v: string | null) => {
     setEmpresaState(v);
@@ -290,7 +382,12 @@ export default function CorreoPage() {
       else n.add(id);
       return n;
     });
-  const todosMarcados = mensajes.length > 0 && mensajes.every((m) => seleccion.has(m.id));
+  // La lista solo se muestra si es de los filtros ACTUALES: al cambiar de Recibidos a Enviados las filas viejas
+  // desaparecen en el mismo render del clic (sin esperar al efecto) y en su lugar salen los esqueletos.
+  const desactualizada = listaDe !== filtros;
+  const visibles = desactualizada ? [] : mensajes;
+  const cargando = carga !== null || desactualizada;
+  const todosMarcados = visibles.length > 0 && visibles.every((m) => seleccion.has(m.id));
 
   const aplicar = () => {
     setFiltros({ ...borrador });
@@ -309,7 +406,7 @@ export default function CorreoPage() {
     setFiltrosAbiertos(false);
   };
   const refrescar = () => {
-    void cargarMensajes(filtros);
+    void cargarMensajes(filtros, { refresco: true });
     cargarCarpetas();
   };
 
@@ -356,7 +453,7 @@ export default function CorreoPage() {
       </Badge>
     ) : null;
 
-  const abrir = (m: MensajeLista) => setHiloAbierto(m.conversationId);
+  const abrir = (m: MensajeLista) => abrirHilo(m.conversationId);
   const teclaFila = (e: React.KeyboardEvent, m: MensajeLista) => {
     if (e.key === 'Enter') abrir(m);
     if (e.key === ' ' && e.target === e.currentTarget) {
@@ -467,7 +564,8 @@ export default function CorreoPage() {
             aria-label='Seleccionar todos'
             checked={todosMarcados}
             indeterminate={seleccion.size > 0 && !todosMarcados}
-            onChange={() => setSeleccion(todosMarcados ? new Set() : new Set(mensajes.map((m) => m.id)))}
+            onChange={() => setSeleccion(todosMarcados ? new Set() : new Set(visibles.map((m) => m.id)))}
+            disabled={desactualizada}
             mx={6}
             data-testid='correo-seleccionar-todos'
           />
@@ -505,7 +603,7 @@ export default function CorreoPage() {
             </Text>
           </Group>
           <Text size='xs' c='dimmed' style={{ flexShrink: 0 }}>
-            {mensajes.length > 0 ? `${mensajes.length.toLocaleString('es-CO')}${siguiente ? '+' : ''} correo(s)` : ''}
+            {visibles.length > 0 ? `${visibles.length.toLocaleString('es-CO')}${siguiente ? '+' : ''} correo(s)` : ''}
           </Text>
         </Group>
       )}
@@ -626,96 +724,130 @@ export default function CorreoPage() {
   );
 
   const bandeja = (
-    <Card withBorder radius='md' p={0} className={css.bandeja}>
+    <Card withBorder radius='md' p={0} className={css.bandeja} style={hiloAbierto ? { display: 'none' } : undefined} data-testid='correo-bandeja'>
       {barra}
-      {errorLista && (
-        <Alert color='red' icon={<IconAlertTriangle size={18} />} title='No se pudieron cargar los correos' m='sm' data-testid='correo-error-lista'>
-          {errorLista}
-        </Alert>
-      )}
-      {mensajes.length === 0 && !cargando && !errorLista ? (
-        vacio
-      ) : (
-        <div role='grid' aria-label='Correos' data-testid='correo-lista'>
-          {mensajes.map((m) => (desktop ? filaEscritorio(m) : filaMovil(m)))}
-        </div>
-      )}
-      {cargando && (
-        <Group justify='center' p='md'>
-          <Loader size='sm' />
-        </Group>
-      )}
-      {siguiente && !cargando && (
-        <Group justify='center' p='sm'>
-          <Button variant='light' onClick={() => cargarMensajes(filtros, siguiente)} data-testid='correo-cargar-mas'>
-            Cargar más correos
-          </Button>
-        </Group>
-      )}
+      {/* La lista se desplaza por dentro (la barra queda fija); oculta, no desmontada, mientras se lee un hilo: al volver conserva la posición. */}
+      <div className={css.listaScroll} data-testid='correo-lista-scroll'>
+        {errorLista && !desactualizada && (
+          <Alert color='red' icon={<IconAlertTriangle size={18} />} title='No se pudieron cargar los correos' m='sm' data-testid='correo-error-lista'>
+            {errorLista}
+          </Alert>
+        )}
+        {desactualizada ? (
+          <EsqueletoFilas movil={!desktop} />
+        ) : visibles.length === 0 && !cargando && !errorLista ? (
+          vacio
+        ) : (
+          <div
+            role='grid'
+            aria-label='Correos'
+            aria-busy={carga === 'refresco'}
+            className={carga === 'refresco' ? css.listaAtenuada : undefined}
+            data-testid='correo-lista'
+          >
+            {visibles.map((m) => (desktop ? filaEscritorio(m) : filaMovil(m)))}
+          </div>
+        )}
+        {carga === 'mas' && <EsqueletoFilas filas={3} movil={!desktop} />}
+        {cargando && (
+          <Text className='sr-only' role='status' data-testid='correo-cargando'>
+            Cargando correos…
+          </Text>
+        )}
+        {siguiente && !cargando && (
+          <Group justify='center' p='sm'>
+            <Button variant='light' onClick={() => cargarMensajes(filtros, { cursor: siguiente })} data-testid='correo-cargar-mas'>
+              Cargar más correos
+            </Button>
+          </Group>
+        )}
+        {!desktop && (
+          <Box p='sm'>
+            <AvisoPrivacidad />
+          </Box>
+        )}
+      </div>
     </Card>
   );
+
+  /** El hilo quedó leído / no leído desde su barra: se refleja en la lista y en los contadores sin recargar la carpeta. */
+  const alCambiarLeido = (conversationId: string, leido: boolean) => {
+    setMensajes((prev) => {
+      const delHilo = prev.filter((m) => m.conversationId === conversationId);
+      const ultimo = delHilo.reduce<MensajeLista | null>((u, m) => (!u || m.fecha > u.fecha ? m : u), null);
+      return prev.map((m) => (m.conversationId !== conversationId ? m : leido ? { ...m, leido: true } : m === ultimo ? { ...m, leido: false } : m));
+    });
+    cargarCarpetas();
+  };
+
+  const hilo = hiloAbierto ? (
+    <Card withBorder radius='md' p={0} className={css.panelHilo}>
+      <HiloCorreo
+        key={`${hiloAbierto}-${versionHilo}`}
+        conversationId={hiloAbierto}
+        carpeta={carpetaActual?.etiqueta ?? null}
+        envioHabilitado={estado.conexion.envioHabilitado}
+        nombreOperador={estado.usuario.nombre}
+        correoOperador={estado.usuario.email}
+        onVolver={cerrarHilo}
+        onLeido={alCambiarLeido}
+        onCambio={() => setHayCambios(true)}
+        onCrearSolicitud={(ids) => setSimulacion(ids)}
+      />
+    </Card>
+  ) : null;
 
   const elegirCarpeta = (id: string | null) => {
     cambiar({ carpeta: id });
     setPanelCarpetas(false);
+    // Como Gmail: elegir una carpeta con un hilo abierto vuelve a la lista (de esa carpeta).
+    if (hiloAbierto) cerrarHilo();
   };
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
-      <div className='max-w-[1600px] mx-auto py-3 sm:py-6 px-3 sm:px-6 lg:px-8'>
-        <Encabezado estado={estado} empresa={empresa} setEmpresa={setEmpresa} />
+    <div className={css.pantalla}>
+      <Encabezado estado={estado} empresa={empresa} setEmpresa={setEmpresa} />
 
-        {!listo ? (
-          <NoDisponible estado={estado} />
-        ) : desktop ? (
-          <div className={css.layout}>
-            <aside className={css.sidebar}>
-              <Stack gap='md'>
-                <ListaCarpetas carpetas={carpetas} actual={filtros.carpeta} onElegir={elegirCarpeta} />
-                <AvisoPrivacidad />
-              </Stack>
-            </aside>
-            <Stack gap='sm' style={{ minWidth: 0 }}>
-              {buscador}
-              {chips}
-              {bandeja}
+      {!listo ? (
+        <NoDisponible estado={estado} />
+      ) : desktop ? (
+        <div className={css.layout}>
+          <aside className={css.sidebar}>
+            <Stack gap='md'>
+              <ListaCarpetas carpetas={carpetas} actual={filtros.carpeta} cargando={cargandoCarpetas} onElegir={elegirCarpeta} />
+              <AvisoPrivacidad />
             </Stack>
-          </div>
-        ) : (
-          <Stack gap='sm'>
-            <Group gap='xs' wrap='nowrap'>
-              <Tooltip label='Carpetas'>
-                <ActionIcon variant='default' radius='xl' size={36} onClick={() => setPanelCarpetas(true)} aria-label='Carpetas' data-testid='correo-menu-carpetas'>
-                  <IconFolders size={18} />
-                </ActionIcon>
-              </Tooltip>
-              {buscador}
-            </Group>
-            {chips}
+          </aside>
+          <div className={css.principal}>
+            <div className={css.fijo}>{buscador}</div>
+            {!hiloAbierto && chips}
             {bandeja}
-            <AvisoPrivacidad />
-            <Drawer opened={panelCarpetas} onClose={() => setPanelCarpetas(false)} position='left' size='80%' title='Carpetas' data-testid='correo-carpetas-drawer'>
-              <ListaCarpetas carpetas={carpetas} actual={filtros.carpeta} onElegir={elegirCarpeta} />
-            </Drawer>
-          </Stack>
-        )}
-      </div>
-
-      <HiloDrawer
-        conversationId={hiloAbierto}
-        envioHabilitado={estado.conexion.envioHabilitado}
-        nombreOperador={estado.usuario.nombre}
-        correoOperador={estado.usuario.email}
-        onClose={() => {
-          setHiloAbierto(null);
-          if (hayCambios) {
-            setHayCambios(false);
-            void cargarMensajes(filtros);
-          }
-        }}
-        onCambio={() => setHayCambios(true)}
-        onCrearSolicitud={(ids) => setSimulacion(ids)}
-      />
+            {hilo}
+          </div>
+        </div>
+      ) : (
+        <div className={css.principal}>
+          {/* Celular: el hilo es una vista a pantalla completa con ← (sin buscador ni chips encima). */}
+          {!hiloAbierto && (
+            <>
+              <Group gap='xs' wrap='nowrap' className={css.fijo}>
+                <Tooltip label='Carpetas'>
+                  <ActionIcon variant='default' radius='xl' size={36} onClick={() => setPanelCarpetas(true)} aria-label='Carpetas' data-testid='correo-menu-carpetas'>
+                    <IconFolders size={18} />
+                  </ActionIcon>
+                </Tooltip>
+                {buscador}
+              </Group>
+              {chips}
+            </>
+          )}
+          {bandeja}
+          {hilo}
+          <Drawer opened={panelCarpetas} onClose={() => setPanelCarpetas(false)} position='left' size='80%' title='Carpetas' data-testid='correo-carpetas-drawer'>
+            <ListaCarpetas carpetas={carpetas} actual={filtros.carpeta} cargando={cargandoCarpetas} onElegir={elegirCarpeta} />
+          </Drawer>
+        </div>
+      )}
 
       {simulacion && idEmpresa && (
         <SimulacionModal
@@ -732,8 +864,9 @@ export default function CorreoPage() {
             // Se refresca al CERRAR (no durante la creación): el resumen no se desmonta.
             if (huboCreadas) {
               setSeleccion(new Set());
-              void cargarMensajes(filtros);
-              if (hiloAbierto) setHiloAbierto(null);
+              void cargarMensajes(filtros, { refresco: true });
+              // Con el hilo abierto, se vuelve a leer (ya con su solicitud vinculada) sin salir de él.
+              if (hiloAbierto) setVersionHilo((v) => v + 1);
             }
           }}
         />

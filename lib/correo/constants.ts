@@ -55,6 +55,8 @@ export const CORREO_AUDIT_ACCIONES = [
   'ACUSE_HILO',
   'ACUSE_HILO_FALLIDO',
   'VINCULO_HUERFANO',
+  'MARCAR_LEIDO',
+  'MARCAR_NO_LEIDO',
 ] as const;
 export type CorreoAuditAccion = (typeof CORREO_AUDIT_ACCIONES)[number];
 

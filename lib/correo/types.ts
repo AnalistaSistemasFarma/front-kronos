@@ -39,6 +39,8 @@ export interface MensajeCompleto extends MensajeResumen {
   /** HTML del cuerpo. En el servidor llega crudo de Graph; al navegador solo sale SANEADO. */
   html: string;
   adjuntos: AdjuntoInfo[];
+  /** Enlace del mensaje en Outlook en la web (solo de Graph; el navegador lo recibe validado). */
+  webLink?: string;
   /** Imágenes incrustadas (cid) como data: URI, solo dentro del servidor para el saneado. */
   imagenesCid?: Record<string, string>;
 }
@@ -95,6 +97,8 @@ export interface MailProvider {
   adjunto(mensajeId: string, adjuntoId: string): Promise<ArchivoAdjunto>;
   responder(mensajeId: string, entrada: RespuestaEntrada): Promise<void>;
   categorizar(mensajeId: string, categoria: string): Promise<void>;
+  /** Marca un mensaje del buzón propio como leído / no leído (como Gmail). */
+  marcarLeido(mensajeId: string, leido: boolean): Promise<void>;
   /**
    * No leídos de la Bandeja de entrada (icono del Correo en la cabecera). Opcional:
    * si el proveedor no lo trae, se calcula con carpetas().

@@ -28,6 +28,7 @@ import * as mensajes from '../mensajes/route';
 import * as carpetas from '../carpetas/route';
 import * as hilo from '../hilo/route';
 import * as notas from '../hilo/notas/route';
+import * as leido from '../hilo/leido/route';
 import * as vincular from '../hilo/vincular/route';
 import * as adjunto from '../adjunto/route';
 import * as responder from '../responder/route';
@@ -113,6 +114,7 @@ describe('Correo · rutas: sesión y permiso', () => {
     ['mensajes', () => mensajes.GET(get('/mensajes'))],
     ['hilo', () => hilo.GET(get('/hilo?id=mock-conv-01AAAA'))],
     ['notas', () => notas.POST(post('/hilo/notas', {}))],
+    ['leido', () => leido.POST(post('/hilo/leido', {}))],
     ['vincular', () => vincular.POST(post('/hilo/vincular', {}))],
     ['adjunto', () => adjunto.GET(get('/adjunto'))],
     ['simular', () => simular.POST(post('/simular', {}))],
@@ -220,6 +222,19 @@ describe('Correo · rutas: aislamiento por persona (anti-IDOR)', () => {
     expect(m.reservarAcuse).not.toHaveBeenCalled();
   });
 
+  it('marcar leído / no leído: solo hilos del buzón propio, valor obligatorio y auditado', async () => {
+    comoUsuario();
+    expect((await leido.POST(post('/hilo/leido', { conversationId: 'mock-conv-01AAAA' }))).status).toBe(400);
+    expect((await leido.POST(post('/hilo/leido', { conversationId: '<x>', leido: true }))).status).toBe(400);
+    const r = await leido.POST(post('/hilo/leido', { conversationId: 'mock-conv-01AAAA', leido: true }));
+    expect(r.status).toBe(200);
+    expect((await r.json()).cambiados).toBeGreaterThanOrEqual(0);
+    expect(m.auditar).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ accion: 'MARCAR_LEIDO', conversationId: 'mock-conv-01AAAA', mailbox: 'laura@gsslatam.com' }));
+    const n = await leido.POST(post('/hilo/leido', { conversationId: 'mock-conv-01AAAA', leido: false }));
+    expect(await n.json()).toEqual({ cambiados: 1 });
+    expect(m.auditar).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ accion: 'MARCAR_NO_LEIDO' }));
+  });
+
   it('notas de un hilo no vinculado: 404', async () => {
     comoUsuario();
     expect((await notas.POST(post('/hilo/notas', { conversationId: 'mock-conv-01AAAA' }))).status).toBe(404);
@@ -303,6 +318,7 @@ describe('Correo · rutas: app de aplicación y buzón de la sesión (anti-IDOR)
     comoUsuario();
     expect((await hilo.GET(get('/hilo?id=CONVDEGERENCIA1'))).status).toBe(404);
     expect((await adjunto.GET(get('/adjunto?mensaje=AAMkGERENCIA1&adjunto=ATTGERENCIA1'))).status).toBe(404);
+    expect((await leido.POST(post('/hilo/leido', { conversationId: 'CONVDEGERENCIA1', leido: true }))).status).toBe(404);
     const fd = new FormData();
     fd.set('mensajeId', 'AAMkGERENCIA1');
     fd.set('texto', 'x');

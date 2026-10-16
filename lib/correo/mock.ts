@@ -165,6 +165,11 @@ export class MockMailProvider implements MailProvider {
     });
   }
 
+  async marcarLeido(mensajeId: string, leido: boolean): Promise<void> {
+    const m = estado(this.yo).mensajes.find((x) => x.id === mensajeId);
+    if (m) m.leido = leido;
+  }
+
   async categorizar(mensajeId: string, categoria: string): Promise<void> {
     const m = estado(this.yo).mensajes.find((x) => x.id === mensajeId);
     if (m && !m.categorias.includes(categoria)) m.categorias.push(categoria);
