@@ -39,6 +39,8 @@ export interface MensajeVista {
   enCaso: boolean;
   /** «Abrir en Outlook» (validado en el servidor: solo https de Outlook en la web). */
   enlaceOutlook: string | null;
+  /** Imágenes incrustadas aún sin descargar: se piden al desplegar el mensaje (correoApi.imagenes). */
+  imagenesPendientes?: boolean;
 }
 
 export interface HiloVista {
@@ -147,8 +149,12 @@ export const correoApi = {
   carpetas: (signal?: AbortSignal) => get<{ carpetas: Carpeta[] }>('/api/correo/carpetas', signal),
   mensajes: (params: Record<string, string>, signal?: AbortSignal) =>
     get<{ mensajes: MensajeLista[]; siguiente: string | null }>(`/api/correo/mensajes?${new URLSearchParams(params)}`, signal),
-  hilo: (id: string, remotas = false, signal?: AbortSignal) =>
-    get<{ hilo: HiloVista }>(`/api/correo/hilo?${new URLSearchParams({ id, ...(remotas ? { remotas: '1' } : {}) })}`, signal),
+  /** `fresco` («Actualizar») ignora la caché corta del servidor. */
+  hilo: (id: string, remotas = false, signal?: AbortSignal, fresco = false) =>
+    get<{ hilo: HiloVista }>(`/api/correo/hilo?${new URLSearchParams({ id, ...(remotas ? { remotas: '1' } : {}), ...(fresco ? { fresco: '1' } : {}) })}`, signal),
+  /** Un mensaje del hilo con sus imágenes incrustadas (al desplegarlo). */
+  imagenes: (hilo: string, id: string, remotas = false) =>
+    get<{ mensaje: MensajeVista }>(`/api/correo/hilo/imagenes?${new URLSearchParams({ hilo, id, ...(remotas ? { remotas: '1' } : {}) })}`),
   marcarLeido: (conversationId: string, leido: boolean) => post<{ cambiados: number }>('/api/correo/hilo/leido', { conversationId, leido }),
   marcarSeleccion: (mensajesIds: string[], leido: boolean) => post<{ cambiados: number; fallidos: number }>('/api/correo/leido', { mensajesIds, leido }),
   /** Un lote de «Marcar todo» (200): repetir mientras `restantes` > 0. carpeta null = Bandeja de entrada. */

@@ -1,6 +1,7 @@
 import { CORREO_PAGE_SIZE, GRAPH_BASE, GRAPH_BATCH_MAX } from './constants';
 import type { Inquilino } from './config';
 import { CorreoError } from './errors';
+import { conReintentos, esReintentable, esperaReintento, leerRetryAfter, limitadorBuzones, POLITICA_GRAPH, type LimitadorConcurrencia, type PoliticaReintento } from './graphResiliencia';
 import { insertarSobreHistorial } from './plantillas/acuse.html';
 import type {
   AdjuntoInfo,
@@ -118,6 +119,13 @@ export async function tokenApp(inq: Inquilino, fetchFn: FetchFn = fetch, now = D
 
 const SELECT_RESUMEN = 'id,conversationId,internetMessageId,subject,from,receivedDateTime,isRead,hasAttachments,bodyPreview,categories';
 const SELECT_COMPLETO = `${SELECT_RESUMEN},toRecipients,ccRecipients,body,webLink`;
+/**
+ * Metadatos de TODOS los adjuntos en la MISMA consulta del hilo (sin bytes). contentId solo existe en
+ * fileAttachment, de ahí el «cast» (probado contra Graph v1.0 el 2026-10-16).
+ */
+export const EXPAND_ADJUNTOS = 'attachments($select=id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId)';
+/** Imágenes que se pueden incrustar como data: URI. */
+const IMAGEN_CID_RE = /^image\/(png|jpe?g|gif)$/i;
 /** Imágenes incrustadas: tope total por mensaje para pasarlas a data: URI. */
 const MAX_CID_TOTAL = 5 * 1024 * 1024;
 
@@ -224,14 +232,47 @@ function aCompleto(m: GraphMsg): MensajeCompleto {
     String(body.contentType ?? '').toLowerCase() === 'html'
       ? content
       : `<p>${content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r?\n/g, '<br>')}</p>`;
+  // Adjuntos que vinieron en la misma consulta ($expand=attachments, sin bytes): los visibles van a la
+  // lista; las imágenes incrustadas (cid) quedan PENDIENTES y se piden solo para los mensajes desplegados.
+  const expandidos = Array.isArray(m.attachments) ? (m.attachments as GraphMsg[]) : [];
+  const adjuntos: AdjuntoInfo[] = [];
+  let conImagenCid = false;
+  for (const a of expandidos) {
+    const tipo = String(a.contentType ?? 'application/octet-stream');
+    if (typeof a.contentId === 'string' && a.contentId && IMAGEN_CID_RE.test(tipo)) conImagenCid = true;
+    if (a.isInline) continue;
+    adjuntos.push({ id: String(a.id), nombre: String(a.name ?? 'adjunto'), tipo, tamano: Number(a.size) || 0, enLinea: false });
+  }
   return {
     ...aResumen(m),
     para: Array.isArray(m.toRecipients) ? (m.toRecipients as GraphAddr[]).map(dir) : [],
     cc: Array.isArray(m.ccRecipients) ? (m.ccRecipients as GraphAddr[]).map(dir) : [],
     html,
-    adjuntos: [],
+    adjuntos,
+    imagenesPendientes: conImagenCid && /\bcid:/i.test(html),
     ...(typeof m.webLink === 'string' && m.webLink ? { webLink: m.webLink } : {}),
   };
+}
+
+/** Mensajes que se ven DESPLEGADOS al abrir el hilo (como Gmail): el último y los no leídos. */
+export function idsDesplegados(mensajes: Array<{ id: string; leido: boolean }>): Set<string> {
+  const ids = new Set(mensajes.filter((m) => !m.leido).map((m) => m.id));
+  const ultimo = mensajes[mensajes.length - 1];
+  if (ultimo) ids.add(ultimo.id);
+  return ids;
+}
+
+/** Opciones del hilo: qué imágenes incrustadas (cid) se descargan en la misma apertura. */
+export interface OpcionesHilo {
+  /** 'desplegados' = el último y los no leídos (vista del hilo); 'ninguna' = solo metadatos (marcar, vincular, acuse…). */
+  imagenes?: 'desplegados' | 'ninguna';
+}
+
+export interface OpcionesProveedorGraph {
+  /** Pruebas: espera entre reintentos (por defecto, setTimeout real). */
+  dormir?: (ms: number) => Promise<void>;
+  politica?: PoliticaReintento;
+  limitador?: LimitadorConcurrencia;
 }
 
 function escHtml(s: string): string {
@@ -243,16 +284,39 @@ export function textoAHtml(texto: string): string {
   return escHtml(texto).replace(/\r?\n/g, '<br>');
 }
 
+/** 429 que sigue después de los reintentos automáticos: mensaje para la persona con la espera sugerida. */
+function errorLimitado(res: Response): CorreoError {
+  const ms = leerRetryAfter(res.headers.get('retry-after'));
+  const s = ms == null ? 10 : Math.max(1, Math.ceil(ms / 1000));
+  return new CorreoError(`Microsoft limitó las consultas a su buzón. Intente de nuevo en ${s} s.`, 429, 'LIMITADO');
+}
+
 export class GraphMailProvider implements MailProvider {
   private readonly me: string;
 
   constructor(
     private readonly mailbox: Mailbox,
     private readonly token: () => Promise<string>,
-    private readonly fetchFn: FetchFn = fetch
+    private readonly fetchFn: FetchFn = fetch,
+    private readonly opciones: OpcionesProveedorGraph = {}
   ) {
     if (mailbox?.__marca !== 'mailbox-de-sesion') throw new CorreoError('Buzón no permitido.', 500);
     this.me = mailbox.base;
+  }
+
+  /**
+   * Toda salida a Graph pasa por aquí: máximo 3 llamadas simultáneas por buzón (cola en memoria) y
+   * reintento automático de 429/503 respetando Retry-After. La espera NO ocupa cupo de la cola.
+   */
+  private async enviar(url: string, init: RequestInit, idempotente: boolean): Promise<Response> {
+    const limitador = this.opciones.limitador ?? limitadorBuzones;
+    return conReintentos(() => limitador.correr(this.mailbox.correo, () => this.fetchFn(url, init)), {
+      idempotente,
+      politica: this.opciones.politica,
+      dormir: this.opciones.dormir,
+      // Sin buzón ni contenido: solo la señal para diagnosticar el throttling en el registro de PM2.
+      alReintentar: (i) => console.warn(`[correo/graph] Microsoft respondió ${i.status}; reintento ${i.intento} en ${i.esperaMs} ms`),
+    });
   }
 
   private async call(url: string, init: RequestInit = {}, prefer?: string): Promise<Response> {
@@ -261,15 +325,13 @@ export class GraphMailProvider implements MailProvider {
     const token = await this.token();
     const headers: Record<string, string> = { Authorization: `Bearer ${token}`, ...(init.headers as Record<string, string>) };
     if (prefer) headers.Prefer = prefer;
-    const res = await this.fetchFn(url, { ...init, headers });
+    const metodo = String(init.method ?? 'GET').toUpperCase();
+    const res = await this.enviar(url, { ...init, headers }, metodo === 'GET' || metodo === 'PATCH' || metodo === 'DELETE');
     if (res.ok) return res;
     if (res.status === 401) throw new CorreoError('Microsoft rechazó la autenticación del módulo Correo. Avise a Tecnología.', 502);
     if (res.status === 403) throw new CorreoError('Microsoft no autorizó la operación (permiso de la app o política del buzón). Avise a Tecnología.', 403);
     if (res.status === 404) throw new CorreoError('No se encontró el correo en su buzón (pudo moverse o borrarse).', 404);
-    if (res.status === 429) {
-      const ra = Number(res.headers.get('retry-after')) || 10;
-      throw new CorreoError(`Microsoft limitó las consultas. Intente de nuevo en ${ra} s.`, 429);
-    }
+    if (res.status === 429) throw errorLimitado(res);
     throw new CorreoError(`Microsoft respondió con un error (${res.status}).`, 502);
   }
 
@@ -306,54 +368,59 @@ export class GraphMailProvider implements MailProvider {
     return { mensajes: (data.value ?? []).map(aResumen), siguiente: codificarCursor(data['@odata.nextLink']) };
   }
 
-  private async adjuntosDe(m: MensajeCompleto): Promise<MensajeCompleto> {
-    if (!m.conAdjuntos && !/\bcid:/i.test(m.html)) return m;
-    const base = `${this.me}/messages/${encodeURIComponent(m.id)}/attachments`;
-    const conCid = /\bcid:/i.test(m.html);
-    // Sin imágenes incrustadas basta la lista liviana (sin bytes).
-    const data = await this.json<{ value?: GraphMsg[] }>(conCid ? base : `${base}?$select=id,name,contentType,size,isInline`);
-    const adjuntos: AdjuntoInfo[] = [];
-    const imagenesCid: Record<string, string> = {};
+  /**
+   * Imágenes incrustadas (cid) de UN mensaje como data: URI: una sola consulta, solo de los adjuntos en
+   * línea (antes se bajaban los bytes de TODOS los adjuntos, PDF incluidos). Tope total MAX_CID_TOTAL.
+   */
+  async imagenesCid(mensajeId: string): Promise<Record<string, string>> {
+    const url = `${this.me}/messages/${encodeURIComponent(assertGraphId(mensajeId))}/attachments?$filter=${encodeURIComponent('isInline eq true')}`;
+    const data = await this.json<{ value?: GraphMsg[] }>(url);
+    const imagenes: Record<string, string> = {};
     let total = 0;
     for (const a of data.value ?? []) {
-      const info: AdjuntoInfo = {
-        id: String(a.id),
-        nombre: String(a.name ?? 'adjunto'),
-        tipo: String(a.contentType ?? 'application/octet-stream'),
-        tamano: Number(a.size) || 0,
-        enLinea: Boolean(a.isInline),
-      };
+      const tipo = String(a.contentType ?? '');
       const cid = typeof a.contentId === 'string' ? a.contentId.replace(/^<|>$/g, '') : '';
       const bytes = typeof a.contentBytes === 'string' ? a.contentBytes : '';
-      if (conCid && cid && bytes && /^image\/(png|jpe?g|gif)$/i.test(info.tipo) && total + bytes.length <= MAX_CID_TOTAL) {
-        imagenesCid[cid.toLowerCase()] = `data:${info.tipo.toLowerCase()};base64,${bytes}`;
+      if (cid && bytes && IMAGEN_CID_RE.test(tipo) && total + bytes.length <= MAX_CID_TOTAL) {
+        imagenes[cid.toLowerCase()] = `data:${tipo.toLowerCase()};base64,${bytes}`;
         total += bytes.length;
       }
-      if (!info.enLinea) adjuntos.push(info);
     }
-    return { ...m, adjuntos, imagenesCid };
+    return imagenes;
   }
 
-  async hilo(conversationId: string): Promise<MensajeCompleto[]> {
+  /**
+   * Hilo en UNA consulta: mensajes con cuerpo y metadatos de adjuntos ($expand, sin bytes), ordenados en
+   * Graph (el más reciente primero, para que $top conserve los 50 últimos) y devueltos del más antiguo al
+   * más reciente. Las imágenes cid solo se piden para los mensajes desplegados (una consulta por mensaje);
+   * las de los demás, al desplegarlos (imagenesPendientes).
+   */
+  async hilo(conversationId: string, opciones: OpcionesHilo = {}): Promise<MensajeCompleto[]> {
     const id = assertGraphId(conversationId, 'identificador del hilo');
     const u = new URL(`${this.me}/messages`);
-    u.searchParams.set('$filter', `conversationId eq ${odataString(id)}`);
+    // Graph exige que la propiedad de $orderby esté primero en $filter (si no: InefficientFilter).
+    u.searchParams.set('$filter', `receivedDateTime ge 1900-01-01T00:00:00Z and conversationId eq ${odataString(id)}`);
+    u.searchParams.set('$orderby', 'receivedDateTime desc');
     u.searchParams.set('$select', SELECT_COMPLETO);
+    u.searchParams.set('$expand', EXPAND_ADJUNTOS);
     u.searchParams.set('$top', '50');
     const data = await this.json<{ value?: GraphMsg[] }>(u.toString(), undefined, 'outlook.body-content-type="html"');
-    // Graph no admite $orderby con este $filter: se ordena aquí (más antiguo primero).
     const msgs = (data.value ?? []).map(aCompleto).sort((a, b) => a.fecha.localeCompare(b.fecha));
-    return Promise.all(msgs.map((m) => this.adjuntosDe(m)));
+    if (opciones.imagenes !== 'desplegados') return msgs;
+    const desplegados = idsDesplegados(msgs);
+    return Promise.all(
+      msgs.map(async (m) => (m.imagenesPendientes && desplegados.has(m.id) ? { ...m, imagenesCid: await this.imagenesCid(m.id), imagenesPendientes: false } : m))
+    );
   }
 
   async mensaje(id: string): Promise<MensajeCompleto> {
     const mid = assertGraphId(id);
     const m = await this.json<GraphMsg>(
-      `${this.me}/messages/${encodeURIComponent(mid)}?$select=${SELECT_COMPLETO}`,
+      `${this.me}/messages/${encodeURIComponent(mid)}?$select=${SELECT_COMPLETO}&$expand=${encodeURIComponent(EXPAND_ADJUNTOS)}`,
       undefined,
       'outlook.body-content-type="html"'
     );
-    return this.adjuntosDe(aCompleto(m));
+    return aCompleto(m);
   }
 
   async adjunto(mensajeId: string, adjuntoId: string): Promise<ArchivoAdjunto> {
@@ -468,14 +535,19 @@ export class GraphMailProvider implements MailProvider {
     if (peticiones.length === 0 || peticiones.length > GRAPH_BATCH_MAX) throw new CorreoError('Lote de Graph inválido.', 500);
     for (const p of peticiones) if (!urlDelBuzon(`${GRAPH_BASE}${p.url}`, this.mailbox)) throw new CorreoError('Destino de Graph no permitido.', 500);
     const token = await this.token();
-    const res = await this.fetchFn(`${GRAPH_BASE}/$batch`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requests: peticiones.map((p) => ({ ...p, headers: { 'Content-Type': 'application/json' } })) }),
-    });
+    // Un lote de PATCH es idempotente: se reintenta igual que un GET.
+    const res = await this.enviar(
+      `${GRAPH_BASE}/$batch`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requests: peticiones.map((p) => ({ ...p, headers: { 'Content-Type': 'application/json' } })) }),
+      },
+      true
+    );
     if (res.status === 401) throw new CorreoError('Microsoft rechazó la autenticación del módulo Correo. Avise a Tecnología.', 502);
     if (res.status === 403) throw new CorreoError('Microsoft no autorizó la operación (permiso de la app o política del buzón). Avise a Tecnología.', 403);
-    if (res.status === 429) throw new CorreoError(`Microsoft limitó las consultas. Intente de nuevo en ${Number(res.headers.get('retry-after')) || 10} s.`, 429);
+    if (res.status === 429) throw errorLimitado(res);
     if (!res.ok) throw new CorreoError(`Microsoft respondió con un error (${res.status}).`, 502);
     const data = (await res.json()) as { responses?: Array<{ id?: string; status?: number; headers?: Record<string, string> }> };
     const out = new Map<string, { status: number; retryAfter: number }>();
@@ -492,18 +564,22 @@ export class GraphMailProvider implements MailProvider {
     let fallidos = 0;
     for (let i = 0; i < rutas.length; i += GRAPH_BATCH_MAX) {
       let pendientes = rutas.slice(i, i + GRAPH_BATCH_MAX).map((url, j) => ({ id: String(j + 1), method: 'PATCH' as const, url, body: { isRead: leido } }));
-      // Un reintento para las sub-peticiones limitadas (429), esperando lo que pida Graph (máx. 5 s).
-      for (let intento = 0; intento < 2 && pendientes.length; intento++) {
+      // Las sub-peticiones limitadas (429/503; Exchange admite 4 simultáneas por buzón) se reintentan con la
+      // misma política que el resto (hasta 3 veces, respetando Retry-After con retroceso y jitter).
+      const politica = this.opciones.politica ?? POLITICA_GRAPH;
+      const dormir = this.opciones.dormir ?? ((ms: number) => new Promise<void>((x) => setTimeout(x, ms)));
+      for (let intento = 0; pendientes.length; intento++) {
+        const ultimo = intento >= politica.reintentos;
         const r = await this.lote(pendientes);
-        const limitadas = pendientes.filter((p) => r.get(p.id)?.status === 429);
+        const limitadas = pendientes.filter((p) => esReintentable(r.get(p.id)?.status ?? 0, true));
         for (const p of pendientes) {
           const st = r.get(p.id)?.status ?? 0;
           if (st >= 200 && st < 300) cambiados++;
-          else if (st !== 429 || intento === 1) fallidos++;
+          else if (!esReintentable(st, true) || ultimo) fallidos++;
         }
-        if (!limitadas.length || intento === 1) break;
-        const espera = Math.min(5, Math.max(1, ...limitadas.map((p) => r.get(p.id)?.retryAfter ?? 1)));
-        await new Promise((x) => setTimeout(x, espera * 1000));
+        if (!limitadas.length || ultimo) break;
+        const ra = Math.max(0, ...limitadas.map((p) => r.get(p.id)?.retryAfter ?? 0));
+        await dormir(Math.min(politica.maxEsperaMs, esperaReintento(intento, ra ? ra * 1000 : null, politica)));
         pendientes = limitadas;
       }
     }
