@@ -164,6 +164,20 @@ export interface MensajeVista {
   adjuntos: MensajeCompleto['adjuntos'];
   /** Ya está en el caso vinculado (origen, nota o respuesta). */
   enCaso: boolean;
+  /** «Abrir en Outlook»: solo si Graph lo trae y es de Outlook en la web (https). */
+  enlaceOutlook: string | null;
+}
+
+const HOSTS_OUTLOOK = new Set(['outlook.office.com', 'outlook.office365.com', 'outlook.live.com']);
+/** Solo enlaces https de Outlook en la web: nada de otro dominio ni de otro esquema llega a un `href`. */
+export function enlaceOutlookSeguro(webLink: string | undefined): string | null {
+  if (!webLink) return null;
+  try {
+    const u = new URL(webLink);
+    return u.protocol === 'https:' && HOSTS_OUTLOOK.has(u.hostname.toLowerCase()) ? u.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface HiloVista {
@@ -232,9 +246,33 @@ export async function verHilo(d: CorreoDeps, acceso: AccesoCorreo, conversationI
         remotasBloqueadas: s.remotasBloqueadas,
         adjuntos: m.adjuntos,
         enCaso: registrados.has(m.internetMessageId),
+        enlaceOutlook: enlaceOutlookSeguro(m.webLink),
       };
     }),
   };
+}
+
+/**
+ * «Marcar como leído / no leído» del hilo (barra del hilo, como Gmail). Los ids salen del hilo leído del buzón
+ * PROPIO (nunca del navegador): solo se tocan los mensajes cuyo estado cambia. Queda en la auditoría.
+ */
+export async function marcarLeidoHilo(d: CorreoDeps, acceso: AccesoCorreo, conversationId: string, leido: boolean, ip: string | null): Promise<{ cambiados: number }> {
+  const prov = await proveedorDe(d, acceso);
+  const mensajes = await prov.hilo(conversationId);
+  if (mensajes.length === 0) throw new CorreoError('No se encontró el hilo en su buzón.', 404);
+  // Como Gmail: «no leído» deja sin leer el último mensaje; «leído» marca todos.
+  const objetivo = leido ? mensajes.filter((m) => !m.leido) : mensajes.slice(-1).filter((m) => m.leido);
+  for (const m of objetivo) await prov.marcarLeido(m.id, leido);
+  await data.auditar(d.db, {
+    idUser: acceso.idUser,
+    mailbox: buzon(acceso),
+    accion: leido ? 'MARCAR_LEIDO' : 'MARCAR_NO_LEIDO',
+    conversationId,
+    mensajeId: objetivo[0]?.id ?? null,
+    detalle: `${objetivo.length} mensaje(s)`,
+    ip,
+  });
+  return { cambiados: objetivo.length };
 }
 
 /** Pasa a notas del caso los correos nuevos de un hilo vinculado (a pedido o por la tarea de fondo). */

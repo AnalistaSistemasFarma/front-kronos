@@ -117,7 +117,7 @@ export async function tokenApp(inq: Inquilino, fetchFn: FetchFn = fetch, now = D
 }
 
 const SELECT_RESUMEN = 'id,conversationId,internetMessageId,subject,from,receivedDateTime,isRead,hasAttachments,bodyPreview,categories';
-const SELECT_COMPLETO = `${SELECT_RESUMEN},toRecipients,ccRecipients,body`;
+const SELECT_COMPLETO = `${SELECT_RESUMEN},toRecipients,ccRecipients,body,webLink`;
 /** Imágenes incrustadas: tope total por mensaje para pasarlas a data: URI. */
 const MAX_CID_TOTAL = 5 * 1024 * 1024;
 
@@ -230,6 +230,7 @@ function aCompleto(m: GraphMsg): MensajeCompleto {
     cc: Array.isArray(m.ccRecipients) ? (m.ccRecipients as GraphAddr[]).map(dir) : [],
     html,
     adjuntos: [],
+    ...(typeof m.webLink === 'string' && m.webLink ? { webLink: m.webLink } : {}),
   };
 }
 
@@ -450,6 +451,11 @@ export class GraphMailProvider implements MailProvider {
       throw e;
     }
     await this.call(`${url}/send`, { method: 'POST' });
+  }
+
+  async marcarLeido(mensajeId: string, leido: boolean): Promise<void> {
+    const url = `${this.me}/messages/${encodeURIComponent(assertGraphId(mensajeId))}`;
+    await this.call(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isRead: leido }) });
   }
 
   async categorizar(mensajeId: string, categoria: string): Promise<void> {

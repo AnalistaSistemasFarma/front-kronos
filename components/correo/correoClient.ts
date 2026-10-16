@@ -37,6 +37,8 @@ export interface MensajeVista {
   remotasBloqueadas: number;
   adjuntos: AdjuntoInfo[];
   enCaso: boolean;
+  /** «Abrir en Outlook» (validado en el servidor: solo https de Outlook en la web). */
+  enlaceOutlook: string | null;
 }
 
 export interface HiloVista {
@@ -82,15 +84,18 @@ async function leer<T>(res: Response): Promise<T> {
   return body as T;
 }
 
-const get = <T>(url: string) => fetch(url, { cache: 'no-store' }).then((r) => leer<T>(r));
+const get = <T>(url: string, signal?: AbortSignal) => fetch(url, { cache: 'no-store', signal }).then((r) => leer<T>(r));
 const post = <T>(url: string, body: unknown) =>
   fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => leer<T>(r));
 
 export const correoApi = {
   estado: () => get<EstadoCorreo>('/api/correo'),
-  carpetas: () => get<{ carpetas: Carpeta[] }>('/api/correo/carpetas'),
-  mensajes: (params: Record<string, string>) => get<{ mensajes: MensajeLista[]; siguiente: string | null }>(`/api/correo/mensajes?${new URLSearchParams(params)}`),
-  hilo: (id: string, remotas = false) => get<{ hilo: HiloVista }>(`/api/correo/hilo?${new URLSearchParams({ id, ...(remotas ? { remotas: '1' } : {}) })}`),
+  carpetas: (signal?: AbortSignal) => get<{ carpetas: Carpeta[] }>('/api/correo/carpetas', signal),
+  mensajes: (params: Record<string, string>, signal?: AbortSignal) =>
+    get<{ mensajes: MensajeLista[]; siguiente: string | null }>(`/api/correo/mensajes?${new URLSearchParams(params)}`, signal),
+  hilo: (id: string, remotas = false, signal?: AbortSignal) =>
+    get<{ hilo: HiloVista }>(`/api/correo/hilo?${new URLSearchParams({ id, ...(remotas ? { remotas: '1' } : {}) })}`, signal),
+  marcarLeido: (conversationId: string, leido: boolean) => post<{ cambiados: number }>('/api/correo/hilo/leido', { conversationId, leido }),
   notas: (conversationId: string) => post<{ agregadas: number; idRequest: number }>('/api/correo/hilo/notas', { conversationId }),
   vincular: (conversationId: string, idRequest: number, acuse?: OpcionesAcuse) =>
     post<{ vinculo: VinculoHilo; acuse?: ResultadoAcuse }>('/api/correo/hilo/vincular', { conversationId, idRequest, ...(acuse ? { acuse } : {}) }),
@@ -112,6 +117,9 @@ export const correoApi = {
     return leer<{ ok: boolean; notaEnSolicitud: number | null }>(await fetch('/api/correo/responder', { method: 'POST', body: fd }));
   },
 };
+
+/** ¿El error es de una consulta cancelada a propósito (el usuario ya cambió de carpeta o de hilo)? */
+export const esCancelada = (e: unknown) => e instanceof DOMException && e.name === 'AbortError';
 
 export const urlAdjunto = (mensajeId: string, adjuntoId: string, ver = false) =>
   `/api/correo/adjunto?${new URLSearchParams({ mensaje: mensajeId, adjunto: adjuntoId, ...(ver ? { ver: '1' } : {}) })}`;
