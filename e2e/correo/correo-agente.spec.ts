@@ -65,7 +65,7 @@ async function sesion(context: BrowserContext, baseURL: string) {
 }
 
 /** Correo + agente + chat simulados. `estado.propuso` = el agente ya llamó a correo_proponer_respuesta. */
-async function simular(page: Page, opciones: { compartido?: boolean } = {}) {
+async function simular(page: Page, opciones: { compartido?: boolean; agenteApagado?: boolean } = {}) {
   const estado = {
     compartidos: [] as unknown[],
     confirmaciones: [] as unknown[],
@@ -81,7 +81,7 @@ async function simular(page: Page, opciones: { compartido?: boolean } = {}) {
       json: {
         usuario: { id: 'u-op', nombre: 'Laura', email: 'laura@gsslatam.com' },
         empresas: [{ idCompany: 1, companyName: 'GROUP SHARED SERVICES' }],
-        conexion: { modo: 'graph', disponible: true, correo: 'laura@gsslatam.com', envioHabilitado: true, etiquetarHabilitado: true, sincronizacionAutomatica: false },
+        conexion: { modo: 'graph', disponible: true, correo: 'laura@gsslatam.com', envioHabilitado: true, etiquetarHabilitado: true, sincronizacionAutomatica: false, agenteHabilitado: !opciones.agenteApagado },
       },
     })
   );
@@ -152,6 +152,15 @@ test.describe('Correo · Consultar a un agente · con sesión y simulado', () =>
 
   test.beforeEach(async ({ context, baseURL }) => {
     await sesion(context, baseURL!);
+  });
+
+  test('bandera CORREO_AGENTE_HABILITADO apagada: el hilo no ofrece «Consultar a un agente»', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await simular(page, { agenteApagado: true });
+    await page.goto('/process/correo?hilo=CONV-01AAAA');
+    const vista = page.getByTestId('correo-hilo');
+    await expect(vista.getByTestId('correo-hilo-mensaje')).toHaveCount(1);
+    await expect(vista.getByTestId('correo-hilo-agente')).toHaveCount(0);
   });
 
   test('escritorio: compartir → el agente propone → la persona confirma → se envía una sola vez', async ({ page }) => {
