@@ -3442,8 +3442,12 @@ model OtOrdenTrabajo {
   estado             String    @default("ABIERTA") @db.NVarChar(10)
   // Supervisor: quien abre la bitácora (user.id).
   abierta_por        String    @db.NVarChar(50)
-  // Inspector (user.id), elegido al abrir; registra igual que los auxiliares.
+  // Inspector (user.id), elegido al abrir. En las bitácoras del #617 (2026-10-14) esta
+  // columna guardaba al jefe de producción; la migración 20261015180000 la pasó a
+  // id_jefe_produccion (B1, 2026-10-15).
   id_inspector       String?   @db.NVarChar(50)
+  // Jefe de producción (user.id), elegido al abrir (B1, 2026-10-15).
+  id_jefe_produccion String?   @db.NVarChar(50)
   abierta_en         DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
   cerrada_por        String?   @db.NVarChar(50)
   cerrada_en         DateTime? @db.DateTime2
@@ -3518,6 +3522,7 @@ model OtOperador {
   company   Company           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   ordenes   OtOrdenOperador[]
   registros OtRegistro[]
+  firmas    OtFirma[]
 
   @@unique([id_company, nombre], map: "UQ_ot_operador_nombre")
   @@map("ot_operador")
@@ -3558,6 +3563,9 @@ model OtOrdenOperador {
   @@schema("dbo")
 }
 
+// Desde el 2026-10-15 (B2/B3) son CUATRO vistos buenos (OPERARIO, SUPERVISOR = «Cerró»,
+// INSPECTOR y JEFE_PROD), sin contraseña: sesión propia o PIN en la tablet (auth_method).
+// Las filas viejas INSPECTOR «Verificó» se leen como el visto bueno del jefe de producción.
 // Desde el 2026-10-14 «Cerró»/«Verificó» son un CHECK con contraseña, sin imagen (firma_png
 // queda NULL); el verificador (rol INSPECTOR) se muestra como «Jefe de producción».
 // Firma electrónica de la bitácora (SUPERVISOR «Cerró» e INSPECTOR «Verificó»),
@@ -3566,7 +3574,7 @@ model OtOrdenOperador {
 model OtFirma {
   id_firma         Int      @id @default(autoincrement())
   id_orden_trabajo Int
-  // SUPERVISOR | INSPECTOR
+  // OPERARIO | SUPERVISOR | INSPECTOR | JEFE_PROD (filas viejas: INSPECTOR «Verificó» = jefe)
   rol              String   @db.NVarChar(12)
   significado      String   @db.NVarChar(20)
   id_user          String   @db.NVarChar(50)
@@ -3580,11 +3588,36 @@ model OtFirma {
   firma_sha256     String?  @db.Char(64)
   ip               String?  @db.NVarChar(64)
   user_agent       String?  @db.NVarChar(400)
+  // B2 (2026-10-15): operario (sin usuario) que dio el visto bueno, y usuario de la SESIÓN
+  // desde la que se confirmó (en la tablet, la cuenta compartida).
+  id_operador      Int?
+  id_user_sesion   String?  @db.NVarChar(50)
 
-  orden OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
+  orden    OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
+  operador OtOperador?    @relation(fields: [id_operador], references: [id_operador], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([id_orden_trabajo, rol], map: "UQ_ot_firma_rol")
   @@map("ot_firma")
+  @@schema("dbo")
+}
+
+// PIN personal de la Bitácora de Proceso (B3, 2026-10-15): 4 dígitos, solo el hash
+// bcrypt. Con la cuenta compartida de la tablet, la persona elige su nombre y escribe su
+// PIN para dar su visto bueno. 5 intentos fallidos lo bloquean hasta que la persona lo
+// vuelva a configurar desde su sesión o un supervisor/administrador lo restablezca.
+model OtPin {
+  id_user           String    @id @db.NVarChar(50)
+  pin_hash          String?   @db.NVarChar(100)
+  intentos_fallidos Int       @default(0)
+  bloqueado         Boolean   @default(false)
+  ultimo_fallo_en   DateTime? @db.DateTime2
+  configurado_en    DateTime? @db.DateTime2
+  restablecido_por  String?   @db.NVarChar(50)
+  restablecido_en   DateTime? @db.DateTime2
+  created_at        DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  updated_at        DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  @@map("ot_pin")
   @@schema("dbo")
 }
 
