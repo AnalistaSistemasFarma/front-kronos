@@ -19,6 +19,7 @@ import {
   videoCompleto,
 } from '../../lib/portal/visor-revision';
 import { PanelRespuestas, PreviaDeMaterialFormulario, SelectorFormulario, VisorFormulario } from './FormularioPropio';
+import TopEstudiantes from './TopEstudiantes';
 
 /**
  * FORMACIÓN — sección "tipo Moodle" al final del portal de Talento Humano.
@@ -232,20 +233,25 @@ function ProgresoSubida({ subida, onCancelar }: { subida: EstadoSubida; onCancel
 }
 
 function ListaCursosEstudiante({ cursos, onAbrir }: { cursos: CursoResumen[]; onAbrir: (id: number) => void }) {
-  if (cursos.length === 0) {
-    return <p className='portal-th__estado'>Todavía no hay cursos publicados.</p>;
-  }
+  // Top 10 de estudiantes (Cristian, 2026-10-16): a la derecha de los cursos en pantallas anchas, debajo en las angostas.
   return (
-    <div className='portal-th__curso-grilla'>
-      {cursos.map((c) => (
-        <button type='button' key={c.id} className='portal-th__curso-tarjeta' onClick={() => onAbrir(c.id)}>
-          <strong>{c.titulo}</strong>
-          {c.descripcion && <p>{c.descripcion}</p>}
-          <span className='portal-th__curso-meta'>{c.totalMateriales} material(es)</span>
-          <BarraProgreso porcentaje={c.porcentaje ?? 0} mostrarCompletado />
-          {c.certificado && <span className='portal-th__curso-certificado-chip'>✅ Certificado emitido</span>}
-        </button>
-      ))}
+    <div className='portal-th__lista-top'>
+      {cursos.length === 0 ? (
+        <p className='portal-th__estado'>Todavía no hay cursos publicados.</p>
+      ) : (
+        <div className='portal-th__curso-grilla'>
+          {cursos.map((c) => (
+            <button type='button' key={c.id} className='portal-th__curso-tarjeta' onClick={() => onAbrir(c.id)}>
+              <strong>{c.titulo}</strong>
+              {c.descripcion && <p>{c.descripcion}</p>}
+              <span className='portal-th__curso-meta'>{c.totalMateriales} material(es)</span>
+              <BarraProgreso porcentaje={c.porcentaje ?? 0} mostrarCompletado />
+              {c.certificado && <span className='portal-th__curso-certificado-chip'>✅ Certificado emitido</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      <TopEstudiantes />
     </div>
   );
 }
