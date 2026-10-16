@@ -81,6 +81,12 @@ async function simular(page: Page, opciones: { disponible?: boolean } = {}) {
     return r.fulfill({ json: { mensajes, siguiente: null } });
   });
   await page.route('**/api/correo/hilo?**', (r) => r.fulfill({ json: { hilo } }));
+  // Leído / no leído (al abrir un hilo se marca solo, como Gmail). Va DESPUÉS de «hilo?**», cuyo «?» también calza con «/».
+  const leidos: unknown[] = [];
+  await page.route('**/api/correo/hilo/leido', (r) => {
+    leidos.push(r.request().postDataJSON());
+    return r.fulfill({ json: { cambiados: 1 } });
+  });
   await page.route('**/api/correo/responder', (r) => {
     respuestas.push(r.request().postData() ?? '');
     return r.fulfill({ json: { ok: true, notaEnSolicitud: null } });
@@ -108,7 +114,7 @@ async function simular(page: Page, opciones: { disponible?: boolean } = {}) {
     await new Promise((x) => setTimeout(x, 150));
     return r.fulfill({ status: 201, json: { conversationId: body.conversationId, ok: true, idRequest: 700 + creadas.length, adjuntosSubidos: body.adjuntosIds.length, adjuntosFallidos: [], etiquetado: true } });
   });
-  return { creadas, respuestas, consultas };
+  return { creadas, respuestas, consultas, leidos };
 }
 
 test.describe('Correo · sin sesión', () => {
@@ -143,7 +149,7 @@ test.describe('Correo · con sesión y Graph simulado', () => {
 
   test('escritorio: bandeja → hilo seguro → responder → simulación → crear con resumen', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
-    const { creadas, respuestas } = await simular(page);
+    const { creadas, respuestas, leidos } = await simular(page);
     await page.goto('/process/correo');
     await expect(page.getByTestId('correo-titulo')).toBeVisible();
     await expect(page.getByTestId('correo-buzon')).toHaveText('laura@gsslatam.com');
@@ -162,7 +168,22 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     await expect(page.frameLocator('[data-testid="correo-cuerpo"]').locator('#cuerpo')).toContainText('arrendamiento');
     await expect(drawer.getByTestId('correo-imagenes-bloqueadas')).toBeVisible();
     await expect(drawer.getByTestId('correo-adjunto')).toContainText('contrato.pdf');
-    await expect(drawer.getByTestId('correo-hilo-sin-vinculo')).toBeVisible();
+    // Como Gmail: el hilo ocupa el lugar de la lista (sin panel lateral), con ← y las acciones arriba.
+    await expect(page).toHaveURL(/[?&]hilo=CONV-01AAAA/);
+    await expect(page.getByTestId('correo-bandeja')).toBeHidden();
+    await expect(page.getByTestId('correo-carpetas')).toBeVisible();
+    await expect(page.locator('.mantine-Drawer-root')).toHaveCount(0);
+    const barraHilo = drawer.getByTestId('correo-hilo-barra');
+    await expect(barraHilo.getByTestId('correo-hilo-volver')).toBeVisible();
+    await expect(barraHilo.getByTestId('correo-hilo-crear')).toBeVisible();
+    await expect(barraHilo.getByTestId('correo-hilo-vincular-btn')).toBeVisible();
+    // Al abrirlo, el hilo sin leer queda leído (como Gmail).
+    await expect(barraHilo.getByTestId('correo-hilo-leido')).toHaveAttribute('aria-label', 'Marcar como no leído');
+    await expect(drawer.getByTestId('correo-hilo-carpeta')).toHaveText('Recibidos');
+    // El hilo usa todo el ancho del área de contenido (no un panel de 1000 px).
+    const anchoHilo = (await drawer.boundingBox())!.width;
+    expect(anchoHilo).toBeGreaterThan(1366 - 232 - 80);
+    expect(leidos).toEqual([{ conversationId: 'CONV-01AAAA', leido: true }]);
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/02-hilo.png` });
     // Responder como en Gmail: el botón abre el editor en el mismo hilo, con formato Markdown.
     await expect(drawer.getByTestId('correo-responder')).toHaveCount(0);
@@ -185,7 +206,11 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     await drawer.getByTestId('correo-respuesta-enviar').click();
     await expect(drawer.getByTestId('correo-hilo-resultado')).toContainText('Respuesta enviada desde su buzón');
     expect(respuestas[0]).toContain('**lo reviso hoy**');
-    await page.keyboard.press('Escape');
+    // ← vuelve a la lista (y quita ?hilo= de la dirección).
+    await drawer.getByTestId('correo-hilo-volver').click();
+    await expect(page.getByTestId('correo-hilo')).toHaveCount(0);
+    await expect(page).not.toHaveURL(/hilo=/);
+    await expect(page.getByTestId('correo-fila')).toHaveCount(3);
 
     // Selección masiva → simulación (nada se crea todavía).
     for (const c of await page.getByTestId('correo-seleccionar').all()) await c.check();
@@ -366,12 +391,18 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/05b-movil-carpetas.png` });
     await page.keyboard.press('Escape');
     await expect(panel.getByTestId('correo-carpeta')).toHaveCount(0);
-    // Hilo a pantalla completa con Responder abajo.
+    // Hilo a pantalla completa con ← arriba y Responder abajo (sin buscador encima).
     await page.getByTestId('correo-fila').first().click();
-    await expect(page.getByTestId('correo-hilo').getByTestId('correo-responder-btn')).toBeVisible();
-    await page.waitForTimeout(400); // fin de la animación del panel
-    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/05c-movil-hilo.png`, fullPage: true });
-    await page.keyboard.press('Escape');
+    const hiloMovil = page.getByTestId('correo-hilo');
+    await expect(hiloMovil.getByTestId('correo-responder-btn')).toBeVisible();
+    await expect(hiloMovil.getByTestId('correo-hilo-volver')).toBeVisible();
+    await expect(page.getByTestId('correo-buscar')).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390 + 1);
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/05c-movil-hilo.png` });
+    // El «atrás» del navegador (o del celular) vuelve a la lista.
+    await page.goBack();
+    await expect(page.getByTestId('correo-hilo')).toHaveCount(0);
+    await expect(page.getByTestId('correo-fila')).toHaveCount(3);
     // Tocar el avatar selecciona (como en la app de Gmail).
     await page.getByTestId('correo-seleccionar').first().check();
     await page.getByTestId('correo-simular').click();
@@ -469,5 +500,255 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/12-hilo-plegado.png` });
     await drawer.getByTestId('correo-respuesta-descartar').click();
     await expect(drawer.getByTestId('correo-responder')).toHaveCount(0);
+  });
+
+  test('hilo en el lugar de la lista: enlace ?hilo= compartible, leído/no leído, Abrir en Outlook y vincular desde la barra', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await simular(page);
+    const marcas: unknown[] = [];
+    const vinculos: unknown[] = [];
+    let leidoActual = false;
+    const enlaceOutlook = 'https://outlook.office365.com/owa/?ItemID=MSG-0001AAAA&exvsurl=1&viewmodel=ReadMessageItem';
+    await page.route('**/api/correo/hilo?**', (r) => r.fulfill({ json: { hilo: { ...hilo, mensajes: [{ ...hilo.mensajes[0], leido: leidoActual, enlaceOutlook }] } } }));
+    await page.route('**/api/correo/hilo/leido', (r) => {
+      const body = r.request().postDataJSON();
+      marcas.push(body);
+      leidoActual = body.leido;
+      return r.fulfill({ json: { cambiados: 1 } });
+    });
+    await page.route('**/api/correo/hilo/vincular', (r) => {
+      vinculos.push(r.request().postDataJSON());
+      return r.fulfill({ status: 201, json: { vinculo: { id: 1, conversationId: 'CONV-01AAAA', idRequest: 55, asunto: hilo.asunto, creadoEn: '2026-10-16T14:00:00Z', origen: 'VINCULADA' } } });
+    });
+    // Enlace directo (p. ej. desde una solicitud): abre el hilo sin pasar por la lista.
+    await page.goto('/process/correo?hilo=CONV-01AAAA');
+    const vista = page.getByTestId('correo-hilo');
+    await expect(vista.getByTestId('correo-hilo-asunto')).toHaveText('Revisión de contrato de arrendamiento');
+    await expect(vista.getByTestId('correo-hilo-outlook')).toHaveAttribute('href', /^https:\/\/outlook\.office365\.com\//);
+    await expect(vista.getByTestId('correo-hilo-outlook')).toHaveAttribute('target', '_blank');
+    // Al abrir el hilo sin leer se marca como leído solo (como Gmail): el botón ya ofrece «no leído».
+    await expect(vista.getByTestId('correo-hilo-leido')).toHaveAttribute('aria-label', 'Marcar como no leído');
+    await expect.poll(() => marcas).toEqual([{ conversationId: 'CONV-01AAAA', leido: true }]);
+    // Vincular desde la barra (ícono de enlace → número).
+    await vista.getByTestId('correo-hilo-vincular-btn').click();
+    await page.getByTestId('correo-hilo-vincular-panel').getByLabel('Número de la solicitud existente').fill('55');
+    await page.getByTestId('correo-hilo-vincular').click();
+    await expect(vista.getByTestId('correo-hilo-resultado')).toContainText('Hilo vinculado a la solicitud #55');
+    expect(vinculos).toHaveLength(1);
+    // «No leído» deja el último sin leer y vuelve a la lista, como Gmail.
+    await vista.getByTestId('correo-hilo-leido').click();
+    expect(marcas.at(-1)).toEqual({ conversationId: 'CONV-01AAAA', leido: false });
+    await expect(page.getByTestId('correo-hilo')).toHaveCount(0);
+    await expect(page).not.toHaveURL(/hilo=/);
+    await expect(page.getByTestId('correo-fila').first()).toHaveAttribute('data-leido', '0');
+    // Pantalla completa: la página no se desplaza; la lista lo hace por dentro.
+    const desborde = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
+    expect(desborde).toBeLessThanOrEqual(1);
+  });
+
+  test('leído masivo: selección, «Seleccionar los N de esta carpeta», «Marcar todo» por lotes con avance, contadores optimistas y reversión', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await simular(page);
+    // Buzón simulado con estado: la carpeta y el icono de la cabecera reflejan lo que se marca.
+    const bandeja = { total: 600, noLeidos: 450 };
+    await page.route('**/api/correo/no-leidos', (r) => r.fulfill({ json: { noLeidos: bandeja.noLeidos } }));
+    await page.route('**/api/correo/carpetas', (r) =>
+      r.fulfill({ json: { carpetas: [{ id: 'FOLDER-INBOXAAAA', nombre: 'Bandeja de entrada', ...bandeja }, { id: 'FOLDER-SENTAAAA', nombre: 'Elementos enviados', total: 12, noLeidos: 0 }] } })
+    );
+    await page.route('**/api/correo/mensajes**', (r) => r.fulfill({ json: { mensajes, siguiente: 'PAG2' } }));
+    const seleccionados: Array<{ mensajesIds: string[]; leido: boolean }> = [];
+    let fallar = false;
+    await page.route('**/api/correo/leido', async (r) => {
+      const b = r.request().postDataJSON();
+      seleccionados.push(b);
+      await new Promise((x) => setTimeout(x, 300));
+      if (fallar) return r.fulfill({ status: 502, json: { error: 'Microsoft respondió con un error (503).' } });
+      bandeja.noLeidos -= b.leido ? 1 : -1;
+      return r.fulfill({ json: { cambiados: b.mensajesIds.length, fallidos: 0 } });
+    });
+    const lotes: unknown[] = [];
+    await page.route('**/api/correo/leido/carpeta', async (r) => {
+      lotes.push(r.request().postDataJSON());
+      await new Promise((x) => setTimeout(x, 400));
+      const n = Math.min(200, bandeja.noLeidos);
+      bandeja.noLeidos -= n;
+      return r.fulfill({ json: { cambiados: n, fallidos: 0, restantes: bandeja.noLeidos } });
+    });
+    await page.goto('/process/correo');
+    const filas = page.getByTestId('correo-fila');
+    await expect(filas).toHaveCount(3);
+    const recibidos = page.getByTestId('correo-carpeta').first();
+    await expect(recibidos).toHaveText(/Recibidos\s*450/);
+    const icono = page.getByTestId('header-correo');
+    await expect(icono).toHaveAttribute('aria-label', 'Correo: 450 sin leer');
+
+    // 1) Dos seleccionados → «Marcar como leído»: negrita y contadores cambian YA (antes de que responda Graph).
+    await page.getByTestId('correo-seleccionar').nth(0).check();
+    await page.getByTestId('correo-seleccionar').nth(1).check();
+    await page.getByTestId('correo-sel-leido').click();
+    await expect(filas.nth(0)).toHaveAttribute('data-leido', '1');
+    await expect(recibidos).toHaveText(/Recibidos\s*449/);
+    await expect(icono).toHaveAttribute('aria-label', 'Correo: 449 sin leer');
+    await expect.poll(() => seleccionados.at(-1)).toEqual({ mensajesIds: ['MSG-0001AAAA', 'MSG-0002AAAA'], leido: true });
+    await expect(page.getByTestId('correo-barra-seleccion')).toHaveCount(0);
+
+    // 2) Si Microsoft falla, se revierte: la fila vuelve a estar leída y el contador a 449.
+    fallar = true;
+    await page.getByTestId('correo-seleccionar').nth(1).check();
+    await page.getByTestId('correo-sel-no-leido').click();
+    await expect(filas.nth(1)).toHaveAttribute('data-leido', '0');
+    await expect(recibidos).toHaveText(/Recibidos\s*450/);
+    await expect(filas.nth(1)).toHaveAttribute('data-leido', '1');
+    await expect(recibidos).toHaveText(/Recibidos\s*449/);
+    await expect(icono).toHaveAttribute('aria-label', 'Correo: 449 sin leer');
+    fallar = false;
+    await page.getByTestId('correo-seleccionar').nth(1).uncheck();
+
+    // 3) «Seleccionar todo» de la página → aviso de Gmail → toda la carpeta → «Marcar como leído» por lotes con avance.
+    await page.getByTestId('correo-seleccionar-todos').check();
+    const aviso = page.getByTestId('correo-aviso-seleccion');
+    await expect(aviso).toContainText('Se seleccionaron los 3 correos de esta página.');
+    await aviso.getByTestId('correo-seleccionar-carpeta').click();
+    await expect(aviso).toContainText('Se seleccionaron los 600 correos de Recibidos.');
+    await expect(page.getByTestId('correo-seleccion-texto')).toHaveText('Todos los 600 correos de Recibidos');
+    await expect(page.getByTestId('correo-simular')).toHaveCount(0);
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/17-seleccion-carpeta.png` });
+    await page.getByTestId('correo-sel-leido').click();
+    const progreso = page.getByTestId('correo-marcado-progreso');
+    await expect(progreso).toContainText('de 449');
+    await expect(progreso).toContainText('200 de 449');
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/18-marcando-carpeta.png` });
+    await expect(progreso).toHaveCount(0, { timeout: 10_000 });
+    expect(lotes).toEqual([
+      { carpeta: null, leido: true },
+      { carpeta: null, leido: true },
+      { carpeta: null, leido: true },
+    ]);
+    await expect(recibidos).toHaveText(/^Recibidos$/);
+    await expect(icono).toHaveAttribute('aria-label', 'Correo');
+    for (const f of await filas.all()) await expect(f).toHaveAttribute('data-leido', '1');
+
+    // 4) «Marcar todo como leído» en una carpeta grande pide confirmación (y cancelar no marca nada).
+    bandeja.noLeidos = 900;
+    await page.getByTestId('correo-actualizar').click();
+    await expect(recibidos).toHaveText(/Recibidos\s*900/);
+    await page.getByTestId('correo-marcar-todo').click();
+    const confirmar = page.getByTestId('correo-confirmar-marcado');
+    await expect(confirmar).toContainText('Va a marcar 900 correos de Recibidos como leídos');
+    await confirmar.getByRole('button', { name: 'Cancelar' }).click();
+    expect(lotes).toHaveLength(3);
+  });
+
+  test('carga: al cambiar de carpeta salen esqueletos al instante, sin filas viejas, y gana la última respuesta', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await simular(page);
+    const enviados = [{ ...mensajes[1], id: 'MSG-SENT1AAAA', conversationId: 'CONV-S1AAAA', asunto: 'Respuesta enviada a proveedor', leido: true }];
+    const borradores = [{ ...mensajes[1], id: 'MSG-DRAFT1AAAA', conversationId: 'CONV-D1AAAA', asunto: 'Borrador de acta', leido: true }];
+    const retraso = (ms: number) => new Promise((x) => setTimeout(x, ms));
+    // Graph simulado con respuestas LENTAS: Enviados tarda 1,5 s; Borradores 300 ms; «Cargar más» 1 s.
+    await page.route('**/api/correo/mensajes**', async (r) => {
+      const q = new URL(r.request().url()).searchParams;
+      const carpeta = q.get('carpeta');
+      if (carpeta === 'FOLDER-SENTAAAA') {
+        await retraso(1500);
+        return r.fulfill({ json: { mensajes: enviados, siguiente: null } }).catch(() => undefined);
+      }
+      if (carpeta === 'FOLDER-DRAFTSAAAA') {
+        await retraso(300);
+        return r.fulfill({ json: { mensajes: borradores, siguiente: null } }).catch(() => undefined);
+      }
+      if (q.get('cursor')) {
+        await retraso(1000);
+        return r.fulfill({ json: { mensajes: [{ ...mensajes[2], id: 'MSG-0004AAAA', asunto: 'Correo de la página 2' }], siguiente: null } });
+      }
+      return r.fulfill({ json: { mensajes, siguiente: 'PAG2' } });
+    });
+    // Carpetas lentas: mientras tanto, la forma de la lista de carpetas (no un «Recibidos» suelto).
+    await page.route('**/api/correo/carpetas', async (r) => {
+      await retraso(800);
+      return r.fulfill({
+        json: {
+          carpetas: [
+            { id: 'FOLDER-INBOXAAAA', nombre: 'Bandeja de entrada', total: 3, noLeidos: 1 },
+            { id: 'FOLDER-SENTAAAA', nombre: 'Elementos enviados', total: 12, noLeidos: 0 },
+            { id: 'FOLDER-DRAFTSAAAA', nombre: 'Borradores', total: 2, noLeidos: 0 },
+          ],
+        },
+      });
+    });
+    await page.goto('/process/correo');
+    await expect(page.getByTestId('correo-carpetas-esqueleto')).toBeVisible();
+    await expect(page.getByTestId('correo-fila')).toHaveCount(3);
+    const carpetas = page.getByTestId('correo-carpeta');
+    await expect(carpetas).toHaveText([/Recibidos\s*1/, /Enviados/, /Borradores\s*2/]);
+    await expect(page.getByTestId('correo-carpetas-esqueleto')).toHaveCount(0);
+
+    // Recibidos → Enviados: en el mismo instante, Enviados marcada, esqueletos y NINGUNA fila de Recibidos.
+    await carpetas.nth(1).click();
+    await expect(carpetas.nth(1)).toHaveAttribute('data-activa', '1');
+    await expect(carpetas.nth(0)).toHaveAttribute('data-activa', '0');
+    const esqueleto = page.getByTestId('correo-esqueleto');
+    await expect(esqueleto).toBeVisible();
+    await expect(esqueleto.locator('.mantine-Skeleton-root')).not.toHaveCount(0);
+    await expect(page.getByTestId('correo-fila')).toHaveCount(0);
+    await expect(page.getByText('Revisión de contrato de arrendamiento')).toHaveCount(0);
+    await expect(page.getByTestId('correo-vacio')).toHaveCount(0);
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/14-esqueleto-carpeta.png` });
+
+    // Carrera: antes de que llegue Enviados (1,5 s) se elige Borradores (300 ms). Gana Borradores y se queda.
+    await carpetas.nth(2).click();
+    await expect(page.getByTestId('correo-fila')).toHaveText([/Borrador de acta/]);
+    await expect(esqueleto).toHaveCount(0);
+    await page.waitForTimeout(1600);
+    await expect(page.getByTestId('correo-fila')).toHaveText([/Borrador de acta/]);
+    await expect(page.getByText('Respuesta enviada a proveedor')).toHaveCount(0);
+    await expect(carpetas.nth(2)).toHaveAttribute('data-activa', '1');
+
+    // «Cargar más»: las filas se quedan y los esqueletos salen al final.
+    await carpetas.nth(0).click();
+    await expect(page.getByTestId('correo-fila')).toHaveCount(3);
+    await page.getByTestId('correo-cargar-mas').click();
+    await expect(page.getByTestId('correo-esqueleto')).toBeVisible();
+    await expect(page.getByTestId('correo-fila')).toHaveCount(3);
+    await expect(page.getByTestId('correo-fila')).toHaveCount(4);
+
+    // Abrir un hilo lento: esqueleto del hilo en el panel hasta que llega.
+    await page.route('**/api/correo/hilo?**', async (r) => {
+      await retraso(800);
+      return r.fulfill({ json: { hilo } });
+    });
+    await page.getByTestId('correo-fila').first().click();
+    const drawer = page.getByTestId('correo-hilo');
+    await expect(drawer.getByTestId('correo-hilo-esqueleto')).toBeVisible();
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/15-esqueleto-hilo.png` });
+    await expect(drawer.getByTestId('correo-hilo-mensaje')).toHaveCount(1);
+    await expect(drawer.getByTestId('correo-hilo-esqueleto')).toHaveCount(0);
+  });
+
+  test('carga en el celular: esqueletos en forma de tarjeta y sin brillo con «reducir movimiento»', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await simular(page);
+    await page.route('**/api/correo/mensajes**', async (r) => {
+      const carpeta = new URL(r.request().url()).searchParams.get('carpeta');
+      if (carpeta === 'FOLDER-SENTAAAA') await new Promise((x) => setTimeout(x, 1500));
+      return r.fulfill({ json: { mensajes: carpeta ? [] : mensajes, siguiente: null } });
+    });
+    await page.goto('/process/correo');
+    await expect(page.getByTestId('correo-fila')).toHaveCount(3);
+    await page.getByTestId('correo-menu-carpetas').click();
+    await page.getByTestId('correo-carpetas-drawer').getByTestId('correo-carpeta').nth(1).click();
+    const esqueleto = page.getByTestId('correo-esqueleto');
+    await expect(esqueleto).toBeVisible();
+    await expect(page.getByTestId('correo-fila')).toHaveCount(0);
+    // Tarjeta de celular: avatar redondo + tres renglones.
+    await expect(esqueleto.locator('.mantine-Skeleton-root[data-animate]')).toHaveCount(0);
+    await expect(esqueleto.locator('.mantine-Skeleton-root')).not.toHaveCount(0);
+    if (CAPTURAS) {
+      await expect(page.getByTestId('correo-carpetas-drawer').getByTestId('correo-carpeta')).toHaveCount(0);
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: `${CAPTURAS}/16-esqueleto-movil.png` });
+    }
+    await expect(page.getByTestId('correo-vacio')).toBeVisible();
   });
 });

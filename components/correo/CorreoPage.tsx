@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   ActionIcon,
@@ -8,7 +8,6 @@ import {
   Anchor,
   Badge,
   Box,
-  Breadcrumbs,
   Button,
   Card,
   Checkbox,
@@ -17,6 +16,8 @@ import {
   Drawer,
   Group,
   Loader,
+  Modal,
+  Progress,
   NavLink,
   Popover,
   Stack,
@@ -25,11 +26,12 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
+import { useMediaQuery, useReducedMotion } from '@mantine/hooks';
 import {
   IconAdjustmentsHorizontal,
   IconAlertTriangle,
   IconCheck,
+  IconChecks,
   IconChevronRight,
   IconFlask,
   IconFolders,
@@ -43,10 +45,14 @@ import {
   IconSearch,
   IconX,
 } from '@tabler/icons-react';
+import toast from 'react-hot-toast';
 import SgcSelect from '../sgc/SgcSelect';
+import { CORREO_CONFIRMAR_MARCAR_CARPETA, CORREO_MAX_MARCAR_CARPETA, CORREO_MAX_MARCAR_SELECCION } from '../../lib/correo/constants';
+import { EVENTO_NO_LEIDOS } from '../../lib/correo/iconoHeader';
 import type { Carpeta } from '../../lib/correo/types';
-import { CorreoApiError, correoApi, fechaCorta, fechaLarga, urlSolicitud, type EstadoCorreo, type MensajeLista } from './correoClient';
-import HiloDrawer from './HiloDrawer';
+import { CorreoApiError, correoApi, esCancelada, fechaCorta, fechaLarga, urlSolicitud, type EstadoCorreo, type MensajeLista } from './correoClient';
+import { EsqueletoCarpetas, EsqueletoFilas } from './Esqueletos';
+import HiloCorreo from './HiloCorreo';
 import SimulacionModal from './SimulacionModal';
 import { AvatarPersona, carpetasOrdenadas, IconoCarpeta } from './ui';
 import css from './correo.module.css';
@@ -57,7 +63,18 @@ import css from './correo.module.css';
  * buscador arriba con filtros rápidos, lista densa (remitente, asunto + extracto, adjuntos y
  * fecha a la derecha, acciones al pasar el mouse) y la barra de selección para crear
  * solicitudes con simulación. En el celular: la lista primero y las carpetas en un panel.
+ * Desde el 2026-10-16 usa toda la pantalla (encabezado de una línea, zonas con desplazamiento
+ * propio) y el hilo se abre EN EL LUGAR de la lista, con `?hilo=<id>` en la dirección: el botón
+ * «atrás» del navegador vuelve a la lista y el enlace se puede reabrir (solo en el buzón propio).
  */
+
+/** Ids de Graph (base64 con variantes URL), igual que en el servidor. */
+const ID_HILO_RE = /^[A-Za-z0-9+=_-]{8,512}$/;
+
+function hiloDeLaUrl(): string | null {
+  const h = new URLSearchParams(window.location.search).get('hilo');
+  return h && ID_HILO_RE.test(h) ? h : null;
+}
 
 const EMPRESA_KEY = 'correo:empresa';
 
@@ -86,51 +103,49 @@ function aParams(f: Filtros, cursor?: string | null): Record<string, string> {
   return p;
 }
 
+/** Encabezado de UNA línea (como Gmail, para dejar la pantalla a la bandeja): título, buzón y empresa. */
 function Encabezado({ estado, empresa, setEmpresa }: { estado: EstadoCorreo; empresa: string | null; setEmpresa: (v: string | null) => void }) {
   const { conexion } = estado;
   return (
-    <Card shadow='sm' p={{ base: 'md', sm: 'lg' }} radius='md' withBorder mb='md'>
-      <Breadcrumbs separator={<IconChevronRight size={16} />} mb='xs' style={{ flexWrap: 'wrap' }}>
-        <Anchor component={Link} href='/process'>
+    <Group className={css.encabezado} justify='space-between' wrap='nowrap' gap='sm' data-testid='correo-encabezado'>
+      <Group gap={8} wrap='nowrap' style={{ minWidth: 0 }}>
+        <Anchor component={Link} href='/process' size='sm' c='dimmed' visibleFrom='sm' style={{ flexShrink: 0 }}>
           Procesos
         </Anchor>
-        <Text>Correo</Text>
-      </Breadcrumbs>
-      <Group justify='space-between' align='flex-end' wrap='wrap' gap='md'>
-        <div style={{ minWidth: 0 }}>
-          <Title order={1} fz={{ base: 24, sm: 28 }} className='font-bold mb-1 flex items-center gap-3' data-testid='correo-titulo'>
-            <IconMail size={26} className='text-blue-600' style={{ flexShrink: 0 }} />
-            Correo
-          </Title>
-          <Group gap='xs'>
-            <Text size='sm' c='dimmed' visibleFrom='sm'>
-              Su bandeja de Outlook: revise hilos, responda y convierta correos en solicitudes
-            </Text>
-            {conexion.modo === 'mock' && (
-              <Badge color='grape' variant='light' leftSection={<IconFlask size={12} />} data-testid='correo-modo-simulado'>
-                Buzón simulado (pruebas)
-              </Badge>
-            )}
-            {conexion.disponible && (
-              <Badge color='teal' variant='light' leftSection={<IconMail size={12} />} style={{ textTransform: 'none' }} data-testid='correo-buzon'>
-                {conexion.correo}
-              </Badge>
-            )}
-          </Group>
-        </div>
-        {estado.empresas.length > 1 && (
-          <SgcSelect
-            label='Empresa de las solicitudes'
-            size='sm'
-            data={estado.empresas.map((c) => ({ value: String(c.idCompany), label: c.companyName }))}
-            value={empresa}
-            onChange={setEmpresa}
-            allowDeselect={false}
-            w={{ base: '100%', sm: 240 }}
-          />
+        <IconChevronRight size={14} color='var(--mantine-color-dimmed)' style={{ flexShrink: 0 }} className='hidden sm:block' />
+        <Title order={1} fz={20} fw={700} className='flex items-center gap-2' style={{ flexShrink: 0 }} data-testid='correo-titulo'>
+          <IconMail size={22} className='text-blue-600' style={{ flexShrink: 0 }} />
+          Correo
+        </Title>
+        {conexion.modo === 'mock' && (
+          <Badge color='grape' variant='light' leftSection={<IconFlask size={12} />} style={{ flexShrink: 0 }} data-testid='correo-modo-simulado'>
+            {/* En el celular solo el ícono: no cabe junto al buzón. */}
+            <span className='hidden sm:inline'>Buzón simulado (pruebas)</span>
+            <span className='sm:hidden'>Pruebas</span>
+          </Badge>
+        )}
+        {conexion.disponible && (
+          <Badge color='teal' variant='light' leftSection={<IconMail size={12} />} style={{ textTransform: 'none', minWidth: 0 }} data-testid='correo-buzon'>
+            {conexion.correo}
+          </Badge>
         )}
       </Group>
-    </Card>
+      {estado.empresas.length > 1 && (
+        <Tooltip label='Empresa de las solicitudes que cree desde el correo' openDelay={300}>
+          <div style={{ flexShrink: 0 }}>
+            <SgcSelect
+              aria-label='Empresa de las solicitudes'
+              size='xs'
+              data={estado.empresas.map((c) => ({ value: String(c.idCompany), label: c.companyName }))}
+              value={empresa}
+              onChange={setEmpresa}
+              allowDeselect={false}
+              w={{ base: 150, sm: 240 }}
+            />
+          </div>
+        </Tooltip>
+      )}
+    </Group>
   );
 }
 
@@ -162,8 +177,20 @@ function AvisoPrivacidad() {
 }
 
 /** Carpetas de la barra lateral (escritorio) o del panel (celular). */
-function ListaCarpetas({ carpetas, actual, onElegir }: { carpetas: Carpeta[]; actual: string | null; onElegir: (id: string | null) => void }) {
+function ListaCarpetas({
+  carpetas,
+  actual,
+  cargando,
+  onElegir,
+}: {
+  carpetas: Carpeta[];
+  actual: string | null;
+  cargando: boolean;
+  onElegir: (id: string | null) => void;
+}) {
   const orden = carpetasOrdenadas(carpetas);
+  // Primera consulta de carpetas (con sus no leídos): la forma de la lista, no un «Recibidos» suelto que luego salta.
+  if (!orden.length && cargando) return <EsqueletoCarpetas />;
   const items = orden.length ? orden : [{ id: '', nombre: 'Bandeja de entrada', etiqueta: 'Recibidos', tipo: 'entrada' as const, total: 0, noLeidos: 0 }];
   return (
     <Stack gap={2} data-testid='correo-carpetas'>
@@ -198,6 +225,7 @@ function ListaCarpetas({ carpetas, actual, onElegir }: { carpetas: Carpeta[]; ac
 
 export default function CorreoPage() {
   const desktop = useMediaQuery('(min-width: 62em)') ?? false;
+  const reducirMovimiento = useReducedMotion();
   const [estado, setEstado] = useState<EstadoCorreo | null>(null);
   const [errorEstado, setErrorEstado] = useState<{ status: number; mensaje: string } | null>(null);
   const [empresa, setEmpresaState] = useState<string | null>(null);
@@ -206,12 +234,26 @@ export default function CorreoPage() {
   const [borrador, setBorrador] = useState<Filtros>(FILTROS_VACIOS);
   const [mensajes, setMensajes] = useState<MensajeLista[]>([]);
   const [siguiente, setSiguiente] = useState<string | null>(null);
-  const [cargando, setCargando] = useState(false);
+  /** Filtros a los que corresponde la lista mostrada: si no son los actuales, la lista es de otra carpeta/búsqueda y NO se muestra. */
+  const [listaDe, setListaDe] = useState<Filtros | null>(null);
+  /** 'refresco' = misma carpeta (lista atenuada); 'mas' = «Cargar más» (esqueletos al final); 'nueva' = otra carpeta/búsqueda. */
+  const [carga, setCarga] = useState<'nueva' | 'refresco' | 'mas' | null>(null);
+  const peticion = useRef<{ id: number; ctrl: AbortController | null }>({ id: 0, ctrl: null });
+  const [cargandoCarpetas, setCargandoCarpetas] = useState(false);
+  const peticionCarpetas = useRef<AbortController | null>(null);
   const [errorLista, setErrorLista] = useState<string | null>(null);
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
+  /** «Seleccionar los N correos de esta carpeta» (como Gmail): la selección es la carpeta entera, no solo la página. */
+  const [todaCarpeta, setTodaCarpeta] = useState(false);
+  /** Avance de «Marcar todo» (lotes de 200 en el servidor). */
+  const [marcado, setMarcado] = useState<{ leido: boolean; hechos: number; total: number } | null>(null);
+  const detenerMarcado = useRef(false);
+  const [confirmarMarcado, setConfirmarMarcado] = useState<{ leido: boolean; total: number } | null>(null);
+  /** Hilo abierto EN EL LUGAR de la lista; vive en la dirección (?hilo=) para que «atrás» vuelva a la lista. */
   const [hiloAbierto, setHiloAbierto] = useState<string | null>(null);
   const [simulacion, setSimulacion] = useState<string[] | null>(null);
   const [hayCambios, setHayCambios] = useState(false);
+  const [versionHilo, setVersionHilo] = useState(0);
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
   const [panelCarpetas, setPanelCarpetas] = useState(false);
 
@@ -235,34 +277,90 @@ export default function CorreoPage() {
 
   useEffect(() => {
     void cargarEstado();
-    // Enlace desde una solicitud: /process/correo?hilo=<conversationId>
-    const hilo = new URLSearchParams(window.location.search).get('hilo');
-    if (hilo && /^[A-Za-z0-9+=_-]{8,512}$/.test(hilo)) setHiloAbierto(hilo);
-    if (hilo) window.history.replaceState(null, '', window.location.pathname);
+    // Enlace desde una solicitud o compartido: /process/correo?hilo=<conversationId> (siempre del buzón propio).
+    const leer = () => setHiloAbierto(hiloDeLaUrl());
+    leer();
+    window.addEventListener('popstate', leer);
+    return () => window.removeEventListener('popstate', leer);
   }, [cargarEstado]);
+
+  const abrirHilo = useCallback((id: string) => {
+    if (!ID_HILO_RE.test(id)) return;
+    const url = `${window.location.pathname}?${new URLSearchParams({ hilo: id })}`;
+    // Abierto desde la lista: una entrada nueva en el historial, para que «atrás» vuelva a la lista.
+    if (hiloDeLaUrl()) window.history.replaceState({ ...window.history.state, correoHilo: true }, '', url);
+    else window.history.pushState({ ...window.history.state, correoHilo: true }, '', url);
+    setHiloAbierto(id);
+  }, []);
+
+  const cerrarHilo = useCallback(() => {
+    // Si el hilo se abrió desde la lista, se vuelve con el historial (como «atrás»); si llegó por enlace, se reemplaza.
+    if (window.history.state?.correoHilo) window.history.back();
+    else {
+      window.history.replaceState(window.history.state, '', window.location.pathname);
+      setHiloAbierto(null);
+    }
+  }, []);
 
   const listo = Boolean(estado?.conexion.disponible);
 
-  const cargarMensajes = useCallback(async (f: Filtros, cursor?: string | null) => {
-    setCargando(true);
+  /**
+   * Carrera de respuestas: si la persona cambia rápido de carpeta (Recibidos → Enviados → Recibidos), solo vale la
+   * ÚLTIMA consulta. La anterior se cancela (AbortController) y, si igual llega, se descarta por su número de petición.
+   */
+  const cargarMensajes = useCallback(async (f: Filtros, opciones: { cursor?: string | null; refresco?: boolean } = {}) => {
+    const { cursor = null, refresco = false } = opciones;
+    peticion.current.ctrl?.abort();
+    const ctrl = new AbortController();
+    const id = ++peticion.current.id;
+    peticion.current.ctrl = ctrl;
+    setCarga(cursor ? 'mas' : refresco ? 'refresco' : 'nueva');
     setErrorLista(null);
     try {
-      const r = await correoApi.mensajes(aParams(f, cursor));
+      const r = await correoApi.mensajes(aParams(f, cursor), ctrl.signal);
+      if (id !== peticion.current.id) return;
       setMensajes((prev) => (cursor ? [...prev, ...r.mensajes] : r.mensajes));
       setSiguiente(r.siguiente);
+      setListaDe(f);
     } catch (e) {
+      if (id !== peticion.current.id || esCancelada(e)) return;
       setErrorLista(e instanceof Error ? e.message : String(e));
+      if (!cursor) {
+        setMensajes([]);
+        setSiguiente(null);
+        setListaDe(f);
+      }
     } finally {
-      setCargando(false);
+      if (id === peticion.current.id) setCarga(null);
     }
   }, []);
 
   const cargarCarpetas = useCallback(() => {
+    peticionCarpetas.current?.abort();
+    const ctrl = new AbortController();
+    peticionCarpetas.current = ctrl;
+    setCargandoCarpetas(true);
     correoApi
-      .carpetas()
-      .then((r) => setCarpetas(r.carpetas))
-      .catch(() => setCarpetas([]));
+      .carpetas(ctrl.signal)
+      .then((r) => {
+        if (peticionCarpetas.current === ctrl) setCarpetas(r.carpetas);
+      })
+      .catch((e) => {
+        if (peticionCarpetas.current === ctrl && !esCancelada(e)) setCarpetas([]);
+      })
+      .finally(() => {
+        if (peticionCarpetas.current === ctrl) setCargandoCarpetas(false);
+      });
   }, []);
+
+  // Al salir del módulo se cancela lo que esté en vuelo.
+  useEffect(
+    () => () => {
+      peticion.current.ctrl?.abort();
+      peticionCarpetas.current?.abort();
+    },
+    []
+  );
 
   useEffect(() => {
     if (listo) cargarCarpetas();
@@ -271,8 +369,16 @@ export default function CorreoPage() {
   useEffect(() => {
     if (!listo) return;
     setSeleccion(new Set());
+    setTodaCarpeta(false);
     void cargarMensajes(filtros);
   }, [listo, filtros, cargarMensajes]);
+
+  // Al volver a la lista (← o «atrás» del navegador) tras cambios en el hilo, la carpeta se actualiza.
+  useEffect(() => {
+    if (hiloAbierto || !hayCambios) return;
+    setHayCambios(false);
+    void cargarMensajes(filtros, { refresco: true });
+  }, [hiloAbierto, hayCambios, filtros, cargarMensajes]);
 
   const setEmpresa = (v: string | null) => {
     setEmpresaState(v);
@@ -283,14 +389,21 @@ export default function CorreoPage() {
     }
   };
 
-  const toggle = (id: string) =>
+  const toggle = (id: string) => {
+    setTodaCarpeta(false);
     setSeleccion((prev) => {
       const n = new Set(prev);
       if (n.has(id)) n.delete(id);
       else n.add(id);
       return n;
     });
-  const todosMarcados = mensajes.length > 0 && mensajes.every((m) => seleccion.has(m.id));
+  };
+  // La lista solo se muestra si es de los filtros ACTUALES: al cambiar de Recibidos a Enviados las filas viejas
+  // desaparecen en el mismo render del clic (sin esperar al efecto) y en su lugar salen los esqueletos.
+  const desactualizada = listaDe !== filtros;
+  const visibles = desactualizada ? [] : mensajes;
+  const cargando = carga !== null || desactualizada;
+  const todosMarcados = visibles.length > 0 && visibles.every((m) => seleccion.has(m.id));
 
   const aplicar = () => {
     setFiltros({ ...borrador });
@@ -309,7 +422,7 @@ export default function CorreoPage() {
     setFiltrosAbiertos(false);
   };
   const refrescar = () => {
-    void cargarMensajes(filtros);
+    void cargarMensajes(filtros, { refresco: true });
     cargarCarpetas();
   };
 
@@ -319,6 +432,149 @@ export default function CorreoPage() {
   }, [carpetas, filtros.carpeta]);
 
   const hayFiltros = Boolean(filtros.buscar.trim() || filtros.desde || filtros.hasta || filtros.de.trim() || filtros.noLeidos || filtros.conAdjuntos);
+
+  // Icono del Correo en la cabecera: cada cambio del contador de la Bandeja de entrada (optimista, reversión o
+  // consulta) se avisa al instante, sin esperar a su caché de 3 minutos.
+  const noLeidosBandeja = carpetasOrdenadas(carpetas).find((c) => c.tipo === 'entrada')?.noLeidos;
+  useEffect(() => {
+    if (typeof noLeidosBandeja === 'number') window.dispatchEvent(new CustomEvent(EVENTO_NO_LEIDOS, { detail: { noLeidos: noLeidosBandeja } }));
+  }, [noLeidosBandeja]);
+
+  /** Suma (o resta) no leídos a la carpeta abierta, de forma optimista. */
+  const ajustarNoLeidos = (delta: number) => {
+    const id = carpetaActual?.id;
+    if (!id || !delta) return;
+    setCarpetas((prev) => prev.map((c) => (c.id === id ? { ...c, noLeidos: Math.max(0, c.noLeidos + delta) } : c)));
+  };
+
+  /**
+   * Leído / no leído de filas (selección o hilo): se pinta YA (filas en negrita o no y contadores) y, si Microsoft
+   * falla, se revierte tal cual estaba. `cambiar` decide qué filas cambian y a qué estado.
+   */
+  const optimista = async (cambiar: (m: MensajeLista) => boolean | null, llamar: () => Promise<{ cambiados: number; fallidos?: number }>): Promise<boolean> => {
+    const previos = new Map<string, boolean>();
+    let delta = 0;
+    setMensajes((prev) =>
+      prev.map((m) => {
+        const nuevo = cambiar(m);
+        if (nuevo === null || nuevo === m.leido) return m;
+        previos.set(m.id, m.leido);
+        return { ...m, leido: nuevo };
+      })
+    );
+    for (const m of mensajes) {
+      const nuevo = cambiar(m);
+      if (nuevo !== null && nuevo !== m.leido) delta += nuevo ? -1 : 1;
+    }
+    const carpetasAntes = carpetas;
+    ajustarNoLeidos(delta);
+    try {
+      const r = await llamar();
+      if (r.fallidos) {
+        toast.error(`${r.fallidos} correo(s) no se pudieron marcar (pudieron moverse o borrarse).`);
+        void cargarMensajes(filtros, { refresco: true });
+      }
+      cargarCarpetas();
+      return true;
+    } catch (e) {
+      setMensajes((prev) => prev.map((m) => (previos.has(m.id) ? { ...m, leido: previos.get(m.id)! } : m)));
+      setCarpetas(carpetasAntes);
+      toast.error(`No se pudo marcar: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    }
+  };
+
+  const marcarSeleccion = async (leido: boolean) => {
+    if (todaCarpeta) return marcarCarpetaEntera(leido);
+    const ids = [...seleccion];
+    const set = new Set(ids);
+    const ok = await optimista(
+      (m) => (set.has(m.id) ? leido : null),
+      async () => {
+        let cambiados = 0;
+        let fallidos = 0;
+        for (let i = 0; i < ids.length; i += CORREO_MAX_MARCAR_SELECCION) {
+          const r = await correoApi.marcarSeleccion(ids.slice(i, i + CORREO_MAX_MARCAR_SELECCION), leido);
+          cambiados += r.cambiados;
+          fallidos += r.fallidos;
+        }
+        return { cambiados, fallidos };
+      }
+    );
+    if (ok) {
+      setSeleccion(new Set());
+      toast.success(leido ? 'Marcados como leídos' : 'Marcados como no leídos');
+    }
+  };
+
+  /** El hilo abierto (al abrirlo o desde su barra): todas sus filas («leído») o la más reciente («no leído»). */
+  const marcarHilo = (conversationId: string, leido: boolean) => {
+    const delHilo = mensajes.filter((m) => m.conversationId === conversationId);
+    const ultimo = delHilo.reduce<MensajeLista | null>((u, m) => (!u || m.fecha > u.fecha ? m : u), null);
+    return optimista(
+      (m) => (m.conversationId !== conversationId ? null : leido ? true : m === ultimo || m.id === ultimo?.id ? false : null),
+      () => correoApi.marcarLeido(conversationId, leido)
+    );
+  };
+
+  /**
+   * «Marcar todo como leído» o la carpeta entera seleccionada: el servidor marca de a 200 por `$batch` (20 por lote
+   * de Graph) y el navegador repite mostrando el avance, con «Detener», confirmación desde 500 y tope de 5.000.
+   */
+  const marcarCarpetaEntera = async (leido: boolean, confirmado = false) => {
+    if (!carpetaActual || marcado) return;
+    const pendientes = leido ? carpetaActual.noLeidos : Math.max(0, carpetaActual.total - carpetaActual.noLeidos);
+    if (pendientes === 0) {
+      toast.success(leido ? 'No hay correos sin leer en esta carpeta' : 'No hay correos leídos en esta carpeta');
+      return;
+    }
+    if (pendientes > CORREO_CONFIRMAR_MARCAR_CARPETA && !confirmado) {
+      setConfirmarMarcado({ leido, total: pendientes });
+      return;
+    }
+    const total = Math.min(pendientes, CORREO_MAX_MARCAR_CARPETA);
+    const carpetasAntes = carpetas;
+    detenerMarcado.current = false;
+    setMarcado({ leido, hechos: 0, total });
+    // Optimista: las filas visibles y el contador de la carpeta.
+    setMensajes((prev) => prev.map((m) => ({ ...m, leido })));
+    ajustarNoLeidos(leido ? -carpetaActual.noLeidos : pendientes);
+    let hechos = 0;
+    let restantes = pendientes;
+    let error: string | null = null;
+    try {
+      while (!detenerMarcado.current && hechos < CORREO_MAX_MARCAR_CARPETA) {
+        const r = await correoApi.marcarCarpeta(filtros.carpeta, leido);
+        hechos += r.cambiados;
+        restantes = r.restantes;
+        setMarcado({ leido, hechos: Math.min(hechos, total), total });
+        if (r.restantes === 0 || r.cambiados === 0) break;
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      setMarcado(null);
+      setSeleccion(new Set());
+      setTodaCarpeta(false);
+    }
+    if (error && hechos === 0) {
+      // Nada se marcó: se revierte lo optimista.
+      setCarpetas(carpetasAntes);
+      void cargarMensajes(filtros, { refresco: true });
+      toast.error(`No se pudo marcar la carpeta: ${error}`);
+      return;
+    }
+    if (error || restantes > 0) {
+      // Parcial (error, «Detener» o tope): se trae el estado real.
+      void cargarMensajes(filtros, { refresco: true });
+      toast(
+        `Se marcaron ${hechos.toLocaleString('es-CO')} correo(s); quedan ${restantes.toLocaleString('es-CO')}.${error ? ` (${error})` : ' Use otra vez «Marcar todo» para continuar.'}`
+      );
+    } else {
+      toast.success(`${hechos.toLocaleString('es-CO')} correo(s) marcados como ${leido ? 'leídos' : 'no leídos'}`);
+    }
+    cargarCarpetas();
+  };
 
   if (errorEstado) {
     return (
@@ -338,6 +594,12 @@ export default function CorreoPage() {
   }
 
   const idEmpresa = Number(empresa) || estado.empresas[0]?.idCompany;
+  /** Leído / no leído escribe en el buzón (Mail.ReadWrite): mismo interruptor que las categorías (CORREO_ETIQUETAR_HABILITADO). */
+  const escritura = estado.conexion.etiquetarHabilitado;
+  const quitarSeleccion = () => {
+    setTodaCarpeta(false);
+    setSeleccion(new Set());
+  };
 
   const badgeSolicitud = (m: MensajeLista) =>
     m.solicitud ? (
@@ -356,7 +618,7 @@ export default function CorreoPage() {
       </Badge>
     ) : null;
 
-  const abrir = (m: MensajeLista) => setHiloAbierto(m.conversationId);
+  const abrir = (m: MensajeLista) => abrirHilo(m.conversationId);
   const teclaFila = (e: React.KeyboardEvent, m: MensajeLista) => {
     if (e.key === 'Enter') abrir(m);
     if (e.key === ' ' && e.target === e.currentTarget) {
@@ -467,7 +729,11 @@ export default function CorreoPage() {
             aria-label='Seleccionar todos'
             checked={todosMarcados}
             indeterminate={seleccion.size > 0 && !todosMarcados}
-            onChange={() => setSeleccion(todosMarcados ? new Set() : new Set(mensajes.map((m) => m.id)))}
+            onChange={() => {
+              setTodaCarpeta(false);
+              setSeleccion(todosMarcados ? new Set() : new Set(visibles.map((m) => m.id)));
+            }}
+            disabled={desactualizada}
             mx={6}
             data-testid='correo-seleccionar-todos'
           />
@@ -476,20 +742,39 @@ export default function CorreoPage() {
       {seleccion.size > 0 ? (
         <Group justify='space-between' wrap='nowrap' gap='xs' style={{ flex: 1, minWidth: 0 }} data-testid='correo-barra-seleccion'>
           <Group gap='xs' wrap='nowrap' style={{ minWidth: 0 }}>
-            {!desktop && <CloseButton aria-label='Quitar selección' onClick={() => setSeleccion(new Set())} />}
-            <Text size='sm' fw={600} truncate>
-              {seleccion.size} correo(s) seleccionado(s)
+            {!desktop && <CloseButton aria-label='Quitar selección' onClick={quitarSeleccion} />}
+            <Text size='sm' fw={600} truncate data-testid='correo-seleccion-texto'>
+              {todaCarpeta && carpetaActual
+                ? `Todos los ${carpetaActual.total.toLocaleString('es-CO')} correos de ${carpetaActual.etiqueta}`
+                : `${seleccion.size} correo(s) seleccionado(s)`}
             </Text>
           </Group>
-          <Group gap='xs' wrap='nowrap'>
+          <Group gap={4} wrap='nowrap'>
+            {escritura && (
+              <>
+                <Tooltip label='Marcar como leído'>
+                  <ActionIcon variant='subtle' color='gray' radius='xl' size='lg' onClick={() => void marcarSeleccion(true)} disabled={Boolean(marcado)} aria-label='Marcar como leído' data-testid='correo-sel-leido'>
+                    <IconMailOpened size={18} />
+                  </ActionIcon>
+                </Tooltip>
+                <Tooltip label='Marcar como no leído'>
+                  <ActionIcon variant='subtle' color='gray' radius='xl' size='lg' onClick={() => void marcarSeleccion(false)} disabled={Boolean(marcado)} aria-label='Marcar como no leído' data-testid='correo-sel-no-leido'>
+                    <IconMail size={18} />
+                  </ActionIcon>
+                </Tooltip>
+              </>
+            )}
             {desktop && (
-              <Button variant='subtle' size='compact-sm' onClick={() => setSeleccion(new Set())}>
+              <Button variant='subtle' size='compact-sm' onClick={quitarSeleccion}>
                 Quitar selección
               </Button>
             )}
-            <Button size={desktop ? 'compact-md' : 'compact-sm'} leftSection={<IconFlask size={16} />} onClick={() => setSimulacion([...seleccion])} data-testid='correo-simular'>
-              {desktop ? 'Simular / Crear solicitudes' : 'Crear solicitudes'}
-            </Button>
+            {/* Simular / crear trabaja con correos concretos (máx. 50): no con la carpeta entera. */}
+            {!todaCarpeta && (
+              <Button size={desktop ? 'compact-md' : 'compact-sm'} leftSection={<IconFlask size={16} />} onClick={() => setSimulacion([...seleccion])} data-testid='correo-simular'>
+                {desktop ? 'Simular / Crear solicitudes' : 'Crear solicitudes'}
+              </Button>
+            )}
           </Group>
         </Group>
       ) : (
@@ -500,17 +785,60 @@ export default function CorreoPage() {
                 <IconRefresh size={18} />
               </ActionIcon>
             </Tooltip>
+            {escritura && (carpetaActual?.noLeidos ?? 0) > 0 && (
+              <Tooltip label='Marcar todo como leído'>
+                <ActionIcon variant='subtle' color='gray' radius='xl' size='lg' onClick={() => void marcarCarpetaEntera(true)} disabled={Boolean(marcado)} aria-label='Marcar todo como leído' data-testid='correo-marcar-todo'>
+                  <IconChecks size={18} />
+                </ActionIcon>
+              </Tooltip>
+            )}
             <Text size='sm' fw={600} truncate>
               {carpetaActual?.etiqueta ?? 'Recibidos'}
             </Text>
           </Group>
           <Text size='xs' c='dimmed' style={{ flexShrink: 0 }}>
-            {mensajes.length > 0 ? `${mensajes.length.toLocaleString('es-CO')}${siguiente ? '+' : ''} correo(s)` : ''}
+            {visibles.length > 0 ? `${visibles.length.toLocaleString('es-CO')}${siguiente ? '+' : ''} correo(s)` : ''}
           </Text>
         </Group>
       )}
     </div>
   );
+
+  // ---------------------------------------------------------------- selección de la carpeta entera y avance
+  const totalCarpeta = carpetaActual?.total ?? 0;
+  const puedeTodaCarpeta = escritura && desktop && todosMarcados && !hayFiltros && totalCarpeta > visibles.length;
+  const avisoSeleccion =
+    todaCarpeta && carpetaActual ? (
+      <div className={css.avisoSeleccion} data-testid='correo-aviso-seleccion'>
+        <Text size='sm'>
+          Se seleccionaron los {totalCarpeta.toLocaleString('es-CO')} correos de {carpetaActual.etiqueta}.
+        </Text>
+        <Button variant='subtle' size='compact-sm' onClick={quitarSeleccion}>
+          Quitar la selección
+        </Button>
+      </div>
+    ) : puedeTodaCarpeta && carpetaActual ? (
+      <div className={css.avisoSeleccion} data-testid='correo-aviso-seleccion'>
+        <Text size='sm'>Se seleccionaron los {visibles.length} correos de esta página.</Text>
+        <Button variant='subtle' size='compact-sm' onClick={() => setTodaCarpeta(true)} data-testid='correo-seleccionar-carpeta'>
+          Seleccionar los {totalCarpeta.toLocaleString('es-CO')} correos de {carpetaActual.etiqueta}
+        </Button>
+      </div>
+    ) : null;
+
+  const progresoMarcado = marcado ? (
+    <div className={css.avisoSeleccion} role='status' data-testid='correo-marcado-progreso'>
+      <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
+        <Text size='sm'>
+          Marcando como {marcado.leido ? 'leídos' : 'no leídos'}: {marcado.hechos.toLocaleString('es-CO')} de {marcado.total.toLocaleString('es-CO')}…
+        </Text>
+        <Progress value={marcado.total ? (marcado.hechos / marcado.total) * 100 : 0} size='sm' animated={!reducirMovimiento} aria-label='Avance' />
+      </Stack>
+      <Button variant='default' size='compact-sm' onClick={() => (detenerMarcado.current = true)} data-testid='correo-marcado-detener'>
+        Detener
+      </Button>
+    </div>
+  ) : null;
 
   // ---------------------------------------------------------------- filas
   const filaEscritorio = (m: MensajeLista) => {
@@ -626,96 +954,158 @@ export default function CorreoPage() {
   );
 
   const bandeja = (
-    <Card withBorder radius='md' p={0} className={css.bandeja}>
+    <Card withBorder radius='md' p={0} className={css.bandeja} style={hiloAbierto ? { display: 'none' } : undefined} data-testid='correo-bandeja'>
       {barra}
-      {errorLista && (
-        <Alert color='red' icon={<IconAlertTriangle size={18} />} title='No se pudieron cargar los correos' m='sm' data-testid='correo-error-lista'>
-          {errorLista}
-        </Alert>
-      )}
-      {mensajes.length === 0 && !cargando && !errorLista ? (
-        vacio
-      ) : (
-        <div role='grid' aria-label='Correos' data-testid='correo-lista'>
-          {mensajes.map((m) => (desktop ? filaEscritorio(m) : filaMovil(m)))}
-        </div>
-      )}
-      {cargando && (
-        <Group justify='center' p='md'>
-          <Loader size='sm' />
-        </Group>
-      )}
-      {siguiente && !cargando && (
-        <Group justify='center' p='sm'>
-          <Button variant='light' onClick={() => cargarMensajes(filtros, siguiente)} data-testid='correo-cargar-mas'>
-            Cargar más correos
-          </Button>
-        </Group>
-      )}
+      {avisoSeleccion}
+      {progresoMarcado}
+      {/* La lista se desplaza por dentro (la barra queda fija); oculta, no desmontada, mientras se lee un hilo: al volver conserva la posición. */}
+      <div className={css.listaScroll} data-testid='correo-lista-scroll'>
+        {errorLista && !desactualizada && (
+          <Alert color='red' icon={<IconAlertTriangle size={18} />} title='No se pudieron cargar los correos' m='sm' data-testid='correo-error-lista'>
+            {errorLista}
+          </Alert>
+        )}
+        {desactualizada ? (
+          <EsqueletoFilas movil={!desktop} />
+        ) : visibles.length === 0 && !cargando && !errorLista ? (
+          vacio
+        ) : (
+          <div
+            role='grid'
+            aria-label='Correos'
+            aria-busy={carga === 'refresco'}
+            className={carga === 'refresco' ? css.listaAtenuada : undefined}
+            data-testid='correo-lista'
+          >
+            {visibles.map((m) => (desktop ? filaEscritorio(m) : filaMovil(m)))}
+          </div>
+        )}
+        {carga === 'mas' && <EsqueletoFilas filas={3} movil={!desktop} />}
+        {cargando && (
+          <Text className='sr-only' role='status' data-testid='correo-cargando'>
+            Cargando correos…
+          </Text>
+        )}
+        {siguiente && !cargando && (
+          <Group justify='center' p='sm'>
+            <Button variant='light' onClick={() => cargarMensajes(filtros, { cursor: siguiente })} data-testid='correo-cargar-mas'>
+              Cargar más correos
+            </Button>
+          </Group>
+        )}
+        {!desktop && (
+          <Box p='sm'>
+            <AvisoPrivacidad />
+          </Box>
+        )}
+      </div>
     </Card>
   );
+
+  const hilo = hiloAbierto ? (
+    <Card withBorder radius='md' p={0} className={css.panelHilo}>
+      <HiloCorreo
+        key={`${hiloAbierto}-${versionHilo}`}
+        conversationId={hiloAbierto}
+        carpeta={carpetaActual?.etiqueta ?? null}
+        envioHabilitado={estado.conexion.envioHabilitado}
+        nombreOperador={estado.usuario.nombre}
+        correoOperador={estado.usuario.email}
+        onVolver={cerrarHilo}
+        escritura={escritura}
+        marcarHilo={marcarHilo}
+        onCambio={() => setHayCambios(true)}
+        onCrearSolicitud={(ids) => setSimulacion(ids)}
+      />
+    </Card>
+  ) : null;
 
   const elegirCarpeta = (id: string | null) => {
     cambiar({ carpeta: id });
     setPanelCarpetas(false);
+    // Como Gmail: elegir una carpeta con un hilo abierto vuelve a la lista (de esa carpeta).
+    if (hiloAbierto) cerrarHilo();
   };
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
-      <div className='max-w-[1600px] mx-auto py-3 sm:py-6 px-3 sm:px-6 lg:px-8'>
-        <Encabezado estado={estado} empresa={empresa} setEmpresa={setEmpresa} />
+    <div className={css.pantalla}>
+      <Encabezado estado={estado} empresa={empresa} setEmpresa={setEmpresa} />
 
-        {!listo ? (
-          <NoDisponible estado={estado} />
-        ) : desktop ? (
-          <div className={css.layout}>
-            <aside className={css.sidebar}>
-              <Stack gap='md'>
-                <ListaCarpetas carpetas={carpetas} actual={filtros.carpeta} onElegir={elegirCarpeta} />
-                <AvisoPrivacidad />
-              </Stack>
-            </aside>
-            <Stack gap='sm' style={{ minWidth: 0 }}>
-              {buscador}
-              {chips}
-              {bandeja}
+      {!listo ? (
+        <NoDisponible estado={estado} />
+      ) : desktop ? (
+        <div className={css.layout}>
+          <aside className={css.sidebar}>
+            <Stack gap='md'>
+              <ListaCarpetas carpetas={carpetas} actual={filtros.carpeta} cargando={cargandoCarpetas} onElegir={elegirCarpeta} />
+              <AvisoPrivacidad />
             </Stack>
-          </div>
-        ) : (
-          <Stack gap='sm'>
-            <Group gap='xs' wrap='nowrap'>
-              <Tooltip label='Carpetas'>
-                <ActionIcon variant='default' radius='xl' size={36} onClick={() => setPanelCarpetas(true)} aria-label='Carpetas' data-testid='correo-menu-carpetas'>
-                  <IconFolders size={18} />
-                </ActionIcon>
-              </Tooltip>
-              {buscador}
-            </Group>
-            {chips}
+          </aside>
+          <div className={css.principal}>
+            <div className={css.fijo}>{buscador}</div>
+            {!hiloAbierto && chips}
             {bandeja}
-            <AvisoPrivacidad />
-            <Drawer opened={panelCarpetas} onClose={() => setPanelCarpetas(false)} position='left' size='80%' title='Carpetas' data-testid='correo-carpetas-drawer'>
-              <ListaCarpetas carpetas={carpetas} actual={filtros.carpeta} onElegir={elegirCarpeta} />
-            </Drawer>
+            {hilo}
+          </div>
+        </div>
+      ) : (
+        <div className={css.principal}>
+          {/* Celular: el hilo es una vista a pantalla completa con ← (sin buscador ni chips encima). */}
+          {!hiloAbierto && (
+            <>
+              <Group gap='xs' wrap='nowrap' className={css.fijo}>
+                <Tooltip label='Carpetas'>
+                  <ActionIcon variant='default' radius='xl' size={36} onClick={() => setPanelCarpetas(true)} aria-label='Carpetas' data-testid='correo-menu-carpetas'>
+                    <IconFolders size={18} />
+                  </ActionIcon>
+                </Tooltip>
+                {buscador}
+              </Group>
+              {chips}
+            </>
+          )}
+          {bandeja}
+          {hilo}
+          <Drawer opened={panelCarpetas} onClose={() => setPanelCarpetas(false)} position='left' size='80%' title='Carpetas' data-testid='correo-carpetas-drawer'>
+            <ListaCarpetas carpetas={carpetas} actual={filtros.carpeta} cargando={cargandoCarpetas} onElegir={elegirCarpeta} />
+          </Drawer>
+        </div>
+      )}
+
+      <Modal
+        opened={Boolean(confirmarMarcado)}
+        onClose={() => setConfirmarMarcado(null)}
+        title={confirmarMarcado?.leido ? 'Marcar todo como leído' : 'Marcar todo como no leído'}
+        centered
+        data-testid='correo-confirmar-marcado'
+      >
+        {confirmarMarcado && (
+          <Stack gap='sm'>
+            <Text size='sm'>
+              Va a marcar {confirmarMarcado.total.toLocaleString('es-CO')} correos de {carpetaActual?.etiqueta ?? 'esta carpeta'} como{' '}
+              {confirmarMarcado.leido ? 'leídos' : 'no leídos'} en su buzón de Outlook.
+              {confirmarMarcado.total > CORREO_MAX_MARCAR_CARPETA
+                ? ` Por seguridad se marcan como máximo ${CORREO_MAX_MARCAR_CARPETA.toLocaleString('es-CO')} por vez; luego puede repetir.`
+                : ''}
+            </Text>
+            <Group justify='flex-end'>
+              <Button variant='default' onClick={() => setConfirmarMarcado(null)}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={() => {
+                  const c = confirmarMarcado;
+                  setConfirmarMarcado(null);
+                  void marcarCarpetaEntera(c.leido, true);
+                }}
+                data-testid='correo-confirmar-marcado-si'
+              >
+                Marcar {Math.min(confirmarMarcado.total, CORREO_MAX_MARCAR_CARPETA).toLocaleString('es-CO')} correos
+              </Button>
+            </Group>
           </Stack>
         )}
-      </div>
-
-      <HiloDrawer
-        conversationId={hiloAbierto}
-        envioHabilitado={estado.conexion.envioHabilitado}
-        nombreOperador={estado.usuario.nombre}
-        correoOperador={estado.usuario.email}
-        onClose={() => {
-          setHiloAbierto(null);
-          if (hayCambios) {
-            setHayCambios(false);
-            void cargarMensajes(filtros);
-          }
-        }}
-        onCambio={() => setHayCambios(true)}
-        onCrearSolicitud={(ids) => setSimulacion(ids)}
-      />
+      </Modal>
 
       {simulacion && idEmpresa && (
         <SimulacionModal
@@ -732,8 +1122,9 @@ export default function CorreoPage() {
             // Se refresca al CERRAR (no durante la creación): el resumen no se desmonta.
             if (huboCreadas) {
               setSeleccion(new Set());
-              void cargarMensajes(filtros);
-              if (hiloAbierto) setHiloAbierto(null);
+              void cargarMensajes(filtros, { refresco: true });
+              // Con el hilo abierto, se vuelve a leer (ya con su solicitud vinculada) sin salir de él.
+              if (hiloAbierto) setVersionHilo((v) => v + 1);
             }
           }}
         />
