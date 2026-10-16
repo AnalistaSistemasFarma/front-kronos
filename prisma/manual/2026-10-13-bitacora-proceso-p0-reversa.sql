@@ -54,6 +54,11 @@ BEGIN TRY
   WHERE p.process = N'Producción'
     AND NOT EXISTS (SELECT 1 FROM [dbo].[subprocess] s WHERE s.id_process = p.id_process);
 
+  /* Objetos de la migración 20261015180000 (cuatro actores y PIN), si existen: la FK de
+     ot_firma a ot_operador impide borrar ot_operador; ot_pin es del módulo. */
+  IF OBJECT_ID(N'dbo.ot_firma_id_operador_fkey', N'F') IS NOT NULL ALTER TABLE [dbo].[ot_firma] DROP CONSTRAINT [ot_firma_id_operador_fkey];
+  IF OBJECT_ID(N'dbo.ot_pin', N'U') IS NOT NULL DROP TABLE [dbo].[ot_pin];
+
   /* Objetos de la migración 20261014140000 (operarios y áreas), si existen: dependen de ot_*. */
   IF OBJECT_ID(N'dbo.TR_ot_orden_operador_inmutable', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_orden_operador_inmutable];
   IF OBJECT_ID(N'dbo.TR_ot_operador_sin_borrar', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_operador_sin_borrar];

@@ -6,9 +6,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const m = vi.hoisted(() => {
   const names = [
     'getServerSession', 'getOtAccessForUser', 'getActiveUserId', 'listOrdenes', 'crearOrden', 'getOrdenDetalle',
-    'crearRegistro', 'cerrarYFirmar', 'verificarYFirmar', 'prepararFirmante', 'listActividades', 'crearActividad', 'cambiarActividad', 'listUsuariosEmpresa', 'buscarOpsLiberadas',
-    'datosAvisoInspector', 'createAndSendNotifications', 'listOperadores', 'crearOperador', 'cambiarOperador', 'agregarOperadores', 'listAreas', 'crearArea', 'cambiarArea',
-    'listSupervisoresEmpresa',
+    'crearRegistro', 'confirmarVistoBueno', 'prepararConfirmante', 'listActividades', 'crearActividad', 'cambiarActividad', 'listUsuariosEmpresa', 'buscarOps',
+    'datosAviso', 'createAndSendNotifications', 'listOperadores', 'crearOperador', 'cambiarOperador', 'agregarOperadores', 'listAreas', 'crearArea', 'cambiarArea',
+    'listSupervisoresEmpresa', 'importarOperadores', 'estadoPin', 'configurarPin', 'listPinsEmpresa', 'restablecerPin', 'verificarPassword',
   ] as const;
   return Object.fromEntries(names.map((n) => [n, vi.fn()])) as Record<(typeof names)[number], ReturnType<typeof vi.fn>>;
 });
@@ -18,23 +18,28 @@ vi.mock('../../auth/[...nextauth]/route', () => ({ authOptions: {} }));
 vi.mock('../../../../lib/prisma', () => ({ prisma: { tag: 'prisma' } }));
 vi.mock('../../../../lib/bitacora-proceso/db', () => ({
   getOtAccessForUser: m.getOtAccessForUser, getActiveUserId: m.getActiveUserId, listOrdenes: m.listOrdenes, crearOrden: m.crearOrden,
-  getOrdenDetalle: m.getOrdenDetalle, crearRegistro: m.crearRegistro, cerrarYFirmar: m.cerrarYFirmar, verificarYFirmar: m.verificarYFirmar, listActividades: m.listActividades,
+  getOrdenDetalle: m.getOrdenDetalle, crearRegistro: m.crearRegistro, confirmarVistoBueno: m.confirmarVistoBueno, listActividades: m.listActividades,
   crearActividad: m.crearActividad, cambiarActividad: m.cambiarActividad, listUsuariosEmpresa: m.listUsuariosEmpresa,
-  datosAvisoInspector: m.datosAvisoInspector, listOperadores: m.listOperadores, crearOperador: m.crearOperador, cambiarOperador: m.cambiarOperador,
+  datosAviso: m.datosAviso, importarOperadores: m.importarOperadores, estadoPin: m.estadoPin, configurarPin: m.configurarPin,
+  listPinsEmpresa: m.listPinsEmpresa, restablecerPin: m.restablecerPin, listOperadores: m.listOperadores, crearOperador: m.crearOperador, cambiarOperador: m.cambiarOperador,
   agregarOperadores: m.agregarOperadores, listAreas: m.listAreas, crearArea: m.crearArea, cambiarArea: m.cambiarArea, listSupervisoresEmpresa: m.listSupervisoresEmpresa,
 }));
 // El notificador compartido (campana + push): se simula para ver QUÉ se avisa y a QUIÉN.
 vi.mock('../../../../lib/notifications.js', () => ({ createAndSendNotifications: m.createAndSendNotifications }));
-vi.mock('../../../../lib/bitacora-proceso/sap', () => ({ buscarOpsLiberadas: m.buscarOpsLiberadas }));
-vi.mock('../_lib/firmante', () => ({ prepararFirmante: m.prepararFirmante }));
+vi.mock('../../../../lib/bitacora-proceso/sap', () => ({ buscarOps: m.buscarOps }));
+vi.mock('../_lib/firmante', () => ({ prepararConfirmante: m.prepararConfirmante }));
+vi.mock('../../../../lib/auth/verifyPassword', () => ({ synerlinkPasswordVerifier: () => m.verificarPassword }));
 
 import { OtError } from '../../../../lib/bitacora-proceso/rules';
 import { SapError } from '../../../../lib/sap/serviceLayer';
 import * as lista from '../route';
 import * as detalle from '../[id]/route';
 import * as registros from '../[id]/registros/route';
-import * as cerrar from '../[id]/cerrar/route';
-import * as verificar from '../[id]/verificar/route';
+import * as confirmar from '../[id]/confirmar/route';
+import * as pin from '../pin/route';
+import * as pinUsuarios from '../pin/usuarios/route';
+import * as pinRestablecer from '../pin/restablecer/route';
+import * as importar from '../operadores/importar/route';
 import * as actividades from '../actividades/route';
 import * as sapOp from '../sap-op/route';
 import * as usuarios from '../usuarios/route';
@@ -46,8 +51,8 @@ import * as operadoresOrden from '../[id]/operadores/route';
 const FARMA = 1;
 const operario = { idCompany: FARMA, companyName: 'FARMALOGICA S.A.', canOperate: true, canManage: false };
 const supervisor = { ...operario, canManage: true };
-function asUser(access: object[], idUser: string | null = 'u1') {
-  m.getServerSession.mockResolvedValue({ user: { email: 'op@farmalogica.com' } });
+function asUser(access: object[], idUser: string | null = 'u1', role = 'user') {
+  m.getServerSession.mockResolvedValue({ user: { email: 'op@farmalogica.com', role } });
   m.getOtAccessForUser.mockResolvedValue(access);
   m.getActiveUserId.mockResolvedValue(idUser);
 }
@@ -55,14 +60,15 @@ const H = { 'x-forwarded-for': '10.0.0.9', 'user-agent': 'vitest' };
 const get = (q: string) => new Request(`http://x/api${q}`, { headers: H });
 const send = (method: string, body: unknown, q = '') => new Request(`http://x/api${q}`, { method, body: JSON.stringify(body), headers: { ...H, 'content-type': 'application/json' } });
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
-const nueva = { company: FARMA, producto: 'Cefazolina', lote: 'L1', turno: 'TARDE', operadores: [7], idArea: 3, inspector: 'u2' };
-const confirma = { firmante: 'u-sup', confirmo: true, password: 'x' };
+const nueva = { company: FARMA, producto: 'Cefazolina', lote: 'L1', turno: 'TARDE', operadores: [7], idArea: 3, inspector: 'u2', jefeProduccion: 'u3' };
+const confirma = { rol: 'SUPERVISOR', persona: 'u-sup', confirmo: true, pin: '4821' };
 
-const avisoBase = { idOrden: 9, idCompany: FARMA, consecutivo: 1, producto: 'Cefazolina', lote: 'L1', inspectorEmail: 'inspector@farmalogica.com', actorNombre: 'Supervisor', actorEmail: 'op@farmalogica.com' };
+const avisoBase = { idOrden: 9, idCompany: FARMA, consecutivo: 1, producto: 'Cefazolina', lote: 'L1', inspectorEmail: 'inspector@farmalogica.com', jefeEmail: 'jefe@farmalogica.com', actorNombre: 'Supervisor', actorEmail: 'op@farmalogica.com' };
+const vb = (rol: string, siguiente: string | null) => ({ rol, firmadoEn: '2026-10-15T13:00:00.000Z', contentSha256: 'a'.repeat(64), nombre: 'Supervisora', siguiente });
 
 beforeEach(() => {
   for (const fn of Object.values(m)) fn.mockReset();
-  m.datosAvisoInspector.mockImplementation(async (_db: unknown, idOrden: number) => ({ ...avisoBase, idOrden }));
+  m.datosAviso.mockImplementation(async (_db: unknown, idOrden: number) => ({ ...avisoBase, idOrden }));
   m.createAndSendNotifications.mockResolvedValue({ saved: 1, pushed: 1 });
 });
 
@@ -77,7 +83,7 @@ describe('Bitácora de Proceso · rutas', () => {
   });
 
   it('no existen rutas de edición ni de borrado de órdenes ni registros', () => {
-    for (const mod of [lista, detalle, registros, cerrar, verificar, operadoresOrden]) {
+    for (const mod of [lista, detalle, registros, confirmar, operadoresOrden, importar, pinRestablecer]) {
       expect(mod).not.toHaveProperty('PUT');
       expect(mod).not.toHaveProperty('DELETE');
       expect(mod).not.toHaveProperty('PATCH');
@@ -118,29 +124,87 @@ describe('Bitácora de Proceso · rutas', () => {
       actividades.PATCH(send('PATCH', { company: FARMA, id_actividad: 1, activo: false })),
       sapOp.GET(get('?company=1&q=PTCZ')),
       usuarios.GET(get('?company=1')),
+      importar.POST(send('POST', { company: FARMA, texto: 'Ana; 1' })),
+      pinUsuarios.GET(get('?company=1')),
+      pinRestablecer.POST(send('POST', { company: FARMA, idUser: 'u9' })),
     ]);
     expect(all.map((r) => r.status)).toEqual(all.map(() => 403));
     expect(m.crearOrden).not.toHaveBeenCalled();
     expect(m.crearOperador).not.toHaveBeenCalled();
     expect(m.agregarOperadores).not.toHaveBeenCalled();
-    expect(m.buscarOpsLiberadas).not.toHaveBeenCalled();
+    expect(m.buscarOps).not.toHaveBeenCalled();
+    expect(m.importarOperadores).not.toHaveBeenCalled();
+    expect(m.restablecerPin).not.toHaveBeenCalled();
   });
 
-  it('A4 con cuenta compartida: una sesión SIN Gestión llega al cierre; la persona que confirma la elige y valida el servidor', async () => {
+  it('B3 con cuenta compartida: una sesión SIN Gestión llega al visto bueno; la persona la elige y la valida el servidor (PIN)', async () => {
     asUser([operario], 'u-planta');
-    const firmante = { idUser: 'u-sup', email: 'sup@farmalogica.com', ip: '10.0.0.9', nombre: 'Supervisora', access: supervisor };
-    m.prepararFirmante.mockResolvedValue(firmante);
-    m.cerrarYFirmar.mockResolvedValue({ firmadoEn: '2026-10-14T13:00:00.000Z', contentSha256: 'a'.repeat(64) });
-    const res = await cerrar.POST(send('POST', confirma, '?company=1'), params('7'));
+    const conf = { rol: 'SUPERVISOR', idUser: 'u-sup', email: 'sup@farmalogica.com', nombre: 'Supervisora', access: supervisor, metodo: 'pin_tablet' };
+    m.prepararConfirmante.mockResolvedValue(conf);
+    m.confirmarVistoBueno.mockResolvedValue(vb('SUPERVISOR', 'INSPECTOR'));
+    const res = await confirmar.POST(send('POST', { ...confirma, observacion: 'Fin' }, '?company=1'), params('7'));
     expect(res.status).toBe(200);
-    expect(m.prepararFirmante.mock.calls[0][1]).toBe(FARMA);
-    expect(m.cerrarYFirmar.mock.calls[0][4]).toBe(firmante);
-    expect((await res.json()).firmante).toBe('Supervisora');
-    // El aviso al jefe de producción sale a nombre de quien confirmó, no de la cuenta de planta.
-    expect(m.datosAvisoInspector.mock.calls[0][3]).toBe(firmante);
-    // Otra empresa: 403 sin preparar a nadie.
-    expect((await cerrar.POST(send('POST', confirma, '?company=3'), params('7'))).status).toBe(403);
-    expect(m.prepararFirmante).toHaveBeenCalledTimes(1);
+    expect(m.prepararConfirmante.mock.calls[0][1]).toBe(FARMA);
+    expect(m.prepararConfirmante.mock.calls[0][2]).toEqual({ rol: 'SUPERVISOR', persona: 'u-sup', idOperador: null, pin: '4821', observacion: 'Fin' });
+    expect(m.confirmarVistoBueno.mock.calls[0][3]).toBe('Fin');
+    expect(m.confirmarVistoBueno.mock.calls[0][4]).toBe(conf);
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: true, rol: 'SUPERVISOR', firmante: 'Supervisora', siguiente: 'INSPECTOR' });
+    // El PIN nunca vuelve en la respuesta.
+    expect(JSON.stringify(body)).not.toContain('4821');
+    // El aviso sale a nombre de quien confirmó, no de la cuenta de planta.
+    expect(m.datosAviso.mock.calls[0][3]).toMatchObject({ idUser: 'u-sup', email: 'sup@farmalogica.com', nombre: 'Supervisora' });
+    // Otra empresa: 403 sin preparar a nadie; sin «Sí, confirmo» o rol inválido: 400.
+    expect((await confirmar.POST(send('POST', confirma, '?company=3'), params('7'))).status).toBe(403);
+    expect((await confirmar.POST(send('POST', { ...confirma, confirmo: false }, '?company=1'), params('7'))).status).toBe(400);
+    expect((await confirmar.POST(send('POST', { ...confirma, rol: 'CALIDAD' }, '?company=1'), params('7'))).status).toBe(400);
+    expect((await confirmar.POST(send('POST', confirma, '?company=1'), params('x'))).status).toBe(400);
+    expect(m.prepararConfirmante).toHaveBeenCalledTimes(1);
+    // PIN incorrecto / regla de negocio: pasan tal cual.
+    m.prepararConfirmante.mockRejectedValueOnce(new OtError('PIN incorrecto: el visto bueno no se registró.', 403));
+    expect((await confirmar.POST(send('POST', confirma, '?company=1'), params('7'))).status).toBe(403);
+    m.prepararConfirmante.mockResolvedValue(conf);
+    m.confirmarVistoBueno.mockRejectedValueOnce(new OtError('Falta el visto bueno del operario.', 409));
+    expect((await confirmar.POST(send('POST', confirma, '?company=1'), params('7'))).status).toBe(409);
+  });
+
+  it('B8: importar operarios (vista previa por defecto) solo con Gestión', async () => {
+    asUser([supervisor]);
+    m.importarOperadores.mockResolvedValue({ simulado: true, crear: [{ linea: 1, nombre: 'Ana', documento: '1' }], existentes: [], errores: [], creados: 0 });
+    const res = await importar.POST(send('POST', { company: FARMA, texto: 'Ana; 1' }));
+    expect(res.status).toBe(200);
+    expect(m.importarOperadores.mock.calls[0][1]).toMatchObject({ idCompany: FARMA, simular: true, filas: [{ linea: 1, nombre: 'Ana', documento: '1' }] });
+    await importar.POST(send('POST', { company: FARMA, texto: 'Ana; 1', simular: false }));
+    expect(m.importarOperadores.mock.calls[1][1].simular).toBe(false);
+    expect((await importar.POST(send('POST', { company: FARMA, texto: ' ' }))).status).toBe(400);
+  });
+
+  it('B3: PIN propio (estado y configurar con la contraseña); restablecer y listar solo supervisor o administrador', async () => {
+    asUser([operario], 'u-ana');
+    m.estadoPin.mockResolvedValue({ configurado: false, bloqueado: false, intentosFallidos: 0 });
+    expect(await (await pin.GET(get(''))).json()).toMatchObject({ configurado: false });
+    expect(m.estadoPin).toHaveBeenCalledWith({ tag: 'prisma' }, 'u-ana');
+    m.verificarPassword.mockResolvedValue(false);
+    expect((await pin.POST(send('POST', { pin: '4821', confirmacion: '4821', password: 'mala' }))).status).toBe(403);
+    expect(m.configurarPin).not.toHaveBeenCalled();
+    m.verificarPassword.mockResolvedValue(true);
+    const ok = await pin.POST(send('POST', { pin: '4821', confirmacion: '4821', password: 'buena' }));
+    expect(ok.status).toBe(200);
+    expect(m.configurarPin.mock.calls[0].slice(1, 3)).toEqual(['u-ana', '4821']);
+    expect(JSON.stringify(await ok.json())).not.toContain('4821');
+    expect((await pin.POST(send('POST', { pin: '1234', confirmacion: '1234', password: 'buena' }))).status).toBe(400);
+    // Restablecer: operario 403; supervisor sí; administrador sin el módulo de esa empresa también.
+    expect((await pinRestablecer.POST(send('POST', { company: FARMA, idUser: 'u9' }))).status).toBe(403);
+    asUser([supervisor], 'u-sup');
+    expect((await pinRestablecer.POST(send('POST', { company: FARMA, idUser: 'u9' }))).status).toBe(200);
+    expect(m.restablecerPin).toHaveBeenCalledWith({ tag: 'prisma' }, FARMA, 'u9', { idUser: 'u-sup', email: 'op@farmalogica.com' });
+    expect((await pinRestablecer.POST(send('POST', { company: FARMA }))).status).toBe(400);
+    m.listPinsEmpresa.mockResolvedValue([]);
+    expect((await pinUsuarios.GET(get('?company=1'))).status).toBe(200);
+    expect((await pinUsuarios.GET(get(''))).status).toBe(400);
+    asUser([{ ...operario, idCompany: 3, companyName: 'OLP' }], 'u-admin', 'admin');
+    expect((await pinRestablecer.POST(send('POST', { company: FARMA, idUser: 'u9' }))).status).toBe(200);
+    expect((await pinUsuarios.GET(get('?company=1'))).status).toBe(200);
   });
 
   it('A1: maestro de operarios, áreas y operarios de una bitácora abierta (solo Gestión, solo se agregan)', async () => {
@@ -182,8 +246,9 @@ describe('Bitácora de Proceso · rutas', () => {
     const res = await lista.POST(send('POST', nueva));
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ orden: { id: 9, consecutivo: 1 } });
-    expect(m.crearOrden.mock.calls[0][1]).toMatchObject({ sapOp: null, turno: 'TARDE', inspector: 'u2', operadores: [7], idArea: 3 });
+    expect(m.crearOrden.mock.calls[0][1]).toMatchObject({ sapOp: null, turno: 'TARDE', inspector: 'u2', jefeProduccion: 'u3', operadores: [7], idArea: 3 });
     expect((await lista.POST(send('POST', { ...nueva, inspector: '' }))).status).toBe(400);
+    expect((await lista.POST(send('POST', { ...nueva, jefeProduccion: '' }))).status).toBe(400);
     expect(m.crearOrden.mock.calls[0][2]).toEqual({ idUser: 'u1', email: 'op@farmalogica.com', ip: '10.0.0.9' });
     expect((await lista.POST(send('POST', { ...nueva, lote: '' }))).status).toBe(400);
   });
@@ -207,81 +272,55 @@ describe('Bitácora de Proceso · rutas', () => {
     expect((await registros.POST(send('POST', { id_actividad: 2 }, '?company=1'), params('abc'))).status).toBe(400);
   });
 
-  it('detalle 404 si la orden no es de la empresa; cierre por el supervisor', async () => {
+  it('detalle 404 si la orden no es de la empresa', async () => {
     asUser([supervisor]);
     m.getOrdenDetalle.mockResolvedValue(null);
     expect((await detalle.GET(get('?company=1'), params('7'))).status).toBe(404);
     m.getOrdenDetalle.mockResolvedValue({ id: 7 });
     expect((await detalle.GET(get('?company=1'), params('7'))).status).toBe(200);
     expect((await detalle.GET(get('?company=1'), params('0'))).status).toBe(400);
-    const firmante = { idUser: 'u1', email: 'op@farmalogica.com', ip: '10.0.0.9', nombre: 'Supervisor', access: supervisor };
-    m.prepararFirmante.mockResolvedValue(firmante);
-    m.cerrarYFirmar.mockResolvedValue({ firmadoEn: '2026-10-13T22:00:00.000Z', contentSha256: 'a'.repeat(64) });
-    const body = { ...confirma, observacion: 'Fin de lote', password: 'secreta' };
-    const res = await cerrar.POST(send('POST', body, '?company=1'), params('7'));
-    expect(res.status).toBe(200);
-    expect(m.prepararFirmante.mock.calls[0][2]).toEqual(body);
-    expect(m.cerrarYFirmar.mock.calls[0][3]).toBe('Fin de lote');
-    expect(m.cerrarYFirmar.mock.calls[0][4]).toBe(firmante);
-    // La contraseña nunca vuelve en la respuesta.
-    expect(JSON.stringify(await res.json())).not.toContain('secreta');
-    m.prepararFirmante.mockRejectedValueOnce(new OtError('Contraseña incorrecta: la confirmación no se registró.', 403));
-    const mala = await cerrar.POST(send('POST', confirma, '?company=1'), params('7'));
-    expect(mala.status).toBe(403);
-    expect(m.cerrarYFirmar).toHaveBeenCalledTimes(1);
   });
 
-  it('verificar: cualquier sesión con el módulo llega a la ruta; la regla del jefe de producción la aplica la capa de datos', async () => {
-    asUser([operario]);
-    m.prepararFirmante.mockResolvedValue({ idUser: 'u-jefe', email: 'jefe@farmalogica.com', ip: null, nombre: 'Jefe', access: operario });
-    m.verificarYFirmar.mockResolvedValue({ firmadoEn: '2026-10-13T22:10:00.000Z', contentSha256: 'b'.repeat(64) });
-    const ok = await verificar.POST(send('POST', confirma, '?company=1'), params('7'));
-    expect(ok.status).toBe(200);
-    expect(m.verificarYFirmar.mock.calls[0][1]).toBe(7);
-    m.verificarYFirmar.mockRejectedValueOnce(new OtError('Solo el jefe de producción designado en esta bitácora puede verificarla.', 403));
-    expect((await verificar.POST(send('POST', confirma, '?company=1'), params('7'))).status).toBe(403);
-    expect((await verificar.POST(send('POST', {}, '?company=3'), params('7'))).status).toBe(403);
-    expect((await verificar.POST(send('POST', {}, '?company=1'), params('x'))).status).toBe(400);
-  });
-
-  it('AVISOS: al abrir se avisa al jefe de producción designado; al cerrar, que la verifique (campana + push, enlace directo)', async () => {
+  it('AVISOS: al abrir, al inspector y al jefe; tras cada visto bueno, a quien le toca el siguiente', async () => {
     asUser([supervisor]);
     m.crearOrden.mockResolvedValue({ id: 9, consecutivo: 1 });
     expect((await lista.POST(send('POST', nueva))).status).toBe(201);
-    expect(m.datosAvisoInspector).toHaveBeenCalledWith(expect.anything(), 9, FARMA, { idUser: 'u1', email: 'op@farmalogica.com', ip: '10.0.0.9' });
-    expect(m.createAndSendNotifications).toHaveBeenCalledTimes(1);
-    const [to1, p1] = m.createAndSendNotifications.mock.calls[0];
-    expect(to1).toEqual(['inspector@farmalogica.com']);
-    expect(p1).toMatchObject({ title: 'Fue designado jefe de producción de una bitácora · SynerLink', url: '/process/bitacora-proceso/9?empresa=1' });
-
-    m.prepararFirmante.mockResolvedValue({ idUser: 'u1', email: 'op@farmalogica.com', ip: '10.0.0.9', nombre: 'Supervisor', access: supervisor });
-    m.cerrarYFirmar.mockResolvedValue({ firmadoEn: '2026-10-14T13:00:00.000Z', contentSha256: 'a'.repeat(64) });
-    const res = await cerrar.POST(send('POST', confirma, '?company=1'), params('7'));
-    expect(res.status).toBe(200);
+    expect(m.datosAviso).toHaveBeenCalledWith(expect.anything(), 9, FARMA, { idUser: 'u1', email: 'op@farmalogica.com', ip: '10.0.0.9' });
     expect(m.createAndSendNotifications).toHaveBeenCalledTimes(2);
-    const [to2, p2] = m.createAndSendNotifications.mock.calls[1];
+    expect(m.createAndSendNotifications.mock.calls.map((c) => [c[0][0], c[1].title])).toEqual([
+      ['inspector@farmalogica.com', 'Fue designado inspector de una bitácora · SynerLink'],
+      ['jefe@farmalogica.com', 'Fue designado jefe de producción de una bitácora · SynerLink'],
+    ]);
+
+    m.prepararConfirmante.mockResolvedValue({ rol: 'SUPERVISOR', idUser: 'u1', email: 'op@farmalogica.com', nombre: 'Supervisor', access: supervisor });
+    m.confirmarVistoBueno.mockResolvedValue(vb('SUPERVISOR', 'INSPECTOR'));
+    expect((await confirmar.POST(send('POST', confirma, '?company=1'), params('7'))).status).toBe(200);
+    const [to2, p2] = m.createAndSendNotifications.mock.calls[2];
     expect(to2).toEqual(['inspector@farmalogica.com']);
-    expect(p2).toMatchObject({ title: 'Bitácora por verificar · SynerLink', url: '/process/bitacora-proceso/7?empresa=1', tag: 'ot-7-verificar' });
+    expect(p2).toMatchObject({ title: 'Bitácora pendiente de su visto bueno · SynerLink', url: '/process/bitacora-proceso/7?empresa=1', tag: 'ot-7-inspector' });
+
+    m.confirmarVistoBueno.mockResolvedValue(vb('INSPECTOR', 'JEFE_PROD'));
+    expect((await confirmar.POST(send('POST', { ...confirma, rol: 'INSPECTOR' }, '?company=1'), params('7'))).status).toBe(200);
+    expect(m.createAndSendNotifications.mock.calls[3][0]).toEqual(['jefe@farmalogica.com']);
   });
 
-  it('AVISOS: si el aviso falla, la bitácora se abre/cierra igual; un cierre fallido no avisa; verificar no avisa', async () => {
+  it('AVISOS: si el aviso falla, la acción queda igual; un visto bueno fallido no avisa; el último no avisa', async () => {
     asUser([supervisor]);
     m.crearOrden.mockResolvedValue({ id: 9, consecutivo: 1 });
     m.createAndSendNotifications.mockRejectedValue(new Error('push caído'));
     expect((await lista.POST(send('POST', nueva))).status).toBe(201);
-    m.datosAvisoInspector.mockRejectedValueOnce(new Error('BD'));
-    m.prepararFirmante.mockResolvedValue({ idUser: 'u1', email: 'op@farmalogica.com', ip: null, nombre: 'S', access: supervisor });
-    m.cerrarYFirmar.mockResolvedValue({ firmadoEn: '2026-10-14T13:00:00.000Z', contentSha256: 'a'.repeat(64) });
-    expect((await cerrar.POST(send('POST', confirma, '?company=1'), params('7'))).status).toBe(200);
+    m.datosAviso.mockRejectedValueOnce(new Error('BD'));
+    m.prepararConfirmante.mockResolvedValue({ rol: 'SUPERVISOR', idUser: 'u1', email: 'op@farmalogica.com', nombre: 'S', access: supervisor });
+    m.confirmarVistoBueno.mockResolvedValue(vb('SUPERVISOR', 'INSPECTOR'));
+    expect((await confirmar.POST(send('POST', confirma, '?company=1'), params('7'))).status).toBe(200);
 
     m.createAndSendNotifications.mockReset();
-    m.cerrarYFirmar.mockRejectedValueOnce(new OtError('La bitácora ya está cerrada.', 409));
-    expect((await cerrar.POST(send('POST', confirma, '?company=1'), params('7'))).status).toBe(409);
-    // Sin jefe de producción activo: no hay a quién avisar.
-    m.datosAvisoInspector.mockResolvedValueOnce({ ...avisoBase, inspectorEmail: null });
-    expect((await cerrar.POST(send('POST', confirma, '?company=1'), params('7'))).status).toBe(200);
-    m.verificarYFirmar.mockResolvedValue({ firmadoEn: '2026-10-14T13:10:00.000Z', contentSha256: 'b'.repeat(64) });
-    expect((await verificar.POST(send('POST', confirma, '?company=1'), params('7'))).status).toBe(200);
+    m.confirmarVistoBueno.mockRejectedValueOnce(new OtError('La bitácora ya está cerrada.', 409));
+    expect((await confirmar.POST(send('POST', confirma, '?company=1'), params('7'))).status).toBe(409);
+    m.datosAviso.mockResolvedValueOnce({ ...avisoBase, inspectorEmail: null });
+    expect((await confirmar.POST(send('POST', confirma, '?company=1'), params('7'))).status).toBe(200);
+    m.confirmarVistoBueno.mockResolvedValue(vb('JEFE_PROD', null));
+    expect((await confirmar.POST(send('POST', { ...confirma, rol: 'JEFE_PROD' }, '?company=1'), params('7'))).status).toBe(200);
     expect(m.createAndSendNotifications).not.toHaveBeenCalled();
   });
 
@@ -303,10 +342,10 @@ describe('Bitácora de Proceso · rutas', () => {
   it('SAP: solo lectura, sin consulta con menos de 2 letras y error de SAP sin detalle', async () => {
     asUser([supervisor]);
     expect(await (await sapOp.GET(get('?company=1&q=P'))).json()).toEqual({ ops: [] });
-    m.buscarOpsLiberadas.mockResolvedValue([{ AbsoluteEntry: 1, DocumentNumber: 2 }]);
+    m.buscarOps.mockResolvedValue([{ AbsoluteEntry: 1, DocumentNumber: 2 }]);
     const ok = await sapOp.GET(get('?company=1&q=PTCZ'));
     expect((await ok.json()).ops).toHaveLength(1);
-    m.buscarOpsLiberadas.mockRejectedValueOnce(new SapError('SAP Login fallido (401)', 401, 'secreto'));
+    m.buscarOps.mockRejectedValueOnce(new SapError('SAP Login fallido (401)', 401, 'secreto'));
     const fail = await sapOp.GET(get('?company=1&q=PTCZ'));
     expect(fail.status).toBe(502);
     expect((await fail.json()).error).toMatch(/a mano/);
