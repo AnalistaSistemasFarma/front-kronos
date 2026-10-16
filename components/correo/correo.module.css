@@ -131,6 +131,23 @@
   background: var(--mantine-primary-color-light);
 }
 
+/* Aviso de selección (como Gmail: «Seleccionar los N correos de esta carpeta») y avance de «Marcar todo». */
+.avisoSeleccion {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  background: color-mix(in srgb, var(--mantine-color-yellow-1) 60%, var(--mantine-color-body));
+  flex: 0 0 auto;
+}
+
+:global([data-mantine-color-scheme='dark']) .avisoSeleccion {
+  background: color-mix(in srgb, var(--mantine-color-yellow-9) 25%, var(--mantine-color-body));
+}
+
 /* ---- Fila de escritorio ---- */
 .fila {
   position: relative;

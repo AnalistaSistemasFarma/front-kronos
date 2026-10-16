@@ -81,6 +81,12 @@ async function simular(page: Page, opciones: { disponible?: boolean } = {}) {
     return r.fulfill({ json: { mensajes, siguiente: null } });
   });
   await page.route('**/api/correo/hilo?**', (r) => r.fulfill({ json: { hilo } }));
+  // Leído / no leído (al abrir un hilo se marca solo, como Gmail). Va DESPUÉS de «hilo?**», cuyo «?» también calza con «/».
+  const leidos: unknown[] = [];
+  await page.route('**/api/correo/hilo/leido', (r) => {
+    leidos.push(r.request().postDataJSON());
+    return r.fulfill({ json: { cambiados: 1 } });
+  });
   await page.route('**/api/correo/responder', (r) => {
     respuestas.push(r.request().postData() ?? '');
     return r.fulfill({ json: { ok: true, notaEnSolicitud: null } });
@@ -108,7 +114,7 @@ async function simular(page: Page, opciones: { disponible?: boolean } = {}) {
     await new Promise((x) => setTimeout(x, 150));
     return r.fulfill({ status: 201, json: { conversationId: body.conversationId, ok: true, idRequest: 700 + creadas.length, adjuntosSubidos: body.adjuntosIds.length, adjuntosFallidos: [], etiquetado: true } });
   });
-  return { creadas, respuestas, consultas };
+  return { creadas, respuestas, consultas, leidos };
 }
 
 test.describe('Correo · sin sesión', () => {
@@ -143,7 +149,7 @@ test.describe('Correo · con sesión y Graph simulado', () => {
 
   test('escritorio: bandeja → hilo seguro → responder → simulación → crear con resumen', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
-    const { creadas, respuestas } = await simular(page);
+    const { creadas, respuestas, leidos } = await simular(page);
     await page.goto('/process/correo');
     await expect(page.getByTestId('correo-titulo')).toBeVisible();
     await expect(page.getByTestId('correo-buzon')).toHaveText('laura@gsslatam.com');
@@ -171,11 +177,13 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     await expect(barraHilo.getByTestId('correo-hilo-volver')).toBeVisible();
     await expect(barraHilo.getByTestId('correo-hilo-crear')).toBeVisible();
     await expect(barraHilo.getByTestId('correo-hilo-vincular-btn')).toBeVisible();
-    await expect(barraHilo.getByTestId('correo-hilo-leido')).toHaveAttribute('aria-label', 'Marcar como leído');
+    // Al abrirlo, el hilo sin leer queda leído (como Gmail).
+    await expect(barraHilo.getByTestId('correo-hilo-leido')).toHaveAttribute('aria-label', 'Marcar como no leído');
     await expect(drawer.getByTestId('correo-hilo-carpeta')).toHaveText('Recibidos');
     // El hilo usa todo el ancho del área de contenido (no un panel de 1000 px).
     const anchoHilo = (await drawer.boundingBox())!.width;
     expect(anchoHilo).toBeGreaterThan(1366 - 232 - 80);
+    expect(leidos).toEqual([{ conversationId: 'CONV-01AAAA', leido: true }]);
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/02-hilo.png` });
     // Responder como en Gmail: el botón abre el editor en el mismo hilo, con formato Markdown.
     await expect(drawer.getByTestId('correo-responder')).toHaveCount(0);
@@ -518,10 +526,9 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     await expect(vista.getByTestId('correo-hilo-asunto')).toHaveText('Revisión de contrato de arrendamiento');
     await expect(vista.getByTestId('correo-hilo-outlook')).toHaveAttribute('href', /^https:\/\/outlook\.office365\.com\//);
     await expect(vista.getByTestId('correo-hilo-outlook')).toHaveAttribute('target', '_blank');
-    // Leído: marca el hilo y el botón pasa a «no leído»; la fila de la lista deja de estar en negrita.
-    await vista.getByTestId('correo-hilo-leido').click();
+    // Al abrir el hilo sin leer se marca como leído solo (como Gmail): el botón ya ofrece «no leído».
     await expect(vista.getByTestId('correo-hilo-leido')).toHaveAttribute('aria-label', 'Marcar como no leído');
-    expect(marcas).toEqual([{ conversationId: 'CONV-01AAAA', leido: true }]);
+    await expect.poll(() => marcas).toEqual([{ conversationId: 'CONV-01AAAA', leido: true }]);
     // Vincular desde la barra (ícono de enlace → número).
     await vista.getByTestId('correo-hilo-vincular-btn').click();
     await page.getByTestId('correo-hilo-vincular-panel').getByLabel('Número de la solicitud existente').fill('55');
@@ -537,6 +544,99 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     // Pantalla completa: la página no se desplaza; la lista lo hace por dentro.
     const desborde = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
     expect(desborde).toBeLessThanOrEqual(1);
+  });
+
+  test('leído masivo: selección, «Seleccionar los N de esta carpeta», «Marcar todo» por lotes con avance, contadores optimistas y reversión', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await simular(page);
+    // Buzón simulado con estado: la carpeta y el icono de la cabecera reflejan lo que se marca.
+    const bandeja = { total: 600, noLeidos: 450 };
+    await page.route('**/api/correo/no-leidos', (r) => r.fulfill({ json: { noLeidos: bandeja.noLeidos } }));
+    await page.route('**/api/correo/carpetas', (r) =>
+      r.fulfill({ json: { carpetas: [{ id: 'FOLDER-INBOXAAAA', nombre: 'Bandeja de entrada', ...bandeja }, { id: 'FOLDER-SENTAAAA', nombre: 'Elementos enviados', total: 12, noLeidos: 0 }] } })
+    );
+    await page.route('**/api/correo/mensajes**', (r) => r.fulfill({ json: { mensajes, siguiente: 'PAG2' } }));
+    const seleccionados: Array<{ mensajesIds: string[]; leido: boolean }> = [];
+    let fallar = false;
+    await page.route('**/api/correo/leido', async (r) => {
+      const b = r.request().postDataJSON();
+      seleccionados.push(b);
+      await new Promise((x) => setTimeout(x, 300));
+      if (fallar) return r.fulfill({ status: 502, json: { error: 'Microsoft respondió con un error (503).' } });
+      bandeja.noLeidos -= b.leido ? 1 : -1;
+      return r.fulfill({ json: { cambiados: b.mensajesIds.length, fallidos: 0 } });
+    });
+    const lotes: unknown[] = [];
+    await page.route('**/api/correo/leido/carpeta', async (r) => {
+      lotes.push(r.request().postDataJSON());
+      await new Promise((x) => setTimeout(x, 400));
+      const n = Math.min(200, bandeja.noLeidos);
+      bandeja.noLeidos -= n;
+      return r.fulfill({ json: { cambiados: n, fallidos: 0, restantes: bandeja.noLeidos } });
+    });
+    await page.goto('/process/correo');
+    const filas = page.getByTestId('correo-fila');
+    await expect(filas).toHaveCount(3);
+    const recibidos = page.getByTestId('correo-carpeta').first();
+    await expect(recibidos).toHaveText(/Recibidos\s*450/);
+    const icono = page.getByTestId('header-correo');
+    await expect(icono).toHaveAttribute('aria-label', 'Correo: 450 sin leer');
+
+    // 1) Dos seleccionados → «Marcar como leído»: negrita y contadores cambian YA (antes de que responda Graph).
+    await page.getByTestId('correo-seleccionar').nth(0).check();
+    await page.getByTestId('correo-seleccionar').nth(1).check();
+    await page.getByTestId('correo-sel-leido').click();
+    await expect(filas.nth(0)).toHaveAttribute('data-leido', '1');
+    await expect(recibidos).toHaveText(/Recibidos\s*449/);
+    await expect(icono).toHaveAttribute('aria-label', 'Correo: 449 sin leer');
+    await expect.poll(() => seleccionados.at(-1)).toEqual({ mensajesIds: ['MSG-0001AAAA', 'MSG-0002AAAA'], leido: true });
+    await expect(page.getByTestId('correo-barra-seleccion')).toHaveCount(0);
+
+    // 2) Si Microsoft falla, se revierte: la fila vuelve a estar leída y el contador a 449.
+    fallar = true;
+    await page.getByTestId('correo-seleccionar').nth(1).check();
+    await page.getByTestId('correo-sel-no-leido').click();
+    await expect(filas.nth(1)).toHaveAttribute('data-leido', '0');
+    await expect(recibidos).toHaveText(/Recibidos\s*450/);
+    await expect(filas.nth(1)).toHaveAttribute('data-leido', '1');
+    await expect(recibidos).toHaveText(/Recibidos\s*449/);
+    await expect(icono).toHaveAttribute('aria-label', 'Correo: 449 sin leer');
+    fallar = false;
+    await page.getByTestId('correo-seleccionar').nth(1).uncheck();
+
+    // 3) «Seleccionar todo» de la página → aviso de Gmail → toda la carpeta → «Marcar como leído» por lotes con avance.
+    await page.getByTestId('correo-seleccionar-todos').check();
+    const aviso = page.getByTestId('correo-aviso-seleccion');
+    await expect(aviso).toContainText('Se seleccionaron los 3 correos de esta página.');
+    await aviso.getByTestId('correo-seleccionar-carpeta').click();
+    await expect(aviso).toContainText('Se seleccionaron los 600 correos de Recibidos.');
+    await expect(page.getByTestId('correo-seleccion-texto')).toHaveText('Todos los 600 correos de Recibidos');
+    await expect(page.getByTestId('correo-simular')).toHaveCount(0);
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/17-seleccion-carpeta.png` });
+    await page.getByTestId('correo-sel-leido').click();
+    const progreso = page.getByTestId('correo-marcado-progreso');
+    await expect(progreso).toContainText('de 449');
+    await expect(progreso).toContainText('200 de 449');
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/18-marcando-carpeta.png` });
+    await expect(progreso).toHaveCount(0, { timeout: 10_000 });
+    expect(lotes).toEqual([
+      { carpeta: null, leido: true },
+      { carpeta: null, leido: true },
+      { carpeta: null, leido: true },
+    ]);
+    await expect(recibidos).toHaveText(/^Recibidos$/);
+    await expect(icono).toHaveAttribute('aria-label', 'Correo');
+    for (const f of await filas.all()) await expect(f).toHaveAttribute('data-leido', '1');
+
+    // 4) «Marcar todo como leído» en una carpeta grande pide confirmación (y cancelar no marca nada).
+    bandeja.noLeidos = 900;
+    await page.getByTestId('correo-actualizar').click();
+    await expect(recibidos).toHaveText(/Recibidos\s*900/);
+    await page.getByTestId('correo-marcar-todo').click();
+    const confirmar = page.getByTestId('correo-confirmar-marcado');
+    await expect(confirmar).toContainText('Va a marcar 900 correos de Recibidos como leídos');
+    await confirmar.getByRole('button', { name: 'Cancelar' }).click();
+    expect(lotes).toHaveLength(3);
   });
 
   test('carga: al cambiar de carpeta salen esqueletos al instante, sin filas viejas, y gana la última respuesta', async ({ page }) => {

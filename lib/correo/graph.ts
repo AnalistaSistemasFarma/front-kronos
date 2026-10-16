@@ -1,4 +1,4 @@
-import { CORREO_PAGE_SIZE, GRAPH_BASE } from './constants';
+import { CORREO_PAGE_SIZE, GRAPH_BASE, GRAPH_BATCH_MAX } from './constants';
 import type { Inquilino } from './config';
 import { CorreoError } from './errors';
 import { insertarSobreHistorial } from './plantillas/acuse.html';
@@ -453,9 +453,87 @@ export class GraphMailProvider implements MailProvider {
     await this.call(`${url}/send`, { method: 'POST' });
   }
 
-  async marcarLeido(mensajeId: string, leido: boolean): Promise<void> {
-    const url = `${this.me}/messages/${encodeURIComponent(assertGraphId(mensajeId))}`;
-    await this.call(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isRead: leido }) });
+  /** Ruta RELATIVA (para `$batch`) de un mensaje del buzón de la sesión; se valida igual que una URL completa. */
+  private rutaMensaje(mensajeId: string): string {
+    const abs = `${this.me}/messages/${encodeURIComponent(assertGraphId(mensajeId))}`;
+    if (!urlDelBuzon(abs, this.mailbox)) throw new CorreoError('Destino de Graph no permitido.', 500);
+    return abs.slice(GRAPH_BASE.length);
+  }
+
+  /**
+   * Graph `$batch` (POST /v1.0/$batch). Es la ÚNICA llamada fuera de /users/{buzón}: por eso solo acepta
+   * sub-peticiones armadas con rutaMensaje (todas del buzón de la sesión) y vuelve a validarlas aquí.
+   */
+  private async lote(peticiones: Array<{ id: string; method: 'PATCH'; url: string; body: unknown }>): Promise<Map<string, { status: number; retryAfter: number }>> {
+    if (peticiones.length === 0 || peticiones.length > GRAPH_BATCH_MAX) throw new CorreoError('Lote de Graph inválido.', 500);
+    for (const p of peticiones) if (!urlDelBuzon(`${GRAPH_BASE}${p.url}`, this.mailbox)) throw new CorreoError('Destino de Graph no permitido.', 500);
+    const token = await this.token();
+    const res = await this.fetchFn(`${GRAPH_BASE}/$batch`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests: peticiones.map((p) => ({ ...p, headers: { 'Content-Type': 'application/json' } })) }),
+    });
+    if (res.status === 401) throw new CorreoError('Microsoft rechazó la autenticación del módulo Correo. Avise a Tecnología.', 502);
+    if (res.status === 403) throw new CorreoError('Microsoft no autorizó la operación (permiso de la app o política del buzón). Avise a Tecnología.', 403);
+    if (res.status === 429) throw new CorreoError(`Microsoft limitó las consultas. Intente de nuevo en ${Number(res.headers.get('retry-after')) || 10} s.`, 429);
+    if (!res.ok) throw new CorreoError(`Microsoft respondió con un error (${res.status}).`, 502);
+    const data = (await res.json()) as { responses?: Array<{ id?: string; status?: number; headers?: Record<string, string> }> };
+    const out = new Map<string, { status: number; retryAfter: number }>();
+    for (const r of data.responses ?? []) {
+      const ra = Number(r.headers?.['Retry-After'] ?? r.headers?.['retry-after']) || 0;
+      out.set(String(r.id), { status: Number(r.status) || 0, retryAfter: ra });
+    }
+    return out;
+  }
+
+  async marcarLeido(mensajesIds: string[], leido: boolean): Promise<{ cambiados: number; fallidos: number }> {
+    const rutas = [...new Set(mensajesIds)].map((id) => this.rutaMensaje(id));
+    let cambiados = 0;
+    let fallidos = 0;
+    for (let i = 0; i < rutas.length; i += GRAPH_BATCH_MAX) {
+      let pendientes = rutas.slice(i, i + GRAPH_BATCH_MAX).map((url, j) => ({ id: String(j + 1), method: 'PATCH' as const, url, body: { isRead: leido } }));
+      // Un reintento para las sub-peticiones limitadas (429), esperando lo que pida Graph (máx. 5 s).
+      for (let intento = 0; intento < 2 && pendientes.length; intento++) {
+        const r = await this.lote(pendientes);
+        const limitadas = pendientes.filter((p) => r.get(p.id)?.status === 429);
+        for (const p of pendientes) {
+          const st = r.get(p.id)?.status ?? 0;
+          if (st >= 200 && st < 300) cambiados++;
+          else if (st !== 429 || intento === 1) fallidos++;
+        }
+        if (!limitadas.length || intento === 1) break;
+        const espera = Math.min(5, Math.max(1, ...limitadas.map((p) => r.get(p.id)?.retryAfter ?? 1)));
+        await new Promise((x) => setTimeout(x, espera * 1000));
+        pendientes = limitadas;
+      }
+    }
+    return { cambiados, fallidos };
+  }
+
+  private urlCarpeta(carpetaId: string | null): string {
+    return carpetaId ? `${this.me}/mailFolders/${encodeURIComponent(assertGraphId(carpetaId, 'identificador de carpeta'))}` : `${this.me}/mailFolders/inbox`;
+  }
+
+  async idsPorLeido(carpetaId: string | null, leido: boolean, max: number): Promise<string[]> {
+    const u = new URL(`${this.urlCarpeta(carpetaId)}/messages`);
+    // Los que NO están en el estado pedido (para «leído», los no leídos).
+    u.searchParams.set('$filter', `isRead eq ${leido ? 'false' : 'true'}`);
+    u.searchParams.set('$select', 'id');
+    u.searchParams.set('$top', String(Math.min(Math.max(1, max), 100)));
+    const ids: string[] = [];
+    let url: string | undefined = u.toString();
+    while (url && ids.length < max) {
+      const data: { value?: GraphMsg[]; '@odata.nextLink'?: string } = await this.json(url);
+      for (const m of data.value ?? []) if (ids.length < max && m.id) ids.push(String(m.id));
+      // El nextLink se valida en call() (urlDelBuzon) antes de seguirlo.
+      url = data['@odata.nextLink'];
+    }
+    return ids;
+  }
+
+  async contadoresCarpeta(carpetaId: string | null): Promise<{ total: number; noLeidos: number }> {
+    const c = await this.json<{ totalItemCount?: number; unreadItemCount?: number }>(`${this.urlCarpeta(carpetaId)}?$select=totalItemCount,unreadItemCount`);
+    return { total: Math.max(0, Number(c.totalItemCount) || 0), noLeidos: Math.max(0, Number(c.unreadItemCount) || 0) };
   }
 
   async categorizar(mensajeId: string, categoria: string): Promise<void> {
