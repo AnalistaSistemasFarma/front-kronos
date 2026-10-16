@@ -396,3 +396,18 @@
     transition: none;
   }
 }
+
+/*
+ * Cuerpo del correo (iframe de HtmlSeguro): superficie blanca SIEMPRE, como Gmail, para respetar los
+ * colores con que se escribió el correo. En modo oscuro se le da un margen interno blanco para que
+ * el texto no quede pegado al borde de la tarjeta.
+ */
+.cuerpoHtml {
+  color-scheme: light;
+}
+
+:global([data-mantine-color-scheme='dark']) .cuerpoHtml {
+  padding: 10px 12px;
+  box-sizing: content-box;
+  width: calc(100% - 24px) !important;
+}
