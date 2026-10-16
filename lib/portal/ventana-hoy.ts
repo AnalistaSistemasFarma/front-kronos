@@ -14,11 +14,39 @@ export const SEGUNDOS_VENTANA_HOY = 15;
 export const IMAGEN_CUMPLEANOS = '/portal-th/cumpleanos.svg';
 
 /**
- * Una vez por día y por navegador (localStorage): recargar la página, abrir otra pestaña o volver al portal el mismo día no la reabre
- * a cada rato. ⚠️ `playwright.config.ts` (proyecto «publico») repite este formato para dejarla marcada como ya vista: si cambia aquí,
+ * Una vez por INICIO DE SESIÓN: recargar la página, abrir otra pestaña o volver al portal sin haber iniciado sesión de nuevo no la
+ * reabre a cada rato (marca en localStorage con la fecha; ver `reiniciarVentanaHoy`). ⚠️ `playwright.config.ts` (proyecto «publico») repite este formato para dejarla marcada como ya vista: si cambia aquí,
  * cambia allá.
  */
-export const claveVentanaHoy = (hoy: string) => `portal-th-ventana-hoy-${hoy}`;
+export const claveVentanaHoy = (hoy: string) => `${PREFIJO_MARCA_VENTANA_HOY}${hoy}`;
+export const PREFIJO_MARCA_VENTANA_HOY = 'portal-th-ventana-hoy-';
+
+/**
+ * «Cada vez que se inicie sesión» (Cristian, 2026-10-16): al iniciar o cerrar sesión se BORRA la marca de «ya vista», así que la
+ * ventana vuelve a salir en el siguiente ingreso. Se llama al validar el código del portal abierto y al pulsar «Salir».
+ * Sin almacenamiento disponible (modo privado estricto) no hace nada: ahí la ventana sale siempre.
+ */
+export function reiniciarVentanaHoy(almacen: Pick<Storage, 'length' | 'key' | 'removeItem'> | null = tryLocalStorage()): void {
+  if (!almacen) return;
+  try {
+    const claves: string[] = [];
+    for (let i = 0; i < almacen.length; i += 1) {
+      const k = almacen.key(i);
+      if (k && k.startsWith(PREFIJO_MARCA_VENTANA_HOY)) claves.push(k);
+    }
+    for (const k of claves) almacen.removeItem(k);
+  } catch {
+    // idem
+  }
+}
+
+function tryLocalStorage(): Storage | null {
+  try {
+    return typeof window === 'undefined' ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
 
 /** Los eventos de UN día, en el orden del calendario (festivos, laborales, importantes, empresa). Los cumpleaños, al final. */
 export function eventosDelDia(hoy: string, empresa: EventoDia[], cumpleanos: EventoDia[]): EventoDia[] {
