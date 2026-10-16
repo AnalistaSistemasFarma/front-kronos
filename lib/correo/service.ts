@@ -242,7 +242,7 @@ async function hiloDeSesion(d: CorreoDeps, acceso: AccesoCorreo, prov: MailProvi
 }
 
 function aVista(m: MensajeCompleto, remotas: boolean, registrados: Set<string>): MensajeVista {
-  const s = sanitizeEmailHtml(m.html, { remotas, cid: m.imagenesCid });
+  const s = sanitizeEmailHtml(m.html, { remotas, cid: m.imagenesCid, bloquesEstilo: true });
   return {
     id: m.id,
     internetMessageId: m.internetMessageId,
