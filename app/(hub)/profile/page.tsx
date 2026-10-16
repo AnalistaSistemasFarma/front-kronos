@@ -545,12 +545,11 @@ export default function ProfileSettingsPage() {
 
               <div>
                 <Text fw={600} size='sm' mb={4}>
-                  Tipografía
+                  Fuente de la interfaz
                 </Text>
                 <Text size='xs' c='dimmed' mb='sm'>
-                  Todas son fuentes que ya trae su equipo: ninguna se descarga, así
-                  que el cambio no le agrega peso a la aplicación. Se aplica de
-                  inmediato y queda guardado en su perfil.
+                  Cambia la letra de toda la aplicación, también en el chat y en el
+                  celular. Se aplica de inmediato y queda guardada en su perfil.
                 </Text>
                 <SimpleGrid cols={{ base: 1, xs: 2 }} spacing='sm'>
                   {FONTS.map((f) => {
@@ -560,7 +559,8 @@ export default function ProfileSettingsPage() {
                         key={f.key}
                         onClick={() => handleFontSelect(f.key)}
                         aria-pressed={active}
-                        aria-label={`Tipografía ${f.label}`}
+                        aria-label={`Fuente ${f.label}`}
+                        data-font-key={f.key}
                         style={{
                           padding: rem(10),
                           borderRadius: 'var(--mantine-radius-md)',
