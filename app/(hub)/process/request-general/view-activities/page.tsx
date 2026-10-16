@@ -2028,17 +2028,9 @@ function ViewRequestPage() {
                       <IconCheck size={18} className='text-green-6' />
                       Resolución de la Tarea
                     </Title>
-                    {isEditing && (
-                      <ActionIcon
-                        variant='subtle'
-                        onClick={() => setShowResolution(!showResolution)}
-                      >
-                        {showResolution ? <IconX size={16} /> : <IconCheck size={16} />}
-                      </ActionIcon>
-                    )}
                   </Group>
 
-                  {isEditing && (showResolution || resolutionData.estado === '2') && (
+                  {isEditing && (
                     <Stack>
                       {/* Validación: solo permitir resolución si el estado es 2 */}
                       {resolutionData.resolucion && resolutionData.estado !== '2' && !resolutionData.estado ? (
