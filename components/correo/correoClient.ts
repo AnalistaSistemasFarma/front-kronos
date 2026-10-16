@@ -19,6 +19,8 @@ export interface EstadoCorreo {
     envioHabilitado: boolean;
     etiquetarHabilitado: boolean;
     sincronizacionAutomatica: boolean;
+    /** «Consultar a un agente» encendido en el ambiente (CORREO_AGENTE_HABILITADO). */
+    agenteHabilitado?: boolean;
   };
 }
 

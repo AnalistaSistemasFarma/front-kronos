@@ -5,6 +5,7 @@ import { prisma } from '../../../../lib/prisma';
 import { getCorreoAccess, type AccesoCorreo } from '../../../../lib/correo/db';
 import { isCorreoError } from '../../../../lib/correo/errors';
 import { correoDeps } from '../../../../lib/correo/runtime';
+import { agenteCorreoHabilitado } from '../../../../lib/correo/config';
 import type { CorreoDeps } from '../../../../lib/correo/service';
 import { SgcRateLimiter, type SgcRateRule } from '../../../../lib/sgc/rateLimit';
 import { readClientOrigin } from '../../../../lib/sgc/clientOrigin';
@@ -75,4 +76,13 @@ export function empresaParam(url: string): number | null {
   const raw = new URL(url).searchParams.get('empresa');
   const n = Number(raw);
   return raw && Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * «Consultar a un agente» apagado (CORREO_AGENTE_HABILITADO distinto de «true», el valor por defecto):
+ * 403 para /api/correo/agente/**. Se evalúa DESPUÉS de la sesión, así que sin sesión sigue siendo 401.
+ */
+export function agenteApagado(): NextResponse | null {
+  if (agenteCorreoHabilitado()) return null;
+  return jsonNoStore({ error: '«Consultar a un agente» no está habilitado en este ambiente.' }, 403);
 }
