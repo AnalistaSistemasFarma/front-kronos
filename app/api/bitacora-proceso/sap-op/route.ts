@@ -1,4 +1,4 @@
-import { buscarOpsLiberadas } from '../../../../lib/bitacora-proceso/sap';
+import { buscarOps } from '../../../../lib/bitacora-proceso/sap';
 import { SapError } from '../../../../lib/sap/serviceLayer';
 import { errorResponse, getOtRequestContext, jsonNoStore, parseCompanyParam, requireCompany } from '../_lib/context';
 
@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/bitacora-proceso/sap-op?company=1&q=texto — SOLO LECTURA (solo Gestión).
- * OP liberadas de SAP de la empresa (por artículo, descripción, lote o número).
+ * OP planificadas o liberadas de SAP de la empresa (por artículo, descripción, lote o número; B5).
  */
 export async function GET(request: Request) {
   try {
@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     if (access instanceof Response) return access;
     const q = (new URL(request.url).searchParams.get('q') ?? '').trim();
     if (q.length < 2) return jsonNoStore({ ops: [] });
-    const ops = await buscarOpsLiberadas(access.idCompany, q);
+    const ops = await buscarOps(access.idCompany, q);
     return jsonNoStore({ ops });
   } catch (error) {
     if (error instanceof SapError) {

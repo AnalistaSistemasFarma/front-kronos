@@ -197,22 +197,65 @@ export const OT_ACTIVIDADES_A6: ReadonlyArray<{ nombre: string; icono: OtIcono; 
 export const OT_AREAS_FARMALOGICA: ReadonlyArray<string> = ['Envase y agrafado'];
 
 /**
- * Significado de cada confirmación de la bitácora (supervisor al cerrar, jefe de
- * producción al verificar). En la base el rol del verificador sigue siendo
- * `INSPECTOR` (no se renombran columnas); en pantalla, avisos, informe y MCP se
- * muestra «Jefe de producción» (Nicolás, 2026-10-14).
+ * VISTOS BUENOS de la bitácora (B2, revisión con Farmalógica del 2026-10-15): cuatro
+ * «chulitos», uno por actor, en este ORDEN (decisión técnica, pendiente de confirmar
+ * por Nicolás): operario → supervisor (cierra, «Cerró») → inspector → jefe de producción.
+ * En la base (`ot_firma.rol`): OPERARIO | SUPERVISOR | INSPECTOR | JEFE_PROD. Las filas
+ * viejas (#606/#617) con rol INSPECTOR y significado «Verificó» se leen como JEFE_PROD.
  */
-export const OT_FIRMA_SIGNIFICADO = { SUPERVISOR: 'Cerró', INSPECTOR: 'Verificó' } as const;
-export type OtFirmaRol = keyof typeof OT_FIRMA_SIGNIFICADO;
+export const OT_VISTOS_BUENOS = ['OPERARIO', 'SUPERVISOR', 'INSPECTOR', 'JEFE_PROD'] as const;
+export type OtFirmaRol = (typeof OT_VISTOS_BUENOS)[number];
 
-/** Etiqueta visible de cada rol. */
-export const OT_ROL_LABEL: Record<OtFirmaRol, string> = { SUPERVISOR: 'Supervisor', INSPECTOR: 'Jefe de producción' };
+export function isOtFirmaRol(v: unknown): v is OtFirmaRol {
+  return typeof v === 'string' && (OT_VISTOS_BUENOS as readonly string[]).includes(v);
+}
 
-/** Etiqueta del rol del verificador (columna interna `id_inspector`). */
+/** Significado que se guarda en ot_firma.significado. El del supervisor sigue siendo «Cerró». */
+export const OT_FIRMA_SIGNIFICADO: Record<OtFirmaRol, string> = {
+  OPERARIO: 'Visto bueno',
+  SUPERVISOR: 'Cerró',
+  INSPECTOR: 'Visto bueno',
+  JEFE_PROD: 'Visto bueno',
+};
+
+/** Significado de la verificación del modelo anterior (#606/#617): era del jefe de producción. */
+export const OT_SIGNIFICADO_VERIFICO_LEGADO = 'Verificó';
+
+/** Etiqueta visible de cada actor. */
+export const OT_ROL_LABEL: Record<OtFirmaRol, string> = {
+  OPERARIO: 'Operario',
+  SUPERVISOR: 'Supervisor',
+  INSPECTOR: 'Inspector',
+  JEFE_PROD: 'Jefe de producción',
+};
+
+export const OT_INSPECTOR_LABEL = 'Inspector';
 export const OT_JEFE_PRODUCCION_LABEL = 'Jefe de producción';
 
-/** Texto de la casilla de confirmación por rol (A4: check, no firma con imagen). */
+/** Texto de la confirmación por rol (B3: un botón «Sí, confirmo», sin contraseña). */
 export const OT_CONFIRMACION_TEXTO: Record<OtFirmaRol, string> = {
-  SUPERVISOR: 'Confirmo que revisé los registros de este turno y cierro la bitácora («Cerró»).',
-  INSPECTOR: 'Confirmo que verifiqué la bitácora cerrada por el supervisor («Verificó»).',
+  OPERARIO: 'Confirmo, como operario del turno, que la cronología de esta bitácora refleja las intervenciones realizadas.',
+  SUPERVISOR: 'Confirmo que revisé los registros de este turno y cierro la bitácora («Cerró»). Después ya no admite registros.',
+  INSPECTOR: 'Confirmo, como inspector, que revisé la bitácora cerrada por el supervisor.',
+  JEFE_PROD: 'Confirmo, como jefe de producción, que revisé la bitácora y doy mi visto bueno.',
 };
+
+/** Cómo se confirmó cada visto bueno (ot_firma.auth_method), para la auditoría. */
+export const OT_METODO_CONFIRMACION = {
+  sesionPropia: 'sesion_propia',
+  pinTablet: 'pin_tablet',
+  operarioTablet: 'operario_tablet',
+  /** Modelo anterior (#606/#617): contraseña de SynerLink. */
+  contrasena: 'contrasena_synerlink',
+} as const;
+
+export const OT_METODO_LABEL: Record<string, string> = {
+  sesion_propia: 'Sesión propia',
+  pin_tablet: 'PIN en tablet',
+  operario_tablet: 'Operario en tablet',
+  contrasena_synerlink: 'Contraseña de SynerLink',
+};
+
+/** PIN personal de la bitácora (B3). */
+export const OT_PIN_LONGITUD = 4;
+export const OT_PIN_MAX_FALLOS = 5;

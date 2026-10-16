@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PrismaClient } from '../../../app/generated/prisma';
 import { OT_PROCESS_NAME, OT_SUBPROCESS_NAMES, OT_SUBPROCESS_URLS } from '../../../lib/bitacora-proceso/constants';
@@ -6,8 +8,13 @@ import {
   cambiarActividad,
   cambiarArea,
   cambiarOperador,
-  cerrarYFirmar,
-  verificarYFirmar,
+  confirmarVistoBueno,
+  configurarPin,
+  estadoPin,
+  importarOperadores,
+  listPinsEmpresa,
+  restablecerPin,
+  verificarPinPersona,
   crearActividad,
   crearArea,
   crearOperador,
@@ -21,12 +28,14 @@ import {
   listOrdenes,
   listSupervisoresEmpresa,
   listUsuariosEmpresa,
-  datosAvisoInspector,
+  datosAviso,
+  type ConfirmanteActor,
 } from '../../../lib/bitacora-proceso/db';
-import { avisoPorVerificar } from '../../../lib/bitacora-proceso/notificaciones';
+import type { OtFirmaRol } from '../../../lib/bitacora-proceso/constants';
+import { avisoSiguienteVistoBueno } from '../../../lib/bitacora-proceso/notificaciones';
 import { codificarPng } from '../../../lib/firma-gss/png';
 import { FIRMA_GSS_AUDIT_ACTION, registrarFirmaGss } from '../../../lib/firma-gss/miFirma';
-import { isOtError, parseNuevaOrden, type OtCompanyAccess } from '../../../lib/bitacora-proceso/rules';
+import { isOtError, parseImportarOperadores, parseNuevaOrden, type OtCompanyAccess } from '../../../lib/bitacora-proceso/rules';
 
 /**
  * Integración de la Bitácora de Proceso contra un SQL Server real (CI: `prisma db
@@ -57,7 +66,9 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
   let operarioId = '';
   let ajenoId = '';
   let inspectorId = '';
+  let jefeId = '';
   let inspector: OtCompanyAccess;
+  let jefe: OtCompanyAccess;
   let supervisor: OtCompanyAccess;
   let operario: OtCompanyAccess;
   let ajeno: OtCompanyAccess;
@@ -69,10 +80,29 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
   let opInactivo = 0;
 
   const actor = (idUser: string) => ({ idUser, email: `${idUser}@it`, ip: '10.0.0.1' });
-  /** Persona que CONFIRMA (elegida en la lista y validada con su contraseña en la ruta), con SU acceso. */
-  const firmante = (idUser: string, access: OtCompanyAccess | null) => ({ ...actor(idUser), userAgent: 'vitest', nombre: `Nombre ${idUser}`, access });
+  /** Quien da el VISTO BUENO (ya validado en la ruta: sesión propia o PIN), con SU acceso. */
+  const conf = (rol: OtFirmaRol, idUser: string | null, access: OtCompanyAccess | null, extra: Partial<ConfirmanteActor> = {}): ConfirmanteActor => ({
+    rol,
+    idUser,
+    idOperador: null,
+    email: `${idUser ?? 'planta'}@it`,
+    nombre: idUser ? `Nombre ${idUser}` : null,
+    access,
+    metodo: 'sesion_propia',
+    sesion: { idUser: ajenoId, email: 'planta@it' },
+    ip: '10.0.0.1',
+    userAgent: 'vitest',
+    ...extra,
+  });
+  const vbOperario = (idOrden: number, access: OtCompanyAccess, idOperador = opA) =>
+    confirmarVistoBueno(prisma, idOrden, access, null, conf('OPERARIO', null, null, { idOperador, metodo: 'operario_tablet' }));
+  /** Cierre del supervisor (con el visto bueno previo del operario, que el orden exige). */
+  const cerrar = async (idOrden: number, access: OtCompanyAccess, obs: string | null = null) => {
+    await vbOperario(idOrden, access);
+    return confirmarVistoBueno(prisma, idOrden, access, obs, conf('SUPERVISOR', supervisorId, supervisor));
+  };
   const orden = (extra: Record<string, unknown> = {}) =>
-    parseNuevaOrden({ company: FARMA, producto: 'PRUEBA IT', lote: `L-${sufijo}`, turno: 'MANANA', operadores: [opA], idArea, inspector: inspectorId, ...extra });
+    parseNuevaOrden({ company: FARMA, producto: 'PRUEBA IT', lote: `L-${sufijo}`, turno: 'MANANA', operadores: [opA], idArea, inspector: inspectorId, jefeProduccion: jefeId, ...extra });
 
   beforeAll(async () => {
     await prisma.$executeRawUnsafe(`
@@ -82,8 +112,9 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
       SET IDENTITY_INSERT [dbo].[company] OFF;`);
 
     const mk = (n: string) => prisma.user.create({ data: { email: `${n}.${sufijo}@farmalogica.com`, name: `${n} IT` } });
-    const [sup, op, aj, insp] = await Promise.all([mk('supervisor'), mk('operario'), mk('ajeno'), mk('inspector')]);
+    const [sup, op, aj, insp, jf] = await Promise.all([mk('supervisor'), mk('operario'), mk('ajeno'), mk('inspector'), mk('jefe')]);
     inspectorId = insp.id;
+    jefeId = jf.id;
     supervisorId = sup.id;
     operarioId = op.id;
     ajenoId = aj.id;
@@ -99,6 +130,7 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
     const cuOp = await prisma.companyUser.create({ data: { id_company: FARMA, id_user: op.id } });
     const cuAj = await prisma.companyUser.create({ data: { id_company: FARMA, id_user: aj.id } });
     const cuInsp = await prisma.companyUser.create({ data: { id_company: FARMA, id_user: insp.id } });
+    const cuJefe = await prisma.companyUser.create({ data: { id_company: FARMA, id_user: jf.id } });
     await prisma.subprocessUserCompany.createMany({
       data: [
         { id_subprocess: subs.operario, id_company_user: cuSup.id_company_user },
@@ -106,12 +138,14 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
         { id_subprocess: subs.operario, id_company_user: cuOp.id_company_user },
         { id_subprocess: subs.operario, id_company_user: cuAj.id_company_user },
         { id_subprocess: subs.operario, id_company_user: cuInsp.id_company_user },
+        { id_subprocess: subs.operario, id_company_user: cuJefe.id_company_user },
       ],
     });
     [supervisor] = await getOtAccessForUser(prisma, sup.email);
     [operario] = await getOtAccessForUser(prisma, op.email);
     [ajeno] = await getOtAccessForUser(prisma, aj.email);
     [inspector] = await getOtAccessForUser(prisma, insp.email);
+    [jefe] = await getOtAccessForUser(prisma, jf.email);
 
     // Catálogo propio de la prueba (el de la siembra puede existir: nombres distintos).
     idTolva = (await crearActividad(prisma, { idCompany: FARMA, nombre: `Tolva ${sufijo}`, exigeObservacion: false, orden: 1, icono: null }, actor(supervisorId))).id_actividad;
@@ -179,6 +213,9 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
     expect(await status(crearOrden(prisma, orden({ idArea: areaOlp.id_area }), actor(supervisorId)))).toBe(400);
     expect(await status(crearOrden(prisma, orden({ inspector: 'no-existe' }), actor(supervisorId)))).toBe(400);
     expect(await status(crearOrden(prisma, orden({ inspector: supervisorId }), actor(supervisorId)))).toBe(400);
+    expect(await status(crearOrden(prisma, orden({ jefeProduccion: 'no-existe' }), actor(supervisorId)))).toBe(400);
+    expect(await status(crearOrden(prisma, orden({ jefeProduccion: supervisorId }), actor(supervisorId)))).toBe(400);
+    expect(await status(crearOrden(prisma, orden({ jefeProduccion: inspectorId }), actor(supervisorId)))).toBe(400);
   });
 
   it('A1/A2: la cuenta compartida registra con el OPERARIO elegido; se guardan operario y usuario de sesión, con la HORA DEL SERVIDOR', async () => {
@@ -223,8 +260,8 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
     }
 
     // Cierre: solo una vez; después no se admiten registros ni operarios.
-    await cerrarYFirmar(prisma, o.id, supervisor, 'Fin del turno', firmante(supervisorId, supervisor));
-    expect(await status(cerrarYFirmar(prisma, o.id, supervisor, null, firmante(supervisorId, supervisor)))).toBe(409);
+    await cerrar(o.id, supervisor, 'Fin del turno');
+    expect(await status(confirmarVistoBueno(prisma, o.id, supervisor, null, conf('SUPERVISOR', supervisorId, supervisor)))).toBe(409);
     expect(await status(crearRegistro(prisma, o.id, ajeno, { idActividad: idTolva, idOperador: opA, observacion: null }, actor(ajenoId)))).toBe(409);
     expect(await status(agregarOperadores(prisma, o.id, supervisor, [opA], actor(supervisorId)))).toBe(409);
     const cerrada = await getOrdenDetalle(prisma, o.id, supervisor, supervisorId);
@@ -242,7 +279,7 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
     await expect(prisma.$executeRaw`DELETE FROM dbo.ot_operador WHERE id_operador = ${opInactivo}`).rejects.toThrow(/se desactivan/);
     await expect(prisma.$executeRaw`DELETE FROM dbo.ot_area WHERE id_area = ${idArea}`).rejects.toThrow(/se desactivan/);
     await expect(prisma.$executeRaw`DELETE FROM dbo.ot_orden_trabajo WHERE id_orden_trabajo = ${o.id}`).rejects.toThrow(/no se pueden borrar/);
-    await cerrarYFirmar(prisma, o.id, supervisor, null, firmante(supervisorId, supervisor));
+    await cerrar(o.id, supervisor);
     await expect(prisma.$executeRaw`UPDATE dbo.ot_orden_trabajo SET estado = N'ABIERTA' WHERE id_orden_trabajo = ${o.id}`).rejects.toThrow(/cerrada no se puede modificar/);
     await expect(prisma.$executeRaw`UPDATE dbo.ot_orden_trabajo SET turno = N'OTRO' WHERE id_orden_trabajo = ${o.id}`).rejects.toThrow();
     const det = await getOrdenDetalle(prisma, o.id, supervisor, supervisorId);
@@ -250,41 +287,107 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
     expect(det?.estado).toBe('CERRADA');
   });
 
-  it('A4: «Cerró» lo confirma un SUPERVISOR elegido (no la sesión) y «Verificó» el JEFE DE PRODUCCIÓN; sin imagen; huellas encadenadas; inmutables', async () => {
-    const o = await crearOrden(prisma, orden({ producto: 'PRUEBA IT CONFIRMA', lote: `F-${sufijo}` }), actor(supervisorId));
+  it('B2: cuatro vistos buenos en orden (operario → supervisor → inspector → jefe), con persona, hora, método y sesión; inmutables', async () => {
+    const o = await crearOrden(prisma, orden({ producto: 'PRUEBA IT VISTOS', lote: `F-${sufijo}`, operadores: [opA, opB] }), actor(supervisorId));
     await crearRegistro(prisma, o.id, ajeno, { idActividad: idTolva, idOperador: opA, observacion: null }, actor(ajenoId));
-    // La sesión (cuenta de planta, sin Gestión) ve el botón de cierre; quien confirma debe ser supervisor.
-    expect((await getOrdenDetalle(prisma, o.id, ajeno, ajenoId))?.puedeCerrar).toBe(true);
-    expect(await status(verificarYFirmar(prisma, o.id, ajeno, firmante(inspectorId, inspector)))).toBe(409);
-    expect(await status(cerrarYFirmar(prisma, o.id, ajeno, null, firmante(operarioId, operario)))).toBe(403);
-    expect(await status(cerrarYFirmar(prisma, o.id, ajeno, null, firmante(operarioId, null)))).toBe(403);
-    const jefeConGestion: OtCompanyAccess = { ...inspector, canManage: true };
-    expect(await status(cerrarYFirmar(prisma, o.id, ajeno, null, firmante(inspectorId, jefeConGestion)))).toBe(403);
-
-    // Sesión de planta (ajeno) + confirma la supervisora con SU cuenta.
-    const c = await cerrarYFirmar(prisma, o.id, ajeno, 'Fin', firmante(supervisorId, supervisor));
-    expect(c.contentSha256).toMatch(/^[0-9a-f]{64}$/);
     let det = await getOrdenDetalle(prisma, o.id, ajeno, ajenoId);
-    expect(det).toMatchObject({ estado: 'CERRADA', puedeVerificar: true, puedeCerrar: false });
-    expect(det?.firmas).toEqual([expect.objectContaining({ rol: 'SUPERVISOR', significado: 'Cerró', nombre: `Nombre ${supervisorId}`, contentSha256: c.contentSha256 })]);
+    expect(det).toMatchObject({ siguiente: 'OPERARIO', completa: false, idUsuarioSesion: ajenoId, inspector: { id: inspectorId }, jefe: { id: jefeId } });
+    expect(det?.vistos.map((v) => [v.rol, v.estado])).toEqual([['OPERARIO', 'pendiente'], ['SUPERVISOR', 'pendiente'], ['INSPECTOR', 'pendiente'], ['JEFE_PROD', 'pendiente']]);
+
+    // Fuera de orden: el supervisor no cierra sin el visto bueno del operario; el inspector no va antes del cierre.
+    expect(await status(confirmarVistoBueno(prisma, o.id, ajeno, null, conf('SUPERVISOR', supervisorId, supervisor)))).toBe(409);
+    expect(await status(confirmarVistoBueno(prisma, o.id, ajeno, null, conf('INSPECTOR', inspectorId, inspector)))).toBe(409);
+    // Operario no programado: 403. Cualquiera de los programados sirve: queda cuál.
+    expect(await status(vbOperario(o.id, ajeno, opInactivo))).toBe(403);
+    const vo = await vbOperario(o.id, ajeno, opB);
+    expect(vo).toMatchObject({ rol: 'OPERARIO', nombre: `Ana Gómez ${sufijo}`, siguiente: 'SUPERVISOR' });
+    expect(await status(vbOperario(o.id, ajeno, opA))).toBe(409);
+
+    // Cierre: debe ser supervisor (su acceso), no el inspector ni el jefe aunque tengan Gestión.
+    expect(await status(confirmarVistoBueno(prisma, o.id, ajeno, null, conf('SUPERVISOR', operarioId, operario)))).toBe(403);
+    expect(await status(confirmarVistoBueno(prisma, o.id, ajeno, null, conf('SUPERVISOR', jefeId, { ...jefe, canManage: true })))).toBe(403);
+    const c = await confirmarVistoBueno(prisma, o.id, ajeno, 'Fin', conf('SUPERVISOR', supervisorId, supervisor, { metodo: 'pin_tablet' }));
+    expect(c).toMatchObject({ rol: 'SUPERVISOR', siguiente: 'INSPECTOR' });
+    expect(await status(crearRegistro(prisma, o.id, ajeno, { idActividad: idTolva, idOperador: opA, observacion: null }, actor(ajenoId)))).toBe(409);
+
+    // El jefe no va antes del inspector; solo el designado da cada uno.
+    expect(await status(confirmarVistoBueno(prisma, o.id, ajeno, null, conf('JEFE_PROD', jefeId, jefe)))).toBe(409);
+    expect(await status(confirmarVistoBueno(prisma, o.id, ajeno, null, conf('INSPECTOR', operarioId, operario)))).toBe(403);
+    const vi_ = await confirmarVistoBueno(prisma, o.id, ajeno, null, conf('INSPECTOR', inspectorId, inspector, { metodo: 'pin_tablet' }));
+    expect(vi_.siguiente).toBe('JEFE_PROD');
+    const vj = await confirmarVistoBueno(prisma, o.id, jefe, null, conf('JEFE_PROD', jefeId, jefe, { sesion: { idUser: jefeId, email: 'jefe@it' } }));
+    expect(vj.siguiente).toBeNull();
+    expect(await status(confirmarVistoBueno(prisma, o.id, jefe, null, conf('JEFE_PROD', jefeId, jefe)))).toBe(409);
+
+    det = await getOrdenDetalle(prisma, o.id, supervisor, supervisorId);
+    expect(det).toMatchObject({ estado: 'CERRADA', completa: true, siguiente: null, puedeVerificar: false, observacionCierre: 'Fin' });
+    expect(det?.vistos.map((v) => [v.rol, v.estado, v.firma?.metodo])).toEqual([
+      ['OPERARIO', 'dado', 'operario_tablet'],
+      ['SUPERVISOR', 'dado', 'pin_tablet'],
+      ['INSPECTOR', 'dado', 'pin_tablet'],
+      ['JEFE_PROD', 'dado', 'sesion_propia'],
+    ]);
     expect(det?.firmas[0]).not.toHaveProperty('imagen');
+    expect((await listOrdenes(prisma, FARMA, supervisorId)).find((x) => x.id === o.id)).toMatchObject({ verificada: true, pendiente: null });
     expect((await prisma.otOrdenTrabajo.findFirst({ where: { id_orden_trabajo: o.id } }))?.cerrada_por).toBe(supervisorId);
 
-    // Solo el jefe de producción designado verifica, y una sola vez.
-    expect(await status(verificarYFirmar(prisma, o.id, ajeno, firmante(operarioId, operario)))).toBe(403);
-    const v = await verificarYFirmar(prisma, o.id, ajeno, firmante(inspectorId, inspector));
-    expect(v.contentSha256).not.toBe(c.contentSha256);
-    expect(await status(verificarYFirmar(prisma, o.id, ajeno, firmante(inspectorId, inspector)))).toBe(409);
-    det = await getOrdenDetalle(prisma, o.id, inspector, inspectorId);
-    expect(det?.firmas.map((f) => [f.rol, f.significado])).toEqual([['SUPERVISOR', 'Cerró'], ['INSPECTOR', 'Verificó']]);
-    expect(det?.puedeVerificar).toBe(false);
-    expect((await listOrdenes(prisma, FARMA, supervisorId)).find((x) => x.id === o.id)?.verificada).toBe(true);
-
     const filas = await prisma.otFirma.findMany({ where: { id_orden_trabajo: o.id }, orderBy: { id_firma: 'asc' } });
-    expect(filas.map((f) => f.id_user)).toEqual([supervisorId, inspectorId]);
-    expect(filas[0]).toMatchObject({ auth_method: 'contrasena_synerlink', consent_version: 'bitacora-check-2026-10-14', firma_png: null, firma_sha256: null, ip: '10.0.0.1', user_agent: 'vitest' });
+    expect(filas.map((f) => [f.rol, f.id_user, f.id_operador, f.id_user_sesion])).toEqual([
+      ['OPERARIO', ajenoId, opB, ajenoId],
+      ['SUPERVISOR', supervisorId, null, ajenoId],
+      ['INSPECTOR', inspectorId, null, ajenoId],
+      ['JEFE_PROD', jefeId, null, jefeId],
+    ]);
+    expect(new Set(filas.map((f) => f.content_sha256)).size).toBe(4);
+    expect(filas[1]).toMatchObject({ significado: 'Cerró', auth_method: 'pin_tablet', consent_version: 'bitacora-visto-bueno-2026-10-15', firma_png: null, ip: '10.0.0.1', user_agent: 'vitest' });
     await expect(prisma.$executeRaw`UPDATE dbo.ot_firma SET signer_name = N'otro' WHERE id_orden_trabajo = ${o.id}`).rejects.toThrow(/firmas de la bitácora no se pueden editar/);
     await expect(prisma.$executeRaw`DELETE FROM dbo.ot_firma WHERE id_orden_trabajo = ${o.id}`).rejects.toThrow(/firmas de la bitácora no se pueden editar/);
+    // La base rechaza roles fuera de los cuatro.
+    await expect(prisma.$executeRaw`INSERT INTO dbo.ot_firma (id_orden_trabajo, rol, significado, id_user, signer_email, content_sha256, auth_method, consent_version) VALUES (${o.id}, N'CALIDAD', N'x', N'u', N'e', ${'a'.repeat(64)}, N'x', N'x')`).rejects.toThrow();
+  });
+
+  it('B3: PIN en la base — hash bcrypt, bloqueo a los 5 fallos (auditado), restablecer y volver a configurar', async () => {
+    expect(await estadoPin(prisma, inspectorId)).toEqual({ configurado: false, bloqueado: false, intentosFallidos: 0 });
+    expect(await status(verificarPinPersona(prisma, inspectorId, '4821', 'Insp', 'planta@it'))).toBe(409);
+    await configurarPin(prisma, inspectorId, '4821', { email: `inspector.${sufijo}@farmalogica.com`, ip: '10.0.0.1' });
+    const fila = await prisma.otPin.findUnique({ where: { id_user: inspectorId } });
+    expect(fila?.pin_hash).toMatch(/^\$2[aby]\$10\$/);
+    expect(fila?.pin_hash).not.toContain('4821');
+    await verificarPinPersona(prisma, inspectorId, '4821', 'Insp', 'planta@it');
+    for (let i = 1; i <= 4; i++) expect(await status(verificarPinPersona(prisma, inspectorId, '0000', 'Insp', 'planta@it'))).toBe(403);
+    // Un acierto antes del quinto fallo reinicia el contador.
+    await verificarPinPersona(prisma, inspectorId, '4821', 'Insp', 'planta@it');
+    expect((await estadoPin(prisma, inspectorId)).intentosFallidos).toBe(0);
+    for (let i = 1; i <= 4; i++) await status(verificarPinPersona(prisma, inspectorId, '0000', 'Insp', 'planta@it'));
+    expect(await status(verificarPinPersona(prisma, inspectorId, '0000', 'Insp', 'planta@it'))).toBe(423);
+    // Bloqueado: ni el PIN correcto pasa.
+    expect(await status(verificarPinPersona(prisma, inspectorId, '4821', 'Insp', 'planta@it'))).toBe(423);
+    expect((await listPinsEmpresa(prisma, FARMA)).find((u) => u.id === inspectorId)).toMatchObject({ configurado: true, bloqueado: true });
+    expect(JSON.stringify(await listPinsEmpresa(prisma, FARMA))).not.toMatch(/\$2[aby]\$/);
+    // Restablecer: solo personas de la empresa; borra y desbloquea.
+    expect(await status(restablecerPin(prisma, OLP, inspectorId, { idUser: supervisorId, email: 's@it' }))).toBe(404);
+    await restablecerPin(prisma, FARMA, inspectorId, { idUser: supervisorId, email: 's@it' });
+    expect(await estadoPin(prisma, inspectorId)).toEqual({ configurado: false, bloqueado: false, intentosFallidos: 0 });
+    await configurarPin(prisma, inspectorId, '5937', { email: 'i@it', ip: null });
+    await verificarPinPersona(prisma, inspectorId, '5937', 'Insp', 'planta@it');
+    const audit = await prisma.userAuditLog.findMany({ where: { user_id: inspectorId, action: { startsWith: 'BITACORA_PIN_' } }, orderBy: { id_audit_log: 'asc' } });
+    expect(audit.map((a) => a.action)).toEqual(['BITACORA_PIN_CONFIGURADO', 'BITACORA_PIN_BLOQUEADO', 'BITACORA_PIN_RESTABLECIDO', 'BITACORA_PIN_CONFIGURADO']);
+    expect(audit.map((a) => a.details ?? '').join(' ')).not.toMatch(/4821|5937/);
+  });
+
+  it('B8: importar operarios — vista previa sin escribir, crea solo los nuevos, aislado por empresa', async () => {
+    const texto = `Nombre; documento\nImportado Uno ${sufijo}; 111\npepito pérez ${sufijo}\nImportado Dos ${sufijo}`;
+    const previa = await importarOperadores(prisma, parseImportarOperadores({ company: FARMA, texto }), actor(supervisorId));
+    expect(previa).toMatchObject({ simulado: true, creados: 0 });
+    expect(previa.crear.map((f) => f.nombre)).toEqual([`Importado Uno ${sufijo}`, `Importado Dos ${sufijo}`]);
+    expect(previa.existentes).toEqual([{ linea: 3, nombre: `Pepito Pérez ${sufijo}`, activo: true }]);
+    expect((await listOperadores(prisma, FARMA, false)).some((p) => p.nombre === `Importado Uno ${sufijo}`)).toBe(false);
+    const hecho = await importarOperadores(prisma, parseImportarOperadores({ company: FARMA, texto, simular: false }), actor(supervisorId));
+    expect(hecho.creados).toBe(2);
+    expect((await listOperadores(prisma, FARMA, true)).find((p) => p.nombre === `Importado Uno ${sufijo}`)).toMatchObject({ documento: '111', activo: true });
+    // Repetir no duplica; en OLP se crean aparte.
+    expect((await importarOperadores(prisma, parseImportarOperadores({ company: FARMA, texto, simular: false }), actor(supervisorId))).creados).toBe(0);
+    expect((await importarOperadores(prisma, parseImportarOperadores({ company: OLP, texto, simular: true }), actor(supervisorId))).crear).toHaveLength(3);
   });
 
   it('bitácoras ANTERIORES (auxiliares con usuario y firma con imagen) siguen legibles y con sus reglas', async () => {
@@ -312,7 +415,7 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
     const olp: OtCompanyAccess = { idCompany: OLP, companyName: 'ONELATAMPHARMA', canOperate: true, canManage: true };
     expect(await getOrdenDetalle(prisma, o.id, olp, supervisorId)).toBeNull();
     expect(await status(crearRegistro(prisma, o.id, olp, { idActividad: idTolva, idOperador: opA, observacion: null }, actor(supervisorId)))).toBe(404);
-    expect(await status(cerrarYFirmar(prisma, o.id, olp, null, firmante(supervisorId, olp)))).toBe(404);
+    expect(await status(confirmarVistoBueno(prisma, o.id, olp, null, conf('SUPERVISOR', supervisorId, olp)))).toBe(404);
     expect(await status(agregarOperadores(prisma, o.id, olp, [opA], actor(supervisorId)))).toBe(404);
     expect((await listOrdenes(prisma, OLP, supervisorId)).some((x) => x.id === o.id)).toBe(false);
     const actOlp = await crearActividad(prisma, { idCompany: OLP, nombre: `OLP ${sufijo}`, exigeObservacion: false, orden: 1, icono: null }, actor(supervisorId));
@@ -351,18 +454,58 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
     expect(await status(crearRegistro(prisma, o.id, ajeno, { idActividad: nueva.id_actividad, idOperador: opA, observacion: null }, actor(ajenoId)))).toBe(400);
   });
 
-  it('AVISO al jefe de producción: correo ACTIVO, encabezado y nombre de quien confirma; nada de otra empresa', async () => {
+  it('AVISO al inspector y al jefe: correos ACTIVOS, encabezado y nombre de quien confirma; nada de otra empresa', async () => {
     const o = await crearOrden(prisma, orden({ producto: 'PRUEBA AVISO', lote: `AV-${sufijo}` }), actor(supervisorId));
-    const a = await datosAvisoInspector(prisma, o.id, FARMA, actor(supervisorId));
-    expect(a).toMatchObject({ idOrden: o.id, idCompany: FARMA, consecutivo: o.consecutivo, producto: 'PRUEBA AVISO', lote: `AV-${sufijo}`, inspectorEmail: `inspector.${sufijo}@farmalogica.com`, actorNombre: 'supervisor IT' });
-    expect(avisoPorVerificar(a!)[0].emails).toEqual([`inspector.${sufijo}@farmalogica.com`]);
-    expect(await datosAvisoInspector(prisma, o.id, OLP, actor(supervisorId))).toBeNull();
+    const a = await datosAviso(prisma, o.id, FARMA, { ...actor(supervisorId), nombre: 'Quien confirma' });
+    expect(a).toMatchObject({
+      idOrden: o.id, idCompany: FARMA, consecutivo: o.consecutivo, producto: 'PRUEBA AVISO', lote: `AV-${sufijo}`,
+      inspectorEmail: `inspector.${sufijo}@farmalogica.com`, jefeEmail: `jefe.${sufijo}@farmalogica.com`, actorNombre: 'Quien confirma',
+    });
+    expect(avisoSiguienteVistoBueno(a!, 'SUPERVISOR', 'INSPECTOR')[0].emails).toEqual([`inspector.${sufijo}@farmalogica.com`]);
+    expect((await datosAviso(prisma, o.id, FARMA, actor(supervisorId)))?.actorNombre).toBe('supervisor IT');
+    expect(await datosAviso(prisma, o.id, OLP, actor(supervisorId))).toBeNull();
     await prisma.user.update({ where: { id: inspectorId }, data: { isActive: false } });
     try {
-      expect((await datosAvisoInspector(prisma, o.id, FARMA, actor(supervisorId)))?.inspectorEmail).toBeNull();
+      expect((await datosAviso(prisma, o.id, FARMA, actor(supervisorId)))?.inspectorEmail).toBeNull();
     } finally {
       await prisma.user.update({ where: { id: inspectorId }, data: { isActive: true } });
     }
+  });
+
+  it('MIGRACIÓN 20261015180000: en las bitácoras del #617, id_inspector (= jefe) pasa a id_jefe_produccion, incluso CERRADAS; idempotente y deja el trigger activo', async () => {
+    const vieja = await prisma.otOrdenTrabajo.create({
+      data: { id_company: FARMA, consecutivo: 800000 + Math.floor(Math.random() * 99999), producto: 'DEL 617', lote: `M-${sufijo}`, turno: 'TARDE', estado: 'ABIERTA', abierta_por: supervisorId, id_inspector: jefeId },
+    });
+    await prisma.$executeRaw`UPDATE dbo.ot_orden_trabajo SET estado = N'CERRADA', cerrada_por = ${supervisorId}, cerrada_en = SYSUTCDATETIME() WHERE id_orden_trabajo = ${vieja.id_orden_trabajo}`;
+    await prisma.otFirma.create({
+      data: { id_orden_trabajo: vieja.id_orden_trabajo, rol: 'SUPERVISOR', significado: 'Cerró', id_user: supervisorId, signer_email: 's@it', signer_name: 'Sup', content_sha256: 'a'.repeat(64), auth_method: 'contrasena_synerlink', consent_version: 'bitacora-check-2026-10-14' },
+    });
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- ruta fija del repositorio (la migración)
+    const sql = readFileSync(fileURLToPath(new URL('../../../prisma/migrations/20261015180000_bitacora_proceso_cuatro_actores/migration.sql', import.meta.url)), 'utf8');
+    await prisma.$executeRawUnsafe(sql);
+    await prisma.$executeRawUnsafe(sql);
+    const fila = await prisma.otOrdenTrabajo.findFirst({ where: { id_orden_trabajo: vieja.id_orden_trabajo } });
+    expect(fila).toMatchObject({ id_inspector: null, id_jefe_produccion: jefeId, estado: 'CERRADA' });
+    // La cerrada sigue protegida por el trigger.
+    await expect(prisma.$executeRaw`UPDATE dbo.ot_orden_trabajo SET lote = N'X' WHERE id_orden_trabajo = ${vieja.id_orden_trabajo}`).rejects.toThrow(/cerrada no se puede modificar/);
+    // Sin inspector: el siguiente es el jefe, que la verifica después del cierre.
+    const det = await getOrdenDetalle(prisma, vieja.id_orden_trabajo, supervisor, supervisorId);
+    expect(det?.vistos.map((v) => v.estado)).toEqual(['no_aplica', 'dado', 'no_aplica', 'pendiente']);
+    expect(det?.siguiente).toBe('JEFE_PROD');
+    await confirmarVistoBueno(prisma, vieja.id_orden_trabajo, jefe, null, conf('JEFE_PROD', jefeId, jefe));
+    expect((await getOrdenDetalle(prisma, vieja.id_orden_trabajo, supervisor, supervisorId))?.completa).toBe(true);
+  });
+
+  it('el «Verificó» del modelo anterior se lee como el visto bueno del JEFE de producción', async () => {
+    const v = await prisma.otOrdenTrabajo.create({
+      data: { id_company: FARMA, consecutivo: 700000 + Math.floor(Math.random() * 99999), producto: 'VERIFICO', lote: `VV-${sufijo}`, turno: 'NOCHE', estado: 'ABIERTA', abierta_por: supervisorId, id_jefe_produccion: jefeId },
+    });
+    for (const [rol, significado, idUser] of [['SUPERVISOR', 'Cerró', supervisorId], ['INSPECTOR', 'Verificó', jefeId]] as const) {
+      await prisma.otFirma.create({ data: { id_orden_trabajo: v.id_orden_trabajo, rol, significado, id_user: idUser, signer_email: 'x@it', signer_name: 'X', content_sha256: 'b'.repeat(64), auth_method: 'contrasena_synerlink', consent_version: 'bitacora-check-2026-10-14' } });
+    }
+    const det = await getOrdenDetalle(prisma, v.id_orden_trabajo, supervisor, supervisorId);
+    expect(det?.firmas.map((f) => [f.rol, f.significado, f.metodo])).toEqual([['SUPERVISOR', 'Cerró', 'contrasena_synerlink'], ['JEFE_PROD', 'Verificó', 'contrasena_synerlink']]);
+    expect(det?.vistos.find((x) => x.rol === 'JEFE_PROD')?.estado).toBe('dado');
   });
 
   it('MI FIRMA (GSS Firma): la auditoría queda en user_audit_log con la huella, sin la imagen', async () => {

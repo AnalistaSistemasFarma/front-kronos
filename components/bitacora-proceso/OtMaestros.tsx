@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { OT_LIMITS } from '../../lib/bitacora-proceso/constants';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import { otSend, useOtFetch } from './otClient';
+import { OtImportarOperadores } from './OtImportarYPin';
 
 /**
  * Maestros de la bitácora (solo Gestión), reunión con Farmalógica del 2026-10-14:
@@ -95,9 +96,12 @@ export function OtOperadores({ company }: { company: OtCompanyAccess }) {
         </Stack>
       </Card>
 
-      <Title order={2} size='h4'>
-        Operarios <Badge variant='light' ml={4}>{lista.filter((o) => o.activo).length} activos</Badge>
-      </Title>
+      <Group justify='space-between' wrap='wrap' gap='sm'>
+        <Title order={2} size='h4'>
+          Operarios <Badge variant='light' ml={4}>{lista.filter((o) => o.activo).length} activos</Badge>
+        </Title>
+        <OtImportarOperadores company={company} onImportado={() => void reload(true)} />
+      </Group>
       <Text size='sm' c='dimmed'>
         Los operarios no tienen usuario de SynerLink: el supervisor los programa al abrir la bitácora y en la tablet cada uno toca su nombre. No se borran: desactive a quien ya no trabaja en el área.
       </Text>

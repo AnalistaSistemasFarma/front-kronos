@@ -51,6 +51,11 @@ BEGIN TRY
   IF OBJECT_ID(N'dbo.ot_orden_trabajo_id_area_fkey', N'F') IS NOT NULL
     ALTER TABLE [dbo].[ot_orden_trabajo] DROP CONSTRAINT [ot_orden_trabajo_id_area_fkey];
 
+  /* Objetos de la migración 20261015180000 (cuatro actores y PIN), si existen: la FK de
+     ot_firma a ot_operador impide borrar ot_operador; ot_pin es del módulo. */
+  IF OBJECT_ID(N'dbo.ot_firma_id_operador_fkey', N'F') IS NOT NULL ALTER TABLE [dbo].[ot_firma] DROP CONSTRAINT [ot_firma_id_operador_fkey];
+  IF OBJECT_ID(N'dbo.ot_pin', N'U') IS NOT NULL DROP TABLE [dbo].[ot_pin];
+
   IF OBJECT_ID(N'dbo.TR_ot_orden_operador_inmutable', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_orden_operador_inmutable];
   IF OBJECT_ID(N'dbo.TR_ot_operador_sin_borrar', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_operador_sin_borrar];
   IF OBJECT_ID(N'dbo.TR_ot_area_sin_borrar', N'TR') IS NOT NULL DROP TRIGGER [dbo].[TR_ot_area_sin_borrar];

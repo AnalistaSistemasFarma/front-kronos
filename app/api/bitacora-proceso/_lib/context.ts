@@ -15,6 +15,8 @@ export interface OtRequestContext {
   email: string;
   access: OtCompanyAccess[];
   actor: OtActor;
+  /** Rol `admin` de SynerLink (puede restablecer PIN de bitácora, B3). */
+  isAdmin: boolean;
 }
 
 export const NO_STORE = { 'Cache-Control': 'no-store, max-age=0' } as const;
@@ -31,7 +33,8 @@ export async function getOtRequestContext(request: Request): Promise<OtRequestCo
   const [access, idUser] = await Promise.all([getOtAccessForUser(prisma, email), getActiveUserId(prisma, email)]);
   if (!idUser || access.length === 0) return jsonNoStore({ error: 'No tiene acceso a Bitácora de Proceso' }, 403);
   const { clientIp } = readClientOrigin(request);
-  return { email, access, actor: { idUser, email, ip: clientIp } };
+  const isAdmin = (session?.user as { role?: string } | undefined)?.role === 'admin';
+  return { email, access, actor: { idUser, email, ip: clientIp }, isAdmin };
 }
 
 /** Acceso a la empresa pedida con el permiso indicado, o la respuesta 400/403. */
