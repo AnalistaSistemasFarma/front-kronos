@@ -1,5 +1,5 @@
 import type { PrismaClient } from '../../app/generated/prisma';
-import { OT_DIAS_CERRADAS, OT_SUBPROCESS_URLS } from './constants';
+import { isOtResponsableRol, OT_DIAS_CERRADAS, OT_SUBPROCESS_URLS, type OtResponsableRol } from './constants';
 import type { AvisoBitacora } from './notificaciones';
 import {
   assertActoresDistintos,
@@ -21,6 +21,8 @@ import { assertPinUsable, compararPin, hashPin, mensajePinIncorrecto } from './p
 import {
   assertActividadRegistrable,
   assertOperadorDeLaOrden,
+  assertPuedeSerResponsable,
+  errorSinRol,
   assertPuedeRegistrar,
   OtError,
   resolveOtAccess,
@@ -28,11 +30,13 @@ import {
   type CambioActividadInput,
   type CambioAreaInput,
   type CambioOperadorInput,
+  type CambioResponsableInput,
   type ImportarOperadoresInput,
   type NuevaActividadInput,
   type NuevaAreaInput,
   type NuevaOrdenInput,
   type NuevoOperadorInput,
+  type NuevoResponsableInput,
   type NuevoRegistroInput,
   type OtCompanyAccess,
 } from './rules';
@@ -196,24 +200,146 @@ export async function listUsuariosEmpresa(db: OtDb, idCompany: number) {
     .sort((a, b) => a.name.localeCompare(b.name, 'es'));
 }
 
+// ---------------------------------------------------------------------------
+// Responsables por empresa (2026-10-16): supervisor, inspector y jefe de producción
+// ---------------------------------------------------------------------------
+
 /**
- * Supervisores de la empresa: usuarios ACTIVOS con el permiso de Gestión. Son
- * quienes pueden confirmar el cierre («Cerró») eligiendo su nombre en la tablet.
+ * Acceso al módulo (Bitácora de Proceso y Gestión) de varias personas en UNA empresa,
+ * solo usuarios activos. Mapa user.id → acceso; quien no tenga el módulo no aparece.
  */
-export async function listSupervisoresEmpresa(db: OtDb, idCompany: number) {
+async function accesoModuloEnEmpresa(db: Pick<OtDb, 'subprocessUserCompany'>, idCompany: number, ids: readonly string[]) {
+  const out = new Map<string, OtCompanyAccess>();
+  if (ids.length === 0) return out;
   const grants = await db.subprocessUserCompany.findMany({
     where: {
-      subprocess: { subprocess_url: OT_SUBPROCESS_URLS.gestion },
-      companyUser: { id_company: idCompany, user: { isActive: true } },
+      subprocess: { subprocess_url: { in: Object.values(OT_SUBPROCESS_URLS) } },
+      companyUser: { id_company: idCompany, id_user: { in: [...new Set(ids)] }, user: { isActive: true } },
     },
-    select: { companyUser: { select: { user: { select: { id: true, name: true, email: true } } } } },
+    select: {
+      subprocess: { select: { subprocess_url: true } },
+      companyUser: { select: { id_user: true, company: { select: { id_company: true, company: true } } } },
+    },
   });
-  const map = new Map<string, { id: string; name: string }>();
+  const porUsuario = new Map<string, { subprocessUrl: string | null; idCompany: number; companyName: string }[]>();
   for (const g of grants) {
-    const u = g.companyUser.user;
-    map.set(u.id, { id: u.id, name: u.name?.trim() || u.email });
+    const list = porUsuario.get(g.companyUser.id_user) ?? [];
+    list.push({ subprocessUrl: g.subprocess.subprocess_url, idCompany: g.companyUser.company.id_company, companyName: g.companyUser.company.company });
+    porUsuario.set(g.companyUser.id_user, list);
   }
-  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  for (const [id, rows] of porUsuario) {
+    const a = resolveOtAccess(rows)[0];
+    if (a) out.set(id, a);
+  }
+  return out;
+}
+
+/**
+ * Personas que HOY pueden actuar con el rol en la empresa: asignadas y activas en
+ * `ot_responsable`, usuario activo y con el módulo en la empresa (el supervisor, además,
+ * con Gestión). Es la lista de cada selector; nada más sale en ellos.
+ */
+export async function listResponsables(db: OtDb, idCompany: number, rol: OtResponsableRol): Promise<Array<{ id: string; name: string; email: string }>> {
+  const asignados = await db.otResponsable.findMany({ where: { id_company: idCompany, rol, activo: true }, select: { id_user: true } });
+  const ids = asignados.map((a) => a.id_user);
+  if (ids.length === 0) return [];
+  const [acceso, nombres] = await Promise.all([accesoModuloEnEmpresa(db, idCompany, ids), nombresDeUsuarios(db, ids)]);
+  return ids
+    .filter((id) => {
+      const a = acceso.get(id);
+      return Boolean(a && a.canOperate && (rol !== 'SUPERVISOR' || a.canManage));
+    })
+    .map((id) => ({ id, name: nombres.get(id)?.name ?? id, email: nombres.get(id)?.email ?? '' }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
+
+/** ¿La persona puede actuar HOY con ese rol en la empresa? (misma regla que el selector). */
+export async function tieneRolResponsable(db: OtDb, idCompany: number, idUser: string, rol: OtResponsableRol): Promise<boolean> {
+  const fila = await db.otResponsable.findFirst({ where: { id_company: idCompany, id_user: idUser, rol, activo: true }, select: { id_responsable: true } });
+  if (!fila) return false;
+  const a = (await accesoModuloEnEmpresa(db, idCompany, [idUser])).get(idUser);
+  return Boolean(a && a.canOperate && (rol !== 'SUPERVISOR' || a.canManage));
+}
+
+/**
+ * Supervisores de la empresa: quienes pueden confirmar el cierre («Cerró») eligiendo su
+ * nombre en la tablet. Desde el 2026-10-16 son SOLO los asignados como SUPERVISOR en
+ * Catálogo → Responsables (antes: todo usuario con Gestión, incluida la cuenta de planta).
+ */
+export async function listSupervisoresEmpresa(db: OtDb, idCompany: number) {
+  return (await listResponsables(db, idCompany, 'SUPERVISOR')).map(({ id, name }) => ({ id, name }));
+}
+
+export interface ResponsableVista {
+  idResponsable: number;
+  idUser: string;
+  rol: OtResponsableRol;
+  activo: boolean;
+  name: string;
+  email: string;
+  /** Usuario activo con el permiso que el rol exige (si no, no sale en el selector). */
+  habilitado: boolean;
+}
+
+/** Catálogo → Responsables: todas las asignaciones de la empresa (activas e inactivas). */
+export async function listResponsablesEmpresa(db: OtDb, idCompany: number): Promise<ResponsableVista[]> {
+  const filas = await db.otResponsable.findMany({
+    where: { id_company: idCompany },
+    select: { id_responsable: true, id_user: true, rol: true, activo: true },
+  });
+  const ids = filas.map((f) => f.id_user);
+  const [acceso, nombres] = await Promise.all([accesoModuloEnEmpresa(db, idCompany, ids), nombresDeUsuarios(db, ids)]);
+  return filas
+    .filter((f): f is typeof f & { rol: OtResponsableRol } => isOtResponsableRol(f.rol))
+    .map((f) => {
+      const a = acceso.get(f.id_user);
+      return {
+        idResponsable: f.id_responsable,
+        idUser: f.id_user,
+        rol: f.rol,
+        activo: f.activo,
+        name: nombres.get(f.id_user)?.name ?? f.id_user,
+        email: nombres.get(f.id_user)?.email ?? '',
+        habilitado: Boolean(a && a.canOperate && (f.rol !== 'SUPERVISOR' || a.canManage)),
+      };
+    })
+    .sort((x, y) => Number(y.activo) - Number(x.activo) || x.name.localeCompare(y.name, 'es'));
+}
+
+/**
+ * Personas que se pueden ASIGNAR (Catálogo → Responsables): usuarios activos con el módulo
+ * en la empresa, con la marca de Gestión (requisito del supervisor).
+ */
+export async function listCandidatosResponsable(db: OtDb, idCompany: number) {
+  const usuarios = await listUsuariosEmpresa(db, idCompany);
+  const acceso = await accesoModuloEnEmpresa(db, idCompany, usuarios.map((u) => u.id));
+  return usuarios.filter((u) => acceso.get(u.id)?.canOperate).map((u) => ({ ...u, gestion: Boolean(acceso.get(u.id)?.canManage) }));
+}
+
+/** Asigna (o reactiva) el rol a la persona en la empresa. Idempotente. */
+export async function asignarResponsable(db: OtDb, input: NuevoResponsableInput, actor: OtActor) {
+  const persona = await personaActivaEmpresa(db, input.idUser, input.idCompany);
+  if (!persona) throw new OtError('La persona no es un usuario activo de la empresa.', 400);
+  const nombre = persona.name?.trim() || persona.email;
+  assertPuedeSerResponsable(input.rol, (await accesoModuloEnEmpresa(db, input.idCompany, [input.idUser])).get(input.idUser) ?? null, nombre);
+  const ahora = new Date();
+  const fila = await db.otResponsable.upsert({
+    where: { id_company_id_user_rol: { id_company: input.idCompany, id_user: input.idUser, rol: input.rol } },
+    create: { id_company: input.idCompany, id_user: input.idUser, rol: input.rol, activo: true, created_by: actor.idUser },
+    update: { activo: true, updated_by: actor.idUser, updated_at: ahora },
+    select: { id_responsable: true },
+  });
+  return { idResponsable: fila.id_responsable, nombre };
+}
+
+/** Activa o desactiva una asignación de la empresa (no se borran). */
+export async function cambiarResponsable(db: OtDb, input: CambioResponsableInput, actor: OtActor) {
+  const res = await db.otResponsable.updateMany({
+    where: { id_responsable: input.idResponsable, id_company: input.idCompany },
+    data: { activo: input.activo, updated_by: actor.idUser, updated_at: new Date() },
+  });
+  if (res.count === 0) throw new OtError('Responsable no encontrado.', 404);
+  return { ok: true };
 }
 
 /** Operarios activos de la empresa entre los ids dados (para validar la programación). */
@@ -226,26 +352,25 @@ async function operadoresActivos(db: Pick<OtDb, 'otOperador'>, idCompany: number
  * Abre una orden de trabajo (R2). Consecutivo por empresa, calculado dentro de
  * la transacción con bloqueo (UPDLOCK, HOLDLOCK) para que dos supervisores a la
  * vez no choquen. Los operarios (A1) deben estar ACTIVOS en el maestro de la
- * empresa; el área (A5) sale del catálogo; el jefe de producción es un usuario
- * activo de la empresa, distinto de quien abre.
+ * empresa; el área (A5) sale del catálogo; el inspector y el jefe de producción deben
+ * estar ASIGNADOS a ese rol en la empresa (ot_responsable) y ser distintos de quien abre.
  */
 export async function crearOrden(db: OtDb, input: NuevaOrdenInput, actor: OtActor): Promise<{ id: number; consecutivo: number }> {
-  const activo = (idUser: string) =>
-    db.companyUser.findFirst({ where: { id_company: input.idCompany, id_user: idUser, user: { isActive: true } }, select: { id_user: true } });
+  // Inspector y jefe: SOLO personas asignadas a ese rol en la empresa (2026-10-16).
   const [insp, jefe, ops, areas] = await Promise.all([
-    activo(input.inspector),
-    activo(input.jefeProduccion),
+    tieneRolResponsable(db, input.idCompany, input.inspector, 'INSPECTOR'),
+    tieneRolResponsable(db, input.idCompany, input.jefeProduccion, 'JEFE_PROD'),
     operadoresActivos(db, input.idCompany, input.operadores),
     db.otArea.findMany({ where: { id_company: input.idCompany, activo: true }, select: { id_area: true, nombre: true } }),
   ]);
   if (ops.length !== input.operadores.length) {
     throw new OtError('Algún operario seleccionado no existe o está inactivo en el maestro de la empresa.', 400);
   }
-  if (!insp) throw new OtError('El inspector seleccionado no es un usuario activo de la empresa.', 400);
-  if (!jefe) throw new OtError('El jefe de producción seleccionado no es un usuario activo de la empresa.', 400);
+  assertActoresDistintos({ supervisor: actor.idUser, inspector: input.inspector, jefe: input.jefeProduccion });
+  if (!insp) throw errorSinRol('INSPECTOR');
+  if (!jefe) throw errorSinRol('JEFE_PROD');
   const area = resolverArea(areas, input.idArea);
 
-  assertActoresDistintos({ supervisor: actor.idUser, inspector: input.inspector, jefe: input.jefeProduccion });
   return db.$transaction(async (tx) => {
     const next = await tx.$queryRaw<Array<{ siguiente: number }>>`
       SELECT ISNULL(MAX(consecutivo), 0) + 1 AS siguiente
@@ -613,6 +738,10 @@ export async function confirmarVistoBueno(
     const { o, contenido } = await contenidoDe(tx, idOrden, access.idCompany);
     const actores = { estado: o.estado, inspector: o.id_inspector, jefe: o.id_jefe_produccion, operadores: o.operadores.map((x) => x.id_operador) };
     assertPuedeConfirmar(actores, o.firmas, { rol: c.rol, idUser: c.idUser, idOperador: c.idOperador, access: c.access });
+    // Cierra SOLO un supervisor asignado en la empresa (2026-10-16), no cualquiera con Gestión.
+    if (c.rol === 'SUPERVISOR' && !(c.idUser && (await tieneRolResponsable(tx as OtDb, access.idCompany, c.idUser, 'SUPERVISOR')))) {
+      throw errorSinRol('SUPERVISOR', 403);
+    }
 
     let nombre = c.nombre ?? c.email;
     if (c.rol === 'OPERARIO') {

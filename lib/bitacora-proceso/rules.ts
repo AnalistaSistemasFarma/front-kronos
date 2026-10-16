@@ -1,10 +1,13 @@
 import {
   isOtIcono,
+  isOtResponsableRol,
   OT_LIMITS,
+  OT_ROL_LABEL,
   OT_TURNOS,
   otPermissionFromUrl,
   type OtIcono,
   type OtEstado,
+  type OtResponsableRol,
   type OtTurno,
 } from './constants';
 
@@ -529,4 +532,58 @@ export function parseImportarOperadores(body: Record<string, unknown> | null): I
 
 export function isEstado(v: string): v is OtEstado {
   return v === 'ABIERTA' || v === 'CERRADA';
+}
+
+// ---------------------------------------------------------------------------
+// Responsables por empresa (2026-10-16): supervisor, inspector y jefe de producción
+// ---------------------------------------------------------------------------
+
+export interface NuevoResponsableInput {
+  idCompany: number;
+  idUser: string;
+  rol: OtResponsableRol;
+}
+
+/** POST { company, id_user, rol }: asignar a una persona un rol de la bitácora. */
+export function parseNuevoResponsable(body: Record<string, unknown> | null): NuevoResponsableInput {
+  if (!body) throw new OtError('Se esperaba un JSON con el responsable.', 400);
+  const idCompany = optPositiveInt(body.company, 'La empresa');
+  if (!idCompany) throw new OtError('Falta la empresa.', 400);
+  const idUser = typeof body.id_user === 'string' ? body.id_user.trim() : '';
+  if (!idUser || idUser.length > 50) throw new OtError('Elija la persona.', 400);
+  if (!isOtResponsableRol(body.rol)) throw new OtError('Rol no válido: supervisor, inspector o jefe de producción.', 400);
+  return { idCompany, idUser, rol: body.rol };
+}
+
+export interface CambioResponsableInput {
+  idCompany: number;
+  idResponsable: number;
+  activo: boolean;
+}
+
+/** PATCH { company, id_responsable, activo }: los responsables no se borran, se desactivan. */
+export function parseCambioResponsable(body: Record<string, unknown> | null): CambioResponsableInput {
+  if (!body) throw new OtError('Se esperaba un JSON con el cambio.', 400);
+  const idCompany = optPositiveInt(body.company, 'La empresa');
+  const idResponsable = optPositiveInt(body.id_responsable, 'El responsable');
+  if (!idCompany || !idResponsable) throw new OtError('Falta el responsable o la empresa.', 400);
+  if (typeof body.activo !== 'boolean') throw new OtError('Solo se puede activar o desactivar al responsable.', 400);
+  return { idCompany, idResponsable, activo: body.activo };
+}
+
+/**
+ * ¿Puede esta persona tener el rol? Necesita el módulo en la empresa; el SUPERVISOR,
+ * además, el permiso de Gestión (es quien cierra). Lanza 400 con el motivo.
+ */
+export function assertPuedeSerResponsable(rol: OtResponsableRol, access: OtCompanyAccess | null, nombre: string): void {
+  if (!access?.canOperate) throw new OtError(`${nombre} no tiene el permiso «Bitácora de Proceso» en esta empresa.`, 400);
+  if (rol === 'SUPERVISOR' && !access.canManage) {
+    throw new OtError(`${nombre} no tiene el permiso «Bitácora de Proceso: Gestión»: sin él no puede ser supervisor.`, 400);
+  }
+}
+
+/** Mensaje cuando la persona elegida no tiene el rol en la empresa. */
+export function errorSinRol(rol: OtResponsableRol, status = 400): OtError {
+  const label = OT_ROL_LABEL[rol].toLowerCase();
+  return new OtError(`La persona elegida no está asignada como ${label} en esta empresa (Catálogo → Responsables).`, status);
 }
