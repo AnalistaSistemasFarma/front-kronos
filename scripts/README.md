@@ -6,14 +6,12 @@ Utilidades de mantenimiento, seeds y control de calidad.
 
 | npm | Script | Uso |
 |-----|--------|-----|
-| `npm run dev` | `dev.mjs` | Dev server (+ resolución host SQL) |
+| `npm run dev` | `dev.mjs` | Dev server |
 | `npm run verify:deploy` | `verify-deployment-changes.cjs` | Checklist pre-despliegue |
 | `npm run test:orion` / `check:orion` | `test-orion-integration.mjs` | Smoke Orion ↔ Kronos |
 | `npm run seed:orion` | `seed-orion-workflow.mjs` | Campo/workflow `orion_signature` |
 | `npm run check:login` | `check-login.mjs` | Diagnóstico login |
 | `npm run test:db` | `test-db-connection.cjs` | Probar conexión SQL |
-| `npm run db:route` | `windows-sql-route.ps1` | Ruta Wi‑Fi → SQL (admin) |
-| `npm run db:resolve` | `resolve-db-host.mjs` | Elegir host SQL alcanzable |
 | `npm run reset:password` | `reset-password.mjs` | Reset clave (solo pruebas) |
 | `npm run seed:dashboard-solicitudes` | `seed-dashboard-solicitante-solicitado.cjs` | Subprocesos dashboard |
 
@@ -39,3 +37,7 @@ node scripts/prod-gate-check.mjs
 ```
 
 Flags: `--base <rama>`, `--skip-build`. Veredicto en exit code `0` = GO / GO-CONDICIONADO.
+
+## Página "SynerLink se está actualizando" (IIS de prod)
+
+`iis-setup-maintenance.ps1` instala la configuración en IIS. `maintenance-on.ps1` y `maintenance-off.ps1` activan y quitan la página durante las ventanas. Detalle en [`deploy/iis/README.md`](../deploy/iis/README.md).

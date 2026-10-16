@@ -7,6 +7,7 @@ import {
   getUserCompanyUsersWithSubprocesses,
   groupAssignmentsByCompany,
   normalizeSubprocessIds,
+  syncUserCompanySubprocesses,
 } from '../../../../../lib/process/subprocessAssignments';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 
@@ -67,86 +68,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    await consolidateDuplicateCompanyUsers(userId);
-
-    let companyUsers = await prisma.companyUser.findMany({
-      where: {
-        id_user: userId,
-        id_company: companyId,
-      },
-      orderBy: { id_company_user: 'asc' },
-    });
-
-    if (companyUsers.length === 0) {
-      const created = await prisma.companyUser.create({
-        data: {
-          id_user: userId,
-          id_company: companyId,
-        },
-      });
-      companyUsers = [created];
-    }
-
-    const primaryCompanyUser = companyUsers[0];
-    const allCompanyUserIds = companyUsers.map((cu) => cu.id_company_user);
-
-    const existingAssignments = await prisma.subprocessUserCompany.findMany({
-      where: {
-        id_company_user: { in: allCompanyUserIds },
-      },
-      select: { id_subprocess_user_company: true, id_subprocess: true, id_company_user: true },
-    });
-
-    const existingSubprocessIds = [
-      ...new Set(existingAssignments.map((a) => a.id_subprocess)),
-    ];
-    const desiredSet = new Set(desiredSubprocessIds);
-    const removed = existingSubprocessIds.filter((id) => !desiredSet.has(id));
-    const added = desiredSubprocessIds.filter((id) => !existingSubprocessIds.includes(id));
-
-    // Filas a borrar: su id_subprocess ya no está en lo deseado.
-    const toRemoveIds = existingAssignments
-      .filter((a) => !desiredSet.has(a.id_subprocess))
-      .map((a) => a.id_subprocess_user_company);
-
-    // Filas que siguen deseadas pero viven en un company_user no primario (duplicados legacy):
-    // se mueven con UPDATE para conservar su id_subprocess_user_company, en vez de recrearlas.
-    const toMove = existingAssignments.filter(
-      (a) =>
-        desiredSet.has(a.id_subprocess) &&
-        a.id_company_user !== primaryCompanyUser.id_company_user
-    );
-
-    await prisma.$transaction(async (tx) => {
-      if (toRemoveIds.length > 0) {
-        await tx.subprocessUserCompany.deleteMany({
-          where: { id_subprocess_user_company: { in: toRemoveIds } },
-        });
-      }
-
-      for (const assignment of toMove) {
-        await tx.subprocessUserCompany.update({
-          where: { id_subprocess_user_company: assignment.id_subprocess_user_company },
-          data: { id_company_user: primaryCompanyUser.id_company_user },
-        });
-      }
-
-      if (added.length > 0) {
-        await tx.subprocessUserCompany.createMany({
-          data: added.map((subprocessId) => ({
-            id_company_user: primaryCompanyUser.id_company_user,
-            id_subprocess: subprocessId,
-          })),
-        });
-      }
-
-      if (allCompanyUserIds.length > 1) {
-        await tx.companyUser.deleteMany({
-          where: {
-            id_company_user: { in: allCompanyUserIds.filter((id) => id !== primaryCompanyUser.id_company_user) },
-          },
-        });
-      }
+    const result = await syncUserCompanySubprocesses({
+      userId,
+      companyId,
+      subprocessIds: desiredSubprocessIds,
+      mode: 'replace',
     });
 
     await prisma.userAuditLog.create({
@@ -154,14 +80,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         user_id: userId,
         action: 'UPDATE_SUBPROCESSES',
         performed_by: session.user.email,
-        details: `Company ${companyId}: assigned ${added.length}, removed ${removed.length}. Final: [${desiredSubprocessIds.join(', ')}]`,
+        details: `Company ${companyId}: assigned ${result.added}, removed ${result.removed}. Final: [${result.finalIds.join(', ')}]`,
       },
     });
 
     return NextResponse.json({
       message: 'Subprocesses updated successfully',
-      added: added.length,
-      removed: removed.length,
+      added: result.added,
+      removed: result.removed,
     });
   } catch (error) {
     console.error('Error assigning subprocesses:', error);

@@ -9,6 +9,7 @@ import {
   notifyTicketClosed,
   notifyTicketToTechnicians,
 } from '../../../../lib/notificationEvents.js';
+import { normalizeHelpDeskTechnicianId } from '../../../../lib/help-desk/requesterSql';
 
 export async function POST(req) {
   try {
@@ -93,12 +94,13 @@ export async function POST(req) {
         WHERE id_case = @id_case;
       `;
 
+      const nextTechnical = normalizeHelpDeskTechnicianId(id_technical);
       const updateCaseRequest = new sql.Request(transaction);
       updateCaseRequest.input('status', sql.Int, status || null);
       updateCaseRequest.input('priority', sql.NVarChar(1000), priority);
       updateCaseRequest.input('case_type', sql.NVarChar(50), case_type);
       updateCaseRequest.input('id_department', sql.Int, id_department);
-      updateCaseRequest.input('id_technical', sql.Int, id_technical || null);
+      updateCaseRequest.input('id_technical', sql.Int, nextTechnical);
       updateCaseRequest.input('place', sql.NVarChar(1000), place);
       updateCaseRequest.input('email', sql.NVarChar(255), email?.trim() || null);
       updateCaseRequest.input('resolucion', sql.Text, resolucion || null);
@@ -126,7 +128,6 @@ export async function POST(req) {
       await transaction.commit();
 
       const prevTechnical = prevRow?.id_technical ?? null;
-      const nextTechnical = id_technical || null;
       const prevStatus = prevRow?.id_status_case ?? null;
       const nextStatus = status ?? null;
 

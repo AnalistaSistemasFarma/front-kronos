@@ -19,7 +19,10 @@ import {
 import { useState, useEffect, useContext, useMemo } from 'react';
 import { useTheme } from './providers';
 import NotificationBell from './NotificationBell';
-import ChatAgentBar from './chat/ChatAgentBar';
+import CorreoHeaderIcon from './correo/CorreoHeaderIcon';
+import ChatRail from './chat/ChatRail';
+import ChatPulse from './chat/ChatPulse';
+import ValentineWallRoot from './valentine/ValentineWallRoot';
 import {
   AppSectionContext,
   type AppSection,
@@ -49,19 +52,23 @@ export default function Header() {
   const loadingDashboardAdmin = dashboardAdmin?.loadingDashboardAdmin ?? false;
   const hasSolicitanteAccess = roleNav?.hasSolicitanteAccess ?? false;
   const hasSolicitadoAccess = roleNav?.hasSolicitadoAccess ?? false;
+  const hasEquipoAccess = roleNav?.hasEquipoAccess ?? false;
   const loadingRoleNav = roleNav?.loadingRoleNav ?? false;
   const solicitanteUrl =
     roleNav?.solicitanteUrl ?? '/process/request-general/dashboard-solicitante';
-  const solicitadoUrl =
+  const solicitadoBaseUrl =
     roleNav?.solicitadoUrl ?? '/process/request-general/dashboard-solicitado';
   const { theme, toggleTheme } = useTheme();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const showDashboardNav = !loadingDashboardAdmin && isDashboardAdmin;
   const showSolicitanteNav = !loadingRoleNav && hasSolicitanteAccess;
-  const showSolicitadoNav = !loadingRoleNav && hasSolicitadoAccess;
+  // El Dashboard personal también lo ve el líder sin el permiso: entra directo a «Mi equipo».
+  const showSolicitadoNav = !loadingRoleNav && (hasSolicitadoAccess || hasEquipoAccess);
+  const solicitadoUrl =
+    hasSolicitadoAccess || !hasEquipoAccess ? solicitadoBaseUrl : `${solicitadoBaseUrl}/equipo`;
   const [dashMenuOpen, setDashMenuOpen] = useState(false);
   const isSolicitanteActive = pathname.startsWith(solicitanteUrl);
-  const isSolicitadoActive = pathname.startsWith(solicitadoUrl);
+  const isSolicitadoActive = pathname.startsWith(solicitadoBaseUrl);
   const isRoleDashActive = isSolicitanteActive || isSolicitadoActive;
 
   const homeUrl = showSolicitadoNav
@@ -312,12 +319,19 @@ export default function Header() {
             </nav>
 
             <div className='flex items-center space-x-2'>
-              {/* Avatares de los asistentes IA (módulo de chat de agentes).
-                  Se pinta solo si el usuario tiene el permiso; si no, no
-                  ocupa espacio. Único cambio de este archivo en la fase 2c:
-                  una línea AÑADIDA al grupo de acciones, sin tocar ni
-                  reordenar nada de lo que ya estaba. */}
-              <ChatAgentBar />
+              {/* Chats (asistentes, personas y grupos). Desde 2026-09-30 ya no
+                  van en la cabecera: viven en la barra lateral izquierda
+                  (ChatRail). En escritorio esto no pinta nada aquí —la barra
+                  se monta aparte, fija a la izquierda—; en el celular deja
+                  solo el botón que abre el menú deslizable de chats. Se pinta
+                  solo si el usuario tiene el permiso. */}
+              <ChatRail />
+              {/* Pulso del chat entre personas (mensajes directos y zumbidos
+                  📳 en cualquier pantalla). No pinta nada. */}
+              <ChatPulse />
+              <ValentineWallRoot />
+              {/* Acceso directo al Correo (2026-10-15): solo con el permiso del módulo. */}
+              <CorreoHeaderIcon />
               <NotificationBell />
               <ActionIcon
                 variant='subtle'

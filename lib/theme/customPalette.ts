@@ -19,7 +19,8 @@ export function toCustomPaletteKey(hex: string): string | null {
   return n ? `${CUSTOM_PALETTE_PREFIX}${n}` : null;
 }
 
-function tuneAccent(hex: string, bg: string, mode: PaletteMode): string {
+/** Ajusta el tono hasta que el acento tenga contraste AA (>= 4.5:1) contra el fondo dado. */
+export function tuneAccent(hex: string, bg: string, mode: PaletteMode): string {
   const hsl = hexToHsl(hex);
   const h = hsl[0];
   let s = hsl[1];

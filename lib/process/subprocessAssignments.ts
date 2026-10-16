@@ -159,3 +159,126 @@ export function normalizeSubprocessIds(raw: unknown): number[] {
   if (!Array.isArray(raw)) return [];
   return [...new Set(raw.map((id) => Number(id)).filter((id) => Number.isFinite(id)))];
 }
+
+export type SubprocessAssignMode = 'replace' | 'add' | 'remove';
+
+export type SyncUserCompanySubprocessesResult = {
+  added: number;
+  removed: number;
+  finalIds: number[];
+};
+
+/**
+ * Sincroniza subprocesos de un usuario en una empresa.
+ * - replace: deja exactamente los ids indicados
+ * - add: une los ids nuevos a los ya asignados (no quita existentes)
+ * - remove: quita solo los ids indicados y conserva el resto
+ */
+export async function syncUserCompanySubprocesses(options: {
+  userId: string;
+  companyId: number;
+  subprocessIds: number[];
+  mode?: SubprocessAssignMode;
+}): Promise<SyncUserCompanySubprocessesResult> {
+  const { userId, companyId, subprocessIds, mode = 'replace' } = options;
+  const incomingIds = normalizeSubprocessIds(subprocessIds);
+
+  await consolidateDuplicateCompanyUsers(userId);
+
+  let companyUsers = await prisma.companyUser.findMany({
+    where: {
+      id_user: userId,
+      id_company: companyId,
+    },
+    orderBy: { id_company_user: 'asc' },
+  });
+
+  // En modo remove, si no hay vínculo con la empresa no hay nada que quitar.
+  if (companyUsers.length === 0) {
+    if (mode === 'remove') {
+      return { added: 0, removed: 0, finalIds: [] };
+    }
+    const created = await prisma.companyUser.create({
+      data: {
+        id_user: userId,
+        id_company: companyId,
+      },
+    });
+    companyUsers = [created];
+  }
+
+  const primaryCompanyUser = companyUsers[0];
+  const allCompanyUserIds = companyUsers.map((cu) => cu.id_company_user);
+
+  const existingAssignments = await prisma.subprocessUserCompany.findMany({
+    where: {
+      id_company_user: { in: allCompanyUserIds },
+    },
+    select: { id_subprocess_user_company: true, id_subprocess: true, id_company_user: true },
+  });
+
+  const existingSubprocessIds = [...new Set(existingAssignments.map((a) => a.id_subprocess))];
+  const removeSet = new Set(incomingIds);
+  const desiredSubprocessIds =
+    mode === 'add'
+      ? [...new Set([...existingSubprocessIds, ...incomingIds])]
+      : mode === 'remove'
+        ? existingSubprocessIds.filter((id) => !removeSet.has(id))
+        : incomingIds;
+
+  const desiredSet = new Set(desiredSubprocessIds);
+  const removed = existingSubprocessIds.filter((id) => !desiredSet.has(id));
+  const added = desiredSubprocessIds.filter((id) => !existingSubprocessIds.includes(id));
+
+  // Filas a borrar: su id_subprocess ya no está en lo deseado.
+  const toRemoveIds = existingAssignments
+    .filter((a) => !desiredSet.has(a.id_subprocess))
+    .map((a) => a.id_subprocess_user_company);
+
+  // Filas que siguen deseadas pero viven en un company_user no primario (duplicados legacy):
+  // se mueven con UPDATE para conservar su id_subprocess_user_company (referenciado por
+  // tareas/tickets ya asignados), en vez de borrarlas y recrearlas con un id nuevo.
+  const toMove = existingAssignments.filter(
+    (a) => desiredSet.has(a.id_subprocess) && a.id_company_user !== primaryCompanyUser.id_company_user
+  );
+
+  await prisma.$transaction(async (tx) => {
+    if (toRemoveIds.length > 0) {
+      await tx.subprocessUserCompany.deleteMany({
+        where: { id_subprocess_user_company: { in: toRemoveIds } },
+      });
+    }
+
+    for (const assignment of toMove) {
+      await tx.subprocessUserCompany.update({
+        where: { id_subprocess_user_company: assignment.id_subprocess_user_company },
+        data: { id_company_user: primaryCompanyUser.id_company_user },
+      });
+    }
+
+    if (added.length > 0) {
+      await tx.subprocessUserCompany.createMany({
+        data: added.map((subprocessId) => ({
+          id_company_user: primaryCompanyUser.id_company_user,
+          id_subprocess: subprocessId,
+        })),
+      });
+    }
+
+    if (allCompanyUserIds.length > 1) {
+      await tx.companyUser.deleteMany({
+        where: {
+          id_company_user: {
+            in: allCompanyUserIds.filter((id) => id !== primaryCompanyUser.id_company_user),
+          },
+        },
+      });
+    }
+  });
+
+  return {
+    added: added.length,
+    removed: removed.length,
+    finalIds: desiredSubprocessIds,
+  };
+}

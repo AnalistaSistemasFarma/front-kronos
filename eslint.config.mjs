@@ -27,6 +27,7 @@ const eslintConfig = [
       // vendido por pdfjs-dist para el visor de PDF de Orion) — no es código
       // fuente propio y su minificación dispara ruido de lint sin valor real.
       'public/**',
+      'reports/**',
     ],
   },
   // ---------------------------------------------------------------------------

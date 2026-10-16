@@ -1,5 +1,6 @@
 import sql from 'mssql';
 import sqlConfig from '../../../../dbconfig.js';
+import { normalizeHelpDeskTechnicianId } from '../../../../lib/help-desk/requesterSql';
 
 export async function POST(req) {
   try {
@@ -37,6 +38,8 @@ export async function POST(req) {
     const pool = await sql.connect(sqlConfig);
     const transaction = new sql.Transaction(pool);
     const creation_date = new Date().toISOString().split('T')[0];
+    // Sin técnico elegido → NULL explícito (así el filtro "Sin asignar" los encuentra).
+    const technicianId = normalizeHelpDeskTechnicianId(technician);
 
     try {
       await transaction.begin();
@@ -75,7 +78,7 @@ export async function POST(req) {
       request.input('creation_date', sql.Date, creation_date);
       request.input('description', sql.Text, description);
       request.input('asunto', sql.NVarChar(1000), asunto);
-      request.input('technician', sql.Int, technician || null);
+      request.input('technician', sql.Int, technicianId);
       request.input('requester', sql.Int, requester);
       request.input('site', sql.NVarChar(1000), site);
       request.input('department', sql.Int, department);

@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  CHAT_THREAD_POKE_EVENT,
   chatFetch,
   chatGetJson,
   isAbortError,
   notifyChatRefresh,
+  notificarActividad,
   type ChatConversationDto,
   type ChatMessageDto,
   type ChatAgentStatusDto,
@@ -14,6 +16,8 @@ import {
   type ChatStatusDto,
 } from '../../lib/chat/client';
 import { MESSAGES_PAGE_DEFAULT } from '../../lib/chat/constants';
+import type { AgentMetricsDto } from '../../lib/chat/agent-metrics';
+import { avisarMensajeEntrante, mensajeFresco } from '../../lib/chat/message-sound';
 
 /**
  * El hilo abierto —con UN agente o un GRUPO—: histórico, sondeo en vivo, envío
@@ -42,14 +46,76 @@ import { MESSAGES_PAGE_DEFAULT } from '../../lib/chat/constants';
 const FALLBACK_POLL_MS = 5_000;
 
 /**
+ * Caché en memoria del último estado visto de cada hilo (por `targetKey`).
+ * Al reabrir un hilo ya visitado se pinta de una vez lo que había —sin
+ * esqueleto, sin el "refresco" que Nicolás veía al abrir el chat— y la carga
+ * fresca corre por detrás. Vive lo que vive la pestaña; no es persistente.
+ */
+interface HiloEnCache {
+  conversation: ChatConversationDto;
+  messages: ChatMessageDto[];
+  hasOlder: boolean;
+  olderCursor: number | null;
+}
+const cacheHilos = new Map<string, HiloEnCache>();
+
+/** Precargas en curso, para no repetir la misma petición por cada toque. */
+const precargasEnCurso = new Set<string>();
+
+/**
+ * Precarga el histórico de un hilo DIRECTO que ya existe, antes de abrirlo.
+ *
+ * Se llama al pasar el cursor o al empezar a tocar la tarjeta del asistente:
+ * entre el `pointerdown` y el `click` pasan ~100-200 ms que antes se perdían.
+ * Solo hace un GET del histórico de una conversación que ya existe (la bandeja
+ * trae su ficha), así que no crea nada en el servidor. Si el hilo ya está en
+ * caché no hace nada: la recarga fresca la hace el propio hook al abrir.
+ */
+export function precargarHiloDeAgente(
+  idAgent: number,
+  conversation: ChatConversationDto | null
+): void {
+  if (!conversation) return;
+  const clave = `agent:${idAgent}`;
+  if (cacheHilos.has(clave) || precargasEnCurso.has(clave)) return;
+  precargasEnCurso.add(clave);
+  chatGetJson<{ messages: ChatMessageDto[]; hasMore: boolean; nextCursor: number | null }>(
+    `/api/chat/conversations/${conversation.id}/messages?limit=${MESSAGES_PAGE_DEFAULT}`
+  )
+    .then((history) => {
+      if (!history || cacheHilos.has(clave)) return;
+      cacheHilos.set(clave, {
+        conversation,
+        messages: [...(history.messages ?? [])].sort((a, b) => a.id - b.id),
+        hasOlder: Boolean(history.hasMore),
+        olderCursor: history.nextCursor ?? null,
+      });
+    })
+    .catch(() => null)
+    .finally(() => precargasEnCurso.delete(clave));
+}
+
+/**
  * Qué hilo abrir.
  *   - `agent`: la conversación de esta persona con ese agente. Si no existe,
  *     el servidor la crea (POST /api/chat/conversations es idempotente).
  *   - `group`: un grupo que YA existe, identificado por su id de conversación.
  */
 export type ChatTarget =
-  | { kind: 'agent'; idAgent: number }
-  | { kind: 'group'; idConversation: number };
+  | {
+      kind: 'agent';
+      idAgent: number;
+      /**
+       * Id del hilo si la bandeja ya lo conoce. Con él, el histórico se pide EN
+       * PARALELO con el POST que abre el hilo y se pinta en cuanto llega, en
+       * vez de esperar los dos viajes en fila. NO entra en `targetKey`: que la
+       * bandeja lo descubra después no debe reabrir el hilo.
+       */
+      idConversation?: number | null;
+    }
+  | { kind: 'group'; idConversation: number }
+  /** Hilo privado entre dos personas: ya existe y se abre por su id. */
+  | { kind: 'people'; idConversation: number };
 
 export interface ChatThreadState {
   conversation: ChatConversationDto | null;
@@ -57,6 +123,11 @@ export interface ChatThreadState {
   status: ChatStatusDto | null;
   /** Un estado por agente. En un grupo es lo que se pinta; en directo trae uno. */
   statuses: ChatAgentStatusDto[];
+  /**
+   * Métricas del mod (contexto, tokens, modelo). undefined = el usuario no las
+   * ve; null = las ve pero el agente no ha reportado nada en este hilo.
+   */
+  metrics: AgentMetricsDto | null | undefined;
   loading: boolean;
   sending: boolean;
   error: string | null;
@@ -70,12 +141,26 @@ export interface ChatThreadState {
 
 export function useChatConversation(
   target: ChatTarget | null,
-  active: boolean
+  active: boolean,
+  opciones?: {
+    /**
+     * Quién soy. Con varias personas en el hilo, un mensaje de OTRA persona
+     * con el mismo texto que mi optimista no debe reemplazarlo (ver
+     * mergeMessages). Sin esto se usa solo el `role`, como en el hilo directo.
+     */
+    miId?: string;
+    /**
+     * Llega un ZUMBIDO de otra persona por el sondeo. Va en una referencia, no
+     * como dependencia: cambiarla no debe reabrir el hilo ni reprogramar el
+     * sondeo, y el efecto (la sacudida) no pasa por el estado de React.
+     */
+    onZumbido?: (mensaje: ChatMessageDto) => void;
+  }
 ): ChatThreadState {
-  const [conversation, setConversation] = useState<ChatConversationDto | null>(null);
-  const [messages, setMessages] = useState<ChatMessageDto[]>([]);
-  const [status, setStatus] = useState<ChatStatusDto | null>(null);
-  const [statuses, setStatuses] = useState<ChatAgentStatusDto[]>([]);
+  const miIdRef = useRef(opciones?.miId);
+  miIdRef.current = opciones?.miId;
+  const onZumbidoRef = useRef(opciones?.onZumbido);
+  onZumbidoRef.current = opciones?.onZumbido;
 
   // El objetivo se aplana a una cadena para poder usarlo como dependencia de
   // los efectos: un objeto nuevo en cada render reabriría el hilo sin parar.
@@ -84,11 +169,31 @@ export function useChatConversation(
       ? null
       : target.kind === 'agent'
         ? `agent:${target.idAgent}`
-        : `group:${target.idConversation}`;
-  const [loading, setLoading] = useState(false);
+        : `${target.kind}:${target.idConversation}`;
+
+  // EL PRIMER RENDER YA SALE DE LA CACHÉ. Antes el estado arrancaba vacío y
+  // con `loading = false`, y la caché se aplicaba en un efecto —después del
+  // primer pintado—: al abrir el chat se alcanzaba a ver un cuadro con
+  // "Todavía no han hablado", luego el esqueleto y luego los mensajes. Ese
+  // parpadeo era el "golpe" que Nicolás veía al abrir el chat.
+  const [inicial] = useState(() => (targetKey !== null ? cacheHilos.get(targetKey) : undefined));
+  const [conversation, setConversation] = useState<ChatConversationDto | null>(
+    inicial?.conversation ?? null
+  );
+  const [messages, setMessages] = useState<ChatMessageDto[]>(() =>
+    (inicial?.messages ?? []).filter((m) => !m.pending && !m.failed)
+  );
+  const [status, setStatus] = useState<ChatStatusDto | null>(
+    inicial?.conversation.agentStatus ?? null
+  );
+  const [statuses, setStatuses] = useState<ChatAgentStatusDto[]>(
+    inicial?.conversation.agentStatuses ?? []
+  );
+  const [metrics, setMetrics] = useState<AgentMetricsDto | null | undefined>(undefined);
+  const [loading, setLoading] = useState(target !== null && !inicial);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hasOlder, setHasOlder] = useState(false);
+  const [hasOlder, setHasOlder] = useState(inicial?.hasOlder ?? false);
   const [loadingOlder, setLoadingOlder] = useState(false);
 
   // Cursor del sondeo: id del último mensaje REAL que ya tenemos.
@@ -114,8 +219,19 @@ export function useChatConversation(
       if (fresh.length === 0) return prev;
 
       // Un mensaje propio que vuelve del servidor reemplaza a su optimista.
+      // "Propio" lo dice el AUTOR cuando se conoce: en un hilo con otra
+      // persona, que ella escriba "ok" justo cuando yo mando "ok" no puede
+      // borrarme el mío de la pantalla. Sin autor (respuesta vieja) o sin saber
+      // quién soy, se conserva el criterio de siempre.
+      const yo = miIdRef.current;
       const pendingBodies = new Set(
-        fresh.filter((m) => m.role === 'user').map((m) => m.body)
+        fresh
+          .filter(
+            (m) =>
+              m.role === 'user' &&
+              (!yo || !m.author || m.author.kind !== 'user' || String(m.author.id) === yo)
+          )
+          .map((m) => m.body)
       );
       const base = prev.filter(
         (m) => !(m.pending && m.role === 'user' && pendingBodies.has(m.body))
@@ -134,24 +250,95 @@ export function useChatConversation(
   useEffect(() => {
     clearTimer();
     abortRef.current?.abort();
-    conversationIdRef.current = null;
-    cursorRef.current = 0;
-    olderCursorRef.current = null;
-    setConversation(null);
-    setMessages([]);
-    setStatus(null);
-    setStatuses([]);
+    const enCache = targetKey !== null ? cacheHilos.get(targetKey) : undefined;
+    if (enCache) {
+      // Hilo ya visitado: se muestra lo que había mientras llega lo fresco.
+      const reales = enCache.messages.filter((m) => !m.pending && !m.failed);
+      conversationIdRef.current = enCache.conversation.id;
+      cursorRef.current = reales.length > 0 ? reales[reales.length - 1].id : 0;
+      olderCursorRef.current = enCache.olderCursor;
+      setConversation(enCache.conversation);
+      setMessages(reales);
+      setStatus(enCache.conversation.agentStatus);
+      setStatuses(enCache.conversation.agentStatuses ?? []);
+      setMetrics(undefined);
+      setHasOlder(enCache.hasOlder);
+    } else {
+      conversationIdRef.current = null;
+      cursorRef.current = 0;
+      olderCursorRef.current = null;
+      setConversation(null);
+      setMessages([]);
+      setStatus(null);
+      setStatuses([]);
+      setMetrics(undefined);
+      setHasOlder(false);
+    }
     setError(null);
-    setHasOlder(false);
 
     if (target === null) return;
 
     let cancelled = false;
-    setLoading(true);
+    // Con caché no se vuelve a "cargar": nada de esqueleto ni compositor
+    // deshabilitado. La recarga es silenciosa.
+    setLoading(!enCache);
+
+    type Historial = {
+      messages: ChatMessageDto[];
+      hasMore: boolean;
+      nextCursor: number | null;
+    };
+    const pedirHistorial = (idConversation: number) =>
+      chatGetJson<Historial>(
+        `/api/chat/conversations/${idConversation}/messages?limit=${MESSAGES_PAGE_DEFAULT}`
+      );
+
+    const aplicarHistorial = (history: Historial | null) => {
+      // El endpoint devuelve del más nuevo al más viejo; la vista los quiere
+      // en orden cronológico.
+      const ordered = [...(history?.messages ?? [])].sort((a, b) => a.id - b.id);
+      // Se conservan los optimistas que el usuario haya enviado mientras
+      // tanto (con caché el compositor ya estaba habilitado).
+      setMessages((prev) => [...ordered, ...prev.filter((m) => m.pending || m.failed)]);
+      setHasOlder(Boolean(history?.hasMore));
+      olderCursorRef.current = history?.nextCursor ?? null;
+      cursorRef.current = ordered.length > 0 ? ordered[ordered.length - 1].id : 0;
+    };
 
     void (async () => {
       try {
         let conversacion: ChatConversationDto | null = null;
+        // Si ya se conoce el id del hilo, el histórico se pide EN PARALELO con
+        // la ficha, en vez de esperar a que vuelva el POST (dos viajes en fila
+        // eran la mayor parte de la espera al abrir).
+        //
+        // Sin caché también se adelanta si la bandeja ya trae el id del hilo
+        // (2026-09-29): antes, la primera apertura de un hilo esperaba el POST
+        // y DESPUÉS pedía el histórico, y el área de mensajes quedaba en
+        // blanco los dos viajes. Ahora el histórico se pinta en cuanto llega,
+        // aunque el POST no haya vuelto (el compositor sí espera al POST).
+        //
+        // Grupos y hilos entre personas (2026-10-03): su id SIEMPRE se conoce
+        // de entrada, así que el histórico sale en paralelo con la ficha en vez
+        // de esperarla. No abre ningún permiso: el endpoint del histórico
+        // valida el acceso por su cuenta (404 → null, y no se pinta nada).
+        const idConocido =
+          enCache?.conversation.id ??
+          (target.kind === 'agent' ? (target.idConversation ?? null) : target.idConversation);
+        const historialAnticipado = idConocido !== null ? pedirHistorial(idConocido) : null;
+        // Si el anticipado falla, no debe quedar como promesa rechazada suelta.
+        historialAnticipado?.catch(() => null);
+        if (historialAnticipado && !enCache) {
+          void historialAnticipado
+            .then((history) => {
+              // Solo si el POST todavía no volvió: si ya volvió, él aplica el
+              // histórico (y confirma que el id era el correcto).
+              if (!cancelled && history && conversationIdRef.current === null) {
+                aplicarHistorial(history);
+              }
+            })
+            .catch(() => null);
+        }
 
         if (target.kind === 'agent') {
           // Idempotente: si ya existe el hilo con este agente, lo devuelve.
@@ -174,15 +361,21 @@ export function useChatConversation(
           const data = (await res.json()) as { conversation: ChatConversationDto };
           conversacion = data.conversation ?? null;
         } else {
-          // Un grupo ya existe: se lee su ficha. 404 = no es suyo o no está en
-          // él (el servidor no distingue las dos cosas a propósito).
+          // Un grupo (o un hilo entre personas) ya existe: se lee su ficha.
+          // 404 = no es suyo o no está en él (el servidor no distingue las dos
+          // cosas a propósito).
           const res = await chatFetch(`/api/chat/conversations/${target.idConversation}`);
           if (!res.ok) {
             if (cancelled) return;
+            const esPersonas = target.kind === 'people';
             setError(
               res.status === 404
-                ? 'Este grupo no existe o usted no forma parte de él.'
-                : 'No se pudo abrir el grupo.'
+                ? esPersonas
+                  ? 'Esta conversación no existe o ya no tiene acceso a ella.'
+                  : 'Este grupo no existe o usted no forma parte de él.'
+                : esPersonas
+                  ? 'No se pudo abrir la conversación.'
+                  : 'No se pudo abrir el grupo.'
             );
             setLoading(false);
             return;
@@ -199,21 +392,14 @@ export function useChatConversation(
         setStatus(data.conversation.agentStatus);
         setStatuses(data.conversation.agentStatuses ?? []);
 
-        const history = await chatGetJson<{
-          messages: ChatMessageDto[];
-          hasMore: boolean;
-          nextCursor: number | null;
-        }>(`/api/chat/conversations/${data.conversation.id}/messages?limit=${MESSAGES_PAGE_DEFAULT}`);
+        const history =
+          historialAnticipado && idConocido === data.conversation.id
+            ? await historialAnticipado
+            : await pedirHistorial(data.conversation.id);
 
         if (cancelled) return;
 
-        // El endpoint devuelve del más nuevo al más viejo; la vista los quiere
-        // en orden cronológico.
-        const ordered = [...(history?.messages ?? [])].sort((a, b) => a.id - b.id);
-        setMessages(ordered);
-        setHasOlder(Boolean(history?.hasMore));
-        olderCursorRef.current = history?.nextCursor ?? null;
-        cursorRef.current = ordered.length > 0 ? ordered[ordered.length - 1].id : 0;
+        aplicarHistorial(history);
       } catch (err) {
         if (!cancelled && !isAbortError(err)) {
           setError('No se pudo abrir la conversación.');
@@ -233,6 +419,18 @@ export function useChatConversation(
     // recargando el histórico y perdiendo el desplazamiento— sin que nada haya
     // cambiado. La cadena captura lo único que importa: cuál hilo es.
   }, [targetKey, clearTimer]);
+
+  // Mantiene la caché del hilo al día con lo último que se ve.
+  useEffect(() => {
+    if (targetKey === null || conversation === null) return;
+    if (conversationIdRef.current !== conversation.id) return;
+    cacheHilos.set(targetKey, {
+      conversation,
+      messages,
+      hasOlder,
+      olderCursor: olderCursorRef.current,
+    });
+  }, [targetKey, conversation, messages, hasOlder]);
 
   /* ──────────────────────────── Sondeo en vivo ────────────────────────── */
 
@@ -272,6 +470,31 @@ export function useChatConversation(
       if (data.messages.length > 0) {
         mergeMessages(data.messages);
         cursorRef.current = data.cursor;
+        // Zumbidos de OTRA persona que llegan en esta vuelta (los del
+        // historial al abrir no pasan por aquí: no se sacude por lo viejo).
+        const yo = miIdRef.current;
+        for (const m of data.messages) {
+          if (m.eventType === 'nudge' && m.author && String(m.author.id) !== yo) {
+            onZumbidoRef.current?.(m);
+          }
+        }
+        // Sonido de mensaje nuevo si llegó algo de otra persona o de un agente
+        // y no lo está viendo (pestaña oculta o sin foco). Lo propio y los
+        // eventos de sistema (zumbido) no suenan aquí.
+        if (
+          data.messages.some(
+            (m) =>
+              !m.eventType &&
+              mensajeFresco(m.createdAt) &&
+              (m.role === 'agent' ||
+                (m.role === 'user' && Boolean(m.author) && Boolean(yo) && String(m.author?.id) !== yo))
+          )
+        ) {
+          avisarMensajeEntrante(conversationId);
+        }
+        // La conversación sube de primera en las listas ya mismo.
+        const ultimo = data.messages[data.messages.length - 1];
+        if (ultimo) notificarActividad(conversationId, ultimo.createdAt);
         // La barra de la cabecera debe enterarse del mensaje nuevo.
         notifyChatRefresh();
       }
@@ -279,6 +502,8 @@ export function useChatConversation(
       // Un sondeo viejo (o un front por delante de la API) no trae el
       // desglose: se deja lo que había en vez de vaciar el encabezado.
       if (data.statuses) setStatuses(data.statuses);
+      // Sin el campo, el usuario no ve métricas (o la API es vieja): se oculta.
+      setMetrics(data.metrics);
 
       // ⬅️ La cadencia la ordena el servidor.
       scheduleNext(data.nextPollMs);
@@ -292,8 +517,12 @@ export function useChatConversation(
     pollRef.current = poll;
   }, [poll]);
 
+  // Por el ID del hilo y no por el objeto: el POST de apertura devuelve una
+  // ficha nueva (mismo hilo) y, con el objeto como dependencia, el sondeo se
+  // cancelaba y arrancaba de nuevo sin motivo.
+  const idConversacionAbierta = conversation?.id ?? null;
   useEffect(() => {
-    if (targetKey === null || conversation === null) return;
+    if (targetKey === null || idConversacionAbierta === null) return;
 
     void poll();
 
@@ -302,13 +531,22 @@ export function useChatConversation(
     };
     document.addEventListener('visibilitychange', onVisibility);
 
+    // "Pregunta ya": lo manda el pulso global o el botón del zumbido cuando
+    // sabe que hay algo nuevo en ESTE hilo (ver pedirSondeoDelHilo).
+    const onPoke = (event: Event) => {
+      const id = (event as CustomEvent<{ idConversation?: number }>).detail?.idConversation;
+      if (id === idConversacionAbierta) void poll();
+    };
+    window.addEventListener(CHAT_THREAD_POKE_EVENT, onPoke);
+
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener(CHAT_THREAD_POKE_EVENT, onPoke);
       clearTimer();
       abortRef.current?.abort();
     };
     // `poll` es estable (useCallback con dependencias estables).
-  }, [targetKey, conversation, poll, clearTimer]);
+  }, [targetKey, idConversacionAbierta, poll, clearTimer]);
 
   /* ─────────────────────────────── Acciones ───────────────────────────── */
 
@@ -324,6 +562,8 @@ export function useChatConversation(
       if (conversationId === null || (text.length === 0 && files.length === 0)) return false;
 
       const optimisticId = -Date.now();
+      // Optimista: la conversación sube de primera en las listas al enviar.
+      notificarActividad(conversationId, new Date().toISOString());
       setSending(true);
       setError(null);
       setMessages((prev) => [
@@ -439,9 +679,40 @@ export function useChatConversation(
     }
   }, []);
 
+  // Hasta qué mensaje ya se marcó leído un hilo entre personas (ver abajo).
+  const marcadoHastaRef = useRef(0);
+  useEffect(() => {
+    marcadoHastaRef.current = 0;
+  }, [targetKey]);
+
+  const esEntrePersonas = target?.kind === 'people';
+
   const markRead = useCallback(async () => {
     const conversationId = conversationIdRef.current;
     if (conversationId === null) return;
+
+    // ENTRE PERSONAS no hay mensajes de agente: lo que hay que leer es lo que
+    // escribió la otra persona, y el "leído" es la marca de agua de cada quien
+    // (chat_participant.last_read_message_id). Se manda hasta el último
+    // mensaje real que se ve, y una sola vez por mensaje nuevo.
+    if (esEntrePersonas) {
+      let ultimo = 0;
+      for (const m of messages) if (!m.pending && !m.failed && m.id > ultimo) ultimo = m.id;
+      if (ultimo === 0 || ultimo <= marcadoHastaRef.current) return;
+      marcadoHastaRef.current = ultimo;
+      try {
+        const res = await chatFetch(`/api/chat/conversations/${conversationId}/read`, {
+          method: 'POST',
+          body: JSON.stringify({ upToMessageId: ultimo }),
+        });
+        if (res.ok) notifyChatRefresh();
+      } catch {
+        // Se reintenta con el próximo mensaje: leer es cosmético.
+        marcadoHastaRef.current = 0;
+      }
+      return;
+    }
+
     if (!messages.some((m) => m.role === 'agent' && !m.readAt)) return;
 
     try {
@@ -458,7 +729,7 @@ export function useChatConversation(
     } catch {
       /* leer es cosmético: si falla, se reintenta en el próximo cambio */
     }
-  }, [messages]);
+  }, [messages, esEntrePersonas]);
 
   // Con el hilo a la vista, lo que llegue se marca leído solo.
   useEffect(() => {
@@ -472,6 +743,7 @@ export function useChatConversation(
     messages,
     status,
     statuses,
+    metrics,
     loading,
     sending,
     error,

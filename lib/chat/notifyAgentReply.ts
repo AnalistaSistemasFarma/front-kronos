@@ -136,7 +136,8 @@ export async function notifyAgentReply(input: NotifyAgentReplyInput): Promise<vo
       // notificación se reemplaza en vez de apilarse.
       tag: `chat-agente-${input.idConversation}`,
       icon: input.agentAvatarUrl ?? undefined,
-    });
+      // Solo push: el chat ya tiene su contador; en la campana era redundante.
+    }, { skipBell: true });
   } catch (error) {
     console.error('[chat/notify] no se pudo avisar la respuesta del agente:', error);
   }

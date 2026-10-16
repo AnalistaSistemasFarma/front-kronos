@@ -1,12 +1,11 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
-import axios from 'axios';
-import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
+import toast from 'react-hot-toast';
 import { useSession } from 'next-auth/react';
+import { useMediaQuery } from '@mantine/hooks';
 import {
   Title,
   Paper,
@@ -24,17 +23,11 @@ import {
   Grid,
   Alert,
   LoadingOverlay,
-  Breadcrumbs,
-  Anchor,
-  Flex,
-  ActionIcon,
   Box,
   Modal,
   Collapse,
   Table,
-  Progress,
   Tooltip,
-  RingProgress,
   Loader,
   Pagination,
   SegmentedControl,
@@ -44,7 +37,6 @@ import {
   IconUser,
   IconBuilding,
   IconNote,
-  IconChevronRight,
   IconAlertCircle,
   IconArrowLeft,
   IconCheck,
@@ -69,9 +61,22 @@ import {
   IconDownload,
   IconListCheck,
 } from '@tabler/icons-react';
-import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
+import {
+  FilterPanel,
+  ProgressRingTile,
+  RequestProgressBar,
+  RequestsHeader,
+  RequestsPage,
+  StatFilterTile,
+} from '../../../../../components/request-general/list/RequestListUi';
+import requestListStyles from '../../../../../components/request-general/list/requestList.module.css';
+import WorkloadDistribution from '../../../../../components/request-general/WorkloadDistribution';
+import {
+  buildTaskDisplayBadges,
+  getSimplifiedTasksProgress,
+} from '@/lib/orion/taskProgress';
 import { createPrerenderSearchParamsForClientPage } from 'next/dist/server/request/search-params';
 
 const ITEMS_PER_PAGE = 100;
@@ -100,6 +105,7 @@ interface RequestTask {
   task: string;
   id_status: number;
   status_task: string;
+  resolution?: string | null;
 }
 
 interface AssignedTask {
@@ -168,6 +174,7 @@ function RequestBoard() {
   const subprocessId = searchParams.get('subprocess_id');
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const isMobile = useMediaQuery('(max-width: 48em)') ?? false;
   const [assignedTasks, setAssignedTasks] = useState<AssignedTask[]>([]);
   const initialType = searchParams.get('type');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>(
@@ -205,29 +212,50 @@ function RequestBoard() {
     process: '',
   });
   const [currentPage, setCurrentPage] = useState(1);
+  // Paginación en el servidor: `tickets` es solo la página actual de solicitudes; total y
+  // contadores vienen de SQL sobre el conjunto filtrado (antes se descargaba todo al navegador).
+  // Las tareas asignadas llegan completas y se paginan en el cliente.
+  const [totalTickets, setTotalTickets] = useState(0);
+  const [statusCounts, setStatusCounts] = useState({ open: 0, resolved: 0 });
+  // Filtros con los que se cargó la lista (para cambiar de página y exportar).
+  const appliedFiltersRef = useRef<typeof filters | null>(null);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [tickets, assignedTasks, typeFilter]);
+  const byCreatedAtDesc = (a: { createdAt: string }, b: { createdAt: string }) =>
+    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
 
-  const allItems: AssignedItem[] = [
-    ...tickets.map(
-      (t): AssignedItem => ({ kind: 'request', key: `req-${t.id}`, data: t, createdAt: t.created_at })
-    ),
-    ...assignedTasks.map(
-      (t): AssignedItem => ({ kind: 'task', key: `task-${t.id}`, data: t, createdAt: t.created_at })
-    ),
-  ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-  const visibleItems = allItems.filter((item) =>
-    typeFilter === 'all' ? true : typeFilter === 'requests' ? item.kind === 'request' : item.kind === 'task'
-  );
-
-  const totalPages = Math.max(1, Math.ceil(visibleItems.length / ITEMS_PER_PAGE));
-  const pageItems = visibleItems.slice(
+  const requestPageItems: AssignedItem[] = tickets.map((t) => ({
+    kind: 'request',
+    key: `req-${t.id}`,
+    data: t,
+    createdAt: t.created_at,
+  }));
+  const taskItems: AssignedItem[] = assignedTasks
+    .map((t): AssignedItem => ({ kind: 'task', key: `task-${t.id}`, data: t, createdAt: t.created_at }))
+    .sort(byCreatedAtDesc);
+  const taskPageItems = taskItems.slice(
     (currentPage - 1) * ITEMS_PER_PAGE,
     currentPage * ITEMS_PER_PAGE
   );
+
+  const requestPages = Math.ceil(totalTickets / ITEMS_PER_PAGE);
+  const taskPages = Math.ceil(taskItems.length / ITEMS_PER_PAGE);
+  const totalPages = Math.max(
+    1,
+    typeFilter === 'requests'
+      ? requestPages
+      : typeFilter === 'tasks'
+        ? taskPages
+        : Math.max(requestPages, taskPages)
+  );
+
+  // En «Todos» cada página junta su página de solicitudes con su tramo de tareas.
+  const pageItems: AssignedItem[] =
+    typeFilter === 'requests'
+      ? requestPageItems
+      : typeFilter === 'tasks'
+        ? taskPageItems
+        : [...requestPageItems, ...taskPageItems].sort(byCreatedAtDesc);
+  const totalItemsCount = totalTickets + assignedTasks.length;
   const [filtersExpanded, setFiltersExpanded] = useState(false);
 
   useEffect(() => {
@@ -303,37 +331,79 @@ function RequestBoard() {
     await fetchAssignedWithUserId(userId, filters);
   };
 
+  // El usuario lo toma el servidor de la sesión; aquí solo van los filtros.
+  const buildTicketParams = (filtersToUse?: typeof filters) => {
+    const params = new URLSearchParams();
+    if (filtersToUse) {
+      if (filtersToUse.id) params.append('id', filtersToUse.id);
+      if (filtersToUse.status) params.append('status', filtersToUse.status);
+      if (filtersToUse.company) params.append('company', filtersToUse.company);
+      if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
+      if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
+      if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
+      if (filtersToUse.process) params.append('process', filtersToUse.process);
+    }
+    return params;
+  };
+
+  type RequestPage = {
+    rows: Ticket[];
+    total: number;
+    counts: { open: number; resolved: number };
+  };
+  const EMPTY_REQUEST_PAGE: RequestPage = { rows: [], total: 0, counts: { open: 0, resolved: 0 } };
+
+  // Página de solicitudes que hay en `tickets` (0 = ninguna cargada).
+  const loadedRequestPageRef = useRef(0);
+
+  const includesRequests = (filtersToUse?: typeof filters) =>
+    !TASK_ONLY_STATUSES.includes(filtersToUse?.status || '');
+
+  const fetchRequestPage = async (
+    filtersToUse: typeof filters | undefined,
+    page: number
+  ): Promise<RequestPage> => {
+    const params = buildTicketParams(filtersToUse);
+    params.append('page', String(page));
+    params.append('pageSize', String(ITEMS_PER_PAGE));
+    const res = await fetch(`/api/requests-general/request-assigned?${params.toString()}`);
+    if (!res.ok) throw new Error('Failed to fetch assigned tickets');
+    const data = await res.json();
+    return {
+      rows: Array.isArray(data.rows) ? data.rows : [],
+      total: Number(data.total) || 0,
+      counts: {
+        open: Number(data.counts?.open) || 0,
+        resolved: Number(data.counts?.resolved) || 0,
+      },
+    };
+  };
+
+  const applyRequestPage = (data: RequestPage, page: number) => {
+    setTickets(data.rows);
+    setTotalTickets(data.total);
+    setStatusCounts(data.counts);
+    loadedRequestPageRef.current = page;
+    fetchTasksForTickets(data.rows);
+  };
+
   const fetchAssignedWithUserId = async (userIdToUse: number, filtersToUse?: typeof filters) => {
     try {
       setLoading(true);
-
-      const params = new URLSearchParams();
-      params.append('idUser', userIdToUse.toString());
-
-      if (filtersToUse) {
-        if (filtersToUse.id) params.append('id', filtersToUse.id); 
-        if (filtersToUse.status) params.append('status', filtersToUse.status);
-        if (filtersToUse.company) params.append('company', filtersToUse.company);
-        if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
-        if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
-        if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
-        if (filtersToUse.process) params.append('process', filtersToUse.process);
-      }
+      appliedFiltersRef.current = filtersToUse ?? null;
+      setCurrentPage(1);
 
       const statusValue = filtersToUse?.status || '';
-      const includeRequests = !TASK_ONLY_STATUSES.includes(statusValue);
+      const includeRequests = includesRequests(filtersToUse);
       const includeTasks = !REQUEST_ONLY_STATUSES.includes(statusValue) && !filtersToUse?.process;
 
-      const taskParams = new URLSearchParams(params);
+      // activities-assigned aún filtra por ?idUser= (request-assigned usa la sesión).
+      const taskParams = buildTicketParams(filtersToUse);
       taskParams.delete('process');
+      taskParams.append('idUser', userIdToUse.toString());
 
       const [requestResult, taskResult] = await Promise.allSettled([
-        includeRequests
-          ? fetch(`/api/requests-general/request-assigned?${params.toString()}`).then((res) => {
-              if (!res.ok) throw new Error('Failed to fetch assigned tickets');
-              return res.json();
-            })
-          : Promise.resolve([]),
+        includeRequests ? fetchRequestPage(filtersToUse, 1) : Promise.resolve(EMPTY_REQUEST_PAGE),
         includeTasks
           ? fetch(`/api/requests-general/activities-assigned?${taskParams.toString()}`).then((res) => {
               if (!res.ok) throw new Error('Failed to fetch assigned tasks');
@@ -342,12 +412,15 @@ function RequestBoard() {
           : Promise.resolve([]),
       ]);
 
-      const requestData = requestResult.status === 'fulfilled' ? requestResult.value : [];
-      const taskData = taskResult.status === 'fulfilled' ? taskResult.value : [];
-
-      setTickets(requestData);
-      setAssignedTasks(taskData);
-      fetchTasksForTickets(requestData);
+      applyRequestPage(
+        requestResult.status === 'fulfilled' ? requestResult.value : EMPTY_REQUEST_PAGE,
+        1
+      );
+      setAssignedTasks(
+        taskResult.status === 'fulfilled' && Array.isArray(taskResult.value)
+          ? taskResult.value
+          : []
+      );
 
       if (requestResult.status === 'rejected' && taskResult.status === 'rejected') {
         setError('No se pudieron cargar las solicitudes y tareas asignadas. Intenta de nuevo.');
@@ -362,9 +435,39 @@ function RequestBoard() {
     }
   };
 
+  // Las solicitudes se piden por página al servidor; las tareas ya están en memoria.
+  const goToPage = async (page: number, type: TypeFilter = typeFilter) => {
+    setCurrentPage(page);
+    const applied = appliedFiltersRef.current ?? filters;
+    if (type === 'tasks' || !includesRequests(applied)) return;
+    if (loadedRequestPageRef.current === page) return;
+    try {
+      setLoading(true);
+      applyRequestPage(await fetchRequestPage(applied, page), page);
+    } catch (err) {
+      console.error('Error fetching assigned tickets page:', err);
+      setError('No se pudieron cargar las solicitudes asignadas. Intenta de nuevo.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const changeTypeFilter = (type: TypeFilter) => {
+    setTypeFilter(type);
+    void goToPage(1, type);
+  };
+
   const fetchTasksForTickets = async (ticketsToUse: Ticket[]) => {
     try {
-      const response = await fetch('/api/requests-general/activities-requets');
+      // Solo las tareas de las solicitudes visibles (antes: la tabla completa de tareas).
+      const ids = [...new Set(ticketsToUse.map((t) => t.id))];
+      if (ids.length === 0) {
+        setTasksByRequest({});
+        return;
+      }
+      const response = await fetch(
+        `/api/requests-general/activities-requets?ids=${ids.join(',')}`
+      );
       if (!response.ok) throw new Error('Failed to fetch request tasks');
 
       const data: RequestTask[] = await response.json();
@@ -579,24 +682,18 @@ function RequestBoard() {
     }
   };
 
-  const getTasksProgress = (tasks: RequestTask[]) => {
-    const total = tasks.length;
-    const done = tasks.filter((t) => t.status_task?.toLowerCase() === 'resuelto').length;
-    const percent = total === 0 ? 0 : Math.round((done / total) * 100);
-    return { total, done, percent };
-  };
+  const getTasksProgress = (tasks: RequestTask[]) => getSimplifiedTasksProgress(tasks);
 
   const getGlobalTasksProgress = () => {
     const allTasks = Object.values(tasksByRequest).flat();
     return getTasksProgress(allTasks);
   };
 
-  const pendingRequestsCount = tickets.filter((t) => t.status?.toLowerCase() === 'abierto').length;
   const pendingTasksCount = assignedTasks.filter((t) =>
     ['sin empezar', 'abierto'].includes(t.status_task?.toLowerCase())
   ).length;
   const completedCount =
-    tickets.filter((t) => t.status?.toLowerCase() === 'resuelto').length +
+    statusCounts.resolved +
     assignedTasks.filter((t) => t.status_task?.toLowerCase() === 'resuelto').length;
 
   const filterByStatus = (value: string, type: TypeFilter = 'all') => {
@@ -608,25 +705,19 @@ function RequestBoard() {
     }
   };
 
-  const breadcrumbItems = [
-    { title: 'Procesos', href: '/process' },
-    { title: 'Solicitudes Generales', href: '#' },
-    { title: 'Solicitudes Asignadas', href: '#' },
-  ].map((item, index) =>
-    item.href !== '#' ? (
-      <Link key={index} href={item.href} passHref>
-        <Anchor component='span' className='hover:text-blue-600 transition-colors'>
-          {item.title}
-        </Anchor>
-      </Link>
-    ) : (
-      <Text key={index} component='span' c='dimmed'>
-        {item.title}
-      </Text>
-    )
-  );
-
   async function exportToExcel() {
+    // La tabla solo tiene la página visible: la exportación pide la lista completa con los
+    // mismos filtros (la ruta sin `page` devuelve todo).
+    const params = buildTicketParams(appliedFiltersRef.current ?? filters);
+    const response = await fetch(`/api/requests-general/request-assigned?${params.toString()}`);
+    if (!response.ok) {
+      toast.error('No se pudo generar el informe');
+      return;
+    }
+    const allTickets = (await response.json()) as Ticket[];
+
+    // exceljs (pesado) solo se descarga al exportar.
+    const { default: ExcelJS } = await import('exceljs');
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Datos');
 
@@ -661,7 +752,8 @@ function RequestBoard() {
 
     worksheet.columns = columnMapOrdered;
 
-    tickets.forEach(item => {
+    // Una fila por solicitud (antes se agregaba cada una dos veces).
+    allTickets.forEach(item => {
       const row: Record<TicketKeys, any> = {} as Record<TicketKeys, any>;
 
       columnMapOrdered.forEach(col => {
@@ -800,239 +892,92 @@ function RequestBoard() {
     </Table.Tr>
   );
 
+  const globalProgress = getGlobalTasksProgress();
+
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
-      <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
-          <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
-            {breadcrumbItems}
-          </Breadcrumbs>
-
-          <Flex justify='space-between' align='center' mb='4'>
-            <div>
-              <Title
-                order={1}
-                className='text-3xl font-bold mb-2 flex items-center gap-3'
-              >
-                <IconTicket size={32} className='text-blue-600' />
-                Solicitudes y Tareas Asignadas
-              </Title>
-              <Text size='lg' c='dimmed'>
-                Gestión de solicitudes y tareas asignadas a ti
-              </Text>
-            </div>
-          </Flex>
-
-          <Grid columns={10}>
-            <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
-              <Card
-                p='md'
-                radius='md'
-                withBorder
-                role='button'
-                aria-label='Mostrar todas las solicitudes y tareas'
-                onClick={() => filterByStatus('0')}
-                style={{
-                  cursor: 'pointer',
-                  backgroundColor: 'var(--mantine-color-blue-light)',
-                  borderColor:
-                    filters.status === '0' && typeFilter === 'all'
-                      ? 'var(--mantine-color-blue-filled)'
-                      : 'transparent',
-                  borderWidth: 2,
-                  transition: 'border-color 150ms ease',
-                }}
-              >
-                <Group wrap='nowrap'>
-                  <IconTicket size={24} color='var(--mantine-color-blue-light-color)' />
-                  <div>
-                    <Text size='xs' c='var(--mantine-color-blue-light-color)'>
-                      Total Asignado
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {allItems.length}
-                    </Text>
-                    <Text size='xs' c='dimmed'>
-                      {tickets.length} solicitudes · {assignedTasks.length} tareas
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
-              <Card
-                p='md'
-                radius='md'
-                withBorder
-                role='button'
-                aria-label='Filtrar solicitudes pendientes'
-                onClick={() => filterByStatus('1', 'requests')}
-                style={{
-                  cursor: 'pointer',
-                  backgroundColor: 'var(--mantine-color-orange-light)',
-                  borderColor:
-                    filters.status === '1' && typeFilter === 'requests'
-                      ? 'var(--mantine-color-orange-filled)'
-                      : 'transparent',
-                  borderWidth: 2,
-                  transition: 'border-color 150ms ease',
-                }}
-              >
-                <Group wrap='nowrap'>
-                  <IconProgress size={24} color='var(--mantine-color-orange-light-color)' />
-                  <div>
-                    <Text size='xs' c='var(--mantine-color-orange-light-color)'>
-                      Solicitudes Pendientes
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {pendingRequestsCount}
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
-              <Card
-                p='md'
-                radius='md'
-                withBorder
-                role='button'
-                aria-label='Mostrar tareas asignadas'
-                onClick={() => filterByStatus('0', 'tasks')}
-                style={{
-                  cursor: 'pointer',
-                  backgroundColor: 'var(--mantine-color-violet-light)',
-                  borderColor:
-                    typeFilter === 'tasks'
-                      ? 'var(--mantine-color-violet-filled)'
-                      : 'transparent',
-                  borderWidth: 2,
-                  transition: 'border-color 150ms ease',
-                }}
-              >
-                <Group wrap='nowrap'>
-                  <IconListCheck size={24} color='var(--mantine-color-violet-light-color)' />
-                  <div>
-                    <Text size='xs' c='var(--mantine-color-violet-light-color)'>
-                      Tareas Pendientes
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {pendingTasksCount}
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
-              <Card
-                p='md'
-                radius='md'
-                withBorder
-                role='button'
-                aria-label='Filtrar solicitudes y tareas completadas'
-                onClick={() => filterByStatus('2')}
-                style={{
-                  cursor: 'pointer',
-                  backgroundColor: 'var(--mantine-color-green-light)',
-                  borderColor:
-                    filters.status === '2'
-                      ? 'var(--mantine-color-green-filled)'
-                      : 'transparent',
-                  borderWidth: 2,
-                  transition: 'border-color 150ms ease',
-                }}
-              >
-                <Group wrap='nowrap'>
-                  <IconCheck size={24} color='var(--mantine-color-green-light-color)' />
-                  <div>
-                    <Text size='xs' c='var(--mantine-color-green-light-color)'>
-                      Completadas
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {completedCount}
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
-              <Card p='md' radius='md' withBorder>
-                {(() => {
-                  const { total, done, percent } = getGlobalTasksProgress();
-                  return (
-                    <Group wrap='nowrap'>
-                      <RingProgress
-                        size={56}
-                        thickness={6}
-                        roundCaps
-                        sections={[
-                          { value: percent, color: percent === 100 ? 'green' : 'blue' },
-                        ]}
-                        label={
-                          <Text size='xs' ta='center' fw={700}>
-                            {percent}%
-                          </Text>
-                        }
-                      />
-                      <div>
-                        <Text size='xs' c='dimmed'>
-                          Avance de tareas
-                        </Text>
-                        <Text size='lg' fw={600}>
-                          {done}/{total}
-                        </Text>
-                      </div>
-                    </Group>
-                  );
-                })()}
-              </Card>
-            </Grid.Col>
+    <RequestsPage>
+      <RequestsHeader
+        crumbs={[
+          { title: 'Procesos', href: '/process' },
+          { title: 'Solicitudes Generales' },
+          { title: 'Solicitudes Asignadas' },
+        ]}
+        title='Solicitudes y Tareas Asignadas'
+        subtitle='Gestión de solicitudes y tareas asignadas a ti'
+        actions={
+          <>
             {filters.process == '4' && (
-              <Grid.Col span={{ base: 10, sm: 5, md: 2 }}>
-                <Card p='md' radius='md' withBorder className='bg-green-50 border-green-200'>
-                  <Group>
-                    <Button
-                      onClick={() => exportToExcel()}
-                      size='lg'
-                      leftSection={<IconDownload size={18} />}
-                      className='bg-green-500 hover:bg-green-700'
-                    >
-                      Descargar XLSX
-                    </Button>
-                  </Group>
-                </Card>
-              </Grid.Col>
+              <Button
+                variant='default'
+                radius='xl'
+                leftSection={<IconDownload size={16} />}
+                onClick={() => exportToExcel()}
+              >
+                Descargar XLSX
+              </Button>
             )}
-          </Grid>
-        </Card>
+            <WorkloadDistribution onReassigned={() => fetchTickets()} />
+          </>
+        }
+      />
 
-        {error && (
-          <Alert
-            icon={<IconAlertCircle size={20} />}
-            title='Error'
-            color='red'
-            mb='md'
-            className='border-red-200 bg-red-50'
-          >
-            {error}
-          </Alert>
-        )}
+      <div className={requestListStyles.statGrid}>
+        <StatFilterTile
+          icon={<IconTicket size={20} />}
+          label='Total asignado'
+          value={totalItemsCount}
+          hint={`${totalTickets} solicitudes · ${assignedTasks.length} tareas`}
+          tone='info'
+          active={filters.status === '0' && typeFilter === 'all'}
+          onClick={() => filterByStatus('0')}
+          ariaLabel='Mostrar todas las solicitudes y tareas'
+        />
+        <StatFilterTile
+          icon={<IconProgress size={20} />}
+          label='Solicitudes pendientes'
+          value={statusCounts.open}
+          tone='warning'
+          active={filters.status === '1' && typeFilter === 'requests'}
+          onClick={() => filterByStatus('1', 'requests')}
+          ariaLabel='Filtrar solicitudes pendientes'
+        />
+        <StatFilterTile
+          icon={<IconListCheck size={20} />}
+          label='Tareas pendientes'
+          value={pendingTasksCount}
+          tone='violet'
+          active={typeFilter === 'tasks'}
+          onClick={() => filterByStatus('0', 'tasks')}
+          ariaLabel='Mostrar tareas asignadas'
+        />
+        <StatFilterTile
+          icon={<IconCheck size={20} />}
+          label='Completadas'
+          value={completedCount}
+          tone='ok'
+          active={filters.status === '2'}
+          onClick={() => filterByStatus('2')}
+          ariaLabel='Filtrar solicitudes y tareas completadas'
+        />
+        <ProgressRingTile
+          label={`Avance de tareas${totalPages > 1 ? ' (esta página)' : ''}`}
+          done={globalProgress.done}
+          total={globalProgress.total}
+          percent={globalProgress.percent}
+        />
+      </div>
 
-        <Card shadow='sm' p='lg' radius='md' withBorder mb='6'>
-          <Group justify='space-between' mb='md'>
-            <Title order={3} className='flex items-center gap-2'>
-              <IconFilter size={20} />
-              Filtros de Búsqueda
-            </Title>
-            <ActionIcon
-              variant='subtle'
-              onClick={() => setFiltersExpanded(!filtersExpanded)}
-              aria-label={filtersExpanded ? 'Ocultar filtros' : 'Mostrar filtros'}
-            >
-              {filtersExpanded ? <IconX size={16} /> : <IconFilter size={16} />}
-            </ActionIcon>
-          </Group>
+      {error && (
+        <Alert icon={<IconAlertCircle size={20} />} title='Error' color='red' radius='lg' mt='md'>
+          {error}
+        </Alert>
+      )}
 
+      <FilterPanel
+        expanded={filtersExpanded}
+        onToggle={() => setFiltersExpanded(!filtersExpanded)}
+        icon={<IconFilter size={18} />}
+      >
           <Collapse in={filtersExpanded}>
             <Box mt='md'>
               <Grid>
@@ -1135,28 +1080,106 @@ function RequestBoard() {
               </Group>
             </Box>
           </Collapse>
-        </Card>
+      </FilterPanel>
 
-        <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
+        <Card shadow='sm' radius='md' withBorder className='overflow-hidden' mt='md'>
           <LoadingOverlay visible={loading} />
 
-          <Group justify='space-between' mb='md' wrap='wrap'>
-            <Title order={3} className='flex items-center gap-2'>
+          <Group justify='space-between' mb='md' wrap='wrap' gap='sm'>
+            <Title order={3} className='flex items-center gap-2 text-lg sm:text-xl'>
               <IconTicket size={20} />
               Lista de Solicitudes y Tareas Asignadas
             </Title>
             <SegmentedControl
+              fullWidth={isMobile}
+              size={isMobile ? 'xs' : 'sm'}
+              w={{ base: '100%', sm: 'auto' }}
               value={typeFilter}
-              onChange={(value) => setTypeFilter(value as TypeFilter)}
+              onChange={(value) => changeTypeFilter(value as TypeFilter)}
               data={[
-                { value: 'all', label: `Todos (${allItems.length})` },
-                { value: 'requests', label: `Solicitudes (${tickets.length})` },
+                { value: 'all', label: `Todos (${totalItemsCount})` },
+                { value: 'requests', label: `Solicitudes (${totalTickets})` },
                 { value: 'tasks', label: `Tareas (${assignedTasks.length})` },
               ]}
             />
           </Group>
 
-          <div className='overflow-x-auto'>
+          {/* Móvil: tarjetas apiladas en lugar de la tabla ancha */}
+          <Stack gap='xs' hiddenFrom='md' data-testid='assigned-mobile-list'>
+            {pageItems.length === 0 ? (
+              <Text size='sm' c='dimmed' ta='center' py='xl'>
+                {typeFilter === 'tasks'
+                  ? 'No se encontraron tareas asignadas'
+                  : typeFilter === 'requests'
+                    ? 'No se encontraron solicitudes asignadas'
+                    : 'No se encontraron solicitudes ni tareas asignadas'}
+              </Text>
+            ) : (
+              pageItems.map((item) => {
+                const isTask = item.kind === 'task';
+                const t = isTask ? (item.data as AssignedTask) : null;
+                const r = isTask ? null : (item.data as Ticket);
+                const open = () => {
+                  sessionStorage.setItem('selectedRequest', JSON.stringify(item.data));
+                  window.open(
+                    isTask
+                      ? `/process/request-general/view-activities?id=${t!.id}&from=assigned-activities`
+                      : `/process/request-general/view-request?id=${r!.id}&from=assigned-requests`
+                  );
+                };
+                const progress =
+                  r && tasksByRequest[r.id]?.length ? getTasksProgress(tasksByRequest[r.id]) : null;
+                return (
+                  <Paper
+                    key={item.key}
+                    withBorder
+                    radius='md'
+                    p='sm'
+                    role='button'
+                    tabIndex={0}
+                    onClick={open}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') open();
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <Group justify='space-between' wrap='nowrap' gap='xs' mb={4}>
+                      <Group gap={6} wrap='nowrap' style={{ minWidth: 0 }}>
+                        {renderTypeBadge(isTask ? 'task' : 'request')}
+                        <Text size='sm' fw={700}>
+                          #{isTask ? t!.id_request_general : r!.id}
+                        </Text>
+                      </Group>
+                      {renderStatusBadge(isTask ? t!.status_task : r!.status)}
+                    </Group>
+                    <Text size='sm' fw={600} lineClamp={2} style={{ overflowWrap: 'anywhere' }}>
+                      {isTask ? t!.task : r!.subject}
+                    </Text>
+                    {isTask && (
+                      <Text size='xs' c='dimmed' lineClamp={1}>
+                        {t!.subject_request}
+                      </Text>
+                    )}
+                    {progress && (
+                      <div style={{ marginTop: 6 }}>
+                        <RequestProgressBar {...progress} />
+                      </div>
+                    )}
+                    <Text size='xs' c='dimmed' mt={6} style={{ overflowWrap: 'anywhere' }}>
+                      {[isTask ? null : r!.process, isTask ? t!.company : r!.company, formatAssignedDate(isTask ? t!.created_at : r!.created_at)]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </Text>
+                    <Text size='xs' c='dimmed' style={{ overflowWrap: 'anywhere' }}>
+                      {isTask ? t!.name_requester : r!.requester} → {isTask ? t!.assigned : r!.user}
+                    </Text>
+                  </Paper>
+                );
+              })
+            )}
+          </Stack>
+
+          <Box visibleFrom='md' className='overflow-x-auto'>
             <Table striped highlightOnHover>
               <Table.Thead>
                 <Table.Tr>
@@ -1170,7 +1193,7 @@ function RequestBoard() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {visibleItems.length === 0 ? (
+                {pageItems.length === 0 ? (
                   <Table.Tr>
                     <Table.Td colSpan={7} className='text-center py-12 text-gray-500'>
                       <div className='flex flex-col items-center gap-3'>
@@ -1215,32 +1238,14 @@ function RequestBoard() {
                         </Text>
                         {tasksByRequest[ticket.id]?.length ? (
                           <Stack gap={6} mt={8}>
-                            {(() => {
-                              const { total, done, percent } = getTasksProgress(
-                                tasksByRequest[ticket.id]
-                              );
-                              return (
-                                <Group gap={8} wrap='nowrap'>
-                                  <Progress
-                                    value={percent}
-                                    color={percent === 100 ? 'green' : 'blue'}
-                                    size='sm'
-                                    radius='xl'
-                                    style={{ flex: 1, maxWidth: 120 }}
-                                  />
-                                  <Text size='xs' c='dimmed' fw={500} style={{ whiteSpace: 'nowrap' }}>
-                                    {done}/{total}
-                                  </Text>
-                                </Group>
-                              );
-                            })()}
+                            <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
                             <Group gap={6} wrap='wrap'>
-                              {tasksByRequest[ticket.id].map((task) => {
-                                const { color, Icon } = getTaskVisual(task.status_task);
+                              {buildTaskDisplayBadges(tasksByRequest[ticket.id]).map((badge) => {
+                                const { color, Icon } = getTaskVisual(badge.statusKey);
                                 return (
                                   <Tooltip
-                                    key={task.id}
-                                    label={`${task.task} · ${task.status_task}`}
+                                    key={badge.key}
+                                    label={`${badge.label} · ${badge.statusLabel}`}
                                     withArrow
                                   >
                                     <Badge
@@ -1249,12 +1254,19 @@ function RequestBoard() {
                                       size='sm'
                                       radius='sm'
                                       styles={{
-                                        root: { textTransform: 'none', fontWeight: 500, cursor: 'default' },
-                                        label: { overflow: 'hidden', textOverflow: 'ellipsis' },
+                                        root: {
+                                          textTransform: 'none',
+                                          fontWeight: 500,
+                                          cursor: 'default',
+                                        },
+                                        label: {
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis',
+                                        },
                                       }}
                                       leftSection={<Icon size={13} />}
                                     >
-                                      {task.task}
+                                      {badge.label}
                                     </Badge>
                                   </Tooltip>
                                 );
@@ -1307,16 +1319,21 @@ function RequestBoard() {
                 )}
               </Table.Tbody>
             </Table>
-          </div>
+          </Box>
 
           {totalPages > 1 && (
             <Group justify='center' mt='md'>
-              <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} />
+              <Pagination
+                total={totalPages}
+                value={currentPage}
+                onChange={(page) => void goToPage(page)}
+                siblings={isMobile ? 0 : 1}
+                size={isMobile ? 'sm' : 'md'}
+              />
             </Group>
           )}
         </Card>
-      </div>
-    </div>
+    </RequestsPage>
   );
 }
 

@@ -15,11 +15,8 @@ if (fs.existsSync(envPath)) {
 }
 
 const { resolveConnection } = require('../dbconfig');
-const { ensureDatabaseHostResolved } = require('../lib/db/ensureDatabaseHost.server.cjs');
 
 async function main() {
-  console.log('Perfil:', process.env.DB_NETWORK_PROFILE || '(no definido)');
-  await ensureDatabaseHostResolved();
   const conn = resolveConnection();
   console.log('Servidor:', conn.server, 'puerto:', conn.port, 'BD:', conn.database);
 
@@ -42,6 +39,5 @@ main()
   .then(() => process.exit(0))
   .catch((e) => {
     console.error('Conexión FALLÓ:', e.message);
-    console.error('En oficina sin cable: PowerShell como admin → npm run db:route');
     process.exit(1);
   });

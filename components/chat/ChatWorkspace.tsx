@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
@@ -15,7 +15,9 @@ import {
   Grid,
   Group,
   Loader,
+  Modal,
   SimpleGrid,
+  Stack,
   Text,
   TextInput,
   Tooltip,
@@ -34,12 +36,17 @@ import {
   IconLock,
   IconPlus,
   IconSearch,
+  IconTrash,
   IconUsersGroup,
+  IconMessageCircle,
+  IconPhoto,
   IconX,
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
 import { EsqueletoPantallaChat } from './ChatSkeletons';
 import ChatThread from './ChatThread';
+import { ChatNudgeButton, ChatNudgeMenu } from './ChatNudgeControls';
+import ChatSoundMenu from './ChatSoundMenu';
 
 /*
  * Los tres cuadros (detalle de agente, mensaje masivo, grupo nuevo) quedan
@@ -54,13 +61,22 @@ import ChatThread from './ChatThread';
 const AgentDetailModal = dynamic(() => import('./AgentDetailModal'), { ssr: false });
 const ChatBroadcastModal = dynamic(() => import('./ChatBroadcastModal'), { ssr: false });
 const ChatGroupModal = dynamic(() => import('./ChatGroupModal'), { ssr: false });
+const ChatPeopleModal = dynamic(() => import('./ChatPeopleModal'), { ssr: false });
+const ChatMediaPanel = dynamic(() => import('./ChatMediaPanel'), { ssr: false });
 import { useChatOverview } from './useChatOverview';
+import { precargarHiloDeAgente } from './useChatConversation';
+import {
+  CHAT_RAIL_OPEN_EVENT,
+  sortConversationsByActivity,
+  type ChatRailOpenDetail,
+} from '../../lib/chat/rail';
 import {
   describeAgentStatus,
   findAgentByRouteKey,
   formatChatTime,
   groupAgentsByCompany,
   MIN_SEARCH_CHARS,
+  otraPersona,
   toPlainPreview,
   type ChatAgentDto,
   type ChatConversationDto,
@@ -87,7 +103,11 @@ import {
 /**
  * Lo que está abierto: un asistente, un grupo, o nada. Nunca las dos cosas.
  */
-type Seleccion = { tipo: 'agente'; code: string } | { tipo: 'grupo'; id: number } | null;
+type Seleccion =
+  | { tipo: 'agente'; code: string }
+  | { tipo: 'grupo'; id: number }
+  | { tipo: 'persona'; id: number }
+  | null;
 
 function AgentCard({
   agent,
@@ -98,21 +118,32 @@ function AgentCard({
   selected,
   compact,
   onSelect,
+  onPrecargar,
   status,
+  previewPendiente = false,
 }: {
   agent: ChatAgentDto;
   unread: number;
   statusLabel: string;
   lastPreview: string | null;
+  /**
+   * Todavía no se sabe el último mensaje (la bandeja no ha llegado). Se deja
+   * el renglón reservado en blanco en vez de pintar la descripción y
+   * reemplazarla un instante después por la vista previa.
+   */
+  previewPendiente?: boolean;
   lastAt: string | null;
   selected: boolean;
   compact: boolean;
   onSelect: () => void;
+  onPrecargar?: () => void;
   status: Parameters<typeof describeAgentStatus>[0];
 }) {
   return (
     <UnstyledButton
       onClick={onSelect}
+      onPointerEnter={onPrecargar}
+      onPointerDown={onPrecargar}
       className={[
         'chat-agent-card',
         compact ? 'chat-agent-card--compact' : '',
@@ -146,7 +177,7 @@ function AgentCard({
             )}
           </Group>
           <Text size='xs' lineClamp={compact ? 1 : 2} className='chat-text-muted'>
-            {lastPreview || agent.description || statusLabel}
+            {lastPreview || (previewPendiente ? '\u00a0' : agent.description || statusLabel)}
           </Text>
           {!compact && (
             <Group gap={6} mt={6}>
@@ -258,15 +289,91 @@ function GroupCard({
   );
 }
 
+/**
+ * Tarjeta de un hilo ENTRE PERSONAS en la misma lista (sección "Personas").
+ *
+ * Misma clase que las demás tarjetas por la misma razón que GroupCard: en una
+ * misma lista, dos estilos distintos se ven como un error. La cara es la de la
+ * OTRA persona.
+ */
+function PersonCard({
+  conversacion,
+  miId,
+  selected,
+  compact,
+  onSelect,
+}: {
+  conversacion: ChatConversationDto;
+  miId: string | undefined;
+  selected: boolean;
+  compact: boolean;
+  onSelect: () => void;
+}) {
+  const otra = otraPersona(conversacion, miId);
+  const nombre = otra?.name ?? 'Persona';
+
+  return (
+    <UnstyledButton
+      onClick={onSelect}
+      className={[
+        'chat-agent-card',
+        compact ? 'chat-agent-card--compact' : '',
+        selected ? 'chat-agent-card--selected' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      aria-label={`Abrir la conversación con ${nombre}`}
+    >
+      <Group gap='sm' wrap='nowrap' align='flex-start'>
+        <AgentAvatar
+          code={String(otra?.id ?? conversacion.id)}
+          displayName={nombre}
+          avatarUrl={otra?.avatarUrl ?? null}
+          unread={conversacion.unreadCount}
+          size={compact ? 34 : 42}
+          showStatus={false}
+          withTooltip={false}
+        />
+        <Box style={{ flex: 1, minWidth: 0 }}>
+          <Group gap={6} wrap='nowrap' justify='space-between'>
+            <Text size='sm' fw={600} lineClamp={1}>
+              {nombre}
+            </Text>
+            {conversacion.lastMessageAt && (
+              <Text size='xs' className='chat-text-muted' style={{ flexShrink: 0 }}>
+                {formatChatTime(conversacion.lastMessageAt)}
+              </Text>
+            )}
+          </Group>
+          <Text size='xs' className='chat-text-muted' lineClamp={1}>
+            {conversacion.lastMessage
+              ? toPlainPreview(conversacion.lastMessage.preview)
+              : 'Sin mensajes todavía'}
+          </Text>
+        </Box>
+      </Group>
+    </UnstyledButton>
+  );
+}
+
 export default function ChatWorkspace({
   initialAgentCode,
   initialGroupId,
+  initialPersonaId,
+  abrirBuscadorPersonas = false,
 }: {
   initialAgentCode?: string;
   /** Grupo a abrir de entrada: es lo que usa /process/chat/grupo/[id]. */
   initialGroupId?: number;
+  /** Hilo entre personas a abrir de entrada: /process/chat/persona/[id]. */
+  initialPersonaId?: number;
+  /**
+   * Abrir de entrada el buscador de personas. Es lo que pasa al entrar por la
+   * tarjeta del piloto en el hub (/process/chat/personas).
+   */
+  abrirBuscadorPersonas?: boolean;
 }) {
-  const overview = useChatOverview();
+  const overview = useChatOverview({ primeraCargaInmediata: true });
   const searchParams = useSearchParams();
   const { data: session } = useSession();
 
@@ -297,16 +404,32 @@ export default function ChatWorkspace({
       ? { tipo: 'agente', code: initialAgentCode }
       : initialGroupId
         ? { tipo: 'grupo', id: initialGroupId }
-        : null
+        : initialPersonaId
+          ? { tipo: 'persona', id: initialPersonaId }
+          : null
   );
   // Se derivan para no tocar el resto de la pantalla, que ya leía estos dos.
   const selectedCode = seleccion?.tipo === 'agente' ? seleccion.code : null;
   const selectedGroupId = seleccion?.tipo === 'grupo' ? seleccion.id : null;
+  const selectedPersonaId = seleccion?.tipo === 'persona' ? seleccion.id : null;
   const [grupoNuevoAbierto, setGrupoNuevoAbierto] = useState(false);
+  // Buscador de personas (piloto "Personas").
+  const [personasAbierto, setPersonasAbierto] = useState(abrirBuscadorPersonas);
+  // El hilo que se ACABA de abrir desde el buscador: la bandeja todavía no lo
+  // trae hasta su próximo refresco, y sin esto el panel quedaría en blanco ese
+  // instante.
+  const [personaRecienAbierta, setPersonaRecienAbierta] = useState<ChatConversationDto | null>(
+    null
+  );
   // Ficha del asistente. Se abre desde el ENCABEZADO de la conversación —el
   // nombre y la foto—, como en WhatsApp se toca el contacto: la tarjeta de la
   // lista sigue abriendo el chat, que es lo que uno espera de una lista.
   const [detalleAbierto, setDetalleAbierto] = useState(false);
+  // Borrar un grupo: el grupo que se va a borrar (null = no hay confirmación
+  // abierta) y si la petición está en curso.
+  const [grupoABorrar, setGrupoABorrar] = useState<ChatConversationDto | null>(null);
+  const [borrando, setBorrando] = useState(false);
+  const [errorBorrar, setErrorBorrar] = useState<string | null>(null);
 
   // En pantallas angostas las dos columnas de la rejilla se APILAN: la lista de
   // asistentes arriba y la conversación debajo. Al llegar desde una
@@ -329,7 +452,8 @@ export default function ChatWorkspace({
   // agente abierto (allí las dos columnas se apilan y la conversación quedaría
   // debajo de la lista, fuera de la vista).
   const conversacionSola =
-    soloConversacion || Boolean(enPantallaAngosta && (selectedCode || selectedGroupId));
+    soloConversacion ||
+    Boolean(enPantallaAngosta && (selectedCode || selectedGroupId || selectedPersonaId));
 
   // ESCRITORIO con una conversación abierta: el chat ocupa la pantalla y la
   // lista de agentes se convierte en una barra lateral angosta con su propio
@@ -337,7 +461,9 @@ export default function ChatWorkspace({
   // Pedido de Nicolás. Sin conversación abierta la página sigue siendo la
   // rejilla de carpetas de siempre, que es donde uno escoge.
   const modoEscritorio =
-    !enPantallaAngosta && !conversacionSola && Boolean(selectedCode || selectedGroupId);
+    !enPantallaAngosta &&
+    !conversacionSola &&
+    Boolean(selectedCode || selectedGroupId || selectedPersonaId);
 
   // Pantalla completa DE VERDAD en escritorio: también se esconde la barra de
   // SynerLink. Pedido de Nicolás (2026-09-08), y se hizo con un botón —no
@@ -352,6 +478,7 @@ export default function ChatWorkspace({
   // pinta con `overview.canBroadcast`, pero la reja de verdad está en el
   // endpoint: esconder un botón no protege nada.
   const [masivoAbierto, setMasivoAbierto] = useState(false);
+  const [mediaAbierto, setMediaAbierto] = useState(false);
 
   const [expandido, setExpandido] = useState(false);
   useEffect(() => {
@@ -377,7 +504,7 @@ export default function ChatWorkspace({
   // de la conversación. Sin esto la página conserva su propio desplazamiento
   // detrás del marco fijo y la rueda del ratón mueve el fondo — que es
   // exactamente lo que se veía mal. La marca se quita SIEMPRE al salir.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!modoEscritorio) return;
     document.body.classList.add('chat-escritorio-abierto');
     return () => {
@@ -398,9 +525,13 @@ export default function ChatWorkspace({
   // Dos caminos llegan aquí: la conversación sola (celular o enlace directo) y
   // el escritorio con el botón de expandir pulsado.
   const inmersivo =
-    (conversacionSola && Boolean(selectedCode || selectedGroupId)) ||
+    (conversacionSola && Boolean(selectedCode || selectedGroupId || selectedPersonaId)) ||
     (modoEscritorio && expandido);
-  useEffect(() => {
+  // useLayoutEffect y no useEffect: la barra se esconde ANTES del primer
+  // pintado de la conversación. Con useEffect se alcanzaba a ver un cuadro con
+  // la barra puesta y enseguida todo el hilo saltaba hacia arriba al quitarla
+  // —parte del "golpe" al abrir el chat en el celular—.
+  useLayoutEffect(() => {
     if (!inmersivo) return;
     const scrollY = window.scrollY;
     document.body.classList.add('chat-inmersivo');
@@ -507,6 +638,67 @@ export default function ChatWorkspace({
     verEnLaUrl(`/process/chat/grupo/${id}`);
   };
 
+  const selectPersona = (id: number) => {
+    setSeleccion({ tipo: 'persona', id });
+    verEnLaUrl(`/process/chat/persona/${id}`);
+  };
+
+  // La BARRA LATERAL del chat (ChatRail) abre chats aquí sin navegar: manda un
+  // evento y, si esta página lo atiende, lo cancela para que la barra no haga
+  // nada más. Pasa por las mismas funciones que la lista, así abrir desde la
+  // barra o desde la lista es exactamente lo mismo. Ref para no volver a
+  // suscribirse en cada render.
+  const abrirDesdeBarra = useRef<(detalle: ChatRailOpenDetail) => boolean>(() => false);
+  abrirDesdeBarra.current = (detalle) => {
+    if (detalle.tipo === 'grupo') {
+      selectGroup(detalle.id);
+      return true;
+    }
+    if (detalle.tipo === 'persona') {
+      selectPersona(detalle.id);
+      return true;
+    }
+    const agente = overview.agents.find((a) => a.code === detalle.code);
+    if (!agente) return false;
+    selectAgent(agente);
+    return true;
+  };
+  useEffect(() => {
+    const onAbrir = (evento: Event) => {
+      const detalle = (evento as CustomEvent<ChatRailOpenDetail>).detail;
+      if (detalle && abrirDesdeBarra.current(detalle)) evento.preventDefault();
+    };
+    window.addEventListener(CHAT_RAIL_OPEN_EVENT, onAbrir);
+    return () => window.removeEventListener(CHAT_RAIL_OPEN_EVENT, onAbrir);
+  }, []);
+
+  // El hilo entre personas abierto, resuelto contra la bandeja (como el
+  // grupo), con el recién abierto como respaldo mientras la bandeja lo trae.
+  const selectedPersona = useMemo(
+    () =>
+      overview.people.find((p) => p.id === selectedPersonaId) ??
+      (personaRecienAbierta?.id === selectedPersonaId ? personaRecienAbierta : null),
+    [overview.people, selectedPersonaId, personaRecienAbierta]
+  );
+
+  // Hilos entre personas que pasan el filtro del buscador (por el nombre de
+  // la otra persona).
+  const filteredPeople = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    // Por actividad reciente (enviado o recibido), como cualquier mensajería:
+    // la bandeja ya sube la conversación al instante al enviar o recibir.
+    const ordenadas = sortConversationsByActivity(
+      overview.people,
+      (p) => otraPersona(p, miId)?.name ?? ''
+    );
+    if (!query) return ordenadas;
+    return ordenadas.filter((p) =>
+      (p.participants ?? []).some(
+        (x) => x.kind === 'user' && String(x.id) !== miId && x.name.toLowerCase().includes(query)
+      )
+    );
+  }, [overview.people, search, miId]);
+
   // El grupo abierto, resuelto contra la bandeja. Se toma de ahí y no de un
   // estado propio para que el sondeo de la bandeja (cada 30 s) mantenga al día
   // sus integrantes y sus indicadores sin código extra.
@@ -520,8 +712,9 @@ export default function ChatWorkspace({
   // busca por el nombre de Cali, no por el del grupo.
   const filteredGroups = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return overview.groups;
-    return overview.groups.filter(
+    const ordenados = sortConversationsByActivity(overview.groups, (g) => g.title ?? '');
+    if (!query) return ordenados;
+    return ordenados.filter(
       (g) =>
         (g.title ?? '').toLowerCase().includes(query) ||
         (g.company?.companyName ?? '').toLowerCase().includes(query) ||
@@ -566,6 +759,43 @@ export default function ChatWorkspace({
   // que necesita la barra lateral del escritorio, donde no caben tarjetas de
   // dos columnas.
   /**
+   * ¿Puede esta persona borrar este grupo?
+   *
+   * El DUEÑO o un administrador. No cualquier integrante: en un grupo de doce
+   * personas, que cualquiera desaparezca la conversación de todos es un
+   * accidente esperando ocurrir. La reja de verdad está en el endpoint; esto
+   * solo decide si se pinta el botón.
+   */
+  const puedeBorrarGrupo = (grupo: ChatConversationDto): boolean => {
+    if (overview.canBroadcast) return true;
+    return (grupo.participants ?? []).some(
+      (p) => p.kind === 'user' && String(p.id) === miId && p.role === 'owner'
+    );
+  };
+
+  const borrarGrupo = async () => {
+    if (!grupoABorrar) return;
+    setBorrando(true);
+    setErrorBorrar(null);
+    try {
+      const res = await fetch(`/api/chat/groups/${grupoABorrar.id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? `No se pudo borrar (${res.status}).`);
+
+      // Se cierra lo que estaba abierto —el grupo ya no existe— y se recarga
+      // la bandeja para que desaparezca de la lista.
+      setGrupoABorrar(null);
+      setSeleccion(null);
+      verEnLaUrl('/process/chat');
+      overview.refresh();
+    } catch (e) {
+      setErrorBorrar((e as Error).message);
+    } finally {
+      setBorrando(false);
+    }
+  };
+
+  /**
    * Abrir la conversación de un resultado.
    *
    * Un grupo se abre por su id; un hilo directo, buscando el agente en la
@@ -578,6 +808,10 @@ export default function ChatWorkspace({
   const abrirResultado = (hit: ChatSearchHit) => {
     if (hit.kind === 'group') {
       selectGroup(hit.idConversation);
+      return;
+    }
+    if (hit.kind === 'people') {
+      selectPersona(hit.idConversation);
       return;
     }
     const agente = overview.agents.find((a) => a.code === hit.agentCode);
@@ -699,7 +933,7 @@ export default function ChatWorkspace({
             cols={
               comoLista || viewMode === 'list'
                 ? 1
-                : selectedAgent || selectedGroup
+                : selectedAgent || selectedGroup || selectedPersona
                   ? { base: 1, sm: 2 }
                   : { base: 1, sm: 2, lg: 3 }
             }
@@ -710,8 +944,91 @@ export default function ChatWorkspace({
                 key={grupo.id}
                 grupo={grupo}
                 selected={selectedGroupId === grupo.id}
-                compact={comoLista || viewMode === 'list' || Boolean(selectedAgent || selectedGroup)}
+                compact={
+                  comoLista ||
+                  viewMode === 'list' ||
+                  Boolean(selectedAgent || selectedGroup || selectedPersona)
+                }
                 onSelect={() => selectGroup(grupo.id)}
+              />
+            ))}
+          </SimpleGrid>
+        )}
+      </Box>
+    );
+  };
+
+  /**
+   * La sección "PERSONAS" (piloto de mensajes directos entre personas).
+   *
+   * Se pinta si la persona puede iniciar conversaciones (tiene el piloto) o si
+   * ya tiene alguna: a quien le escribieron sin tener el piloto le tiene que
+   * aparecer el hilo para poder contestar. El botón + solo con el piloto.
+   */
+  const renderPersonas = (comoLista: boolean) => {
+    if (filteredPeople.length === 0 && !overview.canMessagePeople) return null;
+    if (filteredPeople.length === 0 && search.trim() !== '') return null;
+
+    return (
+      <Box mb={comoLista ? 'md' : 'lg'} className='chat-folder'>
+        <Group gap='xs' mb='sm' className='chat-folder__header' wrap='nowrap'>
+          <IconMessageCircle size={18} className='chat-folder__icon' />
+          <Text fw={700} size='sm'>
+            Personas
+          </Text>
+          {filteredPeople.length > 0 && (
+            <Badge size='xs' variant='light' color='gray'>
+              {filteredPeople.length}
+            </Badge>
+          )}
+          {overview.peopleUnread > 0 && (
+            <Badge size='xs' color='red'>
+              {overview.peopleUnread}
+            </Badge>
+          )}
+          {overview.canMessagePeople && (
+            <Tooltip label='Escribirle a una persona' withArrow>
+              <ActionIcon
+                variant='subtle'
+                color='gray'
+                size='sm'
+                ml='auto'
+                onClick={() => setPersonasAbierto(true)}
+                aria-label='Escribirle a una persona'
+              >
+                <IconPlus size={16} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+        </Group>
+
+        {filteredPeople.length === 0 ? (
+          <Text size='xs' className='chat-text-muted'>
+            Todavía no ha conversado con nadie. Escríbale a alguien con el <b>+</b>.
+          </Text>
+        ) : (
+          <SimpleGrid
+            cols={
+              comoLista || viewMode === 'list'
+                ? 1
+                : selectedAgent || selectedGroup || selectedPersona
+                  ? { base: 1, sm: 2 }
+                  : { base: 1, sm: 2, lg: 3 }
+            }
+            spacing='sm'
+          >
+            {filteredPeople.map((conversacion) => (
+              <PersonCard
+                key={conversacion.id}
+                conversacion={conversacion}
+                miId={miId}
+                selected={selectedPersonaId === conversacion.id}
+                compact={
+                  comoLista ||
+                  viewMode === 'list' ||
+                  Boolean(selectedAgent || selectedGroup || selectedPersona)
+                }
+                onSelect={() => selectPersona(conversacion.id)}
               />
             ))}
           </SimpleGrid>
@@ -757,7 +1074,7 @@ export default function ChatWorkspace({
             cols={
               comoLista || viewMode === 'list'
                 ? 1
-                : selectedAgent
+                : selectedAgent || selectedGroup || selectedPersona
                   ? { base: 1, sm: 2 }
                   : { base: 1, sm: 2, lg: 3 }
             }
@@ -779,9 +1096,13 @@ export default function ChatWorkspace({
                       : null
                   }
                   lastAt={conversation?.lastMessageAt ?? null}
+                  previewPendiente={!overview.conversationsReady}
+                  onPrecargar={() => precargarHiloDeAgente(agent.idAgent, conversation)}
                   selected={selectedAgent?.idAgent === agent.idAgent}
                   compact={
-                    comoLista || viewMode === 'list' || Boolean(selectedAgent || selectedGroup)
+                    comoLista ||
+                    viewMode === 'list' ||
+                    Boolean(selectedAgent || selectedGroup || selectedPersona)
                   }
                   onSelect={() => selectAgent(agent)}
                 />
@@ -823,11 +1144,93 @@ export default function ChatWorkspace({
     />
   ) : null;
 
+  const modalDePersonas = overview.canMessagePeople ? (
+    <ChatPeopleModal
+      abierto={personasAbierto}
+      onCerrar={() => setPersonasAbierto(false)}
+      onAbierto={(conversacion) => {
+        setPersonasAbierto(false);
+        setPersonaRecienAbierta(conversacion);
+        overview.refresh();
+        selectPersona(conversacion.id);
+      }}
+    />
+  ) : null;
+
   /**
    * La FICHA del asistente abierto. Se define junto al modal de grupo y por la
    * misma razón: se monta en los dos armazones y duplicarla llevaría a que uno
    * se quede sin los arreglos del otro.
    */
+  /**
+   * Confirmación de borrado.
+   *
+   * Con confirmación y diciendo QUÉ se pierde, porque esto no se deshace: se
+   * van los mensajes de todos, no solo los míos. Un borrado destructivo detrás
+   * de un solo clic es de las cosas que uno lamenta una sola vez.
+   */
+  // El hilo abierto, sea cual sea su clase: para "Multimedia y archivos".
+  const idConversacionAbierta = selectedPersona
+    ? selectedPersona.id
+    : selectedGroup
+      ? selectedGroup.id
+      : selectedAgent
+        ? (overview.conversationByAgent.get(selectedAgent.idAgent)?.id ?? null)
+        : null;
+  const tituloAbierto = selectedPersona
+    ? (otraPersona(selectedPersona, miId)?.name ?? 'Persona')
+    : selectedGroup
+      ? (selectedGroup.title ?? 'Grupo')
+      : selectedAgent?.displayName;
+
+  // Se monta solo mientras está abierto: ni el módulo ni la consulta se
+  // cargan hasta que alguien toca el botón.
+  const modalDeMedia =
+    mediaAbierto && idConversacionAbierta !== null ? (
+      <ChatMediaPanel
+        opened
+        onClose={() => setMediaAbierto(false)}
+        idConversation={idConversacionAbierta}
+        titulo={tituloAbierto}
+      />
+    ) : null;
+
+  const modalDeBorrado = (
+    <Modal
+      opened={grupoABorrar !== null}
+      onClose={() => (borrando ? undefined : setGrupoABorrar(null))}
+      title='Borrar el grupo'
+      radius='lg'
+      centered
+      classNames={{ content: 'chat-surface' }}
+    >
+      <Stack gap='sm'>
+        <Text size='sm'>
+          Va a borrar <strong>{grupoABorrar?.title ?? 'este grupo'}</strong> y{' '}
+          <strong>toda su conversación</strong>, para todos los integrantes.
+        </Text>
+        <Text size='xs' className='chat-text-muted'>
+          Esto no se puede deshacer.
+        </Text>
+
+        {errorBorrar && (
+          <Alert color='red' radius='md' p='xs'>
+            <Text size='xs'>{errorBorrar}</Text>
+          </Alert>
+        )}
+
+        <Group justify='flex-end' gap='xs'>
+          <Button variant='subtle' color='gray' onClick={() => setGrupoABorrar(null)} disabled={borrando}>
+            Cancelar
+          </Button>
+          <Button color='red' onClick={() => void borrarGrupo()} loading={borrando}>
+            Borrar el grupo
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+
   const modalDeDetalle = (
     <AgentDetailModal
       agent={selectedAgent}
@@ -849,6 +1252,19 @@ export default function ChatWorkspace({
   // lo que uno abrió se siente como dos pantallas distintas.
   const botonesDelEncabezado = (
     <Group gap={4} wrap='nowrap'>
+      {idConversacionAbierta !== null && (
+        <Tooltip label='Multimedia y archivos' withArrow>
+          <ActionIcon
+            variant='subtle'
+            color='gray'
+            onClick={() => setMediaAbierto(true)}
+            aria-label='Multimedia y archivos de la conversación'
+          >
+            <IconPhoto size={18} />
+          </ActionIcon>
+        </Tooltip>
+      )}
+      <ChatSoundMenu />
       {/* Solo en escritorio: en el celular la barra ya se esconde sola y el
           botón no tendría nada que hacer. */}
       {modoEscritorio && (
@@ -914,7 +1330,24 @@ export default function ChatWorkspace({
               </Text>
             </Box>
           </Group>
-          {botonesDelEncabezado}
+          <Group gap={4} wrap='nowrap'>
+            {puedeBorrarGrupo(selectedGroup) && (
+              <Tooltip label='Borrar el grupo' withArrow>
+                <ActionIcon
+                  variant='subtle'
+                  color='red'
+                  onClick={() => {
+                    setErrorBorrar(null);
+                    setGrupoABorrar(selectedGroup);
+                  }}
+                  aria-label='Borrar el grupo'
+                >
+                  <IconTrash size={18} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+            {botonesDelEncabezado}
+          </Group>
         </Group>
 
         <ChatThread
@@ -930,10 +1363,66 @@ export default function ChatWorkspace({
     );
   };
 
+  /**
+   * El hilo ENTRE PERSONAS, con el mismo marco que los demás. La cara del
+   * encabezado es la otra persona.
+   */
+  const renderPersona = (clase: string) => {
+    if (!selectedPersona) return null;
+    const otra = otraPersona(selectedPersona, miId);
+    const nombre = otra?.name ?? 'Persona';
+
+    return (
+      <Box className={clase}>
+        <Group justify='space-between' p='sm' className='chat-panel__header' wrap='nowrap'>
+          <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
+            <AgentAvatar
+              code={String(otra?.id ?? selectedPersona.id)}
+              displayName={nombre}
+              avatarUrl={otra?.avatarUrl ?? null}
+              size={36}
+              showStatus={false}
+              withTooltip={false}
+            />
+            <Box style={{ minWidth: 0 }}>
+              <Text fw={600} size='sm' lineClamp={1}>
+                {nombre}
+              </Text>
+              <Text size='xs' className='chat-text-muted' lineClamp={1}>
+                Conversación privada
+              </Text>
+            </Box>
+          </Group>
+          <Group gap={4} wrap='nowrap'>
+            <ChatNudgeButton idConversation={selectedPersona.id} nombre={nombre} />
+            <ChatNudgeMenu
+              idConversation={selectedPersona.id}
+              silenciado={Boolean(selectedPersona.nudgesMuted)}
+              onCambio={overview.refresh}
+            />
+            {botonesDelEncabezado}
+          </Group>
+        </Group>
+
+        <ChatThread
+          person={{
+            idConversation: selectedPersona.id,
+            name: nombre,
+            nudgesMuted: Boolean(selectedPersona.nudgesMuted),
+          }}
+          currentUserId={miId}
+          active
+        />
+      </Box>
+    );
+  };
+
   // El hilo con su encabezado. `clase` decide si va como tarjeta (la rejilla de
   // siempre) o como panel de borde a borde (escritorio y pantalla completa).
   const renderConversacion = (clase: string) =>
-    selectedGroup ? (
+    selectedPersona ? (
+      renderPersona(clase)
+    ) : selectedGroup ? (
       renderGrupo(clase)
     ) : selectedAgent ? (
       <Box className={clase}>
@@ -969,7 +1458,11 @@ export default function ChatWorkspace({
 
         {/* Sin `height`: el alto lo acota el contenedor, y dentro del hilo solo
             scrollea la lista de mensajes — el compositor queda fijo abajo. */}
-        <ChatThread agent={selectedAgent} active />
+        <ChatThread
+          agent={selectedAgent}
+          idConversacion={overview.conversationByAgent.get(selectedAgent.idAgent)?.id ?? null}
+          active
+        />
       </Box>
     ) : null;
 
@@ -979,7 +1472,7 @@ export default function ChatWorkspace({
      Nada se desplaza salvo el interior de las dos columnas. */
   // "Hay algo abierto": un asistente o un grupo. A partir de aquí la pantalla
   // se comporta igual con los dos.
-  const hayAlgoAbierto = Boolean(selectedAgent || selectedGroup);
+  const hayAlgoAbierto = Boolean(selectedAgent || selectedGroup || selectedPersona);
 
   if (modoEscritorio && hayAlgoAbierto) {
     return (
@@ -1009,6 +1502,7 @@ export default function ChatWorkspace({
           </div>
           <div className='chat-escritorio__lista'>
             {renderResultados(true)}
+            {renderPersonas(true)}
             {renderGrupos(true)}
             {renderCarpetas(true)}
             {pieDeLista}
@@ -1027,7 +1521,10 @@ export default function ChatWorkspace({
         />
 
         {modalDeGrupo}
+        {modalDePersonas}
         {modalDeDetalle}
+        {modalDeBorrado}
+        {modalDeMedia}
       </div>
     );
   }
@@ -1099,6 +1596,7 @@ export default function ChatWorkspace({
             )}
 
             <Group gap={4} wrap='nowrap'>
+              <ChatSoundMenu />
               <Tooltip label='Vista en tarjetas' withArrow>
                 <ActionIcon
                   variant={viewMode === 'grid' ? 'filled' : 'subtle'}
@@ -1132,6 +1630,7 @@ export default function ChatWorkspace({
           {!(conversacionSola && hayAlgoAbierto) && (
             <Grid.Col span={{ base: 12, lg: hayAlgoAbierto ? 5 : 12 }}>
               {renderResultados(false)}
+              {renderPersonas(false)}
               {renderGrupos(false)}
               {renderCarpetas(false)}
               {pieDeLista}
@@ -1157,7 +1656,10 @@ export default function ChatWorkspace({
       />
 
       {modalDeGrupo}
+        {modalDePersonas}
         {modalDeDetalle}
+        {modalDeBorrado}
+        {modalDeMedia}
     </div>
   );
 }

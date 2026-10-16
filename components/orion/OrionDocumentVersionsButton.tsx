@@ -42,6 +42,9 @@ function kindMeta(kind: string): {
   if (kind === 'original') {
     return { label: 'Original', color: 'var(--mantine-color-gray-6)', tone: 'original' };
   }
+  if (kind === 'validated') {
+    return { label: 'Validado', color: 'var(--mantine-color-teal-7)', tone: 'final' };
+  }
   if (kind === 'final') {
     return { label: 'Final', color: 'var(--mantine-color-teal-6)', tone: 'final' };
   }

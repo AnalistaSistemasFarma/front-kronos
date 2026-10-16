@@ -5,9 +5,8 @@
  * Antes esta lógica vivía solo dentro de components/ui/FileUpload.tsx, atada
  * a una carpeta plana bajo `SAPSEND/TEC/<storagePath>/<entityType>-<id>`. Se
  * generaliza aquí para aceptar una ruta de segmentos ARBITRARIA, de forma
- * que otros módulos (p.ej. Gestión Documental:
- * `GESTION-DOCUMENTAL/<EMPRESA>/<TIPO>/<CODIGO>/v<version>`) puedan reusarla
- * sin duplicar las llamadas a Graph.
+ * que otros módulos (p.ej. el chat o el SGC documental) puedan reusarla sin
+ * duplicar las llamadas a Graph.
  *
  * Isomórfico a propósito: funciona igual llamado desde un componente cliente
  * (FileUpload, con un token obtenido vía el server action
@@ -117,17 +116,25 @@ export async function ensureOneDriveFolderPath(
  * Sube el contenido de un archivo a una carpeta YA existente (por id).
  * `content` puede ser un Blob/File (navegador) o un Buffer/Uint8Array
  * (servidor, p.ej. leído de un FormData de una API route).
+ *
+ * `conflictBehavior` (opcional): qué hace OneDrive si ya existe un archivo con ese nombre.
+ * Sin indicarlo se usa el de Graph (reemplazar). Con 'rename' OneDrive le pone otro nombre
+ * ("foto 1.png"); evita el 409 cuando dos subidas simultáneas eligen el mismo nombre.
  */
 export async function uploadFileToOneDriveFolder(
   token: string,
   folderId: string,
   fileName: string,
   content: BodyInit,
-  contentType?: string
+  contentType?: string,
+  conflictBehavior?: 'rename' | 'replace' | 'fail'
 ): Promise<GraphItemResponse> {
   const graph = graphBase();
+  const query = conflictBehavior
+    ? `?@microsoft.graph.conflictBehavior=${conflictBehavior}`
+    : '';
 
-  const response = await fetch(`${graph}items/${folderId}:/${encodeURIComponent(fileName)}:/content`, {
+  const response = await fetch(`${graph}items/${folderId}:/${encodeURIComponent(fileName)}:/content${query}`, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -138,6 +145,33 @@ export async function uploadFileToOneDriveFolder(
 
   if (!response.ok) {
     throw new Error(`Error al subir el archivo "${fileName}" a OneDrive (HTTP ${response.status})`);
+  }
+
+  return (await response.json()) as GraphItemResponse;
+}
+
+/** Reemplaza el contenido de un driveItem existente conservando su id. */
+export async function replaceOneDriveItemContent(
+  token: string,
+  itemId: string,
+  content: BodyInit,
+  contentType?: string
+): Promise<GraphItemResponse> {
+  const graph = graphBase();
+  const id = String(itemId || '').trim();
+  if (!id) throw new Error('itemId es obligatorio');
+
+  const response = await fetch(`${graph}items/${encodeURIComponent(id)}/content`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': contentType || 'application/octet-stream',
+    },
+    body: content,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Error al reemplazar el archivo en OneDrive (HTTP ${response.status})`);
   }
 
   return (await response.json()) as GraphItemResponse;
@@ -356,4 +390,35 @@ export async function ensureFolderAndUploadFile(
 ): Promise<GraphItemResponse> {
   const folderId = await ensureOneDriveFolderPath(token, segments);
   return uploadFileToOneDriveFolder(token, folderId, fileName, content, contentType);
+}
+
+/**
+ * Convierte un driveItem (.docx, .xlsx…) a PDF con la conversión nativa de Graph
+ * (`content?format=pdf`). Graph responde 302 a una URL firmada que no necesita el
+ * header Authorization (mismo patrón que document-management/.../pdf/route.ts).
+ */
+export async function convertOneDriveItemToPdf(token: string, itemId: string): Promise<Buffer> {
+  const graph = graphBase();
+  const id = String(itemId || '').trim();
+  if (!id) throw new Error('itemId es obligatorio');
+
+  const response = await fetch(`${graph}items/${encodeURIComponent(id)}/content?format=pdf`, {
+    headers: { Authorization: `Bearer ${token}` },
+    redirect: 'manual',
+    cache: 'no-store',
+  });
+
+  let pdfResponse: Response = response;
+  const location = response.headers.get('location');
+  if (location) {
+    pdfResponse = await fetch(location, { cache: 'no-store' });
+  }
+  if (!pdfResponse.ok) {
+    throw new Error(`OneDrive no pudo convertir el archivo a PDF (HTTP ${pdfResponse.status})`);
+  }
+  const buffer = Buffer.from(await pdfResponse.arrayBuffer());
+  if (buffer.subarray(0, 5).toString('latin1') !== '%PDF-') {
+    throw new Error('OneDrive no devolvió un PDF válido al convertir el archivo');
+  }
+  return buffer;
 }

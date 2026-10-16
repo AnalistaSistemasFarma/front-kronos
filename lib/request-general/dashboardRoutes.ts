@@ -3,6 +3,13 @@ import {
   isOrionFirmaSignSubprocess,
 } from '../orion/access';
 import { isDeleteAttachmentsSubprocess } from '../attachments/access';
+import { isValentineWallSubprocess } from '../valentine/constants';
+import { isSgcPermissionMarkerSubprocess } from '../sgc/constants';
+import { isOtPermissionMarkerSubprocess } from '../bitacora-proceso/constants';
+import {
+  isAuditConfigureMarkerSubprocess,
+  isAuditConversationsMarkerSubprocess,
+} from '../chat/audit-constants';
 
 export const DASHBOARD_SOLICITANTE_URL = '/process/request-general/dashboard-solicitante';
 export const DASHBOARD_SOLICITADO_URL = '/process/request-general/dashboard-solicitado';
@@ -18,7 +25,12 @@ export function isHubHiddenRequestDashboardSubprocess(subprocess: {
   if (
     isOrionFirmaPrepareSubprocess(subprocess) ||
     isOrionFirmaSignSubprocess(subprocess) ||
-    isDeleteAttachmentsSubprocess(subprocess)
+    isDeleteAttachmentsSubprocess(subprocess) ||
+    isValentineWallSubprocess(subprocess) ||
+    isSgcPermissionMarkerSubprocess(subprocess) ||
+    isOtPermissionMarkerSubprocess(subprocess) ||
+    isAuditConversationsMarkerSubprocess(subprocess) ||
+    isAuditConfigureMarkerSubprocess(subprocess)
   ) {
     return true;
   }

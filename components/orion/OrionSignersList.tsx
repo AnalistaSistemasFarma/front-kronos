@@ -3,7 +3,11 @@
 import { ActionIcon, Avatar, Badge, Box, Group, Paper, Stack, Text, ThemeIcon, Tooltip } from '@mantine/core';
 import { IconArrowDown, IconArrowUp, IconCheck, IconClock, IconUser } from '@tabler/icons-react';
 import type { OrionParticipant } from '../../lib/orion/participants';
-import type { SignatureFieldPlacement } from '../../lib/orion/signatureFields';
+import {
+  isValidatorPlacementOrder,
+  VALIDATOR_ORDER_BASE,
+  type SignatureFieldPlacement,
+} from '../../lib/orion/signatureFields';
 
 type Props = {
   participants: OrionParticipant[];
@@ -77,7 +81,10 @@ export default function OrionSignersList({
     <Stack gap='sm'>
       <Group justify='space-between' align='flex-end'>
         <Text size='xs' fw={700} tt='uppercase' c='dimmed' lts={0.6}>
-          Firmantes ({participants.length})
+          Firmantes ({participants.filter((p) => !isValidatorPlacementOrder(p.order)).length})
+          {participants.some((p) => isValidatorPlacementOrder(p.order))
+            ? ` · Validadores (${participants.filter((p) => isValidatorPlacementOrder(p.order)).length})`
+            : ''}
         </Text>
         {sequential && variant === 'sequence' && (
           <Badge size='sm' variant='light' color='blue'>
@@ -88,11 +95,17 @@ export default function OrionSignersList({
       {participants.map((person, idx) => {
         const placed = fields.some((f) => f.signerOrder === person.order);
         const isActive = person.order === activeOrder;
+        const isValidator = isValidatorPlacementOrder(person.order);
         const rawStatus =
           signerStatuses[`order:${person.order}`] ??
           signerStatuses[person.email.toLowerCase()] ??
           (placed ? 'UBICADA' : 'SIN UBICAR');
-        const statusInfo = signerStatusLabel(rawStatus, placed, variant);
+        // Validador: sin estado de firma; si no se ubica, va solo a la esquina inferior derecha.
+        const statusInfo = isValidator
+          ? placed
+            ? { label: 'Visto bueno ubicado', color: 'green', done: true }
+            : { label: 'Ubicación automática', color: 'gray', done: false }
+          : signerStatusLabel(rawStatus, placed, variant);
         const canMoveUp = Boolean(onReorder) && idx > 0;
         const canMoveDown = Boolean(onReorder) && idx < participants.length - 1;
 
@@ -124,7 +137,7 @@ export default function OrionSignersList({
                 style={{ flexShrink: 0 }}
               >
                 <Text size='sm' fw={700}>
-                  {person.order}
+                  {isValidator ? `V${person.order - VALIDATOR_ORDER_BASE}` : person.order}
                 </Text>
               </ThemeIcon>
 
@@ -178,7 +191,7 @@ export default function OrionSignersList({
                       style={{ height: 32, width: '100%', objectFit: 'contain' }}
                     />
                   </Box>
-                ) : variant === 'placement' ? (
+                ) : variant === 'placement' && !isValidator ? (
                   <Text size='xs' c='orange.8' mt={8} fw={500}>
                     Sin rúbrica guardada aún
                   </Text>

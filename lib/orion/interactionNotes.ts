@@ -1,10 +1,19 @@
 /**
- * Notas de progreso Orion / adjuntos que no deben ir al historial de interacciones.
- * El seguimiento de firma y archivos vive en Archivos adjuntos.
+ * Notas de progreso Orion / firma que no deben ir al historial de interacciones.
+ * El seguimiento de firma vive en Archivos adjuntos.
+ * Las notas de carga de archivos SÍ se muestran en el historial.
  */
 export function isOrionDocumentInteractionNote(note?: string | null): boolean {
   const text = String(note || '').trim();
   if (!text) return false;
+  // Adjuntos: visibles en historial (no filtrar).
+  if (
+    /Se cargaron archivos/i.test(text) ||
+    /Documento adjunto:/i.test(text) ||
+    /^Archivo adjunto:/i.test(text)
+  ) {
+    return false;
+  }
   return (
     /GSS\s*Firma/i.test(text) ||
     /v[ií]a\s+GSS\s*Firma/i.test(text) ||

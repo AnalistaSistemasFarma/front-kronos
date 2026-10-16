@@ -13,6 +13,7 @@ import { authOptions } from '../../app/api/auth/[...nextauth]/route';
 import { prisma } from '../prisma';
 import { assertConversationOwnership } from './access';
 import { assertGroupAccess, type AgenteMencionable, type ParticipantRole } from './groups';
+import { assertPeopleAccess } from './people';
 
 /** El chat nunca se cachea: es una bandeja en vivo. */
 export const NO_STORE = { 'Cache-Control': 'no-store, max-age=0' } as const;
@@ -76,11 +77,15 @@ export async function resolveSessionUser(): Promise<ChatSessionUser | null> {
  *     todavía tiene permiso sobre el agente de ese hilo
  *     (assertConversationOwnership, lib/chat/access.ts);
  *   - GRUPO: el usuario es participante Y sigue teniendo el módulo habilitado
- *     en la empresa del grupo (assertGroupAccess, lib/chat/groups.ts).
+ *     en la empresa del grupo (assertGroupAccess, lib/chat/groups.ts);
+ *   - PERSONAS: el usuario es uno de los dos participantes Y la regla de
+ *     acceso entre los dos se sigue cumpliendo (assertPeopleAccess,
+ *     lib/chat/people.ts).
  *
- * Se prueban en ese orden y las dos puertas están ancladas a su `kind`, así
- * que ninguna acepta una conversación de la otra clase. El resultado dice cuál
- * fue (`kind`) para que la ruta pueda ramificar sin volver a consultar.
+ * Se lee primero la clase del hilo (`kind`) y se prueba SOLO la puerta que le
+ * corresponde; además cada puerta está anclada a su `kind`, así que ninguna
+ * acepta una conversación de otra clase. El resultado dice cuál fue (`kind`)
+ * para que la ruta pueda ramificar sin volver a consultar.
  *
  * Devuelve un `NextResponse` ya listo cuando algo falla, para que la ruta solo
  * tenga que hacer `if ('response' in guard) return guard.response;`.
@@ -106,6 +111,16 @@ export type ConversationGuard =
       groupRole: ParticipantRole;
       /** Agentes que están en el grupo (para resolver menciones). */
       groupAgents: AgenteMencionable[];
+    }
+  | {
+      user: ChatSessionUser;
+      conversationId: number;
+      /** Hilo privado entre DOS personas (lib/chat/people-rules.ts). */
+      kind: 'people';
+      /** La otra persona del hilo. */
+      otherUserId: string;
+      /** Mi fila en chat_participant. */
+      myParticipantId: number;
     };
 
 export async function guardConversation(rawId: string): Promise<ConversationGuard> {
@@ -117,28 +132,56 @@ export async function guardConversation(rawId: string): Promise<ConversationGuar
     return { response: badRequest('Id de conversación inválido.') };
   }
 
-  const owned = await assertConversationOwnership(user.email, conversationId);
-  if (owned) {
-    return { user, conversationId: owned.id, kind: 'direct', idAgent: owned.idAgent };
+  // La clase del hilo se lee UNA sola vez y decide qué puerta se prueba.
+  // Antes se probaba primero la del hilo directo y, si fallaba, la del grupo:
+  // dos consultas en cada vuelta del sondeo de un grupo, y una tercera clase
+  // de conversación habría caído por descarte en la puerta equivocada. Cada
+  // puerta sigue anclada a su `kind`, así que esto no la reemplaza: la
+  // complementa.
+  const fila = await prisma.chatConversation.findUnique({
+    where: { id: conversationId },
+    select: { kind: true },
+  });
+
+  if (fila?.kind === 'direct') {
+    const owned = await assertConversationOwnership(user.email, conversationId);
+    if (owned) {
+      return { user, conversationId: owned.id, kind: 'direct', idAgent: owned.idAgent };
+    }
+  } else if (fila?.kind === 'group') {
+    const grupo = await assertGroupAccess(user.email, user.id, conversationId);
+    if (grupo) {
+      return {
+        user,
+        conversationId: grupo.id,
+        kind: 'group',
+        groupRole: grupo.role,
+        groupAgents: grupo.agentes,
+      };
+    }
+  } else if (fila?.kind === 'people') {
+    const hilo = await assertPeopleAccess(user.id, conversationId);
+    if (hilo) {
+      return {
+        user,
+        conversationId: hilo.id,
+        kind: 'people',
+        otherUserId: hilo.otherUserId,
+        myParticipantId: hilo.myParticipantId,
+      };
+    }
   }
 
-  const grupo = await assertGroupAccess(user.email, user.id, conversationId);
-  if (grupo) {
-    return {
-      user,
-      conversationId: grupo.id,
-      kind: 'group',
-      groupRole: grupo.role,
-      groupAgents: grupo.agentes,
-    };
-  }
+  // No existe, es de otra clase que no conocemos, o no es suya: la misma
+  // respuesta para las tres (ver la nota de arriba sobre el 404).
+  return { response: notFoundConversation() };
+}
 
-  return {
-    response: NextResponse.json(
-      { error: 'Conversación no encontrada.' },
-      { status: 404, headers: NO_STORE }
-    ),
-  };
+function notFoundConversation() {
+  return NextResponse.json(
+    { error: 'Conversación no encontrada.' },
+    { status: 404, headers: NO_STORE }
+  );
 }
 
 /** Lee el cuerpo JSON de una petición sin reventar si viene vacío o corrupto. */

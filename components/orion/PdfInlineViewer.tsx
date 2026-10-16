@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { Box, Button, Group, Loader, Paper, Stack, Text, ThemeIcon } from '@mantine/core';
 import { IconExternalLink, IconFileText } from '@tabler/icons-react';
 import { usePdfBlobPreview } from './usePdfBlobPreview';
@@ -11,18 +11,21 @@ type Props = {
   fallbackSrc?: string | null;
   fileName?: string;
   minHeight?: number;
+  /** Si true, el visor llena el alto del contenedor padre (flex). */
+  fill?: boolean;
   onOpenExternal?: () => void;
 };
 
 /**
- * Vista previa PDF embebida en la página (sin forzar descarga).
- * Carga el archivo como blob → blob: URL → iframe (Content-Type application/pdf).
+ * Vista previa PDF embebida (blob URL → iframe).
+ * Con `fill` ocupa todo el alto disponible (ideal para layout split macOS).
  */
 export default function PdfInlineViewer({
   src,
   fallbackSrc = null,
   fileName,
   minHeight = 420,
+  fill = false,
   onOpenExternal,
 }: Props) {
   const [activeSrc, setActiveSrc] = useState<string | null>(src);
@@ -43,17 +46,36 @@ export default function PdfInlineViewer({
       onOpenExternal();
       return;
     }
-    // Preferir blob (inline) sobre la URL remota (a veces dispara descarga).
     const href = blobUrl || activeSrc || src || fallbackSrc;
     if (href) window.open(href, '_blank', 'noopener,noreferrer');
   };
+
+  const shellStyle: CSSProperties = fill
+    ? {
+        overflow: 'hidden',
+        height: '100%',
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'var(--app-surface-raised)',
+        boxShadow:
+          '0 1px 2px color-mix(in srgb, #000 4%, transparent), 0 8px 24px color-mix(in srgb, #000 6%, transparent)',
+      }
+    : {
+        overflow: 'hidden',
+        minHeight,
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'var(--app-surface-raised)',
+      };
 
   if (!src && !fallbackSrc) return null;
 
   if (loading) {
     return (
-      <Paper withBorder radius='md' h={minHeight} style={{ background: 'var(--app-surface-raised)' }}>
-        <Stack align='center' justify='center' h='100%' gap='sm'>
+      <Paper withBorder radius='lg' style={shellStyle} h={fill ? undefined : minHeight}>
+        <Stack align='center' justify='center' h='100%' gap='sm' style={{ flex: 1 }}>
           <Loader size='sm' />
           <Text size='sm' c='dimmed'>
             Cargando documento…
@@ -65,8 +87,8 @@ export default function PdfInlineViewer({
 
   if (failed || !blobUrl) {
     return (
-      <Paper withBorder radius='md' h={minHeight} style={{ background: 'var(--app-surface-raised)' }}>
-        <Stack align='center' justify='center' h='100%' gap='md' p='xl'>
+      <Paper withBorder radius='lg' style={shellStyle} h={fill ? undefined : minHeight}>
+        <Stack align='center' justify='center' h='100%' gap='md' p='xl' style={{ flex: 1 }}>
           <ThemeIcon size={56} radius='xl' variant='light' color='blue'>
             <IconFileText size={28} />
           </ThemeIcon>
@@ -85,49 +107,58 @@ export default function PdfInlineViewer({
   }
 
   return (
-    <Paper
-      withBorder
-      radius='md'
-      style={{
-        overflow: 'hidden',
-        minHeight,
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        background: 'var(--app-surface-raised)',
-      }}
-    >
-      {fileName && (
+    <Paper withBorder radius='lg' style={shellStyle}>
+      {fileName ? (
         <Group
           px='md'
-          py={8}
+          py={10}
           gap='xs'
           style={{
             borderBottom: '1px solid var(--app-border)',
-            background: 'var(--app-surface)',
+            background:
+              'linear-gradient(180deg, color-mix(in srgb, var(--app-surface) 92%, #fff), var(--app-surface))',
             flexShrink: 0,
           }}
         >
-          <IconFileText size={16} style={{ opacity: 0.6 }} />
-          <Text size='xs' fw={600} lineClamp={1} style={{ flex: 1 }}>
-            {fileName}
-          </Text>
-          <Button variant='subtle' size='compact-xs' onClick={openExternal}>
+          <ThemeIcon size={28} radius='md' variant='light' color='gray'>
+            <IconFileText size={15} />
+          </ThemeIcon>
+          <Box style={{ flex: 1, minWidth: 0 }}>
+            <Text size='xs' fw={700} lineClamp={1} style={{ letterSpacing: '-0.01em' }}>
+              {fileName}
+            </Text>
+            <Text size='10px' c='dimmed'>
+              Vista previa
+            </Text>
+          </Box>
+          <Button
+            variant='light'
+            size='compact-xs'
+            radius='md'
+            leftSection={<IconExternalLink size={14} />}
+            onClick={openExternal}
+          >
             Ampliar
           </Button>
         </Group>
-      )}
-      <Box style={{ flex: 1, minHeight: fileName ? minHeight - 40 : minHeight }}>
+      ) : null}
+      <Box
+        style={{
+          flex: 1,
+          minHeight: fill ? 0 : fileName ? minHeight - 44 : minHeight,
+          background: '#3a3d40',
+        }}
+      >
         <iframe
           title={fileName || 'Documento PDF'}
-          src={`${blobUrl}#toolbar=1&navpanes=0&scrollbar=1`}
+          src={`${blobUrl}#toolbar=1&navpanes=0&scrollbar=1&zoom=page-width`}
           style={{
             display: 'block',
             width: '100%',
             height: '100%',
-            minHeight: fileName ? minHeight - 40 : minHeight,
+            minHeight: fill ? undefined : fileName ? minHeight - 44 : minHeight,
             border: 'none',
-            background: '#525659',
+            background: '#3a3d40',
           }}
         />
       </Box>

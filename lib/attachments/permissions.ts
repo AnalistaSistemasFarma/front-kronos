@@ -6,7 +6,10 @@ import {
 
 type SqlPool = import('mssql').ConnectionPool;
 
-/** Permiso Eliminar adjuntos. Sin bypass admin. */
+/**
+ * Permiso Eliminar adjuntos (subproceso). Sin bypass admin: para eliminar se exige
+ * además ser administrador (doble llave, ver lib/orion/deletePolicy.ts).
+ */
 export async function userHasDeleteAttachmentsPermission(
   pool: SqlPool,
   userId: string

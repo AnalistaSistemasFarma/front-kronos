@@ -100,6 +100,12 @@ export async function searchUserMessages(
           kind: true,
           title: true,
           agent: { select: { code: true, display_name: true } },
+          // Solo para nombrar un hilo entre personas: el título es la OTRA
+          // persona (el hilo no tiene título propio).
+          participants: {
+            where: { id_user: { not: null } },
+            select: { id_user: true, user: { select: { name: true, email: true } } },
+          },
         },
       },
       userAuthor: { select: { name: true, email: true } },
@@ -113,16 +119,22 @@ export async function searchUserMessages(
 
   return rows.map((row) => {
     const esGrupo = row.conversation.kind === 'group';
+    const entrePersonas = row.conversation.kind === 'people';
+    const otraPersona = entrePersonas
+      ? row.conversation.participants.find((p) => p.id_user !== userId)?.user
+      : null;
     return {
       idMessage: row.id,
       idConversation: row.id_conversation,
-      kind: esGrupo ? ('group' as const) : ('direct' as const),
+      kind: esGrupo ? ('group' as const) : entrePersonas ? ('people' as const) : ('direct' as const),
       conversationTitle: esGrupo
         ? (row.conversation.title ?? 'Grupo')
-        : (row.conversation.agent?.display_name ?? 'Asistente'),
-      // En un grupo el `agent` de la conversación es el anfitrión y NO sirve
-      // para abrir nada: el grupo se abre por su id.
-      agentCode: esGrupo ? null : (row.conversation.agent?.code ?? null),
+        : entrePersonas
+          ? (otraPersona?.name?.trim() || otraPersona?.email || 'Conversación')
+          : (row.conversation.agent?.display_name ?? 'Asistente'),
+      // En un grupo (y entre personas) el `agent` de la conversación NO sirve
+      // para abrir nada: se abre por su id.
+      agentCode: esGrupo || entrePersonas ? null : (row.conversation.agent?.code ?? null),
       author:
         row.userAuthor?.name?.trim() ||
         row.userAuthor?.email ||

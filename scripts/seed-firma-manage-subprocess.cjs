@@ -2,13 +2,15 @@
  * Sembrar subprocesos Orion:
  * - Preparar firma (/process/firma/prepare) — gestiona PDF / firmantes / enviar
  * - Firmar documento (/process/firma/sign) — obligatorio para poder firmar
+ * - Registrar huella (/process/firma/fingerprint) — exigir/colocar/aportar huella
+ * - Documentos firmados (/process/orion-documents) — consulta por empresa (permiso por empresa)
  *
  * Migra el legacy /process/firma/manage (“Firma digital”) → Preparar firma.
  *
  * Uso:
  *   node scripts/seed-firma-manage-subprocess.cjs
  *   node scripts/seed-firma-manage-subprocess.cjs --email=usuario@empresa.com
- *   node scripts/seed-firma-manage-subprocess.cjs --email=x@y.com --also-sign
+ *   node scripts/seed-firma-manage-subprocess.cjs --email=x@y.com --also-sign --also-fingerprint
  */
 const fs = require('fs');
 const path = require('path');
@@ -17,6 +19,10 @@ const PREPARE_URL = '/process/firma/prepare';
 const PREPARE_NAME = 'Preparar firma';
 const SIGN_URL = '/process/firma/sign';
 const SIGN_NAME = 'Firmar documento';
+const FINGERPRINT_URL = '/process/firma/fingerprint';
+const FINGERPRINT_NAME = 'Registrar huella';
+const DOCUMENTS_URL = '/process/orion-documents';
+const DOCUMENTS_NAME = 'Documentos firmados';
 const LEGACY_MANAGE_URL = '/process/firma/manage';
 
 function loadEnv() {
@@ -36,6 +42,8 @@ function parseArgs() {
   return {
     email: emailArg ? emailArg.split('=').slice(1).join('=').trim() : null,
     alsoSign: process.argv.includes('--also-sign'),
+    alsoFingerprint: process.argv.includes('--also-fingerprint'),
+    alsoDocuments: process.argv.includes('--also-documents'),
   };
 }
 
@@ -109,7 +117,7 @@ async function grantToUser(prisma, subId, email) {
 
 async function main() {
   loadEnv();
-  const { email, alsoSign } = parseArgs();
+  const { email, alsoSign, alsoFingerprint, alsoDocuments } = parseArgs();
   const { PrismaClient } = require('../app/generated/prisma');
   const prisma = new PrismaClient();
 
@@ -135,7 +143,6 @@ async function main() {
 
     console.log(`Proceso padre id=${processId}`);
 
-    // Migrar legacy manage → prepare (misma fila, nueva URL/nombre)
     const legacy = await prisma.$queryRawUnsafe(`
       SELECT TOP 1 id_subprocess
       FROM [subprocess]
@@ -167,6 +174,13 @@ async function main() {
 
     const prepareId = await ensureSubprocess(prisma, processId, PREPARE_NAME, PREPARE_URL);
     const signId = await ensureSubprocess(prisma, processId, SIGN_NAME, SIGN_URL);
+    const fingerprintId = await ensureSubprocess(
+      prisma,
+      processId,
+      FINGERPRINT_NAME,
+      FINGERPRINT_URL
+    );
+    const documentsId = await ensureSubprocess(prisma, processId, DOCUMENTS_NAME, DOCUMENTS_URL);
 
     if (email) {
       await grantToUser(prisma, prepareId, email);
@@ -175,9 +189,19 @@ async function main() {
       } else {
         console.log('Tip: añada --also-sign para otorgar también “Firmar documento”.');
       }
+      if (alsoFingerprint) {
+        await grantToUser(prisma, fingerprintId, email);
+      } else {
+        console.log('Tip: añada --also-fingerprint para otorgar “Registrar huella”.');
+      }
+      if (alsoDocuments) {
+        await grantToUser(prisma, documentsId, email);
+      } else {
+        console.log('Tip: añada --also-documents para otorgar “Documentos firmados”.');
+      }
     } else {
       console.log(
-        'Subprocesos listos. Asígnalos en Administración → Usuarios (o pasa --email=... [--also-sign]).'
+        'Subprocesos listos. Asígnalos en Administración → Usuarios (o pasa --email=... [--also-sign] [--also-fingerprint]).'
       );
     }
   } finally {

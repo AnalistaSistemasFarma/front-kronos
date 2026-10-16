@@ -21,7 +21,7 @@
 // (queda impreso en la consola del navegador al activarse).
 // =============================================================================
 
-const SW_VERSION = '2026-09-07.1';
+const SW_VERSION = '2026-09-29.1';
 
 // Toma el control de inmediato en lugar de quedarse "esperando" a que se
 // cierren todas las pestañas con la versión anterior del service worker.
@@ -83,7 +83,9 @@ self.addEventListener('push', (event) => {
         requireInteraction: false,
         tag: data.tag || 'synerlink',
         renotify: true,
-        vibrate: [120, 60, 120],
+        // El patrón puede venir en el payload (el zumbido 📳 del chat entre
+        // personas vibra más largo). Sin él, el de siempre.
+        vibrate: Array.isArray(data.vibrate) ? data.vibrate : [120, 60, 120],
       });
     })
   );

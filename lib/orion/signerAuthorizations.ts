@@ -11,6 +11,7 @@ import {
   parseOrionFileIdFromResolution,
 } from './signerAuthMarkers';
 import { ensureOrionSignerWorkflowTemplates } from './workflowTemplates';
+import { isRequestClosedForOrion } from './internalTasks';
 
 type SqlPool = import('mssql').ConnectionPool;
 
@@ -34,7 +35,6 @@ export async function findFirmaAuthorizationTemplate(
     INNER JOIN task_process_category tpc ON tpc.id_process_category = pcr.id_process_category
     INNER JOIN types_authorization tp ON tp.id = tpc.type_authorization
     WHERE pcr.id_request_general = @id_request
-      AND tpc.active = 1
       AND tpc.is_authorization = 1
       AND tpc.type_authorization IS NOT NULL
       AND (
@@ -43,6 +43,7 @@ export async function findFirmaAuthorizationTemplate(
         OR LOWER(tpc.task) LIKE N'%autorizaci%'
       )
     ORDER BY
+      tpc.active DESC,
       CASE WHEN LOWER(tpc.task) LIKE N'%previa%' THEN 1 ELSE 0 END,
       CASE WHEN ISNULL(tpc.is_sequential, 0) = 0 THEN 0 ELSE 1 END,
       CASE
@@ -64,6 +65,9 @@ async function findExistingSignerAuth(
   userId: string,
   fileId: string
 ): Promise<number | null> {
+  // Incluye status 2 (AUTORIZADO): si ya consumió la auth de este PDF y aún no firmó,
+  // NO crear otra PENDIENTE (eso causa el bucle Autorizaciones ↔ Firmar).
+  // Status 3 (rechazada) no cuenta: se puede volver a abrir.
   const result = await pool
     .request()
     .input('id_request', sql.Int, requestId)
@@ -76,13 +80,54 @@ async function findExistingSignerAuth(
       WHERE id_request_general = @id_request
         AND id_task = @id_task
         AND id_assigned = @id_user
-        AND id_status NOT IN (2, 3)
+        AND id_status <> 3
         AND CHARINDEX(@fileNeedle, ISNULL(resolution, N'')) > 0
         AND CHARINDEX(N'[orionAuth]', ISNULL(resolution, N'')) > 0
-      ORDER BY id DESC
+      ORDER BY
+        CASE WHEN id_status NOT IN (2, 3) THEN 0 ELSE 1 END,
+        id DESC
     `);
 
   return result.recordset[0]?.id ?? null;
+}
+
+/** Cierra PENDIENTES duplicadas del mismo user+file cuando ya hay una auth válida. */
+async function closeDuplicatePendingSignerAuths(
+  pool: SqlPool,
+  params: {
+    requestId: number;
+    templateTaskId: number;
+    userId: string;
+    fileId: string;
+    keepId: number;
+  }
+): Promise<void> {
+  await pool
+    .request()
+    .input('id_request', sql.Int, params.requestId)
+    .input('id_task', sql.Int, params.templateTaskId)
+    .input('id_user', sql.NVarChar(255), params.userId)
+    .input('fileNeedle', sql.NVarChar(400), `[orionFile:${params.fileId}]`)
+    .input('keep_id', sql.Int, params.keepId)
+    .input('id_executor', sql.NVarChar(255), params.userId)
+    .query(`
+      UPDATE task_request_general
+      SET id_status = 2,
+          end_date = GETDATE(),
+          date_resolution = GETDATE(),
+          id_executor_final = @id_executor,
+          resolution = CONCAT(
+            ISNULL(resolution, N''),
+            N' [dedup] Cerrada: ya existía autorización para este documento'
+          )
+      WHERE id_request_general = @id_request
+        AND id_task = @id_task
+        AND id_assigned = @id_user
+        AND id <> @keep_id
+        AND id_status NOT IN (2, 3)
+        AND CHARINDEX(@fileNeedle, ISNULL(resolution, N'')) > 0
+        AND CHARINDEX(N'[orionAuth]', ISNULL(resolution, N'')) > 0
+    `);
 }
 
 export type CreateOrionSignerAuthorizationsResult = {
@@ -114,6 +159,9 @@ export async function createOrionSignerAuthorizations(
   const fileId = String(params.fileId || '').trim();
   if (!fileId) {
     return { created: 0, skipped: 0, templateId: null, errors: ['fileId vacío'] };
+  }
+  if (await isRequestClosedForOrion(pool, params.requestId)) {
+    return { created: 0, skipped: 0, templateId: null, errors: [] };
   }
 
   const ensured = await ensureOrionSignerWorkflowTemplates(pool, params.requestId);
@@ -160,8 +208,14 @@ export async function createOrionSignerAuthorizations(
     );
     if (existing) {
       skipped += 1;
-      // No re-notificar: ya recibió "Autorizar firma" al crear la auth.
-      // Reavisar aquí duplicaba campana ("Su turno") en cada sync/webhook.
+      // Si quedó alguna PENDIENTE duplicada con otra AUTORIZADA, cerrar las abiertas.
+      await closeDuplicatePendingSignerAuths(pool, {
+        requestId: params.requestId,
+        templateTaskId: template.id,
+        userId: user.id,
+        fileId,
+        keepId: existing,
+      });
       continue;
     }
 
@@ -195,12 +249,25 @@ export async function createOrionSignerAuthorizations(
     try {
       const emailAddr = await resolveEmailByUserId(user.id);
       if (emailAddr) {
+        const docLabel = String(params.fileName || '').trim();
+        const subjectLabel = String(params.subject || '').trim();
         await createAndSendNotifications([emailAddr], {
-          title: 'Autorizar firma · SynerLink',
-          body: `Solicitud #${params.requestId}${
-            params.fileName ? ` · ${params.fileName}` : ''
-          }${params.subject ? ` — ${params.subject}` : ''}. Autorice para ver y firmar el documento.`,
-          url: buildAppUrl('/process/authorization'),
+          title: docLabel
+            ? `Firmar: ${docLabel}`
+            : 'Autorizar firma · SynerLink',
+          body: [
+            `Solicitud #${params.requestId}`,
+            docLabel ? `Documento: ${docLabel}` : null,
+            subjectLabel ? subjectLabel : null,
+            'Autorice en Autorizaciones para ver y firmar este PDF.',
+          ]
+            .filter(Boolean)
+            .join(' · '),
+          url: buildAppUrl(
+            `/process/authorization?highlight=${encodeURIComponent(String(taskId))}${
+              fileId ? `&orionFileId=${encodeURIComponent(fileId)}` : ''
+            }`
+          ),
           tag: `orion-auth-${taskId}`,
         });
       }
@@ -293,6 +360,67 @@ export async function userHasPendingOrionSignerAuthBatch(
     if (fid && fid in out) out[fid] = true;
   }
   return out;
+}
+
+/**
+ * Si el usuario ya tiene una auth AUTORIZADA (status 2) para el PDF,
+ * cierra cualquier PENDIENTE duplicada del mismo user+file (limpia el bucle).
+ */
+export async function reconcileDuplicateOrionSignerAuths(
+  pool: SqlPool,
+  params: { requestId: number; userId: string; fileIds: string[] }
+): Promise<number> {
+  const fileIds = [...new Set(params.fileIds.map((f) => String(f || '').trim()).filter(Boolean))];
+  if (!params.userId || fileIds.length === 0) return 0;
+
+  let closed = 0;
+  for (const fileId of fileIds) {
+    const result = await pool
+      .request()
+      .input('id_request', sql.Int, params.requestId)
+      .input('id_user', sql.NVarChar(255), String(params.userId))
+      .input('fileNeedle', sql.NVarChar(400), `[orionFile:${fileId}]`)
+      .query(`
+        SELECT trg.id, trg.id_status
+        FROM task_request_general trg
+        INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
+        WHERE trg.id_request_general = @id_request
+          AND trg.id_assigned = @id_user
+          AND tpc.is_authorization = 1
+          AND CHARINDEX(@fileNeedle, ISNULL(trg.resolution, N'')) > 0
+          AND CHARINDEX(N'[orionAuth]', ISNULL(trg.resolution, N'')) > 0
+          AND trg.id_status <> 3
+        ORDER BY
+          CASE WHEN trg.id_status = 2 THEN 0 ELSE 1 END,
+          trg.id DESC
+      `);
+
+    const rows = result.recordset as Array<{ id: number; id_status: number }>;
+    const hasAuthorized = rows.some((r) => Number(r.id_status) === 2);
+    if (!hasAuthorized) continue;
+
+    for (const row of rows) {
+      if (Number(row.id_status) === 2) continue;
+      await pool
+        .request()
+        .input('id', sql.Int, row.id)
+        .input('id_user', sql.NVarChar(255), String(params.userId))
+        .query(`
+          UPDATE task_request_general
+          SET id_status = 2,
+              end_date = GETDATE(),
+              date_resolution = GETDATE(),
+              id_executor_final = @id_user,
+              resolution = CONCAT(
+                ISNULL(resolution, N''),
+                N' [dedup] Cerrada: ya había autorización consumida'
+              )
+          WHERE id = @id AND id_status NOT IN (2, 3)
+        `);
+      closed += 1;
+    }
+  }
+  return closed;
 }
 
 /**
@@ -448,6 +576,7 @@ export async function findOpenOrionSignTaskId(
         AND trg.id_assigned = @id_user
         AND trg.id_status NOT IN (2, 3)
         AND CHARINDEX(N'[orionAuth]', ISNULL(trg.resolution, N'')) = 0
+        AND CHARINDEX(N'[orionReview]', ISNULL(trg.resolution, N'')) = 0
         AND (
           @fileMarker IS NULL
           OR CHARINDEX(@fileMarker, ISNULL(trg.resolution, N'')) > 0

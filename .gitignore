@@ -12,9 +12,19 @@
 
 # testing
 /coverage
+# reportes de pruebas (evidencia del SGC: la CI los archiva como artefacto)
+/reports
+/test-results
+/playwright-report
 
 # next.js
 /.next/
+# Copias del build y respaldos dentro del checkout (.next-antes-*, .next.bak-*,
+# _respaldos-*): Tailwind v4 escanea todo lo que no esté ignorado aquí y esas
+# copias agotaron el tiempo de PostCSS en el build de prod (2026-10-14).
+/.next*/
+/_respaldos*/
+*.bak
 /out/
 
 # production
@@ -32,6 +42,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 .env-olp
 
 # vercel

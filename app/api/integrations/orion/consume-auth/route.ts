@@ -37,11 +37,16 @@ export async function POST(req: Request) {
         return { error: 'No se pudo identificar al usuario', status: 401 as const };
       }
 
-      const canSign = await userHasOrionSignPermission(pool, userId, false);
+      const canSign = await userHasOrionSignPermission(
+        pool,
+        userId,
+        false,
+        Number.isInteger(requestIdBody) && requestIdBody > 0 ? requestIdBody : null
+      );
       if (!canSign) {
         return {
           error:
-            'No tiene permiso “Firmar documento”. Asígueselo en Administración → Usuarios.',
+            'No tiene permiso “Firmar documento” en la empresa de esta solicitud. Asígueselo en Administración → Usuarios.',
           status: 403 as const,
         };
       }

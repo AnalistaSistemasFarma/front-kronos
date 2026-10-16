@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 import { withMssqlPool } from '@/lib/mssqlPool';
 import { getOrionConfig } from '@/lib/orion/config';
+import { orionErrorResponse } from '@/lib/orion/httpError';
 import { returnDocumentFromSigner } from '@/lib/orion/service';
 
 /**
@@ -63,11 +64,6 @@ export async function POST(req: Request) {
       { status: 200 }
     );
   } catch (err) {
-    const status =
-      err && typeof err === 'object' && 'status' in err
-        ? Number((err as { status: number }).status) || 500
-        : 500;
-    const message = err instanceof Error ? err.message : 'Error interno';
-    return NextResponse.json({ error: message }, { status });
+    return orionErrorResponse(err);
   }
 }

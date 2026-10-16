@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   buildOrionSignedFileApiUrl,
   resolveOrionAbsoluteUrl,
@@ -6,6 +6,7 @@ import {
 import {
   buildOrionSignedFileProxyUrl,
   isAllowedServerPdfFetchUrl,
+  isHostOrSubdomain,
   isOrionProtectedFileUrl,
   orionDocumentHasSignedCopy,
   resolveOrionPdfAccessUrl,
@@ -14,24 +15,43 @@ import {
 import type { OrionSignatureState } from '../types';
 
 describe('orion client url helpers', () => {
+  const prevApi = process.env.ORION_API_BASE_URL;
+  const prevPublic = process.env.ORION_PUBLIC_URL;
+  const prevEmbed = process.env.ORION_EMBED_ORIGIN;
+
+  afterEach(() => {
+    if (prevApi === undefined) delete process.env.ORION_API_BASE_URL;
+    else process.env.ORION_API_BASE_URL = prevApi;
+    if (prevPublic === undefined) delete process.env.ORION_PUBLIC_URL;
+    else process.env.ORION_PUBLIC_URL = prevPublic;
+    if (prevEmbed === undefined) delete process.env.ORION_EMBED_ORIGIN;
+    else process.env.ORION_EMBED_ORIGIN = prevEmbed;
+  });
+
   it('resolves relative Orion paths with api base from env', () => {
-    const prev = process.env.ORION_API_BASE_URL;
+    delete process.env.ORION_PUBLIC_URL;
+    delete process.env.ORION_EMBED_ORIGIN;
     process.env.ORION_API_BASE_URL = 'http://localhost:3000';
     expect(
       resolveOrionAbsoluteUrl('/api/integrations/synerlink/documents/abc/signed-file')
     ).toBe('http://localhost:3000/api/integrations/synerlink/documents/abc/signed-file');
-    if (prev === undefined) delete process.env.ORION_API_BASE_URL;
-    else process.env.ORION_API_BASE_URL = prev;
+  });
+
+  it('rewrites localhost absolute Orion urls to public base', () => {
+    process.env.ORION_PUBLIC_URL = 'https://orion.example.com';
+    process.env.ORION_API_BASE_URL = 'http://localhost:3000';
+    expect(resolveOrionAbsoluteUrl('http://localhost:3000/sign/abc123')).toBe(
+      'https://orion.example.com/sign/abc123'
+    );
   });
 
   it('builds canonical signed-file API url', () => {
-    const prev = process.env.ORION_API_BASE_URL;
+    delete process.env.ORION_PUBLIC_URL;
+    delete process.env.ORION_EMBED_ORIGIN;
     process.env.ORION_API_BASE_URL = 'http://localhost:3000';
     expect(buildOrionSignedFileApiUrl('doc-1')).toBe(
       'http://localhost:3000/api/integrations/synerlink/documents/doc-1/signed-file'
     );
-    if (prev === undefined) delete process.env.ORION_API_BASE_URL;
-    else process.env.ORION_API_BASE_URL = prev;
   });
 });
 
@@ -45,10 +65,22 @@ describe('signedFileAccess', () => {
     expect(isOrionProtectedFileUrl('https://onedrive.example.com/file.pdf')).toBe(false);
   });
 
+  it('isHostOrSubdomain avoids suffix spoofing', () => {
+    expect(isHostOrSubdomain('contoso.sharepoint.com', 'sharepoint.com')).toBe(true);
+    expect(isHostOrSubdomain('sharepoint.com', 'sharepoint.com')).toBe(true);
+    expect(isHostOrSubdomain('evilsharepoint.com', 'sharepoint.com')).toBe(false);
+    expect(isHostOrSubdomain('evilmicrosoft.com', 'microsoft.com')).toBe(false);
+  });
+
   it('rejects loopback and private hosts for server PDF fetch', () => {
+    const prev = process.env.ORION_API_BASE_URL;
+    process.env.ORION_API_BASE_URL = 'http://localhost:3000';
+
     expect(isAllowedServerPdfFetchUrl('http://127.0.0.1/secret.pdf')).toBe(false);
     expect(isAllowedServerPdfFetchUrl('http://169.254.169.254/latest/meta-data')).toBe(false);
     expect(isAllowedServerPdfFetchUrl('http://192.168.1.10/file.pdf')).toBe(false);
+    expect(isAllowedServerPdfFetchUrl('https://evilmicrosoft.com/file.pdf')).toBe(false);
+    expect(isAllowedServerPdfFetchUrl('https://evilsharepoint.com/file.pdf')).toBe(false);
     expect(
       isAllowedServerPdfFetchUrl(
         'https://contoso.sharepoint.com/sites/x/_layouts/15/download.aspx?UniqueId=abc'
@@ -59,6 +91,15 @@ describe('signedFileAccess', () => {
         'http://localhost:3000/api/integrations/synerlink/documents/abc/signed-file'
       )
     ).toBe(true);
+    // Misma ruta en host no configurado como Orion → rechazar (SSRF).
+    expect(
+      isAllowedServerPdfFetchUrl(
+        'http://127.0.0.1:9999/api/integrations/synerlink/documents/abc/signed-file'
+      )
+    ).toBe(false);
+
+    if (prev === undefined) delete process.env.ORION_API_BASE_URL;
+    else process.env.ORION_API_BASE_URL = prev;
   });
 
   it('builds proxy URL with requestId and fileId', () => {

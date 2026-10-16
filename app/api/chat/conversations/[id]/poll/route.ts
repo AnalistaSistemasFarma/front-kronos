@@ -8,6 +8,8 @@ import {
   parsePositiveInt,
 } from '../../../../../../lib/chat/constants';
 import { computeNextPollMs } from '../../../../../../lib/chat/polling';
+import { subagentesEnCurso } from '../../../../../../lib/chat/client';
+import { agentMetricsForViewer } from '../../../../../../lib/chat/agent-metrics-store';
 import {
   badRequest,
   guardConversation,
@@ -55,7 +57,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const limit = parsePositiveInt(sp.get('limit'), POLL_PAGE_MAX, POLL_PAGE_MAX);
     const hidden = sp.get('hidden') === '1';
 
-    const [rows, estados, conversation, lastMessage] = await Promise.all([
+    const [rows, estados, conversation, lastMessage, metrics] = await Promise.all([
       prisma.chatMessage.findMany({
         where: { id_conversation: guard.conversationId, id: { gt: after } },
         orderBy: { id: 'asc' },
@@ -79,6 +81,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         orderBy: { id: 'desc' },
         select: { role: true },
       }),
+      // Métricas del mod (contexto, tokens, modelo). Solo hilo directo y solo si
+      // el usuario las puede ver; nunca lanza, así que no tumba el sondeo.
+      agentMetricsForViewer(guard.user.email, guard),
     ]);
 
     const hasMore = rows.length > limit;
@@ -116,16 +121,28 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // haya un agente por contestar: si no mencionó a nadie, nadie va a
     // responder y sondear en vivo sería quemar consultas para siempre. Ahí el
     // criterio es que quede alguna mención sin recoger.
+    // Entre personas no hay agente que esperar: la otra persona contesta
+    // cuando contesta, y el pulso global (/api/chat/pulse) avisa al instante.
     const awaitingAgent =
       guard.kind === 'direct'
         ? lastRole === 'user'
-        : (await prisma.chatMessageDelivery.count({
-            where: { delivered_at: null, message: { id_conversation: guard.conversationId } },
-          })) > 0;
+        : guard.kind === 'people'
+          ? false
+          : (await prisma.chatMessageDelivery.count({
+              where: { delivered_at: null, message: { id_conversation: guard.conversationId } },
+            })) > 0;
+
+    // Sub-agentes en curso con el agente principal ya en 'idle' (contestó y
+    // dejó trabajo en segundo plano): se sondea como si estuviera trabajando,
+    // para que la caja anclada de sub-agentes se actualice —y se quite— a
+    // tiempo en vez de esperar la cadencia de un hilo quieto.
+    const estadosDeCadencia = guard.kind === 'direct' ? (status ? [status] : []) : statuses;
+    const conSubagentes = estadosDeCadencia.some((s) => subagentesEnCurso(s).length > 0);
 
     const nextPollMs = computeNextPollMs({
       hasNewMessages: page.length > 0,
-      agentState: status?.state ?? null,
+      agentState:
+        (!status || status.state === 'idle') && conSubagentes ? 'tool' : (status?.state ?? null),
       msSinceLastActivity,
       hidden,
       awaitingAgent,
@@ -146,6 +163,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         : null,
       // Desglose por agente: lo que pinta el encabezado de un grupo.
       statuses,
+      // undefined (no se manda) = este usuario no ve métricas; null = no hay.
+      ...(metrics !== undefined ? { metrics } : {}),
       nextPollMs,
       serverTime: new Date().toISOString(),
     });

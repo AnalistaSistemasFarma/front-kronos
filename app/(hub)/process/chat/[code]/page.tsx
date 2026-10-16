@@ -23,6 +23,18 @@ export default async function AgentChatPage({
   params: Promise<{ code: string }>;
 }) {
   const { code } = await params;
+  const clave = decodeURIComponent(code);
+
+  // '/process/chat/personas' es el subproceso del PILOTO de mensajes entre
+  // personas, no un asistente: el hub navega aquí al tocar su tarjeta, así que
+  // se abre la pantalla de chats con el buscador de personas a la vista.
+  if (clave.toLowerCase() === 'personas') {
+    return (
+      <Suspense fallback={<EsqueletoPantallaChat />}>
+        <ChatWorkspace abrirBuscadorPersonas />
+      </Suspense>
+    );
+  }
 
   return (
     <Suspense
@@ -30,7 +42,7 @@ export default async function AgentChatPage({
         <EsqueletoPantallaChat />
       }
     >
-      <ChatWorkspace initialAgentCode={decodeURIComponent(code)} />
+      <ChatWorkspace initialAgentCode={clave} />
     </Suspense>
   );
 }

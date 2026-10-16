@@ -1,0 +1,134 @@
+# Ensayo del SQL CONSOLIDADO del pase del SGC a producción sobre un SQL Server
+# efímero que imita KRONOSDB antes del pase: la base se llama KRONOSDB y se crea
+# con el schema.prisma de `main` (dbo, con las tablas del módulo documental
+# viejo), más lo que en producción vive fuera de Prisma (programador central,
+# notificaciones, _prisma_migrations y los subprocesos 40/41).
+#
+# Recorre: guardia (debe frenar con otro servidor) → F1 ×2 → F2 ×2 → R1 ×2 →
+# R2 ×2 → F1 → F2 (ida y vuelta). No toca ningún servidor real.
+name: SGC — ensayo del pase consolidado
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/sgc/pase-produccion/**'
+      - 'prisma/migrations/*sgc*/**'
+      - 'prisma/manual/*sgc*'
+      - '.github/workflows/sgc-ensayo-pase.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: sgc-ensayo-pase-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ensayo:
+    name: SGC — ensayo del pase (F1/F2/R1/R2)
+    runs-on: ubuntu-latest
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: 'Y'
+          MSSQL_SA_PASSWORD: 'Ci_Sgc_2026!Efimero'
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'Ci_Sgc_2026!Efimero' -Q 'SELECT 1' -b"
+          --health-interval 10s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: sqlserver://localhost:1433;database=KRONOSDB;user=sa;password=Ci_Sgc_2026!Efimero;trustServerCertificate=true;encrypt=true
+      COPIAS: subdireccion.reglamentaria@gsslatam.com
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci || npm install
+
+      - name: Crear KRONOSDB efímera con el esquema de main
+        run: |
+          node -e "
+            const sql = require('mssql');
+            (async () => {
+              const pool = await sql.connect({ server: 'localhost', port: 1433, user: 'sa', password: 'Ci_Sgc_2026!Efimero', database: 'master', options: { encrypt: true, trustServerCertificate: true } });
+              await pool.request().batch(\"IF DB_ID('KRONOSDB') IS NULL CREATE DATABASE KRONOSDB;\");
+              await pool.close();
+            })().catch((e) => { console.error(e); process.exit(1); });
+          "
+          git show origin/main:prisma/schema.prisma > prisma/schema-main-ensayo.prisma
+          npx prisma db push --schema prisma/schema-main-ensayo.prisma --skip-generate --accept-data-loss
+          node scripts/sgc/pase-produccion/aplicar-sql.mjs --confirmo-produccion --registro ensayo.log \
+            scripts/sgc/pase-produccion/prod/ensayo/sembrar-base-tipo-produccion.sql \
+            scripts/sgc/pase-produccion/sql/04-programador-central.sql
+
+      - name: Generar el consolidado para esta base
+        run: |
+          SRV=$(node -e "
+            const sql = require('mssql');
+            sql.connect({ server: 'localhost', port: 1433, user: 'sa', password: 'Ci_Sgc_2026!Efimero', database: 'KRONOSDB', options: { encrypt: true, trustServerCertificate: true } })
+              .then((p) => p.request().query('SELECT CAST(@@SERVERNAME AS NVARCHAR(128)) AS s')).then((r) => { console.log(r.recordset[0].s); process.exit(0); });
+          ")
+          echo "Servidor efímero: $SRV"
+          G=scripts/sgc/pase-produccion/prod/armar-consolidado.mjs
+          node $G --server "$SRV" --integrante-copias "$COPIAS" --sustituto1 "$COPIAS" --programador no --out /tmp/pase
+          node $G --server "$SRV" --integrante-copias "$COPIAS" --sustituto1 "$COPIAS" --programador no --acepto-perdidas --out /tmp/pase-acepto
+          node $G --server OTRO-SERVIDOR --out /tmp/pase-otro
+
+      - name: La guardia frena en otro servidor
+        run: |
+          if node scripts/sgc/pase-produccion/aplicar-sql.mjs --confirmo-produccion --registro ensayo.log /tmp/pase-otro/F1-ddl-antes-del-codigo.sql; then
+            echo "La guardia NO frenó"; exit 1; fi
+          grep -q "GUARDIA: este script del pase del SGC solo corre en KRONOSDB de OTRO-SERVIDOR" ensayo.log
+          echo "Guardia correcta: no se ejecutó nada."
+
+      - name: F1 (dos veces) y F2 (dos veces)
+        run: |
+          A="node scripts/sgc/pase-produccion/aplicar-sql.mjs --confirmo-produccion --registro ensayo.log"
+          $A /tmp/pase/F1-ddl-antes-del-codigo.sql
+          $A /tmp/pase/F1-ddl-antes-del-codigo.sql
+          $A /tmp/pase/F2-despues-del-codigo.sql
+          $A /tmp/pase/F2-despues-del-codigo.sql
+
+      - name: R1 y R2 (dos veces cada una)
+        run: |
+          A="node scripts/sgc/pase-produccion/aplicar-sql.mjs --confirmo-produccion --registro ensayo.log"
+          $A /tmp/pase-acepto/R1-reversa-sgc.sql
+          $A /tmp/pase-acepto/R1-reversa-sgc.sql
+          $A /tmp/pase/R2-restaurar-modulo-viejo.sql
+          $A /tmp/pase/R2-restaurar-modulo-viejo.sql
+          cat > /tmp/verifica-reversa.sql <<'SQL'
+          IF SCHEMA_ID(N'sgc') IS NOT NULL THROW 50800, N'R1 no quitó el esquema sgc.', 1;
+          IF EXISTS (SELECT 1 FROM sys.triggers WHERE parent_class = 0 AND name = N'sgc_proteger_esquema') THROW 50801, N'R1 no quitó el trigger de base.', 1;
+          IF OBJECT_ID(N'dbo.document_version', N'U') IS NULL THROW 50802, N'R2 no restauró document_version.', 1;
+          IF (SELECT COUNT(*) FROM dbo.subprocess WHERE id_subprocess IN (40, 41)) <> 2 THROW 50803, N'R2 no restauró los subprocesos 40 y 41 con sus ids.', 1;
+          IF OBJECT_ID(N'dbo.scheduled_job', N'U') IS NULL THROW 50804, N'La reversa no debe quitar el programador central.', 1;
+          IF EXISTS (SELECT 1 FROM dbo._prisma_migrations WHERE migration_name LIKE N'%[_]sgc[_]%') THROW 50805, N'Quedaron migraciones del SGC registradas.', 1;
+          SELECT N'Reversa verificada' AS resultado;
+          SQL
+          $A /tmp/verifica-reversa.sql
+
+      - name: Ida y vuelta (F1 y F2 otra vez)
+        run: |
+          A="node scripts/sgc/pase-produccion/aplicar-sql.mjs --confirmo-produccion --registro ensayo.log"
+          $A /tmp/pase/F1-ddl-antes-del-codigo.sql
+          $A /tmp/pase/F2-despues-del-codigo.sql
+
+      - name: Archivar registro del ensayo
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ensayo-pase-sgc-${{ github.run_number }}
+          path: |
+            ensayo.log
+            /tmp/pase/MANIFIESTO.txt
+          if-no-files-found: ignore
+          retention-days: 90

@@ -1,13 +1,21 @@
 import sql from 'mssql';
 import sqlConfig from '../../../../dbconfig';
 import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '../../auth/[...nextauth]/route';
 
 export async function GET(req) {
   try {
+    // El usuario sale de la sesión, nunca de ?idUser= (permitiría ver lo que otro puede ver).
+    const session = await getServerSession(authOptions);
+    const idUser = session?.user?.id ? String(session.user.id) : '';
+    if (!idUser) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    }
+
     const pool = await sql.connect(sqlConfig);
 
     const { searchParams } = new URL(req.url);
-    const idUser = searchParams.get('idUser');
     const status = searchParams.get('status');
     const company = searchParams.get('company');
     const date_from = searchParams.get('date_from');
@@ -36,7 +44,6 @@ export async function GET(req) {
       LEFT JOIN [user] up ON up.id = upcrg.id_user
       INNER JOIN status_case sc ON sc.id_status_case = rg.status_req
 	    LEFT JOIN [user] uex ON uex.id = rg.id_executor_final
-	    LEFT JOIN viewers_process_category vpc ON vpc.id_process_category = pc.id
       WHERE 1=1
     `;
 
@@ -47,7 +54,16 @@ export async function GET(req) {
     else if (!status) query += ` AND sc.id_status_case = 1`;
 
     if (idUser) {
-      query += ` AND vpc.id_viewer = @idUser`;
+      query += ` AND (
+        EXISTS (
+          SELECT 1 FROM viewers_process_category vpc
+          WHERE vpc.id_process_category = pc.id AND vpc.id_viewer = @idUser
+        )
+        OR EXISTS (
+          SELECT 1 FROM preparers_process_category ppc
+          WHERE ppc.id_process_category = pc.id AND ppc.id_preparer = @idUser
+        )
+      )`;
     }
 
     if (company) {

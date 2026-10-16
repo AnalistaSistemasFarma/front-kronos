@@ -1,7 +1,57 @@
+/**
+ * Allowlist de URLs que el servidor puede fetchar (PDF Orion / OneDrive).
+ * Endurecido frente a SSRF (CWE-918): sin suffix suelto, sin “trusted bag” ciego.
+ */
+
 import { getOrionConfig } from './config';
 import { resolveOrionPdfUrl } from './documentVersions';
 import { isSignerCompleted } from './signerStatus';
 import type { OrionSignatureState } from './types';
+
+/** Hosts/subdominios permitidos para adjuntos Graph / OneDrive / SharePoint. */
+const ALLOWED_STORAGE_SUFFIXES = [
+  'sharepoint.com',
+  'sharepointonline.com',
+  '1drv.ms',
+  'onedrive.live.com',
+  'graph.microsoft.com',
+  'blob.core.windows.net',
+] as const;
+
+const PRIVATE_OR_METADATA_HOSTS = new Set([
+  'localhost',
+  '127.0.0.1',
+  '::1',
+  '0.0.0.0',
+  'metadata.google.internal',
+]);
+
+/** True si `host` es exactamente `suffix` o un subdominio de este (no evilmicrosoft.com). */
+export function isHostOrSubdomain(host: string, suffix: string): boolean {
+  const h = host.toLowerCase();
+  const s = suffix.toLowerCase();
+  return h === s || h.endsWith(`.${s}`);
+}
+
+function isPrivateOrMetadataHost(host: string): boolean {
+  const h = host.toLowerCase();
+  if (PRIVATE_OR_METADATA_HOSTS.has(h)) return true;
+  if (h.endsWith('.local') || h.endsWith('.internal')) return true;
+  if (/^10\./.test(h)) return true;
+  if (/^192\.168\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(h)) return true;
+  if (/^169\.254\./.test(h)) return true;
+  if (h.startsWith('::ffff:127.') || h.startsWith('::ffff:169.254.')) return true;
+  return false;
+}
+
+function sameOrigin(url: string, base: string): boolean {
+  try {
+    return new URL(url).origin === new URL(base).origin;
+  } catch {
+    return false;
+  }
+}
 
 /** URL del proxy SynerLink de PDF Orion (no es el adjunto OneDrive). */
 export function isOrionSignedFileProxyUrl(url: string | null | undefined): boolean {
@@ -14,20 +64,25 @@ export function isOrionProtectedFileUrl(url: string | null | undefined): boolean
   if (!value) return false;
 
   const { apiBaseUrl } = getOrionConfig();
-  if (apiBaseUrl && value.startsWith(apiBaseUrl)) return true;
+  if (
+    apiBaseUrl &&
+    sameOrigin(value, apiBaseUrl) &&
+    /\/api\/integrations\/synerlink\/documents\/[^/]+\/signed-file/i.test(value)
+  ) {
+    return true;
+  }
 
   return /\/api\/integrations\/synerlink\/documents\/[^/]+\/signed-file/i.test(value);
 }
 
 /**
  * ¿Se puede pedir al servidor que descargue esta URL?
- * Evita SSRF: solo Orion protegido, OneDrive/SharePoint/Graph, o http(s) público
- * que no apunte a loopback / link-local / metadata.
+ * Evita SSRF: origen de Orion configurado, o Graph/OneDrive/SharePoint.
+ * No usa suffix suelto (evilmicrosoft.com no entra) ni URLs relativas.
  */
 export function isAllowedServerPdfFetchUrl(url: string | null | undefined): boolean {
   const value = String(url || '').trim();
   if (!value) return false;
-  if (isOrionProtectedFileUrl(value)) return true;
 
   let parsed: URL;
   try {
@@ -37,39 +92,26 @@ export function isAllowedServerPdfFetchUrl(url: string | null | undefined): bool
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
 
-  const host = parsed.hostname.toLowerCase();
+  const { apiBaseUrl } = getOrionConfig();
   if (
-    host === 'localhost' ||
-    host === '127.0.0.1' ||
-    host === '::1' ||
-    host === '0.0.0.0' ||
-    host.endsWith('.local') ||
-    host.endsWith('.internal') ||
-    /^10\./.test(host) ||
-    /^192\.168\./.test(host) ||
-    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) ||
-    /^169\.254\./.test(host) ||
-    host === 'metadata.google.internal'
-  ) {
-    return false;
-  }
-
-  // Orígenes habituales de adjuntos SynerLink / Graph.
-  if (
-    host.endsWith('sharepoint.com') ||
-    host.endsWith('sharepointonline.com') ||
-    host.endsWith('1drv.ms') ||
-    host.endsWith('onedrive.live.com') ||
-    host.endsWith('microsoft.com') ||
-    host.endsWith('microsoftonline.com') ||
-    host.endsWith('graph.microsoft.com') ||
-    host.endsWith('blob.core.windows.net')
+    apiBaseUrl &&
+    sameOrigin(value, apiBaseUrl) &&
+    /\/api\/integrations\/synerlink\/documents\/[^/]+\/signed-file/i.test(value)
   ) {
     return true;
   }
 
-  // Relativo same-app no se fetcha como URL externa aquí.
-  return false;
+  const host = parsed.hostname.toLowerCase();
+  if (isPrivateOrMetadataHost(host)) return false;
+
+  if (
+    isHostOrSubdomain(host, 'login.microsoftonline.com') ||
+    isHostOrSubdomain(host, 'graph.microsoft.com')
+  ) {
+    return true;
+  }
+
+  return ALLOWED_STORAGE_SUFFIXES.some((suffix) => isHostOrSubdomain(host, suffix));
 }
 
 export function buildOrionSignedFileProxyUrl(params: {
@@ -112,17 +154,12 @@ export function orionDocumentHasSignedCopy(
  * URL para ver/descargar en el cliente:
  * - OneDrive original → directo
  * - PDF firmado Orion → proxy SynerLink (Bearer server-side)
- *
- * Vista "vigente": sin versionId, para que Orion regenere el PDF con todas las firmas.
- * (Si se fija la 1.ª versión parcial por URL duplicada, se puede ver solo la 1.ª firma.)
  */
 export function resolveOrionPdfAccessUrl(
   state: OrionSignatureState | undefined | null,
   originalUrl: string | null | undefined,
   ctx: { requestId: number; fileId: string } | null
 ): string | null {
-  // Con firmas acumuladas: siempre proxy Orion (PDF vigente con todas las firmas).
-  // Sin firmas: null → el caller usa OneDrive SynerLink (no /orion/signed-file).
   if (ctx && state?.orionDocumentId) {
     if (orionDocumentHasSignedCopy(state)) {
       return buildOrionSignedFileProxyUrl({
@@ -161,11 +198,9 @@ export function resolveOrionVersionAccessUrl(params: {
   url: string;
   kind: string;
 }): string {
-  // Original público (p. ej. OneDrive) → enlace directo.
   if (params.kind === 'original' && !isOrionProtectedFileUrl(params.url)) {
     return params.url;
   }
-  // Parcial/final (y original en Orion) → proxy SynerLink con Bearer server-side.
   return buildOrionSignedFileProxyUrl({
     requestId: params.requestId,
     fileId: params.fileId,

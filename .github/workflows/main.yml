@@ -65,6 +65,31 @@ jobs:
           rem paso condicional de abajo NUNCA se ejecutaba. Con la redireccion primero
           rem no hay digito adyacente al operador y el valor viaja completo.
           >>"%GITHUB_ENV%" echo SCHEMA_CHANGED=%SCHEMA_CHANGED%
+          echo === detectar cambio bajo mcp/ ===
+          git diff --quiet %OLD_HEAD% HEAD -- mcp
+          if errorlevel 1 (set "MCP_CHANGED=1") else (set "MCP_CHANGED=0")
+          echo MCP_CHANGED=%MCP_CHANGED%
+          rem Misma regla de arriba: la redireccion va DELANTE del echo.
+          >>"%GITHUB_ENV%" echo MCP_CHANGED=%MCP_CHANGED%
+
+      # PAGINA "SynerLink se esta actualizando" (deploy/iis/README.md). Desde
+      # 2026-10-10 se activa en TODO deploy, no solo con cambio de esquema: el
+      # 2026-10-09 (run 37999883505) `next build` reescribio .next mientras el
+      # proceso viejo atendia y una usuaria vio "Application error: a client-side
+      # exception has occurred". `npm install` tambien cambia node_modules bajo el
+      # proceso vivo, por eso se activa ANTES de instalar. El publico del :8445 ve
+      # la pagina (503 + Retry-After) en vez de chunks rotos. La quita el ultimo
+      # paso del job (if: always()), y solo si GSS-Front ya responde 200.
+      # continue-on-error: la pagina es cosmetica y nunca debe frenar un pase.
+      # Los agentes (directo a :3003) no se afectan.
+      - name: Activar pagina de mantenimiento en IIS
+        continue-on-error: true
+        shell: cmd
+        run: |
+          cd /d %PROJECT_DIR% || exit /b 1
+          rem Mantiene la pagina instalada al dia con la del repo.
+          copy /y deploy\iis\_mantenimiento\index.html C:\inetpub\wwwroot\GSS\_mantenimiento\index.html
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\maintenance-on.ps1 -Motivo "deploy %GITHUB_SHA% (esquema=%SCHEMA_CHANGED%)"
 
       - name: Instalar dependencias
         shell: cmd
@@ -102,7 +127,17 @@ jobs:
         run: |
           cd /d %PROJECT_DIR% || exit /b 1
           echo === next build ===
+          call npm run build && goto :build_ok
+          rem Reintento unico: el 2026-09-22 el build fallo con
+          rem TurbopackInternalError ("failed to receive message... deadline
+          rem has elapsed") precedido de "Slow filesystem detected" en este
+          rem runner Windows -- flakiness del worker, no un error de codigo
+          rem (el mismo commit habia compilado limpio en el CI de Linux).
+          rem Antes de tumbar el deploy completo, reintentamos una vez.
+          echo    fallo el primer intento de build; espero y reintento una vez
+          timeout /t 5 /nobreak >nul
           call npm run build || exit /b 1
+          :build_ok
 
       - name: Levantar o recargar GSS-Front
         shell: cmd
@@ -117,3 +152,68 @@ jobs:
             call pm2 reload GSS-Front || exit /b 1
           )
           call pm2 save
+
+      # MCP de Kronos (kronos-mcp, :3020). Antes el deploy NUNCA compilaba mcp/:
+      # serve.mjs arranca desde mcp/dist (gitignored), asi que un cambio en
+      # mcp/src llegaba al disco pero el proceso seguia sirviendo el dist viejo
+      # hasta que alguien compilaba a mano. Aqui, si el push trae cambios bajo
+      # mcp/, se instala, se compila y se reinicia SOLO kronos-mcp (1 instancia;
+      # nunca all/kill). Va despues de "Levantar" para cubrir tambien el camino
+      # de cambio de esquema (que ya hizo pm2 start kronos-mcp con el dist viejo).
+      #
+      # PM2: el runner corre como DFARUNIADM\nicolas.rivera, pero el daemon real
+      # de produccion vive en el PM2_HOME de administrador (servicio 0pm2.exe,
+      # ver incidente 2026-10-06). Se fijan PM2_HOME y la ruta completa de
+      # pm2.cmd para no depender del PATH ni de que el servicio del runner haya
+      # heredado la variable de maquina. Sin --update-env: no se inyecta el
+      # entorno del runner al proceso del MCP (este lee su propio mcp\.env).
+      - name: (Solo si cambio mcp/) compilar y reiniciar kronos-mcp
+        if: env.MCP_CHANGED == '1'
+        shell: cmd
+        env:
+          PM2_HOME: C:\Users\administrador.DFARUNIADM\.pm2
+          PM2_CMD: C:\Users\administrador.DFARUNIADM\AppData\Roaming\npm\pm2.cmd
+        run: |
+          cd /d %PROJECT_DIR%\mcp || exit /b 1
+          echo === npm ci (mcp) ===
+          call npm ci --no-audit --no-fund || exit /b 1
+          echo === npm run build (mcp) ===
+          call npm run build || exit /b 1
+          echo === pm2 restart kronos-mcp ===
+          call "%PM2_CMD%" restart kronos-mcp || exit /b 1
+          rem `pm2 list` (no `describe`/`jlist`, que imprimen variables de entorno).
+          call "%PM2_CMD%" list
+
+      - name: (Solo si cambio mcp/) verificar que kronos-mcp responde
+        if: env.MCP_CHANGED == '1'
+        shell: powershell
+        run: |
+          $ok = $false
+          for ($i = 1; $i -le 12; $i++) {
+            try {
+              $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 -Uri "http://127.0.0.1:3020/health"
+              if ($r.StatusCode -eq 200) { $ok = $true; break }
+            } catch { }
+            Start-Sleep -Seconds 5
+          }
+          if (-not $ok) { throw "kronos-mcp no respondio /health en :3020 tras el reinicio" }
+          Write-Host "kronos-mcp OK en :3020/health"
+
+      # Corre SIEMPRE (tambien si el job fallo): asi el sitio no queda en
+      # mantenimiento y una bandera que haya quedado de un run interrumpido se
+      # limpia en el siguiente pase. maintenance-off.ps1 verifica HTTP 200 en
+      # http://localhost:3003/ (con reintentos ~2 min) ANTES de borrar la bandera:
+      #   - app arriba  -> borra la bandera (el publico vuelve a SynerLink);
+      #   - app abajo   -> la CONSERVA (la pagina es lo correcto) y sale con 1.
+      # Sin bandera termina al instante. Tras recuperar la app a mano, correr:
+      #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\maintenance-off.ps1
+      - name: Quitar pagina de mantenimiento si GSS-Front responde 200
+        if: always()
+        shell: cmd
+        run: |
+          cd /d %PROJECT_DIR% || exit /b 1
+          if not exist scripts\maintenance-off.ps1 (
+            echo scripts\maintenance-off.ps1 no existe en este checkout; nada que hacer
+            exit /b 0
+          )
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\maintenance-off.ps1

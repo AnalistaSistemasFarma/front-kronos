@@ -40,8 +40,6 @@ import {
   IconClock,
   IconCircleCheck,
 } from '@tabler/icons-react';
-import axios from 'axios';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 import {
   TABLE_FIELD_TYPE,
   parseTableConfig,
@@ -273,17 +271,14 @@ export default function PaymentDetailModal({ opened, onClose, request }: Props) 
     const loadFiles = async () => {
       setFilesLoading(true);
       try {
-        const token = await getMicrosoftToken();
-        if (!token) throw new Error('sin token');
-        const res = await axios.get(
-          `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/SG/Request-${idReqGen}:/children`,
-          { headers: { Authorization: `Bearer ${token}` } }
+        // Lista el servidor: el token de Graph no sale del servidor.
+        const res = await fetch(
+          `/api/requests-general/list-attachments?requestId=${encodeURIComponent(String(idReqGen))}&storagePath=SG&entityType=Request`
         );
+        const data = (await res.json().catch(() => ({}))) as { files?: FolderFile[] };
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         if (!active) return;
-        const items: FolderFile[] = (res.data?.value ?? []).filter(
-          (it: { file?: unknown }) => it.file
-        );
-        setFiles(items);
+        setFiles(Array.isArray(data.files) ? data.files : []);
       } catch {
         // La carpeta puede no existir (404) o no haber token: se muestra "Sin adjuntos".
         if (active) setFilesError('Sin adjuntos');

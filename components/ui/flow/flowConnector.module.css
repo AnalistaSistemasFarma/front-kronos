@@ -1,0 +1,137 @@
+/*
+ * Conector entre pasos de un flujo: un riel delgado por el que bajan "paquetes"
+ * (barritas brillantes) hacia un punto de llegada que late al recibirlos.
+ * Inactivo: riel punteado, sin movimiento. Se apaga con prefers-reduced-motion.
+ */
+
+.connector {
+  --flow-color: #f59e0b;
+  --flow-glow: rgba(245, 158, 11, 0.55);
+  --flow-rail: rgba(245, 158, 11, 0.18);
+  --flow-idle: rgba(120, 120, 128, 0.35);
+  --flow-h: 48px;
+  --flow-speed: 1.8s;
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 24px;
+  height: calc(var(--flow-h) + 10px);
+  margin: 0 auto;
+}
+
+:global([data-mantine-color-scheme='dark']) .connector {
+  --flow-color: #fbbf24;
+  --flow-glow: rgba(251, 191, 36, 0.6);
+  --flow-rail: rgba(251, 191, 36, 0.16);
+  --flow-idle: rgba(255, 255, 255, 0.2);
+}
+
+/* Tonos: verde = estado final / estable; ámbar (el base) = en edición, más rápido. */
+.toneOk {
+  --flow-color: #34c759;
+  --flow-glow: rgba(52, 199, 89, 0.5);
+  --flow-rail: rgba(52, 199, 89, 0.18);
+}
+
+:global([data-mantine-color-scheme='dark']) .toneOk {
+  --flow-color: #30d158;
+  --flow-glow: rgba(48, 209, 88, 0.55);
+  --flow-rail: rgba(48, 209, 88, 0.16);
+}
+
+.toneEditing {
+  --flow-speed: 1.1s;
+}
+
+.rail {
+  position: relative;
+  width: 3px;
+  height: var(--flow-h);
+  border-radius: 999px;
+  background: var(--flow-rail);
+  overflow: hidden;
+}
+
+.packet {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 3px;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(to bottom, transparent, var(--flow-color));
+  box-shadow: 0 0 6px var(--flow-glow);
+  opacity: 0;
+  transform: translateY(-12px);
+}
+
+.node {
+  width: 8px;
+  height: 8px;
+  margin-top: 2px;
+  border-radius: 50%;
+  background: var(--flow-color);
+  box-shadow: 0 0 0 0 var(--flow-glow);
+}
+
+/* Inactivo: riel punteado y sin paquetes. */
+.idle .rail {
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--flow-idle) 0 4px,
+    transparent 4px 8px
+  );
+}
+
+.idle .packet {
+  display: none;
+}
+
+.idle .node {
+  background: var(--flow-idle);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .connector:not(.idle) .packet {
+    animation: flow-travel var(--flow-speed) cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+  .connector:not(.idle) .packet:nth-child(2) {
+    animation-delay: calc(var(--flow-speed) / 3);
+  }
+  .connector:not(.idle) .packet:nth-child(3) {
+    animation-delay: calc(var(--flow-speed) * 2 / 3);
+  }
+  .connector:not(.idle) .node {
+    animation: flow-arrive calc(var(--flow-speed) / 3) ease-out infinite;
+  }
+}
+
+@keyframes flow-travel {
+  0% {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(var(--flow-h));
+  }
+}
+
+@keyframes flow-arrive {
+  0% {
+    box-shadow: 0 0 0 0 var(--flow-glow);
+    transform: scale(1.15);
+  }
+  100% {
+    box-shadow: 0 0 0 6px transparent;
+    transform: scale(1);
+  }
+}

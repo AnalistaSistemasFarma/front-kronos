@@ -1,9 +1,7 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
-import axios from 'axios';
 import { useSession } from 'next-auth/react';
 import toast from 'react-hot-toast';
 import {
@@ -33,6 +31,7 @@ import {
   ActionIcon,
   Box,
   TagsInput,
+  Tooltip,
 } from '@mantine/core';
 import {
   IconCalendar,
@@ -55,6 +54,8 @@ import {
   IconFileSpreadsheet,
   IconPhoto,
   IconAt,
+  IconEye,
+  IconDownload,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
@@ -66,6 +67,7 @@ import {
 } from '../../../../../lib/help-desk/contactEmail';
 import { syncTicketContactEmailInSession } from '../../../../../lib/help-desk/ticketsBoardStorage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
+import TestAttachmentDeleteButton from '../../../../../components/attachments/TestAttachmentDeleteButton';
 
 interface Ticket {
   id_case: number;
@@ -205,7 +207,7 @@ function ViewTicketPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
-  const [folderContents, setFolderContents] = useState([]);
+  const [folderContents, setFolderContents] = useState<FolderFile[]>([]);
   const [newNote, setNewNote] = useState('');
   const [loadingNotes, setLoadingNotes] = useState(false);
   const [showResolution, setShowResolution] = useState(false);
@@ -378,15 +380,21 @@ function ViewTicketPage() {
     }
   }, [attachedFiles, ticket?.id_case]);
 
+  // Depende del id del caso, no del objeto `ticket`: cada edición hace setTicket({...ticket})
+  // y antes eso volvía a pedir categorías, departamentos, técnicos y notas.
+  const ticketCaseId = ticket?.id_case;
   useEffect(() => {
-    if (ticket) {
+    if (ticketCaseId) {
       fetchOptions();
-      if (canManageTickets) {
-        fetchSubprocessUsers();
-      }
       fetchNotes();
     }
-  }, [ticket, canManageTickets]);
+  }, [ticketCaseId]);
+
+  useEffect(() => {
+    if (ticketCaseId && canManageTickets) {
+      fetchSubprocessUsers();
+    }
+  }, [ticketCaseId, canManageTickets]);
 
   useEffect(() => {
     if (ticket?.id_category && !isEditing) {
@@ -593,56 +601,71 @@ function ViewTicketPage() {
     }
   };
 
-  async function GetToken() {
-    const token = await getMicrosoftToken();
+  /**
+   * Archivos recién subidos (id → archivo y momento de subida) que el listado de OneDrive aún
+   * puede no devolver: se muestran igual durante 2 minutos para que no "desaparezcan".
+   */
+  const recentUploadsRef = useRef(new Map<string, { file: FolderFile; at: number }>());
 
-    try {
-      const response = await axios.get(
-        `https://graph.microsoft.com/v1.0/drive/special/documents/children`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      const data = response.data;
-      console.log(data);
-    } catch (error) {
-      console.log(error);
+  const withRecentUploads = (listed: FolderFile[]): FolderFile[] => {
+    const listedIds = new Set(listed.map((f) => String(f.id)));
+    const now = Date.now();
+    const extras: FolderFile[] = [];
+    for (const [id, entry] of recentUploadsRef.current) {
+      if (listedIds.has(id) || now - entry.at > 120_000) recentUploadsRef.current.delete(id);
+      else extras.push(entry.file);
     }
-  }
+    return [...listed, ...extras];
+  };
+
+  const handleUploadComplete = (uploaded: UploadedFile) => {
+    const item = uploaded.graphItem;
+    if (item?.id) {
+      const file: FolderFile = {
+        id: item.id,
+        name: item.name || uploaded.file.name,
+        size: item.size ?? uploaded.file.size,
+        lastModifiedDateTime: item.lastModifiedDateTime || new Date().toISOString(),
+        webUrl: item.webUrl,
+        ...(item['@microsoft.graph.downloadUrl']
+          ? { '@microsoft.graph.downloadUrl': item['@microsoft.graph.downloadUrl'] }
+          : {}),
+      };
+      recentUploadsRef.current.set(String(file.id), { file, at: Date.now() });
+      setFolderContents((prev: FolderFile[]) =>
+        prev.some((f) => String(f.id) === String(file.id)) ? prev : [...prev, file]
+      );
+    }
+    // Confirmar con OneDrive cuando ya haya indexado el archivo.
+    window.setTimeout(() => void fetchFolderContents(), 1500);
+    window.setTimeout(() => void fetchFolderContents(), 5000);
+  };
+
+  // Botón de pruebas (solo testing/local): el archivo ya se borró en OneDrive, quitarlo de la lista.
+  const handleTestAttachmentDeleted = (fileId: string) => {
+    recentUploadsRef.current.delete(String(fileId));
+    setFolderContents((prev) => prev.filter((f) => String(f.id) !== String(fileId)));
+  };
 
   const fetchFolderContents = async () => {
     if (!ticket?.id_case) return;
 
-    const folderName = `Ticket-${ticket.id_case}`;
     try {
-      const token = await getMicrosoftToken();
-      if (!token) {
-        throw new Error('No se pudo obtener el token de acceso.');
+      // Lista el servidor (Ticket-<id> en MA): el token de Graph no sale del servidor.
+      const response = await fetch(
+        `/api/requests-general/list-attachments?requestId=${encodeURIComponent(String(ticket.id_case))}&storagePath=MA&entityType=Ticket`
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        files?: FolderFile[];
+      };
+      if (!response.ok) {
+        throw new Error(data.error || `Error listando adjuntos (HTTP ${response.status})`);
       }
-
-      const response = await axios.get(
-        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/MA/${folderName}:/children`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      const files = response.data.value.filter(
-        (item: Record<string, unknown>) => 'file' in item && !!item.file
-      );
-      setFolderContents(files);
+      setFolderContents(withRecentUploads(Array.isArray(data.files) ? data.files : []));
     } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        setFolderContents([]);
-        return;
-      }
       console.error('Error al listar los archivos de la carpeta:', error);
-      setFolderContents([]);
+      setFolderContents(withRecentUploads([]));
     }
   };
 
@@ -1091,7 +1114,7 @@ function ViewTicketPage() {
 
   if (loading) {
     return (
-      <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+      <div className='app-canvas flex items-center justify-center'>
         <div className='text-center'>
           <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4'></div>
           <Text size='lg' color='gray.6'>
@@ -1104,7 +1127,7 @@ function ViewTicketPage() {
 
   if (error) {
     return (
-      <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+      <div className='app-canvas flex items-center justify-center'>
         <Card shadow='sm' p='xl' radius='md' withBorder className='max-w-md'>
           <Alert icon={<IconAlertCircle size={20} />} title='Error' color='red' mb='md'>
             {error}
@@ -1123,7 +1146,7 @@ function ViewTicketPage() {
 
   if (!ticket) {
     return (
-      <div className='min-h-screen bg-gray-50 flex items-center justify-center'>
+      <div className='app-canvas flex items-center justify-center'>
         <Card shadow='sm' p='xl' radius='md' withBorder className='max-w-md'>
           <Text size='lg' fw={500} mb='md' className='text-center'>
             Caso no encontrado
@@ -1141,10 +1164,10 @@ function ViewTicketPage() {
   }
 
   return (
-    <div className='min-h-screen bg-gray-50'>
+    <div className='app-canvas'>
       <div className='max-w-6xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
         {/* Header */}
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
+        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
           </Breadcrumbs>
@@ -1218,7 +1241,7 @@ function ViewTicketPage() {
 
         <Grid>
           <Grid.Col span={{ base: 12, lg: 8 }}>
-            <Card shadow='sm' p='xl' radius='md' withBorder className='bg-white h-full'>
+            <Card shadow='sm' p='xl' radius='md' withBorder className='h-full'>
               <Title order={3} mb='md' className='flex items-center gap-2'>
                 <IconNote size={20} />
                 Detalles del Caso - {ticket.company}
@@ -1243,7 +1266,7 @@ function ViewTicketPage() {
                   <Text fw={600} mb='xs'>
                     Descripción del Caso
                   </Text>
-                  <Card withBorder radius='md' p='md' bg='gray.0'>
+                  <Card withBorder radius='md' p='md'>
                     <Text size='sm' className='whitespace-pre-line text-gray-700'>
                       {ticket.description}
                     </Text>
@@ -1253,7 +1276,7 @@ function ViewTicketPage() {
                 <Divider />
 
                 {/* Notas del caso */}
-                <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
+                <Card shadow='sm' p='lg' radius='md' withBorder>
                   <Title order={4} mb='md' className='flex items-center gap-2'>
                     <IconNote size={18} className='text-blue-6' />
                     Notas del Caso
@@ -1379,7 +1402,7 @@ function ViewTicketPage() {
                 <Divider />
 
                 {/* Resolución del caso */}
-                <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
+                <Card shadow='sm' p='lg' radius='md' withBorder>
                   <Group justify='space-between' mb='md'>
                     <Title order={4} className='flex items-center gap-2'>
                       <IconCheck size={18} className='text-green-6' />
@@ -1504,7 +1527,7 @@ function ViewTicketPage() {
           <Grid.Col span={{ base: 12, lg: 4 }}>
             <Stack gap='md'>
               {/* Información General */}
-              <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
+              <Card shadow='sm' p='lg' radius='md' withBorder>
                 <Title order={4} mb='md' className='flex items-center gap-2'>
                   <IconCalendar size={18} />
                   Información General
@@ -1569,7 +1592,7 @@ function ViewTicketPage() {
               </Card>
 
               {/* Categorización */}
-              <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
+              <Card shadow='sm' p='lg' radius='md' withBorder>
                 <Title order={4} mb='md' className='flex items-center gap-2'>
                   <IconFilter size={18} />
                   Categorización
@@ -1623,7 +1646,7 @@ function ViewTicketPage() {
               </Card>
 
               {/* Contacto del solicitante */}
-              <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
+              <Card shadow='sm' p='lg' radius='md' withBorder>
                 <Title order={4} mb='md' className='flex items-center gap-2'>
                   <IconAt size={18} />
                   Contacto del solicitante
@@ -1649,7 +1672,7 @@ function ViewTicketPage() {
         </Grid>
 
         {/* File Attachments */}
-        <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
+        <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
           <Title order={3} mb='md' className='flex items-center gap-2'>
             <IconUpload size={20} />
             Archivos Adjuntos
@@ -1662,7 +1685,7 @@ function ViewTicketPage() {
                 Archivos existentes en el ticket ({folderContents.length})
               </Text>
               {folderContents.map((file: FolderFile) => (
-                <Card key={file.id} withBorder p='sm' bg='gray.0'>
+                <Card key={file.id} withBorder p='sm'>
                   <Flex align='center' gap='sm'>
                     <Box c='blue'>
                       {file.name.toLowerCase().endsWith('.pdf') && <IconFileText size={20} />}
@@ -1696,18 +1719,46 @@ function ViewTicketPage() {
                       <Badge color='teal' size='sm'>
                         Almacenado
                       </Badge>
-                      <ActionIcon
-                        variant='subtle'
-                        color='blue'
-                        size='sm'
-                        component='a'
-                        href={file.webUrl}
-                        target='_blank'
-                        rel='noopener noreferrer'
-                        aria-label={`Descargar archivo ${file.name}`}
-                      >
-                        <IconUpload size={16} />
-                      </ActionIcon>
+                      {file.webUrl ? (
+                        <Tooltip label='Ver en línea (sin descargar)'>
+                          <ActionIcon
+                            variant='subtle'
+                            color='blue'
+                            size='sm'
+                            component='a'
+                            href={file.webUrl}
+                            target='_blank'
+                            rel='noopener noreferrer'
+                            aria-label={`Ver en línea ${file.name}`}
+                          >
+                            <IconEye size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                      ) : null}
+                      {file['@microsoft.graph.downloadUrl'] || file.webUrl ? (
+                        <Tooltip label='Descargar'>
+                          <ActionIcon
+                            variant='subtle'
+                            color='blue'
+                            size='sm'
+                            component='a'
+                            href={file['@microsoft.graph.downloadUrl'] || file.webUrl}
+                            target='_blank'
+                            rel='noopener noreferrer'
+                            aria-label={`Descargar archivo ${file.name}`}
+                          >
+                            <IconDownload size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                      ) : null}
+                      <TestAttachmentDeleteButton
+                        requestId={ticket.id_case}
+                        fileId={String(file.id)}
+                        fileName={file.name}
+                        storagePath='MA'
+                        entityType='Ticket'
+                        onDeleted={handleTestAttachmentDeleted}
+                      />
                     </Group>
                   </Flex>
                 </Card>
@@ -1718,12 +1769,13 @@ function ViewTicketPage() {
           <FileUpload
             ticketId={ticket.id_case}
             onFilesChange={setAttachedFiles}
+            onUploadComplete={handleUploadComplete}
             disabled={!canManageTickets || isTicketResolved()}
           />
         </Card>
 
         {/* Actions */}
-        <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
+        <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
           {/* Mensaje de actualización */}
           {updateMessage && (
             <Alert

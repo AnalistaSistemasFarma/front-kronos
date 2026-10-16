@@ -3,6 +3,7 @@ import {
   isCustomPaletteKey,
   parseCustomPaletteHex,
 } from './customPalette';
+import { appearanceFromDuo, DUO_PALETTES, findDuoPalette } from './duoPalettes';
 
 /**
  * Catálogo de paletas de color seleccionables por el usuario.
@@ -38,7 +39,8 @@ export const DEFAULT_PALETTE_KEY = 'gss';
 /** Clave de localStorage donde se persiste la paleta elegida */
 export const PALETTE_STORAGE_KEY = 'theme-palette';
 
-const PALETTE_KEYS = PALETTES.map((p) => p.key);
+/** Paletas de un color + combinaciones de dos tonos (lib/theme/duoPalettes.ts). */
+const PALETTE_KEYS = [...PALETTES.map((p) => p.key), ...DUO_PALETTES.map((d) => d.key)];
 
 /** Set de claves válidas (para validar entradas del usuario/API) */
 export const PALETTE_KEY_SET: ReadonlySet<string> = new Set(PALETTE_KEYS);
@@ -52,10 +54,20 @@ export function isValidPaletteKey(key: unknown): key is string {
 /** Resuelve una clave de paleta a su color base de Mantine, con fallback al default */
 export function resolvePrimaryColor(key: unknown): string {
   if (typeof key === 'string' && parseCustomPaletteHex(key)) return 'custom';
+  if (findDuoPalette(key)) return 'custom';
   const found = PALETTES.find((p) => p.key === key);
   if (found) return found.primaryColor;
   const fallback = PALETTES.find((p) => p.key === DEFAULT_PALETTE_KEY);
   return fallback ? fallback.primaryColor : 'blue';
+}
+
+/**
+ * Color con el que se genera la tupla `custom` de Mantine: el color personalizado o el tono
+ * fuerte de una combinación de dos tonos. null para las paletas fijas (usan un color de Mantine).
+ */
+export function paletteCustomHex(key: unknown): string | null {
+  if (typeof key !== 'string') return null;
+  return parseCustomPaletteHex(key) ?? findDuoPalette(key)?.accent ?? null;
 }
 
 /** Lee la paleta guardada en localStorage (o null si no hay/ inválida) */
@@ -136,6 +148,8 @@ export const PALETTE_APPEARANCE: Record<string, { light: PaletteVars; dark: Pale
     light: { bg: '#e6eef1', surface: '#fafdfd', surfaceRaised: '#fcfefe', header: '#fafdfd', accent: '#0f766e', accentHover: '#0d655f' },
     dark: { bg: '#152233', surface: '#1e2d44', surfaceRaised: '#273855', header: '#121e29', accent: '#38d9a9', accentHover: '#54deb5' },
   },
+  // Combinaciones de dos tonos: fondo y tarjetas en el pastel, acento en el tono fuerte.
+  ...Object.fromEntries(DUO_PALETTES.map((d) => [d.key, appearanceFromDuo(d)])),
 };
 
 /** Devuelve las variables de apariencia de una paleta+modo, con fallback al default */

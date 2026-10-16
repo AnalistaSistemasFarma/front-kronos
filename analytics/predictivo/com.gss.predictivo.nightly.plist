@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- EJEMPLO — NO INSTALADO. Para activarlo (requiere aprobación de Nicolás):
+     1) ajustar la ruta del repo en ProgramArguments,
+     2) cp com.gss.predictivo.nightly.plist ~/Library/LaunchAgents/
+     3) launchctl load ~/Library/LaunchAgents/com.gss.predictivo.nightly.plist
+     Corre todos los días a las 5:15 a. m. (después de los cargues nocturnos). -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.gss.predictivo.nightly</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/horus/proyectos/front-kronos/analytics/predictivo/run_nightly.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>5</integer>
+    <key>Minute</key>
+    <integer>15</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/horus/.horus/logs/predictivo-nightly.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/horus/.horus/logs/predictivo-nightly.log</string>
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

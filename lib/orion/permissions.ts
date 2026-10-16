@@ -27,6 +27,8 @@ export type OrionUiPermissions = {
   isSigner: boolean;
   isMyTurn: boolean;
   isRequestCreator: boolean;
+  /** Asignado como preparador documento del flujo (Administración → Preparadores documento). */
+  isFlowResponsible: boolean;
   hasCompletedSignature: boolean;
   isReadOnly: boolean;
   roleLabel: string;
@@ -79,23 +81,45 @@ export function isOrionRequestCreator(params: {
 }
 
 /**
+ * Responsable de configurar firmas del flujo (preparador documento).
+ * Lo resuelve el servidor vía preparers_process_category.
+ */
+export function isOrionFlowSignatureResponsible(params: {
+  isFlowResponsible?: boolean | null;
+}): boolean {
+  return Boolean(params.isFlowResponsible);
+}
+
+/**
  * Edición de documento/firmantes/posiciones:
- * creador no automático: canManage = permiso Preparar en el servidor.
+ * permiso Preparar + preparador documento del flujo (Administración de flujo).
+ * Así no cualquier usuario con “Preparar firma” configura PDFs de otros flujos.
  */
 export function canEditOrionPreparation(params: {
   canManage: boolean;
   workflowLocked?: boolean;
   state?: OrionSignatureState | null;
-  currentUserEmail?: string | null;
-  currentUserId?: string | null;
-  createdByEmail?: string | null;
-  requesterId?: string | null;
+  isFlowResponsible?: boolean | null;
 }): boolean {
   if (!params.canManage || params.workflowLocked) return false;
   if (isTerminalStatus(params.state?.status)) return false;
   if (hasAnyCompletedOrionSignature(params.state)) return false;
-  // canManage = permiso Preparar (servidor); no se infiere de creador/admin.
+  if (!isOrionFlowSignatureResponsible({ isFlowResponsible: params.isFlowResponsible })) {
+    return false;
+  }
   return true;
+}
+
+/**
+ * Toggle Para firmar / Solo ver: preparador documento del flujo + permiso Preparar.
+ */
+export function canToggleOrionSignatureIntent(params: {
+  canManage: boolean;
+  workflowLocked?: boolean;
+  state?: OrionSignatureState | null;
+  isFlowResponsible?: boolean | null;
+}): boolean {
+  return canEditOrionPreparation(params);
 }
 
 export function resolveOrionPermissions(params: {
@@ -105,6 +129,8 @@ export function resolveOrionPermissions(params: {
   currentUserId?: string | null;
   createdByEmail?: string | null;
   requesterId?: string | null;
+  /** Asignado como preparador documento del flujo (API ensure-document). */
+  isFlowResponsible?: boolean | null;
   state?: OrionSignatureState | null;
   hasAttachment?: boolean;
   participantEmails?: string[];
@@ -118,6 +144,7 @@ export function resolveOrionPermissions(params: {
     currentUserId,
     createdByEmail,
     requesterId,
+    isFlowResponsible: isFlowResponsibleParam = false,
     state,
     hasAttachment = false,
     participantEmails = [],
@@ -137,6 +164,9 @@ export function resolveOrionPermissions(params: {
     currentUserId,
     createdByEmail,
     requesterId,
+  });
+  const isFlowResponsible = isOrionFlowSignatureResponsible({
+    isFlowResponsible: isFlowResponsibleParam,
   });
 
   const signerEmails = new Set(
@@ -164,9 +194,9 @@ export function resolveOrionPermissions(params: {
     if (iCompleted) userRole = 'viewer';
     else if (isMyTurn) userRole = 'signer';
     else if (isSigner) userRole = 'waiting';
-    else if (canManage && !workflowLocked) userRole = 'coordinator';
+    else if (canManage && isFlowResponsible && !workflowLocked) userRole = 'coordinator';
     else userRole = 'viewer';
-  } else if (canManage) {
+  } else if (canManage && isFlowResponsible) {
     userRole = 'coordinator';
   } else if (isSigner && !iCompleted) {
     userRole = 'waiting';
@@ -188,10 +218,7 @@ export function resolveOrionPermissions(params: {
     canManage,
     workflowLocked,
     state,
-    currentUserEmail,
-    currentUserId,
-    createdByEmail,
-    requesterId,
+    isFlowResponsible,
   });
 
   const canManageWorkflow = canEditPrep;
@@ -202,7 +229,7 @@ export function resolveOrionPermissions(params: {
   const canPlaceSignatures = canEditAssignments;
   const canDrawSignature = isSignerUser && !isTerminal;
   const canViewDocument =
-    (isSignerUser || isWaitingSigner || isCoordinator || isCreator) &&
+    (isSignerUser || isWaitingSigner || isCoordinator || isCreator || isFlowResponsible) &&
     (hasDocument || hasAttachment || Boolean(state?.signedFileUrl));
   const turnExpired =
     isMyTurn &&
@@ -232,6 +259,7 @@ export function resolveOrionPermissions(params: {
     isSigner,
     isMyTurn,
     isRequestCreator: isCreator,
+    isFlowResponsible,
     hasCompletedSignature,
     isReadOnly,
     roleLabel,

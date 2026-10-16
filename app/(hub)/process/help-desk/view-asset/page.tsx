@@ -1351,9 +1351,9 @@ function ViewAsset() {
   const editing = isEditing && form !== null;
 
   return (
-    <div className='min-h-screen bg-gray-50'>
+    <div className='app-canvas'>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6' className='bg-white'>
+        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
           </Breadcrumbs>
@@ -1411,7 +1411,7 @@ function ViewAsset() {
             <div className='flex flex-col lg:flex-row gap-6'>
               <div className='flex-1 min-w-0'>
                 <Stack gap='md'>
-                  <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white' pos='relative'>
+                  <Card shadow='sm' p='lg' radius='md' withBorder pos='relative'>
                     <LoadingOverlay visible={saveLoading || (editing && listsLoading)} />
                     <Title order={3} mb='md' className='flex items-center gap-2'>
                       <IconInfoCircle size={20} />
@@ -1662,7 +1662,7 @@ function ViewAsset() {
                     </Grid>
                   </Card>
 
-                  <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
+                  <Card shadow='sm' p='lg' radius='md' withBorder>
                     <Title order={3} mb='md' className='flex items-center gap-2'>
                       <IconUser size={20} />
                       Asignación
@@ -1707,7 +1707,7 @@ function ViewAsset() {
                     </Grid>
                   </Card>
 
-                  <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
+                  <Card shadow='sm' p='lg' radius='md' withBorder>
                     <Title order={3} mb='md' className='flex items-center gap-2'>
                       <IconFileDescription size={20} />
                       Documentos y Renovación
@@ -1828,7 +1828,7 @@ function ViewAsset() {
               </div>
 
               <div className='w-full lg:w-96 lg:sticky lg:top-6 self-start'>
-                <Card shadow='sm' p='lg' radius='md' withBorder className='bg-white'>
+                <Card shadow='sm' p='lg' radius='md' withBorder>
                   <Title order={4} mb='md' className='flex items-center gap-2'>
                     <IconNote size={18} className='text-blue-600' />
                     Historial del Activo
@@ -1890,7 +1890,7 @@ function ViewAsset() {
               </div>
             </div>
 
-            <Card shadow='sm' p='lg' radius='md' withBorder mt='6' className='bg-white'>
+            <Card shadow='sm' p='lg' radius='md' withBorder mt='6'>
               <Group justify='space-between' wrap='wrap'>
                 <Group>
                   {!isEditing ? (
@@ -2059,7 +2059,7 @@ function ViewAsset() {
                   </Grid.Col>
                 </Grid>
 
-                <Card withBorder radius='md' p='md' bg='gray.0'>
+                <Card withBorder radius='md' p='md'>
                   <Text size='sm' fw={600} mb='xs'>
                     Datos del equipo
                   </Text>
@@ -2213,7 +2213,7 @@ function ViewAsset() {
                     </Grid.Col>
                   </Grid>
 
-                  <Card withBorder radius='md' p='md' bg='gray.0'>
+                  <Card withBorder radius='md' p='md'>
                     <Text size='sm' fw={600} mb='xs'>
                       Datos del equipo
                     </Text>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense, type CSSProperties } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import ExcelJS from 'exceljs';
@@ -21,7 +21,6 @@ import {
   Group,
   Badge,
   Modal,
-  Grid,
   Card,
   Text,
   Divider,
@@ -31,7 +30,11 @@ import {
   Box,
   Flex,
   Loader,
+  ScrollArea,
+  SimpleGrid,
+  Tooltip,
 } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import {
   IconAlertCircle,
   IconChevronRight,
@@ -63,6 +66,13 @@ import {
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
+
+/** Grid fluido: se reacomoda por ancho real, no solo por breakpoints CSS. */
+const FLUID_FIELD_GRID: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))',
+  gap: 'var(--mantine-spacing-md)',
+};
 
 interface Asset {
   id: number;
@@ -328,6 +338,10 @@ function AssetsBoard() {
   const { data: session, status } = useSession();
   const userName = session?.user?.name || '';
   const router = useRouter();
+  // <768: teléfono real. <1100: tablet / “sitio de escritorio” en celular (~980px).
+  // initialValue true = mobile-first (evita flash de tabla densa en celular).
+  const isMobile = useMediaQuery('(max-width: 768px)', true);
+  const useCardList = useMediaQuery('(max-width: 1100px)', true);
 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -350,6 +364,11 @@ function AssetsBoard() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [createLoading, setCreateLoading] = useState(false);
   const isSubmittingRef = useRef(false);
+
+  const [newTypeOpened, setNewTypeOpened] = useState(false);
+  const [newTypeName, setNewTypeName] = useState('');
+  const [newTypeError, setNewTypeError] = useState<string | null>(null);
+  const [newTypeSaving, setNewTypeSaving] = useState(false);
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -491,6 +510,46 @@ function AssetsBoard() {
     });
     if (formErrors[field]) {
       setFormErrors((prev) => ({ ...prev, [field]: '' }));
+    }
+  };
+
+  const openNewType = () => {
+    setNewTypeName('');
+    setNewTypeError(null);
+    setNewTypeOpened(true);
+  };
+
+  const handleCreateType = async () => {
+    const name = newTypeName.trim();
+    if (!name) {
+      setNewTypeError('Escriba el nombre del tipo de activo.');
+      return;
+    }
+    if (newTypeSaving) return;
+    setNewTypeSaving(true);
+    try {
+      const response = await fetch('/api/assets/types', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setNewTypeError(data?.error || 'No se pudo crear el tipo de activo.');
+        return;
+      }
+      const type: TypeAssetRow = data.type;
+      const subtype: SubtypeAssetRow = data.subtype;
+      setTypeOptions((prev) => [...prev, type].sort((a, b) => a.tipo_activo.localeCompare(b.tipo_activo)));
+      setSubtypeOptions((prev) => [...prev, subtype]);
+      setFormData((prev) => ({ ...prev, tipo_activo: String(type.id), tipo_equipo: String(subtype.id) }));
+      setFormErrors((prev) => ({ ...prev, tipo_activo: '', tipo_equipo: '' }));
+      setNewTypeOpened(false);
+      toast.success(`Tipo de activo "${type.tipo_activo}" creado.`);
+    } catch {
+      setNewTypeError('No se pudo crear el tipo de activo. Intente de nuevo.');
+    } finally {
+      setNewTypeSaving(false);
     }
   };
 
@@ -747,28 +806,44 @@ function AssetsBoard() {
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
-      <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
+      <div className='max-w-7xl mx-auto py-4 px-3 sm:py-8 sm:px-6 lg:px-8'>
+        <Card shadow='sm' p={{ base: 'md', sm: 'xl' }} radius='md' withBorder mb='md'>
           <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
             {breadcrumbItems}
           </Breadcrumbs>
 
-          <Flex justify='space-between' align='center' mb='4'>
-            <div>
-              <Title order={1} className='text-3xl font-bold mb-2 flex items-center gap-3'>
-                <IconDeviceLaptop size={32} className='text-blue-600' />
+          <Flex
+            justify='space-between'
+            align={{ base: 'stretch', sm: 'center' }}
+            direction={{ base: 'column', sm: 'row' }}
+            gap='md'
+            mb='md'
+          >
+            <div style={{ minWidth: 0 }}>
+              <Title
+                order={1}
+                className='flex items-center gap-2 sm:gap-3'
+                style={{ fontSize: 'clamp(1.25rem, 4vw, 1.875rem)', lineHeight: 1.25 }}
+              >
+                <IconDeviceLaptop
+                  size={isMobile ? 24 : 32}
+                  className='text-blue-600'
+                  style={{ flexShrink: 0 }}
+                />
                 Gestión de Activos
               </Title>
-              <Text size='lg' c='dimmed'>
+              <Text size={isMobile ? 'sm' : 'lg'} c='dimmed' mt={4}>
                 Tablero para ver todos los activos
               </Text>
             </div>
 
             <Button
               onClick={() => setModalOpened(true)}
-              size='lg'
+              size={isMobile ? 'md' : 'lg'}
+              fullWidth={!!isMobile}
               leftSection={<IconPlus size={18} />}
               className='bg-blue-600 hover:bg-blue-700'
+              style={{ flexShrink: 0, minHeight: 44 }}
             >
               Crear Activo
             </Button>
@@ -795,7 +870,7 @@ function AssetsBoard() {
               return (
                 <Card
                   key={card.label}
-                  p='md'
+                  p={{ base: 'sm', sm: 'md' }}
                   radius='md'
                   withBorder
                   role={clickable ? 'button' : undefined}
@@ -803,21 +878,32 @@ function AssetsBoard() {
                   onClick={clickable ? () => filterByStatus(card.statusId as string) : undefined}
                   style={{
                     cursor: clickable ? 'pointer' : 'default',
+                    height: '100%',
                     backgroundColor: `var(--mantine-color-${card.color}-light)`,
                     borderColor: active
                       ? `var(--mantine-color-${card.color}-filled)`
                       : 'transparent',
                     borderWidth: 2,
                     transition: 'border-color 150ms ease',
+                    WebkitTapHighlightColor: 'transparent',
                   }}
                 >
-                  <Group wrap='nowrap'>
-                    <card.Icon size={24} color={`var(--mantine-color-${card.color}-light-color)`} />
+                  <Group wrap='nowrap' gap='xs' align='flex-start'>
+                    <card.Icon
+                      size={isMobile ? 18 : 24}
+                      color={`var(--mantine-color-${card.color}-light-color)`}
+                      style={{ flexShrink: 0, marginTop: 2 }}
+                    />
                     <div style={{ minWidth: 0 }}>
-                      <Text size='xs' c={`var(--mantine-color-${card.color}-light-color)`}>
+                      <Text
+                        size='xs'
+                        c={`var(--mantine-color-${card.color}-light-color)`}
+                        style={{ lineHeight: 1.3 }}
+                        lineClamp={2}
+                      >
                         {card.label}
                       </Text>
-                      <Text size='lg' fw={600} style={{ wordBreak: 'break-word' }}>
+                      <Text size={isMobile ? 'md' : 'lg'} fw={600} style={{ wordBreak: 'break-word' }}>
                         {card.value}
                       </Text>
                     </div>
@@ -826,11 +912,12 @@ function AssetsBoard() {
               );
             })}
 
-            <Card p='md' radius='md' withBorder>
+            <Card p={{ base: 'sm', sm: 'md' }} radius='md' withBorder style={{ height: '100%' }}>
               <Button
                 onClick={() => exportToExcel()}
                 fullWidth
                 h='100%'
+                mih={44}
                 leftSection={<IconDownload size={18} />}
                 className='bg-green-500 hover:bg-green-700'
               >
@@ -852,17 +939,19 @@ function AssetsBoard() {
           </Alert>
         )}
 
-        <Card shadow='sm' p='lg' radius='md' withBorder mb='6'>
-          <Group justify='space-between' mb='md'>
-            <Title order={3} className='flex items-center gap-2'>
-              <IconFilter size={20} />
+        <Card shadow='sm' p={{ base: 'md', sm: 'lg' }} radius='md' withBorder mb='md'>
+          <Group justify='space-between' mb='md' wrap='nowrap'>
+            <Title order={3} className='flex items-center gap-2' style={{ fontSize: 'clamp(1rem, 3vw, 1.25rem)' }}>
+              <IconFilter size={20} style={{ flexShrink: 0 }} />
               Filtros de Búsqueda
             </Title>
             <ActionIcon
               variant='subtle'
+              size='lg'
               onClick={() => setFiltersExpanded(!filtersExpanded)}
               aria-label={filtersExpanded ? 'Ocultar filtros' : 'Mostrar filtros'}
               data-testid='filter-toggle'
+              style={{ minWidth: 44, minHeight: 44 }}
             >
               {filtersExpanded ? <IconX size={16} /> : <IconFilter size={16} />}
             </ActionIcon>
@@ -870,177 +959,181 @@ function AssetsBoard() {
 
           <Collapse in={filtersExpanded}>
             <Box mt='md'>
-              <Grid>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='Serial'
-                    placeholder='Ej: C17QK80C6940'
-                    value={filters.serial}
-                    onChange={(e) => handleFilterChange('serial', e.target.value)}
-                    leftSection={<IconBarcode size={16} />}
-                    data-testid='serial-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='Etiqueta'
-                    placeholder='Ej: POR001'
-                    value={filters.etiqueta}
-                    onChange={(e) => handleFilterChange('etiqueta', e.target.value)}
-                    leftSection={<IconTag size={16} />}
-                    data-testid='etiqueta-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Usuario'
-                    placeholder='Todos los usuarios'
-                    clearable
-                    searchable
-                    data={userSelectData}
-                    value={filters.usuario || null}
-                    onChange={(value) => handleFilterChange('usuario', value || '')}
-                    disabled={listsLoading}
-                    leftSection={<IconUser size={16} />}
-                    data-testid='usuario-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='Modelo'
-                    placeholder='Ej: MACBOOK'
-                    value={filters.modelo}
-                    onChange={(e) => handleFilterChange('modelo', e.target.value)}
-                    leftSection={<IconDeviceLaptop size={16} />}
-                    data-testid='modelo-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Departamento'
-                    placeholder='Todos los departamentos'
-                    clearable
-                    searchable
-                    data={departmentSelectData}
-                    value={filters.departamento || null}
-                    onChange={(value) => handleFilterChange('departamento', value || '')}
-                    disabled={listsLoading}
-                    leftSection={<IconBuilding size={16} />}
-                    data-testid='departamento-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Tipo Activo'
-                    placeholder='Todos los tipos'
-                    clearable
-                    searchable
-                    data={typeSelectData}
-                    value={filters.tipo_activo || null}
-                    onChange={(value) => handleFilterChange('tipo_activo', value || '')}
-                    disabled={listsLoading}
-                    leftSection={<IconDeviceLaptop size={16} />}
-                    data-testid='tipo_activo-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Tipo Equipo'
-                    placeholder={
-                      filters.tipo_activo ? 'Todos los equipos' : 'Seleccione un tipo de activo'
-                    }
-                    clearable
-                    searchable
-                    data={subtypeSelectDataFor(filters.tipo_activo)}
-                    value={filters.tipo_equipo || null}
-                    onChange={(value) => handleFilterChange('tipo_equipo', value || '')}
-                    disabled={!filters.tipo_activo || listsLoading}
-                    leftSection={<IconTag size={16} />}
-                    data-testid='tipo_equipo-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Procesador'
-                    placeholder='Todos los procesadores'
-                    clearable
-                    data={PROCESADORES}
-                    value={filters.procesador || null}
-                    onChange={(value) => handleFilterChange('procesador', value || '')}
-                    leftSection={<IconCpu size={16} />}
-                    data-testid='procesador-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Memoria RAM'
-                    placeholder='Todas'
-                    clearable
-                    data={RAM_OPTIONS}
-                    value={filters.ram || null}
-                    onChange={(value) => handleFilterChange('ram', value || '')}
-                    leftSection={<IconDeviceSdCard size={16} />}
-                    data-testid='ram-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Almacenamiento'
-                    placeholder='Todos'
-                    clearable
-                    data={ALMACENAMIENTO_OPTIONS}
-                    value={filters.almacenamiento || null}
-                    onChange={(value) => handleFilterChange('almacenamiento', value || '')}
-                    leftSection={<IconDatabase size={16} />}
-                    data-testid='almacenamiento-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Estado'
-                    placeholder='Todos los estados'
-                    clearable
-                    data={statusSelectData}
-                    value={filters.estado || null}
-                    onChange={(value) => handleFilterChange('estado', value || '')}
-                    leftSection={<IconFlag size={16} />}
-                    data-testid='estado-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Activo'
-                    placeholder='Todos'
-                    clearable
-                    data={ACTIVO_OPTIONS}
-                    value={filters.activo || null}
-                    onChange={(value) => handleFilterChange('activo', value || '')}
-                    leftSection={<IconCircleDot size={16} />}
-                    data-testid='activo-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Empresa'
-                    placeholder='Todas las empresas'
-                    clearable
-                    searchable
-                    data={companySelectData}
-                    value={filters.empresa || null}
-                    onChange={(value) => handleFilterChange('empresa', value || '')}
-                    disabled={listsLoading}
-                    leftSection={<IconBuilding size={16} />}
-                    data-testid='empresa-filter'
-                  />
-                </Grid.Col>
-              </Grid>
+              <div style={FLUID_FIELD_GRID}>
+                <TextInput
+                  label='Serial'
+                  placeholder='Ej: C17QK80C6940'
+                  value={filters.serial}
+                  onChange={(e) => handleFilterChange('serial', e.target.value)}
+                  leftSection={<IconBarcode size={16} />}
+                  data-testid='serial-filter'
+                  size='md'
+                />
+                <TextInput
+                  label='Etiqueta'
+                  placeholder='Ej: POR001'
+                  value={filters.etiqueta}
+                  onChange={(e) => handleFilterChange('etiqueta', e.target.value)}
+                  leftSection={<IconTag size={16} />}
+                  data-testid='etiqueta-filter'
+                  size='md'
+                />
+                <Select
+                  label='Usuario'
+                  placeholder='Todos los usuarios'
+                  clearable
+                  searchable
+                  data={userSelectData}
+                  value={filters.usuario || null}
+                  onChange={(value) => handleFilterChange('usuario', value || '')}
+                  disabled={listsLoading}
+                  leftSection={<IconUser size={16} />}
+                  data-testid='usuario-filter'
+                  size='md'
+                  comboboxProps={{ withinPortal: true }}
+                />
+                <TextInput
+                  label='Modelo'
+                  placeholder='Ej: MACBOOK'
+                  value={filters.modelo}
+                  onChange={(e) => handleFilterChange('modelo', e.target.value)}
+                  leftSection={<IconDeviceLaptop size={16} />}
+                  data-testid='modelo-filter'
+                  size='md'
+                />
+                <Select
+                  label='Departamento'
+                  placeholder='Todos los departamentos'
+                  clearable
+                  searchable
+                  data={departmentSelectData}
+                  value={filters.departamento || null}
+                  onChange={(value) => handleFilterChange('departamento', value || '')}
+                  disabled={listsLoading}
+                  leftSection={<IconBuilding size={16} />}
+                  data-testid='departamento-filter'
+                  size='md'
+                  comboboxProps={{ withinPortal: true }}
+                />
+                <Select
+                  label='Tipo Activo'
+                  placeholder='Todos los tipos'
+                  clearable
+                  searchable
+                  data={typeSelectData}
+                  value={filters.tipo_activo || null}
+                  onChange={(value) => handleFilterChange('tipo_activo', value || '')}
+                  disabled={listsLoading}
+                  leftSection={<IconDeviceLaptop size={16} />}
+                  data-testid='tipo_activo-filter'
+                  size='md'
+                  comboboxProps={{ withinPortal: true }}
+                />
+                <Select
+                  label='Tipo Equipo'
+                  placeholder={
+                    filters.tipo_activo ? 'Todos los equipos' : 'Seleccione un tipo de activo'
+                  }
+                  clearable
+                  searchable
+                  data={subtypeSelectDataFor(filters.tipo_activo)}
+                  value={filters.tipo_equipo || null}
+                  onChange={(value) => handleFilterChange('tipo_equipo', value || '')}
+                  disabled={!filters.tipo_activo || listsLoading}
+                  leftSection={<IconTag size={16} />}
+                  data-testid='tipo_equipo-filter'
+                  size='md'
+                  comboboxProps={{ withinPortal: true }}
+                />
+                <Select
+                  label='Procesador'
+                  placeholder='Todos los procesadores'
+                  clearable
+                  data={PROCESADORES}
+                  value={filters.procesador || null}
+                  onChange={(value) => handleFilterChange('procesador', value || '')}
+                  leftSection={<IconCpu size={16} />}
+                  data-testid='procesador-filter'
+                  size='md'
+                  comboboxProps={{ withinPortal: true }}
+                />
+                <Select
+                  label='Memoria RAM'
+                  placeholder='Todas'
+                  clearable
+                  data={RAM_OPTIONS}
+                  value={filters.ram || null}
+                  onChange={(value) => handleFilterChange('ram', value || '')}
+                  leftSection={<IconDeviceSdCard size={16} />}
+                  data-testid='ram-filter'
+                  size='md'
+                  comboboxProps={{ withinPortal: true }}
+                />
+                <Select
+                  label='Almacenamiento'
+                  placeholder='Todos'
+                  clearable
+                  data={ALMACENAMIENTO_OPTIONS}
+                  value={filters.almacenamiento || null}
+                  onChange={(value) => handleFilterChange('almacenamiento', value || '')}
+                  leftSection={<IconDatabase size={16} />}
+                  data-testid='almacenamiento-filter'
+                  size='md'
+                  comboboxProps={{ withinPortal: true }}
+                />
+                <Select
+                  label='Estado'
+                  placeholder='Todos los estados'
+                  clearable
+                  data={statusSelectData}
+                  value={filters.estado || null}
+                  onChange={(value) => handleFilterChange('estado', value || '')}
+                  leftSection={<IconFlag size={16} />}
+                  data-testid='estado-filter'
+                  size='md'
+                  comboboxProps={{ withinPortal: true }}
+                />
+                <Select
+                  label='Activo'
+                  placeholder='Todos'
+                  clearable
+                  data={ACTIVO_OPTIONS}
+                  value={filters.activo || null}
+                  onChange={(value) => handleFilterChange('activo', value || '')}
+                  leftSection={<IconCircleDot size={16} />}
+                  data-testid='activo-filter'
+                  size='md'
+                  comboboxProps={{ withinPortal: true }}
+                />
+                <Select
+                  label='Empresa'
+                  placeholder='Todas las empresas'
+                  clearable
+                  searchable
+                  data={companySelectData}
+                  value={filters.empresa || null}
+                  onChange={(value) => handleFilterChange('empresa', value || '')}
+                  disabled={listsLoading}
+                  leftSection={<IconBuilding size={16} />}
+                  data-testid='empresa-filter'
+                  size='md'
+                  comboboxProps={{ withinPortal: true }}
+                />
+              </div>
 
-              <Group justify='flex-end' mt='md'>
+              <Flex
+                justify='flex-end'
+                direction={{ base: 'column-reverse', sm: 'row' }}
+                gap='sm'
+                mt='md'
+              >
                 <Button
                   variant='outline'
                   onClick={handleClearFilters}
                   leftSection={<IconX size={16} />}
                   data-testid='clear-filters'
+                  fullWidth={!!isMobile}
+                  mih={44}
                 >
                   Limpiar Filtros
                 </Button>
@@ -1048,56 +1141,147 @@ function AssetsBoard() {
                   onClick={handleApplyFilters}
                   leftSection={<IconRefresh size={16} />}
                   data-testid='apply-filters'
+                  fullWidth={!!isMobile}
+                  mih={44}
                 >
                   Aplicar Filtros
                 </Button>
-              </Group>
+              </Flex>
             </Box>
           </Collapse>
         </Card>
 
-        <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
+        <Card
+          shadow='sm'
+          radius='md'
+          withBorder
+          p={{ base: 'md', sm: 'lg' }}
+          className='overflow-hidden'
+        >
           <LoadingOverlay visible={loading} />
 
-          <Group justify='space-between' mb='md'>
-            <Title order={3} className='flex items-center gap-2'>
-              <IconDeviceLaptop size={20} />
+          <Group justify='space-between' mb='md' wrap='nowrap' gap='sm'>
+            <Title
+              order={3}
+              className='flex items-center gap-2'
+              style={{ fontSize: 'clamp(1rem, 3vw, 1.25rem)', minWidth: 0 }}
+            >
+              <IconDeviceLaptop size={20} style={{ flexShrink: 0 }} />
               Lista de Activos
             </Title>
-            <Badge variant='light' size='lg'>
+            <Badge variant='light' size='lg' style={{ flexShrink: 0 }}>
               {assets.length} registros
             </Badge>
           </Group>
 
-          <div className='overflow-x-auto'>
-            <Table striped highlightOnHover>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Activo</Table.Th>
-                  <Table.Th>Tipo</Table.Th>
-                  <Table.Th>Usuario Asignado</Table.Th>
-                  <Table.Th>Identificación</Table.Th>
-                  <Table.Th>Estado</Table.Th>
-                  <Table.Th style={{ textAlign: 'right' }}>Costo</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {assets.length === 0 ? (
-                  <Table.Tr>
-                    <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
-                      <div className='flex flex-col items-center gap-3'>
-                        <IconDeviceLaptop size={48} className='text-gray-300' />
-                        <Text size='lg' fw={500}>
-                          No se encontraron activos
+          {assets.length === 0 ? (
+            <Stack align='center' gap='sm' py='xl'>
+              <IconDeviceLaptop size={48} className='text-gray-300' />
+              <Text size='lg' fw={500}>
+                No se encontraron activos
+              </Text>
+              <Text size='sm' c='dimmed' ta='center' px='md'>
+                Intenta ajustar los filtros o crea un nuevo activo
+              </Text>
+            </Stack>
+          ) : useCardList ? (
+            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
+              {assets.map((asset) => {
+                const StatusIcon = getAssetStatusIcon(asset.estado);
+                return (
+                  <Card
+                    key={asset.id}
+                    withBorder
+                    radius='md'
+                    padding='md'
+                    role='button'
+                    tabIndex={0}
+                    aria-label={`Ver activo ${asset.modelo || asset.nombre}`}
+                    onClick={() => openAssetDetail(asset)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openAssetDetail(asset);
+                      }
+                    }}
+                    style={{
+                      cursor: 'pointer',
+                      WebkitTapHighlightColor: 'transparent',
+                      transition: 'border-color 150ms ease, background-color 150ms ease',
+                    }}
+                  >
+                    <Group justify='space-between' align='flex-start' wrap='nowrap' gap='sm' mb={8}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <Text fw={700} size='sm' lineClamp={1}>
+                          {asset.modelo || '-'}
                         </Text>
-                        <Text size='sm' c='gray.5'>
-                          Intenta ajustar los filtros o crea un nuevo activo
+                        <Text size='xs' c='dimmed' lineClamp={1}>
+                          {asset.nombre} · {asset.empresa || '-'}
                         </Text>
                       </div>
-                    </Table.Td>
+                      <Text fw={700} size='sm' style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
+                        {formatCurrency(asset.costo_equipo)}
+                      </Text>
+                    </Group>
+
+                    <Stack gap={6}>
+                      <Group gap={6} wrap='nowrap'>
+                        <IconTag size={14} className='text-gray-400' style={{ flexShrink: 0 }} />
+                        <Text size='sm' lineClamp={1}>
+                          {asset.tipo_activo}
+                          {asset.tipo_equipo ? ` · ${asset.tipo_equipo}` : ''}
+                        </Text>
+                      </Group>
+                      <Group gap={6} wrap='nowrap'>
+                        <IconUser size={14} className='text-gray-400' style={{ flexShrink: 0 }} />
+                        <Text size='sm' lineClamp={1}>
+                          {asset.usuario || 'Sin asignar'}
+                          {asset.departamento ? ` · ${asset.departamento}` : ''}
+                        </Text>
+                      </Group>
+                      <Group gap={6} wrap='nowrap'>
+                        <IconBarcode size={14} className='text-gray-400' style={{ flexShrink: 0 }} />
+                        <Text size='xs' c='dimmed' lineClamp={1}>
+                          {asset.serial || '-'}
+                          {asset.etiqueta ? ` · ${asset.etiqueta}` : ''}
+                        </Text>
+                      </Group>
+                      <Group gap={6} mt={4}>
+                        <Badge
+                          color={getAssetStatusColor(asset.estado)}
+                          variant='light'
+                          size='sm'
+                          leftSection={<StatusIcon size={12} />}
+                          styles={{ label: { overflow: 'visible' } }}
+                        >
+                          {asset.estado}
+                        </Badge>
+                        {!isActive(asset.activo) && (
+                          <Badge color='red' variant='outline' size='xs'>
+                            Inactivo
+                          </Badge>
+                        )}
+                      </Group>
+                    </Stack>
+                  </Card>
+                );
+              })}
+            </SimpleGrid>
+          ) : (
+            <Box style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <Table striped highlightOnHover style={{ minWidth: 720 }}>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Activo</Table.Th>
+                    <Table.Th>Tipo</Table.Th>
+                    <Table.Th>Usuario Asignado</Table.Th>
+                    <Table.Th>Identificación</Table.Th>
+                    <Table.Th>Estado</Table.Th>
+                    <Table.Th style={{ textAlign: 'right' }}>Costo</Table.Th>
                   </Table.Tr>
-                ) : (
-                  assets.map((asset) => {
+                </Table.Thead>
+                <Table.Tbody>
+                  {assets.map((asset) => {
                     const StatusIcon = getAssetStatusIcon(asset.estado);
                     return (
                       <Table.Tr
@@ -1105,7 +1289,7 @@ function AssetsBoard() {
                         className='cursor-pointer transition-colors'
                         onClick={() => openAssetDetail(asset)}
                       >
-                        <Table.Td style={{ minWidth: 200 }}>
+                        <Table.Td style={{ minWidth: 180 }}>
                           <Text size='sm' fw={700}>
                             {asset.modelo || '-'}
                           </Text>
@@ -1140,7 +1324,7 @@ function AssetsBoard() {
                             </Group>
                           </Stack>
                         </Table.Td>
-                        <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                        <Table.Td>
                           <Text size='xs'>
                             <Text span fw={600}>
                               Serial:{' '}
@@ -1154,7 +1338,7 @@ function AssetsBoard() {
                             {asset.etiqueta || '-'}
                           </Text>
                         </Table.Td>
-                        <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                        <Table.Td>
                           <Stack gap={4} align='flex-start'>
                             <Badge
                               color={getAssetStatusColor(asset.estado)}
@@ -1179,36 +1363,80 @@ function AssetsBoard() {
                         </Table.Td>
                       </Table.Tr>
                     );
-                  })
-                )}
-              </Table.Tbody>
-            </Table>
-          </div>
+                  })}
+                </Table.Tbody>
+              </Table>
+            </Box>
+          )}
         </Card>
 
         <Modal
           opened={modalOpened}
           onClose={closeModal}
           title={
-            <Group>
-              <IconPlus size={20} />
-              <Text size='lg' fw={600}>
+            <Group gap='xs' wrap='nowrap'>
+              <IconPlus size={20} style={{ flexShrink: 0 }} />
+              <Text size={isMobile ? 'md' : 'lg'} fw={600}>
                 Crear Activo
               </Text>
             </Group>
           }
-          size='70%'
-          radius='md'
+          fullScreen={!!isMobile}
+          // Mantine fija el ancho con `size` (flex-basis); un maxWidth/width en
+          // `content` no lo cambia. En escritorio: 70% del ancho, entre 780px y 1400px.
+          size={isMobile ? '100%' : 'clamp(min(780px, calc(100vw - 2rem)), 70vw, 1400px)'}
+          yOffset='2rem'
+          centered={!isMobile}
+          radius={isMobile ? 0 : 'md'}
+          padding={isMobile ? 'md' : 'lg'}
           overlayProps={{ blur: 4 }}
+          styles={{
+            content: isMobile
+              ? {
+                  display: 'flex',
+                  flexDirection: 'column',
+                  height: '100%',
+                  maxHeight: '100dvh',
+                }
+              : {
+                  display: 'flex',
+                  flexDirection: 'column',
+                  maxHeight: 'calc(100dvh - 4rem)',
+                  overflow: 'hidden',
+                },
+            header: {
+              flexShrink: 0,
+              paddingBottom: 8,
+              borderBottom: '1px solid var(--mantine-color-default-border)',
+            },
+            body: {
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              paddingTop: 12,
+              paddingBottom: isMobile
+                ? 'calc(12px + env(safe-area-inset-bottom, 0px))'
+                : undefined,
+            },
+          }}
         >
           <LoadingOverlay visible={createLoading || listsLoading} />
 
-          <Stack>
-            <Text fw={600} c='blue.7' tt='uppercase' size='sm'>
-              1. Identificación
-            </Text>
-            <Grid>
-              <Grid.Col span={{ base: 12, md: 3 }}>
+          <ScrollArea
+            type='auto'
+            offsetScrollbars
+            style={{ flex: 1, minHeight: 0 }}
+            // Alto disponible = viewport - márgenes (4rem) - encabezado y botones (~11rem),
+            // para que el pie con "Crear Activo" nunca tape los últimos campos.
+            mah={isMobile ? undefined : 'calc(100dvh - 15rem)'}
+          >
+            <Stack gap='md' pb='sm'>
+              <Text fw={600} c='blue.7' tt='uppercase' size='xs'>
+                1. Identificación
+              </Text>
+              <div style={FLUID_FIELD_GRID}>
                 <TextInput
                   label='Serial del equipo'
                   placeholder='Ej: C17QK80C6940'
@@ -1217,10 +1445,9 @@ function AssetsBoard() {
                   error={formErrors.serial}
                   required
                   maxLength={100}
+                  size='md'
                   leftSection={<IconBarcode size={16} />}
                 />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 3 }}>
                 <TextInput
                   label='Nombre del activo'
                   placeholder='Ej: PORMACEDW'
@@ -1229,20 +1456,18 @@ function AssetsBoard() {
                   error={formErrors.nombre}
                   required
                   maxLength={254}
+                  size='md'
                   leftSection={<IconDeviceLaptop size={16} />}
                 />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 3 }}>
                 <TextInput
                   label='Etiqueta'
                   placeholder='Ej: POR0013'
                   value={formData.etiqueta}
                   onChange={(e) => handleFormChange('etiqueta', e.target.value)}
                   maxLength={100}
+                  size='md'
                   leftSection={<IconTag size={16} />}
                 />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 3 }}>
                 <TextInput
                   label='Modelo'
                   placeholder='Ej: MACBOOK AIR'
@@ -1251,19 +1476,17 @@ function AssetsBoard() {
                   error={formErrors.modelo}
                   required
                   maxLength={254}
+                  size='md'
                   leftSection={<IconDeviceLaptop size={16} />}
                 />
-              </Grid.Col>
-            </Grid>
+              </div>
 
-            <Divider />
+              <Divider />
 
-            {/* 2. Categorización */}
-            <Text fw={600} c='blue.7' tt='uppercase' size='sm'>
-              2. Categorización
-            </Text>
-            <Grid>
-              <Grid.Col span={{ base: 12, md: 3 }}>
+              <Text fw={600} c='blue.7' tt='uppercase' size='xs'>
+                2. Categorización
+              </Text>
+              <div style={FLUID_FIELD_GRID}>
                 <Select
                   label='Tipo de activo'
                   placeholder='Seleccione el tipo'
@@ -1273,10 +1496,26 @@ function AssetsBoard() {
                   onChange={(value) => handleFormChange('tipo_activo', value || '')}
                   error={formErrors.tipo_activo}
                   required
+                  size='md'
                   leftSection={<IconDeviceLaptop size={16} />}
+                  comboboxProps={{ withinPortal: true }}
+                  inputContainer={(children) => (
+                    <Group gap={6} wrap='nowrap' align='center'>
+                      <Box style={{ flex: 1, minWidth: 0 }}>{children}</Box>
+                      <Tooltip label='Crear un tipo de activo nuevo' withinPortal>
+                        <ActionIcon
+                          variant='light'
+                          size={42}
+                          radius='md'
+                          onClick={openNewType}
+                          aria-label='Crear un tipo de activo nuevo'
+                        >
+                          <IconPlus size={18} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </Group>
+                  )}
                 />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 3 }}>
                 <Select
                   label='Tipo de equipo'
                   placeholder={
@@ -1289,10 +1528,10 @@ function AssetsBoard() {
                   error={formErrors.tipo_equipo}
                   required
                   disabled={!formData.tipo_activo}
+                  size='md'
                   leftSection={<IconTag size={16} />}
+                  comboboxProps={{ withinPortal: true }}
                 />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 3 }}>
                 <Select
                   label='Estado'
                   placeholder='Seleccione el estado'
@@ -1301,28 +1540,27 @@ function AssetsBoard() {
                   onChange={(value) => handleFormChange('estado', value || '')}
                   error={formErrors.estado}
                   required
+                  size='md'
                   leftSection={<IconFlag size={16} />}
+                  comboboxProps={{ withinPortal: true }}
                 />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 3 }}>
-                <Switch
-                  label='¿Activo?'
-                  description='Vigente en el inventario'
-                  mt='md'
-                  checked={formData.activo}
-                  onChange={(e) => handleFormChange('activo', e.currentTarget.checked)}
-                />
-              </Grid.Col>
-            </Grid>
+                <Box style={{ display: 'flex', alignItems: 'center', minHeight: 60 }}>
+                  <Switch
+                    label='¿Activo?'
+                    description='Vigente en el inventario'
+                    checked={formData.activo}
+                    onChange={(e) => handleFormChange('activo', e.currentTarget.checked)}
+                    size='md'
+                  />
+                </Box>
+              </div>
 
-            <Divider />
+              <Divider />
 
-            {/* 3. Especificaciones técnicas */}
-            <Text fw={600} c='blue.7' tt='uppercase' size='sm'>
-              3. Especificaciones Técnicas
-            </Text>
-            <Grid>
-              <Grid.Col span={{ base: 12, md: 3 }}>
+              <Text fw={600} c='blue.7' tt='uppercase' size='xs'>
+                3. Especificaciones Técnicas
+              </Text>
+              <div style={FLUID_FIELD_GRID}>
                 <Select
                   label='Procesador'
                   placeholder='Seleccione'
@@ -1331,10 +1569,10 @@ function AssetsBoard() {
                   clearable
                   value={formData.procesador || null}
                   onChange={(value) => handleFormChange('procesador', value || '')}
+                  size='md'
                   leftSection={<IconCpu size={16} />}
+                  comboboxProps={{ withinPortal: true }}
                 />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 3 }}>
                 <Select
                   label='Memoria RAM'
                   placeholder='Seleccione'
@@ -1342,10 +1580,10 @@ function AssetsBoard() {
                   clearable
                   value={formData.ram || null}
                   onChange={(value) => handleFormChange('ram', value || '')}
+                  size='md'
                   leftSection={<IconDeviceSdCard size={16} />}
+                  comboboxProps={{ withinPortal: true }}
                 />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 3 }}>
                 <Select
                   label='Almacenamiento'
                   placeholder='Seleccione'
@@ -1353,10 +1591,10 @@ function AssetsBoard() {
                   clearable
                   value={formData.almacenamiento || null}
                   onChange={(value) => handleFormChange('almacenamiento', value || '')}
+                  size='md'
                   leftSection={<IconDatabase size={16} />}
+                  comboboxProps={{ withinPortal: true }}
                 />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 3 }}>
                 <Select
                   label='Sistema operativo'
                   placeholder='Seleccione'
@@ -1364,19 +1602,18 @@ function AssetsBoard() {
                   clearable
                   value={formData.so || null}
                   onChange={(value) => handleFormChange('so', value || '')}
+                  size='md'
                   leftSection={<IconBrandWindows size={16} />}
+                  comboboxProps={{ withinPortal: true }}
                 />
-              </Grid.Col>
-            </Grid>
+              </div>
 
-            <Divider />
+              <Divider />
 
-            {/* 4. Adquisición y ubicación */}
-            <Text fw={600} c='blue.7' tt='uppercase' size='sm'>
-              4. Adquisición y Ubicación
-            </Text>
-            <Grid>
-              <Grid.Col span={{ base: 12, md: 4 }}>
+              <Text fw={600} c='blue.7' tt='uppercase' size='xs'>
+                4. Adquisición y Ubicación
+              </Text>
+              <div style={FLUID_FIELD_GRID}>
                 <Select
                   label='Sitio'
                   placeholder='Seleccione el sitio'
@@ -1386,10 +1623,10 @@ function AssetsBoard() {
                   onChange={(value) => handleFormChange('sitio', value || '')}
                   error={formErrors.sitio}
                   required
+                  size='md'
                   leftSection={<IconMapPin size={16} />}
+                  comboboxProps={{ withinPortal: true }}
                 />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 4 }}>
                 <TextInput
                   type='date'
                   label='Fecha de compra'
@@ -1397,10 +1634,9 @@ function AssetsBoard() {
                   onChange={(e) => handleFormChange('fecha_compra', e.target.value)}
                   error={formErrors.fecha_compra}
                   required
+                  size='md'
                   leftSection={<IconCalendarEvent size={16} />}
                 />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 4 }}>
                 <NumberInput
                   label='Costo del equipo'
                   placeholder='1500000'
@@ -1414,10 +1650,9 @@ function AssetsBoard() {
                   allowNegative={false}
                   hideControls
                   min={0}
+                  size='md'
                   leftSection={<IconCoin size={16} />}
                 />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 4 }}>
                 <Select
                   label='Usuario asignado'
                   placeholder='Sin asignar'
@@ -1427,10 +1662,10 @@ function AssetsBoard() {
                   clearable
                   value={formData.usuario || null}
                   onChange={(value) => handleFormChange('usuario', value || '')}
+                  size='md'
                   leftSection={<IconUser size={16} />}
+                  comboboxProps={{ withinPortal: true }}
                 />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 4 }}>
                 <Select
                   label='Empresa'
                   placeholder='Seleccione la empresa'
@@ -1440,11 +1675,11 @@ function AssetsBoard() {
                   onChange={(value) => handleFormChange('empresa', value || '')}
                   error={formErrors.empresa}
                   required
+                  size='md'
                   leftSection={<IconBuilding size={16} />}
+                  comboboxProps={{ withinPortal: true }}
                 />
-              </Grid.Col>
-              {isCellphoneType && (
-                <Grid.Col span={{ base: 12, md: 4 }}>
+                {isCellphoneType && (
                   <TextInput
                     label='Simcard'
                     placeholder='1234567890'
@@ -1453,16 +1688,35 @@ function AssetsBoard() {
                     error={formErrors.sim}
                     required
                     maxLength={100}
+                    size='md'
                     leftSection={<IconDeviceMobile size={16} />}
                   />
-                </Grid.Col>
-              )}
-            </Grid>
+                )}
+              </div>
+            </Stack>
+          </ScrollArea>
 
-            <Divider />
-
-            <Group justify='flex-end' gap='md'>
-              <Button variant='outline' onClick={closeModal} size='md'>
+          <Box
+            pt='md'
+            mt='xs'
+            style={{
+              flexShrink: 0,
+              borderTop: '1px solid var(--mantine-color-default-border)',
+              background: 'var(--mantine-color-body)',
+            }}
+          >
+            <Flex
+              gap='sm'
+              direction={{ base: 'column-reverse', sm: 'row' }}
+              justify='flex-end'
+            >
+              <Button
+                variant='outline'
+                onClick={closeModal}
+                size='md'
+                fullWidth={!!isMobile}
+                mih={44}
+              >
                 Cancelar
               </Button>
               <Button
@@ -1470,13 +1724,59 @@ function AssetsBoard() {
                 loading={createLoading}
                 disabled={createLoading}
                 size='md'
+                fullWidth={!!isMobile}
+                mih={44}
                 leftSection={<IconPlus size={16} />}
                 className='bg-blue-600 hover:bg-blue-700'
               >
                 Crear Activo
               </Button>
-            </Group>
-          </Stack>
+            </Flex>
+          </Box>
+        </Modal>
+
+        <Modal
+          opened={newTypeOpened}
+          onClose={() => !newTypeSaving && setNewTypeOpened(false)}
+          title={<Text fw={700}>Nuevo tipo de activo</Text>}
+          centered
+          radius='md'
+          size='sm'
+          zIndex={400}
+        >
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleCreateType();
+            }}
+          >
+            <Stack gap='md'>
+              <TextInput
+                label='Nombre'
+                placeholder='Ej: VEHICULOS'
+                value={newTypeName}
+                onChange={(e) => {
+                  setNewTypeName(e.target.value);
+                  if (newTypeError) setNewTypeError(null);
+                }}
+                error={newTypeError}
+                maxLength={100}
+                data-autofocus
+                required
+              />
+              <Text size='xs' c='dimmed'>
+                También se crea un tipo de equipo con el mismo nombre, para que pueda usarlo de inmediato.
+              </Text>
+              <Group justify='flex-end' gap='sm'>
+                <Button variant='default' onClick={() => setNewTypeOpened(false)} disabled={newTypeSaving}>
+                  Cancelar
+                </Button>
+                <Button type='submit' loading={newTypeSaving} leftSection={<IconPlus size={16} />}>
+                  Crear
+                </Button>
+              </Group>
+            </Stack>
+          </form>
         </Modal>
       </div>
     </div>

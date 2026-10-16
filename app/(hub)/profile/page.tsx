@@ -35,9 +35,18 @@ import {
   IconMoon,
 } from '@tabler/icons-react';
 import { useTheme } from '../../../components/providers';
+import StartPageSection from '../../../components/profile/StartPageSection';
 import { CustomColorPicker } from '../../../components/theme/CustomColorPicker';
 import { FONTS } from '../../../lib/theme/fonts';
 import { PALETTES } from '../../../lib/theme/palettes';
+import { DUO_PALETTES } from '../../../lib/theme/duoPalettes';
+import toast from 'react-hot-toast';
+import {
+  AvataresAgentesSection,
+  MiAvatarSection,
+  type Resultado,
+} from '../../../components/avatar/ProfileAvatarSections';
+import MiFirmaGssSection from '../../../components/firma-gss/MiFirmaGssSection';
 
 interface UserProfile {
   id: string;
@@ -216,6 +225,28 @@ export default function ProfileSettingsPage() {
     setErrorMessage('');
   };
 
+  // Avatar estilo Notion: el resultado se muestra ARRIBA (alerta con color) y
+  // además como aviso emergente, para no depender del scroll.
+  const mostrarResultado = (r: Resultado) => {
+    if (r.tipo === 'ok') {
+      setErrorMessage('');
+      setSuccessMessage(r.mensaje);
+      toast.success(r.mensaje);
+    } else {
+      setSuccessMessage('');
+      setErrorMessage(r.mensaje);
+      toast.error(r.mensaje);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const aplicarImagen = async (image: string | null) => {
+    setFormData((prev) => ({ ...prev, image: image ?? '' }));
+    setProfile((prev) => (prev ? { ...prev, image } : prev));
+    // Refresca la sesión: el encabezado lee la foto del JWT.
+    await update();
+  };
+
   // Apariencia: paleta de color, modo claro/oscuro y tipografía
   const { theme, setThemeMode, palette, setPalette, font, setFont } = useTheme();
 
@@ -239,6 +270,8 @@ export default function ProfileSettingsPage() {
         setErrorMessage(error.error || 'Error al guardar la apariencia');
         return;
       }
+      // Refresca el JWT para que al navegar/recargar no vuelva el tema viejo de la sesión.
+      await update();
       setErrorMessage('');
       setSuccessMessage('Apariencia actualizada');
     } catch {
@@ -353,6 +386,13 @@ export default function ProfileSettingsPage() {
             </form>
           </Card>
 
+          {/* Avatar estilo Notion (persona) y avatar de los asistentes a cargo */}
+          <MiAvatarSection onResultado={mostrarResultado} onImagen={aplicarImagen} />
+          <AvataresAgentesSection onResultado={mostrarResultado} />
+
+          {/* Mi firma en GSS Firma: dibujada o imagen de la firma manuscrita (2026-10-14) */}
+          <MiFirmaGssSection onResultado={mostrarResultado} />
+
           {/* Appearance Section */}
           <Card withBorder padding='lg' radius='md'>
             <Title order={3} mb='md'>
@@ -403,6 +443,60 @@ export default function ProfileSettingsPage() {
                         </ColorSwatch>
                         <Text size='sm' fw={active ? 600 : 400}>
                           {p.label}
+                        </Text>
+                      </UnstyledButton>
+                    );
+                  })}
+                </SimpleGrid>
+              </div>
+
+              <div>
+                <Text fw={600} size='sm' mb={4}>
+                  Combinaciones de dos tonos
+                </Text>
+                <Text size='xs' c='dimmed' mb='sm'>
+                  Un tono fuerte para botones y acentos, y su pastel para el fondo y las tarjetas en lugar
+                  del blanco.
+                </Text>
+                <SimpleGrid cols={{ base: 2, xs: 4 }} spacing='sm'>
+                  {DUO_PALETTES.map((d) => {
+                    const active = palette === d.key;
+                    return (
+                      <UnstyledButton
+                        key={d.key}
+                        onClick={() => handlePaletteSelect(d.key)}
+                        aria-pressed={active}
+                        aria-label={`Combinación ${d.label}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: rem(8),
+                          padding: rem(8),
+                          borderRadius: 'var(--mantine-radius-md)',
+                          border: active
+                            ? '2px solid var(--mantine-primary-color-filled)'
+                            : '1px solid var(--app-border, var(--mantine-color-default-border))',
+                          background: active ? d.pastel : 'transparent',
+                        }}
+                      >
+                        <span
+                          aria-hidden
+                          style={{
+                            width: rem(24),
+                            height: rem(24),
+                            flex: '0 0 auto',
+                            borderRadius: '50%',
+                            background: `linear-gradient(135deg, ${d.accent} 0 50%, ${d.pastel} 50% 100%)`,
+                            boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${d.accent} 35%, transparent)`,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          {active ? <IconCheck size={14} color='#fff' style={{ filter: 'drop-shadow(0 0 1px rgba(0,0,0,.6))' }} /> : null}
+                        </span>
+                        <Text size='sm' fw={active ? 600 : 400} c={active ? d.accent : undefined}>
+                          {d.label}
                         </Text>
                       </UnstyledButton>
                     );
@@ -499,6 +593,9 @@ export default function ProfileSettingsPage() {
               </div>
             </Stack>
           </Card>
+
+          {/* Accesibilidad: página de inicio personalizada (2026-10-15) */}
+          <StartPageSection onResultado={mostrarResultado} />
 
           {/* Change Password Section */}
           <Card withBorder padding='lg' radius='md'>

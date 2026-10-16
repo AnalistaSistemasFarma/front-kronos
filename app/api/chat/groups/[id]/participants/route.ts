@@ -19,16 +19,25 @@ import {
  *   DELETE /api/chat/groups/12/participants  { "idUser": "c…" }
  *   DELETE /api/chat/groups/12/participants  { "idAgent": 20 }
  *
- * Solo el 'owner' del grupo (quien lo creó) administra los integrantes. No se
- * usa `checkAdminPrivileges` aquí a propósito: crear un grupo es una decisión
- * de la organización —de ahí la reja de administrador— pero decidir quién
- * entra a UN grupo ya creado es del dueño de ese grupo. Un administrador que
- * no esté en el grupo no lo administra; para eso tendría que estar dentro.
+ * QUIÉN PUEDE QUÉ (decisión de Nicolás del 2026-10-06: "solo el usuario que
+ * tiene asignado el agente puede invitarlo al grupo"):
+ *  - PERSONAS: solo el 'owner' del grupo (quien lo creó) agrega o quita.
+ *  - AGENTES, agregar: cualquier PERSONA integrante del grupo, pero solo un
+ *    agente que tenga asignado ELLA MISMA en la empresa del grupo. Así cada
+ *    quien trae sus propios agentes y nadie mete el agente de otro. El owner
+ *    no tiene excepción: tampoco puede meter uno que no tenga asignado.
+ *  - AGENTES, quitar: el owner, o el integrante que tiene ese agente asignado
+ *    en la empresa del grupo. No hay columna de "quién lo agregó", y no hace
+ *    falta: quien tiene el agente asignado es quien pudo haberlo traído.
+ *
+ * No se usa `checkAdminPrivileges` aquí a propósito: un administrador que no
+ * esté en el grupo no lo administra; para eso tendría que estar dentro.
  *
  * Reglas que se validan en el servidor, no en la interfaz:
  *  - Una persona solo entra si tiene el módulo habilitado EN LA EMPRESA del
  *    grupo. Si no, no vería el grupo y figuraría de adorno.
- *  - Un asistente solo entra si el que lo agrega puede usarlo en esa empresa.
+ *  - Un asistente solo entra si el que lo agrega lo tiene asignado en esa
+ *    empresa (sea o no el owner).
  *  - No se puede quedar sin asistentes ni sin 'owner'.
  *  - Al sacar a alguien NO se borran sus mensajes: el hilo es el registro de
  *    lo que se dijo y borrarlo hacia atrás sería reescribir la historia.
@@ -57,6 +66,26 @@ function leerObjetivo(
   return { ok: true, idAgent: n };
 }
 
+/**
+ * ¿Tiene esta persona asignado ese agente en la empresa del grupo?
+ *
+ * Es la única llave para traer (o sacar, si no se es owner) un agente. Se
+ * resuelve con `getChatAgentAccess`, que solo devuelve agentes otorgados al
+ * usuario por su subproceso-permiso: un id de agente ajeno en el cuerpo de la
+ * petición no pasa.
+ */
+async function tieneAgenteAsignado(
+  email: string,
+  idAgent: number,
+  idCompany: number | null
+): Promise<boolean> {
+  const acceso = await getChatAgentAccess(email, idAgent);
+  return (
+    acceso !== null &&
+    (idCompany === null || acceso.companies.some((c) => c.idCompany === idCompany))
+  );
+}
+
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
@@ -64,18 +93,21 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if ('response' in guard) return guard.response;
 
     if (guard.kind !== 'group') return badRequest('Esa conversación no es un grupo.');
-    if (guard.groupRole !== 'owner') {
-      return jsonNoStore(
-        { error: 'Solo quien creó el grupo puede cambiar sus integrantes.' },
-        { status: 403 }
-      );
-    }
 
     const payload = await readJsonBody(request);
     if (!payload) return badRequest('El cuerpo debe ser un objeto JSON.');
 
     const objetivo = leerObjetivo(payload);
     if (!objetivo.ok) return badRequest(objetivo.error);
+
+    // Personas: solo el owner. Agentes: cualquier integrante, con su propio
+    // agente (se valida más abajo).
+    if ('idUser' in objetivo && guard.groupRole !== 'owner') {
+      return jsonNoStore(
+        { error: 'Solo quien creó el grupo puede agregar personas.' },
+        { status: 403 }
+      );
+    }
 
     const grupo = await prisma.chatConversation.findUnique({
       where: { id: guard.conversationId },
@@ -136,17 +168,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         return badRequest(`Un grupo admite como máximo ${MAX_GROUP_AGENTS} asistentes.`);
       }
 
-      // El permiso sobre el agente se comprueba SIEMPRE, y en la empresa del
-      // grupo: si no, un dueño podría meter al grupo un agente al que él mismo
-      // no tiene acceso.
-      const acceso = await getChatAgentAccess(guard.user.email, objetivo.idAgent);
-      const disponible =
-        acceso !== null &&
-        (grupo.id_company === null ||
-          acceso.companies.some((c) => c.idCompany === grupo.id_company));
-      if (!disponible) {
+      // El permiso sobre el agente se comprueba SIEMPRE, para el owner y para
+      // cualquier integrante, y en la empresa del grupo: solo entra un agente
+      // que quien lo trae tiene asignado (decisión de Nicolás, 2026-10-06).
+      if (!(await tieneAgenteAsignado(guard.user.email, objetivo.idAgent, grupo.id_company))) {
         return jsonNoStore(
-          { error: 'No tiene ese asistente disponible en la empresa del grupo.' },
+          {
+            error:
+              'Solo puede agregar asistentes que usted tenga asignados en la empresa del grupo.',
+          },
           { status: 403 }
         );
       }
@@ -170,18 +200,38 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     if ('response' in guard) return guard.response;
 
     if (guard.kind !== 'group') return badRequest('Esa conversación no es un grupo.');
-    if (guard.groupRole !== 'owner') {
-      return jsonNoStore(
-        { error: 'Solo quien creó el grupo puede cambiar sus integrantes.' },
-        { status: 403 }
-      );
-    }
 
     const payload = await readJsonBody(request);
     if (!payload) return badRequest('El cuerpo debe ser un objeto JSON.');
 
     const objetivo = leerObjetivo(payload);
     if (!objetivo.ok) return badRequest(objetivo.error);
+
+    // Personas: solo el owner. Agentes: el owner, o quien tiene ese agente
+    // asignado en la empresa del grupo (el que pudo haberlo traído).
+    if (guard.groupRole !== 'owner') {
+      let permitido = false;
+      if ('idAgent' in objetivo) {
+        const grupo = await prisma.chatConversation.findUnique({
+          where: { id: guard.conversationId },
+          select: { id_company: true },
+        });
+        permitido =
+          grupo !== null &&
+          (await tieneAgenteAsignado(guard.user.email, objetivo.idAgent, grupo.id_company));
+      }
+      if (!permitido) {
+        return jsonNoStore(
+          {
+            error:
+              'idUser' in objetivo
+                ? 'Solo quien creó el grupo puede sacar personas.'
+                : 'Solo quien creó el grupo o quien tiene asignado ese asistente puede sacarlo.',
+          },
+          { status: 403 }
+        );
+      }
+    }
 
     const fila = await prisma.chatParticipant.findFirst({
       where: {

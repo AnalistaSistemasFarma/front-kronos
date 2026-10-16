@@ -7,6 +7,8 @@
  * payloads que devuelven las rutas de app/api/chat) y los ayudantes de fetch.
  */
 
+import { notionAvatarVersion } from '../avatar/urls';
+
 /* ──────────────────────── Foto de un asistente ─────────────────────────── */
 
 /** Tope de la imagen ya reducida. 512×512 en JPEG no llega ni a 100 KB. */
@@ -29,6 +31,13 @@ export function agentAvatarSrc(agent: {
   avatarUrl: string | null;
   avatarVersion?: number | null;
 }): string | null {
+  // Avatar estilo Notion (Perfil → Avatar del asistente): manda sobre la foto
+  // subida si es MÁS RECIENTE. Así gana el último cambio, y la foto subida no
+  // se borra: vuelve sola al quitar el avatar o al subir otra foto después.
+  const versionNotion = notionAvatarVersion(agent.avatarUrl);
+  if (versionNotion !== null && (!agent.avatarVersion || versionNotion >= agent.avatarVersion)) {
+    return agent.avatarUrl;
+  }
   if (agent.avatarVersion) {
     return `/api/chat/agents/${encodeURIComponent(agent.code)}/avatar?v=${agent.avatarVersion}`;
   }
@@ -52,7 +61,7 @@ export const MAX_SEARCH_HITS = 40;
 export interface ChatSearchHit {
   idMessage: number;
   idConversation: number;
-  kind: 'direct' | 'group';
+  kind: 'direct' | 'group' | 'people';
   /** Nombre del agente en un hilo directo; título en un grupo. */
   conversationTitle: string;
   /** `code` del agente: es con lo que la interfaz abre un hilo directo. */
@@ -101,6 +110,9 @@ export interface ChatAccessDto {
   /** Solo administradores: habilita crear grupos. Igual que arriba, la reja
    *  real está en POST /api/chat/groups. */
   canCreateGroups?: boolean;
+  /** Piloto "Personas": puede INICIAR conversaciones con otras personas. La
+   *  reja real está en /api/chat/people/*. */
+  canMessagePeople?: boolean;
   companies: ChatAgentCompanyDto[];
   agents: ChatAgentDto[];
 }
@@ -112,6 +124,7 @@ export interface ChatAccessDto {
  */
 export type { AgentTaskDto } from './status-tasks';
 import type { AgentTaskDto } from './status-tasks';
+import type { AgentMetricsDto } from './agent-metrics';
 
 export interface ChatStatusDto {
   state: string;
@@ -173,6 +186,8 @@ export interface ChatMessageDto {
   author?: ChatAuthorDto | null;
   /** El mensaje al que responde, o null. */
   replyTo?: ChatReplyToDto | null;
+  /** Evento de un mensaje de sistema: 'nudge' = zumbido. */
+  eventType?: string | null;
   /** Marca local: mensaje aún no confirmado por el servidor (envío optimista). */
   pending?: boolean;
   /** Marca local: el envío falló y el usuario puede reintentar. */
@@ -201,8 +216,9 @@ export interface ChatConversationDto {
   id: number;
   title: string | null;
   /**
-   * 'direct' | 'group'. Opcional para que un front viejo siga funcionando: si
-   * no viene, se trata como 'direct', que es lo que había antes de los grupos.
+   * 'direct' | 'group' | 'people'. Opcional para que un front viejo siga
+   * funcionando: si no viene, se trata como 'direct', que es lo que había antes
+   * de los grupos.
    */
   kind?: string;
   createdAt: string;
@@ -226,11 +242,30 @@ export interface ChatConversationDto {
   agentStatus: ChatStatusDto | null;
   /** Un estado por agente. En un hilo directo trae, como máximo, uno. */
   agentStatuses?: ChatAgentStatusDto[];
+  /** Solo entre personas: YO silencié los zumbidos de este hilo. */
+  nudgesMuted?: boolean;
 }
 
 /** ¿Es un grupo? Un hilo sin `kind` es de antes de los grupos: es directo. */
 export function esGrupo(conversacion: { kind?: string } | null | undefined): boolean {
   return conversacion?.kind === 'group';
+}
+
+/** ¿Es un hilo privado entre dos personas? */
+export function esEntrePersonas(conversacion: { kind?: string } | null | undefined): boolean {
+  return conversacion?.kind === 'people';
+}
+
+/**
+ * La OTRA persona de un hilo entre personas (la que no soy yo). Es con quien
+ * se habla: su nombre y su foto son la cara del hilo en la lista.
+ */
+export function otraPersona(
+  conversacion: { participants?: ChatParticipantDto[] | null } | null | undefined,
+  miId: string | undefined
+): ChatParticipantDto | null {
+  const personas = (conversacion?.participants ?? []).filter((p) => p.kind === 'user');
+  return personas.find((p) => String(p.id) !== miId) ?? personas[0] ?? null;
 }
 
 export interface ChatPollDto {
@@ -240,6 +275,11 @@ export interface ChatPollDto {
   status: ChatStatusDto | null;
   /** Desglose por agente: lo que pinta el encabezado de un grupo. */
   statuses?: ChatAgentStatusDto[];
+  /**
+   * Métricas del mod synerlink-metrics (contexto, tokens, modelo, sub-agentes).
+   * Ausente = este usuario no las ve (o API vieja); null = no hay reporte.
+   */
+  metrics?: AgentMetricsDto | null;
   /** Cadencia que ORDENA el servidor. El cliente la respeta tal cual. */
   nextPollMs: number;
   serverTime: string;
@@ -360,6 +400,31 @@ export const ESTADO_RANCIO_MS = 10 * 60 * 1000;
 
 /** Con sub-agentes en curso se es más paciente: son prueba de trabajo vivo. */
 export const ESTADO_RANCIO_CON_SUBAGENTES_MS = 20 * 60 * 1000;
+
+/**
+ * Sub-agentes que siguen EN CURSO según un estado, sin importar si el agente
+ * principal está trabajando o ya volvió a 'idle'.
+ *
+ * Pedido de Nicolás (2026-09-29): "que esa cajita sea fija hasta que el
+ * sub-agente termine". El agente principal suele contestar (y con eso su
+ * estado pasa a 'idle') mientras sus sub-agentes siguen corriendo en segundo
+ * plano; la lista de sub-agentes vive aparte en la columna `tasks` y el POST
+ * de la respuesta NO la toca. Atarla a `busy` la escondía justo en ese caso.
+ *
+ * El único tope es la frescura: una lista que no se refresca en
+ * ESTADO_RANCIO_CON_SUBAGENTES_MS se da por muerta (sesión del bot caída sin
+ * que su hook alcanzara a limpiarla), para no dejar una caja pegada para
+ * siempre.
+ */
+export function subagentesEnCurso(
+  status: Pick<ChatStatusDto, 'tasks' | 'updatedAt'> | null | undefined
+): AgentTaskDto[] {
+  const tareas = status?.tasks ?? [];
+  if (tareas.length === 0) return [];
+  const marca = Date.parse(status?.updatedAt ?? '');
+  if (!Number.isNaN(marca) && Date.now() - marca > ESTADO_RANCIO_CON_SUBAGENTES_MS) return [];
+  return tareas;
+}
 
 /** ¿Este estado dice "trabajando" pero lleva demasiado sin refrescarse? */
 export function estadoEstaRancio(status: ChatStatusDto | null): boolean {
@@ -562,4 +627,54 @@ export const CHAT_REFRESH_EVENT = 'synerlink:chat-refresh';
 export function notifyChatRefresh(): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent(CHAT_REFRESH_EVENT));
+}
+
+/**
+ * "Hay algo nuevo en el hilo X: pregúntalo YA, sin esperar tu cadencia."
+ *
+ * Lo disparan el botón del zumbido (para ver el propio zumbido de una vez) y
+ * el pulso global (components/chat/ChatPulse.tsx) cuando la otra persona
+ * escribe. El hilo abierto lo escucha en useChatConversation y, si es el suyo,
+ * adelanta la siguiente vuelta del sondeo. Un evento de `window` y no un
+ * contexto por la misma razón que CHAT_REFRESH_EVENT.
+ */
+export const CHAT_THREAD_POKE_EVENT = 'synerlink:chat-thread-poke';
+
+export function pedirSondeoDelHilo(idConversation: number): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(CHAT_THREAD_POKE_EVENT, { detail: { idConversation } }));
+}
+
+/**
+ * "En el hilo X acaba de haber actividad (envié o recibí)": la bandeja le sube
+ * la fecha del último mensaje AL INSTANTE, sin esperar su sondeo, para que la
+ * conversación suba de primera en las listas (como WhatsApp o Teams). El
+ * servidor la confirma en la siguiente vuelta de la bandeja.
+ */
+export const CHAT_ACTIVITY_EVENT = 'synerlink:chat-activity';
+
+export interface ChatActivityDetail {
+  idConversation: number;
+  at: string;
+}
+
+export function notificarActividad(idConversation: number, at: string): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent<ChatActivityDetail>(CHAT_ACTIVITY_EVENT, { detail: { idConversation, at } })
+  );
+}
+
+/** Un adjunto del apartado "Multimedia y archivos" de una conversación. */
+export interface ChatSharedFileDto {
+  id: number;
+  fileName: string;
+  contentType: string | null;
+  sizeBytes: number | null;
+  /** SIEMPRE /api/chat/attachments/<id>: nunca una URL de OneDrive. */
+  downloadUrl: string;
+  createdAt: string;
+  /** "Usted", el nombre de la persona o el del asistente. */
+  sentBy: string;
+  isImage: boolean;
 }

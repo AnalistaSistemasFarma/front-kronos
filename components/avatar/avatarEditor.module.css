@@ -1,0 +1,259 @@
+/*
+ * Editor de avatar estilo Notion — calco visual de Avatartion
+ * (github.com/wilmerterrero/Avatartion, MIT): lienzo redondeado al centro,
+ * botones circulares con borde negro de 2 px a los lados, flecha ↕ junto a
+ * cada parte y selector en ventana con cuadrícula y paginación en píldoras.
+ * El "negro" es el color de texto del tema para que siga viéndose en modo oscuro.
+ */
+
+.editor {
+  --av-ink: var(--mantine-color-text);
+  --av-paper: var(--mantine-color-body);
+  --av-selected: #3b82f6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+  width: 100%;
+}
+
+/* ── Escritorio: acciones | lienzo | partes ── */
+.stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2rem;
+  width: 100%;
+}
+
+.actions,
+.pickerColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.pickerColumns {
+  display: flex;
+  gap: 1.5rem;
+}
+
+.canvas {
+  position: relative;
+  width: 18.75rem;
+  height: 18.75rem;
+  border-radius: 1rem;
+  overflow: hidden;
+  flex: 0 0 auto;
+  /* Damero para el fondo transparente, como el transparent-bg de Avatartion. */
+  background-color: #fff;
+  background-image: linear-gradient(45deg, #e5e7eb 25%, transparent 25%),
+    linear-gradient(-45deg, #e5e7eb 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #e5e7eb 75%),
+    linear-gradient(-45deg, transparent 75%, #e5e7eb 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+.canvas img {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 18.75rem;
+  height: 18.75rem;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  user-select: none;
+}
+
+.pickerRow {
+  display: flex;
+  align-items: center;
+}
+
+/* Botón circular de Avatartion: p-6 (48 px), borde negro de 2 px. */
+.circle {
+  position: relative;
+  width: 3.25rem;
+  height: 3.25rem;
+  border: 2px solid var(--av-ink, var(--mantine-color-text));
+  border-radius: 9999px;
+  overflow: hidden;
+  background: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: transform 120ms ease;
+  color: #000;
+}
+
+.circle:hover {
+  transform: scale(1.06);
+}
+
+.circle:focus-visible {
+  outline: 3px solid var(--av-selected, #3b82f6);
+  outline-offset: 2px;
+}
+
+.circle img {
+  width: 2.75rem;
+  height: 2.75rem;
+  pointer-events: none;
+}
+
+.selector {
+  background: none;
+  border: 0;
+  padding: 0 0 0 0.125rem;
+  color: var(--av-ink, var(--mantine-color-text));
+  cursor: pointer;
+  display: inline-flex;
+}
+
+.swatch {
+  width: 100%;
+  height: 100%;
+}
+
+/* ── Ventana del selector ── */
+.modalHint {
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.modalCount {
+  font-size: 0.875rem;
+  text-align: center;
+  color: var(--mantine-color-dimmed);
+  margin-top: 0.25rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  padding: 1rem 0;
+  justify-items: center;
+  align-items: center;
+}
+
+@media (min-width: 48em) {
+  .grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.option {
+  position: relative;
+  width: 6rem;
+  height: 6rem;
+  border: 2px solid var(--av-ink, var(--mantine-color-text));
+  border-radius: 0.75rem;
+  overflow: hidden;
+  background: #fff;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.option[aria-pressed='true'] {
+  border-color: var(--av-selected, #3b82f6);
+  box-shadow: 0 0 0 2px var(--av-selected, #3b82f6);
+}
+
+.option img {
+  width: 4.5rem;
+  height: 4.5rem;
+  pointer-events: none;
+}
+
+.optionLabel {
+  position: absolute;
+  inset: auto 0 0 0;
+  font-size: 0.625rem;
+  line-height: 1.1;
+  padding: 0.125rem;
+  background: rgba(255, 255, 255, 0.9);
+  color: #000;
+  text-align: center;
+}
+
+.pages {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.page {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--av-ink, var(--mantine-color-text));
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.page:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.page[aria-current='page'] {
+  background: var(--av-ink, var(--mantine-color-text));
+  color: var(--av-paper, var(--mantine-color-body));
+}
+
+/* ── Celular: lienzo arriba, partes en filas, acciones abajo ── */
+@media (max-width: 48em) {
+  .stage {
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .canvas {
+    width: 16rem;
+    height: 16rem;
+  }
+
+  .canvas img {
+    width: 16rem;
+    height: 16rem;
+  }
+
+  .actions {
+    flex-direction: row;
+    order: 3;
+  }
+
+  .pickerColumns {
+    flex-direction: column;
+    gap: 0.75rem;
+    max-width: 100%;
+  }
+
+  .pickerColumn {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.75rem;
+  }
+
+  /* En el celular Avatartion oculta la flecha ↕: se toca el círculo. */
+  .selector {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .circle {
+    transition: none;
+  }
+}
