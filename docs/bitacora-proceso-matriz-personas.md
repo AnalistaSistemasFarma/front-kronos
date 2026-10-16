@@ -31,6 +31,13 @@ Además, por favor:
   empresa Farmalógica:
   - supervisores: subprocesos «Bitácora de Proceso» y «Bitácora de Proceso: Gestión»;
   - inspectores y jefes: subproceso «Bitácora de Proceso».
+- **Asignar el rol (2026-10-16, obligatorio):** tener usuario y permiso NO basta. Cada
+  supervisor, inspector y jefe se asigna a su rol en *Bitácora de Proceso → Catálogo →
+  Responsables* (lo hace alguien con Gestión). Los selectores al abrir y al cerrar la
+  bitácora listan **solo** a las personas asignadas, y el servidor rechaza a cualquier otra.
+  El supervisor, además, debe tener el permiso de Gestión. Siembra inicial:
+  `prisma/manual/2026-10-16-bitacora-proceso-responsables-farmalogica.sql` (Judy Alvarez
+  inspectora; Karen Blanco y Tatiana Rico jefes; Amanda Casiano supervisora provisional).
 - **Cuenta compartida «Producción»** (la de la tablet): usuario de SynerLink con el
   subproceso «Bitácora de Proceso». Se crea después, con autorización de Nicolás.
 - **PIN de bitácora:** cada supervisor, inspector y jefe entra **una vez con su propia
