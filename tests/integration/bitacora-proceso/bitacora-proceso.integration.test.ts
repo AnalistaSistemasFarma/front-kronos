@@ -28,6 +28,11 @@ import {
   listOrdenes,
   listSupervisoresEmpresa,
   listUsuariosEmpresa,
+  asignarResponsable,
+  cambiarResponsable,
+  listCandidatosResponsable,
+  listResponsables,
+  listResponsablesEmpresa,
   datosAviso,
   type ConfirmanteActor,
 } from '../../../lib/bitacora-proceso/db';
@@ -141,6 +146,14 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
         { id_subprocess: subs.operario, id_company_user: cuJefe.id_company_user },
       ],
     });
+    // Responsables (2026-10-16): solo estas asignaciones salen en los selectores.
+    await prisma.otResponsable.createMany({
+      data: [
+        { id_company: FARMA, id_user: sup.id, rol: 'SUPERVISOR', created_by: 'it' },
+        { id_company: FARMA, id_user: insp.id, rol: 'INSPECTOR', created_by: 'it' },
+        { id_company: FARMA, id_user: jf.id, rol: 'JEFE_PROD', created_by: 'it' },
+      ],
+    });
     [supervisor] = await getOtAccessForUser(prisma, sup.email);
     [operario] = await getOtAccessForUser(prisma, op.email);
     [ajeno] = await getOtAccessForUser(prisma, aj.email);
@@ -171,6 +184,56 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
     expect(sups.some((u) => u.id === supervisorId)).toBe(true);
     expect(sups.some((u) => u.id === operarioId)).toBe(false);
     expect((await listSupervisoresEmpresa(prisma, OLP)).some((u) => u.id === supervisorId)).toBe(false);
+  });
+
+  it('RESPONSABLES: cada selector lista SOLO a los asignados al rol en la empresa; el servidor rechaza a los demás', async () => {
+    const ids = async (rol: 'SUPERVISOR' | 'INSPECTOR' | 'JEFE_PROD', c = FARMA) => (await listResponsables(prisma, c, rol)).map((u) => u.id);
+    expect(await ids('INSPECTOR')).toContain(inspectorId);
+    expect(await ids('JEFE_PROD')).toContain(jefeId);
+    expect(await ids('SUPERVISOR')).toContain(supervisorId);
+    // Usuarios de la empresa con el módulo pero SIN rol: no salen (antes salían todos).
+    for (const rol of ['SUPERVISOR', 'INSPECTOR', 'JEFE_PROD'] as const) {
+      expect(await ids(rol)).not.toContain(operarioId);
+      expect(await ids(rol)).not.toContain(ajenoId);
+    }
+    expect(await ids('INSPECTOR')).not.toContain(jefeId);
+    expect(await ids('JEFE_PROD')).not.toContain(inspectorId);
+    // Aislamiento por empresa.
+    expect(await ids('INSPECTOR', OLP)).not.toContain(inspectorId);
+
+    // Abrir con un inspector o jefe SIN el rol: 400 (aunque sea usuario activo de la empresa).
+    expect(await status(crearOrden(prisma, orden({ inspector: operarioId }), actor(supervisorId)))).toBe(400);
+    expect(await status(crearOrden(prisma, orden({ jefeProduccion: ajenoId }), actor(supervisorId)))).toBe(400);
+    // El inspector asignado NO sirve como jefe (rol distinto).
+    expect(await status(crearOrden(prisma, orden({ inspector: jefeId, jefeProduccion: jefeId }), actor(supervisorId)))).toBe(400);
+
+    // Supervisor: exige Gestión para asignarse; con Gestión pero sin el rol, no puede cerrar.
+    expect(await status(asignarResponsable(prisma, { idCompany: FARMA, idUser: ajenoId, rol: 'SUPERVISOR' }, actor(supervisorId)))).toBe(400);
+    const o = await crearOrden(prisma, orden({ lote: `RS-${sufijo}` }), actor(supervisorId));
+    await vbOperario(o.id, supervisor);
+    const fila = await prisma.otResponsable.findFirstOrThrow({ where: { id_company: FARMA, id_user: supervisorId, rol: 'SUPERVISOR' } });
+    await cambiarResponsable(prisma, { idCompany: FARMA, idResponsable: fila.id_responsable, activo: false }, actor(supervisorId));
+    try {
+      expect(await ids('SUPERVISOR')).not.toContain(supervisorId);
+      expect((await listSupervisoresEmpresa(prisma, FARMA)).some((u) => u.id === supervisorId)).toBe(false);
+      expect(await status(confirmarVistoBueno(prisma, o.id, supervisor, null, conf('SUPERVISOR', supervisorId, supervisor)))).toBe(403);
+      // El rechazo no deja nada: sigue abierta y sin visto bueno del supervisor.
+      expect((await prisma.otOrdenTrabajo.findUniqueOrThrow({ where: { id_orden_trabajo: o.id } })).estado).toBe('ABIERTA');
+    } finally {
+      // Reasignar reactiva la misma fila (idempotente, sin duplicar).
+      await asignarResponsable(prisma, { idCompany: FARMA, idUser: supervisorId, rol: 'SUPERVISOR' }, actor(supervisorId));
+      await asignarResponsable(prisma, { idCompany: FARMA, idUser: supervisorId, rol: 'SUPERVISOR' }, actor(supervisorId));
+    }
+    expect(await prisma.otResponsable.count({ where: { id_company: FARMA, id_user: supervisorId, rol: 'SUPERVISOR' } })).toBe(1);
+    expect((await confirmarVistoBueno(prisma, o.id, supervisor, null, conf('SUPERVISOR', supervisorId, supervisor))).rol).toBe('SUPERVISOR');
+
+    // Catálogo: asignación visible con su estado; candidatos = usuarios con el módulo (con la marca de Gestión).
+    const cat = await listResponsablesEmpresa(prisma, FARMA);
+    expect(cat.find((r) => r.idUser === inspectorId && r.rol === 'INSPECTOR')).toMatchObject({ activo: true, habilitado: true });
+    const cand = await listCandidatosResponsable(prisma, FARMA);
+    expect(cand.find((c) => c.id === supervisorId)?.gestion).toBe(true);
+    expect(cand.find((c) => c.id === operarioId)?.gestion).toBe(false);
+    expect(await status(cambiarResponsable(prisma, { idCompany: OLP, idResponsable: fila.id_responsable, activo: false }, actor(supervisorId)))).toBe(404);
   });
 
   it('la siembra del 2026-10-14 dejó el área «Envase y agrafado» y las actividades nuevas sin duplicar', async () => {

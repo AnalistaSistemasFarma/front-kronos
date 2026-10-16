@@ -117,6 +117,7 @@ model Company {
   otOrdenesTrabajo OtOrdenTrabajo[]
   otOperadores     OtOperador[]
   otAreas          OtArea[]
+  otResponsables   OtResponsable[]
 
   @@map("company")
   @@schema("dbo")
@@ -3526,6 +3527,28 @@ model OtOperador {
 
   @@unique([id_company, nombre], map: "UQ_ot_operador_nombre")
   @@map("ot_operador")
+  @@schema("dbo")
+}
+
+// Responsables por empresa (2026-10-16): quién puede ser SUPERVISOR (cierra), INSPECTOR o
+// JEFE_PROD en la bitácora. Los selectores listan SOLO a estas personas y el servidor
+// rechaza a quien no tenga el rol. No se borran: se desactivan.
+model OtResponsable {
+  id_responsable Int       @id @default(autoincrement())
+  id_company     Int
+  id_user        String    @db.NVarChar(50)
+  rol            String    @db.NVarChar(20)
+  activo         Boolean   @default(true)
+  created_by     String    @db.NVarChar(50)
+  created_at     DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  updated_by     String?   @db.NVarChar(50)
+  updated_at     DateTime? @db.DateTime2
+
+  company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_company, id_user, rol], map: "UQ_ot_responsable")
+  @@index([id_company, rol, activo], map: "IX_ot_responsable_rol")
+  @@map("ot_responsable")
   @@schema("dbo")
 }
 

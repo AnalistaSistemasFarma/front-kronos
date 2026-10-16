@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
-import { Alert, Badge, Button, Card, Group, Loader, NumberInput, Stack, Switch, Text, TextInput, Title } from '@mantine/core';
-import { IconAlertTriangle, IconCheck, IconDeviceFloppy, IconPencil, IconPlus, IconX } from '@tabler/icons-react';
+import { useMemo, useState } from 'react';
+import { Alert, Badge, Button, Card, Group, Loader, NumberInput, Radio, ScrollArea, SegmentedControl, Stack, Switch, Text, TextInput, Title } from '@mantine/core';
+import { IconAlertTriangle, IconCheck, IconDeviceFloppy, IconPencil, IconPlus, IconSearch, IconX } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
-import { OT_LIMITS } from '../../lib/bitacora-proceso/constants';
+import { OT_LIMITS, OT_RESPONSABLE_AYUDA, OT_RESPONSABLE_ROLES, OT_ROL_LABEL, type OtResponsableRol } from '../../lib/bitacora-proceso/constants';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import { otSend, useOtFetch } from './otClient';
 import { OtImportarOperadores } from './OtImportarYPin';
@@ -15,6 +15,8 @@ import { OtImportarOperadores } from './OtImportarYPin';
  *     crea, corrige el nombre o el documento y los desactiva. No se borran: los
  *     registros conservan el nombre con el que se hicieron.
  *   - OtAreas (A5): áreas predefinidas de la empresa (hoy «Envase y agrafado»).
+ *   - OtResponsables (2026-10-16): quién es supervisor, inspector o jefe de producción en
+ *     la empresa. Los selectores de la bitácora listan SOLO a estas personas.
  * Celular primero: tarjetas, campos de 16 px e interruptores grandes; el aviso
  * del resultado aparece arriba y en color.
  */
@@ -253,6 +255,169 @@ export function OtAreas({ company }: { company: OtCompanyAccess }) {
             </Card>
           ))}
           {lista.length === 0 && <Text c='dimmed'>Aún no hay áreas en el catálogo.</Text>}
+        </Stack>
+      )}
+    </Stack>
+  );
+}
+
+interface Responsable {
+  idResponsable: number;
+  idUser: string;
+  rol: OtResponsableRol;
+  activo: boolean;
+  name: string;
+  email: string;
+  habilitado: boolean;
+}
+
+interface Candidato {
+  id: string;
+  name: string;
+  email: string;
+  gestion: boolean;
+}
+
+const ROLES_DATA = OT_RESPONSABLE_ROLES.map((r) => ({ value: r, label: OT_ROL_LABEL[r] }));
+
+/**
+ * Responsables (2026-10-16): asignación por empresa de supervisor, inspector y jefe de
+ * producción. Mismo aspecto que Operarios: tarjeta «Asignar» arriba y una tarjeta por
+ * asignación con el interruptor «Activo». No se borran: se desactivan.
+ */
+export function OtResponsables({ company }: { company: OtCompanyAccess }) {
+  const { data, error, loading, reload } = useOtFetch<{ responsables: Responsable[]; candidatos: Candidato[] }>(`/api/bitacora-proceso/responsables?company=${company.idCompany}`);
+  const [rol, setRol] = useState<OtResponsableRol>('SUPERVISOR');
+  const [persona, setPersona] = useState<string | null>(null);
+  const [filtro, setFiltro] = useState('');
+  const [busy, setBusy] = useState<number | 'nuevo' | null>(null);
+  const [aviso, setAviso] = useState<Aviso>(null);
+  const lista = useMemo(() => data?.responsables ?? [], [data]);
+
+  const candidatos = useMemo(() => {
+    const yaTienen = new Set(lista.filter((r) => r.rol === rol && r.activo).map((r) => r.idUser));
+    const f = filtro.trim().toLowerCase();
+    return (data?.candidatos ?? [])
+      .filter((c) => !yaTienen.has(c.id))
+      .filter((c) => !f || c.name.toLowerCase().includes(f) || c.email.toLowerCase().includes(f));
+  }, [data, lista, rol, filtro]);
+
+  const ok = async (text: string) => {
+    setAviso({ ok: true, text });
+    toast.success(text);
+    await reload(true);
+  };
+
+  const asignar = async () => {
+    if (!persona) return;
+    setBusy('nuevo');
+    setAviso(null);
+    try {
+      const nombre = data?.candidatos.find((c) => c.id === persona)?.name ?? '';
+      await otSend('/api/bitacora-proceso/responsables', 'POST', { company: company.idCompany, id_user: persona, rol });
+      setPersona(null);
+      setFiltro('');
+      await ok(`«${nombre}» asignado como ${OT_ROL_LABEL[rol].toLowerCase()}.`);
+    } catch (e) {
+      setAviso({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const cambiar = async (r: Responsable, activo: boolean) => {
+    setBusy(r.idResponsable);
+    setAviso(null);
+    try {
+      await otSend('/api/bitacora-proceso/responsables', 'PATCH', { company: company.idCompany, id_responsable: r.idResponsable, activo });
+      await ok(`«${r.name}» (${OT_ROL_LABEL[r.rol].toLowerCase()}) ${activo ? 'activado' : 'desactivado'}.`);
+    } catch (e) {
+      setAviso({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Stack gap='md'>
+      <AvisoArriba aviso={aviso} onClose={() => setAviso(null)} testId='ot-responsables-aviso' />
+      {error && <Alert color='red'>{error}</Alert>}
+
+      <Card withBorder radius='md' p={{ base: 'md', sm: 'lg' }}>
+        <Title order={2} size='h4' mb='sm'>Asignar responsable</Title>
+        <Stack gap='sm'>
+          <SegmentedControl fullWidth size='md' data={ROLES_DATA} value={rol} onChange={(v) => { setRol(v as OtResponsableRol); setPersona(null); }} data-testid='ot-responsable-rol' />
+          <Text size='sm' c='dimmed'>{OT_RESPONSABLE_AYUDA[rol]}</Text>
+          <TextInput size='md' placeholder='Buscar persona' leftSection={<IconSearch size={18} />} value={filtro} onChange={(e) => setFiltro(e.currentTarget.value)} data-testid='ot-responsable-buscar' />
+          {loading && !data ? (
+            <Loader size='sm' />
+          ) : (
+            <ScrollArea.Autosize mah={240} type='auto' offsetScrollbars>
+              <Radio.Group value={persona} onChange={setPersona}>
+                <Stack gap={6} data-testid='ot-responsable-candidatos'>
+                  {candidatos.map((c) => {
+                    const sinGestion = rol === 'SUPERVISOR' && !c.gestion;
+                    return (
+                      <Radio.Card key={c.id} value={c.id} radius='md' p='sm' withBorder disabled={sinGestion} opacity={sinGestion ? 0.55 : 1}>
+                        <Group wrap='nowrap' gap='sm' mih={40}>
+                          <Radio.Indicator size='md' disabled={sinGestion} />
+                          <div style={{ minWidth: 0 }}>
+                            <Text fw={500} truncate>{c.name}</Text>
+                            <Text size='xs' c='dimmed' truncate>{sinGestion ? 'Sin permiso de Gestión: no puede ser supervisor' : c.email}</Text>
+                          </div>
+                        </Group>
+                      </Radio.Card>
+                    );
+                  })}
+                  {candidatos.length === 0 && <Text size='sm' c='dimmed'>No hay más personas con el permiso del módulo en esta empresa.</Text>}
+                </Stack>
+              </Radio.Group>
+            </ScrollArea.Autosize>
+          )}
+          <Button size='lg' leftSection={<IconPlus size={20} />} onClick={asignar} loading={busy === 'nuevo'} disabled={!persona} fullWidth data-testid='ot-responsable-asignar'>
+            Asignar como {OT_ROL_LABEL[rol].toLowerCase()}
+          </Button>
+        </Stack>
+      </Card>
+
+      <Title order={2} size='h4'>
+        Responsables <Badge variant='light' ml={4}>{lista.filter((r) => r.activo).length} activos</Badge>
+      </Title>
+      <Text size='sm' c='dimmed'>
+        Al abrir y cerrar la bitácora solo se pueden elegir las personas asignadas aquí. En una misma bitácora el supervisor que abre, el inspector y el jefe de producción son tres personas distintas. No se borran: desactive a quien ya no cumple el rol.
+      </Text>
+      {loading && !data ? (
+        <Loader />
+      ) : (
+        <Stack gap='sm' data-testid='ot-responsables-lista'>
+          {OT_RESPONSABLE_ROLES.map((r) => {
+            const delRol = lista.filter((x) => x.rol === r);
+            return (
+              <Stack key={r} gap='xs' data-testid={`ot-responsables-${r}`}>
+                <Text fw={600} size='md'>
+                  {OT_ROL_LABEL[r]} <Badge variant='light' ml={4}>{delRol.filter((x) => x.activo).length}</Badge>
+                </Text>
+                {delRol.map((x) => (
+                  <Card key={x.idResponsable} withBorder radius='md' p='md' opacity={x.activo ? 1 : 0.65}>
+                    <Group justify='space-between' wrap='wrap' gap='sm'>
+                      <div style={{ minWidth: 0 }}>
+                        <Text fw={600} size='lg' style={{ overflowWrap: 'anywhere' }}>{x.name}</Text>
+                        <Group gap={6} mt={4}>
+                          <Badge variant='light' color={x.activo ? 'green' : 'gray'}>{x.activo ? 'Activo' : 'Inactivo'}</Badge>
+                          {x.activo && !x.habilitado && (
+                            <Badge variant='light' color='orange'>{x.rol === 'SUPERVISOR' ? 'Sin permiso de Gestión' : 'Sin permiso del módulo'}</Badge>
+                          )}
+                          {x.email && <Badge variant='outline' color='gray' style={{ textTransform: 'none' }}>{x.email}</Badge>}
+                        </Group>
+                      </div>
+                      <Switch size='lg' label='Activo' checked={x.activo} disabled={busy !== null} onChange={(e) => cambiar(x, e.currentTarget.checked)} />
+                    </Group>
+                  </Card>
+                ))}
+                {delRol.length === 0 && <Text size='sm' c='dimmed'>Nadie asignado.</Text>}
+              </Stack>
+            );
+          })}
         </Stack>
       )}
     </Stack>

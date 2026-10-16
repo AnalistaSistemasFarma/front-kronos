@@ -361,6 +361,13 @@ jobs:
           # Script SOLO PRUEBAS que desactiva «Fin de lote» (guardado por DB_NAME()): dos veces.
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-15-bitacora-proceso-pruebas-fin-de-lote.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-15-bitacora-proceso-pruebas-fin-de-lote.sql
+          # Responsables por empresa (2026-10-16): migración, siembra de Farmalógica y la de SOLO PRUEBAS (guardada por DB_NAME()), dos veces cada una.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261016180000_bitacora_proceso_responsables/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261016180000_bitacora_proceso_responsables/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-16-bitacora-proceso-responsables-farmalogica.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-16-bitacora-proceso-responsables-farmalogica.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-16-bitacora-proceso-pruebas-responsables.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-16-bitacora-proceso-pruebas-responsables.sql
           # Módulo Correo (2026-10-15): migración, permiso del menú y tarea de fondo APAGADA, dos veces (idempotencia).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261015120000_correo_modulo/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261015120000_correo_modulo/migration.sql
