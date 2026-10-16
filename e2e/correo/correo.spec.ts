@@ -183,7 +183,8 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     // El hilo usa todo el ancho del área de contenido (no un panel de 1000 px).
     const anchoHilo = (await drawer.boundingBox())!.width;
     expect(anchoHilo).toBeGreaterThan(1366 - 232 - 80);
-    expect(leidos).toEqual([{ conversationId: 'CONV-01AAAA', leido: true }]);
+    // El marcado sale después de pintar el hilo (con una pausa corta), una sola vez.
+    await expect.poll(() => leidos).toEqual([{ conversationId: 'CONV-01AAAA', leido: true }]);
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/02-hilo.png` });
     // Responder como en Gmail: el botón abre el editor en el mismo hilo, con formato Markdown.
     await expect(drawer.getByTestId('correo-responder')).toHaveCount(0);
@@ -544,6 +545,62 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     // Pantalla completa: la página no se desplaza; la lista lo hace por dentro.
     const desborde = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
     expect(desborde).toBeLessThanOrEqual(1);
+  });
+
+  test('throttling de Microsoft (2026-10-16): esqueleto mientras el servidor reintenta, «Reintentar» si se agota, marcado silencioso y una sola consulta', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await simular(page);
+    // El servidor reintenta solo (429 → 200 de Graph): para la página es una respuesta lenta. La primera apertura
+    // simula que se agotaron los reintentos (429 con el mensaje amable); la segunda, que Graph ya respondió.
+    const pedidas: string[] = [];
+    let intento = 0;
+    const conImagenes = {
+      ...hilo,
+      mensajes: [
+        { ...hilo.mensajes[0], id: 'MSG-0020AAAA', leido: true, adjuntos: [], remotasBloqueadas: 0, imagenesPendientes: true, html: '<p>Anterior con firma <img alt="logo"></p>', fecha: '2026-10-13T14:00:00Z' },
+        { ...hilo.mensajes[0], leido: false, imagenesPendientes: false },
+      ],
+    };
+    await page.route('**/api/correo/hilo?**', async (r) => {
+      pedidas.push(r.request().url());
+      await new Promise((x) => setTimeout(x, 700));
+      if (++intento === 1) return r.fulfill({ status: 429, json: { error: 'Microsoft limitó las consultas a su buzón. Intente de nuevo en 2 s.', code: 'LIMITADO' } });
+      return r.fulfill({ json: { hilo: conImagenes } });
+    });
+    // Marcado al abrir: si Microsoft falla, no hay aviso de error ni se pierde la vista.
+    const marcas: unknown[] = [];
+    await page.route('**/api/correo/hilo/leido', (r) => {
+      marcas.push(r.request().postDataJSON());
+      return r.fulfill({ status: 429, json: { error: 'Microsoft limitó las consultas a su buzón. Intente de nuevo en 2 s.' } });
+    });
+    const imagenes: string[] = [];
+    await page.route('**/api/correo/hilo/imagenes**', (r) => {
+      imagenes.push(new URL(r.request().url()).searchParams.get('id') ?? '');
+      return r.fulfill({ json: { mensaje: { ...conImagenes.mensajes[0], imagenesPendientes: false, html: '<p id="con-logo">Anterior con firma <img alt="logo" src="data:image/png;base64,iVBORw0KGgo="></p>' } } });
+    });
+    await page.goto('/process/correo');
+    await page.getByTestId('correo-fila').first().click();
+    const vista = page.getByTestId('correo-hilo');
+    // Mientras el servidor reintenta: esqueleto, nunca el error.
+    await expect(vista.getByTestId('correo-hilo-esqueleto')).toBeVisible();
+    await expect(vista.getByTestId('correo-hilo-error')).toHaveCount(0);
+    // Reintentos agotados: mensaje amable con «Reintentar».
+    await expect(vista.getByTestId('correo-hilo-error')).toContainText('Microsoft limitó las consultas a su buzón');
+    await vista.getByTestId('correo-hilo-reintentar').click();
+    await expect(vista.getByTestId('correo-hilo-error')).toHaveCount(0);
+    await expect(vista.getByTestId('correo-hilo-mensaje')).toHaveCount(2);
+    expect(pedidas).toHaveLength(2);
+    // Marcado automático: una vez, después de pintar; su fallo es silencioso y el hilo se sigue viendo.
+    await expect.poll(() => marcas).toEqual([{ conversationId: 'CONV-01AAAA', leido: true }]);
+    await expect(page.getByText('No se pudo marcar')).toHaveCount(0);
+    await expect(vista.getByTestId('correo-hilo-mensaje')).toHaveCount(2);
+    // Las imágenes incrustadas del mensaje plegado se piden solo al desplegarlo (una vez).
+    expect(imagenes).toEqual([]);
+    const msgs = vista.getByTestId('correo-hilo-mensaje');
+    await msgs.nth(0).getByTestId('correo-hilo-mensaje-cabecera').click();
+    await expect.poll(() => imagenes).toEqual(['MSG-0020AAAA']);
+    await expect(msgs.nth(0).frameLocator('iframe').locator('#con-logo img')).toHaveAttribute('src', /^data:image\/png/);
+    expect(pedidas).toHaveLength(2);
   });
 
   test('leído masivo: selección, «Seleccionar los N de esta carpeta», «Marcar todo» por lotes con avance, contadores optimistas y reversión', async ({ page }) => {

@@ -43,6 +43,8 @@ export interface MensajeCompleto extends MensajeResumen {
   webLink?: string;
   /** Imágenes incrustadas (cid) como data: URI, solo dentro del servidor para el saneado. */
   imagenesCid?: Record<string, string>;
+  /** Tiene imágenes cid que aún no se descargaron (se piden al desplegar el mensaje). */
+  imagenesPendientes?: boolean;
 }
 
 export interface FiltrosBandeja {
@@ -92,7 +94,10 @@ export interface MailProvider {
   perfil(): Promise<{ correo: string }>;
   carpetas(): Promise<Carpeta[]>;
   mensajes(filtros: FiltrosBandeja, cursor?: string | null): Promise<PaginaMensajes>;
-  hilo(conversationId: string): Promise<MensajeCompleto[]>;
+  /** Hilo en una consulta. `imagenes: 'desplegados'` baja además las imágenes cid del último y los no leídos. */
+  hilo(conversationId: string, opciones?: { imagenes?: 'desplegados' | 'ninguna' }): Promise<MensajeCompleto[]>;
+  /** Imágenes incrustadas (cid) de un mensaje como data: URI. Opcional (el simulado no las tiene). */
+  imagenesCid?(mensajeId: string): Promise<Record<string, string>>;
   mensaje(id: string): Promise<MensajeCompleto>;
   adjunto(mensajeId: string, adjuntoId: string): Promise<ArchivoAdjunto>;
   responder(mensajeId: string, entrada: RespuestaEntrada): Promise<void>;
