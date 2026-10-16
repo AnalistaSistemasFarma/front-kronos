@@ -2,14 +2,14 @@
 
 import { useState } from 'react';
 import { Alert, Badge, Button, Card, Group, Loader, NumberInput, Stack, Switch, Tabs, Text, TextInput, Title } from '@mantine/core';
-import { IconAlertTriangle, IconArrowDown, IconArrowUp, IconCheck, IconKey, IconListCheck, IconMapPin, IconPlus, IconUsers } from '@tabler/icons-react';
+import { IconAlertTriangle, IconArrowDown, IconArrowUp, IconCheck, IconKey, IconListCheck, IconMapPin, IconPlus, IconUserCheck, IconUsers } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { OT_ICONOS, OT_LIMITS } from '../../lib/bitacora-proceso/constants';
 import SgcSelect from '../sgc/SgcSelect';
 import { OtIconoActividad } from './otIconos';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import { otSend, useOtFetch } from './otClient';
-import { OtAreas, OtOperadores } from './OtMaestros';
+import { OtAreas, OtOperadores, OtResponsables } from './OtMaestros';
 import { OtPinsEmpresa } from './OtImportarYPin';
 
 /**
@@ -18,6 +18,8 @@ import { OtPinsEmpresa } from './OtImportarYPin';
  *     flechas para ordenar. Las actividades NO se borran: se desactivan (el
  *     historial conserva su nombre). La observación es opcional en todas (2026-10-14).
  *   - Operarios (A1): maestro de operarios SIN usuario de SynerLink.
+ *   - Responsables (2026-10-16): supervisores, inspectores y jefes de producción de la
+ *     empresa; los selectores de la bitácora listan solo a estas personas.
  *   - Áreas (A5): áreas predefinidas de la empresa.
  *   - PIN (B3, 2026-10-15): estado del PIN de bitácora por persona y restablecimiento.
  */
@@ -41,6 +43,9 @@ export default function OtCatalogo({ company }: { company: OtCompanyAccess }) {
         <Tabs.Tab value='operarios' leftSection={<IconUsers size={18} />} data-testid='ot-tab-operarios'>
           Operarios
         </Tabs.Tab>
+        <Tabs.Tab value='responsables' leftSection={<IconUserCheck size={18} />} data-testid='ot-tab-responsables'>
+          Responsables
+        </Tabs.Tab>
         <Tabs.Tab value='areas' leftSection={<IconMapPin size={18} />} data-testid='ot-tab-areas'>
           Áreas
         </Tabs.Tab>
@@ -53,6 +58,9 @@ export default function OtCatalogo({ company }: { company: OtCompanyAccess }) {
       </Tabs.Panel>
       <Tabs.Panel value='operarios'>
         <OtOperadores company={company} />
+      </Tabs.Panel>
+      <Tabs.Panel value='responsables'>
+        <OtResponsables company={company} />
       </Tabs.Panel>
       <Tabs.Panel value='areas'>
         <OtAreas company={company} />

@@ -147,7 +147,7 @@ export default function ConfirmacionBitacoraModal({
           ) : personas.length === 0 ? (
             <Alert color='yellow' icon={<IconAlertTriangle size={16} />}>
               {rol === 'SUPERVISOR'
-                ? 'No hay supervisores (permiso Bitácora de Proceso: Gestión) disponibles en esta empresa.'
+                ? 'No hay supervisores asignados en esta empresa. Un supervisor (Gestión) los asigna en Catálogo → Responsables.'
                 : `Esta bitácora no tiene ${OT_ROL_LABEL[rol].toLowerCase()} designado.`}
             </Alert>
           ) : (

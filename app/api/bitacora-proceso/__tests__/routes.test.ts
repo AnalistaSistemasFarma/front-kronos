@@ -8,7 +8,7 @@ const m = vi.hoisted(() => {
     'getServerSession', 'getOtAccessForUser', 'getActiveUserId', 'listOrdenes', 'crearOrden', 'getOrdenDetalle',
     'crearRegistro', 'confirmarVistoBueno', 'prepararConfirmante', 'listActividades', 'crearActividad', 'cambiarActividad', 'listUsuariosEmpresa', 'buscarOps',
     'datosAviso', 'createAndSendNotifications', 'listOperadores', 'crearOperador', 'cambiarOperador', 'agregarOperadores', 'listAreas', 'crearArea', 'cambiarArea',
-    'listSupervisoresEmpresa', 'importarOperadores', 'estadoPin', 'configurarPin', 'listPinsEmpresa', 'restablecerPin', 'verificarPassword',
+    'listSupervisoresEmpresa', 'listResponsables', 'listResponsablesEmpresa', 'listCandidatosResponsable', 'asignarResponsable', 'cambiarResponsable', 'importarOperadores', 'estadoPin', 'configurarPin', 'listPinsEmpresa', 'restablecerPin', 'verificarPassword',
   ] as const;
   return Object.fromEntries(names.map((n) => [n, vi.fn()])) as Record<(typeof names)[number], ReturnType<typeof vi.fn>>;
 });
@@ -23,6 +23,8 @@ vi.mock('../../../../lib/bitacora-proceso/db', () => ({
   datosAviso: m.datosAviso, importarOperadores: m.importarOperadores, estadoPin: m.estadoPin, configurarPin: m.configurarPin,
   listPinsEmpresa: m.listPinsEmpresa, restablecerPin: m.restablecerPin, listOperadores: m.listOperadores, crearOperador: m.crearOperador, cambiarOperador: m.cambiarOperador,
   agregarOperadores: m.agregarOperadores, listAreas: m.listAreas, crearArea: m.crearArea, cambiarArea: m.cambiarArea, listSupervisoresEmpresa: m.listSupervisoresEmpresa,
+  listResponsables: m.listResponsables, listResponsablesEmpresa: m.listResponsablesEmpresa, listCandidatosResponsable: m.listCandidatosResponsable,
+  asignarResponsable: m.asignarResponsable, cambiarResponsable: m.cambiarResponsable,
 }));
 // El notificador compartido (campana + push): se simula para ver QUÉ se avisa y a QUIÉN.
 vi.mock('../../../../lib/notifications.js', () => ({ createAndSendNotifications: m.createAndSendNotifications }));
@@ -46,6 +48,7 @@ import * as usuarios from '../usuarios/route';
 import * as operadores from '../operadores/route';
 import * as areas from '../areas/route';
 import * as supervisores from '../supervisores/route';
+import * as responsables from '../responsables/route';
 import * as operadoresOrden from '../[id]/operadores/route';
 
 const FARMA = 1;
@@ -127,6 +130,10 @@ describe('Bitácora de Proceso · rutas', () => {
       importar.POST(send('POST', { company: FARMA, texto: 'Ana; 1' })),
       pinUsuarios.GET(get('?company=1')),
       pinRestablecer.POST(send('POST', { company: FARMA, idUser: 'u9' })),
+      responsables.GET(get('?company=1')),
+      responsables.GET(get('?company=1&rol=INSPECTOR')),
+      responsables.POST(send('POST', { company: FARMA, id_user: 'u9', rol: 'INSPECTOR' })),
+      responsables.PATCH(send('PATCH', { company: FARMA, id_responsable: 1, activo: false })),
     ]);
     expect(all.map((r) => r.status)).toEqual(all.map(() => 403));
     expect(m.crearOrden).not.toHaveBeenCalled();
@@ -135,6 +142,9 @@ describe('Bitácora de Proceso · rutas', () => {
     expect(m.buscarOps).not.toHaveBeenCalled();
     expect(m.importarOperadores).not.toHaveBeenCalled();
     expect(m.restablecerPin).not.toHaveBeenCalled();
+    expect(m.asignarResponsable).not.toHaveBeenCalled();
+    expect(m.cambiarResponsable).not.toHaveBeenCalled();
+    expect(m.listResponsables).not.toHaveBeenCalled();
   });
 
   it('B3 con cuenta compartida: una sesión SIN Gestión llega al visto bueno; la persona la elige y la valida el servidor (PIN)', async () => {
@@ -238,6 +248,45 @@ describe('Bitácora de Proceso · rutas', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ supervisores: [{ id: 'u-sup', name: 'Supervisora' }] });
     expect((await supervisores.GET(get('?company=3'))).status).toBe(403);
+  });
+
+  it('responsables: cada selector pide SOLO los asignados al rol; asignar y desactivar (Gestión, aislado por empresa)', async () => {
+    asUser([supervisor]);
+    m.listResponsables.mockResolvedValue([{ id: 'u-judy', name: 'Judy Alvarez', email: 'judy.alvarez@farmalogica.com' }]);
+    const res = await responsables.GET(get('?company=1&rol=INSPECTOR'));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ responsables: [{ id: 'u-judy', name: 'Judy Alvarez', email: 'judy.alvarez@farmalogica.com' }] });
+    expect(m.listResponsables).toHaveBeenCalledWith({ tag: 'prisma' }, FARMA, 'INSPECTOR');
+    expect((await responsables.GET(get('?company=1&rol=OPERARIO'))).status).toBe(400);
+    expect((await responsables.GET(get('?company=3&rol=INSPECTOR'))).status).toBe(403);
+
+    m.listResponsablesEmpresa.mockResolvedValue([]);
+    m.listCandidatosResponsable.mockResolvedValue([]);
+    expect(await (await responsables.GET(get('?company=1'))).json()).toEqual({ responsables: [], candidatos: [] });
+
+    m.asignarResponsable.mockResolvedValue({ idResponsable: 5, nombre: 'Karen Blanco' });
+    const post = await responsables.POST(send('POST', { company: FARMA, id_user: 'u-karen', rol: 'JEFE_PROD' }));
+    expect(post.status).toBe(201);
+    expect(m.asignarResponsable.mock.calls[0][1]).toEqual({ idCompany: FARMA, idUser: 'u-karen', rol: 'JEFE_PROD' });
+    expect((await responsables.POST(send('POST', { company: 3, id_user: 'u-karen', rol: 'JEFE_PROD' }))).status).toBe(403);
+    expect((await responsables.POST(send('POST', { company: FARMA, id_user: 'u-karen', rol: 'OPERARIO' }))).status).toBe(400);
+    m.asignarResponsable.mockRejectedValueOnce(new OtError('Judy no tiene el permiso «Bitácora de Proceso: Gestión»: sin él no puede ser supervisor.', 400));
+    const sinGestion = await responsables.POST(send('POST', { company: FARMA, id_user: 'u-judy', rol: 'SUPERVISOR' }));
+    expect(sinGestion.status).toBe(400);
+    expect((await sinGestion.json()).error).toContain('Gestión');
+
+    m.cambiarResponsable.mockResolvedValue({ ok: true });
+    expect((await responsables.PATCH(send('PATCH', { company: FARMA, id_responsable: 5, activo: false }))).status).toBe(200);
+    expect(m.cambiarResponsable.mock.calls[0][1]).toEqual({ idCompany: FARMA, idResponsable: 5, activo: false });
+    expect(responsables).not.toHaveProperty('DELETE');
+  });
+
+  it('abrir con un inspector o jefe sin el rol: el 400 de la capa de datos llega tal cual', async () => {
+    asUser([supervisor]);
+    m.crearOrden.mockRejectedValue(new OtError('La persona elegida no está asignada como inspector en esta empresa (Catálogo → Responsables).', 400));
+    const res = await lista.POST(send('POST', { ...nueva, inspector: 'u-otro' }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain('no está asignada como inspector');
   });
 
   it('el supervisor abre una orden SIN OP; los datos inválidos dan 400', async () => {

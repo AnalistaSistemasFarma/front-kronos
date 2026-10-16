@@ -259,3 +259,24 @@ export const OT_METODO_LABEL: Record<string, string> = {
 /** PIN personal de la bitácora (B3). */
 export const OT_PIN_LONGITUD = 4;
 export const OT_PIN_MAX_FALLOS = 5;
+
+/**
+ * RESPONSABLES por empresa (2026-10-16, Nicolás: «desde la app me deja seleccionar más de
+ * los que son»). Cada selector de la bitácora lista SOLO a las personas asignadas a ese
+ * rol en la empresa (tabla `ot_responsable`, Catálogo → Responsables): ya no sale todo
+ * usuario de la empresa ni todo usuario con Gestión. El servidor rechaza a quien no
+ * tenga el rol. El operario no está aquí: sale del maestro `ot_operador`.
+ */
+export const OT_RESPONSABLE_ROLES = ['SUPERVISOR', 'INSPECTOR', 'JEFE_PROD'] as const;
+export type OtResponsableRol = (typeof OT_RESPONSABLE_ROLES)[number];
+
+export function isOtResponsableRol(v: unknown): v is OtResponsableRol {
+  return typeof v === 'string' && (OT_RESPONSABLE_ROLES as readonly string[]).includes(v);
+}
+
+/** Qué hace cada responsable (texto de ayuda del catálogo). */
+export const OT_RESPONSABLE_AYUDA: Record<OtResponsableRol, string> = {
+  SUPERVISOR: 'Cierra la bitácora («Cerró»). Debe tener el permiso «Bitácora de Proceso: Gestión».',
+  INSPECTOR: 'Da su visto bueno después del cierre del supervisor.',
+  JEFE_PROD: 'Da el último visto bueno, después del inspector.',
+};
