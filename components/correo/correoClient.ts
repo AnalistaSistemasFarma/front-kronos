@@ -19,6 +19,8 @@ export interface EstadoCorreo {
     envioHabilitado: boolean;
     etiquetarHabilitado: boolean;
     sincronizacionAutomatica: boolean;
+    /** «Consultar a un agente» encendido en el ambiente (CORREO_AGENTE_HABILITADO). */
+    agenteHabilitado?: boolean;
   };
 }
 
@@ -37,6 +39,10 @@ export interface MensajeVista {
   remotasBloqueadas: number;
   adjuntos: AdjuntoInfo[];
   enCaso: boolean;
+  /** «Abrir en Outlook» (validado en el servidor: solo https de Outlook en la web). */
+  enlaceOutlook: string | null;
+  /** Imágenes incrustadas aún sin descargar: se piden al desplegar el mensaje (correoApi.imagenes). */
+  imagenesPendientes?: boolean;
 }
 
 export interface HiloVista {
@@ -61,6 +67,60 @@ export interface CategoriaCorreo {
   categoria: string;
 }
 
+/** Agente del chat que la persona puede usar (los mismos del chat). */
+export interface AgenteCorreo {
+  idAgent: number;
+  code: string;
+  displayName: string;
+  avatarUrl: string | null;
+  avatarVersion: number | null;
+  description: string | null;
+}
+
+/** Acceso vigente de un agente a un hilo. */
+export interface ConcesionCorreo {
+  id: number;
+  agente: { idAgent: number; code: string; displayName: string };
+  creadaEn: string;
+  venceEn: string;
+  idChatConversation: number;
+}
+
+/** Propuesta del agente (tarjeta del chat). Espejo de AccionVista (lib/correo/agente.ts). */
+export interface AccionAgenteCorreo {
+  id: number;
+  tipo: 'RESPUESTA' | 'SOLICITUD' | 'NOTA';
+  estado: 'PENDIENTE' | 'EJECUTANDO' | 'CONFIRMADA' | 'DESCARTADA' | 'FALLIDA';
+  idChatMessage: number | null;
+  creadaEn: string;
+  decididaEn: string | null;
+  resultado: string | null;
+  idRequest: number | null;
+  asunto: string;
+  agente: string;
+  vigente: boolean;
+  estadoConcesion: 'VIGENTE' | 'VENCIDA' | 'REVOCADA';
+  venceEn: string;
+  respuesta?: { cuerpo: string; html: string; todos: boolean; para: string[] };
+  solicitud?: { proceso: string | null; categoria: string | null; titulo: string; descripcion: string };
+  nota?: { texto: string; idRequest: number | null };
+}
+
+export interface PreparacionSolicitudAgente {
+  empresas: Array<{ idCompany: number; companyName: string }>;
+  idCompany: number;
+  categorias: CategoriaCorreo[];
+  procesos: ProcesoCorreo[];
+  idProcess: number | null;
+  idSolicitante: string | null;
+  solicitanteNombre: string | null;
+  alertas: string[];
+  duplicadoDe: number | null;
+  titulo: string;
+  descripcion: string;
+  adjuntos: number;
+}
+
 export class CorreoApiError extends Error {
   constructor(
     message: string,
@@ -82,15 +142,26 @@ async function leer<T>(res: Response): Promise<T> {
   return body as T;
 }
 
-const get = <T>(url: string) => fetch(url, { cache: 'no-store' }).then((r) => leer<T>(r));
+const get = <T>(url: string, signal?: AbortSignal) => fetch(url, { cache: 'no-store', signal }).then((r) => leer<T>(r));
 const post = <T>(url: string, body: unknown) =>
   fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => leer<T>(r));
 
 export const correoApi = {
   estado: () => get<EstadoCorreo>('/api/correo'),
-  carpetas: () => get<{ carpetas: Carpeta[] }>('/api/correo/carpetas'),
-  mensajes: (params: Record<string, string>) => get<{ mensajes: MensajeLista[]; siguiente: string | null }>(`/api/correo/mensajes?${new URLSearchParams(params)}`),
-  hilo: (id: string, remotas = false) => get<{ hilo: HiloVista }>(`/api/correo/hilo?${new URLSearchParams({ id, ...(remotas ? { remotas: '1' } : {}) })}`),
+  carpetas: (signal?: AbortSignal) => get<{ carpetas: Carpeta[] }>('/api/correo/carpetas', signal),
+  mensajes: (params: Record<string, string>, signal?: AbortSignal) =>
+    get<{ mensajes: MensajeLista[]; siguiente: string | null }>(`/api/correo/mensajes?${new URLSearchParams(params)}`, signal),
+  /** `fresco` («Actualizar») ignora la caché corta del servidor. */
+  hilo: (id: string, remotas = false, signal?: AbortSignal, fresco = false) =>
+    get<{ hilo: HiloVista }>(`/api/correo/hilo?${new URLSearchParams({ id, ...(remotas ? { remotas: '1' } : {}), ...(fresco ? { fresco: '1' } : {}) })}`, signal),
+  /** Un mensaje del hilo con sus imágenes incrustadas (al desplegarlo). */
+  imagenes: (hilo: string, id: string, remotas = false) =>
+    get<{ mensaje: MensajeVista }>(`/api/correo/hilo/imagenes?${new URLSearchParams({ hilo, id, ...(remotas ? { remotas: '1' } : {}) })}`),
+  marcarLeido: (conversationId: string, leido: boolean) => post<{ cambiados: number }>('/api/correo/hilo/leido', { conversationId, leido }),
+  marcarSeleccion: (mensajesIds: string[], leido: boolean) => post<{ cambiados: number; fallidos: number }>('/api/correo/leido', { mensajesIds, leido }),
+  /** Un lote de «Marcar todo» (200): repetir mientras `restantes` > 0. carpeta null = Bandeja de entrada. */
+  marcarCarpeta: (carpeta: string | null, leido: boolean) =>
+    post<{ cambiados: number; fallidos: number; restantes: number }>('/api/correo/leido/carpeta', { carpeta, leido }),
   notas: (conversationId: string) => post<{ agregadas: number; idRequest: number }>('/api/correo/hilo/notas', { conversationId }),
   vincular: (conversationId: string, idRequest: number, acuse?: OpcionesAcuse) =>
     post<{ vinculo: VinculoHilo; acuse?: ResultadoAcuse }>('/api/correo/hilo/vincular', { conversationId, idRequest, ...(acuse ? { acuse } : {}) }),
@@ -103,6 +174,18 @@ export const correoApi = {
   usuarios: (empresa: number, q: string) => get<{ usuarios: Array<{ id: string; nombre: string; correo: string }> }>(`/api/correo/usuarios?${new URLSearchParams({ empresa: String(empresa), q })}`),
   procesos: (empresa: number) => get<{ categorias: CategoriaCorreo[]; procesos: ProcesoCorreo[] }>(`/api/correo/procesos?empresa=${empresa}`),
   vinculos: (idRequest: number) => get<{ vinculos: VinculoHilo[] }>(`/api/correo/vinculos?solicitud=${idRequest}`),
+  // «Consultar a un agente» (2026-10-16): compartir el hilo con un agente del chat y decidir sus propuestas.
+  agentes: () => get<{ agentes: AgenteCorreo[] }>('/api/correo/agente/agentes'),
+  compartir: (conversationId: string, idAgent: number, pregunta: string) =>
+    post<{ idShare: number; idChatConversation: number; agente: AgenteCorreo; venceEn: string }>('/api/correo/agente/compartir', { conversationId, idAgent, pregunta }),
+  compartidos: (conversationId: string) => get<{ compartidos: ConcesionCorreo[] }>(`/api/correo/agente/compartidos?${new URLSearchParams({ conversationId })}`),
+  revocar: (id: number) => post<{ revocada: boolean }>('/api/correo/agente/revocar', { id }),
+  acciones: (chat: number, signal?: AbortSignal) => get<{ acciones: AccionAgenteCorreo[] }>(`/api/correo/agente/acciones?chat=${chat}`, signal),
+  prepararSolicitudAgente: (id: number, empresa?: number | null) =>
+    get<PreparacionSolicitudAgente>(`/api/correo/agente/acciones/${id}/preparar${empresa ? `?empresa=${empresa}` : ''}`),
+  confirmarAccion: (id: number, edicion: Record<string, unknown> = {}) =>
+    post<{ estado: string; resultado: string; idRequest: number | null }>(`/api/correo/agente/acciones/${id}`, { op: 'confirmar', ...edicion }),
+  descartarAccion: (id: number) => post<{ estado: string; resultado: string }>(`/api/correo/agente/acciones/${id}`, { op: 'descartar' }),
   responder: async (p: { mensajeId: string; texto: string; todos: boolean; archivos: File[] }) => {
     const fd = new FormData();
     fd.set('mensajeId', p.mensajeId);
@@ -112,6 +195,9 @@ export const correoApi = {
     return leer<{ ok: boolean; notaEnSolicitud: number | null }>(await fetch('/api/correo/responder', { method: 'POST', body: fd }));
   },
 };
+
+/** ¿El error es de una consulta cancelada a propósito (el usuario ya cambió de carpeta o de hilo)? */
+export const esCancelada = (e: unknown) => e instanceof DOMException && e.name === 'AbortError';
 
 export const urlAdjunto = (mensajeId: string, adjuntoId: string, ver = false) =>
   `/api/correo/adjunto?${new URLSearchParams({ mensaje: mensajeId, adjunto: adjuntoId, ...(ver ? { ver: '1' } : {}) })}`;

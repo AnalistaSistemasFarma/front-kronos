@@ -39,8 +39,12 @@ export interface MensajeCompleto extends MensajeResumen {
   /** HTML del cuerpo. En el servidor llega crudo de Graph; al navegador solo sale SANEADO. */
   html: string;
   adjuntos: AdjuntoInfo[];
+  /** Enlace del mensaje en Outlook en la web (solo de Graph; el navegador lo recibe validado). */
+  webLink?: string;
   /** Imágenes incrustadas (cid) como data: URI, solo dentro del servidor para el saneado. */
   imagenesCid?: Record<string, string>;
+  /** Tiene imágenes cid que aún no se descargaron (se piden al desplegar el mensaje). */
+  imagenesPendientes?: boolean;
 }
 
 export interface FiltrosBandeja {
@@ -75,6 +79,11 @@ export interface RespuestaEntrada {
    * para dejarlo encima del historial citado; si no, el texto va como `comment`.
    */
   html?: string;
+  /**
+   * Cuerpo HTML YA SANEADO de la respuesta escrita por la persona (su Markdown convertido). Va como
+   * `comment` de reply/createReply en lugar del texto plano; no cambia el flujo de envío.
+   */
+  comentarioHtml?: string;
 }
 
 /**
@@ -85,11 +94,23 @@ export interface MailProvider {
   perfil(): Promise<{ correo: string }>;
   carpetas(): Promise<Carpeta[]>;
   mensajes(filtros: FiltrosBandeja, cursor?: string | null): Promise<PaginaMensajes>;
-  hilo(conversationId: string): Promise<MensajeCompleto[]>;
+  /** Hilo en una consulta. `imagenes: 'desplegados'` baja además las imágenes cid del último y los no leídos. */
+  hilo(conversationId: string, opciones?: { imagenes?: 'desplegados' | 'ninguna' }): Promise<MensajeCompleto[]>;
+  /** Imágenes incrustadas (cid) de un mensaje como data: URI. Opcional (el simulado no las tiene). */
+  imagenesCid?(mensajeId: string): Promise<Record<string, string>>;
   mensaje(id: string): Promise<MensajeCompleto>;
   adjunto(mensajeId: string, adjuntoId: string): Promise<ArchivoAdjunto>;
   responder(mensajeId: string, entrada: RespuestaEntrada): Promise<void>;
   categorizar(mensajeId: string, categoria: string): Promise<void>;
+  /**
+   * Marca mensajes del buzón propio como leídos / no leídos (como Gmail). En Graph va por `$batch`
+   * de a 20, con cada sub-petición validada contra el buzón de la sesión.
+   */
+  marcarLeido(mensajesIds: string[], leido: boolean): Promise<{ cambiados: number; fallidos: number }>;
+  /** Ids de una carpeta (null = Bandeja de entrada) con el estado CONTRARIO a `leido`, hasta `max` («Marcar todo»). */
+  idsPorLeido(carpetaId: string | null, leido: boolean, max: number): Promise<string[]>;
+  /** Total y no leídos de una carpeta (progreso de «Marcar todo»). */
+  contadoresCarpeta(carpetaId: string | null): Promise<{ total: number; noLeidos: number }>;
   /**
    * No leídos de la Bandeja de entrada (icono del Correo en la cabecera). Opcional:
    * si el proveedor no lo trae, se calcula con carpetas().

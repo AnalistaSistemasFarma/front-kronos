@@ -14,7 +14,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Mini-parser de .env (sin dependencias). Soporta KEY=VALUE, comillas simples/
 // dobles, valores multilinea entre comillas, y lineas de comentario (#).
-function loadDotEnv(path) {
+function loadDotEnv(path, soloPrefijo = null) {
   let raw;
   try {
     raw = readFileSync(path, 'utf8');
@@ -52,13 +52,18 @@ function loadDotEnv(path) {
       while (i < n && raw[i] !== '\n' && raw[i] !== '\r') value += raw[i++];
       value = value.trim();
     }
-    if (key && process.env[key] === undefined) {
+    if (key && process.env[key] === undefined && (!soloPrefijo || key.startsWith(soloPrefijo))) {
       process.env[key] = value;
     }
   }
 }
 
 loadDotEnv(join(__dirname, '.env'));
+// «Consultar a un agente» (Correo, 2026-10-16): las herramientas correo_* LEEN el hilo compartido con
+// la MISMA app de Graph del módulo Correo. Para no copiar secretos entre archivos, si mcp/.env no trae
+// las CORREO_* se toman SOLO esas del .env del front (carpeta padre). Ninguna otra variable del front
+// entra al MCP, y las que ya estén definidas no se pisan.
+loadDotEnv(join(__dirname, '..', '.env'), 'CORREO_');
 
 const { createApp } = await import('./dist/server.js');
 const { loadConfig } = await import('./dist/config.js');

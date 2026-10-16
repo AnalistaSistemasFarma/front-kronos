@@ -13,9 +13,11 @@ vi.mock('../db', () => db);
 
 import { readCorreoConfig } from '../config';
 import { limpiarTokensApp } from '../graph';
+import { limpiarCacheHilos } from '../cacheHilo';
 import { CorreoError } from '../errors';
 import { MockMailProvider, enviadosSimulados, reiniciarBuzonSimulado } from '../mock';
 import {
+  enlaceOutlookSeguro,
   auditarLectura,
   crearDesdeFila,
   estadoConexion,
@@ -24,6 +26,8 @@ import {
   simular,
   sincronizarHilo,
   sincronizarTodo,
+  imagenesMensajeHilo,
+  marcarLeidoHilo,
   verHilo,
   vincularHilo,
   type CorreoDeps,
@@ -105,6 +109,7 @@ const filaBase = {
 beforeEach(() => {
   vi.clearAllMocks();
   reiniciarBuzonSimulado();
+  limpiarCacheHilos();
   db.usuarioDeEmpresa.mockResolvedValue({ id: 'u-remitente', nombre: 'Uno', correo: 'prueba.uno@gsslatam.com', empresas: [1] });
   db.reservarHilo.mockResolvedValue({ idLink: 3 });
   db.vinculoDeHilo.mockResolvedValue(null);
@@ -262,7 +267,7 @@ describe('Correo · hilo, notas y respuesta', () => {
     const d = deps();
     const r = await responder(d, yo, { mensajeId: 'mock-msg-0002AAAA', texto: 'Recibido, lo reviso.', todos: false, adjuntos: [], ip: null });
     expect(r).toEqual({ notaEnSolicitud: 500 });
-    expect(enviadosSimulados(yo.email)).toEqual([{ mensajeId: 'mock-msg-0002AAAA', todos: false, texto: 'Recibido, lo reviso.', adjuntos: [] }]);
+    expect(enviadosSimulados(yo.email)).toEqual([{ mensajeId: 'mock-msg-0002AAAA', todos: false, texto: 'Recibido, lo reviso.', adjuntos: [], comentarioHtml: '<p>Recibido, lo reviso.</p>' }]);
     expect(d.kronos.insertarNota).toHaveBeenCalledWith(500, expect.stringContaining('Respuesta enviada desde SynerLink'), 'op1');
     expect(db.auditar).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ accion: 'RESPONDER', idRequest: 500 }));
     // La copia enviada aparece en el hilo: con la auditoría reciente se registra como RESPUESTA, sin nota nueva.
@@ -271,6 +276,19 @@ describe('Correo · hilo, notas y respuesta', () => {
     const d2 = deps();
     expect((await sincronizarHilo(d2, yo, 'mock-conv-01AAAA', null)).agregadas).toBe(0);
     expect(db.registrarCorreo).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ tipo: 'RESPUESTA' }));
+  });
+
+  it('responder con Markdown: sale como HTML saneado y la nota del caso queda en texto legible', async () => {
+    db.vinculoDeHilo.mockResolvedValue({ id: 3, conversationId: 'mock-conv-01AAAA', idRequest: 501, asunto: 'x', creadoEn: '', origen: 'CREADA', lastSyncedAt: null });
+    const d = deps();
+    const antes = enviadosSimulados(yo.email).length;
+    await responder(d, yo, { mensajeId: 'mock-msg-0002AAAA', texto: 'Hola **equipo**:\n- uno\n- [ver](https://x.co) <script>x</script>', todos: false, adjuntos: [], ip: null });
+    const env = enviadosSimulados(yo.email)[antes];
+    expect(env.comentarioHtml).toBe('<p>Hola <strong>equipo</strong>:</p><ul><li>uno</li><li><a href="https://x.co" target="_blank" rel="noopener noreferrer nofollow">ver</a> &lt;script&gt;x&lt;/script&gt;</li></ul>');
+    expect(env.texto).toBe('Hola equipo:\n• uno\n• ver (https://x.co) <script>x</script>');
+    const nota = (d.kronos.insertarNota as unknown as { mock: { calls: unknown[][] } }).mock.calls.at(-1)?.[1] as string;
+    expect(nota).toContain('Hola equipo:\n• uno');
+    expect(nota).not.toContain('**');
   });
 
   it('responder valida texto y adjuntos', async () => {
@@ -309,6 +327,56 @@ describe('Correo · buzón de la sesión con la app de aplicación (modo graph)'
     await prov.mensajes({ buscar: 'contrato' });
     expect(urls.length).toBe(2);
     expect(urls.every((u) => u.startsWith(`${BASE}/`))).toBe(true);
+  });
+
+  it('throttling (2026-10-16): abrir un hilo y marcarlo leído = 1 consulta del hilo + imágenes del desplegado + 1 $batch', async () => {
+    limpiarTokensApp();
+    const logo = { id: 'ATT1AAAAAA', contentType: 'image/png', isInline: true, contentId: 'img1' };
+    const mensajes = ['M1', 'M2', 'M3', 'M4', 'M5'].map((id, i) => ({
+      id: `${id}AAAAAAAA`,
+      conversationId: 'CONV0001AAAA',
+      receivedDateTime: `2026-10-1${i}T10:00:00Z`,
+      isRead: i < 3,
+      hasAttachments: true,
+      body: { contentType: 'html', content: '<p>x</p><img src="cid:img1">' },
+      attachments: [logo, { id: `PDF${i}AAAAAAA`, name: 'a.pdf', contentType: 'application/pdf', size: 9, isInline: false }],
+    }));
+    const { f, urls } = graphFalso((url, init) => {
+      if (url.endsWith('/$batch')) {
+        const reqs = JSON.parse(String(init.body)).requests as Array<{ id: string }>;
+        return { body: { responses: reqs.map((r) => ({ id: r.id, status: 200 })) } };
+      }
+      if (url.includes('/attachments')) return { body: { value: [{ ...logo, contentBytes: 'AAAA' }] } };
+      return { body: { value: [...mensajes].reverse() } };
+    });
+    const d = deps({ cfg, fetchFn: f });
+    db.vinculoDeHilo.mockResolvedValue(null);
+    // Doble apertura simultánea (doble clic / efecto repetido): se deduplica.
+    const [h] = await Promise.all([verHilo(d, yo, 'CONV0001AAAA', { remotas: false }), verHilo(d, yo, 'CONV0001AAAA', { remotas: false })]);
+    expect(h.mensajes).toHaveLength(5);
+    const hilo = urls.filter((u) => u.includes('/messages?'));
+    const imagenes = urls.filter((u) => u.includes('/attachments'));
+    expect(hilo).toHaveLength(1);
+    // Desplegados: los 2 no leídos (M4, M5; M5 es además el último). M1–M3 quedan pendientes hasta desplegarlos.
+    expect(imagenes).toHaveLength(2);
+    expect(h.mensajes.map((m) => m.imagenesPendientes)).toEqual([true, true, true, false, false]);
+    expect(h.mensajes[4].html).toContain('data:image/png;base64,AAAA');
+    // Marcar leído al abrir: usa el hilo en caché; solo sale el $batch con los 2 no leídos.
+    const r = await marcarLeidoHilo(d, yo, 'CONV0001AAAA', true, null);
+    expect(r.cambiados).toBe(2);
+    expect(urls.filter((u) => u.includes('/messages?'))).toHaveLength(1);
+    expect(urls.filter((u) => u.endsWith('/$batch'))).toHaveLength(1);
+    // Antes: 1 + 5 (adjuntos con bytes) al abrir y otra vez 1 + 5 al marcar, más el $batch = 13 llamadas. Ahora: 4.
+    expect(urls).toHaveLength(4);
+    // Desplegar un mensaje plegado: una consulta solo para ese mensaje (dentro del hilo propio).
+    const m1 = await imagenesMensajeHilo(d, yo, 'CONV0001AAAA', 'M1AAAAAAAA', { remotas: false });
+    expect(m1).toMatchObject({ id: 'M1AAAAAAAA', imagenesPendientes: false });
+    expect(m1.html).toContain('data:image/png;base64,AAAA');
+    // El marcado actualizó la copia en caché: desplegar no volvió a leer el hilo.
+    expect(urls.filter((u) => u.includes('/messages?'))).toHaveLength(1);
+    expect(urls).toHaveLength(5);
+    await expect(imagenesMensajeHilo(d, yo, 'CONV0001AAAA', 'AAMkAJENO123', { remotas: false })).rejects.toMatchObject({ status: 404 });
+    expect(urls.filter((u) => !u.endsWith('/$batch')).every((u) => u.startsWith(`${BASE}/`))).toBe(true);
   });
 
   it('anti-IDOR: un id de mensaje de OTRO buzón se consulta en el propio y da 404; nada se crea', async () => {
@@ -355,5 +423,16 @@ describe('Correo · tarea de fondo (apagada por defecto)', () => {
     db.vinculoDeHilo.mockResolvedValue({ id: 3, conversationId: 'mock-conv-01AAAA', idRequest: 500, asunto: 'x', creadoEn: '', origen: 'CREADA', lastSyncedAt: null });
     const r = await sincronizarTodo(deps({ cfg: readCorreoConfig({ CORREO_MODO: 'mock', CORREO_SYNC_HABILITADO: 'true' }) }), async (id) => (id === 'op1' ? yo : null));
     expect(r).toEqual({ hilos: 2, agregadas: 2, errores: 0 });
+  });
+});
+
+describe('enlaceOutlookSeguro («Abrir en Outlook»)', () => {
+  it('solo https de Outlook en la web; lo demás no llega a un href', () => {
+    expect(enlaceOutlookSeguro('https://outlook.office365.com/owa/?ItemID=AAMk%2Bx&exvsurl=1')).toMatch(/^https:\/\/outlook\.office365\.com\//);
+    expect(enlaceOutlookSeguro('https://outlook.office.com/mail/id/AAMk')).not.toBeNull();
+    expect(enlaceOutlookSeguro('javascript:alert(1)')).toBeNull();
+    expect(enlaceOutlookSeguro('http://outlook.office365.com/owa')).toBeNull();
+    expect(enlaceOutlookSeguro('https://outlook.office365.com.evil.example/owa')).toBeNull();
+    expect(enlaceOutlookSeguro(undefined)).toBeNull();
   });
 });

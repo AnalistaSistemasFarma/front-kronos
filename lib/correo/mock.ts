@@ -14,7 +14,7 @@ const PDF_MIN = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n',
 
 interface Estado {
   mensajes: MensajeCompleto[];
-  enviados: Array<{ mensajeId: string; todos: boolean; texto: string; adjuntos: string[]; html?: string }>;
+  enviados: Array<{ mensajeId: string; todos: boolean; texto: string; adjuntos: string[]; html?: string; comentarioHtml?: string }>;
 }
 
 const estados: Map<string, Estado> =
@@ -146,7 +146,7 @@ export class MockMailProvider implements MailProvider {
   async responder(mensajeId: string, entrada: RespuestaEntrada): Promise<void> {
     const m = await this.mensaje(mensajeId);
     const e = estado(this.yo);
-    e.enviados.push({ mensajeId, todos: entrada.todos, texto: entrada.texto, adjuntos: entrada.adjuntos.map((a) => a.nombre), ...(entrada.html ? { html: entrada.html } : {}) });
+    e.enviados.push({ mensajeId, todos: entrada.todos, texto: entrada.texto, adjuntos: entrada.adjuntos.map((a) => a.nombre), ...(entrada.html ? { html: entrada.html } : {}), ...(entrada.comentarioHtml ? { comentarioHtml: entrada.comentarioHtml } : {}) });
     const n = e.mensajes.length + 100;
     e.mensajes.push({
       ...m,
@@ -158,11 +158,40 @@ export class MockMailProvider implements MailProvider {
       fecha: new Date().toISOString(),
       leido: true,
       conAdjuntos: entrada.adjuntos.length > 0,
-      html: `<p>${entrada.texto.replace(/</g, '&lt;')}</p>`,
+      html: entrada.comentarioHtml ?? `<p>${entrada.texto.replace(/</g, '&lt;')}</p>`,
       extracto: entrada.texto.slice(0, 200),
       adjuntos: [],
       categorias: [],
     });
+  }
+
+  async marcarLeido(mensajesIds: string[], leido: boolean): Promise<{ cambiados: number; fallidos: number }> {
+    let cambiados = 0;
+    let fallidos = 0;
+    for (const id of new Set(mensajesIds)) {
+      const m = estado(this.yo).mensajes.find((x) => x.id === id);
+      if (m) {
+        m.leido = leido;
+        cambiados++;
+      } else fallidos++;
+    }
+    return { cambiados, fallidos };
+  }
+
+  private deCarpeta(carpetaId: string | null) {
+    return carpetaId === 'mock-folder-sentAAAA' ? [] : estado(this.yo).mensajes;
+  }
+
+  async idsPorLeido(carpetaId: string | null, leido: boolean, max: number): Promise<string[]> {
+    return this.deCarpeta(carpetaId)
+      .filter((m) => m.leido !== leido)
+      .slice(0, max)
+      .map((m) => m.id);
+  }
+
+  async contadoresCarpeta(carpetaId: string | null): Promise<{ total: number; noLeidos: number }> {
+    const ms = this.deCarpeta(carpetaId);
+    return { total: ms.length, noLeidos: ms.filter((m) => !m.leido).length };
   }
 
   async categorizar(mensajeId: string, categoria: string): Promise<void> {
