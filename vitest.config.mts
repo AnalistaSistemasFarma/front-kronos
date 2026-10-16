@@ -92,6 +92,8 @@ export default defineConfig({
         'lib/correo/sanitize.ts',
         'lib/correo/service.ts',
         'lib/correo/mock.ts',
+        // «Consultar a un agente» (2026-10-16): concesión, tarjetas y confirmación.
+        'lib/correo/agente.ts',
         'app/api/correo/**/route.ts',
       ],
       exclude: [

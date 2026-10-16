@@ -7,6 +7,8 @@ import { useSession } from 'next-auth/react';
 import { ActionIcon, Indicator, Tooltip } from '@mantine/core';
 import { IconMail } from '@tabler/icons-react';
 import {
+  conNoLeidos,
+  EVENTO_NO_LEIDOS,
   CORREO_HREF,
   ICONO_CORREO_RETRASO_MS,
   ICONO_CORREO_TTL_MS,
@@ -113,6 +115,21 @@ export default function CorreoHeaderIcon() {
       document.removeEventListener('visibilitychange', refrescar);
       clearInterval(intervalo);
     };
+  }, [status, email]);
+
+  // El módulo Correo avisa el contador nuevo al marcar leído / no leído (optimista): se pinta al instante.
+  useEffect(() => {
+    if (status !== 'authenticated' || !email) return;
+    const alAviso = (ev: Event) => {
+      const n = (ev as CustomEvent<{ noLeidos?: unknown }>).detail?.noLeidos;
+      const e = conNoLeidos(memoria, email, n, Date.now());
+      if (!e) return;
+      memoria = e;
+      guardarEstado(storage(), e);
+      setEstado(e);
+    };
+    window.addEventListener(EVENTO_NO_LEIDOS, alAviso);
+    return () => window.removeEventListener(EVENTO_NO_LEIDOS, alAviso);
   }, [status, email]);
 
   useEffect(() => {

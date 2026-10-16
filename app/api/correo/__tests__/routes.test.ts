@@ -28,6 +28,9 @@ import * as mensajes from '../mensajes/route';
 import * as carpetas from '../carpetas/route';
 import * as hilo from '../hilo/route';
 import * as notas from '../hilo/notas/route';
+import * as leido from '../hilo/leido/route';
+import * as leidoSel from '../leido/route';
+import * as leidoCarpeta from '../leido/carpeta/route';
 import * as vincular from '../hilo/vincular/route';
 import * as adjunto from '../adjunto/route';
 import * as responder from '../responder/route';
@@ -113,6 +116,9 @@ describe('Correo · rutas: sesión y permiso', () => {
     ['mensajes', () => mensajes.GET(get('/mensajes'))],
     ['hilo', () => hilo.GET(get('/hilo?id=mock-conv-01AAAA'))],
     ['notas', () => notas.POST(post('/hilo/notas', {}))],
+    ['leido', () => leido.POST(post('/hilo/leido', {}))],
+    ['leido-seleccion', () => leidoSel.POST(post('/leido', {}))],
+    ['leido-carpeta', () => leidoCarpeta.POST(post('/leido/carpeta', {}))],
     ['vincular', () => vincular.POST(post('/hilo/vincular', {}))],
     ['adjunto', () => adjunto.GET(get('/adjunto'))],
     ['simular', () => simular.POST(post('/simular', {}))],
@@ -220,6 +226,43 @@ describe('Correo · rutas: aislamiento por persona (anti-IDOR)', () => {
     expect(m.reservarAcuse).not.toHaveBeenCalled();
   });
 
+  it('marcar leído / no leído: solo hilos del buzón propio, valor obligatorio y auditado', async () => {
+    comoUsuario();
+    expect((await leido.POST(post('/hilo/leido', { conversationId: 'mock-conv-01AAAA' }))).status).toBe(400);
+    expect((await leido.POST(post('/hilo/leido', { conversationId: '<x>', leido: true }))).status).toBe(400);
+    const r = await leido.POST(post('/hilo/leido', { conversationId: 'mock-conv-01AAAA', leido: true }));
+    expect(r.status).toBe(200);
+    expect((await r.json()).cambiados).toBeGreaterThanOrEqual(0);
+    expect(m.auditar).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ accion: 'MARCAR_LEIDO', conversationId: 'mock-conv-01AAAA', mailbox: 'laura@gsslatam.com' }));
+    const n = await leido.POST(post('/hilo/leido', { conversationId: 'mock-conv-01AAAA', leido: false }));
+    expect(await n.json()).toEqual({ cambiados: 1 });
+    expect(m.auditar).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ accion: 'MARCAR_NO_LEIDO' }));
+  });
+
+  it('marcar seleccionados y toda la carpeta (simulado): por lotes, con «restantes» para el avance, auditado', async () => {
+    comoUsuario();
+    expect((await leidoSel.POST(post('/leido', { mensajesIds: [], leido: true }))).status).toBe(400);
+    expect((await leidoSel.POST(post('/leido', { mensajesIds: Array.from({ length: 101 }, (_, i) => `mock-msg-${i}AAAAAA`), leido: true }))).status).toBe(400);
+    const sel = await leidoSel.POST(post('/leido', { mensajesIds: ['mock-msg-0001AAAA', 'mock-msg-0001AAAA', 'no-existe-AAAA'], leido: true }));
+    expect(await sel.json()).toEqual({ cambiados: 1, fallidos: 1 });
+    expect(m.auditar).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ accion: 'MARCAR_LEIDO', detalle: 'Selección: 1 de 2 mensaje(s)' }));
+    expect((await leidoCarpeta.POST(post('/leido/carpeta', { carpeta: '<x>', leido: true }))).status).toBe(400);
+    const todo = await (await leidoCarpeta.POST(post('/leido/carpeta', { carpeta: null, leido: true }))).json();
+    expect(todo.restantes).toBe(0);
+    expect(todo.cambiados).toBeGreaterThan(0);
+    const otra = await (await leidoCarpeta.POST(post('/leido/carpeta', { carpeta: null, leido: true }))).json();
+    expect(otra).toEqual({ cambiados: 0, fallidos: 0, restantes: 0 });
+  });
+
+  it('con CORREO_ETIQUETAR_HABILITADO=false (sin escritura en el buzón) leído / no leído responde 403', async () => {
+    cfgEnv = { CORREO_MODO: 'mock', CORREO_ETIQUETAR_HABILITADO: 'false' };
+    comoUsuario();
+    expect((await leido.POST(post('/hilo/leido', { conversationId: 'mock-conv-01AAAA', leido: true }))).status).toBe(403);
+    expect((await leidoSel.POST(post('/leido', { mensajesIds: ['mock-msg-0001AAAA'], leido: true }))).status).toBe(403);
+    expect((await leidoCarpeta.POST(post('/leido/carpeta', { carpeta: null, leido: true }))).status).toBe(403);
+    expect(m.auditar).not.toHaveBeenCalled();
+  });
+
   it('notas de un hilo no vinculado: 404', async () => {
     comoUsuario();
     expect((await notas.POST(post('/hilo/notas', { conversationId: 'mock-conv-01AAAA' }))).status).toBe(404);
@@ -303,6 +346,7 @@ describe('Correo · rutas: app de aplicación y buzón de la sesión (anti-IDOR)
     comoUsuario();
     expect((await hilo.GET(get('/hilo?id=CONVDEGERENCIA1'))).status).toBe(404);
     expect((await adjunto.GET(get('/adjunto?mensaje=AAMkGERENCIA1&adjunto=ATTGERENCIA1'))).status).toBe(404);
+    expect((await leido.POST(post('/hilo/leido', { conversationId: 'CONVDEGERENCIA1', leido: true }))).status).toBe(404);
     const fd = new FormData();
     fd.set('mensajeId', 'AAMkGERENCIA1');
     fd.set('texto', 'x');
@@ -310,6 +354,78 @@ describe('Correo · rutas: app de aplicación y buzón de la sesión (anti-IDOR)
     expect(urls.length).toBeGreaterThan(0);
     expect(urls.every((u) => u.startsWith(`${BASE}/`))).toBe(true);
   });
+
+  it('marcar leído por Graph $batch: lotes de 20, cada sub-petición en /users/{correo de la sesión}, reintento de 429', async () => {
+    const lotes: Array<{ requests: Array<{ id: string; method: string; url: string; body: unknown }> }> = [];
+    let limitarUno = true;
+    fetchFn = (async (url: string, init?: RequestInit) => {
+      if (url.includes('login.microsoftonline.com')) return new Response(JSON.stringify({ access_token: 'APP', expires_in: 3600 }), { status: 200 });
+      if (url === 'https://graph.microsoft.com/v1.0/$batch') {
+        const b = JSON.parse(String(init?.body));
+        lotes.push(b);
+        const responses = b.requests.map((r: { id: string }, i: number) => {
+          if (limitarUno && i === 0) {
+            limitarUno = false;
+            return { id: r.id, status: 429, headers: { 'Retry-After': '0' } };
+          }
+          return { id: r.id, status: 200 };
+        });
+        return new Response(JSON.stringify({ responses }), { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    }) as unknown as typeof fetch;
+    cfgEnv = GRAPH_ENV;
+    comoUsuario();
+    const ids = Array.from({ length: 45 }, (_, i) => `AAMkSEL${String(i).padStart(4, '0')}`);
+    const r = await leidoSel.POST(post('/leido', { mensajesIds: ids, leido: true, mailbox: 'gerencia@gsslatam.com' }));
+    expect(await r.json()).toEqual({ cambiados: 45, fallidos: 0 });
+    // 3 lotes (20 + 20 + 5) más el reintento de la sub-petición limitada.
+    expect(lotes.map((l) => l.requests.length)).toEqual([20, 1, 20, 5]);
+    const subs = lotes.flatMap((l) => l.requests);
+    expect(subs.every((q) => q.method === 'PATCH' && q.url.startsWith('/users/laura%40gsslatam.com/messages/AAMkSEL'))).toBe(true);
+    expect(subs.every((q) => JSON.stringify(q.body) === '{"isRead":true}')).toBe(true);
+    expect(JSON.stringify(lotes)).not.toContain('gerencia');
+  }, 15_000);
+
+  it('throttling (2026-10-16): Graph responde 429 y luego 200 → el hilo abre (reintento con Retry-After, sin error)', async () => {
+    let n = 0;
+    const hiloGraph = { value: [{ id: 'M1AAAAAAAA', conversationId: 'CONV429AAAAA', subject: 'Hola', receivedDateTime: '2026-10-16T16:13:00Z', isRead: true, body: { contentType: 'html', content: '<p>ok</p>' }, attachments: [] }] };
+    const urls: string[] = [];
+    fetchFn = (async (url: string) => {
+      if (url.includes('login.microsoftonline.com')) return new Response(JSON.stringify({ access_token: 'APP', expires_in: 3600 }), { status: 200 });
+      urls.push(url);
+      if (++n === 1) return new Response('{"error":{"code":"ApplicationThrottled"}}', { status: 429, headers: { 'Retry-After': '1' } });
+      return new Response(JSON.stringify(hiloGraph), { status: 200 });
+    }) as unknown as typeof fetch;
+    cfgEnv = GRAPH_ENV;
+    comoUsuario();
+    // Dos aperturas simultáneas del mismo hilo (doble clic): una sola cadena de consultas a Graph.
+    const [r, r2] = await Promise.all([hilo.GET(get('/hilo?id=CONV429AAAAA')), hilo.GET(get('/hilo?id=CONV429AAAAA'))]);
+    expect(r.status).toBe(200);
+    expect(r2.status).toBe(200);
+    expect((await r.json()).hilo.mensajes).toHaveLength(1);
+    expect(urls).toHaveLength(2);
+    // Reabrir enseguida: caché corta, sin Graph; «Actualizar» (fresco=1) sí consulta.
+    expect((await hilo.GET(get('/hilo?id=CONV429AAAAA'))).status).toBe(200);
+    expect(urls).toHaveLength(2);
+    expect((await hilo.GET(get('/hilo?id=CONV429AAAAA&fresco=1'))).status).toBe(200);
+    expect(urls).toHaveLength(3);
+  }, 15_000);
+
+  it('throttling persistente: tras 3 reintentos, 429 con mensaje claro (la vista ofrece «Reintentar»)', async () => {
+    const urls: string[] = [];
+    fetchFn = (async (url: string) => {
+      if (url.includes('login.microsoftonline.com')) return new Response(JSON.stringify({ access_token: 'APP', expires_in: 3600 }), { status: 200 });
+      urls.push(url);
+      return new Response('{}', { status: 429, headers: { 'Retry-After': '0' } });
+    }) as unknown as typeof fetch;
+    cfgEnv = GRAPH_ENV;
+    comoUsuario();
+    const r = await hilo.GET(get('/hilo?id=CONV429BBBBB'));
+    expect(r.status).toBe(429);
+    expect((await r.json()).error).toMatch(/Microsoft limitó las consultas a su buzón/);
+    expect(urls).toHaveLength(4);
+  }, 15_000);
 
   it('usuarios de un inquilino sin app habilitada: «Correo disponible próximamente para su empresa»', async () => {
     graph(() => ({ body: {} }));

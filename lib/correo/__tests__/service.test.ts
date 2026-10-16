@@ -13,9 +13,11 @@ vi.mock('../db', () => db);
 
 import { readCorreoConfig } from '../config';
 import { limpiarTokensApp } from '../graph';
+import { limpiarCacheHilos } from '../cacheHilo';
 import { CorreoError } from '../errors';
 import { MockMailProvider, enviadosSimulados, reiniciarBuzonSimulado } from '../mock';
 import {
+  enlaceOutlookSeguro,
   auditarLectura,
   crearDesdeFila,
   estadoConexion,
@@ -24,6 +26,8 @@ import {
   simular,
   sincronizarHilo,
   sincronizarTodo,
+  imagenesMensajeHilo,
+  marcarLeidoHilo,
   verHilo,
   vincularHilo,
   type CorreoDeps,
@@ -105,6 +109,7 @@ const filaBase = {
 beforeEach(() => {
   vi.clearAllMocks();
   reiniciarBuzonSimulado();
+  limpiarCacheHilos();
   db.usuarioDeEmpresa.mockResolvedValue({ id: 'u-remitente', nombre: 'Uno', correo: 'prueba.uno@gsslatam.com', empresas: [1] });
   db.reservarHilo.mockResolvedValue({ idLink: 3 });
   db.vinculoDeHilo.mockResolvedValue(null);
@@ -324,6 +329,56 @@ describe('Correo · buzón de la sesión con la app de aplicación (modo graph)'
     expect(urls.every((u) => u.startsWith(`${BASE}/`))).toBe(true);
   });
 
+  it('throttling (2026-10-16): abrir un hilo y marcarlo leído = 1 consulta del hilo + imágenes del desplegado + 1 $batch', async () => {
+    limpiarTokensApp();
+    const logo = { id: 'ATT1AAAAAA', contentType: 'image/png', isInline: true, contentId: 'img1' };
+    const mensajes = ['M1', 'M2', 'M3', 'M4', 'M5'].map((id, i) => ({
+      id: `${id}AAAAAAAA`,
+      conversationId: 'CONV0001AAAA',
+      receivedDateTime: `2026-10-1${i}T10:00:00Z`,
+      isRead: i < 3,
+      hasAttachments: true,
+      body: { contentType: 'html', content: '<p>x</p><img src="cid:img1">' },
+      attachments: [logo, { id: `PDF${i}AAAAAAA`, name: 'a.pdf', contentType: 'application/pdf', size: 9, isInline: false }],
+    }));
+    const { f, urls } = graphFalso((url, init) => {
+      if (url.endsWith('/$batch')) {
+        const reqs = JSON.parse(String(init.body)).requests as Array<{ id: string }>;
+        return { body: { responses: reqs.map((r) => ({ id: r.id, status: 200 })) } };
+      }
+      if (url.includes('/attachments')) return { body: { value: [{ ...logo, contentBytes: 'AAAA' }] } };
+      return { body: { value: [...mensajes].reverse() } };
+    });
+    const d = deps({ cfg, fetchFn: f });
+    db.vinculoDeHilo.mockResolvedValue(null);
+    // Doble apertura simultánea (doble clic / efecto repetido): se deduplica.
+    const [h] = await Promise.all([verHilo(d, yo, 'CONV0001AAAA', { remotas: false }), verHilo(d, yo, 'CONV0001AAAA', { remotas: false })]);
+    expect(h.mensajes).toHaveLength(5);
+    const hilo = urls.filter((u) => u.includes('/messages?'));
+    const imagenes = urls.filter((u) => u.includes('/attachments'));
+    expect(hilo).toHaveLength(1);
+    // Desplegados: los 2 no leídos (M4, M5; M5 es además el último). M1–M3 quedan pendientes hasta desplegarlos.
+    expect(imagenes).toHaveLength(2);
+    expect(h.mensajes.map((m) => m.imagenesPendientes)).toEqual([true, true, true, false, false]);
+    expect(h.mensajes[4].html).toContain('data:image/png;base64,AAAA');
+    // Marcar leído al abrir: usa el hilo en caché; solo sale el $batch con los 2 no leídos.
+    const r = await marcarLeidoHilo(d, yo, 'CONV0001AAAA', true, null);
+    expect(r.cambiados).toBe(2);
+    expect(urls.filter((u) => u.includes('/messages?'))).toHaveLength(1);
+    expect(urls.filter((u) => u.endsWith('/$batch'))).toHaveLength(1);
+    // Antes: 1 + 5 (adjuntos con bytes) al abrir y otra vez 1 + 5 al marcar, más el $batch = 13 llamadas. Ahora: 4.
+    expect(urls).toHaveLength(4);
+    // Desplegar un mensaje plegado: una consulta solo para ese mensaje (dentro del hilo propio).
+    const m1 = await imagenesMensajeHilo(d, yo, 'CONV0001AAAA', 'M1AAAAAAAA', { remotas: false });
+    expect(m1).toMatchObject({ id: 'M1AAAAAAAA', imagenesPendientes: false });
+    expect(m1.html).toContain('data:image/png;base64,AAAA');
+    // El marcado actualizó la copia en caché: desplegar no volvió a leer el hilo.
+    expect(urls.filter((u) => u.includes('/messages?'))).toHaveLength(1);
+    expect(urls).toHaveLength(5);
+    await expect(imagenesMensajeHilo(d, yo, 'CONV0001AAAA', 'AAMkAJENO123', { remotas: false })).rejects.toMatchObject({ status: 404 });
+    expect(urls.filter((u) => !u.endsWith('/$batch')).every((u) => u.startsWith(`${BASE}/`))).toBe(true);
+  });
+
   it('anti-IDOR: un id de mensaje de OTRO buzón se consulta en el propio y da 404; nada se crea', async () => {
     limpiarTokensApp();
     const { f, urls } = graphFalso(() => ({ status: 404, body: { error: { code: 'ErrorItemNotFound' } } }));
@@ -368,5 +423,16 @@ describe('Correo · tarea de fondo (apagada por defecto)', () => {
     db.vinculoDeHilo.mockResolvedValue({ id: 3, conversationId: 'mock-conv-01AAAA', idRequest: 500, asunto: 'x', creadoEn: '', origen: 'CREADA', lastSyncedAt: null });
     const r = await sincronizarTodo(deps({ cfg: readCorreoConfig({ CORREO_MODO: 'mock', CORREO_SYNC_HABILITADO: 'true' }) }), async (id) => (id === 'op1' ? yo : null));
     expect(r).toEqual({ hilos: 2, agregadas: 2, errores: 0 });
+  });
+});
+
+describe('enlaceOutlookSeguro («Abrir en Outlook»)', () => {
+  it('solo https de Outlook en la web; lo demás no llega a un href', () => {
+    expect(enlaceOutlookSeguro('https://outlook.office365.com/owa/?ItemID=AAMk%2Bx&exvsurl=1')).toMatch(/^https:\/\/outlook\.office365\.com\//);
+    expect(enlaceOutlookSeguro('https://outlook.office.com/mail/id/AAMk')).not.toBeNull();
+    expect(enlaceOutlookSeguro('javascript:alert(1)')).toBeNull();
+    expect(enlaceOutlookSeguro('http://outlook.office365.com/owa')).toBeNull();
+    expect(enlaceOutlookSeguro('https://outlook.office365.com.evil.example/owa')).toBeNull();
+    expect(enlaceOutlookSeguro(undefined)).toBeNull();
   });
 });
