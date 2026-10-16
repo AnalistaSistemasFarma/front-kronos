@@ -73,8 +73,9 @@ BEGIN
     [restablecido_en]   DATETIME2     NULL,
     [created_at]        DATETIME2     NOT NULL CONSTRAINT [ot_pin_created_at_df] DEFAULT sysutcdatetime(),
     [updated_at]        DATETIME2     NOT NULL CONSTRAINT [ot_pin_updated_at_df] DEFAULT sysutcdatetime(),
-    CONSTRAINT [ot_pin_pkey] PRIMARY KEY CLUSTERED ([id_user]),
-    CONSTRAINT [ot_pin_id_user_fkey] FOREIGN KEY ([id_user]) REFERENCES [dbo].[user]([id]) ON DELETE NO ACTION ON UPDATE NO ACTION
+    -- Sin FK a [user]: user.id es NVARCHAR(1000) y SQL Server exige el mismo largo (igual que
+    -- las demás columnas de usuario del módulo, p. ej. ot_orden_trabajo.abierta_por).
+    CONSTRAINT [ot_pin_pkey] PRIMARY KEY CLUSTERED ([id_user])
   );
 END
 
