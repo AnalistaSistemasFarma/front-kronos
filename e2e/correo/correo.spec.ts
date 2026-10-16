@@ -558,18 +558,24 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     await page.route('**/api/correo/mensajes**', (r) => r.fulfill({ json: { mensajes, siguiente: 'PAG2' } }));
     const seleccionados: Array<{ mensajesIds: string[]; leido: boolean }> = [];
     let fallar = false;
+    // La petición que falla espera a que la prueba vea el cambio optimista (para no depender de tiempos).
+    let soltarFallo: () => void = () => undefined;
+    const fallo = new Promise<void>((x) => (soltarFallo = x));
     await page.route('**/api/correo/leido', async (r) => {
       const b = r.request().postDataJSON();
       seleccionados.push(b);
-      await new Promise((x) => setTimeout(x, 300));
+      if (fallar) await fallo;
       if (fallar) return r.fulfill({ status: 502, json: { error: 'Microsoft respondió con un error (503).' } });
       bandeja.noLeidos -= b.leido ? 1 : -1;
       return r.fulfill({ json: { cambiados: b.mensajesIds.length, fallidos: 0 } });
     });
     const lotes: unknown[] = [];
+    // El segundo lote espera a que la prueba vea «200 de 449» (sin depender de la velocidad de la máquina de la CI).
+    let soltarSegundo: () => void = () => undefined;
+    const segundo = new Promise<void>((x) => (soltarSegundo = x));
     await page.route('**/api/correo/leido/carpeta', async (r) => {
       lotes.push(r.request().postDataJSON());
-      await new Promise((x) => setTimeout(x, 400));
+      if (lotes.length === 2) await segundo;
       const n = Math.min(200, bandeja.noLeidos);
       bandeja.noLeidos -= n;
       return r.fulfill({ json: { cambiados: n, fallidos: 0, restantes: bandeja.noLeidos } });
@@ -598,6 +604,7 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     await page.getByTestId('correo-sel-no-leido').click();
     await expect(filas.nth(1)).toHaveAttribute('data-leido', '0');
     await expect(recibidos).toHaveText(/Recibidos\s*450/);
+    soltarFallo();
     await expect(filas.nth(1)).toHaveAttribute('data-leido', '1');
     await expect(recibidos).toHaveText(/Recibidos\s*449/);
     await expect(icono).toHaveAttribute('aria-label', 'Correo: 449 sin leer');
@@ -618,6 +625,7 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     await expect(progreso).toContainText('de 449');
     await expect(progreso).toContainText('200 de 449');
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/18-marcando-carpeta.png` });
+    soltarSegundo();
     await expect(progreso).toHaveCount(0, { timeout: 10_000 });
     expect(lotes).toEqual([
       { carpeta: null, leido: true },
