@@ -24,20 +24,33 @@ function hasSignedProgress(doc: OrionSignatureState): boolean {
  * Stem lógico del adjunto: quita .pdf y sufijos de versión (-firmado / -original / -parcial).
  * Sirve para colapsar la copia descargada con el documento Orion canónico.
  */
-export function normalizeAttachmentStem(name?: string | null): string {
-  return String(name || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\.pdf$/i, '')
-    .replace(/-(firmado|original|parcial)(\s*\(\d+\))?$/i, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+/** Sufijo de copia de versión al final del nombre (sin .pdf). */
+const VERSION_COPY_SUFFIX = /-(?:firmado|original|parcial)$/i;
+/** Contador de copia de Windows/OneDrive: " (2)". */
+const COPY_COUNTER = /\s*\(\d+\)$/;
+
+/**
+ * Quita "-firmado" / "-original" / "-parcial" (con o sin " (n)" de copia). Sin ese sufijo el
+ * nombre queda igual, incluido un " (n)" propio. En dos pasos para no anidar repeticiones.
+ */
+function stripVersionCopySuffix(stem: string): string {
+  const withoutCounter = stem.replace(COPY_COUNTER, '');
+  return VERSION_COPY_SUFFIX.test(withoutCounter) ? withoutCounter.replace(VERSION_COPY_SUFFIX, '') : stem;
 }
 
-function isVersionCopyFileName(name?: string | null): boolean {
-  return /-(firmado|original|parcial)(\s*\(\d+\))?\.pdf$/i.test(
-    String(name || '').trim()
-  );
+export function normalizeAttachmentStem(name?: string | null): string {
+  const stem = String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\.pdf$/i, '');
+  return stripVersionCopySuffix(stem).replace(/\s+/g, ' ').trim();
+}
+
+/** Copia de versión de un PDF: `X-firmado.pdf`, `X-original (2).pdf`… */
+export function isVersionCopyFileName(name?: string | null): boolean {
+  const value = String(name || '').trim();
+  if (!/\.pdf$/i.test(value)) return false;
+  return VERSION_COPY_SUFFIX.test(value.replace(/\.pdf$/i, '').replace(COPY_COUNTER, ''));
 }
 
 function pickGhostAttachmentUrl(doc: OrionSignatureState): string | undefined {

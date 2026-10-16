@@ -3,7 +3,7 @@
 import { memo, useMemo, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { Alert, Group, ActionIcon, SimpleGrid } from '@mantine/core';
+import { Alert, Button, Group, ActionIcon, SimpleGrid } from '@mantine/core';
 import {
   IconLayoutGrid,
   IconList,
@@ -28,7 +28,7 @@ type Subprocess = ProcessRecord['subprocesses'][number];
 function ProcessViewInner() {
   const { data: session } = useSession();
   const router = useRouter();
-  const { processes, loading, error } = useProcessData();
+  const { processes, loading, error, fetchProcesses } = useProcessData();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -200,6 +200,15 @@ function ProcessViewInner() {
         {error && (
           <Alert icon={<IconX size={16} />} title='Error' color='red' mb='md' radius='lg'>
             {error}
+            <Button
+              size='xs'
+              variant='light'
+              color='red'
+              mt='sm'
+              onClick={() => void fetchProcesses({ silent: false })}
+            >
+              Reintentar
+            </Button>
           </Alert>
         )}
 

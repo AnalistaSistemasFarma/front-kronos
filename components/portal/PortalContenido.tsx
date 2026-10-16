@@ -1,7 +1,22 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import PortalFormacion from './PortalFormacion';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Group, Select, TextInput } from '@mantine/core';
+import { IconBuilding, IconSearch } from '@tabler/icons-react';
+import {
+  TODAS_LAS_EMPRESAS,
+  contarCorreos,
+  filtrarGruposCorreo,
+  opcionesEmpresa,
+  type GrupoCorreo,
+} from '../../lib/portal/correos-datos';
+import { filtrarExtensiones, type Extension } from '../../lib/portal/extensiones-datos';
+import { urlFormacion as urlPaginaFormacion, type OrigenPortal } from '../../lib/portal/formacion-navegacion';
+import HeinsohnVentana from './HeinsohnVentana';
+import OrganigramaVisor from './OrganigramaVisor';
+import PoliticasVisor, { TEXTOS_AYUDAS } from './PoliticasVisor';
+import PortalCalendario from './PortalCalendario';
+import VentanaEventosHoy from './VentanaEventosHoy';
 import PortalNavegacion, { useSeccionActiva, type SeccionNav } from './PortalNavegacion';
 
 /** Cada cuánto rota sola la imagen principal del carrusel de anuncios. */
@@ -10,12 +25,18 @@ const ROTACION_CARRUSEL_MS = 6000;
 /** ids estables de sección, para el panel de navegación y el scroll-spy. */
 const ID_SECCION_ANUNCIOS = 'portal-th-anuncios';
 const ID_SECCION_POLITICAS = 'portal-th-politicas';
-/** Sección nueva "tipo Moodle" — cursos, materiales, progreso y certificado.
- *  Pedido de Cristian (2026-09-18). Va al final, después de Políticas. */
+/** Acceso a FORMACIÓN. Desde 2026-09-30 (pedido de Cristian) Formación
+ *  tiene su propia página (`/portal/formacion`) que se abre en una pestaña
+ *  nueva; aquí solo queda este acceso. Desde el hub abre
+ *  `/process/portal-th/formacion`, dentro del layout de SynerLink. */
 const ID_SECCION_FORMACION = 'portal-th-formacion';
 /** No es una sección con scroll: es un botón del panel que abre su propia
  *  ventana de vista previa (ver `irASeccion`), igual que un documento. */
 const ID_SECCION_CONTACTOS = 'portal-th-contactos';
+/** Botón del panel, debajo de Contactos: abre la ventana de vídeos de ayuda (carpeta FORMACION/AYUDAS). Sin sección en la página. */
+const ID_SECCION_AYUDAS = 'portal-th-ayudas';
+/** Botón del panel: abre una ventana con un botón por empresa hacia su acceso al portal de nómina de Heinsohn. Sin sección en la página. */
+const ID_SECCION_HEINSOHN = 'portal-th-heinsohn';
 
 /**
  * EL CONTENIDO DEL PORTAL DE TALENTO HUMANO — anuncios y documentos.
@@ -44,13 +65,86 @@ interface Banner {
   /** Los anuncios se sirven desde la base, no desde SharePoint. */
   url: string;
 }
-/** Un correo con licencia activa de M365, agrupado por empresa. */
-interface GrupoCorreo {
-  empresa: string;
-  dominio: string;
-  /** 'sin_acceso' = todavía no hay conector configurado para ese tenant. */
-  estado: 'ok' | 'sin_acceso';
-  usuarios: { nombre: string; correo: string }[];
+
+/**
+ * Tope de espera de las listas de Contactos. El servidor consulta varios
+ * conectores (hasta 20 s cada uno, en paralelo): pasado este tiempo se deja de
+ * esperar y se ofrece "Reintentar" en vez de dejar el "Cargando…" para siempre.
+ */
+const TIEMPO_MAXIMO_CONTACTOS_MS = 30_000;
+
+const extraerGrupos = (data: Record<string, unknown>) =>
+  Array.isArray(data.grupos) ? (data.grupos as GrupoCorreo[]) : [];
+const extraerExtensiones = (data: Record<string, unknown>) =>
+  Array.isArray(data.extensiones) ? (data.extensiones as Extension[]) : [];
+
+/**
+ * Carga perezosa de una lista de la ventana de Contactos: se pide la primera
+ * vez que se abre esa opción, con tope de tiempo y "Reintentar".
+ *
+ * OJO (arreglo 2026-10-08): la versión anterior tenía `cargando` entre las
+ * dependencias del efecto. Al ponerlo en `true`, React limpiaba el efecto
+ * —marcando como cancelada la petición en curso— y la nueva ejecución salía
+ * de inmediato porque ya estaba "cargando": la respuesta llegaba y se
+ * descartaba, y "Cargando correos corporativos…" quedaba para siempre.
+ */
+function useListaContactos<T>(
+  activa: boolean,
+  url: string,
+  extraer: (data: Record<string, unknown>) => T,
+  mensajeError: string
+) {
+  const [datos, setDatos] = useState<T | null>(null);
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [intento, setIntento] = useState(0);
+
+  useEffect(() => {
+    if (!activa || datos !== null) return;
+    let vigente = true;
+    let vencido = false;
+    const control = new AbortController();
+    const reloj = setTimeout(() => {
+      vencido = true;
+      control.abort();
+    }, TIEMPO_MAXIMO_CONTACTOS_MS);
+    setCargando(true);
+    setError(null);
+    (async () => {
+      try {
+        const res = await fetch(url, { cache: 'no-store', signal: control.signal });
+        const data = await leerJson(res);
+        if (!res.ok) throw new Error(String(data?.error ?? mensajeError));
+        if (vigente) {
+          setDatos(extraer(data));
+          setCargando(false);
+        }
+      } catch (e) {
+        if (!vigente) return;
+        setError(
+          vencido
+            ? 'La consulta está tardando más de lo normal. Intente de nuevo en un momento.'
+            : (e as Error).message || mensajeError
+        );
+        setCargando(false);
+      } finally {
+        clearTimeout(reloj);
+      }
+    })();
+    return () => {
+      vigente = false;
+      clearTimeout(reloj);
+      control.abort();
+      setCargando(false);
+    };
+  }, [activa, datos, intento, url, extraer, mensajeError]);
+
+  const reintentar = useCallback(() => {
+    setError(null);
+    setIntento((n) => n + 1);
+  }, []);
+
+  return { datos, cargando, error, reintentar };
 }
 
 /**
@@ -141,17 +235,22 @@ export function usePortalContenido(): EstadoPortal & {
 }
 
 export default function PortalContenido({
-  documentos,
   banners,
   puedeEditar = false,
   onCambioEnBanners,
+  origen = 'abierto',
 }: {
+  /** Ya no se pinta (Cristian, 2026-10-08: sin tarjetas en Políticas); se
+   *  conserva en la firma para no tocar las dos páginas que lo pasan. */
   documentos: Documento[];
   banners: Banner[];
   /** Solo Talento Humano administra la cartelera. */
   puedeEditar?: boolean;
   onCambioEnBanners?: () => void | Promise<void>;
+  /** Por qué portal se entró: decide a dónde vuelve la página de Formación. */
+  origen?: OrigenPortal;
 }) {
+  const urlFormacion = urlPaginaFormacion(origen);
   const [subiendo, setSubiendo] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
@@ -268,40 +367,68 @@ export default function PortalContenido({
    * que luego cuenta de dónde sale la información de cada uno.
    */
   const [contactosAbierto, setContactosAbierto] = useState(false);
+  /**
+   * Ventana "VISUALIZAR" de Políticas y reglamentos. Pedido de Cristian
+   * (2026-10-08): todos los archivos de la carpeta de SharePoint, con vista
+   * previa, en una sola ventana (ver `PoliticasVisor`).
+   */
+  const [politicasAbierto, setPoliticasAbierto] = useState(false);
+  const cerrarPoliticas = useCallback(() => setPoliticasAbierto(false), []);
+  /** Ventana «AYUDAS» (Cristian, 2026-10-15): los videos de la carpeta FORMACION/AYUDAS, con la misma ventana de Políticas. */
+  const [ayudasAbierto, setAyudasAbierto] = useState(false);
+  const cerrarAyudas = useCallback(() => setAyudasAbierto(false), []);
+  /** Ventana «HEINSOHN NÓMINA» (Cristian, 2026-10-15). */
+  const [heinsohnAbierto, setHeinsohnAbierto] = useState(false);
+  const cerrarHeinsohn = useCallback(() => setHeinsohnAbierto(false), []);
+  /** Organigrama digital (Cristian, 2026-10-15): se abre desde «Contactos» y, al cerrarlo, se vuelve a «Contactos». */
+  const [organigramaAbierto, setOrganigramaAbierto] = useState(false);
   const [contactoSeleccionado, setContactoSeleccionado] = useState<'correos' | 'extensiones' | null>(null);
   const cerrarContactos = () => {
     setContactosAbierto(false);
     setContactoSeleccionado(null);
+    setBusquedaExtension('');
+    setEmpresaCorreo(TODAS_LAS_EMPRESAS);
+    setBusquedaCorreo('');
   };
 
-  // ── "Correos Corporativos" dentro de Contactos ──────────────────────────
-  // Se pide la primera vez que se abre esa opción, no al abrir la ventana de
-  // Contactos entera (nadie pide "Extensiones" el 100% de las veces).
-  const [correosGrupos, setCorreosGrupos] = useState<GrupoCorreo[] | null>(null);
-  const [correosCargando, setCorreosCargando] = useState(false);
-  const [correosError, setCorreosError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (contactoSeleccionado !== 'correos' || correosGrupos !== null || correosCargando) return;
-    let cancelado = false;
-    setCorreosCargando(true);
-    setCorreosError(null);
-    (async () => {
-      try {
-        const res = await fetch('/api/portal/contactos/correos', { cache: 'no-store' });
-        const data = await leerJson(res);
-        if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo cargar la lista.'));
-        if (!cancelado) setCorreosGrupos(Array.isArray(data.grupos) ? (data.grupos as GrupoCorreo[]) : []);
-      } catch (e) {
-        if (!cancelado) setCorreosError((e as Error).message);
-      } finally {
-        if (!cancelado) setCorreosCargando(false);
-      }
-    })();
-    return () => {
-      cancelado = true;
-    };
-  }, [contactoSeleccionado, correosGrupos, correosCargando]);
+  // ── "Correos Corporativos" y "Extensiones Corporativas" dentro de Contactos
+  // Cada lista se pide la primera vez que se abre su opción, no al abrir la
+  // ventana de Contactos entera (nadie pide las dos el 100% de las veces).
+  const {
+    datos: correosGrupos,
+    cargando: correosCargando,
+    error: correosError,
+    reintentar: reintentarCorreos,
+  } = useListaContactos(
+    contactoSeleccionado === 'correos',
+    '/api/portal/contactos/correos',
+    extraerGrupos,
+    'No se pudo cargar la lista.'
+  );
+  const {
+    datos: extensiones,
+    cargando: extensionesCargando,
+    error: extensionesError,
+    reintentar: reintentarExtensiones,
+  } = useListaContactos(
+    contactoSeleccionado === 'extensiones',
+    '/api/portal/contactos/extensiones',
+    extraerExtensiones,
+    'No se pudo cargar las extensiones.'
+  );
+  const [busquedaExtension, setBusquedaExtension] = useState('');
+  // Filtro de Correos por empresa + buscador (Cristian, 2026-10-08). Mismos
+  // controles Mantine que la barra de filtros de Artículos.
+  const [empresaCorreo, setEmpresaCorreo] = useState(TODAS_LAS_EMPRESAS);
+  const [busquedaCorreo, setBusquedaCorreo] = useState('');
+  const correosFiltrados = useMemo(
+    () => (correosGrupos ? filtrarGruposCorreo(correosGrupos, empresaCorreo, busquedaCorreo) : []),
+    [correosGrupos, empresaCorreo, busquedaCorreo]
+  );
+  const extensionesFiltradas = useMemo(
+    () => (extensiones ? filtrarExtensiones(extensiones, busquedaExtension) : []),
+    [extensiones, busquedaExtension]
+  );
 
   // Cerrar con Escape: en una ventana que tapa la pantalla, buscar la ✕ con el
   // mouse cuando uno solo quería salir es incómodo.
@@ -346,6 +473,8 @@ export default function PortalContenido({
     { id: ID_SECCION_POLITICAS, etiqueta: 'Políticas y reglamentos' },
     { id: ID_SECCION_FORMACION, etiqueta: 'Formación' },
     { id: ID_SECCION_CONTACTOS, etiqueta: 'Contactos' },
+    { id: ID_SECCION_AYUDAS, etiqueta: 'Ayudas' },
+    { id: ID_SECCION_HEINSOHN, etiqueta: 'Heinsohn Nómina' },
     // Cuando el portal tenga más secciones, se agregan acá — el panel de
     // navegación no necesita ningún otro cambio.
   ];
@@ -356,8 +485,27 @@ export default function PortalContenido({
   const activa = useSeccionActiva(idsSecciones);
 
   const irASeccion = (id: string) => {
+    if (id === ID_SECCION_POLITICAS) {
+      // Pedido de Cristian (2026-10-14): el botón del panel abre lo mismo que VISUALIZAR (la ventana con todos los
+      // archivos y su vista previa), en vez de solo desplazar la página hasta la sección.
+      setPoliticasAbierto(true);
+      return;
+    }
     if (id === ID_SECCION_CONTACTOS) {
       setContactosAbierto(true);
+      return;
+    }
+    if (id === ID_SECCION_AYUDAS) {
+      setAyudasAbierto(true);
+      return;
+    }
+    if (id === ID_SECCION_HEINSOHN) {
+      setHeinsohnAbierto(true);
+      return;
+    }
+    if (id === ID_SECCION_FORMACION) {
+      // Igual que la tarjeta: pestaña nueva, sin `opener`.
+      window.open(urlFormacion, '_blank', 'noopener,noreferrer');
       return;
     }
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -365,8 +513,14 @@ export default function PortalContenido({
 
   return (
     <>
+      {/* Ventana emergente con los eventos de hoy (del calendario): se abre al entrar y se cierra sola a los 15 s. */}
+      <VentanaEventosHoy />
       <div className='portal-th__layout'>
-        <PortalNavegacion secciones={secciones} activa={activa} onSeleccionar={irASeccion} />
+        {/* Columna izquierda: calendario y eventos del día ARRIBA, y debajo los botones de cada sección. */}
+        <aside className='portal-th__lateral'>
+          <PortalCalendario puedeEditar={puedeEditar} />
+          <PortalNavegacion secciones={secciones} activa={activa} onSeleccionar={irASeccion} />
+        </aside>
 
         <div className='portal-th__contenido'>
           {/* La sección se pinta si hay anuncios O si esta persona los administra:
@@ -461,46 +615,40 @@ export default function PortalContenido({
           )}
 
           <section id={ID_SECCION_POLITICAS} className='portal-th__seccion'>
-            <h2>Políticas y reglamentos</h2>
-            {documentos.length === 0 ? (
-              <p className='portal-th__estado'>Todavía no hay documentos publicados.</p>
-            ) : (
-              <div className='portal-th__tarjetas'>
-                {documentos.map((d) => (
-                  <button
-                    type='button'
-                    key={d.ruta}
-                    className='portal-th__tarjeta'
-                    onClick={() =>
-                      setAbierto({ titulo: d.titulo, url: archivoUrl(d.ruta), esImagen: false })
-                    }
-                    aria-label={`Ver ${d.titulo}`}
-                  >
-                    {d.portada ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={archivoUrl(d.portada)} alt='' loading='lazy' />
-                    ) : (
-                      <div className='portal-th__sinportada'>PDF</div>
-                    )}
-                    {/* Sin el peso del archivo: a quien entra a leer una política no
-                        le dice nada saber que pesa 3 MB, y llenaba el renglón de
-                        ruido. Pedido de Cristian (2026-09-09). */}
-                    <div className='portal-th__tarjeta-pie'>
-                      <strong>{d.titulo}</strong>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
+            <div className='portal-th__seccion-barra'>
+              <h2>Políticas y reglamentos</h2>
+              <button
+                type='button'
+                className='portal-th__cargar portal-th__visualizar'
+                onClick={() => setPoliticasAbierto(true)}
+              >
+                VISUALIZAR
+              </button>
+            </div>
+            {/* Sin tarjetas: pedido de Cristian Baldión (2026-10-08). La sección
+                deja solo el título y VISUALIZAR, que lista TODOS los archivos de
+                la carpeta de SharePoint en su ventana (PoliticasVisor). Las
+                portadas que traía /api/portal/content ya no se pintan aquí; el
+                endpoint queda igual porque también entrega los anuncios. */}
           </section>
 
-          {/* FORMACIÓN — sección nueva "tipo Moodle" al final de la página
-              (pedido de Cristian, 2026-09-18): cursos, materiales, progreso y
-              certificado. Vive en su propio componente porque hace sus
-              propios fetch — ver `PortalFormacion.tsx`. */}
+          {/* FORMACIÓN — solo el ACCESO. Los cursos viven en su propia página,
+              que se abre en una pestaña nueva (Cristian, 2026-09-30). */}
           <section id={ID_SECCION_FORMACION} className='portal-th__seccion'>
-            <h2>Formación</h2>
-            <PortalFormacion />
+            <a
+              className='portal-th__acceso-formacion'
+              href={urlFormacion}
+              target='_blank'
+              rel='noopener noreferrer'
+            >
+              <span className='portal-th__acceso-formacion-titulo'>Formación</span>
+              <span className='portal-th__acceso-formacion-texto'>
+                Cursos, materiales, progreso y certificados. Se abre en una pestaña nueva.
+              </span>
+              <span className='portal-th__acceso-formacion-flecha' aria-hidden='true'>
+                ↗
+              </span>
+            </a>
           </section>
         </div>
       </div>
@@ -546,10 +694,22 @@ export default function PortalContenido({
         </div>
       )}
 
+      {politicasAbierto && <PoliticasVisor onCerrar={cerrarPoliticas} />}
+      {ayudasAbierto && <PoliticasVisor onCerrar={cerrarAyudas} textos={TEXTOS_AYUDAS} />}
+      {heinsohnAbierto && <HeinsohnVentana onCerrar={cerrarHeinsohn} />}
+      {organigramaAbierto && (
+        <OrganigramaVisor
+          onCerrar={() => {
+            setOrganigramaAbierto(false);
+            setContactosAbierto(true);
+          }}
+        />
+      )}
+
       {/* VENTANA DE CONTACTOS — mismo marco que la vista previa de documentos,
-          pero con dos botones adentro en vez de un PDF. Sin contenido todavía:
-          Cristian confirma después de dónde sale cada uno (SharePoint o
-          directorio de Microsoft 365). */}
+          pero con dos botones adentro en vez de un PDF. Correos: directorio de
+          Microsoft 365 (conectores por tenant). Extensiones: Excel de Talento
+          Humano en SharePoint (`lib/portal/extensiones.ts`). */}
       {contactosAbierto && (
         <div
           className='portal-th__visor'
@@ -562,7 +722,7 @@ export default function PortalContenido({
         >
           <div
             className={
-              contactoSeleccionado === 'correos'
+              contactoSeleccionado
                 ? 'portal-th__visor-caja portal-th__visor-caja--contactos portal-th__visor-caja--contactos-tabla'
                 : 'portal-th__visor-caja portal-th__visor-caja--contactos'
             }
@@ -579,6 +739,17 @@ export default function PortalContenido({
               <button
                 type='button'
                 className='portal-th__contactos-boton'
+                onClick={() => {
+                  cerrarContactos();
+                  setOrganigramaAbierto(true);
+                }}
+                data-testid='abrir-organigrama'
+              >
+                Organigrama
+              </button>
+              <button
+                type='button'
+                className='portal-th__contactos-boton'
                 onClick={() => setContactoSeleccionado('correos')}
               >
                 Correos Corporativos
@@ -592,15 +763,103 @@ export default function PortalContenido({
               </button>
 
               {contactoSeleccionado === 'extensiones' && (
-                <p className='portal-th__estado'>Todavía no hay contenido cargado para Extensiones Corporativas.</p>
+                <div className='portal-th__extensiones'>
+                  <div className='portal-th__extensiones-buscar'>
+                    <input
+                      type='search'
+                      className='portal-th__buscador'
+                      placeholder='Buscar por nombre o extensión'
+                      aria-label='Buscar extensión por nombre o número'
+                      value={busquedaExtension}
+                      onChange={(e) => setBusquedaExtension(e.target.value)}
+                      autoComplete='off'
+                      enterKeyHint='search'
+                    />
+                  </div>
+                  {extensionesCargando && <p className='portal-th__estado'>Cargando extensiones corporativas…</p>}
+                  {extensionesError && (
+                    <div className='portal-th__alerta portal-th__alerta--error' role='alert'>
+                      <span>{extensionesError}</span>
+                      <button type='button' onClick={reintentarExtensiones}>
+                        Reintentar
+                      </button>
+                    </div>
+                  )}
+                  {extensiones &&
+                    (extensionesFiltradas.length === 0 ? (
+                      <p className='portal-th__estado'>
+                        {extensiones.length === 0
+                          ? 'Todavía no hay extensiones cargadas.'
+                          : `Ninguna extensión coincide con «${busquedaExtension.trim()}».`}
+                      </p>
+                    ) : (
+                      <>
+                        <table className='portal-th__correos-tabla portal-th__extensiones-tabla'>
+                          <thead>
+                            <tr>
+                              <th>Nombre</th>
+                              <th>Extensión</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {extensionesFiltradas.map((e) => (
+                              <tr key={`${e.nombre}-${e.extension}`}>
+                                <td>{e.nombre}</td>
+                                <td>{e.extension}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <p className='portal-th__estado portal-th__extensiones-conteo'>
+                          {extensionesFiltradas.length === extensiones.length
+                            ? `${extensiones.length} extensiones`
+                            : `${extensionesFiltradas.length} de ${extensiones.length} extensiones`}
+                        </p>
+                      </>
+                    ))}
+                </div>
               )}
 
               {contactoSeleccionado === 'correos' && (
                 <div className='portal-th__correos'>
                   {correosCargando && <p className='portal-th__estado'>Cargando correos corporativos…</p>}
-                  {correosError && <p className='portal-th__error'>{correosError}</p>}
+                  {correosError && (
+                    <div className='portal-th__alerta portal-th__alerta--error' role='alert'>
+                      <span>{correosError}</span>
+                      <button type='button' onClick={reintentarCorreos}>
+                        Reintentar
+                      </button>
+                    </div>
+                  )}
+                  {correosGrupos && correosGrupos.length > 0 && (
+                    <Group gap='sm' wrap='wrap'>
+                      <TextInput
+                        placeholder='Buscar por nombre o correo'
+                        aria-label='Buscar correo por nombre o dirección'
+                        leftSection={<IconSearch size={16} />}
+                        value={busquedaCorreo}
+                        onChange={(e) => setBusquedaCorreo(e.currentTarget.value)}
+                        style={{ flex: '1 1 240px' }}
+                      />
+                      <Select
+                        aria-label='Filtrar por empresa'
+                        data={opcionesEmpresa(correosGrupos)}
+                        value={empresaCorreo}
+                        onChange={(v) => setEmpresaCorreo(v ?? TODAS_LAS_EMPRESAS)}
+                        allowDeselect={false}
+                        leftSection={<IconBuilding size={16} />}
+                        comboboxProps={{ withinPortal: true, zIndex: 1100 }}
+                        style={{ flex: '0 1 220px', minWidth: 180 }}
+                      />
+                    </Group>
+                  )}
+                  {correosGrupos && busquedaCorreo.trim() && correosFiltrados.length === 0 && (
+                    <p className='portal-th__estado'>
+                      Ningún correo coincide con «{busquedaCorreo.trim()}».
+                    </p>
+                  )}
                   {correosGrupos &&
-                    correosGrupos.map((grupo) => (
+                    correosFiltrados.map((grupo) => (
                       <section key={grupo.dominio} className='portal-th__correos-grupo'>
                         <h4 className='portal-th__correos-empresa'>
                           {grupo.empresa}

@@ -34,7 +34,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const curso = await prisma.portalCourse.findUnique({
       where: { id: courseId },
       include: {
-        materials: { orderBy: { orden: 'asc' }, select: { id: true, title: true, required: true } },
+        materials: { where: { eliminado_at: null }, orderBy: { orden: 'asc' }, select: { id: true, title: true, required: true } },
         enrollments: { orderBy: { enrolled_at: 'asc' }, select: { student_email: true, enrolled_at: true } },
       },
     });

@@ -1,0 +1,106 @@
+{
+  "titulo": "Evaluación Inducción Organizacional y SST Farmalógica SA 2025",
+  "instrucciones": "10 preguntas de selección múltiple con única respuesta. Puntaje mínimo para aprobar: 8 pts./10 pts.",
+  "preguntas": [
+    {
+      "n": 1,
+      "enunciado": "Según el reglamento de Higiene y Seguridad Industrial, ¿cuáles son los principales riesgos existentes en Farmalogica S.A.?",
+      "opciones": [
+        "Mecánico, trabajo en alturas, químico, biomecánico, físico y psicosocial",
+        "Solo riesgos químicos y biológicos",
+        "Únicamente riesgos biomecánicos y fenómenos naturales",
+        "Riesgos psicosociales exclusivamente"
+      ]
+    },
+    {
+      "n": 2,
+      "enunciado": "¿Cuáles son las prohibiciones establecidas en la política de prevención de alcohol, tabaco y sustancias psicoactivas?",
+      "opciones": [
+        "Solo está prohibido el consumo de alcohol durante la jornada laboral",
+        "Está prohibido el consumo, pero se permite presentarse al trabajo con efectos residuales",
+        "No está permitido el consumo antes y durante la jornada laboral, presentarse bajo influencia, ni posesión/venta dentro de las instalaciones",
+        "Solo está prohibido el consumo dentro de las instalaciones"
+      ]
+    },
+    {
+      "n": 3,
+      "enunciado": "¿Qué es un accidente de trabajo según la información proporcionada en el documento?",
+      "opciones": [
+        "Cualquier lesión que ocurra al empleado, independientemente del lugar y circunstancia",
+        "Todo acontecimiento repentino que suceda por causa o con ocasión del trabajo que cause lesión, perturbación funcional, invalidez o muerte",
+        "Solo aquellos eventos que ocurren dentro de las instalaciones de la empresa",
+        "Lesiones que se producen exclusivamente por manipulación de equipos específicos"
+      ]
+    },
+    {
+      "n": 4,
+      "enunciado": "Si ocurre un accidente de trabajo, ¿cuál es el procedimiento correcto para reportarlo en Farmalogica S.A.?",
+      "opciones": [
+        "Reportarlo directamente a la ARL sin informar a la empresa",
+        "Reportarlo al finalizar la semana laboral",
+        "Esperar a que el trabajador se recupere para realizar el reporte",
+        "Reportarlo inmediatamente al jefe directo, generar reporte a la ARL, diligenciar el formato, informar al área de SST"
+      ]
+    },
+    {
+      "n": 5,
+      "enunciado": "¿Cuáles son las responsabilidades de los trabajadores ante el Sistema de Gestión de Seguridad y Salud en el Trabajo (SG-SST)?",
+      "opciones": [
+        "Solo realizar pausas activas diariamente",
+        "Procurar el cuidado de su salud, suministrar información sobre su estado de salud, cumplir normas y participar en identificación de peligros",
+        "Únicamente reportar accidentes cuando ocurran",
+        "Solamente cumplir con el uso de EPP cuando se lo indiquen"
+      ]
+    },
+    {
+      "n": 6,
+      "enunciado": "En relación con la prevención del riesgo químico y el Sistema Globalmente Armonizado (SGA) en Farmalogica S.A., seleccione la opción que incluye correctamente todas las medidas y procedimientos establecidos:",
+      "opciones": [
+        "La plataforma SOLUQUIM permite únicamente el etiquetado de productos químicos; las fichas de seguridad (FDS) deben solicitarse por correo electrónico; es permitido trabajar con productos sin etiqueta de SOLUQUIM; y no es necesario diligenciar permisos de trabajo para desinfección y limpieza.",
+        "En cumplimiento de la resolución 773 de 2021, Farmalogica utiliza la plataforma SOLUQUIM que permite inventariar productos químicos, acceder a fichas de seguridad (FDS) y generar etiquetas; se deben utilizar los EPP indicados en las FDS; los productos químicos deben almacenarse según matriz de compatibilidad; y debe diligenciarse el permiso de trabajo SST-04-FR-023 antes de iniciar trabajos de desinfección y limpieza.",
+        "La prevención del riesgo químico solo aplica para el personal de laboratorio; no es obligatorio que todos los productos estén etiquetados; la plataforma SOLUQUIM solo permite acceder a las fichas de seguridad; y los EPP se utilizan a criterio del trabajador.",
+        "Farmalogica utiliza SOLUQUIM para cumplir con el SGA, pero solo permite el inventario de productos; no es necesario seguir la matriz de compatibilidad para almacenamiento; y los permisos de trabajo solo aplican para tareas en espacios confinados"
+      ]
+    },
+    {
+      "n": 7,
+      "enunciado": "¿Cuáles son los puntos de encuentro designados en caso de evacuación para las diferentes sedes de Farmalogica S.A.?",
+      "opciones": [
+        "Para todas las sedes, el punto de encuentro es la Bahía Arbofarma",
+        "Para la sede administrativa: Bahía Arbofarma; para la sede planta: Bahía Copetran",
+        "El único punto de encuentro es la entrada principal de cada sede",
+        "Para la sede administrativa: Bahía Copetran; para la sede operativa: Bahía Arbofarma"
+      ]
+    },
+    {
+      "n": 8,
+      "enunciado": "Seleccione la opción correcta según el siguiente enunciado: Debo registrar mi huella en el biométrico cuando en el turno:",
+      "opciones": [
+        "Ingreso, voy y regreso del break y salgo",
+        "Voy y regreso del baño",
+        "No debo registrar la huella",
+        "Ninguna de las anteriores"
+      ]
+    },
+    {
+      "n": 9,
+      "enunciado": "¿Cuál de los siguientes valores no es corporativo?",
+      "opciones": [
+        "Responsalidad",
+        "Tolerancia",
+        "Honestidad",
+        "Respeto"
+      ]
+    },
+    {
+      "n": 10,
+      "enunciado": "¿Con cuánto tiempo de vinculación a la compañía puedo solicitar mis vacaciones?",
+      "opciones": [
+        "15 días",
+        "6 meses",
+        "1 año",
+        "2 años"
+      ]
+    }
+  ]
+}

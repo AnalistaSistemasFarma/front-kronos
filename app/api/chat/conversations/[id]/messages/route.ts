@@ -260,6 +260,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         idDestino: guard.otherUserId,
         body,
         attachmentCount: uploaded.length,
+        idMessage: message.id,
+        createdAt: message.created_at,
       });
     }
 

@@ -1,3 +1,4 @@
+import { oneDriveRoot } from '@/lib/onedrive/root';
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
@@ -12,6 +13,9 @@ import { withMssqlPool } from '@/lib/mssqlPool';
 import { getOrionDocumentFromBag } from '@/lib/orion/formValue';
 import { loadOrionFormBag } from '@/lib/orion/service';
 import { applyValidatorMarks } from '@/lib/orion/validatorMarks';
+import { getOrionDraftInfo } from '@/lib/orion/draftService';
+import { findDraftForOneDriveItem } from '@/lib/orion/draftState';
+import { getDraftSessionActor } from '@/lib/orion/draftRouteAuth';
 
 function safePathSegment(value: string, fallback: string): string {
   const v = String(value || '').trim();
@@ -37,8 +41,52 @@ async function withValidatorMarks(
   }
 }
 
+/**
+ * Mensaje de bloqueo si el adjunto es un Word en preparación (o una copia de sus versiones) y
+ * quien pide no es su preparadora. Ante un error se bloquea: no se entrega el Word sin verificar.
+ */
+async function draftDownloadBlocked(requestId: number, itemIds: string[]): Promise<string | null> {
+  const blockedMessage =
+    'Este Word está en preparación: solo quien lo prepara puede descargarlo. Revíselo en el tablero del documento.';
+  try {
+    const loaded = await withMssqlPool((pool) => loadOrionFormBag(pool, requestId));
+    const found = findDraftForOneDriveItem(loaded?.bag.drafts, itemIds);
+    if (!found || found.draft.status === 'CONVERTIDO_PDF') return null;
+    const auth = await getDraftSessionActor();
+    if (!auth) return 'No autorizado';
+    const info = await withMssqlPool((pool) =>
+      getOrionDraftInfo(pool, { requestId, fileId: found.fileId, ...auth })
+    );
+    return info.isElaborator ? null : blockedMessage;
+  } catch (err) {
+    console.error('[attachment-file] verificación de Word en preparación', err);
+    return blockedMessage;
+  }
+}
+
+/** Solo ASCII: tildes/diacríticos fuera (ByteString de headers HTTP). */
+function toAsciiHeader(value: string, fallback = 'archivo.bin'): string {
+  const ascii = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\x20-\x7e]/g, '_')
+    .replace(/["\\\r\n]/g, '_')
+    .trim();
+  return ascii || fallback;
+}
+
+function safeContentType(value: string | null | undefined): string {
+  // Graph a veces manda `application/pdf; name="Cotización.pdf"` → rompe el header.
+  const mime = String(value || '')
+    .split(';')[0]
+    .trim()
+    .toLowerCase();
+  if (/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(mime)) return mime;
+  return 'application/octet-stream';
+}
+
 function contentDisposition(fileName: string, download: boolean): string {
-  const safe = String(fileName || 'archivo.bin').replace(/[\r\n"]/g, '_');
+  const safe = toAsciiHeader(fileName || 'archivo.bin');
   const type = download ? 'attachment' : 'inline';
   return `${type}; filename="${safe}"`;
 }
@@ -75,7 +123,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'No se pudo obtener token de OneDrive' }, { status: 502 });
     }
 
-    const folderSegments = ['SAPSEND', 'TEC', storagePath, `${entityType}-${requestId}`];
+    const folderSegments = [oneDriveRoot(), 'TEC', storagePath, `${entityType}-${requestId}`];
     const meta = await getOneDriveItemMeta(token, fileId);
     if (!meta) {
       return NextResponse.json({ error: 'Documento no encontrado' }, { status: 404 });
@@ -90,6 +138,14 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Documento no encontrado' }, { status: 404 });
     }
 
+    // Word en preparación: solo su preparadora lo descarga (los validadores revisan en el tablero).
+    // Se decide por pertenencia al borrador (Word o copia de versión), sin importar storagePath.
+    // Solo .docx: los PDF e imágenes no pagan esta consulta.
+    if (/\.docx$/i.test(String(meta.name || ''))) {
+      const blocked = await draftDownloadBlocked(requestId, [fileId, meta.id]);
+      if (blocked) return NextResponse.json({ error: blocked }, { status: 403 });
+    }
+
     const downloaded = await downloadOneDriveItemContent(token, fileId, meta);
     if (!downloaded) {
       return NextResponse.json({ error: 'No se pudo leer el archivo en OneDrive' }, { status: 404 });
@@ -100,13 +156,15 @@ export async function GET(req: Request) {
       body = await withValidatorMarks(requestId, fileId, body);
     }
 
+    // Headers solo ASCII: si Content-Type o el nombre traen tildes, Node lanza ByteString.
+    const headers = new Headers();
+    headers.set('Content-Type', safeContentType(downloaded.contentType));
+    headers.set('Content-Disposition', contentDisposition(downloaded.fileName, forceDownload));
+    headers.set('Cache-Control', 'private, no-store');
+
     return new NextResponse(body as unknown as BodyInit, {
       status: 200,
-      headers: {
-        'Content-Type': downloaded.contentType || 'application/octet-stream',
-        'Content-Disposition': contentDisposition(downloaded.fileName, forceDownload),
-        'Cache-Control': 'private, no-store',
-      },
+      headers,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Error interno';

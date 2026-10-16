@@ -7,6 +7,7 @@ import {
   chatGetJson,
   isAbortError,
   notifyChatRefresh,
+  notificarActividad,
   type ChatConversationDto,
   type ChatMessageDto,
   type ChatAgentStatusDto,
@@ -15,6 +16,8 @@ import {
   type ChatStatusDto,
 } from '../../lib/chat/client';
 import { MESSAGES_PAGE_DEFAULT } from '../../lib/chat/constants';
+import type { AgentMetricsDto } from '../../lib/chat/agent-metrics';
+import { avisarMensajeEntrante, mensajeFresco } from '../../lib/chat/message-sound';
 
 /**
  * El hilo abierto —con UN agente o un GRUPO—: histórico, sondeo en vivo, envío
@@ -120,6 +123,11 @@ export interface ChatThreadState {
   status: ChatStatusDto | null;
   /** Un estado por agente. En un grupo es lo que se pinta; en directo trae uno. */
   statuses: ChatAgentStatusDto[];
+  /**
+   * Métricas del mod (contexto, tokens, modelo). undefined = el usuario no las
+   * ve; null = las ve pero el agente no ha reportado nada en este hilo.
+   */
+  metrics: AgentMetricsDto | null | undefined;
   loading: boolean;
   sending: boolean;
   error: string | null;
@@ -181,6 +189,7 @@ export function useChatConversation(
   const [statuses, setStatuses] = useState<ChatAgentStatusDto[]>(
     inicial?.conversation.agentStatuses ?? []
   );
+  const [metrics, setMetrics] = useState<AgentMetricsDto | null | undefined>(undefined);
   const [loading, setLoading] = useState(target !== null && !inicial);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -252,6 +261,7 @@ export function useChatConversation(
       setMessages(reales);
       setStatus(enCache.conversation.agentStatus);
       setStatuses(enCache.conversation.agentStatuses ?? []);
+      setMetrics(undefined);
       setHasOlder(enCache.hasOlder);
     } else {
       conversationIdRef.current = null;
@@ -261,6 +271,7 @@ export function useChatConversation(
       setMessages([]);
       setStatus(null);
       setStatuses([]);
+      setMetrics(undefined);
       setHasOlder(false);
     }
     setError(null);
@@ -306,9 +317,14 @@ export function useChatConversation(
         // y DESPUÉS pedía el histórico, y el área de mensajes quedaba en
         // blanco los dos viajes. Ahora el histórico se pinta en cuanto llega,
         // aunque el POST no haya vuelto (el compositor sí espera al POST).
+        //
+        // Grupos y hilos entre personas (2026-10-03): su id SIEMPRE se conoce
+        // de entrada, así que el histórico sale en paralelo con la ficha en vez
+        // de esperarla. No abre ningún permiso: el endpoint del histórico
+        // valida el acceso por su cuenta (404 → null, y no se pinta nada).
         const idConocido =
           enCache?.conversation.id ??
-          (target.kind === 'agent' ? (target.idConversation ?? null) : null);
+          (target.kind === 'agent' ? (target.idConversation ?? null) : target.idConversation);
         const historialAnticipado = idConocido !== null ? pedirHistorial(idConocido) : null;
         // Si el anticipado falla, no debe quedar como promesa rechazada suelta.
         historialAnticipado?.catch(() => null);
@@ -462,6 +478,23 @@ export function useChatConversation(
             onZumbidoRef.current?.(m);
           }
         }
+        // Sonido de mensaje nuevo si llegó algo de otra persona o de un agente
+        // y no lo está viendo (pestaña oculta o sin foco). Lo propio y los
+        // eventos de sistema (zumbido) no suenan aquí.
+        if (
+          data.messages.some(
+            (m) =>
+              !m.eventType &&
+              mensajeFresco(m.createdAt) &&
+              (m.role === 'agent' ||
+                (m.role === 'user' && Boolean(m.author) && Boolean(yo) && String(m.author?.id) !== yo))
+          )
+        ) {
+          avisarMensajeEntrante(conversationId);
+        }
+        // La conversación sube de primera en las listas ya mismo.
+        const ultimo = data.messages[data.messages.length - 1];
+        if (ultimo) notificarActividad(conversationId, ultimo.createdAt);
         // La barra de la cabecera debe enterarse del mensaje nuevo.
         notifyChatRefresh();
       }
@@ -469,6 +502,8 @@ export function useChatConversation(
       // Un sondeo viejo (o un front por delante de la API) no trae el
       // desglose: se deja lo que había en vez de vaciar el encabezado.
       if (data.statuses) setStatuses(data.statuses);
+      // Sin el campo, el usuario no ve métricas (o la API es vieja): se oculta.
+      setMetrics(data.metrics);
 
       // ⬅️ La cadencia la ordena el servidor.
       scheduleNext(data.nextPollMs);
@@ -527,6 +562,8 @@ export function useChatConversation(
       if (conversationId === null || (text.length === 0 && files.length === 0)) return false;
 
       const optimisticId = -Date.now();
+      // Optimista: la conversación sube de primera en las listas al enviar.
+      notificarActividad(conversationId, new Date().toISOString());
       setSending(true);
       setError(null);
       setMessages((prev) => [
@@ -706,6 +743,7 @@ export function useChatConversation(
     messages,
     status,
     statuses,
+    metrics,
     loading,
     sending,
     error,

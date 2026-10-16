@@ -1,0 +1,164 @@
+/*
+ * SGC documental en CELULAR (revisión móvil del 2026-10-03, pedida por
+ * Nicolás: «hay muchas cosas que no se pueden trabajar»).
+ *
+ * Solo aplica dentro del módulo (el <body> lleva `sgc-movil` mientras se
+ * navega por /process/sgc-documental, ver su layout.tsx) y solo en pantallas
+ * angostas (≤ 48em = 768 px). En escritorio no cambia nada.
+ */
+@media (max-width: 48em) {
+  /*
+   * iOS hace zoom sobre todo campo con letra menor a 16 px al enfocarlo, y ese
+   * zoom descuadra la página (mismo bug del chat, PR #374). Mantine pone 14 px
+   * (size="sm") con una variable de la misma especificidad, por eso !important.
+   */
+  .sgc-movil input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='range']),
+  .sgc-movil textarea,
+  .sgc-movil select,
+  .sgc-movil .ProseMirror[contenteditable='true'] {
+    font-size: 16px !important;
+  }
+
+  /* Huellas SHA-256, códigos y rutas largas: que partan la línea en vez de ensanchar la pantalla o el modal. */
+  .sgc-movil .mantine-Code-root {
+    word-break: break-all;
+    white-space: normal;
+  }
+  .sgc-movil .mantine-Modal-body {
+    overflow-wrap: anywhere;
+  }
+  /*
+   * El ScrollArea de Mantine monta su contenido con `display: table`, que crece
+   * al ancho de lo más largo en vez de partir el texto: en los modales (Ver
+   * tareas, registro de cambios) eso obligaba a desplazar de lado.
+   */
+  .sgc-movil .mantine-Modal-body .mantine-ScrollArea-viewport > div,
+  .sgc-movil .mantine-Modal-body .mantine-ScrollArea-content {
+    display: block !important;
+    min-width: 0 !important;
+    width: auto !important;
+  }
+  /* Ver tareas: el estado de cada firmante y la reasignación bajan de renglón. */
+  .sgc-movil [data-testid='sgc-firmante'] {
+    flex-wrap: wrap !important;
+  }
+  .sgc-movil [data-testid='sgc-firmante'] > p {
+    white-space: normal !important;
+  }
+  .sgc-movil .mantine-Modal-body .mantine-Group-root:has([data-testid='sgc-reasignar']) {
+    flex-wrap: wrap !important;
+  }
+  .sgc-movil .mantine-Modal-body .mantine-Select-root:has([data-testid='sgc-reasignar']) {
+    min-width: 0 !important;
+    flex: 1 1 200px;
+  }
+  .sgc-movil .mantine-Accordion-control .mantine-Group-root {
+    flex-wrap: wrap;
+  }
+  .sgc-movil .mantine-Accordion-control .mantine-Badge-root {
+    min-width: max-content;
+  }
+
+  /* En tablas que se desplazan a lo ancho, los distintivos (Elaboró, Revisó…) no se recortan. */
+  .sgc-movil table .mantine-Badge-root {
+    min-width: max-content;
+  }
+
+  /* Campos con ancho fijo (w={300…340}) que se salían de la tarjeta en 360 px. */
+  .sgc-movil .mantine-InputWrapper-root {
+    max-width: 100%;
+  }
+
+  /* Menos relleno en las tarjetas grandes y títulos que caben (eran de 30 px en 3 renglones). */
+  .sgc-movil .max-w-7xl.mx-auto,
+  .sgc-movil .max-w-5xl.mx-auto {
+    padding-top: 1rem;
+  }
+  .sgc-movil .mantine-Card-root[style*='padding: var(--mantine-spacing-xl)'] {
+    padding: var(--mantine-spacing-md) !important;
+  }
+  .sgc-movil h1.text-3xl,
+  .sgc-movil h1.text-2xl {
+    font-size: 1.5rem !important;
+    line-height: 1.25 !important;
+  }
+
+  /* Migas de pan (Procesos › Documentos › …) a 12 px: salían casi del tamaño del texto (Nicolás, 2026-10-03). */
+  .sgc-movil .mantine-Breadcrumbs-root {
+    flex-wrap: wrap;
+    row-gap: 2px;
+    margin-bottom: 0.5rem !important;
+  }
+  .sgc-movil .mantine-Breadcrumbs-root,
+  .sgc-movil .mantine-Breadcrumbs-root .mantine-Breadcrumbs-breadcrumb,
+  .sgc-movil .mantine-Breadcrumbs-root a,
+  .sgc-movil .mantine-Breadcrumbs-root p,
+  .sgc-movil .mantine-Breadcrumbs-root button {
+    font-size: 12px !important;
+    line-height: 1.5 !important;
+  }
+  .sgc-movil .mantine-Breadcrumbs-root a,
+  .sgc-movil .mantine-Breadcrumbs-root button {
+    padding-block: 6px;
+  }
+  .sgc-movil .mantine-Breadcrumbs-separator {
+    margin-inline: 4px;
+  }
+  .sgc-movil .mantine-Breadcrumbs-separator svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  /* Objetivos táctiles: íconos de acción de las tablas y modales de al menos 36 px. */
+  .sgc-movil .max-w-7xl .mantine-ActionIcon-root,
+  .sgc-movil .max-w-5xl .mantine-ActionIcon-root,
+  .sgc-movil .mantine-Modal-root .mantine-ActionIcon-root,
+  .sgc-movil .max-w-7xl .mantine-CloseButton-root {
+    min-width: 36px;
+    min-height: 36px;
+  }
+  .sgc-movil .mantine-NumberInput-root {
+    --input-right-section-width: 40px;
+  }
+  .sgc-movil .mantine-NumberInput-control {
+    width: 40px;
+  }
+  .sgc-movil [data-testid='sgc-interaccion-ver-detalle'] {
+    padding-block: 7px;
+  }
+
+  /* Autorizaciones: la columna «Acciones» queda fija a la derecha (antes había que deslizar la tabla para encontrar «Autorizar»). */
+  .sgc-movil [data-testid='sgc-autorizaciones-tabla'] th:last-child,
+  .sgc-movil [data-testid='sgc-autorizaciones-tabla'] td:last-child:not([colspan]) {
+    position: sticky;
+    right: 0;
+    z-index: 1;
+    background: var(--app-surface, var(--mantine-color-body));
+    box-shadow: -6px 0 8px -6px rgba(0, 0, 0, 0.25);
+  }
+
+  /* Documentos relacionados: el código y el título ya no quedan en una columna de 60 px. */
+  .sgc-movil tr[data-testid='sgc-relacion-fila'] {
+    border-bottom: 1px solid var(--mantine-color-default-border);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .sgc-movil tr[data-testid='sgc-relacion-fila'] > td {
+    width: auto !important;
+    border: 0;
+  }
+  .sgc-movil tr[data-testid='sgc-relacion-fila'] > td:nth-child(2) {
+    flex: 1 1 100%;
+    order: 3;
+  }
+
+  /* Mapa de relaciones: el minimapa tapaba medio lienzo; botones de zoom más grandes. */
+  .sgc-movil .react-flow__minimap {
+    display: none;
+  }
+  .sgc-movil .react-flow__controls-button {
+    width: 36px;
+    height: 36px;
+  }
+}

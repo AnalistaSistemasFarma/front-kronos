@@ -37,3 +37,7 @@ node scripts/prod-gate-check.mjs
 ```
 
 Flags: `--base <rama>`, `--skip-build`. Veredicto en exit code `0` = GO / GO-CONDICIONADO.
+
+## Página "SynerLink se está actualizando" (IIS de prod)
+
+`iis-setup-maintenance.ps1` instala la configuración en IIS. `maintenance-on.ps1` y `maintenance-off.ps1` activan y quitan la página durante las ventanas. Detalle en [`deploy/iis/README.md`](../deploy/iis/README.md).

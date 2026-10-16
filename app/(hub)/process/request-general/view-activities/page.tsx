@@ -2,7 +2,6 @@
 
 import { Suspense, useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 import axios from 'axios';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -73,6 +72,7 @@ import {
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
+import TestAttachmentDeleteButton from '../../../../../components/attachments/TestAttachmentDeleteButton';
 import {
   hydrateAttachments,
   mergeListedWithPending,
@@ -99,7 +99,10 @@ import {
   resolveOrionPdfUrl,
 } from '../../../../../lib/orion/documentVersions';
 import { resolveOrionPdfAccessUrl } from '../../../../../lib/orion/signedFileAccess';
-import { resolveRequestPdfAccessUrl } from '../../../../../lib/attachments/fileUrl';
+import {
+  buildSynerLinkAttachmentFileUrl,
+  resolveRequestPdfAccessUrl,
+} from '../../../../../lib/attachments/fileUrl';
 import { mergeOneDriveWithOrionDocuments } from '../../../../../lib/orion/attachmentList';
 import type { OrionSignatureState } from '../../../../../lib/orion/types';
 import { buildOrionParticipants } from '../../../../../lib/orion/participants';
@@ -112,6 +115,10 @@ import { isSynerlinkWorkflowLocked } from '../../../../../lib/orion/workflowLock
 import OrionSignaturePanel from '../../../../../components/orion/OrionSignaturePanel';
 import { OrionSignatureProvider } from '../../../../../components/orion/OrionSignatureContext';
 import OrionAttachmentTableRow from '../../../../../components/orion/OrionAttachmentTableRow';
+import ViewOnlineButton from '../../../../../components/orion/ViewOnlineButton';
+import OrionDraftTableRow from '../../../../../components/orion/OrionDraftTableRow';
+import { nestDraftPdfRows } from '../../../../../lib/orion/attachmentNesting';
+import { isWordDraftFileName } from '../../../../../lib/orion/draftState';
 import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
@@ -246,6 +253,7 @@ function ViewRequestPage() {
   const userIdFetchRef = useRef(false);
   const [loadingUserId, setLoadingUserId] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
+  // Solo el responsable de la solicitud reasigna tareas (lo decide el servidor).
   const [isAdmin, setIsAdmin] = useState(false);
   const [loadingPermissions, setLoadingPermissions] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -302,8 +310,6 @@ function ViewRequestPage() {
   const [orionDocuments, setOrionDocuments] = useState<Record<string, OrionSignatureState>>({});
 
   useEffect(() => {
-    // No usar selectedRequest de otra pantalla: suele ser solicitud (sin id_request_general)
-    // y pinta "Tarea #2147" vacío mientras el fetch falla.
     try {
       const storedRequest = sessionStorage.getItem('selectedRequest');
       if (storedRequest) {
@@ -336,7 +342,6 @@ function ViewRequestPage() {
         let res: Response;
         if (id) {
           res = await fetch(`/api/requests-general/view-activities?id=${id}`);
-          // Deep-link legacy / notificaciones: a veces llega id_request_general en lugar del id de tarea
           if (!res.ok) {
             const qs = new URLSearchParams({ requestId: String(id) });
             if (orionFileIdParam) qs.set('fileId', orionFileIdParam);
@@ -349,7 +354,6 @@ function ViewRequestPage() {
         }
 
         if (!res.ok) {
-          // Si venía el id de solicitud, ir al detalle de solicitud (no a una tarea fantasma).
           const maybeRequestId = Number(id || requestIdParam);
           if (Number.isInteger(maybeRequestId) && maybeRequestId > 0) {
             router.replace(
@@ -407,7 +411,9 @@ function ViewRequestPage() {
         })
         .catch(() => setCanDeleteAttachments(false));
     }
-  }, [request]);
+    // Por id y no por el objeto: `request` se asigna dos veces al abrir (sessionStorage y API)
+    // y otra vez al guardar; antes cada vez se repetían notas, OneDrive, tareas y permisos.
+  }, [request?.id_request_general]);
 
   useEffect(() => {
     if (notesViewportRef.current) {
@@ -475,6 +481,7 @@ function ViewRequestPage() {
       const hasEditPermission = hasAdminRole || isAssignedUser;
 
       setCanEdit(hasEditPermission);
+      if (!hasEditPermission) setIsEditing(false);
     } catch (error) {
       console.error('Error checking permissions:', error);
       setCanEdit(false);
@@ -523,7 +530,6 @@ function ViewRequestPage() {
           if (da !== db) return da - db;
           return Number(a.id_note || 0) - Number(b.id_note || 0);
         });
-        // Historial de interacciones: solo notas humanas; progreso de documentos va en Archivos adjuntos.
         setNotes(list.filter((n) => !isOrionDocumentInteractionNote(n.note)));
       } else {
         console.error('Error al cargar notas');
@@ -612,6 +618,15 @@ function ViewRequestPage() {
       void fetchFolderContents();
     }, 5000);
   }, [request?.id_request_general]);
+
+  // Botón de pruebas (solo testing/local): el archivo ya se borró en OneDrive, quitarlo de la tabla.
+  const handleTestAttachmentDeleted = useCallback(
+    (fileId: string) => {
+      setFolderContents((prev) => prev.filter((f) => String(f.id) !== String(fileId)));
+      if (request?.id_request_general) removeFromAttachmentCache(request.id_request_general, fileId);
+    },
+    [request?.id_request_general]
+  );
 
   // Abre el modal de justificación; el borrado real va en handleDeleteAttachment.
   const [pendingDelete, setPendingDelete] = useState<{
@@ -992,64 +1007,6 @@ function ViewRequestPage() {
     [modalBusinessTasks]
   );
 
-  async function CheckOrCreateFolderAndUpload(
-    folderName: string,
-    files: { file: File }[],
-    token: string
-  ) {
-    let folderId: string;
-
-    try {
-      const getResponse = await axios.get(
-        `${process.env.MICROSOFTGRAPHUSERROUTE}root:/SAPSEND/TEC/SG/${folderName}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      if (getResponse.status === 200) {
-        folderId = (getResponse.data as { id: string }).id;
-      } else {
-        throw new Error('Error al verificar la existencia de la carpeta.');
-      }
-    } catch (getError: unknown) {
-      if (getError instanceof Error) {
-        console.error(getError.message);
-      } else {
-        console.error(getError);
-      }
-    }
-
-    if (files && files.length > 0) {
-      const uploadPromises = files.map((file: { file: File }) =>
-        axios.put(
-          `${process.env.MICROSOFTGRAPHUSERROUTE}items/${folderId}:/${file.file.name}:/content`,
-          file.file,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': file.file.type,
-            },
-          }
-        )
-      );
-
-      const results = await Promise.all(uploadPromises);
-
-      results.forEach((response, index) => {
-        if (response.status === 201 || response.status === 200) {
-          console.log(`Archivo subido: ${files[index].file.name}`, response.data);
-        } else {
-          console.log(`Error al subir el archivo: ${files[index].file.name}`);
-        }
-      });
-    } else {
-      console.log('No hay archivos seleccionados para subir.');
-    }
-  }
-
   const handleStartEditing = () => {
     setOriginalRequest(request);
     setIsEditing(true);
@@ -1132,7 +1089,6 @@ function ViewRequestPage() {
     }
     */}
 
-    // Tareas secuenciales: si esta tarea está bloqueada (la anterior no está cerrada), no permitir
     const lockedNow = taskRQ.find((t) => t.id === request?.id)?.locked;
     if (lockedNow) {
       setUpdateMessage({
@@ -1180,22 +1136,8 @@ function ViewRequestPage() {
     }
 
     try {
-      if (attachedFiles.length > 0) {
-        const token = await getMicrosoftToken();
-        if (!token) {
-          throw new Error('No se pudo obtener el token de acceso para subir archivos.');
-        }
-
-        const folderName = `Request-${request?.id_request_general}`;
-        const filesToUpload = attachedFiles
-          .filter((file) => file.status === 'success')
-          .map((file) => ({ file: file.file }));
-
-        if (filesToUpload.length > 0) {
-          await CheckOrCreateFolderAndUpload(folderName, filesToUpload, token);
-        }
-      }
-
+      // Los adjuntos ya los subió FileUpload por el servidor al elegirlos (autoUpload):
+      // antes se volvían a subir aquí desde el navegador con el token de Graph.
       const updateData = {
         id: request?.id,
 
@@ -1274,7 +1216,6 @@ function ViewRequestPage() {
     }
   };
 
-  // Tarea actual bloqueada por secuencia (la anterior no está cerrada)
   const currentTaskLocked = taskRQ.find((t) => t.id === request?.id)?.locked ?? false;
 
   const formatFileSize = (bytes: number): string => {
@@ -1527,8 +1468,11 @@ function ViewRequestPage() {
   const taskOrionFileId = parseOrionFileIdFromResolution(request?.resolution);
   const taskPendingOrionAuth = isOrionSignerAuthResolution(request?.resolution);
   const hasPdfAttachments = attachmentRows.some((f) => /\.pdf$/i.test(f.name));
+  // Word en preparación (etapa previa a la firma): también usa la tabla de firma.
+  const hasWordAttachments = attachmentRows.some((f) => isWordDraftFileName(f.name));
   const showOrionPanel =
     hasPdfAttachments ||
+    hasWordAttachments ||
     hasOrionSignatureField ||
     hasOrionDocuments ||
     Boolean(taskOrionFileId) ||
@@ -2052,9 +1996,10 @@ function ViewRequestPage() {
                         placeholder='Selecciona estado'
                         data={statusOptions}
                         value={resolutionData.estado}
-                        onChange={(val) =>
-                          setResolutionData({ ...resolutionData, estado: val || '' })
-                        }
+                        onChange={(val) => {
+                          setResolutionData({ ...resolutionData, estado: val || '' });
+                          if (val === '2') setShowResolution(true);
+                        }}
                         error={formErrors.estado}
                       />
                     </Stack>
@@ -2083,17 +2028,9 @@ function ViewRequestPage() {
                       <IconCheck size={18} className='text-green-6' />
                       Resolución de la Tarea
                     </Title>
-                    {isEditing && (
-                      <ActionIcon
-                        variant='subtle'
-                        onClick={() => setShowResolution(!showResolution)}
-                      >
-                        {showResolution ? <IconX size={16} /> : <IconCheck size={16} />}
-                      </ActionIcon>
-                    )}
                   </Group>
 
-                  {isEditing && showResolution && (
+                  {isEditing && (
                     <Stack>
                       {/* Validación: solo permitir resolución si el estado es 2 */}
                       {resolutionData.resolucion && resolutionData.estado !== '2' && !resolutionData.estado ? (
@@ -2148,7 +2085,7 @@ function ViewRequestPage() {
                           color='blue'
                           onClick={handleStartEditing}
                           leftSection={<IconTicket size={16} />}
-                          disabled={isRequestResolved() || currentTaskLocked}
+                          disabled={isRequestResolved() || currentTaskLocked || !canEdit}
                         >
                           Editar Tarea
                         </Button>
@@ -2413,20 +2350,27 @@ function ViewRequestPage() {
                     ) : (
                       <>
                         <Table.Th>Documento</Table.Th>
-                        <Table.Th style={{ width: 100 }}>Abrir</Table.Th>
+                        <Table.Th style={{ width: 120 }}>Abrir</Table.Th>
                       </>
                     )}
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {attachmentRows.map((file: FolderFile, fileIndex: number) => {
+                  {nestDraftPdfRows(attachmentRows, (f: FolderFile) =>
+                    showOrionPanel && /\.pdf$/i.test(f.name)
+                      ? getOrionDocForFile(String(f.id), f.name).sourceDraftFileId
+                      : null
+                  ).map(({ file, rowNumber, nested }) => {
                     const fileId = String(file.id || taskOrionFileId || '');
                     const openUrl =
                       resolveAttachmentDownloadUrl(file) ?? file.webUrl ?? '#';
                     const sizeLabel = [
                       file.size ? formatFileSize(file.size) : null,
                       file.lastModifiedDateTime
-                        ? new Date(file.lastModifiedDateTime).toLocaleDateString('es-CO')
+                        ? new Date(file.lastModifiedDateTime).toLocaleString('es-CO', {
+                            dateStyle: 'short',
+                            timeStyle: 'short',
+                          })
                         : null,
                     ]
                       .filter(Boolean)
@@ -2452,7 +2396,7 @@ function ViewRequestPage() {
                       return (
                         <OrionAttachmentTableRow
                           key={file.id}
-                          rowNumber={fileIndex + 1}
+                          rowNumber={rowNumber}
                           requestId={request.id_request_general}
                           fileId={fileId || 'pdf'}
                           fileName={file.name}
@@ -2484,6 +2428,17 @@ function ViewRequestPage() {
                           onDocumentsUpdate={handleOrionDocumentsChange}
                           canDeleteAttachment={canDeleteAttachments}
                           onDeleteAttachment={requestDeleteAttachment}
+                          testDeleteSlot={
+                            request.id_request_general ? (
+                              <TestAttachmentDeleteButton
+                                requestId={request.id_request_general}
+                                fileId={String(file.id)}
+                                fileName={file.name}
+                                onDeleted={handleTestAttachmentDeleted}
+                              />
+                            ) : null
+                          }
+                          nestedUnderWord={nested}
                           forceSignerUi={(() => {
                             const me = String(session?.user?.email || '')
                               .trim()
@@ -2522,13 +2477,53 @@ function ViewRequestPage() {
                       );
                     }
 
+                    if (showOrionPanel && request.id_request_general && isWordDraftFileName(file.name)) {
+                      return (
+                        <OrionDraftTableRow
+                          key={file.id}
+                          rowNumber={rowNumber}
+                          requestId={request.id_request_general}
+                          fileId={String(file.id)}
+                          fileName={file.name}
+                          fileSizeLabel={sizeLabel}
+                          processName={request?.process || request?.category || null}
+                          requesterName={request?.name_requester || null}
+                          openUrl={openUrl}
+                          canDeleteAttachment={canDeleteAttachments}
+                          onDeleteAttachment={requestDeleteAttachment}
+                          testDeleteSlot={
+                            request.id_request_general ? (
+                              <TestAttachmentDeleteButton
+                                requestId={request.id_request_general}
+                                fileId={String(file.id)}
+                                fileName={file.name}
+                                onDeleted={handleTestAttachmentDeleted}
+                              />
+                            ) : null
+                          }
+                          autoOpenReview={
+                            searchParams.get('orionAction') === 'review' &&
+                            String(orionFileIdParam || '') === String(file.id)
+                          }
+                          onConverted={async () => {
+                            // El PDF nuevo sale debajo del Word: adjuntos + estado de firma.
+                            await Promise.all([
+                              fetchFolderContents(),
+                              fetchFormValues(request.id_request_general),
+                            ]);
+                            refreshAttachmentsAfterUpload();
+                          }}
+                        />
+                      );
+                    }
+
                     return (
                       <Table.Tr key={file.id}>
                         {showOrionPanel ? (
                           <>
                             <Table.Td data-label='N.º'>
                               <Text size='sm' c='dimmed'>
-                                {fileIndex + 1}
+                                {rowNumber}
                               </Text>
                             </Table.Td>
                             <Table.Td data-label='Documento'>
@@ -2569,20 +2564,16 @@ function ViewRequestPage() {
                             >
                               <Group gap={6} wrap='nowrap'>
                                 {file.webUrl ? (
-                                  <Tooltip label='Ver en línea (sin descargar)'>
-                                    <ActionIcon
-                                      variant='subtle'
-                                      color='blue'
-                                      size='sm'
-                                      component='a'
-                                      href={file.webUrl}
-                                      target='_blank'
-                                      rel='noopener noreferrer'
-                                      aria-label={`Ver en línea ${file.name}`}
-                                    >
-                                      <IconEye size={16} />
-                                    </ActionIcon>
-                                  </Tooltip>
+                                  <ViewOnlineButton
+                                    fileName={file.name}
+                                    href={file.webUrl}
+                                    inlineSrc={buildSynerLinkAttachmentFileUrl({
+                                      requestId: request.id_request_general,
+                                      fileId,
+                                    })}
+                                    webUrl={file.webUrl}
+                                    downloadUrl={openUrl}
+                                  />
                                 ) : null}
                                 <UnstyledButton
                                   component='a'
@@ -2597,6 +2588,14 @@ function ViewRequestPage() {
                                 >
                                   Abrir
                                 </UnstyledButton>
+                                {!file.fromOrionBag && request?.id_request_general ? (
+                                  <TestAttachmentDeleteButton
+                                    requestId={request.id_request_general}
+                                    fileId={String(file.id)}
+                                    fileName={file.name}
+                                    onDeleted={handleTestAttachmentDeleted}
+                                  />
+                                ) : null}
                               </Group>
                             </Table.Td>
                           </>
@@ -2613,18 +2612,42 @@ function ViewRequestPage() {
                               ) : null}
                             </Table.Td>
                             <Table.Td data-label='Abrir'>
-                              <ActionIcon
-                                variant='subtle'
-                                color='blue'
-                                size='sm'
-                                component='a'
-                                href={openUrl}
-                                target='_blank'
-                                rel='noopener noreferrer'
-                                aria-label={`Ver archivo ${file.name}`}
-                              >
-                                <IconEye size={16} />
-                              </ActionIcon>
+                              <Group gap={6} wrap='nowrap'>
+                                {file.webUrl ? (
+                                  <ViewOnlineButton
+                                    fileName={file.name}
+                                    href={file.webUrl}
+                                    inlineSrc={buildSynerLinkAttachmentFileUrl({
+                                      requestId: request.id_request_general,
+                                      fileId,
+                                    })}
+                                    webUrl={file.webUrl}
+                                    downloadUrl={openUrl}
+                                  />
+                                ) : null}
+                                <UnstyledButton
+                                  component='a'
+                                  href={openUrl}
+                                  target='_blank'
+                                  rel='noopener noreferrer'
+                                  aria-label={`Abrir ${file.name}`}
+                                  style={{
+                                    fontSize: 13,
+                                    color: 'var(--mantine-color-blue-6)',
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  Abrir
+                                </UnstyledButton>
+                                {!file.fromOrionBag && request?.id_request_general ? (
+                                  <TestAttachmentDeleteButton
+                                    requestId={request.id_request_general}
+                                    fileId={String(file.id)}
+                                    fileName={file.name}
+                                    onDeleted={handleTestAttachmentDeleted}
+                                  />
+                                ) : null}
+                              </Group>
                             </Table.Td>
                           </>
                         )}
@@ -2702,7 +2725,7 @@ function ViewRequestPage() {
                   color='blue'
                   onClick={handleStartEditing}
                   leftSection={<IconTicket size={16} />}
-                  disabled={isRequestResolved() || currentTaskLocked}
+                  disabled={isRequestResolved() || currentTaskLocked || !canEdit}
                 >
                   Editar Tarea
                 </Button>

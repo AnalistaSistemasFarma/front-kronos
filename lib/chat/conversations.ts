@@ -265,8 +265,19 @@ export function serializeAttachment(row: {
   };
 }
 
-/** `include` que necesita `serializeConversation`. */
-const conversationInclude = {
+/**
+ * Lo que necesita `serializeConversation` MENOS el último mensaje. Es el
+ * `include` de las listas de VARIAS conversaciones.
+ *
+ * ⚠️ Rendimiento (2026-10-03): con varios padres, Prisma NO baja el `take: 1`
+ * anidado a SQL. Lanza `SELECT ... FROM chat_message WHERE id_conversation IN
+ * (...) ORDER BY id DESC` SIN límite, trae TODOS los mensajes (con su `body`
+ * NVARCHAR(MAX)) y recorta en memoria. En producción eso eran 5.265 mensajes y
+ * 4,2 MB por cada vuelta de la bandeja para el usuario con más historial, y
+ * crece con cada mensaje. Con UN solo padre (findUnique) sí manda `TOP 1`, por
+ * eso `getConversationPayload` sigue usando `conversationInclude` completo.
+ */
+const conversationIncludeSinMensajes = {
   agent: {
     select: {
       id_agent: true,
@@ -290,12 +301,48 @@ const conversationInclude = {
       },
     },
   },
+};
+
+/** `include` que necesita `serializeConversation` (para UNA conversación). */
+const conversationInclude = {
+  ...conversationIncludeSinMensajes,
   messages: {
     orderBy: { id: 'desc' as const },
     take: 1,
     select: { id: true, role: true, body: true, created_at: true },
   },
 };
+
+/**
+ * Último mensaje de cada conversación en DOS consultas acotadas: el MAX(id) por
+ * hilo (busca por el índice `(id_conversation, id DESC)`) y luego esas filas por
+ * clave primaria. Devuelve exactamente lo que daba `messages: { take: 1 }`.
+ */
+async function ultimosMensajesPorConversacion(
+  ids: number[]
+): Promise<Map<number, ConversationRow['messages'][number]>> {
+  const porConversacion = new Map<number, ConversationRow['messages'][number]>();
+  if (ids.length === 0) return porConversacion;
+
+  const maximos = await prisma.chatMessage.groupBy({
+    by: ['id_conversation'],
+    where: { id_conversation: { in: ids } },
+    _max: { id: true },
+  });
+  const idsUltimos = maximos
+    .map((m) => m._max.id)
+    .filter((id): id is number => typeof id === 'number');
+  if (idsUltimos.length === 0) return porConversacion;
+
+  const filas = await prisma.chatMessage.findMany({
+    where: { id: { in: idsUltimos } },
+    select: { id: true, id_conversation: true, role: true, body: true, created_at: true },
+  });
+  for (const { id_conversation, ...mensaje } of filas) {
+    porConversacion.set(id_conversation, mensaje);
+  }
+  return porConversacion;
+}
 
 type ConversationRow = {
   id: number;
@@ -498,13 +545,20 @@ export async function listUserConversations(
   const alcance = await conversationScopeFor(userId, userEmail);
   if (!alcance) return [];
 
-  const rows = await prisma.chatConversation.findMany({
+  const filasSinMensaje = await prisma.chatConversation.findMany({
     where: { archived: opts.archived, OR: alcance },
-    include: conversationInclude,
+    include: conversationIncludeSinMensajes,
     orderBy: [{ last_message_at: 'desc' }, { id: 'desc' }],
   });
 
-  if (rows.length === 0) return [];
+  if (filasSinMensaje.length === 0) return [];
+
+  // El último mensaje va aparte y acotado (ver conversationIncludeSinMensajes).
+  const ultimos = await ultimosMensajesPorConversacion(filasSinMensaje.map((r) => r.id));
+  const rows = filasSinMensaje.map((r) => {
+    const ultimo = ultimos.get(r.id);
+    return { ...r, messages: ultimo ? [ultimo] : [] };
+  });
 
   // Solo los DIRECTOS cuentan por `read_at`. Con `kind !== 'group'` cualquier
   // clase nueva de conversación caería aquí por descarte y se contaría con la

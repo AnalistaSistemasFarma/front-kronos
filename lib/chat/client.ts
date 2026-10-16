@@ -7,6 +7,8 @@
  * payloads que devuelven las rutas de app/api/chat) y los ayudantes de fetch.
  */
 
+import { notionAvatarVersion } from '../avatar/urls';
+
 /* ──────────────────────── Foto de un asistente ─────────────────────────── */
 
 /** Tope de la imagen ya reducida. 512×512 en JPEG no llega ni a 100 KB. */
@@ -29,6 +31,13 @@ export function agentAvatarSrc(agent: {
   avatarUrl: string | null;
   avatarVersion?: number | null;
 }): string | null {
+  // Avatar estilo Notion (Perfil → Avatar del asistente): manda sobre la foto
+  // subida si es MÁS RECIENTE. Así gana el último cambio, y la foto subida no
+  // se borra: vuelve sola al quitar el avatar o al subir otra foto después.
+  const versionNotion = notionAvatarVersion(agent.avatarUrl);
+  if (versionNotion !== null && (!agent.avatarVersion || versionNotion >= agent.avatarVersion)) {
+    return agent.avatarUrl;
+  }
   if (agent.avatarVersion) {
     return `/api/chat/agents/${encodeURIComponent(agent.code)}/avatar?v=${agent.avatarVersion}`;
   }
@@ -115,6 +124,7 @@ export interface ChatAccessDto {
  */
 export type { AgentTaskDto } from './status-tasks';
 import type { AgentTaskDto } from './status-tasks';
+import type { AgentMetricsDto } from './agent-metrics';
 
 export interface ChatStatusDto {
   state: string;
@@ -265,6 +275,11 @@ export interface ChatPollDto {
   status: ChatStatusDto | null;
   /** Desglose por agente: lo que pinta el encabezado de un grupo. */
   statuses?: ChatAgentStatusDto[];
+  /**
+   * Métricas del mod synerlink-metrics (contexto, tokens, modelo, sub-agentes).
+   * Ausente = este usuario no las ve (o API vieja); null = no hay reporte.
+   */
+  metrics?: AgentMetricsDto | null;
   /** Cadencia que ORDENA el servidor. El cliente la respeta tal cual. */
   nextPollMs: number;
   serverTime: string;
@@ -628,4 +643,38 @@ export const CHAT_THREAD_POKE_EVENT = 'synerlink:chat-thread-poke';
 export function pedirSondeoDelHilo(idConversation: number): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent(CHAT_THREAD_POKE_EVENT, { detail: { idConversation } }));
+}
+
+/**
+ * "En el hilo X acaba de haber actividad (envié o recibí)": la bandeja le sube
+ * la fecha del último mensaje AL INSTANTE, sin esperar su sondeo, para que la
+ * conversación suba de primera en las listas (como WhatsApp o Teams). El
+ * servidor la confirma en la siguiente vuelta de la bandeja.
+ */
+export const CHAT_ACTIVITY_EVENT = 'synerlink:chat-activity';
+
+export interface ChatActivityDetail {
+  idConversation: number;
+  at: string;
+}
+
+export function notificarActividad(idConversation: number, at: string): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent<ChatActivityDetail>(CHAT_ACTIVITY_EVENT, { detail: { idConversation, at } })
+  );
+}
+
+/** Un adjunto del apartado "Multimedia y archivos" de una conversación. */
+export interface ChatSharedFileDto {
+  id: number;
+  fileName: string;
+  contentType: string | null;
+  sizeBytes: number | null;
+  /** SIEMPRE /api/chat/attachments/<id>: nunca una URL de OneDrive. */
+  downloadUrl: string;
+  createdAt: string;
+  /** "Usted", el nombre de la persona o el del asistente. */
+  sentBy: string;
+  isImage: boolean;
 }

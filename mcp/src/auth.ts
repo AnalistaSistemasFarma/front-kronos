@@ -21,6 +21,13 @@ export interface AuthScope {
    * en toda query. Vacío cuando `allCompanies` es `true`.
    */
   companyIds: number[];
+  /**
+   * Lista blanca de herramientas de la key. `undefined` = sin restricción
+   * (keys históricas). Si está definida, solo se registran esas herramientas.
+   */
+  allowedTools?: string[];
+  /** Código del agente (agent.code) que presenta la key, si aplica. */
+  agentCode?: string;
 }
 
 /**
@@ -65,5 +72,7 @@ export function resolveScope(token: string | null, apiKeys: ApiKeyEntry[]): Auth
     role: matched.role,
     allCompanies,
     companyIds: allCompanies ? [] : [...(matched.companyIds as number[])],
+    ...(matched.allowedTools ? { allowedTools: [...matched.allowedTools] } : {}),
+    ...(matched.agentCode ? { agentCode: matched.agentCode } : {}),
   };
 }

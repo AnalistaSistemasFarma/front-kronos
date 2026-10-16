@@ -76,3 +76,55 @@ export function describeSgcPermissionMarker(url: string | null | undefined): str
   if (!perm || perm === 'lectura') return null;
   return SGC_PERMISSION_DESCRIPTIONS[perm];
 }
+
+// ---------------------------------------------------------------------------
+// Sprint 1 — repositorio y listado maestro.
+// ---------------------------------------------------------------------------
+
+/**
+ * Estados de un documento (y de una versión). No son tareas del flujo.
+ * Sprint 8: «pendiente de archivo» = documento del listado maestro importado
+ * con su código, versión y fecha de vigencia, al que aún le falta el PDF (solo
+ * del documento; una versión nunca queda en ese estado).
+ */
+export const SGC_DOCUMENT_STATUSES = ['borrador', 'vigente', 'obsoleto', 'anulado', 'pendiente_archivo'] as const;
+export type SgcDocumentStatus = (typeof SGC_DOCUMENT_STATUSES)[number];
+
+export const SGC_DOCUMENT_STATUS_LABELS: Record<SgcDocumentStatus, string> = {
+  borrador: 'En elaboración',
+  vigente: 'Vigente',
+  obsoleto: 'Obsoleto',
+  anulado: 'Anulado',
+  pendiente_archivo: 'Pendiente de archivo',
+};
+
+/**
+ * Confidencialidad: quién puede CONSULTAR un documento de la empresa.
+ *   publica      → toda persona con permiso de consulta del SGC en la empresa
+ *   departamento → el departamento dueño y los departamentos/personas autorizados
+ *   confidencial → solo los departamentos/personas autorizados expresamente
+ * Aseguramiento de Calidad ve todo (es la dueña del módulo).
+ */
+export const SGC_CONFIDENTIALITY_LEVELS = ['publica', 'departamento', 'confidencial'] as const;
+export type SgcConfidentiality = (typeof SGC_CONFIDENTIALITY_LEVELS)[number];
+
+export const SGC_CONFIDENTIALITY_LABELS: Record<SgcConfidentiality, string> = {
+  publica: 'Pública interna',
+  departamento: 'Por departamento',
+  confidencial: 'Confidencial',
+};
+
+export function isSgcDocumentStatus(value: unknown): value is SgcDocumentStatus {
+  return typeof value === 'string' && (SGC_DOCUMENT_STATUSES as readonly string[]).includes(value);
+}
+
+export function isSgcConfidentiality(value: unknown): value is SgcConfidentiality {
+  return typeof value === 'string' && (SGC_CONFIDENTIALITY_LEVELS as readonly string[]).includes(value);
+}
+
+/** Tamaño máximo de un archivo cargado al SGC (PDF controlado o fuente Word). */
+export const SGC_MAX_FILE_BYTES = 25 * 1024 * 1024;
+
+/** Periodicidad de revisión y anticipación de la alerta por defecto (plan: 3 años, 2 meses). */
+export const SGC_DEFAULT_REVIEW_MONTHS = 36;
+export const SGC_DEFAULT_ALERT_MONTHS = 2;

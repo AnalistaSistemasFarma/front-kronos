@@ -11,8 +11,8 @@ import {
   type ReactNode,
 } from 'react';
 import { useSession } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
-import { Alert, Center, Loader } from '@mantine/core';
+import { usePathname, useRouter } from 'next/navigation';
+import { Alert, Button, Center, Loader } from '@mantine/core';
 import { IconAlertCircle } from '@tabler/icons-react';
 import type {
   DashboardActivityRow,
@@ -20,25 +20,24 @@ import type {
   DashboardRequestRow,
 } from './RequestRoleDashboard';
 import { PROCESS_HUB_URL } from '../../lib/navigation/AppSectionContext';
-import { SolicitadoTabProvider } from '../../lib/request-general/SolicitadoTabContext';
+import { fetchWithRetry } from '../../lib/navigation/fetchWithRetry';
+import {
+  SOLICITADO_TAB_URL,
+  SolicitadoTabProvider,
+  pathnameToSolicitadoTab,
+} from '../../lib/request-general/SolicitadoTabContext';
+import type { TeamActivityRow } from '../../lib/request-general/teamWorkload';
 import SolicitadoNav from './SolicitadoNav';
 import SolicitadoPeriodLabel from './SolicitadoPageHeading';
 import DashboardDateToolbar from '../dashboard/DashboardDateToolbar';
+import { panelStyles } from '../ui/panel/Panel';
 import {
   getDashboardDateRange,
   getPeriodRangeLabel,
   parseCalendarDate,
   type DashboardDateFilter,
+  type DateRangeStrings,
 } from '../../lib/dashboard/dateRange';
-
-const EMPTY_COUNTS: DashboardCounts = {
-  total: 0,
-  abierto: 0,
-  enProgreso: 0,
-  resuelto: 0,
-  cancelado: 0,
-  otros: 0,
-};
 
 function countByStatus(statuses: Array<string | null | undefined>): DashboardCounts {
   const counts: DashboardCounts = {
@@ -73,11 +72,25 @@ function isDateInRange(
   return key >= range.startDate && key <= range.endDate;
 }
 
+export interface SolicitadoAccess {
+  /** Pestañas «Mis procesos» y «Mis actividades» (permiso asignado). */
+  personal: boolean;
+  /** Pestaña «Mi equipo» (automática para el líder de proceso). */
+  equipo: boolean;
+}
+
 export interface SolicitadoDataContextValue {
+  access: SolicitadoAccess;
   requests: DashboardRequestRow[];
+  /** Sin filtrar por fecha: lo pendiente es la foto de hoy. */
+  allRequests: DashboardRequestRow[];
+  allActivities: DashboardActivityRow[];
   activities: DashboardActivityRow[];
   requestCounts: DashboardCounts;
   activityCounts: DashboardCounts;
+  /** Actividades del equipo SIN filtrar por fecha (las pendientes son la foto de hoy). */
+  teamActivities: TeamActivityRow[];
+  dateRange: DateRangeStrings | null;
   dateFilter: DashboardDateFilter;
   setDateFilter: (value: DashboardDateFilter) => void;
   selectedMonthDate: Date;
@@ -97,14 +110,38 @@ export function useSolicitadoData(): SolicitadoDataContextValue {
   return ctx;
 }
 
+type AccessCheck = 'allowed' | 'denied';
+
+/** Solo un "no" definitivo del servidor cuenta como sin acceso; una falla temporal lanza error. */
+async function checkAccess(kind: 'solicitado' | 'equipo'): Promise<AccessCheck> {
+  const res = await fetchWithRetry(`/api/requests-general/dashboard-access?kind=${kind}`, {
+    credentials: 'same-origin',
+    cache: 'no-store',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401 || res.status === 403) return 'denied';
+  if (!res.ok) throw new Error('No se pudo verificar el acceso. Intenta de nuevo.');
+  return data.allowed ? 'allowed' : 'denied';
+}
+
+async function fetchJson(url: string, fallbackError: string) {
+  const res = await fetchWithRetry(url, { credentials: 'same-origin', cache: 'no-store' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || fallbackError);
+  return data;
+}
+
 export function SolicitadoShell({ children }: { children: ReactNode }) {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const pathname = usePathname();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [access, setAccess] = useState<SolicitadoAccess>({ personal: false, equipo: false });
   const [allRequests, setAllRequests] = useState<DashboardRequestRow[]>([]);
   const [allActivities, setAllActivities] = useState<DashboardActivityRow[]>([]);
+  const [teamActivities, setTeamActivities] = useState<TeamActivityRow[]>([]);
   const [dateFilter, setDateFilter] = useState<DashboardDateFilter>('month');
   const [selectedMonthDate, setSelectedMonthDate] = useState(
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1)
@@ -120,27 +157,28 @@ export function SolicitadoShell({ children }: { children: ReactNode }) {
           setError(null);
         }
 
-        const accessRes = await fetch(
-          '/api/requests-general/dashboard-access?kind=solicitado',
-          { credentials: 'same-origin', cache: 'no-store' }
-        );
-        const accessData = await accessRes.json().catch(() => ({}));
-        if (!accessRes.ok || !accessData.allowed) {
+        const [personal, equipo] = await Promise.all([
+          checkAccess('solicitado'),
+          checkAccess('equipo'),
+        ]);
+        if (personal === 'denied' && equipo === 'denied') {
           router.replace(PROCESS_HUB_URL);
           return;
         }
 
-        const res = await fetch('/api/requests-general/dashboard-solicitado', {
-          credentials: 'same-origin',
-          cache: 'no-store',
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          throw new Error(data.error || 'No se pudo cargar el dashboard');
-        }
+        const [personalData, teamData] = await Promise.all([
+          personal === 'allowed'
+            ? fetchJson('/api/requests-general/dashboard-solicitado', 'No se pudo cargar el dashboard')
+            : null,
+          equipo === 'allowed'
+            ? fetchJson('/api/requests-general/dashboard-equipo', 'No se pudo cargar tu equipo')
+            : null,
+        ]);
 
-        setAllRequests(Array.isArray(data.requests) ? data.requests : []);
-        setAllActivities(Array.isArray(data.activities) ? data.activities : []);
+        setAccess({ personal: personal === 'allowed', equipo: equipo === 'allowed' });
+        setAllRequests(Array.isArray(personalData?.requests) ? personalData.requests : []);
+        setAllActivities(Array.isArray(personalData?.activities) ? personalData.activities : []);
+        setTeamActivities(Array.isArray(teamData?.activities) ? teamData.activities : []);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Error inesperado');
       } finally {
@@ -168,6 +206,15 @@ export function SolicitadoShell({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [session, status, router, loadData]);
+
+  // Pestaña sin acceso (p. ej. líder sin el permiso personal): a la que sí puede ver.
+  const activeTab = pathnameToSolicitadoTab(pathname);
+  const tabAllowed = activeTab === 'equipo' ? access.equipo : access.personal;
+  useEffect(() => {
+    if (loading || error || tabAllowed) return;
+    if (access.equipo) router.replace(SOLICITADO_TAB_URL.equipo);
+    else if (access.personal) router.replace(SOLICITADO_TAB_URL.procesos);
+  }, [loading, error, tabAllowed, access, router]);
 
   const dateRange = useMemo(
     () => getDashboardDateRange(dateFilter, selectedMonthDate),
@@ -208,10 +255,15 @@ export function SolicitadoShell({ children }: { children: ReactNode }) {
 
   const value = useMemo(
     () => ({
+      access,
       requests,
+      allRequests,
+      allActivities,
       activities,
       requestCounts,
       activityCounts,
+      teamActivities,
+      dateRange,
       dateFilter,
       setDateFilter,
       selectedMonthDate,
@@ -221,10 +273,15 @@ export function SolicitadoShell({ children }: { children: ReactNode }) {
       refresh,
     }),
     [
+      access,
       requests,
+      allRequests,
+      allActivities,
       activities,
       requestCounts,
       activityCounts,
+      teamActivities,
+      dateRange,
       dateFilter,
       selectedMonthDate,
       appliedRange,
@@ -245,6 +302,9 @@ export function SolicitadoShell({ children }: { children: ReactNode }) {
     return (
       <Alert icon={<IconAlertCircle size={16} />} title='Dashboard personal' color='red' m='md'>
         {error}
+        <Button size='xs' variant='light' color='red' mt='sm' onClick={() => void loadData()}>
+          Reintentar
+        </Button>
       </Alert>
     );
   }
@@ -252,24 +312,31 @@ export function SolicitadoShell({ children }: { children: ReactNode }) {
   return (
     <SolicitadoDataContext.Provider value={value}>
       <SolicitadoTabProvider>
-        <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
-          <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-            <SolicitadoPeriodLabel />
-            <div className='mb-md' style={{ marginBottom: 12 }}>
-              <DashboardDateToolbar
-                dateFilter={dateFilter}
-                onDateFilterChange={setDateFilter}
-                selectedMonthDate={selectedMonthDate}
-                onSelectedMonthDateChange={setSelectedMonthDate}
-                onRefresh={() => void refresh()}
-                loading={refreshing}
-                showExport={false}
-              />
-            </div>
-            <div className='dashboard-sticky-chrome min-w-0 mb-2'>
+        <div className={`${panelStyles.root} ${panelStyles.page}`}>
+          <div className={panelStyles.container}>
+            <header className={panelStyles.header}>
+              <div>
+                <SolicitadoPeriodLabel />
+                <h1 className={panelStyles.largeTitle}>Dashboard personal</h1>
+              </div>
+              <div className={panelStyles.headerControls}>
+                <DashboardDateToolbar
+                  dateFilter={dateFilter}
+                  onDateFilterChange={setDateFilter}
+                  selectedMonthDate={selectedMonthDate}
+                  onSelectedMonthDateChange={setSelectedMonthDate}
+                  onRefresh={() => void refresh()}
+                  loading={refreshing}
+                  showExport={false}
+                />
+              </div>
+            </header>
+            <div className='min-w-0' style={{ marginBottom: 24 }}>
               <SolicitadoNav />
             </div>
-            <div className='solicitado-shell-content min-w-0'>{Children.toArray(children)}</div>
+            <div className='solicitado-shell-content min-w-0'>
+              {tabAllowed ? Children.toArray(children) : null}
+            </div>
           </div>
         </div>
       </SolicitadoTabProvider>

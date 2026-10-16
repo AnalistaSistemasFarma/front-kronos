@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
       where: esFormador ? {} : { active: true },
       orderBy: [{ id: 'desc' }],
       include: {
-        materials: { select: { id: true, required: true } },
+        materials: { where: { eliminado_at: null }, select: { id: true, required: true } },
         enrollments: { where: { student_email: quien.correo }, select: { id: true } },
         certificates: { where: { student_email: quien.correo }, select: { code: true, issued_at: true } },
         _count: { select: { enrollments: true } },

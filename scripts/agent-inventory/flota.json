@@ -1,0 +1,73 @@
+{
+  "_nota": "Mapa de los agentes REGISTRADOS en SynerLink (tabla agent, por code) a su equipo y carpeta. Solo estos se escanean (decisión de Nicolás, 2026-10-02). host = alias SSH desde la Mac de horus; null = la propia Mac de horus. Sin secretos: solo nombres y rutas.",
+  "equipos": {
+    "local": "Mac de Horus",
+    "jorge": "Mac mini de Jorge",
+    "pedro": "Mac mini de Pedro",
+    "lisa": "Mac mini de Lisa",
+    "cosmo": "Mac mini de Cosmo"
+  },
+  "agentes": [
+    { "code": "horus", "host": "local", "kind": "claude-code", "dir": ".horus" },
+    { "code": "mechita", "host": "local", "kind": "claude-code", "dir": ".mechita" },
+    { "code": "sawblaze", "host": "local", "kind": "claude-code", "dir": ".sawblaze" },
+    { "code": "zoe", "host": "local", "kind": "claude-code", "dir": ".zoe" },
+    { "code": "duo", "host": "local", "kind": "openclaw", "agent": "duo", "bridge": "duo" },
+    { "code": "lunaris", "host": "local", "kind": "openclaw", "agent": "main", "profile": "lunaris", "bridge": "lunaris" },
+
+    { "code": "jorge", "host": "jorge", "kind": "claude-code", "dir": ".jorgebot" },
+    { "code": "jose", "host": "jorge", "kind": "claude-code", "dir": ".josebot" },
+    { "code": "rex", "host": "jorge", "kind": "claude-code", "dir": ".andreabot" },
+    { "code": "laura", "host": "jorge", "kind": "claude-code", "dir": ".laurabot" },
+    { "code": "lina", "host": "jorge", "kind": "claude-code", "dir": ".linabot" },
+    { "code": "carter", "host": "jorge", "kind": "claude-code", "dir": ".carter" },
+    { "code": "gilbert", "host": "jorge", "kind": "claude-code", "dir": ".gilbert" },
+    { "code": "ofi", "host": "jorge", "kind": "claude-code", "dir": ".ofi" },
+
+    { "code": "cali", "host": "pedro", "kind": "claude-code", "dir": ".cali" },
+    { "code": "hiper", "host": "pedro", "kind": "claude-code", "dir": ".hiper" },
+    { "code": "indi", "host": "pedro", "kind": "claude-code", "dir": ".indi" },
+    { "code": "mark", "host": "pedro", "kind": "claude-code", "dir": ".mark" },
+    { "code": "pedro", "host": "pedro", "kind": "claude-code", "dir": ".pedro" },
+    { "code": "plan", "host": "pedro", "kind": "claude-code", "dir": ".plan" },
+    { "code": "play", "host": "pedro", "kind": "claude-code", "dir": ".play" },
+    { "code": "troy", "host": "pedro", "kind": "claude-code", "dir": ".troy" },
+
+    { "code": "lisa", "host": "lisa", "kind": "openclaw", "agent": "main", "bridge": "synerlink-bridge" },
+    { "code": "tesa", "host": "lisa", "kind": "openclaw", "agent": "tesa", "bridge": "synerlink-bridge-tesa" },
+    { "code": "argo", "host": "lisa", "kind": "openclaw", "agent": "argo", "bridge": "synerlink-bridge-argo" },
+    { "code": "maria", "host": "lisa", "kind": "openclaw", "agent": "maria", "bridge": "synerlink-bridge-maria" },
+    { "code": "pandora", "host": "lisa", "kind": "openclaw", "agent": "pandora", "bridge": "synerlink-bridge-pandora" },
+    { "code": "sora", "host": "lisa", "kind": "openclaw", "agent": "sora", "bridge": "synerlink-bridge-sora" },
+    { "code": "luna", "host": "lisa", "kind": "openclaw", "agent": "luna", "bridge": "synerlink-bridge-luna" },
+
+    { "code": "cosmo", "host": "cosmo", "kind": "claude-code", "dir": ".andreabot" },
+    { "code": "vega", "host": "cosmo", "kind": "openclaw", "agent": "vega", "bridge": "vega" },
+    { "code": "sirio", "host": "cosmo", "kind": "openclaw", "agent": "sirio", "bridge": "sirio" },
+    { "code": "orion", "host": "cosmo", "kind": "openclaw", "agent": "orion", "bridge": "orion" },
+    { "code": "atlas", "host": "cosmo", "kind": "openclaw", "agent": "atlas", "bridge": "atlas" },
+    { "code": "kepler", "host": "cosmo", "kind": "openclaw", "agent": "kepler", "bridge": "kepler" },
+    { "code": "galileo", "host": "cosmo", "kind": "openclaw", "agent": "galileo", "bridge": "galileo" },
+    { "code": "mercurio", "host": "cosmo", "kind": "openclaw", "agent": "mercurio", "bridge": "mercurio" }
+  ],
+  "conectores": {
+    "_nota": "Catálogo de conectores centrales (serfarma05) por host:puerto. Se usa cuando el MCP exige autenticación y no se puede listar sus herramientas sin credencial. acceso = lectura | escritura.",
+    "192.168.10.5:3012": { "empresa": "Farmalogica", "acceso": "lectura" },
+    "192.168.10.5:3013": { "empresa": "Laboratorios Ryan", "acceso": "lectura" },
+    "192.168.10.5:3014": { "empresa": "Meditrack", "acceso": "lectura" },
+    "192.168.10.5:3015": { "empresa": "OneLATAM Pharma", "acceso": "lectura" },
+    "192.168.10.5:3016": { "empresa": "GSS", "acceso": "lectura" },
+    "192.168.10.5:3017": { "empresa": "GSS", "acceso": "escritura" },
+    "192.168.10.5:3018": { "empresa": "OneLATAM Pharma", "acceso": "lectura" },
+    "192.168.10.5:3020": { "empresa": "Según la llave", "acceso": "escritura", "nota": "2 herramientas de escritura acotadas a categorización" },
+    "192.168.10.5:3021": { "empresa": "Kelab", "acceso": "escritura" },
+    "192.168.10.5:3022": { "empresa": "Abamia", "acceso": "escritura" },
+    "192.168.10.5:3023": { "empresa": "Laboratorios Ryan", "acceso": "lectura" },
+    "192.168.10.5:3030": { "empresa": "OneLATAM Pharma", "acceso": "lectura" },
+    "192.168.10.5:3031": { "empresa": "Farmalogica", "acceso": "lectura" },
+    "192.168.10.5:3032": { "empresa": "Laboratorios Ryan", "acceso": "lectura" },
+    "192.168.10.5:3033": { "empresa": "Kelab", "acceso": "lectura" },
+    "192.168.10.5:3034": { "empresa": "Meditrack", "acceso": "lectura" },
+    "192.168.10.5:3035": { "empresa": "Abamia", "acceso": "lectura" }
+  }
+}

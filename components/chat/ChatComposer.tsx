@@ -1,6 +1,16 @@
 'use client';
 
-import { forwardRef, memo, useCallback, useId, useImperativeHandle, useRef, useState } from 'react';
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useMediaQuery } from '@mantine/hooks';
 import {
   ActionIcon,
@@ -73,6 +83,35 @@ const LETTERFX_MAX_CHARS = 600;
  * el celular ese botón se comía ancho que le hacía falta a la caja de texto.
  */
 
+/**
+ * BORRADOR del mensaje (pedido de Nicolás, 2026-10-01): lo que se va
+ * escribiendo se guarda en `localStorage` por persona y por conversación, así
+ * no se pierde al cambiar de chat, salir del chat o redimensionar la ventana
+ * (al cruzar el corte de celular/escritorio el compositor se desmonta y se
+ * vuelve a montar). Se borra al enviar. Con try/catch: en modo privado o con
+ * el almacenamiento bloqueado simplemente no hay borrador.
+ */
+const PREFIJO_BORRADOR = 'chat-borrador:';
+
+function leerBorrador(clave: string | null): string {
+  if (!clave) return '';
+  try {
+    return window.localStorage.getItem(PREFIJO_BORRADOR + clave) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function guardarBorrador(clave: string | null, valor: string) {
+  if (!clave) return;
+  try {
+    if (valor) window.localStorage.setItem(PREFIJO_BORRADOR + clave, valor);
+    else window.localStorage.removeItem(PREFIJO_BORRADOR + clave);
+  } catch {
+    // Sin almacenamiento: no hay borrador, el chat funciona igual.
+  }
+}
+
 type WrapKind = 'bold' | 'italic' | 'code' | 'list';
 
 /**
@@ -137,6 +176,10 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   cita?: ChatReplyToDto | null;
   onQuitarCita?: () => void;
   voiceConversationId?: number;
+  /**
+   * Clave del borrador (persona + conversación). Sin clave no se guarda nada.
+   */
+  draftKey?: string | null;
 }>(function ChatComposer(
   {
     onSend,
@@ -148,10 +191,36 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     cita = null,
     onQuitarCita,
     voiceConversationId,
+    draftKey = null,
   },
   ref
 ) {
   const [value, setValue] = useState('');
+  // Borrador: al montar o al cambiar de conversación se carga el de esa
+  // conversación (antes de pintar, para que no parpadee vacío). Se guarda
+  // cuando cambia el TEXTO, no cuando cambia la clave: así el texto de una
+  // conversación nunca se escribe en la clave de otra al pasar entre ellas.
+  // `saltarGuardadoRef` evita que la pasada con el texto viejo (la que corre
+  // justo antes de que llegue el borrador cargado) borre lo que se cargó.
+  const claveBorradorRef = useRef<string | null>(null);
+  const valorRef = useRef(value);
+  valorRef.current = value;
+  const saltarGuardadoRef = useRef(false);
+  useLayoutEffect(() => {
+    claveBorradorRef.current = draftKey;
+    const cargado = leerBorrador(draftKey);
+    if (cargado !== valorRef.current) {
+      saltarGuardadoRef.current = true;
+      setValue(cargado);
+    }
+  }, [draftKey]);
+  useEffect(() => {
+    if (saltarGuardadoRef.current) {
+      saltarGuardadoRef.current = false;
+      return;
+    }
+    guardarBorrador(claveBorradorRef.current, value);
+  }, [value]);
   const [preview, setPreview] = useState(false);
   // Con teclado TÁCTIL el Enter hace salto de línea y para enviar está el
   // botón. Se detecta por `pointer: coarse` y no por ancho de pantalla a

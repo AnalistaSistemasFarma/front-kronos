@@ -1,6 +1,5 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '../../../../lib/prisma';
-import { checkAdminPrivileges } from '../../../../lib/access-control';
 import { CHAT_MODULE_URL, getChatAccess } from '../../../../lib/chat/access';
 import { getConversationPayload } from '../../../../lib/chat/conversations';
 import {
@@ -27,17 +26,23 @@ import {
  * hablar personas y que los agentes se comuniquen entre si en esos grupos".
  *
  * -------------------------------------------------------------------------
- * SOLO ADMINISTRADORES
+ * CUALQUIERA CON EL CHAT, PERO SOLO CON SUS PROPIOS AGENTES
  * -------------------------------------------------------------------------
- * Decisión de Nicolás del 2026-09-08. El motivo no es jerárquico sino de
- * costo: cada agente que entra a un grupo es una sesión de Claude que puede
- * despertarse con una mención. Si cualquiera pudiera armar grupos con ocho
- * agentes, el consumo de la flota se iría sin que nadie pueda rastrear quién
- * lo abrió.
+ * Hasta el 2026-10-06 crear grupos era solo de administradores (decisión de
+ * Nicolás del 2026-09-08, por costo: cada agente de un grupo es una sesión de
+ * Claude que puede despertarse con una mención).
  *
- * Se usa `checkAdminPrivileges`, la misma fuente de verdad de Administración →
- * Usuarios y del mensaje masivo, no un rol suelto: así no aparece un segundo
- * criterio de "quién es administrador" que después se desincronice.
+ * Decisión de Nicolás del 2026-10-06: "necesito que todos puedan crear grupos
+ * con sus agentes asignados, solo con sus agentes asignados, para que entre
+ * ellos puedan crear sus grupos y los agentes de ellos asignados puedan hablar
+ * entre sí también". Y la precisión del mismo día: "solo el usuario que tiene
+ * asignado el agente puede invitarlo al grupo".
+ *
+ * Por eso ya no hay reja de administrador. El control de costo queda en lo
+ * que sí se puede rastrear: cada agente del grupo es uno que el creador TIENE
+ * ASIGNADO en esa empresa (validación 2, sin excepción para administradores),
+ * el tope de MAX_GROUP_AGENTS, la regla de la mención y el tope de turnos
+ * seguidos entre agentes (lib/chat/groups.ts). El grupo queda con `created_by`.
  *
  * -------------------------------------------------------------------------
  * TODO GRUPO PERTENECE A UNA EMPRESA
@@ -48,7 +53,9 @@ import {
  * validaciones, que se hacen TODAS antes de escribir nada:
  *
  *   1. El creador tiene el módulo en esa empresa.
- *   2. Cada agente PERTENECE a esa empresa y el creador tiene permiso sobre él.
+ *   2. Cada agente PERTENECE a esa empresa y el creador lo tiene asignado.
+ *      `access.agents` solo trae los agentes otorgados al creador, así que un
+ *      id ajeno metido en el cuerpo de la petición se rechaza con 403.
  *   3. Cada persona invitada tiene el módulo en esa empresa. Si no, se rechaza
  *      con su nombre: agregarla igual crearía un grupo donde alguien figura
  *      pero nunca lo ve, y eso se descubre tarde y de la peor forma.
@@ -57,13 +64,6 @@ export async function POST(request: NextRequest) {
   try {
     const user = await resolveSessionUser();
     if (!user) return unauthorized();
-
-    if (!(await checkAdminPrivileges(user.email))) {
-      return jsonNoStore(
-        { error: 'Crear grupos está reservado a los administradores.' },
-        { status: 403 }
-      );
-    }
 
     const payload = await readJsonBody(request);
     if (!payload) return badRequest('El cuerpo debe ser un objeto JSON.');

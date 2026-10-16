@@ -152,8 +152,11 @@ async function embedDataUrl(pdf: PDFDocument, dataUrl: string): Promise<PDFImage
 }
 
 /**
- * Estampa el visto bueno de cada validador en su caja: chulito verde o, si se pasa
- * `signatures` (versión final), su firma guardada en pequeño. Debajo, nombre y fecha.
+ * Estampa el visto bueno (rúbrica) de cada validador: chulito verde o, si se pasa `signatures`
+ * (versión final), su firma guardada en pequeño. Debajo, nombre y fecha.
+ *
+ * Se replica en TODAS las páginas, en la misma posición (% de la página) donde se ubicó la caja,
+ * como la rúbrica que se pone en cada hoja de un documento físico.
  */
 export async function stampValidatorMarks(
   pdfBytes: Uint8Array,
@@ -163,60 +166,72 @@ export async function stampValidatorMarks(
   if (marks.length === 0) return pdfBytes;
   const pdf = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
   const pages = pdf.getPages();
+  if (pages.length === 0) return pdfBytes;
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  let stamped = false;
 
   for (const mark of marks) {
-    const page = mark.field.page > 0 ? pages[mark.field.page - 1] : pages[pages.length - 1];
-    if (!page) continue;
-    const { width: pw, height: ph } = page.getSize();
-    const bw = (mark.field.width / 100) * pw;
-    const bh = (mark.field.height / 100) * ph;
-    const bx = (mark.field.x / 100) * pw;
-    const by = ph - (mark.field.y / 100) * ph - bh;
-
-    // Visto bueno discreto: tamaños acotados aunque la caja sea grande.
-    const nameSize = Math.min(5.5, Math.max(3.5, bh * 0.14));
-    const dateSize = Math.max(3, nameSize - 1.3);
-    const textHeight = nameSize + dateSize + 2;
-    const graphicHeight = Math.min(16, Math.max(4, bh - textHeight - 2));
-    const graphicTop = by + textHeight + graphicHeight + 1;
-
+    // La firma se incrusta una vez y se reutiliza en cada página (el PDF no crece por página).
     const dataUrl = signatures?.[mark.email];
     const image = dataUrl ? await embedDataUrl(pdf, dataUrl) : null;
-    if (image) {
-      const scale = Math.min((bw - 2) / image.width, graphicHeight / image.height);
-      const w = image.width * scale;
-      const h = image.height * scale;
-      page.drawImage(image, { x: bx + (bw - w) / 2, y: graphicTop - h, width: w, height: h });
-    } else {
-      const size = Math.min(graphicHeight, bw * 0.3, 8);
-      drawCheck(page, bx + (bw - size) / 2, graphicTop - size - (graphicHeight - size) / 2, size);
+    for (const page of pages) {
+      drawValidatorMark(page, mark, { font, bold, image });
     }
-
-    const maxWidth = bw - 2;
-    const name = fitText(bold, mark.name, nameSize, maxWidth);
-    page.drawText(name, {
-      x: bx + (bw - bold.widthOfTextAtSize(name, nameSize)) / 2,
-      y: by + dateSize + 2,
-      size: nameSize,
-      font: bold,
-      color: TEXT,
-    });
-    const date = formatValidatorDate(mark.decidedAt);
-    if (date) {
-      const text = fitText(font, `Validó ${date}`, dateSize, maxWidth);
-      page.drawText(text, {
-        x: bx + (bw - font.widthOfTextAtSize(text, dateSize)) / 2,
-        y: by + 1,
-        size: dateSize,
-        font,
-        color: MUTED,
-      });
-    }
-    stamped = true;
   }
 
-  return stamped ? pdf.save() : pdfBytes;
+  return pdf.save();
+}
+
+function drawValidatorMark(
+  page: PDFPage,
+  mark: ValidatorMark,
+  assets: { font: PDFFont; bold: PDFFont; image: PDFImage | null }
+): void {
+  const { font, bold, image } = assets;
+  const { width: pw, height: ph } = page.getSize();
+  const bw = (mark.field.width / 100) * pw;
+  const bh = (mark.field.height / 100) * ph;
+  const bx = (mark.field.x / 100) * pw;
+  const by = ph - (mark.field.y / 100) * ph - bh;
+
+  // Visto bueno discreto: tamaños acotados aunque la caja sea grande.
+  const nameSize = Math.min(5.5, Math.max(3.5, bh * 0.14));
+  const dateSize = Math.max(3, nameSize - 1.3);
+  // Caja muy pequeña: sin nombre ni fecha, el chulito/firma ocupa toda la caja.
+  const withText = bh >= nameSize + dateSize + 8 && bw >= 24;
+  const textHeight = withText ? nameSize + dateSize + 2 : 0;
+  const graphicHeight = withText ? Math.min(16, Math.max(4, bh - textHeight - 2)) : Math.max(1, bh - 1);
+  const graphicTop = withText ? by + textHeight + graphicHeight + 1 : by + bh - 0.5;
+
+  if (image) {
+    const scale = Math.min(Math.max(1, bw - 2) / image.width, graphicHeight / image.height);
+    const w = image.width * scale;
+    const h = image.height * scale;
+    page.drawImage(image, { x: bx + (bw - w) / 2, y: graphicTop - h, width: w, height: h });
+  } else {
+    const size = withText ? Math.min(graphicHeight, bw * 0.3, 8) : Math.min(graphicHeight, bw - 1, 8);
+    drawCheck(page, bx + (bw - size) / 2, graphicTop - size - (graphicHeight - size) / 2, size);
+  }
+  if (!withText) return;
+
+  const maxWidth = bw - 2;
+  const name = fitText(bold, mark.name, nameSize, maxWidth);
+  page.drawText(name, {
+    x: bx + (bw - bold.widthOfTextAtSize(name, nameSize)) / 2,
+    y: by + dateSize + 2,
+    size: nameSize,
+    font: bold,
+    color: TEXT,
+  });
+  const date = formatValidatorDate(mark.decidedAt);
+  if (date) {
+    const text = fitText(font, `Validó ${date}`, dateSize, maxWidth);
+    page.drawText(text, {
+      x: bx + (bw - font.widthOfTextAtSize(text, dateSize)) / 2,
+      y: by + 1,
+      size: dateSize,
+      font,
+      color: MUTED,
+    });
+  }
 }

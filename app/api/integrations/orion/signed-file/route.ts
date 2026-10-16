@@ -20,11 +20,23 @@ import {
 import { isOrionProtectedFileUrl, isAllowedServerPdfFetchUrl, orionDocumentHasSignedCopy } from '@/lib/orion/signedFileAccess';
 import { stampSynerlinkWatermark } from '@/lib/orion/stampSynerlinkWatermark';
 import { applyValidatorMarks } from '@/lib/orion/validatorMarks';
+import { buildValidatorMarks } from '@/lib/orion/validatorStamp';
 
 function normalizeEmail(email?: string | null): string {
   return String(email || '')
     .trim()
     .toLowerCase();
+}
+
+/** Solo ASCII en Content-Disposition (tildes rompen ByteString de headers). */
+function asciiFileName(fileName: string, fallback = 'documento.pdf'): string {
+  const ascii = String(fileName || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\x20-\x7e]/g, '_')
+    .replace(/["\\\r\n]/g, '_')
+    .trim();
+  return ascii || fallback;
 }
 
 /**
@@ -111,7 +123,7 @@ export async function GET(req: Request) {
         status: 200,
         headers: {
           'Content-Type': 'application/pdf',
-          'Content-Disposition': `${disposition}; filename="${fileName}"`,
+          'Content-Disposition': `${disposition}; filename="${asciiFileName(fileName)}"`,
           'Cache-Control': 'private, no-store',
         },
       });
@@ -144,7 +156,7 @@ export async function GET(req: Request) {
     let targetUrl: string | null = null;
     let maxSignerOrder: number | null = null;
     let wantValidated = false;
-    let selectedVersion = versionId
+    const selectedVersion = versionId
       ? orderedVersions.find((v) => v.id === versionId) ?? null
       : null;
 
@@ -244,6 +256,21 @@ export async function GET(req: Request) {
           ? Buffer.from(buffer)
           : Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 
+      if (applySynerlinkStamp) {
+        try {
+          const avoid = [
+            ...buildValidatorMarks(state).map((m) => m.field),
+            ...(state.signatureFields ?? []),
+            ...(state.validatorFields ?? []),
+          ];
+          const stamped = await stampSynerlinkWatermark(body, avoid);
+          body = Buffer.from(stamped);
+        } catch (err) {
+          console.warn('[orion/signed-file] stamp Synerlink watermark failed:', err);
+        }
+      }
+
+      // Después del sello, para que el visto bueno de los validadores quede encima.
       const isPdf = !contentType || /pdf/i.test(contentType);
       if (isPdf && validatorMode !== 'none') {
         body = Buffer.from(
@@ -251,20 +278,12 @@ export async function GET(req: Request) {
         );
       }
 
-      if (applySynerlinkStamp) {
-        try {
-          const stamped = await stampSynerlinkWatermark(body);
-          body = Buffer.from(stamped);
-        } catch (err) {
-          console.warn('[orion/signed-file] stamp Synerlink watermark failed:', err);
-        }
-      }
-
+      const safeType = String(contentType || 'application/pdf').split(';')[0].trim() || 'application/pdf';
       return new NextResponse(body as unknown as BodyInit, {
         status: 200,
         headers: {
-          'Content-Type': contentType || 'application/pdf',
-          'Content-Disposition': `${disposition}; filename="${fileName}"`,
+          'Content-Type': /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i.test(safeType) ? safeType : 'application/pdf',
+          'Content-Disposition': `${disposition}; filename="${asciiFileName(fileName)}"`,
           'Cache-Control': cacheControl,
         },
       });

@@ -3,15 +3,21 @@ import { prisma } from '../../../../../lib/prisma';
 import { identificar } from '../../../../../lib/portal/acceso';
 import { generarCertificadoPdf } from '../../../../../lib/portal/certificado-pdf';
 import { formadoresDePortal } from '../../../../../lib/portal/config';
+import { archivarCertificadoEnSharePoint } from '../../../../../lib/portal/formacion';
+import { descargarArchivoFormacion } from '../../../../../lib/portal/formacion-storage';
 
 /**
  * Sirve el PDF de un certificado ya emitido.
  *
  *   GET /api/portal/certificates/:code
  *
- * Se genera EN EL MOMENTO a partir de los datos congelados en
- * `portal_certificate` (nunca del curso en vivo): pedirlo dos veces da
- * siempre el mismo PDF, así el curso haya cambiado de nombre después.
+ * Desde 2026-09-30 el PDF se archiva en SharePoint al emitirse
+ * (FORMACION/<curso>/certificados/<codigo>.pdf) y este endpoint lo sirve
+ * desde allá, como PROXY con la sesión del portal. Si todavía no está
+ * archivado (emitido antes del cambio, o SharePoint falló en ese momento),
+ * se genera EN EL MOMENTO a partir de los datos congelados en
+ * `portal_certificate` —nunca del curso en vivo— y se intenta archivar de
+ * paso. Pedirlo dos veces da siempre el mismo contenido.
  *
  * Exige sesión del portal, igual que el resto de los archivos que sirve —
  * pero no exige ser el DUEÑO del certificado: un formador puede necesitar
@@ -38,6 +44,30 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: 'No tiene acceso a este certificado.' }, { status: 403 });
     }
 
+    const nombreArchivo = `Certificado-${certificado.code}.pdf`;
+    const disposicion = `inline; filename*=UTF-8''${encodeURIComponent(nombreArchivo)}`;
+
+    if (certificado.sp_drive_item_id) {
+      try {
+        const archivo = await descargarArchivoFormacion(certificado.sp_drive_item_id);
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': disposicion,
+          'Cache-Control': 'private, max-age=300',
+        };
+        if (archivo.tamano) headers['Content-Length'] = String(archivo.tamano);
+        return new NextResponse(archivo.cuerpo, { headers });
+      } catch (e) {
+        // El certificado es un derecho del estudiante: si SharePoint no
+        // responde, se genera igual con los datos congelados.
+        console.error('[portal] Certificado no disponible en SharePoint, se genera al vuelo', certificado.code, e);
+      }
+    } else {
+      await archivarCertificadoEnSharePoint(certificado.code).catch((e) =>
+        console.error('[portal] No se pudo archivar el certificado en SharePoint', certificado.code, e)
+      );
+    }
+
     const pdf = await generarCertificadoPdf({
       code: certificado.code,
       studentName: certificado.student_name,
@@ -49,7 +79,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       headers: {
         'Content-Type': 'application/pdf',
         'Content-Length': String(pdf.byteLength),
-        'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(`Certificado-${certificado.code}.pdf`)}`,
+        'Content-Disposition': disposicion,
         'Cache-Control': 'private, max-age=300',
       },
     });

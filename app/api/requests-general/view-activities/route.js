@@ -5,8 +5,8 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '../../auth/[...nextauth]/route';
 
 const TASK_SELECT = `
-        SELECT 
-            trg.id, trg.id_task, tpc.task ,rg.id as id_request_general, rg.description, rg.subject_request, rg.id_company, c.company ,rg.created_at, 
+        SELECT
+            trg.id, trg.id_task, tpc.task ,rg.id as id_request_general, rg.description, rg.subject_request, rg.id_company, c.company ,rg.created_at,
             rg.id_requester, urq.name as name_requester, urq.email as requester_email, rg.status_req, trg.id_status ,sc.status as status_task, u.name as assigned, pc.process, cr.category,
             trg.start_date, trg.resolution, trg.date_resolution, uex.name as executor_final,
             pc.id AS id_process_category
@@ -115,6 +115,14 @@ async function resolveTaskIdForRequest(pool, { requestId, fileId, userId }) {
 
 export async function GET(req) {
   try {
+    // Sesión obligatoria también para `?id=`: antes cualquiera sin sesión podía leer
+    // cualquier tarea (asunto, descripción, correo del solicitante) por su id.
+    // Nota: aún no se valida que la sesión tenga relación con la tarea (ver inventario IDOR).
+    const guardSession = await getServerSession(authOptions);
+    if (!guardSession?.user?.email) {
+      return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
     const requestIdRaw = searchParams.get('requestId');

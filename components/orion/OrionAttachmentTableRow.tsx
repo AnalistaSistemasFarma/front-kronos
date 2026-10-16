@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  ActionIcon,
   Badge,
   Button,
   Group,
@@ -13,7 +12,6 @@ import {
   UnstyledButton,
 } from '@mantine/core';
 import {
-  IconEye,
   IconFile,
   IconPencil,
   IconSignature,
@@ -39,6 +37,8 @@ import OrionDocumentLifecycleModal from './OrionDocumentLifecycleModal';
 import OrionReviewPanel from './OrionReviewPanel';
 import { knownReadyForSigning } from '../../lib/orion/reviewState';
 import { esEstadoFinalOrion } from '../../lib/orion/deletePolicy';
+import DocStageTrack from './DocStageTrack';
+import ViewOnlineButton from './ViewOnlineButton';
 
 type RowProps = OrionAttachmentSignActionsProps & {
   rowNumber?: number | string;
@@ -49,9 +49,16 @@ type RowProps = OrionAttachmentSignActionsProps & {
   versionsSlot?: ReactNode;
   canDeleteAttachment?: boolean;
   onDeleteAttachment?: (fileId: string, fileName?: string | null) => void | Promise<void>;
+  /** Botón para borrar adjuntos de prueba (solo testing/local; lo arma la página). */
+  testDeleteSlot?: ReactNode;
   /** Llegó desde Autorizaciones a validar este documento: abre el modal de validación. */
   autoOpenReview?: boolean;
+  /** PDF que salió de un Word en preparación: se muestra como sub-fila debajo de ese Word. */
+  nestedUnderWord?: boolean;
 };
+
+/** Etapas del PDF para firmar (su validación es independiente de la del Word del que salió). */
+const PDF_STAGES = ['Validación PDF', 'Ubicar firmas', 'Firmas'] as const;
 
 function ActionLink({
   icon,
@@ -118,7 +125,9 @@ export default function OrionAttachmentTableRow({
   versionsSlot,
   canDeleteAttachment = false,
   onDeleteAttachment,
+  testDeleteSlot,
   autoOpenReview = false,
+  nestedUnderWord = false,
   ...props
 }: RowProps) {
   void previewUrl; // OneDrive webUrl no se usa: Ver en línea va por proxy SynerLink.
@@ -264,7 +273,14 @@ export default function OrionAttachmentTableRow({
 
   return (
     <>
-    <Table.Tr className={isClosed ? 'doc-row doc-row--closed' : 'doc-row'}>
+    <Table.Tr
+      className={isClosed ? 'doc-row doc-row--closed' : 'doc-row'}
+      style={
+        nestedUnderWord
+          ? { background: 'color-mix(in srgb, var(--mantine-color-teal-light) 45%, transparent)' }
+          : undefined
+      }
+    >
       <Table.Td data-label='N.º' className='doc-cell doc-cell--mono doc-col--secondary' style={{ width: 56, whiteSpace: 'nowrap' }}>
         <Text size='sm' c='dimmed'>
           {rowNumber ?? '—'}
@@ -273,6 +289,12 @@ export default function OrionAttachmentTableRow({
 
       <Table.Td data-label='Documento' className='doc-cell doc-cell--file' style={{ minWidth: 140, maxWidth: 280 }}>
         <Group gap={6} wrap='nowrap' align='flex-start'>
+          {nestedUnderWord ? (
+            // Conector "└" hacia el Word de arriba: este PDF salió de ese documento.
+            <Text size='sm' c='teal.7' fw={700} aria-hidden style={{ flexShrink: 0, lineHeight: 1.4, paddingLeft: 4 }}>
+              └
+            </Text>
+          ) : null}
           <div style={{ minWidth: 0, flex: 1 }}>
             <Text size='sm' fw={700} lineClamp={2}>
               {props.fileName}
@@ -282,23 +304,28 @@ export default function OrionAttachmentTableRow({
                 {fileSizeLabel}
               </Text>
             ) : null}
+            {d.state.sourceDraftFileId ? (
+              <Tooltip
+                label='Se preparó en Word. Este PDF tiene su propia validación antes de firmar.'
+                multiline
+                maw={260}
+                withArrow
+              >
+                <Badge size='xs' variant='light' color='teal' mt={4} styles={{ label: { textTransform: 'none' } }}>
+                  Viene del Word
+                </Badge>
+              </Tooltip>
+            ) : null}
           </div>
           {viewOnlineHref ? (
-            <Tooltip label='Ver en línea (sin descargar)'>
-              <ActionIcon
-                variant='subtle'
-                color='blue'
-                size='md'
-                component='a'
-                href={viewOnlineHref}
-                target='_blank'
-                rel='noopener noreferrer'
-                aria-label={`Ver en línea ${props.fileName}`}
-                style={{ flexShrink: 0, marginTop: 1, minWidth: 36, minHeight: 36 }}
-              >
-                <IconEye size={16} />
-              </ActionIcon>
-            </Tooltip>
+            <ViewOnlineButton
+              fileName={props.fileName}
+              href={viewOnlineHref}
+              inlineSrc={viewOnlineHref}
+              downloadUrl={downloadHref}
+              size='md'
+              style={{ flexShrink: 0, marginTop: 1, minWidth: 36, minHeight: 36 }}
+            />
           ) : null}
         </Group>
       </Table.Td>
@@ -374,6 +401,13 @@ export default function OrionAttachmentTableRow({
               —
             </Text>
           )}
+          {d.forSigning ? (
+            <DocStageTrack
+              stages={PDF_STAGES}
+              stage={isClosed ? 3 : d.signers.length > 0 ? 2 : validationComplete ? 1 : 0}
+              doneLabel='Listo: firmado'
+            />
+          ) : null}
         </Stack>
       </Table.Td>
 
@@ -412,6 +446,7 @@ export default function OrionAttachmentTableRow({
                 disabled={!downloadHref}
               />
               {deleteAction}
+              {testDeleteSlot}
             </Stack>
           </div>
         ) : !d.forSigning ? (
@@ -434,6 +469,7 @@ export default function OrionAttachmentTableRow({
                 disabled={!downloadHref}
               />
               {deleteAction}
+              {testDeleteSlot}
             </Stack>
           </div>
         ) : (
@@ -490,6 +526,7 @@ export default function OrionAttachmentTableRow({
               ) : null}
 
               {deleteAction}
+              {testDeleteSlot}
 
               {canAccessOriginalFile && originalFileHref ? (
                 <ActionLink
@@ -499,7 +536,8 @@ export default function OrionAttachmentTableRow({
                 />
               ) : null}
 
-              {d.hasOrionDoc && d.signers.length > 0 ? (
+              {/* Las URL de firma solo las comparte quien maneja el flujo, nunca el firmante. */}
+              {d.hasOrionDoc && d.signers.length > 0 && d.permissions.canManageWorkflow ? (
                 <ActionLink
                   icon={<IconUsers size={15} stroke={1.6} />}
                   label='Invitar / URL de firma'

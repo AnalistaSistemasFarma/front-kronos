@@ -9,6 +9,7 @@ import {
 } from '../../../../../../lib/chat/constants';
 import { computeNextPollMs } from '../../../../../../lib/chat/polling';
 import { subagentesEnCurso } from '../../../../../../lib/chat/client';
+import { agentMetricsForViewer } from '../../../../../../lib/chat/agent-metrics-store';
 import {
   badRequest,
   guardConversation,
@@ -56,7 +57,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const limit = parsePositiveInt(sp.get('limit'), POLL_PAGE_MAX, POLL_PAGE_MAX);
     const hidden = sp.get('hidden') === '1';
 
-    const [rows, estados, conversation, lastMessage] = await Promise.all([
+    const [rows, estados, conversation, lastMessage, metrics] = await Promise.all([
       prisma.chatMessage.findMany({
         where: { id_conversation: guard.conversationId, id: { gt: after } },
         orderBy: { id: 'asc' },
@@ -80,6 +81,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         orderBy: { id: 'desc' },
         select: { role: true },
       }),
+      // Métricas del mod (contexto, tokens, modelo). Solo hilo directo y solo si
+      // el usuario las puede ver; nunca lanza, así que no tumba el sondeo.
+      agentMetricsForViewer(guard.user.email, guard),
     ]);
 
     const hasMore = rows.length > limit;
@@ -159,6 +163,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         : null,
       // Desglose por agente: lo que pinta el encabezado de un grupo.
       statuses,
+      // undefined (no se manda) = este usuario no ve métricas; null = no hay.
+      ...(metrics !== undefined ? { metrics } : {}),
       nextPollMs,
       serverTime: new Date().toISOString(),
     });

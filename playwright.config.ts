@@ -8,13 +8,54 @@ import { defineConfig, devices } from '@playwright/test';
  *   - E2E_BASE_URL definido  → ese servidor (p.ej. pruebas en la .230).
  *   - sin E2E_BASE_URL        → levanta `next start` local en el puerto 3100
  *                               (el build ya debe existir: `npm run build`).
- * Las pruebas con sesión necesitan E2E_USER_EMAIL / E2E_USER_PASSWORD de un
- * usuario de pruebas; sin ellas se omiten (no fallan).
+ *
+ * Proyectos:
+ *   - publico     → pruebas sin sesión (siempre).
+ *   - setup       → inicia sesión UNA vez con el usuario de pruebas y guarda
+ *                   la sesión (storageState). Corre con trace y capturas
+ *                   APAGADAS: la traza de Playwright guarda en claro lo que se
+ *                   escribe, incluida la contraseña, y la CI archiva los
+ *                   reportes 90 días.
+ *   - con-sesion  → pruebas *.session.spec.ts con esa sesión; nunca escriben
+ *                   la contraseña, así que su traza no la contiene.
+ *   - firma       → (S3) pruebas *.firma.spec.ts: firman con reautenticación
+ *                   (escriben la contraseña), así que corren SIN traza,
+ *                   capturas ni video, como `setup`.
+ *   - movil-ios / movil-android → (revisión móvil 2026-10-03) pruebas
+ *                   *.movil.spec.ts en pantalla de celular con toque (iPhone
+ *                   390×844 y Android 360×740, ambas con Chromium, que es el
+ *                   navegador que instala la CI). Firman con reautenticación,
+ *                   así que corren sin traza, capturas ni video.
+ *   (S2) Con E2E_USER_EMAIL2/3 y E2E_USER_PASSWORD2/3, `setup` también deja
+ *   las sesiones 2 y 3 para el recorrido con varios revisores y aprobadores.
+ *   (2026-10-10) Con E2E_USER_EMAIL4/E2E_USER_PASSWORD4 deja la sesión 4: el
+ *   SOLICITANTE (qa.sgc4), que no puede ser el elaborador (RN 2026-10-05).
+ * setup y con-sesion solo existen si hay E2E_USER_EMAIL y E2E_USER_PASSWORD.
  *
  * Reportes: reports/playwright/html (con capturas y trazas) y
  * reports/playwright/junit.xml. La CI los archiva como artefacto.
  */
 const baseURL = process.env.E2E_BASE_URL || 'http://127.0.0.1:3100';
+const hasUser = !!process.env.E2E_USER_EMAIL && !!process.env.E2E_USER_PASSWORD;
+export const STORAGE_STATE = 'reports/playwright/.auth/sesion.json';
+// Sprint 2: segundo y tercer usuario de pruebas (revisores/aprobadores del recorrido documental).
+export const STORAGE_STATE_2 = 'reports/playwright/.auth/sesion2.json';
+export const STORAGE_STATE_3 = 'reports/playwright/.auth/sesion3.json';
+// 2026-10-10: cuarto usuario de pruebas, SOLO SOLICITANTE (qa.sgc4). Desde las RN
+// del 2026-10-05 el elaborador sale de la matriz de responsables y nunca es el
+// solicitante: las solicitudes de la e2e las crea qa.sgc4 y las elabora qa.sgc
+// (fila de la matriz GC × PR en KRONOSDB_PRUEBAS), para que el respaldo de
+// Calidad no se las asigne a personas reales.
+export const STORAGE_STATE_4 = 'reports/playwright/.auth/sesion4.json';
+
+// Ventana emergente «Hoy» del portal (2026-10-15): se abre sola al entrar y TAPA la página. Para que ninguna prueba dependa de que hoy
+// sea o no un día con evento (festivos, fechas importantes, cumpleaños), el proyecto «publico» arranca con la de hoy ya marcada como vista.
+// Mismo formato que `claveVentanaHoy` en lib/portal/ventana-hoy.ts. Las pruebas de la ventana quitan esa marca a propósito.
+const hoyBogota = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+const SIN_VENTANA_HOY = {
+  cookies: [],
+  origins: [{ origin: new URL(baseURL).origin, localStorage: [{ name: `portal-th-ventana-hoy-${hoyBogota}`, value: '1' }] }],
+};
 
 export default defineConfig({
   testDir: './e2e',
@@ -30,12 +71,54 @@ export default defineConfig({
   outputDir: 'reports/playwright/artefactos',
   use: {
     baseURL,
-    trace: 'on',
+    trace: 'retain-on-failure',
     screenshot: 'on',
     locale: 'es-CO',
     timezoneId: 'America/Bogota',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    {
+      name: 'publico',
+      testIgnore: [/\.setup\.ts$/, /\.session\.spec\.ts$/, /\.firma\.spec\.ts$/, /\.movil\.spec\.ts$/],
+      use: { ...devices['Desktop Chrome'], storageState: SIN_VENTANA_HOY },
+    },
+    ...(hasUser
+      ? [
+          {
+            name: 'setup',
+            testMatch: /\.setup\.ts$/,
+            use: { ...devices['Desktop Chrome'], trace: 'off' as const, screenshot: 'off' as const, video: 'off' as const },
+          },
+          {
+            name: 'con-sesion',
+            testMatch: /\.session\.spec\.ts$/,
+            dependencies: ['setup'],
+            use: { ...devices['Desktop Chrome'], storageState: STORAGE_STATE },
+          },
+          {
+            // Sprint 3: firma electrónica con REAUTENTICACIÓN. Estas pruebas
+            // escriben la contraseña al firmar, así que corren como `setup`:
+            // sin traza, sin capturas y sin video (la CI verifica además que
+            // ninguna contraseña quede en los reportes).
+            name: 'firma',
+            testMatch: /\.firma\.spec\.ts$/,
+            dependencies: ['setup'],
+            use: { ...devices['Desktop Chrome'], storageState: STORAGE_STATE, trace: 'off' as const, screenshot: 'off' as const, video: 'off' as const },
+          },
+          ...(
+            [
+              ['movil-ios', { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, userAgent: devices['iPhone 13'].userAgent }],
+              ['movil-android', { viewport: { width: 360, height: 740 }, deviceScaleFactor: 3, userAgent: devices['Galaxy S9+'].userAgent }],
+            ] as const
+          ).map(([name, screen]) => ({
+            name,
+            testMatch: /\.movil\.spec\.ts$/,
+            dependencies: ['setup'],
+            use: { ...screen, isMobile: true, hasTouch: true, defaultBrowserType: 'chromium' as const, storageState: STORAGE_STATE, trace: 'off' as const, screenshot: 'off' as const, video: 'off' as const },
+          })),
+        ]
+      : []),
+  ],
   webServer: process.env.E2E_BASE_URL
     ? undefined
     : {

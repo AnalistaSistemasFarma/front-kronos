@@ -7,6 +7,9 @@ import {
 } from '../../../../lib/notificationEvents.js';
 import { syncAuthorizationToSapsend } from '../../../../lib/sapsend/authorizationStatus.js';
 import { advanceSequentialTask } from '../../../../lib/workflow/advanceSequentialTask.js';
+import { resolveSessionUser } from '../../../../lib/chat/http';
+import { authorizationDecisionBlock } from '../../../../lib/request-general/workload';
+import { orionInternalTaskSql } from '../../../../lib/orion/internalTasks';
 
 export async function POST(req) {
   const TAG = '[update-activities]';
@@ -50,7 +53,7 @@ export async function POST(req) {
       const prevResult = await new sql.Request(transaction)
         .input('id', sql.Int, id)
         .query(`
-          SELECT trg.id_status, trg.id_request_general, trg.id_task, trg.resolution,
+          SELECT trg.id_status, trg.id_request_general, trg.id_task, trg.resolution, trg.id_assigned,
                  rg.subject_request,
                  tpc.task, tpc.is_sequential, tpc.display_order, tpc.id_process_category,
                  tpc.is_authorization, taut.type_authorization,
@@ -81,6 +84,23 @@ export async function POST(req) {
       const taskName = String(prevRow?.task || '').toLowerCase();
       const isAuthorizationTask =
         Number(prevRow?.is_authorization) === 1 || prevRow?.is_authorization === true;
+      // Aprobador efectivo (c47 msg 16541): una autorización asignada solo la aprueba/rechaza su
+      // asignado ACTUAL (el usuario sale de la sesión). Si se reasignó, el anterior ya no puede.
+      let executorId = id_assigned;
+      if (isAuthorizationTask && [2, 3].includes(Number(id_status))) {
+        const sessionUser = await resolveSessionUser();
+        const block = authorizationDecisionBlock({
+          sessionUserId: sessionUser?.id ?? null,
+          currentAssignee: prevRow?.id_assigned ?? null,
+          currentStatus: prevRow?.id_status ?? null,
+        });
+        if (block) {
+          await transaction.rollback();
+          console.warn(`${TAG} ✖ Decisión de autorización bloqueada (${block.status}) tarea ${id}.`);
+          return new Response(JSON.stringify({ error: block.error }), { status: block.status });
+        }
+        executorId = sessionUser.id;
+      }
       const isSequentialTask =
         Number(prevRow?.is_sequential) === 1 || prevRow?.is_sequential === true;
       const isOrionSignerAuth =
@@ -123,6 +143,7 @@ export async function POST(req) {
                 ISNULL(tpc2.display_order, 0) < @display_order
                 OR (ISNULL(tpc2.display_order, 0) = @display_order AND trg2.id_task < @id_task)
               )
+              AND NOT ${orionInternalTaskSql('trg2', 'tpc2')}
             ORDER BY ISNULL(tpc2.display_order, 0) DESC, trg2.id_task DESC
           `);
         const pred = predResult.recordset[0];
@@ -216,7 +237,7 @@ export async function POST(req) {
       request.input(
         'id_executor_final',
         sql.NVarChar(1000),
-        id_assigned
+        executorId
       );
 
       await request.query(updateQuery);
@@ -235,7 +256,7 @@ export async function POST(req) {
             requestId: prevRow?.id_request_general,
             subject: prevRow?.subject_request,
             taskName: prevRow?.task,
-            executorUserId: id_assigned,
+            executorUserId: executorId,
           })
         );
       }
@@ -247,7 +268,7 @@ export async function POST(req) {
           syncAuthorizationToSapsend(
             prevRow?.id_request_general,
             Number(nextStatus) === 2,
-            id_assigned,
+            executorId,
             resolution
           )
         );
@@ -269,7 +290,7 @@ export async function POST(req) {
           await new sql.Request(pool)
             .input('note', sql.Text, noteText)
             .input('id_request', sql.Int, prevRow?.id_request_general)
-            .input('created_by', sql.NVarChar, id_assigned)
+            .input('created_by', sql.NVarChar, executorId)
             .query(`
               INSERT INTO notes (note, id_request, created_by)
               VALUES (@note, @id_request, @created_by)
@@ -279,19 +300,20 @@ export async function POST(req) {
         }
       }
 
-      // Creación diferida (lazy) de la siguiente tarea secuencial: cuando esta tarea se cierra
-      // (Resuelto=2 o Cancelado=3), si la siguiente tarea del orden es secuencial y aún no existe
-      // en la solicitud, se instancia ahora y se notifica a su(s) responsable(s).
+      // Creación diferida (lazy) de la siguiente tarea secuencial: SOLO cuando esta tarea se
+      // RESUELVE/APRUEBA (Resuelto=2). Un rechazo/cancelación (id_status=3) NO avanza el flujo:
+      // la solicitud se detiene y no debe llegar a la siguiente tarea (p. ej. "Programación de
+      // Pago"). Antes se usaba CLOSED_STATUSES=[2,3], lo que hacía que una solicitud rechazada
+      // igual creara la siguiente tarea.
       const CLOSED_STATUSES = [2, 3];
-      const justClosed =
-        CLOSED_STATUSES.includes(Number(nextStatus)) &&
-        !CLOSED_STATUSES.includes(Number(prevStatus));
+      const justResolved =
+        Number(nextStatus) === 2 && !CLOSED_STATUSES.includes(Number(prevStatus));
 
-      console.log(`${TAG} 5) ¿Se acaba de cerrar la tarea? justClosed =`, justClosed, `(prevStatus=${prevStatus} -> nextStatus=${nextStatus})`);
+      console.log(`${TAG} 5) ¿Se acaba de RESOLVER la tarea (2)? justResolved =`, justResolved, `(prevStatus=${prevStatus} -> nextStatus=${nextStatus})`);
 
       // Creación diferida de la siguiente tarea secuencial.
       // Auths Orion por firmante no avanzan el workflow Fase B.
-      if (justClosed && !isFirmaAuthorization) {
+      if (justResolved && !isFirmaAuthorization) {
         await advanceSequentialTask(pool, {
           id_request_general: prevRow.id_request_general,
           id_task: prevRow.id_task,
@@ -299,8 +321,10 @@ export async function POST(req) {
           display_order: prevRow.display_order,
           subject_request: prevRow.subject_request,
         });
-      } else if (justClosed && isFirmaAuthorization) {
+      } else if (justResolved && isFirmaAuthorization) {
         console.log(`${TAG} 5b) Auth FIRMA/Orion: no se avanza workflow secuencial.`);
+      } else if (Number(nextStatus) === 3) {
+        console.log(`${TAG} 5c) Tarea rechazada/cancelada (3): el flujo se detiene, no se crea la siguiente tarea.`);
       }
 
       console.log(`${TAG} ✅ Respondiendo 200 (tarea ${id} actualizada).`);

@@ -228,8 +228,14 @@ function RequestBoard() {
     return describeCron(job.cron_expression);
   };
 
-  const formatJobDate = (value: string | null) =>
-    value ? new Date(value).toLocaleString('es-CO', { hour12: true }) : '—';
+  const formatJobDate = (value: string | null) => {
+    if (!value) return '—';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '—';
+    return new Date(parsed.getTime() + 5 * 60 * 60 * 1000).toLocaleString('es-CO', {
+      hour12: true,
+    });
+  };
 
   const resetJobForm = () => {
     setJobForm({ ...EMPTY_JOB_FORM, startDate: new Date().toISOString().slice(0, 10) });
