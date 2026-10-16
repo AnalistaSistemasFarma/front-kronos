@@ -16,6 +16,7 @@ import { GraphMailProvider, mailboxForSession, tokenApp } from './graph';
 import { MockMailProvider } from './mock';
 import { agruparPorHilo, filaDesdeHilo, notaDesdeCorreo, notaDesdeRespuesta, type FilaCrear, type ProcesoOpcion } from './rules';
 import { sanitizeEmailHtml } from './sanitize';
+import { markdownAHtml, markdownATexto } from './markdown';
 import { claveAcuse, enlaceSolicitud, textoAcuse, type OpcionesAcuse } from './acuse';
 import { fragmentoAcuse, logoAcuseUrl } from './plantillas/acuse.html';
 import type { SolicitudVisible } from './kronos';
@@ -309,7 +310,9 @@ export async function responder(
   const prov = await proveedorDe(d, acceso);
   // Se lee el mensaje del buzón PROPIO: si el id no es de su buzón, Graph responde 404.
   const original = await prov.mensaje(p.mensajeId);
-  await prov.responder(original.id, { texto, todos: p.todos, adjuntos: p.adjuntos });
+  // La respuesta admite Markdown sencillo (negrita, cursiva, listas, enlaces): sale como HTML saneado.
+  const comentarioHtml = markdownAHtml(texto);
+  await prov.responder(original.id, { texto: markdownATexto(texto), todos: p.todos, adjuntos: p.adjuntos, ...(comentarioHtml ? { comentarioHtml } : {}) });
   const vinculo = original.conversationId ? await data.vinculoDeHilo(d.db, acceso.idUser, original.conversationId) : null;
   const para = p.todos ? [original.de, ...original.para, ...original.cc].map((x) => x.correo).filter((c) => c && c !== acceso.email.toLowerCase()) : [original.de.correo];
   await data.auditar(d.db, {
@@ -326,7 +329,7 @@ export async function responder(
   if (!vinculo) return { notaEnSolicitud: null };
   await d.kronos.insertarNota(
     vinculo.idRequest,
-    notaDesdeRespuesta({ operador: acceso.nombre, para: [...new Set(para)], texto, adjuntos: p.adjuntos.map((a) => a.nombre), todos: p.todos }, CORREO_MAX_NOTA),
+    notaDesdeRespuesta({ operador: acceso.nombre, para: [...new Set(para)], texto: markdownATexto(texto), adjuntos: p.adjuntos.map((a) => a.nombre), todos: p.todos }, CORREO_MAX_NOTA),
     acceso.idUser
   );
   return { notaEnSolicitud: vinculo.idRequest };

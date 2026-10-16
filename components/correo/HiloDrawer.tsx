@@ -1,53 +1,68 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionIcon,
   Alert,
   Anchor,
   Badge,
+  Box,
   Button,
   Card,
   Checkbox,
-  Divider,
+  Collapse,
   Drawer,
   FileInput,
   Group,
+  Image,
   Loader,
+  Modal,
   NumberInput,
+  Paper,
   Stack,
   Switch,
   Text,
-  Textarea,
   Title,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import {
   IconAlertTriangle,
+  IconArrowBackUp,
+  IconArrowBackUpDouble,
   IconCheck,
+  IconChevronDown,
+  IconChevronUp,
   IconDownload,
   IconEye,
+  IconFile,
+  IconFileTypePdf,
   IconLink,
   IconNotes,
   IconPaperclip,
   IconPhoto,
   IconPlus,
   IconSend,
-  IconX,
+  IconTrash,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { CORREO_MAX_ADJUNTO_RESPUESTA_BYTES, CORREO_MAX_ADJUNTOS_RESPUESTA } from '../../lib/correo/constants';
 import { ACUSE_A_TODOS, ACUSE_ETIQUETA, enlaceSolicitud } from '../../lib/correo/acuse';
 import { fragmentoAcuse, logoAcuseUrl } from '../../lib/correo/plantillas/acuse.html';
-import type { ResultadoAcuse } from '../../lib/correo/types';
-import { correoApi, fechaLarga, PREVISUALIZABLES, tamano, urlAdjunto, urlSolicitud, type HiloVista } from './correoClient';
+import { htmlATexto } from '../../lib/correo/sanitize';
+import type { AdjuntoInfo, ResultadoAcuse } from '../../lib/correo/types';
+import { correoApi, fechaCorta, fechaLarga, PREVISUALIZABLES, tamano, urlAdjunto, urlSolicitud, type HiloVista, type MensajeVista } from './correoClient';
+import EditorMarkdown from './EditorMarkdown';
 import HtmlSeguro from './HtmlSeguro';
+import { AvatarPersona } from './ui';
 
 /**
- * Vista del HILO (todos los mensajes de la conversación, del más antiguo al más
- * reciente): cuerpo saneado, adjuntos para ver o descargar, el caso vinculado
- * (con los correos nuevos que aún no están en el caso) y la respuesta sobre el hilo.
+ * Vista del HILO, al estilo Gmail: el asunto arriba con el caso vinculado, los mensajes
+ * apilados (los anteriores plegados en una línea —remitente, extracto y fecha— y el último
+ * desplegado), los adjuntos como fichas con vista previa y, al final, «Responder» /
+ * «Responder a todos», que abren el editor en el mismo hilo (con negrita, cursiva, listas
+ * y enlaces). El cuerpo siempre llega saneado del servidor y se muestra aislado.
  */
 export interface HiloDrawerProps {
   conversationId: string | null;
@@ -60,11 +75,209 @@ export interface HiloDrawerProps {
   envioHabilitado?: boolean;
   /** Nombre de la persona (firma del texto «Informar en el hilo»). */
   nombreOperador?: string;
+  /** Correo de la persona (para mostrar «para mí»). */
+  correoOperador?: string;
 }
 
 type Resultado = { color: 'green' | 'red' | 'yellow'; texto: string; reintentarAcuse?: { confirmarExterno: boolean } } | null;
 
-export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, onCambio, envioHabilitado = true, nombreOperador = '' }: HiloDrawerProps) {
+const lista = (ds: Array<{ nombre: string; correo: string }>, yo: string) =>
+  ds.map((d) => (d.correo && d.correo.toLowerCase() === yo ? 'mí' : d.nombre || d.correo)).join(', ');
+
+function FichaAdjunto({ m, a, onVer }: { m: MensajeVista; a: AdjuntoInfo; onVer: (a: AdjuntoInfo) => void }) {
+  const tipo = a.tipo.toLowerCase();
+  const esImagen = tipo.startsWith('image/');
+  const esPdf = tipo === 'application/pdf';
+  const visible = PREVISUALIZABLES.has(tipo);
+  return (
+    <Paper withBorder radius='md' p={8} w={{ base: '100%', xs: 220 }} data-testid='correo-adjunto'>
+      <Group gap={8} wrap='nowrap'>
+        <Box c={esPdf ? 'red' : esImagen ? 'blue' : 'dimmed'} style={{ flexShrink: 0, display: 'flex' }}>
+          {esPdf ? <IconFileTypePdf size={28} /> : esImagen ? <IconPhoto size={28} /> : <IconFile size={28} />}
+        </Box>
+        <Stack gap={0} style={{ minWidth: 0, flex: 1 }}>
+          <Text size='sm' fw={500} truncate title={a.nombre}>
+            {a.nombre}
+          </Text>
+          <Text size='xs' c='dimmed'>
+            {tamano(a.tamano)}
+          </Text>
+        </Stack>
+        <Group gap={0} wrap='nowrap'>
+          {visible && (
+            <Tooltip label='Vista previa'>
+              {esImagen ? (
+                <ActionIcon variant='subtle' color='gray' onClick={() => onVer(a)} aria-label={`Ver ${a.nombre}`}>
+                  <IconEye size={18} />
+                </ActionIcon>
+              ) : (
+                <ActionIcon component='a' href={urlAdjunto(m.id, a.id, true)} target='_blank' rel='noopener noreferrer' variant='subtle' color='gray' aria-label={`Ver ${a.nombre}`}>
+                  <IconEye size={18} />
+                </ActionIcon>
+              )}
+            </Tooltip>
+          )}
+          <Tooltip label='Descargar'>
+            <ActionIcon component='a' href={urlAdjunto(m.id, a.id)} variant='subtle' color='gray' aria-label={`Descargar ${a.nombre}`}>
+              <IconDownload size={18} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+      </Group>
+    </Paper>
+  );
+}
+
+function MensajeHilo({
+  m,
+  abierto,
+  onToggle,
+  remotas,
+  yo,
+  onVerAdjunto,
+}: {
+  m: MensajeVista;
+  abierto: boolean;
+  onToggle: () => void;
+  remotas: boolean;
+  yo: string;
+  onVerAdjunto: (m: MensajeVista, a: AdjuntoInfo) => void;
+}) {
+  const [detalles, setDetalles] = useState(false);
+  const extracto = useMemo(() => (abierto ? '' : htmlATexto(m.html).replace(/\s+/g, ' ').slice(0, 180)), [abierto, m.html]);
+  const visibles = m.adjuntos.filter((a) => !a.enLinea);
+  return (
+    <Card withBorder radius='md' p={0} data-testid='correo-hilo-mensaje' data-abierto={abierto ? '1' : '0'}>
+      <UnstyledButton
+        onClick={onToggle}
+        px='sm'
+        py={abierto ? 'sm' : 8}
+        w='100%'
+        aria-expanded={abierto}
+        aria-label={abierto ? `Plegar el correo de ${m.de.nombre}` : `Desplegar el correo de ${m.de.nombre}`}
+        data-testid='correo-hilo-mensaje-cabecera'
+      >
+        <Group wrap='nowrap' gap='sm' align={abierto ? 'flex-start' : 'center'}>
+          <AvatarPersona nombre={m.de.nombre} correo={m.de.correo} size={abierto ? 40 : 32} />
+          <Box style={{ flex: 1, minWidth: 0 }}>
+            <Group gap={6} wrap='nowrap' style={{ minWidth: 0 }}>
+              <Text size='sm' fw={700} truncate style={{ flexShrink: 0, maxWidth: '60%' }}>
+                {m.de.nombre || m.de.correo}
+              </Text>
+              {abierto && (
+                <Text size='xs' c='dimmed' truncate>
+                  &lt;{m.de.correo}&gt;
+                </Text>
+              )}
+            </Group>
+            {abierto ? (
+              (m.para.length > 0 || m.cc.length > 0) && (
+                <Group gap={2} wrap='nowrap' style={{ minWidth: 0 }}>
+                  <Text size='xs' c='dimmed' truncate>
+                    para {lista(m.para, yo)}
+                    {m.cc.length ? `, cc ${lista(m.cc, yo)}` : ''}
+                  </Text>
+                  <ActionIcon
+                    size='xs'
+                    variant='subtle'
+                    color='gray'
+                    component='span'
+                    role='button'
+                    tabIndex={0}
+                    aria-label='Ver detalles del correo'
+                    onClick={(e: React.MouseEvent) => {
+                      e.stopPropagation();
+                      setDetalles((v) => !v);
+                    }}
+                    data-testid='correo-hilo-detalles'
+                  >
+                    {detalles ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
+                  </ActionIcon>
+                </Group>
+              )
+            ) : (
+              <Text size='xs' c='dimmed' truncate data-testid='correo-hilo-extracto'>
+                {extracto}
+              </Text>
+            )}
+          </Box>
+          <Group gap={6} wrap='nowrap' style={{ flexShrink: 0 }}>
+            {m.enCaso && (
+              <Badge size='sm' color='teal' variant='light'>
+                En el caso
+              </Badge>
+            )}
+            {!abierto && visibles.length > 0 && <IconPaperclip size={14} aria-label='Con adjuntos' />}
+            <Tooltip label={fechaLarga(m.fecha)} openDelay={300}>
+              <Text size='xs' c='dimmed'>
+                {abierto ? fechaLarga(m.fecha) : fechaCorta(m.fecha)}
+              </Text>
+            </Tooltip>
+          </Group>
+        </Group>
+      </UnstyledButton>
+      {abierto && (
+        <Stack gap='sm' px='sm' pb='sm' pl={{ base: 'sm', sm: 64 }}>
+          <Collapse in={detalles}>
+            <Paper withBorder radius='sm' p='xs' data-testid='correo-hilo-detalles-panel'>
+              <Stack gap={2}>
+                <Text size='xs'>
+                  <Text span c='dimmed' w={50} display='inline-block'>
+                    De:
+                  </Text>
+                  {m.de.nombre} &lt;{m.de.correo}&gt;
+                </Text>
+                {m.para.length > 0 && (
+                  <Text size='xs'>
+                    <Text span c='dimmed' w={50} display='inline-block'>
+                      Para:
+                    </Text>
+                    {m.para.map((p) => p.correo).join(', ')}
+                  </Text>
+                )}
+                {m.cc.length > 0 && (
+                  <Text size='xs'>
+                    <Text span c='dimmed' w={50} display='inline-block'>
+                      CC:
+                    </Text>
+                    {m.cc.map((p) => p.correo).join(', ')}
+                  </Text>
+                )}
+                <Text size='xs'>
+                  <Text span c='dimmed' w={50} display='inline-block'>
+                    Fecha:
+                  </Text>
+                  {fechaLarga(m.fecha)}
+                </Text>
+                <Text size='xs'>
+                  <Text span c='dimmed' w={50} display='inline-block'>
+                    Asunto:
+                  </Text>
+                  {m.asunto}
+                </Text>
+              </Stack>
+            </Paper>
+          </Collapse>
+          <HtmlSeguro html={m.html} remotas={remotas} titulo={`Correo de ${m.de.nombre}`} />
+          {visibles.length > 0 && (
+            <Stack gap={6}>
+              <Text size='xs' fw={600} c='dimmed'>
+                {visibles.length} adjunto(s)
+              </Text>
+              <Group gap='xs' wrap='wrap'>
+                {visibles.map((a) => (
+                  <FichaAdjunto key={a.id} m={m} a={a} onVer={(x) => onVerAdjunto(m, x)} />
+                ))}
+              </Group>
+            </Stack>
+          )}
+        </Stack>
+      )}
+    </Card>
+  );
+}
+
+export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, onCambio, envioHabilitado = true, nombreOperador = '', correoOperador = '' }: HiloDrawerProps) {
   const desktop = useMediaQuery('(min-width: 48em)') ?? true;
   const [hilo, setHilo] = useState<HiloVista | null>(null);
   const [cargando, setCargando] = useState(false);
@@ -73,6 +286,7 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
   const [resultado, setResultado] = useState<Resultado>(null);
   const [texto, setTexto] = useState('');
   const [todos, setTodos] = useState(false);
+  const [redactando, setRedactando] = useState(false);
   const [archivos, setArchivos] = useState<File[]>([]);
   const [enviando, setEnviando] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
@@ -81,6 +295,10 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
   const [acuseVincular, setAcuseVincular] = useState(true);
   const [confirmarInforme, setConfirmarInforme] = useState(false);
   const [reintentando, setReintentando] = useState(false);
+  const [abiertos, setAbiertos] = useState<Set<string>>(new Set());
+  const [verAdjunto, setVerAdjunto] = useState<{ url: string; nombre: string } | null>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const yo = correoOperador.toLowerCase();
 
   const cargar = useCallback(
     async (conRemotas: boolean) => {
@@ -90,6 +308,14 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
       try {
         const r = await correoApi.hilo(conversationId, conRemotas);
         setHilo(r.hilo);
+        // Como Gmail: el último y los no leídos desplegados; los demás en una línea.
+        setAbiertos((prev) => {
+          const n = new Set([...prev].filter((id) => r.hilo.mensajes.some((m) => m.id === id)));
+          const ult = r.hilo.mensajes[r.hilo.mensajes.length - 1];
+          if (ult) n.add(ult.id);
+          for (const m of r.hilo.mensajes) if (!m.leido) n.add(m.id);
+          return n;
+        });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -106,13 +332,28 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
     setTexto('');
     setArchivos([]);
     setTodos(false);
+    setRedactando(false);
     setIdVincular('');
     setAcuseVincular(true);
     setConfirmarInforme(false);
+    setAbiertos(new Set());
     if (conversationId) void cargar(false);
   }, [conversationId, cargar]);
 
   const ultimo = hilo?.mensajes[hilo.mensajes.length - 1] ?? null;
+  const variosDestinatarios = Boolean(ultimo && [ultimo.de, ...ultimo.para, ...ultimo.cc].filter((d) => d.correo && d.correo.toLowerCase() !== yo).length > 1);
+
+  const abrirRedaccion = (aTodos: boolean) => {
+    setTodos(aTodos);
+    setRedactando(true);
+    requestAnimationFrame(() => editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+  };
+
+  const descartar = () => {
+    setTexto('');
+    setArchivos([]);
+    setRedactando(false);
+  };
 
   const enviar = async () => {
     if (!ultimo || !texto.trim()) return;
@@ -130,6 +371,7 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
       toast.success('Respuesta enviada');
       setTexto('');
       setArchivos([]);
+      setRedactando(false);
       onCambio();
       void cargar(remotas);
     } catch (e) {
@@ -200,21 +442,53 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
   };
 
   const bloqueadas = hilo?.mensajes.reduce((s, m) => s + m.remotasBloqueadas, 0) ?? 0;
+  const toggle = (id: string) =>
+    setAbiertos((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const todosAbiertos = Boolean(hilo && hilo.mensajes.every((m) => abiertos.has(m.id)));
 
   return (
     <Drawer
       opened={Boolean(conversationId)}
       onClose={onClose}
       position='right'
-      size={desktop ? '60%' : '100%'}
+      size={desktop ? 'min(1000px, 72%)' : '100%'}
+      padding={desktop ? 'lg' : 'sm'}
       title={
-        <Title order={4} lineClamp={2}>
-          {hilo?.asunto || 'Hilo de correo'}
-        </Title>
+        <Stack gap={4} style={{ minWidth: 0 }}>
+          <Title order={3} fz={{ base: 18, sm: 22 }} fw={500} lineClamp={2} data-testid='correo-hilo-asunto'>
+            {hilo?.asunto || 'Hilo de correo'}
+          </Title>
+          {hilo && (
+            <Group gap={6}>
+              {hilo.vinculo && (
+                <Badge
+                  component='a'
+                  href={urlSolicitud(hilo.vinculo.idRequest)}
+                  color='teal'
+                  variant='light'
+                  leftSection={<IconLink size={12} />}
+                  style={{ cursor: 'pointer', textTransform: 'none' }}
+                  data-testid='correo-hilo-badge-solicitud'
+                >
+                  Solicitud #{hilo.vinculo.idRequest}
+                </Badge>
+              )}
+              <Badge color='gray' variant='light' style={{ textTransform: 'none' }}>
+                {hilo.mensajes.length} {hilo.mensajes.length === 1 ? 'mensaje' : 'mensajes'}
+              </Badge>
+            </Group>
+          )}
+        </Stack>
       }
+      styles={{ title: { flex: 1, minWidth: 0 } }}
       data-testid='correo-hilo'
     >
-      <Stack gap='md'>
+      <Stack gap='sm'>
         {resultado && (
           <Alert
             color={resultado.color}
@@ -267,25 +541,27 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
                       {hilo.vinculo.origen === 'CREADA' ? ' (creada desde este hilo)' : ''}
                     </Text>
                   </Group>
-                  {envioHabilitado &&
-                    (hilo.vinculo.acuseEnviadoEn ? (
-                      <Button size='xs' variant='default' disabled leftSection={<IconCheck size={14} />} data-testid='correo-hilo-informado'>
-                        Informado el {new Date(hilo.vinculo.acuseEnviadoEn).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}
+                  <Group gap='xs'>
+                    {envioHabilitado &&
+                      (hilo.vinculo.acuseEnviadoEn ? (
+                        <Button size='xs' variant='default' disabled leftSection={<IconCheck size={14} />} data-testid='correo-hilo-informado'>
+                          Informado el {new Date(hilo.vinculo.acuseEnviadoEn).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}
+                        </Button>
+                      ) : (
+                        <Button size='xs' variant='light' color='teal' onClick={() => setConfirmarInforme((v) => !v)} data-testid='correo-hilo-informar'>
+                          Informar en el hilo
+                        </Button>
+                      ))}
+                    {hilo.pendientes > 0 ? (
+                      <Button size='xs' leftSection={<IconNotes size={14} />} onClick={agregarNotas} loading={sincronizando} data-testid='correo-hilo-agregar-notas'>
+                        Agregar {hilo.pendientes} correo(s) nuevo(s) al caso
                       </Button>
                     ) : (
-                      <Button size='xs' variant='light' color='teal' onClick={() => setConfirmarInforme((v) => !v)} data-testid='correo-hilo-informar'>
-                        Informar en el hilo
-                      </Button>
-                    ))}
-                  {hilo.pendientes > 0 ? (
-                    <Button size='xs' leftSection={<IconNotes size={14} />} onClick={agregarNotas} loading={sincronizando} data-testid='correo-hilo-agregar-notas'>
-                      Agregar {hilo.pendientes} correo(s) nuevo(s) al caso
-                    </Button>
-                  ) : (
-                    <Badge color='teal' variant='light'>
-                      Caso al día
-                    </Badge>
-                  )}
+                      <Badge color='teal' variant='light'>
+                        Caso al día
+                      </Badge>
+                    )}
+                  </Group>
                 </Group>
                 {confirmarInforme && envioHabilitado && !hilo.vinculo.acuseEnviadoEn && (
                   <Stack gap={6} mt='xs' data-testid='correo-hilo-informar-confirmar'>
@@ -372,116 +648,96 @@ export default function HiloDrawer({ conversationId, onClose, onCrearSolicitud, 
               </Alert>
             )}
 
-            {hilo.mensajes.map((m) => (
-              <Card key={m.id} withBorder radius='md' p='sm' data-testid='correo-hilo-mensaje'>
-                <Stack gap={6}>
-                  <Group justify='space-between' wrap='wrap' gap={4}>
-                    <Text size='sm' fw={700}>
-                      {m.de.nombre}{' '}
-                      <Text span size='xs' c='dimmed'>
-                        &lt;{m.de.correo}&gt;
-                      </Text>
-                    </Text>
-                    <Group gap={6}>
-                      {m.enCaso && (
-                        <Badge size='sm' color='teal' variant='light'>
-                          En el caso
-                        </Badge>
-                      )}
-                      <Text size='xs' c='dimmed'>
-                        {fechaLarga(m.fecha)}
-                      </Text>
-                    </Group>
-                  </Group>
-                  {(m.para.length > 0 || m.cc.length > 0) && (
-                    <Text size='xs' c='dimmed' lineClamp={2}>
-                      Para: {m.para.map((p) => p.correo).join(', ')}
-                      {m.cc.length ? ` · CC: ${m.cc.map((p) => p.correo).join(', ')}` : ''}
-                    </Text>
-                  )}
-                  <HtmlSeguro html={m.html} remotas={remotas} titulo={`Correo de ${m.de.nombre}`} />
-                  {m.adjuntos.length > 0 && (
-                    <Stack gap={4}>
-                      <Divider />
-                      {m.adjuntos.map((a) => (
-                        <Group key={a.id} justify='space-between' wrap='nowrap' gap='xs' data-testid='correo-adjunto'>
-                          <Group gap={6} wrap='nowrap' style={{ minWidth: 0 }}>
-                            <IconPaperclip size={14} style={{ flexShrink: 0 }} />
-                            <Text size='sm' truncate>
-                              {a.nombre}
-                            </Text>
-                            <Text size='xs' c='dimmed' style={{ flexShrink: 0 }}>
-                              {tamano(a.tamano)}
-                            </Text>
-                          </Group>
-                          <Group gap={4} wrap='nowrap'>
-                            {PREVISUALIZABLES.has(a.tipo.toLowerCase()) && (
-                              <Tooltip label='Ver'>
-                                <ActionIcon component='a' href={urlAdjunto(m.id, a.id, true)} target='_blank' rel='noopener noreferrer' variant='subtle' aria-label={`Ver ${a.nombre}`}>
-                                  <IconEye size={18} />
-                                </ActionIcon>
-                              </Tooltip>
-                            )}
-                            <Tooltip label='Descargar'>
-                              <ActionIcon component='a' href={urlAdjunto(m.id, a.id)} variant='subtle' aria-label={`Descargar ${a.nombre}`}>
-                                <IconDownload size={18} />
-                              </ActionIcon>
-                            </Tooltip>
-                          </Group>
-                        </Group>
-                      ))}
-                    </Stack>
-                  )}
-                </Stack>
-              </Card>
-            ))}
+            {hilo.mensajes.length > 1 && (
+              <Group justify='flex-end'>
+                <Button
+                  size='compact-xs'
+                  variant='subtle'
+                  color='gray'
+                  onClick={() => setAbiertos(todosAbiertos ? new Set(ultimo ? [ultimo.id] : []) : new Set(hilo.mensajes.map((m) => m.id)))}
+                  data-testid='correo-hilo-expandir-todos'
+                >
+                  {todosAbiertos ? 'Plegar los anteriores' : 'Desplegar todos'}
+                </Button>
+              </Group>
+            )}
 
-            {ultimo && envioHabilitado && (
-              <Card withBorder radius='md' p='sm' data-testid='correo-responder'>
-                <Stack gap='xs'>
-                  <Text size='sm' fw={700}>
-                    Responder sobre el hilo
-                  </Text>
-                  <Text size='xs' c='dimmed'>
-                    Sale desde su propio buzón, como respuesta al último mensaje de {ultimo.de.nombre}.
-                    {hilo.vinculo ? ` Quedará como nota en la solicitud #${hilo.vinculo.idRequest}.` : ''}
-                  </Text>
-                  <Textarea
-                    placeholder='Escriba su respuesta…'
-                    autosize
-                    minRows={3}
-                    maxRows={12}
-                    value={texto}
-                    onChange={(e) => setTexto(e.currentTarget.value)}
-                    aria-label='Respuesta'
-                    data-testid='correo-respuesta-texto'
-                  />
-                  <FileInput
-                    multiple
-                    clearable
-                    placeholder={`Adjuntos (máx. ${CORREO_MAX_ADJUNTOS_RESPUESTA}, 3 MB c/u)`}
-                    leftSection={<IconPaperclip size={16} />}
-                    value={archivos}
-                    onChange={(f) => setArchivos((f ?? []).slice(0, CORREO_MAX_ADJUNTOS_RESPUESTA))}
-                    aria-label='Adjuntos de la respuesta'
-                  />
-                  <Group justify='space-between' wrap='wrap' gap='xs'>
-                    <Switch label='Responder a todos' checked={todos} onChange={(e) => setTodos(e.currentTarget.checked)} />
-                    <Group gap='xs'>
-                      <Button variant='default' leftSection={<IconX size={16} />} onClick={() => setTexto('')} disabled={enviando || !texto}>
-                        Limpiar
-                      </Button>
-                      <Button leftSection={<IconSend size={16} />} onClick={enviar} loading={enviando} disabled={!texto.trim()} data-testid='correo-respuesta-enviar'>
-                        Enviar respuesta
-                      </Button>
+            <Stack gap={6}>
+              {hilo.mensajes.map((m) => (
+                <MensajeHilo
+                  key={m.id}
+                  m={m}
+                  abierto={abiertos.has(m.id)}
+                  onToggle={() => toggle(m.id)}
+                  remotas={remotas}
+                  yo={yo}
+                  onVerAdjunto={(msg, a) => setVerAdjunto({ url: urlAdjunto(msg.id, a.id, true), nombre: a.nombre })}
+                />
+              ))}
+            </Stack>
+
+            {ultimo && envioHabilitado && !redactando && (
+              <Group gap='sm' mt='xs' pl={{ base: 0, sm: 64 }} data-testid='correo-acciones-respuesta'>
+                <Button variant='default' radius='xl' leftSection={<IconArrowBackUp size={18} />} onClick={() => abrirRedaccion(false)} data-testid='correo-responder-btn'>
+                  Responder
+                </Button>
+                {variosDestinatarios && (
+                  <Button variant='default' radius='xl' leftSection={<IconArrowBackUpDouble size={18} />} onClick={() => abrirRedaccion(true)} data-testid='correo-responder-todos-btn'>
+                    Responder a todos
+                  </Button>
+                )}
+              </Group>
+            )}
+
+            {ultimo && envioHabilitado && redactando && (
+              <Card withBorder radius='md' p='sm' shadow='sm' ref={editorRef} data-testid='correo-responder'>
+                <Group wrap='nowrap' align='flex-start' gap='sm'>
+                  {desktop && <AvatarPersona nombre={nombreOperador} correo={correoOperador} size={40} />}
+                  <Stack gap='xs' style={{ flex: 1, minWidth: 0 }}>
+                    <Group justify='space-between' wrap='nowrap' gap='xs'>
+                      <Group gap={6} wrap='nowrap' style={{ minWidth: 0 }}>
+                        {todos ? <IconArrowBackUpDouble size={16} /> : <IconArrowBackUp size={16} />}
+                        <Text size='sm' truncate data-testid='correo-responder-para'>
+                          {todos ? 'Responder a todos' : `Responder a ${ultimo.de.nombre || ultimo.de.correo}`}
+                        </Text>
+                      </Group>
+                      {variosDestinatarios && <Switch size='xs' label='A todos' checked={todos} onChange={(e) => setTodos(e.currentTarget.checked)} />}
                     </Group>
-                  </Group>
-                </Stack>
+                    <Text size='xs' c='dimmed'>
+                      Sale desde su propio buzón, como respuesta al último mensaje del hilo.
+                      {hilo.vinculo ? ` Quedará como nota en la solicitud #${hilo.vinculo.idRequest}.` : ''}
+                    </Text>
+                    <EditorMarkdown value={texto} onChange={setTexto} placeholder='Escriba su respuesta…' autoFocus disabled={enviando} testId='correo-respuesta-texto' />
+                    <FileInput
+                      multiple
+                      clearable
+                      size='xs'
+                      placeholder={`Adjuntar archivos (máx. ${CORREO_MAX_ADJUNTOS_RESPUESTA}, 3 MB c/u)`}
+                      leftSection={<IconPaperclip size={14} />}
+                      value={archivos}
+                      onChange={(f) => setArchivos((f ?? []).slice(0, CORREO_MAX_ADJUNTOS_RESPUESTA))}
+                      aria-label='Adjuntos de la respuesta'
+                    />
+                    <Group justify='space-between' wrap='nowrap' gap='xs'>
+                      <Button radius='xl' leftSection={<IconSend size={16} />} onClick={enviar} loading={enviando} disabled={!texto.trim()} data-testid='correo-respuesta-enviar'>
+                        Enviar
+                      </Button>
+                      <Tooltip label='Descartar borrador'>
+                        <ActionIcon variant='subtle' color='gray' size='lg' onClick={descartar} disabled={enviando} aria-label='Descartar borrador' data-testid='correo-respuesta-descartar'>
+                          <IconTrash size={18} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </Group>
+                  </Stack>
+                </Group>
               </Card>
             )}
           </>
         )}
       </Stack>
+      <Modal opened={Boolean(verAdjunto)} onClose={() => setVerAdjunto(null)} title={verAdjunto?.nombre} size='xl' centered data-testid='correo-adjunto-previa'>
+        {verAdjunto && <Image src={verAdjunto.url} alt={verAdjunto.nombre} fit='contain' mah='75vh' />}
+      </Modal>
     </Drawer>
   );
 }

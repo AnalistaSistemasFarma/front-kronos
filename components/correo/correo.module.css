@@ -1,0 +1,248 @@
+/*
+ * Bandeja del módulo Correo con la distribución y densidad de Gmail, pero con el tema de
+ * SynerLink: solo variables de Mantine (claro/oscuro salen solos) y los mismos radios y bordes.
+ */
+
+.layout {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.sidebar {
+  position: sticky;
+  top: 12px;
+}
+
+.bandeja {
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 48px;
+  padding: 4px 12px 4px 10px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-body);
+}
+
+.toolbarSeleccion {
+  background: var(--mantine-primary-color-light);
+}
+
+/* ---- Fila de escritorio ---- */
+.fila {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 42px;
+  padding: 0 14px 0 10px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  cursor: pointer;
+  font-size: 14px;
+  background: color-mix(in srgb, var(--mantine-color-gray-1) 55%, var(--mantine-color-body));
+  color: var(--mantine-color-text);
+  outline: none;
+}
+
+.fila[data-leido='0'] {
+  background: var(--mantine-color-body);
+}
+
+.fila:hover {
+  z-index: 1;
+  box-shadow: inset 1px 0 0 var(--mantine-color-default-border), inset -1px 0 0 var(--mantine-color-default-border),
+    0 1px 2px 0 rgba(60, 64, 67, 0.3), 0 1px 3px 1px rgba(60, 64, 67, 0.15);
+}
+
+.fila:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--mantine-primary-color-filled);
+}
+
+.fila[data-seleccionado='1'] {
+  background: var(--mantine-primary-color-light);
+}
+
+.de {
+  flex: 0 0 200px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.asunto {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.asuntoTexto {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extracto {
+  color: var(--mantine-color-dimmed);
+  font-weight: 400;
+}
+
+.fuerte {
+  font-weight: 700;
+}
+
+.meta {
+  flex: 0 0 auto;
+  min-width: 84px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--mantine-color-dimmed);
+}
+
+.fila[data-leido='0'] .meta {
+  color: var(--mantine-color-text);
+  font-weight: 700;
+}
+
+.acciones {
+  display: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.fila:hover .acciones,
+.fila:focus-within .acciones {
+  display: flex;
+}
+
+.fila:hover .fecha,
+.fila:focus-within .fecha {
+  display: none;
+}
+
+.fecha {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* ---- Fila de celular (lista primero, como la app de Gmail) ---- */
+.filaMovil {
+  display: flex;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-body);
+  cursor: pointer;
+}
+
+.filaMovil[data-seleccionado='1'] {
+  background: var(--mantine-primary-color-light);
+}
+
+.avatarSel {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.avatarMarcado {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mantine-primary-color-filled);
+  color: var(--mantine-color-white);
+}
+
+.cuerpoMovil {
+  flex: 1;
+  min-width: 0;
+}
+
+.lineaMovil {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.truncar {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.busqueda :global(.mantine-TextInput-input),
+.busqueda input {
+  background: color-mix(in srgb, var(--mantine-color-gray-1) 80%, var(--mantine-color-body));
+  border-color: transparent;
+}
+
+.busqueda input:focus {
+  background: var(--mantine-color-body);
+  border-color: var(--mantine-color-default-border);
+  box-shadow: 0 1px 2px rgba(60, 64, 67, 0.2);
+}
+
+.chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+
+.chips::-webkit-scrollbar {
+  display: none;
+}
+
+:global([data-mantine-color-scheme='dark']) .fila {
+  background: color-mix(in srgb, var(--mantine-color-dark-6) 70%, var(--mantine-color-body));
+}
+
+:global([data-mantine-color-scheme='dark']) .fila[data-leido='0'] {
+  background: var(--mantine-color-body);
+}
+
+:global([data-mantine-color-scheme='dark']) .fila[data-seleccionado='1'],
+:global([data-mantine-color-scheme='dark']) .filaMovil[data-seleccionado='1'] {
+  background: var(--mantine-primary-color-light);
+}
+
+:global([data-mantine-color-scheme='dark']) .fila:hover {
+  box-shadow: inset 0 0 0 1px var(--mantine-color-dark-3), 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+:global([data-mantine-color-scheme='dark']) .busqueda input {
+  background: var(--mantine-color-dark-6);
+}
+
+:global([data-mantine-color-scheme='dark']) .busqueda input:focus {
+  background: var(--mantine-color-dark-7);
+}
