@@ -25,6 +25,9 @@ import {
   escapeOData,
   isEstado,
   isOtError,
+  opPorNumero,
+  OT_SAP_OP_ESTADOS,
+  parseImportarOperadores,
   OtError,
   parseAgregarOperadores,
   parseCambioActividad,
@@ -101,7 +104,8 @@ describe('Bitácora de Proceso · permisos', () => {
   it('bitácora anterior (auxiliares con usuario): quien no figura y no tiene Gestión recibe 403; el jefe de producción sí registra', () => {
     const e = errorOf(() => assertPuedeRegistrar({ estado: 'ABIERTA', operarios: ['u1'], inspector: 'u3' }, 'u2', operario));
     expect(e.status).toBe(403);
-    expect(e.message).toMatch(/no figura como auxiliar ni como jefe de producción/);
+    expect(e.message).toMatch(/no figura como auxiliar, inspector ni jefe de producción/);
+    expect(() => assertPuedeRegistrar({ estado: 'ABIERTA', operarios: ['u1'], jefe: 'u4' }, 'u4', operario)).not.toThrow();
     expect(() => assertPuedeRegistrar({ estado: 'ABIERTA', operarios: ['u1'], inspector: 'u3' }, 'u3', operario)).not.toThrow();
     expect(errorOf(() => assertPuedeRegistrar({ estado: 'CERRADA', operarios: [], inspector: 'u3' }, 'u3', operario)).status).toBe(409);
     expect(() => assertPuedeRegistrar({ estado: 'ABIERTA', operarios: ['u1'] }, 'u1', operario)).not.toThrow();
@@ -123,23 +127,27 @@ describe('Bitácora de Proceso · permisos', () => {
 });
 
 describe('Bitácora de Proceso · validación', () => {
-  const base = { company: FARMA, producto: ' Cefazolina 1 g ', lote: '1565426', turno: 'manana', operadores: [7, 7, '8'], idArea: 3, inspector: ' u9 ' };
+  const base = { company: FARMA, producto: ' Cefazolina 1 g ', lote: '1565426', turno: 'manana', operadores: [7, 7, '8'], idArea: 3, inspector: ' u9 ', jefeProduccion: ' u8 ' };
 
   it('abre sin OP de SAP (opcional), normaliza turno, operarios (sin usuario) y área del catálogo', () => {
     const input = parseNuevaOrden(base);
     expect(input).toMatchObject({ idCompany: FARMA, producto: 'Cefazolina 1 g', lote: '1565426', turno: 'MANANA', sapOp: null, idArea: 3, itemCode: null });
     expect(input.operadores).toEqual([7, 8]);
     expect(input.inspector).toBe('u9');
+    expect(input.jefeProduccion).toBe('u8');
     expect(parseNuevaOrden({ ...base, idArea: undefined }).idArea).toBeNull();
     // El área ya no es texto libre: un texto en `area` se ignora.
     expect(parseNuevaOrden({ ...base, area: 'Texto libre' })).not.toHaveProperty('area');
   });
 
-  it('el jefe de producción es obligatorio', () => {
-    expect(errorOf(() => parseNuevaOrden({ ...base, inspector: '' })).message).toMatch(/jefe de producción/);
-    expect(errorOf(() => parseNuevaOrden({ ...base, inspector: undefined })).message).toMatch(/jefe de producción/);
-    expect(errorOf(() => parseNuevaOrden({ ...base, inspector: 'x'.repeat(51) })).message).toMatch(/Jefe de producción no válido/);
-    expect(parseNuevaOrden({ ...base, inspector: undefined, jefeProduccion: 'u5' }).inspector).toBe('u5');
+  it('B1: inspector y jefe de producción son campos distintos y obligatorios', () => {
+    expect(errorOf(() => parseNuevaOrden({ ...base, inspector: '' })).message).toMatch(/inspector/);
+    expect(errorOf(() => parseNuevaOrden({ ...base, inspector: undefined })).message).toMatch(/inspector/);
+    expect(errorOf(() => parseNuevaOrden({ ...base, inspector: 'x'.repeat(51) })).message).toMatch(/Inspector no válido/);
+    expect(errorOf(() => parseNuevaOrden({ ...base, jefeProduccion: '' })).message).toMatch(/jefe de producción/);
+    expect(errorOf(() => parseNuevaOrden({ ...base, jefeProduccion: 'x'.repeat(51) })).message).toMatch(/Jefe de producción no válido/);
+    // El jefe ya no se toma del campo del inspector (el #617 los fusionaba).
+    expect(errorOf(() => parseNuevaOrden({ ...base, jefeProduccion: undefined })).status).toBe(400);
   });
 
   it('exige producto, lote, turno válido y al menos un operario', () => {
@@ -160,9 +168,9 @@ describe('Bitácora de Proceso · validación', () => {
   it('guarda una copia acotada de la OP de SAP (solo los campos conocidos)', () => {
     const input = parseNuevaOrden({
       ...base,
-      sapOp: { AbsoluteEntry: 14259, DocumentNumber: 14045, ItemNo: 'PTCZ0121', ProductDescription: 'CEFAZOLINA 1g', U_Cod_Lote: '1565426', U_FecVen_lote: '2029-07-31T00:00:00Z', PlannedQuantity: 41600, Warehouse: 'BQAPT', Otro: 'x' },
+      sapOp: { AbsoluteEntry: 14259, DocumentNumber: 14045, ItemNo: 'PTCZ0121', ProductDescription: 'CEFAZOLINA 1g', U_Cod_Lote: '1565426', U_FecVen_lote: '2029-07-31T00:00:00Z', PlannedQuantity: 41600, Warehouse: 'BQAPT', ProductionOrderStatus: 'boposPlanned', Otro: 'x' },
     });
-    expect(input.sapOp).toEqual({ AbsoluteEntry: 14259, DocumentNumber: 14045, ItemNo: 'PTCZ0121', ProductDescription: 'CEFAZOLINA 1g', U_Cod_Lote: '1565426', U_FecVen_lote: '2029-07-31T00:00:00Z', PlannedQuantity: 41600, Warehouse: 'BQAPT' });
+    expect(input.sapOp).toEqual({ AbsoluteEntry: 14259, DocumentNumber: 14045, ItemNo: 'PTCZ0121', ProductDescription: 'CEFAZOLINA 1g', U_Cod_Lote: '1565426', U_FecVen_lote: '2029-07-31T00:00:00Z', PlannedQuantity: 41600, Warehouse: 'BQAPT', ProductionOrderStatus: 'boposPlanned' });
     expect(parseNuevaOrden({ ...base, sapOp: { AbsoluteEntry: 1, DocumentNumber: 2, PlannedQuantity: 'x' } }).sapOp?.PlannedQuantity).toBeNull();
     expect(errorOf(() => parseNuevaOrden({ ...base, sapOp: [] })).status).toBe(400);
     expect(errorOf(() => parseNuevaOrden({ ...base, sapOp: { AbsoluteEntry: 1 } })).status).toBe(400);
@@ -213,8 +221,8 @@ describe('Bitácora de Proceso · validación', () => {
     expect(OT_AREAS_FARMALOGICA).toEqual(['Envase y agrafado']);
   });
 
-  it('A3 y A9: etiquetas de jefe de producción y turnos con horario', () => {
-    expect(OT_ROL_LABEL).toEqual({ SUPERVISOR: 'Supervisor', INSPECTOR: 'Jefe de producción' });
+  it('B1 y A9: etiquetas de los cuatro actores y turnos con horario', () => {
+    expect(OT_ROL_LABEL).toEqual({ OPERARIO: 'Operario', SUPERVISOR: 'Supervisor', INSPECTOR: 'Inspector', JEFE_PROD: 'Jefe de producción' });
     expect(OT_TURNO_LABEL).toEqual({ MANANA: 'Mañana (06–14)', TARDE: 'Tarde (14–22)', NOCHE: 'Noche (22–06)' });
   });
 
@@ -256,15 +264,48 @@ describe('Bitácora de Proceso · validación', () => {
     expect(errorOf(() => parseCambioActividad(null)).status).toBe(400);
   });
 
-  it('filtro OData de OP liberadas: escapa comillas y busca por número', () => {
+  it('B5: filtro OData de OP PLANIFICADAS y LIBERADAS (nunca cerradas ni canceladas); escapa comillas y busca por número', () => {
     expect(escapeOData("o'neil")).toBe("o''neil");
     const f = buildSapOpFilter("PTCZ'");
-    expect(f).toContain("ProductionOrderStatus eq 'boposReleased'");
+    expect(OT_SAP_OP_ESTADOS).toEqual(['boposPlanned', 'boposReleased']);
+    expect(f.startsWith("(ProductionOrderStatus eq 'boposPlanned' or ProductionOrderStatus eq 'boposReleased') and (")).toBe(true);
+    expect(f).not.toMatch(/boposClosed|boposCancelled/);
     expect(f).toContain("contains(ItemNo,'PTCZ''')");
     expect(f).not.toContain('DocumentNumber');
     expect(buildSapOpFilter('14045')).toContain('DocumentNumber eq 14045');
     expect(isEstado('ABIERTA')).toBe(true);
     expect(isEstado('ANULADA')).toBe(false);
+  });
+
+  it('B5: con el NÚMERO exacto de la OP se elige sola; con texto o varias coincidencias, no', () => {
+    const ops = [{ DocumentNumber: 14022 }, { DocumentNumber: 140220 }];
+    expect(opPorNumero(' 14022 ', ops)).toEqual({ DocumentNumber: 14022 });
+    expect(opPorNumero('PTCZ', ops)).toBeNull();
+    expect(opPorNumero('999', ops)).toBeNull();
+    expect(opPorNumero('14022', [{ DocumentNumber: 14022 }, { DocumentNumber: 14022 }])).toBeNull();
+  });
+
+  it('B8: importar operarios pegando la lista (nombre; documento), con encabezado, repetidos y errores por línea', () => {
+    const texto = 'Nombre completo;Documento\r\nAna María  Gómez; 1020 304\nPedro Pérez\n\nana maría gómez;9\n;123\n' + 'x'.repeat(121) + '\nLuis\t' + '9'.repeat(31) + '\nCarla, 55';
+    const r = parseImportarOperadores({ company: FARMA, texto });
+    expect(r.simular).toBe(true);
+    expect(r.filas).toEqual([
+      { linea: 2, nombre: 'Ana María Gómez', documento: '1020304' },
+      { linea: 3, nombre: 'Pedro Pérez', documento: null },
+      { linea: 9, nombre: 'Carla', documento: '55' },
+    ]);
+    expect(r.errores.map((e) => [e.linea, e.motivo])).toEqual([
+      [5, 'Nombre repetido en la lista.'],
+      [6, 'Falta el nombre.'],
+      [7, 'Nombre de más de 120 caracteres.'],
+      [8, 'Documento de más de 30 caracteres.'],
+    ]);
+    expect(parseImportarOperadores({ company: FARMA, texto: 'Ana', simular: false }).simular).toBe(false);
+    expect(errorOf(() => parseImportarOperadores(null)).status).toBe(400);
+    expect(errorOf(() => parseImportarOperadores({ texto: 'Ana' })).message).toMatch(/empresa/);
+    expect(errorOf(() => parseImportarOperadores({ company: FARMA, texto: '  ' })).message).toMatch(/Pegue/);
+    expect(errorOf(() => parseImportarOperadores({ company: FARMA, texto: 'Nombre' })).message).toMatch(/no tiene operarios/);
+    expect(errorOf(() => parseImportarOperadores({ company: FARMA, texto: Array.from({ length: 501 }, (_, i) => `Op ${i}`).join('\n') })).message).toMatch(/Máximo 500/);
   });
 });
 

@@ -5653,3 +5653,288 @@ a.portal-th__contactos-boton--enlace:focus-visible {
   outline: 2px solid var(--pth-azul);
   outline-offset: 2px;
 }
+
+/* ── Organigrama digital (Cristian, 2026-10-15) ─────────────────────────────── */
+.portal-th__visor-caja--organigrama {
+  position: relative;
+  width: min(1700px, 98vw);
+  height: min(94vh, 100%);
+}
+
+.portal-th__org-herramientas {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 14px 0;
+}
+
+.portal-th__org-herramientas .portal-th__buscador {
+  flex: 1 1 240px;
+  max-width: 420px;
+}
+
+.portal-th__org-contador {
+  min-width: 90px;
+  color: var(--pth-tinta-3);
+  font-size: 0.8rem;
+}
+
+.portal-th__org-zoom {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.portal-th__org-zoom button {
+  min-width: 40px;
+  padding: 7px 12px;
+  border: 1px solid var(--pth-azul);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--pth-azul);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.portal-th__org-zoom button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.portal-th__org-ayuda {
+  margin: 6px 14px 8px;
+  color: var(--pth-tinta-3);
+  font-size: 0.78rem;
+}
+
+.portal-th__org-leyenda {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 8px;
+}
+
+.portal-th__org-muestra {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  border: 2px solid var(--pth-azul);
+  border-radius: 4px;
+  background: #fff;
+}
+
+.portal-th__org-muestra--otras {
+  border-style: dashed;
+}
+
+.portal-th__org-lienzo {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0 14px 14px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 10px;
+  background: #fff;
+  cursor: grab;
+  touch-action: pan-x pan-y;
+}
+
+.portal-th__org-lienzo:active {
+  cursor: grabbing;
+}
+
+.portal-th__org-lienzo svg {
+  display: block;
+  max-width: none;
+  height: auto;
+}
+
+.portal-th__org-cargando {
+  position: sticky;
+  left: 12px;
+  bottom: 8px;
+  margin: 0;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.portal-th__org-nodo {
+  cursor: pointer;
+  outline: none;
+}
+
+.portal-th__org-nodo rect {
+  fill: #fff;
+  stroke: #1f2937;
+  stroke-width: 1.2px;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Color del cuadro = nivel del cargo (los mismos tonos del organigrama en papel). */
+.portal-th__org-nodo--estrategico rect {
+  fill: #f2dcda;
+}
+
+.portal-th__org-nodo--tactico rect {
+  fill: #dbeef3;
+}
+
+.portal-th__org-nodo--operativo rect {
+  fill: #d7e3bf;
+}
+
+.portal-th__org-nodo--con rect {
+  stroke: var(--pth-azul);
+  stroke-width: 2.4px;
+}
+
+/* Solo hay personas de otras empresas con este cargo: borde punteado. */
+.portal-th__org-nodo--otras rect {
+  stroke: var(--pth-azul);
+  stroke-width: 1.8px;
+  stroke-dasharray: 6 4;
+}
+
+.portal-th__org-nodo:hover rect,
+.portal-th__org-nodo:focus-visible rect {
+  fill: var(--pth-azul-50);
+  stroke-width: 3px;
+}
+
+.portal-th__org-nodo--activo rect,
+.portal-th__org-nodo--activo:hover rect,
+.portal-th__org-nodo--activo:focus-visible rect {
+  fill: var(--pth-azul);
+  stroke: var(--pth-azul);
+}
+
+.portal-th__org-nodo--activo .portal-th__org-texto {
+  fill: #fff;
+}
+
+.portal-th__org-nodo--busqueda rect {
+  fill: #fff3bf;
+  stroke: #e67700;
+  stroke-width: 3px;
+}
+
+.portal-th__org-texto {
+  fill: #111827;
+  pointer-events: none;
+  font-family: Calibri, 'Segoe UI', Arial, sans-serif;
+  user-select: none;
+}
+
+/* Ventana pequeña con las personas del cargo. */
+.portal-th__org-ventana {
+  position: absolute;
+  right: 28px;
+  bottom: 28px;
+  display: flex;
+  flex-direction: column;
+  width: min(380px, calc(100% - 40px));
+  max-height: min(70%, 560px);
+  border: 1px solid var(--pth-azul);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 12px 34px rgba(15, 26, 44, 0.3);
+}
+
+.portal-th__org-ventana > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--pth-linea);
+  background: var(--pth-azul);
+  color: #fff;
+  border-radius: 11px 11px 0 0;
+}
+
+.portal-th__org-ventana > header div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.portal-th__org-ventana > header strong {
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+}
+
+.portal-th__org-ventana > header small {
+  opacity: 0.85;
+  font-size: 0.72rem;
+}
+
+.portal-th__org-ventana > header button {
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.portal-th__org-ventana-cuerpo {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 12px;
+}
+
+.portal-th__org-ventana ul {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.portal-th__org-ventana li {
+  padding: 8px 10px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 8px;
+}
+
+.portal-th__org-ventana dl {
+  display: grid;
+  grid-template-columns: 7.2rem 1fr;
+  gap: 2px 8px;
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.portal-th__org-ventana dt {
+  color: var(--pth-tinta-3);
+}
+
+.portal-th__org-ventana dd {
+  margin: 0;
+  color: var(--pth-tinta);
+  overflow-wrap: anywhere;
+}
+
+.portal-th__org-otras {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--pth-linea);
+  color: var(--pth-tinta-2);
+  font-size: 0.78rem;
+}
+
+@media (max-width: 760px) {
+  .portal-th__org-ventana {
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    width: auto;
+  }
+}

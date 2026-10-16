@@ -1,22 +1,30 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Alert, Box, Button, Checkbox, Group, Loader, Modal, Paper, PasswordInput, Radio, Stack, Text, Textarea } from '@mantine/core';
+import { Alert, Box, Button, Group, Loader, Modal, Paper, PinInput, Radio, SimpleGrid, Stack, Text, Textarea } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { IconAlertTriangle, IconSquareCheck } from '@tabler/icons-react';
-import { OT_CONFIRMACION_TEXTO, OT_LIMITS, OT_ROL_LABEL, type OtFirmaRol } from '../../lib/bitacora-proceso/constants';
+import { IconAlertTriangle, IconLock, IconSquareCheck, IconUserCheck } from '@tabler/icons-react';
+import { OT_CONFIRMACION_TEXTO, OT_LIMITS, OT_PIN_LONGITUD, OT_ROL_LABEL, type OtFirmaRol } from '../../lib/bitacora-proceso/constants';
 
 /**
- * Confirmación «Cerró» (supervisor) o «Verificó» (jefe de producción) — A4,
- * 2026-10-14. Reemplaza la firma con imagen: es un CHECK con la contraseña de
- * SynerLink de QUIEN CONFIRMA. La tablet usa una cuenta compartida de planta,
- * así que la persona elige SU nombre de la lista y escribe SU contraseña; el
- * servidor la valida contra la cuenta de esa persona. Sin imagen de firma ni
- * consentimiento de GSS Firma. Celular primero: pantalla completa en el celular.
+ * VISTO BUENO de la bitácora (B2/B3, revisión con Farmalógica del 2026-10-15): un botón
+ * «Sí, confirmo», SIN contraseña.
+ *   - Operario: toca su nombre entre los programados y confirma.
+ *   - Supervisor, inspector o jefe de producción: elige su nombre. Si es la persona de
+ *     la SESIÓN, basta «Sí, confirmo». Si no (cuenta compartida «Producción» de la
+ *     tablet), escribe su PIN personal de 4 dígitos, que valida el servidor.
+ * Celular y tablet primero: pantalla completa en el celular y botones grandes.
  */
 export interface Confirmante {
   id: string;
   name: string;
+}
+
+export interface DatosConfirmacion {
+  persona?: string;
+  operador?: number;
+  pin?: string;
+  observacion: string;
 }
 
 export default function ConfirmacionBitacoraModal({
@@ -25,53 +33,66 @@ export default function ConfirmacionBitacoraModal({
   rol,
   titulo,
   personas,
+  operadores = [],
+  idUsuarioSesion,
   cargando,
-  conObservacion,
   onConfirmar,
 }: {
   opened: boolean;
   onClose: () => void;
   rol: OtFirmaRol;
   titulo: string;
-  /** Personas que pueden confirmar (supervisores al cerrar; el jefe de producción designado al verificar). */
+  /** Personas que pueden confirmar (supervisores al cerrar; el inspector o el jefe designado). */
   personas: Confirmante[];
+  /** Operarios programados (rol OPERARIO). */
+  operadores?: Array<{ id: number; nombre: string; activo: boolean }>;
+  /** user.id de la sesión: si coincide con la persona elegida, no se pide PIN. */
+  idUsuarioSesion: string;
   cargando?: boolean;
-  conObservacion?: boolean;
-  onConfirmar: (datos: { firmante: string; password: string; observacion: string }) => Promise<void>;
+  onConfirmar: (datos: DatosConfirmacion) => Promise<void>;
 }) {
   const mobile = useMediaQuery('(max-width: 48em)') ?? false;
-  const [firmante, setFirmante] = useState<string | null>(null);
-  const [confirmo, setConfirmo] = useState(false);
-  const [password, setPassword] = useState('');
+  const [persona, setPersona] = useState<string | null>(null);
+  const [operador, setOperador] = useState<number | null>(null);
+  const [pin, setPin] = useState('');
   const [observacion, setObservacion] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!opened) return;
-    setConfirmo(false);
-    setPassword('');
+    setPin('');
     setObservacion('');
     setError(null);
-    setFirmante(null);
+    setPersona(null);
+    setOperador(null);
   }, [opened]);
 
-  // Si solo hay una persona posible (p. ej. el jefe de producción designado), viene elegida.
+  // Si solo hay una persona posible (el inspector o el jefe designado), viene elegida.
   useEffect(() => {
-    if (opened && personas.length === 1) setFirmante(personas[0].id);
-  }, [opened, personas]);
+    if (opened && rol !== 'OPERARIO' && personas.length === 1) setPersona(personas[0].id);
+  }, [opened, personas, rol]);
+
+  const esOperario = rol === 'OPERARIO';
+  const sesionPropia = !esOperario && persona !== null && persona === idUsuarioSesion;
+  const pidePin = !esOperario && persona !== null && !sesionPropia;
+  const listo = esOperario ? operador !== null : persona !== null && (!pidePin || pin.length === OT_PIN_LONGITUD);
 
   const confirmar = async () => {
-    if (!firmante) return setError('Elija su nombre.');
-    if (!confirmo) return setError('Marque la casilla de confirmación.');
-    if (!password) return setError('Escriba su contraseña de SynerLink.');
+    if (esOperario && operador === null) return setError('Toque su nombre.');
+    if (!esOperario && !persona) return setError('Elija su nombre.');
+    if (pidePin && pin.length !== OT_PIN_LONGITUD) return setError(`Escriba su PIN de ${OT_PIN_LONGITUD} dígitos.`);
     setBusy(true);
     setError(null);
     try {
-      await onConfirmar({ firmante, password, observacion: observacion.trim() });
+      await onConfirmar({
+        ...(esOperario ? { operador: operador! } : { persona: persona! }),
+        ...(pidePin ? { pin } : {}),
+        observacion: observacion.trim(),
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setPassword('');
+      setPin('');
     } finally {
       setBusy(false);
     }
@@ -87,7 +108,7 @@ export default function ConfirmacionBitacoraModal({
       radius={mobile ? 0 : 'md'}
       data-testid='ot-confirmacion-modal'
     >
-      <Stack gap='md' pb={mobile ? 96 : 0}>
+      <Stack gap='md' pb={mobile ? 104 : 0}>
         {error && (
           <Alert color='red' icon={<IconAlertTriangle size={18} />} withCloseButton onClose={() => setError(null)} data-testid='ot-confirmacion-error'>
             {error}
@@ -96,27 +117,48 @@ export default function ConfirmacionBitacoraModal({
 
         <Box>
           <Text fw={600} size='md' mb={4}>
-            ¿Quién confirma? ({OT_ROL_LABEL[rol]})
-          </Text>
-          <Text size='xs' c='dimmed' mb={6}>
-            Elija su propio nombre y escriba su propia contraseña de SynerLink, aunque la tablet tenga abierta otra cuenta.
+            {esOperario ? '1. Toque su nombre (operario)' : `1. ¿Quién da el visto bueno? (${OT_ROL_LABEL[rol]})`}
           </Text>
           {cargando ? (
             <Loader size='sm' />
+          ) : esOperario ? (
+            operadores.length === 0 ? (
+              <Alert color='yellow' icon={<IconAlertTriangle size={16} />}>Esta bitácora no tiene operarios programados.</Alert>
+            ) : (
+              <SimpleGrid cols={{ base: 1, xs: 2 }} spacing='sm' data-testid='ot-confirma-operadores'>
+                {operadores.map((p) => (
+                  <Button
+                    key={p.id}
+                    size='xl'
+                    h={72}
+                    fullWidth
+                    disabled={!p.activo}
+                    variant={operador === p.id ? 'filled' : 'default'}
+                    leftSection={operador === p.id ? <IconUserCheck size={22} /> : undefined}
+                    onClick={() => setOperador(p.id)}
+                    styles={{ label: { whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.2 } }}
+                    data-testid='ot-confirma-operador'
+                  >
+                    {p.nombre}
+                  </Button>
+                ))}
+              </SimpleGrid>
+            )
           ) : personas.length === 0 ? (
             <Alert color='yellow' icon={<IconAlertTriangle size={16} />}>
               {rol === 'SUPERVISOR'
                 ? 'No hay supervisores (permiso Bitácora de Proceso: Gestión) disponibles en esta empresa.'
-                : 'Esta bitácora no tiene jefe de producción designado.'}
+                : `Esta bitácora no tiene ${OT_ROL_LABEL[rol].toLowerCase()} designado.`}
             </Alert>
           ) : (
-            <Radio.Group value={firmante} onChange={setFirmante}>
+            <Radio.Group value={persona} onChange={(v) => { setPersona(v); setPin(''); }}>
               <Stack gap={6} data-testid='ot-confirmantes'>
                 {personas.map((p) => (
                   <Radio.Card key={p.id} value={p.id} radius='md' p='sm' withBorder>
-                    <Group wrap='nowrap' gap='sm' mih={44}>
+                    <Group wrap='nowrap' gap='sm' mih={48}>
                       <Radio.Indicator size='md' />
                       <Text fw={500} size='lg'>{p.name}</Text>
+                      {p.id === idUsuarioSesion && <Text size='sm' c='dimmed'>(su sesión)</Text>}
                     </Group>
                   </Radio.Card>
                 ))}
@@ -125,7 +167,36 @@ export default function ConfirmacionBitacoraModal({
           )}
         </Box>
 
-        {conObservacion && (
+        {sesionPropia && (
+          <Alert color='blue' variant='light' icon={<IconUserCheck size={18} />} data-testid='ot-sesion-propia'>
+            Está en su propia sesión: no necesita PIN.
+          </Alert>
+        )}
+        {pidePin && (
+          <Box data-testid='ot-pin-bloque'>
+            <Group gap={6} mb={4}>
+              <IconLock size={18} />
+              <Text fw={600} size='md'>2. Su PIN de bitácora</Text>
+            </Group>
+            <Text size='xs' c='dimmed' mb={6}>
+              Esta tablet tiene abierta otra cuenta. Escriba su PIN personal de {OT_PIN_LONGITUD} dígitos (se configura en «Configurar PIN de bitácora»).
+            </Text>
+            <PinInput
+              length={OT_PIN_LONGITUD}
+              type='number'
+              mask
+              size='xl'
+              inputMode='numeric'
+              oneTimeCode={false}
+              value={pin}
+              onChange={setPin}
+              aria-label='PIN de bitácora'
+              data-testid='ot-pin'
+            />
+          </Box>
+        )}
+
+        {rol === 'SUPERVISOR' && (
           <Textarea
             size='md'
             label='Observación de cierre (opcional)'
@@ -139,25 +210,9 @@ export default function ConfirmacionBitacoraModal({
           />
         )}
 
-        <Paper withBorder radius='md' p='sm'>
-          <Checkbox
-            size='lg'
-            checked={confirmo}
-            onChange={(e) => setConfirmo(e.currentTarget.checked)}
-            label={<Text size='md'>{OT_CONFIRMACION_TEXTO[rol]}</Text>}
-            data-testid='ot-confirmo'
-          />
+        <Paper withBorder radius='md' p='sm' bg='var(--mantine-color-default-hover)'>
+          <Text size='md'>{OT_CONFIRMACION_TEXTO[rol]}</Text>
         </Paper>
-
-        <PasswordInput
-          size='md'
-          label='Su contraseña de SynerLink'
-          description='Confirma que es usted. No se guarda.'
-          autoComplete='off'
-          value={password}
-          onChange={(e) => setPassword(e.currentTarget.value)}
-          data-testid='ot-confirmacion-password'
-        />
 
         <Box
           pos={mobile ? 'fixed' : 'static'}
@@ -169,20 +224,20 @@ export default function ConfirmacionBitacoraModal({
           style={mobile ? { borderTop: '1px solid var(--mantine-color-default-border)', zIndex: 2 } : undefined}
         >
           <Group grow={mobile} justify='flex-end' gap='sm'>
-            <Button variant='default' size='md' h={52} onClick={onClose} disabled={busy}>
+            <Button variant='default' size='lg' h={60} onClick={onClose} disabled={busy}>
               Cancelar
             </Button>
             <Button
-              size='md'
-              h={52}
+              size='lg'
+              h={60}
               color={rol === 'SUPERVISOR' ? 'red' : undefined}
-              leftSection={<IconSquareCheck size={18} />}
+              leftSection={<IconSquareCheck size={22} />}
               onClick={confirmar}
               loading={busy}
-              disabled={!firmante || !confirmo || !password}
+              disabled={!listo}
               data-testid='ot-confirmar'
             >
-              {rol === 'SUPERVISOR' ? 'Confirmar cierre' : 'Confirmar verificación'}
+              Sí, confirmo
             </Button>
           </Group>
         </Box>

@@ -90,6 +90,11 @@ export interface MailProvider {
   adjunto(mensajeId: string, adjuntoId: string): Promise<ArchivoAdjunto>;
   responder(mensajeId: string, entrada: RespuestaEntrada): Promise<void>;
   categorizar(mensajeId: string, categoria: string): Promise<void>;
+  /**
+   * No leídos de la Bandeja de entrada (icono del Correo en la cabecera). Opcional:
+   * si el proveedor no lo trae, se calcula con carpetas().
+   */
+  noLeidosBandeja?(): Promise<number>;
 }
 
 /** Fila de la simulación (una por hilo). */

@@ -13,6 +13,7 @@ import {
 import { filtrarExtensiones, type Extension } from '../../lib/portal/extensiones-datos';
 import { urlFormacion as urlPaginaFormacion, type OrigenPortal } from '../../lib/portal/formacion-navegacion';
 import HeinsohnVentana from './HeinsohnVentana';
+import OrganigramaVisor from './OrganigramaVisor';
 import PoliticasVisor, { TEXTOS_AYUDAS } from './PoliticasVisor';
 import PortalCalendario from './PortalCalendario';
 import PortalNavegacion, { useSeccionActiva, type SeccionNav } from './PortalNavegacion';
@@ -378,6 +379,8 @@ export default function PortalContenido({
   /** Ventana «HEINSOHN NÓMINA» (Cristian, 2026-10-15). */
   const [heinsohnAbierto, setHeinsohnAbierto] = useState(false);
   const cerrarHeinsohn = useCallback(() => setHeinsohnAbierto(false), []);
+  /** Organigrama digital (Cristian, 2026-10-15): se abre desde «Contactos» y, al cerrarlo, se vuelve a «Contactos». */
+  const [organigramaAbierto, setOrganigramaAbierto] = useState(false);
   const [contactoSeleccionado, setContactoSeleccionado] = useState<'correos' | 'extensiones' | null>(null);
   const cerrarContactos = () => {
     setContactosAbierto(false);
@@ -691,6 +694,14 @@ export default function PortalContenido({
       {politicasAbierto && <PoliticasVisor onCerrar={cerrarPoliticas} />}
       {ayudasAbierto && <PoliticasVisor onCerrar={cerrarAyudas} textos={TEXTOS_AYUDAS} />}
       {heinsohnAbierto && <HeinsohnVentana onCerrar={cerrarHeinsohn} />}
+      {organigramaAbierto && (
+        <OrganigramaVisor
+          onCerrar={() => {
+            setOrganigramaAbierto(false);
+            setContactosAbierto(true);
+          }}
+        />
+      )}
 
       {/* VENTANA DE CONTACTOS — mismo marco que la vista previa de documentos,
           pero con dos botones adentro en vez de un PDF. Correos: directorio de
@@ -722,6 +733,17 @@ export default function PortalContenido({
               </div>
             </header>
             <div className='portal-th__contactos'>
+              <button
+                type='button'
+                className='portal-th__contactos-boton'
+                onClick={() => {
+                  cerrarContactos();
+                  setOrganigramaAbierto(true);
+                }}
+                data-testid='abrir-organigrama'
+              >
+                Organigrama
+              </button>
               <button
                 type='button'
                 className='portal-th__contactos-boton'

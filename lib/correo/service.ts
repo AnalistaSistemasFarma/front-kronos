@@ -31,6 +31,8 @@ export interface KronosPort {
   /** Categorías y procesos de «Nueva solicitud» en la empresa (misma regla de la pantalla normal). */
   catalogoEmpresa(idCompany: number): Promise<CatalogoCorreo>;
   solicitudVisible(idUser: string, idRequest: number): Promise<SolicitudVisible | null>;
+  /** ¿La solicitud sigue existiendo? (un vínculo a una solicitud borrada es huérfano y no bloquea). */
+  solicitudExiste(idRequest: number): Promise<boolean>;
   insertarNota(idRequest: number, nota: string, idUser: string): Promise<number>;
 }
 
@@ -354,8 +356,12 @@ export async function simular(
     data.solicitudesDeCorreos(d.db, mensajes.map((m) => m.internetMessageId)),
     data.vinculosDeHilos(d.db, acceso.idUser, grupos.map((g) => g[0].conversationId)),
   ]);
-  const duplicados = new Map<string, number>(porCorreo);
-  for (const [conv, v] of vinculos) duplicados.set(conv, v.idRequest);
+  // Solo bloquean las solicitudes que siguen existiendo (un vínculo huérfano se limpia al crear).
+  const candidatas = [...new Set([...porCorreo.values(), ...[...vinculos.values()].map((v) => v.idRequest)].filter(Boolean))];
+  const vigentes = new Set<number>();
+  for (const id of candidatas) if (await d.kronos.solicitudExiste(id)) vigentes.add(id);
+  const duplicados = new Map<string, number>([...porCorreo].filter(([, id]) => vigentes.has(id)));
+  for (const [conv, v] of vinculos) if (vigentes.has(v.idRequest)) duplicados.set(conv, v.idRequest);
   await auditarLectura(d, acceso, { accion: 'SIMULAR', detalle: `${mensajes.length} correo(s) leídos para simular` }, p.ip ?? null);
   const filas = grupos.map((g) =>
     filaDesdeHilo(g, {
@@ -400,7 +406,17 @@ export async function crearDesdeFila(
     conversationId: fila.conversationId,
     asunto: fila.titulo,
     correos: elegidos.map((m) => ({ internetMessageId: m.internetMessageId, recibido: m.fecha })),
+    solicitudExiste: (id) => d.kronos.solicitudExiste(id),
   });
+  if (reserva.limpiados?.length) {
+    await data.auditar(d.db, {
+      idUser: acceso.idUser,
+      accion: 'VINCULO_HUERFANO',
+      conversationId: fila.conversationId,
+      detalle: `Vínculo(s) huérfano(s) limpiado(s) antes de crear: ${reserva.limpiados.join(', ')}`,
+      ip,
+    });
+  }
 
   let idRequest: number;
   try {
