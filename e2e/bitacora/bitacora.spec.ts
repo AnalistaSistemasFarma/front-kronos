@@ -29,6 +29,15 @@ const USUARIOS = [
   { id: 'u-jefe', name: 'Julia Jefe', email: 'jefe@farmalogica.com' },
 ];
 
+/** Usuario de la empresa CON el módulo pero SIN rol asignado: no debe salir en ningún selector (2026-10-16). */
+const SIN_ROL = { id: 'u-otro', name: 'Otro Usuario', email: 'otro@farmalogica.com' };
+/** Asignaciones de Catálogo → Responsables (lo único que listan los selectores). */
+const RESPONSABLES: Record<'SUPERVISOR' | 'INSPECTOR' | 'JEFE_PROD', typeof USUARIOS> = {
+  SUPERVISOR: [USUARIOS[0]],
+  INSPECTOR: [USUARIOS[1]],
+  JEFE_PROD: [USUARIOS[2]],
+};
+
 type Rol = 'OPERARIO' | 'SUPERVISOR' | 'INSPECTOR' | 'JEFE_PROD';
 const ROLES: Rol[] = ['OPERARIO', 'SUPERVISOR', 'INSPECTOR', 'JEFE_PROD'];
 
@@ -92,7 +101,15 @@ async function simular(page: Page, estado: Estado) {
     if (ruta === '/' && url.searchParams.get('solo') === 'acceso') return r.fulfill({ json: { companies: [EMPRESA] } });
     if (ruta === '/') return r.fulfill({ json: { companies: [EMPRESA], company: EMPRESA, ordenes: [] } });
     if (ruta === '/11') return r.fulfill({ json: { orden: estado.orden } });
-    if (ruta === '/usuarios') return r.fulfill({ json: { usuarios: USUARIOS } });
+    if (ruta === '/usuarios') return r.fulfill({ json: { usuarios: [...USUARIOS, SIN_ROL] } });
+    if (ruta === '/responsables') {
+      const rol = url.searchParams.get('rol') as keyof typeof RESPONSABLES | null;
+      if (rol) return r.fulfill({ json: { responsables: RESPONSABLES[rol] ?? [] } });
+      const filas = (Object.keys(RESPONSABLES) as (keyof typeof RESPONSABLES)[]).flatMap((k, i) =>
+        RESPONSABLES[k].map((u, j) => ({ idResponsable: i * 10 + j + 1, idUser: u.id, rol: k, activo: true, name: u.name, email: u.email, habilitado: true }))
+      );
+      return r.fulfill({ json: { responsables: filas, candidatos: [...USUARIOS, SIN_ROL].map((u) => ({ ...u, gestion: u.id === 'u-sup' })) } });
+    }
     if (ruta === '/supervisores') return r.fulfill({ json: { supervisores: [{ id: 'u-sup', name: 'Sandra Supervisora' }, { id: 'u-ins', name: 'Iván Inspector' }] } });
     if (ruta === '/operadores') return r.fulfill({ json: { operadores: [{ id_operador: 7, nombre: 'Pepito Pérez', documento: null, activo: true }, { id_operador: 8, nombre: 'Ana Gómez', documento: '55', activo: true }] } });
     if (ruta === '/areas') return r.fulfill({ json: { areas: [{ id_area: 3, nombre: 'Envase y agrafado', orden: 10, activo: true }] } });
@@ -154,6 +171,45 @@ test.describe('Bitácora de Proceso · con sesión, base y SAP simulados', () =>
     await expect.poll(() => estado.enviados.find((e) => e.ruta === '/')?.body).toMatchObject({
       inspector: 'u-ins', jefeProduccion: 'u-jefe', lote: '1455326', itemCode: 'PTCF015501', operadores: [7], sapOp: { DocumentNumber: 14022, ProductionOrderStatus: 'boposPlanned' },
     });
+  });
+
+  test('selectores: inspector y jefe listan SOLO a los asignados a ese rol (no a todos los usuarios de la empresa)', async ({ page, context, baseURL }) => {
+    await sesion(context, baseURL!, 'u-sup', 'sup@farmalogica.com');
+    const estado: Estado = { orden: detalle({ estado: 'ABIERTA', dados: {}, sesion: 'u-sup' }), enviados: [] };
+    await simular(page, estado);
+    const pedidas: string[] = [];
+    page.on('request', (req) => { if (req.url().includes('/api/bitacora-proceso/')) pedidas.push(new URL(req.url()).pathname + new URL(req.url()).search); });
+    await page.goto('/process/bitacora-proceso?empresa=1');
+    await page.getByTestId('ot-nueva').click();
+    const insp = page.getByTestId('ot-inspector');
+    const jefe = page.getByTestId('ot-jefe');
+    await expect(insp.getByText('Iván Inspector')).toBeVisible();
+    await expect(insp.getByRole('radio')).toHaveCount(1);
+    await expect(jefe.getByRole('radio')).toHaveCount(1);
+    for (const nombre of ['Otro Usuario', 'Sandra Supervisora', 'Julia Jefe']) await expect(insp.getByText(nombre)).toHaveCount(0);
+    await expect(jefe.getByText('Julia Jefe')).toBeVisible();
+    for (const nombre of ['Otro Usuario', 'Sandra Supervisora', 'Iván Inspector']) await expect(jefe.getByText(nombre)).toHaveCount(0);
+    expect(pedidas.some((p) => p.includes('/responsables?') && p.includes('rol=INSPECTOR'))).toBe(true);
+    expect(pedidas.some((p) => p.includes('/responsables?') && p.includes('rol=JEFE_PROD'))).toBe(true);
+    expect(pedidas.some((p) => p.startsWith('/api/bitacora-proceso/usuarios'))).toBe(false);
+  });
+
+  test('catálogo → Responsables: lista por rol y asigna un inspector', async ({ page, context, baseURL }) => {
+    await sesion(context, baseURL!, 'u-sup', 'sup@farmalogica.com');
+    const estado: Estado = { orden: detalle({ estado: 'ABIERTA', dados: {}, sesion: 'u-sup' }), enviados: [] };
+    await simular(page, estado);
+    await page.goto('/process/bitacora-proceso/gestion?empresa=1');
+    await page.getByTestId('ot-tab-responsables').click();
+    await expect(page.getByTestId('ot-responsables-SUPERVISOR')).toContainText('Sandra Supervisora');
+    await expect(page.getByTestId('ot-responsables-INSPECTOR')).toContainText('Iván Inspector');
+    await expect(page.getByTestId('ot-responsables-JEFE_PROD')).toContainText('Julia Jefe');
+    // Supervisor: quien no tiene Gestión no se puede elegir.
+    await expect(page.getByTestId('ot-responsable-candidatos')).toContainText('Sin permiso de Gestión');
+    await page.getByTestId('ot-responsable-rol').getByText('Inspector').click();
+    await page.getByTestId('ot-responsable-candidatos').getByText('Otro Usuario').click();
+    await page.getByTestId('ot-responsable-asignar').click();
+    await expect(page.getByTestId('ot-responsables-aviso')).toContainText('asignado como inspector');
+    expect(estado.enviados.at(-1)).toMatchObject({ ruta: '/responsables', body: { company: 1, id_user: 'u-otro', rol: 'INSPECTOR' } });
   });
 
   test('tablet: visto bueno del operario y cierre del supervisor con PIN (cuenta compartida); PIN malo se rechaza', async ({ page, context, baseURL }) => {
