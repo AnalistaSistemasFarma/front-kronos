@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Alert, Badge, Button, Card, Group, Loader, NumberInput, Stack, Switch, Tabs, Text, TextInput, Title } from '@mantine/core';
-import { IconAlertTriangle, IconArrowDown, IconArrowUp, IconCheck, IconListCheck, IconMapPin, IconPlus, IconUsers } from '@tabler/icons-react';
+import { IconAlertTriangle, IconArrowDown, IconArrowUp, IconCheck, IconKey, IconListCheck, IconMapPin, IconPlus, IconUsers } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { OT_ICONOS, OT_LIMITS } from '../../lib/bitacora-proceso/constants';
 import SgcSelect from '../sgc/SgcSelect';
@@ -10,6 +10,7 @@ import { OtIconoActividad } from './otIconos';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import { otSend, useOtFetch } from './otClient';
 import { OtAreas, OtOperadores } from './OtMaestros';
+import { OtPinsEmpresa } from './OtImportarYPin';
 
 /**
  * Catálogo de la bitácora (pantalla 4, solo Gestión), en pestañas:
@@ -18,6 +19,7 @@ import { OtAreas, OtOperadores } from './OtMaestros';
  *     historial conserva su nombre). La observación es opcional en todas (2026-10-14).
  *   - Operarios (A1): maestro de operarios SIN usuario de SynerLink.
  *   - Áreas (A5): áreas predefinidas de la empresa.
+ *   - PIN (B3, 2026-10-15): estado del PIN de bitácora por persona y restablecimiento.
  */
 interface Actividad {
   id_actividad: number;
@@ -42,6 +44,9 @@ export default function OtCatalogo({ company }: { company: OtCompanyAccess }) {
         <Tabs.Tab value='areas' leftSection={<IconMapPin size={18} />} data-testid='ot-tab-areas'>
           Áreas
         </Tabs.Tab>
+        <Tabs.Tab value='pin' leftSection={<IconKey size={18} />} data-testid='ot-tab-pin'>
+          PIN
+        </Tabs.Tab>
       </Tabs.List>
       <Tabs.Panel value='actividades'>
         <CatalogoActividades company={company} />
@@ -51,6 +56,9 @@ export default function OtCatalogo({ company }: { company: OtCompanyAccess }) {
       </Tabs.Panel>
       <Tabs.Panel value='areas'>
         <OtAreas company={company} />
+      </Tabs.Panel>
+      <Tabs.Panel value='pin'>
+        <OtPinsEmpresa company={company} />
       </Tabs.Panel>
     </Tabs>
   );

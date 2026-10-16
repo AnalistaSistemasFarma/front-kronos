@@ -76,6 +76,7 @@ export default defineConfig({
         'lib/bitacora-proceso/rules.ts',
         'lib/bitacora-proceso/firmas.ts',
         'lib/bitacora-proceso/notificaciones.ts',
+        'lib/bitacora-proceso/pin.ts',
         'app/api/bitacora-proceso/**/route.ts',
         // Firma GSS: saneamiento de la imagen y registro de la firma propia.
         'lib/firma-gss/png.ts',
