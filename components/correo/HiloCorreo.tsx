@@ -92,6 +92,8 @@ export interface HiloCorreoProps {
   onCambio: () => void;
   /** Responder desde SynerLink (Mail.Send) habilitado en el ambiente. */
   envioHabilitado?: boolean;
+  /** «Consultar a un agente» encendido en el ambiente (CORREO_AGENTE_HABILITADO; apagado por defecto). */
+  agenteHabilitado?: boolean;
   /** Nombre de la persona (firma del texto «Informar en el hilo»). */
   nombreOperador?: string;
   /** Correo de la persona (para mostrar «para mí»). */
@@ -316,6 +318,7 @@ export default function HiloCorreo({
   onCrearSolicitud,
   onCambio,
   envioHabilitado = true,
+  agenteHabilitado = false,
   nombreOperador = '',
   correoOperador = '',
 }: HiloCorreoProps) {
@@ -406,14 +409,14 @@ export default function HiloCorreo({
   useEffect(() => () => peticion.current?.abort(), []);
 
   const cargarCompartidos = useCallback(async () => {
-    if (!conversationId) return;
+    if (!conversationId || !agenteHabilitado) return;
     try {
       const r = await correoApi.compartidos(conversationId);
       setCompartidos(r.compartidos);
     } catch {
       setCompartidos([]);
     }
-  }, [conversationId]);
+  }, [conversationId, agenteHabilitado]);
 
   useEffect(() => {
     if (hilo?.conversationId) void cargarCompartidos();
@@ -692,6 +695,7 @@ export default function HiloCorreo({
           </Popover>
         )}
         {hilo &&
+          agenteHabilitado &&
           accion('Consultar a un agente', <IconRobot size={19} />, {
             onClick: () => setAgenteAbierto(true),
             'data-testid': 'correo-hilo-agente',
@@ -994,7 +998,7 @@ export default function HiloCorreo({
           )}
         </Stack>
       </div>
-      {hilo && (
+      {hilo && agenteHabilitado && (
         <ConsultarAgenteModal
           opened={agenteAbierto}
           onClose={() => setAgenteAbierto(false)}
