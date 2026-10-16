@@ -2581,17 +2581,9 @@ function ViewRequestPage() {
                       <IconCheck size={18} className='text-green-6' />
                       Resolución de la Solicitud - Finalizar Solicitud
                     </Title>
-                    {!isRequestResolved() && isEditing && canEdit && (
-                      <ActionIcon
-                        variant='subtle'
-                        onClick={() => setShowResolution(!showResolution)}
-                      >
-                        {showResolution ? <IconX size={16} /> : <IconCheck size={16} />}
-                      </ActionIcon>
-                    )}
                   </Group>
 
-                  {!isRequestResolved() && isEditing && showResolution && canEdit && (
+                  {!isRequestResolved() && isEditing && canEdit && (
                     <Stack>
                       <Select
                         label='Estado de la solicitud'
