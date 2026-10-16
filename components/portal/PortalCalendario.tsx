@@ -8,6 +8,7 @@ import {
   MESES,
   NOMBRE_TIPO,
   cuadriculaDelMes,
+  cumpleanosComoEventos,
   eventosFijosPorDia,
   fechaLarga,
   hoyEnBogota,
@@ -49,6 +50,8 @@ export default function PortalCalendario({ puedeEditar }: { puedeEditar: boolean
   const [visible, setVisible] = useState<{ año: number; mes: number } | null>(null);
   const [seleccionado, setSeleccionado] = useState<string | null>(null);
   const [empresa, setEmpresa] = useState<EventoDia[]>([]);
+  // Cumpleaños de BASE PERSONAL (Cristian, 2026-10-15): un evento «CUMPLEAÑOS» por día con las personas que cumplen.
+  const [cumples, setCumples] = useState<EventoDia[]>([]);
   const [aviso, setAviso] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
   const [plegado, setPlegado] = useState(true); // solo se nota en celular (ver el CSS)
   const [nuevo, setNuevo] = useState<{ titulo: string; descripcion: string } | null>(null);
@@ -98,6 +101,28 @@ export default function PortalCalendario({ puedeEditar }: { puedeEditar: boolean
     return () => control.abort();
   }, [cargarEmpresa]);
 
+  // Los cumpleaños se piden aparte: si BASE PERSONAL no está disponible, el calendario sigue con todo lo demás y se avisa arriba.
+  useEffect(() => {
+    if (!desde || !hasta) return;
+    const control = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch(`/api/portal/cumpleanos?desde=${desde}&hasta=${hasta}`, { cache: 'no-store', signal: control.signal });
+        if (control.signal.aborted) return;
+        if (res.status === 401) return setCumples([]);
+        const data = await lectura(res);
+        if (control.signal.aborted) return;
+        if (!res.ok) throw new Error(String(data.error ?? 'No se pudieron cargar los cumpleaños.'));
+        setCumples(cumpleanosComoEventos(Array.isArray(data.cumpleanos) ? (data.cumpleanos as { fecha: string; personas: { nombre: string; empresa: string; area: string }[] }[]) : []));
+      } catch (e) {
+        if (control.signal.aborted || (e as Error).name === 'AbortError') return;
+        setCumples([]);
+        setAviso({ tipo: 'error', texto: (e as Error).message });
+      }
+    })();
+    return () => control.abort();
+  }, [desde, hasta]);
+
   // El aviso va ARRIBA: al aparecer uno, se lleva a la persona hasta él.
   useEffect(() => {
     if (!aviso) return;
@@ -107,8 +132,8 @@ export default function PortalCalendario({ puedeEditar }: { puedeEditar: boolean
   const todo = useMemo(() => {
     if (celdas.length === 0) return new Map<string, EventoDia[]>();
     const años = [Number(celdas[0].fecha.slice(0, 4)), Number(celdas[celdas.length - 1].fecha.slice(0, 4))];
-    return unirEventos(eventosFijosPorDia(años), empresa);
-  }, [celdas, empresa]);
+    return unirEventos(eventosFijosPorDia(años), [...empresa, ...cumples]);
+  }, [celdas, empresa, cumples]);
 
   if (!hoy || !visible || !seleccionado) return null;
 
@@ -282,6 +307,16 @@ export default function PortalCalendario({ puedeEditar }: { puedeEditar: boolean
                       {NOMBRE_TIPO[e.tipo]}
                       {e.descripcion ? ` · ${e.descripcion}` : ''}
                     </small>
+                    {e.personas && e.personas.length > 0 && (
+                      <ul className='portal-th__cal-cumples' data-testid='cumple-personas'>
+                        {e.personas.map((p, k) => (
+                          <li key={`${p.nombre}-${k}`} data-testid='cumple-persona'>
+                            <strong>{p.nombre}</strong>
+                            <small>{[p.empresa, p.area].filter(Boolean).join(' · ')}</small>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                   {e.tipo === 'empresa' && editar && (
                     quitando === e.id ? (

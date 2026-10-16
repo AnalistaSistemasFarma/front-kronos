@@ -5938,3 +5938,31 @@ a.portal-th__contactos-boton--enlace:focus-visible {
     width: auto;
   }
 }
+
+/* ── Cumpleaños en el recuadro de eventos (Cristian, 2026-10-15) ───────────── */
+.portal-th__cal-cumples {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.portal-th__cal-cumples li {
+  display: flex;
+  flex-direction: column;
+  padding-left: 8px;
+  border-left: 2px solid #2e7d32;
+}
+
+.portal-th__cal-cumples strong {
+  color: var(--pthc-tinta);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.portal-th__cal-cumples small {
+  color: var(--pthc-tinta-3);
+  font-size: 0.7rem;
+}
