@@ -48,6 +48,15 @@ export const STORAGE_STATE_3 = 'reports/playwright/.auth/sesion3.json';
 // Calidad no se las asigne a personas reales.
 export const STORAGE_STATE_4 = 'reports/playwright/.auth/sesion4.json';
 
+// Ventana emergente «Hoy» del portal (2026-10-15): se abre sola al entrar y TAPA la página. Para que ninguna prueba dependa de que hoy
+// sea o no un día con evento (festivos, fechas importantes, cumpleaños), el proyecto «publico» arranca con la de hoy ya marcada como vista.
+// Mismo formato que `claveVentanaHoy` en lib/portal/ventana-hoy.ts. Las pruebas de la ventana quitan esa marca a propósito.
+const hoyBogota = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+const SIN_VENTANA_HOY = {
+  cookies: [],
+  origins: [{ origin: new URL(baseURL).origin, localStorage: [{ name: `portal-th-ventana-hoy-${hoyBogota}`, value: '1' }] }],
+};
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 60_000,
@@ -71,7 +80,7 @@ export default defineConfig({
     {
       name: 'publico',
       testIgnore: [/\.setup\.ts$/, /\.session\.spec\.ts$/, /\.firma\.spec\.ts$/, /\.movil\.spec\.ts$/],
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], storageState: SIN_VENTANA_HOY },
     },
     ...(hasUser
       ? [
