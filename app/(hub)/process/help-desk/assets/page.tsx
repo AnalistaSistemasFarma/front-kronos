@@ -849,7 +849,21 @@ function AssetsBoard() {
             </Button>
           </Flex>
 
-          <SimpleGrid cols={{ base: 2, sm: 3, md: 6 }} spacing={{ base: 'xs', sm: 'md' }}>
+          {/*
+            Grid de CSS puro con auto-fit en vez de Grid/Grid.Col con breakpoints
+            (base/xs/sm/md/lg): el número de tarjetas por fila se recalcula de
+            forma continua según el ancho real disponible, sin puntos de quiebre
+            fijos donde todo "salta" de layout al redimensionar. Cada tarjeta
+            nunca baja de 170px, así que el valor de "Costo Equipos" (montos
+            largos) tiene espacio para no recortarse.
+          */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+              gap: 'var(--mantine-spacing-md)',
+            }}
+          >
             {summaryCards.map((card) => {
               const clickable = card.statusId !== undefined;
               const active = clickable && filters.estado === card.statusId;
@@ -910,7 +924,7 @@ function AssetsBoard() {
                 XLSX
               </Button>
             </Card>
-          </SimpleGrid>
+          </div>
         </Card>
 
         {error && (

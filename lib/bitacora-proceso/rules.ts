@@ -84,7 +84,7 @@ export function companyOtAccess(
  *   figura como auxiliar o como jefe de producción de esa bitácora (403).
  */
 export function assertPuedeRegistrar(
-  orden: { estado: string; operarios: readonly string[]; inspector?: string | null; operadores?: readonly number[] },
+  orden: { estado: string; operarios: readonly string[]; inspector?: string | null; jefe?: string | null; operadores?: readonly number[] },
   idUser: string,
   access: OtCompanyAccess
 ): void {
@@ -93,9 +93,9 @@ export function assertPuedeRegistrar(
   }
   if (access.canManage) return;
   if (orden.operadores && orden.operadores.length > 0) return;
-  if (!orden.operarios.includes(idUser) && orden.inspector !== idUser) {
+  if (!orden.operarios.includes(idUser) && orden.inspector !== idUser && orden.jefe !== idUser) {
     throw new OtError(
-      'Usted no figura como auxiliar ni como jefe de producción de esta bitácora. Pida al supervisor que lo incluya.',
+      'Usted no figura como auxiliar, inspector ni jefe de producción de esta bitácora. Pida al supervisor que lo incluya.',
       403
     );
   }
@@ -156,6 +156,8 @@ export interface SapOpSnapshot {
   U_FecVen_lote: string | null;
   PlannedQuantity: number | null;
   Warehouse: string | null;
+  /** boposPlanned | boposReleased (B5: también las planificadas). Opcional en copias viejas. */
+  ProductionOrderStatus?: string | null;
 }
 
 export interface NuevaOrdenInput {
@@ -168,8 +170,10 @@ export interface NuevaOrdenInput {
   idArea: number | null;
   /** Operarios SIN usuario del maestro de la empresa (A1; en la base, ot_orden_operador). */
   operadores: number[];
-  /** Jefe de producción (usuario de SynerLink; columna interna id_inspector). */
+  /** Inspector (usuario de SynerLink, columna id_inspector; B1, 2026-10-15). */
   inspector: string;
+  /** Jefe de producción (usuario de SynerLink, columna id_jefe_produccion; B1). */
+  jefeProduccion: string;
   sapOp: SapOpSnapshot | null;
 }
 
@@ -199,6 +203,7 @@ function parseSapOp(v: unknown): SapOpSnapshot | null {
     U_FecVen_lote: s(o.U_FecVen_lote, 40),
     PlannedQuantity: qty,
     Warehouse: s(o.Warehouse, 20),
+    ProductionOrderStatus: s(o.ProductionOrderStatus, 20),
   };
 }
 
@@ -213,9 +218,12 @@ export function parseNuevaOrden(body: Record<string, unknown> | null): NuevaOrde
   }
   const operadores = parseIdList(body.operadores, 'Operarios', OT_LIMITS.maxOperarios);
   if (operadores.length === 0) throw new OtError('Seleccione al menos un operario.', 400);
-  const inspector = str(body.inspector ?? body.jefeProduccion);
-  if (!inspector) throw new OtError('Seleccione el jefe de producción.', 400);
-  if (inspector.length > 50) throw new OtError('Jefe de producción no válido.', 400);
+  const inspector = str(body.inspector);
+  if (!inspector) throw new OtError('Seleccione el inspector.', 400);
+  if (inspector.length > 50) throw new OtError('Inspector no válido.', 400);
+  const jefeProduccion = str(body.jefeProduccion);
+  if (!jefeProduccion) throw new OtError('Seleccione el jefe de producción.', 400);
+  if (jefeProduccion.length > 50) throw new OtError('Jefe de producción no válido.', 400);
   return {
     idCompany,
     producto: reqStr(body.producto, OT_LIMITS.producto, 'El producto'),
@@ -225,6 +233,7 @@ export function parseNuevaOrden(body: Record<string, unknown> | null): NuevaOrde
     idArea: optPositiveInt(body.idArea ?? body.id_area, 'El área'),
     operadores,
     inspector,
+    jefeProduccion,
     sapOp: parseSapOp(body.sapOp),
   };
 }
@@ -435,15 +444,87 @@ export function escapeOData(value: string): string {
 }
 
 /**
- * Filtro OData de búsqueda de OP liberadas (solo lectura). Con un número busca
- * también por DocumentNumber; con texto, por artículo, descripción y lote.
+ * Estados de OP que se ofrecen (B5, 2026-10-15): PLANIFICADAS y LIBERADAS. Amanda:
+ * basta con que «la orden esté creada». Nunca cerradas ni canceladas.
+ */
+export const OT_SAP_OP_ESTADOS = ['boposPlanned', 'boposReleased'] as const;
+
+export const OT_SAP_OP_ESTADO_LABEL: Record<string, string> = { boposPlanned: 'Planificada', boposReleased: 'Liberada' };
+
+/**
+ * Filtro OData de búsqueda de OP planificadas o liberadas (solo lectura). Con un
+ * número busca también por DocumentNumber; con texto, por artículo, descripción y lote.
  */
 export function buildSapOpFilter(q: string): string {
   const term = q.trim().slice(0, 50);
   const e = escapeOData(term);
   const parts = [`contains(ItemNo,'${e}')`, `contains(ProductDescription,'${e}')`, `U_Cod_Lote eq '${e}'`];
   if (/^\d{1,9}$/.test(term)) parts.push(`DocumentNumber eq ${Number(term)}`);
-  return `ProductionOrderStatus eq 'boposReleased' and (${parts.join(' or ')})`;
+  const estados = OT_SAP_OP_ESTADOS.map((x) => `ProductionOrderStatus eq '${x}'`).join(' or ');
+  return `(${estados}) and (${parts.join(' or ')})`;
+}
+
+/**
+ * B5: si se escribió un NÚMERO de OP y entre los resultados está exactamente esa OP, se
+ * elige sola (se completan producto, código y lote). Con texto no se elige nada.
+ */
+export function opPorNumero<T extends { DocumentNumber: number }>(q: string, ops: readonly T[]): T | null {
+  const t = q.trim();
+  if (!/^\d{1,9}$/.test(t)) return null;
+  const n = Number(t);
+  const hits = ops.filter((o) => o.DocumentNumber === n);
+  return hits.length === 1 ? hits[0] : null;
+}
+
+// ---------------------------------------------------------------------------
+// Importación del maestro de operarios (B8)
+// ---------------------------------------------------------------------------
+
+export const OT_IMPORTAR_MAX_FILAS = 500;
+
+export interface ImportarOperadoresInput {
+  idCompany: number;
+  filas: Array<{ linea: number; nombre: string; documento: string | null }>;
+  errores: Array<{ linea: number; motivo: string }>;
+  /** true = solo vista previa (no escribe). */
+  simular: boolean;
+}
+
+/**
+ * Pegado de una lista (B8, «Catálogo → Operarios → Importar»): una persona por línea,
+ * «Nombre completo; documento» (separador ; , o tabulador; el documento es opcional).
+ * Se ignora una primera línea de encabezado («nombre…»). Nombres repetidos en el
+ * texto cuentan una sola vez.
+ */
+export function parseImportarOperadores(body: Record<string, unknown> | null): ImportarOperadoresInput {
+  if (!body) throw new OtError('Se esperaba un JSON con la lista de operarios.', 400);
+  const idCompany = optPositiveInt(body.company, 'La empresa');
+  if (!idCompany) throw new OtError('Falta la empresa.', 400);
+  const texto = typeof body.texto === 'string' ? body.texto : '';
+  if (!texto.trim()) throw new OtError('Pegue la lista de operarios (una persona por línea).', 400);
+  const lineas = texto.replace(/\r\n?/g, '\n').split('\n');
+  const filas: ImportarOperadoresInput['filas'] = [];
+  const errores: ImportarOperadoresInput['errores'] = [];
+  const vistos = new Set<string>();
+  lineas.forEach((raw, i) => {
+    const linea = i + 1;
+    const l = raw.trim();
+    if (!l) return;
+    const [n, d] = l.split(/\t|;|,/).map((x) => x.trim());
+    const nombre = (n ?? '').replace(/\s+/g, ' ');
+    if (i === 0 && /^nombre/i.test(nombre)) return;
+    if (!nombre) return void errores.push({ linea, motivo: 'Falta el nombre.' });
+    if (nombre.length > OT_LIMITS.operadorNombre) return void errores.push({ linea, motivo: `Nombre de más de ${OT_LIMITS.operadorNombre} caracteres.` });
+    const documento = d ? d.replace(/\s+/g, '') : null;
+    if (documento && documento.length > OT_LIMITS.operadorDocumento) return void errores.push({ linea, motivo: `Documento de más de ${OT_LIMITS.operadorDocumento} caracteres.` });
+    const k = nombre.toLocaleLowerCase('es');
+    if (vistos.has(k)) return void errores.push({ linea, motivo: 'Nombre repetido en la lista.' });
+    vistos.add(k);
+    filas.push({ linea, nombre, documento: documento || null });
+  });
+  if (filas.length > OT_IMPORTAR_MAX_FILAS) throw new OtError(`Máximo ${OT_IMPORTAR_MAX_FILAS} operarios por importación.`, 400);
+  if (filas.length === 0 && errores.length === 0) throw new OtError('La lista no tiene operarios.', 400);
+  return { idCompany, filas, errores, simular: body.simular !== false };
 }
 
 export function isEstado(v: string): v is OtEstado {

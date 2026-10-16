@@ -1,0 +1,953 @@
+{
+ "fuente": "Organigrama GTH-01-FR-005-5 (PDF vigente, Cristian Baldión 2026-10-15)",
+ "empresa": {
+  "id": 8,
+  "nombre": "GSS"
+ },
+ "cargos": [
+  {
+   "nombre": "DIRECTOR GENERAL",
+   "nivel": "Estratégico",
+   "padre": null,
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "GERENTE COMERCIAL Y DE MERCADEO",
+   "nivel": "Estratégico",
+   "padre": "DIRECTOR GENERAL",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "GERENTE DE ABASTECIMIENTO Y COMERCIO EXTERIOR",
+   "nivel": "Estratégico",
+   "padre": "DIRECTOR GENERAL",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "GERENTE DE CALIDAD",
+   "nivel": "Estratégico",
+   "padre": "DIRECTOR GENERAL",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "GERENTE DE CONTROL",
+   "nivel": "Estratégico",
+   "padre": "DIRECTOR GENERAL",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "GERENTE DE OPERACIONES Y FINANZAS",
+   "nivel": "Estratégico",
+   "padre": "DIRECTOR GENERAL",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "GERENTE DE PLANEACION Y MANUFACTURA",
+   "nivel": "Estratégico",
+   "padre": "DIRECTOR GENERAL",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "GERENTE DE TALENTO HUMANO",
+   "nivel": "Estratégico",
+   "padre": "DIRECTOR GENERAL",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "GERENTE TECNICO REGULATORIO",
+   "nivel": "Estratégico",
+   "padre": "DIRECTOR GENERAL",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE DE MANTENIMIENTO",
+   "nivel": "Táctico",
+   "padre": "DIRECTOR GENERAL",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "OFICIAL DE CUMPLIMIENTO",
+   "nivel": "Operativo",
+   "padre": "DIRECTOR GENERAL",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE INGENIERIA",
+   "nivel": "Operativo",
+   "padre": "GERENTE DE PLANEACION Y MANUFACTURA",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE MANTENIMIENTO",
+   "nivel": "Operativo",
+   "padre": "JEFE DE MANTENIMIENTO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE PRODUCCION",
+   "nivel": "Operativo",
+   "padre": "GERENTE DE PLANEACION Y MANUFACTURA",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "AUXILIAR DE RECEPCION",
+   "nivel": "Operativo",
+   "padre": "GERENTE DE CONTROL",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "AUXILIAR DE VIGILANCIA",
+   "nivel": "Operativo",
+   "padre": "GERENTE DE CONTROL",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "COORDINADOR ADMINISTRATIVO",
+   "nivel": "Táctico",
+   "padre": "GERENTE DE OPERACIONES Y FINANZAS",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "COORDINADOR DE CAPITAL DE TRABAJO",
+   "nivel": "Táctico",
+   "padre": "GERENTE DE OPERACIONES Y FINANZAS",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "COORDINADOR DE DISENO GRAFICO",
+   "nivel": "Táctico",
+   "padre": "GERENTE COMERCIAL Y DE MERCADEO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "COORDINADOR DE FORMACION Y CALIFICACION DE PERSONAL",
+   "nivel": "Táctico",
+   "padre": "GERENTE DE TALENTO HUMANO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "COORDINADOR DE MEJORAMIENTO CONTINUO",
+   "nivel": "Táctico",
+   "padre": "GERENTE DE CALIDAD",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "COORDINADOR DE NOMINA CONTRATACION",
+   "nivel": "Táctico",
+   "padre": "GERENTE DE TALENTO HUMANO",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "COORDINADOR DE TALENTO HUMANO",
+   "nivel": "Táctico",
+   "padre": "GERENTE DE TALENTO HUMANO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "COORDINADOR INSTITUCIONAL",
+   "nivel": "Táctico",
+   "padre": "GERENTE COMERCIAL Y DE MERCADEO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE ASUNTOS REGULATORIOS",
+   "nivel": "Táctico",
+   "padre": "GERENTE TECNICO REGULATORIO",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE CREDITO Y CARTERA",
+   "nivel": "Táctico",
+   "padre": "GERENTE DE OPERACIONES Y FINANZAS",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE DE AUDITORIAS",
+   "nivel": "Táctico",
+   "padre": "GERENTE DE CALIDAD",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE DE COMERCIO EXTERIOR",
+   "nivel": "Táctico",
+   "padre": "GERENTE DE ABASTECIMIENTO Y COMERCIO EXTERIOR",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE DE DESARROLLO",
+   "nivel": "Táctico",
+   "padre": "GERENTE DE OPERACIONES Y FINANZAS",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE DE PRODUCCION",
+   "nivel": "Táctico",
+   "padre": "GERENTE DE PLANEACION Y MANUFACTURA",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE DE SEGURIDAD Y SALUD EN EL TRABAJO",
+   "nivel": "Táctico",
+   "padre": "GERENTE DE TALENTO HUMANO",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE DE SELECCION Y BIENESTAR",
+   "nivel": "Táctico",
+   "padre": "GERENTE DE TALENTO HUMANO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE DE VENTAS EXTERIOR",
+   "nivel": "Táctico",
+   "padre": "GERENTE COMERCIAL Y DE MERCADEO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE INFRAESTRUCTURA",
+   "nivel": "Táctico",
+   "padre": "GERENTE DE OPERACIONES Y FINANZAS",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE PLANEACION",
+   "nivel": "Táctico",
+   "padre": "GERENTE DE PLANEACION Y MANUFACTURA",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "SUBGERENTE DE ACONDICIONAMIENTO",
+   "nivel": "Estratégico",
+   "padre": "GERENTE DE PLANEACION Y MANUFACTURA",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "SUBGERENTE DE COMPRAS",
+   "nivel": "Estratégico",
+   "padre": "GERENTE DE ABASTECIMIENTO Y COMERCIO EXTERIOR",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "SUBGERENTE DE CONTABILIDAD",
+   "nivel": "Estratégico",
+   "padre": "GERENTE DE OPERACIONES Y FINANZAS",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "SUBGERENTE DE CONTROL DE CALIDAD FISICOQUIMICO",
+   "nivel": "Estratégico",
+   "padre": "GERENTE DE CALIDAD",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "SUBGERENTE DE ESTABILIDADES INVESTIGACION Y DESARROLLO",
+   "nivel": "Estratégico",
+   "padre": "GERENTE TECNICO REGULATORIO",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "SUBGERENTE DE GARANTIA DE CALIDAD",
+   "nivel": "Estratégico",
+   "padre": "GERENTE DE CALIDAD",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "SUBGERENTE DE MICROBIOLOGIA",
+   "nivel": "Estratégico",
+   "padre": "GERENTE DE CALIDAD",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "SUBGERENTE DE SEGURIDAD DEL PACIENTE",
+   "nivel": "Estratégico",
+   "padre": "GERENTE TECNICO REGULATORIO",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "SUBGERENTE DE VALIDACIONES",
+   "nivel": "Estratégico",
+   "padre": "GERENTE DE CALIDAD",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "SUBGERENTE DE VENTAS COLOMBIA",
+   "nivel": "Estratégico",
+   "padre": "GERENTE COMERCIAL Y DE MERCADEO",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "SUBGERENTE FINANCIERO",
+   "nivel": "Estratégico",
+   "padre": "GERENTE DE OPERACIONES Y FINANZAS",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "SUBGERENTE JURIDICO",
+   "nivel": "Estratégico",
+   "padre": "GERENTE DE OPERACIONES Y FINANZAS",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "SUPERVISOR DE MANTENIMIENTO",
+   "nivel": "Operativo",
+   "padre": "JEFE DE MANTENIMIENTO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA CAPITAL DE TRABAJO",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR DE CAPITAL DE TRABAJO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DATA ANALISIS",
+   "nivel": "Operativo",
+   "padre": "SUBGERENTE FINANCIERO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE ASUNTOS REGULATORIOS Y FARMACOVIGILANCIA",
+   "nivel": "Operativo",
+   "padre": "SUBGERENTE DE SEGURIDAD DEL PACIENTE",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE FARMACOVIGILANCIA",
+   "nivel": "Operativo",
+   "padre": "SUBGERENTE DE SEGURIDAD DEL PACIENTE",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE FORMACION Y CALIFICACION DE PERSONAL",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR DE FORMACION Y CALIFICACION DE PERSONAL",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE MERCADEO",
+   "nivel": "Operativo",
+   "padre": "SUBGERENTE DE VENTAS COLOMBIA",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE NOMINA CONTRATACION",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR DE NOMINA CONTRATACION",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE SELECCION Y BIENESTAR",
+   "nivel": "Operativo",
+   "padre": "JEFE DE SELECCION Y BIENESTAR",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE SERVICIO AL CLIENTE",
+   "nivel": "Operativo",
+   "padre": "SUBGERENTE DE VENTAS COLOMBIA",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE TECNOVIGILANCIA",
+   "nivel": "Operativo",
+   "padre": "SUBGERENTE DE SEGURIDAD DEL PACIENTE",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA JUNIOR DE DESARROLLO",
+   "nivel": "Operativo",
+   "padre": "JEFE DE DESARROLLO",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA SENIOR DE DESARROLLO",
+   "nivel": "Operativo",
+   "padre": "JEFE DE DESARROLLO",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "AUXILIAR DE SERVICIOS GENERALES",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR ADMINISTRATIVO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 2
+  },
+  {
+   "nombre": "AUXILIAR DE TALENTO HUMANO",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR DE TALENTO HUMANO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "AUXILIAR DOCUMENTAL",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR DE NOMINA CONTRATACION",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "COORDINADOR DE ACONDICIONAMIENTO",
+   "nivel": "Táctico",
+   "padre": "SUBGERENTE DE ACONDICIONAMIENTO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "COORDINADOR DE CALIDAD",
+   "nivel": "Táctico",
+   "padre": "SUBGERENTE DE GARANTIA DE CALIDAD",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "COORDINADOR DE COMPRAS",
+   "nivel": "Táctico",
+   "padre": "SUBGERENTE DE COMPRAS",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "COORDINADOR DE DOCUMENTACION TECNICA",
+   "nivel": "Táctico",
+   "padre": "JEFE ASUNTOS REGULATORIOS",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "COORDINADOR DE GESTION REGULATORIA Y ARTES",
+   "nivel": "Táctico",
+   "padre": "SUBGERENTE DE SEGURIDAD DEL PACIENTE",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "COORDINADOR DE SISTEMAS",
+   "nivel": "Táctico",
+   "padre": "JEFE INFRAESTRUCTURA",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "COORDINADOR SEGURIDAD Y SALUD EN EL TRABAJO",
+   "nivel": "Táctico",
+   "padre": "JEFE DE SEGURIDAD Y SALUD EN EL TRABAJO",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "DISENADOR GRAFICO",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR DE DISENO GRAFICO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ESPECIALISTA EN COMERCIO EXTERIOR",
+   "nivel": "Operativo",
+   "padre": "JEFE DE COMERCIO EXTERIOR",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "ESPECIALISTA JURIDICO",
+   "nivel": "Operativo",
+   "padre": "SUBGERENTE JURIDICO",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "ESPECIALISTA SENIOR INSTITUCIONAL",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR INSTITUCIONAL",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE DE COMPRAS",
+   "nivel": "Táctico",
+   "padre": "SUBGERENTE DE COMPRAS",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE DE CONTABILIDAD",
+   "nivel": "Táctico",
+   "padre": "SUBGERENTE DE CONTABILIDAD",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE DE CONTROL DE CALIDAD FISICOQUIMICO",
+   "nivel": "Táctico",
+   "padre": "SUBGERENTE DE CONTROL DE CALIDAD FISICOQUIMICO",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE DE ESTABILIDADES",
+   "nivel": "Táctico",
+   "padre": "SUBGERENTE DE ESTABILIDADES INVESTIGACION Y DESARROLLO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE DE GARANTIA DE CALIDAD",
+   "nivel": "Táctico",
+   "padre": "SUBGERENTE DE GARANTIA DE CALIDAD",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE DE MICROBIOLOGIA",
+   "nivel": "Táctico",
+   "padre": "SUBGERENTE DE MICROBIOLOGIA",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "JEFE DE VALIDACIONES",
+   "nivel": "Táctico",
+   "padre": "SUBGERENTE DE VALIDACIONES",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "MENSAJERO",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR ADMINISTRATIVO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "REPRESENTANTE EN VENTAS",
+   "nivel": "Operativo",
+   "padre": "SUBGERENTE DE VENTAS COLOMBIA",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "SUPERVISOR DE PRODUCCION",
+   "nivel": "Operativo",
+   "padre": "JEFE DE PRODUCCION",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "SUPERVISOR LOGISTICO",
+   "nivel": "Operativo",
+   "padre": "JEFE PLANEACION",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "TECNICO DE MANTENIMIENTO",
+   "nivel": "Operativo",
+   "padre": "SUPERVISOR DE MANTENIMIENTO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE ASEGURAMIENTO METROLOGICO",
+   "nivel": "Operativo",
+   "padre": "JEFE DE VALIDACIONES",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE ASUNTOS REGULATORIOS",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR DE DOCUMENTACION TECNICA",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE CALIDAD",
+   "nivel": "Operativo",
+   "padre": "JEFE DE GARANTIA DE CALIDAD",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE COMPRAS",
+   "nivel": "Operativo",
+   "padre": "JEFE DE COMPRAS",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE ESTABILIDADES",
+   "nivel": "Operativo",
+   "padre": "JEFE DE ESTABILIDADES",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE GESTION REGULATORIA",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR DE GESTION REGULATORIA Y ARTES",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE GESTION TECNICA",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR DE GESTION REGULATORIA Y ARTES",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE MICROBIOLOGIA",
+   "nivel": "Operativo",
+   "padre": "JEFE DE MICROBIOLOGIA",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE SEGURIDAD Y SALUD EN EL TRABAJO",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR SEGURIDAD Y SALUD EN EL TRABAJO",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE SISTEMAS",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR DE SISTEMAS",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE VALIDACIONES",
+   "nivel": "Operativo",
+   "padre": "JEFE DE VALIDACIONES",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DOCUMENTAL CONTROL DE CALIDAD",
+   "nivel": "Operativo",
+   "padre": "JEFE DE CONTROL DE CALIDAD FISICOQUIMICO",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA JUNIOR DE MICROBIOLOGIA",
+   "nivel": "Operativo",
+   "padre": "JEFE DE MICROBIOLOGIA",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA SENIOR DE SEGURIDAD Y SALUD EN EL TRABAJO",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR SEGURIDAD Y SALUD EN EL TRABAJO",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "AUXILIAR CONTABLE",
+   "nivel": "Operativo",
+   "padre": "JEFE DE CONTABILIDAD",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "AUXILIAR DE ALMACEN DE PRODUCCION",
+   "nivel": "Operativo",
+   "padre": "SUPERVISOR LOGISTICO",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "AUXILIAR DE CONTROLES EN PROCESOS",
+   "nivel": "Operativo",
+   "padre": "JEFE DE GARANTIA DE CALIDAD",
+   "aproximada": true,
+   "nuevo": true,
+   "cajas": 2
+  },
+  {
+   "nombre": "AUXILIAR DE MANTENIMIENTO",
+   "nivel": "Operativo",
+   "padre": "TECNICO DE MANTENIMIENTO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "AUXILIAR DE OFICINA DE GARANTIA Y CALIDAD",
+   "nivel": "Operativo",
+   "padre": "JEFE DE GARANTIA DE CALIDAD",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "AUXILIAR DE PRODUCCION",
+   "nivel": "Operativo",
+   "padre": "SUPERVISOR DE PRODUCCION",
+   "aproximada": true,
+   "nuevo": false,
+   "cajas": 2
+  },
+  {
+   "nombre": "AUXILIAR DE SEGURIDAD Y SALUD EN EL TRABAJO",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR SEGURIDAD Y SALUD EN EL TRABAJO",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "AUXILIAR DE SOPORTE TECNOLOGICO",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR DE SISTEMAS",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "COORDINADOR DE CONTABILIDAD",
+   "nivel": "Táctico",
+   "padre": "JEFE DE CONTABILIDAD",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "COORDINADOR DE COSTOS E INVENTARIO",
+   "nivel": "Táctico",
+   "padre": "JEFE DE CONTABILIDAD",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ESPECIALISTA EN COMPRAS",
+   "nivel": "Operativo",
+   "padre": "JEFE DE COMPRAS",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "INSPECTOR DE CALIDAD",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR DE CALIDAD",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "INSPECTOR DE CALIDAD DE PLANTA",
+   "nivel": "Operativo",
+   "padre": "JEFE DE GARANTIA DE CALIDAD",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "SUPERVISOR SENIOR",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR DE ACONDICIONAMIENTO",
+   "aproximada": false,
+   "nuevo": true,
+   "cajas": 1
+  },
+  {
+   "nombre": "TECNOLOGO DE CONTROL DE CALIDAD",
+   "nivel": "Operativo",
+   "padre": "JEFE DE MICROBIOLOGIA",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "ANALISTA DE CONTABILIDAD",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR DE CONTABILIDAD",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 2
+  },
+  {
+   "nombre": "ANALISTA DE COSTOS",
+   "nivel": "Operativo",
+   "padre": "COORDINADOR DE COSTOS E INVENTARIO",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  },
+  {
+   "nombre": "AUXILIAR DE MICROBIOLOGIA",
+   "nivel": "Operativo",
+   "padre": "ANALISTA DE MICROBIOLOGIA",
+   "aproximada": false,
+   "nuevo": false,
+   "cajas": 1
+  }
+ ]
+}

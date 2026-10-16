@@ -123,6 +123,18 @@ export async function solicitudVisible(idUser: string, idRequest: number): Promi
   });
 }
 
+/**
+ * ¿La solicitud sigue existiendo? Solo existencia (sin datos ni participación): sirve para
+ * decidir si un vínculo del Correo es vigente o huérfano. Las canceladas SÍ existen.
+ */
+export async function solicitudExiste(idRequest: number): Promise<boolean> {
+  if (!Number.isInteger(idRequest) || idRequest <= 0) return false;
+  return withMssqlPool(async (pool) => {
+    const r = await pool.request().input('id', sql.Int, idRequest).query<{ n: number }>('SELECT COUNT(1) AS n FROM requests_general WHERE id = @id');
+    return (r.recordset[0]?.n ?? 0) > 0;
+  });
+}
+
 /** Agrega una nota a la solicitud (misma tabla que la vista de la solicitud). */
 export async function insertarNota(idRequest: number, nota: string, idUser: string): Promise<number> {
   return withMssqlPool(async (pool) => {
