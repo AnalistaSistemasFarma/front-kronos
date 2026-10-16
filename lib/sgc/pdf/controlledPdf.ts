@@ -1,4 +1,5 @@
-import { PDFDocument, PDFHexString, PDFName, PDFString, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
+import * as UPNGModule from '@pdf-lib/upng';
+import { PDFDocument, PDFHexString, PDFName, PDFString, StandardFonts, clip, endPath, popGraphicsState, pushGraphicsState, rectangle, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import { canonicalJson, sha256HexOf } from '../signature/record';
 import { formatBogotaDateTime, toWinAnsiSafe } from '../watermark';
 import { drawInstitutionalHeaders, type SgcInstitutionalHeaderData, type SgcRect } from './institutional';
@@ -51,6 +52,14 @@ export interface SgcManifestSignature {
   authMethod: string;
   contentSha256: string;
   recordHash: string;
+  /** Sprint 12: la firmó un SUSTITUTO «en sustitución de» esta persona (solo si aplica). */
+  onBehalfOf?: string;
+}
+
+/** Texto del firmante con la sustitución, si la hubo: «Ana (ana@x) en sustitución de luis@x». */
+export function signerWithSubstitution(s: Pick<SgcManifestSignature, 'signerName' | 'signerEmail' | 'onBehalfOf'>, withEmail = true): string {
+  const who = withEmail ? `${s.signerName ?? s.signerEmail} (${s.signerEmail})` : s.signerName ?? s.signerEmail;
+  return s.onBehalfOf ? `${who} en sustitución de ${s.onBehalfOf}` : who;
 }
 
 /** Firma ubicada en el documento: página del CONTENIDO (1 = primera) y caja en % (origen arriba-izquierda). */
@@ -96,6 +105,11 @@ export interface SgcManifest {
   institutionalHeader?: boolean;
   /** 2026-10-03: revisiones menores de Calidad (en orden). */
   minorRevisions?: SgcManifestMinorRevision[];
+  /**
+   * Sprint 13 (R14): firmas que van a la página «Registro de firmas» (uids,
+   * en orden). Solo cuando un significado tiene 3 o más firmantes.
+   */
+  signatureRegister?: string[];
 }
 
 /** Huellas de contenido sobre las que una firma del manifiesto es válida (el contenido final y lo que corrigieron las revisiones menores). */
@@ -241,7 +255,7 @@ function drawCover(w: Writer, m: SgcManifest, mSha: string, placed: ReadonlySet<
   if (unplaced.length > 0) {
     w.text(placed.size > 0 ? 'Firmas sin ubicación en el documento' : 'Firmas', { size: 11, font: 'bold', gap: 4 });
     for (const s of unplaced) {
-      w.row(s.meaningLabel, `${s.signerName ?? s.signerEmail} (${s.signerEmail}) · ${colombia(s.signedAt)} · Motivo: ${s.reason}`);
+      w.row(s.meaningLabel, `${signerWithSubstitution(s)} · ${colombia(s.signedAt)} · Motivo: ${s.reason}`);
     }
   }
   w.y -= 10;
@@ -260,7 +274,7 @@ async function drawManifest(pdf: PDFDocument, w: Writer, m: SgcManifest, mSha: s
   for (const s of m.signatures) {
     const png = masters[s.uid];
     w.ensure(png ? 190 : 150);
-    w.text(`${s.meaningLabel} — ${s.signerName ?? s.signerEmail}`, { size: 11, font: 'bold', gap: 2 });
+    w.text(`${s.meaningLabel} — ${signerWithSubstitution(s, false)}`, { size: 11, font: 'bold', gap: 2 });
     if (png) {
       try {
         const img = await pdf.embedPng(png);
@@ -273,6 +287,7 @@ async function drawManifest(pdf: PDFDocument, w: Writer, m: SgcManifest, mSha: s
       }
     }
     w.row('Firmante', `${s.signerName ?? ''} <${s.signerEmail}>`.trim());
+    if (s.onBehalfOf) w.row('En sustitución de', `${s.onBehalfOf} (firmante sustituto asignado por Aseguramiento de Calidad)`);
     w.row('Significado', s.meaningLabel);
     w.row('Sello de tiempo (servidor)', `${s.signedAt} UTC · ${colombia(s.signedAt)}`);
     w.row('Motivo', s.reason);
@@ -286,45 +301,140 @@ async function drawManifest(pdf: PDFDocument, w: Writer, m: SgcManifest, mSha: s
   w.text('La huella del PDF completo queda registrada en SynerLink; cualquier alteración del archivo invalida la verificación.', { size: 8, color: MUTED });
 }
 
-/** Estampa una firma electrónica dentro de su caja (trazo del maestro si existe, nombre, significado y fecha). */
+// El decodificador PNG que ya trae pdf-lib (su export real es el default; los tipos declaran funciones sueltas).
+const UPNG = ((UPNGModule as unknown as { default?: typeof UPNGModule }).default ?? UPNGModule) as typeof UPNGModule;
+
+/**
+ * Recuadro del TRAZO dentro de la imagen del maestro (píxeles con tinta: no
+ * transparentes y no casi blancos), con un margen pequeño. El pad guarda un
+ * lienzo ancho con fondo blanco y el trazo ocupa una parte; recortarlo al
+ * dibujar hace que la firma llene su caja. null si no se puede leer o no hay tinta.
+ */
+export function signatureInkBounds(png: Uint8Array): { x: number; y: number; width: number; height: number } | null {
+  try {
+    const img = UPNG.decode(png.slice().buffer);
+    const rgba = new Uint8Array(UPNG.toRGBA8(img)[0]);
+    const { width, height } = img;
+    let minX = width, minY = height, maxX = -1, maxY = -1;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const o = (y * width + x) * 4;
+        if (rgba[o + 3] > 40 && Math.min(rgba[o], rgba[o + 1], rgba[o + 2]) < 200) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    if (maxX < 0) return null;
+    const m = Math.max(2, Math.round(Math.max(maxX - minX, maxY - minY) * 0.04));
+    const x = Math.max(0, minX - m);
+    const y = Math.max(0, minY - m);
+    return { x, y, width: Math.min(width, maxX + m + 1) - x, height: Math.min(height, maxY + m + 1) - y };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Estampa una firma electrónica dentro de su caja: SOLO la representación
+ * gráfica (el trazo del maestro de firmas, recortado a la tinta), ocupando la
+ * caja. Si la persona no tiene trazo (o es ilegible), su nombre en cursiva,
+ * grande y centrado.
+ * 2026-10-05 (pedido de Nicolás, demo PiSA): sin nombre, significado, fecha ni
+ * leyenda en la caja; esos datos siguen en el registro de trazabilidad del
+ * final y en el manifiesto incrustado.
+ */
 async function drawPlacedSignature(pdf: PDFDocument, page: PDFPage, box: SgcRect, s: SgcManifestSignature, png: Uint8Array | undefined, fonts: Fonts) {
-  page.drawRectangle({ x: box.x, y: box.y, width: box.width, height: box.height, borderColor: rgb(0.0, 0.19, 0.34), borderWidth: 0.4, opacity: 0, borderOpacity: 0.35 });
-  const size = Math.max(4, Math.min(7, box.height / 6));
-  const lines = [s.signerName ?? s.signerEmail, `${s.meaningLabel} · ${formatBogotaDateTime(new Date(s.signedAt))}`, 'Firma electrónica · SynerLink'];
-  const textH = lines.length * (size + 1.5);
-  const imgArea = box.height - textH - 3;
-  let drewImage = false;
-  if (png && imgArea > 6) {
+  const frame = () => page.drawRectangle({ x: box.x, y: box.y, width: box.width, height: box.height, borderColor: rgb(0.0, 0.19, 0.34), borderWidth: 0.4, opacity: 0, borderOpacity: 0.35 });
+  const pad = Math.min(2, box.width / 10, box.height / 10);
+  const areaW = box.width - pad * 2;
+  const areaH = box.height - pad * 2;
+  if (areaW <= 2 || areaH <= 2) return frame();
+  if (png) {
     try {
       const img = await pdf.embedPng(png);
-      const scale = Math.min((box.width - 4) / img.width, imgArea / img.height);
+      const ink = signatureInkBounds(png) ?? { x: 0, y: 0, width: img.width, height: img.height };
+      const scale = Math.min(areaW / ink.width, areaH / ink.height);
       const w = img.width * scale;
       const h = img.height * scale;
-      page.drawImage(img, { x: box.x + (box.width - w) / 2, y: box.y + textH + 2 + (imgArea - h) / 2, width: w, height: h });
-      drewImage = true;
+      // La imagen completa, desplazada para que el trazo quede centrado en la caja; se recorta a la caja.
+      const x = box.x + box.width / 2 - (ink.x + ink.width / 2) * scale;
+      const y = box.y + box.height / 2 - h + (ink.y + ink.height / 2) * scale;
+      page.pushOperators(pushGraphicsState(), rectangle(box.x, box.y, box.width, box.height), clip(), endPath());
+      page.drawImage(img, { x, y, width: w, height: h });
+      page.pushOperators(popGraphicsState());
+      return frame();
     } catch {
       // Un trazo ilegible no impide la firma: la firma electrónica es el registro, no la imagen.
     }
   }
-  if (!drewImage && imgArea > 6) {
-    const name = toWinAnsiSafe(s.signerName ?? s.signerEmail);
-    let nsize = Math.min(imgArea * 0.7, 14);
-    while (nsize > 5 && fonts.italic.widthOfTextAtSize(name, nsize) > box.width - 4) nsize -= 0.5;
-    page.drawText(name, { x: box.x + 2, y: box.y + textH + 2 + (imgArea - nsize) / 2, size: nsize, font: fonts.italic, color: rgb(0.05, 0.15, 0.4) });
-  }
-  let y = box.y + textH - size;
-  lines.forEach((l, i) => {
-    const font = i === 0 ? fonts.bold : fonts.regular;
-    let t = toWinAnsiSafe(l);
-    while (t.length > 1 && font.widthOfTextAtSize(t, size) > box.width - 3) t = t.slice(0, -1);
-    page.drawText(t, { x: box.x + 1.5, y: y + 1, size, font, color: INK });
-    y -= size + 1.5;
-  });
+  frame();
+  const name = toWinAnsiSafe(s.signerName ?? s.signerEmail);
+  let nsize = Math.min(areaH * 0.75, 22);
+  while (nsize > 5 && fonts.italic.widthOfTextAtSize(name, nsize) > areaW) nsize -= 0.5;
+  const tw = fonts.italic.widthOfTextAtSize(name, nsize);
+  page.drawText(name, { x: box.x + Math.max(pad, (box.width - tw) / 2), y: box.y + (box.height - nsize) / 2 + nsize * 0.2, size: nsize, font: fonts.italic, color: rgb(0.05, 0.15, 0.4) });
 }
 
 export interface SgcControlledPdfOptions {
   /** Encabezado institucional del sistema (si el documento lo usa). */
   header?: SgcInstitutionalHeaderData | null;
+  /** Sprint 13: cargo de cada firmante del registro de firmas (por uid). */
+  registerCargos?: Record<string, string>;
+}
+
+const REGISTER_COLS = 2;
+const REGISTER_BOX_H = 118;
+
+/**
+ * Sprint 13 (R14): páginas «Registro de firmas» al final del contenido: el
+ * encabezado del documento (código, versión y nombre) y un recuadro por
+ * firmante con su nombre, cargo, significado, fecha y trazo (o su nombre en
+ * cursiva si no tiene firma registrada). Devuelve cuántas páginas agregó.
+ */
+export async function drawSignatureRegister(pdf: PDFDocument, m: SgcManifest, masters: Record<string, Uint8Array>, fonts: Fonts, cargos: Record<string, string> = {}): Promise<number> {
+  const uids = new Set(m.signatureRegister ?? []);
+  const entries = m.signatures.filter((s) => uids.has(s.uid));
+  if (entries.length === 0) return 0;
+  const [W, H] = A4;
+  const gap = 10;
+  const colW = (W - MARGIN * 2 - gap * (REGISTER_COLS - 1)) / REGISTER_COLS;
+  const headerH = 46;
+  const perPage = Math.max(1, Math.floor((H - MARGIN * 2 - headerH - 30) / (REGISTER_BOX_H + gap))) * REGISTER_COLS;
+  let pages = 0;
+  for (let start = 0; start < entries.length; start += perPage) {
+    const page = pdf.addPage(A4);
+    pages += 1;
+    const top = H - MARGIN;
+    page.drawRectangle({ x: MARGIN, y: top - headerH, width: W - MARGIN * 2, height: headerH, borderColor: BRAND, borderWidth: 0.8 });
+    page.drawText(toWinAnsiSafe('REGISTRO DE FIRMAS'), { x: MARGIN + 8, y: top - 16, size: 11, font: fonts.bold, color: BRAND });
+    page.drawText(toWinAnsiSafe(`${m.company} · ${m.title}`.slice(0, 110)), { x: MARGIN + 8, y: top - 30, size: 8.5, font: fonts.regular, color: INK });
+    page.drawText(toWinAnsiSafe(`CÓDIGO: ${m.code} · VERSIÓN: ${m.versionNumber}`), { x: MARGIN + 8, y: top - 41, size: 8, font: fonts.bold, color: MUTED });
+    for (const [i, sg] of entries.slice(start, start + perPage).entries()) {
+      const col = i % REGISTER_COLS;
+      const row = Math.floor(i / REGISTER_COLS);
+      const x = MARGIN + col * (colW + gap);
+      const y = top - headerH - 14 - (row + 1) * REGISTER_BOX_H - row * gap;
+      page.drawRectangle({ x, y, width: colW, height: REGISTER_BOX_H, borderColor: LINE, borderWidth: 0.7 });
+      const lines = [
+        { t: sg.meaningLabel.toUpperCase(), f: fonts.bold, size: 8, c: BRAND },
+        { t: signerWithSubstitution(sg, false), f: fonts.bold, size: 9, c: INK },
+        { t: cargos[sg.uid] ? `Cargo: ${cargos[sg.uid]}` : sg.signerEmail, f: fonts.regular, size: 7.5, c: MUTED },
+        { t: colombia(sg.signedAt), f: fonts.regular, size: 7.5, c: MUTED },
+      ];
+      let ty = y + REGISTER_BOX_H - 12;
+      for (const l of lines) {
+        let txt = toWinAnsiSafe(l.t);
+        while (txt.length > 1 && l.f.widthOfTextAtSize(txt, l.size) > colW - 12) txt = txt.slice(0, -1);
+        page.drawText(txt, { x: x + 6, y: ty, size: l.size, font: l.f, color: l.c });
+        ty -= l.size + 3;
+      }
+      await drawPlacedSignature(pdf, page, { x: x + 6, y: y + 6, width: colW - 12, height: ty - y - 8 }, sg, masters[sg.uid], fonts);
+    }
+  }
+  return pages;
 }
 
 /** Composición del PDF controlado que se guarda en sgc.document_version.layout_json. */
@@ -361,6 +471,9 @@ export async function buildControlledPdfWithLayout(contentPdf: Uint8Array, manif
   const bySignature = new Map(manifest.signatures.map((s) => [s.uid, s]));
   const placements = (manifest.placements ?? []).filter((p) => bySignature.has(p.uid) && p.page >= 1 && p.page <= total);
   drawCover(new Writer(out, fonts, runningHeader), manifest, mSha, new Set(placements.map((p) => p.uid)));
+  // S14 (R22): la portada puede ocupar más de una página (descripción larga, revisiones menores, firmas sin
+  // ubicar): el contenido empieza DESPUÉS de la última página de la portada, no siempre en la 2.
+  const coverPages = out.getPageCount();
 
   const copied = await out.copyPages(content, content.getPageIndices());
   const header = options.header ?? null;
@@ -379,8 +492,8 @@ export async function buildControlledPdfWithLayout(contentPdf: Uint8Array, manif
   let emission: SgcControlledLayout['emission'] = null;
   if (header) {
     const drawn = await drawInstitutionalHeaders(out, copied, header, fonts);
-    // El contenido empieza en la página 2 del PDF controlado (la 1 es la portada de control).
-    if (drawn.emission) emission = { ...drawn.emission, page: 2 };
+    // El contenido empieza justo después de la portada de control (página coverPages + 1 del PDF controlado).
+    if (drawn.emission) emission = { ...drawn.emission, page: coverPages + 1 };
   }
   // Cada firma en la caja que ubicó el elaborador.
   for (const p of placements) {
@@ -389,6 +502,9 @@ export async function buildControlledPdfWithLayout(contentPdf: Uint8Array, manif
     const box = { x: (p.x / 100) * width, y: height - ((p.y + p.height) / 100) * height, width: (p.width / 100) * width, height: (p.height / 100) * height };
     await drawPlacedSignature(out, page, box, bySignature.get(p.uid)!, masters[p.uid], fonts);
   }
+
+  // Sprint 13: con 3 o más firmantes de un mismo significado, la página «Registro de firmas».
+  await drawSignatureRegister(out, manifest, masters, fonts, options.registerCargos);
 
   const w = new Writer(out, fonts, runningHeader);
   await drawManifest(out, w, manifest, mSha, masters);
@@ -466,7 +582,7 @@ export async function verifyControlledPdf(
     else if (db.recordHash.trim() !== s.recordHash) problem = 'El registro de la firma no coincide con el del PDF.';
     else if (db.contentSha256.trim() !== s.contentSha256 || !accepted.has(s.contentSha256)) problem = 'La firma no corresponde al contenido del documento.';
     if (problem) problems.push(`${s.meaningLabel} (${s.signerEmail}): ${problem}`);
-    return { uid: s.uid, meaningLabel: s.meaningLabel, signer: s.signerName ?? s.signerEmail, ok: !problem, problem };
+    return { uid: s.uid, meaningLabel: s.meaningLabel, signer: signerWithSubstitution(s, false), ok: !problem, problem };
   });
   if (manifest && signatures.length === 0) problems.push('El manifiesto no tiene firmas.');
   return { ok: problems.length === 0, pdfSha256, pdfMatches, manifestFound: Boolean(manifest), manifestSha256: mSha, manifestMatches, signatures, problems };

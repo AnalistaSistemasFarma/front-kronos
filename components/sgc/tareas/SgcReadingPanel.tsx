@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Alert, Badge, Button, Card, Group, Modal, Stack, Text, Textarea, Title } from '@mantine/core';
+import { Alert, Anchor, Badge, Button, Card, Group, Modal, Stack, Text, Textarea, Title } from '@mantine/core';
+import SgcEvaluationTaker from './SgcEvaluationTaker';
 import { IconBook, IconCheck, IconHelpCircle, IconLock, IconSignature } from '@tabler/icons-react';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 import SgcSecureViewer from '../SgcSecureViewer';
@@ -103,6 +104,38 @@ export default function SgcReadingPanel({ idTask, requestId, reading, canSign, o
             El PDF controlado de esta versión aún no está disponible. Intente de nuevo en unos minutos.
           </Alert>
         )}
+        {/* Sprint 10: con capacitación, debajo del documento van el video y la evaluación (material registrado antes de la divulgación). */}
+        {reading.training && (
+          <Alert color='grape' variant='light' title={`Capacitación: ${reading.training.title}`} data-testid='sgc-lectura-capacitacion'>
+            <Stack gap={4}>
+              {reading.training.videoUrl && (
+                <Text size='sm'>
+                  Video:{' '}
+                  <Anchor href={reading.training.videoUrl} target='_blank' rel='noreferrer' data-testid='sgc-lectura-video'>
+                    ver el video de la capacitación
+                  </Anchor>
+                </Text>
+              )}
+              {reading.training.sessionDate && <Text size='sm'>Sesión: {reading.training.sessionDate}</Text>}
+              {reading.training.evaluationUrl && reading.status !== 'leido' && (
+                <Text size='sm' data-testid='sgc-lectura-evaluacion-espera'>
+                  Evaluación en SynerLink: se habilita aquí mismo después de firmar «Leído» (tiene {reading.training.maxAttempts} intento(s)).
+                </Text>
+              )}
+              {reading.training.formsUrl && (
+                <Text size='sm'>
+                  Evaluación:{' '}
+                  <Anchor href={reading.training.formsUrl} target='_blank' rel='noreferrer' data-testid='sgc-lectura-evaluacion'>
+                    presentar la evaluación
+                  </Anchor>{' '}
+                  (tiene {reading.training.maxAttempts} intento(s); si no aprueba, Calidad le programa una recapacitación).
+                </Text>
+              )}
+            </Stack>
+          </Alert>
+        )}
+        {/* S17 (R30): la evaluación propia de SynerLink se presenta en la misma pantalla, después de la lectura firmada. */}
+        {reading.training?.evaluationUrl && reading.status === 'leido' && <SgcEvaluationTaker url={reading.training.evaluationUrl} />}
         {(pending || canDoubt) && (
           <Group>
             {pending && (

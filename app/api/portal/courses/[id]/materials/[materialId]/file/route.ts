@@ -3,11 +3,16 @@ import { prisma } from '../../../../../../../../lib/prisma';
 import { identificar } from '../../../../../../../../lib/portal/acceso';
 import { formadoresDePortal } from '../../../../../../../../lib/portal/config';
 import {
+  MaterialNoValido,
   moverArchivoDeMaterialAEliminados,
+  referenciaDeMaterialSubido,
   subirArchivoDeMaterial,
   validarArchivoMaterial,
+  validarRegistroSubido,
+  type ReferenciaMaterial,
 } from '../../../../../../../../lib/portal/formacion';
 import {
+  ArchivoFueraDeCarpeta,
   FormacionStorageNoConfigurado,
   MENSAJE_NO_CONFIGURADO,
   descargarArchivoFormacion,
@@ -20,6 +25,9 @@ function idDesdeParametro(valor: string): number | null {
 
 /**
  * Sirve el ARCHIVO de un material tipo DOCUMENT.
+ *
+ * Soporta RANGOS de bytes (`Range: bytes=…` → 206 con `Content-Range`), imprescindibles para reproducir un video largo
+ * cuyo índice MP4 está al final del archivo (Cristian, 2026-10-14). Se pasan a SharePoint, que los atiende.
  *
  * Desde 2026-09-30 el archivo vive en SharePoint (FORMACION) y este endpoint
  * hace de PROXY con la sesión del portal: el navegador nunca recibe una URL de
@@ -51,14 +59,26 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const disposicion = `inline; filename*=UTF-8''${encodeURIComponent(material.file_name ?? 'material')}`;
 
     if (material.sp_drive_item_id) {
-      const archivo = await descargarArchivoFormacion(material.sp_drive_item_id);
+      const archivo = await descargarArchivoFormacion(material.sp_drive_item_id, {
+        rango: request.headers.get('range'),
+        // Si el navegador cierra la conexión (adelantó el video o cerró el visor) se corta la descarga a SharePoint.
+        signal: request.signal,
+      });
+      if (archivo.estado === 416) {
+        return new NextResponse(null, {
+          status: 416,
+          headers: { 'Accept-Ranges': 'bytes', ...(archivo.contentRange ? { 'Content-Range': archivo.contentRange } : {}) },
+        });
+      }
       const headers: Record<string, string> = {
         'Content-Type': material.mime || archivo.mime || 'application/octet-stream',
         'Content-Disposition': disposicion,
         'Cache-Control': 'private, max-age=300',
+        'Accept-Ranges': 'bytes',
       };
       if (archivo.tamano) headers['Content-Length'] = String(archivo.tamano);
-      return new NextResponse(archivo.cuerpo, { headers });
+      if (archivo.contentRange) headers['Content-Range'] = archivo.contentRange;
+      return new NextResponse(archivo.cuerpo, { status: archivo.estado, headers });
     }
 
     // Material anterior al cambio a SharePoint: bytes en la base (en desuso).
@@ -87,7 +107,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 /**
  * REEMPLAZA el archivo de un material (o convierte un enlace en documento).
  *
- *   PUT /api/portal/courses/:id/materials/:materialId/file   (multipart: `file`)
+ *   PUT /api/portal/courses/:id/materials/:materialId/file
+ *       JSON `{ driveItemId, mime }` — el navegador ya subió el archivo
+ *       DIRECTO a SharePoint (`POST .../materials/upload-session`), sin
+ *       límite de peso (Cristian, 2026-10-08). O multipart `file`, el camino
+ *       anterior, que se conserva por compatibilidad.
  *
  * Orden de los pasos, para no dejar huérfanos:
  *   1. se sube el archivo nuevo a FORMACION/<curso>/materiales;
@@ -118,12 +142,21 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     });
     if (!actual) return NextResponse.json({ error: 'Material no encontrado.' }, { status: 404 });
 
-    const form = await request.formData();
-    const archivo = form.get('file');
-    const invalido = validarArchivoMaterial(archivo);
-    if (invalido) return NextResponse.json({ error: invalido }, { status: 400 });
-
-    const nuevo = await subirArchivoDeMaterial(courseId, archivo as File);
+    let nuevo: ReferenciaMaterial;
+    if ((request.headers.get('content-type') ?? '').toLowerCase().includes('application/json')) {
+      const registro = validarRegistroSubido(await request.json().catch(() => null));
+      if (!registro.ok) return NextResponse.json({ error: registro.error }, { status: 400 });
+      if (registro.driveItemId === actual.sp_drive_item_id) {
+        return NextResponse.json({ error: 'Ese ya es el archivo actual del material.' }, { status: 400 });
+      }
+      nuevo = await referenciaDeMaterialSubido(courseId, registro.driveItemId, registro.mime);
+    } else {
+      const form = await request.formData();
+      const archivo = form.get('file');
+      const invalido = validarArchivoMaterial(archivo);
+      if (invalido) return NextResponse.json({ error: invalido }, { status: 400 });
+      nuevo = await subirArchivoDeMaterial(courseId, archivo as File);
+    }
 
     if (actual.sp_drive_item_id) {
       try {
@@ -153,6 +186,10 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (error instanceof FormacionStorageNoConfigurado) {
       console.error('[portal] Formación sin SharePoint configurado:', error.detalle);
       return NextResponse.json({ error: MENSAJE_NO_CONFIGURADO }, { status: 503 });
+    }
+    if (error instanceof MaterialNoValido) return NextResponse.json({ error: error.message }, { status: 400 });
+    if (error instanceof ArchivoFueraDeCarpeta) {
+      return NextResponse.json({ error: 'El archivo subido no está en la carpeta de este curso.' }, { status: 400 });
     }
     console.error('[portal] PUT .../materials/[materialId]/file', error);
     return NextResponse.json({ error: 'No se pudo reemplazar el archivo.' }, { status: 500 });

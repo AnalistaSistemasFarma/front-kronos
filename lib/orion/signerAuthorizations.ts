@@ -11,6 +11,7 @@ import {
   parseOrionFileIdFromResolution,
 } from './signerAuthMarkers';
 import { ensureOrionSignerWorkflowTemplates } from './workflowTemplates';
+import { isRequestClosedForOrion } from './internalTasks';
 
 type SqlPool = import('mssql').ConnectionPool;
 
@@ -34,7 +35,6 @@ export async function findFirmaAuthorizationTemplate(
     INNER JOIN task_process_category tpc ON tpc.id_process_category = pcr.id_process_category
     INNER JOIN types_authorization tp ON tp.id = tpc.type_authorization
     WHERE pcr.id_request_general = @id_request
-      AND tpc.active = 1
       AND tpc.is_authorization = 1
       AND tpc.type_authorization IS NOT NULL
       AND (
@@ -43,6 +43,7 @@ export async function findFirmaAuthorizationTemplate(
         OR LOWER(tpc.task) LIKE N'%autorizaci%'
       )
     ORDER BY
+      tpc.active DESC,
       CASE WHEN LOWER(tpc.task) LIKE N'%previa%' THEN 1 ELSE 0 END,
       CASE WHEN ISNULL(tpc.is_sequential, 0) = 0 THEN 0 ELSE 1 END,
       CASE
@@ -158,6 +159,9 @@ export async function createOrionSignerAuthorizations(
   const fileId = String(params.fileId || '').trim();
   if (!fileId) {
     return { created: 0, skipped: 0, templateId: null, errors: ['fileId vacío'] };
+  }
+  if (await isRequestClosedForOrion(pool, params.requestId)) {
+    return { created: 0, skipped: 0, templateId: null, errors: [] };
   }
 
   const ensured = await ensureOrionSignerWorkflowTemplates(pool, params.requestId);

@@ -11,9 +11,9 @@ const m = vi.hoisted(() => {
     'listFlowProcesses', 'createFlowProcess', 'updateFlowProcess', 'createDraftVersion', 'getFlowVersion', 'saveDraftDefinition', 'publishFlowVersion', 'discardDraftVersion', 'listConfigChanges',
     'listMatrix', 'addMatrixEntry', 'deactivateMatrixEntry', 'suggestForTarget',
     'listAuthorizationTypes', 'saveAuthorizationType', 'grantAuthorizationTypeUser', 'revokeAuthorizationTypeUser', 'listAuthorizationInbox',
-    'createRequest', 'listMyRequests', 'getRequestDetail', 'addNote', 'uploadAttachment', 'getAttachmentForDownload', 'withdrawAttachment', 'setSigners', 'cancelRequest', 'saveFormValues',
+    'createRequest', 'listMyRequests', 'getRequestDetail', 'addNote', 'uploadAttachment', 'getAttachmentForDownload', 'withdrawAttachment', 'setSigners', 'confirmSuggestions', 'cancelRequest', 'saveFormValues',
     'listTaskInbox', 'getTaskDetail', 'decideTask', 'reassignTask', 'listEligibleUsers', 'companyOfRequest', 'requestOfTask', 'taskOfAuthorization', 'getRequestForm',
-    'downloadVerifiedFile', 'uploadToSgcStorage',
+    'downloadVerifiedFile', 'uploadToSgcStorage', 'downloadSgcFile', 'buildLayoutPreview', 'currentDraftInTx',
   ] as const;
   return Object.fromEntries(names.map((n) => [n, vi.fn()])) as Record<(typeof names)[number], ReturnType<typeof vi.fn>>;
 });
@@ -24,7 +24,9 @@ vi.mock('../../../../lib/prisma', () => ({ prisma: {} }));
 vi.mock('../../../../lib/sgc/access', () => ({ getSgcAccessForUser: m.getSgcAccessForUser }));
 vi.mock('../../../../lib/sgc/db/documents', () => ({ getAccessSubject: m.getAccessSubject }));
 vi.mock('../../../../lib/sgc/notifications', () => ({ sgcNotifier: vi.fn() }));
-vi.mock('../../../../lib/sgc/onedrive', () => ({ downloadVerifiedFile: m.downloadVerifiedFile, uploadToSgcStorage: m.uploadToSgcStorage }));
+vi.mock('../../../../lib/sgc/onedrive', () => ({ downloadVerifiedFile: m.downloadVerifiedFile, uploadToSgcStorage: m.uploadToSgcStorage, downloadSgcFile: m.downloadSgcFile }));
+vi.mock('../../../../lib/sgc/db/layout', () => ({ buildLayoutPreview: m.buildLayoutPreview }));
+vi.mock('../../../../lib/sgc/db/signatureRecord', () => ({ currentDraftInTx: m.currentDraftInTx }));
 vi.mock('../../../../lib/sgc/db/flows', () => ({
   listFlowProcesses: m.listFlowProcesses, createFlowProcess: m.createFlowProcess, updateFlowProcess: m.updateFlowProcess, createDraftVersion: m.createDraftVersion,
   getFlowVersion: m.getFlowVersion, saveDraftDefinition: m.saveDraftDefinition, publishFlowVersion: m.publishFlowVersion, discardDraftVersion: m.discardDraftVersion, listConfigChanges: m.listConfigChanges,
@@ -36,7 +38,7 @@ vi.mock('../../../../lib/sgc/db/authorizations', () => ({
 }));
 vi.mock('../../../../lib/sgc/db/requests', () => ({
   createRequest: m.createRequest, listMyRequests: m.listMyRequests, getRequestDetail: m.getRequestDetail, addNote: m.addNote, uploadAttachment: m.uploadAttachment,
-  getAttachmentForDownload: m.getAttachmentForDownload, withdrawAttachment: m.withdrawAttachment, setSigners: m.setSigners, cancelRequest: m.cancelRequest, saveFormValues: m.saveFormValues,
+  getAttachmentForDownload: m.getAttachmentForDownload, withdrawAttachment: m.withdrawAttachment, setSigners: m.setSigners, confirmSuggestions: m.confirmSuggestions, cancelRequest: m.cancelRequest, saveFormValues: m.saveFormValues,
   listTaskInbox: m.listTaskInbox, getTaskDetail: m.getTaskDetail, decideTask: m.decideTask, reassignTask: m.reassignTask, listEligibleUsers: m.listEligibleUsers,
   companyOfRequest: m.companyOfRequest, requestOfTask: m.requestOfTask, taskOfAuthorization: m.taskOfAuthorization, getRequestForm: m.getRequestForm,
 }));
@@ -229,7 +231,7 @@ describe('Rutas S2 · matriz y Autorizaciones SGC', () => {
     expect(status(await authTypeRevoke.POST(req('/', null), params({ id: '2' })))).toBe(400);
   });
 
-  it('[SGC-REQ-033] autorizar/rechazar decide el cupo exacto con el mismo motor de la tarea (autorizar = aprobar, rechazar = devolver)', async () => {
+  it('[SGC-REQ-033] autorizar/rechazar decide el cupo exacto con el mismo motor de la tarea (autorizar = aprobar; rechazar lo resuelve el motor: devolver, o cerrar en la autorización de la creación del DOC v7)', async () => {
     asUser([gestion]);
     m.taskOfAuthorization.mockResolvedValue({ idTask: 40, idAssignee: 77, idCompany: OLP });
     m.decideTask.mockResolvedValue({ outcome: 'abierta' });
@@ -237,7 +239,7 @@ describe('Rutas S2 · matriz y Autorizaciones SGC', () => {
     expect(m.decideTask.mock.calls[0][2]).toBe(40);
     expect(m.decideTask.mock.calls[0][3]).toEqual({ decision: 'aprobar', comment: 'ok', idAssignee: 77 });
     await authDecision.POST(req('/', { decision: 'rechazar', comment: 'corregir anexo' }), params({ id: '5' }));
-    expect(m.decideTask.mock.calls[1][3]).toMatchObject({ decision: 'devolver' });
+    expect(m.decideTask.mock.calls[1][3]).toMatchObject({ decision: 'rechazar', comment: 'corregir anexo', idAssignee: 77 });
     expect(status(await authDecision.POST(req('/', { decision: 'otra' }), params({ id: '5' })))).toBe(400);
     expect(status(await authDecision.POST(req('/', {}), params({ id: 'x' })))).toBe(400);
     m.taskOfAuthorization.mockResolvedValue({ idTask: 40, idAssignee: 77, idCompany: 1 });
@@ -293,6 +295,12 @@ describe('Rutas S2 · solicitudes y Tareas documentales', () => {
     expect(status(await reassign.POST(req('/', { toEmail: 'b@x.co', reason: 'vacaciones' }), params({ id: '4' })))).toBe(200);
     expect(m.reassignTask.mock.calls[0][2]).toEqual(gestion);
     expect(status(await signers.POST(req('/', { stepKey: 'revision', signers: ['a@x.co'] }), params({ id: '1' })))).toBe(200);
+    // 2026-10-05: el acceso de la persona viaja al motor, que solo deja asignar a Calidad.
+    expect(m.setSigners.mock.calls[0][5]).toEqual(gestion);
+    // «Aprobar sugerencia» con un clic va al motor con el acceso de la persona.
+    m.confirmSuggestions.mockResolvedValue({ confirmed: 2, confirmedScope: 1 });
+    expect(status(await signers.POST(req('/', { action: 'confirmar' }), params({ id: '1' })))).toBe(200);
+    expect(m.confirmSuggestions.mock.calls[0][4]).toEqual(gestion);
     expect(status(await cancel.POST(req('/', { reason: 'ya no se necesita' }), params({ id: '1' })))).toBe(200);
     for (const bad of [decision.POST(req('/', null), params({ id: '4' })), reassign.POST(req('/', {}), params({ id: 'x' })), signers.POST(req('/', 1), params({ id: '1' })), cancel.POST(req('/', {}), params({ id: '0' }))]) {
       expect(status(await bad)).toBe(400);
@@ -329,14 +337,38 @@ describe('Rutas S2 · solicitudes y Tareas documentales', () => {
     expect(Array.from(input.bytes)).toEqual([1, 2, 3]);
     expect(status(await attachments.POST(new Request('http://x', { method: 'POST', body: new FormData() }), params({ id: '1' })))).toBe(400);
 
-    m.getAttachmentForDownload.mockResolvedValue({ itemId: 'it', fileName: 'Borrador ñ.docx', contentType: '', sha256: 'abc' });
-    m.downloadVerifiedFile.mockResolvedValue(new Uint8Array([9]));
+    // 2026-10-05 (RN «Ver documento» nunca descarga): se entrega para el visor, nunca como attachment.
+    const pdfBytes = new TextEncoder().encode('%PDF-1.4 x');
+    m.getAttachmentForDownload.mockResolvedValue({ itemId: 'it', fileName: 'Acta ñ.pdf', contentType: 'application/pdf', sha256: 'abc', purpose: 'soporte' });
+    m.downloadVerifiedFile.mockResolvedValue(pdfBytes);
     const dl = await attachmentId.GET(get('/'), params({ id: '1', attachmentId: '5' }));
     expect(dl.status).toBe(200);
-    expect(dl.headers.get('content-disposition')).toBe("attachment; filename*=UTF-8''Borrador%20%C3%B1.docx");
-    expect(dl.headers.get('content-type')).toBe('application/octet-stream');
+    expect(dl.headers.get('content-disposition')).toBe("inline; filename*=UTF-8''Acta%20%C3%B1.pdf");
+    expect(dl.headers.get('content-type')).toBe('application/pdf');
     expect(dl.headers.get('cache-control')).toContain('no-store');
     expect(m.downloadVerifiedFile).toHaveBeenCalledWith('it', 'abc');
+    expect(m.currentDraftInTx).not.toHaveBeenCalled();
+    // Formato que no se convierte (p. ej. un .doc o una imagen): 415.
+    m.getAttachmentForDownload.mockResolvedValue({ itemId: 'it', fileName: 'Viejo.doc', contentType: '', sha256: 'abc', purpose: 'soporte' });
+    m.downloadVerifiedFile.mockResolvedValue(new Uint8Array([9]));
+    const unsupported = await attachmentId.GET(get('/'), params({ id: '1', attachmentId: '5' }));
+    expect(unsupported.status).toBe(415);
+    expect(await unsupported.json()).toEqual({ error: 'Este archivo solo es visible en la app' });
+    // Abrir la URL directo en una pestaña (visor nativo con «Descargar»): no se entrega.
+    expect(status(await attachmentId.GET(new Request('http://x/', { headers: { 'sec-fetch-dest': 'document' } }), params({ id: '1', attachmentId: '5' })))).toBe(415);
+    // El borrador VIGENTE sale compuesto con el encabezado del SGC (la vista previa del documento final).
+    m.getAttachmentForDownload.mockResolvedValue({ itemId: 'it', fileName: 'Borrador.docx', contentType: '', sha256: 'abc', purpose: 'borrador' });
+    m.currentDraftInTx.mockResolvedValue({ kind: 'borrador_adjunto', ref: 'adjunto:5', format: 'docx' });
+    m.buildLayoutPreview.mockResolvedValue(pdfBytes);
+    m.downloadVerifiedFile.mockClear();
+    const draft = await attachmentId.GET(get('/'), params({ id: '1', attachmentId: '5' }));
+    expect(draft.status).toBe(200);
+    expect(draft.headers.get('content-type')).toBe('application/pdf');
+    expect(draft.headers.get('content-disposition')).toBe("inline; filename*=UTF-8''Borrador.pdf");
+    expect(m.buildLayoutPreview.mock.calls[0][3]).toMatchObject({ email: expect.any(String) });
+    expect(m.buildLayoutPreview.mock.calls[0][4]).toEqual({ runningHeader: true });
+    expect(m.downloadVerifiedFile).not.toHaveBeenCalled();
+    m.getAttachmentForDownload.mockResolvedValue({ itemId: 'it', fileName: 'Acta ñ.pdf', contentType: 'application/pdf', sha256: 'abc', purpose: 'soporte' });
     expect(status(await attachmentId.GET(get('/'), params({ id: '1', attachmentId: 'x' })))).toBe(404);
     m.downloadVerifiedFile.mockRejectedValue(new SgcError('no coincide', 409));
     expect(status(await attachmentId.GET(get('/'), params({ id: '1', attachmentId: '5' })))).toBe(409);

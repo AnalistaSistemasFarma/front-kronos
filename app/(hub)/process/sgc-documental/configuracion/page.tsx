@@ -1,14 +1,17 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Alert, Badge, Button, Card, Checkbox, Group, Loader, Modal, NumberInput, Stack, Table, Tabs, Text, TextInput, Textarea } from '@mantine/core';
+import { Alert, Badge, Button, Card, Checkbox, Group, Loader, Modal, MultiSelect, NumberInput, Stack, Table, Tabs, Text, TextInput, Textarea } from '@mantine/core';
 import SgcSelect from '../../../../../components/sgc/SgcSelect';
 import { IconAlertTriangle, IconCheck, IconEdit, IconPlus } from '@tabler/icons-react';
 import SgcCargoMembers from '../../../../../components/sgc/SgcCargoMembers';
+import SgcApprovers from '../../../../../components/sgc/SgcApprovers';
 import SgcCompanySettings from '../../../../../components/sgc/SgcCompanySettings';
+import SgcHeaderTemplates from '../../../../../components/sgc/SgcHeaderTemplates';
+import { SGC_DRAFT_EXTENSIONS, SGC_DRAFT_EXTENSION_LABELS } from '../../../../../lib/sgc/headerTemplates';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import { sgcSend, useSgcFetch } from '../../../../../components/sgc/useSgcFetch';
-import { SGC_CODING_TOKENS, buildDocumentCode, validateCodingGuide } from '../../../../../lib/sgc/coding';
+import { SGC_CHILD_CODING_TOKENS, SGC_CODING_TOKENS, buildChildCode, buildDocumentCode, parseChildTypeCodes, validateCodingGuide } from '../../../../../lib/sgc/coding';
 import type { SgcCatalogs } from '../../../../../lib/sgc/db/catalogs';
 import type { SgcCompanyAccess } from '../../../../../lib/sgc/permissions';
 
@@ -27,6 +30,8 @@ type Form = Record<string, string | number | boolean | null>;
 
 function Configuracion({ company }: { company: SgcCompanyAccess }) {
   const catalogs = useSgcFetch<SgcCatalogs>(`/api/sgc/catalogs?company=${company.idCompany}&all=1`);
+  // S16 (R31): plantillas de encabezado para elegir la de cada tipo documental.
+  const templates = useSgcFetch<{ templates: { id: number; code: string; name: string; isActive: boolean; isDefault: boolean }[] }>(`/api/sgc/header-templates?company=${company.idCompany}`);
   const [feedback, setFeedback] = useState<{ color: 'green' | 'red'; text: string } | null>(null);
   const [editing, setEditing] = useState<{ entity: Entity; form: Form } | null>(null);
   const [guide, setGuide] = useState<Form | null>(null);
@@ -52,13 +57,29 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
     prefix: data.codingGuide?.prefix ?? '',
     pattern: data.codingGuide?.pattern ?? '{PREFIJO}-{PROCESO}-{TIPO}-{CONSECUTIVO}',
     sequenceDigits: data.codingGuide?.sequenceDigits ?? 3,
+    // Sprint 8: herencia del número del padre (formatos e instructivos de un procedimiento).
+    childPattern: data.codingGuide?.childPattern ?? '',
+    childTypeCodes: (data.codingGuide?.childTypeCodes ?? []).join(', '),
+    childSequenceDigits: data.codingGuide?.childSequenceDigits ?? 2,
     reason: '',
   };
-  const guideInput = { prefix: String(guideForm.prefix), pattern: String(guideForm.pattern), sequenceDigits: Number(guideForm.sequenceDigits) };
+  const childPattern = String(guideForm.childPattern ?? '').trim();
+  const guideInput = {
+    prefix: String(guideForm.prefix),
+    pattern: String(guideForm.pattern),
+    sequenceDigits: Number(guideForm.sequenceDigits),
+    childPattern: childPattern || null,
+    childTypeCodes: parseChildTypeCodes(String(guideForm.childTypeCodes ?? '')),
+    childSequenceDigits: Number(guideForm.childSequenceDigits),
+  };
   const guideErrors = validateCodingGuide(guideInput);
   const example = guideErrors.length
     ? null
     : buildDocumentCode(guideInput, { processTypeCode: 'M', processCode: 'GC', documentTypeCode: 'PR' }, 1);
+  const childType = guideInput.childTypeCodes[0] ?? 'FO';
+  const childExample = guideErrors.length || !childPattern || !example
+    ? null
+    : buildChildCode(guideInput, { processTypeCode: 'M', processCode: 'GC', documentTypeCode: childType }, { code: example, sequence: 1 }, 1);
 
   const save = async (entity: Entity | 'coding-guide', form: Form) => {
     setBusy(true);
@@ -112,6 +133,8 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
           <Tabs.Tab value='procesos'>Procesos</Tabs.Tab>
           <Tabs.Tab value='tipos-documentales'>Tipos documentales</Tabs.Tab>
           <Tabs.Tab value='cargos'>Personas por cargo</Tabs.Tab>
+          <Tabs.Tab value='aprobadores'>Aprobadores autorizados</Tabs.Tab>
+          <Tabs.Tab value='encabezados'>Encabezados</Tabs.Tab>
           <Tabs.Tab value='empresa'>Encabezado y divulgación</Tabs.Tab>
         </Tabs.List>
 
@@ -127,9 +150,27 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                 <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Patrón' value={String(guideForm.pattern)} onChange={(e) => setGuide({ ...guideForm, pattern: e.currentTarget.value })} w={380} ff='monospace' />
                 <NumberInput label='Dígitos' min={1} max={6} value={Number(guideForm.sequenceDigits)} onChange={(v) => setGuide({ ...guideForm, sequenceDigits: Number(v) })} w={100} />
               </Group>
+              <Text size='sm' fw={600} mt='xs'>
+                Herencia del número del documento padre
+              </Text>
+              <Text size='sm' c='dimmed'>
+                Opcional. Los tipos indicados (por ejemplo formatos e instructivos) toman el número de su documento padre. Marcas:{' '}
+                {SGC_CHILD_CODING_TOKENS.map((t) => `{${t}}`).join(' ')}. Vacío = sin herencia.
+              </Text>
+              <Group align='flex-end' wrap='wrap'>
+                <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Patrón de herencia' placeholder='{CODIGO_PADRE}-{TIPO}{CONSECUTIVO}' value={String(guideForm.childPattern ?? '')} onChange={(e) => setGuide({ ...guideForm, childPattern: e.currentTarget.value })} w={380} ff='monospace' data-testid='sgc-guia-herencia' />
+                <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Tipos que heredan' placeholder='FO, IN' value={String(guideForm.childTypeCodes ?? '')} onChange={(e) => setGuide({ ...guideForm, childTypeCodes: e.currentTarget.value.toUpperCase() })} w={180} />
+                <NumberInput label='Dígitos' min={1} max={6} value={Number(guideForm.childSequenceDigits)} onChange={(v) => setGuide({ ...guideForm, childSequenceDigits: Number(v) })} w={100} />
+              </Group>
               {example ? (
                 <Text size='sm'>
                   Ejemplo (proceso GC, procedimiento): <Text span ff='monospace' fw={700}>{example}</Text>
+                  {childExample && (
+                    <>
+                      {' '}
+                      · su {childType}: <Text span ff='monospace' fw={700} data-testid='sgc-guia-ejemplo-hijo'>{childExample}</Text>
+                    </>
+                  )}
                 </Text>
               ) : (
                 <Alert color='yellow' icon={<IconAlertTriangle size={18} />}>
@@ -235,7 +276,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
               <Button
                 size='xs'
                 leftSection={<IconPlus size={14} />}
-                onClick={() => setEditing({ entity: 'document-types', form: { code: '', name: '', pluralName: '', requiresTraining: true, reviewMonths: 36, alertMonths: 2, sortOrder: 0, isActive: true, reason: '' } })}
+                onClick={() => setEditing({ entity: 'document-types', form: { code: '', name: '', pluralName: '', requiresTraining: true, reviewMonths: 36, alertMonths: 2, sortOrder: 0, isActive: true, idHeaderTemplate: null, draftExtensions: 'docx', generatorGuide: false, reason: '' } })}
               >
                 Nuevo tipo documental
               </Button>
@@ -249,6 +290,8 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                     <Table.Th>Revisión</Table.Th>
                     <Table.Th>Alerta</Table.Th>
                     <Table.Th>Capacitación</Table.Th>
+                    <Table.Th>Borrador</Table.Th>
+                    <Table.Th>Encabezado</Table.Th>
                     <Table.Th>Estado</Table.Th>
                     <Table.Th />
                   </Table.Tr>
@@ -263,7 +306,16 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                       <Table.Td>{t.reviewMonths} meses</Table.Td>
                       <Table.Td>{t.alertMonths} meses antes</Table.Td>
                       <Table.Td>{t.requiresTraining ? 'Obligatoria' : 'No'}</Table.Td>
-                      <Table.Td>{activeBadge(t.isActive)}</Table.Td>
+                      <Table.Td>{(t.draftExtensions ?? ['docx']).map((x) => (x === 'xlsx' ? 'Excel' : 'Word')).join(' y ')}</Table.Td>
+                      <Table.Td>{t.idHeaderTemplate ? templates.data?.templates.find((x) => x.id === t.idHeaderTemplate)?.name ?? `#${t.idHeaderTemplate}` : 'Por defecto'}</Table.Td>
+                      <Table.Td>
+                        {activeBadge(t.isActive)}
+                        {t.generatorGuide && (
+                          <Badge ml={4} variant='light' color='grape' data-testid='sgc-tipo-generador-guia'>
+                            Plantilla guía
+                          </Badge>
+                        )}
+                      </Table.Td>
                       <Table.Td>
                         {editButton('document-types', {
                           id: t.id,
@@ -275,6 +327,9 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                           alertMonths: t.alertMonths,
                           sortOrder: t.sortOrder,
                           isActive: t.isActive,
+                          idHeaderTemplate: t.idHeaderTemplate ?? null,
+                          draftExtensions: (t.draftExtensions ?? ['docx']).join(','),
+                          generatorGuide: !!t.generatorGuide,
                         })}
                       </Table.Td>
                     </Table.Tr>
@@ -287,6 +342,14 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
 
         <Tabs.Panel value='cargos'>
           <SgcCargoMembers idCompany={company.idCompany} />
+        </Tabs.Panel>
+
+        <Tabs.Panel value='aprobadores'>
+          <SgcApprovers idCompany={company.idCompany} processes={(data?.processes ?? []).filter((p) => p.isActive).map((p) => ({ id: p.id, code: p.code, name: p.name }))} departments={data?.departments ?? []} />
+        </Tabs.Panel>
+
+        <Tabs.Panel value='encabezados'>
+          <SgcHeaderTemplates idCompany={company.idCompany} />
         </Tabs.Panel>
 
         <Tabs.Panel value='empresa'>
@@ -316,6 +379,32 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                   <NumberInput label='Alerta (meses antes)' min={0} max={24} value={Number(editing.form.alertMonths)} onChange={(v) => set('alertMonths', Number(v))} />
                 </Group>
                 <Checkbox label='Capacitación obligatoria' checked={!!editing.form.requiresTraining} onChange={(e) => set('requiresTraining', e.currentTarget.checked)} />
+                {/* S16 (R32, D17): formatos del borrador (Excel sin convertirlo a Word) y (R31, D20) plantilla de encabezado. */}
+                <MultiSelect
+                  label='Formatos del borrador'
+                  description='El borrador de un documento nuevo o de una nueva versión. Excel se compone tal cual (nunca se convierte a Word).'
+                  data={SGC_DRAFT_EXTENSIONS.map((x) => ({ value: x, label: SGC_DRAFT_EXTENSION_LABELS[x] }))}
+                  value={String(editing.form.draftExtensions ?? 'docx').split(',').filter(Boolean)}
+                  onChange={(v) => set('draftExtensions', v.length ? v.join(',') : 'docx')}
+                  data-testid='sgc-tipo-formatos-borrador'
+                />
+                <SgcSelect
+                  label='Plantilla de encabezado'
+                  description='Sin plantilla propia, el tipo usa la plantilla por defecto de la empresa (pestaña «Encabezados»).'
+                  data={[{ value: '', label: 'Por defecto de la empresa' }, ...(templates.data?.templates ?? []).filter((x) => x.isActive).map((x) => ({ value: String(x.id), label: `${x.name} (${x.code})` }))]}
+                  value={editing.form.idHeaderTemplate ? String(editing.form.idHeaderTemplate) : ''}
+                  onChange={(v) => set('idHeaderTemplate', v ? Number(v) : null)}
+                  allowDeselect={false}
+                  data-testid='sgc-tipo-plantilla-encabezado'
+                />
+                {/* S19 (R34): el Generador es solo para documentos sin codificación. */}
+                <Checkbox
+                  label='Plantilla guía del Generador (sin codificación)'
+                  description='Los vigentes de este tipo pueden ser origen de una plantilla del Generador y lo que se genera no lleva código documental. Los documentos codificados van por solicitud.'
+                  checked={!!editing.form.generatorGuide}
+                  onChange={(e) => set('generatorGuide', e.currentTarget.checked)}
+                  data-testid='sgc-tipo-generador-guia-check'
+                />
               </>
             )}
             {editing.entity === 'processes' && (

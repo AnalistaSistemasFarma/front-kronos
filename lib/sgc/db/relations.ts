@@ -5,6 +5,8 @@ import type { SgcCompanyAccess } from '../permissions';
 import { SGC_RELATION_LABELS, isSgcRelationType, sanitizeLayout, type SgcGraphEdge, type SgcGraphNode, type SgcLayout, type SgcRelationType } from '../relations';
 import type { SgcActor, SgcDb } from './catalogs';
 import { canViewDocument, listVisibleDocuments } from './documents';
+import { guideInputOf } from './coding';
+import { pairKey, proposeRelations } from '../relationProposals';
 
 /**
  * Relaciones tipadas entre documentos y mapa tipo Obsidian (Sprint 5).
@@ -58,7 +60,8 @@ export async function getRelationGraph(
   const rows = ids.length
     ? await db.sgcDocumentRelation.findMany({
         // Sprint 6: sin listas IN gigantes (SQL Server admite 2.100 parámetros); se filtra en memoria.
-        where: { id_company: access.idCompany, is_active: true },
+        // Sprint 9: el mapa solo muestra las relaciones CONFIRMADAS (las propuestas por código esperan a Calidad).
+        where: { id_company: access.idCompany, is_active: true, status: 'confirmada' },
         orderBy: { id_document_relation: 'asc' },
       }).then((all) => {
         const visible = new Set(ids);
@@ -118,7 +121,7 @@ export async function listDocumentRelations(
 ): Promise<SgcDocumentRelationItem[] | null> {
   if (!(await canViewDocument(db, accessByCompany, subject, idDocument, now))) return null;
   const rows = await db.sgcDocumentRelation.findMany({
-    where: { is_active: true, OR: [{ id_source_document: idDocument }, { id_target_document: idDocument }] },
+    where: { is_active: true, status: 'confirmada', OR: [{ id_source_document: idDocument }, { id_target_document: idDocument }] },
     include: { source: { select: { id_document: true, code: true, title: true, status: true } }, target: { select: { id_document: true, code: true, title: true, status: true } } },
     orderBy: { id_document_relation: 'asc' },
   });
@@ -178,6 +181,11 @@ export async function addDocumentRelation(
           note,
           created_by: actor.email.toLowerCase(),
           change_reason: reason,
+          // Sprint 9: la que registra Calidad a mano queda confirmada de una vez.
+          origin: 'manual',
+          status: 'confirmada',
+          confirmed_by: actor.email.toLowerCase(),
+          confirmed_at: new Date(),
         },
       });
       await writeSgcAudit(tx, {
@@ -225,4 +233,104 @@ export async function removeDocumentRelation(db: SgcDb, accessByCompany: readonl
     });
     return saved;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 9 — «Relacionar documentos»: propuestas por código y confirmación de Calidad.
+// ---------------------------------------------------------------------------
+
+/** Genera las propuestas de relación de la empresa (solo las que faltan) y las deja «propuestas». */
+export async function proposeDocumentRelations(db: SgcDb, access: SgcCompanyAccess, actor: SgcActor) {
+  if (!access.canQuality) throw new SgcError('Solo Aseguramiento de Calidad relaciona documentos.', 403);
+  const idCompany = access.idCompany;
+  const [docs, guide, relations, listRows] = await Promise.all([
+    db.sgcDocument.findMany({ where: { id_company: idCompany, status: { not: 'anulado' } }, select: { id_document: true, code: true, status: true, documentType: { select: { code: true } }, process: { select: { code: true, processType: { select: { code: true } } } } } }),
+    db.sgcCodingGuide.findUnique({ where: { id_company: idCompany } }),
+    db.sgcDocumentRelation.findMany({ where: { id_company: idCompany, is_active: true }, select: { id_source_document: true, id_target_document: true } }),
+    db.sgcMasterListImportRow.findMany({ where: { status: 'cargada', parent_code: { not: null }, id_document: { not: null }, import: { id_company: idCompany } }, select: { id_document: true, parent_code: true }, orderBy: { id_master_list_import_row: 'asc' } }),
+  ]);
+  const proposals = proposeRelations(
+    docs.map((d) => ({ id: d.id_document, code: d.code, status: d.status, documentTypeCode: d.documentType.code, processCode: d.process.code, processTypeCode: d.process.processType.code })),
+    {
+      guide: guide ? guideInputOf(guide) : null,
+      listParents: new Map(listRows.map((r) => [r.id_document!, r.parent_code!])),
+      related: new Set(relations.map((r) => pairKey(r.id_source_document, r.id_target_document))),
+    }
+  );
+  if (proposals.length === 0) return { created: 0 };
+  const email = actor.email.toLowerCase();
+  await db.$transaction(async (tx) => {
+    for (const p of proposals) {
+      await tx.sgcDocumentRelation.create({
+        data: { id_company: idCompany, id_source_document: p.idSource, id_target_document: p.idTarget, relation_type: p.type, created_by: email, change_reason: p.reason.slice(0, 1000), origin: p.origin, status: 'propuesta' },
+      });
+    }
+    await writeSgcAudit(tx, {
+      idCompany,
+      actorEmail: actor.email,
+      action: SGC_AUDIT_ACTIONS.relacionPropuesta,
+      entity: 'document_relation',
+      entityId: null,
+      after: { proposals: proposals.length, listado: proposals.filter((p) => p.origin === 'listado').length, codigo: proposals.filter((p) => p.origin === 'codigo').length },
+      detail: `«Relacionar documentos»: ${proposals.length} relación(es) propuesta(s) por el código y el listado maestro, pendientes de confirmar.`,
+      ip: actor.ip,
+      userAgent: actor.userAgent,
+    });
+  }, { maxWait: 10_000, timeout: 60_000 });
+  return { created: proposals.length };
+}
+
+/** Relaciones PROPUESTAS de la empresa (pendientes de que Calidad las confirme o descarte). */
+export async function listRelationProposals(db: SgcDb, access: SgcCompanyAccess) {
+  if (!access.canQuality) throw new SgcError('Solo Aseguramiento de Calidad relaciona documentos.', 403);
+  const rows = await db.sgcDocumentRelation.findMany({
+    where: { id_company: access.idCompany, is_active: true, status: 'propuesta' },
+    include: { source: { select: { code: true, title: true, status: true } }, target: { select: { code: true, title: true, status: true } } },
+    orderBy: { id_document_relation: 'asc' },
+  });
+  return rows.map((r) => ({
+    id: r.id_document_relation,
+    type: r.relation_type,
+    typeLabel: isSgcRelationType(r.relation_type) ? SGC_RELATION_LABELS[r.relation_type] : r.relation_type,
+    origin: r.origin,
+    reason: r.change_reason,
+    source: { id: r.id_source_document, code: r.source.code, title: r.source.title, status: r.source.status },
+    target: { id: r.id_target_document, code: r.target.code, title: r.target.title, status: r.target.status },
+    proposedBy: r.created_by,
+    proposedAt: r.created_at.toISOString(),
+  }));
+}
+
+/** Calidad CONFIRMA (una o en bloque) o DESCARTA (con motivo) relaciones propuestas. */
+export async function decideRelationProposals(db: SgcDb, access: SgcCompanyAccess, input: { ids?: unknown; action?: unknown; reason?: unknown }, actor: SgcActor, now: Date = new Date()) {
+  if (!access.canQuality) throw new SgcError('Solo Aseguramiento de Calidad relaciona documentos.', 403);
+  const ids = Array.isArray(input.ids) ? [...new Set(input.ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 2000) : [];
+  if (!ids.length) throw new SgcError('Seleccione al menos una relación propuesta.');
+  if (input.action !== 'confirmar' && input.action !== 'descartar') throw new SgcError('Acción inválida (confirmar o descartar).');
+  const reason = input.action === 'descartar' ? reasonOf(input.reason) : typeof input.reason === 'string' && input.reason.trim() ? input.reason.trim().slice(0, 1000) : null;
+  const rows = await db.sgcDocumentRelation.findMany({ where: { id_company: access.idCompany, is_active: true, status: 'propuesta' }, include: { source: { select: { code: true } }, target: { select: { code: true } } } });
+  const chosen = rows.filter((r) => ids.includes(r.id_document_relation));
+  if (chosen.length !== ids.length) throw new SgcError('Alguna relación ya no está propuesta (otra persona la confirmó o la descartó). Actualice la lista.', 409);
+  const email = actor.email.toLowerCase();
+  await db.$transaction(async (tx) => {
+    for (const r of chosen) {
+      const saved =
+        input.action === 'confirmar'
+          ? await tx.sgcDocumentRelation.update({ where: { id_document_relation: r.id_document_relation }, data: { status: 'confirmada', confirmed_by: email, confirmed_at: now } })
+          : await tx.sgcDocumentRelation.update({ where: { id_document_relation: r.id_document_relation }, data: { is_active: false, removed_by: email, removed_at: now, remove_reason: reason } });
+      await writeSgcAudit(tx, {
+        idCompany: access.idCompany,
+        actorEmail: actor.email,
+        action: input.action === 'confirmar' ? SGC_AUDIT_ACTIONS.relacionConfirmada : SGC_AUDIT_ACTIONS.relacionRetirada,
+        entity: 'document_relation',
+        entityId: r.id_document_relation,
+        before: { status: r.status, isActive: r.is_active },
+        after: { status: saved.status, isActive: saved.is_active },
+        detail: `${r.source.code} → ${isSgcRelationType(r.relation_type) ? SGC_RELATION_LABELS[r.relation_type] : r.relation_type} → ${r.target.code} (${input.action === 'confirmar' ? 'confirmada' : 'propuesta descartada'})${reason ? `: ${reason}` : ''}`.slice(0, 1000),
+        ip: actor.ip,
+        userAgent: actor.userAgent,
+      });
+    }
+  }, { maxWait: 10_000, timeout: 60_000 });
+  return { [input.action === 'confirmar' ? 'confirmed' : 'discarded']: chosen.length };
 }

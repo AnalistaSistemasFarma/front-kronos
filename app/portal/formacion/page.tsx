@@ -1,9 +1,15 @@
 'use client';
 
-import { Suspense, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import PortalFormacion from '../../../components/portal/PortalFormacion';
-import { origenDesdeParametro, urlVolverAlPortal } from '../../../lib/portal/formacion-navegacion';
+import {
+  RUTA_FORMACION_HUB,
+  cursoDesdeParametro,
+  origenDesdeParametro,
+  urlIngresoYVolverAFormacion,
+  urlVolverAlPortal,
+} from '../../../lib/portal/formacion-navegacion';
 
 /**
  * PORTAL DE TALENTO HUMANO — FORMACIÓN, en su propia página.
@@ -20,9 +26,19 @@ import { origenDesdeParametro, urlVolverAlPortal } from '../../../lib/portal/for
  * `/portal`: adentro quedaría detrás del login de SynerLink.
  */
 function PaginaFormacion() {
-  const origen = origenDesdeParametro(useSearchParams().get('desde'));
+  const parametros = useSearchParams();
+  const origen = origenDesdeParametro(parametros.get('desde'));
+  // Invitación a un curso (?curso=N): se abre ese curso al ingresar.
+  const cursoInicial = cursoDesdeParametro(parametros.get('curso'));
   const volver = urlVolverAlPortal(origen);
   const [sinSesion, setSinSesion] = useState(false);
+  const router = useRouter();
+
+  // Enlaces viejos (`?desde=hub`): quien viene del módulo del hub sigue en el
+  // hub, con el encabezado de SynerLink (Nicolás, 2026-10-09).
+  useEffect(() => {
+    if (origen === 'hub') router.replace(RUTA_FORMACION_HUB);
+  }, [origen, router]);
 
   return (
     <div className='portal-th portal-th--formacion'>
@@ -45,17 +61,22 @@ function PaginaFormacion() {
         {sinSesion ? (
           <section className='portal-th__ingreso'>
             <h2>Ingrese primero al portal</h2>
-            <p>
-              Para ver los cursos de Formación, ingrese al Portal de Talento Humano y vuelva a abrir Formación desde
-              allí.
-            </p>
-            <a className='portal-th__certificado-boton' href={volver}>
-              Ir al portal
+            {cursoInicial ? (
+              <p>Lo invitaron a un curso de Formación. Ingrese con su correo (le enviaremos un código) y el curso se abrirá de inmediato.</p>
+            ) : (
+              <p>
+                Para ver los cursos de Formación, ingrese al Portal de Talento Humano y vuelva a abrir Formación desde
+                allí.
+              </p>
+            )}
+            {/* Con una invitación, el ingreso lo trae de vuelta a ESTE curso apenas valide el código. */}
+            <a className='portal-th__certificado-boton' href={cursoInicial ? urlIngresoYVolverAFormacion(cursoInicial) : volver} data-testid='ingresar-invitacion'>
+              {cursoInicial ? 'Ingresar al portal' : 'Ir al portal'}
             </a>
           </section>
         ) : (
           <section className='portal-th__seccion'>
-            <PortalFormacion onSinSesion={() => setSinSesion(true)} />
+            <PortalFormacion onSinSesion={() => setSinSesion(true)} cursoInicialId={cursoInicial} />
           </section>
         )}
       </main>

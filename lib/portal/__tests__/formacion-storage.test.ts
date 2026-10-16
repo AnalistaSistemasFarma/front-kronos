@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  ArchivoFueraDeCarpeta,
   FormacionStorageNoConfigurado,
+  crearSesionSubida,
+  obtenerArchivoSubidoEnCarpeta,
   LIMITE_SUBIDA_SIMPLE,
   TAMANO_TROZO,
   _reiniciarCacheToken,
   carpetaDeCurso,
   descargarArchivoFormacion,
+  rangoValido,
   esSegmentoValido,
   leerConfigFormacion,
   nombreArchivoSeguro,
@@ -205,6 +209,67 @@ describe('descargarArchivoFormacion', () => {
   it('rechaza ids con caracteres raros', async () => {
     await expect(descargarArchivoFormacion('../x', { config: CFG, fetch: vi.fn() as unknown as typeof fetch })).rejects.toThrow();
   });
+
+  // RANGOS (Cristian, 2026-10-14): un MP4 largo con el índice al final solo se reproduce si se pueden pedir tramos.
+  describe('rangos', () => {
+    it('sin rango: 200 completo, sin Range hacia SharePoint', async () => {
+      const f = fetchFalso(() => respuesta(200, 'TODO', { 'content-length': '4' }));
+      const r = await descargarArchivoFormacion('01ABC', { config: CFG, fetch: f as unknown as typeof fetch });
+      expect(r.estado).toBe(200);
+      expect(r.contentRange).toBeNull();
+      expect((f.mock.calls[1][1] as RequestInit).headers).not.toHaveProperty('Range');
+    });
+
+    it('con rango: se lo pasa a SharePoint y devuelve 206 con Content-Range y el largo del tramo', async () => {
+      const f = fetchFalso(() => respuesta(206, 'ABCDE', { 'content-length': '5', 'content-range': 'bytes 0-4/822160460', 'content-type': 'video/mp4' }));
+      const r = await descargarArchivoFormacion('01ABC', { config: CFG, fetch: f as unknown as typeof fetch, rango: 'bytes=0-4' });
+      expect((f.mock.calls[1][1] as RequestInit).headers).toMatchObject({ Range: 'bytes=0-4' });
+      expect(r).toMatchObject({ estado: 206, tamano: 5, contentRange: 'bytes 0-4/822160460' });
+      expect(await new Response(r.cuerpo).text()).toBe('ABCDE');
+    });
+
+    it('rango hacia el FINAL del archivo (donde está el índice moov): bytes=-4194304', async () => {
+      const f = fetchFalso(() => respuesta(206, 'FIN', { 'content-length': '3', 'content-range': 'bytes 818000000-822159999/822160460' }));
+      const r = await descargarArchivoFormacion('01ABC', { config: CFG, fetch: f as unknown as typeof fetch, rango: 'bytes=-4194304' });
+      expect((f.mock.calls[1][1] as RequestInit).headers).toMatchObject({ Range: 'bytes=-4194304' });
+      expect(r.estado).toBe(206);
+    });
+
+    it('rango fuera del archivo: 416 con el tamaño total, sin cuerpo', async () => {
+      const f = fetchFalso(() => respuesta(416, '', { 'content-range': 'bytes */14243133' }));
+      const r = await descargarArchivoFormacion('01ABC', { config: CFG, fetch: f as unknown as typeof fetch, rango: 'bytes=99999999999-' });
+      expect(r).toMatchObject({ estado: 416, cuerpo: null, contentRange: 'bytes */14243133' });
+    });
+
+    it('si SharePoint ignora el rango y responde 200, se entrega completo como 200', async () => {
+      const f = fetchFalso(() => respuesta(200, 'TODO', { 'content-length': '4' }));
+      const r = await descargarArchivoFormacion('01ABC', { config: CFG, fetch: f as unknown as typeof fetch, rango: 'bytes=0-1' });
+      expect(r).toMatchObject({ estado: 200, contentRange: null });
+    });
+
+    it('pasa la señal de cancelación para cortar la descarga cuando el navegador cierra la conexión', async () => {
+      const f = fetchFalso(() => respuesta(200, 'X', { 'content-length': '1' }));
+      const control = new AbortController();
+      await descargarArchivoFormacion('01ABC', { config: CFG, fetch: f as unknown as typeof fetch, signal: control.signal });
+      expect((f.mock.calls[1][1] as RequestInit).signal).toBe(control.signal);
+    });
+
+    it('un error de SharePoint (404, 500) sigue siendo un error, no un archivo', async () => {
+      const f = fetchFalso(() => respuesta(404, 'no'));
+      await expect(descargarArchivoFormacion('01ABC', { config: CFG, fetch: f as unknown as typeof fetch, rango: 'bytes=0-1' })).rejects.toThrow(/404/);
+    });
+  });
+});
+
+describe('rangoValido', () => {
+  it('acepta un solo rango de bytes', () => {
+    for (const r of ['bytes=0-1023', 'bytes=500-', 'bytes=-500', 'bytes=0-0', ' bytes=10-20 ']) expect(rangoValido(r), r).toBe(r.trim());
+  });
+  it('ignora lo raro: varios rangos, otra unidad, invertido, vacío o basura', () => {
+    for (const r of ['bytes=0-1,5-9', 'items=0-1', 'bytes=20-10', 'bytes=-', 'bytes=', 'bytes=a-b', 'bytes=0-1\r\nX: y', '', null, undefined, 'bytes=' + '9'.repeat(40) + '-']) {
+      expect(rangoValido(r as string | null | undefined), String(r)).toBeNull();
+    }
+  });
 });
 
 describe('moverMaterialAEliminados', () => {
@@ -260,5 +325,43 @@ describe('moverMaterialAEliminados', () => {
       )
     ).rejects.toThrow();
     expect(f).not.toHaveBeenCalled();
+  });
+});
+
+describe('subida directa del navegador (sin tope de peso, 2026-10-08)', () => {
+  it('crearSesionSubida: abre la sesión en la ruta saneada y no devuelve el token', async () => {
+    const f = fetchFalso((url) =>
+      url.endsWith(':/createUploadSession') ? respuesta(200, { uploadUrl: 'https://upload.sp/s1', expirationDateTime: 'X' }) : respuesta(404)
+    );
+    const s = await crearSesionSubida(
+      { carpetaCurso: 'sst-1', subcarpeta: 'materiales', nombreArchivo: 'C:\\videos\\..\\clase:1.mp4' },
+      { config: CFG, fetch: f as unknown as typeof fetch }
+    );
+    expect(s).toEqual({ uploadUrl: 'https://upload.sp/s1', expiracion: 'X', nombre: 'clase_1.mp4' });
+    expect(String(f.mock.calls.at(-1)?.[0])).toContain('/drive/root:/FORMACION/sst-1/materiales/clase_1.mp4:/createUploadSession');
+  });
+
+  it('crearSesionSubida: una uploadUrl que no es https se rechaza', async () => {
+    const f = fetchFalso(() => respuesta(200, { uploadUrl: 'http://raro/s' }));
+    await expect(
+      crearSesionSubida({ carpetaCurso: 'sst-1', subcarpeta: 'materiales', nombreArchivo: 'a.mp4' }, { config: CFG, fetch: f as unknown as typeof fetch })
+    ).rejects.toThrow(/no válida/);
+  });
+
+  it('obtenerArchivoSubidoEnCarpeta: acepta el padre exacto (codificado o no) y rechaza otro', async () => {
+    const conPadre = (path: string) =>
+      fetchFalso(() => respuesta(200, { id: '01X', name: 'v.mp4', size: 10, file: { mimeType: 'video/mp4' }, parentReference: { path } }));
+    const op = { driveItemId: '01X', carpetaCurso: 'curso con espacio-1', subcarpeta: 'materiales' as const, mime: 'video/mp4' };
+    for (const path of ['/drives/b!a/root:/FORMACION/curso%20con%20espacio-1/materiales', '/drive/root:/FORMACION/curso con espacio-1/materiales']) {
+      await expect(obtenerArchivoSubidoEnCarpeta(op, { config: CFG, fetch: conPadre(path) as unknown as typeof fetch })).resolves.toMatchObject({
+        driveItemId: '01X',
+        tamano: 10,
+      });
+    }
+    for (const path of ['/drive/root:/FORMACION/curso con espacio-1', '/drive/root:/FORMACION/curso con espacio-1/materiales/sub', '/drive/root:/OTRA/materiales']) {
+      await expect(
+        obtenerArchivoSubidoEnCarpeta(op, { config: CFG, fetch: conPadre(path) as unknown as typeof fetch })
+      ).rejects.toBeInstanceOf(ArchivoFueraDeCarpeta);
+    }
   });
 });

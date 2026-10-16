@@ -20,7 +20,8 @@ import {
   Title,
 } from '@mantine/core';
 import SgcSelect from '../../../../../../components/sgc/SgcSelect';
-import { IconAlertTriangle, IconArrowLeft, IconBan, IconCheck, IconEdit, IconEye, IconFilePlus, IconKey } from '@tabler/icons-react';
+import { IconAlertTriangle, IconArrowLeft, IconBan, IconCheck, IconCopy,
+  IconEdit, IconEye, IconFilePlus, IconKey } from '@tabler/icons-react';
 import SgcShell from '../../../../../../components/sgc/SgcShell';
 import SgcSecureViewer from '../../../../../../components/sgc/SgcSecureViewer';
 import SgcDocumentRelations from '../../../../../../components/sgc/relations/SgcDocumentRelations';
@@ -76,9 +77,16 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
   const [grantExpires, setGrantExpires] = useState('');
 
   if (detail.error) {
+    // S14 (R23): quien no puede consultar el documento recibe un mensaje claro y la opción de solicitar acceso.
     return (
-      <Alert color='red' icon={<IconAlertTriangle size={18} />} title='Documento' data-testid='sgc-ficha-error'>
-        {detail.error}
+      <Alert color='orange' icon={<IconAlertTriangle size={18} />} title='Documento' data-testid='sgc-ficha-error'>
+        <Stack gap='xs'>
+          <Text size='sm'>{detail.error}</Text>
+          <Text size='sm'>Si necesita consultarlo, pida el acceso a Aseguramiento de Calidad con su justificación.</Text>
+          <Button size='xs' variant='light' w='fit-content' component={Link} href={sgcHref(`${SGC_BASE_URL}/accesos`, company.idCompany, { documento: id })} data-testid='sgc-ficha-solicitar-acceso'>
+            Solicitar acceso
+          </Button>
+        </Stack>
       </Alert>
     );
   }
@@ -152,6 +160,12 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
                 data-testid='sgc-ficha-nueva-version'
               >
                 Solicitar nueva versión
+              </Button>
+            )}
+            {/* Sprint 11: copia no controlada (la decide Calidad; solo los tipos que la admiten). */}
+            {d.status === 'vigente' && (
+              <Button component={Link} href={sgcHref(`${SGC_BASE_URL}/copias`, company.idCompany, { documento: String(d.idDocument) })} variant='light' color='orange' leftSection={<IconCopy size={16} />} data-testid='sgc-ficha-copia'>
+                Copia no controlada
               </Button>
             )}
             {permissions.canAdminister && d.status !== 'anulado' && (
@@ -235,6 +249,7 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
             fileUrl={`/api/sgc/documents/${d.idDocument}/versions/${viewing.id}/file`}
             canDownload={permissions.canDownload && viewing.isCurrent}
             canPrint={permissions.canPrint && viewing.isCurrent}
+            requestAccessHref={sgcHref(`${SGC_BASE_URL}/accesos`, company.idCompany, { documento: String(d.idDocument) })}
           />
         </Card>
       )}

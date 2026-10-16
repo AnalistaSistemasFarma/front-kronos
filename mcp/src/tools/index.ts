@@ -20,6 +20,14 @@ import {
 } from '../graph.js';
 import { sanitizeOneDriveName } from '../onedriveName.js';
 import { loadTeamsGraphConfig, TeamsGraphClient } from '../teams.js';
+import {
+  instantiateInitialTasks,
+  insertNewRequestNotifications,
+  processOwnerEmails,
+} from '../workflow.js';
+import { registerIaAccessTool } from './iaAccess.js';
+import { BITACORA_TOOLS, registerBitacoraTools } from './bitacoraProceso.js';
+import { registerCorreoAgenteTools } from './correoAgente.js';
 
 interface ToolContext {
   scope: AuthScope;
@@ -308,6 +316,16 @@ export const ENTITY_METADATA = {
     companyColumn: 'company_user.id_company (vía relación)',
     fields: Object.keys(USER_SAFE_SELECT),
   },
+  bitacoras: {
+    description:
+      'Bitácora de Proceso (planta): una bitácora = un turno (ot_orden_trabajo) con supervisor, jefe de producción (quien verifica) y operarios sin usuario de SynerLink (ot_orden_operador, maestro ot_operador; las bitácoras anteriores al 2026-10-14 tienen auxiliares con usuario en ot_orden_operario), registros de intervenciones con hora del servidor en UTC, el operario que la hizo y el usuario de la sesión que la registró (ot_registro, inmutables), catálogo de actividades (ot_actividad) y confirmaciones «Cerró» (supervisor) / «Verificó» (jefe de producción) (ot_firma). Solo lectura vía kronos_list_bitacoras, kronos_get_bitacora, kronos_bitacora_actividad_reciente y kronos_list_bitacora_actividades. Nunca se exponen imágenes de firma, huellas ni IP.',
+    companyColumn: 'ot_orden_trabajo.id_company / ot_actividad.id_company',
+    fields: [
+      'id', 'codigo (BP-xxxx, consecutivo por empresa)', 'id_company', 'company', 'producto', 'item_code', 'lote',
+      'turno', 'area', 'orden_produccion_sap', 'estado (abierta|cerrada|verificada)', 'abierta_en', 'cerrada_en',
+      'supervisor', 'jefe_produccion', 'operarios', 'registros (operario + usuario_sesion)', 'firmas (confirmaciones Cerró/Verificó)', 'ultima_actividad_en',
+    ],
+  },
   attachments: {
     description:
       'Adjuntos/documentos de una solicitud. El CONTENIDO binario NO se guarda en la base de datos: los archivos se suben a OneDrive (MS Graph) en la carpeta determinística SAPSEND/TEC/SG/Request-<id>. kronos_list_attachments devuelve DOS cosas: (a) "required_files" = la DEFINICIÓN de qué archivos exige el proceso (file_process_category: etiqueta, obligatoriedad, condición) y (b) "files" = los archivos REALES cargados en OneDrive (name, size, tipo, fechas, file_id y download_url temporal). kronos_get_attachment resuelve el archivo real (download_url y, opcional, base64) o la definición del proceso.',
@@ -321,7 +339,8 @@ export const ENTITY_METADATA = {
 } as const;
 
 /**
- * Capacidades del servidor: 29 tools en total = 21 de LECTURA + 8 de ESCRITURA.
+ * Capacidades del servidor: 39 tools en total = 27 de LECTURA (incluye 4 de la
+ * Bitácora de Proceso y 2 del hilo de correo compartido) + 12 de ESCRITURA (3 de ellas solo PROPONEN).
  *
  * Las de escritura están acotadas (categorización, creación de solicitudes,
  * notas, resolución de tareas, adjuntos en OneDrive y formulario dinámico),
@@ -329,7 +348,7 @@ export const ENTITY_METADATA = {
  * candado de solo lectura del resto del servidor.
  */
 export const TOOL_CAPABILITIES = {
-  totalTools: 29,
+  totalTools: 39,
   readOnly: [
     'kronos_metadata',
     'kronos_list_requests',
@@ -352,6 +371,10 @@ export const TOOL_CAPABILITIES = {
     'teams_list_meetings',
     'teams_list_transcripts',
     'teams_get_transcript',
+    ...BITACORA_TOOLS,
+    // «Consultar a un agente» (Correo, 2026-10-16): lectura SOLO del hilo compartido (concesión de 24 h).
+    'correo_hilo_compartido',
+    'correo_adjunto_compartido',
   ],
   write: [
     'kronos_categorize_case',
@@ -362,13 +385,59 @@ export const TOOL_CAPABILITIES = {
     'kronos_upload_attachment',
     'kronos_delete_attachment',
     'kronos_set_request_fields',
+    'kronos_request_ia_access',
+    // Propuestas sobre un hilo compartido: NO ejecutan; quedan PENDIENTES hasta que la persona confirma.
+    'correo_proponer_respuesta',
+    'correo_crear_solicitud_desde_hilo',
+    'correo_agregar_nota',
   ],
   writeNote:
-    'El servidor tiene rutas de escritura acotadas: categorización (caso: category_case; solicitud: process_category_request_general), creación de solicitudes (kronos_create_request: inserta requests_general + workflow + notificaciones), notas de bitácora (kronos_add_note) y resolución de actividades del workflow (kronos_resolve_task: cierra task_request_general con id_status=2 + date_resolution/end_date + id_executor_final, respetando el gate secuencial y avanzando el flujo), subida de adjuntos a OneDrive (kronos_upload_attachment: carpeta SAPSEND/TEC/SG/Request-<id> o SAPSEND/TEC/MA/Ticket-<id>, sin sobrescribir archivos existentes), eliminación de adjuntos (kronos_delete_attachment: solo key admin + usuario con doble llave de la app, justificación obligatoria, rechaza documentos con flujo de firma Orion y deja nota en la bitácora) y diligenciamiento del formulario dinámico (kronos_set_request_fields: UPSERT en request_form_value, sin campos de firma Orion ni solicitudes cerradas). Todas parametrizadas, validadas por alcance de empresa y auditadas. El candado assertReadOnlySql sigue intacto para las tools de lectura.',
+    'El servidor tiene rutas de escritura acotadas: categorización (caso: category_case; solicitud: process_category_request_general), creación de solicitudes (kronos_create_request: inserta requests_general + workflow + notificaciones), notas de bitácora (kronos_add_note) y resolución de actividades del workflow (kronos_resolve_task: cierra task_request_general con id_status=2 + date_resolution/end_date + id_executor_final, respetando el gate secuencial y avanzando el flujo), subida de adjuntos a OneDrive (kronos_upload_attachment: carpeta SAPSEND/TEC/SG/Request-<id> o SAPSEND/TEC/MA/Ticket-<id>, sin sobrescribir archivos existentes), eliminación de adjuntos (kronos_delete_attachment: solo key admin + usuario con doble llave de la app, justificación obligatoria, rechaza documentos con flujo de firma Orion y deja nota en la bitácora) y diligenciamiento del formulario dinámico (kronos_set_request_fields: UPSERT en request_form_value, sin campos de firma Orion ni solicitudes cerradas) y radicación de solicitudes de conectores IA a nombre de una persona (kronos_request_ia_access: la empresa se deduce del permiso de la persona sobre el agente de la key, nunca GSS; tope diario y sin duplicados). Todas parametrizadas, validadas por alcance de empresa y auditadas. El candado assertReadOnlySql sigue intacto para las tools de lectura.',
 } as const;
 
-export function registerTools(server: McpServer, ctx: ToolContext): void {
+/**
+ * Envuelve el McpServer para que `server.tool(nombre, ...)` SOLO registre las
+ * herramientas de la lista blanca de la key. Las demás no se registran: no
+ * aparecen en tools/list y una llamada directa responde "tool not found".
+ */
+export function restrictToAllowedTools(server: McpServer, allowed: ReadonlySet<string>): McpServer {
+  return new Proxy(server, {
+    get(target, prop, receiver) {
+      if (prop === 'tool') {
+        return (name: string, ...rest: unknown[]) => {
+          if (!allowed.has(name)) return undefined;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return (target.tool as any).call(target, name, ...rest);
+        };
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
+export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
+  const server = ctx.scope.allowedTools
+    ? restrictToAllowedTools(rawServer, new Set(ctx.scope.allowedTools))
+    : rawServer;
   const prisma = getPrisma();
+
+  // Radicación de solicitudes de conectores IA a nombre de una persona.
+  registerIaAccessTool(server, ctx);
+
+  // «Consultar a un agente» desde el Correo: 2 lecturas del hilo compartido + 3 PROPUESTAS que la
+  // persona confirma en el chat (src/tools/correoAgente.ts).
+  registerCorreoAgenteTools(server, { scope: ctx.scope, audit: ctx.audit });
+
+  // Bitácora de Proceso (planta): 4 tools de SOLO LECTURA (src/tools/bitacoraProceso.ts).
+  registerBitacoraTools(server, {
+    scope: ctx.scope,
+    maxPageSize: ctx.maxPageSize,
+    defaultPageSize: ctx.defaultPageSize,
+    withAudit: (tool, params, fn) => withAudit(ctx, tool, params, fn),
+    companyClause,
+    isMissingTableError,
+  });
 
   // ---------------------------------------------------------------------------
   // Teams / transcripciones
@@ -2183,63 +2252,38 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
             VALUES (${newId}, ${args.id_process_category})
           `);
 
-          // 6. Instanciar las tareas del workflow (id_status = 4 = Sin Empezar).
-          const tasks = await tx.$queryRaw<{ id_task: number; id_user: string; email: string | null }[]>(Prisma.sql`
-            SELECT tpc.id AS id_task, utrg.id_user, u.email
-            FROM user_task_request_general utrg
-            INNER JOIN task_process_category tpc ON tpc.id = utrg.id_task
-            INNER JOIN [user] u ON u.id = utrg.id_user
-            WHERE tpc.id_process_category = ${args.id_process_category}
-          `);
-          for (const t of tasks) {
-            await tx.$executeRaw(Prisma.sql`
-              INSERT INTO task_request_general (id_request_general, id_task, id_status, id_assigned)
-              VALUES (${newId}, ${t.id_task}, 4, ${t.id_user})
-            `);
-          }
+          // 6. Instanciar las tareas IGUAL que la app (createGeneralRequest):
+          //    solo activas, condiciones por opción, creación diferida de las
+          //    secuenciales (solo la primera) y autorizaciones sin responsable.
+          //    Antes se creaban TODAS las tareas del flujo de una vez.
+          const createdTasks = await instantiateInitialTasks(tx, newId, args.id_process_category);
 
-          // 7. Correos: responsable del proceso + asignados de las tareas.
-          const procUsers = await tx.$queryRaw<{ email: string | null }[]>(Prisma.sql`
-            SELECT u.email
-            FROM user_process_category_request_general upcrg
-            INNER JOIN [user] u ON u.id = upcrg.id_user
-            WHERE upcrg.id_process_category = ${args.id_process_category}
-          `);
-          const processEmail = procUsers[0]?.email ?? null;
+          // 7. Correos: encargados del proceso + responsables de las tareas creadas.
+          const processEmails = await processOwnerEmails(tx, args.id_process_category);
+          const processEmail = processEmails[0] ?? null;
           const taskEmails = Array.from(
-            new Set(tasks.map((t) => t.email).filter((e): e is string => Boolean(e)))
+            new Set(createdTasks.map((t) => t.email).filter((e): e is string => Boolean(e)))
           );
 
           // 8. Notificaciones en la app (tabla notifications), igual que notifyNewRequest.
-          //    Nota: el push del navegador (web-push) lo envía la SPA; aquí se
-          //    persiste la notificación en BD (campana), que es la parte durable.
-          const viewUrl =
-            args.url && args.url.trim()
-              ? args.url.trim()
-              : `/process/request-general/view-request?id=${newId}&from=general-requests`;
-          const activitiesUrl = `/process/request-general/view-activities?id=${newId}&from=assigned-activities`;
-          const processList = processEmail ? [processEmail] : [];
-          const taskList = taskEmails.filter((e) => !processList.includes(e));
-
-          for (const email of processList) {
-            await tx.$executeRaw(Prisma.sql`
-              INSERT INTO notifications (email, title, body, url)
-              VALUES (${email}, ${'Nueva solicitud · SynerLink'}, ${`#${newId} — ${args.subject}`}, ${viewUrl})
-            `);
-          }
-          for (const email of taskList) {
-            await tx.$executeRaw(Prisma.sql`
-              INSERT INTO notifications (email, title, body, url)
-              VALUES (${email}, ${'Actividad asignada · SynerLink'}, ${`Tienes una actividad en la solicitud #${newId} — ${args.subject}`}, ${activitiesUrl})
-            `);
-          }
+          const requesterEmail = await tx.$queryRaw<{ email: string | null }[]>(Prisma.sql`
+            SELECT TOP 1 u.email FROM [user] u WHERE u.id = ${args.requesterUserId}
+          `);
+          await insertNewRequestNotifications(tx, {
+            requestId: newId,
+            subject: args.subject,
+            creatorEmail: requesterEmail[0]?.email ?? null,
+            processEmails,
+            taskEmails,
+            url: args.url ?? null,
+          });
 
           return {
             id_request: newId,
             id_company: args.companyId,
             id_process_category: args.id_process_category,
             requester: args.requesterUserId,
-            tasksCreated: tasks.length,
+            tasksCreated: createdTasks.length,
             notified: { processEmail, taskEmails },
           };
         });

@@ -10,7 +10,8 @@ export const dynamic = 'force-dynamic';
  * creó o elabora (Calidad: todas las de la empresa).
  * POST /api/sgc/requests — crea una solicitud documental (gestión o Calidad):
  * { company, requestType, subject, description, idDocument? | idProcess + idDocumentType,
- *   elaboratorEmail?, formValues? }.
+ *   formValues? }. Un elaboratorEmail que llegue se IGNORA (2026-10-05): el
+ * elaborador lo asigna el servidor según la configuración del proceso.
  */
 export async function GET(request: Request) {
   try {
@@ -43,6 +44,8 @@ export async function POST(request: Request) {
         idDocument: body.idDocument,
         idProcess: body.idProcess,
         idDocumentType: body.idDocumentType,
+        idParentDocument: body.idParentDocument,
+        requiresTraining: body.requiresTraining,
         elaboratorEmail: body.elaboratorEmail,
         formValues: body.formValues && typeof body.formValues === 'object' ? (body.formValues as Record<string, unknown>) : {},
       },

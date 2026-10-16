@@ -54,7 +54,7 @@ Los catálogos son globales (compartidos por todas las empresas), así que se ex
 
 ---
 
-## 2. Tools disponibles (29: 21 lectura + 8 escritura)
+## 2. Tools disponibles (39: 27 lectura + 12 escritura, 3 de ellas solo PROPONEN)
 
 ### 2.1 Lectura (21)
 
@@ -76,6 +76,13 @@ Los catálogos son globales (compartidos por todas las empresas), así que se ex
 | `teams_list_meetings` | Lista reuniones online recientes del usuario Graph configurado. |
 | `teams_list_transcripts` | Lista las transcripciones disponibles para una reunión (`meetingId` o `joinUrl`). |
 | `teams_get_transcript` | Descarga la transcripción más reciente o una específica. Por defecto usa el formato sin atribución de hablante permitido por el tenant. |
+
+| `kronos_list_bitacoras` | Bitácora de Proceso (planta): lista bitácoras (una por turno) con código `BP-xxxx`, producto, lote, turno, los cuatro actores (supervisor, inspector, jefe de producción y operarios), registros, los cuatro vistos buenos (`vistos_buenos`, `firmas` = siguiente pendiente o `completa`) y última actividad. Filtros: `companyId`, `estado` (`abierta`/`cerrada`/`verificada`), `desde`/`hasta`, `producto`, `lote`, `supervisor`, `inspector`, `jefeProduccion`, `ordenProduccion`. |
+| `kronos_get_bitacora` | Una bitácora (`id` o `codigo` + `companyId`): encabezado, participantes (supervisor, inspector, jefe de producción y operarios), registros cronológicos y los cuatro vistos buenos (operario, supervisor «Cerró», inspector y jefe) con hora y método (`sesion_propia`, `pin_tablet`, `operario_tablet`; las filas viejas «Verificó» salen como del jefe). **Nunca** devuelve la imagen de la firma, huellas SHA-256, IP ni navegador. |
+| `kronos_bitacora_actividad_reciente` | Monitoreo en tiempo real: registros desde una hora (`desde`, por defecto 60 min; máx. 31 días) de las bitácoras abiertas, con cursor `despuesDeRegistro`/`siguiente_cursor`. |
+| `kronos_list_bitacora_actividades` | Catálogo de intervenciones de la bitácora por empresa. |
+
+Las tools de bitácora (`src/tools/bitacoraProceso.ts`) son de solo lectura (pasan por `queryReadOnly`), filtran por `ot_orden_trabajo.id_company` / `ot_actividad.id_company` y devuelven horas en UTC. En una base sin las tablas `ot_*` responden «El módulo Bitácora de Proceso aún no está instalado».
 
 **Paginación:** todas usan `limit`/`offset` con tope máximo (`MCP_MAX_PAGE_SIZE`, default 200) y default (`MCP_DEFAULT_PAGE_SIZE`, default 50).
 
@@ -107,6 +114,34 @@ Ambas hacen **UPSERT** sobre su tabla puente (UPDATE; si afecta 0 filas, INSERT)
 **Sanitización:** `kronos_list_users` solo devuelve `id, name, email, isActive, role, phone, identification, createdAt`. Nunca `password`, `emailVerified`, cuentas/tokens ni sesiones.
 
 ---
+
+### 2.4 Correo · «Consultar a un agente» (2026-10-16)
+
+Diseño aprobado por Nicolás Rivera (2026-10-16 09:24–09:27): desde un hilo del módulo Correo, la
+persona COMPARTE ese hilo con uno de SUS agentes del chat (concesión `email_agent_share`, 24 h,
+revocable). El agente recibe en el chat un mensaje con el contexto y el `share_id` (`cs_…`, opaco).
+Implementación: `src/tools/correoAgente.ts` (herramientas), `src/correo/concesion.ts` (alcance,
+propuestas, auditoría) y `src/correo/graph.ts` (lectura de Graph).
+
+| Tool | Tipo | Qué hace |
+|---|---|---|
+| `correo_hilo_compartido` | Lectura | Mensajes del hilo (texto saneado, sin historial citado, con topes) y adjuntos con `attachment_id`. |
+| `correo_adjunto_compartido` | Lectura | Un adjunto del MISMO hilo (≤ 5 MB): texto, imagen o base64. |
+| `correo_proponer_respuesta` | Propuesta | NO envía: deja una acción PENDIENTE y una tarjeta en el chat. |
+| `correo_crear_solicitud_desde_hilo` | Propuesta | NO crea: la persona revisa empresa, proceso, solicitante y confirma. |
+| `correo_agregar_nota` | Propuesta | NO escribe: nota para la solicitud vinculada, si existe. |
+
+Reglas: el agente sale de la llave (`agentCode` o, si falta, `agent` = `agent.code`); la concesión
+debe ser de ESE agente, vigente y sin revocar; la persona activa, con el agente asignado
+(subproceso + empresa del agente) y el chat directo intacto. Cualquier falla da el MISMO rechazo y
+queda `AGENTE_DENEGADO` en `dbo.email_audit`. El buzón sale de la concesión, nunca del agente;
+Graph solo con GET bajo `/users/{buzón de la concesión}`. Solo el clic de la persona en SynerLink
+ejecuta (front: `lib/correo/agente.ts`). Lecturas y propuestas quedan en `email_audit`
+(`AGENTE_LEER_HILO`, `AGENTE_LEER_ADJUNTO`, `AGENTE_PROPONER`) y en el log del MCP (sin los cuerpos).
+
+Variables: las mismas `CORREO_*` del front (`CORREO_MODO`, `CORREO_INQUILINOS`, `CORREO_<K>_*`).
+`serve.mjs` las toma del `.env` del front (carpeta padre) si `mcp/.env` no las trae; ninguna otra
+variable del front entra al MCP.
 
 ## 3. Configuración de keys y alcance
 
@@ -277,3 +312,33 @@ Cubre (vitest, Prisma mockeado — no requiere DB real):
 - **Sanitización:** `kronos_list_users` nunca devuelve `password`/tokens.
 - **Inyección:** un texto malicioso viaja como **valor parametrizado** (no como SQL crudo) y el filtro de empresa permanece intacto; `companyId` no numérico es rechazado por el esquema.
 - **Config:** validación de keys (longitud, duplicados, `companyIds` lista/`"*"`, rechazo de arreglos vacíos y valores inválidos, presencia).
+
+
+---
+
+## Llaves restringidas de agentes y `kronos_request_ia_access` (2026-10-09)
+
+**Lista blanca por key.** Cada entrada de `MCP_API_KEYS` admite dos campos opcionales:
+
+```json
+{ "key": "<secreto>", "agent": "galileo", "companyIds": [3], "role": "agent",
+  "allowedTools": ["kronos_request_ia_access"], "agentCode": "galileo" }
+```
+
+- `allowedTools`: si existe, el servidor **solo registra** esas herramientas para la key (no aparecen las demás en `tools/list`) y además rechaza con **403** cualquier `tools/call` HTTP fuera de la lista (también en lotes JSON-RPC), con auditoría `denied`. Un nombre desconocido impide arrancar el servidor.
+- `agentCode`: `agent.code` del agente que presenta la key; obligatorio si la lista incluye `kronos_request_ia_access`.
+- Las keys **sin** estos campos (horus, nancy, test-local) siguen exactamente igual.
+- **Orden de despliegue:** primero el código, después las keys nuevas. Un servidor anterior ignora `allowedTools` y daría a la key acceso completo.
+
+**`kronos_request_ia_access`** `{requesterEmail, sistema, para_que, datos, solo_lectura?, companyId?}` radica una "Solicitud de conectores para agentes IA" a nombre de la persona:
+
+1. La persona debe existir, estar activa y tener asignado el agente de la key (subproceso del agente en `subprocess_user_company`, en empresas de `agent_company` y del alcance de la key). **GSS nunca es candidata.**
+2. 0 empresas → rechazo. 1 → esa. Varias → responde `elegir_empresa` con la lista; solo se acepta un `companyId` de esa lista.
+3. Proceso: el activo llamado `Solicitud de conectores para agentes IA` (configurable con `MCP_IA_ACCESS_PROCESS_NAME`) habilitado para la empresa. Se resuelve por nombre porque los ids cambian entre pruebas y producción.
+4. Sin duplicados: si la persona tiene una abierta del mismo sistema, devuelve `duplicada` con su número. Tope: 3 por persona, por día y por agente (marca `[agente:<code>]` en la descripción). Candado `sp_getapplock` por persona.
+5. Crea la solicitud, la vincula al proceso y crea las tareas **igual que la app** (`src/workflow.ts`, réplica de `lib/requests-general/createGeneralRequest.js`: solo activas, condiciones por opción, solo la primera secuencial, autorizaciones sin responsable con NULL) y las notificaciones de campana.
+
+`kronos_create_request` usa ahora la misma lógica de tareas (antes creaba todas las tareas del flujo de una vez).
+
+El script `sql/proceso-conectores-ia.template.sql` crea el proceso por empresa (copia de 249 con otro autorizador), idempotente y con verificación de `DB_NAME()`.
+

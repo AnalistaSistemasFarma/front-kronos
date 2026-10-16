@@ -12,15 +12,15 @@ import {
 import { usePathname, useRouter } from 'next/navigation';
 import { DASHBOARD_SOLICITADO_URL } from './dashboardRoutes';
 
-export type SolicitadoTab = 'procesos' | 'actividades';
+export type SolicitadoTab = 'procesos' | 'equipo';
 
 export const SOLICITADO_TAB_URL: Record<SolicitadoTab, string> = {
   procesos: DASHBOARD_SOLICITADO_URL,
-  actividades: `${DASHBOARD_SOLICITADO_URL}/actividades`,
+  equipo: `${DASHBOARD_SOLICITADO_URL}/equipo`,
 };
 
 export function pathnameToSolicitadoTab(pathname: string): SolicitadoTab {
-  if (pathname.includes('/actividades')) return 'actividades';
+  if (pathname.endsWith('/equipo')) return 'equipo';
   return 'procesos';
 }
 

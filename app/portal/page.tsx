@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import PortalContenido, { leerJson, usePortalContenido } from '../../components/portal/PortalContenido';
+import { rutaSiguienteValida } from '../../lib/portal/formacion-navegacion';
 
 /**
  * PORTAL DE TALENTO HUMANO — entrada ABIERTA, con código al correo.
@@ -62,6 +63,12 @@ export default function PortalAbierto() {
       if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo validar el código.'));
       setCodigo('');
       setPidioCodigo(false);
+      // Si llegó desde una invitación a un curso, vuelve a Formación (solo esa ruta; ver rutaSiguienteValida).
+      const siguiente = rutaSiguienteValida(new URLSearchParams(window.location.search).get('siguiente'));
+      if (siguiente) {
+        window.location.assign(siguiente);
+        return;
+      }
       await recargar();
     } catch (e) {
       setError((e as Error).message);
@@ -100,7 +107,7 @@ export default function PortalAbierto() {
         )}
       </header>
 
-      <main className='portal-th__cuerpo'>
+      <main className='portal-th__cuerpo portal-th__cuerpo--ancho'>
         {cargando && <p className='portal-th__estado'>Cargando…</p>}
 
         {!cargando && !email && (

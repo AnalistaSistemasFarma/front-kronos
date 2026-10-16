@@ -1,14 +1,22 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { usePathname } from 'next/navigation';
 import { useAppSection } from '../../lib/navigation/AppSectionContext';
 import { isHubInstantSwapRoute } from '../../lib/navigation/AppSectionContext';
-import DashboardShell from '../dashboard/DashboardShell';
-import ProcessView from '../process/ProcessView';
+
+// Carga diferida: el tablero (vistas de análisis + chart.js) y la vista de procesos ya no van
+// en el paquete del layout, que comparten TODAS las pantallas del hub (solicitudes, tickets...).
+const DashboardShell = dynamic(() => import('../dashboard/DashboardShell'));
+const ProcessView = dynamic(() => import('../process/ProcessView'));
 
 function HubPanels() {
   const { activeSection } = useAppSection();
+  // Cada panel se monta la primera vez que se abre y luego se conserva (cambio instantáneo).
+  // Antes el tablero se montaba oculto en /process y disparaba sus consultas sin verse.
+  const [visited, setVisited] = useState(() => new Set([activeSection]));
+  if (!visited.has(activeSection)) setVisited(new Set(visited).add(activeSection));
 
   useEffect(() => {
     requestAnimationFrame(() => {
@@ -25,13 +33,13 @@ function HubPanels() {
         className={panelClass(activeSection === 'dashboard')}
         aria-hidden={activeSection !== 'dashboard'}
       >
-        <DashboardShell />
+        {visited.has('dashboard') ? <DashboardShell /> : null}
       </div>
       <div
         className={panelClass(activeSection === 'process')}
         aria-hidden={activeSection !== 'process'}
       >
-        <ProcessView />
+        {visited.has('process') ? <ProcessView /> : null}
       </div>
     </div>
   );

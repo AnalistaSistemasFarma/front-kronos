@@ -27,6 +27,7 @@ jobs:
     env:
       PROJECT_DIR: C:\Users\nicolas.rivera\projects\front-kronos-test
       STALE_RUN: "false"
+      IIS_SITE_PATH: C:\inetpub\testrp\rp-kronos-test
     steps:
       - name: Mostrar contexto
         shell: powershell
@@ -83,6 +84,22 @@ jobs:
           if (-not (Test-Path ".env"))     { throw "FALTA .env (front). Abortando para no romper el entorno." }
           if (-not (Test-Path "mcp\.env")) { throw "FALTA mcp\.env (MCP). Abortando para no romper el entorno." }
           Write-Host "OK: .env (front) y mcp\.env presentes."
+
+      # Pagina "SynerLink se esta actualizando" en el sitio IIS de pruebas
+      # rp-kronos-test (:8450, deploy/iis/README.md), en TODO deploy, antes de
+      # detener las apps / instalar / compilar. La quita el ultimo paso del job
+      # (if: always()) solo cuando :3030 responde 200. El tunel trycloudflare va
+      # directo a :3030 y no pasa por IIS. continue-on-error: es cosmetica.
+      - name: Activar pagina de mantenimiento (IIS rp-kronos-test)
+        if: env.STALE_RUN != 'true'
+        continue-on-error: true
+        shell: powershell
+        run: |
+          Set-Location $env:PROJECT_DIR
+          # Mantiene la pagina instalada al dia con la del repo.
+          Copy-Item deploy\iis\_mantenimiento\index.html (Join-Path $env:IIS_SITE_PATH '_mantenimiento\index.html') -Force
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\maintenance-on.ps1 -SitePath $env:IIS_SITE_PATH -Motivo "deploy $env:GITHUB_SHA"
+          if ($LASTEXITCODE -ne 0) { throw "maintenance-on fallo" }
 
       - name: Detener apps del test (liberar locks de binarios nativos)
         if: env.STALE_RUN != 'true'
@@ -181,3 +198,14 @@ jobs:
           }
           if (-not $ok) { throw "Smoke test fallo: localhost:3030 no devolvio 200 tras varios intentos." }
           Write-Host "OK: GSS-Front-TEST responde 200 en localhost:3030."
+
+      # Corre SIEMPRE (tambien si el job fallo) para no dejar el sitio en
+      # mantenimiento. maintenance-off.ps1 verifica HTTP 200 en :3030 (reintentos
+      # ~2 min) antes de borrar la bandera; si la app no quedo arriba la conserva.
+      - name: Quitar pagina de mantenimiento si GSS-Front-TEST responde 200
+        if: ${{ always() && env.STALE_RUN != 'true' }}
+        shell: powershell
+        run: |
+          Set-Location $env:PROJECT_DIR
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\maintenance-off.ps1 -SitePath $env:IIS_SITE_PATH -HealthUrl http://localhost:3030/
+          if ($LASTEXITCODE -ne 0) { throw "maintenance-off fallo: la bandera sigue puesta" }

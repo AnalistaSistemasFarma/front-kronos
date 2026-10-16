@@ -42,7 +42,7 @@ function text(form: FormData, name: string): string {
  * INICIAL de un documento vigente, solo Aseguramiento de Calidad (Sprint 1).
  * Campos: company, idProcess, idDocumentType, title, code?, confidentiality,
  * idOwnerDepartment?, versionNumber, effectiveDate (YYYY-MM-DD),
- * changeDescription?, pdf (obligatorio), source? (Word).
+ * changeDescription?, idParentDocument? (Sprint 8), pdf (obligatorio), source? (Word).
  */
 export async function POST(request: Request) {
   try {
@@ -61,6 +61,7 @@ export async function POST(request: Request) {
     const pdf = fileField(form, 'pdf');
     const source = fileField(form, 'source');
     const owner = text(form, 'idOwnerDepartment');
+    const parent = text(form, 'idParentDocument');
     const result = await createInitialDocument(
       prisma,
       uploadToSgcStorage,
@@ -75,6 +76,8 @@ export async function POST(request: Request) {
         versionNumber: Number(text(form, 'versionNumber') || '1'),
         effectiveDate: text(form, 'effectiveDate'),
         changeDescription: text(form, 'changeDescription'),
+        // Sprint 8: documento padre (formatos e instructivos que heredan su número).
+        idParentDocument: parent ? Number(parent) : null,
         pdf: { bytes: pdf ? new Uint8Array(await pdf.arrayBuffer()) : new Uint8Array(), fileName: pdf?.name ?? '' },
         source: source
           ? { bytes: new Uint8Array(await source.arrayBuffer()), fileName: source.name, contentType: source.type }

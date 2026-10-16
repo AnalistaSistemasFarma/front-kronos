@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs';
 import { expect, test, type APIRequestContext, type Browser, type Page } from '@playwright/test';
 import { STORAGE_STATE_2, STORAGE_STATE_3 } from '../../playwright.config';
+import { createRequestElaboratedByQaSgc, flowRoleModel } from './flujo-v7';
 
 /**
  * SGC documental · Sprint 4 CON SESIÓN, contra PRUEBAS (KRONOSDB_PRUEBAS):
@@ -17,6 +18,11 @@ import { STORAGE_STATE_2, STORAGE_STATE_3 } from '../../playwright.config';
  *      documento queda VIGENTE.
  *   4. Una NUEVA VERSIÓN recorre el flujo: la V2 queda vigente y la V1
  *      OBSOLETA; la verificación del QR lo confirma.
+ * Desde las RN del 2026-10-05 las solicitudes las crea qa.sgc4 (solo
+ * solicitante) y las elabora qa.sgc (matriz de responsables GC × PR). Con el
+ * DOC v7 (S15) las pide y elabora qa.sgc, qa.sgc2 autoriza la creación, el
+ * CREADOR (qa.sgc) prepara la capacitación y firma «Capacitó» primero, y el
+ * grupo de Calidad (qa.sgc2) la cierra (ver e2e/sgc/flujo-v7.ts).
  * Corre en el proyecto `firma` (sin traza, capturas ni video): escribe contraseñas.
  */
 const OLP = 3;
@@ -26,7 +32,8 @@ const U2 = process.env.E2E_USER_EMAIL2 ?? '';
 const PW2 = process.env.E2E_USER_PASSWORD2 ?? '';
 const U3 = process.env.E2E_USER_EMAIL3 ?? '';
 const PW3 = process.env.E2E_USER_PASSWORD3 ?? '';
-const hasThree = Boolean(U1 && PW1 && U2 && PW2 && U3 && PW3);
+const U4 = process.env.E2E_USER_EMAIL4 ?? '';
+const hasThree = Boolean(U1 && PW1 && U2 && PW2 && U3 && PW3 && U4);
 const CHECKLIST = { chk_codificacion: { answer: 'cumple' }, chk_formato: { answer: 'cumple' }, chk_anexos: { answer: 'no_aplica' } };
 
 async function ctxFor(browser: Browser, storageState: string): Promise<Page> {
@@ -61,6 +68,9 @@ const HEAD = ['Id', 'Hora de inicio', 'Hora de finalización', 'Correo electrón
 
 /** Lleva una solicitud por elaboración, revisión y aprobación (API) y deja el alcance con las personas dadas. */
 async function throughApproval(p1: Page, p2: Page, p3: Page, idRequest: number, readers: string[]) {
+  const r = await ok<{ request: { elaboratorEmail: string; roleModel?: string } }>(await p1.request.get(`/api/sgc/requests/${idRequest}`));
+  expect(r.request.elaboratorEmail, 'la solicitud la elabora qa.sgc').toBe(U1.toLowerCase());
+  const v7 = r.request.roleModel === 'solicitante_elabora';
   for (const stepKey of ['revision', 'aprobacion']) await ok(await p1.request.post(`/api/sgc/requests/${idRequest}/signers`, { data: { stepKey, signers: [U3], mode: 'orden' } }));
   await ok(await p1.request.post(`/api/sgc/requests/${idRequest}/draft`, { data: { html: '<h1>Procedimiento e2e S4</h1><p>Contenido de prueba de la divulgación, la capacitación y la vigencia.</p>', origin: 'blanco', note: 'e2e S4' } }));
   for (const email of readers) {
@@ -72,7 +82,19 @@ async function throughApproval(p1: Page, p2: Page, p3: Page, idRequest: number, 
   await ok(await sign(p3.request, apr, 'aprobo', PW3));
   const res = await ok<{ controlledPdf: { status: string } }>(await sign(p2.request, apr, 'aprobo', PW2, { checklist: CHECKLIST }));
   expect(res.controlledPdf.status).toBe('generado');
+  // Sprint 10: con el flujo de capacitación previa, Calidad registra el material ANTES de la divulgación.
+  const d = await ok<{ request: { currentTaskKey: string } }>(await p1.request.get(`/api/sgc/requests/${idRequest}`));
+  if (d.request.currentTaskKey === 'preparacion_capacitacion') {
+    // El material lo registra Aseguramiento de Calidad (permiso de Calidad: qa.sgc); la tarea la resuelve el grupo SGC-VERIF-CALIDAD (qa.sgc2).
+    // S15 (DOC v7, R27): lo registra y resuelve el CREADOR del documento (qa.sgc).
+    await ok(await p1.request.post(`/api/sgc/requests/${idRequest}/training`, { data: TRAINING }));
+    const resolver = v7 ? p1 : p2;
+    await ok(await resolver.request.post(`/api/sgc/tasks/${await taskId(resolver.request, idRequest, /^Preparación de la capacitación/)}/decision`, { data: { decision: 'aprobar', comment: 'Material listo (e2e).' } }));
+  }
 }
+
+/** Sprint 10: material de la capacitación de la e2e (evaluación en Microsoft Forms). */
+const TRAINING = { mode: 'mixta', title: 'Capacitación e2e del procedimiento', videoUrl: 'https://stream.example.com/e2e-s4', formsUrl: 'https://forms.office.com/r/e2e-s4', sessionDate: '2026-10-05', maxScore: 10, minScorePct: 80 };
 
 /** Lectura completa por la API: abrir el PDF desde el servidor, llegar al final y firmar «Leído». */
 async function readAndSign(page: Page, idRequest: number, password: string) {
@@ -96,13 +118,16 @@ test.describe.serial('SGC documental · Sprint 4 · divulgación, capacitación 
     const p2 = await ctxFor(browser, STORAGE_STATE_2);
     const p3 = await ctxFor(browser, STORAGE_STATE_3);
     const cat = await ok<{ processes: { id: number; code: string }[]; documentTypes: { id: number; code: string }[] }>(await page.request.get(`/api/sgc/catalogs?company=${OLP}`));
-    const created = await ok<{ idRequest: number }>(
-      await page.request.post('/api/sgc/requests', {
-        data: { company: OLP, requestType: 'nuevo', subject: `E2E S4 · lectura y vigencia ${new Date().toISOString()}`, description: 'Recorrido automático de la e2e del Sprint 4 (datos de prueba).', idProcess: cat.processes.find((p) => p.code === 'GC')!.id, idDocumentType: cat.documentTypes.find((t) => t.code === 'PR')!.id, formValues: { urgencia: 'Normal' } },
-      }),
-      [201]
-    );
-    idRequest = created.idRequest;
+    // 2026-10-10 (RN 2026-10-05) y S15 (DOC v7): la solicitud la elabora qa.sgc (ver e2e/sgc/flujo-v7.ts).
+    ({ idRequest } = await createRequestElaboratedByQaSgc(browser, page.request, {
+      requestType: 'nuevo',
+      subject: `E2E S4 · lectura y vigencia ${new Date().toISOString()}`,
+      description: 'Recorrido automático de la e2e del Sprint 4 (datos de prueba).',
+      idProcess: cat.processes.find((p) => p.code === 'GC')!.id,
+      idDocumentType: cat.documentTypes.find((t) => t.code === 'PR')!.id,
+      requiresTraining: 'si',
+      formValues: { urgencia: 'Normal' },
+    }));
     await throughApproval(page, p2, p3, idRequest, [U1, U2, U3]);
     const detail = await ok<{ request: { status: string; currentTaskKey: string }; dissemination: { readers: { email: string; status: string }[]; started: boolean }; controlledPdf: { idDocument: number } }>(await page.request.get(`/api/sgc/requests/${idRequest}`));
     expect(detail.request).toMatchObject({ status: 'abierta', currentTaskKey: 'divulgacion' });
@@ -135,6 +160,7 @@ test.describe.serial('SGC documental · Sprint 4 · divulgación, capacitación 
     await expect(p3.getByTestId('sgc-firma-significado')).toHaveText('Leyó');
     await p3.getByTestId('sgc-firma-motivo').fill('Leí el documento completo y entiendo su contenido.');
     await p3.getByTestId('sgc-firma-consentimiento').check();
+    await p3.getByTestId('sgc-firma-contrasena').click();
     await p3.getByTestId('sgc-firma-contrasena').fill(PW3);
     await p3.getByTestId('sgc-firma-confirmar').click();
     await expect(p3.getByTestId('sgc-mensaje')).toContainText('Lectura firmada', { timeout: 60_000 });
@@ -155,17 +181,21 @@ test.describe.serial('SGC documental · Sprint 4 · divulgación, capacitación 
     await page.goto(`/process/sgc-documental/solicitudes/${idRequest}?empresa=${OLP}`);
     const card = page.getByTestId('sgc-capacitacion');
     await expect(card).toBeVisible();
-    await page.getByTestId('sgc-capacitacion-titulo').fill('Capacitación e2e del procedimiento');
-    await page.getByTestId('sgc-capacitacion-video').fill('https://stream.example.com/e2e-s4');
-    await page.getByTestId('sgc-capacitacion-forms').fill('https://forms.office.com/r/e2e-s4');
-    await page.getByTestId('sgc-capacitacion-fecha').fill('2026-10-05');
-    await page.getByTestId('sgc-capacitacion-guardar').click();
-    await expect(page.getByTestId('sgc-mensaje')).toContainText('Capacitación registrada');
+    // Sprint 10: con la capacitación previa, el material ya quedó registrado antes de la divulgación.
+    if (await page.getByTestId('sgc-capacitacion-titulo').isVisible()) {
+      await page.getByTestId('sgc-capacitacion-titulo').fill('Capacitación e2e del procedimiento');
+      await page.getByTestId('sgc-capacitacion-video').fill('https://stream.example.com/e2e-s4');
+      await page.getByTestId('sgc-capacitacion-forms').fill('https://forms.office.com/r/e2e-s4');
+      await page.getByTestId('sgc-capacitacion-fecha').fill('2026-10-05');
+      await page.getByTestId('sgc-capacitacion-guardar').click();
+      await expect(page.getByTestId('sgc-mensaje')).toContainText('Capacitación registrada');
+    }
     await expect(page.getByTestId('sgc-capacitacion-tema')).toHaveText('Capacitación e2e del procedimiento');
     const buffer = await xlsx([HEAD, [1, 'a', 'b', U1, 'QA 1', 10], [2, 'a', 'b', U2, 'QA 2', 9], [3, 'a', 'b', U3, 'QA 3', 5]]);
     await card.locator('input[type="file"]').setInputFiles({ name: 'Resultados Forms e2e.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer });
     await expect(page.getByTestId('sgc-mensaje')).toContainText('Resultados de la capacitación cargados', { timeout: 60_000 });
     await expect(page.getByTestId('sgc-capacitacion-resumen')).toContainText('2 aprobaron, 1 reprobaron');
+    // Sprint 10: un solo intento reprobado (de 2 permitidos) sigue siendo «Reprobó» (no recapacitación).
     await expect(page.getByTestId(`sgc-capacitado-${U3.toLowerCase()}`)).toContainText('Reprobó');
   });
 
@@ -174,6 +204,10 @@ test.describe.serial('SGC documental · Sprint 4 · divulgación, capacitación 
     const idTask = await taskId(p2.request, idRequest, /^Capacitación/);
     const d = await ok<{ training: { upload: { id: number; sha256: string } } }>(await page.request.get(`/api/sgc/requests/${idRequest}`));
     const content = { draftRef: `training_upload:${d.training.upload.id}`, draftSha256: d.training.upload.sha256 };
+    // S15 (DOC v7, R27 y D18): primero firma «Capacitó» el creador (qa.sgc), que dictó la capacitación; luego cierra Calidad.
+    if ((await flowRoleModel(page.request)) === 'solicitante_elabora') {
+      expect(await ok<{ outcome: string }>(await sign(page.request, idTask, 'capacito', PW1, { ...content, comment: 'QA 3 se reprograma para la próxima sesión (e2e, creador).' }))).toMatchObject({ outcome: 'abierta' });
+    }
     const noJust = await sign(p2.request, idTask, 'capacito', PW2, content);
     expect(noJust.status()).toBe(409);
     expect((await noJust.json()).error).toMatch(/justificación/);
@@ -188,11 +222,7 @@ test.describe.serial('SGC documental · Sprint 4 · divulgación, capacitación 
   test('[SGC-REQ-061][SGC-REQ-062][SGC-REQ-063] una nueva versión recorre el flujo: la V2 queda vigente, la V1 OBSOLETA y la verificación del QR lo muestra', async ({ browser, page }) => {
     const p2 = await ctxFor(browser, STORAGE_STATE_2);
     const p3 = await ctxFor(browser, STORAGE_STATE_3);
-    const created = await ok<{ idRequest: number }>(
-      await page.request.post('/api/sgc/requests', { data: { company: OLP, requestType: 'nueva_version', subject: `E2E S4 · nueva versión ${new Date().toISOString()}`, description: 'Nueva versión de la e2e del Sprint 4 (datos de prueba).', idDocument, formValues: { urgencia: 'Normal' } } }),
-      [201]
-    );
-    const id2 = created.idRequest;
+    const { idRequest: id2, roleModel } = await createRequestElaboratedByQaSgc(browser, page.request, { requestType: 'nueva_version', subject: `E2E S4 · nueva versión ${new Date().toISOString()}`, description: 'Nueva versión de la e2e del Sprint 4 (datos de prueba).', idDocument, formValues: { urgencia: 'Normal' } });
     await throughApproval(page, p2, p3, id2, [U1]);
     // Mientras se divulga la V2, la V1 sigue vigente.
     expect((await ok<{ verdict: string }>(await page.request.get(`/api/sgc/verify?empresa=${OLP}&codigo=${encodeURIComponent(code)}&version=1`))).verdict).toBe('vigente');
@@ -201,6 +231,7 @@ test.describe.serial('SGC documental · Sprint 4 · divulgación, capacitación 
     await ok(await page.request.post(`/api/sgc/requests/${id2}/training`, { data: { mode: 'video', title: 'Capacitación e2e de la V2', videoUrl: 'https://stream.example.com/e2e-s4-v2', formsUrl: 'https://forms.office.com/r/e2e-s4-v2', maxScore: 10 } }));
     const up = await page.request.post(`/api/sgc/requests/${id2}/training/results`, { multipart: { file: { name: 'Resultados V2.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: await xlsx([HEAD, [1, 'a', 'b', U1, 'QA 1', 10]]) } } });
     expect(up.status()).toBe(201);
+    if (roleModel === 'solicitante_elabora') await ok(await sign(page.request, await taskId(page.request, id2, /^Capacitación/), 'capacito', PW1));
     const res = await ok<{ published: { versionNumber: number; obsolete: { versionNumber: number } } }>(await sign(p2.request, await taskId(p2.request, id2, /^Capacitación/), 'capacito', PW2));
     expect(res.published).toMatchObject({ versionNumber: 2, obsolete: { versionNumber: 1 } });
     await page.goto(`/process/sgc-documental/verificar?empresa=${OLP}&codigo=${encodeURIComponent(code)}&version=1`);

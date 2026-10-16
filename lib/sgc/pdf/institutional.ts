@@ -1,6 +1,7 @@
 import { rgb, type PDFDocument, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib';
 import { toWinAnsiSafe } from '../watermark';
 import type { SgcPlacedMeaning, SgcPlacementParticipant, SgcStoredField } from '../signature/fields';
+import { SGC_DEFAULT_HEADER_TEMPLATE, headerBottomText, type SgcHeaderTemplateConfig } from '../headerTemplates';
 
 /**
  * PLANTILLA INSTITUCIONAL del SGC (correcciones de Calidad OLP, 2026-10-02) —
@@ -58,6 +59,8 @@ export interface SgcInstitutionalHeaderData {
   emissionText: string;
   /** Logo de la empresa (PNG o JPEG) o null. */
   logo: { bytes: Uint8Array; kind: 'png' | 'jpg' } | null;
+  /** S16 (R31): rótulos y fila inferior de la plantilla del tipo documental (sin ella, la institucional de siempre). */
+  template?: SgcHeaderTemplateConfig | null;
 }
 
 export interface SgcRect {
@@ -126,6 +129,47 @@ export function institutionalSignatureBoxesPct(pageWidth = 595.28, pageHeight = 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
+ * Sprint 13 (R14, decisión D11): con hasta 2 firmantes por significado se
+ * reparten el recuadro «Firma», como antes; con 3 o MÁS, el recuadro lleva
+ * solo al TITULAR del paso (el primero en el orden que confirmó quien asignó
+ * los firmantes) con la leyenda «y N más · ver registro de firmas», y todos
+ * van a la página «Registro de firmas» al final del documento (también el
+ * cupo de verificación de Calidad de ese paso). La plantilla institucional
+ * de Calidad no cambia.
+ */
+export const SGC_SIGNATURE_REGISTER_MIN = 3;
+
+const isPoolKey = (key: string) => key.includes(':grupo:');
+
+/** Significados cuyo recuadro se desborda (3 o más firmantes) y van al registro de firmas. */
+export function overflowMeanings(participants: readonly Pick<SgcPlacementParticipant, 'meaning'>[]): SgcPlacedMeaning[] {
+  return (['elaboro', 'reviso', 'aprobo'] as const).filter((m) => participants.filter((p) => p.meaning === m).length >= SGC_SIGNATURE_REGISTER_MIN);
+}
+
+/** Titular de un significado: el primero que no es un cupo de grupo (si no hay, el primero). */
+export function titularOf<T extends Pick<SgcPlacementParticipant, 'key'>>(group: readonly T[]): T | undefined {
+  return group.find((p) => !isPoolKey(p.key)) ?? group[0];
+}
+
+/**
+ * Firmantes que NO necesitan caja propia porque van solo al «Registro de
+ * firmas» (3 o más del mismo significado, sin ser el titular y sin una caja
+ * ubicada a mano). D6 de la E2E del 2026-10-10: no cuentan como «sin ubicar».
+ */
+export function registerOnlyParticipants<T extends Pick<SgcPlacementParticipant, 'key' | 'meaning'>>(participants: readonly T[], fields: readonly Pick<SgcStoredField, 'signerKey'>[]): T[] {
+  const overflow = new Set<string>(overflowMeanings(participants));
+  const placed = new Set(fields.map((f) => f.signerKey));
+  return participants.filter((p) => overflow.has(p.meaning) && !placed.has(p.key) && titularOf(participants.filter((q) => q.meaning === p.meaning))?.key !== p.key);
+}
+
+/** Texto del encabezado para un significado: los nombres o, con 3 o más, «Titular y N más · ver registro de firmas». */
+export function headerNames(list: readonly string[]): string {
+  if (list.length === 0) return 'No aplica';
+  if (list.length >= SGC_SIGNATURE_REGISTER_MIN) return `${list[0]} y ${list.length - 1} más · ver registro de firmas`;
+  return list.join(', ');
+}
+
+/**
  * Ubicación SUGERIDA de las firmas que faltan: dentro del recuadro «Firma» de
  * su significado en la página 1 (varias personas del mismo rol se reparten el
  * recuadro). El elaborador las puede mover o redimensionar después.
@@ -135,7 +179,10 @@ export function suggestInstitutionalPlacements(participants: readonly SgcPlaceme
   const placed = new Set(existing.map((f) => f.signerKey));
   const out: SgcStoredField[] = [];
   for (const meaning of ['elaboro', 'reviso', 'aprobo'] as const) {
-    const group = participants.filter((p) => p.meaning === meaning);
+    const all = participants.filter((p) => p.meaning === meaning);
+    // Sprint 13: con 3 o más, solo el titular va al recuadro; los demás, al registro de firmas.
+    const titular = titularOf(all);
+    const group = all.length >= SGC_SIGNATURE_REGISTER_MIN && titular ? [titular] : all;
     const box = boxes[meaning];
     const w = box.width / Math.max(1, group.length);
     group.forEach((p, i) => {
@@ -169,7 +216,7 @@ function drawLogo(page: PDFPage, logo: PDFImage | null, r: SgcRect, fallback: st
 }
 
 function names(list: string[]): string {
-  return list.length ? list.join(', ') : 'No aplica';
+  return headerNames(list);
 }
 
 /**
@@ -187,6 +234,7 @@ export async function drawInstitutionalHeaders(pdf: PDFDocument, pages: readonly
     }
   }
   const total = pages.length;
+  const t = data.template ?? SGC_DEFAULT_HEADER_TEMPLATE;
   let emission: SgcRect | null = null;
   pages.forEach((page, i) => {
     const { width, height } = page.getSize();
@@ -195,15 +243,15 @@ export async function drawInstitutionalHeaders(pdf: PDFDocument, pages: readonly
       const g = firstPageHeaderGeometry(width, height);
       [g.logo, g.title, g.code, ...g.labels, ...g.firmas, g.emission, g.process].forEach((r) => cell(page, r));
       drawLogo(page, logo, g.logo, data.company, fonts.bold);
-      drawLines(page, fonts.regular, ['NOMBRE DEL DOCUMENTO'], g.title, { size: 6.5, top: 10, color: MUTED });
+      drawLines(page, fonts.regular, [t.titleLabel], g.title, { size: 6.5, top: 10, color: MUTED });
       const titleLines = splitTitle(data.title, fonts.bold, 10.5, g.title.width - 8);
       drawLines(page, fonts.bold, titleLines, { ...g.title, height: g.title.height - 10 }, { size: 10.5, top: 12 });
-      drawLines(page, fonts.bold, [`CÓDIGO: ${data.code}`, `VERSIÓN: ${data.versionLabel}`, pageLabel], g.code, { size: 8, top: 13 });
+      drawLines(page, fonts.bold, [`${t.codeLabel}: ${data.code}`, `${t.versionLabel}: ${data.versionLabel}`, pageLabel], g.code, { size: 8, top: 13 });
       const labels: [string, string][] = [
-        ['ELABORÓ:', names(data.elaboro)],
-        ['REVISÓ:', names(data.reviso)],
-        ['APROBÓ:', names(data.aprobo)],
-        ['FECHA DE EMISIÓN:', ''],
+        [`${t.elaboroLabel}:`, names(data.elaboro)],
+        [`${t.revisoLabel}:`, names(data.reviso)],
+        [`${t.aproboLabel}:`, names(data.aprobo)],
+        [`${t.emissionLabel}:`, ''],
       ];
       labels.forEach(([label, value], c) => {
         drawLines(page, fonts.bold, [label], g.labels[c], { size: 7, top: 9 });
@@ -214,7 +262,7 @@ export async function drawInstitutionalHeaders(pdf: PDFDocument, pages: readonly
       });
       drawLines(page, fonts.regular, [data.emissionText], g.emission, { size: 7.5, top: 16, color: MUTED });
       emission = { x: g.emission.x + 1, y: g.emission.y + 1, width: g.emission.width - 2, height: g.emission.height - 2 };
-      drawLines(page, fonts.bold, [`PROCESO: ${data.process}    ·    TIPO DOCUMENTAL: ${data.documentType}`], g.process, { size: 7.5, top: 12 });
+      drawLines(page, fonts.bold, [headerBottomText(t, data)], g.process, { size: 7.5, top: 12 });
       return;
     }
     const w = width - MARGIN_X * 2;
@@ -225,7 +273,7 @@ export async function drawInstitutionalHeaders(pdf: PDFDocument, pages: readonly
     [logoR, titleR, codeR].forEach((r) => cell(page, r));
     drawLogo(page, logo, logoR, data.company, fonts.bold);
     drawLines(page, fonts.bold, [data.title], titleR, { size: 8.5, top: 17 });
-    drawLines(page, fonts.bold, [`CÓDIGO: ${data.code} · VERSIÓN: ${data.versionLabel}`, pageLabel], codeR, { size: 7, top: 11 });
+    drawLines(page, fonts.bold, [`${t.codeLabel}: ${data.code} · ${t.versionLabel}: ${data.versionLabel}`, pageLabel], codeR, { size: 7, top: 11 });
   });
   return { emission };
 }

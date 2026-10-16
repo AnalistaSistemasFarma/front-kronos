@@ -1,8 +1,20 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { Box, Loader, ScrollArea, Stack, Text } from '@mantine/core';
-import { IconCircleCheckFilled } from '@tabler/icons-react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import { ActionIcon, Box, Group, Loader, ScrollArea, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core';
+import {
+  IconCircleCheckFilled,
+  IconFingerprint,
+  IconZoomIn,
+  IconZoomOut,
+} from '@tabler/icons-react';
 import {
   clampFieldSize,
   createFieldId,
@@ -86,6 +98,23 @@ type DragState = {
 const CLICK_SUPPRESS_MS = 280;
 const MOVE_THRESHOLD_PX = 4;
 
+// S16 (R35, D22): página más grande para ubicar las firmas (antes 720 px); el mismo valor en el SGC y en SynerLink (paridad).
+const PAGE_BASE_WIDTH = 1000;
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 4;
+const ZOOM_STEP = 0.25;
+/** Se renderiza a más resolución que la vista base para que la letra se lea al hacer zoom. */
+const PDF_RENDER_SCALE = 2.5;
+
+/** Por debajo de esto la caja solo muestra el ícono/rúbrica (sin texto) y el asa va por fuera. */
+function isTinyField(field: { width: number; height: number }) {
+  return field.width < 8 || field.height < 3;
+}
+
+function clampZoom(z: number) {
+  return Math.round(clamp(z, ZOOM_MIN, ZOOM_MAX) * 100) / 100;
+}
+
 export default function SignaturePlacementCanvas({
   pdfSrc,
   documentId,
@@ -95,7 +124,11 @@ export default function SignaturePlacementCanvas({
   fields,
   onChange,
 }: Props) {
-  const { pages, loading, error } = usePdfPageImages(pdfSrc);
+  const { pages, loading, error } = usePdfPageImages(pdfSrc, PDF_RENDER_SCALE);
+  const [zoom, setZoom] = useState(1);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  // Centro visible (fracción del contenido) que se conserva al cambiar el zoom.
+  const pendingScrollRef = useRef<{ x: number; y: number } | null>(null);
   const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const imgRefs = useRef<Record<number, HTMLImageElement | null>>({});
   const fieldsRef = useRef(fields);
@@ -285,6 +318,44 @@ export default function SignaturePlacementCanvas({
     };
   }, [endInteraction, updateFieldFromPointer]);
 
+  const changeZoom = useCallback((next: (current: number) => number) => {
+    setZoom((current) => {
+      const target = clampZoom(next(current));
+      if (target === current) return current;
+      const vp = viewportRef.current;
+      if (vp && vp.scrollWidth > 0 && vp.scrollHeight > 0) {
+        pendingScrollRef.current = {
+          x: (vp.scrollLeft + vp.clientWidth / 2) / vp.scrollWidth,
+          y: (vp.scrollTop + vp.clientHeight / 2) / vp.scrollHeight,
+        };
+      }
+      return target;
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    const vp = viewportRef.current;
+    const anchor = pendingScrollRef.current;
+    if (!vp || !anchor) return;
+    pendingScrollRef.current = null;
+    vp.scrollLeft = anchor.x * vp.scrollWidth - vp.clientWidth / 2;
+    vp.scrollTop = anchor.y * vp.scrollHeight - vp.clientHeight / 2;
+  }, [zoom]);
+
+  // Ctrl + rueda: zoom (listener no pasivo para poder evitar el zoom del navegador).
+  const hasPages = pages.length > 0;
+  useEffect(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    function onWheel(e: WheelEvent) {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      changeZoom((z) => z + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP));
+    }
+    vp.addEventListener('wheel', onWheel, { passive: false });
+    return () => vp.removeEventListener('wheel', onWheel);
+  }, [changeZoom, hasPages, loading]);
+
   const startMove = (
     e: ReactPointerEvent<HTMLDivElement>,
     field: SignatureFieldPlacement,
@@ -386,10 +457,47 @@ export default function SignaturePlacementCanvas({
             se ve un chulito; en la versión final se reemplaza por su firma guardada, en pequeño.
           </Text>
         ) : null}
-        <Text size='xs' c='dimmed' mt={4}>
-          Clic para colocar · arrastre para mover · esquina inferior para redimensionar (
-          {kindBounds.minW}–{kindBounds.maxW}% × {kindBounds.minH}–{kindBounds.maxH}%).
-        </Text>
+        <Group justify='space-between' align='center' gap='xs' mt={4} wrap='wrap'>
+          <Text size='xs' c='dimmed' style={{ flex: '1 1 260px' }}>
+            Clic para colocar · arrastre para mover · esquina inferior para redimensionar (
+            {kindBounds.minW}–{kindBounds.maxW}% × {kindBounds.minH}–{kindBounds.maxH}%). Usa los botones para hacer zoom.
+          </Text>
+          <Group gap={4} wrap='nowrap'>
+            <Tooltip label='Alejar' withArrow>
+              <ActionIcon
+                variant='default'
+                size={44}
+                aria-label='Alejar'
+                disabled={zoom <= ZOOM_MIN}
+                onClick={() => changeZoom((z) => z - ZOOM_STEP)}
+              >
+                <IconZoomOut size={18} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label='Volver al 100%' withArrow>
+              <UnstyledButton
+                onClick={() => changeZoom(() => 1)}
+                aria-label='Volver al 100%'
+                style={{ minWidth: 44, minHeight: 44, textAlign: 'center' }}
+              >
+                <Text size='xs' fw={600}>
+                  {Math.round(zoom * 100)}%
+                </Text>
+              </UnstyledButton>
+            </Tooltip>
+            <Tooltip label='Acercar' withArrow>
+              <ActionIcon
+                variant='default'
+                size={44}
+                aria-label='Acercar'
+                disabled={zoom >= ZOOM_MAX}
+                onClick={() => changeZoom((z) => z + ZOOM_STEP)}
+              >
+                <IconZoomIn size={18} />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
+        </Group>
       </Box>
       <ScrollArea
         style={{ flex: 1, minHeight: 0 }}
@@ -397,11 +505,12 @@ export default function SignaturePlacementCanvas({
         offsetScrollbars
         type='scroll'
         scrollbarSize={10}
+        viewportRef={viewportRef}
         styles={{
           viewport: { paddingBottom: 16 },
         }}
       >
-        <Stack gap='lg' p='md' align='center' pb='xl'>
+        <Stack gap='lg' p='md' align='flex-start' pb='xl'>
           {pages.map((page) => (
             <Box
               key={page.page}
@@ -411,8 +520,11 @@ export default function SignaturePlacementCanvas({
               onClick={(e) => handlePageClick(page.page, e)}
               style={{
                 position: 'relative',
-                width: '100%',
-                maxWidth: 720,
+                // Márgenes auto: centrada si cabe; con zoom se desborda solo hacia la derecha (scroll).
+                marginInline: 'auto',
+                flexShrink: 0,
+                width: zoom <= 1 ? '100%' : PAGE_BASE_WIDTH * zoom,
+                maxWidth: zoom <= 1 ? PAGE_BASE_WIDTH * zoom : 'none',
                 cursor: interacting ? 'grabbing' : 'crosshair',
                 boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
                 borderRadius: 4,
@@ -457,7 +569,7 @@ export default function SignaturePlacementCanvas({
                     }}
                   >
                     <IconCircleCheckFilled
-                      size={field.width < 8 || field.height < 3 ? '70%' : 12}
+                      size={isTinyField(field) ? '70%' : 12}
                       style={{ color: 'var(--mantine-color-teal-6)', maxHeight: '100%' }}
                     />
                   </Box>
@@ -467,12 +579,23 @@ export default function SignaturePlacementCanvas({
                 .map((field) => {
                   const person = participants.find((p) => p.order === field.signerOrder);
                   const isActive = field.signerOrder === activeOrder;
-                  const isApproval = normalizeFieldKind(field.kind) === 'approval';
-                  // Visto bueno diminuto: solo el chulito y el control de tamaño por fuera.
-                  const tiny = isApproval && (field.width < 8 || field.height < 3);
+                  const fieldKind = normalizeFieldKind(field.kind);
+                  const isApproval = fieldKind === 'approval';
+                  // Caja diminuta: solo ícono/rúbrica, el nombre en el tooltip y el asa por fuera.
+                  const tiny = isTinyField(field);
+                  const caption = (
+                    field.label ||
+                    (fieldKind === 'fingerprint'
+                      ? 'Huella'
+                      : fieldKind === 'validation'
+                        ? 'Validación'
+                        : person?.name) ||
+                    'Firmante'
+                  ).toUpperCase();
                   return (
                     <Box
                       key={field.id}
+                      title={tiny ? caption : undefined}
                       onPointerDown={(e) => startMove(e, field, page.page)}
                       style={{
                         position: 'absolute',
@@ -508,14 +631,24 @@ export default function SignaturePlacementCanvas({
                             pointerEvents: 'none',
                           }}
                         />
+                      ) : fieldKind === 'fingerprint' && tiny ? (
+                        <IconFingerprint
+                          size='80%'
+                          style={{
+                            color: 'var(--mantine-color-green-7)',
+                            flexShrink: 0,
+                            maxHeight: '100%',
+                            pointerEvents: 'none',
+                          }}
+                        />
                       ) : person?.signatureDataUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={person.signatureDataUrl}
                           alt=''
                           style={{
-                            maxWidth: '92%',
-                            maxHeight: '58%',
+                            maxWidth: tiny ? '100%' : '92%',
+                            maxHeight: tiny ? '100%' : '58%',
                             objectFit: 'contain',
                             flexShrink: 0,
                             pointerEvents: 'none',
@@ -532,15 +665,7 @@ export default function SignaturePlacementCanvas({
                           fw={600}
                           style={{ lineHeight: 1.2, marginTop: 2, pointerEvents: 'none' }}
                         >
-                          {(
-                            field.label ||
-                            (normalizeFieldKind(field.kind) === 'fingerprint'
-                              ? 'Huella'
-                              : normalizeFieldKind(field.kind) === 'validation'
-                                ? 'Validación'
-                                : person?.name) ||
-                            'Firmante'
-                          ).toUpperCase()}
+                          {caption}
                         </Text>
                       )}
                       <Box

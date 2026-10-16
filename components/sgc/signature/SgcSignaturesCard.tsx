@@ -48,7 +48,7 @@ export default function SgcSignaturesCard({ data, onRetryPdf, idTask = null }: {
             </Text>
           ) : (
             <Text size='sm' c='dimmed'>
-              Aún no hay borrador. El elaborador lo carga (Word .docx o PDF) o lo edita en la app.
+              Aún no hay borrador. El elaborador lo carga en Word (.docx) o lo edita en la app.
             </Text>
           )}
           {draftRevisions.length > 0 && (
@@ -80,6 +80,11 @@ export default function SgcSignaturesCard({ data, onRetryPdf, idTask = null }: {
                     </Table.Td>
                     <Table.Td>
                       <Text size='sm'>{s.signerName ?? s.signerEmail}</Text>
+                      {s.onBehalfOf && (
+                        <Text size='xs' c='dimmed'>
+                          en sustitución de {s.onBehalfOf}
+                        </Text>
+                      )}
                       <Text size='xs' c='dimmed'>
                         {s.signerEmail}
                       </Text>

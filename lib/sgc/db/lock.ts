@@ -39,3 +39,22 @@ export async function withSgcAppLock<T>(
     { maxWait: 15_000, timeout: opts.holdMs ?? 120_000 }
   );
 }
+
+/**
+ * E2E del 2026-10-10: el CÓDIGO de un documento nuevo (consecutivo de la guía)
+ * se calcula como «el mayor existente + 1» y el archivo se sube a OneDrive por
+ * RUTA (código/versión) ANTES de crear el documento en la base. Dos generaciones
+ * a la vez en la misma empresa (dos aprobaciones finales, o una aprobación y una
+ * carga inicial) tomaban el mismo código: la segunda REEMPLAZABA el PDF ya
+ * registrado de la primera (que quedaba distinto de su huella) y luego fallaba
+ * por la restricción única. Este bloqueo serializa, por empresa, el tramo
+ * «calcular código → subir → registrar». Es raro y corto: se espera (no se rechaza).
+ */
+export function withNewDocumentCodeLock<T>(db: SgcDb, idCompany: number, fn: () => Promise<T>): Promise<T> {
+  return withSgcAppLock(
+    db,
+    `sgc-codigo-documento-nuevo-${idCompany}`,
+    { waitMs: 90_000, busyMessage: 'Se está registrando otro documento nuevo de la empresa. Intente de nuevo en un momento.', holdMs: 240_000 },
+    () => fn()
+  );
+}

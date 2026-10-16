@@ -1,451 +1,264 @@
 import Link from 'next/link';
 import {
-  Button,
-  Container,
-  Group,
-  Stack,
-  Title,
-  Text,
-  Card,
-  Grid,
-  GridCol,
-  Badge,
-  SimpleGrid,
-  Box,
-  Image,
-} from '@mantine/core';
-import {
-  IconBuilding,
   IconArrowRight,
   IconMail,
   IconPhone,
   IconMapPin,
   IconCheck,
 } from '@tabler/icons-react';
+import LandingMotion from '../components/landing/LandingMotion';
+import LandingHeader from '../components/landing/LandingHeader';
+import SynerLinkOrbit from '../components/landing/SynerLinkOrbit';
+import ServiceCards from '../components/landing/ServiceCards';
+import CountUp from '../components/landing/CountUp';
+import CompanyShowcase from '../components/landing/CompanyShowcase';
+import BenefitsVisual from '../components/landing/BenefitsVisual';
+import styles from '../components/landing/landing.module.css';
 
+const BENEFITS = [
+  'Reducción significativa de costos operativos',
+  'Mejora en la calidad y eficiencia de procesos',
+  'Acceso a expertise especializado',
+  'Escalabilidad según las necesidades del negocio',
+  'Cumplimiento normativo garantizado',
+  'Enfoque en el core business de tu empresa',
+];
+
+const STATS = [
+  { value: '500+', label: 'Empresas Atendidas' },
+  { value: '98%', label: 'Satisfacción del Cliente' },
+  { value: '35%', label: 'Ahorro Promedio' },
+];
+
+const FOOTER_SERVICES = ['Recursos Humanos', 'Finanzas y Contabilidad', 'Servicios de TI', 'Compras'];
+const FOOTER_COMPANY = ['Nosotros', 'Carreras', 'Casos de Éxito', 'Blog'];
+
+/** Las animaciones (GSAP) viven en LandingMotion y se enganchan a los atributos data-*. */
 export default function LandingPage() {
   return (
-    <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
-      {/* Header */}
-      <Box
-        component='header'
-        style={{
-          borderBottom: '1px solid #e5e7eb',
-          backgroundColor: '#ffffff',
-          position: 'sticky',
-          top: 0,
-          zIndex: 50,
-        }}
-      >
-        <Container size='xl' py='md'>
-          <Group justify='space-between' align='center'>
-            <Link href='/' style={{ textDecoration: 'none' }}>
-              <Image
-                src='/Logo_Principal.svg'
-                alt='ServiciosCompartidos Logo'
-                height={40}
-                width={120}
-                fit='contain'
-                className='h-12'
-              />
-            </Link>
+    <LandingMotion>
+      <LandingHeader />
 
-            <Group gap='xl' visibleFrom='md'>
-              <Link href='#services' style={{ textDecoration: 'none' }}>
-                <Text fw={500} style={{ cursor: 'pointer', color: '#4b5563' }}>
-                  Servicios
-                </Text>
-              </Link>
-              <Link href='#benefits' style={{ textDecoration: 'none' }}>
-                <Text fw={500} style={{ cursor: 'pointer', color: '#4b5563' }}>
-                  Beneficios
-                </Text>
-              </Link>
-              <Link href='#about' style={{ textDecoration: 'none' }}>
-                <Text fw={500} style={{ cursor: 'pointer', color: '#4b5563' }}>
-                  Nosotros
-                </Text>
-              </Link>
-              <Link href='#contact' style={{ textDecoration: 'none' }}>
-                <Text fw={500} style={{ cursor: 'pointer', color: '#4b5563' }}>
-                  Contacto
-                </Text>
-              </Link>
-            </Group>
+      {/* Hero */}
+      <section className={styles.hero} data-hero-section>
+        <div className={styles.heroBg} aria-hidden>
+          <span className={styles.depthLayer} data-depth='0.6'>
+            <span className={`${styles.blob} ${styles.blobA}`} />
+          </span>
+          <span className={styles.depthLayer} data-depth='1.1'>
+            <span className={`${styles.blob} ${styles.blobB}`} />
+          </span>
+          <span className={styles.depthLayer} data-depth='1.6'>
+            <span className={`${styles.blob} ${styles.blobC}`} />
+          </span>
+          <span className={styles.dots} />
+          <span className={styles.heroGlow} data-hero-glow />
+        </div>
 
-            <Group gap='sm'>
-              <Button component={Link} href='/login'>
-                Iniciar Sesión
-              </Button>
-            </Group>
-          </Group>
-        </Container>
-      </Box>
-
-      {/* Hero Section */}
-      <Box
-        style={{
-          background: 'linear-gradient(135deg, #113562 0%, #3db6e0 100%)',
-          color: 'white',
-          padding: '80px 0',
-          position: 'relative',
-          overflow: 'hidden',
-        }}
-      >
-        <Container size='xl'>
-          <Stack align='center' gap='xl' style={{ textAlign: 'center' }}>
-            <Badge
-              size='lg'
-              variant='light'
-              style={{
-                backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                color: 'white',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-              }}
-            >
+        <div className={`${styles.container} ${styles.heroGrid}`}>
+          <div data-hero-copy>
+            <span className={styles.eyebrow} data-hero data-hero-eyebrow>
+              <span className={styles.eyebrowDot} />
               Optimizando Operaciones Desde 2020
-            </Badge>
-
-            <Title
-              order={1}
-              size='3rem'
-              fw={700}
-              style={{
-                lineHeight: 1.2,
-                maxWidth: '800px',
-                fontSize: 'clamp(2rem, 5vw, 3rem)',
-                color: '#ffffff',
-              }}
-            >
-              Excelencia Centralizada para las Operaciones de tu Negocio
-            </Title>
-
-            <Text
-              size='xl'
-              style={{ maxWidth: '600px', lineHeight: 1.6, color: 'rgba(255,255,255,0.92)' }}
-            >
+            </span>
+            <h1 className={styles.heroTitle} data-hero data-hero-title>
+              Excelencia Centralizada para las{' '}
+              <span className={styles.gradientText}>Operaciones de tu Negocio</span>
+            </h1>
+            <p className={styles.heroText} data-hero data-hero-text>
               Transforma tu organización con nuestra plataforma integral de servicios compartidos.
-              Consolidamos Recursos Humanos, Finanzas, TI y Operaciones en un único centro eficiente
-              que impulsa el ahorro de costos y la excelencia operativa.
-            </Text>
-
-            <Group gap='md'>
-              <Button
-                size='lg'
-                rightSection={<IconArrowRight size={16} />}
-                style={{
-                  backgroundColor: 'white',
-                  color: '#113562',
-                  '&:hover': { backgroundColor: '#f8f9fa' },
-                }}
-              >
+              Consolidamos Recursos Humanos, Finanzas, TI y Operaciones en un único centro eficiente que
+              impulsa el ahorro de costos y la excelencia operativa.
+            </p>
+            <div className={styles.heroActions} data-hero data-hero-actions>
+              <button type='button' className={`${styles.btn} ${styles.btnPrimary}`} data-magnetic>
                 Solicitar Demo
-              </Button>
-              <Button size='lg' variant='outline' style={{ borderColor: 'white', color: 'white' }}>
+                <IconArrowRight size={18} />
+              </button>
+              <a href='#services' className={`${styles.btn} ${styles.btnGlass}`} data-magnetic>
                 Saber Más
-              </Button>
-            </Group>
-          </Stack>
-        </Container>
+              </a>
+            </div>
+          </div>
 
-        {/* Background Pattern */}
-        <Box
-          style={{
-            position: 'absolute',
-            inset: 0,
-            backgroundImage: `radial-gradient(circle at 1px 1px, rgba(255,255,255,0.15) 1px, transparent 0)`,
-            backgroundSize: '20px 20px',
-            opacity: 0.5,
-          }}
-        />
-      </Box>
+          <div data-hero-visual>
+            <SynerLinkOrbit />
+          </div>
+        </div>
+      </section>
 
-      {/* Services Section */}
-      <Box py={80} id='services'>
-        <Container size='xl'>
-          <Stack align='center' gap='lg' mb={60}>
-            <Title order={2} size='2.5rem' fw={700} ta='center' c='#111827'>
+      {/* Empresas que confían en nosotros */}
+      <section className={styles.trusted} aria-labelledby='trusted-title'>
+        <div className={`${styles.container} ${styles.trustedHead}`}>
+          <span className={styles.kicker} data-fade>
+            Nuestras empresas
+          </span>
+          <h2 id='trusted-title' className={styles.trustedTitle} data-split>
+            Empresas que confían en nosotros
+          </h2>
+          <p className={styles.trustedText} data-fade>
+            Solicitudes y aprobaciones, conexión a SAP Business One, firma electrónica y reportes BI para
+            cada compañía del grupo.
+          </p>
+        </div>
+        <div className={styles.container}>
+          <CompanyShowcase />
+        </div>
+      </section>
+
+      {/* Servicios */}
+      <section className={styles.section} id='services'>
+        <div className={styles.container}>
+          <div className={styles.sectionHead}>
+            <span className={styles.kicker} data-fade>
+              Servicios
+            </span>
+            <h2 className={styles.sectionTitle} data-split>
               Nuestros Servicios
-            </Title>
-            <Text size='lg' ta='center' style={{ maxWidth: '600px', color: '#6b7280' }}>
+            </h2>
+            <p className={styles.sectionText} data-fade>
               Una suite completa de servicios empresariales diseñados para optimizar tus operaciones
-            </Text>
-          </Stack>
+            </p>
+          </div>
+          <ServiceCards />
+        </div>
+      </section>
 
-          <SimpleGrid cols={{ base: 1, md: 2, lg: 4 }} spacing='lg'>
-            {[
-              {
-                title: 'Recursos Humanos',
-                description:
-                  'Gestión integral del talento humano, desde reclutamiento hasta desarrollo profesional.',
-                icon: '👥',
-              },
-              {
-                title: 'Finanzas y Contabilidad',
-                description:
-                  'Servicios financieros completos con reporting preciso y cumplimiento normativo.',
-                icon: '💰',
-              },
-              {
-                title: 'Servicios de TI',
-                description: 'Infraestructura tecnológica robusta y soporte técnico especializado.',
-                icon: '💻',
-              },
-              {
-                title: 'Compras',
-                description:
-                  'Gestión estratégica de adquisiciones y cadena de suministro optimizada.',
-                icon: '🛒',
-              },
-            ].map((service, index) => (
-              <Card
-                key={index}
-                shadow='sm'
-                padding='lg'
-                radius='md'
-                withBorder
-                style={{ backgroundColor: '#ffffff', borderColor: '#e5e7eb' }}
-              >
-                <Text size='3rem' ta='center' py='md'>
-                  {service.icon}
-                </Text>
-                <Title order={3} size='lg' fw={600} mb='sm' c='#111827'>
-                  {service.title}
-                </Title>
-                <Text size='sm' style={{ color: '#6b7280' }}>
-                  {service.description}
-                </Text>
-              </Card>
-            ))}
-          </SimpleGrid>
-        </Container>
-      </Box>
+      {/* Beneficios */}
+      <section className={`${styles.section} ${styles.sectionTint}`} id='benefits'>
+        <div className={`${styles.container} ${styles.benefitsGrid}`}>
+          <div>
+            <span className={styles.kicker} data-fade>
+              Beneficios
+            </span>
+            <h2 className={`${styles.sectionTitle} ${styles.benefitsTitle}`} data-split>
+              Beneficios que Transforman tu Negocio
+            </h2>
+            <ul className={styles.benefitList}>
+              {BENEFITS.map((benefit) => (
+                <li key={benefit} className={styles.benefit} data-benefit>
+                  <span className={styles.check} data-check>
+                    <IconCheck size={16} stroke={3} />
+                  </span>
+                  {benefit}
+                </li>
+              ))}
+            </ul>
+          </div>
 
-      {/* Benefits Section */}
-      <Box py={80} style={{ backgroundColor: '#f8f9fa' }} id='benefits'>
-        <Container size='xl'>
-          <Grid gutter='xl' align='center'>
-            <GridCol span={{ base: 12, md: 6 }}>
-              <Title order={2} size='2.5rem' fw={700} mb='lg' c='#111827'>
-                Beneficios que Transforman tu Negocio
-              </Title>
-              <Stack gap='md'>
-                {[
-                  'Reducción significativa de costos operativos',
-                  'Mejora en la calidad y eficiencia de procesos',
-                  'Acceso a expertise especializado',
-                  'Escalabilidad según las necesidades del negocio',
-                  'Cumplimiento normativo garantizado',
-                  'Enfoque en el core business de tu empresa',
-                ].map((benefit, index) => (
-                  <Group key={index} gap='sm' align='flex-start'>
-                    <IconCheck
-                      size={20}
-                      style={{ color: '#10b981', flexShrink: 0, marginTop: 2 }}
-                    />
-                    <Text size='lg' c='#1f2937'>
-                      {benefit}
-                    </Text>
-                  </Group>
-                ))}
-              </Stack>
-            </GridCol>
-            <GridCol span={{ base: 12, md: 6 }}>
-              <Image
-                src='/modern-office-workspace-with-collaborative-team-en.jpg'
-                alt='Equipo colaborativo en oficina moderna'
-                radius='md'
-                fit='cover'
-                height={400}
-              />
-            </GridCol>
-          </Grid>
-        </Container>
-      </Box>
+          <BenefitsVisual />
+        </div>
+      </section>
 
-      {/* Stats Section */}
-      <Box py={80}>
-        <Container size='xl'>
-          <SimpleGrid cols={{ base: 1, md: 3 }} spacing='xl'>
-            {[
-              { value: '500+', label: 'Empresas Atendidas' },
-              { value: '98%', label: 'Satisfacción del Cliente' },
-              { value: '35%', label: 'Ahorro Promedio' },
-            ].map((stat, index) => (
-              <Stack key={index} align='center' gap='xs'>
-                <Text size='3rem' fw={700} style={{ color: '#113562' }}>
-                  {stat.value}
-                </Text>
-                <Text size='lg' ta='center' style={{ color: '#6b7280' }}>
-                  {stat.label}
-                </Text>
-              </Stack>
-            ))}
-          </SimpleGrid>
-        </Container>
-      </Box>
+      {/* Cifras */}
+      <section className={styles.section} id='about'>
+        <div className={`${styles.container} ${styles.stats}`}>
+          {STATS.map((stat) => (
+            <div key={stat.label} className={styles.stat} data-stat>
+              <CountUp value={stat.value} className={styles.statValue} />
+              <span className={styles.statLabel}>{stat.label}</span>
+            </div>
+          ))}
+        </div>
+      </section>
 
-      {/* CTA Section */}
-      <Box py={80} style={{ backgroundColor: '#113562', color: 'white' }}>
-        <Container size='xl'>
-          <Stack align='center' gap='lg' style={{ textAlign: 'center' }}>
-            <Title order={2} size='2.5rem' fw={700} c='white'>
+      {/* Llamado a la acción */}
+      <section>
+        <div className={styles.container}>
+          <div className={styles.ctaCard} data-cta>
+            <span className={styles.ctaGlow} aria-hidden />
+            <h2 className={styles.ctaTitle} data-split>
               ¿Listo para Transformar tus Operaciones?
-            </Title>
-            <Text size='xl' style={{ maxWidth: '600px', color: 'rgba(255,255,255,0.92)' }}>
+            </h2>
+            <p className={styles.ctaText} data-fade>
               Únete a cientos de empresas que ya han optimizado sus procesos con nuestros servicios
               compartidos.
-            </Text>
-            <Group gap='md'>
-              <Button
-                size='lg'
-                component={Link}
-                href='/register'
-                style={{ backgroundColor: 'white', color: '#113562' }}
-              >
+            </p>
+            <div className={styles.ctaActions} data-fade>
+              <Link href='/register' className={`${styles.btn} ${styles.btnWhite}`} data-magnetic>
                 Comenzar Ahora
-              </Button>
-              <Button size='lg' variant='outline' style={{ borderColor: 'white', color: 'white' }}>
+                <IconArrowRight size={18} />
+              </Link>
+              <a href='#contact' className={`${styles.btn} ${styles.btnOutlineLight}`} data-magnetic>
                 Contactar Ventas
-              </Button>
-            </Group>
-          </Stack>
-        </Container>
-      </Box>
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
 
-      {/* Footer */}
-      <Box component='footer' style={{ backgroundColor: '#1f2937', color: 'white' }}>
-        <Container size='xl' py='xl'>
-          <Grid gutter='xl'>
-            <GridCol span={{ base: 12, md: 6, lg: 4 }}>
-              <Group align='center' gap='xs' mb='md'>
-                <Image
-                  src='/Logo_Principal_Blanco_Ancho.svg'
-                  alt='ServiciosCompartidos Logo'
-                  height={40}
-                  width={120}
-                  fit='contain'
-                />
-              </Group>
-              <Text size='sm' style={{ lineHeight: 1.6, color: '#d1d5db' }}>
-                Entregando excelencia operativa a través de servicios empresariales centralizados.
-              </Text>
-            </GridCol>
+      {/* Pie de página */}
+      <footer className={styles.footer} id='contact'>
+        <div className={`${styles.container} ${styles.footerGrid}`}>
+          <div data-fade>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src='/Logo_Principal_Blanco_Ancho.svg'
+              alt='ServiciosCompartidos Logo'
+              className={styles.footerLogo}
+            />
+            <p className={styles.footerText}>
+              Entregando excelencia operativa a través de servicios empresariales centralizados.
+            </p>
+          </div>
 
-            <GridCol span={{ base: 12, md: 6, lg: 2 }}>
-              <Title order={4} size='lg' fw={600} mb='md' c='white'>
-                Servicios
-              </Title>
-              <Stack gap='xs'>
-                <Text
-                  size='sm'
-                  component='a'
-                  href='#'
-                  style={{ color: '#9ca3af', textDecoration: 'none' }}
-                >
-                  Recursos Humanos
-                </Text>
-                <Text
-                  size='sm'
-                  component='a'
-                  href='#'
-                  style={{ color: '#9ca3af', textDecoration: 'none' }}
-                >
-                  Finanzas y Contabilidad
-                </Text>
-                <Text
-                  size='sm'
-                  component='a'
-                  href='#'
-                  style={{ color: '#9ca3af', textDecoration: 'none' }}
-                >
-                  Servicios de TI
-                </Text>
-                <Text
-                  size='sm'
-                  component='a'
-                  href='#'
-                  style={{ color: '#9ca3af', textDecoration: 'none' }}
-                >
-                  Compras
-                </Text>
-              </Stack>
-            </GridCol>
+          <div data-fade>
+            <h4 className={styles.footerTitle}>Servicios</h4>
+            <ul className={styles.footerList}>
+              {FOOTER_SERVICES.map((item) => (
+                <li key={item}>
+                  <a href='#' className={styles.footerLink}>
+                    {item}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
 
-            <GridCol span={{ base: 12, md: 6, lg: 2 }}>
-              <Title order={4} size='lg' fw={600} mb='md' c='white'>
-                Empresa
-              </Title>
-              <Stack gap='xs'>
-                <Text
-                  size='sm'
-                  component='a'
-                  href='#'
-                  style={{ color: '#9ca3af', textDecoration: 'none' }}
-                >
-                  Nosotros
-                </Text>
-                <Text
-                  size='sm'
-                  component='a'
-                  href='#'
-                  style={{ color: '#9ca3af', textDecoration: 'none' }}
-                >
-                  Carreras
-                </Text>
-                <Text
-                  size='sm'
-                  component='a'
-                  href='#'
-                  style={{ color: '#9ca3af', textDecoration: 'none' }}
-                >
-                  Casos de Éxito
-                </Text>
-                <Text
-                  size='sm'
-                  component='a'
-                  href='#'
-                  style={{ color: '#9ca3af', textDecoration: 'none' }}
-                >
-                  Blog
-                </Text>
-              </Stack>
-            </GridCol>
+          <div data-fade>
+            <h4 className={styles.footerTitle}>Empresa</h4>
+            <ul className={styles.footerList}>
+              {FOOTER_COMPANY.map((item) => (
+                <li key={item}>
+                  <a href='#' className={styles.footerLink}>
+                    {item}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
 
-            <GridCol span={{ base: 12, md: 6, lg: 4 }}>
-              <Title order={4} size='lg' fw={600} mb='md' c='white'>
-                Contacto
-              </Title>
-              <Stack gap='sm'>
-                <Group gap='xs' align='center'>
+          <div data-fade>
+            <h4 className={styles.footerTitle}>Contacto</h4>
+            <ul className={styles.footerList}>
+              <li className={styles.contactItem}>
+                <span className={styles.contactIcon}>
                   <IconMail size={16} />
-                  <Text size='sm' c='#d1d5db'>
-                    contacto@servicioscompartidos.com
-                  </Text>
-                </Group>
-                <Group gap='xs' align='center'>
+                </span>
+                contacto@servicioscompartidos.com
+              </li>
+              <li className={styles.contactItem}>
+                <span className={styles.contactIcon}>
                   <IconPhone size={16} />
-                  <Text size='sm' c='#d1d5db'>
-                    +1 (555) 123-4567
-                  </Text>
-                </Group>
-                <Group gap='xs' align='center'>
+                </span>
+                +1 (555) 123-4567
+              </li>
+              <li className={styles.contactItem}>
+                <span className={styles.contactIcon}>
                   <IconMapPin size={16} />
-                  <Text size='sm' c='#d1d5db'>
-                    Av. Empresarial 123, Suite 100
-                  </Text>
-                </Group>
-              </Stack>
-            </GridCol>
-          </Grid>
+                </span>
+                Av. Empresarial 123, Suite 100
+              </li>
+            </ul>
+          </div>
+        </div>
 
-          <Box mt='xl' pt='lg' style={{ borderTop: '1px solid #374151', textAlign: 'center' }}>
-            <Text size='sm' style={{ color: '#9ca3af' }}>
-              © {new Date().getFullYear()} ServiciosCompartidos. Todos los derechos reservados.
-            </Text>
-          </Box>
-        </Container>
-      </Box>
-    </Box>
+        <div className={styles.container}>
+          <div className={styles.copyright}>
+            © {new Date().getFullYear()} ServiciosCompartidos. Todos los derechos reservados.
+          </div>
+        </div>
+      </footer>
+    </LandingMotion>
   );
 }

@@ -3,6 +3,7 @@ import { prisma } from '../../../../../lib/prisma';
 import { identificar } from '../../../../../lib/portal/acceso';
 import { formadoresDePortal } from '../../../../../lib/portal/config';
 import { calcularProgreso } from '../../../../../lib/portal/formacion';
+import { puedeMarcarManual } from '../../../../../lib/portal/permisos-formacion';
 
 function idDesdeParametro(valor: string): number | null {
   const n = Number(valor);
@@ -67,6 +68,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       select: { code: true, issued_at: true },
     });
 
+    // Casillas editables a mano solo para ADMINISTRADORES/FORMADORES del
+    // Excel de permisos (Cristian, 2026-10-08). El servidor lo vuelve a
+    // verificar en /progress: esto solo decide cómo se pinta la casilla.
+    const marcadoManual = await puedeMarcarManual(quien.correo);
+
     return NextResponse.json(
       {
         curso: {
@@ -77,14 +83,17 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           creadoPor: curso.created_by,
         },
         esFormador,
+        puedeMarcarManual: marcadoManual,
         porcentaje,
         materiales: curso.materials.map((m) => ({
           id: m.id,
-          tipo: m.type as 'DOCUMENT' | 'LINK',
+          tipo: m.type as 'DOCUMENT' | 'LINK' | 'FORM',
+          formularioId: m.formulario_id,
           titulo: m.title,
           orden: m.orden,
           url: m.url,
           nombreArchivo: m.file_name,
+          mime: m.mime,
           obligatorio: m.required,
           completadoEl: completadosMapa.get(m.id) ?? null,
         })),

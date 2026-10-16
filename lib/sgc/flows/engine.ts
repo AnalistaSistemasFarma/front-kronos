@@ -7,6 +7,7 @@ import type {
   SgcTaskDefinition,
   SgcTerminalStatus,
 } from './definition';
+import { signerSegregationDenial, type SgcSegregationContext, type SgcSignerStepKind } from './segregation';
 
 /**
  * Reglas de EJECUCIÓN del motor de flujos validados — funciones PURAS.
@@ -71,6 +72,8 @@ export function evaluateCondition(conditionKey: SgcConditionKey | null, ctx: Sgc
     case null:
       return true;
     case 'tipo_exige_capacitacion':
+    case 'requiere_capacitacion':
+      // Sprint 10: requiresTraining ya es la bandera efectiva de la solicitud (lib/sgc/training/flag.ts).
       return ctx.requiresTraining;
     case 'solicitud_es_nueva':
       return ctx.requestType === 'nuevo';
@@ -135,11 +138,19 @@ export function assigneesInTurn(assignees: readonly SgcAssigneeState[], mode: Sg
   return pending;
 }
 
-/** Resultado de la tarea según las decisiones de sus firmantes vigentes. */
-export function taskOutcome(assignees: readonly SgcAssigneeState[]): 'resuelta' | 'devuelta' | 'abierta' {
+/**
+ * Resultado de la tarea según las decisiones de sus firmantes vigentes.
+ * RN 2026-10-02 (validación asíncrona, sin secuencia): EN PARALELO una
+ * devolución NO cierra la tarea mientras otro firmante vigente siga
+ * pendiente; vuelve a elaboración (y se puede subir la nueva versión) solo
+ * cuando respondieron todos. EN ORDEN la devolución corta la secuencia de
+ * inmediato (los siguientes aún no están en turno).
+ */
+export function taskOutcome(assignees: readonly SgcAssigneeState[], mode: SgcSigningMode | null = null): 'resuelta' | 'devuelta' | 'abierta' {
   const live = assignees.filter(isLive);
-  if (live.some((a) => a.status === 'devuelto')) return 'devuelta';
-  if (live.length > 0 && live.every((a) => a.status === 'aprobado')) return 'resuelta';
+  const returned = live.some((a) => a.status === 'devuelto');
+  if (returned && (mode === 'orden' || !live.some((a) => a.status === 'pendiente'))) return 'devuelta';
+  if (!returned && live.length > 0 && live.every((a) => a.status === 'aprobado')) return 'resuelta';
   return 'abierta';
 }
 
@@ -190,12 +201,26 @@ export interface SgcSignerInput {
 /**
  * Normaliza la lista de firmantes de un paso: correos en minúscula, sin
  * repetidos, orden 1..n según el orden recibido. Valida que sean personas
- * habilitadas (con permiso de gestión o Calidad en la empresa) y que el
- * elaborador no se asigne a sí mismo.
+ * habilitadas (con permiso de gestión o Calidad en la empresa) y que ni el
+ * elaborador ni el solicitante queden como firmantes de su propia solicitud,
+ * salvo la EXCEPCIÓN PARA CALIDAD del 2026-10-13 (lib/sgc/flows/segregation.ts):
+ * en REVISIÓN, una persona de Calidad sí revisa lo que pidió y, si la empresa
+ * lo habilitó, lo que elaboró. La aprobación no cambia.
  */
 export function normalizeSigners(
   raw: unknown,
-  opts: { stepName: string; elaboratorEmail: string; eligibleEmails: ReadonlySet<string>; min?: number; max?: number }
+  opts: {
+    stepName: string;
+    elaboratorEmail: string;
+    requesterEmail?: string | null;
+    eligibleEmails: ReadonlySet<string>;
+    min?: number;
+    max?: number;
+    /** Tipo de paso (revisión o aprobación); sin él, la regla estricta. */
+    kind?: SgcSignerStepKind;
+    /** Personas de Calidad y ajuste de la empresa; sin él, la regla estricta (sin excepción). */
+    segregation?: Pick<SgcSegregationContext, 'quality' | 'qualitySelfReview'>;
+  }
 ): SgcSignerInput[] {
   const list = Array.isArray(raw) ? raw : [];
   const emails = list.map((x) => String((x as { email?: unknown })?.email ?? x ?? '').trim().toLowerCase()).filter(Boolean);
@@ -203,13 +228,20 @@ export function normalizeSigners(
   const max = opts.max ?? 10;
   if (emails.length < min) throw new SgcError(`Asigne al menos ${min} persona(s) para ${opts.stepName}.`);
   if (emails.length > max) throw new SgcError(`${opts.stepName} admite máximo ${max} personas.`);
+  const ctx: SgcSegregationContext = {
+    requesterEmail: opts.requesterEmail ?? '',
+    elaboratorEmail: opts.elaboratorEmail,
+    quality: opts.segregation?.quality ?? new Set<string>(),
+    qualitySelfReview: opts.segregation?.qualitySelfReview ?? false,
+  };
+  const kind = opts.kind ?? 'otro';
   const seen = new Set<string>();
   for (const e of emails) {
     if (seen.has(e)) throw new SgcError(`${e} está repetido en ${opts.stepName}.`);
     seen.add(e);
-    if (e === opts.elaboratorEmail.toLowerCase()) {
-      throw new SgcError(`El elaborador no puede ser firmante de ${opts.stepName} de su propio documento.`);
-    }
+    // 2026-10-05: ni el elaborador ni quien hizo la solicitud firman lo suyo (con la excepción de Calidad del 2026-10-13).
+    const denial = signerSegregationDenial(e, kind, opts.stepName, ctx);
+    if (denial) throw new SgcError(denial);
     if (!opts.eligibleEmails.has(e)) throw new SgcError(`${e} no tiene permiso de gestión documental en el SGC de esta empresa.`);
   }
   return emails.map((email, i) => ({ email, order: i + 1 }));
