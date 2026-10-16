@@ -50,6 +50,19 @@ export function estadoVencido(estado: EstadoIconoCorreo | null, sesionEmail: str
   return ahora - estado.en >= ttl || ahora < estado.en;
 }
 
+/**
+ * Evento del navegador con el contador NUEVO de la Bandeja de entrada (el módulo Correo lo emite al marcar
+ * leído / no leído, de forma optimista y otra vez si revierte), para que el icono cambie al instante.
+ */
+export const EVENTO_NO_LEIDOS = 'correo:no-leidos';
+
+/** Estado del icono con el contador que avisó el módulo (solo si es de la misma sesión y el icono está visible). */
+export function conNoLeidos(estado: EstadoIconoCorreo | null, sesionEmail: string | null | undefined, n: unknown, ahora: number): EstadoIconoCorreo | null {
+  if (!estado || !sesionEmail || !estado.visible || estado.email.toLowerCase() !== sesionEmail.toLowerCase()) return null;
+  if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) return null;
+  return { ...estado, noLeidos: Math.floor(n), en: ahora };
+}
+
 /** Texto del contador: nada con 0 o sin dato; «99+» desde 100. */
 export function etiquetaNoLeidos(n: number | null): string | null {
   if (n == null || n <= 0) return null;

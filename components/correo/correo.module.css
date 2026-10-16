@@ -3,20 +3,118 @@
  * SynerLink: solo variables de Mantine (claro/oscuro salen solos) y los mismos radios y bordes.
  */
 
+/*
+ * Pantalla completa como Gmail (2026-10-16): el módulo ocupa el alto de la ventana bajo la cabecera de
+ * SynerLink y cada zona (carpetas, lista, hilo) se desplaza por dentro; la página no se desplaza.
+ */
+.pantalla {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: calc(100dvh - var(--app-header-height, 4rem));
+  max-width: 1920px;
+  margin: 0 auto;
+  padding: 8px 8px 8px;
+  background: var(--mantine-color-body);
+  overflow: hidden;
+}
+
+@media (min-width: 62em) {
+  .pantalla {
+    padding: 10px 16px 12px 8px;
+  }
+}
+
+.encabezado {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 0 4px;
+}
+
 .layout {
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
+  gap: 12px;
 }
 
 .sidebar {
-  position: sticky;
-  top: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.principal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+/* Buscador y chips: alto propio (en la columna flexible no deben estirarse). */
+.fijo {
+  flex: 0 0 auto;
+  display: flex;
+  min-width: 0;
 }
 
 .bandeja {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
+}
+
+.listaScroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ---- Hilo en el lugar de la lista ---- */
+.panelHilo {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.hilo {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.hiloScroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.hiloContenido {
+  padding: 16px 12px 24px;
+}
+
+@media (min-width: 48em) {
+  .hiloContenido {
+    padding: 18px 24px 32px 16px;
+  }
+}
+
+.separador {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--mantine-color-default-border);
+  flex-shrink: 0;
 }
 
 .toolbar {
@@ -31,6 +129,23 @@
 
 .toolbarSeleccion {
   background: var(--mantine-primary-color-light);
+}
+
+/* Aviso de selección (como Gmail: «Seleccionar los N correos de esta carpeta») y avance de «Marcar todo». */
+.avisoSeleccion {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  background: color-mix(in srgb, var(--mantine-color-yellow-1) 60%, var(--mantine-color-body));
+  flex: 0 0 auto;
+}
+
+:global([data-mantine-color-scheme='dark']) .avisoSeleccion {
+  background: color-mix(in srgb, var(--mantine-color-yellow-9) 25%, var(--mantine-color-body));
 }
 
 /* ---- Fila de escritorio ---- */
@@ -211,6 +326,7 @@
 }
 
 .chips {
+  flex: 0 0 auto;
   display: flex;
   gap: 8px;
   overflow-x: auto;
@@ -245,4 +361,53 @@
 
 :global([data-mantine-color-scheme='dark']) .busqueda input:focus {
   background: var(--mantine-color-dark-7);
+}
+
+/* ---- Carga (2026-10-16): esqueletos con la misma geometría de las filas reales ---- */
+.filaEsqueleto {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 42px;
+  padding: 0 14px 0 10px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.filaEsqueleto .meta {
+  justify-content: flex-end;
+}
+
+.filaMovilEsqueleto {
+  display: flex;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+/* Al actualizar la MISMA carpeta la lista se queda, atenuada, hasta que llegan los datos nuevos. */
+.listaAtenuada {
+  opacity: 0.45;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .listaAtenuada {
+    transition: none;
+  }
+}
+
+/*
+ * Cuerpo del correo (iframe de HtmlSeguro): superficie blanca SIEMPRE, como Gmail, para respetar los
+ * colores con que se escribió el correo. En modo oscuro se le da un margen interno blanco para que
+ * el texto no quede pegado al borde de la tarjeta.
+ */
+.cuerpoHtml {
+  color-scheme: light;
+}
+
+:global([data-mantine-color-scheme='dark']) .cuerpoHtml {
+  padding: 10px 12px;
+  box-sizing: content-box;
+  width: calc(100% - 24px) !important;
 }

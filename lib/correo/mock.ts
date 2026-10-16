@@ -165,6 +165,35 @@ export class MockMailProvider implements MailProvider {
     });
   }
 
+  async marcarLeido(mensajesIds: string[], leido: boolean): Promise<{ cambiados: number; fallidos: number }> {
+    let cambiados = 0;
+    let fallidos = 0;
+    for (const id of new Set(mensajesIds)) {
+      const m = estado(this.yo).mensajes.find((x) => x.id === id);
+      if (m) {
+        m.leido = leido;
+        cambiados++;
+      } else fallidos++;
+    }
+    return { cambiados, fallidos };
+  }
+
+  private deCarpeta(carpetaId: string | null) {
+    return carpetaId === 'mock-folder-sentAAAA' ? [] : estado(this.yo).mensajes;
+  }
+
+  async idsPorLeido(carpetaId: string | null, leido: boolean, max: number): Promise<string[]> {
+    return this.deCarpeta(carpetaId)
+      .filter((m) => m.leido !== leido)
+      .slice(0, max)
+      .map((m) => m.id);
+  }
+
+  async contadoresCarpeta(carpetaId: string | null): Promise<{ total: number; noLeidos: number }> {
+    const ms = this.deCarpeta(carpetaId);
+    return { total: ms.length, noLeidos: ms.filter((m) => !m.leido).length };
+  }
+
   async categorizar(mensajeId: string, categoria: string): Promise<void> {
     const m = estado(this.yo).mensajes.find((x) => x.id === mensajeId);
     if (m && !m.categorias.includes(categoria)) m.categorias.push(categoria);

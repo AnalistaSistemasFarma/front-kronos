@@ -28,6 +28,8 @@ export const CORREO_RATE_RULES = {
   adjunto: { max: 60, windowMs: 60_000 },
   envio: { max: 10, windowMs: 60_000 },
   creacion: { max: 120, windowMs: 10 * 60_000 },
+  /** Leído / no leído (abrir un hilo lo marca; «Marcar todo» va por lotes): cuota propia, por minuto. */
+  marcado: { max: 120, windowMs: 60_000 },
 } as const satisfies Record<string, SgcRateRule>;
 export type CorreoRateBucket = keyof typeof CORREO_RATE_RULES;
 
