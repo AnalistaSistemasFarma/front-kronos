@@ -39,6 +39,8 @@ export interface MensajeCompleto extends MensajeResumen {
   /** HTML del cuerpo. En el servidor llega crudo de Graph; al navegador solo sale SANEADO. */
   html: string;
   adjuntos: AdjuntoInfo[];
+  /** Enlace del mensaje en Outlook en la web (solo de Graph; el navegador lo recibe validado). */
+  webLink?: string;
   /** Imágenes incrustadas (cid) como data: URI, solo dentro del servidor para el saneado. */
   imagenesCid?: Record<string, string>;
 }
@@ -95,6 +97,15 @@ export interface MailProvider {
   adjunto(mensajeId: string, adjuntoId: string): Promise<ArchivoAdjunto>;
   responder(mensajeId: string, entrada: RespuestaEntrada): Promise<void>;
   categorizar(mensajeId: string, categoria: string): Promise<void>;
+  /**
+   * Marca mensajes del buzón propio como leídos / no leídos (como Gmail). En Graph va por `$batch`
+   * de a 20, con cada sub-petición validada contra el buzón de la sesión.
+   */
+  marcarLeido(mensajesIds: string[], leido: boolean): Promise<{ cambiados: number; fallidos: number }>;
+  /** Ids de una carpeta (null = Bandeja de entrada) con el estado CONTRARIO a `leido`, hasta `max` («Marcar todo»). */
+  idsPorLeido(carpetaId: string | null, leido: boolean, max: number): Promise<string[]>;
+  /** Total y no leídos de una carpeta (progreso de «Marcar todo»). */
+  contadoresCarpeta(carpetaId: string | null): Promise<{ total: number; noLeidos: number }>;
   /**
    * No leídos de la Bandeja de entrada (icono del Correo en la cabecera). Opcional:
    * si el proveedor no lo trae, se calcula con carpetas().

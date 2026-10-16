@@ -1,7 +1,9 @@
 import type { CorreoConfig } from './config';
 import { inquilinoDeCorreo } from './config';
 import {
+  CORREO_LOTE_MARCAR_CARPETA,
   CORREO_MAX_ADJUNTO_BYTES,
+  CORREO_MAX_MARCAR_SELECCION,
   CORREO_MAX_ADJUNTO_RESPUESTA_BYTES,
   CORREO_MAX_ADJUNTOS_RESPUESTA,
   CORREO_MAX_NOTA,
@@ -12,7 +14,7 @@ import {
 import * as data from './db';
 import type { AccesoCorreo, CorreoDb } from './db';
 import { CorreoError, NO_DISPONIBLE } from './errors';
-import { GraphMailProvider, mailboxForSession, tokenApp } from './graph';
+import { assertGraphId, GraphMailProvider, mailboxForSession, tokenApp } from './graph';
 import { MockMailProvider } from './mock';
 import { agruparPorHilo, filaDesdeHilo, notaDesdeCorreo, notaDesdeRespuesta, type FilaCrear, type ProcesoOpcion } from './rules';
 import { sanitizeEmailHtml } from './sanitize';
@@ -164,6 +166,20 @@ export interface MensajeVista {
   adjuntos: MensajeCompleto['adjuntos'];
   /** Ya está en el caso vinculado (origen, nota o respuesta). */
   enCaso: boolean;
+  /** «Abrir en Outlook»: solo si Graph lo trae y es de Outlook en la web (https). */
+  enlaceOutlook: string | null;
+}
+
+const HOSTS_OUTLOOK = new Set(['outlook.office.com', 'outlook.office365.com', 'outlook.live.com']);
+/** Solo enlaces https de Outlook en la web: nada de otro dominio ni de otro esquema llega a un `href`. */
+export function enlaceOutlookSeguro(webLink: string | undefined): string | null {
+  if (!webLink) return null;
+  try {
+    const u = new URL(webLink);
+    return u.protocol === 'https:' && HOSTS_OUTLOOK.has(u.hostname.toLowerCase()) ? u.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface HiloVista {
@@ -232,9 +248,74 @@ export async function verHilo(d: CorreoDeps, acceso: AccesoCorreo, conversationI
         remotasBloqueadas: s.remotasBloqueadas,
         adjuntos: m.adjuntos,
         enCaso: registrados.has(m.internetMessageId),
+        enlaceOutlook: enlaceOutlookSeguro(m.webLink),
       };
     }),
   };
+}
+
+/** Leído / no leído escribe en el buzón (Mail.ReadWrite): lo controla el mismo interruptor que las categorías. */
+function exigirEscrituraBuzon(d: CorreoDeps): void {
+  if (!d.cfg.etiquetarHabilitado) throw new CorreoError('Marcar correos como leídos o no leídos no está habilitado en este ambiente.', 403);
+}
+
+async function auditarLeido(d: CorreoDeps, acceso: AccesoCorreo, leido: boolean, e: { conversationId?: string | null; mensajeId?: string | null; detalle: string }, ip: string | null) {
+  await data.auditar(d.db, { idUser: acceso.idUser, mailbox: buzon(acceso), accion: leido ? 'MARCAR_LEIDO' : 'MARCAR_NO_LEIDO', ip, ...e });
+}
+
+/**
+ * «Marcar como leído / no leído» del hilo (barra del hilo y al abrirlo, como Gmail). Los ids salen del hilo leído
+ * del buzón PROPIO (nunca del navegador): solo se tocan los mensajes cuyo estado cambia. Queda en la auditoría.
+ */
+export async function marcarLeidoHilo(d: CorreoDeps, acceso: AccesoCorreo, conversationId: string, leido: boolean, ip: string | null): Promise<{ cambiados: number }> {
+  exigirEscrituraBuzon(d);
+  const prov = await proveedorDe(d, acceso);
+  const mensajes = await prov.hilo(conversationId);
+  if (mensajes.length === 0) throw new CorreoError('No se encontró el hilo en su buzón.', 404);
+  // Como Gmail: «no leído» deja sin leer el último mensaje; «leído» marca todos.
+  const objetivo = leido ? mensajes.filter((m) => !m.leido) : mensajes.slice(-1).filter((m) => m.leido);
+  const r = objetivo.length ? await prov.marcarLeido(objetivo.map((m) => m.id), leido) : { cambiados: 0, fallidos: 0 };
+  if (r.fallidos) throw new CorreoError('Microsoft no pudo marcar todos los correos del hilo. Intente de nuevo.', 502);
+  await auditarLeido(d, acceso, leido, { conversationId, mensajeId: objetivo[0]?.id ?? null, detalle: `Hilo: ${r.cambiados} mensaje(s)` }, ip);
+  return { cambiados: r.cambiados };
+}
+
+/**
+ * Correos SELECCIONADOS en la lista. Los ids vienen del navegador, pero cada PATCH va a
+ * /users/{buzón de la sesión}/messages/{id}: un id de otro buzón no existe ahí (Graph: 404 → «fallido»).
+ */
+export async function marcarLeidoMensajes(d: CorreoDeps, acceso: AccesoCorreo, ids: string[], leido: boolean, ip: string | null): Promise<{ cambiados: number; fallidos: number }> {
+  exigirEscrituraBuzon(d);
+  const unicos = [...new Set(ids.map((x) => String(x ?? '').trim()))];
+  if (unicos.length === 0) throw new CorreoError('Seleccione al menos un correo.', 400);
+  if (unicos.length > CORREO_MAX_MARCAR_SELECCION) throw new CorreoError(`Máximo ${CORREO_MAX_MARCAR_SELECCION} correos por vez.`, 400);
+  const prov = await proveedorDe(d, acceso);
+  const r = await prov.marcarLeido(unicos, leido);
+  await auditarLeido(d, acceso, leido, { mensajeId: unicos[0], detalle: `Selección: ${r.cambiados} de ${unicos.length} mensaje(s)` }, ip);
+  return r;
+}
+
+/**
+ * «Marcar todo como leído» / toda la carpeta seleccionada: un LOTE por petición (el navegador repite y muestra el
+ * avance). Los ids se consultan en el servidor (estado contrario) y se marcan por `$batch`; `restantes` sale del
+ * contador de la carpeta para la barra de progreso.
+ */
+export async function marcarLeidoCarpeta(
+  d: CorreoDeps,
+  acceso: AccesoCorreo,
+  carpetaId: string | null,
+  leido: boolean,
+  ip: string | null
+): Promise<{ cambiados: number; fallidos: number; restantes: number }> {
+  exigirEscrituraBuzon(d);
+  const carpeta = carpetaId ? assertGraphId(carpetaId, 'identificador de carpeta') : null;
+  const prov = await proveedorDe(d, acceso);
+  const ids = await prov.idsPorLeido(carpeta, leido, CORREO_LOTE_MARCAR_CARPETA);
+  const r = ids.length ? await prov.marcarLeido(ids, leido) : { cambiados: 0, fallidos: 0 };
+  const c = await prov.contadoresCarpeta(carpeta);
+  const restantes = leido ? c.noLeidos : Math.max(0, c.total - c.noLeidos);
+  if (ids.length) await auditarLeido(d, acceso, leido, { detalle: `Carpeta ${carpeta ?? 'Bandeja de entrada'}: ${r.cambiados} mensaje(s) en este lote` }, ip);
+  return { ...r, restantes };
 }
 
 /** Pasa a notas del caso los correos nuevos de un hilo vinculado (a pedido o por la tarea de fondo). */

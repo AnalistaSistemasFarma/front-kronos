@@ -16,6 +16,7 @@ import { limpiarTokensApp } from '../graph';
 import { CorreoError } from '../errors';
 import { MockMailProvider, enviadosSimulados, reiniciarBuzonSimulado } from '../mock';
 import {
+  enlaceOutlookSeguro,
   auditarLectura,
   crearDesdeFila,
   estadoConexion,
@@ -368,5 +369,16 @@ describe('Correo · tarea de fondo (apagada por defecto)', () => {
     db.vinculoDeHilo.mockResolvedValue({ id: 3, conversationId: 'mock-conv-01AAAA', idRequest: 500, asunto: 'x', creadoEn: '', origen: 'CREADA', lastSyncedAt: null });
     const r = await sincronizarTodo(deps({ cfg: readCorreoConfig({ CORREO_MODO: 'mock', CORREO_SYNC_HABILITADO: 'true' }) }), async (id) => (id === 'op1' ? yo : null));
     expect(r).toEqual({ hilos: 2, agregadas: 2, errores: 0 });
+  });
+});
+
+describe('enlaceOutlookSeguro («Abrir en Outlook»)', () => {
+  it('solo https de Outlook en la web; lo demás no llega a un href', () => {
+    expect(enlaceOutlookSeguro('https://outlook.office365.com/owa/?ItemID=AAMk%2Bx&exvsurl=1')).toMatch(/^https:\/\/outlook\.office365\.com\//);
+    expect(enlaceOutlookSeguro('https://outlook.office.com/mail/id/AAMk')).not.toBeNull();
+    expect(enlaceOutlookSeguro('javascript:alert(1)')).toBeNull();
+    expect(enlaceOutlookSeguro('http://outlook.office365.com/owa')).toBeNull();
+    expect(enlaceOutlookSeguro('https://outlook.office365.com.evil.example/owa')).toBeNull();
+    expect(enlaceOutlookSeguro(undefined)).toBeNull();
   });
 });
