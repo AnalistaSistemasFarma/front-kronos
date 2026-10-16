@@ -14,7 +14,8 @@ import {
 import * as data from './db';
 import type { AccesoCorreo, CorreoDb } from './db';
 import { CorreoError, NO_DISPONIBLE } from './errors';
-import { assertGraphId, GraphMailProvider, mailboxForSession, tokenApp } from './graph';
+import { assertGraphId, GraphMailProvider, idsDesplegados, mailboxForSession, tokenApp } from './graph';
+import { actualizarMensajeEnCache, hiloConCache, invalidarHilo, marcarLeidoEnCache } from './cacheHilo';
 import { MockMailProvider } from './mock';
 import { agruparPorHilo, filaDesdeHilo, notaDesdeCorreo, notaDesdeRespuesta, type FilaCrear, type ProcesoOpcion } from './rules';
 import { sanitizeEmailHtml } from './sanitize';
@@ -168,6 +169,8 @@ export interface MensajeVista {
   enCaso: boolean;
   /** «Abrir en Outlook»: solo si Graph lo trae y es de Outlook en la web (https). */
   enlaceOutlook: string | null;
+  /** Imágenes incrustadas aún sin descargar: el navegador las pide al desplegar el mensaje. */
+  imagenesPendientes: boolean;
 }
 
 const HOSTS_OUTLOOK = new Set(['outlook.office.com', 'outlook.office365.com', 'outlook.live.com']);
@@ -216,10 +219,53 @@ async function clasificarPendientes(d: CorreoDeps, acceso: AccesoCorreo, mensaje
   return { nuevos, registrados, respuestasPropias };
 }
 
-export async function verHilo(d: CorreoDeps, acceso: AccesoCorreo, conversationId: string, opciones: { remotas: boolean }): Promise<HiloVista> {
+/**
+ * Imágenes cid de los mensajes que se ven desplegados y aún no las tienen (p. ej. el hilo quedó en caché
+ * desde el marcado como leído, que no las pide). Se guardan en la caché para no volver a pedirlas.
+ */
+async function completarImagenes(prov: MailProvider, acceso: AccesoCorreo, conversationId: string, mensajes: MensajeCompleto[], ids: Set<string>): Promise<MensajeCompleto[]> {
+  if (!prov.imagenesCid) return mensajes;
+  return Promise.all(
+    mensajes.map(async (m) => {
+      if (!m.imagenesPendientes || !ids.has(m.id)) return m;
+      const completo = { ...m, imagenesCid: await prov.imagenesCid!(m.id), imagenesPendientes: false };
+      actualizarMensajeEnCache(acceso.idUser, assertGraphId(conversationId, 'identificador del hilo'), completo);
+      return completo;
+    })
+  );
+}
+
+/** Hilo del buzón PROPIO con la caché corta por persona (una consulta aunque se pida varias veces a la vez). */
+async function hiloDeSesion(d: CorreoDeps, acceso: AccesoCorreo, prov: MailProvider, conversationId: string, opciones: { imagenes?: 'desplegados' | 'ninguna'; fresco?: boolean } = {}): Promise<MensajeCompleto[]> {
+  const id = assertGraphId(conversationId, 'identificador del hilo');
+  return hiloConCache(acceso.idUser, id, () => prov.hilo(id, { imagenes: opciones.imagenes ?? 'ninguna' }), { fresco: opciones.fresco, ahora: now(d) });
+}
+
+function aVista(m: MensajeCompleto, remotas: boolean, registrados: Set<string>): MensajeVista {
+  const s = sanitizeEmailHtml(m.html, { remotas, cid: m.imagenesCid });
+  return {
+    id: m.id,
+    internetMessageId: m.internetMessageId,
+    asunto: m.asunto,
+    de: m.de,
+    para: m.para,
+    cc: m.cc,
+    fecha: m.fecha,
+    leido: m.leido,
+    html: s.html,
+    remotasBloqueadas: s.remotasBloqueadas,
+    adjuntos: m.adjuntos,
+    enCaso: registrados.has(m.internetMessageId),
+    enlaceOutlook: enlaceOutlookSeguro(m.webLink),
+    imagenesPendientes: Boolean(m.imagenesPendientes),
+  };
+}
+
+export async function verHilo(d: CorreoDeps, acceso: AccesoCorreo, conversationId: string, opciones: { remotas: boolean; fresco?: boolean }): Promise<HiloVista> {
   const prov = await proveedorDe(d, acceso);
-  const mensajes = await prov.hilo(conversationId);
-  if (mensajes.length === 0) throw new CorreoError('No se encontró el hilo en su buzón.', 404);
+  const enCache = await hiloDeSesion(d, acceso, prov, conversationId, { imagenes: 'desplegados', fresco: opciones.fresco });
+  if (enCache.length === 0) throw new CorreoError('No se encontró el hilo en su buzón.', 404);
+  const mensajes = await completarImagenes(prov, acceso, conversationId, enCache, idsDesplegados(enCache));
   const vinculo = await data.vinculoDeHilo(d.db, acceso.idUser, conversationId);
   let registrados = new Set<string>();
   let pendientes = 0;
@@ -233,25 +279,24 @@ export async function verHilo(d: CorreoDeps, acceso: AccesoCorreo, conversationI
     asunto: mensajes[0].asunto,
     vinculo,
     pendientes,
-    mensajes: mensajes.map((m) => {
-      const s = sanitizeEmailHtml(m.html, { remotas: opciones.remotas, cid: m.imagenesCid });
-      return {
-        id: m.id,
-        internetMessageId: m.internetMessageId,
-        asunto: m.asunto,
-        de: m.de,
-        para: m.para,
-        cc: m.cc,
-        fecha: m.fecha,
-        leido: m.leido,
-        html: s.html,
-        remotasBloqueadas: s.remotasBloqueadas,
-        adjuntos: m.adjuntos,
-        enCaso: registrados.has(m.internetMessageId),
-        enlaceOutlook: enlaceOutlookSeguro(m.webLink),
-      };
-    }),
+    mensajes: mensajes.map((m) => aVista(m, opciones.remotas, registrados)),
   };
+}
+
+/**
+ * Al DESPLEGAR un mensaje con imágenes cid pendientes: una consulta para ese mensaje. El mensaje se busca
+ * dentro del hilo del buzón PROPIO (caché o Graph): un id que no sea de ese hilo da 404.
+ */
+export async function imagenesMensajeHilo(d: CorreoDeps, acceso: AccesoCorreo, conversationId: string, mensajeId: string, opciones: { remotas: boolean }): Promise<MensajeVista> {
+  const prov = await proveedorDe(d, acceso);
+  const mensajes = await hiloDeSesion(d, acceso, prov, conversationId);
+  const id = assertGraphId(mensajeId);
+  const m = mensajes.find((x) => x.id === id);
+  if (!m) throw new CorreoError('No se encontró el correo en este hilo.', 404);
+  const [completo] = await completarImagenes(prov, acceso, conversationId, [m], new Set([id]));
+  const vinculo = await data.vinculoDeHilo(d.db, acceso.idUser, conversationId);
+  const registrados = vinculo ? await data.correosRegistrados(d.db, [completo.internetMessageId]) : new Set<string>();
+  return aVista(completo, opciones.remotas, registrados);
 }
 
 /** Leído / no leído escribe en el buzón (Mail.ReadWrite): lo controla el mismo interruptor que las categorías. */
@@ -270,11 +315,14 @@ async function auditarLeido(d: CorreoDeps, acceso: AccesoCorreo, leido: boolean,
 export async function marcarLeidoHilo(d: CorreoDeps, acceso: AccesoCorreo, conversationId: string, leido: boolean, ip: string | null): Promise<{ cambiados: number }> {
   exigirEscrituraBuzon(d);
   const prov = await proveedorDe(d, acceso);
-  const mensajes = await prov.hilo(conversationId);
+  // Al abrir el hilo ya quedó en la caché: marcarlo no vuelve a leerlo de Graph (solo el `$batch`).
+  const mensajes = await hiloDeSesion(d, acceso, prov, conversationId);
   if (mensajes.length === 0) throw new CorreoError('No se encontró el hilo en su buzón.', 404);
   // Como Gmail: «no leído» deja sin leer el último mensaje; «leído» marca todos.
   const objetivo = leido ? mensajes.filter((m) => !m.leido) : mensajes.slice(-1).filter((m) => m.leido);
   const r = objetivo.length ? await prov.marcarLeido(objetivo.map((m) => m.id), leido) : { cambiados: 0, fallidos: 0 };
+  if (r.fallidos) invalidarHilo(acceso.idUser, assertGraphId(conversationId, 'identificador del hilo'));
+  else if (objetivo.length) marcarLeidoEnCache(acceso.idUser, assertGraphId(conversationId, 'identificador del hilo'), objetivo.map((m) => m.id), leido);
   if (r.fallidos) throw new CorreoError('Microsoft no pudo marcar todos los correos del hilo. Intente de nuevo.', 502);
   await auditarLeido(d, acceso, leido, { conversationId, mensajeId: objetivo[0]?.id ?? null, detalle: `Hilo: ${r.cambiados} mensaje(s)` }, ip);
   return { cambiados: r.cambiados };
@@ -291,6 +339,7 @@ export async function marcarLeidoMensajes(d: CorreoDeps, acceso: AccesoCorreo, i
   if (unicos.length > CORREO_MAX_MARCAR_SELECCION) throw new CorreoError(`Máximo ${CORREO_MAX_MARCAR_SELECCION} correos por vez.`, 400);
   const prov = await proveedorDe(d, acceso);
   const r = await prov.marcarLeido(unicos, leido);
+  invalidarHilo(acceso.idUser);
   await auditarLeido(d, acceso, leido, { mensajeId: unicos[0], detalle: `Selección: ${r.cambiados} de ${unicos.length} mensaje(s)` }, ip);
   return r;
 }
@@ -312,6 +361,7 @@ export async function marcarLeidoCarpeta(
   const prov = await proveedorDe(d, acceso);
   const ids = await prov.idsPorLeido(carpeta, leido, CORREO_LOTE_MARCAR_CARPETA);
   const r = ids.length ? await prov.marcarLeido(ids, leido) : { cambiados: 0, fallidos: 0 };
+  if (ids.length) invalidarHilo(acceso.idUser);
   const c = await prov.contadoresCarpeta(carpeta);
   const restantes = leido ? c.noLeidos : Math.max(0, c.total - c.noLeidos);
   if (ids.length) await auditarLeido(d, acceso, leido, { detalle: `Carpeta ${carpeta ?? 'Bandeja de entrada'}: ${r.cambiados} mensaje(s) en este lote` }, ip);
@@ -394,6 +444,7 @@ export async function responder(
   // La respuesta admite Markdown sencillo (negrita, cursiva, listas, enlaces): sale como HTML saneado.
   const comentarioHtml = markdownAHtml(texto);
   await prov.responder(original.id, { texto: markdownATexto(texto), todos: p.todos, adjuntos: p.adjuntos, ...(comentarioHtml ? { comentarioHtml } : {}) });
+  invalidarHilo(acceso.idUser, original.conversationId);
   const vinculo = original.conversationId ? await data.vinculoDeHilo(d.db, acceso.idUser, original.conversationId) : null;
   const para = p.todos ? [original.de, ...original.para, ...original.cc].map((x) => x.correo).filter((c) => c && c !== acceso.email.toLowerCase()) : [original.de.correo];
   await data.auditar(d.db, {
@@ -687,6 +738,7 @@ export async function enviarAcuse(
       logoUrl: logoAcuseUrl(d.appBaseUrl),
     });
     await prov.responder(destino.id, { texto, html, todos: p.todos, adjuntos: [] });
+    invalidarHilo(acceso.idUser, p.conversationId);
     // Ya salió: la reserva queda como constancia. Lo que sigue no debe invitar a reenviarlo.
     reservado = null;
 

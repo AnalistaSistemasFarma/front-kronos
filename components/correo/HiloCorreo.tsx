@@ -85,7 +85,7 @@ export interface HiloCorreoProps {
   /** Leído / no leído escribe en el buzón: solo con CORREO_ETIQUETAR_HABILITADO. */
   escritura?: boolean;
   /** Marca el hilo (la página actualiza la lista y los contadores de forma optimista); false si falló y se revirtió. */
-  marcarHilo?: (conversationId: string, leido: boolean) => Promise<boolean>;
+  marcarHilo?: (conversationId: string, leido: boolean, opciones?: { silencioso?: boolean }) => Promise<boolean>;
   /** Abrir la simulación con los mensajes del hilo (crear una solicitud con este hilo). */
   onCrearSolicitud: (mensajesIds: string[]) => void;
   /** El hilo cambió (vínculo, notas, respuesta): refrescar la bandeja al cerrar. */
@@ -99,6 +99,9 @@ export interface HiloCorreoProps {
 }
 
 type Resultado = { color: 'green' | 'red' | 'yellow'; texto: string; reintentarAcuse?: { confirmarExterno: boolean } } | null;
+
+/** Pausa antes de marcar como leído al abrir (después de pintar el hilo; se cancela si la persona sale). */
+const AUTO_MARCAR_MS = 1200;
 
 const lista = (ds: Array<{ nombre: string; correo: string }>, yo: string) =>
   ds.map((d) => (d.correo && d.correo.toLowerCase() === yo ? 'mí' : d.nombre || d.correo)).join(', ');
@@ -354,7 +357,9 @@ export default function HiloCorreo({
       setCargando(true);
       setError(null);
       try {
-        const r = await correoApi.hilo(conversationId, conRemotas, ctrl.signal);
+        const fresco = refrescar.current;
+        refrescar.current = false;
+        const r = await correoApi.hilo(conversationId, conRemotas, ctrl.signal, fresco);
         if (peticion.current !== ctrl) return;
         setHilo(r.hilo);
         // Como Gmail: el último y los no leídos desplegados; los demás en una línea.
@@ -563,17 +568,49 @@ export default function HiloCorreo({
     if (!leido) onVolver();
   };
 
-  // Al abrir un hilo con correos sin leer, se marcan como leídos (como Gmail), una sola vez por hilo.
+  // Al abrir un hilo con correos sin leer, se marcan como leídos (como Gmail), una sola vez por hilo. Va
+  // DESPUÉS de pintar el hilo y con una pausa corta (si la persona sale enseguida, no se marca ni consulta
+  // Graph); es silencioso: si Microsoft falla, el hilo se sigue viendo igual y solo vuelve la negrita.
   const autoMarcado = useRef<string | null>(null);
   useEffect(() => {
     if (!hilo || !escritura || !marcarHilo || autoMarcado.current === hilo.conversationId) return;
-    autoMarcado.current = hilo.conversationId;
-    if (hilo.mensajes.every((m) => m.leido)) return;
-    const revertir = pintarLeido(true);
-    void marcarHilo(hilo.conversationId, true).then((ok) => {
-      if (!ok) revertir();
-    });
+    if (hilo.mensajes.every((m) => m.leido)) {
+      autoMarcado.current = hilo.conversationId;
+      return;
+    }
+    const conv = hilo.conversationId;
+    const t = setTimeout(() => {
+      autoMarcado.current = conv;
+      const revertir = pintarLeido(true);
+      void marcarHilo(conv, true, { silencioso: true }).then((ok) => {
+        if (!ok) revertir();
+      });
+    }, AUTO_MARCAR_MS);
+    return () => clearTimeout(t);
   }, [hilo, escritura, marcarHilo]);
+
+  /** «Actualizar»: la próxima carga ignora la caché corta del servidor. */
+  const refrescar = useRef(false);
+
+  // Imágenes incrustadas de los mensajes desplegados que aún no las traen (una consulta por mensaje, una vez).
+  const imagenesPedidas = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!hilo) return;
+    for (const m of hilo.mensajes) {
+      if (!m.imagenesPendientes || !abiertos.has(m.id) || imagenesPedidas.current.has(m.id)) continue;
+      imagenesPedidas.current.add(m.id);
+      const conv = hilo.conversationId;
+      correoApi
+        .imagenes(conv, m.id, remotas)
+        .then(({ mensaje }) =>
+          setHilo((h) =>
+            h && h.conversationId === conv ? { ...h, mensajes: h.mensajes.map((x) => (x.id === mensaje.id ? { ...mensaje, leido: x.leido } : x)) } : h
+          )
+        )
+        // Sin imágenes el correo se sigue leyendo; se podrá reintentar con «Actualizar».
+        .catch(() => imagenesPedidas.current.delete(m.id));
+    }
+  }, [hilo, abiertos, remotas]);
 
   const accion = (label: string, icono: React.ReactNode, props: Record<string, unknown>) => (
     <Tooltip label={label}>
@@ -675,7 +712,14 @@ export default function HiloCorreo({
             rel: 'noopener noreferrer',
             'data-testid': 'correo-hilo-outlook',
           })}
-        {accion('Actualizar', <IconRefresh size={19} />, { onClick: () => void cargar(remotas), disabled: !conversationId, 'data-testid': 'correo-hilo-actualizar' })}
+        {accion('Actualizar', <IconRefresh size={19} />, {
+          onClick: () => {
+            refrescar.current = true;
+            void cargar(remotas);
+          },
+          disabled: !conversationId,
+          'data-testid': 'correo-hilo-actualizar',
+        })}
         {hilo && (
           <Text size='xs' c='dimmed' ml='auto' style={{ flexShrink: 0 }}>
             {hilo.mensajes.length} {hilo.mensajes.length === 1 ? 'mensaje' : 'mensajes'}
@@ -738,8 +782,13 @@ export default function HiloCorreo({
             </Alert>
           )}
           {error && (
-            <Alert color='red' icon={<IconAlertTriangle size={18} />} title='No se pudo abrir el hilo'>
-              {error}
+            <Alert color='red' icon={<IconAlertTriangle size={18} />} title='No se pudo abrir el hilo' data-testid='correo-hilo-error'>
+              <Stack gap='xs' align='flex-start'>
+                <Text size='sm'>{error}</Text>
+                <Button size='xs' variant='light' color='red' leftSection={<IconRefresh size={14} />} loading={cargando} onClick={() => void cargar(remotas)} data-testid='correo-hilo-reintentar'>
+                  Reintentar
+                </Button>
+              </Stack>
             </Alert>
           )}
           {Boolean(conversationId) && !hilo && !error && <EsqueletoHiloCorreo />}

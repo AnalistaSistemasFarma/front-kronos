@@ -387,6 +387,46 @@ describe('Correo · rutas: app de aplicación y buzón de la sesión (anti-IDOR)
     expect(JSON.stringify(lotes)).not.toContain('gerencia');
   }, 15_000);
 
+  it('throttling (2026-10-16): Graph responde 429 y luego 200 → el hilo abre (reintento con Retry-After, sin error)', async () => {
+    let n = 0;
+    const hiloGraph = { value: [{ id: 'M1AAAAAAAA', conversationId: 'CONV429AAAAA', subject: 'Hola', receivedDateTime: '2026-10-16T16:13:00Z', isRead: true, body: { contentType: 'html', content: '<p>ok</p>' }, attachments: [] }] };
+    const urls: string[] = [];
+    fetchFn = (async (url: string) => {
+      if (url.includes('login.microsoftonline.com')) return new Response(JSON.stringify({ access_token: 'APP', expires_in: 3600 }), { status: 200 });
+      urls.push(url);
+      if (++n === 1) return new Response('{"error":{"code":"ApplicationThrottled"}}', { status: 429, headers: { 'Retry-After': '1' } });
+      return new Response(JSON.stringify(hiloGraph), { status: 200 });
+    }) as unknown as typeof fetch;
+    cfgEnv = GRAPH_ENV;
+    comoUsuario();
+    // Dos aperturas simultáneas del mismo hilo (doble clic): una sola cadena de consultas a Graph.
+    const [r, r2] = await Promise.all([hilo.GET(get('/hilo?id=CONV429AAAAA')), hilo.GET(get('/hilo?id=CONV429AAAAA'))]);
+    expect(r.status).toBe(200);
+    expect(r2.status).toBe(200);
+    expect((await r.json()).hilo.mensajes).toHaveLength(1);
+    expect(urls).toHaveLength(2);
+    // Reabrir enseguida: caché corta, sin Graph; «Actualizar» (fresco=1) sí consulta.
+    expect((await hilo.GET(get('/hilo?id=CONV429AAAAA'))).status).toBe(200);
+    expect(urls).toHaveLength(2);
+    expect((await hilo.GET(get('/hilo?id=CONV429AAAAA&fresco=1'))).status).toBe(200);
+    expect(urls).toHaveLength(3);
+  }, 15_000);
+
+  it('throttling persistente: tras 3 reintentos, 429 con mensaje claro (la vista ofrece «Reintentar»)', async () => {
+    const urls: string[] = [];
+    fetchFn = (async (url: string) => {
+      if (url.includes('login.microsoftonline.com')) return new Response(JSON.stringify({ access_token: 'APP', expires_in: 3600 }), { status: 200 });
+      urls.push(url);
+      return new Response('{}', { status: 429, headers: { 'Retry-After': '0' } });
+    }) as unknown as typeof fetch;
+    cfgEnv = GRAPH_ENV;
+    comoUsuario();
+    const r = await hilo.GET(get('/hilo?id=CONV429BBBBB'));
+    expect(r.status).toBe(429);
+    expect((await r.json()).error).toMatch(/Microsoft limitó las consultas a su buzón/);
+    expect(urls).toHaveLength(4);
+  }, 15_000);
+
   it('usuarios de un inquilino sin app habilitada: «Correo disponible próximamente para su empresa»', async () => {
     graph(() => ({ body: {} }));
     comoUsuario({ ...yo, email: 'ana@onelatampharma.com' });
