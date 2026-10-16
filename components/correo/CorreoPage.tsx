@@ -451,7 +451,11 @@ export default function CorreoPage() {
    * Leído / no leído de filas (selección o hilo): se pinta YA (filas en negrita o no y contadores) y, si Microsoft
    * falla, se revierte tal cual estaba. `cambiar` decide qué filas cambian y a qué estado.
    */
-  const optimista = async (cambiar: (m: MensajeLista) => boolean | null, llamar: () => Promise<{ cambiados: number; fallidos?: number }>): Promise<boolean> => {
+  const optimista = async (
+    cambiar: (m: MensajeLista) => boolean | null,
+    llamar: () => Promise<{ cambiados: number; fallidos?: number }>,
+    silencioso = false
+  ): Promise<boolean> => {
     const previos = new Map<string, boolean>();
     let delta = 0;
     setMensajes((prev) =>
@@ -474,12 +478,13 @@ export default function CorreoPage() {
         toast.error(`${r.fallidos} correo(s) no se pudieron marcar (pudieron moverse o borrarse).`);
         void cargarMensajes(filtros, { refresco: true });
       }
-      cargarCarpetas();
+      // Al abrir un hilo (silencioso) el contador ya se ajustó arriba: no se vuelve a consultar Graph.
+      if (!silencioso) cargarCarpetas();
       return true;
     } catch (e) {
       setMensajes((prev) => prev.map((m) => (previos.has(m.id) ? { ...m, leido: previos.get(m.id)! } : m)));
       setCarpetas(carpetasAntes);
-      toast.error(`No se pudo marcar: ${e instanceof Error ? e.message : String(e)}`);
+      if (!silencioso) toast.error(`No se pudo marcar: ${e instanceof Error ? e.message : String(e)}`);
       return false;
     }
   };
@@ -508,12 +513,13 @@ export default function CorreoPage() {
   };
 
   /** El hilo abierto (al abrirlo o desde su barra): todas sus filas («leído») o la más reciente («no leído»). */
-  const marcarHilo = (conversationId: string, leido: boolean) => {
+  const marcarHilo = (conversationId: string, leido: boolean, opciones: { silencioso?: boolean } = {}) => {
     const delHilo = mensajes.filter((m) => m.conversationId === conversationId);
     const ultimo = delHilo.reduce<MensajeLista | null>((u, m) => (!u || m.fecha > u.fecha ? m : u), null);
     return optimista(
       (m) => (m.conversationId !== conversationId ? null : leido ? true : m === ultimo || m.id === ultimo?.id ? false : null),
-      () => correoApi.marcarLeido(conversationId, leido)
+      () => correoApi.marcarLeido(conversationId, leido),
+      Boolean(opciones.silencioso)
     );
   };
 
