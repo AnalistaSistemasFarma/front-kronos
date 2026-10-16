@@ -79,8 +79,10 @@ export interface HiloCorreoProps {
   onVolver: () => void;
   /** Etiqueta de la carpeta desde la que se abrió (ficha junto al asunto). */
   carpeta?: string | null;
-  /** El hilo quedó leído / no leído: la lista y los contadores se actualizan sin recargar. */
-  onLeido?: (conversationId: string, leido: boolean) => void;
+  /** Leído / no leído escribe en el buzón: solo con CORREO_ETIQUETAR_HABILITADO. */
+  escritura?: boolean;
+  /** Marca el hilo (la página actualiza la lista y los contadores de forma optimista); false si falló y se revirtió. */
+  marcarHilo?: (conversationId: string, leido: boolean) => Promise<boolean>;
   /** Abrir la simulación con los mensajes del hilo (crear una solicitud con este hilo). */
   onCrearSolicitud: (mensajesIds: string[]) => void;
   /** El hilo cambió (vínculo, notas, respuesta): refrescar la bandeja al cerrar. */
@@ -303,7 +305,8 @@ export default function HiloCorreo({
   conversationId,
   onVolver,
   carpeta = null,
-  onLeido,
+  escritura = false,
+  marcarHilo,
   onCrearSolicitud,
   onCambio,
   envioHabilitado = true,
@@ -503,25 +506,37 @@ export default function HiloCorreo({
   const leidoHilo = Boolean(hilo && hilo.mensajes.every((m) => m.leido));
   const enlaceOutlook = ultimo?.enlaceOutlook ?? null;
 
+  /** Pinta el estado leído del hilo ya (optimista) y devuelve cómo revertirlo. */
+  const pintarLeido = (leido: boolean) => {
+    const previo = new Map((hilo?.mensajes ?? []).map((m) => [m.id, m.leido]));
+    setHilo((h) => (h ? { ...h, mensajes: h.mensajes.map((m, i) => (leido ? { ...m, leido: true } : i === h.mensajes.length - 1 ? { ...m, leido: false } : m)) } : h));
+    return () => setHilo((h) => (h ? { ...h, mensajes: h.mensajes.map((m) => (previo.has(m.id) ? { ...m, leido: previo.get(m.id)! } : m)) } : h));
+  };
+
   /** Como Gmail: «leído» marca todo el hilo; «no leído» deja sin leer el último y vuelve a la lista. */
   const marcar = async () => {
-    if (!hilo) return;
+    if (!hilo || !marcarHilo) return;
     const leido = !leidoHilo;
+    const revertir = pintarLeido(leido);
     setMarcando(true);
-    try {
-      await correoApi.marcarLeido(hilo.conversationId, leido);
-      setHilo((h) =>
-        h ? { ...h, mensajes: h.mensajes.map((m, i) => (leido ? { ...m, leido: true } : i === h.mensajes.length - 1 ? { ...m, leido: false } : m)) } : h
-      );
-      onLeido?.(hilo.conversationId, leido);
-      toast.success(leido ? 'Hilo marcado como leído' : 'Hilo marcado como no leído');
-      if (!leido) onVolver();
-    } catch (e) {
-      setResultado({ color: 'red', texto: `No se pudo marcar el hilo: ${e instanceof Error ? e.message : String(e)}` });
-    } finally {
-      setMarcando(false);
-    }
+    const ok = await marcarHilo(hilo.conversationId, leido);
+    setMarcando(false);
+    if (!ok) return revertir();
+    toast.success(leido ? 'Hilo marcado como leído' : 'Hilo marcado como no leído');
+    if (!leido) onVolver();
   };
+
+  // Al abrir un hilo con correos sin leer, se marcan como leídos (como Gmail), una sola vez por hilo.
+  const autoMarcado = useRef<string | null>(null);
+  useEffect(() => {
+    if (!hilo || !escritura || !marcarHilo || autoMarcado.current === hilo.conversationId) return;
+    autoMarcado.current = hilo.conversationId;
+    if (hilo.mensajes.every((m) => m.leido)) return;
+    const revertir = pintarLeido(true);
+    void marcarHilo(hilo.conversationId, true).then((ok) => {
+      if (!ok) revertir();
+    });
+  }, [hilo, escritura, marcarHilo]);
 
   const accion = (label: string, icono: React.ReactNode, props: Record<string, unknown>) => (
     <Tooltip label={label}>
@@ -603,6 +618,8 @@ export default function HiloCorreo({
           </Popover>
         )}
         {hilo &&
+          escritura &&
+          marcarHilo &&
           accion(leidoHilo ? 'Marcar como no leído' : 'Marcar como leído', leidoHilo ? <IconMail size={19} /> : <IconMailOpened size={19} />, {
             onClick: marcar,
             loading: marcando,

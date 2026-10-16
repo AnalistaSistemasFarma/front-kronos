@@ -16,6 +16,8 @@ import {
   Drawer,
   Group,
   Loader,
+  Modal,
+  Progress,
   NavLink,
   Popover,
   Stack,
@@ -24,11 +26,12 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
+import { useMediaQuery, useReducedMotion } from '@mantine/hooks';
 import {
   IconAdjustmentsHorizontal,
   IconAlertTriangle,
   IconCheck,
+  IconChecks,
   IconChevronRight,
   IconFlask,
   IconFolders,
@@ -42,7 +45,10 @@ import {
   IconSearch,
   IconX,
 } from '@tabler/icons-react';
+import toast from 'react-hot-toast';
 import SgcSelect from '../sgc/SgcSelect';
+import { CORREO_CONFIRMAR_MARCAR_CARPETA, CORREO_MAX_MARCAR_CARPETA, CORREO_MAX_MARCAR_SELECCION } from '../../lib/correo/constants';
+import { EVENTO_NO_LEIDOS } from '../../lib/correo/iconoHeader';
 import type { Carpeta } from '../../lib/correo/types';
 import { CorreoApiError, correoApi, esCancelada, fechaCorta, fechaLarga, urlSolicitud, type EstadoCorreo, type MensajeLista } from './correoClient';
 import { EsqueletoCarpetas, EsqueletoFilas } from './Esqueletos';
@@ -219,6 +225,7 @@ function ListaCarpetas({
 
 export default function CorreoPage() {
   const desktop = useMediaQuery('(min-width: 62em)') ?? false;
+  const reducirMovimiento = useReducedMotion();
   const [estado, setEstado] = useState<EstadoCorreo | null>(null);
   const [errorEstado, setErrorEstado] = useState<{ status: number; mensaje: string } | null>(null);
   const [empresa, setEmpresaState] = useState<string | null>(null);
@@ -236,6 +243,12 @@ export default function CorreoPage() {
   const peticionCarpetas = useRef<AbortController | null>(null);
   const [errorLista, setErrorLista] = useState<string | null>(null);
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
+  /** «Seleccionar los N correos de esta carpeta» (como Gmail): la selección es la carpeta entera, no solo la página. */
+  const [todaCarpeta, setTodaCarpeta] = useState(false);
+  /** Avance de «Marcar todo» (lotes de 200 en el servidor). */
+  const [marcado, setMarcado] = useState<{ leido: boolean; hechos: number; total: number } | null>(null);
+  const detenerMarcado = useRef(false);
+  const [confirmarMarcado, setConfirmarMarcado] = useState<{ leido: boolean; total: number } | null>(null);
   /** Hilo abierto EN EL LUGAR de la lista; vive en la dirección (?hilo=) para que «atrás» vuelva a la lista. */
   const [hiloAbierto, setHiloAbierto] = useState<string | null>(null);
   const [simulacion, setSimulacion] = useState<string[] | null>(null);
@@ -356,6 +369,7 @@ export default function CorreoPage() {
   useEffect(() => {
     if (!listo) return;
     setSeleccion(new Set());
+    setTodaCarpeta(false);
     void cargarMensajes(filtros);
   }, [listo, filtros, cargarMensajes]);
 
@@ -375,13 +389,15 @@ export default function CorreoPage() {
     }
   };
 
-  const toggle = (id: string) =>
+  const toggle = (id: string) => {
+    setTodaCarpeta(false);
     setSeleccion((prev) => {
       const n = new Set(prev);
       if (n.has(id)) n.delete(id);
       else n.add(id);
       return n;
     });
+  };
   // La lista solo se muestra si es de los filtros ACTUALES: al cambiar de Recibidos a Enviados las filas viejas
   // desaparecen en el mismo render del clic (sin esperar al efecto) y en su lugar salen los esqueletos.
   const desactualizada = listaDe !== filtros;
@@ -417,6 +433,149 @@ export default function CorreoPage() {
 
   const hayFiltros = Boolean(filtros.buscar.trim() || filtros.desde || filtros.hasta || filtros.de.trim() || filtros.noLeidos || filtros.conAdjuntos);
 
+  // Icono del Correo en la cabecera: cada cambio del contador de la Bandeja de entrada (optimista, reversión o
+  // consulta) se avisa al instante, sin esperar a su caché de 3 minutos.
+  const noLeidosBandeja = carpetasOrdenadas(carpetas).find((c) => c.tipo === 'entrada')?.noLeidos;
+  useEffect(() => {
+    if (typeof noLeidosBandeja === 'number') window.dispatchEvent(new CustomEvent(EVENTO_NO_LEIDOS, { detail: { noLeidos: noLeidosBandeja } }));
+  }, [noLeidosBandeja]);
+
+  /** Suma (o resta) no leídos a la carpeta abierta, de forma optimista. */
+  const ajustarNoLeidos = (delta: number) => {
+    const id = carpetaActual?.id;
+    if (!id || !delta) return;
+    setCarpetas((prev) => prev.map((c) => (c.id === id ? { ...c, noLeidos: Math.max(0, c.noLeidos + delta) } : c)));
+  };
+
+  /**
+   * Leído / no leído de filas (selección o hilo): se pinta YA (filas en negrita o no y contadores) y, si Microsoft
+   * falla, se revierte tal cual estaba. `cambiar` decide qué filas cambian y a qué estado.
+   */
+  const optimista = async (cambiar: (m: MensajeLista) => boolean | null, llamar: () => Promise<{ cambiados: number; fallidos?: number }>): Promise<boolean> => {
+    const previos = new Map<string, boolean>();
+    let delta = 0;
+    setMensajes((prev) =>
+      prev.map((m) => {
+        const nuevo = cambiar(m);
+        if (nuevo === null || nuevo === m.leido) return m;
+        previos.set(m.id, m.leido);
+        return { ...m, leido: nuevo };
+      })
+    );
+    for (const m of mensajes) {
+      const nuevo = cambiar(m);
+      if (nuevo !== null && nuevo !== m.leido) delta += nuevo ? -1 : 1;
+    }
+    const carpetasAntes = carpetas;
+    ajustarNoLeidos(delta);
+    try {
+      const r = await llamar();
+      if (r.fallidos) {
+        toast.error(`${r.fallidos} correo(s) no se pudieron marcar (pudieron moverse o borrarse).`);
+        void cargarMensajes(filtros, { refresco: true });
+      }
+      cargarCarpetas();
+      return true;
+    } catch (e) {
+      setMensajes((prev) => prev.map((m) => (previos.has(m.id) ? { ...m, leido: previos.get(m.id)! } : m)));
+      setCarpetas(carpetasAntes);
+      toast.error(`No se pudo marcar: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    }
+  };
+
+  const marcarSeleccion = async (leido: boolean) => {
+    if (todaCarpeta) return marcarCarpetaEntera(leido);
+    const ids = [...seleccion];
+    const set = new Set(ids);
+    const ok = await optimista(
+      (m) => (set.has(m.id) ? leido : null),
+      async () => {
+        let cambiados = 0;
+        let fallidos = 0;
+        for (let i = 0; i < ids.length; i += CORREO_MAX_MARCAR_SELECCION) {
+          const r = await correoApi.marcarSeleccion(ids.slice(i, i + CORREO_MAX_MARCAR_SELECCION), leido);
+          cambiados += r.cambiados;
+          fallidos += r.fallidos;
+        }
+        return { cambiados, fallidos };
+      }
+    );
+    if (ok) {
+      setSeleccion(new Set());
+      toast.success(leido ? 'Marcados como leídos' : 'Marcados como no leídos');
+    }
+  };
+
+  /** El hilo abierto (al abrirlo o desde su barra): todas sus filas («leído») o la más reciente («no leído»). */
+  const marcarHilo = (conversationId: string, leido: boolean) => {
+    const delHilo = mensajes.filter((m) => m.conversationId === conversationId);
+    const ultimo = delHilo.reduce<MensajeLista | null>((u, m) => (!u || m.fecha > u.fecha ? m : u), null);
+    return optimista(
+      (m) => (m.conversationId !== conversationId ? null : leido ? true : m === ultimo || m.id === ultimo?.id ? false : null),
+      () => correoApi.marcarLeido(conversationId, leido)
+    );
+  };
+
+  /**
+   * «Marcar todo como leído» o la carpeta entera seleccionada: el servidor marca de a 200 por `$batch` (20 por lote
+   * de Graph) y el navegador repite mostrando el avance, con «Detener», confirmación desde 500 y tope de 5.000.
+   */
+  const marcarCarpetaEntera = async (leido: boolean, confirmado = false) => {
+    if (!carpetaActual || marcado) return;
+    const pendientes = leido ? carpetaActual.noLeidos : Math.max(0, carpetaActual.total - carpetaActual.noLeidos);
+    if (pendientes === 0) {
+      toast.success(leido ? 'No hay correos sin leer en esta carpeta' : 'No hay correos leídos en esta carpeta');
+      return;
+    }
+    if (pendientes > CORREO_CONFIRMAR_MARCAR_CARPETA && !confirmado) {
+      setConfirmarMarcado({ leido, total: pendientes });
+      return;
+    }
+    const total = Math.min(pendientes, CORREO_MAX_MARCAR_CARPETA);
+    const carpetasAntes = carpetas;
+    detenerMarcado.current = false;
+    setMarcado({ leido, hechos: 0, total });
+    // Optimista: las filas visibles y el contador de la carpeta.
+    setMensajes((prev) => prev.map((m) => ({ ...m, leido })));
+    ajustarNoLeidos(leido ? -carpetaActual.noLeidos : pendientes);
+    let hechos = 0;
+    let restantes = pendientes;
+    let error: string | null = null;
+    try {
+      while (!detenerMarcado.current && hechos < CORREO_MAX_MARCAR_CARPETA) {
+        const r = await correoApi.marcarCarpeta(filtros.carpeta, leido);
+        hechos += r.cambiados;
+        restantes = r.restantes;
+        setMarcado({ leido, hechos: Math.min(hechos, total), total });
+        if (r.restantes === 0 || r.cambiados === 0) break;
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      setMarcado(null);
+      setSeleccion(new Set());
+      setTodaCarpeta(false);
+    }
+    if (error && hechos === 0) {
+      // Nada se marcó: se revierte lo optimista.
+      setCarpetas(carpetasAntes);
+      void cargarMensajes(filtros, { refresco: true });
+      toast.error(`No se pudo marcar la carpeta: ${error}`);
+      return;
+    }
+    if (error || restantes > 0) {
+      // Parcial (error, «Detener» o tope): se trae el estado real.
+      void cargarMensajes(filtros, { refresco: true });
+      toast(
+        `Se marcaron ${hechos.toLocaleString('es-CO')} correo(s); quedan ${restantes.toLocaleString('es-CO')}.${error ? ` (${error})` : ' Use otra vez «Marcar todo» para continuar.'}`
+      );
+    } else {
+      toast.success(`${hechos.toLocaleString('es-CO')} correo(s) marcados como ${leido ? 'leídos' : 'no leídos'}`);
+    }
+    cargarCarpetas();
+  };
+
   if (errorEstado) {
     return (
       <Box p='md'>
@@ -435,6 +594,12 @@ export default function CorreoPage() {
   }
 
   const idEmpresa = Number(empresa) || estado.empresas[0]?.idCompany;
+  /** Leído / no leído escribe en el buzón (Mail.ReadWrite): mismo interruptor que las categorías (CORREO_ETIQUETAR_HABILITADO). */
+  const escritura = estado.conexion.etiquetarHabilitado;
+  const quitarSeleccion = () => {
+    setTodaCarpeta(false);
+    setSeleccion(new Set());
+  };
 
   const badgeSolicitud = (m: MensajeLista) =>
     m.solicitud ? (
@@ -564,7 +729,10 @@ export default function CorreoPage() {
             aria-label='Seleccionar todos'
             checked={todosMarcados}
             indeterminate={seleccion.size > 0 && !todosMarcados}
-            onChange={() => setSeleccion(todosMarcados ? new Set() : new Set(visibles.map((m) => m.id)))}
+            onChange={() => {
+              setTodaCarpeta(false);
+              setSeleccion(todosMarcados ? new Set() : new Set(visibles.map((m) => m.id)));
+            }}
             disabled={desactualizada}
             mx={6}
             data-testid='correo-seleccionar-todos'
@@ -574,20 +742,39 @@ export default function CorreoPage() {
       {seleccion.size > 0 ? (
         <Group justify='space-between' wrap='nowrap' gap='xs' style={{ flex: 1, minWidth: 0 }} data-testid='correo-barra-seleccion'>
           <Group gap='xs' wrap='nowrap' style={{ minWidth: 0 }}>
-            {!desktop && <CloseButton aria-label='Quitar selección' onClick={() => setSeleccion(new Set())} />}
-            <Text size='sm' fw={600} truncate>
-              {seleccion.size} correo(s) seleccionado(s)
+            {!desktop && <CloseButton aria-label='Quitar selección' onClick={quitarSeleccion} />}
+            <Text size='sm' fw={600} truncate data-testid='correo-seleccion-texto'>
+              {todaCarpeta && carpetaActual
+                ? `Todos los ${carpetaActual.total.toLocaleString('es-CO')} correos de ${carpetaActual.etiqueta}`
+                : `${seleccion.size} correo(s) seleccionado(s)`}
             </Text>
           </Group>
-          <Group gap='xs' wrap='nowrap'>
+          <Group gap={4} wrap='nowrap'>
+            {escritura && (
+              <>
+                <Tooltip label='Marcar como leído'>
+                  <ActionIcon variant='subtle' color='gray' radius='xl' size='lg' onClick={() => void marcarSeleccion(true)} disabled={Boolean(marcado)} aria-label='Marcar como leído' data-testid='correo-sel-leido'>
+                    <IconMailOpened size={18} />
+                  </ActionIcon>
+                </Tooltip>
+                <Tooltip label='Marcar como no leído'>
+                  <ActionIcon variant='subtle' color='gray' radius='xl' size='lg' onClick={() => void marcarSeleccion(false)} disabled={Boolean(marcado)} aria-label='Marcar como no leído' data-testid='correo-sel-no-leido'>
+                    <IconMail size={18} />
+                  </ActionIcon>
+                </Tooltip>
+              </>
+            )}
             {desktop && (
-              <Button variant='subtle' size='compact-sm' onClick={() => setSeleccion(new Set())}>
+              <Button variant='subtle' size='compact-sm' onClick={quitarSeleccion}>
                 Quitar selección
               </Button>
             )}
-            <Button size={desktop ? 'compact-md' : 'compact-sm'} leftSection={<IconFlask size={16} />} onClick={() => setSimulacion([...seleccion])} data-testid='correo-simular'>
-              {desktop ? 'Simular / Crear solicitudes' : 'Crear solicitudes'}
-            </Button>
+            {/* Simular / crear trabaja con correos concretos (máx. 50): no con la carpeta entera. */}
+            {!todaCarpeta && (
+              <Button size={desktop ? 'compact-md' : 'compact-sm'} leftSection={<IconFlask size={16} />} onClick={() => setSimulacion([...seleccion])} data-testid='correo-simular'>
+                {desktop ? 'Simular / Crear solicitudes' : 'Crear solicitudes'}
+              </Button>
+            )}
           </Group>
         </Group>
       ) : (
@@ -598,6 +785,13 @@ export default function CorreoPage() {
                 <IconRefresh size={18} />
               </ActionIcon>
             </Tooltip>
+            {escritura && (carpetaActual?.noLeidos ?? 0) > 0 && (
+              <Tooltip label='Marcar todo como leído'>
+                <ActionIcon variant='subtle' color='gray' radius='xl' size='lg' onClick={() => void marcarCarpetaEntera(true)} disabled={Boolean(marcado)} aria-label='Marcar todo como leído' data-testid='correo-marcar-todo'>
+                  <IconChecks size={18} />
+                </ActionIcon>
+              </Tooltip>
+            )}
             <Text size='sm' fw={600} truncate>
               {carpetaActual?.etiqueta ?? 'Recibidos'}
             </Text>
@@ -609,6 +803,42 @@ export default function CorreoPage() {
       )}
     </div>
   );
+
+  // ---------------------------------------------------------------- selección de la carpeta entera y avance
+  const totalCarpeta = carpetaActual?.total ?? 0;
+  const puedeTodaCarpeta = escritura && desktop && todosMarcados && !hayFiltros && totalCarpeta > visibles.length;
+  const avisoSeleccion =
+    todaCarpeta && carpetaActual ? (
+      <div className={css.avisoSeleccion} data-testid='correo-aviso-seleccion'>
+        <Text size='sm'>
+          Se seleccionaron los {totalCarpeta.toLocaleString('es-CO')} correos de {carpetaActual.etiqueta}.
+        </Text>
+        <Button variant='subtle' size='compact-sm' onClick={quitarSeleccion}>
+          Quitar la selección
+        </Button>
+      </div>
+    ) : puedeTodaCarpeta && carpetaActual ? (
+      <div className={css.avisoSeleccion} data-testid='correo-aviso-seleccion'>
+        <Text size='sm'>Se seleccionaron los {visibles.length} correos de esta página.</Text>
+        <Button variant='subtle' size='compact-sm' onClick={() => setTodaCarpeta(true)} data-testid='correo-seleccionar-carpeta'>
+          Seleccionar los {totalCarpeta.toLocaleString('es-CO')} correos de {carpetaActual.etiqueta}
+        </Button>
+      </div>
+    ) : null;
+
+  const progresoMarcado = marcado ? (
+    <div className={css.avisoSeleccion} role='status' data-testid='correo-marcado-progreso'>
+      <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
+        <Text size='sm'>
+          Marcando como {marcado.leido ? 'leídos' : 'no leídos'}: {marcado.hechos.toLocaleString('es-CO')} de {marcado.total.toLocaleString('es-CO')}…
+        </Text>
+        <Progress value={marcado.total ? (marcado.hechos / marcado.total) * 100 : 0} size='sm' animated={!reducirMovimiento} aria-label='Avance' />
+      </Stack>
+      <Button variant='default' size='compact-sm' onClick={() => (detenerMarcado.current = true)} data-testid='correo-marcado-detener'>
+        Detener
+      </Button>
+    </div>
+  ) : null;
 
   // ---------------------------------------------------------------- filas
   const filaEscritorio = (m: MensajeLista) => {
@@ -726,6 +956,8 @@ export default function CorreoPage() {
   const bandeja = (
     <Card withBorder radius='md' p={0} className={css.bandeja} style={hiloAbierto ? { display: 'none' } : undefined} data-testid='correo-bandeja'>
       {barra}
+      {avisoSeleccion}
+      {progresoMarcado}
       {/* La lista se desplaza por dentro (la barra queda fija); oculta, no desmontada, mientras se lee un hilo: al volver conserva la posición. */}
       <div className={css.listaScroll} data-testid='correo-lista-scroll'>
         {errorLista && !desactualizada && (
@@ -770,16 +1002,6 @@ export default function CorreoPage() {
     </Card>
   );
 
-  /** El hilo quedó leído / no leído desde su barra: se refleja en la lista y en los contadores sin recargar la carpeta. */
-  const alCambiarLeido = (conversationId: string, leido: boolean) => {
-    setMensajes((prev) => {
-      const delHilo = prev.filter((m) => m.conversationId === conversationId);
-      const ultimo = delHilo.reduce<MensajeLista | null>((u, m) => (!u || m.fecha > u.fecha ? m : u), null);
-      return prev.map((m) => (m.conversationId !== conversationId ? m : leido ? { ...m, leido: true } : m === ultimo ? { ...m, leido: false } : m));
-    });
-    cargarCarpetas();
-  };
-
   const hilo = hiloAbierto ? (
     <Card withBorder radius='md' p={0} className={css.panelHilo}>
       <HiloCorreo
@@ -790,7 +1012,8 @@ export default function CorreoPage() {
         nombreOperador={estado.usuario.nombre}
         correoOperador={estado.usuario.email}
         onVolver={cerrarHilo}
-        onLeido={alCambiarLeido}
+        escritura={escritura}
+        marcarHilo={marcarHilo}
         onCambio={() => setHayCambios(true)}
         onCrearSolicitud={(ids) => setSimulacion(ids)}
       />
@@ -848,6 +1071,41 @@ export default function CorreoPage() {
           </Drawer>
         </div>
       )}
+
+      <Modal
+        opened={Boolean(confirmarMarcado)}
+        onClose={() => setConfirmarMarcado(null)}
+        title={confirmarMarcado?.leido ? 'Marcar todo como leído' : 'Marcar todo como no leído'}
+        centered
+        data-testid='correo-confirmar-marcado'
+      >
+        {confirmarMarcado && (
+          <Stack gap='sm'>
+            <Text size='sm'>
+              Va a marcar {confirmarMarcado.total.toLocaleString('es-CO')} correos de {carpetaActual?.etiqueta ?? 'esta carpeta'} como{' '}
+              {confirmarMarcado.leido ? 'leídos' : 'no leídos'} en su buzón de Outlook.
+              {confirmarMarcado.total > CORREO_MAX_MARCAR_CARPETA
+                ? ` Por seguridad se marcan como máximo ${CORREO_MAX_MARCAR_CARPETA.toLocaleString('es-CO')} por vez; luego puede repetir.`
+                : ''}
+            </Text>
+            <Group justify='flex-end'>
+              <Button variant='default' onClick={() => setConfirmarMarcado(null)}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={() => {
+                  const c = confirmarMarcado;
+                  setConfirmarMarcado(null);
+                  void marcarCarpetaEntera(c.leido, true);
+                }}
+                data-testid='correo-confirmar-marcado-si'
+              >
+                Marcar {Math.min(confirmarMarcado.total, CORREO_MAX_MARCAR_CARPETA).toLocaleString('es-CO')} correos
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
 
       {simulacion && idEmpresa && (
         <SimulacionModal

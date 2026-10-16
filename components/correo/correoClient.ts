@@ -96,6 +96,10 @@ export const correoApi = {
   hilo: (id: string, remotas = false, signal?: AbortSignal) =>
     get<{ hilo: HiloVista }>(`/api/correo/hilo?${new URLSearchParams({ id, ...(remotas ? { remotas: '1' } : {}) })}`, signal),
   marcarLeido: (conversationId: string, leido: boolean) => post<{ cambiados: number }>('/api/correo/hilo/leido', { conversationId, leido }),
+  marcarSeleccion: (mensajesIds: string[], leido: boolean) => post<{ cambiados: number; fallidos: number }>('/api/correo/leido', { mensajesIds, leido }),
+  /** Un lote de «Marcar todo» (200): repetir mientras `restantes` > 0. carpeta null = Bandeja de entrada. */
+  marcarCarpeta: (carpeta: string | null, leido: boolean) =>
+    post<{ cambiados: number; fallidos: number; restantes: number }>('/api/correo/leido/carpeta', { carpeta, leido }),
   notas: (conversationId: string) => post<{ agregadas: number; idRequest: number }>('/api/correo/hilo/notas', { conversationId }),
   vincular: (conversationId: string, idRequest: number, acuse?: OpcionesAcuse) =>
     post<{ vinculo: VinculoHilo; acuse?: ResultadoAcuse }>('/api/correo/hilo/vincular', { conversationId, idRequest, ...(acuse ? { acuse } : {}) }),

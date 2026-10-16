@@ -25,6 +25,12 @@ const cache: Map<string, Entrada> =
   ((globalThis as Record<string, unknown>).__correoNoLeidos as Map<string, Entrada> | undefined) ??
   ((globalThis as Record<string, unknown>).__correoNoLeidos = new Map<string, Entrada>());
 
+/** Tras marcar leído / no leído: el próximo icono de la cabecera vuelve a consultar Graph. */
+export function invalidarNoLeidos(idUser: string): void {
+  const e = cache.get(idUser);
+  if (e && !e.pendiente) cache.delete(idUser);
+}
+
 /** Solo pruebas. */
 export function limpiarCacheNoLeidos(): void {
   cache.clear();
