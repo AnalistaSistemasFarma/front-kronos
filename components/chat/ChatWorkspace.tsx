@@ -66,8 +66,14 @@ const ChatMediaPanel = dynamic(() => import('./ChatMediaPanel'), { ssr: false })
 import { useChatOverview } from './useChatOverview';
 import { precargarHiloDeAgente } from './useChatConversation';
 import {
+  CHAT_CREATE_PARAM,
+  CHAT_RAIL_CREATE_EVENT,
   CHAT_RAIL_OPEN_EVENT,
+  chatCreateOptions,
+  isChatCreateKind,
   sortConversationsByActivity,
+  type ChatCreateDetail,
+  type ChatCreateKind,
   type ChatRailOpenDetail,
 } from '../../lib/chat/rail';
 import {
@@ -671,6 +677,50 @@ export default function ChatWorkspace({
     window.addEventListener(CHAT_RAIL_OPEN_EVENT, onAbrir);
     return () => window.removeEventListener(CHAT_RAIL_OPEN_EVENT, onAbrir);
   }, []);
+
+  // El botón "Nuevo" de la BARRA LATERAL (2026-10-06) abre aquí los MISMOS
+  // cuadros de siempre: por evento si la persona ya está en esta página, o por
+  // `?nuevo=<tipo>` si venía de otra pantalla. Solo se abre lo que esta persona
+  // puede crear (mismas condiciones que los botones de la página).
+  const abrirCreacion = useRef<(tipo: ChatCreateKind) => boolean>(() => false);
+  abrirCreacion.current = (tipo) => {
+    const permitidas = chatCreateOptions({
+      canMessagePeople: overview.canMessagePeople,
+      canCreateGroups: overview.canCreateGroups,
+      canBroadcast: overview.canBroadcast,
+      totalAgents: overview.agents.length,
+    });
+    if (!permitidas.includes(tipo)) return false;
+    if (tipo === 'persona') setPersonasAbierto(true);
+    else if (tipo === 'grupo') setGrupoNuevoAbierto(true);
+    else setMasivoAbierto(true);
+    return true;
+  };
+  useEffect(() => {
+    const onCrear = (evento: Event) => {
+      const tipo = (evento as CustomEvent<ChatCreateDetail>).detail?.tipo;
+      if (isChatCreateKind(tipo) && abrirCreacion.current(tipo)) evento.preventDefault();
+    };
+    window.addEventListener(CHAT_RAIL_CREATE_EVENT, onCrear);
+    return () => window.removeEventListener(CHAT_RAIL_CREATE_EVENT, onCrear);
+  }, []);
+
+  // `?nuevo=<tipo>`: se atiende una sola vez, cuando ya se saben los permisos,
+  // y se borra de la dirección para que recargar no vuelva a abrir el cuadro.
+  const creacionAtendida = useRef<string | null>(null);
+  const creacionPedida = searchParams.get(CHAT_CREATE_PARAM);
+  useEffect(() => {
+    if (!creacionPedida) {
+      creacionAtendida.current = null;
+      return;
+    }
+    if (!overview.ready || creacionAtendida.current === creacionPedida) return;
+    creacionAtendida.current = creacionPedida;
+    if (isChatCreateKind(creacionPedida)) abrirCreacion.current(creacionPedida);
+    const url = new URL(window.location.href);
+    url.searchParams.delete(CHAT_CREATE_PARAM);
+    window.history.replaceState(null, '', `${url.pathname}${url.search}`);
+  }, [creacionPedida, overview.ready]);
 
   // El hilo entre personas abierto, resuelto contra la bandeja (como el
   // grupo), con el recién abierto como respaldo mientras la bandeja lo trae.
