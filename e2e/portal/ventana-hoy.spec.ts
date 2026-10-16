@@ -147,6 +147,57 @@ test.describe('Portal TH · ventana emergente «Hoy»', () => {
     await expect(page.getByTestId('ventana-hoy-imagen')).toHaveCount(0);
   });
 
+  test('cada vez que se INICIA SESIÓN con el código vuelve a salir, aunque ya la hubiera visto hoy; y al cerrar sesión se reinicia', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    // «marcada»: hoy ya la vio (no sale al abrir). Con sesión cerrada no hay contenido; al validar el código, sí.
+    await preparar(page, HOY, { empresa: eventoEmpresa, marcada: true });
+    let dentro = false;
+    await page.route('**/api/portal/content', (r) =>
+      dentro
+        ? r.fulfill({ json: { email: 'e2e@gsslatam.com', via: 'codigo', documentos: [], banners: [], puedeEditar: false } })
+        : r.fulfill({ status: 401, json: { error: 'Sesión no válida.' } })
+    );
+    await page.route('**/api/portal/login', (r) => r.fulfill({ json: { ok: true, mensaje: 'Si su correo está autorizado, le llegará un código.' } }));
+    await page.route('**/api/portal/verify', (r) => {
+      dentro = true;
+      return r.fulfill({ json: { ok: true } });
+    });
+    await page.route('**/api/portal/logout', (r) => {
+      dentro = false;
+      return r.fulfill({ json: { ok: true } });
+    });
+    const iniciarSesion = async () => {
+      await page.getByPlaceholder('nombre.apellido@empresa.com').fill('nueva.persona@gsslatam.com');
+      await page.getByRole('button', { name: 'Enviarme el código' }).click();
+      await page.getByPlaceholder('000000').fill('123456');
+      await page.getByRole('button', { name: 'Entrar' }).click();
+    };
+
+    await page.goto('/portal');
+    await iniciarSesion();
+    // Aunque la marca de hoy estaba puesta, al iniciar sesión se reinició y la ventana sale.
+    await expect(ventana(page)).toBeVisible();
+    await expect(ventana(page).getByTestId('ventana-hoy-evento')).toHaveCount(1);
+    await page.getByTestId('ventana-hoy-cerrar').click();
+    await expect(ventana(page)).toBeHidden();
+
+    // Recargar SIN volver a iniciar sesión: no se reabre.
+    await page.reload();
+    await expect(page.getByRole('navigation', { name: 'Secciones del portal' })).toBeVisible();
+    await expect(ventana(page)).toHaveCount(0);
+
+    // Cerrar sesión y volver a entrar: sale otra vez.
+    await page.getByRole('button', { name: 'Salir' }).click();
+    await expect(page.getByPlaceholder('nombre.apellido@empresa.com')).toBeVisible();
+    expect(await page.evaluate((c) => window.localStorage.getItem(c), CLAVE(HOY))).toBeNull();
+    await iniciarSesion();
+    await expect(ventana(page)).toBeVisible();
+    if (CAPTURAS) {
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: `${CAPTURAS}/133-hoy-tras-iniciar-sesion.png` });
+    }
+  });
+
   test('celular: cabe en la pantalla y se cierra', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await preparar(page, HOY, { cumples: cumpleHoy, empresa: eventoEmpresa });

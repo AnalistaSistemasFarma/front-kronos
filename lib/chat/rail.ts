@@ -335,3 +335,59 @@ export function railOpenDetail(item: ChatRailItem): ChatRailOpenDetail {
   if (item.kind === 'people') return { tipo: 'persona', id: item.idConversation ?? 0 };
   return { tipo: 'grupo', id: item.idConversation ?? 0 };
 }
+
+/* ─────────────────────── Botón "Nuevo" de la barra ─────────────────────── */
+
+/**
+ * Pedido de Nicolás (2026-10-06): "quiero un botón en la barra lateral de chat
+ * que me deje crear todo: chat 1 a 1, grupos, etc."
+ *
+ * La barra NO tiene cuadros propios: cada opción abre el cuadro que ya existe
+ * en la página del chat (ChatWorkspace). Si la persona ya está en esa página,
+ * la barra le manda este evento; si está en otra pantalla, navega a
+ * `/process/chat?nuevo=<tipo>` y la página abre el cuadro al cargar.
+ */
+export const CHAT_RAIL_CREATE_EVENT = 'synerlink:chat-rail-crear';
+
+/** Parámetro de la URL con el que se pide abrir un cuadro de creación. */
+export const CHAT_CREATE_PARAM = 'nuevo';
+
+/** Qué se puede crear desde el botón: hilo con una persona, grupo o mensaje masivo. */
+export type ChatCreateKind = 'persona' | 'grupo' | 'masivo';
+
+export interface ChatCreateDetail {
+  tipo: ChatCreateKind;
+}
+
+const CREATE_KINDS: readonly ChatCreateKind[] = ['persona', 'grupo', 'masivo'];
+
+export function isChatCreateKind(value: unknown): value is ChatCreateKind {
+  return typeof value === 'string' && (CREATE_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * Las opciones del menú "Nuevo" que puede ver esta persona, en orden. Son las
+ * MISMAS condiciones con que la página del chat pinta cada acceso:
+ *   - persona: el piloto de mensajes entre personas (`canMessagePeople`).
+ *   - grupo: `canCreateGroups` (todo usuario con chat y algún agente, #517).
+ *   - masivo: solo administradores (`canBroadcast`) y con más de un asistente,
+ *     igual que el botón "Enviar a todos".
+ * La reja de verdad sigue en cada endpoint: esto solo decide qué se pinta.
+ */
+export function chatCreateOptions(permisos: {
+  canMessagePeople: boolean;
+  canCreateGroups: boolean;
+  canBroadcast: boolean;
+  totalAgents: number;
+}): ChatCreateKind[] {
+  const opciones: ChatCreateKind[] = [];
+  if (permisos.canMessagePeople) opciones.push('persona');
+  if (permisos.canCreateGroups) opciones.push('grupo');
+  if (permisos.canBroadcast && permisos.totalAgents > 1) opciones.push('masivo');
+  return opciones;
+}
+
+/** A dónde navegar para crear desde una pantalla que no es la del chat. */
+export function chatCreateHref(tipo: ChatCreateKind): string {
+  return `/process/chat?${CHAT_CREATE_PARAM}=${tipo}`;
+}
