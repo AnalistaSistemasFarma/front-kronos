@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   ActionIcon,
   Alert,
@@ -48,6 +49,7 @@ import {
   IconPaperclip,
   IconPhoto,
   IconRefresh,
+  IconRobot,
   IconSend,
   IconTrash,
 } from '@tabler/icons-react';
@@ -57,7 +59,8 @@ import { ACUSE_A_TODOS, ACUSE_ETIQUETA, enlaceSolicitud } from '../../lib/correo
 import { fragmentoAcuse, logoAcuseUrl } from '../../lib/correo/plantillas/acuse.html';
 import { htmlATexto } from '../../lib/correo/sanitize';
 import type { AdjuntoInfo, ResultadoAcuse } from '../../lib/correo/types';
-import { correoApi, esCancelada, fechaCorta, fechaLarga, PREVISUALIZABLES, tamano, urlAdjunto, urlSolicitud, type HiloVista, type MensajeVista } from './correoClient';
+import { correoApi, esCancelada, fechaCorta, fechaLarga, PREVISUALIZABLES, tamano, urlAdjunto, urlSolicitud, type ConcesionCorreo, type HiloVista, type MensajeVista } from './correoClient';
+import ConsultarAgenteModal from './ConsultarAgenteModal';
 import { EsqueletoHiloCorreo } from './Esqueletos';
 import EditorMarkdown from './EditorMarkdown';
 import HtmlSeguro from './HtmlSeguro';
@@ -333,6 +336,11 @@ export default function HiloCorreo({
   const [abiertos, setAbiertos] = useState<Set<string>>(new Set());
   const [verAdjunto, setVerAdjunto] = useState<{ url: string; nombre: string } | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
+  /** «Consultar a un agente»: selector y accesos vigentes de sus agentes a este hilo. */
+  const [agenteAbierto, setAgenteAbierto] = useState(false);
+  const [compartidos, setCompartidos] = useState<ConcesionCorreo[]>([]);
+  const [revocando, setRevocando] = useState<number | null>(null);
   /** Solo vale la respuesta del ÚLTIMO hilo pedido (si se abre otro antes de que llegue, la anterior se cancela). */
   const peticion = useRef<AbortController | null>(null);
   const yo = correoOperador.toLowerCase();
@@ -380,6 +388,8 @@ export default function HiloCorreo({
     setConfirmarInforme(false);
     setAbiertos(new Set());
     setError(null);
+    setCompartidos([]);
+    setAgenteAbierto(false);
     if (conversationId) void cargar(false);
     else {
       peticion.current?.abort();
@@ -389,6 +399,33 @@ export default function HiloCorreo({
   }, [conversationId, cargar]);
 
   useEffect(() => () => peticion.current?.abort(), []);
+
+  const cargarCompartidos = useCallback(async () => {
+    if (!conversationId) return;
+    try {
+      const r = await correoApi.compartidos(conversationId);
+      setCompartidos(r.compartidos);
+    } catch {
+      setCompartidos([]);
+    }
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (hilo?.conversationId) void cargarCompartidos();
+  }, [hilo?.conversationId, cargarCompartidos]);
+
+  const revocar = async (c: ConcesionCorreo) => {
+    setRevocando(c.id);
+    try {
+      await correoApi.revocar(c.id);
+      toast.success(`Se revocó el acceso de ${c.agente.displayName} a este hilo`);
+      setCompartidos((l) => l.filter((x) => x.id !== c.id));
+    } catch (e) {
+      setResultado({ color: 'red', texto: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setRevocando(null);
+    }
+  };
 
   const ultimo = hilo?.mensajes[hilo.mensajes.length - 1] ?? null;
   const variosDestinatarios = Boolean(ultimo && [ultimo.de, ...ultimo.para, ...ultimo.cc].filter((d) => d.correo && d.correo.toLowerCase() !== yo).length > 1);
@@ -618,6 +655,11 @@ export default function HiloCorreo({
           </Popover>
         )}
         {hilo &&
+          accion('Consultar a un agente', <IconRobot size={19} />, {
+            onClick: () => setAgenteAbierto(true),
+            'data-testid': 'correo-hilo-agente',
+          })}
+        {hilo &&
           escritura &&
           marcarHilo &&
           accion(leidoHilo ? 'Marcar como no leído' : 'Marcar como leído', leidoHilo ? <IconMail size={19} /> : <IconMailOpened size={19} />, {
@@ -770,6 +812,33 @@ export default function HiloCorreo({
                 </Card>
               )}
 
+              {compartidos.map((c) => (
+                <Card key={c.id} withBorder radius='md' p='xs' bg='var(--mantine-color-blue-light)' data-testid='correo-hilo-compartido'>
+                  <Group justify='space-between' wrap='wrap' gap='xs'>
+                    <Group gap='xs' wrap='nowrap' style={{ minWidth: 0 }}>
+                      <IconRobot size={18} style={{ flexShrink: 0 }} />
+                      <Text size='sm' style={{ minWidth: 0 }}>
+                        Compartido con <b>{c.agente.displayName}</b>
+                        <Text span size='xs' c='dimmed'>
+                          {' '}
+                          · hasta el {fechaLarga(c.venceEn)}
+                        </Text>
+                      </Text>
+                    </Group>
+                    <Group gap={6}>
+                      {c.agente.code && (
+                        <Button size='compact-xs' variant='subtle' onClick={() => router.push(`/process/chat/${encodeURIComponent(c.agente.code)}`)} data-testid='correo-hilo-compartido-chat'>
+                          Abrir el chat
+                        </Button>
+                      )}
+                      <Button size='compact-xs' variant='light' color='red' loading={revocando === c.id} onClick={() => revocar(c)} data-testid='correo-hilo-revocar'>
+                        Revocar
+                      </Button>
+                    </Group>
+                  </Group>
+                </Card>
+              ))}
+
               {bloqueadas > 0 && !remotas && (
                 <Alert color='gray' icon={<IconPhoto size={18} />} data-testid='correo-imagenes-bloqueadas'>
                   <Group justify='space-between' wrap='wrap' gap='xs'>
@@ -876,6 +945,19 @@ export default function HiloCorreo({
           )}
         </Stack>
       </div>
+      {hilo && (
+        <ConsultarAgenteModal
+          opened={agenteAbierto}
+          onClose={() => setAgenteAbierto(false)}
+          conversationId={hilo.conversationId}
+          asunto={hilo.asunto}
+          onCompartido={({ agente }) => {
+            setAgenteAbierto(false);
+            toast.success(`Hilo compartido con ${agente.displayName}`);
+            router.push(`/process/chat/${encodeURIComponent(agente.code)}`);
+          }}
+        />
+      )}
       <Modal opened={Boolean(verAdjunto)} onClose={() => setVerAdjunto(null)} title={verAdjunto?.nombre} size='xl' centered data-testid='correo-adjunto-previa'>
         {verAdjunto && <Image src={verAdjunto.url} alt={verAdjunto.nombre} fit='contain' mah='75vh' />}
       </Modal>

@@ -40,6 +40,10 @@ const RUTAS_FIJAS = [
   'app/api/bitacora-proceso/',
   // Módulo Correo: su integración (tests/integration/correo) y su reversa viven en este job.
   'lib/correo/',
+  // «Consultar a un agente»: el SQL de kronos-mcp se prueba en el mismo job (mcp/test-integracion).
+  'mcp/src/correo/',
+  'mcp/src/tools/correoAgente.ts',
+  'mcp/test-integracion/',
   // Base de datos: esquema, migraciones (SGC, Bitácora y Portal TH se prueban en el job) y SQL manual
   'prisma/',
   // Utilidades compartidas de las que depende el SGC (también las detecta el árbol de importaciones)

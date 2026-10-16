@@ -375,9 +375,18 @@ jobs:
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-15-correo-permiso.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-15-correo-tarea-sincronizacion-APAGADA.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-15-correo-tarea-sincronizacion-APAGADA.sql
+          # Correo · «Consultar a un agente» (2026-10-16): concesiones y propuestas, dos veces (idempotencia).
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261016100000_correo_agente/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261016100000_correo_agente/migration.sql
 
       - name: Pruebas de integración + cobertura de lib/sgc/db (vitest)
         run: npm run test:integration -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/integracion/junit.xml
+
+      - name: Integración del MCP (correo_* de «Consultar a un agente», SQL real)
+        # El SQL crudo de kronos-mcp (concesión, propuestas, auditoría) contra la MISMA base efímera.
+        run: |
+          cd mcp && (npm ci || npm install)
+          npx vitest run --config vitest.integration.config.ts --reporter=default
 
       - name: Reversas del SGC (ida y vuelta, S8 en adelante)
         # Cada reversa nueva se prueba contra la base efímera DESPUÉS de las
