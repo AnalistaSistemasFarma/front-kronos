@@ -6,13 +6,15 @@ import {
   PALETTE_STORAGE_KEY,
 } from '../../lib/theme/palettes';
 import { darkTokens, lightTokens } from '../../lib/theme/tokens';
+import { FONT_STACKS, FONT_STORAGE_KEY } from '../../lib/theme/fonts';
 
-function buildInitScript(): string {
+export function buildInitScript(): string {
   const light = JSON.stringify(lightTokens);
   const dark = JSON.stringify(darkTokens);
   const paletteKeys = JSON.stringify(Array.from(PALETTE_KEY_SET));
   const appearance = JSON.stringify(PALETTE_APPEARANCE);
   const landingVars = JSON.stringify(LANDING_CSS_VARS);
+  const fontStacks = JSON.stringify(FONT_STACKS);
 
   return `(function(){
 try{
@@ -85,6 +87,9 @@ if(pa){
   };
   for(var m in pmap){if(pmap[m])r.style.setProperty(m,pmap[m]);}
 }
+var FS=${fontStacks};
+var fk=localStorage.getItem('${FONT_STORAGE_KEY}');
+if(typeof fk==='string'&&Object.prototype.hasOwnProperty.call(FS,fk)){r.style.setProperty('--font-sans',FS[fk]);r.setAttribute('data-font',fk);}
 }
 }catch(e){}
 })();`;

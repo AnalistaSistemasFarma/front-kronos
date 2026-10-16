@@ -3,6 +3,7 @@ import './globals.css';
 import '@mantine/core/styles.css';
 import { Providers } from '../components/providers';
 import { ThemeInitScript } from '../components/theme/ThemeInitScript';
+import { FONT_FACE_VARIABLES } from '../lib/theme/fontFaces';
 import AppToaster from '../components/ui/AppToaster';
 import ServiceWorkerRegistrar from '../components/ServiceWorkerRegistrar';
 import RecuperacionActualizacion from '../components/errors/RecuperacionActualizacion';
@@ -31,7 +32,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang='es' suppressHydrationWarning>
+    <html lang='es' className={FONT_FACE_VARIABLES} suppressHydrationWarning>
       <head>
         <ThemeInitScript />
       </head>
