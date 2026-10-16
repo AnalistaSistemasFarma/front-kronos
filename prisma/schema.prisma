@@ -3902,3 +3902,66 @@ model EmailAudit {
   @@map("email_audit")
   @@schema("dbo")
 }
+
+// ---------------------------------------------------------------------------
+// «Consultar a un agente» desde un hilo del Correo (2026-10-16, diseño aprobado por
+// Nicolás Rivera 09:24–09:27). La persona comparte UN hilo con UNO de sus agentes del
+// chat por 24 h; el agente lo lee y PROPONE (respuesta, solicitud, nota). Solo el clic
+// de la persona en su sesión ejecuta: «obviamente es una decisión del usuario, no del
+// agente autónomamente». Migración: prisma/migrations/20261016100000_correo_agente.
+// ---------------------------------------------------------------------------
+
+/// Concesión: el agente puede leer SOLO este hilo del buzón de la persona, mientras
+/// esté vigente (expires_at, sin revoked_at). `token` es el identificador opaco que
+/// recibe el agente (share_id); el buzón sale de aquí, nunca de lo que diga el agente.
+model EmailAgentShare {
+  id                   Int       @id @default(autoincrement())
+  token                String    @db.NVarChar(64)
+  id_user              String    @db.NVarChar(50)
+  mailbox              String    @db.NVarChar(320)
+  conversation_id      String    @db.NVarChar(512)
+  asunto               String?   @db.NVarChar(255)
+  id_agent             Int
+  id_chat_conversation Int
+  created_at           DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  expires_at           DateTime  @db.DateTime2
+  revoked_at           DateTime? @db.DateTime2
+  revoked_by           String?   @db.NVarChar(50)
+
+  acciones EmailAgentAction[]
+
+  @@unique([token], map: "UQ_email_agent_share_token")
+  @@index([id_user, conversation_id], map: "IX_email_agent_share_hilo")
+  @@index([id_chat_conversation], map: "IX_email_agent_share_chat")
+  @@map("email_agent_share")
+  @@schema("dbo")
+}
+
+/// Acción PROPUESTA por el agente sobre un hilo compartido. Nunca se ejecuta sola:
+/// queda PENDIENTE como tarjeta en el chat hasta que la persona la confirma (o la
+/// descarta). EJECUTANDO es el candado de «un solo envío».
+model EmailAgentAction {
+  id              Int       @id @default(autoincrement())
+  id_share        Int
+  id_agent        Int
+  // RESPUESTA | SOLICITUD | NOTA
+  tipo            String    @db.NVarChar(12)
+  // PENDIENTE | EJECUTANDO | CONFIRMADA | DESCARTADA | FALLIDA
+  estado          String    @default("PENDIENTE") @db.NVarChar(12)
+  /// JSON con lo propuesto (cuerpo, a todos, proceso, título, nota…). Es la constancia
+  /// de qué confirmó la persona.
+  payload         String    @db.NVarChar(Max)
+  id_chat_message Int?
+  created_at      DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  decided_at      DateTime? @db.DateTime2
+  decided_by      String?   @db.NVarChar(50)
+  resultado       String?   @db.NVarChar(1000)
+  id_request      Int?
+
+  share EmailAgentShare @relation(fields: [id_share], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_share], map: "IX_email_agent_action_share")
+  @@index([id_chat_message], map: "IX_email_agent_action_mensaje")
+  @@map("email_agent_action")
+  @@schema("dbo")
+}
