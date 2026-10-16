@@ -16,6 +16,7 @@ import HeinsohnVentana from './HeinsohnVentana';
 import OrganigramaVisor from './OrganigramaVisor';
 import PoliticasVisor, { TEXTOS_AYUDAS } from './PoliticasVisor';
 import PortalCalendario from './PortalCalendario';
+import VentanaEventosHoy from './VentanaEventosHoy';
 import PortalNavegacion, { useSeccionActiva, type SeccionNav } from './PortalNavegacion';
 
 /** Cada cuánto rota sola la imagen principal del carrusel de anuncios. */
@@ -512,6 +513,8 @@ export default function PortalContenido({
 
   return (
     <>
+      {/* Ventana emergente con los eventos de hoy (del calendario): se abre al entrar y se cierra sola a los 15 s. */}
+      <VentanaEventosHoy />
       <div className='portal-th__layout'>
         {/* Columna izquierda: calendario y eventos del día ARRIBA, y debajo los botones de cada sección. */}
         <aside className='portal-th__lateral'>
