@@ -59,7 +59,6 @@ import { saveAs } from 'file-saver';
 import { PDFDocument } from 'pdf-lib';
 import ExcelJS from 'exceljs';
 import { addDataSheet, downloadWorkbook } from '../../../../../lib/dashboard/excel/excelHelpers';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 import { formatEstimatedPaymentDateShort } from '../../../../../lib/treasury/estimatedPaymentDate';
 
 function parseOrionFileIdFromAuthResolution(resolution?: string | null): string | null {
@@ -93,6 +92,7 @@ interface PaymentSchedulingTask {
   valor_pagar?: number | null;
   fecha_solicitada_pago: string;
   acreedor?: string | null;
+  subempresa?: string | null;
 }
 
 interface CompanyRow {
@@ -401,10 +401,10 @@ function PaymentSchedulingBoard() {
         }
     };
 
-    const fetchDepartments = async (userIdParam?: string) => {
+    const fetchDepartments = async (_userIdParam?: string) => {
         try {
-        const idUser = userIdParam || '';
-        const url = `/api/authorization/authorization-departments?userId=${idUser}`;
+        // El servidor toma el usuario de la sesión; no se envía ningún id.
+        const url = `/api/authorization/authorization-departments`;
 
         const response = await fetch(url);
         const data = await response.json();
@@ -561,6 +561,7 @@ function PaymentSchedulingBoard() {
         const columns = [
             { header: 'ID Solicitud', key: 'id', width: 12 },
             { header: 'Empresa', key: 'empresa', width: 26 },
+            { header: 'Subempresa', key: 'subempresa', width: 26 },
             { header: 'Tipo', key: 'tipo', width: 22 },
             { header: 'Subtipo', key: 'subtipo', width: 24 },
             { header: 'Documento', key: 'documento', width: 16 },
@@ -577,6 +578,7 @@ function PaymentSchedulingBoard() {
             return {
                 id: r.id_solicitud,
                 empresa: r.empresa ?? '',
+                subempresa: r.subempresa ?? '',
                 tipo: r.tipo_solicitud ?? '',
                 subtipo: r.subtipo_solicitud ?? '',
                 documento: a.doc,
@@ -601,44 +603,31 @@ function PaymentSchedulingBoard() {
     };
 
     const downloadConsolidatedPdf = async (rows: PaymentSchedulingTask[]): Promise<number> => {
-        const token = await getMicrosoftToken();
-        if (!token) throw new Error('No se pudo obtener el token de acceso a OneDrive.');
-
-        const base = process.env.MICROSOFTGRAPHUSERROUTE;
         const merged = await PDFDocument.create();
         let mergedCount = 0;
 
         for (const r of rows) {
-            const folder = `Request-${r.id_solicitud}`;
-            let children: Array<{
-                id: string;
-                name?: string;
-                file?: unknown;
-                '@microsoft.graph.downloadUrl'?: string;
-            }> = [];
-            try {
-                const res = await axios.get(
-                    `${base}root:/SAPSEND/TEC/SG/${folder}:/children`,
-                    { headers: { Authorization: `Bearer ${token}` } }
-                );
-                children = res.data?.value ?? [];
-            } catch (err) {
-                if (axios.isAxiosError(err) && err.response?.status === 404) continue;
-                throw err;
-            }
-
-            const pdfs = children.filter(
-                (it) => it.file && /\.pdf$/i.test(String(it.name || ''))
+            // Lista y descarga por el servidor: el token de Graph no sale del servidor.
+            const listRes = await fetch(
+                `/api/requests-general/list-attachments?requestId=${encodeURIComponent(String(r.id_solicitud))}&storagePath=SG&entityType=Request`
             );
+            const listData = (await listRes.json().catch(() => ({}))) as {
+                error?: string;
+                files?: Array<{ id: string; name?: string; '@microsoft.graph.downloadUrl'?: string }>;
+            };
+            if (!listRes.ok) {
+                throw new Error(listData.error || `Error listando adjuntos (HTTP ${listRes.status})`);
+            }
+            const children = Array.isArray(listData.files) ? listData.files : [];
+
+            const pdfs = children.filter((it) => /\.pdf$/i.test(String(it.name || '')));
 
             for (const pdf of pdfs) {
-                const downloadUrl = pdf['@microsoft.graph.downloadUrl'];
-                const bytesRes = downloadUrl
-                    ? await axios.get(downloadUrl, { responseType: 'arraybuffer' })
-                    : await axios.get(`${base}items/${pdf.id}/content`, {
-                          responseType: 'arraybuffer',
-                          headers: { Authorization: `Bearer ${token}` },
-                      });
+                // El enlace temporal de descarga de Graph es directo y no lleva el token.
+                const downloadUrl =
+                    pdf['@microsoft.graph.downloadUrl'] ||
+                    `/api/requests-general/attachment-file?requestId=${encodeURIComponent(String(r.id_solicitud))}&fileId=${encodeURIComponent(pdf.id)}&storagePath=SG&entityType=Request&download=1`;
+                const bytesRes = await axios.get(downloadUrl, { responseType: 'arraybuffer' });
                 try {
                     const src = await PDFDocument.load(bytesRes.data, { ignoreEncryption: true });
                     const pages = await merged.copyPages(src, src.getPageIndices());
@@ -841,9 +830,9 @@ function PaymentSchedulingBoard() {
                 </Text>
             )}
             </Table.Td>
-            <Table.Td style={{ minWidth: 150, maxWidth: 220 }}>
-            <Group gap={6} wrap='nowrap'>
-                <IconBuilding size={16} className='text-gray-400' style={{ flexShrink: 0 }} />
+            <Table.Td style={{ minWidth: 170, maxWidth: 260 }}>
+            <Group gap={6} wrap='nowrap' align='flex-start'>
+                <IconBuilding size={16} className='text-gray-400' style={{ flexShrink: 0, marginTop: 2 }} />
                 <div style={{ minWidth: 0 }}>
                     <Text size='sm' fw={500} truncate>
                         {req.usuario_asignado}
@@ -851,6 +840,11 @@ function PaymentSchedulingBoard() {
                     <Text size='xs' c='dimmed' truncate>
                         {req.empresa}
                     </Text>
+                    {req.subempresa && (
+                        <Text size='xs' c='dimmed' truncate>
+                            {req.subempresa}
+                        </Text>
+                    )}
                 </div>
             </Group>
             </Table.Td>
@@ -973,10 +967,15 @@ function PaymentSchedulingBoard() {
             )}
             </UnstyledButton>
 
-            <Group gap={6} wrap='nowrap'>
-                <IconBuilding size={14} className='text-gray-400' style={{ flexShrink: 0 }} />
-                <Text size='sm' truncate>{req.empresa}</Text>
-                <Badge variant='light' color='indigo' size='xs' ml='auto' style={{ flexShrink: 0 }}>
+            <Group gap={6} wrap='nowrap' align='flex-start'>
+                <IconBuilding size={14} className='text-gray-400' style={{ flexShrink: 0, marginTop: 2 }} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                    <Text size='sm' truncate>{req.empresa}</Text>
+                    {req.subempresa && (
+                        <Text size='xs' c='dimmed' truncate>{req.subempresa}</Text>
+                    )}
+                </div>
+                <Badge variant='light' color='indigo' size='xs' style={{ flexShrink: 0 }}>
                 {req.usuario_asignado}
                 </Badge>
             </Group>
@@ -1317,7 +1316,7 @@ function PaymentSchedulingBoard() {
                 {filteredRequests.map(renderCard)}
                 </Stack>
             ) : (
-                <div className='overflow-x-auto'>
+                <Table.ScrollContainer minWidth={1100}>
                 <Table striped highlightOnHover verticalSpacing='sm' horizontalSpacing='md'>
                     <Table.Thead
                         style={{
@@ -1347,7 +1346,7 @@ function PaymentSchedulingBoard() {
                     </Table.Thead>
                     <Table.Tbody>{filteredRequests.map(renderRow)}</Table.Tbody>
                 </Table>
-                </div>
+                </Table.ScrollContainer>
             )}
             </Card>
         </div>

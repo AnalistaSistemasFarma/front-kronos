@@ -9,6 +9,7 @@ import {
 } from '@/lib/orion/service';
 import { applyOrionDraftReviewWebhook } from '@/lib/orion/draftService';
 import type { OrionDraftReviewWebhookPayload, OrionWebhookPayload } from '@/lib/orion/types';
+import { fireAndForgetSignerTurnEmail } from '@/lib/orion/signerEmail';
 
 const TAG = '[integrations/orion/document-status]';
 
@@ -122,6 +123,14 @@ export async function POST(req: NextRequest) {
             : {}),
         },
       });
+
+      if (statusUpper === 'EN_PROCESO' || statusUpper === 'PENDIENTE_FIRMA') {
+        fireAndForgetSignerTurnEmail(pool, {
+          requestId,
+          fileId: currentState.fileId ?? fileId,
+          invitedByEmail: ctx.requester_email,
+        });
+      }
 
       return { notFound: false as const, ...currentState };
     });

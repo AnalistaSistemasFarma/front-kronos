@@ -110,9 +110,11 @@ test.describe('SGC documental · Sprint 2 · paridad visual con SynerLink', () =
   }
 
   test('[SGC-REQ-032] «Tareas documentales» se ve igual que «Tareas Asignadas» de SynerLink (misma cabecera, indicadores, filtros y columnas)', async ({ page }, testInfo) => {
-    await page.goto('/process/request-general/assigned-activities');
+    // 2026-10-09 (#49abf32, fuera del SGC): «Tareas Asignadas» de SynerLink se unificó con
+    // «Solicitudes Asignadas»; la ruta vieja redirige a assigned-requests?type=tasks.
+    await page.goto('/process/request-general/assigned-requests?type=tasks');
     await expect(page.getByRole('heading', { level: 1, name: /Tareas Asignadas/ })).toBeVisible({ timeout: 45_000 });
-    await expect(page.getByText('Lista de Tareas Asignadas')).toBeVisible();
+    await expect(page.getByText(/^Lista de (Solicitudes y )?Tareas Asignadas/)).toBeVisible();
     const synerlink = await shape(page);
     await testInfo.attach('synerlink-tareas-asignadas.png', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
 
@@ -123,13 +125,20 @@ test.describe('SGC documental · Sprint 2 · paridad visual con SynerLink', () =
     await testInfo.attach('paridad.json', { body: JSON.stringify({ synerlink, sgc }, null, 2), contentType: 'application/json' });
 
     expect(sgc.title).toBe('Tareas documentales');
-    expect(synerlink.title).toBe('Tareas Asignadas');
+    expect(synerlink.title).toMatch(/Tareas Asignadas$/);
+    // Estilo calculado: igual que SynerLink (cabecera, tarjeta, indicadores y filtros).
     expect(sgc.titleFont).toBe(synerlink.titleFont);
     expect(sgc.card).toBe(synerlink.card);
-    expect(sgc.kpis).toEqual(synerlink.kpis);
     expect(sgc.kpiStyle).toBe(synerlink.kpiStyle);
     expect(sgc.filters).toBe(synerlink.filters);
-    expect(sgc.headers).toEqual(synerlink.headers);
+    // D5 (E2E 2026-10-10): «Tareas documentales» se alineó con la vista de TAREAS de la pantalla
+    // unificada (mismas columnas e indicadores de tareas). La única diferencia permitida es el
+    // indicador «Solicitudes Pendientes», que no aplica a una bandeja que solo tiene tareas.
+    // S14 (R21, decisión de Nicolás del 2026-10-13): en el SGC la columna «Asunto» se llama «Nombre del documento».
+    expect(sgc.headers).toEqual(synerlink.headers.map((h) => (h === 'Asunto' ? 'Nombre del documento' : h)));
+    // (El anillo «Avance de tareas» expone su porcentaje, que depende de los datos de cada bandeja.)
+    const labels = (k: string[]) => k.filter((x) => !/^\d+%$/.test(x));
+    expect(labels(sgc.kpis)).toEqual(labels(synerlink.kpis).filter((k) => k !== 'Solicitudes Pendientes'));
   });
 });
 

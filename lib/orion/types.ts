@@ -8,6 +8,9 @@ export type OrionDocumentStatus =
   | string;
 
 export type OrionSignerState = {
+  /** Id del turno en Orion: ubica el slot exacto si el mismo correo firma varias veces. */
+  id?: string | null;
+  signerId?: string | null;
   email?: string;
   name?: string;
   status?: string;
@@ -25,6 +28,13 @@ export type OrionSignerState = {
   extensionRequestedAt?: string | null;
   /** Enviar correo con link Orion al enviar a firma / turno. */
   notifyByEmail?: boolean | null;
+  /**
+   * Elección local de correo cuando lo envía SynerLink (ORION_SIGNER_EMAIL_SENDER):
+   * Orion recibe notifyByEmail:false y su respuesta no debe borrar esta intención.
+   */
+  synerlinkNotify?: boolean | null;
+  /** Último correo SAPSEND de turno enviado por SynerLink (evita duplicados por webhook). */
+  synerlinkEmailedAt?: string | null;
   /** Este firmante debe aportar huella (además de rúbrica). */
   requireFingerprint?: boolean | null;
   /** ID visual de firma en el documento (editable; default = order). */

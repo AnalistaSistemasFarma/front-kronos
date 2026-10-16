@@ -30,7 +30,12 @@ const sgcSecurityHeaders = [
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=()' },
 ];
 
+// Id único por build: lo comparten el HTML/JS del cliente y el servidor
+// (/api/health/version) para detectar que hay una versión nueva desplegada.
+const appBuildId = `${(process.env.GITHUB_SHA ?? 'local').slice(0, 12)}-${Date.now().toString(36)}`;
+
 const nextConfig: NextConfig = {
+  generateBuildId: async () => appBuildId,
   async headers() {
     return [
       { source: '/process/sgc-documental/:path*', headers: sgcSecurityHeaders },
@@ -58,11 +63,14 @@ const nextConfig: NextConfig = {
   // Solo variables que el cliente necesita (sin prefijo NEXT_PUBLIC_).
   // Los secretos (p. ej. MICROSOFTCLIENTSECRET) deben quedar solo en .env y usarse en servidor.
   env: {
+    APP_BUILD_ID: appBuildId,
     API_EMAIL: process.env.API_EMAIL,
     MICROSOFTCLIENTID: process.env.MICROSOFTCLIENTID,
     MICROSOFTTENANTID: process.env.MICROSOFTTENANTID,
     MICROSOFTGRAPHUSERROUTE: process.env.MICROSOFTGRAPHUSERROUTE,
     MSCALLBACKURI: process.env.MSCALLBACKURI,
+    // Carpeta raíz de adjuntos en OneDrive (lib/onedrive/root.ts). Vacía = SAPSEND (producción).
+    ONEDRIVE_ROOT_FOLDER: process.env.ONEDRIVE_ROOT_FOLDER ?? '',
   },
 };
 
@@ -84,6 +92,10 @@ export default async function config(phase: string): Promise<NextConfig> {
     return {
       ...nextConfig,
       experimental: { ...nextConfig.experimental, webpackMemoryOptimizations: true },
+      // Aun así seguía subiendo a 4+ GB en una jornada (2026-10-15). Soltar antes las páginas
+      // compiladas que no se usan (por defecto 60 s y 5 páginas): volver a una página vieja
+      // la recompila, pero la memoria no se acumula durante el día.
+      onDemandEntries: { maxInactiveAge: 25 * 1000, pagesBufferLength: 2 },
     };
   }
 

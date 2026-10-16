@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { ActionIcon, Badge, Button, Card, FileInput, Group, Modal, ScrollArea, Stack, Table, Text, Textarea, Title, Tooltip } from '@mantine/core';
 import SgcSelect from '../SgcSelect';
-import { IconDownload, IconEye, IconTrash, IconUpload } from '@tabler/icons-react';
+import { IconEye, IconTrash, IconUpload } from '@tabler/icons-react';
+import SgcDocumentViewerModal from '../SgcDocumentViewerModal';
 import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 import { formatDateCO, formatFileSize } from './format';
 import { attachmentDraftLabel } from '../../../lib/sgc/draft/view';
@@ -22,17 +23,20 @@ export interface SgcAttachmentsCardProps {
   currentDraft?: SgcRequestDetail['currentDraft'];
   canUploadDraft: boolean;
   canUploadSupport: boolean;
+  /** Sprint 8: formatos del borrador (con el encabezado obligatorio, solo Word). */
+  draftFormats?: readonly string[];
   canWithdraw: (a: Attachment) => boolean;
   onUpload: (file: File, purpose: 'borrador' | 'soporte') => Promise<void>;
   onWithdraw: (id: number, reason: string) => Promise<void>;
 }
 
-export default function SgcAttachmentsCard({ requestId, attachments, currentDraft = null, canUploadDraft, canUploadSupport, canWithdraw, onUpload, onWithdraw }: SgcAttachmentsCardProps) {
+export default function SgcAttachmentsCard({ requestId, attachments, currentDraft = null, canUploadDraft, canUploadSupport, draftFormats = ['docx', 'doc', 'pdf'], canWithdraw, onUpload, onWithdraw }: SgcAttachmentsCardProps) {
   const [file, setFile] = useState<File | null>(null);
   const [purpose, setPurpose] = useState<'borrador' | 'soporte'>(canUploadDraft ? 'borrador' : 'soporte');
   const [uploading, setUploading] = useState(false);
   const [withdraw, setWithdraw] = useState<Attachment | null>(null);
   const [reason, setReason] = useState('');
+  const [viewing, setViewing] = useState<Attachment | null>(null);
   const active = attachments.filter((a) => !a.withdrawnAt);
 
   return (
@@ -109,9 +113,9 @@ export default function SgcAttachmentsCard({ requestId, attachments, currentDraf
                   <Table.Td data-label='Abrir'>
                     <Group gap={6} wrap='nowrap'>
                       {!a.withdrawnAt && (
-                        <Tooltip label='Descargar (queda registrado)'>
-                          <ActionIcon variant='subtle' color='blue' size='sm' component='a' href={`/api/sgc/requests/${requestId}/attachments/${a.id}`}>
-                            <IconDownload size={16} />
+                        <Tooltip label='Ver documento (queda registrado)'>
+                          <ActionIcon variant='subtle' color='blue' size='sm' aria-label='Ver documento' onClick={() => setViewing(a)} data-testid='sgc-adjunto-ver'>
+                            <IconEye size={16} />
                           </ActionIcon>
                         </Tooltip>
                       )}
@@ -143,7 +147,16 @@ export default function SgcAttachmentsCard({ requestId, attachments, currentDraf
             placeholder='Seleccione el archivo'
             value={file}
             onChange={setFile}
-            accept={purpose === 'borrador' ? '.docx,.doc,.pdf' : undefined}
+            accept={purpose === 'borrador' ? draftFormats.map((f) => `.${f}`).join(',') : undefined}
+            description={
+              purpose === 'borrador' && !draftFormats.includes('pdf')
+                ? draftFormats.includes('xlsx')
+                  ? draftFormats.includes('docx')
+                    ? 'El borrador va en Word (.docx) o en Excel (.xlsx), sin convertirlo: el sistema le pone el encabezado institucional.'
+                    : 'El borrador va en Excel (.xlsx), sin convertirlo: el sistema le pone el encabezado institucional.'
+                  : 'El borrador va en Word (.docx): el sistema le pone el encabezado institucional.'
+                : undefined
+            }
             style={{ flex: 1, minWidth: 240 }}
             clearable
             data-testid='sgc-adjunto-archivo'
@@ -177,6 +190,7 @@ export default function SgcAttachmentsCard({ requestId, attachments, currentDraf
           </Button>
         </Group>
       )}
+      <SgcDocumentViewerModal fileUrl={viewing ? `/api/sgc/requests/${requestId}/attachments/${viewing.id}` : null} title={viewing?.fileName ?? ''} onClose={() => setViewing(null)} />
       <Modal opened={Boolean(withdraw)} onClose={() => setWithdraw(null)} title='Retirar adjunto' centered>
         <Stack>
           <Text size='sm'>

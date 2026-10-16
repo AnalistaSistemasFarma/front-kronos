@@ -8,14 +8,19 @@ import { moduleLabel, outboundHostLabel } from '../../../lib/system-metrics/rout
 import {
   isMissingTableError,
   parseRange,
+  readActiveUsers,
   readDbSeries,
   readModuleSeries,
   readModuleShare,
   readPeriodSummaries,
   readProcessLifetimes,
   readProcessSeries,
+  readRecentAlerts,
   readRouteRanking,
+  readUserRanking,
 } from '../../../lib/system-metrics/store';
+
+const ALERT_HISTORY_HOURS = 48;
 
 /**
  * GET /api/system-metrics?range=1h|6h|24h|7d
@@ -51,7 +56,40 @@ export async function GET(request: NextRequest) {
             readModuleSeries(pool, range),
             readProcessLifetimes(pool, range),
           ]);
-        return { processSeries, inbound, outbound, modules, db, summary, moduleSeries, lifetimes };
+        // Consumo por usuario: tabla aparte (script 2026-10-06); si falta, no tumba lo demás.
+        let users: Awaited<ReturnType<typeof readUserRanking>> = [];
+        let activeUsers: Awaited<ReturnType<typeof readActiveUsers>> | null = null;
+        let usersTableMissing = false;
+        try {
+          [users, activeUsers] = await Promise.all([readUserRanking(pool, range), readActiveUsers(pool, range)]);
+        } catch (error) {
+          if (!isMissingTableError(error)) throw error;
+          usersTableMissing = true;
+        }
+        // Alertas tempranas: también en tabla aparte (script 2026-10-07).
+        let alerts: Awaited<ReturnType<typeof readRecentAlerts>> = [];
+        let alertsTableMissing = false;
+        try {
+          alerts = await readRecentAlerts(pool, ALERT_HISTORY_HOURS, 60);
+        } catch (error) {
+          if (!isMissingTableError(error)) throw error;
+          alertsTableMissing = true;
+        }
+        return {
+          alerts,
+          alertsTableMissing,
+          processSeries,
+          inbound,
+          outbound,
+          modules,
+          db,
+          summary,
+          moduleSeries,
+          lifetimes,
+          users,
+          activeUsers,
+          usersTableMissing,
+        };
       });
 
       return NextResponse.json({
@@ -66,6 +104,16 @@ export async function GET(request: NextRequest) {
         summary: data.summary,
         moduleSeries: data.moduleSeries.map((m) => ({ ...m, label: moduleLabel(m.module) })),
         lifetimes: data.lifetimes,
+        users: data.users.map((u) => ({
+          ...u,
+          topModuleLabel: u.topModule ? moduleLabel(u.topModule) : null,
+          modules: u.modules.map((m) => ({ ...m, label: moduleLabel(m.module) })),
+        })),
+        activeUsers: data.activeUsers,
+        usersTableMissing: data.usersTableMissing,
+        alerts: data.alerts,
+        alertsTableMissing: data.alertsTableMissing,
+        alertHistoryHours: ALERT_HISTORY_HOURS,
       });
     } catch (error) {
       if (!isMissingTableError(error)) throw error;
@@ -81,6 +129,12 @@ export async function GET(request: NextRequest) {
         summary: null,
         moduleSeries: [],
         lifetimes: [],
+        users: [],
+        activeUsers: null,
+        usersTableMissing: false,
+        alerts: [],
+        alertsTableMissing: false,
+        alertHistoryHours: ALERT_HISTORY_HOURS,
       });
     }
   } catch (error) {

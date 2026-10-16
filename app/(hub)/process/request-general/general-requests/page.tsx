@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 import Link from 'next/link';
 import {
   Title,
@@ -29,7 +31,6 @@ import {
   Collapse,
   Box,
   Flex,
-  Progress,
   RingProgress,
   Loader,
   Pagination,
@@ -62,6 +63,7 @@ import {
   buildTaskDisplayBadges,
   getSimplifiedTasksProgress,
 } from '@/lib/orion/taskProgress';
+import { RequestProgressBar } from '../../../../../components/request-general/RequestProgressBar';
 
 const ITEMS_PER_PAGE = 100;
 
@@ -174,17 +176,16 @@ function RequestGeneralPage() {
     process: '',
   });
   const [currentPage, setCurrentPage] = useState(1);
+  // Paginación en el servidor: `tickets` es solo la página actual; total y contadores vienen
+  // de SQL sobre el conjunto filtrado (antes se descargaba todo el historial al navegador).
+  const [totalTickets, setTotalTickets] = useState(0);
+  const [statusCounts, setStatusCounts] = useState({ open: 0, resolved: 0 });
+  // Filtros con los que se cargó la lista: al cambiar de página se reutilizan (no los que
+  // el usuario esté editando sin pulsar "Aplicar").
+  const appliedFiltersRef = useRef<typeof filters | null>(null);
 
-  // Paginación en cliente: al cambiar el conjunto de tickets (nuevo fetch / filtros) vuelve a página 1.
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [tickets]);
-
-  const totalPages = Math.max(1, Math.ceil(tickets.length / ITEMS_PER_PAGE));
-  const pageItems = tickets.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE
-  );
+  const totalPages = Math.max(1, Math.ceil(totalTickets / ITEMS_PER_PAGE));
+  const pageItems = tickets;
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
@@ -262,7 +263,15 @@ function RequestGeneralPage() {
 
   const fetchTasksForTickets = async (ticketsToUse: Ticket[]) => {
     try {
-      const response = await fetch('/api/requests-general/activities-requets');
+      // Solo las tareas de las solicitudes visibles (antes: la tabla completa de tareas).
+      const ids = [...new Set(ticketsToUse.map((t) => t.id))];
+      if (ids.length === 0) {
+        setTasksByRequest({});
+        return;
+      }
+      const response = await fetch(
+        `/api/requests-general/activities-requets?ids=${ids.join(',')}`
+      );
       if (!response.ok) throw new Error('Failed to fetch request tasks');
 
       const data: RequestTask[] = await response.json();
@@ -282,13 +291,17 @@ function RequestGeneralPage() {
 
   const fetchTicketsWithUserId = async (
     userIdToUse: number,
-    filtersToUse: typeof filters = filters
+    filtersToUse: typeof filters = filters,
+    page = 1
   ) => {
     try {
       setLoading(true);
+      appliedFiltersRef.current = filtersToUse;
 
       const params = new URLSearchParams();
       params.append('idUser', userIdToUse.toString());
+      params.append('page', String(page));
+      params.append('pageSize', String(ITEMS_PER_PAGE));
 
       if (filtersToUse.status) params.append('status', filtersToUse.status);
       if (filtersToUse.company) params.append('company', filtersToUse.company);
@@ -304,10 +317,20 @@ function RequestGeneralPage() {
 
       if (!response.ok) throw new Error('Failed to fetch tickets');
 
-      const data = await response.json();
-      console.log('fetchTicketsWithUserId: Tickets recibidos:', data.length, 'tickets');
-      setTickets(data);
-      fetchTasksForTickets(data);
+      const data = (await response.json()) as {
+        rows: Ticket[];
+        total: number;
+        counts: { open: number; resolved: number };
+      };
+      const rows = Array.isArray(data.rows) ? data.rows : [];
+      setTickets(rows);
+      setTotalTickets(Number(data.total) || 0);
+      setStatusCounts({
+        open: Number(data.counts?.open) || 0,
+        resolved: Number(data.counts?.resolved) || 0,
+      });
+      setCurrentPage(page);
+      fetchTasksForTickets(rows);
     } catch (err) {
       console.error('Error fetching tickets:', err);
       setError('Unable to load tickets. Please try again.');
@@ -546,6 +569,61 @@ function RequestGeneralPage() {
     )
   );
 
+  async function exportToExcel() {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Datos');
+
+    type TicketKeys = keyof Ticket;
+
+    const formatDate = (raw: any) => {
+      if (!raw) return '';
+      const d = new Date(raw);
+      if (isNaN(d.getTime())) return String(raw);
+      return new Intl.DateTimeFormat('es-CO', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(d);
+    };
+
+    const dateKeys: TicketKeys[] = ['created_at'];
+
+    const columnMapOrdered: { key: TicketKeys; header: string; width: number }[] = [
+      { key: 'requester', header: 'Solicitante', width: 24 },
+      { key: 'user', header: 'Asignado', width: 24 },
+      { key: 'company', header: 'Empresa', width: 24 },
+      { key: 'category', header: 'Categoría', width: 22 },
+      { key: 'subject', header: 'Asunto', width: 30 },
+      { key: 'description', header: 'Descripción', width: 40 },
+      { key: 'status', header: 'Estado', width: 18 },
+      { key: 'created_at', header: 'Fecha de creación', width: 20 },
+    ];
+
+    worksheet.columns = columnMapOrdered;
+
+    tickets.forEach(item => {
+      const row: Record<TicketKeys, any> = {} as Record<TicketKeys, any>;
+
+      columnMapOrdered.forEach(col => {
+        const value = item[col.key];
+        row[col.key] = dateKeys.includes(col.key) ? formatDate(value) : value;
+      });
+
+      worksheet.addRow(row);
+    });
+
+    worksheet.getRow(1).font = { bold: true };
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+
+    saveAs(blob, 'InformeSolicitudes.xlsx');
+  }
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
       <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
@@ -598,7 +676,7 @@ function RequestGeneralPage() {
                       Total de Solicitudes
                     </Text>
                     <Text size='lg' fw={600}>
-                      {tickets.length}
+                      {totalTickets}
                     </Text>
                   </div>
                 </Group>
@@ -630,7 +708,7 @@ function RequestGeneralPage() {
                       Pendientes
                     </Text>
                     <Text size='lg' fw={600}>
-                      {tickets.filter((t) => t.status?.toLowerCase() === 'abierto').length}
+                      {statusCounts.open}
                     </Text>
                   </div>
                 </Group>
@@ -662,7 +740,7 @@ function RequestGeneralPage() {
                       Completadas
                     </Text>
                     <Text size='lg' fw={600}>
-                      {tickets.filter((t) => t.status?.toLowerCase() === 'resuelto').length}
+                      {statusCounts.resolved}
                     </Text>
                   </div>
                 </Group>
@@ -689,7 +767,7 @@ function RequestGeneralPage() {
                       />
                       <div>
                         <Text size='xs' c='dimmed'>
-                          Avance de tareas
+                          Avance de tareas{totalPages > 1 ? ' (esta página)' : ''}
                         </Text>
                         <Text size='lg' fw={600}>
                           {done}/{total}
@@ -851,7 +929,8 @@ function RequestGeneralPage() {
 
                     setTimeout(async () => {
                       if (userId) {
-                        await fetchTicketsWithUserId(userId);
+                        // Con los filtros limpios: el estado `filters` de este render aún es el anterior.
+                        await fetchTicketsWithUserId(userId, clearedFilters);
                       }
                     }, 100);
                   }}
@@ -931,25 +1010,7 @@ function RequestGeneralPage() {
                         </Text>
                         {tasksByRequest[ticket.id]?.length ? (
                           <Stack gap={6} mt={8}>
-                            {(() => {
-                              const { total, done, percent } = getTasksProgress(
-                                tasksByRequest[ticket.id]
-                              );
-                              return (
-                                <Group gap={8} wrap='nowrap'>
-                                  <Progress
-                                    value={percent}
-                                    color={percent === 100 ? 'green' : 'blue'}
-                                    size='sm'
-                                    radius='xl'
-                                    style={{ flex: 1, maxWidth: 120 }}
-                                  />
-                                  <Text size='xs' c='dimmed' fw={500} style={{ whiteSpace: 'nowrap' }}>
-                                    {done}/{total}
-                                  </Text>
-                                </Group>
-                              );
-                            })()}
+                            <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
                             <Group gap={6} wrap='wrap'>
                               {buildTaskDisplayBadges(tasksByRequest[ticket.id]).map((badge) => {
                                 const { color, Icon } = getTaskVisual(badge.statusKey);
@@ -1062,7 +1123,15 @@ function RequestGeneralPage() {
 
           {totalPages > 1 && (
             <Group justify='center' mt='md'>
-              <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} />
+              <Pagination
+                total={totalPages}
+                value={currentPage}
+                onChange={(page) => {
+                  if (userId) {
+                    void fetchTicketsWithUserId(userId, appliedFiltersRef.current ?? filters, page);
+                  }
+                }}
+              />
             </Group>
           )}
         </Card>

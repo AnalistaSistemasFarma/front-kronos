@@ -27,6 +27,17 @@ export const SGC_SCHEMA_MIGRATIONS = [
   '20261001100000_sgc_s5_relaciones_vencimientos_accesos',
   '20261001200000_sgc_s6_endurecimiento',
   '20261003120000_sgc_correcciones_calidad',
+  '20261008100000_sgc_s8_encabezado_listado_maestro',
+  '20261008110000_sgc_s9_archivos_relaciones_correo',
+  '20261008120000_sgc_s10_capacitacion_opcional',
+  '20261008130000_sgc_s11_copias_no_controladas',
+  '20261008140000_sgc_s12_aprobadores_sustitutos',
+  '20261008150000_sgc_s13_firma_propia_registro',
+  '20261010100000_sgc_generador_plantillas',
+  '20261014100000_sgc_s15_modelo_roles',
+  '20261014110000_sgc_s16_encabezados_excel',
+  '20261014120000_sgc_s17_evaluaciones',
+  '20261014130000_sgc_s19_generador_sin_codificacion',
 ];
 
 export function sha256Hex(content) {
@@ -185,6 +196,8 @@ export function payloadFromRow(row) {
     masterSha256: trimOrNull(row.master_sha256),
     ip: row.ip ?? null,
     userAgent: row.user_agent ?? null,
+    // Sprint 12: solo las firmas de un sustituto llevan «en sustitución de» (las demás conservan su hash).
+    ...(row.on_behalf_of && String(row.on_behalf_of).trim() ? { onBehalfOf: String(row.on_behalf_of).trim() } : {}),
   };
 }
 

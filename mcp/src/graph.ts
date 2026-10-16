@@ -1,11 +1,15 @@
 /**
- * Cliente MS Graph (OneDrive) de SOLO LECTURA para el MCP de Kronos.
+ * Cliente MS Graph (OneDrive) para el MCP de Kronos.
  *
  * SynerLink/Kronos sube los adjuntos de cada solicitud/ticket a OneDrive vía
  * Microsoft Graph, usando un flujo APP-ONLY (client_credentials). Este módulo
  * REUTILIZA esas mismas credenciales (las mismas variables de entorno que ya
- * usa el front) para poder LISTAR y resolver la descarga de esos archivos
- * reales desde el MCP. No escribe ni borra nada en OneDrive.
+ * usa el front) para LISTAR y resolver la descarga de esos archivos reales
+ * desde el MCP y, además, para las DOS escrituras acotadas de adjuntos:
+ *   - subir (ensureFolder + uploadFileToFolder), igual que el front-kronos,
+ *     pero SIN sobrescribir un archivo existente (conflictBehavior=fail);
+ *   - eliminar un archivo puntual (deleteItem), que la tool solo invoca tras
+ *     verificar que el archivo pertenece a la carpeta de la solicitud.
  *
  * Variables de entorno reutilizadas del front-kronos:
  *   - MICROSOFTCLIENTID
@@ -169,6 +173,118 @@ export class GraphClient {
     }
     const arr = await resp.arrayBuffer();
     return Buffer.from(arr);
+  }
+
+  /**
+   * ESCRITURA. Resuelve (o crea, si no existe) la carpeta `folderName` dentro
+   * de `basePath` (ruta relativa a la raíz del drive, p.ej. `SAPSEND/TEC/SG`) y
+   * devuelve el id del driveItem de la carpeta.
+   *
+   * Sigue el mismo flujo del front-kronos (lib/onedrive/graphFolderUpload.ts):
+   * primero GET de la ruta; si no existe, POST .../children con
+   * `conflictBehavior: 'fail'` (nunca 'replace', que podría reemplazar una
+   * carpeta con documentos); si otra subida la creó en paralelo (409), se
+   * vuelve a leer. Asume que `basePath` ya existe (lo crea la app).
+   */
+  async ensureFolder(basePath: string, folderName: string): Promise<string> {
+    const fullPath = encodePath(`${basePath}/${folderName}`);
+    const getFolder = async (): Promise<string | null> => {
+      const resp = await fetch(`${this.cfg.driveRoute}root:/${fullPath}`, {
+        headers: await this.authHeaders(),
+      });
+      if (resp.status === 404) return null;
+      if (!resp.ok) {
+        const detail = await safeText(resp);
+        throw new Error(`Error resolviendo carpeta OneDrive (${resp.status}): ${detail}`);
+      }
+      const item = (await resp.json()) as GraphRawItem & { folder?: unknown };
+      if (!item.id || !item.folder) {
+        throw new Error('La ruta de la carpeta destino en OneDrive no es una carpeta.');
+      }
+      return item.id;
+    };
+
+    const existing = await getFolder();
+    if (existing) return existing;
+
+    const resp = await fetch(`${this.cfg.driveRoute}root:/${encodePath(basePath)}:/children`, {
+      method: 'POST',
+      headers: {
+        ...(await this.authHeaders()),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: folderName,
+        folder: {},
+        '@microsoft.graph.conflictBehavior': 'fail',
+      }),
+    });
+    if (resp.ok) {
+      const item = (await resp.json()) as GraphRawItem;
+      if (!item.id) throw new Error('Respuesta de MS Graph al crear la carpeta sin id.');
+      return item.id;
+    }
+    if (resp.status === 409) {
+      const retry = await getFolder();
+      if (retry) return retry;
+    }
+    const detail = await safeText(resp);
+    throw new Error(`Error creando carpeta OneDrive (${resp.status}): ${detail}`);
+  }
+
+  /**
+   * ESCRITURA. Sube (PUT) el contenido de un archivo dentro de la carpeta
+   * `folderId`. `name` debe venir ya saneado (sanitizeOneDriveName); se
+   * codifica solo el segmento del nombre, dejando intactos los `:` de la
+   * sintaxis de direccionamiento de Graph.
+   *
+   * A diferencia de la app, NUNCA sobrescribe: usa
+   * `@microsoft.graph.conflictBehavior=fail`, de modo que un agente no puede
+   * reemplazar en silencio un documento existente (p.ej. uno ya firmado). Si el
+   * nombre ya existe, Graph responde 409 y se informa con un error claro.
+   */
+  async uploadFileToFolder(
+    folderId: string,
+    name: string,
+    content: Buffer,
+    contentType: string
+  ): Promise<GraphFile> {
+    const url =
+      `${this.cfg.driveRoute}items/${encodeURIComponent(folderId)}:/${encodeURIComponent(name)}:/content` +
+      '?@microsoft.graph.conflictBehavior=fail';
+    const resp = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        ...(await this.authHeaders()),
+        'Content-Type': contentType,
+      },
+      body: content,
+    });
+    if (resp.status === 409) {
+      throw new Error(
+        `Ya existe un archivo llamado "${name}" en la carpeta de la solicitud; no se sobrescribe. Use otro nombre o etiqueta.`
+      );
+    }
+    if (!resp.ok) {
+      const detail = await safeText(resp);
+      throw new Error(`Error subiendo archivo a OneDrive (${resp.status}): ${detail}`);
+    }
+    const item = (await resp.json()) as GraphRawItem;
+    return toGraphFile(item);
+  }
+
+  /**
+   * ESCRITURA. Elimina un driveItem por id (va a la papelera de OneDrive). 404
+   * se trata como idempotente (ya no existe), igual que deleteOneDriveItem del
+   * front. El llamador DEBE validar antes que el item pertenece a la carpeta de
+   * la solicitud: este método no conoce el alcance.
+   */
+  async deleteItem(itemId: string): Promise<void> {
+    const url = `${this.cfg.driveRoute}items/${encodeURIComponent(itemId)}`;
+    const resp = await fetch(url, { method: 'DELETE', headers: await this.authHeaders() });
+    if (resp.ok || resp.status === 204 || resp.status === 404) return;
+    const detail = await safeText(resp);
+    throw new Error(`Error eliminando archivo en OneDrive (${resp.status}): ${detail}`);
   }
 }
 

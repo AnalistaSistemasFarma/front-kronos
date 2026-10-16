@@ -7,6 +7,8 @@ import { IconCircleCheckFilled, IconDeviceFloppy } from '@tabler/icons-react';
 import {
   SGC_FIELD_KIND,
   fromPlacements,
+  justPlaced,
+  nextOrderWithoutBox,
   toPlacements,
   type SgcPlacementParticipant,
   type SgcStoredField,
@@ -27,14 +29,24 @@ import SgcSignersPlacementList from './SgcSignersPlacementList';
  * controlado. Lo propio del SGC: el documento es la VISTA PREVIA del
  * documento final (/api/sgc/requests/<id>/layout/preview) y se guarda en
  * /api/sgc/requests/<id>/layout (no en Orión).
+ *
+ * S16 (R35, D22): el área del documento es más grande (la página se muestra
+ * hasta 1.000 px de ancho, también en SynerLink: el cambio se hizo en ambos
+ * lienzos y la prueba de paridad sigue igual) y hay menos clics: al ubicar la
+ * caja de una persona se pasa sola a la siguiente sin caja (solo en este
+ * contenedor; no cambia el marcado compartido).
  */
 
 export interface SgcLayoutData {
   idRequest: number;
   institutionalHeader: boolean;
+  /** Sprint 8: encabezado institucional obligatorio (configuración de la empresa). */
+  headerMandatory?: boolean;
   fields: SgcStoredField[];
   participants: SgcPlacementParticipant[];
   missing: string[];
+  /** D6: firmantes que van solo al «Registro de firmas» (3 o más del mismo rol, sin ser el titular). */
+  inRegister?: string[];
   suggested: SgcStoredField[];
   canEdit: boolean;
   draft: { name: string; sha256: string; format: string } | null;
@@ -86,11 +98,15 @@ export default function SgcDocumentLayoutModal({ opened, onClose, layout, onSave
     setError(null);
   }, [opened, initial]);
 
+  // S16 (R35, «menos clics»): al ubicar la primera caja de una persona, pasa sola a la siguiente sin caja.
+  // Es comportamiento del contenedor del SGC: el lienzo y la lista conservan el marcado de SynerLink (prueba de paridad).
   const handlePlacementChange = useCallback(
     (next: SignatureFieldPlacement[]) => {
-      if (layout.canEdit) setFields(next);
+      if (!layout.canEdit) return;
+      if (justPlaced(fields, next, activeOrder)) setActiveOrder(nextOrderWithoutBox(persons.map((p) => p.order), next, activeOrder));
+      setFields(next);
     },
-    [layout.canEdit]
+    [layout.canEdit, activeOrder, persons, fields]
   );
 
   const placedCount = persons.filter((p) => fields.some((f) => f.signerOrder === p.order)).length;

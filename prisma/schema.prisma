@@ -112,6 +112,11 @@ model Company {
   chatGroups      ChatConversation[]
   // SGC documental — configuración de activación por empresa (esquema `sgc`).
   sgcCompanyConfig SgcCompanyConfig?
+  // Órdenes de Trabajo (bitácora de proceso de planta, 2026-10-13).
+  otActividades    OtActividad[]
+  otOrdenesTrabajo OtOrdenTrabajo[]
+  otOperadores     OtOperador[]
+  otAreas          OtArea[]
 
   @@map("company")
   @@schema("dbo")
@@ -204,6 +209,8 @@ model Department {
   sgcProcesses        SgcProcessMap[]
   sgcOwnedDocuments   SgcDocument[]
   sgcDocumentAccesses SgcDocumentAccess[]
+  // S15: líderes aprobadores por departamento (sgc.approver_authorization.id_department).
+  sgcApproverLeaders  SgcApproverAuthorization[]
 
   @@map("department")
   @@schema("dbo")
@@ -920,7 +927,7 @@ model PortalCourseMaterial {
   id        Int          @id @default(autoincrement())
   course_id Int
   course    PortalCourse @relation(fields: [course_id], references: [id], onDelete: Cascade)
-  /// 'DOCUMENT' | 'LINK'. Texto y no enum: el provider sqlserver no los
+  /// 'DOCUMENT' | 'LINK' | 'FORM'. Texto y no enum: el provider sqlserver no los
   /// soporta (mismo criterio que el resto de este esquema).
   type      String       @db.NVarChar(20)
   title     String       @db.NVarChar(255)
@@ -948,7 +955,15 @@ model PortalCourseMaterial {
   required  Boolean      @default(true)
   created_at DateTime    @default(now())
 
-  progress PortalMaterialProgress[]
+  /// Solo si type = 'FORM' (formulario propio del portal, Cristian
+  /// 2026-10-08). Se responde con la versión VIGENTE del formulario.
+  formulario_id Int?
+  formulario    PortalFormulario? @relation(fields: [formulario_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  progress   PortalMaterialProgress[]
+  vistas     PortalMaterialVista[]
+  respuestas PortalFormularioRespuesta[]
+  intentos   PortalFormularioIntento[]
 
   @@index([course_id, orden])
   @@map("portal_course_material")
@@ -979,10 +994,142 @@ model PortalMaterialProgress {
   material       PortalCourseMaterial @relation(fields: [material_id], references: [id], onDelete: Cascade)
   student_email  String               @db.NVarChar(255)
   completed_at   DateTime             @default(now())
+  /// 'AUTO' (el servidor validó que revisó el material) | 'MANUAL' (lo marcó
+  /// un administrador/formador del Excel de permisos). Las filas anteriores
+  /// al 2026-10-08 quedan como 'MANUAL': las marcaba el propio estudiante.
+  origen         String               @default("MANUAL") @db.NVarChar(10)
+  /// Correo de quien lo marcó a mano (solo origen MANUAL desde 2026-10-08).
+  marcado_por    String?              @db.NVarChar(255)
 
   @@unique([material_id, student_email])
   @@index([student_email])
   @@map("portal_material_progress")
+  @@schema("dbo")
+}
+
+/// APERTURA de un material por un estudiante (Cristian, 2026-10-08): la
+/// registra el SERVIDOR al abrir el material y es contra su hora que se valida
+/// el reporte de "revisado" (ver `lib/portal/revision-material.ts`). El
+/// navegador solo conoce el `token`; no puede fijar la hora de apertura.
+model PortalMaterialVista {
+  id              Int                  @id @default(autoincrement())
+  token           String               @unique @db.NVarChar(36)
+  material_id     Int
+  material        PortalCourseMaterial @relation(fields: [material_id], references: [id], onDelete: Cascade)
+  student_email   String               @db.NVarChar(255)
+  abierta_at      DateTime             @default(now())
+  /// Páginas del PDF contadas por el servidor (null si no aplica o no se pudo).
+  paginas         Int?
+  reportada_at    DateTime?
+  segundos_vistos Int?
+  duracion_seg    Int?
+  /// Si el reporte se aceptó.
+  aceptada        Boolean?
+
+  @@index([material_id, student_email])
+  @@map("portal_material_vista")
+  @@schema("dbo")
+}
+
+/// ═══════════ FORMACIÓN — FORMULARIO PROPIO (Cristian Baldión, 2026-10-08) ═══════════
+/// "créame el formulario en el curso, así como el enlace que te pasé, pero
+/// que sea un formulario propio del curso": un material `FORM` que se
+/// responde DENTRO del portal. La definición (preguntas, tipo, obligatoria,
+/// opciones, orden) es un JSON VERSIONADO — ver `lib/portal/formulario.ts`.
+/// Editar el formulario crea una versión nueva; cada respuesta guarda la
+/// versión con la que se respondió.
+
+/// Un formulario (p. ej. SST-01-FR-001 PERFIL SOCIODEMOGRÁFICO SST).
+model PortalFormulario {
+  id             Int      @id @default(autoincrement())
+  /// Código del formato. Único: es como se identifica al importar.
+  codigo         String   @unique @db.NVarChar(60)
+  titulo         String   @db.NVarChar(255)
+  /// Número de la versión vigente (la que se responde).
+  version_actual Int      @default(1)
+  created_by     String   @db.NVarChar(255)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @default(now()) @updatedAt
+
+  versiones  PortalFormularioVersion[]
+  materiales PortalCourseMaterial[]
+
+  @@map("portal_formulario")
+  @@schema("dbo")
+}
+
+/// Una versión de la definición. Nunca se modifica: editar = versión nueva.
+model PortalFormularioVersion {
+  id            Int              @id @default(autoincrement())
+  formulario_id Int
+  formulario    PortalFormulario @relation(fields: [formulario_id], references: [id], onDelete: Cascade)
+  version       Int
+  /// JSON de la definición (`DefinicionFormulario`).
+  definicion    String           @db.NVarChar(Max)
+  created_by    String           @db.NVarChar(255)
+  created_at    DateTime         @default(now())
+
+  respuestas PortalFormularioRespuesta[]
+  intentos   PortalFormularioIntento[]
+
+  @@unique([formulario_id, version])
+  @@map("portal_formulario_version")
+  @@schema("dbo")
+}
+
+/// Respuesta de UNA persona a UN material formulario. DATOS PERSONALES
+/// SENSIBLES (Ley 1581 de 2012): solo las consultan las hojas ADMINISTRADORES
+/// y FORMADORES del Excel de permisos, y nunca se escriben en los logs.
+/// Se envía UNA vez (índice único); no se edita. Para corregir, un
+/// administrador/formador la reabre (la borra) y la persona responde de nuevo.
+model PortalFormularioRespuesta {
+  id                    Int                     @id @default(autoincrement())
+  material_id           Int
+  material              PortalCourseMaterial    @relation(fields: [material_id], references: [id], onDelete: Cascade)
+  formulario_version_id Int
+  version               PortalFormularioVersion @relation(fields: [formulario_version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// Correo de la SESIÓN (no el que se escriba en el formulario).
+  student_email         String                  @db.NVarChar(255)
+  /// JSON `{ [idPregunta]: "texto" | { otra: "texto" } }`.
+  respuestas            String                  @db.NVarChar(Max)
+  /// Prueba de la autorización de tratamiento de datos: qué versión del
+  /// texto aceptó y cuándo.
+  autorizacion_version  String?                 @db.NVarChar(60)
+  autorizado_at         DateTime?
+  enviada_at            DateTime                @default(now())
+
+  @@unique([material_id, student_email])
+  @@index([formulario_version_id])
+  @@map("portal_formulario_respuesta")
+  @@schema("dbo")
+}
+
+/// Un INTENTO de una EVALUACIÓN (formulario de tipo "evaluacion"): cada envío
+/// calificado, aprobado o no. Solo el intento aprobado crea además la fila de
+/// `PortalFormularioRespuesta` (que es la que completa el material), así que
+/// quien reprueba puede volver a intentar sin que Talento Humano reabra nada.
+/// DATOS PERSONALES (Ley 1581 de 2012): mismas reglas que las respuestas; nunca
+/// a los logs. No se editan.
+model PortalFormularioIntento {
+  id                    Int                     @id @default(autoincrement())
+  material_id           Int
+  material              PortalCourseMaterial    @relation(fields: [material_id], references: [id], onDelete: Cascade)
+  formulario_version_id Int
+  version               PortalFormularioVersion @relation(fields: [formulario_version_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// Correo de la SESIÓN.
+  student_email         String                  @db.NVarChar(255)
+  /// JSON `{ [idPregunta]: "texto" }`.
+  respuestas            String                  @db.NVarChar(Max)
+  puntaje               Float
+  puntaje_max           Float
+  /// 0 a 100, 2 decimales.
+  porcentaje            Float
+  aprobado              Boolean
+  enviado_at            DateTime                @default(now())
+
+  @@index([material_id, student_email])
+  @@index([formulario_version_id])
+  @@map("portal_formulario_intento")
   @@schema("dbo")
 }
 
@@ -1320,6 +1467,42 @@ model SgcCompanyConfig {
   logo_data_url         String? @db.NVarChar(Max)
   dissemination_domains String? @db.NVarChar(500)
   read_threshold_pct    Int     @default(90)
+  // Sprint 8 (socialización con Calidad OLP, 2026-10-07): el encabezado
+  // institucional es OBLIGATORIO en documento nuevo y nueva versión (el
+  // borrador va en Word o en el editor; un PDF se rechaza). Es configuración
+  // por empresa (por defecto sí) para poder revertirlo sin tocar el código.
+  header_mandatory          Boolean   @default(true)
+  // Carga inicial de vigentes ABIERTA: solo mientras está abierta se cargan
+  // documentos vigentes sin el encabezado del sistema (uno a uno o desde el
+  // listado maestro en Excel). Calidad la cierra con motivo (Sprint 9).
+  initial_load_open         Boolean   @default(true)
+  initial_load_closed_by    String?   @db.NVarChar(255)
+  initial_load_closed_at    DateTime?
+  initial_load_close_reason String?   @db.NVarChar(1000)
+  // Sprint 9: POLÍTICA DE CORREO de la empresa: nunca (por defecto: solo campana
+  // y tablero) | vencimientos (solo los avisos de vencimiento) | resumen_diario
+  // (un correo al día con los pendientes de cada persona).
+  email_mode                String    @default("nunca") @db.NVarChar(20)
+  // Día del último resumen diario enviado (evita repetirlo el mismo día).
+  email_digest_last_date    DateTime? @db.Date
+  // Sprint 11: COPIAS NO CONTROLADAS — tipos documentales que las admiten
+  // (códigos separados por coma; por defecto formatos FO,FR), días de
+  // vigencia por defecto y máximo.
+  uncontrolled_copy_types    String?   @default("FO,FR") @db.NVarChar(200)
+  uncontrolled_copy_days     Int       @default(30)
+  uncontrolled_copy_max_days Int       @default(90)
+  // Sprint 11: protección del VISOR (marca de agua en mosaico, ocultar sin foco
+  // y registrar «Imprimir pantalla»). Encendida por defecto; reversible.
+  viewer_protection          Boolean   @default(true)
+  // Sprint 12: APROBADORES AUTORIZADOS — con la lista activa (y al menos una
+  // persona autorizada en la empresa), solo ellos quedan como aprobadores.
+  approver_list_enforced     Boolean   @default(true)
+  // Sprint 13: FIRMA PROPIA (cada persona registra la suya y Calidad la valida).
+  // APAGADA por defecto: encenderla requiere el aval de la Dra. Adriana Cárdenas.
+  self_signature_enabled     Boolean   @default(false)
+  // Generador de documentos desde plantillas aprobadas por Calidad (2026-10-10).
+  // APAGADO por defecto: lo enciende el SQL de datos de cada entorno.
+  generator_enabled          Boolean   @default(false)
 
   company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
 
@@ -1351,6 +1534,21 @@ model SgcCompanyConfig {
   icalTokens         SgcIcalToken[]
   accessRequests     SgcAccessRequest[]
 
+  // Sprint 8: importaciones del listado maestro (Excel de Calidad).
+  masterListImports SgcMasterListImport[]
+  // Sprint 9: cargas masivas de los PDF del listado maestro.
+  bulkUploads       SgcBulkUpload[]
+  // Sprint 11: copias no controladas.
+  uncontrolledCopies SgcUncontrolledCopyRequest[]
+  // Sprint 12: aprobadores autorizados y firmantes sustitutos.
+  approverAuthorizations SgcApproverAuthorization[]
+  signerSubstitutions    SgcSignerSubstitution[]
+  // S16: plantillas de encabezado por tipo documental.
+  headerTemplates        SgcHeaderTemplate[]
+  // Generador de documentos (2026-10-10): plantillas y registros generados.
+  generatorTemplates     SgcGeneratorTemplate[]
+  generatedDocuments     SgcGeneratedDocument[]
+
   @@map("company_config")
   @@schema("sgc")
 }
@@ -1370,6 +1568,14 @@ model SgcCodingGuide {
   prefix          String   @db.NVarChar(10)
   pattern         String   @db.NVarChar(200)
   sequence_digits Int      @default(3)
+  // Sprint 8: HERENCIA del número del documento padre (codificación de OLP:
+  // los formatos e instructivos heredan el número de su procedimiento). Sin
+  // child_pattern no hay herencia. Marcas: las del patrón más {CODIGO_PADRE} y
+  // {NUMERO_PADRE}; child_type_codes son los tipos documentales que heredan
+  // (códigos separados por coma). Ver lib/sgc/coding.ts.
+  child_pattern         String? @db.NVarChar(200)
+  child_type_codes      String? @db.NVarChar(200)
+  child_sequence_digits Int?
   updated_by      String?  @db.NVarChar(255)
   change_reason   String?  @db.NVarChar(1000)
   created_at      DateTime @default(now())
@@ -1421,6 +1627,8 @@ model SgcProcessMap {
   // Sprint 2
   responsibles  SgcResponsibleMatrix[]
   requests      SgcRequest[]
+  // Sprint 12: aprobadores autorizados del proceso.
+  approverAuthorizations SgcApproverAuthorization[]
 
   @@unique([id_company, code])
   @@map("process_map")
@@ -1442,8 +1650,15 @@ model SgcDocumentType {
   is_active         Boolean  @default(true)
   created_at        DateTime @default(now())
   updated_at        DateTime @updatedAt
+  // S16 (R31, D20): plantilla de encabezado del tipo (NULL = la por defecto de la empresa).
+  id_header_template Int?
+  // S16 (R32, D17): formatos del borrador del tipo («docx», «docx,xlsx»…; NULL = solo Word).
+  draft_extensions   String? @db.NVarChar(100)
+  /// S19 (R34): tipo de PLANTILLAS GUÍA del Generador (lo generado no lleva código documental).
+  generator_guide    Boolean @default(false, map: "document_type_generator_guide_df")
 
-  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  companyConfig  SgcCompanyConfig   @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  headerTemplate SgcHeaderTemplate? @relation(fields: [id_header_template], references: [id_header_template], onDelete: NoAction, onUpdate: NoAction)
   documents     SgcDocument[]
   // Sprint 2
   responsibles  SgcResponsibleMatrix[]
@@ -1494,6 +1709,16 @@ model SgcDocument {
   reviewAlertConfigs SgcReviewAlertConfig[]
   reviewAlerts       SgcReviewAlert[]
   accessRequests     SgcAccessRequest[]
+  // Sprint 8: solicitudes de documentos que heredan su número y filas del listado maestro que lo crearon.
+  childRequests      SgcRequest[]                @relation("SgcRequestParent")
+  importRows         SgcMasterListImportRow[]
+  // Sprint 9: archivos de la carga masiva que se le asignaron.
+  bulkUploadItems    SgcBulkUploadItem[]
+  // Sprint 11: copias no controladas solicitadas.
+  uncontrolledCopies SgcUncontrolledCopyRequest[]
+  // Generador de documentos (2026-10-10): plantilla que parte de este vigente y registros generados.
+  generatorTemplates SgcGeneratorTemplate[]
+  generatedDocuments SgcGeneratedDocument[]
 
   @@unique([id_company, code])
   @@index([id_company, status])
@@ -1532,6 +1757,8 @@ model SgcDocumentVersion {
   // Correcciones 2026-10-03: composición del PDF controlado (encabezado
   // institucional, posición del campo «Fecha de emisión» y firmas ubicadas).
   layout_json           String?   @db.NVarChar(Max)
+  // S16 (R33): huella SHA-256 del ARCHIVO ORIGINAL (Word o Excel) de la carga inicial.
+  source_sha256         String?   @db.Char(64)
 
   document SgcDocument @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
   // Sprint 5: avisos de vencimiento de la versión.
@@ -1646,6 +1873,10 @@ model SgcFlowVersion {
   published_by    String?   @db.NVarChar(255)
   published_at    DateTime?
   retired_at      DateTime?
+  // S15 (DOC v7): modelo de roles de la versión. NULL = calidad_asigna (hasta el
+  // DOC v6); solicitante_elabora = el solicitante elabora y asigna firmantes de su
+  // departamento y Calidad autoriza la creación (lib/sgc/flows/roleModel.ts).
+  role_model      String?   @db.NVarChar(30)
 
   process     SgcFlowProcess      @relation(fields: [id_flow_process], references: [id_flow_process], onDelete: NoAction, onUpdate: NoAction)
   tasks       SgcFlowTaskDef[]
@@ -1821,11 +2052,21 @@ model SgcRequest {
   // pendiente | generado | error
   controlled_pdf_status String?   @db.NVarChar(20)
   controlled_pdf_error  String?   @db.NVarChar(1000)
+  // Sprint 8: documento padre del que hereda el número (formato o instructivo de un procedimiento).
+  id_parent_document    Int?
+  // Sprint 10: ¿requiere capacitación? La SUGIERE el solicitante y la CONFIRMA
+  // quien crea el documento o Calidad. NULL = sin sugerir / sin confirmar
+  // (manda la sugerencia y, si no hay, el tipo documental).
+  requires_training_suggested Boolean?
+  requires_training           Boolean?
+  training_confirmed_by       String?   @db.NVarChar(255)
+  training_confirmed_at       DateTime?
 
   companyConfig  SgcCompanyConfig   @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   process        SgcFlowProcess     @relation(fields: [id_flow_process], references: [id_flow_process], onDelete: NoAction, onUpdate: NoAction)
   version        SgcFlowVersion     @relation(fields: [id_flow_version], references: [id_flow_version], onDelete: NoAction, onUpdate: NoAction)
   document       SgcDocument?       @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+  parentDocument SgcDocument?       @relation("SgcRequestParent", fields: [id_parent_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
   processMap     SgcProcessMap?     @relation(fields: [id_process_map], references: [id_process_map], onDelete: NoAction, onUpdate: NoAction)
   documentType   SgcDocumentType?   @relation(fields: [id_document_type], references: [id_document_type], onDelete: NoAction, onUpdate: NoAction)
   tasks          SgcTask[]
@@ -1844,6 +2085,8 @@ model SgcRequest {
   // Correcciones 2026-10-03: composición del documento (firmas ubicadas) y avisos de umbral de lectura.
   documentLayouts      SgcDocumentLayout[]
   readThresholdNotices SgcReadThresholdNotice[]
+  // Sprint 10: recapacitaciones de quienes no aprobaron en los intentos permitidos.
+  retrainings          SgcRetraining[]
 
   @@index([id_company, status])
   @@index([requester_email])
@@ -1926,6 +2169,8 @@ model SgcTaskAssignee {
   created_at        DateTime  @default(now())
   // Sprint 3: firma electrónica con la que se decidió el cupo (sgc.signature).
   id_signature      Int?
+  // Sprint 12: el cupo es de un SUSTITUTO que firma en nombre de esta persona (ausente).
+  on_behalf_of      String?   @db.NVarChar(255)
 
   task           SgcTask            @relation(fields: [id_task], references: [id_task], onDelete: NoAction, onUpdate: NoAction)
   authorizations SgcAuthorization[]
@@ -2114,6 +2359,8 @@ model SgcSignature {
   prev_record_hash    String?  @db.Char(64)
   record_hash         String   @unique @db.Char(64)
   created_at          DateTime @default(now())
+  // Sprint 12: firma de un SUSTITUTO «en sustitución de» esta persona (entra al registro encadenado).
+  on_behalf_of        String?  @db.NVarChar(255)
 
   request  SgcRequest      @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
   assignee SgcTaskAssignee @relation(fields: [id_task_assignee], references: [id_task_assignee], onDelete: NoAction, onUpdate: NoAction)
@@ -2159,6 +2406,14 @@ model SgcSignatureMaster {
   revoked_at          DateTime?
   revoked_by          String?   @db.NVarChar(255)
   revoke_reason       String?   @db.NVarChar(1000)
+  // Sprint 13 (R13, FIRMA PROPIA): calidad = la registró Calidad (inducción) | propia = la registró su titular.
+  origin              String    @default("calidad") @db.NVarChar(20)
+  // dibujada | imagen (subida y recortada a la tinta). NULL en las registradas antes del S13.
+  capture_method      String?   @db.NVarChar(20)
+  // validada | pendiente. Una firma pendiente NO firma; Calidad la valida (una vez) o la revoca.
+  validation_status   String    @default("validada") @db.NVarChar(20)
+  validated_by        String?   @db.NVarChar(255)
+  validated_at        DateTime?
 
   companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
 
@@ -2304,10 +2559,17 @@ model SgcTraining {
   registered_at DateTime
   updated_by    String    @db.NVarChar(255)
   updated_at    DateTime
+  // Sprint 10: proveedor de la evaluación (microsoft | google) y máximo de intentos que cuentan.
+  evaluation_provider String? @db.NVarChar(20)
+  max_attempts        Int     @default(2)
 
-  request SgcRequest          @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
-  task    SgcTask             @relation(fields: [id_task], references: [id_task], onDelete: NoAction, onUpdate: NoAction)
-  uploads SgcTrainingUpload[]
+  request     SgcRequest          @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
+  task        SgcTask             @relation(fields: [id_task], references: [id_task], onDelete: NoAction, onUpdate: NoAction)
+  uploads     SgcTrainingUpload[]
+  retrainings SgcRetraining[]
+  // S17 (R30): evaluación propia de SynerLink (banco de preguntas e intentos).
+  questions   SgcTrainingQuestion[]
+  attempts    SgcTrainingAttempt[]
 
   @@index([id_request])
   @@map("training")
@@ -2357,11 +2619,40 @@ model SgcTrainingResult {
   attempts           Int
   in_scope           Boolean
   completed_at_text  String? @db.NVarChar(40)
+  // Sprint 10: intento que cuenta, intentos de más (no cuentan) y si queda en recapacitación.
+  attempt_number      Int?
+  extra_attempts      Int     @default(0)
+  retraining_required Boolean @default(false)
 
   upload SgcTrainingUpload @relation(fields: [id_training_upload], references: [id_training_upload], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([id_training_upload])
   @@map("training_result")
+  @@schema("sgc")
+}
+
+// Sprint 10: RECAPACITACIÓN (presencial o virtual) de quien no aprobó la
+// evaluación en los intentos permitidos. La registra Calidad. SOLO INSERCIÓN.
+model SgcRetraining {
+  id_retraining Int      @id @default(autoincrement())
+  id_request    Int
+  id_training   Int
+  user_email    String   @db.NVarChar(255)
+  // presencial | virtual
+  mode          String   @db.NVarChar(20)
+  session_date  DateTime @db.Date
+  // asistio | aprobo | reprobo
+  result        String   @db.NVarChar(20)
+  notes         String?  @db.NVarChar(1000)
+  registered_by String   @db.NVarChar(255)
+  registered_at DateTime
+
+  request  SgcRequest  @relation(fields: [id_request], references: [id_request], onDelete: NoAction, onUpdate: NoAction)
+  training SgcTraining @relation(fields: [id_training], references: [id_training], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_request])
+  @@index([user_email])
+  @@map("retraining")
   @@schema("sgc")
 }
 
@@ -2411,6 +2702,12 @@ model SgcDocumentRelation {
   removed_by           String?   @db.NVarChar(255)
   removed_at           DateTime?
   remove_reason        String?   @db.NVarChar(1000)
+  // Sprint 9: de dónde sale (manual | codigo | listado) y si Calidad ya la
+  // confirmó (propuesta | confirmada). El mapa solo muestra las confirmadas.
+  origin               String    @default("manual") @db.NVarChar(20)
+  status               String    @default("confirmada") @db.NVarChar(20)
+  confirmed_by         String?   @db.NVarChar(255)
+  confirmed_at         DateTime?
 
   companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   source        SgcDocument      @relation("SgcRelationSource", fields: [id_source_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
@@ -2603,6 +2900,110 @@ model SgcReadThresholdNotice {
   @@unique([id_task, threshold_pct])
   @@index([id_request])
   @@map("read_threshold_notice")
+  @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 8: importación del LISTADO MAESTRO (Excel de
+// Calidad). Cada importación confirmada deja su encabezado y una fila por
+// cada fila del Excel (cargada o con su error). SOLO INSERCIÓN (trigger).
+// Los documentos se crean en estado «pendiente de archivo» con su código; la
+// versión y la fecha de vigencia del listado quedan en la fila y se usan al
+// cargar el PDF (Sprint 9).
+// ---------------------------------------------------------------------------
+model SgcMasterListImport {
+  id_master_list_import Int      @id @default(autoincrement())
+  id_company            Int
+  file_name             String   @db.NVarChar(260)
+  // Huella SHA-256 de las filas recibidas (JSON canónico).
+  rows_sha256           String   @db.Char(64)
+  rows_total            Int
+  rows_loaded           Int
+  rows_error            Int
+  imported_by           String   @db.NVarChar(255)
+  imported_at           DateTime
+  ip                    String?  @db.NVarChar(64)
+
+  companyConfig SgcCompanyConfig         @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  rows          SgcMasterListImportRow[]
+
+  @@index([id_company, imported_at])
+  @@map("master_list_import")
+  @@schema("sgc")
+}
+
+model SgcMasterListImportRow {
+  id_master_list_import_row Int       @id @default(autoincrement())
+  id_master_list_import     Int
+  row_number                Int
+  code                      String?   @db.NVarChar(60)
+  title                     String?   @db.NVarChar(300)
+  document_type_code        String?   @db.NVarChar(10)
+  process_code              String?   @db.NVarChar(10)
+  version_number            Int?
+  effective_date            DateTime? @db.Date
+  confidentiality           String?   @db.NVarChar(20)
+  parent_code               String?   @db.NVarChar(60)
+  // cargada | error
+  status                    String    @db.NVarChar(20)
+  errors                    String?   @db.NVarChar(2000)
+  warnings                  String?   @db.NVarChar(2000)
+  id_document               Int?
+
+  import   SgcMasterListImport @relation(fields: [id_master_list_import], references: [id_master_list_import], onDelete: NoAction, onUpdate: NoAction)
+  document SgcDocument?        @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_master_list_import])
+  @@index([id_document])
+  @@map("master_list_import_row")
+  @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 9: CARGA MASIVA de los PDF del listado maestro. Cada
+// tanda deja su encabezado y una fila por archivo (cargado o con su error y el
+// aviso si el nombre no coincide con el del listado). SOLO INSERCIÓN.
+// ---------------------------------------------------------------------------
+model SgcBulkUpload {
+  id_bulk_upload Int      @id @default(autoincrement())
+  id_company     Int
+  files_total    Int
+  created_by     String   @db.NVarChar(255)
+  created_at     DateTime
+  ip             String?  @db.NVarChar(64)
+
+  companyConfig SgcCompanyConfig    @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  items         SgcBulkUploadItem[]
+
+  @@index([id_company, created_at])
+  @@map("bulk_upload")
+  @@schema("sgc")
+}
+
+model SgcBulkUploadItem {
+  id_bulk_upload_item Int      @id @default(autoincrement())
+  id_bulk_upload      Int
+  file_name           String   @db.NVarChar(260)
+  size_bytes          Int
+  sha256              String?  @db.Char(64)
+  code                String?  @db.NVarChar(60)
+  id_document         Int?
+  id_document_version Int?
+  // cargado | error
+  status              String   @db.NVarChar(20)
+  // S16 (R33): formato del archivo cargado (pdf | docx | xlsx); NULL = pdf (antes del S16).
+  source_kind         String?  @db.NVarChar(10)
+  warning             String?  @db.NVarChar(1000)
+  error               String?  @db.NVarChar(1000)
+  created_by          String   @db.NVarChar(255)
+  created_at          DateTime
+
+  bulkUpload SgcBulkUpload @relation(fields: [id_bulk_upload], references: [id_bulk_upload], onDelete: NoAction, onUpdate: NoAction)
+  document   SgcDocument?  @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_bulk_upload])
+  @@index([id_document])
+  @@map("bulk_upload_item")
   @@schema("sgc")
 }
 
@@ -2851,5 +3252,716 @@ model AgentCvSummary {
 
   @@unique([id_agent, week_start])
   @@map("agent_cv_summary")
+  @@schema("dbo")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 11: COPIAS NO CONTROLADAS. Solicitud con
+// justificación, destino y días; decide SOLO el grupo SGC-COPIA-NC (nunca el
+// jefe del área), con motivo; autorizada, se imprime (o, si es para un tercero,
+// se baja) con la marca «COPIA NO CONTROLADA» hasta su vencimiento. La
+// solicitud no se borra (trigger) y cada impresión o descarga es un EVENTO de
+// solo inserción.
+// ---------------------------------------------------------------------------
+model SgcUncontrolledCopyRequest {
+  id_copy_request     Int       @id @default(autoincrement())
+  id_company          Int
+  id_document         Int
+  id_document_version Int
+  requester_email     String    @db.NVarChar(255)
+  justification       String    @db.NVarChar(1000)
+  // interno | tercero
+  destination         String    @db.NVarChar(20)
+  destination_detail  String?   @db.NVarChar(300)
+  days_requested      Int
+  // pendiente | autorizada | rechazada | cancelada
+  status              String    @default("pendiente") @db.NVarChar(20)
+  decided_by          String?   @db.NVarChar(255)
+  decided_at          DateTime?
+  decision_reason     String?   @db.NVarChar(1000)
+  expires_at          DateTime?
+  allow_download      Boolean   @default(false)
+  created_at          DateTime
+  ip                  String?   @db.NVarChar(64)
+
+  companyConfig SgcCompanyConfig           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  document      SgcDocument                @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+  events        SgcUncontrolledCopyEvent[]
+
+  @@index([id_company, status])
+  @@index([requester_email])
+  @@map("uncontrolled_copy_request")
+  @@schema("sgc")
+}
+
+model SgcUncontrolledCopyEvent {
+  id_copy_event   Int      @id @default(autoincrement())
+  id_copy_request Int
+  // impresion | descarga
+  event           String   @db.NVarChar(20)
+  actor_email     String   @db.NVarChar(255)
+  occurred_at     DateTime
+  ip              String?  @db.NVarChar(64)
+  user_agent      String?  @db.NVarChar(400)
+
+  request SgcUncontrolledCopyRequest @relation(fields: [id_copy_request], references: [id_copy_request], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_copy_request])
+  @@map("uncontrolled_copy_event")
+  @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — Sprint 12: APROBADORES AUTORIZADOS por persona y proceso
+// (decisión D9), con vigencia y motivo; los administra Aseguramiento de
+// Calidad. No se borran: se revocan con motivo.
+// ---------------------------------------------------------------------------
+model SgcApproverAuthorization {
+  id_approver_authorization Int       @id @default(autoincrement())
+  id_company                Int
+  user_email                String    @db.NVarChar(255)
+  // NULL = todos los procesos de la empresa.
+  id_process_map            Int?
+  valid_from                DateTime  @db.Date
+  valid_to                  DateTime? @db.Date
+  reason                    String    @db.NVarChar(1000)
+  granted_by                String    @db.NVarChar(255)
+  granted_at                DateTime
+  revoked_by                String?   @db.NVarChar(255)
+  revoked_at                DateTime?
+  revoke_reason             String?   @db.NVarChar(1000)
+  // S15 (R19, D16): LÍDER que aprueba los documentos de un DEPARTAMENTO (flujo DOC
+  // v7). NULL = autorización por proceso del S12. La lista por departamento solo
+  // restringe si la empresa enciende el ajuste (apagado por defecto).
+  id_department             Int?
+
+  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  process       SgcProcessMap?   @relation(fields: [id_process_map], references: [id_process_map], onDelete: NoAction, onUpdate: NoAction)
+  department    Department?      @relation(fields: [id_department], references: [id_department], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_company, user_email])
+  @@map("approver_authorization")
+  @@schema("sgc")
+}
+
+// Sprint 12: FIRMANTE SUSTITUTO que asigna solo el grupo SGC-SUSTITUTOS (María
+// Camila y su suplente, D8) sobre un cupo pendiente, con motivo y periodo de
+// ausencia. SOLO INSERCIÓN.
+model SgcSignerSubstitution {
+  id_signer_substitution    Int       @id @default(autoincrement())
+  id_company                Int
+  id_request                Int
+  id_task                   Int
+  step_key                  String    @db.NVarChar(40)
+  id_task_assignee_original Int
+  id_task_assignee_new      Int
+  original_email            String    @db.NVarChar(255)
+  substitute_email          String    @db.NVarChar(255)
+  reason                    String    @db.NVarChar(1000)
+  absence_from              DateTime? @db.Date
+  absence_to                DateTime? @db.Date
+  assigned_by               String    @db.NVarChar(255)
+  assigned_at               DateTime
+
+  companyConfig SgcCompanyConfig @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_request])
+  @@map("signer_substitution")
+  @@schema("sgc")
+}
+
+/// Evento de la EMPRESA en el calendario de la ventana principal del portal de Talento Humano
+/// (Cristian Baldión, 2026-10-09). Un evento = un día. Los festivos de Colombia y las fechas importantes
+/// NO se guardan aquí: se calculan (lib/portal/calendario.ts). Solo los editores del portal (los mismos
+/// que cargan anuncios) crean y borran; ver el calendario lo puede cualquiera que entre al portal.
+/// Borrado lógico: no se pierde quién lo quitó ni cuándo.
+model PortalEvento {
+  id           Int       @id @default(autoincrement())
+  fecha        DateTime  @db.Date
+  titulo       String    @db.NVarChar(160)
+  descripcion  String?   @db.NVarChar(1000)
+  created_by   String    @db.NVarChar(255)
+  created_at   DateTime  @default(now())
+  eliminado_at DateTime?
+  eliminado_by String?   @db.NVarChar(255)
+
+  @@index([fecha])
+  @@map("portal_evento")
+  @@schema("dbo")
+}
+
+// =============================================================================
+// Bitácora de Proceso (antes «Órdenes de Trabajo»; P0, 2026-10-13). Las tablas
+// conservan el prefijo ot_ a propósito (nombre interno, sin mover el esquema) — bitácora de proceso de planta pedida
+// por Farmalógica (Amanda Casiano) para cerrar una desviación de auditoría:
+// «no se evidencia registro de las intervenciones durante todo el proceso».
+// Una orden de trabajo = un turno (producto, lote, turno y operarios). Los
+// operarios registran actividades del catálogo con la HORA DEL SERVIDOR
+// (SYSUTCDATETIME) y su usuario de sesión. Los registros NO se editan ni se
+// borran (ALCOA+): no hay rutas de edición/borrado y la base lo impide con un
+// trigger (migración 20261013180000_ordenes_trabajo_p0). La OP de SAP es
+// opcional y solo se guarda una copia (snapshot); nada se escribe en SAP.
+// =============================================================================
+
+model OtActividad {
+  id_actividad      Int      @id @default(autoincrement())
+  id_company        Int
+  nombre            String   @db.NVarChar(120)
+  exige_observacion Boolean  @default(false)
+  orden             Int      @default(0)
+  activo            Boolean  @default(true)
+  // Clave de un ícono de la lista cerrada OT_ICONOS (lib/bitacora-proceso/constants.ts); opcional.
+  icono             String?  @db.NVarChar(40)
+  created_by        String   @db.NVarChar(50)
+  created_at        DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  company   Company      @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  registros OtRegistro[]
+
+  @@index([id_company, activo, orden], map: "IX_ot_actividad_company")
+  @@map("ot_actividad")
+  @@schema("dbo")
+}
+
+model OtOrdenTrabajo {
+  id_orden_trabajo   Int       @id @default(autoincrement())
+  id_company         Int
+  consecutivo        Int
+  producto           String    @db.NVarChar(200)
+  item_code          String?   @db.NVarChar(50)
+  lote               String    @db.NVarChar(50)
+  // MANANA | TARDE | NOCHE
+  turno              String    @db.NVarChar(10)
+  area               String?   @db.NVarChar(100)
+  sap_op_absentry    Int?
+  sap_op_docnum      Int?
+  // Copia JSON de la OP de SAP al abrir (ItemNo, ProductDescription, U_Cod_Lote,
+  // U_FecVen_lote, PlannedQuantity, Warehouse): el soporte no cambia si cambia la OP.
+  sap_op_snapshot    String?   @db.NVarChar(Max)
+  // ABIERTA | CERRADA
+  estado             String    @default("ABIERTA") @db.NVarChar(10)
+  // Supervisor: quien abre la bitácora (user.id).
+  abierta_por        String    @db.NVarChar(50)
+  // Inspector (user.id), elegido al abrir. En las bitácoras del #617 (2026-10-14) esta
+  // columna guardaba al jefe de producción; la migración 20261015180000 la pasó a
+  // id_jefe_produccion (B1, 2026-10-15).
+  id_inspector       String?   @db.NVarChar(50)
+  // Jefe de producción (user.id), elegido al abrir (B1, 2026-10-15).
+  id_jefe_produccion String?   @db.NVarChar(50)
+  abierta_en         DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  cerrada_por        String?   @db.NVarChar(50)
+  cerrada_en         DateTime? @db.DateTime2
+  observacion_cierre String?   @db.NVarChar(1000)
+  // Área del catálogo (A5, 2026-10-14); `area` guarda la copia del nombre.
+  id_area            Int?
+
+  company    Company           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  areaRef    OtArea?           @relation(fields: [id_area], references: [id_area], onDelete: NoAction, onUpdate: NoAction)
+  // Auxiliares CON usuario (modelo anterior al 2026-10-14; se conserva para las bitácoras viejas).
+  operarios  OtOrdenOperario[]
+  // Operarios SIN usuario programados por el supervisor (A1, 2026-10-14).
+  operadores OtOrdenOperador[]
+  registros  OtRegistro[]
+  firmas     OtFirma[]
+
+  @@unique([id_company, consecutivo], map: "UQ_ot_orden_trabajo_consecutivo")
+  @@index([id_company, estado], map: "IX_ot_orden_trabajo_estado")
+  @@index([id_company, lote], map: "IX_ot_orden_trabajo_lote")
+  @@map("ot_orden_trabajo")
+  @@schema("dbo")
+}
+
+model OtOrdenOperario {
+  id_orden_operario Int    @id @default(autoincrement())
+  id_orden_trabajo  Int
+  id_user           String @db.NVarChar(50)
+
+  orden OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_orden_trabajo, id_user], map: "UQ_ot_orden_operario")
+  @@map("ot_orden_operario")
+  @@schema("dbo")
+}
+
+model OtRegistro {
+  id_registro      BigInt   @id @default(autoincrement())
+  id_orden_trabajo Int
+  id_actividad     Int
+  // Copia del nombre de la actividad al registrar (el soporte no cambia si se renombra).
+  actividad_nombre String   @db.NVarChar(120)
+  id_user          String   @db.NVarChar(50)
+  // Hora del SERVIDOR de base de datos: el cliente nunca la envía.
+  registrado_en    DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  observacion      String?  @db.NVarChar(500)
+  ip               String?  @db.NVarChar(64)
+  // Operario (sin usuario) que eligió su nombre en la tablet (A1). `id_user` es el usuario de la SESIÓN.
+  id_operador      Int?
+  operador_nombre  String?  @db.NVarChar(120)
+
+  orden     OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
+  actividad OtActividad    @relation(fields: [id_actividad], references: [id_actividad], onDelete: NoAction, onUpdate: NoAction)
+  operador  OtOperador?    @relation(fields: [id_operador], references: [id_operador], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_orden_trabajo, registrado_en], map: "IX_ot_registro_orden")
+  @@map("ot_registro")
+  @@schema("dbo")
+}
+
+// Maestro de operarios SIN usuario de SynerLink, por empresa (A1, 2026-10-14). No se borran: se desactivan.
+model OtOperador {
+  id_operador Int       @id @default(autoincrement())
+  id_company  Int
+  nombre      String    @db.NVarChar(120)
+  documento   String?   @db.NVarChar(30)
+  activo      Boolean   @default(true)
+  created_by  String    @db.NVarChar(50)
+  created_at  DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  updated_by  String?   @db.NVarChar(50)
+  updated_at  DateTime? @db.DateTime2
+
+  company   Company           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  ordenes   OtOrdenOperador[]
+  registros OtRegistro[]
+  firmas    OtFirma[]
+
+  @@unique([id_company, nombre], map: "UQ_ot_operador_nombre")
+  @@map("ot_operador")
+  @@schema("dbo")
+}
+
+// Catálogo de áreas por empresa (A5, 2026-10-14). No se borran: se desactivan.
+model OtArea {
+  id_area    Int      @id @default(autoincrement())
+  id_company Int
+  nombre     String   @db.NVarChar(100)
+  orden      Int      @default(0)
+  activo     Boolean  @default(true)
+  created_by String   @db.NVarChar(50)
+  created_at DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  company Company          @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  ordenes OtOrdenTrabajo[]
+
+  @@unique([id_company, nombre], map: "UQ_ot_area_nombre")
+  @@map("ot_area")
+  @@schema("dbo")
+}
+
+// Operarios programados en una bitácora (solo se agregan: TR_ot_orden_operador_inmutable).
+model OtOrdenOperador {
+  id_orden_operador Int      @id @default(autoincrement())
+  id_orden_trabajo  Int
+  id_operador       Int
+  agregado_por      String   @db.NVarChar(50)
+  agregado_en       DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  orden    OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
+  operador OtOperador     @relation(fields: [id_operador], references: [id_operador], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_orden_trabajo, id_operador], map: "UQ_ot_orden_operador")
+  @@map("ot_orden_operador")
+  @@schema("dbo")
+}
+
+// Desde el 2026-10-15 (B2/B3) son CUATRO vistos buenos (OPERARIO, SUPERVISOR = «Cerró»,
+// INSPECTOR y JEFE_PROD), sin contraseña: sesión propia o PIN en la tablet (auth_method).
+// Las filas viejas INSPECTOR «Verificó» se leen como el visto bueno del jefe de producción.
+// Desde el 2026-10-14 «Cerró»/«Verificó» son un CHECK con contraseña, sin imagen (firma_png
+// queda NULL); el verificador (rol INSPECTOR) se muestra como «Jefe de producción».
+// Firma electrónica de la bitácora (SUPERVISOR «Cerró» e INSPECTOR «Verificó»),
+// SOLO INSERCIÓN (trigger TR_ot_firma_inmutable). Reutiliza la reautenticación de
+// SynerLink, el consentimiento de GSS Firma y la firma registrada en GSS Firma.
+model OtFirma {
+  id_firma         Int      @id @default(autoincrement())
+  id_orden_trabajo Int
+  // OPERARIO | SUPERVISOR | INSPECTOR | JEFE_PROD (filas viejas: INSPECTOR «Verificó» = jefe)
+  rol              String   @db.NVarChar(12)
+  significado      String   @db.NVarChar(20)
+  id_user          String   @db.NVarChar(50)
+  signer_email     String   @db.NVarChar(255)
+  signer_name      String?  @db.NVarChar(255)
+  firmado_en       DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  content_sha256   String   @db.Char(64)
+  auth_method      String   @db.NVarChar(40)
+  consent_version  String   @db.NVarChar(60)
+  firma_png        String?  @db.NVarChar(Max)
+  firma_sha256     String?  @db.Char(64)
+  ip               String?  @db.NVarChar(64)
+  user_agent       String?  @db.NVarChar(400)
+  // B2 (2026-10-15): operario (sin usuario) que dio el visto bueno, y usuario de la SESIÓN
+  // desde la que se confirmó (en la tablet, la cuenta compartida).
+  id_operador      Int?
+  id_user_sesion   String?  @db.NVarChar(50)
+
+  orden    OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
+  operador OtOperador?    @relation(fields: [id_operador], references: [id_operador], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_orden_trabajo, rol], map: "UQ_ot_firma_rol")
+  @@map("ot_firma")
+  @@schema("dbo")
+}
+
+// PIN personal de la Bitácora de Proceso (B3, 2026-10-15): 4 dígitos, solo el hash
+// bcrypt. Con la cuenta compartida de la tablet, la persona elige su nombre y escribe su
+// PIN para dar su visto bueno. 5 intentos fallidos lo bloquean hasta que la persona lo
+// vuelva a configurar desde su sesión o un supervisor/administrador lo restablezca.
+model OtPin {
+  id_user           String    @id @db.NVarChar(50)
+  pin_hash          String?   @db.NVarChar(100)
+  intentos_fallidos Int       @default(0)
+  bloqueado         Boolean   @default(false)
+  ultimo_fallo_en   DateTime? @db.DateTime2
+  configurado_en    DateTime? @db.DateTime2
+  restablecido_por  String?   @db.NVarChar(50)
+  restablecido_en   DateTime? @db.DateTime2
+  created_at        DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  updated_at        DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  @@map("ot_pin")
+  @@schema("dbo")
+}
+
+/// S16 (R31, D20): PLANTILLA DE ENCABEZADO por tipo documental (rótulos y fila
+/// inferior del encabezado institucional). Una por defecto por empresa. No se
+/// borra: se desactiva. Cada cambio queda en sgc.config_change_log con motivo.
+model SgcHeaderTemplate {
+  id_header_template Int      @id @default(autoincrement())
+  id_company         Int
+  code               String   @db.NVarChar(30)
+  name               String   @db.NVarChar(150)
+  config_json        String   @db.NVarChar(Max)
+  is_default         Boolean  @default(false)
+  is_active          Boolean  @default(true)
+  version            Int      @default(1)
+  created_by         String   @db.NVarChar(255)
+  created_at         DateTime @default(now())
+  updated_by         String   @db.NVarChar(255)
+  updated_at         DateTime @default(now())
+
+  companyConfig SgcCompanyConfig  @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  documentTypes SgcDocumentType[]
+
+  @@unique([id_company, code])
+  @@map("header_template")
+  @@schema("sgc")
+}
+
+/// S17 (R30): PREGUNTA del banco de la evaluación propia de SynerLink (la arma
+/// el creador del documento o Calidad). Se reemplaza mientras nadie ha
+/// presentado la evaluación; con intentos, el banco queda congelado.
+model SgcTrainingQuestion {
+  id_training_question Int      @id @default(autoincrement())
+  id_training          Int
+  sort_order           Int
+  // unica | multiple | vf
+  kind                 String   @db.NVarChar(20)
+  text                 String   @db.NVarChar(1000)
+  points               Decimal  @db.Decimal(9, 2)
+  created_by           String   @db.NVarChar(255)
+  created_at           DateTime @default(now())
+
+  training SgcTraining         @relation(fields: [id_training], references: [id_training], onDelete: NoAction, onUpdate: NoAction)
+  options  SgcTrainingOption[]
+  answers  SgcTrainingAnswer[]
+
+  @@index([id_training])
+  @@map("training_question")
+  @@schema("sgc")
+}
+
+/// S17 (R30): OPCIÓN de una pregunta. «is_correct» nunca viaja al navegador del lector.
+model SgcTrainingOption {
+  id_training_option   Int     @id @default(autoincrement())
+  id_training_question Int
+  sort_order           Int
+  text                 String  @db.NVarChar(500)
+  is_correct           Boolean @default(false)
+
+  question SgcTrainingQuestion @relation(fields: [id_training_question], references: [id_training_question], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_training_question])
+  @@map("training_option")
+  @@schema("sgc")
+}
+
+/// S17 (R30): INTENTO calificado en el servidor (solo inserción, con huella).
+model SgcTrainingAttempt {
+  id_training_attempt Int      @id @default(autoincrement())
+  id_training         Int
+  user_email          String   @db.NVarChar(255)
+  attempt_number      Int
+  score               Decimal  @db.Decimal(9, 2)
+  max_score           Decimal  @db.Decimal(9, 2)
+  percent             Decimal  @db.Decimal(5, 1)
+  passed              Boolean
+  min_score_pct       Decimal  @db.Decimal(5, 2)
+  bank_sha256         String   @db.Char(64)
+  record_sha256       String   @db.Char(64)
+  submitted_at        DateTime
+  ip                  String?  @db.NVarChar(64)
+  user_agent          String?  @db.NVarChar(500)
+
+  training SgcTraining         @relation(fields: [id_training], references: [id_training], onDelete: NoAction, onUpdate: NoAction)
+  answers  SgcTrainingAnswer[]
+
+  @@unique([id_training, user_email, attempt_number])
+  @@map("training_attempt")
+  @@schema("sgc")
+}
+
+/// S17 (R30): RESPUESTA de un intento (solo inserción).
+model SgcTrainingAnswer {
+  id_training_answer   Int     @id @default(autoincrement())
+  id_training_attempt  Int
+  id_training_question Int
+  selected_json        String  @db.NVarChar(400)
+  is_correct           Boolean
+  points               Decimal @db.Decimal(9, 2)
+
+  attempt  SgcTrainingAttempt  @relation(fields: [id_training_attempt], references: [id_training_attempt], onDelete: NoAction, onUpdate: NoAction)
+  question SgcTrainingQuestion @relation(fields: [id_training_question], references: [id_training_question], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_training_attempt])
+  @@map("training_answer")
+  @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// SGC documental — GENERADOR DE DOCUMENTOS desde plantillas aprobadas por
+// Calidad (2026-10-10; ver lib/sgc/generator.ts). La plantilla parte de un
+// documento VIGENTE (Word o editor) con campos {{CAMPO:Etiqueta}}; cada
+// configuración es una versión que congela contenido y campos y que aprueba
+// SOLO Aseguramiento de Calidad. Lo generado es un REGISTRO inmutable con su
+// propio consecutivo. Nada se borra (triggers).
+// ---------------------------------------------------------------------------
+model SgcGeneratorTemplate {
+  id_template        Int       @id @default(autoincrement())
+  id_company         Int
+  id_document        Int
+  name               String    @db.NVarChar(300)
+  description        String?   @db.NVarChar(1000)
+  // activa | retirada
+  status             String    @default("activa") @db.NVarChar(20)
+  // Versión APROBADA vigente de la configuración (sin relación: la escribe el código al aprobar).
+  current_version_id Int?
+  // Último consecutivo de registro emitido (se incrementa bajo bloqueo).
+  last_sequence      Int       @default(0)
+  created_by         String    @db.NVarChar(255)
+  created_at         DateTime
+  retired_by         String?   @db.NVarChar(255)
+  retired_at         DateTime?
+  retire_reason      String?   @db.NVarChar(1000)
+
+  companyConfig SgcCompanyConfig              @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  document      SgcDocument                   @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+  versions      SgcGeneratorTemplateVersion[]
+  generated     SgcGeneratedDocument[]
+
+  @@unique([id_company, id_document])
+  @@map("generator_template")
+  @@schema("sgc")
+}
+
+model SgcGeneratorTemplateVersion {
+  id_template_version Int       @id @default(autoincrement())
+  id_template         Int
+  version_number      Int
+  // pendiente | aprobada | rechazada | reemplazada
+  status              String    @default("pendiente") @db.NVarChar(20)
+  // Versión del documento de origen cuyo contenido se congeló.
+  id_document_version Int
+  // Contenido congelado (HTML limpio con las marcas) y su huella. INMUTABLE (trigger).
+  body_html           String    @db.NVarChar(Max)
+  body_sha256         String    @db.Char(64)
+  // Campos editables (JSON: clave, etiqueta, tipo, obligatorio, largo, ayuda). INMUTABLE.
+  fields_json         String    @db.NVarChar(Max)
+  change_reason       String    @db.NVarChar(1000)
+  proposed_by         String    @db.NVarChar(255)
+  proposed_at         DateTime
+  decided_by          String?   @db.NVarChar(255)
+  decided_at          DateTime?
+  decision_reason     String?   @db.NVarChar(1000)
+
+  template  SgcGeneratorTemplate   @relation(fields: [id_template], references: [id_template], onDelete: NoAction, onUpdate: NoAction)
+  generated SgcGeneratedDocument[]
+
+  @@unique([id_template, version_number])
+  @@index([id_template, status])
+  @@map("generator_template_version")
+  @@schema("sgc")
+}
+
+model SgcGeneratedDocument {
+  id_generated        Int       @id @default(autoincrement())
+  id_company          Int
+  id_template         Int
+  id_template_version Int
+  id_document         Int
+  id_document_version Int
+  sequence_number     Int
+  code                String    @db.NVarChar(80)
+  // Valores de los campos (JSON). INMUTABLE (trigger).
+  values_json         String    @db.NVarChar(Max)
+  pdf_item_id         String    @db.NVarChar(200)
+  pdf_path            String    @db.NVarChar(600)
+  pdf_sha256          String    @db.Char(64)
+  pdf_size            Int
+  // emitido | anulado
+  status              String    @default("emitido") @db.NVarChar(20)
+  generated_by        String    @db.NVarChar(255)
+  generated_at        DateTime
+  ip                  String?   @db.NVarChar(64)
+  annulled_by         String?   @db.NVarChar(255)
+  annulled_at         DateTime?
+  annul_reason        String?   @db.NVarChar(1000)
+
+  companyConfig   SgcCompanyConfig            @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  template        SgcGeneratorTemplate        @relation(fields: [id_template], references: [id_template], onDelete: NoAction, onUpdate: NoAction)
+  templateVersion SgcGeneratorTemplateVersion @relation(fields: [id_template_version], references: [id_template_version], onDelete: NoAction, onUpdate: NoAction)
+  document        SgcDocument                 @relation(fields: [id_document], references: [id_document], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_company, code])
+  @@unique([id_template, sequence_number])
+  @@index([id_company, generated_by])
+  @@map("generated_document")
+  @@schema("sgc")
+}
+
+// ---------------------------------------------------------------------------
+// Módulo «Correo» (2026-10-15): bandeja de Outlook de cada persona (Graph con la app
+// de aplicación del inquilino; el buzón SIEMPRE es el de la sesión), simulación y
+// creación masiva de solicitudes, hilos vinculados a casos.
+// Migración: prisma/migrations/20261015120000_correo_modulo. NO se guardan cuerpos
+// de correo: solo identificadores, el asunto de la solicitud y la auditoría.
+// ---------------------------------------------------------------------------
+
+/// Vínculo hilo de correo (conversationId del buzón de la persona) ↔ solicitud general.
+/// Idempotente: un hilo por persona queda vinculado a una sola solicitud.
+model EmailThreadLink {
+  id              Int       @id @default(autoincrement())
+  id_user         String    @db.NVarChar(50)
+  mailbox         String    @db.NVarChar(320)
+  conversation_id String    @db.NVarChar(512)
+  // NULL mientras la solicitud se está creando (estado CREANDO).
+  id_request      Int?
+  // CREANDO | ACTIVO
+  estado          String    @default("ACTIVO") @db.NVarChar(10)
+  // CREADA (la solicitud nació del correo) | VINCULADA (a una solicitud existente)
+  origen          String    @db.NVarChar(10)
+  asunto          String?   @db.NVarChar(255)
+  created_by      String    @db.NVarChar(50)
+  created_at      DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  last_synced_at  DateTime? @db.DateTime2
+
+  mensajes EmailThreadMessage[]
+
+  @@unique([id_user, conversation_id], map: "UQ_email_thread_link_hilo")
+  @@index([id_request], map: "IX_email_thread_link_request")
+  @@map("email_thread_link")
+  @@schema("dbo")
+}
+
+/// Correos (internetMessageId) ya registrados en un hilo vinculado: origen de la
+/// solicitud, notas agregadas y respuestas. ÚNICO global: un mismo correo no crea
+/// dos solicitudes ni dos notas, aunque llegue a varios buzones.
+model EmailThreadMessage {
+  id                  BigInt    @id @default(autoincrement())
+  id_link             Int
+  internet_message_id String    @db.NVarChar(512)
+  // ORIGEN | NOTA | RESPUESTA
+  tipo                String    @db.NVarChar(10)
+  received_at         DateTime? @db.DateTime2
+  created_at          DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  link EmailThreadLink @relation(fields: [id_link], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([internet_message_id], map: "UQ_email_thread_message_imid")
+  @@index([id_link], map: "IX_email_thread_message_link")
+  @@map("email_thread_message")
+  @@schema("dbo")
+}
+
+/// Auditoría del módulo Correo: CADA lectura del buzón (bandeja, hilo, adjunto),
+/// conversiones, vínculos, respuestas y notas. Inmutable (trigger); sin cuerpos de correo.
+model EmailAudit {
+  id                  BigInt   @id @default(autoincrement())
+  id_user             String   @db.NVarChar(50)
+  // Buzón consultado (siempre el del usuario de la sesión).
+  mailbox             String?  @db.NVarChar(320)
+  accion              String   @db.NVarChar(30)
+  mensaje_id          String?  @db.NVarChar(512)
+  conversation_id     String?  @db.NVarChar(512)
+  internet_message_id String?  @db.NVarChar(512)
+  id_request          Int?
+  detalle             String?  @db.NVarChar(1000)
+  ip                  String?  @db.NVarChar(64)
+  created_at          DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  @@index([id_user, created_at], map: "IX_email_audit_user")
+  @@index([id_request], map: "IX_email_audit_request")
+  @@map("email_audit")
+  @@schema("dbo")
+}
+
+// ---------------------------------------------------------------------------
+// «Consultar a un agente» desde un hilo del Correo (2026-10-16, diseño aprobado por
+// Nicolás Rivera 09:24–09:27). La persona comparte UN hilo con UNO de sus agentes del
+// chat por 24 h; el agente lo lee y PROPONE (respuesta, solicitud, nota). Solo el clic
+// de la persona en su sesión ejecuta: «obviamente es una decisión del usuario, no del
+// agente autónomamente». Migración: prisma/migrations/20261016100000_correo_agente.
+// ---------------------------------------------------------------------------
+
+/// Concesión: el agente puede leer SOLO este hilo del buzón de la persona, mientras
+/// esté vigente (expires_at, sin revoked_at). `token` es el identificador opaco que
+/// recibe el agente (share_id); el buzón sale de aquí, nunca de lo que diga el agente.
+model EmailAgentShare {
+  id                   Int       @id @default(autoincrement())
+  token                String    @db.NVarChar(64)
+  id_user              String    @db.NVarChar(50)
+  mailbox              String    @db.NVarChar(320)
+  conversation_id      String    @db.NVarChar(512)
+  asunto               String?   @db.NVarChar(255)
+  id_agent             Int
+  id_chat_conversation Int
+  created_at           DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  expires_at           DateTime  @db.DateTime2
+  revoked_at           DateTime? @db.DateTime2
+  revoked_by           String?   @db.NVarChar(50)
+
+  acciones EmailAgentAction[]
+
+  @@unique([token], map: "UQ_email_agent_share_token")
+  @@index([id_user, conversation_id], map: "IX_email_agent_share_hilo")
+  @@index([id_chat_conversation], map: "IX_email_agent_share_chat")
+  @@map("email_agent_share")
+  @@schema("dbo")
+}
+
+/// Acción PROPUESTA por el agente sobre un hilo compartido. Nunca se ejecuta sola:
+/// queda PENDIENTE como tarjeta en el chat hasta que la persona la confirma (o la
+/// descarta). EJECUTANDO es el candado de «un solo envío».
+model EmailAgentAction {
+  id              Int       @id @default(autoincrement())
+  id_share        Int
+  id_agent        Int
+  // RESPUESTA | SOLICITUD | NOTA
+  tipo            String    @db.NVarChar(12)
+  // PENDIENTE | EJECUTANDO | CONFIRMADA | DESCARTADA | FALLIDA
+  estado          String    @default("PENDIENTE") @db.NVarChar(12)
+  /// JSON con lo propuesto (cuerpo, a todos, proceso, título, nota…). Es la constancia
+  /// de qué confirmó la persona.
+  payload         String    @db.NVarChar(Max)
+  id_chat_message Int?
+  created_at      DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  decided_at      DateTime? @db.DateTime2
+  decided_by      String?   @db.NVarChar(50)
+  resultado       String?   @db.NVarChar(1000)
+  id_request      Int?
+
+  share EmailAgentShare @relation(fields: [id_share], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_share], map: "IX_email_agent_action_share")
+  @@index([id_chat_message], map: "IX_email_agent_action_mensaje")
+  @@map("email_agent_action")
   @@schema("dbo")
 }

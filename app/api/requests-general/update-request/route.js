@@ -4,6 +4,10 @@ import {
   notifyRequestClosed,
 } from '../../../../lib/notificationEvents.js';
 import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
+import {
+  cancelOpenOrionInternalTasks,
+  orionInternalTaskSql,
+} from '../../../../lib/orion/internalTasks';
 
 export async function POST(req) {
   try {
@@ -19,6 +23,45 @@ export async function POST(req) {
         }),
         { status: 400 }
       );
+    }
+
+    // Al cerrar la solicitud (Resuelto=2 / Cancelado=3) todas sus tareas deben estar
+    // cerradas también. Si alguna sigue abierta, se bloquea el cierre y se informa
+    // cuáles faltan y su responsable. El proceso interno de firma (firmar, autorizar
+    // firma, validar documento) no cuenta: se cancela junto con el cierre.
+    if (isRequestClosedStatus(status)) {
+      const pendingTasks = await withMssqlPool(async (pool) => {
+        const result = await pool
+          .request()
+          .input('id', sql.Int, id)
+          .query(`
+            SELECT tpc.task AS task_name, u.name AS assigned_name, sc.status AS status_name
+            FROM task_request_general trg
+            INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
+            LEFT JOIN [user] u ON u.id = trg.id_assigned
+            INNER JOIN status_case sc ON sc.id_status_case = trg.id_status
+            WHERE trg.id_request_general = @id AND trg.id_status NOT IN (2, 3)
+              AND NOT ${orionInternalTaskSql('trg', 'tpc')}
+            ORDER BY tpc.display_order, trg.id
+          `);
+        return result.recordset;
+      });
+
+      if (pendingTasks.length > 0) {
+        const lines = pendingTasks.map(
+          (t) =>
+            `• «${t.task_name}» — Responsable: ${t.assigned_name || 'Sin asignar'} (${t.status_name})`
+        );
+        return new Response(
+          JSON.stringify({
+            error:
+              'No se puede cerrar la solicitud porque hay tareas sin resolver o cancelar:\n' +
+              lines.join('\n'),
+            pendingTasks,
+          }),
+          { status: 409 }
+        );
+      }
     }
 
     const { prevRow } = await withMssqlPool(async (pool) => {
@@ -69,6 +112,14 @@ export async function POST(req) {
           updateCategoryRequest.input('id', sql.Int, id);
 
           await updateCategoryRequest.query(updateCategoryQuery);
+        }
+
+        if (isRequestClosedStatus(status)) {
+          await cancelOpenOrionInternalTasks(
+            transaction,
+            id,
+            'Solicitud cerrada: el proceso de firma ya no queda como tarea pendiente.'
+          );
         }
 
         await transaction.commit();

@@ -44,18 +44,20 @@ import type { SgcRequestDetail } from '../../../lib/sgc/db/requests';
 import type { SgcSignatureMeaning } from '../../../lib/sgc/flows/definition';
 import { sgcStatusColor } from '../../../lib/sgc/flows/engine';
 import type { SgcMatrixSuggestion } from '../../../lib/sgc/flows/matrix';
-import { sgcSend, useSgcFetch } from '../useSgcFetch';
+import { isSgcHttpError, sgcSend, useSgcFetch } from '../useSgcFetch';
 import { formatDateCO } from './format';
 import SgcAdditionalInfo from './SgcAdditionalInfo';
 import SgcAttachmentsCard from './SgcAttachmentsCard';
 import SgcInteractionHistory from './SgcInteractionHistory';
 import SgcSignersPanel from './SgcSignersPanel';
+import SgcSubstituteCard from './SgcSubstituteCard';
 import SgcTasksModal from './SgcTasksModal';
 import SgcSignModal from '../signature/SgcSignModal';
 import SgcSignaturesCard from '../signature/SgcSignaturesCard';
 import SgcDisseminationCard from './SgcDisseminationCard';
 import SgcReadingPanel from './SgcReadingPanel';
 import SgcTrainingCard from './SgcTrainingCard';
+import SgcTrainingFlagCard from './SgcTrainingFlagCard';
 import SgcCurrentDraftCard from './SgcCurrentDraftCard';
 import SgcDocumentLayoutCard from './SgcDocumentLayoutCard';
 import { draftEditorHref } from '../../../lib/sgc/draft/view';
@@ -107,8 +109,34 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [signOpen, setSignOpen] = useState(false);
+  // S15 (R15): documento vigente que ya cubre el tema, al rechazar la creación.
+  const [linkedDocument, setLinkedDocument] = useState<string | null>(null);
 
   const userOptions = useMemo(() => (users.data?.users ?? []).map((u) => ({ value: u.email, label: u.name ? `${u.name} (${u.email})` : u.email })), [users.data]);
+  // Sprint 12: en APROBACIÓN solo se ofrecen los aprobadores autorizados del proceso (si la lista aplica).
+  const approvers = useSgcFetch<{ restricted: boolean; users: { email: string; name: string | null }[] }>(
+    idCompany && (data?.permissions.canChangeSigners || data?.permissions.canSubstitute) ? `/api/sgc/users?company=${idCompany}&role=aprobador&process=${data.request.process?.id ?? ''}` : null
+  );
+  const approverOptions = useMemo(
+    () => (approvers.data?.restricted ? approvers.data.users.map((u) => ({ value: u.email, label: u.name ? `${u.name} (${u.email})` : u.email })) : null),
+    [approvers.data]
+  );
+  // 2026-10-05: el elaborador y el solicitante no firman lo suyo. Excepción de Calidad (2026-10-13): en REVISIÓN,
+  // el servidor indica quiénes de ellos sí pueden quedar (Calidad; el elaborador solo si la empresa lo habilitó).
+  const elaboratorLc = data?.request.elaboratorEmail.toLowerCase() ?? '';
+  const requesterLc = data?.request.requesterEmail.toLowerCase() ?? '';
+  const reviewExempt = useMemo(() => new Set(data?.segregation?.reviewExempt ?? []), [data?.segregation]);
+  // S15 (DOC v7, R17–R19): solo se ofrecen personas del departamento de quien elabora (revisor también de Calidad).
+  const scope = data?.signerScope ?? null;
+  const scopeReviewers = useMemo(() => (scope ? new Set(scope.reviewers) : null), [scope]);
+  const scopeApprovers = useMemo(() => (scope ? new Set(scope.approvers) : null), [scope]);
+  const signerOptions = useMemo(() => userOptions.filter((u) => u.value !== elaboratorLc && u.value !== requesterLc && (!scopeReviewers || scopeReviewers.has(u.value) || scopeApprovers?.has(u.value))), [userOptions, elaboratorLc, requesterLc, scopeReviewers, scopeApprovers]);
+  const reviewerOptions = useMemo(
+    () => userOptions.filter((u) => ((u.value !== elaboratorLc && u.value !== requesterLc) || reviewExempt.has(u.value)) && (!scopeReviewers || scopeReviewers.has(u.value))),
+    [userOptions, elaboratorLc, requesterLc, reviewExempt, scopeReviewers]
+  );
+  const departmentApproverOptions = useMemo(() => (scopeApprovers ? userOptions.filter((u) => scopeApprovers.has(u.value) && u.value !== elaboratorLc && u.value !== requesterLc) : null), [userOptions, scopeApprovers, elaboratorLc, requesterLc]);
+  const vigentes = useSgcFetch<{ documents: { idDocument: number; code: string; title: string }[] }>(idCompany && data?.tasks.some((t) => t.canReject && t.myAction) ? `/api/sgc/documents?company=${idCompany}` : null);
 
   const run = useCallback(
     async (fn: () => Promise<unknown>, ok: string) => {
@@ -176,7 +204,12 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
   const decisionOptions =
     myAction?.kind === 'enviar'
       ? [{ value: 'aprobar', label: 'Resuelto — enviar a revisión' }]
-      : focus?.role === 'capacitacion'
+      : focus?.canReject
+        ? [
+            { value: 'aprobar', label: 'Resuelto — autorizar la creación' },
+            { value: 'rechazar', label: 'Rechazado — no autorizar la creación (cierra la solicitud)' },
+          ]
+        : focus?.role === 'capacitacion'
         ? [{ value: 'aprobar', label: 'Resuelto — cerrar la capacitación' }]
         : [
             { value: 'aprobar', label: focus?.isAuthorization ? 'Resuelto — autorizar (aprobar)' : 'Resuelto — aprobar' },
@@ -192,18 +225,26 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
       setMessage({ type: 'error', text: 'Escriba las observaciones de la devolución (mínimo 5 caracteres).' });
       return;
     }
+    if (decision === 'rechazar' && resolution.trim().length < 10) {
+      setMessage({ type: 'error', text: 'Escriba el motivo del rechazo de la creación (mínimo 10 caracteres).' });
+      return;
+    }
     // Sprint 3: aprobar (o enviar) un paso con firma abre la FIRMA ELECTRÓNICA (reautenticación + motivo).
     if (decision === 'aprobar' && myAction?.signatureMeaning) {
       setSignOpen(true);
       return;
     }
     setSaving(true);
-    const ok = await run(() => sgcSend(`/api/sgc/tasks/${focus.id}/decision`, 'POST', { decision, comment: resolution }), 'Tarea actualizada correctamente.');
+    const ok = await run(
+      () => sgcSend(`/api/sgc/tasks/${focus.id}/decision`, 'POST', { decision, comment: resolution, ...(decision === 'rechazar' && linkedDocument ? { linkedDocumentId: Number(linkedDocument) } : {}) }),
+      decision === 'rechazar' ? 'Creación no autorizada: la solicitud quedó cerrada y se le avisó al solicitante.' : 'Tarea actualizada correctamente.'
+    );
     setSaving(false);
     if (ok) {
       setIsEditing(false);
       setDecision(null);
       setResolution('');
+      setLinkedDocument(null);
     }
   };
 
@@ -261,7 +302,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
             openTask={task ? { key: task.key, round: task.round } : null}
             idTask={mode === 'tarea' ? focus?.id ?? null : null}
             minorHref={
-              permissions.isQuality && !permissions.isElaborator && request.status === 'abierta' && task?.status === 'abierta' && task.signatureMeaning === 'aprobo' && data.currentDraft && data.currentDraft.format !== 'pdf'
+              permissions.isQuality && !permissions.isElaborator && request.status === 'abierta' && task?.status === 'abierta' && task.signatureMeaning === 'aprobo' && data.currentDraft && data.currentDraft.format !== 'pdf' && data.currentDraft.format !== 'xlsx'
                 ? draftEditorHref(request.id, request.idCompany, mode === 'tarea' ? focus?.id : null)
                 : null
             }
@@ -296,7 +337,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
                   await sendMessage(
                     `Nueva Nota en la Solicitud documental #${request.id} - ${request.subject}`,
                     emails.join('; '),
-                    [{ 'ID de la Solicitud': request.id, Asunto: request.subject, Proceso: request.flow.name, Empresa: request.company, Nota: body }],
+                    [{ 'ID de la Solicitud': request.id, 'Nombre del documento': request.subject, Proceso: request.flow.name, Empresa: request.company, Nota: body }],
                     `Este es un mensaje automático del módulo Documentos de SynerLink. Se ha agregado una nueva nota a la solicitud #${request.id}.`,
                     'https://farmalogica.com.co/imagenes/logos/logo20.png',
                     []
@@ -331,7 +372,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
                 </div>
                 <div>
                   <Text size='sm' color='gray.6' fw={500}>
-                    Asunto
+                    Nombre del documento
                   </Text>
                   <Card withBorder radius='md' p='md' mt='xs'>
                     <Group>
@@ -424,7 +465,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
                             <Text size='sm'>
                               {request.document
                                 ? `${request.document.code} · ${request.document.title}`
-                                : `Nuevo · ${request.process?.code ?? ''} ${request.process?.name ?? ''} · ${request.documentType?.name ?? ''}`}
+                                : `Nuevo · ${request.process?.code ?? ''} ${request.process?.name ?? ''} · ${request.documentType?.name ?? ''}${request.parentDocument ? ` · hereda el número de ${request.parentDocument.code}` : ''}`}
                             </Text>
                           </div>
                         </Group>
@@ -483,13 +524,25 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
                       {isEditing && (
                         <Stack>
                           <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true'
-                            label={decision === 'devolver' ? 'Observaciones de la devolución' : 'Descripción de la resolución'}
-                            placeholder={decision === 'devolver' ? 'Qué debe corregir el elaborador…' : 'Describe la resolución aplicada...'}
+                            label={decision === 'devolver' ? 'Observaciones de la devolución' : decision === 'rechazar' ? 'Motivo del rechazo de la creación' : 'Descripción de la resolución'}
+                            placeholder={decision === 'devolver' ? 'Qué debe corregir el elaborador…' : decision === 'rechazar' ? 'Por qué no se autoriza (por ejemplo, ya existe un documento vigente que lo cubre)…' : 'Describe la resolución aplicada...'}
                             value={resolution}
                             onChange={(e) => setResolution(e.currentTarget.value)}
                             minRows={3}
                             data-testid='sgc-resolucion'
                           />
+                          {decision === 'rechazar' && (
+                            <SgcSelect
+                              label='Documento vigente que ya cubre el tema (opcional)'
+                              placeholder='Seleccione si aplica'
+                              searchable
+                              clearable
+                              data={(vigentes.data?.documents ?? []).map((d) => ({ value: String(d.idDocument), label: `${d.code} · ${d.title}` }))}
+                              value={linkedDocument}
+                              onChange={setLinkedDocument}
+                              data-testid='sgc-rechazo-documento'
+                            />
+                          )}
                           {signatureLabel && (
                             <Alert color='blue' variant='light' icon={<IconSignature size={16} />} title={`Punto de firma: ${signatureLabel}`} data-testid='sgc-firma-pendiente'>
                               <Text size='sm'>{data.signatureNotice}</Text>
@@ -503,7 +556,12 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
                           Esta tarea se firma en orden: aún no es su turno. Se le notificará cuando le toque.
                         </Alert>
                       )}
-                      {focus.status === 'abierta' && !myAction && !focus.myWaiting && permissions.isElaborator && focus.key !== 'elaboracion' && (
+                      {focus.status === 'abierta' && !myAction && focus.blockedReason && (
+                        <Alert color='gray' icon={<IconLock size={16} />} mb='md' data-testid='sgc-bloqueo-segregacion'>
+                          {focus.blockedReason}
+                        </Alert>
+                      )}
+                      {focus.status === 'abierta' && !myAction && !focus.myWaiting && !focus.blockedReason && permissions.isElaborator && focus.key !== 'elaboracion' && focus.assignment !== 'creador' && focus.assignment !== 'alcance' && (
                         <Alert color='gray' icon={<IconLock size={16} />} mb='md'>
                           El elaborador no revisa ni aprueba su propio documento.
                         </Alert>
@@ -551,9 +609,19 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           <SgcDisseminationCard idCompany={request.idCompany} view={data.dissemination} users={userOptions} onAction={onDisseminationAction} />
         )}
 
+        {/* Sprint 10: capacitación opcional por solicitud (sugerida por el solicitante, confirmada por quien crea el documento o Calidad). */}
+        {!data.readerOnly && request.trainingFlag && (
+          <SgcTrainingFlagCard flag={request.trainingFlag} onSet={(requiresTraining, reason) => run(() => sgcSend(`/api/sgc/requests/${request.id}/training-flag`, 'PUT', { requiresTraining, reason }), 'Capacitación de la solicitud confirmada.')} />
+        )}
+
         {data.training && (
           <SgcTrainingCard
             view={data.training}
+            users={userOptions}
+            requestId={request.id}
+            onChanged={reload}
+            onConsolidate={() => run(() => sgcSend(`/api/sgc/requests/${request.id}/training/consolidate`, 'POST', {}), 'Resultados de la evaluación consolidados: el Excel de resultados quedó guardado con su huella.')}
+            onRetrain={(body) => run(() => sgcSend(`/api/sgc/requests/${request.id}/training/retraining`, 'POST', body), 'Recapacitación registrada.')}
             onSave={(body) => run(() => sgcSend(`/api/sgc/requests/${request.id}/training`, 'POST', body), 'Capacitación registrada.')}
             onUpload={(file) =>
               run(async () => {
@@ -572,11 +640,30 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
         <SgcSignersPanel
           steps={data.steps}
           canEdit={permissions.canChangeSigners}
-          users={userOptions.filter((u) => u.value !== request.elaboratorEmail.toLowerCase())}
+          users={signerOptions}
+          reviewerUsers={reviewerOptions}
+          approverUsers={departmentApproverOptions ?? approverOptions?.filter((u) => u.value !== elaboratorLc && u.value !== requesterLc) ?? null}
+          requesterElaborates={request.roleModel === 'solicitante_elabora'}
+          scopeNotice={scope ? (scope.notice ?? `Solo personas del departamento de quien elabora (${scope.departments.join(', ') || 'sin departamento'}); un revisor también puede ser de Aseguramiento de Calidad.${scope.leadersEnforced ? ' Aprueban solo los líderes autorizados del departamento.' : ''}`) : null}
           suggestion={sugg.data?.suggestion ?? null}
+          suggestOnly={permissions.signersSuggestOnly}
+          canConfirm={permissions.canConfirmSuggestion}
+          onConfirm={async () => {
+            await run(() => sgcSend(`/api/sgc/requests/${request.id}/signers`, 'POST', { action: 'confirmar' }), 'Sugerencia confirmada: los firmantes y el alcance quedan definitivos.');
+          }}
           onSave={async (stepKey, signers, signingMode, reason) => {
             await run(() => sgcSend(`/api/sgc/requests/${request.id}/signers`, 'POST', { stepKey, signers, mode: signingMode, reason }), 'Firmantes actualizados.');
           }}
+        />
+
+        <SgcSubstituteCard
+          tasks={data.tasks}
+          substitutions={data.substitutions}
+          canSubstitute={permissions.canSubstitute}
+          users={signerOptions}
+          reviewerUsers={reviewerOptions}
+          approverUsers={approverOptions?.filter((u) => u.value !== elaboratorLc && u.value !== requesterLc) ?? null}
+          onAssign={(idTask, body) => run(() => sgcSend(`/api/sgc/tasks/${idTask}/substitute`, 'POST', body), 'Sustituto asignado: firmará en sustitución del titular.')}
         />
 
         <SgcDocumentLayoutCard
@@ -610,6 +697,7 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
           currentDraft={data.currentDraft}
           canUploadDraft={permissions.canUploadDraft}
           canUploadSupport={permissions.canUploadSupport}
+          draftFormats={request.draftFormats}
           canWithdraw={(a) => request.status === 'abierta' && (a.uploadedByEmail.toLowerCase() === me || permissions.isElaborator || permissions.isQuality)}
           onUpload={async (file, purpose) => {
             let duplicateOf: { id: number; fileName: string }[] = [];
@@ -696,9 +784,21 @@ export default function SgcRequestView({ mode, id }: SgcRequestViewProps) {
             draft={signContent}
             draftHref={myAction.signatureMeaning === 'capacito' ? null : draftHref}
             checklist={myAction.checklist}
+            idCompany={request.idCompany}
+            qualityVerification={Boolean(myAction.qualityVerification)}
+            justification={
+              myAction.signatureMeaning === 'capacito' && data.training?.upload?.needsJustification
+                ? { required: true, summary: `Del alcance: ${data.training.upload.summary.failed} reprobaron y ${data.training.upload.summary.missing.length} no tienen resultado.` }
+                : null
+            }
             submitLabel={myAction.kind === 'enviar' ? 'Firmar y enviar a revisión' : myAction.signatureMeaning === 'capacito' ? 'Firmar «Capacitó» y cerrar' : undefined}
             onSign={async (payload) => {
-              const res = await sgcSend<{ controlledPdf?: { status: string | null; error?: string }; published?: { code: string; versionNumber: number; obsolete: { versionNumber: number } | null } | null }>(`/api/sgc/tasks/${focus.id}/sign`, 'POST', { ...payload, comment: payload.comment || resolution, idAssignee: myAction.idAssignee });
+              const res = await sgcSend<{ controlledPdf?: { status: string | null; error?: string }; published?: { code: string; versionNumber: number; obsolete: { versionNumber: number } | null } | null }>(`/api/sgc/tasks/${focus.id}/sign`, 'POST', { ...payload, comment: payload.comment || resolution, idAssignee: myAction.idAssignee }).catch((e: unknown) => {
+                // S14 (R29): si lo firmado cambió (otra persona cargó otros resultados o un borrador nuevo), se recarga
+                // la tarea para que el formulario muestre el contenido vigente y se firme de nuevo sobre él.
+                if (isSgcHttpError(e) && e.status === 409) reload();
+                throw e;
+              });
               setSignOpen(false);
               setIsEditing(false);
               setDecision(null);

@@ -81,8 +81,13 @@ export function describeSgcPermissionMarker(url: string | null | undefined): str
 // Sprint 1 — repositorio y listado maestro.
 // ---------------------------------------------------------------------------
 
-/** Estados de un documento (y de una versión). No son tareas del flujo. */
-export const SGC_DOCUMENT_STATUSES = ['borrador', 'vigente', 'obsoleto', 'anulado'] as const;
+/**
+ * Estados de un documento (y de una versión). No son tareas del flujo.
+ * Sprint 8: «pendiente de archivo» = documento del listado maestro importado
+ * con su código, versión y fecha de vigencia, al que aún le falta el PDF (solo
+ * del documento; una versión nunca queda en ese estado).
+ */
+export const SGC_DOCUMENT_STATUSES = ['borrador', 'vigente', 'obsoleto', 'anulado', 'pendiente_archivo'] as const;
 export type SgcDocumentStatus = (typeof SGC_DOCUMENT_STATUSES)[number];
 
 export const SGC_DOCUMENT_STATUS_LABELS: Record<SgcDocumentStatus, string> = {
@@ -90,6 +95,7 @@ export const SGC_DOCUMENT_STATUS_LABELS: Record<SgcDocumentStatus, string> = {
   vigente: 'Vigente',
   obsoleto: 'Obsoleto',
   anulado: 'Anulado',
+  pendiente_archivo: 'Pendiente de archivo',
 };
 
 /**

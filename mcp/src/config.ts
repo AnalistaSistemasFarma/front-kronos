@@ -27,6 +27,26 @@ const apiKeySchema = z.object({
   ]),
   /** Rol/nivel informativo: "admin" o "reader". En esta versión todo es solo lectura. */
   role: z.string().default('reader'),
+  /**
+   * Lista blanca de herramientas (opcional). Si se define, el servidor SOLO
+   * registra estas herramientas para la key: las demás ni se listan ni se
+   * pueden llamar (tampoco por HTTP directo). Sin el campo, la key ve todas
+   * (comportamiento histórico: horus, nancy, test-local).
+   */
+  allowedTools: z.array(z.string().min(1)).min(1).optional(),
+  /**
+   * Código del agente (tabla `agent.code`, p. ej. "galileo", "lisa") que
+   * presenta esta key. Lo usan las herramientas que actúan "en nombre de" un
+   * agente (kronos_request_ia_access). Nunca se toma del cliente.
+   */
+  agentCode: z.string().min(1).max(60).optional(),
+}).superRefine((entry, ctx) => {
+  if (entry.allowedTools?.includes('kronos_request_ia_access') && !entry.agentCode) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `La key del agente "${entry.agent}" permite kronos_request_ia_access pero no define agentCode.`,
+    });
+  }
 });
 
 export type ApiKeyEntry = z.infer<typeof apiKeySchema>;

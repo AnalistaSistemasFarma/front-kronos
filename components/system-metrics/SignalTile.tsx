@@ -103,7 +103,7 @@ export function Sparkline({ values, label }: { values: Array<number | null>; lab
       </defs>
       <path d={area} fill={`url(#${gradientId})`} />
       <path d={d} fill="none" stroke="var(--sm-info)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={x(last.i)} cy={y(last.v)} r={3} fill="var(--sm-info)" stroke="var(--sm-card)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+      <circle cx={x(last.i)} cy={y(last.v)} r={3} fill="var(--sm-info)" stroke="var(--sm-card-solid, var(--sm-card))" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
     </svg>
   );
 }

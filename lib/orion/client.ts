@@ -1,4 +1,9 @@
-import { getOrionConfig } from './config';
+import {
+  activateOrionFallback,
+  getOrionConfig,
+  getOrionFallbackUrl,
+  isOrionFallbackActive,
+} from './config';
 import type {
   OrionAssignSignersPayload,
   OrionCreateDocumentPayload,
@@ -109,6 +114,22 @@ export type OrionResult<T> = {
   code?: string;
 };
 
+/**
+ * Tope de espera por llamada a Orion. Sin esto, un Orion (o túnel) que no contesta deja la
+ * pantalla esperando indefinidamente; al vencer se trata como "no responde" (activa el respaldo).
+ * Las lecturas son rápidas; las escrituras pueden subir PDFs, por eso tienen más margen.
+ */
+const ORION_READ_TIMEOUT_MS = 15_000;
+const ORION_WRITE_TIMEOUT_MS = 60_000;
+
+function orionTimeoutSignal(init?: RequestInit): AbortSignal {
+  const method = String(init?.method || 'GET').toUpperCase();
+  const timeout = AbortSignal.timeout(
+    method === 'GET' || method === 'HEAD' ? ORION_READ_TIMEOUT_MS : ORION_WRITE_TIMEOUT_MS
+  );
+  return init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+}
+
 async function orionFetch<T>(path: string, init?: RequestInit): Promise<OrionResult<T>> {
   const cfg = getOrionConfig();
   if (!cfg.apiBaseUrl || !cfg.integrationApiKey) {
@@ -120,10 +141,8 @@ async function orionFetch<T>(path: string, init?: RequestInit): Promise<OrionRes
     };
   }
 
-  const url = `${cfg.apiBaseUrl}${path.startsWith('/') ? path : `/${path}`}`;
-  let res: Response;
-  try {
-    res = await fetch(url, {
+  const request = (baseUrl: string) =>
+    fetch(`${baseUrl}${path.startsWith('/') ? path : `/${path}`}`, {
       ...init,
       headers: {
         Authorization: `Bearer ${cfg.integrationApiKey}`,
@@ -131,8 +150,19 @@ async function orionFetch<T>(path: string, init?: RequestInit): Promise<OrionRes
         ...(init?.headers ?? {}),
       },
       cache: 'no-store',
+      signal: orionTimeoutSignal(init),
     });
+
+  let res: Response;
+  try {
+    res = await request(cfg.apiBaseUrl);
   } catch (err) {
+    const fallback = isOrionFallbackActive() ? null : getOrionFallbackUrl();
+    if (fallback) {
+      console.warn(`[orion] ${cfg.apiBaseUrl} no responde; usando ${fallback}`);
+      activateOrionFallback();
+      return orionFetch<T>(path, init);
+    }
     const message = err instanceof Error ? err.message : String(err);
     return {
       ok: false,
@@ -282,6 +312,8 @@ export async function acceptOrionSignerTurn(
     requireFingerprint?: boolean | null;
     /** Slot de secuencia (mismo email puede firmar varias veces). */
     signOrder?: number | null;
+    /** Id del turno en Orion; tiene prioridad sobre signOrder. */
+    signerId?: string | null;
     /** Consentimiento biométrico Ley 1581 (obligatorio si hay huella). */
     biometricConsentAccepted?: boolean | null;
     biometricConsentVersion?: string | null;
@@ -298,10 +330,13 @@ export async function acceptOrionSignerTurn(
   if (Number.isFinite(signOrder) && signOrder > 0) {
     payload.signOrder = signOrder;
   }
+  const signerId = String(options?.signerId || '').trim();
+  if (signerId) payload.signerId = signerId;
   const dataUrl = String(options?.signatureDataUrl || '').trim();
   if (dataUrl.startsWith('data:image/')) {
     payload.signatureDataUrl = dataUrl;
   }
+  // Sin imagen, requireFingerprint:true hace que Orion use la huella de "Mi huella".
   const fingerprintDataUrl = String(options?.fingerprintDataUrl || '').trim();
   if (fingerprintDataUrl.startsWith('data:image/')) {
     payload.fingerprintDataUrl = fingerprintDataUrl;
@@ -397,6 +432,68 @@ export async function saveOrionPersonConsent(
     `/api/integrations/synerlink/user-consent?email=${encoded}`,
     { method: 'POST', body: JSON.stringify(body) }
   );
+}
+
+/** Vista previa del firmante (solo lectura): Orion es la fuente de rúbrica, nombre, cédula y cargo. */
+export type OrionSignerPreview = {
+  email: string;
+  hasSignature: boolean;
+  signatureDataUrl: string | null;
+  fullName: string | null;
+  idDocumentType: string | null;
+  idNumber: string | null;
+  jobTitle: string | null;
+  companyName: string | null;
+};
+
+function pickText(...values: unknown[]): string | null {
+  for (const v of values) {
+    const s = typeof v === 'string' ? v.trim() : '';
+    if (s) return s;
+  }
+  return null;
+}
+
+export async function getOrionSignerPreview(email: string): Promise<OrionResult<OrionSignerPreview>> {
+  const encoded = encodeURIComponent(email.trim().toLowerCase());
+  const res = await orionFetch<Record<string, unknown>>(
+    `/api/integrations/synerlink/user-signature?email=${encoded}`,
+    { method: 'GET' }
+  );
+  if (!res.ok || !res.data) return { ...res, data: null };
+  const d = res.data;
+  const profile = (d.profile && typeof d.profile === 'object' ? d.profile : {}) as Record<string, unknown>;
+  const dataUrl = pickText(d.dataUrl, d.signatureDataUrl);
+  return {
+    ...res,
+    data: {
+      email: email.trim().toLowerCase(),
+      hasSignature: d.hasSignature === true || Boolean(dataUrl),
+      signatureDataUrl: dataUrl,
+      fullName: pickText(d.fullName, d.name, d.displayName, profile.fullName, profile.name),
+      idDocumentType: pickText(d.idDocumentType, profile.idDocumentType),
+      idNumber: pickText(d.idNumber, profile.idNumber),
+      jobTitle: pickText(d.jobTitle, profile.jobTitle),
+      companyName: pickText(d.companyName, profile.companyName),
+    },
+  };
+}
+
+export async function getOrionUserFingerprint(
+  email: string
+): Promise<OrionResult<{ hasFingerprint: boolean; updatedAt?: string | null }>> {
+  const encoded = encodeURIComponent(email.trim().toLowerCase());
+  return orionFetch(`/api/integrations/synerlink/user-fingerprint?email=${encoded}`, {
+    method: 'GET',
+  });
+}
+
+/** URL de "Mi huella" en Orion (registro único de la huella con consentimiento). */
+export function getOrionFingerprintProfileUrl(): string | null {
+  const custom = process.env.ORION_FINGERPRINT_PROFILE_URL?.trim();
+  if (custom) return custom.replace(/\/$/, '');
+  const base = getOrionPublicBaseUrl() || getOrionConfig().embedOrigin;
+  return base ? `${base}/dashboard/my-fingerprint` : null;
 }
 
 /** Regenera PDF acumulado en Orion (corrige documentos con solo la 1.ª firma). */
@@ -659,6 +756,7 @@ export async function fetchOrionProtectedFile(url: string): Promise<{
     const res = await fetch(absoluteUrl, {
       headers: { Authorization: `Bearer ${cfg.integrationApiKey}` },
       cache: 'no-store',
+      signal: AbortSignal.timeout(ORION_WRITE_TIMEOUT_MS),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
@@ -680,7 +778,11 @@ export async function fetchOrionProtectedFile(url: string): Promise<{
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Error de red';
     const unreachable =
-      /fetch failed|ECONNREFUSED|ENOTFOUND|ECONNRESET|ETIMEDOUT/i.test(message);
+      /fetch failed|ECONNREFUSED|ENOTFOUND|ECONNRESET|ETIMEDOUT|aborted due to timeout/i.test(message);
+    if (unreachable && !isOrionFallbackActive() && getOrionFallbackUrl()) {
+      activateOrionFallback();
+      return fetchOrionProtectedFile(url);
+    }
     return {
       ok: false,
       status: unreachable ? 503 : 502,

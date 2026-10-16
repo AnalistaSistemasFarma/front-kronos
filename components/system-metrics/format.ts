@@ -42,9 +42,37 @@ export function formatAgo(iso: string | null | undefined, now = Date.now()): str
   return `hace ${Math.round(m / 60)} h`;
 }
 
+const PROGRAM_NAMES: Record<string, string> = {
+  tiberius: 'Prisma (Kronos)',
+  'node-mssql': 'mssql (Kronos)',
+  tedious: 'mssql (Kronos)',
+};
+
+/** Nombre legible del programa que abrió una sesión en SQL Server (`program_name`). */
+export function programLabel(name: string): string {
+  if (PROGRAM_NAMES[name]) return PROGRAM_NAMES[name];
+  if (name.startsWith('Microsoft SQL Server Management Studio') || name === 'SQL Server Management Studio') {
+    return 'SQL Server Management Studio';
+  }
+  if (name.startsWith('Microsoft Office') || name.startsWith('Microsoft® Excel')) return 'Excel / Office';
+  if (name.startsWith('SQLAgent')) return 'Agente SQL (tareas programadas)';
+  if (name.startsWith('Microsoft JDBC')) return 'Aplicación Java (JDBC)';
+  if (name.startsWith('.Net SqlClient') || name.startsWith('Core Microsoft SqlClient')) return 'Aplicación .NET';
+  if (name.startsWith('Power BI') || name.startsWith('Mashup Engine')) return 'Power BI';
+  return name || '(sin nombre)';
+}
+
 /** Variación porcentual; null si no hay base para comparar. */
 export function percentChange(current: number | null | undefined, previous: number | null | undefined): number | null {
   if (current == null || previous == null || !Number.isFinite(current) || !Number.isFinite(previous)) return null;
   if (previous === 0) return current === 0 ? 0 : null;
   return ((current - previous) / previous) * 100;
+}
+
+/** Iniciales para el avatar: "Laura Gómez" → "LG"; sin nombre, del correo. */
+export function initialsOf(name: string | null, email: string): string {
+  const source = name?.trim() || email;
+  const words = source.split(/[\s.@_-]+/).filter(Boolean);
+  const letters = words.length >= 2 ? words[0][0] + words[1][0] : source.slice(0, 2);
+  return letters.toUpperCase();
 }

@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import ExcelJS from 'exceljs';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { addMatrixEntry } from '../../../lib/sgc/db/matrix';
 import { PrismaClient } from '../../../app/generated/prisma';
 import { getSgcAccessForUser } from '../../../lib/sgc/access';
 import { SGC_PROCESS_NAME, SGC_SUBPROCESS_NAMES, SGC_SUBPROCESS_URLS } from '../../../lib/sgc/constants';
@@ -13,7 +14,7 @@ import { getCatalogs } from '../../../lib/sgc/db/catalogs';
 import { addScopeEntry, getMyReading, openReadingFile, recordReadingEvent, removeScopeEntry, sendReadingReminders } from '../../../lib/sgc/db/dissemination';
 import { canViewDocument, createInitialDocument, getAccessSubject, type SgcUploader } from '../../../lib/sgc/db/documents';
 import { getCurrentFlowVersion, loadDefinition } from '../../../lib/sgc/db/flows';
-import { addNote, cancelRequest, closeDissemination, createRequest, excludeReader, getAttachmentForDownload, getRequestDetail, getTaskDetail, listTaskInbox, setSigners, uploadAttachment } from '../../../lib/sgc/db/requests';
+import { addNote, cancelRequest, closeDissemination, confirmSuggestions, createRequest, decideTask, excludeReader, getAttachmentForDownload, getRequestDetail, getTaskDetail, listTaskInbox, setSigners, uploadAttachment } from '../../../lib/sgc/db/requests';
 import { listDraftRevisions } from '../../../lib/sgc/db/drafts';
 import { signTask, type SgcSignatureDeps } from '../../../lib/sgc/db/signatures';
 import { saveTraining, uploadTrainingResults } from '../../../lib/sgc/db/training';
@@ -45,7 +46,10 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
   const prisma = new PrismaClient({ datasources: { db: { url: url ?? '' } } });
   const CO = 70;
   const PW = 'Clave-S4-ci#2026';
+  // 2026-10-05: el solicitante (sol) solo SUGIERE firmantes y alcance; el elaborador (elab) es de
+  // Aseguramiento de Calidad y es quien los confirma o asigna (SGC_ASIGNACION_PERMISO = tarea_y_calidad).
   const E = {
+    sol: 'sol.s4@onelatampharma.com',
     elab: 'elab.s4@onelatampharma.com',
     rev: 'rev.s4@onelatampharma.com',
     apr: 'apr.s4@onelatampharma.com',
@@ -113,9 +117,9 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
 
   /** Solicitud de nueva versión llevada por elaboración, revisión y aprobación (con PDF controlado). */
   async function approvedRequest(subject: string): Promise<number> {
-    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.elab), { idCompany: CO, requestType: 'nueva_version', subject, description: 'Nueva versión para la prueba del Sprint 4.', idDocument: idDoc, formValues: { urgencia: 'Normal' } }, actor(E.elab));
-    await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev], mode: 'orden' }, actor(E.elab));
-    await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr], mode: 'orden' }, actor(E.elab));
+    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nueva_version', subject, description: 'Nueva versión para la prueba del Sprint 4.', idDocument: idDoc, formValues: { urgencia: 'Normal' } }, actor(E.sol));
+    await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev], mode: 'orden' }, actor(E.elab), await accessOf(E.elab));
+    await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr], mode: 'orden' }, actor(E.elab), await accessOf(E.elab));
     await uploadAttachment(prisma, upload, idRequest, { purpose: 'borrador', ...docx(subject) }, await viewer(E.elab), actor(E.elab));
     return idRequest;
   }
@@ -139,7 +143,9 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
       SET IDENTITY_INSERT [dbo].[company] ON;
       IF NOT EXISTS (SELECT 1 FROM [dbo].[company] WHERE id_company = ${CO}) INSERT INTO [dbo].[company] (id_company, company) VALUES (${CO}, N'EMPRESA S4 CI');
       SET IDENTITY_INSERT [dbo].[company] OFF;`);
-    await prisma.sgcCompanyConfig.upsert({ where: { id_company: CO }, create: { id_company: CO, is_active: true, storage_root: 'SGC/S4', activated_by: 'ci', activated_at: new Date() }, update: { is_active: true } });
+    // Sprint 8: esta suite usa borradores PDF y el encabezado opcional (modo configurable header_mandatory = 0);
+    // el encabezado OBLIGATORIO se prueba en tests/integration/sgc/s8.integration.test.ts.
+    await prisma.sgcCompanyConfig.upsert({ where: { id_company: CO }, create: { id_company: CO, is_active: true, header_mandatory: false, storage_root: 'SGC/S4', activated_by: 'ci', activated_at: new Date() }, update: { is_active: true, header_mandatory: false } });
     const proc = await prisma.process.create({ data: { process: `${SGC_PROCESS_NAME} (S4 CI)` } });
     const sub: Record<string, number> = {};
     for (const perm of ['lectura', 'gestion', 'calidad', 'flujos'] as const) {
@@ -149,7 +155,8 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     cargo = (await prisma.cargo.create({ data: { nombre_normalizado: `ANALISTA DE CALIDAD S4 CI ${Date.now()}` } })).id_cargo;
     const hash = bcrypt.hashSync(PW, 4);
     const grants: [string, string[], boolean][] = [
-      [E.elab, ['gestion'], false],
+      [E.sol, ['gestion'], false],
+      [E.elab, ['gestion', 'calidad'], false],
       [E.rev, ['gestion'], true],
       [E.apr, ['gestion'], false],
       [E.cal, ['calidad'], false],
@@ -171,6 +178,9 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     const cat = await getCatalogs(prisma, CO);
     procGC = cat.processes.find((p) => p.code === 'GC')!.id;
     typePR = cat.documentTypes.find((t) => t.code === 'PR')!.id;
+    // 2026-10-05 (#536): el elaborador sale de la matriz de responsables (proceso × tipo); una fila
+    // por persona deja determinista quién elabora (el elaborador de Calidad de la prueba).
+    await addMatrixEntry(prisma, CO, { role: 'elaborador', idProcess: procGC, idDocumentType: typePR, userEmail: E.elab, reason: 'Elaborador de Calidad de la prueba' }, actor(E.cal));
     const calType = (await listAuthorizationTypes(prisma, CO)).find((t) => t.code === 'SGC-VERIF-CALIDAD')!;
     await grantAuthorizationTypeUser(prisma, CO, calType.id, { email: E.cal, reason: 'Calidad de la prueba S4' }, actor('ci@x.co'));
     const doc = await createInitialDocument(prisma, upload, { idCompany: CO, idProcess: procGC, idDocumentType: typePR, title: 'Control de documentos S4', confidentiality: 'publica', versionNumber: 1, effectiveDate: '2026-01-15', pdf: { bytes: await pdfOf('vigente V1'), fileName: 'v1.pdf' } }, actor(E.cal));
@@ -216,11 +226,31 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     await expect(prisma.$executeRawUnsafe(`DELETE FROM [sgc].[cargo_member] WHERE id_company = ${CO}`)).rejects.toThrow(/no se borra/);
   });
 
-  it('[SGC-REQ-053] el alcance se define antes de la divulgación (elaborador o Calidad) por departamento, cargo y persona; nada se borra', async () => {
+  it('[SGC-REQ-053] el alcance se define antes de la divulgación (lo sugiere el solicitante y lo confirma el elaborador de Calidad) por departamento, cargo y persona; nada se borra', async () => {
     reqA = await approvedRequest('Nueva versión con divulgación S4');
     await expect(addScopeEntry(prisma, notifier, await accessOf(E.rev), reqA, { entry: { kind: 'empresa' }, reason: 'Toda la empresa' }, actor(E.rev))).rejects.toMatchObject({ status: 403 });
+    // 2026-10-05 (decisión de Nicolás): antes «el elaborador o Calidad»; con la política por defecto (tarea_y_calidad)
+    // selecciona quien ejecuta la primera tarea (la elaboración) con el permiso de Calidad. Calidad sin ser el elaborador, no.
+    await expect(addScopeEntry(prisma, notifier, await accessOf(E.cal), reqA, { entry: { kind: 'cargo', idCargo: cargo }, reason: 'Analistas de Calidad' }, actor(E.cal))).rejects.toMatchObject({ status: 403 });
     await addScopeEntry(prisma, notifier, await accessOf(E.elab), reqA, { entry: { kind: 'departamento', idDepartment: dept }, reason: 'Área usuaria del procedimiento' }, actor(E.elab));
-    await addScopeEntry(prisma, notifier, await accessOf(E.cal), reqA, { entry: { kind: 'cargo', idCargo: cargo }, reason: 'Analistas de Calidad' }, actor(E.cal));
+    // El solicitante SUGIERE (queda pendiente) y el elaborador de Calidad confirma con un clic.
+    expect(await addScopeEntry(prisma, notifier, await accessOf(E.sol), reqA, { entry: { kind: 'cargo', idCargo: cargo }, reason: 'Analistas de Calidad' }, actor(E.sol))).toMatchObject({ suggested: true });
+    expect(await prisma.sgcDisseminationScope.findFirstOrThrow({ where: { id_request: reqA, kind: 'cargo' } })).toMatchObject({ is_active: false, removed_at: null, added_by: E.sol });
+    const pendingView = (await getRequestDetail(prisma, reqA, await viewer(E.elab))).dissemination!;
+    expect(pendingView.scope.map((s) => [s.kind, s.suggested])).toEqual([
+      ['departamento', false],
+      ['cargo', true],
+    ]);
+    await expect(addScopeEntry(prisma, notifier, await accessOf(E.sol), reqA, { entry: { kind: 'cargo', idCargo: cargo }, reason: 'Repetido' }, actor(E.sol))).rejects.toThrow(/ya está sugerida/);
+    // Quien sugiere retira lo que sugirió, pero no lo confirmado.
+    const sugAjeno = await addScopeEntry(prisma, notifier, await accessOf(E.sol), reqA, { entry: { kind: 'persona', email: E.ajeno }, reason: 'Sugerencia que se retira' }, actor(E.sol));
+    await removeScopeEntry(prisma, await accessOf(E.sol), reqA, sugAjeno.idScope, { reason: 'Ya no se sugiere' }, actor(E.sol));
+    const deptRow = await prisma.sgcDisseminationScope.findFirstOrThrow({ where: { id_request: reqA, kind: 'departamento', is_active: true } });
+    await expect(removeScopeEntry(prisma, await accessOf(E.sol), reqA, deptRow.id_scope, { reason: 'Retirar lo confirmado' }, actor(E.sol))).rejects.toMatchObject({ status: 403 });
+    // Lo sugerido sin confirmar no deja completar la primera tarea (la elaboración).
+    await expect(decideTask(prisma, notifier, (await taskOf(reqA, 'elaboracion')).id_task, { decision: 'aprobar' }, actor(E.elab))).rejects.toThrow(/SUGERIDOS sin confirmar/);
+    await expect(confirmSuggestions(prisma, notifier, reqA, actor(E.sol), await accessOf(E.sol))).rejects.toMatchObject({ status: 403 });
+    expect(await confirmSuggestions(prisma, notifier, reqA, actor(E.elab), await accessOf(E.elab))).toEqual({ confirmed: 0, confirmedScope: 1, confirmedTraining: false });
     const tmp = await addScopeEntry(prisma, notifier, await accessOf(E.elab), reqA, { entry: { kind: 'persona', email: E.ajeno }, reason: 'Por error' }, actor(E.elab));
     await expect(addScopeEntry(prisma, notifier, await accessOf(E.elab), reqA, { entry: { kind: 'departamento', idDepartment: dept }, reason: 'Repetido' }, actor(E.elab))).rejects.toMatchObject({ status: 409 });
     await expect(addScopeEntry(prisma, notifier, await accessOf(E.elab), reqA, { entry: { kind: 'departamento', idDepartment: 999999 }, reason: 'No existe' }, actor(E.elab))).rejects.toThrow(/no existe/);
@@ -325,13 +355,15 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
   });
 
   it('[SGC-REQ-053][SGC-REQ-057] cobertura, recordatorios, ampliación del alcance por Calidad durante la divulgación y exclusión justificada', async () => {
-    await expect(sendReadingReminders(prisma, notifier, await accessOf(E.elab), reqA, actor(E.elab))).rejects.toMatchObject({ status: 403 });
+    // 2026-10-05: el elaborador ahora es de Calidad; quien no es de Calidad (el solicitante) no envía recordatorios.
+    await expect(sendReadingReminders(prisma, notifier, await accessOf(E.sol), reqA, actor(E.sol))).rejects.toMatchObject({ status: 403 });
     sent.length = 0;
     expect(await sendReadingReminders(prisma, notifier, await accessOf(E.cal), reqA, actor(E.cal))).toEqual({ sent: 3 });
     expect(sent[0].payload.title).toMatch(/Recordatorio/);
-    await expect(addScopeEntry(prisma, notifier, await accessOf(E.elab), reqA, { entry: { kind: 'persona', email: E.ajeno }, reason: 'Ampliar' }, actor(E.elab))).rejects.toMatchObject({ status: 403 });
+    // 2026-10-05: durante la divulgación el solicitante ya no sugiere; amplía quien ejecutó la elaboración con el permiso de Calidad.
+    await expect(addScopeEntry(prisma, notifier, await accessOf(E.sol), reqA, { entry: { kind: 'persona', email: E.ajeno }, reason: 'Ampliar' }, actor(E.sol))).rejects.toMatchObject({ status: 403 });
     await expect(removeScopeEntry(prisma, await accessOf(E.cal), reqA, 1, { reason: 'Retirar durante' }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
-    const add = await addScopeEntry(prisma, notifier, await accessOf(E.cal), reqA, { entry: { kind: 'persona', email: E.ajeno }, reason: 'Ampliación: usa el procedimiento' }, actor(E.cal));
+    const add = await addScopeEntry(prisma, notifier, await accessOf(E.elab), reqA, { entry: { kind: 'persona', email: E.ajeno }, reason: 'Ampliación: usa el procedimiento' }, actor(E.elab));
     expect(add.added).toBe(1);
     const t = await taskOf(reqA, 'divulgacion');
     const recAjeno = await prisma.sgcReadRecord.findFirstOrThrow({ where: { id_task: t.id_task, user_email: E.ajeno } });
@@ -344,10 +376,13 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     const d = (await getRequestDetail(prisma, reqA, await viewer(E.cal))).dissemination!;
     expect(d.coverage).toMatchObject({ total: 5, read: 1, pending: 3, excluded: 1, percent: 25 });
     expect(d.readers.find((r) => r.email === E.l2)).toMatchObject({ status: 'pendiente', remindersSent: 1 });
-    expect(d).toMatchObject({ started: true, open: true, canManage: true, canEditScope: true, canRemoveScope: false });
+    // 2026-10-05: Calidad gestiona la divulgación; ampliar el alcance queda en quien ejecutó la elaboración (de Calidad).
+    expect(d).toMatchObject({ started: true, open: true, canManage: true, canEditScope: false, canRemoveScope: false });
+    expect((await getRequestDetail(prisma, reqA, await viewer(E.elab))).dissemination).toMatchObject({ canManage: true, canEditScope: true, canRemoveScope: false });
   });
 
-  it('[SGC-REQ-056][SGC-REQ-057] cuando todos los del alcance firman, la divulgación se cierra sola y pasa a la capacitación', async () => {
+  it('[SGC-REQ-056][SGC-REQ-057][SGC-REQ-152] cuando todos los del alcance firman, la divulgación se cierra sola y pasa a la capacitación (y el grupo de Calidad recibe el aviso de la TAREA)', async () => {
+    sent.length = 0;
     for (const email of [E.l2, E.l3, E.rev]) {
       const { idTask, idAssignee } = await readToEnd(reqA, email);
       await signTask(prisma, deps, idTask, firma('leyo', { idAssignee }), actor(email));
@@ -359,15 +394,20 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     const cap = await taskOf(reqA, 'capacitacion');
     expect(cap.status).toBe('abierta');
     expect(cap.assignees).toEqual([expect.objectContaining({ user_email: null, pool_type_code: 'SGC-VERIF-CALIDAD', signature_meaning: 'capacito' })]);
+    // S14 (R26): el aviso del cupo de grupo de una tarea que no es autorización dice «Tarea documental asignada» y lleva a la tarea.
+    const capNotice = sent.find((n) => n.payload.url === `/process/sgc-documental/tareas/${cap.id_task}`);
+    expect(capNotice).toMatchObject({ emails: expect.arrayContaining([E.cal]), payload: { title: expect.stringContaining('Tarea documental asignada') } });
+    expect(sent.some((n) => n.payload.url === '/process/sgc-documental/autorizaciones')).toBe(false);
     expect(await prisma.sgcDocument.findUniqueOrThrow({ where: { id_document: idDoc } })).toMatchObject({ current_version_id: idV1 });
   });
 
   it('[SGC-REQ-058][SGC-REQ-059] Calidad registra la capacitación y carga el Excel de Forms: aprobados, reprobados, sin resultado y fuera del alcance', async () => {
     const training = { mode: 'mixta', title: 'Capacitación del procedimiento S4', videoUrl: 'https://stream.example/v/s4', formsUrl: 'https://forms.office.com/r/s4', sessionDate: '2026-10-05', maxScore: 10, minScorePct: 80 };
-    await expect(saveTraining(prisma, await accessOf(E.elab), reqA, training, actor(E.elab))).rejects.toMatchObject({ status: 403 });
+    await expect(saveTraining(prisma, await accessOf(E.sol), reqA, training, actor(E.sol))).rejects.toMatchObject({ status: 403 });
     await expect(uploadTrainingResults(prisma, upload, await accessOf(E.cal), reqA, { fileName: 'r.xlsx', bytes: await xlsx([HEAD]) }, actor(E.cal))).rejects.toThrow(/Registre primero/);
     await saveTraining(prisma, await accessOf(E.cal), reqA, training, actor(E.cal));
-    await expect(uploadTrainingResults(prisma, upload, await accessOf(E.cal), reqA, { fileName: 'r.csv', bytes: new Uint8Array([1]) }, actor(E.cal))).rejects.toThrow(/\.xlsx/);
+    // Sprint 10: también se acepta el CSV de Google Forms; otro formato se rechaza.
+    await expect(uploadTrainingResults(prisma, upload, await accessOf(E.cal), reqA, { fileName: 'r.pdf', bytes: new Uint8Array([1]) }, actor(E.cal))).rejects.toThrow(/\.xlsx/);
     const bytes = await xlsx([
       HEAD,
       [1, 'a', 'b', E.l1, 'L1', 9],
@@ -385,7 +425,8 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     await expect(prisma.$executeRawUnsafe(`DELETE FROM [sgc].[training_result]`)).rejects.toThrow(/solo inserción/);
     const view = (await getRequestDetail(prisma, reqA, await viewer(E.cal))).training!;
     expect(view).toMatchObject({ open: true, canManage: true, uploadsCount: 1, training: { instructor: 'Jefe de Calidad', minScorePct: 80 }, upload: { sha256: up.sha256, needsJustification: true } });
-    expect(Object.fromEntries(view.people.map((p) => [p.email, p.status]))).toEqual({ [E.l1]: 'aprobo', [E.l2]: 'reprobo', [E.l3]: 'sin_resultado', [E.rev]: 'aprobo' });
+    // Sprint 10: L2 reprobó en sus 2 intentos (los que cuentan por defecto) → queda en recapacitación.
+    expect(Object.fromEntries(view.people.map((p) => [p.email, p.status]))).toEqual({ [E.l1]: 'aprobo', [E.l2]: 'recapacitacion', [E.l3]: 'sin_resultado', [E.rev]: 'aprobo' });
     expect(view.people.find((p) => p.email === E.l2)).toMatchObject({ score: 7, attempts: 2 });
     expect(view.outOfScope.map((o) => o.email)).toEqual(['otro@x.co']);
   });
@@ -436,8 +477,9 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     const reqB = await approvedRequest('Nueva versión cancelada en divulgación S4');
     await addScopeEntry(prisma, notifier, await accessOf(E.elab), reqB, { entry: { kind: 'persona', email: E.l1 }, reason: 'Lector único' }, actor(E.elab));
     await signThroughApproval(reqB);
-    await expect(cancelRequest(prisma, notifier, await accessOf(E.elab), reqB, { reason: 'Ya no se necesita' }, actor(E.elab))).rejects.toMatchObject({ status: 403 });
-    const elabDetail = await getRequestDetail(prisma, reqB, await viewer(E.elab));
+    // 2026-10-05: el elaborador ahora es de Calidad; el solicitante (sin Calidad) no cancela en la divulgación.
+    await expect(cancelRequest(prisma, notifier, await accessOf(E.sol), reqB, { reason: 'Ya no se necesita' }, actor(E.sol))).rejects.toMatchObject({ status: 403 });
+    const elabDetail = await getRequestDetail(prisma, reqB, await viewer(E.sol));
     expect(elabDetail.permissions).toMatchObject({ canCancel: false, canChangeSigners: false, canEditForm: false });
     await cancelRequest(prisma, notifier, await accessOf(E.cal), reqB, { reason: 'Se detectó un error en el contenido aprobado' }, actor(E.cal));
     const rB = await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: reqB } });
@@ -451,7 +493,7 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     const reqC = await approvedRequest('Nueva versión con cierre de divulgación S4');
     await addScopeEntry(prisma, notifier, await accessOf(E.elab), reqC, { entry: { kind: 'persona', email: E.l2 }, reason: 'Lector único' }, actor(E.elab));
     await signThroughApproval(reqC);
-    await expect(closeDissemination(prisma, notifier, await accessOf(E.elab), reqC, { reason: 'Cierre por el elaborador' }, actor(E.elab))).rejects.toMatchObject({ status: 403 });
+    await expect(closeDissemination(prisma, notifier, await accessOf(E.sol), reqC, { reason: 'Cierre por el solicitante' }, actor(E.sol))).rejects.toMatchObject({ status: 403 });
     await expect(closeDissemination(prisma, notifier, await accessOf(E.cal), reqC, { reason: 'corto' }, actor(E.cal))).rejects.toThrow(/mínimo 10/);
     const closed = await closeDissemination(prisma, notifier, await accessOf(E.cal), reqC, { reason: 'La persona está de vacaciones; se divulga al regresar (prueba S4).' }, actor(E.cal));
     expect(closed).toMatchObject({ read: 0, excluded: 1, next: 'capacitacion' });
@@ -479,9 +521,9 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
 
   it('[SGC-REQ-053][SGC-REQ-061] un documento NUEVO sin alcance usa el departamento dueño del proceso y, si se cancela en la divulgación, el documento queda anulado', async () => {
     await prisma.sgcProcessMap.update({ where: { id_process_map: procGC }, data: { id_department: dept } });
-    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.elab), { idCompany: CO, requestType: 'nuevo', subject: 'Instructivo nuevo S4', description: 'Documento nuevo sin alcance definido (S4).', idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Normal' } }, actor(E.elab));
-    await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev], mode: 'orden' }, actor(E.elab));
-    await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr], mode: 'orden' }, actor(E.elab));
+    const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nuevo', subject: 'Instructivo nuevo S4', description: 'Documento nuevo sin alcance definido (S4).', idProcess: procGC, idDocumentType: typePR, formValues: { urgencia: 'Normal' } }, actor(E.sol));
+    await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev], mode: 'orden' }, actor(E.elab), await accessOf(E.elab));
+    await setSigners(prisma, notifier, idRequest, { stepKey: 'aprobacion', signers: [E.apr], mode: 'orden' }, actor(E.elab), await accessOf(E.elab));
     await uploadAttachment(prisma, upload, idRequest, { purpose: 'borrador', ...docx('nuevo') }, await viewer(E.elab), actor(E.elab));
     await signThroughApproval(idRequest);
     const scope = await prisma.sgcDisseminationScope.findMany({ where: { id_request: idRequest } });
@@ -512,11 +554,11 @@ describe.skipIf(!url)('SGC · Sprint 4 · divulgación, capacitación y vigencia
     const cal = await accessOf(E.cal);
     await expect(addScopeEntry(prisma, notifier, cal, reqA, { entry: { kind: 'empresa' }, reason: 'Después de cerrar' }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
     await expect(sendReadingReminders(prisma, notifier, cal, reqA, actor(E.cal))).rejects.toMatchObject({ status: 409 });
-    await expect(saveTraining(prisma, cal, reqA, { mode: 'video', title: 'Tarde para capacitar', videoUrl: 'https://v.x/1', formsUrl: 'https://f.x/1', maxScore: 10 }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
+    await expect(saveTraining(prisma, cal, reqA, { mode: 'video', title: 'Tarde para capacitar', videoUrl: 'https://v.x/1', formsUrl: 'https://forms.office.com/r/s4tarde', maxScore: 10 }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
     await expect(uploadTrainingResults(prisma, upload, cal, reqA, { fileName: 'r.xlsx', bytes: await xlsx([HEAD]) }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
     const otra = { ...cal, idCompany: 999 };
     await expect(addScopeEntry(prisma, notifier, otra, reqA, { entry: { kind: 'empresa' }, reason: 'Otra empresa' }, actor(E.cal))).rejects.toMatchObject({ status: 404 });
-    await expect(saveTraining(prisma, otra, reqA, { mode: 'video', title: 'Otra empresa', videoUrl: 'https://v.x/1', formsUrl: 'https://f.x/1', maxScore: 10 }, actor(E.cal))).rejects.toMatchObject({ status: 404 });
+    await expect(saveTraining(prisma, otra, reqA, { mode: 'video', title: 'Otra empresa', videoUrl: 'https://v.x/1', formsUrl: 'https://forms.office.com/r/s4tarde', maxScore: 10 }, actor(E.cal))).rejects.toMatchObject({ status: 404 });
     await expect(sendReadingReminders(prisma, notifier, otra, reqA, actor(E.cal))).rejects.toMatchObject({ status: 404 });
     await expect(addScopeEntry(prisma, notifier, cal, 99999999, { entry: { kind: 'empresa' }, reason: 'No existe' }, actor(E.cal))).rejects.toMatchObject({ status: 404 });
     expect(await recordReadingEvent(prisma, a1.id_task_assignee, { event: 'final' }, { email: E.l1 }, actor(E.l1))).toMatchObject({ status: 'leido' });

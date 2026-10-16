@@ -1,5 +1,6 @@
 import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
+import { AVATAR_URL_PREFIX } from '../../../lib/avatar/urls';
 import { prisma } from '../../../lib/prisma';
 import { isValidFontKey } from '../../../lib/theme/fonts';
 import { isValidPaletteKey } from '../../../lib/theme/palettes';
@@ -97,8 +98,12 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    // Validate image URL format
-    if (imageUrl) {
+    // Validate image URL format. Se admite además la ruta relativa del avatar
+    // estilo Notion de ESTA persona (/api/avatar/user/<su id>?v=…): el Perfil la
+    // reenvía tal cual al guardar nombre o apariencia.
+    const esSuAvatarNotion =
+      !!imageUrl && imageUrl.startsWith(`${AVATAR_URL_PREFIX}user/${encodeURIComponent(currentUser.id)}?v=`);
+    if (imageUrl && !esSuAvatarNotion) {
       try {
         new URL(imageUrl);
       } catch {

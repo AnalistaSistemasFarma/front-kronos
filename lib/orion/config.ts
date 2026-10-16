@@ -29,9 +29,34 @@ export type OrionConfig = {
   enabled: boolean;
 };
 
+function trimUrl(raw: string | undefined): string | null {
+  return raw?.trim().replace(/\/$/, '') || null;
+}
+
+/** Tiempo que se usa ORION_FALLBACK_URL antes de volver a intentar ORION_API_BASE_URL. */
+const FALLBACK_TTL_MS = 60_000;
+
+const fallbackState = globalThis as typeof globalThis & { __orionFallbackUntil?: number };
+
+export function getOrionFallbackUrl(): string | null {
+  const fallback = trimUrl(process.env.ORION_FALLBACK_URL);
+  return fallback && fallback !== trimUrl(process.env.ORION_API_BASE_URL) ? fallback : null;
+}
+
+export function isOrionFallbackActive(): boolean {
+  return Boolean(getOrionFallbackUrl()) && (fallbackState.__orionFallbackUntil ?? 0) > Date.now();
+}
+
+export function activateOrionFallback(): void {
+  fallbackState.__orionFallbackUntil = Date.now() + FALLBACK_TTL_MS;
+}
+
 export function getOrionConfig(): OrionConfig {
-  const apiBaseUrl = process.env.ORION_API_BASE_URL?.trim().replace(/\/$/, '') || null;
-  const embedOrigin = process.env.ORION_EMBED_ORIGIN?.trim().replace(/\/$/, '') || apiBaseUrl;
+  const primary = trimUrl(process.env.ORION_API_BASE_URL);
+  const primaryEmbed = trimUrl(process.env.ORION_EMBED_ORIGIN) || primary;
+  const fallback = isOrionFallbackActive() ? getOrionFallbackUrl() : null;
+  const apiBaseUrl = fallback || primary;
+  const embedOrigin = fallback && (!primaryEmbed || primaryEmbed === primary) ? fallback : primaryEmbed;
 
   const dedicated = process.env.ORION_INTEGRATION_API_KEY?.trim();
   const keys = (process.env.INTEGRATION_API_KEYS || '')
@@ -92,6 +117,21 @@ export function getOrionSignatureProfileUrl(): string | null {
   if (custom) return custom.replace(/\/$/, '');
   const { embedOrigin } = getOrionConfig();
   return embedOrigin ? `${embedOrigin}/dashboard/my-signature` : null;
+}
+
+export type OrionSignerEmailSender = 'orion' | 'synerlink' | 'both';
+
+/**
+ * Quién envía el correo de turno a los firmantes (ORION_SIGNER_EMAIL_SENDER):
+ * - orion (defecto): Orion por Graph a quien tenga notifyByEmail.
+ * - synerlink: Orion recibe notifyByEmail:false y SynerLink envía por SAPSEND.
+ * - both: ambos.
+ */
+export function getOrionSignerEmailSender(): OrionSignerEmailSender {
+  const raw = String(process.env.ORION_SIGNER_EMAIL_SENDER || '')
+    .trim()
+    .toLowerCase();
+  return raw === 'synerlink' || raw === 'both' ? raw : 'orion';
 }
 
 export function parseRequestIdFromExternalRef(externalRef: string | undefined): number | null {

@@ -1,8 +1,10 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { Alert, Button, Group, Loader, Stack, Text } from '@mantine/core';
-import { IconAlertTriangle, IconDownload, IconLock, IconPrinter, IconZoomIn, IconZoomOut } from '@tabler/icons-react';
+import { IconAlertTriangle, IconDownload, IconEye, IconKey, IconLock, IconPrinter, IconRefresh, IconZoomIn, IconZoomOut } from '@tabler/icons-react';
+import { SGC_VIEWER_VEIL_TEXT, sgcViewerError, type SgcViewerError } from '../../lib/sgc/viewerError';
 
 /**
  * VISOR SEGURO del SGC: muestra el PDF controlado SIN barra del navegador,
@@ -17,6 +19,19 @@ import { IconAlertTriangle, IconDownload, IconLock, IconPrinter, IconZoomIn, Ico
  *   hoja de impresión sale en blanco (@media print).
  * Limitación honesta: nada impide una captura de pantalla; la marca de agua y
  * el registro de consultas son la mitigación.
+ *
+ * Sprint 11 (bloqueo de capturas, R10), cuando la empresa tiene la protección
+ * del visor (el servidor lo indica con X-Sgc-Proteccion: 1):
+ *   - el PDF trae del servidor una marca de agua EN MOSAICO con el correo, la
+ *     fecha y hora y la IP de quien consulta (toda captura lo identifica);
+ *   - el documento se OCULTA cuando la ventana pierde el foco o la pestaña se
+ *     oculta (dificulta la herramienta Recortes y el cambio de ventana);
+ *   - la tecla «Imprimir pantalla» (Windows) oculta el documento un momento,
+ *     intenta vaciar el portapapeles y deja el intento en la AUDITORÍA; también
+ *     se registran los intentos de copiar e imprimir sin permiso.
+ * Lo que NO se puede: impedir la captura del sistema operativo, de la
+ * herramienta Recortes, del celular o de una foto con otro teléfono (ningún
+ * navegador lo permite); en macOS la tecla de captura no llega a la página.
  */
 export interface SgcSecureViewerProps {
   fileUrl: string;
@@ -28,6 +43,13 @@ export interface SgcSecureViewerProps {
    * documento completo cabe en pantalla). Con esto se habilita «Leído».
    */
   onReachedEnd?: (pages: number) => void;
+  /**
+   * 2026-10-05 («Ver documento» de los adjuntos de la solicitud): oculta
+   * Descargar e Imprimir aunque haya permiso excepcional (solo consulta).
+   */
+  hideDownloadPrint?: boolean;
+  /** S14 (R23): enlace para solicitar acceso si el servidor responde que no tiene permiso. */
+  requestAccessHref?: string | null;
 }
 
 /** Escala inicial del visor (página al 100 % del ancho disponible). */
@@ -68,7 +90,7 @@ async function renderPdf(bytes: Uint8Array, scale: number, container: HTMLElemen
 }
 
 /** Imprime (solo con permiso) a partir del PDF de "impresión autorizada". */
-async function printAuthorized(url: string) {
+export async function printAuthorized(url: string) {
   const res = await fetch(url, { cache: 'no-store' });
   if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || 'No se pudo preparar la impresión');
   const bytes = new Uint8Array(await res.arrayBuffer());
@@ -102,17 +124,33 @@ async function printAuthorized(url: string) {
   setTimeout(() => frame.remove(), 60_000);
 }
 
-export default function SgcSecureViewer({ fileUrl, canDownload, canPrint, onReachedEnd }: SgcSecureViewerProps) {
+export default function SgcSecureViewer({ fileUrl, canDownload: canDownloadProp, canPrint: canPrintProp, onReachedEnd, hideDownloadPrint = false, requestAccessHref = null }: SgcSecureViewerProps) {
+  const canDownload = canDownloadProp && !hideDownloadPrint;
+  const canPrint = canPrintProp && !hideDownloadPrint;
   const pagesRef = useRef<HTMLDivElement>(null);
   const bytesRef = useRef<Uint8Array | null>(null);
   const renderGenRef = useRef(0);
   const endRef = useRef(false);
   const [progress, setProgress] = useState(0);
   const [scale, setScale] = useState(BASE_SCALE);
-  const [state, setState] = useState<{ tipo: 'cargando' } | { tipo: 'listo'; pages: number } | { tipo: 'error'; mensaje: string }>({
+  const [state, setState] = useState<{ tipo: 'cargando' } | { tipo: 'listo'; pages: number } | { tipo: 'error'; error: SgcViewerError }>({
     tipo: 'cargando',
   });
+  const [attempt, setAttempt] = useState(0);
   const [printError, setPrintError] = useState<string | null>(null);
+  // Sprint 11: protección del visor (la indica el servidor) y documento oculto mientras la ventana no está activa.
+  const [protect, setProtect] = useState(false);
+  const [veiled, setVeiled] = useState(false);
+  const lastEventRef = useRef<Record<string, number>>({});
+  const report = useCallback(
+    (event: 'imprimir_pantalla' | 'copiar' | 'imprimir_bloqueado') => {
+      const now = Date.now();
+      if (now - (lastEventRef.current[event] ?? 0) < 5000) return;
+      lastEventRef.current[event] = now;
+      void fetch('/api/sgc/viewer-events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event, resource: fileUrl }) }).catch(() => undefined);
+    },
+    [fileUrl]
+  );
 
   // Descarga del PDF (una sola vez por URL: cada apertura queda en la auditoría).
   useEffect(() => {
@@ -121,7 +159,11 @@ export default function SgcSecureViewer({ fileUrl, canDownload, canPrint, onReac
     setState({ tipo: 'cargando' });
     fetch(fileUrl, { cache: 'no-store' })
       .then(async (res) => {
-        if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `Error ${res.status}`);
+        if (!res.ok) {
+          const apiMessage = ((await res.json().catch(() => ({}))) as { error?: string })?.error ?? null;
+          throw Object.assign(new Error(apiMessage || `Error ${res.status}`), { sgcViewerError: sgcViewerError(res.status, apiMessage) });
+        }
+        if (!cancelled) setProtect(res.headers.get('X-Sgc-Proteccion') === '1');
         return new Uint8Array(await res.arrayBuffer());
       })
       .then(async (bytes) => {
@@ -130,12 +172,16 @@ export default function SgcSecureViewer({ fileUrl, canDownload, canPrint, onReac
         const pages = await renderPdf(bytes.slice(), scale, pagesRef.current, () => cancelled);
         if (!cancelled) setState({ tipo: 'listo', pages });
       })
-      .catch((err: unknown) => !cancelled && setState({ tipo: 'error', mensaje: err instanceof Error ? err.message : String(err) }));
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const known = (err as { sgcViewerError?: SgcViewerError } | null)?.sgcViewerError;
+        setState({ tipo: 'error', error: known ?? sgcViewerError(null, err instanceof Error ? err.message : String(err)) });
+      });
     return () => {
       cancelled = true;
     };
-    // El zoom se maneja aparte para no volver a pedir (ni auditar) el archivo.
-  }, [fileUrl]);
+    // El zoom se maneja aparte para no volver a pedir (ni auditar) el archivo; «Reintentar» sí lo pide de nuevo.
+  }, [fileUrl, attempt]);
 
   const rerender = useCallback(async (nextScale: number) => {
     setScale(nextScale);
@@ -150,11 +196,42 @@ export default function SgcSecureViewer({ fileUrl, canDownload, canPrint, onReac
       if ((e.ctrlKey || e.metaKey) && (key === 's' || key === 'p')) {
         e.preventDefault();
         e.stopPropagation();
+        if (key === 'p' && protect && !canPrint) report('imprimir_bloqueado');
       }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, []);
+  }, [protect, canPrint, report]);
+
+  // Sprint 11: ocultar al perder el foco y registrar «Imprimir pantalla».
+  useEffect(() => {
+    if (!protect) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const hide = () => setVeiled(true);
+    const show = () => setVeiled(false);
+    const onVisibility = () => (document.hidden ? hide() : show());
+    const onPrintScreen = (e: KeyboardEvent) => {
+      if (e.key !== 'PrintScreen') return;
+      hide();
+      navigator.clipboard?.writeText('').catch(() => undefined);
+      report('imprimir_pantalla');
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(show, 1500);
+    };
+    window.addEventListener('blur', hide);
+    window.addEventListener('focus', show);
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('keyup', onPrintScreen, true);
+    window.addEventListener('keydown', onPrintScreen, true);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener('blur', hide);
+      window.removeEventListener('focus', show);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('keyup', onPrintScreen, true);
+      window.removeEventListener('keydown', onPrintScreen, true);
+    };
+  }, [protect, report]);
 
   const block = (e: React.SyntheticEvent) => e.preventDefault();
 
@@ -224,8 +301,22 @@ export default function SgcSecureViewer({ fileUrl, canDownload, canPrint, onReac
         </Alert>
       )}
       {state.tipo === 'error' && (
-        <Alert color='red' icon={<IconAlertTriangle size={18} />} title='No se pudo abrir el documento'>
-          {state.mensaje}
+        <Alert color={state.error.kind === 'sin_permiso' ? 'orange' : 'red'} icon={state.error.kind === 'sin_permiso' ? <IconKey size={18} /> : <IconAlertTriangle size={18} />} title={state.error.title} data-testid='sgc-visor-error' data-kind={state.error.kind}>
+          <Stack gap='xs'>
+            <Text size='sm'>{state.error.message}</Text>
+            <Group gap='xs'>
+              {state.error.kind === 'sin_permiso' && requestAccessHref && (
+                <Button size='xs' variant='light' component={Link} href={requestAccessHref} leftSection={<IconKey size={14} />} data-testid='sgc-visor-solicitar-acceso'>
+                  Solicitar acceso
+                </Button>
+              )}
+              {state.error.kind === 'tecnico' && (
+                <Button size='xs' variant='light' leftSection={<IconRefresh size={14} />} onClick={() => setAttempt((n) => n + 1)} data-testid='sgc-visor-reintentar'>
+                  Reintentar
+                </Button>
+              )}
+            </Group>
+          </Stack>
         </Alert>
       )}
       {state.tipo === 'cargando' && (
@@ -241,13 +332,39 @@ export default function SgcSecureViewer({ fileUrl, canDownload, canPrint, onReac
           {progress >= 100 ? 'Llegó al final del documento.' : `Lectura obligatoria: desplácese hasta el final del documento (${progress} %).`}
         </Text>
       )}
+      {protect && veiled && (
+        <Alert color='gray' icon={<IconLock size={18} />} data-testid='sgc-visor-oculto'>
+          <Stack gap='xs'>
+            <Text size='sm'>{SGC_VIEWER_VEIL_TEXT}</Text>
+            <Button
+              size='xs'
+              variant='light'
+              w='fit-content'
+              leftSection={<IconEye size={14} />}
+              onClick={() => {
+                window.focus();
+                setVeiled(false);
+              }}
+              data-testid='sgc-visor-mostrar'
+            >
+              Mostrar el documento
+            </Button>
+          </Stack>
+        </Alert>
+      )}
       <div
         ref={pagesRef}
         onScroll={onReachedEnd ? checkEnd : undefined}
         onContextMenu={block}
         onDragStart={block}
-        onCopy={block}
+        onCopy={(e) => {
+          block(e);
+          if (protect) report('copiar');
+        }}
+        data-protegido={protect ? '1' : '0'}
         style={{
+          filter: protect && veiled ? 'blur(18px)' : undefined,
+          visibility: protect && veiled ? 'hidden' : undefined,
           userSelect: 'none',
           WebkitUserSelect: 'none',
           background: 'var(--mantine-color-default-hover)',

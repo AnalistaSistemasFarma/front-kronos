@@ -130,6 +130,12 @@ export interface SgcSignaturePayload {
   masterSha256: string | null;
   ip: string | null;
   userAgent: string | null;
+  /**
+   * Sprint 12: la firma la hace un SUSTITUTO «en sustitución de» esta persona.
+   * Solo aparece cuando hay sustitución: las firmas anteriores conservan su
+   * hash (el JSON canónico omite las claves indefinidas).
+   */
+  onBehalfOf?: string;
 }
 
 export function buildSignaturePayload(p: {
@@ -147,6 +153,7 @@ export function buildSignaturePayload(p: {
   masterSha256: string | null;
   ip: string | null;
   userAgent: string | null;
+  onBehalfOf?: string | null;
 }): SgcSignaturePayload {
   if (!SHA_RE.test(p.content.sha256)) throw new SgcError('La huella del contenido firmado no es válida.', 500);
   return {
@@ -168,6 +175,7 @@ export function buildSignaturePayload(p: {
     masterSha256: p.masterSha256,
     ip: p.ip,
     userAgent: p.userAgent,
+    ...(p.onBehalfOf ? { onBehalfOf: p.onBehalfOf.trim().toLowerCase() } : {}),
   };
 }
 
@@ -219,6 +227,7 @@ export interface SgcSignatureRow {
   master_sha256: string | null;
   ip: string | null;
   user_agent: string | null;
+  on_behalf_of?: string | null;
   evidence_sha256: string;
   prev_record_hash: string | null;
   record_hash: string;
@@ -245,6 +254,7 @@ export function payloadFromRow(row: SgcSignatureRow): SgcSignaturePayload {
     masterSha256: row.master_sha256?.trim() ?? null,
     ip: row.ip,
     userAgent: row.user_agent,
+    ...(row.on_behalf_of?.trim() ? { onBehalfOf: row.on_behalf_of.trim() } : {}),
   };
 }
 

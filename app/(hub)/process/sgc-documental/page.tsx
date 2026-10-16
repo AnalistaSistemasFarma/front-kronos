@@ -7,7 +7,9 @@ import {
   IconBuildingCommunity,
   IconCalendarDue,
   IconChecklist,
+  IconCopy,
   IconFileCertificate,
+  IconFileExport,
   IconFilePlus,
   IconFileUpload,
   IconGitBranch,
@@ -17,10 +19,13 @@ import {
   IconTopologyStar3,
   IconSettings,
   IconShieldCheck,
+  IconSignature,
 } from '@tabler/icons-react';
 import SgcModuleCard, { type SgcModuleCardProps } from '../../../../components/sgc/SgcModuleCard';
+import SgcPendingBoard from '../../../../components/sgc/SgcPendingBoard';
 import SgcShell from '../../../../components/sgc/SgcShell';
 import { sgcHref } from '../../../../components/sgc/useSgcCompany';
+import { useSgcFetch } from '../../../../components/sgc/useSgcFetch';
 import { SGC_BASE_URL } from '../../../../lib/sgc/constants';
 import type { SgcCompanyAccess } from '../../../../lib/sgc/permissions';
 
@@ -42,7 +47,7 @@ const DIMENSIONES = [
   { value: 'capacitacion', label: 'Capacitación', enabled: false },
 ] as const;
 
-function accesosDocumentos(company: SgcCompanyAccess): SgcModuleCardProps[] {
+function accesosDocumentos(company: SgcCompanyAccess, selfSignature = false, generator = false): SgcModuleCardProps[] {
   const id = company.idCompany;
   const cards: SgcModuleCardProps[] = [
     {
@@ -60,7 +65,7 @@ function accesosDocumentos(company: SgcCompanyAccess): SgcModuleCardProps[] {
       href: sgcHref(`${SGC_BASE_URL}/areas`, id),
     },
     {
-      title: 'Mapa de procesos',
+      title: 'Mapa de documentos',
       description: 'Tipo de proceso → proceso → tipo documental → documento.',
       icon: <IconHierarchy2 size={24} />,
       sprint: 'Sprint 1',
@@ -87,6 +92,38 @@ function accesosDocumentos(company: SgcCompanyAccess): SgcModuleCardProps[] {
       sprint: 'Sprint 5',
       href: sgcHref(`${SGC_BASE_URL}/vencimientos`, id),
     },
+    {
+      title: 'Copias no controladas',
+      description: 'Pida una copia imprimible de un formato (con marca y vencimiento); la autoriza Calidad.',
+      icon: <IconCopy size={24} />,
+      sprint: 'Sprint 11',
+      href: sgcHref(`${SGC_BASE_URL}/copias`, id),
+    },
+    // 2026-10-10: «Generador de documentos» solo cuando la empresa lo encendió.
+    ...(generator
+      ? [
+          {
+            title: 'Generador de documentos',
+            description: 'Genere cartas, políticas y otros documentos desde plantillas aprobadas por Calidad, llenando solo los campos permitidos.',
+            icon: <IconFileExport size={24} />,
+            sprint: 'Generador',
+            href: sgcHref(`${SGC_BASE_URL}/generador`, id),
+            ...(company.canQuality ? { badge: 'Calidad aprueba' } : {}),
+          },
+        ]
+      : []),
+    // Sprint 13: «Mi firma» solo cuando la empresa encendió la firma propia (aval de Adriana Cárdenas).
+    ...(selfSignature
+      ? [
+          {
+            title: 'Mi firma',
+            description: 'Registre su firma (dibujada o imagen); Aseguramiento de Calidad la valida antes de usarla.',
+            icon: <IconSignature size={24} />,
+            sprint: 'Sprint 13',
+            href: sgcHref(`${SGC_BASE_URL}/mi-firma`, id),
+          },
+        ]
+      : []),
     {
       title: 'Solicitudes de acceso',
       description: 'Pida consultar un documento de otra área, con justificación.',
@@ -164,6 +201,18 @@ function accesosDocumentos(company: SgcCompanyAccess): SgcModuleCardProps[] {
   return cards;
 }
 
+function DocumentCards({ company }: { company: SgcCompanyAccess }) {
+  const own = useSgcFetch<{ enabled: boolean }>(`/api/sgc/signature/own?company=${company.idCompany}`);
+  const generator = useSgcFetch<{ enabled: boolean }>(`/api/sgc/generator?company=${company.idCompany}`);
+  return (
+    <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing='lg'>
+      {accesosDocumentos(company, Boolean(own.data?.enabled), Boolean(generator.data?.enabled)).map((a) => (
+        <SgcModuleCard key={a.title} {...a} />
+      ))}
+    </SimpleGrid>
+  );
+}
+
 export default function SgcDocumentalPage() {
   return (
     <SgcShell>
@@ -178,11 +227,9 @@ export default function SgcDocumentalPage() {
           </Tabs.List>
 
           <Tabs.Panel value='documentos'>
-            <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing='lg'>
-              {accesosDocumentos(company).map((a) => (
-                <SgcModuleCard key={a.title} {...a} />
-              ))}
-            </SimpleGrid>
+            {/* Sprint 9: «Mis pendientes del SGC» (avisos dentro de la app en lugar de correos). */}
+            <SgcPendingBoard idCompany={company.idCompany} />
+            <DocumentCards company={company} />
             <Text size='xs' c='dimmed' mt='lg'>
               Módulo en construcción por sprints. Las demás dimensiones del SGC se habilitan con los
               siguientes flujos validados.

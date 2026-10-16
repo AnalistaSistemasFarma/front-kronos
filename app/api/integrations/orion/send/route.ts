@@ -30,6 +30,7 @@ import { resolveOrionVersionLabel } from '@/lib/orion/versionLabel';
 import { assertOrionReviewApprovedForSigning } from '@/lib/orion/review';
 import { orionErrorMessage } from '@/lib/orion/errorCodes';
 import { orionErrorResponse } from '@/lib/orion/httpError';
+import { fireAndForgetSignerTurnEmail } from '@/lib/orion/signerEmail';
 
 /** POST /api/integrations/orion/send — enviar documento a firma en Orion */
 export async function POST(req: Request) {
@@ -112,8 +113,8 @@ export async function POST(req: Request) {
       };
 
       const origin = resolvePublicAppOrigin(req.headers.get('origin'));
-      // Genera/renueva invites locales (URLs para copiar). El correo lo manda Orion
-      // solo a firmantes con invitedAt (notifyByEmail marcado en preparación).
+      // Genera/renueva invites locales (URLs para copiar). El correo de turno lo manda
+      // Orion o SynerLink según ORION_SIGNER_EMAIL_SENDER (ver lib/orion/signerEmail).
       const ensured = ensureExternalSignerInvites({
         state: nextState,
         requestId,
@@ -172,12 +173,15 @@ export async function POST(req: Request) {
 
       // Firmantes: 1 aviso de turno (Autorizar firma). Resto: "Incluido como firmante".
       // "Documento enviado" solo a stakeholders (no al firmante en turno ni al preparador).
+      // El aviso de turno lo da createOrionSignerAuthorizations al crear la autorización;
+      // "Le toca firmar" solo sale de respaldo si no se creó ni existía ninguna.
       fireAndForgetNotification(
         notifyOrionSignerInvited({
           requestId,
           subject: ctx?.subject_request ?? null,
           signerEmails,
           currentSignerEmail: pending?.email ?? null,
+          notifyCurrent: authResult.created === 0 && authResult.skipped === 0,
           fileId,
           fileName: nextState.fileName ?? current.fileName ?? null,
         })
@@ -196,6 +200,13 @@ export async function POST(req: Request) {
           ].filter(Boolean),
         })
       );
+
+      fireAndForgetSignerTurnEmail(pool, {
+        requestId,
+        fileId,
+        invitedByName: session.user.name ?? null,
+        invitedByEmail: session.user.email,
+      });
 
       return {
         state: nextState,

@@ -1,0 +1,104 @@
+/*
+ * Barra de avance de tareas que "se rellena": crece desde 0 al cargar y, mientras no
+ * termina, un destello la recorre. Completa queda verde y quieta.
+ * Independiente (no necesita el contenedor de paneles): trae sus colores claro/oscuro.
+ */
+
+.progress {
+  --tone: #007aff;
+  --track: rgba(120, 120, 128, 0.16);
+
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--mantine-color-dimmed);
+  white-space: nowrap;
+}
+
+.done {
+  --tone: #34c759;
+}
+
+:global([data-mantine-color-scheme='dark']) .progress {
+  --tone: #0a84ff;
+  --track: rgba(255, 255, 255, 0.12);
+}
+
+:global([data-mantine-color-scheme='dark']) .done {
+  --tone: #30d158;
+}
+
+.track {
+  position: relative;
+  flex: 1 1 auto;
+  max-width: 140px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--track);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+}
+
+.fill {
+  position: relative;
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--tone) 65%, #fff), var(--tone));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--tone) 45%, transparent);
+  transform-origin: left center;
+  overflow: hidden;
+}
+
+/* Un solo destello de luz que recorre la barra (quieto = invisible). */
+.fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 45%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+  opacity: 0;
+  transform: translateX(-100%);
+}
+
+.done .fill::after {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fill {
+    animation: rpb-fill 900ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .progress:not(.done) .fill::after {
+    animation: rpb-sweep 2.2s ease-in-out 900ms infinite;
+  }
+}
+
+@keyframes rpb-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Pasa en el 70 % del ciclo y descansa el resto. */
+@keyframes rpb-sweep {
+  0% {
+    opacity: 1;
+    transform: translateX(-100%);
+  }
+  70% {
+    opacity: 1;
+    transform: translateX(240%);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(240%);
+  }
+}

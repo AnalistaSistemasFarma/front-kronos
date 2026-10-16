@@ -22,7 +22,9 @@ export default function SgcDocumentLayoutCard({ requestId, onMessage }: { reques
   if (error || !data) return null;
   if (data.participants.length === 0 && !data.canEdit) return null;
   const placed = data.fields.length;
-  const total = data.participants.length;
+  // D6 (E2E 2026-10-10): con 3 o más del mismo rol, los que no son titulares van al registro de firmas (no a una caja).
+  const inRegister = data.inRegister?.length ?? 0;
+  const total = data.participants.length - inRegister;
   const isPdf = data.draft?.format === 'pdf';
 
   const save = async (body: Record<string, unknown>, ok: string) => {
@@ -56,9 +58,15 @@ export default function SgcDocumentLayoutCard({ requestId, onMessage }: { reques
         </Text>
         <Switch
           label='Usar el encabezado institucional (logo, código, versión, página x de y, elaboró, revisó, aprobó con su recuadro «Firma», fecha de emisión y proceso)'
-          description={isPdf ? 'No aplica a un borrador PDF: el PDF ya trae su propio formato.' : 'El sistema llena estos campos y el historial de cambios al generar el PDF controlado.'}
+          description={
+            isPdf
+              ? 'No aplica a un borrador PDF: el PDF ya trae su propio formato.'
+              : data.headerMandatory
+                ? 'Obligatorio en los documentos nuevos y en las nuevas versiones (Aseguramiento de Calidad). El sistema llena estos campos y el historial de cambios al generar el PDF controlado.'
+                : 'El sistema llena estos campos y el historial de cambios al generar el PDF controlado.'
+          }
           checked={data.institutionalHeader}
-          disabled={!data.canEdit || busy || (isPdf && !data.institutionalHeader)}
+          disabled={!data.canEdit || busy || data.headerMandatory || (isPdf && !data.institutionalHeader)}
           onChange={(e) => {
             const value = e.currentTarget.checked;
             void save({ institutionalHeader: value }, value ? 'El documento usará el encabezado institucional.' : 'El documento ya no usará el encabezado institucional.').catch(() => undefined);
@@ -76,6 +84,11 @@ export default function SgcDocumentLayoutCard({ requestId, onMessage }: { reques
               ? 'Las firmas sin ubicar irán en el recuadro «Firma» de su rol en el encabezado institucional.'
               : 'Las firmas sin ubicar irán en la portada de control del PDF (respaldo). Ubíquelas para que queden dentro del documento.'}
           </Alert>
+        )}
+        {inRegister > 0 && (
+          <Text size='xs' c='dimmed' data-testid='sgc-firmas-registro'>
+            {inRegister} firma(s) más van al «Registro de firmas» al final del documento (3 o más firmantes del mismo rol).
+          </Text>
         )}
         <Group justify='space-between' wrap='wrap'>
           <Text size='xs' c='dimmed'>

@@ -75,7 +75,13 @@ export async function PATCH(
     } = {};
 
     const tipo = typeof body?.tipo === 'string' ? body.tipo.toUpperCase() : actual.type;
-    if (tipo !== 'DOCUMENT' && tipo !== 'LINK') {
+    // Un FORMULARIO propio se edita en título, obligatorio y orden; no cambia
+    // de tipo (sus respuestas quedarían colgando de un enlace o un archivo).
+    if (actual.type === 'FORM' || tipo === 'FORM') {
+      if (actual.type !== 'FORM' || tipo !== 'FORM' || typeof body?.url === 'string') {
+        return NextResponse.json({ error: 'Un formulario propio no cambia de tipo ni tiene URL.' }, { status: 400 });
+      }
+    } else if (tipo !== 'DOCUMENT' && tipo !== 'LINK') {
       return NextResponse.json({ error: 'El tipo debe ser DOCUMENT o LINK.' }, { status: 400 });
     }
     if (tipo === 'DOCUMENT' && actual.type === 'LINK') {

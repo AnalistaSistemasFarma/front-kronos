@@ -20,7 +20,7 @@ export default function PortalTalentoHumanoModulo() {
   return (
     <div className='app-page-shell app-page-shell--fill min-h-screen'>
       <div className='portal-th portal-th--modulo'>
-        <div className='portal-th__cuerpo'>
+        <div className='portal-th__cuerpo portal-th__cuerpo--ancho'>
           <header className='portal-th__encabezado-modulo'>
             <h1>Portal de Talento Humano</h1>
             <p>Políticas, reglamentos y anuncios de Talento Humano.</p>

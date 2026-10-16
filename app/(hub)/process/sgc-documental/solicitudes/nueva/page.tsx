@@ -1,25 +1,28 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useSession } from 'next-auth/react';
 import { Alert, Button, Card, Grid, Group, Stack, Text, TextInput, Textarea, Title } from '@mantine/core';
 import SgcSelect from '../../../../../../components/sgc/SgcSelect';
-import { IconAlertCircle, IconBulb, IconFilePlus, IconSend } from '@tabler/icons-react';
+import { IconAlertCircle, IconFilePlus, IconSend } from '@tabler/icons-react';
 import SgcShell from '../../../../../../components/sgc/SgcShell';
 import { sgcSend, useSgcFetch } from '../../../../../../components/sgc/useSgcFetch';
 import type { SgcCatalogs } from '../../../../../../lib/sgc/db/catalogs';
 import type { SgcCompanyAccess } from '../../../../../../lib/sgc/permissions';
 import type { SgcFormFieldDefinition } from '../../../../../../lib/sgc/flows/definition';
-import type { SgcMatrixSuggestion } from '../../../../../../lib/sgc/flows/matrix';
+import { inheritsParentNumber } from '../../../../../../lib/sgc/coding';
+import { SgcCopyRequestForm } from '../../../../../../components/sgc/SgcUncontrolledCopies';
 
 /**
  * Solicitud documental (paso 0 del flujo): nuevo documento, nueva versión o
- * modificación de un vigente, con su justificación. Quien la crea elige al
- * elaborador (por defecto, él mismo); la matriz solo sugiere.
+ * modificación de un vigente, con su justificación. Quien la crea NO elige al
+ * elaborador (2026-10-05): lo asigna el servidor según la matriz de
+ * responsables del proceso o, por respaldo, Aseguramiento de Calidad.
  */
 interface FormInfo {
   flow: { code: string; name: string; version: number };
+  /** S15: con el DOC v7 el solicitante elabora y Calidad autoriza primero la creación. */
+  roleModel?: 'calidad_asigna' | 'solicitante_elabora';
   requestTypes: { value: string; label: string }[];
   fields: SgcFormFieldDefinition[];
   steps: { key: string; name: string; isEnabled: boolean }[];
@@ -27,39 +30,37 @@ interface FormInfo {
 
 function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
   const router = useRouter();
-  const { data: session } = useSession();
-  const me = (session?.user?.email ?? '').toLowerCase();
   const id = company.idCompany;
   const form = useSgcFetch<FormInfo>(`/api/sgc/requests/form?company=${id}`);
   const catalogs = useSgcFetch<SgcCatalogs>(`/api/sgc/catalogs?company=${id}`);
   const docs = useSgcFetch<{ documents: { idDocument: number; code: string; title: string; versionNumber: number | null }[] }>(`/api/sgc/documents?company=${id}`);
-  const users = useSgcFetch<{ users: { email: string; name: string | null }[] }>(`/api/sgc/users?company=${id}`);
   // Sprint 5: «Iniciar nueva versión» desde el calendario o la ficha llega con ?tipo=nueva_version&documento=<id>.
   const [prefill] = useState(() => {
     if (typeof window === 'undefined') return { tipo: null as string | null, documento: null as string | null };
     const q = new URLSearchParams(window.location.search);
     const tipo = q.get('tipo');
-    return { tipo: tipo === 'nueva_version' || tipo === 'modificacion' ? tipo : null, documento: /^\d+$/.test(q.get('documento') ?? '') ? q.get('documento') : null };
+    return { tipo: tipo === 'nueva_version' || tipo === 'modificacion' || tipo === 'copia_no_controlada' ? tipo : null, documento: /^\d+$/.test(q.get('documento') ?? '') ? q.get('documento') : null };
   });
   const [requestType, setRequestType] = useState<string | null>(prefill.tipo ?? 'nuevo');
   const [idProcess, setIdProcess] = useState<string | null>(null);
   const [idDocumentType, setIdDocumentType] = useState<string | null>(null);
   const [idDocument, setIdDocument] = useState<string | null>(prefill.tipo ? prefill.documento : null);
+  const [idParentDocument, setIdParentDocument] = useState<string | null>(null);
+  // Sprint 10: el solicitante SUGIERE si requiere capacitación (la confirma quien crea el documento o Calidad).
+  const [requiresTraining, setRequiresTraining] = useState<string>('tipo');
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
-  const [elaborator, setElaborator] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selectedDoc = docs.data?.documents.find((d) => String(d.idDocument) === idDocument);
+  // Sprint 8: un formato o instructivo hereda el número de su documento padre (guía de codificación).
+  const selectedType = catalogs.data?.documentTypes.find((t) => String(t.id) === idDocumentType) ?? null;
+  const guide = catalogs.data?.codingGuide ?? null;
+  const inherits = Boolean(requestType === 'nuevo' && guide && selectedType && inheritsParentNumber(guide, selectedType.code));
   const [subjectTouched, setSubjectTouched] = useState(false);
   const suggestedSubject = selectedDoc && requestType === 'nueva_version' ? `Nueva versión de ${selectedDoc.code} (V${(selectedDoc.versionNumber ?? 0) + 1})` : '';
-  const suggestUrl =
-    requestType === 'nuevo' && idProcess && idDocumentType ? `/api/sgc/matrix?company=${id}&process=${idProcess}&documentType=${idDocumentType}` : null;
-  const sugg = useSgcFetch<{ suggestion: SgcMatrixSuggestion[] }>(suggestUrl);
-  const elabHint = sugg.data?.suggestion.find((s) => s.role === 'elaborador');
-  const userOptions = useMemo(() => (users.data?.users ?? []).map((u) => ({ value: u.email, label: u.name ? `${u.name} (${u.email})` : u.email })), [users.data]);
 
   if (!company.canManage && !company.canQuality) {
     return (
@@ -81,7 +82,8 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
         idProcess: requestType === 'nuevo' ? Number(idProcess) : undefined,
         idDocumentType: requestType === 'nuevo' ? Number(idDocumentType) : undefined,
         idDocument: requestType !== 'nuevo' ? Number(idDocument) : undefined,
-        elaboratorEmail: elaborator ?? me,
+        idParentDocument: inherits && idParentDocument ? Number(idParentDocument) : undefined,
+        requiresTraining: requiresTraining === 'tipo' ? undefined : requiresTraining,
         formValues: values,
       });
       router.push(`/process/sgc-documental/solicitudes/${res.idRequest}?empresa=${id}`);
@@ -102,13 +104,31 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
           Flujo «{form.data.flow.name}» versión {form.data.flow.version}: {form.data.steps.map((s) => s.name + (s.isEnabled ? '' : ' (Sprint 4)')).join(' → ')}.
         </Text>
       )}
+      {form.data?.roleModel === 'solicitante_elabora' && (
+        <Alert color='blue' variant='light' icon={<IconAlertCircle size={16} />} mb='md' data-testid='sgc-nueva-modelo-v7'>
+          Usted elaborará el documento: Aseguramiento de Calidad primero autoriza su creación (o la rechaza si ya existe un documento que cubre el tema). Luego usted carga el borrador y asigna a los revisores y aprobadores de su departamento.
+        </Alert>
+      )}
       {(error || form.error) && (
         <Alert color='red' icon={<IconAlertCircle size={16} />} mb='md' data-testid='sgc-nueva-error'>
           {error ?? form.error}
         </Alert>
       )}
       <Stack>
-        <SgcSelect label='Tipo de solicitud' data={form.data?.requestTypes ?? []} value={requestType} onChange={setRequestType} allowDeselect={false} required data-testid='sgc-nueva-tipo' />
+        <SgcSelect
+          label='Tipo de solicitud'
+          data={[...(form.data?.requestTypes ?? []), { value: 'copia_no_controlada', label: 'Copia no controlada de un documento vigente' }]}
+          value={requestType}
+          onChange={setRequestType}
+          allowDeselect={false}
+          required
+          data-testid='sgc-nueva-tipo'
+        />
+        {/* Sprint 11: la copia no controlada se pide desde el mismo formulario (va a Calidad, no al flujo documental). */}
+        {requestType === 'copia_no_controlada' ? (
+          <SgcCopyRequestForm idCompany={id} initialDocument={prefill.documento} onDone={() => router.push(`/process/sgc-documental/copias?empresa=${id}`)} />
+        ) : (
+        <>
         {requestType === 'nuevo' ? (
           <Grid>
             <Grid.Col span={{ base: 12, md: 6 }}>
@@ -132,6 +152,21 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
                 data-testid='sgc-nueva-tipo-documental'
               />
             </Grid.Col>
+            {inherits && (
+              <Grid.Col span={12}>
+                <SgcSelect
+                  label='Documento padre'
+                  description={`Un ${selectedType?.name.toLowerCase() ?? 'documento'} hereda el número de su documento padre (por ejemplo, el procedimiento).`}
+                  required
+                  searchable
+                  data={(docs.data?.documents ?? []).map((d) => ({ value: String(d.idDocument), label: `${d.code} · ${d.title}` }))}
+                  value={idParentDocument}
+                  onChange={setIdParentDocument}
+                  nothingFoundMessage='No hay documentos vigentes que usted pueda consultar'
+                  data-testid='sgc-nueva-padre'
+                />
+              </Grid.Col>
+            )}
           </Grid>
         ) : (
           <SgcSelect
@@ -145,8 +180,22 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
             data-testid='sgc-nueva-documento'
           />
         )}
+        <SgcSelect
+          label='¿Requiere capacitación?'
+          description={form.data?.roleModel === 'solicitante_elabora' ? 'Usted la prepara y la dicta como creador del documento. Los formatos y los manuales de uso suelen requerirla.' : 'Su sugerencia: la confirma quien crea el documento o Calidad. Los formatos y los manuales de uso suelen requerirla.'}
+          data={[
+            { value: 'tipo', label: 'Según el tipo documental' },
+            { value: 'si', label: 'Sí, requiere capacitación' },
+            { value: 'no', label: 'No requiere capacitación' },
+          ]}
+          value={requiresTraining}
+          onChange={(v) => setRequiresTraining(v ?? 'tipo')}
+          allowDeselect={false}
+          data-testid='sgc-nueva-capacitacion'
+        />
         <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true'
-          label='Asunto'
+          label='Nombre del documento'
+          description='Es el nombre con el que el documento queda en el listado maestro y en su encabezado.'
           required
           value={subjectTouched || !prefill.tipo ? subject : subject || suggestedSubject}
           onChange={(e) => {
@@ -157,22 +206,6 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
           data-testid='sgc-nueva-asunto'
         />
         <Textarea autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Justificación' required minRows={3} autosize value={description} onChange={(e) => setDescription(e.currentTarget.value)} data-testid='sgc-nueva-justificacion' />
-        <SgcSelect
-          label='Elaborador'
-          description='Quien elabora el documento y asigna a los revisores y aprobadores.'
-          searchable
-          data={userOptions}
-          value={elaborator ?? (userOptions.some((u) => u.value === me) ? me : null)}
-          onChange={setElaborator}
-          data-testid='sgc-nueva-elaborador'
-        />
-        {elabHint && (elabHint.people.length > 0 || elabHint.cargos.length > 0) && (
-          <Alert color='blue' variant='light' icon={<IconBulb size={16} />} p='xs'>
-            <Text size='xs'>
-              La matriz sugiere como elaborador{elabHint.fromExample ? ' (datos de ejemplo)' : ''}: {[...elabHint.people, ...elabHint.cargos.map((c) => `cargo ${c}`)].join(', ')}.
-            </Text>
-          </Alert>
-        )}
         {(form.data?.fields ?? []).map((f) =>
           f.type === 'seleccion' || f.type === 'si_no' ? (
             <SgcSelect
@@ -208,6 +241,8 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
             Crear solicitud
           </Button>
         </Group>
+        </>
+        )}
       </Stack>
     </Card>
   );

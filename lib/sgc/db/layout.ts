@@ -1,6 +1,5 @@
 import type { Prisma } from '../../../app/generated/prisma';
 import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../audit';
-import { buildCodeRoot, buildDocumentCode, nextSequence } from '../coding';
 import type { SgcCurrentDraft } from '../draft/current';
 import { sanitizeDraftHtml } from '../draft/html';
 import { SgcError } from '../errors';
@@ -11,12 +10,14 @@ import {
   decodeLogoDataUrl,
   drawInstitutionalHeaders,
   hasChangeHistoryToken,
+  registerOnlyParticipants,
   suggestInstitutionalPlacements,
   type SgcChangeHistoryRow,
   type SgcInstitutionalHeaderData,
   type SgcSystemToken,
 } from '../pdf/institutional';
 import { wrapDraftForPdf, type SgcDocxToHtml, type SgcHtmlToPdf } from '../pdf/render';
+import { xlsxToSheet } from '../pdf/viewable';
 import {
   missingPlacements,
   normalizeSgcFields,
@@ -26,10 +27,15 @@ import {
   type SgcPlacementParticipant,
   type SgcStoredField,
 } from '../signature/fields';
+import { isQualityVerificationPool } from '../signature/qualityVerification';
 import { sha256HexOf } from '../signature/record';
 import { isPdf } from '../storage';
+import { toWinAnsiSafe } from '../watermark';
 import type { SgcActor, SgcDb } from './catalogs';
+import { resolveNewDocumentCode } from './coding';
+import { isHeaderMandatory } from './companySettings';
 import { loadDefinition } from './flows';
+import { headerTemplateForType } from './headerTemplates';
 import { addInteraction, assertCanView, type SgcViewer } from './requests';
 import { currentDraftInTx } from './signatureRecord';
 
@@ -96,8 +102,8 @@ async function namesOf(db: Db, emails: Iterable<string>): Promise<Map<string, st
 
 /**
  * Personas (o grupo) cuya firma va en el documento, en el orden del flujo:
- * el elaborador, los revisores, los aprobadores y el grupo de verificación de
- * Calidad de la aprobación.
+ * el elaborador, los revisores y los aprobadores. S14 (R20): el grupo de
+ * verificación de Calidad de la aprobación ya NO (es una lista de chequeo).
  */
 export async function layoutParticipants(db: Db, row: { id_flow_version: number; elaborator_email: string; signers: { step_key: string; user_email: string; sign_order: number; is_active: boolean }[] }): Promise<SgcPlacementParticipant[]> {
   const def = await loadDefinition(db as Tx, row.id_flow_version);
@@ -118,7 +124,8 @@ export async function layoutParticipants(db: Db, row: { id_flow_version: number;
       const e = lower(s.user_email);
       out.push({ key: sgcSignerKey(t.key, e), meaning, name: names.get(e) ?? e, email: e, role });
     }
-    if (t.poolAuthorizationTypeCode) {
+    // S14 (R20): la verificación de Calidad del paso «Aprobó» es una lista de chequeo: no lleva caja en el documento.
+    if (t.poolAuthorizationTypeCode && !isQualityVerificationPool(meaning, t.poolAuthorizationTypeCode)) {
       out.push({ key: sgcSignerKey(t.key, null, t.poolAuthorizationTypeCode), meaning, name: 'Aseguramiento de Calidad (grupo)', email: t.poolAuthorizationTypeCode, role });
     }
   }
@@ -151,6 +158,11 @@ export async function latestLayout(db: Db, idRequest: number): Promise<SgcLayout
   };
 }
 
+/** Encabezado que se aplica: el guardado, o siempre si es obligatorio; nunca sobre un borrador PDF. */
+export function effectiveInstitutional(saved: boolean, mandatory: boolean, draftFormat: string | null | undefined): boolean {
+  return (saved || mandatory) && draftFormat !== 'pdf';
+}
+
 function inElaboration(row: { status: string; tasks: { status: string; taskDef: { assignment: string } }[] }): boolean {
   return row.status === 'abierta' && row.tasks.some((t) => t.status === 'abierta' && t.taskDef.assignment === 'elaborador');
 }
@@ -158,17 +170,23 @@ function inElaboration(row: { status: string; tasks: { status: string; taskDef: 
 /** Composición del documento para la vista (participantes, cajas, sugerencias y si la persona puede editarla). */
 export async function getDocumentLayout(db: SgcDb, idRequest: number, viewer: SgcViewer) {
   const { row } = await assertCanView(db, idRequest, viewer);
-  const [participants, layout, draft] = await Promise.all([layoutParticipants(db, row), latestLayout(db, idRequest), currentDraftInTx(db as never, idRequest)]);
+  const [participants, layout, draft, headerMandatory] = await Promise.all([layoutParticipants(db, row), latestLayout(db, idRequest), currentDraftInTx(db as never, idRequest), isHeaderMandatory(db, row.id_company)]);
   const keys = new Set(participants.map((p) => p.key));
   const fields = layout.fields.filter((f) => keys.has(f.signerKey));
   const canEdit = inElaboration(row) && lower(row.elaborator_email) === lower(viewer.email);
+  // Sprint 8: con el encabezado obligatorio, el documento siempre lo usa (salvo un borrador PDF anterior a la regla).
+  const institutionalHeader = headerMandatory ? draft?.format !== 'pdf' : layout.institutionalHeader;
+  // D6 (E2E 2026-10-10): quien va solo al registro de firmas no cuenta como «sin ubicar».
+  const inRegister = new Set(registerOnlyParticipants(participants, fields).map((p) => p.key));
   return {
     idRequest,
-    institutionalHeader: layout.institutionalHeader,
+    institutionalHeader,
+    headerMandatory,
     fields,
     participants,
-    missing: missingPlacements(participants, fields).map((p) => p.key),
-    suggested: layout.institutionalHeader ? suggestInstitutionalPlacements(participants, fields) : [],
+    missing: missingPlacements(participants, fields).filter((p) => !inRegister.has(p.key)).map((p) => p.key),
+    inRegister: [...inRegister],
+    suggested: institutionalHeader ? suggestInstitutionalPlacements(participants, fields) : [],
     canEdit,
     draft: draft ? { name: draft.name, sha256: draft.sha256, format: draft.format } : null,
     // La firma se ubicó sobre otro borrador: conviene revisar que la caja siga en su sitio.
@@ -187,8 +205,12 @@ export async function saveDocumentLayout(db: SgcDb, idRequest: number, input: { 
   const { row } = await assertCanView(db, idRequest, viewer);
   if (lower(row.elaborator_email) !== lower(actor.email)) throw new SgcError('Solo el elaborador ubica las firmas en el documento.', 403);
   if (!inElaboration(row)) throw new SgcError('Las firmas se ubican durante la elaboración (antes de enviar el documento a revisión).', 409);
-  const [participants, current, draft] = await Promise.all([layoutParticipants(db, row), latestLayout(db, idRequest), currentDraftInTx(db as never, idRequest)]);
-  const institutional = typeof input.institutionalHeader === 'boolean' ? input.institutionalHeader : current.institutionalHeader;
+  const [participants, current, draft, headerMandatory] = await Promise.all([layoutParticipants(db, row), latestLayout(db, idRequest), currentDraftInTx(db as never, idRequest), isHeaderMandatory(db, row.id_company)]);
+  // Sprint 8: con el encabezado obligatorio no se ofrece apagarlo (el servidor lo rechaza).
+  if (headerMandatory && input.institutionalHeader === false) {
+    throw new SgcError('El encabezado institucional es obligatorio en los documentos nuevos y en las nuevas versiones: no se puede quitar.', 409);
+  }
+  const institutional = headerMandatory ? draft?.format !== 'pdf' : typeof input.institutionalHeader === 'boolean' ? input.institutionalHeader : current.institutionalHeader;
   if (institutional && draft?.format === 'pdf') {
     throw new SgcError('El encabezado institucional se aplica a documentos editados en la app o en Word: un PDF ya trae su propio formato. Ubique las firmas sobre el PDF.', 409);
   }
@@ -209,8 +231,9 @@ export async function saveDocumentLayout(db: SgcDb, idRequest: number, input: { 
       data: { id_request: idRequest, institutional_header: institutional, fields_json: fieldsJson, content_sha256: draft?.sha256 ?? null, saved_by: lower(actor.email), saved_at: now, change_reason: reason },
     });
     const placed = normalized.fields.length;
-    const missing = missingPlacements(participants, normalized.fields).length;
-    await addInteraction(tx, idRequest, 'estado', lower(actor.email), `Ubicó las firmas en el documento: ${placed} de ${participants.length} firma(s) ubicada(s)${missing ? ` (faltan ${missing})` : ''}.${institutional !== current.institutionalHeader ? `\nEncabezado institucional: ${institutional ? 'sí' : 'no'}.` : ''}${reason ? `\nMotivo: ${reason}` : ''}`, {
+    const register = registerOnlyParticipants(participants, normalized.fields).length;
+    const missing = missingPlacements(participants, normalized.fields).length - register;
+    await addInteraction(tx, idRequest, 'estado', lower(actor.email), `Ubicó las firmas en el documento: ${placed} de ${participants.length - register} firma(s) ubicada(s)${missing ? ` (faltan ${missing})` : ''}${register ? `; ${register} van solo al registro de firmas` : ''}.${institutional !== current.institutionalHeader ? `\nEncabezado institucional: ${institutional ? 'sí' : 'no'}.` : ''}${reason ? `\nMotivo: ${reason}` : ''}`, {
       meta: { idDocumentLayout: saved.id_document_layout, institutional, placed, missing },
     });
     await writeSgcAudit(tx, {
@@ -273,6 +296,8 @@ export async function changeHistoryRows(db: Db, idDocument: number | null, curre
 export interface SgcComposeInput {
   idCompany: number;
   idDocument: number | null;
+  /** S16 (R31): tipo documental (su plantilla de encabezado; sin él, la por defecto de la empresa). */
+  idDocumentType?: number | null;
   draft: { format: string; bytes: Uint8Array | null; html: string | null };
   institutional: boolean;
   code: string;
@@ -295,15 +320,22 @@ export interface SgcComposeInput {
  * el espacio del encabezado. Devuelve el PDF y los datos del encabezado (que
  * se dibuja después, sobre el PDF final o la vista previa).
  */
-export async function composeContent(db: Db, deps: Pick<SgcLayoutDeps, 'htmlToPdf' | 'docxToHtml'>, input: SgcComposeInput): Promise<{ contentPdf: Uint8Array; header: SgcInstitutionalHeaderData | null; sourceHtml: string | null }> {
+export async function composeContent(
+  db: Db,
+  deps: Pick<SgcLayoutDeps, 'htmlToPdf' | 'docxToHtml'>,
+  input: SgcComposeInput
+): Promise<{ contentPdf: Uint8Array; header: SgcInstitutionalHeaderData | null; sourceHtml: string | null; headerTemplate: { id: number; code: string; version: number } | null }> {
   if (input.draft.format === 'pdf') {
     if (!input.draft.bytes || !isPdf(input.draft.bytes)) throw new SgcError('El borrador PDF no es un PDF válido.', 409);
-    return { contentPdf: input.draft.bytes, header: null, sourceHtml: null };
+    return { contentPdf: input.draft.bytes, header: null, sourceHtml: null, headerTemplate: null };
   }
   let html: string;
+  let sheetCss: string | undefined;
   if (input.draft.format === 'docx') html = await deps.docxToHtml(input.draft.bytes!);
   else if (input.draft.format === 'html') html = sanitizeDraftHtml(input.draft.html ?? '');
-  else throw new SgcError('El borrador debe ser PDF, Word (.docx) o editado en la app.', 409);
+  // S16 (R32, D17): un FORMATO en Excel se compone desde sus hojas (tablas), sin pasar por Word.
+  else if (input.draft.format === 'xlsx') ({ html, css: sheetCss } = await xlsxToSheet(input.draft.bytes!));
+  else throw new SgcError('El borrador debe ser PDF, Word (.docx), Excel (.xlsx) o editado en la app.', 409);
   const history = buildChangeHistoryHtml(await changeHistoryRows(db, input.idDocument, { versionNumber: input.versionNumber, date: input.changeDate, reason: input.changeReason }));
   const values: Partial<Record<SgcSystemToken, string>> = {
     CODIGO: input.code,
@@ -318,10 +350,14 @@ export async function composeContent(db: Db, deps: Pick<SgcLayoutDeps, 'htmlToPd
   };
   let body = applySystemFieldTokens(html, values, history);
   if (input.institutional && !hasChangeHistoryToken(html)) body += `<h2>HISTORIAL DE CAMBIOS</h2>${history}`;
-  const contentPdf = await deps.htmlToPdf(wrapDraftForPdf({ title: input.title, code: input.code, contentHtml: body, institutional: input.institutional }));
+  const contentPdf = await deps.htmlToPdf(wrapDraftForPdf({ title: input.title, code: input.code, contentHtml: body, institutional: input.institutional, sheet: input.draft.format === 'xlsx', extraCss: sheetCss }));
   let header: SgcInstitutionalHeaderData | null = null;
+  let headerTemplate: { id: number; code: string; version: number } | null = null;
   if (input.institutional) {
     const config = await db.sgcCompanyConfig.findUnique({ where: { id_company: input.idCompany }, select: { logo_data_url: true } });
+    // S16 (R31): rótulos y fila inferior de la plantilla del tipo documental.
+    const tpl = await headerTemplateForType(db, input.idCompany, input.idDocumentType ?? null);
+    headerTemplate = tpl.ref;
     header = {
       company: input.company,
       title: input.title,
@@ -334,9 +370,10 @@ export async function composeContent(db: Db, deps: Pick<SgcLayoutDeps, 'htmlToPd
       aprobo: input.aprobo,
       emissionText: input.emissionText,
       logo: decodeLogoDataUrl(config?.logo_data_url ?? null),
+      template: tpl.config,
     };
   }
-  return { contentPdf, header, sourceHtml: input.draft.format === 'html' ? html : null };
+  return { contentPdf, header, sourceHtml: input.draft.format === 'html' ? html : null, headerTemplate };
 }
 
 const previewCache = new Map<string, { bytes: Uint8Array; at: number }>();
@@ -347,7 +384,10 @@ const PREVIEW_TTL_MS = 10 * 60 * 1000;
  * el contenido compuesto como quedará en el PDF controlado, con el encabezado
  * institucional si aplica. Código provisional en un documento nuevo.
  */
-export async function buildLayoutPreview(db: SgcDb, deps: SgcLayoutDeps, idRequest: number, viewer: SgcViewer): Promise<Uint8Array> {
+export async function buildLayoutPreview(db: SgcDb, deps: SgcLayoutDeps, idRequest: number, viewer: SgcViewer, options: { runningHeader?: boolean } = {}): Promise<Uint8Array> {
+  // 2026-10-05 («Ver documento» sin descarga): sin encabezado institucional, la
+  // misma línea superior del PDF controlado (código · versión · título).
+  const runningHeader = options.runningHeader === true;
   const { row } = await assertCanView(db, idRequest, viewer);
   const request = await db.sgcRequest.findUniqueOrThrow({
     where: { id_request: idRequest },
@@ -355,11 +395,12 @@ export async function buildLayoutPreview(db: SgcDb, deps: SgcLayoutDeps, idReque
   });
   const [participants, layout] = await Promise.all([layoutParticipants(db, row), latestLayout(db, idRequest)]);
   const { draft, bytes, html } = await loadVerifiedDraft(db, deps, idRequest);
-  const institutional = layout.institutionalHeader && draft.format !== 'pdf';
+  const institutional = effectiveInstitutional(layout.institutionalHeader, await isHeaderMandatory(db, request.id_company), draft.format);
   const people = participants.filter((p) => p.email.includes('@'));
   const cargos = await cargoOf(db, request.id_company, people.map((p) => p.email));
   const label = (m: SgcPlacedMeaning) => participants.filter((p) => p.meaning === m).map((p) => (p.email.includes('@') ? personLabel(p.name, p.email, cargos.get(p.email)) : p.name));
-  const key = [idRequest, draft.sha256, institutional ? 1 : 0, sha256HexOf(JSON.stringify([label('elaboro'), label('reviso'), label('aprobo')]))].join(':');
+  const tplRef = institutional ? (await headerTemplateForType(db, request.id_company, request.id_document_type)).ref : null;
+  const key = [idRequest, draft.sha256, institutional ? 1 : 0, runningHeader ? 1 : 0, tplRef ? `${tplRef.id}.${tplRef.version}` : 'def', sha256HexOf(JSON.stringify([label('elaboro'), label('reviso'), label('aprobo')]))].join(':');
   const hit = previewCache.get(key);
   if (hit && Date.now() - hit.at < PREVIEW_TTL_MS) return hit.bytes;
 
@@ -369,18 +410,24 @@ export async function buildLayoutPreview(db: SgcDb, deps: SgcLayoutDeps, idReque
     const last = await db.sgcDocumentVersion.findFirst({ where: { id_document: request.document.id_document }, orderBy: { version_number: 'desc' }, select: { version_number: true } });
     versionNumber = (last?.version_number ?? 0) + 1;
   } else {
-    const guide = await db.sgcCodingGuide.findUnique({ where: { id_company: request.id_company } });
-    if (guide && request.processMap && request.documentType) {
-      const g = { prefix: guide.prefix, pattern: guide.pattern, sequenceDigits: guide.sequence_digits };
-      const parts = { processTypeCode: request.processMap.processType.code, processCode: request.processMap.code, documentTypeCode: request.documentType.code };
-      const existing = await db.sgcDocument.findMany({ where: { id_company: request.id_company, code: { startsWith: buildCodeRoot(g, parts) } }, select: { code: true } });
-      code = `${buildDocumentCode(g, parts, nextSequence(g, parts, existing.map((e) => e.code)))} (provisional)`;
-    } else code = 'Se asigna al aprobar';
+    code = 'Se asigna al aprobar';
+    if (request.processMap && request.documentType) {
+      // Sprint 8: misma regla que la aprobación (guía de la empresa y herencia del número del padre).
+      const resolved = await resolveNewDocumentCode(db, {
+        idCompany: request.id_company,
+        processTypeCode: request.processMap.processType.code,
+        processCode: request.processMap.code,
+        documentTypeCode: request.documentType.code,
+        idParentDocument: request.id_parent_document,
+      }).catch(() => null);
+      if (resolved) code = `${resolved.code} (provisional)`;
+    }
   }
   const changeValue = request.formValues.find((v) => v.field.field_key === 'resumen_cambios')?.value_text ?? null;
   const composed = await composeContent(db, deps, {
     idCompany: request.id_company,
     idDocument: request.document?.id_document ?? null,
+    idDocumentType: request.id_document_type,
     draft: { format: draft.format, bytes, html },
     institutional,
     code,
@@ -400,6 +447,15 @@ export async function buildLayoutPreview(db: SgcDb, deps: SgcLayoutDeps, idReque
   const pdf = await PDFDocument.load(composed.contentPdf, { ignoreEncryption: true });
   const fonts = { regular: await pdf.embedFont(StandardFonts.Helvetica), bold: await pdf.embedFont(StandardFonts.HelveticaBold) };
   if (composed.header) await drawInstitutionalHeaders(pdf, pdf.getPages(), composed.header, fonts);
+  else if (runningHeader) {
+    const top = toWinAnsiSafe(`${code} · Versión ${versionNumber} · ${request.document?.title ?? request.subject}`);
+    for (const page of pdf.getPages()) {
+      const { width, height } = page.getSize();
+      let size = 7.5;
+      while (size > 5 && fonts.regular.widthOfTextAtSize(top, size) > width - 40) size -= 0.5;
+      page.drawText(top, { x: 20, y: height - 14, size, font: fonts.regular, color: rgb(0.42, 0.45, 0.5) });
+    }
+  }
   for (const page of pdf.getPages()) page.drawText('Vista previa del documento final (sin firmas) · SynerLink', { x: 20, y: 8, size: 7, font: fonts.regular, color: rgb(0.55, 0.1, 0.1) });
   const out = await pdf.save();
   if (previewCache.size > 30) previewCache.delete(previewCache.keys().next().value!);

@@ -4,7 +4,7 @@ import { SgcError, isSgcError, isUniqueViolation } from '../errors';
 
 describe('SGC · estados y confidencialidad', () => {
   it('[SGC-REQ-022] los estados del documento son borrador, vigente, obsoleto y anulado (no hay "eliminado")', () => {
-    expect(Object.keys(SGC_DOCUMENT_STATUS_LABELS)).toEqual(['borrador', 'vigente', 'obsoleto', 'anulado']);
+    expect(Object.keys(SGC_DOCUMENT_STATUS_LABELS)).toEqual(['borrador', 'vigente', 'obsoleto', 'anulado', 'pendiente_archivo']);
     expect(isSgcDocumentStatus('vigente')).toBe(true);
     expect(isSgcDocumentStatus('eliminado')).toBe(false);
     expect(isSgcDocumentStatus(3)).toBe(false);
