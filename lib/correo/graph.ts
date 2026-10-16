@@ -376,7 +376,7 @@ export class GraphMailProvider implements MailProvider {
       await this.responderConHtml(mid, entrada, entrada.html);
       return;
     }
-    const comment = textoAHtml(entrada.texto);
+    const comment = entrada.comentarioHtml || textoAHtml(entrada.texto);
     if (entrada.adjuntos.length === 0) {
       await this.call(`${this.me}/messages/${mid}/${entrada.todos ? 'replyAll' : 'reply'}`, {
         method: 'POST',

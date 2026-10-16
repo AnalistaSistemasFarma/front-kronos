@@ -63,8 +63,23 @@ async function simular(page: Page, opciones: { disponible?: boolean } = {}) {
       },
     })
   );
-  await page.route('**/api/correo/carpetas', (r) => r.fulfill({ json: { carpetas: [{ id: 'FOLDER-INBOXAAAA', nombre: 'Bandeja de entrada', total: 3, noLeidos: 1 }] } }));
-  await page.route('**/api/correo/mensajes**', (r) => r.fulfill({ json: { mensajes, siguiente: null } }));
+  await page.route('**/api/correo/carpetas', (r) =>
+    r.fulfill({
+      json: {
+        carpetas: [
+          { id: 'FOLDER-SENTAAAA', nombre: 'Elementos enviados', total: 12, noLeidos: 0 },
+          { id: 'FOLDER-INBOXAAAA', nombre: 'Bandeja de entrada', total: 3, noLeidos: 1 },
+          { id: 'FOLDER-DRAFTSAAAA', nombre: 'Borradores', total: 2, noLeidos: 0 },
+          { id: 'FOLDER-OUTBOXAAAA', nombre: 'Bandeja de salida', total: 0, noLeidos: 0 },
+        ],
+      },
+    })
+  );
+  const consultas: URLSearchParams[] = [];
+  await page.route('**/api/correo/mensajes**', (r) => {
+    consultas.push(new URL(r.request().url()).searchParams);
+    return r.fulfill({ json: { mensajes, siguiente: null } });
+  });
   await page.route('**/api/correo/hilo?**', (r) => r.fulfill({ json: { hilo } }));
   await page.route('**/api/correo/responder', (r) => {
     respuestas.push(r.request().postData() ?? '');
@@ -93,7 +108,7 @@ async function simular(page: Page, opciones: { disponible?: boolean } = {}) {
     await new Promise((x) => setTimeout(x, 150));
     return r.fulfill({ status: 201, json: { conversationId: body.conversationId, ok: true, idRequest: 700 + creadas.length, adjuntosSubidos: body.adjuntosIds.length, adjuntosFallidos: [], etiquetado: true } });
   });
-  return { creadas, respuestas };
+  return { creadas, respuestas, consultas };
 }
 
 test.describe('Correo · sin sesión', () => {
@@ -148,11 +163,28 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     await expect(drawer.getByTestId('correo-imagenes-bloqueadas')).toBeVisible();
     await expect(drawer.getByTestId('correo-adjunto')).toContainText('contrato.pdf');
     await expect(drawer.getByTestId('correo-hilo-sin-vinculo')).toBeVisible();
-    await drawer.getByTestId('correo-respuesta-texto').fill('Recibido, lo reviso hoy.');
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/02-hilo.png` });
+    // Responder como en Gmail: el botón abre el editor en el mismo hilo, con formato Markdown.
+    await expect(drawer.getByTestId('correo-responder')).toHaveCount(0);
+    await drawer.getByTestId('correo-responder-btn').click();
+    await expect(drawer.getByTestId('correo-responder-para')).toContainText('Responder a Usuario Uno');
+    const editor = drawer.getByTestId('correo-respuesta-texto');
+    await editor.fill('lo reviso hoy');
+    await editor.selectText();
+    await drawer.getByTestId('correo-md-b').click();
+    await expect(editor).toHaveValue('**lo reviso hoy**');
+    // El texto queda seleccionado (dentro de las marcas), como en un editor; se lleva el cursor al final.
+    await expect.poll(() => editor.evaluate((el: HTMLTextAreaElement) => [el.selectionStart, el.selectionEnd].join('-'))).toBe('2-15');
+    await editor.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(el.value.length, el.value.length));
+    await editor.pressSequentially('\n- contrato\n- anexos');
+    await drawer.getByTestId('correo-md-tab-previa').click();
+    const previa = drawer.getByTestId('correo-md-previa').locator('iframe').contentFrame();
+    await expect(previa.locator('strong')).toHaveText('lo reviso hoy');
+    await expect(previa.locator('li')).toHaveCount(2);
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/02b-responder-markdown.png` });
     await drawer.getByTestId('correo-respuesta-enviar').click();
     await expect(drawer.getByTestId('correo-hilo-resultado')).toContainText('Respuesta enviada desde su buzón');
-    expect(respuestas[0]).toContain('Recibido, lo reviso hoy.');
-    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/02-hilo.png` });
+    expect(respuestas[0]).toContain('**lo reviso hoy**');
     await page.keyboard.press('Escape');
 
     // Selección masiva → simulación (nada se crea todavía).
@@ -318,7 +350,7 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     expect((creadas[0] as { acuse: { enviar: boolean } }).acuse.enviar).toBe(false);
   });
 
-  test('celular: bandeja en tarjetas, hilo a pantalla completa y simulación en tarjetas', async ({ page }) => {
+  test('celular: lista primero, carpetas en panel, hilo a pantalla completa y simulación en tarjetas', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await simular(page);
     await page.goto('/process/correo');
@@ -327,9 +359,115 @@ test.describe('Correo · con sesión y Graph simulado', () => {
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/05-movil-bandeja.png` });
     const ancho = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(ancho).toBeLessThanOrEqual(390 + 1);
+    // Carpetas en un panel lateral.
+    await page.getByTestId('correo-menu-carpetas').click();
+    const panel = page.getByTestId('correo-carpetas-drawer');
+    await expect(panel.getByTestId('correo-carpeta')).toHaveText([/Recibidos\s*1/, /Enviados/, /Borradores\s*2/]);
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/05b-movil-carpetas.png` });
+    await page.keyboard.press('Escape');
+    await expect(panel.getByTestId('correo-carpeta')).toHaveCount(0);
+    // Hilo a pantalla completa con Responder abajo.
+    await page.getByTestId('correo-fila').first().click();
+    await expect(page.getByTestId('correo-hilo').getByTestId('correo-responder-btn')).toBeVisible();
+    await page.waitForTimeout(400); // fin de la animación del panel
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/05c-movil-hilo.png`, fullPage: true });
+    await page.keyboard.press('Escape');
+    // Tocar el avatar selecciona (como en la app de Gmail).
     await page.getByTestId('correo-seleccionar').first().check();
     await page.getByTestId('correo-simular').click();
     await expect(page.getByTestId('correo-sim-tarjetas')).toBeVisible();
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/06-movil-simulacion.png` });
+  });
+
+  test('estilo Gmail: carpetas con no leídos, buscador, chips de filtro y acciones al pasar el mouse', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const { consultas } = await simular(page);
+    await page.goto('/process/correo');
+    await expect(page.getByTestId('correo-fila')).toHaveCount(3);
+    // Carpetas: Recibidos primero (activa, con 1 no leído), Enviados, Borradores (total); la de salida se oculta.
+    const carpetas = page.getByTestId('correo-carpeta');
+    await expect(carpetas).toHaveText([/Recibidos\s*1/, /Enviados/, /Borradores\s*2/]);
+    await expect(carpetas.first()).toHaveAttribute('data-activa', '1');
+    // Fila densa: no leído en negrita, asunto + extracto en una línea, clip y fecha a la derecha.
+    const primera = page.getByTestId('correo-fila').first();
+    await expect(primera).toHaveAttribute('data-leido', '0');
+    await expect(primera).toContainText('Revisión de contrato de arrendamiento — Adjunto el contrato para revisión');
+    await expect(primera.getByLabel('Con adjuntos')).toBeVisible();
+    // Al pasar el mouse aparecen «Abrir» y «Convertir en solicitud».
+    await expect(primera.getByTestId('correo-fila-crear')).toBeHidden();
+    await primera.hover();
+    await expect(primera.getByTestId('correo-fila-crear')).toBeVisible();
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/10-bandeja-hover.png` });
+    // Chips: «No leídos» filtra de una vez.
+    await page.getByTestId('correo-chips').getByText('No leídos').click();
+    await expect.poll(() => consultas.at(-1)?.get('noLeidos')).toBe('1');
+    // Buscador: Enter aplica y deja un chip quitable.
+    await page.getByTestId('correo-buscar').fill('contrato');
+    await page.getByTestId('correo-buscar').press('Enter');
+    await expect.poll(() => consultas.at(-1)?.get('buscar')).toBe('contrato');
+    await expect(page.getByTestId('correo-chip-activo')).toContainText('«contrato»');
+    // Opciones de búsqueda (De / fechas) en el desplegable del buscador.
+    await page.getByTestId('correo-mas-filtros').click();
+    await page.getByTestId('correo-filtros').getByLabel('De', { exact: true }).fill('uno@gsslatam.com');
+    await page.getByTestId('correo-aplicar').click();
+    await expect.poll(() => consultas.at(-1)?.get('de')).toBe('uno@gsslatam.com');
+    // Carpeta Enviados.
+    await carpetas.nth(1).click();
+    await expect.poll(() => consultas.at(-1)?.get('carpeta')).toBe('FOLDER-SENTAAAA');
+    await expect(carpetas.nth(1)).toHaveAttribute('data-activa', '1');
+    // Selección → barra con «Simular / Crear solicitudes»; la acción de la fila abre la simulación de ese correo.
+    await page.getByTestId('correo-seleccionar').nth(1).check();
+    await expect(page.getByTestId('correo-barra-seleccion')).toContainText('1 correo(s)');
+    await expect(page.getByTestId('correo-simular')).toHaveText('Simular / Crear solicitudes');
+    if (CAPTURAS) {
+      await page.screenshot({ path: `${CAPTURAS}/11-bandeja-seleccion.png` });
+      // Misma pantalla en modo oscuro (tokens de Mantine, sin colores en duro).
+      await page.getByRole('button', { name: 'Activar modo oscuro' }).click();
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: `${CAPTURAS}/13-bandeja-oscuro.png` });
+      await page.getByRole('button', { name: 'Activar modo claro' }).click();
+    }
+    await page.getByTestId('correo-seleccionar').nth(1).uncheck();
+    await primera.hover();
+    await primera.getByTestId('correo-fila-crear').click();
+    await expect(page.getByTestId('correo-simulacion').getByTestId('correo-sim-fila')).toHaveCount(3);
+  });
+
+  test('hilo estilo Gmail: anteriores plegados en una línea, el último desplegado, detalles y adjuntos en fichas', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await simular(page);
+    const largo = {
+      ...hilo,
+      mensajes: [
+        { ...hilo.mensajes[0], id: 'MSG-0010AAAA', leido: true, adjuntos: [], remotasBloqueadas: 0, html: '<p>Primer mensaje del hilo con el contexto.</p>', fecha: '2026-10-13T14:00:00Z' },
+        { ...hilo.mensajes[0], id: 'MSG-0011AAAA', leido: true, adjuntos: [], remotasBloqueadas: 0, de: { nombre: 'Laura', correo: 'laura@gsslatam.com' }, para: [mensajes[0].de], html: '<p>Respuesta intermedia de <b>Laura</b>.</p>', fecha: '2026-10-14T14:00:00Z' },
+        { ...hilo.mensajes[0], cc: [{ nombre: 'Usuario Dos', correo: 'dos@onelatampharma.com' }], leido: true },
+      ],
+    };
+    await page.route('**/api/correo/hilo?**', (r) => r.fulfill({ json: { hilo: largo } }));
+    await page.goto('/process/correo');
+    await page.getByTestId('correo-fila').first().click();
+    const drawer = page.getByTestId('correo-hilo');
+    await expect(drawer.getByTestId('correo-hilo-asunto')).toHaveText('Revisión de contrato de arrendamiento');
+    const msgs = drawer.getByTestId('correo-hilo-mensaje');
+    await expect(msgs).toHaveCount(3);
+    await expect(msgs.nth(0)).toHaveAttribute('data-abierto', '0');
+    await expect(msgs.nth(0).getByTestId('correo-hilo-extracto')).toHaveText('Primer mensaje del hilo con el contexto.');
+    await expect(msgs.nth(2)).toHaveAttribute('data-abierto', '1');
+    await expect(drawer.getByTestId('correo-cuerpo')).toHaveCount(1);
+    await expect(msgs.nth(2)).toContainText('para mí, cc Usuario Dos');
+    await msgs.nth(2).getByTestId('correo-hilo-detalles').click();
+    await expect(msgs.nth(2).getByTestId('correo-hilo-detalles-panel')).toContainText('dos@onelatampharma.com');
+    await expect(msgs.nth(2).getByTestId('correo-adjunto')).toContainText('contrato.pdf');
+    // Desplegar uno anterior.
+    await msgs.nth(0).getByTestId('correo-hilo-mensaje-cabecera').click();
+    await expect(msgs.nth(0)).toHaveAttribute('data-abierto', '1');
+    await expect(drawer.getByTestId('correo-cuerpo')).toHaveCount(2);
+    // Varios destinatarios: «Responder a todos» abre el editor en modo a todos.
+    await drawer.getByTestId('correo-responder-todos-btn').click();
+    await expect(drawer.getByTestId('correo-responder-para')).toHaveText('Responder a todos');
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/12-hilo-plegado.png` });
+    await drawer.getByTestId('correo-respuesta-descartar').click();
+    await expect(drawer.getByTestId('correo-responder')).toHaveCount(0);
   });
 });

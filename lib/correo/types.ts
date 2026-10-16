@@ -75,6 +75,11 @@ export interface RespuestaEntrada {
    * para dejarlo encima del historial citado; si no, el texto va como `comment`.
    */
   html?: string;
+  /**
+   * Cuerpo HTML YA SANEADO de la respuesta escrita por la persona (su Markdown convertido). Va como
+   * `comment` de reply/createReply en lugar del texto plano; no cambia el flujo de envío.
+   */
+  comentarioHtml?: string;
 }
 
 /**

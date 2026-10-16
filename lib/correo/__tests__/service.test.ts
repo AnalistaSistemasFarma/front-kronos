@@ -262,7 +262,7 @@ describe('Correo · hilo, notas y respuesta', () => {
     const d = deps();
     const r = await responder(d, yo, { mensajeId: 'mock-msg-0002AAAA', texto: 'Recibido, lo reviso.', todos: false, adjuntos: [], ip: null });
     expect(r).toEqual({ notaEnSolicitud: 500 });
-    expect(enviadosSimulados(yo.email)).toEqual([{ mensajeId: 'mock-msg-0002AAAA', todos: false, texto: 'Recibido, lo reviso.', adjuntos: [] }]);
+    expect(enviadosSimulados(yo.email)).toEqual([{ mensajeId: 'mock-msg-0002AAAA', todos: false, texto: 'Recibido, lo reviso.', adjuntos: [], comentarioHtml: '<p>Recibido, lo reviso.</p>' }]);
     expect(d.kronos.insertarNota).toHaveBeenCalledWith(500, expect.stringContaining('Respuesta enviada desde SynerLink'), 'op1');
     expect(db.auditar).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ accion: 'RESPONDER', idRequest: 500 }));
     // La copia enviada aparece en el hilo: con la auditoría reciente se registra como RESPUESTA, sin nota nueva.
@@ -271,6 +271,19 @@ describe('Correo · hilo, notas y respuesta', () => {
     const d2 = deps();
     expect((await sincronizarHilo(d2, yo, 'mock-conv-01AAAA', null)).agregadas).toBe(0);
     expect(db.registrarCorreo).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ tipo: 'RESPUESTA' }));
+  });
+
+  it('responder con Markdown: sale como HTML saneado y la nota del caso queda en texto legible', async () => {
+    db.vinculoDeHilo.mockResolvedValue({ id: 3, conversationId: 'mock-conv-01AAAA', idRequest: 501, asunto: 'x', creadoEn: '', origen: 'CREADA', lastSyncedAt: null });
+    const d = deps();
+    const antes = enviadosSimulados(yo.email).length;
+    await responder(d, yo, { mensajeId: 'mock-msg-0002AAAA', texto: 'Hola **equipo**:\n- uno\n- [ver](https://x.co) <script>x</script>', todos: false, adjuntos: [], ip: null });
+    const env = enviadosSimulados(yo.email)[antes];
+    expect(env.comentarioHtml).toBe('<p>Hola <strong>equipo</strong>:</p><ul><li>uno</li><li><a href="https://x.co" target="_blank" rel="noopener noreferrer nofollow">ver</a> &lt;script&gt;x&lt;/script&gt;</li></ul>');
+    expect(env.texto).toBe('Hola equipo:\n• uno\n• ver (https://x.co) <script>x</script>');
+    const nota = (d.kronos.insertarNota as unknown as { mock: { calls: unknown[][] } }).mock.calls.at(-1)?.[1] as string;
+    expect(nota).toContain('Hola equipo:\n• uno');
+    expect(nota).not.toContain('**');
   });
 
   it('responder valida texto y adjuntos', async () => {
