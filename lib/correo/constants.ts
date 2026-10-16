@@ -57,6 +57,16 @@ export const CORREO_AUDIT_ACCIONES = [
   'VINCULO_HUERFANO',
   'MARCAR_LEIDO',
   'MARCAR_NO_LEIDO',
+  // «Consultar a un agente» (2026-10-16): concesión, lecturas y propuestas del agente, decisiones de la persona.
+  'COMPARTIR_AGENTE',
+  'REVOCAR_AGENTE',
+  'AGENTE_LEER_HILO',
+  'AGENTE_LEER_ADJUNTO',
+  'AGENTE_PROPONER',
+  'AGENTE_DENEGADO',
+  'AGENTE_CONFIRMAR',
+  'AGENTE_DESCARTAR',
+  'AGENTE_FALLIDO',
 ] as const;
 export type CorreoAuditAccion = (typeof CORREO_AUDIT_ACCIONES)[number];
 
@@ -74,3 +84,15 @@ export const CORREO_LOTE_MARCAR_CARPETA = 200;
 /** «Marcar todo»: tope total por acción; por encima se pide confirmación desde CORREO_CONFIRMAR_MARCAR_CARPETA. */
 export const CORREO_MAX_MARCAR_CARPETA = 5_000;
 export const CORREO_CONFIRMAR_MARCAR_CARPETA = 500;
+
+/**
+ * «Consultar a un agente» (diseño aprobado por Nicolás Rivera, 2026-10-16 09:24–09:27): la persona
+ * comparte UN hilo con UNO de sus agentes del chat. Vigencia de la concesión y topes del mensaje de
+ * contexto (el chat admite 8.000 caracteres por mensaje de persona).
+ */
+export const CORREO_AGENTE_VIGENCIA_MS = 24 * 60 * 60_000;
+export const CORREO_AGENTE_MAX_CONTEXTO = 7_600;
+export const CORREO_AGENTE_MAX_EXTRACTO = 1_500;
+export const CORREO_AGENTE_MAX_PREGUNTA = 1_000;
+/** Nota del caso propuesta por el agente. */
+export const CORREO_AGENTE_MAX_NOTA = 4_000;

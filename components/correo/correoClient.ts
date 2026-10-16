@@ -63,6 +63,60 @@ export interface CategoriaCorreo {
   categoria: string;
 }
 
+/** Agente del chat que la persona puede usar (los mismos del chat). */
+export interface AgenteCorreo {
+  idAgent: number;
+  code: string;
+  displayName: string;
+  avatarUrl: string | null;
+  avatarVersion: number | null;
+  description: string | null;
+}
+
+/** Acceso vigente de un agente a un hilo. */
+export interface ConcesionCorreo {
+  id: number;
+  agente: { idAgent: number; code: string; displayName: string };
+  creadaEn: string;
+  venceEn: string;
+  idChatConversation: number;
+}
+
+/** Propuesta del agente (tarjeta del chat). Espejo de AccionVista (lib/correo/agente.ts). */
+export interface AccionAgenteCorreo {
+  id: number;
+  tipo: 'RESPUESTA' | 'SOLICITUD' | 'NOTA';
+  estado: 'PENDIENTE' | 'EJECUTANDO' | 'CONFIRMADA' | 'DESCARTADA' | 'FALLIDA';
+  idChatMessage: number | null;
+  creadaEn: string;
+  decididaEn: string | null;
+  resultado: string | null;
+  idRequest: number | null;
+  asunto: string;
+  agente: string;
+  vigente: boolean;
+  estadoConcesion: 'VIGENTE' | 'VENCIDA' | 'REVOCADA';
+  venceEn: string;
+  respuesta?: { cuerpo: string; html: string; todos: boolean; para: string[] };
+  solicitud?: { proceso: string | null; categoria: string | null; titulo: string; descripcion: string };
+  nota?: { texto: string; idRequest: number | null };
+}
+
+export interface PreparacionSolicitudAgente {
+  empresas: Array<{ idCompany: number; companyName: string }>;
+  idCompany: number;
+  categorias: CategoriaCorreo[];
+  procesos: ProcesoCorreo[];
+  idProcess: number | null;
+  idSolicitante: string | null;
+  solicitanteNombre: string | null;
+  alertas: string[];
+  duplicadoDe: number | null;
+  titulo: string;
+  descripcion: string;
+  adjuntos: number;
+}
+
 export class CorreoApiError extends Error {
   constructor(
     message: string,
@@ -112,6 +166,18 @@ export const correoApi = {
   usuarios: (empresa: number, q: string) => get<{ usuarios: Array<{ id: string; nombre: string; correo: string }> }>(`/api/correo/usuarios?${new URLSearchParams({ empresa: String(empresa), q })}`),
   procesos: (empresa: number) => get<{ categorias: CategoriaCorreo[]; procesos: ProcesoCorreo[] }>(`/api/correo/procesos?empresa=${empresa}`),
   vinculos: (idRequest: number) => get<{ vinculos: VinculoHilo[] }>(`/api/correo/vinculos?solicitud=${idRequest}`),
+  // «Consultar a un agente» (2026-10-16): compartir el hilo con un agente del chat y decidir sus propuestas.
+  agentes: () => get<{ agentes: AgenteCorreo[] }>('/api/correo/agente/agentes'),
+  compartir: (conversationId: string, idAgent: number, pregunta: string) =>
+    post<{ idShare: number; idChatConversation: number; agente: AgenteCorreo; venceEn: string }>('/api/correo/agente/compartir', { conversationId, idAgent, pregunta }),
+  compartidos: (conversationId: string) => get<{ compartidos: ConcesionCorreo[] }>(`/api/correo/agente/compartidos?${new URLSearchParams({ conversationId })}`),
+  revocar: (id: number) => post<{ revocada: boolean }>('/api/correo/agente/revocar', { id }),
+  acciones: (chat: number, signal?: AbortSignal) => get<{ acciones: AccionAgenteCorreo[] }>(`/api/correo/agente/acciones?chat=${chat}`, signal),
+  prepararSolicitudAgente: (id: number, empresa?: number | null) =>
+    get<PreparacionSolicitudAgente>(`/api/correo/agente/acciones/${id}/preparar${empresa ? `?empresa=${empresa}` : ''}`),
+  confirmarAccion: (id: number, edicion: Record<string, unknown> = {}) =>
+    post<{ estado: string; resultado: string; idRequest: number | null }>(`/api/correo/agente/acciones/${id}`, { op: 'confirmar', ...edicion }),
+  descartarAccion: (id: number) => post<{ estado: string; resultado: string }>(`/api/correo/agente/acciones/${id}`, { op: 'descartar' }),
   responder: async (p: { mensajeId: string; texto: string; todos: boolean; archivos: File[] }) => {
     const fd = new FormData();
     fd.set('mensajeId', p.mensajeId);

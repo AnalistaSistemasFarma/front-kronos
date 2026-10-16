@@ -28,6 +28,8 @@ import AgentMetricsBar from './AgentMetricsBar';
 import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
 import { EsqueletoHilo } from './ChatSkeletons';
 import ChatMarkdown from './ChatMarkdown';
+import TarjetaAccionCorreo from '../correo/TarjetaAccionCorreo';
+import { useAccionesCorreo } from '../correo/useAccionesCorreo';
 import { useChatConversation, type ChatTarget } from './useChatConversation';
 import { useAltoVisible, usuarioInteractuando } from './useAltoVisible';
 import {
@@ -672,6 +674,14 @@ export default function ChatThread({
     onZumbido: enPersonas ? alZumbido : undefined,
   });
 
+  // «Consultar a un agente» (Correo, 2026-10-16): las propuestas del agente sobre un hilo de correo
+  // compartido se pintan como TARJETA de confirmación en lugar de su mensaje. Solo en hilos directos.
+  const ultimoMensaje = thread.messages[thread.messages.length - 1];
+  const accionesCorreo = useAccionesCorreo(
+    esHiloDirecto ? thread.conversation?.id ?? null : null,
+    `${thread.messages.length}:${ultimoMensaje?.id ?? 0}`
+  );
+
   // Sonido de mensaje nuevo: este hilo está a la vista, así que lo que llegue
   // aquí no suena mientras la ventana tenga el foco (ver message-sound.ts).
   const idHiloAbierto = thread.conversation?.id ?? null;
@@ -1144,18 +1154,31 @@ export default function ChatThread({
             </Center>
           )}
 
-          {thread.messages.map((message) => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              agent={agent}
-              currentUserId={currentUserId}
-              porAutor={!esHiloDirecto}
-              nueva={yaEstaban.current ? !yaEstaban.current.has(message.id) : false}
-              onCitar={citar}
-              onIrAlCitado={irAlMensaje}
-            />
-          ))}
+          {thread.messages.map((message) => {
+            const accion = message.role === 'agent' ? accionesCorreo.porMensaje.get(message.id) : undefined;
+            if (accion) {
+              return (
+                <Group key={message.id} id={`msg-${message.id}`} align='flex-start' gap='xs' wrap='nowrap'>
+                  <Box style={{ flexShrink: 0 }}>
+                    <AgentAvatar code={agent?.code ?? ''} displayName={agent?.displayName ?? accion.agente} avatarUrl={agent?.avatarUrl ?? null} size={28} showStatus={false} withTooltip={false} />
+                  </Box>
+                  <TarjetaAccionCorreo accion={accion} onCambio={() => void accionesCorreo.refrescar()} />
+                </Group>
+              );
+            }
+            return (
+              <MessageBubble
+                key={message.id}
+                message={message}
+                agent={agent}
+                currentUserId={currentUserId}
+                porAutor={!esHiloDirecto}
+                nueva={yaEstaban.current ? !yaEstaban.current.has(message.id) : false}
+                onCitar={citar}
+                onIrAlCitado={irAlMensaje}
+              />
+            );
+          })}
 
           {enGrupo ? (
             <GroupActivity statuses={thread.statuses} />
