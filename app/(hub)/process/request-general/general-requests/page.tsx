@@ -31,7 +31,6 @@ import {
   Collapse,
   Box,
   Flex,
-  Progress,
   RingProgress,
   Loader,
   Pagination,
@@ -64,6 +63,7 @@ import {
   buildTaskDisplayBadges,
   getSimplifiedTasksProgress,
 } from '@/lib/orion/taskProgress';
+import { RequestProgressBar } from '../../../../../components/request-general/RequestProgressBar';
 
 const ITEMS_PER_PAGE = 100;
 
@@ -1010,25 +1010,7 @@ function RequestGeneralPage() {
                         </Text>
                         {tasksByRequest[ticket.id]?.length ? (
                           <Stack gap={6} mt={8}>
-                            {(() => {
-                              const { total, done, percent } = getTasksProgress(
-                                tasksByRequest[ticket.id]
-                              );
-                              return (
-                                <Group gap={8} wrap='nowrap'>
-                                  <Progress
-                                    value={percent}
-                                    color={percent === 100 ? 'green' : 'blue'}
-                                    size='sm'
-                                    radius='xl'
-                                    style={{ flex: 1, maxWidth: 120 }}
-                                  />
-                                  <Text size='xs' c='dimmed' fw={500} style={{ whiteSpace: 'nowrap' }}>
-                                    {done}/{total}
-                                  </Text>
-                                </Group>
-                              );
-                            })()}
+                            <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
                             <Group gap={6} wrap='wrap'>
                               {buildTaskDisplayBadges(tasksByRequest[ticket.id]).map((badge) => {
                                 const { color, Icon } = getTaskVisual(badge.statusKey);

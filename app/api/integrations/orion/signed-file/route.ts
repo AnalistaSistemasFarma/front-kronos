@@ -28,6 +28,17 @@ function normalizeEmail(email?: string | null): string {
     .toLowerCase();
 }
 
+/** Solo ASCII en Content-Disposition (tildes rompen ByteString de headers). */
+function asciiFileName(fileName: string, fallback = 'documento.pdf'): string {
+  const ascii = String(fileName || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\x20-\x7e]/g, '_')
+    .replace(/["\\\r\n]/g, '_')
+    .trim();
+  return ascii || fallback;
+}
+
 /**
  * Proxy de PDF firmado Orion con Bearer server-side.
  * GET /api/integrations/orion/signed-file?requestId=&fileId=&versionId=
@@ -112,7 +123,7 @@ export async function GET(req: Request) {
         status: 200,
         headers: {
           'Content-Type': 'application/pdf',
-          'Content-Disposition': `${disposition}; filename="${fileName}"`,
+          'Content-Disposition': `${disposition}; filename="${asciiFileName(fileName)}"`,
           'Cache-Control': 'private, no-store',
         },
       });
@@ -267,11 +278,12 @@ export async function GET(req: Request) {
         );
       }
 
+      const safeType = String(contentType || 'application/pdf').split(';')[0].trim() || 'application/pdf';
       return new NextResponse(body as unknown as BodyInit, {
         status: 200,
         headers: {
-          'Content-Type': contentType || 'application/pdf',
-          'Content-Disposition': `${disposition}; filename="${fileName}"`,
+          'Content-Type': /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i.test(safeType) ? safeType : 'application/pdf',
+          'Content-Disposition': `${disposition}; filename="${asciiFileName(fileName)}"`,
           'Cache-Control': cacheControl,
         },
       });
