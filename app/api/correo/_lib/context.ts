@@ -64,7 +64,7 @@ export async function readJson(request: Request): Promise<Record<string, unknown
 
 /** Errores de negocio con su mensaje (y código); el resto, 500 sin detalle. */
 export function errorResponse(error: unknown, tag: string): NextResponse {
-  if (isCorreoError(error)) return jsonNoStore({ error: error.message, code: error.code }, error.status);
+  if (isCorreoError(error)) return jsonNoStore({ error: error.message, code: error.code, ...(error.idRequest ? { idRequest: error.idRequest } : {}) }, error.status);
   console.error(`[correo/${tag}]`, error instanceof Error ? error.message : 'error');
   return jsonNoStore({ error: 'Error interno del módulo Correo' }, 500);
 }

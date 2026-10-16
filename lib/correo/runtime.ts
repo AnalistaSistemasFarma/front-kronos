@@ -9,7 +9,7 @@ import { prisma } from '../prisma';
 import { createGeneralRequest } from '../requests-general/createGeneralRequest.js';
 import { syncRequestToSapsend } from '../sapsend/treasury.js';
 import { readCorreoConfig } from './config';
-import { catalogoEmpresa, insertarNota, solicitudVisible } from './kronos';
+import { catalogoEmpresa, insertarNota, solicitudExiste, solicitudVisible } from './kronos';
 import type { CorreoDeps } from './service';
 import type { ArchivoAdjunto } from './types';
 
@@ -54,7 +54,7 @@ export function correoDeps(): CorreoDeps {
   return {
     db: prisma,
     cfg: readCorreoConfig(),
-    kronos: { catalogoEmpresa, solicitudVisible, insertarNota },
+    kronos: { catalogoEmpresa, solicitudVisible, solicitudExiste, insertarNota },
     crearSolicitud: (p) => createGeneralRequest({ ...p, url: undefined }),
     notificarNueva: (p) => {
       // notificationEvents.js es JS: su tipo inferido (never[]) no admite listas; se pasa tal cual.

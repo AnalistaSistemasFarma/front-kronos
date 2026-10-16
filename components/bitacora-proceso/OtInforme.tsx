@@ -5,15 +5,16 @@ import { useEffect } from 'react';
 import { Alert, Anchor, Box, Breadcrumbs, Button, Card, Divider, Group, Loader, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { IconAlertTriangle, IconArrowLeft, IconChevronRight, IconPrinter, IconSquare, IconSquareCheck } from '@tabler/icons-react';
-import { OT_BASE_URL, OT_FIRMA_SIGNIFICADO, OT_JEFE_PRODUCCION_LABEL, OT_ROL_LABEL, otNombreCompleto } from '../../lib/bitacora-proceso/constants';
+import { OT_BASE_URL, OT_INSPECTOR_LABEL, OT_JEFE_PRODUCCION_LABEL, OT_METODO_LABEL, OT_ROL_LABEL, otNombreCompleto } from '../../lib/bitacora-proceso/constants';
 import type { OrdenDetalle } from '../../lib/bitacora-proceso/db';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import { codigoOt, fmtFecha, fmtFechaHora, fmtFechaHoraSeg, nombreArchivoInforme, otHref, turnoLabel, useOtFetch } from './otClient';
 
 /**
  * Informe de la bitácora (soporte de calidad, R9 P0; se imprime para el batch
- * record): encabezado, cronología y, AL FINAL, la verificación («Cerró» /
- * «Verificó»). «Imprimir / Guardar PDF» usa el diálogo del navegador; la hoja de
+ * record): encabezado, cronología y, AL FINAL, los CUATRO vistos buenos (B2,
+ * 2026-10-15: operario, supervisor «Cerró», inspector y jefe de producción) con
+ * nombre, fecha y hora del servidor y cómo se confirmó. «Imprimir / Guardar PDF» usa el diálogo del navegador; la hoja de
  * impresión solo muestra el informe (en blanco y negro, sin menú).
  *   - A7: el bloque de verificación nunca se parte entre páginas (break-inside: avoid).
  *   - A8: el título del documento (nombre sugerido del PDF) es
@@ -42,6 +43,7 @@ const PRINT_CSS = `
   .ot-tabla-impresion thead { display: table-header-group; }
   .ot-tabla-impresion tr { break-inside: avoid; page-break-inside: avoid; }
   .ot-bloque-final { break-inside: avoid; page-break-inside: avoid; }
+  .ot-vistos-grid { display: grid !important; grid-template-columns: repeat(4, minmax(0, 1fr)) !important; gap: 8px !important; }
 }`;
 
 function Campo({ label, value }: { label: string; value: React.ReactNode }) {
@@ -118,7 +120,7 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
             </Title>
             <Text fw={600}>Bitácora {codigoOt(o.consecutivo)}</Text>
             <Text size='sm' c='dimmed'>
-              Estado: {o.estado === 'ABIERTA' ? 'Abierta (parcial)' : o.firmas.some((f) => f.rol === 'INSPECTOR') ? 'Cerrada y verificada' : 'Cerrada, pendiente de verificación'} · Generado el {fmtFechaHora(new Date().toISOString())}
+              Estado: {o.estado === 'ABIERTA' ? 'Abierta (parcial)' : o.completa ? 'Cerrada, con todos los vistos buenos' : `Cerrada, falta el visto bueno del ${OT_ROL_LABEL[o.siguiente ?? 'JEFE_PROD'].toLowerCase()}`} · Generado el {fmtFechaHora(new Date().toISOString())}
             </Text>
           </div>
           <Divider />
@@ -135,7 +137,8 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
             <Campo label='Hora inicio' value={fmtFechaHoraSeg(o.abiertaEn)} />
             <Campo label='Hora final' value={o.cerradaEn ? fmtFechaHoraSeg(o.cerradaEn) : 'Pendiente (abierta)'} />
             <Campo label='Supervisor' value={o.abiertaPor} />
-            <Campo label={OT_JEFE_PRODUCCION_LABEL} value={o.inspector?.name ?? '—'} />
+            <Campo label={OT_INSPECTOR_LABEL} value={o.inspector?.name ?? '—'} />
+            <Campo label={OT_JEFE_PRODUCCION_LABEL} value={o.jefe?.name ?? '—'} />
             {o.cerradaPor && <Campo label='Cerrada por' value={o.cerradaPor} />}
           </SimpleGrid>
           {o.operadores.length > 0 && <Campo label='Operarios' value={o.operadores.map((p) => p.nombre).join(', ')} />}
@@ -197,31 +200,30 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
             </>
           )}
           <Divider />
-          {/* A7: verificación AL FINAL y en un bloque que no se parte entre páginas. */}
+          {/* A7/B2: los cuatro vistos buenos AL FINAL, en un bloque que no se parte entre páginas. */}
           <div className='ot-bloque-final' data-testid='ot-informe-firmas'>
-            <Title order={2} size='h4' mb='sm'>Verificación</Title>
-            <SimpleGrid cols={{ base: 1, xs: 2 }} spacing='md'>
-              {(['SUPERVISOR', 'INSPECTOR'] as const).map((rol) => {
-                const f = o.firmas.find((x) => x.rol === rol);
-                const Icono = f ? IconSquareCheck : IconSquare;
+            <Title order={2} size='h4' mb='sm'>Vistos buenos</Title>
+            <SimpleGrid cols={{ base: 1, xs: 2 }} spacing='md' className='ot-vistos-grid'>
+              {o.vistos.map((v) => {
+                const Icono = v.estado === 'dado' ? IconSquareCheck : IconSquare;
                 return (
-                  <Card key={rol} withBorder radius='md' p='sm'>
+                  <Card key={v.rol} withBorder radius='md' p='sm' data-testid={`ot-informe-visto-${v.rol.toLowerCase()}`}>
                     <Group gap={8} wrap='nowrap' align='center'>
                       <Icono size={26} stroke={1.8} />
                       <div style={{ minWidth: 0 }}>
-                        <Text fw={700}>{OT_FIRMA_SIGNIFICADO[rol]}</Text>
-                        <Text size='xs' c='dimmed' tt='uppercase' fw={600}>{OT_ROL_LABEL[rol]}</Text>
+                        <Text fw={700}>{OT_ROL_LABEL[v.rol]}</Text>
+                        {v.rol === 'SUPERVISOR' && <Text size='xs' c='dimmed' tt='uppercase' fw={600}>Cerró la bitácora</Text>}
                       </div>
                     </Group>
-                    {f ? (
+                    {v.firma ? (
                       <>
-                        <Text fw={600} mt={6}>{f.nombre}</Text>
-                        <Text size='sm'>{fmtFechaHoraSeg(f.firmadoEn)}</Text>
-                        <Text size='xs' c='dimmed'>Confirmado con la contraseña de SynerLink de la persona.</Text>
+                        <Text fw={600} mt={6}>{v.firma.nombre}</Text>
+                        <Text size='sm'>{fmtFechaHoraSeg(v.firma.firmadoEn)}</Text>
+                        <Text size='xs' c='dimmed'>Confirmado: {OT_METODO_LABEL[v.firma.metodo] ?? v.firma.metodo}</Text>
                       </>
                     ) : (
                       <Text c='dimmed' mt={6}>
-                        Pendiente{rol === 'INSPECTOR' && o.inspector ? ` — ${o.inspector.name}` : ''}
+                        {v.estado === 'no_aplica' ? 'No aplica' : `Pendiente${v.designado ? ` — ${v.designado}` : ''}`}
                       </Text>
                     )}
                   </Card>

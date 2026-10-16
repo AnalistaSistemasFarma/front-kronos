@@ -293,6 +293,12 @@ export class GraphMailProvider implements MailProvider {
     }));
   }
 
+  /** Solo el contador de la Bandeja de entrada (consulta mínima, sin contenido). */
+  async noLeidosBandeja(): Promise<number> {
+    const data = await this.json<{ unreadItemCount?: number }>(`${this.me}/mailFolders/inbox?$select=unreadItemCount`);
+    return Math.max(0, Number(data.unreadItemCount) || 0);
+  }
+
   async mensajes(filtros: FiltrosBandeja, cursor?: string | null): Promise<PaginaMensajes> {
     const url = cursor ? validarCursor(cursor, this.mailbox) : urlBandeja(this.mailbox, filtros);
     const data = await this.json<{ value?: GraphMsg[]; '@odata.nextLink'?: string }>(url);

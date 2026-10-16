@@ -5,10 +5,11 @@ import { buildSapOpFilter, OtError, type SapOpSnapshot } from './rules';
 
 /**
  * Selector OPCIONAL de la orden de producción de SAP (R11) — SOLO LECTURA (R12).
- * Únicamente Login, GET de ProductionOrders liberadas y Logout. Este módulo no
+ * Únicamente Login, GET de ProductionOrders planificadas o liberadas (B5, 2026-10-15)
+ * y Logout. Este módulo no
  * hace POST/PATCH/DELETE al Service Layer: ni OP, ni emisiones, ni recibos.
  */
-const SELECT = 'AbsoluteEntry,DocumentNumber,ItemNo,ProductDescription,U_Cod_Lote,U_FecVen_lote,PlannedQuantity,Warehouse';
+const SELECT = 'AbsoluteEntry,DocumentNumber,ItemNo,ProductDescription,U_Cod_Lote,U_FecVen_lote,PlannedQuantity,Warehouse,ProductionOrderStatus';
 
 async function credencialesSap(idCompany: number) {
   const endpoints = await prisma.sap_endpoints.findMany({ where: { id_company: idCompany } });
@@ -31,11 +32,12 @@ function toSnapshot(row: Record<string, unknown>): SapOpSnapshot | null {
     U_FecVen_lote: s(row.U_FecVen_lote),
     PlannedQuantity: typeof row.PlannedQuantity === 'number' ? row.PlannedQuantity : null,
     Warehouse: s(row.Warehouse),
+    ProductionOrderStatus: s(row.ProductionOrderStatus),
   };
 }
 
-/** Busca hasta 20 OP liberadas de la empresa que coincidan con el texto. */
-export async function buscarOpsLiberadas(idCompany: number, q: string): Promise<SapOpSnapshot[]> {
+/** Busca hasta 20 OP planificadas o liberadas de la empresa que coincidan con el texto o el número. */
+export async function buscarOps(idCompany: number, q: string): Promise<SapOpSnapshot[]> {
   const creds = await credencialesSap(idCompany);
   if (!creds) throw new OtError('La empresa no tiene un Service Layer de SAP activo.', 409);
   const session = await sapLogin(creds);
