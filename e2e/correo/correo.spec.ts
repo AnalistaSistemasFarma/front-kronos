@@ -1,5 +1,7 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { encode } from 'next-auth/jwt';
+import { sanitizeEmailHtml } from '../../lib/correo/sanitize';
+import { BOLETIN, OUTLOOK_RESPUESTA } from '../../lib/correo/__tests__/fixtures/correosHtml';
 
 /**
  * Módulo Correo · extremo a extremo con Microsoft Graph SIMULADO.
@@ -815,5 +817,59 @@ test.describe('Correo · con sesión y Graph simulado', () => {
       await page.screenshot({ path: `${CAPTURAS}/16-esqueleto-movil.png` });
     }
     await expect(page.getByTestId('correo-vacio')).toBeVisible();
+  });
+
+  test('HTML de Outlook (2026-10-16): la tabla se ve con bordes y fondos, el <style> se aplica, superficie blanca en oscuro y desplazamiento en celular', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await simular(page);
+    // El servidor sanea con los bloques <style>; aquí se usa la misma función sobre una muestra sintética.
+    const conTablas = {
+      ...hilo,
+      mensajes: [
+        // El anterior (leído) va plegado; el último (la respuesta de Outlook) se despliega solo.
+        { ...hilo.mensajes[0], id: 'MSG-0099AAAA', leido: true, fecha: '2026-10-14T15:00:00Z', remotasBloqueadas: 0, adjuntos: [], html: sanitizeEmailHtml(BOLETIN, { bloquesEstilo: true }).html },
+        { ...hilo.mensajes[0], leido: true, remotasBloqueadas: 0, adjuntos: [], html: sanitizeEmailHtml(OUTLOOK_RESPUESTA, { bloquesEstilo: true }).html },
+      ],
+    };
+    await page.route('**/api/correo/hilo?**', (r) => r.fulfill({ json: { hilo: conTablas } }));
+    await page.goto('/process/correo');
+    await page.getByTestId('correo-fila').first().click();
+    const vista = page.getByTestId('correo-hilo');
+    const msgs = vista.getByTestId('correo-hilo-mensaje');
+    await expect(msgs).toHaveCount(2);
+    const ultimo = msgs.nth(1);
+    const cuerpo = ultimo.frameLocator('iframe');
+    const encabezado = cuerpo.locator('table td').first();
+    await expect(encabezado).toContainText('Agente');
+    const estilo = await encabezado.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { fondo: cs.backgroundColor, borde: cs.borderTopStyle, colorBorde: cs.borderTopColor, relleno: cs.paddingLeft };
+    });
+    expect(estilo).toEqual({ fondo: 'rgb(31, 56, 100)', borde: 'solid', colorBorde: 'rgb(31, 56, 100)', relleno: '8px' });
+    await expect(cuerpo.locator('table tr').nth(2).locator('td').first()).toHaveCSS('background-color', 'rgb(255, 242, 204)');
+    await expect(cuerpo.locator('table')).toHaveCSS('border-collapse', 'collapse');
+    // <style> de Outlook aplicado: párrafos sin margen.
+    await expect(cuerpo.locator('p.MsoNormal').first()).toHaveCSS('margin-top', '0px');
+    // El iframe crece con el contenido (sin barra vertical interna).
+    const alto = await ultimo.locator('iframe').evaluate((f: HTMLIFrameElement) => ({ iframe: f.clientHeight, contenido: f.contentDocument!.body.scrollHeight }));
+    expect(alto.iframe).toBeGreaterThanOrEqual(alto.contenido);
+    if (CAPTURAS) await ultimo.screenshot({ path: `${CAPTURAS}/17-correo-tablas.png` });
+
+    // Modo oscuro: el correo sigue en superficie blanca con sus colores.
+    await page.getByRole('button', { name: 'Activar modo oscuro' }).click();
+    await expect(cuerpo.locator('body')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+    await expect(encabezado).toHaveCSS('background-color', 'rgb(31, 56, 100)');
+    if (CAPTURAS) {
+      await page.waitForTimeout(400);
+      await ultimo.screenshot({ path: `${CAPTURAS}/18-correo-tablas-oscuro.png` });
+    }
+    await page.getByRole('button', { name: 'Activar modo claro' }).click();
+
+    // Celular: la tabla (600 px) se desplaza en horizontal dentro del correo; la página no.
+    await page.setViewportSize({ width: 360, height: 740 });
+    const raiz = cuerpo.locator('.correo-raiz');
+    await expect.poll(() => raiz.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+    await expect(raiz).toHaveCSS('overflow-x', 'auto');
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/19-correo-tablas-movil.png` });
   });
 });
