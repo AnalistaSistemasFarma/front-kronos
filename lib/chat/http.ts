@@ -14,6 +14,8 @@ import { prisma } from '../prisma';
 import { assertConversationOwnership } from './access';
 import { assertGroupAccess, type AgenteMencionable, type ParticipantRole } from './groups';
 import { assertPeopleAccess } from './people';
+import { assertProjectConversationAccess } from './projects';
+import type { ProjectRole } from './projects-rules';
 
 /** El chat nunca se cachea: es una bandeja en vivo. */
 export const NO_STORE = { 'Cache-Control': 'no-store, max-age=0' } as const;
@@ -81,6 +83,9 @@ export async function resolveSessionUser(): Promise<ChatSessionUser | null> {
  *   - PERSONAS: el usuario es uno de los dos participantes Y la regla de
  *     acceso entre los dos se sigue cumpliendo (assertPeopleAccess,
  *     lib/chat/people.ts).
+ *   - PROYECTO: el usuario es miembro del proyecto Y conserva el permiso del
+ *     agente en la empresa del proyecto Y el agente tiene proyectos
+ *     habilitados (assertProjectConversationAccess, lib/chat/projects.ts).
  *
  * Se lee primero la clase del hilo (`kind`) y se prueba SOLO la puerta que le
  * corresponde; además cada puerta está anclada a su `kind`, así que ninguna
@@ -121,6 +126,16 @@ export type ConversationGuard =
       otherUserId: string;
       /** Mi fila en chat_participant. */
       myParticipantId: number;
+    }
+  | {
+      user: ChatSessionUser;
+      conversationId: number;
+      /** Conversación de un PROYECTO (hilo de agente, lib/chat/projects.ts). */
+      kind: 'project';
+      /** El agente del proyecto (uno solo, como en el hilo directo). */
+      idAgent: number;
+      idProject: number;
+      projectRole: ProjectRole;
     };
 
 export async function guardConversation(rawId: string): Promise<ConversationGuard> {
@@ -157,6 +172,18 @@ export async function guardConversation(rawId: string): Promise<ConversationGuar
         kind: 'group',
         groupRole: grupo.role,
         groupAgents: grupo.agentes,
+      };
+    }
+  } else if (fila?.kind === 'project') {
+    const proyecto = await assertProjectConversationAccess(user, conversationId);
+    if (proyecto) {
+      return {
+        user,
+        conversationId: proyecto.conversationId,
+        kind: 'project',
+        idAgent: proyecto.idAgent,
+        idProject: proyecto.idProject,
+        projectRole: proyecto.role,
       };
     }
   } else if (fila?.kind === 'people') {

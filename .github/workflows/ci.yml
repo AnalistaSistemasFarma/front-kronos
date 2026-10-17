@@ -108,6 +108,12 @@ jobs:
         # validación del SGC documental (matriz de trazabilidad).
         run: npm test -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/vitest/junit.xml
 
+      - name: Pruebas del puente de hilos (node --test, sin dependencias)
+        # puente-hilos/: cola por hilo y tope de 2, argumentos del `claude -p`
+        # (modo restringido, sin permisos abiertos, plugin de Telegram apagado),
+        # entorno aislado y configuración que falla cerrado.
+        run: cd puente-hilos && node --test test/
+
       - name: Instalar navegador para e2e (Playwright)
         run: npx playwright install --with-deps chromium
 
@@ -378,6 +384,15 @@ jobs:
           # Correo · «Consultar a un agente» (2026-10-16): concesiones y propuestas, dos veces (idempotencia).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261016100000_correo_agente/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261016100000_correo_agente/migration.sql
+          # Proyectos (hilos de agente) del chat, F1 (2026-10-17): migración y pase de PRUEBAS, dos veces (idempotencia).
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017120000_chat_projects/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017120000_chat_projects/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-17-chat-proyectos-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-17-chat-proyectos-PRUEBAS.sql
+          echo "IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'chat_conversation_kind_ck' AND definition LIKE '%project%') OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_chat_project_member_owner') THROW 50000, N'La migración de proyectos no dejó el CHECK de kind o el índice de dueño único.', 1;" > /tmp/proyectos-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/proyectos-ok.sql
+          # El script de PROD debe NEGARSE fuera de KRONOSDB.
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-17-chat-proyectos-PROD.sql; then echo "El script de PROD de proyectos debió negarse en kronos_ci"; exit 1; fi
           # Bitácora · actividades de texto libre (2026-10-17): migración y PRUEBAS dos veces, reversa y otra vez PRUEBAS (idempotencia ida y vuelta).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017200000_bitacora_proceso_texto_libre/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017200000_bitacora_proceso_texto_libre/migration.sql
@@ -410,7 +425,7 @@ jobs:
         run: |
           set -e
           # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
-          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia"
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia chat_proyectos_reversa_acepta_perdida"
           reversa() {
             { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
@@ -421,6 +436,11 @@ jobs:
             npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
           }
           # De la más nueva a la más antigua…
+          # Proyectos del chat (2026-10-17): ida y vuelta (la reversa y luego la migración otra vez).
+          reversa prisma/manual/2026-10-17-chat-proyectos-reversa.sql
+          echo "IF OBJECT_ID(N'dbo.chat_project', N'U') IS NOT NULL OR COL_LENGTH(N'dbo.chat_conversation', N'id_project') IS NOT NULL THROW 50000, N'La reversa de proyectos no quitó lo suyo.', 1;" > /tmp/proyectos-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/proyectos-quitado.sql
+          migra 20261017120000_chat_projects
           # S19: con un tipo marcado como plantilla guía (integración del Generador), sin la bandera debe negarse.
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-14-sgc-s19-generador-sin-codificacion-reversa.sql; then echo "La reversa del S19 debió negarse sin su bandera"; exit 1; fi
           reversa prisma/manual/2026-10-14-sgc-s19-generador-sin-codificacion-reversa.sql

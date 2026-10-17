@@ -17,9 +17,21 @@
  *
  * o CHAT_AGENT_API_KEYS_FILE=<ruta a un JSON con ese mismo arreglo>.
  * `agent` es el `code` de la tabla `agent` ('horus'), no el display_name.
+ *
+ * ALCANCE (`scope`, opcional — 2026-10-17, proyectos del chat):
+ *   - 'channel'  (por defecto) — la llave del BOT VIVO: hilos directos y
+ *                grupos. NO ve los proyectos.
+ *   - 'projects' — la llave del PUENTE DE HILOS (puente-hilos/): SOLO las
+ *                conversaciones de proyecto. No ve los hilos directos ni los
+ *                grupos del agente.
+ * Son espacios separados a propósito: la sesión viva del bot nunca recibe un
+ * mensaje de proyecto, y el puente no puede leer la bandeja del bot.
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+
+/** Alcance de una llave. Ver la nota de arriba. */
+export type ChatAgentKeyScope = 'channel' | 'projects';
 
 /** Una llave configurada. `agent` es el `code` del agente en la tabla `agent`. */
 export interface ChatAgentKeyEntry {
@@ -27,6 +39,8 @@ export interface ChatAgentKeyEntry {
   agent: string;
   /** Etiqueta informativa para logs. NUNCA se registra la llave. */
   label?: string;
+  /** 'channel' si no se indica. */
+  scope?: ChatAgentKeyScope;
 }
 
 /**
@@ -79,7 +93,7 @@ export function parseAgentKeys(raw: string): ChatAgentKeyEntry[] {
     if (typeof item !== 'object' || item === null || Array.isArray(item)) {
       throw new Error('Cada entrada de CHAT_AGENT_API_KEYS debe ser un objeto.');
     }
-    const { key, agent, label } = item as Record<string, unknown>;
+    const { key, agent, label, scope } = item as Record<string, unknown>;
 
     if (typeof key !== 'string' || key.length < MIN_AGENT_KEY_LENGTH) {
       throw new Error(
@@ -92,6 +106,11 @@ export function parseAgentKeys(raw: string): ChatAgentKeyEntry[] {
     if (label !== undefined && typeof label !== 'string') {
       throw new Error('El "label" de una llave, si viene, debe ser texto.');
     }
+    // Un alcance desconocido NO cae a 'channel': se rechaza toda la
+    // configuración, para no dar más de lo que se quiso dar.
+    if (scope !== undefined && scope !== 'channel' && scope !== 'projects') {
+      throw new Error('El "scope" de una llave solo puede ser "channel" o "projects".');
+    }
     // Llaves duplicadas = dos identidades para el mismo secreto. Se rechaza.
     if (seen.has(key)) {
       throw new Error('Hay llaves duplicadas en CHAT_AGENT_API_KEYS.');
@@ -99,7 +118,12 @@ export function parseAgentKeys(raw: string): ChatAgentKeyEntry[] {
     seen.add(key);
 
     const agentCode = agent.trim();
-    entries.push({ key, agent: agentCode, label: (label ?? '').trim() || agentCode });
+    entries.push({
+      key,
+      agent: agentCode,
+      label: (label ?? '').trim() || agentCode,
+      scope: scope === 'projects' ? 'projects' : 'channel',
+    });
   }
 
   return entries;
