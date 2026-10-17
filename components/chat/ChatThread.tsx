@@ -592,6 +592,7 @@ export default function ChatThread({
   agent,
   group,
   person,
+  project,
   currentUserId,
   active = true,
   height,
@@ -623,6 +624,15 @@ export default function ChatThread({
     /** Yo silencié los zumbidos de este hilo: llegan sin sacudida ni sonido. */
     nudgesMuted?: boolean;
   };
+  /**
+   * PROYECTO (hilo de agente, F1): la conversación ya existe y se abre por su
+   * id. Va JUNTO con `agent` (el agente del proyecto). Sin menciones: todo lo
+   * que se escriba aquí lo atiende ese agente con el contexto del proyecto.
+   */
+  project?: {
+    idConversation: number;
+    name: string;
+  };
   /** Quién soy. En un grupo es lo que distingue mis mensajes de los ajenos. */
   currentUserId?: string;
   /** El hilo está a la vista (marca leído y arranca el sondeo). */
@@ -632,15 +642,18 @@ export default function ChatThread({
 }) {
   const enGrupo = Boolean(group);
   const enPersonas = !group && Boolean(person);
+  const enProyecto = !group && !person && Boolean(project);
   // Hilo directo = una persona con UN agente. Es lo único donde `role='user'`
   // significa "lo escribí yo".
-  const esHiloDirecto = !group && !person && Boolean(agent);
+  const esHiloDirecto = !group && !person && !project && Boolean(agent);
 
   const target: ChatTarget | null = group
     ? { kind: 'group', idConversation: group.idConversation }
     : person
       ? { kind: 'people', idConversation: person.idConversation }
-      : agent
+      : project
+        ? { kind: 'project', idConversation: project.idConversation }
+        : agent
         ? { kind: 'agent', idAgent: agent.idAgent, idConversation: idConversacion ?? null }
         : null;
 
@@ -748,14 +761,16 @@ export default function ChatThread({
     ? `grupo:${group.idConversation}`
     : person
       ? `persona:${person.idConversation}`
-      : `agente:${agent?.idAgent ?? 0}`;
+      : project
+        ? `proyecto:${project.idConversation}`
+        : `agente:${agent?.idAgent ?? 0}`;
 
   // Clave del BORRADOR del compositor: persona + hilo. Sin saber quién es la
   // persona (sesión cargando) o sin hilo, no se guarda borrador.
   const { data: sesionBorrador } = useSession();
   const miIdBorrador = currentUserId ?? sesionBorrador?.user?.id ?? null;
   const claveBorrador =
-    miIdBorrador && (group || person || agent) ? `${miIdBorrador}:${claveHilo}` : null;
+    miIdBorrador && (group || person || project || agent) ? `${miIdBorrador}:${claveHilo}` : null;
 
   const participantes = thread.conversation?.participants ?? group?.participants;
   // Memorizado: es prop del compositor (en `memo`) y un arreglo nuevo en cada
@@ -1147,7 +1162,9 @@ export default function ChatThread({
                     ? 'Escriba para empezar. Los asistentes de este grupo responden solo cuando se los menciona con @.'
                     : enPersonas
                       ? `Escríbale a ${person?.name ?? 'esta persona'}. Solo ustedes dos ven esta conversación, además de la auditoría del área de Sistemas.`
-                      : agent?.description ||
+                      : enProyecto
+                        ? `Escríbale a ${agent?.displayName ?? 'el asistente'}. En este hilo trabaja solo con las instrucciones y los archivos de «${project?.name ?? 'el proyecto'}», aparte de sus demás conversaciones. Los miembros del proyecto ven todo lo que se escriba aquí.`
+                        : agent?.description ||
                       `Escríbale a ${agent?.displayName ?? 'el asistente'} para empezar la conversación.`}
                 </Text>
               </Stack>
@@ -1218,7 +1235,7 @@ export default function ChatThread({
 
       <Box className='chat-thread__composer'>
         <ChatComposer
-          voiceConversationId={agent?.code === 'duo' ? thread.conversation?.id : undefined}
+          voiceConversationId={!enProyecto && agent?.code === 'duo' ? thread.conversation?.id : undefined}
           ref={composerRef}
           onSend={alEnviar}
           cita={cita}
@@ -1231,7 +1248,9 @@ export default function ChatThread({
               ? `Escriba en ${group?.title ?? 'el grupo'}…  (mencione con @)`
               : enPersonas
                 ? `Escríbale a ${person?.name ?? 'esta persona'}…`
-                : `Escríbale a ${agent?.displayName ?? 'el asistente'}…`
+                : enProyecto
+                  ? `Escríbale a ${agent?.displayName ?? 'el asistente'} en ${project?.name ?? 'el proyecto'}…`
+                  : `Escríbale a ${agent?.displayName ?? 'el asistente'}…`
           }
           menciones={menciones}
         />

@@ -44,6 +44,82 @@ export function agentAvatarSrc(agent: {
   return agent.avatarUrl || null;
 }
 
+/* ───────────────── Proyectos (hilos de agente) — F1 ───────────────────── */
+
+export type ChatProjectRole = 'owner' | 'member';
+
+export interface ChatProjectProfileDto {
+  key: string;
+  label: string;
+  description: string;
+}
+
+export interface ChatProjectSummaryDto {
+  idProject: number;
+  name: string;
+  company: { idCompany: number; companyName: string };
+  profile: { key: string; label: string };
+  myRole: ChatProjectRole;
+  memberCount: number;
+  conversationCount: number;
+  updatedAt: string;
+}
+
+/** GET /api/chat/projects?agent=<code> */
+export interface ChatProjectListDto {
+  agent: {
+    idAgent: number;
+    code: string;
+    displayName: string;
+    handle: string | null;
+    avatarUrl: string | null;
+    avatarVersion: number | null;
+  };
+  companies: { idCompany: number; companyName: string }[];
+  profiles: ChatProjectProfileDto[];
+  projects: ChatProjectSummaryDto[];
+}
+
+export interface ChatProjectMemberDto {
+  id: string;
+  name: string;
+  email: string;
+  avatarUrl: string | null;
+  role: ChatProjectRole;
+}
+
+export interface ChatProjectFileDto {
+  id: number;
+  fileName: string;
+  contentType: string | null;
+  sizeBytes: number | null;
+  createdAt: string;
+  downloadUrl: string;
+}
+
+export interface ChatProjectConversationDto {
+  id: number;
+  title: string | null;
+  createdAt: string;
+  lastMessageAt: string | null;
+}
+
+/** GET /api/chat/projects/[id] */
+export interface ChatProjectDetailDto {
+  idProject: number;
+  name: string;
+  instructions: string | null;
+  profile: { key: string; label: string };
+  company: { idCompany: number; companyName: string };
+  agent: ChatProjectListDto['agent'];
+  myRole: ChatProjectRole;
+  createdAt: string;
+  updatedAt: string;
+  members: ChatProjectMemberDto[];
+  files: ChatProjectFileDto[];
+  conversations: ChatProjectConversationDto[];
+}
+
 /* ─────────────────────── Buscador de mensajes ──────────────────────────── */
 
 /** Mínimo de caracteres para buscar. Con uno o dos, todo coincide con todo. */
@@ -100,6 +176,11 @@ export interface ChatAgentDto {
    * cada quien.
    */
   busy: boolean;
+  /**
+   * El asistente tiene PROYECTOS (hilos aislados) habilitados — piloto F1,
+   * interruptor CHAT_PROJECTS_AGENTS. Opcional: un servidor viejo no lo manda.
+   */
+  projectsEnabled?: boolean;
 }
 
 export interface ChatAccessDto {

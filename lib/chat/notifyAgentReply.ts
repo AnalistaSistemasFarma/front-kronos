@@ -54,6 +54,12 @@ export interface NotifyAgentReplyInput {
   groupEmails?: string[];
   /** GRUPO: el nombre del grupo, para que el aviso diga en cuál fue. */
   groupTitle?: string | null;
+  /**
+   * Enlace del aviso cuando no es ni el hilo directo ni un grupo (PROYECTO:
+   * /process/chat/proyecto/<id>?conversacion=<id>). Sin valor, se arma como
+   * siempre.
+   */
+  url?: string;
 }
 
 /**
@@ -129,7 +135,9 @@ export async function notifyAgentReply(input: NotifyAgentReplyInput): Promise<vo
       // (initialAgentCode). El parámetro depende de un efecto en el navegador
       // y, al abrir la aplicación desde cero por una notificación, se veía la
       // lista de agentes en vez de la conversación.
-      url: esGrupo
+      url: input.url
+        ? input.url
+        : esGrupo
         ? `/process/chat/grupo/${input.idConversation}`
         : `/process/chat/${encodeURIComponent(input.agentCode)}`,
       // Un `tag` por conversación: si el agente manda varios mensajes, la

@@ -56,6 +56,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       upTo = parsed;
     }
 
+    // PROYECTO (F1): los miembros no son filas de chat_participant, así que no
+    // hay marca de agua por persona; y `read_at` es UNA columna por mensaje
+    // (el primero que leyera lo daría por leído a todos). En el piloto no se
+    // cuentan no leídos de proyecto: se responde sin tocar nada.
+    if (guard.kind === 'project') {
+      return jsonNoStore({ updated: 0, unreadCount: 0 });
+    }
+
     // Grupos y hilos entre personas: marca de agua por participante.
     if (guard.kind === 'group' || guard.kind === 'people') {
       // Hasta dónde leyó: lo que pidió el cliente o, si no dijo nada, el

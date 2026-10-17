@@ -47,7 +47,24 @@ describe('safeEqualSecret', () => {
 describe('parseAgentKeys', () => {
   it('acepta una configuración válida y usa el agent como label por defecto', () => {
     const entries = parseAgentKeys(JSON.stringify([{ key: KEY_A, agent: 'horus' }]));
-    expect(entries).toEqual([{ key: KEY_A, agent: 'horus', label: 'horus' }]);
+    // Sin `scope`, la llave es la del bot vivo ('channel'): no ve proyectos.
+    expect(entries).toEqual([{ key: KEY_A, agent: 'horus', label: 'horus', scope: 'channel' }]);
+  });
+
+  it('acepta el alcance "projects" (llave del puente de hilos)', () => {
+    const entries = parseAgentKeys(
+      JSON.stringify([
+        { key: KEY_A, agent: 'play', scope: 'projects' },
+        { key: KEY_B, agent: 'play', scope: 'channel' },
+      ])
+    );
+    expect(entries.map((e) => e.scope)).toEqual(['projects', 'channel']);
+  });
+
+  it('rechaza un alcance desconocido en vez de caer a "channel"', () => {
+    expect(() =>
+      parseAgentKeys(JSON.stringify([{ key: KEY_A, agent: 'play', scope: 'todo' }]))
+    ).toThrow(/scope/);
   });
 
   it('conserva el label cuando viene', () => {
