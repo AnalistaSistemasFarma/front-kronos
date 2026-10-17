@@ -6,7 +6,12 @@ import {
   LOGIN_AUDIT_MARKER_URL,
 } from '../constants';
 import { escapeLike, parseLoginAuditFilters, todayInColombia } from '../filters';
-import { callbackProviderFromUrl, errorFromRedirectUrl, normalizeIdentifier } from '../flow';
+import {
+  callbackProviderFromUrl,
+  csrfRejectedFromRedirectUrl,
+  errorFromRedirectUrl,
+  normalizeIdentifier,
+} from '../flow';
 import { classifyIp, normalizeIp } from '../ip';
 import { parseUserAgent } from '../user-agent';
 
@@ -121,6 +126,29 @@ describe('errorFromRedirectUrl', () => {
     expect(errorFromRedirectUrl('/login?error=OAuthCallback')).toBe('OAuthCallback');
     expect(errorFromRedirectUrl('https://x.test/process')).toBeNull();
     expect(errorFromRedirectUrl(null)).toBeNull();
+  });
+});
+
+describe('csrfRejectedFromRedirectUrl', () => {
+  it('detecta el rechazo por CSRF de NextAuth (?csrf=true, sin error=)', () => {
+    expect(csrfRejectedFromRedirectUrl('https://x.test/api/auth/signin?csrf=true')).toBe(true);
+    expect(csrfRejectedFromRedirectUrl('/api/auth/signin?csrf=true')).toBe(true);
+    expect(errorFromRedirectUrl('https://x.test/api/auth/signin?csrf=true')).toBeNull();
+  });
+
+  it('no lo confunde con otras respuestas', () => {
+    expect(csrfRejectedFromRedirectUrl('https://x.test/process')).toBe(false);
+    expect(csrfRejectedFromRedirectUrl('/api/auth/signin?csrf=false')).toBe(false);
+    expect(csrfRejectedFromRedirectUrl('/api/auth/error?error=CredentialsSignin')).toBe(false);
+    expect(csrfRejectedFromRedirectUrl(null)).toBe(false);
+    expect(csrfRejectedFromRedirectUrl('http://[')).toBe(false);
+  });
+});
+
+describe('describeFailureReason (motivos nuevos)', () => {
+  it('tiene etiqueta para CSRF_INVALIDO y SIN_AUTORIZACION', () => {
+    expect(describeFailureReason('CSRF_INVALIDO')).toMatch(/CSRF/);
+    expect(describeFailureReason('SIN_AUTORIZACION')).toMatch(/no llegó a validar/);
   });
 });
 
