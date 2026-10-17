@@ -3988,3 +3988,44 @@ model EmailAgentAction {
   @@map("email_agent_action")
   @@schema("dbo")
 }
+
+// ---------------------------------------------------------------------------
+// Auditoría de INICIOS DE SESIÓN (2026-10-16, pedido de Nicolás Rivera: «ver los
+// logins que van haciendo los usuarios, de qué IP y país, por auditoría de
+// seguridad»). Una fila por intento, exitoso o fallido, por correo/contraseña,
+// NIT de proveedor o Microsoft (Entra ID). La escribe lib/auth/login-audit/recorder.ts
+// sin frenar el login. NUNCA guarda contraseñas, PIN ni tokens.
+// Migración: prisma/migrations/20261016200000_user_login_audit (a mano en prod).
+// ---------------------------------------------------------------------------
+model UserLoginAudit {
+  id             Int      @id @default(autoincrement())
+  attempted_at   DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  // credentials | supplier-nit | azure-ad
+  provider       String   @db.NVarChar(20)
+  /// Correo o NIT TAL COMO SE ESCRIBIÓ (minúsculas, recortado). Null si Microsoft falló antes de identificar.
+  identifier     String?  @db.NVarChar(320)
+  id_user        String?  @db.NVarChar(50)
+  user_name      String?  @db.NVarChar(255)
+  success        Boolean
+  /// Clave de lib/auth/login-audit/constants.ts (LOGIN_FAILURE_REASONS). Null si entró.
+  failure_reason String?  @db.NVarChar(40)
+  client_ip      String?  @db.NVarChar(64)
+  // PUBLICA | INTERNA | DESCONOCIDA
+  ip_scope       String   @db.NVarChar(12)
+  country_code   String?  @db.NVarChar(2)
+  country_name   String?  @db.NVarChar(100)
+  region         String?  @db.NVarChar(120)
+  city           String?  @db.NVarChar(120)
+  user_agent     String?  @db.NVarChar(400)
+  browser        String?  @db.NVarChar(60)
+  os             String?  @db.NVarChar(60)
+  device         String?  @db.NVarChar(20)
+  /// Empresas del usuario al momento del intento (foto, separadas por coma).
+  companies      String?  @db.NVarChar(400)
+
+  @@index([attempted_at(sort: Desc)], map: "IX_user_login_audit_fecha")
+  @@index([identifier, attempted_at], map: "IX_user_login_audit_identificador")
+  @@index([id_user, attempted_at], map: "IX_user_login_audit_usuario")
+  @@map("user_login_audit")
+  @@schema("dbo")
+}
