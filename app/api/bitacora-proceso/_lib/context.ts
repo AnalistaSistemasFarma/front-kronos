@@ -2,8 +2,16 @@ import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { prisma } from '../../../../lib/prisma';
-import { getActiveUserId, getOtAccessForUser, type OtActor } from '../../../../lib/bitacora-proceso/db';
-import { companyOtAccess, isOtError, type OtCompanyAccess } from '../../../../lib/bitacora-proceso/rules';
+import { getActiveUserId, getOtAccessForUser, puedeAbrirComoJefe, type OtActor } from '../../../../lib/bitacora-proceso/db';
+import {
+  companyOtAccess,
+  isOtError,
+  mensajeFaltaAcceso,
+  mensajeNoPuedeAbrir,
+  OT_MSG_SIN_MODULO,
+  OT_MSG_USUARIO_INACTIVO,
+  type OtCompanyAccess,
+} from '../../../../lib/bitacora-proceso/rules';
 import { readClientOrigin } from '../../../../lib/sgc/clientOrigin';
 
 /**
@@ -31,7 +39,8 @@ export async function getOtRequestContext(request: Request): Promise<OtRequestCo
   const email = session?.user?.email;
   if (!email) return jsonNoStore({ error: 'No autorizado' }, 401);
   const [access, idUser] = await Promise.all([getOtAccessForUser(prisma, email), getActiveUserId(prisma, email)]);
-  if (!idUser || access.length === 0) return jsonNoStore({ error: 'No tiene acceso a Bitácora de Proceso' }, 403);
+  if (!idUser) return jsonNoStore({ error: OT_MSG_USUARIO_INACTIVO }, 403);
+  if (access.length === 0) return jsonNoStore({ error: OT_MSG_SIN_MODULO }, 403);
   const { clientIp } = readClientOrigin(request);
   const isAdmin = (session?.user as { role?: string } | undefined)?.role === 'admin';
   return { email, access, actor: { idUser, email, ip: clientIp }, isAdmin };
@@ -46,15 +55,24 @@ export function requireCompany(
   if (!idCompany) return jsonNoStore({ error: 'Falta la empresa' }, 400);
   const a = companyOtAccess(ctx.access, idCompany, need);
   if (a) return a;
-  return jsonNoStore(
-    {
-      error:
-        need === 'canManage'
-          ? 'Solo el supervisor (Bitácora de Proceso: Gestión) puede hacer esto.'
-          : 'No tiene acceso a Bitácora de Proceso en esta empresa.',
-    },
-    403
-  );
+  const entry = ctx.access.find((x) => x.idCompany === idCompany) ?? null;
+  return jsonNoStore({ error: mensajeFaltaAcceso(need, entry, idCompany) }, 403);
+}
+
+/**
+ * Acceso para ABRIR una bitácora (y para los datos que pide la apertura) — R3, 2026-10-17:
+ * el supervisor (Gestión) o el JEFE DE PRODUCCIÓN asignado en la empresa. Devuelve también
+ * con qué título abre, para que crearOrden aplique la regla del jefe.
+ */
+export async function requireCompanyOpen(
+  ctx: OtRequestContext,
+  idCompany: number | null
+): Promise<{ access: OtCompanyAccess; abreComo: 'GESTION' | 'JEFE_PROD' } | NextResponse> {
+  const a = requireCompany(ctx, idCompany);
+  if (a instanceof Response) return a;
+  if (a.canManage) return { access: a, abreComo: 'GESTION' };
+  if (await puedeAbrirComoJefe(prisma, a, ctx.actor.idUser)) return { access: a, abreComo: 'JEFE_PROD' };
+  return jsonNoStore({ error: mensajeNoPuedeAbrir(a) }, 403);
 }
 
 export function parseId(raw: string | undefined): number | null {

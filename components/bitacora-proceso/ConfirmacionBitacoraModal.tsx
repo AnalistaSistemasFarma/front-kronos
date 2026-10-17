@@ -42,7 +42,7 @@ export default function ConfirmacionBitacoraModal({
   onClose: () => void;
   rol: OtFirmaRol;
   titulo: string;
-  /** Personas que pueden confirmar (supervisores al cerrar; el inspector o el jefe designado). */
+  /** Personas que pueden confirmar (al cerrar: supervisores y el jefe designado; si no, el inspector o el jefe designado). */
   personas: Confirmante[];
   /** Operarios programados (rol OPERARIO). */
   operadores?: Array<{ id: number; nombre: string; activo: boolean }>;
@@ -68,10 +68,13 @@ export default function ConfirmacionBitacoraModal({
     setOperador(null);
   }, [opened]);
 
-  // Si solo hay una persona posible (el inspector o el jefe designado), viene elegida.
+  // Si solo hay una persona posible (el inspector o el jefe designado), viene elegida. Al cerrar
+  // desde su propio computador (R4), si la persona de la sesión está en la lista, viene elegida ella.
   useEffect(() => {
-    if (opened && rol !== 'OPERARIO' && personas.length === 1) setPersona(personas[0].id);
-  }, [opened, personas, rol]);
+    if (!opened || rol === 'OPERARIO') return;
+    if (personas.length === 1) setPersona(personas[0].id);
+    else if (personas.some((p) => p.id === idUsuarioSesion)) setPersona(idUsuarioSesion);
+  }, [opened, personas, rol, idUsuarioSesion]);
 
   const esOperario = rol === 'OPERARIO';
   const sesionPropia = !esOperario && persona !== null && persona === idUsuarioSesion;
@@ -147,7 +150,7 @@ export default function ConfirmacionBitacoraModal({
           ) : personas.length === 0 ? (
             <Alert color='yellow' icon={<IconAlertTriangle size={16} />}>
               {rol === 'SUPERVISOR'
-                ? 'No hay supervisores asignados en esta empresa. Un supervisor (Gestión) los asigna en Catálogo → Responsables.'
+                ? 'No hay quien pueda cerrar: no hay supervisores asignados en esta empresa ni jefe de producción designado en la bitácora. Un supervisor (Gestión) los asigna en Catálogo → Responsables.'
                 : `Esta bitácora no tiene ${OT_ROL_LABEL[rol].toLowerCase()} designado.`}
             </Alert>
           ) : (

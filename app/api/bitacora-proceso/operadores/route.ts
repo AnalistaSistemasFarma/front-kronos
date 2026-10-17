@@ -1,23 +1,31 @@
 import { prisma } from '../../../../lib/prisma';
 import { cambiarOperador, crearOperador, listOperadores } from '../../../../lib/bitacora-proceso/db';
 import { parseCambioOperador, parseNuevoOperador } from '../../../../lib/bitacora-proceso/rules';
-import { errorResponse, getOtRequestContext, jsonNoStore, parseCompanyParam, readJson, requireCompany } from '../_lib/context';
+import { errorResponse, getOtRequestContext, jsonNoStore, parseCompanyParam, readJson, requireCompany, requireCompanyOpen } from '../_lib/context';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * Maestro de operarios SIN usuario de SynerLink (A1, 2026-10-14).
  * GET ?company=1[&todas=1]: activos (para programar la bitácora); con `todas=1`, también inactivos.
- * Solo Gestión (supervisores): los operarios eligen su nombre en la pantalla de planta,
+ * Sin `todas`: quien puede abrir (Gestión o jefe asignado, R3); con `todas`: solo Gestión. Los operarios eligen su nombre en la pantalla de planta,
  * que trae los programados en la bitácora, no este maestro.
  */
 export async function GET(request: Request) {
   try {
     const ctx = await getOtRequestContext(request);
     if (ctx instanceof Response) return ctx;
-    const access = requireCompany(ctx, parseCompanyParam(request.url), 'canManage');
-    if (access instanceof Response) return access;
     const todas = new URL(request.url).searchParams.get('todas') === '1';
+    // Con `todas` es el catálogo (solo Gestión); sin él, la lista activa para ABRIR (Gestión o jefe, R3).
+    let access;
+    if (todas) {
+      access = requireCompany(ctx, parseCompanyParam(request.url), 'canManage');
+      if (access instanceof Response) return access;
+    } else {
+      const open = await requireCompanyOpen(ctx, parseCompanyParam(request.url));
+      if (open instanceof Response) return open;
+      access = open.access;
+    }
     const operadores = await listOperadores(prisma, access.idCompany, !todas);
     return jsonNoStore({ operadores });
   } catch (error) {
