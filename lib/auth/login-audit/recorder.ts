@@ -27,7 +27,12 @@ import {
   type LoginFailureReason,
   type LoginProvider,
 } from './constants';
-import { callbackProviderFromUrl, errorFromRedirectUrl, normalizeIdentifier } from './flow';
+import {
+  callbackProviderFromUrl,
+  csrfRejectedFromRedirectUrl,
+  errorFromRedirectUrl,
+  normalizeIdentifier,
+} from './flow';
 import { geolocateIp } from './geo';
 import { parseUserAgent } from './user-agent';
 
@@ -197,17 +202,36 @@ async function redirectTarget(probe: ResponseProbe): Promise<string | null> {
   return typeof body?.url === 'string' ? body.url : null;
 }
 
+/**
+ * Resultado cuando NADIE anotó el intento (ni `authorize` ni el evento `signIn`).
+ *   - `?csrf=true` en la respuesta: NextAuth rechazó el POST por CSRF antes de
+ *     llamar a `authorize` → FALLIDO, CSRF_INVALIDO.
+ *   - credenciales / NIT: el único camino al éxito pasa por `authorize`, que
+ *     siempre anota; si no hay anotación, no hubo validación → FALLIDO
+ *     (ERROR_INTERNO si NextAuth trajo `?error=` o lanzó; si no, SIN_AUTORIZACION).
+ *   - Microsoft: el éxito no siempre se anota; se decide por `?error=`.
+ * Exportada para las pruebas.
+ */
+export function outcomeWithoutNote(
+  provider: LoginProvider,
+  error: string | null,
+  csrfRejected: boolean
+): Pick<LoginAttemptNote, 'success' | 'reason'> {
+  if (csrfRejected) return { success: false, reason: 'CSRF_INVALIDO' };
+  if (provider === 'azure-ad') {
+    return error ? { success: false, reason: 'MICROSOFT_RECHAZADO' } : { success: true, reason: null };
+  }
+  return { success: false, reason: error ? 'ERROR_INTERNO' : 'SIN_AUTORIZACION' };
+}
+
 /** Decide el resultado final con lo anotado + la respuesta, y escribe. Nunca lanza. */
 async function finalize(store: LoginAuditStore, probe: ResponseProbe | null): Promise<void> {
   try {
-    const error = probe ? errorFromRedirectUrl(await redirectTarget(probe)) : 'ERROR';
+    const target = probe ? await redirectTarget(probe) : null;
+    const error = probe ? errorFromRedirectUrl(target) : 'ERROR';
     let note = store.attempt;
     if (!note) {
-      note = {
-        identifier: null,
-        success: !error,
-        reason: error ? (store.provider === 'azure-ad' ? 'MICROSOFT_RECHAZADO' : 'ERROR_INTERNO') : null,
-      };
+      note = { identifier: null, ...outcomeWithoutNote(store.provider, error, csrfRejectedFromRedirectUrl(target)) };
     } else if (note.success && error) {
       // authorize aprobó pero NextAuth terminó en error: cuenta como fallo.
       note = { ...note, success: false, reason: 'ERROR_INTERNO' };
