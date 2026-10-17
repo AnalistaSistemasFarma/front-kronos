@@ -1344,6 +1344,8 @@ body.chat-inmersivo.con-chat-rail .chat-escritorio {
 
 .chat-rail__nombre {
   padding-left: 4px;
+  /* Empuja a la derecha el "+" (Nuevo) y el botón de contraer. */
+  margin-right: auto;
 }
 
 .chat-rail__scroll {
@@ -5641,4 +5643,609 @@ html.dark .portal-th--modulo .portal-th__cal,
 .portal-th__invitar-acciones button:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+/* ── Heinsohn Nómina (Cristian, 2026-10-15): botón-enlace con el estilo de los botones de «Contactos» ── */
+a.portal-th__contactos-boton--enlace {
+  display: block;
+  text-decoration: none;
+}
+
+a.portal-th__contactos-boton--enlace:focus-visible {
+  outline: 2px solid var(--pth-azul);
+  outline-offset: 2px;
+}
+
+/* ── Organigrama digital (Cristian, 2026-10-15) ─────────────────────────────── */
+.portal-th__visor-caja--organigrama {
+  position: relative;
+  width: min(1700px, 98vw);
+  height: min(94vh, 100%);
+}
+
+.portal-th__org-herramientas {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 14px 0;
+}
+
+.portal-th__org-herramientas .portal-th__buscador {
+  flex: 1 1 240px;
+  max-width: 420px;
+}
+
+.portal-th__org-contador {
+  min-width: 90px;
+  color: var(--pth-tinta-3);
+  font-size: 0.8rem;
+}
+
+.portal-th__org-zoom {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.portal-th__org-zoom button {
+  min-width: 40px;
+  padding: 7px 12px;
+  border: 1px solid var(--pth-azul);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--pth-azul);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.portal-th__org-zoom button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.portal-th__org-ayuda {
+  margin: 6px 14px 8px;
+  color: var(--pth-tinta-3);
+  font-size: 0.78rem;
+}
+
+.portal-th__org-leyenda {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 8px;
+}
+
+.portal-th__org-muestra {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  border: 2px solid var(--pth-azul);
+  border-radius: 4px;
+  background: #fff;
+}
+
+.portal-th__org-muestra--otras {
+  border-style: dashed;
+}
+
+.portal-th__org-lienzo {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0 14px 14px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 10px;
+  background: #fff;
+  cursor: grab;
+  touch-action: pan-x pan-y;
+}
+
+.portal-th__org-lienzo:active {
+  cursor: grabbing;
+}
+
+.portal-th__org-lienzo svg {
+  display: block;
+  max-width: none;
+  height: auto;
+}
+
+.portal-th__org-cargando {
+  position: sticky;
+  left: 12px;
+  bottom: 8px;
+  margin: 0;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.portal-th__org-nodo {
+  cursor: pointer;
+  outline: none;
+}
+
+.portal-th__org-nodo rect {
+  fill: #fff;
+  stroke: #1f2937;
+  stroke-width: 1.2px;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Color del cuadro = nivel del cargo (los mismos tonos del organigrama en papel). */
+.portal-th__org-nodo--estrategico rect {
+  fill: #f2dcda;
+}
+
+.portal-th__org-nodo--tactico rect {
+  fill: #dbeef3;
+}
+
+.portal-th__org-nodo--operativo rect {
+  fill: #d7e3bf;
+}
+
+.portal-th__org-nodo--con rect {
+  stroke: var(--pth-azul);
+  stroke-width: 2.4px;
+}
+
+/* Solo hay personas de otras empresas con este cargo: borde punteado. */
+.portal-th__org-nodo--otras rect {
+  stroke: var(--pth-azul);
+  stroke-width: 1.8px;
+  stroke-dasharray: 6 4;
+}
+
+.portal-th__org-nodo:hover rect,
+.portal-th__org-nodo:focus-visible rect {
+  fill: var(--pth-azul-50);
+  stroke-width: 3px;
+}
+
+.portal-th__org-nodo--activo rect,
+.portal-th__org-nodo--activo:hover rect,
+.portal-th__org-nodo--activo:focus-visible rect {
+  fill: var(--pth-azul);
+  stroke: var(--pth-azul);
+}
+
+.portal-th__org-nodo--activo .portal-th__org-texto {
+  fill: #fff;
+}
+
+.portal-th__org-nodo--busqueda rect {
+  fill: #fff3bf;
+  stroke: #e67700;
+  stroke-width: 3px;
+}
+
+.portal-th__org-texto {
+  fill: #111827;
+  pointer-events: none;
+  font-family: Calibri, 'Segoe UI', Arial, sans-serif;
+  user-select: none;
+}
+
+/* Ventana pequeña con las personas del cargo. */
+.portal-th__org-ventana {
+  position: absolute;
+  right: 28px;
+  bottom: 28px;
+  display: flex;
+  flex-direction: column;
+  width: min(380px, calc(100% - 40px));
+  max-height: min(70%, 560px);
+  border: 1px solid var(--pth-azul);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 12px 34px rgba(15, 26, 44, 0.3);
+}
+
+.portal-th__org-ventana > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--pth-linea);
+  background: var(--pth-azul);
+  color: #fff;
+  border-radius: 11px 11px 0 0;
+}
+
+.portal-th__org-ventana > header div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.portal-th__org-ventana > header strong {
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+}
+
+.portal-th__org-ventana > header small {
+  opacity: 0.85;
+  font-size: 0.72rem;
+}
+
+.portal-th__org-ventana > header button {
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.portal-th__org-ventana-cuerpo {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 12px;
+}
+
+.portal-th__org-ventana ul {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.portal-th__org-ventana li {
+  padding: 8px 10px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 8px;
+}
+
+.portal-th__org-ventana dl {
+  display: grid;
+  grid-template-columns: 7.2rem 1fr;
+  gap: 2px 8px;
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.portal-th__org-ventana dt {
+  color: var(--pth-tinta-3);
+}
+
+.portal-th__org-ventana dd {
+  margin: 0;
+  color: var(--pth-tinta);
+  overflow-wrap: anywhere;
+}
+
+.portal-th__org-otras {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--pth-linea);
+  color: var(--pth-tinta-2);
+  font-size: 0.78rem;
+}
+
+@media (max-width: 760px) {
+  .portal-th__org-ventana {
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    width: auto;
+  }
+}
+
+/* ── Cumpleaños en el recuadro de eventos (Cristian, 2026-10-15) ───────────── */
+.portal-th__cal-cumples {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.portal-th__cal-cumples li {
+  display: flex;
+  flex-direction: column;
+  padding-left: 8px;
+  border-left: 2px solid #2e7d32;
+}
+
+.portal-th__cal-cumples strong {
+  color: var(--pthc-tinta);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.portal-th__cal-cumples small {
+  color: var(--pthc-tinta-3);
+  font-size: 0.7rem;
+}
+
+/* ── Ventana emergente «Hoy» (Cristian, 2026-10-15) ───────────────────────── */
+.portal-th__hoy {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: grid;
+  place-items: center;
+  padding: 2vmin;
+  background-color: rgba(15, 26, 44, 0.5);
+}
+
+.portal-th__hoy-caja {
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 94vw);
+  max-height: min(86vh, 640px);
+  overflow: hidden;
+  background-color: #fff;
+  border-radius: 14px;
+  box-shadow: 0 18px 50px rgba(15, 26, 44, 0.35);
+  animation: portal-th-hoy-entra 220ms ease-out;
+}
+
+.portal-th__hoy-barra {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  background-color: var(--pth-azul);
+  color: #fff;
+}
+
+.portal-th__hoy-barra > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.portal-th__hoy-barra strong {
+  font-size: 1rem;
+}
+
+.portal-th__hoy-barra small {
+  opacity: 0.88;
+  font-size: 0.78rem;
+}
+
+.portal-th__hoy-barra button {
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.portal-th__hoy-cuerpo {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px;
+}
+
+.portal-th__hoy-imagen {
+  display: block;
+  width: 100%;
+  max-height: 150px;
+  margin: 0 0 12px;
+  border-radius: 10px;
+  object-fit: contain;
+}
+
+.portal-th__hoy-eventos {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.portal-th__hoy-eventos > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.portal-th__hoy-eventos > li > div {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.portal-th__hoy-eventos > li > div > strong {
+  color: var(--pthc-tinta);
+  font-size: 0.92rem;
+}
+
+.portal-th__hoy-eventos > li > div > small {
+  color: var(--pthc-tinta-3);
+  font-size: 0.74rem;
+}
+
+.portal-th__hoy-eventos .portal-th__cal-punto {
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+/* Barra que se vacía en 15 s. */
+.portal-th__hoy-tiempo {
+  height: 4px;
+  background-color: var(--pth-linea);
+}
+
+.portal-th__hoy-tiempo span {
+  display: block;
+  height: 100%;
+  background-color: var(--pth-azul);
+  transform-origin: left center;
+  animation-name: portal-th-hoy-tiempo;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes portal-th-hoy-tiempo {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes portal-th-hoy-entra {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-th__hoy-caja {
+    animation: none;
+  }
+}
+
+/* ── Formación: Top 10 de estudiantes (Cristian, 2026-10-16) ───────────────── */
+.portal-th__lista-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+/* Pantalla ancha: el top va a la DERECHA de los cursos, que se quedan donde estaban. */
+@media (min-width: 1200px) {
+  .portal-th__lista-top {
+    grid-template-columns: minmax(0, 1fr) 330px;
+  }
+
+  .portal-th__top {
+    position: sticky;
+    top: 16px;
+  }
+}
+
+/* Muy ancha: el top se sale al margen libre y los cursos conservan su ancho de siempre. */
+@media (min-width: 1800px) {
+  .portal-th__lista-top {
+    margin-right: -354px;
+  }
+}
+
+.portal-th__top {
+  padding: 16px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 12px;
+  background-color: #fff;
+}
+
+.portal-th__top h3 {
+  margin: 0 0 4px;
+  color: var(--pth-azul);
+  font-size: 1.02rem;
+}
+
+.portal-th__top-explica {
+  margin: 0 0 12px;
+  color: var(--pth-tinta-3);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.portal-th__top-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.portal-th__top-tabla th,
+.portal-th__top-tabla td {
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--pth-linea);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.portal-th__top-tabla thead th {
+  color: var(--pth-tinta-3);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.portal-th__top-tabla th[scope='row'] {
+  color: var(--pth-tinta);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.portal-th__top-tabla td:nth-child(3),
+.portal-th__top-tabla td:nth-child(4),
+.portal-th__top-tabla thead th:nth-child(3),
+.portal-th__top-tabla thead th:nth-child(4) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.portal-th__top-puesto {
+  width: 38px;
+  text-align: center !important;
+}
+
+.portal-th__top-medalla {
+  display: block;
+  margin: 0 auto;
+}
+
+.portal-th__top-numero {
+  display: inline-block;
+  min-width: 24px;
+  color: var(--pth-tinta-3);
+  font-weight: 700;
+  text-align: center;
+}
+
+.portal-th__top-usted th,
+.portal-th__top-usted td {
+  background-color: var(--pth-azul-50);
+}
+
+.portal-th__top-tu {
+  color: var(--pth-azul);
+  font-weight: 400;
+  font-size: 0.74rem;
+}
+
+.portal-th__top-suposicion {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background-color: var(--pth-azul-50);
+  color: var(--pth-tinta-2);
+  font-size: 0.78rem;
+}
+
+.portal-th__top-solo-lectores {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }

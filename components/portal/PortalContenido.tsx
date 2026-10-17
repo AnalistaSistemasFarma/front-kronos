@@ -12,8 +12,11 @@ import {
 } from '../../lib/portal/correos-datos';
 import { filtrarExtensiones, type Extension } from '../../lib/portal/extensiones-datos';
 import { urlFormacion as urlPaginaFormacion, type OrigenPortal } from '../../lib/portal/formacion-navegacion';
+import HeinsohnVentana from './HeinsohnVentana';
+import OrganigramaVisor from './OrganigramaVisor';
 import PoliticasVisor, { TEXTOS_AYUDAS } from './PoliticasVisor';
 import PortalCalendario from './PortalCalendario';
+import VentanaEventosHoy from './VentanaEventosHoy';
 import PortalNavegacion, { useSeccionActiva, type SeccionNav } from './PortalNavegacion';
 
 /** Cada cuánto rota sola la imagen principal del carrusel de anuncios. */
@@ -32,6 +35,8 @@ const ID_SECCION_FORMACION = 'portal-th-formacion';
 const ID_SECCION_CONTACTOS = 'portal-th-contactos';
 /** Botón del panel, debajo de Contactos: abre la ventana de vídeos de ayuda (carpeta FORMACION/AYUDAS). Sin sección en la página. */
 const ID_SECCION_AYUDAS = 'portal-th-ayudas';
+/** Botón del panel: abre una ventana con un botón por empresa hacia su acceso al portal de nómina de Heinsohn. Sin sección en la página. */
+const ID_SECCION_HEINSOHN = 'portal-th-heinsohn';
 
 /**
  * EL CONTENIDO DEL PORTAL DE TALENTO HUMANO — anuncios y documentos.
@@ -372,6 +377,11 @@ export default function PortalContenido({
   /** Ventana «AYUDAS» (Cristian, 2026-10-15): los videos de la carpeta FORMACION/AYUDAS, con la misma ventana de Políticas. */
   const [ayudasAbierto, setAyudasAbierto] = useState(false);
   const cerrarAyudas = useCallback(() => setAyudasAbierto(false), []);
+  /** Ventana «HEINSOHN NÓMINA» (Cristian, 2026-10-15). */
+  const [heinsohnAbierto, setHeinsohnAbierto] = useState(false);
+  const cerrarHeinsohn = useCallback(() => setHeinsohnAbierto(false), []);
+  /** Organigrama digital (Cristian, 2026-10-15): se abre desde «Contactos» y, al cerrarlo, se vuelve a «Contactos». */
+  const [organigramaAbierto, setOrganigramaAbierto] = useState(false);
   const [contactoSeleccionado, setContactoSeleccionado] = useState<'correos' | 'extensiones' | null>(null);
   const cerrarContactos = () => {
     setContactosAbierto(false);
@@ -464,6 +474,7 @@ export default function PortalContenido({
     { id: ID_SECCION_FORMACION, etiqueta: 'Formación' },
     { id: ID_SECCION_CONTACTOS, etiqueta: 'Contactos' },
     { id: ID_SECCION_AYUDAS, etiqueta: 'Ayudas' },
+    { id: ID_SECCION_HEINSOHN, etiqueta: 'Heinsohn Nómina' },
     // Cuando el portal tenga más secciones, se agregan acá — el panel de
     // navegación no necesita ningún otro cambio.
   ];
@@ -488,6 +499,10 @@ export default function PortalContenido({
       setAyudasAbierto(true);
       return;
     }
+    if (id === ID_SECCION_HEINSOHN) {
+      setHeinsohnAbierto(true);
+      return;
+    }
     if (id === ID_SECCION_FORMACION) {
       // Igual que la tarjeta: pestaña nueva, sin `opener`.
       window.open(urlFormacion, '_blank', 'noopener,noreferrer');
@@ -498,6 +513,8 @@ export default function PortalContenido({
 
   return (
     <>
+      {/* Ventana emergente con los eventos de hoy (del calendario): se abre al entrar y se cierra sola a los 15 s. */}
+      <VentanaEventosHoy />
       <div className='portal-th__layout'>
         {/* Columna izquierda: calendario y eventos del día ARRIBA, y debajo los botones de cada sección. */}
         <aside className='portal-th__lateral'>
@@ -679,6 +696,15 @@ export default function PortalContenido({
 
       {politicasAbierto && <PoliticasVisor onCerrar={cerrarPoliticas} />}
       {ayudasAbierto && <PoliticasVisor onCerrar={cerrarAyudas} textos={TEXTOS_AYUDAS} />}
+      {heinsohnAbierto && <HeinsohnVentana onCerrar={cerrarHeinsohn} />}
+      {organigramaAbierto && (
+        <OrganigramaVisor
+          onCerrar={() => {
+            setOrganigramaAbierto(false);
+            setContactosAbierto(true);
+          }}
+        />
+      )}
 
       {/* VENTANA DE CONTACTOS — mismo marco que la vista previa de documentos,
           pero con dos botones adentro en vez de un PDF. Correos: directorio de
@@ -710,6 +736,17 @@ export default function PortalContenido({
               </div>
             </header>
             <div className='portal-th__contactos'>
+              <button
+                type='button'
+                className='portal-th__contactos-boton'
+                onClick={() => {
+                  cerrarContactos();
+                  setOrganigramaAbierto(true);
+                }}
+                data-testid='abrir-organigrama'
+              >
+                Organigrama
+              </button>
               <button
                 type='button'
                 className='portal-th__contactos-boton'
