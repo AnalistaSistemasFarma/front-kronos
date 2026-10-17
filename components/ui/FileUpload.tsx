@@ -25,6 +25,13 @@ import {
   IconCloudUpload,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
+import {
+  MAX_UPLOAD_REQUEST_BYTES,
+  REQUEST_ATTACHMENT_ACCEPT,
+  formatUploadMb,
+  isAllowedRequestAttachment,
+  proxyUploadErrorMessage,
+} from '@/lib/attachments/uploadRules';
 
 export interface UploadedFile {
   id: string;
@@ -56,19 +63,9 @@ interface FileUploadProps {
   autoUpload?: boolean;
 }
 
-const ALLOWED_TYPES = [
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'image/png',
-  'image/jpeg',
-  'image/jpg',
-  'text/plain',
-];
-
-const MAX_FILE_SIZE = Number.MAX_SAFE_INTEGER; // Sin límite de tamaño
+// Tipos y tope: lib/attachments/uploadRules.ts. Se valida por EXTENSIÓN o MIME (en Android y
+// en Windows sin Office `file.type` llega vacío) y el tope es el que deja pasar IIS por petición.
+const MAX_FILE_SIZE = MAX_UPLOAD_REQUEST_BYTES;
 
 const FileUpload: React.FC<FileUploadProps> = ({
   ticketId,
@@ -118,10 +115,15 @@ const FileUpload: React.FC<FileUploadProps> = ({
   };
 
   const validateFile = (file: File): string | null => {
-    if (!ALLOWED_TYPES.includes(file.type)) {
+    if (!isAllowedRequestAttachment(file)) {
       return `Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, XLS, XLSX, PNG, JPG, JPEG, TXT`;
     }
-    // Sin límite de tamaño de archivo
+    if (file.size <= 0) {
+      return 'El archivo está vacío.';
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      return `Pesa ${formatUploadMb(file.size)} y el máximo por archivo es ${formatUploadMb(MAX_FILE_SIZE)}.`;
+    }
     return null;
   };
 
@@ -157,7 +159,12 @@ const FileUpload: React.FC<FileUploadProps> = ({
         uploaded?: UploadedFile['graphItem'][];
       };
       if (!res.ok) {
-        throw new Error(data.error || `Error al subir el archivo (HTTP ${res.status})`);
+        // Un 413/502 de IIS llega en HTML (sin JSON): se traduce a un mensaje entendible.
+        throw new Error(
+          data.error ||
+            proxyUploadErrorMessage(res.status) ||
+            `Error al subir el archivo (HTTP ${res.status})`
+        );
       }
       const graphItem = data.uploaded?.[0];
       if (!graphItem?.id) {
@@ -355,18 +362,37 @@ const FileUpload: React.FC<FileUploadProps> = ({
               </Text>
             </Text>
             <Text size='xs' c='dimmed'>
-              Tipos permitidos: PDF, DOC, DOCX, XLS, XLSX, PNG, JPG, JPEG (sin límite de tamaño)
+              Tipos permitidos: PDF, DOC, DOCX, XLS, XLSX, PNG, JPG, JPEG, TXT (máx.{' '}
+              {formatUploadMb(MAX_FILE_SIZE)} por archivo)
             </Text>
           </Stack>
         </Stack>
 
+        {/* Mismo patrón que el compositor del chat (2026-09-08): sin `display:none`, porque
+            varios navegadores móviles no abren el selector al hacer `.click()` sobre un input
+            que no está en el layout. Y el `stopPropagation`: el clic programático del input
+            sube a la tarjeta, que volvía a llamar `.click()`; en Safari iOS ese segundo
+            llamado cancela el selector que se acababa de abrir. */}
         <input
           ref={fileInputRef}
           type='file'
           multiple
-          accept='.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.txt'
+          accept={REQUEST_ATTACHMENT_ACCEPT}
           onChange={handleFileInputChange}
-          style={{ display: 'none' }}
+          onClick={(e) => e.stopPropagation()}
+          tabIndex={-1}
+          style={{
+            position: 'absolute',
+            width: 1,
+            height: 1,
+            padding: 0,
+            margin: -1,
+            border: 0,
+            opacity: 0,
+            overflow: 'hidden',
+            clip: 'rect(0 0 0 0)',
+            pointerEvents: 'none',
+          }}
           disabled={disabled}
           aria-label='Seleccionar archivos para subir'
         />
