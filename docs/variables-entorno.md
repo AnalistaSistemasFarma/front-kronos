@@ -33,6 +33,13 @@ Si faltan, la integración queda apagada (`enabled=false`).
 
 - `AGENT_INVENTORY_COLLECTOR_KEY`: llave del recolector, de al menos 32 caracteres.
 
+## Chat: Proyectos (hilos de agente), F1 piloto
+
+- `CHAT_PROJECTS_AGENTS`: JSON `{"<code del agente>": ["perfil", …]}` con los agentes que tienen proyectos y los perfiles de conectores que se pueden escoger (catálogo en `lib/chat/projects-rules.ts`). Sin la variable, o con un JSON inválido, el módulo queda **apagado** (las rutas responden 404 y el botón no aparece).
+- `CHAT_AGENT_API_KEYS` (ya existía): ahora admite `"scope": "projects"` por llave. Esa llave es la del **puente de hilos** (`puente-hilos/`) y solo ve conversaciones de proyecto; las llaves sin `scope` (o con `"channel"`) son las de los bots vivos y **no** ven proyectos.
+
+El puente de hilos tiene sus propias variables (`HILOS_*`), que viven en el `.env` del puente y no en el de la aplicación: ver `puente-hilos/README.md`.
+
 ## Otros
 
 - `FARMADOSIS_COMPANY_ID`
