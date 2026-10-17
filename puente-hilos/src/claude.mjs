@@ -204,8 +204,8 @@ export function correrTurno({ bin, args, env, cwd, prompt, perfil, timeoutMs, al
       } catch {}
     };
 
+    // Sin unref: el tope del turno debe mantener vivo el proceso hasta cumplirse.
     const temporizador = setTimeout(() => matar('tiempo agotado'), timeoutMs);
-    temporizador.unref?.();
 
     hijo.stdout.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
