@@ -1,5 +1,5 @@
 import type { PrismaClient } from '../../app/generated/prisma';
-import { isOtResponsableRol, OT_DIAS_CERRADAS, OT_SUBPROCESS_URLS, type OtResponsableRol } from './constants';
+import { isOtResponsableRol, OT_DIAS_CERRADAS, OT_NOTA_CIERRE_JEFE, OT_SIN_VISTO_OPERARIO, OT_SUBPROCESS_URLS, type OtResponsableRol } from './constants';
 import type { AvisoBitacora } from './notificaciones';
 import {
   assertActoresDistintos,
@@ -27,6 +27,7 @@ import {
   assertPuedeRegistrar,
   motivoSinRol,
   OtError,
+  textoDelRegistro,
   resolveOtAccess,
   resolverArea,
   type CambioActividadInput,
@@ -481,7 +482,8 @@ export interface OrdenDetalle {
   /** Jefe de producción (B1; columna id_jefe_produccion). */
   jefe: { id: string; name: string } | null;
   /** `operador` = operario elegido en la tablet; `usuario` = usuario de la sesión que registró. */
-  registros: Array<{ id: string; actividad: string; operador: string | null; usuario: string; registradoEn: string; observacion: string | null }>;
+  /** `textoLibre`: el registro es de una actividad de texto libre y `observacion` es el texto escrito. */
+  registros: Array<{ id: string; actividad: string; operador: string | null; usuario: string; registradoEn: string; observacion: string | null; textoLibre: boolean }>;
   /** Vistos buenos dados (rol VISIBLE: las filas viejas «Verificó» salen como JEFE_PROD). */
   firmas: FirmaVista[];
   /** Los cuatro vistos buenos en orden, con su estado (B2). */
@@ -498,6 +500,10 @@ export interface OrdenDetalle {
   puedeCerrar: boolean;
   /** Cerrada y falta algún visto bueno posterior (inspector o jefe). */
   puedeVerificar: boolean;
+  /** Con qué rol ABRIÓ: el jefe de producción de esta bitácora o el supervisor (permiso de Gestión). */
+  abiertaComo: 'SUPERVISOR' | 'JEFE_PROD';
+  /** Quién CERRÓ, con qué rol, cuándo y por qué método (null si está abierta). */
+  cierre: { nombre: string; como: 'SUPERVISOR' | 'JEFE_PROD'; en: string; metodo: string; cuentaComoVistoJefe: boolean } | null;
   /** Abierta, con operarios programados y sin el visto bueno (opcional) del operario. */
   puedeVistoOperario: boolean;
 }
@@ -566,17 +572,26 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
     const f = dados[rol];
     const designado = rol === 'INSPECTOR' ? nombre(o.id_inspector) : rol === 'JEFE_PROD' ? nombre(o.id_jefe_produccion) : null;
     if (f) return { rol, estado: 'dado', designado, firma: firmaVista(f), nota: null };
-    if (rol === 'JEFE_PROD' && cerroElJefe) return { rol, estado: 'no_aplica', designado, firma: null, nota: 'Cerró la bitácora: su cierre cuenta como su visto bueno' };
+    if (rol === 'JEFE_PROD' && cerroElJefe) return { rol, estado: 'no_aplica', designado, firma: null, nota: OT_NOTA_CIERRE_JEFE };
     // R4: el del operario es opcional (se puede dar mientras está abierta; no frena el cierre).
-    if (rol === 'OPERARIO' && actores.operadores.length > 0) return { rol, estado: 'opcional', designado, firma: null, nota: o.estado === 'ABIERTA' ? 'Opcional' : 'No se dio (opcional)' };
+    // Transparencia (Nicolás, 2026-10-17): si no se dio, se dice explícitamente.
+    if (rol === 'OPERARIO' && actores.operadores.length > 0) {
+      return { rol, estado: 'opcional', designado, firma: null, nota: o.estado === 'ABIERTA' ? `${OT_SIN_VISTO_OPERARIO} (opcional, hasta el cierre)` : OT_SIN_VISTO_OPERARIO };
+    }
     return { rol, estado: requeridos.includes(rol) ? 'pendiente' : 'no_aplica', designado, firma: null, nota: null };
   });
+  // Transparencia (2026-10-17): quién abrió y con qué rol; quién cerró, con qué rol, cuándo y cómo.
+  const fCierre = dados.SUPERVISOR ? firmaVista(dados.SUPERVISOR) : null;
   return {
     id: o.id_orden_trabajo,
     idCompany: o.id_company,
     consecutivo: o.consecutivo,
     producto: o.producto,
     itemCode: o.item_code,
+    abiertaComo: o.id_jefe_produccion && o.abierta_por === o.id_jefe_produccion ? 'JEFE_PROD' : 'SUPERVISOR',
+    cierre: fCierre
+      ? { nombre: fCierre.nombre, como: cerroElJefe ? 'JEFE_PROD' : 'SUPERVISOR', en: fCierre.firmadoEn, metodo: fCierre.metodo, cuentaComoVistoJefe: cerroElJefe }
+      : null,
     lote: o.lote,
     turno: o.turno,
     area: o.area,
@@ -603,6 +618,7 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
       usuario: nombre(r.id_user) ?? r.id_user,
       registradoEn: r.registrado_en.toISOString(),
       observacion: r.observacion,
+      textoLibre: r.es_texto_libre,
     })),
     firmas,
     vistos,
@@ -656,9 +672,10 @@ export async function crearRegistro(
 
     const actividad = await tx.otActividad.findFirst({
       where: { id_actividad: input.idActividad, id_company: access.idCompany },
-      select: { id_actividad: true, nombre: true, activo: true },
+      select: { id_actividad: true, nombre: true, activo: true, texto_libre: true },
     });
     assertActividadRegistrable(actividad);
+    const texto = textoDelRegistro(actividad!, input);
 
     const r = await tx.otRegistro.create({
       data: {
@@ -668,7 +685,8 @@ export async function crearRegistro(
         id_user: actor.idUser,
         id_operador: operador?.id_operador ?? null,
         operador_nombre: operador?.nombre ?? null,
-        observacion: input.observacion,
+        observacion: texto.observacion,
+        es_texto_libre: texto.esTextoLibre,
         ip: actor.ip ? actor.ip.slice(0, 64) : null,
       },
       select: { id_registro: true, registrado_en: true, actividad_nombre: true, operador_nombre: true },
@@ -966,7 +984,7 @@ export async function listActividades(db: OtDb, idCompany: number, soloActivas: 
   const rows = await db.otActividad.findMany({
     where: { id_company: idCompany, ...(soloActivas ? { activo: true } : {}) },
     orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
-    select: { id_actividad: true, nombre: true, exige_observacion: true, orden: true, activo: true, icono: true },
+    select: { id_actividad: true, nombre: true, exige_observacion: true, texto_libre: true, orden: true, activo: true, icono: true },
   });
   return rows;
 }
@@ -982,12 +1000,13 @@ export async function crearActividad(db: OtDb, input: NuevaActividadInput, actor
       id_company: input.idCompany,
       nombre: input.nombre,
       exige_observacion: input.exigeObservacion,
+      texto_libre: input.textoLibre ?? false,
       orden: input.orden,
       icono: input.icono,
       activo: true,
       created_by: actor.idUser,
     },
-    select: { id_actividad: true, nombre: true, exige_observacion: true, orden: true, activo: true, icono: true },
+    select: { id_actividad: true, nombre: true, exige_observacion: true, texto_libre: true, orden: true, activo: true, icono: true },
   });
 }
 
@@ -997,6 +1016,7 @@ export async function cambiarActividad(db: OtDb, input: CambioActividadInput) {
     data: {
       ...(input.activo !== undefined ? { activo: input.activo } : {}),
       ...(input.exigeObservacion !== undefined ? { exige_observacion: input.exigeObservacion } : {}),
+      ...(input.textoLibre !== undefined ? { texto_libre: input.textoLibre } : {}),
       ...(input.orden !== undefined ? { orden: input.orden } : {}),
       ...(input.icono !== undefined ? { icono: input.icono } : {}),
     },
@@ -1004,7 +1024,7 @@ export async function cambiarActividad(db: OtDb, input: CambioActividadInput) {
   if (res.count === 0) throw new OtError('Actividad no encontrada.', 404);
   return db.otActividad.findFirst({
     where: { id_actividad: input.idActividad, id_company: input.idCompany },
-    select: { id_actividad: true, nombre: true, exige_observacion: true, orden: true, activo: true, icono: true },
+    select: { id_actividad: true, nombre: true, exige_observacion: true, texto_libre: true, orden: true, activo: true, icono: true },
   });
 }
 

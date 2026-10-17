@@ -63,6 +63,9 @@ export const OT_LIMITS = {
   lote: 50,
   area: 100,
   observacion: 500,
+  /** Texto libre de una actividad de ese tipo (2026-10-17): va en ot_registro.observacion (NVARCHAR(500)). */
+  textoLibre: 500,
+  textoLibreMin: 3,
   observacionCierre: 1000,
   actividadNombre: 120,
   maxOperarios: 50,
@@ -225,6 +228,16 @@ export const OT_FIRMA_SIGNIFICADO: Record<OtFirmaRol, string> = {
  * Cabe en ot_firma.significado (NVARCHAR(20)).
  */
 export const OT_SIGNIFICADO_CIERRE_JEFE = 'Cerró (jefe)';
+
+/** Textos de transparencia (Nicolás, 2026-10-17: «que sea lo más transparente posible»). */
+export const OT_NOTA_CIERRE_JEFE = 'Cerró la bitácora como jefe de producción: ese cierre cuenta como su visto bueno de jefe';
+export const OT_SIN_VISTO_OPERARIO = 'Sin visto bueno del operario';
+
+/** Rol con el que se abre o se cierra, como se muestra en pantalla y en el informe. */
+export const OT_ROL_APERTURA_CIERRE: Record<'SUPERVISOR' | 'JEFE_PROD', string> = {
+  SUPERVISOR: 'Supervisor (permiso de Gestión)',
+  JEFE_PROD: 'Jefe de producción',
+};
 
 /** Significado de la verificación del modelo anterior (#606/#617): era del jefe de producción. */
 export const OT_SIGNIFICADO_VERIFICO_LEGADO = 'Verificó';

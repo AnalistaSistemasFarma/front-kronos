@@ -246,11 +246,37 @@ export function parseNuevaOrden(body: Record<string, unknown> | null): NuevaOrde
   };
 }
 
+/**
+ * Sanea el TEXTO LIBRE que escribe el operario (2026-10-17): normaliza Unicode (NFC) y los
+ * saltos de línea, quita caracteres de control y los invisibles de formato o de dirección
+ * (p. ej. U+202E, que puede «voltear» lo que se ve en el informe), colapsa espacios y líneas
+ * vacías repetidas y recorta. No interpreta HTML: la pantalla y el informe lo muestran como
+ * texto (React escapa), así que < y > se guardan tal cual.
+ */
+export function sanitizarTextoLibre(v: unknown): string {
+  if (typeof v !== 'string') return '';
+  return (
+    v
+      .normalize('NFC')
+      .replace(/\r\n?/g, '\n')
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
+      .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g, '')
+      .replace(/\t/g, ' ')
+      .split('\n')
+      .map((l) => l.replace(/ {2,}/g, ' ').trim())
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  );
+}
+
 export interface NuevoRegistroInput {
   idActividad: number;
   /** Operario (sin usuario) que eligió su nombre en la tablet (A1). */
   idOperador: number | null;
   observacion: string | null;
+  /** Texto libre (solo actividades de ese tipo), ya saneado; null o ausente si no vino. */
+  texto?: string | null;
 }
 
 /**
@@ -266,7 +292,26 @@ export function parseNuevoRegistro(body: Record<string, unknown> | null): NuevoR
     idActividad,
     idOperador: optPositiveInt(body.id_operador ?? body.idOperador, 'El operario'),
     observacion: optStr(body.observacion, OT_LIMITS.observacion, 'La observación'),
+    texto: body.texto === undefined || body.texto === null ? null : sanitizarTextoLibre(body.texto),
   };
+}
+
+/**
+ * Qué se guarda en `observacion` según el tipo de actividad (2026-10-17):
+ *   - TEXTO LIBRE: el texto es OBLIGATORIO (mín. 3, máx. 500 caracteres ya saneado) y es lo
+ *     que se guarda; no se admite además la observación opcional.
+ *   - El resto: la observación opcional de siempre; no se admite texto libre.
+ */
+export function textoDelRegistro(actividad: { texto_libre: boolean; nombre: string }, input: Pick<NuevoRegistroInput, 'observacion' | 'texto'>): { observacion: string | null; esTextoLibre: boolean } {
+  if (actividad.texto_libre) {
+    const t = input.texto ?? '';
+    if (t.length < OT_LIMITS.textoLibreMin) throw new OtError(`«${actividad.nombre}» es de texto libre: escriba qué pasó (mínimo ${OT_LIMITS.textoLibreMin} caracteres).`, 400);
+    if (t.length > OT_LIMITS.textoLibre) throw new OtError(`El texto libre: máximo ${OT_LIMITS.textoLibre} caracteres.`, 400);
+    if (input.observacion) throw new OtError('En una actividad de texto libre escriba todo en el texto (sin observación aparte).', 400);
+    return { observacion: t, esTextoLibre: true };
+  }
+  if (input.texto) throw new OtError(`«${actividad.nombre}» no es de texto libre: use la observación opcional.`, 400);
+  return { observacion: input.observacion, esTextoLibre: false };
 }
 
 /**
@@ -288,6 +333,8 @@ export interface NuevaActividadInput {
   idCompany: number;
   nombre: string;
   exigeObservacion: boolean;
+  /** Actividad de texto libre (2026-10-17); ausente = no. */
+  textoLibre?: boolean;
   orden: number;
   icono: OtIcono | null;
 }
@@ -314,6 +361,7 @@ export function parseNuevaActividad(body: Record<string, unknown> | null): Nueva
     idCompany,
     nombre: reqStr(body.nombre, OT_LIMITS.actividadNombre, 'El nombre de la actividad'),
     exigeObservacion: body.exige_observacion === true,
+    textoLibre: body.texto_libre === true,
     orden: parseOrden(body.orden),
     icono: parseIcono(body.icono),
   };
@@ -324,11 +372,12 @@ export interface CambioActividadInput {
   idCompany: number;
   activo?: boolean;
   exigeObservacion?: boolean;
+  textoLibre?: boolean;
   orden?: number;
   icono?: OtIcono | null;
 }
 
-/** PATCH del catálogo: SOLO `activo`, `orden`, `exige_observacion` e `icono` (el nombre no cambia). */
+/** PATCH del catálogo: SOLO `activo`, `orden`, `exige_observacion`, `texto_libre` e `icono` (el nombre no cambia). */
 export function parseCambioActividad(body: Record<string, unknown> | null): CambioActividadInput {
   if (!body) throw new OtError('Se esperaba un JSON con el cambio.', 400);
   const idActividad = optPositiveInt(body.id_actividad, 'La actividad');
@@ -337,10 +386,11 @@ export function parseCambioActividad(body: Record<string, unknown> | null): Camb
   const out: CambioActividadInput = { idActividad, idCompany };
   if (typeof body.activo === 'boolean') out.activo = body.activo;
   if (typeof body.exige_observacion === 'boolean') out.exigeObservacion = body.exige_observacion;
+  if (typeof body.texto_libre === 'boolean') out.textoLibre = body.texto_libre;
   if (body.orden !== undefined) out.orden = parseOrden(body.orden);
   if (body.icono !== undefined) out.icono = parseIcono(body.icono);
-  if (out.activo === undefined && out.exigeObservacion === undefined && out.orden === undefined && out.icono === undefined) {
-    throw new OtError('No hay cambios: solo se puede cambiar activo, orden, exige observación e ícono.', 400);
+  if (out.activo === undefined && out.exigeObservacion === undefined && out.textoLibre === undefined && out.orden === undefined && out.icono === undefined) {
+    throw new OtError('No hay cambios: solo se puede cambiar activo, orden, exige observación, texto libre e ícono.', 400);
   }
   return out;
 }

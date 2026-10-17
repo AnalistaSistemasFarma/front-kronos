@@ -45,6 +45,8 @@ import {
   OT_JEFE_PRODUCCION_LABEL,
   OT_LIMITS,
   OT_METODO_LABEL,
+  OT_NOTA_CIERRE_JEFE,
+  OT_ROL_APERTURA_CIERRE,
   OT_ROL_LABEL,
   OT_SIGNIFICADO_CIERRE_JEFE,
   otPictograma,
@@ -74,6 +76,8 @@ interface Actividad {
   id_actividad: number;
   nombre: string;
   icono: string | null;
+  /** Actividad de TEXTO LIBRE (2026-10-17): pide un texto obligatorio antes de registrar. */
+  texto_libre?: boolean;
 }
 
 interface OperadorMaestro {
@@ -103,6 +107,9 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
   const [confirmar, setConfirmar] = useState<Confirmar>(null);
   const supervisores = useOtFetch<{ supervisores: Confirmante[] }>(confirmar === 'SUPERVISOR' ? `/api/bitacora-proceso/supervisores?company=${company.idCompany}` : null);
   const [agregar, setAgregar] = useState(false);
+  /** Actividad de texto libre que espera su texto (modal). */
+  const [textoPara, setTextoPara] = useState<Actividad | null>(null);
+  const [texto, setTexto] = useState('');
 
   const o = detalle.data?.orden;
   const conOperadores = (o?.operadores.length ?? 0) > 0;
@@ -112,16 +119,26 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
   };
 
   /** Segundo toque: registra la actividad para el operario elegido (o sin operario en bitácoras anteriores). */
-  const registrar = async (a: Actividad) => {
+  const registrar = async (a: Actividad, textoLibre?: string) => {
     if (!o || busy !== null) return;
     if (conOperadores && !operador) return;
+    // Actividad de texto libre: primero se pide el texto (obligatorio).
+    if (a.texto_libre && textoLibre === undefined) {
+      setTexto('');
+      setTextoPara(a);
+      return;
+    }
     setBusy(a.id_actividad);
     try {
       const r = await otSend<{ registro: { registradoEn: string; actividad: string; operador: string | null } }>(
         `/api/bitacora-proceso/${o.id}/registros?company=${company.idCompany}`,
         'POST',
-        { id_actividad: a.id_actividad, id_operador: operador?.id, observacion: obs.trim() || undefined }
+        a.texto_libre
+          ? { id_actividad: a.id_actividad, id_operador: operador?.id, texto: textoLibre }
+          : { id_actividad: a.id_actividad, id_operador: operador?.id, observacion: obs.trim() || undefined }
       );
+      setTextoPara(null);
+      setTexto('');
       const quien = r.registro.operador ? ` — ${r.registro.operador}` : '';
       const text = `Registrado: ${r.registro.actividad}${quien} a las ${fmtHora(r.registro.registradoEn)}.`;
       setAviso({ ok: true, text });
@@ -247,7 +264,8 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
 
       {!abierta && (
         <Alert color='gray' icon={<IconLock size={18} />} title='Bitácora cerrada' data-testid='ot-cerrada'>
-          Cerrada el {fmtFechaHora(o.cerradaEn)} por {o.cerradaPor ?? '—'}. Ya no admite registros.
+          Cerrada el {fmtFechaHora(o.cerradaEn)} por {o.cierre ? `${o.cierre.nombre} (${OT_ROL_APERTURA_CIERRE[o.cierre.como].toLowerCase()}, ${(OT_METODO_LABEL[o.cierre.metodo] ?? o.cierre.metodo).toLowerCase()})` : (o.cerradaPor ?? '—')}. Ya no admite registros.
+          {o.cierre?.cuentaComoVistoJefe ? ` ${OT_NOTA_CIERRE_JEFE}.` : ''}
           {o.completa ? ' Tiene todos sus vistos buenos.' : o.siguiente ? ` Falta el visto bueno del ${OT_ROL_LABEL[o.siguiente].toLowerCase()}.` : ''}
           {o.observacionCierre ? ` Observación: ${o.observacionCierre}` : ''}
         </Alert>
@@ -342,8 +360,10 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
                 leftSection={<OtIconoActividad icono={a.icono} size={otPictograma(a.icono) ? 52 : 30} />}
                 styles={{ label: { whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.2 } }}
                 data-testid='ot-actividad'
+                data-texto-libre={a.texto_libre ? '1' : undefined}
               >
                 {a.nombre}
+                {a.texto_libre ? ' · texto libre' : ''}
               </Button>
             ))}
           </SimpleGrid>
@@ -374,7 +394,11 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
                     <Text fw={600}>{r.actividad}</Text>
                     <Text size='sm'>{r.operador ?? r.usuario}</Text>
                     {r.operador && <Text size='xs' c='dimmed'>Registró: {r.usuario}</Text>}
-                    {r.observacion && <Text size='sm' mt={2} style={{ overflowWrap: 'anywhere' }}>{r.observacion}</Text>}
+                    {r.observacion && (
+                      <Text size='sm' mt={2} style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }} data-testid={r.textoLibre ? 'ot-registro-texto-libre' : undefined}>
+                        {r.textoLibre ? <><b>Texto libre:</b> {r.observacion}</> : r.observacion}
+                      </Text>
+                    )}
                   </div>
                   <Text fw={700} size='md' style={{ whiteSpace: 'nowrap' }}>{fmtHora(r.registradoEn)}</Text>
                 </Group>
@@ -438,7 +462,19 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
           </div>
           <div>
             <Text size='xs' c='dimmed' tt='uppercase' fw={600}>Abrió</Text>
-            <Text>{o.abiertaPor}</Text>
+            <Text data-testid='ot-abrio'>{o.abiertaPor} — {OT_ROL_APERTURA_CIERRE[o.abiertaComo]}</Text>
+            <Text size='xs' c='dimmed'>{fmtFechaHoraSeg(o.abiertaEn)}</Text>
+          </div>
+          <div>
+            <Text size='xs' c='dimmed' tt='uppercase' fw={600}>Cerró</Text>
+            {o.cierre ? (
+              <>
+                <Text data-testid='ot-cerro'>{o.cierre.nombre} — {OT_ROL_APERTURA_CIERRE[o.cierre.como]}</Text>
+                <Text size='xs' c='dimmed'>{fmtFechaHoraSeg(o.cierre.en)} · {OT_METODO_LABEL[o.cierre.metodo] ?? o.cierre.metodo}</Text>
+              </>
+            ) : (
+              <Text c='dimmed'>Pendiente (abierta)</Text>
+            )}
           </div>
           <div>
             <Text size='xs' c='dimmed' tt='uppercase' fw={600}>{OT_INSPECTOR_LABEL}</Text>
@@ -519,6 +555,47 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
           )}
         </Group>
       </Box>
+
+      {/* Actividad de TEXTO LIBRE (2026-10-17): el texto es obligatorio y se guarda con la actividad. */}
+      <Modal
+        opened={textoPara !== null}
+        onClose={() => busy === null && setTextoPara(null)}
+        title={<Text fw={700} size='lg'>{textoPara?.nombre ?? ''}</Text>}
+        fullScreen={mobile}
+        size='md'
+        radius={mobile ? 0 : 'md'}
+      >
+        <Stack gap='sm'>
+          {operador && <Text>Registra: <b>{operador.nombre}</b></Text>}
+          <Textarea
+            size='md'
+            label='Escriba qué pasó (obligatorio)'
+            autosize
+            minRows={3}
+            maxRows={8}
+            maxLength={OT_LIMITS.textoLibre}
+            value={texto}
+            onChange={(e) => setTexto(e.currentTarget.value)}
+            description={`${texto.trim().length}/${OT_LIMITS.textoLibre} · mínimo ${OT_LIMITS.textoLibreMin}. Queda con la hora del servidor y no se puede editar ni borrar.`}
+            data-autofocus
+            data-testid='ot-texto-libre'
+          />
+          <Group grow={mobile} justify='flex-end' gap='sm'>
+            <Button variant='default' size='lg' onClick={() => setTextoPara(null)} disabled={busy !== null}>
+              Cancelar
+            </Button>
+            <Button
+              size='lg'
+              loading={textoPara !== null && busy === textoPara.id_actividad}
+              disabled={texto.trim().length < OT_LIMITS.textoLibreMin}
+              onClick={() => textoPara && registrar(textoPara, texto)}
+              data-testid='ot-texto-libre-registrar'
+            >
+              Registrar
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       <ConfirmacionBitacoraModal
         opened={confirmar !== null}

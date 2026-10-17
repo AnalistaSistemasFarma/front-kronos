@@ -312,7 +312,7 @@ describe('Bitácora de Proceso · rutas', () => {
     m.crearRegistro.mockResolvedValue({ id: '1', registradoEn: '2026-10-13T20:00:00.000Z', actividad: 'Refrigerio' });
     const ok = await registros.POST(send('POST', { id_actividad: 2, id_operador: 7, registrado_en: '1999-01-01T00:00:00Z', id_user: 'otro' }, '?company=1'), params('5'));
     expect(ok.status).toBe(201);
-    expect(m.crearRegistro.mock.calls[0][3]).toEqual({ idActividad: 2, idOperador: 7, observacion: null });
+    expect(m.crearRegistro.mock.calls[0][3]).toEqual({ idActividad: 2, idOperador: 7, observacion: null, texto: null });
     // El usuario que se guarda es el de la SESIÓN (aparte del operario elegido).
     expect(m.crearRegistro.mock.calls[0][4]).toMatchObject({ idUser: 'u1' });
     m.crearRegistro.mockRejectedValueOnce(new OtError('La bitácora está cerrada: ya no admite registros.', 409));
@@ -453,5 +453,17 @@ describe('Bitácora de Proceso · rutas', () => {
     expect((await (await operadores.GET(get('?company=1&todas=1'))).json()).error).toMatch(/«Bitácora de Proceso: Gestión» en FARMALOGICA S\.A\./);
     const abrir = await (await lista.POST(send('POST', nueva))).json();
     expect(abrir.error).toMatch(/Para abrir una bitácora en FARMALOGICA S\.A\. le falta el permiso «Bitácora de Proceso: Gestión» \(supervisor\) o estar asignado como jefe de producción/);
+  });
+
+  it('TEXTO LIBRE (2026-10-17): el texto llega SANEADO a la capa de datos y el 400 de «obligatorio» pasa tal cual', async () => {
+    asUser([operario]);
+    m.crearRegistro.mockResolvedValue({ id: '1', registradoEn: '2026-10-17T20:00:00.000Z', actividad: 'Novedad', operador: 'Ana' });
+    const ok = await registros.POST(send('POST', { id_actividad: 9, id_operador: 7, texto: '  Se cayó\u202E un frasco\u0000  ' }, '?company=1'), params('5'));
+    expect(ok.status).toBe(201);
+    expect(m.crearRegistro.mock.calls[0][3]).toEqual({ idActividad: 9, idOperador: 7, observacion: null, texto: 'Se cayó un frasco' });
+    m.crearRegistro.mockRejectedValue(new OtError('«Novedad» es de texto libre: escriba qué pasó (mínimo 3 caracteres).', 400));
+    const falta = await registros.POST(send('POST', { id_actividad: 9, id_operador: 7 }, '?company=1'), params('5'));
+    expect(falta.status).toBe(400);
+    expect((await falta.json()).error).toMatch(/texto libre/);
   });
 });

@@ -3524,6 +3524,8 @@ model OtActividad {
   id_company        Int
   nombre            String   @db.NVarChar(120)
   exige_observacion Boolean  @default(false)
+  // Actividad de TEXTO LIBRE (2026-10-17): al registrarla, el operario escribe un texto obligatorio.
+  texto_libre       Boolean  @default(false)
   orden             Int      @default(0)
   activo            Boolean  @default(true)
   // Clave de un ícono de la lista cerrada OT_ICONOS (lib/bitacora-proceso/constants.ts); opcional.
@@ -3613,6 +3615,8 @@ model OtRegistro {
   // Operario (sin usuario) que eligió su nombre en la tablet (A1). `id_user` es el usuario de la SESIÓN.
   id_operador      Int?
   operador_nombre  String?  @db.NVarChar(120)
+  // La actividad era de TEXTO LIBRE al registrar (2026-10-17): `observacion` es el texto escrito (obligatorio).
+  es_texto_libre   Boolean  @default(false)
 
   orden     OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
   actividad OtActividad    @relation(fields: [id_actividad], references: [id_actividad], onDelete: NoAction, onUpdate: NoAction)

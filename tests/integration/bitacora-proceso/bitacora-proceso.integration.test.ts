@@ -434,8 +434,11 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
     const det = await getOrdenDetalle(prisma, o.id, jefe, jefeId);
     expect(det).toMatchObject({ estado: 'CERRADA', completa: true, siguiente: null });
     expect(det?.vistos.map((v) => [v.rol, v.estado])).toEqual([['OPERARIO', 'opcional'], ['SUPERVISOR', 'dado'], ['INSPECTOR', 'dado'], ['JEFE_PROD', 'no_aplica']]);
-    expect(det?.vistos[0].nota).toMatch(/No se dio/);
-    expect(det?.vistos[3].nota).toMatch(/su cierre cuenta como su visto bueno/);
+    expect(det?.vistos[0].nota).toBe('Sin visto bueno del operario');
+    expect(det?.vistos[3].nota).toMatch(/cuenta como su visto bueno de jefe/);
+    // Transparencia: quién abrió y con qué rol; quién cerró, con qué rol, cuándo y cómo.
+    expect(det).toMatchObject({ abiertaComo: 'JEFE_PROD', cierre: { como: 'JEFE_PROD', metodo: 'sesion_propia', cuentaComoVistoJefe: true } });
+    expect(det?.cierre?.en).toBeTruthy();
 
     // Un jefe que deja de estar asignado ya no cierra (mensaje con lo que falta).
     const o2 = await crearOrden(prisma, orden({ lote: `J2-${sufijo}` }), actor(supervisorId));
@@ -448,6 +451,29 @@ describe.skipIf(!url)('Bitácora de Proceso · integración con SQL Server', () 
     } finally {
       await asignarResponsable(prisma, { idCompany: FARMA, idUser: jefeId, rol: 'JEFE_PROD' }, actor(supervisorId));
     }
+  });
+
+  it('TEXTO LIBRE (2026-10-17): Gestión marca la actividad; el texto es obligatorio, queda saneado y marcado en el registro aunque luego cambie el catálogo', async () => {
+    const act = await crearActividad(prisma, { idCompany: FARMA, nombre: `Novedad ${sufijo}`, exigeObservacion: false, textoLibre: true, orden: 950, icono: null }, actor(supervisorId));
+    expect(act).toMatchObject({ texto_libre: true });
+    expect((await listActividades(prisma, FARMA, true)).find((a) => a.id_actividad === act.id_actividad)?.texto_libre).toBe(true);
+    const o = await crearOrden(prisma, orden({ producto: 'PRUEBA IT TEXTO', lote: `TL-${sufijo}` }), actor(supervisorId));
+    // Sin texto, o demasiado corto: 400; con observación aparte: 400.
+    expect(await status(crearRegistro(prisma, o.id, ajeno, { idActividad: act.id_actividad, idOperador: opA, observacion: null }, actor(ajenoId)))).toBe(400);
+    expect(await status(crearRegistro(prisma, o.id, ajeno, { idActividad: act.id_actividad, idOperador: opA, observacion: null, texto: 'ab' }, actor(ajenoId)))).toBe(400);
+    expect(await status(crearRegistro(prisma, o.id, ajeno, { idActividad: act.id_actividad, idOperador: opA, observacion: 'x', texto: 'texto válido' }, actor(ajenoId)))).toBe(400);
+    // En una actividad normal no se admite texto libre.
+    expect(await status(crearRegistro(prisma, o.id, ajeno, { idActividad: idTolva, idOperador: opA, observacion: null, texto: 'no va' }, actor(ajenoId)))).toBe(400);
+    await crearRegistro(prisma, o.id, ajeno, { idActividad: act.id_actividad, idOperador: opA, observacion: null, texto: 'Se cayó un frasco en la línea 2' }, actor(ajenoId));
+    await crearRegistro(prisma, o.id, ajeno, { idActividad: idTolva, idOperador: opA, observacion: 'opcional' }, actor(ajenoId));
+    // Gestión desmarca la actividad: el registro ya hecho sigue marcado como texto libre.
+    await cambiarActividad(prisma, { idActividad: act.id_actividad, idCompany: FARMA, textoLibre: false });
+    const det = await getOrdenDetalle(prisma, o.id, supervisor, supervisorId);
+    expect(det?.registros.map((r) => [r.observacion, r.textoLibre])).toEqual([
+      ['Se cayó un frasco en la línea 2', true],
+      ['opcional', false],
+    ]);
+    expect(det).toMatchObject({ abiertaComo: 'SUPERVISOR', cierre: null });
   });
 
   it('B3: PIN en la base — hash bcrypt, bloqueo a los 5 fallos (auditado), restablecer y volver a configurar', async () => {
