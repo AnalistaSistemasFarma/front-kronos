@@ -80,7 +80,7 @@ Antes de empezar: el PR debe estar fusionado en `testing` y desplegado, y Nicol√
 ## Pruebas
 
 ```bash
-cd puente-hilos && node --test test/
+cd puente-hilos && node --test test/*.test.mjs
 ```
 
 No tiene dependencias: usa Node 20 o superior y el `claude` instalado, que debe soportar `--restricted`. El puente lo verifica al arrancar.
