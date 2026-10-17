@@ -197,6 +197,18 @@ BEGIN
   RETURN;
 END;
 
+-- Correos de @MiembrosCsv, sin STRING_SPLIT (la base es SQL Server 2016 y
+-- STRING_SPLIT depende del nivel de compatibilidad).
+DECLARE @Miembros TABLE (email NVARCHAR(255) PRIMARY KEY);
+DECLARE @resto NVARCHAR(MAX) = ISNULL(@MiembrosCsv, N'''') + N'','', @pos INT, @uno NVARCHAR(255);
+WHILE LEN(@resto) > 0
+BEGIN
+  SET @pos = CHARINDEX(N'','', @resto);
+  SET @uno = LTRIM(RTRIM(LEFT(@resto, @pos - 1)));
+  SET @resto = SUBSTRING(@resto, @pos + 1, LEN(@resto));
+  IF @uno <> N'''' AND NOT EXISTS (SELECT 1 FROM @Miembros WHERE email = @uno) INSERT INTO @Miembros (email) VALUES (@uno);
+END;
+
 DECLARE @Ejemplos TABLE (n INT IDENTITY(1,1), nombre NVARCHAR(120), perfil NVARCHAR(40), patron NVARCHAR(100), instrucciones NVARCHAR(MAX));
 INSERT INTO @Ejemplos (nombre, perfil, patron, instrucciones) VALUES
  (N''Farmalógica — Operaciones'', N''farmalogica'', N''%FARMAL%GICA%'',
@@ -249,9 +261,9 @@ BEGIN
 
     INSERT INTO [dbo].[chat_project_member] (id_project, id_user, role, added_by)
     SELECT DISTINCT @ProjectId, u.id, N''member'', @OwnerId
-    FROM STRING_SPLIT(@MiembrosCsv, N'','') s
-    JOIN [dbo].[user] u ON u.email = LTRIM(RTRIM(s.value)) AND u.isActive = 1
-    WHERE LTRIM(RTRIM(s.value)) <> N'''' AND u.id <> @OwnerId
+    FROM @Miembros s
+    JOIN [dbo].[user] u ON u.email = s.email AND u.isActive = 1
+    WHERE u.id <> @OwnerId
       AND EXISTS (
         SELECT 1 FROM [dbo].[subprocess_user_company] suc
         JOIN [dbo].[company_user] cu ON cu.id_company_user = suc.id_company_user
@@ -267,14 +279,13 @@ BEGIN
 END;
 
 -- Miembros que NO se pudieron agregar (sin permiso del agente o sin usuario).
-SELECT LTRIM(RTRIM(s.value)) AS correo_no_agregado
-FROM STRING_SPLIT(@MiembrosCsv, N'','') s
-WHERE LTRIM(RTRIM(s.value)) <> N''''
-  AND NOT EXISTS (
+SELECT s.email AS correo_no_agregado
+FROM @Miembros s
+WHERE NOT EXISTS (
     SELECT 1 FROM [dbo].[chat_project_member] m
     JOIN [dbo].[user] u ON u.id = m.id_user
     JOIN [dbo].[chat_project] p ON p.id_project = m.id_project
-    WHERE p.id_agent = @AgentId AND u.email = LTRIM(RTRIM(s.value)));
+    WHERE p.id_agent = @AgentId AND u.email = s.email);
 ',
 N'@AgentCode NVARCHAR(60), @OwnerEmail NVARCHAR(255), @MiembrosCsv NVARCHAR(MAX)',
 @AgentCode = @AgentCode, @OwnerEmail = @OwnerEmail, @MiembrosCsv = @MiembrosCsv;
