@@ -161,10 +161,14 @@ export function leerTokenDeEnv(ruta, leer = (r) => readFileSync(r, 'utf8')) {
   } catch {
     throw new ErrorConfig(`No se pudo leer HILOS_TOKEN_ENV_AGENTE (${ruta}).`);
   }
-  for (const linea of texto.split(/\r?\n/)) {
-    const m = /^\s*(?:export\s+)?CLAUDE_CODE_OAUTH_TOKEN\s*=\s*(.*)$/.exec(linea);
-    if (!m) continue;
-    const valor = m[1].trim().replace(/^(['"])(.*)\1$/, '$2').trim();
+  for (const cruda of texto.split('\n')) {
+    let linea = cruda.trim();
+    if (linea.startsWith('export ')) linea = linea.slice(7).trim();
+    const igual = linea.indexOf('=');
+    if (igual < 0 || linea.slice(0, igual).trim() !== 'CLAUDE_CODE_OAUTH_TOKEN') continue;
+    let valor = linea.slice(igual + 1).trim();
+    const q = valor[0];
+    if ((q === '"' || q === "'") && valor.endsWith(q) && valor.length >= 2) valor = valor.slice(1, -1).trim();
     if (valor) return valor;
   }
   throw new ErrorConfig(`El archivo de HILOS_TOKEN_ENV_AGENTE no trae CLAUDE_CODE_OAUTH_TOKEN.`);
