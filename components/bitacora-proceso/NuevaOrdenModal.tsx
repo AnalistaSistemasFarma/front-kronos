@@ -404,7 +404,7 @@ export default function NuevaOrdenModal({
 
         <PersonaPicker
           titulo='Inspector'
-          descripcion='Da su visto bueno después del cierre del supervisor.'
+          descripcion='Da su visto bueno después del cierre. Debe ser distinto de quien abre y del jefe.'
           usuarios={inspectores.data?.responsables ?? null}
           vacio='No hay inspectores asignados en esta empresa. Asígnelos en Catálogo → Responsables.'
           value={inspector}
@@ -415,7 +415,7 @@ export default function NuevaOrdenModal({
         />
         <PersonaPicker
           titulo='Jefe de producción'
-          descripcion='Da el último visto bueno, después del inspector.'
+          descripcion='Puede ser usted mismo. El jefe designado también puede cerrar; si cierra el supervisor, el jefe da el último visto bueno.'
           usuarios={jefes.data?.responsables ?? null}
           vacio='No hay jefes de producción asignados en esta empresa. Asígnelos en Catálogo → Responsables.'
           value={jefe}

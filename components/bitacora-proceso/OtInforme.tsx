@@ -5,7 +5,7 @@ import { useEffect } from 'react';
 import { Alert, Anchor, Box, Breadcrumbs, Button, Card, Divider, Group, Loader, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { IconAlertTriangle, IconArrowLeft, IconChevronRight, IconPrinter, IconSquare, IconSquareCheck } from '@tabler/icons-react';
-import { OT_BASE_URL, OT_INSPECTOR_LABEL, OT_JEFE_PRODUCCION_LABEL, OT_METODO_LABEL, OT_ROL_LABEL, otNombreCompleto } from '../../lib/bitacora-proceso/constants';
+import { OT_BASE_URL, OT_INSPECTOR_LABEL, OT_JEFE_PRODUCCION_LABEL, OT_METODO_LABEL, OT_ROL_LABEL, OT_SIGNIFICADO_CIERRE_JEFE, otNombreCompleto } from '../../lib/bitacora-proceso/constants';
 import type { OrdenDetalle } from '../../lib/bitacora-proceso/db';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import { codigoOt, fmtFecha, fmtFechaHora, fmtFechaHoraSeg, nombreArchivoInforme, otHref, turnoLabel, useOtFetch } from './otClient';
@@ -136,7 +136,7 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
             {op && <Campo label='Cantidad planeada (SAP)' value={opTxt('PlannedQuantity')} />}
             <Campo label='Hora inicio' value={fmtFechaHoraSeg(o.abiertaEn)} />
             <Campo label='Hora final' value={o.cerradaEn ? fmtFechaHoraSeg(o.cerradaEn) : 'Pendiente (abierta)'} />
-            <Campo label='Supervisor' value={o.abiertaPor} />
+            <Campo label='Abrió' value={o.abiertaPor} />
             <Campo label={OT_INSPECTOR_LABEL} value={o.inspector?.name ?? '—'} />
             <Campo label={OT_JEFE_PRODUCCION_LABEL} value={o.jefe?.name ?? '—'} />
             {o.cerradaPor && <Campo label='Cerrada por' value={o.cerradaPor} />}
@@ -211,7 +211,7 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
                     <Group gap={8} wrap='nowrap' align='center'>
                       <Icono size={26} stroke={1.8} />
                       <div style={{ minWidth: 0 }}>
-                        <Text fw={700}>{OT_ROL_LABEL[v.rol]}</Text>
+                        <Text fw={700}>{v.rol === 'SUPERVISOR' && v.firma?.significado === OT_SIGNIFICADO_CIERRE_JEFE ? OT_ROL_LABEL.JEFE_PROD : OT_ROL_LABEL[v.rol]}</Text>
                         {v.rol === 'SUPERVISOR' && <Text size='xs' c='dimmed' tt='uppercase' fw={600}>Cerró la bitácora</Text>}
                       </div>
                     </Group>
@@ -223,7 +223,7 @@ export default function OtInforme({ company, idOrden }: { company: OtCompanyAcce
                       </>
                     ) : (
                       <Text c='dimmed' mt={6}>
-                        {v.estado === 'no_aplica' ? 'No aplica' : `Pendiente${v.designado ? ` — ${v.designado}` : ''}`}
+                        {v.nota ?? (v.estado === 'no_aplica' ? 'No aplica' : `Pendiente${v.designado ? ` — ${v.designado}` : ''}`)}
                       </Text>
                     )}
                   </Card>

@@ -46,6 +46,7 @@ import {
   OT_LIMITS,
   OT_METODO_LABEL,
   OT_ROL_LABEL,
+  OT_SIGNIFICADO_CIERRE_JEFE,
   otPictograma,
   type OtFirmaRol,
 } from '../../lib/bitacora-proceso/constants';
@@ -169,8 +170,11 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
     if (!o) return [];
     if (confirmar === 'INSPECTOR') return o.inspector ? [o.inspector] : [];
     if (confirmar === 'JEFE_PROD') return o.jefe ? [o.jefe] : [];
-    // El inspector y el jefe de la bitácora no pueden cerrarla (segregación).
-    return (supervisores.data?.supervisores ?? []).filter((p) => p.id !== o.inspector?.id && p.id !== o.jefe?.id);
+    if (confirmar === 'OPERARIO') return [];
+    // CIERRE (R3, 2026-10-17): los supervisores asignados y el JEFE DE PRODUCCIÓN designado
+    // en esta bitácora. El inspector nunca cierra (segregación); el servidor lo vuelve a validar.
+    const sup = (supervisores.data?.supervisores ?? []).filter((p) => p.id !== o.inspector?.id && p.id !== o.jefe?.id);
+    return o.jefe ? [...sup, { id: o.jefe.id, name: `${o.jefe.name} (jefe de producción)` }] : sup;
   }, [o, confirmar, supervisores.data]);
 
   if (detalle.loading && !o) {
@@ -391,7 +395,7 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
                 <Group gap={8} wrap='nowrap'>
                   <Icono size={26} color={v.estado === 'dado' ? 'var(--mantine-color-green-7)' : undefined} />
                   <div>
-                    <Text fw={700}>{OT_ROL_LABEL[v.rol]}</Text>
+                    <Text fw={700}>{v.rol === 'SUPERVISOR' && v.firma?.significado === OT_SIGNIFICADO_CIERRE_JEFE ? OT_ROL_LABEL.JEFE_PROD : OT_ROL_LABEL[v.rol]}</Text>
                     {v.rol === 'SUPERVISOR' && <Text size='xs' c='dimmed' fw={600}>CERRÓ</Text>}
                   </div>
                 </Group>
@@ -401,6 +405,8 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
                     <Text size='sm'>{fmtFechaHoraSeg(v.firma.firmadoEn)}</Text>
                     <Text size='xs' c='dimmed'>{OT_METODO_LABEL[v.firma.metodo] ?? v.firma.metodo}</Text>
                   </>
+                ) : v.nota ? (
+                  <Text c='dimmed' mt={4}>{v.nota}</Text>
                 ) : v.estado === 'no_aplica' ? (
                   <Text c='dimmed' mt={4}>No aplica</Text>
                 ) : (
@@ -431,7 +437,7 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
             <Text>{o.cerradaEn ? fmtFechaHora(o.cerradaEn) : 'Abierta'}</Text>
           </div>
           <div>
-            <Text size='xs' c='dimmed' tt='uppercase' fw={600}>Supervisor</Text>
+            <Text size='xs' c='dimmed' tt='uppercase' fw={600}>Abrió</Text>
             <Text>{o.abiertaPor}</Text>
           </div>
           <div>
@@ -483,6 +489,20 @@ export default function OtPlanta({ company, idOrden }: { company: OtCompanyAcces
           <Button variant='default' size={mobile ? 'md' : 'lg'} h={mobile ? 52 : undefined} leftSection={<IconPrinter size={18} />} component={Link} href={informeHref} data-testid='ot-informe'>
             {mobile ? 'Informe' : 'Informe / PDF'}
           </Button>
+          {/* R4: el visto bueno del operario es opcional y ya no frena el cierre; se puede dar mientras esté abierta. */}
+          {o.puedeVistoOperario && o.siguiente !== 'OPERARIO' && (
+            <Button
+              variant='light'
+              size={mobile ? 'md' : 'lg'}
+              h={mobile ? 52 : undefined}
+              leftSection={<IconSquareCheck size={18} />}
+              onClick={() => setConfirmar('OPERARIO')}
+              styles={{ label: { whiteSpace: 'normal', lineHeight: 1.15 } }}
+              data-testid='ot-visto-operario'
+            >
+              {BOTON_VISTO.OPERARIO}
+            </Button>
+          )}
           {o.siguiente && (
             <Button
               color={o.siguiente === 'SUPERVISOR' ? 'red' : undefined}

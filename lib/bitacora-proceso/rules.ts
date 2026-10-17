@@ -47,6 +47,11 @@ export interface OtCompanyAccess {
   companyName: string;
   canOperate: boolean;
   canManage: boolean;
+  /**
+   * Puede ABRIR bitácoras (R3, 2026-10-17): Gestión o jefe de producción asignado. Solo lo
+   * calcula GET /api/bitacora-proceso para la UI; el servidor lo vuelve a validar al abrir.
+   */
+  canOpen?: boolean;
 }
 
 /** Resuelve el acceso por empresa desde las filas de permiso (ignora URLs ajenas). */
@@ -586,4 +591,58 @@ export function assertPuedeSerResponsable(rol: OtResponsableRol, access: OtCompa
 export function errorSinRol(rol: OtResponsableRol, status = 400): OtError {
   const label = OT_ROL_LABEL[rol].toLowerCase();
   return new OtError(`La persona elegida no está asignada como ${label} en esta empresa (Catálogo → Responsables).`, status);
+}
+
+/** Lo que se sabe de una persona para decir EXACTAMENTE qué le falta para actuar con un rol. */
+export interface EstadoRolPersona {
+  nombre: string;
+  empresa: string;
+  /** null = no tiene fila en Catálogo → Responsables; false = desactivada; true = asignada y activa. */
+  asignado: boolean | null;
+  /** Acceso al módulo de ESA persona en la empresa (null = sin ningún permiso del módulo). */
+  access: OtCompanyAccess | null;
+}
+
+/**
+ * Motivo EXACTO por el que la persona no puede actuar con el rol (null = sí puede):
+ * el rol en Responsables, el permiso del módulo o, para el supervisor, el de Gestión.
+ * (2026-10-17: antes el mensaje no decía qué faltaba.)
+ */
+export function motivoSinRol(rol: OtResponsableRol, e: EstadoRolPersona): string | null {
+  const label = OT_ROL_LABEL[rol].toLowerCase();
+  if (e.asignado === null) return `${e.nombre} no está asignado como ${label} en ${e.empresa}: asígnelo en Catálogo → Responsables.`;
+  if (e.asignado === false) return `${e.nombre} está desactivado como ${label} en ${e.empresa}: actívelo en Catálogo → Responsables.`;
+  if (!e.access?.canOperate) {
+    return `${e.nombre} está asignado como ${label}, pero le falta el permiso «Bitácora de Proceso» en ${e.empresa} (Administración → Usuarios).`;
+  }
+  if (rol === 'SUPERVISOR' && !e.access.canManage) {
+    return `${e.nombre} está asignado como supervisor, pero le falta el permiso «Bitácora de Proceso: Gestión» en ${e.empresa} (Administración → Usuarios).`;
+  }
+  return null;
+}
+
+/** Mensaje de la sesión SIN ningún permiso del módulo (dice cuál pedir y dónde). */
+export const OT_MSG_SIN_MODULO =
+  'No tiene acceso a Bitácora de Proceso: le falta el permiso «Bitácora de Proceso» (o «Bitácora de Proceso: Gestión») en alguna empresa. Lo asigna un administrador en Administración → Usuarios.';
+
+/** Mensaje de la sesión con usuario inactivo. */
+export const OT_MSG_USUARIO_INACTIVO = 'Su usuario de SynerLink está inactivo. Pida a un administrador que lo active.';
+
+/**
+ * Qué le falta EXACTAMENTE a la sesión en la empresa pedida (2026-10-17): el permiso del
+ * módulo en esa empresa o el de Gestión. `entry` = su acceso en esa empresa (null = ninguno).
+ */
+export function mensajeFaltaAcceso(need: 'canOperate' | 'canManage', entry: OtCompanyAccess | null, idCompany: number): string {
+  if (!entry) {
+    return `Le falta el permiso «Bitácora de Proceso» en la empresa seleccionada (id ${idCompany}). Lo asigna un administrador en Administración → Usuarios.`;
+  }
+  if (need === 'canManage' && !entry.canManage) {
+    return `Le falta el permiso «Bitácora de Proceso: Gestión» en ${entry.companyName.trim()}: esto solo lo hace el supervisor. Lo asigna un administrador en Administración → Usuarios.`;
+  }
+  return `Le falta el permiso «Bitácora de Proceso» en ${entry.companyName.trim()}.`;
+}
+
+/** Mensaje cuando no puede ABRIR (R3): ni Gestión ni jefe de producción asignado. */
+export function mensajeNoPuedeAbrir(entry: OtCompanyAccess): string {
+  return `Para abrir una bitácora en ${entry.companyName.trim()} le falta el permiso «Bitácora de Proceso: Gestión» (supervisor) o estar asignado como jefe de producción en Catálogo → Responsables.`;
 }
