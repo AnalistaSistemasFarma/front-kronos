@@ -1,13 +1,15 @@
 import type { PrismaClient } from '../../app/generated/prisma';
-import { isOtResponsableRol, OT_DIAS_CERRADAS, OT_SUBPROCESS_URLS, type OtResponsableRol } from './constants';
+import { isOtResponsableRol, OT_DIAS_CERRADAS, OT_NOTA_CIERRE_JEFE, OT_SIN_VISTO_OPERARIO, OT_SUBPROCESS_URLS, type OtResponsableRol } from './constants';
 import type { AvisoBitacora } from './notificaciones';
 import {
   assertActoresDistintos,
   assertPuedeConfirmar,
+  esCierreDelJefe,
   huellaContenido,
   OT_CONFIRMACION_VERSION,
   OT_FIRMA_SIGNIFICADO,
   OT_VISTOS_BUENOS,
+  significadoCierre,
   rolVisible,
   siguienteVistoBueno,
   vistosCompletos,
@@ -22,9 +24,10 @@ import {
   assertActividadRegistrable,
   assertOperadorDeLaOrden,
   assertPuedeSerResponsable,
-  errorSinRol,
   assertPuedeRegistrar,
+  motivoSinRol,
   OtError,
+  textoDelRegistro,
   resolveOtAccess,
   resolverArea,
   type CambioActividadInput,
@@ -262,6 +265,43 @@ export async function tieneRolResponsable(db: OtDb, idCompany: number, idUser: s
 }
 
 /**
+ * Motivo EXACTO por el que la persona no puede actuar HOY con el rol en la empresa
+ * (null = sí puede; misma regla que tieneRolResponsable). Para los mensajes de error.
+ */
+export async function motivoSinRolPersona(db: OtDb, idCompany: number, idUser: string, rol: OtResponsableRol): Promise<string | null> {
+  const [fila, acceso, nombres, empresa] = await Promise.all([
+    db.otResponsable.findFirst({ where: { id_company: idCompany, id_user: idUser, rol }, select: { activo: true } }),
+    accesoModuloEnEmpresa(db, idCompany, [idUser]),
+    nombresDeUsuarios(db, [idUser]),
+    db.company.findFirst({ where: { id_company: idCompany }, select: { company: true } }),
+  ]);
+  return motivoSinRol(rol, {
+    nombre: nombres.get(idUser)?.name ?? 'La persona elegida',
+    empresa: empresa?.company?.trim() || 'esta empresa',
+    asignado: fila ? fila.activo : null,
+    access: acceso.get(idUser) ?? null,
+  });
+}
+
+/**
+ * ¿Puede ABRIR una bitácora en la empresa? (R3, 2026-10-17: abren el supervisor o el jefe).
+ *   - con «Bitácora de Proceso: Gestión» (supervisor), como hasta ahora;
+ *   - o, sin Gestión, si está asignado y activo como JEFE DE PRODUCCIÓN en la empresa. Ese
+ *     acceso es SOLO para abrir (no administra el catálogo) y la bitácora que abre queda
+ *     con él mismo como jefe de producción (ver crearOrden).
+ */
+export async function puedeAbrirComoJefe(db: OtDb, access: OtCompanyAccess, idUser: string): Promise<boolean> {
+  if (!access.canOperate) return false;
+  return tieneRolResponsable(db, access.idCompany, idUser, 'JEFE_PROD');
+}
+
+/** Empresas (ids) donde la persona es hoy jefe de producción asignado y activo. */
+export async function empresasComoJefe(db: OtDb, idUser: string): Promise<Set<number>> {
+  const filas = await db.otResponsable.findMany({ where: { id_user: idUser, rol: 'JEFE_PROD', activo: true }, select: { id_company: true } });
+  return new Set(filas.map((f) => f.id_company));
+}
+
+/**
  * Supervisores de la empresa: quienes pueden confirmar el cierre («Cerró») eligiendo su
  * nombre en la tablet. Desde el 2026-10-16 son SOLO los asignados como SUPERVISOR en
  * Catálogo → Responsables (antes: todo usuario con Gestión, incluida la cuenta de planta).
@@ -353,22 +393,34 @@ async function operadoresActivos(db: Pick<OtDb, 'otOperador'>, idCompany: number
  * la transacción con bloqueo (UPDLOCK, HOLDLOCK) para que dos supervisores a la
  * vez no choquen. Los operarios (A1) deben estar ACTIVOS en el maestro de la
  * empresa; el área (A5) sale del catálogo; el inspector y el jefe de producción deben
- * estar ASIGNADOS a ese rol en la empresa (ot_responsable) y ser distintos de quien abre.
+ * estar ASIGNADOS a ese rol en la empresa (ot_responsable); el inspector, distinto de quien
+ * abre y del jefe. Quien abre SÍ puede ser el jefe (R3, 2026-10-17); si abre como jefe (sin
+ * Gestión), solo puede abrir bitácoras de las que él mismo es el jefe.
  */
-export async function crearOrden(db: OtDb, input: NuevaOrdenInput, actor: OtActor): Promise<{ id: number; consecutivo: number }> {
+export async function crearOrden(
+  db: OtDb,
+  input: NuevaOrdenInput,
+  actor: OtActor,
+  /** 'GESTION' = abre con el permiso de Gestión; 'JEFE_PROD' = abre como jefe asignado (R3). */
+  abreComo: 'GESTION' | 'JEFE_PROD' = 'GESTION'
+): Promise<{ id: number; consecutivo: number }> {
+  // Quien abre sin Gestión (como jefe) solo abre bitácoras de las que él mismo es el jefe.
+  if (abreComo === 'JEFE_PROD' && input.jefeProduccion !== actor.idUser) {
+    throw new OtError('Usted abre como jefe de producción (sin el permiso de Gestión): elíjase a sí mismo como jefe de producción de esta bitácora.', 403);
+  }
   // Inspector y jefe: SOLO personas asignadas a ese rol en la empresa (2026-10-16).
   const [insp, jefe, ops, areas] = await Promise.all([
-    tieneRolResponsable(db, input.idCompany, input.inspector, 'INSPECTOR'),
-    tieneRolResponsable(db, input.idCompany, input.jefeProduccion, 'JEFE_PROD'),
+    motivoSinRolPersona(db, input.idCompany, input.inspector, 'INSPECTOR'),
+    motivoSinRolPersona(db, input.idCompany, input.jefeProduccion, 'JEFE_PROD'),
     operadoresActivos(db, input.idCompany, input.operadores),
     db.otArea.findMany({ where: { id_company: input.idCompany, activo: true }, select: { id_area: true, nombre: true } }),
   ]);
   if (ops.length !== input.operadores.length) {
     throw new OtError('Algún operario seleccionado no existe o está inactivo en el maestro de la empresa.', 400);
   }
-  assertActoresDistintos({ supervisor: actor.idUser, inspector: input.inspector, jefe: input.jefeProduccion });
-  if (!insp) throw errorSinRol('INSPECTOR');
-  if (!jefe) throw errorSinRol('JEFE_PROD');
+  assertActoresDistintos({ abre: actor.idUser, inspector: input.inspector, jefe: input.jefeProduccion });
+  if (insp) throw new OtError(insp, 400);
+  if (jefe) throw new OtError(jefe, 400);
   const area = resolverArea(areas, input.idArea);
 
   return db.$transaction(async (tx) => {
@@ -430,7 +482,8 @@ export interface OrdenDetalle {
   /** Jefe de producción (B1; columna id_jefe_produccion). */
   jefe: { id: string; name: string } | null;
   /** `operador` = operario elegido en la tablet; `usuario` = usuario de la sesión que registró. */
-  registros: Array<{ id: string; actividad: string; operador: string | null; usuario: string; registradoEn: string; observacion: string | null }>;
+  /** `textoLibre`: el registro es de una actividad de texto libre y `observacion` es el texto escrito. */
+  registros: Array<{ id: string; actividad: string; operador: string | null; usuario: string; registradoEn: string; observacion: string | null; textoLibre: boolean }>;
   /** Vistos buenos dados (rol VISIBLE: las filas viejas «Verificó» salen como JEFE_PROD). */
   firmas: FirmaVista[];
   /** Los cuatro vistos buenos en orden, con su estado (B2). */
@@ -447,6 +500,12 @@ export interface OrdenDetalle {
   puedeCerrar: boolean;
   /** Cerrada y falta algún visto bueno posterior (inspector o jefe). */
   puedeVerificar: boolean;
+  /** Con qué rol ABRIÓ: el jefe de producción de esta bitácora o el supervisor (permiso de Gestión). */
+  abiertaComo: 'SUPERVISOR' | 'JEFE_PROD';
+  /** Quién CERRÓ, con qué rol, cuándo y por qué método (null si está abierta). */
+  cierre: { nombre: string; como: 'SUPERVISOR' | 'JEFE_PROD'; en: string; metodo: string; cuentaComoVistoJefe: boolean } | null;
+  /** Abierta, con operarios programados y sin el visto bueno (opcional) del operario. */
+  puedeVistoOperario: boolean;
 }
 
 /** Visto bueno dado (sin imagen de firma, huella visible ni IP en pantalla). */
@@ -463,8 +522,10 @@ export interface FirmaVista {
 
 export interface VistoBuenoVista {
   rol: OtFirmaRol;
-  /** dado | pendiente | no_aplica (p. ej. sin inspector en bitácoras del #617). */
-  estado: 'dado' | 'pendiente' | 'no_aplica';
+  /** dado | pendiente | opcional (operario, R4) | no_aplica (p. ej. sin inspector en bitácoras del #617). */
+  estado: 'dado' | 'pendiente' | 'opcional' | 'no_aplica';
+  /** Aclaración visible (p. ej. «Cerró la bitácora: su cierre cuenta como su visto bueno»). */
+  nota: string | null;
   /** Persona designada (inspector o jefe) cuando está pendiente. */
   designado: string | null;
   firma: FirmaVista | null;
@@ -504,20 +565,33 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
   const actores = { estado: o.estado, inspector: o.id_inspector, jefe: o.id_jefe_produccion, operadores: o.operadores.map((x) => x.operador.id_operador) };
   const firmas = o.firmas.map(firmaVista).filter((f): f is FirmaVista => f !== null);
   const dados = vistosDados(o.firmas);
-  const requeridos = vistosRequeridos(actores);
+  const requeridos = vistosRequeridos(actores, o.firmas);
   const siguiente = siguienteVistoBueno(actores, o.firmas);
+  const cerroElJefe = esCierreDelJefe(dados.SUPERVISOR);
   const vistos: VistoBuenoVista[] = OT_VISTOS_BUENOS.map((rol) => {
     const f = dados[rol];
     const designado = rol === 'INSPECTOR' ? nombre(o.id_inspector) : rol === 'JEFE_PROD' ? nombre(o.id_jefe_produccion) : null;
-    if (f) return { rol, estado: 'dado', designado, firma: firmaVista(f) };
-    return { rol, estado: requeridos.includes(rol) ? 'pendiente' : 'no_aplica', designado, firma: null };
+    if (f) return { rol, estado: 'dado', designado, firma: firmaVista(f), nota: null };
+    if (rol === 'JEFE_PROD' && cerroElJefe) return { rol, estado: 'no_aplica', designado, firma: null, nota: OT_NOTA_CIERRE_JEFE };
+    // R4: el del operario es opcional (se puede dar mientras está abierta; no frena el cierre).
+    // Transparencia (Nicolás, 2026-10-17): si no se dio, se dice explícitamente.
+    if (rol === 'OPERARIO' && actores.operadores.length > 0) {
+      return { rol, estado: 'opcional', designado, firma: null, nota: o.estado === 'ABIERTA' ? `${OT_SIN_VISTO_OPERARIO} (opcional, hasta el cierre)` : OT_SIN_VISTO_OPERARIO };
+    }
+    return { rol, estado: requeridos.includes(rol) ? 'pendiente' : 'no_aplica', designado, firma: null, nota: null };
   });
+  // Transparencia (2026-10-17): quién abrió y con qué rol; quién cerró, con qué rol, cuándo y cómo.
+  const fCierre = dados.SUPERVISOR ? firmaVista(dados.SUPERVISOR) : null;
   return {
     id: o.id_orden_trabajo,
     idCompany: o.id_company,
     consecutivo: o.consecutivo,
     producto: o.producto,
     itemCode: o.item_code,
+    abiertaComo: o.id_jefe_produccion && o.abierta_por === o.id_jefe_produccion ? 'JEFE_PROD' : 'SUPERVISOR',
+    cierre: fCierre
+      ? { nombre: fCierre.nombre, como: cerroElJefe ? 'JEFE_PROD' : 'SUPERVISOR', en: fCierre.firmadoEn, metodo: fCierre.metodo, cuentaComoVistoJefe: cerroElJefe }
+      : null,
     lote: o.lote,
     turno: o.turno,
     area: o.area,
@@ -544,6 +618,7 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
       usuario: nombre(r.id_user) ?? r.id_user,
       registradoEn: r.registrado_en.toISOString(),
       observacion: r.observacion,
+      textoLibre: r.es_texto_libre,
     })),
     firmas,
     vistos,
@@ -556,6 +631,7 @@ export async function getOrdenDetalle(db: OtDb, idOrden: number, access: OtCompa
     puedeGestionar: access.canManage,
     puedeCerrar: o.estado === 'ABIERTA',
     puedeVerificar: o.estado === 'CERRADA' && siguiente !== null,
+    puedeVistoOperario: o.estado === 'ABIERTA' && actores.operadores.length > 0 && !dados.OPERARIO,
   };
 }
 
@@ -596,9 +672,10 @@ export async function crearRegistro(
 
     const actividad = await tx.otActividad.findFirst({
       where: { id_actividad: input.idActividad, id_company: access.idCompany },
-      select: { id_actividad: true, nombre: true, activo: true },
+      select: { id_actividad: true, nombre: true, activo: true, texto_libre: true },
     });
     assertActividadRegistrable(actividad);
+    const texto = textoDelRegistro(actividad!, input);
 
     const r = await tx.otRegistro.create({
       data: {
@@ -608,7 +685,8 @@ export async function crearRegistro(
         id_user: actor.idUser,
         id_operador: operador?.id_operador ?? null,
         operador_nombre: operador?.nombre ?? null,
-        observacion: input.observacion,
+        observacion: texto.observacion,
+        es_texto_libre: texto.esTextoLibre,
         ip: actor.ip ? actor.ip.slice(0, 64) : null,
       },
       select: { id_registro: true, registrado_en: true, actividad_nombre: true, operador_nombre: true },
@@ -737,10 +815,12 @@ export async function confirmarVistoBueno(
     if (locked.length === 0) throw new OtError('Bitácora no encontrada.', 404);
     const { o, contenido } = await contenidoDe(tx, idOrden, access.idCompany);
     const actores = { estado: o.estado, inspector: o.id_inspector, jefe: o.id_jefe_produccion, operadores: o.operadores.map((x) => x.id_operador) };
-    assertPuedeConfirmar(actores, o.firmas, { rol: c.rol, idUser: c.idUser, idOperador: c.idOperador, access: c.access });
-    // Cierra SOLO un supervisor asignado en la empresa (2026-10-16), no cualquiera con Gestión.
-    if (c.rol === 'SUPERVISOR' && !(c.idUser && (await tieneRolResponsable(tx as OtDb, access.idCompany, c.idUser, 'SUPERVISOR')))) {
-      throw errorSinRol('SUPERVISOR', 403);
+    const cierreComo = assertPuedeConfirmar(actores, o.firmas, { rol: c.rol, idUser: c.idUser, idOperador: c.idOperador, access: c.access });
+    // Cierra SOLO un supervisor asignado en la empresa (2026-10-16), no cualquiera con Gestión;
+    // o el jefe de producción DESIGNADO en la bitácora, si sigue asignado como jefe (R3, 2026-10-17).
+    if (c.rol === 'SUPERVISOR' && cierreComo && c.idUser) {
+      const motivo = await motivoSinRolPersona(tx as OtDb, access.idCompany, c.idUser, cierreComo);
+      if (motivo) throw new OtError(motivo, 403);
     }
 
     let nombre = c.nombre ?? c.email;
@@ -750,9 +830,11 @@ export async function confirmarVistoBueno(
       nombre = op.nombre;
     }
 
+    // Traza de con qué rol se cerró: «Cerró» (supervisor) o «Cerró (jefe)».
+    const significado = c.rol === 'SUPERVISOR' ? significadoCierre(cierreComo ?? 'SUPERVISOR') : OT_FIRMA_SIGNIFICADO[c.rol];
     let huella: string;
     if (c.rol === 'SUPERVISOR') {
-      huella = huellaContenido({ ...contenido, observacionCierre: observacion, cerradaPor: c.idUser, cerradaEn: null });
+      huella = huellaContenido({ ...contenido, observacionCierre: observacion, cerradaPor: c.idUser, cerradaEn: null, cierreComo });
       const n = await tx.$executeRaw`
         UPDATE [dbo].[ot_orden_trabajo]
         SET estado = N'CERRADA', cerrada_por = ${c.idUser}, cerrada_en = SYSUTCDATETIME(), observacion_cierre = ${observacion}
@@ -766,7 +848,7 @@ export async function confirmarVistoBueno(
       data: {
         id_orden_trabajo: idOrden,
         rol: c.rol,
-        significado: OT_FIRMA_SIGNIFICADO[c.rol],
+        significado,
         // El operario no tiene usuario: id_user = la sesión desde la que tocó su nombre.
         id_user: c.idUser ?? c.sesion.idUser,
         signer_email: c.email,
@@ -783,7 +865,7 @@ export async function confirmarVistoBueno(
       },
       select: { firmado_en: true, content_sha256: true },
     });
-    const despues = [...o.firmas, { rol: c.rol, significado: OT_FIRMA_SIGNIFICADO[c.rol], id_user: c.idUser ?? c.sesion.idUser }];
+    const despues = [...o.firmas, { rol: c.rol, significado, id_user: c.idUser ?? c.sesion.idUser }];
     const estado = c.rol === 'SUPERVISOR' ? 'CERRADA' : o.estado;
     return {
       rol: c.rol,
@@ -902,7 +984,7 @@ export async function listActividades(db: OtDb, idCompany: number, soloActivas: 
   const rows = await db.otActividad.findMany({
     where: { id_company: idCompany, ...(soloActivas ? { activo: true } : {}) },
     orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
-    select: { id_actividad: true, nombre: true, exige_observacion: true, orden: true, activo: true, icono: true },
+    select: { id_actividad: true, nombre: true, exige_observacion: true, texto_libre: true, orden: true, activo: true, icono: true },
   });
   return rows;
 }
@@ -918,12 +1000,13 @@ export async function crearActividad(db: OtDb, input: NuevaActividadInput, actor
       id_company: input.idCompany,
       nombre: input.nombre,
       exige_observacion: input.exigeObservacion,
+      texto_libre: input.textoLibre ?? false,
       orden: input.orden,
       icono: input.icono,
       activo: true,
       created_by: actor.idUser,
     },
-    select: { id_actividad: true, nombre: true, exige_observacion: true, orden: true, activo: true, icono: true },
+    select: { id_actividad: true, nombre: true, exige_observacion: true, texto_libre: true, orden: true, activo: true, icono: true },
   });
 }
 
@@ -933,6 +1016,7 @@ export async function cambiarActividad(db: OtDb, input: CambioActividadInput) {
     data: {
       ...(input.activo !== undefined ? { activo: input.activo } : {}),
       ...(input.exigeObservacion !== undefined ? { exige_observacion: input.exigeObservacion } : {}),
+      ...(input.textoLibre !== undefined ? { texto_libre: input.textoLibre } : {}),
       ...(input.orden !== undefined ? { orden: input.orden } : {}),
       ...(input.icono !== undefined ? { icono: input.icono } : {}),
     },
@@ -940,7 +1024,7 @@ export async function cambiarActividad(db: OtDb, input: CambioActividadInput) {
   if (res.count === 0) throw new OtError('Actividad no encontrada.', 404);
   return db.otActividad.findFirst({
     where: { id_actividad: input.idActividad, id_company: input.idCompany },
-    select: { id_actividad: true, nombre: true, exige_observacion: true, orden: true, activo: true, icono: true },
+    select: { id_actividad: true, nombre: true, exige_observacion: true, texto_libre: true, orden: true, activo: true, icono: true },
   });
 }
 
