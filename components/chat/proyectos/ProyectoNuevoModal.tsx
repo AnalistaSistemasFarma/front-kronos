@@ -237,8 +237,9 @@ export default function ProyectoNuevoModal({
         <Alert color='blue' icon={<IconInfoCircle size={16} />} py={6}>
           <Text size='xs'>
             Cada conversación del proyecto tiene su propia memoria y no se mezcla con las demás
-            conversaciones del asistente. Es un <b>piloto</b>: el asistente atiende como máximo dos
-            conversaciones de proyecto a la vez y las demás esperan su turno.
+            conversaciones del asistente. Puede consultar páginas web públicas, pero nunca envía
+            datos de la empresa a sitios externos. Es un <b>piloto</b>: el asistente atiende como
+            máximo dos conversaciones de proyecto a la vez y las demás esperan su turno.
           </Text>
         </Alert>
 

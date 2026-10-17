@@ -23,20 +23,29 @@ No reemplaza al bot vivo ni lo toca. El bot de Play sigue en su sesión larga (`
 | Sin sesión ni llavero de ningún bot | La credencial entra **solo** por variable de entorno al hijo. **Nunca** corra `claude /login` con ese config dir. |
 | Plugin de Telegram apagado | `--settings {"enabledPlugins":{"telegram@claude-plugins-official":false},"disableAllHooks":true}`. Así se evita el gotcha de los jobs `claude -p` que tumban el poller. |
 | Sin modo de permisos abierto | `--restricted` + `--permission-mode dontAsk`. Nunca `bypassPermissions` ni `--dangerously-skip-permissions`; el código lo verifica y el evento `init` se revisa en cada turno. |
-| Herramientas mínimas | `Read, Glob, Grep, Edit, Write, TodoWrite` (+ `WebSearch` si el perfil lo pide). Se escribe **solo** en `./trabajo/**`. Bash, WebFetch, Agent/Task y NotebookEdit quedan prohibidos. |
+| Herramientas mínimas | `Read, Glob, Grep, Edit, Write, TodoWrite`, más `WebSearch` y `WebFetch` si el perfil tiene `web` (decisión de Nicolás, 2026-10-17). Se escribe **solo** en `./trabajo/**`. Bash, Agent/Task y NotebookEdit quedan prohibidos. |
+| Prompt injection y fuga de datos | El encabezado de sistema de cada turno ordena tratar páginas web, búsquedas, archivos y adjuntos como **datos**, nunca como instrucciones, y **prohíbe** enviar datos de SAP o de la empresa a sitios externos (URL, parámetros, búsquedas, formularios). |
 | Conectores MCP por hilo | `--strict-mcp-config --mcp-config` con **solo** los servidores del perfil del proyecto (`config/perfiles.json`) y las herramientas por nombre exacto, sin comodines. |
 | Entorno limpio | El hijo no hereda nada del puente: recibe solo PATH, HOME, el config aislado y una credencial. La llave de SynerLink nunca le llega. |
 | Llave correcta | Si la bandeja no responde `scope: "projects"` (por ejemplo, porque le pusieron la llave del bot vivo), el puente **no arranca**. |
 | Sin `CLAUDE.md` ajenos | No arranca si hay un `CLAUDE.md` por encima de `HILOS_DIR`, porque Claude Code lo cargaría en cada hilo. |
 
-## Autenticación (decisión de Nicolás)
+## Autenticación (decisión de Nicolás, 2026-10-17)
 
-El puente lee **una** credencial de su propio `.env`:
+«El plan de cada agente, el token de cada agente.» El puente usa el `CLAUDE_CODE_OAUTH_TOKEN` **del propio agente** (en el piloto, el de Play) y lo toma de UNA de estas fuentes:
 
-- `HILOS_ANTHROPIC_API_KEY` (**recomendada**): es una llave de API con facturación por consumo y un presupuesto medible por hilo (`HILOS_MAX_BUDGET_USD`).
-- `HILOS_CLAUDE_CODE_OAUTH_TOKEN` (solo para el piloto): un token **propio** del puente, generado aparte. **Nunca** el de Play ni el de otro bot.
+- `HILOS_TOKEN_ENV_AGENTE` (la del piloto): es la ruta al `.env` del bot, por ejemplo `~/.play/.env`. El puente lee **solo** esa variable, dentro del proceso y sin imprimirla, e ignora el resto del archivo. El bot vivo no se toca.
+- `HILOS_CLAUDE_CODE_OAUTH_TOKEN`: el mismo token, copiado sin mostrarlo al `.env` del puente (con permisos 600).
+- `HILOS_ANTHROPIC_API_KEY`: llave de API. Queda como alternativa para cuando se escale.
 
-> ⚠️ Para escalar a producción: la documentación del Agent SDK de Anthropic dice que, sin aprobación previa, los productos de terceros que atienden a varias personas **no deben** ofrecer el inicio de sesión ni los límites de claude.ai, y recomienda la **llave de API**. Un hilo compartido por varias personas de SynerLink entra en ese caso. La decisión (llave de API con presupuesto, o validarlo con Anthropic) **la toma Nicolás**.
+Lo que **no** cambia:
+
+- No se reutiliza el llavero ni la sesión viva del bot.
+- El config dir sigue **aislado**, así que la credencial entra solo por variable de entorno.
+
+> ⚠️ **El puente comparte el límite de uso con el bot vivo.** El token es el mismo plan, así que lo que consumen los hilos sale del mismo límite semanal de Play. Si se agota, se frenan los dos. Los topes (2 hilos, 15 min por turno) y `consumo.jsonl` sirven para medirlo.
+>
+> Nota para cuando se escale: la documentación del Agent SDK de Anthropic recomienda la llave de API para productos que atienden a varias personas.
 
 ## Activación del piloto en PRUEBAS (paso a paso)
 
@@ -47,13 +56,13 @@ Antes de empezar: el PR debe estar fusionado en `testing` y desplegado, y Nicol�
    - `CHAT_PROJECTS_AGENTS={"play":["farmalogica","olp","comex-latam"]}`
    - agregue a `CHAT_AGENT_API_KEYS` una llave **nueva** (de 32 caracteres o más) con `{"key":"…","agent":"play","label":"play-hilos-pruebas","scope":"projects"}`. La llave del bot vivo no se toca.
    - reinicie la app de pruebas.
-3. **Carpeta del puente** en el equipo donde va a correr (fuera de `~/.play`):
+3. **Carpeta del puente** en el **Mac de Pedro** (192.168.10.100, donde corre Play), fuera de `~/.play`:
    ```bash
    mkdir -p ~/.puente-hilos/play-pruebas/logs && chmod 700 ~/.puente-hilos ~/.puente-hilos/play-pruebas
    cp puente-hilos/config/perfiles.example.json ~/.puente-hilos/play-pruebas/perfiles.json
    cp puente-hilos/config/env.example ~/.puente-hilos/play-pruebas/.env && chmod 600 ~/.puente-hilos/play-pruebas/.env
    ```
-   Llene el `.env`: la URL de PRUEBAS, la llave de scope `projects`, `HILOS_DIR`, `HILOS_PERFILES` y **una** credencial.
+   Llene el `.env`: la URL de PRUEBAS, la llave de scope `projects`, `HILOS_DIR`, `HILOS_PERFILES` y **una** credencial (en el piloto, `HILOS_TOKEN_ENV_AGENTE=~/.play/.env`, ruta absoluta).
 4. **Prueba en primer plano** (Ctrl+C para apagar):
    ```bash
    bash puente-hilos/launchd/run.sh ~/.puente-hilos/play-pruebas/.env

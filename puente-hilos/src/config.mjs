@@ -9,8 +9,14 @@
  *   HILOS_AGENTE               code del agente (p. ej. 'play'); se verifica contra la llave.
  *   HILOS_DIR                  Carpeta del puente (estado, carpetas de hilos, config aislado).
  *   HILOS_PERFILES             Ruta a perfiles.json (perfil -> conectores MCP).
- *   HILOS_ANTHROPIC_API_KEY    Credencial del modelo (recomendada: llave de API).
- *   HILOS_CLAUDE_CODE_OAUTH_TOKEN  Alternativa del piloto: token propio, NUNCA el de un bot.
+ *   Credencial del modelo, EXACTAMENTE una de:
+ *   HILOS_TOKEN_ENV_AGENTE     Ruta al .env DEL PROPIO AGENTE (p. ej. ~/.play/.env). Decisión de
+ *                              Nicolás (2026-10-17): «el plan de cada agente, el token de cada
+ *                              agente». Se lee SOLO CLAUDE_CODE_OAUTH_TOKEN de ese archivo, dentro
+ *                              del proceso y sin imprimirlo; el resto del archivo se ignora.
+ *                              Comparte el límite de uso con el bot vivo.
+ *   HILOS_CLAUDE_CODE_OAUTH_TOKEN  El mismo token, copiado al .env del puente (600).
+ *   HILOS_ANTHROPIC_API_KEY    Llave de API (la vía que Anthropic indica para multiusuario).
  *   HILOS_MAX_CONCURRENCIA     1 o 2 (por defecto 2). Tope de hilos simultáneos.
  *   HILOS_TIMEOUT_TURNO_MS     Tope por turno (por defecto 900000 = 15 min).
  *   HILOS_MODELO               Opcional: modelo del `claude -p`.
@@ -31,7 +37,6 @@ export const HERRAMIENTAS_PROHIBIDAS = [
   'KillShell',
   'PowerShell',
   'REPL',
-  'WebFetch',
   'NotebookEdit',
   // Subagentes: llegan en F2, con topes de profundidad y gasto.
   'Agent',
@@ -63,7 +68,7 @@ function entero(env, nombre, porDefecto, min, max) {
  *     no viven en archivos de configuración;
  *   - cada herramienta es un nombre EXACTO `mcp__<servidor>__<tool>` de un
  *     servidor declarado en ese mismo perfil; nada de comodines;
- *   - `web: true` habilita solo WebSearch (WebFetch está prohibido siempre).
+ *   - `web: true` habilita WebSearch y WebFetch (decisión de Nicolás, 2026-10-17).
  */
 export function validarPerfiles(json) {
   if (typeof json !== 'object' || json === null || Array.isArray(json)) {
@@ -145,6 +150,26 @@ export function validarAislamiento(hilosDir, home = homedir()) {
   return abs;
 }
 
+/**
+ * Lee SOLO `CLAUDE_CODE_OAUTH_TOKEN` del .env del agente. No devuelve ni
+ * registra nada más del archivo, y los errores nunca incluyen su contenido.
+ */
+export function leerTokenDeEnv(ruta, leer = (r) => readFileSync(r, 'utf8')) {
+  let texto;
+  try {
+    texto = leer(ruta);
+  } catch {
+    throw new ErrorConfig(`No se pudo leer HILOS_TOKEN_ENV_AGENTE (${ruta}).`);
+  }
+  for (const linea of texto.split(/\r?\n/)) {
+    const m = /^\s*(?:export\s+)?CLAUDE_CODE_OAUTH_TOKEN\s*=\s*(.*)$/.exec(linea);
+    if (!m) continue;
+    const valor = m[1].trim().replace(/^(['"])(.*)\1$/, '$2').trim();
+    if (valor) return valor;
+  }
+  throw new ErrorConfig(`El archivo de HILOS_TOKEN_ENV_AGENTE no trae CLAUDE_CODE_OAUTH_TOKEN.`);
+}
+
 export function cargarConfig(env = process.env) {
   const entorno = requerida(env, 'HILOS_ENTORNO');
   if (entorno !== 'pruebas') {
@@ -160,12 +185,15 @@ export function cargarConfig(env = process.env) {
   const agente = requerida(env, 'HILOS_AGENTE').toLowerCase();
 
   const apiKey = (env.HILOS_ANTHROPIC_API_KEY ?? '').trim();
-  const oauth = (env.HILOS_CLAUDE_CODE_OAUTH_TOKEN ?? '').trim();
-  if (Boolean(apiKey) === Boolean(oauth)) {
+  const oauthDirecto = (env.HILOS_CLAUDE_CODE_OAUTH_TOKEN ?? '').trim();
+  const envAgente = (env.HILOS_TOKEN_ENV_AGENTE ?? '').trim();
+  const fuentes = [apiKey, oauthDirecto, envAgente].filter(Boolean).length;
+  if (fuentes !== 1) {
     throw new ErrorConfig(
-      'Defina EXACTAMENTE una credencial: HILOS_ANTHROPIC_API_KEY (recomendada) o HILOS_CLAUDE_CODE_OAUTH_TOKEN.'
+      'Defina EXACTAMENTE una credencial: HILOS_TOKEN_ENV_AGENTE, HILOS_CLAUDE_CODE_OAUTH_TOKEN o HILOS_ANTHROPIC_API_KEY.'
     );
   }
+  const oauth = envAgente ? leerTokenDeEnv(envAgente) : oauthDirecto;
 
   const hilosDir = validarAislamiento(requerida(env, 'HILOS_DIR'));
   const ancestros = claudeMdEnAncestros(hilosDir);
@@ -207,6 +235,7 @@ export function cargarConfig(env = process.env) {
     llave,
     agente,
     credencial: apiKey ? { tipo: 'api-key', valor: apiKey } : { tipo: 'oauth-token', valor: oauth },
+    origenCredencial: apiKey ? 'llave de API' : envAgente ? 'token del propio agente (leído de su .env)' : 'token en el .env del puente',
     hilosDir,
     configClaudeDir: path.join(hilosDir, 'claude-config'),
     perfiles,

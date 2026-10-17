@@ -42,8 +42,16 @@ export const PROJECT_PROFILES: readonly ProjectProfile[] = [
     label: 'Sin conectores',
     description: 'Solo conversación, instrucciones y archivos del proyecto.',
   },
-  { key: 'farmalogica', label: 'Farmalógica', description: 'SAP Business One de Farmalógica (solo lectura).' },
-  { key: 'olp', label: 'One Latam Pharma', description: 'SAP Business One de OLP (solo lectura).' },
+  {
+    key: 'farmalogica',
+    label: 'Farmalógica',
+    description: 'SAP Business One de Farmalógica (solo lectura) y consulta de páginas web públicas.',
+  },
+  {
+    key: 'olp',
+    label: 'One Latam Pharma',
+    description: 'SAP Business One de OLP (solo lectura) y consulta de páginas web públicas.',
+  },
   { key: 'ryan', label: 'Laboratorios Ryan', description: 'SAP Business One de Ryan (solo lectura).' },
   { key: 'abamia', label: 'Abamia', description: 'SAP Business One de Abamia (solo lectura).' },
   { key: 'kelab', label: 'Kelab', description: 'SAP Business One de Kelab (solo lectura).' },
@@ -51,7 +59,7 @@ export const PROJECT_PROFILES: readonly ProjectProfile[] = [
   {
     key: 'comex-latam',
     label: 'Comex Latam',
-    description: 'Comercio exterior: búsqueda web y SAP de OLP (solo lectura).',
+    description: 'Comercio exterior: búsqueda y lectura de páginas web, y SAP de OLP (solo lectura).',
   },
 ];
 

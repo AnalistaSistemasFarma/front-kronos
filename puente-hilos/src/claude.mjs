@@ -4,8 +4,8 @@
  * Todo lo que decide la seguridad del proceso del modelo está aquí, en
  * funciones puras con pruebas (test/claude.test.mjs):
  *
- *   - `--restricted`: quita Bash y las demás herramientas que ejecutan código,
- *     quita WebFetch, ignora los settings de usuario/proyecto/local, confina
+ *   - `--restricted`: quita Bash y las demás herramientas que ejecutan código
+ *     (WebFetch solo vuelve si el perfil tiene `web`), ignora los settings de usuario/proyecto/local, confina
  *     las herramientas de archivos a la carpeta del hilo y rechaza el modo
  *     bypassPermissions.
  *   - `--permission-mode dontAsk`: lo que no está permitido explícitamente se
@@ -43,8 +43,10 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
   if (!perfil) throw new Error('Falta el perfil.');
   if (!sesion?.id || !/^[0-9a-f-]{36}$/i.test(sesion.id)) throw new Error('session id inválido.');
 
-  const tools = [...HERRAMIENTAS_BASE, ...(perfil.web ? ['WebSearch'] : [])];
-  const permitidas = [...PERMITIDAS_BASE, ...(perfil.web ? ['WebSearch'] : []), ...perfil.herramientas];
+  // Navegación (decisión de Nicolás, 2026-10-17): WebSearch y WebFetch si el perfil tiene `web`.
+  const web = perfil.web ? ['WebSearch', 'WebFetch'] : [];
+  const tools = [...HERRAMIENTAS_BASE, ...web];
+  const permitidas = [...PERMITIDAS_BASE, ...web, ...perfil.herramientas];
 
   const args = [
     '-p',
@@ -134,6 +136,7 @@ export function etiquetaHerramienta(nombre) {
     Write: 'Preparando un documento…',
     Edit: 'Editando un documento…',
     WebSearch: 'Buscando en internet…',
+    WebFetch: 'Leyendo una página web…',
     TodoWrite: 'Organizando la tarea…',
   };
   return mapa[nombre] ?? 'Trabajando…';

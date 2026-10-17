@@ -36,11 +36,12 @@ test('solo los conectores del hilo y el plugin de Telegram apagado', () => {
   assert.equal(settings.disableAllHooks, true);
 });
 
-test('herramientas mínimas: sin Bash ni WebFetch; escritura solo en ./trabajo', () => {
+test('herramientas mínimas: sin Bash ni subagentes; sin web si el perfil no la pide; escritura solo en ./trabajo', () => {
   const args = armarArgumentos(base);
   const tools = valorDe(args, '--tools').split(',');
   for (const p of HERRAMIENTAS_PROHIBIDAS) assert.ok(!tools.includes(p), `no debe traer ${p}`);
   assert.ok(!tools.includes('WebSearch'));
+  assert.ok(!tools.includes('WebFetch'));
   assert.ok(args.includes('Edit(./trabajo/**)'));
   assert.ok(!args.includes('Edit'));
   assert.ok(args.includes('mcp__sapbo-farmalogica__sap_query'));
@@ -48,9 +49,12 @@ test('herramientas mínimas: sin Bash ni WebFetch; escritura solo en ./trabajo',
   for (const p of HERRAMIENTAS_PROHIBIDAS) assert.ok(args.slice(i).includes(p));
 });
 
-test('WebSearch solo si el perfil lo pide', () => {
+test('WebSearch y WebFetch solo si el perfil lo pide (y Bash nunca)', () => {
   const args = armarArgumentos({ ...base, perfil: { ...PERFIL_SAP, web: true } });
-  assert.ok(valorDe(args, '--tools').split(',').includes('WebSearch'));
+  const tools = valorDe(args, '--tools').split(',');
+  assert.ok(tools.includes('WebSearch') && tools.includes('WebFetch'));
+  assert.ok(!tools.includes('Bash') && !tools.includes('Agent'));
+  assert.ok(args.includes('WebFetch'));
 });
 
 test('sesión: --session-id la primera vez, --resume después', () => {

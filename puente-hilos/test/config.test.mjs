@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { cargarConfig, validarAislamiento, validarPerfiles } from '../src/config.mjs';
+import { cargarConfig, leerTokenDeEnv, validarAislamiento, validarPerfiles } from '../src/config.mjs';
 
 function envBase(dir, extra = {}) {
   const perfiles = path.join(dir, 'perfiles.json');
@@ -39,6 +39,21 @@ test('exige exactamente una credencial', () => {
   const d = tmp();
   assert.throws(() => cargarConfig(envBase(d, { HILOS_ANTHROPIC_API_KEY: '' })), /EXACTAMENTE/);
   assert.throws(() => cargarConfig(envBase(d, { HILOS_CLAUDE_CODE_OAUTH_TOKEN: 't' })), /EXACTAMENTE/);
+  assert.throws(() => cargarConfig(envBase(d, { HILOS_TOKEN_ENV_AGENTE: '/x/.env' })), /EXACTAMENTE/);
+});
+
+test('token del propio agente: lee SOLO CLAUDE_CODE_OAUTH_TOKEN del .env del bot', () => {
+  const d = tmp();
+  const envBot = path.join(d, 'bot.env');
+  writeFileSync(envBot, 'TELEGRAM_BOT_TOKEN=secreto\nexport CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat-prueba"\nOTRA=1\n');
+  const cfg = cargarConfig(envBase(d, { HILOS_ANTHROPIC_API_KEY: '', HILOS_TOKEN_ENV_AGENTE: envBot }));
+  assert.deepEqual(cfg.credencial, { tipo: 'oauth-token', valor: 'sk-ant-oat-prueba' });
+  assert.ok(!JSON.stringify(cfg).includes('TELEGRAM'));
+});
+
+test('leerTokenDeEnv no filtra el contenido del archivo en sus errores', () => {
+  assert.throws(() => leerTokenDeEnv('/x', () => 'TELEGRAM_BOT_TOKEN=secreto\n'), (e) => !String(e.message).includes('secreto'));
+  assert.throws(() => leerTokenDeEnv('/no/existe'), /No se pudo leer/);
 });
 
 test('el tope de concurrencia no pasa de 2 en F1', () => {

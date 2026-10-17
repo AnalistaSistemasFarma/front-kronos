@@ -6,7 +6,10 @@
   },
   "farmalogica": {
     "mcpServers": {
-      "sapbo-farmalogica": { "type": "http", "url": "http://192.168.10.5:3012/mcp" }
+      "sapbo-farmalogica": {
+        "type": "http",
+        "url": "http://192.168.10.5:3012/mcp"
+      }
     },
     "herramientas": [
       "mcp__sapbo-farmalogica__sap_metadata",
@@ -14,11 +17,14 @@
       "mcp__sapbo-farmalogica__sap_get",
       "mcp__sapbo-farmalogica__sap_query_view"
     ],
-    "web": false
+    "web": true
   },
   "olp": {
     "mcpServers": {
-      "sapbo-onelatampharma": { "type": "http", "url": "http://192.168.10.5:3015/mcp" }
+      "sapbo-onelatampharma": {
+        "type": "http",
+        "url": "http://192.168.10.5:3015/mcp"
+      }
     },
     "herramientas": [
       "mcp__sapbo-onelatampharma__sap_metadata",
@@ -26,11 +32,14 @@
       "mcp__sapbo-onelatampharma__sap_get",
       "mcp__sapbo-onelatampharma__sap_query_view"
     ],
-    "web": false
+    "web": true
   },
   "comex-latam": {
     "mcpServers": {
-      "sapbo-onelatampharma": { "type": "http", "url": "http://192.168.10.5:3015/mcp" }
+      "sapbo-onelatampharma": {
+        "type": "http",
+        "url": "http://192.168.10.5:3015/mcp"
+      }
     },
     "herramientas": [
       "mcp__sapbo-onelatampharma__sap_metadata",

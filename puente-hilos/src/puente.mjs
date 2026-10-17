@@ -231,7 +231,7 @@ async function principal() {
 
   const estado = new Estado(cfg.hilosDir);
   const puente = crearPuente({ cfg, synerlink, estado });
-  log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial ${cfg.credencial.tipo}.`);
+  log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}.`);
 
   let parar = false;
   for (const senal of ['SIGTERM', 'SIGINT']) {
