@@ -1,11 +1,12 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { OT_CATALOGO_FARMALOGICA, OT_PICTOGRAMAS, otPictograma } from '../constants';
+import { OT_CATALOGO_FARMALOGICA, OT_PICTOGRAMAS, OT_SIGNIFICADO_CIERRE_JEFE, otPictograma } from '../constants';
 import {
   assertActoresDistintos,
   assertNoBloqueado,
   assertPuedeConfirmar,
+  esCierreDelJefe,
   huellaContenido,
   LimiteReautenticacion,
   metodoConfirmacion,
@@ -14,6 +15,7 @@ import {
   OT_FIRMA_SIGNIFICADO,
   parseConfirmacion,
   rolVisible,
+  significadoCierre,
   siguienteVistoBueno,
   vistosCompletos,
   vistosDados,
@@ -51,7 +53,7 @@ describe('Bitácora de Proceso · cuatro vistos buenos (B2/B3, 2026-10-15)', () 
   const cerro = f('SUPERVISOR', 'sup', 'Cerró');
 
   it('es un visto bueno propio de la bitácora: sin consentimiento de GSS Firma, sin contraseña, con «Sí, confirmo»', () => {
-    expect(OT_CONFIRMACION_VERSION).toBe('bitacora-visto-bueno-2026-10-15');
+    expect(OT_CONFIRMACION_VERSION).toBe('bitacora-visto-bueno-2026-10-17');
     expect(OT_FIRMA_SIGNIFICADO).toEqual({ OPERARIO: 'Visto bueno', SUPERVISOR: 'Cerró', INSPECTOR: 'Visto bueno', JEFE_PROD: 'Visto bueno' });
     expect(Object.values(OT_CONFIRMACION_TEXTO).join(' ')).not.toMatch(/ley 527|firma electr|contraseña/i);
   });
@@ -71,11 +73,14 @@ describe('Bitácora de Proceso · cuatro vistos buenos (B2/B3, 2026-10-15)', () 
     expect(vistosCompletos(vieja, [cerro])).toBe(false);
   });
 
-  it('orden: operario → supervisor (cierra) → inspector → jefe; solo se exigen los actores que la bitácora tiene', () => {
-    expect(vistosRequeridos(abierta)).toEqual(['OPERARIO', 'SUPERVISOR', 'INSPECTOR', 'JEFE_PROD']);
-    expect(siguienteVistoBueno(abierta, [])).toBe('OPERARIO');
+  it('orden: (operario opcional) → cierre → inspector → jefe; solo se exigen los actores que la bitácora tiene (R4)', () => {
+    expect(vistosRequeridos(abierta)).toEqual(['SUPERVISOR', 'INSPECTOR', 'JEFE_PROD']);
+    // R4: el del operario ya no es requisito: lo siguiente en una abierta es el cierre.
+    expect(siguienteVistoBueno(abierta, [])).toBe('SUPERVISOR');
     const op = { ...f('OPERARIO', 'tablet'), id_operador: 7 };
     expect(siguienteVistoBueno(abierta, [op])).toBe('SUPERVISOR');
+    // Cerrada sin visto bueno del operario: igual se completa con inspector y jefe.
+    expect(vistosCompletos(cerrada, [cerro, f('INSPECTOR', 'insp'), f('JEFE_PROD', 'jefe')])).toBe(true);
     expect(siguienteVistoBueno(cerrada, [op, cerro])).toBe('INSPECTOR');
     expect(siguienteVistoBueno(cerrada, [op, cerro, f('INSPECTOR', 'insp')])).toBe('JEFE_PROD');
     expect(vistosCompletos(cerrada, [op, cerro, f('INSPECTOR', 'insp'), f('JEFE_PROD', 'jefe')])).toBe(true);
@@ -90,15 +95,21 @@ describe('Bitácora de Proceso · cuatro vistos buenos (B2/B3, 2026-10-15)', () 
     expect(errorOf(() => assertPuedeConfirmar(abierta, [f('OPERARIO', 't')], { rol: 'OPERARIO', idUser: null, idOperador: 7, access: null })).status).toBe(409);
   });
 
-  it('supervisor: con Gestión (su acceso, no el de la sesión), no inspector ni jefe, y después del operario', () => {
+  it('cierre por el supervisor: con Gestión (su acceso, no el de la sesión), nunca el inspector y SIN esperar al operario (R4)', () => {
     const op = f('OPERARIO', 't');
-    expect(() => assertPuedeConfirmar(abierta, [op], { rol: 'SUPERVISOR', idUser: 'sup', idOperador: null, access: sup })).not.toThrow();
-    expect(errorOf(() => assertPuedeConfirmar(abierta, [], { rol: 'SUPERVISOR', idUser: 'sup', idOperador: null, access: sup })).message).toMatch(/operario/);
-    expect(errorOf(() => assertPuedeConfirmar(abierta, [op], { rol: 'SUPERVISOR', idUser: 'u', idOperador: null, access: op_ })).status).toBe(403);
+    expect(assertPuedeConfirmar(abierta, [op], { rol: 'SUPERVISOR', idUser: 'sup', idOperador: null, access: sup })).toBe('SUPERVISOR');
+    // R4: sin el visto bueno del operario también cierra.
+    expect(assertPuedeConfirmar(abierta, [], { rol: 'SUPERVISOR', idUser: 'sup', idOperador: null, access: sup })).toBe('SUPERVISOR');
+    const sinGestion = errorOf(() => assertPuedeConfirmar(abierta, [op], { rol: 'SUPERVISOR', idUser: 'u', idOperador: null, access: op_ }));
+    expect(sinGestion.status).toBe(403);
+    expect(sinGestion.message).toMatch(/le falta el permiso «Bitácora de Proceso: Gestión».*jefe de producción designado/);
     expect(errorOf(() => assertPuedeConfirmar(abierta, [op], { rol: 'SUPERVISOR', idUser: 'u', idOperador: null, access: null })).status).toBe(403);
-    expect(errorOf(() => assertPuedeConfirmar(abierta, [op], { rol: 'SUPERVISOR', idUser: 'insp', idOperador: null, access: sup })).status).toBe(403);
-    expect(errorOf(() => assertPuedeConfirmar(abierta, [op], { rol: 'SUPERVISOR', idUser: 'jefe', idOperador: null, access: sup })).status).toBe(403);
+    // El inspector nunca cierra, ni con Gestión.
+    const insp = errorOf(() => assertPuedeConfirmar(abierta, [op], { rol: 'SUPERVISOR', idUser: 'insp', idOperador: null, access: sup }));
+    expect(insp.status).toBe(403);
+    expect(insp.message).toMatch(/inspector de esta bitácora no puede cerrarla/);
     expect(errorOf(() => assertPuedeConfirmar(cerrada, [op], { rol: 'SUPERVISOR', idUser: 'sup', idOperador: null, access: sup })).status).toBe(409);
+    expect(errorOf(() => assertPuedeConfirmar(abierta, [cerro], { rol: 'SUPERVISOR', idUser: 'sup', idOperador: null, access: sup })).status).toBe(409);
     // Sin operarios programados (modelo anterior) no se exige el del operario.
     expect(() => assertPuedeConfirmar({ ...abierta, operadores: [] }, [], { rol: 'SUPERVISOR', idUser: 'sup', idOperador: null, access: sup })).not.toThrow();
   });
@@ -120,11 +131,45 @@ describe('Bitácora de Proceso · cuatro vistos buenos (B2/B3, 2026-10-15)', () 
     expect(errorOf(() => assertPuedeConfirmar({ ...cerrada, inspector: null }, [cerro, f('INSPECTOR', 'jefe', 'Verificó')], c('JEFE_PROD', 'jefe'))).status).toBe(409);
   });
 
-  it('al abrir: supervisor, inspector y jefe son tres personas distintas', () => {
-    expect(() => assertActoresDistintos({ supervisor: 's', inspector: 'i', jefe: 'j' })).not.toThrow();
-    expect(errorOf(() => assertActoresDistintos({ supervisor: 's', inspector: 's', jefe: 'j' })).status).toBe(400);
-    expect(errorOf(() => assertActoresDistintos({ supervisor: 's', inspector: 'i', jefe: 's' })).status).toBe(400);
-    expect(errorOf(() => assertActoresDistintos({ supervisor: 's', inspector: 'i', jefe: 'i' })).status).toBe(400);
+  it('al abrir (R3): el inspector es distinto de quien abre y del jefe; quien abre SÍ puede ser el jefe', () => {
+    expect(() => assertActoresDistintos({ abre: 's', inspector: 'i', jefe: 'j' })).not.toThrow();
+    expect(() => assertActoresDistintos({ abre: 'j', inspector: 'i', jefe: 'j' })).not.toThrow();
+    expect(errorOf(() => assertActoresDistintos({ abre: 's', inspector: 's', jefe: 'j' })).status).toBe(400);
+    expect(errorOf(() => assertActoresDistintos({ abre: 's', inspector: 'i', jefe: 'i' })).status).toBe(400);
+  });
+
+  it('R3: el JEFE designado cierra (aun sin Gestión); su cierre cuenta como su visto bueno y queda la traza «Cerró (jefe)»', () => {
+    const c = (rol: 'SUPERVISOR' | 'INSPECTOR' | 'JEFE_PROD', idUser: string, access = op_) => ({ rol, idUser, idOperador: null, access });
+    expect(assertPuedeConfirmar(abierta, [], c('SUPERVISOR', 'jefe'))).toBe('JEFE_PROD');
+    // Un jefe que NO es el designado de esta bitácora, sin Gestión, no cierra.
+    expect(errorOf(() => assertPuedeConfirmar(abierta, [], c('SUPERVISOR', 'otro-jefe'))).status).toBe(403);
+    expect(significadoCierre('JEFE_PROD')).toBe(OT_SIGNIFICADO_CIERRE_JEFE);
+    expect(significadoCierre('SUPERVISOR')).toBe('Cerró');
+    expect(OT_SIGNIFICADO_CIERRE_JEFE.length).toBeLessThanOrEqual(20); // ot_firma.significado NVARCHAR(20)
+    const cerroJefe = f('SUPERVISOR', 'jefe', OT_SIGNIFICADO_CIERRE_JEFE);
+    expect(esCierreDelJefe(cerroJefe)).toBe(true);
+    expect(esCierreDelJefe(cerro)).toBe(false);
+    expect(rolVisible(cerroJefe)).toBe('SUPERVISOR');
+    // Después del cierre del jefe solo falta el inspector; el jefe no firma otra vez.
+    expect(vistosRequeridos(cerrada, [cerroJefe])).toEqual(['SUPERVISOR', 'INSPECTOR']);
+    expect(siguienteVistoBueno(cerrada, [cerroJefe])).toBe('INSPECTOR');
+    expect(() => assertPuedeConfirmar(cerrada, [cerroJefe], c('INSPECTOR', 'insp'))).not.toThrow();
+    expect(vistosCompletos(cerrada, [cerroJefe, f('INSPECTOR', 'insp')])).toBe(true);
+    const otraVez = errorOf(() => assertPuedeConfirmar(cerrada, [cerroJefe, f('INSPECTOR', 'insp')], c('JEFE_PROD', 'jefe')));
+    expect(otraVez.status).toBe(409);
+    expect(otraVez.message).toMatch(/su cierre cuenta como su visto bueno/);
+    // Sin inspector designado (#617), el cierre del jefe la deja completa.
+    expect(vistosCompletos({ ...cerrada, inspector: null }, [cerroJefe])).toBe(true);
+    // Si cierra el supervisor, el jefe sigue dando el último visto bueno.
+    expect(siguienteVistoBueno(cerrada, [cerro, f('INSPECTOR', 'insp')])).toBe('JEFE_PROD');
+  });
+
+  it('R3: la huella del cierre del jefe incluye con qué rol cerró; la del supervisor no cambia (huellas anteriores intactas)', () => {
+    const cierre = { ...base, cerradaPor: 'jefe', cerradaEn: null, observacionCierre: 'fin' };
+    const sinCampo = huellaContenido(cierre);
+    expect(huellaContenido({ ...cierre, cierreComo: 'SUPERVISOR' })).toBe(sinCampo);
+    expect(huellaContenido({ ...cierre, cierreComo: null })).toBe(sinCampo);
+    expect(huellaContenido({ ...cierre, cierreComo: 'JEFE_PROD' })).not.toBe(sinCampo);
   });
 
   it('cuerpo: rol, «Sí, confirmo», persona u operario y PIN opcional de 4 dígitos; sin contraseña', () => {

@@ -384,7 +384,7 @@ export function OtResponsables({ company }: { company: OtCompanyAccess }) {
         Responsables <Badge variant='light' ml={4}>{lista.filter((r) => r.activo).length} activos</Badge>
       </Title>
       <Text size='sm' c='dimmed'>
-        Al abrir y cerrar la bitácora solo se pueden elegir las personas asignadas aquí. En una misma bitácora el supervisor que abre, el inspector y el jefe de producción son tres personas distintas. No se borran: desactive a quien ya no cumple el rol.
+        Al abrir y cerrar la bitácora solo se pueden elegir las personas asignadas aquí. En una misma bitácora el inspector es distinto de quien abre y del jefe de producción; el jefe puede abrir y cerrar su propia bitácora. No se borran: desactive a quien ya no cumple el rol.
       </Text>
       {loading && !data ? (
         <Loader />

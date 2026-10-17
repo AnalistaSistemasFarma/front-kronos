@@ -40,8 +40,7 @@ import {
   parseNuevoOperador,
   parseNuevoRegistro,
   resolveOtAccess,
-  resolverArea,
-} from '../rules';
+  resolverArea, sanitizarTextoLibre, textoDelRegistro } from '../rules';
 import { isHubHiddenRequestDashboardSubprocess } from '../../request-general/dashboardRoutes';
 
 const FARMA = 1;
@@ -179,8 +178,8 @@ describe('Bitácora de Proceso · validación', () => {
 
   it('IGNORA cualquier hora o usuario que envíe el cliente en el registro', () => {
     const input = parseNuevoRegistro({ id_actividad: 3, id_operador: 7, observacion: ' ok ', registrado_en: '2020-01-01T00:00:00Z', fecha: 'ayer', id_user: 'otro' });
-    expect(input).toEqual({ idActividad: 3, idOperador: 7, observacion: 'ok' });
-    expect(parseNuevoRegistro({ idActividad: '4' })).toEqual({ idActividad: 4, idOperador: null, observacion: null });
+    expect(input).toEqual({ idActividad: 3, idOperador: 7, observacion: 'ok', texto: null });
+    expect(parseNuevoRegistro({ idActividad: '4' })).toEqual({ idActividad: 4, idOperador: null, observacion: null, texto: null });
     expect(errorOf(() => parseNuevoRegistro({ id_actividad: 1, id_operador: 'x' })).message).toMatch(/operario/);
     expect(errorOf(() => parseNuevoRegistro({})).message).toMatch(/actividad/);
     expect(errorOf(() => parseNuevoRegistro(null)).status).toBe(400);
@@ -246,7 +245,7 @@ describe('Bitácora de Proceso · validación', () => {
   });
 
   it('catálogo: alta y PATCH solo de activo, orden y exige observación', () => {
-    expect(parseNuevaActividad({ company: 1, nombre: ' Limpieza ', exige_observacion: true, orden: 15 })).toEqual({ idCompany: 1, nombre: 'Limpieza', exigeObservacion: true, orden: 15, icono: null });
+    expect(parseNuevaActividad({ company: 1, nombre: ' Limpieza ', exige_observacion: true, orden: 15 })).toEqual({ idCompany: 1, nombre: 'Limpieza', exigeObservacion: true, textoLibre: false, orden: 15, icono: null });
     expect(parseNuevaActividad({ company: 1, nombre: 'Pesaje', icono: 'pesaje' }).icono).toBe('pesaje');
     expect(errorOf(() => parseNuevaActividad({ company: 1, nombre: 'X', icono: '<script>' })).message).toMatch(/ícono/);
     expect(parseCambioActividad({ company: 1, id_actividad: 2, icono: 'uv' })).toEqual({ idActividad: 2, idCompany: 1, icono: 'uv' });
@@ -346,5 +345,35 @@ describe('Bitácora de Proceso · catálogo de Farmalógica', () => {
     expect(sql).toContain("N'Despeje del área'");
     expect(sql).toContain("N'Aseo del área'");
     expect(sql).toMatch(/@DesactivarFinDeLote BIT = 0/);
+  });
+
+  it('TEXTO LIBRE (2026-10-17): se sanea (control, invisibles de dirección, espacios y líneas) y no interpreta HTML', () => {
+    expect(sanitizarTextoLibre('  Cambio\u0000 de   bidón\r\n\r\n\r\n\r\nlote 2\t ')).toBe('Cambio de bidón\n\nlote 2');
+    expect(sanitizarTextoLibre('abc\u202Eevil\u200B')).toBe('abcevil');
+    expect(sanitizarTextoLibre('<b>x</b>')).toBe('<b>x</b>');
+    expect(sanitizarTextoLibre(42)).toBe('');
+    expect(parseNuevoRegistro({ id_actividad: 5, texto: '  hola\u0007  ' }).texto).toBe('hola');
+  });
+
+  it('TEXTO LIBRE: obligatorio (mín. 3, máx. 500) solo en actividades de ese tipo; en las demás, la observación opcional de siempre', () => {
+    const libre = { texto_libre: true, nombre: 'Novedad' };
+    const normal = { texto_libre: false, nombre: 'Tapón' };
+    expect(textoDelRegistro(libre, { observacion: null, texto: 'Se cayó un frasco' })).toEqual({ observacion: 'Se cayó un frasco', esTextoLibre: true });
+    for (const texto of [null, undefined, '', 'ab']) {
+      const e = (() => { try { textoDelRegistro(libre, { observacion: null, texto }); } catch (x) { return x as OtError; } return null; })();
+      expect(e?.status).toBe(400);
+      expect(e?.message).toMatch(/texto libre: escriba qué pasó/);
+    }
+    expect(() => textoDelRegistro(libre, { observacion: null, texto: 'x'.repeat(501) })).toThrow(/máximo 500/);
+    expect(() => textoDelRegistro(libre, { observacion: 'otra', texto: 'texto ok' })).toThrow(/sin observación aparte/);
+    expect(textoDelRegistro(normal, { observacion: 'opcional', texto: null })).toEqual({ observacion: 'opcional', esTextoLibre: false });
+    expect(textoDelRegistro(normal, { observacion: null })).toEqual({ observacion: null, esTextoLibre: false });
+    expect(() => textoDelRegistro(normal, { observacion: null, texto: 'algo' })).toThrow(/no es de texto libre/);
+  });
+
+  it('TEXTO LIBRE: se marca desde el catálogo (alta y PATCH)', () => {
+    expect(parseNuevaActividad({ company: 1, nombre: 'Novedad', texto_libre: true }).textoLibre).toBe(true);
+    expect(parseCambioActividad({ company: 1, id_actividad: 2, texto_libre: true })).toEqual({ idActividad: 2, idCompany: 1, textoLibre: true });
+    expect(parseCambioActividad({ company: 1, id_actividad: 2, texto_libre: false })).toEqual({ idActividad: 2, idCompany: 1, textoLibre: false });
   });
 });
