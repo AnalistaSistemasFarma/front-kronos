@@ -106,6 +106,8 @@ export interface EstadoConexion {
   envioHabilitado: boolean;
   etiquetarHabilitado: boolean;
   sincronizacionAutomatica: boolean;
+  /** «Consultar a un agente» (CORREO_AGENTE_HABILITADO). */
+  agenteHabilitado: boolean;
 }
 
 export function estadoConexion(d: CorreoDeps, acceso: AccesoCorreo): EstadoConexion {
@@ -117,6 +119,7 @@ export function estadoConexion(d: CorreoDeps, acceso: AccesoCorreo): EstadoConex
     envioHabilitado: d.cfg.envioHabilitado,
     etiquetarHabilitado: d.cfg.etiquetarHabilitado,
     sincronizacionAutomatica: d.cfg.syncHabilitado,
+    agenteHabilitado: d.cfg.agenteHabilitado === true,
   };
 }
 
