@@ -393,6 +393,17 @@ jobs:
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/proyectos-ok.sql
           # El script de PROD debe NEGARSE fuera de KRONOSDB.
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-17-chat-proyectos-PROD.sql; then echo "El script de PROD de proyectos debió negarse en kronos_ci"; exit 1; fi
+          # Bitácora · actividades de texto libre (2026-10-17): migración y PRUEBAS dos veces, reversa y otra vez PRUEBAS (idempotencia ida y vuelta).
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017200000_bitacora_proceso_texto_libre/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017200000_bitacora_proceso_texto_libre/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-17-bitacora-proceso-texto-libre-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-17-bitacora-proceso-texto-libre-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-17-bitacora-proceso-texto-libre-reversa.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-17-bitacora-proceso-texto-libre-reversa.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-17-bitacora-proceso-texto-libre-PRUEBAS.sql
+          echo "IF COL_LENGTH(N'dbo.ot_actividad', N'texto_libre') IS NULL OR COL_LENGTH(N'dbo.ot_registro', N'es_texto_libre') IS NULL THROW 50000, N'Faltan las columnas de texto libre de la bitácora.', 1;" > /tmp/texto-libre-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/texto-libre-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-17-bitacora-proceso-texto-libre-PROD.sql; then echo "El script de PROD de texto libre debió negarse en kronos_ci"; exit 1; fi
 
       - name: Pruebas de integración + cobertura de lib/sgc/db (vitest)
         run: npm run test:integration -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/integracion/junit.xml

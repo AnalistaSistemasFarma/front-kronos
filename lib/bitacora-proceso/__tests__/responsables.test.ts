@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isOtResponsableRol, OT_RESPONSABLE_ROLES } from '../constants';
-import { assertPuedeSerResponsable, errorSinRol, isOtError, parseCambioResponsable, parseNuevoResponsable, type OtCompanyAccess } from '../rules';
+import { assertPuedeSerResponsable, errorSinRol, isOtError, mensajeFaltaAcceso, mensajeNoPuedeAbrir, motivoSinRol, parseCambioResponsable, parseNuevoResponsable, type OtCompanyAccess } from '../rules';
 
 /**
  * Responsables por empresa (2026-10-16, «me deja seleccionar más de los que son»): reglas
@@ -75,5 +75,21 @@ describe('Bitácora de Proceso · responsables', () => {
     expect(pruebas).toContain("IF DB_NAME() NOT IN (N'KRONOSDB_PRUEBAS', N'kronos_ci')");
     expect(pruebas).toContain('nicolas.rivera@gsslatam.com');
     expect(pruebas).not.toMatch(/N'KRONOSDB'[,)]/);
+  });
+
+  it('2026-10-17: el motivo dice EXACTAMENTE qué falta: rol en Responsables, activarlo, permiso del módulo o Gestión', () => {
+    const e = { nombre: 'Karen Blanco', empresa: 'FARMALOGICA S.A.' };
+    expect(motivoSinRol('JEFE_PROD', { ...e, asignado: null, access: base })).toBe('Karen Blanco no está asignado como jefe de producción en FARMALOGICA S.A.: asígnelo en Catálogo → Responsables.');
+    expect(motivoSinRol('JEFE_PROD', { ...e, asignado: false, access: base })).toMatch(/desactivado como jefe de producción.*actívelo en Catálogo → Responsables/);
+    expect(motivoSinRol('INSPECTOR', { ...e, asignado: true, access: null })).toMatch(/le falta el permiso «Bitácora de Proceso» en FARMALOGICA/);
+    expect(motivoSinRol('SUPERVISOR', { ...e, asignado: true, access: base })).toMatch(/le falta el permiso «Bitácora de Proceso: Gestión»/);
+    expect(motivoSinRol('SUPERVISOR', { ...e, asignado: true, access: gestion })).toBeNull();
+    expect(motivoSinRol('JEFE_PROD', { ...e, asignado: true, access: base })).toBeNull();
+  });
+
+  it('2026-10-17: falta de acceso de la sesión: empresa, permiso del módulo o Gestión, con el nombre de la empresa', () => {
+    expect(mensajeFaltaAcceso('canOperate', null, 3)).toMatch(/«Bitácora de Proceso» en la empresa seleccionada \(id 3\)/);
+    expect(mensajeFaltaAcceso('canManage', base, 1)).toMatch(/«Bitácora de Proceso: Gestión» en FARMALOGICA S\.A\./);
+    expect(mensajeNoPuedeAbrir(base)).toMatch(/Gestión» \(supervisor\) o estar asignado como jefe de producción en Catálogo → Responsables/);
   });
 });

@@ -98,7 +98,7 @@ export default function OtShell({ section, subtitle, requireManage, compact, act
   if (!company) {
     return (
       <Alert color='yellow' icon={<IconAlertTriangle size={18} />} title='Bitácora de Proceso' m='md' data-testid='ot-sin-acceso'>
-        No tiene acceso a Bitácora de Proceso en ninguna empresa. Pídalo a su supervisor o a TI.
+        No tiene acceso a Bitácora de Proceso: le falta el permiso «Bitácora de Proceso» (o «Bitácora de Proceso: Gestión») en alguna empresa. Lo asigna un administrador en Administración → Usuarios.
       </Alert>
     );
   }
@@ -152,7 +152,7 @@ export default function OtShell({ section, subtitle, requireManage, compact, act
         )}
         {denied ? (
           <Alert color='yellow' icon={<IconAlertTriangle size={18} />} title='Solo supervisores' data-testid='ot-solo-gestion'>
-            Esta sección es exclusiva del supervisor (permiso Bitácora de Proceso: Gestión).
+            Esta sección es exclusiva del supervisor: le falta el permiso «Bitácora de Proceso: Gestión» en {company.companyName.trim()}. Lo asigna un administrador en Administración → Usuarios.
           </Alert>
         ) : (
           children(company)

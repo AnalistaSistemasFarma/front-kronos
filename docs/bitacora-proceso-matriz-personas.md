@@ -11,14 +11,15 @@ cuatro vistos buenos (operario, supervisor, inspector y jefe de producción).
 | **Operario** | Nombre completo; documento (opcional) | **No.** Va al maestro de operarios. En la tablet toca su nombre. |
 | **Supervisor** | Nombre completo; correo corporativo | **Sí.** Abre y cierra la bitácora (permiso «Bitácora de Proceso: Gestión»). |
 | **Inspector** | Nombre completo; correo corporativo | **Sí.** Da su visto bueno después del cierre (permiso base del módulo). |
-| **Jefe de producción** | Nombre completo; correo corporativo | **Sí.** Da el último visto bueno (permiso base del módulo). |
+| **Jefe de producción** | Nombre completo; correo corporativo | **Sí.** Puede abrir y cerrar la bitácora de la que es jefe (sin Gestión, desde 2026-10-17); si la cierra el supervisor, da el último visto bueno (permiso base del módulo). |
 
 Además, por favor:
 
 - **Área(s)** donde se usa (hoy «Envase y agrafado»: confirmar la ortografía, B9).
 - **Turnos** adicionales a Mañana (06–14), Tarde (14–22) y Noche (22–06), si los hay (B6, para después).
 - Si una persona tiene dos roles (por ejemplo supervisor e inspector), indicarlo. En una
-  misma bitácora el supervisor que abre, el inspector y el jefe deben ser **tres personas distintas**.
+  misma bitácora el **inspector** debe ser distinto de quien abre y del jefe; quien abre sí puede
+  ser el jefe de producción de esa bitácora (2026-10-17).
 
 ## 2. Cómo se carga
 
