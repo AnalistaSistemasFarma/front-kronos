@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense, useCallback, useRef } from 'react';
 import { useSession } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   Title,
@@ -34,6 +34,7 @@ import {
   Checkbox,
   ScrollArea,
   SegmentedControl,
+  Tabs,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import {
@@ -50,6 +51,7 @@ import {
   IconUsers,
   IconShield,
   IconUsersGroup,
+  IconLogin2,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { notifySubprocessAssignmentsChanged } from '@/lib/process/subprocessAssignmentsEvents';
@@ -66,6 +68,11 @@ import { isDeleteAttachmentsSubprocess } from '@/lib/attachments/access';
 import { isValentineWallSubprocess } from '@/lib/valentine/constants';
 import { describeSgcPermissionMarker, isSgcPermissionMarkerSubprocess } from '@/lib/sgc/constants';
 import { describeOtPermissionMarker, isOtPermissionMarkerSubprocess } from '@/lib/bitacora-proceso/constants';
+import {
+  LOGIN_AUDIT_MARKER_DESCRIPTION,
+  isLoginAuditMarkerSubprocess,
+} from '@/lib/auth/login-audit/constants';
+import LoginAuditPanel from '@/components/users/LoginAuditPanel';
 
 const AVATAR_COLORS = ['blue', 'teal', 'violet', 'indigo', 'cyan', 'grape', 'orange'] as const;
 
@@ -131,6 +138,14 @@ function UserManagement() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const isMobile = useMediaQuery('(max-width: 768px)', true);
+  const searchParams = useSearchParams();
+
+  // Pestaña «Inicios de sesión» (auditoría de seguridad, 2026-10-16): solo se muestra si
+  // el servidor confirma el permiso (lib/auth/login-audit/access.ts). ?vista=inicios-sesion abre directo.
+  const [view, setView] = useState<'usuarios' | 'inicios-sesion'>(
+    searchParams.get('vista') === 'inicios-sesion' ? 'inicios-sesion' : 'usuarios'
+  );
+  const [canViewLoginAudit, setCanViewLoginAudit] = useState(false);
 
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -306,6 +321,26 @@ function UserManagement() {
     }
     void fetchUsers();
   }, [session, status, router, fetchUsers]);
+
+  useEffect(() => {
+    if (status === 'loading' || !session) return;
+    let cancelled = false;
+    fetch('/api/users/login-audit/access', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : { allowed: false }))
+      .then((body: { allowed?: boolean }) => {
+        if (cancelled) return;
+        setCanViewLoginAudit(Boolean(body?.allowed));
+        if (!body?.allowed) setView('usuarios');
+      })
+      .catch(() => {
+        if (!cancelled) setCanViewLoginAudit(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, status]);
+
+  const showLoginAudit = canViewLoginAudit && view === 'inicios-sesion';
 
   // Load department catalog for the MultiSelect (used in create/edit modals)
   useEffect(() => {
@@ -1150,12 +1185,15 @@ function UserManagement() {
                     Administración de Usuarios
                   </Title>
                   <Text size='xs' c='dimmed'>
-                    Gestiona accesos, roles y subprocesos · {pagination.total} usuarios
+                    {showLoginAudit
+                      ? 'Auditoría de seguridad · intentos de inicio de sesión, IP y país'
+                      : `Gestiona accesos, roles y subprocesos · ${pagination.total} usuarios`}
                   </Text>
                 </div>
               </Group>
             </div>
 
+            {!showLoginAudit && (
             <Group gap='xs' grow={!!isMobile}>
               <Button
                 size='sm'
@@ -1185,8 +1223,31 @@ function UserManagement() {
                 Exportar CSV
               </Button>
             </Group>
+            )}
           </Flex>
+
+          {canViewLoginAudit && (
+            <Tabs
+              value={view}
+              onChange={(value) => setView(value === 'inicios-sesion' ? 'inicios-sesion' : 'usuarios')}
+              mt='sm'
+            >
+              <Tabs.List>
+                <Tabs.Tab value='usuarios' leftSection={<IconUsers size={14} />}>
+                  Usuarios
+                </Tabs.Tab>
+                <Tabs.Tab value='inicios-sesion' leftSection={<IconLogin2 size={14} />}>
+                  Inicios de sesión
+                </Tabs.Tab>
+              </Tabs.List>
+            </Tabs>
+          )}
         </Card>
+
+        {showLoginAudit ? (
+          <LoginAuditPanel />
+        ) : (
+        <>
 
         {error && (
           <Alert icon={<IconAlertCircle size={16} />} title='Error' color='red' mb='sm'>
@@ -1395,6 +1456,8 @@ function UserManagement() {
             </Flex>
           )}
         </Card>
+        </>
+        )}
 
       {/* Bulk Assignment Modal */}
       <Modal
@@ -2138,7 +2201,9 @@ function UserManagement() {
                                 )}
                                 {isHubHiddenRequestDashboardSubprocess(subprocess) ? (
                                   <Badge size='xs' variant='light' color='teal' mt={4}>
-                                    {isSgcPermissionMarkerSubprocess(subprocess)
+                                    {isLoginAuditMarkerSubprocess(subprocess)
+                                      ? LOGIN_AUDIT_MARKER_DESCRIPTION
+                                      : isSgcPermissionMarkerSubprocess(subprocess)
                                       ? describeSgcPermissionMarker(subprocess.subprocess_url)
                                       : isOtPermissionMarkerSubprocess(subprocess)
                                       ? describeOtPermissionMarker(subprocess.subprocess_url)

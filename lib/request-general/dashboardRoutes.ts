@@ -10,6 +10,7 @@ import {
   isAuditConfigureMarkerSubprocess,
   isAuditConversationsMarkerSubprocess,
 } from '../chat/audit-constants';
+import { isLoginAuditMarkerSubprocess } from '../auth/login-audit/constants';
 
 export const DASHBOARD_SOLICITANTE_URL = '/process/request-general/dashboard-solicitante';
 export const DASHBOARD_SOLICITADO_URL = '/process/request-general/dashboard-solicitado';
@@ -30,7 +31,8 @@ export function isHubHiddenRequestDashboardSubprocess(subprocess: {
     isSgcPermissionMarkerSubprocess(subprocess) ||
     isOtPermissionMarkerSubprocess(subprocess) ||
     isAuditConversationsMarkerSubprocess(subprocess) ||
-    isAuditConfigureMarkerSubprocess(subprocess)
+    isAuditConfigureMarkerSubprocess(subprocess) ||
+    isLoginAuditMarkerSubprocess(subprocess)
   ) {
     return true;
   }
