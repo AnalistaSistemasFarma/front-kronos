@@ -116,7 +116,9 @@ export type ChatTarget =
     }
   | { kind: 'group'; idConversation: number }
   /** Hilo privado entre dos personas: ya existe y se abre por su id. */
-  | { kind: 'people'; idConversation: number };
+  | { kind: 'people'; idConversation: number }
+  /** Conversación de un PROYECTO (hilo de agente): ya existe y se abre por su id. */
+  | { kind: 'project'; idConversation: number };
 
 export interface ChatThreadState {
   conversation: ChatConversationDto | null;
@@ -368,7 +370,7 @@ export function useChatConversation(
           const res = await chatFetch(`/api/chat/conversations/${target.idConversation}`);
           if (!res.ok) {
             if (cancelled) return;
-            const esPersonas = target.kind === 'people';
+            const esPersonas = target.kind === 'people' || target.kind === 'project';
             setError(
               res.status === 404
                 ? esPersonas

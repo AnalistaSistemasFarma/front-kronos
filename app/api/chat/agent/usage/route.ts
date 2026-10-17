@@ -130,7 +130,9 @@ export async function POST(request: NextRequest) {
     const registradas: number[] = [];
     const rechazadas: number[] = [];
     for (const id of ids) {
-      const conversation = await resolveAgentConversation(agent.idAgent, id);
+      // El alcance de la llave decide qué conversaciones valen (lib/chat/agent-auth.ts):
+      // el puente de hilos reporta el consumo POR CONVERSACIÓN DE PROYECTO.
+      const conversation = await resolveAgentConversation(agent.idAgent, id, agent.scope);
       if (!conversation) {
         rechazadas.push(id);
         continue;
