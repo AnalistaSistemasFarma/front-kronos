@@ -16,6 +16,7 @@ import {
   type ChatStatusDto,
 } from '../../lib/chat/client';
 import { MESSAGES_PAGE_DEFAULT } from '../../lib/chat/constants';
+import { proxyUploadErrorMessage } from '../../lib/attachments/uploadRules';
 import type { AgentMetricsDto } from '../../lib/chat/agent-metrics';
 import { avisarMensajeEntrante, mensajeFresco } from '../../lib/chat/message-sound';
 
@@ -619,7 +620,12 @@ export function useChatConversation(
 
         if (!res.ok) {
           const payload = (await res.json().catch(() => null)) as { error?: string } | null;
-          setError(payload?.error ?? 'No se pudo enviar el mensaje.');
+          // Un 413 de IIS (adjuntos que pasan de 30.000.000 bytes) llega en HTML, sin JSON.
+          setError(
+            payload?.error ??
+              (files.length > 0 ? proxyUploadErrorMessage(res.status) : null) ??
+              'No se pudo enviar el mensaje.'
+          );
           setMessages((prev) =>
             prev.map((m) => (m.id === optimisticId ? { ...m, pending: false, failed: true } : m))
           );
