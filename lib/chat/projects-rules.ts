@@ -56,6 +56,13 @@ export const PROJECT_PROFILES: readonly ProjectProfile[] = [
   { key: 'abamia', label: 'Abamia', description: 'SAP Business One de Abamia (solo lectura).' },
   { key: 'kelab', label: 'Kelab', description: 'SAP Business One de Kelab (solo lectura).' },
   { key: 'meditrack', label: 'Meditrack', description: 'SAP Business One de Meditrack (solo lectura).' },
+  // Orus (horus), decisión de Nicolás del 2026-10-17: además de los perfiles
+  // de Play, el de GSS.
+  {
+    key: 'gss',
+    label: 'GSS',
+    description: 'SAP Business One de Group Shared Services (solo lectura) y consulta de páginas web públicas.',
+  },
   {
     key: 'comex-latam',
     label: 'Comex Latam',

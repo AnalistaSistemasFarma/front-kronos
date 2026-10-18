@@ -112,7 +112,7 @@ jobs:
         # puente-hilos/: cola por hilo y tope de 2, argumentos del `claude -p`
         # (modo restringido, sin permisos abiertos, plugin de Telegram apagado),
         # entorno aislado y configuración que falla cerrado.
-        run: cd puente-hilos && node --test test/
+        run: cd puente-hilos && node --test test/*.test.mjs
 
       - name: Instalar navegador para e2e (Playwright)
         run: npx playwright install --with-deps chromium
