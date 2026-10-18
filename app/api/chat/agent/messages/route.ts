@@ -273,7 +273,7 @@ export async function POST(request: NextRequest) {
           .map((m) => m.user.email)
           .filter((e) => e.length > 0),
         groupTitle: conversation.projectName,
-        url: `/process/chat/proyecto/${conversation.idProject}?conversacion=${conversation.id}`,
+        url: `/process/proyectos/${conversation.idProject}?conversacion=${conversation.id}`,
         agentCode: agent.code,
         agentName: agent.displayName,
         agentAvatarUrl: agent.avatarUrl,

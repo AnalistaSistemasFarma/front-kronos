@@ -94,10 +94,95 @@ export const MAX_OWNED_PROJECTS_PER_AGENT = 10;
 /** Conversaciones activas por proyecto. */
 export const MAX_PROJECT_CONVERSATIONS = 50;
 
-export type ProjectRole = 'owner' | 'member';
+/** Proyectos ACTIVOS por empresa en los que una persona es dueña (módulo, 2026-10-18). */
+export const MAX_OWNED_PROJECTS = 30;
+/** Agentes designados por proyecto. */
+export const MAX_PROJECT_AGENTS = 6;
+/** Descripción corta del proyecto (la ven todos los miembros en la lista). */
+export const MAX_PROJECT_DESCRIPTION_CHARS = 1_000;
+/** Vínculos por proyecto (correos + solicitudes). Van en el contexto del agente. */
+export const MAX_PROJECT_LINKS = 100;
+/** Resumen de un correo vinculado: lo escribe o revisa quien lo vincula. */
+export const MAX_LINK_SUMMARY_CHARS = 500;
+
+/**
+ * Permiso del MÓDULO «Proyectos» (subproceso del menú, igual que «Correo»).
+ * Se otorga por persona y empresa en Administración → Usuarios.
+ */
+export const PROJECTS_MODULE_URL = '/process/proyectos';
+
+/**
+ * Roles del proyecto (módulo, 2026-10-18):
+ *   owner  — dueño: administra todo (uno solo por proyecto).
+ *   editor — conversa con los agentes, vincula y sube archivos.
+ *   reader — solo lee.
+ * 'member' es el valor de la F1 y equivale a 'editor' (la migración lo pasa a
+ * 'editor'; se acepta al leer mientras conviven las dos versiones).
+ */
+export type ProjectRole = 'owner' | 'editor' | 'reader';
+
+export const PROJECT_ROLE_LABELS: Record<ProjectRole, string> = {
+  owner: 'Dueño',
+  editor: 'Editor',
+  reader: 'Lector',
+};
 
 export function isProjectRole(value: unknown): value is ProjectRole {
-  return value === 'owner' || value === 'member';
+  return value === 'owner' || value === 'editor' || value === 'reader';
+}
+
+/** Rol que se puede ASIGNAR al invitar o cambiar (el dueño no se asigna). */
+export function isAssignableRole(value: unknown): value is 'editor' | 'reader' {
+  return value === 'editor' || value === 'reader';
+}
+
+/** Lee el rol guardado. Desconocido = lector (falla hacia lo más restringido). */
+export function roleFromDb(raw: string | null | undefined): ProjectRole {
+  if (raw === 'owner') return 'owner';
+  if (raw === 'editor' || raw === 'member') return 'editor';
+  return 'reader';
+}
+
+/** Qué puede hacer cada rol. La reja real está en las rutas; esto es la tabla. */
+export interface ProjectCapabilities {
+  /** Abrir conversaciones y escribirle a los agentes (además, permiso del agente). */
+  write: boolean;
+  /** Vincular correos propios y solicitudes visibles; subir archivos. */
+  contribute: boolean;
+  /** Quitar vínculos y archivos AJENOS (los propios los quita quien contribuye). */
+  removeAny: boolean;
+  /** Nombre, descripción e instrucciones. */
+  edit: boolean;
+  /** Designar y retirar agentes. */
+  manageAgents: boolean;
+  /** Invitar, cambiar el rol y retirar miembros. */
+  manageMembers: boolean;
+  /** Archivar y restaurar. */
+  archive: boolean;
+  /** Salirse del proyecto (el dueño no: se quedaría sin dueño). */
+  leave: boolean;
+}
+
+export function capabilitiesFor(role: ProjectRole | null | undefined): ProjectCapabilities {
+  const owner = role === 'owner';
+  const editor = role === 'editor';
+  return {
+    write: owner || editor,
+    contribute: owner || editor,
+    removeAny: owner,
+    edit: owner,
+    manageAgents: owner,
+    manageMembers: owner,
+    archive: owner,
+    leave: editor || role === 'reader',
+  };
+}
+
+/** ¿Puede quitar un vínculo o archivo que agregó `autorId`? */
+export function canRemoveContribution(role: ProjectRole, actorId: string, autorId: string | null): boolean {
+  const c = capabilitiesFor(role);
+  if (c.removeAny) return true;
+  return c.contribute && autorId !== null && autorId === actorId;
 }
 
 /* ─────────────────────────── Interruptor ───────────────────────────── */
@@ -221,7 +306,7 @@ export function validateProfileForAgent(
 
 /* ─────────────────────────── Miembros ─────────────────────────────── */
 
-/** Solo el dueño administra el proyecto (miembros, instrucciones, archivos). */
+/** Solo el dueño administra el proyecto (miembros, instrucciones, agentes). */
 export function canManageProject(role: ProjectRole | null | undefined): boolean {
   return role === 'owner';
 }
@@ -229,8 +314,8 @@ export function canManageProject(role: ProjectRole | null | undefined): boolean 
 /**
  * ¿Puede `actor` retirar a `target` del proyecto?
  *   - El dueño retira a cualquier miembro, pero NO a sí mismo (el proyecto
- *     se quedaría sin dueño; en F1 no hay traspaso).
- *   - Un miembro solo puede retirarse a sí mismo (salir del proyecto).
+ *     se quedaría sin dueño; el traspaso queda para después).
+ *   - Un editor o lector solo puede retirarse a sí mismo (salir).
  */
 export function canRemoveMember(opciones: {
   actorId: string;
@@ -245,6 +330,47 @@ export function canRemoveMember(opciones: {
   if (actorRole === 'owner') return { ok: true };
   if (actorId === targetId) return { ok: true };
   return { ok: false, error: 'Solo el dueño del proyecto puede retirar a otras personas.' };
+}
+
+/** Descripción: opcional, una o dos líneas. Vacía = null. */
+export function normalizeProjectDescription(raw: unknown): Validacion<string | null> {
+  if (raw === undefined || raw === null) return { ok: true, value: null };
+  if (typeof raw !== 'string') return { ok: false, error: 'La descripción debe ser texto.' };
+  const value = raw.replace(/\r\n/g, '\n').trim();
+  if (!value) return { ok: true, value: null };
+  if (value.length > MAX_PROJECT_DESCRIPTION_CHARS) {
+    return { ok: false, error: `La descripción no puede pasar de ${MAX_PROJECT_DESCRIPTION_CHARS} caracteres.` };
+  }
+  return { ok: true, value };
+}
+
+/** Resumen de un correo vinculado: obligatorio y acotado (es lo que ven los demás). */
+export function normalizeLinkSummary(raw: unknown): Validacion<string | null> {
+  if (raw === undefined || raw === null) return { ok: true, value: null };
+  if (typeof raw !== 'string') return { ok: false, error: 'El resumen debe ser texto.' };
+  const value = raw.replace(/\r\n/g, '\n').trim();
+  if (!value) return { ok: true, value: null };
+  if (value.length > MAX_LINK_SUMMARY_CHARS) {
+    return { ok: false, error: `El resumen no puede pasar de ${MAX_LINK_SUMMARY_CHARS} caracteres.` };
+  }
+  return { ok: true, value };
+}
+
+/** Códigos de agente que llegan del cliente: sin duplicados, en minúsculas, con tope. */
+export function normalizeAgentCodes(raw: unknown): Validacion<string[]> {
+  if (!Array.isArray(raw)) return { ok: false, error: 'Debe escoger al menos un asistente.' };
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string') return { ok: false, error: 'Asistente inválido.' };
+    const code = item.trim().toLowerCase();
+    if (!/^[a-z0-9_-]{1,60}$/.test(code)) return { ok: false, error: 'Asistente inválido.' };
+    if (!out.includes(code)) out.push(code);
+  }
+  if (out.length === 0) return { ok: false, error: 'Debe escoger al menos un asistente.' };
+  if (out.length > MAX_PROJECT_AGENTS) {
+    return { ok: false, error: `Un proyecto puede tener hasta ${MAX_PROJECT_AGENTS} asistentes.` };
+  }
+  return { ok: true, value: out };
 }
 
 /**

@@ -43,7 +43,7 @@ describe('GET /api/chat/agent/inbox', () => {
     expect((await res.json()).scope).toBeUndefined();
   });
 
-  it("llave 'projects': solo proyectos activos de su agente, sin tocar la bandeja de siempre", async () => {
+  it("llave 'projects': solo proyectos activos donde su agente está designado, sin tocar la bandeja de siempre", async () => {
     auth.mockResolvedValue({ idAgent: 21, code: 'play', displayName: 'Play', scope: 'projects' });
     const res = await GET(pedir());
     expect(res.status).toBe(200);
@@ -52,7 +52,7 @@ describe('GET /api/chat/agent/inbox', () => {
     expect(findMessages.mock.calls[0][0].where).toMatchObject({
       role: 'user',
       delivered_at: null,
-      conversation: { kind: 'project', archived: false, id_agent: 21, project: { id_agent: 21, archived: false } },
+      conversation: { kind: 'project', archived: false, id_agent: 21, project: { archived: false, agents: { some: { id_agent: 21 } } } },
     });
     expect((await res.json()).scope).toBe('projects');
   });
