@@ -16,7 +16,7 @@
  *      el consumo y confirma (ack) los mensajes atendidos.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { cargarConfig, ErrorConfig } from './config.mjs';
 import { ColaHilos } from './cola.mjs';
@@ -266,7 +266,17 @@ async function principal() {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+/** ¿Este módulo es el punto de entrada? Con rutas reales: el despliegue usa un symlink. */
+function esPuntoDeEntrada() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]);
+  } catch {
+    return false;
+  }
+}
+
+if (esPuntoDeEntrada()) {
   principal().catch((err) => {
     console.error(new Date().toISOString(), '[puente-hilos] no arranca:', err?.message ?? err);
     process.exit(1);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
@@ -13,7 +13,6 @@ import {
   Button,
   Checkbox,
   FileButton,
-  Grid,
   Group,
   Modal,
   ScrollArea,
@@ -81,12 +80,16 @@ function EsqueletoPanel() {
 
 type Candidato = { id: string; name: string; email: string };
 
+/** Mismo corte que el chat (ChatWorkspace: max-width 992px). */
+const CONSULTA_CELULAR = '(max-width: 992px)';
+
+
 export default function ProyectoWorkspace({ idProject }: { idProject: number }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data: sesion } = useSession();
   const miId = sesion?.user?.id as string | undefined;
-  const enCelular = useMediaQuery('(max-width: 62em)') ?? false;
+  const enCelular = useMediaQuery(CONSULTA_CELULAR) ?? false;
 
   const [proyecto, setProyecto] = useState<ChatProjectDetailDto | null>(null);
   const [sinAcceso, setSinAcceso] = useState(false);
@@ -120,12 +123,15 @@ export default function ProyectoWorkspace({ idProject }: { idProject: number }) 
       setProyecto(data.project);
       setInstrucciones(data.project.instructions ?? '');
       setError(null);
-      // En escritorio se abre de una vez la conversación más reciente.
-      setIdConversacion((actual) => actual ?? (enCelular ? null : data.project.conversations[0]?.id ?? null));
+      // En escritorio se abre de una vez la conversación más reciente; en el
+      // celular, no: primero se ve el proyecto. Se mide aquí y no con el valor
+      // de useMediaQuery, que en el primer render todavía no se conoce.
+      const celularAhora = window.matchMedia(CONSULTA_CELULAR).matches;
+      setIdConversacion((actual) => actual ?? (celularAhora ? null : data.project.conversations[0]?.id ?? null));
     } catch {
       setError('No se pudo cargar el proyecto.');
     }
-  }, [idProject, enCelular]);
+  }, [idProject]);
 
   useEffect(() => {
     void cargar();
@@ -149,6 +155,37 @@ export default function ProyectoWorkspace({ idProject }: { idProject: number }) 
   );
 
   const conversacionAbierta = proyecto?.conversations.find((c) => c.id === idConversacion) ?? null;
+
+  // CELULAR con una conversación abierta: pantalla completa, igual que el chat
+  // (ChatWorkspace): se esconde la barra de la aplicación con `chat-inmersivo`
+  // y la marca se quita SIEMPRE al salir, o la app quedaría sin navegación.
+  const inmersivo = enCelular && conversacionAbierta !== null;
+  useLayoutEffect(() => {
+    if (!inmersivo) return;
+    const scrollY = window.scrollY;
+    document.body.classList.add('chat-inmersivo');
+    document.documentElement.classList.add('chat-inmersivo');
+    return () => {
+      document.body.classList.remove('chat-inmersivo');
+      document.documentElement.classList.remove('chat-inmersivo');
+      window.scrollTo({ top: scrollY, behavior: 'instant' });
+    };
+  }, [inmersivo]);
+
+  // ESCRITORIO: el mismo marco del chat (`chat-escritorio`, ver ChatWorkspace),
+  // clavado a la pantalla debajo de la barra de SynerLink. La página de atrás
+  // no se desplaza; solo corren por dentro la columna del proyecto y la lista
+  // de mensajes, así que la caja de escribir queda SIEMPRE a la vista. Antes
+  // las columnas iban dentro de la página con el título encima y el hilo se
+  // salía por debajo del borde (reporte del piloto, 2026-10-17).
+  const enEscritorio = !enCelular;
+  useLayoutEffect(() => {
+    if (!enEscritorio) return;
+    document.body.classList.add('chat-escritorio-abierto');
+    return () => {
+      document.body.classList.remove('chat-escritorio-abierto');
+    };
+  }, [enEscritorio]);
 
   /* ────────────────────────────── Acciones ─────────────────────────────── */
 
@@ -296,8 +333,7 @@ export default function ProyectoWorkspace({ idProject }: { idProject: number }) 
     </Group>
   );
 
-  const panel = proyecto ? (
-    <Box className='chat-page-thread' style={{ position: 'static' }}>
+  const pestanas = proyecto ? (
       <Tabs value={pestana} onChange={setPestana} keepMounted={false} style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
         <Tabs.List grow className='chat-panel__header'>
           <Tabs.Tab value='conversaciones' leftSection={<IconMessages size={14} />}>
@@ -493,16 +529,13 @@ export default function ProyectoWorkspace({ idProject }: { idProject: number }) 
           </Tabs.Panel>
         </ScrollArea>
       </Tabs>
-    </Box>
   ) : (
-    <Box className='chat-page-thread' style={{ position: 'static' }}>
-      <EsqueletoPanel />
-    </Box>
+    <EsqueletoPanel />
   );
 
   const hilo =
     proyecto && agente && conversacionAbierta ? (
-      <Box className='chat-page-thread'>
+      <Box className={`chat-page-thread ${inmersivo ? 'chat-page-thread--completa' : 'chat-page-thread--panel'}`}>
         <Group justify='space-between' p='sm' className='chat-panel__header' wrap='nowrap'>
           <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
             {enCelular && (
@@ -538,7 +571,7 @@ export default function ProyectoWorkspace({ idProject }: { idProject: number }) 
         />
       </Box>
     ) : (
-      <Box className='chat-page-thread'>
+      <Box className='chat-page-thread chat-page-thread--panel'>
         {proyecto ? (
           <Stack align='center' justify='center' gap={6} style={{ flex: 1 }} p='lg'>
             <IconFolder size={30} className='chat-empty__icon' />
@@ -556,60 +589,90 @@ export default function ProyectoWorkspace({ idProject }: { idProject: number }) 
       </Box>
     );
 
-  return (
+  const encabezado = (
+    <>
+      {volver}
+      {proyecto ? (
+        <>
+          <Title order={1} className='ios-process-hub__title text-2xl' lineClamp={2}>
+            {proyecto.name}
+          </Title>
+          <Group gap={6} mt={4} wrap='wrap'>
+            <Text size='xs' className='chat-text-muted'>
+              {proyecto.company.companyName}
+            </Text>
+            <Badge size='xs' variant='light'>
+              {proyecto.profile.label}
+            </Badge>
+            <Text size='xs' className='chat-text-muted'>
+              · {proyecto.members.length} {proyecto.members.length === 1 ? 'miembro' : 'miembros'} · con{' '}
+              {proyecto.agent.displayName}
+            </Text>
+          </Group>
+        </>
+      ) : (
+        <Stack gap={6}>
+          <Skeleton height={22} width={220} radius='sm' />
+          <Skeleton height={10} width={180} radius='sm' />
+        </Stack>
+      )}
+    </>
+  );
+
+  // Avisos ARRIBA y con color (lineamiento del módulo): en escritorio, en la
+  // cabecera de la columna del proyecto; en el celular, encima del panel.
+  const avisos = (
+    <>
+      {error && (
+        <Alert color='red' radius='md' icon={<IconAlertCircle size={18} />} mt='sm' withCloseButton onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+      {aviso && (
+        <Alert color='green' radius='md' mt='sm' withCloseButton onClose={() => setAviso(null)}>
+          {aviso}
+        </Alert>
+      )}
+    </>
+  );
+
+  const cuerpo = enEscritorio ? (
+    // Escritorio: mismo armazón que el chat con una conversación abierta. La
+    // columna izquierda lleva el proyecto (título y pestañas) en lugar de la
+    // lista de asistentes; la derecha, el hilo como panel.
+    <div className='chat-escritorio'>
+      <aside className='chat-escritorio__lateral'>
+        <div className='chat-escritorio__buscador'>
+          {encabezado}
+          {avisos}
+        </div>
+        <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{pestanas}</Box>
+      </aside>
+      <section className='chat-escritorio__principal'>{hilo}</section>
+    </div>
+  ) : inmersivo ? (
+    // Celular con una conversación abierta: pantalla completa, como el chat.
+    <div className='app-page-shell app-page-shell--fill ios-process-hub min-h-screen'>
+      <div className='chat-page-shell--completa'>{hilo}</div>
+    </div>
+  ) : (
+    // Celular sin conversación: el proyecto, con el título arriba.
     <div className='app-page-shell app-page-shell--fill ios-process-hub min-h-screen'>
       <div className='max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8'>
-        {volver}
-
-        <Group justify='space-between' align='flex-start' mb='md' gap='sm' wrap='nowrap'>
-          <Box style={{ minWidth: 0, flex: 1 }}>
-            {proyecto ? (
-              <>
-                <Title order={1} className='ios-process-hub__title text-2xl' lineClamp={1}>
-                  {proyecto.name}
-                </Title>
-                <Group gap={6} mt={4} wrap='wrap'>
-                  <Text size='xs' className='chat-text-muted'>
-                    {proyecto.company.companyName}
-                  </Text>
-                  <Badge size='xs' variant='light'>
-                    {proyecto.profile.label}
-                  </Badge>
-                  <Text size='xs' className='chat-text-muted'>
-                    · {proyecto.members.length} {proyecto.members.length === 1 ? 'miembro' : 'miembros'} · con{' '}
-                    {proyecto.agent.displayName}
-                  </Text>
-                </Group>
-              </>
-            ) : (
-              <Stack gap={6}>
-                <Skeleton height={22} width={260} radius='sm' />
-                <Skeleton height={10} width={200} radius='sm' />
-              </Stack>
-            )}
-          </Box>
-        </Group>
-
-        {error && (
-          <Alert color='red' radius='md' icon={<IconAlertCircle size={18} />} mb='sm' withCloseButton onClose={() => setError(null)}>
-            {error}
-          </Alert>
-        )}
-        {aviso && (
-          <Alert color='green' radius='md' mb='sm' withCloseButton onClose={() => setAviso(null)}>
-            {aviso}
-          </Alert>
-        )}
-
-        {enCelular ? (
-          idConversacion !== null && conversacionAbierta ? hilo : panel
-        ) : (
-          <Grid gutter='md'>
-            <Grid.Col span={{ base: 12, md: 4 }}>{panel}</Grid.Col>
-            <Grid.Col span={{ base: 12, md: 8 }}>{hilo}</Grid.Col>
-          </Grid>
-        )}
+        <Box mb='md'>
+          {encabezado}
+          {avisos}
+        </Box>
+        <Box className='chat-page-thread' style={{ position: 'static' }}>
+          {pestanas}
+        </Box>
       </div>
+    </div>
+  );
+
+  return (
+    <>
+      {cuerpo}
 
       <Modal
         opened={invitarAbierto}
@@ -700,6 +763,6 @@ export default function ProyectoWorkspace({ idProject }: { idProject: number }) 
           </Group>
         </Stack>
       </Modal>
-    </div>
+    </>
   );
 }

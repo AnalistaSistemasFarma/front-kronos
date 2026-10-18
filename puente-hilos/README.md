@@ -75,12 +75,28 @@ Antes de empezar: el PR debe estar fusionado en `testing` y desplegado, y Nicol�
    - una fila en `chat_agent_turn_usage` para esa conversación;
    - que el chat directo de Play **no** recibió nada.
 
+## Otro agente (`scripts/provisionar-agente.sh`)
+
+Cada agente lleva **su propia instancia** del puente, en el Mac donde corre el bot y con su propio token. Para no repetir los pasos 3 a 5 a mano:
+
+```bash
+# 1) Ensayo: solo dice lo que haría.
+puente-hilos/scripts/provisionar-agente.sh horus
+# 2) Con la llave nueva de scope "projects" en un archivo de una línea (se copia sin mostrarla y se borra):
+puente-hilos/scripts/provisionar-agente.sh horus --llave-archivo /ruta/llave.tmp --aplicar
+# 3) Opcional: --cargar registra y prende el servicio com.gss.puente-hilos.<agente>-pruebas.
+```
+
+El script verifica Node ≥ 20, que `claude` soporte `--restricted`, que el `.env` del bot tenga `CLAUDE_CODE_OAUTH_TOKEN` (solo cuenta la línea, no la lee) y que no haya un `CLAUDE.md` por encima de `~/.puente-hilos`. No sobrescribe una instancia que ya exista y no toca el bot vivo.
+
+Del lado de SynerLink, el agente debe estar en `CHAT_PROJECTS_AGENTS` con perfiles del catálogo (`lib/chat/projects-rules.ts`). Un perfil desconocido deja **todo** el módulo apagado (falla cerrado), así que un perfil nuevo, como `gss`, se agrega al `.env` solo después de desplegar el código que lo trae.
+
 **Apagar:** `launchctl kill SIGTERM …`, o Ctrl+C. Termina los turnos en curso y sale. Para apagar los proyectos en la aplicación, quite `CHAT_PROJECTS_AGENTS` y reinicie la app.
 
 ## Pruebas
 
 ```bash
-cd puente-hilos && node --test test/
+cd puente-hilos && node --test test/*.test.mjs
 ```
 
 No tiene dependencias: usa Node 20 o superior y el `claude` instalado, que debe soportar `--restricted`. El puente lo verifica al arrancar.
