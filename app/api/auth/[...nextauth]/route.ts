@@ -7,6 +7,7 @@ import CredentialsProvider from 'next-auth/providers/credentials';
 import { prisma } from '../../../../lib/prisma';
 import { normalizeNit, SUPPLIER_ROLE } from '../../../../lib/proveedor/isolation';
 import { noteLoginAttempt, withLoginAudit } from '../../../../lib/auth/login-audit/recorder';
+import { resolveAuthRedirect } from '../../../../lib/auth/safe-redirect';
 
 const azureConfigured =
   Boolean(process.env.AZURE_AD_CLIENT_ID) &&
@@ -200,6 +201,10 @@ export const authOptions: AuthOptions = {
       }
 
       return token;
+    },
+    // Solo redirige dentro del mismo sitio (OWASP H-05): rechaza `//`, `/\`, esquemas y otros hosts.
+    async redirect({ url, baseUrl }: { url: string; baseUrl: string }) {
+      return resolveAuthRedirect(url, baseUrl);
     },
     async session({ session, token }: { session: Session; token: JWT }) {
       if (token && session.user) {
