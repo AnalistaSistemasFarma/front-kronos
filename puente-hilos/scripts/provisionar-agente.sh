@@ -14,6 +14,8 @@
 #                          el archivo se borra. Sin esta opción, la variable
 #                          queda vacía y el puente no arranca hasta llenarla.
 #   --url URL              SynerLink de PRUEBAS (por defecto http://192.168.11.230:3030).
+#   --claude-bin RUTA      ejecutable de Claude Code con soporte de --restricted, si
+#                          el del PATH es viejo (p. ej. el Mac de Pedro trae 2.1.212).
 #   --aplicar              hace los cambios. Sin esta opción es un ENSAYO: solo
 #                          dice lo que haría.
 #   --cargar               además, registra el servicio launchd y lo prende.
@@ -34,7 +36,7 @@ set -euo pipefail
 
 AGENTE="${1:-}"
 if [[ -z "$AGENTE" || "$AGENTE" == -* ]]; then
-  sed -n '2,32p' "$0"
+  sed -n '2,34p' "$0"
   exit 2
 fi
 shift
@@ -45,11 +47,13 @@ LLAVE_ARCHIVO=""
 URL="http://192.168.11.230:3030"
 APLICAR=0
 CARGAR=0
+CLAUDE_ORIGEN=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --env-bot) ENV_BOT="$2"; shift 2 ;;
     --llave-archivo) LLAVE_ARCHIVO="$2"; shift 2 ;;
     --url) URL="$2"; shift 2 ;;
+    --claude-bin) CLAUDE_ORIGEN="$2"; shift 2 ;;
     --aplicar) APLICAR=1; shift ;;
     --cargar) CARGAR=1; shift ;;
     *) echo "Opción desconocida: $1" >&2; exit 2 ;;
@@ -72,8 +76,8 @@ paso() { if [[ $APLICAR -eq 1 ]]; then echo "→ $*"; else echo "[ensayo] $*"; f
 command -v node >/dev/null || fallo "No hay node en el PATH."
 NODE_MAYOR="$(node -p 'process.versions.node.split(".")[0]')"
 [[ "$NODE_MAYOR" -ge 20 ]] || fallo "El puente exige Node 20 o superior (hay $NODE_MAYOR)."
-CLAUDE_REAL="$(command -v claude || true)"
-[[ -n "$CLAUDE_REAL" ]] || fallo "No hay claude en el PATH."
+CLAUDE_REAL="${CLAUDE_ORIGEN:-$(command -v claude || true)}"
+[[ -n "$CLAUDE_REAL" && -x "$CLAUDE_REAL" ]] || fallo "No hay claude ejecutable (PATH o --claude-bin)."
 while [[ -L "$CLAUDE_REAL" ]]; do
   destino="$(readlink "$CLAUDE_REAL")"
   [[ "$destino" == /* ]] || destino="$(dirname "$CLAUDE_REAL")/$destino"
