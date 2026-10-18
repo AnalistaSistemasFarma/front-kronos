@@ -48,5 +48,20 @@
       "mcp__sapbo-onelatampharma__sap_query_view"
     ],
     "web": true
+  },
+  "gss": {
+    "mcpServers": {
+      "sapbo-gss": {
+        "type": "http",
+        "url": "http://192.168.10.5:3016/mcp"
+      }
+    },
+    "herramientas": [
+      "mcp__sapbo-gss__sap_metadata",
+      "mcp__sapbo-gss__sap_query",
+      "mcp__sapbo-gss__sap_get",
+      "mcp__sapbo-gss__sap_query_view"
+    ],
+    "web": true
   }
 }
