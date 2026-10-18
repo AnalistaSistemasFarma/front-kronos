@@ -1,57 +1,53 @@
 import { NextRequest } from 'next/server';
-import { prisma } from '../../../../lib/prisma';
-import { getChatAgentAccess } from '../../../../lib/chat/access';
+import { prisma } from '../../../lib/prisma';
+import { badRequest, jsonNoStore, readJsonBody, resolveSessionUser, serverError, unauthorized } from '../../../lib/chat/http';
+import { designableAgents, listProjectsForUser, projectModuleCompanies } from '../../../lib/chat/projects';
 import {
-  badRequest,
-  jsonNoStore,
-  readJsonBody,
-  resolveSessionUser,
-  serverError,
-  unauthorized,
-} from '../../../../lib/chat/http';
-import { eligibleProjectUsers, listProjectsForUser } from '../../../../lib/chat/projects';
-import {
-  MAX_OWNED_PROJECTS_PER_AGENT,
-  MAX_PROJECT_MEMBERS,
+  isKnownProfile,
+  MAX_OWNED_PROJECTS,
+  normalizeAgentCodes,
+  normalizeProjectDescription,
   normalizeProjectInstructions,
   normalizeProjectName,
-  projectsEnabledFor,
-  validateProfileForAgent,
-} from '../../../../lib/chat/projects-rules';
+  PROJECT_PROFILES,
+} from '../../../lib/chat/projects-rules';
+import type { ListaProyectosDto } from '../../../lib/proyectos/tipos';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * PROYECTOS (hilos de agente) — F1 piloto, 2026-10-17.
+ * Módulo «Proyectos» (2026-10-18).
  *
- *   GET  /api/chat/projects?agent=<code>   proyectos de ese agente que la
- *        persona puede abrir, más las empresas y los perfiles con los que
- *        puede crear uno.
- *   POST /api/chat/projects                crea un proyecto.
- *        { agentCode, name, idCompany, profile, instructions?, idUsers? }
+ *   GET  /api/proyectos[?archivados=1]  proyectos donde la persona es miembro
+ *        (archivados: solo los suyos), más las empresas donde tiene el módulo,
+ *        los agentes que puede designar en cada una y los perfiles.
+ *   POST /api/proyectos  { name, idCompany, description?, agentCodes[], profile, instructions? }
  *
  * SEGURIDAD
  *   - La persona sale de la SESIÓN; el dueño es SIEMPRE quien crea.
- *   - El agente debe tener proyectos habilitados (CHAT_PROJECTS_AGENTS) y la
- *     persona debe tener su permiso en la empresa escogida.
- *   - El perfil de conectores debe estar habilitado PARA ESE AGENTE.
- *   - Cada invitado debe tener el chat y el permiso del agente en esa
- *     empresa; si alguno no, no se crea nada y se dice quién (con nombre).
- *   - Sin interruptor, todo responde 404.
+ *   - Debe tener el permiso del módulo en la empresa escogida.
+ *   - Cada agente debe estar asignado a la persona EN ESA empresa, tener
+ *     proyectos habilitados (CHAT_PROJECTS_AGENTS) y admitir el perfil.
+ *   - Sin el módulo, 404.
  */
 export async function GET(request: NextRequest) {
   try {
     const user = await resolveSessionUser();
     if (!user) return unauthorized();
 
-    const code = (request.nextUrl.searchParams.get('agent') ?? '').trim();
-    if (!code) return badRequest('Debe indicar el asistente (agent).');
+    const archivados = request.nextUrl.searchParams.get('archivados') === '1';
+    const data = await listProjectsForUser(user, { archivados });
+    if (!data) return jsonNoStore({ error: 'No tiene el módulo «Proyectos».' }, { status: 404 });
 
-    const data = await listProjectsForUser(user, code);
-    if (!data) return jsonNoStore({ error: 'No hay proyectos para este asistente.' }, { status: 404 });
-    return jsonNoStore(data);
+    const porEmpresa = await designableAgents(user.email);
+    const designables: ListaProyectosDto['designables'] = {};
+    for (const c of data.companies) designables[String(c.idCompany)] = porEmpresa.get(c.idCompany) ?? [];
+
+    // El contrato con la interfaz (lib/proyectos/tipos.ts) lo verifica el compilador.
+    const lista: ListaProyectosDto = { companies: data.companies, designables, profiles: [...PROJECT_PROFILES], projects: data.projects };
+    return jsonNoStore(lista);
   } catch (error) {
-    return serverError('GET /api/chat/projects', error);
+    return serverError('GET /api/proyectos', error);
   }
 }
 
@@ -63,147 +59,69 @@ export async function POST(request: NextRequest) {
     const payload = await readJsonBody(request);
     if (!payload) return badRequest('El cuerpo debe ser un objeto JSON.');
 
-    const agentCode = typeof payload.agentCode === 'string' ? payload.agentCode.trim().toLowerCase() : '';
-    if (!agentCode || !projectsEnabledFor(agentCode)) {
-      return jsonNoStore({ error: 'No hay proyectos para este asistente.' }, { status: 404 });
-    }
-
     const nombre = normalizeProjectName(payload.name);
     if (!nombre.ok) return badRequest(nombre.error);
+    const descripcion = normalizeProjectDescription(payload.description);
+    if (!descripcion.ok) return badRequest(descripcion.error);
     const instrucciones = normalizeProjectInstructions(payload.instructions);
     if (!instrucciones.ok) return badRequest(instrucciones.error);
-    const perfil = validateProfileForAgent(payload.profile, agentCode);
-    if (!perfil.ok) return badRequest(perfil.error);
+    const codigos = normalizeAgentCodes(payload.agentCodes);
+    if (!codigos.ok) return badRequest(codigos.error);
+    if (!isKnownProfile(payload.profile)) return badRequest('Escoja el perfil de conectores.');
+    const perfil = payload.profile;
 
     const idCompany = Number(payload.idCompany);
     if (!Number.isInteger(idCompany) || idCompany <= 0) return badRequest('Escoja la empresa del proyecto.');
 
-    const agente = await prisma.agent.findFirst({
-      where: { code: agentCode, is_active: true },
-      select: { id_agent: true },
-    });
-    if (!agente) return jsonNoStore({ error: 'No hay proyectos para este asistente.' }, { status: 404 });
+    // (b) permiso del módulo en esa empresa. Sin él: 404, como si no existiera.
+    const empresas = await projectModuleCompanies(user.id);
+    if (!empresas.some((e) => e.idCompany === idCompany)) {
+      return jsonNoStore({ error: 'No tiene el módulo «Proyectos» en esa empresa.' }, { status: 404 });
+    }
 
-    // La persona debe tener el permiso del agente EN ESA empresa.
-    const acceso = await getChatAgentAccess(user.email, agente.id_agent);
-    if (!acceso) return jsonNoStore({ error: 'No hay proyectos para este asistente.' }, { status: 404 });
-    if (!acceso.companies.some((c) => c.idCompany === idCompany)) {
+    // Agentes: asignados a la persona en esa empresa, habilitados y con el perfil.
+    const permitidos = (await designableAgents(user.email, perfil)).get(idCompany) ?? [];
+    const porCodigo = new Map(permitidos.map((a) => [a.code.toLowerCase(), a]));
+    const faltan = codigos.value.filter((c) => !porCodigo.has(c));
+    if (faltan.length > 0) {
       return jsonNoStore(
-        { error: 'No tiene este asistente habilitado en esa empresa.' },
+        { error: 'Alguno de los asistentes no está disponible para usted en esa empresa con ese perfil de conectores.' },
         { status: 403 }
       );
     }
+    const agentes = codigos.value.map((c) => porCodigo.get(c)!);
 
-    // Invitados: sin duplicados ni el propio dueño, y todos elegibles.
-    const crudos = Array.isArray(payload.idUsers) ? payload.idUsers : [];
-    const idUsers = [
-      ...new Set(
-        crudos
-          .filter((x): x is string => typeof x === 'string')
-          .map((x) => x.trim())
-          .filter((x) => x && x !== user.id)
-      ),
-    ];
-    if (idUsers.length + 1 > MAX_PROJECT_MEMBERS) {
-      return badRequest(`Un proyecto admite máximo ${MAX_PROJECT_MEMBERS} miembros.`);
-    }
-    if (idUsers.length > 0) {
-      const elegibles = new Set(
-        (await eligibleProjectUsers(agente.id_agent, idCompany, idUsers)).map((u) => u.id)
-      );
-      const faltantes = idUsers.filter((id) => !elegibles.has(id));
-      if (faltantes.length > 0) {
-        const nombres = await prisma.user.findMany({
-          where: { id: { in: faltantes } },
-          select: { id: true, name: true, email: true },
-        });
-        const legibles = faltantes.map((id) => {
-          const u = nombres.find((x) => x.id === id);
-          return u ? u.name?.trim() || u.email : 'una persona desconocida';
-        });
-        return jsonNoStore(
-          {
-            error:
-              'Estas personas no tienen el asistente habilitado en esa empresa, así que no podrían entrar: ' +
-              legibles.join(', ') +
-              '.',
-            missingUsers: legibles,
-          },
-          { status: 409 }
-        );
-      }
-    }
-
-    // Tope de proyectos activos por dueño y agente: cada proyecto despierta
-    // sesiones del modelo, y el consumo sale del mismo límite de la flota.
+    // Tope de proyectos activos por dueño: cada proyecto despierta sesiones
+    // del modelo, y el consumo sale del plan de cada agente.
     const propios = await prisma.chatProject.count({
-      where: {
-        id_agent: agente.id_agent,
-        archived: false,
-        members: { some: { id_user: user.id, role: 'owner' } },
-      },
+      where: { archived: false, members: { some: { id_user: user.id, role: 'owner' } } },
     });
-    if (propios >= MAX_OWNED_PROJECTS_PER_AGENT) {
+    if (propios >= MAX_OWNED_PROJECTS) {
       return jsonNoStore(
-        {
-          error: `Ya es dueño de ${MAX_OWNED_PROJECTS_PER_AGENT} proyectos activos con este asistente. Archive uno antes de crear otro.`,
-        },
+        { error: `Ya es dueño de ${MAX_OWNED_PROJECTS} proyectos activos. Archive uno antes de crear otro.` },
         { status: 409 }
       );
     }
 
-    const now = new Date();
-    const creado = await prisma.$transaction(async (tx) => {
-      const proyecto = await tx.chatProject.create({
-        data: {
-          name: nombre.value,
-          id_agent: agente.id_agent,
-          id_company: idCompany,
-          profile: perfil.value,
-          instructions: instrucciones.value,
-          created_by: user.id,
-          members: {
-            create: [
-              { id_user: user.id, role: 'owner', added_by: user.id },
-              ...idUsers.map((id) => ({ id_user: id, role: 'member', added_by: user.id })),
-            ],
-          },
-        },
-        select: { id_project: true },
-      });
-
-      // Primera conversación del proyecto, para entrar a trabajar de una vez.
-      const conversacion = await tx.chatConversation.create({
-        data: {
-          kind: 'project',
-          id_project: proyecto.id_project,
-          title: 'Conversación inicial',
-          id_company: idCompany,
-          id_user: user.id,
-          created_by: user.id,
-          id_agent: agente.id_agent,
-          last_message_at: now,
-        },
-        select: { id: true },
-      });
-
-      await tx.chatMessage.create({
-        data: {
-          id_conversation: conversacion.id,
-          role: 'system',
-          body:
-            `Se creó el proyecto **${nombre.value}**. ` +
-            'Todo lo que se escriba aquí lo atiende el asistente con el contexto, las instrucciones y los archivos de este proyecto, aparte de sus demás conversaciones.',
-          created_at: now,
-          delivered_at: now,
-        },
-      });
-
-      return { idProject: proyecto.id_project, idConversation: conversacion.id };
+    const creado = await prisma.chatProject.create({
+      data: {
+        name: nombre.value,
+        description: descripcion.value,
+        // «Agente con el que se creó» (columna de la F1). El acceso lo dan
+        // las filas de chat_project_agent.
+        id_agent: agentes[0].idAgent,
+        id_company: idCompany,
+        profile: perfil,
+        instructions: instrucciones.value,
+        created_by: user.id,
+        members: { create: [{ id_user: user.id, role: 'owner', added_by: user.id }] },
+        agents: { create: agentes.map((a) => ({ id_agent: a.idAgent, added_by: user.id })) },
+      },
+      select: { id_project: true },
     });
 
-    return jsonNoStore(creado, { status: 201 });
+    return jsonNoStore({ idProject: creado.id_project }, { status: 201 });
   } catch (error) {
-    return serverError('POST /api/chat/projects', error);
+    return serverError('POST /api/proyectos', error);
   }
 }

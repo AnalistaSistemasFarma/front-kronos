@@ -14,7 +14,7 @@ import { prisma } from '../prisma';
 import { assertConversationOwnership } from './access';
 import { assertGroupAccess, type AgenteMencionable, type ParticipantRole } from './groups';
 import { assertPeopleAccess } from './people';
-import { assertProjectConversationAccess } from './projects';
+import { assertProjectConversationAccess, type WriteAccess } from './projects';
 import type { ProjectRole } from './projects-rules';
 
 /** El chat nunca se cachea: es una bandeja en vivo. */
@@ -132,10 +132,12 @@ export type ConversationGuard =
       conversationId: number;
       /** Conversación de un PROYECTO (hilo de agente, lib/chat/projects.ts). */
       kind: 'project';
-      /** El agente del proyecto (uno solo, como en el hilo directo). */
+      /** El agente de ESTA conversación (un proyecto puede tener varios). */
       idAgent: number;
       idProject: number;
       projectRole: ProjectRole;
+      /** ¿Puede escribir? Leer basta con ser miembro (lib/chat/projects.ts). */
+      projectWritable: WriteAccess;
     };
 
 export async function guardConversation(rawId: string): Promise<ConversationGuard> {
@@ -184,6 +186,7 @@ export async function guardConversation(rawId: string): Promise<ConversationGuar
         idAgent: proyecto.idAgent,
         idProject: proyecto.idProject,
         projectRole: proyecto.role,
+        projectWritable: proyecto.writable,
       };
     }
   } else if (fila?.kind === 'people') {

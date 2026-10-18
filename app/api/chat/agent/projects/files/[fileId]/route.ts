@@ -5,12 +5,13 @@ import { jsonNoStore, NO_STORE, serverError, unauthorized } from '../../../../..
 import { buildContentDisposition, safeDownloadContentType } from '../../../../../../../lib/chat/attachments';
 import { downloadChatAttachment } from '../../../../../../../lib/chat/attachmentStorage';
 import { projectsEnabledFor } from '../../../../../../../lib/chat/projects-rules';
+import { whereProyectoDelAgente } from '../../../../../../../lib/chat/projects';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * Descarga de un ARCHIVO DE PROYECTO para el PUENTE DE HILOS (llave con
- * scope "projects"). El archivo debe ser de un proyecto ACTIVO de ESTE agente.
+ * scope "projects"). El archivo debe ser de un proyecto ACTIVO donde ESTE agente está designado.
  */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ fileId: string }> }) {
   try {
@@ -27,8 +28,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const archivo = await prisma.chatProjectFile.findFirst({
       where: {
         id_project_file: idFile,
-        // ANCLA DE SEGURIDAD: proyecto activo del agente de la llave.
-        project: { id_agent: agent.idAgent, archived: false },
+        // ANCLA DE SEGURIDAD: proyecto activo donde el agente de la llave
+        // está designado.
+        project: whereProyectoDelAgente(agent.idAgent),
       },
       select: { file_name: true, content_type: true, onedrive_item_id: true },
     });
