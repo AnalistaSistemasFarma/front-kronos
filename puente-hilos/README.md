@@ -1,17 +1,26 @@
-# Puente de hilos (proyectos del chat) — F1 piloto
+# Puente de hilos (módulo «Proyectos») — piloto
 
 Servicio aparte que atiende las **conversaciones de proyecto** del chat de SynerLink con **una sesión de Claude Code por hilo**. Nicolás Rivera aprobó el piloto el 2026-10-17. Arranca solo con Play (`@silvia_gss_bot`) y **solo en PRUEBAS**.
 
 No reemplaza al bot vivo ni lo toca. El bot de Play sigue en su sesión larga (`com.pedro.play`), con su `.env`, su config y su canal de siempre. La bandeja que lee el bot vivo solo trae hilos directos y menciones de grupo, así que **nunca recibe un mensaje de proyecto**. Este puente lee una bandeja distinta con una llave de alcance `projects`, y esa llave no ve nada más.
+
+## Módulo «Proyectos» (2026-10-18): varios agentes por proyecto
+
+Desde el módulo, un proyecto tiene **uno o varios agentes designados** (`chat_project_agent`) y cada conversación es de **uno** de ellos (`chat_conversation.id_agent`). No cambia el modelo operativo:
+
+- **Una instancia del puente por agente**, en el Mac de ese agente, con **su** llave `scope: "projects"` y **su** token (el plan de cada agente). `scripts/provisionar-agente.sh <agente>` la deja lista.
+- La bandeja de cada llave solo entrega mensajes de **sus** conversaciones en proyectos **activos donde está designado**. Si el dueño retira a un agente, su puente deja de recibir mensajes de ese proyecto y sus conversaciones quedan de solo lectura.
+- Cada instancia mantiene su propia carpeta `proyectos/<id>/…` con los archivos del proyecto: dos agentes del mismo proyecto no comparten sesión, carpeta ni consumo.
+- **Lo vinculado** (correos y solicitudes) llega en el contexto (`project.links`) y el puente lo escribe en `./contexto/vinculados.md` de la carpeta del hilo en cada turno. Es de solo lectura para el modelo (solo escribe en `./trabajo`) y trae **lo mismo que ven los miembros**: de un correo, asunto, remitente, fecha, número de mensajes y el resumen de quien lo vinculó — **nunca el cuerpo** —; de una solicitud, número, asunto, proceso, empresa y estado actual. No hay un conector MCP nuevo: así la llave del puente nunca entra al proceso del modelo.
 
 ## Cómo funciona
 
 1. Hace long-poll a `GET /api/chat/agent/inbox` con la llave de scope `projects` y `ack=false`.
 2. Cada mensaje entra a la cola de **su** conversación. Dentro de un hilo los turnos van en serie, y entre hilos corren en paralelo con un **tope de 2 a la vez** (`src/cola.mjs`). Los mensajes que llegan mientras un hilo trabaja salen juntos en el turno siguiente.
 3. En cada turno:
-   - pide el contexto del proyecto (`/api/chat/agent/projects/context`): instrucciones, perfil, archivos y versión;
+   - pide el contexto del proyecto (`/api/chat/agent/projects/context`): instrucciones, descripción, perfil, archivos, vinculados y versión;
    - baja los archivos del proyecto a `proyectos/<id>/archivos/` si cambió la versión, y los adjuntos del chat a `adjuntos/`;
-   - escribe `CLAUDE.md`, `.puente/sistema.md` y `.puente/mcp.json`;
+   - escribe `CLAUDE.md`, `.puente/sistema.md`, `.puente/mcp.json` y `contexto/vinculados.md`;
    - corre `claude -p --resume <session_id del hilo>` en la carpeta del hilo (`src/claude.mjs`).
 4. Publica la respuesta en el hilo, deja el indicador en reposo, reporta el consumo (`/api/chat/agent/usage`, por conversación y también en `consumo.jsonl`) y confirma los mensajes. La confirmación va al final, así que si el puente se cae, el mensaje vuelve a llegar.
 
@@ -69,18 +78,34 @@ Antes de empezar: el PR debe estar fusionado en `testing` y desplegado, y Nicol�
    ```
    Debe imprimir `listo: agente play (Play), entorno pruebas, tope 2 hilos…`.
 5. **Como servicio** (opcional; no se carga solo): copie `launchd/com.gss.puente-hilos.play-pruebas.plist.example` a `~/Library/LaunchAgents/`, reemplace `__HOME__` y `__REPO__`, y use `bootstrap` / `kickstart` / `kill SIGTERM` / `bootout`, como dice el encabezado del plist.
-6. **Prueba de punta a punta:** abra el chat de pruebas → Play → botón **Proyectos** → entre a «Comex Latam» y escriba. Revise:
+6. **Prueba de punta a punta:** abra SynerLink de pruebas → **Procesos → Proyectos** (permiso «Proyectos») → entre a «Comex Latam», abra una conversación con Play y escriba. Revise:
    - el indicador «trabajando»;
    - la respuesta en el hilo;
    - una fila en `chat_agent_turn_usage` para esa conversación;
    - que el chat directo de Play **no** recibió nada.
+
+## Otro agente (`scripts/provisionar-agente.sh`)
+
+Cada agente lleva **su propia instancia** del puente, en el Mac donde corre el bot y con su propio token. Para no repetir los pasos 3 a 5 a mano:
+
+```bash
+# 1) Ensayo: solo dice lo que haría.
+puente-hilos/scripts/provisionar-agente.sh horus
+# 2) Con la llave nueva de scope "projects" en un archivo de una línea (se copia sin mostrarla y se borra):
+puente-hilos/scripts/provisionar-agente.sh horus --llave-archivo /ruta/llave.tmp --aplicar
+# 3) Opcional: --cargar registra y prende el servicio com.gss.puente-hilos.<agente>-pruebas.
+```
+
+El script verifica Node ≥ 20, que `claude` soporte `--restricted`, que el `.env` del bot tenga `CLAUDE_CODE_OAUTH_TOKEN` (solo cuenta la línea, no la lee) y que no haya un `CLAUDE.md` por encima de `~/.puente-hilos`. No sobrescribe una instancia que ya exista y no toca el bot vivo.
+
+Del lado de SynerLink, el agente debe estar en `CHAT_PROJECTS_AGENTS` con perfiles del catálogo (`lib/chat/projects-rules.ts`). Un perfil desconocido deja **todo** el módulo apagado (falla cerrado), así que un perfil nuevo, como `gss`, se agrega al `.env` solo después de desplegar el código que lo trae.
 
 **Apagar:** `launchctl kill SIGTERM …`, o Ctrl+C. Termina los turnos en curso y sale. Para apagar los proyectos en la aplicación, quite `CHAT_PROJECTS_AGENTS` y reinicie la app.
 
 ## Pruebas
 
 ```bash
-cd puente-hilos && node --test test/
+cd puente-hilos && node --test test/*.test.mjs
 ```
 
 No tiene dependencias: usa Node 20 o superior y el `claude` instalado, que debe soportar `--restricted`. El puente lo verifica al arrancar.

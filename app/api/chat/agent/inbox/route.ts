@@ -13,6 +13,7 @@ import {
 import { jsonNoStore, serverError, unauthorized } from '../../../../../lib/chat/http';
 import type { ChatAgentIdentity } from '../../../../../lib/chat/agent-auth';
 import { projectsEnabledFor } from '../../../../../lib/chat/projects-rules';
+import { whereProyectoDelAgente } from '../../../../../lib/chat/projects';
 
 // El long-poll obliga a que la ruta sea dinámica: nada de esto se cachea.
 export const dynamic = 'force-dynamic';
@@ -270,12 +271,13 @@ async function bandejaDeProyectos(opciones: {
       where: {
         role: 'user',
         delivered_at: null,
-        // ANCLA DE SEGURIDAD: solo PROYECTOS activos de ESTE agente.
+        // ANCLA DE SEGURIDAD: solo conversaciones de ESTE agente en
+        // proyectos activos donde sigue DESIGNADO (chat_project_agent).
         conversation: {
           kind: 'project',
           archived: false,
           id_agent: agent.idAgent,
-          project: { id_agent: agent.idAgent, archived: false },
+          project: whereProyectoDelAgente(agent.idAgent),
         },
       },
       orderBy: { id: 'asc' },

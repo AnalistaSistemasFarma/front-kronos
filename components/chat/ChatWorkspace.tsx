@@ -27,7 +27,6 @@ import {
   IconArrowLeft,
   IconBuilding,
   IconFolderOff,
-  IconFolders,
   IconLayoutGrid,
   IconList,
   IconHierarchy2,
@@ -1504,24 +1503,7 @@ export default function ChatWorkspace({
               </Box>
             </Group>
           </UnstyledButton>
-          <Group gap={4} wrap='nowrap'>
-            {/* PROYECTOS (hilos aislados por empresa o tema), piloto F1. Solo
-                aparece si el asistente los tiene habilitados en el servidor. */}
-            {selectedAgent.projectsEnabled && (
-              <Tooltip label='Proyectos de este asistente' withArrow>
-                <ActionIcon
-                  component={Link}
-                  href={`/process/chat/proyectos/${encodeURIComponent(selectedAgent.code)}`}
-                  variant='subtle'
-                  color='gray'
-                  aria-label={`Proyectos de ${selectedAgent.displayName}`}
-                >
-                  <IconFolders size={18} />
-                </ActionIcon>
-              </Tooltip>
-            )}
-            {botonesDelEncabezado}
-          </Group>
+          {botonesDelEncabezado}
         </Group>
 
         {/* Sin `height`: el alto lo acota el contenedor, y dentro del hilo solo

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '../../../../../../../lib/prisma';
-import { forbidden, jsonNoStore, NO_STORE, serverError } from '../../../../../../../lib/chat/http';
-import { buildContentDisposition, safeDownloadContentType } from '../../../../../../../lib/chat/attachments';
-import { downloadChatAttachment } from '../../../../../../../lib/chat/attachmentStorage';
-import { guardProject } from '../../../../../../../lib/chat/projects-guard';
-import { canManageProject } from '../../../../../../../lib/chat/projects-rules';
+import { prisma } from '../../../../../../lib/prisma';
+import { forbidden, jsonNoStore, NO_STORE, serverError } from '../../../../../../lib/chat/http';
+import { buildContentDisposition, safeDownloadContentType } from '../../../../../../lib/chat/attachments';
+import { downloadChatAttachment } from '../../../../../../lib/chat/attachmentStorage';
+import { archivedProject, guardProject } from '../../../../../../lib/chat/projects-guard';
+import { canRemoveContribution } from '../../../../../../lib/chat/projects-rules';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
  * UN archivo del proyecto.
  *   GET    descarga (cualquier miembro). Pasa por el servidor: el enlace de
  *          OneDrive nunca sale al navegador.
- *   DELETE quita la referencia (solo el DUEÑO). El archivo de OneDrive queda,
+ *   DELETE quita la referencia (el dueño, o el editor que lo cargó). El archivo de OneDrive queda,
  *          como en el resto del chat.
  */
 async function archivoDelProyecto(idProject: number, rawFileId: string) {
@@ -21,7 +21,7 @@ async function archivoDelProyecto(idProject: number, rawFileId: string) {
   // ANCLA: el archivo debe ser de ESTE proyecto (anti-IDOR).
   return prisma.chatProjectFile.findFirst({
     where: { id_project_file: idFile, id_project: idProject },
-    select: { id_project_file: true, file_name: true, content_type: true, onedrive_item_id: true },
+    select: { id_project_file: true, file_name: true, content_type: true, onedrive_item_id: true, uploaded_by: true },
   });
 }
 
@@ -53,7 +53,7 @@ export async function GET(
     if (content.contentLength) headers.set('Content-Length', content.contentLength);
     return new NextResponse(content.stream, { status: 200, headers });
   } catch (error) {
-    return serverError('GET /api/chat/projects/[id]/files/[fileId]', error);
+    return serverError('GET /api/proyectos/[id]/archivos/[fileId]', error);
   }
 }
 
@@ -65,12 +65,13 @@ export async function DELETE(
     const { id, fileId } = await params;
     const guard = await guardProject(id);
     if ('response' in guard) return guard.response;
-    if (!canManageProject(guard.project.role)) {
-      return forbidden('Solo el dueño del proyecto puede quitar archivos.');
-    }
+    if (guard.project.archived) return archivedProject();
 
     const archivo = await archivoDelProyecto(guard.project.idProject, fileId);
     if (!archivo) return noEncontrado();
+    if (!canRemoveContribution(guard.project.role, guard.user.id, archivo.uploaded_by)) {
+      return forbidden('Solo el dueño del proyecto o quien cargó el archivo lo puede quitar.');
+    }
 
     await prisma.$transaction([
       prisma.chatProjectFile.delete({ where: { id_project_file: archivo.id_project_file } }),
@@ -81,6 +82,6 @@ export async function DELETE(
     ]);
     return jsonNoStore({ removed: true });
   } catch (error) {
-    return serverError('DELETE /api/chat/projects/[id]/files/[fileId]', error);
+    return serverError('DELETE /api/proyectos/[id]/archivos/[fileId]', error);
   }
 }

@@ -14,6 +14,7 @@ import {
 } from '../../../../../../lib/chat/constants';
 import {
   badRequest,
+  forbidden,
   guardConversation,
   jsonNoStore,
   readMessageRequest,
@@ -133,6 +134,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { id } = await params;
     const guard = await guardConversation(id);
     if ('response' in guard) return guard.response;
+
+    // PROYECTO: leer basta con ser miembro; escribir exige rol (dueño o
+    // editor), el agente vigente y tenerlo asignado (lib/chat/projects.ts).
+    if (guard.kind === 'project' && !guard.projectWritable.ok) {
+      return forbidden(guard.projectWritable.motivo);
+    }
 
     const payload = await readMessageRequest(request);
     if (!payload) {

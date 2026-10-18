@@ -80,6 +80,6 @@ test('el ejemplo del repositorio es válido', async () => {
   const { readFileSync } = await import('node:fs');
   const ejemplo = JSON.parse(readFileSync(new URL('../config/perfiles.example.json', import.meta.url), 'utf8'));
   const perfiles = validarPerfiles(ejemplo);
-  assert.deepEqual([...perfiles.keys()].sort(), ['comex-latam', 'farmalogica', 'olp', 'sin-conectores']);
+  assert.deepEqual([...perfiles.keys()].sort(), ['comex-latam', 'farmalogica', 'gss', 'olp', 'sin-conectores']);
   assert.equal(perfiles.get('comex-latam').web, true);
 });
