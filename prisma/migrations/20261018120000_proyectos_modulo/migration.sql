@@ -110,7 +110,7 @@ END;
 -- El buzón se guarda siempre en minúsculas (así lo compara el código).
 IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'chat_project_email_mailbox_ck')
   EXEC(N'ALTER TABLE [dbo].[chat_project_email] WITH CHECK ADD CONSTRAINT [chat_project_email_mailbox_ck]
-    CHECK ([mailbox] = LOWER([mailbox]) COLLATE Latin1_General_BIN AND [mailbox] LIKE N''%_@_%''));');
+    CHECK ([mailbox] = LOWER([mailbox]) COLLATE Latin1_General_BIN AND [mailbox] LIKE N''%_@_%'');');
 
 /* ---- 5. chat_project_request --------------------------------------- */
 IF OBJECT_ID(N'[dbo].[chat_project_request]', N'U') IS NULL
