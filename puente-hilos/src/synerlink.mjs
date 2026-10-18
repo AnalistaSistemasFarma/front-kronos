@@ -10,6 +10,7 @@
  *   GET  /api/chat/attachments/N          descarga de un adjunto del hilo
  *   POST /api/chat/agent/status           indicador «trabajando»
  *   POST /api/chat/agent/messages         publicar la respuesta
+ *   POST /api/chat/agent/projects/proposals  entregar las PROPUESTAS de tareas del turno
  *   POST /api/chat/agent/usage            consumo (tokens) del turno
  *
  * La llave nunca se escribe en registros ni pasa al proceso del modelo.
@@ -63,6 +64,8 @@ export function crearClienteSynerLink({ url, llave, fetchImpl = globalThis.fetch
       }),
     responder: (idConversation, body) =>
       json('/api/chat/agent/messages', { method: 'POST', body: { idConversation, body, state: 'idle' } }),
+    /** Propuestas de tareas del turno: quedan PENDIENTES hasta que un dueño o editor las confirme. */
+    proponer: (idConversation, items) => json('/api/chat/agent/projects/proposals', { method: 'POST', body: { idConversation, items } }),
     consumo: (reporte) => json('/api/chat/agent/usage', { method: 'POST', body: reporte }),
     /** Descarga binaria (archivo del proyecto o adjunto). Devuelve un Buffer. */
     async descargar(ruta, maxBytes = 25 * 1024 * 1024) {

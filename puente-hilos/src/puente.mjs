@@ -27,6 +27,8 @@ import {
   asegurarCarpetas,
   bajarAdjuntos,
   escribirContexto,
+  leerPropuestas,
+  limpiarPropuestas,
   Estado,
   registrarConsumoLocal,
   rutasDelHilo,
@@ -87,6 +89,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
       await sincronizarArchivos({ rutas, contexto, estado, descargar: (u) => synerlink.descargar(u) });
       const adjuntos = await bajarAdjuntos({ rutas, mensajes: lote, descargar: (u) => synerlink.descargar(u) });
       escribirContexto({ rutas, agente: cfg.agenteNombre ?? cfg.agente, contexto, perfil, instruccionesEn: cfg.instruccionesEn });
+      limpiarPropuestas(rutas);
 
       const ejecutar = async (sesion) => {
         const args = armarArgumentos({
@@ -153,7 +156,24 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
       } else {
         cuerpo = r.resultado.texto.trim() || '_(El asistente terminó sin texto.)_';
       }
-      cuerpo = (aviso + cuerpo).slice(0, MAX_RESPUESTA);
+      // Propuestas de tareas que dejó el modelo: se entregan con la llave del
+      // PUENTE (el modelo nunca la ve) y quedan pendientes de confirmación.
+      let notaPropuestas = '';
+      const prop = leerPropuestas(rutas);
+      if (prop.error) log(`conversación ${idConversation}: ${prop.error}`);
+      if (r.resultado?.ok && prop.items.length > 0) {
+        try {
+          const res = await synerlink.proponer(idConversation, prop.items);
+          const n = res?.creadas?.length ?? 0;
+          const m = res?.rechazadas?.length ?? 0;
+          if (n > 0) notaPropuestas += `\n\n📌 Dejé ${n === 1 ? '1 propuesta' : `${n} propuestas`} en el **Cronograma** del proyecto. Nada cambia hasta que un dueño o editor la${n === 1 ? '' : 's'} confirme.`;
+          if (m > 0) notaPropuestas += `\n\n⚠️ ${m === 1 ? '1 propuesta no se pudo registrar' : `${m} propuestas no se pudieron registrar`}: ${res.rechazadas.map((x) => x.error).slice(0, 3).join(' · ')}`;
+        } catch (e) {
+          log(`conversación ${idConversation}: no se pudieron entregar las propuestas:`, e.message);
+          notaPropuestas = '\n\n⚠️ No pude registrar mis propuestas en el Cronograma por un error. Intente de nuevo.';
+        }
+      }
+      cuerpo = (aviso + cuerpo).slice(0, MAX_RESPUESTA - notaPropuestas.length) + notaPropuestas;
 
       await synerlink.responder(idConversation, cuerpo);
 
