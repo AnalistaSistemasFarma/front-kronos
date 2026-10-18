@@ -866,7 +866,13 @@ export default function ChatThread({
     stickToBottomRef.current = true;
     if (!stickToBottom) setStickToBottom(true);
   }
-  if (yaEstaban.current === null && thread.messages.length > 0) {
+  // PARPADEO AL CAMBIAR DE HILO (2026-10-17, «a veces vuelve»): en el render
+  // en que cambia `claveHilo`, `thread.messages` todavía son los del hilo
+  // ANTERIOR (el hook los reinicia en un efecto, después). Si "lo que ya
+  // estaba" se tomaba de ahí, TODO el historial del hilo nuevo quedaba como
+  // «nuevo» y entraba con la animación desde opacidad 0: la conversación entera
+  // titilaba. Solo se cuenta lo que ya es de este hilo.
+  if (yaEstaban.current === null && !thread.stale && thread.messages.length > 0) {
     yaEstaban.current = new Set(thread.messages.map((m) => m.id));
   }
 
@@ -874,7 +880,9 @@ export default function ChatThread({
   // algo, un mensaje nuevo no debe arrancarle la vista.
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
-    if (!viewport) return;
+    // Mismo motivo: la cuenta del hilo anterior no es el "primer lote" del
+    // nuevo (si no, el hilo nuevo bajaba con animación en vez de abrir abajo).
+    if (!viewport || thread.stale) return;
     const primerLote = lastCountRef.current === 0;
     const grew = thread.messages.length > lastCountRef.current;
     lastCountRef.current = thread.messages.length;
@@ -888,7 +896,7 @@ export default function ChatThread({
       return;
     }
     viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
-  }, [thread.messages, stickToBottom]);
+  }, [thread.messages, thread.stale, stickToBottom]);
 
   // Al abrir el hilo, al fondo sin animación. useLayoutEffect (no useEffect):
   // fija el scroll ANTES de que el navegador pinte, para no dejar ver el
