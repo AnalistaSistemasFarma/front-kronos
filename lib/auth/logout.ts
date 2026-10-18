@@ -1,3 +1,5 @@
+import { isSafeRelativePath } from './safe-redirect';
+
 /** Entrada por defecto tras login; /home resuelve Mis procesos > Solicitante > hub. */
 export const DEFAULT_POST_LOGIN_URL = '/home';
 
@@ -75,14 +77,17 @@ export function getSafeCallbackUrl(
   if (!raw?.trim()) return DEFAULT_POST_LOGIN_URL;
 
   const value = raw.trim();
-  if (value.startsWith('/') && !value.startsWith('//')) {
+  // Solo rutas relativas del mismo sitio: rechaza `//`, `/\`, controles y esquemas (H-05).
+  if (isSafeRelativePath(value)) {
     return value;
   }
 
   try {
     const parsed = new URL(value);
     if (origin && parsed.origin === origin) {
-      return `${parsed.pathname}${parsed.search}` || DEFAULT_POST_LOGIN_URL;
+      const path = `${parsed.pathname}${parsed.search}`;
+      // `https://mismo-host//evil.example` deja `//evil.example`: también se valida.
+      if (isSafeRelativePath(path)) return path;
     }
   } catch {
     /* URL inválida */
