@@ -4,6 +4,7 @@ import { authenticateAgent } from '../../../../../../lib/chat/agent-auth';
 import { badRequest, jsonNoStore, serverError, unauthorized } from '../../../../../../lib/chat/http';
 import { assertAgentProjectConversation } from '../../../../../../lib/chat/projects';
 import { profileLabel } from '../../../../../../lib/chat/projects-rules';
+import { vinculosDelProyecto } from '../../../../../../lib/chat/projects-links';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +18,12 @@ export const dynamic = 'force-dynamic';
  * hilo: nombre, empresa, PERFIL de conectores, instrucciones, lista de
  * archivos y una `version` (updated_at del proyecto) para no volver a bajar
  * los archivos si nada cambió.
+ *
+ * Módulo «Proyectos» (2026-10-18): trae además la descripción y lo VINCULADO
+ * (correos y solicitudes) con EXACTAMENTE lo que ven los miembros: de un
+ * correo, asunto, remitente, fecha y resumen —nunca el cuerpo—; de una
+ * solicitud, número, asunto, proceso y estado actual. Es de solo lectura: el
+ * puente lo escribe en ./contexto/vinculados.md de la carpeta del hilo.
  *
  * Solo con la llave del puente: la del bot vivo responde 404 aquí, igual que
  * una conversación que no es de un proyecto de ESTE agente.
@@ -42,6 +49,7 @@ export async function GET(request: NextRequest) {
       select: {
         id_project: true,
         name: true,
+        description: true,
         profile: true,
         instructions: true,
         updated_at: true,
@@ -55,14 +63,39 @@ export async function GET(request: NextRequest) {
     });
     if (!p) return jsonNoStore({ error: 'Conversación no encontrada.' }, { status: 404 });
 
+    const vinculos = await vinculosDelProyecto(p.id_project, null);
+
     return jsonNoStore({
       project: {
         idProject: p.id_project,
         name: p.name,
         company: { idCompany: p.company.id_company, companyName: p.company.company },
         profile: { key: p.profile, label: profileLabel(p.profile) },
+        description: p.description,
         instructions: p.instructions,
         version: p.updated_at.toISOString(),
+        links: {
+          emails: vinculos.emails.map((e) => ({
+            id: e.id,
+            subject: e.subject,
+            senderName: e.senderName,
+            senderEmail: e.senderEmail,
+            lastMessageAt: e.lastMessageAt,
+            messageCount: e.messageCount,
+            summary: e.summary,
+            linkedBy: e.linkedBy?.name ?? null,
+            linkedAt: e.linkedAt,
+          })),
+          requests: vinculos.requests.map((r) => ({
+            idRequest: r.idRequest,
+            subject: r.subject,
+            processName: r.processName,
+            companyName: r.companyName,
+            estado: r.estado,
+            linkedBy: r.linkedBy?.name ?? null,
+            linkedAt: r.linkedAt,
+          })),
+        },
         files: p.files.map((f) => ({
           id: f.id_project_file,
           fileName: f.file_name,

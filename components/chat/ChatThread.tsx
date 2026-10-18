@@ -18,6 +18,7 @@ import {
 import {
   IconAlertCircle,
   IconDownload,
+  IconLock,
   IconMessage2,
   IconUpload,
 } from '@tabler/icons-react';
@@ -632,6 +633,12 @@ export default function ChatThread({
   project?: {
     idConversation: number;
     name: string;
+    /**
+     * Módulo «Proyectos»: si viene, la conversación es de SOLO LECTURA para
+     * quien mira (lector, o asistente retirado) y en lugar de la caja de
+     * escribir se muestra este motivo. El servidor también rechaza el envío.
+     */
+    readOnly?: string | null;
   };
   /** Quién soy. En un grupo es lo que distingue mis mensajes de los ajenos. */
   currentUserId?: string;
@@ -1233,6 +1240,13 @@ export default function ChatThread({
         </Alert>
       )}
 
+      {enProyecto && project?.readOnly ? (
+        <Box className='chat-thread__composer'>
+          <Alert icon={<IconLock size={16} />} color='gray' radius='md' py={8} data-testid='chat-solo-lectura'>
+            <Text size='xs'>{project.readOnly}</Text>
+          </Alert>
+        </Box>
+      ) : (
       <Box className='chat-thread__composer'>
         <ChatComposer
           voiceConversationId={!enProyecto && agent?.code === 'duo' ? thread.conversation?.id : undefined}
@@ -1255,6 +1269,7 @@ export default function ChatThread({
           menciones={menciones}
         />
       </Box>
+      )}
     </Box>
   );
 }

@@ -393,6 +393,14 @@ jobs:
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/proyectos-ok.sql
           # El script de PROD debe NEGARSE fuera de KRONOSDB.
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-17-chat-proyectos-PROD.sql; then echo "El script de PROD de proyectos debió negarse en kronos_ci"; exit 1; fi
+          # Módulo «Proyectos» (2026-10-18): migración y pase de PRUEBAS dos veces (idempotencia), sobre los hilos de ejemplo de la F1.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261018120000_proyectos_modulo/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261018120000_proyectos_modulo/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-18-proyectos-modulo-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-18-proyectos-modulo-PRUEBAS.sql
+          echo "IF EXISTS (SELECT 1 FROM dbo.chat_project p WHERE NOT EXISTS (SELECT 1 FROM dbo.chat_project_agent a WHERE a.id_project = p.id_project AND a.id_agent = p.id_agent)) OR EXISTS (SELECT 1 FROM dbo.chat_project_member WHERE role = N'member') OR NOT EXISTS (SELECT 1 FROM dbo.subprocess WHERE subprocess_url = N'/process/proyectos') OR EXISTS (SELECT 1 FROM dbo.chat_project_member m INNER JOIN dbo.chat_project p ON p.id_project = m.id_project INNER JOIN dbo.company_user cu ON cu.id_user = m.id_user AND cu.id_company = p.id_company WHERE NOT EXISTS (SELECT 1 FROM dbo.subprocess_user_company x INNER JOIN dbo.subprocess s ON s.id_subprocess = x.id_subprocess WHERE s.subprocess_url = N'/process/proyectos' AND x.id_company_user = cu.id_company_user)) THROW 50000, N'La migración del módulo Proyectos no copió los agentes, los roles o el permiso de la F1.', 1;" > /tmp/modulo-proyectos-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/modulo-proyectos-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-18-proyectos-modulo-PROD.sql; then echo "El script de PROD del módulo Proyectos debió negarse en kronos_ci"; exit 1; fi
           # Bitácora · actividades de texto libre (2026-10-17): migración y PRUEBAS dos veces, reversa y otra vez PRUEBAS (idempotencia ida y vuelta).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017200000_bitacora_proceso_texto_libre/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017200000_bitacora_proceso_texto_libre/migration.sql
@@ -425,7 +433,7 @@ jobs:
         run: |
           set -e
           # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
-          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia chat_proyectos_reversa_acepta_perdida"
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida"
           reversa() {
             { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
@@ -436,11 +444,16 @@ jobs:
             npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
           }
           # De la más nueva a la más antigua…
+          # Módulo «Proyectos» (2026-10-18): ida y vuelta; va ANTES que la de la F1 (sus tablas apuntan a chat_project).
+          reversa prisma/manual/2026-10-18-proyectos-modulo-reversa.sql
+          echo "IF OBJECT_ID(N'dbo.chat_project_agent', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.chat_project_email', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.chat_project_request', N'U') IS NOT NULL OR COL_LENGTH(N'dbo.chat_project', N'description') IS NOT NULL OR EXISTS (SELECT 1 FROM dbo.subprocess WHERE subprocess_url = N'/process/proyectos') OR EXISTS (SELECT 1 FROM dbo.chat_project_member WHERE role NOT IN (N'owner', N'member')) THROW 50000, N'La reversa del módulo Proyectos no quitó lo suyo.', 1;" > /tmp/modulo-proyectos-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/modulo-proyectos-quitado.sql
           # Proyectos del chat (2026-10-17): ida y vuelta (la reversa y luego la migración otra vez).
           reversa prisma/manual/2026-10-17-chat-proyectos-reversa.sql
           echo "IF OBJECT_ID(N'dbo.chat_project', N'U') IS NOT NULL OR COL_LENGTH(N'dbo.chat_conversation', N'id_project') IS NOT NULL THROW 50000, N'La reversa de proyectos no quitó lo suyo.', 1;" > /tmp/proyectos-quitado.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/proyectos-quitado.sql
           migra 20261017120000_chat_projects
+          migra 20261018120000_proyectos_modulo
           # S19: con un tipo marcado como plantilla guía (integración del Generador), sin la bandera debe negarse.
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-14-sgc-s19-generador-sin-codificacion-reversa.sql; then echo "La reversa del S19 debió negarse sin su bandera"; exit 1; fi
           reversa prisma/manual/2026-10-14-sgc-s19-generador-sin-codificacion-reversa.sql

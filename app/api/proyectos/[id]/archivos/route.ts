@@ -1,10 +1,10 @@
 import { NextRequest } from 'next/server';
-import { prisma } from '../../../../../../lib/prisma';
-import { badRequest, forbidden, jsonNoStore, readMessageRequest, serverError } from '../../../../../../lib/chat/http';
-import { collectChatAttachments } from '../../../../../../lib/chat/attachments';
-import { uploadProjectFiles } from '../../../../../../lib/chat/attachmentStorage';
-import { guardProject } from '../../../../../../lib/chat/projects-guard';
-import { canManageProject, MAX_PROJECT_FILES } from '../../../../../../lib/chat/projects-rules';
+import { prisma } from '../../../../../lib/prisma';
+import { badRequest, forbidden, jsonNoStore, readMessageRequest, serverError } from '../../../../../lib/chat/http';
+import { collectChatAttachments } from '../../../../../lib/chat/attachments';
+import { uploadProjectFiles } from '../../../../../lib/chat/attachmentStorage';
+import { archivedProject, guardProject } from '../../../../../lib/chat/projects-guard';
+import { capabilitiesFor, MAX_PROJECT_FILES } from '../../../../../lib/chat/projects-rules';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
  * ARCHIVOS del proyecto (base de conocimiento del hilo).
  *
  *   POST multipart/form-data, campo `files` (hasta 5 por envío, 25 MB c/u,
- *        mismas extensiones bloqueadas que el chat). Solo el DUEÑO.
+ *        mismas extensiones bloqueadas que el chat). Dueño o editor.
  *
  * El puente de hilos los baja a la carpeta del proyecto con la llave del
  * agente (GET /api/chat/agent/projects/files/[fileId]); el agente los lee
@@ -23,8 +23,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { id } = await params;
     const guard = await guardProject(id);
     if ('response' in guard) return guard.response;
-    if (!canManageProject(guard.project.role)) {
-      return forbidden('Solo el dueño del proyecto puede cargar archivos.');
+    if (guard.project.archived) return archivedProject();
+    if (!capabilitiesFor(guard.project.role).contribute) {
+      return forbidden('Su rol en el proyecto no permite cargar archivos.');
     }
 
     const payload = await readMessageRequest(request);
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     try {
       subidos = await uploadProjectFiles(guard.project.idProject, collected.files);
     } catch (error) {
-      console.error('[chat/projects] no se pudieron subir los archivos a OneDrive:', error);
+      console.error('[proyectos] no se pudieron subir los archivos a OneDrive:', error);
       return jsonNoStore({ error: 'No se pudieron guardar los archivos.' }, { status: 502 });
     }
 
@@ -66,6 +67,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     return jsonNoStore({ uploaded: subidos.length }, { status: 201 });
   } catch (error) {
-    return serverError('POST /api/chat/projects/[id]/files', error);
+    return serverError('POST /api/proyectos/[id]/archivos', error);
   }
 }

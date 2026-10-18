@@ -56,7 +56,7 @@ export interface NotifyAgentReplyInput {
   groupTitle?: string | null;
   /**
    * Enlace del aviso cuando no es ni el hilo directo ni un grupo (PROYECTO:
-   * /process/chat/proyecto/<id>?conversacion=<id>). Sin valor, se arma como
+   * /process/proyectos/<id>?conversacion=<id>). Sin valor, se arma como
    * siempre.
    */
   url?: string;
