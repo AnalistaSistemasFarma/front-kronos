@@ -9,13 +9,23 @@ import {
   type EventoDia,
   type PersonaCumple,
 } from '../../lib/portal/calendario';
-import { IMAGEN_CUMPLEANOS, SEGUNDOS_VENTANA_HOY, claveVentanaHoy, eventosDelDia, hayCumpleanos } from '../../lib/portal/ventana-hoy';
+import {
+  IMAGEN_CUMPLEANOS,
+  SEGUNDOS_VENTANA_HOY,
+  claveVentanaHoy,
+  eventosDelDia,
+  hayCumpleanos,
+  marcarMostradaEnEstaCarga,
+  yaSeMostroEnEstaCarga,
+} from '../../lib/portal/ventana-hoy';
 
 /**
  * VENTANA EMERGENTE «HOY» (Cristian Baldión, 2026-10-15): al entrar al portal muestra los eventos del día, de los MISMOS datos del
  * calendario (festivos, fechas importantes, eventos de la empresa y cumpleaños). Con cumpleaños lleva una imagen alusiva. Se cierra
  * sola a los ${SEGUNDOS_VENTANA_HOY} segundos —con una barra que lo muestra— o antes con ✕, con Escape o haciendo clic afuera.
- * Si hoy no hay nada que mostrar, NO se abre. Una vez por día y por navegador. Si alguna fuente falla, se muestra lo que sí llegó
+ * Si hoy no hay nada que mostrar, NO se abre. Sale EN CADA CARGA de la página principal (Cristian, 2026-10-16: «cada vez que yo
+ * actualice la página»): ya nadie guarda la marca de «ya vista». Esa marca solo se LEE, y únicamente la dejan las pruebas automáticas
+ * (playwright.config.ts) para que la ventana no tape las demás pruebas. Si alguna fuente falla, se muestra lo que sí llegó
  * (el calendario ya avisa de los errores; esta ventana no debe estorbar con ellos).
  */
 
@@ -35,12 +45,14 @@ export default function VentanaEventosHoy() {
 
   const cerrar = useCallback(() => setAbierta(false), []);
 
-  // 1) Qué hay hoy (una sola vez al entrar).
+  // 1) Qué hay hoy (en cada carga de la página).
   useEffect(() => {
+    if (yaSeMostroEnEstaCarga()) return; // ya salió en esta carga: navegar dentro de la SPA no la reabre
     const fecha = hoyEnBogota();
     setHoy(fecha);
     try {
-      if (window.localStorage.getItem(claveVentanaHoy(fecha))) return; // ya se mostró hoy en este navegador
+      // Interruptor de las pruebas automáticas: en producción esta marca no existe (nadie la escribe) y la ventana sale siempre.
+      if (window.localStorage.getItem(claveVentanaHoy(fecha))) return;
     } catch {
       // sin almacenamiento (modo privado estricto): se muestra igual
     }
@@ -60,13 +72,9 @@ export default function VentanaEventosHoy() {
       const cumples = cumpleanosComoEventos(Array.isArray(cum.cumpleanos) ? (cum.cumpleanos as { fecha: string; personas: PersonaCumple[] }[]) : []);
       const lista = eventosDelDia(fecha, empresa, cumples);
       if (lista.length === 0) return;
+      marcarMostradaEnEstaCarga();
       setEventos(lista);
       setAbierta(true);
-      try {
-        window.localStorage.setItem(claveVentanaHoy(fecha), '1');
-      } catch {
-        // idem
-      }
     })();
     return () => control.abort();
   }, []);

@@ -14,12 +14,24 @@ export const SEGUNDOS_VENTANA_HOY = 15;
 export const IMAGEN_CUMPLEANOS = '/portal-th/cumpleanos.svg';
 
 /**
- * Una vez por INICIO DE SESIÓN: recargar la página, abrir otra pestaña o volver al portal sin haber iniciado sesión de nuevo no la
- * reabre a cada rato (marca en localStorage con la fecha; ver `reiniciarVentanaHoy`). ⚠️ `playwright.config.ts` (proyecto «publico») repite este formato para dejarla marcada como ya vista: si cambia aquí,
+ * Desde el 2026-10-16 (pedido de Cristian: «cada vez que yo actualice la página principal») la ventana sale EN CADA CARGA y ya nadie
+ * escribe esta marca. Solo se LEE, como interruptor de las pruebas automáticas (ver `playwright.config.ts`); `reiniciarVentanaHoy` se
+ * conserva para limpiar cualquier marca que haya quedado de la versión anterior. ⚠️ `playwright.config.ts` (proyecto «publico») repite este formato para dejarla marcada como ya vista: si cambia aquí,
  * cambia allá.
  */
 export const claveVentanaHoy = (hoy: string) => `${PREFIJO_MARCA_VENTANA_HOY}${hoy}`;
 export const PREFIJO_MARCA_VENTANA_HOY = 'portal-th-ventana-hoy-';
+
+/**
+ * Una vez por CARGA de la página (en memoria, no en localStorage): recargar o entrar de nuevo la vuelve a mostrar, pero cambiar de
+ * ruta DENTRO de SynerLink (p. ej. ir a otro módulo del hub y volver a `/process/portal-th`) no la reabre. Iniciar o cerrar sesión
+ * (`reiniciarVentanaHoy`) también la habilita otra vez.
+ */
+let mostradaEnEstaCarga = false;
+export const yaSeMostroEnEstaCarga = () => mostradaEnEstaCarga;
+export const marcarMostradaEnEstaCarga = () => {
+  mostradaEnEstaCarga = true;
+};
 
 /**
  * «Cada vez que se inicie sesión» (Cristian, 2026-10-16): al iniciar o cerrar sesión se BORRA la marca de «ya vista», así que la
@@ -27,6 +39,7 @@ export const PREFIJO_MARCA_VENTANA_HOY = 'portal-th-ventana-hoy-';
  * Sin almacenamiento disponible (modo privado estricto) no hace nada: ahí la ventana sale siempre.
  */
 export function reiniciarVentanaHoy(almacen: Pick<Storage, 'length' | 'key' | 'removeItem'> | null = tryLocalStorage()): void {
+  mostradaEnEstaCarga = false;
   if (!almacen) return;
   try {
     const claves: string[] = [];
