@@ -23,6 +23,14 @@ export const claveVentanaHoy = (hoy: string) => `${PREFIJO_MARCA_VENTANA_HOY}${h
 export const PREFIJO_MARCA_VENTANA_HOY = 'portal-th-ventana-hoy-';
 
 /**
+ * ¿Se omite la ventana por la marca guardada? SOLO en un navegador AUTOMATIZADO (`navigator.webdriver`, que Playwright activa): la marca es
+ * un interruptor de las pruebas. En un navegador real se IGNORA aunque exista: la versión anterior (una vez por día) la escribía en
+ * `localStorage` y esas marcas viejas seguían ahí, así que a quien ya había visto la ventana ese día no le volvía a salir al actualizar
+ * (Cristian, 2026-10-19).
+ */
+export const omitirPorMarca = (hayMarca: boolean, navegadorAutomatizado: boolean): boolean => hayMarca && navegadorAutomatizado;
+
+/**
  * Una vez por CARGA de la página (en memoria, no en localStorage): recargar o entrar de nuevo la vuelve a mostrar, pero cambiar de
  * ruta DENTRO de SynerLink (p. ej. ir a otro módulo del hub y volver a `/process/portal-th`) no la reabre. Iniciar o cerrar sesión
  * (`reiniciarVentanaHoy`) también la habilita otra vez.
