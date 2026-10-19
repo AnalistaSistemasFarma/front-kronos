@@ -770,6 +770,8 @@ model ChatConversation {
   /// Un indicador POR AGENTE: en un grupo hay varios trabajando a la vez.
   statuses     ChatAgentStatus[]
   turnUsage    ChatAgentTurnUsage[]
+  /// Solo en 'project': hasta dónde leyó cada miembro (icono de la cabecera).
+  projectReads ChatProjectRead[]
 
   @@index([id_user, archived, last_message_at(sort: Desc)])
   @@index([id_agent])
@@ -888,6 +890,32 @@ model ChatProject {
   @@index([id_agent, archived])
   @@index([id_company])
   @@map("chat_project")
+  @@schema("dbo")
+}
+
+/// LECTURA de una conversación de proyecto por persona (icono «Proyectos» de la
+/// cabecera, pedido de Nicolás Rivera del 2026-10-19). Es la MISMA marca de agua
+/// del chat (chat_participant.last_read_message_id), pero en tabla aparte: los
+/// miembros de un proyecto no son filas de chat_participant, y agregarlas haría
+/// que las conversaciones de proyecto se colaran en las consultas del chat que
+/// leen participantes. Sin fila = nunca la ha abierto (todo cuenta como nuevo).
+/// La marca solo avanza. Tabla NUEVA y aparte: si el código sale antes que el
+/// DDL, solo falla el contador (el icono no se pinta), no el módulo.
+model ChatProjectRead {
+  id_project_read      Int      @id @default(autoincrement())
+  id_conversation      Int
+  /// Sin llave foránea a propósito (como added_by): un usuario desactivado no
+  /// debe bloquear nada, y la fila no da acceso — la puerta es la del proyecto.
+  id_user              String   @db.NVarChar(1000)
+  /// Id del último mensaje que esta persona ya vio en esta conversación.
+  last_read_message_id Int
+  updated_at           DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [id_conversation], references: [id], onDelete: Cascade)
+
+  @@unique([id_conversation, id_user], map: "chat_project_read_conversation_user")
+  @@index([id_user], map: "chat_project_read_id_user_idx")
+  @@map("chat_project_read")
   @@schema("dbo")
 }
 

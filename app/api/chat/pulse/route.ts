@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server';
 import { prisma } from '../../../../lib/prisma';
 import { CHAT_MODULE_URL } from '../../../../lib/chat/access';
 import { visiblePeopleConversationIds } from '../../../../lib/chat/people';
+import { projectModuleCompanies } from '../../../../lib/chat/projects';
+import { whereConversacionesVisibles, whereMensajesQueCuentan } from '../../../../lib/proyectos/no-leidos';
 import {
   NUDGE_EVENT_TYPE,
   PULSE_MAX_EVENTS,
@@ -48,8 +50,16 @@ export const dynamic = 'force-dynamic';
  *
  * Seguridad: el usuario sale de la sesión; los eventos se filtran por
  * participación y, antes de responder, por la regla de acceso vigente
- * (visiblePeopleConversationIds). Sin el módulo de Chat responde 403 y el
- * cliente deja de preguntar.
+ * (visiblePeopleConversationIds). Sin el módulo de Chat NI el de Proyectos
+ * responde 403 y el cliente deja de preguntar.
+ *
+ * PROYECTOS (2026-10-19, icono «Proyectos» de la cabecera): el mismo pulso
+ * avisa también de mensajes NUEVOS —de personas o de agentes— en conversaciones
+ * de proyecto, con `type: 'project'`, para que el icono vuelva a contar sin un
+ * sondeo propio. Solo de proyectos NO archivados donde la persona es MIEMBRO y
+ * conserva el módulo en la empresa del proyecto (la misma puerta de
+ * resolveProjectForUser, ver lib/proyectos/no-leidos.ts). El evento no lleva
+ * el texto del mensaje: solo el id de la conversación y quién escribió.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -63,7 +73,11 @@ export async function GET(request: NextRequest) {
       },
       select: { id_subprocess_user_company: true },
     });
-    if (!conChat) return forbidden('No tiene habilitado el módulo de Chat.');
+    // Empresas con el módulo «Proyectos»: la puerta de los eventos de proyecto.
+    const empresasProyectos = (await projectModuleCompanies(user.id)).map((e) => e.idCompany);
+    if (!conChat && empresasProyectos.length === 0) {
+      return forbidden('No tiene habilitado el módulo de Chat.');
+    }
 
     const maxActual = async () => {
       const fila = await prisma.chatMessage.findFirst({
@@ -80,15 +94,27 @@ export async function GET(request: NextRequest) {
       return jsonNoStore({ cursor: await maxActual(), events: [] });
     }
 
+    // Cada rama trae SU puerta: hilos 'people' donde participa (si tiene Chat) y
+    // conversaciones de proyecto visibles (si tiene Proyectos).
+    const ramas = [
+      ...(conChat
+        ? [
+            {
+              id_user_author: { not: null },
+              NOT: { id_user_author: user.id },
+              conversation: { kind: 'people', participants: { some: { id_user: user.id } } },
+              OR: [{ role: 'user' }, { event_type: NUDGE_EVENT_TYPE }],
+            },
+          ]
+        : []),
+      ...(empresasProyectos.length > 0
+        ? [{ ...whereMensajesQueCuentan(user.id), conversation: whereConversacionesVisibles(user.id, empresasProyectos) }]
+        : []),
+    ];
+
     const buscar = (desde: number, hasta: number) =>
       prisma.chatMessage.findMany({
-        where: {
-          id: { gt: desde, lte: hasta },
-          id_user_author: { not: null },
-          NOT: { id_user_author: user.id },
-          conversation: { kind: 'people', participants: { some: { id_user: user.id } } },
-          OR: [{ role: 'user' }, { event_type: NUDGE_EVENT_TYPE }],
-        },
+        where: { id: { gt: desde, lte: hasta }, OR: ramas },
         orderBy: { id: 'asc' },
         take: PULSE_MAX_EVENTS,
         select: {
@@ -96,7 +122,10 @@ export async function GET(request: NextRequest) {
           id_conversation: true,
           event_type: true,
           created_at: true,
+          role: true,
+          conversation: { select: { kind: true } },
           userAuthor: { select: { name: true, email: true } },
+          agentAuthor: { select: { display_name: true } },
         },
       });
 
@@ -122,9 +151,13 @@ export async function GET(request: NextRequest) {
 
     if (filas.length === 0) return jsonNoStore({ cursor, events: [] });
 
+    // Proyecto: la puerta ya va en la consulta (miembro + módulo de hoy).
+    const deProyecto = filas.filter((f) => f.conversation.kind === 'project');
+    const dePersonas = filas.filter((f) => f.conversation.kind === 'people');
+
     // La regla de acceso de HOY, y la preferencia de silencio de cada hilo.
-    const visibles = new Set(await visiblePeopleConversationIds(user.id));
-    const hilos = [...new Set(filas.map((f) => f.id_conversation))].filter((id) => visibles.has(id));
+    const visibles = new Set(dePersonas.length ? await visiblePeopleConversationIds(user.id) : []);
+    const hilos = [...new Set(dePersonas.map((f) => f.id_conversation))].filter((id) => visibles.has(id));
     const silencios = hilos.length
       ? await prisma.chatParticipant.findMany({
           where: { id_conversation: { in: hilos }, id_user: user.id },
@@ -133,7 +166,19 @@ export async function GET(request: NextRequest) {
       : [];
     const silenciado = new Map(silencios.map((s) => [s.id_conversation, s.nudges_muted]));
 
-    const events: ChatPulseEvent[] = filas
+    const eventosProyecto: ChatPulseEvent[] = deProyecto.map((f) => ({
+      type: 'project' as const,
+      idConversation: f.id_conversation,
+      idMessage: f.id,
+      authorName:
+        f.role === 'agent'
+          ? f.agentAuthor?.display_name?.trim() || 'El asistente'
+          : f.userAuthor?.name?.trim() || f.userAuthor?.email || 'Alguien',
+      createdAt: f.created_at.toISOString(),
+      muted: false,
+    }));
+
+    const events: ChatPulseEvent[] = dePersonas
       .filter((f) => visibles.has(f.id_conversation))
       .map((f) => {
         const esZumbido = f.event_type === NUDGE_EVENT_TYPE;
@@ -146,6 +191,8 @@ export async function GET(request: NextRequest) {
           muted: esZumbido && Boolean(silenciado.get(f.id_conversation)),
         };
       });
+    events.push(...eventosProyecto);
+    events.sort((a, b) => a.idMessage - b.idMessage);
 
     return jsonNoStore({ cursor, events });
   } catch (error) {
