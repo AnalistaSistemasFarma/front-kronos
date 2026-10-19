@@ -1,4 +1,5 @@
 import { SgcError } from './errors';
+import { normalizeHeaderGrid, type SgcHeaderGrid } from './headerGrid';
 
 /**
  * PLANTILLAS DE ENCABEZADO POR TIPO DOCUMENTAL (S16, R31; decisión D20 de
@@ -15,6 +16,13 @@ import { SgcError } from './errors';
  * formato o un procedimiento. Las plantillas definitivas de Calidad (D20)
  * se cargan desde Configuración del SGC; los vigentes no cambian (su
  * encabezado quedó compuesto en el PDF controlado al aprobarse).
+ *
+ * 2026-10-19 (fase 1 de la grilla, lib/sgc/headerGrid.ts): una plantilla puede
+ * traer además su GRILLA (filas, columnas, celdas combinadas y el campo de
+ * cada celda). Con grilla, la tabla de la primera página sigue la grilla (los
+ * recuadros de firma y la fecha de emisión salen de sus celdas); sin grilla,
+ * la geometría institucional de siempre. Los rótulos de arriba siguen siendo
+ * los de las celdas que no traen rótulo propio.
  */
 
 export const SGC_HEADER_BOTTOM_ROWS = ['proceso_tipo', 'proceso', 'tipo', 'leyenda'] as const;
@@ -39,6 +47,8 @@ export interface SgcHeaderTemplateConfig {
   bottomRow: SgcHeaderBottomRow;
   /** Texto de la fila inferior cuando es «leyenda» (o que se agrega a la derecha de las demás). */
   legend: string | null;
+  /** 2026-10-19: grilla propia de la primera página (null = la tabla institucional). */
+  grid: SgcHeaderGrid | null;
 }
 
 /** Encabezado institucional de hoy (el «por defecto»). */
@@ -52,6 +62,7 @@ export const SGC_DEFAULT_HEADER_TEMPLATE: SgcHeaderTemplateConfig = {
   emissionLabel: 'FECHA DE EMISIÓN',
   bottomRow: 'proceso_tipo',
   legend: null,
+  grid: null,
 };
 
 const LABEL_MAX = 40;
@@ -84,6 +95,7 @@ export function normalizeHeaderTemplateConfig(raw: unknown): SgcHeaderTemplateCo
     emissionLabel: label(r.emissionLabel, 'El rótulo de la fecha de emisión', d.emissionLabel),
     bottomRow: bottomRow as SgcHeaderBottomRow,
     legend: legendRaw || null,
+    grid: r.grid === undefined || r.grid === null ? null : normalizeHeaderGrid(r.grid),
   };
 }
 
@@ -123,6 +135,11 @@ export function describeHeaderTemplateChanges(before: SgcHeaderTemplateConfig | 
   if (!before) return ['Plantilla creada.'];
   const out: string[] = [];
   for (const k of Object.keys(after) as (keyof SgcHeaderTemplateConfig)[]) {
+    if (k === 'grid') {
+      const describe = (g: SgcHeaderGrid | null | undefined) => (g ? `${g.rows.length} fila(s) × ${g.columns.length} columna(s), ${g.cells.length} celda(s)` : 'tabla institucional');
+      if (JSON.stringify(before.grid ?? null) !== JSON.stringify(after.grid ?? null)) out.push(`grilla: «${describe(before.grid)}» → «${describe(after.grid)}»${before.grid && after.grid && describe(before.grid) === describe(after.grid) ? ' (cambió el contenido de las celdas)' : ''}`);
+      continue;
+    }
     if (before[k] !== after[k]) out.push(`${k}: «${before[k] ?? ''}» → «${after[k] ?? ''}»`);
   }
   return out.length ? out : ['Sin cambios en la plantilla.'];

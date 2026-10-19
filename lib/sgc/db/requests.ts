@@ -61,6 +61,7 @@ import { describeElaboratorChoice } from '../flows/elaborator';
 import { isHeaderMandatory, isQualitySelfReviewEnabled, isTrainingClosedByQuality } from './companySettings';
 import { elaboratorMayReview, requesterMayElaborate, reviewExemptions, signerSegregationDenial, signerStepKind, type SgcSegregationContext } from '../flows/segregation';
 import { guideInputOf, loadParentDocument } from './coding';
+import { assertParentForNewChild } from './hierarchy';
 import { inheritsParentNumber } from '../coding';
 import { activateReaders, checkReadThreshold, getDisseminationView, getMyReading } from './dissemination';
 import { getTrainingView } from './training';
@@ -441,13 +442,17 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
     if (!type) throw new SgcError('Seleccione un tipo documental activo de la empresa.');
     // Sprint 8: si el tipo hereda el número de su documento padre (guía de codificación), el padre es obligatorio.
     const guide = await db.sgcCodingGuide.findUnique({ where: { id_company: idCompany } });
+    const hasParent = input.idParentDocument !== undefined && input.idParentDocument !== null && input.idParentDocument !== '';
     if (guide && inheritsParentNumber(guideInputOf(guide), type.code)) {
       const raw = Number(input.idParentDocument);
-      if (!input.idParentDocument || !Number.isInteger(raw)) {
+      if (!hasParent || !Number.isInteger(raw)) {
         throw new SgcError(`Un documento de tipo ${type.name} hereda el número de su documento padre: seleccione el documento padre (por ejemplo, el procedimiento).`);
       }
       idParentDocument = (await loadParentDocument(db, idCompany, raw)).idDocument;
     }
+    // 2026-10-19 (documentos padre e hijos): el procedimiento (tipo padre) NO tiene padre; un hijo
+    // puede indicar su padre aunque su tipo no herede el número, y al aprobarse la relación se crea sola.
+    if (hasParent) idParentDocument = (await assertParentForNewChild(db, idCompany, Number(input.idParentDocument), type)).id_document;
   } else {
     idDocument = Number(input.idDocument);
     const doc = Number.isInteger(idDocument) ? await db.sgcDocument.findFirst({ where: { id_document: idDocument, id_company: idCompany } }) : null;

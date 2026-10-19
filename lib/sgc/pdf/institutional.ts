@@ -2,6 +2,7 @@ import { rgb, type PDFDocument, type PDFFont, type PDFImage, type PDFPage } from
 import { toWinAnsiSafe } from '../watermark';
 import type { SgcPlacedMeaning, SgcPlacementParticipant, SgcStoredField } from '../signature/fields';
 import { SGC_DEFAULT_HEADER_TEMPLATE, headerBottomText, type SgcHeaderTemplateConfig } from '../headerTemplates';
+import { headerGridRects, type SgcHeaderGrid, type SgcHeaderGridCell } from '../headerGrid';
 
 /**
  * PLANTILLA INSTITUCIONAL del SGC (correcciones de Calidad OLP, 2026-10-02) —
@@ -116,14 +117,25 @@ export function firstPageHeaderGeometry(pageWidth: number, pageHeight: number) {
 
 const MEANING_COLUMN: Record<SgcPlacedMeaning, number> = { elaboro: 0, reviso: 1, aprobo: 2 };
 
-/** Recuadros «Firma» (Elaboró, Revisó, Aprobó) en PORCENTAJE de la página (origen arriba-izquierda), para sugerir la ubicación. */
-export function institutionalSignatureBoxesPct(pageWidth = 595.28, pageHeight = 841.89): Record<SgcPlacedMeaning, { x: number; y: number; width: number; height: number }> {
-  const g = firstPageHeaderGeometry(pageWidth, pageHeight);
+/**
+ * Recuadros «Firma» (Elaboró, Revisó, Aprobó) en PORCENTAJE de la página (origen arriba-izquierda), para sugerir la ubicación.
+ * 2026-10-19: con una plantilla con GRILLA, los recuadros son sus celdas «Firma de quien elaboró / revisó / aprobó».
+ */
+export function institutionalSignatureBoxesPct(pageWidth = 595.28, pageHeight = 841.89, grid: SgcHeaderGrid | null = null): Record<SgcPlacedMeaning, { x: number; y: number; width: number; height: number }> {
   const toPct = (r: SgcRect) => {
     const inner = { x: r.x + 3, y: r.y + 3, width: r.width - 6, height: r.height - 12 };
     return { x: (inner.x / pageWidth) * 100, y: ((pageHeight - inner.y - inner.height) / pageHeight) * 100, width: (inner.width / pageWidth) * 100, height: (inner.height / pageHeight) * 100 };
   };
-  return { elaboro: toPct(g.firmas[0]), reviso: toPct(g.firmas[1]), aprobo: toPct(g.firmas[2]) };
+  const g = firstPageHeaderGeometry(pageWidth, pageHeight);
+  const out = { elaboro: toPct(g.firmas[0]), reviso: toPct(g.firmas[1]), aprobo: toPct(g.firmas[2]) };
+  if (grid) {
+    for (const { cell, rect } of headerGridRects(grid, pageWidth, pageHeight, MARGIN_X, TOP)) {
+      if (cell.field === 'firma_elaboro') out.elaboro = toPct(rect);
+      else if (cell.field === 'firma_reviso') out.reviso = toPct(rect);
+      else if (cell.field === 'firma_aprobo') out.aprobo = toPct(rect);
+    }
+  }
+  return out;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -174,8 +186,8 @@ export function headerNames(list: readonly string[]): string {
  * su significado en la página 1 (varias personas del mismo rol se reparten el
  * recuadro). El elaborador las puede mover o redimensionar después.
  */
-export function suggestInstitutionalPlacements(participants: readonly SgcPlacementParticipant[], existing: readonly SgcStoredField[]): SgcStoredField[] {
-  const boxes = institutionalSignatureBoxesPct();
+export function suggestInstitutionalPlacements(participants: readonly SgcPlacementParticipant[], existing: readonly SgcStoredField[], grid: SgcHeaderGrid | null = null): SgcStoredField[] {
+  const boxes = institutionalSignatureBoxesPct(595.28, 841.89, grid);
   const placed = new Set(existing.map((f) => f.signerKey));
   const out: SgcStoredField[] = [];
   for (const meaning of ['elaboro', 'reviso', 'aprobo'] as const) {
@@ -239,6 +251,11 @@ export async function drawInstitutionalHeaders(pdf: PDFDocument, pages: readonly
   pages.forEach((page, i) => {
     const { width, height } = page.getSize();
     const pageLabel = `PÁGINA ${i + 1} DE ${total}`;
+    if (i === 0 && t.grid) {
+      // 2026-10-19: grilla propia de la plantilla (fase 1).
+      emission = drawGridHeader(page, t.grid, t, data, fonts, logo, pageLabel);
+      return;
+    }
     if (i === 0) {
       const g = firstPageHeaderGeometry(width, height);
       [g.logo, g.title, g.code, ...g.labels, ...g.firmas, g.emission, g.process].forEach((r) => cell(page, r));
@@ -276,6 +293,125 @@ export async function drawInstitutionalHeaders(pdf: PDFDocument, pages: readonly
     drawLines(page, fonts.bold, [`${t.codeLabel}: ${data.code} · ${t.versionLabel}: ${data.versionLabel}`, pageLabel], codeR, { size: 7, top: 11 });
   });
   return { emission };
+}
+
+/** Rótulo de una celda: el propio (si lo trae; '' = sin rótulo) o el de la plantilla para ese campo. */
+export function gridCellLabel(cell: SgcHeaderGridCell, t: SgcHeaderTemplateConfig): string {
+  if (cell.label !== undefined && cell.label !== null) return cell.label;
+  switch (cell.field) {
+    case 'nombre':
+      return t.titleLabel;
+    case 'codigo':
+      return t.codeLabel;
+    case 'version':
+      return t.versionLabel;
+    case 'pagina':
+      return 'PÁGINA';
+    case 'elaboro':
+      return t.elaboroLabel;
+    case 'reviso':
+      return t.revisoLabel;
+    case 'aprobo':
+      return t.aproboLabel;
+    case 'fecha_emision':
+      return t.emissionLabel;
+    case 'proceso':
+      return 'PROCESO';
+    case 'tipo_documental':
+      return 'TIPO DOCUMENTAL';
+    case 'firma_elaboro':
+    case 'firma_reviso':
+    case 'firma_aprobo':
+      return 'Firma';
+    default:
+      return '';
+  }
+}
+
+function drawAligned(page: PDFPage, font: PDFFont, lines: string[], r: SgcRect, opts: { size: number; top: number; color?: ReturnType<typeof rgb>; center?: boolean }) {
+  if (!opts.center) return drawLines(page, font, lines, r, opts);
+  let y = r.y + r.height - opts.top;
+  for (const l of lines) {
+    const f = fit(l, font, opts.size, r.width - 8);
+    if (y < r.y + 2) break;
+    const w = font.widthOfTextAtSize(f.text, f.size);
+    page.drawText(f.text, { x: r.x + (r.width - w) / 2, y, size: f.size, font, color: opts.color ?? INK });
+    y -= f.size + 2;
+  }
+}
+
+/**
+ * Dibuja la GRILLA de la plantilla en la primera página (fase 1). Devuelve el
+ * recuadro de la fecha de emisión (para estamparla en cada copia controlada).
+ */
+function drawGridHeader(page: PDFPage, grid: SgcHeaderGrid, t: SgcHeaderTemplateConfig, data: SgcInstitutionalHeaderData, fonts: Fonts, logo: PDFImage | null, pageLabel: string): SgcRect | null {
+  const { width, height } = page.getSize();
+  let emission: SgcRect | null = null;
+  for (const { cell, rect } of headerGridRects(grid, width, height, MARGIN_X, TOP)) {
+    page.drawRectangle({ x: rect.x, y: rect.y, width: rect.width, height: rect.height, borderColor: LINE, borderWidth: 0.7 });
+    const label = gridCellLabel(cell, t);
+    const center = cell.align === 'center';
+    const withLabel = (value: string) => (label ? `${label}: ${value}` : value);
+    switch (cell.field) {
+      case 'logo':
+        drawLogo(page, logo, rect, data.company, fonts.bold);
+        break;
+      case 'empresa':
+        drawAligned(page, fonts.bold, [label ? `${label} ${data.company}` : data.company], rect, { size: 9, top: Math.min(rect.height / 2 + 3, 14), center });
+        break;
+      case 'nombre': {
+        if (label) drawAligned(page, fonts.regular, [label], rect, { size: 6.5, top: 10, color: MUTED, center });
+        const body = label ? { ...rect, height: rect.height - 10 } : rect;
+        drawAligned(page, fonts.bold, splitTitle(data.title, fonts.bold, 10.5, rect.width - 8), body, { size: 10.5, top: 12, center });
+        break;
+      }
+      case 'codigo':
+        drawAligned(page, fonts.bold, [withLabel(data.code)], rect, { size: 8, top: Math.min(rect.height / 2 + 3, 13), center });
+        break;
+      case 'version':
+        drawAligned(page, fonts.bold, [withLabel(data.versionLabel)], rect, { size: 8, top: Math.min(rect.height / 2 + 3, 13), center });
+        break;
+      case 'pagina':
+        drawAligned(page, fonts.bold, [label && label !== 'PÁGINA' ? `${label}: ${pageLabel.replace(/^PÁGINA /, '')}` : label ? pageLabel : pageLabel.replace(/^PÁGINA /, '')], rect, { size: 8, top: Math.min(rect.height / 2 + 3, 13), center });
+        break;
+      case 'codigo_version_pagina':
+        drawAligned(page, fonts.bold, [`${t.codeLabel}: ${data.code}`, `${t.versionLabel}: ${data.versionLabel}`, pageLabel], rect, { size: 8, top: 13, center });
+        break;
+      case 'elaboro':
+      case 'reviso':
+      case 'aprobo': {
+        const list = cell.field === 'elaboro' ? data.elaboro : cell.field === 'reviso' ? data.reviso : data.aprobo;
+        if (label) drawAligned(page, fonts.bold, [`${label}:`], rect, { size: 7, top: 9, center });
+        drawAligned(page, fonts.regular, [names(list)], label ? { ...rect, height: rect.height - 10 } : rect, { size: 6.8, top: 9, center });
+        break;
+      }
+      case 'firma_elaboro':
+      case 'firma_reviso':
+      case 'firma_aprobo':
+        if (label) page.drawText(toWinAnsiSafe(label), { x: rect.x + 4, y: rect.y + rect.height - 8, size: 5.5, font: fonts.regular, color: BOX });
+        break;
+      case 'fecha_emision':
+        if (label) drawAligned(page, fonts.bold, [`${label}:`], rect, { size: 7, top: 9, center });
+        drawAligned(page, fonts.regular, [data.emissionText], label ? { ...rect, height: rect.height - 10 } : rect, { size: 7.5, top: label ? 9 : 16, color: MUTED, center });
+        emission = { x: rect.x + 1, y: rect.y + 1, width: rect.width - 2, height: rect.height - 2 };
+        break;
+      case 'proceso':
+        drawAligned(page, fonts.bold, [withLabel(data.process)], rect, { size: 7.5, top: Math.min(rect.height / 2 + 3, 12), center });
+        break;
+      case 'tipo_documental':
+        drawAligned(page, fonts.bold, [withLabel(data.documentType)], rect, { size: 7.5, top: Math.min(rect.height / 2 + 3, 12), center });
+        break;
+      case 'proceso_tipo':
+        drawAligned(page, fonts.bold, [headerBottomText(t, data)], rect, { size: 7.5, top: Math.min(rect.height / 2 + 3, 12), center });
+        break;
+      case 'texto':
+        drawAligned(page, fonts.bold, splitTitle(cell.text ?? '', fonts.bold, 7.5, rect.width - 8), rect, { size: 7.5, top: 10, center });
+        break;
+      default:
+        break;
+    }
+  }
+  return emission;
 }
 
 function splitTitle(title: string, font: PDFFont, size: number, width: number): string[] {

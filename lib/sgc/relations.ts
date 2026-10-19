@@ -52,6 +52,8 @@ export interface SgcGraphNode {
   idDepartment: number | null;
   idDocumentType: number;
   documentTypeCode: string;
+  /** 2026-10-19: versión vigente (para abrirla en el visor desde el árbol, sin descarga). */
+  currentVersionId?: number | null;
 }
 
 export interface SgcGraphEdge {

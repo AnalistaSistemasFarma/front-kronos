@@ -16,6 +16,7 @@ import {
   IconHierarchy2,
   IconKey,
   IconListDetails,
+  IconBinaryTree2,
   IconTopologyStar3,
   IconSettings,
   IconShieldCheck,
@@ -84,6 +85,13 @@ function accesosDocumentos(company: SgcCompanyAccess, selfSignature = false, gen
       icon: <IconTopologyStar3 size={24} />,
       sprint: 'Sprint 5',
       href: sgcHref(`${SGC_BASE_URL}/relaciones`, id),
+    },
+    {
+      title: 'Árbol documental',
+      description: 'Cada procedimiento y lo que se desprende de él (formatos, instructivos, anexos), con estado y versión vigente. Vista del auditor.',
+      icon: <IconBinaryTree2 size={24} />,
+      sprint: 'Padres e hijos',
+      href: sgcHref(`${SGC_BASE_URL}/arbol`, id),
     },
     {
       title: 'Calendario de vencimientos',

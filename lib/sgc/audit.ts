@@ -93,6 +93,9 @@ export const SGC_AUDIT_ACTIONS = {
   cargaMasivaArchivos: 'listado_maestro.carga_archivos',
   relacionPropuesta: 'relacion.propuesta',
   relacionConfirmada: 'relacion.confirmada',
+  // 2026-10-19: documentos padre e hijos (relacionar con el padre por arrastre o botón, y la relación que se crea sola).
+  relacionPadreAsignado: 'relacion.padre_asignado',
+  relacionAutomatica: 'relacion.automatica',
   cargaInicialCerrada: 'carga_inicial.cerrada',
   correoResumenDiario: 'correo.resumen_diario',
   // Sprint 10: capacitación opcional por solicitud, material previo y recapacitación.
