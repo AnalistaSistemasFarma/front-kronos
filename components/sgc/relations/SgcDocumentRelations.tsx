@@ -4,12 +4,13 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { Alert, Badge, Button, Card, Group, Modal, Stack, Table, Text, TextInput, Textarea, Title } from '@mantine/core';
 import SgcSelect from '../SgcSelect';
-import { IconLink, IconPlus } from '@tabler/icons-react';
+import { IconHierarchy2, IconLink, IconPlus } from '@tabler/icons-react';
+import SgcParentLinkModal from './SgcParentLinkModal';
 import { sgcHref } from '../useSgcCompany';
 import { sgcSend, useSgcFetch } from '../useSgcFetch';
 import { useSgcRowLink } from '../useSgcRowLink';
 import { SGC_BASE_URL } from '../../../lib/sgc/constants';
-import type { SgcDocumentRelationItem } from '../../../lib/sgc/db/relations';
+import type { SgcDocumentRelationItem, SgcParentOptions } from '../../../lib/sgc/db/relations';
 import { SGC_RELATION_LABELS, SGC_RELATION_PHRASES, SGC_RELATION_STYLES, SGC_RELATION_TYPES } from '../../../lib/sgc/relations';
 
 /**
@@ -18,6 +19,10 @@ import { SGC_RELATION_LABELS, SGC_RELATION_PHRASES, SGC_RELATION_STYLES, SGC_REL
  */
 export default function SgcDocumentRelations({ idDocument, idCompany, code, canAdminister }: { idDocument: number; idCompany: number; code: string; canAdminister: boolean }) {
   const rel = useSgcFetch<{ relations: SgcDocumentRelationItem[] }>(`/api/sgc/documents/${idDocument}/relations`);
+  // 2026-10-19 (documentos padre e hijos): Calidad ve si el documento es padre, si ya tiene padre o si se puede relacionar.
+  const parentInfo = useSgcFetch<SgcParentOptions>(canAdminister ? `/api/sgc/relations/parent?document=${idDocument}` : null);
+  const [linking, setLinking] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
   const rowLink = useSgcRowLink();
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<SgcDocumentRelationItem | null>(null);
@@ -40,6 +45,7 @@ export default function SgcDocumentRelations({ idDocument, idCompany, code, canA
       setOther('');
       setNote('');
       rel.reload();
+      parentInfo.reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -58,6 +64,14 @@ export default function SgcDocumentRelations({ idDocument, idCompany, code, canA
           <Button component={Link} href={sgcHref(`${SGC_BASE_URL}/relaciones`, idCompany)} size='xs' variant='default'>
             Ver en el mapa
           </Button>
+          <Button component={Link} href={sgcHref(`${SGC_BASE_URL}/arbol`, idCompany, { documento: String(idDocument) })} size='xs' variant='default' data-testid='sgc-relaciones-ver-arbol'>
+            Ver en el árbol
+          </Button>
+          {canAdminister && parentInfo.data && !parentInfo.data.isParentType && !parentInfo.data.parent && (
+            <Button size='xs' variant='light' leftSection={<IconHierarchy2 size={14} />} onClick={() => { setDone(null); setLinking(true); }} data-testid='sgc-relacion-con-padre'>
+              Relacionar con padre
+            </Button>
+          )}
           {canAdminister && (
             <Button size='xs' leftSection={<IconPlus size={14} />} onClick={() => { setError(null); setAdding(true); }} data-testid='sgc-relacion-agregar'>
               Relacionar
@@ -65,6 +79,16 @@ export default function SgcDocumentRelations({ idDocument, idCompany, code, canA
           )}
         </Group>
       </Group>
+      {done && (
+        <Alert color='green' mb='sm' withCloseButton onClose={() => setDone(null)} data-testid='sgc-relacion-padre-ok'>
+          {done}
+        </Alert>
+      )}
+      {canAdminister && parentInfo.data?.isParentType && (
+        <Text size='xs' c='dimmed' mb='xs' data-testid='sgc-relaciones-es-padre'>
+          Documento padre (tipo {parentInfo.data.document.documentTypeCode}): no tiene padre. Sus formatos e instructivos se relacionan con él.
+        </Text>
+      )}
       {items.length === 0 ? (
         <Text size='sm' c='dimmed' data-testid='sgc-relaciones-vacio'>
           Sin documentos relacionados que usted pueda consultar.
@@ -148,6 +172,18 @@ export default function SgcDocumentRelations({ idDocument, idCompany, code, canA
           </Button>
         </Stack>
       </Modal>
+
+      <SgcParentLinkModal
+        child={linking ? { idDocument, code } : null}
+        via='boton'
+        onClose={() => setLinking(false)}
+        onDone={(message) => {
+          setLinking(false);
+          setDone(message);
+          rel.reload();
+          parentInfo.reload();
+        }}
+      />
 
       <Modal opened={!!removing} onClose={() => setRemoving(null)} title='Retirar relación' centered>
         <Stack>

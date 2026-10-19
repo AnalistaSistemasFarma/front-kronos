@@ -1,6 +1,7 @@
 import type { PrismaClient } from '../../../app/generated/prisma';
 import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../audit';
 import { getMasterCodeError, parseChildTypeCodes, validateCodingGuide } from '../coding';
+import { parentTypeCodesOf } from '../hierarchy';
 import { SgcError, isUniqueViolation } from '../errors';
 import { normalizeDraftExtensions, parseDraftExtensions } from '../headerTemplates';
 
@@ -60,7 +61,11 @@ export interface SgcCatalogs {
     /** S16 (R32): formatos admitidos para el borrador («docx», «xlsx»). */
     draftExtensions: string[];
     generatorGuide: boolean;
+    /** 2026-10-19: tipo «padre» marcado en Configuración (sus documentos no tienen padre). */
+    isParentType: boolean;
   }[];
+  /** 2026-10-19: códigos de los tipos padre en efecto (los marcados o, sin marca, el procedimiento). */
+  parentTypeCodes: string[];
   departments: { id: number; name: string }[];
 }
 
@@ -127,7 +132,9 @@ export async function getCatalogs(db: SgcDb, idCompany: number, includeInactive 
       idHeaderTemplate: d.id_header_template,
       draftExtensions: parseDraftExtensions(d.draft_extensions),
       generatorGuide: d.generator_guide,
+      isParentType: d.is_parent_type,
     })),
+    parentTypeCodes: parentTypeCodesOf(docTypes.filter((d) => d.is_active).map((d) => ({ code: d.code, name: d.name, isParentType: d.is_parent_type }))),
     departments: departments.map((d) => ({ id: d.id_department, name: d.department })),
   };
 }
@@ -300,7 +307,7 @@ export async function saveCatalogEntry(
       };
       if (data.alert_months >= data.review_months) throw new SgcError('La alerta debe ser menor que el periodo de revisión.');
       // S16 (R31 y R32): plantilla de encabezado y formatos del borrador del tipo (si llegan).
-      const extra: { id_header_template?: number | null; draft_extensions?: string | null; generator_guide?: boolean } = {};
+      const extra: { id_header_template?: number | null; draft_extensions?: string | null; generator_guide?: boolean; is_parent_type?: boolean } = {};
       if (body.idHeaderTemplate !== undefined) {
         const idTemplate = body.idHeaderTemplate === null || body.idHeaderTemplate === '' ? null : Number(body.idHeaderTemplate);
         if (idTemplate !== null) {
@@ -313,6 +320,8 @@ export async function saveCatalogEntry(
       if (body.draftExtensions !== undefined) extra.draft_extensions = normalizeDraftExtensions(body.draftExtensions);
       // S19 (R34): tipo de plantillas guía del Generador (sin codificación).
       if (body.generatorGuide !== undefined) extra.generator_guide = boolOr(body.generatorGuide, false);
+      // 2026-10-19: tipo «padre» (procedimiento): sus documentos no tienen padre.
+      if (body.isParentType !== undefined) extra.is_parent_type = boolOr(body.isParentType, false);
       if (id === null) {
         const saved = await tx.sgcDocumentType.create({ data: { id_company: idCompany, ...data, ...extra } });
         await audit(SGC_AUDIT_ACTIONS.maestroCreado, 'document_type', saved.id_document_type, null, saved);
@@ -352,6 +361,37 @@ export async function saveCatalogEntry(
             reason,
             before_json: JSON.stringify({ generatorGuide: before.generator_guide }),
             after_json: JSON.stringify({ generatorGuide: saved.generator_guide }),
+            ip: actor.ip ?? null,
+            user_agent: actor.userAgent ?? null,
+          },
+        });
+      }
+      // 2026-10-19: marcar o desmarcar un tipo como «padre» queda en el control de cambios (con motivo).
+      if ('is_parent_type' in extra && extra.is_parent_type !== before.is_parent_type) {
+        if (extra.is_parent_type) {
+          // Un tipo cuyos documentos ya cuelgan de un padre no puede volverse padre (el padre no tiene padre).
+          const conPadre = await tx.sgcDocumentRelation.count({
+            where: {
+              id_company: idCompany,
+              is_active: true,
+              OR: [
+                { relation_type: 'procedimiento_padre', target: { id_document_type: id } },
+                { relation_type: { in: ['formato', 'anexo'] }, source: { id_document_type: id } },
+              ],
+            },
+          });
+          if (conPadre > 0) throw new SgcError(`Hay ${conPadre} documento(s) de este tipo que ya tienen documento padre: retire esas relaciones antes de marcarlo como tipo padre (el documento padre no tiene padre).`, 409);
+        }
+        await tx.sgcConfigChangeLog.create({
+          data: {
+            id_company: idCompany,
+            actor_email: actor.email,
+            entity: 'document_type',
+            entity_id: String(id),
+            action: 'tipo_documental.tipo_padre',
+            reason,
+            before_json: JSON.stringify({ isParentType: before.is_parent_type }),
+            after_json: JSON.stringify({ isParentType: saved.is_parent_type }),
             ip: actor.ip ?? null,
             user_agent: actor.userAgent ?? null,
           },

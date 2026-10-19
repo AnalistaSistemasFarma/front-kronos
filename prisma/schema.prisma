@@ -1866,6 +1866,9 @@ model SgcDocumentType {
   draft_extensions   String? @db.NVarChar(100)
   /// S19 (R34): tipo de PLANTILLAS GUÍA del Generador (lo generado no lleva código documental).
   generator_guide    Boolean @default(false, map: "document_type_generator_guide_df")
+  /// 2026-10-19 (documentos padre e hijos): tipo «padre» (el procedimiento): sus documentos no tienen padre y de ellos se desprenden los hijos.
+  /// Sin ningún tipo marcado en la empresa, el código trata como padre al procedimiento (PR). Ver lib/sgc/hierarchy.ts.
+  is_parent_type     Boolean @default(false, map: "document_type_is_parent_type_df")
 
   companyConfig  SgcCompanyConfig   @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   headerTemplate SgcHeaderTemplate? @relation(fields: [id_header_template], references: [id_header_template], onDelete: NoAction, onUpdate: NoAction)
