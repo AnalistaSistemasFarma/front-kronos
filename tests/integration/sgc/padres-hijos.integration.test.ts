@@ -114,8 +114,13 @@ describe.skipIf(!url)('SGC · documentos padre e hijos con SQL Server', () => {
     const body = { id: ma.id, code: ma.code, name: ma.name, pluralName: ma.pluralName, requiresTraining: ma.requiresTraining, reviewMonths: ma.reviewMonths, alertMonths: ma.alertMonths, sortOrder: ma.sortOrder, isActive: true, isParentType: true, reason: 'El manual también es documento padre' };
     await saveCatalogEntry(prisma, CO, 'document-types', body, actor(E.cal));
     cat = await getCatalogs(prisma, CO);
-    // Con un tipo marcado, solo valen los marcados: el procedimiento también se marca.
-    expect(cat.parentTypeCodes).toEqual(['MA']);
+    // Con un tipo marcado, solo valen los marcados. 2026-10-19 (carga real de OLP): al marcar el PRIMERO, el
+    // procedimiento (padre por defecto) queda marcado también, con su propia línea en el control de cambios.
+    expect(cat.parentTypeCodes.sort()).toEqual(['MA', 'PR']);
+    const auto = await prisma.sgcConfigChangeLog.findMany({ where: { id_company: CO, action: 'tipo_documental.tipo_padre' }, orderBy: { id_config_change: 'asc' } });
+    expect(auto).toHaveLength(2);
+    expect(auto[1].reason).toContain('Se conserva PR (Procedimiento) como tipo padre');
+    expect(JSON.parse(auto[1].after_json!)).toEqual({ isParentType: true, automatico: true });
     const pr = cat.documentTypes.find((t) => t.code === 'PR')!;
     await saveCatalogEntry(prisma, CO, 'document-types', { id: pr.id, code: pr.code, name: pr.name, pluralName: pr.pluralName, requiresTraining: pr.requiresTraining, reviewMonths: pr.reviewMonths, alertMonths: pr.alertMonths, sortOrder: pr.sortOrder, isActive: true, isParentType: true, reason: 'El procedimiento es documento padre' }, actor(E.cal));
     cat = await getCatalogs(prisma, CO);

@@ -36,6 +36,20 @@ export function parentTypeCodesOf(types: readonly SgcHierarchyType[]): string[] 
   return [...new Set(types.filter((t) => isProcedureType(t)).map((t) => t.code.trim().toUpperCase()))];
 }
 
+/**
+ * 2026-10-19 (carga real de OLP): mientras ningún tipo está marcado, el
+ * procedimiento es el padre por defecto. Al marcar el PRIMER tipo (p. ej. el
+ * Manual), el procedimiento dejaría de ser padre sin que nadie lo pidiera y
+ * sus formatos e instructivos quedarían sin poder relacionarse. Devuelve los
+ * tipos procedimiento (activos, sin marcar) que deben quedar marcados junto
+ * con `idMarking`; vacío si ya había algún tipo marcado (la configuración es
+ * explícita) o si el que se marca es el propio procedimiento.
+ */
+export function defaultParentTypesToKeep<T extends SgcHierarchyType & { id: number; isActive: boolean }>(typesBefore: readonly T[], idMarking: number): T[] {
+  if (typesBefore.some((t) => t.isParentType)) return [];
+  return typesBefore.filter((t) => t.id !== idMarking && t.isActive && isProcedureType(t));
+}
+
 /** ¿Es un tipo «procedimiento» por su código o su nombre? (respaldo sin configuración). */
 export function isProcedureType(t: Pick<SgcHierarchyType, 'code' | 'name'>): boolean {
   if (t.code.trim().toUpperCase() === 'PR') return true;
