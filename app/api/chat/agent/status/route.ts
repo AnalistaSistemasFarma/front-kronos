@@ -53,7 +53,11 @@ export async function POST(request: NextRequest) {
     const payload = await readJsonBody(request);
     if (!payload) return badRequest('El cuerpo debe ser un objeto JSON.');
 
-    const conversation = await resolveAgentConversation(agent.idAgent, Number(payload.idConversation));
+    const conversation = await resolveAgentConversation(
+      agent.idAgent,
+      Number(payload.idConversation),
+      agent.scope
+    );
     if (!conversation) {
       return jsonNoStore({ error: 'Conversación no encontrada.' }, { status: 404 });
     }

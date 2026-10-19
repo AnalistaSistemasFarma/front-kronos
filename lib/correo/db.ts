@@ -14,7 +14,7 @@ import type { VinculoHilo } from './types';
 
 export type CorreoDb = Pick<
   PrismaClient,
-  'subprocessUserCompany' | 'user' | 'emailThreadLink' | 'emailThreadMessage' | 'emailAudit' | '$transaction'
+  'subprocessUserCompany' | 'user' | 'emailThreadLink' | 'emailThreadMessage' | 'emailAudit' | 'chatProjectEmail' | '$transaction'
 >;
 
 export interface EmpresaCorreo {
@@ -134,6 +134,22 @@ export async function vinculosDeHilos(db: CorreoDb, idUser: string, conversation
   if (ids.length === 0) return out;
   const rows = await db.emailThreadLink.findMany({ where: { id_user: idUser, conversation_id: { in: ids }, estado: 'ACTIVO' } });
   for (const r of rows) out.set(r.conversation_id, aVinculo(r));
+  return out;
+}
+
+/**
+ * Proyectos del chat a los que la persona (u otro miembro, desde el MISMO buzón) vinculó estos hilos. El buzón es
+ * el de la sesión: nunca se consultan vínculos de otro buzón. Hilo → nombres de proyecto.
+ */
+export async function proyectosDeHilos(db: CorreoDb, mailbox: string, conversationIds: string[]): Promise<Map<string, string[]>> {
+  const ids = [...new Set(conversationIds)].slice(0, 200);
+  const out = new Map<string, string[]>();
+  if (ids.length === 0) return out;
+  const rows = await db.chatProjectEmail.findMany({
+    where: { mailbox: mailbox.toLowerCase(), conversation_id: { in: ids } },
+    select: { conversation_id: true, project: { select: { name: true } } },
+  });
+  for (const r of rows) out.set(r.conversation_id, [...(out.get(r.conversation_id) ?? []), r.project.name]);
   return out;
 }
 

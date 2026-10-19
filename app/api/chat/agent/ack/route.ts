@@ -61,6 +61,22 @@ export async function POST(request: NextRequest) {
 
     const ahora = new Date();
 
+    // Llave del PUENTE DE HILOS: solo confirma mensajes de PROYECTOS de su
+    // agente. Nunca toca la bandeja del bot vivo (ni al revés: abajo, la llave
+    // de siempre sigue anclada a 'direct' y a sus entregas de grupo).
+    if (agent.scope === 'projects') {
+      const proyectos = await prisma.chatMessage.updateMany({
+        where: {
+          id: { in: ids },
+          delivered_at: null,
+          role: 'user',
+          conversation: { kind: 'project', id_agent: agent.idAgent },
+        },
+        data: { delivered_at: ahora },
+      });
+      return jsonNoStore({ updated: proyectos.count, project: proyectos.count });
+    }
+
     const [directos, grupos] = await Promise.all([
       prisma.chatMessage.updateMany({
         where: {

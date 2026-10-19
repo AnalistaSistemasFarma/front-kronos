@@ -42,6 +42,7 @@ import {
   formatBytes,
   getChatAttachmentError,
 } from '../../lib/chat/attachments';
+import { MAX_UPLOAD_REQUEST_BYTES } from '../../lib/attachments/uploadRules';
 import ChatVoice from './ChatVoice';
 import type { ChatReplyToDto } from '../../lib/chat/client';
 
@@ -362,23 +363,36 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         accepted.push(file);
       }
 
-      setFiles((prev) => {
-        const merged = [...prev];
-        for (const file of accepted) {
-          // Mismo nombre y mismo tamaño = el usuario lo escogió dos veces.
-          if (merged.some((x) => x.name === file.name && x.size === file.size)) continue;
-          if (merged.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE) break;
-          merged.push(file);
+      // Todos los adjuntos de un mensaje viajan en UNA petición, y IIS corta las de más de
+      // 30.000.000 bytes con un 413 que la app nunca ve (se veía "No se pudo enviar el
+      // mensaje."). Con fotos o videos de celular el tope se alcanza rápido: se avisa aquí.
+      const merged = [...files];
+      let totalBytes = merged.reduce((sum, f) => sum + f.size, 0);
+      let overTotal = false;
+      for (const file of accepted) {
+        // Mismo nombre y mismo tamaño = el usuario lo escogió dos veces.
+        if (merged.some((x) => x.name === file.name && x.size === file.size)) continue;
+        if (merged.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE) break;
+        if (totalBytes + file.size > MAX_UPLOAD_REQUEST_BYTES) {
+          overTotal = true;
+          continue;
         }
-        return merged;
-      });
+        totalBytes += file.size;
+        merged.push(file);
+      }
+      setFiles(merged);
+      if (!problem && overTotal) {
+        problem = `Los adjuntos de un mensaje pueden sumar máximo ${formatBytes(
+          MAX_UPLOAD_REQUEST_BYTES
+        )}. Envíe los demás en otro mensaje.`;
+      }
 
       if (!problem && files.length + accepted.length > MAX_CHAT_ATTACHMENTS_PER_MESSAGE) {
         problem = `Puede adjuntar máximo ${MAX_CHAT_ATTACHMENTS_PER_MESSAGE} archivos por mensaje.`;
       }
       setFileError(problem);
     },
-    [files.length]
+    [files]
   );
 
   const removeFile = useCallback((index: number) => {

@@ -44,9 +44,12 @@ export default function OtListado({ company }: { company: OtCompanyAccess }) {
   const abiertas = filtradas.filter((o) => o.estado === 'ABIERTA');
   const cerradas = filtradas.filter((o) => o.estado === 'CERRADA');
   const ir = (o: OrdenResumen) => router.push(otHref(`${OT_BASE_URL}/${o.id}`, company.idCompany));
+  // R3 (2026-10-17): abren el supervisor (Gestión) o el jefe de producción asignado.
+  const puedeAbrir = company.canOpen ?? company.canManage;
+  const conBarra = (company.canManage || puedeAbrir) && !desktop;
 
   return (
-    <Stack gap='md' pb={company.canManage && !desktop ? 88 : 0}>
+    <Stack gap='md' pb={conBarra ? 88 : 0}>
       {creada && (
         <Alert color='green' icon={<IconCheck size={18} />} withCloseButton onClose={() => setCreada(null)} data-testid='ot-creada'>
           {creada}
@@ -58,14 +61,18 @@ export default function OtListado({ company }: { company: OtCompanyAccess }) {
         </Alert>
       )}
 
-      {company.canManage && desktop && (
+      {(company.canManage || puedeAbrir) && desktop && (
         <Group justify='flex-end' gap='sm'>
-          <Button variant='default' size='md' leftSection={<IconSettings size={18} />} component={Link} href={otHref(`${OT_BASE_URL}/gestion`, company.idCompany)}>
-            Catálogo y operarios
-          </Button>
-          <Button size='md' leftSection={<IconPlus size={18} />} onClick={() => setNueva(true)} data-testid='ot-nueva'>
-            Nueva bitácora
-          </Button>
+          {company.canManage && (
+            <Button variant='default' size='md' leftSection={<IconSettings size={18} />} component={Link} href={otHref(`${OT_BASE_URL}/gestion`, company.idCompany)}>
+              Catálogo y operarios
+            </Button>
+          )}
+          {puedeAbrir && (
+            <Button size='md' leftSection={<IconPlus size={18} />} onClick={() => setNueva(true)} data-testid='ot-nueva'>
+              Nueva bitácora
+            </Button>
+          )}
         </Group>
       )}
 
@@ -89,7 +96,7 @@ export default function OtListado({ company }: { company: OtCompanyAccess }) {
         <Card withBorder radius='md' p='lg'>
           <Text c='dimmed'>
             No hay bitácoras abiertas{buscar ? ' que coincidan' : ''}.
-            {company.canManage ? ' Abra una con «Nueva bitácora».' : ' El supervisor debe abrir la bitácora del turno.'}
+            {puedeAbrir ? ' Abra una con «Nueva bitácora».' : ' El supervisor o el jefe de producción debe abrir la bitácora del turno.'}
           </Text>
         </Card>
       ) : (
@@ -181,20 +188,24 @@ export default function OtListado({ company }: { company: OtCompanyAccess }) {
         </Stack>
       )}
 
-      {company.canManage && !desktop && (
+      {conBarra && (
         <Box pos='fixed' bottom={0} left={0} right={0} p='md' bg='var(--mantine-color-body)' style={{ borderTop: '1px solid var(--mantine-color-default-border)', zIndex: 150 }}>
           <Group grow gap='sm'>
-            <Button variant='default' size='md' h={52} component={Link} href={otHref(`${OT_BASE_URL}/gestion`, company.idCompany)} leftSection={<IconSettings size={18} />}>
-              Catálogo
-            </Button>
-            <Button size='md' h={52} leftSection={<IconPlus size={18} />} onClick={() => setNueva(true)} data-testid='ot-nueva'>
-              Nueva bitácora
-            </Button>
+            {company.canManage && (
+              <Button variant='default' size='md' h={52} component={Link} href={otHref(`${OT_BASE_URL}/gestion`, company.idCompany)} leftSection={<IconSettings size={18} />}>
+                Catálogo
+              </Button>
+            )}
+            {puedeAbrir && (
+              <Button size='md' h={52} leftSection={<IconPlus size={18} />} onClick={() => setNueva(true)} data-testid='ot-nueva'>
+                Nueva bitácora
+              </Button>
+            )}
           </Group>
         </Box>
       )}
 
-      {company.canManage && (
+      {puedeAbrir && (
         <NuevaOrdenModal
           opened={nueva}
           onClose={() => setNueva(false)}

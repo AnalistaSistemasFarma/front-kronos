@@ -1344,6 +1344,8 @@ body.chat-inmersivo.con-chat-rail .chat-escritorio {
 
 .chat-rail__nombre {
   padding-left: 4px;
+  /* Empuja a la derecha el "+" (Nuevo) y el botón de contraer. */
+  margin-right: auto;
 }
 
 .chat-rail__scroll {
@@ -6116,4 +6118,134 @@ a.portal-th__contactos-boton--enlace:focus-visible {
   .portal-th__hoy-caja {
     animation: none;
   }
+}
+
+/* ── Formación: Top 10 de estudiantes (Cristian, 2026-10-16) ───────────────── */
+.portal-th__lista-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+/* Pantalla ancha: el top va a la DERECHA de los cursos, que se quedan donde estaban. */
+@media (min-width: 1200px) {
+  .portal-th__lista-top {
+    grid-template-columns: minmax(0, 1fr) 330px;
+  }
+
+  .portal-th__top {
+    position: sticky;
+    top: 16px;
+  }
+}
+
+/* Muy ancha: el top se sale al margen libre y los cursos conservan su ancho de siempre. */
+@media (min-width: 1800px) {
+  .portal-th__lista-top {
+    margin-right: -354px;
+  }
+}
+
+.portal-th__top {
+  padding: 16px;
+  border: 1px solid var(--pth-linea);
+  border-radius: 12px;
+  background-color: #fff;
+}
+
+.portal-th__top h3 {
+  margin: 0 0 4px;
+  color: var(--pth-azul);
+  font-size: 1.02rem;
+}
+
+.portal-th__top-explica {
+  margin: 0 0 12px;
+  color: var(--pth-tinta-3);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.portal-th__top-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.portal-th__top-tabla th,
+.portal-th__top-tabla td {
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--pth-linea);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.portal-th__top-tabla thead th {
+  color: var(--pth-tinta-3);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.portal-th__top-tabla th[scope='row'] {
+  color: var(--pth-tinta);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.portal-th__top-tabla td:nth-child(3),
+.portal-th__top-tabla td:nth-child(4),
+.portal-th__top-tabla thead th:nth-child(3),
+.portal-th__top-tabla thead th:nth-child(4) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.portal-th__top-puesto {
+  width: 38px;
+  text-align: center !important;
+}
+
+.portal-th__top-medalla {
+  display: block;
+  margin: 0 auto;
+}
+
+.portal-th__top-numero {
+  display: inline-block;
+  min-width: 24px;
+  color: var(--pth-tinta-3);
+  font-weight: 700;
+  text-align: center;
+}
+
+.portal-th__top-usted th,
+.portal-th__top-usted td {
+  background-color: var(--pth-azul-50);
+}
+
+.portal-th__top-tu {
+  color: var(--pth-azul);
+  font-weight: 400;
+  font-size: 0.74rem;
+}
+
+.portal-th__top-suposicion {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background-color: var(--pth-azul-50);
+  color: var(--pth-tinta-2);
+  font-size: 0.78rem;
+}
+
+.portal-th__top-solo-lectores {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }

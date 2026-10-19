@@ -21,12 +21,14 @@ import {
 } from '@xyflow/react';
 import { Alert, Badge, Button, Card, Group, Loader, MultiSelect, Stack, Switch, Text, TextInput } from '@mantine/core';
 import SgcSelect, { sgcTouchComboboxProps } from '../SgcSelect';
-import { IconAlertTriangle, IconFocus2, IconSearch } from '@tabler/icons-react';
+import { IconAlertTriangle, IconFocus2, IconHierarchy2, IconSearch } from '@tabler/icons-react';
+import SgcParentLinkModal, { type SgcParentLinkTarget } from './SgcParentLinkModal';
 import { sgcHref } from '../useSgcCompany';
 import { sgcSend, useSgcFetch } from '../useSgcFetch';
 import { SGC_BASE_URL } from '../../../lib/sgc/constants';
 import type { SgcRelationGraph } from '../../../lib/sgc/db/relations';
 import type { SgcCompanyAccess } from '../../../lib/sgc/permissions';
+import { isParentTypeCode } from '../../../lib/sgc/hierarchy';
 import {
   SGC_RELATION_LABELS,
   SGC_RELATION_STYLES,
@@ -46,9 +48,15 @@ import {
  * documental y tipo de relación; búsqueda por código que centra el mapa; clic
  * abre la ficha. Solo aparecen los documentos que la persona puede consultar
  * (lo decide el servidor) y las posiciones se guardan por persona.
+ *
+ * 2026-10-19 (documentos padre e hijos): Calidad ARRASTRA un documento hijo
+ * (formato, instructivo…) y lo suelta sobre su documento padre (procedimiento)
+ * para relacionarlos: se marca el padre bajo el cursor, se pide confirmación y
+ * motivo (SgcParentLinkModal) y el nodo vuelve a su sitio. Las reglas (el padre
+ * no tiene padre, un hijo tiene un solo padre) las aplica el servidor.
  */
 
-type DocNodeData = { doc: SgcGraphNode; highlighted: boolean };
+type DocNodeData = { doc: SgcGraphNode; highlighted: boolean; dropTarget?: 'ok' | 'no' | null; isParent?: boolean };
 type DocNode = Node<DocNodeData, 'documento'>;
 
 function DocumentNode({ data }: NodeProps<DocNode>) {
@@ -63,10 +71,11 @@ function DocumentNode({ data }: NodeProps<DocNode>) {
         padding: '8px 10px',
         borderRadius: 8,
         background: 'var(--mantine-color-body)',
-        border: `2px solid var(--mantine-color-${d.processTypeColor}-${data.highlighted ? 7 : 4})`,
-        boxShadow: data.highlighted ? '0 0 0 4px var(--mantine-color-yellow-3)' : '0 1px 3px rgba(0,0,0,.12)',
+        border: data.dropTarget ? `2px dashed var(--mantine-color-${data.dropTarget === 'ok' ? 'green' : 'red'}-6)` : `2px solid var(--mantine-color-${d.processTypeColor}-${data.highlighted ? 7 : 4})`,
+        boxShadow: data.dropTarget === 'ok' ? '0 0 0 4px var(--mantine-color-green-2)' : data.highlighted ? '0 0 0 4px var(--mantine-color-yellow-3)' : '0 1px 3px rgba(0,0,0,.12)',
         cursor: 'pointer',
       }}
+      data-drop={data.dropTarget ?? undefined}
     >
       <Handle type='target' position={Position.Left} style={{ opacity: 0 }} />
       <Group gap={6} wrap='nowrap'>
@@ -79,6 +88,11 @@ function DocumentNode({ data }: NodeProps<DocNode>) {
         {d.status !== 'vigente' && (
           <Badge size='xs' color='orange' variant='light'>
             {d.status}
+          </Badge>
+        )}
+        {data.isParent && (
+          <Badge size='xs' color='blue' variant='light' title='Documento padre'>
+            Padre
           </Badge>
         )}
       </Group>
@@ -95,7 +109,7 @@ function DocumentNode({ data }: NodeProps<DocNode>) {
 
 const NODE_TYPES = { documento: DocumentNode };
 
-function MapCanvas({ company, graph, showObsolete, setShowObsolete }: { company: SgcCompanyAccess; graph: SgcRelationGraph; showObsolete: boolean; setShowObsolete: (v: boolean) => void }) {
+function MapCanvas({ company, graph, showObsolete, setShowObsolete, onChanged }: { company: SgcCompanyAccess; graph: SgcRelationGraph; showObsolete: boolean; setShowObsolete: (v: boolean) => void; onChanged: () => void }) {
   const router = useRouter();
   const flow = useReactFlow();
   const [processType, setProcessType] = useState<string | null>(null);
@@ -108,6 +122,13 @@ function MapCanvas({ company, graph, showObsolete, setShowObsolete }: { company:
   const [notFound, setNotFound] = useState(false);
   const layoutRef = useRef<SgcLayout>({ ...graph.layout });
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Arrastrar un hijo sobre su padre (solo Calidad).
+  const dragStart = useRef<{ id: string; x: number; y: number } | null>(null);
+  const [dropOn, setDropOn] = useState<{ id: number; ok: boolean } | null>(null);
+  const [link, setLink] = useState<{ child: SgcParentLinkTarget; parent: SgcParentLinkTarget } | null>(null);
+  const [linked, setLinked] = useState<string | null>(null);
+  const parentCodes = useMemo(() => graph.parentTypeCodes ?? [], [graph.parentTypeCodes]);
+  const byId = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n])), [graph.nodes]);
 
   const filtered = useMemo(
     () =>
@@ -129,10 +150,25 @@ function MapCanvas({ company, graph, showObsolete, setShowObsolete }: { company:
         id: String(n.id),
         type: 'documento',
         position: layoutRef.current[String(n.id)] ?? positions[String(n.id)] ?? { x: 0, y: 0 },
-        data: { doc: n, highlighted: highlight === n.id },
+        data: { doc: n, highlighted: highlight === n.id, dropTarget: null, isParent: isParentTypeCode(parentCodes, n.documentTypeCode) },
       }))
     );
-  }, [filtered, positions, highlight, setNodes]);
+  }, [filtered, positions, highlight, setNodes, parentCodes]);
+  // Marca del padre bajo el cursor: solo cambia los datos (no las posiciones, para no soltar el nodo que se arrastra).
+  useEffect(() => {
+    setNodes((prev) =>
+      prev.map((n) => {
+        const dropTarget = dropOn?.id === Number(n.id) ? (dropOn.ok ? 'ok' : 'no') : null;
+        return (n.data.dropTarget ?? null) === dropTarget ? n : { ...n, data: { ...n.data, dropTarget } };
+      })
+    );
+  }, [dropOn, setNodes]);
+
+  /** Nodo de documento bajo el que se suelta el arrastrado (el primero que se cruza). */
+  const targetUnder = (node: Node): SgcGraphNode | null => {
+    const hit = flow.getIntersectingNodes(node).find((n) => n.id !== node.id);
+    return hit ? (byId.get(Number(hit.id)) ?? null) : null;
+  };
 
   const edges: Edge[] = useMemo(
     () =>
@@ -200,6 +236,16 @@ function MapCanvas({ company, graph, showObsolete, setShowObsolete }: { company:
             {company.canQuality && <Switch label='Incluir obsoletos' checked={showObsolete} onChange={(e) => setShowObsolete(e.currentTarget.checked)} data-testid='sgc-mapa-obsoletos' />}
           </Stack>
         </Group>
+        {company.canQuality && (
+          <Text size='xs' c='dimmed' mt='xs' data-testid='sgc-mapa-ayuda-arrastre'>
+            <IconHierarchy2 size={12} style={{ verticalAlign: 'middle' }} /> Para relacionar un formato o instructivo con su procedimiento, arrástrelo y suéltelo sobre el procedimiento (marcado «Padre»). En el celular, use «Relacionar con padre» en la ficha o en el árbol documental.
+          </Text>
+        )}
+        {linked && (
+          <Alert color='green' mt='xs' withCloseButton onClose={() => setLinked(null)} data-testid='sgc-mapa-relacion-ok'>
+            {linked}
+          </Alert>
+        )}
         <Group gap='md' mt='xs'>
           {SGC_RELATION_TYPES.map((t) => (
             <Group key={t} gap={4}>
@@ -220,7 +266,27 @@ function MapCanvas({ company, graph, showObsolete, setShowObsolete }: { company:
           edges={edges}
           nodeTypes={NODE_TYPES}
           onNodesChange={onNodesChange}
+          onNodeDragStart={(_e, node) => {
+            dragStart.current = { id: node.id, x: node.position.x, y: node.position.y };
+          }}
+          onNodeDrag={(_e, node) => {
+            if (!company.canQuality) return;
+            const t = targetUnder(node);
+            const child = byId.get(Number(node.id));
+            const next = t && child ? { id: t.id, ok: isParentTypeCode(parentCodes, t.documentTypeCode) && !isParentTypeCode(parentCodes, child.documentTypeCode) } : null;
+            if (next?.id !== dropOn?.id || next?.ok !== dropOn?.ok) setDropOn(next);
+          }}
           onNodeDragStop={(_e, node) => {
+            const t = company.canQuality ? targetUnder(node) : null;
+            const child = byId.get(Number(node.id));
+            setDropOn(null);
+            if (t && child) {
+              // Soltado sobre otro documento: se pide confirmación y el nodo vuelve a su sitio (no se guarda encima).
+              const start = dragStart.current;
+              if (start && start.id === node.id) setNodes((all) => all.map((n) => (n.id === node.id ? { ...n, position: { x: start.x, y: start.y } } : n)));
+              setLink({ child: { idDocument: child.id, code: child.code, title: child.title }, parent: { idDocument: t.id, code: t.code, title: t.title } });
+              return;
+            }
             layoutRef.current = { ...layoutRef.current, [node.id]: { x: Math.round(node.position.x), y: Math.round(node.position.y) } };
             persist();
           }}
@@ -236,6 +302,17 @@ function MapCanvas({ company, graph, showObsolete, setShowObsolete }: { company:
           <Controls showInteractive={false} />
         </ReactFlow>
       </div>
+      <SgcParentLinkModal
+        child={link?.child ?? null}
+        presetParent={link?.parent ?? null}
+        via='arrastre'
+        onClose={() => setLink(null)}
+        onDone={(message) => {
+          setLink(null);
+          setLinked(message);
+          onChanged();
+        }}
+      />
     </Stack>
   );
 }
@@ -266,7 +343,7 @@ export default function SgcRelationMap({ company }: { company: SgcCompanyAccess 
   }
   return (
     <ReactFlowProvider>
-      <MapCanvas company={company} graph={graph.data} showObsolete={showObsolete} setShowObsolete={setShowObsolete} />
+      <MapCanvas company={company} graph={graph.data} showObsolete={showObsolete} setShowObsolete={setShowObsolete} onChanged={graph.reload} />
     </ReactFlowProvider>
   );
 }

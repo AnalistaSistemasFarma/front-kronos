@@ -4,6 +4,7 @@ import {
   notifyRequestClosed,
 } from '../../../../lib/notificationEvents.js';
 import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
+import { closeLinkedOriginTask } from '../../../../lib/workflow/closeLinkedOriginTask.js';
 import {
   cancelOpenOrionInternalTasks,
   orionInternalTaskSql,
@@ -72,7 +73,7 @@ export async function POST(req) {
         const prevResult = await new sql.Request(transaction)
           .input('id', sql.Int, id)
           .query(`
-          SELECT rg.status_req, rg.subject_request, rg.id_requester
+          SELECT rg.status_req, rg.subject_request, rg.id_requester, rg.id_origin_task
           FROM requests_general rg
           WHERE rg.id = @id
         `);
@@ -142,6 +143,19 @@ export async function POST(req) {
           statusId: nextStatus,
         })
       );
+
+      if (prevRow?.id_origin_task) {
+        fireAndForgetNotification(
+          withMssqlPool((pool) =>
+            closeLinkedOriginTask(pool, {
+              originTaskId: prevRow.id_origin_task,
+              mirroredStatus: Number(nextStatus),
+              closedByUserId: id_technical,
+              linkedRequestId: id,
+            })
+          )
+        );
+      }
     }
 
     return new Response(

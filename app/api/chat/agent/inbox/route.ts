@@ -11,6 +11,9 @@ import {
   parsePositiveInt,
 } from '../../../../../lib/chat/constants';
 import { jsonNoStore, serverError, unauthorized } from '../../../../../lib/chat/http';
+import type { ChatAgentIdentity } from '../../../../../lib/chat/agent-auth';
+import { projectsEnabledFor } from '../../../../../lib/chat/projects-rules';
+import { whereProyectoDelAgente } from '../../../../../lib/chat/projects';
 
 // El long-poll obliga a que la ruta sea dinámica: nada de esto se cachea.
 export const dynamic = 'force-dynamic';
@@ -78,6 +81,14 @@ export async function GET(request: NextRequest) {
 
     const startedAt = Date.now();
     const deadline = startedAt + waitSeconds * 1000;
+
+    // LLAVE DEL PUENTE DE HILOS (scope 'projects'): otra bandeja, aparte.
+    // Devuelve SOLO mensajes de conversaciones de PROYECTO de este agente; la
+    // bandeja de siempre (abajo) no cambia y sigue anclada a 'direct' y a las
+    // entregas de grupo, así que la sesión viva del bot nunca ve un proyecto.
+    if (agent.scope === 'projects') {
+      return bandejaDeProyectos({ request, agent, limit, ack, startedAt, deadline });
+    }
 
     const conversationSelect = {
       id: true,
@@ -228,4 +239,99 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     return serverError('GET /api/chat/agent/inbox', error);
   }
+}
+
+/**
+ * Bandeja del PUENTE DE HILOS: mensajes de personas en conversaciones de
+ * PROYECTO de este agente, pendientes de recoger. Mismo long-poll y misma
+ * semántica de `ack` que la bandeja de siempre.
+ *
+ * Además del texto, cada mensaje trae el proyecto (id y nombre) para que el
+ * puente sepa en qué carpeta y con qué sesión atenderlo; las instrucciones,
+ * los archivos y el perfil de conectores los pide aparte, por
+ * GET /api/chat/agent/projects/context, que vuelve a verificar la puerta.
+ */
+async function bandejaDeProyectos(opciones: {
+  request: NextRequest;
+  agent: ChatAgentIdentity;
+  limit: number;
+  ack: boolean;
+  startedAt: number;
+  deadline: number;
+}) {
+  const { request, agent, limit, ack, startedAt, deadline } = opciones;
+
+  // Interruptor apagado para este agente: ni siquiera se consulta la base.
+  if (!projectsEnabledFor(agent.code)) {
+    return jsonNoStore({ error: 'Proyectos no habilitados para este agente.' }, { status: 404 });
+  }
+
+  const fetchPending = () =>
+    prisma.chatMessage.findMany({
+      where: {
+        role: 'user',
+        delivered_at: null,
+        // ANCLA DE SEGURIDAD: solo conversaciones de ESTE agente en
+        // proyectos activos donde sigue DESIGNADO (chat_project_agent).
+        conversation: {
+          kind: 'project',
+          archived: false,
+          id_agent: agent.idAgent,
+          project: whereProyectoDelAgente(agent.idAgent),
+        },
+      },
+      orderBy: { id: 'asc' },
+      take: limit,
+      include: {
+        attachments: true,
+        userAuthor: { select: { id: true, name: true, email: true } },
+        conversation: {
+          select: { id: true, title: true, kind: true, project: { select: { id_project: true, name: true } } },
+        },
+      },
+    });
+
+  let pending = await fetchPending();
+  while (pending.length === 0 && Date.now() < deadline && !request.signal.aborted) {
+    const remaining = deadline - Date.now();
+    await new Promise((resolve) => setTimeout(resolve, Math.min(INBOX_WAIT_TICK_MS, remaining)));
+    if (request.signal.aborted) break;
+    pending = await fetchPending();
+  }
+
+  if (ack && pending.length > 0) {
+    await prisma.chatMessage.updateMany({
+      where: { id: { in: pending.map((m) => m.id) }, delivered_at: null },
+      data: { delivered_at: new Date() },
+    });
+  }
+
+  return jsonNoStore({
+    agent: { idAgent: agent.idAgent, code: agent.code, displayName: agent.displayName },
+    scope: 'projects',
+    acknowledged: ack,
+    waitedMs: Date.now() - startedAt,
+    messages: pending.map((m) => ({
+      id: m.id,
+      idConversation: m.id_conversation,
+      role: m.role,
+      body: m.body,
+      createdAt: m.created_at.toISOString(),
+      author: m.userAuthor
+        ? { kind: 'user' as const, id: m.userAuthor.id, name: m.userAuthor.name, email: m.userAuthor.email }
+        : null,
+      conversation: {
+        id: m.conversation.id,
+        title: m.conversation.title,
+        kind: m.conversation.kind,
+        user: m.userAuthor
+          ? { id: m.userAuthor.id, name: m.userAuthor.name, email: m.userAuthor.email }
+          : null,
+      },
+      project: m.conversation.project
+        ? { idProject: m.conversation.project.id_project, name: m.conversation.project.name }
+        : null,
+      attachments: m.attachments.map(serializeAttachment),
+    })),
+  });
 }

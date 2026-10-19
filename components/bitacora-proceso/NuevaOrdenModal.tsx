@@ -68,7 +68,9 @@ export default function NuevaOrdenModal({
   onCreated: (orden: { id: number; consecutivo: number }) => void;
 }) {
   const mobile = useMediaQuery('(max-width: 48em)') ?? false;
-  const usuarios = useOtFetch<{ usuarios: Usuario[] }>(opened ? `/api/bitacora-proceso/usuarios?company=${idCompany}` : null);
+  // Solo los ASIGNADOS a cada rol en la empresa (Catálogo → Responsables, 2026-10-16).
+  const inspectores = useOtFetch<{ responsables: Usuario[] }>(opened ? `/api/bitacora-proceso/responsables?company=${idCompany}&rol=INSPECTOR` : null);
+  const jefes = useOtFetch<{ responsables: Usuario[] }>(opened ? `/api/bitacora-proceso/responsables?company=${idCompany}&rol=JEFE_PROD` : null);
   const maestro = useOtFetch<{ operadores: OperadorMaestro[] }>(opened ? `/api/bitacora-proceso/operadores?company=${idCompany}` : null);
   const areasCat = useOtFetch<{ areas: AreaCatalogo[] }>(opened ? `/api/bitacora-proceso/areas?company=${idCompany}` : null);
 
@@ -402,8 +404,9 @@ export default function NuevaOrdenModal({
 
         <PersonaPicker
           titulo='Inspector'
-          descripcion='Da su visto bueno después del cierre del supervisor.'
-          usuarios={usuarios.data?.usuarios ?? null}
+          descripcion='Da su visto bueno después del cierre. Debe ser distinto de quien abre y del jefe.'
+          usuarios={inspectores.data?.responsables ?? null}
+          vacio='No hay inspectores asignados en esta empresa. Asígnelos en Catálogo → Responsables.'
           value={inspector}
           onChange={setInspector}
           excluir={jefe}
@@ -412,8 +415,9 @@ export default function NuevaOrdenModal({
         />
         <PersonaPicker
           titulo='Jefe de producción'
-          descripcion='Da el último visto bueno, después del inspector.'
-          usuarios={usuarios.data?.usuarios ?? null}
+          descripcion='Puede ser usted mismo. El jefe designado también puede cerrar; si cierra el supervisor, el jefe da el último visto bueno.'
+          usuarios={jefes.data?.responsables ?? null}
+          vacio='No hay jefes de producción asignados en esta empresa. Asígnelos en Catálogo → Responsables.'
           value={jefe}
           onChange={setJefe}
           excluir={inspector}
@@ -444,11 +448,12 @@ export default function NuevaOrdenModal({
   );
 }
 
-/** Lista de personas (usuarios de la empresa) con búsqueda; sin combobox (celular). */
+/** Lista de personas (las asignadas al rol en la empresa) con búsqueda; sin combobox (celular). */
 function PersonaPicker({
   titulo,
   descripcion,
   usuarios,
+  vacio,
   value,
   onChange,
   excluir,
@@ -458,6 +463,8 @@ function PersonaPicker({
   titulo: string;
   descripcion: string;
   usuarios: Usuario[] | null;
+  /** Texto cuando nadie tiene el rol. */
+  vacio: string;
   value: string | null;
   onChange: (v: string | null) => void;
   /** La otra persona ya elegida (inspector y jefe son distintos). */
@@ -496,7 +503,11 @@ function PersonaPicker({
                   </Group>
                 </Radio.Card>
               ))}
-              {lista.length === 0 && <Text size='sm' c='dimmed'>Sin coincidencias.</Text>}
+              {lista.length === 0 && (
+                <Text size='sm' c='dimmed' data-testid={`${testId}-vacio`}>
+                  {(usuarios ?? []).length === 0 ? vacio : 'Sin coincidencias.'}
+                </Text>
+              )}
             </Stack>
           </Radio.Group>
         </ScrollArea.Autosize>

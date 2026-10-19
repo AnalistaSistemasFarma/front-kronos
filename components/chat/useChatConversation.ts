@@ -16,6 +16,7 @@ import {
   type ChatStatusDto,
 } from '../../lib/chat/client';
 import { MESSAGES_PAGE_DEFAULT } from '../../lib/chat/constants';
+import { proxyUploadErrorMessage } from '../../lib/attachments/uploadRules';
 import type { AgentMetricsDto } from '../../lib/chat/agent-metrics';
 import { avisarMensajeEntrante, mensajeFresco } from '../../lib/chat/message-sound';
 
@@ -115,7 +116,9 @@ export type ChatTarget =
     }
   | { kind: 'group'; idConversation: number }
   /** Hilo privado entre dos personas: ya existe y se abre por su id. */
-  | { kind: 'people'; idConversation: number };
+  | { kind: 'people'; idConversation: number }
+  /** Conversación de un PROYECTO (hilo de agente): ya existe y se abre por su id. */
+  | { kind: 'project'; idConversation: number };
 
 export interface ChatThreadState {
   conversation: ChatConversationDto | null;
@@ -129,6 +132,13 @@ export interface ChatThreadState {
    */
   metrics: AgentMetricsDto | null | undefined;
   loading: boolean;
+  /**
+   * `messages` (y lo demás) todavía son del hilo ANTERIOR. Pasa en el render
+   * en que cambia el objetivo: el estado se reinicia en un efecto, después de
+   * ese render. Quien lleve cuentas por hilo (qué mensajes ya estaban, cuántos
+   * había) no debe sacarlas de ese render.
+   */
+  stale: boolean;
   sending: boolean;
   error: string | null;
   hasOlder: boolean;
@@ -191,6 +201,8 @@ export function useChatConversation(
   );
   const [metrics, setMetrics] = useState<AgentMetricsDto | null | undefined>(undefined);
   const [loading, setLoading] = useState(target !== null && !inicial);
+  // De qué hilo es lo que hay en el estado (ver `stale`).
+  const [claveCargada, setClaveCargada] = useState(targetKey);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasOlder, setHasOlder] = useState(inicial?.hasOlder ?? false);
@@ -275,6 +287,7 @@ export function useChatConversation(
       setHasOlder(false);
     }
     setError(null);
+    setClaveCargada(targetKey);
 
     if (target === null) return;
 
@@ -367,7 +380,7 @@ export function useChatConversation(
           const res = await chatFetch(`/api/chat/conversations/${target.idConversation}`);
           if (!res.ok) {
             if (cancelled) return;
-            const esPersonas = target.kind === 'people';
+            const esPersonas = target.kind === 'people' || target.kind === 'project';
             setError(
               res.status === 404
                 ? esPersonas
@@ -619,7 +632,12 @@ export function useChatConversation(
 
         if (!res.ok) {
           const payload = (await res.json().catch(() => null)) as { error?: string } | null;
-          setError(payload?.error ?? 'No se pudo enviar el mensaje.');
+          // Un 413 de IIS (adjuntos que pasan de 30.000.000 bytes) llega en HTML, sin JSON.
+          setError(
+            payload?.error ??
+              (files.length > 0 ? proxyUploadErrorMessage(res.status) : null) ??
+              'No se pudo enviar el mensaje.'
+          );
           setMessages((prev) =>
             prev.map((m) => (m.id === optimisticId ? { ...m, pending: false, failed: true } : m))
           );
@@ -745,6 +763,7 @@ export function useChatConversation(
     statuses,
     metrics,
     loading,
+    stale: claveCargada !== targetKey,
     sending,
     error,
     hasOlder,

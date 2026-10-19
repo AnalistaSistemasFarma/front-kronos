@@ -19,6 +19,11 @@
  *                              sea de un inquilino habilitado ve «Correo disponible próximamente».
  *   CORREO_ENVIO_HABILITADO    true (defecto): responder desde SynerLink (Mail.Send).
  *   CORREO_ETIQUETAR_HABILITADO true (defecto): categoría «SynerLink #N» en Outlook (Mail.ReadWrite).
+ *                              Es el interruptor general de ESCRITURA en el buzón: con false tampoco se
+ *                              marca leído / no leído ni se elimina.
+ *   CORREO_ELIMINAR_HABILITADO true (defecto): eliminar (deslizar, botón, selección) = mover a «Elementos
+ *                              eliminados» con «Deshacer» (Mail.ReadWrite). Solo aplica si la escritura
+ *                              (CORREO_ETIQUETAR_HABILITADO) está encendida. Nunca borra de forma permanente.
  *   CORREO_SYNC_HABILITADO     false (defecto): tarea de fondo que pasa a notas los correos nuevos
  *                              de los hilos vinculados. Se enciende solo con aprobación.
  */
@@ -37,6 +42,7 @@ export interface CorreoConfig {
   inquilinos: Inquilino[];
   envioHabilitado: boolean;
   etiquetarHabilitado: boolean;
+  eliminarHabilitado: boolean;
   syncHabilitado: boolean;
 }
 
@@ -76,6 +82,7 @@ export function readCorreoConfig(env: Env = process.env): CorreoConfig {
     inquilinos,
     envioHabilitado: bool(env.CORREO_ENVIO_HABILITADO, true),
     etiquetarHabilitado: bool(env.CORREO_ETIQUETAR_HABILITADO, true),
+    eliminarHabilitado: bool(env.CORREO_ELIMINAR_HABILITADO, true),
     syncHabilitado: bool(env.CORREO_SYNC_HABILITADO, false),
   };
 }

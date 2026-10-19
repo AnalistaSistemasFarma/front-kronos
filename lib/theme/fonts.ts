@@ -7,9 +7,15 @@
  * aplicación se veía distinta al resto del celular. Dejarlo a criterio del
  * navegador no tenía arreglo confiable; que el usuario escoja, sí.
  *
- * SOLO FAMILIAS DEL SISTEMA, a propósito: ninguna opción descarga una fuente
- * web. Cargar una tipografía por gusto personal le costaría peso de descarga a
- * TODOS los usuarios en cada visita, y esto es una preferencia estética.
+ * FAMILIAS DEL SISTEMA, salvo excepciones marcadas con `webFont`: cargar una
+ * tipografía por gusto personal no debe costarle peso de descarga a TODOS los
+ * usuarios. La única fuente web (Google Sans, la de SAPSEND, 2026-10-16) se
+ * declara con `preload: false` en lib/theme/fontFaces.ts: el navegador solo la
+ * descarga cuando alguien la usa.
+ *
+ * PARA AGREGAR UNA FUENTE: una entrada aquí (clave nueva, sin migración: la
+ * columna `uiFont` guarda la clave en NVARCHAR(1000)) y, si es web, su
+ * `localFont` en fontFaces.ts con su propia variable CSS.
  *
  * Cada opción es una cadena CSS completa que se inyecta en `--font-sans`, la
  * única fuente de verdad de la tipografía (ver app/globals.css y
@@ -25,14 +31,30 @@ export interface FontOption {
   hint: string;
   /** Cadena CSS que se inyecta en --font-sans */
   stack: string;
+  /** true si es una fuente web autoalojada (se descarga al usarla) */
+  webFont?: boolean;
 }
+
+/** Respaldo del sistema que va detrás de cualquier fuente web */
+const SYSTEM_STACK = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
 export const FONTS: FontOption[] = [
   {
     key: 'sistema',
-    label: 'De la aplicación',
+    label: 'Predeterminada (SynerLink)',
     hint: 'La que trae SynerLink. Es la que se ve hoy.',
-    stack: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    stack: SYSTEM_STACK,
+  },
+  {
+    // La de SAPSEND (2026-10-16). SAPSEND usa Product Sans, de licencia
+    // propietaria; esta es Google Sans, su sucesora con licencia abierta (OFL).
+    // `--font-google-sans` la define next/font en <html> (fontFaces.ts); el
+    // nombre de respaldo cubre el caso en que la variable no exista.
+    key: 'sapsend',
+    label: 'Google Sans (SAPSEND)',
+    hint: 'La misma letra de SAPSEND. Se descarga una sola vez (unos 36 KB) solo si la escoge.',
+    stack: `var(--font-google-sans, "Google Sans"), ${SYSTEM_STACK}`,
+    webFont: true,
   },
   {
     key: 'dispositivo',
@@ -64,6 +86,15 @@ export const DEFAULT_FONT_KEY = 'sistema';
 export const FONT_STORAGE_KEY = 'theme-font';
 
 const FONT_KEY_SET = new Set(FONTS.map((f) => f.key));
+
+/**
+ * Clave → cadena CSS, para el script de arranque (ThemeInitScript), que aplica
+ * la fuente guardada ANTES de pintar: así no se ve primero la predeterminada y
+ * luego la del usuario.
+ */
+export const FONT_STACKS: Record<string, string> = Object.fromEntries(
+  FONTS.map((f) => [f.key, f.stack]),
+);
 
 export function isValidFontKey(key: unknown): key is string {
   return typeof key === 'string' && FONT_KEY_SET.has(key);

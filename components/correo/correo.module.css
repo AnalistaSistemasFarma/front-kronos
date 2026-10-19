@@ -363,6 +363,86 @@
   background: var(--mantine-color-dark-7);
 }
 
+/*
+ * ---- Deslizar una fila (2026-10-18): a la izquierda elimina, a la derecha leído / no leído ----
+ * El navegador conserva el desplazamiento vertical (pan-y) y el zoom; el gesto horizontal lo maneja FilaDeslizable.
+ * El fondo de color solo existe mientras se desliza, y el recorte (overflow) también, para no cortar la sombra
+ * de la fila al pasar el mouse.
+ */
+.deslizable {
+  position: relative;
+}
+
+.deslizable[data-deslizando='1'] {
+  overflow: hidden;
+}
+
+.frenteDeslizar {
+  position: relative;
+  background: var(--mantine-color-body);
+  touch-action: pan-y pinch-zoom;
+}
+
+.deslizable[data-deslizando='1'] .frenteDeslizar {
+  cursor: grabbing;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.fondoDeslizar {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  color: var(--mantine-color-white);
+  font-size: 14px;
+  font-weight: 600;
+  background: var(--mantine-color-red-5);
+  transition: background-color 120ms ease;
+}
+
+.fondoDeslizar[data-lado='izquierda'] {
+  justify-content: flex-end;
+}
+
+.fondoDeslizar[data-lado='derecha'] {
+  justify-content: flex-start;
+}
+
+.fondoDeslizar[data-color='rojo'][data-armado='1'] {
+  background: var(--mantine-color-red-7);
+}
+
+.fondoDeslizar[data-color='azul'] {
+  background: var(--mantine-color-blue-5);
+}
+
+.fondoDeslizar[data-color='azul'][data-armado='1'] {
+  background: var(--mantine-color-blue-7);
+}
+
+.accionDeslizar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0.85;
+  transform: scale(0.88);
+  transition: transform 120ms ease, opacity 120ms ease;
+}
+
+.fondoDeslizar[data-armado='1'] .accionDeslizar {
+  opacity: 1;
+  transform: scale(1.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fondoDeslizar,
+  .accionDeslizar {
+    transition: none;
+  }
+}
+
 /* ---- Carga (2026-10-16): esqueletos con la misma geometría de las filas reales ---- */
 .filaEsqueleto {
   display: flex;
@@ -395,4 +475,50 @@
   .listaAtenuada {
     transition: none;
   }
+}
+
+/*
+ * Cuerpo del correo (iframe de HtmlSeguro): superficie blanca SIEMPRE, como Gmail, para respetar los
+ * colores con que se escribió el correo. En modo oscuro se le da un margen interno blanco para que
+ * el texto no quede pegado al borde de la tarjeta.
+ */
+.cuerpoHtml {
+  color-scheme: light;
+}
+
+:global([data-mantine-color-scheme='dark']) .cuerpoHtml {
+  padding: 10px 12px;
+  box-sizing: content-box;
+  width: calc(100% - 24px) !important;
+}
+
+/* Aviso «Correo movido a la Papelera · Deshacer» (2026-10-18). */
+.avisoDeshacer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.botonDeshacer {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 4px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1f2430;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.botonDeshacer:hover {
+  background: #e5e7eb;
+}
+
+.botonDeshacer:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
 }

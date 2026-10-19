@@ -1,0 +1,111 @@
+# Puente de hilos (módulo «Proyectos») — piloto
+
+Servicio aparte que atiende las **conversaciones de proyecto** del chat de SynerLink con **una sesión de Claude Code por hilo**. Nicolás Rivera aprobó el piloto el 2026-10-17. Arranca solo con Play (`@silvia_gss_bot`) y **solo en PRUEBAS**.
+
+No reemplaza al bot vivo ni lo toca. El bot de Play sigue en su sesión larga (`com.pedro.play`), con su `.env`, su config y su canal de siempre. La bandeja que lee el bot vivo solo trae hilos directos y menciones de grupo, así que **nunca recibe un mensaje de proyecto**. Este puente lee una bandeja distinta con una llave de alcance `projects`, y esa llave no ve nada más.
+
+## Módulo «Proyectos» (2026-10-18): varios agentes por proyecto
+
+Desde el módulo, un proyecto tiene **uno o varios agentes designados** (`chat_project_agent`) y cada conversación es de **uno** de ellos (`chat_conversation.id_agent`). No cambia el modelo operativo:
+
+- **Una instancia del puente por agente**, en el Mac de ese agente, con **su** llave `scope: "projects"` y **su** token (el plan de cada agente). `scripts/provisionar-agente.sh <agente>` la deja lista.
+- La bandeja de cada llave solo entrega mensajes de **sus** conversaciones en proyectos **activos donde está designado**. Si el dueño retira a un agente, su puente deja de recibir mensajes de ese proyecto y sus conversaciones quedan de solo lectura.
+- Cada instancia mantiene su propia carpeta `proyectos/<id>/…` con los archivos del proyecto: dos agentes del mismo proyecto no comparten sesión, carpeta ni consumo.
+- **Lo vinculado** (correos y solicitudes) llega en el contexto (`project.links`) y el puente lo escribe en `./contexto/vinculados.md` de la carpeta del hilo en cada turno. Es de solo lectura para el modelo (solo escribe en `./trabajo`) y trae **lo mismo que ven los miembros**: de un correo, asunto, remitente, fecha, número de mensajes y el resumen de quien lo vinculó — **nunca el cuerpo** —; de una solicitud, número, asunto, proceso, empresa y estado actual. No hay un conector MCP nuevo: así la llave del puente nunca entra al proceso del modelo.
+
+## Cómo funciona
+
+1. Hace long-poll a `GET /api/chat/agent/inbox` con la llave de scope `projects` y `ack=false`.
+2. Cada mensaje entra a la cola de **su** conversación. Dentro de un hilo los turnos van en serie, y entre hilos corren en paralelo con un **tope de 2 a la vez** (`src/cola.mjs`). Los mensajes que llegan mientras un hilo trabaja salen juntos en el turno siguiente.
+3. En cada turno:
+   - pide el contexto del proyecto (`/api/chat/agent/projects/context`): instrucciones, descripción, perfil, archivos, vinculados y versión;
+   - baja los archivos del proyecto a `proyectos/<id>/archivos/` si cambió la versión, y los adjuntos del chat a `adjuntos/`;
+   - escribe `CLAUDE.md`, `.puente/sistema.md`, `.puente/mcp.json` y `contexto/vinculados.md`;
+   - corre `claude -p --resume <session_id del hilo>` en la carpeta del hilo (`src/claude.mjs`).
+4. Publica la respuesta en el hilo, deja el indicador en reposo, reporta el consumo (`/api/chat/agent/usage`, por conversación y también en `consumo.jsonl`) y confirma los mensajes. La confirmación va al final, así que si el puente se cae, el mensaje vuelve a llegar.
+
+## Seguridad del proceso del modelo
+
+| Control | Cómo |
+|---|---|
+| Config dir **aislado** | `CLAUDE_CONFIG_DIR=<HILOS_DIR>/claude-config`. El puente no arranca si `HILOS_DIR` está dentro de `~/.<bot>/`, de `~/.claude` o de un `claude-config`. |
+| Sin sesión ni llavero de ningún bot | La credencial entra **solo** por variable de entorno al hijo. **Nunca** corra `claude /login` con ese config dir. |
+| Plugin de Telegram apagado | `--settings {"enabledPlugins":{"telegram@claude-plugins-official":false},"disableAllHooks":true}`. Así se evita el gotcha de los jobs `claude -p` que tumban el poller. |
+| Sin modo de permisos abierto | `--restricted` + `--permission-mode dontAsk`. Nunca `bypassPermissions` ni `--dangerously-skip-permissions`; el código lo verifica y el evento `init` se revisa en cada turno. |
+| Herramientas mínimas | `Read, Glob, Grep, Edit, Write, TodoWrite`, más `WebSearch` y `WebFetch` si el perfil tiene `web` (decisión de Nicolás, 2026-10-17). Se escribe **solo** en `./trabajo/**`. Bash, Agent/Task y NotebookEdit quedan prohibidos. |
+| Prompt injection y fuga de datos | El encabezado de sistema de cada turno ordena tratar páginas web, búsquedas, archivos y adjuntos como **datos**, nunca como instrucciones, y **prohíbe** enviar datos de SAP o de la empresa a sitios externos (URL, parámetros, búsquedas, formularios). |
+| Conectores MCP por hilo | `--strict-mcp-config --mcp-config` con **solo** los servidores del perfil del proyecto (`config/perfiles.json`) y las herramientas por nombre exacto, sin comodines. |
+| Entorno limpio | El hijo no hereda nada del puente: recibe solo PATH, HOME, el config aislado y una credencial. La llave de SynerLink nunca le llega. |
+| Llave correcta | Si la bandeja no responde `scope: "projects"` (por ejemplo, porque le pusieron la llave del bot vivo), el puente **no arranca**. |
+| Sin `CLAUDE.md` ajenos | No arranca si hay un `CLAUDE.md` por encima de `HILOS_DIR`, porque Claude Code lo cargaría en cada hilo. |
+
+## Autenticación (decisión de Nicolás, 2026-10-17)
+
+«El plan de cada agente, el token de cada agente.» El puente usa el `CLAUDE_CODE_OAUTH_TOKEN` **del propio agente** (en el piloto, el de Play) y lo toma de UNA de estas fuentes:
+
+- `HILOS_TOKEN_ENV_AGENTE` (la del piloto): es la ruta al `.env` del bot, por ejemplo `~/.play/.env`. El puente lee **solo** esa variable, dentro del proceso y sin imprimirla, e ignora el resto del archivo. El bot vivo no se toca.
+- `HILOS_CLAUDE_CODE_OAUTH_TOKEN`: el mismo token, copiado sin mostrarlo al `.env` del puente (con permisos 600).
+- `HILOS_ANTHROPIC_API_KEY`: llave de API. Queda como alternativa para cuando se escale.
+
+Lo que **no** cambia:
+
+- No se reutiliza el llavero ni la sesión viva del bot.
+- El config dir sigue **aislado**, así que la credencial entra solo por variable de entorno.
+
+> ⚠️ **El puente comparte el límite de uso con el bot vivo.** El token es el mismo plan, así que lo que consumen los hilos sale del mismo límite semanal de Play. Si se agota, se frenan los dos. Los topes (2 hilos, 15 min por turno) y `consumo.jsonl` sirven para medirlo.
+>
+> Nota para cuando se escale: la documentación del Agent SDK de Anthropic recomienda la llave de API para productos que atienden a varias personas.
+
+## Activación del piloto en PRUEBAS (paso a paso)
+
+Antes de empezar: el PR debe estar fusionado en `testing` y desplegado, y Nicolás debe haber dado el visto bueno. Avísele antes de desplegar, porque el despliegue apaga el SynerLink de pruebas unos 10 minutos.
+
+1. **Base de PRUEBAS.** Saque un respaldo COPY_ONLY y corra `prisma/manual/2026-10-17-chat-proyectos-PRUEBAS.sql`, con `@OwnerEmail` y `@MiembrosCsv` ajustados. El script se detiene en cualquier otra base. Debe correr **antes** del código, porque Prisma lee la columna `id_project`.
+2. **`.env` de la aplicación de PRUEBAS** (en el servidor de pruebas, sin imprimir el archivo):
+   - `CHAT_PROJECTS_AGENTS={"play":["farmalogica","olp","comex-latam"]}`
+   - agregue a `CHAT_AGENT_API_KEYS` una llave **nueva** (de 32 caracteres o más) con `{"key":"…","agent":"play","label":"play-hilos-pruebas","scope":"projects"}`. La llave del bot vivo no se toca.
+   - reinicie la app de pruebas.
+3. **Carpeta del puente** en el **Mac de Pedro** (192.168.10.100, donde corre Play), fuera de `~/.play`:
+   ```bash
+   mkdir -p ~/.puente-hilos/play-pruebas/logs && chmod 700 ~/.puente-hilos ~/.puente-hilos/play-pruebas
+   cp puente-hilos/config/perfiles.example.json ~/.puente-hilos/play-pruebas/perfiles.json
+   cp puente-hilos/config/env.example ~/.puente-hilos/play-pruebas/.env && chmod 600 ~/.puente-hilos/play-pruebas/.env
+   ```
+   Llene el `.env`: la URL de PRUEBAS, la llave de scope `projects`, `HILOS_DIR`, `HILOS_PERFILES` y **una** credencial (en el piloto, `HILOS_TOKEN_ENV_AGENTE=~/.play/.env`, ruta absoluta).
+4. **Prueba en primer plano** (Ctrl+C para apagar):
+   ```bash
+   bash puente-hilos/launchd/run.sh ~/.puente-hilos/play-pruebas/.env
+   ```
+   Debe imprimir `listo: agente play (Play), entorno pruebas, tope 2 hilos…`.
+5. **Como servicio** (opcional; no se carga solo): copie `launchd/com.gss.puente-hilos.play-pruebas.plist.example` a `~/Library/LaunchAgents/`, reemplace `__HOME__` y `__REPO__`, y use `bootstrap` / `kickstart` / `kill SIGTERM` / `bootout`, como dice el encabezado del plist.
+6. **Prueba de punta a punta:** abra SynerLink de pruebas → **Procesos → Proyectos** (permiso «Proyectos») → entre a «Comex Latam», abra una conversación con Play y escriba. Revise:
+   - el indicador «trabajando»;
+   - la respuesta en el hilo;
+   - una fila en `chat_agent_turn_usage` para esa conversación;
+   - que el chat directo de Play **no** recibió nada.
+
+## Otro agente (`scripts/provisionar-agente.sh`)
+
+Cada agente lleva **su propia instancia** del puente, en el Mac donde corre el bot y con su propio token. Para no repetir los pasos 3 a 5 a mano:
+
+```bash
+# 1) Ensayo: solo dice lo que haría.
+puente-hilos/scripts/provisionar-agente.sh horus
+# 2) Con la llave nueva de scope "projects" en un archivo de una línea (se copia sin mostrarla y se borra):
+puente-hilos/scripts/provisionar-agente.sh horus --llave-archivo /ruta/llave.tmp --aplicar
+# 3) Opcional: --cargar registra y prende el servicio com.gss.puente-hilos.<agente>-pruebas.
+```
+
+El script verifica Node ≥ 20, que `claude` soporte `--restricted`, que el `.env` del bot tenga `CLAUDE_CODE_OAUTH_TOKEN` (solo cuenta la línea, no la lee) y que no haya un `CLAUDE.md` por encima de `~/.puente-hilos`. No sobrescribe una instancia que ya exista y no toca el bot vivo.
+
+Del lado de SynerLink, el agente debe estar en `CHAT_PROJECTS_AGENTS` con perfiles del catálogo (`lib/chat/projects-rules.ts`). Un perfil desconocido deja **todo** el módulo apagado (falla cerrado), así que un perfil nuevo, como `gss`, se agrega al `.env` solo después de desplegar el código que lo trae.
+
+**Apagar:** `launchctl kill SIGTERM …`, o Ctrl+C. Termina los turnos en curso y sale. Para apagar los proyectos en la aplicación, quite `CHAT_PROJECTS_AGENTS` y reinicie la app.
+
+## Pruebas
+
+```bash
+cd puente-hilos && node --test test/*.test.mjs
+```
+
+No tiene dependencias: usa Node 20 o superior y el `claude` instalado, que debe soportar `--restricted`. El puente lo verifica al arrancar.

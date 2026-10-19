@@ -7,6 +7,10 @@ import type { SgcActor, SgcDb } from './catalogs';
 import { canViewDocument, listVisibleDocuments } from './documents';
 import { guideInputOf } from './coding';
 import { pairKey, proposeRelations } from '../relationProposals';
+import { hierarchyOf, hierarchyRelationFor, isHierarchyRelationType, isParentTypeCode } from '../hierarchy';
+import { assertParentChild, loadParentMap, loadParentTypeCodes } from './hierarchy';
+
+export { assertParentChild, assertParentForNewChild, createAutomaticParentRelation, loadParentMap, loadParentTypeCodes } from './hierarchy';
 
 /**
  * Relaciones tipadas entre documentos y mapa tipo Obsidian (Sprint 5).
@@ -29,6 +33,101 @@ export interface SgcRelationGraph {
   edges: SgcGraphEdge[];
   layout: SgcLayout;
   processTypeOrder: number[];
+  /** 2026-10-19: tipos documentales padre de la empresa (para el árbol y el «arrastrar al padre»). */
+  parentTypeCodes: string[];
+}
+
+// ---------------------------------------------------------------------------
+// 2026-10-19 — Documentos PADRE e HIJOS (ver lib/sgc/hierarchy.ts).
+// ---------------------------------------------------------------------------
+
+export interface SgcParentOptions {
+  document: { idDocument: number; code: string; title: string; documentTypeCode: string; status: string };
+  /** El documento es de un tipo padre: no tiene padre. */
+  isParentType: boolean;
+  parentTypeCodes: string[];
+  /** Padre actual (relación confirmada), si tiene. */
+  parent: { idDocument: number; code: string; title: string; idRelation: number } | null;
+  /** Documentos padre a los que se puede relacionar (vigentes o pendientes de archivo de un tipo padre). */
+  candidates: { idDocument: number; code: string; title: string; status: string; documentTypeCode: string }[];
+}
+
+/** Lo que necesita «Relacionar con padre» (solo Calidad). */
+export async function getParentOptions(db: SgcDb, accessByCompany: readonly SgcCompanyAccess[], idDocument: number): Promise<SgcParentOptions> {
+  const doc = Number.isInteger(idDocument) ? await db.sgcDocument.findUnique({ where: { id_document: idDocument }, include: { documentType: { select: { code: true } } } }) : null;
+  if (!doc) throw new SgcError('Documento no encontrado.', 404);
+  const access = accessByCompany.find((a) => a.idCompany === doc.id_company);
+  if (!access?.canQuality) throw new SgcError('Solo Aseguramiento de Calidad relaciona documentos.', 403);
+  const [codes, rels, candidates] = await Promise.all([
+    loadParentTypeCodes(db, doc.id_company),
+    db.sgcDocumentRelation.findMany({
+      where: { id_company: doc.id_company, is_active: true, status: 'confirmada', OR: [{ relation_type: 'procedimiento_padre', id_target_document: idDocument }, { relation_type: { in: ['formato', 'anexo'] }, id_source_document: idDocument }] },
+      include: { source: { select: { id_document: true, code: true, title: true } }, target: { select: { id_document: true, code: true, title: true } } },
+      orderBy: { id_document_relation: 'asc' },
+    }),
+    db.sgcDocument.findMany({ where: { id_company: doc.id_company, status: { in: ['vigente', 'pendiente_archivo'] }, id_document: { not: idDocument } }, include: { documentType: { select: { code: true } } }, orderBy: { code: 'asc' } }),
+  ]);
+  const current = rels[0] ?? null;
+  const parentDoc = current ? (current.relation_type === 'procedimiento_padre' ? current.source : current.target) : null;
+  return {
+    document: { idDocument: doc.id_document, code: doc.code, title: doc.title, documentTypeCode: doc.documentType.code, status: doc.status },
+    isParentType: isParentTypeCode(codes, doc.documentType.code),
+    parentTypeCodes: codes,
+    parent: parentDoc && current ? { idDocument: parentDoc.id_document, code: parentDoc.code, title: parentDoc.title, idRelation: current.id_document_relation } : null,
+    candidates: candidates
+      .filter((c) => isParentTypeCode(codes, c.documentType.code))
+      .map((c) => ({ idDocument: c.id_document, code: c.code, title: c.title, status: c.status, documentTypeCode: c.documentType.code })),
+  };
+}
+
+export const SGC_PARENT_VIA = ['arrastre', 'boton'] as const;
+const VIA_LABEL: Record<(typeof SGC_PARENT_VIA)[number], string> = { arrastre: 'arrastre en el mapa', boton: '«Relacionar con padre»' };
+
+/**
+ * «RELACIONAR CON PADRE» (arrastrar un hijo sobre su padre en el mapa o el
+ * botón accesible): solo Calidad, con motivo; la relación queda confirmada y
+ * en la auditoría. Reglas: el padre es de un tipo padre, el padre no tiene
+ * padre y un hijo tiene un solo padre.
+ */
+export async function setDocumentParent(db: SgcDb, accessByCompany: readonly SgcCompanyAccess[], input: { idChild?: unknown; idParent?: unknown; reason?: unknown; via?: unknown }, actor: SgcActor) {
+  const idChild = Number(input.idChild);
+  const idParent = Number(input.idParent);
+  const include = { documentType: { select: { code: true } } } as const;
+  const [child, parent] = await Promise.all([
+    Number.isInteger(idChild) ? db.sgcDocument.findUnique({ where: { id_document: idChild }, include }) : null,
+    Number.isInteger(idParent) ? db.sgcDocument.findUnique({ where: { id_document: idParent }, include }) : null,
+  ]);
+  if (!child || !parent) throw new SgcError('Documento no encontrado.', 404);
+  const access = accessByCompany.find((a) => a.idCompany === child.id_company);
+  if (!access?.canQuality) throw new SgcError('Solo Aseguramiento de Calidad relaciona documentos.', 403);
+  const reason = reasonOf(input.reason);
+  const via = (SGC_PARENT_VIA as readonly string[]).includes(String(input.via)) ? (input.via as (typeof SGC_PARENT_VIA)[number]) : 'boton';
+  const rel = hierarchyRelationFor(parent.id_document, child.id_document, child.documentType.code);
+  const email = actor.email.toLowerCase();
+  try {
+    return await db.$transaction(async (tx) => {
+      // Dentro de la transacción: dos personas no le ponen dos padres al mismo hijo.
+      await assertParentChild(tx, parent, child);
+      const saved = await tx.sgcDocumentRelation.create({
+        data: { id_company: child.id_company, id_source_document: rel.idSource, id_target_document: rel.idTarget, relation_type: rel.type, created_by: email, change_reason: reason, origin: 'manual', status: 'confirmada', confirmed_by: email, confirmed_at: new Date() },
+      });
+      await writeSgcAudit(tx, {
+        idCompany: child.id_company,
+        actorEmail: actor.email,
+        action: SGC_AUDIT_ACTIONS.relacionPadreAsignado,
+        entity: 'document_relation',
+        entityId: saved.id_document_relation,
+        after: { ...saved, via },
+        detail: `${child.code} queda como hijo de ${parent.code} (${SGC_RELATION_LABELS[rel.type]}, ${VIA_LABEL[via]}): ${reason}`.slice(0, 1000),
+        ip: actor.ip,
+        userAgent: actor.userAgent,
+      });
+      return saved;
+    });
+  } catch (error) {
+    if (isUniqueViolation(error) || /document_relation_activa_uq/.test(String((error as Error)?.message))) throw new SgcError(`La relación de ${child.code} con ${parent.code} ya existe.`, 409);
+    throw error;
+  }
 }
 
 /** Grafo de la empresa para la persona (respeta permisos) y sus posiciones guardadas. */
@@ -55,6 +154,7 @@ export async function getRelationGraph(
     idDepartment: doc.id_owner_department ?? doc.process.id_department,
     idDocumentType: doc.documentType.id_document_type,
     documentTypeCode: doc.documentType.code,
+    currentVersionId: current?.id_document_version ?? null,
   }));
   const ids = nodes.map((n) => n.id);
   const rows = ids.length
@@ -68,9 +168,10 @@ export async function getRelationGraph(
         return all.filter((r) => visible.has(r.id_source_document) && visible.has(r.id_target_document));
       })
     : [];
-  const [layoutRow, types] = await Promise.all([
+  const [layoutRow, types, parentTypeCodes] = await Promise.all([
     db.sgcGraphLayout.findUnique({ where: { id_company_user_email: { id_company: access.idCompany, user_email: subject.email.toLowerCase() } } }),
     db.sgcProcessType.findMany({ where: { id_company: access.idCompany }, orderBy: [{ sort_order: 'asc' }, { code: 'asc' }], select: { id_process_type: true } }),
+    loadParentTypeCodes(db, access.idCompany),
   ]);
   let layout: SgcLayout = {};
   try {
@@ -83,6 +184,7 @@ export async function getRelationGraph(
     edges: rows.filter((r) => isSgcRelationType(r.relation_type)).map((r) => ({ id: r.id_document_relation, source: r.id_source_document, target: r.id_target_document, type: r.relation_type as SgcRelationType, note: r.note })),
     layout,
     processTypeOrder: types.map((t) => t.id_process_type),
+    parentTypeCodes,
   };
 }
 
@@ -172,6 +274,14 @@ export async function addDocumentRelation(
   const note = typeof input.note === 'string' && input.note.trim() ? input.note.trim().slice(0, 500) : null;
   try {
     return await db.$transaction(async (tx) => {
+      // 2026-10-19: «procedimiento padre», «formato» y «anexo» son jerárquicas: aplican las reglas de padre e hijo.
+      if (isHierarchyRelationType(String(input.type))) {
+        const h = hierarchyOf({ source: source.id_document, target: target.id_document, type: String(input.type) })!;
+        const [p, c] = await Promise.all(
+          [h.parent, h.child].map((id) => tx.sgcDocument.findUniqueOrThrow({ where: { id_document: id }, include: { documentType: { select: { code: true } } } }))
+        );
+        await assertParentChild(tx, p, c);
+      }
       const saved = await tx.sgcDocumentRelation.create({
         data: {
           id_company: source.id_company,
@@ -243,11 +353,13 @@ export async function removeDocumentRelation(db: SgcDb, accessByCompany: readonl
 export async function proposeDocumentRelations(db: SgcDb, access: SgcCompanyAccess, actor: SgcActor) {
   if (!access.canQuality) throw new SgcError('Solo Aseguramiento de Calidad relaciona documentos.', 403);
   const idCompany = access.idCompany;
-  const [docs, guide, relations, listRows] = await Promise.all([
+  const [docs, guide, relations, listRows, parentTypeCodes, parentOf] = await Promise.all([
     db.sgcDocument.findMany({ where: { id_company: idCompany, status: { not: 'anulado' } }, select: { id_document: true, code: true, status: true, documentType: { select: { code: true } }, process: { select: { code: true, processType: { select: { code: true } } } } } }),
     db.sgcCodingGuide.findUnique({ where: { id_company: idCompany } }),
     db.sgcDocumentRelation.findMany({ where: { id_company: idCompany, is_active: true }, select: { id_source_document: true, id_target_document: true } }),
     db.sgcMasterListImportRow.findMany({ where: { status: 'cargada', parent_code: { not: null }, id_document: { not: null }, import: { id_company: idCompany } }, select: { id_document: true, parent_code: true }, orderBy: { id_master_list_import_row: 'asc' } }),
+    loadParentTypeCodes(db, idCompany),
+    loadParentMap(db, idCompany, true),
   ]);
   const proposals = proposeRelations(
     docs.map((d) => ({ id: d.id_document, code: d.code, status: d.status, documentTypeCode: d.documentType.code, processCode: d.process.code, processTypeCode: d.process.processType.code })),
@@ -255,6 +367,9 @@ export async function proposeDocumentRelations(db: SgcDb, access: SgcCompanyAcce
       guide: guide ? guideInputOf(guide) : null,
       listParents: new Map(listRows.map((r) => [r.id_document!, r.parent_code!])),
       related: new Set(relations.map((r) => pairKey(r.id_source_document, r.id_target_document))),
+      // 2026-10-19: solo lo que cumple las reglas de padre e hijo.
+      parentTypeCodes,
+      parentOf,
     }
   );
   if (proposals.length === 0) return { created: 0 };
@@ -313,7 +428,16 @@ export async function decideRelationProposals(db: SgcDb, access: SgcCompanyAcces
   if (chosen.length !== ids.length) throw new SgcError('Alguna relación ya no está propuesta (otra persona la confirmó o la descartó). Actualice la lista.', 409);
   const email = actor.email.toLowerCase();
   await db.$transaction(async (tx) => {
+    // 2026-10-19: confirmar una relación jerárquica respeta las reglas de padre e hijo (un hijo, un solo padre).
+    const parentTypeCodes = input.action === 'confirmar' ? await loadParentTypeCodes(tx, access.idCompany) : [];
+    const parentOf = input.action === 'confirmar' ? await loadParentMap(tx, access.idCompany) : new Map<number, number>();
     for (const r of chosen) {
+      const h = input.action === 'confirmar' ? hierarchyOf({ source: r.id_source_document, target: r.id_target_document, type: r.relation_type }) : null;
+      if (h) {
+        const [p, c] = await Promise.all([h.parent, h.child].map((id) => tx.sgcDocument.findUniqueOrThrow({ where: { id_document: id }, include: { documentType: { select: { code: true } } } })));
+        await assertParentChild(tx, p, c, { parentTypeCodes, parentOf });
+        parentOf.set(h.child, h.parent);
+      }
       const saved =
         input.action === 'confirmar'
           ? await tx.sgcDocumentRelation.update({ where: { id_document_relation: r.id_document_relation }, data: { status: 'confirmada', confirmed_by: email, confirmed_at: now } })
