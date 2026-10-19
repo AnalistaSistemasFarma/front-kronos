@@ -223,5 +223,9 @@ describe.skipIf(!url)('SGC · documentos padre e hijos con SQL Server', () => {
     expect(await prisma.$queryRaw<{ n: number }[]>`SELECT COUNT(*) AS n FROM sgc.document_relation WHERE origin IN (N'solicitud', N'carga')`).toEqual([{ n: 0 }]);
     await prisma.$executeRawUnsafe(migration());
     expect(await prisma.$queryRaw<{ c: string }[]>`SELECT name AS c FROM sys.columns WHERE object_id = OBJECT_ID('sgc.document_type') AND name = 'is_parent_type'`).toHaveLength(1);
+    // Se deja otra vez el procedimiento marcado como padre: la reversa de la CI (sin bandera) debe encontrar datos y negarse.
+    const pr = (await getCatalogs(prisma, CO)).documentTypes.find((t) => t.code === 'PR')!;
+    await saveCatalogEntry(prisma, CO, 'document-types', { id: pr.id, code: pr.code, name: pr.name, pluralName: pr.pluralName, requiresTraining: pr.requiresTraining, reviewMonths: pr.reviewMonths, alertMonths: pr.alertMonths, sortOrder: pr.sortOrder, isActive: true, isParentType: true, reason: 'El procedimiento vuelve a ser tipo padre' }, actor(E.cal));
+    expect((await getCatalogs(prisma, CO)).parentTypeCodes).toEqual(['PR']);
   });
 });
