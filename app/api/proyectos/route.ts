@@ -1,0 +1,127 @@
+import { NextRequest } from 'next/server';
+import { prisma } from '../../../lib/prisma';
+import { badRequest, jsonNoStore, readJsonBody, resolveSessionUser, serverError, unauthorized } from '../../../lib/chat/http';
+import { designableAgents, listProjectsForUser, projectModuleCompanies } from '../../../lib/chat/projects';
+import {
+  isKnownProfile,
+  MAX_OWNED_PROJECTS,
+  normalizeAgentCodes,
+  normalizeProjectDescription,
+  normalizeProjectInstructions,
+  normalizeProjectName,
+  PROJECT_PROFILES,
+} from '../../../lib/chat/projects-rules';
+import type { ListaProyectosDto } from '../../../lib/proyectos/tipos';
+
+export const dynamic = 'force-dynamic';
+
+/**
+ * Módulo «Proyectos» (2026-10-18).
+ *
+ *   GET  /api/proyectos[?archivados=1]  proyectos donde la persona es miembro
+ *        (archivados: solo los suyos), más las empresas donde tiene el módulo,
+ *        los agentes que puede designar en cada una y los perfiles.
+ *   POST /api/proyectos  { name, idCompany, description?, agentCodes[], profile, instructions? }
+ *
+ * SEGURIDAD
+ *   - La persona sale de la SESIÓN; el dueño es SIEMPRE quien crea.
+ *   - Debe tener el permiso del módulo en la empresa escogida.
+ *   - Cada agente debe estar asignado a la persona EN ESA empresa, tener
+ *     proyectos habilitados (CHAT_PROJECTS_AGENTS) y admitir el perfil.
+ *   - Sin el módulo, 404.
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const user = await resolveSessionUser();
+    if (!user) return unauthorized();
+
+    const archivados = request.nextUrl.searchParams.get('archivados') === '1';
+    const data = await listProjectsForUser(user, { archivados });
+    if (!data) return jsonNoStore({ error: 'No tiene el módulo «Proyectos».' }, { status: 404 });
+
+    const porEmpresa = await designableAgents(user.email);
+    const designables: ListaProyectosDto['designables'] = {};
+    for (const c of data.companies) designables[String(c.idCompany)] = porEmpresa.get(c.idCompany) ?? [];
+
+    // El contrato con la interfaz (lib/proyectos/tipos.ts) lo verifica el compilador.
+    const lista: ListaProyectosDto = { companies: data.companies, designables, profiles: [...PROJECT_PROFILES], projects: data.projects };
+    return jsonNoStore(lista);
+  } catch (error) {
+    return serverError('GET /api/proyectos', error);
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const user = await resolveSessionUser();
+    if (!user) return unauthorized();
+
+    const payload = await readJsonBody(request);
+    if (!payload) return badRequest('El cuerpo debe ser un objeto JSON.');
+
+    const nombre = normalizeProjectName(payload.name);
+    if (!nombre.ok) return badRequest(nombre.error);
+    const descripcion = normalizeProjectDescription(payload.description);
+    if (!descripcion.ok) return badRequest(descripcion.error);
+    const instrucciones = normalizeProjectInstructions(payload.instructions);
+    if (!instrucciones.ok) return badRequest(instrucciones.error);
+    const codigos = normalizeAgentCodes(payload.agentCodes);
+    if (!codigos.ok) return badRequest(codigos.error);
+    if (!isKnownProfile(payload.profile)) return badRequest('Escoja el perfil de conectores.');
+    const perfil = payload.profile;
+
+    const idCompany = Number(payload.idCompany);
+    if (!Number.isInteger(idCompany) || idCompany <= 0) return badRequest('Escoja la empresa del proyecto.');
+
+    // (b) permiso del módulo en esa empresa. Sin él: 404, como si no existiera.
+    const empresas = await projectModuleCompanies(user.id);
+    if (!empresas.some((e) => e.idCompany === idCompany)) {
+      return jsonNoStore({ error: 'No tiene el módulo «Proyectos» en esa empresa.' }, { status: 404 });
+    }
+
+    // Agentes: asignados a la persona en esa empresa, habilitados y con el perfil.
+    const permitidos = (await designableAgents(user.email, perfil)).get(idCompany) ?? [];
+    const porCodigo = new Map(permitidos.map((a) => [a.code.toLowerCase(), a]));
+    const faltan = codigos.value.filter((c) => !porCodigo.has(c));
+    if (faltan.length > 0) {
+      return jsonNoStore(
+        { error: 'Alguno de los asistentes no está disponible para usted en esa empresa con ese perfil de conectores.' },
+        { status: 403 }
+      );
+    }
+    const agentes = codigos.value.map((c) => porCodigo.get(c)!);
+
+    // Tope de proyectos activos por dueño: cada proyecto despierta sesiones
+    // del modelo, y el consumo sale del plan de cada agente.
+    const propios = await prisma.chatProject.count({
+      where: { archived: false, members: { some: { id_user: user.id, role: 'owner' } } },
+    });
+    if (propios >= MAX_OWNED_PROJECTS) {
+      return jsonNoStore(
+        { error: `Ya es dueño de ${MAX_OWNED_PROJECTS} proyectos activos. Archive uno antes de crear otro.` },
+        { status: 409 }
+      );
+    }
+
+    const creado = await prisma.chatProject.create({
+      data: {
+        name: nombre.value,
+        description: descripcion.value,
+        // «Agente con el que se creó» (columna de la F1). El acceso lo dan
+        // las filas de chat_project_agent.
+        id_agent: agentes[0].idAgent,
+        id_company: idCompany,
+        profile: perfil,
+        instructions: instrucciones.value,
+        created_by: user.id,
+        members: { create: [{ id_user: user.id, role: 'owner', added_by: user.id }] },
+        agents: { create: agentes.map((a) => ({ id_agent: a.idAgent, added_by: user.id })) },
+      },
+      select: { id_project: true },
+    });
+
+    return jsonNoStore({ idProject: creado.id_project }, { status: 201 });
+  } catch (error) {
+    return serverError('POST /api/proyectos', error);
+  }
+}

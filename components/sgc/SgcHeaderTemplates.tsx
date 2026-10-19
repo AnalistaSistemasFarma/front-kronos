@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { Alert, Badge, Button, Card, Group, Image, Loader, Modal, SimpleGrid, Stack, Table, Text, TextInput, Textarea } from '@mantine/core';
 import { IconCheck, IconEdit, IconEye, IconPlus, IconStar } from '@tabler/icons-react';
 import SgcSelect from './SgcSelect';
+import SgcHeaderGridEditor from './SgcHeaderGridEditor';
 import { sgcSend, useSgcFetch } from './useSgcFetch';
 import { useSgcPdfPageImages } from './signature/useSgcPdfPageImages';
 import { formatDateCO } from './tareas/format';
@@ -14,10 +15,11 @@ import { SGC_DEFAULT_HEADER_TEMPLATE, SGC_HEADER_BOTTOM_ROWS, SGC_HEADER_BOTTOM_
  * por defecto y las demás se configuran por tipo). Misma pantalla que
  * «Personas por cargo» y «Aprobadores autorizados» (SgcCargoMembers,
  * SgcApprovers): texto de ayuda, botón arriba y tabla Mantine, con motivo en
- * cada cambio. La geometría del encabezado institucional no cambia (no se
- * mueven los recuadros de firma); se configuran los rótulos y la fila
- * inferior. Cada tipo documental elige su plantilla en «Tipos documentales».
- * Los documentos vigentes no cambian.
+ * cada cambio. Se configuran los rótulos, la fila inferior y (2026-10-19,
+ * fase 1) la GRILLA de la primera página: filas, columnas, celdas combinadas
+ * y el campo de cada celda (SgcHeaderGridEditor); sin grilla, la tabla
+ * institucional. Cada tipo documental elige su plantilla en «Tipos
+ * documentales». Los documentos vigentes no cambian.
  */
 interface Row {
   id: number;
@@ -103,7 +105,7 @@ export default function SgcHeaderTemplates({ idCompany }: { idCompany: number })
     <Card withBorder radius='md' p='lg' shadow='xs' data-testid='sgc-encabezados'>
       <Stack>
         <Text size='sm' c='dimmed'>
-          Plantillas del encabezado institucional por tipo documental (instructivos, formatos, procedimientos y manuales). La tabla del encabezado es la misma; cada plantilla define sus rótulos y la fila inferior. Los tipos sin plantilla propia usan la plantilla por defecto. Los documentos vigentes no cambian: el cambio aplica a los que se aprueben después. Cada cambio queda en el control de cambios con su motivo.
+          Plantillas del encabezado institucional por tipo documental (instructivos, formatos, procedimientos y manuales). Cada plantilla define sus rótulos, la fila inferior y, si se activa, su propia grilla (filas, columnas, celdas combinadas y el campo de cada celda). Los tipos sin plantilla propia usan la plantilla por defecto. Los documentos vigentes no cambian: el cambio aplica a los que se aprueben después. Cada cambio queda en el control de cambios con su motivo.
         </Text>
         {msg && <Alert color={msg.ok ? 'green' : 'red'} data-testid='sgc-encabezados-mensaje'>{msg.text}</Alert>}
         <Group>
@@ -143,6 +145,11 @@ export default function SgcHeaderTemplates({ idCompany }: { idCompany: number })
                     <Text size='xs' c='dimmed' ff='monospace'>
                       {r.code}
                     </Text>
+                    {r.config.grid && (
+                      <Badge size='xs' variant='light' color='teal' mt={2} data-testid='sgc-encabezado-con-grilla'>
+                        Grilla {r.config.grid.rows.length}×{r.config.grid.columns.length}
+                      </Badge>
+                    )}
                   </Table.Td>
                   <Table.Td>
                     <Text size='xs'>{r.documentTypes.length ? r.documentTypes.map((t) => t.code).join(', ') : r.isDefault ? 'Los tipos sin plantilla propia' : '—'}</Text>
@@ -225,6 +232,7 @@ export default function SgcHeaderTemplates({ idCompany }: { idCompany: number })
               />
               <TextInput label='Leyenda (opcional)' description='Si la fila inferior es «Una leyenda propia», es obligatoria.' value={editing.config.legend ?? ''} onChange={(e) => setCfg('legend', e.currentTarget.value)} autoComplete='off' data-testid='sgc-encabezado-leyenda' />
             </Group>
+            <SgcHeaderGridEditor config={editing.config} onChange={(grid) => setEditing({ ...editing, config: { ...editing.config, grid } })} />
             <Group>
               <Button variant='default' leftSection={<IconEye size={14} />} onClick={() => setLivePreview(headerPreviewUrl(idCompany, { config: editing.config }))} data-testid='sgc-encabezado-ver'>
                 Ver cómo queda

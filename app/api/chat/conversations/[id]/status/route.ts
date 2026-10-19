@@ -52,8 +52,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     }));
 
     // En el hilo directo, "el" estado es el del agente del hilo.
+    // En un PROYECTO también hay un solo agente.
     const delHilo =
-      guard.kind === 'direct' ? statuses.find((s) => s.idAgent === guard.idAgent) ?? null : null;
+      guard.kind === 'direct' || guard.kind === 'project'
+        ? statuses.find((s) => s.idAgent === guard.idAgent) ?? null
+        : null;
 
     return jsonNoStore({
       status: delHilo

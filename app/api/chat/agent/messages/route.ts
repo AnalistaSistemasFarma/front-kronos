@@ -99,7 +99,13 @@ export async function POST(request: NextRequest) {
     }
     const fields = payload.fields;
 
-    const conversation = await resolveAgentConversation(agent.idAgent, Number(fields.idConversation));
+    // El alcance de la llave decide la puerta: la del bot vivo nunca escribe en
+    // un proyecto, y la del puente de hilos solo escribe en proyectos.
+    const conversation = await resolveAgentConversation(
+      agent.idAgent,
+      Number(fields.idConversation),
+      agent.scope
+    );
     if (!conversation) {
       return jsonNoStore({ error: 'Conversación no encontrada.' }, { status: 404 });
     }
@@ -252,7 +258,29 @@ export async function POST(request: NextRequest) {
     // respuesta del agente ya está publicada y no debe quedar en vilo porque
     // un endpoint de push esté lento o una suscripción esté vencida. Los
     // errores se registran adentro; nunca se propagan al bot.
-    if (conversation.kind === 'group') {
+    if (conversation.kind === 'project') {
+      // En un PROYECTO se le avisa a sus miembros (la pertenencia sale de
+      // chat_project_member, nunca de chat_participant).
+      const miembros = await prisma.chatProjectMember.findMany({
+        where: { id_project: conversation.idProject },
+        select: { user: { select: { email: true, isActive: true } } },
+      });
+      void notifyAgentReply({
+        idConversation: conversation.id,
+        idUser: null,
+        groupEmails: miembros
+          .filter((m) => m.user.isActive)
+          .map((m) => m.user.email)
+          .filter((e) => e.length > 0),
+        groupTitle: conversation.projectName,
+        url: `/process/proyectos/${conversation.idProject}?conversacion=${conversation.id}`,
+        agentCode: agent.code,
+        agentName: agent.displayName,
+        agentAvatarUrl: agent.avatarUrl,
+        body,
+        attachmentCount: uploaded.length,
+      });
+    } else if (conversation.kind === 'group') {
       // En un grupo se le avisa a todas las personas del grupo. Se resuelven
       // los correos aquí y no dentro del aviso para no meter otra consulta en
       // el camino caliente de la transacción.

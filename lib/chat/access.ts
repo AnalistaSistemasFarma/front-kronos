@@ -1,4 +1,5 @@
 import { prisma } from '../prisma';
+import { projectsEnabledFor } from './projects-rules';
 
 /**
  * Resolución de permisos del módulo "Asistentes IA" (chat de agentes).
@@ -83,6 +84,8 @@ export interface ChatAgentAccess {
    * usted"— y es lo que pinta el aro alrededor del avatar.
    */
   busy: boolean;
+  /** Tiene PROYECTOS habilitados (CHAT_PROJECTS_AGENTS, lib/chat/projects-rules.ts). */
+  projectsEnabled: boolean;
 }
 
 /** Resultado completo de la resolución de permisos del módulo. */
@@ -190,6 +193,7 @@ export async function getChatAccess(userEmail: string): Promise<ChatAccess> {
       companies,
       // Se llena abajo, de una sola consulta para todos.
       busy: false,
+      projectsEnabled: projectsEnabledFor(agent.code),
     });
   }
 

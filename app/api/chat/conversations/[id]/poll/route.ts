@@ -102,8 +102,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // El estado que gobierna la cadencia del sondeo. En el hilo directo es el
     // del agente del hilo; en un grupo, el "más ocupado" de todos: si alguno
     // está trabajando, al usuario le tiene que llegar rápido lo que publique.
+    // Un PROYECTO tiene un solo agente, como el hilo directo.
     const status =
-      guard.kind === 'direct'
+      guard.kind === 'direct' || guard.kind === 'project'
         ? statuses.find((s) => s.idAgent === guard.idAgent) ?? null
         : statuses.find((s) => s.state !== 'idle') ?? null;
 
@@ -124,7 +125,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // Entre personas no hay agente que esperar: la otra persona contesta
     // cuando contesta, y el pulso global (/api/chat/pulse) avisa al instante.
     const awaitingAgent =
-      guard.kind === 'direct'
+      guard.kind === 'direct' || guard.kind === 'project'
         ? lastRole === 'user'
         : guard.kind === 'people'
           ? false
@@ -136,7 +137,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // dejó trabajo en segundo plano): se sondea como si estuviera trabajando,
     // para que la caja anclada de sub-agentes se actualice —y se quite— a
     // tiempo en vez de esperar la cadencia de un hilo quieto.
-    const estadosDeCadencia = guard.kind === 'direct' ? (status ? [status] : []) : statuses;
+    const estadosDeCadencia =
+      guard.kind === 'direct' || guard.kind === 'project' ? (status ? [status] : []) : statuses;
     const conSubagentes = estadosDeCadencia.some((s) => subagentesEnCurso(s).length > 0);
 
     const nextPollMs = computeNextPollMs({

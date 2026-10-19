@@ -44,6 +44,8 @@ export function agentAvatarSrc(agent: {
   return agent.avatarUrl || null;
 }
 
+/* Proyectos: los contratos del módulo están en lib/proyectos/tipos.ts. */
+
 /* ─────────────────────── Buscador de mensajes ──────────────────────────── */
 
 /** Mínimo de caracteres para buscar. Con uno o dos, todo coincide con todo. */
@@ -100,6 +102,11 @@ export interface ChatAgentDto {
    * cada quien.
    */
   busy: boolean;
+  /**
+   * El asistente tiene PROYECTOS (hilos aislados) habilitados — piloto F1,
+   * interruptor CHAT_PROJECTS_AGENTS. Opcional: un servidor viejo no lo manda.
+   */
+  projectsEnabled?: boolean;
 }
 
 export interface ChatAccessDto {

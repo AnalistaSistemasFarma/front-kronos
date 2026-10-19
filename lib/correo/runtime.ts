@@ -64,5 +64,7 @@ export function correoDeps(): CorreoDeps {
     subirAdjuntos,
     dominiosGrupo: dominiosGrupo(),
     appBaseUrl: appBaseUrl(),
+    // Firma el comprobante de «Deshacer» (lib/correo/eliminar.ts); el valor nunca sale del servidor.
+    secretoFirma: process.env.NEXTAUTH_SECRET,
   };
 }
