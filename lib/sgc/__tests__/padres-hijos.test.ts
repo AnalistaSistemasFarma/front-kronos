@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildChildCode, buildChildCodeRoot, nextChildSequence, parentNumberOf, validateCodingGuide, type SgcCodingGuideInput } from '../coding';
 import {
   buildDocumentTree,
+  defaultParentTypesToKeep,
   filterTree,
   findListedParent,
   hierarchyOf,
@@ -197,5 +198,24 @@ describe('SGC · padres e hijos · árbol documental', () => {
     expect(filterTree(tree.roots, 'ggc-02').map((r) => r.doc.code)).toEqual(['OLP-GGC-02-PR']);
     expect(filterTree(tree.roots, '')).toHaveLength(3);
     expect(filterTree(tree.roots, 'no-existe')).toEqual([]);
+  });
+});
+
+describe('SGC · padres e hijos · el procedimiento sigue siendo padre al marcar el primer tipo (2026-10-19)', () => {
+  const t = (id: number, code: string, name: string, isParentType = false, isActive = true) => ({ id, code, name, isParentType, isActive });
+  const olp = [t(1, 'MN', 'Manual'), t(2, 'PR', 'Procedimiento'), t(3, 'FR', 'Formato'), t(4, 'IN', 'Instructivo')];
+
+  it('[SGC-REQ-180] al marcar el primer tipo (el Manual), el procedimiento queda marcado también', () => {
+    expect(defaultParentTypesToKeep(olp, 1).map((x) => x.code)).toEqual(['PR']);
+    // Con eso, los formatos e instructivos siguen pudiendo colgar del procedimiento.
+    expect(parentTypeCodesOf([t(1, 'MN', 'Manual', true), t(2, 'PR', 'Procedimiento', true)]).sort()).toEqual(['MN', 'PR']);
+  });
+
+  it('[SGC-REQ-180] no aplica si ya había un tipo marcado, si se marca el propio procedimiento o si el procedimiento está inactivo', () => {
+    expect(defaultParentTypesToKeep([t(1, 'MN', 'Manual'), t(2, 'PR', 'Procedimiento'), t(5, 'PL', 'Plan', true)], 1)).toEqual([]);
+    expect(defaultParentTypesToKeep(olp, 2)).toEqual([]);
+    expect(defaultParentTypesToKeep([t(1, 'MN', 'Manual'), t(2, 'PR', 'Procedimiento', false, false)], 1)).toEqual([]);
+    // Un procedimiento reconocido por su nombre (otro código) también se conserva.
+    expect(defaultParentTypesToKeep([t(1, 'MA', 'Manual'), t(7, 'PO', 'Procedimiento operativo')], 1).map((x) => x.code)).toEqual(['PO']);
   });
 });
