@@ -13,8 +13,9 @@
  * Solo entra quien completó al menos un curso. No se cuentan formadores ni administradores (marcan y restablecen cursos, y sus
  * propias pruebas distorsionarían la tabla).
  *
- * PRIVACIDAD: lo que sale hacia el navegador es el NOMBRE, los cursos completados y la nota. Nunca el correo, la cédula ni el detalle
- * de cada evaluación. Este archivo es PURO (sin red ni base).
+ * PRIVACIDAD (Cristian, 2026-10-16: «solo el nombre del estudiante»): lo que sale hacia el navegador es el PUESTO y el NOMBRE. Los cursos
+ * completados y la nota SOLO deciden el orden: no se muestran ni viajan. Nunca el correo, la cédula ni el detalle de las evaluaciones.
+ * Este archivo es PURO (sin red ni base).
  */
 
 export const TOPE_TOP = 10;
@@ -46,8 +47,6 @@ export interface EntradaRanking {
 export interface FilaTop {
   puesto: number;
   nombre: string;
-  cursos: number;
-  nota: number | null;
   /** La fila es de quien está mirando la tabla (se resalta; el correo nunca viaja). */
   esUsted: boolean;
 }
@@ -122,7 +121,7 @@ export function armarRanking(params: {
 /** Lo que se le entrega a quien mira: el top y, si no está en él, su propio puesto. Sin correos. */
 export function vistaPublica(ranking: EntradaRanking[], correoUsuario: string, tope = TOPE_TOP): VistaRanking {
   const yo = minusculas(correoUsuario);
-  const fila = (e: EntradaRanking, i: number): FilaTop => ({ puesto: i + 1, nombre: e.nombre, cursos: e.cursos, nota: e.nota, esUsted: e.correo === yo });
+  const fila = (e: EntradaRanking, i: number): FilaTop => ({ puesto: i + 1, nombre: e.nombre, esUsted: e.correo === yo });
   const top = ranking.slice(0, tope).map(fila);
   const idx = ranking.findIndex((e) => e.correo === yo);
   return { top, total: ranking.length, usted: idx >= tope ? fila(ranking[idx], idx) : null };
@@ -131,10 +130,4 @@ export function vistaPublica(ranking: EntradaRanking[], correoUsuario: string, t
 /** «Oro», «Plata» o «Bronce» para los tres primeros puestos; null para el resto. */
 export function medallaDelPuesto(puesto: number): 'oro' | 'plata' | 'bronce' | null {
   return puesto === 1 ? 'oro' : puesto === 2 ? 'plata' : puesto === 3 ? 'bronce' : null;
-}
-
-/** «92 %» o «92,5 %» (coma decimal, como en Colombia); «—» si no hay nota. */
-export function textoNota(nota: number | null): string {
-  if (nota === null) return '—';
-  return `${String(nota).replace('.', ',')} %`;
 }
