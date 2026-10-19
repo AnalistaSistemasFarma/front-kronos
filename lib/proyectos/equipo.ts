@@ -53,10 +53,10 @@ import {
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
-const agenteMini = { id_agent: true, code: true, display_name: true, handle: true, avatar_url: true, avatar_version: true } as const;
-type FilaAgente = { id_agent: number; code: string; display_name: string; handle: string | null; avatar_url: string | null; avatar_version: number | null };
+const agenteMini = { id_agent: true, code: true, display_name: true, handle: true, avatar_url: true, avatar_updated_at: true } as const;
+type FilaAgente = { id_agent: number; code: string; display_name: string; handle: string | null; avatar_url: string | null; avatar_updated_at: Date | null };
 function aAgenteMini(a: FilaAgente): AgenteMiniDto {
-  return { idAgent: a.id_agent, code: a.code, displayName: a.display_name, handle: a.handle, avatarUrl: a.avatar_url, avatarVersion: a.avatar_version };
+  return { idAgent: a.id_agent, code: a.code, displayName: a.display_name, handle: a.handle, avatarUrl: a.avatar_url, avatarVersion: a.avatar_updated_at ? a.avatar_updated_at.getTime() : null };
 }
 
 /** Fila de auditoría del equipo (solo INSERT). */
