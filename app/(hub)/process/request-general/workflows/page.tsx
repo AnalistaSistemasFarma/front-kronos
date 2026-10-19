@@ -139,6 +139,8 @@ function RequestBoard() {
       secuencial: boolean;
       esAutorizacion: boolean;
       tipoAutorizacion: string;
+      esFlujoVinculado: boolean;
+      flujoVinculado: string;
       condition_option_temps: string[];
     }>
   >([]);
@@ -150,6 +152,8 @@ function RequestBoard() {
     secuencial: false,
     esAutorizacion: false,
     tipoAutorizacion: '',
+    esFlujoVinculado: false,
+    flujoVinculado: '',
     condition_option_temps: [] as string[],
   });
   const [authorizationTypeOptions, setAuthorizationTypeOptions] = useState<
@@ -392,6 +396,7 @@ function RequestBoard() {
   const addTask = () => {
     if (!taskForm.tarea.trim()) return;
     if (taskForm.esAutorizacion && !taskForm.tipoAutorizacion) return;
+    if (taskForm.esFlujoVinculado && (!taskForm.flujoVinculado || !taskForm.asignado)) return;
 
     setTasks([
       ...tasks,
@@ -404,6 +409,8 @@ function RequestBoard() {
         secuencial: taskForm.secuencial,
         esAutorizacion: taskForm.esAutorizacion,
         tipoAutorizacion: taskForm.esAutorizacion ? taskForm.tipoAutorizacion : '',
+        esFlujoVinculado: taskForm.esFlujoVinculado,
+        flujoVinculado: taskForm.esFlujoVinculado ? taskForm.flujoVinculado : '',
         condition_option_temps: taskForm.condition_option_temps,
       },
     ]);
@@ -416,6 +423,8 @@ function RequestBoard() {
       secuencial: false,
       esAutorizacion: false,
       tipoAutorizacion: '',
+      esFlujoVinculado: false,
+      flujoVinculado: '',
       condition_option_temps: [],
     });
 
@@ -898,6 +907,9 @@ function RequestBoard() {
         type_authorization: task.esAutorizacion
           ? Number(task.tipoAutorizacion) || null
           : null,
+        id_linked_process: task.esFlujoVinculado
+          ? Number(task.flujoVinculado) || null
+          : null,
         condition_option_temps: task.condition_option_temps,
       }));
 
@@ -982,7 +994,7 @@ function RequestBoard() {
         isExternal: false,
       });
       setTasks([]);
-      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '', condition_option_temps: [] });
+      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '', esFlujoVinculado: false, flujoVinculado: '', condition_option_temps: [] });
       setRequiresFiles(false);
       setRequiredFiles([]);
       setFileForm({ file_label: '', required: true, condition_option_temps: [] });
@@ -1416,7 +1428,7 @@ function RequestBoard() {
             setCurrentStep(1);
             setFormErrors({});
             setTasks([]);
-            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '', condition_option_temps: [] });
+            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '', esFlujoVinculado: false, flujoVinculado: '', condition_option_temps: [] });
             setRequiresFiles(false);
             setRequiredFiles([]);
             setFileForm({ file_label: '', required: true, condition_option_temps: [] });
@@ -1890,7 +1902,8 @@ function RequestBoard() {
                           mt={26}
                           disabled={
                             !taskForm.tarea.trim() ||
-                            (taskForm.esAutorizacion && !taskForm.tipoAutorizacion)
+                            (taskForm.esAutorizacion && !taskForm.tipoAutorizacion) ||
+                            (taskForm.esFlujoVinculado && (!taskForm.flujoVinculado || !taskForm.asignado))
                           }
                           className='cursor-pointer hover:bg-blue-700 transition-colors duration-200'
                           size='lg'
@@ -1911,6 +1924,7 @@ function RequestBoard() {
                       mt='sm'
                       label='Tarea de autorización'
                       checked={taskForm.esAutorizacion}
+                      disabled={taskForm.esFlujoVinculado}
                       onChange={(e) =>
                         setTaskForm({
                           ...taskForm,
@@ -1919,6 +1933,43 @@ function RequestBoard() {
                         })
                       }
                     />
+
+                    <Checkbox
+                      mt='sm'
+                      label='Lanza otro flujo (el asignado crea una solicitud de ese flujo y esta tarea se cierra cuando esa solicitud se cierre)'
+                      checked={taskForm.esFlujoVinculado}
+                      disabled={taskForm.esAutorizacion}
+                      onChange={(e) =>
+                        setTaskForm({
+                          ...taskForm,
+                          esFlujoVinculado: e.currentTarget.checked,
+                          flujoVinculado: e.currentTarget.checked ? taskForm.flujoVinculado : '',
+                        })
+                      }
+                    />
+
+                    {taskForm.esFlujoVinculado && (
+                      <Select
+                        mt='sm'
+                        label='Flujo a lanzar'
+                        placeholder='Seleccione el proceso'
+                        data={processesWF}
+                        value={taskForm.flujoVinculado}
+                        onChange={(value) =>
+                          setTaskForm({ ...taskForm, flujoVinculado: value || '' })
+                        }
+                        searchable
+                        withAsterisk
+                        error={
+                          taskForm.esFlujoVinculado && !taskForm.flujoVinculado
+                            ? 'Selecciona el flujo a lanzar'
+                            : taskForm.esFlujoVinculado && !taskForm.asignado
+                              ? 'La tarea vinculada requiere un asignado'
+                              : undefined
+                        }
+                        maw={400}
+                      />
+                    )}
 
                     {taskForm.esAutorizacion && (
                       <Select
@@ -2054,6 +2105,12 @@ function RequestBoard() {
                                     {authorizationTypeOptions.find(
                                       (o) => o.value === task.tipoAutorizacion
                                     )?.label || 'Autorización'}
+                                  </Badge>
+                                ) : task.esFlujoVinculado ? (
+                                  <Badge color='grape' variant='light' size='sm'>
+                                    Flujo: {processesWF.find(
+                                      (o) => o.value === task.flujoVinculado
+                                    )?.label || 'Vinculado'}
                                   </Badge>
                                 ) : (
                                   <Text size='sm' c='dimmed'>—</Text>
@@ -2545,7 +2602,7 @@ function RequestBoard() {
                   setCurrentStep(1);
                   setFormErrors({});
                   setTasks([]);
-                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '', condition_option_temps: [] });
+                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '', esFlujoVinculado: false, flujoVinculado: '', condition_option_temps: [] });
                 }
               }}
               size='md'
