@@ -14,6 +14,7 @@ import type {
   MensajeResumen,
   PaginaMensajes,
   RespuestaEntrada,
+  UbicacionMensaje,
 } from './types';
 
 /**
@@ -210,6 +211,19 @@ function dir(a: GraphAddr): Direccion {
 }
 
 type GraphMsg = Record<string, unknown>;
+
+/** Sub-petición de `$batch` (ruta RELATIVA de rutaMensaje, siempre del buzón de la sesión). */
+interface SubPeticionLote {
+  id: string;
+  method: 'GET' | 'PATCH' | 'POST';
+  url: string;
+  body?: unknown;
+}
+interface RespuestaLote {
+  status: number;
+  retryAfter: number;
+  body: GraphMsg | null;
+}
 export function aResumen(m: GraphMsg): MensajeResumen {
   return {
     id: String(m.id ?? ''),
@@ -530,60 +544,117 @@ export class GraphMailProvider implements MailProvider {
   /**
    * Graph `$batch` (POST /v1.0/$batch). Es la ÚNICA llamada fuera de /users/{buzón}: por eso solo acepta
    * sub-peticiones armadas con rutaMensaje (todas del buzón de la sesión) y vuelve a validarlas aquí.
+   * `idempotente`: un lote de GET o PATCH se puede repetir ante un 503; uno de `move` (POST) no.
    */
-  private async lote(peticiones: Array<{ id: string; method: 'PATCH'; url: string; body: unknown }>): Promise<Map<string, { status: number; retryAfter: number }>> {
+  private async lote(peticiones: SubPeticionLote[], idempotente: boolean): Promise<Map<string, RespuestaLote>> {
     if (peticiones.length === 0 || peticiones.length > GRAPH_BATCH_MAX) throw new CorreoError('Lote de Graph inválido.', 500);
     for (const p of peticiones) if (!urlDelBuzon(`${GRAPH_BASE}${p.url}`, this.mailbox)) throw new CorreoError('Destino de Graph no permitido.', 500);
     const token = await this.token();
-    // Un lote de PATCH es idempotente: se reintenta igual que un GET.
     const res = await this.enviar(
       `${GRAPH_BASE}/$batch`,
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requests: peticiones.map((p) => ({ ...p, headers: { 'Content-Type': 'application/json' } })) }),
+        body: JSON.stringify({
+          requests: peticiones.map((p) => (p.body === undefined ? { id: p.id, method: p.method, url: p.url } : { ...p, headers: { 'Content-Type': 'application/json' } })),
+        }),
       },
-      true
+      idempotente
     );
     if (res.status === 401) throw new CorreoError('Microsoft rechazó la autenticación del módulo Correo. Avise a Tecnología.', 502);
     if (res.status === 403) throw new CorreoError('Microsoft no autorizó la operación (permiso de la app o política del buzón). Avise a Tecnología.', 403);
     if (res.status === 429) throw errorLimitado(res);
     if (!res.ok) throw new CorreoError(`Microsoft respondió con un error (${res.status}).`, 502);
-    const data = (await res.json()) as { responses?: Array<{ id?: string; status?: number; headers?: Record<string, string> }> };
-    const out = new Map<string, { status: number; retryAfter: number }>();
+    const data = (await res.json()) as { responses?: Array<{ id?: string; status?: number; headers?: Record<string, string>; body?: unknown }> };
+    const out = new Map<string, RespuestaLote>();
     for (const r of data.responses ?? []) {
       const ra = Number(r.headers?.['Retry-After'] ?? r.headers?.['retry-after']) || 0;
-      out.set(String(r.id), { status: Number(r.status) || 0, retryAfter: ra });
+      out.set(String(r.id), { status: Number(r.status) || 0, retryAfter: ra, body: r.body && typeof r.body === 'object' ? (r.body as GraphMsg) : null });
     }
     return out;
   }
 
-  async marcarLeido(mensajesIds: string[], leido: boolean): Promise<{ cambiados: number; fallidos: number }> {
-    const rutas = [...new Set(mensajesIds)].map((id) => this.rutaMensaje(id));
-    let cambiados = 0;
-    let fallidos = 0;
-    for (let i = 0; i < rutas.length; i += GRAPH_BATCH_MAX) {
-      let pendientes = rutas.slice(i, i + GRAPH_BATCH_MAX).map((url, j) => ({ id: String(j + 1), method: 'PATCH' as const, url, body: { isRead: leido } }));
-      // Las sub-peticiones limitadas (429/503; Exchange admite 4 simultáneas por buzón) se reintentan con la
-      // misma política que el resto (hasta 3 veces, respetando Retry-After con retroceso y jitter).
-      const politica = this.opciones.politica ?? POLITICA_GRAPH;
-      const dormir = this.opciones.dormir ?? ((ms: number) => new Promise<void>((x) => setTimeout(x, ms)));
+  /**
+   * Sub-peticiones en lotes de 20; las limitadas (429, y 503 si es idempotente; Exchange admite 4 simultáneas por
+   * buzón) se reintentan con la misma política que el resto (hasta 3 veces, respetando Retry-After con retroceso y
+   * jitter). Devuelve la respuesta FINAL de cada sub-petición por su id.
+   */
+  private async lotes(peticiones: SubPeticionLote[], idempotente: boolean): Promise<Map<string, RespuestaLote>> {
+    const politica = this.opciones.politica ?? POLITICA_GRAPH;
+    const dormir = this.opciones.dormir ?? ((ms: number) => new Promise<void>((x) => setTimeout(x, ms)));
+    const finales = new Map<string, RespuestaLote>();
+    for (let i = 0; i < peticiones.length; i += GRAPH_BATCH_MAX) {
+      let pendientes = peticiones.slice(i, i + GRAPH_BATCH_MAX);
       for (let intento = 0; pendientes.length; intento++) {
         const ultimo = intento >= politica.reintentos;
-        const r = await this.lote(pendientes);
-        const limitadas = pendientes.filter((p) => esReintentable(r.get(p.id)?.status ?? 0, true));
-        for (const p of pendientes) {
-          const st = r.get(p.id)?.status ?? 0;
-          if (st >= 200 && st < 300) cambiados++;
-          else if (!esReintentable(st, true) || ultimo) fallidos++;
-        }
-        if (!limitadas.length || ultimo) break;
+        const r = await this.lote(pendientes, idempotente);
+        const limitadas = ultimo ? [] : pendientes.filter((p) => esReintentable(r.get(p.id)?.status ?? 0, idempotente));
+        for (const p of pendientes) if (!limitadas.includes(p)) finales.set(p.id, r.get(p.id) ?? { status: 0, retryAfter: 0, body: null });
+        if (!limitadas.length) break;
         const ra = Math.max(0, ...limitadas.map((p) => r.get(p.id)?.retryAfter ?? 0));
         await dormir(Math.min(politica.maxEsperaMs, esperaReintento(intento, ra ? ra * 1000 : null, politica)));
         pendientes = limitadas;
       }
     }
-    return { cambiados, fallidos };
+    return finales;
+  }
+
+  async marcarLeido(mensajesIds: string[], leido: boolean): Promise<{ cambiados: number; fallidos: number }> {
+    const subs = [...new Set(mensajesIds)].map((id, j) => ({ id: String(j + 1), method: 'PATCH' as const, url: this.rutaMensaje(id), body: { isRead: leido } }));
+    const r = await this.lotes(subs, true);
+    let cambiados = 0;
+    for (const p of subs) {
+      const st = r.get(p.id)?.status ?? 0;
+      if (st >= 200 && st < 300) cambiados++;
+    }
+    return { cambiados, fallidos: subs.length - cambiados };
+  }
+
+  /**
+   * Eliminar · pertenencia: cada id se consulta en /users/{buzón de la sesión}/messages/{id} (por `$batch`). Un id
+   * de otro buzón no existe ahí (404 → null): nunca se mueve un correo que no sea de la persona.
+   */
+  async ubicarMensajes(mensajesIds: string[]): Promise<Map<string, UbicacionMensaje | null>> {
+    const unicos = [...new Set(mensajesIds)];
+    const subs = unicos.map((id, j) => ({ id: String(j + 1), method: 'GET' as const, url: `${this.rutaMensaje(id)}?$select=id,parentFolderId,conversationId,internetMessageId,isRead` }));
+    const r = await this.lotes(subs, true);
+    const out = new Map<string, UbicacionMensaje | null>();
+    unicos.forEach((id, j) => {
+      const res = r.get(String(j + 1));
+      const b = res?.body;
+      const ok = res && res.status >= 200 && res.status < 300 && b && typeof b.parentFolderId === 'string' && String(b.id ?? id) === id;
+      out.set(
+        id,
+        ok
+          ? { carpetaId: String(b.parentFolderId), conversationId: String(b.conversationId ?? ''), internetMessageId: String(b.internetMessageId ?? ''), leido: Boolean(b.isRead) }
+          : null
+      );
+    });
+    return out;
+  }
+
+  async idCarpetaEliminados(): Promise<string> {
+    const c = await this.json<{ id?: string }>(`${this.me}/mailFolders/deleteditems?$select=id`);
+    return assertGraphId(String(c.id ?? ''), 'identificador de carpeta');
+  }
+
+  /**
+   * Graph `POST /messages/{id}/move` por `$batch`: el destino es una carpeta DEL MISMO BUZÓN (`deleteditems` o el
+   * id de la carpeta de origen al deshacer). No se reintenta un 503 (podría haberse movido ya); un 429 sí (no se
+   * procesó). Graph responde el mensaje movido con su id NUEVO.
+   */
+  async moverMensajes(mensajesIds: string[], destinoId: string): Promise<Map<string, string | null>> {
+    const destino = destinoId === 'deleteditems' ? destinoId : assertGraphId(destinoId, 'identificador de carpeta');
+    const unicos = [...new Set(mensajesIds)];
+    const subs = unicos.map((id, j) => ({ id: String(j + 1), method: 'POST' as const, url: `${this.rutaMensaje(id)}/move`, body: { destinationId: destino } }));
+    const r = await this.lotes(subs, false);
+    const out = new Map<string, string | null>();
+    unicos.forEach((id, j) => {
+      const res = r.get(String(j + 1));
+      const nuevo = res && res.status >= 200 && res.status < 300 && typeof res.body?.id === 'string' ? res.body.id : null;
+      out.set(id, nuevo && ID_RE.test(nuevo) ? nuevo : null);
+    });
+    return out;
   }
 
   private urlCarpeta(carpetaId: string | null): string {

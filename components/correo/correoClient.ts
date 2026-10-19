@@ -18,13 +18,34 @@ export interface EstadoCorreo {
     correo: string;
     envioHabilitado: boolean;
     etiquetarHabilitado: boolean;
+    /** Eliminar (mover a Elementos eliminados con «Deshacer»): escritura y CORREO_ELIMINAR_HABILITADO. */
+    eliminarHabilitado?: boolean;
     sincronizacionAutomatica: boolean;
     /** «Consultar a un agente» encendido en el ambiente (CORREO_AGENTE_HABILITADO). */
     agenteHabilitado?: boolean;
   };
 }
 
-export type MensajeLista = MensajeResumen & { solicitud: number | null };
+/** `proyectos`: proyectos del chat donde se vinculó el hilo (se avisa antes de eliminarlo). */
+export type MensajeLista = MensajeResumen & { solicitud: number | null; proyectos?: string[] };
+
+/** Hilo vinculado que se iba a eliminar (409 VINCULADO): se pide confirmación. */
+export interface VinculoEliminar {
+  mensajeId: string;
+  conversationId: string;
+  idRequest: number | null;
+  proyectos: string[];
+}
+
+export interface ResultadoEliminar {
+  /** id pedido → id nuevo en Elementos eliminados (Graph cambia el id al mover). */
+  eliminados: Array<{ id: string; nuevoId: string }>;
+  yaEnEliminados: string[];
+  fallidos: string[];
+  /** Comprobante firmado por el servidor para «Deshacer». */
+  deshacer: string | null;
+  venceEn: string | null;
+}
 
 export interface MensajeVista {
   id: string;
@@ -162,6 +183,20 @@ export const correoApi = {
   /** Un lote de «Marcar todo» (200): repetir mientras `restantes` > 0. carpeta null = Bandeja de entrada. */
   marcarCarpeta: (carpeta: string | null, leido: boolean) =>
     post<{ cambiados: number; fallidos: number; restantes: number }>('/api/correo/leido/carpeta', { carpeta, leido }),
+  /**
+   * Eliminar = MOVER a Elementos eliminados (nunca borra). Si algún hilo está vinculado y no se confirmó, el
+   * servidor responde 409 VINCULADO y aquí se devuelve `{ vinculados }` para pedir la confirmación.
+   */
+  eliminar: async (mensajesIds: string[], confirmarVinculados = false): Promise<{ resultado: ResultadoEliminar } | { vinculados: VinculoEliminar[] }> => {
+    const res = await fetch('/api/correo/eliminar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mensajesIds, confirmarVinculados }) });
+    if (res.status === 409) {
+      const b = (await res.clone().json().catch(() => ({}))) as { code?: string; vinculos?: VinculoEliminar[] };
+      if (b.code === 'VINCULADO' && Array.isArray(b.vinculos)) return { vinculados: b.vinculos };
+    }
+    return { resultado: await leer<ResultadoEliminar>(res) };
+  },
+  /** «Deshacer» del aviso: devuelve a su carpeta los correos del comprobante. */
+  deshacerEliminar: (deshacer: string) => post<{ restaurados: Array<{ id: string; nuevoId: string }>; fallidos: string[] }>('/api/correo/eliminar/deshacer', { deshacer }),
   notas: (conversationId: string) => post<{ agregadas: number; idRequest: number }>('/api/correo/hilo/notas', { conversationId }),
   vincular: (conversationId: string, idRequest: number, acuse?: OpcionesAcuse) =>
     post<{ vinculo: VinculoHilo; acuse?: ResultadoAcuse }>('/api/correo/hilo/vincular', { conversationId, idRequest, ...(acuse ? { acuse } : {}) }),

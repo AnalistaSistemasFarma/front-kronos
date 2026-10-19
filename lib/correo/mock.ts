@@ -12,8 +12,20 @@ import type { ArchivoAdjunto, Carpeta, FiltrosBandeja, MailProvider, MensajeComp
 
 const PDF_MIN = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n', 'utf8');
 
+/** Carpetas del buzón simulado. */
+const INBOX = 'mock-folder-inboxAAAA';
+const ENVIADOS = 'mock-folder-sentAAAA';
+const ELIMINADOS = 'mock-folder-deletedAAAA';
+/**
+ * Graph le cambia el id a un mensaje al moverlo; el simulado también (sufijo reversible), para que la
+ * bandeja y «Deshacer» trabajen con el id nuevo igual que en producción.
+ */
+const SUFIJO_ELIMINADO = '-ELIM';
+
 interface Estado {
   mensajes: MensajeCompleto[];
+  /** Carpeta de cada mensaje (por id); sin entrada = Bandeja de entrada. */
+  carpeta: Map<string, string>;
   enviados: Array<{ mensajeId: string; todos: boolean; texto: string; adjuntos: string[]; html?: string; comentarioHtml?: string }>;
 }
 
@@ -58,7 +70,7 @@ function semilla(yo: string): Estado {
     msg(4, { conv: '03', asunto: 'Consulta sobre marca registrada', de: ['Asesor Externo', 'asesor@externo-ejemplo.com'], dias: 3, hora: 16, adjuntos: true, html: '<p>Remito el estado de la solicitud de registro de marca.</p>' }, yo),
     msg(5, { conv: '04', asunto: 'Otrosí contrato de mantenimiento', de: ['Usuario de Prueba Uno', 'prueba.uno@gsslatam.com'], dias: 5, hora: 12, leido: true, html: '<p>Necesitamos un otrosí para ampliar el plazo del contrato de mantenimiento.</p>' }, yo),
   ];
-  return { mensajes, enviados: [] };
+  return { mensajes, enviados: [], carpeta: new Map() };
 }
 
 function estado(yo: string): Estado {
@@ -88,20 +100,29 @@ export class MockMailProvider implements MailProvider {
     return { correo: this.yo.toLowerCase() };
   }
 
+  private carpetaDe(m: MensajeCompleto): string {
+    return estado(this.yo).carpeta.get(m.id) ?? INBOX;
+  }
+
   async carpetas(): Promise<Carpeta[]> {
     const ms = estado(this.yo).mensajes;
+    const de = (id: string) => ms.filter((m) => this.carpetaDe(m) === id);
+    const cuenta = (id: string) => ({ total: de(id).length, noLeidos: de(id).filter((m) => !m.leido).length });
     return [
-      { id: 'mock-folder-inboxAAAA', nombre: 'Bandeja de entrada', total: ms.length, noLeidos: ms.filter((m) => !m.leido).length },
-      { id: 'mock-folder-sentAAAA', nombre: 'Elementos enviados', total: 0, noLeidos: 0 },
+      { id: INBOX, nombre: 'Bandeja de entrada', ...cuenta(INBOX) },
+      { id: ENVIADOS, nombre: 'Elementos enviados', total: 0, noLeidos: 0 },
+      { id: ELIMINADOS, nombre: 'Elementos eliminados', ...cuenta(ELIMINADOS) },
     ];
   }
 
   async mensajes(filtros: FiltrosBandeja, cursor?: string | null): Promise<PaginaMensajes> {
     const f = normalizarFiltros(filtros);
-    if (f.carpetaId === 'mock-folder-sentAAAA') return { mensajes: [], siguiente: null };
+    if (f.carpetaId === ENVIADOS) return { mensajes: [], siguiente: null };
+    const carpeta = f.carpetaId ?? INBOX;
     const desde = cursor ? Number(Buffer.from(cursor, 'base64url').toString('utf8').replace(/^\D+/, '')) || 0 : 0;
     const lista = estado(this.yo)
       .mensajes.filter((m) => {
+        if (this.carpetaDe(m) !== carpeta) return false;
         const dia = m.fecha.slice(0, 10);
         if (f.desde && dia < f.desde) return false;
         if (f.hasta && dia > f.hasta) return false;
@@ -179,7 +200,40 @@ export class MockMailProvider implements MailProvider {
   }
 
   private deCarpeta(carpetaId: string | null) {
-    return carpetaId === 'mock-folder-sentAAAA' ? [] : estado(this.yo).mensajes;
+    const id = carpetaId ?? INBOX;
+    return estado(this.yo).mensajes.filter((m) => this.carpetaDe(m) === id);
+  }
+
+  async ubicarMensajes(mensajesIds: string[]) {
+    const out = new Map<string, { carpetaId: string; conversationId: string; internetMessageId: string; leido: boolean } | null>();
+    for (const id of new Set(mensajesIds)) {
+      const m = estado(this.yo).mensajes.find((x) => x.id === id);
+      out.set(id, m ? { carpetaId: this.carpetaDe(m), conversationId: m.conversationId, internetMessageId: m.internetMessageId, leido: m.leido } : null);
+    }
+    return out;
+  }
+
+  async idCarpetaEliminados(): Promise<string> {
+    return ELIMINADOS;
+  }
+
+  async moverMensajes(mensajesIds: string[], destinoId: string): Promise<Map<string, string | null>> {
+    const e = estado(this.yo);
+    const destino = destinoId === 'deleteditems' ? ELIMINADOS : destinoId;
+    const out = new Map<string, string | null>();
+    for (const id of new Set(mensajesIds)) {
+      const m = e.mensajes.find((x) => x.id === id);
+      if (!m || ![INBOX, ENVIADOS, ELIMINADOS].includes(destino)) {
+        out.set(id, null);
+        continue;
+      }
+      e.carpeta.delete(m.id);
+      const base = m.id.endsWith(SUFIJO_ELIMINADO) ? m.id.slice(0, -SUFIJO_ELIMINADO.length) : m.id;
+      m.id = destino === ELIMINADOS ? `${base}${SUFIJO_ELIMINADO}` : base;
+      if (destino !== INBOX) e.carpeta.set(m.id, destino);
+      out.set(id, m.id);
+    }
+    return out;
   }
 
   async idsPorLeido(carpetaId: string | null, leido: boolean, max: number): Promise<string[]> {
