@@ -41,7 +41,7 @@ async function contextFor(db: SgcDb, idCompany: number, now: Date): Promise<SgcM
   return {
     guide: guide ? guideInputOf(guide) : null,
     processes: new Map(processes.map((p) => [p.code.toUpperCase(), { id: p.id_process_map, processTypeCode: p.processType.code, idDepartment: p.id_department }])),
-    documentTypes: new Map(types.map((t) => [t.code.toUpperCase(), { id: t.id_document_type }])),
+    documentTypes: new Map(types.map((t) => [t.code.toUpperCase(), { id: t.id_document_type, name: t.name, pluralName: t.plural_name }])),
     existing: new Map(docs.map((d) => [d.code.toUpperCase(), { sequence: d.sequence_number, processCode: d.process.code, processTypeCode: d.process.processType.code, documentTypeCode: d.documentType.code }])),
     today: todayCO(now),
   };

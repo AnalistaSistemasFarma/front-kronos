@@ -1,7 +1,7 @@
-import type { PrismaClient } from '../../../app/generated/prisma';
+import type { Prisma, PrismaClient } from '../../../app/generated/prisma';
 import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../audit';
 import { getMasterCodeError, parseChildTypeCodes, validateCodingGuide } from '../coding';
-import { parentTypeCodesOf } from '../hierarchy';
+import { defaultParentTypesToKeep, parentTypeCodesOf } from '../hierarchy';
 import { SgcError, isUniqueViolation } from '../errors';
 import { normalizeDraftExtensions, parseDraftExtensions } from '../headerTemplates';
 
@@ -322,8 +322,19 @@ export async function saveCatalogEntry(
       if (body.generatorGuide !== undefined) extra.generator_guide = boolOr(body.generatorGuide, false);
       // 2026-10-19: tipo «padre» (procedimiento): sus documentos no tienen padre.
       if (body.isParentType !== undefined) extra.is_parent_type = boolOr(body.isParentType, false);
+      // 2026-10-19: tipos de la empresa ANTES del cambio (para conservar el procedimiento como padre al marcar el primero).
+      const typesBefore = extra.is_parent_type
+        ? (await tx.sgcDocumentType.findMany({ where: { id_company: idCompany }, select: { id_document_type: true, code: true, name: true, is_active: true, is_parent_type: true } })).map((t) => ({
+            id: t.id_document_type,
+            code: t.code,
+            name: t.name,
+            isActive: t.is_active,
+            isParentType: t.is_parent_type,
+          }))
+        : [];
       if (id === null) {
         const saved = await tx.sgcDocumentType.create({ data: { id_company: idCompany, ...data, ...extra } });
+        if (extra.is_parent_type) await keepDefaultParentTypes(tx, idCompany, typesBefore, saved.id_document_type, saved.code, reason, actor);
         await audit(SGC_AUDIT_ACTIONS.maestroCreado, 'document_type', saved.id_document_type, null, saved);
         return saved;
       }
@@ -396,12 +407,60 @@ export async function saveCatalogEntry(
             user_agent: actor.userAgent ?? null,
           },
         });
+        if (extra.is_parent_type) await keepDefaultParentTypes(tx, idCompany, typesBefore, id, saved.code, reason, actor);
       }
       return saved;
     });
   } catch (error) {
     if (isUniqueViolation(error)) throw new SgcError('Ya existe un registro con ese código en la empresa.', 409);
     throw error;
+  }
+}
+
+/**
+ * 2026-10-19: al marcar el PRIMER tipo «padre», el procedimiento (padre por
+ * defecto hasta ese momento) queda marcado también, con su propia línea en el
+ * control de cambios. Es ADITIVO: nada cambia para quien ya tenía tipos
+ * marcados, y Calidad puede desmarcar el procedimiento después si lo quiere.
+ * Si el procedimiento tiene documentos que ya cuelgan de un padre, no se marca
+ * (regla «el padre no tiene padre») y se deja igual que antes.
+ */
+async function keepDefaultParentTypes(
+  tx: Prisma.TransactionClient,
+  idCompany: number,
+  typesBefore: Parameters<typeof defaultParentTypesToKeep>[0],
+  idMarking: number,
+  codeMarking: string,
+  reason: string,
+  actor: SgcActor
+): Promise<void> {
+  for (const t of defaultParentTypesToKeep(typesBefore, idMarking)) {
+    const conPadre = await tx.sgcDocumentRelation.count({
+      where: {
+        id_company: idCompany,
+        is_active: true,
+        OR: [
+          { relation_type: 'procedimiento_padre', target: { id_document_type: t.id } },
+          { relation_type: { in: ['formato', 'anexo'] }, source: { id_document_type: t.id } },
+        ],
+      },
+    });
+    if (conPadre > 0) continue;
+    await tx.sgcDocumentType.update({ where: { id_document_type: t.id }, data: { is_parent_type: true } });
+    await tx.sgcConfigChangeLog.create({
+      data: {
+        id_company: idCompany,
+        actor_email: actor.email,
+        entity: 'document_type',
+        entity_id: String(t.id),
+        action: 'tipo_documental.tipo_padre',
+        reason: `${reason} — Se conserva ${t.code} (${t.name}) como tipo padre: era el padre por defecto y se marcó ${codeMarking}.`.slice(0, 1000),
+        before_json: JSON.stringify({ isParentType: false }),
+        after_json: JSON.stringify({ isParentType: true, automatico: true }),
+        ip: actor.ip ?? null,
+        user_agent: actor.userAgent ?? null,
+      },
+    });
   }
 }
 
