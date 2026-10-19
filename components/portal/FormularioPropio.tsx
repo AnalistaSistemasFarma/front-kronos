@@ -42,8 +42,11 @@ import { leerJson } from './PortalContenido';
 import { ConstructorFormulario } from './ConstructorFormulario';
 import { COLOR_ESTADO, varColorEstado } from '@/lib/theme/estados';
 import {
+  ESCALA_MAX_POR_DEFECTO,
+  ESCALA_MIN_POR_DEFECTO,
   OPCIONES_SI_NO,
   MENSAJE_AUTORIZACION,
+  PREFIJO_OTRAS,
   calificar,
   esEvaluacion,
   textoDeRespuesta,
@@ -561,6 +564,25 @@ function CampoPregunta({
   const opciones = p.tipo === 'si_no' ? [...OPCIONES_SI_NO] : (p.opciones ?? []);
   const esOtra = typeof valor === 'object' && valor !== null && !Array.isArray(valor);
   const marcadas = Array.isArray(valor) ? valor : [];
+  // Selección múltiple con «Otras» (formularios SST, 2026-10-19): el texto libre viaja como UN elemento `Otras: <texto>`.
+  const esElementoOtras = (x: string) => x.startsWith(PREFIJO_OTRAS);
+  const marcadasLista = marcadas.filter((x) => !esElementoOtras(x));
+  const textoOtras = (marcadas.find(esElementoOtras) ?? '').slice(PREFIJO_OTRAS.length);
+  const [otrasActiva, setOtrasActiva] = useState(() => marcadas.some(esElementoOtras));
+  const ponerMultiple = (lista: string[], otras: string) => onCambio(otras.trim() ? [...lista, `${PREFIJO_OTRAS}${otras}`] : lista);
+  // Imagen que ilustra la pregunta (solo de /portal-th/; la definición ya lo valida). Va debajo del enunciado.
+  const imagen = p.imagen ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      className='portal-th__formulario-imagen'
+      src={p.imagen.src}
+      alt={p.imagen.alt}
+      data-testid={`imagen-${p.id}`}
+      style={{ display: 'block', width: '100%', maxWidth: 560, height: 'auto', margin: '8px 0', border: '1px solid var(--mantine-color-default-border)', borderRadius: 8, background: '#fff' }}
+    />
+  ) : null;
+  const minEscala = p.escala?.min ?? ESCALA_MIN_POR_DEFECTO;
+  const maxEscala = p.escala?.max ?? ESCALA_MAX_POR_DEFECTO;
   // Mismo patrón de campo que el resto de SynerLink: etiqueta arriba, asterisco
   // rojo si es obligatoria, ayuda como descripción y error en rojo debajo.
   // `size='md'` en los campos de texto (16 px): con menos, Safari en iPhone
@@ -574,16 +596,65 @@ function CampoPregunta({
 
   return (
     <Box id={`fp-${p.id}`} className={`portal-th__formulario-pregunta${error ? ' portal-th__formulario-pregunta--error' : ''}`}>
+      {/* En los tipos de texto la imagen va arriba del campo; en los de opciones va dentro del grupo, bajo el enunciado. */}
+      {(p.tipo === 'texto' || p.tipo === 'texto_largo' || p.tipo === 'numero' || p.tipo === 'fecha') && imagen}
       {p.tipo === 'seleccion_multiple' ? (
-        <Checkbox.Group {...comun} size='md' value={marcadas} onChange={(v) => onCambio(v)} data-testid={`multiple-${p.id}`}>
+        <Checkbox.Group {...comun} size='md' value={marcadasLista} onChange={(v) => ponerMultiple(v, otrasActiva ? textoOtras : '')} data-testid={`multiple-${p.id}`}>
+          {imagen}
           <Stack gap='xs' mt='xs'>
             {opciones.map((o) => (
               <Checkbox key={o} value={o} label={o} size='sm' />
             ))}
+            {p.permiteOtra && (
+              <Group gap='sm' wrap='wrap' align='center'>
+                <Checkbox
+                  label='Otras'
+                  size='sm'
+                  checked={otrasActiva}
+                  data-testid={`otras-marca-${p.id}`}
+                  onChange={(e) => {
+                    const marcada = e.currentTarget.checked;
+                    setOtrasActiva(marcada);
+                    if (!marcada) ponerMultiple(marcadasLista, '');
+                  }}
+                />
+                <TextInput
+                  aria-label={`${p.texto}: otras`}
+                  placeholder='Escriba cuál'
+                  maxLength={2000}
+                  size='md'
+                  flex='1 1 160px'
+                  disabled={!otrasActiva}
+                  value={otrasActiva ? textoOtras : ''}
+                  data-testid={`otras-texto-${p.id}`}
+                  onChange={(e) => ponerMultiple(marcadasLista, e.currentTarget.value)}
+                />
+              </Group>
+            )}
           </Stack>
         </Checkbox.Group>
+      ) : p.tipo === 'escala' ? (
+        <Radio.Group {...comun} size='md' name={`fp-${p.id}`} value={texto} onChange={(v) => onCambio(v)} data-testid={`escala-${p.id}`}>
+          {imagen}
+          <Group gap='md' mt='xs' wrap='wrap'>
+            {Array.from({ length: maxEscala - minEscala + 1 }, (_, i) => String(minEscala + i)).map((n) => (
+              <Radio key={n} value={n} label={n} size='sm' />
+            ))}
+          </Group>
+          {(p.escala?.etiquetaMin || p.escala?.etiquetaMax) && (
+            <Group justify='space-between' mt={6} gap='md'>
+              <Text size='xs' c='dimmed'>
+                {p.escala?.etiquetaMin ?? ''}
+              </Text>
+              <Text size='xs' c='dimmed'>
+                {p.escala?.etiquetaMax ?? ''}
+              </Text>
+            </Group>
+          )}
+        </Radio.Group>
       ) : p.tipo === 'seleccion' && p.presentacion === 'lista' ? (
         <Stack gap='xs'>
+          {imagen}
           <NativeSelect
             {...comun}
             size='md'
@@ -621,6 +692,7 @@ function CampoPregunta({
             else onCambio(v);
           }}
         >
+          {imagen}
           <Stack gap='xs' mt='xs'>
             {opciones.map((o) => (
               <Radio key={o} value={o} label={o} size='sm' />
