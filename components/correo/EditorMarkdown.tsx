@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import { ActionIcon, Box, Group, Tabs, Text, Textarea, Tooltip } from '@mantine/core';
 import { IconBold, IconItalic, IconLink, IconList, IconListNumbers, IconStrikethrough } from '@tabler/icons-react';
 import { markdownAHtml } from '../../lib/correo/markdown';
+import { filasAMarkdown, tsvAMarkdown } from '../../lib/correo/tablaPegada';
 import HtmlSeguro from './HtmlSeguro';
 
 /**
@@ -21,11 +22,29 @@ export interface EditorMarkdownProps {
   testId?: string;
   ariaLabel?: string;
   minRows?: number;
+  /** Redactar (2026-10-19): una tabla pegada (Excel, Word, Outlook, web) se convierte en tabla Markdown. */
+  pegarTablas?: boolean;
+  maxRows?: number;
+}
+
+/** Tabla del portapapeles (HTML con <table> o texto con tabuladores) como Markdown, o null. */
+function tablaDelPortapapeles(dt: DataTransfer): string | null {
+  const html = dt.getData('text/html');
+  if (html && /<table[\s>]/i.test(html) && typeof DOMParser !== 'undefined') {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const tabla = doc.querySelector('table');
+    if (tabla) {
+      const filas = [...tabla.querySelectorAll('tr')].map((tr) => [...tr.querySelectorAll('th,td')].map((c) => c.textContent ?? ''));
+      const md = filasAMarkdown(filas);
+      if (md) return md;
+    }
+  }
+  return tsvAMarkdown(dt.getData('text/plain'));
 }
 
 type Marca = 'b' | 'i' | 's' | 'ul' | 'ol' | 'link';
 
-export default function EditorMarkdown({ value, onChange, placeholder, disabled, autoFocus, testId, ariaLabel = 'Respuesta', minRows = 5 }: EditorMarkdownProps) {
+export default function EditorMarkdown({ value, onChange, placeholder, disabled, autoFocus, testId, ariaLabel = 'Respuesta', minRows = 5, pegarTablas = false, maxRows = 16 }: EditorMarkdownProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [tab, setTab] = useState<string | null>('escribir');
   const previa = useMemo(() => (tab === 'previa' ? markdownAHtml(value) : ''), [tab, value]);
@@ -79,6 +98,25 @@ export default function EditorMarkdown({ value, onChange, placeholder, disabled,
     }
   };
 
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!pegarTablas || disabled) return;
+    const md = tablaDelPortapapeles(e.clipboardData);
+    if (!md) return;
+    e.preventDefault();
+    const el = e.currentTarget;
+    const ini = el.selectionStart ?? value.length;
+    const fin = el.selectionEnd ?? value.length;
+    // La tabla va en su propio bloque (línea en blanco antes y después).
+    const antes = value.slice(0, ini);
+    const pre = !antes || antes.endsWith('\n\n') ? '' : antes.endsWith('\n') ? '\n' : '\n\n';
+    const bloque = `${pre}${md}\n\n`;
+    onChange(`${antes}${bloque}${value.slice(fin)}`);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(ini + bloque.length, ini + bloque.length);
+    });
+  };
+
   const boton = (marca: Marca, etiqueta: string, icono: React.ReactNode) => (
     <Tooltip label={etiqueta} withArrow openDelay={300}>
       <ActionIcon variant='subtle' color='gray' size='md' onClick={() => aplicar(marca)} disabled={disabled || tab !== 'escribir'} aria-label={etiqueta} data-testid={`correo-md-${marca}`}>
@@ -114,10 +152,11 @@ export default function EditorMarkdown({ value, onChange, placeholder, disabled,
             placeholder={placeholder}
             autosize
             minRows={minRows}
-            maxRows={16}
+            maxRows={maxRows}
             value={value}
             onChange={(e) => onChange(e.currentTarget.value)}
             onKeyDown={onKeyDown}
+            onPaste={onPaste}
             disabled={disabled}
             autoFocus={autoFocus}
             aria-label={ariaLabel}
@@ -139,7 +178,7 @@ export default function EditorMarkdown({ value, onChange, placeholder, disabled,
         </Tabs.Panel>
       </Tabs>
       <Text size='xs' c='dimmed' mt={4}>
-        Formato: **negrita**, *cursiva*, «- » para listas y [texto](https://…) para enlaces.
+        Formato: **negrita**, *cursiva*, «- » para listas y [texto](https://…) para enlaces.{pegarTablas ? ' Puede pegar tablas de Excel, Word u Outlook.' : ''}
       </Text>
     </Box>
   );
