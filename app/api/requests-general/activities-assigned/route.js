@@ -22,6 +22,7 @@ export async function GET(req) {
     const date_from = searchParams.get('date_from');
     const date_to = searchParams.get('date_to');
     const assigned_to = searchParams.get('assigned_to');
+    const process = searchParams.get('process');
 
     console.log('API: idUser recibido:', idUser);
 
@@ -81,6 +82,10 @@ export async function GET(req) {
       query += ` AND rg.[user] = @assigned_to`;
     }
 
+    if (process) {
+      query += ` AND pc.process LIKE '%' + @process + '%'`;
+    }
+
     const request = pool.request();
 
     request.input('idUser', sql.NVarChar, idUser);
@@ -111,6 +116,10 @@ export async function GET(req) {
 
     if (assigned_to) {
       request.input('assigned_to', sql.NVarChar, assigned_to);
+    }
+
+    if (process) {
+      request.input('process', sql.NVarChar, process);
     }
 
     console.log('API activities: Ejecutando consulta:', query);
