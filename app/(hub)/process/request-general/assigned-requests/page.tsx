@@ -117,6 +117,7 @@ interface AssignedTask {
   subject_request: string;
   id_company: number;
   company: string;
+  process: string;
   created_at: string;
   id_requester: number;
   name_requester: string;
@@ -395,11 +396,10 @@ function RequestBoard() {
 
       const statusValue = filtersToUse?.status || '';
       const includeRequests = includesRequests(filtersToUse);
-      const includeTasks = !REQUEST_ONLY_STATUSES.includes(statusValue) && !filtersToUse?.process;
+      const includeTasks = !REQUEST_ONLY_STATUSES.includes(statusValue);
 
       // activities-assigned aún filtra por ?idUser= (request-assigned usa la sesión).
       const taskParams = buildTicketParams(filtersToUse);
-      taskParams.delete('process');
       taskParams.append('idUser', userIdToUse.toString());
 
       const [requestResult, taskResult] = await Promise.allSettled([
@@ -859,12 +859,17 @@ function RequestBoard() {
         </Text>
       </Table.Td>
       <Table.Td>
-        <Group gap={4} wrap='nowrap'>
-          <IconBuilding size={13} className='text-gray-400' />
-          <Text size='xs' c='dimmed'>
-            {task.company}
+        <Stack gap={2}>
+          <Text size='sm' fw={500}>
+            {task.process}
           </Text>
-        </Group>
+          <Group gap={4} wrap='nowrap'>
+            <IconBuilding size={13} className='text-gray-400' />
+            <Text size='xs' c='dimmed'>
+              {task.company}
+            </Text>
+          </Group>
+        </Stack>
       </Table.Td>
       <Table.Td style={{ whiteSpace: 'nowrap' }}>{renderStatusBadge(task.status_task)}</Table.Td>
       <Table.Td>
