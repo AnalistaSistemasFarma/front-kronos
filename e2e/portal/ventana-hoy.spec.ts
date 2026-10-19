@@ -4,7 +4,8 @@ import { expect, test, type Page } from '@playwright/test';
  * Portal TH · ventana emergente «Hoy» (Cristian Baldión, 2026-10-15): al entrar se abre con los eventos del día (los del calendario);
  * con cumpleaños lleva una imagen; se cierra sola a los 15 s o antes si la persona la cierra. Sin sesión real ni SharePoint: las APIs
  * se simulan con `page.route`, las personas son INVENTADAS y el RELOJ es controlado (así «hoy» es siempre el mismo día y los 15
- * segundos se comprueban sin esperar). El proyecto «publico» deja la ventana de hoy marcada como vista; estas pruebas quitan esa marca.
+ * segundos se comprueban sin esperar). El proyecto «publico» deja una marca que APAGA la ventana (para que no tape las demás
+ * pruebas); estas pruebas la quitan. En producción esa marca no existe y la ventana sale en cada carga.
  * Con `FORMACION_CAPTURAS=<carpeta>` guarda capturas.
  */
 
@@ -96,7 +97,7 @@ test.describe('Portal TH · ventana emergente «Hoy»', () => {
     await expect(ventana(page)).toBeHidden();
   });
 
-  test('se puede cerrar antes: con ✕, con Escape y haciendo clic afuera; y ya no vuelve a salir solo', async ({ page }) => {
+  test('se puede cerrar antes: con ✕, con Escape y haciendo clic afuera; y CADA recarga de la página la vuelve a abrir', async ({ page }) => {
     await preparar(page, HOY, { empresa: eventoEmpresa });
     await page.goto('/portal');
     await expect(ventana(page)).toBeVisible();
@@ -104,20 +105,20 @@ test.describe('Portal TH · ventana emergente «Hoy»', () => {
     await page.getByTestId('ventana-hoy-cerrar').click();
     await expect(ventana(page)).toBeHidden();
 
-    // mismo día: recargar no la reabre
+    // Pedido de Cristian (2026-10-16): cada vez que se actualiza la página, la ventana vuelve a salir (nadie guarda «ya vista»).
     await page.reload();
-    await expect(page.getByRole('navigation', { name: 'Secciones del portal' })).toBeVisible();
-    await expect(ventana(page)).toHaveCount(0);
+    await expect(ventana(page)).toBeVisible();
+    expect(await page.evaluate((c) => window.localStorage.getItem(c), CLAVE(HOY))).toBeNull();
 
     // Escape
-    await page.evaluate((c) => window.localStorage.removeItem(c), CLAVE(HOY));
+    await page.keyboard.press('Escape');
+    await expect(ventana(page)).toBeHidden();
     await page.reload();
     await expect(ventana(page)).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(ventana(page)).toBeHidden();
 
     // clic afuera
-    await page.evaluate((c) => window.localStorage.removeItem(c), CLAVE(HOY));
     await page.reload();
     await expect(ventana(page)).toBeVisible();
     await page.mouse.click(4, 4);
@@ -148,7 +149,7 @@ test.describe('Portal TH · ventana emergente «Hoy»', () => {
     await expect(page.getByTestId('ventana-hoy-imagen')).toHaveCount(0);
   });
 
-  test('cada vez que se INICIA SESIÓN con el código vuelve a salir, aunque ya la hubiera visto hoy; y al cerrar sesión se reinicia', async ({ page }) => {
+  test('al INICIAR SESIÓN con el código sale, aunque la marca de pruebas estuviera puesta (se reinicia); también al recargar y al volver a entrar', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     // «marcada»: hoy ya la vio (no sale al abrir). Con sesión cerrada no hay contenido; al validar el código, sí.
     await preparar(page, HOY, { empresa: eventoEmpresa, marcada: true });
@@ -182,10 +183,11 @@ test.describe('Portal TH · ventana emergente «Hoy»', () => {
     await page.getByTestId('ventana-hoy-cerrar').click();
     await expect(ventana(page)).toBeHidden();
 
-    // Recargar SIN volver a iniciar sesión: no se reabre.
+    // Recargar la página: también sale otra vez (pedido de Cristian, 2026-10-16: en cada actualización).
     await page.reload();
-    await expect(page.getByRole('navigation', { name: 'Secciones del portal' })).toBeVisible();
-    await expect(ventana(page)).toHaveCount(0);
+    await expect(ventana(page)).toBeVisible();
+    await page.getByTestId('ventana-hoy-cerrar').click();
+    await expect(ventana(page)).toBeHidden();
 
     // Cerrar sesión y volver a entrar: sale otra vez.
     await page.getByRole('button', { name: 'Salir' }).click();
