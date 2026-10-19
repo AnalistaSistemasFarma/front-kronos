@@ -2,9 +2,9 @@
  * PORTAL DE TALENTO HUMANO — CUMPLEAÑOS en el calendario (Cristian Baldión, 2026-10-15).
  *
  * El calendario del portal muestra, cada día, quiénes cumplen años: el evento «CUMPLEAÑOS» y, debajo, el nombre, la empresa
- * contratante y el área de cada persona. La fuente es el Excel BASE PERSONAL (SharePoint, `CONTACTOS/BASE PERSONAL.xlsx`):
- * la columna «Fecha de nacimiento» es la llave (día y mes); «Apellidos y Nombres», «Empresa contratante» y «Área / Dependencia»
- * son lo que se muestra.
+ * contratante y el cargo de cada persona (Cristian, 2026-10-19: el CARGO reemplaza al Área / Dependencia). La fuente es el Excel
+ * BASE PERSONAL (SharePoint, `CONTACTOS/BASE PERSONAL.xlsx`): la columna «Fecha de nacimiento» es la llave (día y mes);
+ * «Apellidos y Nombres», «Empresa contratante» y «Cargo» son lo que se muestra.
  *
  * SOLO LECTURA, con la misma app de Entra de Formación y Políticas (`PORTAL_TH_SP_*`), por la API de Excel de Graph:
  *
@@ -40,7 +40,7 @@ export function leerConfigCumpleanos(env: NodeJS.ProcessEnv = process.env): Conf
 export interface PersonaCumple {
   nombre: string;
   empresa: string;
-  area: string;
+  cargo: string;
 }
 
 /** Una persona con su día y mes de cumpleaños (sin año). Nunca sale de este módulo hacia el navegador con estos campos. */
@@ -67,7 +67,7 @@ const texto = (v: unknown) => (v === null || v === undefined ? '' : String(v).re
 const COLUMNAS = {
   nombre: ['APELLIDOS Y NOMBRES', 'NOMBRES Y APELLIDOS', 'NOMBRE'],
   empresa: ['EMPRESA CONTRATANTE'],
-  area: ['AREA DEPENDENCIA', 'AREA'],
+  cargo: ['CARGO'],
   nacimiento: ['FECHA DE NACIMIENTO', 'FECHA NACIMIENTO'],
   estado: ['ESTADO ACTIVO SI NO', 'ESTADO'],
 } as const;
@@ -135,7 +135,7 @@ export function personasDesdeHojaCumple(valores: unknown[][], hoy: Date = new Da
       sinFechaValida += 1;
       continue;
     }
-    personas.push({ nombre, empresa: texto(fila[col.empresa]), area: texto(fila[col.area]), ...dm });
+    personas.push({ nombre, empresa: texto(fila[col.empresa]), cargo: texto(fila[col.cargo]), ...dm });
   }
   return { personas, sinFechaValida };
 }
@@ -152,7 +152,7 @@ export function cumpleanosEnRango(personas: PersonaConDia[], desde: string, hast
   const porClave = new Map<string, PersonaCumple[]>();
   for (const p of personas) {
     const k = `${String(p.mes).padStart(2, '0')}-${String(p.dia).padStart(2, '0')}`;
-    porClave.set(k, [...(porClave.get(k) ?? []), { nombre: p.nombre, empresa: p.empresa, area: p.area }]);
+    porClave.set(k, [...(porClave.get(k) ?? []), { nombre: p.nombre, empresa: p.empresa, cargo: p.cargo }]);
   }
   const salida: CumplesDelDia[] = [];
   const fin = new Date(`${hasta}T00:00:00Z`).getTime();
