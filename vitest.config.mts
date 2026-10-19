@@ -94,6 +94,8 @@ export default defineConfig({
         'lib/correo/mock.ts',
         // «Consultar a un agente» (2026-10-16): concesión, tarjetas y confirmación.
         'lib/correo/agente.ts',
+        // Deslizar para eliminar (2026-10-18): mover a Elementos eliminados y «Deshacer» firmado.
+        'lib/correo/eliminar.ts',
         'app/api/correo/**/route.ts',
       ],
       exclude: [

@@ -80,6 +80,8 @@ export interface CorreoDeps {
   now?: () => number;
   /** Proveedor a la medida (pruebas). */
   proveedor?: (acceso: AccesoCorreo) => Promise<MailProvider>;
+  /** Secreto del servidor (NEXTAUTH_SECRET) con que se firma el comprobante de «Deshacer» al eliminar. */
+  secretoFirma?: string;
 }
 
 const now = (d: CorreoDeps) => (d.now ? d.now() : Date.now());
@@ -105,6 +107,8 @@ export interface EstadoConexion {
   correo: string;
   envioHabilitado: boolean;
   etiquetarHabilitado: boolean;
+  /** Eliminar (mover a Elementos eliminados con «Deshacer»): escritura encendida y CORREO_ELIMINAR_HABILITADO. */
+  eliminarHabilitado: boolean;
   sincronizacionAutomatica: boolean;
 }
 
@@ -116,6 +120,7 @@ export function estadoConexion(d: CorreoDeps, acceso: AccesoCorreo): EstadoConex
     correo: acceso.email.toLowerCase(),
     envioHabilitado: d.cfg.envioHabilitado,
     etiquetarHabilitado: d.cfg.etiquetarHabilitado,
+    eliminarHabilitado: d.cfg.etiquetarHabilitado && d.cfg.eliminarHabilitado,
     sincronizacionAutomatica: d.cfg.syncHabilitado,
   };
 }

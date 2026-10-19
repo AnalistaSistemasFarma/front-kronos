@@ -116,6 +116,26 @@ export interface MailProvider {
    * si el proveedor no lo trae, se calcula con carpetas().
    */
   noLeidosBandeja?(): Promise<number>;
+  /**
+   * Eliminar (2026-10-18). Dónde está cada mensaje DEL BUZÓN PROPIO (carpeta, hilo, Message-ID); null si no
+   * existe ahí (otro buzón, ya movido o borrado). Es la validación de pertenencia antes de moverlo.
+   */
+  ubicarMensajes(mensajesIds: string[]): Promise<Map<string, UbicacionMensaje | null>>;
+  /** Id real de la carpeta «Elementos eliminados» del buzón (para saber qué ya está ahí). */
+  idCarpetaEliminados(): Promise<string>;
+  /**
+   * MUEVE mensajes del buzón propio a otra carpeta del MISMO buzón (Graph `move`; `deleteditems` = Elementos
+   * eliminados). Graph le da un id nuevo al mensaje movido: devuelve id anterior → id nuevo (null si falló).
+   * No existe una operación de borrado permanente en el módulo.
+   */
+  moverMensajes(mensajesIds: string[], destinoId: string): Promise<Map<string, string | null>>;
+}
+
+export interface UbicacionMensaje {
+  carpetaId: string;
+  conversationId: string;
+  internetMessageId: string;
+  leido: boolean;
 }
 
 /** Fila de la simulación (una por hilo). */

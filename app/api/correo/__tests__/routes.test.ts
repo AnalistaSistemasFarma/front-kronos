@@ -7,7 +7,7 @@ const m = vi.hoisted(() => {
   const names = [
     'getServerSession', 'getCorreoAccess', 'vinculosDeHilos', 'vinculosDeSolicitud', 'buscarUsuariosEmpresa',
     'usuariosPorCorreo', 'usuarioDeEmpresa', 'solicitudesDeCorreos', 'reservarHilo', 'activarHilo', 'liberarHilo', 'vincularExistente', 'vinculoDeHilo',
-    'correosRegistrados', 'registrarCorreo', 'marcarSincronizado', 'hilosParaSincronizar', 'auditar', 'correoDeps', 'reservarAcuse', 'liberarAcuse',
+    'correosRegistrados', 'registrarCorreo', 'marcarSincronizado', 'hilosParaSincronizar', 'auditar', 'correoDeps', 'reservarAcuse', 'liberarAcuse', 'proyectosDeHilos',
   ] as const;
   return Object.fromEntries(names.map((n) => [n, vi.fn()])) as Record<(typeof names)[number], ReturnType<typeof vi.fn>>;
 });
@@ -40,6 +40,8 @@ import * as usuarios from '../usuarios/route';
 import * as procesos from '../procesos/route';
 import * as vinculos from '../vinculos/route';
 import * as acuse from '../acuse/route';
+import * as eliminar from '../eliminar/route';
+import * as deshacer from '../eliminar/deshacer/route';
 import { codificarCursor, limpiarTokensApp } from '../../../../lib/correo/graph';
 
 const yo = {
@@ -100,6 +102,7 @@ beforeEach(() => {
     notificarNueva: vi.fn(),
     subirAdjuntos: vi.fn(async () => ({ subidos: 0, fallidos: [] })),
     dominiosGrupo: ['gsslatam.com'],
+    secretoFirma: 'secreto-de-firma-de-pruebas-0123456789',
   }));
   m.vinculosDeHilos.mockResolvedValue(new Map([['mock-conv-01AAAA', { idRequest: 321 }]]));
   m.vinculosDeSolicitud.mockResolvedValue([]);
@@ -107,6 +110,7 @@ beforeEach(() => {
   m.correosRegistrados.mockResolvedValue(new Set());
   m.usuariosPorCorreo.mockResolvedValue(new Map());
   m.solicitudesDeCorreos.mockResolvedValue(new Map());
+  m.proyectosDeHilos.mockResolvedValue(new Map());
 });
 
 describe('Correo · rutas: sesión y permiso', () => {
@@ -127,6 +131,8 @@ describe('Correo · rutas: sesión y permiso', () => {
     ['procesos', () => procesos.GET(get('/procesos?empresa=1'))],
     ['vinculos', () => vinculos.GET(get('/vinculos?solicitud=1'))],
     ['acuse', () => acuse.POST(post('/acuse', {}))],
+    ['eliminar', () => eliminar.POST(post('/eliminar', {}))],
+    ['eliminar-deshacer', () => deshacer.POST(post('/eliminar/deshacer', {}))],
     ['responder', () => responder.POST(new Request('http://x/api/correo/responder', { method: 'POST', body: new FormData(), headers: H }))],
   ];
 
@@ -448,5 +454,76 @@ describe('Correo · rutas: app de aplicación y buzón de la sesión (anti-IDOR)
       expect.objectContaining({ accion: 'LEER_HILO', conversationId: 'mock-conv-01AAAA', mensajeId: 'mock-msg-0001AAAA' }),
       expect.objectContaining({ accion: 'DESCARGAR_ADJUNTO', mensajeId: 'mock-msg-0001AAAA', ip: '10.0.0.9' }),
     ]);
+  });
+});
+
+describe('Correo · rutas: eliminar (deslizar) y «Deshacer»', () => {
+  const enBandeja = async () => ((await (await mensajes.GET(get('/mensajes'))).json()).mensajes as Array<{ id: string }>).map((x) => x.id);
+
+  it('mueve a Elementos eliminados del buzón de la SESIÓN (un buzón en el cuerpo se ignora) y «Deshacer» lo restaura', async () => {
+    const a = comoUsuario()!;
+    m.vinculosDeHilos.mockResolvedValue(new Map());
+    const r = await eliminar.POST(post('/eliminar', { mensajesIds: ['mock-msg-0003AAAA'], mailbox: 'gerencia@gsslatam.com', idUser: 'victima' }));
+    expect(r.status).toBe(200);
+    expect(r.headers.get('cache-control')).toContain('no-store');
+    const body = await r.json();
+    expect(body).toMatchObject({ eliminados: [{ id: 'mock-msg-0003AAAA', nuevoId: 'mock-msg-0003AAAA-ELIM' }], fallidos: [], yaEnEliminados: [] });
+    expect(body.requiereConfirmacion).toBeUndefined();
+    expect(await enBandeja()).not.toContain('mock-msg-0003AAAA');
+    expect(m.auditar).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ accion: 'ELIMINAR', idUser: a.idUser, mailbox: 'laura@gsslatam.com', ip: '10.0.0.9' }));
+    const u = await deshacer.POST(post('/eliminar/deshacer', { deshacer: body.deshacer }));
+    expect(u.status).toBe(200);
+    expect(await u.json()).toEqual({ restaurados: [{ id: 'mock-msg-0003AAAA-ELIM', nuevoId: 'mock-msg-0003AAAA' }], fallidos: [] });
+    expect(await enBandeja()).toContain('mock-msg-0003AAAA');
+    expect(m.auditar).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ accion: 'RESTAURAR', idUser: a.idUser }));
+  });
+
+  it('el «Deshacer» de otra persona: 403; sin comprobante: 400', async () => {
+    comoUsuario();
+    m.vinculosDeHilos.mockResolvedValue(new Map());
+    const body = await (await eliminar.POST(post('/eliminar', { mensajesIds: ['mock-msg-0004AAAA'] }))).json();
+    comoUsuario();
+    expect((await deshacer.POST(post('/eliminar/deshacer', { deshacer: body.deshacer }))).status).toBe(403);
+    expect((await deshacer.POST(post('/eliminar/deshacer', {}))).status).toBe(400);
+  });
+
+  it('hilo vinculado: 409 VINCULADO con el detalle; con confirmarVinculados, elimina', async () => {
+    comoUsuario();
+    m.proyectosDeHilos.mockResolvedValue(new Map([['mock-conv-01AAAA', ['Proyecto X']]]));
+    const r = await eliminar.POST(post('/eliminar', { mensajesIds: ['mock-msg-0001AAAA'] }));
+    expect(r.status).toBe(409);
+    expect(await r.json()).toMatchObject({ code: 'VINCULADO', vinculos: [{ mensajeId: 'mock-msg-0001AAAA', idRequest: 321, proyectos: ['Proyecto X'] }] });
+    const ok = await eliminar.POST(post('/eliminar', { mensajesIds: ['mock-msg-0001AAAA'], confirmarVinculados: true }));
+    expect(ok.status).toBe(200);
+    expect(m.proyectosDeHilos).toHaveBeenCalledWith(expect.anything(), 'laura@gsslatam.com', expect.any(Array));
+  });
+
+  it('cuerpo inválido 400; escritura apagada 403', async () => {
+    comoUsuario();
+    expect((await eliminar.POST(post('/eliminar', { mensajesIds: 'x' }))).status).toBe(400);
+    cfgEnv = { CORREO_MODO: 'mock', CORREO_ELIMINAR_HABILITADO: 'false' };
+    expect((await eliminar.POST(post('/eliminar', { mensajesIds: ['mock-msg-0003AAAA'] }))).status).toBe(403);
+    expect((await estado.GET(get(''))).status).toBe(200);
+    expect((await (await estado.GET(get(''))).json()).conexion.eliminarHabilitado).toBe(false);
+  });
+
+  it('Graph: un id de OTRO buzón responde 404 consultando el buzón propio y no se hace ningún `move`', async () => {
+    const subs: Array<{ method: string; url: string }> = [];
+    fetchFn = (async (url: string, init?: RequestInit) => {
+      if (url.includes('login.microsoftonline.com')) return new Response(JSON.stringify({ access_token: 'APP', expires_in: 3600 }), { status: 200 });
+      if (url === `${BASE}/mailFolders/deleteditems?$select=id`) return new Response(JSON.stringify({ id: 'FOLDERDELETED1' }), { status: 200 });
+      if (url === 'https://graph.microsoft.com/v1.0/$batch') {
+        const reqs = JSON.parse(String(init?.body)).requests as Array<{ id: string; method: string; url: string }>;
+        subs.push(...reqs);
+        return new Response(JSON.stringify({ responses: reqs.map((q) => ({ id: q.id, status: 404 })) }), { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    }) as unknown as typeof fetch;
+    cfgEnv = GRAPH_ENV;
+    comoUsuario();
+    const r = await eliminar.POST(post('/eliminar', { mensajesIds: ['AAMkGERENCIA1'], mailbox: 'gerencia@gsslatam.com' }));
+    expect(r.status).toBe(404);
+    expect(subs).toEqual([expect.objectContaining({ method: 'GET', url: expect.stringMatching(/^\/users\/laura%40gsslatam\.com\/messages\/AAMkGERENCIA1\?/) })]);
+    expect(JSON.stringify(subs)).not.toContain('gerencia');
   });
 });
