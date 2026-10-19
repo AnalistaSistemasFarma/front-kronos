@@ -78,6 +78,8 @@ const HEADER_ICONS: Array<{ test: RegExp; icon: TablerIcon }> = [
 ];
 
 const SUB_RULES: Array<{ test: RegExp; icon: TablerIcon }> = [
+  // Módulo «Proyectos» (2026-10-18): sin esta regla el nombre caía por hash en el carrito de compras.
+  { test: /^proyectos?$|gesti[oó]n\s+de\s+proyectos/, icon: IconFolders },
   { test: /mis\s*ticket/, icon: IconInbox },
   { test: /^tickets?$|panel.*caso/, icon: IconTicket },
   { test: /ticket|help|soporte/, icon: IconTicket },

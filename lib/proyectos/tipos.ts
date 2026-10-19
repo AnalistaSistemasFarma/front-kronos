@@ -57,6 +57,8 @@ export interface ProyectoResumenDto {
   conversationCount: number;
   linkCount: number;
   fileCount: number;
+  /** Tareas del cronograma (2026-10-18). */
+  taskCount: number;
   updatedAt: string;
 }
 
@@ -165,4 +167,107 @@ export interface CandidatoDto {
   id: string;
   name: string;
   email: string;
+}
+
+/* ───────────────────────────── Cronograma (2026-10-18) ───────────────────────────── */
+
+export interface TareaDto {
+  id: number;
+  title: string;
+  description: string | null;
+  responsible: PersonaDto | null;
+  /** AAAA-MM-DD (fecha de calendario). */
+  startDate: string;
+  endDate: string;
+  status: 'pendiente' | 'en_curso' | 'hecha' | 'bloqueada';
+  progress: number | null;
+  isMilestone: boolean;
+  /** 'agente' = la propuso un asistente y una persona la confirmó. */
+  origin: 'persona' | 'agente';
+  createdBy: PersonaDto | null;
+  createdAt: string;
+  updatedBy: PersonaDto | null;
+  updatedAt: string | null;
+  puedoEditar: boolean;
+  puedoBorrar: boolean;
+}
+
+/** Actividad del workflow de una solicitud (task_request_general), como sub-ítem. */
+export interface ActividadSolicitudDto {
+  id: number;
+  task: string;
+  idStatus: number | null;
+  status: string | null;
+  assignedTo: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  resolvedAt: string | null;
+}
+
+export interface SolicitudCronogramaDto {
+  /** Id del vínculo (chat_project_request). */
+  idLink: number;
+  idRequest: number;
+  subject: string;
+  processName: string | null;
+  /** Estado vivo del caso. */
+  estado: string | null;
+  idStatus: number | null;
+  createdAt: string | null;
+  resolvedAt: string | null;
+  /** Fecha objetivo que le puso el proyecto (el «vencimiento»). */
+  targetDate: string | null;
+  url: string;
+  linkedBy: PersonaDto | null;
+  actividades: ActividadSolicitudDto[];
+  puedoFijarFecha: boolean;
+  puedoQuitar: boolean;
+}
+
+export interface PropuestaDto {
+  id: number;
+  kind: string;
+  kindLabel: string;
+  summary: string;
+  source: 'puente' | 'mcp';
+  agent: AgenteMiniDto | null;
+  requestedFor: PersonaDto | null;
+  createdAt: string;
+  expiresAt: string;
+  puedoConfirmar: boolean;
+  motivo: string | null;
+}
+
+export interface CronogramaDto {
+  /** Hoy en Bogotá (AAAA-MM-DD): la línea roja del Gantt. */
+  hoy: string;
+  tasks: TareaDto[];
+  requests: SolicitudCronogramaDto[];
+  /** Miembros que pueden ser responsables. */
+  members: PersonaDto[];
+  capabilities: { crear: boolean; vincular: boolean; fijarFecha: boolean };
+  proposals: PropuestaDto[];
+  /** Avisos no fatales (p. ej. no se pudo leer el estado vivo de las solicitudes). */
+  avisos: string[];
+}
+
+export interface EventoAuditoriaDto {
+  id: number;
+  action: string;
+  detail: string;
+  by: PersonaDto | null;
+  agent: string | null;
+  via: string;
+  at: string;
+}
+
+/** Concesión de 24 h para gestionar Proyectos desde un asistente (kronos-mcp). */
+export interface ConcesionProyectoDto {
+  id: number;
+  agent: AgenteMiniDto;
+  /** null = todos los proyectos de la persona. */
+  project: { idProject: number; name: string } | null;
+  createdAt: string;
+  expiresAt: string;
+  idChatConversation: number;
 }

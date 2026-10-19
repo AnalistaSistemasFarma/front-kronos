@@ -224,7 +224,8 @@
   .modalTactil :global(.mantine-TextInput-input),
   .modalTactil :global(.mantine-Textarea-input),
   .modalTactil :global(.mantine-Select-input),
-  .modalTactil :global(.mantine-NativeSelect-input) {
+  .modalTactil :global(.mantine-NativeSelect-input),
+  .modalTactil :global(.mantine-NumberInput-input) {
     min-height: 44px;
     /* 16 px: iOS no hace zoom al enfocar. */
     font-size: 16px;

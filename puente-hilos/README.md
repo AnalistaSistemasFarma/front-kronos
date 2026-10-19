@@ -12,6 +12,8 @@ Desde el módulo, un proyecto tiene **uno o varios agentes designados** (`chat_p
 - La bandeja de cada llave solo entrega mensajes de **sus** conversaciones en proyectos **activos donde está designado**. Si el dueño retira a un agente, su puente deja de recibir mensajes de ese proyecto y sus conversaciones quedan de solo lectura.
 - Cada instancia mantiene su propia carpeta `proyectos/<id>/…` con los archivos del proyecto: dos agentes del mismo proyecto no comparten sesión, carpeta ni consumo.
 - **Lo vinculado** (correos y solicitudes) llega en el contexto (`project.links`) y el puente lo escribe en `./contexto/vinculados.md` de la carpeta del hilo en cada turno. Es de solo lectura para el modelo (solo escribe en `./trabajo`) y trae **lo mismo que ven los miembros**: de un correo, asunto, remitente, fecha, número de mensajes y el resumen de quien lo vinculó — **nunca el cuerpo** —; de una solicitud, número, asunto, proceso, empresa y estado actual. No hay un conector MCP nuevo: así la llave del puente nunca entra al proceso del modelo.
+- **El cronograma** (2026-10-18) llega en `project.schedule` (tareas con fechas, estado, avance y responsable; solicitudes con sus fechas reales y actividades) y el puente lo escribe en `./contexto/cronograma.md`, de solo lectura. El modelo **no cambia el cronograma**: si quiere crear una tarea o cambiar su estado, avance o fechas, escribe `./trabajo/propuestas-cronograma.json` (máx. 10 por turno, solo `tarea_crear` y `tarea_editar`). Al terminar el turno, el puente lo lee, lo **borra** y lo entrega con SU llave a `POST /api/chat/agent/projects/proposals`; SynerLink valida cada propuesta y la deja **pendiente** hasta que un dueño o editor la confirma con un clic en el Cronograma. La respuesta del hilo dice cuántas quedaron registradas.
+- **Decisión (2026-10-18): las conversaciones de proyecto NO montan las herramientas `proyecto_*` de kronos-mcp.** Ese MCP necesita una llave de agente en el proceso del modelo, y aquí el modelo corre con un entorno limpio a propósito. El archivo de propuestas cumple lo mismo con menos superficie: el modelo solo escribe un JSON en `./trabajo`, nunca ve una llave, y todo pasa por la confirmación de una persona. Las herramientas `proyecto_*` del MCP quedan para el **chat directo** con un agente, con la concesión de 24 h que la persona da desde Proyectos («Gestionar con un asistente»). Si más adelante se quisiera el MCP aquí, la opción segura es un MCP **local de solo propuestas** que escriba ese mismo archivo, sin llave.
 
 ## Cómo funciona
 
@@ -20,7 +22,7 @@ Desde el módulo, un proyecto tiene **uno o varios agentes designados** (`chat_p
 3. En cada turno:
    - pide el contexto del proyecto (`/api/chat/agent/projects/context`): instrucciones, descripción, perfil, archivos, vinculados y versión;
    - baja los archivos del proyecto a `proyectos/<id>/archivos/` si cambió la versión, y los adjuntos del chat a `adjuntos/`;
-   - escribe `CLAUDE.md`, `.puente/sistema.md`, `.puente/mcp.json` y `contexto/vinculados.md`;
+   - escribe `CLAUDE.md`, `.puente/sistema.md`, `.puente/mcp.json`, `contexto/vinculados.md` y `contexto/cronograma.md`;
    - corre `claude -p --resume <session_id del hilo>` en la carpeta del hilo (`src/claude.mjs`).
 4. Publica la respuesta en el hilo, deja el indicador en reposo, reporta el consumo (`/api/chat/agent/usage`, por conversación y también en `consumo.jsonl`) y confirma los mensajes. La confirmación va al final, así que si el puente se cae, el mensaje vuelve a llegar.
 
