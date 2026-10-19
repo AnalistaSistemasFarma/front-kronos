@@ -152,6 +152,10 @@ interface Request {
   date_resolution?: string;
   start_date?:string;
   executor_final: string;
+  id_linked_process?: number | null;
+  linked_process_label?: string | null;
+  linked_request_id?: number | null;
+  linked_request_status?: number | null;
 }
 
 interface Option {
@@ -1983,6 +1987,69 @@ function ViewRequestPage() {
                   </Grid>
                 </div>
 
+                {request.id_linked_process && (
+                  <div>
+                    <Title order={4} mb='md' className='flex items-center gap-2'>
+                      <IconProgress size={18} className='text-grape-6' />
+                      Flujo vinculado
+                    </Title>
+                    <Card withBorder radius='md' p='md' bg='gray.0'>
+                      <Text size='sm' mb='xs'>
+                        Esta tarea se completa creando una solicitud del flujo{' '}
+                        <b>{request.linked_process_label || 'vinculado'}</b>. La tarea se cerrará
+                        automáticamente cuando esa solicitud se cierre.
+                      </Text>
+                      {request.linked_request_id ? (
+                        <Group gap='sm'>
+                          <Badge color='blue' variant='light'>
+                            Solicitud #{request.linked_request_id}
+                          </Badge>
+                          <Badge
+                            color={getStatusColor(
+                              request.linked_request_status === 2
+                                ? 'Resuelto'
+                                : request.linked_request_status === 3
+                                  ? 'Cancelado'
+                                  : 'Abierto'
+                            )}
+                            variant='light'
+                          >
+                            {request.linked_request_status === 2
+                              ? 'Resuelto'
+                              : request.linked_request_status === 3
+                                ? 'Cancelado'
+                                : 'En progreso'}
+                          </Badge>
+                          <Button
+                            variant='light'
+                            size='xs'
+                            onClick={() =>
+                              router.push(
+                                `/process/request-general/view-request?id=${request.linked_request_id}`
+                              )
+                            }
+                          >
+                            Ver solicitud
+                          </Button>
+                        </Group>
+                      ) : (
+                        <Button
+                          color='grape'
+                          disabled={currentTaskLocked || isRequestResolved() || !canEdit}
+                          onClick={() =>
+                            router.push(
+                              `/process/request-general/create-request?linkedProcess=${request.id_linked_process}&originTask=${request.id}&company=${request.id_company}`
+                            )
+                          }
+                        >
+                          Crear solicitud del flujo
+                        </Button>
+                      )}
+                    </Card>
+                  </div>
+                )}
+
+                {!request.id_linked_process && (
                 <div>
                   <Title order={4} mb='md' className='flex items-center gap-2'>
                     <IconProgress size={18} className='text-blue-6' />
@@ -2019,8 +2086,9 @@ function ViewRequestPage() {
                     </Card>
                   )}
                 </div>
+                )}
 
-                <Divider />
+                {!request.id_linked_process && <Divider />}
 
                 <div>
                   <Group justify='space-between' mb='md'>
@@ -2085,7 +2153,7 @@ function ViewRequestPage() {
                           color='blue'
                           onClick={handleStartEditing}
                           leftSection={<IconTicket size={16} />}
-                          disabled={isRequestResolved() || currentTaskLocked || !canEdit}
+                          disabled={isRequestResolved() || currentTaskLocked || !canEdit || !!request.id_linked_process}
                         >
                           Editar Tarea
                         </Button>
@@ -2725,7 +2793,7 @@ function ViewRequestPage() {
                   color='blue'
                   onClick={handleStartEditing}
                   leftSection={<IconTicket size={16} />}
-                  disabled={isRequestResolved() || currentTaskLocked || !canEdit}
+                  disabled={isRequestResolved() || currentTaskLocked || !canEdit || !!request.id_linked_process}
                 >
                   Editar Tarea
                 </Button>
