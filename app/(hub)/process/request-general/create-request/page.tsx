@@ -95,6 +95,7 @@ import {
   RequestsPage,
   StatFilterTile,
 } from '../../../../../components/request-general/list/RequestListUi';
+import { SignatureAutoCloseToggle } from '../../../../../components/request-general/list/SignatureAutoCloseToggle';
 import { panelStyles } from '../../../../../components/ui/panel/Panel';
 import {
   buildTaskDisplayBadges,
@@ -1430,6 +1431,7 @@ function RequestBoard() {
         subtitle='Gestión y seguimiento de solicitudes generales'
         actions={
           <>
+            <SignatureAutoCloseToggle />
             <Button
               variant='default'
               radius='xl'
