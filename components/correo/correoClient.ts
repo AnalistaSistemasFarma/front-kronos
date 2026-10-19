@@ -22,6 +22,15 @@ export interface EstadoCorreo {
     eliminarHabilitado?: boolean;
     sincronizacionAutomatica: boolean;
   };
+  /** Dominios del grupo (Redactar marca en amarillo a los destinatarios externos). */
+  dominiosGrupo?: string[];
+}
+
+/** Sugerencia del autocompletado de Redactar. */
+export interface SugerenciaDestinatario {
+  nombre: string;
+  correo: string;
+  origen: 'reciente' | 'directorio';
 }
 
 /** `proyectos`: proyectos del chat donde se vinculó el hilo (se avisa antes de eliminarlo). */
@@ -219,6 +228,19 @@ export const correoApi = {
   confirmarAccion: (id: number, edicion: Record<string, unknown> = {}) =>
     post<{ estado: string; resultado: string; idRequest: number | null }>(`/api/correo/agente/acciones/${id}`, { op: 'confirmar', ...edicion }),
   descartarAccion: (id: number) => post<{ estado: string; resultado: string }>(`/api/correo/agente/acciones/${id}`, { op: 'descartar' }),
+  /** Autocompletado de Redactar: recientes de la persona y directorio de la organización. */
+  destinatarios: (q: string, signal?: AbortSignal) => get<{ destinatarios: SugerenciaDestinatario[] }>(`/api/correo/destinatarios?${new URLSearchParams({ q })}`, signal),
+  /** Correo NUEVO desde el buzón propio (el servidor usa el de la sesión; aquí no se manda remitente). */
+  redactar: async (p: { para: string[]; cc: string[]; cco: string[]; asunto: string; texto: string; archivos: File[] }) => {
+    const fd = new FormData();
+    fd.set('para', JSON.stringify(p.para));
+    fd.set('cc', JSON.stringify(p.cc));
+    fd.set('cco', JSON.stringify(p.cco));
+    fd.set('asunto', p.asunto);
+    fd.set('texto', p.texto);
+    for (const f of p.archivos) fd.append('files', f, f.name);
+    return leer<{ ok: boolean; destinatarios: number }>(await fetch('/api/correo/redactar', { method: 'POST', body: fd }));
+  },
   responder: async (p: { mensajeId: string; texto: string; todos: boolean; archivos: File[] }) => {
     const fd = new FormData();
     fd.set('mensajeId', p.mensajeId);

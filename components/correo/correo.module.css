@@ -522,3 +522,67 @@
   outline: 2px solid #93c5fd;
   outline-offset: 2px;
 }
+
+/*
+ * Redactar (2026-10-19): ventana flotante abajo a la derecha en el escritorio (como Gmail) y botón flotante en el
+ * celular. Solo variables de Mantine: claro y oscuro salen solos.
+ */
+.redactarFlotante {
+  position: fixed;
+  right: 24px;
+  bottom: 0;
+  z-index: 300;
+  width: min(560px, calc(100vw - 48px));
+  max-height: calc(100dvh - var(--app-header-height, 4rem) - 24px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  background: var(--mantine-color-body);
+}
+
+.redactarFlotante[data-minimizado='1'] {
+  width: 300px;
+}
+
+.redactarCabecera {
+  flex: 0 0 auto;
+  padding: 8px 10px 8px 14px;
+  background: var(--mantine-color-default-hover);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  cursor: default;
+}
+
+.redactarFlotante[data-minimizado='1'] .redactarCabecera {
+  cursor: pointer;
+  border-bottom: 0;
+}
+
+.redactarCuerpo {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.redactarEditor {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--mantine-spacing-sm);
+}
+
+.redactarPie {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+
+/* Celular: «Redactar» flota abajo a la derecha sobre la lista, como el botón de Gmail. */
+.fabRedactar {
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: 200;
+  box-shadow: var(--mantine-shadow-lg);
+}

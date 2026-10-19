@@ -18,6 +18,8 @@ export async function GET(request: Request) {
       empresas: ctx.acceso.empresasSolicitud,
       empresaBuzon: ctx.acceso.empresas[0]?.idCompany ?? null,
       conexion,
+      // Dominios del grupo: la ventana de Redactar marca en amarillo a los destinatarios externos.
+      dominiosGrupo: ctx.deps.dominiosGrupo,
     });
   } catch (error) {
     return errorResponse(error, 'estado');

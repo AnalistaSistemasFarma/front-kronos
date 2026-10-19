@@ -34,6 +34,21 @@ export const CORREO_MAX_TOTAL_RESPUESTA_BYTES = 10 * 1024 * 1024;
 /** Texto de la respuesta (sin adjuntos). */
 export const CORREO_MAX_RESPUESTA_CHARS = 20_000;
 
+/**
+ * Redactar (2026-10-19, pedido de Nicolás Rivera): correo NUEVO desde el buzón de la sesión. Mismos topes de
+ * adjuntos y de texto que la respuesta (3 MB por archivo, 5 archivos, 10 MB en total). Destinatarios: máximo
+ * entre Para, CC y CCO juntos (Exchange admite 500; aquí se limita para que un error no llegue a media empresa).
+ */
+export const CORREO_MAX_DESTINATARIOS = 50;
+/** Asunto del correo nuevo (Outlook admite 255). */
+export const CORREO_MAX_ASUNTO_NUEVO = 255;
+/** Autocompletado de destinatarios: sugerencias por consulta y largo de la búsqueda. */
+export const CORREO_MAX_SUGERENCIAS = 8;
+export const CORREO_MAX_BUSQUEDA_DESTINATARIO = 60;
+/** Contactos recientes: se leen de los últimos correos ENVIADOS del buzón propio, en caché corta en memoria. */
+export const CORREO_RECIENTES_MENSAJES = 50;
+export const CORREO_RECIENTES_CACHE_MS = 5 * 60_000;
+
 /** Categoría de Outlook con la que se marca un correo convertido: «SynerLink #123». */
 export const CORREO_CATEGORIA_PREFIJO = 'SynerLink #';
 export function correoCategoria(idRequest: number): string {
@@ -70,6 +85,8 @@ export const CORREO_AUDIT_ACCIONES = [
   // Deslizar para eliminar (2026-10-18): mover a «Elementos eliminados» y «Deshacer» (nunca se borra de forma permanente).
   'ELIMINAR',
   'RESTAURAR',
+  // Redactar (2026-10-19): correo nuevo desde el buzón propio. Se registran destinatarios y asunto, nunca el cuerpo.
+  'ENVIAR_NUEVO',
 ] as const;
 export type CorreoAuditAccion = (typeof CORREO_AUDIT_ACCIONES)[number];
 
