@@ -16,10 +16,10 @@ const OTRO = `${año}-${mes}-20`;
 
 const PERSONAS = {
   [DIA]: [
-    { nombre: 'ACOSTA RUIZ LUIS FERNANDO', empresa: 'GROUP SHARED SERVICES SAS', area: 'CONTABILIDAD' },
-    { nombre: 'PEREZ GOMEZ ANA MARIA', empresa: 'LABORATORIO RYAN DE COLOMBIA S.A.S', area: 'CONTROL DE CALIDAD' },
+    { nombre: 'ACOSTA RUIZ LUIS FERNANDO', empresa: 'GROUP SHARED SERVICES SAS', cargo: 'ANALISTA CONTABLE' },
+    { nombre: 'PEREZ GOMEZ ANA MARIA', empresa: 'LABORATORIO RYAN DE COLOMBIA S.A.S', cargo: 'DIRECTOR DE PLANTA' },
   ],
-  [OTRO]: [{ nombre: 'MORA PINTO JUAN', empresa: 'ABAMIA LABS SAS', area: 'COMERCIAL' }],
+  [OTRO]: [{ nombre: 'MORA PINTO JUAN', empresa: 'ABAMIA LABS SAS', cargo: 'GERENTE COMERCIAL' }],
 };
 
 async function simular(page: Page, opciones: { falla?: boolean } = {}) {
@@ -44,7 +44,7 @@ test.describe('Portal TH · Cumpleaños en el calendario', () => {
     expect((await request.get(`/api/portal/cumpleanos?desde=${DIA}&hasta=${DIA}`)).status()).toBe(401);
   });
 
-  test('el día del cumpleaños sale marcado y, al elegirlo, «CUMPLEAÑOS» con nombre, empresa y área de cada persona', async ({ page }) => {
+  test('el día del cumpleaños sale marcado y, al elegirlo, «CUMPLEAÑOS» con nombre, empresa y cargo de cada persona', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await simular(page);
     await page.goto('/portal');
@@ -60,11 +60,12 @@ test.describe('Portal TH · Cumpleaños en el calendario', () => {
     await expect(item).toContainText('Fecha importante');
     const personas = item.getByTestId('cumple-persona');
     await expect(personas).toHaveCount(2);
-    // ordenadas por nombre, con empresa contratante y área debajo del nombre
+    // ordenadas por nombre, con empresa contratante y CARGO debajo del nombre (el cargo reemplaza al área, 2026-10-19)
     await expect(personas.nth(0)).toContainText('ACOSTA RUIZ LUIS FERNANDO');
-    await expect(personas.nth(0)).toContainText('GROUP SHARED SERVICES SAS · CONTABILIDAD');
+    await expect(personas.nth(0)).toContainText('GROUP SHARED SERVICES SAS · ANALISTA CONTABLE');
+    await expect(personas.nth(0)).not.toContainText('CONTABILIDAD');
     await expect(personas.nth(1)).toContainText('PEREZ GOMEZ ANA MARIA');
-    await expect(personas.nth(1)).toContainText('LABORATORIO RYAN DE COLOMBIA S.A.S · CONTROL DE CALIDAD');
+    await expect(personas.nth(1)).toContainText('LABORATORIO RYAN DE COLOMBIA S.A.S · DIRECTOR DE PLANTA');
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/120-cumpleanos-dia.png` });
   });
 
