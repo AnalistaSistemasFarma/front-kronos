@@ -175,7 +175,7 @@ export default function LandingPage() {
               compartidos.
             </p>
             <div className={styles.ctaActions} data-fade>
-              <Link href='/register' className={`${styles.btn} ${styles.btnWhite}`} data-magnetic>
+              <Link href='/login' className={`${styles.btn} ${styles.btnWhite}`} data-magnetic>
                 Comenzar Ahora
                 <IconArrowRight size={18} />
               </Link>

@@ -17,6 +17,7 @@ import type { SgcActor, SgcDb } from './catalogs';
 import { resolveNewDocumentCode } from './coding';
 import { getVersionForViewer, type SgcUploader } from './documents';
 import { addInteraction, decideTask, requestOfTask } from './requests';
+import { createAutomaticParentRelation } from './hierarchy';
 import { cargoOf, composeContent, effectiveInstitutional, latestLayout, loadVerifiedDraft, personLabel } from './layout';
 import { isHeaderMandatory } from './companySettings';
 import { minorRevisionChain } from './drafts';
@@ -414,7 +415,7 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
       if (c && overflow.has(s.meaning)) registerCargos[s.signature_uid.trim()] = c;
     }
     // Con plantilla institucional, la firma que no se ubicó va en su recuadro «Firma» del encabezado.
-    const suggested = institutional ? new Map(suggestInstitutionalPlacements(signedParticipants, layout.fields).map((f) => [f.signerKey, f])) : new Map();
+    const suggested = institutional ? new Map(suggestInstitutionalPlacements(signedParticipants, layout.fields, composed.header?.template?.grid ?? null).map((f) => [f.signerKey, f])) : new Map();
     const placements: SgcManifestPlacement[] = [];
     for (const s of documentSignatures) {
       const key = keyOfAssignee.get(s.id_task_assignee);
@@ -501,6 +502,14 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
           },
         });
         idDocument = doc.id_document;
+        // 2026-10-19 (documentos padre e hijos): el hijo pedido por solicitud queda relacionado SOLO con su padre.
+        if (request.id_parent_document) {
+          await createAutomaticParentRelation(
+            tx,
+            { idCompany: request.id_company, idParent: request.id_parent_document, idChild: doc.id_document, childTypeCode: request.documentType!.code, origin: 'solicitud', reason: `Relación creada al aprobar la solicitud #${idRequest}: ${code} se desprende de su documento padre.` },
+            actor
+          );
+        }
       }
       const version = await tx.sgcDocumentVersion.create({
         data: {

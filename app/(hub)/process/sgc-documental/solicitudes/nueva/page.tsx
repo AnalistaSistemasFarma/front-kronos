@@ -33,7 +33,7 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
   const id = company.idCompany;
   const form = useSgcFetch<FormInfo>(`/api/sgc/requests/form?company=${id}`);
   const catalogs = useSgcFetch<SgcCatalogs>(`/api/sgc/catalogs?company=${id}`);
-  const docs = useSgcFetch<{ documents: { idDocument: number; code: string; title: string; versionNumber: number | null }[] }>(`/api/sgc/documents?company=${id}`);
+  const docs = useSgcFetch<{ documents: { idDocument: number; code: string; title: string; versionNumber: number | null; documentType?: { code: string } }[] }>(`/api/sgc/documents?company=${id}`);
   // Sprint 5: «Iniciar nueva versión» desde el calendario o la ficha llega con ?tipo=nueva_version&documento=<id>.
   const [prefill] = useState(() => {
     if (typeof window === 'undefined') return { tipo: null as string | null, documento: null as string | null };
@@ -59,6 +59,12 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
   const selectedType = catalogs.data?.documentTypes.find((t) => String(t.id) === idDocumentType) ?? null;
   const guide = catalogs.data?.codingGuide ?? null;
   const inherits = Boolean(requestType === 'nuevo' && guide && selectedType && inheritsParentNumber(guide, selectedType.code));
+  // 2026-10-19 (documentos padre e hijos): el procedimiento (tipo padre) no tiene padre; los demás tipos pueden
+  // indicar su padre (obligatorio si heredan el número) y, al aprobarse, la relación padre → hijo se crea sola.
+  const parentTypeCodes = catalogs.data?.parentTypeCodes ?? [];
+  const isParentType = Boolean(selectedType && parentTypeCodes.includes(selectedType.code));
+  const canHaveParent = Boolean(requestType === 'nuevo' && selectedType && !isParentType);
+  const parentOptions = (docs.data?.documents ?? []).filter((d) => !d.documentType || parentTypeCodes.includes(d.documentType.code));
   const [subjectTouched, setSubjectTouched] = useState(false);
   const suggestedSubject = selectedDoc && requestType === 'nueva_version' ? `Nueva versión de ${selectedDoc.code} (V${(selectedDoc.versionNumber ?? 0) + 1})` : '';
 
@@ -82,7 +88,7 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
         idProcess: requestType === 'nuevo' ? Number(idProcess) : undefined,
         idDocumentType: requestType === 'nuevo' ? Number(idDocumentType) : undefined,
         idDocument: requestType !== 'nuevo' ? Number(idDocument) : undefined,
-        idParentDocument: inherits && idParentDocument ? Number(idParentDocument) : undefined,
+        idParentDocument: canHaveParent && idParentDocument ? Number(idParentDocument) : undefined,
         requiresTraining: requiresTraining === 'tipo' ? undefined : requiresTraining,
         formValues: values,
       });
@@ -152,19 +158,31 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
                 data-testid='sgc-nueva-tipo-documental'
               />
             </Grid.Col>
-            {inherits && (
+            {canHaveParent && (
               <Grid.Col span={12}>
                 <SgcSelect
                   label='Documento padre'
-                  description={`Un ${selectedType?.name.toLowerCase() ?? 'documento'} hereda el número de su documento padre (por ejemplo, el procedimiento).`}
-                  required
+                  description={
+                    inherits
+                      ? `Un ${selectedType?.name.toLowerCase() ?? 'documento'} hereda el número de su documento padre (por ejemplo, el procedimiento). Al aprobarse, queda relacionado con él.`
+                      : 'Opcional: el procedimiento del que se desprende. Al aprobarse, el documento queda relacionado con él.'
+                  }
+                  required={inherits}
+                  clearable={!inherits}
                   searchable
-                  data={(docs.data?.documents ?? []).map((d) => ({ value: String(d.idDocument), label: `${d.code} · ${d.title}` }))}
+                  data={parentOptions.map((d) => ({ value: String(d.idDocument), label: `${d.code} · ${d.title}` }))}
                   value={idParentDocument}
                   onChange={setIdParentDocument}
-                  nothingFoundMessage='No hay documentos vigentes que usted pueda consultar'
+                  nothingFoundMessage='No hay documentos padre vigentes que usted pueda consultar'
                   data-testid='sgc-nueva-padre'
                 />
+              </Grid.Col>
+            )}
+            {requestType === 'nuevo' && isParentType && (
+              <Grid.Col span={12}>
+                <Alert color='blue' variant='light' icon={<IconAlertCircle size={16} />} data-testid='sgc-nueva-tipo-padre'>
+                  Un {selectedType?.name.toLowerCase()} es documento padre: no tiene padre. De él se desprenden sus formatos e instructivos, que heredan su número.
+                </Alert>
               </Grid.Col>
             )}
           </Grid>

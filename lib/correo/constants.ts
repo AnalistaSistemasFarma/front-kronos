@@ -67,6 +67,9 @@ export const CORREO_AUDIT_ACCIONES = [
   'AGENTE_CONFIRMAR',
   'AGENTE_DESCARTAR',
   'AGENTE_FALLIDO',
+  // Deslizar para eliminar (2026-10-18): mover a «Elementos eliminados» y «Deshacer» (nunca se borra de forma permanente).
+  'ELIMINAR',
+  'RESTAURAR',
 ] as const;
 export type CorreoAuditAccion = (typeof CORREO_AUDIT_ACCIONES)[number];
 
@@ -84,6 +87,14 @@ export const CORREO_LOTE_MARCAR_CARPETA = 200;
 /** «Marcar todo»: tope total por acción; por encima se pide confirmación desde CORREO_CONFIRMAR_MARCAR_CARPETA. */
 export const CORREO_MAX_MARCAR_CARPETA = 5_000;
 export const CORREO_CONFIRMAR_MARCAR_CARPETA = 500;
+
+/**
+ * Eliminar (deslizar a la izquierda, botón o selección; 2026-10-18): correos por petición. Se MUEVEN a
+ * «Elementos eliminados» (Graph `move` a `deleteditems`); nunca se borran de forma permanente.
+ */
+export const CORREO_MAX_ELIMINAR_SELECCION = 100;
+/** Vigencia del comprobante firmado de «Deshacer» (el aviso dura ~7 s; el margen cubre una red lenta). */
+export const CORREO_DESHACER_VIGENCIA_MS = 5 * 60_000;
 
 /**
  * «Consultar a un agente» (diseño aprobado por Nicolás Rivera, 2026-10-16 09:24–09:27): la persona
