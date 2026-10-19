@@ -205,9 +205,9 @@ export default function ProyectosPage() {
           opened={nuevoAbierto}
           datos={datos}
           onClose={() => setNuevoAbierto(false)}
-          onCreado={(id) => {
+          onCreado={(id, equipoPedido) => {
             setNuevoAbierto(false);
-            router.push(`/process/proyectos/${id}?creado=1`);
+            router.push(`/process/proyectos/${id}?creado=${equipoPedido ? 'equipo' : '1'}`);
           }}
         />
       )}

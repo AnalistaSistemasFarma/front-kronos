@@ -32,7 +32,7 @@ export default function NuevoProyectoModal({
   opened: boolean;
   datos: ListaProyectosDto;
   onClose: () => void;
-  onCreado: (idProject: number) => void;
+  onCreado: (idProject: number, equipoPedido: boolean) => void;
 }) {
   const escritorio = useMediaQuery(CONSULTA_ESCRITORIO) ?? true;
   const [nombre, setNombre] = useState('');
@@ -41,6 +41,8 @@ export default function NuevoProyectoModal({
   const [agentes, setAgentes] = useState<string[]>([]);
   const [perfil, setPerfil] = useState<string | null>(null);
   const [instrucciones, setInstrucciones] = useState('');
+  // Equipo de subagentes (F2, 2026-10-18): «de primeras», el asistente propone un equipo al crear.
+  const [sugerirEquipo, setSugerirEquipo] = useState(true);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,6 +53,7 @@ export default function NuevoProyectoModal({
     setNombre('');
     setDescripcion('');
     setInstrucciones('');
+    setSugerirEquipo(true);
     setError(null);
     setEmpresa(primera ? String(primera.idCompany) : null);
   }, [opened, datos]);
@@ -78,14 +81,14 @@ export default function NuevoProyectoModal({
     if (!listo || !empresa || !perfil) return;
     setEnviando(true);
     setError(null);
-    const r = await apiSend<{ idProject: number }>(
+    const r = await apiSend<{ idProject: number; teamRequested?: boolean }>(
       'POST',
       '/api/proyectos',
-      { name: nombre, idCompany: Number(empresa), description: descripcion, agentCodes: agentes, profile: perfil, instructions: instrucciones },
+      { name: nombre, idCompany: Number(empresa), description: descripcion, agentCodes: agentes, profile: perfil, instructions: instrucciones, suggestTeam: sugerirEquipo },
       'No se pudo crear el proyecto.'
     );
     setEnviando(false);
-    if (r.ok && r.data.idProject) onCreado(r.data.idProject);
+    if (r.ok && r.data.idProject) onCreado(r.data.idProject, r.data.teamRequested === true);
     else if (!r.ok) setError(r.error);
   };
 
@@ -198,6 +201,13 @@ export default function NuevoProyectoModal({
           autosize
           minRows={3}
           maxRows={8}
+        />
+        <Checkbox
+          checked={sugerirEquipo}
+          onChange={(e) => setSugerirEquipo(e.currentTarget.checked)}
+          label='Pedir al asistente que sugiera un equipo de subagentes'
+          description='Propondrá de 3 a 6 especialistas para las actividades del proyecto. Usted los aprueba, edita o descarta en la sección «Equipo»; nada trabaja sin su aprobación.'
+          data-testid='proyectos-sugerir-equipo'
         />
         <Group justify='flex-end' gap='sm' className={escritorio ? undefined : css.pieModal}>
           <Button variant='default' onClick={onClose}>

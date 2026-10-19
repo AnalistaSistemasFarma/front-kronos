@@ -862,6 +862,10 @@ model ChatProject {
   description  String?  @db.NVarChar(1000)
   created_by   String   @db.NVarChar(1000)
   archived     Boolean  @default(false)
+  /// Equipo de subagentes (F2, 2026-10-18): el dueño lo apaga sin borrar el equipo.
+  team_enabled      Boolean @default(true)
+  /// Subagentes a la vez en un turno (1 a 5). El puente lo acota con su propio tope.
+  team_max_parallel Int     @default(3) @db.TinyInt
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt
 
@@ -877,6 +881,9 @@ model ChatProject {
   tasks         ChatProjectTask[]
   proposals     ChatProjectProposal[]
   grants        ChatProjectGrant[]
+  subagents     ChatProjectSubagent[]
+  teamRequests  ChatProjectTeamRequest[]
+  subagentRuns  ChatProjectSubagentRun[]
 
   @@index([id_agent, archived])
   @@index([id_company])
@@ -1122,6 +1129,131 @@ model ChatProjectGrant {
 
   @@index([id_user, id_agent])
   @@map("chat_project_grant")
+  @@schema("dbo")
+}
+
+// ===================================================================
+// EQUIPO DE SUBAGENTES de un proyecto (F2, orquestador) — pedido de Nicolás
+// Rivera del 2026-10-18: «para el tema de proyectos quiero que puedas, de
+// primeras, sugerir subagentes especializados para hacer las actividades que
+// ellos requieran».
+//
+//   - El agente del proyecto PROPONE de 3 a 6 subagentes (pedido «Sugerir
+//     equipo»: chat_project_team_request, que atiende el puente de hilos).
+//   - El dueño (y el editor, solo si PROYECTOS_EQUIPO_EDITOR_APRUEBA=1)
+//     aprueba, edita o descarta cada uno. Solo lo APROBADO llega al puente.
+//   - Herramientas de un catálogo CERRADO (lib/proyectos/equipo-rules.ts);
+//     el puente las cruza con el perfil del proyecto. Nunca Bash ni Agent:
+//     un subagente no lanza otros.
+//   - Lo que hace cada subagente en un turno queda en chat_project_subagent_run
+//     (consumo por subagente) y los cambios del equipo, en una auditoría
+//     INMUTABLE (chat_project_team_event, con trigger).
+// ===================================================================
+
+/// Un subagente del equipo del proyecto.
+model ChatProjectSubagent {
+  id_subagent  Int       @id @default(autoincrement())
+  id_project   Int
+  /// Identificador para Claude Code (`subagent_type`): [a-z0-9-], 3 a 40. Único por proyecto entre los no descartados.
+  slug         String    @db.NVarChar(40)
+  name         String    @db.NVarChar(60)
+  purpose      String    @db.NVarChar(300)
+  instructions String?   @db.NVarChar(4000)
+  /// Catálogo cerrado, separado por comas: archivos,trabajo,web,conectores.
+  tools        String    @db.NVarChar(100)
+  /// null = el del agente principal; 'haiku' | 'sonnet' | 'opus'.
+  model        String?   @db.NVarChar(20)
+  /// 'propuesto' | 'aprobado' | 'descartado'
+  status       String    @default("propuesto") @db.NVarChar(20)
+  /// 'agente' (salió de «Sugerir equipo») | 'persona'
+  origin       String    @db.NVarChar(20)
+  id_request   Int?
+  /// Agente que lo sugirió.
+  id_agent     Int?
+  created_at   DateTime  @default(now())
+  updated_by   String?   @db.NVarChar(1000)
+  updated_at   DateTime?
+  reviewed_by  String?   @db.NVarChar(1000)
+  reviewed_at  DateTime?
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+
+  @@index([id_project, status])
+  @@map("chat_project_subagent")
+  @@schema("dbo")
+}
+
+/// Pedido de «Sugerir equipo». Lo reclama y lo responde el puente del agente.
+model ChatProjectTeamRequest {
+  id_request   Int       @id @default(autoincrement())
+  id_project   Int
+  id_agent     Int
+  requested_by String    @db.NVarChar(1000)
+  requested_at DateTime  @default(now())
+  /// 'pendiente' | 'en_curso' | 'lista' | 'fallida' | 'vencida'
+  status       String    @default("pendiente") @db.NVarChar(20)
+  claimed_at   DateTime?
+  finished_at  DateTime?
+  error        String?   @db.NVarChar(300)
+  suggested    Int       @default(0)
+  total_tokens Int       @default(0)
+  models       String?   @db.NVarChar(300)
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+
+  @@index([id_agent, status])
+  @@index([id_project, requested_at])
+  @@map("chat_project_team_request")
+  @@schema("dbo")
+}
+
+/// Lo que hizo UN subagente en UN turno (lo reporta el puente; dato declarado, como el consumo).
+model ChatProjectSubagentRun {
+  id_run          Int       @id @default(autoincrement())
+  id_project      Int
+  id_conversation Int
+  id_agent        Int
+  id_subagent     Int?
+  slug            String    @db.NVarChar(40)
+  description     String    @db.NVarChar(200)
+  /// 'ok' | 'error' | 'cancelado'
+  status          String    @db.NVarChar(20)
+  session_id      String?   @db.NVarChar(120)
+  turn_started_at DateTime?
+  started_at      DateTime?
+  ended_at        DateTime?
+  duration_ms     Int?
+  total_tokens    Int       @default(0)
+  tool_uses       Int       @default(0)
+  model           String?   @db.NVarChar(80)
+  created_at      DateTime  @default(now())
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+
+  @@index([id_project, created_at])
+  @@index([id_conversation])
+  @@map("chat_project_subagent_run")
+  @@schema("dbo")
+}
+
+/// Auditoría INMUTABLE del equipo (un trigger impide UPDATE y DELETE).
+model ChatProjectTeamEvent {
+  id_event    Int      @id @default(autoincrement())
+  id_project  Int
+  id_subagent Int?
+  /// 'pedir' | 'sugerir' | 'aprobar' | 'editar' | 'descartar' | 'restaurar' | 'configurar' | 'bloqueo' | 'fallar'
+  action      String   @db.NVarChar(30)
+  detail      String   @db.NVarChar(1000)
+  /// JSON { campo: [antes, después] } cuando aplica.
+  changes     String?  @db.NVarChar(Max)
+  id_user     String?  @db.NVarChar(1000)
+  id_agent    Int?
+  /// 'web' | 'puente'
+  via         String   @db.NVarChar(20)
+  created_at  DateTime @default(now())
+
+  @@index([id_project, created_at])
+  @@map("chat_project_team_event")
   @@schema("dbo")
 }
 

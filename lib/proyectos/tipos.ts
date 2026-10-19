@@ -140,6 +140,8 @@ export interface ProyectoDetalleDto extends ProyectoResumenDto {
   files: ArchivoDto[];
   conversations: ConversacionDto[];
   links: { emails: CorreoVinculadoDto[]; requests: SolicitudVinculadaDto[] };
+  /** Subagentes APROBADOS del equipo (F2, 2026-10-18). */
+  teamCount: number;
 }
 
 /** Un hilo del buzón PROPIO, para escoger cuál vincular. */
@@ -270,4 +272,80 @@ export interface ConcesionProyectoDto {
   createdAt: string;
   expiresAt: string;
   idChatConversation: number;
+}
+
+/* ─────────────── Equipo de subagentes (F2, 2026-10-18) ─────────────── */
+
+export type HerramientaEquipoDto = 'archivos' | 'trabajo' | 'web' | 'conectores';
+export type ModeloSubagenteDto = 'haiku' | 'sonnet' | 'opus';
+
+export interface SubagenteDto {
+  id: number;
+  /** Identificador que usa el asistente (`subagent_type`). */
+  slug: string;
+  name: string;
+  purpose: string;
+  instructions: string | null;
+  tools: HerramientaEquipoDto[];
+  /** null = el del asistente principal. */
+  model: ModeloSubagenteDto | null;
+  status: 'propuesto' | 'aprobado' | 'descartado';
+  origin: 'agente' | 'persona';
+  /** Asistente que lo sugirió. */
+  suggestedBy: string | null;
+  createdAt: string;
+  reviewedBy: PersonaDto | null;
+  reviewedAt: string | null;
+  /** Últimos 30 días. */
+  uso30d: { corridas: number; tokens: number; ultima: string | null };
+}
+
+export interface PedidoEquipoDto {
+  id: number;
+  status: 'pendiente' | 'en_curso' | 'lista' | 'fallida' | 'vencida';
+  requestedAt: string;
+  finishedAt: string | null;
+  requestedBy: PersonaDto | null;
+  agent: AgenteMiniDto | null;
+  error: string | null;
+  suggested: number;
+}
+
+/** Lo que hizo un subagente en un turno (lo reporta el puente). */
+export interface CorridaSubagenteDto {
+  id: number;
+  slug: string;
+  name: string;
+  description: string;
+  status: 'ok' | 'error' | 'cancelado';
+  conversation: { id: number; title: string | null } | null;
+  startedAt: string;
+  durationMs: number | null;
+  totalTokens: number;
+  toolUses: number;
+  model: string | null;
+}
+
+export interface EquipoDto {
+  /** El dueño puede apagar el equipo sin borrarlo. */
+  enabled: boolean;
+  /** Subagentes a la vez (el puente lo acota con su propio tope). */
+  maxParallel: number;
+  topeMaximo: number;
+  /** Siempre 1: los subagentes no lanzan otros. */
+  profundidad: number;
+  maxEquipo: number;
+  /** Herramientas del catálogo que admite el perfil del proyecto. */
+  disponibles: HerramientaEquipoDto[];
+  profileLabel: string;
+  capacidades: { ver: boolean; sugerir: boolean; aprobar: boolean; configurar: boolean };
+  /** ¿El editor también aprueba? (PROYECTOS_EQUIPO_EDITOR_APRUEBA). */
+  editorAprueba: boolean;
+  /** Asistentes con los que ESTA persona puede pedir una sugerencia. */
+  sugeridores: AgenteMiniDto[];
+  members: SubagenteDto[];
+  /** El pedido de «Sugerir equipo» más reciente. */
+  pedido: PedidoEquipoDto | null;
+  corridas: CorridaSubagenteDto[];
+  consumo30d: { corridas: number; tokens: number };
 }

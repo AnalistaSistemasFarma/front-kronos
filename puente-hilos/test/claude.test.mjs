@@ -68,9 +68,14 @@ test('sesión: --session-id la primera vez, --resume después', () => {
 
 test('el hijo NO hereda el entorno del puente: solo config aislado y una credencial', () => {
   const env = armarEntorno({ path: '/usr/bin', home: '/Users/x', configClaudeDir: '/Users/x/.puente-hilos/p/claude-config', credencial: { tipo: 'api-key', valor: 'sk-test' } });
+  // Los topes de subagentes van SIEMPRE (F2): sin equipo, tope 1 y Agent prohibida.
   assert.deepEqual(Object.keys(env).sort(), [
     'ANTHROPIC_API_KEY',
+    'CLAUDE_CODE_DISABLE_BACKGROUND_TASKS',
+    'CLAUDE_CODE_DISABLE_EXPLORE_PLAN_AGENTS',
     'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+    'CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS',
+    'CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH',
     'CLAUDE_CONFIG_DIR',
     'DISABLE_AUTOUPDATER',
     'HOME',
@@ -78,6 +83,8 @@ test('el hijo NO hereda el entorno del puente: solo config aislado y una credenc
     'PATH',
   ]);
   assert.ok(!('HILOS_SYNERLINK_KEY' in env));
+  assert.equal(env.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS, '1');
+  assert.equal(env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH, '1');
   const conToken = armarEntorno({ path: '/usr/bin', home: '/h', configClaudeDir: '/c', credencial: { tipo: 'oauth-token', valor: 't' } });
   assert.equal(conToken.CLAUDE_CODE_OAUTH_TOKEN, 't');
   assert.ok(!('ANTHROPIC_API_KEY' in conToken));
