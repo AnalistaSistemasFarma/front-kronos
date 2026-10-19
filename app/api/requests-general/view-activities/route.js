@@ -9,6 +9,8 @@ const TASK_SELECT = `
             trg.id, trg.id_task, tpc.task ,rg.id as id_request_general, rg.description, rg.subject_request, rg.id_company, c.company ,rg.created_at,
             rg.id_requester, urq.name as name_requester, urq.email as requester_email, rg.status_req, trg.id_status ,sc.status as status_task, u.name as assigned, pc.process, cr.category,
             trg.start_date, trg.resolution, trg.date_resolution, uex.name as executor_final,
+            tpc.id_linked_process, lp.process as linked_process_label,
+            lrq.id as linked_request_id, lrq.status_req as linked_request_status,
             pc.id AS id_process_category
         FROM task_request_general trg
             INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
@@ -21,6 +23,8 @@ const TASK_SELECT = `
             LEFT JOIN [user] urq ON urq.id = rg.id_requester
             INNER JOIN company c ON c.id_company = rg.id_company
 			      LEFT JOIN [user] uex ON uex.id = trg.id_executor_final
+            LEFT JOIN process_category lp ON lp.id = tpc.id_linked_process
+            LEFT JOIN requests_general lrq ON lrq.id_origin_task = trg.id
 `;
 
 /**

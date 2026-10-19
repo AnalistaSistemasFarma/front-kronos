@@ -20,6 +20,7 @@ export async function POST(req) {
       createdby,
       url,
       formValues,
+      originTaskId,
     } = body;
 
     if (!company || !subject || !process || !descripcion) {
@@ -43,6 +44,7 @@ export async function POST(req) {
         createdby: requesterId || createdby,
         url,
         formValues,
+        originTaskId: originTaskId ? Number(originTaskId) : null,
       });
     } catch (dbError) {
       console.error('Error en transacción:', dbError);
