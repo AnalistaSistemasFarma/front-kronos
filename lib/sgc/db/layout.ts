@@ -178,6 +178,8 @@ export async function getDocumentLayout(db: SgcDb, idRequest: number, viewer: Sg
   const institutionalHeader = headerMandatory ? draft?.format !== 'pdf' : layout.institutionalHeader;
   // D6 (E2E 2026-10-10): quien va solo al registro de firmas no cuenta como «sin ubicar».
   const inRegister = new Set(registerOnlyParticipants(participants, fields).map((p) => p.key));
+  // 2026-10-19: con una plantilla con grilla, las firmas sugeridas caen en sus celdas «Firma».
+  const grid = institutionalHeader ? (await headerTemplateForType(db, row.id_company, row.id_document_type ?? null)).config.grid : null;
   return {
     idRequest,
     institutionalHeader,
@@ -186,7 +188,7 @@ export async function getDocumentLayout(db: SgcDb, idRequest: number, viewer: Sg
     participants,
     missing: missingPlacements(participants, fields).filter((p) => !inRegister.has(p.key)).map((p) => p.key),
     inRegister: [...inRegister],
-    suggested: institutionalHeader ? suggestInstitutionalPlacements(participants, fields) : [],
+    suggested: institutionalHeader ? suggestInstitutionalPlacements(participants, fields, grid) : [],
     canEdit,
     draft: draft ? { name: draft.name, sha256: draft.sha256, format: draft.format } : null,
     // La firma se ubicó sobre otro borrador: conviene revisar que la caja siga en su sitio.

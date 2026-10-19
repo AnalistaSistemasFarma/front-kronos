@@ -344,6 +344,12 @@ jobs:
           # S19: el Generador solo para documentos sin codificación (tipo «plantilla guía»).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014130000_sgc_s19_generador_sin_codificacion/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261014130000_sgc_s19_generador_sin_codificacion/migration.sql
+          # Documentos padre e hijos (2026-10-19): migración y script de PRUEBAS dos veces (idempotencia); el de PROD se niega fuera de KRONOSDB. La reversa se prueba en tests/integration/sgc/padres-hijos.integration.test.ts.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261019100000_sgc_padres_hijos/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261019100000_sgc_padres_hijos/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-19-sgc-padres-hijos-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-19-sgc-padres-hijos-PRUEBAS.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-19-sgc-padres-hijos-PROD.sql; then echo "El script de PROD de padres e hijos debió negarse en kronos_ci"; exit 1; fi
           # Bitácora de Proceso (antes Órdenes de Trabajo; P0): tablas + triggers de integridad, inspector e íconos, y la siembra de Farmalógica (ambas dos veces: idempotentes).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013180000_ordenes_trabajo_p0/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261013180000_ordenes_trabajo_p0/migration.sql
@@ -433,7 +439,7 @@ jobs:
         run: |
           set -e
           # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
-          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida"
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida"
           reversa() {
             { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
@@ -454,6 +460,11 @@ jobs:
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/proyectos-quitado.sql
           migra 20261017120000_chat_projects
           migra 20261018120000_proyectos_modulo
+          # Padres e hijos (2026-10-19): con tipos padre marcados y relaciones creadas solas (integración), sin la bandera debe negarse.
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-19-sgc-padres-hijos-reversa.sql; then echo "La reversa de padres e hijos debió negarse sin su bandera"; exit 1; fi
+          reversa prisma/manual/2026-10-19-sgc-padres-hijos-reversa.sql
+          echo "IF COL_LENGTH(N'sgc.document_type', N'is_parent_type') IS NOT NULL OR EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'document_relation_origen_estado_ck' AND definition LIKE N'%solicitud%') OR EXISTS (SELECT 1 FROM sgc.document_relation WHERE origin IN (N'solicitud', N'carga')) THROW 50000, N'La reversa de padres e hijos no quitó lo suyo.', 1;" > /tmp/padres-hijos-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/padres-hijos-quitado.sql
           # S19: con un tipo marcado como plantilla guía (integración del Generador), sin la bandera debe negarse.
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-14-sgc-s19-generador-sin-codificacion-reversa.sql; then echo "La reversa del S19 debió negarse sin su bandera"; exit 1; fi
           reversa prisma/manual/2026-10-14-sgc-s19-generador-sin-codificacion-reversa.sql
@@ -504,6 +515,7 @@ jobs:
           migra 20261014110000_sgc_s16_encabezados_excel
           migra 20261014120000_sgc_s17_evaluaciones
           migra 20261014130000_sgc_s19_generador_sin_codificacion
+          migra 20261019100000_sgc_padres_hijos
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-08-sgc-s8-guia-codificacion-olp.sql
 
       - name: Bitácora de Proceso — reversa (ida y vuelta)

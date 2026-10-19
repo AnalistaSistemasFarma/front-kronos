@@ -38,6 +38,7 @@ export const SGC_SCHEMA_MIGRATIONS = [
   '20261014110000_sgc_s16_encabezados_excel',
   '20261014120000_sgc_s17_evaluaciones',
   '20261014130000_sgc_s19_generador_sin_codificacion',
+  '20261019100000_sgc_padres_hijos',
 ];
 
 export function sha256Hex(content) {
