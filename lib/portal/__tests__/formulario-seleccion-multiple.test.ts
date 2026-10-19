@@ -32,9 +32,12 @@ describe('definición: selección múltiple y lista', () => {
     expect(d.preguntas[0]).toMatchObject({ tipo: 'seleccion_multiple', opciones: ['A', 'B', 'C', 'D'] });
     expect(d.preguntas[0].permiteOtra).toBeUndefined();
   });
-  it('no admite "otra respuesta" ni lista desplegable en una selección múltiple', () => {
-    expect(errores(encuesta([multiple({ permiteOtra: true })]))).toMatch(/no admite "otra respuesta"/);
+  it('admite "otra respuesta" (formularios SST, 2026-10-19) pero no lista desplegable en una selección múltiple', () => {
+    expect(valida(encuesta([multiple({ permiteOtra: true })])).preguntas[0].permiteOtra).toBe(true);
     expect(errores(encuesta([multiple({ presentacion: 'lista' })]))).toMatch(/solo para la selección única/);
+  });
+  it('en una evaluación, una pregunta con puntos sigue sin admitir "otra respuesta" (no se puede calificar texto libre)', () => {
+    expect(errores(evaluacion([multiple({ permiteOtra: true, puntos: 100, correctas: [0] })]))).toMatch(/sin "otra respuesta"/);
   });
   it('lista desplegable: es una selección única con presentacion "lista"', () => {
     const d = valida(encuesta([{ id: 'l1', texto: 'Elija', tipo: 'seleccion', obligatoria: true, opciones: ['x', 'y'], presentacion: 'lista' }]));
