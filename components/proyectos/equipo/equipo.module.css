@@ -1,0 +1,242 @@
+/*
+ * Sección «Equipo» de un proyecto (F2, 2026-10-18). Solo variables de Mantine y de la aplicación,
+ * igual que el resto del módulo (proyectos.module.css y cronograma.module.css). Nada se sale por
+ * los lados: los textos largos se parten o se cortan con «…».
+ */
+
+.cabecera {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cabeceraFila {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.cabeceraAcciones {
+  margin-left: auto;
+  align-items: center;
+}
+
+.interruptor {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+}
+
+.topes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  padding-top: 8px;
+  border-top: 1px solid var(--app-border, var(--mantine-color-default-border));
+  min-width: 0;
+}
+
+.bloquePropuesto {
+  border-color: var(--mantine-color-grape-light-color);
+}
+
+.tarjeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--app-border, var(--mantine-color-default-border));
+  border-radius: var(--mantine-radius-md);
+  background: var(--mantine-color-body);
+  min-width: 0;
+}
+
+.tarjetaCuerpo {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.tarjetaTexto {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.nombre {
+  overflow-wrap: anywhere;
+}
+
+.instrucciones {
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-default-hover);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.verMas {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  min-height: 28px;
+  border-radius: var(--mantine-radius-sm);
+}
+
+.verMas:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 1px;
+}
+
+.acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.vacio {
+  border: 1px dashed var(--app-border, var(--mantine-color-default-border));
+  border-radius: var(--mantine-radius-md);
+}
+
+.vacioLinea {
+  padding: 10px 12px;
+  border: 1px dashed var(--app-border, var(--mantine-color-default-border));
+  border-radius: var(--mantine-radius-md);
+}
+
+.listaCorridas {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--app-border, var(--mantine-color-default-border));
+  border-radius: var(--mantine-radius-md);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.corrida {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  min-width: 0;
+}
+
+.corrida + .corrida {
+  border-top: 1px solid var(--app-border, var(--mantine-color-default-border));
+}
+
+.corridaIcono {
+  flex: 0 0 auto;
+  display: flex;
+}
+
+.corridaTitulo {
+  overflow-wrap: anywhere;
+}
+
+.corridaCifras {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+}
+
+.descartado {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 10px;
+  border: 1px solid var(--app-border, var(--mantine-color-default-border));
+  border-radius: var(--mantine-radius-md);
+  min-width: 0;
+}
+
+/* Celular y tableta: acciones de la tarjeta a lo ancho, objetivos táctiles de 44 px. */
+@media (max-width: 61.99em) {
+  .acciones {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .acciones > * {
+    flex: 1 1 0;
+  }
+
+  .acciones > .descartar {
+    flex: 0 0 44px;
+  }
+
+  .acciones :global(.mantine-Button-root) {
+    width: 100%;
+  }
+
+  .verMas {
+    min-height: 44px;
+  }
+
+  .interruptor {
+    min-height: 44px;
+  }
+
+  .cabeceraAcciones {
+    width: 100%;
+    margin-left: 0;
+    justify-content: space-between;
+  }
+
+  .topes :global(.mantine-SegmentedControl-control) {
+    min-width: 40px;
+  }
+
+  .topes :global(.mantine-SegmentedControl-label) {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+/* Celular angosto: las cifras de una corrida bajan debajo del texto (el icono queda a la izquierda). */
+@media (max-width: 30em) {
+  .corrida {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    column-gap: 10px;
+    row-gap: 4px;
+  }
+
+  .corridaCifras {
+    grid-column: 2;
+    flex-direction: row;
+    gap: 12px;
+    align-items: center;
+    justify-content: flex-start;
+    text-align: left;
+  }
+}
+
+.cifra {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
