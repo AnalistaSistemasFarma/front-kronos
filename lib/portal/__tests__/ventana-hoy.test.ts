@@ -4,7 +4,7 @@ import { IMAGEN_CUMPLEANOS, PREFIJO_MARCA_VENTANA_HOY, SEGUNDOS_VENTANA_HOY, cla
 
 // Ventana emergente «Hoy» (Cristian Baldión, 2026-10-15).
 
-const cumple = (fecha: string) => cumpleanosComoEventos([{ fecha, personas: [{ nombre: 'PEREZ GOMEZ ANA', empresa: 'GSS SAS', area: 'SISTEMAS' }] }]);
+const cumple = (fecha: string) => cumpleanosComoEventos([{ fecha, personas: [{ nombre: 'PEREZ GOMEZ ANA', empresa: 'GSS SAS', cargo: 'ANALISTA DE SISTEMAS' }] }]);
 const empresa = (fecha: string, titulo: string): EventoDia => ({ id: 1, fecha, titulo, tipo: 'empresa', descripcion: 'Auditorio' });
 
 describe('constantes', () => {

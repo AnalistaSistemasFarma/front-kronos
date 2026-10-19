@@ -33,7 +33,7 @@ async function preparar(page: Page, fecha: string, opciones: { empresa?: unknown
   );
 }
 
-const cumpleHoy = [{ fecha: HOY, personas: [{ nombre: 'ACOSTA RUIZ LUIS FERNANDO', empresa: 'GROUP SHARED SERVICES SAS', area: 'CONTABILIDAD' }, { nombre: 'PEREZ GOMEZ ANA MARIA', empresa: 'ABAMIA LABS SAS', area: 'COMERCIAL' }] }];
+const cumpleHoy = [{ fecha: HOY, personas: [{ nombre: 'ACOSTA RUIZ LUIS FERNANDO', empresa: 'GROUP SHARED SERVICES SAS', cargo: 'ANALISTA CONTABLE' }, { nombre: 'PEREZ GOMEZ ANA MARIA', empresa: 'ABAMIA LABS SAS', cargo: 'GERENTE COMERCIAL' }] }];
 const eventoEmpresa = [{ id: 7, fecha: HOY, titulo: 'Capacitación en seguridad', descripcion: 'Auditorio, 10:00', tipo: 'empresa' }];
 const ventana = (page: Page) => page.getByTestId('ventana-hoy');
 
@@ -56,7 +56,7 @@ test.describe('Portal TH · ventana emergente «Hoy»', () => {
     }
   });
 
-  test('con cumpleaños: la imagen de cumpleaños y, debajo del título, el nombre, la empresa y el área de cada persona', async ({ page }) => {
+  test('con cumpleaños: la imagen de cumpleaños y, debajo del título, el nombre, la empresa y el cargo de cada persona', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await preparar(page, HOY, { cumples: cumpleHoy });
     await page.goto('/portal');
@@ -69,7 +69,8 @@ test.describe('Portal TH · ventana emergente «Hoy»', () => {
     const personas = ventana(page).getByTestId('ventana-hoy-personas').locator('li');
     await expect(personas).toHaveCount(2);
     await expect(personas.nth(0)).toContainText('ACOSTA RUIZ LUIS FERNANDO');
-    await expect(personas.nth(0)).toContainText('GROUP SHARED SERVICES SAS · CONTABILIDAD');
+    await expect(personas.nth(0)).toContainText('GROUP SHARED SERVICES SAS · ANALISTA CONTABLE');
+    await expect(personas.nth(0)).not.toContainText('CONTABILIDAD');
     await expect(personas.nth(1)).toContainText('PEREZ GOMEZ ANA MARIA');
     if (CAPTURAS) {
       await page.waitForTimeout(500);

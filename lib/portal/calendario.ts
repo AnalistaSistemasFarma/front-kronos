@@ -27,7 +27,7 @@ export interface EventoDia {
   titulo: string;
   tipo: TipoEvento;
   descripcion?: string | null;
-  /** Solo los CUMPLEAÑOS: quiénes cumplen ese día (nombre, empresa contratante y área). */
+  /** Solo los CUMPLEAÑOS: quiénes cumplen ese día (nombre, empresa contratante y cargo). */
   personas?: PersonaCumple[];
 }
 
@@ -35,7 +35,7 @@ export interface EventoDia {
 export interface PersonaCumple {
   nombre: string;
   empresa: string;
-  area: string;
+  cargo: string;
 }
 
 /** Título del evento de cumpleaños (Cristian Baldión, 2026-10-15). */

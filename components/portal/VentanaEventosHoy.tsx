@@ -131,7 +131,7 @@ export default function VentanaEventosHoy() {
                       {e.personas.map((p, k) => (
                         <li key={`${p.nombre}-${k}`}>
                           <strong>{p.nombre}</strong>
-                          <small>{[p.empresa, p.area].filter(Boolean).join(' · ')}</small>
+                          <small>{[p.empresa, p.cargo].filter(Boolean).join(' · ')}</small>
                         </li>
                       ))}
                     </ul>

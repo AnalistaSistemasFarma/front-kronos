@@ -113,7 +113,7 @@ export default function PortalCalendario({ puedeEditar }: { puedeEditar: boolean
         const data = await lectura(res);
         if (control.signal.aborted) return;
         if (!res.ok) throw new Error(String(data.error ?? 'No se pudieron cargar los cumpleaños.'));
-        setCumples(cumpleanosComoEventos(Array.isArray(data.cumpleanos) ? (data.cumpleanos as { fecha: string; personas: { nombre: string; empresa: string; area: string }[] }[]) : []));
+        setCumples(cumpleanosComoEventos(Array.isArray(data.cumpleanos) ? (data.cumpleanos as { fecha: string; personas: { nombre: string; empresa: string; cargo: string }[] }[]) : []));
       } catch (e) {
         if (control.signal.aborted || (e as Error).name === 'AbortError') return;
         setCumples([]);
@@ -312,7 +312,7 @@ export default function PortalCalendario({ puedeEditar }: { puedeEditar: boolean
                         {e.personas.map((p, k) => (
                           <li key={`${p.nombre}-${k}`} data-testid='cumple-persona'>
                             <strong>{p.nombre}</strong>
-                            <small>{[p.empresa, p.area].filter(Boolean).join(' · ')}</small>
+                            <small>{[p.empresa, p.cargo].filter(Boolean).join(' · ')}</small>
                           </li>
                         ))}
                       </ul>
