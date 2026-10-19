@@ -436,7 +436,7 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
         },
         orderBy: { created_at: 'desc' },
       },
-      _count: { select: { tasks: true } },
+      _count: { select: { tasks: true, subagents: { where: { status: 'aprobado' } } } },
       conversations: {
         where: { archived: false },
         select: {
@@ -534,6 +534,7 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
     conversationCount: p.conversations.length,
     fileCount: p.files.length,
     taskCount: p._count.tasks,
+    teamCount: p._count.subagents,
   };
 }
 

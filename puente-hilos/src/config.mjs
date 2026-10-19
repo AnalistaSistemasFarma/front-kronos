@@ -23,6 +23,18 @@
  *   HILOS_MAX_BUDGET_USD       Opcional: tope de gasto por turno (solo con llave de API).
  *   HILOS_CLAUDE_BIN           Opcional: ruta del ejecutable `claude` (por defecto, el del PATH).
  *   HILOS_INSTRUCCIONES_EN     'system-prompt' (por defecto) o 'claude-md'. Ver hilos.mjs.
+ *
+ *   Equipo de subagentes (F2, 2026-10-18; ver equipo.mjs):
+ *   HILOS_SUBAGENTES                 'si' (por defecto) o 'no'. Con 'no', ningún turno lleva
+ *                                    equipo aunque el proyecto tenga uno aprobado (interruptor).
+ *   HILOS_SUBAGENTES_MAX_SIMULTANEOS Tope de subagentes a la vez por turno (1 a 5; por defecto 3).
+ *                                    El proyecto puede bajarlo, nunca subirlo.
+ *   HILOS_SUBAGENTES_MAX_TURNOS      Vueltas máximas de cada subagente (5 a 100; por defecto 30).
+ *   HILOS_SUBAGENTES_PRESUPUESTO_USD Tope de gasto por PEDIDO cuando el turno lleva equipo
+ *                                    (`--max-budget-usd`; por defecto 3). Si HILOS_MAX_BUDGET_USD
+ *                                    es menor, manda ese.
+ *   HILOS_SUGERENCIA_PRESUPUESTO_USD Tope de gasto de «Sugerir equipo» (por defecto 0.5).
+ *   HILOS_SUGERENCIA_TIMEOUT_MS      Tope de tiempo de «Sugerir equipo» (por defecto 180000 = 3 min).
  */
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -38,10 +50,19 @@ export const HERRAMIENTAS_PROHIBIDAS = [
   'PowerShell',
   'REPL',
   'NotebookEdit',
-  // Subagentes: llegan en F2, con topes de profundidad y gasto.
+  // Subagentes: prohibidos SALVO en un turno con equipo aprobado (F2, equipo.mjs),
+  // y entonces solo `Agent(<slug>)` del equipo. Nunca dentro de un subagente.
   'Agent',
   'Task',
 ];
+
+function numero(env, nombre, porDefecto, max) {
+  const raw = (env[nombre] ?? '').trim();
+  if (!raw) return porDefecto;
+  const n = Number(raw);
+  if (!(n > 0) || n > max) throw new ErrorConfig(`${nombre} debe ser un número mayor que 0 y hasta ${max}.`);
+  return n;
+}
 
 export class ErrorConfig extends Error {}
 
@@ -221,6 +242,9 @@ export function cargarConfig(env = process.env) {
     throw new ErrorConfig("HILOS_INSTRUCCIONES_EN solo admite 'system-prompt' o 'claude-md'.");
   }
 
+  const subagentes = (env.HILOS_SUBAGENTES ?? 'si').trim().toLowerCase();
+  if (subagentes !== 'si' && subagentes !== 'no') throw new ErrorConfig("HILOS_SUBAGENTES solo admite 'si' o 'no'.");
+
   const presupuesto = (env.HILOS_MAX_BUDGET_USD ?? '').trim();
   if (presupuesto && !(Number(presupuesto) > 0)) throw new ErrorConfig('HILOS_MAX_BUDGET_USD debe ser un número positivo.');
 
@@ -247,6 +271,12 @@ export function cargarConfig(env = process.env) {
     timeoutTurnoMs: entero(env, 'HILOS_TIMEOUT_TURNO_MS', 15 * 60 * 1000, 60 * 1000, 60 * 60 * 1000),
     modelo: (env.HILOS_MODELO ?? '').trim() || null,
     presupuestoUsd: presupuesto ? Number(presupuesto) : null,
+    subagentes: subagentes === 'si',
+    subagentesMaxSimultaneos: entero(env, 'HILOS_SUBAGENTES_MAX_SIMULTANEOS', 3, 1, 5),
+    subagentesMaxTurnos: entero(env, 'HILOS_SUBAGENTES_MAX_TURNOS', 30, 5, 100),
+    subagentesPresupuestoUsd: numero(env, 'HILOS_SUBAGENTES_PRESUPUESTO_USD', 3, 50),
+    sugerenciaPresupuestoUsd: numero(env, 'HILOS_SUGERENCIA_PRESUPUESTO_USD', 0.5, 5),
+    sugerenciaTimeoutMs: entero(env, 'HILOS_SUGERENCIA_TIMEOUT_MS', 3 * 60 * 1000, 30 * 1000, 10 * 60 * 1000),
     claudeBin,
     instruccionesEn,
     // Para el entorno del hijo: solo lo indispensable del entorno propio.
