@@ -198,6 +198,13 @@ function RequestBoard() {
   const [createLoading, setCreateLoading] = useState(false);
   const isSubmittingRef = useRef(false);
 
+  const linkedProcessParam = searchParams.get('linkedProcess');
+  const originTaskParam = searchParams.get('originTask');
+  const companyParam = searchParams.get('company');
+  const [originTaskId, setOriginTaskId] = useState<string | null>(null);
+  const [lockedLinked, setLockedLinked] = useState(false);
+  const linkedAppliedRef = useRef(false);
+
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
   const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
   const [processCategories, setProcessCategories] = useState<
@@ -327,6 +334,29 @@ function RequestBoard() {
       setIdUser('');
     }
   }, []);
+
+  useEffect(() => {
+    if (linkedAppliedRef.current) return;
+    if (!linkedProcessParam) return;
+    if (processCategories.length === 0) return;
+    const proc = processCategories.find((p) => p.value === String(linkedProcessParam));
+    if (!proc) return;
+    linkedAppliedRef.current = true;
+
+    const targetCompany = companyParam || formData.company || '';
+    if (targetCompany) {
+      void fetchCategoriesByCompanyOnLoad(targetCompany);
+    }
+    setFormData((prev) => ({
+      ...prev,
+      company: targetCompany || prev.company,
+      category: String(proc.id_category_request),
+      process: String(linkedProcessParam),
+    }));
+    setOriginTaskId(originTaskParam);
+    setLockedLinked(true);
+    setModalOpened(true);
+  }, [processCategories, linkedProcessParam, companyParam, originTaskParam, formData.company]);
 
   useEffect(() => {
     if (formData.category) {
@@ -933,6 +963,7 @@ function RequestBoard() {
             process: parseInt(formData.process),
             createdby: userId,
             url: formData.url,
+            originTaskId: originTaskId || null,
             formValues: buildFormValuesPayload(),
           }),
         });
@@ -1817,7 +1848,7 @@ function RequestBoard() {
                   error={formErrors.company}
                   required
                   leftSection={<IconBuilding size={16} />}
-                  disabled={formDataLoading}
+                  disabled={formDataLoading || lockedLinked}
                 />
               </Grid.Col>
 
@@ -1945,7 +1976,7 @@ function RequestBoard() {
                   error={formErrors.category}
                   required
                   leftSection={<IconTag size={16} />}
-                  disabled={formDataLoading}
+                  disabled={formDataLoading || lockedLinked}
                 />
               </Grid.Col>
 
@@ -1964,7 +1995,7 @@ function RequestBoard() {
                   error={formErrors.process}
                   required
                   leftSection={<IconProgress size={16} />}
-                  disabled={!formData.category || formDataLoading}
+                  disabled={!formData.category || formDataLoading || lockedLinked}
                 />
               </Grid.Col>
             </Grid>

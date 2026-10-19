@@ -163,7 +163,7 @@ export async function POST(req) {
       // Actualizar tareas si es necesario
       if (shouldUpdateTasks) {
         for (const task of tasks) {
-          const { id, task: taskName, active: taskActive, cost, cost_center: taskCostCenter, id_user_assigned: taskUserAssigned, is_sequential: taskIsSequential, display_order: taskDisplayOrder, is_authorization: taskIsAuthorization, type_authorization: taskTypeAuthorization, condition_option_ids: taskConditionOptionIds, action } = task;
+          const { id, task: taskName, active: taskActive, cost, cost_center: taskCostCenter, id_user_assigned: taskUserAssigned, is_sequential: taskIsSequential, display_order: taskDisplayOrder, is_authorization: taskIsAuthorization, type_authorization: taskTypeAuthorization, id_linked_process: taskLinkedProcess, condition_option_ids: taskConditionOptionIds, action } = task;
 
           if (action === 'create') {
             // Crear nueva tarea
@@ -173,9 +173,9 @@ export async function POST(req) {
 
             const insertTaskQuery = `
               INSERT INTO task_process_category
-              (task, id_process_category, active, cost, cost_center, is_sequential, display_order, is_authorization, type_authorization)
+              (task, id_process_category, active, cost, cost_center, is_sequential, display_order, is_authorization, type_authorization, id_linked_process)
               OUTPUT INSERTED.id
-              VALUES (@task, @id_process, @active, @cost, @cost_center, @is_sequential, @display_order, @is_authorization, @type_authorization)
+              VALUES (@task, @id_process, @active, @cost, @cost_center, @is_sequential, @display_order, @is_authorization, @type_authorization, @id_linked_process)
             `;
 
             const taskRequest = new sql.Request(transaction);
@@ -188,6 +188,7 @@ export async function POST(req) {
             taskRequest.input('display_order', sql.Int, taskDisplayOrder ?? null);
             taskRequest.input('is_authorization', sql.Bit, taskIsAuthorization ? 1 : 0);
             taskRequest.input('type_authorization', sql.Int, taskIsAuthorization ? (taskTypeAuthorization ?? null) : null);
+            taskRequest.input('id_linked_process', sql.Int, taskLinkedProcess ?? null);
 
             const taskResult = await taskRequest.query(insertTaskQuery);
             const newTaskId = taskResult.recordset[0].id;
@@ -225,7 +226,8 @@ export async function POST(req) {
                 is_sequential = @is_sequential,
                 display_order = @display_order,
                 is_authorization = @is_authorization,
-                type_authorization = @type_authorization
+                type_authorization = @type_authorization,
+                id_linked_process = @id_linked_process
               WHERE id = @id
             `;
 
@@ -239,6 +241,7 @@ export async function POST(req) {
             taskRequest.input('display_order', sql.Int, taskDisplayOrder ?? null);
             taskRequest.input('is_authorization', sql.Bit, taskIsAuthorization ? 1 : 0);
             taskRequest.input('type_authorization', sql.Int, taskIsAuthorization ? (taskTypeAuthorization ?? null) : null);
+            taskRequest.input('id_linked_process', sql.Int, taskLinkedProcess ?? null);
 
             await taskRequest.query(updateTaskQuery);
 
