@@ -1,5 +1,6 @@
 import { codeFollowsGuide, getDocumentCodeError, inheritsParentNumber, normalizeDocumentCode, parseSequenceFromCode, type SgcCodingGuideInput } from './coding';
-import { isSgcConfidentiality, type SgcConfidentiality } from './constants';
+import { SGC_CONFIDENTIALITY_LABELS, SGC_CONFIDENTIALITY_LEVELS, isSgcConfidentiality, type SgcConfidentiality } from './constants';
+import { stripTrailingNumber } from './hierarchy';
 
 /**
  * IMPORTACIÓN DEL LISTADO MAESTRO (Sprint 8, socialización con Calidad OLP del
@@ -167,7 +168,11 @@ export interface SgcMasterListContext {
   /** Procesos ACTIVOS por código. */
   processes: ReadonlyMap<string, { id: number; processTypeCode: string; idDepartment: number | null }>;
   /** Tipos documentales ACTIVOS por código. */
-  documentTypes: ReadonlyMap<string, { id: number }>;
+  /**
+   * Tipos documentales ACTIVOS por código. `name` y `pluralName` (opcionales)
+   * permiten reconocer el tipo escrito por su nombre («Procedimientos»).
+   */
+  documentTypes: ReadonlyMap<string, { id: number; name?: string; pluralName?: string }>;
   /** Códigos que ya existen en la empresa (en mayúsculas) con su consecutivo registrado. */
   existing: ReadonlyMap<string, { sequence: number | null; processCode: string; processTypeCode: string; documentTypeCode: string }>;
   /** Hoy (AAAA-MM-DD, hora de Colombia). */
@@ -198,6 +203,55 @@ export interface SgcMasterListValidation {
   summary: { total: number; ok: number; errors: number; warnings: number };
 }
 
+const looseText = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+/**
+ * 2026-10-19 (carga real de Calidad OLP): código del tipo documental de la
+ * celda. Por su código (lo de siempre) o, si no, por su nombre en singular o
+ * plural («Procedimiento», «Procedimientos»), solo cuando hay UN tipo con ese
+ * nombre. null si no se reconoce.
+ */
+export function resolveMasterListTypeCode(raw: string, types: SgcMasterListContext['documentTypes']): string | null {
+  const code = raw.trim().toUpperCase();
+  if (!code) return null;
+  if (types.has(code)) return code;
+  const want = looseText(raw);
+  const byName = [...types].filter(([, t]) => [t.name, t.pluralName].some((n) => n && looseText(n) === want)).map(([c]) => c);
+  return byName.length === 1 ? byName[0] : null;
+}
+
+/**
+ * 2026-10-19: confidencialidad de la celda. Además de los valores técnicos
+ * (publica, departamento, confidencial) acepta los rótulos que muestra el
+ * sistema («Pública interna», «Por departamento», «Confidencial»), sin
+ * importar tildes, mayúsculas ni espacios de más. null si no se reconoce.
+ */
+export function resolveMasterListConfidentiality(raw: string): SgcConfidentiality | null {
+  const want = looseText(raw);
+  if (isSgcConfidentiality(want)) return want;
+  return SGC_CONFIDENTIALITY_LEVELS.find((level) => looseText(SGC_CONFIDENTIALITY_LABELS[level]) === want) ?? null;
+}
+
+/**
+ * 2026-10-19: código del documento padre que trae el listado. Exacto o, si no
+ * existe, el mismo código con o sin el sufijo de versión («OLP-GGC-01-PR» ↔
+ * «OLP-GGC-01-PR-1»), solo cuando hay UN candidato (el mismo criterio de las
+ * propuestas de relación, lib/sgc/hierarchy.ts → findListedParent).
+ */
+export function resolveMasterListParentCode(parentCode: string, known: readonly string[]): string | null {
+  const want = parentCode.trim().toUpperCase();
+  if (known.includes(want)) return want;
+  const base = stripTrailingNumber(want);
+  const candidates = [...new Set(known)].filter((c) => stripTrailingNumber(c) === want || c === base || stripTrailingNumber(c) === base);
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
 /**
  * Valida el listado fila por fila. Error = la fila NO se carga (código
  * inválido o repetido, tipo o proceso inexistente, versión o fecha
@@ -210,7 +264,7 @@ export function validateMasterList(rows: readonly SgcMasterListRawRow[], ctx: Sg
   for (const r of rows) {
     const code = normalizeDocumentCode(r.values.code ?? '');
     const proc = ctx.processes.get((r.values.processCode ?? '').trim().toUpperCase());
-    if (code && !inFile.has(code)) inFile.set(code, { processCode: (r.values.processCode ?? '').trim().toUpperCase(), processTypeCode: proc?.processTypeCode ?? '', documentTypeCode: (r.values.documentTypeCode ?? '').trim().toUpperCase() });
+    if (code && !inFile.has(code)) inFile.set(code, { processCode: (r.values.processCode ?? '').trim().toUpperCase(), processTypeCode: proc?.processTypeCode ?? '', documentTypeCode: resolveMasterListTypeCode(r.values.documentTypeCode ?? '', ctx.documentTypes) ?? (r.values.documentTypeCode ?? '').trim().toUpperCase() });
   }
   const items = rows.map((r): SgcMasterListItem => {
     const errors: string[] = [];
@@ -231,8 +285,11 @@ export function validateMasterList(rows: readonly SgcMasterListRawRow[], ctx: Sg
     if (title && title.length < 3) errors.push('El nombre del documento es muy corto (mínimo 3 caracteres).');
     if (title.length > 300) errors.push('El nombre del documento admite máximo 300 caracteres.');
 
-    const typeCode = (v.documentTypeCode ?? '').trim().toUpperCase();
+    const rawTypeCode = (v.documentTypeCode ?? '').trim().toUpperCase();
+    const resolvedType = resolveMasterListTypeCode(v.documentTypeCode ?? '', ctx.documentTypes);
+    const typeCode = resolvedType ?? rawTypeCode;
     const type = typeCode ? ctx.documentTypes.get(typeCode) : undefined;
+    if (resolvedType && resolvedType !== rawTypeCode) warnings.push(`El tipo documental «${(v.documentTypeCode ?? '').trim()}» se tomó como ${resolvedType}.`);
     if (typeCode && !type) errors.push(`El tipo documental «${typeCode}» no existe o está inactivo en el SGC de la empresa.`);
     const processCode = (v.processCode ?? '').trim().toUpperCase();
     const process = processCode ? ctx.processes.get(processCode) : undefined;
@@ -257,14 +314,21 @@ export function validateMasterList(rows: readonly SgcMasterListRawRow[], ctx: Sg
     const rawConf = (v.confidentiality ?? '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
     let confidentiality: SgcConfidentiality = 'publica';
     if (rawConf) {
-      if (isSgcConfidentiality(rawConf)) confidentiality = rawConf;
+      const resolvedConf = resolveMasterListConfidentiality(v.confidentiality ?? '');
+      if (resolvedConf) confidentiality = resolvedConf;
       else errors.push(`La confidencialidad «${v.confidentiality}» no es válida (publica, departamento o confidencial).`);
     }
     if (confidentiality === 'departamento' && process && process.idDepartment === null) {
       errors.push(`Un documento «por departamento» necesita que el proceso ${processCode} tenga departamento dueño.`);
     }
 
-    const parentCode = normalizeDocumentCode(v.parentCode ?? '') || null;
+    const listedParentCode = normalizeDocumentCode(v.parentCode ?? '') || null;
+    // 2026-10-19: el padre se reconoce con o sin el sufijo de versión, si hay UN candidato (en el listado o en el SGC).
+    const resolvedParent = listedParentCode && !ctx.existing.has(listedParentCode) && !inFile.has(listedParentCode)
+      ? resolveMasterListParentCode(listedParentCode, [...ctx.existing.keys(), ...inFile.keys()])
+      : null;
+    const parentCode = resolvedParent ?? listedParentCode;
+    if (resolvedParent && resolvedParent !== listedParentCode) warnings.push(`El documento padre ${listedParentCode} se tomó como ${resolvedParent}.`);
     let parentInfo: { processCode: string; processTypeCode: string; documentTypeCode: string; sequence: number | null } | null = null;
     if (parentCode) {
       if (parentCode === code) errors.push('Un documento no puede ser su propio padre.');
