@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cumpleanosComoEventos, type EventoDia } from '../calendario';
-import { IMAGEN_CUMPLEANOS, PREFIJO_MARCA_VENTANA_HOY, SEGUNDOS_VENTANA_HOY, claveVentanaHoy, eventosDelDia, hayCumpleanos, reiniciarVentanaHoy } from '../ventana-hoy';
+import { IMAGEN_CUMPLEANOS, PREFIJO_MARCA_VENTANA_HOY, SEGUNDOS_VENTANA_HOY, claveVentanaHoy, eventosDelDia, hayCumpleanos, omitirPorMarca, reiniciarVentanaHoy } from '../ventana-hoy';
 
 // Ventana emergente «Hoy» (Cristian Baldión, 2026-10-15).
 
@@ -70,6 +70,15 @@ describe('reiniciarVentanaHoy (cada inicio de sesión, Cristian 2026-10-16)', ()
     expect(() => reiniciarVentanaHoy(null)).not.toThrow();
     const roto = { length: 1, key: () => { throw new Error('bloqueado'); }, removeItem: () => undefined };
     expect(() => reiniciarVentanaHoy(roto)).not.toThrow();
+  });
+});
+
+describe('omitirPorMarca (marcas viejas de la versión de una vez por día)', () => {
+  it('en un navegador REAL la marca se ignora siempre; solo un navegador automatizado la respeta', () => {
+    expect(omitirPorMarca(true, false)).toBe(false); // marca vieja en el navegador de una persona: la ventana sale
+    expect(omitirPorMarca(false, false)).toBe(false);
+    expect(omitirPorMarca(true, true)).toBe(true); // interruptor de las pruebas automáticas
+    expect(omitirPorMarca(false, true)).toBe(false);
   });
 });
 
