@@ -70,7 +70,7 @@ vi.mock('../../prisma', () => {
     }),
     groupBy: vi.fn(async () => []),
   });
-  const agente = { id_agent: 5, code: 'horus', display_name: 'Orus', handle: '@orus', avatar_url: null, avatar_version: null, is_active: true };
+  const agente = { id_agent: 5, code: 'horus', display_name: 'Orus', handle: '@orus', avatar_url: null, avatar_updated_at: null, is_active: true };
   const prisma: Record<string, unknown> = {
     chatProjectSubagent: tabla('subagentes', 'id_subagent'),
     chatProjectTeamRequest: tabla('pedidos', 'id_request'),
