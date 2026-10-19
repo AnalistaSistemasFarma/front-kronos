@@ -1,3 +1,4 @@
+// Prueba de devportal (horus, 2026-10-19): este comentario se descarta.
 /**
  * PORTAL TH — VENTANA EMERGENTE «HOY» (Cristian Baldión, 2026-10-15).
  *
