@@ -20,6 +20,8 @@ import {
   prepararAudioZumbido,
   zumbidoFresco,
 } from '../../lib/chat/nudge-fx';
+import { avisarMensajeEntrante, mensajeFresco } from '../../lib/chat/message-sound';
+import { avisarActividadProyectos } from '../../lib/proyectos/iconoHeader';
 
 /**
  * PULSO GLOBAL del chat entre personas. No pinta nada: vive en la cabecera de
@@ -33,6 +35,11 @@ import {
  *                       (ChatThread); si no, aviso flotante "📳 X le envió un
  *                       zumbido · Abrir", sonido, vibración y título
  *                       parpadeante si la pestaña está oculta.
+ *
+ *   - Mensaje en un PROYECTO (2026-10-19) -> avisa al icono «Proyectos» de la
+ *                       cabecera para que vuelva a contar, le pide al hilo
+ *                       abierto que sondee y suena el tono del chat si la
+ *                       persona no lo está viendo (misma preferencia).
  *
  * Se PAUSA con la pestaña oculta (no se sostiene una conexión para nadie) y
  * retoma al volver con el mismo cursor, así que lo que llegó mientras tanto
@@ -84,7 +91,18 @@ export default function ChatPulse() {
       efectoZumbido();
     };
 
-    const procesar = (eventos: ChatPulseEvent[]) => {
+    const procesarProyectos = (eventos: ChatPulseEvent[]) => {
+      if (eventos.length === 0) return;
+      const hilos = [...new Set(eventos.map((e) => e.idConversation))];
+      for (const id of hilos) pedirSondeoDelHilo(id);
+      avisarActividadProyectos(hilos);
+      // El antirrebote de message-sound deja sonar una sola vez por ráfaga.
+      for (const e of eventos) if (mensajeFresco(e.createdAt)) avisarMensajeEntrante(e.idConversation);
+    };
+
+    const procesar = (todos: ChatPulseEvent[]) => {
+      procesarProyectos(todos.filter((e) => e.type === 'project'));
+      const eventos = todos.filter((e) => e.type !== 'project');
       if (eventos.length === 0) return;
       const hilos = new Set<number>();
       for (const e of eventos) {
