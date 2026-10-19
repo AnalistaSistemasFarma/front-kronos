@@ -39,6 +39,19 @@ const eventoEmpresa = [{ id: 7, fecha: HOY, titulo: 'Capacitación en seguridad'
 const ventana = (page: Page) => page.getByTestId('ventana-hoy');
 
 test.describe('Portal TH · ventana emergente «Hoy»', () => {
+  test('una marca VIEJA de la versión de una vez por día NO impide que salga en un navegador real (caso de Cristian, 2026-10-19)', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    // El navegador de una persona: sin `navigator.webdriver` y con la marca que dejó la versión anterior.
+    await page.addInitScript(() => Object.defineProperty(navigator, 'webdriver', { get: () => false }));
+    await preparar(page, HOY, { empresa: eventoEmpresa, marcada: true });
+    await page.goto('/portal');
+    await expect(ventana(page)).toBeVisible();
+    expect(await page.evaluate((c) => window.localStorage.getItem(c), CLAVE(HOY))).toBe('1'); // la marca sigue ahí y no estorba
+    await page.getByTestId('ventana-hoy-cerrar').click();
+    await page.reload();
+    await expect(ventana(page)).toBeVisible(); // y al actualizar, otra vez
+  });
+
   test('al entrar se abre sola con los eventos del día, la fecha larga y la barra de tiempo', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await preparar(page, HOY, { empresa: eventoEmpresa });
