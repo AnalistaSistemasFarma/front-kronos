@@ -1,11 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { medallaDelPuesto, textoNota, type FilaTop, type VistaRanking } from '../../lib/portal/ranking-formacion';
+import { medallaDelPuesto, type FilaTop, type VistaRanking } from '../../lib/portal/ranking-formacion';
 
 /**
  * FORMACIÓN — TOP 10 DE ESTUDIANTES (Cristian Baldión, 2026-10-16): una tabla con los mejores estudiantes (más cursos completados y,
- * a igual número, mejor nota promedio). Oro, plata y bronce para los tres primeros. A la derecha de la lista de cursos en pantallas
+ * a igual número, mejor nota promedio). SOLO SE MUESTRA EL NOMBRE (pedido de Cristian, 2026-10-16): ni cursos ni nota. Oro, plata y bronce para los tres primeros. A la derecha de la lista de cursos en pantallas
  * anchas y debajo en las angostas. Sin sesión (401) no se muestra nada. Los fallos se avisan arriba, con color.
  */
 
@@ -104,12 +104,6 @@ export default function TopEstudiantes() {
               <tr>
                 <th scope='col'>Puesto</th>
                 <th scope='col'>Estudiante</th>
-                <th scope='col' title='Cursos completados'>
-                  Cursos
-                </th>
-                <th scope='col' title='Nota promedio de las evaluaciones'>
-                  Nota
-                </th>
               </tr>
             </thead>
             <tbody>
@@ -122,15 +116,13 @@ export default function TopEstudiantes() {
                     {f.nombre}
                     {f.esUsted && <span className='portal-th__top-tu'> (usted)</span>}
                   </th>
-                  <td>{f.cursos}</td>
-                  <td>{textoNota(f.nota)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           {datos.usted && (
             <p className='portal-th__top-suposicion' data-testid='top-usted'>
-              Su puesto: <strong>#{datos.usted.puesto}</strong> de {datos.total} · {datos.usted.cursos} {datos.usted.cursos === 1 ? 'curso' : 'cursos'} · nota {textoNota(datos.usted.nota)}
+              Su puesto: <strong>#{datos.usted.puesto}</strong> de {datos.total}
             </p>
           )}
         </>

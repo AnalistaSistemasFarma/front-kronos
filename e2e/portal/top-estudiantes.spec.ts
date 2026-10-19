@@ -20,7 +20,8 @@ const cursos = ['INDUCCIÓN SISTEMAS', 'INDUCCIÓN SAGRILAFT / PTEE', 'INDUCCIÓ
   certificado: null,
 }));
 const NOMBRES = ['María Fernanda Ospina', 'Luis Fernando Acosta', 'Ana María Pérez', 'Carlos Andrés Mora', 'Diana Patricia Ruiz', 'Jorge Iván Soto', 'Paola Andrea Gil', 'Camilo Ernesto Vega', 'Natalia Rojas', 'Sergio Alejandro Díaz'];
-const TOP = NOMBRES.map((nombre, i) => ({ puesto: i + 1, nombre, cursos: 6 - Math.floor(i / 2), nota: i === 4 ? null : 98 - i * 2.5, esUsted: i === 2 }));
+// Solo puesto y nombre: la API ya no entrega cursos ni nota (pedido de Cristian, 2026-10-16: «solo el nombre del estudiante»).
+const TOP = NOMBRES.map((nombre, i) => ({ puesto: i + 1, nombre, esUsted: i === 2 }));
 
 async function simular(page: Page, opciones: { top?: unknown; falla?: boolean; sinSesion?: boolean } = {}) {
   await page.route('**/api/portal/courses', (r) => r.fulfill({ json: { esFormador: false, cursos } }));
@@ -54,12 +55,12 @@ test.describe('Formación · Top 10 de estudiantes', () => {
     await expect(filas.nth(2).getByRole('img', { name: 'Medalla de bronce' })).toBeVisible();
     await expect(panel(page).locator('[data-testid^="medalla-"]')).toHaveCount(3);
     for (let i = 3; i < 10; i++) await expect(filas.nth(i).locator('.portal-th__top-numero')).toHaveText(String(i + 1));
-    // columnas: cursos y nota con coma decimal; sin nota, «—»
-    await expect(filas.nth(0)).toContainText('6');
-    await expect(filas.nth(0)).toContainText('98 %');
-    await expect(filas.nth(1)).toContainText('95,5 %');
-    await expect(filas.nth(4)).toContainText('—');
-    await expect(panel(page).getByRole('columnheader')).toHaveText(['Puesto', 'Estudiante', 'Cursos', 'Nota']);
+    // SOLO el nombre: dos columnas (puesto y estudiante), sin cursos ni nota
+    await expect(panel(page).getByRole('columnheader')).toHaveText(['Puesto', 'Estudiante']);
+    await expect(panel(page).locator('tbody td')).toHaveCount(10); // solo la celda del puesto en cada fila
+    await expect(panel(page)).not.toContainText('%');
+    await expect(panel(page)).not.toContainText('Cursos');
+    await expect(panel(page)).not.toContainText('Nota');
     // quien mira, resaltado
     await expect(filas.nth(2)).toHaveClass(/portal-th__top-usted/);
     await expect(filas.nth(2)).toContainText('(usted)');
@@ -110,9 +111,9 @@ test.describe('Formación · Top 10 de estudiantes', () => {
 
   test('si quien mira está fuera del top, ve su propio puesto debajo de la tabla', async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 1000 });
-    await simular(page, { top: { top: TOP.map((f) => ({ ...f, esUsted: false })), total: 23, usted: { puesto: 14, nombre: 'Yo', cursos: 2, nota: 88.5, esUsted: true } } });
+    await simular(page, { top: { top: TOP.map((f) => ({ ...f, esUsted: false })), total: 23, usted: { puesto: 14, nombre: 'Yo', esUsted: true } } });
     await page.goto('/portal/formacion');
-    await expect(panel(page).getByTestId('top-usted')).toHaveText('Su puesto: #14 de 23 · 2 cursos · nota 88,5 %');
+    await expect(panel(page).getByTestId('top-usted')).toHaveText('Su puesto: #14 de 23');
     await expect(panel(page).locator('.portal-th__top-usted')).toHaveCount(0);
   });
 

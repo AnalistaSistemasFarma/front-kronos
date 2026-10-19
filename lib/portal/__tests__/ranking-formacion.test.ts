@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TOPE_TOP, armarRanking, medallaDelPuesto, textoNota, vistaPublica, type CertificadoRanking, type NotaRanking } from '../ranking-formacion';
+import { TOPE_TOP, armarRanking, medallaDelPuesto, vistaPublica, type CertificadoRanking, type NotaRanking } from '../ranking-formacion';
 
 // Top 10 de estudiantes (Cristian Baldión, 2026-10-16). Personas inventadas.
 
@@ -98,13 +98,20 @@ describe('vistaPublica', () => {
   it('si quien mira está FUERA del top, devuelve su propio puesto aparte', () => {
     const v = vistaPublica(muchos, 'p13@x.com');
     expect(v.top.some((x) => x.esUsted)).toBe(false);
-    expect(v.usted).toEqual({ puesto: 13, nombre: 'Persona 13', cursos: 1, nota: 88, esUsted: true });
+    expect(v.usted).toEqual({ puesto: 13, nombre: 'Persona 13', esUsted: true });
   });
 
   it('NUNCA entrega correos, ni de las filas ni de «usted»', () => {
     const texto = JSON.stringify(vistaPublica(muchos, 'p13@x.com'));
     expect(texto).not.toMatch(/@|correo/i);
-    expect(Object.keys(vistaPublica(muchos, 'p01@x.com').top[0]).sort()).toEqual(['cursos', 'esUsted', 'nombre', 'nota', 'puesto']);
+  });
+
+  it('SOLO el nombre (y el puesto): ni los cursos ni la nota viajan al navegador, aunque decidan el orden (Cristian, 2026-10-16)', () => {
+    const v = vistaPublica(muchos, 'p13@x.com');
+    for (const fila of [...v.top, v.usted!]) expect(Object.keys(fila).sort()).toEqual(['esUsted', 'nombre', 'puesto']);
+    expect(JSON.stringify(v)).not.toMatch(/"(cursos|nota)"/);
+    // el orden sigue siendo por cursos y nota: quien tiene la mejor nota va primero
+    expect(v.top[0].nombre).toBe('Persona 1');
   });
 
   it('con menos de 10 personas entrega las que haya; sin nadie, vacío', () => {
@@ -113,14 +120,8 @@ describe('vistaPublica', () => {
   });
 });
 
-describe('medallaDelPuesto y textoNota', () => {
+describe('medallaDelPuesto', () => {
   it('oro, plata y bronce para los tres primeros; nada para el resto', () => {
     expect([1, 2, 3, 4, 10].map(medallaDelPuesto)).toEqual(['oro', 'plata', 'bronce', null, null]);
-  });
-  it('la nota con coma decimal y «—» si no hay', () => {
-    expect(textoNota(92)).toBe('92 %');
-    expect(textoNota(92.5)).toBe('92,5 %');
-    expect(textoNota(0)).toBe('0 %');
-    expect(textoNota(null)).toBe('—');
   });
 });
