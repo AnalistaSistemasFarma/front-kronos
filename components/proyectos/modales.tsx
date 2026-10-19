@@ -31,7 +31,7 @@ import { CONSULTA_ESCRITORIO, EsqueletoFilas } from './ui';
 import css from './proyectos.module.css';
 
 /** Marco común: a pantalla completa en celular y tableta, con el pie de acciones fijo. */
-function Marco({
+export function Marco({
   opened,
   onClose,
   titulo,
@@ -77,7 +77,7 @@ function Marco({
   );
 }
 
-function ErrorArriba({ error, onClose }: { error: string | null; onClose: () => void }) {
+export function ErrorArriba({ error, onClose }: { error: string | null; onClose: () => void }) {
   if (!error) return null;
   return (
     <Alert color='red' radius='md' icon={<IconAlertCircle size={18} />} withCloseButton onClose={onClose} py={8}>

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { crearPuente, verificarBandeja, verificarClaude } from '../src/puente.mjs';
@@ -30,6 +30,10 @@ function synerlinkFalso() {
       conversation: { id, title: 'x' },
     }),
     responder: async (...a) => llamadas.push(['responder', ...a]),
+    proponer: async (id, items) => {
+      llamadas.push(['proponer', id, items]);
+      return { creadas: items.slice(0, 1).map((_, i) => 100 + i), rechazadas: items.slice(1).map((_, i) => ({ indice: i + 1, error: 'Tipo no permitido.' })) };
+    },
     consumo: async (r) => llamadas.push(['consumo', r]),
     confirmar: async (ids) => llamadas.push(['confirmar', ids]),
     descargar: async () => Buffer.from(''),
@@ -99,4 +103,38 @@ test('perfil desconocido: no improvisa conectores, avisa en el hilo', async () =
   assert.equal(corrio, false);
   assert.match(s.llamadas.find((l) => l[0] === 'responder')[2], /no está configurado/);
   assert.deepEqual(s.llamadas.find((l) => l[0] === 'confirmar')[1], [9]);
+});
+
+test('propuestas del turno: el puente las entrega con SU llave, borra el archivo y lo dice en la respuesta', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'puente-'));
+  const cfg = {
+    hilosDir: dir, agente: 'play', agenteNombre: 'Play', maxConcurrencia: 1, timeoutTurnoMs: 5000,
+    perfiles: validarPerfiles({}), instruccionesEn: 'system-prompt', claudeBin: 'claude',
+    path: '/usr/bin', home: dir, configClaudeDir: path.join(dir, 'claude-config'), credencial: { tipo: 'api-key', valor: 'k' },
+  };
+  const s = synerlinkFalso();
+  let entornoDelModelo = null;
+  const puente = crearPuente({
+    cfg, synerlink: s, estado: new Estado(dir),
+    correr: async (opts) => {
+      entornoDelModelo = opts.env;
+      // El modelo deja dos propuestas en ./trabajo (lo único que puede escribir).
+      writeFileSync(path.join(opts.cwd, 'trabajo', 'propuestas-cronograma.json'), JSON.stringify([
+        { kind: 'tarea_crear', tarea: { title: 'Revisar DIM', startDate: '2026-10-20' } },
+        { kind: 'miembro_invitar', email: 'x@y.com', role: 'editor' },
+      ]));
+      return { resultado: { ok: true, texto: 'Le propongo una tarea.' }, sessionId: 's', tokens: null };
+    },
+  });
+  puente.recibir([{ id: 9, idConversation: 40, body: 'organice', conversation: { kind: 'project' } }]);
+  await puente.cola.vacia();
+  const prop = s.llamadas.find((l) => l[0] === 'proponer');
+  assert.ok(prop, 'entregó las propuestas');
+  assert.equal(prop[1], 40);
+  assert.equal(prop[2].length, 2);
+  assert.equal(existsSync(path.join(dir, 'proyectos', '7', 'conversaciones', '40', 'trabajo', 'propuestas-cronograma.json')), false);
+  const respuesta = s.llamadas.find((l) => l[0] === 'responder')[2];
+  assert.match(respuesta, /Le propongo una tarea\.[\s\S]*Dejé 1 propuesta en el \*\*Cronograma\*\*[\s\S]*1 propuesta no se pudo registrar/);
+  // El modelo nunca recibe la llave del puente.
+  assert.ok(!JSON.stringify(entornoDelModelo ?? {}).includes('Bearer'));
 });

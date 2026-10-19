@@ -2,12 +2,12 @@ import { NextRequest } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
 import { badRequest, forbidden, jsonNoStore, readJsonBody, serverError } from '../../../../../lib/chat/http';
 import { eligibleProjectUsers } from '../../../../../lib/chat/projects';
+import { errorDeProyecto, invitarMiembros } from '../../../../../lib/proyectos/acciones';
 import { archivedProject, guardProject } from '../../../../../lib/chat/projects-guard';
 import {
   canRemoveMember,
   capabilitiesFor,
   isAssignableRole,
-  MAX_PROJECT_MEMBERS,
   normalizeInviteIds,
   roleFromDb,
 } from '../../../../../lib/chat/projects-rules';
@@ -56,33 +56,11 @@ export async function POST(request: NextRequest, { params }: Ctx) {
     const payload = await readJsonBody(request);
     const ids = normalizeInviteIds(payload?.idUsers, guard.user.id);
     if (!ids.ok) return badRequest(ids.error);
-    const role = payload?.role === undefined ? 'editor' : payload.role;
-    if (!isAssignableRole(role)) return badRequest('El rol debe ser editor o lector.');
-
-    const elegibles = new Set((await eligibleProjectUsers(guard.project.idCompany, ids.value)).map((u) => u.id));
-    if (ids.value.some((x) => !elegibles.has(x))) {
-      return jsonNoStore(
-        {
-          error:
-            'Hay personas que no tienen el permiso «Proyectos» en la empresa del proyecto, así que no podrían entrar. Pida primero el permiso.',
-        },
-        { status: 409 }
-      );
-    }
-
-    const actuales = await prisma.chatProjectMember.findMany({ where: { id_project: guard.project.idProject }, select: { id_user: true } });
-    const yaEstan = new Set(actuales.map((m) => m.id_user));
-    const nuevos = ids.value.filter((x) => !yaEstan.has(x));
-    if (actuales.length + nuevos.length > MAX_PROJECT_MEMBERS) {
-      return badRequest(`Un proyecto admite máximo ${MAX_PROJECT_MEMBERS} miembros.`);
-    }
-    if (nuevos.length > 0) {
-      await prisma.chatProjectMember.createMany({
-        data: nuevos.map((idUser) => ({ id_project: guard.project.idProject, id_user: idUser, role, added_by: guard.user.id })),
-      });
-    }
-    return jsonNoStore({ added: nuevos.length }, { status: 201 });
+    const r = await invitarMiembros(guard.user, guard.project, ids.value, payload?.role);
+    return jsonNoStore(r, { status: 201 });
   } catch (error) {
+    const e = errorDeProyecto(error);
+    if (e) return jsonNoStore({ error: e.error }, { status: e.status });
     return serverError('POST /api/proyectos/[id]/miembros', error);
   }
 }
