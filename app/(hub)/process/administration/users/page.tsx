@@ -73,6 +73,7 @@ import {
   isLoginAuditMarkerSubprocess,
 } from '@/lib/auth/login-audit/constants';
 import LoginAuditPanel from '@/components/users/LoginAuditPanel';
+import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 
 const AVATAR_COLORS = ['blue', 'teal', 'violet', 'indigo', 'cyan', 'grape', 'orange'] as const;
 
@@ -179,6 +180,11 @@ function UserManagement() {
   const [selectedSubprocessIds, setSelectedSubprocessIds] = useState<number[]>([]);
   const [subprocessSearch, setSubprocessSearch] = useState('');
   const [subprocessLoading, setSubprocessLoading] = useState(false);
+
+  const [updateMessage, setUpdateMessage] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
 
   // Bulk assignment
   const [bulkModalOpened, setBulkModalOpened] = useState(false);
@@ -370,6 +376,51 @@ function UserManagement() {
     setPagination((prev) => ({ ...prev, page: 1 }));
   };
 
+  const sendEmailNotification = async (recipients: string): Promise<boolean> => {
+    if (!process.env.API_EMAIL) {
+      console.error('Error: La variable de entorno API_EMAIL no está configurada');
+      setUpdateMessage({
+        type: 'error',
+        text: 'Error de configuración: No se puede enviar la notificación por correo. Contacte al administrador.',
+      });
+      return false;
+    }
+
+    try {
+      const message = `Credenciales SynerLink  ${formData?.name}`;
+      const emails = recipients;
+
+      const table: Array<Record<string, string | number | undefined>> = [
+        {
+          'Usuario': formData?.email,
+          'Contraseña': formData?.password,
+          'Enlace de Acceso': `<a href="https://groupsharedservices.farmalogica.com:8445/login">https://groupsharedservices.farmalogica.com:8445/login</a>`,
+        },
+      ];
+
+      const outro = `Te confirmamos que tu acceso a SynerLink ya está activo con tus nuevas credenciales. Si tienes algún inconveniente al ingresar, registra un caso en la Mesa de Ayuda a través del siguiente enlace: <a href="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=kZrxWHFYXkCtzFtukGuz9Vc3GKrCGIpKi4GcZ3rlRP1UMEtFQjZYWkVTQllJMVMwNTNZRlRCWTNZWi4u&origin=QRCode">Mesa de Ayuda</a> Este mensaje y sus adjuntos son confidenciales y para uso exclusivo de su destinatario.`;
+
+      const result = await sendMessage(
+        message,
+        emails,
+        table,
+        outro,
+        'https://groupsharedservices.farmalogica.com:8445/icons/icon-192.png', 
+        []
+      );
+
+      console.log('Notificación por correo enviada exitosamente:', result);
+      return true;
+    } catch (error) {
+      console.error('Error al enviar la notificación por correo:', error);
+      setUpdateMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Error al enviar la notificación por correo',
+      });
+      return false;
+    }
+  };
+
   const handleCreateUser = async () => {
     try {
       setFormLoading(true);
@@ -399,6 +450,8 @@ function UserManagement() {
           toast.error('Usuario creado, pero no se pudieron asignar los departamentos');
         }
       }
+
+      await sendEmailNotification(formData?.email);
 
       // Add the new user to the list
       setUsers((prev) => [user, ...prev]);
