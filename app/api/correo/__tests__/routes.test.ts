@@ -42,6 +42,10 @@ import * as vinculos from '../vinculos/route';
 import * as acuse from '../acuse/route';
 import * as eliminar from '../eliminar/route';
 import * as deshacer from '../eliminar/deshacer/route';
+import * as redactar from '../redactar/route';
+import * as destinatarios from '../destinatarios/route';
+import { nuevosSimulados } from '../../../../lib/correo/mock';
+import { limpiarRecientes } from '../../../../lib/correo/service';
 import { codificarCursor, limpiarTokensApp } from '../../../../lib/correo/graph';
 
 const yo = {
@@ -93,6 +97,7 @@ beforeEach(() => {
   cfgEnv = { CORREO_MODO: 'mock' };
   fetchFn = undefined;
   limpiarTokensApp();
+  limpiarRecientes();
   m.correoDeps.mockImplementation(() => ({
     fetchFn,
     db: { emailAudit: { findMany: async () => [] } },
@@ -134,6 +139,8 @@ describe('Correo · rutas: sesión y permiso', () => {
     ['eliminar', () => eliminar.POST(post('/eliminar', {}))],
     ['eliminar-deshacer', () => deshacer.POST(post('/eliminar/deshacer', {}))],
     ['responder', () => responder.POST(new Request('http://x/api/correo/responder', { method: 'POST', body: new FormData(), headers: H }))],
+    ['redactar', () => redactar.POST(new Request('http://x/api/correo/redactar', { method: 'POST', body: new FormData(), headers: H }))],
+    ['destinatarios', () => destinatarios.GET(get('/destinatarios?q=an'))],
   ];
 
   it.each(llamadas)('%s: 401 sin sesión', async (_n, call) => {
@@ -525,5 +532,67 @@ describe('Correo · rutas: eliminar (deslizar) y «Deshacer»', () => {
     expect(r.status).toBe(404);
     expect(subs).toEqual([expect.objectContaining({ method: 'GET', url: expect.stringMatching(/^\/users\/laura%40gsslatam\.com\/messages\/AAMkGERENCIA1\?/) })]);
     expect(JSON.stringify(subs)).not.toContain('gerencia');
+  });
+});
+
+describe('Correo · Redactar (correo nuevo, 2026-10-19)', () => {
+  const formulario = (campos: Record<string, string>, archivos: Array<[string, string]> = []) => {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(campos)) fd.set(k, v);
+    for (const [nombre, txt] of archivos) fd.append('files', new Blob([txt], { type: 'text/plain' }), nombre);
+    return redactar.POST(new Request('http://x/api/correo/redactar', { method: 'POST', body: fd, headers: H }));
+  };
+
+  it('envía desde el buzón de la SESIÓN: remitente, buzón o usuario del formulario se ignoran', async () => {
+    cfgEnv = GRAPH_ENV;
+    const llamadas: string[] = [];
+    fetchFn = (async (url: string) => {
+      if (String(url).includes('login.microsoftonline.com')) return new Response(JSON.stringify({ access_token: 'APP', expires_in: 3600 }));
+      llamadas.push(String(url));
+      return new Response(null, { status: 202 });
+    }) as unknown as typeof fetch;
+    const a = comoUsuario()!;
+    const r = await formulario({ para: JSON.stringify(['ana@gsslatam.com']), asunto: 'Hola', texto: 'Buen día', de: 'gerencia@gsslatam.com', mailbox: 'gerencia@gsslatam.com', usuario: 'victima', from: 'gerencia@gsslatam.com' });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ ok: true, destinatarios: 1 });
+    expect(llamadas).toEqual([`${BASE}/sendMail`]);
+    expect(m.auditar).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ idUser: a.idUser, accion: 'ENVIAR_NUEVO', mailbox: 'laura@gsslatam.com' }));
+    expect(r.headers.get('cache-control')).toContain('no-store');
+  });
+
+  it('bandera CORREO_ENVIO_HABILITADO=false → 403; destinatario inválido → 400 (simulado)', async () => {
+    cfgEnv = { CORREO_MODO: 'mock', CORREO_ENVIO_HABILITADO: 'false' };
+    comoUsuario();
+    const r = await formulario({ para: JSON.stringify(['ana@gsslatam.com']), asunto: 'Hola', texto: 'x' });
+    expect(r.status).toBe(403);
+    expect(nuevosSimulados('laura@gsslatam.com')).toHaveLength(0);
+    cfgEnv = { CORREO_MODO: 'mock' };
+    comoUsuario();
+    const malo = await formulario({ para: JSON.stringify(['no es correo']), asunto: 'Hola', texto: 'x' });
+    expect(malo.status).toBe(400);
+    expect((await malo.json()).code).toBe('DESTINATARIOS');
+    const roto = await formulario({ para: '{no-json', asunto: 'Hola', texto: 'x' });
+    expect(roto.status).toBe(400);
+  });
+
+  it('con adjuntos en el buzón simulado: queda en Enviados; comparte la cuota de envío (10 por minuto)', async () => {
+    comoUsuario();
+    const ok = await formulario({ para: JSON.stringify(['ana@gsslatam.com']), cco: JSON.stringify(['archivo@gsslatam.com']), asunto: 'Acta', texto: '**Adjunto**' }, [['acta.txt', 'hola']]);
+    expect(ok.status).toBe(200);
+    expect(nuevosSimulados('laura@gsslatam.com')).toEqual([
+      { asunto: 'Acta', html: '<p><strong>Adjunto</strong></p>', para: ['ana@gsslatam.com'], cc: [], cco: ['archivo@gsslatam.com'], adjuntos: ['acta.txt'] },
+    ]);
+    for (let i = 0; i < 9; i++) await formulario({ para: JSON.stringify(['ana@gsslatam.com']), asunto: `n${i}`, texto: 'x' });
+    expect((await formulario({ para: JSON.stringify(['ana@gsslatam.com']), asunto: 'once', texto: 'x' })).status).toBe(429);
+  });
+
+  it('destinatarios: recientes y directorio simulado; parámetros de otro buzón se ignoran', async () => {
+    comoUsuario();
+    const r = await destinatarios.GET(get('/destinatarios?q=prueba&mailbox=gerencia@gsslatam.com'));
+    expect(r.status).toBe(200);
+    const { destinatarios: lista } = await r.json();
+    expect(lista.length).toBeGreaterThan(0);
+    for (const x of lista) expect(x.correo).not.toBe('laura@gsslatam.com');
+    expect(lista.map((x: { origen: string }) => x.origen)).toContain('reciente');
   });
 });

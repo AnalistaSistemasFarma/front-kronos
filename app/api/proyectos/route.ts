@@ -12,6 +12,7 @@ import {
   PROJECT_PROFILES,
 } from '../../../lib/chat/projects-rules';
 import type { ListaProyectosDto } from '../../../lib/proyectos/tipos';
+import { pedirSugerencia } from '../../../lib/proyectos/equipo';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +22,9 @@ export const dynamic = 'force-dynamic';
  *   GET  /api/proyectos[?archivados=1]  proyectos donde la persona es miembro
  *        (archivados: solo los suyos), más las empresas donde tiene el módulo,
  *        los agentes que puede designar en cada una y los perfiles.
- *   POST /api/proyectos  { name, idCompany, description?, agentCodes[], profile, instructions? }
+ *   POST /api/proyectos  { name, idCompany, description?, agentCodes[], profile, instructions?, suggestTeam? }
+ *        suggestTeam (F2, 2026-10-18): al crear, pide de una vez al primer
+ *        asistente una sugerencia de equipo de subagentes (quedan PROPUESTOS).
  *
  * SEGURIDAD
  *   - La persona sale de la SESIÓN; el dueño es SIEMPRE quien crea.
@@ -120,7 +123,23 @@ export async function POST(request: NextRequest) {
       select: { id_project: true },
     });
 
-    return jsonNoStore({ idProject: creado.id_project }, { status: 201 });
+    // «De primeras» (pedido de Nicolás, 2026-10-18): la sugerencia de equipo
+    // sale con la creación. Si no se puede pedir, el proyecto queda creado igual.
+    let teamRequested = false;
+    if (payload.suggestTeam === true) {
+      try {
+        await pedirSugerencia(
+          { id: user.id, email: user.email },
+          { idProject: creado.id_project, name: nombre.value, idCompany, profile: perfil, role: 'owner', archived: false },
+          { agentCode: agentes[0].code }
+        );
+        teamRequested = true;
+      } catch (err) {
+        console.error('[POST /api/proyectos] sugerencia de equipo:', (err as Error).message);
+      }
+    }
+
+    return jsonNoStore({ idProject: creado.id_project, teamRequested }, { status: 201 });
   } catch (error) {
     return serverError('POST /api/proyectos', error);
   }

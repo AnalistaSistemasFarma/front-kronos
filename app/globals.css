@@ -6249,3 +6249,25 @@ a.portal-th__contactos-boton--enlace:focus-visible {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* ─── Icono «Proyectos» de la cabecera (2026-10-19): hoja inferior en el celular.
+   Mismas superficies y textos que la campana (notification-bell-*). ─── */
+.proyectos-hoja.mantine-Drawer-content {
+  background-color: var(--app-surface, var(--surface)) !important;
+  color: var(--app-text, var(--foreground)) !important;
+  height: auto !important;
+  max-height: 85dvh;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.proyectos-hoja__cuerpo {
+  padding: 0;
+}
+
+.proyectos-hoja__asa {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  margin: 8px auto 0;
+  background-color: var(--app-border, var(--border-subtle));
+}

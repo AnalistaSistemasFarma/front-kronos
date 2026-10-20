@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildHighlights,
   buildInsights,
   looksLikeMemoryLeak,
   mainTableOf,
@@ -78,16 +79,42 @@ describe('buildInsights', () => {
   });
 
   it('reinicios: varios pid en la misma instancia', () => {
-    const lifetimes = [1, 2, 3, 4].map((pid) => ({ host: 'srv', instance: '0', pid, firstSeen: '' }));
+    // 15:00–18:00 UTC = 10:00–13:00 en Bogotá: fuera del reinicio programado.
+    const lifetimes = [15, 16, 17, 18].map((h, pid) => ({
+      host: 'srv',
+      instance: '0',
+      pid,
+      firstSeen: `2026-10-05T${h}:00:00.000Z`,
+    }));
     const insights = buildInsights(base({ lifetimes }));
     const r = insights.find((i) => i.id.startsWith('restarts'));
     expect(r?.title).toContain('3 veces');
     expect(r?.severity).toBe('warning');
   });
 
-  it('pool con peticiones esperando conexión', () => {
-    const insights = buildInsights(base({ summary: { current: summary({ maxPoolPending: 6 }), previous: summary() } }));
-    expect(insights.find((i) => i.id === 'pool-pending')?.severity).toBe('critical');
+  it('reinicios: el programado de las 00:02 (pm2 cron_restart) no cuenta', () => {
+    // 05:02 UTC = 00:02 en Bogotá, seis noches seguidas.
+    const lifetimes = [0, 1, 2, 3, 4, 5, 6].map((d) => ({
+      host: 'srv',
+      instance: '0',
+      pid: d,
+      firstSeen: `2026-10-0${d + 1}T05:02:00.000Z`,
+    }));
+    const insights = buildInsights(base({ lifetimes }));
+    expect(insights.find((i) => i.id.startsWith('restarts'))).toBeUndefined();
+  });
+
+  it('pool con peticiones esperando conexión: crítico solo si fue reciente', () => {
+    const now = buildInsights(base({ processSeries: [point(0, { poolPending: 6 })] }));
+    expect(now.find((i) => i.id === 'pool-pending')?.severity).toBe('critical');
+
+    // Pasó al comienzo del rango y ya no: queda como información.
+    const old = buildInsights(
+      base({ processSeries: [point(0, { poolPending: 6 }), ...Array.from({ length: 30 }, (_, i) => point(i + 1))] })
+    );
+    const pool = old.find((i) => i.id === 'pool-pending');
+    expect(pool?.severity).toBe('info');
+    expect(pool?.title).toContain('no en los últimos 15 min');
   });
 
   it('SQL: bloqueos, log y Query Store', () => {
@@ -183,5 +210,58 @@ describe('ayudas', () => {
 
   it('verdictFrom sin datos', () => {
     expect(verdictFrom([], false).headline).toBe('Esperando los primeros datos');
+  });
+});
+
+describe('buildHighlights', () => {
+  it('sin problemas muestra lo que va bien', () => {
+    const input = base({
+      processSeries: [point(0)],
+      db: [{ hasServerState: true, sqlCpuPct: 10, blockedRequests: 0, longestWaitMs: 0, logUsedPct: 10 }],
+    });
+    const ids = buildHighlights(input, buildInsights(input)).map((h) => h.id);
+    expect(ids).toEqual(['good-errors', 'good-speed', 'good-server', 'good-db']);
+  });
+
+  it('servicios externos: cualquier falla (aunque sean pocas llamadas) impide decir que van bien', () => {
+    const outbound = [
+      { key: 'graph.microsoft.com', label: 'Microsoft Graph', requests: 300, errors: 0, throttled: 0, p95Ms: 200 },
+      { key: 'sap:50000', label: 'SAP Service Layer', requests: 10, errors: 10, throttled: 0, p95Ms: 900 },
+    ];
+    const input = base({ processSeries: [point(0)], outbound });
+    const ids = buildHighlights(input, buildInsights(input)).map((h) => h.id);
+    expect(ids).not.toContain('good-external');
+
+    const ok = base({ processSeries: [point(0)], outbound: [outbound[0]] });
+    const good = buildHighlights(ok, buildInsights(ok)).find((h) => h.id === 'good-external');
+    expect(good?.detail).toContain('Microsoft Graph');
+  });
+
+  it('no dice "100 %" sin error si hubo errores (trunca, no redondea)', () => {
+    const input = base({ summary: { current: summary({ requests: 10000, errors: 4 }), previous: summary() } });
+    const h = buildHighlights(input, buildInsights(input)).find((x) => x.id === 'good-errors');
+    expect(h?.title).toContain('99,9 %');
+  });
+
+  it('no compara contra un periodo anterior con pocos datos', () => {
+    // El anterior solo tiene 10 minutos con dato frente a 360: "subió 400 %" sería falso.
+    const input = base({
+      summary: {
+        current: summary({ requests: 36000, minutes: 360 }),
+        previous: summary({ requests: 1000, minutes: 10 }),
+      },
+    });
+    expect(buildInsights(input).find((i) => i.id === 'traffic-change')).toBeUndefined();
+  });
+
+  it('no celebra un área que tiene un problema', () => {
+    const input = base({
+      summary: { current: summary({ errors: 100 }), previous: summary() },
+      processSeries: [point(0, { hostCpuPct: 95 })],
+    });
+    const ids = buildHighlights(input, buildInsights(input)).map((h) => h.id);
+    expect(ids).not.toContain('good-errors');
+    expect(ids).not.toContain('good-server');
+    expect(ids).toContain('good-speed');
   });
 });

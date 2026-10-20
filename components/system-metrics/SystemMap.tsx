@@ -78,7 +78,8 @@ export function SystemMap({ data, onSelectExternal }: { data: MapData; onSelectE
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const [stage, setStage] = useState<HTMLDivElement | null>(null);
-  const reqLabel = data.users.reqPerMin == null ? 'sin datos' : `${formatValue(data.users.reqPerMin)} pet./min`;
+  // Pet./min y p95 son promedio del rango elegido; "personas activas" es de los últimos ~15 min.
+  const reqLabel = data.users.reqPerMin == null ? 'sin datos' : `${formatValue(data.users.reqPerMin)} pet./min (prom.)`;
 
   const edges = useMemo<FlowEdge[]>(() => {
     const list: FlowEdge[] = [];
@@ -117,7 +118,8 @@ export function SystemMap({ data, onSelectExternal }: { data: MapData; onSelectE
           weight: weights[2 * n + j],
           rate: ext.callsPerMin / Math.max(1, n),
           tone: ext.tone === 'idle' ? 'info' : ext.tone,
-          title: `${inst.name} → ${ext.label}: ${formatValue(ext.callsPerMin / Math.max(1, n))} llamadas por minuto`,
+          // El dato por servicio no se separa por proceso: se dice el total, no un reparto inventado.
+          title: `${inst.name} → ${ext.label}: ${formatValue(ext.callsPerMin)} llamadas por minuto entre todos los procesos`,
         });
       });
     });
@@ -158,7 +160,7 @@ export function SystemMap({ data, onSelectExternal }: { data: MapData; onSelectE
                 <b>{reqLabel}</b>
               </span>
               <span>
-                p95 <b>{formatMs(data.users.p95Ms)}</b>
+                p95 aprox. <b>{formatMs(data.users.p95Ms)}</b>
               </span>
             </div>
             {data.users.top.length > 0 && (
@@ -265,7 +267,7 @@ export function SystemMap({ data, onSelectExternal }: { data: MapData; onSelectE
                   <b>{formatValue(ext.callsPerMin)}</b> llamadas/min
                 </span>
                 <span>
-                  p95 <b>{formatMs(ext.p95Ms)}</b>
+                  p95 aprox. <b>{formatMs(ext.p95Ms)}</b>
                 </span>
                 {ext.throttled > 0 && (
                   <span>
@@ -325,7 +327,7 @@ export function SystemMap({ data, onSelectExternal }: { data: MapData; onSelectE
           ))}
           {data.moreApps > 0 && (
             <div className={styles.nodeSub} style={{ paddingLeft: 4 }}>
-              y {formatInt(data.moreApps)} {data.moreApps === 1 ? 'conexión más' : 'conexiones más'} con poco uso
+              y {formatInt(data.moreApps)} {data.moreApps === 1 ? 'aplicación más' : 'aplicaciones más'}
             </div>
           )}
         </div>

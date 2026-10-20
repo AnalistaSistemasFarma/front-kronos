@@ -10,7 +10,11 @@
  *   GET  /api/chat/attachments/N          descarga de un adjunto del hilo
  *   POST /api/chat/agent/status           indicador «trabajando»
  *   POST /api/chat/agent/messages         publicar la respuesta
+ *   POST /api/chat/agent/projects/proposals  entregar las PROPUESTAS de tareas del turno
  *   POST /api/chat/agent/usage            consumo (tokens) del turno
+ *   POST /api/chat/agent/projects/team/requests     pedidos de «Sugerir equipo» (los reclama)
+ *   POST /api/chat/agent/projects/team/suggestions  entrega de una sugerencia
+ *   POST /api/chat/agent/projects/team/runs         lo que hizo cada subagente en un turno
  *
  * La llave nunca se escribe en registros ni pasa al proceso del modelo.
  */
@@ -63,7 +67,17 @@ export function crearClienteSynerLink({ url, llave, fetchImpl = globalThis.fetch
       }),
     responder: (idConversation, body) =>
       json('/api/chat/agent/messages', { method: 'POST', body: { idConversation, body, state: 'idle' } }),
+    /** Propuestas de tareas del turno: quedan PENDIENTES hasta que un dueño o editor las confirme. */
+    proponer: (idConversation, items) => json('/api/chat/agent/projects/proposals', { method: 'POST', body: { idConversation, items } }),
     consumo: (reporte) => json('/api/chat/agent/usage', { method: 'POST', body: reporte }),
+    // Equipo de subagentes (F2, 2026-10-18).
+    /** Reclama los pedidos de «Sugerir equipo» pendientes de los proyectos de este agente. */
+    pedidosEquipo: () => json('/api/chat/agent/projects/team/requests', { method: 'POST', body: {} }),
+    /** Entrega la sugerencia (o el error) de un pedido. Quedan PROPUESTOS: el dueño aprueba. */
+    entregarSugerencia: (idRequest, cuerpo) =>
+      json('/api/chat/agent/projects/team/suggestions', { method: 'POST', body: { idRequest, ...cuerpo } }),
+    /** Registra lo que hizo cada subagente en un turno (para la sección Equipo y el consumo). */
+    corridas: (reporte) => json('/api/chat/agent/projects/team/runs', { method: 'POST', body: reporte }),
     /** Descarga binaria (archivo del proyecto o adjunto). Devuelve un Buffer. */
     async descargar(ruta, maxBytes = 25 * 1024 * 1024) {
       const res = await pedir(ruta, { timeoutMs: 120_000 });

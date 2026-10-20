@@ -376,7 +376,7 @@ export async function listProjectsForUser(user: ProjectUser, opciones: { archiva
       members: { where: { id_user: user.id }, select: { role: true } },
       agents: { select: { agent: { select: agenteMini } }, orderBy: { added_at: 'asc' } },
       _count: {
-        select: { members: true, files: true, emails: true, requests: true, conversations: { where: { archived: false } } },
+        select: { members: true, files: true, emails: true, requests: true, tasks: true, conversations: { where: { archived: false } } },
       },
     },
     orderBy: [{ updated_at: 'desc' }],
@@ -398,6 +398,7 @@ export async function listProjectsForUser(user: ProjectUser, opciones: { archiva
       conversationCount: p._count.conversations,
       linkCount: p._count.emails + p._count.requests,
       fileCount: p._count.files,
+      taskCount: p._count.tasks,
       updatedAt: p.updated_at.toISOString(),
     })),
   };
@@ -435,6 +436,7 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
         },
         orderBy: { created_at: 'desc' },
       },
+      _count: { select: { tasks: true, subagents: { where: { status: 'aprobado' } } } },
       conversations: {
         where: { archived: false },
         select: {
@@ -531,6 +533,8 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
     memberCount: p.members.length,
     conversationCount: p.conversations.length,
     fileCount: p.files.length,
+    taskCount: p._count.tasks,
+    teamCount: p._count.subagents,
   };
 }
 

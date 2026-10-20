@@ -12,6 +12,36 @@ Desde el módulo, un proyecto tiene **uno o varios agentes designados** (`chat_p
 - La bandeja de cada llave solo entrega mensajes de **sus** conversaciones en proyectos **activos donde está designado**. Si el dueño retira a un agente, su puente deja de recibir mensajes de ese proyecto y sus conversaciones quedan de solo lectura.
 - Cada instancia mantiene su propia carpeta `proyectos/<id>/…` con los archivos del proyecto: dos agentes del mismo proyecto no comparten sesión, carpeta ni consumo.
 - **Lo vinculado** (correos y solicitudes) llega en el contexto (`project.links`) y el puente lo escribe en `./contexto/vinculados.md` de la carpeta del hilo en cada turno. Es de solo lectura para el modelo (solo escribe en `./trabajo`) y trae **lo mismo que ven los miembros**: de un correo, asunto, remitente, fecha, número de mensajes y el resumen de quien lo vinculó — **nunca el cuerpo** —; de una solicitud, número, asunto, proceso, empresa y estado actual. No hay un conector MCP nuevo: así la llave del puente nunca entra al proceso del modelo.
+- **El cronograma** (2026-10-18) llega en `project.schedule` (tareas con fechas, estado, avance y responsable; solicitudes con sus fechas reales y actividades) y el puente lo escribe en `./contexto/cronograma.md`, de solo lectura. El modelo **no cambia el cronograma**: si quiere crear una tarea o cambiar su estado, avance o fechas, escribe `./trabajo/propuestas-cronograma.json` (máx. 10 por turno, solo `tarea_crear` y `tarea_editar`). Al terminar el turno, el puente lo lee, lo **borra** y lo entrega con SU llave a `POST /api/chat/agent/projects/proposals`; SynerLink valida cada propuesta y la deja **pendiente** hasta que un dueño o editor la confirma con un clic en el Cronograma. La respuesta del hilo dice cuántas quedaron registradas.
+- **Decisión (2026-10-18): las conversaciones de proyecto NO montan las herramientas `proyecto_*` de kronos-mcp.** Ese MCP necesita una llave de agente en el proceso del modelo, y aquí el modelo corre con un entorno limpio a propósito. El archivo de propuestas cumple lo mismo con menos superficie: el modelo solo escribe un JSON en `./trabajo`, nunca ve una llave, y todo pasa por la confirmación de una persona. Las herramientas `proyecto_*` del MCP quedan para el **chat directo** con un agente, con la concesión de 24 h que la persona da desde Proyectos («Gestionar con un asistente»). Si más adelante se quisiera el MCP aquí, la opción segura es un MCP **local de solo propuestas** que escriba ese mismo archivo, sin llave.
+
+## Equipo de subagentes (F2, orquestador, 2026-10-18)
+
+Pedido de Nicolás Rivera: «para el tema de proyectos quiero que puedas, de primeras, sugerir subagentes especializados para hacer las actividades que ellos requieran». Es el patrón orquestador-trabajadores de Anthropic, aterrizado a cada proyecto y con el equipo **aprobado por una persona**.
+
+1. **Sugerir equipo.** Al crear el proyecto (casilla, encendida por defecto) o con el botón «Sugerir equipo» de la sección **Equipo**, SynerLink deja un pedido. Este puente lo reclama (`POST /api/chat/agent/projects/team/requests`, cada 15 s entre vueltas de la bandeja), corre UN `claude -p` **sin herramientas** (`--tools ""`), sin conectores, sin sesión (`--no-session-persistence`) y con salida estructurada (`--json-schema`), y entrega de 3 a 6 subagentes (`…/team/suggestions`). Pasa por la misma cola: cuenta dentro del tope de hilos.
+2. **Aprobación.** Los subagentes quedan **propuestos**. El dueño (el editor, solo con `PROYECTOS_EQUIPO_EDITOR_APRUEBA=1` en la app) aprueba, edita o descarta cada uno. Todo queda en `chat_project_team_event` (inmutable).
+3. **Orquestación.** El contexto del turno trae `team` con **solo lo aprobado**. El puente escribe `.puente/agentes.json` y corre el turno con `--agents` y `--forward-subagent-text`. El principal puede usar la herramienta Agent **solo** con `Agent(<slug>)` del equipo; los agentes incorporados de Claude Code se niegan uno por uno (`Agent(general-purpose)`, `Agent(claude)`, …).
+
+| Tope | Por defecto | Cómo se aplica (verificado con `claude` 2.1.299) |
+|---|---|---|
+| Subagentes a la vez | 3 (el dueño lo baja a 1–2; el puente acota a `HILOS_SUBAGENTES_MAX_SIMULTANEOS`, máx. 5) | `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`: el que pasa del tope se rechaza («Concurrent subagent limit reached») |
+| Profundidad | 1: un subagente no lanza otros | `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`, Agent/Task en `disallowedTools` de cada subagente y el vigía |
+| Tiempo por turno | 15 min (`HILOS_TIMEOUT_TURNO_MS`) | el puente mata el proceso |
+| Gasto por pedido | 3 USD con equipo (`HILOS_SUBAGENTES_PRESUPUESTO_USD`; si `HILOS_MAX_BUDGET_USD` es menor, manda ese) | `--max-budget-usd` (incluye a los subagentes) |
+| Vueltas por subagente | 30 (`HILOS_SUBAGENTES_MAX_TURNOS`) | `maxTurns` en la definición |
+| Segundo plano | prohibido | `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` (el esquema de Agent pierde `run_in_background`) |
+| Explore / Plan | apagados | `CLAUDE_CODE_DISABLE_EXPLORE_PLAN_AGENTS=1` |
+
+**Herramientas de un subagente** = intersección del catálogo cerrado aprobado con el perfil del proyecto: Read/Glob/Grep siempre; Write/Edit solo en `./trabajo/**` (la regla de permisos es del proceso principal y la heredan, `permissionMode: dontAsk`); WebSearch/WebFetch solo si el perfil tiene `web`; los conectores de solo lectura del perfil por nombre exacto. **Nunca Bash ni Agent.** Un subagente con `tools` vacío heredaría todo: por eso «Leer el proyecto» va siempre.
+
+**Vigía en vivo** (`src/equipo.mjs → crearVigia`): con `--forward-subagent-text` el puente ve cada herramienta de cada subagente (`parent_tool_use_id`). Mata el turno si el principal lanza un subagente que no es del equipo o con `model`/`cwd`/`isolation`/`run_in_background`; si un subagente usa una herramienta fuera de su lista o intenta lanzar otro; o si corrió con un modelo distinto del aprobado. El bloqueo queda en la auditoría.
+
+**Visibilidad y consumo.** Mientras trabajan, el indicador del chat muestra la **tablita de sub-agentes** que ya existía (`tasks`: «Nombre: qué hace»). Al final del turno, `…/team/runs` registra por subagente: descripción, estado, duración, herramientas y fichas (del `tool_use_result` del Agent: `totalTokens`, `totalDurationMs`, `resolvedModel`). Ojo: `result.usage` de Claude Code es **solo del hilo principal**; el consumo del turno se toma de `modelUsage`, que sí suma a los subagentes.
+
+**Escrituras.** Los subagentes no escriben en SynerLink ni en SAP: no tienen credenciales (entorno limpio) ni conectores de escritura. Un cambio al cronograma sale en su informe y el principal lo deja como **propuesta** en `./trabajo/propuestas-cronograma.json`, que una persona confirma (el mismo patrón del cronograma).
+
+**Apagar:** `HILOS_SUBAGENTES=no` en el `.env` del puente (todos los proyectos) o el interruptor «Encendido» de la sección Equipo (un proyecto).
 
 ## Cómo funciona
 
@@ -20,7 +50,7 @@ Desde el módulo, un proyecto tiene **uno o varios agentes designados** (`chat_p
 3. En cada turno:
    - pide el contexto del proyecto (`/api/chat/agent/projects/context`): instrucciones, descripción, perfil, archivos, vinculados y versión;
    - baja los archivos del proyecto a `proyectos/<id>/archivos/` si cambió la versión, y los adjuntos del chat a `adjuntos/`;
-   - escribe `CLAUDE.md`, `.puente/sistema.md`, `.puente/mcp.json` y `contexto/vinculados.md`;
+   - escribe `CLAUDE.md`, `.puente/sistema.md`, `.puente/mcp.json`, `contexto/vinculados.md` y `contexto/cronograma.md`;
    - corre `claude -p --resume <session_id del hilo>` en la carpeta del hilo (`src/claude.mjs`).
 4. Publica la respuesta en el hilo, deja el indicador en reposo, reporta el consumo (`/api/chat/agent/usage`, por conversación y también en `consumo.jsonl`) y confirma los mensajes. La confirmación va al final, así que si el puente se cae, el mensaje vuelve a llegar.
 
@@ -32,7 +62,7 @@ Desde el módulo, un proyecto tiene **uno o varios agentes designados** (`chat_p
 | Sin sesión ni llavero de ningún bot | La credencial entra **solo** por variable de entorno al hijo. **Nunca** corra `claude /login` con ese config dir. |
 | Plugin de Telegram apagado | `--settings {"enabledPlugins":{"telegram@claude-plugins-official":false},"disableAllHooks":true}`. Así se evita el gotcha de los jobs `claude -p` que tumban el poller. |
 | Sin modo de permisos abierto | `--restricted` + `--permission-mode dontAsk`. Nunca `bypassPermissions` ni `--dangerously-skip-permissions`; el código lo verifica y el evento `init` se revisa en cada turno. |
-| Herramientas mínimas | `Read, Glob, Grep, Edit, Write, TodoWrite`, más `WebSearch` y `WebFetch` si el perfil tiene `web` (decisión de Nicolás, 2026-10-17). Se escribe **solo** en `./trabajo/**`. Bash, Agent/Task y NotebookEdit quedan prohibidos. |
+| Herramientas mínimas | `Read, Glob, Grep, Edit, Write, TodoWrite`, más `WebSearch` y `WebFetch` si el perfil tiene `web` (decisión de Nicolás, 2026-10-17). Se escribe **solo** en `./trabajo/**`. Bash y NotebookEdit quedan prohibidos; Agent/Task también, salvo `Agent(<slug>)` del equipo aprobado (ver «Equipo de subagentes»). |
 | Prompt injection y fuga de datos | El encabezado de sistema de cada turno ordena tratar páginas web, búsquedas, archivos y adjuntos como **datos**, nunca como instrucciones, y **prohíbe** enviar datos de SAP o de la empresa a sitios externos (URL, parámetros, búsquedas, formularios). |
 | Conectores MCP por hilo | `--strict-mcp-config --mcp-config` con **solo** los servidores del perfil del proyecto (`config/perfiles.json`) y las herramientas por nombre exacto, sin comodines. |
 | Entorno limpio | El hijo no hereda nada del puente: recibe solo PATH, HOME, el config aislado y una credencial. La llave de SynerLink nunca le llega. |

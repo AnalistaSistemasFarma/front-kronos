@@ -14,7 +14,9 @@ import {
   IconLink,
   IconLock,
   IconMessages,
+  IconTimeline,
   IconUsers,
+  IconUsersGroup,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import AgentAvatar from '../chat/AgentAvatar';
@@ -32,6 +34,8 @@ import {
   VincularSolicitudModal,
 } from './modales';
 import { ListaConversaciones, SeccionArchivos, SeccionDetalles, SeccionMiembros, SeccionVinculados } from './secciones';
+import SeccionCronograma from './cronograma/SeccionCronograma';
+import SeccionEquipo from './equipo/SeccionEquipo';
 import { AgentesApilados, AvisoArriba, BadgeRol, CONSULTA_ESCRITORIO, Encabezado, EsqueletoFilas, type Aviso } from './ui';
 import css from './proyectos.module.css';
 
@@ -52,8 +56,9 @@ import css from './proyectos.module.css';
  * (`capabilities` solo dice qué botones pintar).
  */
 
-type Seccion = 'conversaciones' | 'vinculados' | 'archivos' | 'miembros' | 'detalles';
-const SECCIONES: Seccion[] = ['conversaciones', 'vinculados', 'archivos', 'miembros', 'detalles'];
+// «Equipo» (F2, 2026-10-18): los subagentes del proyecto, junto al cronograma.
+type Seccion = 'conversaciones' | 'cronograma' | 'equipo' | 'vinculados' | 'archivos' | 'miembros' | 'detalles';
+const SECCIONES: Seccion[] = ['conversaciones', 'cronograma', 'equipo', 'vinculados', 'archivos', 'miembros', 'detalles'];
 
 function esSeccion(v: string | null): v is Seccion {
   return v !== null && (SECCIONES as string[]).includes(v);
@@ -82,6 +87,8 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
   const [ocupado, setOcupado] = useState(false);
   const [modal, setModal] = useState<'conversacion' | 'correo' | 'solicitud' | 'invitar' | 'agentes' | null>(null);
   const [confirmar, setConfirmar] = useState<Confirmacion>(null);
+  // Cronograma (2026-10-18): sube cada vez que el proyecto se recarga, para que la sección se refresque.
+  const [version, setVersion] = useState(0);
 
   const avisar = useCallback((a: Aviso) => {
     setAviso(a);
@@ -93,6 +100,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
     const r = await apiGet<{ project: ProyectoDetalleDto }>(`/api/proyectos/${idProject}`, 'No se pudo cargar el proyecto.');
     if (r.ok) {
       setProyecto(r.data.project);
+      setVersion((v) => v + 1);
       setSinAcceso(false);
       // En escritorio se abre de una vez la conversación más reciente; en el
       // celular, no: primero se ve el proyecto.
@@ -110,7 +118,12 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
   }, [cargar]);
 
   useEffect(() => {
-    if (searchParams.get('creado') === '1') setAviso({ tipo: 'ok', texto: 'Proyecto creado. Abra una conversación con uno de sus asistentes.' });
+    const creado = searchParams.get('creado');
+    if (creado === '1') setAviso({ tipo: 'ok', texto: 'Proyecto creado. Abra una conversación con uno de sus asistentes.' });
+    // Equipo de subagentes (F2): se pidió la sugerencia al crear.
+    if (creado === 'equipo') {
+      setAviso({ tipo: 'ok', texto: 'Proyecto creado. El asistente está armando una propuesta de equipo: revísela en «Equipo» en unos minutos.' });
+    }
   }, [searchParams]);
 
   // La dirección refleja la conversación y la sección: «atrás» funciona y el enlace se puede compartir.
@@ -214,6 +227,8 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
 
   const conteo: Record<Seccion, number | null> = {
     conversaciones: proyecto?.conversations.length ?? null,
+    cronograma: proyecto ? proyecto.taskCount + proyecto.links.requests.length : null,
+    equipo: proyecto?.teamCount ?? null,
     vinculados: proyecto ? proyecto.links.emails.length + proyecto.links.requests.length : null,
     archivos: proyecto?.files.length ?? null,
     miembros: proyecto?.members.length ?? null,
@@ -221,6 +236,8 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
   };
   const etiqueta: Record<Seccion, string> = {
     conversaciones: 'Conversaciones',
+    cronograma: 'Cronograma',
+    equipo: 'Equipo',
     vinculados: 'Vinculados',
     archivos: 'Archivos',
     miembros: 'Miembros',
@@ -228,6 +245,8 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
   };
   const icono: Record<Seccion, React.ReactNode> = {
     conversaciones: <IconMessages size={18} />,
+    cronograma: <IconTimeline size={18} />,
+    equipo: <IconUsersGroup size={18} />,
     vinculados: <IconLink size={18} />,
     archivos: <IconFile size={18} />,
     miembros: <IconUsers size={18} />,
@@ -246,6 +265,10 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
             onNueva={() => setModal('conversacion')}
           />
         );
+      case 'cronograma':
+        return <SeccionCronograma proyecto={proyecto} version={version} avisar={avisar} onVincularSolicitud={() => setModal('solicitud')} />;
+      case 'equipo':
+        return <SeccionEquipo proyecto={proyecto} version={version} avisar={avisar} />;
       case 'vinculados':
         return (
           <SeccionVinculados

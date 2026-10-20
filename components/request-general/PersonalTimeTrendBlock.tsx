@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { Alert, Box, Group, Paper, Text } from '@mantine/core';
+                                                                                  import { Alert, Box, Group, Paper, Text } from '@mantine/core';
 import {
   IconMinus,
   IconTrendingDown,

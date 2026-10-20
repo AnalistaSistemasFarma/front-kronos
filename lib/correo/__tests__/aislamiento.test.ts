@@ -41,6 +41,16 @@ describe('Correo · aislamiento del buzón (revisión estática)', () => {
     expect(g).toMatch(/export function mailboxForSession\(correoSesion: string\): Mailbox \{[\s\S]{0,400}\/users\/\$\{encodeURIComponent\(correo\)\}/);
   });
 
+  it('la única ruta fuera del buzón (además de $batch) es la colección del directorio, solo GET y validada', () => {
+    const g = leer('lib/correo/graph.ts');
+    // Sin «/» después: la otra aparición es la de mailboxForSession (/users/${correo}).
+    expect(g.match(/\$\{GRAPH_BASE\}\/users(?!\/)/g)).toEqual(['${GRAPH_BASE}/users']);
+    expect(g).toMatch(/const DIRECTORIO_URL = `\$\{GRAPH_BASE\}\/users`;/);
+    expect(g).toMatch(/u\.pathname === '\/v1\.0\/users'/);
+    expect(g).toMatch(/if \(!esUrlDirectorio\(url\)\) throw/);
+    expect(g).toMatch(/this\.enviar\(url, \{ method: 'GET'/);
+  });
+
   it('solo graph.ts y constants.ts conocen graph.microsoft.com; nadie usa /me ni otra app', () => {
     const conGraph = fuentes.filter((f) => /graph\.microsoft\.com/.test(leer(f).replace(/^\s*(\*|\/\/).*$/gm, '')));
     expect(conGraph.sort()).toEqual(['lib/correo/constants.ts', 'lib/correo/graph.ts']);

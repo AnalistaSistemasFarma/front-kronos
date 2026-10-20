@@ -86,6 +86,21 @@ export interface RespuestaEntrada {
   comentarioHtml?: string;
 }
 
+/** Correo NUEVO (Redactar). El cuerpo llega YA SANEADO (Markdown de la persona convertido en el servidor). */
+export interface NuevoCorreoEntrada {
+  asunto: string;
+  html: string;
+  para: string[];
+  cc: string[];
+  cco: string[];
+  adjuntos: ArchivoAdjunto[];
+}
+
+/** Sugerencia del autocompletado de destinatarios. */
+export interface SugerenciaDestinatario extends Direccion {
+  origen: 'reciente' | 'directorio';
+}
+
 /**
  * Proveedor de buzón: SIEMPRE el buzón del usuario de la sesión (mailboxForSession). No existe un
  * método que reciba otro buzón o usuario: el aislamiento es por construcción.
@@ -129,6 +144,18 @@ export interface MailProvider {
    * No existe una operación de borrado permanente en el módulo.
    */
   moverMensajes(mensajesIds: string[], destinoId: string): Promise<Map<string, string | null>>;
+  /**
+   * Redactar (2026-10-19): envía un correo NUEVO desde el buzón propio (Graph `sendMail`, o borrador + adjuntos +
+   * `send` cuando hay adjuntos). Queda en «Elementos enviados» como cualquier correo de Outlook.
+   */
+  enviarNuevo(entrada: NuevoCorreoEntrada): Promise<void>;
+  /** Personas a las que la persona les escribió hace poco (de sus «Elementos enviados»; sin el contenido). */
+  contactosRecientes(max: number): Promise<Direccion[]>;
+  /**
+   * Directorio de la organización: personas (miembros, cuentas activas) de los dominios del inquilino cuyo nombre
+   * o correo empieza por `q`. Solo nombre y correo. Opcional: sin él, el autocompletado usa solo los recientes.
+   */
+  buscarDirectorio?(q: string, dominios: string[], max: number): Promise<Direccion[]>;
 }
 
 export interface UbicacionMensaje {

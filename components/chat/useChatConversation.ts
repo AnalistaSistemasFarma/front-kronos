@@ -19,6 +19,7 @@ import { MESSAGES_PAGE_DEFAULT } from '../../lib/chat/constants';
 import { proxyUploadErrorMessage } from '../../lib/attachments/uploadRules';
 import type { AgentMetricsDto } from '../../lib/chat/agent-metrics';
 import { avisarMensajeEntrante, mensajeFresco } from '../../lib/chat/message-sound';
+import { avisarProyectoLeido } from '../../lib/proyectos/iconoHeader';
 
 /**
  * El hilo abierto —con UN agente o un GRUPO—: histórico, sondeo en vivo, envío
@@ -703,7 +704,10 @@ export function useChatConversation(
     marcadoHastaRef.current = 0;
   }, [targetKey]);
 
-  const esEntrePersonas = target?.kind === 'people';
+  // Hilos entre personas y conversaciones de PROYECTO usan marca de agua por
+  // persona (chat_participant / chat_project_read), no `read_at`.
+  const esEntrePersonas = target?.kind === 'people' || target?.kind === 'project';
+  const esProyecto = target?.kind === 'project';
 
   const markRead = useCallback(async () => {
     const conversationId = conversationIdRef.current;
@@ -723,7 +727,11 @@ export function useChatConversation(
           method: 'POST',
           body: JSON.stringify({ upToMessageId: ultimo }),
         });
-        if (res.ok) notifyChatRefresh();
+        if (res.ok) {
+          // El icono «Proyectos» de la cabecera vuelve a contar al instante.
+          if (esProyecto) avisarProyectoLeido(conversationId);
+          else notifyChatRefresh();
+        }
       } catch {
         // Se reintenta con el próximo mensaje: leer es cosmético.
         marcadoHastaRef.current = 0;
@@ -747,7 +755,7 @@ export function useChatConversation(
     } catch {
       /* leer es cosmético: si falla, se reintenta en el próximo cambio */
     }
-  }, [messages, esEntrePersonas]);
+  }, [messages, esEntrePersonas, esProyecto]);
 
   // Con el hilo a la vista, lo que llegue se marca leído solo.
   useEffect(() => {

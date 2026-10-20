@@ -1,5 +1,6 @@
 import { CORREO_PAGE_SIZE, GRAPH_BASE, GRAPH_BATCH_MAX } from './constants';
 import type { Inquilino } from './config';
+import { esDestinatarioValido } from './destinatarios';
 import { CorreoError } from './errors';
 import { conReintentos, esReintentable, esperaReintento, leerRetryAfter, limitadorBuzones, POLITICA_GRAPH, type LimitadorConcurrencia, type PoliticaReintento } from './graphResiliencia';
 import { insertarSobreHistorial } from './plantillas/acuse.html';
@@ -12,6 +13,7 @@ import type {
   MailProvider,
   MensajeCompleto,
   MensajeResumen,
+  NuevoCorreoEntrada,
   PaginaMensajes,
   RespuestaEntrada,
   UbicacionMensaje,
@@ -296,6 +298,51 @@ function escHtml(s: string): string {
 /** Texto de la respuesta (plano) a HTML seguro con saltos de línea. */
 export function textoAHtml(texto: string): string {
   return escHtml(texto).replace(/\r?\n/g, '<br>');
+}
+
+/**
+ * Directorio de la organización (autocompletado de «Redactar», 2026-10-19). Es la ÚNICA ruta de Graph fuera de
+ * /users/{buzón} además de `$batch`: la colección `/v1.0/users`, SOLO con GET, solo `displayName`, `mail` y
+ * `userType`, y solo miembros con la cuenta activa. No lee buzones ni perfiles: nombre y correo, nada más.
+ */
+const DIRECTORIO_URL = `${GRAPH_BASE}/users`;
+/** Búsqueda admitida: letras, números, espacio, punto, guion, guion bajo, «@» y apóstrofo (nombres como O'Neil). */
+const BUSQUEDA_RE = /^[\p{L}\p{N} .@_'-]{2,60}$/u;
+
+export function normalizarBusquedaDirectorio(q: string): string | null {
+  const v = String(q ?? '').replace(/\s+/g, ' ').trim();
+  return BUSQUEDA_RE.test(v) ? v : null;
+}
+
+/** URL de la búsqueda en el directorio (función pura, probada aparte). */
+export function urlDirectorio(q: string, max: number): string {
+  const v = normalizarBusquedaDirectorio(q);
+  if (!v) throw new CorreoError('Búsqueda de destinatarios inválida.', 400);
+  const t = odataString(v);
+  const u = new URL(DIRECTORIO_URL);
+  u.searchParams.set(
+    '$filter',
+    `accountEnabled eq true and userType eq 'Member' and (startswith(displayName,${t}) or startswith(mail,${t}) or startswith(givenName,${t}) or startswith(surname,${t}))`
+  );
+  u.searchParams.set('$select', 'displayName,mail,userType');
+  u.searchParams.set('$top', String(Math.min(Math.max(1, max * 2), 25)));
+  u.searchParams.set('$count', 'true');
+  return u.toString();
+}
+
+/** ¿La URL es EXACTAMENTE la colección del directorio? (sin /users/{alguien}, sin otra ruta). */
+export function esUrlDirectorio(url: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  return u.protocol === 'https:' && u.host === 'graph.microsoft.com' && !u.username && !u.password && !u.port && u.pathname === '/v1.0/users';
+}
+
+function destinatarios(lista: string[]): Array<{ emailAddress: { address: string } }> {
+  return lista.map((address) => ({ emailAddress: { address } }));
 }
 
 /** 429 que sigue después de los reintentos automáticos: mensaje para la persona con la espera sugerida. */
@@ -681,6 +728,89 @@ export class GraphMailProvider implements MailProvider {
   async contadoresCarpeta(carpetaId: string | null): Promise<{ total: number; noLeidos: number }> {
     const c = await this.json<{ totalItemCount?: number; unreadItemCount?: number }>(`${this.urlCarpeta(carpetaId)}?$select=totalItemCount,unreadItemCount`);
     return { total: Math.max(0, Number(c.totalItemCount) || 0), noLeidos: Math.max(0, Number(c.unreadItemCount) || 0) };
+  }
+
+  /**
+   * Redactar (2026-10-19). Sin adjuntos: `POST /users/{buzón de la sesión}/sendMail` (queda en Enviados). Con
+   * adjuntos: borrador (`POST /messages`) → un `POST /attachments` por archivo (≤ 3 MB c/u, el tope de la llamada
+   * simple) → `send`; si algo falla antes de enviar, el borrador se borra para no dejarlo en Borradores. Ninguno de
+   * los dos pasos se reintenta solo ante un 503 (podría haberse enviado ya).
+   */
+  async enviarNuevo(entrada: NuevoCorreoEntrada): Promise<void> {
+    const json = { 'Content-Type': 'application/json' };
+    const message = {
+      subject: entrada.asunto,
+      body: { contentType: 'HTML', content: entrada.html },
+      toRecipients: destinatarios(entrada.para),
+      ccRecipients: destinatarios(entrada.cc),
+      bccRecipients: destinatarios(entrada.cco),
+    };
+    if (entrada.adjuntos.length === 0) {
+      await this.call(`${this.me}/sendMail`, { method: 'POST', headers: json, body: JSON.stringify({ message, saveToSentItems: true }) });
+      return;
+    }
+    const draft = await this.json<{ id?: string }>(`${this.me}/messages`, { method: 'POST', headers: json, body: JSON.stringify(message) });
+    const url = `${this.me}/messages/${encodeURIComponent(assertGraphId(String(draft.id ?? '')))}`;
+    try {
+      for (const a of entrada.adjuntos) {
+        await this.call(`${url}/attachments`, {
+          method: 'POST',
+          headers: json,
+          body: JSON.stringify({ '@odata.type': '#microsoft.graph.fileAttachment', name: a.nombre, contentType: a.tipo, contentBytes: a.bytes.toString('base64') }),
+        });
+      }
+    } catch (e) {
+      await this.call(url, { method: 'DELETE' }).catch(() => undefined);
+      throw e;
+    }
+    await this.call(`${url}/send`, { method: 'POST' });
+  }
+
+  /** Destinatarios de los últimos correos ENVIADOS del buzón propio (solo direcciones; sin asunto ni cuerpo). */
+  async contactosRecientes(max: number): Promise<Direccion[]> {
+    const u = new URL(`${this.me}/mailFolders/sentitems/messages`);
+    u.searchParams.set('$select', 'toRecipients,ccRecipients,sentDateTime');
+    u.searchParams.set('$orderby', 'sentDateTime desc');
+    u.searchParams.set('$top', String(Math.min(Math.max(1, max), 100)));
+    const data = await this.json<{ value?: GraphMsg[] }>(u.toString());
+    const vistos = new Map<string, Direccion>();
+    for (const m of data.value ?? []) {
+      for (const lista of [m.toRecipients, m.ccRecipients]) {
+        if (!Array.isArray(lista)) continue;
+        for (const a of lista as GraphAddr[]) {
+          const d = dir(a);
+          if (d.correo && d.correo !== this.mailbox.correo && !vistos.has(d.correo)) vistos.set(d.correo, d);
+        }
+      }
+    }
+    return [...vistos.values()];
+  }
+
+  /**
+   * Directorio: GET a la colección /v1.0/users (consulta avanzada: ConsistencyLevel eventual). Solo miembros
+   * activos con correo de los dominios del inquilino; devuelve nombre y correo. Se valida la URL exacta antes de salir.
+   */
+  async buscarDirectorio(q: string, dominios: string[], max: number): Promise<Direccion[]> {
+    const url = urlDirectorio(q, max);
+    if (!esUrlDirectorio(url)) throw new CorreoError('Destino de Graph no permitido.', 500);
+    const token = await this.token();
+    const res = await this.enviar(url, { method: 'GET', headers: { Authorization: `Bearer ${token}`, ConsistencyLevel: 'eventual' } }, true);
+    if (res.status === 401) throw new CorreoError('Microsoft rechazó la autenticación del módulo Correo. Avise a Tecnología.', 502);
+    if (res.status === 403) throw new CorreoError('Microsoft no autorizó la consulta del directorio (permiso de la app). Avise a Tecnología.', 403);
+    if (res.status === 429) throw errorLimitado(res);
+    if (!res.ok) throw new CorreoError(`Microsoft respondió con un error (${res.status}).`, 502);
+    const data = (await res.json()) as { value?: GraphMsg[] };
+    const permitidos = new Set(dominios.map((d) => d.toLowerCase()));
+    const out: Direccion[] = [];
+    for (const u of data.value ?? []) {
+      const correo = String(u.mail ?? '').trim().toLowerCase();
+      if (!correo || String(u.userType ?? 'Member') !== 'Member' || !esDestinatarioValido(correo)) continue;
+      if (!permitidos.has(correo.split('@')[1] ?? '')) continue;
+      if (out.some((x) => x.correo === correo)) continue;
+      out.push({ nombre: String(u.displayName ?? '').trim() || correo, correo });
+      if (out.length >= max) break;
+    }
+    return out;
   }
 
   async categorizar(mensajeId: string, categoria: string): Promise<void> {

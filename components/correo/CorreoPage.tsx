@@ -41,6 +41,7 @@ import {
   IconMail,
   IconMailOpened,
   IconPaperclip,
+  IconPencil,
   IconRefresh,
   IconSearch,
   IconTrash,
@@ -55,6 +56,7 @@ import { CorreoApiError, correoApi, esCancelada, fechaCorta, fechaLarga, urlSoli
 import { EsqueletoCarpetas, EsqueletoFilas } from './Esqueletos';
 import FilaDeslizable, { type AccionDeslizar } from './FilaDeslizable';
 import HiloCorreo from './HiloCorreo';
+import RedactarCorreo from './RedactarCorreo';
 import SimulacionModal from './SimulacionModal';
 import { AvatarPersona, carpetasOrdenadas, IconoCarpeta } from './ui';
 import css from './correo.module.css';
@@ -259,6 +261,9 @@ export default function CorreoPage() {
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
   const [panelCarpetas, setPanelCarpetas] = useState(false);
   /** Eliminar correos de hilos vinculados (solicitud o proyecto): confirmación antes de moverlos a la Papelera. */
+  /** Redactar (2026-10-19): ventana de correo nuevo y el aviso de envío (arriba, en verde, hasta cerrarlo). */
+  const [redactando, setRedactando] = useState(false);
+  const [avisoEnvio, setAvisoEnvio] = useState<string | null>(null);
   const [confirmarEliminar, setConfirmarEliminar] = useState<{ filas: MensajeLista[]; vinculos: VinculoEliminar[] } | null>(null);
   /** Lista y filtros VIGENTES (para «Deshacer», que llega segundos después de eliminar). */
   const listaDeRef = useRef<Filtros | null>(null);
@@ -1213,6 +1218,49 @@ export default function CorreoPage() {
     </Card>
   ) : null;
 
+  const envio = estado.conexion.envioHabilitado;
+  const textoSinEnvio = 'Enviar correos desde SynerLink no está habilitado en este ambiente.';
+  const botonRedactar = (
+    <Tooltip label={textoSinEnvio} disabled={envio} withArrow>
+      <div>
+        <Button
+          size='md'
+          radius='lg'
+          variant='light'
+          leftSection={<IconPencil size={20} />}
+          onClick={() => setRedactando(true)}
+          disabled={!envio}
+          fullWidth
+          justify='flex-start'
+          data-testid='correo-redactar-btn'
+        >
+          Redactar
+        </Button>
+      </div>
+    </Tooltip>
+  );
+  const avisoEnviado = avisoEnvio ? (
+    <Alert color='green' variant='light' icon={<IconCheck size={18} />} withCloseButton onClose={() => setAvisoEnvio(null)} p='xs' style={{ flex: '0 0 auto' }} data-testid='correo-aviso-enviado'>
+      <Text size='sm'>{avisoEnvio}</Text>
+    </Alert>
+  ) : null;
+  const alEnviar = ({ destinatarios, asunto }: { destinatarios: number; asunto: string }) => {
+    setAvisoEnvio(`Correo ${asunto ? `«${asunto}» ` : ''}enviado desde su buzón a ${destinatarios === 1 ? '1 destinatario' : `${destinatarios} destinatarios`}. Quedó en Enviados.`);
+    // Los contadores (y la lista, si está en Enviados) se refrescan sin desmontar el aviso.
+    cargarCarpetas();
+    if (carpetaActual?.tipo === 'enviados') void cargarMensajes(filtrosRef.current, { refresco: true });
+  };
+  const redactar = (
+    <RedactarCorreo
+      abierto={redactando}
+      desktop={desktop}
+      correoOperador={estado.conexion.correo}
+      dominiosGrupo={estado.dominiosGrupo ?? []}
+      onCerrar={() => setRedactando(false)}
+      onEnviado={alEnviar}
+    />
+  );
+
   const elegirCarpeta = (id: string | null) => {
     cambiar({ carpeta: id });
     setPanelCarpetas(false);
@@ -1223,6 +1271,7 @@ export default function CorreoPage() {
   return (
     <div className={css.pantalla}>
       <Encabezado estado={estado} empresa={empresa} setEmpresa={setEmpresa} />
+      {listo && avisoEnviado}
 
       {!listo ? (
         <NoDisponible estado={estado} />
@@ -1230,6 +1279,7 @@ export default function CorreoPage() {
         <div className={css.layout}>
           <aside className={css.sidebar}>
             <Stack gap='md'>
+              {botonRedactar}
               <ListaCarpetas carpetas={carpetas} actual={filtros.carpeta} cargando={cargandoCarpetas} onElegir={elegirCarpeta} />
               <AvisoPrivacidad />
             </Stack>
@@ -1259,12 +1309,26 @@ export default function CorreoPage() {
           )}
           {bandeja}
           {hilo}
+          {!hiloAbierto && !redactando && envio && (
+            <Button
+              className={css.fabRedactar}
+              size='lg'
+              radius='xl'
+              leftSection={<IconPencil size={20} />}
+              onClick={() => setRedactando(true)}
+              aria-label='Redactar correo nuevo'
+              data-testid='correo-redactar-fab'
+            >
+              Redactar
+            </Button>
+          )}
           <Drawer opened={panelCarpetas} onClose={() => setPanelCarpetas(false)} position='left' size='80%' title='Carpetas' data-testid='correo-carpetas-drawer'>
             <ListaCarpetas carpetas={carpetas} actual={filtros.carpeta} cargando={cargandoCarpetas} onElegir={elegirCarpeta} />
           </Drawer>
         </div>
       )}
 
+      {listo && redactar}
       <Modal
         opened={Boolean(confirmarMarcado)}
         onClose={() => setConfirmarMarcado(null)}

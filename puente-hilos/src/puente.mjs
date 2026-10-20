@@ -16,17 +16,33 @@
  *      el consumo y confirma (ack) los mensajes atendidos.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, realpathSync } from 'node:fs';
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cargarConfig, ErrorConfig } from './config.mjs';
 import { ColaHilos } from './cola.mjs';
 import { crearClienteSynerLink } from './synerlink.mjs';
-import { armarArgumentos, armarEntorno, correrTurno, etiquetaHerramienta } from './claude.mjs';
+import { armarArgumentos, armarArgumentosSugerencia, armarEntorno, correrTurno, etiquetaHerramienta } from './claude.mjs';
+import {
+  argumentosEquipo,
+  armarAgentes,
+  armarPromptSugerencia,
+  catalogoDisponible,
+  crearVigia,
+  equipoDelTurno,
+  esquemaSugerencia,
+  tareasIndicador,
+  textoEquipoPrincipal,
+  topesEfectivos,
+  validarSugerencia,
+} from './equipo.mjs';
 import {
   armarPrompt,
   asegurarCarpetas,
   bajarAdjuntos,
   escribirContexto,
+  leerPropuestas,
+  limpiarPropuestas,
   Estado,
   registrarConsumoLocal,
   rutasDelHilo,
@@ -86,7 +102,27 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
       asegurarCarpetas(rutas);
       await sincronizarArchivos({ rutas, contexto, estado, descargar: (u) => synerlink.descargar(u) });
       const adjuntos = await bajarAdjuntos({ rutas, mensajes: lote, descargar: (u) => synerlink.descargar(u) });
-      escribirContexto({ rutas, agente: cfg.agenteNombre ?? cfg.agente, contexto, perfil, instruccionesEn: cfg.instruccionesEn });
+      // Equipo de subagentes (F2): SOLO el aprobado en SynerLink, con topes. Si
+      // algo del equipo no valida, el turno corre SIN equipo (falla cerrado).
+      const agenteNombre = cfg.agenteNombre ?? cfg.agente;
+      let equipo = null;
+      let avisoEquipo = '';
+      try {
+        equipo = equipoDelTurno(contexto, cfg);
+      } catch (e) {
+        log(`conversación ${idConversation}: equipo inválido, el turno va sin subagentes:`, e.message);
+        avisoEquipo = '_Nota: el equipo de subagentes del proyecto no se pudo cargar; respondí sin él._\n\n';
+      }
+      const topes = topesEfectivos(equipo, cfg);
+      const equipoTurno = equipo
+        ? {
+            bloque: textoEquipoPrincipal({ equipo, topes }),
+            agentes: armarAgentes({ equipo, perfil, agente: agenteNombre, proyecto: contexto.project, topes }),
+          }
+        : null;
+      escribirContexto({ rutas, agente: agenteNombre, contexto, perfil, instruccionesEn: cfg.instruccionesEn, equipoTurno });
+      limpiarPropuestas(rutas);
+      let vigia = null;
 
       const ejecutar = async (sesion) => {
         const args = armarArgumentos({
@@ -96,18 +132,38 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
           rutaSistema: rutas.sistema,
           dirArchivos: rutas.archivos,
           modelo: cfg.modelo,
-          presupuestoUsd: cfg.presupuestoUsd,
+          // Con equipo, el tope de gasto POR PEDIDO es obligatorio.
+          presupuestoUsd: equipo ? topes.presupuestoUsd : cfg.presupuestoUsd,
+          equipo: equipo ? argumentosEquipo({ equipo, rutaAgentes: rutas.agentes }) : null,
         });
         let ultimaEtiqueta = null;
+        let ultimosActivos = '';
+        vigia = equipo ? crearVigia({ equipo, perfil }) : null;
         return correr({
           bin: cfg.claudeBin,
           args,
-          env: armarEntorno(cfg),
+          env: armarEntorno(cfg, equipo ? topes : null),
           cwd: rutas.cwd,
           prompt: armarPrompt(lote, adjuntos),
           perfil,
+          equipo,
+          vigia,
           timeoutMs: cfg.timeoutTurnoMs,
           alEvento: (evento, acc) => {
+            // La tablita de sub-agentes del chat: se actualiza cuando cambia
+            // el conjunto de subagentes que están trabajando.
+            if (vigia) {
+              const activos = vigia.activos();
+              const clave = activos.map((c) => c.toolUseId).join(',');
+              if (clave !== ultimosActivos) {
+                ultimosActivos = clave;
+                const etiqueta = activos.length > 0 ? `Trabajando con ${activos.length === 1 ? '1 subagente' : `${activos.length} subagentes`}…` : 'Consolidando lo del equipo…';
+                ultimaEtiqueta = etiqueta;
+                void synerlink.estado(idConversation, 'tool', etiqueta, tareasIndicador(activos)).catch(() => null);
+                return;
+              }
+              if (evento.parent_tool_use_id) return; // lo de adentro de un subagente no mueve la etiqueta
+            }
             if (evento.type !== 'assistant' || !acc.ultimaHerramienta) return;
             const etiqueta = etiquetaHerramienta(acc.ultimaHerramienta);
             if (etiqueta === ultimaEtiqueta) return;
@@ -145,19 +201,64 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
       if (r.abortado) {
         cuerpo = r.abortado.startsWith('arranque inseguro')
           ? 'No pude atender el mensaje: el proceso arrancó con permisos que este puente no admite y se detuvo por seguridad. Avísele a Tecnología.'
-          : 'No alcancé a terminar dentro del tiempo permitido. Intente con una pregunta más acotada.';
+          : r.abortado.startsWith('subagente fuera')
+            ? 'Detuve el trabajo por seguridad: un subagente intentó salirse de lo aprobado para el equipo del proyecto. Tecnología quedó con el registro; puede intentar de nuevo.'
+            : 'No alcancé a terminar dentro del tiempo permitido. Intente con una pregunta más acotada.';
         log(`conversación ${idConversation}: turno abortado (${r.abortado})`);
+      } else if (/budget/i.test(r.resultado?.subtipo ?? '')) {
+        cuerpo = `Llegué al tope de gasto de este pedido${equipo ? ` (${topes.presupuestoUsd} USD con el equipo de subagentes)` : ''} y me detuve antes de terminar. Intente con una pregunta más acotada o pídale menos frentes a la vez.`;
+        log(`conversación ${idConversation}: tope de gasto alcanzado (${r.resultado.subtipo})`);
       } else if (!r.resultado?.ok) {
         cuerpo = 'No pude completar la respuesta por un error del asistente. Intente de nuevo en unos minutos.';
         log(`conversación ${idConversation}: turno con error (código ${r.codigo}, ${r.resultado?.subtipo ?? 'sin resultado'})`);
       } else {
         cuerpo = r.resultado.texto.trim() || '_(El asistente terminó sin texto.)_';
       }
-      cuerpo = (aviso + cuerpo).slice(0, MAX_RESPUESTA);
+      // Propuestas de tareas que dejó el modelo: se entregan con la llave del
+      // PUENTE (el modelo nunca la ve) y quedan pendientes de confirmación.
+      let notaPropuestas = '';
+      const prop = leerPropuestas(rutas);
+      if (prop.error) log(`conversación ${idConversation}: ${prop.error}`);
+      if (r.resultado?.ok && prop.items.length > 0) {
+        try {
+          const res = await synerlink.proponer(idConversation, prop.items);
+          const n = res?.creadas?.length ?? 0;
+          const m = res?.rechazadas?.length ?? 0;
+          if (n > 0) notaPropuestas += `\n\n📌 Dejé ${n === 1 ? '1 propuesta' : `${n} propuestas`} en el **Cronograma** del proyecto. Nada cambia hasta que un dueño o editor la${n === 1 ? '' : 's'} confirme.`;
+          if (m > 0) notaPropuestas += `\n\n⚠️ ${m === 1 ? '1 propuesta no se pudo registrar' : `${m} propuestas no se pudieron registrar`}: ${res.rechazadas.map((x) => x.error).slice(0, 3).join(' · ')}`;
+        } catch (e) {
+          log(`conversación ${idConversation}: no se pudieron entregar las propuestas:`, e.message);
+          notaPropuestas = '\n\n⚠️ No pude registrar mis propuestas en el Cronograma por un error. Intente de nuevo.';
+        }
+      }
+      cuerpo = (aviso + avisoEquipo + cuerpo).slice(0, MAX_RESPUESTA - notaPropuestas.length) + notaPropuestas;
 
       await synerlink.responder(idConversation, cuerpo);
 
       const fin = new Date();
+      // Lo que hizo cada subagente: a SynerLink (sección Equipo) y a consumo.jsonl.
+      if (vigia && vigia.corridas().length > 0) {
+        vigia.cerrar('cancelado');
+        const reporteEquipo = {
+          idConversation,
+          sessionId: sesion.id,
+          turnStartedAt: inicio.toISOString(),
+          blocked: vigia.violaciones().slice(0, 5),
+          runs: vigia.corridas().map((c) => ({
+            slug: c.slug,
+            description: c.descripcion,
+            status: c.estado,
+            startedAt: new Date(c.inicio).toISOString(),
+            endedAt: c.fin ? new Date(c.fin).toISOString() : null,
+            durationMs: c.duracionMs,
+            totalTokens: c.tokens,
+            toolUses: c.herramientas,
+            model: c.modelo,
+          })),
+        };
+        registrarConsumoLocal(cfg.hilosDir, { tipo: 'subagentes', idProject: contexto.project.idProject, ...reporteEquipo });
+        await synerlink.corridas(reporteEquipo).catch((e) => log('no se pudo registrar lo del equipo:', e.message));
+      }
       if (r.tokens) {
         const reporte = {
           idConversation,
@@ -193,13 +294,65 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
     }
   }
 
+  /**
+   * «Sugerir equipo»: UN `claude -p` sin herramientas, sin conectores y sin
+   * sesión, con salida estructurada. Lo que devuelve queda PROPUESTO en
+   * SynerLink hasta que el dueño lo apruebe. Pasa por la misma cola (cuenta
+   * dentro del tope de hilos simultáneos).
+   */
+  async function sugerirEquipo(pedido) {
+    const idRequest = pedido?.idRequest;
+    try {
+      const idProject = Number(pedido?.idProject);
+      if (!Number.isInteger(idProject) || idProject <= 0) throw new Error('pedido sin proyecto');
+      const perfil = cfg.perfiles.get(pedido.project?.profileKey);
+      if (!perfil) {
+        await synerlink.entregarSugerencia(idRequest, { error: 'El perfil de conectores del proyecto no está configurado en el puente.' });
+        return;
+      }
+      const disponibles = catalogoDisponible(perfil);
+      const dir = path.join(cfg.hilosDir, 'proyectos', String(idProject), 'equipo');
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const rutaMcp = path.join(dir, 'mcp-vacio.json');
+      writeFileSync(rutaMcp, JSON.stringify({ mcpServers: {} }), { mode: 0o600 });
+      const r = await correr({
+        bin: cfg.claudeBin,
+        args: armarArgumentosSugerencia({
+          rutaMcp,
+          esquema: esquemaSugerencia(disponibles),
+          modelo: cfg.modelo,
+          presupuestoUsd: cfg.sugerenciaPresupuestoUsd,
+        }),
+        env: armarEntorno(cfg, null),
+        cwd: dir,
+        prompt: armarPromptSugerencia({ brief: pedido, disponibles, agente: cfg.agenteNombre ?? cfg.agente }),
+        perfil: { mcpServers: {}, herramientas: [], web: false },
+        timeoutMs: cfg.sugerenciaTimeoutMs,
+      });
+      const items = r.resultado?.ok ? validarSugerencia(r.salidaEstructurada, disponibles) : [];
+      const consumo = r.tokens ? { tokens: r.tokens, models: r.modelos ?? [] } : {};
+      if (items.length === 0) {
+        log(`pedido de equipo ${idRequest}: sin sugerencia (${r.abortado ?? r.resultado?.subtipo ?? `código ${r.codigo}`})`);
+        await synerlink.entregarSugerencia(idRequest, { error: 'El asistente no pudo armar una propuesta de equipo. Intente de nuevo en unos minutos.', ...consumo });
+        return;
+      }
+      await synerlink.entregarSugerencia(idRequest, { items, ...consumo });
+    } catch (err) {
+      log(`pedido de equipo ${idRequest}: error:`, err?.message ?? err);
+      await synerlink.entregarSugerencia(idRequest, { error: 'El asistente no pudo armar una propuesta de equipo por un error del puente.' }).catch(() => null);
+    }
+  }
+
+  const PREFIJO_EQUIPO = 'equipo:';
   const cola = new ColaHilos({
     maxConcurrencia: cfg.maxConcurrencia,
-    ejecutar: atender,
+    ejecutar: (clave, lote) => (clave.startsWith(PREFIJO_EQUIPO) ? sugerirEquipo(lote[0]).finally(() => enProceso.delete(clave)) : atender(clave, lote)),
     alEsperar: (clave) =>
-      void synerlink
-        .estado(Number(clave), 'thinking', `En espera: el asistente atiende otras ${cfg.maxConcurrencia} conversaciones…`)
-        .catch(() => null),
+      clave.startsWith(PREFIJO_EQUIPO)
+        ? undefined
+        : void synerlink
+            .estado(Number(clave), 'thinking', `En espera: el asistente atiende otras ${cfg.maxConcurrencia} conversaciones…`)
+            .catch(() => null),
     alError: (clave, err) => log(`conversación ${clave}: error no controlado:`, err?.message ?? err),
   });
 
@@ -216,7 +369,20 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
     return nuevos;
   }
 
-  return { recibir, cola, enProceso, atender };
+  /** Mete a la cola los pedidos de «Sugerir equipo» (ya reclamados por el servidor). */
+  function recibirPedidos(pedidos) {
+    let nuevos = 0;
+    for (const p of pedidos ?? []) {
+      const clave = `${PREFIJO_EQUIPO}${p?.idRequest}`;
+      if (!Number.isInteger(p?.idRequest) || enProceso.has(clave)) continue;
+      enProceso.add(clave);
+      cola.encolar(clave, p);
+      nuevos += 1;
+    }
+    return nuevos;
+  }
+
+  return { recibir, recibirPedidos, cola, enProceso, atender, sugerirEquipo };
 }
 
 async function principal() {
@@ -245,7 +411,23 @@ async function principal() {
 
   puente.recibir(primera.messages ?? []);
   let espera = 1000;
+  // «Sugerir equipo»: se revisa entre vueltas de la bandeja, cada 15 s como mucho.
+  let ultimaRevisionEquipo = 0;
+  let equipoDisponible = true;
   while (!parar) {
+    if (equipoDisponible && Date.now() - ultimaRevisionEquipo > 15_000) {
+      ultimaRevisionEquipo = Date.now();
+      try {
+        const p = await synerlink.pedidosEquipo();
+        puente.recibirPedidos(p?.requests ?? []);
+      } catch (err) {
+        if (err?.status === 404) {
+          // SynerLink todavía no trae el equipo de subagentes: no se insiste.
+          equipoDisponible = false;
+          log('SynerLink no trae «Sugerir equipo» (404): no se revisa más en esta ejecución.');
+        } else log('pedidos de equipo:', err?.message ?? err);
+      }
+    }
     try {
       const r = await synerlink.bandeja(25);
       const nuevos = puente.recibir(r.messages ?? []);

@@ -33,19 +33,19 @@ describe('CORREO_AGENTE_HABILITADO', () => {
     expect(correoAgenteHabilitado({ CORREO_AGENTE_HABILITADO: ' TRUE ' })).toBe(true);
   });
 
-  it('apagada: 34 herramientas y ninguna correo_*', async () => {
+  it('apagada: 44 herramientas y ninguna correo_*', async () => {
     vi.stubEnv('CORREO_AGENTE_HABILITADO', 'false');
     const n = await nombres();
-    expect(n.length).toBe(34);
+    expect(n.length).toBe(44);
     expect(n.some((x) => x.startsWith('correo_'))).toBe(false);
-    expect(TOOL_CAPABILITIES.totalTools).toBe(34);
+    expect(TOOL_CAPABILITIES.totalTools).toBe(44);
   });
 
-  it('encendida: 39, con las 5 correo_*', async () => {
+  it('encendida: 49, con las 5 correo_*', async () => {
     vi.stubEnv('CORREO_AGENTE_HABILITADO', 'true');
     const n = await nombres();
-    expect(n.length).toBe(39);
+    expect(n.length).toBe(49);
     for (const t of CORREO_AGENTE_TOOLS) expect(n).toContain(t);
-    expect(TOOL_CAPABILITIES.totalTools).toBe(39);
+    expect(TOOL_CAPABILITIES.totalTools).toBe(49);
   });
 });

@@ -5,6 +5,7 @@ import {
   CUMPLEANOS_CACHE_MS,
   RUTA_BASE_PERSONAL_POR_DEFECTO,
   _reiniciarCacheCumpleanos,
+  cumpleanerosDeLaFecha,
   cumpleanosEnRango,
   diaMesDeNacimiento,
   leerConfigCumpleanos,
@@ -89,22 +90,37 @@ describe('diaMesDeNacimiento', () => {
 
 describe('columnas', () => {
   it('se ubican por su encabezado aunque cambien de orden, tildes o mayúsculas; sin una necesaria lanza cuál falta', () => {
-    expect(ubicarColumnasCumple(['FECHA DE NACIMIENTO', 'area / dependencia', 'Empresa Contratante', 'apellidos y nombres'])).toMatchObject({ nacimiento: 0, area: 1, empresa: 2, nombre: 3, estado: -1 });
-    expect(() => ubicarColumnasCumple(['Apellidos y Nombres', 'Empresa contratante', 'Área / Dependencia'])).toThrow(/«FECHA DE NACIMIENTO»/);
-    expect(() => ubicarColumnasCumple(['Apellidos y Nombres', 'Área / Dependencia', 'Fecha de nacimiento'])).toThrow(/«EMPRESA CONTRATANTE»/);
+    expect(ubicarColumnasCumple(['FECHA DE NACIMIENTO', 'CARGO', 'Empresa Contratante', 'apellidos y nombres'])).toMatchObject({ nacimiento: 0, cargo: 1, empresa: 2, nombre: 3, estado: -1 });
+    expect(() => ubicarColumnasCumple(['Apellidos y Nombres', 'Empresa contratante', 'Cargo'])).toThrow(/«FECHA DE NACIMIENTO»/);
+    expect(() => ubicarColumnasCumple(['Apellidos y Nombres', 'Cargo', 'Fecha de nacimiento'])).toThrow(/«EMPRESA CONTRATANTE»/);
+    // El Área / Dependencia ya no se usa: tenerla no reemplaza al cargo.
+    expect(() => ubicarColumnasCumple(['Apellidos y Nombres', 'Empresa contratante', 'Área / Dependencia', 'Fecha de nacimiento'])).toThrow(/«CARGO»/);
   });
 });
 
 describe('personasDesdeHojaCumple', () => {
-  it('toma nombre, empresa contratante, área y día/mes; descarta inactivos, sin nombre y sin fecha válida (y cuenta estos últimos)', () => {
+  it('toma nombre, empresa contratante, cargo y día/mes; descarta inactivos, sin nombre y sin fecha válida (y cuenta estos últimos)', () => {
     const r = personasDesdeHojaCumple(HOJA, HOY);
     expect(r.personas.map((p) => p.nombre)).toEqual(['PEREZ GOMEZ ANA', 'ACOSTA RUIZ LUIS', 'MORA PINTO JUAN']);
     expect(r.sinFechaValida).toBe(1);
-    expect(r.personas[0]).toEqual({ nombre: 'PEREZ GOMEZ ANA', empresa: 'GROUP SHARED SERVICES SAS', area: 'SISTEMAS', mes: 10, dia: 15 });
+    // El correo corporativo se guarda SOLO para uso interno (mensajes de cumpleaños, 2026-10-20): nunca sale hacia el navegador.
+    expect(r.personas[0]).toEqual({ nombre: 'PEREZ GOMEZ ANA', empresa: 'GROUP SHARED SERVICES SAS', cargo: 'ANALISTA', correo: 'a@x.com', mes: 10, dia: 15 });
+    expect(r.personas[2].correo).toBe(''); // sin correo en la hoja
   });
-  it('no deja pasar la cédula, el correo ni el cargo, ni el año de nacimiento', () => {
-    const texto = JSON.stringify(personasDesdeHojaCumple(HOJA, HOY).personas);
-    for (const no of ['1010101010', '2020202020', 'a@x.com', 'ANALISTA', '1990', '1985', '1988']) expect(texto, no).not.toContain(no);
+  it('lo que sale hacia el navegador NO trae la cédula, el correo, el área ni el año de nacimiento (el cargo sí, pedido de Cristian 2026-10-19)', () => {
+    const texto = JSON.stringify(cumpleanosEnRango(personasDesdeHojaCumple(HOJA, HOY).personas, '2026-01-01', '2026-12-31'));
+    for (const no of ['1010101010', '2020202020', 'a@x.com', '@', 'SISTEMAS', 'CONTABILIDAD', 'PRODUCCION', '1990', '1985', '1988']) expect(texto, no).not.toContain(no);
+    expect(texto).toContain('ANALISTA');
+  });
+  it('la columna del correo es opcional: sin ella las personas entran con el correo vacío', () => {
+    const r = personasDesdeHojaCumple([['Apellidos y Nombres', 'Empresa contratante', 'Cargo', 'Fecha de nacimiento'], ['ANA', 'E', 'JEFE', serie('1990-10-15')]], HOY);
+    expect(r.personas).toEqual([{ nombre: 'ANA', empresa: 'E', cargo: 'JEFE', correo: '', mes: 10, dia: 15 }]);
+  });
+  it('el CARGO reemplaza al Área / Dependencia: sale el cargo y nunca el área; sin la columna Cargo avisa cuál falta', () => {
+    const p = personasDesdeHojaCumple(HOJA, HOY).personas[0];
+    expect(p.cargo).toBe('ANALISTA');
+    expect(Object.keys(p)).not.toContain('area');
+    expect(() => ubicarColumnasCumple(['Apellidos y Nombres', 'Empresa contratante', 'Área / Dependencia', 'Fecha de nacimiento'])).toThrow(/«CARGO»/);
   });
   it('hoja vacía o solo con encabezado: nadie', () => {
     expect(personasDesdeHojaCumple([], HOY)).toEqual({ personas: [], sinFechaValida: 0 });
@@ -121,15 +137,15 @@ describe('cumpleanosEnRango', () => {
     expect(r[0].personas.map((p) => p.nombre)).toEqual(['ACOSTA RUIZ LUIS', 'PEREZ GOMEZ ANA']);
     expect(cumpleanosEnRango(personas, '2031-10-15', '2031-10-15')[0].personas).toHaveLength(2); // cualquier año
   });
-  it('solo devuelve nombre, empresa y área', () => {
-    expect(Object.keys(cumpleanosEnRango(personas, '2026-10-15', '2026-10-15')[0].personas[0]).sort()).toEqual(['area', 'empresa', 'nombre']);
+  it('solo devuelve nombre, empresa y cargo', () => {
+    expect(Object.keys(cumpleanosEnRango(personas, '2026-10-15', '2026-10-15')[0].personas[0]).sort()).toEqual(['cargo', 'empresa', 'nombre']);
   });
   it('quien nació un 29 de febrero se celebra el 28 en los años que no son bisiestos y el 29 en los bisiestos', () => {
     expect(cumpleanosEnRango(personas, '2026-02-27', '2026-03-02').map((d) => d.fecha)).toEqual(['2026-02-28']);
     expect(cumpleanosEnRango(personas, '2028-02-27', '2028-03-02').map((d) => d.fecha)).toEqual(['2028-02-29']);
   });
   it('un rango que cruza de año, y un rango inválido o invertido', () => {
-    const p = [{ nombre: 'A', empresa: 'E', area: 'X', mes: 1, dia: 1 }, { nombre: 'B', empresa: 'E', area: 'X', mes: 12, dia: 31 }];
+    const p = [{ nombre: 'A', empresa: 'E', cargo: 'X', correo: '', mes: 1, dia: 1 }, { nombre: 'B', empresa: 'E', cargo: 'X', correo: '', mes: 12, dia: 31 }];
     expect(cumpleanosEnRango(p, '2026-12-30', '2027-01-02').map((d) => d.fecha)).toEqual(['2026-12-31', '2027-01-01']);
     expect(cumpleanosEnRango(p, '2026-12-31', '2026-12-01')).toEqual([]);
     expect(cumpleanosEnRango(p, 'x', 'y')).toEqual([]);
@@ -139,14 +155,33 @@ describe('cumpleanosEnRango', () => {
   });
 });
 
+describe('cumpleanerosDeLaFecha (uso interno de los mensajes de cumpleaños)', () => {
+  const personas = personasDesdeHojaCumple(HOJA, HOY).personas;
+  it('trae a quienes cumplen ese día y mes, de cualquier año, con su correo para uso interno', () => {
+    expect(cumpleanerosDeLaFecha(personas, '2026-10-15').map((p) => p.nombre).sort()).toEqual(['ACOSTA RUIZ LUIS', 'PEREZ GOMEZ ANA']);
+    expect(cumpleanerosDeLaFecha(personas, '2031-10-15')).toHaveLength(2);
+    expect(cumpleanerosDeLaFecha(personas, '2026-10-15').find((p) => p.nombre === 'PEREZ GOMEZ ANA')?.correo).toBe('a@x.com');
+    expect(cumpleanerosDeLaFecha(personas, '2026-10-16')).toEqual([]);
+  });
+  it('quien nació un 29 de febrero se celebra el 28 en los años que no son bisiestos, igual que en el calendario', () => {
+    expect(cumpleanerosDeLaFecha(personas, '2026-02-28').map((p) => p.nombre)).toEqual(['MORA PINTO JUAN']);
+    expect(cumpleanerosDeLaFecha(personas, '2026-02-29')).toEqual([]); // no existe ese día en 2026
+    expect(cumpleanerosDeLaFecha(personas, '2028-02-29').map((p) => p.nombre)).toEqual(['MORA PINTO JUAN']);
+    expect(cumpleanerosDeLaFecha(personas, '2028-02-28')).toEqual([]);
+  });
+  it('una fecha que no es una fecha: nadie', () => {
+    for (const mala of ['', 'x', '2026-13-01', '2026-02-30', '2026-00-10']) expect(cumpleanerosDeLaFecha(personas, mala), mala).toEqual([]);
+  });
+});
+
 describe('cumpleanosComoEventos (lo que ve el calendario)', () => {
   it('un evento «CUMPLEAÑOS» por día, de tipo fecha importante, con la lista de personas', () => {
-    const e = cumpleanosComoEventos([{ fecha: '2026-10-15', personas: [{ nombre: 'A', empresa: 'E', area: 'X' }] }]);
-    expect(e).toEqual([{ fecha: '2026-10-15', titulo: 'CUMPLEAÑOS', tipo: 'conmemoracion', personas: [{ nombre: 'A', empresa: 'E', area: 'X' }] }]);
+    const e = cumpleanosComoEventos([{ fecha: '2026-10-15', personas: [{ nombre: 'A', empresa: 'E', cargo: 'X' }] }]);
+    expect(e).toEqual([{ fecha: '2026-10-15', titulo: 'CUMPLEAÑOS', tipo: 'conmemoracion', personas: [{ nombre: 'A', empresa: 'E', cargo: 'X' }] }]);
     expect(TITULO_CUMPLEANOS).toBe('CUMPLEAÑOS');
   });
   it('ignora fechas inválidas y días sin personas (la respuesta del servidor no es de fiar)', () => {
-    expect(cumpleanosComoEventos([{ fecha: '2026-02-30', personas: [{ nombre: 'A', empresa: 'E', area: 'X' }] }, { fecha: '2026-10-15', personas: [] }, { fecha: 'x', personas: [] }])).toEqual([]);
+    expect(cumpleanosComoEventos([{ fecha: '2026-02-30', personas: [{ nombre: 'A', empresa: 'E', cargo: 'X' }] }, { fecha: '2026-10-15', personas: [] }, { fecha: 'x', personas: [] }])).toEqual([]);
   });
 });
 

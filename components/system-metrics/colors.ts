@@ -20,10 +20,11 @@ export function seriesColor(index: number, isDark: boolean): string {
 const MODULE_SLOTS: Record<string, number> = {
   'Solicitudes generales': 0,
   'Firma electrónica (Orion)': 1,
-  'Chat / Asistentes IA': 2,
+  Chat: 2,
   'SGC documental': 3,
   'Help desk': 4,
-  'Archivos estáticos': 5,
+  // Antes era de "Archivos estáticos", que ya no cuenta en el consumo por persona ni en el tráfico.
+  'Asistentes IA': 5,
   Dashboard: 6,
   Notificaciones: 7,
 };

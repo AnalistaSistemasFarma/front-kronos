@@ -134,7 +134,7 @@ function floorMinute(date: Date): number {
   return Math.floor(date.getTime() / MINUTE) * MINUTE;
 }
 
-function localParts(iso: string, timeZone: string): { hhmm: string; minuteOfDay: number } {
+export function localParts(iso: string, timeZone: string): { hhmm: string; minuteOfDay: number } {
   const parts = new Intl.DateTimeFormat('es-CO', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(
     new Date(iso)
   );
@@ -426,8 +426,10 @@ export function evaluateEarlyWarnings(input: WatchInput): EarlyWarning[] {
           key: `proceso-bloqueado${suffix}-${last.instance}`,
           rule: 'proceso-bloqueado',
           severity: worst >= T.freezeMs ? 'critical' : 'warning',
-          title: `${name} lleva ${minutesText(stalled.length)} demasiado ocupado para atender${where}`,
-          happening: `Tarda hasta ${fmt(worst)} ms en atender trabajo nuevo (lo normal es menos de 50 ms). Los demás procesos están bien.`,
+          // "N de los últimos 5 min": los minutos no tienen por qué ser seguidos. Sin decir que
+          // los demás procesos están bien: eso no se verifica aquí.
+          title: `${name} estuvo demasiado ocupado para atender en ${stalled.length} de los últimos ${T.stalledLookbackMin} minutos${where}`,
+          happening: `Tarda hasta ${fmt(worst)} ms en atender trabajo nuevo (lo normal es menos de 50 ms).`,
           why: 'Algo pesado está ocupando ese proceso: generar un PDF o un Excel grande, leer un archivo enorme o un cálculo en bucle.',
           risk: 'Las personas atendidas por ese proceso ven pantallas que no cargan. Si dura, pm2 lo reinicia y se corta lo que estaban haciendo.',
           action: 'En el monitor, revisar "Rutas más pesadas" en la última hora para ver qué estaba corriendo.',

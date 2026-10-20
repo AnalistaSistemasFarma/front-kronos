@@ -5,6 +5,8 @@ import { badRequest, jsonNoStore, serverError, unauthorized } from '../../../../
 import { assertAgentProjectConversation } from '../../../../../../lib/chat/projects';
 import { profileLabel } from '../../../../../../lib/chat/projects-rules';
 import { vinculosDelProyecto } from '../../../../../../lib/chat/projects-links';
+import { cronogramaParaAgente } from '../../../../../../lib/proyectos/cronograma';
+import { equipoParaAgente } from '../../../../../../lib/proyectos/equipo';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +26,15 @@ export const dynamic = 'force-dynamic';
  * correo, asunto, remitente, fecha y resumen —nunca el cuerpo—; de una
  * solicitud, número, asunto, proceso y estado actual. Es de solo lectura: el
  * puente lo escribe en ./contexto/vinculados.md de la carpeta del hilo.
+ *
+ * Cronograma (2026-10-18): trae además `schedule` (tareas con fechas, estado,
+ * avance y responsable; solicitudes con sus fechas y actividades). El puente lo
+ * escribe en ./contexto/cronograma.md. El agente NO cambia el cronograma: deja
+ * propuestas (POST /api/chat/agent/projects/proposals) que una persona confirma.
+ *
+ * Equipo de subagentes (F2, 2026-10-18): trae además `team` con SOLO los
+ * subagentes APROBADOS por el dueño, el interruptor y el tope de simultáneos.
+ * El puente los convierte en la definición `--agents` (puente-hilos/src/equipo.mjs).
  *
  * Solo con la llave del puente: la del bot vivo responde 404 aquí, igual que
  * una conversación que no es de un proyecto de ESTE agente.
@@ -64,6 +75,20 @@ export async function GET(request: NextRequest) {
     if (!p) return jsonNoStore({ error: 'Conversación no encontrada.' }, { status: 404 });
 
     const vinculos = await vinculosDelProyecto(p.id_project, null);
+    // Sin equipo si falla: el turno sigue, y sin subagentes (falla cerrado).
+    let team: Awaited<ReturnType<typeof equipoParaAgente>> = { enabled: false, maxParallel: 1, members: [] };
+    try {
+      team = await equipoParaAgente(p.id_project);
+    } catch (err) {
+      console.error('[agent/projects/context] equipo:', (err as Error).message);
+    }
+    let schedule: Awaited<ReturnType<typeof cronogramaParaAgente>> | null = null;
+    try {
+      schedule = await cronogramaParaAgente(p.id_project);
+    } catch (err) {
+      // El cronograma es un adorno del contexto: si falla, el turno sigue.
+      console.error('[agent/projects/context] cronograma:', (err as Error).message);
+    }
 
     return jsonNoStore({
       project: {
@@ -96,6 +121,8 @@ export async function GET(request: NextRequest) {
             linkedAt: r.linkedAt,
           })),
         },
+        schedule,
+        team,
         files: p.files.map((f) => ({
           id: f.id_project_file,
           fileName: f.file_name,

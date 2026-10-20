@@ -9,12 +9,18 @@ import {
   CORREO_MAX_NOTA,
   CORREO_MAX_RESPUESTA_CHARS,
   CORREO_MAX_TOTAL_RESPUESTA_BYTES,
+  CORREO_MAX_ASUNTO_NUEVO,
+  CORREO_MAX_BUSQUEDA_DESTINATARIO,
+  CORREO_MAX_SUGERENCIAS,
+  CORREO_RECIENTES_CACHE_MS,
+  CORREO_RECIENTES_MENSAJES,
   correoCategoria,
 } from './constants';
+import { revisarDestinatarios } from './destinatarios';
 import * as data from './db';
 import type { AccesoCorreo, CorreoDb } from './db';
 import { CorreoError, NO_DISPONIBLE } from './errors';
-import { assertGraphId, GraphMailProvider, idsDesplegados, mailboxForSession, tokenApp } from './graph';
+import { assertGraphId, GraphMailProvider, idsDesplegados, mailboxForSession, normalizarBusquedaDirectorio, tokenApp } from './graph';
 import { actualizarMensajeEnCache, hiloConCache, invalidarHilo, marcarLeidoEnCache } from './cacheHilo';
 import { MockMailProvider } from './mock';
 import { agruparPorHilo, filaDesdeHilo, notaDesdeCorreo, notaDesdeRespuesta, type FilaCrear, type ProcesoOpcion } from './rules';
@@ -23,7 +29,7 @@ import { markdownAHtml, markdownATexto } from './markdown';
 import { claveAcuse, enlaceSolicitud, textoAcuse, type OpcionesAcuse } from './acuse';
 import { fragmentoAcuse, logoAcuseUrl } from './plantillas/acuse.html';
 import type { SolicitudVisible } from './kronos';
-import type { ArchivoAdjunto, Direccion, FilaSimulacion, MailProvider, MensajeCompleto, ResultadoAcuse, ResultadoCreacion, VinculoHilo } from './types';
+import type { ArchivoAdjunto, Direccion, FilaSimulacion, MailProvider, MensajeCompleto, ResultadoAcuse, ResultadoCreacion, SugerenciaDestinatario, VinculoHilo } from './types';
 
 /**
  * Orquestación del módulo Correo. Las dependencias se inyectan (base, Graph,
@@ -473,6 +479,125 @@ export async function responder(
     acceso.idUser
   );
   return { notaEnSolicitud: vinculo.idRequest };
+}
+
+// ---------------------------------------------------------------------------
+// Redactar (correo nuevo, 2026-10-19)
+// ---------------------------------------------------------------------------
+
+/** Validación común de los adjuntos de una respuesta o de un correo nuevo (mismos topes). */
+function validarAdjuntos(adjuntos: ArchivoAdjunto[], que: string): void {
+  if (adjuntos.length > CORREO_MAX_ADJUNTOS_RESPUESTA) throw new CorreoError(`Máximo ${CORREO_MAX_ADJUNTOS_RESPUESTA} adjuntos por ${que}.`, 400);
+  if (adjuntos.some((a) => a.bytes.length > CORREO_MAX_ADJUNTO_RESPUESTA_BYTES)) throw new CorreoError(`Cada adjunto puede pesar máximo 3 MB.`, 400);
+  if (adjuntos.some((a) => a.bytes.length === 0)) throw new CorreoError('Hay un adjunto vacío.', 400);
+  if (adjuntos.reduce((s, a) => s + a.bytes.length, 0) > CORREO_MAX_TOTAL_RESPUESTA_BYTES) throw new CorreoError('Los adjuntos suman más de 10 MB.', 400);
+}
+
+/** Asunto de una sola línea: sin caracteres de control (evita saltos de línea en la cabecera). */
+export function limpiarAsunto(asunto: string): string {
+  return String(asunto ?? '')
+    .replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Envía un correo NUEVO desde el buzón de la SESIÓN (nunca desde uno que llegue del navegador: la ruta no
+ * recibe remitente). El cuerpo es el Markdown de la persona convertido y SANEADO en el servidor (el navegador no
+ * manda HTML). Respeta CORREO_ENVIO_HABILITADO. Auditoría ENVIAR_NUEVO con destinatarios y asunto, sin el cuerpo.
+ */
+export async function enviarNuevo(
+  d: CorreoDeps,
+  acceso: AccesoCorreo,
+  p: { para: string[]; cc: string[]; cco: string[]; asunto: string; texto: string; adjuntos: ArchivoAdjunto[]; ip: string | null }
+): Promise<{ destinatarios: number }> {
+  if (!d.cfg.envioHabilitado) throw new CorreoError('Enviar correos desde SynerLink no está habilitado en este ambiente.', 403);
+  const r = revisarDestinatarios({ para: p.para, cc: p.cc, cco: p.cco });
+  if (r.error) throw new CorreoError(r.error, 400, 'DESTINATARIOS');
+  const asunto = limpiarAsunto(p.asunto);
+  if (asunto.length > CORREO_MAX_ASUNTO_NUEVO) throw new CorreoError(`El asunto puede tener máximo ${CORREO_MAX_ASUNTO_NUEVO} caracteres.`, 400);
+  const texto = String(p.texto ?? '').trim();
+  if (texto.length > CORREO_MAX_RESPUESTA_CHARS) throw new CorreoError('El correo es demasiado largo.', 400);
+  if (!texto && !asunto && p.adjuntos.length === 0) throw new CorreoError('Escriba el asunto o el mensaje.', 400);
+  validarAdjuntos(p.adjuntos, 'correo');
+  const prov = await proveedorDe(d, acceso);
+  // Markdown → HTML ya saneado (lista blanca); el HTML que alguien escriba queda como texto.
+  const html = markdownAHtml(texto);
+  await prov.enviarNuevo({ asunto, html, para: r.para, cc: r.cc, cco: r.cco, adjuntos: p.adjuntos });
+  const lista = (x: string[]) => (x.length ? x.join(', ') : '—');
+  await data.auditar(d.db, {
+    idUser: acceso.idUser,
+    mailbox: buzon(acceso),
+    accion: 'ENVIAR_NUEVO',
+    detalle: `Asunto: «${asunto || '(sin asunto)'}» · Para: ${lista(r.para)} · CC: ${lista(r.cc)} · CCO: ${lista(r.cco)} · ${p.adjuntos.length} adjunto(s)`,
+    ip: p.ip,
+  });
+  // Las nuevas direcciones pasan a los recientes de la persona sin esperar a la caché.
+  recordarRecientes(acceso, [...r.para, ...r.cc, ...r.cco].map((correo) => ({ nombre: correo, correo })));
+  return { destinatarios: r.total };
+}
+
+interface CacheRecientes {
+  expira: number;
+  lista: Direccion[];
+}
+const recientesCache: Map<string, CacheRecientes> =
+  ((globalThis as Record<string, unknown>).__correoRecientes as never) ?? ((globalThis as Record<string, unknown>).__correoRecientes = new Map());
+
+/** Solo pruebas. */
+export function limpiarRecientes(): void {
+  recientesCache.clear();
+}
+
+function claveRecientes(acceso: AccesoCorreo): string {
+  return `${acceso.idUser}:${buzon(acceso)}`;
+}
+
+function recordarRecientes(acceso: AccesoCorreo, nuevas: Direccion[]): void {
+  const c = recientesCache.get(claveRecientes(acceso));
+  if (!c) return;
+  const resto = c.lista.filter((x) => !nuevas.some((n) => n.correo === x.correo));
+  c.lista = [...nuevas.map((n) => c.lista.find((x) => x.correo === n.correo) ?? n), ...resto].slice(0, 200);
+}
+
+async function recientesDe(d: CorreoDeps, acceso: AccesoCorreo, prov: MailProvider): Promise<Direccion[]> {
+  const k = claveRecientes(acceso);
+  const c = recientesCache.get(k);
+  if (c && c.expira > now(d)) return c.lista;
+  const lista = await prov.contactosRecientes(CORREO_RECIENTES_MENSAJES);
+  recientesCache.set(k, { expira: now(d) + CORREO_RECIENTES_CACHE_MS, lista });
+  return lista;
+}
+
+function coincide(x: Direccion, q: string): boolean {
+  const t = q.toLowerCase();
+  return x.correo.startsWith(t) || x.nombre.toLowerCase().split(/\s+/).some((p) => p.startsWith(t)) || x.nombre.toLowerCase().startsWith(t);
+}
+
+/**
+ * Autocompletado de destinatarios: primero los contactos RECIENTES de la persona (de sus Enviados) y después el
+ * DIRECTORIO de la organización (solo nombre y correo de miembros activos de los dominios de su inquilino). Sin
+ * texto: solo los recientes. Si el directorio falla (p. ej. la app no tiene el permiso), se sigue con los recientes.
+ */
+export async function sugerirDestinatarios(d: CorreoDeps, acceso: AccesoCorreo, q: string): Promise<SugerenciaDestinatario[]> {
+  const texto = String(q ?? '').replace(/\s+/g, ' ').trim().slice(0, CORREO_MAX_BUSQUEDA_DESTINATARIO);
+  const prov = await proveedorDe(d, acceso);
+  const recientes = await recientesDe(d, acceso, prov).catch(() => [] as Direccion[]);
+  const out: SugerenciaDestinatario[] = [];
+  const agregar = (x: Direccion, origen: SugerenciaDestinatario['origen']) => {
+    if (out.length < CORREO_MAX_SUGERENCIAS && !out.some((y) => y.correo === x.correo)) out.push({ ...x, origen });
+  };
+  for (const x of recientes) if (!texto || coincide(x, texto)) agregar(x, 'reciente');
+  const busqueda = normalizarBusquedaDirectorio(texto);
+  if (busqueda && out.length < CORREO_MAX_SUGERENCIAS && prov.buscarDirectorio) {
+    const dominios = d.cfg.modo === 'graph' ? (inquilinoDeCorreo(d.cfg, acceso.email)?.dominios ?? []) : [buzon(acceso).split('@')[1] ?? ''];
+    const dir = await prov.buscarDirectorio(busqueda, dominios, CORREO_MAX_SUGERENCIAS).catch((e) => {
+      console.warn('[correo/destinatarios] directorio no disponible:', e instanceof Error ? e.message : 'error');
+      return [] as Direccion[];
+    });
+    for (const x of dir) if (x.correo !== buzon(acceso)) agregar(x, 'directorio');
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
