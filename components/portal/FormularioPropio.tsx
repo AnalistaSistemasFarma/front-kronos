@@ -569,6 +569,9 @@ function CampoPregunta({
   const marcadasLista = marcadas.filter((x) => !esElementoOtras(x));
   const textoOtras = (marcadas.find(esElementoOtras) ?? '').slice(PREFIJO_OTRAS.length);
   const [otrasActiva, setOtrasActiva] = useState(() => marcadas.some(esElementoOtras));
+  // La casilla «Otras» es parte del GRUPO (Mantine: una casilla dentro de `Checkbox.Group` toma su estado del grupo e ignora su propio
+  // `checked`/`onChange`; por eso la primera versión no respondía al clic). Se identifica con un valor que ninguna opción puede tener.
+  const VALOR_OTRAS_MULTIPLE = '\u0000otras';
   const ponerMultiple = (lista: string[], otras: string) => onCambio(otras.trim() ? [...lista, `${PREFIJO_OTRAS}${otras}`] : lista);
   // Imagen que ilustra la pregunta (solo de /portal-th/; la definición ya lo valida). Va debajo del enunciado.
   const imagen = p.imagen ? (
@@ -599,7 +602,20 @@ function CampoPregunta({
       {/* En los tipos de texto la imagen va arriba del campo; en los de opciones va dentro del grupo, bajo el enunciado. */}
       {(p.tipo === 'texto' || p.tipo === 'texto_largo' || p.tipo === 'numero' || p.tipo === 'fecha') && imagen}
       {p.tipo === 'seleccion_multiple' ? (
-        <Checkbox.Group {...comun} size='md' value={marcadasLista} onChange={(v) => ponerMultiple(v, otrasActiva ? textoOtras : '')} data-testid={`multiple-${p.id}`}>
+        <Checkbox.Group
+          {...comun}
+          size='md'
+          value={otrasActiva ? [...marcadasLista, VALOR_OTRAS_MULTIPLE] : marcadasLista}
+          onChange={(v) => {
+            const conOtras = v.includes(VALOR_OTRAS_MULTIPLE);
+            setOtrasActiva(conOtras);
+            ponerMultiple(
+              v.filter((x) => x !== VALOR_OTRAS_MULTIPLE),
+              conOtras ? textoOtras : ''
+            );
+          }}
+          data-testid={`multiple-${p.id}`}
+        >
           {imagen}
           <Stack gap='xs' mt='xs'>
             {opciones.map((o) => (
@@ -607,17 +623,7 @@ function CampoPregunta({
             ))}
             {p.permiteOtra && (
               <Group gap='sm' wrap='wrap' align='center'>
-                <Checkbox
-                  label='Otras'
-                  size='sm'
-                  checked={otrasActiva}
-                  data-testid={`otras-marca-${p.id}`}
-                  onChange={(e) => {
-                    const marcada = e.currentTarget.checked;
-                    setOtrasActiva(marcada);
-                    if (!marcada) ponerMultiple(marcadasLista, '');
-                  }}
-                />
+                <Checkbox label='Otras' size='sm' value={VALOR_OTRAS_MULTIPLE} data-testid={`otras-marca-${p.id}`} />
                 <TextInput
                   aria-label={`${p.texto}: otras`}
                   placeholder='Escriba cuál'
