@@ -39,11 +39,28 @@ export function UserBehavior({ users, rangeMinutes }: { users: UserRow[]; rangeM
 
     const moduleOf = (label: string) => label || OTHER_MODULES_KEY;
 
-    type Source = { id: string; name: string; email: string | null; totalMs: number; requests: number; modules: Map<string, number> };
+    type Source = {
+      id: string;
+      name: string;
+      email: string | null;
+      totalMs: number;
+      requests: number;
+      modules: Map<string, number>;
+      /** Datos viejos: cada ventana entera a su módulo principal, el % por módulo no es real. */
+      approximate: boolean;
+    };
     const sources: Source[] = top.map((u) => {
       const modules = new Map<string, number>();
       for (const m of u.modules) modules.set(moduleOf(m.label), (modules.get(moduleOf(m.label)) ?? 0) + m.totalMs);
-      return { id: u.email, name: u.name ?? u.email, email: u.email, totalMs: u.totalMs, requests: u.requests, modules };
+      return {
+        id: u.email,
+        name: u.name ?? u.email,
+        email: u.email,
+        totalMs: u.totalMs,
+        requests: u.requests,
+        modules,
+        approximate: Boolean(u.modulesApproximate),
+      };
     });
     if (rest.length) {
       const modules = new Map<string, number>();
@@ -61,6 +78,7 @@ export function UserBehavior({ users, rangeMinutes }: { users: UserRow[]; rangeM
         totalMs,
         requests,
         modules,
+        approximate: rest.some((u) => u.modulesApproximate),
       });
     }
 
@@ -94,7 +112,9 @@ export function UserBehavior({ users, rangeMinutes }: { users: UserRow[]; rangeM
         weight: weights[i],
         rate: (r.source.requests * share) / Math.max(1, rangeMinutes),
         color: moduleFlowColor(r.label, isDark),
-        title: `${r.source.name} → ${r.label}: ${formatMs(r.ms)} de servidor (${formatValue(share * 100, 0)} % de su consumo)`,
+        title: r.source.approximate
+          ? `${r.source.name} → ${r.label}: ${formatMs(r.ms)} de servidor (aproximado)`
+          : `${r.source.name} → ${r.label}: ${formatMs(r.ms)} de servidor (${formatValue(share * 100, 0)} % de su consumo)`,
       };
     });
     return { sources, targets: targetList, edges };
@@ -131,7 +151,11 @@ export function UserBehavior({ users, rangeMinutes }: { users: UserRow[]; rangeM
                 <span style={{ minWidth: 0 }}>
                   <div className={styles.rowTitle}>{s.name}</div>
                   <div className={styles.rowSub} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {mainLabel ? `${formatValue(s.totalMs ? (mainMs / s.totalMs) * 100 : 0, 0)} % en ${mainLabel}` : 'sin detalle'}
+                    {!mainLabel
+                      ? 'sin detalle'
+                      : s.approximate
+                        ? `sobre todo en ${mainLabel}`
+                        : `${formatValue(s.totalMs ? (mainMs / s.totalMs) * 100 : 0, 0)} % en ${mainLabel}`}
                   </div>
                 </span>
                 <span className={styles.rowMetric}>{formatMs(s.totalMs)}</span>
@@ -140,8 +164,11 @@ export function UserBehavior({ users, rangeMinutes }: { users: UserRow[]; rangeM
           })}
         </div>
 
-        <div className={styles.flowColumn}>
+        {/* Los módulos se reparten a lo alto de la lista de personas: si quedan todos juntos en
+            el centro, las curvas de quienes están arriba y abajo se amontonan en un muro. */}
+        <div className={`${styles.flowColumn} ${styles.flowColumnSpread}`}>
           <div className={styles.flowColumnTitle}>Módulos</div>
+          <div className={styles.flowColumnSpreadBody}>
           {model.targets.map((t) => (
             <button
               key={t.label}
@@ -165,11 +192,14 @@ export function UserBehavior({ users, rangeMinutes }: { users: UserRow[]; rangeM
               <span className={styles.rowMetric}>{formatMs(t.totalMs)}</span>
             </button>
           ))}
+          </div>
         </div>
       </div>
       <p className={styles.cardHint} style={{ marginTop: 12, marginBottom: 0 }}>
-        Pase el mouse por una persona o un módulo para ver solo sus conexiones. El reparto por módulo es aproximado: cada
-        bloque de 5 minutos se asigna al módulo donde la persona gastó más tiempo.
+        Pase el mouse por una persona o un módulo para ver solo sus conexiones.
+        {model.sources.some((s) => s.approximate)
+          ? ' Para datos anteriores al cambio del monitor el reparto es aproximado (cada bloque de 5 minutos se asignaba entero al módulo donde la persona gastó más tiempo): ahí se muestra "sobre todo en" sin porcentaje.'
+          : ''}
       </p>
     </div>
   );

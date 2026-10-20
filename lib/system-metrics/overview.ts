@@ -158,9 +158,10 @@ async function readEnvironment(pool: Pool, db: DbFlags, currentDb: string | null
   if (db.people) {
     const p = await safe(() =>
       pool.request().query(`
+        -- Mismo criterio que readActiveUsers (store.ts): solo actividad real, últimas 3 ventanas.
         SELECT COUNT(DISTINCT user_email) AS active_now
         FROM ${Q}.dbo.system_metric_user WITH (NOLOCK)
-        WHERE bucket_at >= DATEADD(minute, -15, SYSUTCDATETIME());
+        WHERE bucket_at >= DATEADD(minute, -20, SYSUTCDATETIME()) AND total_ms > 0;
 
         SELECT COUNT(*) AS recent FROM (
           SELECT TOP 1 1 AS x FROM ${Q}.dbo.system_metric_user WITH (NOLOCK)
@@ -169,7 +170,7 @@ async function readEnvironment(pool: Pool, db: DbFlags, currentDb: string | null
 
         SELECT TOP 6 user_email, MAX(user_name) AS user_name
         FROM ${Q}.dbo.system_metric_user WITH (NOLOCK)
-        WHERE bucket_at >= DATEADD(minute, -15, SYSUTCDATETIME())
+        WHERE bucket_at >= DATEADD(minute, -20, SYSUTCDATETIME()) AND total_ms > 0
         GROUP BY user_email
         ORDER BY SUM(total_ms) DESC;`)
     );
