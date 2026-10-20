@@ -53,7 +53,13 @@ import { avisarEstadoProyectos, type EstadoAgenteProyectoDto } from '../../lib/p
  * se entrega al volver — los zumbidos viejos ya no hacen ruido (NUDGE_FRESH_MS).
  * Sin el módulo de Chat el servidor responde 403 y el pulso se apaga.
  */
-type PulseDto = { cursor: number; events: ChatPulseEvent[]; statusCursor?: string; statuses?: EstadoAgenteProyectoDto[] };
+type PulseDto = {
+  cursor: number;
+  events: ChatPulseEvent[];
+  statusCursor?: string;
+  statuses?: EstadoAgenteProyectoDto[];
+  rcursor?: number;
+};
 
 export default function ChatPulse() {
   const { status } = useSession();
@@ -69,6 +75,9 @@ export default function ChatPulse() {
     // Cursor de los estados de agentes en proyectos: '0' = pedir el actual.
     // null = el servidor no los entrega (sin el módulo o versión anterior).
     let cursorEstados: string | null = '0';
+    // Cursor de REACCIONES (2026-10-20). 0 = «deme el actual»; si el servidor
+    // no lo devuelve (tabla aún sin crear), se deja de preguntar por ellas.
+    let rcursor: number | null = 0;
     let control: AbortController | null = null;
     let reintento: number | null = null;
     let espera = 0;
@@ -111,8 +120,13 @@ export default function ChatPulse() {
     };
 
     const procesar = (todos: ChatPulseEvent[]) => {
+      // Reacción de otra persona: solo que el hilo abierto (si es ese)
+      // pregunte ya. Sin sonido, sin aviso y sin reordenar la bandeja.
+      for (const id of new Set(todos.filter((e) => e.type === 'reaction').map((e) => e.idConversation))) {
+        pedirSondeoDelHilo(id);
+      }
       procesarProyectos(todos.filter((e) => e.type === 'project'));
-      const eventos = todos.filter((e) => e.type !== 'project');
+      const eventos = todos.filter((e) => e.type !== 'project' && e.type !== 'reaction');
       if (eventos.length === 0) return;
       const hilos = new Set<number>();
       for (const e of eventos) {
@@ -144,7 +158,8 @@ export default function ChatPulse() {
           control = new AbortController();
           try {
             const st = cursorEstados !== null ? `&st=${encodeURIComponent(cursorEstados)}` : '';
-            const res = await chatFetch(`/api/chat/pulse?since=${cursor}${st}`, {
+            const rq = rcursor !== null ? `&rsince=${rcursor}` : '';
+            const res = await chatFetch(`/api/chat/pulse?since=${cursor}${st}${rq}`, {
               signal: control.signal,
             });
             if (!vivo) return;
@@ -175,6 +190,7 @@ export default function ChatPulse() {
             } else if (cursorEstados === '0') {
               cursorEstados = null;
             }
+            rcursor = typeof data.rcursor === 'number' ? Math.max(rcursor ?? 0, data.rcursor) : null;
             // Base sin ningún mensaje todavía: la vuelta con since=0 responde
             // al instante, así que se espera el tiempo de una vuelta normal
             // para no girar en vacío.

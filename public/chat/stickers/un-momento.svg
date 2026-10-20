@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160" role="img" aria-label="Un momento">
+  <title>Un momento</title>
+  <ellipse cx="80" cy="150" rx="50" ry="6" fill="#0f1a2c" opacity=".12"/>
+  <g stroke="#ffffff" stroke-width="7" stroke-linejoin="round" paint-order="stroke">
+    <rect x="50" y="12" width="60" height="10" rx="4" fill="#1a3c6e"/>
+    <rect x="50" y="90" width="60" height="10" rx="4" fill="#1a3c6e"/>
+    <path d="M58 22 H102 C102 42 88 50 80 56 C88 62 102 70 102 90 H58 C58 70 72 62 80 56 C72 50 58 42 58 22 Z" fill="#ffffff" stroke="#1a3c6e" stroke-width="4"/>
+    <path d="M66 32 H94 C92 42 84 48 80 51 C76 48 68 42 66 32 Z" fill="#e0a526" stroke-width="0"/>
+    <path d="M80 60 L80 74 M66 88 C70 78 90 78 94 88 Z" fill="#e0a526" stroke="#e0a526" stroke-width="3" stroke-linecap="round"/>
+  </g>
+  <g>
+    <rect x="22" y="110" width="116" height="32" rx="16" fill="#b07300" stroke="#ffffff" stroke-width="5" paint-order="stroke"/>
+    <text x="80" y="131" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="800" fill="#ffffff">Un momento</text>
+  </g>
+</svg>

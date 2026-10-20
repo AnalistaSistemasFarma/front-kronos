@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160" role="img" aria-label="Lo reviso">
+  <title>Lo reviso</title>
+  <ellipse cx="80" cy="150" rx="50" ry="6" fill="#0f1a2c" opacity=".12"/>
+  <g stroke="#ffffff" stroke-width="7" stroke-linejoin="round" paint-order="stroke">
+    <path d="M40 14 H92 L110 32 V100 H40 Z" fill="#ffffff" stroke="#d8dde6" stroke-width="4"/>
+    <path d="M92 14 V32 H110" fill="#d8dde6" stroke-width="0"/>
+    <path d="M52 40 H86 M52 52 H96 M52 64 H80" fill="none" stroke="#d8dde6" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="92" cy="74" r="20" fill="#f5f7fa" fill-opacity=".85" stroke="#1a3c6e" stroke-width="7"/>
+    <path d="M106 88 L122 104" fill="none" stroke="#1a3c6e" stroke-width="10" stroke-linecap="round"/>
+  </g>
+  <g>
+    <rect x="22" y="110" width="116" height="32" rx="16" fill="#1a3c6e" stroke="#ffffff" stroke-width="5" paint-order="stroke"/>
+    <text x="80" y="131" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="800" fill="#ffffff">Lo reviso</text>
+  </g>
+</svg>
