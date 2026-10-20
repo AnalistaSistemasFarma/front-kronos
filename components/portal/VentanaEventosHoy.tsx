@@ -16,6 +16,7 @@ import {
   eventosDelDia,
   hayCumpleanos,
   marcarMostradaEnEstaCarga,
+  omitirPorMarca,
   yaSeMostroEnEstaCarga,
 } from '../../lib/portal/ventana-hoy';
 
@@ -51,8 +52,9 @@ export default function VentanaEventosHoy() {
     const fecha = hoyEnBogota();
     setHoy(fecha);
     try {
-      // Interruptor de las pruebas automáticas: en producción esta marca no existe (nadie la escribe) y la ventana sale siempre.
-      if (window.localStorage.getItem(claveVentanaHoy(fecha))) return;
+      // Interruptor de las pruebas automáticas: solo cuenta en un navegador automatizado. En uno real se ignora, aunque haya quedado
+      // una marca vieja de la versión de «una vez por día»: la ventana sale en cada carga.
+      if (omitirPorMarca(!!window.localStorage.getItem(claveVentanaHoy(fecha)), navigator.webdriver === true)) return;
     } catch {
       // sin almacenamiento (modo privado estricto): se muestra igual
     }

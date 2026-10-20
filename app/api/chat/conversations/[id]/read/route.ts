@@ -7,6 +7,7 @@ import {
   readJsonBody,
   serverError,
 } from '../../../../../../lib/chat/http';
+import { marcarLeidaProyecto } from '../../../../../../lib/proyectos/no-leidos';
 
 /**
  * Marca como leídos los mensajes del AGENTE en una conversación.
@@ -56,12 +57,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       upTo = parsed;
     }
 
-    // PROYECTO (F1): los miembros no son filas de chat_participant, así que no
-    // hay marca de agua por persona; y `read_at` es UNA columna por mensaje
-    // (el primero que leyera lo daría por leído a todos). En el piloto no se
-    // cuentan no leídos de proyecto: se responde sin tocar nada.
+    // PROYECTO: los miembros no son filas de chat_participant y `read_at` es UNA
+    // columna por mensaje (el primero que leyera lo daría por leído a todos).
+    // Desde el 2026-10-19 (icono «Proyectos» de la cabecera) se mueve la marca
+    // de agua de ESTA persona en chat_project_read (lib/proyectos/no-leidos.ts).
+    // Un lector también marca: leer es lo que su rol permite.
     if (guard.kind === 'project') {
-      return jsonNoStore({ updated: 0, unreadCount: 0 });
+      const r = await marcarLeidaProyecto(guard.user.id, guard.conversationId, upTo);
+      return jsonNoStore({ updated: r.updated, unreadCount: r.unreadCount });
     }
 
     // Grupos y hilos entre personas: marca de agua por participante.

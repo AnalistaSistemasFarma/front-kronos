@@ -5,7 +5,8 @@
  * Lo que se admite (lo mismo que ofrece la barra del editor):
  *   **negrita** / __negrita__, *cursiva* / _cursiva_, ~~tachado~~, `código`,
  *   [texto](https://…) y enlaces sueltos https://…, listas con «- », «* », «+ » o «1. »,
- *   citas con «> », títulos «# », «## », «### » y bloques ``` de código.
+ *   citas con «> », títulos «# », «## », «### », bloques ``` de código y TABLAS con barras
+ *   («| a | b |» + «|---|---|», 2026-10-19: lo que deja «pegar una tabla» en la ventana de Redactar).
  * Un salto de línea simple se respeta (como en un correo); una línea en blanco separa párrafos.
  *
  * Seguridad: el texto se ESCAPA antes de dar formato (el HTML que alguien escriba queda como
@@ -59,7 +60,7 @@ function formato(t: string): string {
     .replace(/~~(?=\S)([^~\n]*?\S)~~/g, '<del>$1</del>');
 }
 
-type Bloque = { tipo: 'p' | 'ul' | 'ol' | 'quote' | 'pre' | 'h'; lineas: string[]; nivel?: number };
+type Bloque = { tipo: 'p' | 'ul' | 'ol' | 'quote' | 'pre' | 'h' | 'table'; lineas: string[]; nivel?: number };
 
 const RE_UL = /^\s{0,3}[-*+]\s+(.*)$/;
 const RE_OL = /^\s{0,3}\d{1,3}[.)]\s+(.*)$/;
@@ -67,6 +68,24 @@ const RE_QUOTE = /^\s{0,3}>\s?(.*)$/;
 const RE_H = /^\s{0,3}(#{1,3})\s+(.*?)\s*#*\s*$/;
 const RE_FENCE = /^\s{0,3}```/;
 const esSeparador = (l: string) => /^(?:-{3,}|\*{3,}|_{3,})$/.test(l.replace(/[ \t]/g, ''));
+/** Fila de tabla: empieza y termina con «|». Separador del encabezado: «|---|:---:|». */
+const RE_FILA_TABLA = /^\s{0,3}\|.*\|\s*$/;
+const RE_CELDA_SEPARADOR = /^\s*:?-{3,}:?\s*$/;
+/** «|---|:---:|» (sin expresiones anidadas: cada celda se revisa por separado). */
+function esSeparadorTabla(l: string): boolean {
+  const t = l.trim();
+  if (t.length < 5 || !t.startsWith('|') || !t.endsWith('|') || /^\s{4,}/.test(l)) return false;
+  return t.slice(1, -1).split('|').every((c) => RE_CELDA_SEPARADOR.test(c));
+}
+/** Tope de filas y columnas por tabla (lo demás queda como texto). */
+const MAX_FILAS_TABLA = 200;
+const MAX_COLUMNAS_TABLA = 30;
+
+/** Celdas de una fila «| a | b |» (una barra escrita como «\|» queda dentro de la celda). */
+export function celdasTabla(linea: string): string[] {
+  const t = linea.trim().replace(/^\|/, '').replace(/\|$/, '');
+  return t.split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, '|').trim());
+}
 
 function bloques(md: string): Array<Bloque | { tipo: 'hr' }> {
   const out: Array<Bloque | { tipo: 'hr' }> = [];
@@ -92,6 +111,14 @@ function bloques(md: string): Array<Bloque | { tipo: 'hr' }> {
     if (esSeparador(l)) {
       cerrar();
       out.push({ tipo: 'hr' });
+      continue;
+    }
+    if (RE_FILA_TABLA.test(l) && i + 1 < lineas.length && esSeparadorTabla(lineas[i + 1])) {
+      cerrar();
+      const filas: string[] = [l];
+      for (i += 2; i < lineas.length && RE_FILA_TABLA.test(lineas[i]) && filas.length < MAX_FILAS_TABLA; i++) filas.push(lineas[i]);
+      i--;
+      out.push({ tipo: 'table', lineas: filas });
       continue;
     }
     const h = RE_H.exec(l);
@@ -155,6 +182,14 @@ export function markdownAHtml(md: string): string {
           return `<${b.tipo}>${b.lineas.map((li) => `<li>${conSaltos(li.split('\n'))}</li>`).join('')}</${b.tipo}>`;
         case 'quote':
           return `<blockquote>${conSaltos(b.lineas)}</blockquote>`;
+        case 'table': {
+          const [enc, ...cuerpo] = b.lineas.map((l) => celdasTabla(l).slice(0, MAX_COLUMNAS_TABLA));
+          const n = enc.length;
+          const celda = (t: string, th: boolean) =>
+            `<${th ? 'th' : 'td'} style="border:1px solid #d0d7de;padding:6px 10px;text-align:left;vertical-align:top${th ? ';background-color:#f3f4f6' : ''}">${enLinea(esc(t))}</${th ? 'th' : 'td'}>`;
+          const fila = (cs: string[], th: boolean) => `<tr>${Array.from({ length: n }, (_, j) => celda(cs[j] ?? '', th)).join('')}</tr>`;
+          return `<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #d0d7de;font-size:14px"><thead>${fila(enc, true)}</thead><tbody>${cuerpo.map((c) => fila(c, false)).join('')}</tbody></table>`;
+        }
         default:
           return `<p>${conSaltos(b.lineas)}</p>`;
       }
@@ -171,7 +206,7 @@ export function markdownATexto(md: string): string {
   const t = String(md ?? '').replace(/\r\n?/g, '\n').slice(0, MAX_ENTRADA);
   return t
     .split('\n')
-    .filter((l) => !RE_FENCE.test(l))
+    .filter((l) => !RE_FENCE.test(l) && !esSeparadorTabla(l))
     .map((l) => {
       let x = l;
       const h = RE_H.exec(x);
