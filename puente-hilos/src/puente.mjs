@@ -38,6 +38,8 @@ import {
   turnoAutorizado,
 } from './codigo.mjs';
 import { ColaHilos } from './cola.mjs';
+import { guiaDesarrolloSegura } from './guia.mjs';
+import { prepararMemoriaTurno } from './memoria.mjs';
 import { crearClienteSynerLink } from './synerlink.mjs';
 import { armarArgumentos, armarArgumentosSugerencia, armarEntorno, correrTurno, etiquetaHerramienta } from './claude.mjs';
 import {
@@ -230,7 +232,27 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
             agentes: armarAgentes({ equipo, perfil, agente: agenteNombre, proyecto: contexto.project, topes, codigo }),
           }
         : null;
-      escribirContexto({ rutas, agente: agenteNombre, contexto, perfil, instruccionesEn: cfg.instruccionesEn, equipoTurno, bloqueCodigo: codigo?.bloque ?? indiceRepos?.bloque ?? '' });
+      // Memoria del bot principal, en solo lectura (copia renovada en cada turno).
+      const memoria = prepararMemoriaTurno({ cfg, rutas, lote, agenteNombre });
+      if (memoria.motivo) log(`conversación ${idConversation}: turno sin memoria (${memoria.motivo}).`);
+      else if (memoria.archivos) log(`conversación ${idConversation}: memoria ${memoria.archivos.length} archivos${memoria.excluidos.length ? `; excluidos por seguridad: ${memoria.excluidos.map((x) => `${x.archivo} (${x.motivo})`).join(', ')}` : ''}.`);
+      // Proyecto con código (nivel 2): el resumen corto del flujo de pases va con las reglas del código.
+      let bloqueGuia = '';
+      if (codigo || indiceRepos) {
+        const g = guiaDesarrolloSegura();
+        if (g.error) log(`conversación ${idConversation}: la guía del flujo de desarrollo no se cargó: ${g.error}`);
+        bloqueGuia = g.bloque;
+      }
+      escribirContexto({
+        rutas,
+        agente: agenteNombre,
+        contexto,
+        perfil,
+        instruccionesEn: cfg.instruccionesEn,
+        equipoTurno,
+        bloqueCodigo: (codigo?.bloque ?? indiceRepos?.bloque ?? '') + (bloqueGuia ? `\n${bloqueGuia}` : ''),
+        bloqueMemoria: memoria.bloque,
+      });
       limpiarPropuestas(rutas);
       let vigia = null;
 

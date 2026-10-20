@@ -53,6 +53,12 @@
  *                                    Sin esta variable, ningún proyecto tiene código.
  *   HILOS_GITHUB_TOKEN_ARCHIVO       Archivo (600) con el token de GitHub. Solo entra al proceso
  *                                    del modelo como GH_TOKEN en turnos con código.
+ *
+ *   Memoria del bot principal (2026-10-20; ver memoria.mjs). Opcional, SOLO LECTURA:
+ *   HILOS_MEMORIA_DIR                Ruta absoluta al directorio memory/ del bot (MEMORY.md +
+ *                                    archivos). Se copia en cada turno a .puente/memoria del hilo,
+ *                                    sin los archivos que parezcan tener secretos.
+ *   HILOS_MEMORIA_LECTORES           Correos (coma) cuyos turnos reciben la memoria. Vacío = todos.
  */
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -351,9 +357,22 @@ export function cargarConfig(env = process.env) {
   const presupuesto = (env.HILOS_MAX_BUDGET_USD ?? '').trim();
   if (presupuesto && !(Number(presupuesto) > 0)) throw new ErrorConfig('HILOS_MAX_BUDGET_USD debe ser un número positivo.');
 
-  for (const v of ['HILOS_REPOS_POR_PROYECTO', 'HILOS_GITHUB_TOKEN_ARCHIVO']) {
+  for (const v of ['HILOS_REPOS_POR_PROYECTO', 'HILOS_GITHUB_TOKEN_ARCHIVO', 'HILOS_MEMORIA_DIR']) {
     const r = (env[v] ?? '').trim();
     if (r && !path.isAbsolute(r)) throw new ErrorConfig(`${v} debe ser una ruta absoluta.`);
+  }
+
+  // Memoria del bot principal (solo lectura; ver memoria.mjs). Nunca dentro de HILOS_DIR.
+  const memoriaDir = (env.HILOS_MEMORIA_DIR ?? '').trim() || null;
+  if (memoriaDir && (path.resolve(memoriaDir) + path.sep).startsWith(path.resolve(hilosDir) + path.sep)) {
+    throw new ErrorConfig('HILOS_MEMORIA_DIR no puede estar dentro de HILOS_DIR.');
+  }
+  const memoriaLectores = (env.HILOS_MEMORIA_LECTORES ?? '')
+    .split(',')
+    .map((c) => c.trim().toLowerCase())
+    .filter(Boolean);
+  if (memoriaLectores.some((c) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c))) {
+    throw new ErrorConfig('HILOS_MEMORIA_LECTORES debe ser una lista de correos separados por coma.');
   }
 
   let claudeBin = (env.HILOS_CLAUDE_BIN ?? '').trim() || 'claude';
@@ -389,6 +408,8 @@ export function cargarConfig(env = process.env) {
     instruccionesEn,
     rutaReposPorProyecto: (env.HILOS_REPOS_POR_PROYECTO ?? '').trim() || null,
     githubTokenArchivo: (env.HILOS_GITHUB_TOKEN_ARCHIVO ?? '').trim() || null,
+    memoriaDir,
+    memoriaLectores,
     // Para el entorno del hijo: solo lo indispensable del entorno propio.
     path: env.PATH ?? '/usr/bin:/bin',
     home: env.HOME ?? homedir(),

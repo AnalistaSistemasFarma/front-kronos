@@ -187,3 +187,15 @@ Gotchas de `claude` 2.1.299: `cd <dir> && git …` se niega siempre (por eso `gi
 **Verificar sin escribir en hilos:** `scripts/simular-turno-codigo.mjs` (conversación ficticia ≥ 990000; `--sin-reglas-texto` prueba solo los controles duros).
 
 **Límites conocidos:** con `npm test`/`node`, el modelo puede correr código arbitrario dentro del sandbox, incluido usar `GH_TOKEN` contra GitHub. El control de pases es local (reglas y hook): GitHub no lo impone si el token tiene permisos de administrador y el repo no tiene protección de ramas.
+
+## Memoria del agente (solo lectura, 2026-10-20)
+
+Pedido de Nicolás Rivera (16:21 COT): «eso debería usar la memoria que ya tienen los agentes por defecto». El agente de Proyectos corre con config aislado, así que no veía la memoria automática de su bot principal. Con `HILOS_MEMORIA_DIR` (ver `src/memoria.mjs`):
+
+- En cada turno, el puente **copia** los `.md` del directorio `memory/` del bot a `<hilo>/.puente/memoria/` (archivos 400). Nunca escribe en el origen. Los archivos que parezcan tener un secreto (tokens de GitHub, Anthropic, Slack, Telegram, AWS, llaves privadas, JWT, `Bearer`, contraseñas con valor) **no se copian** y quedan en el log.
+- El índice `MEMORY.md` va en el encabezado de sistema, como en la memoria nativa (hasta ~220 líneas), con la instrucción de abrir con Read los archivos que necesite. El agente **no escribe memoria**: lo que aprenda lo deja en el hilo en un bloque «🧠 Para la memoria de <agente>» para que el bot principal lo guarde.
+- La memoria automática nativa del hijo queda **apagada** (`autoMemoryEnabled: false` y `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`), así no hay dos memorias ni se guarda nada de un proyecto.
+- `HILOS_MEMORIA_LECTORES`: si se define, solo los turnos escritos por esas personas (identidad del servidor) reciben la memoria; los demás van sin ella y se borra la copia del hilo.
+- Engram no se expone: su servidor MCP abre la base en lectura y escritura y la comparte con el bot vivo.
+
+En proyectos con código (nivel 2) va además un resumen corto del flujo de pases: `contexto/flujo-desarrollo-gss.md` (`src/guia.mjs`).

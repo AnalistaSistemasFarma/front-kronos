@@ -36,6 +36,9 @@ export const SETTINGS_HIJO = {
   enabledPlugins: { 'telegram@claude-plugins-official': false },
   disableAllHooks: true,
   permissions: { disableBypassPermissionsMode: 'disable' },
+  // Sin memoria automática nativa: la memoria del agente llega en solo lectura
+  // desde el puente (memoria.mjs) y los proyectos no guardan memoria propia.
+  autoMemoryEnabled: false,
 };
 
 /**
@@ -152,6 +155,7 @@ export function armarEntorno({ path, home, configClaudeDir, credencial }, topes 
     CLAUDE_CONFIG_DIR: configClaudeDir,
     DISABLE_AUTOUPDATER: '1',
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
     ...entornoTopes(topes),
   };
   // Turno con código: GH_TOKEN, HOME propio (home-codigo) y avisos de gh/npm apagados.
