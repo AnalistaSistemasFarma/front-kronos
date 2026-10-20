@@ -67,10 +67,7 @@ import {
   syncOrionSignerTasks,
 } from './signerTasks';
 import { openNextOrionSignerAuthorization } from './signerAuthorizations';
-import {
-  isSignatureAutoCloseEnabled,
-  resolveSignatureTasksOnSigned,
-} from './autoCloseOnSigned';
+import { resolveSignatureTasksOnSigned } from './autoCloseOnSigned';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/microsoft-365/useGetMicrosoftToken.jsx';
 import type { SignerAcceptIdentity } from './signerIdentity';
 import { normalizeSignerIdentity } from './signerIdentity';
@@ -1074,14 +1071,12 @@ export async function applyOrionWebhookToRequest(
       fileId
     );
   } else if (statusUpper === 'FIRMADO' && allSigned) {
-    // Firmas completas: con el cierre automático (activado por defecto; el solicitante puede
-    // apagarlo) se cierran SOLO las tareas de firma, y el workflow avanza a la siguiente tarea.
-    // La solicitud NUNCA se cierra aquí: pueden quedar otras tareas o más PDFs por firmar.
+    // Firmas completas: se cierran solas las tareas de firma (siempre, para todos) y el workflow
+    // avanza a la siguiente tarea. La solicitud NUNCA se cierra aquí: pueden quedar otras
+    // tareas o más PDFs por firmar. Un webhook repetido (sin cambio de estado ni de turno) no
+    // vuelve a tocar nada.
     const template = await findOrionSignatureTaskTemplate(pool, params.requestId);
-    const autoClose =
-      (statusChanged || turnAdvanced) &&
-      (await isSignatureAutoCloseEnabled(pool, ctx?.id_requester ?? null));
-    if (autoClose) {
+    if (statusChanged || turnAdvanced) {
       try {
         tasksUpdated += await resolveSignatureTasksOnSigned(pool, {
           requestId: params.requestId,
