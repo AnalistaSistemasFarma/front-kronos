@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160" role="img" aria-label="¡Buen trabajo!">
+  <title>¡Buen trabajo!</title>
+  <ellipse cx="80" cy="150" rx="50" ry="6" fill="#0f1a2c" opacity=".12"/>
+  <g stroke="#ffffff" stroke-width="7" stroke-linejoin="round" paint-order="stroke">
+    <path d="M60 8 L72 40 L88 40 L100 8 Z" fill="#1a3c6e" stroke-width="5"/>
+    <path d="M72 8 L80 40 L88 8 Z" fill="#b3261e" stroke-width="0"/>
+    <circle cx="80" cy="66" r="34" fill="#e0a526"/>
+    <circle cx="80" cy="66" r="26" fill="none" stroke="#b07300" stroke-width="3"/>
+    <path d="M80 48 L85 60 L98 61 L88 69 L91 82 L80 75 L69 82 L72 69 L62 61 L75 60 Z" fill="#ffffff" stroke-width="0"/>
+  </g>
+  <g>
+    <rect x="22" y="110" width="116" height="32" rx="16" fill="#b07300" stroke="#ffffff" stroke-width="5" paint-order="stroke"/>
+    <text x="80" y="131" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="800" fill="#ffffff">¡Buen trabajo!</text>
+  </g>
+</svg>

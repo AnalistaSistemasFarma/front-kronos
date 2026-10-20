@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '../../../../../../lib/prisma';
 import { messageInclude, serializeMessage } from '../../../../../../lib/chat/conversations';
+import { conExtras, cursorReacciones } from '../../../../../../lib/chat/message-extras';
 import { calcularEntregas } from '../../../../../../lib/chat/groups';
 import { readClientOrigin } from '../../../../../../lib/chat/client-origin';
 import { notifyPeopleMessage } from '../../../../../../lib/chat/notifyPeople';
@@ -73,10 +74,19 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
 
+    // Reacciones y GIF/stickers (2026-10-20), aparte y tolerantes a que las
+    // tablas aún no existan. El cursor de reacciones solo va en la PRIMERA
+    // página: es desde donde el sondeo pregunta «¿qué cambió?».
+    const [messages, reactionCursor] = await Promise.all([
+      conExtras(page.map(serializeMessage), guard.user.id),
+      before ? Promise.resolve(undefined) : cursorReacciones(guard.conversationId),
+    ]);
+
     return jsonNoStore({
-      messages: page.map(serializeMessage),
+      messages,
       hasMore,
       nextCursor: hasMore ? page[page.length - 1].id : null,
+      ...(reactionCursor !== undefined && reactionCursor !== null ? { reactionCursor } : {}),
     });
   } catch (error) {
     return serverError('GET /api/chat/conversations/[id]/messages', error);

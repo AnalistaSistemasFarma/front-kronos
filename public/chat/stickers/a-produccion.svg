@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160" role="img" aria-label="¡A producción!">
+  <title>¡A producción!</title>
+  <ellipse cx="80" cy="150" rx="50" ry="6" fill="#0f1a2c" opacity=".12"/>
+  <g stroke="#ffffff" stroke-width="7" stroke-linejoin="round" paint-order="stroke">
+    <path d="M80 8 C98 22 104 46 100 74 H60 C56 46 62 22 80 8 Z" fill="#f5f7fa" stroke="#1a3c6e" stroke-width="4"/>
+    <circle cx="80" cy="44" r="10" fill="#1f7a8c" stroke="#1a3c6e" stroke-width="4"/>
+    <path d="M60 60 L44 80 L60 78 Z M100 60 L116 80 L100 78 Z" fill="#b3261e" stroke-width="5"/>
+    <path d="M68 76 C68 90 74 98 80 104 C86 98 92 90 92 76 Z" fill="#e0a526" stroke-width="4"/>
+    <path d="M74 78 C74 86 77 92 80 95 C83 92 86 86 86 78 Z" fill="#c2742c" stroke-width="0"/>
+  </g>
+  <g>
+    <rect x="22" y="110" width="116" height="32" rx="16" fill="#1a3c6e" stroke="#ffffff" stroke-width="5" paint-order="stroke"/>
+    <text x="80" y="131" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800" fill="#ffffff">¡A producción!</text>
+  </g>
+</svg>

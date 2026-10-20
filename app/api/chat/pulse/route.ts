@@ -6,6 +6,7 @@ import { projectModuleCompanies } from '../../../../lib/chat/projects';
 import { whereConversacionesVisibles, whereMensajesQueCuentan } from '../../../../lib/proyectos/no-leidos';
 import { MAX_ESTADOS, cursorDeEstado, type EstadoAgenteProyectoDto } from '../../../../lib/proyectos/estado-agente';
 import { estadosCambiadosVisibles, marcaGlobalEstados } from '../../../../lib/proyectos/estado-agente-servidor';
+import { tablaAusente } from '../../../../lib/chat/message-extras';
 import {
   NUDGE_EVENT_TYPE,
   PULSE_MAX_EVENTS,
@@ -74,6 +75,15 @@ export const dynamic = 'force-dynamic';
  * segundo por instancia sin importar cuántas personas miren) y solo si avanzó
  * hace la consulta filtrada por la puerta. No es un sondeo nuevo: viaja en el
  * mismo pulso que ya estaba abierto.
+ *
+ * REACCIONES (2026-10-20): con `rsince=<cursor>` el MISMO pulso avisa también
+ * que alguien reaccionó en un hilo entre personas, un grupo o un proyecto
+ * donde la persona participa (`type: 'reaction'`), para que el hilo abierto
+ * pregunte ya. No es un sondeo nuevo: es una consulta más en la vuelta que ya
+ * existe (MAX(id) de la clave primaria de chat_message_reaction) y solo si el
+ * cliente manda `rsince`. El evento solo lleva el id de la conversación y del
+ * mensaje; las reacciones en sí las trae el sondeo del hilo, que vuelve a
+ * validar el acceso. Lo que reacciona uno mismo no se avisa.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -113,8 +123,25 @@ export async function GET(request: NextRequest) {
     const extra = (estados: EstadoAgenteProyectoDto[] = []) =>
       conEstados && statusCursor ? { statusCursor: statusCursor.toISOString(), statuses: estados } : {};
 
+    // Cursor de reacciones: null = el cliente no pregunta por ellas (cliente
+    // viejo) y no se consulta nada de más. También queda en null si la tabla
+    // todavía no existe en esta base.
+    const rawRsince = request.nextUrl.searchParams.get('rsince');
+    const rsinceNum = rawRsince === null ? NaN : Number.parseInt(rawRsince, 10);
+    let rcursor: number | null = Number.isInteger(rsinceNum) && rsinceNum >= 0 ? rsinceNum : null;
+    const maxReaccion = async (): Promise<number | null> => {
+      try {
+        const fila = await prisma.chatMessageReaction.findFirst({ orderBy: { id: 'desc' }, select: { id: true } });
+        return fila?.id ?? 0;
+      } catch (error) {
+        if (tablaAusente(error)) return null;
+        throw error;
+      }
+    };
+    if (rcursor === 0) rcursor = await maxReaccion();
+
     if (since === 0) {
-      return jsonNoStore({ cursor: await maxActual(), events: [], ...extra() });
+      return jsonNoStore({ cursor: await maxActual(), events: [], ...extra(), ...(rcursor !== null ? { rcursor } : {}) });
     }
 
     // Cada rama trae SU puerta: hilos 'people' donde participa (si tiene Chat) y
@@ -152,10 +179,29 @@ export async function GET(request: NextRequest) {
         },
       });
 
+    // Reacciones de OTROS en conversaciones donde participo (personas y grupos
+    // por chat_participant; proyectos con la misma puerta de los mensajes).
+    const ramasReaccion = [
+      ...(conChat
+        ? [{ conversation: { kind: { in: ['people', 'group'] }, participants: { some: { id_user: user.id } } } }]
+        : []),
+      ...(empresasProyectos.length > 0
+        ? [{ conversation: whereConversacionesVisibles(user.id, empresasProyectos) }]
+        : []),
+    ];
+    const buscarReacciones = (desde: number, hasta: number) =>
+      prisma.chatMessageReaction.findMany({
+        where: { id: { gt: desde, lte: hasta }, NOT: { id_user: user.id }, message: { OR: ramasReaccion } },
+        orderBy: { id: 'asc' },
+        take: PULSE_MAX_EVENTS,
+        select: { id: true, id_conversation: true, id_message: true, created_at: true },
+      });
+
     const deadline = Date.now() + PULSE_WAIT_SECONDS * 1000;
     let cursor = since;
     let filas: Awaited<ReturnType<typeof buscar>> = [];
     let estados: EstadoAgenteProyectoDto[] = [];
+    let reacciones: Awaited<ReturnType<typeof buscarReacciones>> = [];
 
     for (;;) {
       const hasta = await maxActual();
@@ -176,7 +222,16 @@ export async function GET(request: NextRequest) {
           statusCursor = estados.length >= MAX_ESTADOS && ultimo ? ultimo : ultimo && ultimo > marca ? ultimo : marca;
         }
       }
-      if (filas.length > 0 || estados.length > 0) break;
+      if (rcursor !== null && ramasReaccion.length > 0) {
+        const rhasta = await maxReaccion();
+        if (rhasta === null) {
+          rcursor = null;
+        } else if (rhasta > rcursor) {
+          reacciones = await buscarReacciones(rcursor, rhasta);
+          rcursor = reacciones.length >= PULSE_MAX_EVENTS ? reacciones[reacciones.length - 1].id : rhasta;
+        }
+      }
+      if (filas.length > 0 || estados.length > 0 || reacciones.length > 0) break;
       if (Date.now() >= deadline || request.signal.aborted) break;
       await new Promise((resolve) =>
         setTimeout(resolve, Math.min(PULSE_TICK_MS, Math.max(0, deadline - Date.now())))
@@ -184,7 +239,17 @@ export async function GET(request: NextRequest) {
       if (request.signal.aborted) break;
     }
 
-    if (filas.length === 0) return jsonNoStore({ cursor, events: [], ...extra(estados) });
+    const rextra = rcursor !== null ? { rcursor } : {};
+    const eventosReaccion: ChatPulseEvent[] = reacciones.map((r) => ({
+      type: 'reaction' as const,
+      idConversation: r.id_conversation,
+      idMessage: r.id_message,
+      authorName: '',
+      createdAt: r.created_at.toISOString(),
+      muted: false,
+    }));
+
+    if (filas.length === 0) return jsonNoStore({ cursor, events: eventosReaccion, ...extra(estados), ...rextra });
 
     // Proyecto: la puerta ya va en la consulta (miembro + módulo de hoy).
     const deProyecto = filas.filter((f) => f.conversation.kind === 'project');
@@ -228,8 +293,10 @@ export async function GET(request: NextRequest) {
       });
     events.push(...eventosProyecto);
     events.sort((a, b) => a.idMessage - b.idMessage);
+    // Las reacciones van al final: solo le piden al hilo que pregunte.
+    events.push(...eventosReaccion);
 
-    return jsonNoStore({ cursor, events, ...extra(estados) });
+    return jsonNoStore({ cursor, events, ...extra(estados), ...rextra });
   } catch (error) {
     return serverError('GET /api/chat/pulse', error);
   }

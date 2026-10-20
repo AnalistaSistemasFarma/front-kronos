@@ -31,6 +31,7 @@ import {
   IconList,
   IconPaperclip,
   IconSend,
+  IconSticker,
   IconX,
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
@@ -181,6 +182,13 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
    * Clave del borrador (persona + conversación). Sin clave no se guarda nada.
    */
   draftKey?: string | null;
+  /**
+   * Abre el selector de stickers y GIF (2026-10-20). Sin esto la opción no
+   * aparece en el menú del clip.
+   */
+  onAbrirStickers?: () => void;
+  /** Texto de esa opción: «Stickers y GIF» si el servidor tiene GIF. */
+  etiquetaStickers?: string;
 }>(function ChatComposer(
   {
     onSend,
@@ -193,6 +201,8 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     onQuitarCita,
     voiceConversationId,
     draftKey = null,
+    onAbrirStickers,
+    etiquetaStickers = 'Stickers',
   },
   ref
 ) {
@@ -605,6 +615,11 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         >
           Adjuntar archivos
         </Menu.Item>
+        {onAbrirStickers && (
+          <Menu.Item leftSection={<IconSticker size={14} />} onClick={onAbrirStickers}>
+            {etiquetaStickers}
+          </Menu.Item>
+        )}
         <Menu.Divider />
         <Menu.Label>Formato</Menu.Label>
         <Menu.Item
