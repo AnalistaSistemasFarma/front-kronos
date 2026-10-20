@@ -84,7 +84,7 @@ export function validarMiembro(m) {
  * Herramientas de Claude Code de UN subagente: intersección de lo aprobado con
  * lo que el perfil del proyecto permite. Nunca devuelve una prohibida.
  */
-export function herramientasDeMiembro(miembro, perfil) {
+export function herramientasDeMiembro(miembro, perfil, conCodigo = false) {
   const t = new Set(miembro.tools);
   const out = ['Read', 'Glob', 'Grep'];
   if (t.has('trabajo')) out.push('Write', 'Edit');
@@ -94,6 +94,9 @@ export function herramientasDeMiembro(miembro, perfil) {
   for (const h of unicas) {
     if (HERRAMIENTAS_PROHIBIDAS.includes(h) || HERRAMIENTAS_SUBAGENTE.includes(h)) throw new Error(`Herramienta prohibida en un subagente: ${h}.`);
   }
+  // Acceso al código (nivel 2): Bash SOLO para git de lectura (las escrituras se
+  // niegan en su disallowedTools con codigo.mjs → prohibidasSubagenteCodigo).
+  if (conCodigo) unicas.push('Bash');
   return unicas;
 }
 
@@ -134,7 +137,7 @@ function linea(v) {
 }
 
 /** Instrucciones de sistema de UN subagente: reglas fijas + las de su rol. */
-export function textoSubagente({ agente, proyecto, miembro, perfil }) {
+export function textoSubagente({ agente, proyecto, miembro, perfil, codigo = null }) {
   const puedeEscribir = miembro.tools.includes('trabajo');
   const lineas = [
     `Usted es «${linea(miembro.name)}», un SUBAGENTE especializado que trabaja para ${agente} (asistente de inteligencia artificial de la organización Group Shared Services Latinoamérica) en el proyecto «${linea(proyecto.name)}» (empresa: ${linea(proyecto.company?.companyName)}).`,
@@ -152,6 +155,14 @@ export function textoSubagente({ agente, proyecto, miembro, perfil }) {
     '- Informe final: breve (idealmente menos de 400 palabras), con hallazgos concretos, cifras y de dónde salieron. Si no encontró algo, dígalo; no lo invente.',
     '- Escriba en español colombiano formal, trato de «usted».',
   ];
+  if (codigo?.worktrees?.length) {
+    lineas.push(
+      '',
+      '## Código fuente del proyecto (solo lectura)',
+      ...codigo.worktrees.map((w) => `- ${w.nombre}: carpeta \`./codigo/${w.nombre}\` (ruta completa \`${w.worktree}\`), con todos los archivos. Léalos con Read, Glob y Grep.`),
+      '- Puede usar Bash SOLO para git de lectura: `git -C codigo/<repo> log|show|diff|ls-files|ls-tree|grep|blame|status …`. No use el .git del clon ni `--git-dir`. No edite, no haga commit, push, PR, npm ni node: eso lo hace el asistente principal.'
+    );
+  }
   if (miembro.instructions.trim()) {
     lineas.push('', '## Instrucciones de su rol (las aprobó el dueño del proyecto)', '', miembro.instructions.trim());
   }
@@ -163,14 +174,19 @@ export function textoSubagente({ agente, proyecto, miembro, perfil }) {
  * lo que no está permitido se niega; las reglas de permisos (Write solo en
  * ./trabajo/**) las pone el proceso principal y el subagente las hereda.
  */
-export function armarAgentes({ equipo, perfil, agente, proyecto, topes }) {
+export function armarAgentes({ equipo, perfil, agente, proyecto, topes, codigo = null }) {
   const out = {};
   for (const m of equipo.miembros) {
     const def = {
       description: `${linea(m.name)}: ${linea(m.purpose) || 'subagente del proyecto'}`.slice(0, 400),
-      prompt: textoSubagente({ agente, proyecto, miembro: m, perfil }),
-      tools: herramientasDeMiembro(m, perfil),
-      disallowedTools: [...new Set([...HERRAMIENTAS_PROHIBIDAS, ...HERRAMIENTAS_SUBAGENTE])],
+      prompt: textoSubagente({ agente, proyecto, miembro: m, perfil, codigo }),
+      tools: herramientasDeMiembro(m, perfil, Boolean(codigo)),
+      // SOLO nombres de herramienta: en 2.1.299 un patrón aquí (p. ej. `Bash(git * push *)`)
+      // le quita la herramienta ENTERA al subagente. Lo fino (git de lectura) lo
+      // impone el hook PreToolUse (hook-subagentes.mjs); las reglas del principal se heredan.
+      disallowedTools: codigo
+        ? [...new Set([...HERRAMIENTAS_PROHIBIDAS.filter((h) => h !== 'Bash'), ...HERRAMIENTAS_SUBAGENTE])]
+        : [...new Set([...HERRAMIENTAS_PROHIBIDAS, ...HERRAMIENTAS_SUBAGENTE])],
       permissionMode: 'dontAsk',
       maxTurns: topes.maxTurnosSubagente,
     };
@@ -254,9 +270,9 @@ export function modeloCoincide(aprobado, resuelto) {
  *   activos()        -> subagentes corriendo, para el indicador del chat
  *   corridas()       -> resumen de cada subagente para el registro de consumo
  */
-export function crearVigia({ equipo, perfil, ahora = () => Date.now() }) {
+export function crearVigia({ equipo, perfil, ahora = () => Date.now(), conCodigo = false }) {
   const miembros = new Map(equipo.miembros.map((m) => [m.slug, m]));
-  const permitidas = new Map(equipo.miembros.map((m) => [m.slug, new Set(herramientasDeMiembro(m, perfil))]));
+  const permitidas = new Map(equipo.miembros.map((m) => [m.slug, new Set(herramientasDeMiembro(m, perfil, conCodigo))]));
   const porToolUse = new Map();
   const violaciones = [];
 

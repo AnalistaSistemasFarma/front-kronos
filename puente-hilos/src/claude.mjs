@@ -63,7 +63,9 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
     ...(codigo ? codigo.prohibidas : []),
   ];
   if (codigo && !codigo.sandbox?.enabled) throw new Error('Turno con código sin sandbox: no se arma.');
-  const settings = codigo ? { ...SETTINGS_HIJO, sandbox: codigo.sandbox } : SETTINGS_HIJO;
+  if (codigo && !codigo.hooks?.PreToolUse?.length) throw new Error('Turno con código sin el hook de subagentes: no se arma.');
+  // Con código: sandbox y el ÚNICO hook (subagentes solo git de lectura); nada más.
+  const settings = codigo ? { ...SETTINGS_HIJO, disableAllHooks: false, hooks: codigo.hooks ?? {}, sandbox: codigo.sandbox } : SETTINGS_HIJO;
 
   const args = [
     '-p',
