@@ -28,6 +28,7 @@
 import { prisma } from '../prisma';
 import { projectModuleCompanies, type ProjectUser } from '../chat/projects';
 import { toPlainPreview } from '../chat/client';
+import type { EstadoAgenteProyectoDto } from './estado-agente';
 
 /** Conversaciones (las más recientes) que se revisan por consulta. Acota el costo. */
 export const MAX_CONVERSACIONES_REVISADAS = 300;
@@ -90,6 +91,8 @@ export interface ResumenNoLeidos {
   /** Total de mensajes nuevos (para la etiqueta accesible). */
   mensajes: number;
   items?: ItemNoLeido[];
+  /** Agentes trabajando ahora en conversaciones visibles (2026-10-20; la ruta lo completa). */
+  trabajando?: EstadoAgenteProyectoDto[];
 }
 
 type ConversacionVisible = {

@@ -4,6 +4,8 @@ import { CHAT_MODULE_URL } from '../../../../lib/chat/access';
 import { visiblePeopleConversationIds } from '../../../../lib/chat/people';
 import { projectModuleCompanies } from '../../../../lib/chat/projects';
 import { whereConversacionesVisibles, whereMensajesQueCuentan } from '../../../../lib/proyectos/no-leidos';
+import { MAX_ESTADOS, cursorDeEstado, type EstadoAgenteProyectoDto } from '../../../../lib/proyectos/estado-agente';
+import { estadosCambiadosVisibles, marcaGlobalEstados } from '../../../../lib/proyectos/estado-agente-servidor';
 import { tablaAusente } from '../../../../lib/chat/message-extras';
 import {
   NUDGE_EVENT_TYPE,
@@ -62,6 +64,18 @@ export const dynamic = 'force-dynamic';
  * resolveProjectForUser, ver lib/proyectos/no-leidos.ts). El evento no lleva
  * el texto del mensaje: solo el id de la conversación y quién escribió.
  *
+ * ESTADO DEL AGENTE EN PROYECTOS (2026-10-20, Nicolás Rivera: «cuando un agente
+ * está trabajando no hay ningún estado por fuera que diga que está trabajando»):
+ * con `st=<cursor>` el mismo long-poll entrega también, en `statuses`, los
+ * cambios de chat_agent_status de las conversaciones de proyecto que la persona
+ * puede ver (misma puerta), y devuelve `statusCursor`. `st=0` (primera vuelta)
+ * solo pide el cursor. Sin `st` (un navegador con la versión anterior) la ruta
+ * se comporta exactamente como antes. Cada vuelta mira UNA marca global
+ * compartida por toda la instancia (marcaGlobalEstados, ~1 consulta por
+ * segundo por instancia sin importar cuántas personas miren) y solo si avanzó
+ * hace la consulta filtrada por la puerta. No es un sondeo nuevo: viaja en el
+ * mismo pulso que ya estaba abierto.
+ *
  * REACCIONES (2026-10-20): con `rsince=<cursor>` el MISMO pulso avisa también
  * que alguien reaccionó en un hilo entre personas, un grupo o un proyecto
  * donde la persona participa (`type: 'reaction'`), para que el hilo abierto
@@ -100,6 +114,15 @@ export async function GET(request: NextRequest) {
     const rawSince = Number.parseInt(request.nextUrl.searchParams.get('since') ?? '0', 10);
     const since = Number.isInteger(rawSince) && rawSince > 0 ? rawSince : 0;
 
+    // Estados de agentes en proyectos: solo si el navegador los pide (`st`) y la
+    // persona tiene el módulo «Proyectos» en alguna empresa.
+    const rawSt = request.nextUrl.searchParams.get('st');
+    const conEstados = rawSt !== null && empresasProyectos.length > 0;
+    let statusCursor: Date | null = conEstados ? cursorDeEstado(rawSt) : null;
+    if (conEstados && statusCursor === null) statusCursor = await marcaGlobalEstados();
+    const extra = (estados: EstadoAgenteProyectoDto[] = []) =>
+      conEstados && statusCursor ? { statusCursor: statusCursor.toISOString(), statuses: estados } : {};
+
     // Cursor de reacciones: null = el cliente no pregunta por ellas (cliente
     // viejo) y no se consulta nada de más. También queda en null si la tabla
     // todavía no existe en esta base.
@@ -118,7 +141,7 @@ export async function GET(request: NextRequest) {
     if (rcursor === 0) rcursor = await maxReaccion();
 
     if (since === 0) {
-      return jsonNoStore({ cursor: await maxActual(), events: [], ...(rcursor !== null ? { rcursor } : {}) });
+      return jsonNoStore({ cursor: await maxActual(), events: [], ...extra(), ...(rcursor !== null ? { rcursor } : {}) });
     }
 
     // Cada rama trae SU puerta: hilos 'people' donde participa (si tiene Chat) y
@@ -177,6 +200,7 @@ export async function GET(request: NextRequest) {
     const deadline = Date.now() + PULSE_WAIT_SECONDS * 1000;
     let cursor = since;
     let filas: Awaited<ReturnType<typeof buscar>> = [];
+    let estados: EstadoAgenteProyectoDto[] = [];
     let reacciones: Awaited<ReturnType<typeof buscarReacciones>> = [];
 
     for (;;) {
@@ -187,6 +211,17 @@ export async function GET(request: NextRequest) {
         // saltarse lo que no cupo; si no, avanza hasta lo revisado.
         cursor = filas.length >= PULSE_MAX_EVENTS ? filas[filas.length - 1].id : hasta;
       }
+      if (conEstados && statusCursor) {
+        const marca = await marcaGlobalEstados();
+        if (marca > statusCursor) {
+          const desde: Date = statusCursor;
+          estados = await estadosCambiadosVisibles(user.id, empresasProyectos, desde);
+          // Igual que con los mensajes: si se llenó el tope, el cursor queda en
+          // el último entregado; si no, avanza hasta la marca revisada.
+          const ultimo = estados.length > 0 ? new Date(estados[estados.length - 1].updatedAt) : null;
+          statusCursor = estados.length >= MAX_ESTADOS && ultimo ? ultimo : ultimo && ultimo > marca ? ultimo : marca;
+        }
+      }
       if (rcursor !== null && ramasReaccion.length > 0) {
         const rhasta = await maxReaccion();
         if (rhasta === null) {
@@ -196,7 +231,7 @@ export async function GET(request: NextRequest) {
           rcursor = reacciones.length >= PULSE_MAX_EVENTS ? reacciones[reacciones.length - 1].id : rhasta;
         }
       }
-      if (filas.length > 0 || reacciones.length > 0) break;
+      if (filas.length > 0 || estados.length > 0 || reacciones.length > 0) break;
       if (Date.now() >= deadline || request.signal.aborted) break;
       await new Promise((resolve) =>
         setTimeout(resolve, Math.min(PULSE_TICK_MS, Math.max(0, deadline - Date.now())))
@@ -214,7 +249,7 @@ export async function GET(request: NextRequest) {
       muted: false,
     }));
 
-    if (filas.length === 0) return jsonNoStore({ cursor, events: eventosReaccion, ...rextra });
+    if (filas.length === 0) return jsonNoStore({ cursor, events: eventosReaccion, ...extra(estados), ...rextra });
 
     // Proyecto: la puerta ya va en la consulta (miembro + módulo de hoy).
     const deProyecto = filas.filter((f) => f.conversation.kind === 'project');
@@ -261,7 +296,7 @@ export async function GET(request: NextRequest) {
     // Las reacciones van al final: solo le piden al hilo que pregunte.
     events.push(...eventosReaccion);
 
-    return jsonNoStore({ cursor, events, ...rextra });
+    return jsonNoStore({ cursor, events, ...extra(estados), ...rextra });
   } catch (error) {
     return serverError('GET /api/chat/pulse', error);
   }
