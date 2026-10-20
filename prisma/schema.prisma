@@ -1734,6 +1734,14 @@ model ChatMessage {
   @@index([id_conversation, created_at])
   @@index([id_agent_author])
   @@index([id_reply_to])
+  /// ÍNDICE FUERA DE PRISMA: IX_chat_message_bandeja_agentes — no clúster,
+  /// FILTRADO (WHERE delivered_at IS NULL) y CUBRIENTE, para la bandeja de los
+  /// agentes (app/api/chat/agent/inbox, fetchDirectos). Prisma no soporta
+  /// índices filtrados ni INCLUDE en SQL Server, así que vive solo en
+  /// prisma/migrations/20261020120000_ix_chat_message_bandeja.
+  /// ⚠️ Si agrega una columna a este modelo, agréguela también al INCLUDE de
+  /// ese índice: si deja de cubrir la consulta, el plan vuelve a recorrer el
+  /// clúster cada 400 ms por agente.
   @@map("chat_message")
   @@schema("dbo")
 }
