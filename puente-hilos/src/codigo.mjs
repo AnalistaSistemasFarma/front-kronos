@@ -239,7 +239,13 @@ export function leerReposSolicitados(rutas, nombresValidos) {
  * para montarlos en el siguiente turno (bajo demanda). Se SUMA a lo que había.
  */
 export function registrarReposSolicitados(rutas, respuesta, repos) {
-  const nuevos = reposMencionados(respuesta, repos);
+  // Solo cuentan las líneas «Montar: …» (nombrarlos en una lista o en el índice no monta nada:
+  // en la prueba del 2026-10-20 Orus listó los 10 repos y se habrían montado todos).
+  const lineas = String(respuesta ?? '')
+    .split('\n')
+    .map((l) => l.match(/^\s*(?:[-*>]\s*)?(?:\*\*|_)?\s*montar\s*:?\s*(?:\*\*|_)?\s*:?\s*(.+)$/i)?.[1])
+    .filter(Boolean);
+  const nuevos = reposMencionados(lineas.join('\n'), repos);
   if (nuevos.length === 0) return [];
   const todos = [...new Set([...leerReposSolicitados(rutas, repos.map((r) => r.nombre)), ...nuevos])];
   mkdirSync(rutas.puente, { recursive: true, mode: 0o700 });
@@ -271,7 +277,7 @@ export function textoIndiceRepos({ disponibles, montados }) {
     '',
     `Este proyecto tiene acceso a ${disponibles.length} repositorios de la compañía. Para no cargar todos en cada turno, cada uno se monta (worktree propio de esta conversación, rama \`${PREFIJO_RAMA}…\`) SOLO cuando hace falta:`,
     '- se monta EN ESTE MISMO TURNO si algún mensaje de la persona lo nombra (por su nombre o «dueño/repo»);',
-    '- si usted descubre que necesita uno que no está montado, NÓMBRELO por su nombre exacto en su respuesta (por ejemplo «para seguir necesito revisar `front-orion`») y quedará montado desde el siguiente turno; dígale a la persona que le escriba de nuevo para continuar;',
+    '- si usted descubre que necesita uno que no está montado, escriba en su respuesta una línea que empiece por `Montar:` con los nombres exactos (por ejemplo `Montar: front-orion, mcp-sapbo`) y quedarán montados desde el siguiente turno; dígale a la persona que le escriba de nuevo para continuar. Nombrarlos en otra parte de la respuesta NO los monta;',
     '- una vez montado, queda montado en esta conversación.',
     'No intente clonarlos, descargarlos ni buscarlos fuera de `./codigo`: no hace falta y está bloqueado.',
     '',

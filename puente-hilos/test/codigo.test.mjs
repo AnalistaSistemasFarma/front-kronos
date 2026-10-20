@@ -218,7 +218,10 @@ test('bajo demanda: qué se monta en el turno y registro de lo que pide Orus', a
   assert.deepEqual(elegir([{ body: 'siga' }]), ['sapsend']);
   // Lo nombra Orus en su respuesta: se monta en el siguiente turno; se acumula; nombres ajenos no.
   const disponibles = p.repos.map((n) => bd.repos.get(n));
-  assert.deepEqual(registrarReposSolicitados(rutas, 'Necesito revisar `mcp-sapbo` y el repo inventado otro-repo.', disponibles), ['mcp-sapbo']);
+  // Nombrarlos en una lista NO los monta; solo la línea «Montar: …».
+  assert.deepEqual(registrarReposSolicitados(rutas, '- `sapsend`\n- `front-kronos`\n- `mcp-sapbo`', disponibles), []);
+  assert.deepEqual(registrarReposSolicitados(rutas, 'Para seguir:\nMontar: `mcp-sapbo`, otro-repo', disponibles), ['mcp-sapbo']);
+  assert.deepEqual(registrarReposSolicitados(rutas, 'No montar nada: front-kronos', disponibles), []);
   assert.deepEqual(registrarReposSolicitados(rutas, 'nada que pedir', disponibles), []);
   assert.deepEqual(JSON.parse(rf(path.join(rutas.puente, 'repos-solicitados.json'), 'utf8')).repos, ['mcp-sapbo']);
   assert.deepEqual(elegir([{ body: 'siga' }]), ['sapsend', 'mcp-sapbo']);
