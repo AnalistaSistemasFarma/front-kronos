@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server';
 import { badRequest, forbidden, jsonNoStore, readJsonBody, resolveSessionUser, serverError, unauthorized } from '../../../../lib/chat/http';
 import { marcarTodoLeido, resumenNoLeidos } from '../../../../lib/proyectos/no-leidos';
+import { projectModuleCompanies } from '../../../../lib/chat/projects';
+import { estadosTrabajandoVisibles } from '../../../../lib/proyectos/estado-agente-servidor';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +18,10 @@ export const dynamic = 'force-dynamic';
  * cuenta proyectos donde la persona es miembro y conserva el módulo en la
  * empresa del proyecto (lib/proyectos/no-leidos.ts). El fragmento del último
  * mensaje viaja recortado y en texto plano, y solo de esas conversaciones.
+ *
+ * Con `detalle=1` trae además `trabajando` (2026-10-20): los agentes que están
+ * trabajando ahora en conversaciones de proyecto visibles para la persona (la
+ * misma puerta). Lo que cambie con el panel abierto llega por el pulso.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -24,6 +30,10 @@ export async function GET(request: NextRequest) {
     const detalle = request.nextUrl.searchParams.get('detalle') === '1';
     const r = await resumenNoLeidos(user, { detalle });
     if (!r) return forbidden('No tiene habilitado el módulo Proyectos.');
+    if (detalle) {
+      const empresas = (await projectModuleCompanies(user.id)).map((e) => e.idCompany);
+      r.trabajando = await estadosTrabajandoVisibles(user.id, empresas);
+    }
     return jsonNoStore(r);
   } catch (error) {
     return serverError('GET /api/proyectos/no-leidos', error);

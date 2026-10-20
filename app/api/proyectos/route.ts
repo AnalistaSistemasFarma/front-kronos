@@ -13,6 +13,7 @@ import {
 } from '../../../lib/chat/projects-rules';
 import type { ListaProyectosDto } from '../../../lib/proyectos/tipos';
 import { pedirSugerencia } from '../../../lib/proyectos/equipo';
+import { estadosTrabajandoVisibles } from '../../../lib/proyectos/estado-agente-servidor';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,8 +47,21 @@ export async function GET(request: NextRequest) {
     const designables: ListaProyectosDto['designables'] = {};
     for (const c of data.companies) designables[String(c.idCompany)] = porEmpresa.get(c.idCompany) ?? [];
 
+    // Agentes trabajando AHORA en las conversaciones de estos proyectos (2026-10-20),
+    // con la misma puerta del icono de la cabecera. Solo de los activos: un
+    // proyecto archivado no tiene conversaciones vivas. Lo siguiente llega por el pulso.
+    const trabajando =
+      archivados || data.projects.length === 0
+        ? []
+        : await estadosTrabajandoVisibles(
+            user.id,
+            data.companies.map((c) => c.idCompany),
+            { idProjects: data.projects.map((p) => p.idProject) }
+          );
+    const projects = data.projects.map((p) => ({ ...p, trabajando: trabajando.filter((e) => e.idProject === p.idProject) }));
+
     // El contrato con la interfaz (lib/proyectos/tipos.ts) lo verifica el compilador.
-    const lista: ListaProyectosDto = { companies: data.companies, designables, profiles: [...PROJECT_PROFILES], projects: data.projects };
+    const lista: ListaProyectosDto = { companies: data.companies, designables, profiles: [...PROJECT_PROFILES], projects };
     return jsonNoStore(lista);
   } catch (error) {
     return serverError('GET /api/proyectos', error);

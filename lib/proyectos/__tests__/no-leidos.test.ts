@@ -26,6 +26,7 @@ const m = vi.hoisted(() => ({
   participantes: vi.fn(),
   sessionUser: vi.fn(),
   guard: vi.fn(),
+  estadoFindMany: vi.fn(),
 }));
 
 vi.mock('../../prisma', () => ({
@@ -35,6 +36,7 @@ vi.mock('../../prisma', () => ({
     chatMessage: { groupBy: m.msgGroupBy, findMany: m.msgFindMany, findFirst: m.msgFindFirst, count: m.msgCount },
     subprocessUserCompany: { findFirst: m.supFindFirst },
     chatParticipant: { findMany: m.participantes },
+    chatAgentStatus: { findMany: m.estadoFindMany },
   },
 }));
 vi.mock('../../chat/projects', () => ({ projectModuleCompanies: m.empresas }));
@@ -79,6 +81,7 @@ beforeEach(() => {
   m.msgCount.mockResolvedValue(0);
   m.visiblesPersonas.mockResolvedValue([]);
   m.participantes.mockResolvedValue([]);
+  m.estadoFindMany.mockResolvedValue([]);
 });
 
 describe('la puerta del contador', () => {
@@ -225,7 +228,10 @@ describe('rutas', () => {
     expect(res.headers.get('cache-control')).toContain('no-store');
     expect(await res.json()).toEqual({ noLeidos: 0, mensajes: 0 });
     const conDetalle = await noLeidosGet(req('/api/proyectos/no-leidos?detalle=1'));
-    expect(await conDetalle.json()).toEqual({ noLeidos: 0, mensajes: 0, items: [] });
+    // Con el panel viajan también los agentes trabajando (2026-10-20), con la misma puerta.
+    expect(await conDetalle.json()).toEqual({ noLeidos: 0, mensajes: 0, items: [], trabajando: [] });
+    expect(m.estadoFindMany).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(m.estadoFindMany.mock.calls[0][0].where.conversation)).toContain('"members":{"some":{"id_user":"u-ana"}}');
   });
 
   it('POST leer-todo: solo esa acción y solo con el módulo', async () => {
