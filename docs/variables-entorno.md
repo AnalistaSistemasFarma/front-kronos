@@ -36,6 +36,7 @@ Si faltan, la integración queda apagada (`enabled=false`).
 ## Chat: Proyectos (hilos de agente), F1 piloto
 
 - `CHAT_PROJECTS_AGENTS`: JSON `{"<code del agente>": ["perfil", …]}` con los agentes que tienen proyectos y los perfiles de conectores que se pueden escoger (catálogo en `lib/chat/projects-rules.ts`). Desde el módulo «Proyectos» (2026-10-18) dice qué agentes se pueden **designar** en un proyecto y con qué perfiles; el acceso al módulo lo da el permiso `/process/proyectos` (Administración → Usuarios). Sin la variable, o con un JSON inválido, ningún agente se puede designar ni atiende proyectos (el puente recibe 404).
+- `PROYECTOS_OPERADORES_PASES` (opcional, 2026-10-20): JSON `[{"email":"…","name":"…"}]` con quiénes pueden autorizar pases en «Permisos de los agentes» de Proyectos. Sin la variable, o inválida, son los operadores autorizados de producción: Nicolás Rivera y Cristian Baldión. Solo se cambia cuando Nicolás lo indique.
 - `CHAT_AGENT_API_KEYS` (ya existía): ahora admite `"scope": "projects"` por llave. Esa llave es la del **puente de hilos** (`puente-hilos/`) y solo ve conversaciones de proyecto; las llaves sin `scope` (o con `"channel"`) son las de los bots vivos y **no** ven proyectos.
 
 El puente de hilos tiene sus propias variables (`HILOS_*`), que viven en el `.env` del puente y no en el de la aplicación: ver `puente-hilos/README.md`.
