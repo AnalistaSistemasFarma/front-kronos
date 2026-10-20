@@ -7,6 +7,7 @@ import { useSession } from 'next-auth/react';
 import {
   ActionIcon,
   Badge,
+  Box,
   Drawer,
   Group,
   Indicator,
@@ -42,6 +43,14 @@ import {
   type EstadoIconoProyectos,
   type ItemNoLeidoDto,
 } from '../../lib/proyectos/iconoHeader';
+import AgentAvatar from '../chat/AgentAvatar';
+import { LineaEstadoAgente } from './EstadoAgente';
+import { useEstadosAgentes } from './useEstadosAgentes';
+import {
+  textoSubagentes,
+  vistaEstadoAgente,
+  type EstadoAgenteProyectoDto,
+} from '../../lib/proyectos/estado-agente';
 
 /**
  * Acceso directo al módulo «Proyectos» en la cabecera, junto al Correo y la
@@ -90,6 +99,9 @@ async function consultar(email: string): Promise<EstadoIconoProyectos | null> {
 
 type Panel = { cargando: boolean; error: boolean; items: ItemNoLeidoDto[] };
 
+// Agentes trabajando (2026-10-20): lo último que trajo el panel, compartido entre montajes.
+let memoriaTrabajando: EstadoAgenteProyectoDto[] = [];
+
 export default function ProyectosHeaderIcon() {
   const { data: session, status } = useSession();
   const email = session?.user?.email ?? null;
@@ -100,6 +112,12 @@ export default function ProyectosHeaderIcon() {
   const [abierto, setAbierto] = useState(false);
   const [panel, setPanel] = useState<Panel>({ cargando: false, error: false, items: [] });
   const [marcando, setMarcando] = useState(false);
+  // «Orus está trabajando…» (2026-10-20): semilla del panel + lo que entrega el pulso del chat.
+  const [semillaTrabajando, setSemillaTrabajando] = useState<EstadoAgenteProyectoDto[]>(() => memoriaTrabajando);
+  const estadosAgentes = useEstadosAgentes(semillaTrabajando);
+  const trabajando = [...estadosAgentes.values()]
+    .filter((e) => vistaEstadoAgente(e, e.agent.displayName).trabajando)
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
   const emailRef = useRef(email);
   emailRef.current = email;
   const abiertoRef = useRef(abierto);
@@ -129,6 +147,10 @@ export default function ProyectosHeaderIcon() {
       guardarEstado(storage(), e);
       setEstado(e);
       setPanel({ cargando: false, error: false, items: Array.isArray(body.items) ? (body.items as ItemNoLeidoDto[]) : [] });
+      if (Array.isArray(body.trabajando)) {
+        memoriaTrabajando = body.trabajando as EstadoAgenteProyectoDto[];
+        setSemillaTrabajando(memoriaTrabajando);
+      }
     } catch {
       setPanel((p) => ({ ...p, cargando: false, error: true }));
     }
@@ -232,6 +254,11 @@ export default function ProyectosHeaderIcon() {
     router.push(urlConversacion(item.idProject, item.idConversation));
   };
 
+  const abrirTrabajando = (e: EstadoAgenteProyectoDto) => {
+    setAbierto(false);
+    router.push(urlConversacion(e.idProject, e.idConversation));
+  };
+
   const marcarTodo = async () => {
     if (marcando) return;
     setMarcando(true);
@@ -243,14 +270,26 @@ export default function ProyectosHeaderIcon() {
     }
   };
 
+  const textoTrabajando =
+    trabajando.length === 0 ? '' : trabajando.length === 1 ? `${trabajando[0].agent.displayName} está trabajando` : `${trabajando.length} asistentes trabajando`;
   const boton = (
     <Indicator label={etiqueta ?? undefined} size={16} disabled={!etiqueta} color='red' offset={4}>
-      <Tooltip label='Proyectos' withArrow disabled={abierto}>
+      <Indicator
+        position='bottom-end'
+        size={8}
+        offset={6}
+        color='blue'
+        processing
+        disabled={trabajando.length === 0}
+        withBorder
+        data-testid='header-proyectos-trabajando'
+      >
+      <Tooltip label={textoTrabajando ? `Proyectos · ${textoTrabajando}` : 'Proyectos'} withArrow disabled={abierto}>
         <ActionIcon
           variant='subtle'
           color='gray'
           onClick={alternar}
-          aria-label={ariaIconoProyectos(noLeidos)}
+          aria-label={textoTrabajando ? `${ariaIconoProyectos(noLeidos)}. ${textoTrabajando}` : ariaIconoProyectos(noLeidos)}
           aria-haspopup='dialog'
           aria-expanded={abierto}
           aria-current={activo ? 'page' : undefined}
@@ -259,6 +298,7 @@ export default function ProyectosHeaderIcon() {
           <IconFolders size={18} />
         </ActionIcon>
       </Tooltip>
+      </Indicator>
     </Indicator>
   );
 
@@ -283,6 +323,18 @@ export default function ProyectosHeaderIcon() {
       </div>
 
       <ScrollArea.Autosize mah={celular ? '60dvh' : 420}>
+        {trabajando.length > 0 && (
+          <div data-testid='proyectos-trabajando'>
+            <Text size='xs' fw={600} px='md' pt='sm' pb={4} className='notification-bell-text-muted'>
+              Trabajando ahora
+            </Text>
+            <ul className='list-none m-0 p-0'>
+              {trabajando.map((e) => (
+                <FilaTrabajando key={e.idConversation} estado={e} onAbrir={abrirTrabajando} />
+              ))}
+            </ul>
+          </div>
+        )}
         {panel.cargando && panel.items.length === 0 ? (
           <Group justify='center' py='xl'>
             <Loader size='sm' />
@@ -295,7 +347,7 @@ export default function ProyectosHeaderIcon() {
             </UnstyledButton>
           </Text>
         ) : panel.items.length === 0 ? (
-          <Text size='sm' ta='center' py='xl' className='notification-bell-text-muted'>
+          <Text size='sm' ta='center' py={trabajando.length > 0 ? 'md' : 'xl'} className='notification-bell-text-muted'>
             No tiene mensajes nuevos en sus proyectos
           </Text>
         ) : (
@@ -403,6 +455,58 @@ function FilaNoLeido({ item, onAbrir }: { item: ItemNoLeidoDto; onAbrir: (item: 
                 {horaCorta(u.createdAt)}
               </Text>
             ) : null}
+          </div>
+          <ThemeIcon size='sm' variant='transparent' color='gray' style={{ flexShrink: 0, marginTop: 4 }}>
+            <IconChevronRight size={16} />
+          </ThemeIcon>
+        </Group>
+      </UnstyledButton>
+    </li>
+  );
+}
+
+/** Una conversación con su agente trabajando (2026-10-20): mismo renglón de la campana. */
+function FilaTrabajando({ estado, onAbrir }: { estado: EstadoAgenteProyectoDto; onAbrir: (e: EstadoAgenteProyectoDto) => void }) {
+  const vista = vistaEstadoAgente(estado, estado.agent.displayName);
+  const detalle = [vista.actividad, textoSubagentes(vista.subagentes.length)].filter(Boolean).join(' · ');
+  return (
+    <li>
+      <UnstyledButton
+        onClick={() => onAbrir(estado)}
+        w='100%'
+        style={{ display: 'block' }}
+        aria-label={`Abrir ${estado.conversationTitle} en ${estado.projectName}: ${vista.texto}${detalle ? ` ${detalle}` : ''}`}
+      >
+        <Group
+          gap='sm'
+          wrap='nowrap'
+          align='flex-start'
+          px='md'
+          py='sm'
+          className='notification-bell-row notification-bell-row--interactive border-b border-[var(--app-border)] transition-colors'
+        >
+          <div style={{ flexShrink: 0 }}>
+            <AgentAvatar
+              code={estado.agent.code}
+              displayName={estado.agent.displayName}
+              avatarUrl={estado.agent.avatarUrl}
+              avatarVersion={estado.agent.avatarVersion}
+              size={36}
+              showStatus={false}
+              withTooltip={false}
+              working
+            />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Text size='sm' fw={600} lineClamp={1} className='notification-bell-text'>
+              {estado.projectName}
+            </Text>
+            <Text size='xs' lineClamp={1} className='notification-bell-text-muted'>
+              {estado.conversationTitle}
+            </Text>
+            <Box mt={4}>
+              <LineaEstadoAgente vista={vista} />
+            </Box>
           </div>
           <ThemeIcon size='sm' variant='transparent' color='gray' style={{ flexShrink: 0, marginTop: 4 }}>
             <IconChevronRight size={16} />
