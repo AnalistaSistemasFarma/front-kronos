@@ -40,6 +40,14 @@ Si faltan, la integración queda apagada (`enabled=false`).
 
 El puente de hilos tiene sus propias variables (`HILOS_*`), que viven en el `.env` del puente y no en el de la aplicación: ver `puente-hilos/README.md`.
 
+## Chat: reacciones, GIF y stickers (2026-10-20)
+
+- `CHAT_GIPHY_API_KEY`: llave de una app de GIPHY (API, no SDK) creada en https://developers.giphy.com → *Create an App* → *API*. Solo la usa el servidor (`lib/chat/gif.ts`): el navegador nunca la ve. **Sin la variable, los GIF quedan apagados** (no aparece la pestaña y `/api/chat/gifs/*` responde 404); las reacciones y los stickers funcionan igual. La llave de prueba (*beta*) tiene un cupo bajo por hora; para producción hay que pedir la llave de producción en el mismo panel (GIPHY revisa la app y pide la atribución «Powered by GIPHY», que ya está en el selector).
+- `CHAT_GIF_RATING`: `g` (por defecto) o `pg`. Cualquier otro valor cae a `g`. Se aplica al buscar y otra vez al enviar.
+- `NEXTAUTH_SECRET` (ya existía): de él se deriva la llave que firma las URL del proxy de GIF (`/api/chat/gifs/proxy`). Sin él, los GIF también quedan apagados.
+
+Las reacciones y los stickers no necesitan variables, pero sí el SQL `prisma/manual/2026-10-20-chat-reacciones-stickers-{PRUEBAS,PROD}.sql`. Sin ese SQL el chat funciona igual y estas funciones responden «aún no están habilitadas».
+
 ## Otros
 
 - `FARMADOSIS_COMPANY_ID`

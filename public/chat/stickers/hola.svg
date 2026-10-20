@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160" role="img" aria-label="¡Hola!">
+  <title>¡Hola!</title>
+  <ellipse cx="80" cy="150" rx="50" ry="6" fill="#0f1a2c" opacity=".12"/>
+  <g stroke="#ffffff" stroke-width="7" stroke-linejoin="round" paint-order="stroke">
+    <path d="M30 22 C30 15 36 10 43 10 H117 C124 10 130 15 130 22 V74 C130 81 124 86 117 86 H70 L50 102 L54 86 H43 C36 86 30 81 30 74 Z" fill="#2a8a5f"/>
+    <circle cx="58" cy="48" r="7" fill="#ffffff" stroke-width="0"/>
+    <circle cx="80" cy="48" r="7" fill="#ffffff" stroke-width="0"/>
+    <circle cx="102" cy="48" r="7" fill="#ffffff" stroke-width="0"/>
+  </g>
+  <g>
+    <rect x="22" y="110" width="116" height="32" rx="16" fill="#2a8a5f" stroke="#ffffff" stroke-width="5" paint-order="stroke"/>
+    <text x="80" y="131" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="800" fill="#ffffff">¡Hola!</text>
+  </g>
+</svg>

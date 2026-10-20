@@ -46,7 +46,7 @@ import { avisarActividadProyectos } from '../../lib/proyectos/iconoHeader';
  * se entrega al volver — los zumbidos viejos ya no hacen ruido (NUDGE_FRESH_MS).
  * Sin el módulo de Chat el servidor responde 403 y el pulso se apaga.
  */
-type PulseDto = { cursor: number; events: ChatPulseEvent[] };
+type PulseDto = { cursor: number; events: ChatPulseEvent[]; rcursor?: number };
 
 export default function ChatPulse() {
   const { status } = useSession();
@@ -59,6 +59,9 @@ export default function ChatPulse() {
 
     let vivo = true;
     let cursor = 0;
+    // Cursor de REACCIONES (2026-10-20). 0 = «deme el actual»; si el servidor
+    // no lo devuelve (tabla aún sin crear), se deja de preguntar por ellas.
+    let rcursor: number | null = 0;
     let control: AbortController | null = null;
     let reintento: number | null = null;
     let espera = 0;
@@ -101,8 +104,13 @@ export default function ChatPulse() {
     };
 
     const procesar = (todos: ChatPulseEvent[]) => {
+      // Reacción de otra persona: solo que el hilo abierto (si es ese)
+      // pregunte ya. Sin sonido, sin aviso y sin reordenar la bandeja.
+      for (const id of new Set(todos.filter((e) => e.type === 'reaction').map((e) => e.idConversation))) {
+        pedirSondeoDelHilo(id);
+      }
       procesarProyectos(todos.filter((e) => e.type === 'project'));
-      const eventos = todos.filter((e) => e.type !== 'project');
+      const eventos = todos.filter((e) => e.type !== 'project' && e.type !== 'reaction');
       if (eventos.length === 0) return;
       const hilos = new Set<number>();
       for (const e of eventos) {
@@ -133,7 +141,8 @@ export default function ChatPulse() {
         while (vivo && document.visibilityState === 'visible') {
           control = new AbortController();
           try {
-            const res = await chatFetch(`/api/chat/pulse?since=${cursor}`, {
+            const rq = rcursor !== null ? `&rsince=${rcursor}` : '';
+            const res = await chatFetch(`/api/chat/pulse?since=${cursor}${rq}`, {
               signal: control.signal,
             });
             if (!vivo) return;
@@ -156,6 +165,7 @@ export default function ChatPulse() {
             // La primera vuelta solo trae el cursor: no se repite el historial.
             if (cursor > 0) procesar(data.events ?? []);
             cursor = Math.max(cursor, data.cursor ?? 0);
+            rcursor = typeof data.rcursor === 'number' ? Math.max(rcursor ?? 0, data.rcursor) : null;
             // Base sin ningún mensaje todavía: la vuelta con since=0 responde
             // al instante, así que se espera el tiempo de una vuelta normal
             // para no girar en vacío.

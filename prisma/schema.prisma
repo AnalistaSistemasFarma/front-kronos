@@ -90,6 +90,9 @@ model User {
   // Módulo «Proyectos» (2026-10-18): vínculos que hizo esta persona.
   chatProjectEmailsLinked   ChatProjectEmail[]   @relation("ChatProjectEmailLinker")
   chatProjectRequestsLinked ChatProjectRequest[] @relation("ChatProjectRequestLinker")
+  // Reacciones y stickers del chat (2026-10-20).
+  chatReactions             ChatMessageReaction[]
+  chatStickersCreated       ChatSticker[]        @relation("ChatStickerCreator")
 
   @@map("user")
   @@schema("dbo")
@@ -117,6 +120,8 @@ model Company {
   agentCompanies  AgentCompany[]
   chatGroups      ChatConversation[]
   chatProjects    ChatProject[]
+  // Stickers propios de la empresa en el chat (2026-10-20; la pantalla de carga queda para después).
+  chatStickers    ChatSticker[]
   // SGC documental — configuración de activación por empresa (esquema `sgc`).
   sgcCompanyConfig SgcCompanyConfig?
   // Órdenes de Trabajo (bitácora de proceso de planta, 2026-10-13).
@@ -1729,6 +1734,10 @@ model ChatMessage {
   agentAuthor  Agent?                @relation("ChatMessageAgentAuthor", fields: [id_agent_author], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
   deliveries   ChatMessageDelivery[]
   voiceEvent   ChatVoiceEvent?
+  /// Reacciones con emoji (2026-10-20). Tabla APARTE: el mensaje no cambia.
+  reactions    ChatMessageReaction[]
+  /// GIF o sticker (2026-10-20). Tabla APARTE: el mensaje no cambia.
+  media        ChatMessageMedia?
 
   @@index([id_conversation, id(sort: Desc)])
   @@index([id_conversation, created_at])
@@ -1781,6 +1790,108 @@ model ChatAttachment {
 
   @@index([id_message])
   @@map("chat_attachment")
+  @@schema("dbo")
+}
+
+/// REACCIÓN con emoji a un mensaje del chat (2026-10-20). Una fila por
+/// (mensaje, persona, emoji). Tabla NUEVA y aparte: chat_message no cambia, y si
+/// el código sale antes que el DDL solo fallan las reacciones, no el chat.
+///
+/// CAMBIOS EN VIVO SIN SONDEO NUEVO: cada cambio (poner o quitar) BORRA la fila
+/// de esa llave y crea otra, así que el `id` (IDENTITY) solo crece. Quitar deja
+/// una fila con `active = false` (lápida) para que el cambio también tenga id.
+/// El sondeo del hilo abierto pregunta «¿hay un id mayor que el último que vi
+/// en esta conversación?» con un seek por (id_conversation, id), y el pulso
+/// global hace lo mismo con el MAX(id) de la clave primaria.
+///
+/// `id_conversation` va copiado del mensaje para ese seek y para filtrar por
+/// acceso sin unir con chat_message. Sin llave foránea a propósito: el mensaje
+/// ya cuelga en cascada de la conversación y SQL Server rechaza dos caminos.
+///
+/// Las reacciones NO despiertan al agente: no crean entregas ni pasan por la
+/// bandeja (decisión pendiente de Nicolás; ver lib/chat/reactions.ts).
+model ChatMessageReaction {
+  id              Int      @id @default(autoincrement())
+  id_message      Int
+  id_conversation Int
+  id_user         String   @db.NVarChar(1000)
+  /// Un emoji del catálogo cerrado (lib/chat/reactions-catalog.ts). El
+  /// servidor rechaza cualquier otro texto.
+  emoji           String   @db.NVarChar(32)
+  /// false = lápida de una reacción quitada (ver arriba).
+  active          Boolean  @default(true)
+  created_at      DateTime @default(now())
+
+  message ChatMessage @relation(fields: [id_message], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user    User        @relation(fields: [id_user], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_message, id_user, emoji], map: "chat_message_reaction_message_user_emoji")
+  @@index([id_conversation, id], map: "chat_message_reaction_conversation_id_idx")
+  @@index([id_user], map: "chat_message_reaction_id_user_idx")
+  @@map("chat_message_reaction")
+  @@schema("dbo")
+}
+
+/// GIF o STICKER de un mensaje (2026-10-20). Una fila por mensaje como máximo.
+///
+/// El mensaje se guarda como siempre en chat_message, con un `body` DESCRIPTIVO
+/// («[Sticker: Pulgar arriba]», «[GIF: gato aplaudiendo]»): eso es lo que leen
+/// los agentes, los conectores, la bandeja, el buscador y los avisos, sin que
+/// ninguno tenga que cambiar. Esta tabla solo le dice a la interfaz que lo
+/// pinte como imagen.
+///
+/// `media_url` es la URL del PROVEEDOR (GIPHY) y nunca viaja al navegador: la
+/// imagen se sirve por /api/chat/gifs/proxy con URL firmada, para no exponer la
+/// IP ni la sesión de nadie ante el proveedor.
+model ChatMessageMedia {
+  id_message  Int      @id
+  /// 'gif' | 'sticker'. CHECK en la base.
+  kind        String   @db.NVarChar(20)
+  /// 'giphy' (GIF) | 'gss' (paquete propio, archivo en /public) | 'empresa' (chat_sticker).
+  provider    String   @db.NVarChar(20)
+  /// Id del GIF en el proveedor o código del sticker del paquete propio.
+  external_id String?  @db.NVarChar(100)
+  /// Sticker cargado por la empresa (chat_sticker). NULL en los demás.
+  id_sticker  Int?
+  title       String?  @db.NVarChar(200)
+  media_url   String?  @db.NVarChar(1000)
+  width       Int?
+  height      Int?
+  created_at  DateTime @default(now())
+
+  message ChatMessage  @relation(fields: [id_message], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  sticker ChatSticker? @relation(fields: [id_sticker], references: [id_sticker], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_sticker], map: "chat_message_media_id_sticker_idx")
+  @@map("chat_message_media")
+  @@schema("dbo")
+}
+
+/// STICKER cargado por un administrador (2026-10-20). La tabla queda lista; la
+/// pantalla de administración queda para después. `id_company` NULL = sirve en
+/// todas las empresas. Solo PNG, WebP o GIF (nunca SVG subido: podría llevar
+/// script) y hasta 512 KB, con CHECK en la base. El paquete propio de GSS NO
+/// vive aquí: son archivos versionados en public/chat/stickers.
+model ChatSticker {
+  id_sticker   Int      @id @default(autoincrement())
+  id_company   Int?
+  label        String   @db.NVarChar(80)
+  keywords     String?  @db.NVarChar(300)
+  content_type String   @db.NVarChar(50)
+  image_data   Bytes    @db.VarBinary(Max)
+  size_bytes   Int
+  sort_order   Int      @default(0)
+  active       Boolean  @default(true)
+  created_by   String   @db.NVarChar(1000)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @default(now())
+
+  company  Company?           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  creator  User               @relation("ChatStickerCreator", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  messages ChatMessageMedia[]
+
+  @@index([id_company, active, sort_order], map: "chat_sticker_company_active_idx")
+  @@map("chat_sticker")
   @@schema("dbo")
 }
 
