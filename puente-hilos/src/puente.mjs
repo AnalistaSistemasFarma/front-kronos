@@ -2,6 +2,7 @@
 /**
  * PUENTE DE HILOS — SynerLink (proyectos) ⇄ Claude Code, una sesión por hilo.
  * F1 piloto (Play, solo PRUEBAS), aprobado por Nicolás Rivera el 2026-10-17.
+ * Producción con instancia propia y separada (HILOS_ENTORNO=produccion), 2026-10-20.
  *
  * Es un SERVICIO APARTE del bot vivo: no toca su launchd, su .env, su config
  * ni su sesión. Se prende y se apaga solo (launchd/…plist.example).
@@ -19,7 +20,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cargarConfig, ErrorConfig } from './config.mjs';
+import { cargarConfig, ErrorConfig, sellarEntorno } from './config.mjs';
 import { ColaHilos } from './cola.mjs';
 import { crearClienteSynerLink } from './synerlink.mjs';
 import { armarArgumentos, armarArgumentosSugerencia, armarEntorno, correrTurno, etiquetaHerramienta } from './claude.mjs';
@@ -51,8 +52,14 @@ import {
 
 const MAX_RESPUESTA = 40_000;
 
+/** Etiqueta del entorno en CADA línea del log; se fija al cargar la configuración. */
+let etiquetaEntorno = '';
+export function fijarEtiquetaEntorno(entorno) {
+  etiquetaEntorno = entorno ? `[${entorno}]` : '';
+}
+
 function log(...partes) {
-  console.log(new Date().toISOString(), '[puente-hilos]', ...partes);
+  console.log(new Date().toISOString(), '[puente-hilos]', ...(etiquetaEntorno ? [etiquetaEntorno] : []), ...partes);
 }
 
 /** El `claude` instalado debe soportar lo que el puente exige; si no, no arranca. */
@@ -387,7 +394,10 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
 
 async function principal() {
   const cfg = cargarConfig(process.env);
+  fijarEtiquetaEntorno(cfg.entorno);
   verificarClaude(cfg.claudeBin);
+  mkdirSync(cfg.hilosDir, { recursive: true, mode: 0o700 });
+  if (sellarEntorno(cfg)) log(`carpeta ${cfg.hilosDir} sellada como ${cfg.entorno} (${cfg.url}).`);
   mkdirSync(cfg.configClaudeDir, { recursive: true, mode: 0o700 });
 
   const synerlink = crearClienteSynerLink({ url: cfg.url, llave: cfg.llave });
@@ -460,7 +470,8 @@ function esPuntoDeEntrada() {
 
 if (esPuntoDeEntrada()) {
   principal().catch((err) => {
-    console.error(new Date().toISOString(), '[puente-hilos] no arranca:', err?.message ?? err);
+    const entorno = (process.env.HILOS_ENTORNO ?? '').trim();
+    console.error(new Date().toISOString(), '[puente-hilos]', ...(entorno ? [`[${entorno}]`] : []), 'no arranca:', err?.message ?? err);
     process.exit(1);
   });
 }

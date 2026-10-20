@@ -132,6 +132,26 @@ Del lado de SynerLink, el agente debe estar en `CHAT_PROJECTS_AGENTS` con perfil
 
 **Apagar:** `launchctl kill SIGTERM …`, o Ctrl+C. Termina los turnos en curso y sale. Para apagar los proyectos en la aplicación, quite `CHAT_PROJECTS_AGENTS` y reinicie la app.
 
+## Producción (instancia aparte, 2026-10-20)
+
+Decisión de Nicolás Rivera (2026-10-20): «lo de prod en prod, lo de testing en testing». El puente de producción es **otra instancia**, nunca el de pruebas con otra URL:
+
+| | Pruebas | Producción |
+|---|---|---|
+| `HILOS_ENTORNO` | `pruebas` | `produccion` |
+| Carpeta (`HILOS_DIR`) | `~/.puente-hilos/<agente>-pruebas` | `~/.puente-hilos/<agente>-prod` |
+| Servicio launchd | `com.gss.puente-hilos.<agente>-pruebas` | `com.gss.puente-hilos.<agente>-prod` |
+| Llave (`scope: projects`) | `<agente>-hilos-pruebas` | `<agente>-hilos-prod` |
+
+Protecciones de `produccion` (todas fallan cerrado, ver `src/config.mjs`):
+
+- la URL no puede ser de un servidor de PRUEBAS conocido (`HOSTS_PRUEBAS`: la .230 y localhost);
+- `HILOS_CONFIRMAR_URL_PRODUCCION` debe repetir la URL exacta;
+- `HILOS_DIR` no puede contener «pruebas» ni «testing», ni ser una carpeta que ya usó otro puente (estado, hilos, sesiones o config) sin sello de producción;
+- al arrancar, la carpeta queda **sellada** (`.entorno.json`, 600) con el entorno y la URL. Un puente de pruebas no arranca sobre una carpeta sellada como producción, y producción no la reutiliza con otra URL. Así, pruebas y producción nunca comparten estado ni sesiones (el config aislado `claude-config` y las sesiones viven dentro de cada carpeta).
+
+Cada línea del log lleva el entorno: `[puente-hilos] [produccion] listo: agente …, entorno produccion, …`.
+
 ## Pruebas
 
 ```bash
