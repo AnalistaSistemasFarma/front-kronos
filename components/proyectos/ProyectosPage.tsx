@@ -4,9 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Badge, Button, Card, Group, SegmentedControl, Stack, Text, TextInput, ThemeIcon } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { IconFolderPlus, IconFolders, IconLink, IconMessages, IconSearch, IconUsers } from '@tabler/icons-react';
+import { IconBrandGithub, IconFolderPlus, IconFolders, IconLink, IconMessages, IconSearch, IconUsers } from '@tabler/icons-react';
 import { apiGet, fechaCorta } from './api';
 import NuevoProyectoModal from './NuevoProyectoModal';
+import CatalogoReposModal from './permisos/CatalogoReposModal';
+import type { OpcionesPermisosDto } from '../../lib/proyectos/permisos-agentes-tipos';
 import { AgentesApilados, AvisoArriba, BadgeRol, CONSULTA_ESCRITORIO, Encabezado, EsqueletoTarjetas, type Aviso } from './ui';
 import type { ListaProyectosDto, ProyectoResumenDto } from '../../lib/proyectos/tipos';
 import css from './proyectos.module.css';
@@ -96,6 +98,14 @@ export default function ProyectosPage() {
   const [estado, setEstado] = useState<'activos' | 'archivados'>('activos');
   const [busqueda, setBusqueda] = useState('');
   const [nuevoAbierto, setNuevoAbierto] = useState(false);
+  // Catálogo de repositorios (2026-10-20): solo la administración ve el botón.
+  const [catalogoAdmin, setCatalogoAdmin] = useState(false);
+  const [catalogoAbierto, setCatalogoAbierto] = useState(false);
+  useEffect(() => {
+    const ctrl = new AbortController();
+    void apiGet<OpcionesPermisosDto>('/api/proyectos/permisos-agentes', '', ctrl.signal).then((r) => setCatalogoAdmin(r.ok && r.data.catalogAdmin === true));
+    return () => ctrl.abort();
+  }, []);
 
   const cargar = useCallback(async (est: 'activos' | 'archivados') => {
     setCargando(true);
@@ -158,7 +168,21 @@ export default function ProyectosPage() {
 
   return (
     <div className={css.pantalla}>
-      <Encabezado titulo='Proyectos' derecha={!sinModulo ? botonNuevo : undefined} />
+      <Encabezado
+        titulo='Proyectos'
+        derecha={
+          !sinModulo ? (
+            <Group gap='xs' wrap='nowrap' style={{ flexShrink: 0 }}>
+              {catalogoAdmin && (
+                <Button variant='default' leftSection={<IconBrandGithub size={18} />} onClick={() => setCatalogoAbierto(true)} data-testid='proyectos-repositorios'>
+                  {escritorio ? 'Repositorios' : 'Repos'}
+                </Button>
+              )}
+              {botonNuevo}
+            </Group>
+          ) : undefined
+        }
+      />
 
       <div className={css.barra}>
         <TextInput
@@ -233,6 +257,7 @@ export default function ProyectosPage() {
         )}
       </div>
 
+      {catalogoAdmin && <CatalogoReposModal opened={catalogoAbierto} onClose={() => setCatalogoAbierto(false)} />}
       {datos && (
         <NuevoProyectoModal
           opened={nuevoAbierto}

@@ -15,6 +15,8 @@
  *   POST /api/chat/agent/projects/team/requests     pedidos de «Sugerir equipo» (los reclama)
  *   POST /api/chat/agent/projects/team/suggestions  entrega de una sugerencia
  *   POST /api/chat/agent/projects/team/runs         lo que hizo cada subagente en un turno
+ *   GET  /api/chat/agent/projects/policy?idConversation=N  permisos de los agentes del proyecto
+ *                                                    (nivel de código, repos, autorizadores; 2026-10-20)
  *
  * La llave nunca se escribe en registros ni pasa al proceso del modelo.
  */
@@ -58,6 +60,8 @@ export function crearClienteSynerLink({ url, llave, fetchImpl = globalThis.fetch
     bandeja: (waitSeconds = 25) =>
       json(`/api/chat/agent/inbox?wait=${waitSeconds}&limit=20&ack=false`, { timeoutMs: (waitSeconds + 15) * 1000 }),
     confirmar: (messageIds) => json('/api/chat/agent/ack', { method: 'POST', body: { messageIds } }),
+    /** Permisos de los agentes del proyecto de ese hilo (se piden al iniciar cada turno). */
+    politica: (idConversation) => json(`/api/chat/agent/projects/policy?idConversation=${encodeURIComponent(idConversation)}`),
     contexto: (idConversation) =>
       json(`/api/chat/agent/projects/context?idConversation=${encodeURIComponent(idConversation)}`),
     estado: (idConversation, state, label, tasks) =>

@@ -40,7 +40,7 @@ export const SETTINGS_HIJO = {
  * fija el id con --session-id (así el puente lo conoce de antemano); después,
  * --resume con ese mismo id.
  */
-export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, presupuestoUsd, equipo = null }) {
+export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, presupuestoUsd, equipo = null, lectura = null }) {
   if (!perfil) throw new Error('Falta el perfil.');
   if (!sesion?.id || !/^[0-9a-f-]{36}$/i.test(sesion.id)) throw new Error('session id inválido.');
 
@@ -51,9 +51,13 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
   // por uno. Sin equipo, Agent/Task siguen prohibidas como en la F1.
   const tools = [...HERRAMIENTAS_BASE, ...web, ...(equipo ? equipo.tools : [])];
   const permitidas = [...PERMITIDAS_BASE, ...web, ...perfil.herramientas, ...(equipo ? equipo.permitidas : [])];
-  const prohibidas = equipo
-    ? [...HERRAMIENTAS_PROHIBIDAS.filter((h) => !HERRAMIENTAS_SUBAGENTE.includes(h)), ...equipo.prohibidas]
-    : HERRAMIENTAS_PROHIBIDAS;
+  const prohibidas = [
+    ...(equipo
+      ? [...HERRAMIENTAS_PROHIBIDAS.filter((h) => !HERRAMIENTAS_SUBAGENTE.includes(h)), ...equipo.prohibidas]
+      : HERRAMIENTAS_PROHIBIDAS),
+    // Permisos del proyecto, nivel LECTURA (politica.mjs): sin secretos de los clones.
+    ...(lectura ? lectura.prohibidas : []),
+  ];
 
   const args = [
     '-p',
@@ -78,6 +82,8 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
     rutaSistema,
   ];
   if (dirArchivos) args.push('--add-dir', dirArchivos);
+  // Repos del proyecto en LECTURA: solo se leen (Edit/Write siguen confinados a ./trabajo).
+  for (const d of lectura?.dirs ?? []) args.push('--add-dir', d);
   if (sesion.nueva) args.push('--session-id', sesion.id);
   else args.push('--resume', sesion.id);
   if (modelo) args.push('--model', modelo);

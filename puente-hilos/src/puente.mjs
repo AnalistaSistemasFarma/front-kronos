@@ -21,6 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cargarConfig, ErrorConfig } from './config.mjs';
 import { ColaHilos } from './cola.mjs';
+import { carpetasLectura, leerArchivoManual, obtenerPoliticaApi, prohibidasLectura, resolverPolitica, textoPolitica } from './politica.mjs';
 import { crearClienteSynerLink } from './synerlink.mjs';
 import { armarArgumentos, armarArgumentosSugerencia, armarEntorno, correrTurno, etiquetaHerramienta } from './claude.mjs';
 import {
@@ -77,6 +78,34 @@ export function verificarBandeja(respuesta, agenteEsperado) {
   }
 }
 
+/**
+ * Permisos de los agentes del turno (2026-10-20, ver politica.mjs). Nunca lanza:
+ * ante cualquier duda, «ninguno». Devuelve la política resuelta, las carpetas de
+ * lectura y el bloque para el encabezado de sistema.
+ */
+export async function politicaDelTurno({ cfg, synerlink, idConversation, idProject, leerArchivo = leerArchivoManual, existe }) {
+  const api = await obtenerPoliticaApi(synerlink, idConversation, idProject);
+  let archivo = null;
+  let errorArchivo = null;
+  // El archivo manual se relee en CADA turno (vincular un repo no exige reiniciar).
+  const ruta = cfg.rutaReposPorProyecto ?? ((process.env.HILOS_REPOS_POR_PROYECTO ?? '').trim() || null);
+  try {
+    archivo = leerArchivo(ruta);
+  } catch (e) {
+    errorArchivo = e;
+  }
+  const politica = resolverPolitica({ api, archivo, idProject, errorArchivo: api.estado === 'bd' ? null : errorArchivo });
+  const lectura = carpetasLectura(politica, archivo, existe ? { existe } : undefined);
+  return {
+    politica,
+    api,
+    archivo,
+    errorArchivo,
+    lectura: lectura.dirs.length > 0 ? { dirs: lectura.dirs.map((d) => d.ruta), prohibidas: prohibidasLectura(lectura.dirs) } : null,
+    bloque: textoPolitica({ politica, lectura }),
+  };
+}
+
 export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
   const enProceso = new Set();
 
@@ -120,7 +149,14 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
             agentes: armarAgentes({ equipo, perfil, agente: agenteNombre, proyecto: contexto.project, topes }),
           }
         : null;
-      escribirContexto({ rutas, agente: agenteNombre, contexto, perfil, instruccionesEn: cfg.instruccionesEn, equipoTurno });
+      // Permisos de los agentes (2026-10-20): SynerLink manda; si no hay política, el archivo manual; si no, «ninguno».
+      const politicaTurno = await politicaDelTurno({ cfg, synerlink, idConversation, idProject: contexto.project.idProject });
+      if (politicaTurno.api.estado === 'error') log(`conversación ${idConversation}: no se pudo leer la política (${politicaTurno.api.error}); turno sin código.`);
+      if (politicaTurno.errorArchivo) log(`conversación ${idConversation}: archivo de repos inválido:`, politicaTurno.errorArchivo.message);
+      if (politicaTurno.politica.nivel > 0) {
+        log(`conversación ${idConversation}: permisos ${politicaTurno.politica.codeLevel} (origen ${politicaTurno.politica.origen}; repos ${politicaTurno.politica.repos.map((r) => r.slug).join(', ')}).`);
+      }
+      escribirContexto({ rutas, agente: agenteNombre, contexto, perfil, instruccionesEn: cfg.instruccionesEn, equipoTurno, politicaTurno });
       limpiarPropuestas(rutas);
       let vigia = null;
 
@@ -135,6 +171,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
           // Con equipo, el tope de gasto POR PEDIDO es obligatorio.
           presupuestoUsd: equipo ? topes.presupuestoUsd : cfg.presupuestoUsd,
           equipo: equipo ? argumentosEquipo({ equipo, rutaAgentes: rutas.agentes }) : null,
+          lectura: politicaTurno.lectura,
         });
         let ultimaEtiqueta = null;
         let ultimosActivos = '';
