@@ -14,6 +14,7 @@
     { "code": "zoe", "host": "local", "kind": "claude-code", "dir": ".zoe" },
     { "code": "duo", "host": "local", "kind": "openclaw", "agent": "duo", "bridge": "duo" },
     { "code": "lunaris", "host": "local", "kind": "openclaw", "agent": "main", "profile": "lunaris", "bridge": "lunaris" },
+    { "code": "senhatsumi", "host": "local", "kind": "openclaw", "agent": "senhatsumi", "bridge": "senhatsumi" },
 
     { "code": "jorge", "host": "jorge", "kind": "claude-code", "dir": ".jorgebot" },
     { "code": "jose", "host": "jorge", "kind": "claude-code", "dir": ".josebot" },
@@ -40,6 +41,7 @@
     { "code": "pandora", "host": "lisa", "kind": "openclaw", "agent": "pandora", "bridge": "synerlink-bridge-pandora" },
     { "code": "sora", "host": "lisa", "kind": "openclaw", "agent": "sora", "bridge": "synerlink-bridge-sora" },
     { "code": "luna", "host": "lisa", "kind": "openclaw", "agent": "luna", "bridge": "synerlink-bridge-luna" },
+    { "code": "jarvis", "host": "lisa", "kind": "openclaw", "agent": "jarvis", "bridge": "synerlink-bridge-jarvis" },
 
     { "code": "cosmo", "host": "cosmo", "kind": "claude-code", "dir": ".andreabot" },
     { "code": "vega", "host": "cosmo", "kind": "openclaw", "agent": "vega", "bridge": "vega" },
