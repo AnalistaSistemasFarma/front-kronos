@@ -68,7 +68,12 @@ const RE_CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  *   "operadoresPases": ["correo", …],
  *   "repos": { "<nombre>": { "github", "clon", "ramaPruebas", "ramaProduccion",
  *              "ramasProtegidas"?, "workflowsProduccion"?, "despliegue"? } },
- *   "proyectos": { "<idProject>": { "repos": ["<nombre>"], "nivel": 2, "pases": true|false } }
+ *              "descripcion"? } },
+ *   "proyectos": { "<idProject>": { "repos": ["<nombre>"], "nivel": 2, "pases": true|false,
+ *                  "bajoDemanda"?: true|false } }
+ *
+ * bajoDemanda: con muchos repos, el worktree de cada uno se crea SOLO cuando hace
+ * falta (ver reposDelTurno); el resto aparece en un índice en las instrucciones.
  * }
  */
 export function validarReposPorProyecto(json) {
@@ -105,6 +110,7 @@ export function validarReposPorProyecto(json) {
       ramasProtegidas: [...new Set([...RAMAS_PROTEGIDAS_BASE, r.ramaPruebas, r.ramaProduccion, ...extra])],
       workflowsProduccion: [...new Set(workflows)],
       despliegue: typeof r.despliegue === 'string' ? r.despliegue.slice(0, 2000) : '',
+      descripcion: typeof r.descripcion === 'string' ? r.descripcion.replace(/\s+/g, ' ').trim().slice(0, 200) : '',
     });
   }
   const proyectos = new Map();
@@ -113,7 +119,8 @@ export function validarReposPorProyecto(json) {
     if (!p || !Array.isArray(p.repos) || p.repos.length === 0) throw new ErrorConfig(`Proyecto ${id}: repos debe ser una lista no vacía.`);
     for (const n of p.repos) if (!repos.has(n)) throw new ErrorConfig(`Proyecto ${id}: el repo ${n} no está declarado.`);
     if (p.nivel !== 2) throw new ErrorConfig(`Proyecto ${id}: solo se admite nivel 2 (desarrollo).`);
-    proyectos.set(Number(id), { repos: [...new Set(p.repos)], nivel: 2, pases: p.pases === true });
+    if (p.bajoDemanda !== undefined && typeof p.bajoDemanda !== 'boolean') throw new ErrorConfig(`Proyecto ${id}: bajoDemanda debe ser true o false.`);
+    proyectos.set(Number(id), { repos: [...new Set(p.repos)], nivel: 2, pases: p.pases === true, bajoDemanda: p.bajoDemanda === true });
   }
   return { operadores: operadores.map((c) => c.toLowerCase()), repos, proyectos };
 }
@@ -191,6 +198,88 @@ export const AYUDANTE_CREDENCIAL = '!f(){ test -n "$GH_TOKEN" && { echo username
 
 function git(args, { cwd, env }) {
   return execFileSync('git', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 180_000 }).trim();
+}
+
+/** Archivo de la conversación con los repos que Orus nombró en su última respuesta. */
+export const ARCHIVO_REPOS_SOLICITADOS = 'repos-solicitados.json';
+
+function escaparRegex(t) {
+  return t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Repos que se nombran en un texto: por su nombre (`front-kronos`) o por
+ * «dueño/repo» (`AnalistaSistemasFarma/front-kronos`), sin distinguir mayúsculas y
+ * con bordes de palabra (`sapsend` no coincide dentro de `sapsendmailer`).
+ */
+export function reposMencionados(texto, repos) {
+  if (typeof texto !== 'string' || !texto) return [];
+  const t = texto.toLowerCase();
+  const out = [];
+  for (const r of repos) {
+    const claves = [...new Set([r.nombre, r.github, r.github.split('/')[1]].map((x) => x.toLowerCase()))];
+    if (claves.some((c) => new RegExp(`(^|[^a-z0-9_.-])${escaparRegex(c)}($|[^a-z0-9_-])`).test(t))) out.push(r.nombre);
+  }
+  return out;
+}
+
+/** Lee los repos que Orus pidió en el turno anterior (solo nombres del proyecto). */
+export function leerReposSolicitados(rutas, nombresValidos) {
+  try {
+    const j = JSON.parse(readFileSync(path.join(rutas.puente, ARCHIVO_REPOS_SOLICITADOS), 'utf8'));
+    const validos = new Set(nombresValidos);
+    return Array.isArray(j?.repos) ? j.repos.filter((n) => validos.has(n)) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Tras el turno: guarda los repos del proyecto que Orus nombró en su respuesta,
+ * para montarlos en el siguiente turno (bajo demanda). Se SUMA a lo que había.
+ */
+export function registrarReposSolicitados(rutas, respuesta, repos) {
+  const nuevos = reposMencionados(respuesta, repos);
+  if (nuevos.length === 0) return [];
+  const todos = [...new Set([...leerReposSolicitados(rutas, repos.map((r) => r.nombre)), ...nuevos])];
+  mkdirSync(rutas.puente, { recursive: true, mode: 0o700 });
+  writeFileSync(path.join(rutas.puente, ARCHIVO_REPOS_SOLICITADOS), JSON.stringify({ ts: new Date().toISOString(), repos: todos }, null, 2), { mode: 0o600 });
+  return nuevos;
+}
+
+/**
+ * Qué repos se montan en este turno. Sin bajoDemanda: todos (como antes).
+ * Con bajoDemanda: los que ya tienen worktree en la conversación, los que nombra
+ * algún mensaje del turno y los que Orus nombró en su respuesta anterior.
+ */
+export function reposDelTurno({ proyecto, repos, lote, rutas, existe = existsSync }) {
+  const delProyecto = proyecto.repos.map((n) => repos.get(n));
+  if (!proyecto.bajoDemanda) return delProyecto;
+  const elegidos = new Set();
+  for (const r of delProyecto) if (existe(path.join(rutas.cwd, 'codigo', r.nombre, '.git'))) elegidos.add(r.nombre);
+  for (const m of lote ?? []) for (const n of reposMencionados(m?.body ?? '', delProyecto)) elegidos.add(n);
+  for (const n of leerReposSolicitados(rutas, proyecto.repos)) elegidos.add(n);
+  return delProyecto.filter((r) => elegidos.has(r.nombre));
+}
+
+/** Índice de TODOS los repos del proyecto (bajo demanda), con cuáles están montados. */
+export function textoIndiceRepos({ disponibles, montados }) {
+  const m = new Set(montados.map((w) => w.nombre));
+  const l = [
+    '',
+    '## Índice de repositorios del proyecto (montaje bajo demanda)',
+    '',
+    `Este proyecto tiene acceso a ${disponibles.length} repositorios de la compañía. Para no cargar todos en cada turno, cada uno se monta (worktree propio de esta conversación, rama \`${PREFIJO_RAMA}…\`) SOLO cuando hace falta:`,
+    '- se monta EN ESTE MISMO TURNO si algún mensaje de la persona lo nombra (por su nombre o «dueño/repo»);',
+    '- si usted descubre que necesita uno que no está montado, NÓMBRELO por su nombre exacto en su respuesta (por ejemplo «para seguir necesito revisar `front-orion`») y quedará montado desde el siguiente turno; dígale a la persona que le escriba de nuevo para continuar;',
+    '- una vez montado, queda montado en esta conversación.',
+    'No intente clonarlos, descargarlos ni buscarlos fuera de `./codigo`: no hace falta y está bloqueado.',
+    '',
+    '| Repo | GitHub | Estado | Para qué es |',
+    '|---|---|---|---|',
+  ];
+  for (const r of disponibles) l.push(`| \`${r.nombre}\` | ${r.github} | ${m.has(r.nombre) ? `✅ montado en \`./codigo/${r.nombre}\`` : 'disponible (no montado)'} | ${r.descripcion || '—'} |`);
+  return l.join('\n');
 }
 
 /**
@@ -384,8 +473,8 @@ export function textoCodigo({ worktrees, autorizado, puedePasar, autores, operad
       `- **Este turno SÍ está autorizado** (autor verificado por el servidor: ${autores.join(', ')}). Si la orden es pasar, hágalo por el flujo normal y nada más:`,
       '  1. Antes de fusionar, revise el PR: si trae SQL (migraciones, `.sql`, cambios de esquema), NO lo aplique usted: dígalo en su respuesta y pida que se aplique por el flujo de pase.',
       '  2. AVISO PREVIO en el grupo de Teams de desarrollo: usted NO tiene herramienta de Teams. Escriba en su respuesta un bloque «📣 Aviso para el grupo de Teams» listo para copiar, con la bandera 🧪 TESTING (pase a la rama de pruebas) o 🚀 PROD (pase a producción), qué se sube (PR y título), qué se ve afectado y la caída estimada; firme como Orus, asistente de IA de Group Shared Services Latinoamérica. Tecnología lo publica.',
-      '  3. Fusione con `gh pr merge <n> --merge --admin` (sin `--delete-branch`). En SAPSEND, fusionar a `testing` despliega solo a pruebas (deploy-testing.yml).',
-      '  4. Producción de SAPSEND es POR EMPRESA y manual: tras fusionar a `production`, dispare `gh workflow run deploy-<empresa>.yml --ref production` SOLO para las empresas que el operador indicó (si no lo dijo, pregunte cuáles) y siga con `gh run watch <id> --exit-status`.',
+      '  3. Fusione con `gh pr merge <n> --merge --admin` (sin `--delete-branch`). Antes, lea la nota «Despliegue» del repo: en cada repo fusionar a una rama hace cosas distintas (en SAPSEND, fusionar a `testing` despliega solo a pruebas; en front-kronos, fusionar a `main` DESPLIEGA A PRODUCCIÓN). Si el repo no tiene nota de despliegue, diga en el aviso que no hay despliegue automático conocido.',
+      '  4. Producción de SAPSEND es POR EMPRESA y manual: tras fusionar a `production`, dispare `gh workflow run deploy-<empresa>.yml --ref production` SOLO para las empresas que el operador indicó (si no lo dijo, pregunte cuáles) y siga con `gh run watch <id> --exit-status`. En los demás repos solo se disparan los workflows de producción que tengan declarados.',
       '  5. Al terminar, deje en la respuesta el AVISO POSTERIOR para Teams (misma bandera), con el resultado y la duración del despliegue.'
     );
   } else {

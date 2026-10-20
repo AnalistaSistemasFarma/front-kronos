@@ -168,3 +168,91 @@ test('hook de subagentes: solo git de lectura; el principal no se toca', () => {
   assert.equal(decidir({ agent_id: 'a', agent_type: 's', tool_name: 'Bash', tool_input: { command: 'git -C codigo/sapsend log' } }), null);
   assert.equal(decidir({ agent_id: 'a', agent_type: 's', tool_name: 'Bash', tool_input: { command: 'npm test' } }).hookSpecificOutput.permissionDecision, 'deny');
 });
+
+test('bajo demanda: menciones con borde de palabra, por nombre o dueño/repo', async () => {
+  const { reposMencionados } = await import('../src/codigo.mjs');
+  const repos = [
+    { nombre: 'sapsend', github: 'gsslatam/sapsend' },
+    { nombre: 'sapsendmailer', github: 'NicolasRivera03/sapsendmailer' },
+    { nombre: 'front-kronos', github: 'AnalistaSistemasFarma/front-kronos' },
+    { nombre: 'mcp-sapbo', github: 'NicolasRivera03/mcp-sapbo' },
+  ];
+  assert.deepEqual(reposMencionados('Revise SAPSENDMAILER por favor', repos), ['sapsendmailer']);
+  assert.deepEqual(reposMencionados('en sapsend, y luego `front-kronos`.', repos), ['sapsend', 'front-kronos']);
+  assert.deepEqual(reposMencionados('https://github.com/NicolasRivera03/mcp-sapbo/pull/3', repos), ['mcp-sapbo']);
+  assert.deepEqual(reposMencionados('el mcp-sapbo-olp no es un repo', repos), []);
+  assert.deepEqual(reposMencionados('front-kronosx no', repos), []);
+  assert.deepEqual(reposMencionados('', repos), []);
+});
+
+test('bajo demanda: qué se monta en el turno y registro de lo que pide Orus', async () => {
+  const { mkdtempSync, mkdirSync: mk, readFileSync: rf } = await import('node:fs');
+  const os = await import('node:os');
+  const path = (await import('node:path')).default;
+  const { reposDelTurno, registrarReposSolicitados, textoIndiceRepos, validarReposPorProyecto: v } = await import('../src/codigo.mjs');
+  const base = {
+    ...JSON_OK,
+    repos: {
+      ...JSON_OK.repos,
+      'front-kronos': { github: 'AnalistaSistemasFarma/front-kronos', clon: '/h/repos/front-kronos', ramaPruebas: 'testing', ramaProduccion: 'main', descripcion: 'SynerLink' },
+      'mcp-sapbo': { github: 'NicolasRivera03/mcp-sapbo', clon: '/h/repos/mcp-sapbo', ramaPruebas: 'main', ramaProduccion: 'main' },
+    },
+  };
+  // Sin bajoDemanda: todos, como antes.
+  const todos = v({ ...base, proyectos: { 1: { repos: ['sapsend', 'front-kronos', 'mcp-sapbo'], nivel: 2, pases: true } } });
+  assert.equal(todos.proyectos.get(1).bajoDemanda, false);
+  const cwd = mkdtempSync(path.join(os.tmpdir(), 'bd-'));
+  const rutas = { cwd, puente: path.join(cwd, '.puente') };
+  assert.equal(reposDelTurno({ proyecto: todos.proyectos.get(1), repos: todos.repos, lote: [], rutas }).length, 3);
+  assert.throws(() => v({ ...base, proyectos: { 1: { repos: ['sapsend'], nivel: 2, bajoDemanda: 'si' } } }));
+
+  const bd = v({ ...base, proyectos: { 1: { repos: ['sapsend', 'front-kronos', 'mcp-sapbo'], nivel: 2, pases: true, bajoDemanda: true } } });
+  const p = bd.proyectos.get(1);
+  const elegir = (lote) => reposDelTurno({ proyecto: p, repos: bd.repos, lote, rutas }).map((r) => r.nombre);
+  // Nada nombrado ni montado: nada.
+  assert.deepEqual(elegir([{ body: 'hola, ¿qué tiene disponible?' }]), []);
+  // Lo nombra la persona: se monta en ese turno.
+  assert.deepEqual(elegir([{ body: 'revise front-kronos' }]), ['front-kronos']);
+  // Ya montado en la conversación: sigue montado.
+  mk(path.join(cwd, 'codigo', 'sapsend', '.git'), { recursive: true });
+  assert.deepEqual(elegir([{ body: 'siga' }]), ['sapsend']);
+  // Lo nombra Orus en su respuesta: se monta en el siguiente turno; se acumula; nombres ajenos no.
+  const disponibles = p.repos.map((n) => bd.repos.get(n));
+  assert.deepEqual(registrarReposSolicitados(rutas, 'Necesito revisar `mcp-sapbo` y el repo inventado otro-repo.', disponibles), ['mcp-sapbo']);
+  assert.deepEqual(registrarReposSolicitados(rutas, 'nada que pedir', disponibles), []);
+  assert.deepEqual(JSON.parse(rf(path.join(rutas.puente, 'repos-solicitados.json'), 'utf8')).repos, ['mcp-sapbo']);
+  assert.deepEqual(elegir([{ body: 'siga' }]), ['sapsend', 'mcp-sapbo']);
+  // Índice: todos los repos, con estado.
+  const t = textoIndiceRepos({ disponibles, montados: [{ nombre: 'sapsend' }] });
+  assert.match(t, /3 repositorios/);
+  assert.match(t, /`sapsend` \| gsslatam\/sapsend \| ✅ montado/);
+  assert.match(t, /`front-kronos` \| AnalistaSistemasFarma\/front-kronos \| disponible \(no montado\) \| SynerLink/);
+});
+
+test('prepararCodigoTurno bajo demanda: sin repos nombrados va sin código y con índice; con uno, solo ese', async () => {
+  const { prepararCodigoTurno } = await import('../src/puente.mjs');
+  const { validarReposPorProyecto: v } = await import('../src/codigo.mjs');
+  const vinc = v({
+    ...JSON_OK,
+    repos: { ...JSON_OK.repos, 'front-kronos': { github: 'AnalistaSistemasFarma/front-kronos', clon: '/h/repos/front-kronos', ramaPruebas: 'testing', ramaProduccion: 'main' } },
+    proyectos: { 1: { repos: ['sapsend', 'front-kronos'], nivel: 2, pases: true, bajoDemanda: true } },
+  });
+  const cfg = { rutaReposPorProyecto: '/x.json', githubTokenArchivo: '/t', hilosDir: '/h', home: '/home', path: '/bin' };
+  const rutas = { cwd: '/no/existe/c5', puente: '/no/existe/c5/.puente' };
+  let montados = null;
+  const comun = { cfg, idProject: 1, idConversation: 5, rutas, agenteNombre: 'Orus', cargar: () => vinc, leerToken: () => 'tok', prepararHome: () => '/h/home-codigo' };
+  const preparar = ({ repos }) => {
+    montados = repos.map((r) => r.nombre);
+    return repos.map((r) => ({ ...r, worktree: `/no/existe/c5/codigo/${r.nombre}`, rama: 'proyecto/1-c5', gitComun: `${r.clon}/.git` }));
+  };
+  const a = prepararCodigoTurno({ ...comun, lote: [{ body: 'hola', author: { kind: 'user', email: 'x@y.com' } }], preparar });
+  assert.equal(a.soloIndice, true);
+  assert.equal(montados, null);
+  assert.match(a.bloque, /disponible \(no montado\)/);
+  const b = prepararCodigoTurno({ ...comun, lote: [{ body: 'mire front-kronos', author: { kind: 'user', email: 'x@y.com' } }], preparar });
+  assert.deepEqual(montados, ['front-kronos']);
+  assert.deepEqual(b.dirsExtra, ['/no/existe/c5/codigo/front-kronos']);
+  assert.match(b.bloque, /usted SÍ tiene el código/);
+  assert.match(b.bloque, /`front-kronos` \| AnalistaSistemasFarma\/front-kronos \| ✅ montado/);
+  assert.match(b.bloque, /`sapsend` \| gsslatam\/sapsend \| disponible/);
+});

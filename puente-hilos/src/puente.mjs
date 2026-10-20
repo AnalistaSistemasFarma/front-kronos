@@ -32,6 +32,9 @@ import {
   prepararWorktrees,
   sandboxCodigo,
   textoCodigo,
+  textoIndiceRepos,
+  reposDelTurno,
+  registrarReposSolicitados,
   turnoAutorizado,
 } from './codigo.mjs';
 import { ColaHilos } from './cola.mjs';
@@ -107,7 +110,7 @@ export function ocultarSecreto(texto, secreto) {
  * Acceso al código del turno (nivel 2). Devuelve null si el proyecto no tiene
  * repos vinculados. Si algo falla, el turno corre SIN código (falla cerrado).
  */
-export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lote, agenteNombre, conEquipo = false, cargar = cargarReposPorProyecto, preparar = prepararWorktrees, leerToken = leerTokenGithub, prepararHome = prepararHomeCodigo }) {
+export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lote, agenteNombre, conEquipo = false, cargar = cargarReposPorProyecto, preparar = prepararWorktrees, elegirRepos = reposDelTurno, leerToken = leerTokenGithub, prepararHome = prepararHomeCodigo }) {
   if (!cfg.rutaReposPorProyecto) return null;
   const vinculos = cargar(cfg.rutaReposPorProyecto);
   const proyecto = vinculos?.proyectos.get(idProject);
@@ -115,8 +118,16 @@ export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lot
   const token = leerToken(cfg.githubTokenArchivo);
   const homeCodigo = prepararHome(cfg.hilosDir, agenteNombre);
   const envGit = { PATH: cfg.path, HOME: homeCodigo, GH_TOKEN: token, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', LANG: 'en_US.UTF-8' };
-  const worktrees = preparar({ repos: proyecto.repos.map((n) => vinculos.repos.get(n)), rutas, idProject, idConversation, envGit });
+  // Bajo demanda (proyectos con muchos repos): solo se montan los que hacen falta.
+  const disponibles = proyecto.repos.map((n) => vinculos.repos.get(n));
+  const aMontar = elegirRepos({ proyecto, repos: vinculos.repos, lote, rutas });
   const { autorizado, autores } = turnoAutorizado(lote, vinculos.operadores);
+  if (aMontar.length === 0) {
+    // Ningún repo nombrado todavía: el turno va SIN código (sin Bash, sin token),
+    // pero con el índice para que Orus sepa qué hay y cómo pedirlo.
+    return { soloIndice: true, disponibles, bajoDemanda: true, bloque: textoIndiceRepos({ disponibles, montados: [] }) };
+  }
+  const worktrees = preparar({ repos: aMontar, rutas, idProject, idConversation, envGit });
   const permisos = permisosCodigo({ repos: worktrees, autorizado, pases: proyecto.pases });
   return {
     ...permisos,
@@ -127,7 +138,11 @@ export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lot
     sandbox: sandboxCodigo({ worktrees, homeReal: cfg.home, homeCodigo, hilosDir: cfg.hilosDir, secretos: [cfg.githubTokenArchivo] }),
     entorno: entornoCodigo({ token, homeCodigo }),
     hooks: hooksCodigo(),
-    bloque: textoCodigo({ worktrees, autorizado, puedePasar: permisos.puedePasar, autores, operadores: vinculos.operadores, equipo: conEquipo }),
+    disponibles,
+    bajoDemanda: proyecto.bajoDemanda,
+    bloque:
+      textoCodigo({ worktrees, autorizado, puedePasar: permisos.puedePasar, autores, operadores: vinculos.operadores, equipo: conEquipo }) +
+      (proyecto.bajoDemanda ? `\n${textoIndiceRepos({ disponibles, montados: worktrees })}` : ''),
   };
 }
 
@@ -189,10 +204,16 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
       // Acceso al código (nivel 2): repos vinculados al proyecto, worktree propio y
       // pases solo si TODOS los mensajes del turno son de un operador autorizado.
       let codigo = null;
+      let indiceRepos = null; // proyecto bajo demanda: índice de repos y registro de los que Orus pida
       let avisoCodigo = '';
       try {
         codigo = prepararCodigoTurno({ cfg, idProject: contexto.project.idProject, idConversation, rutas, lote, agenteNombre, conEquipo: Boolean(equipo) });
-        if (codigo) {
+        if (codigo?.soloIndice) {
+          indiceRepos = codigo;
+          codigo = null;
+          log(`conversación ${idConversation}: código bajo demanda, ningún repo montado todavía (${indiceRepos.disponibles.length} disponibles).`);
+        } else if (codigo) {
+          if (codigo.bajoDemanda) indiceRepos = codigo;
           log(
             `conversación ${idConversation}: código ${codigo.worktrees.map((w) => `${w.nombre}@${w.rama}`).join(', ')}; pases ${codigo.puedePasar ? 'AUTORIZADOS' : 'no'} (autores: ${codigo.autores.join(', ')}).`
           );
@@ -209,7 +230,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
             agentes: armarAgentes({ equipo, perfil, agente: agenteNombre, proyecto: contexto.project, topes, codigo }),
           }
         : null;
-      escribirContexto({ rutas, agente: agenteNombre, contexto, perfil, instruccionesEn: cfg.instruccionesEn, equipoTurno, bloqueCodigo: codigo?.bloque ?? '' });
+      escribirContexto({ rutas, agente: agenteNombre, contexto, perfil, instruccionesEn: cfg.instruccionesEn, equipoTurno, bloqueCodigo: codigo?.bloque ?? indiceRepos?.bloque ?? '' });
       limpiarPropuestas(rutas);
       let vigia = null;
 
@@ -329,6 +350,15 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
       }
       cuerpo = (aviso + avisoEquipo + avisoCodigo + cuerpo).slice(0, MAX_RESPUESTA - notaPropuestas.length) + notaPropuestas;
       if (codigo) cuerpo = ocultarSecreto(cuerpo, codigo.token);
+      // Bajo demanda: los repos que Orus nombró en su respuesta se montan desde el siguiente turno.
+      if (indiceRepos && r.resultado?.ok) {
+        try {
+          const pedidos = registrarReposSolicitados(rutas, r.resultado.texto, indiceRepos.disponibles);
+          if (pedidos.length) log(`conversación ${idConversation}: repos nombrados por el asistente, se montan en el siguiente turno: ${pedidos.join(', ')}.`);
+        } catch (e) {
+          log(`conversación ${idConversation}: no se pudieron registrar los repos pedidos:`, e.message);
+        }
+      }
 
       await synerlink.responder(idConversation, cuerpo);
 

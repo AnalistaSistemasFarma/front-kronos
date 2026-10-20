@@ -7,10 +7,18 @@
       "ramaPruebas": "testing",
       "ramaProduccion": "production",
       "workflowsProduccion": ["deploy-abamia.yml", "deploy-farmalogica.yml", "deploy-gss.yml", "deploy-kelab.yml", "deploy-meditrack.yml", "deploy-olp.yml", "deploy-ryan.yml"],
-      "despliegue": "testing: al fusionar corre deploy-testing.yml. Producción: fusionar a production y luego gh workflow run deploy-<empresa>.yml --ref production."
+      "despliegue": "testing: al fusionar corre deploy-testing.yml. Producción: fusionar a production y luego gh workflow run deploy-<empresa>.yml --ref production.",
+      "descripcion": "SAPSEND multiempresa (compras, tesorería)."
+    },
+    "front-kronos": {
+      "github": "AnalistaSistemasFarma/front-kronos",
+      "clon": "/Users/<usuario>/.puente-hilos/<agente>-prod/repos/front-kronos",
+      "ramaPruebas": "testing",
+      "ramaProduccion": "main",
+      "descripcion": "SynerLink."
     }
   },
   "proyectos": {
-    "1": { "repos": ["sapsend"], "nivel": 2, "pases": true }
+    "1": { "repos": ["sapsend", "front-kronos"], "nivel": 2, "pases": true, "bajoDemanda": true }
   }
 }

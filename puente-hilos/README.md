@@ -166,6 +166,13 @@ Aprobado por Nicolás Rivera el 2026-10-20 (13:14 COT, «sí, dale»; 13:15 COT,
 
 **Vincular repos a un proyecto:** `repos-por-proyecto.json` (ejemplo en `config/`), en la carpeta del puente. Se relee en **cada turno**: vincular o desvincular no exige reiniciar. Más adelante lo puede administrar SynerLink (por ejemplo, `project.repos` en el contexto) con el mismo validador (`validarReposPorProyecto`).
 
+**Muchos repos: montaje bajo demanda** (`"bajoDemanda": true` en el proyecto). Cada turno monta solo:
+- los repos que ya tienen worktree en la conversación;
+- los que nombra algún mensaje del turno (por nombre o «dueño/repo», con borde de palabra);
+- los que Orus nombró en su respuesta anterior (`.puente/repos-solicitados.json`).
+
+El resto aparece en un **índice** en el encabezado del turno (`textoIndiceRepos`), con su estado. Si no hay ninguno montado, el turno va **sin código** (sin Bash ni token), solo con el índice. Así no se hace `fetch` ni `--add-dir` de decenas de repos por turno. Cada repo puede llevar `descripcion` para el índice. Sin `bajoDemanda`, se montan todos, como antes.
+
 **Por turno, si el proyecto tiene repos:**
 
 1. El puente hace `git fetch` en el clon (`repos/<repo>`) y deja un **git worktree propio de la conversación** en `./codigo/<repo>`, rama `proyecto/<idProject>-c<idConversation>`, salida de `origin/<ramaPruebas>`. Solo trae lo versionado: los `.env` del repo no llegan.
