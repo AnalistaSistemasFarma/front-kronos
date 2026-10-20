@@ -185,8 +185,10 @@ export async function probeDatabase(pool: mssql.ConnectionPool): Promise<DbSampl
       longest_wait_ms: number | null;
     }>(`
       SELECT
-        (SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE is_user_process = 1) AS user_connections,
-        (SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE is_user_process = 1 AND database_id = DB_ID()) AS db_sessions,
+        -- Sin la sesión del propio monitor (@@SPID), como en las demás consultas.
+        (SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE is_user_process = 1 AND session_id <> @@SPID) AS user_connections,
+        (SELECT COUNT(*) FROM sys.dm_exec_sessions
+          WHERE is_user_process = 1 AND database_id = DB_ID() AND session_id <> @@SPID) AS db_sessions,
         (SELECT COUNT(*) FROM sys.dm_exec_requests r
            JOIN sys.dm_exec_sessions s ON s.session_id = r.session_id
           WHERE r.database_id = DB_ID() AND r.session_id <> @@SPID AND s.is_user_process = 1) AS active_requests,
@@ -314,7 +316,7 @@ export async function readDbLiveDetail(pool: mssql.ConnectionPool): Promise<DbLi
         COUNT(*) AS sessions,
         SUM(CASE WHEN status IN ('running', 'runnable', 'suspended') THEN 1 ELSE 0 END) AS running
       FROM sys.dm_exec_sessions
-      WHERE is_user_process = 1 AND database_id = DB_ID()
+      WHERE is_user_process = 1 AND database_id = DB_ID() AND session_id <> @@SPID
       GROUP BY host_name, program_name, login_name
       ORDER BY COUNT(*) DESC`)
   );
@@ -379,7 +381,9 @@ export async function readDbLiveDetail(pool: mssql.ConnectionPool): Promise<DbLi
       FROM sys.dm_exec_requests r
       JOIN sys.dm_exec_sessions s ON s.session_id = r.session_id
       OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) t
-      WHERE r.blocking_session_id > 0
+      -- Solo esta base, igual que el conteo de bloqueadas: si no, salían bloqueos de otras
+      -- bases del servidor (p. ej. SAP) mientras el conteo decía 0.
+      WHERE r.blocking_session_id > 0 AND r.database_id = DB_ID()
       ORDER BY r.wait_time DESC`)
   );
   detail.blocked = (blocked?.recordset ?? []).map((r) => ({
@@ -410,9 +414,10 @@ export async function readDbLiveDetail(pool: mssql.ConnectionPool): Promise<DbLi
             - qs.statement_start_offset) / 2) + 1), 400) AS statement,
         qs.execution_count,
         qs.total_worker_time / 1000 AS total_cpu_ms,
-        qs.total_worker_time / 1000 / NULLIF(qs.execution_count, 0) AS avg_cpu_ms,
-        qs.total_elapsed_time / 1000 / NULLIF(qs.execution_count, 0) AS avg_elapsed_ms,
-        qs.total_logical_reads / NULLIF(qs.execution_count, 0) AS avg_logical_reads,
+        -- En FLOAT: con división entera las consultas de menos de 1 ms salían "0 ms".
+        CAST(qs.total_worker_time AS FLOAT) / 1000 / NULLIF(qs.execution_count, 0) AS avg_cpu_ms,
+        CAST(qs.total_elapsed_time AS FLOAT) / 1000 / NULLIF(qs.execution_count, 0) AS avg_elapsed_ms,
+        CAST(qs.total_logical_reads AS FLOAT) / NULLIF(qs.execution_count, 0) AS avg_logical_reads,
         DATEDIFF(second, qs.last_execution_time, GETDATE()) AS last_execution_seconds
       FROM sys.dm_exec_query_stats qs
       CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
