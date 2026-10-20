@@ -116,6 +116,7 @@ Reglas obligatorias:
 - Entre 3 y 5 frases, máximo 900 caracteres.
 - Use SOLO los datos del bloque JSON. No invente nada ni suponga de qué trataron las conversaciones: no tiene acceso a ellas y no debe sugerir que sí.
 - Diga qué tanto se usó el agente en la semana y cómo se compara con la semana anterior, si hubo cambios en su inventario (herramientas, MCP, skills, modelo) y cómo está en riesgos (hallazgos abiertos, en especial críticos y altos, y los que se abrieron o cerraron).
+- Si vienen, mencione en una frase el gobierno (plantilla de mínimo privilegio y si tiene caso de Gobierno IA) y la calidad de respuesta (tiempo de respuesta típico y preguntas sin respuesta). Si no vienen, no los mencione.
 - Cifras en formato colombiano (1.234.567). Fechas en prosa ("28 de septiembre de 2026"). Los tokens, como "consumo de tokens".
 - No use nombres de tablas, campos ni términos de programación. Puede nombrar MCP o skills tal como vienen.
 - Responda únicamente con el texto del resumen."""
@@ -161,6 +162,28 @@ def resumen_sin_actividad(a, semana):
     return ' '.join(partes)
 
 
+def resumen_basico(a, semana):
+    """Respaldo sin IA cuando la IA falla o responde vacío: solo cifras."""
+    s, p = a['semanaActual'], a['semanaAnterior']
+    total, antes = s['mensajesRecibidos'] + s['mensajesEnviados'], p['mensajesRecibidos'] + p['mensajesEnviados']
+    partes = [f"Durante la semana del {fecha_prosa(semana['desde'])} al {fecha_prosa(semana['hasta'])}, {a['nombre']} registró "
+              f"{fmt(total)} {'mensaje' if total == 1 else 'mensajes'} en SynerLink con {fmt(s.get('usuariosActivos', 0))} "
+              f"{'persona activa' if s.get('usuariosActivos', 0) == 1 else 'personas activas'}, frente a {fmt(antes)} la semana anterior."]
+    h = a['hallazgosAbiertos']
+    abiertos = sum(h.values())
+    partes.append('No tiene hallazgos de riesgo abiertos.' if abiertos == 0 else
+                  f"Mantiene {fmt(abiertos)} {'hallazgo abierto' if abiertos == 1 else 'hallazgos abiertos'}.")
+    if a['historialDeLaSemana']:
+        partes.append(f"Su historial registró {fmt(len(a['historialDeLaSemana']))} novedades en la semana.")
+    return ' '.join(partes)
+
+
+def limpio(texto):
+    """Igual que limpiarResumen() del servidor: sin títulos Markdown ni negritas."""
+    lineas = [l.lstrip().lstrip('#').strip().replace('**', '') for l in (texto or '').replace('\r', '').split('\n')]
+    return '\n'.join(lineas).strip()
+
+
 def redactar(a, semana):
     datos = json.dumps({'semana': semana, 'agente': a}, ensure_ascii=False, indent=1)
     prompt = f"{INSTRUCCIONES}\n\nDatos:\n```json\n{datos}\n```"
@@ -197,10 +220,17 @@ def semanal(args):
                 texto, modelo = resumen_sin_actividad(a, semana), 'plantilla-sin-actividad'
                 plantilla += 1
             else:
-                texto, modelo = redactar(a, semana), MODELO
-                ia += 1
-            if len(texto) < 40:
-                raise RuntimeError('respuesta vacía o demasiado corta')
+                try:
+                    texto, modelo = limpio(redactar(a, semana)), MODELO
+                    if len(texto) < 40:
+                        raise RuntimeError('respuesta vacía o demasiado corta')
+                    ia += 1
+                except Exception as e:
+                    # 2026-10-12 troy, sirio y rex se quedaron sin resumen (y el
+                    # de rex tumbó todo su lote): ahora cae a un texto con cifras.
+                    log(f"IA sin resumen para {a['code']} ({e}); se usa el texto con cifras")
+                    texto, modelo = resumen_basico(a, semana), 'plantilla-cifras'
+                    plantilla += 1
             resumenes.append({'code': a['code'], 'summary': texto[:2500], 'model': modelo, 'inputHash': huella})
             if args.dry_run:
                 print(f"\n── {a['code']} ({modelo})\n{texto}")
@@ -216,6 +246,19 @@ def semanal(args):
     for i in range(0, len(resumenes), 20):
         st, r = http('POST', url + '/api/chat/auditoria/hoja-de-vida/resumen', key,
                      {'semana': semana['desde'], 'resumenes': resumenes[i:i + 20]})
+        err = str(r.get('error', '')) if isinstance(r, dict) else ''
+        try:  # http() devuelve el cuerpo del error como texto JSON
+            err = str(json.loads(err).get('error', err))
+        except Exception:
+            pass
+        if st == 400 and ':' in err:
+            # Un resumen inválido no debe tumbar a los otros 19: se quita y se reintenta una vez.
+            malo = err.split(':', 1)[0].strip().lower()
+            lote = [x for x in resumenes[i:i + 20] if x['code'] != malo]
+            log(f'lote {i // 20 + 1}: se quita {malo} ({err}) y se reintenta')
+            fallas.append(f'{malo}: rechazado por el servidor')
+            st, r = http('POST', url + '/api/chat/auditoria/hoja-de-vida/resumen', key,
+                         {'semana': semana['desde'], 'resumenes': lote}) if lote else (200, {'guardados': []})
         if st != 200:
             log(f'ERROR publicando lote {i // 20 + 1}: HTTP {st}: {r}')
             fallas.append(f'lote {i // 20 + 1}: HTTP {st}')

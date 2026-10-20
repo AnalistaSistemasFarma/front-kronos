@@ -11,6 +11,8 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { HojaDeVida } from './cv-db';
+import type { HojaDeVidaCompleta } from './cv-completa-db';
+import { duracionLegible, nombreModoAuth } from './cv-completa';
 
 export function esc(value: unknown): string {
   return String(value ?? '').replace(
@@ -82,7 +84,16 @@ const TIPO_ENTRADA: Record<string, string> = {
   hallazgo_abierto: 'Hallazgo',
   hallazgo_cerrado: 'Hallazgo cerrado',
   perfil: 'Hoja de vida',
+  reinicio: 'Reinicio',
+  rotacion: 'Rotación de sesión',
+  gobierno: 'Gobierno',
+  credencial: 'Credencial',
+  personalidad: 'Personalidad',
+  caso: 'Caso',
+  hallazgo_externo: 'Gobierno IA',
 };
+const RELACION: Record<string, string> = { 'gobierno-ia': 'Gobierno IA', incidente: 'Incidente', cambio: 'Cambio', otro: 'Otro' };
+const ESTADO_EXTERNO: Record<string, string> = { abierto: 'Abierto', resuelto: 'Resuelto', aceptado: 'Riesgo aceptado' };
 
 /** Barras de los últimos 30 días (SVG estático: el PDF no corre JavaScript). */
 function graficaDias(dias: HojaDeVida['metricas']['dias']): string {
@@ -110,8 +121,9 @@ ${etiqueta(0, 'start')}${etiqueta(Math.floor(dias.length / 2), 'middle')}${etiqu
 
 export function htmlHojaDeVida(
   f: HojaDeVida,
-  opts: { generadoPor: string; generadoEl: Date; logo: string | null }
+  opts: { generadoPor: string; generadoEl: Date; logo: string | null; completa?: HojaDeVidaCompleta | null }
 ): string {
+  const c = opts.completa ?? null;
   const a = f.agente;
   const inv = f.inventario;
   const m30 = f.metricas.ultimos30;
@@ -141,7 +153,80 @@ export function htmlHojaDeVida(
           fila('Último escaneo', esc(fechaLarga(inv.scannedAt))),
         ]
       : [fila('Inventario', 'Todavía no se ha escaneado.')]),
+    ...(c
+      ? [
+          fila(
+            'Director del área',
+            c.gobierno?.directorName || c.gobierno?.directorEmail
+              ? esc(`${c.gobierno?.directorName ?? ''}${c.gobierno?.directorEmail ? ` · ${c.gobierno.directorEmail}` : ''}`)
+              : '<span class="muted">Sin director registrado.</span>'
+          ),
+          fila(
+            'Caso de Gobierno IA',
+            (() => {
+              const g = c.casos.find((x) => x.relation === 'gobierno-ia');
+              return g ? esc(`#${g.idRequest}${g.estado ? ` · ${g.estado}` : ''}${g.proceso ? ` · ${g.proceso}` : ''}`) : '<span class="muted">Sin caso vinculado.</span>';
+            })()
+          ),
+          fila(
+            'Credencial',
+            c.ejecucion
+              ? `${esc(nombreModoAuth(c.ejecucion.authMode))}${c.ejecucion.tokenFingerprint ? ` · huella <span class="mono">${esc(c.ejecucion.tokenFingerprint)}</span>` : ''}${c.ejecucion.compartidaCon.length ? `<div class="sub">Compartida con ${esc(c.ejecucion.compartidaCon.join(', '))}.</div>` : ''}<div class="sub">Solo se guarda la huella (12 caracteres del sha256), nunca el valor.</div>`
+              : '<span class="muted">Sin datos del recolector.</span>'
+          ),
+          fila('En ejecución desde', esc(c.ejecucion?.processStartedAt ? fechaLarga(c.ejecucion.processStartedAt) : '—')),
+          fila(
+            'Última rotación de sesión',
+            esc(c.ejecucion?.lastRotationAt ? `${fechaLarga(c.ejecucion.lastRotationAt)}${c.ejecucion.lastRotationStatus ? ` (${c.ejecucion.lastRotationStatus})` : ''}` : 'Sin rotación registrada')
+          ),
+        ]
+      : []),
   ].join('');
+
+  const gobiernoHtml = c
+    ? `<ul>
+<li><strong>Mínimo privilegio:</strong> ${c.gobierno?.privilegeTemplate ? `${esc(c.gobierno.privilegeTemplate)}${c.gobierno.privilegeAppliedOn ? `, aplicada el ${esc(fechaLarga(c.gobierno.privilegeAppliedOn))}` : ''}` : 'sin plantilla aplicada'}.${c.gobierno?.notes ? `<div class="sub pre">${esc(c.gobierno.notes)}</div>` : ''}</li>
+<li><strong>Reglas de gobierno en sus instrucciones:</strong> ${c.ejecucion?.governance.length ? `${num(c.ejecucion.governance.length)} bloque(s).` : 'ninguna detectada.'}</li>
+${c.ejecucion?.personaFingerprint ? `<li><strong>Huella de su personalidad:</strong> <span class="mono">${esc(c.ejecucion.personaFingerprint)}</span>${c.ejecucion.personaFiles.length ? ` (${esc(c.ejecucion.personaFiles.join(', '))})` : ''}.</li>` : ''}
+</ul>${(c.ejecucion?.governance ?? [])
+        .map(
+          (b) =>
+            `<div class="card" style="margin-bottom:6px"><p><strong>${esc(b.marker)}</strong>${b.caseRef ? ` · caso #${esc(b.caseRef)}` : ''}${b.addedOn ? ` · desde ${esc(fechaLarga(b.addedOn))}` : ''}</p>${b.text ? `<p class="sub pre">${esc(b.text)}</p>` : ''}</div>`
+        )
+        .join('')}`
+    : '';
+
+  const calidadHtml = c
+    ? `<div class="kpis">
+  ${kpi('Tiempo de respuesta', esc(duracionLegible(c.calidad30.medianaSeg)), 'mediana, últimos 30 días')}
+  ${kpi('9 de cada 10 respuestas', esc(duracionLegible(c.calidad30.p90Seg)), 'tardan hasta esto')}
+  ${kpi('Sin respuesta', num(c.calidad30.sinRespuesta), 'en la primera hora')}
+  ${kpi('Recogidos tarde', num(c.calidad30.tardias + c.calidad30.pendientes), 'más de 10 minutos')}
+</div>
+<p class="sub">Calidad de respuesta en hilos directos, calculada solo con la hora de cada mensaje (${num(c.calidad30.respondidas)} de ${num(c.calidad30.preguntas)} preguntas respondidas). ${c.calidad30.reportaConsumo === false ? 'El agente no reporta su consumo: el consumo en tokens sale en cero.' : ''}</p>`
+    : '';
+
+  const casosHtml = c
+    ? c.casos.length
+      ? `<table class="t"><thead><tr><th>Caso</th><th>Relación</th><th>Estado</th><th>Tareas</th></tr></thead><tbody>${c.casos
+          .map(
+            (x) =>
+              `<tr><td><strong>#${esc(x.idRequest)}</strong> ${esc(x.asunto ?? '')}<div class="sub">${esc([x.proceso, x.empresa, x.creadoEl ? `radicado el ${fechaCorta(x.creadoEl)}` : null].filter(Boolean).join(' · ') || (x.enEstaBase ? '' : 'No está en esta base.'))}</div></td><td>${esc(RELACION[x.relation] ?? x.relation)}</td><td>${esc(x.estado ?? '—')}</td><td>${x.tareas.map((t) => `${esc(t.tarea)}<div class="sub">${esc([t.estado, t.responsable, t.resueltaEl ? fechaCorta(t.resueltaEl) : null].filter(Boolean).join(' · '))}</div>`).join('') || '—'}</td></tr>`
+          )
+          .join('')}</tbody></table>`
+      : '<p class="muted">Ningún caso vinculado.</p>'
+    : '';
+
+  const externosHtml = c
+    ? c.hallazgosExternos.length
+      ? `<table class="t"><thead><tr><th>Severidad</th><th>Hallazgo</th><th>Estado</th></tr></thead><tbody>${c.hallazgosExternos
+          .map((h) => {
+            const s = SEVERIDAD[h.severity] ?? { nombre: h.severity, color: '#6a7689' };
+            return `<tr><td>${chip(s.nombre, s.color)}</td><td><strong>${esc(h.refCode)}</strong> · ${esc(h.title)}${h.detail ? `<div class="sub">${esc(h.detail)}</div>` : ''}${h.recommendation ? `<div class="sub">Recomendación: ${esc(h.recommendation)}</div>` : ''}<div class="sub">${esc(h.source)} · ${esc(fechaCorta(h.reportedOn))}${h.idRequest ? ` · caso #${esc(h.idRequest)}` : ''}</div></td><td>${esc(ESTADO_EXTERNO[h.status] ?? h.status)}${h.resolvedOn ? `<div class="sub">${esc(fechaCorta(h.resolvedOn))}</div>` : ''}</td></tr>`;
+          })
+          .join('')}</tbody></table>`
+      : '<p class="muted">Gobierno IA todavía no ha reportado hallazgos para este agente.</p>'
+    : '';
 
   const perfil = f.perfil;
   const proposito = perfil?.purpose
@@ -188,14 +273,18 @@ export function htmlHojaDeVida(
           .join('')}</tbody></table>`
       : `<p class="muted">${cerrados ? 'Ninguno cerrado todavía.' : 'Sin hallazgos abiertos.'}</p>`;
 
-  const historial = f.historial.length
-    ? `<table class="t"><thead><tr><th>Fecha</th><th>Tipo</th><th>Qué pasó</th></tr></thead><tbody>${f.historial
+  const lineaTiempo = [
+    ...f.historial,
+    ...(c?.eventosCasos ?? []).map((e) => ({ ...e, id: 0, createdBy: null as string | null })),
+  ].sort((x, y) => (x.occurredAt < y.occurredAt ? 1 : x.occurredAt > y.occurredAt ? -1 : 0));
+  const historial = lineaTiempo.length
+    ? `<table class="t"><thead><tr><th>Fecha</th><th>Tipo</th><th>Qué pasó</th></tr></thead><tbody>${lineaTiempo
         .slice(0, 60)
         .map(
           (e) =>
             `<tr><td>${esc(fechaCorta(e.occurredAt))}</td><td>${esc(TIPO_ENTRADA[e.kind] ?? e.kind)}</td><td>${esc(e.title)}${e.detail ? `<div class="sub pre">${esc(e.detail)}</div>` : ''}${e.createdBy ? `<div class="sub">Por ${esc(e.createdBy)}</div>` : ''}</td></tr>`
         )
-        .join('')}</tbody></table>${f.historial.length > 60 ? `<p class="muted">Se muestran las 60 entradas más recientes de ${num(f.historial.length)}.</p>` : ''}`
+        .join('')}</tbody></table>${lineaTiempo.length > 60 ? `<p class="muted">Se muestran las 60 entradas más recientes de ${num(lineaTiempo.length)}.</p>` : ''}`
     : '<p class="muted">Sin entradas todavía.</p>';
 
   return `<!doctype html>
@@ -275,6 +364,7 @@ ${
 </div>
 ${graficaDias(f.metricas.dias)}
 <div class="ley"><span style="background:#1a3c6e"></span>Recibidos<span style="background:#8fa3c0"></span>Enviados · mensajes por día, últimos 30 días</div>
+${calidadHtml}
 <p class="sub">El consumo lo declara cada agente y se cuenta una sola vez por turno, aunque el turno haya atendido varias conversaciones.${f.metricas.calculadoEl ? ` Métricas calculadas el ${esc(fechaLarga(f.metricas.calculadoEl))}.` : ''}</p>
 
 <h2>Usuarios asignados (${num(asignados.length)})</h2>
@@ -288,7 +378,16 @@ ${mcps}
 <h2>Reglas vigentes</h2>
 ${reglas}
 
-<h2>Hallazgos abiertos (${num(f.hallazgos.abiertos.length)})</h2>
+${c ? `<h2>Gobierno vigente</h2>
+${gobiernoHtml}
+
+<h2>Casos de SynerLink vinculados (${num(c.casos.length)})</h2>
+${casosHtml}
+
+<h2>Hallazgos de Gobierno IA</h2>
+${externosHtml}
+` : ''}
+<h2>Hallazgos automáticos abiertos (${num(f.hallazgos.abiertos.length)})</h2>
 ${hallazgos(f.hallazgos.abiertos, false)}
 <h2>Hallazgos cerrados recientes</h2>
 ${hallazgos(f.hallazgos.cerrados, true)}

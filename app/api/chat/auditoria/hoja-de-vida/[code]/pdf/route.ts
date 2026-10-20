@@ -12,6 +12,7 @@ import {
   unauthorized,
 } from '../../../../../../../lib/chat/http';
 import { leerHojaDeVida } from '../../../../../../../lib/agent-audit/cv-db';
+import { leerHojaDeVidaCompleta } from '../../../../../../../lib/agent-audit/cv-completa-db';
 import { htmlHojaDeVida, logoGssDataUri } from '../../../../../../../lib/agent-audit/cv-pdf';
 import { diaColombia } from '../../../../../../../lib/agent-audit/cv';
 import { htmlToPdf } from '../../../../../../../lib/sgc/pdf/render';
@@ -55,6 +56,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cod
       generadoPor: user.email,
       generadoEl: new Date(),
       logo: await logoGssDataUri(),
+      completa: await leerHojaDeVidaCompleta(ficha.agente.idAgent),
     });
     let pdf: Uint8Array;
     try {
