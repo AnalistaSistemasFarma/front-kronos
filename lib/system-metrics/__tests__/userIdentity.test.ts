@@ -64,15 +64,22 @@ describe('UserAccumulator', () => {
 
     const rows = acc.drain();
     const ana = rows.find((r) => r.email === 'ana@gss.com')!;
+    // La petición sin duración (espera del chat) no es consumo: no cuenta en peticiones.
     expect(ana).toMatchObject({
       name: 'Ana',
-      requests: 4,
+      requests: 3,
       errors: 1,
       totalMs: 1200,
       maxMs: 900,
       p95Ms: 900,
       topModule: 'orion',
     });
+    expect(ana.modules).toEqual(
+      expect.arrayContaining([
+        { module: 'orion', requests: 1, totalMs: 900 },
+        { module: 'chat', requests: 2, totalMs: 300 },
+      ])
+    );
     expect(rows.find((r) => r.email === 'beto@gss.com')).toMatchObject({ requests: 1, totalMs: 50, topModule: 'sgc' });
     expect(acc.size).toBe(0);
   });

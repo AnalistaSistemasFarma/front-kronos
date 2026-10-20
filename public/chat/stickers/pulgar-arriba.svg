@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160" role="img" aria-label="¡De acuerdo!">
+  <title>¡De acuerdo!</title>
+  <ellipse cx="80" cy="150" rx="50" ry="6" fill="#0f1a2c" opacity=".12"/>
+  <g stroke="#ffffff" stroke-width="7" stroke-linejoin="round" paint-order="stroke">
+    <circle cx="80" cy="60" r="48" fill="#1a3c6e"/>
+    <rect x="46" y="58" width="16" height="36" rx="4" fill="#f5f7fa" stroke-width="0"/>
+    <path d="M64 92 V60 L74 34 C76 28 86 28 88 36 L86 54 H106 C113 54 117 60 115 67 L109 86 C108 90 104 93 100 93 Z" fill="#ffffff" stroke="#15315a" stroke-width="3"/>
+    <path d="M90 66 H112 M88 76 H110 M86 85 H106" fill="none" stroke="#1a3c6e" stroke-width="3" stroke-linecap="round"/>
+  </g>
+  <g>
+    <rect x="22" y="110" width="116" height="32" rx="16" fill="#1a3c6e" stroke="#ffffff" stroke-width="5" paint-order="stroke"/>
+    <text x="80" y="131" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="800" fill="#ffffff">¡De acuerdo!</text>
+  </g>
+</svg>

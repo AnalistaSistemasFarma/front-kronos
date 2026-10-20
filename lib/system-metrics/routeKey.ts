@@ -74,15 +74,71 @@ export function normalizeRoutePath(url: string | undefined | null): RouteKeyInfo
   };
 }
 
+/** Módulo del chat con agentes (el chat entre personas queda en `chat`). */
+export const AI_ASSISTANTS_MODULE = 'asistentes-ia';
+
+/** /api/chat/<esto>/… es solo de agentes: bandeja y voz del bot, flota, auditoría, grupos, masivo. */
+const AI_CHAT_API = new Set(['agent', 'agents', 'auditoria', 'organigrama', 'groups', 'broadcast']);
+
+/**
+ * Chat entre personas o Asistentes IA. Las rutas compartidas por ambos (un hilo y sus mensajes,
+ * los adjuntos) quedan en `chat` aquí y el colector las corrige mirando el tipo de conversación
+ * (ver chatLookupTarget). Lo demás del chat (pulso, personas, anclados, búsqueda) es `chat`.
+ */
+function chatModule(segments: string[], api: boolean): string {
+  const [, , third] = segments;
+  if (api) {
+    if (third && AI_CHAT_API.has(third)) return AI_ASSISTANTS_MODULE;
+    // La bandeja (lista de conversaciones) es solo de agentes; las de personas van por /people.
+    if (third === 'conversations' && segments.length === 3) return AI_ASSISTANTS_MODULE;
+    return 'chat';
+  }
+  // Páginas: /process/chat es la pantalla de Asistentes IA; /process/chat/persona, el chat entre personas.
+  return third === 'persona' ? 'chat' : AI_ASSISTANTS_MODULE;
+}
+
 function moduleFromSegments(segments: string[]): string {
   if (segments.length === 0) return 'inicio';
   const [first, second, third] = segments;
   if (first === 'api') {
     if (second === 'integrations' && third) return third;
+    if (second === 'chat') return chatModule(segments, true);
     return second ?? 'api';
   }
-  if (first === 'process' && second) return second;
+  if (first === 'process' && second) {
+    if (second === 'chat') return chatModule(segments, false);
+    return second;
+  }
   return first;
+}
+
+export type ChatLookupTarget = { table: 'conversation' | 'attachment'; id: number };
+
+/**
+ * Rutas del chat que sirven a los dos tipos de conversación: para saber si fue con una persona o
+ * con un agente hay que mirar la conversación en la base. Devuelve qué buscar, o null.
+ */
+export function chatLookupTarget(url: string | undefined | null): ChatLookupTarget | null {
+  const segments = String(url || '').split(/[?#]/, 1)[0].split('/').filter(Boolean);
+  if (segments[0] !== 'api' || segments[1] !== 'chat' || !/^\d+$/.test(segments[3] ?? '')) return null;
+  const id = Number(segments[3]);
+  if (segments[2] === 'conversations') return { table: 'conversation', id };
+  if (segments[2] === 'attachments') return { table: 'attachment', id };
+  return null;
+}
+
+/**
+ * Rutas de long-poll: la petición queda abierta hasta ~20–30 s ESPERANDO un mensaje nuevo
+ * (revisa la base cada segundo). Ese tiempo es espera, no trabajo del servidor: igual que un
+ * stream SSE, se cuentan las peticiones pero su duración no entra en los tiempos. Sin esto,
+ * el pulso del chat (abierto en la cabecera de TODA la app) hacía ver a cualquiera con la
+ * pantalla abierta como "100 % en Chat", aunque no usara el chat ni tuviera agentes.
+ */
+const WAITING_ROUTES = new Set(['/api/chat/pulse', '/api/chat/agent/inbox']);
+
+/** `path` es la ruta ya normalizada (`normalizeRoutePath(url).path`). */
+export function isWaitingRoute(path: string): boolean {
+  return WAITING_ROUTES.has(path);
 }
 
 /**
@@ -109,7 +165,9 @@ const MODULE_LABELS: Record<string, string> = {
   firma: 'Firma electrónica (Orion)',
   'help-desk': 'Help desk',
   assets: 'Help desk',
-  chat: 'Chat / Asistentes IA',
+  // Chat entre personas; el chat con agentes va aparte en "Asistentes IA".
+  chat: 'Chat',
+  [AI_ASSISTANTS_MODULE]: 'Asistentes IA',
   sgc: 'SGC documental',
   'sgc-documental': 'SGC documental',
   auth: 'Inicio de sesión',

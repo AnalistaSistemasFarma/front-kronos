@@ -31,6 +31,14 @@ import {
   IconLock,
   IconPencil,
 } from '@tabler/icons-react';
+import {
+  CalidadRespuesta,
+  CasosVinculados,
+  GobiernoVigente,
+  HallazgosGobiernoIA,
+  IdentificacionAmpliada,
+  type Completa,
+} from './secciones-completas';
 
 /**
  * AUDITORÍA DE AGENTES → INVENTARIO → HOJA DE VIDA (F2) — la ficha de un agente.
@@ -138,6 +146,8 @@ type Ficha = {
   }[];
   hallazgos: { abiertos: Hallazgo[]; cerrados: Hallazgo[] };
   resumenes: { semana: string; texto: string; modelo: string | null; generadoEl: string }[];
+  /** Incremento 1 (2026-10-20): ver ./secciones-completas.tsx. */
+  completa?: Completa;
 };
 type Aviso = { color: 'green' | 'yellow' | 'red'; titulo: string; texto: string };
 
@@ -172,6 +182,13 @@ const NOMBRE_ENTRADA: Record<string, { label: string; color: string }> = {
   hallazgo_abierto: { label: 'Hallazgo', color: 'orange' },
   hallazgo_cerrado: { label: 'Hallazgo cerrado', color: 'green' },
   perfil: { label: 'Hoja de vida', color: 'blue' },
+  reinicio: { label: 'Reinicio', color: 'gray' },
+  rotacion: { label: 'Rotación de sesión', color: 'cyan' },
+  gobierno: { label: 'Gobierno', color: 'grape' },
+  credencial: { label: 'Credencial', color: 'red' },
+  personalidad: { label: 'Personalidad', color: 'violet' },
+  caso: { label: 'Caso', color: 'indigo' },
+  hallazgo_externo: { label: 'Gobierno IA', color: 'orange' },
 };
 
 const fmt = new Intl.NumberFormat('es-CO');
@@ -376,6 +393,12 @@ export default function HojaDeVidaAgentePage() {
     if (code) void cargar();
   }, [code, cargar]);
 
+  // El aviso va arriba: si quien edita está abajo (gobierno, casos, hallazgos),
+  // se sube para que lo vea sin tener que buscarlo.
+  useEffect(() => {
+    if (aviso && typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [aviso]);
+
   const abrirEdicion = () => {
     setForm({
       purpose: datos?.perfil?.purpose ?? '',
@@ -493,7 +516,12 @@ export default function HojaDeVidaAgentePage() {
   const asignados = datos?.usuarios.filter((u) => u.asignado) ?? [];
   const noAsignados = datos?.usuarios.filter((u) => !u.asignado) ?? [];
   const resumen = datos?.resumenes[0] ?? null;
-  const historial = datos?.historial ?? [];
+  // La línea de tiempo suma los hechos de los casos vinculados (radicación y
+  // tareas resueltas), que se leen en vivo y no se guardan.
+  const historial = [
+    ...(datos?.historial ?? []),
+    ...(datos?.completa?.eventosCasos ?? []).map((e, i) => ({ ...e, id: -1 - i, createdBy: null })),
+  ].sort((x, y) => (x.occurredAt < y.occurredAt ? 1 : x.occurredAt > y.occurredAt ? -1 : y.id - x.id));
   const historialVisible = verHistorial ? historial : historial.slice(0, 15);
 
   return (
@@ -637,6 +665,7 @@ export default function HojaDeVidaAgentePage() {
                   }
                 />
               </SimpleGrid>
+              {datos.completa && <IdentificacionAmpliada c={datos.completa} />}
             </Card>
 
             <SimpleGrid cols={{ base: 1, md: 2 }} spacing='sm' mb='md'>
@@ -724,6 +753,7 @@ export default function HojaDeVidaAgentePage() {
                 <Dato k='Usuarios históricos' v={num(mh.usuariosActivos)} />
                 <Dato k='Días activos históricos' v={num(mh.diasActivos)} />
               </Group>
+              {datos.completa && <CalidadRespuesta c={datos.completa} />}
               <Grafica dias={datos.metricas.dias} />
               <Text size='xs' c='dimmed' mt={8}>
                 Mensajes por día en los últimos 30 días. El consumo lo declara cada agente y se cuenta
@@ -959,6 +989,34 @@ export default function HojaDeVidaAgentePage() {
                 )}
               </Card>
             </SimpleGrid>
+
+            {datos.completa && (
+              <>
+                <SimpleGrid cols={{ base: 1, md: 2 }} spacing='sm' mb='md'>
+                  <GobiernoVigente
+                    c={datos.completa}
+                    code={code}
+                    puedeConfigurar={datos.puedeConfigurar}
+                    onAviso={setAviso}
+                    onRecargar={cargar}
+                  />
+                  <HallazgosGobiernoIA
+                    c={datos.completa}
+                    code={code}
+                    puedeConfigurar={datos.puedeConfigurar}
+                    onAviso={setAviso}
+                    onRecargar={cargar}
+                  />
+                </SimpleGrid>
+                <CasosVinculados
+                  c={datos.completa}
+                  code={code}
+                  puedeConfigurar={datos.puedeConfigurar}
+                  onAviso={setAviso}
+                  onRecargar={cargar}
+                />
+              </>
+            )}
 
             <SimpleGrid cols={{ base: 1, md: 2 }} spacing='sm' mb='md'>
               <Card withBorder radius='md' padding='md' className='chat-surface'>

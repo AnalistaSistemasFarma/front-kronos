@@ -134,6 +134,7 @@ const fechaLarga = (v: string) =>
 
 export function VisorFormulario({
   materialId,
+  rutaApi,
   titulo,
   previa,
   onCerrar,
@@ -141,6 +142,11 @@ export function VisorFormulario({
 }: {
   /** Material FORM a responder. */
   materialId?: number;
+  /**
+   * Formulario INDEPENDIENTE (no de un curso; p. ej. los de SST): la ruta de la API que entrega la definición (GET) y recibe el envío
+   * (POST). Se puede enviar más de una vez y no completa ningún material.
+   */
+  rutaApi?: string;
   titulo: string;
   /** Vista previa del formador: la definición directamente, sin guardar nada. */
   previa?: DefinicionFormulario;
@@ -161,11 +167,11 @@ export function VisorFormulario({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (previa || !materialId) return;
+    if (previa || (!materialId && !rutaApi)) return;
     let vivo = true;
     void (async () => {
       try {
-        const res = await fetch(`/api/portal/materials/${materialId}/formulario`, { cache: 'no-store' });
+        const res = await fetch(rutaApi ?? `/api/portal/materials/${materialId}/formulario`, { cache: 'no-store' });
         const data = await leerJson(res);
         if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo abrir el formulario.'));
         if (vivo) setDatos(data as unknown as DatosFormulario);
@@ -176,7 +182,7 @@ export function VisorFormulario({
     return () => {
       vivo = false;
     };
-  }, [materialId, previa]);
+  }, [materialId, rutaApi, previa]);
 
   useEffect(() => {
     const alTeclear = (e: KeyboardEvent) => {
@@ -224,6 +230,7 @@ export function VisorFormulario({
             key={datos.formulario.versionId}
             datos={datos}
             previa={!!previa}
+            rutaEnvio={rutaApi}
             onCerrar={onCerrar}
             onEnviado={onEnviado}
           />
@@ -236,11 +243,14 @@ export function VisorFormulario({
 function CuerpoFormulario({
   datos,
   previa,
+  rutaEnvio,
   onCerrar,
   onEnviado,
 }: {
   datos: DatosFormulario;
   previa: boolean;
+  /** Formulario independiente: a dónde se envía (ver `VisorFormulario`). */
+  rutaEnvio?: string;
   onCerrar: () => void;
   onEnviado?: () => Promise<void> | void;
 }) {
@@ -330,7 +340,7 @@ function CuerpoFormulario({
     }
     setEnviando(true);
     try {
-      const res = await fetch(`/api/portal/materials/${datos.material.id}/formulario`, {
+      const res = await fetch(rutaEnvio ?? `/api/portal/materials/${datos.material.id}/formulario`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ versionId: datos.formulario.versionId, autorizaDatos: autoriza, respuestas: valores }),
@@ -392,7 +402,9 @@ function CuerpoFormulario({
             <Text ta='center' c='dimmed' maw={520}>
               {nota
                 ? `Superó la nota mínima de ${formatoNota(nota.notaMinima)}. Sus respuestas quedaron guardadas y el material quedó completado.`
-                : 'Gracias. Sus respuestas quedaron guardadas y el material quedó completado.'}
+                : rutaEnvio
+                  ? 'Gracias. Sus respuestas quedaron guardadas. Solo las ve el equipo de Seguridad y Salud en el Trabajo.'
+                  : 'Gracias. Sus respuestas quedaron guardadas y el material quedó completado.'}
             </Text>
           </>
         ) : (
@@ -406,7 +418,7 @@ function CuerpoFormulario({
             </Text>
           </>
         )}
-        <Button onClick={onCerrar}>Volver al curso</Button>
+        <Button onClick={onCerrar}>{rutaEnvio ? 'Cerrar' : 'Volver al curso'}</Button>
       </Stack>
     );
   }
@@ -569,6 +581,9 @@ function CampoPregunta({
   const marcadasLista = marcadas.filter((x) => !esElementoOtras(x));
   const textoOtras = (marcadas.find(esElementoOtras) ?? '').slice(PREFIJO_OTRAS.length);
   const [otrasActiva, setOtrasActiva] = useState(() => marcadas.some(esElementoOtras));
+  // La casilla «Otras» es parte del GRUPO (Mantine: una casilla dentro de `Checkbox.Group` toma su estado del grupo e ignora su propio
+  // `checked`/`onChange`; por eso la primera versión no respondía al clic). Se identifica con un valor que ninguna opción puede tener.
+  const VALOR_OTRAS_MULTIPLE = '\u0000otras';
   const ponerMultiple = (lista: string[], otras: string) => onCambio(otras.trim() ? [...lista, `${PREFIJO_OTRAS}${otras}`] : lista);
   // Imagen que ilustra la pregunta (solo de /portal-th/; la definición ya lo valida). Va debajo del enunciado.
   const imagen = p.imagen ? (
@@ -599,7 +614,20 @@ function CampoPregunta({
       {/* En los tipos de texto la imagen va arriba del campo; en los de opciones va dentro del grupo, bajo el enunciado. */}
       {(p.tipo === 'texto' || p.tipo === 'texto_largo' || p.tipo === 'numero' || p.tipo === 'fecha') && imagen}
       {p.tipo === 'seleccion_multiple' ? (
-        <Checkbox.Group {...comun} size='md' value={marcadasLista} onChange={(v) => ponerMultiple(v, otrasActiva ? textoOtras : '')} data-testid={`multiple-${p.id}`}>
+        <Checkbox.Group
+          {...comun}
+          size='md'
+          value={otrasActiva ? [...marcadasLista, VALOR_OTRAS_MULTIPLE] : marcadasLista}
+          onChange={(v) => {
+            const conOtras = v.includes(VALOR_OTRAS_MULTIPLE);
+            setOtrasActiva(conOtras);
+            ponerMultiple(
+              v.filter((x) => x !== VALOR_OTRAS_MULTIPLE),
+              conOtras ? textoOtras : ''
+            );
+          }}
+          data-testid={`multiple-${p.id}`}
+        >
           {imagen}
           <Stack gap='xs' mt='xs'>
             {opciones.map((o) => (
@@ -607,17 +635,7 @@ function CampoPregunta({
             ))}
             {p.permiteOtra && (
               <Group gap='sm' wrap='wrap' align='center'>
-                <Checkbox
-                  label='Otras'
-                  size='sm'
-                  checked={otrasActiva}
-                  data-testid={`otras-marca-${p.id}`}
-                  onChange={(e) => {
-                    const marcada = e.currentTarget.checked;
-                    setOtrasActiva(marcada);
-                    if (!marcada) ponerMultiple(marcadasLista, '');
-                  }}
-                />
+                <Checkbox label='Otras' size='sm' value={VALOR_OTRAS_MULTIPLE} data-testid={`otras-marca-${p.id}`} />
                 <TextInput
                   aria-label={`${p.texto}: otras`}
                   placeholder='Escriba cuál'

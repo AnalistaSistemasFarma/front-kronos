@@ -90,6 +90,9 @@ model User {
   // Módulo «Proyectos» (2026-10-18): vínculos que hizo esta persona.
   chatProjectEmailsLinked   ChatProjectEmail[]   @relation("ChatProjectEmailLinker")
   chatProjectRequestsLinked ChatProjectRequest[] @relation("ChatProjectRequestLinker")
+  // Reacciones y stickers del chat (2026-10-20).
+  chatReactions             ChatMessageReaction[]
+  chatStickersCreated       ChatSticker[]        @relation("ChatStickerCreator")
 
   @@map("user")
   @@schema("dbo")
@@ -117,6 +120,8 @@ model Company {
   agentCompanies  AgentCompany[]
   chatGroups      ChatConversation[]
   chatProjects    ChatProject[]
+  // Stickers propios de la empresa en el chat (2026-10-20; la pantalla de carga queda para después).
+  chatStickers    ChatSticker[]
   // SGC documental — configuración de activación por empresa (esquema `sgc`).
   sgcCompanyConfig SgcCompanyConfig?
   // Órdenes de Trabajo (bitácora de proceso de planta, 2026-10-13).
@@ -680,6 +685,10 @@ model Agent {
   metricsDaily     AgentMetricsDaily[]
   cvEntries        AgentCvEntry[]
   cvSummaries      AgentCvSummary[]
+  // Hoja de vida completa (incremento 1, 2026-10-20): back-relations requeridas por Prisma.
+  governance       AgentGovernance?
+  cvCases          AgentCvCase[]
+  externalFindings AgentExternalFinding[]
   // Proyectos (hilos de agente) del chat — F1 piloto 2026-10-17.
   projects         ChatProject[]
   // Módulo «Proyectos» (2026-10-18): proyectos donde está designado.
@@ -1729,11 +1738,23 @@ model ChatMessage {
   agentAuthor  Agent?                @relation("ChatMessageAgentAuthor", fields: [id_agent_author], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
   deliveries   ChatMessageDelivery[]
   voiceEvent   ChatVoiceEvent?
+  /// Reacciones con emoji (2026-10-20). Tabla APARTE: el mensaje no cambia.
+  reactions    ChatMessageReaction[]
+  /// GIF o sticker (2026-10-20). Tabla APARTE: el mensaje no cambia.
+  media        ChatMessageMedia?
 
   @@index([id_conversation, id(sort: Desc)])
   @@index([id_conversation, created_at])
   @@index([id_agent_author])
   @@index([id_reply_to])
+  /// ÍNDICE FUERA DE PRISMA: IX_chat_message_bandeja_agentes — no clúster,
+  /// FILTRADO (WHERE delivered_at IS NULL) y CUBRIENTE, para la bandeja de los
+  /// agentes (app/api/chat/agent/inbox, fetchDirectos). Prisma no soporta
+  /// índices filtrados ni INCLUDE en SQL Server, así que vive solo en
+  /// prisma/migrations/20261020120000_ix_chat_message_bandeja.
+  /// ⚠️ Si agrega una columna a este modelo, agréguela también al INCLUDE de
+  /// ese índice: si deja de cubrir la consulta, el plan vuelve a recorrer el
+  /// clúster cada 400 ms por agente.
   @@map("chat_message")
   @@schema("dbo")
 }
@@ -1781,6 +1802,108 @@ model ChatAttachment {
 
   @@index([id_message])
   @@map("chat_attachment")
+  @@schema("dbo")
+}
+
+/// REACCIÓN con emoji a un mensaje del chat (2026-10-20). Una fila por
+/// (mensaje, persona, emoji). Tabla NUEVA y aparte: chat_message no cambia, y si
+/// el código sale antes que el DDL solo fallan las reacciones, no el chat.
+///
+/// CAMBIOS EN VIVO SIN SONDEO NUEVO: cada cambio (poner o quitar) BORRA la fila
+/// de esa llave y crea otra, así que el `id` (IDENTITY) solo crece. Quitar deja
+/// una fila con `active = false` (lápida) para que el cambio también tenga id.
+/// El sondeo del hilo abierto pregunta «¿hay un id mayor que el último que vi
+/// en esta conversación?» con un seek por (id_conversation, id), y el pulso
+/// global hace lo mismo con el MAX(id) de la clave primaria.
+///
+/// `id_conversation` va copiado del mensaje para ese seek y para filtrar por
+/// acceso sin unir con chat_message. Sin llave foránea a propósito: el mensaje
+/// ya cuelga en cascada de la conversación y SQL Server rechaza dos caminos.
+///
+/// Las reacciones NO despiertan al agente: no crean entregas ni pasan por la
+/// bandeja (decisión pendiente de Nicolás; ver lib/chat/reactions.ts).
+model ChatMessageReaction {
+  id              Int      @id @default(autoincrement())
+  id_message      Int
+  id_conversation Int
+  id_user         String   @db.NVarChar(1000)
+  /// Un emoji del catálogo cerrado (lib/chat/reactions-catalog.ts). El
+  /// servidor rechaza cualquier otro texto.
+  emoji           String   @db.NVarChar(32)
+  /// false = lápida de una reacción quitada (ver arriba).
+  active          Boolean  @default(true)
+  created_at      DateTime @default(now())
+
+  message ChatMessage @relation(fields: [id_message], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user    User        @relation(fields: [id_user], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_message, id_user, emoji], map: "chat_message_reaction_message_user_emoji")
+  @@index([id_conversation, id], map: "chat_message_reaction_conversation_id_idx")
+  @@index([id_user], map: "chat_message_reaction_id_user_idx")
+  @@map("chat_message_reaction")
+  @@schema("dbo")
+}
+
+/// GIF o STICKER de un mensaje (2026-10-20). Una fila por mensaje como máximo.
+///
+/// El mensaje se guarda como siempre en chat_message, con un `body` DESCRIPTIVO
+/// («[Sticker: Pulgar arriba]», «[GIF: gato aplaudiendo]»): eso es lo que leen
+/// los agentes, los conectores, la bandeja, el buscador y los avisos, sin que
+/// ninguno tenga que cambiar. Esta tabla solo le dice a la interfaz que lo
+/// pinte como imagen.
+///
+/// `media_url` es la URL del PROVEEDOR (GIPHY) y nunca viaja al navegador: la
+/// imagen se sirve por /api/chat/gifs/proxy con URL firmada, para no exponer la
+/// IP ni la sesión de nadie ante el proveedor.
+model ChatMessageMedia {
+  id_message  Int      @id
+  /// 'gif' | 'sticker'. CHECK en la base.
+  kind        String   @db.NVarChar(20)
+  /// 'giphy' (GIF) | 'gss' (paquete propio, archivo en /public) | 'empresa' (chat_sticker).
+  provider    String   @db.NVarChar(20)
+  /// Id del GIF en el proveedor o código del sticker del paquete propio.
+  external_id String?  @db.NVarChar(100)
+  /// Sticker cargado por la empresa (chat_sticker). NULL en los demás.
+  id_sticker  Int?
+  title       String?  @db.NVarChar(200)
+  media_url   String?  @db.NVarChar(1000)
+  width       Int?
+  height      Int?
+  created_at  DateTime @default(now())
+
+  message ChatMessage  @relation(fields: [id_message], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  sticker ChatSticker? @relation(fields: [id_sticker], references: [id_sticker], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_sticker], map: "chat_message_media_id_sticker_idx")
+  @@map("chat_message_media")
+  @@schema("dbo")
+}
+
+/// STICKER cargado por un administrador (2026-10-20). La tabla queda lista; la
+/// pantalla de administración queda para después. `id_company` NULL = sirve en
+/// todas las empresas. Solo PNG, WebP o GIF (nunca SVG subido: podría llevar
+/// script) y hasta 512 KB, con CHECK en la base. El paquete propio de GSS NO
+/// vive aquí: son archivos versionados en public/chat/stickers.
+model ChatSticker {
+  id_sticker   Int      @id @default(autoincrement())
+  id_company   Int?
+  label        String   @db.NVarChar(80)
+  keywords     String?  @db.NVarChar(300)
+  content_type String   @db.NVarChar(50)
+  image_data   Bytes    @db.VarBinary(Max)
+  size_bytes   Int
+  sort_order   Int      @default(0)
+  active       Boolean  @default(true)
+  created_by   String   @db.NVarChar(1000)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @default(now())
+
+  company  Company?           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  creator  User               @relation("ChatStickerCreator", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  messages ChatMessageMedia[]
+
+  @@index([id_company, active, sort_order], map: "chat_sticker_company_active_idx")
+  @@map("chat_sticker")
   @@schema("dbo")
 }
 
@@ -3591,6 +3714,7 @@ model AgentInventory {
   agent       Agent               @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
   scanRequest AgentScanRequest    @relation(fields: [id_scan_request], references: [id], onDelete: NoAction, onUpdate: NoAction)
   mcps        AgentInventoryMcp[]
+  runtime     AgentInventoryRuntime?
 
   @@index([id_agent, scanned_at])
   @@index([id_scan_request])
@@ -3756,6 +3880,107 @@ model AgentCvSummary {
 
   @@unique([id_agent, week_start])
   @@map("agent_cv_summary")
+  @@schema("dbo")
+}
+
+// ---------------------------------------------------------------------------
+// Auditoría de agentes → HOJA DE VIDA COMPLETA (incremento 1, 2026-10-20).
+// Migración 20261020120000_auditoria_hoja_de_vida_completa: SOLO cuatro tablas
+// nuevas; no altera ninguna existente.
+// ---------------------------------------------------------------------------
+
+/// Gobierno DECLARADO del agente: director del área (aval del flujo de Gobierno
+/// IA), plantilla de mínimo privilegio aplicada, fecha y notas. Lo edita quien
+/// tenga el permiso de configurar; cada cambio queda en la línea de tiempo.
+model AgentGovernance {
+  id_agent             Int       @id
+  director_name        String?   @db.NVarChar(160)
+  director_email       String?   @db.NVarChar(255)
+  privilege_template   String?   @db.NVarChar(120)
+  privilege_applied_on DateTime? @db.Date
+  notes                String?   @db.NVarChar(1000)
+  updated_by           String?   @db.NVarChar(255)
+  updated_at           DateTime  @default(now())
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("agent_governance")
+  @@schema("dbo")
+}
+
+/// Caso de SynerLink (requests_general.id) vinculado al agente. Sin FK a
+/// requests_general a propósito: los números de caso de producción no existen
+/// en KRONOSDB_PRUEBAS. El estado y las tareas se leen en vivo al abrir la ficha.
+model AgentCvCase {
+  id             Int      @id @default(autoincrement())
+  id_agent       Int
+  id_request     Int
+  /// 'gobierno-ia' | 'incidente' | 'cambio' | 'otro'
+  relation       String   @db.NVarChar(30)
+  title_snapshot String?  @db.NVarChar(300)
+  linked_by      String?  @db.NVarChar(255)
+  linked_at      DateTime @default(now())
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_agent, id_request])
+  @@map("agent_cv_case")
+  @@schema("dbo")
+}
+
+/// Lo que el recolector ve del agente en marcha, una fila por inventario.
+/// NUNCA secretos: de la credencial solo el modo y su HUELLA (12 hex del sha256).
+model AgentInventoryRuntime {
+  id_inventory         Int       @id
+  /// 'token' | 'api-key' | 'oauth-llavero' | 'perfil-openclaw' | 'desconocido'
+  auth_mode            String?   @db.NVarChar(30)
+  auth_detail          String?   @db.NVarChar(120)
+  token_fingerprint    String?   @db.NVarChar(16)
+  process_started_at   DateTime?
+  last_rotation_at     DateTime?
+  last_rotation_status String?   @db.NVarChar(30)
+  last_rotation_detail String?   @db.NVarChar(300)
+  /// Huella de los archivos de personalidad (CLAUDE.md, AGENTS.md, SOUL.md…).
+  persona_fingerprint  String?   @db.NVarChar(16)
+  persona_files        String?   @db.NVarChar(500)
+  /// Bloques de gobierno detectados (<!-- GOBIERNO-IA-… -->), con su texto.
+  governance_json      String?   @db.NVarChar(Max)
+  /// Si el agente tiene el hook que reporta su consumo a SynerLink.
+  usage_hook           Boolean?
+
+  inventory AgentInventory @relation(fields: [id_inventory], references: [id], onDelete: Cascade)
+
+  @@index([token_fingerprint])
+  @@map("agent_inventory_runtime")
+  @@schema("dbo")
+}
+
+/// Hallazgo de una auditoría externa (Gobierno IA, Iván Gutiérrez). A
+/// diferencia de agent_audit_finding, el recolector no lo abre ni lo cierra:
+/// lo registra y lo cierra una persona con el permiso de configurar.
+model AgentExternalFinding {
+  id             Int       @id @default(autoincrement())
+  id_agent       Int
+  source         String    @db.NVarChar(120)
+  ref_code       String    @db.NVarChar(40)
+  severity       String    @db.NVarChar(20)
+  title          String    @db.NVarChar(300)
+  detail         String?   @db.NVarChar(2000)
+  recommendation String?   @db.NVarChar(1000)
+  /// 'abierto' | 'resuelto' | 'aceptado'
+  status         String    @db.NVarChar(20)
+  reported_on    DateTime  @db.Date
+  resolved_on    DateTime? @db.Date
+  id_request     Int?
+  created_by     String?   @db.NVarChar(255)
+  created_at     DateTime  @default(now())
+  updated_by     String?   @db.NVarChar(255)
+  updated_at     DateTime?
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_agent, source, ref_code])
+  @@map("agent_external_finding")
   @@schema("dbo")
 }
 

@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { prisma } from '../../../../../../lib/prisma';
 import { parseAgentTasks } from '../../../../../../lib/chat/status-tasks';
 import { messageInclude, serializeMessage } from '../../../../../../lib/chat/conversations';
+import { cambiosDeReacciones, conExtras } from '../../../../../../lib/chat/message-extras';
 import {
   POLL_PAGE_MAX,
   parseNonNegativeInt,
@@ -56,6 +57,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
     const limit = parsePositiveInt(sp.get('limit'), POLL_PAGE_MAX, POLL_PAGE_MAX);
     const hidden = sp.get('hidden') === '1';
+    // Cursor de REACCIONES (2026-10-20). Solo lo manda un cliente nuevo; sin
+    // él (cliente viejo) no se hace ninguna consulta de más.
+    const rawRafter = sp.get('rafter');
+    const rafter = rawRafter === null ? null : parseNonNegativeInt(rawRafter);
 
     const [rows, estados, conversation, lastMessage, metrics] = await Promise.all([
       prisma.chatMessage.findMany({
@@ -85,6 +90,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       // el usuario las puede ver; nunca lanza, así que no tumba el sondeo.
       agentMetricsForViewer(guard.user.email, guard),
     ]);
+    // Seek por (id_conversation, id) en la tabla de reacciones; null si la
+    // tabla aún no existe o el cliente no preguntó.
+    const reacciones =
+      rafter === null ? null : await cambiosDeReacciones(guard.conversationId, rafter, guard.user.id);
+    const hayCambiosDeReacciones = Boolean(reacciones && Object.keys(reacciones.cambios).length > 0);
 
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
@@ -142,7 +152,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const conSubagentes = estadosDeCadencia.some((s) => subagentesEnCurso(s).length > 0);
 
     const nextPollMs = computeNextPollMs({
-      hasNewMessages: page.length > 0,
+      // Una reacción nueva también es actividad: se sigue en vivo un momento.
+      hasNewMessages: page.length > 0 || hayCambiosDeReacciones,
       agentState:
         (!status || status.state === 'idle') && conSubagentes ? 'tool' : (status?.state ?? null),
       msSinceLastActivity,
@@ -151,7 +162,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     });
 
     return jsonNoStore({
-      messages: page.map(serializeMessage),
+      messages: page.length > 0 ? await conExtras(page.map(serializeMessage), guard.user.id) : [],
       // El cliente usa este cursor tal cual en la siguiente vuelta.
       cursor: page.length > 0 ? page[page.length - 1].id : after,
       hasMore,
@@ -167,6 +178,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       statuses,
       // undefined (no se manda) = este usuario no ve métricas; null = no hay.
       ...(metrics !== undefined ? { metrics } : {}),
+      ...(reacciones ? { reactions: { cursor: reacciones.cursor, changes: reacciones.cambios } } : {}),
       nextPollMs,
       serverTime: new Date().toISOString(),
     });

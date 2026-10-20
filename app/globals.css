@@ -2865,6 +2865,268 @@ body.chat-inmersivo .chat-page-thread--completa {
   border-color: #ffffff;
 }
 
+/* ── Reacciones, GIF y stickers (2026-10-20) ──
+   Mismos tokens --app-* que las fichas de adjuntos: chips redondos con borde
+   suave; el MÍO lleva el acento. Dentro de la burbuja del usuario (fondo de
+   color) el chip se aclara, igual que la ficha de un adjunto. */
+.chat-reacciones {
+  row-gap: 4px;
+}
+
+.chat-reacciones .chat-reaccion {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  background-color: var(--app-surface, var(--surface));
+  color: var(--app-text, var(--foreground));
+  font-size: 13px;
+  line-height: 1;
+  transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+}
+
+.chat-reacciones .chat-reaccion:hover:not(:disabled) {
+  border-color: var(--app-accent, #2563eb);
+}
+
+.chat-reacciones .chat-reaccion:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.chat-reacciones .chat-reaccion--mia {
+  border-color: var(--app-accent, #2563eb);
+  background-color: color-mix(in srgb, var(--app-accent, #2563eb) 14%, var(--app-surface, #ffffff));
+}
+
+.chat-reaccion__emoji {
+  font-size: 15px;
+}
+
+.chat-reaccion__n {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-bubble--user .chat-reacciones .chat-reaccion {
+  background-color: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+}
+
+.chat-bubble--user .chat-reacciones .chat-reaccion--mia {
+  background-color: rgba(255, 255, 255, 0.34);
+  border-color: #ffffff;
+}
+
+/* Botón de reaccionar: solo al pasar el mouse (o con el foco del teclado). En
+   pantallas táctiles no aparece: ahí se reacciona con toque largo. */
+.chat-reaccionar-btn {
+  opacity: 0;
+  flex-shrink: 0;
+  margin-bottom: 4px;
+  transition: opacity 120ms ease;
+}
+
+.chat-msg:hover .chat-reaccionar-btn,
+.chat-reaccionar-btn:focus-visible,
+.chat-reaccionar-btn--abierto {
+  opacity: 1;
+}
+
+/* `.chat-msg .chat-reaccionar-btn` y no solo la clase: los estilos de Mantine
+   cargan DESPUÉS de globals.css y su `display` ganaría el empate. */
+@media (hover: none), (pointer: coarse) {
+  .chat-msg .chat-reaccionar-btn {
+    display: none;
+  }
+}
+
+/* En el celular la presión larga abre la hoja del mensaje: que no compita con
+   la selección de texto ni con el menú del sistema (la hoja trae «Copiar»). */
+@media (pointer: coarse) {
+  .chat-bubble {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
+
+.chat-reaccion-rapida .chat-reaccion-rapida__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  font-size: 22px;
+  line-height: 1;
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+
+.chat-reaccion-rapida .chat-reaccion-rapida__btn:hover,
+.chat-reaccion-rapida .chat-reaccion-rapida__btn:focus-visible {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  transform: scale(1.12);
+}
+
+.chat-emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+  gap: 2px;
+}
+
+.chat-emoji-grid .chat-emoji-grid__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  border-radius: 8px;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.chat-emoji-grid .chat-emoji-grid__btn:hover,
+.chat-emoji-grid .chat-emoji-grid__btn:focus-visible {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+/* Hoja inferior del celular (acciones del mensaje y selector de stickers).
+   Alto según el contenido (nunca la pantalla entera) y con tope. */
+.chat-hoja.chat-hoja {
+  height: auto;
+  max-height: 88dvh;
+  background-color: var(--app-surface, var(--surface));
+  color: var(--app-text, var(--foreground));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.chat-hoja__agarre {
+  width: 40px;
+  height: 4px;
+  margin: 0 auto 10px;
+  border-radius: 999px;
+  background-color: var(--app-border, var(--border-subtle));
+}
+
+.chat-hoja .chat-hoja__accion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 8px;
+  border-radius: 10px;
+  color: var(--app-text, var(--foreground));
+}
+
+.chat-hoja .chat-hoja__accion:hover,
+.chat-hoja .chat-hoja__accion:focus-visible {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+/* Mensaje de STICKER: sin globo, solo la imagen (como WhatsApp y Telegram). */
+.chat-bubble--sticker {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  padding: 0;
+}
+
+.chat-bubble--sticker .chat-bubble__author,
+.chat-bubble--sticker .chat-bubble__meta {
+  color: var(--app-text-muted, #64748b);
+}
+
+.chat-bubble--sticker .chat-reacciones .chat-reaccion {
+  background-color: var(--app-surface, var(--surface));
+  border-color: var(--app-border, var(--border-subtle));
+  color: var(--app-text, var(--foreground));
+}
+
+.chat-bubble--sticker .chat-reacciones .chat-reaccion--mia {
+  border-color: var(--app-accent, #2563eb);
+}
+
+.chat-sticker {
+  display: block;
+  width: 128px;
+  height: 128px;
+  object-fit: contain;
+}
+
+/* GIF: caja con proporción fija (ancho y alto vienen del proveedor), así el
+   hilo no salta cuando termina de cargar. */
+.chat-bubble--gif {
+  padding: 4px;
+}
+
+.chat-gif {
+  display: block;
+  max-width: min(240px, 100%);
+  height: auto;
+  border-radius: 0.75rem;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.chat-bubble--gif .chat-bubble__author,
+.chat-bubble--gif .chat-bubble__meta,
+.chat-bubble--gif .chat-reacciones {
+  padding: 0 6px;
+}
+
+.chat-sticker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: 6px;
+}
+
+.chat-sticker-grid .chat-sticker-grid__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 12px;
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+
+.chat-sticker-grid .chat-sticker-grid__btn:hover,
+.chat-sticker-grid .chat-sticker-grid__btn:focus-visible {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  transform: scale(1.04);
+}
+
+.chat-sticker-grid__btn img {
+  width: 88px;
+  height: 88px;
+  object-fit: contain;
+}
+
+.chat-gif-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 6px;
+}
+
+.chat-gif-grid .chat-gif-grid__btn {
+  display: block;
+  height: 110px;
+  border-radius: 10px;
+  overflow: hidden;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.chat-gif-grid__btn img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.chat-gif-grid .chat-gif-grid__btn:focus-visible {
+  outline: 2px solid var(--app-accent, #2563eb);
+  outline-offset: 2px;
+}
+
 /* ── Miniatura de una imagen adjunta (2026-10-01) ──
    Caja de tamaño FIJO: la imagen llega después que la burbuja y, si la caja
    creciera al cargar, el hilo cambiaría de alto y el desplazamiento saltaría

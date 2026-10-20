@@ -6,6 +6,7 @@
  * El porqué del diseño está en el encabezado de ChatProject (prisma/schema.prisma).
  */
 import type { ProjectCapabilities, ProjectProfile, ProjectRole } from '../chat/projects-rules';
+import type { EstadoAgenteProyectoDto } from './estado-agente';
 
 export type { ProjectCapabilities, ProjectRole };
 
@@ -60,6 +61,12 @@ export interface ProyectoResumenDto {
   /** Tareas del cronograma (2026-10-18). */
   taskCount: number;
   updatedAt: string;
+  /**
+   * Agentes trabajando AHORA en sus conversaciones (2026-10-20). Opcional: una
+   * respuesta vieja no lo trae y la tarjeta simplemente no lo pinta. Lo que
+   * cambie después llega por el pulso del chat.
+   */
+  trabajando?: EstadoAgenteProyectoDto[];
 }
 
 export interface ListaProyectosDto {
@@ -99,6 +106,12 @@ export interface ConversacionDto {
   createdBy: PersonaDto | null;
   /** Null = se puede escribir. Si no, el motivo (rol, agente retirado…). */
   soloLectura: string | null;
+  /**
+   * Estado del agente en esta conversación al cargar (2026-10-20): el mismo
+   * indicador del chat. Null = nunca reportó nada. Lo que cambie después llega
+   * por el pulso del chat.
+   */
+  agentStatus?: EstadoAgenteProyectoDto | null;
 }
 
 export interface CorreoVinculadoDto {

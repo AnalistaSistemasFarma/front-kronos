@@ -3,6 +3,7 @@ import { badRequest, jsonNoStore, NO_STORE, readJsonBody, serverError } from '..
 import { isCollectorRequest } from '../../../../../../lib/agent-audit/collector-auth';
 import { diaColombia, esDia, limpiarResumen, lunesDe, ResumenInvalidoError, sumarDias } from '../../../../../../lib/agent-audit/cv';
 import { guardarResumenes, insumosResumen } from '../../../../../../lib/agent-audit/cv-db';
+import { insumosResumenCompleto } from '../../../../../../lib/agent-audit/cv-completa-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +31,11 @@ export async function GET(request: NextRequest) {
     }
     const raw = request.nextUrl.searchParams.get('semana');
     const semana = esDia(raw) ? raw : semanaPorDefecto();
-    return jsonNoStore(await insumosResumen(semana));
+    const ins = await insumosResumen(semana);
+    // Incremento 1 (2026-10-20): gobierno declarado, casos de Gobierno IA y
+    // calidad de respuesta. También solo datos estructurados.
+    const extra = await insumosResumenCompleto(ins.semana.desde, ins.semana.hasta);
+    return jsonNoStore({ ...ins, agentes: ins.agentes.map((a) => ({ ...a, ...((extra[a.code] as object) ?? {}) })) });
   } catch (error) {
     return serverError('GET /api/chat/auditoria/hoja-de-vida/resumen', error);
   }
