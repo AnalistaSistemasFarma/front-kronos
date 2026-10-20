@@ -68,7 +68,6 @@ import {
 } from './signerTasks';
 import { openNextOrionSignerAuthorization } from './signerAuthorizations';
 import {
-  closeRequestIfNoOpenTasks,
   isSignatureAutoCloseEnabled,
   resolveSignatureTasksOnSigned,
 } from './autoCloseOnSigned';
@@ -1003,7 +1002,7 @@ export async function applyOrionWebhookToRequest(
   });
 
   let tasksUpdated = 0;
-  let requestClosed = false;
+  const requestClosed = false;
 
   // Auth Kronos del siguiente firmante SOLO al avanzar de turno (alguien acaba de firmar).
   // Antes se abría en cada sync EN_PROCESO y, como findExisting ignoraba status=2,
@@ -1075,9 +1074,9 @@ export async function applyOrionWebhookToRequest(
       fileId
     );
   } else if (statusUpper === 'FIRMADO' && allSigned) {
-    // Firmas completas: avanza el workflow secuencial de firma. Por defecto NO cierra la
-    // solicitud (pueden quedar otras tareas o más PDFs); solo si el solicitante activó el
-    // cierre automático y ya no queda ninguna otra tarea abierta.
+    // Firmas completas: con el cierre automático (activado por defecto; el solicitante puede
+    // apagarlo) se cierran SOLO las tareas de firma, y el workflow avanza a la siguiente tarea.
+    // La solicitud NUNCA se cierra aquí: pueden quedar otras tareas o más PDFs por firmar.
     const template = await findOrionSignatureTaskTemplate(pool, params.requestId);
     const autoClose =
       (statusChanged || turnAdvanced) &&
@@ -1116,18 +1115,6 @@ export async function applyOrionWebhookToRequest(
       }
     } catch (err) {
       console.warn('[orion/applyWebhook] Watermark DOCUMENTO VALIDADO:', err);
-    }
-
-    if (autoClose) {
-      try {
-        requestClosed = await closeRequestIfNoOpenTasks(pool, {
-          requestId: params.requestId,
-          requesterUserId: ctx?.id_requester ?? null,
-          subject: ctx?.subject_request ?? null,
-        });
-      } catch (err) {
-        console.warn('[orion/applyWebhook] Cierre automático (solicitud):', err);
-      }
     }
   }
 

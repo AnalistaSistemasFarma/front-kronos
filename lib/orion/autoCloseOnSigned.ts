@@ -1,18 +1,22 @@
 import 'server-only';
 import sql from 'mssql';
 import { orionInternalTaskSql } from './internalTasks';
-import { fireAndForgetNotification, notifyRequestClosed } from '../notificationEvents.js';
 
 type SqlPool = import('mssql').ConnectionPool;
 
 /**
  * Cierre automático al terminar de firmar (interruptor en la lista de solicitudes).
  *
- * Cada solicitante decide si sus solicitudes se cierran solas cuando todos los documentos
- * quedan firmados. Se guarda en dbo.user_signature_auto_close
- * (prisma/manual/2026-10-16-user-signature-auto-close.sql); sin fila = desactivado.
- * Si la tabla aún no existe, todo sigue como siempre (sin cierre automático).
+ * ACTIVADO POR DEFECTO (pedido de Juan, 2026-10-20): cuando todos los documentos quedan
+ * firmados se cierran solas las tareas de firma y el flujo sigue con la siguiente tarea.
+ * La SOLICITUD no se cierra: solo la parte de firma (también pedido de Juan).
+ * Quien no lo quiera lo apaga con el interruptor; esa elección se guarda en
+ * dbo.user_signature_auto_close (prisma/manual/2026-10-16-user-signature-auto-close.sql).
+ * Sin fila = activado. Si la tabla aún no existe, nadie pudo apagarlo: también activado.
  */
+
+/** Valor para quien nunca tocó el interruptor. */
+export const SIGNATURE_AUTO_CLOSE_DEFAULT = true;
 
 /** La tabla aún no existe (el pase manual no se ha corrido). */
 export class SignatureAutoCloseUnavailableError extends Error {
@@ -33,7 +37,8 @@ export async function getSignatureAutoClose(pool: SqlPool, userId: string): Prom
       .request()
       .input('idUser', sql.NVarChar(1000), userId)
       .query('SELECT TOP 1 enabled FROM dbo.user_signature_auto_close WHERE id_user = @idUser');
-    return Boolean(result.recordset[0]?.enabled);
+    const row = result.recordset[0];
+    return row ? Boolean(row.enabled) : SIGNATURE_AUTO_CLOSE_DEFAULT;
   } catch (err) {
     if (isMissingTable(err)) throw new SignatureAutoCloseUnavailableError();
     throw err;
@@ -63,7 +68,11 @@ export async function saveSignatureAutoClose(
   }
 }
 
-/** Preferencia del solicitante; false si no la activó o si la tabla no existe. */
+/**
+ * Preferencia del solicitante: activado salvo que lo haya apagado. Sin tabla también activado
+ * (nadie pudo apagarlo). Si la lectura falla por otra razón no se cierra nada: ante la duda,
+ * mejor dejar la solicitud abierta que cerrarla contra la voluntad de la persona.
+ */
 export async function isSignatureAutoCloseEnabled(
   pool: SqlPool,
   requesterUserId: string | null | undefined
@@ -72,16 +81,15 @@ export async function isSignatureAutoCloseEnabled(
   try {
     return await getSignatureAutoClose(pool, requesterUserId);
   } catch (err) {
-    if (!(err instanceof SignatureAutoCloseUnavailableError)) {
-      console.warn('[orion/autoClose] No se pudo leer la preferencia de cierre automático:', err);
-    }
+    if (err instanceof SignatureAutoCloseUnavailableError) return SIGNATURE_AUTO_CLOSE_DEFAULT;
+    console.warn('[orion/autoClose] No se pudo leer la preferencia de cierre automático:', err);
     return false;
   }
 }
 
 /**
- * Paso 1 (antes de avanzar el flujo): resuelve la tarea de firma del proceso y lo que quede
- * abierto del proceso interno de firma, para que el flujo pueda seguir o la solicitud cerrarse.
+ * Antes de avanzar el flujo: resuelve la tarea de firma del proceso y lo que quede abierto del
+ * proceso interno de firma, para que el flujo pueda seguir con la siguiente tarea.
  */
 export async function resolveSignatureTasksOnSigned(
   pool: SqlPool,
@@ -108,89 +116,4 @@ export async function resolveSignatureTasksOnSigned(
         AND (trg.id_task = @id_task OR ${orionInternalTaskSql('trg', 'tpc')})
     `);
   return Number(result.rowsAffected?.[0] || 0);
-}
-
-async function insertNote(pool: SqlPool, requestId: number, note: string, author: string | null) {
-  if (!author) return;
-  try {
-    await pool
-      .request()
-      .input('note', sql.Text, note)
-      .input('id_request', sql.Int, requestId)
-      .input('created_by', sql.NVarChar, author)
-      .query('INSERT INTO notes (note, id_request, created_by) VALUES (@note, @id_request, @created_by)');
-  } catch (err) {
-    console.warn('[orion/autoClose] No se pudo registrar la nota:', err);
-  }
-}
-
-/**
- * Paso 2 (después de avanzar el flujo): cierra la solicitud (Resuelto) solo si ya no queda
- * ninguna tarea abierta. Si queda alguna, la deja abierta y lo explica en una nota.
- */
-export async function closeRequestIfNoOpenTasks(
-  pool: SqlPool,
-  params: { requestId: number; requesterUserId: string | null; subject: string | null }
-): Promise<boolean> {
-  const statusRes = await pool
-    .request()
-    .input('id', sql.Int, params.requestId)
-    .query('SELECT status_req FROM requests_general WHERE id = @id');
-  const status = Number(statusRes.recordset[0]?.status_req);
-  if (status === 2 || status === 3) return false;
-
-  const pending = await pool
-    .request()
-    .input('id', sql.Int, params.requestId)
-    .query(`
-      SELECT tpc.task AS task_name
-      FROM task_request_general trg
-      INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
-      WHERE trg.id_request_general = @id AND trg.id_status NOT IN (2, 3)
-        AND NOT ${orionInternalTaskSql('trg', 'tpc')}
-      ORDER BY tpc.display_order, trg.id
-    `);
-
-  if (pending.recordset.length > 0) {
-    const names = pending.recordset.map((t) => `«${t.task_name}»`).join(', ');
-    await insertNote(
-      pool,
-      params.requestId,
-      `Cierre automático: el proceso de firma terminó, pero la solicitud sigue abierta porque hay tareas pendientes: ${names}.`,
-      params.requesterUserId
-    );
-    return false;
-  }
-
-  const resolution = 'Cerrada automáticamente al completar todas las firmas.';
-  const updated = await pool
-    .request()
-    .input('id', sql.Int, params.requestId)
-    .input('resolution', sql.NVarChar(255), resolution)
-    .input('executor', sql.NVarChar(1000), params.requesterUserId)
-    .query(`
-      UPDATE requests_general
-      SET status_req = 2,
-          resolution = @resolution,
-          id_executor_final = @executor,
-          date_resolution = GETDATE()
-      WHERE id = @id AND status_req NOT IN (2, 3)
-    `);
-  if (!Number(updated.rowsAffected?.[0] || 0)) return false;
-
-  await insertNote(
-    pool,
-    params.requestId,
-    'Se ha cerrado la solicitud automáticamente: el proceso de firma terminó (cierre automático activado por el solicitante).',
-    params.requesterUserId
-  );
-  fireAndForgetNotification(
-    notifyRequestClosed({
-      requestId: params.requestId,
-      subject: params.subject,
-      requesterUserId: params.requesterUserId,
-      statusId: 2,
-    })
-  );
-  return true;
 }

@@ -2,16 +2,18 @@
   PASE MANUAL — cierre automático al terminar de firmar (Solicitudes generales).
 
   QUÉ ES: crea dbo.user_signature_auto_close, donde cada solicitante guarda si quiere
-  que sus solicitudes se cierren solas cuando todos los documentos quedan firmados
-  (interruptor arriba de la lista de sus solicitudes). Una fila por usuario; sin fila
-  = desactivado (valor por defecto). Se corre A MANO, como los demás pases de
-  prisma/manual (las migraciones no corren en los despliegues).
+  que las tareas de firma de sus solicitudes se cierren solas cuando todos los documentos
+  quedan firmados (la solicitud no se cierra). Interruptor arriba de la lista de sus
+  solicitudes. Una fila por usuario.
+  Desde 2026-10-20 el cierre automático está ACTIVADO POR DEFECTO: sin fila = activado;
+  la fila solo existe si la persona movió el interruptor (p. ej. para apagarlo).
+  Se corre A MANO, como los demás pases de prisma/manual (las migraciones no corren en
+  los despliegues).
 
   ADITIVO: solo crea la tabla nueva. No toca ninguna tabla existente.
 
-  ORDEN: primero este script, después el código. Si el código saliera antes, el
-  interruptor dice "aún no disponible" y las firmas siguen funcionando como siempre
-  (sin cierre automático).
+  ORDEN: sin esta tabla el cierre automático funciona igual (activado para todos), pero
+  nadie puede apagarlo: el interruptor sale activado y bloqueado.
 
   Idempotente: se puede correr dos veces. Reversa:
   prisma/manual/2026-10-16-user-signature-auto-close-reversa.sql

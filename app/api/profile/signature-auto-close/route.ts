@@ -4,6 +4,7 @@ import { authOptions } from '../../auth/[...nextauth]/route';
 import { resolveUserIdByEmail } from '../../../../lib/request-general/dashboardAccess';
 import { withMssqlPool } from '../../../../lib/mssqlPool';
 import {
+  SIGNATURE_AUTO_CLOSE_DEFAULT,
   SignatureAutoCloseUnavailableError,
   getSignatureAutoClose,
   saveSignatureAutoClose,
@@ -11,7 +12,7 @@ import {
 
 /**
  * Cierre automático al terminar de firmar (interruptor en la lista de solicitudes).
- * GET → { available, enabled }   · por defecto enabled = false.
+ * GET → { available, enabled }   · por defecto enabled = true (activado para todos).
  * PUT { enabled: boolean } → guarda la preferencia de la persona de la sesión.
  */
 
@@ -27,7 +28,7 @@ export async function GET() {
     const userId = await sessionUserId();
     if (!userId) return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
 
-    let enabled = false;
+    let enabled = SIGNATURE_AUTO_CLOSE_DEFAULT;
     let available = true;
     try {
       enabled = await withMssqlPool((pool) => getSignatureAutoClose(pool, userId));
