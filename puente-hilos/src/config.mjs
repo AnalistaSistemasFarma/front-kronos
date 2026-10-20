@@ -62,6 +62,12 @@
  *                                    archivos). Se copia en cada turno a .puente/memoria del hilo,
  *                                    sin los archivos que parezcan tener secretos.
  *   HILOS_MEMORIA_LECTORES           Correos (coma) cuyos turnos reciben la memoria. Vacío = todos.
+ *
+ *   Conectores por proyecto (bases en SOLO LECTURA, 2026-10-20; ver conectores.mjs). Opcional:
+ *   HILOS_CONECTORES_POR_PROYECTO    Ruta a conectores-por-proyecto.json (conectores MCP que se
+ *                                    SUMAN al perfil en proyectos concretos). Se relee en cada turno.
+ *   HILOS_CONECTORES_SECRETOS        Archivo 600 con las llaves Bearer de esos conectores; lo lee
+ *                                    solo el headersHelper (nunca entra al mcp.json ni al modelo).
  */
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -360,7 +366,7 @@ export function cargarConfig(env = process.env) {
   const presupuesto = (env.HILOS_MAX_BUDGET_USD ?? '').trim();
   if (presupuesto && !(Number(presupuesto) > 0)) throw new ErrorConfig('HILOS_MAX_BUDGET_USD debe ser un número positivo.');
 
-  for (const v of ['HILOS_REPOS_POR_PROYECTO', 'HILOS_GITHUB_TOKEN_ARCHIVO', 'HILOS_MEMORIA_DIR']) {
+  for (const v of ['HILOS_REPOS_POR_PROYECTO', 'HILOS_GITHUB_TOKEN_ARCHIVO', 'HILOS_MEMORIA_DIR', 'HILOS_CONECTORES_POR_PROYECTO', 'HILOS_CONECTORES_SECRETOS']) {
     const r = (env[v] ?? '').trim();
     if (r && !path.isAbsolute(r)) throw new ErrorConfig(`${v} debe ser una ruta absoluta.`);
   }
@@ -420,6 +426,8 @@ export function cargarConfig(env = process.env) {
     githubTokenArchivo: (env.HILOS_GITHUB_TOKEN_ARCHIVO ?? '').trim() || null,
     memoriaDir,
     memoriaLectores,
+    rutaConectoresPorProyecto: (env.HILOS_CONECTORES_POR_PROYECTO ?? '').trim() || null,
+    conectoresSecretos: (env.HILOS_CONECTORES_SECRETOS ?? '').trim() || null,
     // Para el entorno del hijo: solo lo indispensable del entorno propio.
     path: env.PATH ?? '/usr/bin:/bin',
     home: env.HOME ?? homedir(),

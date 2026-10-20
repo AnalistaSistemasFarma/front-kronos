@@ -136,7 +136,7 @@ export function asegurarCarpetas(rutas) {
 }
 
 /** Encabezado de sistema de cada turno. Breve: las instrucciones del proyecto van aparte o aquí. */
-export function textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo = '', bloqueCodigo = '', bloqueMemoria = '' }) {
+export function textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo = '', bloqueCodigo = '', bloqueMemoria = '', bloqueConectores = '' }) {
   const p = contexto.project;
   const lineas = [
     `Usted es ${agente}, asistente de inteligencia artificial de la organización Group Shared Services Latinoamérica.`,
@@ -155,6 +155,8 @@ export function textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo =
   ];
   // Memoria del bot principal en solo lectura (memoria.mjs → textoMemoria).
   if (bloqueMemoria) lineas.push(bloqueMemoria);
+  // Conectores por proyecto (bases en solo lectura; conectores.mjs → textoConectores).
+  if (bloqueConectores) lineas.push(bloqueConectores);
   if (bloqueEquipo) lineas.push(bloqueEquipo);
   // Acceso al código (nivel 2): reglas de repos, ramas y pases (codigo.mjs → textoCodigo).
   if (bloqueCodigo) lineas.push(bloqueCodigo);
@@ -297,8 +299,8 @@ export function limpiarPropuestas(rutas) {
 }
 
 /** Escribe sistema.md, CLAUDE.md, mcp.json, vinculados.md y cronograma.md del hilo. */
-export function escribirContexto({ rutas, agente, contexto, perfil, instruccionesEn, equipoTurno = null, bloqueCodigo = '', bloqueMemoria = '' }) {
-  writeFileSync(rutas.sistema, textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo: equipoTurno?.bloque ?? '', bloqueCodigo, bloqueMemoria }), { mode: MODO_ARCHIVO });
+export function escribirContexto({ rutas, agente, contexto, perfil, instruccionesEn, equipoTurno = null, bloqueCodigo = '', bloqueMemoria = '', bloqueConectores = '' }) {
+  writeFileSync(rutas.sistema, textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo: equipoTurno?.bloque ?? '', bloqueCodigo, bloqueMemoria, bloqueConectores }), { mode: MODO_ARCHIVO });
   // Sin equipo, no queda ninguna definición vieja que se pueda colar.
   if (equipoTurno) writeFileSync(rutas.agentes, JSON.stringify(equipoTurno.agentes, null, 2), { mode: MODO_ARCHIVO });
   else rmSync(rutas.agentes, { force: true });

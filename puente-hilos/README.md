@@ -203,3 +203,15 @@ Pedido de Nicolás Rivera (16:21 COT): «eso debería usar la memoria que ya tie
 - Engram no se expone: su servidor MCP abre la base en lectura y escritura y la comparte con el bot vivo.
 
 En proyectos con código (nivel 2) va además un resumen corto del flujo de pases: `contexto/flujo-desarrollo-gss.md` (`src/guia.mjs`).
+
+## Bases de datos por proyecto (solo lectura, 2026-10-20)
+
+Pedido de Nicolás Rivera (17:24 COT) para el proyecto 1: «necesita hacer un análisis duro». Con `HILOS_CONECTORES_POR_PROYECTO` (ver `src/conectores.mjs` y `config/conectores-por-proyecto.example.json`):
+
+- A los proyectos vinculados se les **suman** conectores MCP ya existentes y blindados (`mcp-sapbo-*`, `sapsend-*`, `kronos-synerlink` con llave de lectura). Nunca credenciales SQL: la base se consulta a través del conector, que impone su candado.
+- Herramientas por nombre exacto; el validador rechaza comodines y cualquier herramienta de escritura conocida (`sap_create/update/delete/action/batch`, las de escritura de Kronos, `proyecto_proponer_*`).
+- Solo en turnos escritos por `lectores` (identidad del servidor), como la memoria. Los demás turnos van con el perfil tal cual.
+- **Llaves Bearer fuera del hilo:** el `mcp.json` del hilo (que el modelo puede leer) lleva un `headersHelper` (`src/cabeceras-conector.mjs`) que lee `HILOS_CONECTORES_SECRETOS` (600). Ese archivo está en el `denyRead` del sandbox de los turnos con código y fuera de la carpeta del hilo.
+- **Red:** las conexiones MCP las abre el propio Claude Code, no los comandos de Bash, así que el sandbox **no** se abre hacia 192.168.10.5: `node`/`npm` siguen sin llegar a los conectores, a SSH ni al 1433.
+- El encabezado del turno lleva las reglas: filtro de fecha siempre, `top` pequeño, nunca `groupby`/`aggregate` ni `maxPageSize: 0` sin rango de fechas, sin reintentos en bucle, sin escritura (las bases `z_PRUEBAS_*` por Service Layer NO están habilitadas: cada escritura exige autorización previa de Nicolás).
+- Se relee en cada turno; si el archivo o las llaves fallan, el turno corre sin estos conectores y lo dice.

@@ -40,6 +40,7 @@ import {
   turnoAutorizado,
 } from './codigo.mjs';
 import { ColaHilos } from './cola.mjs';
+import { combinarPerfil, prepararConectoresTurno, secretosConectores } from './conectores.mjs';
 import { guiaDesarrolloSegura } from './guia.mjs';
 import { prepararMemoriaTurno } from './memoria.mjs';
 import { crearClienteSynerLink } from './synerlink.mjs';
@@ -140,7 +141,7 @@ export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lot
     autores,
     worktrees,
     token,
-    sandbox: sandboxCodigo({ worktrees, homeReal: cfg.home, homeCodigo, hilosDir: cfg.hilosDir, secretos: [cfg.githubTokenArchivo], cacheNpm }),
+    sandbox: sandboxCodigo({ worktrees, homeReal: cfg.home, homeCodigo, hilosDir: cfg.hilosDir, secretos: [cfg.githubTokenArchivo, ...secretosConectores(cfg)], cacheNpm }),
     entorno: entornoCodigo({ token, homeCodigo, cacheNpm }),
     hooks: hooksCodigo(),
     disponibles,
@@ -180,8 +181,8 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
       await synerlink.estado(idConversation, 'thinking', 'Preparando el proyecto…').catch(() => null);
 
       const contexto = await synerlink.contexto(idConversation);
-      const perfil = cfg.perfiles.get(contexto.project.profile.key);
-      if (!perfil) {
+      const perfilBase = cfg.perfiles.get(contexto.project.profile.key);
+      if (!perfilBase) {
         // Perfil que este puente no conoce: no se improvisa ningún conector.
         await synerlink.responder(
           idConversation,
@@ -189,6 +190,22 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
         );
         return;
       }
+
+      // Conectores por proyecto (bases en SOLO LECTURA): se SUMAN al perfil solo en los
+      // proyectos vinculados y en turnos de un lector autorizado. Si algo falla, el turno
+      // va con el perfil tal cual (falla cerrado).
+      let conectores = null;
+      let avisoConectores = '';
+      try {
+        conectores = prepararConectoresTurno({ cfg, idProject: contexto.project.idProject, lote });
+        if (conectores?.motivo) log(`conversación ${idConversation}: turno sin conectores del proyecto (${conectores.motivo}).`);
+        else if (conectores) log(`conversación ${idConversation}: conectores del proyecto: ${conectores.servidores.map((x) => x.nombre).join(', ')}.`);
+      } catch (e) {
+        conectores = null;
+        log(`conversación ${idConversation}: no se pudieron preparar los conectores del proyecto, el turno va sin ellos:`, e.message);
+        avisoConectores = '_Nota: no pude preparar los conectores de bases de datos del proyecto en este turno; respondí sin ellos. Tecnología quedó con el registro._\n\n';
+      }
+      const perfil = combinarPerfil(perfilBase, conectores);
 
       const rutas = rutasDelHilo(cfg.hilosDir, contexto.project.idProject, idConversation);
       asegurarCarpetas(rutas);
@@ -255,6 +272,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
         equipoTurno,
         bloqueCodigo: (codigo?.bloque ?? indiceRepos?.bloque ?? '') + (bloqueGuia ? `\n${bloqueGuia}` : ''),
         bloqueMemoria: memoria.bloque,
+        bloqueConectores: conectores?.bloque ?? '',
       });
       limpiarPropuestas(rutas);
       let vigia = null;
@@ -373,7 +391,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
           notaPropuestas = '\n\n⚠️ No pude registrar mis propuestas en el Cronograma por un error. Intente de nuevo.';
         }
       }
-      cuerpo = (aviso + avisoEquipo + avisoCodigo + cuerpo).slice(0, MAX_RESPUESTA - notaPropuestas.length) + notaPropuestas;
+      cuerpo = (aviso + avisoEquipo + avisoCodigo + avisoConectores + cuerpo).slice(0, MAX_RESPUESTA - notaPropuestas.length) + notaPropuestas;
       if (codigo) cuerpo = ocultarSecreto(cuerpo, codigo.token);
       // Bajo demanda: los repos que Orus nombró en su respuesta se montan desde el siguiente turno.
       if (indiceRepos && r.resultado?.ok) {
