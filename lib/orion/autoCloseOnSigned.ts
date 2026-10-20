@@ -13,8 +13,19 @@ type SqlPool = import('mssql').ConnectionPool;
  */
 
 /**
+ * ¿El nombre de la tarea habla de firmar? Palabra completa ("Firma", "Firmar", "Firmas"):
+ * findOrionSignatureTaskTemplate busca LIKE '%firma%' y eso también encuentra "Confirmar
+ * recepción", que es un paso normal del proceso y no debe cerrarse solo.
+ */
+export function isSignatureTaskName(task: string | null | undefined): boolean {
+  return /(^|[^a-záéíóúüñ])firma(r|s)?([^a-záéíóúüñ]|$)/i.test(String(task ?? ''));
+}
+
+/**
  * Antes de avanzar el flujo: resuelve la tarea de firma del proceso y lo que quede abierto del
  * proceso interno de firma, para que el flujo pueda seguir con la siguiente tarea.
+ * `templateTaskId` solo se pasa si de verdad es una tarea de firma (ver isSignatureTaskName);
+ * con null se cierra únicamente el proceso interno (turnos de firmantes, autorización, validación).
  */
 export async function resolveSignatureTasksOnSigned(
   pool: SqlPool,

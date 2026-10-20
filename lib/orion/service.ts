@@ -67,7 +67,7 @@ import {
   syncOrionSignerTasks,
 } from './signerTasks';
 import { openNextOrionSignerAuthorization } from './signerAuthorizations';
-import { resolveSignatureTasksOnSigned } from './autoCloseOnSigned';
+import { isSignatureTaskName, resolveSignatureTasksOnSigned } from './autoCloseOnSigned';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/microsoft-365/useGetMicrosoftToken.jsx';
 import type { SignerAcceptIdentity } from './signerIdentity';
 import { normalizeSignerIdentity } from './signerIdentity';
@@ -1080,7 +1080,7 @@ export async function applyOrionWebhookToRequest(
       try {
         tasksUpdated += await resolveSignatureTasksOnSigned(pool, {
           requestId: params.requestId,
-          templateTaskId: template?.id ?? null,
+          templateTaskId: template && isSignatureTaskName(template.task) ? template.id : null,
           executorUserId: ctx?.id_requester ?? null,
         });
       } catch (err) {
