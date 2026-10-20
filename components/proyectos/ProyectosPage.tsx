@@ -10,6 +10,9 @@ import NuevoProyectoModal from './NuevoProyectoModal';
 import { AgentesApilados, AvisoArriba, BadgeRol, CONSULTA_ESCRITORIO, Encabezado, EsqueletoTarjetas, type Aviso } from './ui';
 import type { ListaProyectosDto, ProyectoResumenDto } from '../../lib/proyectos/tipos';
 import css from './proyectos.module.css';
+import { LineaEstadoAgente } from './EstadoAgente';
+import { useEstadosAgentes } from './useEstadosAgentes';
+import { resumenTrabajando, vistaEstadoAgente, type EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente';
 
 /**
  * Módulo «Proyectos» — la lista (/process/proyectos).
@@ -20,9 +23,24 @@ import css from './proyectos.module.css';
  * persona es miembro; el servidor no devuelve nada más.
  */
 
-function TarjetaProyecto({ p, onAbrir }: { p: ProyectoResumenDto; onAbrir: () => void }) {
+function TarjetaProyecto({ p, onAbrir, estados }: { p: ProyectoResumenDto; onAbrir: () => void; estados: EstadoAgenteProyectoDto[] }) {
+  // «Orus está trabajando…» (2026-10-20): quién trabaja ahora en alguna conversación del proyecto.
+  const r = resumenTrabajando(estados);
+  const vista = r.primero ? { ...vistaEstadoAgente(r.primero, r.primero.agent.displayName), texto: r.texto } : null;
+  // Con varias conversaciones, la actividad de una sola confundiría: solo con una.
+  if (vista && r.n > 1) vista.actividad = null;
   return (
-    <Card withBorder radius='md' p='md' component='button' type='button' onClick={onAbrir} className={css.tarjeta} data-testid='proyecto-tarjeta'>
+    <Card
+      withBorder
+      radius='md'
+      p='md'
+      component='button'
+      type='button'
+      onClick={onAbrir}
+      className={css.tarjeta}
+      data-testid='proyecto-tarjeta'
+      data-trabajando={r.n > 0 ? 'true' : undefined}
+    >
       <Group justify='space-between' wrap='nowrap' gap='xs' align='flex-start'>
         <Text fw={600} size='md' lineClamp={2} style={{ minWidth: 0 }}>
           {p.name}
@@ -47,6 +65,7 @@ function TarjetaProyecto({ p, onAbrir }: { p: ProyectoResumenDto; onAbrir: () =>
           {p.description}
         </Text>
       )}
+      {vista && <LineaEstadoAgente vista={vista} subagentes={r.n > 1 ? 'no' : 'resumen'} testId='proyecto-tarjeta-estado' />}
       <Group justify='space-between' wrap='nowrap' gap='xs' mt='auto'>
         <AgentesApilados agentes={p.agents} />
         <Group gap={10} wrap='nowrap' c='dimmed' style={{ fontSize: 12 }}>
@@ -100,6 +119,15 @@ export default function ProyectosPage() {
   useEffect(() => {
     if (searchParams.get('nuevo') === '1') setNuevoAbierto(true);
   }, [searchParams]);
+
+  // Estado en vivo de los agentes (2026-10-20): lo que trajo la lista y lo que entrega el pulso.
+  const semillaEstados = useMemo(() => (datos?.projects ?? []).flatMap((p) => p.trabajando ?? []), [datos]);
+  const estados = useEstadosAgentes(semillaEstados);
+  const estadosPorProyecto = useMemo(() => {
+    const m = new Map<number, EstadoAgenteProyectoDto[]>();
+    for (const e of estados.values()) m.set(e.idProject, [...(m.get(e.idProject) ?? []), e]);
+    return m;
+  }, [estados]);
 
   const filtrados = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
@@ -194,7 +222,12 @@ export default function ProyectosPage() {
         ) : (
           <div className={css.rejilla} style={cargando ? { opacity: 0.6 } : undefined}>
             {filtrados.map((p) => (
-              <TarjetaProyecto key={p.idProject} p={p} onAbrir={() => router.push(`/process/proyectos/${p.idProject}`)} />
+              <TarjetaProyecto
+                key={p.idProject}
+                p={p}
+                estados={estadosPorProyecto.get(p.idProject) ?? []}
+                onAbrir={() => router.push(`/process/proyectos/${p.idProject}`)}
+              />
             ))}
           </div>
         )}

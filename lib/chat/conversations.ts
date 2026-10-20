@@ -20,6 +20,7 @@ import { getChatAccess } from './access';
 import { visiblePeopleConversationIds } from './people';
 import { toPreview } from './constants';
 import { parseAgentTasks, type AgentTaskDto } from './status-tasks';
+import type { ChatMediaDto, ChatReactionDto } from './media-rules';
 
 /**
  * Quién escribió un mensaje.
@@ -63,6 +64,10 @@ export interface ChatMessagePayload {
   replyTo: ChatReplyToPayload | null;
   /** Evento de un mensaje de sistema ('nudge' = zumbido), o null. */
   eventType: string | null;
+  /** Reacciones con emoji (2026-10-20). Solo viaja si hay alguna (lib/chat/message-extras.ts). */
+  reactions?: ChatReactionDto[];
+  /** GIF o sticker (2026-10-20). Solo viaja en esos mensajes. */
+  media?: ChatMediaDto;
 }
 
 /**

@@ -25,6 +25,8 @@ export type ProcessSeriesRow = {
   eventLoopP99Ms: number | null;
   hostCpuPct: number | null;
   hostMemUsedPct: number | null;
+  /** Minutos con dato de esta instancia en la ventana (los bordes del rango van incompletos). */
+  minutes: number;
   httpRequests: number;
   httpErrors: number;
   httpP95Ms: number | null;
@@ -33,6 +35,7 @@ export type ProcessSeriesRow = {
   outThrottled: number;
   poolBorrowed: number | null;
   poolPending: number | null;
+  /** Conexiones abiertas en ese momento (NO es el máximo del pool: ver MetricsResponse.poolMax). */
   poolSize: number | null;
 };
 
@@ -70,6 +73,8 @@ export type DbSeriesRow = {
 
 export type PeriodSummary = {
   samples: number;
+  /** Minutos distintos con dato (para saber si dos periodos son comparables). */
+  minutes: number;
   requests: number;
   errors: number;
   p95Ms: number | null;
@@ -106,8 +111,10 @@ export type UserRow = {
   topModule: string | null;
   topModuleLabel: string | null;
   lastSeen: string;
-  /** Tiempo por módulo (aproximado: cada ventana de 5 min se asigna a su módulo principal). */
+  /** Tiempo por módulo. Exacto, salvo `modulesApproximate`. */
   modules: Array<{ module: string; label: string; totalMs: number }>;
+  /** Parte del rango viene de datos viejos donde cada ventana se asignaba entera a su módulo principal. */
+  modulesApproximate: boolean;
 };
 
 export type ActiveUsers = {
@@ -133,6 +140,8 @@ export type MetricsResponse = {
   activeUsers: ActiveUsers | null;
   /** Falta correr prisma/manual/2026-10-06-system-metrics-usuarios.sql en esta base. */
   usersTableMissing: boolean;
+  /** Máximo de conexiones del pool de mssql de CADA proceso (configuración), para el anillo. */
+  poolMax?: number | null;
   /** Alertas tempranas enviadas (la más reciente primero). Puede faltar en respuestas viejas. */
   alerts?: AlertRow[];
   /** Falta correr prisma/manual/2026-10-07-system-metrics-alertas.sql en esta base. */

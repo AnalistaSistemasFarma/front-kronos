@@ -4,13 +4,30 @@ import os from 'node:os';
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import { getPool } from '../mssqlPool';
 import { probeDatabase } from './dbProbe';
-import { normalizeOutboundHost, normalizeRoutePath } from './routeKey';
-import { DurationWindow, hostCpuPercent, round2, RouteAccumulator, UserAccumulator } from './stats';
+import sql from 'mssql';
+import { ChatKindCache, type ChatKind } from './chatKind';
+import {
+  AI_ASSISTANTS_MODULE,
+  chatLookupTarget,
+  isWaitingRoute,
+  normalizeOutboundHost,
+  normalizeRoutePath,
+} from './routeKey';
+import {
+  DurationWindow,
+  hostCpuPercent,
+  round2,
+  RouteAccumulator,
+  UserAccumulator,
+  type RouteSummary,
+  type UserSummary,
+} from './stats';
 import {
   deleteOldMetrics,
   insertDbSample,
   insertProcessSample,
   insertRouteSummaries,
+  insertUserModuleSummaries,
   insertUserSummaries,
   isMissingTableError,
   type ProcessSample,
@@ -36,8 +53,19 @@ import { sessionTokenFromCookie, UserIdentityCache } from './userIdentity';
  */
 
 const TICK_MS = 60_000;
-const ROUTE_FLUSH_EVERY_TICKS = 5;
+/** Ventana de rutas y usuarios, alineada al reloj (:00, :05, :10…) como las barras de las gráficas. */
+const ROUTE_WINDOW_MINUTES = 5;
 const DB_PROBE_EVERY_TICKS = 5;
+/** Si guardar se demora o falla, lo pendiente se reintenta en el siguiente minuto (con tope). */
+const MAX_PENDING_SAMPLES = 10;
+const MAX_PENDING_WINDOWS = 3;
+/**
+ * monitorEventLoopDelay mide el tiempo completo entre disparos de su temporizador, no solo el
+ * retraso: un proceso en reposo marca ~20–35 ms. Se resta la resolución para mostrar el retraso real.
+ */
+const LOOP_RESOLUTION_MS = 20;
+/** Petición que el navegador cortó antes de recibir la respuesta (mismo código que nginx). */
+const CLIENT_CLOSED_REQUEST = 499;
 const PAUSE_WHEN_TABLE_MISSING_MS = 10 * 60_000;
 const CLEANUP_EVERY_MS = 24 * 60 * 60_000;
 const FIRST_CLEANUP_DELAY_MS = 10 * 60_000;
@@ -148,25 +176,32 @@ export function startSystemMetrics(): void {
     const { decode } = await import('next-auth/jwt');
     return (await decode({ token, secret })) as { email?: unknown; name?: unknown } | null;
   });
+  const chatKinds = new ChatKindCache(async (target) => {
+    const pool = await getPool();
+    const r = await pool
+      .request()
+      .input('id', sql.Int, target.id)
+      .query<{ kind: string | null }>(
+        target.table === 'conversation'
+          ? 'SELECT kind FROM dbo.chat_conversation WHERE id = @id'
+          : `SELECT c.kind
+             FROM dbo.chat_attachment a
+             JOIN dbo.chat_message m ON m.id = a.id_message
+             JOIN dbo.chat_conversation c ON c.id = m.id_conversation
+             WHERE a.id = @id`
+      );
+    return r.recordset[0]?.kind ?? null;
+  });
 
   // --- Peticiones que ENTRAN a Kronos -------------------------------------------------
+  type InboundResponse = {
+    statusCode?: number;
+    getHeader?: (name: string) => unknown;
+    once?: (event: string, listener: () => void) => unknown;
+  };
   const inboundStarts = new WeakMap<object, InboundStart>();
-  dc.subscribe('http.server.request.start', (message) => {
-    const { request, response } = message as {
-      request: { url?: string; method?: string; headers?: { cookie?: string } };
-      response: object;
-    };
-    inboundStarts.set(response, {
-      t: performance.now(),
-      url: request?.url ?? '/',
-      method: request?.method ?? 'GET',
-      sessionToken: sessionTokenFromCookie(request?.headers?.cookie),
-    });
-  });
-  dc.subscribe('http.server.response.finish', (message) => {
-    const { response } = message as {
-      response: { statusCode?: number; getHeader?: (name: string) => unknown };
-    };
+
+  const finishInbound = (response: InboundResponse, aborted: boolean) => {
     const start = inboundStarts.get(response);
     if (!start) return;
     inboundStarts.delete(response);
@@ -174,33 +209,74 @@ export function startSystemMetrics(): void {
 
     const info = normalizeRoutePath(start.url);
     const contentType = String(response.getHeader?.('content-type') ?? '');
-    // Un stream SSE queda abierto minutos: contarlo, pero no meter su duración en los tiempos.
-    const durationMs = contentType.includes('text/event-stream') ? null : performance.now() - start.t;
-    const statusCode = response.statusCode ?? 0;
-    routes.record({
-      direction: 'in',
-      key: `${start.method} ${info.path}`,
-      module: info.module,
-      durationMs,
-      status: statusCode,
-    });
-    inbound.add(durationMs, statusCode);
+    // Un stream SSE o un long-poll quedan abiertos esperando: contarlos, pero no meter su
+    // duración en los tiempos (es espera, no consumo). Que el navegador los cierre es normal.
+    const waiting = contentType.includes('text/event-stream') || isWaitingRoute(info.path);
+    // Si el navegador cortó antes de recibir la respuesta (la persona se fue de la pantalla),
+    // la petición se cuenta igual, sin duración: antes se perdía y justo las esperas largas
+    // quedaban fuera del monitor.
+    const cut = aborted && !waiting;
+    const durationMs = waiting || cut ? null : performance.now() - start.t;
+    const statusCode = cut ? CLIENT_CLOSED_REQUEST : (response.statusCode ?? 0);
+    // Tráfico, errores y p95 del proceso son de pantallas y API: los archivos estáticos (JS,
+    // CSS, imágenes) son decenas por página, de pocos ms, e inflaban el tráfico y bajaban el p95.
+    if (info.module !== 'estaticos') inbound.add(durationMs, statusCode);
 
-    // Consumo por usuario: solo peticiones con sesión y que no sean archivos estáticos.
-    if (start.sessionToken && info.module !== 'estaticos') {
-      const entry = { module: info.module, durationMs, status: statusCode };
-      const known = identities.peek(start.sessionToken);
-      if (known) users.record({ ...entry, email: known.email, name: known.name });
-      else if (known === undefined) {
-        void identities.resolve(start.sessionToken).then((user) => {
-          if (user) users.record({ ...entry, email: user.email, name: user.name });
-        });
+    const commit = (module: string) => {
+      routes.record({
+        direction: 'in',
+        key: `${start.method} ${info.path}`,
+        module,
+        durationMs,
+        status: statusCode,
+      });
+
+      // Consumo por usuario: solo peticiones con sesión y que no sean archivos estáticos.
+      if (start.sessionToken && module !== 'estaticos') {
+        const entry = { module, durationMs, status: statusCode };
+        const known = identities.peek(start.sessionToken);
+        if (known) users.record({ ...entry, email: known.email, name: known.name });
+        else if (known === undefined) {
+          void identities.resolve(start.sessionToken).then((user) => {
+            if (user) users.record({ ...entry, email: user.email, name: user.name });
+          });
+        }
       }
-    }
+    };
+
+    // Un hilo o un adjunto del chat: "Chat" si es entre personas, "Asistentes IA" si es con
+    // agentes. El tipo se consulta una vez por conversación y queda recordado.
+    const target = info.module === 'chat' ? chatLookupTarget(start.url) : null;
+    if (!target) return commit(info.module);
+    const asModule = (kind: ChatKind | null | undefined) => (kind === 'ai' ? AI_ASSISTANTS_MODULE : 'chat');
+    const kind = chatKinds.peek(target);
+    if (kind) return commit(asModule(kind));
+    void chatKinds.resolve(target).then((resolved) => commit(asModule(resolved)));
+  };
+
+  dc.subscribe('http.server.request.start', (message) => {
+    const { request, response } = message as {
+      request: { url?: string; method?: string; headers?: { cookie?: string } };
+      response: InboundResponse;
+    };
+    inboundStarts.set(response, {
+      t: performance.now(),
+      url: request?.url ?? '/',
+      method: request?.method ?? 'GET',
+      sessionToken: sessionTokenFromCookie(request?.headers?.cookie),
+    });
+    // 'close' llega también después de una respuesta normal; para entonces ya se registró
+    // en 'finish' y se borró del mapa, así que solo cuenta las cortadas.
+    response?.once?.('close', () => finishInbound(response, true));
+  });
+  dc.subscribe('http.server.response.finish', (message) => {
+    finishInbound((message as { response: InboundResponse }).response, false);
   });
 
   // --- Llamadas que SALEN de Kronos (Graph, Orion, SAP, IA…) ------------------------------
   const outboundStarts = new WeakMap<object, OutboundStart>();
+  // La duración es hasta que el servicio RESPONDE (encabezados), no hasta terminar de bajar el
+  // cuerpo: medir el final no es fiable porque un fetch cuyo cuerpo nunca se lee no termina.
   const finishOutbound = (request: object, statusCode: number) => {
     const start = outboundStarts.get(request);
     if (!start) return;
@@ -243,14 +319,17 @@ export function startSystemMetrics(): void {
   });
 
   // --- Recursos del proceso y del servidor -------------------------------------------------
-  const loopDelay = monitorEventLoopDelay({ resolution: 20 });
+  const loopDelay = monitorEventLoopDelay({ resolution: LOOP_RESOLUTION_MS });
   loopDelay.enable();
 
   let prevCpu = process.cpuUsage();
   let prevCpuAt = performance.now();
   let prevHostCpus = os.cpus();
   let tick = 0;
-  let routeWindowStart = floorToMinute(new Date());
+  let routeWindowStart = floorToWindow(new Date());
+  const pendingSamples: ProcessSample[] = [];
+  const pendingWindows: Array<{ bucket: Date; routes: RouteSummary[]; users: UserSummary[]; modules: UserSummary[] }> = [];
+  let userModulesWarned = false;
   let flushing = false;
   let pausedUntil = 0;
   let lastCleanupAt = Date.now() - CLEANUP_EVERY_MS + FIRST_CLEANUP_DELAY_MS;
@@ -299,16 +378,17 @@ export function startSystemMetrics(): void {
     prevCpuAt = now;
 
     const hostCpus = os.cpus();
-    const hostCpu = hostCpuPercent(prevHostCpus, hostCpus);
+    const hostCpu = hostCpuPercent(prevHostCpus, hostCpus, process.platform === 'win32');
     prevHostCpus = hostCpus;
 
     const mem = process.memoryUsage();
     const total = os.totalmem();
     const free = os.freemem();
 
-    const p50 = loopDelay.percentile(50) / 1e6;
-    const p99 = loopDelay.percentile(99) / 1e6;
-    const max = loopDelay.max / 1e6;
+    const loopMs = (ns: number) => Math.max(0, ns / 1e6 - LOOP_RESOLUTION_MS);
+    const p50 = loopMs(loopDelay.percentile(50));
+    const p99 = loopMs(loopDelay.percentile(99));
+    const max = loopMs(loopDelay.max);
     loopDelay.reset();
 
     const inWindow = inbound.drain();
@@ -346,34 +426,69 @@ export function startSystemMetrics(): void {
     tick += 1;
     const sample = collectSample();
     status.latest = sample;
+    // Lo que no se pudo guardar se reintenta en el siguiente minuto (antes se descartaba y
+    // quedaban huecos justo cuando la base estaba con problemas). Con tope para no crecer.
+    pendingSamples.push(sample);
+    if (pendingSamples.length > MAX_PENDING_SAMPLES) pendingSamples.shift();
 
-    const flushRoutes = tick % ROUTE_FLUSH_EVERY_TICKS === 0;
+    // Rutas y usuarios: se cierra la ventana al cruzar un múltiplo de 5 minutos del reloj.
     // Se vacía siempre (aunque no se pueda guardar) para que la memoria no crezca.
-    const routeRows = flushRoutes ? routes.drain() : [];
-    const userRows = flushRoutes ? users.drain() : [];
-    const routeBucket = routeWindowStart;
-    if (flushRoutes) routeWindowStart = floorToMinute(new Date());
+    const windowNow = floorToWindow(new Date());
+    if (windowNow.getTime() > routeWindowStart.getTime()) {
+      const routeRows = routes.drain();
+      const userRows = users.drain();
+      if (routeRows.length || userRows.length) {
+        pendingWindows.push({ bucket: routeWindowStart, routes: routeRows, users: userRows, modules: userRows });
+        if (pendingWindows.length > MAX_PENDING_WINDOWS) pendingWindows.shift();
+      }
+      routeWindowStart = windowNow;
+    }
 
     if (flushing || Date.now() < pausedUntil) return;
     flushing = true;
     try {
       const pool = await getPool();
-      await insertProcessSample(pool, sample);
-      if (routeRows.length) {
-        await insertRouteSummaries(pool, routeBucket, status.host, status.instance, routeRows);
+      while (pendingSamples.length) {
+        await insertProcessSample(pool, pendingSamples[0]);
+        pendingSamples.shift();
       }
-      if (userRows.length) {
-        try {
-          await insertUserSummaries(pool, routeBucket, status.host, status.instance, userRows);
-          status.usersTableMissing = false;
-        } catch (error) {
-          // La tabla de usuarios va en un script aparte: si falta, lo demás se sigue guardando.
-          if (!isMissingTableError(error)) throw error;
-          if (!status.usersTableMissing) {
-            console.warn('[system-metrics] Falta la tabla system_metric_user (prisma/manual/2026-10-06-system-metrics-usuarios.sql)');
-          }
-          status.usersTableMissing = true;
+      while (pendingWindows.length) {
+        const w = pendingWindows[0];
+        if (w.routes.length) {
+          await insertRouteSummaries(pool, w.bucket, status.host, status.instance, w.routes);
+          w.routes = [];
         }
+        if (w.users.length) {
+          try {
+            await insertUserSummaries(pool, w.bucket, status.host, status.instance, w.users);
+            status.usersTableMissing = false;
+          } catch (error) {
+            // La tabla de usuarios va en un script aparte: si falta, lo demás se sigue guardando.
+            if (!isMissingTableError(error)) throw error;
+            if (!status.usersTableMissing) {
+              console.warn('[system-metrics] Falta la tabla system_metric_user (prisma/manual/2026-10-06-system-metrics-usuarios.sql)');
+            }
+            status.usersTableMissing = true;
+            w.modules = [];
+          }
+          w.users = [];
+        }
+        if (w.modules.length) {
+          try {
+            await insertUserModuleSummaries(pool, w.bucket, status.host, status.instance, w.modules);
+          } catch (error) {
+            // Script aparte (2026-10-20): sin la tabla, Usuarios usa el reparto aproximado de antes.
+            if (!isMissingTableError(error)) throw error;
+            if (!userModulesWarned) {
+              console.warn(
+                '[system-metrics] Falta la tabla system_metric_user_module (prisma/manual/2026-10-20-system-metrics-usuario-modulo.sql)'
+              );
+            }
+            userModulesWarned = true;
+          }
+          w.modules = [];
+        }
+        pendingWindows.shift();
       }
       if (isPrimaryInstance() && tick % DB_PROBE_EVERY_TICKS === 1) {
         const db = await probeDatabase(pool);
@@ -419,5 +534,12 @@ export function startSystemMetrics(): void {
 function floorToMinute(date: Date): Date {
   const d = new Date(date);
   d.setSeconds(0, 0);
+  return d;
+}
+
+/** Inicio de la ventana de ROUTE_WINDOW_MINUTES que contiene `date` (:00, :05, :10…). */
+function floorToWindow(date: Date): Date {
+  const d = floorToMinute(date);
+  d.setUTCMinutes(d.getUTCMinutes() - (d.getUTCMinutes() % ROUTE_WINDOW_MINUTES));
   return d;
 }

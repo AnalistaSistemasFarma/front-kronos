@@ -166,6 +166,45 @@ export async function insertUserSummaries(
   }
 }
 
+/** 4 parámetros por fila → 200 filas por INSERT. */
+const USER_MODULE_CHUNK = 200;
+
+/**
+ * Reparto real por módulo de cada persona en la ventana (tabla de
+ * 2026-10-20-system-metrics-usuario-modulo.sql). Antes solo se guardaba el módulo principal y
+ * todo el tiempo de la ventana se le asignaba a él ("100 % en X").
+ */
+export async function insertUserModuleSummaries(
+  pool: Pool,
+  bucketAt: Date,
+  host: string,
+  instance: string,
+  rows: UserSummary[]
+): Promise<void> {
+  const flat = rows.flatMap((u) => u.modules.map((m) => ({ email: u.email, ...m })));
+  for (let start = 0; start < flat.length; start += USER_MODULE_CHUNK) {
+    const chunk = flat.slice(start, start + USER_MODULE_CHUNK);
+    const req = pool
+      .request()
+      .input('bucket_at', sql.DateTime2(0), bucketAt)
+      .input('host', sql.NVarChar(128), host.slice(0, 128))
+      .input('instance', sql.NVarChar(16), instance.slice(0, 16));
+    const values: string[] = [];
+    chunk.forEach((m, i) => {
+      req
+        .input(`em${i}`, sql.NVarChar(320), m.email.slice(0, 320))
+        .input(`md${i}`, sql.NVarChar(80), m.module.slice(0, 80))
+        .input(`rq${i}`, sql.Int, m.requests)
+        .input(`tm${i}`, sql.BigInt, m.totalMs);
+      values.push(`(@bucket_at, @host, @instance, @em${i}, @md${i}, @rq${i}, @tm${i})`);
+    });
+    await req.query(`
+      INSERT INTO dbo.system_metric_user_module (
+        bucket_at, host, instance, user_email, module, requests, total_ms
+      ) VALUES ${values.join(',\n')}`);
+  }
+}
+
 export async function insertDbSample(pool: Pool, sampledAt: Date, s: DbSample): Promise<void> {
   await pool
     .request()
@@ -201,9 +240,10 @@ export async function deleteOldMetrics(pool: Pool, retentionDays: number): Promi
     ['dbo.system_metric_route', 'bucket_at', retentionDays],
     ['dbo.system_metric_db', 'sampled_at', retentionDays],
     ['dbo.system_metric_user', 'bucket_at', retentionDays],
+    ['dbo.system_metric_user_module', 'bucket_at', retentionDays],
     ['dbo.system_metric_alert', 'raised_at', Math.max(retentionDays, ALERT_RETENTION_DAYS)],
   ];
-  const optional = new Set(['dbo.system_metric_user', 'dbo.system_metric_alert']);
+  const optional = new Set(['dbo.system_metric_user', 'dbo.system_metric_user_module', 'dbo.system_metric_alert']);
   let deleted = 0;
   for (const [table, column, days] of targets) {
     for (let batch = 0; batch < 40; batch += 1) {
@@ -257,6 +297,8 @@ export type ProcessSeriesRow = {
   eventLoopP99Ms: number | null;
   hostCpuPct: number | null;
   hostMemUsedPct: number | null;
+  /** Minutos con dato de esta instancia en la ventana (la primera y la última pueden ir incompletas). */
+  minutes: number;
   httpRequests: number;
   httpErrors: number;
   httpP95Ms: number | null;
@@ -283,9 +325,12 @@ export async function readProcessSeries(pool: Pool, range: RangeKey): Promise<Pr
         MAX(event_loop_p99_ms) AS event_loop_p99_ms,
         AVG(host_cpu_pct) AS host_cpu_pct,
         AVG(host_mem_used_pct) AS host_mem_used_pct,
+        COUNT(*) AS minutes,
         SUM(http_requests) AS http_requests,
         SUM(http_errors) AS http_errors,
-        MAX(http_p95_ms) AS http_p95_ms,
+        -- Mismo cálculo que el resumen (promedio de los p95 por minuto, ponderado por tráfico):
+        -- antes era el MAX y la mini gráfica quedaba siempre por encima del número grande.
+        SUM(CAST(http_p95_ms AS BIGINT) * http_requests) / NULLIF(SUM(CAST(http_requests AS BIGINT)), 0) AS http_p95_ms,
         SUM(out_requests) AS out_requests,
         SUM(out_errors) AS out_errors,
         SUM(out_throttled) AS out_throttled,
@@ -306,6 +351,7 @@ export async function readProcessSeries(pool: Pool, range: RangeKey): Promise<Pr
     eventLoopP99Ms: nullableNumber(row.event_loop_p99_ms),
     hostCpuPct: nullableNumber(row.host_cpu_pct),
     hostMemUsedPct: nullableNumber(row.host_mem_used_pct),
+    minutes: Number(row.minutes) || 0,
     httpRequests: Number(row.http_requests) || 0,
     httpErrors: Number(row.http_errors) || 0,
     httpP95Ms: nullableNumber(row.http_p95_ms),
@@ -453,7 +499,10 @@ export async function readDbSeries(pool: Pool, range: RangeKey): Promise<DbSerie
 }
 
 export type PeriodSummary = {
+  /** Filas (minutos × instancias). */
   samples: number;
+  /** Minutos distintos con dato: sirve para saber si dos periodos son comparables. */
+  minutes: number;
   requests: number;
   errors: number;
   /** p95 promedio ponderado por peticiones (las ventanas con más tráfico pesan más). */
@@ -478,6 +527,7 @@ export async function readPeriodSummaries(
       SELECT
         CASE WHEN sampled_at >= DATEADD(minute, -@minutes, SYSUTCDATETIME()) THEN 'current' ELSE 'previous' END AS period,
         COUNT(*) AS samples,
+        COUNT(DISTINCT sampled_at) AS minutes,
         SUM(CAST(http_requests AS BIGINT)) AS requests,
         SUM(CAST(http_errors AS BIGINT)) AS errors,
         SUM(CAST(http_p95_ms AS BIGINT) * http_requests) / NULLIF(SUM(CAST(http_requests AS BIGINT)), 0) AS p95_ms,
@@ -494,6 +544,7 @@ export async function readPeriodSummaries(
       GROUP BY CASE WHEN sampled_at >= DATEADD(minute, -@minutes, SYSUTCDATETIME()) THEN 'current' ELSE 'previous' END`);
   const empty: PeriodSummary = {
     samples: 0,
+    minutes: 0,
     requests: 0,
     errors: 0,
     p95Ms: null,
@@ -511,6 +562,7 @@ export async function readPeriodSummaries(
     const target = row.period === 'current' ? out.current : out.previous;
     Object.assign(target, {
       samples: Number(row.samples) || 0,
+      minutes: Number(row.minutes) || 0,
       requests: Number(row.requests) || 0,
       errors: Number(row.errors) || 0,
       p95Ms: nullableNumber(row.p95_ms),
@@ -645,25 +697,69 @@ export type UserRankingRow = {
   /** Módulo donde más tiempo de servidor gastó en el rango. */
   topModule: string | null;
   lastSeen: string;
-  /** Tiempo por módulo (aproximado: cada ventana de 5 min cuenta para su módulo principal). */
+  /** Tiempo por módulo. Exacto desde system_metric_user_module; ver `modulesApproximate`. */
   modules: Array<{ module: string; totalMs: number }>;
+  /**
+   * true si parte del rango viene de datos viejos (sin la tabla por módulo), donde todo el
+   * tiempo de cada ventana se le asignaba a su módulo principal: ahí el % por módulo no es real.
+   */
+  modulesApproximate: boolean;
 };
+
+/**
+ * Consulta del ranking. Las ventanas en las que la persona solo tuvo peticiones que esperan
+ * (pulso del chat: total_ms = 0) no son actividad: no cuentan en peticiones, promedio ni p95
+ * (antes bajaban el promedio y el p95, que para esas ventanas valía 0).
+ * Con `withModules`, el tiempo de una ventana que ya tiene su reparto por módulo no se asigna
+ * al módulo principal (approx_ms solo cubre ventanas viejas).
+ */
+const userRankingSql = (withModules: boolean) => `
+      SELECT LOWER(u.user_email) AS user_email, MAX(u.user_name) AS user_name, u.top_module,
+        SUM(CAST(u.requests AS BIGINT)) AS requests,
+        SUM(CAST(u.errors AS BIGINT)) AS errors,
+        SUM(u.total_ms) AS total_ms,
+        MAX(u.max_ms) AS max_ms,
+        SUM(CAST(u.p95_ms AS BIGINT) * u.requests) AS p95_weighted,
+        ${withModules ? 'SUM(CASE WHEN m.user_email IS NULL THEN u.total_ms ELSE 0 END)' : 'SUM(u.total_ms)'} AS approx_ms,
+        MAX(u.bucket_at) AS last_seen
+      FROM dbo.system_metric_user u
+      ${
+        withModules
+          ? `LEFT JOIN (
+          SELECT DISTINCT bucket_at, host, instance, user_email
+          FROM dbo.system_metric_user_module
+          WHERE bucket_at >= DATEADD(minute, -@minutes, SYSUTCDATETIME())
+        ) m ON m.bucket_at = u.bucket_at AND m.host = u.host AND m.instance = u.instance AND m.user_email = u.user_email`
+          : ''
+      }
+      WHERE u.bucket_at >= DATEADD(minute, -@minutes, SYSUTCDATETIME())
+        AND u.total_ms > 0
+      GROUP BY LOWER(u.user_email), u.top_module`;
 
 /** Usuarios ordenados por tiempo de servidor consumido en el rango. */
 // Tope alto a propósito: el monitor muestra a TODAS las personas con actividad en el rango.
 export async function readUserRanking(pool: Pool, range: RangeKey, limit = 2000): Promise<UserRankingRow[]> {
   const { minutes } = RANGES[range];
-  const r = await pool.request().input('minutes', sql.Int, minutes).query(`
-      SELECT user_email, MAX(user_name) AS user_name, top_module,
-        SUM(CAST(requests AS BIGINT)) AS requests,
-        SUM(CAST(errors AS BIGINT)) AS errors,
-        SUM(total_ms) AS total_ms,
-        MAX(max_ms) AS max_ms,
-        SUM(CAST(p95_ms AS BIGINT) * requests) AS p95_weighted,
-        MAX(bucket_at) AS last_seen
-      FROM dbo.system_metric_user
-      WHERE bucket_at >= DATEADD(minute, -@minutes, SYSUTCDATETIME())
-      GROUP BY user_email, top_module`);
+  let withModules = true;
+  let r;
+  let exact: Array<{ user_email: string; module: string; total_ms: number }> = [];
+  try {
+    const [main, mods] = await Promise.all([
+      pool.request().input('minutes', sql.Int, minutes).query(userRankingSql(true)),
+      pool.request().input('minutes', sql.Int, minutes).query(`
+        SELECT LOWER(user_email) AS user_email, module, SUM(total_ms) AS total_ms
+        FROM dbo.system_metric_user_module
+        WHERE bucket_at >= DATEADD(minute, -@minutes, SYSUTCDATETIME())
+        GROUP BY LOWER(user_email), module`),
+    ]);
+    r = main;
+    exact = mods.recordset;
+  } catch (error) {
+    // Sin la tabla por módulo (script 2026-10-20 sin correr): reparto aproximado de antes.
+    if (!isMissingTableError(error)) throw error;
+    withModules = false;
+    r = await pool.request().input('minutes', sql.Int, minutes).query(userRankingSql(false));
+  }
 
   // Llega una fila por (usuario, módulo principal de cada ventana): se junta por usuario y se
   // queda como módulo principal el que sumó más tiempo.
@@ -683,23 +779,34 @@ export async function readUserRanking(pool: Pool, range: RangeKey, limit = 2000)
       topModule: null,
       lastSeen: new Date(0).toISOString(),
       modules: [],
+      modulesApproximate: false,
       p95Weighted: 0,
       moduleMs: new Map<string, number>(),
     };
     const totalMs = Number(row.total_ms) || 0;
+    const approxMs = Number(row.approx_ms) || 0;
     if (row.user_name) cur.name = String(row.user_name);
     cur.requests += Number(row.requests) || 0;
     cur.errors += Number(row.errors) || 0;
     cur.totalMs += totalMs;
     cur.maxMs = Math.max(cur.maxMs, Number(row.max_ms) || 0);
     cur.p95Weighted += Number(row.p95_weighted) || 0;
-    if (row.top_module) {
+    if (row.top_module && approxMs > 0) {
       const topMod = String(row.top_module);
-      cur.moduleMs.set(topMod, (cur.moduleMs.get(topMod) ?? 0) + totalMs);
+      cur.moduleMs.set(topMod, (cur.moduleMs.get(topMod) ?? 0) + approxMs);
+      cur.modulesApproximate = true;
     }
     const seen = new Date(row.last_seen).toISOString();
     if (seen > cur.lastSeen) cur.lastSeen = seen;
     byUser.set(email, cur);
+  }
+  if (withModules) {
+    for (const row of exact) {
+      const cur = byUser.get(String(row.user_email));
+      if (!cur) continue;
+      const mod = String(row.module);
+      cur.moduleMs.set(mod, (cur.moduleMs.get(mod) ?? 0) + (Number(row.total_ms) || 0));
+    }
   }
 
   return Array.from(byUser.values())
@@ -743,18 +850,21 @@ export async function readActiveUsers(pool: Pool, range: RangeKey): Promise<Acti
     .request()
     .input('minutes', sql.Int, minutes)
     .input('bucket', sql.Int, Math.max(bucket, 5)).query(`
+      -- Activo = tuvo al menos una petición con duración (total_ms > 0): tener la pestaña
+      -- abierta con el pulso del chat no cuenta. "Ahora" son las 3 últimas ventanas guardadas
+      -- (≈ 15 min de actividad: la ventana en curso aún no se guarda, por eso 20 y no 15).
       SELECT
         (SELECT COUNT(DISTINCT user_email) FROM dbo.system_metric_user
-          WHERE bucket_at >= DATEADD(minute, -15, SYSUTCDATETIME())) AS active_now,
+          WHERE bucket_at >= DATEADD(minute, -20, SYSUTCDATETIME()) AND total_ms > 0) AS active_now,
         (SELECT COUNT(DISTINCT user_email) FROM dbo.system_metric_user
-          WHERE bucket_at >= DATEADD(minute, -@minutes, SYSUTCDATETIME())) AS in_range,
+          WHERE bucket_at >= DATEADD(minute, -@minutes, SYSUTCDATETIME()) AND total_ms > 0) AS in_range,
         (SELECT COUNT(DISTINCT user_email) FROM dbo.system_metric_user
           WHERE bucket_at >= DATEADD(minute, -2 * @minutes, SYSUTCDATETIME())
-            AND bucket_at < DATEADD(minute, -@minutes, SYSUTCDATETIME())) AS previous_range;
+            AND bucket_at < DATEADD(minute, -@minutes, SYSUTCDATETIME()) AND total_ms > 0) AS previous_range;
 
       SELECT ${bucketExpr('bucket_at')} AS bucket, COUNT(DISTINCT user_email) AS users
       FROM dbo.system_metric_user
-      WHERE bucket_at >= DATEADD(minute, -@minutes, SYSUTCDATETIME())
+      WHERE bucket_at >= DATEADD(minute, -@minutes, SYSUTCDATETIME()) AND total_ms > 0
       GROUP BY ${bucketExpr('bucket_at')}
       ORDER BY bucket`);
   const recordsets = r.recordsets as unknown as Array<Array<Record<string, unknown>>>;

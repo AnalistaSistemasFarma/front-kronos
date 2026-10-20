@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AI_ASSISTANTS_MODULE,
+  chatLookupTarget,
+  isWaitingRoute,
   moduleLabel,
   normalizeOutboundHost,
   normalizeRoutePath,
@@ -75,5 +78,39 @@ describe('etiquetas', () => {
     expect(outboundHostLabel('graph.microsoft.com')).toContain('Graph');
     expect(outboundHostLabel('localhost:3000', 'localhost:3000')).toBe('Orion (firma)');
     expect(outboundHostLabel('192.168.10.7:50000')).toBe('SAP Service Layer');
+  });
+});
+
+describe('isWaitingRoute', () => {
+  it('reconoce los long-poll del chat (espera, no consumo)', () => {
+    expect(isWaitingRoute(normalizeRoutePath('/api/chat/pulse?since=9').path)).toBe(true);
+    expect(isWaitingRoute(normalizeRoutePath('/api/chat/agent/inbox?wait=25').path)).toBe(true);
+    expect(isWaitingRoute(normalizeRoutePath('/api/chat/conversations/12/poll?after=5').path)).toBe(false);
+    expect(isWaitingRoute(normalizeRoutePath('/api/requests-general/view-request').path)).toBe(false);
+  });
+});
+
+describe('chat entre personas y Asistentes IA', () => {
+  it('separa por ruta lo que es solo de agentes y lo que es solo entre personas', () => {
+    expect(normalizeRoutePath('/api/chat/agent/inbox?wait=25').module).toBe(AI_ASSISTANTS_MODULE);
+    expect(normalizeRoutePath('/api/chat/groups/4/participants').module).toBe(AI_ASSISTANTS_MODULE);
+    expect(normalizeRoutePath('/api/chat/auditoria/inventario').module).toBe(AI_ASSISTANTS_MODULE);
+    expect(normalizeRoutePath('/api/chat/conversations').module).toBe(AI_ASSISTANTS_MODULE);
+    expect(normalizeRoutePath('/process/chat').module).toBe(AI_ASSISTANTS_MODULE);
+    expect(normalizeRoutePath('/process/chat/proyecto/3').module).toBe(AI_ASSISTANTS_MODULE);
+    expect(normalizeRoutePath('/api/chat/pulse?since=9').module).toBe('chat');
+    expect(normalizeRoutePath('/api/chat/people/conversations').module).toBe('chat');
+    expect(normalizeRoutePath('/process/chat/persona/12').module).toBe('chat');
+    expect(moduleLabel(AI_ASSISTANTS_MODULE)).toBe('Asistentes IA');
+    expect(moduleLabel('chat')).toBe('Chat');
+  });
+
+  it('marca para consultar en la base las rutas que sirven a los dos (un hilo, un adjunto)', () => {
+    expect(chatLookupTarget('/api/chat/conversations/57/poll?after=3')).toEqual({ table: 'conversation', id: 57 });
+    expect(chatLookupTarget('/api/chat/conversations/57')).toEqual({ table: 'conversation', id: 57 });
+    expect(chatLookupTarget('/api/chat/attachments/42')).toEqual({ table: 'attachment', id: 42 });
+    expect(chatLookupTarget('/api/chat/conversations')).toBeNull();
+    expect(chatLookupTarget('/api/chat/pulse')).toBeNull();
+    expect(chatLookupTarget('/api/requests-general/12')).toBeNull();
   });
 });

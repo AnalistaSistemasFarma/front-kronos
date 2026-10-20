@@ -9,6 +9,7 @@
  * THRESHOLDS para ajustarlos en un solo lugar (el log de transacciones, en logHealth.ts).
  */
 
+import { localParts, WARNING_THRESHOLDS } from './earlyWarnings';
 import { judgeLog, type LogContext } from './logHealth';
 
 export type Severity = 'critical' | 'warning' | 'info' | 'ok';
@@ -42,6 +43,8 @@ export const THRESHOLDS = {
 
 type Summary = {
   samples: number;
+  /** Minutos distintos con dato (si falta, se usa `samples`). */
+  minutes?: number;
   requests: number;
   errors: number;
   p95Ms: number | null;
@@ -63,6 +66,7 @@ type ProcessPoint = {
 };
 
 type DbPoint = {
+  bucket?: string;
   hasServerState: boolean;
   sqlCpuPct: number | null;
   blockedRequests: number | null;
@@ -81,6 +85,8 @@ type DbLive = {
   topQueries: Array<{ statement: string; executions: number; totalCpuMs: number }>;
   logUsedPct?: number | null;
   log?: LogContext | null;
+  /** Consultas bloqueadas en la foto en vivo de esta base. */
+  blocked?: unknown[];
 };
 
 type Lifetime = { host: string; instance: string; pid: number; firstSeen: string };
@@ -110,6 +116,39 @@ const fmt = (n: number, digits = 0) =>
 
 function instanceName(instance: string): string {
   return instance === 'unica' ? 'Kronos' : `Kronos #${instance}`;
+}
+
+/** Hallazgos de "algo que pasó" solo son atención/crítico si pasó en este último tramo. */
+const RECENT_MIN = 15;
+const TIME_ZONE = 'America/Bogota';
+
+/**
+ * El periodo anterior solo se compara si tiene datos de al menos el 80 % del tiempo del
+ * actual: si el monitor estuvo apagado parte de él, la variación sale inflada.
+ */
+export function comparable(cur: Summary | undefined, prev: Summary | undefined): boolean {
+  if (!cur || !prev || prev.samples <= 0) return false;
+  const c = cur.minutes ?? cur.samples;
+  const p = prev.minutes ?? prev.samples;
+  return p >= c * 0.8;
+}
+
+/** Valor más alto entre el último dato de cada servidor (con varios servidores no basta la última fila). */
+function latestPerHostMax(rows: ProcessPoint[], pick: (r: ProcessPoint) => number | null): number | null {
+  const byHost = new Map<string, number>();
+  for (const r of rows) {
+    const v = pick(r);
+    if (v != null) byHost.set(r.host, v);
+  }
+  return byHost.size ? Math.max(...byHost.values()) : null;
+}
+
+/** Filas cuyo `bucket` cae en los últimos RECENT_MIN minutos del dato más reciente. */
+function recentRows<T extends { bucket?: string }>(rows: T[]): T[] {
+  const times = rows.map((r) => (r.bucket ? Date.parse(r.bucket) : NaN)).filter(Number.isFinite);
+  if (!times.length) return rows;
+  const from = Math.max(...times) - RECENT_MIN * 60_000;
+  return rows.filter((r) => !r.bucket || Date.parse(r.bucket) >= from);
 }
 
 /** Último valor no nulo de una serie. */
@@ -155,7 +194,7 @@ export function buildInsights(input: InsightInput): Insight[] {
   const prev = input.summary?.previous;
 
   // --- Servidor de la aplicación -----------------------------------------------------------
-  const hostCpu = lastValue(input.processSeries, (r) => r.hostCpuPct);
+  const hostCpu = latestPerHostMax(input.processSeries, (r) => r.hostCpuPct);
   const cpuLevel = level(hostCpu, THRESHOLDS.hostCpu);
   if (cpuLevel && hostCpu != null) {
     add({
@@ -168,7 +207,7 @@ export function buildInsights(input: InsightInput): Insight[] {
     });
   }
 
-  const hostMem = lastValue(input.processSeries, (r) => r.hostMemUsedPct);
+  const hostMem = latestPerHostMax(input.processSeries, (r) => r.hostMemUsedPct);
   const memLevel = level(hostMem, THRESHOLDS.hostMem);
   if (memLevel && hostMem != null) {
     add({
@@ -217,24 +256,37 @@ export function buildInsights(input: InsightInput): Insight[] {
     }
   }
 
-  const restartsByInstance = new Map<string, number>();
+  // Reinicios: cada pid nuevo de una instancia (el primero del rango no cuenta). Los que nacen
+  // en la franja del reinicio programado de pm2 (00:02, cron_restart) no son caídas: antes, en
+  // 7 días salían ~6 "reinicios" por instancia y el panel quedaba en Atención sin motivo.
+  const pidsByInstance = new Map<string, Lifetime[]>();
   for (const l of input.lifetimes) {
     const k = `${l.host}|${l.instance}`;
-    restartsByInstance.set(k, (restartsByInstance.get(k) ?? 0) + 1);
+    pidsByInstance.set(k, [...(pidsByInstance.get(k) ?? []), l]);
   }
-  for (const [key, processes] of restartsByInstance) {
-    const restarts = processes - 1;
+  const { fromMin, toMin } = WARNING_THRESHOLDS.cronWindow;
+  const inCron = (iso: string) => {
+    if (!Number.isFinite(Date.parse(iso))) return false;
+    const m = localParts(iso, TIME_ZONE).minuteOfDay;
+    return m >= fromMin && m < toMin;
+  };
+  for (const [key, pids] of pidsByInstance) {
+    const later = [...pids].sort((a, b) => a.firstSeen.localeCompare(b.firstSeen)).slice(1);
+    const scheduled = later.filter((l) => inCron(l.firstSeen)).length;
+    const restarts = later.length - scheduled;
     if (restarts <= 0) continue;
     const instance = key.split('|')[1];
+    const scheduledNote =
+      scheduled > 0 ? ` Sin contar ${scheduled === 1 ? 'el reinicio programado' : `${scheduled} reinicios programados`} de las 00:02.` : '';
     add({
       id: `restarts-${key}`,
       severity: restarts >= 3 ? 'warning' : 'info',
       area: 'servidor',
       title: `${instanceName(instance)} se reinició ${restarts === 1 ? '1 vez' : `${restarts} veces`} en ${input.rangeLabel}`,
       detail:
-        restarts >= 3
-          ? 'Varios reinicios seguidos suelen ser caídas (error no controlado o falta de memoria). Revise los logs de pm2.'
-          : 'Puede ser el reinicio programado de las 00:02 o un despliegue.',
+        (restarts >= 3
+          ? 'Varios reinicios fuera del horario programado suelen ser caídas (error no controlado o falta de memoria) o despliegues. Revise los logs de pm2.'
+          : 'Puede ser un despliegue o una caída: revise los logs de pm2 si no hubo despliegue.') + scheduledNote,
     });
   }
 
@@ -248,12 +300,13 @@ export function buildInsights(input: InsightInput): Insight[] {
         severity: errLevel,
         area: 'trafico',
         title: `${fmt(errorPct, 1)} % de las peticiones terminan en error`,
-        detail: `${fmt(cur.errors)} de ${fmt(cur.requests)} respuestas fueron errores del servidor (5xx). La tabla "Rutas más pesadas" muestra cuáles fallan.`,
+        detail: `${fmt(cur.errors)} de ${fmt(cur.requests)} respuestas fueron errores del servidor (5xx) o conexiones cortadas. La tabla "Rutas más pesadas" muestra cuáles fallan.`,
       });
     }
   }
 
-  if (cur?.p95Ms != null && prev?.p95Ms != null && prev.p95Ms > 0 && prev.samples > 0) {
+  const prevComparable = comparable(cur, prev);
+  if (cur?.p95Ms != null && prev?.p95Ms != null && prev.p95Ms > 0 && prevComparable) {
     const change = ((cur.p95Ms - prev.p95Ms) / prev.p95Ms) * 100;
     if (change >= THRESHOLDS.slowerPct && cur.p95Ms >= THRESHOLDS.slowerMinMs) {
       add({
@@ -261,34 +314,42 @@ export function buildInsights(input: InsightInput): Insight[] {
         severity: 'warning',
         area: 'trafico',
         title: `Kronos responde ${fmt(change)} % más lento que en el periodo anterior`,
-        detail: `El 95 % de las peticiones tarda hasta ${fmt(cur.p95Ms)} ms (antes ${fmt(prev.p95Ms)} ms).`,
+        detail: `El p95 aproximado (promedio de los p95 de cada minuto) subió a ${fmt(cur.p95Ms)} ms (antes ${fmt(prev.p95Ms)} ms).`,
       });
     }
   }
 
-  if (cur && prev && prev.samples > 0 && prev.requests >= THRESHOLDS.minRequestsForRates) {
-    const change = ((cur.requests - prev.requests) / prev.requests) * 100;
+  if (cur && prev && prevComparable && prev.requests >= THRESHOLDS.minRequestsForRates) {
+    // Se comparan tasas (peticiones por minuto con dato), no totales.
+    const rate = (s: Summary) => s.requests / Math.max(1, s.minutes ?? s.samples);
+    const change = ((rate(cur) - rate(prev)) / rate(prev)) * 100;
     if (Math.abs(change) >= 50) {
       add({
         id: 'traffic-change',
         severity: 'info',
         area: 'trafico',
         title: `El tráfico ${change > 0 ? 'subió' : 'bajó'} ${fmt(Math.abs(change))} % frente al periodo anterior`,
-        detail: `${fmt(cur.requests)} peticiones ahora contra ${fmt(prev.requests)} antes.`,
+        detail: `${fmt(rate(cur), 1)} peticiones por minuto ahora contra ${fmt(rate(prev), 1)} antes.`,
       });
     }
   }
 
-  const pending = cur?.maxPoolPending ?? lastValue(input.processSeries, (r) => r.poolPending);
-  if (pending != null && pending > 0) {
+  // Conexiones SQL agotadas: atención/crítico solo si pasó en los últimos 15 min; si fue antes
+  // en el rango queda como información (antes un pico de hace 6 días dejaba el panel en rojo).
+  const pendingOf = (rows: ProcessPoint[]) => rows.reduce((acc, r) => Math.max(acc, r.poolPending ?? 0), 0);
+  const recentPending = pendingOf(recentRows(input.processSeries));
+  const rangePending = Math.max(cur?.maxPoolPending ?? 0, pendingOf(input.processSeries));
+  const pending = recentPending > 0 ? recentPending : rangePending;
+  if (pending > 0) {
     add({
       id: 'pool-pending',
-      severity: pending >= 5 ? 'critical' : 'warning',
+      severity: recentPending >= 5 ? 'critical' : recentPending > 0 ? 'warning' : 'info',
       area: 'base',
       title:
-        pending === 1
+        (pending === 1
           ? 'Una petición tuvo que esperar una conexión libre a SQL'
-          : `Hasta ${fmt(pending)} peticiones esperaron una conexión libre a SQL`,
+          : `Hasta ${fmt(pending)} peticiones esperaron una conexión libre a SQL`) +
+        (recentPending > 0 ? '' : ` en ${input.rangeLabel} (no en los últimos ${RECENT_MIN} min)`),
       detail:
         'El pool de conexiones de Kronos se quedó corto: o hay consultas lentas que retienen conexiones, o llamadas externas lentas dentro de una transacción.',
     });
@@ -307,19 +368,25 @@ export function buildInsights(input: InsightInput): Insight[] {
     });
   }
 
-  const maxBlocked = input.db.reduce((acc, r) => Math.max(acc, r.blockedRequests ?? 0), 0);
+  // Igual que el pool: solo es atención/crítico si el bloqueo se vio en los últimos 15 min.
+  const blockedOf = (rows: DbPoint[]) => rows.reduce((acc, r) => Math.max(acc, r.blockedRequests ?? 0), 0);
+  const recentBlocked = blockedOf(recentRows(input.db));
+  const maxBlocked = blockedOf(input.db);
   const blockedLevel = level(maxBlocked, THRESHOLDS.blocked);
   if (blockedLevel) {
     const wait = input.db.reduce((acc, r) => Math.max(acc, r.longestWaitMs ?? 0), 0);
     add({
       id: 'blocked',
-      severity: blockedLevel,
+      severity: recentBlocked > 0 ? (level(recentBlocked, THRESHOLDS.blocked) ?? 'warning') : 'info',
       area: 'base',
       title:
-        maxBlocked === 1
+        (maxBlocked === 1
           ? 'Hubo una consulta bloqueada esperando a otra'
-          : `Hubo hasta ${fmt(maxBlocked)} consultas bloqueadas al mismo tiempo`,
-      detail: `La espera más larga fue de ${fmt(wait / 1000, 1)} s. Un bloqueo largo congela a todos los usuarios que tocan esas tablas.`,
+          : `Hubo hasta ${fmt(maxBlocked)} consultas bloqueadas al mismo tiempo`) +
+        (recentBlocked > 0 ? '' : ` en ${input.rangeLabel} (no en los últimos ${RECENT_MIN} min)`),
+      detail:
+        (wait > 0 ? `La espera más larga fue de ${fmt(wait / 1000, 1)} s. ` : '') +
+        'Un bloqueo largo congela a todos los usuarios que tocan esas tablas. Se revisa cada 5 minutos.',
     });
   }
 
@@ -381,7 +448,9 @@ export function buildInsights(input: InsightInput): Insight[] {
       id: 'query-store',
       severity: 'info',
       area: 'base',
-      title: live.databaseName ? `Query Store está apagado en ${live.databaseName}` : 'Query Store está apagado',
+      title: `Query Store está ${
+        live.queryStore === 'READ_ONLY' ? 'en solo lectura (suele ser porque se llenó)' : live.queryStore === 'ERROR' ? 'con error' : 'apagado'
+      }${live.databaseName ? ` en ${live.databaseName}` : ''}`,
       detail:
         'Sin él, el historial de consultas se pierde cada vez que SQL Server reinicia o limpia su caché. Activarlo permite comparar "antes y después" de un cambio.',
     });
@@ -415,6 +484,86 @@ export function buildInsights(input: InsightInput): Insight[] {
   }
 
   return out.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
+}
+
+const MAX_HIGHLIGHTS = 4;
+
+/**
+ * Lo que va BIEN, para mostrarlo primero en el panel y que no todo se lea como problemas.
+ * Solo se dice lo que los datos respaldan, con los mismos umbrales de buildInsights: si un
+ * área ya tiene un hallazgo (p. ej. CPU alta) no se celebra esa misma área.
+ */
+export function buildHighlights(input: InsightInput, insights: Insight[]): Insight[] {
+  const out: Insight[] = [];
+  const flagged = new Set(insights.filter((i) => i.severity !== 'ok').map((i) => i.id));
+  const flaggedPrefix = (prefix: string) => Array.from(flagged).some((id) => id.startsWith(prefix));
+  const cur = input.summary?.current;
+
+  if (cur && cur.requests >= THRESHOLDS.minRequestsForRates && !flagged.has('error-rate')) {
+    // Se trunca (no se redondea): 99,96 % no debe leerse "100 %" si hubo errores.
+    const okPct = Math.floor(((cur.requests - cur.errors) / cur.requests) * 1000) / 10;
+    out.push({
+      id: 'good-errors',
+      severity: 'ok',
+      area: 'trafico',
+      title: cur.errors === 0 ? 'Todas las peticiones respondieron sin error' : `${fmt(okPct, 1)} % de las peticiones respondieron sin error`,
+      detail: `${fmt(cur.requests)} peticiones de pantallas y API en ${input.rangeLabel}.`,
+    });
+  }
+
+  if (cur?.p95Ms != null && !flagged.has('slower') && cur.p95Ms < 1000) {
+    out.push({
+      id: 'good-speed',
+      severity: 'ok',
+      area: 'trafico',
+      title: `Las pantallas responden rápido: unos ${fmt(cur.p95Ms)} ms`,
+      detail: 'p95 aproximado: casi todas las peticiones de cada minuto terminan en ese tiempo o menos.',
+    });
+  }
+
+  // Con margen real (no solo "debajo del umbral de atención") y el servidor más cargado.
+  const hostCpu = latestPerHostMax(input.processSeries, (r) => r.hostCpuPct);
+  const hostMem = latestPerHostMax(input.processSeries, (r) => r.hostMemUsedPct);
+  if (hostCpu != null && hostMem != null && !flagged.has('host-cpu') && !flagged.has('host-mem')) {
+    const roomy = hostCpu < 40 && hostMem < 65;
+    out.push({
+      id: 'good-server',
+      severity: 'ok',
+      area: 'servidor',
+      title: roomy ? 'El servidor tiene capacidad de sobra' : 'CPU y memoria del servidor dentro de lo normal',
+      detail: `Último dato: CPU al ${fmt(hostCpu)} % y memoria al ${fmt(hostMem)} %.`,
+    });
+  }
+
+  const dbProblem =
+    flagged.has('blocked') || flagged.has('sql-cpu') || flagged.has('pool-pending') || (input.dbLive?.blocked?.length ?? 0) > 0;
+  if (input.db.some((r) => r.hasServerState) && !dbProblem) {
+    out.push({
+      id: 'good-db',
+      severity: 'ok',
+      area: 'base',
+      title: 'Sin bloqueos en la base de datos',
+      detail: 'No se vieron consultas esperando a otra en las revisiones de SQL (cada 5 min) ni en la foto en vivo.',
+    });
+  }
+
+  // Cualquier servicio con fallas o rechazos (aunque tenga pocas llamadas) impide la frase.
+  const outCalls = input.outbound.reduce((acc, o) => acc + o.requests, 0);
+  const outbad = input.outbound.some((o) => o.throttled > 0 || (o.requests > 0 && o.errors / o.requests >= 0.05));
+  if (outCalls > 0 && !outbad && !flaggedPrefix('throttled-') && !flaggedPrefix('outbound-errors-')) {
+    const names = Array.from(new Set(input.outbound.filter((o) => o.requests > 0).map((o) => o.label ?? o.key)));
+    out.push({
+      id: 'good-external',
+      severity: 'ok',
+      area: 'externos',
+      title: 'Los servicios externos responden bien',
+      detail: `${fmt(outCalls)} llamadas sin rechazos ni fallas relevantes: ${names.slice(0, 3).join(', ')}${
+        names.length > 3 ? ` y ${names.length - 3} más` : ''
+      }.`,
+    });
+  }
+
+  return out.slice(0, MAX_HIGHLIGHTS);
 }
 
 export type Verdict = { severity: Severity; headline: string; sub: string };

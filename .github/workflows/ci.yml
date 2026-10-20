@@ -453,6 +453,17 @@ jobs:
           echo "IF OBJECT_ID(N'dbo.chat_project_read', N'U') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'chat_project_read_conversation_user' AND is_unique = 1) OR NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'chat_project_read_last_read_ck') OR (SELECT COUNT(*) FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.chat_project_read') AND type = 2) <> 2 THROW 50000, N'La migración de no leídos de Proyectos no dejó la tabla, sus dos índices o el CHECK.', 1;" > /tmp/no-leidos-ok.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/no-leidos-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-19-proyectos-no-leidos-PROD.sql; then echo "El script de PROD de no leídos debió negarse en kronos_ci"; exit 1; fi
+          # Reacciones, GIF y stickers del chat (2026-10-20): migración y PRUEBAS dos veces (idempotencia), objetos y CHECK, y PROD que se niega.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261020120000_chat_reacciones_stickers/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261020120000_chat_reacciones_stickers/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-20-chat-reacciones-stickers-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-20-chat-reacciones-stickers-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.chat_message_reaction', N'U') IS NULL OR OBJECT_ID(N'dbo.chat_message_media', N'U') IS NULL OR OBJECT_ID(N'dbo.chat_sticker', N'U') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'chat_message_reaction_message_user_emoji' AND is_unique = 1) OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'chat_message_reaction_conversation_id_idx') OR (SELECT COUNT(*) FROM sys.check_constraints WHERE name IN (N'chat_sticker_content_type_ck', N'chat_sticker_size_ck', N'chat_message_media_kind_ck', N'chat_message_media_provider_ck', N'chat_message_reaction_emoji_ck')) <> 5 THROW 50000, N'La migración de reacciones no dejó las tablas, los índices o los CHECK.', 1;" > /tmp/reacciones-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/reacciones-ok.sql
+          # El CHECK de proveedor debe rechazar un GIF sin id del proveedor (se prueba sobre un mensaje real de la base efímera, si lo hay, dentro de una transacción que se deshace).
+          echo "IF EXISTS (SELECT 1 FROM dbo.chat_message) BEGIN BEGIN TRAN; BEGIN TRY INSERT INTO dbo.chat_message_media (id_message, kind, provider) SELECT TOP 1 id, N'gif', N'giphy' FROM dbo.chat_message; ROLLBACK TRAN; THROW 50000, N'El CHECK de chat_message_media aceptó un GIF sin id.', 1; END TRY BEGIN CATCH IF @@TRANCOUNT > 0 ROLLBACK TRAN; IF ERROR_NUMBER() = 50000 THROW; END CATCH; END;" > /tmp/reacciones-check.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/reacciones-check.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-20-chat-reacciones-stickers-PROD.sql; then echo "El script de PROD de reacciones debió negarse en kronos_ci"; exit 1; fi
           # Bitácora · actividades de texto libre (2026-10-17): migración y PRUEBAS dos veces, reversa y otra vez PRUEBAS (idempotencia ida y vuelta).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017200000_bitacora_proceso_texto_libre/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017200000_bitacora_proceso_texto_libre/migration.sql
@@ -485,7 +496,7 @@ jobs:
         run: |
           set -e
           # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
-          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida"
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida"
           reversa() {
             { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
@@ -496,6 +507,11 @@ jobs:
             npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
           }
           # De la más nueva a la más antigua…
+          # Reacciones, GIF y stickers del chat (2026-10-20): ida y vuelta (reversa dos veces, comprobación y la migración otra vez).
+          reversa prisma/manual/2026-10-20-chat-reacciones-stickers-reversa.sql
+          echo "IF OBJECT_ID(N'dbo.chat_message_reaction', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.chat_message_media', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.chat_sticker', N'U') IS NOT NULL THROW 50000, N'La reversa de reacciones no quitó sus tablas.', 1;" > /tmp/reacciones-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/reacciones-quitado.sql
+          migra 20261020120000_chat_reacciones_stickers
           # No leídos de Proyectos (2026-10-19): con las marcas que dejó la integración, sin la bandera debe negarse; luego ida y vuelta. Va ANTES que la del equipo.
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-19-proyectos-no-leidos-reversa.sql; then echo "La reversa de no leídos debió negarse sin su bandera"; exit 1; fi
           reversa prisma/manual/2026-10-19-proyectos-no-leidos-reversa.sql

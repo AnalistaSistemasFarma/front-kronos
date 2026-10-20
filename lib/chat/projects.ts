@@ -35,6 +35,8 @@
  */
 import { prisma } from '../prisma';
 import { getChatAccess } from './access';
+import { parseAgentTasks } from './status-tasks';
+import type { EstadoAgenteProyectoDto } from '../proyectos/estado-agente';
 import {
   capabilitiesFor,
   profileLabel,
@@ -447,6 +449,8 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
           id_agent: true,
           created_by: true,
           agent: { select: agenteMini },
+          // Estado del agente (el mismo indicador del chat, 2026-10-20).
+          statuses: { select: { id_agent: true, state: true, label: true, tasks: true, updated_at: true } },
         },
         orderBy: [{ last_message_at: 'desc' }, { id: 'desc' }],
         take: 200,
@@ -528,6 +532,7 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
         agent: aAgenteMini(c.agent),
         createdBy: persona(c.created_by),
         soloLectura: w.ok ? null : w.motivo,
+        agentStatus: estadoDeConversacion(c, p.id_project, p.name),
       };
     }),
     memberCount: p.members.length,
@@ -535,6 +540,38 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
     fileCount: p.files.length,
     taskCount: p._count.tasks,
     teamCount: p._count.subagents,
+  };
+}
+
+/**
+ * Estado del agente DUEÑO de una conversación de proyecto (2026-10-20). En un
+ * proyecto cada conversación es de un solo agente; una fila de otro agente no
+ * se muestra.
+ */
+function estadoDeConversacion(
+  c: {
+    id: number;
+    title: string | null;
+    id_agent: number;
+    agent: Parameters<typeof aAgenteMini>[0];
+    statuses: { id_agent: number; state: string; label: string | null; tasks: string | null; updated_at: Date }[];
+  },
+  idProject: number,
+  projectName: string
+): EstadoAgenteProyectoDto | null {
+  const s = c.statuses.find((x) => x.id_agent === c.id_agent);
+  if (!s) return null;
+  const a = aAgenteMini(c.agent);
+  return {
+    idConversation: c.id,
+    idProject,
+    projectName,
+    conversationTitle: c.title?.trim() || 'Conversación',
+    agent: { idAgent: a.idAgent, code: a.code, displayName: a.displayName, avatarUrl: a.avatarUrl, avatarVersion: a.avatarVersion },
+    state: s.state,
+    label: s.label,
+    tasks: parseAgentTasks(s.tasks),
+    updatedAt: s.updated_at.toISOString(),
   };
 }
 

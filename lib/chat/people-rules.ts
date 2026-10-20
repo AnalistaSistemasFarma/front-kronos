@@ -229,7 +229,8 @@ export const NUDGE_FRESH_MS = 2 * 60_000;
  * ('project', 2026-10-19: icono «Proyectos» de la cabecera).
  */
 export interface ChatPulseEvent {
-  type: 'message' | 'nudge' | 'project';
+  /** 'reaction' (2026-10-20): alguien reaccionó; solo pide sondear el hilo. */
+  type: 'message' | 'nudge' | 'project' | 'reaction';
   idConversation: number;
   idMessage: number;
   /** Quién lo escribió o zumbó. */

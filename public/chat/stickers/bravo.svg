@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160" role="img" aria-label="¡Bravo!">
+  <title>¡Bravo!</title>
+  <ellipse cx="80" cy="150" rx="50" ry="6" fill="#0f1a2c" opacity=".12"/>
+  <g stroke="#ffffff" stroke-width="7" stroke-linejoin="round" paint-order="stroke">
+    <path d="M50 22 H110 V44 C110 64 96 76 80 76 C64 76 50 64 50 44 Z" fill="#e0a526"/>
+    <path d="M50 30 H36 C36 46 42 54 54 56 M110 30 H124 C124 46 118 54 106 56" fill="none" stroke="#e0a526" stroke-width="7" stroke-linecap="round"/>
+    <rect x="72" y="76" width="16" height="14" fill="#b07300" stroke-width="4"/>
+    <rect x="58" y="88" width="44" height="14" rx="4" fill="#1a3c6e" stroke-width="5"/>
+    <path d="M80 32 L83 40 L91 41 L85 46 L87 54 L80 50 L73 54 L75 46 L69 41 L77 40 Z" fill="#ffffff" stroke-width="0"/>
+  </g>
+  <g>
+    <rect x="22" y="110" width="116" height="32" rx="16" fill="#1a3c6e" stroke="#ffffff" stroke-width="5" paint-order="stroke"/>
+    <text x="80" y="131" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="800" fill="#ffffff">¡Bravo!</text>
+  </g>
+</svg>
