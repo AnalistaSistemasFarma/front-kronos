@@ -31,7 +31,7 @@
  * lo versionado (los `.env` están en .gitignore).
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ErrorConfig } from './config.mjs';
@@ -76,6 +76,28 @@ const RE_RAMA = /^[A-Za-z0-9._/-]{1,100}$/;
 const RE_WORKFLOW = /^[A-Za-z0-9._-]+\.ya?ml$/;
 const RE_CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** Ruta relativa dentro del repo: sin «..», sin absoluta, caracteres simples. */
+function rutaRelativaSegura(r) {
+  return typeof r === 'string' && /^[A-Za-z0-9._/-]{1,200}$/.test(r) && !path.isAbsolute(r) && !r.split('/').some((p) => p === '..' || p === '');
+}
+
+/**
+ * Copia en el worktree los stubs sin secretos que el CI usa para compilar (solo si el
+ * destino no existe y el origen está versionado en el worktree). Nunca sobrescribe.
+ */
+export function copiarStubsPruebas(worktree, stubs = {}) {
+  const copiados = [];
+  for (const [d, o] of Object.entries(stubs)) {
+    const origen = path.join(worktree, o);
+    const destino = path.join(worktree, d);
+    if (!existsSync(origen) || existsSync(destino)) continue;
+    mkdirSync(path.dirname(destino), { recursive: true });
+    writeFileSync(destino, readFileSync(origen), { mode: 0o600 });
+    copiados.push(d);
+  }
+  return copiados;
+}
+
 /**
  * Valida repos-por-proyecto.json. Todo falla cerrado.
  * {
@@ -111,6 +133,13 @@ export function validarReposPorProyecto(json) {
     if (!Array.isArray(extra) || extra.some((b) => !RE_RAMA.test(b) || b.startsWith(PREFIJO_RAMA))) {
       throw new ErrorConfig(`Repo ${nombre}: ramasProtegidas inválidas.`);
     }
+    // stubsPruebas: { "<destino sin versionar>": "<archivo VERSIONADO del repo>" }, lo mismo
+    // que hace el CI (p. ej. front-kronos: dbconfig.js ← .github/dbconfig.ci.stub.js).
+    const stubs = r.stubsPruebas ?? {};
+    if (!stubs || typeof stubs !== 'object' || Array.isArray(stubs)) throw new ErrorConfig(`Repo ${nombre}: stubsPruebas debe ser un objeto.`);
+    for (const [d, o] of Object.entries(stubs)) {
+      if (!rutaRelativaSegura(d) || !rutaRelativaSegura(o) || /(^|\/)\.env/i.test(d) || /(^|\/)\.env/i.test(o)) throw new ErrorConfig(`Repo ${nombre}: stubsPruebas inválido (${d}).`);
+    }
     const workflows = r.workflowsProduccion ?? [];
     if (!Array.isArray(workflows) || workflows.some((w) => !RE_WORKFLOW.test(w))) {
       throw new ErrorConfig(`Repo ${nombre}: workflowsProduccion inválidos.`);
@@ -123,6 +152,7 @@ export function validarReposPorProyecto(json) {
       ramaProduccion: r.ramaProduccion,
       ramasProtegidas: [...new Set([...RAMAS_PROTEGIDAS_BASE, r.ramaPruebas, r.ramaProduccion, ...extra])],
       workflowsProduccion: [...new Set(workflows)],
+      stubsPruebas: { ...stubs },
       despliegue: typeof r.despliegue === 'string' ? r.despliegue.slice(0, 2000) : '',
       descripcion: typeof r.descripcion === 'string' ? r.descripcion.replace(/\s+/g, ' ').trim().slice(0, 200) : '',
     });
@@ -344,6 +374,7 @@ export function prepararWorktrees({ repos, rutas, idProject, idConversation, env
         : ['worktree', 'add', '--no-track', '-b', rama, destino, `origin/${r.ramaPruebas}`];
       ejecutarGit(args, { cwd: r.clon, env: envGit });
     }
+    copiarStubsPruebas(destino, r.stubsPruebas);
     listos.push({ ...r, worktree: destino, rama, gitComun: path.join(r.clon, '.git') });
   }
   return listos;
@@ -359,7 +390,7 @@ const GH_LECTURA = [
   'pr view', 'pr list', 'pr diff', 'pr checks', 'pr status', 'pr create', 'pr comment', 'pr edit',
   'run list', 'run view', 'run watch', 'workflow list', 'workflow view', 'repo view', 'issue view', 'issue list', 'status',
 ];
-const NPM = ['npm test', 'npm run', 'npm ci', 'npm install', 'npm ls', 'npm --version', 'npx tsc', 'npx eslint', 'npx jest', 'npx prettier', 'npx next lint', 'npx vitest', 'node'];
+const NPM = ['npm test', 'npm run', 'npm ci', 'npm install', 'npm ls', 'npm --version', 'npx tsc', 'npx eslint', 'npx jest', 'npx prettier', 'npx next lint', 'npx vitest', 'npx prisma generate', 'npx prisma validate', 'node'];
 
 /** Siempre prohibido (gana sobre cualquier permiso). */
 export const BASH_PROHIBIDO = [
@@ -466,6 +497,7 @@ export function textoCodigo({ worktrees, autorizado, puedePasar, autores, operad
     l.push(
       `- **${w.nombre}** (GitHub ${w.github}): carpeta \`./codigo/${w.nombre}\` (ruta completa \`${w.worktree}\`), rama de trabajo \`${w.rama}\` (salió de \`origin/${w.ramaPruebas}\`). Rama de pruebas: \`${w.ramaPruebas}\`; rama de producción: \`${w.ramaProduccion}\`.${deps ? ` Estado: ${deps}.` : ''}`,
       ...(w.despliegue ? [`  - Despliegue: ${w.despliegue}`] : []),
+      ...(Object.keys(w.stubsPruebas ?? {}).length ? [`  - Stubs SIN secretos para compilar, copiados como en el CI: ${Object.entries(w.stubsPruebas).map(([d, o]) => `\`${d}\` ← \`${o}\``).join(', ')}. No los suba al repo.`] : []),
       ...(w.workflowsProduccion.length ? [`  - Workflows de producción: ${w.workflowsProduccion.map((x) => `\`${x}\``).join(', ')}`] : [])
     );
   }
@@ -478,7 +510,7 @@ export function textoCodigo({ worktrees, autorizado, puedePasar, autores, operad
     '- Los `.env` NO están en el worktree y no se leen ni se crean con secretos reales. Si una prueba necesita variables, use un `.env.test` sin secretos de producción.',
     '- **Usted (el hilo principal) SÍ puede ejecutar comandos con la herramienta Bash en este turno**: git, gh, npm y npx dentro del worktree. NO le pida a la persona que corra pruebas, `tsc` o el lint: córralos usted y reporte el resultado real. Si un comando se bloquea, diga cuál y con qué mensaje.',
     '- Comandos de npm/npx SIEMPRE con la ruta completa del worktree, porque la carpeta actual de Bash se conserva entre comandos: `cd <ruta completa del worktree> && npx vitest run <archivo>`, `cd <ruta completa> && npx tsc --noEmit`, `cd <ruta completa> && npx eslint <rutas>`, `cd <ruta completa> && npm test`, `cd <ruta completa> && npm run lint`.',
-    '- Si el worktree no tiene `node_modules`, corra primero `cd <ruta completa del worktree> && npm ci` (con `timeout` de 600000 en Bash). La caché de npm es compartida y no pide nada a la persona. `npx` no descarga paquetes que no estén en `node_modules`: si dice que falta, es que falta `npm ci`.',
+    '- Si el worktree no tiene `node_modules`, corra primero `cd <ruta completa del worktree> && npm ci` (con `timeout` de 600000 en Bash). La caché de npm es compartida y no pide nada a la persona. `npx` no descarga paquetes que no estén en `node_modules`: si dice que falta, es que falta `npm ci`. Si el repo usa Prisma y `tsc` no encuentra el cliente, corra `npx prisma generate` (como en el CI).',
     '',
     'Qué NO puede (está bloqueado y además está prohibido intentarlo):',
     `- push a \`main\`, \`testing\`, \`production\` u otra rama que no sea \`${PREFIJO_RAMA}…\`; push forzado; borrar ramas.`,
@@ -528,16 +560,62 @@ export function entornoCodigo({ token, homeCodigo, cacheNpm = null }) {
     // npx NUNCA instala de la red un paquete que no esté en node_modules: sin esto,
     // `npx tsc` sin dependencias bajó el paquete falso «tsc@2.0.4» (prueba del 2026-10-20).
     NPM_CONFIG_YES: 'false',
+    // Navegadores de puppeteer/playwright: su postinstall los baja de hosts que el
+    // sandbox no permite y `npm ci` fallaba entero (prueba del 2026-10-20). No hacen falta
+    // para vitest, tsc ni eslint.
+    PUPPETEER_SKIP_DOWNLOAD: '1',
+    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: '1',
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
     CHECKPOINT_DISABLE: '1',
     NEXT_TELEMETRY_DISABLED: '1',
   };
 }
 
 /** HOME propio de los turnos con código: .gitconfig con identidad y nada más. */
-export function prepararHomeCodigo(hilosDir, agenteNombre) {
+/**
+ * Motores de Prisma: el postinstall de @prisma/engines los descarga, pero dentro del
+ * sandbox la descarga se corta (ECONNRESET, prueba del 2026-10-20) y `npm ci` falla.
+ * Se siembran en el HOME de código desde la caché del propio equipo (binarios públicos
+ * de Prisma, sin secretos), clonando con APFS (`cp -c`) solo las versiones que falten.
+ * Prisma los encuentra en ~/.cache/prisma/master/<hash>/<plataforma> y no descarga.
+ */
+export function sembrarMotoresPrisma(homeReal, homeCodigo, { copiar = (o, d) => execFileSync('cp', ['-c', '-p', o, d], { stdio: 'ignore', timeout: 120_000 }) } = {}) {
+  const origen = path.join(homeReal ?? '', '.cache', 'prisma', 'master');
+  const destino = path.join(homeCodigo, '.cache', 'prisma', 'master');
+  const sembrados = [];
+  if (!homeReal || !existsSync(origen)) return sembrados;
+  // Archivo por archivo: una descarga cortada en el sandbox deja la carpeta de la
+  // versión a medias (pasó con schema-engine) y hay que completar lo que falte.
+  for (const v of readdirSync(origen)) {
+    if (!/^[0-9a-f]{40}$/.test(v)) continue;
+    for (const plataforma of readdirSync(path.join(origen, v))) {
+      if (!/^[a-z0-9._-]{1,60}$/.test(plataforma)) continue;
+      const dirO = path.join(origen, v, plataforma);
+      const dirD = path.join(destino, v, plataforma);
+      let archivos;
+      try {
+        archivos = readdirSync(dirO);
+      } catch {
+        continue;
+      }
+      for (const a of archivos) {
+        if (existsSync(path.join(dirD, a))) continue;
+        try {
+          mkdirSync(dirD, { recursive: true, mode: 0o700 });
+          copiar(path.join(dirO, a), path.join(dirD, a));
+          sembrados.push(`${v.slice(0, 8)}/${plataforma}/${a}`);
+        } catch {}
+      }
+    }
+  }
+  return sembrados;
+}
+
+export function prepararHomeCodigo(hilosDir, agenteNombre, homeReal = null) {
   const home = path.join(hilosDir, 'home-codigo');
   mkdirSync(home, { recursive: true, mode: 0o700 });
   mkdirSync(rutaCacheNpm(hilosDir), { recursive: true, mode: 0o700 });
+  sembrarMotoresPrisma(homeReal, home);
   const gitconfig = path.join(home, '.gitconfig');
   const texto = `[user]\n\tname = ${agenteNombre} (asistente IA GSS)\n\temail = orus-proyectos@noreply.gsslatam.com\n[init]\n\tdefaultBranch = main\n[push]\n\tautoSetupRemote = false\n`;
   if (!existsSync(gitconfig) || readFileSync(gitconfig, 'utf8') !== texto) writeFileSync(gitconfig, texto, { mode: 0o600 });

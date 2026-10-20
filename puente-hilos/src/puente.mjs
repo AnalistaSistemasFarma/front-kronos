@@ -120,7 +120,7 @@ export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lot
   const proyecto = vinculos?.proyectos.get(idProject);
   if (!proyecto) return null;
   const token = leerToken(cfg.githubTokenArchivo);
-  const homeCodigo = prepararHome(cfg.hilosDir, agenteNombre);
+  const homeCodigo = prepararHome(cfg.hilosDir, agenteNombre, cfg.home);
   const envGit = { PATH: cfg.path, HOME: homeCodigo, GH_TOKEN: token, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', LANG: 'en_US.UTF-8' };
   // Bajo demanda (proyectos con muchos repos): solo se montan los que hacen falta.
   const disponibles = proyecto.repos.map((n) => vinculos.repos.get(n));
