@@ -196,9 +196,16 @@ test.describe('Proyectos · configuración del módulo', () => {
     await expect(page.getByTestId('proyectos-config-modal-habilitado')).toBeChecked();
     // Sin perfil ni motivo no se guarda.
     await expect(guardar).toBeDisabled();
-    await page.getByTestId('proyectos-config-modal-perfiles').click({ force: true });
-    await page.getByRole('option', { name: 'GSS' }).click();
-    await page.getByRole('option', { name: 'Comex Latam' }).click();
+    // El campo visible del MultiSelect (el data-testid queda en el input interno).
+    const perfiles = page.getByRole('dialog').locator('.mantine-MultiSelect-input');
+    await expect(perfiles).toBeVisible();
+    const opcion = (nombre: string) => page.getByRole('option', { name: nombre, exact: true });
+    await expect(async () => {
+      if (!(await opcion('GSS').isVisible())) await perfiles.click();
+      await expect(opcion('GSS')).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 15_000 });
+    await opcion('GSS').click();
+    await opcion('Comex Latam').click();
     await page.keyboard.press('Escape');
     await expect(guardar).toBeDisabled();
     await page.getByTestId('proyectos-config-modal-motivo').fill('Comex trabaja proyectos de GSS');
