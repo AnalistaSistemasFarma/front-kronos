@@ -304,15 +304,12 @@ function PaymentSchedulingBoard() {
         [payments]
     );
 
-    // Suma de "Valor a Pagar" (parseo igual que formatCurrency).
     const sumValor = (rows: PaymentSchedulingTask[]) =>
         rows.reduce((acc, r) => {
             const n = Number(String(r.valor_pagar ?? '').replace(/[^\d.-]/g, ''));
             return acc + (Number.isFinite(n) ? n : 0);
         }, 0);
 
-    // Agrupación por tipo de solicitud, ordenada según TYPE_REQUEST_OPTIONS;
-    // los tipos no listados y los vacíos ('Sin tipo') van al final.
     const groupedByType = useMemo(() => {
         const order = TYPE_REQUEST_OPTIONS.filter((o) => o.value !== '0').map((o) => o.label);
         const map = new Map<string, PaymentSchedulingTask[]>();
@@ -427,7 +424,6 @@ function PaymentSchedulingBoard() {
 
     const fetchDepartments = async (_userIdParam?: string) => {
         try {
-        // El servidor toma el usuario de la sesión; no se envía ningún id.
         const url = `/api/authorization/authorization-departments`;
 
         const response = await fetch(url);
@@ -581,7 +577,6 @@ function PaymentSchedulingBoard() {
         );
     };
 
-    // Igual que goToRelatedRequest pero en una pestaña nueva (ícono de ojo).
     const openRelatedRequestNewTab = (req: PaymentSchedulingTask) => {
         if (!req.id_solicitud) return;
         window.open(
@@ -641,7 +636,6 @@ function PaymentSchedulingBoard() {
         let mergedCount = 0;
 
         for (const r of rows) {
-            // Lista y descarga por el servidor: el token de Graph no sale del servidor.
             const listRes = await fetch(
                 `/api/requests-general/list-attachments?requestId=${encodeURIComponent(String(r.id_solicitud))}&storagePath=SG&entityType=Request`
             );
@@ -657,7 +651,6 @@ function PaymentSchedulingBoard() {
             const pdfs = children.filter((it) => /\.pdf$/i.test(String(it.name || '')));
 
             for (const pdf of pdfs) {
-                // El enlace temporal de descarga de Graph es directo y no lleva el token.
                 const downloadUrl =
                     pdf['@microsoft.graph.downloadUrl'] ||
                     `/api/requests-general/attachment-file?requestId=${encodeURIComponent(String(r.id_solicitud))}&fileId=${encodeURIComponent(pdf.id)}&storagePath=SG&entityType=Request&download=1`;
