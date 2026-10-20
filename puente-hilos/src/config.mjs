@@ -45,6 +45,14 @@
  *                                    es menor, manda ese.
  *   HILOS_SUGERENCIA_PRESUPUESTO_USD Tope de gasto de «Sugerir equipo» (por defecto 0.5).
  *   HILOS_SUGERENCIA_TIMEOUT_MS      Tope de tiempo de «Sugerir equipo» (por defecto 180000 = 3 min).
+ *
+ *   Acceso al código (nivel 2, 2026-10-20; ver codigo.mjs). Opcional y aditivo:
+ *   HILOS_REPOS_POR_PROYECTO         Ruta a repos-por-proyecto.json (repos, proyectos que los
+ *                                    usan y operadores que autorizan pases). Se relee en CADA
+ *                                    turno: vincular un repo no exige reiniciar el puente.
+ *                                    Sin esta variable, ningún proyecto tiene código.
+ *   HILOS_GITHUB_TOKEN_ARCHIVO       Archivo (600) con el token de GitHub. Solo entra al proceso
+ *                                    del modelo como GH_TOKEN en turnos con código.
  */
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -343,6 +351,11 @@ export function cargarConfig(env = process.env) {
   const presupuesto = (env.HILOS_MAX_BUDGET_USD ?? '').trim();
   if (presupuesto && !(Number(presupuesto) > 0)) throw new ErrorConfig('HILOS_MAX_BUDGET_USD debe ser un número positivo.');
 
+  for (const v of ['HILOS_REPOS_POR_PROYECTO', 'HILOS_GITHUB_TOKEN_ARCHIVO']) {
+    const r = (env[v] ?? '').trim();
+    if (r && !path.isAbsolute(r)) throw new ErrorConfig(`${v} debe ser una ruta absoluta.`);
+  }
+
   let claudeBin = (env.HILOS_CLAUDE_BIN ?? '').trim() || 'claude';
   if (claudeBin.includes(path.sep)) {
     try {
@@ -374,6 +387,8 @@ export function cargarConfig(env = process.env) {
     sugerenciaTimeoutMs: entero(env, 'HILOS_SUGERENCIA_TIMEOUT_MS', 3 * 60 * 1000, 30 * 1000, 10 * 60 * 1000),
     claudeBin,
     instruccionesEn,
+    rutaReposPorProyecto: (env.HILOS_REPOS_POR_PROYECTO ?? '').trim() || null,
+    githubTokenArchivo: (env.HILOS_GITHUB_TOKEN_ARCHIVO ?? '').trim() || null,
     // Para el entorno del hijo: solo lo indispensable del entorno propio.
     path: env.PATH ?? '/usr/bin:/bin',
     home: env.HOME ?? homedir(),

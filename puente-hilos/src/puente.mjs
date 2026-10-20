@@ -21,6 +21,18 @@ import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cargarConfig, ErrorConfig, sellarEntorno } from './config.mjs';
+import { appendFileSync } from 'node:fs';
+import {
+  cargarReposPorProyecto,
+  entornoCodigo,
+  leerTokenGithub,
+  permisosCodigo,
+  prepararHomeCodigo,
+  prepararWorktrees,
+  sandboxCodigo,
+  textoCodigo,
+  turnoAutorizado,
+} from './codigo.mjs';
 import { ColaHilos } from './cola.mjs';
 import { crearClienteSynerLink } from './synerlink.mjs';
 import { armarArgumentos, armarArgumentosSugerencia, armarEntorno, correrTurno, etiquetaHerramienta } from './claude.mjs';
@@ -84,8 +96,59 @@ export function verificarBandeja(respuesta, agenteEsperado) {
   }
 }
 
+/** Quita el token de GitHub de cualquier texto antes de publicarlo o registrarlo. */
+export function ocultarSecreto(texto, secreto) {
+  if (!secreto || typeof texto !== 'string') return texto;
+  return texto.split(secreto).join('[token oculto]');
+}
+
+/**
+ * Acceso al código del turno (nivel 2). Devuelve null si el proyecto no tiene
+ * repos vinculados. Si algo falla, el turno corre SIN código (falla cerrado).
+ */
+export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lote, agenteNombre, cargar = cargarReposPorProyecto, preparar = prepararWorktrees, leerToken = leerTokenGithub, prepararHome = prepararHomeCodigo }) {
+  if (!cfg.rutaReposPorProyecto) return null;
+  const vinculos = cargar(cfg.rutaReposPorProyecto);
+  const proyecto = vinculos?.proyectos.get(idProject);
+  if (!proyecto) return null;
+  const token = leerToken(cfg.githubTokenArchivo);
+  const homeCodigo = prepararHome(cfg.hilosDir, agenteNombre);
+  const envGit = { PATH: cfg.path, HOME: homeCodigo, GH_TOKEN: token, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', LANG: 'en_US.UTF-8' };
+  const worktrees = preparar({ repos: proyecto.repos.map((n) => vinculos.repos.get(n)), rutas, idProject, idConversation, envGit });
+  const { autorizado, autores } = turnoAutorizado(lote, vinculos.operadores);
+  const permisos = permisosCodigo({ repos: worktrees, autorizado, pases: proyecto.pases });
+  return {
+    ...permisos,
+    autorizado,
+    autores,
+    worktrees,
+    token,
+    sandbox: sandboxCodigo({ worktrees, homeReal: cfg.home, homeCodigo, hilosDir: cfg.hilosDir, secretos: [cfg.githubTokenArchivo] }),
+    entorno: entornoCodigo({ token, homeCodigo }),
+    bloque: textoCodigo({ worktrees, autorizado, puedePasar: permisos.puedePasar, autores, operadores: vinculos.operadores }),
+  };
+}
+
 export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
   const enProceso = new Set();
+
+  /** Auditoría local de cada comando y cada negación en turnos con código (sin el token). */
+  function auditarCodigo(idConversation, evento, codigo) {
+    try {
+      const filas = [];
+      if (evento?.type === 'assistant') {
+        for (const c of evento.message?.content ?? []) {
+          if (c?.type === 'tool_use' && c.name === 'Bash') filas.push({ tipo: 'bash', comando: String(c.input?.command ?? '').slice(0, 2000) });
+        }
+      } else if (evento?.type === 'result' && Array.isArray(evento.permission_denials) && evento.permission_denials.length > 0) {
+        for (const d of evento.permission_denials) filas.push({ tipo: 'negado', herramienta: d?.tool_name, entrada: JSON.stringify(d?.tool_input ?? {}).slice(0, 2000) });
+      }
+      for (const f of filas) {
+        const linea = JSON.stringify({ ts: new Date().toISOString(), idConversation, autorizado: codigo.puedePasar, ...f });
+        appendFileSync(path.join(cfg.hilosDir, 'auditoria-codigo.jsonl'), `${ocultarSecreto(linea, codigo.token)}\n`, { mode: 0o600 });
+      }
+    } catch {}
+  }
 
   async function atender(claveConv, lote) {
     const idConversation = Number(claveConv);
@@ -127,7 +190,23 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
             agentes: armarAgentes({ equipo, perfil, agente: agenteNombre, proyecto: contexto.project, topes }),
           }
         : null;
-      escribirContexto({ rutas, agente: agenteNombre, contexto, perfil, instruccionesEn: cfg.instruccionesEn, equipoTurno });
+      // Acceso al código (nivel 2): repos vinculados al proyecto, worktree propio y
+      // pases solo si TODOS los mensajes del turno son de un operador autorizado.
+      let codigo = null;
+      let avisoCodigo = '';
+      try {
+        codigo = prepararCodigoTurno({ cfg, idProject: contexto.project.idProject, idConversation, rutas, lote, agenteNombre });
+        if (codigo) {
+          log(
+            `conversación ${idConversation}: código ${codigo.worktrees.map((w) => `${w.nombre}@${w.rama}`).join(', ')}; pases ${codigo.puedePasar ? 'AUTORIZADOS' : 'no'} (autores: ${codigo.autores.join(', ')}).`
+          );
+        }
+      } catch (e) {
+        codigo = null;
+        log(`conversación ${idConversation}: no se pudo preparar el acceso al código, el turno va sin él:`, e.message);
+        avisoCodigo = '_Nota: no pude preparar el acceso al código del proyecto en este turno; respondí sin él. Tecnología quedó con el registro._\n\n';
+      }
+      escribirContexto({ rutas, agente: agenteNombre, contexto, perfil, instruccionesEn: cfg.instruccionesEn, equipoTurno, bloqueCodigo: codigo?.bloque ?? '' });
       limpiarPropuestas(rutas);
       let vigia = null;
 
@@ -142,6 +221,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
           // Con equipo, el tope de gasto POR PEDIDO es obligatorio.
           presupuestoUsd: equipo ? topes.presupuestoUsd : cfg.presupuestoUsd,
           equipo: equipo ? argumentosEquipo({ equipo, rutaAgentes: rutas.agentes }) : null,
+          codigo,
         });
         let ultimaEtiqueta = null;
         let ultimosActivos = '';
@@ -149,14 +229,16 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
         return correr({
           bin: cfg.claudeBin,
           args,
-          env: armarEntorno(cfg, equipo ? topes : null),
+          env: armarEntorno(cfg, equipo ? topes : null, codigo?.entorno ?? null),
           cwd: rutas.cwd,
           prompt: armarPrompt(lote, adjuntos),
           perfil,
           equipo,
+          codigo,
           vigia,
           timeoutMs: cfg.timeoutTurnoMs,
           alEvento: (evento, acc) => {
+            if (codigo) auditarCodigo(idConversation, evento, codigo);
             // La tablita de sub-agentes del chat: se actualiza cuando cambia
             // el conjunto de subagentes que están trabajando.
             if (vigia) {
@@ -238,7 +320,8 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
           notaPropuestas = '\n\n⚠️ No pude registrar mis propuestas en el Cronograma por un error. Intente de nuevo.';
         }
       }
-      cuerpo = (aviso + avisoEquipo + cuerpo).slice(0, MAX_RESPUESTA - notaPropuestas.length) + notaPropuestas;
+      cuerpo = (aviso + avisoEquipo + avisoCodigo + cuerpo).slice(0, MAX_RESPUESTA - notaPropuestas.length) + notaPropuestas;
+      if (codigo) cuerpo = ocultarSecreto(cuerpo, codigo.token);
 
       await synerlink.responder(idConversation, cuerpo);
 

@@ -159,3 +159,24 @@ cd puente-hilos && node --test test/*.test.mjs
 ```
 
 No tiene dependencias: usa Node 20 o superior y el `claude` instalado, que debe soportar `--restricted`. El puente lo verifica al arrancar.
+
+## Acceso al código (nivel 2, 2026-10-20)
+
+Aprobado por Nicolás Rivera el 2026-10-20 (13:14 COT, «sí, dale»; 13:15 COT, «sí puede subir a testing y prod, para eso es»). Código: `src/codigo.mjs`. Es **aditivo y opcional**: sin `HILOS_REPOS_POR_PROYECTO`, nada cambia.
+
+**Vincular repos a un proyecto:** `repos-por-proyecto.json` (ejemplo en `config/`), en la carpeta del puente. Se relee en **cada turno**: vincular o desvincular no exige reiniciar. Más adelante lo puede administrar SynerLink (por ejemplo, `project.repos` en el contexto) con el mismo validador (`validarReposPorProyecto`).
+
+**Por turno, si el proyecto tiene repos:**
+
+1. El puente hace `git fetch` en el clon (`repos/<repo>`) y deja un **git worktree propio de la conversación** en `./codigo/<repo>`, rama `proyecto/<idProject>-c<idConversation>`, salida de `origin/<ramaPruebas>`. Solo trae lo versionado: los `.env` del repo no llegan.
+2. Instala en el clon un **hook pre-push** que rechaza todo destino que no sea `refs/heads/proyecto/*` y todo borrado de rama remota.
+3. Habilita **Bash** con reglas por prefijo (`git -C codigo/<repo> …`, `gh pr create/view/list/checks…`, `npm`/`npx`/`node`) y **niega** `ssh`, `scp`, `curl`, clientes SQL, `git push` con refspec «:», `--force`, `--no-verify`, `--delete`, `git config/remote/worktree/-c`, `gh api/auth/secret`, `gh pr merge --delete-branch`, etc.
+4. Corre los comandos del modelo dentro del **sandbox de Claude Code** (`failIfUnavailable`): red solo a GitHub y al registro de npm; escritura solo en la carpeta del hilo, el `.git` del clon y `home-codigo`; sin lectura de `.env` del puente, del token, `~/.ssh` ni la casa de los bots.
+5. **Pases** (`gh pr merge` y `gh workflow run <workflow de producción declarado> --ref <ramaProduccion>`): solo si el proyecto tiene `"pases": true` y **todos** los mensajes del turno los escribió un correo de `operadoresPases`, según `author.email` de la bandeja (sale de la sesión de SynerLink, no del texto). Si no, quedan negados por regla y el modelo lo rechaza.
+6. El token de GitHub entra al modelo **solo** como `GH_TOKEN` en esos turnos; la respuesta y la auditoría (`auditoria-codigo.jsonl`: cada comando Bash y cada negación) se publican con el token oculto.
+
+Gotchas de `claude` 2.1.299: `cd <dir> && git …` se niega siempre (por eso `git -C`); un patrón que **termina** en `:*` es el prefijo heredado, no «dos puntos y lo que sea»; `gh` (Go) necesita `sandbox.enableWeakerNetworkIsolation` para verificar TLS; el `credential-osxkeychain` del sistema se cuelga sin sesión gráfica (`GIT_CONFIG_NOSYSTEM=1` y ayudante propio).
+
+**Verificar sin escribir en hilos:** `scripts/simular-turno-codigo.mjs` (conversación ficticia ≥ 990000; `--sin-reglas-texto` prueba solo los controles duros).
+
+**Límites conocidos:** con `npm test`/`node`, el modelo puede correr código arbitrario dentro del sandbox, incluido usar `GH_TOKEN` contra GitHub. El control de pases es local (reglas y hook): GitHub no lo impone si el token tiene permisos de administrador y el repo no tiene protección de ramas.
