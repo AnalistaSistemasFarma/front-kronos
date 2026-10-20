@@ -152,3 +152,15 @@ test('el ejemplo del repositorio es válido', async () => {
   assert.deepEqual([...perfiles.keys()].sort(), ['comex-latam', 'farmalogica', 'gss', 'olp', 'sin-conectores']);
   assert.equal(perfiles.get('comex-latam').web, true);
 });
+
+test('HILOS_MODELO: modelo del hilo principal por agente (2026-10-20) y --model en el turno', async () => {
+  assert.equal(cargarConfig(envProd(tmp())).modelo, null);
+  assert.equal(cargarConfig(envProd(tmp(), { HILOS_MODELO: ' claude-opus-5-5 ' })).modelo, 'claude-opus-5-5');
+  assert.equal(cargarConfig(envProd(tmp(), { HILOS_MODELO: 'opus' })).modelo, 'opus');
+  for (const malo of ['claude opus', '--dangerously-skip-permissions', 'x;rm -rf /', '-p']) {
+    assert.throws(() => cargarConfig(envProd(tmp(), { HILOS_MODELO: malo })), /HILOS_MODELO inválido/, malo);
+  }
+  const { armarArgumentos } = await import('../src/claude.mjs');
+  const args = armarArgumentos({ perfil: { mcpServers: {}, herramientas: [], web: false }, sesion: { id: '11111111-2222-3333-4444-555555555555', nueva: false }, rutaMcp: '/m', rutaSistema: '/s', modelo: 'claude-opus-5-5' });
+  assert.equal(args[args.indexOf('--model') + 1], 'claude-opus-5-5');
+});

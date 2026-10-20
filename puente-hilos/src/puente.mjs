@@ -25,6 +25,8 @@ import { appendFileSync } from 'node:fs';
 import {
   cargarReposPorProyecto,
   entornoCodigo,
+  estadoDependencias,
+  rutaCacheNpm,
   leerTokenGithub,
   permisosCodigo,
   prepararHomeCodigo,
@@ -129,7 +131,8 @@ export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lot
     // pero con el índice para que Orus sepa qué hay y cómo pedirlo.
     return { soloIndice: true, disponibles, bajoDemanda: true, bloque: textoIndiceRepos({ disponibles, montados: [] }) };
   }
-  const worktrees = preparar({ repos: aMontar, rutas, idProject, idConversation, envGit });
+  const worktrees = preparar({ repos: aMontar, rutas, idProject, idConversation, envGit }).map((w) => ({ ...w, dependencias: w.dependencias ?? estadoDependencias(w.worktree) }));
+  const cacheNpm = rutaCacheNpm(cfg.hilosDir); // la crea prepararHomeCodigo
   const permisos = permisosCodigo({ repos: worktrees, autorizado, pases: proyecto.pases });
   return {
     ...permisos,
@@ -137,8 +140,8 @@ export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lot
     autores,
     worktrees,
     token,
-    sandbox: sandboxCodigo({ worktrees, homeReal: cfg.home, homeCodigo, hilosDir: cfg.hilosDir, secretos: [cfg.githubTokenArchivo] }),
-    entorno: entornoCodigo({ token, homeCodigo }),
+    sandbox: sandboxCodigo({ worktrees, homeReal: cfg.home, homeCodigo, hilosDir: cfg.hilosDir, secretos: [cfg.githubTokenArchivo], cacheNpm }),
+    entorno: entornoCodigo({ token, homeCodigo, cacheNpm }),
     hooks: hooksCodigo(),
     disponibles,
     bajoDemanda: proyecto.bajoDemanda,
@@ -549,7 +552,7 @@ async function principal() {
 
   const estado = new Estado(cfg.hilosDir);
   const puente = crearPuente({ cfg, synerlink, estado });
-  log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}.`);
+  log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}, modelo del hilo principal: ${cfg.modelo ?? 'el predeterminado de la cuenta (sin HILOS_MODELO)'}.`);
 
   let parar = false;
   for (const senal of ['SIGTERM', 'SIGINT']) {

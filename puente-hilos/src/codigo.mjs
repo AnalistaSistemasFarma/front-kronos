@@ -54,7 +54,21 @@ export const DOMINIOS_PERMITIDOS = [
   'objects.githubusercontent.com',
   'raw.githubusercontent.com',
   'registry.npmjs.org',
+  // Motores de Prisma: el postinstall de @prisma/client/@prisma/engines los baja de
+  // aquí en `npm ci`; sin ellos no hay cliente generado y `tsc` falla (2026-10-20).
+  'binaries.prisma.sh',
 ];
+
+/** Caché de npm COMPARTIDA por todas las conversaciones del puente (dentro de HILOS_DIR). */
+export function rutaCacheNpm(hilosDir) {
+  return path.join(hilosDir, 'cache-npm');
+}
+
+/** ¿El worktree ya tiene dependencias instaladas? (para avisarle al modelo en el turno). */
+export function estadoDependencias(worktree, existe = existsSync) {
+  if (!existe(path.join(worktree, 'package.json'))) return 'sin-package';
+  return existe(path.join(worktree, 'node_modules')) ? 'instaladas' : 'faltan';
+}
 
 const RE_NOMBRE = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const RE_GITHUB = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -414,7 +428,7 @@ export function permisosCodigo({ repos, autorizado, pases }) {
  * escritura solo en la carpeta del hilo, el .git común del clon y la caché de npm;
  * sin lectura de secretos. Si el sandbox no está disponible, el turno NO corre.
  */
-export function sandboxCodigo({ worktrees, homeReal, homeCodigo, hilosDir, secretos = [] }) {
+export function sandboxCodigo({ worktrees, homeReal, homeCodigo, hilosDir, secretos = [], cacheNpm = rutaCacheNpm(hilosDir) }) {
   // Rutas ABSOLUTAS: en el turno, HOME es homeCodigo y «~» ya no sería la casa real.
   const casa = (r) => path.join(homeReal, r);
   return {
@@ -426,7 +440,7 @@ export function sandboxCodigo({ worktrees, homeReal, homeCodigo, hilosDir, secre
     enableWeakerNetworkIsolation: true,
     network: { allowedDomains: DOMINIOS_PERMITIDOS, allowLocalBinding: false },
     filesystem: {
-      allowWrite: [...new Set(worktrees.map((w) => w.gitComun)), homeCodigo],
+      allowWrite: [...new Set(worktrees.map((w) => w.gitComun)), homeCodigo, cacheNpm],
       denyRead: [
         path.join(hilosDir, '.env'),
         path.join(hilosDir, 'claude-config'),
@@ -448,8 +462,9 @@ export function textoCodigo({ worktrees, autorizado, puedePasar, autores, operad
     'Repositorios vinculados a este proyecto:',
   ];
   for (const w of worktrees) {
+    const deps = w.dependencias === 'instaladas' ? 'dependencias (`node_modules`) instaladas' : w.dependencias === 'faltan' ? `dependencias SIN instalar: antes de probar corra \`cd ${w.worktree} && npm ci\`` : null;
     l.push(
-      `- **${w.nombre}** (GitHub ${w.github}): carpeta \`./codigo/${w.nombre}\` (ruta completa \`${w.worktree}\`), rama de trabajo \`${w.rama}\` (salió de \`origin/${w.ramaPruebas}\`). Rama de pruebas: \`${w.ramaPruebas}\`; rama de producción: \`${w.ramaProduccion}\`.`,
+      `- **${w.nombre}** (GitHub ${w.github}): carpeta \`./codigo/${w.nombre}\` (ruta completa \`${w.worktree}\`), rama de trabajo \`${w.rama}\` (salió de \`origin/${w.ramaPruebas}\`). Rama de pruebas: \`${w.ramaPruebas}\`; rama de producción: \`${w.ramaProduccion}\`.${deps ? ` Estado: ${deps}.` : ''}`,
       ...(w.despliegue ? [`  - Despliegue: ${w.despliegue}`] : []),
       ...(w.workflowsProduccion.length ? [`  - Workflows de producción: ${w.workflowsProduccion.map((x) => `\`${x}\``).join(', ')}`] : [])
     );
@@ -461,7 +476,9 @@ export function textoCodigo({ worktrees, autorizado, puedePasar, autores, operad
     '- git SIEMPRE con `git -C codigo/<repo> …` desde la carpeta del hilo (por ejemplo `git -C codigo/sapsend status`, `git -C codigo/sapsend log --oneline -5`, `git -C codigo/sapsend ls-files`), o con la ruta completa del worktree. `cd codigo/<repo> && git …` y `--git-dir` están bloqueados. Para gh y npm sí puede usar `cd codigo/<repo> && gh …` / `cd codigo/<repo> && npm test`.',
     `- Trabajar en su rama \`${PREFIJO_RAMA}…\`: editar, \`git add\`/\`commit\`, correr \`npm test\`, \`npx tsc --noEmit\`, \`npm run lint\`; empujar SOLO ramas \`${PREFIJO_RAMA}…\` (\`git -C codigo/<repo> push -u origin ${PREFIJO_RAMA}…\`) y abrir PR con \`gh pr create --base <rama de pruebas>\`.`,
     '- Los `.env` NO están en el worktree y no se leen ni se crean con secretos reales. Si una prueba necesita variables, use un `.env.test` sin secretos de producción.',
-    '- Si `npm ci` hace falta para probar, córralo dentro del worktree.',
+    '- **Usted (el hilo principal) SÍ puede ejecutar comandos con la herramienta Bash en este turno**: git, gh, npm y npx dentro del worktree. NO le pida a la persona que corra pruebas, `tsc` o el lint: córralos usted y reporte el resultado real. Si un comando se bloquea, diga cuál y con qué mensaje.',
+    '- Comandos de npm/npx SIEMPRE con la ruta completa del worktree, porque la carpeta actual de Bash se conserva entre comandos: `cd <ruta completa del worktree> && npx vitest run <archivo>`, `cd <ruta completa> && npx tsc --noEmit`, `cd <ruta completa> && npx eslint <rutas>`, `cd <ruta completa> && npm test`, `cd <ruta completa> && npm run lint`.',
+    '- Si el worktree no tiene `node_modules`, corra primero `cd <ruta completa del worktree> && npm ci` (con `timeout` de 600000 en Bash). La caché de npm es compartida y no pide nada a la persona. `npx` no descarga paquetes que no estén en `node_modules`: si dice que falta, es que falta `npm ci`.',
     '',
     'Qué NO puede (está bloqueado y además está prohibido intentarlo):',
     `- push a \`main\`, \`testing\`, \`production\` u otra rama que no sea \`${PREFIJO_RAMA}…\`; push forzado; borrar ramas.`,
@@ -492,7 +509,7 @@ export function textoCodigo({ worktrees, autorizado, puedePasar, autores, operad
 }
 
 /** Entorno extra del hijo en un turno con código. El token SOLO entra aquí. */
-export function entornoCodigo({ token, homeCodigo }) {
+export function entornoCodigo({ token, homeCodigo, cacheNpm = null }) {
   return {
     GH_TOKEN: token,
     HOME: homeCodigo,
@@ -502,6 +519,17 @@ export function entornoCodigo({ token, homeCodigo }) {
     GH_NO_UPDATE_NOTIFIER: '1',
     GIT_TERMINAL_PROMPT: '0',
     NPM_CONFIG_UPDATE_NOTIFIER: 'false',
+    // Caché compartida: el primer `npm ci` de un repo la llena y los siguientes
+    // (otras conversaciones, otros worktrees) instalan casi sin red.
+    ...(cacheNpm ? { NPM_CONFIG_CACHE: cacheNpm } : {}),
+    NPM_CONFIG_PREFER_OFFLINE: 'true',
+    NPM_CONFIG_AUDIT: 'false',
+    NPM_CONFIG_FUND: 'false',
+    // npx NUNCA instala de la red un paquete que no esté en node_modules: sin esto,
+    // `npx tsc` sin dependencias bajó el paquete falso «tsc@2.0.4» (prueba del 2026-10-20).
+    NPM_CONFIG_YES: 'false',
+    CHECKPOINT_DISABLE: '1',
+    NEXT_TELEMETRY_DISABLED: '1',
   };
 }
 
@@ -509,6 +537,7 @@ export function entornoCodigo({ token, homeCodigo }) {
 export function prepararHomeCodigo(hilosDir, agenteNombre) {
   const home = path.join(hilosDir, 'home-codigo');
   mkdirSync(home, { recursive: true, mode: 0o700 });
+  mkdirSync(rutaCacheNpm(hilosDir), { recursive: true, mode: 0o700 });
   const gitconfig = path.join(home, '.gitconfig');
   const texto = `[user]\n\tname = ${agenteNombre} (asistente IA GSS)\n\temail = orus-proyectos@noreply.gsslatam.com\n[init]\n\tdefaultBranch = main\n[push]\n\tautoSetupRemote = false\n`;
   if (!existsSync(gitconfig) || readFileSync(gitconfig, 'utf8') !== texto) writeFileSync(gitconfig, texto, { mode: 0o600 });

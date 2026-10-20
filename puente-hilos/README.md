@@ -184,6 +184,10 @@ El resto aparece en un **índice** en el encabezado del turno (`textoIndiceRepos
 
 Gotchas de `claude` 2.1.299: `cd <dir> && git …` se niega siempre (por eso `git -C`); un patrón que **termina** en `:*` es el prefijo heredado, no «dos puntos y lo que sea»; `gh` (Go) necesita `sandbox.enableWeakerNetworkIsolation` para verificar TLS; el `credential-osxkeychain` del sistema se cuelga sin sesión gráfica (`GIT_CONFIG_NOSYSTEM=1` y ayudante propio).
 
+**Pruebas, tipos y lint en el worktree (2026-10-20):** el hilo principal corre `npm ci`/`npm install`, `npx vitest`, `npx tsc`, `npx eslint`, `npm test` y `npm run lint` dentro del sandbox. El worktree nace sin `node_modules` (y sin `.env`): el encabezado del turno dice si faltan las dependencias y le pide al modelo `cd <ruta completa> && npm ci`. La **caché de npm es compartida** por todas las conversaciones (`<HILOS_DIR>/cache-npm`, `NPM_CONFIG_CACHE` + `prefer-offline`): el primer `npm ci` de un repo la llena y los siguientes casi no usan red. `NPM_CONFIG_YES=false` impide que `npx` baje un paquete que no esté en `node_modules` (sin esto, `npx tsc` bajó el paquete falso `tsc@2.0.4`). El sandbox admite además `binaries.prisma.sh`, de donde el postinstall de Prisma baja sus motores. Ojo: la carpeta actual de Bash se conserva entre comandos, por eso se pide la ruta completa del worktree en cada `cd`.
+
+**Modelo del hilo principal:** `HILOS_MODELO` en el `.env` de cada puente (p. ej. `claude-opus-5-5`); se pasa como `--model` y el log de arranque lo muestra. Sin ella, el predeterminado de la cuenta. Los subagentes usan el modelo que fijó su equipo (`null` = heredan el principal).
+
 **Verificar sin escribir en hilos:** `scripts/simular-turno-codigo.mjs` (conversación ficticia ≥ 990000; `--sin-reglas-texto` prueba solo los controles duros).
 
 **Límites conocidos:** con `npm test`/`node`, el modelo puede correr código arbitrario dentro del sandbox, incluido usar `GH_TOKEN` contra GitHub. El control de pases es local (reglas y hook): GitHub no lo impone si el token tiene permisos de administrador y el repo no tiene protección de ramas.

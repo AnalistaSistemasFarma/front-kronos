@@ -29,7 +29,10 @@
  *   HILOS_ANTHROPIC_API_KEY    Llave de API (la vía que Anthropic indica para multiusuario).
  *   HILOS_MAX_CONCURRENCIA     1 o 2 (por defecto 2). Tope de hilos simultáneos.
  *   HILOS_TIMEOUT_TURNO_MS     Tope por turno (por defecto 900000 = 15 min).
- *   HILOS_MODELO               Opcional: modelo del `claude -p`.
+ *   HILOS_MODELO               Opcional: modelo del hilo PRINCIPAL del `claude -p` (`--model`),
+ *                              por agente (p. ej. claude-opus-5-5 en horus-prod). Sin ella, el
+ *                              predeterminado de la cuenta. Los subagentes usan el modelo que
+ *                              fijó su equipo (null = heredan este).
  *   HILOS_MAX_BUDGET_USD       Opcional: tope de gasto por turno (solo con llave de API).
  *   HILOS_CLAUDE_BIN           Opcional: ruta del ejecutable `claude` (por defecto, el del PATH).
  *   HILOS_INSTRUCCIONES_EN     'system-prompt' (por defecto) o 'claude-md'. Ver hilos.mjs.
@@ -375,6 +378,13 @@ export function cargarConfig(env = process.env) {
     throw new ErrorConfig('HILOS_MEMORIA_LECTORES debe ser una lista de correos separados por coma.');
   }
 
+  // Modelo del hilo PRINCIPAL (por agente, en su .env). Sin la variable, el
+  // `claude -p` usa el predeterminado de la cuenta (en 2026-10 era Sonnet 5.5).
+  const modelo = (env.HILOS_MODELO ?? '').trim() || null;
+  if (modelo && !/^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,79}$/.test(modelo)) {
+    throw new ErrorConfig('HILOS_MODELO inválido: use un id o alias de modelo (p. ej. claude-opus-5-5).');
+  }
+
   let claudeBin = (env.HILOS_CLAUDE_BIN ?? '').trim() || 'claude';
   if (claudeBin.includes(path.sep)) {
     try {
@@ -396,7 +406,7 @@ export function cargarConfig(env = process.env) {
     perfiles,
     maxConcurrencia: entero(env, 'HILOS_MAX_CONCURRENCIA', MAX_CONCURRENCIA_F1, 1, MAX_CONCURRENCIA_F1),
     timeoutTurnoMs: entero(env, 'HILOS_TIMEOUT_TURNO_MS', 15 * 60 * 1000, 60 * 1000, 60 * 60 * 1000),
-    modelo: (env.HILOS_MODELO ?? '').trim() || null,
+    modelo,
     presupuestoUsd: presupuesto ? Number(presupuesto) : null,
     subagentes: subagentes === 'si',
     subagentesMaxSimultaneos: entero(env, 'HILOS_SUBAGENTES_MAX_SIMULTANEOS', 3, 1, 5),
