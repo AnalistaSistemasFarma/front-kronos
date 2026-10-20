@@ -47,6 +47,8 @@ import {
   type ProjectRole,
 } from '../../lib/chat/projects-rules';
 import type { ProyectoDetalleDto } from '../../lib/proyectos/tipos';
+import { vistaEstadoAgente, type EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente';
+import { LineaEstadoAgente } from './EstadoAgente';
 import { fechaCorta } from './api';
 import { BadgeRol } from './ui';
 import css from './proyectos.module.css';
@@ -58,11 +60,14 @@ export function ListaConversaciones({
   activa,
   onAbrir,
   onNueva,
+  estados,
 }: {
   proyecto: ProyectoDetalleDto;
   activa: number | null;
   onAbrir: (id: number) => void;
   onNueva: () => void;
+  /** Estado en vivo del agente por conversación (2026-10-20). */
+  estados?: ReadonlyMap<number, EstadoAgenteProyectoDto>;
 }) {
   const puedeAbrir = proyecto.capabilities.write && proyecto.agents.some((a) => a.puedoEscribir);
   return (
@@ -89,15 +94,19 @@ export function ListaConversaciones({
           </Text>
         </Stack>
       ) : (
-        proyecto.conversations.map((c) => (
+        proyecto.conversations.map((c) => {
+          // «Orus está trabajando…» (2026-10-20): el mismo estado del chat, en vivo por el pulso.
+          const vista = vistaEstadoAgente(estados?.get(c.id) ?? c.agentStatus ?? null, c.agent.displayName);
+          return (
           <UnstyledButton
             key={c.id}
             onClick={() => onAbrir(c.id)}
             className={`${css.fila} ${css.filaBoton} ${c.id === activa ? css.filaActiva : ''}`}
             aria-current={c.id === activa ? 'true' : undefined}
             data-testid='proyecto-conversacion'
+            data-trabajando={vista.trabajando ? 'true' : undefined}
           >
-            <AgentAvatar code={c.agent.code} displayName={c.agent.displayName} avatarUrl={c.agent.avatarUrl} avatarVersion={c.agent.avatarVersion} size={34} showStatus={false} withTooltip={false} />
+            <AgentAvatar code={c.agent.code} displayName={c.agent.displayName} avatarUrl={c.agent.avatarUrl} avatarVersion={c.agent.avatarVersion} size={34} showStatus={false} withTooltip={false} working={vista.trabajando} />
             <div className={css.item} style={{ flex: 1 }}>
               <Group gap={6} wrap='nowrap' justify='space-between'>
                 <Text size='sm' fw={600} className={css.truncar}>
@@ -114,9 +123,11 @@ export function ListaConversaciones({
                 </Text>
                 {c.soloLectura && <IconLock size={12} color='var(--mantine-color-dimmed)' style={{ flexShrink: 0 }} aria-label='Solo lectura' />}
               </Group>
+              <LineaEstadoAgente vista={vista} subagentes='tabla' testId='proyecto-conversacion-estado' />
             </div>
           </UnstyledButton>
-        ))
+          );
+        })
       )}
     </Stack>
   );

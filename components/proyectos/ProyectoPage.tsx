@@ -38,6 +38,8 @@ import SeccionCronograma from './cronograma/SeccionCronograma';
 import SeccionEquipo from './equipo/SeccionEquipo';
 import { AgentesApilados, AvisoArriba, BadgeRol, CONSULTA_ESCRITORIO, Encabezado, EsqueletoFilas, type Aviso } from './ui';
 import css from './proyectos.module.css';
+import { useEstadosAgentes } from './useEstadosAgentes';
+import type { EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente';
 
 /**
  * UN PROYECTO — /process/proyectos/<id>.
@@ -134,6 +136,14 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
     const qs = p.toString();
     window.history.replaceState(null, '', `/process/proyectos/${idProject}${qs ? `?${qs}` : ''}`);
   }, [idProject, seccion, idConversacion]);
+
+  // Estado en vivo de los agentes de ESTE proyecto (2026-10-20): lo que trajo la
+  // carga y, después, lo que entrega el pulso del chat. Sin peticiones propias.
+  const semillaEstados = useMemo(
+    () => (proyecto?.conversations ?? []).map((c) => c.agentStatus).filter((e): e is EstadoAgenteProyectoDto => !!e),
+    [proyecto]
+  );
+  const estados = useEstadosAgentes(semillaEstados, (e) => e.idProject === idProject);
 
   const conversacion = proyecto?.conversations.find((c) => c.id === idConversacion) ?? null;
   const agenteConversacion: ChatAgentDto | null = useMemo(() => {
@@ -263,6 +273,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
             activa={idConversacion}
             onAbrir={(id) => setIdConversacion(id)}
             onNueva={() => setModal('conversacion')}
+            estados={estados}
           />
         );
       case 'cronograma':
