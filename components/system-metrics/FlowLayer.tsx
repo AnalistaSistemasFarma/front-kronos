@@ -29,7 +29,7 @@ export type FlowEdge = {
   title: string;
 };
 
-type Drawn = FlowEdge & { d: string; width: number; speed: number };
+type Drawn = FlowEdge & { d: string; width: number; pulseWidth: number; speed: number };
 
 
 const TONE_VAR: Record<StatusTone, string> = {
@@ -81,47 +81,71 @@ export function FlowLayer({
         rects.set(el.dataset.flowNode!, unscale(el.getBoundingClientRect()));
       });
 
-      // Varias curvas que salen/llegan al mismo nodo se reparten a lo alto para no encimarse.
+      // Nodos apilados (pantalla angosta): no hay hueco entre columnas por donde pasar.
+      const visible = edges.flatMap((e) => {
+        const a = rects.get(e.from);
+        const b = rects.get(e.to);
+        if (!a || !b) return [];
+        const sideBySide = b.left >= a.right - 1 || b.right <= a.left + 1;
+        return sideBySide ? [{ e, a, b }] : [];
+      });
+
+      // Varias curvas que salen/llegan al mismo nodo se reparten a lo alto, en el orden en que
+      // están sus otros extremos: así no se cruzan al llegar (antes iban en el orden de los datos
+      // y con muchas personas se trenzaban en un solo nudo).
+      const centerY = (r: DOMRect) => r.top + r.height / 2;
+      const slotOut = new Map<(typeof visible)[number], number>();
+      const slotIn = new Map<(typeof visible)[number], number>();
       const outCount = new Map<string, number>();
       const inCount = new Map<string, number>();
-      for (const e of edges) {
-        outCount.set(e.from, (outCount.get(e.from) ?? 0) + 1);
-        inCount.set(e.to, (inCount.get(e.to) ?? 0) + 1);
+      const group = (key: (v: (typeof visible)[number]) => string) => {
+        const groups = new Map<string, typeof visible>();
+        for (const v of visible) {
+          const list = groups.get(key(v));
+          if (list) list.push(v);
+          else groups.set(key(v), [v]);
+        }
+        return groups;
+      };
+      for (const [node, list] of group((v) => v.e.from)) {
+        list.sort((p, q) => centerY(p.b) - centerY(q.b)).forEach((v, i) => slotOut.set(v, i));
+        outCount.set(node, list.length);
       }
-      const outSeen = new Map<string, number>();
-      const inSeen = new Map<string, number>();
+      for (const [node, list] of group((v) => v.e.to)) {
+        list.sort((p, q) => centerY(p.a) - centerY(q.a)).forEach((v, i) => slotIn.set(v, i));
+        inCount.set(node, list.length);
+      }
+
+      const usableOf = (rect: DOMRect, count: number) => Math.min(rect.height * 0.8, count * 10);
       const spread = (rect: DOMRect, index: number, count: number) => {
-        if (count <= 1) return rect.top + rect.height / 2;
-        const usable = Math.min(rect.height * 0.6, count * 10);
-        return rect.top + rect.height / 2 - usable / 2 + (usable * index) / (count - 1);
+        if (count <= 1) return centerY(rect);
+        const usable = usableOf(rect, count);
+        return centerY(rect) - usable / 2 + (usable * index) / (count - 1);
       };
 
       const paths: Drawn[] = [];
-      for (const e of edges) {
-        const a = rects.get(e.from);
-        const b = rects.get(e.to);
-        if (!a || !b) continue;
-        // Nodos apilados (pantalla angosta): no hay hueco entre columnas por donde pasar.
-        const sideBySide = b.left >= a.right - 1 || b.right <= a.left + 1;
-        if (!sideBySide) continue;
-        const oi = outSeen.get(e.from) ?? 0;
-        const ii = inSeen.get(e.to) ?? 0;
-        outSeen.set(e.from, oi + 1);
-        inSeen.set(e.to, ii + 1);
+      for (const v of visible) {
+        const { e, a, b } = v;
+        const outs = outCount.get(e.from) ?? 1;
+        const ins = inCount.get(e.to) ?? 1;
 
         const rightward = b.left >= a.left;
         const x1 = (rightward ? a.right : a.left) - box.left;
         const x2 = (rightward ? b.left : b.right) - box.left;
-        const y1 = spread(a, oi, outCount.get(e.from) ?? 1) - box.top;
-        const y2 = spread(b, ii, inCount.get(e.to) ?? 1) - box.top;
+        const y1 = spread(a, slotOut.get(v) ?? 0, outs) - box.top;
+        const y2 = spread(b, slotIn.get(v) ?? 0, ins) - box.top;
         const bend = Math.max(24, Math.abs(x2 - x1) * 0.5) * (rightward ? 1 : -1);
         const d = `M${x1.toFixed(1)},${y1.toFixed(1)} C${(x1 + bend).toFixed(1)},${y1.toFixed(1)} ${(x2 - bend).toFixed(1)},${y2.toFixed(1)} ${x2.toFixed(1)},${y2.toFixed(1)}`;
 
+        // Si muchas curvas comparten un nodo, se adelgazan para caber en su franja sin taparse.
+        const room = Math.min(usableOf(a, outs) / Math.max(1, outs - 1), usableOf(b, ins) / Math.max(1, ins - 1));
+        const width = Math.min(1.5 + Math.max(0, Math.min(1, e.weight)) * 7, Math.max(1, room));
         const rate = e.rate ?? 0;
         paths.push({
           ...e,
           d,
-          width: 1.5 + Math.max(0, Math.min(1, e.weight)) * 7,
+          width,
+          pulseWidth: Math.max(Math.min(2.5, width + 1), width * 0.7),
           speed: rate <= 0 ? 0 : Math.max(0.6, 3.4 - Math.log10(rate + 1) * 1.1),
         });
       }
@@ -160,7 +184,7 @@ export function FlowLayer({
                 d={p.d}
                 fill="none"
                 stroke={color}
-                strokeWidth={Math.max(2.5, p.width * 0.7)}
+                strokeWidth={p.pulseWidth}
                 strokeLinecap="round"
                 className={styles.flowPulse}
                 style={{ ['--flow-speed' as string]: `${p.speed.toFixed(2)}s` }}

@@ -33,6 +33,7 @@ import {
   IconUsers,
 } from '@tabler/icons-react';
 import {
+  buildHighlights,
   buildInsights,
   mainTableOf,
   verdictFrom,
@@ -51,13 +52,11 @@ import { StatusHero, ToneChip } from '../../../../components/system-metrics/Stat
 import { SystemMap, type MapData } from '../../../../components/system-metrics/SystemMap';
 import { UserBehavior } from '../../../../components/system-metrics/UserBehavior';
 import { AlertSubscriptionSwitch } from '../../../../components/system-metrics/AlertSubscriptionSwitch';
-import { MonitorBoard } from '../../../../components/system-metrics/MonitorBoard';
 import { UserConsumption } from '../../../../components/system-metrics/UserConsumption';
 import type { StatusTone } from '../../../../components/system-metrics/colors';
 import {
   formatAgo,
   formatBucket,
-  formatDateTime,
   formatInt,
   formatMs,
   formatValue,
@@ -107,6 +106,23 @@ function worstTone(insights: Insight[], fallback: StatusTone = 'ok'): StatusTone
   return relevant.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])[0].severity as StatusTone;
 }
 
+/** Estados de Query Store (sys.database_query_store_options.actual_state_desc). */
+const QUERY_STORE_LABEL: Record<string, string> = {
+  READ_WRITE: 'activo',
+  OFF: 'apagado',
+  READ_ONLY: 'en solo lectura (¿lleno?)',
+  ERROR: 'con error',
+};
+
+/** Dos periodos se comparan solo si el anterior tiene datos de al menos el 80 % del tiempo del actual. */
+function comparablePeriods(
+  cur: { minutes: number; samples: number } | undefined,
+  prev: { minutes: number; samples: number } | undefined
+): boolean {
+  if (!cur || !prev || prev.samples === 0) return false;
+  return prev.minutes >= cur.minutes * 0.8;
+}
+
 function instanceName(instance: string, host: string, multiHost: boolean): string {
   const base = instance === 'unica' ? 'Kronos' : `Kronos #${instance}`;
   return multiHost ? `${base} · ${host}` : base;
@@ -115,8 +131,23 @@ function instanceName(instance: string, host: string, multiHost: boolean): strin
 /** Series alineadas al mismo eje de tiempo para las gráficas de tendencia. */
 function useProcessCharts(rows: ProcessSeriesRow[], range: RangeKey) {
   return useMemo(() => {
-    const buckets = Array.from(new Set(rows.map((r) => r.bucket))).sort();
+    // Todas las ventanas entre la primera y la última, también las que no tienen dato: si
+    // Kronos estuvo caído 40 minutos, ese tramo debe verse como hueco y no desaparecer del eje.
+    const present = Array.from(new Set(rows.map((r) => r.bucket))).sort();
+    const step = BUCKET_MINUTES[range] * 60_000;
+    const buckets: string[] = [];
+    if (present.length) {
+      const last = Date.parse(present[present.length - 1]);
+      for (let t = Date.parse(present[0]); t <= last; t += step) buckets.push(new Date(t).toISOString());
+    }
     const bucketIndex = new Map(buckets.map((b, i) => [b, i]));
+    // Minutos realmente medidos en cada ventana: la primera y la última del rango van
+    // incompletas y, divididas entre la ventana completa, la línea "caía" en los bordes.
+    const bucketMinutes = buckets.map(() => 0);
+    for (const r of rows) {
+      const i = bucketIndex.get(r.bucket);
+      if (i != null) bucketMinutes[i] = Math.max(bucketMinutes[i], r.minutes || BUCKET_MINUTES[range]);
+    }
     const labels = buckets.map((b) => formatBucket(b, range));
     const hosts = Array.from(new Set(rows.map((r) => r.host))).sort();
     const instances = Array.from(new Set(rows.map((r) => `${r.host}|${r.instance}`))).sort();
@@ -160,7 +191,9 @@ function useProcessCharts(rows: ProcessSeriesRow[], range: RangeKey) {
         values[i] = current == null ? v : agg === 'sum' ? current + v : Math.max(current, v);
       }
       if (!perMinute) return values;
-      return values.map((v) => (v == null ? null : Math.round((v / BUCKET_MINUTES[range]) * 10) / 10));
+      return values.map((v, i) =>
+        v == null || !bucketMinutes[i] ? null : Math.round((v / bucketMinutes[i]) * 10) / 10
+      );
     };
 
     const requests = totals((r) => r.httpRequests, 'sum');
@@ -168,20 +201,38 @@ function useProcessCharts(rows: ProcessSeriesRow[], range: RangeKey) {
     const errorPct = requests.map((req, i) =>
       req == null || req === 0 ? null : Math.round((((errors[i] ?? 0) / req) * 100) * 100) / 100
     );
+    // p95 de la ventana: promedio de los p95 por minuto ponderado por tráfico (mismo cálculo
+    // que el número grande del mosaico). Sin tráfico no hay p95 (antes salía 0 ms).
+    const p95 = buckets.map((_, i) => {
+      let weighted = 0;
+      let req = 0;
+      for (const r of rows) {
+        if (bucketIndex.get(r.bucket) !== i || r.httpP95Ms == null || !r.httpRequests) continue;
+        weighted += r.httpP95Ms * r.httpRequests;
+        req += r.httpRequests;
+      }
+      return req ? Math.round(weighted / req) : null;
+    });
     const hostCpu = perHostAvg((r) => r.hostCpuPct);
+    // Tendencia del mosaico de CPU: promedio de todos los servidores (como el número grande).
+    const hostCpuTrend = buckets.map((_, i) => {
+      const vals = hostCpu.map((s) => s.values[i]).filter((v): v is number => v != null);
+      return vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10 : null;
+    });
 
     return {
       labels,
       bucketCount: buckets.length,
       multiHost,
       cpu: [...hostCpu, ...perInstance((r) => r.cpuPct, hosts.length)],
-      hostCpuTrend: hostCpu[0]?.values ?? [],
+      hostCpuTrend,
       hostMem: perHostAvg((r) => r.hostMemUsedPct),
       rss: perInstance((r) => r.rssMb),
       eventLoop: perInstance((r) => r.eventLoopP99Ms),
       trafficPerMin: totals((r) => r.httpRequests, 'sum', true),
       errorPct,
-      p95: totals((r) => r.httpP95Ms, 'max'),
+      p95,
+      measuredMinutes: bucketMinutes.reduce((a, b) => a + b, 0),
       pool: [
         { label: 'Conexiones en uso', colorIndex: 0, values: totals((r) => r.poolBorrowed, 'sum') },
         { label: 'Peticiones esperando conexión', colorIndex: 1, values: totals((r) => r.poolPending, 'sum') },
@@ -348,7 +399,8 @@ export default function SystemMetricsPage() {
   const dbRows = useMemo(() => metrics?.db ?? [], [metrics]);
   const charts = useProcessCharts(processRows, range);
   const hasData = processRows.length > 0;
-  const observedMinutes = Math.max(1, charts.bucketCount * BUCKET_MINUTES[range]);
+  // Minutos realmente medidos (sin huecos ni la parte que falta de las ventanas de los bordes).
+  const observedMinutes = Math.max(1, charts.measuredMinutes);
 
   const insights = useMemo(
     () =>
@@ -364,25 +416,55 @@ export default function SystemMetricsPage() {
     [metrics, processRows, dbRows, dbLive, rangeOption.span]
   );
   const verdict = useMemo(() => verdictFrom(insights, hasData), [insights, hasData]);
+  const highlights = useMemo(
+    () =>
+      buildHighlights(
+        {
+          rangeLabel: rangeOption.span,
+          summary: metrics?.summary ?? null,
+          processSeries: processRows,
+          db: dbRows,
+          outbound: metrics?.outbound ?? [],
+          dbLive,
+          lifetimes: metrics?.lifetimes ?? [],
+        },
+        insights
+      ),
+    [metrics, processRows, dbRows, dbLive, rangeOption.span, insights]
+  );
 
+  // Última fila de CADA proceso (no la última ventana global): cada instancia guarda en su
+  // propio segundo y la última ventana a veces trae solo algunas, y los totales subían y bajaban.
+  // Solo procesos vistos en las dos últimas ventanas (uno que ya se apagó no cuenta).
   const latest = useMemo(() => {
-    const lastBucket = processRows.length ? processRows[processRows.length - 1].bucket : null;
-    return processRows.filter((r) => r.bucket === lastBucket);
-  }, [processRows]);
+    if (!processRows.length) return [];
+    const lastAt = Date.parse(processRows[processRows.length - 1].bucket);
+    const minAt = lastAt - BUCKET_MINUTES[range] * 60_000;
+    const byInstance = new Map<string, ProcessSeriesRow>();
+    for (const r of processRows) {
+      if (Date.parse(r.bucket) < minAt) continue;
+      const key = `${r.host}|${r.instance}`;
+      const seen = byInstance.get(key);
+      if (!seen || r.bucket >= seen.bucket) byInstance.set(key, r);
+    }
+    return Array.from(byInstance.values());
+  }, [processRows, range]);
 
   const lastDb = dbRows.length ? dbRows[dbRows.length - 1] : null;
   const cur = metrics?.summary?.current;
   const prev = metrics?.summary?.previous;
-  const hasPrev = (prev?.samples ?? 0) > 0;
+  // El periodo anterior solo es comparable si tiene datos de casi todo su tiempo: si el monitor
+  // estuvo apagado parte de él salían cosas como "el tráfico subió 400 %".
+  const hasPrev = comparablePeriods(cur, prev);
 
   const signals = useMemo(() => {
-    const trafficValues = charts.trafficPerMin.filter((v): v is number => v != null);
-    const reqPerMin = trafficValues.length ? trafficValues.reduce((a, b) => a + b, 0) / trafficValues.length : null;
+    const rate = (p: typeof cur) => (p && p.minutes ? p.requests / p.minutes : null);
+    const reqPerMin = rate(cur);
     const errPct = cur && cur.requests ? (cur.errors / cur.requests) * 100 : null;
     const prevErrPct = prev && prev.requests ? (prev.errors / prev.requests) * 100 : null;
     return {
       reqPerMin,
-      trafficChange: hasPrev ? percentChange(cur?.requests, prev?.requests) : null,
+      trafficChange: hasPrev ? percentChange(reqPerMin, rate(prev)) : null,
       p95: cur?.p95Ms ?? null,
       p95Change: hasPrev ? percentChange(cur?.p95Ms, prev?.p95Ms) : null,
       errPct,
@@ -390,7 +472,7 @@ export default function SystemMetricsPage() {
       cpu: cur?.hostCpuPct ?? null,
       cpuChange: hasPrev ? percentChange(cur?.hostCpuPct, prev?.hostCpuPct) : null,
     };
-  }, [charts.trafficPerMin, cur, prev, hasPrev]);
+  }, [cur, prev, hasPrev]);
 
   const mapData = useMemo<MapData>(() => {
     const multiHost = new Set(processRows.map((r) => r.host)).size > 1;
@@ -467,26 +549,25 @@ export default function SystemMetricsPage() {
     allApps.sort((a, b) => Number(b.active) - Number(a.active) || b.sessions - a.sessions);
     const MAX_APPS = 8;
 
-    const byLabel = new Map<string, MapData['externals'][number]>();
-    for (const o of metrics?.outbound ?? []) {
-      const label = o.label ?? o.key;
-      const curExt = byLabel.get(label) ?? {
-        key: o.key,
-        label,
-        callsPerMin: 0,
-        p95Ms: 0,
-        throttled: 0,
-        errors: 0,
-        tone: 'ok' as StatusTone,
-      };
-      curExt.callsPerMin += o.requests / observedMinutes;
-      curExt.p95Ms = Math.max(curExt.p95Ms, o.p95Ms);
-      curExt.throttled += o.throttled;
-      curExt.errors += o.errors;
-      curExt.tone = worstTone(insights.filter((i) => i.area === 'externos' && i.id.endsWith(o.key)), curExt.tone);
-      byLabel.set(label, curExt);
-    }
-    const externals = Array.from(byLabel.values())
+    // Un nodo por servicio (host), no por etiqueta: dos servidores SAP con la misma etiqueta se
+    // juntaban y el detalle mostraba solo el primero. Si la etiqueta se repite, se le agrega el host.
+    const outbound = metrics?.outbound ?? [];
+    const labelCount = new Map<string, number>();
+    for (const o of outbound) labelCount.set(o.label ?? o.key, (labelCount.get(o.label ?? o.key) ?? 0) + 1);
+    const externals = outbound
+      .map((o) => {
+        const base = o.label ?? o.key;
+        const ownIds = new Set([`throttled-${o.key}`, `outbound-errors-${o.key}`]);
+        return {
+          key: o.key,
+          label: (labelCount.get(base) ?? 0) > 1 && base !== o.key ? `${base} · ${o.key}` : base,
+          callsPerMin: o.requests / observedMinutes,
+          p95Ms: o.p95Ms,
+          throttled: o.throttled,
+          errors: o.errors,
+          tone: worstTone(insights.filter((i) => ownIds.has(i.id))),
+        };
+      })
       .sort((a, b) => b.callsPerMin - a.callsPerMin)
       .slice(0, 4);
 
@@ -523,7 +604,11 @@ export default function SystemMetricsPage() {
       return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
     };
     const borrowed = latest.reduce((acc, r) => acc + (r.poolBorrowed ?? 0), 0);
-    const size = latest.reduce((acc, r) => acc + (r.poolSize ?? 0), 0);
+    const open = latest.reduce((acc, r) => acc + (r.poolSize ?? 0), 0);
+    // Capacidad = máximo configurado del pool × procesos. Antes se dividía entre las conexiones
+    // ABIERTAS en ese momento (mssql abre solo las que necesita): "2 de 2" marcaba 100 % en rojo
+    // con el pool casi vacío.
+    const capacity = (metrics?.poolMax ?? 0) * latest.filter((r) => r.poolSize != null).length;
     const kronosCpu = latest.reduce((acc, r) => acc + (r.cpuPct ?? 0), 0);
     const kronosRam = latest.reduce((acc, r) => acc + (r.rssMb ?? 0), 0);
     return [
@@ -546,8 +631,11 @@ export default function SystemMetricsPage() {
       {
         key: 'pool',
         label: 'Conexiones SQL',
-        percent: size > 0 ? (borrowed / size) * 100 : null,
-        sub: size > 0 ? `${formatInt(borrowed)} de ${formatInt(size)} en uso` : 'pool sin abrir',
+        percent: capacity > 0 ? (borrowed / capacity) * 100 : null,
+        sub:
+          capacity > 0
+            ? `${formatInt(borrowed)} en uso de ${formatInt(capacity)} posibles (${formatInt(open)} abiertas)`
+            : 'pool sin abrir',
         warning: 70,
         critical: 90,
       },
@@ -560,7 +648,7 @@ export default function SystemMetricsPage() {
         critical: 85,
       },
     ];
-  }, [latest, lastDb, dbLive]);
+  }, [latest, lastDb, dbLive, metrics?.poolMax]);
 
   const connectionsByProgram = useMemo(() => {
     const map = new Map<string, number>();
@@ -686,7 +774,7 @@ export default function SystemMetricsPage() {
           </Alert>
         )}
 
-        <StatusHero verdict={verdict} insights={insights} hasData={hasData} />
+        <StatusHero verdict={verdict} insights={insights} highlights={highlights} hasData={hasData} />
 
         <Tabs value={tab} onChange={changeTab} keepMounted={false} variant="pills" radius="xl" className={styles.tabs}>
           <Tabs.List className={styles.tabList} aria-label="Secciones del monitor">
@@ -749,15 +837,16 @@ export default function SystemMetricsPage() {
               change={signals.trafficChange}
               polarity="neutral"
               trend={charts.trafficPerMin}
-              foot={cur ? `${formatInt(cur.requests)} en total` : undefined}
+              foot={cur ? `${formatInt(cur.requests)} en total (pantallas y API, sin archivos)` : undefined}
             />
             <SignalTile
               icon={<IconClockHour4 size={15} />}
-              label="Tiempo de respuesta p95"
+              label="Tiempo de respuesta p95 (aprox.)"
               value={signals.p95 == null ? '–' : formatMs(signals.p95)}
               change={signals.p95Change}
               polarity="up-is-bad"
               trend={charts.p95}
+              foot="promedio de los p95 de cada minuto"
             />
             <SignalTile
               icon={<IconAlertTriangle size={15} />}
@@ -767,7 +856,7 @@ export default function SystemMetricsPage() {
               change={signals.errChange}
               polarity="up-is-bad"
               trend={charts.errorPct}
-              foot={cur ? `${formatInt(cur.errors)} respuestas 5xx` : undefined}
+              foot={cur ? `${formatInt(cur.errors)} errores 5xx o conexiones cortadas` : undefined}
             />
             <SignalTile
               icon={<IconGauge size={15} />}
@@ -787,7 +876,9 @@ export default function SystemMetricsPage() {
             <h2 id="sm-rings" className={styles.sectionTitle}>
               Qué tan lleno está cada recurso
             </h2>
-            <span className={styles.sectionHint}>Último minuto registrado</span>
+            <span className={styles.sectionHint}>
+              {range === '1h' ? 'Último minuto registrado' : `Última ventana de ${BUCKET_MINUTES[range]} min`}
+            </span>
           </div>
           <div className={styles.card}>
             <ResourceRings rings={rings} />
@@ -838,10 +929,11 @@ export default function SystemMetricsPage() {
                 Personas → aplicaciones → máquinas desde donde se conectan → SQL Server. Cada Kronos muestra el estado de
                 su propia base; el nodo SQL Server, el del servidor completo (CPU, memoria y discos).
               </p>
-              {/* Cada mapa en su propio tablero: se arrastra, se acerca y se puede ampliar. */}
-              <MonitorBoard>
+              {/* En una tarjeta normal (sin tablero que se arrastra): la página baja de forma natural
+                  y el mapa se acomoda solo al ancho. */}
+              <div className={styles.card}>
                 <OverviewMap data={overview} />
-              </MonitorBoard>
+              </div>
             </>
           )}
         </section>
@@ -860,12 +952,12 @@ export default function SystemMetricsPage() {
             mismo SQL Server. Es la misma tarjeta {dbLive?.databaseName ? `"${dbLive.databaseName}"` : 'de este Kronos'} de la
             vista general, abierta en detalle.
           </p>
-          <MonitorBoard>
+          <div className={styles.card}>
             <SystemMap
               data={mapData}
               onSelectExternal={(key, label) => setDetail({ kind: 'route', direction: 'out', key, title: label })}
             />
-          </MonitorBoard>
+          </div>
         </section>
         </Tabs.Panel>
 
@@ -929,7 +1021,7 @@ export default function SystemMetricsPage() {
             <div className={styles.list}>
               {visibleRoutes.map((r) => (
                 <button
-                  key={r.key}
+                  key={`${r.key}|${r.module}`}
                   type="button"
                   className={styles.listRowButton}
                   onClick={() => setDetail({ kind: 'route', direction: 'in', key: r.key, title: r.key })}
@@ -1012,8 +1104,8 @@ export default function SystemMetricsPage() {
             <Group gap="xs">
               {dbLive?.queryStore && (
                 <ToneChip
-                  tone={dbLive.queryStore === 'READ_WRITE' ? 'ok' : 'info'}
-                  label={`Query Store ${dbLive.queryStore === 'READ_WRITE' ? 'activo' : 'apagado'}`}
+                  tone={dbLive.queryStore === 'READ_WRITE' ? 'ok' : dbLive.queryStore === 'ERROR' ? 'warning' : 'info'}
+                  label={`Query Store ${QUERY_STORE_LABEL[dbLive.queryStore] ?? dbLive.queryStore.toLowerCase()}`}
                 />
               )}
               <Tooltip label="Actualizar foto en vivo">
@@ -1066,7 +1158,7 @@ export default function SystemMetricsPage() {
               {dbLive?.blocked && dbLive.blocked.length > 0 && (
                 <>
                   <h3 className={styles.cardTitle} style={{ marginTop: 20 }}>
-                    Bloqueadas ahora
+                    Bloqueadas ahora en esta base
                   </h3>
                   <div className={styles.list} style={{ marginTop: 10 }}>
                     {dbLive.blocked.map((b) => (
@@ -1091,7 +1183,9 @@ export default function SystemMetricsPage() {
             <div className={styles.card}>
               <h3 className={styles.cardTitle}>Consultas que más CPU consumen</h3>
               <p className={styles.cardHint}>
-                Acumulado desde {dbLive?.sqlServerStartedAt ? formatDateTime(dbLive.sqlServerStartedAt) : 'que SQL arrancó'}
+                {/* SQL Server acumula desde que el plan de cada consulta entró a su caché (y se
+                    reinicia si se recompila), no desde que arrancó: no decir una fecha falsa. */}
+                Acumulado desde que cada consulta entró a la caché de SQL Server
               </p>
               {!dbLive?.topQueries?.length ? (
                 <div className={styles.empty}>Sin datos de consultas.</div>
@@ -1106,7 +1200,7 @@ export default function SystemMetricsPage() {
                             <div className={styles.rowTitle}>{table ?? 'Consulta'}</div>
                             <div className={styles.rowSub}>
                               {formatInt(q.executions)} ejecuciones · {formatMs(q.avgElapsedMs)} en promedio ·{' '}
-                              {formatInt(q.avgLogicalReads)} lecturas
+                              {formatInt(q.avgLogicalReads)} lecturas por ejecución
                             </div>
                           </span>
                           <span className={styles.rowMetric}>
@@ -1168,7 +1262,9 @@ export default function SystemMetricsPage() {
               <h2 id="sm-ext" className={styles.sectionTitle}>
                 Servicios externos
               </h2>
-              <span className={styles.sectionHint}>Graph/SharePoint, Orion, SAP, IA y otros</span>
+              <span className={styles.sectionHint}>
+                Tiempo hasta que el servicio responde · p95 aproximado
+              </span>
             </div>
             <div className={styles.list}>
               {outbound.map((r) => (
@@ -1185,11 +1281,12 @@ export default function SystemMetricsPage() {
                       {formatInt(r.requests)} llamadas · promedio {formatMs(r.avgMs)}
                       {r.throttled > 0 ? ` · ${formatInt(r.throttled)} limitadas (429)` : ''}
                       {r.errors > 0 ? ` · ${formatInt(r.errors)} fallidas` : ''}
+                      {r.clientErrors > 0 ? ` · ${formatInt(r.clientErrors)} rechazadas (4xx)` : ''}
                     </div>
                   </span>
                   <span className={styles.rowMetric}>
                     {formatMs(r.p95Ms)}
-                    <div className={styles.rowMetricSub}>p95</div>
+                    <div className={styles.rowMetricSub}>p95 aprox.</div>
                   </span>
                   <IconChevronRight size={16} className={styles.chevron} />
                 </button>
@@ -1207,6 +1304,7 @@ export default function SystemMetricsPage() {
         range={range}
         inbound={inbound}
         outbound={outbound}
+        modules={metrics?.modules ?? []}
         onClose={() => setDetail(null)}
         onSelect={setDetail}
       />

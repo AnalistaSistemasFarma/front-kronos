@@ -84,7 +84,7 @@ export function UserConsumption({
     const indexed = users.map((u, i) => ({ user: u, rank: i + 1 }));
     if (!q) return indexed;
     return indexed.filter(
-      ({ user }) => user.email.includes(q) || (user.name ?? '').toLowerCase().includes(q)
+      ({ user }) => user.email.toLowerCase().includes(q) || (user.name ?? '').toLowerCase().includes(q)
     );
   }, [users, query]);
   const visible = showAll || query ? filtered : filtered.slice(0, VISIBLE);
@@ -100,7 +100,7 @@ export function UserConsumption({
           value={activeUsers ? formatInt(activeUsers.activeNow) : '–'}
           unit={activeUsers?.activeNow === 1 ? 'persona' : 'personas'}
           trend={trend}
-          foot="Con actividad en los últimos 15 min"
+          foot="Usaron Kronos en los últimos ~15 min (tener la pestaña abierta no cuenta)"
         />
         <SignalTile
           icon={<IconUsersGroup size={15} />}
@@ -123,7 +123,7 @@ export function UserConsumption({
           small
           foot={
             top && topShare != null
-              ? `${formatValue(topShare, 0)} % del tiempo de servidor (${formatMs(top.totalMs)})`
+              ? `${formatValue(topShare, 0)} % del tiempo de las personas con sesión (${formatMs(top.totalMs)})`
               : 'Sin actividad en el rango'
           }
         />
@@ -134,7 +134,7 @@ export function UserConsumption({
           unit="%"
           foot={
             users.length > 5
-              ? 'Del tiempo de servidor es de las 5 personas que más consumen'
+              ? 'Del tiempo de las personas con sesión es de las 5 que más consumen'
               : 'Hay 5 personas o menos en el rango'
           }
         />
@@ -145,8 +145,9 @@ export function UserConsumption({
           <div>
             <h3 className={styles.cardTitle}>Quién consume más</h3>
             <p className={styles.cardHint}>
-              Ordenado por tiempo de servidor: lo que Kronos tardó atendiendo a cada persona, incluida la espera a
-              la base de datos y a servicios externos
+              Ordenado por tiempo de servidor: la suma de lo que Kronos tardó en responderle a cada persona,
+              incluida la espera a la base de datos y a servicios externos. Si una pantalla pide varias cosas a la
+              vez, sus tiempos se suman.
             </p>
           </div>
           {users.length > 5 && (
@@ -193,7 +194,8 @@ export function UserConsumption({
                     </div>
                     <div className={styles.rowSub}>
                       {user.name ? `${user.email} · ` : ''}
-                      {formatInt(user.requests)} peticiones · promedio {formatMs(user.avgMs)} · p95 {formatMs(user.p95Ms)}
+                      {formatInt(user.requests)} peticiones · promedio {formatMs(user.avgMs)} · p95 aprox.{' '}
+                      {formatMs(user.p95Ms)}
                     </div>
                     <div className={styles.rowSub}>
                       {user.topModuleLabel ? `Más usa: ${user.topModuleLabel} · ` : ''}
