@@ -243,6 +243,8 @@ export function registrarReposSolicitados(rutas, respuesta, repos) {
   // en la prueba del 2026-10-20 Orus listó los 10 repos y se habrían montado todos).
   const lineas = String(respuesta ?? '')
     .split('\n')
+    // Se evalúa línea por línea (sin saltos) sobre la respuesta del propio agente: sin riesgo de ReDoS.
+    // eslint-disable-next-line security/detect-unsafe-regex
     .map((l) => l.match(/^\s*(?:[-*>]\s*)?(?:\*\*|_)?\s*montar\s*:?\s*(?:\*\*|_)?\s*:?\s*(.+)$/i)?.[1])
     .filter(Boolean);
   const nuevos = reposMencionados(lineas.join('\n'), repos);
