@@ -65,7 +65,6 @@ import {
 } from '../../../../components/system-metrics/format';
 import {
   BUCKET_MINUTES,
-  RANGE_MINUTES,
   RANGE_OPTIONS,
   type DbLive,
   type DetailTarget,
@@ -984,7 +983,7 @@ export default function SystemMetricsPage() {
               <div className={styles.card} style={{ marginTop: 16 }}>
                 <h3 className={styles.cardTitle}>Comportamiento</h3>
                 <p className={styles.cardHint}>A qué módulos va el tiempo de servidor de cada persona</p>
-                <UserBehavior users={metrics?.users ?? []} rangeMinutes={RANGE_MINUTES[range]} />
+                <UserBehavior users={metrics?.users ?? []} />
               </div>
             </>
           )}

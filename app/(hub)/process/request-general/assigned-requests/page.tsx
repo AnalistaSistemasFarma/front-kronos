@@ -2,7 +2,6 @@
 
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { saveAs } from 'file-saver';
 import toast from 'react-hot-toast';
 import { useSession } from 'next-auth/react';
 import { useMediaQuery } from '@mantine/hooks';
@@ -77,6 +76,12 @@ import {
   buildTaskDisplayBadges,
   getSimplifiedTasksProgress,
 } from '@/lib/orion/taskProgress';
+import {
+  boardExportFilename,
+  buildBoardWorkbook,
+  type BoardRequest,
+} from '@/lib/request-general/exportBoardExcel';
+import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
 import { createPrerenderSearchParamsForClientPage } from 'next/dist/server/request/search-params';
 
 const ITEMS_PER_PAGE = 100;
@@ -183,6 +188,7 @@ function RequestBoard() {
   );
   const [tasksByRequest, setTasksByRequest] = useState<Record<number, RequestTask[]>>({});
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     company: '',
@@ -705,73 +711,130 @@ function RequestBoard() {
     }
   };
 
-  async function exportToExcel() {
-    // La tabla solo tiene la página visible: la exportación pide la lista completa con los
-    // mismos filtros (la ruta sin `page` devuelve todo).
-    const params = buildTicketParams(appliedFiltersRef.current ?? filters);
-    const response = await fetch(`/api/requests-general/request-assigned?${params.toString()}`);
-    if (!response.ok) {
-      toast.error('No se pudo generar el informe');
-      return;
+  const STATUS_LABELS: Record<string, string> = {
+    '0': 'Todos',
+    '1': 'Abierto',
+    '2': 'Resuelto',
+    '3': 'Cancelado',
+    '4': 'Sin empezar (solo tareas)',
+    '7': 'Devuelta (solo solicitudes)',
+  };
+
+  async function loadTasksByRequest(ids: number[]) {
+    const grouped: Record<number, RequestTask[]> = {};
+    for (let i = 0; i < ids.length; i += 500) {
+      const batch = ids.slice(i, i + 500);
+      if (batch.length === 0) continue;
+      const response = await fetch(
+        `/api/requests-general/activities-requets?ids=${batch.join(',')}`
+      );
+      if (!response.ok) throw new Error('No se pudieron leer las tareas');
+      const data = (await response.json()) as RequestTask[];
+      for (const task of data) {
+        (grouped[task.id_request_general] ||= []).push(task);
+      }
     }
-    const allTickets = (await response.json()) as Ticket[];
+    return grouped;
+  }
 
-    // exceljs (pesado) solo se descarga al exportar.
-    const { default: ExcelJS } = await import('exceljs');
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Datos');
+  async function exportToExcel() {
+    if (exporting) return;
+    const applied = appliedFiltersRef.current ?? filters;
+    const includeRequests = typeFilter !== 'tasks' && includesRequests(applied);
+    const includeTasks =
+      typeFilter !== 'requests' && !REQUEST_ONLY_STATUSES.includes(applied.status || '');
 
-    type TicketKeys = keyof Ticket;
+    setExporting(true);
+    try {
+      let allTickets: Ticket[] = [];
+      if (includeRequests) {
+        const params = buildTicketParams(applied);
+        const response = await fetch(`/api/requests-general/request-assigned?${params.toString()}`);
+        if (!response.ok) throw new Error('solicitudes');
+        const data = await response.json();
+        allTickets = Array.isArray(data) ? data : [];
+      }
 
-    const formatDate = (raw: any) => {
-      if (!raw) return '';
-      const d = new Date(raw);
-      if (isNaN(d.getTime())) return String(raw);
-      return new Intl.DateTimeFormat('es-CO', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      }).format(d);
-    };
+      let tasks: AssignedTask[] = [];
+      if (includeTasks && userId) {
+        const taskParams = buildTicketParams(applied);
+        taskParams.append('idUser', String(userId));
+        const response = await fetch(
+          `/api/requests-general/activities-assigned?${taskParams.toString()}`
+        );
+        if (!response.ok) throw new Error('tareas');
+        const data = await response.json();
+        tasks = Array.isArray(data) ? data : [];
+      }
 
-    const dateKeys: TicketKeys[] = ['created_at'];
+      if (allTickets.length === 0 && tasks.length === 0) {
+        toast.error('No hay registros con los filtros actuales');
+        return;
+      }
 
-    const columnMapOrdered: { key: TicketKeys; header: string; width: number }[] = [
-      { key: 'requester', header: 'Solicitante', width: 24 },
-      { key: 'user', header: 'Asignado', width: 24 },
-      { key: 'company', header: 'Empresa', width: 24 },
-      { key: 'process', header: 'Proceso', width: 22 },
-      { key: 'category', header: 'Categoría', width: 22 },
-      { key: 'subject', header: 'Asunto', width: 30 },
-      { key: 'description', header: 'Descripción', width: 40 },
-      { key: 'status', header: 'Estado', width: 18 },
-      { key: 'created_at', header: 'Fecha de creación', width: 20 },
-    ];
+      const tasksById = allTickets.length
+        ? await loadTasksByRequest(allTickets.map((ticket) => ticket.id))
+        : {};
 
-    worksheet.columns = columnMapOrdered;
+      const requests: BoardRequest[] = allTickets.map((ticket) => ({
+        id: ticket.id,
+        subject: ticket.subject,
+        process: ticket.process,
+        category: ticket.category,
+        company: ticket.company,
+        status: ticket.status,
+        requester: ticket.requester,
+        assigned: ticket.user,
+        createdAt: ticket.created_at,
+        description: ticket.description,
+        tasks: tasksById[ticket.id] ?? [],
+      }));
 
-    // Una fila por solicitud (antes se agregaba cada una dos veces).
-    allTickets.forEach(item => {
-      const row: Record<TicketKeys, any> = {} as Record<TicketKeys, any>;
-
-      columnMapOrdered.forEach(col => {
-        const value = item[col.key];
-        row[col.key] = dateKeys.includes(col.key) ? formatDate(value) : value;
+      const companyLabel =
+        companies.find((company) => company.value === applied.company)?.label || 'Todas';
+      const workbook = await buildBoardWorkbook({
+        module: 'Solicitudes y Tareas Asignadas',
+        filters: [
+          {
+            label: 'Vista',
+            value:
+              typeFilter === 'tasks'
+                ? 'Solo tareas'
+                : typeFilter === 'requests'
+                  ? 'Solo solicitudes'
+                  : 'Solicitudes y tareas',
+          },
+          { label: 'Estado', value: STATUS_LABELS[applied.status] || 'Todos' },
+          { label: 'Empresa', value: companyLabel },
+          { label: 'Proceso', value: applied.process || 'Todos' },
+          { label: 'ID', value: applied.id || 'Todos' },
+          { label: 'Fecha desde', value: applied.date_from || 'Sin límite' },
+          { label: 'Fecha hasta', value: applied.date_to || 'Sin límite' },
+        ],
+        requests,
+        assignedTasks: tasks.map((task) => ({
+          requestId: task.id_request_general,
+          taskId: task.id_task ?? task.id,
+          task: task.task,
+          subject: task.subject_request,
+          process: task.process,
+          company: task.company,
+          status: task.status_task,
+          createdAt: task.created_at,
+          requester: task.name_requester,
+          assigned: task.assigned,
+          description: task.description,
+        })),
       });
 
-      worksheet.addRow(row);
-    });
-
-    worksheet.getRow(1).font = { bold: true };
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
-
-    saveAs(blob, 'InformeSolicitudesAsignadas.xlsx');
+      await downloadWorkbook(workbook, boardExportFilename('Solicitudes-y-tareas-asignadas'));
+      toast.success('Excel descargado');
+    } catch (err) {
+      console.error(err);
+      toast.error('No se pudo generar el informe');
+    } finally {
+      setExporting(false);
+    }
   }
 
   const formatAssignedDate = (raw: string) => {
@@ -911,16 +974,15 @@ function RequestBoard() {
         subtitle='Gestión de solicitudes y tareas asignadas a ti'
         actions={
           <>
-            {filters.process == '4' && (
-              <Button
-                variant='default'
-                radius='xl'
-                leftSection={<IconDownload size={16} />}
-                onClick={() => exportToExcel()}
-              >
-                Descargar XLSX
-              </Button>
-            )}
+            <Button
+              variant='default'
+              radius='xl'
+              leftSection={<IconDownload size={16} />}
+              loading={exporting}
+              onClick={() => exportToExcel()}
+            >
+              Descargar Excel
+            </Button>
             <WorkloadDistribution onReassigned={() => fetchTickets()} />
           </>
         }
