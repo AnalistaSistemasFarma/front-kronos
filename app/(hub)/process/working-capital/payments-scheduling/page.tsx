@@ -304,6 +304,27 @@ function PaymentSchedulingBoard() {
         [payments]
     );
 
+    const sumValor = (rows: PaymentSchedulingTask[]) =>
+        rows.reduce((acc, r) => {
+            const n = Number(String(r.valor_pagar ?? '').replace(/[^\d.-]/g, ''));
+            return acc + (Number.isFinite(n) ? n : 0);
+        }, 0);
+
+    const groupedByType = useMemo(() => {
+        const order = TYPE_REQUEST_OPTIONS.filter((o) => o.value !== '0').map((o) => o.label);
+        const map = new Map<string, PaymentSchedulingTask[]>();
+        for (const r of filteredRequests) {
+            const key = (r.tipo_solicitud ?? '').trim() || 'Sin tipo';
+            if (!map.has(key)) map.set(key, []);
+            map.get(key)!.push(r);
+        }
+        return [...map.keys()]
+            .sort((a, b) => (order.indexOf(a) + 1 || 999) - (order.indexOf(b) + 1 || 999))
+            .map((type) => ({ type, rows: map.get(type)! }));
+    }, [filteredRequests]);
+
+    const totalGeneral = useMemo(() => sumValor(filteredRequests), [filteredRequests]);
+
     const allSelectableSelected =
         selectableRequests.length > 0 && selectableRequests.every((r) => selectedIds.has(r.id_tarea));
     const someSelectableSelected = selectableRequests.some((r) => selectedIds.has(r.id_tarea));
@@ -403,7 +424,6 @@ function PaymentSchedulingBoard() {
 
     const fetchDepartments = async (_userIdParam?: string) => {
         try {
-        // El servidor toma el usuario de la sesión; no se envía ningún id.
         const url = `/api/authorization/authorization-departments`;
 
         const response = await fetch(url);
@@ -557,6 +577,15 @@ function PaymentSchedulingBoard() {
         );
     };
 
+    const openRelatedRequestNewTab = (req: PaymentSchedulingTask) => {
+        if (!req.id_solicitud) return;
+        window.open(
+            `/process/request-general/view-activities?id=${req.id_tarea}&from=payments-scheduling`,
+            '_blank',
+            'noopener,noreferrer'
+        );
+    };
+
     const downloadPaymentPlano = async (rows: PaymentSchedulingTask[]) => {
         const columns = [
             { header: 'ID Solicitud', key: 'id', width: 12 },
@@ -607,7 +636,6 @@ function PaymentSchedulingBoard() {
         let mergedCount = 0;
 
         for (const r of rows) {
-            // Lista y descarga por el servidor: el token de Graph no sale del servidor.
             const listRes = await fetch(
                 `/api/requests-general/list-attachments?requestId=${encodeURIComponent(String(r.id_solicitud))}&storagePath=SG&entityType=Request`
             );
@@ -623,7 +651,6 @@ function PaymentSchedulingBoard() {
             const pdfs = children.filter((it) => /\.pdf$/i.test(String(it.name || '')));
 
             for (const pdf of pdfs) {
-                // El enlace temporal de descarga de Graph es directo y no lleva el token.
                 const downloadUrl =
                     pdf['@microsoft.graph.downloadUrl'] ||
                     `/api/requests-general/attachment-file?requestId=${encodeURIComponent(String(r.id_solicitud))}&fileId=${encodeURIComponent(pdf.id)}&storagePath=SG&entityType=Request&download=1`;
@@ -835,7 +862,7 @@ function PaymentSchedulingBoard() {
                 <IconBuilding size={16} className='text-gray-400' style={{ flexShrink: 0, marginTop: 2 }} />
                 <div style={{ minWidth: 0 }}>
                     <Text size='sm' fw={500} truncate>
-                        {req.usuario_asignado}
+                        {req.creador_solicitud}
                     </Text>
                     <Text size='xs' c='dimmed' truncate>
                         {req.empresa}
@@ -888,31 +915,38 @@ function PaymentSchedulingBoard() {
                 onClick={() => goToRelatedRequest(req)}
                 aria-label={`Ir a solicitud ${req.id_solicitud}`}
             >
-                <Badge variant='light' color={getStatusColor(req.estado_tarea)} size='sm'>
+                <Badge
+                    variant='light'
+                    color={getStatusColor(req.estado_tarea)}
+                    size='sm'
+                    styles={{ label: { overflow: 'visible' } }}
+                >
                     {getStatusLabel(req.estado_tarea)}
                 </Badge>
             </UnstyledButton>
             </Table.Td>
             <Table.Td style={{ whiteSpace: 'nowrap' }}>
-            <Group gap='xs' wrap='nowrap' justify='center'>
+            <Group gap={4} wrap='nowrap' justify='center'>
                 <Tooltip label='Ir a la solicitud'>
                 <ActionIcon
                     variant='light'
                     color='blue'
-                    onClick={() => goToRelatedRequest(req)}
+                    size='sm'
+                    onClick={() => openRelatedRequestNewTab(req)}
                     aria-label='Ir a la solicitud'
                 >
-                    <IconEye size={16} />
+                    <IconEye size={15} />
                 </ActionIcon>
                 </Tooltip>
                 <Tooltip label='Ver detalle'>
                 <ActionIcon
                     variant='subtle'
                     color='gray'
+                    size='sm'
                     onClick={() => openDetailModal(req)}
                     aria-label='Ver detalle'
                 >
-                    <IconNotes size={16} />
+                    <IconNotes size={15} />
                 </ActionIcon>
                 </Tooltip>
             </Group>
@@ -1029,7 +1063,7 @@ function PaymentSchedulingBoard() {
                 mt='xs'
                 fullWidth
                 leftSection={<IconEye size={14} />}
-                onClick={() => goToRelatedRequest(req)}
+                onClick={() => openRelatedRequestNewTab(req)}
             >
                 Ir a la solicitud
             </Button>
@@ -1283,6 +1317,15 @@ function PaymentSchedulingBoard() {
                 <IconShieldCheck size={20} />
                 Solicitudes por autorizar
                 </Title>
+                <Group gap='lg'>
+                {filteredRequests.length > 0 && (
+                    <Text size='sm' fw={600}>
+                        Total general:{' '}
+                        <Text span fw={700} c='green'>
+                            {formatCurrency(totalGeneral)}
+                        </Text>
+                    </Text>
+                )}
                 {!isMobile && selectableRequests.length > 0 && (
                 <Checkbox
                     label='Seleccionar todo'
@@ -1291,6 +1334,7 @@ function PaymentSchedulingBoard() {
                     onChange={toggleSelectAll}
                 />
                 )}
+                </Group>
             </Group>
 
             {filteredRequests.length === 0 ? (
@@ -1304,7 +1348,7 @@ function PaymentSchedulingBoard() {
                 </Text>
                 </Stack>
             ) : isMobile ? (
-                <Stack gap='sm'>
+                <Stack gap='lg'>
                 {selectableRequests.length > 0 && (
                     <Checkbox
                     label='Seleccionar todo'
@@ -1313,40 +1357,72 @@ function PaymentSchedulingBoard() {
                     onChange={toggleSelectAll}
                     />
                 )}
-                {filteredRequests.map(renderCard)}
+                {groupedByType.map((group) => (
+                    <div key={group.type}>
+                    <Group justify='space-between' mb='xs' wrap='nowrap'>
+                        <Group gap='xs' wrap='nowrap'>
+                        <Text fw={700}>{group.type}</Text>
+                        <Badge variant='light' color='gray' size='sm'>
+                            {group.rows.length}
+                        </Badge>
+                        </Group>
+                        <Text size='sm' fw={700} c='green' style={{ whiteSpace: 'nowrap' }}>
+                        {formatCurrency(sumValor(group.rows))}
+                        </Text>
+                    </Group>
+                    <Stack gap='sm'>{group.rows.map(renderCard)}</Stack>
+                    </div>
+                ))}
                 </Stack>
             ) : (
-                <Table.ScrollContainer minWidth={1100}>
-                <Table striped highlightOnHover verticalSpacing='sm' horizontalSpacing='md'>
-                    <Table.Thead
-                        style={{
-                            backgroundColor:
-                                'light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))',
-                        }}
+                <Stack gap='xl'>
+                {groupedByType.map((group) => (
+                    <div key={group.type}>
+                    <Group gap='xs' mb='xs'>
+                        <Title order={4}>{group.type}</Title>
+                        <Badge variant='light' color='gray'>
+                        {group.rows.length}
+                        </Badge>
+                    </Group>
+                    <Table
+                        striped
+                        highlightOnHover
+                        verticalSpacing='sm'
+                        horizontalSpacing='xs'
+                        layout='fixed'
+                        style={{ width: '100%' }}
                     >
-                    <Table.Tr>
-                        <Table.Th w={40}>
-                        <Checkbox
-                            checked={allSelectableSelected}
-                            indeterminate={someSelectableSelected && !allSelectableSelected}
-                            onChange={toggleSelectAll}
-                            disabled={selectableRequests.length === 0}
-                            aria-label='Seleccionar todo'
-                        />
-                        </Table.Th>
-                        <Table.Th>ID</Table.Th>
-                        <Table.Th>Tipo</Table.Th>
-                        <Table.Th>Solicitante</Table.Th>
-                        <Table.Th>Acreedor</Table.Th>
-                        <Table.Th>Fechas de pago</Table.Th>
-                        <Table.Th ta='right'>Valor</Table.Th>
-                        <Table.Th>Estado</Table.Th>
-                        <Table.Th ta='center'>Acciones</Table.Th>
-                    </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>{filteredRequests.map(renderRow)}</Table.Tbody>
-                </Table>
-                </Table.ScrollContainer>
+                        <Table.Thead
+                            style={{
+                                backgroundColor:
+                                    'light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))',
+                            }}
+                        >
+                        <Table.Tr>
+                            <Table.Th w={36} />
+                            <Table.Th w={54}>ID</Table.Th>
+                            <Table.Th w={150}>Tipo</Table.Th>
+                            <Table.Th w={150}>Solicitante</Table.Th>
+                            <Table.Th>Acreedor</Table.Th>
+                            <Table.Th w={170}>Fechas de pago</Table.Th>
+                            <Table.Th w={128} ta='center'>Valor</Table.Th>
+                            <Table.Th w={110}>Estado</Table.Th>
+                            <Table.Th w={92} ta='center'>Acciones</Table.Th>
+                        </Table.Tr>
+                        </Table.Thead>
+                        <Table.Tbody>{group.rows.map(renderRow)}</Table.Tbody>
+                    </Table>
+                    <Group justify='flex-end' mt='xs'>
+                        <Text size='sm' c='dimmed'>
+                        Subtotal {group.type}:{' '}
+                        <Text span fw={700} c='green'>
+                            {formatCurrency(sumValor(group.rows))}
+                        </Text>
+                        </Text>
+                    </Group>
+                    </div>
+                ))}
+                </Stack>
             )}
             </Card>
         </div>
