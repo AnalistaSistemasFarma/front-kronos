@@ -4,7 +4,7 @@ import { authenticateAgent } from '../../../../../../../lib/chat/agent-auth';
 import { jsonNoStore, NO_STORE, serverError, unauthorized } from '../../../../../../../lib/chat/http';
 import { buildContentDisposition, safeDownloadContentType } from '../../../../../../../lib/chat/attachments';
 import { downloadChatAttachment } from '../../../../../../../lib/chat/attachmentStorage';
-import { projectsEnabledFor } from '../../../../../../../lib/chat/projects-rules';
+import { cargarConfigProyectos } from '../../../../../../../lib/proyectos/config-agentes';
 import { whereProyectoDelAgente } from '../../../../../../../lib/chat/projects';
 
 export const dynamic = 'force-dynamic';
@@ -19,7 +19,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (!agent) return unauthorized();
 
     const noEncontrado = () => jsonNoStore({ error: 'Archivo no encontrado.' }, { status: 404 });
-    if (agent.scope !== 'projects' || !projectsEnabledFor(agent.code)) return noEncontrado();
+    if (agent.scope !== 'projects') return noEncontrado();
+    const config = await cargarConfigProyectos();
+    if (!config.habilitadoEnAlguna(agent.code)) return noEncontrado();
 
     const { fileId } = await params;
     const idFile = Number.parseInt(fileId, 10);
@@ -29,8 +31,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       where: {
         id_project_file: idFile,
         // ANCLA DE SEGURIDAD: proyecto activo donde el agente de la llave
-        // está designado.
-        project: whereProyectoDelAgente(agent.idAgent),
+        // está designado, en una empresa donde está habilitado para Proyectos.
+        project: { ...whereProyectoDelAgente(agent.idAgent), ...config.filtroEmpresas(agent.code) },
       },
       select: { file_name: true, content_type: true, onedrive_item_id: true },
     });

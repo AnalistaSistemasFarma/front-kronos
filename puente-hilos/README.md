@@ -128,7 +128,7 @@ puente-hilos/scripts/provisionar-agente.sh horus --llave-archivo /ruta/llave.tmp
 
 El script verifica Node ≥ 20, que `claude` soporte `--restricted`, que el `.env` del bot tenga `CLAUDE_CODE_OAUTH_TOKEN` (solo cuenta la línea, no la lee) y que no haya un `CLAUDE.md` por encima de `~/.puente-hilos`. No sobrescribe una instancia que ya exista y no toca el bot vivo.
 
-Del lado de SynerLink, el agente debe estar en `CHAT_PROJECTS_AGENTS` con perfiles del catálogo (`lib/chat/projects-rules.ts`). Un perfil desconocido deja **todo** el módulo apagado (falla cerrado), así que un perfil nuevo, como `gss`, se agrega al `.env` solo después de desplegar el código que lo trae.
+Del lado de SynerLink, el agente debe estar habilitado para Proyectos en la empresa: desde el 2026-10-20 eso se hace en Procesos → Proyectos → Configuración (por empresa, con motivo y registro); una empresa sin configurar sigue con `CHAT_PROJECTS_AGENTS` y perfiles del catálogo (`lib/chat/projects-rules.ts`). La pantalla solo deja cambiar agentes con llave `scope: "projects"`. Un perfil desconocido deja **todo** el módulo apagado (falla cerrado), así que un perfil nuevo, como `gss`, se agrega al `.env` solo después de desplegar el código que lo trae.
 
 **Apagar:** `launchctl kill SIGTERM …`, o Ctrl+C. Termina los turnos en curso y sale. Para apagar los proyectos en la aplicación, quite `CHAT_PROJECTS_AGENTS` y reinicie la app.
 
