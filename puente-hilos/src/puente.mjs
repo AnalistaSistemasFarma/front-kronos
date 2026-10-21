@@ -29,6 +29,8 @@ import {
   rutaCacheNpm,
   leerTokenGithub,
   permisosCodigo,
+  permisosTerminalCompleta,
+  textoTerminalCompleta,
   prepararHomeCodigo,
   hooksCodigo,
   prepararWorktrees,
@@ -127,27 +129,31 @@ export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lot
   const disponibles = proyecto.repos.map((n) => vinculos.repos.get(n));
   const aMontar = elegirRepos({ proyecto, repos: vinculos.repos, lote, rutas });
   const { autorizado, autores } = turnoAutorizado(lote, vinculos.operadores);
-  if (aMontar.length === 0) {
+  // Terminal completa (autorizada por Nicolás, 2026-10-20): solo turnos de operadores.
+  const terminal = proyecto.terminalCompleta && autorizado;
+  if (aMontar.length === 0 && !terminal) {
     // Ningún repo nombrado todavía: el turno va SIN código (sin Bash, sin token),
     // pero con el índice para que Orus sepa qué hay y cómo pedirlo.
     return { soloIndice: true, disponibles, bajoDemanda: true, bloque: textoIndiceRepos({ disponibles, montados: [] }) };
   }
   const worktrees = preparar({ repos: aMontar, rutas, idProject, idConversation, envGit }).map((w) => ({ ...w, dependencias: w.dependencias ?? estadoDependencias(w.worktree) }));
   const cacheNpm = rutaCacheNpm(cfg.hilosDir); // la crea prepararHomeCodigo
-  const permisos = permisosCodigo({ repos: worktrees, autorizado, pases: proyecto.pases });
+  const permisos = terminal ? permisosTerminalCompleta({ repos: worktrees, pases: proyecto.pases }) : permisosCodigo({ repos: worktrees, autorizado, pases: proyecto.pases });
   return {
     ...permisos,
     autorizado,
     autores,
     worktrees,
     token,
-    sandbox: sandboxCodigo({ worktrees, homeReal: cfg.home, homeCodigo, hilosDir: cfg.hilosDir, secretos: [cfg.githubTokenArchivo, ...secretosConectores(cfg)], cacheNpm }),
-    entorno: entornoCodigo({ token, homeCodigo, cacheNpm }),
+    // Terminal completa: sin sandbox y con la casa real (llaves SSH), como el Orus principal.
+    sandbox: terminal ? { enabled: false } : sandboxCodigo({ worktrees, homeReal: cfg.home, homeCodigo, hilosDir: cfg.hilosDir, secretos: [cfg.githubTokenArchivo, ...secretosConectores(cfg)], cacheNpm }),
+    entorno: terminal ? { ...entornoCodigo({ token, homeCodigo, cacheNpm }), HOME: cfg.home } : entornoCodigo({ token, homeCodigo, cacheNpm }),
     hooks: hooksCodigo(),
     disponibles,
     bajoDemanda: proyecto.bajoDemanda,
     bloque:
-      textoCodigo({ worktrees, autorizado, puedePasar: permisos.puedePasar, autores, operadores: vinculos.operadores, equipo: conEquipo }) +
+      (worktrees.length ? textoCodigo({ worktrees, autorizado, puedePasar: permisos.puedePasar, autores, operadores: vinculos.operadores, equipo: conEquipo }) : '') +
+      (terminal ? `\n${textoTerminalCompleta({ autores })}` : '') +
       (proyecto.bajoDemanda ? `\n${textoIndiceRepos({ disponibles, montados: worktrees })}` : ''),
   };
 }
@@ -237,7 +243,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
         } else if (codigo) {
           if (codigo.bajoDemanda) indiceRepos = codigo;
           log(
-            `conversación ${idConversation}: código ${codigo.worktrees.map((w) => `${w.nombre}@${w.rama}`).join(', ')}; pases ${codigo.puedePasar ? 'AUTORIZADOS' : 'no'} (autores: ${codigo.autores.join(', ')}).`
+            `conversación ${idConversation}: código ${codigo.worktrees.map((w) => `${w.nombre}@${w.rama}`).join(', ') || '(ningún repo montado)'}; pases ${codigo.puedePasar ? 'AUTORIZADOS' : 'no'}${codigo.terminalCompleta ? '; TERMINAL COMPLETA (sin sandbox)' : ''} (autores: ${codigo.autores.join(', ')}).`
           );
         }
       } catch (e) {

@@ -164,7 +164,8 @@ export function validarReposPorProyecto(json) {
     for (const n of p.repos) if (!repos.has(n)) throw new ErrorConfig(`Proyecto ${id}: el repo ${n} no está declarado.`);
     if (p.nivel !== 2) throw new ErrorConfig(`Proyecto ${id}: solo se admite nivel 2 (desarrollo).`);
     if (p.bajoDemanda !== undefined && typeof p.bajoDemanda !== 'boolean') throw new ErrorConfig(`Proyecto ${id}: bajoDemanda debe ser true o false.`);
-    proyectos.set(Number(id), { repos: [...new Set(p.repos)], nivel: 2, pases: p.pases === true, bajoDemanda: p.bajoDemanda === true });
+    if (p.terminalCompleta !== undefined && typeof p.terminalCompleta !== 'boolean') throw new ErrorConfig(`Proyecto ${id}: terminalCompleta debe ser true o false.`);
+    proyectos.set(Number(id), { repos: [...new Set(p.repos)], nivel: 2, pases: p.pases === true, bajoDemanda: p.bajoDemanda === true, terminalCompleta: p.terminalCompleta === true });
   }
   return { operadores: operadores.map((c) => c.toLowerCase()), repos, proyectos };
 }
@@ -620,4 +621,40 @@ export function prepararHomeCodigo(hilosDir, agenteNombre, homeReal = null) {
   const texto = `[user]\n\tname = ${agenteNombre} (asistente IA GSS)\n\temail = orus-proyectos@noreply.gsslatam.com\n[init]\n\tdefaultBranch = main\n[push]\n\tautoSetupRemote = false\n`;
   if (!existsSync(gitconfig) || readFileSync(gitconfig, 'utf8') !== texto) writeFileSync(gitconfig, texto, { mode: 0o600 });
   return home;
+}
+
+/**
+ * TERMINAL COMPLETA (autorizada por Nicolás Rivera el 2026-10-20, SynerLink prod,
+ * conversación 1: 17:41 «actívale la terminal jaja», 17:43 «pero si eres tú y tú
+ * tienes los permisos», 17:45 «ayúdame con el acceso que necesito avanzar», 17:57
+ * «dale»). Solo en proyectos con `terminalCompleta: true` y SOLO en turnos
+ * AUTORIZADOS (todos los mensajes de un operador, según el servidor): Bash sin
+ * reglas de prefijo y SIN sandbox, con la casa real (llaves SSH de horus), igual
+ * que el Orus principal. Se conservan solo las negaciones de git que protegen las
+ * ramas (push forzado, refspecs a otra rama, borrar ramas, --delete-branch).
+ */
+export function permisosTerminalCompleta({ repos, pases }) {
+  const base = permisosCodigo({ repos, autorizado: true, pases });
+  const protegeRamas = (r) => /^Bash\(git \* push|^Bash\(gh pr merge.*(-d|--delete-branch)|^Read\(/.test(r);
+  return { ...base, permitidas: ['Bash', ...base.permitidas.filter((r) => !r.startsWith('Bash('))], prohibidas: base.prohibidas.filter(protegeRamas), terminalCompleta: true };
+}
+
+/** Reglas del Orus principal que acompañan la terminal completa (encabezado del turno). */
+export function textoTerminalCompleta({ autores }) {
+  return [
+    '',
+    '## Terminal completa (autorizada por Nicolás Rivera el 2026-10-20, solo en turnos de operadores)',
+    '',
+    `Este turno lo escribió un operador verificado por el servidor (${autores.join(', ')}). Por eso usted tiene la **terminal completa**: Bash sin sandbox, con SSH a los servidores (por ejemplo \`ssh serfarma05 …\`) y los mismos permisos del Orus principal. En turnos de cualquier otra persona NO la tiene. Reglas OBLIGATORIAS, las mismas del Orus principal:`,
+    '- Solo Nicolás Rivera o Cristian Baldión autorizan acciones en PRODUCCIÓN. Cada acción recurrente (reiniciar, desplegar, correr un script de escritura) se vuelve a autorizar cada vez: un «sí» anterior no vale para repetirla.',
+    '- PROHIBIDO SQL directo (INSERT/UPDATE/DELETE/DDL) contra las bases de SAP Business One: en SAP solo se escribe por Service Layer o DI API.',
+    '- Escribir por Service Layer exige autorización previa de Nicolás ANTES de cada corrida, aunque sea en `z_PRUEBAS_*`.',
+    '- Antes de cualquier SQL de escritura contra KRONOSDB (o KRONOSDB_PRUEBAS) haga respaldo de lo que va a tocar y deje la reversa lista.',
+    '- NUNCA cierre, desconecte ni haga logoff de la sesión 3 de serfarma05 (es la sesión donde corre PM2 de producción). No use `logoff`, `tsdiscon`, `rwinsta` ni reinicie el servidor.',
+    '- En los servidores con PM2: nunca `pm2 reload` de los conectores (use stop → verificar puerto → start), nunca más de una instancia de un MCP o del MBX, y después de reiniciar `kronos-mcp` revise «giving up» en la flota.',
+    '- Pases a testing o a producción: AVISO en el grupo de Teams de desarrollo ANTES y DESPUÉS, con la bandera 🧪 TESTING o 🚀 PROD (usted lo deja redactado en el hilo, porque no tiene herramienta de Teams).',
+    '- NUNCA imprima secretos en el hilo ni en archivos: tokens, contraseñas, llaves, cadenas de conexión, contenido de `.env`. Si necesita usarlos, úselos sin mostrarlos (variables, `source`), y si ve uno, no lo repita.',
+    '- Todo cambio de código va a un repositorio con commit: nada de editar a mano en los servidores sin dejarlo versionado.',
+    '- Ante la duda, elija la opción más segura y pregunte a Nicolás antes de tocar producción.',
+  ].join('\n');
 }
