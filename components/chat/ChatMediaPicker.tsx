@@ -21,8 +21,8 @@ import { chatGetJson, isAbortError } from '../../lib/chat/client';
 export type StickerItem = {
   key: string;
   provider: 'gss' | 'empresa';
-  /** Paquete (2026-10-20): 'animados' (Noto), 'gss' (estático) o 'empresa'. */
-  pack?: 'animados' | 'gss' | 'empresa';
+  /** Paquete: 'mios' (Mis stickers, 2026-10-21), 'animados' (Noto), 'gss' (estático) o 'empresa'. */
+  pack?: 'mios' | 'animados' | 'gss' | 'empresa';
   code?: string;
   idSticker?: number;
   label: string;
@@ -31,8 +31,18 @@ export type StickerItem = {
   animated?: boolean;
   poster?: string | null;
 };
-export type PaqueteItem = { id: 'animados' | 'gss' | 'empresa'; nombre: string };
-export type Catalogo = { gif: boolean; packs?: PaqueteItem[]; stickers: StickerItem[] };
+export type PaqueteItem = { id: 'mios' | 'animados' | 'gss' | 'empresa'; nombre: string };
+export type Catalogo = {
+  gif: boolean;
+  packs?: PaqueteItem[];
+  stickers: StickerItem[];
+  /** «Mis stickers» está disponible (la tabla existe en esta base). */
+  misStickers?: boolean;
+  /** Empresas a las que se puede proponer un sticker propio. */
+  empresas?: { id: number; nombre: string }[];
+  /** Quien mira revisa propuestas (administrador). Solo pinta; la reja está en la ruta. */
+  puedeRevisar?: boolean;
+};
 type GifItem = { id: string; title: string; width: number | null; height: number | null; previewUrl: string };
 type PaginaGif = { items: GifItem[]; next: number | null };
 
@@ -54,6 +64,26 @@ export function pedirCatalogo(): Promise<Catalogo | null> {
       });
   }
   return catalogoEnCurso;
+}
+
+// Quienes pintan el catálogo y quieren enterarse cuando cambia (al cargar o
+// quitar un sticker propio).
+const suscritos = new Set<(c: Catalogo | null) => void>();
+
+/** Escucha los cambios del catálogo. Devuelve cómo dejar de escuchar. */
+export function suscribirCatalogo(fn: (c: Catalogo | null) => void): () => void {
+  suscritos.add(fn);
+  return () => {
+    suscritos.delete(fn);
+  };
+}
+
+/** Vuelve a pedir el catálogo (después de cargar, quitar o proponer un sticker propio). */
+export async function refrescarCatalogo(): Promise<Catalogo | null> {
+  catalogoEnCache = null;
+  const c = await pedirCatalogo();
+  for (const fn of suscritos) fn(c);
+  return c;
 }
 
 /** El catálogo si ya se pidió en esta pestaña (para pintar sin esperar). */

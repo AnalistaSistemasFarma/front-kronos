@@ -1,10 +1,10 @@
 'use client';
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Box, Center, Loader, ScrollArea, Stack, Tabs, Text, TextInput, Tooltip, UnstyledButton } from '@mantine/core';
-import { IconAlertCircle, IconMoodSmile, IconMovie, IconSearch, IconSticker } from '@tabler/icons-react';
+import { Alert, Box, Button, Center, Group, Loader, ScrollArea, Stack, Tabs, Text, TextInput, Tooltip, UnstyledButton } from '@mantine/core';
+import { IconAlertCircle, IconMoodSmile, IconMovie, IconPlus, IconSearch, IconSettings, IconSticker } from '@tabler/icons-react';
 import { SelectorEmoji } from './ChatReactions';
-import { PestanaGif, catalogoEnMemoria, pedirCatalogo, type Catalogo, type StickerItem } from './ChatMediaPicker';
+import { PestanaGif, catalogoEnMemoria, pedirCatalogo, suscribirCatalogo, type Catalogo, type StickerItem } from './ChatMediaPicker';
 import StickerAnimado from './StickerAnimado';
 import type { MediaParaEnviar } from './useChatConversation';
 import { ATRIBUCION_STICKERS_ANIMADOS } from '../../lib/chat/stickers-animados-catalog';
@@ -40,11 +40,14 @@ function ChatExpresiones({
   alto,
   onEmoji,
   onEnviar,
+  onMisStickers,
 }: {
   /** Alto de la zona desplazable (número en px o una expresión CSS). */
   alto: number | string;
   onEmoji: (emoji: string) => void;
   onEnviar: (media: MediaParaEnviar) => void;
+  /** Abre «Mis stickers» (cargar, quitar, proponer). Lo maneja el compositor. */
+  onMisStickers?: () => void;
 }) {
   const [catalogo, setCatalogo] = useState<Catalogo | null>(catalogoEnMemoria());
   const [errorCatalogo, setErrorCatalogo] = useState<string | null>(null);
@@ -62,6 +65,9 @@ function ChatExpresiones({
       vivo = false;
     };
   }, [catalogo]);
+
+  // Al cargar o quitar un sticker propio, el catálogo se vuelve a pedir.
+  useEffect(() => suscribirCatalogo((c) => c && setCatalogo(c)), []);
 
   const conGif = Boolean(catalogo?.gif);
   const valor: Pestana = pestana === 'gif' && !conGif ? 'stickers' : pestana;
@@ -93,7 +99,13 @@ function ChatExpresiones({
         </Tabs.Panel>
 
         <Tabs.Panel value='stickers' pt='xs'>
-          <PestanaStickers catalogo={catalogo} error={Boolean(errorCatalogo)} alto={alto} onEnviar={onEnviar} />
+          <PestanaStickers
+            catalogo={catalogo}
+            error={Boolean(errorCatalogo)}
+            alto={alto}
+            onEnviar={onEnviar}
+            onMisStickers={onMisStickers}
+          />
         </Tabs.Panel>
 
         {conGif && (
@@ -122,11 +134,13 @@ function PestanaStickers({
   error,
   alto,
   onEnviar,
+  onMisStickers,
 }: {
   catalogo: Catalogo | null;
   error: boolean;
   alto: number | string;
   onEnviar: (media: MediaParaEnviar) => void;
+  onMisStickers?: () => void;
 }) {
   const [filtro, setFiltro] = useState('');
   const viewport = useRef<HTMLDivElement>(null);
@@ -139,8 +153,9 @@ function PestanaStickers({
     ];
     return declarados
       .map((p) => ({ ...p, stickers: catalogo.stickers.filter((s) => (s.pack ?? (s.provider === 'empresa' ? 'empresa' : 'gss')) === p.id) }))
-      .filter((p) => p.stickers.length > 0);
-  }, [catalogo]);
+      // «Mis stickers» se muestra aunque esté vacío: ahí está el botón de agregar.
+      .filter((p) => p.stickers.length > 0 || (p.id === 'mios' && Boolean(onMisStickers)));
+  }, [catalogo, onMisStickers]);
 
   const encontrados = useMemo(() => {
     const q = normalizar(filtro);
@@ -158,8 +173,19 @@ function PestanaStickers({
     if (destino && viewport.current) viewport.current.scrollTo({ top: destino.offsetTop - 4, behavior: 'smooth' });
   };
 
-  const cuadricula = (lista: StickerItem[]) => (
+  const cuadricula = (lista: StickerItem[], conAgregar = false) => (
     <div className='chat-sticker-grid'>
+      {conAgregar && onMisStickers && (
+        <UnstyledButton
+          className='chat-sticker-grid__btn chat-sticker-grid__agregar'
+          onClick={onMisStickers}
+          aria-label='Agregar un sticker propio'
+          title='Agregar un sticker propio'
+        >
+          <IconPlus size={26} stroke={1.5} />
+          <span>Agregar</span>
+        </UnstyledButton>
+      )}
       {lista.map((s) => (
         <UnstyledButton
           key={s.key}
@@ -195,8 +221,12 @@ function PestanaStickers({
             return (
               <Tooltip key={p.id} label={p.nombre} withArrow openDelay={300}>
                 <UnstyledButton className='chat-paquetes__btn' onClick={() => irAPaquete(p.id)} aria-label={`Paquete ${p.nombre}`}>
-                  {/* eslint-disable-next-line @next/next/no-img-element -- portada local */}
-                  <img src={portada.poster ?? portada.src} alt='' width={28} height={28} />
+                  {portada ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- portada local o del propio servidor
+                    <img src={portada.poster ?? portada.src} alt='' width={28} height={28} />
+                  ) : (
+                    <IconSticker size={20} stroke={1.5} />
+                  )}
                   <span>{p.nombre}</span>
                 </UnstyledButton>
               </Tooltip>
@@ -220,10 +250,17 @@ function PestanaStickers({
         ) : (
           paquetes.map((p) => (
             <Box key={p.id} data-paquete={p.id} mb='xs' pos='relative'>
-              <Text size='xs' fw={600} className='chat-text-muted' mb={4}>
-                {p.nombre}
-              </Text>
-              {cuadricula(p.stickers)}
+              <Group justify='space-between' gap={4} mb={4} wrap='nowrap'>
+                <Text size='xs' fw={600} className='chat-text-muted'>
+                  {p.nombre}
+                </Text>
+                {p.id === 'mios' && onMisStickers && (
+                  <Button size='compact-xs' variant='subtle' leftSection={<IconSettings size={12} />} onClick={onMisStickers}>
+                    Gestionar
+                  </Button>
+                )}
+              </Group>
+              {cuadricula(p.stickers, p.id === 'mios')}
             </Box>
           ))
         )}

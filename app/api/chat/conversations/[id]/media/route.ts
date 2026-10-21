@@ -6,6 +6,7 @@ import { gifConfig, obtenerGifParaEnviar } from '../../../../../../lib/chat/gif'
 import { crearMensajeConMedia, type MediaNueva } from '../../../../../../lib/chat/message-media';
 import { ExtrasNoDisponibles, tablaAusente } from '../../../../../../lib/chat/message-extras';
 import { stickerPropio } from '../../../../../../lib/chat/stickers-paquetes';
+import { stickerEnviable } from '../../../../../../lib/chat/stickers-personales';
 import {
   badRequest,
   forbidden,
@@ -28,7 +29,8 @@ import {
  * El navegador manda SOLO identificadores. El servidor resuelve todo lo demás:
  *   - el sticker propio sale del catálogo versionado (lib/chat/stickers-catalog);
  *   - el de la empresa tiene que estar activo y ser de una empresa donde quien
- *     envía tiene el módulo de Chat (o de todas, `id_company` NULL);
+ *     envía tiene el módulo de Chat (o de todas, `id_company` NULL), o ser un
+ *     sticker PROPIO de quien envía («Mis stickers», 2026-10-21);
  *   - el GIF se vuelve a pedir a GIPHY por su id y se rechaza si su rating no
  *     está permitido. La URL que queda guardada la eligió el servidor.
  *
@@ -69,16 +71,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       const idSticker = Number(body.idSticker);
       if (!Number.isInteger(idSticker) || idSticker <= 0) return badRequest('Ese sticker no existe.');
       const { empresas } = await accesoAMedia(guard.user);
+      // De una empresa de quien envía (o de todas) o uno PROPIO suyo («Mis
+      // stickers»); nunca el sticker personal de otra persona.
       let fila: { id_sticker: number; label: string } | null = null;
       try {
-        fila = await prisma.chatSticker.findFirst({
-          where: {
-            id_sticker: idSticker,
-            active: true,
-            OR: [{ id_company: null }, ...(empresas.length ? [{ id_company: { in: empresas } }] : [])],
-          },
-          select: { id_sticker: true, label: true },
-        });
+        fila = await stickerEnviable(idSticker, empresas, guard.user.id);
       } catch (error) {
         if (tablaAusente(error)) throw new ExtrasNoDisponibles();
         throw error;
