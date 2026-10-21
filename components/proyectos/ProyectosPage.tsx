@@ -2,15 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Badge, Button, Card, Group, SegmentedControl, Stack, Text, TextInput, ThemeIcon } from '@mantine/core';
+import { ActionIcon, Badge, Button, Card, Group, SegmentedControl, Stack, Text, TextInput, ThemeIcon } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { IconBrandGithub, IconFolderPlus, IconFolders, IconLink, IconMessages, IconSearch, IconUsers } from '@tabler/icons-react';
+import { IconBrandGithub, IconFolderPlus, IconFolders, IconLink, IconMessages, IconSearch, IconSettings, IconUsers } from '@tabler/icons-react';
 import { apiGet, fechaCorta } from './api';
 import NuevoProyectoModal from './NuevoProyectoModal';
 import CatalogoReposModal from './permisos/CatalogoReposModal';
 import type { OpcionesPermisosDto } from '../../lib/proyectos/permisos-agentes-tipos';
 import { AgentesApilados, AvisoArriba, BadgeRol, CONSULTA_ESCRITORIO, Encabezado, EsqueletoTarjetas, type Aviso } from './ui';
 import type { ListaProyectosDto, ProyectoResumenDto } from '../../lib/proyectos/tipos';
+import type { AccesoConfigDto } from '../../lib/proyectos/config-agentes-tipos';
 import css from './proyectos.module.css';
 import { LineaEstadoAgente } from './EstadoAgente';
 import { useEstadosAgentes } from './useEstadosAgentes';
@@ -106,6 +107,15 @@ export default function ProyectosPage() {
     void apiGet<OpcionesPermisosDto>('/api/proyectos/permisos-agentes', '', ctrl.signal).then((r) => setCatalogoAdmin(r.ok && r.data.catalogAdmin === true));
     return () => ctrl.abort();
   }, []);
+  // Configuración del módulo (2026-10-20): el botón solo se pinta a quien puede configurar.
+  const [puedeConfigurar, setPuedeConfigurar] = useState(false);
+
+  useEffect(() => {
+    void (async () => {
+      const r = await apiGet<AccesoConfigDto>('/api/proyectos/configuracion', '');
+      setPuedeConfigurar(r.ok && r.data.companies.length > 0);
+    })();
+  }, []);
 
   const cargar = useCallback(async (est: 'activos' | 'archivados') => {
     setCargando(true);
@@ -166,19 +176,31 @@ export default function ProyectosPage() {
     </Button>
   );
 
+  const irAConfigurar = () => router.push('/process/proyectos/configuracion');
+  const botonConfigurar = !puedeConfigurar ? null : escritorio ? (
+    <Button variant='default' leftSection={<IconSettings size={18} />} onClick={irAConfigurar} style={{ flexShrink: 0 }} data-testid='proyectos-configuracion'>
+      Configuración
+    </Button>
+  ) : (
+    <ActionIcon variant='default' size={36} radius='md' onClick={irAConfigurar} aria-label='Configuración de Proyectos' data-testid='proyectos-configuracion'>
+      <IconSettings size={18} />
+    </ActionIcon>
+  );
+
   return (
     <div className={css.pantalla}>
       <Encabezado
         titulo='Proyectos'
         derecha={
-          !sinModulo ? (
+          botonConfigurar || !sinModulo ? (
             <Group gap='xs' wrap='nowrap' style={{ flexShrink: 0 }}>
-              {catalogoAdmin && (
+              {botonConfigurar}
+              {!sinModulo && catalogoAdmin && (
                 <Button variant='default' leftSection={<IconBrandGithub size={18} />} onClick={() => setCatalogoAbierto(true)} data-testid='proyectos-repositorios'>
                   {escritorio ? 'Repositorios' : 'Repos'}
                 </Button>
               )}
-              {botonNuevo}
+              {!sinModulo && botonNuevo}
             </Group>
           ) : undefined
         }

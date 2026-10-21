@@ -17,6 +17,8 @@ vi.mock('../../prisma', () => ({
   prisma: {
     chatMessage: { findMany: findMessages, updateMany: updateMessages },
     chatMessageDelivery: { findMany: findDeliveries, updateMany: vi.fn() },
+    // Configuración del módulo por empresa (2026-10-20): vacía = manda CHAT_PROJECTS_AGENTS, como antes.
+    chatProjectAgentConfig: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
 

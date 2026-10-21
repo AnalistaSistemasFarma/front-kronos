@@ -12,7 +12,7 @@ import {
 } from '../../../../../lib/chat/constants';
 import { jsonNoStore, serverError, unauthorized } from '../../../../../lib/chat/http';
 import type { ChatAgentIdentity } from '../../../../../lib/chat/agent-auth';
-import { projectsEnabledFor } from '../../../../../lib/chat/projects-rules';
+import { cargarConfigProyectos } from '../../../../../lib/proyectos/config-agentes';
 import { whereProyectoDelAgente } from '../../../../../lib/chat/projects';
 
 // El long-poll obliga a que la ruta sea dinámica: nada de esto se cachea.
@@ -261,10 +261,14 @@ async function bandejaDeProyectos(opciones: {
 }) {
   const { request, agent, limit, ack, startedAt, deadline } = opciones;
 
-  // Interruptor apagado para este agente: ni siquiera se consulta la base.
-  if (!projectsEnabledFor(agent.code)) {
+  // Interruptor apagado para este agente en TODAS las empresas: ni siquiera se
+  // consultan los mensajes. Por empresa lo decide la configuración del módulo
+  // (lib/proyectos/config-agentes.ts); en una empresa sin configurar, el .env.
+  const config = await cargarConfigProyectos();
+  if (!config.habilitadoEnAlguna(agent.code)) {
     return jsonNoStore({ error: 'Proyectos no habilitados para este agente.' }, { status: 404 });
   }
+  const empresas = config.filtroEmpresas(agent.code);
 
   const fetchPending = () =>
     prisma.chatMessage.findMany({
@@ -277,7 +281,8 @@ async function bandejaDeProyectos(opciones: {
           kind: 'project',
           archived: false,
           id_agent: agent.idAgent,
-          project: whereProyectoDelAgente(agent.idAgent),
+          // …y solo de empresas donde el agente está habilitado para Proyectos.
+          project: { ...whereProyectoDelAgente(agent.idAgent), ...empresas },
         },
       },
       orderBy: { id: 'asc' },

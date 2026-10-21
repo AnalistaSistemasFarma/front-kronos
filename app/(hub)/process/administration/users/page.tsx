@@ -67,6 +67,7 @@ import {
 import { isDeleteAttachmentsSubprocess } from '@/lib/attachments/access';
 import { isValentineWallSubprocess } from '@/lib/valentine/constants';
 import { describeSgcPermissionMarker, isSgcPermissionMarkerSubprocess } from '@/lib/sgc/constants';
+import { isProjectsConfigMarkerSubprocess, PROJECTS_CONFIG_MARKER_DESCRIPTION } from '@/lib/proyectos/config-agentes-rules';
 import { describeOtPermissionMarker, isOtPermissionMarkerSubprocess } from '@/lib/bitacora-proceso/constants';
 import {
   LOGIN_AUDIT_MARKER_DESCRIPTION,
@@ -2259,6 +2260,8 @@ function UserManagement() {
                                       ? PERMISOS_AGENTES_MARKER_DESCRIPTION
                                       : isLoginAuditMarkerSubprocess(subprocess)
                                       ? LOGIN_AUDIT_MARKER_DESCRIPTION
+                                      : isProjectsConfigMarkerSubprocess(subprocess)
+                                      ? PROJECTS_CONFIG_MARKER_DESCRIPTION
                                       : isSgcPermissionMarkerSubprocess(subprocess)
                                       ? describeSgcPermissionMarker(subprocess.subprocess_url)
                                       : isOtPermissionMarkerSubprocess(subprocess)

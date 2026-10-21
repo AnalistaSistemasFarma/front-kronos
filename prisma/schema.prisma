@@ -120,6 +120,8 @@ model Company {
   agentCompanies  AgentCompany[]
   chatGroups      ChatConversation[]
   chatProjects    ChatProject[]
+  // Configuración de «Proyectos» por empresa (2026-10-20): qué agentes trabajan en proyectos.
+  chatProjectAgentConfigs ChatProjectAgentConfig[]
   // Stickers propios de la empresa en el chat (2026-10-20; la pantalla de carga queda para después).
   chatStickers    ChatSticker[]
   // SGC documental — configuración de activación por empresa (esquema `sgc`).
@@ -693,6 +695,8 @@ model Agent {
   projects         ChatProject[]
   // Módulo «Proyectos» (2026-10-18): proyectos donde está designado.
   projectDesignations ChatProjectAgent[]
+  // Configuración de «Proyectos» por empresa (2026-10-20).
+  projectConfigs      ChatProjectAgentConfig[]
 
   @@unique([code])
   @@map("agent")
@@ -902,6 +906,66 @@ model ChatProject {
   @@index([id_agent, archived])
   @@index([id_company])
   @@map("chat_project")
+  @@schema("dbo")
+}
+
+/// CONFIGURACIÓN de «Proyectos» por empresa (2026-10-20, pedido de Nicolás
+/// Rivera: «los permisos y la configuración de Proyectos se manejan desde la
+/// interfaz, no por detrás»). Una fila por (empresa, agente): si el agente
+/// puede trabajar en proyectos de ESA empresa y con qué perfiles de conectores.
+///
+/// COMPATIBILIDAD HACIA ATRÁS (lib/proyectos/config-agentes-rules.ts):
+///   - empresa SIN filas  → manda CHAT_PROJECTS_AGENTS del .env, como antes;
+///   - empresa CON filas  → manda la tabla (sin fila = no habilitado).
+/// Al guardar el PRIMER cambio de una empresa, lo que decía el .env para los
+/// agentes de esa empresa se copia a la tabla en la misma transacción, para
+/// que nada cambie sin que alguien lo decida.
+///
+/// Tabla NUEVA y aparte: si el código sale antes que el DDL, todo sigue con el
+/// .env (la lectura reconoce «la tabla no existe» y cae al .env).
+model ChatProjectAgentConfig {
+  id_config  Int      @id @default(autoincrement())
+  id_company Int
+  id_agent   Int
+  enabled    Boolean  @default(false)
+  /// Claves del catálogo de perfiles separadas por coma (lib/chat/projects-rules.ts).
+  /// NULL = los del .env para ese agente.
+  profiles   String?  @db.NVarChar(400)
+  /// Motivo del ÚLTIMO cambio (el historial completo está en chat_project_agent_config_log).
+  reason     String?  @db.NVarChar(500)
+  updated_by String?  @db.NVarChar(1000)
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now())
+
+  company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  agent   Agent   @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_company, id_agent], map: "chat_project_agent_config_company_agent")
+  @@index([id_agent], map: "chat_project_agent_config_id_agent_idx")
+  @@map("chat_project_agent_config")
+  @@schema("dbo")
+}
+
+/// REGISTRO de cambios de la configuración de «Proyectos» (2026-10-20). Una
+/// fila por cambio, con el antes, el después y el motivo. Inmutable (trigger
+/// TR_chat_project_agent_config_log_inmutable). Sin llaves foráneas a
+/// propósito: el historial sobrevive a lo que pase con agentes y usuarios.
+model ChatProjectAgentConfigLog {
+  id_log          Int      @id @default(autoincrement())
+  id_company      Int
+  id_agent        Int
+  /// 'cambio' (desde la pantalla) | 'copia_env' (copia inicial del .env).
+  action          String   @db.NVarChar(20)
+  enabled_before  Boolean?
+  enabled_after   Boolean
+  profiles_before String?  @db.NVarChar(400)
+  profiles_after  String?  @db.NVarChar(400)
+  reason          String   @db.NVarChar(500)
+  changed_by      String?  @db.NVarChar(1000)
+  changed_at      DateTime @default(now())
+
+  @@index([id_company, changed_at], map: "chat_project_agent_config_log_company_idx")
+  @@map("chat_project_agent_config_log")
   @@schema("dbo")
 }
 
