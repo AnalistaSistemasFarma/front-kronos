@@ -9,7 +9,7 @@
  *   GET  /api/chat/agent/projects/files/N descarga de un archivo del proyecto
  *   GET  /api/chat/attachments/N          descarga de un adjunto del hilo
  *   POST /api/chat/agent/status           indicador «trabajando»
- *   POST /api/chat/agent/messages         publicar la respuesta
+ *   POST /api/chat/agent/messages         publicar la respuesta (JSON, o multipart con adjuntos)
  *   POST /api/chat/agent/projects/proposals  entregar las PROPUESTAS de tareas del turno
  *   POST /api/chat/agent/usage            consumo (tokens) del turno
  *   POST /api/chat/agent/projects/team/requests     pedidos de «Sugerir equipo» (los reclama)
@@ -67,6 +67,31 @@ export function crearClienteSynerLink({ url, llave, fetchImpl = globalThis.fetch
       }),
     responder: (idConversation, body) =>
       json('/api/chat/agent/messages', { method: 'POST', body: { idConversation, body, state: 'idle' } }),
+    /**
+     * Publica la respuesta CON adjuntos: misma ruta, en multipart/form-data
+     * (campos idConversation, body, state y un `files` por archivo). `archivos`
+     * ya viene validado y leído por adjuntos-salida.mjs ({ nombre, datos, tipo }).
+     */
+    async responderConArchivos(idConversation, body, archivos) {
+      const form = new FormData();
+      form.append('idConversation', String(idConversation));
+      form.append('body', body ?? '');
+      form.append('state', 'idle');
+      for (const a of archivos) form.append('files', new Blob([a.datos], { type: a.tipo }), a.nombre);
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 180_000);
+      try {
+        // Sin Content-Type: fetch pone el multipart con su boundary.
+        const res = await fetchImpl(`${url}/api/chat/agent/messages`, { method: 'POST', headers: cabeceras, body: form, signal: ctrl.signal });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new ErrorSynerLink(`POST /api/chat/agent/messages (adjuntos) -> HTTP ${res.status}${data?.error ? ` (${data.error})` : ''}`, res.status);
+        }
+        return data;
+      } finally {
+        clearTimeout(t);
+      }
+    },
     /** Propuestas de tareas del turno: quedan PENDIENTES hasta que un dueño o editor las confirme. */
     proponer: (idConversation, items) => json('/api/chat/agent/projects/proposals', { method: 'POST', body: { idConversation, items } }),
     consumo: (reporte) => json('/api/chat/agent/usage', { method: 'POST', body: reporte }),

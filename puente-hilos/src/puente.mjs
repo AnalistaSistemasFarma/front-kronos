@@ -47,6 +47,7 @@ import { guiaDesarrolloSegura } from './guia.mjs';
 import { grafosDelTurno, textoGrafos } from './grafos.mjs';
 import { prepararMemoriaTurno } from './memoria.mjs';
 import { crearClienteSynerLink } from './synerlink.mjs';
+import { prepararAdjuntos } from './adjuntos-salida.mjs';
 import { armarArgumentos, armarArgumentosSugerencia, armarEntorno, correrTurno, etiquetaHerramienta } from './claude.mjs';
 import {
   argumentosEquipo,
@@ -384,6 +385,28 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
       } else {
         cuerpo = r.resultado.texto.trim() || '_(El asistente terminó sin texto.)_';
       }
+      // Adjuntos salientes: líneas «MEDIA:trabajo/…» de la respuesta (adjuntos-salida.mjs).
+      // Solo en un turno que terminó bien, y solo archivos de ./trabajo de ESTA conversación.
+      let adjuntosSalida = [];
+      if (r.resultado?.ok && !r.abortado) {
+        const prep = await prepararAdjuntos(cuerpo, {
+          cwd: rutas.cwd,
+          trabajo: rutas.trabajo,
+          excluir: [path.basename(rutas.propuestas)],
+          log: (m) => log(`conversación ${idConversation}: ${m}`),
+        });
+        cuerpo = prep.texto;
+        adjuntosSalida = prep.archivos;
+        // Un archivo que lleve el token de GitHub del turno no sale del puente.
+        if (codigo?.token) {
+          const conToken = adjuntosSalida.filter((a) => a.datos.includes(codigo.token));
+          if (conToken.length) {
+            adjuntosSalida = adjuntosSalida.filter((a) => !conToken.includes(a));
+            cuerpo += `\n\n⚠️ No adjunté ${conToken.map((a) => a.nombre).join(', ')}: contiene una credencial.`;
+            log(`conversación ${idConversation}: adjunto(s) retenidos por contener el token: ${conToken.map((a) => a.nombre).join(', ')}.`);
+          }
+        }
+      }
       // Propuestas de tareas que dejó el modelo: se entregan con la llave del
       // PUENTE (el modelo nunca la ve) y quedan pendientes de confirmación.
       let notaPropuestas = '';
@@ -413,7 +436,21 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
         }
       }
 
-      await synerlink.responder(idConversation, cuerpo);
+      if (adjuntosSalida.length > 0 && synerlink.responderConArchivos) {
+        try {
+          await synerlink.responderConArchivos(idConversation, cuerpo, adjuntosSalida);
+          log(`conversación ${idConversation}: respuesta con ${adjuntosSalida.length} adjunto(s): ${adjuntosSalida.map((a) => `${a.nombre} (${a.bytes} B)`).join(', ')}.`);
+        } catch (e) {
+          // La respuesta NO se pierde: sale sin los archivos y lo dice.
+          log(`conversación ${idConversation}: no se pudieron subir los adjuntos, se publica sin ellos:`, e.message);
+          await synerlink.responder(
+            idConversation,
+            `${cuerpo}\n\n⚠️ No pude subir ${adjuntosSalida.length === 1 ? 'el archivo' : 'los archivos'} (${adjuntosSalida.map((a) => a.nombre).join(', ')}) por un error al guardarlos. Intente de nuevo en unos minutos.`
+          );
+        }
+      } else {
+        await synerlink.responder(idConversation, cuerpo);
+      }
 
       const fin = new Date();
       // Lo que hizo cada subagente: a SynerLink (sección Equipo) y a consumo.jsonl.
