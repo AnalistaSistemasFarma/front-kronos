@@ -145,11 +145,55 @@ model CompanyUser {
   id_company_user Int                     @id @default(autoincrement())
   id_company      Int
   id_user         String
+  /// Perfil del usuario en el SAPSEND de ESTA empresa (cada tenant numera los suyos). Compras: U_SEND_UserId.
+  id_user_sapsend       Int?
+  /// Departamento del usuario en el SAPSEND de ESTA empresa. Compras: U_SEND_Dep (texto en SAP).
+  id_department_sapsend Int?
   company         Company                 @relation(fields: [id_company], references: [id_company], onDelete: Cascade)
   user            User                    @relation(fields: [id_user], references: [id], onDelete: Cascade)
   subprocesses    SubprocessUserCompany[]
 
   @@map("company_user")
+  @@schema("dbo")
+}
+
+/// Compras: enlace entre un borrador de solicitud (Drafts en SAP) y la solicitud
+/// del workflow (requests_general) que lo autoriza. Sin FK a requests_general (no
+/// está en este esquema). Estados: pending | publishing | approved | rejected |
+/// quoted (enviada a cotización) | cancelled | publish_error (reintentable) |
+/// reject_error. Solo una fila
+/// 'pending'/'publishing'/'publish_error' por borrador.
+model PurchaseAuthorization {
+  id                 Int      @id @default(autoincrement())
+  id_company         Int
+  doc_entry          Int
+  id_request_general Int      @unique
+  status             String   @db.NVarChar(20)
+  firm_doc_entry     Int?
+  error              String?  @db.NVarChar(500)
+  created_by         String   @db.NVarChar(50)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @default(now()) @updatedAt
+
+  @@index([id_company, doc_entry])
+  @@map("purchase_authorization")
+  @@schema("dbo")
+}
+
+/// Compras: configuración por empresa. id_process_category_auth = plantilla del
+/// workflow (process_category) con la tarea de autorización por departamento.
+model PurchaseCompanyConfig {
+  id_company               Int     @id
+  id_process_category_auth Int
+  /// Correos de Compras (separados por coma) a avisar cuando una solicitud pasa a
+  /// cotización. Equivale a SENDEMAILTOCOMPRAS del .env de cada SAPSEND.
+  compras_emails           String? @db.NVarChar(500)
+  /// Moneda de línea por defecto (SAPSEND: 'COP'; Ryan: vacía) y bodega por
+  /// defecto en la carga masiva (SAPSEND: 'MPR01' solo en Ryan). NULL = no se envía.
+  default_currency         String? @db.NVarChar(3)
+  default_warehouse        String? @db.NVarChar(8)
+
+  @@map("purchase_company_config")
   @@schema("dbo")
 }
 

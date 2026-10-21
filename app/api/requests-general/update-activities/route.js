@@ -6,6 +6,7 @@ import {
   notifyActivityResolved,
 } from '../../../../lib/notificationEvents.js';
 import { syncAuthorizationToSapsend } from '../../../../lib/sapsend/authorizationStatus.js';
+import { onAuthorizationDecision as onPurchaseAuthorizationDecision } from '../../../../lib/purchases/authorization';
 import { advanceSequentialTask } from '../../../../lib/workflow/advanceSequentialTask.js';
 import { resolveSessionUser } from '../../../../lib/chat/http';
 import { authorizationDecisionBlock } from '../../../../lib/request-general/workload';
@@ -271,6 +272,11 @@ export async function POST(req) {
             executorId,
             resolution
           )
+        );
+        // COMPRAS: si la solicitud autoriza un borrador de compra, publicar la firme o rechazarlo
+        // en SAP. No bloquea; el gate (¿es de compras?) vive dentro (purchase_authorization).
+        fireAndForgetNotification(
+          onPurchaseAuthorizationDecision(prevRow?.id_request_general, Number(nextStatus) === 2, resolution)
         );
       }
 

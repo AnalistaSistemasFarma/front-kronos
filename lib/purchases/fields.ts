@@ -76,6 +76,8 @@ export const LIST_SELECT_FIELDS: string[] = [
   'U_SEND_UserName',
   'U_SEND_UserEmail',
   'U_SEND_Dep',
+  // Para la variante «Mis solicitudes» (SAPSEND filtra por U_SEND_UserId).
+  'U_SEND_UserId',
 ];
 
 /** El $select acotado, ya unido, listo para la query. */
