@@ -136,7 +136,7 @@ export function asegurarCarpetas(rutas) {
 }
 
 /** Encabezado de sistema de cada turno. Breve: las instrucciones del proyecto van aparte o aquí. */
-export function textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo = '', bloqueCodigo = '' }) {
+export function textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo = '', bloqueCodigo = '', bloquePolitica = '' }) {
   const p = contexto.project;
   const lineas = [
     `Usted es ${agente}, asistente de inteligencia artificial de la organización Group Shared Services Latinoamérica.`,
@@ -156,6 +156,8 @@ export function textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo =
   if (bloqueEquipo) lineas.push(bloqueEquipo);
   // Acceso al código (nivel 2): reglas de repos, ramas y pases (codigo.mjs → textoCodigo).
   if (bloqueCodigo) lineas.push(bloqueCodigo);
+  // Permisos de los agentes (2026-10-20, politica.mjs): nivel de código y repos del turno.
+  if (bloquePolitica) lineas.push(bloquePolitica);
   if (instruccionesEn === 'system-prompt' && p.instructions) {
     lineas.push('', '## Instrucciones del proyecto (las definió el dueño del proyecto)', '', p.instructions);
   }
@@ -295,8 +297,14 @@ export function limpiarPropuestas(rutas) {
 }
 
 /** Escribe sistema.md, CLAUDE.md, mcp.json, vinculados.md y cronograma.md del hilo. */
-export function escribirContexto({ rutas, agente, contexto, perfil, instruccionesEn, equipoTurno = null, bloqueCodigo = '' }) {
-  writeFileSync(rutas.sistema, textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo: equipoTurno?.bloque ?? '', bloqueCodigo }), { mode: MODO_ARCHIVO });
+export function escribirContexto({ rutas, agente, contexto, perfil, instruccionesEn, equipoTurno = null, bloqueCodigo = '', politicaTurno = null }) {
+  writeFileSync(
+    rutas.sistema,
+    textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo: equipoTurno?.bloque ?? '', bloqueCodigo, bloquePolitica: politicaTurno?.bloque ?? '' }),
+    { mode: MODO_ARCHIVO }
+  );
+  // Copia de lo que se aplicó en el turno (para revisar después; el modelo no escribe en .puente).
+  if (politicaTurno) writeFileSync(path.join(rutas.puente, 'politica.json'), JSON.stringify(politicaTurno.politica, null, 2), { mode: MODO_ARCHIVO });
   // Sin equipo, no queda ninguna definición vieja que se pueda colar.
   if (equipoTurno) writeFileSync(rutas.agentes, JSON.stringify(equipoTurno.agentes, null, 2), { mode: MODO_ARCHIVO });
   else rmSync(rutas.agentes, { force: true });

@@ -1,3 +1,4 @@
+import { isPermisosAgentesMarkerSubprocess } from '../proyectos/permisos-agentes-rules';
 import {
   isOrionFirmaPrepareSubprocess,
   isOrionFirmaSignSubprocess,
@@ -25,6 +26,8 @@ export function isHubHiddenRequestDashboardSubprocess(subprocess: {
   subprocess_url?: string | null;
 }): boolean {
   if (
+    // Permisos de los agentes en Proyectos (2026-10-20): marcador, no página.
+    isPermisosAgentesMarkerSubprocess(subprocess) ||
     isOrionFirmaPrepareSubprocess(subprocess) ||
     isOrionFirmaSignSubprocess(subprocess) ||
     isDeleteAttachmentsSubprocess(subprocess) ||
