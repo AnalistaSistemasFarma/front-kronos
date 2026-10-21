@@ -79,6 +79,7 @@ const TIPOS_ENCUESTA: { value: TipoUi; label: string }[] = [
   { value: 'lista', label: 'Selección única (lista desplegable)' },
   { value: 'seleccion_multiple', label: 'Selección múltiple' },
   { value: 'si_no', label: 'Sí / No' },
+  { value: 'escala', label: 'Escala numérica (p. ej. 0 a 10)' },
 ];
 const TIPOS_EVALUACION: { value: TipoUi; label: string }[] = [
   { value: 'seleccion', label: 'Selección única (con puntos)' },
@@ -98,7 +99,15 @@ export function ConstructorFormulario({
   onGuardar,
   onVistaPrevia,
   onCancelar,
+  soloEncuesta = false,
+  contexto,
 }: {
+  /**
+   * Formularios de SST (2026-10-20): solo encuestas (no hay evaluaciones), código con prefijo SST y, si piden datos sensibles, la
+   * autorización propia de Seguridad y Salud en el Trabajo.
+   */
+  soloEncuesta?: boolean;
+  contexto?: 'sst';
   /** Tipo de un formulario NUEVO (se ignora al editar). */
   tipo: TipoFormulario;
   /** Presente = se está editando (guardar crea una versión nueva; el código no cambia). */
@@ -111,7 +120,7 @@ export function ConstructorFormulario({
   onCancelar: () => void;
 }) {
   const editando = !!definicion;
-  const [e, setE] = useState<Estado>(() => estadoInicial(tipo, definicion));
+  const [e, setE] = useState<Estado>(() => estadoInicial(tipo, definicion, contexto));
   const [errores, setErrores] = useState<string[]>([]);
   const evaluacion = e.tipo === 'evaluacion';
 
@@ -155,8 +164,9 @@ export function ConstructorFormulario({
             opciones: [...q.opciones, ...Array(faltan).fill('')],
             correcta,
             correctas,
-            permiteOtra: t === 'seleccion' ? q.permiteOtra : false,
+            permiteOtra: seleccion ? q.permiteOtra : false,
             puntos: seleccion ? q.puntos : '',
+            escala: t === 'escala' ? (q.escala ?? { min: 0, max: 10, etiquetaMin: '', etiquetaMax: '' }) : q.escala,
           };
         }),
       })
@@ -199,30 +209,36 @@ export function ConstructorFormulario({
           <Text size='sm' c='dimmed'>
             {editando
               ? 'Al guardar se crea una versión nueva; las respuestas ya enviadas conservan la versión con la que se respondieron.'
-              : 'Elija si es una encuesta o una evaluación y arme las preguntas.'}
+              : soloEncuesta
+                ? 'Arme las preguntas del formulario.'
+                : 'Elija si es una encuesta o una evaluación y arme las preguntas.'}
           </Text>
         </div>
 
-        <SegmentedControl
-          value={e.tipo}
-          disabled={editando}
-          fullWidth
-          data={[
-            { value: 'encuesta', label: 'Encuesta' },
-            { value: 'evaluacion', label: 'Evaluación' },
-          ]}
-          onChange={(v) => {
-            const t = v as TipoFormulario;
-            setE((x) => ({
-              ...estadoInicial(t),
-              titulo: x.titulo,
-              descripcion: x.descripcion,
-            }));
-          }}
-          data-testid='tipo-formulario'
-        />
+        {!soloEncuesta && (
+          <SegmentedControl
+            value={e.tipo}
+            disabled={editando}
+            fullWidth
+            data={[
+              { value: 'encuesta', label: 'Encuesta' },
+              { value: 'evaluacion', label: 'Evaluación' },
+            ]}
+            onChange={(v) => {
+              const t = v as TipoFormulario;
+              setE((x) => ({
+                ...estadoInicial(t, undefined, contexto),
+                titulo: x.titulo,
+                descripcion: x.descripcion,
+              }));
+            }}
+            data-testid='tipo-formulario'
+          />
+        )}
         <Text size='xs' c='dimmed'>
-          {evaluacion
+          {soloEncuesta
+            ? 'Encuesta: respuestas libres o de selección, sin calificación. Cada envío se guarda en SharePoint y lo ven solo el administrador y el equipo de SST.'
+            : evaluacion
             ? 'Evaluación: preguntas de selección única con la respuesta correcta y puntos que suman 100. El sistema califica y muestra la nota.'
             : 'Encuesta: respuestas libres o de selección, sin calificación (como el SST-01-FR-001 Perfil sociodemográfico).'}
         </Text>
@@ -237,7 +253,7 @@ export function ConstructorFormulario({
             }
             onImportado={(imp) => {
               setErrores([]);
-              setE((x) => estadoDesdeImportacion(x.tipo, imp));
+              setE((x) => ({ ...estadoDesdeImportacion(x.tipo, imp), ...(x.contexto ? { contexto: x.contexto } : {}) }));
             }}
           />
         )}
@@ -301,7 +317,20 @@ export function ConstructorFormulario({
             <Checkbox value='cedula' label='Número de cédula' />
           </Group>
         </Checkbox.Group>
-        {e.datos.cedula && (
+        {contexto === 'sst' && (
+          <Switch
+            label='Pide datos de salud u otros datos sensibles (exige que la persona autorice su tratamiento)'
+            checked={e.datosSensibles}
+            onChange={(ev) => cambiar({ datosSensibles: ev.currentTarget.checked })}
+            data-testid='datos-sensibles'
+          />
+        )}
+        {contexto === 'sst' && (e.datosSensibles || e.datos.cedula) && (
+          <Text size='xs' c='dimmed'>
+            El formulario incluirá el aviso de tratamiento de datos de Seguridad y Salud en el Trabajo (Ley 1581 de 2012), pendiente de validación por Talento Humano o Jurídica.
+          </Text>
+        )}
+        {contexto !== 'sst' && e.datos.cedula && (
           <Text size='xs' c='dimmed'>
             La cédula es un dato personal: el formulario incluye el aviso de tratamiento de datos (Ley 1581 de 2012), pendiente de validación por Talento Humano o Jurídica.
           </Text>
@@ -377,6 +406,54 @@ export function ConstructorFormulario({
                 )}
               </Group>
 
+              {p.tipo === 'escala' && (
+                <Group align='flex-end' gap='md' wrap='wrap' data-testid={`escala-${i + 1}`}>
+                  <NumberInput
+                    label='Valor mínimo'
+                    min={0}
+                    max={19}
+                    allowDecimal={false}
+                    w={130}
+                    value={p.escala?.min ?? 0}
+                    onChange={(v) => cambiarPregunta(i, { escala: { min: v === '' ? '' : Number(v), max: p.escala?.max ?? 10, etiquetaMin: p.escala?.etiquetaMin ?? '', etiquetaMax: p.escala?.etiquetaMax ?? '' } })}
+                  />
+                  <NumberInput
+                    label='Valor máximo'
+                    min={1}
+                    max={20}
+                    allowDecimal={false}
+                    w={130}
+                    value={p.escala?.max ?? 10}
+                    onChange={(v) => cambiarPregunta(i, { escala: { min: p.escala?.min ?? 0, max: v === '' ? '' : Number(v), etiquetaMin: p.escala?.etiquetaMin ?? '', etiquetaMax: p.escala?.etiquetaMax ?? '' } })}
+                  />
+                  <TextInput
+                    label='Rótulo del mínimo (opcional)'
+                    maxLength={60}
+                    flex='1 1 180px'
+                    value={p.escala?.etiquetaMin ?? ''}
+                    onChange={(ev) => cambiarPregunta(i, { escala: { min: p.escala?.min ?? 0, max: p.escala?.max ?? 10, etiquetaMin: ev.currentTarget.value, etiquetaMax: p.escala?.etiquetaMax ?? '' } })}
+                  />
+                  <TextInput
+                    label='Rótulo del máximo (opcional)'
+                    maxLength={60}
+                    flex='1 1 180px'
+                    value={p.escala?.etiquetaMax ?? ''}
+                    onChange={(ev) => cambiarPregunta(i, { escala: { min: p.escala?.min ?? 0, max: p.escala?.max ?? 10, etiquetaMin: p.escala?.etiquetaMin ?? '', etiquetaMax: ev.currentTarget.value } })}
+                  />
+                </Group>
+              )}
+
+              {p.imagen && (
+                <Group gap='sm' wrap='wrap' data-testid={`imagen-pregunta-${i + 1}`}>
+                  <Text size='sm'>
+                    Esta pregunta muestra la imagen <Text span ff='monospace' size='xs'>{p.imagen.src}</Text>.
+                  </Text>
+                  <Button size='xs' variant='default' onClick={() => cambiarPregunta(i, { imagen: undefined })}>
+                    Quitar imagen
+                  </Button>
+                </Group>
+              )}
+
               {esSeleccion(p) && (
                 <Stack gap='xs'>
                   <Text size='sm' fw={500}>
@@ -437,7 +514,7 @@ export function ConstructorFormulario({
                     <Button size='xs' variant='default' leftSection={<IconPlus size={14} />} onClick={() => cambiarPregunta(i, { opciones: [...p.opciones, ''] })}>
                       Agregar opción
                     </Button>
-                    {!evaluacion && p.tipo === 'seleccion' && (
+                    {!evaluacion && (p.tipo === 'seleccion' || p.tipo === 'seleccion_multiple') && (
                       <Checkbox size='xs' label='Permitir "Otra respuesta"' checked={p.permiteOtra} onChange={(ev) => cambiarPregunta(i, { permiteOtra: ev.currentTarget.checked })} />
                     )}
                   </Group>
