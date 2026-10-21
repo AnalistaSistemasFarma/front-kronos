@@ -139,7 +139,7 @@ export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lot
   }
   const worktrees = preparar({ repos: aMontar, rutas, idProject, idConversation, envGit }).map((w) => ({ ...w, dependencias: w.dependencias ?? estadoDependencias(w.worktree) }));
   const cacheNpm = rutaCacheNpm(cfg.hilosDir); // la crea prepararHomeCodigo
-  const permisos = terminal ? permisosTerminalCompleta({ repos: worktrees, pases: proyecto.pases }) : permisosCodigo({ repos: worktrees, autorizado, pases: proyecto.pases });
+  const permisos = terminal ? permisosTerminalCompleta({ repos: worktrees, pases: proyecto.pases, cwd: rutas.cwd }) : permisosCodigo({ repos: worktrees, autorizado, pases: proyecto.pases, cwd: rutas.cwd });
   return {
     ...permisos,
     autorizado,

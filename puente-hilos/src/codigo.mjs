@@ -32,7 +32,7 @@
  */
 import { permisosGrafos } from './grafos.mjs';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ErrorConfig } from './config.mjs';
@@ -407,10 +407,30 @@ export const BASH_PROHIBIDO = [
 ];
 
 /**
+ * Reglas Edit/Write con la ruta ABSOLUTA de la carpeta del hilo para `codigo/**` y
+ * `trabajo/**` («//» = raíz del sistema de archivos en las reglas de Claude Code).
+ * Si la ruta no es absoluta o trae caracteres que el patrón interpretaría (comodines,
+ * paréntesis, espacios…), no se agrega nada: falla cerrado y quedan las relativas.
+ */
+export function reglasEscrituraAbsolutas(cwd) {
+  if (!cwd || !path.isAbsolute(cwd)) return [];
+  const rutas = new Set([path.resolve(cwd)]);
+  try {
+    rutas.add(realpathSync(cwd));
+  } catch {}
+  const reglas = [];
+  for (const r of rutas) {
+    if (!/^\/[A-Za-z0-9._\/-]+$/.test(r) || r.split('/').includes('..')) continue;
+    for (const sub of ['codigo', 'trabajo']) reglas.push(`Edit(/${r}/${sub}/**)`, `Write(/${r}/${sub}/**)`);
+  }
+  return reglas;
+}
+
+/**
  * Herramientas y reglas del turno con código. `autorizado` agrega SOLO el merge
  * de PR y el despliegue por workflow de producción de los repos del proyecto.
  */
-export function permisosCodigo({ repos, autorizado, pases }) {
+export function permisosCodigo({ repos, autorizado, pases, cwd = null }) {
   // Claude Code 2.1.299 NIEGA `cd <dir> && git …` (protección contra repos
   // plantados), así que git va SIEMPRE con `git -C codigo/<repo> …`, y las reglas
   // se arman por repo con esa ruta exacta. Ojo con la sintaxis: un patrón que
@@ -433,6 +453,11 @@ export function permisosCodigo({ repos, autorizado, pases }) {
   prohibidas.push(...g.prohibidas);
   // Edición del código: solo dentro de ./codigo (el worktree) y ./trabajo.
   permitidas.push('Edit(./codigo/**)', 'Write(./codigo/**)');
+  // Además, con la ruta ABSOLUTA de la carpeta del hilo (gotcha del 2026-10-21,
+  // conversación 123): Claude Code 2.1.299 resuelve «./» contra la carpeta ACTUAL
+  // de la sesión, así que tras un `cd codigo/<repo>` las reglas relativas dejan de
+  // coincidir y el Write queda negado. «//ruta» es la sintaxis de ruta absoluta.
+  permitidas.push(...reglasEscrituraAbsolutas(cwd));
 
   for (const c of BASH_PROHIBIDO) prohibidas.push(`Bash(${c} *)`, `Bash(${c})`, `Bash(* && ${c} *)`, `Bash(* ; ${c} *)`, `Bash(* | ${c} *)`);
   // Un refspec «origen:destino» puede empujar a OTRA rama remota
@@ -515,7 +540,7 @@ export function textoCodigo({ worktrees, autorizado, puedePasar, autores, operad
     `- Trabajar en su rama \`${PREFIJO_RAMA}…\`: editar, \`git add\`/\`commit\`, correr \`npm test\`, \`npx tsc --noEmit\`, \`npm run lint\`; empujar SOLO ramas \`${PREFIJO_RAMA}…\` (\`git -C codigo/<repo> push -u origin ${PREFIJO_RAMA}…\`) y abrir PR con \`gh pr create --base <rama de pruebas>\`.`,
     '- Los `.env` NO están en el worktree y no se leen ni se crean con secretos reales. Si una prueba necesita variables, use un `.env.test` sin secretos de producción.',
     '- **Usted (el hilo principal) SÍ puede ejecutar comandos con la herramienta Bash en este turno**: git, gh, npm y npx dentro del worktree. NO le pida a la persona que corra pruebas, `tsc` o el lint: córralos usted y reporte el resultado real. Si un comando se bloquea, diga cuál y con qué mensaje.',
-    '- Comandos de npm/npx SIEMPRE con la ruta completa del worktree, porque la carpeta actual de Bash se conserva entre comandos: `cd <ruta completa del worktree> && npx vitest run <archivo>`, `cd <ruta completa> && npx tsc --noEmit`, `cd <ruta completa> && npx eslint <rutas>`, `cd <ruta completa> && npm test`, `cd <ruta completa> && npm run lint`.',
+    '- Cada comando de Bash arranca en la carpeta del hilo (el `cd` no se conserva de un comando a otro). Comandos de npm/npx SIEMPRE con la ruta completa del worktree: `cd <ruta completa del worktree> && npx vitest run <archivo>`, `cd <ruta completa> && npx tsc --noEmit`, `cd <ruta completa> && npx eslint <rutas>`, `cd <ruta completa> && npm test`, `cd <ruta completa> && npm run lint`.',
     '- Si el worktree no tiene `node_modules`, corra primero `cd <ruta completa del worktree> && npm ci` (con `timeout` de 600000 en Bash). La caché de npm es compartida y no pide nada a la persona. `npx` no descarga paquetes que no estén en `node_modules`: si dice que falta, es que falta `npm ci`. Si el repo usa Prisma y `tsc` no encuentra el cliente, corra `npx prisma generate` (como en el CI).',
     '',
     'Qué NO puede (está bloqueado y además está prohibido intentarlo):',
@@ -638,8 +663,8 @@ export function prepararHomeCodigo(hilosDir, agenteNombre, homeReal = null) {
  * que el Orus principal. Se conservan solo las negaciones de git que protegen las
  * ramas (push forzado, refspecs a otra rama, borrar ramas, --delete-branch).
  */
-export function permisosTerminalCompleta({ repos, pases }) {
-  const base = permisosCodigo({ repos, autorizado: true, pases });
+export function permisosTerminalCompleta({ repos, pases, cwd = null }) {
+  const base = permisosCodigo({ repos, autorizado: true, pases, cwd });
   const protegeRamas = (r) => /^Bash\(git \* push|^Bash\(gh pr merge.*(-d|--delete-branch)|^Read\(/.test(r);
   return { ...base, permitidas: ['Bash', ...base.permitidas.filter((r) => !r.startsWith('Bash('))], prohibidas: base.prohibidas.filter(protegeRamas), terminalCompleta: true };
 }

@@ -162,6 +162,9 @@ export function armarEntorno({ path, home, configClaudeDir, credencial }, topes 
     DISABLE_AUTOUPDATER: '1',
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+    // Cada comando de Bash vuelve a la carpeta del hilo: un `cd codigo/<repo>` no
+    // persiste y no rompe las reglas relativas de Edit/Write (gotcha del 2026-10-21).
+    CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: '1',
     // Graphify SIEMPRE local: sin esto autodetecta llaves de proveedores o cae a `claude -p`.
     GRAPHIFY_BACKEND: 'none',
     GRAPHIFY_QUERY_LOG_DISABLE: '1',

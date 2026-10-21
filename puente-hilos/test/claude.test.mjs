@@ -71,6 +71,7 @@ test('el hijo NO hereda el entorno del puente: solo config aislado y una credenc
   // Los topes de subagentes van SIEMPRE (F2): sin equipo, tope 1 y Agent prohibida.
   assert.deepEqual(Object.keys(env).sort(), [
     'ANTHROPIC_API_KEY',
+    'CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR',
     'CLAUDE_CODE_DISABLE_AUTO_MEMORY',
     'CLAUDE_CODE_DISABLE_BACKGROUND_TASKS',
     'CLAUDE_CODE_DISABLE_EXPLORE_PLAN_AGENTS',
