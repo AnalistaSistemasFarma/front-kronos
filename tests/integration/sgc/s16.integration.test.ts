@@ -235,6 +235,12 @@ describe.skipIf(!url)('SGC · S16 · encabezados por tipo y Excel con SQL Server
       ['Instrucciones', 'A1:A1'],
     ]);
     await expect(inspectBulkExcel(prisma, CO, { fileName: 'OLP-GC-07-FO02.pdf', bytes })).rejects.toMatchObject({ status: 415 });
+    // Un .xlsx dañado (es un ZIP pero no un libro de Excel) no se puede leer: 422, sin guardar nada.
+    const broken = { fileName: file.fileName, bytes: new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...new TextEncoder().encode('no es un libro')]) };
+    await expect(inspectBulkExcel(prisma, CO, broken)).rejects.toMatchObject({ status: 422 });
+    await expect(previewBulkExcel(prisma, CO, broken, null, actor(E.cal), convert)).rejects.toMatchObject({ status: 422 });
+    const chromeDown = { ...convert, htmlToPdf: async () => Promise.reject(new Error('Chrome caído')) };
+    await expect(previewBulkExcel(prisma, CO, file, null, actor(E.cal), chromeDown)).rejects.toMatchObject({ status: 422 });
 
     const settings = { orientation: 'horizontal', fit: 'escala', scalePct: 80, sheets: [{ name: 'Registro', include: true, hiddenColumns: ['C'] }, { name: 'Instrucciones', include: false }] };
     const before = htmls.length;
@@ -250,7 +256,12 @@ describe.skipIf(!url)('SGC · S16 · encabezados por tipo y Excel con SQL Server
     expect(await prisma.sgcDocument.findFirstOrThrow({ where: { id_company: CO, code: 'OLP-GC-07-FO02' } })).toMatchObject({ status: 'pendiente_archivo' });
     await expect(previewBulkExcel(prisma, CO, file, JSON.stringify({ sheets: [{ name: 'No existe' }] }), actor(E.cal), convert)).rejects.toThrow(/No existe/);
 
-    const { idBulkUpload } = await startBulkUpload(prisma, CO, { filesTotal: 2 }, actor(E.cal));
+    const { idBulkUpload } = await startBulkUpload(prisma, CO, { filesTotal: 4 }, actor(E.cal));
+    const horizontal = normalizeSheetSettings({ orientation: 'horizontal' });
+    const asPdf = await uploadBulkFile(prisma, upload, CO, idBulkUpload, { fileName: 'OLP-GC-07-FO02 Registro de inspección.pdf', bytes: await pdfOf('pdf') }, actor(E.cal), new Date(), convert, horizontal);
+    expect(asPdf).toMatchObject({ status: 'error', error: expect.stringContaining('solo aplican a un Excel') });
+    const unreadable = await uploadBulkFile(prisma, upload, CO, idBulkUpload, broken, actor(E.cal), new Date(), convert, horizontal);
+    expect(unreadable).toMatchObject({ status: 'error', error: expect.stringContaining('No se pudo leer el Excel') });
     const wrong = await uploadBulkFile(prisma, upload, CO, idBulkUpload, file, actor(E.cal), new Date(), convert, normalizeSheetSettings({ orientation: 'horizontal', sheets: [{ name: 'Otra hoja' }] }));
     expect(wrong).toMatchObject({ status: 'error', error: expect.stringContaining('Otra hoja') });
     const loaded = await uploadBulkFile(prisma, upload, CO, idBulkUpload, file, actor(E.cal), new Date(), convert, normalizeSheetSettings(settings));
