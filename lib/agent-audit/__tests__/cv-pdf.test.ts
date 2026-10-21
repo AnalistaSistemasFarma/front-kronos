@@ -71,3 +71,57 @@ describe('hoja de vida en PDF', () => {
     expect(html).toContain('No contiene el texto de las conversaciones');
   });
 });
+
+describe('hoja de vida completa en PDF (incremento 1)', () => {
+  const completa = {
+    ejecucion: {
+      vistoEl: '2026-10-20T07:30:00.000Z',
+      authMode: 'token',
+      authDetail: null,
+      tokenFingerprint: '51de66cc7ed6',
+      compartidaCon: ['Cosmo'],
+      processStartedAt: '2026-10-20T06:00:02.000Z',
+      lastRotationAt: null,
+      lastRotationStatus: null,
+      lastRotationDetail: null,
+      personaFingerprint: 'dbed81a1b8ae',
+      personaFiles: ['CLAUDE.md'],
+      governance: [{ marker: 'GOBIERNO-IA-MINPRIV', addedOn: '2026-10-19', author: 'horus', caseRef: 6212, text: 'Usted NO ejecuta <comandos>', file: 'AGENTS.md' }],
+      usageHook: false,
+    },
+    gobierno: { directorName: null, directorEmail: null, privilegeTemplate: 'Plantilla A — sin SAP', privilegeAppliedOn: '2026-10-19', notes: null, updatedBy: null, updatedAt: '2026-10-20T07:00:00.000Z' },
+    casos: [
+      {
+        idRequest: 6212, relation: 'gobierno-ia', enEstaBase: true, asunto: 'Conectores Galileo', proceso: 'Solicitud de conectores para agentes IA', empresa: 'ONE LATAM PHARMA',
+        estado: 'Abierto', creadoEl: '2026-10-16T15:00:00.000Z', resueltoEl: null, vinculadoPor: null, vinculadoEl: '2026-10-20T07:00:00.000Z',
+        tareas: [{ id: 7398, tarea: 'Auditoria de seguridad', estado: 'Sin Empezar', responsable: 'Iván Gutiérrez', inicio: null, resueltaEl: null }],
+      },
+    ],
+    eventosCasos: [{ occurredAt: '2026-10-16T15:00:00.000Z', kind: 'caso', title: 'Se radicó el caso #6212', detail: null }],
+    hallazgosExternos: [
+      { id: 1, source: 'Gobierno IA (Iván Gutiérrez)', refCode: 'H-01', severity: 'alto', title: 'Hallazgo <i>uno</i>', detail: null, recommendation: 'Quitar exec', status: 'abierto', reportedOn: '2026-10-20', resolvedOn: null, idRequest: 6212, createdBy: null },
+    ],
+    calidad30: { preguntas: 10, respondidas: 9, sinRespuesta: 1, enEspera: 0, medianaSeg: 75, p90Seg: 600, tardias: 2, pendientes: 0, reportaConsumo: false },
+  };
+
+  it('trae identificación, gobierno, calidad, casos y hallazgos de Gobierno IA, escapados', () => {
+    const html = htmlHojaDeVida(ficha, { generadoPor: 'qa@x.com', generadoEl: new Date(), logo: null, completa: completa as never });
+    expect(html).toContain('huella <span class="mono">51de66cc7ed6</span>');
+    expect(html).toContain('Compartida con Cosmo');
+    expect(html).toContain('<h2>Gobierno vigente</h2>');
+    expect(html).toContain('Plantilla A — sin SAP');
+    expect(html).toContain('Usted NO ejecuta &lt;comandos&gt;');
+    expect(html).toContain('<h2>Casos de SynerLink vinculados (1)</h2>');
+    expect(html).toContain('Auditoria de seguridad');
+    expect(html).toContain('Hallazgo &lt;i&gt;uno&lt;/i&gt;');
+    expect(html).toContain('1 min');
+    expect(html).toContain('El agente no reporta su consumo');
+    expect(html).toContain('Se radicó el caso #6212');
+  });
+
+  it('sin los datos nuevos sigue generando la ficha de F2', () => {
+    const html = htmlHojaDeVida(ficha, { generadoPor: 'qa@x.com', generadoEl: new Date(), logo: null });
+    expect(html).not.toContain('Gobierno vigente');
+    expect(html).toContain('Hallazgos automáticos abiertos');
+  });
+});

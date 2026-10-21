@@ -18,6 +18,15 @@ CONFIGURACIÓN (fuera del repo, chmod 600):
         SYNERLINK_INVENTORY_URL=http://192.168.11.230:3030     # PRUEBAS
         SYNERLINK_INVENTORY_KEY=<llave del recolector, ≥32 caracteres>
 
+DATOS DE EJECUCIÓN (1.1.0, hoja de vida completa, 2026-10-20): por agente,
+`runtime` con el modo de autenticación y la HUELLA de la credencial (12 hex
+del sha256, calculada en el equipo; el valor nunca sale de ahí), la hora de
+arranque del servicio, la última rotación semanal de sesión
+(~/.fleet-rotacion/resultados), la huella de los archivos de personalidad
+(CLAUDE.md / AGENTS.md, SOUL.md, IDENTITY.md), los bloques
+<!-- GOBIERNO-IA-… --> con su texto (reglas, no conversaciones) y si tiene el
+hook que reporta su consumo. Nunca se lee una conversación ni un transcript.
+
 SOLO LECTURA Y SIN SECRETOS (decisión de Nicolás, 2026-10-02):
   - No escribe, no reinicia y no instala nada en los equipos.
   - Nunca lee ni envía valores de .env, tokens, contraseñas ni encabezados de
@@ -48,13 +57,13 @@ import urllib.request
 AQUI = pathlib.Path(__file__).resolve().parent
 FLOTA = json.loads((AQUI / 'flota.json').read_text(encoding='utf-8'))
 CONF = pathlib.Path(os.path.expanduser('~/.horus/agent-inventory/collector.env'))
-VERSION = '1.0.0'
+VERSION = '1.1.0'
 
 # ── Escáner remoto ──────────────────────────────────────────────────────────
 # Se ejecuta en cada equipo con `python3 -` (stdlib, sin instalar nada).
 # Recibe por argv el JSON con los agentes de ese equipo y el catálogo.
 SCAN = r'''
-import json, os, glob, re, sys, subprocess, urllib.request, urllib.error
+import json, os, glob, re, sys, subprocess, urllib.request, urllib.error, hashlib, datetime, sqlite3
 H = os.path.expanduser('~')
 cfg = json.loads(sys.argv[1])
 CAT = cfg['conectores']
@@ -82,6 +91,88 @@ def servicio(patron):
         if len(p) == 3 and rx.search(p[2]):
             return 'activo' if p[0].strip().isdigit() else 'detenido'
     return 'sin-servicio'
+
+def pid_de(patron):
+    rx = re.compile(patron)
+    for l in LAUNCHD:
+        p = l.split('\t')
+        if len(p) == 3 and rx.search(p[2]) and p[0].strip().isdigit():
+            return p[0].strip()
+    return None
+
+def arranque(pid):
+    """Hora UTC (ISO) en que arrancó el proceso, a partir de su tiempo transcurrido."""
+    if not pid: return None
+    try:
+        et = subprocess.run(['ps', '-o', 'etime=', '-p', pid], capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL).stdout.strip()
+    except Exception:
+        return None
+    m = re.match(r'^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$', et)
+    if not m: return None
+    d, h, mi, se = (int(x) if x else 0 for x in m.groups())
+    seg = ((d * 24 + h) * 60 + mi) * 60 + se
+    t = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=seg)
+    return t.replace(microsecond=0).isoformat()
+
+def huella(valor):
+    """12 hex del sha256. Es lo ÚNICO que sale de una credencial."""
+    return hashlib.sha256(valor.encode('utf-8')).hexdigest()[:12] if valor else None
+
+def env_valor(path, nombre):
+    """Valor de UNA variable de un .env, solo para calcular su huella aquí mismo."""
+    try:
+        with open(path, encoding='utf-8-sig', errors='ignore') as f:
+            for linea in f:
+                linea = linea.strip()
+                if linea.startswith('export '): linea = linea[7:].strip()
+                if linea.startswith(nombre + '='):
+                    v = linea.split('=', 1)[1].strip()
+                    if len(v) >= 2 and v[0] == v[-1] and v[0] in '"\'': v = v[1:-1]
+                    return v or None
+    except Exception:
+        pass
+    return None
+
+def ultima_rotacion(nombres):
+    """Último resultado de la rotación semanal de sesión (~/.fleet-rotacion/resultados/<fecha>/<bot>.json)."""
+    base = os.path.join(H, '.fleet-rotacion', 'resultados')
+    for fecha in sorted(glob.glob(os.path.join(base, '*')), reverse=True)[:20]:
+        for n in nombres:
+            d = leer_json(os.path.join(fecha, n + '.json'))
+            if not isinstance(d, dict): continue
+            cuando = None
+            try:
+                cuando = datetime.datetime.strptime(str(d.get('fecha', ''))[:25], '%Y-%m-%d %H:%M:%S %z').astimezone(datetime.timezone.utc).isoformat()
+            except Exception:
+                cuando = os.path.basename(fecha) + 'T12:00:00+00:00' if re.match(r'^\d{4}-\d{2}-\d{2}$', os.path.basename(fecha)) else None
+            det = [x for x in (('sesión ' + str(d.get('antes')) + ' → ' + str(d.get('desp'))) if d.get('antes') else None,
+                               ('traspaso: ' + str(d.get('traspaso'))) if d.get('traspaso') else None) if x]
+            return {'at': cuando, 'status': str(d.get('estado') or 'sin estado')[:30], 'detail': '; '.join(det)[:300] or None}
+    return None
+
+RX_GOB = re.compile(r'<!--\s*(GOBIERNO-IA[A-Z0-9-]*)\s*:?([^>]*?)-->(.*?)<!--\s*/\s*\1\s*-->', re.S)
+
+def bloques_gobierno(textos):
+    out = []
+    for nombre, t in textos:
+        for m in RX_GOB.finditer(t or ''):
+            meta = m.group(2) or ''
+            f = re.search(r'(\d{4}-\d{2}-\d{2})', meta)
+            c = re.search(r'#\s*(\d{3,8})', meta)
+            a = re.search(r'\(\s*([A-Za-z0-9_.-]+)\s*[,)]', meta)
+            out.append({'marker': m.group(1), 'addedOn': f.group(1) if f else None, 'author': a.group(1) if a else None,
+                        'caseRef': int(c.group(1)) if c else None, 'text': m.group(3).strip()[:2000], 'file': nombre})
+    return out[:8]
+
+def persona(archivos):
+    """Huella conjunta de los archivos de personalidad que existan (y sus textos para buscar bloques)."""
+    h = hashlib.sha256(); vistos = []; textos = []
+    for ruta in archivos:
+        if ruta and os.path.isfile(ruta):
+            t = leer(ruta)
+            h.update(os.path.basename(ruta).encode() + b'\0' + t.encode('utf-8', 'ignore') + b'\0')
+            vistos.append(os.path.basename(ruta)); textos.append((os.path.basename(ruta), t))
+    return (h.hexdigest()[:12] if vistos else None), vistos, textos
 
 def destino(url):
     return re.split(r'[?#]', url or '')[0] or None
@@ -219,6 +310,28 @@ def claude_code(a):
     if 'synerlink' not in vistos and (os.path.isdir(os.path.join(C, 'channels', 'synerlink')) or any('synerlink' in k for k in servers)):
         canales.append({'type': 'synerlink', 'policy': 'lista-blanca', 'allowed': None, 'detail': 'Acceso por el permiso del agente en SynerLink'})
     r['channels'] = canales
+    # ── Datos de ejecución (hoja de vida completa) ──
+    envp = os.path.join(base, '.env')
+    tok = env_valor(envp, 'CLAUDE_CODE_OAUTH_TOKEN'); api = None if tok else env_valor(envp, 'ANTHROPIC_API_KEY')
+    # Carpeta de trabajo (vault) del bot: agent.json → vault_path, o VAULT_PATH= de run.sh.
+    m_v = re.search(r'^\s*VAULT_PATH=["\']?([^"\'\n]+)', run, re.M)
+    vault = ag.get('vault_path') or (m_v.group(1).strip() if m_v else None)
+    vault = os.path.expanduser(str(vault).replace('${HOME}', H).replace('$HOME', H)) if vault else None
+    fp, archivos, textos = persona([os.path.join(vault, 'CLAUDE.md') if vault else None, os.path.join(vault, 'GOBIERNO.md') if vault else None,
+                                    os.path.join(C, 'CLAUDE.md')])
+    rot = ultima_rotacion([nombre, a['code']])
+    r['runtime'] = {
+        'authMode': 'token' if tok else ('api-key' if api else 'oauth-llavero'),
+        'authDetail': 'CLAUDE_CODE_OAUTH_TOKEN en .env' if tok else ('ANTHROPIC_API_KEY en .env' if api else 'sin token en .env: usa la sesión del llavero'),
+        'tokenFingerprint': huella(tok or api),
+        'processStartedAt': arranque(pid_de(r'\.' + re.escape(nombre) + r'$')),
+        'lastRotationAt': rot['at'] if rot else None,
+        'lastRotationStatus': rot['status'] if rot else None,
+        'lastRotationDetail': rot['detail'] if rot else None,
+        'personaFingerprint': fp, 'personaFiles': archivos,
+        'governance': bloques_gobierno(textos),
+        'usageHook': 'synerlink_audit_usage' in json.dumps(st.get('hooks') or {}),
+    }
     return r
 
 def openclaw(a):
@@ -272,6 +385,44 @@ def openclaw(a):
     if br and (glob.glob(os.path.join(H, br, '*', '.env')) + glob.glob(os.path.join(H, br, '.env')) + glob.glob(os.path.join(H, 'synerlink-bridge', br, '.env')) + glob.glob(os.path.join(H, 'synerlink-bridge', br, '*', '.env'))):
         canales.append({'type': 'synerlink', 'policy': 'lista-blanca', 'allowed': None, 'detail': 'Puente SynerLink ⇄ openclaw; acceso por el permiso del agente'})
     r['channels'] = canales
+    # ── Datos de ejecución (hoja de vida completa) ──
+    agdir = os.path.join(OC, 'agents', a['agent'], 'agent')
+    perfiles = {}
+    try:
+        db = os.path.join(agdir, 'openclaw-agent.sqlite')
+        if os.path.isfile(db):
+            cx = sqlite3.connect('file:%s?mode=ro' % db, uri=True, timeout=3)
+            for (j,) in cx.execute("select store_json from auth_profile_store where store_key='primary'"):
+                perfiles = (json.loads(j) or {}).get('profiles') or {}
+            cx.close()
+    except Exception:
+        perfiles = {}
+    if not perfiles:
+        perfiles = (leer_json(os.path.join(agdir, 'auth-profiles.json')) or {}).get('profiles') or {}
+    nombre_p, valor = None, None
+    for k, v in perfiles.items() if isinstance(perfiles, dict) else []:
+        if isinstance(v, dict):
+            cand = v.get('token') or v.get('key') or v.get('apiKey') or v.get('access')
+            if isinstance(cand, str) and cand:
+                nombre_p, valor = k, cand; break
+    pid = None
+    if br:
+        pid = pid_de(r'synerlink-bridge-?' + re.escape(br.replace('synerlink-bridge', '').lstrip('-')) + r'(-prod|-production)?$') if br != 'synerlink-bridge' else pid_de(r'\.synerlink-bridge(-prod)?$')
+    fp, archivos, textos = persona([os.path.join(ws, n) for n in ('AGENTS.md', 'SOUL.md', 'IDENTITY.md')])
+    rot = ultima_rotacion([a['code'], a['agent']])
+    r['runtime'] = {
+        'authMode': 'perfil-openclaw' if valor else 'desconocido',
+        'authDetail': ('perfil ' + nombre_p) if nombre_p else None,
+        'tokenFingerprint': huella(valor),
+        'processStartedAt': arranque(pid or pid_de(r'^ai\.openclaw\.gateway$')),
+        'lastRotationAt': rot['at'] if rot else None,
+        'lastRotationStatus': rot['status'] if rot else None,
+        'lastRotationDetail': rot['detail'] if rot else None,
+        'personaFingerprint': fp, 'personaFiles': archivos,
+        'governance': bloques_gobierno(textos),
+        'usageHook': None,
+    }
+    valor = None
     return r
 
 out = []

@@ -55,6 +55,50 @@ import {
 } from '../../lib/chat/nudge-fx';
 import { registrarHiloAbierto, soltarHiloAbierto } from '../../lib/chat/message-sound';
 import type { ChatReplyToDto } from '../../lib/chat/client';
+import { BotonReaccionar, FilaReacciones, HojaMensaje } from './ChatReactions';
+import ChatMediaPicker, { useGifDisponible } from './ChatMediaPicker';
+import type { MediaParaEnviar } from './useChatConversation';
+
+/**
+ * GIF o STICKER de un mensaje (2026-10-20). La imagen sale SIEMPRE de la
+ * propia aplicación (sticker en /chat/stickers, de empresa en
+ * /api/chat/stickers, GIF por el proxy firmado): el navegador nunca le pide
+ * nada a GIPHY. El texto descriptivo del mensaje queda como `alt`.
+ */
+function MediaDelMensaje({ message }: { message: ChatMessageDto }) {
+  const media = message.media;
+  if (!media) return null;
+  if (media.kind === 'sticker') {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- imagen local o del propio servidor
+      <img
+        src={media.src}
+        alt={`Sticker: ${media.title}`}
+        title={media.title}
+        className='chat-sticker'
+        width={128}
+        height={128}
+        loading='lazy'
+        draggable={false}
+      />
+    );
+  }
+  const ancho = media.width && media.height ? Math.min(240, media.width) : 240;
+  const alto = media.width && media.height ? Math.round((ancho * media.height) / media.width) : undefined;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- pasa por el proxy firmado de SynerLink
+    <img
+      src={media.src}
+      alt={`GIF: ${media.title}`}
+      title={media.title}
+      className='chat-gif'
+      width={ancho}
+      height={alto}
+      loading='lazy'
+      draggable={false}
+    />
+  );
+}
 
 /**
  * El hilo de conversación: burbujas con Markdown real, indicador de qué está
@@ -154,6 +198,8 @@ const MessageBubble = memo(function MessageBubble({
   nueva = false,
   onCitar,
   onIrAlCitado,
+  onReaccionar,
+  onAbrirHoja,
 }: {
   message: ChatMessageDto;
   /** El agente del hilo directo. En un grupo no hay "uno". */
@@ -171,6 +217,10 @@ const MessageBubble = memo(function MessageBubble({
   onCitar?: (message: ChatMessageDto) => void;
   /** Saltar al mensaje que este cita. */
   onIrAlCitado?: (idMessage: number) => void;
+  /** Poner o quitar MI reacción (2026-10-20). Sin esto no hay reacciones. */
+  onReaccionar?: (message: ChatMessageDto, emoji: string) => void;
+  /** Toque largo en el celular: abre la hoja de acciones del mensaje. */
+  onAbrirHoja?: (message: ChatMessageDto) => void;
 }) {
   const isSystem = message.role === 'system';
 
@@ -194,18 +244,54 @@ const MessageBubble = memo(function MessageBubble({
   const UMBRAL = 55;
 
   const puedeCitar = Boolean(onCitar) && !message.pending && !message.failed && message.id > 0;
+  const real = !message.pending && !message.failed && message.id > 0;
+  const puedeReaccionar = Boolean(onReaccionar) && real;
+
+  /*
+   * TOQUE LARGO (2026-10-20): 450 ms quieto sobre el mensaje abre la hoja de
+   * acciones (reaccionar, responder, copiar). Moverse más de 10 px lo cancela:
+   * es el desplazamiento de la conversación o el deslizar para citar.
+   * Android dispara además `contextmenu` con la presión larga; ese evento se
+   * reconoce por el toque reciente y no cita (la hoja ya ofrece Responder).
+   */
+  const largo = useRef<number | null>(null);
+  const ultimoToque = useRef(0);
+  const cancelarLargo = () => {
+    if (largo.current !== null) {
+      window.clearTimeout(largo.current);
+      largo.current = null;
+    }
+  };
+  useEffect(() => cancelarLargo, []);
 
   const alTocar = (event: React.TouchEvent) => {
-    if (!puedeCitar) return;
+    ultimoToque.current = Date.now();
+    if (!puedeCitar && !(onAbrirHoja && real)) return;
     const toque = event.touches[0];
     gesto.current = { x: toque.clientX, y: toque.clientY };
+    cancelarLargo();
+    if (onAbrirHoja && real) {
+      largo.current = window.setTimeout(() => {
+        largo.current = null;
+        gesto.current = null;
+        setArrastre(0);
+        try {
+          navigator.vibrate?.(10);
+        } catch {
+          /* sin vibración: no pasa nada */
+        }
+        onAbrirHoja(message);
+      }, 450);
+    }
   };
 
   const alMover = (event: React.TouchEvent) => {
-    if (!gesto.current || !puedeCitar) return;
+    if (!gesto.current) return;
     const toque = event.touches[0];
     const dx = toque.clientX - gesto.current.x;
     const dy = toque.clientY - gesto.current.y;
+    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) cancelarLargo();
+    if (!puedeCitar) return;
     // Solo a la derecha, y solo si el gesto es horizontal: si no, es la
     // conversación desplazándose y hay que dejarla en paz.
     if (dx <= 0 || Math.abs(dy) > Math.abs(dx)) {
@@ -216,6 +302,7 @@ const MessageBubble = memo(function MessageBubble({
   };
 
   const alSoltar = () => {
+    cancelarLargo();
     if (arrastre >= UMBRAL && puedeCitar) onCitar?.(message);
     gesto.current = null;
     setArrastre(0);
@@ -253,13 +340,20 @@ const MessageBubble = memo(function MessageBubble({
     );
   }
 
+  const esSticker = message.media?.kind === 'sticker';
+  const reaccionarBoton = puedeReaccionar ? (
+    <BotonReaccionar alLado={isUser ? 'left' : 'right'} onElegir={(e) => onReaccionar?.(message, e)} />
+  ) : null;
+
   return (
     <Group
       align='flex-end'
       gap='xs'
       justify={isUser ? 'flex-end' : 'flex-start'}
       wrap='nowrap'
+      className='chat-msg'
     >
+      {isUser && reaccionarBoton}
       {!isUser && (
         <Box style={{ flexShrink: 0 }}>
           <AgentAvatar
@@ -282,6 +376,7 @@ const MessageBubble = memo(function MessageBubble({
           nueva ? 'chat-bubble--nueva' : '',
           message.pending ? 'chat-bubble--pending' : '',
           message.failed ? 'chat-bubble--failed' : '',
+          message.media ? `chat-bubble--media chat-bubble--${message.media.kind}` : '',
         ]
           .filter(Boolean)
           .join(' ')}
@@ -289,7 +384,13 @@ const MessageBubble = memo(function MessageBubble({
         onTouchStart={alTocar}
         onTouchMove={alMover}
         onTouchEnd={alSoltar}
+        onTouchCancel={alSoltar}
         onContextMenu={(event) => {
+          // Presión larga en Android: la atiende la hoja (ver arriba).
+          if (onAbrirHoja && Date.now() - ultimoToque.current < 1500) {
+            event.preventDefault();
+            return;
+          }
           if (!puedeCitar) return;
           // Se reemplaza el menú del navegador: ofrecer "inspeccionar" sobre
           // un mensaje no le sirve a nadie, y responder sí.
@@ -324,10 +425,19 @@ const MessageBubble = memo(function MessageBubble({
           </UnstyledButton>
         )}
 
-        {message.body.trim().length > 0 && <ChatMarkdown content={message.body} />}
+        {message.media ? (
+          <MediaDelMensaje message={message} />
+        ) : (
+          message.body.trim().length > 0 && <ChatMarkdown content={message.body} />
+        )}
         <MessageAttachments message={message} />
 
-        <Text size='xs' className='chat-bubble__meta'>
+        <FilaReacciones
+          reactions={message.reactions}
+          onAlternar={puedeReaccionar ? (e) => onReaccionar?.(message, e) : undefined}
+        />
+
+        <Text size='xs' className={`chat-bubble__meta${esSticker ? ' chat-bubble__meta--media' : ''}`}>
           {message.failed
             ? 'No se pudo enviar'
             : message.pending
@@ -335,6 +445,7 @@ const MessageBubble = memo(function MessageBubble({
               : formatChatTime(message.createdAt)}
         </Text>
       </Box>
+      {!isUser && reaccionarBoton}
     </Group>
   );
 });
@@ -1030,6 +1141,38 @@ export default function ChatThread({
   );
   const quitarCita = useCallback(() => setCita(null), []);
 
+  /* ───────────── Reacciones, GIF y stickers (2026-10-20) ───────────── */
+
+  // En un proyecto de solo lectura no se reacciona (el servidor también lo niega).
+  const soloLectura = Boolean(enProyecto && project?.readOnly);
+  const reaccionarHilo = thread.react;
+  const reaccionar = useCallback(
+    (message: ChatMessageDto, emoji: string) => void reaccionarHilo(message.id, emoji),
+    [reaccionarHilo]
+  );
+  // La hoja del celular guarda el ID y lee el mensaje vivo del hilo: así ve
+  // las reacciones que lleguen mientras está abierta.
+  const [idHoja, setIdHoja] = useState<number | null>(null);
+  const abrirHoja = useCallback((message: ChatMessageDto) => setIdHoja(message.id), []);
+  const mensajeHoja = idHoja === null ? null : (thread.messages.find((m) => m.id === idHoja) ?? null);
+
+  const [selectorMedia, setSelectorMedia] = useState(false);
+  const abrirStickers = useCallback(() => setSelectorMedia(true), []);
+  const cerrarStickers = useCallback(() => setSelectorMedia(false), []);
+  const gifDisponible = useGifDisponible(active && !composerDisabled);
+  const enviarMediaHilo = thread.sendMedia;
+  const enviarMedia = useCallback(
+    async (media: MediaParaEnviar) => {
+      setSelectorMedia(false);
+      usuarioMovioRef.current = false;
+      stickToBottomRef.current = true;
+      setStickToBottom(true);
+      const enviado = await enviarMediaHilo(media, cita);
+      if (enviado) setCita(null);
+    },
+    [enviarMediaHilo, cita]
+  );
+
   /** Solo reaccionamos si lo que se arrastra son ARCHIVOS (no texto ni enlaces). */
   const dragTraeArchivos = (event: React.DragEvent) =>
     Array.from(event.dataTransfer?.types ?? []).includes('Files');
@@ -1208,6 +1351,8 @@ export default function ChatThread({
                 nueva={yaEstaban.current ? !yaEstaban.current.has(message.id) : false}
                 onCitar={citar}
                 onIrAlCitado={irAlMensaje}
+                onReaccionar={soloLectura ? undefined : reaccionar}
+                onAbrirHoja={abrirHoja}
               />
             );
           })}
@@ -1275,8 +1420,21 @@ export default function ChatThread({
                   : `Escríbale a ${agent?.displayName ?? 'el asistente'}…`
           }
           menciones={menciones}
+          onAbrirStickers={abrirStickers}
+          etiquetaStickers={gifDisponible ? 'Stickers y GIF' : 'Stickers'}
         />
       </Box>
+      )}
+
+      <HojaMensaje
+        mensaje={mensajeHoja}
+        onCerrar={() => setIdHoja(null)}
+        onReaccionar={reaccionar}
+        onCitar={soloLectura ? undefined : citar}
+        puedeReaccionar={!soloLectura}
+      />
+      {!soloLectura && (
+        <ChatMediaPicker abierto={selectorMedia} onCerrar={cerrarStickers} onEnviar={(m) => void enviarMedia(m)} />
       )}
     </Box>
   );

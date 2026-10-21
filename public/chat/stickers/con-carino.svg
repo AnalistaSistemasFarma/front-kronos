@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160" role="img" aria-label="Con cariño">
+  <title>Con cariño</title>
+  <ellipse cx="80" cy="150" rx="50" ry="6" fill="#0f1a2c" opacity=".12"/>
+  <g stroke="#ffffff" stroke-width="7" stroke-linejoin="round" paint-order="stroke">
+    <path d="M66 90 C34 70 26 52 36 38 C44 27 58 30 66 41 C74 30 88 27 96 38 C106 52 98 70 66 90 Z" fill="#b3261e"/>
+    <path d="M106 64 C88 52 84 42 90 34 C94 28 102 30 106 36 C110 30 118 28 122 34 C128 42 124 52 106 64 Z" fill="#c2742c"/>
+  </g>
+  <g>
+    <rect x="22" y="110" width="116" height="32" rx="16" fill="#b3261e" stroke="#ffffff" stroke-width="5" paint-order="stroke"/>
+    <text x="80" y="131" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="800" fill="#ffffff">Con cariño</text>
+  </g>
+</svg>

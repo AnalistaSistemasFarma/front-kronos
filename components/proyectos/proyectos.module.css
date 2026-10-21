@@ -277,3 +277,19 @@
     transition: none;
   }
 }
+
+/* ---- Estado en vivo del agente (2026-10-20): «Orus está trabajando…» ---- */
+.estadoAgente {
+  min-width: 0;
+  margin-top: 2px;
+}
+
+/* La tablita de sub-agentes del chat, alineada con el texto de la tarjeta. */
+.subagentes {
+  min-width: 0;
+}
+
+.subagentes :global(.chat-tasks) {
+  margin-left: 0;
+  margin-top: 4px;
+}
