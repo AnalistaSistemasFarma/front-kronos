@@ -97,9 +97,25 @@ describe('stickers', () => {
     expect(json.notifiedAgents).toEqual([]);
   });
 
+  it('sticker ANIMADO (Noto): mismo contrato «[Sticker: …]», provider gss y WebP con cuadro fijo', async () => {
+    r.guard.mockResolvedValue(guardPersonas);
+    const res = await pedir({ kind: 'sticker', code: 'noto-aplausos' });
+    expect(res.status).toBe(201);
+    expect(r.mensajeCreate.mock.calls[0][0].data).toMatchObject({ body: '[Sticker: ¡Aplausos!]' });
+    expect(r.mediaCreate.mock.calls[0][0].data).toMatchObject({ kind: 'sticker', provider: 'gss', external_id: 'noto-aplausos' });
+    const json = await res.json();
+    expect(json.message.media).toMatchObject({
+      kind: 'sticker',
+      animated: true,
+      src: '/chat/stickers/noto/aplausos.webp',
+      poster: '/chat/stickers/noto/aplausos.poster.webp',
+    });
+  });
+
   it('un código que no está en el catálogo: 400 y nada escrito', async () => {
     r.guard.mockResolvedValue(guardPersonas);
     expect((await pedir({ kind: 'sticker', code: '../../etc/passwd' })).status).toBe(400);
+    expect((await pedir({ kind: 'sticker', code: 'noto-../../x' })).status).toBe(400);
     expect(r.mensajeCreate).not.toHaveBeenCalled();
   });
 
