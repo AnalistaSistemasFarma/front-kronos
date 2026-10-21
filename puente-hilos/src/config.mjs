@@ -383,6 +383,12 @@ export function cargarConfig(env = process.env) {
   }
   const grafosDir = (env.HILOS_GRAFOS_DIR ?? '').trim() || null;
 
+  // HTML → PDF en el puente (pdf.mjs, 2026-10-21). Encendido por defecto; HILOS_PDF=no lo apaga.
+  const pdfModo = (env.HILOS_PDF ?? 'si').trim().toLowerCase();
+  if (!['si', 'no'].includes(pdfModo)) throw new ErrorConfig('HILOS_PDF debe ser «si» o «no».');
+  const pdfChrome = (env.HILOS_PDF_CHROME ?? '').trim() || null;
+  if (pdfChrome && !path.isAbsolute(pdfChrome)) throw new ErrorConfig('HILOS_PDF_CHROME debe ser una ruta absoluta.');
+
   // Memoria del bot principal (solo lectura; ver memoria.mjs). Nunca dentro de HILOS_DIR.
   const memoriaDir = (env.HILOS_MEMORIA_DIR ?? '').trim() || null;
   if (memoriaDir && (path.resolve(memoriaDir) + path.sep).startsWith(path.resolve(hilosDir) + path.sep)) {
@@ -440,6 +446,7 @@ export function cargarConfig(env = process.env) {
     memoriaLectores,
     pluginDirs,
     grafosDir,
+    pdf: { habilitado: pdfModo === 'si', chrome: pdfChrome, timeoutMs: entero(env, 'HILOS_PDF_TIMEOUT_MS', 60 * 1000, 10 * 1000, 3 * 60 * 1000) },
     rutaConectoresPorProyecto: (env.HILOS_CONECTORES_POR_PROYECTO ?? '').trim() || null,
     conectoresSecretos: (env.HILOS_CONECTORES_SECRETOS ?? '').trim() || null,
     // Para el entorno del hijo: solo lo indispensable del entorno propio.

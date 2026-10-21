@@ -48,6 +48,7 @@ import { grafosDelTurno, textoGrafos } from './grafos.mjs';
 import { prepararMemoriaTurno } from './memoria.mjs';
 import { crearClienteSynerLink } from './synerlink.mjs';
 import { prepararAdjuntos } from './adjuntos-salida.mjs';
+import { convertirHtmlAPdf, convertirMarcasPdf, recursosDePlugins, resolverChrome, textoPdf } from './pdf.mjs';
 import { armarArgumentos, armarArgumentosSugerencia, armarEntorno, correrTurno, etiquetaHerramienta } from './claude.mjs';
 import {
   argumentosEquipo,
@@ -160,7 +161,7 @@ export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lot
   };
 }
 
-export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
+export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, convertirPdf = convertirHtmlAPdf }) {
   const enProceso = new Set();
 
   /** Auditoría local de cada comando y cada negación en turnos con código (sin el token). */
@@ -267,6 +268,10 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
       // Proyecto con código (nivel 2): el resumen corto del flujo de pases va con las reglas del código.
       // Grafos de Graphify de los repos MONTADOS en este turno (solo lectura).
       const grafosTurno = grafosDelTurno(cfg.grafosDir, codigo?.worktrees ?? []);
+      // Recursos de solo lectura de los plugins (p. ej. gss-design) y HTML → PDF en el puente (pdf.mjs).
+      // Para TODOS los turnos: con o sin código, con o sin terminal.
+      const recursos = recursosDePlugins(cfg.pluginDirs ?? []);
+      const chromePdf = cfg.pdf?.habilitado === false ? null : resolverChrome({ explicito: cfg.pdf?.chrome ?? null, home: cfg.home });
       let bloqueGuia = '';
       if (codigo || indiceRepos) {
         const g = guiaDesarrolloSegura();
@@ -283,6 +288,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
         bloqueCodigo: (codigo?.bloque ?? indiceRepos?.bloque ?? '') + (bloqueGuia ? `\n${bloqueGuia}` : '') + textoGrafos(grafosTurno, { conBash: Boolean(codigo) }),
         bloqueMemoria: memoria.bloque,
         bloqueConectores: conectores?.bloque ?? '',
+        bloquePdf: textoPdf({ disponible: Boolean(chromePdf), recursos }),
       });
       limpiarPropuestas(rutas);
       let vigia = null;
@@ -299,7 +305,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
           presupuestoUsd: equipo ? topes.presupuestoUsd : cfg.presupuestoUsd,
           equipo: equipo ? argumentosEquipo({ equipo, rutaAgentes: rutas.agentes }) : null,
           codigo,
-          plugins: { dirs: cfg.pluginDirs ?? [], dirsLectura: grafosTurno.map((g) => g.dir) },
+          plugins: { dirs: cfg.pluginDirs ?? [], dirsLectura: [...grafosTurno.map((g) => g.dir), ...recursos] },
         });
         let ultimaEtiqueta = null;
         let ultimosActivos = '';
@@ -389,6 +395,26 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
       // Solo en un turno que terminó bien, y solo archivos de ./trabajo de ESTA conversación.
       let adjuntosSalida = [];
       if (r.resultado?.ok && !r.abortado) {
+        // HTML → PDF (líneas «PDF:trabajo/….html» o «MEDIA:trabajo/….html»): cada una se cambia por
+        // «MEDIA:trabajo/….pdf» y sigue el camino normal de los adjuntos. Chrome va en sandbox, sin red.
+        try {
+          const conv = await convertirMarcasPdf(cuerpo, {
+            cwd: rutas.cwd,
+            trabajo: rutas.trabajo,
+            lecturas: [rutas.trabajo, rutas.adjuntos, rutas.contexto, rutas.archivos, ...recursos],
+            chrome: chromePdf,
+            timeoutMs: cfg.pdf?.timeoutMs,
+            token: codigo?.token ?? null,
+            convertir: async (o) => {
+              await synerlink.estado(idConversation, 'tool', 'Generando el PDF…').catch(() => null);
+              return convertirPdf(o);
+            },
+            log: (m) => log(`conversación ${idConversation}: ${m}`),
+          });
+          cuerpo = conv.texto;
+        } catch (e) {
+          log(`conversación ${idConversation}: error al convertir a PDF:`, e.message);
+        }
         const prep = await prepararAdjuntos(cuerpo, {
           cwd: rutas.cwd,
           trabajo: rutas.trabajo,
