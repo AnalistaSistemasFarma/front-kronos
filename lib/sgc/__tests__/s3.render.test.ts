@@ -50,7 +50,8 @@ describe('SGC · S3 · generador de PDF del borrador (Chrome headless endurecido
     expect(pdf).toEqual(new Uint8Array([37, 80, 68, 70]));
     expect(h.page.setJavaScriptEnabled).toHaveBeenCalledWith(false);
     expect(h.page.setRequestInterception).toHaveBeenCalledWith(true);
-    expect(h.page.pdf).toHaveBeenCalledWith({ format: 'A4', printBackground: true });
+    // 2026-10-21: manda el «@page» del documento (A4; las hojas de Excel anchas, A4 horizontal).
+    expect(h.page.pdf).toHaveBeenCalledWith({ format: 'A4', printBackground: true, preferCSSPageSize: true });
     const req = (url: string) => ({ url: () => url, abort: vi.fn(async () => undefined), continue: vi.fn(async () => undefined), isNavigationRequest: () => false });
     const ext = req('https://evil.example/x.png');
     const blank = req('about:blank');
