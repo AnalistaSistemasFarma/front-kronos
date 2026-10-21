@@ -5607,6 +5607,97 @@ html.dark .portal-th--modulo .portal-th__cal,
   --pthc-festivo: #ff8a80;
 }
 
+/* ── Portal TH en MODO OSCURO, dentro del hub (Cristian, 2026-10-21) ─────────
+   Mismo criterio que el calendario: solo en /process/portal-th (la página
+   abierta /portal sigue siempre clara) y solo con CSS, así que responde EN VIVO
+   al cambiar de tema (applyAppThemeToDocument cambia html.dark,
+   data-mantine-color-scheme y las --app-* sin recargar). En claro no cambia
+   nada: aquí solo se redefinen los tokens del portal con los de SynerLink y se
+   cambian los fondos blancos fijos por la superficie del tema. Sobre el azul
+   de acento (relleno) el texto va oscuro, como el día elegido del calendario. */
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo {
+  --pth-azul: var(--app-accent, var(--mantine-color-anchor));
+  --pth-azul-700: var(--app-accent-hover, var(--mantine-color-anchor));
+  --pth-azul-50: var(--app-surface-raised, var(--mantine-color-default-hover));
+  --pth-tinta: var(--app-text, var(--mantine-color-text));
+  --pth-tinta-2: var(--app-text, var(--mantine-color-text));
+  --pth-tinta-3: var(--app-text-muted, var(--mantine-color-dimmed));
+  --pth-linea: var(--app-border, var(--mantine-color-default-border));
+  --pth-superficie: var(--app-surface, var(--mantine-color-body));
+  --pth-sobre-azul: #0b1220;
+}
+
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__nav-boton,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__carrusel-marco,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__cargar,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__tarjeta,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-caja,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-controles,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__contactos-boton:hover,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__extensiones-buscar,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__buscador:focus,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__politicas-lista,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__politicas-item:hover,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__politicas-item--activo,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__politicas-volver,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__formacion-toggle button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__curso-tarjeta,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__formacion-gestion-barra button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__material-item,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__material-check,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__subida,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__subida button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__acceso-formacion,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__formacion-crear .portal-th__boton-secundario,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__icono-boton,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__invitar,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__invitar-acciones button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__org-zoom button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__org-muestra,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__org-lienzo,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__org-ventana,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__hoy-caja,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__top {
+  background-color: var(--pth-superficie);
+}
+
+/* Los rellenos que comparten elemento con una superficie de arriba vuelven al azul. */
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__nav-boton--activo,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__cargar:hover,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__invitar-acciones button[type='submit'] {
+  background-color: var(--pth-azul);
+}
+
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__material-check--bloqueada {
+  background-color: var(--pth-azul-50);
+}
+
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__nav-boton--activo,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__cargar:hover,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-barra,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-acciones a,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-acciones button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__politicas-tipo,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__certificado-boton,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__formacion-crear button:where(:not(.portal-th__mantine *)),
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-controles button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__cal-boton--primario,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__invitar-acciones button[type='submit'],
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__org-ventana > header,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__org-ventana > header button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__hoy-barra,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__hoy-barra button {
+  color: var(--pth-sobre-azul);
+}
+
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__formacion-toggle-activo {
+  color: var(--pth-sobre-azul) !important;
+}
+
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-acciones button {
+  background-color: rgba(11, 18, 32, 0.14);
+}
+
 .portal-th__cal-alternar {
   display: flex;
   justify-content: space-between;

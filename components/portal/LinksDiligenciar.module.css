@@ -32,6 +32,11 @@
   background-color: var(--pth-azul-50);
 }
 
+/* Modo oscuro dentro del hub (Cristian, 2026-10-21): el blanco fijo pasa a la superficie del tema, en vivo; en claro no cambia. */
+:global(:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo) .boton:not(:hover) {
+  background-color: var(--pth-superficie);
+}
+
 .boton:focus-visible {
   outline: 2px solid var(--pth-azul);
   outline-offset: 2px;
