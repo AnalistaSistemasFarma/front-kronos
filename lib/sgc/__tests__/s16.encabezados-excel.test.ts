@@ -160,23 +160,27 @@ describe('SGC · S16 · formatos en Excel (R32, D17)', () => {
     const { html, css } = await xlsxToSheet(await workbook());
     expect(html).toContain('<h2 class="sgc-hoja-nombre">Registro</h2>');
     expect(html).not.toContain('Oculta');
-    expect(html).toMatch(/<td colspan="3" class="sgc-b sgc-fc-1f4e79 sgc-al-c sgc-va-m sgc-bg-ddebf7 sgc-w-30">REGISTRO DE RECEPCIÓN<\/td>/);
+    expect(html).toMatch(/<td colspan="3" class="sgc-b sgc-fc-1f4e79 sgc-al-c sgc-va-m sgc-bg-ddebf7">REGISTRO DE RECEPCIÓN<\/td>/);
+    // 2026-10-21: los anchos van en una fila «regla» invisible (la combinada de la fila 1 ya no los pierde), en puntos como Excel.
+    expect(html).toContain('<tr class="sgc-regla"><td class="sgc-wp-1613"></td><td class="sgc-wp-668"></td><td class="sgc-wp-668"></td></tr>');
     expect(html).toContain('class="sgc-bt sgc-bl sgc-bb sgc-br"');
     expect(html).toContain('&lt;script&gt;x&lt;/script&gt; &amp; lote');
     expect(html).toContain('<tr class="sgc-vacia">');
     expect(css).toContain('.sgc-bg-ddebf7{background:#ddebf7}');
     expect(css).toContain('.sgc-fc-1f4e79{color:#1f4e79}');
-    expect(css).toContain('.sgc-w-30{width:30ch;min-width:18ch}');
+    expect(css).toContain('table.sgc-hoja .sgc-wp-1613{width:161.3pt}');
     expect(await xlsxToHtml(await workbook())).toBe(html);
     // El sanitizador conserva solo las clases «sgc-…» (y colspan/rowspan); nada más.
     const clean = sanitizeDraftHtml(html);
-    expect(clean).toContain('colspan="3" class="sgc-b sgc-fc-1f4e79 sgc-al-c sgc-va-m sgc-bg-ddebf7 sgc-w-30"');
+    expect(clean).toContain('colspan="3" class="sgc-b sgc-fc-1f4e79 sgc-al-c sgc-va-m sgc-bg-ddebf7"');
     expect(sanitizeDraftHtml('<td class="evil" onclick="x()">a</td>')).toBe('<td>a</td>');
     expect(sanitizeDraftHtml('<td class="sgc-b otra">a</td>')).toBe('<td>a</td>');
     expect(sanitizeDraftHtml('<p class="sgc-b">a</p>')).toBe('<p>a</p>');
     // La hoja de estilos solo admite reglas «.sgc-…» sin url(, < ni @.
     const page = wrapDraftForPdf({ title: 'F', code: 'C', contentHtml: clean, sheet: true, extraCss: `${css}\n.sgc-x{background:url(http://mal)}\n.sgc-y{color:red}</style><script>` });
     expect(page).toContain('.sgc-bg-ddebf7{background:#ddebf7}');
+    // 2026-10-21: «!important» ya no se confunde con «@import» (los bordes no salían).
+    expect(page).toContain('table.sgc-hoja .sgc-bt{border-top:0.6pt solid #333 !important}');
     expect(page).not.toContain('.sgc-y{color:red}');
     expect(page).not.toContain('url(http://mal)');
     expect(page).not.toContain('<script>');

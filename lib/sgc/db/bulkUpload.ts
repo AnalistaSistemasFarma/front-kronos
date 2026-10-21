@@ -111,8 +111,8 @@ export async function uploadBulkFile(
     if (!isZip(file.bytes)) return fail(`El archivo no es un ${kind === 'docx' ? 'Word (.docx)' : 'Excel (.xlsx)'} válido.`, match);
     if (!convert) return fail('La conversión a PDF no está disponible en este servidor: cargue el PDF.', match);
     try {
-      const html = kind === 'docx' ? { html: await convert.docxToHtml(file.bytes), css: undefined } : await xlsxToSheet(file.bytes);
-      pdfBytes = await convert.htmlToPdf(wrapDraftForPdf({ title: fileName, code: match.code ?? '', contentHtml: html.html, sheet: kind === 'xlsx', extraCss: html.css }));
+      const html = kind === 'docx' ? { html: await convert.docxToHtml(file.bytes), css: undefined, layout: undefined } : await xlsxToSheet(file.bytes);
+      pdfBytes = await convert.htmlToPdf(wrapDraftForPdf({ title: fileName, code: match.code ?? '', contentHtml: html.html, sheet: kind === 'xlsx', extraCss: html.css, sheetLayout: html.layout }));
     } catch {
       return fail(`No se pudo convertir el ${kind === 'docx' ? 'Word' : 'Excel'} a PDF: revise que se abra sin contraseña o cargue el PDF.`, match);
     }
