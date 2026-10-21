@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, Suspense, useCallback, useRef } from 'react';
+import SapsendMappingModal from './SapsendMappingModal';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -46,6 +47,7 @@ import {
   IconPlus,
   IconDownload,
   IconSettings,
+  IconDatabase,
   IconCheck,
   IconX,
   IconUsers,
@@ -239,6 +241,8 @@ function UserManagement() {
 
   // Authorization types states (submodal shown when the "Autorización" subprocess is assigned)
   const [authTypeModalOpened, setAuthTypeModalOpened] = useState(false);
+  // Mapeo SAPSEND por empresa (modulo de compras).
+  const [sapsendUser, setSapsendUser] = useState<User | null>(null);
   const [authorizationTypeOptions, setAuthorizationTypeOptions] = useState<
     { value: string; label: string }[]
   >([]);
@@ -1200,6 +1204,17 @@ function UserManagement() {
           aria-label='Asignar subprocesos'
         >
           <IconSettings size={15} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label='SAPSEND por empresa' withArrow>
+        <ActionIcon
+          variant='subtle'
+          color='teal'
+          size='sm'
+          onClick={() => setSapsendUser(user)}
+          aria-label='SAPSEND por empresa'
+        >
+          <IconDatabase size={15} />
         </ActionIcon>
       </Tooltip>
       <Tooltip label='Desactivar usuario' withArrow>
@@ -2372,6 +2387,13 @@ function UserManagement() {
           </Group>
         </Stack>
       </Modal>
+
+      <SapsendMappingModal
+        opened={sapsendUser !== null}
+        onClose={() => setSapsendUser(null)}
+        userId={sapsendUser?.id ?? null}
+        userName={sapsendUser?.name ?? sapsendUser?.email}
+      />
       </div>
     </div>
   );
