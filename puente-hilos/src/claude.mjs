@@ -46,7 +46,7 @@ export const SETTINGS_HIJO = {
  * fija el id con --session-id (así el puente lo conoce de antemano); después,
  * --resume con ese mismo id.
  */
-export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, presupuestoUsd, equipo = null, codigo = null }) {
+export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, presupuestoUsd, equipo = null, codigo = null, plugins = null }) {
   if (!perfil) throw new Error('Falta el perfil.');
   if (!sesion?.id || !/^[0-9a-f-]{36}$/i.test(sesion.id)) throw new Error('session id inválido.');
 
@@ -57,8 +57,10 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
   // por uno. Sin equipo, Agent/Task siguen prohibidas como en la F1.
   // Acceso al código (nivel 2, 2026-10-20): Bash SOLO con las reglas de
   // codigo.mjs (git/gh/npm/npx/node) y dentro del sandbox de Claude Code.
-  const tools = [...HERRAMIENTAS_BASE, ...web, ...(equipo ? equipo.tools : []), ...(codigo ? codigo.tools : [])];
-  const permitidas = [...PERMITIDAS_BASE, ...web, ...perfil.herramientas, ...(equipo ? equipo.permitidas : []), ...(codigo ? codigo.permitidas : [])];
+  // Skills (2026-10-21): en --restricted solo entran por --plugin-dir; con plugins, la herramienta Skill.
+  const skill = plugins?.dirs?.length ? ['Skill'] : [];
+  const tools = [...HERRAMIENTAS_BASE, ...web, ...skill, ...(equipo ? equipo.tools : []), ...(codigo ? codigo.tools : [])];
+  const permitidas = [...PERMITIDAS_BASE, ...web, ...skill, ...perfil.herramientas, ...(equipo ? equipo.permitidas : []), ...(codigo ? codigo.permitidas : [])];
   const exentas = [...(equipo ? HERRAMIENTAS_SUBAGENTE : []), ...(codigo ? HERRAMIENTAS_CODIGO : [])];
   const prohibidas = [
     ...HERRAMIENTAS_PROHIBIDAS.filter((h) => !exentas.includes(h)),
@@ -95,6 +97,9 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
   ];
   if (dirArchivos) args.push('--add-dir', dirArchivos);
   for (const d of codigo?.dirsExtra ?? []) args.push('--add-dir', d);
+  // Grafos de Graphify en solo lectura (Edit/Write siguen confinados a ./trabajo y ./codigo).
+  for (const d of plugins?.dirsLectura ?? []) args.push('--add-dir', d);
+  for (const d of plugins?.dirs ?? []) args.push('--plugin-dir', d);
   if (sesion.nueva) args.push('--session-id', sesion.id);
   else args.push('--resume', sesion.id);
   if (modelo) args.push('--model', modelo);
@@ -157,6 +162,9 @@ export function armarEntorno({ path, home, configClaudeDir, credencial }, topes 
     DISABLE_AUTOUPDATER: '1',
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+    // Graphify SIEMPRE local: sin esto autodetecta llaves de proveedores o cae a `claude -p`.
+    GRAPHIFY_BACKEND: 'none',
+    GRAPHIFY_QUERY_LOG_DISABLE: '1',
     ...entornoTopes(topes),
   };
   // Turno con código: GH_TOKEN, HOME propio (home-codigo) y avisos de gh/npm apagados.

@@ -44,6 +44,7 @@ import {
 import { ColaHilos } from './cola.mjs';
 import { combinarPerfil, prepararConectoresTurno, secretosConectores } from './conectores.mjs';
 import { guiaDesarrolloSegura } from './guia.mjs';
+import { grafosDelTurno, textoGrafos } from './grafos.mjs';
 import { prepararMemoriaTurno } from './memoria.mjs';
 import { crearClienteSynerLink } from './synerlink.mjs';
 import { armarArgumentos, armarArgumentosSugerencia, armarEntorno, correrTurno, etiquetaHerramienta } from './claude.mjs';
@@ -263,6 +264,8 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
       if (memoria.motivo) log(`conversación ${idConversation}: turno sin memoria (${memoria.motivo}).`);
       else if (memoria.archivos) log(`conversación ${idConversation}: memoria ${memoria.archivos.length} archivos${memoria.excluidos.length ? `; excluidos por seguridad: ${memoria.excluidos.map((x) => `${x.archivo} (${x.motivo})`).join(', ')}` : ''}.`);
       // Proyecto con código (nivel 2): el resumen corto del flujo de pases va con las reglas del código.
+      // Grafos de Graphify de los repos MONTADOS en este turno (solo lectura).
+      const grafosTurno = grafosDelTurno(cfg.grafosDir, codigo?.worktrees ?? []);
       let bloqueGuia = '';
       if (codigo || indiceRepos) {
         const g = guiaDesarrolloSegura();
@@ -276,7 +279,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
         perfil,
         instruccionesEn: cfg.instruccionesEn,
         equipoTurno,
-        bloqueCodigo: (codigo?.bloque ?? indiceRepos?.bloque ?? '') + (bloqueGuia ? `\n${bloqueGuia}` : ''),
+        bloqueCodigo: (codigo?.bloque ?? indiceRepos?.bloque ?? '') + (bloqueGuia ? `\n${bloqueGuia}` : '') + textoGrafos(grafosTurno, { conBash: Boolean(codigo) }),
         bloqueMemoria: memoria.bloque,
         bloqueConectores: conectores?.bloque ?? '',
       });
@@ -295,6 +298,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
           presupuestoUsd: equipo ? topes.presupuestoUsd : cfg.presupuestoUsd,
           equipo: equipo ? argumentosEquipo({ equipo, rutaAgentes: rutas.agentes }) : null,
           codigo,
+          plugins: { dirs: cfg.pluginDirs ?? [], dirsLectura: grafosTurno.map((g) => g.dir) },
         });
         let ultimaEtiqueta = null;
         let ultimosActivos = '';

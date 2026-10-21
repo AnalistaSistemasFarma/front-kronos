@@ -79,6 +79,8 @@ test('el hijo NO hereda el entorno del puente: solo config aislado y una credenc
     'CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH',
     'CLAUDE_CONFIG_DIR',
     'DISABLE_AUTOUPDATER',
+    'GRAPHIFY_BACKEND',
+    'GRAPHIFY_QUERY_LOG_DISABLE',
     'HOME',
     'LANG',
     'PATH',

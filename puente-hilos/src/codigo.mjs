@@ -30,6 +30,7 @@
  * Los secretos `.env` del repo NO se copian al worktree: el worktree solo trae
  * lo versionado (los `.env` están en .gitignore).
  */
+import { permisosGrafos } from './grafos.mjs';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -426,6 +427,10 @@ export function permisosCodigo({ repos, autorizado, pases }) {
   }
   for (const c of GH_LECTURA) permitidas.push(`Bash(gh ${c} *)`, `Bash(gh ${c})`, `Bash(cd codigo/* && gh ${c} *)`);
   for (const c of NPM) permitidas.push(`Bash(${c} *)`, `Bash(${c})`, `Bash(cd codigo/* && ${c} *)`, `Bash(cd codigo/* && ${c})`);
+  // Graphify: solo consultas de lectura sobre los grafos (grafos.mjs); update/label/install negados.
+  const g = permisosGrafos();
+  permitidas.push(...g.permitidas);
+  prohibidas.push(...g.prohibidas);
   // Edición del código: solo dentro de ./codigo (el worktree) y ./trabajo.
   permitidas.push('Edit(./codigo/**)', 'Write(./codigo/**)');
 

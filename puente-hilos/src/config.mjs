@@ -366,10 +366,22 @@ export function cargarConfig(env = process.env) {
   const presupuesto = (env.HILOS_MAX_BUDGET_USD ?? '').trim();
   if (presupuesto && !(Number(presupuesto) > 0)) throw new ErrorConfig('HILOS_MAX_BUDGET_USD debe ser un número positivo.');
 
-  for (const v of ['HILOS_REPOS_POR_PROYECTO', 'HILOS_GITHUB_TOKEN_ARCHIVO', 'HILOS_MEMORIA_DIR', 'HILOS_CONECTORES_POR_PROYECTO', 'HILOS_CONECTORES_SECRETOS']) {
+  for (const v of ['HILOS_REPOS_POR_PROYECTO', 'HILOS_GITHUB_TOKEN_ARCHIVO', 'HILOS_MEMORIA_DIR', 'HILOS_CONECTORES_POR_PROYECTO', 'HILOS_CONECTORES_SECRETOS', 'HILOS_GRAFOS_DIR']) {
     const r = (env[v] ?? '').trim();
     if (r && !path.isAbsolute(r)) throw new ErrorConfig(`${v} debe ser una ruta absoluta.`);
   }
+
+  // Plugins locales (skills) por --plugin-dir, y grafos de Graphify (grafos.mjs). 2026-10-21.
+  const pluginDirs = (env.HILOS_PLUGIN_DIRS ?? '')
+    .split(',')
+    .map((d) => d.trim())
+    .filter(Boolean);
+  for (const d of pluginDirs) {
+    if (!path.isAbsolute(d)) throw new ErrorConfig('HILOS_PLUGIN_DIRS debe ser una lista de rutas absolutas separadas por coma.');
+    if (d.split(path.sep).includes('claude-config')) throw new ErrorConfig('HILOS_PLUGIN_DIRS no puede apuntar al config de un bot.');
+    if (!existsSync(path.join(d, '.claude-plugin', 'plugin.json'))) throw new ErrorConfig(`HILOS_PLUGIN_DIRS: ${d} no es un plugin (falta .claude-plugin/plugin.json).`);
+  }
+  const grafosDir = (env.HILOS_GRAFOS_DIR ?? '').trim() || null;
 
   // Memoria del bot principal (solo lectura; ver memoria.mjs). Nunca dentro de HILOS_DIR.
   const memoriaDir = (env.HILOS_MEMORIA_DIR ?? '').trim() || null;
@@ -426,6 +438,8 @@ export function cargarConfig(env = process.env) {
     githubTokenArchivo: (env.HILOS_GITHUB_TOKEN_ARCHIVO ?? '').trim() || null,
     memoriaDir,
     memoriaLectores,
+    pluginDirs,
+    grafosDir,
     rutaConectoresPorProyecto: (env.HILOS_CONECTORES_POR_PROYECTO ?? '').trim() || null,
     conectoresSecretos: (env.HILOS_CONECTORES_SECRETOS ?? '').trim() || null,
     // Para el entorno del hijo: solo lo indispensable del entorno propio.
