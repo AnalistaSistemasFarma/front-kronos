@@ -390,6 +390,14 @@ jobs:
           # Correo · «Consultar a un agente» (2026-10-16): concesiones y propuestas, dos veces (idempotencia).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261016100000_correo_agente/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261016100000_correo_agente/migration.sql
+          # Correo · «Crear ticket» (2026-10-21): migración y pase de PRUEBAS dos veces (idempotencia); el de PROD se niega fuera de KRONOSDB.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261021200000_correo_ticket/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261021200000_correo_ticket/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-21-correo-ticket-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-21-correo-ticket-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.CK_email_thread_case_estado', N'C') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UQ_email_thread_case_hilo') THROW 50000, N'La migración de Correo · ticket no dejó el CHECK o el índice único.', 1;" > /tmp/correo-ticket-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/correo-ticket-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-21-correo-ticket-PROD.sql; then echo "El script de PROD de Correo · ticket debió negarse en kronos_ci"; exit 1; fi
           # Proyectos (hilos de agente) del chat, F1 (2026-10-17): migración y pase de PRUEBAS, dos veces (idempotencia).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017120000_chat_projects/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017120000_chat_projects/migration.sql

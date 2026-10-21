@@ -1213,6 +1213,7 @@ export default function CorreoPage() {
         marcarHilo={marcarHilo}
         onCambio={() => setHayCambios(true)}
         onCrearSolicitud={(ids) => setSimulacion(ids)}
+        ticketHabilitado={Boolean(estado.ticketHabilitado)}
       />
     </Card>
   ) : null;

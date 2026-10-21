@@ -24,6 +24,36 @@ export interface EstadoCorreo {
   };
   /** Dominios del grupo (Redactar marca en amarillo a los destinatarios externos). */
   dominiosGrupo?: string[];
+  /** «Crear ticket» desde un hilo: solo TI (técnicos de la mesa de ayuda). El servidor lo revalida. */
+  ticketHabilitado?: boolean;
+}
+
+/** Formulario de «Crear ticket» precargado con el hilo (GET /api/correo/ticket?preparar=1). */
+export interface PreparacionTicket {
+  conversationId: string;
+  mensajeId: string;
+  remitente: { nombre: string; correo: string };
+  solicitante: { id: string; nombre: string; empresas: number[] } | null;
+  empresas: Array<{ idCompany: number; companyName: string }>;
+  idCompany: number | null;
+  asunto: string;
+  descripcion: string;
+  adjuntos: Array<{ id: string; mensajeId: string; nombre: string; tamano: number }>;
+  categorias: Array<{ id: number; nombre: string }>;
+  departamentos: Array<{ id: number; nombre: string }>;
+  tecnicos: Array<{ id: number; nombre: string }>;
+  idTecnico: number | null;
+  ticketExistente: number | null;
+  tipos: string[];
+  prioridades: string[];
+  sitios: string[];
+}
+
+export interface ResultadoTicket {
+  idCase: number;
+  solicitante: string;
+  adjuntosSubidos: number;
+  adjuntosFallidos: string[];
 }
 
 /** Sugerencia del autocompletado de Redactar. */
@@ -213,6 +243,11 @@ export const correoApi = {
   simular: (mensajesIds: string[], empresa: number, procesoPredeterminado: number | null) =>
     post<{ filas: FilaSimulacion[]; categorias: CategoriaCorreo[]; procesos: ProcesoCorreo[] }>('/api/correo/simular', { mensajesIds, empresa, procesoPredeterminado }),
   crear: (fila: Record<string, unknown>) => post<ResultadoCreacion>('/api/correo/crear', fila),
+  /** «Crear ticket» (solo TI): ticket ya creado desde el hilo, formulario precargado y creación. */
+  ticketDeHilo: (conversationId: string, signal?: AbortSignal) =>
+    get<{ ticket: number | null }>(`/api/correo/ticket?${new URLSearchParams({ hilo: conversationId })}`, signal),
+  prepararTicket: (conversationId: string) => get<PreparacionTicket>(`/api/correo/ticket?${new URLSearchParams({ hilo: conversationId, preparar: '1' })}`),
+  crearTicket: (entrada: Record<string, unknown>) => post<ResultadoTicket>('/api/correo/ticket', entrada),
   usuarios: (empresa: number, q: string) => get<{ usuarios: Array<{ id: string; nombre: string; correo: string }> }>(`/api/correo/usuarios?${new URLSearchParams({ empresa: String(empresa), q })}`),
   procesos: (empresa: number) => get<{ categorias: CategoriaCorreo[]; procesos: ProcesoCorreo[] }>(`/api/correo/procesos?empresa=${empresa}`),
   vinculos: (idRequest: number) => get<{ vinculos: VinculoHilo[] }>(`/api/correo/vinculos?solicitud=${idRequest}`),
@@ -258,6 +293,9 @@ export const urlAdjunto = (mensajeId: string, adjuntoId: string, ver = false) =>
   `/api/correo/adjunto?${new URLSearchParams({ mensaje: mensajeId, adjunto: adjuntoId, ...(ver ? { ver: '1' } : {}) })}`;
 
 export const urlSolicitud = (id: number) => rutaSolicitud(id);
+
+/** Vista del ticket en la mesa de ayuda. */
+export const urlTicket = (id: number) => `/process/help-desk/view-ticket?id=${id}`;
 
 export const PREVISUALIZABLES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'application/pdf']);
 

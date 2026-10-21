@@ -4966,6 +4966,32 @@ model EmailAgentAction {
   @@schema("dbo")
 }
 
+/// «Crear ticket» desde un hilo del Correo (2026-10-21, pedido de Nicolás Rivera: «solo para
+/// los de TI»). Relación hilo ↔ ticket de mesa de ayuda ([case].id_case), aparte del vínculo
+/// hilo ↔ solicitud (email_thread_link): un hilo puede tener su solicitud Y su ticket. Un solo
+/// ticket por hilo y persona (se reserva antes de crear). Migración:
+/// prisma/migrations/20261021200000_correo_ticket (a mano en prod).
+model EmailThreadCase {
+  id                  Int      @id @default(autoincrement())
+  id_user             String   @db.NVarChar(50)
+  mailbox             String   @db.NVarChar(320)
+  conversation_id     String   @db.NVarChar(512)
+  // Correo de origen del ticket (el primero del hilo).
+  internet_message_id String?  @db.NVarChar(512)
+  // NULL mientras el ticket se está creando (estado CREANDO).
+  id_case             Int?
+  // CREANDO | ACTIVO
+  estado              String   @default("ACTIVO") @db.NVarChar(10)
+  asunto              String?  @db.NVarChar(255)
+  created_by          String   @db.NVarChar(50)
+  created_at          DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  @@unique([id_user, conversation_id], map: "UQ_email_thread_case_hilo")
+  @@index([id_case], map: "IX_email_thread_case_case")
+  @@map("email_thread_case")
+  @@schema("dbo")
+}
+
 // ---------------------------------------------------------------------------
 // Auditoría de INICIOS DE SESIÓN (2026-10-16, pedido de Nicolás Rivera: «ver los
 // logins que van haciendo los usuarios, de qué IP y país, por auditoría de

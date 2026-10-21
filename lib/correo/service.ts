@@ -29,6 +29,7 @@ import { markdownAHtml, markdownATexto } from './markdown';
 import { claveAcuse, enlaceSolicitud, textoAcuse, type OpcionesAcuse } from './acuse';
 import { fragmentoAcuse, logoAcuseUrl } from './plantillas/acuse.html';
 import type { SolicitudVisible } from './kronos';
+import type { TicketPort } from './ticket';
 import type { ArchivoAdjunto, Direccion, FilaSimulacion, MailProvider, MensajeCompleto, ResultadoAcuse, ResultadoCreacion, SugerenciaDestinatario, VinculoHilo } from './types';
 
 /**
@@ -88,6 +89,8 @@ export interface CorreoDeps {
   proveedor?: (acceso: AccesoCorreo) => Promise<MailProvider>;
   /** Secreto del servidor (NEXTAUTH_SECRET) con que se firma el comprobante de «Deshacer» al eliminar. */
   secretoFirma?: string;
+  /** «Crear ticket» de mesa de ayuda (solo TI, lib/correo/ticket.ts). Sin él, la acción no existe. */
+  ticket?: TicketPort;
 }
 
 const now = (d: CorreoDeps) => (d.now ? d.now() : Date.now());
