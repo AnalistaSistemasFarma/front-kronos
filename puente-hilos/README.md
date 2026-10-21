@@ -43,6 +43,25 @@ Pedido de Nicolás Rivera: «para el tema de proyectos quiero que puedas, de pri
 
 **Apagar:** `HILOS_SUBAGENTES=no` en el `.env` del puente (todos los proyectos) o el interruptor «Encendido» de la sección Equipo (un proyecto).
 
+## Permisos de los agentes (2026-10-20)
+
+Pedido de Nicolás Rivera (13:18 COT): «va a tocar que cuando creemos el proyecto podamos elegir qué permisos tienen». Los permisos se escogen en SynerLink, en **Nuevo proyecto** o en la sección **Permisos** del proyecto. Solo los cambia la administración o quien tenga el subproceso `/process/proyectos/permisos-agentes` en la empresa. Cada cambio queda en un registro inmutable.
+
+Al iniciar **cada turno**, el puente pide `GET /api/chat/agent/projects/policy?idConversation=N` con su llave `scope: "projects"` (`src/politica.mjs`):
+
+| SynerLink responde | El turno usa |
+|---|---|
+| `source: "bd"` | la política de la base, **incluso «ninguno»** (así se revoca un acceso manual) |
+| `source: "sin-politica"` o 404 (SynerLink sin este API) | el archivo manual `HILOS_REPOS_POR_PROYECTO` (compatibilidad); sin archivo, «ninguno» |
+| cualquier otro error | «ninguno» en ese turno, con una nota en la respuesta |
+
+**Niveles:** 0 ninguno · 1 lectura · 2 desarrollo · 3 desarrollo + pases.
+
+- **Lectura:** los clones de los repos entran al turno con `--add-dir`, y el modelo los lee con Read, Glob y Grep. Sigue sin Bash y sin escribir fuera de `./trabajo`. Se niega leer `.env`, `.git`, `*.pem` y `*.key`.
+- **Desarrollo y pases:** los aplica el módulo de acceso al código (`src/codigo.mjs`: worktree, Bash acotado y sandbox). `jsonParaCodigo()` entrega la **misma forma** de `repos-por-proyecto.json` que ese módulo valida. Mientras el puente no tenga ese módulo, un proyecto en desarrollo trabaja en **lectura**, y así se le dice al modelo.
+- **Qué es de la base y qué es del Mac:** la base dice qué repos y qué nivel tiene cada proyecto, y quién autoriza los pases. El clon, los workflows de producción y las notas de despliegue siguen en la sección `repos` del archivo local. Un repo vinculado sin clon en este Mac se omite, y el turno lo dice. Los autorizadores de la base se cruzan con `operadoresPases` del archivo, que hace de techo del Mac.
+- Lo aplicado en el turno queda en `.puente/politica.json` de la carpeta del hilo.
+
 ## Cómo funciona
 
 1. Hace long-poll a `GET /api/chat/agent/inbox` con la llave de scope `projects` y `ack=false`.

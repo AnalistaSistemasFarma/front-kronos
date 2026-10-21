@@ -43,7 +43,7 @@ export const SETTINGS_HIJO = {
  * fija el id con --session-id (así el puente lo conoce de antemano); después,
  * --resume con ese mismo id.
  */
-export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, presupuestoUsd, equipo = null, codigo = null }) {
+export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, presupuestoUsd, equipo = null, codigo = null, lectura = null }) {
   if (!perfil) throw new Error('Falta el perfil.');
   if (!sesion?.id || !/^[0-9a-f-]{36}$/i.test(sesion.id)) throw new Error('session id inválido.');
 
@@ -61,6 +61,8 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
     ...HERRAMIENTAS_PROHIBIDAS.filter((h) => !exentas.includes(h)),
     ...(equipo ? equipo.prohibidas : []),
     ...(codigo ? codigo.prohibidas : []),
+    // Permisos del proyecto, nivel LECTURA (politica.mjs): sin secretos de los clones.
+    ...(lectura ? lectura.prohibidas : []),
   ];
   if (codigo && !codigo.sandbox?.enabled) throw new Error('Turno con código sin sandbox: no se arma.');
   if (codigo && !codigo.hooks?.PreToolUse?.length) throw new Error('Turno con código sin el hook de subagentes: no se arma.');
@@ -91,6 +93,8 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
   ];
   if (dirArchivos) args.push('--add-dir', dirArchivos);
   for (const d of codigo?.dirsExtra ?? []) args.push('--add-dir', d);
+  // Repos del proyecto en LECTURA (politica.mjs): solo se leen (Edit/Write siguen confinados a ./trabajo).
+  for (const d of lectura?.dirs ?? []) args.push('--add-dir', d);
   if (sesion.nueva) args.push('--session-id', sesion.id);
   else args.push('--resume', sesion.id);
   if (modelo) args.push('--model', modelo);

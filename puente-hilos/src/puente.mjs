@@ -24,6 +24,7 @@ import { cargarConfig, ErrorConfig, sellarEntorno } from './config.mjs';
 import { appendFileSync } from 'node:fs';
 import {
   cargarReposPorProyecto,
+  validarReposPorProyecto,
   entornoCodigo,
   leerTokenGithub,
   permisosCodigo,
@@ -38,6 +39,7 @@ import {
   turnoAutorizado,
 } from './codigo.mjs';
 import { ColaHilos } from './cola.mjs';
+import { carpetasLectura, jsonParaCodigo, leerArchivoManual, obtenerPoliticaApi, prohibidasLectura, resolverPolitica, textoPolitica } from './politica.mjs';
 import { crearClienteSynerLink } from './synerlink.mjs';
 import { armarArgumentos, armarArgumentosSugerencia, armarEntorno, correrTurno, etiquetaHerramienta } from './claude.mjs';
 import {
@@ -146,6 +148,34 @@ export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lot
   };
 }
 
+/**
+ * Permisos de los agentes del turno (2026-10-20, ver politica.mjs). Nunca lanza:
+ * ante cualquier duda, «ninguno». Devuelve la política resuelta, las carpetas de
+ * lectura y el bloque para el encabezado de sistema.
+ */
+export async function politicaDelTurno({ cfg, synerlink, idConversation, idProject, leerArchivo = leerArchivoManual, existe }) {
+  const api = await obtenerPoliticaApi(synerlink, idConversation, idProject);
+  let archivo = null;
+  let errorArchivo = null;
+  // El archivo manual se relee en CADA turno (vincular un repo no exige reiniciar).
+  const ruta = cfg.rutaReposPorProyecto ?? ((process.env.HILOS_REPOS_POR_PROYECTO ?? '').trim() || null);
+  try {
+    archivo = leerArchivo(ruta);
+  } catch (e) {
+    errorArchivo = e;
+  }
+  const politica = resolverPolitica({ api, archivo, idProject, errorArchivo: api.estado === 'bd' ? null : errorArchivo });
+  const lectura = carpetasLectura(politica, archivo, existe ? { existe } : undefined);
+  return {
+    politica,
+    api,
+    archivo,
+    errorArchivo,
+    lectura: lectura.dirs.length > 0 ? { dirs: lectura.dirs.map((d) => d.ruta), prohibidas: prohibidasLectura(lectura.dirs) } : null,
+    bloque: textoPolitica({ politica, lectura }),
+  };
+}
+
 export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
   const enProceso = new Set();
 
@@ -201,13 +231,25 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
         avisoEquipo = '_Nota: el equipo de subagentes del proyecto no se pudo cargar; respondí sin él._\n\n';
       }
       const topes = topesEfectivos(equipo, cfg);
+      // Permisos de los agentes (2026-10-20): SynerLink manda; si no hay política, el archivo manual; si no, «ninguno».
+      const politicaTurno = await politicaDelTurno({ cfg, synerlink, idConversation, idProject: contexto.project.idProject });
+      if (politicaTurno.api.estado === 'error') log(`conversación ${idConversation}: no se pudo leer la política (${politicaTurno.api.error}); turno sin código.`);
+      if (politicaTurno.errorArchivo) log(`conversación ${idConversation}: archivo de repos inválido:`, politicaTurno.errorArchivo.message);
+      if (politicaTurno.politica.nivel > 0) {
+        log(`conversación ${idConversation}: permisos ${politicaTurno.politica.codeLevel} (origen ${politicaTurno.politica.origen}; repos ${politicaTurno.politica.repos.map((r) => r.slug).join(', ')}).`);
+      }
       // Acceso al código (nivel 2): repos vinculados al proyecto, worktree propio y
       // pases solo si TODOS los mensajes del turno son de un operador autorizado.
+      // QUÉ repos y con qué pases lo dice la política resuelta (jsonParaCodigo: la
+      // misma forma de repos-por-proyecto.json); el clon y los workflows, el archivo local.
       let codigo = null;
       let indiceRepos = null; // proyecto bajo demanda: índice de repos y registro de los que Orus pida
       let avisoCodigo = '';
+      const jsonCodigo = jsonParaCodigo(politicaTurno.politica, politicaTurno.archivo, contexto.project.idProject);
       try {
-        codigo = prepararCodigoTurno({ cfg, idProject: contexto.project.idProject, idConversation, rutas, lote, agenteNombre, conEquipo: Boolean(equipo) });
+        codigo = jsonCodigo
+          ? prepararCodigoTurno({ cfg, idProject: contexto.project.idProject, idConversation, rutas, lote, agenteNombre, conEquipo: Boolean(equipo), cargar: () => validarReposPorProyecto(jsonCodigo) })
+          : null;
         if (codigo?.soloIndice) {
           indiceRepos = codigo;
           codigo = null;
@@ -230,7 +272,17 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
             agentes: armarAgentes({ equipo, perfil, agente: agenteNombre, proyecto: contexto.project, topes, codigo }),
           }
         : null;
-      escribirContexto({ rutas, agente: agenteNombre, contexto, perfil, instruccionesEn: cfg.instruccionesEn, equipoTurno, bloqueCodigo: codigo?.bloque ?? indiceRepos?.bloque ?? '' });
+      escribirContexto({
+        rutas,
+        agente: agenteNombre,
+        contexto,
+        perfil,
+        instruccionesEn: cfg.instruccionesEn,
+        equipoTurno,
+        bloqueCodigo: codigo?.bloque ?? indiceRepos?.bloque ?? '',
+        // Con worktree (o con el índice de repos bajo demanda), las reglas del código ya dicen todo; sin él, el bloque de la política (lectura o «ninguno»).
+        politicaTurno: codigo || indiceRepos ? { ...politicaTurno, bloque: '' } : politicaTurno,
+      });
       limpiarPropuestas(rutas);
       let vigia = null;
 
@@ -246,6 +298,8 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
           presupuestoUsd: equipo ? topes.presupuestoUsd : cfg.presupuestoUsd,
           equipo: equipo ? argumentosEquipo({ equipo, rutaAgentes: rutas.agentes }) : null,
           codigo,
+          // La lectura de los clones solo si el turno NO lleva worktree ni índice bajo demanda (el código ya lo maneja).
+          lectura: codigo || indiceRepos ? null : politicaTurno.lectura,
         });
         let ultimaEtiqueta = null;
         let ultimosActivos = '';
