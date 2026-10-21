@@ -38,7 +38,8 @@ const STATUS_OPTIONS = [
 
 function ListadoMaestro({ company }: { company: SgcCompanyAccess }) {
   const rowLink = useSgcRowLink();
-  const [status, setStatus] = useState('vigente');
+  // 2026-10-21 (Calidad OLP): Calidad entra viendo todos los estados, así los importados «pendientes de archivo» no se pierden; los demás siguen viendo solo los vigentes.
+  const [status, setStatus] = useState('todos');
   const [q, setQ] = useState('');
   const [processTypeId, setProcessTypeId] = useState<string | null>(null);
   const [processId, setProcessId] = useState<string | null>(null);
@@ -121,7 +122,7 @@ function ListadoMaestro({ company }: { company: SgcCompanyAccess }) {
           w={220}
         />
         {company.canQuality && (
-          <SgcSelect label='Estado' data={STATUS_OPTIONS} value={status} onChange={(v) => setStatus(v ?? 'vigente')} allowDeselect={false} w={180} />
+          <SgcSelect label='Estado' data={STATUS_OPTIONS} value={status} onChange={(v) => setStatus(v ?? 'todos')} allowDeselect={false} w={180} />
         )}
       </Group>
 

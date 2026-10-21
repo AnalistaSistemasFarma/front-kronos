@@ -17,7 +17,7 @@ import {
   type SgcSystemToken,
 } from '../pdf/institutional';
 import { wrapDraftForPdf, type SgcDocxToHtml, type SgcHtmlToPdf } from '../pdf/render';
-import { xlsxToSheet } from '../pdf/viewable';
+import { xlsxToSheet, type SgcSheetLayout } from '../pdf/viewable';
 import {
   missingPlacements,
   normalizeSgcFields,
@@ -333,10 +333,11 @@ export async function composeContent(
   }
   let html: string;
   let sheetCss: string | undefined;
+  let sheetLayout: SgcSheetLayout | undefined;
   if (input.draft.format === 'docx') html = await deps.docxToHtml(input.draft.bytes!);
   else if (input.draft.format === 'html') html = sanitizeDraftHtml(input.draft.html ?? '');
   // S16 (R32, D17): un FORMATO en Excel se compone desde sus hojas (tablas), sin pasar por Word.
-  else if (input.draft.format === 'xlsx') ({ html, css: sheetCss } = await xlsxToSheet(input.draft.bytes!));
+  else if (input.draft.format === 'xlsx') ({ html, css: sheetCss, layout: sheetLayout } = await xlsxToSheet(input.draft.bytes!));
   else throw new SgcError('El borrador debe ser PDF, Word (.docx), Excel (.xlsx) o editado en la app.', 409);
   const history = buildChangeHistoryHtml(await changeHistoryRows(db, input.idDocument, { versionNumber: input.versionNumber, date: input.changeDate, reason: input.changeReason }));
   const values: Partial<Record<SgcSystemToken, string>> = {
@@ -352,7 +353,7 @@ export async function composeContent(
   };
   let body = applySystemFieldTokens(html, values, history);
   if (input.institutional && !hasChangeHistoryToken(html)) body += `<h2>HISTORIAL DE CAMBIOS</h2>${history}`;
-  const contentPdf = await deps.htmlToPdf(wrapDraftForPdf({ title: input.title, code: input.code, contentHtml: body, institutional: input.institutional, sheet: input.draft.format === 'xlsx', extraCss: sheetCss }));
+  const contentPdf = await deps.htmlToPdf(wrapDraftForPdf({ title: input.title, code: input.code, contentHtml: body, institutional: input.institutional, sheet: input.draft.format === 'xlsx', extraCss: sheetCss, sheetLayout }));
   let header: SgcInstitutionalHeaderData | null = null;
   let headerTemplate: { id: number; code: string; version: number } | null = null;
   if (input.institutional) {
