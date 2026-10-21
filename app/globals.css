@@ -6586,6 +6586,26 @@ a.portal-th__contactos-boton--enlace:focus-visible {
   flex-shrink: 0;
 }
 
+/* Día sin nada (Cristian, 2026-10-21): el aviso y, debajo, los próximos (título como el del día en el calendario). */
+.portal-th__hoy-vacio {
+  margin: 0 0 12px;
+  color: var(--pth-tinta-2);
+  font-size: 0.88rem;
+}
+
+.portal-th__hoy-vacio--pista {
+  margin: 0;
+  color: var(--pth-tinta-3);
+  font-size: 0.78rem;
+}
+
+.portal-th__hoy-subtitulo {
+  margin: 0 0 8px;
+  color: var(--pth-azul);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
 /* Barra que se vacía en 15 s. */
 .portal-th__hoy-tiempo {
   height: 4px;
