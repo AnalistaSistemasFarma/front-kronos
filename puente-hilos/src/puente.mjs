@@ -2,6 +2,7 @@
 /**
  * PUENTE DE HILOS — SynerLink (proyectos) ⇄ Claude Code, una sesión por hilo.
  * F1 piloto (Play, solo PRUEBAS), aprobado por Nicolás Rivera el 2026-10-17.
+ * Producción con instancia propia y separada (HILOS_ENTORNO=produccion), 2026-10-20.
  *
  * Es un SERVICIO APARTE del bot vivo: no toca su launchd, su .env, su config
  * ni su sesión. Se prende y se apaga solo (launchd/…plist.example).
@@ -19,8 +20,26 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cargarConfig, ErrorConfig } from './config.mjs';
+import { cargarConfig, ErrorConfig, sellarEntorno } from './config.mjs';
+import { appendFileSync } from 'node:fs';
+import {
+  cargarReposPorProyecto,
+  validarReposPorProyecto,
+  entornoCodigo,
+  leerTokenGithub,
+  permisosCodigo,
+  prepararHomeCodigo,
+  hooksCodigo,
+  prepararWorktrees,
+  sandboxCodigo,
+  textoCodigo,
+  textoIndiceRepos,
+  reposDelTurno,
+  registrarReposSolicitados,
+  turnoAutorizado,
+} from './codigo.mjs';
 import { ColaHilos } from './cola.mjs';
+import { carpetasLectura, jsonParaCodigo, leerArchivoManual, obtenerPoliticaApi, prohibidasLectura, resolverPolitica, textoPolitica } from './politica.mjs';
 import { crearClienteSynerLink } from './synerlink.mjs';
 import { armarArgumentos, armarArgumentosSugerencia, armarEntorno, correrTurno, etiquetaHerramienta } from './claude.mjs';
 import {
@@ -51,8 +70,14 @@ import {
 
 const MAX_RESPUESTA = 40_000;
 
+/** Etiqueta del entorno en CADA línea del log; se fija al cargar la configuración. */
+let etiquetaEntorno = '';
+export function fijarEtiquetaEntorno(entorno) {
+  etiquetaEntorno = entorno ? `[${entorno}]` : '';
+}
+
 function log(...partes) {
-  console.log(new Date().toISOString(), '[puente-hilos]', ...partes);
+  console.log(new Date().toISOString(), '[puente-hilos]', ...(etiquetaEntorno ? [etiquetaEntorno] : []), ...partes);
 }
 
 /** El `claude` instalado debe soportar lo que el puente exige; si no, no arranca. */
@@ -77,8 +102,100 @@ export function verificarBandeja(respuesta, agenteEsperado) {
   }
 }
 
+/** Quita el token de GitHub de cualquier texto antes de publicarlo o registrarlo. */
+export function ocultarSecreto(texto, secreto) {
+  if (!secreto || typeof texto !== 'string') return texto;
+  return texto.split(secreto).join('[token oculto]');
+}
+
+/**
+ * Acceso al código del turno (nivel 2). Devuelve null si el proyecto no tiene
+ * repos vinculados. Si algo falla, el turno corre SIN código (falla cerrado).
+ */
+export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lote, agenteNombre, conEquipo = false, cargar = cargarReposPorProyecto, preparar = prepararWorktrees, elegirRepos = reposDelTurno, leerToken = leerTokenGithub, prepararHome = prepararHomeCodigo }) {
+  if (!cfg.rutaReposPorProyecto) return null;
+  const vinculos = cargar(cfg.rutaReposPorProyecto);
+  const proyecto = vinculos?.proyectos.get(idProject);
+  if (!proyecto) return null;
+  const token = leerToken(cfg.githubTokenArchivo);
+  const homeCodigo = prepararHome(cfg.hilosDir, agenteNombre);
+  const envGit = { PATH: cfg.path, HOME: homeCodigo, GH_TOKEN: token, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', LANG: 'en_US.UTF-8' };
+  // Bajo demanda (proyectos con muchos repos): solo se montan los que hacen falta.
+  const disponibles = proyecto.repos.map((n) => vinculos.repos.get(n));
+  const aMontar = elegirRepos({ proyecto, repos: vinculos.repos, lote, rutas });
+  const { autorizado, autores } = turnoAutorizado(lote, vinculos.operadores);
+  if (aMontar.length === 0) {
+    // Ningún repo nombrado todavía: el turno va SIN código (sin Bash, sin token),
+    // pero con el índice para que Orus sepa qué hay y cómo pedirlo.
+    return { soloIndice: true, disponibles, bajoDemanda: true, bloque: textoIndiceRepos({ disponibles, montados: [] }) };
+  }
+  const worktrees = preparar({ repos: aMontar, rutas, idProject, idConversation, envGit });
+  const permisos = permisosCodigo({ repos: worktrees, autorizado, pases: proyecto.pases });
+  return {
+    ...permisos,
+    autorizado,
+    autores,
+    worktrees,
+    token,
+    sandbox: sandboxCodigo({ worktrees, homeReal: cfg.home, homeCodigo, hilosDir: cfg.hilosDir, secretos: [cfg.githubTokenArchivo] }),
+    entorno: entornoCodigo({ token, homeCodigo }),
+    hooks: hooksCodigo(),
+    disponibles,
+    bajoDemanda: proyecto.bajoDemanda,
+    bloque:
+      textoCodigo({ worktrees, autorizado, puedePasar: permisos.puedePasar, autores, operadores: vinculos.operadores, equipo: conEquipo }) +
+      (proyecto.bajoDemanda ? `\n${textoIndiceRepos({ disponibles, montados: worktrees })}` : ''),
+  };
+}
+
+/**
+ * Permisos de los agentes del turno (2026-10-20, ver politica.mjs). Nunca lanza:
+ * ante cualquier duda, «ninguno». Devuelve la política resuelta, las carpetas de
+ * lectura y el bloque para el encabezado de sistema.
+ */
+export async function politicaDelTurno({ cfg, synerlink, idConversation, idProject, leerArchivo = leerArchivoManual, existe }) {
+  const api = await obtenerPoliticaApi(synerlink, idConversation, idProject);
+  let archivo = null;
+  let errorArchivo = null;
+  // El archivo manual se relee en CADA turno (vincular un repo no exige reiniciar).
+  const ruta = cfg.rutaReposPorProyecto ?? ((process.env.HILOS_REPOS_POR_PROYECTO ?? '').trim() || null);
+  try {
+    archivo = leerArchivo(ruta);
+  } catch (e) {
+    errorArchivo = e;
+  }
+  const politica = resolverPolitica({ api, archivo, idProject, errorArchivo: api.estado === 'bd' ? null : errorArchivo });
+  const lectura = carpetasLectura(politica, archivo, existe ? { existe } : undefined);
+  return {
+    politica,
+    api,
+    archivo,
+    errorArchivo,
+    lectura: lectura.dirs.length > 0 ? { dirs: lectura.dirs.map((d) => d.ruta), prohibidas: prohibidasLectura(lectura.dirs) } : null,
+    bloque: textoPolitica({ politica, lectura }),
+  };
+}
+
 export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
   const enProceso = new Set();
+
+  /** Auditoría local de cada comando y cada negación en turnos con código (sin el token). */
+  function auditarCodigo(idConversation, evento, codigo) {
+    try {
+      const filas = [];
+      if (evento?.type === 'assistant') {
+        for (const c of evento.message?.content ?? []) {
+          if (c?.type === 'tool_use' && c.name === 'Bash') filas.push({ tipo: 'bash', comando: String(c.input?.command ?? '').slice(0, 2000) });
+        }
+      } else if (evento?.type === 'result' && Array.isArray(evento.permission_denials) && evento.permission_denials.length > 0) {
+        for (const d of evento.permission_denials) filas.push({ tipo: 'negado', herramienta: d?.tool_name, entrada: JSON.stringify(d?.tool_input ?? {}).slice(0, 2000) });
+      }
+      for (const f of filas) {
+        const linea = JSON.stringify({ ts: new Date().toISOString(), idConversation, autorizado: codigo.puedePasar, ...f });
+        appendFileSync(path.join(cfg.hilosDir, 'auditoria-codigo.jsonl'), `${ocultarSecreto(linea, codigo.token)}\n`, { mode: 0o600 });
+      }
+    } catch {}
+  }
 
   async function atender(claveConv, lote) {
     const idConversation = Number(claveConv);
@@ -114,13 +231,58 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
         avisoEquipo = '_Nota: el equipo de subagentes del proyecto no se pudo cargar; respondí sin él._\n\n';
       }
       const topes = topesEfectivos(equipo, cfg);
+      // Permisos de los agentes (2026-10-20): SynerLink manda; si no hay política, el archivo manual; si no, «ninguno».
+      const politicaTurno = await politicaDelTurno({ cfg, synerlink, idConversation, idProject: contexto.project.idProject });
+      if (politicaTurno.api.estado === 'error') log(`conversación ${idConversation}: no se pudo leer la política (${politicaTurno.api.error}); turno sin código.`);
+      if (politicaTurno.errorArchivo) log(`conversación ${idConversation}: archivo de repos inválido:`, politicaTurno.errorArchivo.message);
+      if (politicaTurno.politica.nivel > 0) {
+        log(`conversación ${idConversation}: permisos ${politicaTurno.politica.codeLevel} (origen ${politicaTurno.politica.origen}; repos ${politicaTurno.politica.repos.map((r) => r.slug).join(', ')}).`);
+      }
+      // Acceso al código (nivel 2): repos vinculados al proyecto, worktree propio y
+      // pases solo si TODOS los mensajes del turno son de un operador autorizado.
+      // QUÉ repos y con qué pases lo dice la política resuelta (jsonParaCodigo: la
+      // misma forma de repos-por-proyecto.json); el clon y los workflows, el archivo local.
+      let codigo = null;
+      let indiceRepos = null; // proyecto bajo demanda: índice de repos y registro de los que Orus pida
+      let avisoCodigo = '';
+      const jsonCodigo = jsonParaCodigo(politicaTurno.politica, politicaTurno.archivo, contexto.project.idProject);
+      try {
+        codigo = jsonCodigo
+          ? prepararCodigoTurno({ cfg, idProject: contexto.project.idProject, idConversation, rutas, lote, agenteNombre, conEquipo: Boolean(equipo), cargar: () => validarReposPorProyecto(jsonCodigo) })
+          : null;
+        if (codigo?.soloIndice) {
+          indiceRepos = codigo;
+          codigo = null;
+          log(`conversación ${idConversation}: código bajo demanda, ningún repo montado todavía (${indiceRepos.disponibles.length} disponibles).`);
+        } else if (codigo) {
+          if (codigo.bajoDemanda) indiceRepos = codigo;
+          log(
+            `conversación ${idConversation}: código ${codigo.worktrees.map((w) => `${w.nombre}@${w.rama}`).join(', ')}; pases ${codigo.puedePasar ? 'AUTORIZADOS' : 'no'} (autores: ${codigo.autores.join(', ')}).`
+          );
+        }
+      } catch (e) {
+        codigo = null;
+        log(`conversación ${idConversation}: no se pudo preparar el acceso al código, el turno va sin él:`, e.message);
+        avisoCodigo = '_Nota: no pude preparar el acceso al código del proyecto en este turno; respondí sin él. Tecnología quedó con el registro._\n\n';
+      }
+      // El equipo se arma DESPUÉS del código: sus subagentes leen el worktree y usan git de lectura.
       const equipoTurno = equipo
         ? {
             bloque: textoEquipoPrincipal({ equipo, topes }),
-            agentes: armarAgentes({ equipo, perfil, agente: agenteNombre, proyecto: contexto.project, topes }),
+            agentes: armarAgentes({ equipo, perfil, agente: agenteNombre, proyecto: contexto.project, topes, codigo }),
           }
         : null;
-      escribirContexto({ rutas, agente: agenteNombre, contexto, perfil, instruccionesEn: cfg.instruccionesEn, equipoTurno });
+      escribirContexto({
+        rutas,
+        agente: agenteNombre,
+        contexto,
+        perfil,
+        instruccionesEn: cfg.instruccionesEn,
+        equipoTurno,
+        bloqueCodigo: codigo?.bloque ?? indiceRepos?.bloque ?? '',
+        // Con worktree (o con el índice de repos bajo demanda), las reglas del código ya dicen todo; sin él, el bloque de la política (lectura o «ninguno»).
+        politicaTurno: codigo || indiceRepos ? { ...politicaTurno, bloque: '' } : politicaTurno,
+      });
       limpiarPropuestas(rutas);
       let vigia = null;
 
@@ -135,21 +297,30 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
           // Con equipo, el tope de gasto POR PEDIDO es obligatorio.
           presupuestoUsd: equipo ? topes.presupuestoUsd : cfg.presupuestoUsd,
           equipo: equipo ? argumentosEquipo({ equipo, rutaAgentes: rutas.agentes }) : null,
+          codigo,
+          // La lectura de los clones solo si el turno NO lleva worktree ni índice bajo demanda (el código ya lo maneja).
+          lectura: codigo || indiceRepos ? null : politicaTurno.lectura,
         });
         let ultimaEtiqueta = null;
         let ultimosActivos = '';
-        vigia = equipo ? crearVigia({ equipo, perfil }) : null;
+        vigia = equipo ? crearVigia({ equipo, perfil, conCodigo: Boolean(codigo) }) : null;
+        // Para reproducir el turno tal cual: los argumentos exactos (sin secretos: el entorno no va).
+        try {
+          writeFileSync(path.join(rutas.puente, 'ultimo-comando.json'), JSON.stringify({ ts: new Date().toISOString(), bin: cfg.claudeBin, cwd: rutas.cwd, args }, null, 2), { mode: 0o600 });
+        } catch {}
         return correr({
           bin: cfg.claudeBin,
           args,
-          env: armarEntorno(cfg, equipo ? topes : null),
+          env: armarEntorno(cfg, equipo ? topes : null, codigo?.entorno ?? null),
           cwd: rutas.cwd,
           prompt: armarPrompt(lote, adjuntos),
           perfil,
           equipo,
+          codigo,
           vigia,
           timeoutMs: cfg.timeoutTurnoMs,
           alEvento: (evento, acc) => {
+            if (codigo) auditarCodigo(idConversation, evento, codigo);
             // La tablita de sub-agentes del chat: se actualiza cuando cambia
             // el conjunto de subagentes que están trabajando.
             if (vigia) {
@@ -231,7 +402,17 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
           notaPropuestas = '\n\n⚠️ No pude registrar mis propuestas en el Cronograma por un error. Intente de nuevo.';
         }
       }
-      cuerpo = (aviso + avisoEquipo + cuerpo).slice(0, MAX_RESPUESTA - notaPropuestas.length) + notaPropuestas;
+      cuerpo = (aviso + avisoEquipo + avisoCodigo + cuerpo).slice(0, MAX_RESPUESTA - notaPropuestas.length) + notaPropuestas;
+      if (codigo) cuerpo = ocultarSecreto(cuerpo, codigo.token);
+      // Bajo demanda: los repos que Orus nombró en su respuesta se montan desde el siguiente turno.
+      if (indiceRepos && r.resultado?.ok) {
+        try {
+          const pedidos = registrarReposSolicitados(rutas, r.resultado.texto, indiceRepos.disponibles);
+          if (pedidos.length) log(`conversación ${idConversation}: repos nombrados por el asistente, se montan en el siguiente turno: ${pedidos.join(', ')}.`);
+        } catch (e) {
+          log(`conversación ${idConversation}: no se pudieron registrar los repos pedidos:`, e.message);
+        }
+      }
 
       await synerlink.responder(idConversation, cuerpo);
 
@@ -387,7 +568,10 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
 
 async function principal() {
   const cfg = cargarConfig(process.env);
+  fijarEtiquetaEntorno(cfg.entorno);
   verificarClaude(cfg.claudeBin);
+  mkdirSync(cfg.hilosDir, { recursive: true, mode: 0o700 });
+  if (sellarEntorno(cfg)) log(`carpeta ${cfg.hilosDir} sellada como ${cfg.entorno} (${cfg.url}).`);
   mkdirSync(cfg.configClaudeDir, { recursive: true, mode: 0o700 });
 
   const synerlink = crearClienteSynerLink({ url: cfg.url, llave: cfg.llave });
@@ -460,7 +644,8 @@ function esPuntoDeEntrada() {
 
 if (esPuntoDeEntrada()) {
   principal().catch((err) => {
-    console.error(new Date().toISOString(), '[puente-hilos] no arranca:', err?.message ?? err);
+    const entorno = (process.env.HILOS_ENTORNO ?? '').trim();
+    console.error(new Date().toISOString(), '[puente-hilos]', ...(entorno ? [`[${entorno}]`] : []), 'no arranca:', err?.message ?? err);
     process.exit(1);
   });
 }

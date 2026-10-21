@@ -1,49 +1,38 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useMediaQuery } from '@mantine/hooks';
-import {
-  Alert,
-  Box,
-  Button,
-  Center,
-  Drawer,
-  Loader,
-  Modal,
-  ScrollArea,
-  Stack,
-  Tabs,
-  Text,
-  TextInput,
-  UnstyledButton,
-} from '@mantine/core';
-import { IconAlertCircle, IconMovie, IconSearch, IconSticker } from '@tabler/icons-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Box, Button, Center, Loader, ScrollArea, Stack, Text, TextInput, UnstyledButton } from '@mantine/core';
+import { IconSearch } from '@tabler/icons-react';
 import { chatGetJson, isAbortError } from '../../lib/chat/client';
-import type { MediaParaEnviar } from './useChatConversation';
 
 /**
- * SELECTOR de stickers y GIF del chat (2026-10-20).
+ * Piezas compartidas del selector de stickers y GIF del chat (2026-10-20).
  *
- * En el celular es una HOJA INFERIOR (Drawer abajo), como el resto de las
- * acciones del chat en pantalla chica; en escritorio, un Modal como el de
- * «Multimedia y archivos» (ChatMediaPanel). Se carga solo al abrirse: nada de
- * sondeo.
+ * El selector en sí vive ahora en ChatExpresiones (panel Emoji | Stickers |
+ * GIF con botón propio al lado del clip, como Telegram y WhatsApp — pedido de
+ * Nicolás, 2026-10-20 12:16). Aquí quedan el catálogo (UNA petición por
+ * pestaña del navegador, nunca un sondeo) y la pestaña de GIF.
  *
  * La pestaña de GIF solo aparece si el servidor tiene llave de GIPHY
  * (`gif: true` en /api/chat/stickers). Las imágenes de GIF llegan por el proxy
  * firmado de SynerLink: el navegador nunca habla con GIPHY.
  */
 
-type StickerItem = {
+export type StickerItem = {
   key: string;
   provider: 'gss' | 'empresa';
+  /** Paquete (2026-10-20): 'animados' (Noto), 'gss' (estático) o 'empresa'. */
+  pack?: 'animados' | 'gss' | 'empresa';
   code?: string;
   idSticker?: number;
   label: string;
   keywords: string;
   src: string;
+  animated?: boolean;
+  poster?: string | null;
 };
-type Catalogo = { gif: boolean; stickers: StickerItem[] };
+export type PaqueteItem = { id: 'animados' | 'gss' | 'empresa'; nombre: string };
+export type Catalogo = { gif: boolean; packs?: PaqueteItem[]; stickers: StickerItem[] };
 type GifItem = { id: string; title: string; width: number | null; height: number | null; previewUrl: string };
 type PaginaGif = { items: GifItem[]; next: number | null };
 
@@ -51,7 +40,7 @@ type PaginaGif = { items: GifItem[]; next: number | null };
 let catalogoEnCache: Catalogo | null = null;
 let catalogoEnCurso: Promise<Catalogo | null> | null = null;
 
-function pedirCatalogo(): Promise<Catalogo | null> {
+export function pedirCatalogo(): Promise<Catalogo | null> {
   if (catalogoEnCache) return Promise.resolve(catalogoEnCache);
   if (!catalogoEnCurso) {
     catalogoEnCurso = chatGetJson<Catalogo>('/api/chat/stickers')
@@ -67,8 +56,13 @@ function pedirCatalogo(): Promise<Catalogo | null> {
   return catalogoEnCurso;
 }
 
+/** El catálogo si ya se pidió en esta pestaña (para pintar sin esperar). */
+export function catalogoEnMemoria(): Catalogo | null {
+  return catalogoEnCache;
+}
+
 /**
- * ¿Hay GIF? Para el texto del menú del clip («Stickers» o «Stickers y GIF»).
+ * ¿Hay GIF? Decide si el panel muestra la pestaña de GIF.
  * UNA petición por pestaña del navegador (queda en memoria), nunca un sondeo.
  */
 export function useGifDisponible(activo: boolean): boolean {
@@ -84,163 +78,8 @@ export function useGifDisponible(activo: boolean): boolean {
   return gif;
 }
 
-export default function ChatMediaPicker({
-  abierto,
-  onCerrar,
-  onEnviar,
-  pestanaInicial = 'stickers',
-}: {
-  abierto: boolean;
-  onCerrar: () => void;
-  onEnviar: (media: MediaParaEnviar) => void;
-  pestanaInicial?: 'stickers' | 'gif';
-}) {
-  const enCelular = useMediaQuery('(max-width: 768px)');
-  const [catalogo, setCatalogo] = useState<Catalogo | null>(catalogoEnCache);
-  const [errorCatalogo, setErrorCatalogo] = useState<string | null>(null);
-  const [pestana, setPestana] = useState<string>(pestanaInicial);
-  const [filtro, setFiltro] = useState('');
-
-  useEffect(() => {
-    if (!abierto || catalogo) return;
-    let vivo = true;
-    setErrorCatalogo(null);
-    void pedirCatalogo().then((data) => {
-      if (!vivo) return;
-      if (!data) {
-        setErrorCatalogo('No se pudieron cargar los stickers.');
-        return;
-      }
-      setCatalogo(data);
-    });
-    return () => {
-      vivo = false;
-    };
-  }, [abierto, catalogo]);
-
-  useEffect(() => {
-    if (abierto) setPestana(pestanaInicial);
-  }, [abierto, pestanaInicial]);
-
-  const stickers = useMemo(() => {
-    const q = filtro.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
-    const lista = catalogo?.stickers ?? [];
-    if (!q) return lista;
-    return lista.filter((s) =>
-      `${s.label} ${s.keywords}`.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().includes(q)
-    );
-  }, [catalogo, filtro]);
-
-  const enviarSticker = (s: StickerItem) => {
-    if (s.provider === 'gss' && s.code) onEnviar({ kind: 'sticker', code: s.code });
-    else if (s.provider === 'empresa' && s.idSticker) onEnviar({ kind: 'sticker', idSticker: s.idSticker });
-  };
-
-  const conGif = Boolean(catalogo?.gif);
-  const altoLista = enCelular ? 'min(52dvh, 420px)' : 380;
-
-  const contenido = (
-    <Stack gap='sm' data-testid='chat-media-picker'>
-      {errorCatalogo && (
-        <Alert icon={<IconAlertCircle size={16} />} color='red' radius='md' py={6}>
-          <Text size='xs'>{errorCatalogo}</Text>
-        </Alert>
-      )}
-      <Tabs value={conGif ? pestana : 'stickers'} onChange={(v) => setPestana(v ?? 'stickers')} keepMounted={false}>
-        <Tabs.List grow>
-          <Tabs.Tab value='stickers' leftSection={<IconSticker size={16} />}>
-            Stickers
-          </Tabs.Tab>
-          {conGif && (
-            <Tabs.Tab value='gif' leftSection={<IconMovie size={16} />}>
-              GIF
-            </Tabs.Tab>
-          )}
-        </Tabs.List>
-
-        <Tabs.Panel value='stickers' pt='sm'>
-          <Stack gap='xs'>
-            <TextInput
-              size='sm'
-              placeholder='Buscar sticker'
-              value={filtro}
-              onChange={(e) => setFiltro(e.currentTarget.value)}
-              leftSection={<IconSearch size={14} />}
-              aria-label='Buscar sticker'
-              styles={{ input: { fontSize: 16 } }}
-            />
-            <ScrollArea h={altoLista} type='auto' offsetScrollbars>
-              {!catalogo && !errorCatalogo ? (
-                <Center py='xl'>
-                  <Loader size='sm' />
-                </Center>
-              ) : stickers.length === 0 ? (
-                <Text size='xs' ta='center' className='chat-text-muted' py='md'>
-                  No hay stickers con ese nombre.
-                </Text>
-              ) : (
-                <div className='chat-sticker-grid'>
-                  {stickers.map((s) => (
-                    <UnstyledButton
-                      key={s.key}
-                      className='chat-sticker-grid__btn'
-                      onClick={() => enviarSticker(s)}
-                      aria-label={`Enviar sticker ${s.label}`}
-                      title={s.label}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element -- imagen local o del propio servidor */}
-                      <img src={s.src} alt={s.label} loading='lazy' width={88} height={88} />
-                    </UnstyledButton>
-                  ))}
-                </div>
-              )}
-            </ScrollArea>
-          </Stack>
-        </Tabs.Panel>
-
-        {conGif && (
-          <Tabs.Panel value='gif' pt='sm'>
-            <PestanaGif alto={altoLista} onElegir={(id) => onEnviar({ kind: 'gif', id })} />
-          </Tabs.Panel>
-        )}
-      </Tabs>
-    </Stack>
-  );
-
-  if (enCelular) {
-    return (
-      <Drawer
-        opened={abierto}
-        onClose={onCerrar}
-        position='bottom'
-        size='auto'
-        radius='lg'
-        padding='md'
-        title={conGif ? 'Stickers y GIF' : 'Stickers'}
-        classNames={{ content: 'chat-hoja' }}
-        closeButtonProps={{ 'aria-label': 'Cerrar' }}
-      >
-        {contenido}
-      </Drawer>
-    );
-  }
-  return (
-    <Modal
-      opened={abierto}
-      onClose={onCerrar}
-      title={conGif ? 'Stickers y GIF' : 'Stickers'}
-      size='lg'
-      radius='md'
-      centered
-      closeButtonProps={{ 'aria-label': 'Cerrar' }}
-    >
-      {contenido}
-    </Modal>
-  );
-}
-
 /** Pestaña de GIF: populares al abrir y búsqueda con espera de 350 ms. */
-function PestanaGif({ alto, onElegir }: { alto: number | string; onElegir: (id: string) => void }) {
+export function PestanaGif({ alto, onElegir }: { alto: number | string; onElegir: (id: string) => void }) {
   const [q, setQ] = useState('');
   const [items, setItems] = useState<GifItem[]>([]);
   const [siguiente, setSiguiente] = useState<number | null>(null);

@@ -120,6 +120,8 @@ model Company {
   agentCompanies  AgentCompany[]
   chatGroups      ChatConversation[]
   chatProjects    ChatProject[]
+  // Configuración de «Proyectos» por empresa (2026-10-20): qué agentes trabajan en proyectos.
+  chatProjectAgentConfigs ChatProjectAgentConfig[]
   // Stickers propios de la empresa en el chat (2026-10-20; la pantalla de carga queda para después).
   chatStickers    ChatSticker[]
   // SGC documental — configuración de activación por empresa (esquema `sgc`).
@@ -693,6 +695,8 @@ model Agent {
   projects         ChatProject[]
   // Módulo «Proyectos» (2026-10-18): proyectos donde está designado.
   projectDesignations ChatProjectAgent[]
+  // Configuración de «Proyectos» por empresa (2026-10-20).
+  projectConfigs      ChatProjectAgentConfig[]
 
   @@unique([code])
   @@map("agent")
@@ -895,10 +899,73 @@ model ChatProject {
   subagents     ChatProjectSubagent[]
   teamRequests  ChatProjectTeamRequest[]
   subagentRuns  ChatProjectSubagentRun[]
+  // Permisos de los agentes (2026-10-20): nivel de código, repos y autorizadores de pases.
+  agentPolicy   ChatProjectAgentPolicy?
+  policyRepos   ChatProjectAgentPolicyRepo[]
 
   @@index([id_agent, archived])
   @@index([id_company])
   @@map("chat_project")
+  @@schema("dbo")
+}
+
+/// CONFIGURACIÓN de «Proyectos» por empresa (2026-10-20, pedido de Nicolás
+/// Rivera: «los permisos y la configuración de Proyectos se manejan desde la
+/// interfaz, no por detrás»). Una fila por (empresa, agente): si el agente
+/// puede trabajar en proyectos de ESA empresa y con qué perfiles de conectores.
+///
+/// COMPATIBILIDAD HACIA ATRÁS (lib/proyectos/config-agentes-rules.ts):
+///   - empresa SIN filas  → manda CHAT_PROJECTS_AGENTS del .env, como antes;
+///   - empresa CON filas  → manda la tabla (sin fila = no habilitado).
+/// Al guardar el PRIMER cambio de una empresa, lo que decía el .env para los
+/// agentes de esa empresa se copia a la tabla en la misma transacción, para
+/// que nada cambie sin que alguien lo decida.
+///
+/// Tabla NUEVA y aparte: si el código sale antes que el DDL, todo sigue con el
+/// .env (la lectura reconoce «la tabla no existe» y cae al .env).
+model ChatProjectAgentConfig {
+  id_config  Int      @id @default(autoincrement())
+  id_company Int
+  id_agent   Int
+  enabled    Boolean  @default(false)
+  /// Claves del catálogo de perfiles separadas por coma (lib/chat/projects-rules.ts).
+  /// NULL = los del .env para ese agente.
+  profiles   String?  @db.NVarChar(400)
+  /// Motivo del ÚLTIMO cambio (el historial completo está en chat_project_agent_config_log).
+  reason     String?  @db.NVarChar(500)
+  updated_by String?  @db.NVarChar(1000)
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now())
+
+  company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  agent   Agent   @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_company, id_agent], map: "chat_project_agent_config_company_agent")
+  @@index([id_agent], map: "chat_project_agent_config_id_agent_idx")
+  @@map("chat_project_agent_config")
+  @@schema("dbo")
+}
+
+/// REGISTRO de cambios de la configuración de «Proyectos» (2026-10-20). Una
+/// fila por cambio, con el antes, el después y el motivo. Inmutable (trigger
+/// TR_chat_project_agent_config_log_inmutable). Sin llaves foráneas a
+/// propósito: el historial sobrevive a lo que pase con agentes y usuarios.
+model ChatProjectAgentConfigLog {
+  id_log          Int      @id @default(autoincrement())
+  id_company      Int
+  id_agent        Int
+  /// 'cambio' (desde la pantalla) | 'copia_env' (copia inicial del .env).
+  action          String   @db.NVarChar(20)
+  enabled_before  Boolean?
+  enabled_after   Boolean
+  profiles_before String?  @db.NVarChar(400)
+  profiles_after  String?  @db.NVarChar(400)
+  reason          String   @db.NVarChar(500)
+  changed_by      String?  @db.NVarChar(1000)
+  changed_at      DateTime @default(now())
+
+  @@index([id_company, changed_at], map: "chat_project_agent_config_log_company_idx")
+  @@map("chat_project_agent_config_log")
   @@schema("dbo")
 }
 
@@ -1291,6 +1358,103 @@ model ChatProjectTeamEvent {
 
   @@index([id_project, created_at])
   @@map("chat_project_team_event")
+  @@schema("dbo")
+}
+
+/// PERMISOS DE LOS AGENTES de un proyecto (2026-10-20, pedido de Nicolás
+/// Rivera: «cuando creemos el proyecto podamos elegir qué permisos tienen»).
+/// UNA fila por proyecto; la comparten todos sus agentes. Reglas en
+/// lib/proyectos/permisos-agentes-rules.ts.
+///
+/// SIN FILA = nivel «ninguno» (o, en el puente, lo que diga su archivo manual
+/// repos-por-proyecto.json mientras exista). Tabla NUEVA: si el código sale
+/// antes que el DDL, todos los proyectos siguen en «ninguno».
+model ChatProjectAgentPolicy {
+  id_policy        Int      @id @default(autoincrement())
+  id_project       Int      @unique(map: "chat_project_agent_policy_project")
+  /// 'ninguno' | 'lectura' | 'desarrollo' | 'desarrollo_pases' (CHECK en la base).
+  code_level       String   @default("ninguno") @db.NVarChar(20)
+  /// Correos de quienes autorizan pases, separados por coma. Solo en 'desarrollo_pases'.
+  deploy_approvers String?  @db.NVarChar(2000)
+  /// Conectores adicionales (fase 2, diseñado): JSON. Hoy siempre NULL.
+  connectors       String?  @db.NVarChar(2000)
+  /// Motivo del ÚLTIMO cambio (el historial está en chat_project_agent_policy_log).
+  reason           String?  @db.NVarChar(500)
+  updated_by       String?  @db.NVarChar(1000)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @default(now())
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("chat_project_agent_policy")
+  @@schema("dbo")
+}
+
+/// CATÁLOGO de repositorios que se pueden vincular a un proyecto (2026-10-20).
+/// Lo administra SOLO la administración de SynerLink. No se borra: se desactiva
+/// (un repo desactivado deja de ofrecerse y el API del puente lo omite).
+/// Dónde está el CLON en cada Mac no vive aquí: es del puente (repos-por-proyecto.json).
+model ChatProjectRepoCatalog {
+  id_repo           Int      @id @default(autoincrement())
+  slug              String   @unique(map: "chat_project_repo_catalog_slug") @db.NVarChar(40)
+  name              String   @db.NVarChar(120)
+  /// «dueño/repositorio» en GitHub.
+  github            String   @db.NVarChar(200)
+  branch_testing    String   @db.NVarChar(100)
+  branch_production String   @db.NVarChar(100)
+  description       String?  @db.NVarChar(500)
+  active            Boolean  @default(true)
+  created_by        String?  @db.NVarChar(1000)
+  updated_by        String?  @db.NVarChar(1000)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @default(now())
+
+  projects ChatProjectAgentPolicyRepo[]
+
+  @@map("chat_project_repo_catalog")
+  @@schema("dbo")
+}
+
+/// Repositorios vinculados a la política de un proyecto (2026-10-20).
+model ChatProjectAgentPolicyRepo {
+  id_policy_repo Int      @id @default(autoincrement())
+  id_project     Int
+  id_repo        Int
+  added_by       String?  @db.NVarChar(1000)
+  added_at       DateTime @default(now())
+
+  project ChatProject            @relation(fields: [id_project], references: [id_project], onDelete: NoAction, onUpdate: NoAction)
+  repo    ChatProjectRepoCatalog @relation(fields: [id_repo], references: [id_repo], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_project, id_repo], map: "chat_project_agent_policy_repo_project_repo")
+  @@index([id_repo], map: "chat_project_agent_policy_repo_id_repo_idx")
+  @@map("chat_project_agent_policy_repo")
+  @@schema("dbo")
+}
+
+/// REGISTRO de cambios de los permisos de los agentes y del catálogo de repos
+/// (2026-10-20): quién, cuándo, antes, después y motivo. Inmutable (trigger
+/// TR_chat_project_agent_policy_log_inmutable). Sin llaves foráneas a propósito:
+/// el historial sobrevive a lo que pase con proyectos, repos y usuarios.
+model ChatProjectAgentPolicyLog {
+  id_log           Int      @id @default(autoincrement())
+  /// 'proyecto' | 'catalogo'
+  scope            String   @db.NVarChar(20)
+  id_project       Int?
+  id_repo          Int?
+  /// 'crear' | 'cambiar' | 'activar' | 'desactivar'
+  action           String   @db.NVarChar(20)
+  /// JSON con los valores ANTES (NULL al crear).
+  before_value     String?  @db.NVarChar(Max)
+  /// JSON con los valores DESPUÉS.
+  after_value      String   @db.NVarChar(Max)
+  reason           String   @db.NVarChar(500)
+  changed_by       String?  @db.NVarChar(1000)
+  changed_by_email String?  @db.NVarChar(320)
+  changed_at       DateTime @default(now())
+
+  @@index([id_project, changed_at], map: "chat_project_agent_policy_log_project_idx")
+  @@map("chat_project_agent_policy_log")
   @@schema("dbo")
 }
 

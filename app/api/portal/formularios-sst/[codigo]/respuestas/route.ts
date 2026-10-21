@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { identificar } from '@/lib/portal/acceso';
 import { FormacionStorageError, FormacionStorageNoConfigurado } from '@/lib/portal/formacion-storage';
 import { registrarErrorSinDatos } from '@/lib/portal/formulario-servidor';
-import { LIMITE_TABLA_SST, formularioSst } from '@/lib/portal/formularios-sst';
+import { formularioSstActual } from '@/lib/portal/formularios-sst-catalogo';
+import { LIMITE_TABLA_SST } from '@/lib/portal/formularios-sst';
 import { puedeVerRespuestasSst } from '@/lib/portal/formularios-sst-permisos';
 import { listarEnviosSst } from '@/lib/portal/formularios-sst-servidor';
 
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const quien = await identificar(request);
   if (!quien) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
   if (!puedeVerRespuestasSst(quien.correo)) return NextResponse.json({ error: 'No tiene permiso para ver estas respuestas.' }, { status: 403 });
-  const formulario = formularioSst((await params).codigo);
+  const formulario = await formularioSstActual((await params).codigo);
   if (!formulario) return NextResponse.json({ error: 'Formulario no encontrado.' }, { status: 404 });
   try {
     return NextResponse.json(await listarEnviosSst(formulario, LIMITE_TABLA_SST), { headers: SIN_CACHE });

@@ -5,7 +5,7 @@ import { readClientOrigin } from '../../../../../../lib/chat/client-origin';
 import { gifConfig, obtenerGifParaEnviar } from '../../../../../../lib/chat/gif';
 import { crearMensajeConMedia, type MediaNueva } from '../../../../../../lib/chat/message-media';
 import { ExtrasNoDisponibles, tablaAusente } from '../../../../../../lib/chat/message-extras';
-import { stickerGss } from '../../../../../../lib/chat/stickers-catalog';
+import { stickerPropio } from '../../../../../../lib/chat/stickers-paquetes';
 import {
   badRequest,
   forbidden,
@@ -20,6 +20,7 @@ import {
  *
  *   POST /api/chat/conversations/12/media
  *   { "kind": "sticker", "code": "pulgar-arriba" }        sticker propio de GSS
+ *   { "kind": "sticker", "code": "noto-aplausos" }        sticker animado (Noto)
  *   { "kind": "sticker", "idSticker": 7 }                  sticker de la empresa
  *   { "kind": "gif", "id": "<id de GIPHY>" }               GIF
  *   (+ "replyTo": <id> opcional, igual que un mensaje)
@@ -60,7 +61,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     let media: MediaNueva;
     if (body.kind === 'sticker' && body.code !== undefined) {
-      const s = stickerGss(body.code);
+      // Paquete propio estático (SVG) o animado (WebP de Noto, `noto-…`).
+      const s = stickerPropio(body.code);
       if (!s) return badRequest('Ese sticker no existe.');
       media = { kind: 'sticker', provider: 'gss', externalId: s.code, idSticker: null, title: s.label, mediaUrl: null, width: 160, height: 160 };
     } else if (body.kind === 'sticker' && body.idSticker !== undefined) {

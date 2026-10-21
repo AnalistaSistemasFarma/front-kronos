@@ -14,6 +14,7 @@ import {
   IconLink,
   IconLock,
   IconMessages,
+  IconShieldLock,
   IconTimeline,
   IconUsers,
   IconUsersGroup,
@@ -36,6 +37,7 @@ import {
 import { ListaConversaciones, SeccionArchivos, SeccionDetalles, SeccionMiembros, SeccionVinculados } from './secciones';
 import SeccionCronograma from './cronograma/SeccionCronograma';
 import SeccionEquipo from './equipo/SeccionEquipo';
+import SeccionPermisos from './permisos/SeccionPermisos';
 import { AgentesApilados, AvisoArriba, BadgeRol, CONSULTA_ESCRITORIO, Encabezado, EsqueletoFilas, type Aviso } from './ui';
 import css from './proyectos.module.css';
 import { useEstadosAgentes } from './useEstadosAgentes';
@@ -59,8 +61,9 @@ import type { EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente'
  */
 
 // «Equipo» (F2, 2026-10-18): los subagentes del proyecto, junto al cronograma.
-type Seccion = 'conversaciones' | 'cronograma' | 'equipo' | 'vinculados' | 'archivos' | 'miembros' | 'detalles';
-const SECCIONES: Seccion[] = ['conversaciones', 'cronograma', 'equipo', 'vinculados', 'archivos', 'miembros', 'detalles'];
+// «Permisos» (2026-10-20): qué pueden hacer los agentes con el código del proyecto.
+type Seccion = 'conversaciones' | 'cronograma' | 'equipo' | 'vinculados' | 'archivos' | 'miembros' | 'permisos' | 'detalles';
+const SECCIONES: Seccion[] = ['conversaciones', 'cronograma', 'equipo', 'vinculados', 'archivos', 'miembros', 'permisos', 'detalles'];
 
 function esSeccion(v: string | null): v is Seccion {
   return v !== null && (SECCIONES as string[]).includes(v);
@@ -242,6 +245,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
     vinculados: proyecto ? proyecto.links.emails.length + proyecto.links.requests.length : null,
     archivos: proyecto?.files.length ?? null,
     miembros: proyecto?.members.length ?? null,
+    permisos: null,
     detalles: null,
   };
   const etiqueta: Record<Seccion, string> = {
@@ -251,6 +255,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
     vinculados: 'Vinculados',
     archivos: 'Archivos',
     miembros: 'Miembros',
+    permisos: 'Permisos',
     detalles: 'Detalles',
   };
   const icono: Record<Seccion, React.ReactNode> = {
@@ -260,6 +265,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
     vinculados: <IconLink size={18} />,
     archivos: <IconFile size={18} />,
     miembros: <IconUsers size={18} />,
+    permisos: <IconShieldLock size={18} />,
     detalles: <IconInfoCircle size={18} />,
   };
 
@@ -280,6 +286,8 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
         return <SeccionCronograma proyecto={proyecto} version={version} avisar={avisar} onVincularSolicitud={() => setModal('solicitud')} />;
       case 'equipo':
         return <SeccionEquipo proyecto={proyecto} version={version} avisar={avisar} />;
+      case 'permisos':
+        return <SeccionPermisos proyecto={proyecto} version={version} avisar={avisar} />;
       case 'vinculados':
         return (
           <SeccionVinculados

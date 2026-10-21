@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Checkbox, Group, Modal, Stack, Text, TextInput, Textarea } from '@mantine/core';
+import { Alert, Button, Checkbox, Divider, Group, Modal, Stack, Text, TextInput, Textarea } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { IconAlertCircle, IconFolderPlus } from '@tabler/icons-react';
+import { IconAlertCircle, IconFolderPlus, IconInfoCircle, IconShieldLock } from '@tabler/icons-react';
 import SgcSelect from '../sgc/SgcSelect';
 import AgentAvatar from '../chat/AgentAvatar';
-import { apiSend } from './api';
+import { apiGet, apiSend } from './api';
 import { CONSULTA_ESCRITORIO } from './ui';
 import {
   MAX_PROJECT_AGENTS,
@@ -15,6 +15,9 @@ import {
   MAX_PROJECT_NAME_CHARS,
 } from '../../lib/chat/projects-rules';
 import type { ListaProyectosDto } from '../../lib/proyectos/tipos';
+import type { OpcionesPermisosDto } from '../../lib/proyectos/permisos-agentes-tipos';
+import { MAX_MOTIVO, MIN_MOTIVO } from '../../lib/proyectos/permisos-agentes-rules';
+import FormPermisosAgentes, { BadgeNivel, PERMISOS_POR_DEFECTO, permisosListos, type ValorPermisos } from './permisos/FormPermisosAgentes';
 import css from './proyectos.module.css';
 
 /**
@@ -43,6 +46,10 @@ export default function NuevoProyectoModal({
   const [instrucciones, setInstrucciones] = useState('');
   // Equipo de subagentes (F2, 2026-10-18): «de primeras», el asistente propone un equipo al crear.
   const [sugerirEquipo, setSugerirEquipo] = useState(true);
+  // Permisos de los agentes (2026-10-20): valor seguro por defecto, «ninguno» y sin repos.
+  const [opcionesPermisos, setOpcionesPermisos] = useState<OpcionesPermisosDto | null>(null);
+  const [permisos, setPermisos] = useState<ValorPermisos>(PERMISOS_POR_DEFECTO);
+  const [motivoPermisos, setMotivoPermisos] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,11 +61,31 @@ export default function NuevoProyectoModal({
     setDescripcion('');
     setInstrucciones('');
     setSugerirEquipo(true);
+    setPermisos(PERMISOS_POR_DEFECTO);
+    setMotivoPermisos('');
     setError(null);
     setEmpresa(primera ? String(primera.idCompany) : null);
   }, [opened, datos]);
 
   const designables = useMemo(() => (empresa ? datos.designables[empresa] ?? [] : []), [datos, empresa]);
+
+  // Quién puede escoger los permisos y en qué empresas (la reja real está en el servidor).
+  useEffect(() => {
+    if (!opened) return;
+    const ctrl = new AbortController();
+    void apiGet<OpcionesPermisosDto>('/api/proyectos/permisos-agentes', '', ctrl.signal).then((r) => {
+      if (r.ok) setOpcionesPermisos(r.data);
+    });
+    return () => ctrl.abort();
+  }, [opened]);
+  const puedeEscogerPermisos = empresa !== null && (opcionesPermisos?.editableCompanies ?? []).includes(Number(empresa));
+  // Otra empresa, otros permisos: se vuelve al valor seguro.
+  useEffect(() => {
+    setPermisos(PERMISOS_POR_DEFECTO);
+    setMotivoPermisos('');
+  }, [empresa]);
+  const conCodigo = puedeEscogerPermisos && permisos.codeLevel !== 'ninguno';
+  const permisosOk = !puedeEscogerPermisos || (permisosListos(permisos) && (!conCodigo || motivoPermisos.trim().length >= MIN_MOTIVO));
 
   // Al cambiar de empresa se reinicia la elección: un asistente de otra empresa no sirve.
   useEffect(() => {
@@ -75,7 +102,7 @@ export default function NuevoProyectoModal({
     setPerfil((actual) => (actual && perfilesComunes.some((p) => p.key === actual) ? actual : perfilesComunes[0]?.key ?? null));
   }, [perfilesComunes]);
 
-  const listo = nombre.trim().length > 0 && empresa !== null && agentes.length > 0 && perfil !== null;
+  const listo = nombre.trim().length > 0 && empresa !== null && agentes.length > 0 && perfil !== null && permisosOk;
 
   const crear = async () => {
     if (!listo || !empresa || !perfil) return;
@@ -84,7 +111,17 @@ export default function NuevoProyectoModal({
     const r = await apiSend<{ idProject: number; teamRequested?: boolean }>(
       'POST',
       '/api/proyectos',
-      { name: nombre, idCompany: Number(empresa), description: descripcion, agentCodes: agentes, profile: perfil, instructions: instrucciones, suggestTeam: sugerirEquipo },
+      {
+        name: nombre,
+        idCompany: Number(empresa),
+        description: descripcion,
+        agentCodes: agentes,
+        profile: perfil,
+        instructions: instrucciones,
+        suggestTeam: sugerirEquipo,
+        // Solo quien puede escogerlos los envía; los demás quedan en «ninguno».
+        ...(puedeEscogerPermisos ? { agentPolicy: { ...permisos, reason: conCodigo ? motivoPermisos : undefined } } : {}),
+      },
       'No se pudo crear el proyecto.'
     );
     setEnviando(false);
@@ -209,6 +246,45 @@ export default function NuevoProyectoModal({
           description='Propondrá de 3 a 6 especialistas para las actividades del proyecto. Usted los aprueba, edita o descarta en la sección «Equipo»; nada trabaja sin su aprobación.'
           data-testid='proyectos-sugerir-equipo'
         />
+        <Divider my={4} />
+        <Stack gap='sm' data-testid='proyectos-permisos-agentes'>
+          <Group gap={8}>
+            <IconShieldLock size={18} />
+            <Text fw={600} size='sm'>
+              Permisos de los agentes
+            </Text>
+          </Group>
+          {puedeEscogerPermisos && opcionesPermisos ? (
+            <>
+              <FormPermisosAgentes valor={permisos} onChange={setPermisos} catalogo={opcionesPermisos.catalog} operadores={opcionesPermisos.operators} />
+              {conCodigo && (
+                <Textarea
+                  label='Motivo'
+                  description='Por qué los agentes de este proyecto necesitan este acceso. Queda en el registro de cambios.'
+                  value={motivoPermisos}
+                  onChange={(e) => setMotivoPermisos(e.currentTarget.value)}
+                  maxLength={MAX_MOTIVO}
+                  autosize
+                  minRows={2}
+                  maxRows={4}
+                  required
+                  data-testid='proyectos-permisos-motivo'
+                />
+              )}
+            </>
+          ) : (
+            <Alert color='gray' radius='md' icon={<IconInfoCircle size={18} />} py={8} data-testid='proyectos-permisos-solo-lectura'>
+              <Group gap={8} wrap='wrap' mb={4}>
+                <BadgeNivel nivel='ninguno' />
+                <Text size='sm'>Solo conversación e información del proyecto.</Text>
+              </Group>
+              <Text size='xs' c='dimmed'>
+                El acceso a código lo da la administración de SynerLink o quien tenga el permiso «Permisos de agentes en Proyectos» en esta empresa. Se puede
+                cambiar después, en la sección «Permisos» del proyecto.
+              </Text>
+            </Alert>
+          )}
+        </Stack>
         <Group justify='flex-end' gap='sm' className={escritorio ? undefined : css.pieModal}>
           <Button variant='default' onClick={onClose}>
             Cancelar
