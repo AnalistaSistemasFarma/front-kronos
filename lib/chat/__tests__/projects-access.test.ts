@@ -14,6 +14,7 @@ const findConversation = vi.hoisted(() => vi.fn());
 const moduleCount = vi.hoisted(() => vi.fn());
 const findDesignation = vi.hoisted(() => vi.fn());
 const chatAccess = vi.hoisted(() => vi.fn());
+const configRows = vi.hoisted(() => vi.fn());
 
 vi.mock('../../prisma', () => ({
   prisma: {
@@ -21,6 +22,8 @@ vi.mock('../../prisma', () => ({
     chatConversation: { findFirst: findConversation },
     subprocessUserCompany: { count: moduleCount },
     chatProjectAgent: { findFirst: findDesignation },
+    // Configuración del módulo por empresa (2026-10-20): vacía = manda CHAT_PROJECTS_AGENTS, como antes.
+    chatProjectAgentConfig: { findMany: configRows },
   },
 }));
 vi.mock('../access', () => ({ CHAT_MODULE_URL: '/process/chat', getChatAccess: chatAccess, getChatAgentAccess: vi.fn() }));
@@ -32,6 +35,7 @@ import {
   writeAccessForAgent,
 } from '../projects';
 import { __resetProjectAgentsCache } from '../projects-rules';
+import { invalidarConfigProyectos } from '../../proyectos/config-agentes';
 
 const ANA = { id: 'u-ana', email: 'ana@gsslatam.com' };
 const EMPRESA = 3;
@@ -50,6 +54,8 @@ const conAgente = (empresas: number[]) => ({
 beforeEach(() => {
   vi.clearAllMocks();
   __resetProjectAgentsCache();
+  invalidarConfigProyectos();
+  configRows.mockResolvedValue([]);
   process.env.CHAT_PROJECTS_AGENTS = '{"play":["comex-latam","olp"]}';
   moduleCount.mockResolvedValue(1);
   findDesignation.mockResolvedValue(designado());
@@ -131,6 +137,19 @@ describe('escribirle a un agente', () => {
     process.env.CHAT_PROJECTS_AGENTS = '';
     __resetProjectAgentsCache();
     expect((await writeAccessForAgent(ANA, acceso('owner'), PLAY)).ok).toBe(false);
+  });
+
+  it('configuración del módulo (2026-10-20): con la empresa configurada manda la tabla, no el .env', async () => {
+    configRows.mockResolvedValue([{ id_company: EMPRESA, id_agent: PLAY, enabled: false, profiles: 'comex-latam', agent: { code: 'play' } }]);
+    expect((await writeAccessForAgent(ANA, acceso('owner'), PLAY)).ok).toBe(false);
+    invalidarConfigProyectos();
+    configRows.mockResolvedValue([{ id_company: EMPRESA, id_agent: PLAY, enabled: true, profiles: 'olp', agent: { code: 'play' } }]);
+    // Habilitado, pero sin el perfil del proyecto (comex-latam) en esta empresa.
+    expect((await writeAccessForAgent(ANA, acceso('owner'), PLAY)).ok).toBe(false);
+    invalidarConfigProyectos();
+    configRows.mockResolvedValue([{ id_company: 99, id_agent: PLAY, enabled: false, profiles: null, agent: { code: 'play' } }]);
+    // Otra empresa configurada no cambia nada en ésta: sigue el .env.
+    expect((await writeAccessForAgent(ANA, acceso('owner'), PLAY)).ok).toBe(true);
   });
 
   it('la designación se busca en ESTE proyecto', async () => {

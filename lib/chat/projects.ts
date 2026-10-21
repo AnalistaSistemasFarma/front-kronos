@@ -19,8 +19,9 @@
  *
  * ESCRIBIRLE A UN AGENTE (writeAccessForAgent): además de la puerta,
  *   (d) rol dueño o editor;
- *   (e) el agente sigue DESIGNADO, activo y con el módulo habilitado
- *       (CHAT_PROJECTS_AGENTS) para el perfil del proyecto;
+ *   (e) el agente sigue DESIGNADO, activo y con el módulo habilitado para
+ *       el perfil del proyecto EN LA EMPRESA DEL PROYECTO (configuración del
+ *       módulo, lib/proyectos/config-agentes.ts; sin configurar, el .env);
  *   (f) la persona tiene ESE agente asignado en la empresa del proyecto. El
  *       agente trae conectores de SAP: no debe ser una puerta a datos que la
  *       persona no tiene (opción más segura; decisión pendiente de Nicolás).
@@ -40,12 +41,12 @@ import type { EstadoAgenteProyectoDto } from '../proyectos/estado-agente';
 import {
   capabilitiesFor,
   profileLabel,
-  profilesFor,
-  projectsEnabledFor,
   PROJECTS_MODULE_URL,
   roleFromDb,
   type ProjectRole,
 } from './projects-rules';
+import { cargarConfigProyectos } from '../proyectos/config-agentes';
+import type { ConfigProyectos } from '../proyectos/config-agentes-rules';
 
 /** Proyecto resuelto para una persona que SÍ puede entrar. */
 export interface ProjectAccess {
@@ -154,13 +155,14 @@ interface AgenteDesignado {
 function evaluarAgente(
   agente: AgenteDesignado | null,
   project: Pick<ProjectAccess, 'idCompany' | 'profile' | 'role'>,
-  agentesDeLaPersona: Map<number, Set<number>>
+  agentesDeLaPersona: Map<number, Set<number>>,
+  config: ConfigProyectos
 ): WriteAccess {
   if (!capabilitiesFor(project.role).write) {
     return { ok: false, motivo: 'Usted es lector en este proyecto: puede leer las conversaciones, pero no escribir.' };
   }
   if (!agente) return { ok: false, motivo: 'Este asistente ya no está en el proyecto: la conversación quedó de solo lectura.' };
-  if (!agente.isActive || !projectsEnabledFor(agente.code) || !profilesFor(agente.code).includes(project.profile)) {
+  if (!agente.isActive || !config.perfiles(agente.code, project.idCompany).includes(project.profile)) {
     return { ok: false, motivo: 'Este asistente no tiene proyectos habilitados en este momento.' };
   }
   if (!agentesDeLaPersona.get(agente.idAgent)?.has(project.idCompany)) {
@@ -187,7 +189,7 @@ export async function writeAccessForAgent(user: ProjectUser, project: ProjectAcc
   });
   const agente = fila ? { idAgent: fila.agent.id_agent, code: fila.agent.code, isActive: fila.agent.is_active } : null;
   const asignados = capabilitiesFor(project.role).write ? await agentesAsignados(user.email) : new Map();
-  return evaluarAgente(agente, project, asignados);
+  return evaluarAgente(agente, project, asignados, await cargarConfigProyectos());
 }
 
 /**
@@ -238,11 +240,12 @@ export async function assertAgentProjectConversation(
     select: {
       id: true,
       agent: { select: { code: true } },
-      project: { select: { id_project: true, name: true, profile: true } },
+      project: { select: { id_project: true, name: true, profile: true, id_company: true } },
     },
   });
   if (!conv || !conv.project) return null;
-  if (!projectsEnabledFor(conv.agent.code) || !profilesFor(conv.agent.code).includes(conv.project.profile)) return null;
+  const config = await cargarConfigProyectos();
+  if (!config.perfiles(conv.agent.code, conv.project.id_company).includes(conv.project.profile)) return null;
 
   return { id: conv.id, idProject: conv.project.id_project, projectName: conv.project.name };
 }
@@ -301,11 +304,13 @@ export async function designableAgents(email: string, profile?: string): Promise
   const acceso = await getChatAccess(email);
   const out = new Map<number, AgenteDesignable[]>();
   if (!acceso.canUseChat) return out;
+  const config = await cargarConfigProyectos();
   for (const a of acceso.agents) {
-    if (!projectsEnabledFor(a.code)) continue;
-    const perfiles = profilesFor(a.code);
-    if (profile && !perfiles.includes(profile)) continue;
+    // Habilitado y perfiles POR EMPRESA (configuración del módulo; sin configurar, el .env).
     for (const c of a.companies) {
+      const perfiles = config.perfiles(a.code, c.idCompany);
+      if (perfiles.length === 0) continue;
+      if (profile && !perfiles.includes(profile)) continue;
       const lista = out.get(c.idCompany) ?? [];
       lista.push({
         idAgent: a.idAgent,
@@ -462,10 +467,11 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
   const caps = capabilitiesFor(acceso.role);
   const asignados = caps.write && !p.archived ? await agentesAsignados(user.email) : new Map<number, Set<number>>();
   const designados = new Map(p.agents.map((x) => [x.agent.id_agent, x.agent]));
+  const config = await cargarConfigProyectos();
   const motivoDe = (idAgent: number) => {
     if (p.archived) return { ok: false as const, motivo: 'El proyecto está archivado.' };
     const a = designados.get(idAgent);
-    return evaluarAgente(a ? { idAgent: a.id_agent, code: a.code, isActive: a.is_active } : null, acceso, asignados);
+    return evaluarAgente(a ? { idAgent: a.id_agent, code: a.code, isActive: a.is_active } : null, acceso, asignados, config);
   };
 
   // Nombres de quienes crearon conversaciones o subieron archivos (una consulta).
@@ -497,7 +503,7 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
       const w = motivoDe(x.agent.id_agent);
       return {
         ...aAgenteMini(x.agent),
-        disponible: x.agent.is_active && projectsEnabledFor(x.agent.code),
+        disponible: x.agent.is_active && config.habilitado(x.agent.code, p.company.id_company),
         puedoEscribir: w.ok,
         motivo: w.ok ? null : w.motivo,
       };

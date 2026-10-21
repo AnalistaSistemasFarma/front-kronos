@@ -92,9 +92,9 @@ async function simular(page: Page, inicial: Estado = REPOSO) {
     const trabajando = actual.state !== 'idle' ? [dtoEstado(28, actual)] : [];
     return r.fulfill({ json: conDetalle ? { noLeidos: 0, mensajes: 0, items: [], trabajando } : { noLeidos: 0, mensajes: 0 } });
   });
-  await page.route(/\/api\/proyectos\/4(\?.*)?$/, (r) => r.fulfill({ json: { project: detalle(actual) } }));
+  await page.route(/\/api\/proyectos\/4(\?|$)/, (r) => r.fulfill({ json: { project: detalle(actual) } }));
   await page.route(/\/api\/proyectos\/4\/equipo/, (r) => r.fulfill({ json: { items: [] } }));
-  await page.route(/\/api\/proyectos(\?.*)?$/, (r) =>
+  await page.route(/\/api\/proyectos(\?|$)/, (r) =>
     r.fulfill({
       json: {
         companies: [EMPRESA],

@@ -67,12 +67,14 @@ import {
 import { isDeleteAttachmentsSubprocess } from '@/lib/attachments/access';
 import { isValentineWallSubprocess } from '@/lib/valentine/constants';
 import { describeSgcPermissionMarker, isSgcPermissionMarkerSubprocess } from '@/lib/sgc/constants';
+import { isProjectsConfigMarkerSubprocess, PROJECTS_CONFIG_MARKER_DESCRIPTION } from '@/lib/proyectos/config-agentes-rules';
 import { describeOtPermissionMarker, isOtPermissionMarkerSubprocess } from '@/lib/bitacora-proceso/constants';
 import {
   LOGIN_AUDIT_MARKER_DESCRIPTION,
   isLoginAuditMarkerSubprocess,
 } from '@/lib/auth/login-audit/constants';
 import LoginAuditPanel from '@/components/users/LoginAuditPanel';
+import { isPermisosAgentesMarkerSubprocess, PERMISOS_AGENTES_MARKER_DESCRIPTION } from '@/lib/proyectos/permisos-agentes-rules';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 
 const AVATAR_COLORS = ['blue', 'teal', 'violet', 'indigo', 'cyan', 'grape', 'orange'] as const;
@@ -2254,8 +2256,12 @@ function UserManagement() {
                                 )}
                                 {isHubHiddenRequestDashboardSubprocess(subprocess) ? (
                                   <Badge size='xs' variant='light' color='teal' mt={4}>
-                                    {isLoginAuditMarkerSubprocess(subprocess)
+                                    {isPermisosAgentesMarkerSubprocess(subprocess)
+                                      ? PERMISOS_AGENTES_MARKER_DESCRIPTION
+                                      : isLoginAuditMarkerSubprocess(subprocess)
                                       ? LOGIN_AUDIT_MARKER_DESCRIPTION
+                                      : isProjectsConfigMarkerSubprocess(subprocess)
+                                      ? PROJECTS_CONFIG_MARKER_DESCRIPTION
                                       : isSgcPermissionMarkerSubprocess(subprocess)
                                       ? describeSgcPermissionMarker(subprocess.subprocess_url)
                                       : isOtPermissionMarkerSubprocess(subprocess)

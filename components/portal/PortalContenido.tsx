@@ -13,6 +13,7 @@ import {
 import { filtrarExtensiones, type Extension } from '../../lib/portal/extensiones-datos';
 import { urlFormacion as urlPaginaFormacion, type OrigenPortal } from '../../lib/portal/formacion-navegacion';
 import HeinsohnVentana from './HeinsohnVentana';
+import LinksDiligenciar from './LinksDiligenciar';
 import OrganigramaVisor from './OrganigramaVisor';
 import PoliticasVisor, { TEXTOS_AYUDAS } from './PoliticasVisor';
 import PortalCalendario from './PortalCalendario';
@@ -650,6 +651,9 @@ export default function PortalContenido({
               </span>
             </a>
           </section>
+
+          {/* «LINKS PARA DILIGENCIAR EN CASO DE SER REQUERIDO» (Cristian, 2026-10-20): los formularios SST, bajo Formación. */}
+          <LinksDiligenciar />
         </div>
       </div>
 

@@ -43,6 +43,25 @@ Pedido de Nicolás Rivera: «para el tema de proyectos quiero que puedas, de pri
 
 **Apagar:** `HILOS_SUBAGENTES=no` en el `.env` del puente (todos los proyectos) o el interruptor «Encendido» de la sección Equipo (un proyecto).
 
+## Permisos de los agentes (2026-10-20)
+
+Pedido de Nicolás Rivera (13:18 COT): «va a tocar que cuando creemos el proyecto podamos elegir qué permisos tienen». Los permisos se escogen en SynerLink, en **Nuevo proyecto** o en la sección **Permisos** del proyecto. Solo los cambia la administración o quien tenga el subproceso `/process/proyectos/permisos-agentes` en la empresa. Cada cambio queda en un registro inmutable.
+
+Al iniciar **cada turno**, el puente pide `GET /api/chat/agent/projects/policy?idConversation=N` con su llave `scope: "projects"` (`src/politica.mjs`):
+
+| SynerLink responde | El turno usa |
+|---|---|
+| `source: "bd"` | la política de la base, **incluso «ninguno»** (así se revoca un acceso manual) |
+| `source: "sin-politica"` o 404 (SynerLink sin este API) | el archivo manual `HILOS_REPOS_POR_PROYECTO` (compatibilidad); sin archivo, «ninguno» |
+| cualquier otro error | «ninguno» en ese turno, con una nota en la respuesta |
+
+**Niveles:** 0 ninguno · 1 lectura · 2 desarrollo · 3 desarrollo + pases.
+
+- **Lectura:** los clones de los repos entran al turno con `--add-dir`, y el modelo los lee con Read, Glob y Grep. Sigue sin Bash y sin escribir fuera de `./trabajo`. Se niega leer `.env`, `.git`, `*.pem` y `*.key`.
+- **Desarrollo y pases:** los aplica el módulo de acceso al código (`src/codigo.mjs`: worktree, Bash acotado y sandbox). `jsonParaCodigo()` entrega la **misma forma** de `repos-por-proyecto.json` que ese módulo valida. Mientras el puente no tenga ese módulo, un proyecto en desarrollo trabaja en **lectura**, y así se le dice al modelo.
+- **Qué es de la base y qué es del Mac:** la base dice qué repos y qué nivel tiene cada proyecto, y quién autoriza los pases. El clon, los workflows de producción y las notas de despliegue siguen en la sección `repos` del archivo local. Un repo vinculado sin clon en este Mac se omite, y el turno lo dice. Los autorizadores de la base se cruzan con `operadoresPases` del archivo, que hace de techo del Mac.
+- Lo aplicado en el turno queda en `.puente/politica.json` de la carpeta del hilo.
+
 ## Cómo funciona
 
 1. Hace long-poll a `GET /api/chat/agent/inbox` con la llave de scope `projects` y `ack=false`.
@@ -128,9 +147,29 @@ puente-hilos/scripts/provisionar-agente.sh horus --llave-archivo /ruta/llave.tmp
 
 El script verifica Node ≥ 20, que `claude` soporte `--restricted`, que el `.env` del bot tenga `CLAUDE_CODE_OAUTH_TOKEN` (solo cuenta la línea, no la lee) y que no haya un `CLAUDE.md` por encima de `~/.puente-hilos`. No sobrescribe una instancia que ya exista y no toca el bot vivo.
 
-Del lado de SynerLink, el agente debe estar en `CHAT_PROJECTS_AGENTS` con perfiles del catálogo (`lib/chat/projects-rules.ts`). Un perfil desconocido deja **todo** el módulo apagado (falla cerrado), así que un perfil nuevo, como `gss`, se agrega al `.env` solo después de desplegar el código que lo trae.
+Del lado de SynerLink, el agente debe estar habilitado para Proyectos en la empresa: desde el 2026-10-20 eso se hace en Procesos → Proyectos → Configuración (por empresa, con motivo y registro); una empresa sin configurar sigue con `CHAT_PROJECTS_AGENTS` y perfiles del catálogo (`lib/chat/projects-rules.ts`). La pantalla solo deja cambiar agentes con llave `scope: "projects"`. Un perfil desconocido deja **todo** el módulo apagado (falla cerrado), así que un perfil nuevo, como `gss`, se agrega al `.env` solo después de desplegar el código que lo trae.
 
 **Apagar:** `launchctl kill SIGTERM …`, o Ctrl+C. Termina los turnos en curso y sale. Para apagar los proyectos en la aplicación, quite `CHAT_PROJECTS_AGENTS` y reinicie la app.
+
+## Producción (instancia aparte, 2026-10-20)
+
+Decisión de Nicolás Rivera (2026-10-20): «lo de prod en prod, lo de testing en testing». El puente de producción es **otra instancia**, nunca el de pruebas con otra URL:
+
+| | Pruebas | Producción |
+|---|---|---|
+| `HILOS_ENTORNO` | `pruebas` | `produccion` |
+| Carpeta (`HILOS_DIR`) | `~/.puente-hilos/<agente>-pruebas` | `~/.puente-hilos/<agente>-prod` |
+| Servicio launchd | `com.gss.puente-hilos.<agente>-pruebas` | `com.gss.puente-hilos.<agente>-prod` |
+| Llave (`scope: projects`) | `<agente>-hilos-pruebas` | `<agente>-hilos-prod` |
+
+Protecciones de `produccion` (todas fallan cerrado, ver `src/config.mjs`):
+
+- la URL no puede ser de un servidor de PRUEBAS conocido (`HOSTS_PRUEBAS`: la .230 y localhost);
+- `HILOS_CONFIRMAR_URL_PRODUCCION` debe repetir la URL exacta;
+- `HILOS_DIR` no puede contener «pruebas» ni «testing», ni ser una carpeta que ya usó otro puente (estado, hilos, sesiones o config) sin sello de producción;
+- al arrancar, la carpeta queda **sellada** (`.entorno.json`, 600) con el entorno y la URL. Un puente de pruebas no arranca sobre una carpeta sellada como producción, y producción no la reutiliza con otra URL. Así, pruebas y producción nunca comparten estado ni sesiones (el config aislado `claude-config` y las sesiones viven dentro de cada carpeta).
+
+Cada línea del log lleva el entorno: `[puente-hilos] [produccion] listo: agente …, entorno produccion, …`.
 
 ## Pruebas
 
@@ -139,3 +178,31 @@ cd puente-hilos && node --test test/*.test.mjs
 ```
 
 No tiene dependencias: usa Node 20 o superior y el `claude` instalado, que debe soportar `--restricted`. El puente lo verifica al arrancar.
+
+## Acceso al código (nivel 2, 2026-10-20)
+
+Aprobado por Nicolás Rivera el 2026-10-20 (13:14 COT, «sí, dale»; 13:15 COT, «sí puede subir a testing y prod, para eso es»). Código: `src/codigo.mjs`. Es **aditivo y opcional**: sin `HILOS_REPOS_POR_PROYECTO`, nada cambia.
+
+**Vincular repos a un proyecto:** `repos-por-proyecto.json` (ejemplo en `config/`), en la carpeta del puente. Se relee en **cada turno**: vincular o desvincular no exige reiniciar. Más adelante lo puede administrar SynerLink (por ejemplo, `project.repos` en el contexto) con el mismo validador (`validarReposPorProyecto`).
+
+**Muchos repos: montaje bajo demanda** (`"bajoDemanda": true` en el proyecto). Cada turno monta solo:
+- los repos que ya tienen worktree en la conversación;
+- los que nombra algún mensaje del turno (por nombre o «dueño/repo», con borde de palabra);
+- los que Orus nombró en su respuesta anterior (`.puente/repos-solicitados.json`).
+
+El resto aparece en un **índice** en el encabezado del turno (`textoIndiceRepos`), con su estado. Si no hay ninguno montado, el turno va **sin código** (sin Bash ni token), solo con el índice. Así no se hace `fetch` ni `--add-dir` de decenas de repos por turno. Cada repo puede llevar `descripcion` para el índice. Sin `bajoDemanda`, se montan todos, como antes.
+
+**Por turno, si el proyecto tiene repos:**
+
+1. El puente hace `git fetch` en el clon (`repos/<repo>`) y deja un **git worktree propio de la conversación** en `./codigo/<repo>`, rama `proyecto/<idProject>-c<idConversation>`, salida de `origin/<ramaPruebas>`. Solo trae lo versionado: los `.env` del repo no llegan.
+2. Instala en el clon un **hook pre-push** que rechaza todo destino que no sea `refs/heads/proyecto/*` y todo borrado de rama remota.
+3. Habilita **Bash** con reglas por prefijo (`git -C codigo/<repo> …`, `gh pr create/view/list/checks…`, `npm`/`npx`/`node`) y **niega** `ssh`, `scp`, `curl`, clientes SQL, `git push` con refspec «:», `--force`, `--no-verify`, `--delete`, `git config/remote/worktree/-c`, `gh api/auth/secret`, `gh pr merge --delete-branch`, etc.
+4. Corre los comandos del modelo dentro del **sandbox de Claude Code** (`failIfUnavailable`): red solo a GitHub y al registro de npm; escritura solo en la carpeta del hilo, el `.git` del clon y `home-codigo`; sin lectura de `.env` del puente, del token, `~/.ssh` ni la casa de los bots.
+5. **Pases** (`gh pr merge` y `gh workflow run <workflow de producción declarado> --ref <ramaProduccion>`): solo si el proyecto tiene `"pases": true` y **todos** los mensajes del turno los escribió un correo de `operadoresPases`, según `author.email` de la bandeja (sale de la sesión de SynerLink, no del texto). Si no, quedan negados por regla y el modelo lo rechaza.
+6. El token de GitHub entra al modelo **solo** como `GH_TOKEN` en esos turnos; la respuesta y la auditoría (`auditoria-codigo.jsonl`: cada comando Bash y cada negación) se publican con el token oculto.
+
+Gotchas de `claude` 2.1.299: `cd <dir> && git …` se niega siempre (por eso `git -C`); un patrón que **termina** en `:*` es el prefijo heredado, no «dos puntos y lo que sea»; `gh` (Go) necesita `sandbox.enableWeakerNetworkIsolation` para verificar TLS; el `credential-osxkeychain` del sistema se cuelga sin sesión gráfica (`GIT_CONFIG_NOSYSTEM=1` y ayudante propio).
+
+**Verificar sin escribir en hilos:** `scripts/simular-turno-codigo.mjs` (conversación ficticia ≥ 990000; `--sin-reglas-texto` prueba solo los controles duros).
+
+**Límites conocidos:** con `npm test`/`node`, el modelo puede correr código arbitrario dentro del sandbox, incluido usar `GH_TOKEN` contra GitHub. El control de pases es local (reglas y hook): GitHub no lo impone si el token tiene permisos de administrador y el repo no tiene protección de ramas.

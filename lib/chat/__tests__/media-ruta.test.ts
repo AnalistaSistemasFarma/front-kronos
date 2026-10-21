@@ -97,21 +97,42 @@ describe('stickers', () => {
     expect(json.notifiedAgents).toEqual([]);
   });
 
+  it('sticker ANIMADO (Noto): mismo contrato «[Sticker: …]», provider gss y WebP con cuadro fijo', async () => {
+    r.guard.mockResolvedValue(guardPersonas);
+    const res = await pedir({ kind: 'sticker', code: 'noto-aplausos' });
+    expect(res.status).toBe(201);
+    expect(r.mensajeCreate.mock.calls[0][0].data).toMatchObject({ body: '[Sticker: ¡Aplausos!]' });
+    expect(r.mediaCreate.mock.calls[0][0].data).toMatchObject({ kind: 'sticker', provider: 'gss', external_id: 'noto-aplausos' });
+    const json = await res.json();
+    expect(json.message.media).toMatchObject({
+      kind: 'sticker',
+      animated: true,
+      src: '/chat/stickers/noto/aplausos.webp',
+      poster: '/chat/stickers/noto/aplausos.poster.webp',
+    });
+  });
+
   it('un código que no está en el catálogo: 400 y nada escrito', async () => {
     r.guard.mockResolvedValue(guardPersonas);
     expect((await pedir({ kind: 'sticker', code: '../../etc/passwd' })).status).toBe(400);
+    expect((await pedir({ kind: 'sticker', code: 'noto-../../x' })).status).toBe(400);
     expect(r.mensajeCreate).not.toHaveBeenCalled();
   });
 
-  it('sticker de empresa: solo si está activo y es de una empresa de quien envía (o de todas)', async () => {
+  it('sticker de empresa: solo si está activo y es de una empresa de quien envía (o de todas), o uno PROPIO', async () => {
     r.guard.mockResolvedValue(guardPersonas);
     r.acceso.mockResolvedValue({ ok: true, empresas: [3] });
     r.stickerFindFirst.mockResolvedValue(null);
     expect((await pedir({ kind: 'sticker', idSticker: 12 })).status).toBe(400);
+    // «Mis stickers» (2026-10-21): los personales NO cuentan como «de todas las
+    // empresas»; solo el dueño (que no lo haya quitado) puede enviarlo.
     expect(r.stickerFindFirst.mock.calls[0][0].where).toEqual({
       id_sticker: 12,
       active: true,
-      OR: [{ id_company: null }, { id_company: { in: [3] } }],
+      OR: [
+        { personal: { is: null }, OR: [{ id_company: null }, { id_company: { in: [3] } }] },
+        { personal: { is: { id_user: 'yo', removed_at: null } } },
+      ],
     });
     r.stickerFindFirst.mockResolvedValue({ id_sticker: 12, label: 'Logo OLP' });
     const res = await pedir({ kind: 'sticker', idSticker: 12 });
@@ -128,6 +149,21 @@ describe('stickers', () => {
     r.guard.mockResolvedValue(guardPersonas);
     r.mensajeFindUnique.mockResolvedValue({ id_conversation: 99 });
     expect((await pedir({ kind: 'sticker', code: 'listo', replyTo: 5 })).status).toBe(400);
+  });
+
+  it('sin la tabla de «Mis stickers» (SQL aún no corrido): cae al filtro del #698 y el de empresa se envía', async () => {
+    r.guard.mockResolvedValue(guardPersonas);
+    r.acceso.mockResolvedValue({ ok: true, empresas: [3] });
+    r.stickerFindFirst
+      .mockRejectedValueOnce(Object.assign(new Error("Invalid object name 'dbo.chat_sticker_personal'"), { code: 'P2021', meta: { table: 'dbo.chat_sticker_personal' } }))
+      .mockResolvedValueOnce({ id_sticker: 12, label: 'Logo OLP' });
+    const res = await pedir({ kind: 'sticker', idSticker: 12 });
+    expect(res.status).toBe(201);
+    expect(r.stickerFindFirst.mock.calls[1][0].where).toEqual({
+      id_sticker: 12,
+      active: true,
+      OR: [{ id_company: null }, { id_company: { in: [3] } }],
+    });
   });
 
   it('sin la tabla nueva: 503 claro', async () => {
