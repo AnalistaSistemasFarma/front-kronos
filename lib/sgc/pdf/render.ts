@@ -49,16 +49,24 @@ const SHEET_SIDE_CM = 1.2;
  * de la página (nunca la agranda; mínimo 25 % para que siga legible).
  */
 export function sheetZoomCss(layout: SgcSheetLayout | undefined, usableWidthPt: number): string {
-  if (!layout) return '';
-  return layout.tables
-    .filter((t) => /^sgc-t-\d{1,3}$/.test(t.cls) && Number.isFinite(t.widthPt) && t.widthPt > usableWidthPt)
+  if (!layout || layout.fit === 'real') return '';
+  const tables = layout.tables.filter((t) => /^sgc-t-\d{1,3}$/.test(t.cls) && Number.isFinite(t.widthPt));
+  // 2026-10-21 (ajustes de la carga inicial): escala fija elegida por quien carga (25 % a 150 %).
+  if (layout.fit === 'escala') {
+    const pct = Number(layout.scalePct);
+    if (!Number.isInteger(pct) || pct < 25 || pct > 150) return '';
+    return tables.map((t) => `table.${t.cls}{zoom:${pct / 100}}`).join('\n');
+  }
+  return tables
+    .filter((t) => t.widthPt > usableWidthPt)
     .map((t) => `table.${t.cls}{zoom:${Math.max(0.25, Math.floor((usableWidthPt / t.widthPt) * 1000) / 1000)}}`)
     .join('\n');
 }
 
 export function wrapDraftForPdf(params: { title: string; code: string; contentHtml: string; institutional?: boolean; sheet?: boolean; extraCss?: string; sheetLayout?: SgcSheetLayout }): string {
   // El encabezado institucional y las casillas de firma están calculados para A4 vertical: ahí la hoja solo se escala.
-  const landscape = Boolean(params.sheet && params.sheetLayout?.landscape && !params.institutional);
+  const orientation = params.sheetLayout?.orientation ?? 'auto';
+  const landscape = Boolean(params.sheet && !params.institutional && (orientation === 'horizontal' || (orientation === 'auto' && params.sheetLayout?.landscape)));
   const page = params.institutional
     ? `@page { size: A4; margin: ${SGC_INSTITUTIONAL_OTHER_TOP_CM}cm 2cm 2.2cm 2cm; }
   @page :first { margin-top: ${SGC_INSTITUTIONAL_FIRST_TOP_CM}cm; }`

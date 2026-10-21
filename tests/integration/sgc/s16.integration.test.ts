@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PrismaClient } from '../../../app/generated/prisma';
 import { getSgcAccessForUser } from '../../../lib/sgc/access';
 import { SGC_PROCESS_NAME, SGC_SUBPROCESS_NAMES, SGC_SUBPROCESS_URLS } from '../../../lib/sgc/constants';
-import { startBulkUpload, uploadBulkFile } from '../../../lib/sgc/db/bulkUpload';
+import { inspectBulkExcel, previewBulkExcel, startBulkUpload, uploadBulkFile } from '../../../lib/sgc/db/bulkUpload';
 import { getCatalogs, saveCatalogEntry } from '../../../lib/sgc/db/catalogs';
 import type { SgcUploader } from '../../../lib/sgc/db/documents';
 import { buildHeaderTemplatePreview, headerTemplateForType, listHeaderTemplates, saveHeaderTemplate, setDefaultHeaderTemplate } from '../../../lib/sgc/db/headerTemplates';
@@ -17,6 +17,7 @@ import { confirmMasterListImport } from '../../../lib/sgc/db/masterListImport';
 import { createRequest, getRequestDetail, uploadAttachment } from '../../../lib/sgc/db/requests';
 import type { SgcMasterListRawRow } from '../../../lib/sgc/masterListImport';
 import type { SgcNotifier } from '../../../lib/sgc/notifications';
+import { normalizeSheetSettings } from '../../../lib/sgc/sheetSettings';
 
 /**
  * S16 contra un SQL Server REAL (efímero en CI): encabezado por tipo
@@ -215,5 +216,62 @@ describe.skipIf(!url)('SGC · S16 · encabezados por tipo y Excel con SQL Server
       ['cargado', 'xlsx'],
     ]);
     expect(await prisma.sgcDocument.count({ where: { id_company: CO, code: { in: ['OLP-GC-07', 'OLP-GC-07-FO01'] }, status: 'vigente' } })).toBe(2);
+  });
+  it('[SGC-REQ-165] 2026-10-21: un Excel de la carga inicial se inspecciona y se previsualiza sin guardar nada, y se carga con los ajustes de presentación elegidos', async () => {
+    const row = (n: number, values: SgcMasterListRawRow['values']): SgcMasterListRawRow => ({ rowNumber: n, values });
+    await confirmMasterListImport(prisma, CO, { fileName: 'listado-s16-ajustes.xlsx', rows: [row(2, { code: 'OLP-GC-07-FO02', title: 'Registro de inspección', documentTypeCode: 'FO', processCode: 'GC', versionNumber: '3', effectiveDate: '2024-06-01' })] }, actor(E.cal));
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Registro');
+    ws.getCell('A1').value = 'REGISTRO DE INSPECCIÓN';
+    ws.getCell('B1').value = 'Responsable';
+    ws.getCell('C1').value = 'COLUMNA AUXILIAR';
+    wb.addWorksheet('Instrucciones').getCell('A1').value = 'TEXTO DE AYUDA';
+    const bytes = new Uint8Array(await wb.xlsx.writeBuffer());
+    const file = { fileName: 'OLP-GC-07-FO02 Registro de inspección.xlsx', bytes };
+
+    const inspected = await inspectBulkExcel(prisma, CO, file);
+    expect(inspected.sheets.map((x) => [x.name, x.range])).toEqual([
+      ['Registro', 'A1:C1'],
+      ['Instrucciones', 'A1:A1'],
+    ]);
+    await expect(inspectBulkExcel(prisma, CO, { fileName: 'OLP-GC-07-FO02.pdf', bytes })).rejects.toMatchObject({ status: 415 });
+    // Un .xlsx dañado (es un ZIP pero no un libro de Excel) no se puede leer: 422, sin guardar nada.
+    const broken = { fileName: file.fileName, bytes: new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...new TextEncoder().encode('no es un libro')]) };
+    await expect(inspectBulkExcel(prisma, CO, broken)).rejects.toMatchObject({ status: 422 });
+    await expect(previewBulkExcel(prisma, CO, broken, null, actor(E.cal), convert)).rejects.toMatchObject({ status: 422 });
+    const chromeDown = { ...convert, htmlToPdf: async () => Promise.reject(new Error('Chrome caído')) };
+    await expect(previewBulkExcel(prisma, CO, file, null, actor(E.cal), chromeDown)).rejects.toMatchObject({ status: 422 });
+
+    const settings = { orientation: 'horizontal', fit: 'escala', scalePct: 80, sheets: [{ name: 'Registro', include: true, hiddenColumns: ['C'] }, { name: 'Instrucciones', include: false }] };
+    const before = htmls.length;
+    const docsBefore = await prisma.sgcDocument.count({ where: { id_company: CO, status: 'vigente' } });
+    const preview = await previewBulkExcel(prisma, CO, file, JSON.stringify(settings), actor(E.cal), convert);
+    expect(await pdfText(preview, 1)).toContain('VISTA PREVIA');
+    expect(htmls[before]).toContain('size: A4 landscape');
+    expect(htmls[before]).toContain('{zoom:0.8}');
+    expect(htmls[before]).not.toContain('COLUMNA AUXILIAR');
+    expect(htmls[before]).not.toContain('TEXTO DE AYUDA');
+    // La vista previa no guarda nada ni cambia el documento.
+    expect(await prisma.sgcDocument.count({ where: { id_company: CO, status: 'vigente' } })).toBe(docsBefore);
+    expect(await prisma.sgcDocument.findFirstOrThrow({ where: { id_company: CO, code: 'OLP-GC-07-FO02' } })).toMatchObject({ status: 'pendiente_archivo' });
+    await expect(previewBulkExcel(prisma, CO, file, JSON.stringify({ sheets: [{ name: 'No existe' }] }), actor(E.cal), convert)).rejects.toThrow(/No existe/);
+
+    const { idBulkUpload } = await startBulkUpload(prisma, CO, { filesTotal: 4 }, actor(E.cal));
+    const horizontal = normalizeSheetSettings({ orientation: 'horizontal' });
+    const asPdf = await uploadBulkFile(prisma, upload, CO, idBulkUpload, { fileName: 'OLP-GC-07-FO02 Registro de inspección.pdf', bytes: await pdfOf('pdf') }, actor(E.cal), new Date(), convert, horizontal);
+    expect(asPdf).toMatchObject({ status: 'error', error: expect.stringContaining('solo aplican a un Excel') });
+    const unreadable = await uploadBulkFile(prisma, upload, CO, idBulkUpload, broken, actor(E.cal), new Date(), convert, horizontal);
+    expect(unreadable).toMatchObject({ status: 'error', error: expect.stringContaining('No se pudo leer el Excel') });
+    const wrong = await uploadBulkFile(prisma, upload, CO, idBulkUpload, file, actor(E.cal), new Date(), convert, normalizeSheetSettings({ orientation: 'horizontal', sheets: [{ name: 'Otra hoja' }] }));
+    expect(wrong).toMatchObject({ status: 'error', error: expect.stringContaining('Otra hoja') });
+    const loaded = await uploadBulkFile(prisma, upload, CO, idBulkUpload, file, actor(E.cal), new Date(), convert, normalizeSheetSettings(settings));
+    expect(loaded).toMatchObject({ status: 'cargado', code: 'OLP-GC-07-FO02' });
+    expect(htmls[htmls.length - 1]).not.toContain('COLUMNA AUXILIAR');
+    const v = await prisma.sgcDocumentVersion.findUniqueOrThrow({ where: { id_document_version: loaded.idVersion! } });
+    expect(v.change_description).toContain('ajustes de presentación: hoja horizontal; escala 80 %; «Registro»: sin columnas C; sin la hoja «Instrucciones»');
+    expect(store.get(v.source_item_id!)).toEqual(bytes);
+    const audit = await prisma.sgcAuditLog.findFirstOrThrow({ where: { id_company: CO, action: 'documento.carga', entity_id: String(loaded.idDocument) }, orderBy: { id_audit_log: 'desc' } });
+    expect(JSON.parse(audit.after_json!).sheetSettings).toMatchObject({ orientation: 'horizontal', fit: 'escala', scalePct: 80 });
+    expect(audit.detail).toContain('ajustes de presentación');
   });
 });
