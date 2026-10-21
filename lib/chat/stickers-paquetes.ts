@@ -22,7 +22,7 @@ import {
   STICKERS_ANIMADOS,
 } from './stickers-animados-catalog';
 
-export type IdPaquete = 'animados' | 'gss' | 'empresa';
+export type IdPaquete = 'mios' | 'animados' | 'gss' | 'empresa';
 
 export interface PaqueteStickers {
   id: IdPaquete;
@@ -36,6 +36,9 @@ export const PAQUETES_PROPIOS: readonly PaqueteStickers[] = [
 ];
 
 export const PAQUETE_EMPRESA: PaqueteStickers = { id: 'empresa', nombre: 'De la empresa' };
+
+/** «Mis stickers» (2026-10-21): los que carga cada persona. */
+export const PAQUETE_MIOS: PaqueteStickers = { id: 'mios', nombre: 'Mis stickers' };
 
 export interface StickerPropioResuelto {
   code: string;

@@ -10,10 +10,19 @@ import type { ChatSessionUser } from './http';
  * Devuelve además las empresas del módulo de Chat (para los stickers propios
  * de cada empresa).
  */
-export async function accesoAMedia(user: ChatSessionUser): Promise<{ ok: boolean; empresas: number[] }> {
+export async function accesoAMedia(
+  user: ChatSessionUser
+): Promise<{ ok: boolean; empresas: number[]; nombresEmpresas: { id: number; nombre: string }[] }> {
   const acceso = await getChatAccess(user.email);
   const empresas = acceso.companies.map((c) => c.idCompany);
-  if (acceso.canUseChat) return { ok: true, empresas };
+  // Nombres de las empresas del módulo de Chat: a ellas se puede proponer un
+  // sticker propio («Mis stickers», 2026-10-21).
+  const nombresEmpresas = acceso.companies.map((c) => ({ id: c.idCompany, nombre: c.companyName }));
+  if (acceso.canUseChat) return { ok: true, empresas, nombresEmpresas };
   const proyectos = await projectModuleCompanies(user.id);
-  return { ok: proyectos.length > 0, empresas: [...new Set([...empresas, ...proyectos.map((p) => p.idCompany)])] };
+  return {
+    ok: proyectos.length > 0,
+    empresas: [...new Set([...empresas, ...proyectos.map((p) => p.idCompany)])],
+    nombresEmpresas,
+  };
 }

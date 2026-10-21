@@ -93,6 +93,9 @@ model User {
   // Reacciones y stickers del chat (2026-10-20).
   chatReactions             ChatMessageReaction[]
   chatStickersCreated       ChatSticker[]        @relation("ChatStickerCreator")
+  /// «Mis stickers» (2026-10-21).
+  chatStickersPersonales    ChatStickerPersonal[] @relation("ChatStickerPersonalOwner")
+  chatStickersRevisados     ChatStickerPersonal[] @relation("ChatStickerPersonalReviewer")
 
   @@map("user")
   @@schema("dbo")
@@ -124,6 +127,7 @@ model Company {
   chatProjectAgentConfigs ChatProjectAgentConfig[]
   // Stickers propios de la empresa en el chat (2026-10-20; la pantalla de carga queda para después).
   chatStickers    ChatSticker[]
+  chatStickersPropuestos ChatStickerPersonal[]
   // SGC documental — configuración de activación por empresa (esquema `sgc`).
   sgcCompanyConfig SgcCompanyConfig?
   // Órdenes de Trabajo (bitácora de proceso de planta, 2026-10-13).
@@ -2065,9 +2069,42 @@ model ChatSticker {
   company  Company?           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   creator  User               @relation("ChatStickerCreator", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   messages ChatMessageMedia[]
+  /// Si es un sticker PERSONAL («Mis stickers», 2026-10-21). Sin esta fila es de empresa (o de todas).
+  personal   ChatStickerPersonal? @relation("ChatStickerPersonalSticker")
+  /// Propuestas personales que se aprobaron como ESTE sticker de empresa.
+  aprobadoDe ChatStickerPersonal[] @relation("ChatStickerPersonalAprobado")
 
   @@index([id_company, active, sort_order], map: "chat_sticker_company_active_idx")
   @@map("chat_sticker")
+  @@schema("dbo")
+}
+
+/// «MIS STICKERS» del chat (2026-10-21): marca un sticker de chat_sticker como de UNA persona.
+/// La imagen sigue en chat_sticker (mismo CHECK de tipo y tamaño). Ver lib/chat/stickers-personales.ts.
+model ChatStickerPersonal {
+  id_sticker         Int       @id
+  id_user            String    @db.NVarChar(1000)
+  /// Lo quitó de «Mis stickers». Los mensajes ya enviados lo siguen mostrando.
+  removed_at         DateTime?
+  /// Empresa a la que se propuso. NULL = sin propuesta.
+  proposed_company   Int?
+  /// 'propuesto' | 'aprobado' | 'rechazado' (CHECK en la base).
+  proposal_state     String?   @db.NVarChar(20)
+  proposed_at        DateTime?
+  reviewed_by        String?   @db.NVarChar(1000)
+  reviewed_at        DateTime?
+  /// Copia aprobada como sticker de la empresa.
+  id_sticker_company Int?
+
+  sticker        ChatSticker  @relation("ChatStickerPersonalSticker", fields: [id_sticker], references: [id_sticker], onDelete: NoAction, onUpdate: NoAction)
+  owner          User         @relation("ChatStickerPersonalOwner", fields: [id_user], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  company        Company?     @relation(fields: [proposed_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  reviewer       User?        @relation("ChatStickerPersonalReviewer", fields: [reviewed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  stickerEmpresa ChatSticker? @relation("ChatStickerPersonalAprobado", fields: [id_sticker_company], references: [id_sticker], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_user, removed_at], map: "chat_sticker_personal_user_idx")
+  @@index([proposal_state, proposed_company], map: "chat_sticker_personal_propuesta_idx")
+  @@map("chat_sticker_personal")
   @@schema("dbo")
 }
 
