@@ -251,13 +251,13 @@ describe.skipIf(!url)('SGC · S16 · encabezados por tipo y Excel con SQL Server
     await expect(previewBulkExcel(prisma, CO, file, JSON.stringify({ sheets: [{ name: 'No existe' }] }), actor(E.cal), convert)).rejects.toThrow(/No existe/);
 
     const { idBulkUpload } = await startBulkUpload(prisma, CO, { filesTotal: 2 }, actor(E.cal));
-    const wrong = await uploadBulkFile(prisma, upload, CO, idBulkUpload, file, actor(E.cal), new Date(), convert, normalizeSheetSettings({ sheets: [{ name: 'Otra hoja' }] }));
+    const wrong = await uploadBulkFile(prisma, upload, CO, idBulkUpload, file, actor(E.cal), new Date(), convert, normalizeSheetSettings({ orientation: 'horizontal', sheets: [{ name: 'Otra hoja' }] }));
     expect(wrong).toMatchObject({ status: 'error', error: expect.stringContaining('Otra hoja') });
     const loaded = await uploadBulkFile(prisma, upload, CO, idBulkUpload, file, actor(E.cal), new Date(), convert, normalizeSheetSettings(settings));
     expect(loaded).toMatchObject({ status: 'cargado', code: 'OLP-GC-07-FO02' });
     expect(htmls[htmls.length - 1]).not.toContain('COLUMNA AUXILIAR');
     const v = await prisma.sgcDocumentVersion.findUniqueOrThrow({ where: { id_document_version: loaded.idVersion! } });
-    expect(v.change_description).toContain('ajustes de presentación: hoja horizontal; escala 80 %; sin la hoja «Instrucciones»; «Registro»: sin columnas C');
+    expect(v.change_description).toContain('ajustes de presentación: hoja horizontal; escala 80 %; «Registro»: sin columnas C; sin la hoja «Instrucciones»');
     expect(store.get(v.source_item_id!)).toEqual(bytes);
     const audit = await prisma.sgcAuditLog.findFirstOrThrow({ where: { id_company: CO, action: 'documento.carga', entity_id: String(loaded.idDocument) }, orderBy: { id_audit_log: 'desc' } });
     expect(JSON.parse(audit.after_json!).sheetSettings).toMatchObject({ orientation: 'horizontal', fit: 'escala', scalePct: 80 });
