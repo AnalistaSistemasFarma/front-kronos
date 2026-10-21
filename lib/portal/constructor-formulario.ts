@@ -7,6 +7,8 @@
  */
 import type { ImportacionForms } from './importar-forms';
 import {
+  ESCALA_MAX_POR_DEFECTO,
+  ESCALA_MIN_POR_DEFECTO,
   NOTA_MINIMA_POR_DEFECTO,
   PUNTOS_TOTAL,
   redondear2,
@@ -38,6 +40,30 @@ export const AUTORIZACION_ESTANDAR: AutorizacionDatos = {
   casilla: 'He leído el aviso y autorizo de manera previa, expresa e informada el tratamiento de mis datos personales para las finalidades descritas.',
 };
 
+/**
+ * Autorización de tratamiento de datos de los formularios de SEGURIDAD Y SALUD EN EL TRABAJO (Cristian, 2026-10-20), para los formularios nuevos
+ * que piden datos de salud u otros datos sensibles. BORRADOR pendiente de validación por Talento Humano o Jurídica (Ley 1581 de 2012).
+ */
+export const AUTORIZACION_SST: AutorizacionDatos = {
+  version: 'AUT-DATOS-SST-FORMULARIOS-2026-10-20-BORRADOR',
+  pendienteValidacion: true,
+  titulo: 'Aviso de privacidad y autorización de tratamiento de datos personales',
+  texto: [
+    'En cumplimiento de la Ley 1581 de 2012 y del Decreto 1377 de 2013 (compilado en el Decreto 1074 de 2015), le informamos que la empresa del grupo Group Shared Services Latinoamérica con la que usted tiene vínculo laboral, como responsable del tratamiento, recolectará, almacenará, usará y conservará los datos que registre en este formulario, incluidos datos relacionados con su salud, que son datos sensibles, con la finalidad de gestionar el Sistema de Gestión de Seguridad y Salud en el Trabajo (SG-SST), prevenir accidentes y enfermedades laborales y cumplir las obligaciones legales en la materia.',
+    'Usted no está obligado(a) a autorizar el tratamiento de datos sensibles. Sus respuestas solo las consultan las personas autorizadas del equipo de Seguridad y Salud en el Trabajo, no se publican y se conservan durante el tiempo que exija la normativa aplicable.',
+    'Como titular, usted tiene derecho a conocer, actualizar y rectificar sus datos, solicitar prueba de esta autorización, ser informado(a) sobre su uso, revocar la autorización o pedir la supresión cuando proceda y presentar quejas ante la Superintendencia de Industria y Comercio. Puede ejercerlos a través del área de Talento Humano, conforme a la política de tratamiento de datos personales de la empresa.',
+  ],
+  casilla: 'He leído el aviso y autorizo de manera previa, expresa e informada el tratamiento de mis datos personales, incluidos los datos sensibles, para las finalidades descritas.',
+};
+
+/** Escala numérica tal como se edita: los límites pueden quedar vacíos mientras se escribe. */
+export interface EscalaEditable {
+  min: number | '';
+  max: number | '';
+  etiquetaMin: string;
+  etiquetaMax: string;
+}
+
 export interface PreguntaEditable {
   id: string;
   texto: string;
@@ -55,6 +81,10 @@ export interface PreguntaEditable {
   lista: boolean;
   /** Se conserva al editar; este editor no lo cambia. */
   prellenar?: 'correo' | 'nombre';
+  /** Solo tipo `escala`. */
+  escala?: EscalaEditable;
+  /** Imagen de la pregunta: se CONSERVA al editar (este editor no sube imágenes nuevas; solo se puede quitar). */
+  imagen?: { src: string; alt: string };
 }
 
 export interface Estado {
@@ -70,13 +100,15 @@ export interface Estado {
   preguntas: PreguntaEditable[];
   datosSensibles: boolean;
   autorizacion?: AutorizacionDatos;
+  /** `sst`: formularios de Seguridad y Salud en el Trabajo (código con prefijo SST y autorización propia para datos sensibles). */
+  contexto?: 'sst';
 }
 
 const dosDigitos = (n: number) => String(n).padStart(2, '0');
-function codigoNuevo(tipo: TipoFormulario): string {
+function codigoNuevo(tipo: TipoFormulario, contexto?: 'sst'): string {
   const d = new Date();
   const sello = `${d.getFullYear()}${dosDigitos(d.getMonth() + 1)}${dosDigitos(d.getDate())}-${dosDigitos(d.getHours())}${dosDigitos(d.getMinutes())}${dosDigitos(d.getSeconds())}`;
-  return `${tipo === 'evaluacion' ? 'EVA' : 'ENC'}-${sello}`;
+  return `${contexto === 'sst' ? 'SST-' : ''}${tipo === 'evaluacion' ? 'EVA' : 'ENC'}-${sello}`;
 }
 
 const idNuevo = (preguntas: PreguntaEditable[]): string => {
@@ -98,12 +130,13 @@ export const preguntaVacia = (tipo: TipoFormulario, preguntas: PreguntaEditable[
   lista: false,
 });
 
-export function estadoInicial(tipo: TipoFormulario, definicion?: DefinicionFormulario): Estado {
+export function estadoInicial(tipo: TipoFormulario, definicion?: DefinicionFormulario, contexto?: 'sst'): Estado {
   if (!definicion) {
     return conReparto({
+      ...(contexto ? { contexto } : {}),
       puntosAuto: true,
       tipo,
-      codigo: codigoNuevo(tipo),
+      codigo: codigoNuevo(tipo, contexto),
       titulo: '',
       descripcion: '',
       notaMinima: NOTA_MINIMA_POR_DEFECTO,
@@ -134,9 +167,12 @@ export function estadoInicial(tipo: TipoFormulario, definicion?: DefinicionFormu
       correctas: p.correctas ? [...p.correctas] : [],
       lista: p.presentacion === 'lista',
       prellenar: p.prellenar,
+      ...(p.escala ? { escala: { min: p.escala.min, max: p.escala.max, etiquetaMin: p.escala.etiquetaMin ?? '', etiquetaMax: p.escala.etiquetaMax ?? '' } } : {}),
+      ...(p.imagen ? { imagen: { ...p.imagen } } : {}),
     });
   }
   const base: Estado = {
+    ...(contexto ? { contexto } : {}),
     puntosAuto: false,
     tipo: definicion.tipo === 'evaluacion' ? 'evaluacion' : 'encuesta',
     codigo: definicion.codigo,
@@ -210,6 +246,16 @@ export function construirDefinicion(entrada: Estado): { definicion: DefinicionFo
     const q: PreguntaFormulario = { id: p.id, texto: p.texto.trim(), tipo: p.tipo, obligatoria: esCalificada(e, p) ? true : p.obligatoria };
     if (p.prellenar) q.prellenar = p.prellenar;
     if (p.ayuda.trim()) q.ayuda = p.ayuda.trim();
+    if (p.imagen) q.imagen = { ...p.imagen };
+    if (p.tipo === 'escala') {
+      const esc = p.escala ?? { min: ESCALA_MIN_POR_DEFECTO, max: ESCALA_MAX_POR_DEFECTO, etiquetaMin: '', etiquetaMax: '' };
+      if (esc.min === '' || esc.max === '') errores.push(`Pregunta ${n}: escriba el valor mínimo y el máximo de la escala.`);
+      else {
+        q.escala = { min: Number(esc.min), max: Number(esc.max) };
+        if (esc.etiquetaMin.trim()) q.escala.etiquetaMin = esc.etiquetaMin.trim();
+        if (esc.etiquetaMax.trim()) q.escala.etiquetaMax = esc.etiquetaMax.trim();
+      }
+    }
     if (esSeleccion(p)) {
       const multiple = p.tipo === 'seleccion_multiple';
       // Las opciones vacías se descartan; las correctas se reubican entre las que quedan.
@@ -225,7 +271,8 @@ export function construirDefinicion(entrada: Estado): { definicion: DefinicionFo
       if (limpias.length < (evaluacion ? 2 : 1)) errores.push(`Pregunta ${n}: agregue al menos ${evaluacion ? 'dos opciones' : 'una opción'}.`);
       if (new Set(limpias).size !== limpias.length) errores.push(`Pregunta ${n}: hay opciones repetidas.`);
       q.opciones = limpias;
-      if (p.permiteOtra && !evaluacion && !multiple) q.permiteOtra = true;
+      // «Otras»: en la selección única y, desde los formularios SST (2026-10-19), también en la múltiple. Nunca en una evaluación.
+      if (p.permiteOtra && !evaluacion) q.permiteOtra = true;
       if (p.lista && !multiple) q.presentacion = 'lista';
       if (evaluacion) {
         const pts = p.puntos === '' ? NaN : Number(p.puntos);
@@ -254,7 +301,9 @@ export function construirDefinicion(entrada: Estado): { definicion: DefinicionFo
   const crudo: Record<string, unknown> = { formato: 1, codigo: e.codigo.trim(), titulo: e.titulo.trim(), preguntas };
   if (e.descripcion.trim()) crudo.descripcion = e.descripcion.trim();
   if (e.datosSensibles || pideCedula) crudo.datosSensibles = true;
-  const autorizacion = e.autorizacion ?? (pideCedula ? AUTORIZACION_ESTANDAR : undefined);
+  // En SST la autorización es la de Seguridad y Salud en el Trabajo; en Formación, la estándar. Si el formulario ya trae la suya, se conserva.
+  const autorizacionBase = e.contexto === 'sst' ? AUTORIZACION_SST : AUTORIZACION_ESTANDAR;
+  const autorizacion = e.autorizacion ?? (pideCedula || (e.contexto === 'sst' && e.datosSensibles) ? autorizacionBase : undefined);
   if (autorizacion) crudo.autorizacion = autorizacion;
   if (evaluacion) {
     crudo.tipo = 'evaluacion';

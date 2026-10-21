@@ -123,6 +123,10 @@ async function leerEnvio(c: Ctx, codigo: string, mes: string, nombre: string): P
   return e as EnvioSstGuardado;
 }
 
+/** Para el catálogo de formularios (`formularios-sst-catalogo.ts`): misma credencial, misma carpeta y mismo listado paginado. */
+export { contexto as contextoSst, listarHijos as listarHijosSst };
+export type { Ctx as CtxSst };
+
 /* ───────────── Operaciones ───────────── */
 
 interface Deps {
