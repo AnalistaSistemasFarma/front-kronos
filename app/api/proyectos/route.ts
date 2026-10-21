@@ -14,6 +14,8 @@ import {
 import type { ListaProyectosDto } from '../../../lib/proyectos/tipos';
 import { pedirSugerencia } from '../../../lib/proyectos/equipo';
 import { estadosTrabajandoVisibles } from '../../../lib/proyectos/estado-agente-servidor';
+import { cargarOperadoresPases, normalizarMotivo, normalizarPolitica, type PoliticaEntrada } from '../../../lib/proyectos/permisos-agentes-rules';
+import { catalogoActivo, ErrorPermisos, guardarPolitica, puedeGestionarPermisos, tablaNoExiste } from '../../../lib/proyectos/permisos-agentes';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +28,11 @@ export const dynamic = 'force-dynamic';
  *   POST /api/proyectos  { name, idCompany, description?, agentCodes[], profile, instructions?, suggestTeam? }
  *        suggestTeam (F2, 2026-10-18): al crear, pide de una vez al primer
  *        asistente una sugerencia de equipo de subagentes (quedan PROPUESTOS).
+ *        agentPolicy? (2026-10-20): { codeLevel, repos[], deployApprovers[], reason? }
+ *        permisos de los agentes. Solo se guardan si quien crea puede
+ *        cambiarlos en esa empresa (administración o el subproceso
+ *        /process/proyectos/permisos-agentes); si no puede y pide algo distinto
+ *        de «ninguno», 403. Sin agentPolicy, el proyecto queda en «ninguno».
  *
  * SEGURIDAD
  *   - La persona sale de la SESIÓN; el dueño es SIEMPRE quien crea.
@@ -120,22 +127,61 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const creado = await prisma.chatProject.create({
-      data: {
-        name: nombre.value,
-        description: descripcion.value,
-        // «Agente con el que se creó» (columna de la F1). El acceso lo dan
-        // las filas de chat_project_agent.
-        id_agent: agentes[0].idAgent,
-        id_company: idCompany,
-        profile: perfil,
-        instructions: instrucciones.value,
-        created_by: user.id,
-        members: { create: [{ id_user: user.id, role: 'owner', added_by: user.id }] },
-        agents: { create: agentes.map((a) => ({ id_agent: a.idAgent, added_by: user.id })) },
-      },
-      select: { id_project: true },
-    });
+    // Permisos de los agentes (2026-10-20). Por defecto «ninguno» y sin repos.
+    let politica: { entrada: PoliticaEntrada; motivo: string } | null = null;
+    if (payload.agentPolicy !== undefined && payload.agentPolicy !== null) {
+      const puede = await puedeGestionarPermisos(user.email, idCompany);
+      const pedida = payload.agentPolicy as Record<string, unknown>;
+      const esNinguno = typeof pedida === 'object' && pedida?.codeLevel === 'ninguno';
+      if (!puede && !esNinguno) {
+        return jsonNoStore(
+          { error: 'Solo la administración o quien tenga el permiso «Permisos de agentes en Proyectos» en esa empresa puede dar acceso a código.' },
+          { status: 403 }
+        );
+      }
+      if (puede) {
+        const catalogo = await catalogoActivo();
+        const v = normalizarPolitica(pedida, { catalogoActivo: catalogo.map((r) => r.slug), operadores: cargarOperadoresPases() });
+        if (!v.ok) return badRequest(v.error);
+        const textoMotivo = typeof pedida.reason === 'string' && pedida.reason.trim() ? pedida.reason : 'Permisos escogidos al crear el proyecto.';
+        const m = normalizarMotivo(textoMotivo);
+        if (!m.ok) return badRequest(m.error);
+        politica = { entrada: v.value, motivo: m.value };
+      }
+    }
+
+    const datosProyecto = {
+      name: nombre.value,
+      description: descripcion.value,
+      // «Agente con el que se creó» (columna de la F1). El acceso lo dan
+      // las filas de chat_project_agent.
+      id_agent: agentes[0].idAgent,
+      id_company: idCompany,
+      profile: perfil,
+      instructions: instrucciones.value,
+      created_by: user.id,
+      members: { create: [{ id_user: user.id, role: 'owner', added_by: user.id }] },
+      agents: { create: agentes.map((a) => ({ id_agent: a.idAgent, added_by: user.id })) },
+    };
+    // Con permisos escogidos: proyecto, política y registro en UNA transacción
+    // (si la política no se puede guardar, el proyecto no queda creado a medias).
+    const pol = politica;
+    let creado: { id_project: number };
+    try {
+      creado = pol
+        ? await prisma.$transaction(async (tx) => {
+            const p = await tx.chatProject.create({ data: datosProyecto, select: { id_project: true } });
+            await guardarPolitica({ idProject: p.id_project, actor: user, entrada: pol.entrada, motivo: pol.motivo, cliente: tx });
+            return p;
+          })
+        : await prisma.chatProject.create({ data: datosProyecto, select: { id_project: true } });
+    } catch (error) {
+      if (error instanceof ErrorPermisos) return jsonNoStore({ error: error.message }, { status: error.status });
+      if (pol && tablaNoExiste(error)) {
+        return jsonNoStore({ error: 'Los permisos de los agentes todavía no están habilitados en este servidor. Cree el proyecto sin ellos.' }, { status: 503 });
+      }
+      throw error;
+    }
 
     // «De primeras» (pedido de Nicolás, 2026-10-18): la sugerencia de equipo
     // sale con la creación. Si no se puede pedir, el proyecto queda creado igual.

@@ -29,6 +29,9 @@ import { entornoTopes, HERRAMIENTAS_SUBAGENTE, revisarAgentesInit } from './equi
 export const HERRAMIENTAS_BASE = ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'TodoWrite'];
 export const PERMITIDAS_BASE = ['Read', 'Glob', 'Grep', 'TodoWrite', 'Edit(./trabajo/**)', 'Write(./trabajo/**)'];
 
+/** Única herramienta prohibida que se habilita en un turno con código (con reglas y sandbox). */
+export const HERRAMIENTAS_CODIGO = ['Bash'];
+
 export const SETTINGS_HIJO = {
   enabledPlugins: { 'telegram@claude-plugins-official': false },
   disableAllHooks: true,
@@ -40,7 +43,7 @@ export const SETTINGS_HIJO = {
  * fija el id con --session-id (así el puente lo conoce de antemano); después,
  * --resume con ese mismo id.
  */
-export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, presupuestoUsd, equipo = null }) {
+export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, presupuestoUsd, equipo = null, codigo = null, lectura = null }) {
   if (!perfil) throw new Error('Falta el perfil.');
   if (!sesion?.id || !/^[0-9a-f-]{36}$/i.test(sesion.id)) throw new Error('session id inválido.');
 
@@ -49,11 +52,22 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
   // Equipo de subagentes (F2, 2026-10-18): la herramienta Agent SOLO con el
   // equipo aprobado (`Agent(<slug>)`), y los agentes incorporados negados uno
   // por uno. Sin equipo, Agent/Task siguen prohibidas como en la F1.
-  const tools = [...HERRAMIENTAS_BASE, ...web, ...(equipo ? equipo.tools : [])];
-  const permitidas = [...PERMITIDAS_BASE, ...web, ...perfil.herramientas, ...(equipo ? equipo.permitidas : [])];
-  const prohibidas = equipo
-    ? [...HERRAMIENTAS_PROHIBIDAS.filter((h) => !HERRAMIENTAS_SUBAGENTE.includes(h)), ...equipo.prohibidas]
-    : HERRAMIENTAS_PROHIBIDAS;
+  // Acceso al código (nivel 2, 2026-10-20): Bash SOLO con las reglas de
+  // codigo.mjs (git/gh/npm/npx/node) y dentro del sandbox de Claude Code.
+  const tools = [...HERRAMIENTAS_BASE, ...web, ...(equipo ? equipo.tools : []), ...(codigo ? codigo.tools : [])];
+  const permitidas = [...PERMITIDAS_BASE, ...web, ...perfil.herramientas, ...(equipo ? equipo.permitidas : []), ...(codigo ? codigo.permitidas : [])];
+  const exentas = [...(equipo ? HERRAMIENTAS_SUBAGENTE : []), ...(codigo ? HERRAMIENTAS_CODIGO : [])];
+  const prohibidas = [
+    ...HERRAMIENTAS_PROHIBIDAS.filter((h) => !exentas.includes(h)),
+    ...(equipo ? equipo.prohibidas : []),
+    ...(codigo ? codigo.prohibidas : []),
+    // Permisos del proyecto, nivel LECTURA (politica.mjs): sin secretos de los clones.
+    ...(lectura ? lectura.prohibidas : []),
+  ];
+  if (codigo && !codigo.sandbox?.enabled) throw new Error('Turno con código sin sandbox: no se arma.');
+  if (codigo && !codigo.hooks?.PreToolUse?.length) throw new Error('Turno con código sin el hook de subagentes: no se arma.');
+  // Con código: sandbox y el ÚNICO hook (subagentes solo git de lectura); nada más.
+  const settings = codigo ? { ...SETTINGS_HIJO, disableAllHooks: false, hooks: codigo.hooks ?? {}, sandbox: codigo.sandbox } : SETTINGS_HIJO;
 
   const args = [
     '-p',
@@ -73,11 +87,14 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
     '--mcp-config',
     rutaMcp,
     '--settings',
-    JSON.stringify(SETTINGS_HIJO),
+    JSON.stringify(settings),
     '--append-system-prompt-file',
     rutaSistema,
   ];
   if (dirArchivos) args.push('--add-dir', dirArchivos);
+  for (const d of codigo?.dirsExtra ?? []) args.push('--add-dir', d);
+  // Repos del proyecto en LECTURA (politica.mjs): solo se leen (Edit/Write siguen confinados a ./trabajo).
+  for (const d of lectura?.dirs ?? []) args.push('--add-dir', d);
   if (sesion.nueva) args.push('--session-id', sesion.id);
   else args.push('--resume', sesion.id);
   if (modelo) args.push('--model', modelo);
@@ -131,7 +148,7 @@ export function armarArgumentosSugerencia({ rutaMcp, esquema, modelo, presupuest
  * topes de subagentes van SIEMPRE (sin equipo, Agent está prohibida y el tope
  * queda en 1 por si acaso).
  */
-export function armarEntorno({ path, home, configClaudeDir, credencial }, topes = null) {
+export function armarEntorno({ path, home, configClaudeDir, credencial }, topes = null, extraCodigo = null) {
   const env = {
     PATH: path,
     HOME: home,
@@ -141,6 +158,8 @@ export function armarEntorno({ path, home, configClaudeDir, credencial }, topes 
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     ...entornoTopes(topes),
   };
+  // Turno con código: GH_TOKEN, HOME propio (home-codigo) y avisos de gh/npm apagados.
+  if (extraCodigo) Object.assign(env, extraCodigo);
   if (credencial.tipo === 'api-key') env.ANTHROPIC_API_KEY = credencial.valor;
   else env.CLAUDE_CODE_OAUTH_TOKEN = credencial.valor;
   return env;
@@ -151,12 +170,14 @@ export function armarEntorno({ path, home, configClaudeDir, credencial }, topes 
  * prohibida, con permisos abiertos o con un conector que el perfil no
  * declara, el turno se aborta. Devuelve la lista de problemas (vacía = bien).
  */
-export function revisarInit(evento, perfil, equipo = null) {
+export function revisarInit(evento, perfil, equipo = null, codigo = null) {
   const problemas = [];
   const herramientas = Array.isArray(evento?.tools) ? evento.tools : [];
   for (const h of herramientas) {
     // Con equipo aprobado, la herramienta de subagentes es la única excepción.
     if (equipo && HERRAMIENTAS_SUBAGENTE.includes(h)) continue;
+    // Con código vinculado, Bash (con sus reglas y el sandbox).
+    if (codigo && HERRAMIENTAS_CODIGO.includes(h)) continue;
     if (HERRAMIENTAS_PROHIBIDAS.includes(h)) problemas.push(`herramienta prohibida: ${h}`);
   }
   if (equipo) problemas.push(...revisarAgentesInit(evento, equipo));
@@ -254,7 +275,7 @@ export function acumularEvento(acc, evento) {
  * evento (para mover el indicador). Mata el proceso si se pasa del tope o si
  * `revisarInit` encuentra un problema.
  */
-export function correrTurno({ bin, args, env, cwd, prompt, perfil, equipo = null, vigia = null, timeoutMs, alEvento = () => {}, spawnImpl = spawn }) {
+export function correrTurno({ bin, args, env, cwd, prompt, perfil, equipo = null, codigo: accesoCodigo = null, vigia = null, timeoutMs, alEvento = () => {}, spawnImpl = spawn }) {
   return new Promise((resolve) => {
     const hijo = spawnImpl(bin, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
     let acc = { apiMessages: 0, apiMessagesSubagents: 0, modelos: [] };
@@ -294,7 +315,7 @@ export function correrTurno({ bin, args, env, cwd, prompt, perfil, equipo = null
         }
         acc = acumularEvento(acc, evento);
         if (evento.type === 'system' && evento.subtype === 'init') {
-          const problemas = revisarInit(evento, perfil, equipo);
+          const problemas = revisarInit(evento, perfil, equipo, accesoCodigo);
           if (problemas.length > 0) matar(`arranque inseguro: ${problemas.join('; ')}`);
         }
         // Vigía del equipo: un subagente fuera de lo aprobado detiene el turno.

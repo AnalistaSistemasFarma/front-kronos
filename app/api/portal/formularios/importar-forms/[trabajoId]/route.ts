@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { identificar } from '../../../../../../lib/portal/acceso';
 import { formadoresDePortal } from '../../../../../../lib/portal/config';
+import { esAdministradorSst } from '../../../../../../lib/portal/formularios-sst-permisos';
 import { normalizarImportacion } from '../../../../../../lib/portal/importar-forms';
 import { SIN_CACHE, urlImportador } from '../../../../../../lib/portal/importar-forms-servidor';
 
@@ -21,7 +22,7 @@ const ID_TRABAJO = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 export async function GET(request: NextRequest, { params }: { params: Promise<{ trabajoId: string }> }) {
   const quien = await identificar(request);
   if (!quien) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
-  if (!formadoresDePortal().includes(quien.correo.toLowerCase())) {
+  if (!formadoresDePortal().includes(quien.correo.toLowerCase()) && !esAdministradorSst(quien.correo)) {
     return NextResponse.json({ error: 'Solo un formador puede importar formularios.' }, { status: 403 });
   }
   const id = (await params).trabajoId;
@@ -55,7 +56,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ trabajoId: string }> }) {
   const quien = await identificar(request);
   if (!quien) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
-  if (!formadoresDePortal().includes(quien.correo.toLowerCase())) {
+  if (!formadoresDePortal().includes(quien.correo.toLowerCase()) && !esAdministradorSst(quien.correo)) {
     return NextResponse.json({ error: 'Solo un formador puede importar formularios.' }, { status: 403 });
   }
   const id = (await params).trabajoId;

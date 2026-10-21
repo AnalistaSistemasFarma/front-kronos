@@ -3,8 +3,18 @@
  * se valida y, ante cualquier duda, FALLA CERRADO (no arranca).
  *
  * Variables (nombres; los valores nunca van al repositorio):
- *   HILOS_ENTORNO              'pruebas'. En F1 es el único valor admitido.
- *   HILOS_SYNERLINK_URL        Base de SynerLink de PRUEBAS (p. ej. http://host:puerto).
+ *   HILOS_ENTORNO              'pruebas' o 'produccion' (2026-10-20, decisión de Nicolás:
+ *                              «lo de prod en prod, lo de testing en testing»). Con
+ *                              'produccion' se exige además (ver verificarEntorno):
+ *                                - URL que NO sea de un servidor de PRUEBAS conocido;
+ *                                - HILOS_CONFIRMAR_URL_PRODUCCION idéntica a la URL (doble
+ *                                  entrada: no se llega a prod por un copiar/pegar);
+ *                                - HILOS_DIR propio de producción (nada de «pruebas» en
+ *                                  la ruta) y nunca una carpeta ya usada por otro entorno.
+ *                              Cada carpeta queda sellada con su entorno (.entorno.json):
+ *                              pruebas y producción nunca comparten estado ni sesiones.
+ *   HILOS_SYNERLINK_URL        Base de SynerLink del entorno (p. ej. http://host:puerto).
+ *   HILOS_CONFIRMAR_URL_PRODUCCION  Solo producción: la misma URL, escrita otra vez.
  *   HILOS_SYNERLINK_KEY        Llave del agente con scope "projects" (NO la del bot vivo).
  *   HILOS_AGENTE               code del agente (p. ej. 'play'); se verifica contra la llave.
  *   HILOS_DIR                  Carpeta del puente (estado, carpetas de hilos, config aislado).
@@ -35,12 +45,35 @@
  *                                    es menor, manda ese.
  *   HILOS_SUGERENCIA_PRESUPUESTO_USD Tope de gasto de «Sugerir equipo» (por defecto 0.5).
  *   HILOS_SUGERENCIA_TIMEOUT_MS      Tope de tiempo de «Sugerir equipo» (por defecto 180000 = 3 min).
+ *
+ *   Acceso al código (nivel 2, 2026-10-20; ver codigo.mjs). Opcional y aditivo:
+ *   HILOS_REPOS_POR_PROYECTO         Ruta a repos-por-proyecto.json (repos, proyectos que los
+ *                                    usan y operadores que autorizan pases). Se relee en CADA
+ *                                    turno: vincular un repo no exige reiniciar el puente.
+ *                                    Sin esta variable, ningún proyecto tiene código.
+ *   HILOS_GITHUB_TOKEN_ARCHIVO       Archivo (600) con el token de GitHub. Solo entra al proceso
+ *                                    del modelo como GH_TOKEN en turnos con código.
  */
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
 export const MAX_CONCURRENCIA_F1 = 2;
+
+export const ENTORNOS = ['pruebas', 'produccion'];
+
+/**
+ * Servidores de SynerLink de PRUEBAS conocidos (host, cualquier puerto). Un puente
+ * de producción que apunte a uno de estos no arranca. La .230 es el servidor de
+ * pruebas/testing (y de demos); localhost nunca es producción.
+ */
+export const HOSTS_PRUEBAS = ['192.168.11.230', 'localhost', '127.0.0.1', '::1', '[::1]'];
+
+/** Archivo que sella una carpeta del puente con su entorno. */
+export const ARCHIVO_ENTORNO = '.entorno.json';
+
+/** Rastros de que una carpeta ya la usó un puente (estado, sesiones, hilos, config). */
+const RASTROS_DE_USO = ['estado.json', 'proyectos', 'claude-config', 'consumo.jsonl'];
 
 /** Herramientas de Claude Code que NUNCA se habilitan, aunque un perfil las pida. */
 export const HERRAMIENTAS_PROHIBIDAS = [
@@ -195,10 +228,79 @@ export function leerTokenDeEnv(ruta, leer = (r) => readFileSync(r, 'utf8')) {
   throw new ErrorConfig(`El archivo de HILOS_TOKEN_ENV_AGENTE no trae CLAUDE_CODE_OAUTH_TOKEN.`);
 }
 
+function leerSello(hilosDir) {
+  const ruta = path.join(hilosDir, ARCHIVO_ENTORNO);
+  if (!existsSync(ruta)) return null;
+  try {
+    const sello = JSON.parse(readFileSync(ruta, 'utf8'));
+    if (!sello || typeof sello.entorno !== 'string') throw new Error('sin entorno');
+    return sello;
+  } catch {
+    throw new ErrorConfig(`${ruta} está dañado; no se adivina el entorno de la carpeta.`);
+  }
+}
+
+/**
+ * Protecciones por entorno (fallan cerrado). PRUEBAS conserva el comportamiento
+ * de F1; lo único nuevo es que NO arranca sobre una carpeta sellada por otro
+ * entorno. PRODUCCIÓN exige URL fuera de PRUEBAS, confirmación de la URL,
+ * carpeta propia y nunca reutilizar una carpeta sin sello de producción.
+ */
+export function verificarEntorno({ entorno, url, hilosDir, confirmacionUrl }) {
+  const sello = leerSello(hilosDir);
+  if (sello && sello.entorno !== entorno) {
+    throw new ErrorConfig(
+      `HILOS_DIR (${hilosDir}) es de ${sello.entorno}; este puente es de ${entorno}. Pruebas y producción no comparten carpeta ni sesiones.`
+    );
+  }
+  if (entorno !== 'produccion') return { sello };
+
+  let host;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    throw new ErrorConfig('HILOS_SYNERLINK_URL no es una URL válida.');
+  }
+  if (HOSTS_PRUEBAS.includes(host)) {
+    throw new ErrorConfig(`HILOS_ENTORNO=produccion con una URL de PRUEBAS (${host}). Corrija la URL o el entorno.`);
+  }
+  const confirmada = (confirmacionUrl ?? '').trim().replace(/\/+$/, '');
+  if (!confirmada) throw new ErrorConfig('Producción exige HILOS_CONFIRMAR_URL_PRODUCCION (la misma URL, escrita otra vez).');
+  if (confirmada !== url) throw new ErrorConfig('HILOS_CONFIRMAR_URL_PRODUCCION no coincide con HILOS_SYNERLINK_URL.');
+  if (/pruebas|testing/i.test(hilosDir)) {
+    throw new ErrorConfig(`HILOS_DIR de producción no puede ser una carpeta de pruebas (${hilosDir}).`);
+  }
+  if (sello) {
+    if (sello.url !== url) {
+      throw new ErrorConfig(`HILOS_DIR quedó sellado para ${sello.url}; no se reutiliza con otra URL.`);
+    }
+  } else {
+    const usados = RASTROS_DE_USO.filter((r) => existsSync(path.join(hilosDir, r)));
+    if (usados.length > 0) {
+      throw new ErrorConfig(
+        `HILOS_DIR ya la usó un puente sin sello de producción (${usados.join(', ')}). Producción arranca en una carpeta nueva.`
+      );
+    }
+  }
+  return { sello };
+}
+
+/** Sella la carpeta con su entorno (solo producción; idempotente). */
+export function sellarEntorno(cfg, ahora = new Date()) {
+  if (cfg.entorno !== 'produccion') return false;
+  const ruta = path.join(cfg.hilosDir, ARCHIVO_ENTORNO);
+  if (existsSync(ruta)) return false;
+  writeFileSync(ruta, `${JSON.stringify({ entorno: cfg.entorno, url: cfg.url, agente: cfg.agente, sellado: ahora.toISOString() })}\n`, {
+    mode: 0o600,
+    flag: 'wx',
+  });
+  return true;
+}
+
 export function cargarConfig(env = process.env) {
   const entorno = requerida(env, 'HILOS_ENTORNO');
-  if (entorno !== 'pruebas') {
-    throw new ErrorConfig('F1: el puente solo corre contra PRUEBAS (HILOS_ENTORNO=pruebas).');
+  if (!ENTORNOS.includes(entorno)) {
+    throw new ErrorConfig(`HILOS_ENTORNO solo admite ${ENTORNOS.join(' o ')}.`);
   }
 
   const url = requerida(env, 'HILOS_SYNERLINK_URL').replace(/\/+$/, '');
@@ -227,6 +329,7 @@ export function cargarConfig(env = process.env) {
       `Hay CLAUDE.md por encima de HILOS_DIR (${ancestros.join(', ')}); Claude Code los cargaría en cada hilo. Mueva HILOS_DIR.`
     );
   }
+  verificarEntorno({ entorno, url, hilosDir, confirmacionUrl: env.HILOS_CONFIRMAR_URL_PRODUCCION });
 
   const rutaPerfiles = requerida(env, 'HILOS_PERFILES');
   let perfilesJson;
@@ -247,6 +350,11 @@ export function cargarConfig(env = process.env) {
 
   const presupuesto = (env.HILOS_MAX_BUDGET_USD ?? '').trim();
   if (presupuesto && !(Number(presupuesto) > 0)) throw new ErrorConfig('HILOS_MAX_BUDGET_USD debe ser un número positivo.');
+
+  for (const v of ['HILOS_REPOS_POR_PROYECTO', 'HILOS_GITHUB_TOKEN_ARCHIVO']) {
+    const r = (env[v] ?? '').trim();
+    if (r && !path.isAbsolute(r)) throw new ErrorConfig(`${v} debe ser una ruta absoluta.`);
+  }
 
   let claudeBin = (env.HILOS_CLAUDE_BIN ?? '').trim() || 'claude';
   if (claudeBin.includes(path.sep)) {
@@ -279,6 +387,8 @@ export function cargarConfig(env = process.env) {
     sugerenciaTimeoutMs: entero(env, 'HILOS_SUGERENCIA_TIMEOUT_MS', 3 * 60 * 1000, 30 * 1000, 10 * 60 * 1000),
     claudeBin,
     instruccionesEn,
+    rutaReposPorProyecto: (env.HILOS_REPOS_POR_PROYECTO ?? '').trim() || null,
+    githubTokenArchivo: (env.HILOS_GITHUB_TOKEN_ARCHIVO ?? '').trim() || null,
     // Para el entorno del hijo: solo lo indispensable del entorno propio.
     path: env.PATH ?? '/usr/bin:/bin',
     home: env.HOME ?? homedir(),

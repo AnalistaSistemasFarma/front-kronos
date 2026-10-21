@@ -20,7 +20,8 @@
  */
 import type { Prisma } from '../../app/generated/prisma';
 import { prisma } from '../prisma';
-import { profileLabel, profilesFor, projectsEnabledFor } from '../chat/projects-rules';
+import { profileLabel } from '../chat/projects-rules';
+import { cargarConfigProyectos } from './config-agentes';
 import { writeAccessForAgent, type ProjectAccess, type ProjectUser } from '../chat/projects';
 import { vinculosDelProyecto } from '../chat/projects-links';
 import { cronogramaParaAgente } from './cronograma';
@@ -458,8 +459,11 @@ export async function configurarEquipo(user: ProjectUser, project: ProjectAccess
 /* ─────────────────────────────── Puente ─────────────────────────────── */
 
 /** Proyectos donde ESTE agente puede atender (activo, designado y con su perfil habilitado). */
-function whereProyectoAtendible(idAgent: number, code: string): Prisma.ChatProjectWhereInput {
-  return { archived: false, agents: { some: { id_agent: idAgent } }, profile: { in: projectsEnabledFor(code) ? profilesFor(code) : [] } };
+async function whereProyectoAtendible(idAgent: number, code: string): Promise<Prisma.ChatProjectWhereInput> {
+  // Empresa y perfil habilitados para el agente (configuración del módulo; sin configurar, el .env).
+  const filtro = (await cargarConfigProyectos()).filtroAtendible(code) as Prisma.ChatProjectWhereInput;
+  // El filtro solo trae id_company / profile / OR: no pisa archived ni agents.
+  return { archived: false, agents: { some: { id_agent: idAgent } }, ...filtro };
 }
 
 /**
@@ -469,7 +473,7 @@ function whereProyectoAtendible(idAgent: number, code: string): Prisma.ChatProje
 export async function reclamarPedidos(agent: { idAgent: number; code: string }) {
   await vencerPedidos({ id_agent: agent.idAgent });
   const pendientes = await prisma.chatProjectTeamRequest.findMany({
-    where: { id_agent: agent.idAgent, status: 'pendiente', project: whereProyectoAtendible(agent.idAgent, agent.code) },
+    where: { id_agent: agent.idAgent, status: 'pendiente', project: await whereProyectoAtendible(agent.idAgent, agent.code) },
     orderBy: { requested_at: 'asc' },
     take: 3,
     select: { id_request: true, id_project: true },
@@ -536,7 +540,7 @@ export async function entregarSugerencia(agent: { idAgent: number; code: string 
   const idRequest = Number(payload.idRequest);
   if (!Number.isInteger(idRequest) || idRequest <= 0) throw new ProyectoError('Pedido no encontrado.', 404);
   const pedido = await prisma.chatProjectTeamRequest.findFirst({
-    where: { id_request: idRequest, id_agent: agent.idAgent, status: 'en_curso', project: whereProyectoAtendible(agent.idAgent, agent.code) },
+    where: { id_request: idRequest, id_agent: agent.idAgent, status: 'en_curso', project: await whereProyectoAtendible(agent.idAgent, agent.code) },
     select: { id_request: true, id_project: true, project: { select: { profile: true } } },
   });
   if (!pedido) throw new ProyectoError('Pedido no encontrado.', 404);
