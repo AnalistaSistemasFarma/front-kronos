@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { cargarConfig, leerTokenDeEnv, validarAislamiento, validarPerfiles } from '../src/config.mjs';
+import { ARCHIVO_ENTORNO, cargarConfig, leerTokenDeEnv, sellarEntorno, validarAislamiento, validarPerfiles } from '../src/config.mjs';
 
 function envBase(dir, extra = {}) {
   const perfiles = path.join(dir, 'perfiles.json');
@@ -31,8 +31,77 @@ test('carga una configuración válida con tope 2 por defecto', () => {
   assert.ok(cfg.perfiles.has('sin-conectores'));
 });
 
-test('F1 solo PRUEBAS', () => {
-  assert.throws(() => cargarConfig(envBase(tmp(), { HILOS_ENTORNO: 'produccion' })), /PRUEBAS/);
+test('solo admite pruebas o produccion', () => {
+  assert.throws(() => cargarConfig(envBase(tmp(), { HILOS_ENTORNO: 'prod' })), /pruebas o produccion/);
+  assert.throws(() => cargarConfig(envBase(tmp(), { HILOS_ENTORNO: 'Produccion' })), /pruebas o produccion/);
+  assert.throws(() => cargarConfig(envBase(tmp(), { HILOS_ENTORNO: 'testing' })), /pruebas o produccion/);
+});
+
+const URL_PROD = 'http://192.168.10.5:3003';
+function envProd(dir, extra = {}) {
+  return envBase(dir, {
+    HILOS_ENTORNO: 'produccion',
+    HILOS_SYNERLINK_URL: `${URL_PROD}/`,
+    HILOS_CONFIRMAR_URL_PRODUCCION: URL_PROD,
+    HILOS_DIR: path.join(dir, 'horus-prod'),
+    ...extra,
+  });
+}
+
+test('producción válida: URL de prod confirmada y carpeta propia', () => {
+  const cfg = cargarConfig(envProd(tmp()));
+  assert.equal(cfg.entorno, 'produccion');
+  assert.equal(cfg.url, URL_PROD);
+  assert.ok(cfg.configClaudeDir.endsWith(path.join('horus-prod', 'claude-config')));
+});
+
+test('producción: rechaza URLs de PRUEBAS conocidas', () => {
+  for (const u of ['http://192.168.11.230:3030', 'http://192.168.11.230:3070', 'http://localhost:3003', 'http://127.0.0.1:3003']) {
+    assert.throws(() => cargarConfig(envProd(tmp(), { HILOS_SYNERLINK_URL: u, HILOS_CONFIRMAR_URL_PRODUCCION: u })), /URL de PRUEBAS/);
+  }
+});
+
+test('producción: exige la URL confirmada e idéntica', () => {
+  assert.throws(() => cargarConfig(envProd(tmp(), { HILOS_CONFIRMAR_URL_PRODUCCION: '' })), /exige HILOS_CONFIRMAR_URL_PRODUCCION/);
+  assert.throws(() => cargarConfig(envProd(tmp(), { HILOS_CONFIRMAR_URL_PRODUCCION: 'http://192.168.10.5:3004' })), /no coincide/);
+});
+
+test('producción: nunca una carpeta de pruebas ni una ya usada sin sello', () => {
+  const d = tmp();
+  assert.throws(() => cargarConfig(envProd(d, { HILOS_DIR: path.join(d, 'horus-pruebas') })), /carpeta de pruebas/);
+  const usada = path.join(d, 'horus-otra');
+  mkdirSync(usada, { recursive: true });
+  writeFileSync(path.join(usada, 'estado.json'), '{}');
+  assert.throws(() => cargarConfig(envProd(d, { HILOS_DIR: usada })), /sin sello de producción/);
+});
+
+test('el sello separa los entornos: pruebas no arranca en carpeta de producción y viceversa', () => {
+  const d = tmp();
+  const cfg = cargarConfig(envProd(d));
+  mkdirSync(cfg.hilosDir, { recursive: true });
+  assert.equal(sellarEntorno(cfg), true);
+  assert.equal(sellarEntorno(cfg), false); // idempotente
+  const sello = JSON.parse(readFileSync(path.join(cfg.hilosDir, ARCHIVO_ENTORNO), 'utf8'));
+  assert.equal(sello.entorno, 'produccion');
+  assert.equal(sello.url, URL_PROD);
+  // Ya sellada (y con rastros de uso), producción sigue arrancando…
+  writeFileSync(path.join(cfg.hilosDir, 'estado.json'), '{}');
+  assert.equal(cargarConfig(envProd(d)).entorno, 'produccion');
+  // …pero no con otra URL, ni un puente de pruebas sobre ella.
+  const otra = 'http://10.0.0.9:3003';
+  assert.throws(() => cargarConfig(envProd(d, { HILOS_SYNERLINK_URL: otra, HILOS_CONFIRMAR_URL_PRODUCCION: otra })), /sellado para/);
+  assert.throws(() => cargarConfig(envBase(d, { HILOS_DIR: cfg.hilosDir })), /es de produccion/);
+});
+
+test('pruebas: igual que en F1 (sin confirmación, sin sello, carpeta ya usada)', () => {
+  const d = tmp();
+  const dir = path.join(d, 'play-pruebas');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, 'estado.json'), '{}');
+  const cfg = cargarConfig(envBase(d, { HILOS_DIR: dir }));
+  assert.equal(cfg.entorno, 'pruebas');
+  assert.equal(sellarEntorno(cfg), false);
+  assert.equal(existsSync(path.join(dir, ARCHIVO_ENTORNO)), false);
 });
 
 test('exige exactamente una credencial', () => {
