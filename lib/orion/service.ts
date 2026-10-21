@@ -67,11 +67,7 @@ import {
   syncOrionSignerTasks,
 } from './signerTasks';
 import { openNextOrionSignerAuthorization } from './signerAuthorizations';
-import {
-  closeRequestIfNoOpenTasks,
-  isSignatureAutoCloseEnabled,
-  resolveSignatureTasksOnSigned,
-} from './autoCloseOnSigned';
+import { isSignatureTaskName, resolveSignatureTasksOnSigned } from './autoCloseOnSigned';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/microsoft-365/useGetMicrosoftToken.jsx';
 import type { SignerAcceptIdentity } from './signerIdentity';
 import { normalizeSignerIdentity } from './signerIdentity';
@@ -1003,7 +999,7 @@ export async function applyOrionWebhookToRequest(
   });
 
   let tasksUpdated = 0;
-  let requestClosed = false;
+  const requestClosed = false;
 
   // Auth Kronos del siguiente firmante SOLO al avanzar de turno (alguien acaba de firmar).
   // Antes se abría en cada sync EN_PROCESO y, como findExisting ignoraba status=2,
@@ -1075,18 +1071,16 @@ export async function applyOrionWebhookToRequest(
       fileId
     );
   } else if (statusUpper === 'FIRMADO' && allSigned) {
-    // Firmas completas: avanza el workflow secuencial de firma. Por defecto NO cierra la
-    // solicitud (pueden quedar otras tareas o más PDFs); solo si el solicitante activó el
-    // cierre automático y ya no queda ninguna otra tarea abierta.
+    // Firmas completas: se cierran solas las tareas de firma (siempre, para todos) y el workflow
+    // avanza a la siguiente tarea. La solicitud NUNCA se cierra aquí: pueden quedar otras
+    // tareas o más PDFs por firmar. Un webhook repetido (sin cambio de estado ni de turno) no
+    // vuelve a tocar nada.
     const template = await findOrionSignatureTaskTemplate(pool, params.requestId);
-    const autoClose =
-      (statusChanged || turnAdvanced) &&
-      (await isSignatureAutoCloseEnabled(pool, ctx?.id_requester ?? null));
-    if (autoClose) {
+    if (statusChanged || turnAdvanced) {
       try {
         tasksUpdated += await resolveSignatureTasksOnSigned(pool, {
           requestId: params.requestId,
-          templateTaskId: template?.id ?? null,
+          templateTaskId: template && isSignatureTaskName(template.task) ? template.id : null,
           executorUserId: ctx?.id_requester ?? null,
         });
       } catch (err) {
@@ -1116,18 +1110,6 @@ export async function applyOrionWebhookToRequest(
       }
     } catch (err) {
       console.warn('[orion/applyWebhook] Watermark DOCUMENTO VALIDADO:', err);
-    }
-
-    if (autoClose) {
-      try {
-        requestClosed = await closeRequestIfNoOpenTasks(pool, {
-          requestId: params.requestId,
-          requesterUserId: ctx?.id_requester ?? null,
-          subject: ctx?.subject_request ?? null,
-        });
-      } catch (err) {
-        console.warn('[orion/applyWebhook] Cierre automático (solicitud):', err);
-      }
     }
   }
 
