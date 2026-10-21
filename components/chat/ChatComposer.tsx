@@ -17,6 +17,7 @@ import {
   Box,
   Group,
   Menu,
+  Popover,
   Text,
   Textarea,
   Tooltip,
@@ -28,10 +29,11 @@ import {
   IconEye,
   IconEyeOff,
   IconItalic,
+  IconKeyboard,
   IconList,
+  IconMoodSmile,
   IconPaperclip,
   IconSend,
-  IconSticker,
   IconX,
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
@@ -45,6 +47,8 @@ import {
 } from '../../lib/chat/attachments';
 import { MAX_UPLOAD_REQUEST_BYTES } from '../../lib/attachments/uploadRules';
 import ChatVoice from './ChatVoice';
+import ChatExpresiones from './ChatExpresiones';
+import type { MediaParaEnviar } from './useChatConversation';
 import type { ChatReplyToDto } from '../../lib/chat/client';
 
 /**
@@ -61,6 +65,8 @@ const LETTERFX_MAX_CHARS = 600;
  * DISPOSICIÓN: una sola fila, como WhatsApp — caja (con el clip adentro) y el
  * botón de enviar al lado. El panel de emojis se quitó el 2026-09-09: el
  * teclado del sistema ya trae los suyos y ese botón solo robaba ancho.
+ * Volvió el 2026-10-20, ya como en Telegram y WhatsApp: un botón al lado del
+ * clip que abre Emoji | Stickers | GIF (ChatExpresiones), pedido de Nicolás.
  * Antes eran tres filas apiladas (barra de siete botones, caja de dos renglones
  * mínimos y el renglón del recordatorio con el botón de enviar): unos 155 px que
  * le quitaba a la conversación. Ahora son ~55 px, unos tres renglones más de
@@ -183,12 +189,11 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
    */
   draftKey?: string | null;
   /**
-   * Abre el selector de stickers y GIF (2026-10-20). Sin esto la opción no
-   * aparece en el menú del clip.
+   * Envía un sticker o un GIF (2026-10-20). Con esto aparece el botón de
+   * emoji/stickers/GIF AL LADO del clip (ChatExpresiones). Sin esto (p. ej. un
+   * proyecto de solo lectura) el botón no aparece.
    */
-  onAbrirStickers?: () => void;
-  /** Texto de esa opción: «Stickers y GIF» si el servidor tiene GIF. */
-  etiquetaStickers?: string;
+  onEnviarMedia?: (media: MediaParaEnviar) => void;
 }>(function ChatComposer(
   {
     onSend,
@@ -201,8 +206,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     onQuitarCita,
     voiceConversationId,
     draftKey = null,
-    onAbrirStickers,
-    etiquetaStickers = 'Stickers',
+    onEnviarMedia,
   },
   ref
 ) {
@@ -256,6 +260,14 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  /*
+   * Panel de Emoji | Stickers | GIF (2026-10-20), con botón propio al lado del
+   * clip. En el celular (≤ 768 px, el mismo corte del resto del chat) es una
+   * hoja DENTRO del compositor que reemplaza al teclado, como WhatsApp y
+   * Telegram; en escritorio, un globo encima de la caja.
+   */
+  const [expresiones, setExpresiones] = useState(false);
+  const enCelular = Boolean(useMediaQuery('(max-width: 768px)'));
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   /* ─────────────────── Autocompletado de menciones (@) ────────────────── */
@@ -615,11 +627,6 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         >
           Adjuntar archivos
         </Menu.Item>
-        {onAbrirStickers && (
-          <Menu.Item leftSection={<IconSticker size={14} />} onClick={onAbrirStickers}>
-            {etiquetaStickers}
-          </Menu.Item>
-        )}
         <Menu.Divider />
         <Menu.Label>Formato</Menu.Label>
         <Menu.Item
@@ -661,6 +668,103 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
       </Menu.Dropdown>
     </Menu>
   );
+
+  /* ───── Panel de Emoji | Stickers | GIF (2026-10-20) ───── */
+
+  // Inserta el emoji donde está el cursor (o reemplaza la selección). En el
+  // celular NO se enfoca la caja: eso abriría el teclado encima del panel.
+  const insertarEmoji = useCallback(
+    (emoji: string) => {
+      const area = textareaRef.current;
+      const actual = valorRef.current;
+      const inicio = area?.selectionStart ?? actual.length;
+      const fin = area?.selectionEnd ?? actual.length;
+      const siguiente = `${actual.slice(0, inicio)}${emoji}${actual.slice(fin)}`;
+      if (siguiente.length > MAX_USER_MESSAGE_CHARS) return;
+      setValue(siguiente);
+      const pos = inicio + emoji.length;
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        if (!enCelular) el.focus({ preventScroll: true });
+        el.setSelectionRange(pos, pos);
+      });
+    },
+    [enCelular]
+  );
+
+  const enviarMedia = useCallback(
+    (media: MediaParaEnviar) => {
+      onEnviarMedia?.(media);
+      // En escritorio el globo se cierra al enviar; en el celular la hoja
+      // queda abierta, como en WhatsApp, para mandar otro si se quiere.
+      if (!enCelular) setExpresiones(false);
+    },
+    [onEnviarMedia, enCelular]
+  );
+
+  const alternarExpresiones = useCallback(() => {
+    const abrir = !expresiones;
+    if (enCelular) {
+      if (abrir) {
+        // El panel reemplaza al teclado: se suelta el foco para cerrarlo.
+        textareaRef.current?.blur();
+      } else {
+        // Volver al teclado: el panel se va y la caja recibe el foco.
+        requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
+      }
+    }
+    setExpresiones(abrir);
+  }, [expresiones, enCelular]);
+
+  const panelAbiertoEnCelular = expresiones && enCelular;
+
+  const iconoExpresiones = (
+    <ActionIcon
+      variant={expresiones ? 'light' : 'subtle'}
+      color='gray'
+      size={34}
+      radius='xl'
+      disabled={disabled}
+      aria-label={panelAbiertoEnCelular ? 'Volver al teclado' : 'Emojis, stickers y GIF'}
+      title={panelAbiertoEnCelular ? 'Volver al teclado' : 'Emojis, stickers y GIF'}
+      aria-expanded={expresiones}
+      data-testid='chat-boton-expresiones'
+      onMouseDown={(event) => {
+        // En escritorio la caja conserva el foco (y el cursor) al abrir.
+        if (!enCelular && document.activeElement === textareaRef.current) event.preventDefault();
+      }}
+      onClick={alternarExpresiones}
+    >
+      {panelAbiertoEnCelular ? <IconKeyboard size={19} /> : <IconMoodSmile size={19} />}
+    </ActionIcon>
+  );
+
+  const botonExpresiones = !onEnviarMedia ? null : enCelular ? (
+    iconoExpresiones
+  ) : (
+    <Popover
+      opened={expresiones}
+      onChange={setExpresiones}
+      position='top-end'
+      offset={10}
+      width={380}
+      shadow='md'
+      radius='md'
+      withArrow
+      trapFocus={false}
+      returnFocus={false}
+    >
+      <Popover.Target>{iconoExpresiones}</Popover.Target>
+      <Popover.Dropdown className='chat-surface chat-expresiones-globo' p='sm'>
+        {expresiones && <ChatExpresiones alto={320} onEmoji={insertarEmoji} onEnviar={enviarMedia} />}
+      </Popover.Dropdown>
+    </Popover>
+  );
+
+  // Botones dentro de la caja: emoji/stickers (si hay), clip y voz (si hay).
+  const botonesDentro = 1 + (onEnviarMedia ? 1 : 0) + (voiceConversationId ? 1 : 0);
+  const anchoDentro = 42 * botonesDentro;
 
   return (
     <Box className={`chat-composer${letterFxActive ? ' chat-composer--letterfx-active' : ''}`}>
@@ -790,7 +894,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         {preview ? (
           <Box
             className='chat-composer__preview'
-            style={{ minHeight: 42, paddingRight: voiceConversationId ? 84 : 42 }}
+            style={{ minHeight: 42, paddingRight: anchoDentro }}
             onDoubleClick={() => setPreview(false)}
           >
             <ChatMarkdown content={value} />
@@ -813,6 +917,11 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
               }
             }}
             onBlur={() => setMencionAbierta(false)}
+            // En el celular, tocar la caja con el panel abierto vuelve al
+            // teclado (el panel lo estaba reemplazando).
+            onFocus={() => {
+              if (enCelular) setExpresiones(false);
+            }}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             placeholder={placeholder}
@@ -850,15 +959,16 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
                encimen los dos botones. */
             rightSection={
               <Group gap={0} wrap='nowrap'>
+                {botonExpresiones}
                 {menuClip}
                 {voiceConversationId && (
                   <ChatVoice key={voiceConversationId} conversationId={voiceConversationId} />
                 )}
               </Group>
             }
-            rightSectionWidth={voiceConversationId ? 84 : 42}
+            rightSectionWidth={anchoDentro}
             rightSectionPointerEvents='all'
-            styles={{ input: { paddingRight: voiceConversationId ? 84 : 42 } }}
+            styles={{ input: { paddingRight: anchoDentro } }}
           />
           {letterFxActive && <ComposerLetterFx textareaRef={textareaRef} value={value} />}
           </Box>
@@ -896,6 +1006,13 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           </ActionIcon>
         </Tooltip>
       </Group>
+
+      {/* Hoja del celular: ocupa el lugar del teclado, debajo de la caja. */}
+      {panelAbiertoEnCelular && (
+        <Box className='chat-expresiones-hoja'>
+          <ChatExpresiones alto='min(34dvh, 280px)' onEmoji={insertarEmoji} onEnviar={enviarMedia} />
+        </Box>
+      )}
 
       {/* NO va con `hidden`. Con `hidden` (o sea `display:none`) el input no se
           renderiza, y varios navegadores móviles se niegan a abrir el selector

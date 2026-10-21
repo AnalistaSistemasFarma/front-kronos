@@ -56,8 +56,8 @@ import {
 import { registrarHiloAbierto, soltarHiloAbierto } from '../../lib/chat/message-sound';
 import type { ChatReplyToDto } from '../../lib/chat/client';
 import { BotonReaccionar, FilaReacciones, HojaMensaje } from './ChatReactions';
-import ChatMediaPicker, { useGifDisponible } from './ChatMediaPicker';
 import type { MediaParaEnviar } from './useChatConversation';
+import StickerAnimado from './StickerAnimado';
 
 /**
  * GIF o STICKER de un mensaje (2026-10-20). La imagen sale SIEMPRE de la
@@ -69,6 +69,20 @@ function MediaDelMensaje({ message }: { message: ChatMessageDto }) {
   const media = message.media;
   if (!media) return null;
   if (media.kind === 'sticker') {
+    // Animado (2026-10-20): en bucle mientras se ve, quieto fuera de pantalla
+    // y con prefers-reduced-motion (StickerAnimado).
+    if (media.animated && media.poster) {
+      return (
+        <StickerAnimado
+          src={media.src}
+          poster={media.poster}
+          alt={`Sticker: ${media.title}`}
+          title={media.title}
+          size={128}
+          className='chat-sticker'
+        />
+      );
+    }
     return (
       // eslint-disable-next-line @next/next/no-img-element -- imagen local o del propio servidor
       <img
@@ -1156,14 +1170,11 @@ export default function ChatThread({
   const abrirHoja = useCallback((message: ChatMessageDto) => setIdHoja(message.id), []);
   const mensajeHoja = idHoja === null ? null : (thread.messages.find((m) => m.id === idHoja) ?? null);
 
-  const [selectorMedia, setSelectorMedia] = useState(false);
-  const abrirStickers = useCallback(() => setSelectorMedia(true), []);
-  const cerrarStickers = useCallback(() => setSelectorMedia(false), []);
-  const gifDisponible = useGifDisponible(active && !composerDisabled);
+  // El panel Emoji | Stickers | GIF vive en el compositor (botón al lado del
+  // clip, 2026-10-20); aquí solo se envía.
   const enviarMediaHilo = thread.sendMedia;
   const enviarMedia = useCallback(
     async (media: MediaParaEnviar) => {
-      setSelectorMedia(false);
       usuarioMovioRef.current = false;
       stickToBottomRef.current = true;
       setStickToBottom(true);
@@ -1172,6 +1183,7 @@ export default function ChatThread({
     },
     [enviarMediaHilo, cita]
   );
+  const enviarMediaCompositor = useCallback((media: MediaParaEnviar) => void enviarMedia(media), [enviarMedia]);
 
   /** Solo reaccionamos si lo que se arrastra son ARCHIVOS (no texto ni enlaces). */
   const dragTraeArchivos = (event: React.DragEvent) =>
@@ -1420,8 +1432,7 @@ export default function ChatThread({
                   : `Escríbale a ${agent?.displayName ?? 'el asistente'}…`
           }
           menciones={menciones}
-          onAbrirStickers={abrirStickers}
-          etiquetaStickers={gifDisponible ? 'Stickers y GIF' : 'Stickers'}
+          onEnviarMedia={soloLectura ? undefined : enviarMediaCompositor}
         />
       </Box>
       )}
@@ -1433,9 +1444,6 @@ export default function ChatThread({
         onCitar={soloLectura ? undefined : citar}
         puedeReaccionar={!soloLectura}
       />
-      {!soloLectura && (
-        <ChatMediaPicker abierto={selectorMedia} onCerrar={cerrarStickers} onEnviar={(m) => void enviarMedia(m)} />
-      )}
     </Box>
   );
 }

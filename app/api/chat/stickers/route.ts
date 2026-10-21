@@ -1,5 +1,5 @@
 import { prisma } from '../../../../lib/prisma';
-import { STICKERS_GSS, urlStickerGss } from '../../../../lib/chat/stickers-catalog';
+import { PAQUETES_PROPIOS, PAQUETE_EMPRESA, todosLosStickersPropios } from '../../../../lib/chat/stickers-paquetes';
 import { gifConfig } from '../../../../lib/chat/gif';
 import { accesoAMedia } from '../../../../lib/chat/media-access';
 import { tablaAusente } from '../../../../lib/chat/message-extras';
@@ -11,12 +11,19 @@ export const dynamic = 'force-dynamic';
  * Catálogo del selector de stickers y GIF (2026-10-20).
  *
  *   GET /api/chat/stickers
- *     -> { gif: boolean, stickers: [{ key, provider, code?, idSticker?, label, src }] }
+ *     -> { gif: boolean,
+ *          packs: [{ id, nombre }],
+ *          stickers: [{ key, provider, pack, code?, idSticker?, label, src, animated, poster }] }
  *
  * `gif` dice si la pestaña de GIF va (hay llave de GIPHY). Los stickers son el
  * paquete propio de GSS (archivos versionados) más los que un administrador
  * cargue para las empresas de quien pregunta (tabla chat_sticker; si la tabla
- * aún no existe, solo el paquete propio). Se pide al abrir el selector, no en
+ * aún no existe, solo el paquete propio).
+ *
+ * Desde el 2026-10-20 hay varios PAQUETES (barra de paquetes del panel, como
+ * Telegram): 'animados' (Noto Emoji Animation, WebP animado), 'gss' (el
+ * estático del #698) y 'empresa' (si hay alguno cargado). `animated` y
+ * `poster` le dicen al panel cuáles se mueven y cuál es su cuadro fijo. Se pide al abrir el selector, no en
  * cada vuelta del sondeo.
  */
 export async function GET() {
@@ -26,16 +33,29 @@ export async function GET() {
     const acceso = await accesoAMedia(user);
     if (!acceso.ok) return forbidden('No tiene habilitado el chat.');
 
-    const propios = STICKERS_GSS.map((s) => ({
+    const propios = todosLosStickersPropios().map((s) => ({
       key: `gss:${s.code}`,
       provider: 'gss' as const,
+      pack: s.paquete,
       code: s.code,
       label: s.label,
       keywords: s.keywords,
-      src: urlStickerGss(s.code),
+      src: s.src,
+      animated: s.animated,
+      poster: s.poster,
     }));
 
-    let deEmpresa: { key: string; provider: 'empresa'; idSticker: number; label: string; keywords: string; src: string }[] = [];
+    let deEmpresa: {
+      key: string;
+      provider: 'empresa';
+      pack: 'empresa';
+      idSticker: number;
+      label: string;
+      keywords: string;
+      src: string;
+      animated: false;
+      poster: null;
+    }[] = [];
     try {
       const filas = await prisma.chatSticker.findMany({
         where: {
@@ -49,16 +69,21 @@ export async function GET() {
       deEmpresa = filas.map((f) => ({
         key: `empresa:${f.id_sticker}`,
         provider: 'empresa' as const,
+        pack: 'empresa' as const,
         idSticker: f.id_sticker,
         label: f.label,
         keywords: f.keywords ?? '',
         src: `/api/chat/stickers/${f.id_sticker}`,
+        // Un WebP o GIF animado de la empresa se mueve solo; no hay cuadro fijo.
+        animated: false as const,
+        poster: null,
       }));
     } catch (error) {
       if (!tablaAusente(error)) throw error;
     }
 
-    return jsonNoStore({ gif: gifConfig().enabled, stickers: [...propios, ...deEmpresa] });
+    const packs = [...PAQUETES_PROPIOS, ...(deEmpresa.length ? [PAQUETE_EMPRESA] : [])];
+    return jsonNoStore({ gif: gifConfig().enabled, packs, stickers: [...propios, ...deEmpresa] });
   } catch (error) {
     return serverError('GET /api/chat/stickers', error);
   }
