@@ -1,0 +1,215 @@
+/*
+ * Distribución de carga: mismo lenguaje de los paneles (components/ui/panel) y la barrita
+ * animada de las listas (requestProgressBar.module.css). Va dentro de `panelStyles.root`,
+ * que trae los colores claro/oscuro (--pn-*).
+ */
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px 12px;
+}
+
+@media (min-width: 48em) {
+  .body {
+    padding: 20px 20px;
+  }
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.blockHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin: 0 4px 10px;
+}
+
+.blockTitle {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.blockHint {
+  font-size: 13px;
+  color: var(--pn-muted);
+}
+
+/* ---------- Carga por persona ---------- */
+
+.memberRow {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.memberRow + .memberRow {
+  border-top: 1px solid var(--pn-hairline);
+}
+
+.memberName {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.memberSub {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--pn-muted);
+}
+
+.loadBar {
+  margin-top: 8px;
+}
+
+/* La barrita de las listas, a todo lo ancho de la fila. */
+.loadBar > span {
+  max-width: none;
+}
+
+.memberPercent {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.memberSide {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+/* Celular: el botón y la etiqueta bajan debajo de la barra. */
+@media (max-width: 600px) {
+  .memberRow {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+  }
+  .memberSide {
+    grid-column: 2 / -1;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+
+/* ---------- Tareas ---------- */
+
+.selectAll {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--pn-hairline);
+}
+
+.taskRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  transition: background-color 150ms ease;
+}
+
+.taskRow + .taskRow {
+  border-top: 1px solid var(--pn-hairline);
+}
+
+.taskSelected {
+  background: color-mix(in srgb, var(--pn-info) 10%, transparent);
+  box-shadow: inset 3px 0 0 var(--pn-info);
+}
+
+.taskLocked {
+  background: var(--pn-fill);
+}
+
+.taskMain {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 14px;
+}
+
+.taskPick {
+  width: 28px;
+  padding-top: 2px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+}
+
+.taskTitle {
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.taskSubject {
+  font-size: 13px;
+  color: var(--pn-muted);
+  overflow-wrap: anywhere;
+}
+
+.taskMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--pn-muted);
+}
+
+.taskDetails {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 4px;
+  font-size: 12px;
+  color: var(--pn-muted);
+}
+
+.empty {
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--pn-muted);
+}
+
+/* ---------- Barra de acción ---------- */
+
+.actionBar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--pn-hairline);
+  background: var(--pn-card);
+}
+
+.actionCount {
+  font-size: 13px;
+  color: var(--pn-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .taskRow {
+    transition: none;
+  }
+}
