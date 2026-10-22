@@ -2,10 +2,11 @@
 
 import React, { useEffect, useState } from 'react';
 import { Alert, Box, Button, Group, Loader, Stack, Table, Text, Title } from '@mantine/core';
-import { IconHierarchy2, IconPaperclip } from '@tabler/icons-react';
+import { IconHierarchy2, IconHistory, IconPaperclip } from '@tabler/icons-react';
 import { stateColor, stateLabel } from '../../../../lib/purchases/fields';
 import AttachmentsPanel from './AttachmentsPanel';
 import TracePanel from './TracePanel';
+import ExecutionHistoryPanel from './ExecutionHistoryPanel';
 
 /**
  * Vista interna de la solicitud de compra con el MISMO diseño que SAPSEND
@@ -55,7 +56,7 @@ export default function PurchaseRequestDetail({ requestId }: { requestId: string
   const [purchase, setPurchase] = useState<Purchase | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [panel, setPanel] = useState<'anexos' | 'estado' | null>(null);
+  const [panel, setPanel] = useState<'anexos' | 'estado' | 'historial' | null>(null);
 
   useEffect(() => {
     if (!requestId) {
@@ -118,12 +119,22 @@ export default function PurchaseRequestDetail({ requestId }: { requestId: string
         >
           Estado
         </Button>
+        <Button
+          size="xs"
+          color="indigo"
+          variant={panel === 'historial' ? 'filled' : 'light'}
+          leftSection={<IconHistory size={14} />}
+          onClick={() => setPanel((p) => (p === 'historial' ? null : 'historial'))}
+        >
+          Historial
+        </Button>
       </Group>
 
       {panel === 'anexos' && (
         <AttachmentsPanel companyId={purchase.companyId} docEntry={purchase.docEntry} canUpload={false} />
       )}
       {panel === 'estado' && <TracePanel companyId={purchase.companyId} docEntry={purchase.docEntry} />}
+      {panel === 'historial' && requestId != null && <ExecutionHistoryPanel requestId={requestId} />}
 
       <div>
         <Title order={2}>{titulo}</Title>
