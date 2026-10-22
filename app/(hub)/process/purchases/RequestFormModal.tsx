@@ -25,15 +25,15 @@ export interface EditTarget {
   docEntry: number;
 }
 
-type LineField =
+export type LineField =
   | 'ItemCode' | 'ItemDescription' | 'LineVendor' | 'U_NombreProveedor' | 'Quantity' | 'UnitPrice'
   | 'TaxCode' | 'AccountCode' | 'CostingCode' | 'WarehouseCode' | 'ProjectCode' | 'Currency'
   | 'RequiredDate' | 'U_Dest_compra' | 'U_HBT_UndMedida' | 'U_version';
 
-type Line = Partial<Record<LineField, string | number>>;
+export type Line = Partial<Record<LineField, string | number>>;
 
 /** Columnas del formulario; `required` = obligatorio en el servidor. */
-const COLUMNS: { field: LineField; label: string; width: number; numeric?: boolean; required?: boolean }[] = [
+export const COLUMNS: { field: LineField; label: string; width: number; numeric?: boolean; required?: boolean }[] = [
   { field: 'ItemCode', label: 'Articulo', width: 110 },
   { field: 'ItemDescription', label: 'Descripcion', width: 220, required: true },
   { field: 'LineVendor', label: 'Cod. proveedor', width: 120 },
@@ -52,7 +52,7 @@ const COLUMNS: { field: LineField; label: string; width: number; numeric?: boole
   { field: 'U_version', label: 'Version', width: 80 },
 ];
 
-interface FieldError {
+export interface FieldError {
   field: string;
   error: string;
 }

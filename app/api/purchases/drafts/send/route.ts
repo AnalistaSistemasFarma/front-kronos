@@ -29,7 +29,13 @@ export async function POST(request: NextRequest) {
 
     const sap = await sapLogin(company.endpoint);
     try {
-      const result = await sendToAuthorize({ sap, companyId, docEntry, userEmail: session.user.email });
+      const result = await sendToAuthorize({
+        sap,
+        companyId,
+        docEntry,
+        userEmail: session.user.email,
+        subject: typeof body.subject === 'string' ? body.subject : null,
+      });
       if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
       return NextResponse.json(result);
     } finally {

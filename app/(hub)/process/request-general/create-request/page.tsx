@@ -8,6 +8,7 @@ import {
   buildBoardWorkbook,
 } from '@/lib/request-general/exportBoardExcel';
 import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
+import PurchaseInlineForm from '../../purchases/PurchaseInlineForm';
 import {
   Paper,
   Stack,
@@ -202,6 +203,7 @@ function RequestBoard() {
   const [createLoading, setCreateLoading] = useState(false);
   // Solicitud de compra: se captura en el formulario de Compras (lineas + SAP), no aqui.
   const [isPurchaseProcess, setIsPurchaseProcess] = useState(false);
+  const [purchaseNotice, setPurchaseNotice] = useState<{ ok: boolean; message: string } | null>(null);
   const isSubmittingRef = useRef(false);
 
   const linkedProcessParam = searchParams.get('linkedProcess');
@@ -1820,6 +1822,17 @@ function RequestBoard() {
           </div>
         </Card>
 
+        {purchaseNotice && (
+          <Alert
+            color={purchaseNotice.ok ? 'green' : 'yellow'}
+            withCloseButton
+            onClose={() => setPurchaseNotice(null)}
+            mb='md'
+          >
+            {purchaseNotice.message}
+          </Alert>
+        )}
+
         <Modal
           opened={modalOpened}
           onClose={() => {
@@ -2041,23 +2054,20 @@ function RequestBoard() {
             </Grid>
 
             {isPurchaseProcess && (
-              <Alert color='blue' variant='light' title='Solicitud de compra'>
-                <Text size='sm'>
-                  La solicitud de compra se diligencia en su propio formulario, con las líneas
-                  (artículo, cantidad, IVA, cuenta y norma de reparto) validadas contra SAP. Al
-                  enviarla a autorizar aparecerá aquí, en Mis solicitudes.
-                </Text>
-                <Button
-                  mt='sm'
-                  onClick={() =>
-                    router.push(`/process/purchases?nueva=1&companyId=${formData.company}`)
-                  }
-                >
-                  Abrir formulario de solicitud de compra
-                </Button>
-              </Alert>
+              <PurchaseInlineForm
+                companyId={formData.company}
+                subject={formData.subject}
+                onDone={({ ok, message }) => {
+                  setModalOpened(false);
+                  setFormData({ company: '', subject: '', category: '', process: '', descripcion: '', url: '' });
+                  setPurchaseNotice({ ok, message });
+                  fetchTickets();
+                }}
+              />
             )}
 
+            {!isPurchaseProcess && (
+              <>
             {(() => {
               const processName = (
                 filteredProcesses.find((p) => p.value === formData.process)?.label || ''
@@ -2360,6 +2370,9 @@ function RequestBoard() {
               />
             </div>
 
+              </>
+            )}
+
             <Divider />
 
             <Group justify='flex-end' gap='md'>
@@ -2378,16 +2391,18 @@ function RequestBoard() {
               >
                 Cancelar
               </Button>
+              {!isPurchaseProcess && (
               <Button
                 onClick={handleCreateTicketWithValidation}
                 loading={createLoading}
-                disabled={createLoading || isPurchaseProcess}
+                disabled={createLoading}
                 size='md'
                 leftSection={<IconPlus size={16} />}
                 className='bg-blue-600 hover:bg-blue-700'
               >
                 Crear Solicitud
               </Button>
+              )}
             </Group>
           </Stack>
         </Modal>

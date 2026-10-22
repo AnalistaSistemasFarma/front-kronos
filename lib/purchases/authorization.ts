@@ -46,7 +46,7 @@ const createAndSendNotificationsTyped = createAndSendNotifications as unknown as
 const ACTIVE = ['pending', 'publishing', 'publish_error'];
 
 /** Conexion SAP de la empresa para acciones del sistema (no dependen del permiso del usuario). */
-async function companySap(companyId: number): Promise<SapSession> {
+export async function companySap(companyId: number): Promise<SapSession> {
   const company = await prisma.company.findUnique({
     where: { id_company: companyId },
     include: { sap_endpoints: true },
@@ -76,6 +76,8 @@ export async function sendToAuthorize(params: {
   companyId: number;
   docEntry: number;
   userEmail: string;
+  /** Asunto escrito en «Mis solicitudes» (opcional): se antepone al de la solicitud del workflow. */
+  subject?: string | null;
 }): Promise<SendResult> {
   const { sap, companyId, docEntry, userEmail } = params;
 
@@ -103,7 +105,10 @@ export async function sendToAuthorize(params: {
   if (!user) return { ok: false, status: 401, error: 'Usuario no encontrado.' };
 
   const total = draft.DocTotal != null ? ` · Total ${Number(draft.DocTotal).toLocaleString('es-CO')} ${draft.DocCurrency ?? ''}` : '';
-  const subject = `Solicitud de compra · Borrador #${docEntry}`;
+  const userSubject = (params.subject ?? '').trim().slice(0, 200);
+  const subject = userSubject
+    ? `${userSubject} · Solicitud de compra #${docEntry}`
+    : `Solicitud de compra · Borrador #${docEntry}`;
   const { id_request: idRequest, processEmail, processEmails, taskEmails } = await createGeneralRequest({
     company: companyId,
     subject,
