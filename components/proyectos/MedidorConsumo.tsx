@@ -15,8 +15,9 @@ export const SONDEO_CONSUMO_MS = 60_000;
  * GET /api/proyectos/<id>/consumo al abrir y cada 60 s mientras la pestaña está
  * visible (y al volver a ella). Una falla deja el último dato que hubo.
  */
-export function useConsumoAnthropic(idProject: number): CuotaAgenteDto[] {
+export function useConsumoAnthropic(idProject: number): { agentes: CuotaAgenteDto[]; cargado: boolean } {
   const [agentes, setAgentes] = useState<CuotaAgenteDto[]>([]);
+  const [cargado, setCargado] = useState(false);
   useEffect(() => {
     if (!idProject) return;
     let vivo = true;
@@ -26,7 +27,9 @@ export function useConsumoAnthropic(idProject: number): CuotaAgenteDto[] {
       ctrl?.abort();
       ctrl = new AbortController();
       const r = await apiGet<{ agents?: CuotaAgenteDto[] }>(`/api/proyectos/${idProject}/consumo`, '', ctrl.signal);
-      if (vivo && r.ok) setAgentes(Array.isArray(r.data.agents) ? r.data.agents : []);
+      if (!vivo || r.status === 0) return;
+      if (r.ok) setAgentes(Array.isArray(r.data.agents) ? r.data.agents : []);
+      setCargado(true);
     };
     void cargar();
     const id = window.setInterval(() => void cargar(), SONDEO_CONSUMO_MS);
@@ -41,7 +44,7 @@ export function useConsumoAnthropic(idProject: number): CuotaAgenteDto[] {
       document.removeEventListener('visibilitychange', alVolver);
     };
   }, [idProject]);
-  return agentes;
+  return { agentes, cargado };
 }
 
 function Barra({ barra, testId }: { barra: VistaBarra; testId: string }) {
@@ -71,9 +74,15 @@ function Barra({ barra, testId }: { barra: VistaBarra; testId: string }) {
  * hora se libera. Verde; amarillo desde el 70 %; rojo desde el 90 %.
  *
  * `compacto` (celular y tableta): las dos barras lado a lado para no robar alto.
- * Sin dato no pinta nada (el puente todavía no ha reportado o la tabla no existe).
+ *
+ * FIJO Y SIEMPRE VISIBLE (aclaración de Nicolás, 2026-10-22: «es algo estático,
+ * para que todos los integrantes del grupo puedan verlo»): va en el encabezado,
+ * fuera de menús y pestañas, igual para todos los miembros sin mirar el rol. Sin
+ * dato todavía, muestra la caja con «Sin medición todavía» en vez de esconderse.
+ * Lo esencial (porcentajes, reinicios y «token compartido») está a la vista; el
+ * tooltip solo agrega la hora exacta de la medición.
  */
-export default function MedidorConsumo({ agentes, compacto = false }: { agentes: CuotaAgenteDto[]; compacto?: boolean }) {
+export default function MedidorConsumo({ agentes, compacto = false, cargado = true }: { agentes: CuotaAgenteDto[]; compacto?: boolean; cargado?: boolean }) {
   // Repinta cada minuto: el «hace X min» y el «se reinició» dependen de la hora.
   const [ahora, setAhora] = useState(() => new Date());
   useEffect(() => {
@@ -81,8 +90,22 @@ export default function MedidorConsumo({ agentes, compacto = false }: { agentes:
     return () => window.clearInterval(id);
   }, []);
 
-  if (agentes.length === 0) return null;
   const varios = agentes.length > 1;
+
+  if (agentes.length === 0) {
+    return (
+      <Box className={`${compacto ? css.medidorCompacto : css.medidor}`} data-testid='medidor-consumo'>
+        <Box className={css.medidorCaja} data-testid='medidor-consumo-vacio'>
+          <Group gap={6} wrap='nowrap'>
+            <IconGauge size={14} color='var(--mantine-color-dimmed)' aria-hidden />
+            <Text size='xs' c='dimmed' className={css.truncar}>
+              Consumo de Anthropic · {cargado ? 'sin medición todavía' : 'cargando…'}
+            </Text>
+          </Group>
+        </Box>
+      </Box>
+    );
+  }
 
   return (
     <Stack gap={8} className={compacto ? css.medidorCompacto : css.medidor} data-testid='medidor-consumo'>
@@ -103,7 +126,7 @@ export default function MedidorConsumo({ agentes, compacto = false }: { agentes:
               <Group gap={6} wrap='nowrap' mb={6}>
                 <IconGauge size={14} color='var(--mantine-color-dimmed)' aria-hidden />
                 <Text size='xs' c='dimmed' className={css.truncar}>
-                  Consumo de Anthropic{varios ? ` · ${a.displayName}` : ''}
+                  Consumo de Anthropic{varios ? ` · ${a.displayName}` : ''} · token compartido
                   {v.vieja ? ' · desactualizado' : ''}
                 </Text>
               </Group>
