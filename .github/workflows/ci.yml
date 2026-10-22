@@ -519,6 +519,14 @@ jobs:
           echo "IF OBJECT_ID(N'dbo.chat_sticker_personal', N'U') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'chat_sticker_personal_user_idx') OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'chat_sticker_personal_propuesta_idx') OR (SELECT COUNT(*) FROM sys.check_constraints WHERE name IN (N'chat_sticker_personal_estado_ck', N'chat_sticker_personal_aprobado_ck')) <> 2 THROW 50000, N'La migración de Mis stickers no dejó la tabla, los índices o los CHECK.', 1;" > /tmp/mis-stickers-ok.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/mis-stickers-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-21-chat-stickers-personales-PROD.sql; then echo "El script de PROD de Mis stickers debió negarse en kronos_ci"; exit 1; fi
+          # Medidor del consumo de Anthropic (2026-10-22): migración y PRUEBAS dos veces (idempotencia), tabla y CHECK, y PROD que se niega.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261022120000_chat_agent_quota/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261022120000_chat_agent_quota/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-22-chat-agent-quota-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-22-chat-agent-quota-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.chat_agent_quota', N'U') IS NULL OR (SELECT COUNT(*) FROM sys.check_constraints WHERE name IN (N'chat_agent_quota_fuente_ck', N'chat_agent_quota_rango_ck')) <> 2 THROW 50000, N'La migración del medidor de consumo no dejó la tabla o los CHECK.', 1;" > /tmp/cuota-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/cuota-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-22-chat-agent-quota-PROD.sql; then echo "El script de PROD del medidor de consumo debió negarse en kronos_ci"; exit 1; fi
           # Bitácora · actividades de texto libre (2026-10-17): migración y PRUEBAS dos veces, reversa y otra vez PRUEBAS (idempotencia ida y vuelta).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017200000_bitacora_proceso_texto_libre/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017200000_bitacora_proceso_texto_libre/migration.sql
@@ -562,6 +570,11 @@ jobs:
             npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
           }
           # De la más nueva a la más antigua…
+          # Medidor del consumo de Anthropic (2026-10-22): ida y vuelta (reversa dos veces, comprobación y la migración otra vez).
+          reversa prisma/manual/2026-10-22-chat-agent-quota-reversa.sql
+          echo "IF OBJECT_ID(N'dbo.chat_agent_quota', N'U') IS NOT NULL THROW 50000, N'La reversa del medidor de consumo no quitó su tabla.', 1;" > /tmp/cuota-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/cuota-quitado.sql
+          migra 20261022120000_chat_agent_quota
           # Permisos de los agentes de Proyectos (2026-10-20): con la política de prueba, sin la bandera debe negarse; luego ida y vuelta.
           # Va PRIMERO: sus tablas apuntan a chat_project (la reversa de la F1 no podría borrarla). Se vuelve a migrar al final, con la F1.
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-20-proyectos-permisos-agentes-reversa.sql; then echo "La reversa de permisos de los agentes debió negarse sin su bandera"; exit 1; fi

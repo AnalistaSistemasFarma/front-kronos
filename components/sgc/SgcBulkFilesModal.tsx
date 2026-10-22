@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Modal, Button, Group, Stack, Alert, Text, FileButton, Table, ScrollArea, Progress, Badge } from '@mantine/core';
 import { IconUpload, IconCircleCheck, IconAlertTriangle, IconEye, IconAdjustments } from '@tabler/icons-react';
 import { sgcSend } from './useSgcFetch';
-import SgcSheetSettingsModal from './SgcSheetSettingsModal';
+import SgcSheetSettingsModal, { bulkFileSheetSource } from './SgcSheetSettingsModal';
 import { describeSheetSettings, type SgcSheetSettings } from '../../lib/sgc/sheetSettings';
 
 /**
@@ -45,6 +45,8 @@ export default function SgcBulkFilesModal({ opened, onClose, idCompany, onLoaded
   // 2026-10-21: ajustes de presentación por archivo Excel (nombre → ajustes); sin entrada = automático.
   const [sheetSettings, setSheetSettings] = useState<Record<string, SgcSheetSettings>>({});
   const [adjusting, setAdjusting] = useState<File | null>(null);
+  // Se arma al abrir el ajuste de un archivo (con los ajustes que ya tenía); estable mientras la ventana sigue abierta.
+  const adjustingSource = useMemo(() => (adjusting ? bulkFileSheetSource(idCompany, adjusting, sheetSettings[adjusting.name] ?? null) : null), [adjusting, idCompany]);
 
   const pick = (list: File[] | null) => {
     setError(null);
@@ -210,9 +212,8 @@ export default function SgcBulkFilesModal({ opened, onClose, idCompany, onLoaded
       </Stack>
       <SgcSheetSettingsModal
         opened={Boolean(adjusting)}
-        file={adjusting}
-        idCompany={idCompany}
-        initial={adjusting ? sheetSettings[adjusting.name] ?? null : null}
+        name={adjusting?.name ?? ''}
+        source={adjustingSource}
         onClose={() => setAdjusting(null)}
         onApply={(s) =>
           setSheetSettings((prev) => {

@@ -727,6 +727,8 @@ model Agent {
   deliveries       ChatMessageDelivery[]
   statuses         ChatAgentStatus[]
   turnUsage        ChatAgentTurnUsage[]
+  // Medidor del consumo de Anthropic (2026-10-22): último cupo reportado por el puente.
+  quota            ChatAgentQuota?
   // Auditoría de agentes → Inventario (F1): back-relations requeridas por Prisma.
   inventories      AgentInventory[]
   auditFindings    AgentAuditFinding[]
@@ -1630,6 +1632,13 @@ model PortalCourse {
   /// Carpeta del curso dentro de FORMACION en SharePoint (`<slug>-<id>`).
   /// Se fija en la primera subida y no cambia si el curso se renombra.
   sp_folder_name String? @db.NVarChar(200)
+  /// Curso ELIMINADO por un formador (borrado LÓGICO; Cristian, 2026-10-22):
+  /// deja de aparecer en todas las listas, pero sus inscripciones, intentos y
+  /// certificados se conservan (los certificados siguen verificándose). Sus
+  /// archivos de SharePoint NO se tocan: la carpeta FORMACION es compartida
+  /// entre pruebas y producción. Quién y cuándo queda aquí como auditoría.
+  eliminado_at   DateTime?
+  eliminado_por  String? @db.NVarChar(255)
 
   materials    PortalCourseMaterial[]
   enrollments  PortalCourseEnrollment[]
@@ -2247,6 +2256,31 @@ model ChatAgentStatus {
 
   @@id([id_conversation, id_agent])
   @@map("chat_agent_status")
+  @@schema("dbo")
+}
+
+/// CUPO DE ANTHROPIC DEL TOKEN DEL AGENTE (2026-10-22) — cupo semanal y
+/// ventana de 5 h, tal como los reporta el puente de hilos (stream del turno o
+/// consulta mínima). UNA fila por agente que se sobrescribe: es el último
+/// estado conocido, no un histórico. Alimenta el medidor del encabezado de
+/// cada proyecto (components/proyectos/MedidorConsumo.tsx).
+model ChatAgentQuota {
+  id_agent       Int       @id
+  /// Porcentaje usado (0–100; puede pasar de 100 con excedente). NULL = no vino.
+  utilization_7d Float?
+  reset_7d       DateTime?
+  utilization_5h Float?
+  reset_5h       DateTime?
+  /// overageStatus de Anthropic ('allowed', 'rejected', …). Solo informativo.
+  overage        String?   @db.NVarChar(40)
+  /// Cuándo se midió (reloj del puente) y de dónde salió: 'turno' | 'sonda'.
+  measured_at    DateTime
+  source         String    @db.NVarChar(20)
+  updated_at     DateTime  @updatedAt
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("chat_agent_quota")
   @@schema("dbo")
 }
 

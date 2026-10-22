@@ -30,19 +30,43 @@ import {
  * servidor con esos ajustes (marcado «VISTA PREVIA», no se guarda nada);
  * «Usar estos ajustes» los deja para la carga. Solo la presentación: el texto
  * del Excel no se edita aquí (corregir el contenido es una nueva versión).
+ *
+ * 2026-10-22: la misma pantalla sirve para el BORRADOR EN EXCEL de una
+ * solicitud (documento nuevo o nueva versión): cambia solo de dónde se leen
+ * las hojas, cómo se previsualiza y qué hace «Usar estos ajustes» (allí, los
+ * guarda con la composición del documento).
  */
+
+export interface SgcSheetSettingsSource {
+  /** Hojas del Excel y los ajustes con que se abre (null = automático). */
+  load: () => Promise<{ sheets: SgcSheetInspection[]; settings: SgcSheetSettings | null }>;
+  /** PDF de la vista previa con estos ajustes (no guarda nada). */
+  preview: (settings: SgcSheetSettings) => Promise<Blob>;
+}
 
 interface Props {
   opened: boolean;
-  file: File | null;
-  idCompany: number;
-  initial: SgcSheetSettings | null;
+  /** Nombre del archivo (título de la ventana). */
+  name: string;
+  source: SgcSheetSettingsSource | null;
   onClose: () => void;
-  onApply: (settings: SgcSheetSettings | null) => void;
+  /** null = ajuste automático. Si devuelve una promesa que falla, la ventana sigue abierta con el error. */
+  onApply: (settings: SgcSheetSettings | null) => void | Promise<void>;
+  applyLabel?: string;
+  /** Aviso adicional (p. ej., que cambiar la orientación obliga a volver a ubicar las firmas). */
+  notice?: React.ReactNode;
 }
 
 function overrideFor(settings: SgcSheetSettings, name: string): SgcSheetOverride {
   return settings.sheets.find((s) => s.name === name) ?? { name, include: true, printArea: null, titleRows: null, hiddenColumns: [] };
+}
+
+/** Origen de la CARGA INICIAL: el archivo aún no está en el sistema (se envía en cada consulta y no se guarda). */
+export function bulkFileSheetSource(idCompany: number, file: File, initial: SgcSheetSettings | null): SgcSheetSettingsSource {
+  return {
+    load: async () => ({ sheets: ((await (await postExcel(idCompany, file, 'inspeccionar')).json()) as { sheets: SgcSheetInspection[] }).sheets, settings: initial }),
+    preview: async (settings) => (await postExcel(idCompany, file, 'previsualizar', settings)).blob(),
+  };
 }
 
 async function postExcel(idCompany: number, file: File, action: 'inspeccionar' | 'previsualizar', settings?: SgcSheetSettings): Promise<Response> {
@@ -59,35 +83,37 @@ async function postExcel(idCompany: number, file: File, action: 'inspeccionar' |
   return res;
 }
 
-export default function SgcSheetSettingsModal({ opened, file, idCompany, initial, onClose, onApply }: Props) {
+export default function SgcSheetSettingsModal({ opened, name, source, onClose, onApply, applyLabel = 'Usar estos ajustes', notice }: Props) {
   const [sheets, setSheets] = useState<SgcSheetInspection[] | null>(null);
   const [settings, setSettings] = useState<SgcSheetSettings>(SGC_DEFAULT_SHEET_SETTINGS);
   const [loading, setLoading] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!opened || !file) return;
+    if (!opened || !source) return;
     let cancelled = false;
     setSheets(null);
     setError(null);
-    setSettings(initial ?? { ...SGC_DEFAULT_SHEET_SETTINGS, sheets: [] });
+    setSettings({ ...SGC_DEFAULT_SHEET_SETTINGS, sheets: [] });
     setLoading(true);
-    postExcel(idCompany, file, 'inspeccionar')
-      .then((res) => res.json())
-      .then((body: { sheets: SgcSheetInspection[] }) => {
+    source
+      .load()
+      .then((body) => {
         if (cancelled) return;
         setSheets(body.sheets);
         // Cada hoja con su ajuste (los que ya traía o los automáticos).
-        setSettings((s) => ({ ...s, sheets: body.sheets.map((x) => overrideFor(s, x.name)) }));
+        const base = body.settings ?? { ...SGC_DEFAULT_SHEET_SETTINGS, sheets: [] };
+        setSettings({ ...base, sheets: body.sheets.map((x) => overrideFor(base, x.name)) });
       })
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : 'No se pudo leer el Excel'))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [opened, file, idCompany, initial]);
+  }, [opened, source]);
 
   useEffect(() => () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -110,12 +136,11 @@ export default function SgcSheetSettingsModal({ opened, file, idCompany, initial
   });
 
   const preview = async () => {
-    if (!file) return;
+    if (!source) return;
     setPreviewing(true);
     setError(null);
     try {
-      const res = await postExcel(idCompany, file, 'previsualizar', payload());
-      const url = URL.createObjectURL(await res.blob());
+      const url = URL.createObjectURL(await source.preview(payload()));
       setPreviewUrl(url);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo generar la vista previa');
@@ -124,23 +149,32 @@ export default function SgcSheetSettingsModal({ opened, file, idCompany, initial
     }
   };
 
-  const apply = () => {
+  const apply = async () => {
     const s = payload();
-    onApply(isDefaultSheetSettings(s) ? null : s);
-    onClose();
+    setApplying(true);
+    setError(null);
+    try {
+      await onApply(isDefaultSheetSettings(s) ? null : s);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudieron guardar los ajustes');
+    } finally {
+      setApplying(false);
+    }
   };
 
   const allOut = settings.sheets.length > 0 && settings.sheets.every((x) => !x.include);
 
   return (
     <>
-      <Modal opened={opened} onClose={onClose} title={`Ajustar y previsualizar · ${file?.name ?? ''}`} size='xl' data-testid='sgc-excel-ajustes'>
+      <Modal opened={opened} onClose={onClose} title={`Ajustar y previsualizar · ${name}`} size='xl' data-testid='sgc-excel-ajustes'>
         <Stack gap='sm'>
           <Alert color='blue' icon={<IconInfoCircle size={18} />}>
             <Text size='sm'>
               Estos ajustes solo cambian cómo se imprime el Excel en el PDF: orientación, tamaño, área de impresión, filas de título y columnas que salen. El texto del documento no cambia; si hay que corregirlo, solicite una nueva versión.
             </Text>
           </Alert>
+          {notice}
           {error && (
             <Alert color='red' icon={<IconAlertTriangle size={18} />} withCloseButton onClose={() => setError(null)} data-testid='sgc-excel-ajustes-error'>
               {error}
@@ -312,14 +346,14 @@ export default function SgcSheetSettingsModal({ opened, file, idCompany, initial
               <Button variant='light' leftSection={<IconEye size={16} />} onClick={() => void preview()} loading={previewing} disabled={!sheets || allOut} data-testid='sgc-excel-previsualizar'>
                 Previsualizar
               </Button>
-              <Button leftSection={<IconCheck size={16} />} onClick={apply} disabled={!sheets || allOut} data-testid='sgc-excel-usar'>
-                Usar estos ajustes
+              <Button leftSection={<IconCheck size={16} />} onClick={() => void apply()} loading={applying} disabled={!sheets || allOut} data-testid='sgc-excel-usar'>
+                {applyLabel}
               </Button>
             </Group>
           </Group>
         </Stack>
       </Modal>
-      <SgcDocumentViewerModal fileUrl={previewUrl} title={`Vista previa · ${file?.name ?? ''}`} onClose={() => setPreviewUrl(null)} />
+      <SgcDocumentViewerModal fileUrl={previewUrl} title={`Vista previa · ${name}`} onClose={() => setPreviewUrl(null)} />
     </>
   );
 }

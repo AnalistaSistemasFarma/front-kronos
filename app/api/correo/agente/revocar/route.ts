@@ -1,6 +1,6 @@
 import { revocarConcesion } from '../../../../../lib/correo/agente';
 import { agentePort } from '../../../../../lib/correo/agenteRuntime';
-import { errorResponse, getCorreoContext, jsonNoStore, readJson } from '../../_lib/context';
+import { agenteApagado, errorResponse, getCorreoContext, jsonNoStore, readJson } from '../../_lib/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +9,8 @@ export async function POST(request: Request) {
   try {
     const ctx = await getCorreoContext(request, 'creacion');
     if (ctx instanceof Response) return ctx;
+    const apagado = agenteApagado();
+    if (apagado) return apagado;
     const body = await readJson(request);
     return jsonNoStore(await revocarConcesion(ctx.deps, agentePort(), ctx.acceso, Number(body?.id), ctx.ip));
   } catch (error) {

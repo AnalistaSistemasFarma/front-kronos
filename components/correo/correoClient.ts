@@ -21,6 +21,8 @@ export interface EstadoCorreo {
     /** Eliminar (mover a Elementos eliminados con «Deshacer»): escritura y CORREO_ELIMINAR_HABILITADO. */
     eliminarHabilitado?: boolean;
     sincronizacionAutomatica: boolean;
+    /** «Consultar a un agente» encendido en el ambiente (CORREO_AGENTE_HABILITADO). */
+    agenteHabilitado?: boolean;
   };
   /** Dominios del grupo (Redactar marca en amarillo a los destinatarios externos). */
   dominiosGrupo?: string[];
