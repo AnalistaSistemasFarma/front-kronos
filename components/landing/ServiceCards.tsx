@@ -2,33 +2,73 @@
 
 import type { PointerEvent } from 'react';
 import gsap from 'gsap';
-import { IconCash, IconDeviceLaptop, IconShoppingCart, IconUsers } from '@tabler/icons-react';
+import {
+  IconBuilding,
+  IconCalculator,
+  IconCash,
+  IconCreditCard,
+  IconDeviceLaptop,
+  IconReportAnalytics,
+  IconScale,
+  IconTool,
+  IconUsers,
+} from '@tabler/icons-react';
 import styles from './landing.module.css';
 
 const SERVICES = [
   {
-    title: 'Recursos Humanos',
-    description: 'Gestión integral del talento humano, desde reclutamiento hasta desarrollo profesional.',
-    icon: IconUsers,
+    title: 'GSS',
+    description: 'Casa matriz que opera los servicios compartidos para las empresas del grupo.',
+    icon: IconBuilding,
     tint: 'linear-gradient(140deg, #5ac8fa, #113562)',
   },
   {
-    title: 'Finanzas y Contabilidad',
-    description: 'Servicios financieros completos con reporting preciso y cumplimiento normativo.',
-    icon: IconCash,
+    title: 'Finanzas y reporte',
+    description: 'Informes financieros y seguimiento de los resultados del negocio.',
+    icon: IconReportAnalytics,
     tint: 'linear-gradient(140deg, #3db6e0, #1c5a94)',
   },
   {
-    title: 'Servicios de TI',
-    description: 'Infraestructura tecnológica robusta y soporte técnico especializado.',
-    icon: IconDeviceLaptop,
+    title: 'Contabilidad',
+    description: 'Registro contable, cierres y cumplimiento de la información financiera.',
+    icon: IconCalculator,
     tint: 'linear-gradient(140deg, #2a8fc6, #0b2442)',
   },
   {
-    title: 'Compras',
-    description: 'Gestión estratégica de adquisiciones y cadena de suministro optimizada.',
-    icon: IconShoppingCart,
+    title: 'Capital de trabajo',
+    description: 'Programación de pagos, flujo de caja y disponibilidad de recursos.',
+    icon: IconCash,
     tint: 'linear-gradient(140deg, #7dd3f0, #113562)',
+  },
+  {
+    title: 'Crédito y cartera',
+    description: 'Gestión de crédito, cobro y seguimiento de la cartera de clientes.',
+    icon: IconCreditCard,
+    tint: 'linear-gradient(140deg, #5ac8fa, #1c5a94)',
+  },
+  {
+    title: 'Talento humano',
+    description: 'Gestión de las personas, desde el ingreso hasta su desarrollo.',
+    icon: IconUsers,
+    tint: 'linear-gradient(140deg, #3db6e0, #0b2442)',
+  },
+  {
+    title: 'Jurídico',
+    description: 'Acompañamiento en contratos, documentos y actuaciones del grupo.',
+    icon: IconScale,
+    tint: 'linear-gradient(140deg, #2a8fc6, #113562)',
+  },
+  {
+    title: 'Tecnología',
+    description: 'Plataformas, soporte e infraestructura para la operación diaria.',
+    icon: IconDeviceLaptop,
+    tint: 'linear-gradient(140deg, #7dd3f0, #1c5a94)',
+  },
+  {
+    title: 'Técnica',
+    description: 'Soporte de equipos, activos y la operación técnica del día a día.',
+    icon: IconTool,
+    tint: 'linear-gradient(140deg, #5ac8fa, #0b2442)',
   },
 ];
 

@@ -5,29 +5,56 @@ import gsap from 'gsap';
 import { DrawSVGPlugin } from 'gsap/DrawSVGPlugin';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { useGSAP } from '@gsap/react';
-import { IconCash, IconDeviceLaptop, IconShoppingCart, IconUsers } from '@tabler/icons-react';
+import {
+  IconBuilding,
+  IconCalculator,
+  IconCash,
+  IconCreditCard,
+  IconDeviceLaptop,
+  IconReportAnalytics,
+  IconScale,
+  IconTool,
+  IconUsers,
+} from '@tabler/icons-react';
 import styles from './landing.module.css';
 
 // Plugins registrados dentro del efecto (después de hidratar), igual que en LandingMotion.
 
-/** Áreas que orbitan el núcleo SynerLink; `angle` es su punto de partida en la elipse. */
-const NODES = [
-  { label: 'Recursos Humanos', icon: IconUsers, angle: 218 },
-  { label: 'Finanzas', icon: IconCash, angle: 322 },
-  { label: 'Servicios de TI', icon: IconDeviceLaptop, angle: 38 },
-  { label: 'Compras', icon: IconShoppingCart, angle: 142 },
+/**
+ * Áreas de GSS. Las de nombre largo van en el anillo exterior (índice impar)
+ * y ninguna comparte ángulo, para que no se tapen entre sí ni con el núcleo.
+ */
+const AREAS = [
+  { label: 'GSS', icon: IconBuilding },
+  { label: 'Finanzas y reporte', icon: IconReportAnalytics },
+  { label: 'Contabilidad', icon: IconCalculator },
+  { label: 'Capital de trabajo', icon: IconCash },
+  { label: 'Jurídico', icon: IconScale },
+  { label: 'Crédito y cartera', icon: IconCreditCard },
+  { label: 'Tecnología', icon: IconDeviceLaptop },
+  { label: 'Talento humano', icon: IconUsers },
+  { label: 'Técnica', icon: IconTool },
 ];
 
-/** Elipse de la órbita en % del cuadro (el SVG usa el mismo sistema: viewBox 0 0 100 100). */
-const RX = 30;
-const RY = 27;
+const NODES = AREAS.map((area, i) => ({
+  ...area,
+  angle: -90 + i * (360 / AREAS.length),
+  ring: (i % 2) as 0 | 1,
+}));
+
+/** Elipses de la órbita en % del cuadro (el SVG usa el mismo sistema: viewBox 0 0 100 100). */
+const RINGS = [
+  { rx: 31, ry: 27 },
+  { rx: 42, ry: 36 },
+] as const;
 /** Segundos por vuelta completa. */
 const LAP = 70;
 const MAX_TILT = 9;
 
-function pointAt(angleDeg: number) {
+function pointAt(angleDeg: number, ring: 0 | 1) {
+  const { rx, ry } = RINGS[ring];
   const a = (angleDeg * Math.PI) / 180;
-  return { x: 50 + RX * Math.cos(a), y: 50 + RY * Math.sin(a) };
+  return { x: 50 + rx * Math.cos(a), y: 50 + ry * Math.sin(a) };
 }
 
 /**
@@ -95,9 +122,10 @@ export default function SynerLinkOrbit() {
           const turn = (elapsed / LAP) * 360;
           NODES.forEach((n, i) => {
             const wobble = Math.sin(elapsed * 0.9 + i * 1.7) * 1.4;
-            const p = pointAt(n.angle + turn);
-            const x = p.x + wobble + pull.x * (0.6 + i * 0.15);
-            const y = p.y - wobble * 0.6 + pull.y * (0.6 + i * 0.15);
+            const p = pointAt(n.angle + turn, n.ring);
+            const pullScale = n.ring === 0 ? 0.45 : 0.7;
+            const x = p.x + wobble + pull.x * pullScale;
+            const y = p.y - wobble * 0.6 + pull.y * pullScale;
             setX[i]?.((x / 100) * size);
             setY[i]?.((y / 100) * size);
             links[i]?.setAttribute('x2', String(x));
@@ -167,7 +195,7 @@ export default function SynerLinkOrbit() {
         <div
           className={styles.orbit}
           role='img'
-          aria-label='SynerLink conecta Recursos Humanos, Finanzas, Servicios de TI y Compras'
+          aria-label={`SynerLink conecta ${AREAS.map((area) => area.label).join(', ')}`}
         >
           <div className={styles.orbitLayer} data-orbit-layer>
             <svg className={styles.orbitSvg} viewBox='0 0 100 100' aria-hidden>
@@ -177,10 +205,20 @@ export default function SynerLinkOrbit() {
                   <stop offset='100%' stopColor='#113562' />
                 </linearGradient>
               </defs>
-              <ellipse data-ring-orbit className={styles.ring} cx='50' cy='50' rx={RX} ry={RY} vectorEffect='non-scaling-stroke' />
-              <ellipse data-ring-orbit className={styles.ring} cx='50' cy='50' rx={RX + 12} ry={RY + 12} vectorEffect='non-scaling-stroke' />
+              {RINGS.map((ring) => (
+                <ellipse
+                  key={`${ring.rx}-${ring.ry}`}
+                  data-ring-orbit
+                  className={styles.ring}
+                  cx='50'
+                  cy='50'
+                  rx={ring.rx}
+                  ry={ring.ry}
+                  vectorEffect='non-scaling-stroke'
+                />
+              ))}
               {NODES.map((n, i) => {
-                const p = pointAt(n.angle);
+                const p = pointAt(n.angle, n.ring);
                 const out = i % 2 === 0;
                 return (
                   <g key={n.label}>
@@ -203,14 +241,14 @@ export default function SynerLinkOrbit() {
 
             {NODES.map((n) => {
               const Icon = n.icon;
-              const p = pointAt(n.angle);
+              const p = pointAt(n.angle, n.ring);
               return (
                 <div key={n.label} data-node className={styles.nodeAnchor} style={{ left: `${p.x}%`, top: `${p.y}%` }}>
                   <div className={styles.node}>
                     <span className={styles.nodeIcon}>
-                      <Icon size={16} stroke={2} />
+                      <Icon size={15} stroke={2} />
                     </span>
-                    {n.label}
+                    <span className={styles.nodeLabel}>{n.label}</span>
                   </div>
                 </div>
               );
