@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Box, Group, Progress, Stack, Text, Tooltip } from '@mantine/core';
+import { Group, Progress, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { IconGauge } from '@tabler/icons-react';
-import { vistaCuota, type CuotaAgenteDto, type VistaBarra } from '../../lib/proyectos/consumo-anthropic';
+import { lineasDetalleCuota, vistaCuota, type CuotaAgenteDto, type VistaBarra } from '../../lib/proyectos/consumo-anthropic';
 import { apiGet } from './api';
 import css from './proyectos.module.css';
 
@@ -47,42 +47,38 @@ export function useConsumoAnthropic(idProject: number): { agentes: CuotaAgenteDt
   return { agentes, cargado };
 }
 
-function Barra({ barra, testId }: { barra: VistaBarra; testId: string }) {
+/** «Semanal ▬▬ 42 %»: etiqueta corta, mini barra y porcentaje con su color. */
+function Indicador({ barra, corta, testId }: { barra: VistaBarra; corta: string; testId: string }) {
   return (
-    <div style={{ minWidth: 0 }} data-testid={testId}>
-      <Group justify='space-between' gap={6} wrap='nowrap'>
-        <Text size='xs' fw={600} className={css.truncar}>
-          {barra.etiqueta}
-        </Text>
-        <Text size='xs' fw={700} c={barra.color === 'gray' ? 'dimmed' : `${barra.color}.7`} className={css.medidorPorcentaje}>
-          {barra.porcentaje}
-        </Text>
-      </Group>
-      <Progress value={barra.valor} color={barra.color} size={6} radius='xl' mt={4} aria-label={`${barra.etiqueta}: ${barra.porcentaje} usado`} />
-      {barra.detalle && (
-        <Text size='xs' c='dimmed' mt={2} lineClamp={2}>
-          {barra.detalle}
-        </Text>
-      )}
-    </div>
+    <Group gap={6} wrap='nowrap' className={css.medidorIndicador} data-testid={testId}>
+      <Text size='xs' c='dimmed' fw={500} span>
+        {corta}
+      </Text>
+      <Progress value={barra.valor} color={barra.color} size={5} radius='xl' w={34} aria-hidden />
+      <Text size='xs' fw={700} c={barra.color === 'gray' ? 'dimmed' : `${barra.color}.7`} span className={css.medidorPorcentaje}>
+        {barra.porcentaje}
+      </Text>
+    </Group>
   );
 }
 
 /**
- * MEDIDOR DEL CONSUMO DE ANTHROPIC en el encabezado de cada proyecto (2026-10-22):
- * «Semanal» con el % y cuándo se reinicia, y «Ventana de 5 h» con el % y a qué
- * hora se libera. Verde; amarillo desde el 70 %; rojo desde el 90 %.
+ * MEDIDOR DEL CONSUMO DE ANTHROPIC (2026-10-22), COMPACTO Y EN UNA LÍNEA.
  *
- * `compacto` (celular y tableta): las dos barras lado a lado para no robar alto.
+ * Ajuste de Nicolás: «este sidebar ya está muy cargado, quiero dejarlo más bien
+ * cerca a la miga de pan, lado superior derecho». Va en la barra superior de la
+ * página (a la derecha de la miga en escritorio; en el encabezado compacto en
+ * celular y en la cabecera del hilo a pantalla completa) como una píldora con
+ * «Semanal 42 %» y «5 h 31 %» (verde; amarillo desde 70 %; rojo desde 90 %).
  *
- * FIJO Y SIEMPRE VISIBLE (aclaración de Nicolás, 2026-10-22: «es algo estático,
- * para que todos los integrantes del grupo puedan verlo»): va en el encabezado,
- * fuera de menús y pestañas, igual para todos los miembros sin mirar el rol. Sin
- * dato todavía, muestra la caja con «Sin medición todavía» en vez de esconderse.
- * Lo esencial (porcentajes, reinicios y «token compartido») está a la vista; el
- * tooltip solo agrega la hora exacta de la medición.
+ * El detalle (cuándo se reinicia, a qué hora se libera, «token compartido» y la
+ * hora de la medición) va en el tooltip, que abre al pasar el cursor, con el
+ * teclado o al tocar la píldora (es un botón: el toque le da el foco).
+ *
+ * FIJO Y PARA TODOS (aclaración del 2026-10-22, «es algo estático»): nunca se
+ * esconde. Sin dato todavía, la píldora dice «sin medición». No mira el rol.
  */
-export default function MedidorConsumo({ agentes, compacto = false, cargado = true }: { agentes: CuotaAgenteDto[]; compacto?: boolean; cargado?: boolean }) {
+export default function MedidorConsumo({ agentes, cargado = true }: { agentes: CuotaAgenteDto[]; cargado?: boolean }) {
   // Repinta cada minuto: el «hace X min» y el «se reinició» dependen de la hora.
   const [ahora, setAhora] = useState(() => new Date());
   useEffect(() => {
@@ -90,54 +86,58 @@ export default function MedidorConsumo({ agentes, compacto = false, cargado = tr
     return () => window.clearInterval(id);
   }, []);
 
-  const varios = agentes.length > 1;
-
   if (agentes.length === 0) {
     return (
-      <Box className={`${compacto ? css.medidorCompacto : css.medidor}`} data-testid='medidor-consumo'>
-        <Box className={css.medidorCaja} data-testid='medidor-consumo-vacio'>
-          <Group gap={6} wrap='nowrap'>
+      <Tooltip label='Consumo de Anthropic del token del agente (compartido). El asistente aún no ha reportado su medición.' withArrow multiline w={260} events={{ hover: true, focus: true, touch: true }} position='bottom-end'>
+        <UnstyledButton className={css.medidorPildora} aria-label='Consumo de Anthropic: sin medición todavía' data-testid='medidor-consumo'>
+          <Group gap={6} wrap='nowrap' data-testid='medidor-consumo-vacio'>
             <IconGauge size={14} color='var(--mantine-color-dimmed)' aria-hidden />
-            <Text size='xs' c='dimmed' className={css.truncar}>
-              Consumo de Anthropic · {cargado ? 'sin medición todavía' : 'cargando…'}
+            <Text size='xs' c='dimmed' span>
+              {cargado ? 'Consumo: sin medición' : 'Consumo…'}
             </Text>
           </Group>
-        </Box>
-      </Box>
+        </UnstyledButton>
+      </Tooltip>
     );
   }
 
+  const varios = agentes.length > 1;
   return (
-    <Stack gap={8} className={compacto ? css.medidorCompacto : css.medidor} data-testid='medidor-consumo'>
+    <Group gap={6} wrap='nowrap' className={css.medidorFila} data-testid='medidor-consumo'>
       {agentes.map((a) => {
         const v = vistaCuota(a, ahora);
+        const lineas = lineasDetalleCuota(v);
         const tip = (
           <Stack gap={2}>
             <Text size='xs' fw={600}>
-              Consumo del token del agente (compartido)
+              Consumo de Anthropic{varios ? ` · ${a.displayName}` : ''}
             </Text>
-            <Text size='xs'>{v.medicion}</Text>
-            {v.vieja && <Text size='xs'>La medición está desactualizada: el puente no ha reportado en los últimos minutos.</Text>}
+            {lineas.map((l) => (
+              <Text key={l} size='xs'>
+                {l}
+              </Text>
+            ))}
           </Stack>
         );
+        const etiqueta = [`Consumo de Anthropic${varios ? ` de ${a.displayName}` : ''}`, ...lineas].join('. ');
         return (
-          <Tooltip key={a.code} label={tip} withArrow multiline w={280} events={{ hover: true, focus: true, touch: true }} position='bottom-start'>
-            <Box tabIndex={0} aria-label={`Consumo de Anthropic de ${a.displayName}`} className={css.medidorCaja} data-testid={`medidor-consumo-${a.code}`}>
-              <Group gap={6} wrap='nowrap' mb={6}>
-                <IconGauge size={14} color='var(--mantine-color-dimmed)' aria-hidden />
-                <Text size='xs' c='dimmed' className={css.truncar}>
-                  Consumo de Anthropic{varios ? ` · ${a.displayName}` : ''} · token compartido
-                  {v.vieja ? ' · desactualizado' : ''}
-                </Text>
+          <Tooltip key={a.code} label={tip} withArrow multiline w={320} events={{ hover: true, focus: true, touch: true }} position='bottom-end'>
+            <UnstyledButton className={css.medidorPildora} aria-label={etiqueta} data-testid={`medidor-consumo-${a.code}`} data-vieja={v.vieja || undefined}>
+              <Group gap={10} wrap='nowrap'>
+                {varios ? (
+                  <Text size='xs' fw={600} span className={css.truncar} maw={70}>
+                    {a.displayName}
+                  </Text>
+                ) : (
+                  <IconGauge size={14} color='var(--mantine-color-dimmed)' aria-hidden />
+                )}
+                {v.semanal && <Indicador barra={v.semanal} corta='Semanal' testId='medidor-semanal' />}
+                {v.cinco && <Indicador barra={v.cinco} corta='5 h' testId='medidor-5h' />}
               </Group>
-              <div className={compacto ? css.medidorBarrasLado : css.medidorBarras}>
-                {v.semanal && <Barra barra={v.semanal} testId='medidor-semanal' />}
-                {v.cinco && <Barra barra={v.cinco} testId='medidor-5h' />}
-              </div>
-            </Box>
+            </UnstyledButton>
           </Tooltip>
         );
       })}
-    </Stack>
+    </Group>
   );
 }
