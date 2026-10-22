@@ -93,6 +93,9 @@ model User {
   // Reacciones y stickers del chat (2026-10-20).
   chatReactions             ChatMessageReaction[]
   chatStickersCreated       ChatSticker[]        @relation("ChatStickerCreator")
+  /// «Mis stickers» (2026-10-21).
+  chatStickersPersonales    ChatStickerPersonal[] @relation("ChatStickerPersonalOwner")
+  chatStickersRevisados     ChatStickerPersonal[] @relation("ChatStickerPersonalReviewer")
 
   @@map("user")
   @@schema("dbo")
@@ -124,6 +127,7 @@ model Company {
   chatProjectAgentConfigs ChatProjectAgentConfig[]
   // Stickers propios de la empresa en el chat (2026-10-20; la pantalla de carga queda para después).
   chatStickers    ChatSticker[]
+  chatStickersPropuestos ChatStickerPersonal[]
   // SGC documental — configuración de activación por empresa (esquema `sgc`).
   sgcCompanyConfig SgcCompanyConfig?
   // Órdenes de Trabajo (bitácora de proceso de planta, 2026-10-13).
@@ -141,11 +145,55 @@ model CompanyUser {
   id_company_user Int                     @id @default(autoincrement())
   id_company      Int
   id_user         String
+  /// Perfil del usuario en el SAPSEND de ESTA empresa (cada tenant numera los suyos). Compras: U_SEND_UserId.
+  id_user_sapsend       Int?
+  /// Departamento del usuario en el SAPSEND de ESTA empresa. Compras: U_SEND_Dep (texto en SAP).
+  id_department_sapsend Int?
   company         Company                 @relation(fields: [id_company], references: [id_company], onDelete: Cascade)
   user            User                    @relation(fields: [id_user], references: [id], onDelete: Cascade)
   subprocesses    SubprocessUserCompany[]
 
   @@map("company_user")
+  @@schema("dbo")
+}
+
+/// Compras: enlace entre un borrador de solicitud (Drafts en SAP) y la solicitud
+/// del workflow (requests_general) que lo autoriza. Sin FK a requests_general (no
+/// está en este esquema). Estados: pending | publishing | approved | rejected |
+/// quoted (enviada a cotización) | cancelled | publish_error (reintentable) |
+/// reject_error. Solo una fila
+/// 'pending'/'publishing'/'publish_error' por borrador.
+model PurchaseAuthorization {
+  id                 Int      @id @default(autoincrement())
+  id_company         Int
+  doc_entry          Int
+  id_request_general Int      @unique
+  status             String   @db.NVarChar(20)
+  firm_doc_entry     Int?
+  error              String?  @db.NVarChar(500)
+  created_by         String   @db.NVarChar(50)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @default(now()) @updatedAt
+
+  @@index([id_company, doc_entry])
+  @@map("purchase_authorization")
+  @@schema("dbo")
+}
+
+/// Compras: configuración por empresa. id_process_category_auth = plantilla del
+/// workflow (process_category) con la tarea de autorización por departamento.
+model PurchaseCompanyConfig {
+  id_company               Int     @id
+  id_process_category_auth Int
+  /// Correos de Compras (separados por coma) a avisar cuando una solicitud pasa a
+  /// cotización. Equivale a SENDEMAILTOCOMPRAS del .env de cada SAPSEND.
+  compras_emails           String? @db.NVarChar(500)
+  /// Moneda de línea por defecto (SAPSEND: 'COP'; Ryan: vacía) y bodega por
+  /// defecto en la carga masiva (SAPSEND: 'MPR01' solo en Ryan). NULL = no se envía.
+  default_currency         String? @db.NVarChar(3)
+  default_warehouse        String? @db.NVarChar(8)
+
+  @@map("purchase_company_config")
   @@schema("dbo")
 }
 
@@ -679,6 +727,8 @@ model Agent {
   deliveries       ChatMessageDelivery[]
   statuses         ChatAgentStatus[]
   turnUsage        ChatAgentTurnUsage[]
+  // Medidor del consumo de Anthropic (2026-10-22): último cupo reportado por el puente.
+  quota            ChatAgentQuota?
   // Auditoría de agentes → Inventario (F1): back-relations requeridas por Prisma.
   inventories      AgentInventory[]
   auditFindings    AgentAuditFinding[]
@@ -1582,6 +1632,13 @@ model PortalCourse {
   /// Carpeta del curso dentro de FORMACION en SharePoint (`<slug>-<id>`).
   /// Se fija en la primera subida y no cambia si el curso se renombra.
   sp_folder_name String? @db.NVarChar(200)
+  /// Curso ELIMINADO por un formador (borrado LÓGICO; Cristian, 2026-10-22):
+  /// deja de aparecer en todas las listas, pero sus inscripciones, intentos y
+  /// certificados se conservan (los certificados siguen verificándose). Sus
+  /// archivos de SharePoint NO se tocan: la carpeta FORMACION es compartida
+  /// entre pruebas y producción. Quién y cuándo queda aquí como auditoría.
+  eliminado_at   DateTime?
+  eliminado_por  String? @db.NVarChar(255)
 
   materials    PortalCourseMaterial[]
   enrollments  PortalCourseEnrollment[]
@@ -2065,9 +2122,42 @@ model ChatSticker {
   company  Company?           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   creator  User               @relation("ChatStickerCreator", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   messages ChatMessageMedia[]
+  /// Si es un sticker PERSONAL («Mis stickers», 2026-10-21). Sin esta fila es de empresa (o de todas).
+  personal   ChatStickerPersonal? @relation("ChatStickerPersonalSticker")
+  /// Propuestas personales que se aprobaron como ESTE sticker de empresa.
+  aprobadoDe ChatStickerPersonal[] @relation("ChatStickerPersonalAprobado")
 
   @@index([id_company, active, sort_order], map: "chat_sticker_company_active_idx")
   @@map("chat_sticker")
+  @@schema("dbo")
+}
+
+/// «MIS STICKERS» del chat (2026-10-21): marca un sticker de chat_sticker como de UNA persona.
+/// La imagen sigue en chat_sticker (mismo CHECK de tipo y tamaño). Ver lib/chat/stickers-personales.ts.
+model ChatStickerPersonal {
+  id_sticker         Int       @id
+  id_user            String    @db.NVarChar(1000)
+  /// Lo quitó de «Mis stickers». Los mensajes ya enviados lo siguen mostrando.
+  removed_at         DateTime?
+  /// Empresa a la que se propuso. NULL = sin propuesta.
+  proposed_company   Int?
+  /// 'propuesto' | 'aprobado' | 'rechazado' (CHECK en la base).
+  proposal_state     String?   @db.NVarChar(20)
+  proposed_at        DateTime?
+  reviewed_by        String?   @db.NVarChar(1000)
+  reviewed_at        DateTime?
+  /// Copia aprobada como sticker de la empresa.
+  id_sticker_company Int?
+
+  sticker        ChatSticker  @relation("ChatStickerPersonalSticker", fields: [id_sticker], references: [id_sticker], onDelete: NoAction, onUpdate: NoAction)
+  owner          User         @relation("ChatStickerPersonalOwner", fields: [id_user], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  company        Company?     @relation(fields: [proposed_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  reviewer       User?        @relation("ChatStickerPersonalReviewer", fields: [reviewed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  stickerEmpresa ChatSticker? @relation("ChatStickerPersonalAprobado", fields: [id_sticker_company], references: [id_sticker], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_user, removed_at], map: "chat_sticker_personal_user_idx")
+  @@index([proposal_state, proposed_company], map: "chat_sticker_personal_propuesta_idx")
+  @@map("chat_sticker_personal")
   @@schema("dbo")
 }
 
@@ -2166,6 +2256,31 @@ model ChatAgentStatus {
 
   @@id([id_conversation, id_agent])
   @@map("chat_agent_status")
+  @@schema("dbo")
+}
+
+/// CUPO DE ANTHROPIC DEL TOKEN DEL AGENTE (2026-10-22) — cupo semanal y
+/// ventana de 5 h, tal como los reporta el puente de hilos (stream del turno o
+/// consulta mínima). UNA fila por agente que se sobrescribe: es el último
+/// estado conocido, no un histórico. Alimenta el medidor del encabezado de
+/// cada proyecto (components/proyectos/MedidorConsumo.tsx).
+model ChatAgentQuota {
+  id_agent       Int       @id
+  /// Porcentaje usado (0–100; puede pasar de 100 con excedente). NULL = no vino.
+  utilization_7d Float?
+  reset_7d       DateTime?
+  utilization_5h Float?
+  reset_5h       DateTime?
+  /// overageStatus de Anthropic ('allowed', 'rejected', …). Solo informativo.
+  overage        String?   @db.NVarChar(40)
+  /// Cuándo se midió (reloj del puente) y de dónde salió: 'turno' | 'sonda'.
+  measured_at    DateTime
+  source         String    @db.NVarChar(20)
+  updated_at     DateTime  @updatedAt
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("chat_agent_quota")
   @@schema("dbo")
 }
 
@@ -4882,6 +4997,32 @@ model EmailAgentAction {
   @@index([id_share], map: "IX_email_agent_action_share")
   @@index([id_chat_message], map: "IX_email_agent_action_mensaje")
   @@map("email_agent_action")
+  @@schema("dbo")
+}
+
+/// «Crear ticket» desde un hilo del Correo (2026-10-21, pedido de Nicolás Rivera: «solo para
+/// los de TI»). Relación hilo ↔ ticket de mesa de ayuda ([case].id_case), aparte del vínculo
+/// hilo ↔ solicitud (email_thread_link): un hilo puede tener su solicitud Y su ticket. Un solo
+/// ticket por hilo y persona (se reserva antes de crear). Migración:
+/// prisma/migrations/20261021200000_correo_ticket (a mano en prod).
+model EmailThreadCase {
+  id                  Int      @id @default(autoincrement())
+  id_user             String   @db.NVarChar(50)
+  mailbox             String   @db.NVarChar(320)
+  conversation_id     String   @db.NVarChar(512)
+  // Correo de origen del ticket (el primero del hilo).
+  internet_message_id String?  @db.NVarChar(512)
+  // NULL mientras el ticket se está creando (estado CREANDO).
+  id_case             Int?
+  // CREANDO | ACTIVO
+  estado              String   @default("ACTIVO") @db.NVarChar(10)
+  asunto              String?  @db.NVarChar(255)
+  created_by          String   @db.NVarChar(50)
+  created_at          DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  @@unique([id_user, conversation_id], map: "UQ_email_thread_case_hilo")
+  @@index([id_case], map: "IX_email_thread_case_case")
+  @@map("email_thread_case")
   @@schema("dbo")
 }
 

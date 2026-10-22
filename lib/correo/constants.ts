@@ -87,6 +87,8 @@ export const CORREO_AUDIT_ACCIONES = [
   'RESTAURAR',
   // Redactar (2026-10-19): correo nuevo desde el buzón propio. Se registran destinatarios y asunto, nunca el cuerpo.
   'ENVIAR_NUEVO',
+  // «Crear ticket» (2026-10-21): ticket de mesa de ayuda desde un hilo, solo para técnicos de TI.
+  'CREAR_TICKET',
 ] as const;
 export type CorreoAuditAccion = (typeof CORREO_AUDIT_ACCIONES)[number];
 

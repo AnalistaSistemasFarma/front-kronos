@@ -390,6 +390,14 @@ jobs:
           # Correo · «Consultar a un agente» (2026-10-16): concesiones y propuestas, dos veces (idempotencia).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261016100000_correo_agente/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261016100000_correo_agente/migration.sql
+          # Correo · «Crear ticket» (2026-10-21): migración y pase de PRUEBAS dos veces (idempotencia); el de PROD se niega fuera de KRONOSDB.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261021200000_correo_ticket/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261021200000_correo_ticket/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-21-correo-ticket-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-21-correo-ticket-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.CK_email_thread_case_estado', N'C') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UQ_email_thread_case_hilo') THROW 50000, N'La migración de Correo · ticket no dejó el CHECK o el índice único.', 1;" > /tmp/correo-ticket-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/correo-ticket-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-21-correo-ticket-PROD.sql; then echo "El script de PROD de Correo · ticket debió negarse en kronos_ci"; exit 1; fi
           # Proyectos (hilos de agente) del chat, F1 (2026-10-17): migración y pase de PRUEBAS, dos veces (idempotencia).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017120000_chat_projects/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017120000_chat_projects/migration.sql
@@ -503,6 +511,22 @@ jobs:
           echo "INSERT INTO dbo.chat_project_repo_catalog (slug, name, github, branch_testing, branch_production) VALUES (N'sapsend', N'x', N'a/b', N't', N'p');" > /tmp/permisos-dup.sql
           if npx prisma db execute --schema prisma/schema.prisma --file /tmp/permisos-dup.sql; then echo "La clave repetida del catálogo debió fallar"; exit 1; fi
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-20-proyectos-permisos-agentes-PROD.sql; then echo "El script de PROD de permisos de los agentes debió negarse en kronos_ci"; exit 1; fi
+          # «Mis stickers» del chat (2026-10-21): migración y PRUEBAS dos veces (idempotencia), tabla, índices y CHECK, y PROD que se niega.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261021120000_chat_stickers_personales/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261021120000_chat_stickers_personales/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-21-chat-stickers-personales-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-21-chat-stickers-personales-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.chat_sticker_personal', N'U') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'chat_sticker_personal_user_idx') OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'chat_sticker_personal_propuesta_idx') OR (SELECT COUNT(*) FROM sys.check_constraints WHERE name IN (N'chat_sticker_personal_estado_ck', N'chat_sticker_personal_aprobado_ck')) <> 2 THROW 50000, N'La migración de Mis stickers no dejó la tabla, los índices o los CHECK.', 1;" > /tmp/mis-stickers-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/mis-stickers-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-21-chat-stickers-personales-PROD.sql; then echo "El script de PROD de Mis stickers debió negarse en kronos_ci"; exit 1; fi
+          # Medidor del consumo de Anthropic (2026-10-22): migración y PRUEBAS dos veces (idempotencia), tabla y CHECK, y PROD que se niega.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261022120000_chat_agent_quota/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261022120000_chat_agent_quota/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-22-chat-agent-quota-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-22-chat-agent-quota-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.chat_agent_quota', N'U') IS NULL OR (SELECT COUNT(*) FROM sys.check_constraints WHERE name IN (N'chat_agent_quota_fuente_ck', N'chat_agent_quota_rango_ck')) <> 2 THROW 50000, N'La migración del medidor de consumo no dejó la tabla o los CHECK.', 1;" > /tmp/cuota-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/cuota-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-22-chat-agent-quota-PROD.sql; then echo "El script de PROD del medidor de consumo debió negarse en kronos_ci"; exit 1; fi
           # Bitácora · actividades de texto libre (2026-10-17): migración y PRUEBAS dos veces, reversa y otra vez PRUEBAS (idempotencia ida y vuelta).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017200000_bitacora_proceso_texto_libre/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017200000_bitacora_proceso_texto_libre/migration.sql
@@ -535,7 +559,7 @@ jobs:
         run: |
           set -e
           # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
-          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida proyectos_permisos_agentes_reversa_acepta_perdida proyectos_config_agentes_reversa_acepta_perdida"
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida proyectos_permisos_agentes_reversa_acepta_perdida proyectos_config_agentes_reversa_acepta_perdida chat_stickers_personales_reversa_acepta_perdida"
           reversa() {
             { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
@@ -546,6 +570,11 @@ jobs:
             npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
           }
           # De la más nueva a la más antigua…
+          # Medidor del consumo de Anthropic (2026-10-22): ida y vuelta (reversa dos veces, comprobación y la migración otra vez).
+          reversa prisma/manual/2026-10-22-chat-agent-quota-reversa.sql
+          echo "IF OBJECT_ID(N'dbo.chat_agent_quota', N'U') IS NOT NULL THROW 50000, N'La reversa del medidor de consumo no quitó su tabla.', 1;" > /tmp/cuota-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/cuota-quitado.sql
+          migra 20261022120000_chat_agent_quota
           # Permisos de los agentes de Proyectos (2026-10-20): con la política de prueba, sin la bandera debe negarse; luego ida y vuelta.
           # Va PRIMERO: sus tablas apuntan a chat_project (la reversa de la F1 no podría borrarla). Se vuelve a migrar al final, con la F1.
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-20-proyectos-permisos-agentes-reversa.sql; then echo "La reversa de permisos de los agentes debió negarse sin su bandera"; exit 1; fi
@@ -558,11 +587,16 @@ jobs:
           echo "IF OBJECT_ID(N'dbo.chat_project_agent_config', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.chat_project_agent_config_log', N'U') IS NOT NULL OR EXISTS (SELECT 1 FROM dbo.subprocess WHERE subprocess_url = N'/process/proyectos/configuracion') THROW 50000, N'La reversa de la configuración de Proyectos no quitó lo suyo.', 1;" > /tmp/config-proyectos-quitado.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/config-proyectos-quitado.sql
           migra 20261020180000_proyectos_config_agentes
+          # «Mis stickers» (2026-10-21): ida y vuelta; va ANTES que la de reacciones (chat_sticker_personal apunta a chat_sticker).
+          reversa prisma/manual/2026-10-21-chat-stickers-personales-reversa.sql
+          echo "IF OBJECT_ID(N'dbo.chat_sticker_personal', N'U') IS NOT NULL THROW 50000, N'La reversa de Mis stickers no quitó su tabla.', 1;" > /tmp/mis-stickers-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/mis-stickers-quitado.sql
           # Reacciones, GIF y stickers del chat (2026-10-20): ida y vuelta (reversa dos veces, comprobación y la migración otra vez).
           reversa prisma/manual/2026-10-20-chat-reacciones-stickers-reversa.sql
           echo "IF OBJECT_ID(N'dbo.chat_message_reaction', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.chat_message_media', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.chat_sticker', N'U') IS NOT NULL THROW 50000, N'La reversa de reacciones no quitó sus tablas.', 1;" > /tmp/reacciones-quitado.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/reacciones-quitado.sql
           migra 20261020120000_chat_reacciones_stickers
+          migra 20261021120000_chat_stickers_personales
           # No leídos de Proyectos (2026-10-19): con las marcas que dejó la integración, sin la bandera debe negarse; luego ida y vuelta. Va ANTES que la del equipo.
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-19-proyectos-no-leidos-reversa.sql; then echo "La reversa de no leídos debió negarse sin su bandera"; exit 1; fi
           reversa prisma/manual/2026-10-19-proyectos-no-leidos-reversa.sql

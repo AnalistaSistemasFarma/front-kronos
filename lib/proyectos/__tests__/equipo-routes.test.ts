@@ -95,6 +95,7 @@ vi.mock('../../prisma', () => {
     user: { findMany: vi.fn(async () => []) },
   };
   prisma.$transaction = vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma));
+  prisma.$queryRaw = vi.fn(async () => []);
   return { prisma };
 });
 vi.mock('../../mssqlPool', () => ({ sql: {}, withMssqlPool: vi.fn(async () => { throw new Error('sin SQL'); }) }));

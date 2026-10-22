@@ -141,17 +141,66 @@ test.describe('Portal TH · ventana emergente «Hoy»', () => {
     await expect(page.getByRole('dialog', { name: 'Contactos' })).toBeVisible();
   });
 
-  test('un día sin nada que mostrar NO se abre; ya vista hoy, tampoco', async ({ page }) => {
+  test('un día SIN NADA también sale (Cristian, 2026-10-21: «que salga siempre»): «Hoy no hay eventos ni cumpleaños» y los próximos', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    // La ventana pide cada fuente con el rango hoy → hoy + 30 días (el calendario pide aparte el mes visible).
+    const pedidos: string[] = [];
+    page.on('request', (r) => {
+      const u = new URL(r.url());
+      if (/^\/api\/portal\/(eventos|cumpleanos)$/.test(u.pathname)) pedidos.push(`${u.pathname}${u.search}`);
+    });
+    await preparar(page, HOY, {
+      empresa: [{ id: 9, fecha: '2026-10-20', titulo: 'Pausa activa', descripcion: 'Sala 2', tipo: 'empresa' }],
+      cumples: [{ fecha: '2026-10-18', personas: [{ nombre: 'ACOSTA RUIZ LUIS FERNANDO', empresa: 'GROUP SHARED SERVICES SAS', cargo: 'ANALISTA CONTABLE' }] }],
+    });
+    await page.goto('/portal');
+    await expect(ventana(page)).toBeVisible();
+    await expect(page.getByTestId('ventana-hoy-vacio')).toHaveText('Hoy no hay eventos ni cumpleaños.');
+    await expect(ventana(page).getByTestId('ventana-hoy-evento')).toHaveCount(0);
+    const proximos = ventana(page).getByTestId('ventana-hoy-proximo');
+    await expect(proximos).toHaveCount(3); // cumpleaños 18, evento 20 y festivo 2 de noviembre (el 16 ya pasa de 30 días)
+    await expect(proximos.nth(0)).toContainText('CUMPLEAÑOS');
+    await expect(proximos.nth(0)).toContainText('domingo, 18 de octubre · Fecha importante');
+    await expect(proximos.nth(0)).toContainText('ACOSTA RUIZ LUIS FERNANDO');
+    await expect(proximos.nth(1)).toContainText('Pausa activa');
+    await expect(proximos.nth(1)).toContainText('martes, 20 de octubre · Evento de la empresa · Sala 2');
+    await expect(proximos.nth(2)).toContainText('Día de Todos los Santos');
+    await expect(proximos.nth(2)).toContainText('Festivo');
+    await expect(page.getByTestId('ventana-hoy-imagen')).toHaveCount(0); // la imagen es solo para cumpleaños de HOY
+    expect(pedidos).toEqual(expect.arrayContaining([`/api/portal/eventos?desde=${HOY}&hasta=2026-11-14`, `/api/portal/cumpleanos?desde=${HOY}&hasta=2026-11-14`]));
+    if (CAPTURAS) {
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: `${CAPTURAS}/134-hoy-vacio-proximos.png` });
+    }
+    // Se cierra igual que siempre, y al recargar vuelve a salir.
+    await page.getByTestId('ventana-hoy-cerrar').click();
+    await expect(ventana(page)).toBeHidden();
+    await page.reload();
+    await expect(page.getByTestId('ventana-hoy-vacio')).toBeVisible();
+  });
+
+  test('día sin nada en celular: el aviso y los próximos caben en la pantalla', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
     await preparar(page, HOY);
+    await page.goto('/portal');
+    await expect(ventana(page)).toBeVisible();
+    await expect(page.getByTestId('ventana-hoy-vacio')).toHaveText('Hoy no hay eventos ni cumpleaños.');
+    await expect(ventana(page).getByTestId('ventana-hoy-proximo').first()).toContainText('Día de Todos los Santos'); // aunque no haya datos de la empresa
+    const caja = (await ventana(page).locator('.portal-th__hoy-caja').boundingBox())!;
+    expect(caja.x).toBeGreaterThanOrEqual(0);
+    expect(caja.x + caja.width).toBeLessThanOrEqual(390);
+    expect(caja.y + caja.height).toBeLessThanOrEqual(844);
+    if (CAPTURAS) {
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: `${CAPTURAS}/135-hoy-vacio-celular.png` });
+    }
+  });
+
+  test('la marca de las pruebas automáticas la sigue apagando (solo en navegador automatizado)', async ({ page }) => {
+    await preparar(page, NAVIDAD, { marcada: true });
     await page.goto('/portal');
     await expect(page.getByRole('navigation', { name: 'Secciones del portal' })).toBeVisible();
     await expect(ventana(page)).toHaveCount(0);
-
-    const otra = await page.context().newPage();
-    await preparar(otra, NAVIDAD, { marcada: true });
-    await otra.goto('/portal');
-    await expect(otra.getByRole('navigation', { name: 'Secciones del portal' })).toBeVisible();
-    await expect(otra.getByTestId('ventana-hoy')).toHaveCount(0);
   });
 
   test('si falla la lectura de cumpleaños, igual muestra lo demás y sin errores en pantalla', async ({ page }) => {

@@ -1,4 +1,5 @@
 import { prisma } from '../prisma';
+import { PURCHASES_WRITE_MARKER_URL } from './fields';
 
 /**
  * Resolucion de permisos del modulo "Compras" (multiempresa, SOLO LECTURA en el
@@ -34,8 +35,10 @@ import { prisma } from '../prisma';
 // URL dedicada del modulo (sembrar el subproceso en BD para usarla; ver reporte).
 export const PURCHASES_READ_URL = '/process/purchases';
 
-// Permiso dedicado del modulo (subproceso '/process/purchases' sembrado en BD).
-const PURCHASES_ACCESS_URL = PURCHASES_READ_URL;
+// Escritura (crear/editar/enviar solicitudes): marcador, no pagina (ver fields.ts).
+export const PURCHASES_WRITE_URL = PURCHASES_WRITE_MARKER_URL;
+
+export type PurchasesAccessMode = 'read' | 'write';
 
 /** Endpoint SAP de una empresa, con credenciales. SOLO uso en servidor. */
 export interface CompanySapEndpoint {
@@ -51,6 +54,7 @@ export interface PurchasesCompanyAccess {
   idCompany: number;
   companyName: string;
   canRead: boolean;
+  canWrite: boolean;
   /** null si la empresa no tiene endpoint SAP activo configurado. */
   endpoint: CompanySapEndpoint | null;
 }
@@ -60,6 +64,7 @@ export interface PurchasesCompanyPublic {
   idCompany: number;
   companyName: string;
   canRead: boolean;
+  canWrite: boolean;
   /** true si la empresa esta lista para consultar (endpoint activo). */
   ready: boolean;
 }
@@ -76,7 +81,7 @@ export async function getPurchasesAccess(userEmail: string): Promise<PurchasesCo
     where: {
       companyUser: { user: { email: userEmail } },
       subprocess: {
-        subprocess_url: { in: [PURCHASES_ACCESS_URL] },
+        subprocess_url: { in: [PURCHASES_READ_URL, PURCHASES_WRITE_URL] },
       },
     },
     include: {
@@ -103,6 +108,7 @@ export async function getPurchasesAccess(userEmail: string): Promise<PurchasesCo
         idCompany: id,
         companyName: company.company,
         canRead: false,
+        canWrite: false,
         endpoint: ep
           ? {
               baseUrl: ep.base_url,
@@ -115,7 +121,9 @@ export async function getPurchasesAccess(userEmail: string): Promise<PurchasesCo
       byCompany.set(id, entry);
     }
 
+    // Escribir implica leer (mismo criterio que Articulos).
     entry.canRead = true;
+    if (row.subprocess.subprocess_url === PURCHASES_WRITE_URL) entry.canWrite = true;
   }
 
   return [...byCompany.values()];
@@ -133,12 +141,13 @@ export function isCompanyReady(access: PurchasesCompanyAccess): boolean {
  */
 export async function getCompanyEndpointForUser(
   userEmail: string,
-  companyId: number
+  companyId: number,
+  mode: PurchasesAccessMode = 'read'
 ): Promise<PurchasesCompanyAccess | null> {
   const access = await getPurchasesAccess(userEmail);
   const company = access.find((a) => a.idCompany === companyId);
   if (!company) return null;
-  if (!company.canRead) return null;
+  if (mode === 'read' ? !company.canRead : !company.canWrite) return null;
   if (!isCompanyReady(company)) return null;
   return company;
 }
@@ -149,6 +158,7 @@ export function toPublicAccess(access: PurchasesCompanyAccess[]): PurchasesCompa
     idCompany: a.idCompany,
     companyName: a.companyName,
     canRead: a.canRead,
+    canWrite: a.canWrite,
     ready: isCompanyReady(a),
   }));
 }
