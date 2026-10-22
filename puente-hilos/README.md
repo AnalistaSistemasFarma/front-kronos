@@ -254,3 +254,18 @@ Pedido de Nicolás Rivera (17:24 COT) para el proyecto 1: «necesita hacer un an
 - **Red:** las conexiones MCP las abre el propio Claude Code, no los comandos de Bash, así que el sandbox **no** se abre hacia 192.168.10.5: `node`/`npm` siguen sin llegar a los conectores, a SSH ni al 1433.
 - El encabezado del turno lleva las reglas: filtro de fecha siempre, `top` pequeño, nunca `groupby`/`aggregate` ni `maxPageSize: 0` sin rango de fechas, sin reintentos en bucle, sin escritura (las bases `z_PRUEBAS_*` por Service Layer NO están habilitadas: cada escritura exige autorización previa de Nicolás).
 - Se relee en cada turno; si el archivo o las llaves fallan, el turno corre sin estos conectores y lo dice.
+
+## Base de PRUEBAS y testing para TODOS los hilos (2026-10-22)
+
+Orden de Nicolás Rivera (2026-10-22 10:09 COT). Todos los hilos de proyecto, en el puente de prod y en el de pruebas, con cualquier usuario y sin depender del rol ni de la terminal, reciben dos conectores MCP locales por stdio (`src/mcp-pruebas-kronos.mjs`, armados en `src/pruebas-kronos.mjs`):
+
+| Conector | Herramientas |
+|---|---|
+| `kronos-pruebas-sql` | `pruebas_sql_consultar` (solo SELECT, tope de filas), `pruebas_sql_ejecutar` (DML/DDL con `motivo` auditado), `pruebas_sql_correr_script` (`codigo/<repo>/prisma/manual/*-PRUEBAS.sql` o `trabajo/*.sql`, partido por GO) |
+| `synerlink-testing-web` | `testing_http` (GET/POST como usuario QA en 192.168.11.230:3030), `testing_captura` (PNG en `./trabajo/capturas`, Chrome sin ventana en sandbox con salida solo a un proxy local hacia testing) |
+
+- **Guardas de texto** (`src/pruebas-sql.mjs`): analizador léxico de T-SQL; rechaza KRONOSDB sin `_PRUEBAS` (también dentro de cadenas), `USE`, nombres de 3/4 partes hacia otras bases, OPENQUERY/OPENROWSET/`EXEC … AT`, DROP/CREATE/ALTER DATABASE, BACKUP, RESTORE, `xp_*`, `sp_configure`, logins, usuarios, roles, GRANT/REVOKE/DENY, EXECUTE AS, REVERT, `ON ALL SERVER`, BULK INSERT…
+- **Guardas del servidor** (`src/pruebas-sql-servidor.mjs`): una conexión por llamada a `KRONOSDB_PRUEBAS`, verificación de `DB_NAME()` al conectar y antes de cada lote, y suplantación `EXECUTE AS USER … WITH NO REVERT` a usuarios SIN LOGIN de esa base (`agente_hilos_lectura`, `agente_hilos_escritura`; `scripts/pruebas-kronos-usuarios.sql`). Con la base no TRUSTWORTHY, la sesión no puede salir de ella aunque el login sí tenga acceso a otras. Tiempo máximo: 60 s por consulta, 120 s por lote.
+- **Credenciales**: clave `kronos-pruebas` de `HILOS_CONECTORES_SECRETOS` (`{ sql: {server, port, database, user, password, encrypt}, qa: {email, password} }`, archivo 600). La sesión del QA se guarda en `<HILOS_DIR>/pruebas-kronos-sesion-qa.json` (600, negada al sandbox). Auditoría: `<HILOS_DIR>/auditoria-pruebas-kronos.jsonl`.
+- `HILOS_PRUEBAS_KRONOS=no` lo apaga; `HILOS_PRUEBAS_KRONOS_WEB` cambia la web (solo hosts de pruebas).
+- Requiere `npm ci` en `puente-hilos/` (dependencia `mssql`). Verificación real: `node scripts/verificar-pruebas-kronos.mjs --secretos <archivo>`.

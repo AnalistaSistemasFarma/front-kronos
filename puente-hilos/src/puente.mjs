@@ -44,6 +44,7 @@ import {
 import { ColaHilos } from './cola.mjs';
 import { combinarPerfil, prepararConectoresTurno, secretosConectores } from './conectores.mjs';
 import { guiaDesarrolloSegura } from './guia.mjs';
+import { prepararPruebasTurno, secretosPruebas, verificarSecretosPruebas } from './pruebas-kronos.mjs';
 import { grafosDelTurno, textoGrafos } from './grafos.mjs';
 import { prepararMemoriaTurno } from './memoria.mjs';
 import { crearClienteSynerLink } from './synerlink.mjs';
@@ -151,7 +152,7 @@ export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lot
     worktrees,
     token,
     // Terminal completa: sin sandbox y con la casa real (llaves SSH), como el Orus principal.
-    sandbox: terminal ? { enabled: false } : sandboxCodigo({ worktrees, homeReal: cfg.home, homeCodigo, hilosDir: cfg.hilosDir, secretos: [cfg.githubTokenArchivo, ...secretosConectores(cfg)], cacheNpm }),
+    sandbox: terminal ? { enabled: false } : sandboxCodigo({ worktrees, homeReal: cfg.home, homeCodigo, hilosDir: cfg.hilosDir, secretos: [cfg.githubTokenArchivo, ...secretosConectores(cfg), ...secretosPruebas(cfg)], cacheNpm }),
     entorno: terminal ? { ...entornoCodigo({ token, homeCodigo, cacheNpm }), HOME: cfg.home } : entornoCodigo({ token, homeCodigo, cacheNpm }),
     hooks: hooksCodigo(),
     disponibles,
@@ -218,10 +219,16 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         log(`conversación ${idConversation}: no se pudieron preparar los conectores del proyecto, el turno va sin ellos:`, e.message);
         avisoConectores = '_Nota: no pude preparar los conectores de bases de datos del proyecto en este turno; respondí sin ellos. Tecnología quedó con el registro._\n\n';
       }
-      const perfil = combinarPerfil(perfilBase, conectores);
+      let perfil = combinarPerfil(perfilBase, conectores);
 
       const rutas = rutasDelHilo(cfg.hilosDir, contexto.project.idProject, idConversation);
       asegurarCarpetas(rutas);
+      // Base de PRUEBAS (lectura y escritura) y testing como QA: TODOS los proyectos, todos los
+      // usuarios, con o sin terminal (pruebas-kronos.mjs). Si faltan credenciales, va sin ellos.
+      const chromePdf = cfg.pdf?.habilitado === false ? null : resolverChrome({ explicito: cfg.pdf?.chrome ?? null, home: cfg.home });
+      const pruebas = prepararPruebasTurno({ cfg, rutas, idConversation, lote, chrome: chromePdf ?? resolverChrome({ home: cfg.home }) });
+      if (pruebas.servidores.length) perfil = combinarPerfil(perfil, pruebas);
+      else if (pruebas.motivo && cfg.pruebasKronos?.habilitado) log(`conversación ${idConversation}: turno sin los conectores de PRUEBAS (${pruebas.motivo}).`);
       await sincronizarArchivos({ rutas, contexto, estado, descargar: (u) => synerlink.descargar(u) });
       const adjuntos = await bajarAdjuntos({ rutas, mensajes: lote, descargar: (u) => synerlink.descargar(u) });
       // Equipo de subagentes (F2): SOLO el aprobado en SynerLink, con topes. Si
@@ -275,7 +282,6 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       // Recursos de solo lectura de los plugins (p. ej. gss-design) y HTML → PDF en el puente (pdf.mjs).
       // Para TODOS los turnos: con o sin código, con o sin terminal.
       const recursos = recursosDePlugins(cfg.pluginDirs ?? []);
-      const chromePdf = cfg.pdf?.habilitado === false ? null : resolverChrome({ explicito: cfg.pdf?.chrome ?? null, home: cfg.home });
       let bloqueGuia = '';
       if (codigo || indiceRepos) {
         const g = guiaDesarrolloSegura();
@@ -292,6 +298,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         bloqueCodigo: (codigo?.bloque ?? indiceRepos?.bloque ?? '') + (bloqueGuia ? `\n${bloqueGuia}` : '') + textoGrafos(grafosTurno, { conBash: Boolean(codigo) }),
         bloqueMemoria: memoria.bloque,
         bloqueConectores: conectores?.bloque ?? '',
+        bloquePruebas: pruebas.bloque,
         bloquePdf: textoPdf({ disponible: Boolean(chromePdf), recursos }),
         bloqueTiempo: textoTiempoTurno({ topeMs: cfg.timeoutTurnoMs, avisoMs: cfg.avisoProgresoMs ?? 0 }),
       });
@@ -695,6 +702,17 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
   return { recibir, recibirPedidos, cola, enProceso, atender, sugerirEquipo };
 }
 
+/** Estado de los conectores de PRUEBAS para la línea «listo:» (sin valores secretos). */
+export function pruebasListo(cfg, verificar = verificarSecretosPruebas) {
+  if (!cfg.pruebasKronos?.habilitado) return 'apagado';
+  try {
+    verificar(cfg.conectoresSecretos);
+    return `kronos-pruebas-sql + synerlink-testing-web (${cfg.pruebasKronos.base})`;
+  } catch (e) {
+    return `SIN credenciales (${e.message})`;
+  }
+}
+
 async function principal() {
   const cfg = cargarConfig(process.env);
   fijarEtiquetaEntorno(cfg.entorno);
@@ -718,7 +736,7 @@ async function principal() {
   ocupado = () => puente.enProceso.size > 0;
   medidor?.iniciar();
   log(medidor ? `medidor de consumo: stream de cada turno${cfg.cuota.intervaloMs > 0 && cfg.credencial.tipo === 'oauth-token' ? ` + consulta mínima cada ${Math.round(cfg.cuota.intervaloMs / 1000)} s sin turnos` : ''}.` : 'medidor de consumo apagado (HILOS_CUOTA=no).');
-  log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}, modelo del hilo principal: ${cfg.modelo ?? 'el predeterminado de la cuenta (sin HILOS_MODELO)'}; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; gasto ${cfg.sinTopeGasto ? 'SIN TOPE' : cfg.presupuestoUsd ? `tope ${cfg.presupuestoUsd} USD` : `sin tope general (equipo ${cfg.subagentesPresupuestoUsd} USD)`}; avisos de progreso ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; continuación automática ${cfg.continuarAlAgotar ? 'sí' : 'no'}.`);
+  log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}, modelo del hilo principal: ${cfg.modelo ?? 'el predeterminado de la cuenta (sin HILOS_MODELO)'}; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; gasto ${cfg.sinTopeGasto ? 'SIN TOPE' : cfg.presupuestoUsd ? `tope ${cfg.presupuestoUsd} USD` : `sin tope general (equipo ${cfg.subagentesPresupuestoUsd} USD)`}; avisos de progreso ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; continuación automática ${cfg.continuarAlAgotar ? 'sí' : 'no'}; PRUEBAS para todos los hilos: ${pruebasListo(cfg)}.`);
 
   let parar = false;
   for (const senal of ['SIGTERM', 'SIGINT']) {

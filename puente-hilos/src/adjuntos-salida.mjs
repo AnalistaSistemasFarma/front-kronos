@@ -42,12 +42,14 @@ const EXT_BLOQUEADAS = new Set([
 ]);
 
 /** Lista blanca de lo que la sesión puede adjuntar. */
-export const EXT_PERMITIDAS = ['xlsx', 'xls', 'csv', 'pdf', 'docx', 'pptx', 'png', 'jpg', 'jpeg', 'txt', 'md', 'json'];
+// sql y ts (2026-10-22, hilo de Compras): como TEXTO. ps1, sh, js y mjs NO: el servidor de
+// SynerLink los bloquea (BLOCKED_ATTACHMENT_EXTENSIONS); para compartirlos, como .txt.
+export const EXT_PERMITIDAS = ['xlsx', 'xls', 'csv', 'pdf', 'docx', 'pptx', 'png', 'jpg', 'jpeg', 'txt', 'md', 'json', 'sql', 'ts'];
 const PERMITIDAS = new Set(EXT_PERMITIDAS);
 
 const MIME = {
   pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-  txt: 'text/plain', md: 'text/markdown', csv: 'text/csv', json: 'application/json',
+  txt: 'text/plain', sql: 'text/plain', ts: 'text/plain', md: 'text/markdown', csv: 'text/csv', json: 'application/json',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   xls: 'application/vnd.ms-excel',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -190,6 +192,6 @@ export async function prepararAdjuntos(texto, opts) {
 export function textoAdjuntosSalida() {
   return [
     `- ADJUNTAR ARCHIVOS a su respuesta: SÍ puede, en cualquier turno. 1) Cree el archivo dentro de ./trabajo (por ejemplo ./trabajo/salida/informe.csv) con Write o, si tiene terminal, con sus comandos. 2) En su respuesta final escriba, en una línea sola y fuera de bloques de código, \`MEDIA:trabajo/salida/informe.csv\` (una línea por archivo). El puente quita esa línea y sube el archivo con su mensaje.`,
-    `  Límites: máximo ${MAX_ADJUNTOS} archivos, 25 MB cada uno, solo dentro de ./trabajo (sin \`..\`, sin enlaces simbólicos ni archivos ocultos) y solo extensiones ${EXT_PERMITIDAS.join(', ')}. Con Write solo se escribe texto: sin terminal, entregue tablas como .csv (separado por «;») o .md/.txt/.json; un .xlsx/.docx real solo si lo generó con un comando; un PDF, con la regla DOCUMENTOS EN PDF (el puente convierte su HTML). Nombre en la respuesta el archivo que adjunta; si el puente no lo puede adjuntar, lo dirá en el hilo. Nunca diga que no puede adjuntar archivos.`,
+    `  Límites: máximo ${MAX_ADJUNTOS} archivos, 25 MB cada uno, solo dentro de ./trabajo (sin \`..\`, sin enlaces simbólicos ni archivos ocultos) y solo extensiones ${EXT_PERMITIDAS.join(', ')}. Con Write solo se escribe texto: sin terminal, entregue tablas como .csv (separado por «;») o .md/.txt/.json; SQL como .sql; un script .ps1/.sh/.js/.mjs SynerLink lo bloquea, así que entréguelo renombrado a .txt (dígalo); un .xlsx/.docx real solo si lo generó con un comando; un PDF, con la regla DOCUMENTOS EN PDF (el puente convierte su HTML). Nombre en la respuesta el archivo que adjunta; si el puente no lo puede adjuntar, lo dirá en el hilo. Nunca diga que no puede adjuntar archivos.`,
   ].join('\n');
 }

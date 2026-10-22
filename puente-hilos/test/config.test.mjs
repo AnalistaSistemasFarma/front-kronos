@@ -164,3 +164,11 @@ test('HILOS_MODELO: modelo del hilo principal por agente (2026-10-20) y --model 
   const args = armarArgumentos({ perfil: { mcpServers: {}, herramientas: [], web: false }, sesion: { id: '11111111-2222-3333-4444-555555555555', nueva: false }, rutaMcp: '/m', rutaSistema: '/s', modelo: 'claude-opus-5-5' });
   assert.equal(args[args.indexOf('--model') + 1], 'claude-opus-5-5');
 });
+
+test('PRUEBAS para todos los hilos: encendido por defecto, se apaga con «no» y solo contra la web de pruebas', () => {
+  const cfg = cargarConfig(envBase(tmp()));
+  assert.deepEqual(cfg.pruebasKronos, { habilitado: true, base: 'http://192.168.11.230:3030' });
+  assert.equal(cargarConfig(envBase(tmp(), { HILOS_PRUEBAS_KRONOS: 'no' })).pruebasKronos.habilitado, false);
+  assert.throws(() => cargarConfig(envBase(tmp(), { HILOS_PRUEBAS_KRONOS: 'tal-vez' })), /HILOS_PRUEBAS_KRONOS/);
+  assert.throws(() => cargarConfig(envBase(tmp(), { HILOS_PRUEBAS_KRONOS_WEB: 'http://192.168.10.5:3003' })), /HILOS_PRUEBAS_KRONOS_WEB/);
+});

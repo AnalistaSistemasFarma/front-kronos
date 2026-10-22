@@ -83,6 +83,14 @@
  *   HILOS_CONECTORES_SECRETOS        Archivo 600 con las llaves Bearer de esos conectores; lo lee
  *                                    solo el headersHelper (nunca entra al mcp.json ni al modelo).
  *
+ *   PRUEBAS para todos los hilos (2026-10-22; ver pruebas-kronos.mjs). Encendido por defecto:
+ *   HILOS_PRUEBAS_KRONOS             'si' (por defecto) o 'no'. Conectores kronos-pruebas-sql (lectura y
+ *                                    escritura SOLO en KRONOSDB_PRUEBAS) y synerlink-testing-web (testing
+ *                                    como usuario QA) en TODOS los proyectos. Credenciales: clave
+ *                                    «kronos-pruebas» de HILOS_CONECTORES_SECRETOS.
+ *   HILOS_PRUEBAS_KRONOS_WEB         Web de testing (por defecto http://192.168.11.230:3030; debe ser un
+ *                                    host de HOSTS_PRUEBAS).
+ *
  *   Medidor del consumo de Anthropic (2026-10-22; ver cuota.mjs). Opcional:
  *   HILOS_CUOTA                      'si' (por defecto) o 'no'. Publica en SynerLink el cupo semanal
  *                                    y la ventana de 5 h del token (lo que trae el stream del turno).
@@ -416,6 +424,19 @@ export function cargarConfig(env = process.env) {
   }
   const grafosDir = (env.HILOS_GRAFOS_DIR ?? '').trim() || null;
 
+  // PRUEBAS para todos los hilos (pruebas-kronos.mjs, 2026-10-22). Encendido por defecto.
+  const pruebasModo = (env.HILOS_PRUEBAS_KRONOS ?? 'si').trim().toLowerCase();
+  if (!['si', 'no'].includes(pruebasModo)) throw new ErrorConfig('HILOS_PRUEBAS_KRONOS debe ser «si» o «no».');
+  const pruebasWeb = (env.HILOS_PRUEBAS_KRONOS_WEB ?? 'http://192.168.11.230:3030').trim();
+  {
+    let u;
+    try {
+      u = new URL(pruebasWeb);
+    } catch {
+      throw new ErrorConfig('HILOS_PRUEBAS_KRONOS_WEB no es una URL válida.');
+    }
+    if (!HOSTS_PRUEBAS.includes(u.hostname) || u.pathname !== '/' || u.username || u.search) throw new ErrorConfig('HILOS_PRUEBAS_KRONOS_WEB debe ser la web de PRUEBAS (host de HOSTS_PRUEBAS, sin ruta).');
+  }
   // HTML → PDF en el puente (pdf.mjs, 2026-10-21). Encendido por defecto; HILOS_PDF=no lo apaga.
   const pdfModo = (env.HILOS_PDF ?? 'si').trim().toLowerCase();
   if (!['si', 'no'].includes(pdfModo)) throw new ErrorConfig('HILOS_PDF debe ser «si» o «no».');
@@ -491,6 +512,7 @@ export function cargarConfig(env = process.env) {
     cuota: { habilitada: cuotaModo === 'si', intervaloMs: cuotaIntervaloMs },
     rutaConectoresPorProyecto: (env.HILOS_CONECTORES_POR_PROYECTO ?? '').trim() || null,
     conectoresSecretos: (env.HILOS_CONECTORES_SECRETOS ?? '').trim() || null,
+    pruebasKronos: { habilitado: pruebasModo === 'si', base: new URL(pruebasWeb).origin },
     // Para el entorno del hijo: solo lo indispensable del entorno propio.
     path: env.PATH ?? '/usr/bin:/bin',
     home: env.HOME ?? homedir(),

@@ -211,6 +211,8 @@ export function etiquetaHerramienta(nombre) {
   if (nombre.startsWith('mcp__')) {
     const [, servidor] = nombre.split('__');
     if (servidor?.startsWith('sap')) return 'Consultando SAP…';
+    if (servidor === 'kronos-pruebas-sql') return 'Trabajando en la base de PRUEBAS…';
+    if (servidor === 'synerlink-testing-web') return nombre.endsWith('testing_captura') ? 'Tomando una captura de testing…' : 'Revisando testing como usuario QA…';
     return `Consultando ${servidor}…`;
   }
   const mapa = {
