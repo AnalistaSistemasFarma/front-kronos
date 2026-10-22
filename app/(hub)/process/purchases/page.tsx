@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { Suspense, useState, useEffect, useMemo } from 'react';
 import ExcelJS from 'exceljs';
 import { useSession } from 'next-auth/react';
+import { useSearchParams } from 'next/navigation';
 import {
   Loader, Alert, Table, TextInput, Select, Pagination, Badge, Group, SegmentedControl, ActionIcon, Button,
 } from '@mantine/core';
-import { IconSearch, IconAlertTriangle, IconEye, IconPencil, IconPlus, IconReceipt, IconSend, IconUpload, IconCopy, IconFileSpreadsheet } from '@tabler/icons-react';
+import { IconSearch, IconAlertTriangle, IconEye, IconPencil, IconPlus, IconReceipt, IconSend, IconUpload, IconCopy, IconFileSpreadsheet, IconArrowBackUp, IconTrash } from '@tabler/icons-react';
 import { stateLabel, stateColor, type PurchaseTipo } from '../../../../lib/purchases/fields';
 import { EDITABLE_STATES } from '../../../../lib/purchases/drafts';
 import DetailModal, { type PurchaseDraft } from './DetailModal';
@@ -57,8 +58,9 @@ function formatTotal(raw: unknown): string {
   return Number.isNaN(n) ? String(raw) : n.toLocaleString('es-CO');
 }
 
-export default function PurchasesPage() {
+function PurchasesPageContent() {
   const { data: session } = useSession();
+  const searchParams = useSearchParams();
 
   const [tipo, setTipo] = useState<PurchaseTipo>('solicitudes');
   const [companies, setCompanies] = useState<CompanyAccess[]>([]);
@@ -78,6 +80,10 @@ export default function PurchasesPage() {
   const [bulkOpened, setBulkOpened] = useState(false);
   const [duplicateTarget, setDuplicateTarget] = useState<EditTarget | null>(null);
   const [variant, setVariant] = useState<PurchaseVariant>('todas');
+  // Empresa preseleccionada al llegar desde «Mis solicitudes» (?nueva=1&companyId=N).
+  const [initialCompanyId, setInitialCompanyId] = useState<number | null>(null);
+  // Llegada desde «Mis solicitudes»: crear y enviar a autorizar en un solo paso.
+  const [fromRequests, setFromRequests] = useState(false);
 
   const writableCompanies = useMemo(
     () => companies.filter((c) => c.canWrite && c.ready),
@@ -109,6 +115,50 @@ export default function PurchasesPage() {
     } finally {
       setSendingKey(null);
     }
+  };
+
+  /** «Retomar» (NAD -> B) y «Anular» (B -> anulado, con motivo): solo el solicitante. */
+  const changeState = async (r: PurchaseDraft, action: 'retomar' | 'anular') => {
+    let reason = '';
+    if (action === 'anular') {
+      const answer = window.prompt(`Motivo para anular el borrador #${r.DocEntry} (obligatorio):`);
+      if (answer === null) return;
+      reason = answer.trim();
+      if (!reason) {
+        setActionMessage({ color: 'red', text: 'El motivo es obligatorio para anular.' });
+        return;
+      }
+    }
+    const key = `${r.companyId}-${r.DocEntry}`;
+    setSendingKey(key);
+    setActionMessage(null);
+    try {
+      const res = await fetch('/api/purchases/drafts/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId: r.companyId, docEntry: Number(r.DocEntry), action, reason }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionMessage({ color: 'red', text: data.error || 'No se pudo cambiar el estado' });
+        return;
+      }
+      setActionMessage({
+        color: 'green',
+        text: action === 'retomar' ? `Borrador #${r.DocEntry} retomado: puede editarlo y reenviarlo.` : `Borrador #${r.DocEntry} anulado.`,
+      });
+      setReloadKey((k) => k + 1);
+    } catch {
+      setActionMessage({ color: 'red', text: 'Error de red al cambiar el estado' });
+    } finally {
+      setSendingKey(null);
+    }
+  };
+
+  /** ¿La fila es del usuario (su perfil SAPSEND en esa empresa) y puede escribir alli? */
+  const isOwnRow = (r: PurchaseDraft) => {
+    const c = companies.find((x) => x.idCompany === r.companyId);
+    return Boolean(c?.canWrite && c.sapsendUserId != null && String(r.U_SEND_UserId ?? '') === String(c.sapsendUserId));
   };
 
   /** «Cotizar»: LA -> ENC. El servidor valida que el usuario pueda decidir la autorizacion. */
@@ -178,6 +228,19 @@ export default function PurchasesPage() {
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  useEffect(() => {
+    if (searchParams.get('nueva') !== '1' || companies.length === 0) return;
+    const cid = Number(searchParams.get('companyId'));
+    setTipo('solicitudes');
+    setEditTarget(null);
+    setDuplicateTarget(null);
+    setInitialCompanyId(writableCompanies.some((c) => c.idCompany === cid) ? cid : null);
+    setFromRequests(true);
+    setFormOpened(true);
+    // Solo una vez por llegada: se limpia la URL para que recargar no reabra el formulario.
+    window.history.replaceState(null, '', '/process/purchases');
+  }, [searchParams, companies, writableCompanies]);
 
   const canEditRow = (r: PurchaseDraft) =>
     tipo === 'solicitudes' &&
@@ -312,11 +375,19 @@ export default function PurchasesPage() {
       <DetailModal draft={selected} tipo={tipo} onClose={() => setSelected(null)} />
       <RequestFormModal
         opened={formOpened}
-        onClose={() => setFormOpened(false)}
-        onSaved={() => setReloadKey((k) => k + 1)}
+        onClose={() => {
+          setFormOpened(false);
+          setFromRequests(false);
+        }}
+        onSaved={(warning) => {
+          setReloadKey((k) => k + 1);
+          if (warning) setActionMessage({ color: 'yellow', text: warning });
+        }}
         companies={writableCompanies}
         edit={editTarget}
         duplicate={duplicateTarget}
+        initialCompanyId={initialCompanyId}
+        sendOnCreate={fromRequests && !editTarget}
       />
       <BulkModal
         opened={bulkOpened}
@@ -477,6 +548,38 @@ export default function PurchasesPage() {
                               <IconCopy size={16} />
                             </ActionIcon>
                           )}
+                          {tipo === 'solicitudes' && String(r.U_SEND_State ?? '') === 'NAD' && isOwnRow(r) && (
+                            <ActionIcon
+                              variant="subtle"
+                              color="blue"
+                              size="sm"
+                              loading={sendingKey === `${r.companyId}-${r.DocEntry}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void changeState(r, 'retomar');
+                              }}
+                              aria-label="Retomar solicitud"
+                              title="Retomar (vuelve a borrador para corregir y reenviar)"
+                            >
+                              <IconArrowBackUp size={16} />
+                            </ActionIcon>
+                          )}
+                          {tipo === 'solicitudes' && String(r.U_SEND_State ?? '') === 'B' && isOwnRow(r) && (
+                            <ActionIcon
+                              variant="subtle"
+                              color="red"
+                              size="sm"
+                              loading={sendingKey === `${r.companyId}-${r.DocEntry}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void changeState(r, 'anular');
+                              }}
+                              aria-label="Anular borrador"
+                              title="Anular borrador (con motivo)"
+                            >
+                              <IconTrash size={16} />
+                            </ActionIcon>
+                          )}
                           {tipo === 'solicitudes' && String(r.U_SEND_State ?? '') === 'LA' && (
                             <ActionIcon
                               variant="subtle"
@@ -513,5 +616,20 @@ export default function PurchasesPage() {
         </>
       )}
     </div>
+  );
+}
+
+/** useSearchParams (llegada desde «Mis solicitudes») exige un limite de Suspense en Next 15. */
+export default function PurchasesPage() {
+  return (
+    <Suspense
+      fallback={
+        <Group justify="center" mt="xl">
+          <Loader />
+        </Group>
+      }
+    >
+      <PurchasesPageContent />
+    </Suspense>
   );
 }

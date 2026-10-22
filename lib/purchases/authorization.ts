@@ -153,6 +153,34 @@ export async function sendToAuthorize(params: {
   return { ok: true, idRequestGeneral: idRequest, state: 'LA' };
 }
 
+/**
+ * ¿Ya estan aprobadas TODAS las tareas de autorizacion de la plantilla de la
+ * solicitud? Se compara contra la plantilla (task_process_category) y no contra las
+ * tareas creadas, porque las secuenciales siguientes se crean despues
+ * (advanceSequentialTask) y podrian no existir aun cuando llega este aviso.
+ * Limitacion: si la plantilla tiene autorizaciones condicionadas a opciones del
+ * formulario que no aplican, nunca se completarian; el flujo de compras no las usa.
+ */
+async function allAuthorizationsApproved(idRequest: number): Promise<boolean> {
+  const pool = await sql.connect(sqlConfig);
+  const r = await pool.request().input('req', sql.Int, idRequest).query(`
+    WITH plantilla AS (
+      SELECT DISTINCT tpc.id_process_category
+      FROM task_request_general trg
+      INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
+      WHERE trg.id_request_general = @req
+    )
+    SELECT
+      (SELECT COUNT(*) FROM task_process_category tpc
+        WHERE tpc.id_process_category IN (SELECT id_process_category FROM plantilla)
+          AND tpc.is_authorization = 1) AS total,
+      (SELECT COUNT(DISTINCT trg.id_task) FROM task_request_general trg
+        INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
+        WHERE trg.id_request_general = @req AND tpc.is_authorization = 1 AND trg.id_status = 2) AS aprobadas;`);
+  const row = r.recordset[0] ?? { total: 0, aprobadas: 0 };
+  return Number(row.total) > 0 && Number(row.aprobadas) >= Number(row.total);
+}
+
 /** Marca el resultado sin romper al llamador (corre en segundo plano). */
 async function finish(idRequest: number, data: { status: string; firm_doc_entry?: number; error?: string | null }) {
   await prisma.purchaseAuthorization.update({
@@ -172,6 +200,11 @@ export async function onAuthorizationDecision(
   reason?: string | null
 ): Promise<{ skipped: true } | { skipped: false; status: string; error?: string }> {
   if (!idRequest) return { skipped: true };
+
+  // El flujo se edita en «Administrar flujos de trabajo» y puede tener VARIOS niveles
+  // de autorizacion: solo se publica cuando estan aprobados todos los de la plantilla.
+  // (Un rechazo en cualquier nivel si decide de una vez.)
+  if (authorized && !(await allAuthorizationsApproved(Number(idRequest)))) return { skipped: true };
 
   // Reclamo atomico: solo una ejecucion procesa la decision.
   const claimed = await prisma.purchaseAuthorization.updateMany({

@@ -196,6 +196,8 @@ function RequestBoard() {
     url: '',
   });
   const [createLoading, setCreateLoading] = useState(false);
+  // Solicitud de compra: se captura en el formulario de Compras (lineas + SAP), no aqui.
+  const [isPurchaseProcess, setIsPurchaseProcess] = useState(false);
   const isSubmittingRef = useRef(false);
 
   const linkedProcessParam = searchParams.get('linkedProcess');
@@ -902,8 +904,29 @@ function RequestBoard() {
     return Object.keys(errors).length === 0;
   };
 
+  useEffect(() => {
+    if (!formData.company || !formData.process) {
+      setIsPurchaseProcess(false);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/purchases/entry?companyId=${formData.company}&processId=${formData.process}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) setIsPurchaseProcess(Boolean(d?.isPurchase));
+      })
+      .catch(() => {
+        if (!cancelled) setIsPurchaseProcess(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.company, formData.process]);
+
   const handleCreateTicketWithValidation = async () => {
     if (isSubmittingRef.current) return;
+    // La solicitud de compra no se crea por el formulario generico (se haria sin borrador en SAP).
+    if (isPurchaseProcess) return;
     if (!validateForm()) return;
     await handleCreateTicket();
   };
@@ -1990,6 +2013,24 @@ function RequestBoard() {
               </Grid.Col>
             </Grid>
 
+            {isPurchaseProcess && (
+              <Alert color='blue' variant='light' title='Solicitud de compra'>
+                <Text size='sm'>
+                  La solicitud de compra se diligencia en su propio formulario, con las líneas
+                  (artículo, cantidad, IVA, cuenta y norma de reparto) validadas contra SAP. Al
+                  enviarla a autorizar aparecerá aquí, en Mis solicitudes.
+                </Text>
+                <Button
+                  mt='sm'
+                  onClick={() =>
+                    router.push(`/process/purchases?nueva=1&companyId=${formData.company}`)
+                  }
+                >
+                  Abrir formulario de solicitud de compra
+                </Button>
+              </Alert>
+            )}
+
             {(() => {
               const processName = (
                 filteredProcesses.find((p) => p.value === formData.process)?.label || ''
@@ -2313,7 +2354,7 @@ function RequestBoard() {
               <Button
                 onClick={handleCreateTicketWithValidation}
                 loading={createLoading}
-                disabled={createLoading}
+                disabled={createLoading || isPurchaseProcess}
                 size='md'
                 leftSection={<IconPlus size={16} />}
                 className='bg-blue-600 hover:bg-blue-700'
