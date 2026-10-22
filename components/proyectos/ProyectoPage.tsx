@@ -41,6 +41,7 @@ import SeccionPermisos from './permisos/SeccionPermisos';
 import { AgentesApilados, AvisoArriba, BadgeRol, CONSULTA_ESCRITORIO, Encabezado, EsqueletoFilas, type Aviso } from './ui';
 import css from './proyectos.module.css';
 import { useEstadosAgentes } from './useEstadosAgentes';
+import MedidorConsumo, { useConsumoAnthropic } from './MedidorConsumo';
 import type { EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente';
 
 /**
@@ -77,6 +78,8 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
   const { data: sesion } = useSession();
   const miId = sesion?.user?.id as string | undefined;
   const escritorio = useMediaQuery(CONSULTA_ESCRITORIO) ?? true;
+  // Cupo de Anthropic de los agentes del proyecto (2026-10-22): en el encabezado, para todos los miembros.
+  const consumo = useConsumoAnthropic(idProject);
 
   const [proyecto, setProyecto] = useState<ProyectoDetalleDto | null>(null);
   const [sinAcceso, setSinAcceso] = useState(false);
@@ -518,6 +521,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
               {proyecto.agents.map((a) => a.displayName).join(', ')}
             </Text>
           </Group>
+          <MedidorConsumo agentes={consumo} />
         </>
       ) : (
         <Stack gap={8} mt={8}>
@@ -624,6 +628,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
         </Box>
         {proyecto && <BadgeRol role={proyecto.myRole} />}
       </Group>
+      {proyecto && <MedidorConsumo agentes={consumo} compacto />}
       <div className={css.pestanas}>
         <Tabs value={seccion} onChange={(v) => esSeccion(v) && setSeccion(v)} variant='default'>
           <Tabs.List>
