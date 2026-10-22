@@ -4,11 +4,22 @@
  * Apenas alguien entra al portal se abre una ventana con los eventos del día, tomados del MISMO calendario (festivos, fechas
  * importantes, eventos de la empresa y cumpleaños). Si hay cumpleaños, lleva una imagen alusiva. Se cierra sola a los 15 segundos, o
  * antes si la persona la cierra. Este archivo es PURO: arma la lista del día y decide si se muestra.
+ *
+ * Desde el 2026-10-21 (Cristian: «sí, que salga siempre») se abre SIEMPRE, cada vez que se entra al portal (cada vez que se monta, también
+ * al volver a `/process/portal-th` desde otro módulo de SynerLink), aunque el día no tenga nada: entonces dice «Hoy no hay eventos ni
+ * cumpleaños» y muestra los PRÓXIMOS (`proximosEventos`), de las mismas fuentes del calendario.
  */
-import { TITULO_CUMPLEANOS, eventosFijosPorDia, ordenarEventos, unirEventos, type EventoDia } from './calendario';
+import { TITULO_CUMPLEANOS, aIso, desdeIso, eventosFijosPorDia, ordenarEventos, proximos, unirEventos, type EventoDia } from './calendario';
 
 /** A los cuántos segundos se cierra sola. */
 export const SEGUNDOS_VENTANA_HOY = 15;
+
+/** Día sin nada: se muestran los próximos de los siguientes `DIAS_PROXIMOS_VENTANA_HOY` días, máximo `MAX_PROXIMOS_VENTANA_HOY`. */
+export const DIAS_PROXIMOS_VENTANA_HOY = 30;
+export const MAX_PROXIMOS_VENTANA_HOY = 5;
+
+/** El último día (incluido) del rango de próximos: `hoy` + `dias`. */
+export const finDeProximos = (hoy: string, dias = DIAS_PROXIMOS_VENTANA_HOY): string => aIso(new Date(desdeIso(hoy).getTime() + dias * 86_400_000));
 
 /** Imagen del cumpleaños (decorativa; está en `public/portal-th`). */
 export const IMAGEN_CUMPLEANOS = '/portal-th/cumpleanos.svg';
@@ -31,23 +42,11 @@ export const PREFIJO_MARCA_VENTANA_HOY = 'portal-th-ventana-hoy-';
 export const omitirPorMarca = (hayMarca: boolean, navegadorAutomatizado: boolean): boolean => hayMarca && navegadorAutomatizado;
 
 /**
- * Una vez por CARGA de la página (en memoria, no en localStorage): recargar o entrar de nuevo la vuelve a mostrar, pero cambiar de
- * ruta DENTRO de SynerLink (p. ej. ir a otro módulo del hub y volver a `/process/portal-th`) no la reabre. Iniciar o cerrar sesión
- * (`reiniciarVentanaHoy`) también la habilita otra vez.
- */
-let mostradaEnEstaCarga = false;
-export const yaSeMostroEnEstaCarga = () => mostradaEnEstaCarga;
-export const marcarMostradaEnEstaCarga = () => {
-  mostradaEnEstaCarga = true;
-};
-
-/**
  * «Cada vez que se inicie sesión» (Cristian, 2026-10-16): al iniciar o cerrar sesión se BORRA la marca de «ya vista», así que la
  * ventana vuelve a salir en el siguiente ingreso. Se llama al validar el código del portal abierto y al pulsar «Salir».
  * Sin almacenamiento disponible (modo privado estricto) no hace nada: ahí la ventana sale siempre.
  */
 export function reiniciarVentanaHoy(almacen: Pick<Storage, 'length' | 'key' | 'removeItem'> | null = tryLocalStorage()): void {
-  mostradaEnEstaCarga = false;
   if (!almacen) return;
   try {
     const claves: string[] = [];
@@ -79,3 +78,22 @@ export function eventosDelDia(hoy: string, empresa: EventoDia[], cumpleanos: Eve
 }
 
 export const hayCumpleanos = (eventos: EventoDia[]) => eventos.some((e) => e.titulo === TITULO_CUMPLEANOS && (e.personas?.length ?? 0) > 0);
+
+/**
+ * Los PRÓXIMOS eventos después de hoy (sin contarlo) y hasta `hoy + dias` (incluido): festivos, fechas importantes, eventos de la empresa
+ * y cumpleaños, en orden de fecha y, dentro del día, en el orden del calendario. Máximo `max`. Es lo que sale cuando hoy no hay nada.
+ */
+export function proximosEventos(
+  hoy: string,
+  empresa: EventoDia[],
+  cumpleanos: EventoDia[],
+  dias = DIAS_PROXIMOS_VENTANA_HOY,
+  max = MAX_PROXIMOS_VENTANA_HOY
+): EventoDia[] {
+  const fin = finDeProximos(hoy, dias);
+  const enRango = (e: EventoDia) => e.fecha > hoy && e.fecha <= fin;
+  const años = [Number(hoy.slice(0, 4)), Number(fin.slice(0, 4))];
+  const fijos = new Map([...eventosFijosPorDia(años)].filter(([f]) => f > hoy && f <= fin));
+  const cumples = cumpleanos.filter((e) => enRango(e) && e.personas && e.personas.length > 0);
+  return proximos(unirEventos(fijos, [...empresa.filter(enRango), ...cumples]), hoy, max);
+}
