@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { Suspense, useState, useEffect, useMemo } from 'react';
 import ExcelJS from 'exceljs';
 import { useSession } from 'next-auth/react';
+import { useSearchParams } from 'next/navigation';
 import {
   Loader, Alert, Table, TextInput, Select, Pagination, Badge, Group, SegmentedControl, ActionIcon, Button,
 } from '@mantine/core';
@@ -57,8 +58,9 @@ function formatTotal(raw: unknown): string {
   return Number.isNaN(n) ? String(raw) : n.toLocaleString('es-CO');
 }
 
-export default function PurchasesPage() {
+function PurchasesPageContent() {
   const { data: session } = useSession();
+  const searchParams = useSearchParams();
 
   const [tipo, setTipo] = useState<PurchaseTipo>('solicitudes');
   const [companies, setCompanies] = useState<CompanyAccess[]>([]);
@@ -78,6 +80,8 @@ export default function PurchasesPage() {
   const [bulkOpened, setBulkOpened] = useState(false);
   const [duplicateTarget, setDuplicateTarget] = useState<EditTarget | null>(null);
   const [variant, setVariant] = useState<PurchaseVariant>('todas');
+  // Empresa preseleccionada al llegar desde «Mis solicitudes» (?nueva=1&companyId=N).
+  const [initialCompanyId, setInitialCompanyId] = useState<number | null>(null);
 
   const writableCompanies = useMemo(
     () => companies.filter((c) => c.canWrite && c.ready),
@@ -178,6 +182,18 @@ export default function PurchasesPage() {
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  useEffect(() => {
+    if (searchParams.get('nueva') !== '1' || companies.length === 0) return;
+    const cid = Number(searchParams.get('companyId'));
+    setTipo('solicitudes');
+    setEditTarget(null);
+    setDuplicateTarget(null);
+    setInitialCompanyId(writableCompanies.some((c) => c.idCompany === cid) ? cid : null);
+    setFormOpened(true);
+    // Solo una vez por llegada: se limpia la URL para que recargar no reabra el formulario.
+    window.history.replaceState(null, '', '/process/purchases');
+  }, [searchParams, companies, writableCompanies]);
 
   const canEditRow = (r: PurchaseDraft) =>
     tipo === 'solicitudes' &&
@@ -317,6 +333,7 @@ export default function PurchasesPage() {
         companies={writableCompanies}
         edit={editTarget}
         duplicate={duplicateTarget}
+        initialCompanyId={initialCompanyId}
       />
       <BulkModal
         opened={bulkOpened}
@@ -513,5 +530,20 @@ export default function PurchasesPage() {
         </>
       )}
     </div>
+  );
+}
+
+/** useSearchParams (llegada desde «Mis solicitudes») exige un limite de Suspense en Next 15. */
+export default function PurchasesPage() {
+  return (
+    <Suspense
+      fallback={
+        <Group justify="center" mt="xl">
+          <Loader />
+        </Group>
+      }
+    >
+      <PurchasesPageContent />
+    </Suspense>
   );
 }

@@ -70,6 +70,8 @@ interface Props {
    * fecha requerida reiniciada. Solo aplica si `edit` es null.
    */
   duplicate?: EditTarget | null;
+  /** Empresa preseleccionada al crear (p. ej. al llegar desde «Mis solicitudes»). */
+  initialCompanyId?: number | null;
 }
 
 /** Proyecta una linea del Draft de SAP a los campos del formulario. */
@@ -83,7 +85,15 @@ function toFormLine(l: Record<string, unknown>): Line {
   return line;
 }
 
-export default function RequestFormModal({ opened, onClose, onSaved, companies, edit, duplicate = null }: Props) {
+export default function RequestFormModal({
+  opened,
+  onClose,
+  onSaved,
+  companies,
+  edit,
+  duplicate = null,
+  initialCompanyId = null,
+}: Props) {
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [comments, setComments] = useState('');
   const [requiredDate, setRequiredDate] = useState('');
@@ -100,7 +110,9 @@ export default function RequestFormModal({ opened, onClose, onSaved, companies, 
     setFieldErrors([]);
     const source = edit ?? duplicate;
     if (!source) {
-      setCompanyId(companies.length === 1 ? String(companies[0].idCompany) : null);
+      setCompanyId(
+        initialCompanyId ? String(initialCompanyId) : companies.length === 1 ? String(companies[0].idCompany) : null
+      );
       setComments('');
       setRequiredDate('');
       setLines([{}]);
@@ -134,7 +146,7 @@ export default function RequestFormModal({ opened, onClose, onSaved, companies, 
     return () => {
       cancelled = true;
     };
-  }, [opened, edit, duplicate, companies]);
+  }, [opened, edit, duplicate, companies, initialCompanyId]);
 
   const setLineValue = (index: number, field: LineField, value: string | number) => {
     setLines((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
