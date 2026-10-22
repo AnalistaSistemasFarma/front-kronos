@@ -38,6 +38,10 @@ const MUTED = rgb(0.4, 0.43, 0.48);
 const LINE = rgb(0.35, 0.38, 0.42);
 const BOX = rgb(0.6, 0.63, 0.68);
 
+/** Tamaño de la hoja A4 en puntos. */
+export const SGC_A4_PORTRAIT = { width: 595.28, height: 841.89 } as const;
+export const SGC_A4_LANDSCAPE = { width: 841.89, height: 595.28 } as const;
+
 const MARGIN_X = 36;
 const TOP = 28;
 const ROW_A = 50;
@@ -186,8 +190,14 @@ export function headerNames(list: readonly string[]): string {
  * su significado en la página 1 (varias personas del mismo rol se reparten el
  * recuadro). El elaborador las puede mover o redimensionar después.
  */
-export function suggestInstitutionalPlacements(participants: readonly SgcPlacementParticipant[], existing: readonly SgcStoredField[], grid: SgcHeaderGrid | null = null): SgcStoredField[] {
-  const boxes = institutionalSignatureBoxesPct(595.28, 841.89, grid);
+export function suggestInstitutionalPlacements(
+  participants: readonly SgcPlacementParticipant[],
+  existing: readonly SgcStoredField[],
+  grid: SgcHeaderGrid | null = null,
+  // 2026-10-22: un formato en Excel puede ir en A4 horizontal (lo elige el elaborador); los recuadros se calculan sobre esa hoja.
+  page: { width: number; height: number } = SGC_A4_PORTRAIT
+): SgcStoredField[] {
+  const boxes = institutionalSignatureBoxesPct(page.width, page.height, grid);
   const placed = new Set(existing.map((f) => f.signerKey));
   const out: SgcStoredField[] = [];
   for (const meaning of ['elaboro', 'reviso', 'aprobo'] as const) {

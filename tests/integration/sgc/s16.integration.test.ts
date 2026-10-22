@@ -7,16 +7,17 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PrismaClient } from '../../../app/generated/prisma';
 import { getSgcAccessForUser } from '../../../lib/sgc/access';
 import { SGC_PROCESS_NAME, SGC_SUBPROCESS_NAMES, SGC_SUBPROCESS_URLS } from '../../../lib/sgc/constants';
-import { startBulkUpload, uploadBulkFile } from '../../../lib/sgc/db/bulkUpload';
+import { inspectBulkExcel, previewBulkExcel, startBulkUpload, uploadBulkFile } from '../../../lib/sgc/db/bulkUpload';
 import { getCatalogs, saveCatalogEntry } from '../../../lib/sgc/db/catalogs';
 import type { SgcUploader } from '../../../lib/sgc/db/documents';
 import { buildHeaderTemplatePreview, headerTemplateForType, listHeaderTemplates, saveHeaderTemplate, setDefaultHeaderTemplate } from '../../../lib/sgc/db/headerTemplates';
-import { buildLayoutPreview } from '../../../lib/sgc/db/layout';
+import { buildLayoutPreview, getDocumentLayout, inspectDraftSheets, latestLayout, saveDocumentLayout, validateDraftSheetSettings } from '../../../lib/sgc/db/layout';
 import { addMatrixEntry } from '../../../lib/sgc/db/matrix';
 import { confirmMasterListImport } from '../../../lib/sgc/db/masterListImport';
 import { createRequest, getRequestDetail, uploadAttachment } from '../../../lib/sgc/db/requests';
 import type { SgcMasterListRawRow } from '../../../lib/sgc/masterListImport';
 import type { SgcNotifier } from '../../../lib/sgc/notifications';
+import { normalizeSheetSettings } from '../../../lib/sgc/sheetSettings';
 
 /**
  * S16 contra un SQL Server REAL (efímero en CI): encabezado por tipo
@@ -215,5 +216,137 @@ describe.skipIf(!url)('SGC · S16 · encabezados por tipo y Excel con SQL Server
       ['cargado', 'xlsx'],
     ]);
     expect(await prisma.sgcDocument.count({ where: { id_company: CO, code: { in: ['OLP-GC-07', 'OLP-GC-07-FO01'] }, status: 'vigente' } })).toBe(2);
+  });
+  it('[SGC-REQ-165] 2026-10-21: un Excel de la carga inicial se inspecciona y se previsualiza sin guardar nada, y se carga con los ajustes de presentación elegidos', async () => {
+    const row = (n: number, values: SgcMasterListRawRow['values']): SgcMasterListRawRow => ({ rowNumber: n, values });
+    await confirmMasterListImport(prisma, CO, { fileName: 'listado-s16-ajustes.xlsx', rows: [row(2, { code: 'OLP-GC-07-FO02', title: 'Registro de inspección', documentTypeCode: 'FO', processCode: 'GC', versionNumber: '3', effectiveDate: '2024-06-01' })] }, actor(E.cal));
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Registro');
+    ws.getCell('A1').value = 'REGISTRO DE INSPECCIÓN';
+    ws.getCell('B1').value = 'Responsable';
+    ws.getCell('C1').value = 'COLUMNA AUXILIAR';
+    wb.addWorksheet('Instrucciones').getCell('A1').value = 'TEXTO DE AYUDA';
+    const bytes = new Uint8Array(await wb.xlsx.writeBuffer());
+    const file = { fileName: 'OLP-GC-07-FO02 Registro de inspección.xlsx', bytes };
+
+    const inspected = await inspectBulkExcel(prisma, CO, file);
+    expect(inspected.sheets.map((x) => [x.name, x.range])).toEqual([
+      ['Registro', 'A1:C1'],
+      ['Instrucciones', 'A1:A1'],
+    ]);
+    await expect(inspectBulkExcel(prisma, CO, { fileName: 'OLP-GC-07-FO02.pdf', bytes })).rejects.toMatchObject({ status: 415 });
+    // Un .xlsx dañado (es un ZIP pero no un libro de Excel) no se puede leer: 422, sin guardar nada.
+    const broken = { fileName: file.fileName, bytes: new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...new TextEncoder().encode('no es un libro')]) };
+    await expect(inspectBulkExcel(prisma, CO, broken)).rejects.toMatchObject({ status: 422 });
+    await expect(previewBulkExcel(prisma, CO, broken, null, actor(E.cal), convert)).rejects.toMatchObject({ status: 422 });
+    const chromeDown = { ...convert, htmlToPdf: async () => Promise.reject(new Error('Chrome caído')) };
+    await expect(previewBulkExcel(prisma, CO, file, null, actor(E.cal), chromeDown)).rejects.toMatchObject({ status: 422 });
+
+    const settings = { orientation: 'horizontal', fit: 'escala', scalePct: 80, sheets: [{ name: 'Registro', include: true, hiddenColumns: ['C'] }, { name: 'Instrucciones', include: false }] };
+    const before = htmls.length;
+    const docsBefore = await prisma.sgcDocument.count({ where: { id_company: CO, status: 'vigente' } });
+    const preview = await previewBulkExcel(prisma, CO, file, JSON.stringify(settings), actor(E.cal), convert);
+    expect(await pdfText(preview, 1)).toContain('VISTA PREVIA');
+    expect(htmls[before]).toContain('size: A4 landscape');
+    expect(htmls[before]).toContain('{zoom:0.8}');
+    expect(htmls[before]).not.toContain('COLUMNA AUXILIAR');
+    expect(htmls[before]).not.toContain('TEXTO DE AYUDA');
+    // La vista previa no guarda nada ni cambia el documento.
+    expect(await prisma.sgcDocument.count({ where: { id_company: CO, status: 'vigente' } })).toBe(docsBefore);
+    expect(await prisma.sgcDocument.findFirstOrThrow({ where: { id_company: CO, code: 'OLP-GC-07-FO02' } })).toMatchObject({ status: 'pendiente_archivo' });
+    await expect(previewBulkExcel(prisma, CO, file, JSON.stringify({ sheets: [{ name: 'No existe' }] }), actor(E.cal), convert)).rejects.toThrow(/No existe/);
+
+    const { idBulkUpload } = await startBulkUpload(prisma, CO, { filesTotal: 4 }, actor(E.cal));
+    const horizontal = normalizeSheetSettings({ orientation: 'horizontal' });
+    const asPdf = await uploadBulkFile(prisma, upload, CO, idBulkUpload, { fileName: 'OLP-GC-07-FO02 Registro de inspección.pdf', bytes: await pdfOf('pdf') }, actor(E.cal), new Date(), convert, horizontal);
+    expect(asPdf).toMatchObject({ status: 'error', error: expect.stringContaining('solo aplican a un Excel') });
+    const unreadable = await uploadBulkFile(prisma, upload, CO, idBulkUpload, broken, actor(E.cal), new Date(), convert, horizontal);
+    expect(unreadable).toMatchObject({ status: 'error', error: expect.stringContaining('No se pudo leer el Excel') });
+    const wrong = await uploadBulkFile(prisma, upload, CO, idBulkUpload, file, actor(E.cal), new Date(), convert, normalizeSheetSettings({ orientation: 'horizontal', sheets: [{ name: 'Otra hoja' }] }));
+    expect(wrong).toMatchObject({ status: 'error', error: expect.stringContaining('Otra hoja') });
+    const loaded = await uploadBulkFile(prisma, upload, CO, idBulkUpload, file, actor(E.cal), new Date(), convert, normalizeSheetSettings(settings));
+    expect(loaded).toMatchObject({ status: 'cargado', code: 'OLP-GC-07-FO02' });
+    expect(htmls[htmls.length - 1]).not.toContain('COLUMNA AUXILIAR');
+    const v = await prisma.sgcDocumentVersion.findUniqueOrThrow({ where: { id_document_version: loaded.idVersion! } });
+    expect(v.change_description).toContain('ajustes de presentación: hoja horizontal; escala 80 %; «Registro»: sin columnas C; sin la hoja «Instrucciones»');
+    expect(store.get(v.source_item_id!)).toEqual(bytes);
+    const audit = await prisma.sgcAuditLog.findFirstOrThrow({ where: { id_company: CO, action: 'documento.carga', entity_id: String(loaded.idDocument) }, orderBy: { id_audit_log: 'desc' } });
+    expect(JSON.parse(audit.after_json!).sheetSettings).toMatchObject({ orientation: 'horizontal', fit: 'escala', scalePct: 80 });
+    expect(audit.detail).toContain('ajustes de presentación');
+  });
+  it('[SGC-REQ-164] 2026-10-22: el elaborador ajusta y previsualiza la presentación de su borrador en Excel; se guarda con la composición y cambiar la orientación obliga a reubicar las firmas', async () => {
+    const id = (await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nuevo', subject: 'Registro de humedad', description: 'Formato ancho en Excel (prueba del 2026-10-22).', idProcess: procGC, idDocumentType: typeFO, requiresTraining: 'no', formValues: { urgencia: 'Normal' } }, actor(E.sol))).idRequest;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Registro');
+    ws.getCell('A1').value = 'REGISTRO DE HUMEDAD';
+    ws.getCell('B1').value = 'COLUMNA AUXILIAR';
+    wb.addWorksheet('Ayuda').getCell('A1').value = 'TEXTO DE AYUDA';
+    const bytes = new Uint8Array(await wb.xlsx.writeBuffer());
+    await uploadAttachment(prisma, upload, id, { purpose: 'borrador', fileName: 'Registro de humedad.xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', bytes }, await viewer(E.elab), actor(E.elab));
+    const elab = await viewer(E.elab);
+
+    // Sin borrador: no hay Excel que ajustar.
+    const id2 = (await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nuevo', subject: 'Registro sin borrador', description: 'Solicitud sin borrador (prueba del 2026-10-22).', idProcess: procGC, idDocumentType: typeFO, requiresTraining: 'no', formValues: { urgencia: 'Normal' } }, actor(E.sol))).idRequest;
+    await expect(inspectDraftSheets(prisma, layoutDeps, id2, elab)).rejects.toMatchObject({ status: 409 });
+    await expect(validateDraftSheetSettings(prisma, layoutDeps, id2, elab, null)).rejects.toMatchObject({ status: 409 });
+    // Una composición guardada ilegible no bloquea el documento: se lee vacía y con el ajuste automático.
+    await prisma.sgcDocumentLayout.create({ data: { id_request: id2, institutional_header: true, fields_json: '{roto', content_sha256: null, saved_by: E.elab, saved_at: new Date(), change_reason: 'Prueba de lectura tolerante' } });
+    expect(await latestLayout(prisma, id2)).toMatchObject({ fields: [], sheetSettings: null });
+    await prisma.sgcDocumentLayout.create({ data: { id_request: id2, institutional_header: true, fields_json: JSON.stringify({ fields: [], sheetSettings: { orientation: 'diagonal' } }), content_sha256: null, saved_by: E.elab, saved_at: new Date(), change_reason: 'Prueba de ajustes ilegibles' } });
+    expect((await latestLayout(prisma, id2)).sheetSettings).toBeNull();
+
+    const ins = await inspectDraftSheets(prisma, layoutDeps, id, elab);
+    expect(ins.sheets.map((x) => x.name)).toEqual(['Registro', 'Ayuda']);
+    expect(ins.sheetSettings).toBeNull();
+    await expect(validateDraftSheetSettings(prisma, layoutDeps, id, elab, { sheets: [{ name: 'No existe' }] })).rejects.toThrow(/No existe/);
+    await expect(validateDraftSheetSettings(prisma, layoutDeps, id, elab, { sheets: [{ name: 'Registro', include: false }, { name: 'Ayuda', include: false }] })).rejects.toThrow(/al menos una hoja/);
+    expect(await validateDraftSheetSettings(prisma, layoutDeps, id, elab, { sheets: [{ name: 'Registro' }] })).toBeNull();
+    const settings = await validateDraftSheetSettings(prisma, layoutDeps, id, elab, { orientation: 'horizontal', sheets: [{ name: 'Registro', hiddenColumns: ['B'] }, { name: 'Ayuda', include: false }] });
+
+    // Vista previa con ajustes SIN guardar: horizontal y sin lo quitado; nada queda guardado.
+    htmls.length = 0;
+    await buildLayoutPreview(prisma, layoutDeps, id, elab, { sheetSettings: settings });
+    expect(htmls[0]).toContain('size: A4 landscape');
+    expect(htmls[0]).not.toContain('COLUMNA AUXILIAR');
+    expect(htmls[0]).not.toContain('TEXTO DE AYUDA');
+    expect((await latestLayout(prisma, id)).sheetSettings).toBeNull();
+
+    // Firmas ubicadas en la hoja vertical (las sugeridas del encabezado).
+    await saveDocumentLayout(prisma, id, { institutionalHeader: true }, elab, actor(E.elab));
+    const vertical = await getDocumentLayout(prisma, id, elab);
+    expect(vertical.suggested.length).toBeGreaterThan(0);
+    await saveDocumentLayout(prisma, id, { fields: vertical.suggested }, elab, actor(E.elab));
+    const placed = (await latestLayout(prisma, id)).fields.length;
+    expect(placed).toBe(vertical.suggested.length);
+
+    // Solo el elaborador guarda los ajustes.
+    await expect(saveDocumentLayout(prisma, id, { sheetSettings: settings }, await viewer(E.sol), actor(E.sol))).rejects.toMatchObject({ status: 403 });
+    // Pasa a horizontal: se guardan los ajustes y se quitan las firmas para reubicarlas.
+    const saved = await saveDocumentLayout(prisma, id, { sheetSettings: settings }, elab, actor(E.elab));
+    expect(saved).toMatchObject({ saved: true, removedSignatures: placed, fields: [] });
+    const after = await latestLayout(prisma, id);
+    expect(after.sheetSettings).toMatchObject({ orientation: 'horizontal' });
+    expect(after.fields).toEqual([]);
+    const row = await prisma.sgcDocumentLayout.findFirstOrThrow({ where: { id_request: id }, orderBy: { id_document_layout: 'desc' } });
+    expect(JSON.parse(row.fields_json!)).toMatchObject({ fields: [], sheetSettings: { orientation: 'horizontal' } });
+    // Las sugerencias ahora se calculan sobre la hoja horizontal (el recuadro es más alto en porcentaje de una hoja más baja).
+    const horizontal = await getDocumentLayout(prisma, id, elab);
+    expect(horizontal.sheetSettings).toMatchObject({ orientation: 'horizontal' });
+    expect(horizontal.suggested[0].height).toBeGreaterThan(vertical.suggested[0].height);
+    expect(horizontal.suggested[0].x).toBeLessThan(vertical.suggested[0].x);
+    // Los mismos ajustes otra vez: no se guarda otra fila.
+    expect(await saveDocumentLayout(prisma, id, { sheetSettings: settings }, elab, actor(E.elab))).toMatchObject({ saved: false });
+    // La vista previa sin ajustes explícitos usa los guardados: la misma composición que con esos ajustes sin guardar (misma caché).
+    const fromSaved = await buildLayoutPreview(prisma, layoutDeps, id, elab);
+    expect(fromSaved).toBe(await buildLayoutPreview(prisma, layoutDeps, id, elab, { sheetSettings: settings }));
+    // Y con el automático es otra composición: hoja vertical y con todas las columnas.
+    htmls.length = 0;
+    await buildLayoutPreview(prisma, layoutDeps, id, elab, { sheetSettings: null });
+    expect(htmls[0]).not.toContain('landscape');
+    expect(htmls[0]).toContain('COLUMNA AUXILIAR');
+    // Volver al automático: hoja vertical, se quitan de nuevo las firmas (no había) y quedan en el historial.
+    expect(await saveDocumentLayout(prisma, id, { sheetSettings: null }, elab, actor(E.elab))).toMatchObject({ saved: true, sheetSettings: null });
+    expect((await latestLayout(prisma, id)).sheetSettings).toBeNull();
+    expect(await prisma.sgcAuditLog.count({ where: { id_company: CO, action: 'documento.firmas_ubicadas', entity: 'document_layout', after_json: { contains: 'sheetSettings' } } })).toBe(1);
   });
 });
