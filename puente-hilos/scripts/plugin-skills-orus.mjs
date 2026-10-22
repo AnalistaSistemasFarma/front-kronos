@@ -37,6 +37,10 @@ function arg(nombre, porDefecto) {
 const fuente = path.resolve(arg('--fuente', path.join(homedir(), '.horus', 'claude-config', 'skills')));
 const destino = path.resolve(arg('--destino', path.join(homedir(), '.puente-hilos', 'plugins', 'orus')));
 const ensayo = process.argv.includes('--ensayo');
+// Otro agente (2026-10-22): `--nombre play --agente "Play (@silvia_gss_bot)"` arma SUS skills como plugin «play».
+const nombrePlugin = arg('--nombre', 'orus');
+if (!/^[a-z][a-z0-9-]{0,39}$/.test(nombrePlugin)) throw new Error('--nombre inválido (minúsculas, números y guiones).');
+const agenteDesc = arg('--agente', 'el Orus principal');
 const log = (m) => console.log(`[plugin-skills-orus] ${m}`);
 
 /** Ya tienen plugin propio en el puente. */
@@ -177,7 +181,7 @@ function principal() {
   const fecha = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   writeFileSync(
     path.join(tmp, '.claude-plugin', 'plugin.json'),
-    `${JSON.stringify({ name: 'orus', version: `1.0.0-gss.${fecha}`, description: 'Skills del Orus principal (Group Shared Services Latinoamérica) para los hilos de proyecto, en solo lectura y saneadas: sin permisos, hooks ni comandos propios.', author: { name: 'horus (@horus_gss_bot), Group Shared Services Latinoamérica' } }, null, 2)}\n`
+    `${JSON.stringify({ name: nombrePlugin, version: `1.0.0-gss.${fecha}`, description: `Skills de ${agenteDesc} (Group Shared Services Latinoamérica) para los hilos de proyecto, en solo lectura y saneadas: sin permisos, hooks ni comandos propios.`, author: { name: 'horus (@horus_gss_bot), Group Shared Services Latinoamérica' } }, null, 2)}\n`
   );
   writeFileSync(path.join(tmp, 'excluidas.json'), `${JSON.stringify(excluidas, null, 2)}\n`);
   writeFileSync(path.join(tmp, 'FUENTE'), `${fuente}\nArmado: ${new Date().toISOString()}\nIncluidas (${incluidas.length}): ${incluidas.map((x) => x.nombre).join(', ')}\nExcluidas (${excluidas.length}): ${excluidas.map((x) => x.nombre).join(', ')}\n`);

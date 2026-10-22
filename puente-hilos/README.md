@@ -239,6 +239,17 @@ hilo principal, en todos los proyectos». Código: `src/orus-completo.mjs`.
   este modo queda en `auditoria-codigo.jsonl` (`modo: orus-completo`: inicio, cada herramienta, negaciones).
 - Si el config del principal no se puede leer, el turno va en el modo normal y lo dice en el hilo.
 
+## Conectores del agente y otros agentes (2026-10-22, orden de Nicolás Rivera)
+
+Nicolás Rivera, 2026-10-22 17:22 COT, al habilitar Proyectos para más agentes (primero Play): «cada agente trabaja en sus proyectos con lo que ya tiene: sus propios conectores, los mismos de su chat, sin configurarlos por proyecto; su propio token; acceso a código solo si ya lo tiene». Código: `src/conectores-agente.mjs`.
+
+- **Qué hace.** Con `HILOS_CONECTORES_AGENTE_CONFIG_DIR` (el config dir del bot vivo, p. ej. `/Users/pedro/.play/claude-config`), en **cada turno** el puente LEE los MCP del chat del agente y los suma al perfil del proyecto, en todos los proyectos y para todos los usuarios: `mcpServers` de usuario de su `.claude.json`, los del proyecto cuya ruta es su carpeta de trabajo (`HILOS_CONECTORES_AGENTE_PROYECTO`, o la carpeta más cercana que la contiene, como hace Claude Code) y los de sus plugins habilitados (p. ej. engram). Nunca entran `synerlink`/`synerlink-prod` ni Telegram. `${VAR}` se resuelve con el `env` de su settings.json y `HILOS_CONECTORES_AGENTE_ENV` (su `.env`). Un nombre que choque con un conector del perfil no lo pisa.
+- **Qué NO cambia.** El turno sigue `--restricted` + `dontAsk`, sin Bash (salvo código vinculado), escritura solo en `./trabajo`, config aislado y entorno limpio. Las herramientas de esos conectores se permiten por servidor (`mcp__<nombre>`): son «todas sus herramientas, como en su chat».
+- **Secretos.** La configuración del agente puede traer llaves: el mcp.json COMPLETO del turno (perfil + agente) va en `<HILOS_DIR>/conectores-agente/` (600, fuera de la carpeta del hilo, negado al sandbox) y se borra al terminar el turno. `.puente/mcp.json` del hilo sigue solo con el perfil.
+- **Si falla** (config ilegible), el turno va sin ellos y el hilo lo dice. La línea «listo:» lista los NOMBRES (`conectores del agente: …`).
+- **Skills del agente:** `node scripts/plugin-skills-orus.mjs --fuente ~/.<bot>/claude-config/skills --destino ~/.puente-hilos/plugins/<bot> --nombre <bot> --agente "<Nombre> (@handle)"` arma SUS skills como plugin saneado; se suma a `HILOS_PLUGIN_DIRS` junto con `gss-design` (PDF).
+- **Modo Orus completo:** solo en las instancias de horus. En los puentes de otro agente, `HILOS_AUTORES_ORUS_COMPLETO` va vacío: los turnos de Nicolás en proyectos de ese agente tienen las capacidades del agente (su token, sus conectores), no las del Orus principal, cuyos secretos y llaves SSH no deben salir del Mac de horus.
+
 ## Pruebas
 
 ```bash

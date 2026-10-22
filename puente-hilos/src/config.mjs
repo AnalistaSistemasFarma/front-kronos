@@ -101,6 +101,15 @@
  *   HILOS_ORUS_COMPLETO_PLUGIN       Plugin con TODAS las skills del principal (cambia al «orus» saneado).
  *   HILOS_ORUS_COMPLETO_EXCLUIR      Servidores del principal que no entran (además de synerlink/-prod).
  *
+ *   Conectores del agente (2026-10-22, orden de Nicolás Rivera; ver conectores-agente.mjs). Opcional:
+ *   HILOS_CONECTORES_AGENTE_CONFIG_DIR  Config dir del bot vivo (p. ej. ~/.play/claude-config): en cada
+ *                                    turno se LEEN sus MCP (usuario, proyecto de su carpeta y plugins
+ *                                    habilitados, sin synerlink/-prod ni Telegram) y se suman al perfil,
+ *                                    en todos los proyectos. El turno sigue con el config aislado.
+ *   HILOS_CONECTORES_AGENTE_PROYECTO    Carpeta de trabajo del bot (su vault): elige los MCP de proyecto.
+ *   HILOS_CONECTORES_AGENTE_ENV         .env del bot para resolver ${VAR} (no se imprime).
+ *   HILOS_CONECTORES_AGENTE_EXCLUIR     Servidores del agente que no entran (coma).
+ *
  *   Medidor del consumo de Anthropic (2026-10-22; ver cuota.mjs). Opcional:
  *   HILOS_CUOTA                      'si' (por defecto) o 'no'. Publica en SynerLink el cupo semanal
  *                                    y la ventana de 5 h del token (lo que trae el stream del turno).
@@ -495,6 +504,30 @@ export function cargarConfig(env = process.env) {
     orusCompleto = { autores: autoresCompleto, configDir, envArchivo, plugin, excluir };
   }
 
+  // Conectores del agente (conectores-agente.mjs, 2026-10-22). Sin la variable, apagado.
+  let conectoresAgente = null;
+  const caDir = (env.HILOS_CONECTORES_AGENTE_CONFIG_DIR ?? '').trim();
+  if (caDir) {
+    if (!path.isAbsolute(caDir)) throw new ErrorConfig('HILOS_CONECTORES_AGENTE_CONFIG_DIR debe ser una ruta absoluta (config dir del bot).');
+    if (!existsSync(path.join(caDir, '.claude.json'))) throw new ErrorConfig(`HILOS_CONECTORES_AGENTE_CONFIG_DIR (${caDir}) no tiene .claude.json.`);
+    // Se LEE el config del bot para armar el mcp.json; el turno nunca corre con él (sigue el aislado).
+    if (path.resolve(caDir) === path.resolve(hilosDir, 'claude-config')) throw new ErrorConfig('HILOS_CONECTORES_AGENTE_CONFIG_DIR no puede ser el config aislado del puente.');
+    const rutaOpcional = (nombre) => {
+      const v = (env[nombre] ?? '').trim() || null;
+      if (v && !path.isAbsolute(v)) throw new ErrorConfig(`${nombre} debe ser una ruta absoluta.`);
+      return v;
+    };
+    conectoresAgente = {
+      configDir: caDir,
+      proyectoDir: rutaOpcional('HILOS_CONECTORES_AGENTE_PROYECTO'),
+      envArchivo: rutaOpcional('HILOS_CONECTORES_AGENTE_ENV'),
+      excluir: (env.HILOS_CONECTORES_AGENTE_EXCLUIR ?? '')
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean),
+    };
+  }
+
   // Modelo del hilo PRINCIPAL (por agente, en su .env). Sin la variable, el
   // `claude -p` usa el predeterminado de la cuenta (en 2026-10 era Sonnet 5.5).
   const modelo = (env.HILOS_MODELO ?? '').trim() || null;
@@ -548,6 +581,7 @@ export function cargarConfig(env = process.env) {
     conectoresSecretos: (env.HILOS_CONECTORES_SECRETOS ?? '').trim() || null,
     pruebasKronos: { habilitado: pruebasModo === 'si', base: new URL(pruebasWeb).origin },
     orusCompleto,
+    conectoresAgente,
     // Para el entorno del hijo: solo lo indispensable del entorno propio.
     path: env.PATH ?? '/usr/bin:/bin',
     home: env.HOME ?? homedir(),

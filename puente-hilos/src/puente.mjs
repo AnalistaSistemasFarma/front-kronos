@@ -44,6 +44,7 @@ import {
 import { ColaHilos } from './cola.mjs';
 import { analizarComando, catalogoPlugins, encabezadoObjetivo, MAX_REVISIONES_OBJETIVO, SKILLS_CON_GIT, estadoObjetivoSesion, resolverComando, rutaTranscripcion, skillsDePlugins, textoObjetivo } from './comandos.mjs';
 import { combinarPerfil, prepararConectoresTurno, secretosConectores } from './conectores.mjs';
+import { borrarMcpAgente, perfilConAgente, prepararConectoresAgente, secretosConectoresAgente, servidoresAgente, textoConectoresAgente } from './conectores-agente.mjs';
 import { guiaDesarrolloSegura } from './guia.mjs';
 import { prepararPruebasTurno, secretosPruebas, verificarSecretosPruebas } from './pruebas-kronos.mjs';
 import { grafosDelTurno, textoGrafos } from './grafos.mjs';
@@ -155,7 +156,7 @@ export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lot
     worktrees,
     token,
     // Terminal completa: sin sandbox y con la casa real (llaves SSH), como el Orus principal.
-    sandbox: terminal ? { enabled: false } : sandboxCodigo({ worktrees, homeReal: cfg.home, homeCodigo, hilosDir: cfg.hilosDir, secretos: [cfg.githubTokenArchivo, ...secretosConectores(cfg), ...secretosPruebas(cfg)], cacheNpm }),
+    sandbox: terminal ? { enabled: false } : sandboxCodigo({ worktrees, homeReal: cfg.home, homeCodigo, hilosDir: cfg.hilosDir, secretos: [cfg.githubTokenArchivo, ...secretosConectores(cfg), ...secretosPruebas(cfg), ...secretosConectoresAgente(cfg)], cacheNpm }),
     entorno: terminal ? { ...entornoCodigo({ token, homeCodigo, cacheNpm }), HOME: cfg.home } : entornoCodigo({ token, homeCodigo, cacheNpm }),
     hooks: hooksCodigo(),
     disponibles,
@@ -219,6 +220,8 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
     let supervisor = null;
     // Modo Orus completo (orus-completo.mjs): el mcp.json del turno se borra siempre al final.
     let completo = null;
+    // Conectores del agente (conectores-agente.mjs): su mcp.json (600, fuera del hilo) se borra al final.
+    let delAgente = null;
     try {
       await synerlink.estado(idConversation, 'thinking', 'Preparando el proyecto…').catch(() => null);
 
@@ -310,6 +313,21 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           auditarCompleto(idConversation, { tipo: 'inicio', idProject: contexto.project.idProject, autores: completo.autores, servidores: completo.servidores, plugins: completo.pluginDirs.map((d) => path.basename(d)) });
         }
       }
+      // CONECTORES DEL AGENTE (los mismos de su chat), en todos los proyectos y para todos los usuarios.
+      // En modo Orus completo no aplican (ese modo ya trae los del principal). Si fallan, va sin ellos.
+      let avisoAgente = '';
+      if (!completo && cfg.conectoresAgente) {
+        try {
+          delAgente = prepararConectoresAgente({ cfg, idConversation, perfilServidores: perfil.mcpServers });
+          if (delAgente?.servidores.length) log(`conversación ${idConversation}: conectores del agente: ${delAgente.servidores.join(', ')}${delAgente.faltan.length ? `; variables sin valor: ${delAgente.faltan.join(', ')}` : ''}.`);
+        } catch (e) {
+          delAgente = null;
+          log(`conversación ${idConversation}: no se pudieron leer los conectores del agente, el turno va sin ellos:`, e.message);
+          avisoAgente = '_Nota: no pude cargar mis conectores de siempre en este turno; respondí sin ellos. Tecnología quedó con el registro._\n\n';
+        }
+      }
+      // Perfil del turno (permisos y revisión del init). El del proyecto sigue para el mcp.json del hilo y el equipo.
+      const perfilTurno = perfilConAgente(perfil, delAgente);
       await sincronizarArchivos({ rutas, contexto, estado, descargar: (u) => synerlink.descargar(u) });
       const adjuntos = await bajarAdjuntos({ rutas, mensajes: lote, descargar: (u) => synerlink.descargar(u) });
       // Comando nativo: se resuelve otra vez ya con los adjuntos (una skill los recibe en sus argumentos).
@@ -398,7 +416,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           textoGrafos(grafosTurno, { conBash: Boolean(codigo || completo) }) +
           (completo ? `\n${textoOrusCompleto({ autores: completo.autores, servidores: completo.servidores })}` : ''),
         bloqueMemoria: memoria.bloque,
-        bloqueConectores: conectores?.bloque ?? '',
+        bloqueConectores: (conectores?.bloque ?? '') + (delAgente?.servidores.length ? textoConectoresAgente({ agente: agenteNombre, servidores: delAgente.servidores, origen: delAgente.origen }) : ''),
         bloquePruebas: pruebas.bloque,
         bloquePdf: textoPdf({ disponible: Boolean(chromePdf), recursos }),
         bloqueTiempo: textoTiempoTurno({ topeMs: cfg.timeoutTurnoMs, avisoMs: cfg.avisoProgresoMs ?? 0 }),
@@ -429,9 +447,10 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
               rutaAgentes: equipo ? rutas.agentes : null,
             })
           : armarArgumentos({
-          perfil,
+          perfil: perfilTurno,
           sesion,
-          rutaMcp: rutas.mcp,
+          // Con conectores del agente, el mcp.json COMPLETO del turno va fuera del hilo (600).
+          rutaMcp: delAgente?.rutaMcp ?? rutas.mcp,
           rutaSistema: rutas.sistema,
           dirArchivos: rutas.archivos,
           modelo: cfg.modelo,
@@ -456,7 +475,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           env: completo ? armarEntornoCompleto(cfg, codigo?.entorno ?? null) : armarEntorno(cfg, equipo ? topes : null, codigo?.entorno ?? null),
           cwd: rutas.cwd,
           prompt,
-          perfil,
+          perfil: perfilTurno,
           equipo,
           codigo,
           completo,
@@ -681,7 +700,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       }
       const avisoComando = comando?.accion === 'aviso' ? comando.texto : '';
       const notas = notaObjetivo + notaPropuestas;
-      cuerpo = (avisoComando + aviso + avisoCompleto + avisoEquipo + avisoCodigo + avisoConectores + cuerpo).slice(0, MAX_RESPUESTA - notas.length) + notas;
+      cuerpo = (avisoComando + aviso + avisoCompleto + avisoEquipo + avisoCodigo + avisoConectores + avisoAgente + cuerpo).slice(0, MAX_RESPUESTA - notas.length) + notas;
       if (codigo) cuerpo = ocultarSecreto(cuerpo, codigo.token);
       // Bajo demanda: los repos que Orus nombró en su respuesta se montan desde el siguiente turno.
       if (indiceRepos && r.resultado?.ok) {
@@ -762,6 +781,9 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       await supervisor?.detener().catch(() => null);
       try {
         borrarMcpCompleto(completo?.rutaMcp);
+      } catch {}
+      try {
+        borrarMcpAgente(delAgente?.rutaMcp);
       } catch {}
       // Se confirma SIEMPRE al final (éxito o error ya avisado): con ack=false
       // en la bandeja, si el puente se cae a mitad de turno, el mensaje vuelve
@@ -863,6 +885,17 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
   return { recibir, recibirPedidos, cola, enProceso, atender, sugerirEquipo };
 }
 
+/** Conectores del agente para la línea «listo:» (solo NOMBRES; nunca su configuración). */
+export function conectoresAgenteListo(cfg) {
+  if (!cfg.conectoresAgente?.configDir) return 'apagados';
+  try {
+    const a = servidoresAgente(cfg.conectoresAgente);
+    return `${a.nombres.length ? a.nombres.join(', ') : 'ninguno'} (de ${cfg.conectoresAgente.configDir})${a.faltan.length ? `; variables sin valor: ${a.faltan.join(', ')}` : ''}`;
+  } catch (e) {
+    return `NO se pudieron leer (${e.message.slice(0, 120)}): los turnos irán sin ellos`;
+  }
+}
+
 /** Estado de los conectores de PRUEBAS para la línea «listo:» (sin valores secretos). */
 export function pruebasListo(cfg, verificar = verificarSecretosPruebas) {
   if (!cfg.pruebasKronos?.habilitado) return 'apagado';
@@ -897,7 +930,7 @@ async function principal() {
   ocupado = () => puente.enProceso.size > 0;
   medidor?.iniciar();
   log(medidor ? `medidor de consumo: stream de cada turno${cfg.cuota.intervaloMs > 0 && cfg.credencial.tipo === 'oauth-token' ? ` + consulta mínima cada ${Math.round(cfg.cuota.intervaloMs / 1000)} s sin turnos` : ''}.` : 'medidor de consumo apagado (HILOS_CUOTA=no).');
-  log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}, modelo del hilo principal: ${cfg.modelo ?? 'el predeterminado de la cuenta (sin HILOS_MODELO)'}; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; gasto ${cfg.sinTopeGasto ? 'SIN TOPE' : cfg.presupuestoUsd ? `tope ${cfg.presupuestoUsd} USD` : `sin tope general (equipo ${cfg.subagentesPresupuestoUsd} USD)`}; avisos de progreso ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; continuación automática ${cfg.continuarAlAgotar ? 'sí' : 'no'}; PRUEBAS para todos los hilos: ${pruebasListo(cfg)}.`);
+  log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}, modelo del hilo principal: ${cfg.modelo ?? 'el predeterminado de la cuenta (sin HILOS_MODELO)'}; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; gasto ${cfg.sinTopeGasto ? 'SIN TOPE' : cfg.presupuestoUsd ? `tope ${cfg.presupuestoUsd} USD` : `sin tope general (equipo ${cfg.subagentesPresupuestoUsd} USD)`}; avisos de progreso ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; continuación automática ${cfg.continuarAlAgotar ? 'sí' : 'no'}; PRUEBAS para todos los hilos: ${pruebasListo(cfg)}; conectores del agente: ${conectoresAgenteListo(cfg)}.`);
 
   let parar = false;
   for (const senal of ['SIGTERM', 'SIGINT']) {
