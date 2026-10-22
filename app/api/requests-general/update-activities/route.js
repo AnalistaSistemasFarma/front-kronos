@@ -243,6 +243,15 @@ export async function POST(req) {
 
       await request.query(updateQuery);
 
+      if (isAuthorizationTask && Number(id_status) === 3) {
+        await new sql.Request(transaction)
+          .input('id_request', sql.Int, prevRow.id_request_general)
+          .query(`UPDATE requests_general SET status_req = 7 WHERE id = @id_request`);
+        console.log(
+          `${TAG} 3b) Autorización rechazada: solicitud ${prevRow.id_request_general} marcada como Devuelta (7).`
+        );
+      }
+
       await transaction.commit();
       console.log(`${TAG} 3) UPDATE + commit OK. Tarea ${id} pasó a estado ${id_status}.`);
 
