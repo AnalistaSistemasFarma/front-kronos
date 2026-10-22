@@ -1,0 +1,18 @@
+# Graphify (mapa del código para Claude): lo que NUNCA debe entrar al grafo.
+# Credenciales: también están en .gitignore, pero se repiten aquí por si acaso.
+.env*
+dbconfig.js
+*.pem
+*.key
+
+# Generado o de terceros
+node_modules/
+.next/
+.next*/
+coverage/
+app/generated/
+graphify-out/
+public/
+*.min.js
+package-lock.json
+tsconfig.tsbuildinfo

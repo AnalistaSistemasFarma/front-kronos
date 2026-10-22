@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import ExcelJS from 'exceljs';
+// Solo tipos: la librería (~900 KB) se descarga al exportar/importar, no al abrir la pantalla.
+import type ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import {
   Paper,
@@ -672,6 +673,9 @@ function RequestBoard() {
     userName: string,
     signal?: AbortSignal
   ): Promise<string | null> => {
+    // La sesión ya trae el id de Kronos (callback jwt, buscado por correo): sin viaje extra al
+    // servidor ni búsqueda por NOMBRE, que con dos personas homónimas podía traer el id equivocado.
+    if (session?.user?.id) return session.user.id;
     if (!session || status !== 'authenticated') {
       return null;
     }
@@ -1282,6 +1286,7 @@ function RequestBoard() {
   };
 
   async function exportToExcel() {
+    const { default: ExcelJS } = await import('exceljs');
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Datos');
 

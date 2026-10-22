@@ -15,6 +15,7 @@ import {
   DASHBOARD_SOLICITADO_URL,
 } from './dashboardRoutes';
 import { SUBPROCESS_ASSIGNMENTS_CHANGED } from '../process/subprocessAssignmentsEvents';
+import { fetchNavAccess } from '../navigation/navAccess';
 
 export interface RequestRoleNavContextValue {
   hasSolicitanteAccess: boolean;
@@ -31,17 +32,6 @@ export interface RequestRoleNavContextValue {
 
 const RequestRoleNavContext = createContext<RequestRoleNavContextValue | null>(null);
 
-async function fetchRoleAccess(kind: 'solicitante' | 'solicitado' | 'equipo'): Promise<boolean> {
-  const res = await fetch(`/api/requests-general/dashboard-access?kind=${kind}`, {
-    credentials: 'same-origin',
-    cache: 'no-store',
-  });
-  if (res.status === 401) return false;
-  if (!res.ok) return false;
-  const data = await res.json().catch(() => ({}));
-  return Boolean(data.allowed);
-}
-
 export function RequestRoleNavProvider({ children }: { children: ReactNode }) {
   const { data: session, status } = useSession();
   const [hasSolicitanteAccess, setHasSolicitanteAccess] = useState(false);
@@ -49,7 +39,7 @@ export function RequestRoleNavProvider({ children }: { children: ReactNode }) {
   const [hasEquipoAccess, setHasEquipoAccess] = useState(false);
   const [loadingRoleNav, setLoadingRoleNav] = useState(true);
 
-  const refreshRoleNav = useCallback(async () => {
+  const loadRoleNav = useCallback(async (fresh: boolean) => {
     if (status === 'loading') return;
 
     if (status !== 'authenticated' || !session?.user?.email) {
@@ -62,22 +52,22 @@ export function RequestRoleNavProvider({ children }: { children: ReactNode }) {
 
     setLoadingRoleNav(true);
     try {
-      const [solicitante, solicitado, equipo] = await Promise.all([
-        fetchRoleAccess('solicitante'),
-        fetchRoleAccess('solicitado'),
-        fetchRoleAccess('equipo'),
-      ]);
-      setHasSolicitanteAccess(solicitante);
-      setHasSolicitadoAccess(solicitado);
-      setHasEquipoAccess(equipo);
+      // Una sola llamada compartida con DashboardAdminContext (lib/navigation/navAccess.ts).
+      const result = await fetchNavAccess(session.user.email, { fresh });
+      const access = result.ok ? result.access : null;
+      setHasSolicitanteAccess(Boolean(access?.solicitante));
+      setHasSolicitadoAccess(Boolean(access?.solicitado));
+      setHasEquipoAccess(Boolean(access?.equipo));
     } finally {
       setLoadingRoleNav(false);
     }
   }, [session?.user?.email, status]);
 
+  const refreshRoleNav = useCallback(() => loadRoleNav(true), [loadRoleNav]);
+
   useEffect(() => {
-    void refreshRoleNav();
-  }, [refreshRoleNav]);
+    void loadRoleNav(false);
+  }, [loadRoleNav]);
 
   // Si se asigna/quita el módulo en Administración → Usuarios, refrescar el menú
   useEffect(() => {

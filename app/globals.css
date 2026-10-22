@@ -1301,6 +1301,37 @@ body.con-chat-rail.con-chat-rail--expandida .app-page-shell {
   padding-left: var(--chat-rail-w-expandida);
 }
 
+/* Reserva del ancho mientras llega el permiso del chat (ThemeInitScript la pone
+   si en la visita anterior hubo barra; ChatRail la quita al decidir). Pinta el
+   fondo de la barra vacío para que la página no salte 64–288 px después. */
+html.chat-rail-reservada .app-page-shell {
+  padding-left: var(--chat-rail-w);
+}
+
+html.chat-rail-reservada.chat-rail-reservada--expandida .app-page-shell {
+  padding-left: var(--chat-rail-w-expandida);
+}
+
+html.chat-rail-reservada body:not(.con-chat-rail):not(.chat-inmersivo)::before {
+  content: '';
+  position: fixed;
+  top: var(--app-header-height);
+  left: 0;
+  bottom: 0;
+  z-index: 45;
+  width: var(--chat-rail-w);
+  background-color: var(--app-header, var(--app-surface));
+  border-right: 1px solid var(--app-border);
+}
+
+html.chat-rail-reservada.chat-rail-reservada--expandida body:not(.con-chat-rail):not(.chat-inmersivo)::before {
+  width: var(--chat-rail-w-expandida);
+}
+
+html.chat-rail-reservada body.chat-inmersivo .app-page-shell {
+  padding-left: 0;
+}
+
 /* Modo inmersivo del chat: sin cabecera tampoco hay barra (ver más abajo). */
 body.chat-inmersivo .chat-rail--fija {
   display: none;

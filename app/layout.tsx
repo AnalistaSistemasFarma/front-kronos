@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from 'next';
+import { getServerSession } from 'next-auth';
+import { authOptions } from './api/auth/[...nextauth]/route';
 import './globals.css';
 import '@mantine/core/styles.css';
 import { Providers } from '../components/providers';
@@ -26,11 +28,15 @@ export const viewport: Viewport = {
   themeColor: '#0078D4',
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // La sesión se lee aquí (cookie + fila del usuario en caché 60 s) y se entrega al cliente: antes cada página
+  // esperaba a /api/auth/session antes de pedir permisos y datos.
+  const session = await getServerSession(authOptions).catch(() => null);
+
   return (
     <html lang='es' className={FONT_FACE_VARIABLES} suppressHydrationWarning>
       <head>
@@ -40,7 +46,7 @@ export default function RootLayout({
         className='antialiased min-h-screen'
         style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)' }}
       >
-        <Providers>{children}</Providers>
+        <Providers session={session}>{children}</Providers>
         <AppToaster />
         <ServiceWorkerRegistrar />
         <RecuperacionActualizacion />
