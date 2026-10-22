@@ -82,6 +82,8 @@ function PurchasesPageContent() {
   const [variant, setVariant] = useState<PurchaseVariant>('todas');
   // Empresa preseleccionada al llegar desde «Mis solicitudes» (?nueva=1&companyId=N).
   const [initialCompanyId, setInitialCompanyId] = useState<number | null>(null);
+  // Llegada desde «Mis solicitudes»: crear y enviar a autorizar en un solo paso.
+  const [fromRequests, setFromRequests] = useState(false);
 
   const writableCompanies = useMemo(
     () => companies.filter((c) => c.canWrite && c.ready),
@@ -190,6 +192,7 @@ function PurchasesPageContent() {
     setEditTarget(null);
     setDuplicateTarget(null);
     setInitialCompanyId(writableCompanies.some((c) => c.idCompany === cid) ? cid : null);
+    setFromRequests(true);
     setFormOpened(true);
     // Solo una vez por llegada: se limpia la URL para que recargar no reabra el formulario.
     window.history.replaceState(null, '', '/process/purchases');
@@ -328,12 +331,19 @@ function PurchasesPageContent() {
       <DetailModal draft={selected} tipo={tipo} onClose={() => setSelected(null)} />
       <RequestFormModal
         opened={formOpened}
-        onClose={() => setFormOpened(false)}
-        onSaved={() => setReloadKey((k) => k + 1)}
+        onClose={() => {
+          setFormOpened(false);
+          setFromRequests(false);
+        }}
+        onSaved={(warning) => {
+          setReloadKey((k) => k + 1);
+          if (warning) setActionMessage({ color: 'yellow', text: warning });
+        }}
         companies={writableCompanies}
         edit={editTarget}
         duplicate={duplicateTarget}
         initialCompanyId={initialCompanyId}
+        sendOnCreate={fromRequests && !editTarget}
       />
       <BulkModal
         opened={bulkOpened}

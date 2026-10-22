@@ -60,7 +60,8 @@ interface FieldError {
 interface Props {
   opened: boolean;
   onClose: () => void;
-  onSaved: () => void;
+  /** `warning`: el borrador se creo pero algo posterior fallo (se muestra en el listado). */
+  onSaved: (warning?: string) => void;
   companies: WritableCompany[];
   /** null = crear; con valor = editar ese borrador. */
   edit: EditTarget | null;
@@ -72,6 +73,11 @@ interface Props {
   duplicate?: EditTarget | null;
   /** Empresa preseleccionada al crear (p. ej. al llegar desde «Mis solicitudes»). */
   initialCompanyId?: number | null;
+  /**
+   * Al crear, enviar de una vez a autorizar (flujo desde «Mis solicitudes»: el
+   * usuario monta la solicitud y pasa a autorizacion en un solo paso).
+   */
+  sendOnCreate?: boolean;
 }
 
 /** Proyecta una linea del Draft de SAP a los campos del formulario. */
@@ -93,6 +99,7 @@ export default function RequestFormModal({
   edit,
   duplicate = null,
   initialCompanyId = null,
+  sendOnCreate = false,
 }: Props) {
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [comments, setComments] = useState('');
@@ -178,6 +185,23 @@ export default function RequestFormModal({
         setError(data.error || 'No se pudo guardar la solicitud');
         setFieldErrors(Array.isArray(data.errors) ? data.errors : []);
         return;
+      }
+      if (!edit && sendOnCreate && data.docEntry) {
+        const sent = await fetch('/api/purchases/drafts/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ companyId: Number(companyId), docEntry: data.docEntry }),
+        });
+        const sentData = await sent.json().catch(() => ({}));
+        if (!sent.ok) {
+          // El borrador SI quedo creado: se cierra (para no crear otro con un segundo clic)
+          // y se avisa en el listado, desde donde se puede reenviar.
+          onSaved(
+            `Se creo el borrador #${data.docEntry}, pero no se pudo enviar a autorizar: ${sentData.error || 'error'}. Envielo desde el listado.`
+          );
+          onClose();
+          return;
+        }
       }
       onSaved();
       onClose();
@@ -337,7 +361,7 @@ export default function RequestFormModal({
                 Cancelar
               </Button>
               <Button onClick={save} loading={saving} disabled={!comments.trim()}>
-                {edit ? 'Guardar cambios' : 'Crear borrador'}
+                {edit ? 'Guardar cambios' : sendOnCreate ? 'Crear y enviar a autorizar' : 'Crear borrador'}
               </Button>
             </Group>
           </Group>
