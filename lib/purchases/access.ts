@@ -1,4 +1,5 @@
 import { prisma } from '../prisma';
+import { PURCHASES_WRITE_MARKER_URL } from './fields';
 
 /**
  * Resolucion de permisos del modulo "Compras" (multiempresa, SOLO LECTURA en el
@@ -34,8 +35,8 @@ import { prisma } from '../prisma';
 // URL dedicada del modulo (sembrar el subproceso en BD para usarla; ver reporte).
 export const PURCHASES_READ_URL = '/process/purchases';
 
-// Escritura (crear/editar/enviar solicitudes). Sembrar el subproceso en BD.
-export const PURCHASES_WRITE_URL = '/process/purchases/manage';
+// Escritura (crear/editar/enviar solicitudes): marcador, no pagina (ver fields.ts).
+export const PURCHASES_WRITE_URL = PURCHASES_WRITE_MARKER_URL;
 
 export type PurchasesAccessMode = 'read' | 'write';
 

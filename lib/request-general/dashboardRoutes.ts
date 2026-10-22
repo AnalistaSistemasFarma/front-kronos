@@ -13,6 +13,7 @@ import {
 } from '../chat/audit-constants';
 import { isLoginAuditMarkerSubprocess } from '../auth/login-audit/constants';
 import { isProjectsConfigMarkerSubprocess } from '../proyectos/config-agentes-rules';
+import { isPurchasesWriteMarkerSubprocess } from '../purchases/fields';
 
 export const DASHBOARD_SOLICITANTE_URL = '/process/request-general/dashboard-solicitante';
 export const DASHBOARD_SOLICITADO_URL = '/process/request-general/dashboard-solicitado';
@@ -37,7 +38,9 @@ export function isHubHiddenRequestDashboardSubprocess(subprocess: {
     isAuditConversationsMarkerSubprocess(subprocess) ||
     isAuditConfigureMarkerSubprocess(subprocess) ||
     isLoginAuditMarkerSubprocess(subprocess) ||
-    isProjectsConfigMarkerSubprocess(subprocess)
+    isProjectsConfigMarkerSubprocess(subprocess) ||
+    // Permiso de escritura de Compras (2026-10-22): marcador, no página.
+    isPurchasesWriteMarkerSubprocess(subprocess)
   ) {
     return true;
   }
