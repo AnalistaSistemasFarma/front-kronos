@@ -16,17 +16,27 @@ export const SONDEO_CONSUMO_MS = 60_000;
  * visible (y al volver a ella). Una falla deja el último dato que hubo.
  */
 export function useConsumoAnthropic(idProject: number): { agentes: CuotaAgenteDto[]; cargado: boolean } {
+  return useConsumoEnUrl(idProject ? `/api/proyectos/${idProject}/consumo` : null);
+}
+
+/**
+ * La misma lectura para cualquier ruta que responda `{ agents: CuotaAgenteDto[] }`
+ * (2026-10-22: también el botón de consumo del chat, /api/chat/agents/<code>/consumo).
+ */
+export function useConsumoEnUrl(url: string | null): { agentes: CuotaAgenteDto[]; cargado: boolean } {
   const [agentes, setAgentes] = useState<CuotaAgenteDto[]>([]);
   const [cargado, setCargado] = useState(false);
   useEffect(() => {
-    if (!idProject) return;
+    setAgentes([]);
+    setCargado(false);
+    if (!url) return;
     let vivo = true;
     let ctrl: AbortController | null = null;
     const cargar = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       ctrl?.abort();
       ctrl = new AbortController();
-      const r = await apiGet<{ agents?: CuotaAgenteDto[] }>(`/api/proyectos/${idProject}/consumo`, '', ctrl.signal);
+      const r = await apiGet<{ agents?: CuotaAgenteDto[] }>(url, '', ctrl.signal);
       if (!vivo || r.status === 0) return;
       if (r.ok) setAgentes(Array.isArray(r.data.agents) ? r.data.agents : []);
       setCargado(true);
@@ -43,7 +53,7 @@ export function useConsumoAnthropic(idProject: number): { agentes: CuotaAgenteDt
       window.clearInterval(id);
       document.removeEventListener('visibilitychange', alVolver);
     };
-  }, [idProject]);
+  }, [url]);
   return { agentes, cargado };
 }
 
@@ -139,5 +149,58 @@ export default function MedidorConsumo({ agentes, cargado = true }: { agentes: C
         );
       })}
     </Group>
+  );
+}
+
+/**
+ * DETALLE del consumo de UN agente, a la vista (2026-10-22, botón del chat):
+ * las dos ventanas con su barra, porcentaje con color y hora de reinicio, más
+ * «token compartido» y la hora de la medición. Mismas reglas (vistaCuota) y
+ * mismos textos que el tooltip de la píldora de Proyectos.
+ */
+export function DetalleConsumo({ agente }: { agente: CuotaAgenteDto }) {
+  const [ahora, setAhora] = useState(() => new Date());
+  useEffect(() => {
+    const id = window.setInterval(() => setAhora(new Date()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const v = vistaCuota(agente, ahora);
+  const barra = (b: VistaBarra | null, testId: string) =>
+    b && (
+      <Stack gap={4} data-testid={testId}>
+        <Group justify='space-between' wrap='nowrap' gap='xs'>
+          <Text size='xs' fw={600}>
+            {b.etiqueta}
+          </Text>
+          <Text size='xs' fw={700} c={b.color === 'gray' ? 'dimmed' : `${b.color}.7`}>
+            {b.porcentaje}
+          </Text>
+        </Group>
+        <Progress value={b.valor} color={b.color} size={6} radius='xl' aria-hidden />
+        {b.detalle && (
+          <Text size='xs' c='dimmed'>
+            {b.detalle}
+          </Text>
+        )}
+      </Stack>
+    );
+  return (
+    <Stack gap='sm' data-testid='detalle-consumo' data-vieja={v.vieja || undefined}>
+      {barra(v.semanal, 'detalle-consumo-semanal')}
+      {barra(v.cinco, 'detalle-consumo-5h')}
+      <Stack gap={2}>
+        <Text size='xs' c='dimmed'>
+          Consumo del token del agente (compartido)
+        </Text>
+        <Text size='xs' c='dimmed'>
+          {v.medicion}
+        </Text>
+        {v.vieja && (
+          <Text size='xs' c='yellow.8'>
+            La medición está desactualizada: el puente no ha reportado en los últimos minutos.
+          </Text>
+        )}
+      </Stack>
+    </Stack>
   );
 }
