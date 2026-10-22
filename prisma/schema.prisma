@@ -1632,6 +1632,13 @@ model PortalCourse {
   /// Carpeta del curso dentro de FORMACION en SharePoint (`<slug>-<id>`).
   /// Se fija en la primera subida y no cambia si el curso se renombra.
   sp_folder_name String? @db.NVarChar(200)
+  /// Curso ELIMINADO por un formador (borrado LÓGICO; Cristian, 2026-10-22):
+  /// deja de aparecer en todas las listas, pero sus inscripciones, intentos y
+  /// certificados se conservan (los certificados siguen verificándose). Sus
+  /// archivos de SharePoint NO se tocan: la carpeta FORMACION es compartida
+  /// entre pruebas y producción. Quién y cuándo queda aquí como auditoría.
+  eliminado_at   DateTime?
+  eliminado_por  String? @db.NVarChar(255)
 
   materials    PortalCourseMaterial[]
   enrollments  PortalCourseEnrollment[]

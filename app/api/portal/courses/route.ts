@@ -23,7 +23,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const cursos = await prisma.portalCourse.findMany({
-      where: esFormador ? {} : { active: true },
+      // Los cursos ELIMINADOS (borrado lógico, 2026-10-22) no aparecen para nadie.
+      where: esFormador ? { eliminado_at: null } : { active: true, eliminado_at: null },
       orderBy: [{ id: 'desc' }],
       include: {
         materials: { where: { eliminado_at: null }, select: { id: true, required: true } },
