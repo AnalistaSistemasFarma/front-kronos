@@ -6,6 +6,8 @@ import {
 } from '@mantine/core';
 import { IconPlus, IconTrash } from '@tabler/icons-react';
 import AttachmentsPanel from './AttachmentsPanel';
+import SapLookupInput from './SapLookupInput';
+import { FIELD_LOOKUP } from '../../../../lib/purchases/lookups';
 
 /**
  * Crear / editar una solicitud de compra (borrador oPurchaseRequest en SAP).
@@ -311,17 +313,33 @@ export default function RequestFormModal({
                               aria-label={`${c.label} linea ${i + 1}`}
                             />
                           ) : (
-                            <TextInput
-                              size="xs"
-                              type={c.field === 'RequiredDate' ? 'date' : 'text'}
-                              value={String(line[c.field] ?? '')}
-                              onChange={(e) => {
-                                const v = e.currentTarget.value;
-                                setLineValue(i, c.field, c.field === 'ItemDescription' ? v.toUpperCase() : v);
-                              }}
-                              error={err}
-                              aria-label={`${c.label} linea ${i + 1}`}
-                            />
+                            FIELD_LOOKUP[c.field] ? (
+                              <SapLookupInput
+                                companyId={companyId}
+                                kind={FIELD_LOOKUP[c.field]!}
+                                value={String(line[c.field] ?? '')}
+                                onChange={(v) => setLineValue(i, c.field, v)}
+                                onSelect={(opt) =>
+                                  setLines((prev) =>
+                                    prev.map((l, j) => (j === i ? { ...l, ...(opt.fill ?? {}), [c.field]: opt.fill?.[c.field] ?? opt.value } : l))
+                                  )
+                                }
+                                error={err}
+                                ariaLabel={`${c.label} línea ${i + 1}`}
+                              />
+                            ) : (
+                              <TextInput
+                                size="xs"
+                                type={c.field === 'RequiredDate' ? 'date' : 'text'}
+                                value={String(line[c.field] ?? '')}
+                                onChange={(e) => {
+                                  const v = e.currentTarget.value;
+                                  setLineValue(i, c.field, c.field === 'ItemDescription' ? v.toUpperCase() : v);
+                                }}
+                                error={err}
+                                aria-label={`${c.label} linea ${i + 1}`}
+                              />
+                            )
                           )}
                         </Table.Td>
                       );
