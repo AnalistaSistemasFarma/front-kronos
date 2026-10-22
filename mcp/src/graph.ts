@@ -112,6 +112,32 @@ export class GraphClient {
   }
 
   /**
+   * SOLO LECTURA. Cuenta del directorio (Entra) por correo/UPN: si existe, si está
+   * habilitada y cuántas licencias tiene. `null` si no existe (404). Requiere el
+   * permiso de aplicación User.Read.All. Lo usa kronos_usuarios_crear.
+   */
+  async getDirectoryUser(
+    email: string
+  ): Promise<{ displayName: string | null; accountEnabled: boolean; licencias: number } | null> {
+    const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(email)}?$select=displayName,accountEnabled,assignedLicenses`;
+    const resp = await fetch(url, { headers: await this.authHeaders() });
+    if (resp.status === 404) return null;
+    if (!resp.ok) {
+      throw new Error(`Graph /users respondió ${resp.status}`);
+    }
+    const u = (await resp.json()) as {
+      displayName?: string | null;
+      accountEnabled?: boolean;
+      assignedLicenses?: unknown[];
+    };
+    return {
+      displayName: u.displayName ?? null,
+      accountEnabled: u.accountEnabled === true,
+      licencias: Array.isArray(u.assignedLicenses) ? u.assignedLicenses.length : 0,
+    };
+  }
+
+  /**
    * Lista los ARCHIVOS reales dentro de una carpeta relativa a la raíz del
    * drive (ej: `SAPSEND/TEC/SG/Request-104`). Devuelve solo los items que son
    * archivo (excluye subcarpetas). Si la carpeta no existe (404) devuelve `[]`.
