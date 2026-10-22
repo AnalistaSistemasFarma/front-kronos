@@ -123,7 +123,8 @@ export async function POST(req) {
               display_order,
               is_authorization,
               type_authorization,
-              id_linked_process
+              id_linked_process,
+              closes_request
               )
               OUTPUT INSERTED.id
               VALUES
@@ -137,7 +138,8 @@ export async function POST(req) {
               @display_order,
               @is_authorization,
               @type_authorization,
-              @id_linked_process
+              @id_linked_process,
+              @closes_request
               );
           `;
 
@@ -160,6 +162,7 @@ export async function POST(req) {
             t.is_authorization ? (t.type_authorization ?? null) : null
           );
           taskRequest.input("id_linked_process", sql.Int, t.id_linked_process ?? null);
+          taskRequest.input("closes_request", sql.Bit, t.closes_request ? 1 : 0);
 
           const taskResult = await taskRequest.query(insertTaskQuery);
 

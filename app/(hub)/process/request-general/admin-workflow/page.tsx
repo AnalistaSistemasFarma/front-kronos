@@ -451,6 +451,7 @@ function RequestBoard() {
       asignado: string;
       costo: number;
       centroCosto: string;
+      cierraSolicitud: boolean;
     }>
   >([]);
   const [taskForm, setTaskForm] = useState({
@@ -458,6 +459,7 @@ function RequestBoard() {
     asignado: '',
     costo: '',
     centroCosto: '',
+    cierraSolicitud: false,
   });
 
   const [taskFormKey, setTaskFormKey] = useState(0);
@@ -473,10 +475,11 @@ function RequestBoard() {
         asignado: taskForm.asignado,
         costo: parseFloat(taskForm.costo) || 0,
         centroCosto: taskForm.centroCosto,
+        cierraSolicitud: taskForm.cierraSolicitud,
       },
     ]);
 
-    setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+    setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false });
 
     setTaskFormKey(prev => prev + 1);
   };
@@ -965,6 +968,7 @@ function RequestBoard() {
         id_user: task.asignado || null,
         cost: task.costo || 0,
         cost_center: task.centroCosto || null,
+        closes_request: task.cierraSolicitud,
       }));
 
       console.log('asignados tareas ' + tasksToSend);
@@ -1005,7 +1009,7 @@ function RequestBoard() {
         isExternal: false,
       });
       setTasks([]);
-      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false });
       setAssignedCategoryInfo(null);
 
       fetchWorkFlows();
@@ -1812,7 +1816,7 @@ function RequestBoard() {
             setCurrentStep(1);
             setFormErrors({});
             setTasks([]);
-            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false });
             setFormData({
               company: '',
               category: '',
@@ -2284,6 +2288,16 @@ function RequestBoard() {
                           Agregar
                         </Button>
                       </Grid.Col>
+
+                      <Grid.Col span={12}>
+                        <Checkbox
+                          label='Al resolver esta tarea, cerrar la solicitud'
+                          checked={taskForm.cierraSolicitud}
+                          onChange={(e) =>
+                            setTaskForm({ ...taskForm, cierraSolicitud: e.currentTarget.checked })
+                          }
+                        />
+                      </Grid.Col>
                     </Grid>
                   </div>
 
@@ -2307,6 +2321,9 @@ function RequestBoard() {
                             </Table.Th>
                             <Table.Th className='py-4 px-5 text-sm font-semibold uppercase tracking-wider'>
                               Centro de Costo
+                            </Table.Th>
+                            <Table.Th className='py-4 px-5 text-sm font-semibold uppercase tracking-wider text-center'>
+                              Cierra solicitud
                             </Table.Th>
                             <Table.Th
                               className='py-4 px-5 text-sm font-semibold uppercase tracking-wider text-center'
@@ -2348,6 +2365,15 @@ function RequestBoard() {
                                 <Text size='base' c='dimmed'>
                                   {task.centroCosto || '-'}
                                 </Text>
+                              </Table.Td>
+                              <Table.Td className='py-4 px-5 text-center'>
+                                {task.cierraSolicitud ? (
+                                  <Badge color='red' variant='light' size='sm'>
+                                    Sí
+                                  </Badge>
+                                ) : (
+                                  <Text size='sm' c='dimmed'>—</Text>
+                                )}
                               </Table.Td>
                               <Table.Td className='py-4 px-5 text-center'>
                                 <ActionIcon
@@ -2402,7 +2428,7 @@ function RequestBoard() {
                   setCurrentStep(1);
                   setFormErrors({});
                   setTasks([]);
-                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false });
                 }
               }}
               size='md'
