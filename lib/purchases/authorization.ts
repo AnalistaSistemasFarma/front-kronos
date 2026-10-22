@@ -6,6 +6,7 @@ import { createAndSendNotifications } from '../notifications.js';
 import { createGeneralRequest } from '../requests-general/createGeneralRequest';
 import { sapGet, sapLogin, sapLogout, sapPatch, SapError, type SapSession } from '../sap/serviceLayer';
 import { publishApprovedDraft, publishSap } from './publish';
+import { withStep, type TriggeredBy } from '../workflow-sap/executionLog';
 import { checkTransition, normalizeState } from './states';
 
 /**
@@ -132,9 +133,25 @@ export async function sendToAuthorize(params: {
   try {
     const etagged = await sapGet<Record<string, unknown>>(sap, `Drafts(${docEntry})?$select=DocEntry,U_SEND_State`);
     if (normalizeState(etagged.U_SEND_State) !== state) throw new SapError('El borrador cambio durante el envio', 412);
-    await sapPatch(sap, `Drafts(${docEntry})`, { U_SEND_State: 'LA' }, false, {
-      ifMatch: etagged['odata.etag'] as string | undefined,
-    });
+    await withStep(
+      {
+        idRequest,
+        stepKind: 'sap',
+        stepName: 'Pasar a «Por autorizar»',
+        actionKey: 'purchase.state_to_authorize',
+        triggerEvent: 'on_start',
+        triggeredBy: 'user',
+        idUser: user.id,
+        idCompany: companyId,
+        sapEntity: 'Drafts',
+        requestSummary: { docEntry, de: state, a: 'LA' },
+      },
+      () =>
+        sapPatch(sap, `Drafts(${docEntry})`, { U_SEND_State: 'LA' }, false, {
+          ifMatch: etagged['odata.etag'] as string | undefined,
+        }),
+      () => ({ status: 'ok', sapDocEntry: docEntry })
+    );
   } catch (error) {
     // Sin LA no debe quedar una autorizacion viva: se revierte.
     await cancelGeneralRequest(idRequest);
@@ -202,7 +219,8 @@ async function finish(idRequest: number, data: { status: string; firm_doc_entry?
 export async function onAuthorizationDecision(
   idRequest: number | null | undefined,
   authorized: boolean,
-  reason?: string | null
+  reason?: string | null,
+  triggeredBy: TriggeredBy = 'user'
 ): Promise<{ skipped: true } | { skipped: false; status: string; error?: string }> {
   if (!idRequest) return { skipped: true };
 
@@ -225,7 +243,30 @@ export async function onAuthorizationDecision(
     sap = await companySap(link.id_company);
 
     if (authorized) {
-      const r = await publishApprovedDraft(publishSap(sap), link.doc_entry);
+      const session = sap;
+      const r = await withStep(
+        {
+          idRequest: link.id_request_general,
+          stepKind: 'sap',
+          stepName: 'Publicar solicitud en firme',
+          actionKey: 'purchase.publish_firm',
+          triggerEvent: 'on_final_approve',
+          triggeredBy,
+          idCompany: link.id_company,
+          sapEntity: 'PurchaseRequests',
+          requestSummary: { borrador: link.doc_entry },
+        },
+        () => publishApprovedDraft(publishSap(session), link.doc_entry),
+        (res) =>
+          res.ok
+            ? {
+                status: 'ok',
+                sapDocEntry: res.firmDocEntry,
+                sapDocNum: res.firmDocNum ?? null,
+                responseSummary: res.resumed ? 'Reanudada sin duplicar' : 'Creada',
+              }
+            : { status: 'error', error: res.error, responseSummary: { estado: res.state } }
+      );
       if (r.ok) {
         await finish(link.id_request_general, { status: 'approved', firm_doc_entry: r.firmDocEntry });
         return { skipped: false, status: 'approved' };
@@ -242,12 +283,28 @@ export async function onAuthorizationDecision(
       return { skipped: false, status: 'reject_error', error: check.error };
     }
     const motivo = (reason ?? '').trim() || 'Rechazada en SynerLink';
-    await sapPatch(
-      sap,
-      `Drafts(${link.doc_entry})`,
-      { U_SEND_State: 'NAD', U_Motivo_Can_Solicitud: motivo.slice(0, 254) },
-      false,
-      { ifMatch: draft['odata.etag'] as string | undefined }
+    const session = sap;
+    await withStep(
+      {
+        idRequest: link.id_request_general,
+        stepKind: 'sap',
+        stepName: 'Pasar a «No aprobado»',
+        actionKey: 'purchase.state_rejected',
+        triggerEvent: 'on_reject',
+        triggeredBy,
+        idCompany: link.id_company,
+        sapEntity: 'Drafts',
+        requestSummary: { docEntry: link.doc_entry, a: 'NAD', motivo: motivo.slice(0, 254) },
+      },
+      () =>
+        sapPatch(
+          session,
+          `Drafts(${link.doc_entry})`,
+          { U_SEND_State: 'NAD', U_Motivo_Can_Solicitud: motivo.slice(0, 254) },
+          false,
+          { ifMatch: draft['odata.etag'] as string | undefined }
+        ),
+      () => ({ status: 'ok', sapDocEntry: link.doc_entry })
     );
     await finish(link.id_request_general, { status: 'rejected' });
     return { skipped: false, status: 'rejected' };
@@ -340,9 +397,26 @@ export async function sendToQuotation(params: {
     const draft = await sapGet<Record<string, unknown>>(sap, `Drafts(${docEntry})?$select=DocEntry,U_SEND_State,Comments`);
     const check = checkTransition(draft.U_SEND_State, 'cotizar');
     if (!check.ok) throw new Error(check.error);
-    await sapPatch(sap, `Drafts(${docEntry})`, { U_SEND_State: 'ENC' }, false, {
-      ifMatch: draft['odata.etag'] as string | undefined,
-    });
+    const session = sap;
+    await withStep(
+      {
+        idRequest: link.id_request_general,
+        stepKind: 'sap',
+        stepName: 'Pasar a «En cotización»',
+        actionKey: 'purchase.state_quotation',
+        triggerEvent: 'on_quote',
+        triggeredBy: 'user',
+        idUser: user.id,
+        idCompany: companyId,
+        sapEntity: 'Drafts',
+        requestSummary: { docEntry, a: 'ENC', motivo: (params.reason ?? '').trim() || null },
+      },
+      () =>
+        sapPatch(session, `Drafts(${docEntry})`, { U_SEND_State: 'ENC' }, false, {
+          ifMatch: draft['odata.etag'] as string | undefined,
+        }),
+      () => ({ status: 'ok', sapDocEntry: docEntry })
+    );
   } catch (error) {
     // El borrador sigue en LA: se devuelve la autorizacion a pendiente.
     await prisma.purchaseAuthorization
@@ -386,5 +460,5 @@ export async function sendToQuotation(params: {
 
 /** Reintenta publicar una aprobacion que quedo en error (es idempotente). */
 export function retryPublish(idRequest: number) {
-  return onAuthorizationDecision(idRequest, true);
+  return onAuthorizationDecision(idRequest, true, null, 'retry');
 }
