@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { cambioRelevante, crearMedidorCuota, cuotaDeCabeceras, cuotaDeEvento, MODELO_SONDA, sondearCuota } from '../src/cuota.mjs';
+import { cambioRelevante, crearMedidorCuota, cuotaDeCabeceras, cuotaDeEvento, MODELO_SONDA, PAUSA_404_MS, sondearCuota } from '../src/cuota.mjs';
 import { cargarConfig } from '../src/config.mjs';
 import { crearClienteSynerLink } from '../src/synerlink.mjs';
 
@@ -170,7 +170,7 @@ test('medidor: sondea solo sin turnos y cuando la medición tiene el intervalo',
   assert.equal(sondas, 2);
 });
 
-test('medidor: intervalo 0 = solo lo del stream; un 404 pausa una hora sin tumbar nada', async () => {
+test('medidor: intervalo 0 = solo lo del stream; un 404 pausa 5 min sin tumbar nada', async () => {
   const r = reloj();
   const sinSonda = crearMedidorCuota({ credencial: { tipo: 'oauth-token', valor: 't' }, publicar: async () => {}, intervaloMs: 0, sondear: async () => assert.fail('no') });
   assert.equal(await sinSonda.revisar({ forzar: true }), null);
@@ -193,10 +193,50 @@ test('medidor: intervalo 0 = solo lo del stream; un 404 pausa una hora sin tumba
   await new Promise((res) => setImmediate(res));
   assert.equal(intentos, 1);
   assert.equal(logs.length, 1);
-  r.avanzar(60 * 60 * 1000);
+  assert.equal(PAUSA_404_MS, 5 * 60 * 1000);
+  r.avanzar(PAUSA_404_MS - 120_000 - 1);
+  m.registrarEvento(EVENTO);
+  await new Promise((res) => setImmediate(res));
+  assert.equal(intentos, 1); // aún en pausa
+  r.avanzar(1);
   m.registrarEvento(EVENTO);
   await new Promise((res) => setImmediate(res));
   assert.equal(intentos, 2);
+  assert.equal(logs.length, 1); // el aviso del 404 no se repite
+});
+
+test('medidor: registra en el log la primera publicación exitosa y la primera tras un fallo', async () => {
+  const r = reloj();
+  let falla = false;
+  const logs = [];
+  const m = crearMedidorCuota({
+    credencial: { tipo: 'oauth-token', valor: 't' },
+    publicar: async () => {
+      if (falla) throw Object.assign(new Error('HTTP 404'), { status: 404 });
+    },
+    ahora: r.ahora,
+    log: (...p) => logs.push(p.join(' ')),
+  });
+  m.registrarEvento(EVENTO);
+  await new Promise((res) => setImmediate(res));
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /cuota publicada en SynerLink: semanal 40 %, 5 h 22 % \(turno/);
+  r.avanzar(61_000);
+  m.registrarEvento(EVENTO);
+  await new Promise((res) => setImmediate(res));
+  assert.equal(logs.length, 1); // los siguientes envíos no llenan el log
+  falla = true;
+  r.avanzar(61_000);
+  m.registrarEvento(EVENTO);
+  await new Promise((res) => setImmediate(res));
+  assert.equal(logs.length, 2);
+  assert.match(logs[1], /404/);
+  falla = false;
+  r.avanzar(PAUSA_404_MS);
+  m.registrarEvento(EVENTO);
+  await new Promise((res) => setImmediate(res));
+  assert.equal(logs.length, 3);
+  assert.match(logs[2], /cuota publicada en SynerLink/);
 });
 
 test('medidor: una sonda que falla no se reintenta en cada vuelta', async () => {

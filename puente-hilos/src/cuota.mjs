@@ -21,11 +21,19 @@
  * esté este agente. Es el consumo del TOKEN, compartido con el bot vivo y con
  * los otros agentes que usen el mismo token.
  *
+ * Si SynerLink responde 404 (la ruta aún no ha llegado a ese entorno) se
+ * reintenta a los 5 min (PAUSA_404_MS); antes era 1 h y, tras el pase a prod
+ * del 2026-10-22, el medidor tardaba hasta una hora en aparecer. El log anota
+ * la primera publicación exitosa tras arrancar y la primera tras un fallo,
+ * para que haya evidencia sin llenar el log con cada envío.
+ *
  * El token jamás se registra ni se publica. Nada de aquí puede tumbar el puente:
  * todo error se registra y se sigue.
  */
 
 const URL_MENSAJES = 'https://api.anthropic.com/v1/messages';
+/** Espera tras un 404 de /api/chat/agent/quota antes de reintentar. */
+export const PAUSA_404_MS = 5 * 60 * 1000;
 export const MODELO_SONDA = 'claude-haiku-4-5-20251001';
 const SISTEMA_SONDA = "You are Claude Code, Anthropic's official CLI for Claude.";
 
@@ -180,6 +188,7 @@ export function crearMedidorCuota({
   let pausaHasta = 0;
   let temporizador = null;
   let avisoRuta = false;
+  let registrarExito = true; // la primera publicación tras arrancar (o tras un fallo) va al log
 
   async function enviar(estado, forzar = false) {
     const t = ahora().getTime();
@@ -191,12 +200,17 @@ export function crearMedidorCuota({
       await publicar(estado);
       ultimoPublicado = estado;
       avisoRuta = false;
+      if (registrarExito) {
+        log(`cuota publicada en SynerLink: semanal ${estado.utilizacion7d ?? '—'} %, 5 h ${estado.utilizacion5h ?? '—'} % (${estado.fuente}, medido ${estado.medidoEn}).`);
+        registrarExito = false;
+      }
       return true;
     } catch (err) {
+      registrarExito = true;
       if (err?.status === 404) {
-        // SynerLink todavía no trae la ruta: se reintenta en una hora, sin llenar el log.
-        pausaHasta = t + 60 * 60 * 1000;
-        if (!avisoRuta) log('SynerLink no trae /api/chat/agent/quota (404): reintento en 1 h.');
+        // SynerLink todavía no trae la ruta: se reintenta en 5 min, sin llenar el log.
+        pausaHasta = t + PAUSA_404_MS;
+        if (!avisoRuta) log(`SynerLink no trae /api/chat/agent/quota (404): reintento cada ${Math.round(PAUSA_404_MS / 60000)} min.`);
         avisoRuta = true;
       } else log('cuota: no se pudo publicar:', err?.message ?? err);
       return false;
