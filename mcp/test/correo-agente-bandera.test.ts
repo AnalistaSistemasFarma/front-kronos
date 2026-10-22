@@ -1,6 +1,6 @@
 /**
  * Bandera CORREO_AGENTE_HABILITADO (apagada por defecto): sin «true» kronos-mcp no registra las
- * herramientas correo_* y kronos_metadata reporta 34. Con «true», las 39 (resto de la suite).
+ * herramientas correo_* y kronos_metadata reporta 44. Con «true», las 49 (resto de la suite).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
