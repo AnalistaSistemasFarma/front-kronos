@@ -336,11 +336,14 @@ describe.skipIf(!url)('SGC · S16 · encabezados por tipo y Excel con SQL Server
     expect(horizontal.suggested[0].x).toBeLessThan(vertical.suggested[0].x);
     // Los mismos ajustes otra vez: no se guarda otra fila.
     expect(await saveDocumentLayout(prisma, id, { sheetSettings: settings }, elab, actor(E.elab))).toMatchObject({ saved: false });
-    // La vista previa sin ajustes explícitos usa los guardados.
+    // La vista previa sin ajustes explícitos usa los guardados: la misma composición que con esos ajustes sin guardar (misma caché).
+    const fromSaved = await buildLayoutPreview(prisma, layoutDeps, id, elab);
+    expect(fromSaved).toBe(await buildLayoutPreview(prisma, layoutDeps, id, elab, { sheetSettings: settings }));
+    // Y con el automático es otra composición: hoja vertical y con todas las columnas.
     htmls.length = 0;
-    await buildLayoutPreview(prisma, layoutDeps, id, elab);
-    expect(htmls[0]).toContain('size: A4 landscape');
-    expect(htmls[0]).not.toContain('COLUMNA AUXILIAR');
+    await buildLayoutPreview(prisma, layoutDeps, id, elab, { sheetSettings: null });
+    expect(htmls[0]).not.toContain('landscape');
+    expect(htmls[0]).toContain('COLUMNA AUXILIAR');
     // Volver al automático: hoja vertical, se quitan de nuevo las firmas (no había) y quedan en el historial.
     expect(await saveDocumentLayout(prisma, id, { sheetSettings: null }, elab, actor(E.elab))).toMatchObject({ saved: true, sheetSettings: null });
     expect((await latestLayout(prisma, id)).sheetSettings).toBeNull();
