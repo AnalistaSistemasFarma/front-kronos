@@ -28,8 +28,8 @@ Pedido de Nicolás Rivera: «para el tema de proyectos quiero que puedas, de pri
 |---|---|---|
 | Subagentes a la vez | 3 (el dueño lo baja a 1–2; el puente acota a `HILOS_SUBAGENTES_MAX_SIMULTANEOS`, máx. 5) | `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`: el que pasa del tope se rechaza («Concurrent subagent limit reached») |
 | Profundidad | 1: un subagente no lanza otros | `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`, Agent/Task en `disallowedTools` de cada subagente y el vigía |
-| Tiempo por turno | 15 min (`HILOS_TIMEOUT_TURNO_MS`) | el puente mata el proceso |
-| Gasto por pedido | 3 USD con equipo (`HILOS_SUBAGENTES_PRESUPUESTO_USD`; si `HILOS_MAX_BUDGET_USD` es menor, manda ese) | `--max-budget-usd` (incluye a los subagentes) |
+| Tiempo por turno | 60 min (`HILOS_TIMEOUT_TURNO_MS`; antes 15 min) con avisos de progreso; ver «Turnos largos» | el puente mata el proceso |
+| Gasto por pedido | 3 USD con equipo (`HILOS_SUBAGENTES_PRESUPUESTO_USD`; si `HILOS_MAX_BUDGET_USD` es menor, manda ese). Con `HILOS_MAX_BUDGET_USD=0`/`off`, **sin tope**, tampoco con equipo | `--max-budget-usd` (incluye a los subagentes) |
 | Vueltas por subagente | 30 (`HILOS_SUBAGENTES_MAX_TURNOS`) | `maxTurns` en la definición |
 | Segundo plano | prohibido | `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` (el esquema de Agent pierde `run_in_background`) |
 | Explore / Plan | apagados | `CLAUDE_CODE_DISABLE_EXPLORE_PLAN_AGENTS=1` |
@@ -54,6 +54,25 @@ Pedido de Nicolás Rivera: «para el tema de proyectos quiero que puedas, de pri
    - escribe `CLAUDE.md`, `.puente/sistema.md`, `.puente/mcp.json`, `contexto/vinculados.md` y `contexto/cronograma.md`;
    - corre `claude -p --resume <session_id del hilo>` en la carpeta del hilo (`src/claude.mjs`).
 4. Publica la respuesta en el hilo, deja el indicador en reposo, reporta el consumo (`/api/chat/agent/usage`, por conversación y también en `consumo.jsonl`) y confirma los mensajes. La confirmación va al final, así que si el puente se cae, el mensaje vuelve a llegar.
+
+## Turnos largos: tiempo, gasto y avisos (2026-10-22)
+
+Pedido de Nicolás Rivera (2026-10-22, 07:00 COT): «que no tenga límite de dinero por ahora; el límite de tiempo sí, algo razonable» y «si la tarea es muy grande, que la estuviera supervisando, y si se demoró por alguna razón, le avise al usuario». Vale para **todos** los usuarios y proyectos (con o sin código, operador o no). Código: `src/progreso.mjs`.
+
+| Variable | Por defecto | Qué hace |
+|---|---|---|
+| `HILOS_MAX_BUDGET_USD` | vacío | `0` u `off`: **sin tope de gasto** en los turnos, tampoco con equipo (no se pasa `--max-budget-usd`). Un número: tope por pedido, como antes. El costo se sigue registrando en `consumo.jsonl` (`costoUsd`) y en SynerLink. «Sugerir equipo» conserva su propio tope (`HILOS_SUGERENCIA_PRESUPUESTO_USD`). |
+| `HILOS_TIMEOUT_TURNO_MS` | 3600000 (60 min, también el máximo) | Tope duro: el puente detiene el `claude -p` (SIGTERM y, a los 5 s, SIGKILL). |
+| `HILOS_AVISO_PROGRESO_MS` | 600000 (10 min; 1 a 30 min; `0`/`off` lo apaga) | Mientras el turno corre, publica en el hilo «⏳ Sigo trabajando en su pedido (lleva 10 min; el máximo por turno es 1 h). Le aviso al terminar.» y, si la hay, UNA línea: «_Lo último: «…»_» (último texto del hilo principal, recortado a 180 caracteres) o «_Ahora: Consultando SAP…_» (la etiqueta del indicador). |
+| `HILOS_CONTINUAR_AL_AGOTAR` | `no` | Con `si`: si el turno agota el tiempo, avisa «Continúo automáticamente una vez más…» y relanza UNA continuación (`--resume`, mismo id) con «continúe desde donde quedó». Si también se agota, se rinde con el mensaje de corte. |
+
+- **El indicador no se apaga.** El aviso se publica con `POST /api/chat/agent/messages` y `state`/`label` del momento (nunca `idle`); la ruta no toca la tablita de subagentes. Además, cada 3 min un **latido** reenvía el estado, porque la app deja de pintar «trabajando» si pasan 10 min sin novedades (`ESTADO_RANCIO_MS`) y una herramienta larga (un build, una consulta pesada) no genera eventos. Al terminar, el puente apaga los temporizadores y **espera** lo que esté en vuelo antes de publicar la respuesta y dejar el indicador en reposo.
+- **El aviso no reemplaza la respuesta final**: es un mensaje aparte; la respuesta sale igual al terminar. Cada aviso dispara la notificación de mensaje nuevo a los miembros del proyecto (como cualquier respuesta).
+- **Si se corta** (tiempo, tope de gasto si lo hay, o error con avance visible), el mensaje dice qué alcanzó a hacer —el último avance y hasta 10 archivos creados o modificados en el turno (los de `./trabajo` con fecha posterior al inicio, más lo que tocó con Write/Edit dentro del hilo)— y que **la sesión conserva el avance**: «Escriba **«continúa»** y retomo desde donde quedé». Ya no dice «intente con una pregunta más acotada».
+- **La sesión se conserva**: un turno cortado por tiempo que ya arrancó (hubo `init`) queda marcado como iniciado aunque sea el primero del hilo, para que «continúa» haga `--resume` y no abra una sesión nueva.
+- **Encabezado del turno** (`sistema.md`): dice el tope de tiempo y pide guardar el avance en `./trabajo` a medida que avanza y escribir de vez en cuando una frase de lo que va haciendo (es lo que ve la persona si el turno se corta).
+- **Por proyecto:** no se configura por proyecto. El tope por defecto ya es el máximo admitido (60 min) y `repos-por-proyecto.json` solo cubre proyectos con código; un valor por proyecto solo serviría para bajarlo.
+- **Sin tope de gasto, lo que cuida el gasto es el tiempo**: 60 min por turno, 2 hilos a la vez como mucho y, con continuación automática, hasta 2 h por pedido.
 
 ## Seguridad del proceso del modelo
 

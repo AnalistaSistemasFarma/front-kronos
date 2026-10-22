@@ -28,12 +28,26 @@
  *   HILOS_CLAUDE_CODE_OAUTH_TOKEN  El mismo token, copiado al .env del puente (600).
  *   HILOS_ANTHROPIC_API_KEY    Llave de API (la vía que Anthropic indica para multiusuario).
  *   HILOS_MAX_CONCURRENCIA     1 o 2 (por defecto 2). Tope de hilos simultáneos.
- *   HILOS_TIMEOUT_TURNO_MS     Tope por turno (por defecto 900000 = 15 min).
+ *   HILOS_TIMEOUT_TURNO_MS     Tope DURO por turno (por defecto 3600000 = 60 min, que es también el
+ *                              máximo; mínimo 1 min). Antes era 15 min: Nicolás Rivera (2026-10-22)
+ *                              pidió «el límite de tiempo sí, algo razonable» con supervisión.
+ *   HILOS_AVISO_PROGRESO_MS    Cada cuánto el puente publica en el hilo un aviso breve de que
+ *                              sigue trabajando (por defecto 600000 = 10 min; 60000 a 1800000;
+ *                              0 u «off» lo apaga). El aviso NO reemplaza la respuesta final y
+ *                              deja el indicador «trabajando» encendido (ver progreso.mjs).
+ *   HILOS_CONTINUAR_AL_AGOTAR  'no' (por defecto) o 'si'. Con 'si', si un turno agota el tiempo
+ *                              el puente relanza UNA continuación automática («continúe desde
+ *                              donde quedó») sobre la misma sesión antes de rendirse.
  *   HILOS_MODELO               Opcional: modelo del hilo PRINCIPAL del `claude -p` (`--model`),
  *                              por agente (p. ej. claude-opus-5-5 en horus-prod). Sin ella, el
  *                              predeterminado de la cuenta. Los subagentes usan el modelo que
  *                              fijó su equipo (null = heredan este).
- *   HILOS_MAX_BUDGET_USD       Opcional: tope de gasto por turno (solo con llave de API).
+ *   HILOS_MAX_BUDGET_USD       Opcional: tope de gasto por turno (`--max-budget-usd`). Vacío = sin
+ *                              tope general (con equipo manda HILOS_SUBAGENTES_PRESUPUESTO_USD).
+ *                              «0» u «off» = SIN NINGÚN TOPE DE GASTO, ni con equipo: el puente no
+ *                              pasa `--max-budget-usd` en los turnos (decisión de Nicolás Rivera,
+ *                              2026-10-22: «que no tenga límite de dinero por ahora»). El gasto se
+ *                              sigue registrando en consumo.jsonl y en SynerLink como siempre.
  *   HILOS_CLAUDE_BIN           Opcional: ruta del ejecutable `claude` (por defecto, el del PATH).
  *   HILOS_INSTRUCCIONES_EN     'system-prompt' (por defecto) o 'claude-md'. Ver hilos.mjs.
  *
@@ -74,6 +88,9 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 
 export const MAX_CONCURRENCIA_F1 = 2;
+
+/** Tope duro por turno si el .env no dice otra cosa: 60 min (el máximo admitido). */
+export const TIMEOUT_TURNO_DEFECTO_MS = 60 * 60 * 1000;
 
 export const ENTORNOS = ['pruebas', 'produccion'];
 
@@ -363,8 +380,18 @@ export function cargarConfig(env = process.env) {
   const subagentes = (env.HILOS_SUBAGENTES ?? 'si').trim().toLowerCase();
   if (subagentes !== 'si' && subagentes !== 'no') throw new ErrorConfig("HILOS_SUBAGENTES solo admite 'si' o 'no'.");
 
-  const presupuesto = (env.HILOS_MAX_BUDGET_USD ?? '').trim();
-  if (presupuesto && !(Number(presupuesto) > 0)) throw new ErrorConfig('HILOS_MAX_BUDGET_USD debe ser un número positivo.');
+  // «0» u «off»: sin tope de gasto en los turnos (tampoco con equipo).
+  const presupuesto = (env.HILOS_MAX_BUDGET_USD ?? '').trim().toLowerCase();
+  const sinTopeGasto = presupuesto === 'off' || (presupuesto !== '' && Number(presupuesto) === 0);
+  if (presupuesto && !sinTopeGasto && !(Number(presupuesto) > 0)) {
+    throw new ErrorConfig('HILOS_MAX_BUDGET_USD debe ser un número positivo, o 0/off para no poner tope de gasto.');
+  }
+
+  // Supervisión de turnos largos (progreso.mjs, 2026-10-22).
+  const avisoRaw = (env.HILOS_AVISO_PROGRESO_MS ?? '').trim().toLowerCase();
+  const avisoProgresoMs = avisoRaw === 'off' || avisoRaw === '0' ? 0 : entero(env, 'HILOS_AVISO_PROGRESO_MS', 10 * 60 * 1000, 60 * 1000, 30 * 60 * 1000);
+  const continuar = (env.HILOS_CONTINUAR_AL_AGOTAR ?? 'no').trim().toLowerCase();
+  if (continuar !== 'si' && continuar !== 'no') throw new ErrorConfig("HILOS_CONTINUAR_AL_AGOTAR solo admite 'si' o 'no'.");
 
   for (const v of ['HILOS_REPOS_POR_PROYECTO', 'HILOS_GITHUB_TOKEN_ARCHIVO', 'HILOS_MEMORIA_DIR', 'HILOS_CONECTORES_POR_PROYECTO', 'HILOS_CONECTORES_SECRETOS', 'HILOS_GRAFOS_DIR']) {
     const r = (env[v] ?? '').trim();
@@ -429,9 +456,12 @@ export function cargarConfig(env = process.env) {
     configClaudeDir: path.join(hilosDir, 'claude-config'),
     perfiles,
     maxConcurrencia: entero(env, 'HILOS_MAX_CONCURRENCIA', MAX_CONCURRENCIA_F1, 1, MAX_CONCURRENCIA_F1),
-    timeoutTurnoMs: entero(env, 'HILOS_TIMEOUT_TURNO_MS', 15 * 60 * 1000, 60 * 1000, 60 * 60 * 1000),
+    timeoutTurnoMs: entero(env, 'HILOS_TIMEOUT_TURNO_MS', TIMEOUT_TURNO_DEFECTO_MS, 60 * 1000, 60 * 60 * 1000),
+    avisoProgresoMs,
+    continuarAlAgotar: continuar === 'si',
     modelo,
-    presupuestoUsd: presupuesto ? Number(presupuesto) : null,
+    presupuestoUsd: presupuesto && !sinTopeGasto ? Number(presupuesto) : null,
+    sinTopeGasto,
     subagentes: subagentes === 'si',
     subagentesMaxSimultaneos: entero(env, 'HILOS_SUBAGENTES_MAX_SIMULTANEOS', 3, 1, 5),
     subagentesMaxTurnos: entero(env, 'HILOS_SUBAGENTES_MAX_TURNOS', 30, 5, 100),

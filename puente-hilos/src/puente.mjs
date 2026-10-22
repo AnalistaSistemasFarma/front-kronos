@@ -48,6 +48,7 @@ import { grafosDelTurno, textoGrafos } from './grafos.mjs';
 import { prepararMemoriaTurno } from './memoria.mjs';
 import { crearClienteSynerLink } from './synerlink.mjs';
 import { prepararAdjuntos } from './adjuntos-salida.mjs';
+import { archivosDelTurno, archivosModificadosDesde, crearSupervisor, duracionLegible, PROMPT_CONTINUACION, textoAvisoProgreso, textoCorte, textoTiempoTurno } from './progreso.mjs';
 import { convertirHtmlAPdf, convertirMarcasPdf, recursosDePlugins, resolverChrome, textoPdf } from './pdf.mjs';
 import { armarArgumentos, armarArgumentosSugerencia, armarEntorno, correrTurno, etiquetaHerramienta } from './claude.mjs';
 import {
@@ -186,6 +187,8 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
     const idConversation = Number(claveConv);
     const ids = lote.map((m) => m.id);
     const inicio = new Date();
+    // Supervisión del turno (progreso.mjs): avisos «sigo trabajando» y latido del indicador.
+    let supervisor = null;
     try {
       await synerlink.estado(idConversation, 'thinking', 'Preparando el proyecto…').catch(() => null);
 
@@ -289,11 +292,17 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         bloqueMemoria: memoria.bloque,
         bloqueConectores: conectores?.bloque ?? '',
         bloquePdf: textoPdf({ disponible: Boolean(chromePdf), recursos }),
+        bloqueTiempo: textoTiempoTurno({ topeMs: cfg.timeoutTurnoMs, avisoMs: cfg.avisoProgresoMs ?? 0 }),
       });
       limpiarPropuestas(rutas);
       let vigia = null;
+      // Lo que el indicador muestra ahora (el aviso y el latido lo conservan, nunca lo apagan),
+      // y lo último que se sabe del turno para los avisos y el mensaje de corte.
+      let indicador = { state: 'thinking', label: 'Pensando…' };
+      let ultimoTexto = null;
+      const tocados = new Set();
 
-      const ejecutar = async (sesion) => {
+      const ejecutar = async (sesion, prompt = armarPrompt(lote, adjuntos)) => {
         const args = armarArgumentos({
           perfil,
           sesion,
@@ -319,7 +328,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           args,
           env: armarEntorno(cfg, equipo ? topes : null, codigo?.entorno ?? null),
           cwd: rutas.cwd,
-          prompt: armarPrompt(lote, adjuntos),
+          prompt,
           perfil,
           equipo,
           codigo,
@@ -327,6 +336,8 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           timeoutMs: cfg.timeoutTurnoMs,
           alEvento: (evento, acc) => {
             if (codigo) auditarCodigo(idConversation, evento, codigo);
+            if (acc.ultimoTexto) ultimoTexto = acc.ultimoTexto;
+            for (const f of acc.archivosTocados ?? []) tocados.add(f);
             // La tablita de sub-agentes del chat: se actualiza cuando cambia
             // el conjunto de subagentes que están trabajando.
             if (vigia) {
@@ -336,6 +347,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
                 ultimosActivos = clave;
                 const etiqueta = activos.length > 0 ? `Trabajando con ${activos.length === 1 ? '1 subagente' : `${activos.length} subagentes`}…` : 'Consolidando lo del equipo…';
                 ultimaEtiqueta = etiqueta;
+                indicador = { state: 'tool', label: etiqueta };
                 void synerlink.estado(idConversation, 'tool', etiqueta, tareasIndicador(activos)).catch(() => null);
                 return;
               }
@@ -345,12 +357,27 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
             const etiqueta = etiquetaHerramienta(acc.ultimaHerramienta);
             if (etiqueta === ultimaEtiqueta) return;
             ultimaEtiqueta = etiqueta;
+            indicador = { state: 'tool', label: etiqueta };
             void synerlink.estado(idConversation, 'tool', etiqueta).catch(() => null);
           },
         });
       };
 
       await synerlink.estado(idConversation, 'thinking', 'Pensando…').catch(() => null);
+      // Aviso intermedio en el hilo SIN apagar el indicador (synerlink.avisar deja state/label).
+      const avisar = async (texto) => {
+        if (!synerlink.avisar) return false;
+        await synerlink.avisar(idConversation, codigo ? ocultarSecreto(texto, codigo.token) : texto, indicador.state, indicador.label);
+        return true;
+      };
+      supervisor = crearSupervisor({
+        intervaloAvisoMs: cfg.avisoProgresoMs ?? 0,
+        alAviso: async (ms) => {
+          const ok = await avisar(textoAvisoProgreso({ transcurridoMs: ms, topeMs: cfg.timeoutTurnoMs, actividad: indicador.label, ultimoTexto }));
+          if (ok) log(`conversación ${idConversation}: aviso de progreso (${duracionLegible(ms)}).`);
+        },
+        alLatido: () => synerlink.estado(idConversation, indicador.state, indicador.label),
+      });
       let sesion = estado.sesionDe(idConversation);
       let r = await ejecutar(sesion);
 
@@ -367,6 +394,33 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         aviso = '_Nota: esta conversación arrancó una memoria nueva; la anterior no se encontró._\n\n';
       }
 
+      // Turno cortado por tiempo: la sesión YA existe (arrancó: hubo init) y conserva el avance.
+      // Se marca iniciada para que el siguiente turno («continúa») haga --resume y no abra otra.
+      const cortadoPorTiempo = (x) => x.abortado === 'tiempo agotado' && Boolean(x.init);
+      if (cortadoPorTiempo(r)) estado.marcarIniciada(idConversation, sesion.id);
+      // Continuación automática (HILOS_CONTINUAR_AL_AGOTAR=si): UNA vez, sobre la misma sesión.
+      let continuacion = false;
+      if (cortadoPorTiempo(r) && cfg.continuarAlAgotar) {
+        continuacion = true;
+        log(`conversación ${idConversation}: tiempo agotado; continuación automática (una vez).`);
+        await avisar(
+          `⏱️ Se cumplió el tiempo máximo de este turno (${duracionLegible(cfg.timeoutTurnoMs)}) y la tarea sigue en curso. Continúo automáticamente una vez más desde donde quedé; le aviso al terminar.`
+        ).catch(() => null);
+        sesion = estado.sesionDe(idConversation);
+        r = await ejecutar(sesion, PROMPT_CONTINUACION);
+        if (cortadoPorTiempo(r)) estado.marcarIniciada(idConversation, sesion.id);
+      }
+      // Fin del trabajo del modelo: se apagan los avisos y el latido, y se espera lo que esté en
+      // vuelo (un latido tardío no debe volver a encender el indicador tras la respuesta).
+      await supervisor.detener();
+      const transcurridoMs = Date.now() - inicio.getTime();
+      const archivosTurno = () =>
+        archivosDelTurno({
+          cwd: rutas.cwd,
+          escaneados: archivosModificadosDesde(rutas.trabajo, inicio.getTime(), { base: rutas.cwd, excluir: [path.basename(rutas.propuestas)] }),
+          tocados: [...tocados],
+        });
+
       // El id de la sesión lo fija SIEMPRE el puente (--session-id); nunca se
       // adopta el que diga el proceso. Si no coinciden, algo raro pasó.
       if (r.resultado) estado.marcarIniciada(idConversation, sesion.id);
@@ -380,13 +434,19 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           ? 'No pude atender el mensaje: el proceso arrancó con permisos que este puente no admite y se detuvo por seguridad. Avísele a Tecnología.'
           : r.abortado.startsWith('subagente fuera')
             ? 'Detuve el trabajo por seguridad: un subagente intentó salirse de lo aprobado para el equipo del proyecto. Tecnología quedó con el registro; puede intentar de nuevo.'
-            : 'No alcancé a terminar dentro del tiempo permitido. Intente con una pregunta más acotada.';
-        log(`conversación ${idConversation}: turno abortado (${r.abortado})`);
+            : textoCorte({ motivo: 'tiempo', transcurridoMs, topeMs: cfg.timeoutTurnoMs, ultimoTexto, archivos: archivosTurno(), continuacion });
+        log(`conversación ${idConversation}: turno abortado (${r.abortado}) tras ${duracionLegible(transcurridoMs)}${continuacion ? ', también en la continuación automática' : ''}`);
       } else if (/budget/i.test(r.resultado?.subtipo ?? '')) {
-        cuerpo = `Llegué al tope de gasto de este pedido${equipo ? ` (${topes.presupuestoUsd} USD con el equipo de subagentes)` : ''} y me detuve antes de terminar. Intente con una pregunta más acotada o pídale menos frentes a la vez.`;
+        // Solo pasa si hay un tope configurado (con HILOS_MAX_BUDGET_USD=0/off no se pasa --max-budget-usd).
+        cuerpo = textoCorte({ motivo: 'gasto', transcurridoMs, presupuestoUsd: equipo ? topes.presupuestoUsd : cfg.presupuestoUsd, ultimoTexto, archivos: archivosTurno() });
         log(`conversación ${idConversation}: tope de gasto alcanzado (${r.resultado.subtipo})`);
       } else if (!r.resultado?.ok) {
-        cuerpo = 'No pude completar la respuesta por un error del asistente. Intente de nuevo en unos minutos.';
+        // Con avance visible, el mismo mensaje útil del corte; sin avance, el de siempre.
+        const archivos = archivosTurno();
+        cuerpo =
+          ultimoTexto || archivos.length > 0
+            ? textoCorte({ motivo: 'error', transcurridoMs, ultimoTexto, archivos })
+            : 'No pude completar la respuesta por un error del asistente. Intente de nuevo en unos minutos.';
         log(`conversación ${idConversation}: turno con error (código ${r.codigo}, ${r.resultado?.subtipo ?? 'sin resultado'})`);
       } else {
         cuerpo = r.resultado.texto.trim() || '_(El asistente terminó sin texto.)_';
@@ -528,6 +588,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         .responder(idConversation, 'No pude atender el mensaje por un error del puente. Tecnología ya quedó con el registro.')
         .catch(() => null);
     } finally {
+      await supervisor?.detener().catch(() => null);
       // Se confirma SIEMPRE al final (éxito o error ya avisado): con ack=false
       // en la bandeja, si el puente se cae a mitad de turno, el mensaje vuelve
       // a llegar al reiniciar (al menos una vez).
@@ -643,7 +704,7 @@ async function principal() {
 
   const estado = new Estado(cfg.hilosDir);
   const puente = crearPuente({ cfg, synerlink, estado });
-  log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}, modelo del hilo principal: ${cfg.modelo ?? 'el predeterminado de la cuenta (sin HILOS_MODELO)'}.`);
+  log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}, modelo del hilo principal: ${cfg.modelo ?? 'el predeterminado de la cuenta (sin HILOS_MODELO)'}; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; gasto ${cfg.sinTopeGasto ? 'SIN TOPE' : cfg.presupuestoUsd ? `tope ${cfg.presupuestoUsd} USD` : `sin tope general (equipo ${cfg.subagentesPresupuestoUsd} USD)`}; avisos de progreso ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; continuación automática ${cfg.continuarAlAgotar ? 'sí' : 'no'}.`);
 
   let parar = false;
   for (const senal of ['SIGTERM', 'SIGINT']) {

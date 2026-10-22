@@ -222,6 +222,8 @@ export function etiquetaHerramienta(nombre) {
     WebSearch: 'Buscando en internet…',
     WebFetch: 'Leyendo una página web…',
     TodoWrite: 'Organizando la tarea…',
+    Bash: 'Ejecutando comandos…',
+    Skill: 'Usando una skill…',
     Agent: 'Repartiendo el trabajo entre el equipo…',
     Task: 'Repartiendo el trabajo entre el equipo…',
   };
@@ -242,8 +244,20 @@ export function acumularEvento(acc, evento) {
     if (evento.parent_tool_use_id) out.apiMessagesSubagents = (out.apiMessagesSubagents ?? 0) + 1;
     const modelo = evento.message?.model;
     if (modelo) out.modelos = [...new Set([...(out.modelos ?? []), modelo])];
-    const usos = (evento.message?.content ?? []).filter((c) => c?.type === 'tool_use');
+    const contenido = Array.isArray(evento.message?.content) ? evento.message.content : [];
+    const usos = contenido.filter((c) => c?.type === 'tool_use');
     if (usos.length > 0) out.ultimaHerramienta = usos[usos.length - 1].name;
+    // Para los avisos de progreso y el mensaje de corte (progreso.mjs): el último texto
+    // del hilo PRINCIPAL (lo de los subagentes no) y los archivos que tocó con Write/Edit.
+    if (!evento.parent_tool_use_id) {
+      const textos = contenido.filter((c) => c?.type === 'text' && typeof c.text === 'string' && c.text.trim());
+      if (textos.length > 0) out.ultimoTexto = textos[textos.length - 1].text.trim().slice(-2000);
+    }
+    const tocados = usos
+      .filter((u) => ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(u.name))
+      .map((u) => u.input?.file_path ?? u.input?.notebook_path)
+      .filter((f) => typeof f === 'string' && f);
+    if (tocados.length > 0) out.archivosTocados = [...new Set([...(out.archivosTocados ?? []), ...tocados])].slice(-50);
   } else if (evento?.type === 'result') {
     out.resultado = {
       ok: evento.subtype === 'success' && !evento.is_error,

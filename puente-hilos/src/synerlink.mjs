@@ -9,7 +9,8 @@
  *   GET  /api/chat/agent/projects/files/N descarga de un archivo del proyecto
  *   GET  /api/chat/attachments/N          descarga de un adjunto del hilo
  *   POST /api/chat/agent/status           indicador «trabajando»
- *   POST /api/chat/agent/messages         publicar la respuesta (JSON, o multipart con adjuntos)
+ *   POST /api/chat/agent/messages         publicar la respuesta (JSON, o multipart con adjuntos) y los
+ *                                         avisos de progreso (con el indicador aún «trabajando»)
  *   POST /api/chat/agent/projects/proposals  entregar las PROPUESTAS de tareas del turno
  *   POST /api/chat/agent/usage            consumo (tokens) del turno
  *   POST /api/chat/agent/projects/team/requests     pedidos de «Sugerir equipo» (los reclama)
@@ -67,6 +68,13 @@ export function crearClienteSynerLink({ url, llave, fetchImpl = globalThis.fetch
       }),
     responder: (idConversation, body) =>
       json('/api/chat/agent/messages', { method: 'POST', body: { idConversation, body, state: 'idle' } }),
+    /**
+     * Mensaje INTERMEDIO (aviso de progreso, 2026-10-22): se publica en el hilo pero el
+     * indicador queda como estaba («trabajando»), no en reposo. La ruta acepta state/label
+     * y no toca la tablita de subagentes (`tasks`).
+     */
+    avisar: (idConversation, body, state = 'thinking', label = null) =>
+      json('/api/chat/agent/messages', { method: 'POST', body: { idConversation, body, state: state === 'tool' ? 'tool' : 'thinking', label } }),
     /**
      * Publica la respuesta CON adjuntos: misma ruta, en multipart/form-data
      * (campos idConversation, body, state y un `files` por archivo). `archivos`
