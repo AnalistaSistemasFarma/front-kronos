@@ -1355,7 +1355,8 @@ function ViewRequestPage() {
 
     if (request?.id_status === 1) {
       return [
-        { value: '2', label: 'Resuelto' }
+        { value: '2', label: 'Resuelto' },
+        { value: '3', label: 'Cancelado' }
       ];
     }
 
