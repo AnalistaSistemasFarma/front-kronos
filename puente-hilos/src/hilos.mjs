@@ -92,7 +92,28 @@ export class Estado {
 
   /** La sesión guardada ya no existe (p. ej. se borró): la próxima vez, una nueva. */
   reiniciarSesion(idConversation) {
-    this.datos.conversaciones[idConversation] = { sessionId: randomUUID(), iniciada: false };
+    // Se recuerda la sesión anterior (con /clear la pide la persona; así Tecnología la puede recuperar).
+    const anterior = this.datos.conversaciones[idConversation]?.sessionId ?? null;
+    this.datos.conversaciones[idConversation] = { sessionId: randomUUID(), iniciada: false, ...(anterior ? { sesionAnterior: anterior } : {}) };
+    this.guardar();
+  }
+
+  /** Objetivo (/goal) vigente de la conversación: { condicion, autor, fijado } o null (comandos.mjs). */
+  objetivoDe(idConversation) {
+    return this.datos.conversaciones[idConversation]?.objetivo ?? null;
+  }
+
+  fijarObjetivo(idConversation, condicion, autor = null) {
+    const actual = this.datos.conversaciones[idConversation] ?? {};
+    this.datos.conversaciones[idConversation] = { ...actual, objetivo: { condicion, autor, fijado: new Date().toISOString() } };
+    this.guardar();
+  }
+
+  quitarObjetivo(idConversation) {
+    const actual = this.datos.conversaciones[idConversation];
+    if (!actual?.objetivo) return;
+    const { objetivo, ...resto } = actual;
+    this.datos.conversaciones[idConversation] = resto;
     this.guardar();
   }
 
@@ -137,7 +158,7 @@ export function asegurarCarpetas(rutas) {
 }
 
 /** Encabezado de sistema de cada turno. Breve: las instrucciones del proyecto van aparte o aquí. */
-export function textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo = '', bloqueCodigo = '', bloqueMemoria = '', bloqueConectores = '', bloquePdf = '', bloqueTiempo = '', bloquePruebas = '' }) {
+export function textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo = '', bloqueCodigo = '', bloqueMemoria = '', bloqueConectores = '', bloquePdf = '', bloqueTiempo = '', bloquePruebas = '', bloqueObjetivo = '' }) {
   const p = contexto.project;
   const lineas = [
     `Usted es ${agente}, asistente de inteligencia artificial de la organización Group Shared Services Latinoamérica.`,
@@ -168,6 +189,8 @@ export function textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo =
   if (bloqueEquipo) lineas.push(bloqueEquipo);
   // Acceso al código (nivel 2): reglas de repos, ramas y pases (codigo.mjs → textoCodigo).
   if (bloqueCodigo) lineas.push(bloqueCodigo);
+  // Objetivo vigente de la conversación (/goal; comandos.mjs → textoObjetivo).
+  if (bloqueObjetivo) lineas.push(bloqueObjetivo);
   if (instruccionesEn === 'system-prompt' && p.instructions) {
     lineas.push('', '## Instrucciones del proyecto (las definió el dueño del proyecto)', '', p.instructions);
   }
@@ -307,8 +330,8 @@ export function limpiarPropuestas(rutas) {
 }
 
 /** Escribe sistema.md, CLAUDE.md, mcp.json, vinculados.md y cronograma.md del hilo. */
-export function escribirContexto({ rutas, agente, contexto, perfil, instruccionesEn, equipoTurno = null, bloqueCodigo = '', bloqueMemoria = '', bloqueConectores = '', bloquePdf = '', bloqueTiempo = '', bloquePruebas = '' }) {
-  writeFileSync(rutas.sistema, textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo: equipoTurno?.bloque ?? '', bloqueCodigo, bloqueMemoria, bloqueConectores, bloquePdf, bloqueTiempo, bloquePruebas }), { mode: MODO_ARCHIVO });
+export function escribirContexto({ rutas, agente, contexto, perfil, instruccionesEn, equipoTurno = null, bloqueCodigo = '', bloqueMemoria = '', bloqueConectores = '', bloquePdf = '', bloqueTiempo = '', bloquePruebas = '', bloqueObjetivo = '' }) {
+  writeFileSync(rutas.sistema, textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo: equipoTurno?.bloque ?? '', bloqueCodigo, bloqueMemoria, bloqueConectores, bloquePdf, bloqueTiempo, bloquePruebas, bloqueObjetivo }), { mode: MODO_ARCHIVO });
   // Sin equipo, no queda ninguna definición vieja que se pueda colar.
   if (equipoTurno) writeFileSync(rutas.agentes, JSON.stringify(equipoTurno.agentes, null, 2), { mode: MODO_ARCHIVO });
   else rmSync(rutas.agentes, { force: true });
@@ -358,7 +381,7 @@ export async function bajarAdjuntos({ rutas, mensajes, descargar }) {
 }
 
 /** El texto que recibe el modelo en el turno: los mensajes del lote, con su autor. */
-export function armarPrompt(mensajes, adjuntos) {
+export function armarPrompt(mensajes, adjuntos, encabezado = '') {
   const partes = mensajes.map((m) => {
     const autor = m.author?.name?.trim() || m.author?.email || 'Una persona';
     return `**${autor}** escribió:\n${m.body || '(sin texto)'}`;
@@ -366,7 +389,7 @@ export function armarPrompt(mensajes, adjuntos) {
   if (adjuntos.length > 0) {
     partes.push(`Adjuntos de estos mensajes (léalos con Read si hacen falta):\n${adjuntos.map((a) => `- ${a}`).join('\n')}`);
   }
-  return partes.join('\n\n---\n\n');
+  return encabezado + partes.join('\n\n---\n\n');
 }
 
 export function registrarConsumoLocal(hilosDir, fila) {

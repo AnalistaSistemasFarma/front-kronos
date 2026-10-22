@@ -46,7 +46,7 @@ export const SETTINGS_HIJO = {
  * fija el id con --session-id (así el puente lo conoce de antemano); después,
  * --resume con ese mismo id.
  */
-export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, presupuestoUsd, equipo = null, codigo = null, plugins = null }) {
+export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, presupuestoUsd, equipo = null, codigo = null, plugins = null, objetivo = false }) {
   if (!perfil) throw new Error('Falta el perfil.');
   if (!sesion?.id || !/^[0-9a-f-]{36}$/i.test(sesion.id)) throw new Error('session id inválido.');
 
@@ -71,7 +71,14 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
   if (codigo && !codigo.sandbox?.enabled && codigo.terminalCompleta !== true) throw new Error('Turno con código sin sandbox: no se arma.');
   if (codigo && !codigo.hooks?.PreToolUse?.length) throw new Error('Turno con código sin el hook de subagentes: no se arma.');
   // Con código: sandbox y el ÚNICO hook (subagentes solo git de lectura); nada más.
-  const settings = codigo ? { ...SETTINGS_HIJO, disableAllHooks: false, hooks: codigo.hooks ?? {}, sandbox: codigo.sandbox } : SETTINGS_HIJO;
+  // /goal (comandos.mjs): Claude Code lo evalúa con un hook de sesión y se niega a correr con
+  // disableAllHooks. Solo en turnos con objetivo se prenden los hooks, y SIN ningún hook propio:
+  // --restricted ya ignora los settings de usuario/proyecto/local, así que no entra otro.
+  const settings = codigo
+    ? { ...SETTINGS_HIJO, disableAllHooks: false, hooks: codigo.hooks ?? {}, sandbox: codigo.sandbox }
+    : objetivo
+      ? { ...SETTINGS_HIJO, disableAllHooks: false, hooks: {} }
+      : SETTINGS_HIJO;
 
   const args = [
     '-p',
@@ -299,11 +306,23 @@ export function acumularEvento(acc, evento) {
 }
 
 /**
+ * ¿Es la devolución del evaluador de /goal («Stop hook feedback: …», objetivo aún sin cumplir)?
+ * Llega como un mensaje `user` del hilo principal. En los turnos con objetivo es el único hook de
+ * parada que existe (los turnos con código solo tienen el PreToolUse de subagentes).
+ */
+export function esRevisionObjetivo(evento) {
+  if (evento?.type !== 'user' || evento.parent_tool_use_id) return false;
+  const c = evento.message?.content;
+  const textos = typeof c === 'string' ? [c] : Array.isArray(c) ? c.map((x) => (typeof x === 'string' ? x : x?.type === 'text' ? x.text : '')) : [];
+  return textos.some((t) => typeof t === 'string' && t.trimStart().startsWith('Stop hook feedback:'));
+}
+
+/**
  * Corre el proceso y devuelve el resumen del turno. `alEvento` recibe cada
  * evento (para mover el indicador). Mata el proceso si se pasa del tope o si
  * `revisarInit` encuentra un problema.
  */
-export function correrTurno({ bin, args, env, cwd, prompt, perfil, equipo = null, codigo: accesoCodigo = null, vigia = null, timeoutMs, alEvento = () => {}, spawnImpl = spawn }) {
+export function correrTurno({ bin, args, env, cwd, prompt, perfil, equipo = null, codigo: accesoCodigo = null, vigia = null, timeoutMs, maxRevisionesObjetivo = 0, alEvento = () => {}, spawnImpl = spawn }) {
   return new Promise((resolve) => {
     const hijo = spawnImpl(bin, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
     let acc = { apiMessages: 0, apiMessagesSubagents: 0, modelos: [] };
@@ -311,6 +330,7 @@ export function correrTurno({ bin, args, env, cwd, prompt, perfil, equipo = null
     let stderr = '';
     let abortado = null;
     let terminado = false;
+    let revisionesObjetivo = 0;
 
     const matar = (motivo) => {
       if (abortado) return;
@@ -345,6 +365,12 @@ export function correrTurno({ bin, args, env, cwd, prompt, perfil, equipo = null
         if (evento.type === 'system' && evento.subtype === 'init') {
           const problemas = revisarInit(evento, perfil, equipo, accesoCodigo);
           if (problemas.length > 0) matar(`arranque inseguro: ${problemas.join('; ')}`);
+        }
+        // /goal: si el evaluador sigue diciendo «no cumplido», el turno no gira sin fin (p. ej. un
+        // objetivo que depende de que una persona responda): se para y el objetivo sigue vigente.
+        if (maxRevisionesObjetivo > 0 && esRevisionObjetivo(evento)) {
+          revisionesObjetivo += 1;
+          if (revisionesObjetivo >= maxRevisionesObjetivo) matar(`objetivo sin cumplir tras ${revisionesObjetivo} revisiones`);
         }
         // Vigía del equipo: un subagente fuera de lo aprobado detiene el turno.
         if (vigia) {

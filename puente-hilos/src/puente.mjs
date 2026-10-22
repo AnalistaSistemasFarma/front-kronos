@@ -42,6 +42,7 @@ import {
   turnoAutorizado,
 } from './codigo.mjs';
 import { ColaHilos } from './cola.mjs';
+import { analizarComando, catalogoPlugins, encabezadoObjetivo, MAX_REVISIONES_OBJETIVO, SKILLS_CON_GIT, estadoObjetivoSesion, resolverComando, rutaTranscripcion, skillsDePlugins, textoObjetivo } from './comandos.mjs';
 import { combinarPerfil, prepararConectoresTurno, secretosConectores } from './conectores.mjs';
 import { guiaDesarrolloSegura } from './guia.mjs';
 import { prepararPruebasTurno, secretosPruebas, verificarSecretosPruebas } from './pruebas-kronos.mjs';
@@ -164,6 +165,21 @@ export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lot
   };
 }
 
+/** ¿Todos los mensajes del lote son de un operador autorizado (operadoresPases)? Falla cerrado. */
+export function loteDeOperador(cfg, lote, cargar = cargarReposPorProyecto) {
+  try {
+    const v = cfg.rutaReposPorProyecto ? cargar(cfg.rutaReposPorProyecto) : null;
+    return turnoAutorizado(lote, v?.operadores ?? []).autorizado;
+  } catch {
+    return false;
+  }
+}
+
+/** Nombre de quien escribió el mensaje (para el registro del objetivo). */
+function autorDe(m) {
+  return m?.author?.name?.trim() || m?.author?.email || null;
+}
+
 export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, convertirPdf = convertirHtmlAPdf, medidor = null }) {
   const enProceso = new Set();
 
@@ -205,6 +221,40 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         return;
       }
 
+      // Comandos «/x» (comandos.mjs): lista blanca. Los que responde el puente no corren el modelo;
+      // los nativos van TAL CUAL al `claude -p`, con las MISMAS herramientas y permisos de siempre.
+      let comando = null;
+      let catalogo = null;
+      let operador = false;
+      if (lote.some((m) => analizarComando(m?.body))) {
+        catalogo = catalogoPlugins(cfg.pluginDirs ?? []);
+        operador = loteDeOperador(cfg, lote);
+        comando = resolverComando({ lote, catalogo, operador });
+        if (comando) log(`conversación ${idConversation}: comando ${comando.accion}${comando.nombre ? ` /${comando.nombre}` : ''}${operador ? ' (operador)' : ''}.`);
+      }
+      if (comando?.accion === 'responder') {
+        await synerlink.responder(idConversation, comando.texto);
+        return;
+      }
+      if (comando?.accion === 'limpiar') {
+        estado.reiniciarSesion(idConversation);
+        await synerlink.responder(
+          idConversation,
+          '🧹 Listo: este hilo arranca una **memoria nueva** desde el próximo mensaje. El historial del chat sigue aquí, pero el asistente ya no lo tiene presente; si hace falta algo de antes, péguelo o resúmalo. Si había un objetivo (/goal), también se quitó.'
+        );
+        return;
+      }
+      if (comando?.accion === 'objetivo-ver') {
+        const o = estado.objetivoDe(idConversation);
+        await synerlink.responder(
+          idConversation,
+          o
+            ? `🎯 **Objetivo activo** de esta conversación (/goal): «${o.condicion}»\n\nLo fijó ${o.autor ?? 'una persona del proyecto'} el ${String(o.fijado).slice(0, 10)}. El asistente sigue trabajando hacia él en cada mensaje hasta que un evaluador confirme que se cumplió. Para quitarlo: \`/goal clear\`.`
+            : 'Esta conversación no tiene un objetivo activo. Para fijar uno: `/goal <condición>` (por ejemplo, `/goal el informe queda en PDF con las cifras de septiembre`).'
+        );
+        return;
+      }
+
       // Conectores por proyecto (bases en SOLO LECTURA): se SUMAN al perfil solo en los
       // proyectos vinculados y en turnos de un lector autorizado. Si algo falla, el turno
       // va con el perfil tal cual (falla cerrado).
@@ -231,6 +281,14 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       else if (pruebas.motivo && cfg.pruebasKronos?.habilitado) log(`conversación ${idConversation}: turno sin los conectores de PRUEBAS (${pruebas.motivo}).`);
       await sincronizarArchivos({ rutas, contexto, estado, descargar: (u) => synerlink.descargar(u) });
       const adjuntos = await bajarAdjuntos({ rutas, mensajes: lote, descargar: (u) => synerlink.descargar(u) });
+      // Comando nativo: se resuelve otra vez ya con los adjuntos (una skill los recibe en sus argumentos).
+      const nativo = comando?.accion === 'nativo' ? resolverComando({ lote, catalogo, operador, adjuntos }) : null;
+      // /goal: el objetivo queda guardado POR CONVERSACIÓN (estado.json) y va en el encabezado de
+      // cada turno; mientras esté vigente, el turno corre con hooks (los exige el /goal nativo).
+      if (nativo?.objetivo?.fijar) estado.fijarObjetivo(idConversation, nativo.objetivo.fijar, autorDe(lote[0]));
+      if (nativo?.objetivo?.quitar) estado.quitarObjetivo(idConversation);
+      const objetivo = estado.objetivoDe(idConversation);
+      const conObjetivo = Boolean(objetivo) || Boolean(nativo?.objetivo);
       // Equipo de subagentes (F2): SOLO el aprobado en SynerLink, con topes. Si
       // algo del equipo no valida, el turno corre SIN equipo (falla cerrado).
       const agenteNombre = cfg.agenteNombre ?? cfg.agente;
@@ -264,6 +322,14 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         codigo = null;
         log(`conversación ${idConversation}: no se pudo preparar el acceso al código, el turno va sin él:`, e.message);
         avisoCodigo = '_Nota: no pude preparar el acceso al código del proyecto en este turno; respondí sin él. Tecnología quedó con el registro._\n\n';
+      }
+      // Skills incluidas que corren git al cargarse: solo con el código montado (comandos.mjs).
+      if (nativo && SKILLS_CON_GIT.has(nativo.nombre) && !codigo) {
+        await synerlink.responder(
+          idConversation,
+          `**/${nativo.nombre}** necesita el código del proyecto montado en este turno, y aquí no hay ningún repositorio montado${indiceRepos ? ' todavía. Nombre en un mensaje el repositorio que quiere revisar (se monta desde el siguiente) y vuelva a enviar el comando' : ': este proyecto no tiene repositorios vinculados (Tecnología los vincula)'}.`
+        );
+        return;
       }
       // El equipo se arma DESPUÉS del código: sus subagentes leen el worktree y usan git de lectura.
       const equipoTurno = equipo
@@ -301,6 +367,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         bloquePruebas: pruebas.bloque,
         bloquePdf: textoPdf({ disponible: Boolean(chromePdf), recursos }),
         bloqueTiempo: textoTiempoTurno({ topeMs: cfg.timeoutTurnoMs, avisoMs: cfg.avisoProgresoMs ?? 0 }),
+        bloqueObjetivo: textoObjetivo(objetivo),
       });
       limpiarPropuestas(rutas);
       let vigia = null;
@@ -310,7 +377,8 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       let ultimoTexto = null;
       const tocados = new Set();
 
-      const ejecutar = async (sesion, prompt = armarPrompt(lote, adjuntos)) => {
+      const promptTurno = nativo?.prompt ?? armarPrompt(lote, adjuntos, encabezadoObjetivo(objetivo));
+      const ejecutar = async (sesion, prompt = promptTurno) => {
         const args = armarArgumentos({
           perfil,
           sesion,
@@ -322,7 +390,9 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           presupuestoUsd: equipo ? topes.presupuestoUsd : cfg.presupuestoUsd,
           equipo: equipo ? argumentosEquipo({ equipo, rutaAgentes: rutas.agentes }) : null,
           codigo,
-          plugins: { dirs: cfg.pluginDirs ?? [], dirsLectura: [...grafosTurno.map((g) => g.dir), ...recursos] },
+          // Las carpetas skills/ de los plugins, en solo lectura: las skills leen sus referencias.
+          plugins: { dirs: cfg.pluginDirs ?? [], dirsLectura: [...grafosTurno.map((g) => g.dir), ...recursos, ...skillsDePlugins(cfg.pluginDirs ?? [])] },
+          objetivo: conObjetivo,
         });
         let ultimaEtiqueta = null;
         let ultimosActivos = '';
@@ -342,6 +412,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           codigo,
           vigia,
           timeoutMs: cfg.timeoutTurnoMs,
+          maxRevisionesObjetivo: conObjetivo ? (cfg.objetivoMaxRevisiones ?? MAX_REVISIONES_OBJETIVO) : 0,
           alEvento: (evento, acc) => {
             // Cupo semanal y ventana de 5 h: vienen gratis en el stream del turno.
             if (evento?.type === 'rate_limit_event') {
@@ -392,6 +463,12 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         alLatido: () => synerlink.estado(idConversation, indicador.state, indicador.label),
       });
       let sesion = estado.sesionDe(idConversation);
+      // Un comando que mira la conversación (/compact, /context, /recap…) en un hilo sin conversación todavía.
+      if (nativo && !nativo.objetivo && sesion.nueva && ['compact', 'context', 'recap', 'usage', 'cost'].includes(nativo.nombre)) {
+        await supervisor.detener();
+        await synerlink.responder(idConversation, `Este hilo todavía no tiene conversación con el asistente, así que \`/${nativo.nombre}\` todavía no tiene sobre qué trabajar. Escríbale primero lo que necesita.`);
+        return;
+      }
       let r = await ejecutar(sesion);
 
       // La sesión guardada ya no existe en el config aislado: se abre una nueva
@@ -411,6 +488,9 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       // Se marca iniciada para que el siguiente turno («continúa») haga --resume y no abra otra.
       const cortadoPorTiempo = (x) => x.abortado === 'tiempo agotado' && Boolean(x.init);
       if (cortadoPorTiempo(r)) estado.marcarIniciada(idConversation, sesion.id);
+      // /goal parado por revisiones: igual, la sesión existe y guarda el avance (y el objetivo).
+      const paradoPorObjetivo = typeof r.abortado === 'string' && r.abortado.startsWith('objetivo sin cumplir') && Boolean(r.init);
+      if (paradoPorObjetivo) estado.marcarIniciada(idConversation, sesion.id);
       // Continuación automática (HILOS_CONTINUAR_AL_AGOTAR=si): UNA vez, sobre la misma sesión.
       let continuacion = false;
       if (cortadoPorTiempo(r) && cfg.continuarAlAgotar) {
@@ -442,7 +522,13 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       }
 
       let cuerpo;
-      if (r.abortado) {
+      if (paradoPorObjetivo) {
+        const o = estado.objetivoDe(idConversation);
+        cuerpo =
+          `${ultimoTexto ? `${ultimoTexto}\n\n` : ''}🎯 El objetivo (/goal) **sigue sin cumplirse** después de ${cfg.objetivoMaxRevisiones ?? MAX_REVISIONES_OBJETIVO} revisiones en este mensaje, así que paré aquí para no dar vueltas` +
+          `${o ? `: «${o.condicion}»` : ''}. Sigue activo: en su próximo mensaje continúo hacia él (por ejemplo, si falta una confirmación o un dato, escríbalo). Para quitarlo: \`/goal clear\`.`;
+        log(`conversación ${idConversation}: turno parado (${r.abortado}).`);
+      } else if (r.abortado) {
         cuerpo = r.abortado.startsWith('arranque inseguro')
           ? 'No pude atender el mensaje: el proceso arrancó con permisos que este puente no admite y se detuvo por seguridad. Avísele a Tecnología.'
           : r.abortado.startsWith('subagente fuera')
@@ -461,8 +547,27 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
             ? textoCorte({ motivo: 'error', transcurridoMs, ultimoTexto, archivos })
             : 'No pude completar la respuesta por un error del asistente. Intente de nuevo en unos minutos.';
         log(`conversación ${idConversation}: turno con error (código ${r.codigo}, ${r.resultado?.subtipo ?? 'sin resultado'})`);
+      } else if (nativo?.objetivo?.quitar) {
+        cuerpo = '🧹 Listo: quité el objetivo (/goal) de esta conversación.';
       } else {
-        cuerpo = r.resultado.texto.trim() || '_(El asistente terminó sin texto.)_';
+        const sinTexto = nativo ? (ultimoTexto ? ultimoTexto : nativo.nombre === 'compact' ? '✅ Listo: compacté la memoria de este hilo; seguimos desde el resumen.' : `✅ \`/${nativo.nombre}\` listo.`) : '_(El asistente terminó sin texto.)_';
+        cuerpo = r.resultado.texto.trim() || sinTexto;
+      }
+      // /goal: ¿el evaluador de Claude Code ya lo dio por cumplido? (adjunto goal_status de la transcripción)
+      let notaObjetivo = '';
+      if (objetivo && r.resultado && !r.abortado) {
+        const est = estadoObjetivoSesion(rutaTranscripcion(cfg.configClaudeDir, rutas.cwd, sesion.id));
+        if (est?.met) {
+          estado.quitarObjetivo(idConversation);
+          notaObjetivo = `\n\n✅ **Objetivo cumplido** (/goal): «${objetivo.condicion}». Ya no sigue activo.`;
+          log(`conversación ${idConversation}: objetivo cumplido.`);
+        } else if (est?.fallido) {
+          estado.quitarObjetivo(idConversation);
+          notaObjetivo = `\n\n⚠️ **Objetivo cerrado sin cumplir** (/goal): «${objetivo.condicion}». El evaluador concluyó que no se puede cumplir así${est.motivo ? `: ${String(est.motivo).slice(0, 400)}` : '.'} Si quiere, fije otro con \`/goal <condición>\`.`;
+          log(`conversación ${idConversation}: objetivo imposible, se quita.`);
+        } else if (nativo?.objetivo?.fijar) {
+          notaObjetivo = `\n\n🎯 **Objetivo activo** (/goal): «${objetivo.condicion}». Sigue vigente en los próximos mensajes hasta que se cumpla; \`/goal clear\` lo quita.`;
+        }
       }
       // Adjuntos salientes: líneas «MEDIA:trabajo/…» de la respuesta (adjuntos-salida.mjs).
       // Solo en un turno que terminó bien, y solo archivos de ./trabajo de ESTA conversación.
@@ -523,7 +628,9 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           notaPropuestas = '\n\n⚠️ No pude registrar mis propuestas en el Cronograma por un error. Intente de nuevo.';
         }
       }
-      cuerpo = (aviso + avisoEquipo + avisoCodigo + avisoConectores + cuerpo).slice(0, MAX_RESPUESTA - notaPropuestas.length) + notaPropuestas;
+      const avisoComando = comando?.accion === 'aviso' ? comando.texto : '';
+      const notas = notaObjetivo + notaPropuestas;
+      cuerpo = (avisoComando + aviso + avisoEquipo + avisoCodigo + avisoConectores + cuerpo).slice(0, MAX_RESPUESTA - notas.length) + notas;
       if (codigo) cuerpo = ocultarSecreto(cuerpo, codigo.token);
       // Bajo demanda: los repos que Orus nombró en su respuesta se montan desde el siguiente turno.
       if (indiceRepos && r.resultado?.ok) {

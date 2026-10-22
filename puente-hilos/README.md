@@ -191,6 +191,29 @@ Variables: `HILOS_PDF` (`si` por defecto, `no` lo apaga), `HILOS_PDF_CHROME` (ru
 
 Verificación real (2026-10-21, haiku, 0,05 USD): `scripts/simular-turno-real.mjs --contexto-falso --modelo claude-haiku-4-5 --adjuntos-en <dir>` con un usuario no operador (sin Bash): la sesión invocó la skill, escribió el HTML con el CSS y el logo por ruta absoluta, pidió `PDF:` y el puente adjuntó un PDF A4 de una página con DM Sans y Source Sans 3 incrustadas.
 
+## Comandos «/x» en los hilos (2026-10-22)
+
+Pedido de Nicolás Rivera (2026-10-22 11:13 COT): «comandos como /goal no funcionan desde los proyectos; quiero que se puedan ejecutar todos los comandos desde el chat también». Para todos los usuarios y proyectos. Código: `src/comandos.mjs` (pruebas en `test/comandos.test.mjs`).
+
+**Por qué no funcionaban.** El puente le pasaba al `claude -p` el lote con encabezado («**Fulano** escribió:\n/goal …»): el texto ya no empezaba por «/» y Claude Code no lo trataba como comando. Además, `/goal` (integrado de Claude Code 2.1.299: «keep working until the condition is met», evaluado por un hook de parada de la sesión) se niega a correr con `disableAllHooks` («/goal can't run while hooks are restricted»). Y de las skills del Orus principal solo estaban montadas `gss-design` y `graphify`.
+
+**Cómo funciona ahora.** Un mensaje que es SOLO un comando (lote de un mensaje) se resuelve por lista blanca:
+
+| Tipo | Comandos | Qué hace el puente |
+|---|---|---|
+| Del puente | `/ayuda` (`/comandos`, `/help`), `/goal` (ver), `/clear` (`/nueva`) | Responde sin correr el modelo; `/clear` abre sesión nueva (la anterior queda en `estado.json` como `sesionAnterior`). |
+| Nativos | `/goal <condición>`, `/goal clear`, `/compact`, `/context`, `/recap`, `/usage` y `/cost` (solo operadores) | El turno se manda TAL CUAL («/x args») al `claude -p`. |
+| Skills | las de los plugins montados (`/gss-design`, `/graphify`, `/grafos-proyectos` y las del plugin `orus`) y las incluidas `/dataviz`, `/debug`, `/deep-research`, `/claude-api`; `/code-review`, `/simplify`, `/security-review`, `/verify` solo con código montado (corren `git` de lectura al cargarse) | Igual, como `/<plugin>:<skill> args`; los adjuntos del mensaje van en los argumentos. |
+| No disponibles | interfaz (`/config`, `/login`, `/resume`…), configuración (`/model`, `/permissions`, `/mcp`, `/hooks`, `/init`…), segundo plano (`/schedule`, `/loop`, `/batch`, `/run`…) y las skills excluidas del Orus | «/x no está disponible en los hilos de proyecto porque …», sin correr el modelo. |
+
+Un comando junto con otros mensajes en el mismo lote no se ejecuta: el turno va normal con una nota. Un comando NUNCA cambia lo que el turno puede hacer: herramientas, conectores, terminal, producción y permisos los fija el puente igual que para un mensaje normal.
+
+**`/goal`.** El objetivo se guarda POR CONVERSACIÓN en `estado.json` y va en el encabezado de sistema y del prompt de cada turno. Mientras esté vigente, el turno corre con `disableAllHooks: false` y `hooks: {}` (ningún hook propio; `--restricted` ya ignora los settings de usuario/proyecto/local), que es lo que necesita el `/goal` nativo; Claude Code lo restaura solo al hacer `--resume`. Al terminar el turno el puente lee el último `goal_status` de la transcripción: `met` → «✅ Objetivo cumplido» y se quita; `failed` (imposible) → se quita con aviso. Para que un objetivo que depende de una persona («que Nicolás confirme…») no haga girar el turno sin fin, el turno se para tras **3** devoluciones «no cumplido» del evaluador (`MAX_REVISIONES_OBJETIVO`): se publica el avance y el objetivo sigue activo para el próximo mensaje.
+
+**Plugin `orus` (skills del Orus principal).** Se arma con `node scripts/plugin-skills-orus.mjs` (fuente `~/.horus/claude-config/skills`, destino `~/.puente-hilos/plugins/orus`, `--ensayo` para probar) y se suma a `HILOS_PLUGIN_DIRS`. Es una COPIA saneada, 0444/0555: del frontmatter de cada `SKILL.md` solo quedan `name`, `description`, `argument-hint`, `when_to_use`, `version`, `license` y `user-invocable` (fuera `allowed-tools`, `hooks`, `model`, `context`, `agent`), la sintaxis «!`comando`» se neutraliza, y de los demás archivos solo entra texto e imágenes/fuentes sin nombre ni contenido de secreto (patrones de `memoria.mjs`). Excluidas, con su motivo en `excluidas.json` (el hilo lo dice si las piden): las de infraestructura de agentes (`migrar-agente-synerlink`, `cambiar-auth-token`, `voz-tiempo-real`, `auditoria-agentes-ia`), las que escriben en producción (`crear-usuario-synerlink`, `cierre-casos-synerlink`, `sgc-activar-empresa`), las que instalan skills (`find-skills`, `geo-update`) y las de la bóveda personal (`obsidian-cli`, `analisis-reuniones`). La carpeta `skills/` de cada plugin se monta en solo lectura (`--add-dir`) para que las skills lean sus referencias. Lo que cambie en el Orus principal entra al volver a correr el script.
+
+Verificación real (2026-10-22, haiku, `scripts/simular-turno-real.mjs --contexto-falso`, usuario no operador): `/ayuda`; `/goal` fijado, cumplido en el mismo turno y quitado; `/goal` que depende de una persona, parado a las 3 revisiones (53 s) y cumplido en el turno siguiente cuando «Nicolás» confirmó (restaurado por `--resume`); `/goal clear`; `/model`, `/usage`, `/config` y `/cambiar-auth-token` rechazados con su motivo; `/abogado-del-diablo` (plugin `orus`); `/context`, `/recap`, `/compact`; `/clear` y `/compact` en hilo nuevo; escritura fuera de `./trabajo` negada en el turno con objetivo.
+
 ## Pruebas
 
 ```bash
