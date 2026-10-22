@@ -99,6 +99,9 @@ export default defineConfig({
         // Deslizar para eliminar (2026-10-18): mover a Elementos eliminados y «Deshacer» firmado.
         'lib/correo/eliminar.ts',
         'app/api/correo/**/route.ts',
+        // Visores de adjuntos del chat (2026-10-22): reglas puras y la ruta de la vista.
+        'lib/chat/visor.ts',
+        'app/api/chat/attachments/[[]id]/vista/route.ts',
       ],
       exclude: [
         '**/__tests__/**',

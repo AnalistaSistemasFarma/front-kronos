@@ -55,7 +55,7 @@ export interface SgcSecureViewerProps {
 /** Escala inicial del visor (página al 100 % del ancho disponible). */
 const BASE_SCALE = 1.3;
 
-async function renderPdf(bytes: Uint8Array, scale: number, container: HTMLElement, isCancelled: () => boolean) {
+export async function renderPdf(bytes: Uint8Array, scale: number, container: HTMLElement, isCancelled: () => boolean) {
   const pdfjs = await import('pdfjs-dist');
   pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
   const pdf = await pdfjs.getDocument({ data: bytes }).promise;
