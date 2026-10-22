@@ -7,7 +7,7 @@ import { useSearchParams } from 'next/navigation';
 import {
   Loader, Alert, Table, TextInput, Select, Pagination, Badge, Group, SegmentedControl, ActionIcon, Button,
 } from '@mantine/core';
-import { IconSearch, IconAlertTriangle, IconEye, IconPencil, IconPlus, IconReceipt, IconSend, IconUpload, IconCopy, IconFileSpreadsheet } from '@tabler/icons-react';
+import { IconSearch, IconAlertTriangle, IconEye, IconPencil, IconPlus, IconReceipt, IconSend, IconUpload, IconCopy, IconFileSpreadsheet, IconArrowBackUp, IconTrash } from '@tabler/icons-react';
 import { stateLabel, stateColor, type PurchaseTipo } from '../../../../lib/purchases/fields';
 import { EDITABLE_STATES } from '../../../../lib/purchases/drafts';
 import DetailModal, { type PurchaseDraft } from './DetailModal';
@@ -115,6 +115,50 @@ function PurchasesPageContent() {
     } finally {
       setSendingKey(null);
     }
+  };
+
+  /** «Retomar» (NAD -> B) y «Anular» (B -> anulado, con motivo): solo el solicitante. */
+  const changeState = async (r: PurchaseDraft, action: 'retomar' | 'anular') => {
+    let reason = '';
+    if (action === 'anular') {
+      const answer = window.prompt(`Motivo para anular el borrador #${r.DocEntry} (obligatorio):`);
+      if (answer === null) return;
+      reason = answer.trim();
+      if (!reason) {
+        setActionMessage({ color: 'red', text: 'El motivo es obligatorio para anular.' });
+        return;
+      }
+    }
+    const key = `${r.companyId}-${r.DocEntry}`;
+    setSendingKey(key);
+    setActionMessage(null);
+    try {
+      const res = await fetch('/api/purchases/drafts/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId: r.companyId, docEntry: Number(r.DocEntry), action, reason }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionMessage({ color: 'red', text: data.error || 'No se pudo cambiar el estado' });
+        return;
+      }
+      setActionMessage({
+        color: 'green',
+        text: action === 'retomar' ? `Borrador #${r.DocEntry} retomado: puede editarlo y reenviarlo.` : `Borrador #${r.DocEntry} anulado.`,
+      });
+      setReloadKey((k) => k + 1);
+    } catch {
+      setActionMessage({ color: 'red', text: 'Error de red al cambiar el estado' });
+    } finally {
+      setSendingKey(null);
+    }
+  };
+
+  /** ¿La fila es del usuario (su perfil SAPSEND en esa empresa) y puede escribir alli? */
+  const isOwnRow = (r: PurchaseDraft) => {
+    const c = companies.find((x) => x.idCompany === r.companyId);
+    return Boolean(c?.canWrite && c.sapsendUserId != null && String(r.U_SEND_UserId ?? '') === String(c.sapsendUserId));
   };
 
   /** «Cotizar»: LA -> ENC. El servidor valida que el usuario pueda decidir la autorizacion. */
@@ -502,6 +546,38 @@ function PurchasesPageContent() {
                               aria-label="Duplicar solicitud"
                             >
                               <IconCopy size={16} />
+                            </ActionIcon>
+                          )}
+                          {tipo === 'solicitudes' && String(r.U_SEND_State ?? '') === 'NAD' && isOwnRow(r) && (
+                            <ActionIcon
+                              variant="subtle"
+                              color="blue"
+                              size="sm"
+                              loading={sendingKey === `${r.companyId}-${r.DocEntry}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void changeState(r, 'retomar');
+                              }}
+                              aria-label="Retomar solicitud"
+                              title="Retomar (vuelve a borrador para corregir y reenviar)"
+                            >
+                              <IconArrowBackUp size={16} />
+                            </ActionIcon>
+                          )}
+                          {tipo === 'solicitudes' && String(r.U_SEND_State ?? '') === 'B' && isOwnRow(r) && (
+                            <ActionIcon
+                              variant="subtle"
+                              color="red"
+                              size="sm"
+                              loading={sendingKey === `${r.companyId}-${r.DocEntry}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void changeState(r, 'anular');
+                              }}
+                              aria-label="Anular borrador"
+                              title="Anular borrador (con motivo)"
+                            >
+                              <IconTrash size={16} />
                             </ActionIcon>
                           )}
                           {tipo === 'solicitudes' && String(r.U_SEND_State ?? '') === 'LA' && (
