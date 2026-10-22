@@ -31,6 +31,8 @@ export const CORREO_RATE_RULES = {
   creacion: { max: 120, windowMs: 10 * 60_000 },
   /** Leído / no leído (abrir un hilo lo marca; «Marcar todo» va por lotes): cuota propia, por minuto. */
   marcado: { max: 120, windowMs: 60_000 },
+  /** Eliminar y «Deshacer» (hasta 100 correos por petición): cuota propia, por minuto. */
+  eliminar: { max: 60, windowMs: 60_000 },
 } as const satisfies Record<string, SgcRateRule>;
 export type CorreoRateBucket = keyof typeof CORREO_RATE_RULES;
 

@@ -17,7 +17,7 @@ const sapAgent = new https.Agent({ rejectUnauthorized: false });
 interface SapFetchInit {
   method: string;
   headers?: Record<string, string>;
-  body?: string;
+  body?: string | Buffer;
 }
 
 interface SapFetchResponse {
@@ -94,6 +94,11 @@ export class SapError extends Error {
    */
   get friendly(): string {
     return extractSapMessage(this.detail) ?? this.message;
+  }
+
+  /** 412: el documento cambio desde la lectura (falla de If-Match / ETag). */
+  get isPreconditionFailed(): boolean {
+    return this.status === 412;
   }
 }
 
@@ -281,7 +286,8 @@ export async function sapPatch(
   session: SapSession,
   path: string,
   body: unknown,
-  replaceCollections = false
+  replaceCollections = false,
+  opts: { ifMatch?: string } = {}
 ): Promise<void> {
   const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
 
@@ -290,6 +296,9 @@ export async function sapPatch(
     Cookie: `B1SESSION=${session.sessionId}`,
   };
   if (replaceCollections) headers['B1S-ReplaceCollectionsOnPatch'] = 'true';
+  // Control optimista: SAP responde 412 si el documento cambio desde que se leyo
+  // (valor de `odata.etag`). Evita que dos decisiones pisen el mismo borrador.
+  if (opts.ifMatch) headers['If-Match'] = opts.ifMatch;
 
   const response = await sapFetch(url, {
     method: 'PATCH',
@@ -304,6 +313,69 @@ export async function sapPatch(
     const detail = await response.text().catch(() => '');
     throw new SapError(sapErrorMessage(`SAP PATCH ${path} fallo (${response.status})`, detail), response.status, detail);
   }
+}
+
+/** Archivo para un envio multipart (p. ej. Attachments2). */
+export interface SapFilePart {
+  filename: string;
+  contentType: string;
+  data: Buffer;
+}
+
+/** Arma el cuerpo multipart/form-data que espera Attachments2 (mismo formato que SAPSEND). */
+export function buildMultipartBody(files: SapFilePart[], boundary: string): Buffer {
+  const chunks: Buffer[] = [];
+  const quote = (s: string) => s.replace(/["\r\n]/g, '_');
+  for (const f of files) {
+    chunks.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${quote(f.filename)}"\r\n` +
+          `Content-Type: ${f.contentType}\r\n\r\n`
+      ),
+      f.data,
+      Buffer.from('\r\n')
+    );
+  }
+  chunks.push(Buffer.from(`--${boundary}--\r\n`));
+  return Buffer.concat(chunks);
+}
+
+/**
+ * Sube archivos al Service Layer en multipart/form-data. POST crea un registro
+ * (Attachments2 -> devuelve AbsoluteEntry); PATCH Attachments2(n) agrega lineas
+ * al registro existente.
+ */
+export async function sapUploadFiles<T = unknown>(
+  session: SapSession,
+  path: string,
+  files: SapFilePart[],
+  method: 'POST' | 'PATCH' = 'POST'
+): Promise<T | null> {
+  const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
+  const boundary = `----synerlink${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+  const body = buildMultipartBody(files, boundary);
+
+  const response = await sapFetch(url, {
+    method,
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      'Content-Length': String(body.length),
+      Cookie: `B1SESSION=${session.sessionId}`,
+    },
+    body,
+  });
+
+  if (response.status === 401) {
+    throw new SapError('Sesion SAP expirada o invalida', 401);
+  }
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new SapError(sapErrorMessage(`SAP ${method} ${path} fallo (${response.status})`, detail), response.status, detail);
+  }
+  // POST devuelve el registro creado; PATCH responde 204 sin cuerpo.
+  const text = await response.text();
+  return text ? (JSON.parse(text) as T) : null;
 }
 
 /** Elimina un recurso del Service Layer (DELETE entity(key)). */

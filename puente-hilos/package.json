@@ -1,0 +1,14 @@
+{
+  "name": "synerlink-puente-hilos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Puente de hilos (proyectos) del chat de SynerLink hacia Claude Code: una sesión por hilo, config aislado, herramientas mínimas. F1 piloto.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/puente.mjs",
+    "test": "node --test test/*.test.mjs"
+  }
+}

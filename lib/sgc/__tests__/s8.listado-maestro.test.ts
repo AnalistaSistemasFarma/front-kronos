@@ -11,6 +11,9 @@ import {
   normalizeHeader,
   parseListDate,
   parseMasterListTable,
+  resolveMasterListConfidentiality,
+  resolveMasterListParentCode,
+  resolveMasterListTypeCode,
   validateMasterList,
   type SgcMasterListContext,
   type SgcMasterListRawRow,
@@ -253,5 +256,95 @@ describe('SGC · S8 · plantilla descargable y lectura del Excel', () => {
     const empty = new ExcelJS.Workbook();
     const emptyBuf = (await empty.xlsx.writeBuffer()) as ArrayBuffer;
     await expect(readMasterListWorkbook(emptyBuf)).rejects.toThrow();
+  });
+});
+
+/**
+ * 2026-10-19 — carga real de Calidad OLP: el listado llegó con el tipo por su
+ * nombre en plural («Procedimientos»), la confidencialidad con el rótulo que
+ * muestra el sistema («Pública interna», «Por departamento») y el padre sin el
+ * sufijo de versión («OLP-GGC-01-PR» para «OLP-GGC-01-PR-1»): las 65 filas
+ * quedaban con error. Se aceptan además de lo de siempre, con advertencia.
+ */
+describe('SGC · carga inicial real · listado de Calidad OLP (2026-10-19)', () => {
+  const olp = (over: Partial<SgcMasterListContext> = {}): SgcMasterListContext =>
+    ctx({
+      guide: { prefix: 'OLP', pattern: '{PREFIJO}-{PROCESO}-{CONSECUTIVO}-{TIPO}', sequenceDigits: 2, childPattern: '{PREFIJO}-{PROCESO}-{NUMERO_PADRE}-{TIPO}-{CONSECUTIVO}', childTypeCodes: ['FR', 'IN'], childSequenceDigits: 3 },
+      processes: new Map([['GGC', { id: 20, processTypeCode: 'S', idDepartment: 7 }]]),
+      documentTypes: new Map([
+        ['PR', { id: 200, name: 'Procedimiento', pluralName: 'Procedimientos' }],
+        ['FR', { id: 201, name: 'Formato', pluralName: 'Formatos' }],
+        ['IN', { id: 202, name: 'Instructivo', pluralName: 'Instructivos' }],
+        ['MN', { id: 203, name: 'Manual', pluralName: 'Manuales' }],
+      ]),
+      existing: new Map(),
+      today: '2026-10-19',
+      ...over,
+    });
+  const fila = (n: number, values: SgcMasterListRawRow['values']) => row(n, { processCode: 'GGC', versionNumber: '1', effectiveDate: '2026-08-12', ...values });
+
+  it('[SGC-REQ-114] el tipo documental se reconoce por su código o por su nombre (singular o plural), solo si es único', () => {
+    const types = olp().documentTypes;
+    expect(resolveMasterListTypeCode('PR', types)).toBe('PR');
+    expect(resolveMasterListTypeCode(' pr ', types)).toBe('PR');
+    expect(resolveMasterListTypeCode('Procedimientos', types)).toBe('PR');
+    expect(resolveMasterListTypeCode('PROCEDIMIENTO', types)).toBe('PR');
+    expect(resolveMasterListTypeCode('Manuales', types)).toBe('MN');
+    expect(resolveMasterListTypeCode('Política', types)).toBeNull();
+    expect(resolveMasterListTypeCode('', types)).toBeNull();
+    // Dos tipos con el mismo nombre: no se adivina.
+    const dup = new Map([...types, ['PX', { id: 9, name: 'Procedimiento', pluralName: 'Procedimientos' }]]);
+    expect(resolveMasterListTypeCode('Procedimientos', dup)).toBeNull();
+    // Sin nombres (contexto anterior): solo por código, como antes.
+    expect(resolveMasterListTypeCode('Procedimientos', new Map([['PR', { id: 1 }]]))).toBeNull();
+  });
+
+  it('[SGC-REQ-114] la confidencialidad acepta el valor técnico y el rótulo que muestra el sistema', () => {
+    expect(resolveMasterListConfidentiality('publica')).toBe('publica');
+    expect(resolveMasterListConfidentiality('Publica  interna ')).toBe('publica');
+    expect(resolveMasterListConfidentiality('Pública interna')).toBe('publica');
+    expect(resolveMasterListConfidentiality('Por departamento  ')).toBe('departamento');
+    expect(resolveMasterListConfidentiality('DEPARTAMENTO')).toBe('departamento');
+    expect(resolveMasterListConfidentiality('Confidencial')).toBe('confidencial');
+    expect(resolveMasterListConfidentiality('secreta')).toBeNull();
+  });
+
+  it('[SGC-REQ-114] el padre se reconoce con o sin el sufijo de versión, solo con un candidato', () => {
+    const known = ['OLP-GGC-01-PR-1', 'OLP-GGC-02-PR-1', 'OLP-GGC-02-PR-2'];
+    expect(resolveMasterListParentCode('OLP-GGC-01-PR-1', known)).toBe('OLP-GGC-01-PR-1');
+    expect(resolveMasterListParentCode('OLP-GGC-01-PR', known)).toBe('OLP-GGC-01-PR-1');
+    expect(resolveMasterListParentCode('OLP-GGC-02-PR', known)).toBeNull();
+    expect(resolveMasterListParentCode('OLP-GGC-09-PR', known)).toBeNull();
+    expect(resolveMasterListParentCode('OLP-GGC-01-PR-7', ['OLP-GGC-01-PR'])).toBe('OLP-GGC-01-PR');
+  });
+
+  it('[SGC-REQ-114] las filas del listado real se cargan con advertencias en vez de error; lo que sigue mal sigue siendo error', () => {
+    const rows = [
+      fila(2, { code: 'OLP-GGC-01-PR-1', title: 'PROCEDIMIENTO CONTROL DE DOCUMENTOS Y REGISTROS', documentTypeCode: 'Procedimientos', confidentiality: 'Publica  interna ' }),
+      fila(3, { code: 'OLP-GGC-01-IN-001-1', title: 'INSTRUCTIVO CODIFICACIÓN DOCUMENTAL', documentTypeCode: 'Instructivos', confidentiality: 'Publica  interna ', parentCode: 'OLP-GGC-01-PR' }),
+      fila(4, { code: 'OLP-GGC-01-FR-001-1', title: 'LISTADO MAESTRO DE DOCUMENTOS INTERNOS', documentTypeCode: 'Formatos', confidentiality: 'Por departamento  ', parentCode: 'OLP-GGC-01-PR-1' }),
+      // Siguen siendo error: código repetido, tipo desconocido, confidencialidad desconocida y padre que no existe.
+      fila(5, { code: 'OLP-GGC-01-PR-1', title: 'OTRO PROCEDIMIENTO CON EL MISMO CÓDIGO', documentTypeCode: 'PR' }),
+      fila(6, { code: 'OLP-GGC-05-PL-1', title: 'PLAN DESCONOCIDO', documentTypeCode: 'Planes' }),
+      fila(7, { code: 'OLP-GGC-06-PR-1', title: 'CONFIDENCIALIDAD RARA', documentTypeCode: 'PR', confidentiality: 'secreta' }),
+      fila(8, { code: 'OLP-GGC-07-FR-001-1', title: 'FORMATO SIN PADRE EN EL LISTADO', documentTypeCode: 'FR', parentCode: 'OLP-GGC-07-PR' }),
+    ];
+    const v = validateMasterList(rows, olp());
+    const by = (n: number) => v.items.find((i) => i.rowNumber === n)!;
+    expect(by(2)).toMatchObject({ status: 'ok', documentTypeCode: 'PR', idDocumentType: 200, confidentiality: 'publica', parentCode: null });
+    expect(by(2).warnings).toContain('El tipo documental «Procedimientos» se tomó como PR.');
+    expect(by(3)).toMatchObject({ status: 'ok', documentTypeCode: 'IN', idDocumentType: 202, parentCode: 'OLP-GGC-01-PR-1' });
+    expect(by(3).warnings).toContain('El documento padre OLP-GGC-01-PR se tomó como OLP-GGC-01-PR-1.');
+    expect(by(4)).toMatchObject({ status: 'ok', documentTypeCode: 'FR', confidentiality: 'departamento', parentCode: 'OLP-GGC-01-PR-1' });
+    expect(by(5).errors).toContain('El código OLP-GGC-01-PR-1 está repetido (fila 2).');
+    expect(by(6).errors).toContain('El tipo documental «PLANES» no existe o está inactivo en el SGC de la empresa.');
+    expect(by(7).errors.join(' ')).toMatch(/confidencialidad «secreta» no es válida/);
+    expect(by(8).errors).toContain('El documento padre OLP-GGC-07-PR no está en el listado ni en el SGC de la empresa.');
+    expect(v.summary).toMatchObject({ total: 7, ok: 3, errors: 4 });
+  });
+
+  it('[SGC-REQ-114] lo que ya funcionaba no cambia: códigos exactos, sin advertencias nuevas', () => {
+    const v = validateMasterList([ok(2, 'OLP-GCC-02'), ok(3, 'OLP-GCC-02-FO01', { documentTypeCode: 'FO', parentCode: 'OLP-GCC-02', confidentiality: 'departamento' })], ctx());
+    expect(v.summary).toEqual({ total: 2, ok: 2, errors: 0, warnings: 0 });
   });
 });

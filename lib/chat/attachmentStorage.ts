@@ -8,6 +8,7 @@
  * cliente arrastraría el secreto de Graph al bundle.
  */
 import {
+  CHAT_ATTACHMENTS_ROOT,
   buildChatAttachmentFolderSegments,
   buildStoredAttachmentName,
   type ChatAttachmentCandidate,
@@ -65,6 +66,44 @@ export async function uploadChatAttachments(
       file.contentType ?? undefined
     );
 
+    uploaded.push({
+      file_name: file.fileName,
+      content_type: file.contentType,
+      size_bytes: file.size,
+      onedrive_item_id: item.id,
+      web_url: typeof item.webUrl === 'string' ? item.webUrl : null,
+    });
+  }
+
+  return uploaded;
+}
+
+/**
+ * Archivos de un PROYECTO del chat (base de conocimiento del hilo, F1
+ * 2026-10-17). Misma subida que los adjuntos, en su propia carpeta:
+ * CHAT-AGENTES/proyectos/<id_project>. Mismo orden deliberado: primero
+ * OneDrive y, solo si todo salió bien, la base.
+ */
+export async function uploadProjectFiles(
+  idProject: number,
+  files: ChatAttachmentCandidate[]
+): Promise<UploadedChatAttachment[]> {
+  if (files.length === 0) return [];
+
+  const token = await getMicrosoftToken();
+  if (!token) throw new Error('No se pudo obtener el token de Microsoft Graph');
+
+  const segments = [CHAT_ATTACHMENTS_ROOT, 'proyectos', String(idProject)];
+  const uploaded: UploadedChatAttachment[] = [];
+
+  for (const file of files) {
+    const item = await ensureFolderAndUploadFile(
+      token,
+      segments,
+      buildStoredAttachmentName(file.fileName),
+      file.blob,
+      file.contentType ?? undefined
+    );
     uploaded.push({
       file_name: file.fileName,
       content_type: file.contentType,

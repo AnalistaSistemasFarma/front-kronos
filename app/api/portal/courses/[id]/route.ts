@@ -4,6 +4,7 @@ import { identificar } from '../../../../../lib/portal/acceso';
 import { formadoresDePortal } from '../../../../../lib/portal/config';
 import { calcularProgreso } from '../../../../../lib/portal/formacion';
 import { puedeMarcarManual } from '../../../../../lib/portal/permisos-formacion';
+import { conteosDelCurso, eliminarCurso } from '../../../../../lib/portal/eliminar-curso';
 
 function idDesdeParametro(valor: string): number | null {
   const n = Number(valor);
@@ -19,6 +20,8 @@ function idDesdeParametro(valor: string): number | null {
  *                                     /roster para no cargar la vista de
  *                                     estudio con datos que no necesita).
  *   PATCH /api/portal/courses/:id  — edita título/descripción/publicado.
+ *   DELETE /api/portal/courses/:id — elimina el curso (borrado LÓGICO, solo
+ *                                     formadores; ver lib/portal/eliminar-curso).
  *
  * AUTOINSCRIPCIÓN: pedido explícito — "cualquier usuario autenticado del
  * portal puede autoinscribirse". Por eso este GET, cuando lo pide un
@@ -37,7 +40,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   try {
     const curso = await prisma.portalCourse.findUnique({
-      where: { id },
+      where: { id, eliminado_at: null },
       include: { materials: { where: { eliminado_at: null }, orderBy: { orden: 'asc' } } },
     });
     if (!curso) return NextResponse.json({ error: 'Curso no encontrado.' }, { status: 404 });
@@ -72,6 +75,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // Excel de permisos (Cristian, 2026-10-08). El servidor lo vuelve a
     // verificar en /progress: esto solo decide cómo se pinta la casilla.
     const marcadoManual = await puedeMarcarManual(quien.correo);
+    // Lo que el formador ve en la confirmación de «Eliminar curso».
+    const conteos = esFormador ? await conteosDelCurso(id) : null;
 
     return NextResponse.json(
       {
@@ -84,6 +89,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         },
         esFormador,
         puedeMarcarManual: marcadoManual,
+        conteos,
         porcentaje,
         materiales: curso.materials.map((m) => ({
           id: m.id,
@@ -129,7 +135,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (typeof body?.descripcion === 'string') data.description = body.descripcion.trim() || null;
     if (typeof body?.activo === 'boolean') data.active = body.activo;
 
-    const existe = await prisma.portalCourse.findUnique({ where: { id }, select: { id: true } });
+    // Un curso eliminado no se edita ni se vuelve a publicar.
+    const existe = await prisma.portalCourse.findUnique({ where: { id, eliminado_at: null }, select: { id: true } });
     if (!existe) return NextResponse.json({ error: 'Curso no encontrado.' }, { status: 404 });
     if (typeof body?.descripcion === 'string' && body.descripcion.length > 4000) {
       return NextResponse.json({ error: 'La descripción es muy larga (máximo 4.000 caracteres).' }, { status: 400 });
@@ -140,5 +147,28 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   } catch (error) {
     console.error('[portal] PATCH /api/portal/courses/[id]', error);
     return NextResponse.json({ error: 'No se pudo actualizar el curso.' }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const quien = await identificar(request);
+  if (!quien) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
+  // El mismo permiso que crear y editar cursos: la lista de formadores del portal.
+  if (!formadoresDePortal().includes(quien.correo.toLowerCase())) {
+    return NextResponse.json({ error: 'Solo un formador puede eliminar cursos.' }, { status: 403 });
+  }
+
+  const id = idDesdeParametro((await params).id);
+  if (!id) return NextResponse.json({ error: 'Curso no válido.' }, { status: 400 });
+
+  try {
+    const r = await eliminarCurso(id, quien.correo.toLowerCase());
+    if (!r) return NextResponse.json({ error: 'Curso no encontrado o ya eliminado.' }, { status: 404 });
+    // Solo id y conteos: el correo de quien lo eliminó queda en la base (eliminado_por), no en los registros.
+    console.info('[portal] curso eliminado', { courseId: id, inscritos: r.inscritos, certificados: r.certificados });
+    return NextResponse.json({ ok: true, curso: { id, titulo: r.titulo }, inscritos: r.inscritos, certificados: r.certificados });
+  } catch (error) {
+    console.error('[portal] DELETE /api/portal/courses/[id]:', (error as Error).name);
+    return NextResponse.json({ error: 'No se pudo eliminar el curso.' }, { status: 500 });
   }
 }

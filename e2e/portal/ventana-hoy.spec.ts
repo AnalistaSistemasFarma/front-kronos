@@ -4,7 +4,8 @@ import { expect, test, type Page } from '@playwright/test';
  * Portal TH · ventana emergente «Hoy» (Cristian Baldión, 2026-10-15): al entrar se abre con los eventos del día (los del calendario);
  * con cumpleaños lleva una imagen; se cierra sola a los 15 s o antes si la persona la cierra. Sin sesión real ni SharePoint: las APIs
  * se simulan con `page.route`, las personas son INVENTADAS y el RELOJ es controlado (así «hoy» es siempre el mismo día y los 15
- * segundos se comprueban sin esperar). El proyecto «publico» deja la ventana de hoy marcada como vista; estas pruebas quitan esa marca.
+ * segundos se comprueban sin esperar). El proyecto «publico» deja una marca que APAGA la ventana (para que no tape las demás
+ * pruebas); estas pruebas la quitan. En producción esa marca no existe y la ventana sale en cada carga.
  * Con `FORMACION_CAPTURAS=<carpeta>` guarda capturas.
  */
 
@@ -33,11 +34,24 @@ async function preparar(page: Page, fecha: string, opciones: { empresa?: unknown
   );
 }
 
-const cumpleHoy = [{ fecha: HOY, personas: [{ nombre: 'ACOSTA RUIZ LUIS FERNANDO', empresa: 'GROUP SHARED SERVICES SAS', area: 'CONTABILIDAD' }, { nombre: 'PEREZ GOMEZ ANA MARIA', empresa: 'ABAMIA LABS SAS', area: 'COMERCIAL' }] }];
+const cumpleHoy = [{ fecha: HOY, personas: [{ nombre: 'ACOSTA RUIZ LUIS FERNANDO', empresa: 'GROUP SHARED SERVICES SAS', cargo: 'ANALISTA CONTABLE' }, { nombre: 'PEREZ GOMEZ ANA MARIA', empresa: 'ABAMIA LABS SAS', cargo: 'GERENTE COMERCIAL' }] }];
 const eventoEmpresa = [{ id: 7, fecha: HOY, titulo: 'Capacitación en seguridad', descripcion: 'Auditorio, 10:00', tipo: 'empresa' }];
 const ventana = (page: Page) => page.getByTestId('ventana-hoy');
 
 test.describe('Portal TH · ventana emergente «Hoy»', () => {
+  test('una marca VIEJA de la versión de una vez por día NO impide que salga en un navegador real (caso de Cristian, 2026-10-19)', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    // El navegador de una persona: sin `navigator.webdriver` y con la marca que dejó la versión anterior.
+    await page.addInitScript(() => Object.defineProperty(navigator, 'webdriver', { get: () => false }));
+    await preparar(page, HOY, { empresa: eventoEmpresa, marcada: true });
+    await page.goto('/portal');
+    await expect(ventana(page)).toBeVisible();
+    expect(await page.evaluate((c) => window.localStorage.getItem(c), CLAVE(HOY))).toBe('1'); // la marca sigue ahí y no estorba
+    await page.getByTestId('ventana-hoy-cerrar').click();
+    await page.reload();
+    await expect(ventana(page)).toBeVisible(); // y al actualizar, otra vez
+  });
+
   test('al entrar se abre sola con los eventos del día, la fecha larga y la barra de tiempo', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await preparar(page, HOY, { empresa: eventoEmpresa });
@@ -56,7 +70,7 @@ test.describe('Portal TH · ventana emergente «Hoy»', () => {
     }
   });
 
-  test('con cumpleaños: la imagen de cumpleaños y, debajo del título, el nombre, la empresa y el área de cada persona', async ({ page }) => {
+  test('con cumpleaños: la imagen de cumpleaños y, debajo del título, el nombre, la empresa y el cargo de cada persona', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await preparar(page, HOY, { cumples: cumpleHoy });
     await page.goto('/portal');
@@ -69,7 +83,8 @@ test.describe('Portal TH · ventana emergente «Hoy»', () => {
     const personas = ventana(page).getByTestId('ventana-hoy-personas').locator('li');
     await expect(personas).toHaveCount(2);
     await expect(personas.nth(0)).toContainText('ACOSTA RUIZ LUIS FERNANDO');
-    await expect(personas.nth(0)).toContainText('GROUP SHARED SERVICES SAS · CONTABILIDAD');
+    await expect(personas.nth(0)).toContainText('GROUP SHARED SERVICES SAS · ANALISTA CONTABLE');
+    await expect(personas.nth(0)).not.toContainText('CONTABILIDAD');
     await expect(personas.nth(1)).toContainText('PEREZ GOMEZ ANA MARIA');
     if (CAPTURAS) {
       await page.waitForTimeout(500);
@@ -95,7 +110,7 @@ test.describe('Portal TH · ventana emergente «Hoy»', () => {
     await expect(ventana(page)).toBeHidden();
   });
 
-  test('se puede cerrar antes: con ✕, con Escape y haciendo clic afuera; y ya no vuelve a salir solo', async ({ page }) => {
+  test('se puede cerrar antes: con ✕, con Escape y haciendo clic afuera; y CADA recarga de la página la vuelve a abrir', async ({ page }) => {
     await preparar(page, HOY, { empresa: eventoEmpresa });
     await page.goto('/portal');
     await expect(ventana(page)).toBeVisible();
@@ -103,20 +118,20 @@ test.describe('Portal TH · ventana emergente «Hoy»', () => {
     await page.getByTestId('ventana-hoy-cerrar').click();
     await expect(ventana(page)).toBeHidden();
 
-    // mismo día: recargar no la reabre
+    // Pedido de Cristian (2026-10-16): cada vez que se actualiza la página, la ventana vuelve a salir (nadie guarda «ya vista»).
     await page.reload();
-    await expect(page.getByRole('navigation', { name: 'Secciones del portal' })).toBeVisible();
-    await expect(ventana(page)).toHaveCount(0);
+    await expect(ventana(page)).toBeVisible();
+    expect(await page.evaluate((c) => window.localStorage.getItem(c), CLAVE(HOY))).toBeNull();
 
     // Escape
-    await page.evaluate((c) => window.localStorage.removeItem(c), CLAVE(HOY));
+    await page.keyboard.press('Escape');
+    await expect(ventana(page)).toBeHidden();
     await page.reload();
     await expect(ventana(page)).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(ventana(page)).toBeHidden();
 
     // clic afuera
-    await page.evaluate((c) => window.localStorage.removeItem(c), CLAVE(HOY));
     await page.reload();
     await expect(ventana(page)).toBeVisible();
     await page.mouse.click(4, 4);
@@ -126,17 +141,66 @@ test.describe('Portal TH · ventana emergente «Hoy»', () => {
     await expect(page.getByRole('dialog', { name: 'Contactos' })).toBeVisible();
   });
 
-  test('un día sin nada que mostrar NO se abre; ya vista hoy, tampoco', async ({ page }) => {
+  test('un día SIN NADA también sale (Cristian, 2026-10-21: «que salga siempre»): «Hoy no hay eventos ni cumpleaños» y los próximos', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    // La ventana pide cada fuente con el rango hoy → hoy + 30 días (el calendario pide aparte el mes visible).
+    const pedidos: string[] = [];
+    page.on('request', (r) => {
+      const u = new URL(r.url());
+      if (/^\/api\/portal\/(eventos|cumpleanos)$/.test(u.pathname)) pedidos.push(`${u.pathname}${u.search}`);
+    });
+    await preparar(page, HOY, {
+      empresa: [{ id: 9, fecha: '2026-10-20', titulo: 'Pausa activa', descripcion: 'Sala 2', tipo: 'empresa' }],
+      cumples: [{ fecha: '2026-10-18', personas: [{ nombre: 'ACOSTA RUIZ LUIS FERNANDO', empresa: 'GROUP SHARED SERVICES SAS', cargo: 'ANALISTA CONTABLE' }] }],
+    });
+    await page.goto('/portal');
+    await expect(ventana(page)).toBeVisible();
+    await expect(page.getByTestId('ventana-hoy-vacio')).toHaveText('Hoy no hay eventos ni cumpleaños.');
+    await expect(ventana(page).getByTestId('ventana-hoy-evento')).toHaveCount(0);
+    const proximos = ventana(page).getByTestId('ventana-hoy-proximo');
+    await expect(proximos).toHaveCount(3); // cumpleaños 18, evento 20 y festivo 2 de noviembre (el 16 ya pasa de 30 días)
+    await expect(proximos.nth(0)).toContainText('CUMPLEAÑOS');
+    await expect(proximos.nth(0)).toContainText('domingo, 18 de octubre · Fecha importante');
+    await expect(proximos.nth(0)).toContainText('ACOSTA RUIZ LUIS FERNANDO');
+    await expect(proximos.nth(1)).toContainText('Pausa activa');
+    await expect(proximos.nth(1)).toContainText('martes, 20 de octubre · Evento de la empresa · Sala 2');
+    await expect(proximos.nth(2)).toContainText('Día de Todos los Santos');
+    await expect(proximos.nth(2)).toContainText('Festivo');
+    await expect(page.getByTestId('ventana-hoy-imagen')).toHaveCount(0); // la imagen es solo para cumpleaños de HOY
+    expect(pedidos).toEqual(expect.arrayContaining([`/api/portal/eventos?desde=${HOY}&hasta=2026-11-14`, `/api/portal/cumpleanos?desde=${HOY}&hasta=2026-11-14`]));
+    if (CAPTURAS) {
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: `${CAPTURAS}/134-hoy-vacio-proximos.png` });
+    }
+    // Se cierra igual que siempre, y al recargar vuelve a salir.
+    await page.getByTestId('ventana-hoy-cerrar').click();
+    await expect(ventana(page)).toBeHidden();
+    await page.reload();
+    await expect(page.getByTestId('ventana-hoy-vacio')).toBeVisible();
+  });
+
+  test('día sin nada en celular: el aviso y los próximos caben en la pantalla', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
     await preparar(page, HOY);
+    await page.goto('/portal');
+    await expect(ventana(page)).toBeVisible();
+    await expect(page.getByTestId('ventana-hoy-vacio')).toHaveText('Hoy no hay eventos ni cumpleaños.');
+    await expect(ventana(page).getByTestId('ventana-hoy-proximo').first()).toContainText('Día de Todos los Santos'); // aunque no haya datos de la empresa
+    const caja = (await ventana(page).locator('.portal-th__hoy-caja').boundingBox())!;
+    expect(caja.x).toBeGreaterThanOrEqual(0);
+    expect(caja.x + caja.width).toBeLessThanOrEqual(390);
+    expect(caja.y + caja.height).toBeLessThanOrEqual(844);
+    if (CAPTURAS) {
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: `${CAPTURAS}/135-hoy-vacio-celular.png` });
+    }
+  });
+
+  test('la marca de las pruebas automáticas la sigue apagando (solo en navegador automatizado)', async ({ page }) => {
+    await preparar(page, NAVIDAD, { marcada: true });
     await page.goto('/portal');
     await expect(page.getByRole('navigation', { name: 'Secciones del portal' })).toBeVisible();
     await expect(ventana(page)).toHaveCount(0);
-
-    const otra = await page.context().newPage();
-    await preparar(otra, NAVIDAD, { marcada: true });
-    await otra.goto('/portal');
-    await expect(otra.getByRole('navigation', { name: 'Secciones del portal' })).toBeVisible();
-    await expect(otra.getByTestId('ventana-hoy')).toHaveCount(0);
   });
 
   test('si falla la lectura de cumpleaños, igual muestra lo demás y sin errores en pantalla', async ({ page }) => {
@@ -147,7 +211,7 @@ test.describe('Portal TH · ventana emergente «Hoy»', () => {
     await expect(page.getByTestId('ventana-hoy-imagen')).toHaveCount(0);
   });
 
-  test('cada vez que se INICIA SESIÓN con el código vuelve a salir, aunque ya la hubiera visto hoy; y al cerrar sesión se reinicia', async ({ page }) => {
+  test('al INICIAR SESIÓN con el código sale, aunque la marca de pruebas estuviera puesta (se reinicia); también al recargar y al volver a entrar', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     // «marcada»: hoy ya la vio (no sale al abrir). Con sesión cerrada no hay contenido; al validar el código, sí.
     await preparar(page, HOY, { empresa: eventoEmpresa, marcada: true });
@@ -181,10 +245,11 @@ test.describe('Portal TH · ventana emergente «Hoy»', () => {
     await page.getByTestId('ventana-hoy-cerrar').click();
     await expect(ventana(page)).toBeHidden();
 
-    // Recargar SIN volver a iniciar sesión: no se reabre.
+    // Recargar la página: también sale otra vez (pedido de Cristian, 2026-10-16: en cada actualización).
     await page.reload();
-    await expect(page.getByRole('navigation', { name: 'Secciones del portal' })).toBeVisible();
-    await expect(ventana(page)).toHaveCount(0);
+    await expect(ventana(page)).toBeVisible();
+    await page.getByTestId('ventana-hoy-cerrar').click();
+    await expect(ventana(page)).toBeHidden();
 
     // Cerrar sesión y volver a entrar: sale otra vez.
     await page.getByRole('button', { name: 'Salir' }).click();

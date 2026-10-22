@@ -34,6 +34,21 @@ export const CORREO_MAX_TOTAL_RESPUESTA_BYTES = 10 * 1024 * 1024;
 /** Texto de la respuesta (sin adjuntos). */
 export const CORREO_MAX_RESPUESTA_CHARS = 20_000;
 
+/**
+ * Redactar (2026-10-19, pedido de Nicolás Rivera): correo NUEVO desde el buzón de la sesión. Mismos topes de
+ * adjuntos y de texto que la respuesta (3 MB por archivo, 5 archivos, 10 MB en total). Destinatarios: máximo
+ * entre Para, CC y CCO juntos (Exchange admite 500; aquí se limita para que un error no llegue a media empresa).
+ */
+export const CORREO_MAX_DESTINATARIOS = 50;
+/** Asunto del correo nuevo (Outlook admite 255). */
+export const CORREO_MAX_ASUNTO_NUEVO = 255;
+/** Autocompletado de destinatarios: sugerencias por consulta y largo de la búsqueda. */
+export const CORREO_MAX_SUGERENCIAS = 8;
+export const CORREO_MAX_BUSQUEDA_DESTINATARIO = 60;
+/** Contactos recientes: se leen de los últimos correos ENVIADOS del buzón propio, en caché corta en memoria. */
+export const CORREO_RECIENTES_MENSAJES = 50;
+export const CORREO_RECIENTES_CACHE_MS = 5 * 60_000;
+
 /** Categoría de Outlook con la que se marca un correo convertido: «SynerLink #123». */
 export const CORREO_CATEGORIA_PREFIJO = 'SynerLink #';
 export function correoCategoria(idRequest: number): string {
@@ -67,6 +82,13 @@ export const CORREO_AUDIT_ACCIONES = [
   'AGENTE_CONFIRMAR',
   'AGENTE_DESCARTAR',
   'AGENTE_FALLIDO',
+  // Deslizar para eliminar (2026-10-18): mover a «Elementos eliminados» y «Deshacer» (nunca se borra de forma permanente).
+  'ELIMINAR',
+  'RESTAURAR',
+  // Redactar (2026-10-19): correo nuevo desde el buzón propio. Se registran destinatarios y asunto, nunca el cuerpo.
+  'ENVIAR_NUEVO',
+  // «Crear ticket» (2026-10-21): ticket de mesa de ayuda desde un hilo, solo para técnicos de TI.
+  'CREAR_TICKET',
 ] as const;
 export type CorreoAuditAccion = (typeof CORREO_AUDIT_ACCIONES)[number];
 
@@ -84,6 +106,14 @@ export const CORREO_LOTE_MARCAR_CARPETA = 200;
 /** «Marcar todo»: tope total por acción; por encima se pide confirmación desde CORREO_CONFIRMAR_MARCAR_CARPETA. */
 export const CORREO_MAX_MARCAR_CARPETA = 5_000;
 export const CORREO_CONFIRMAR_MARCAR_CARPETA = 500;
+
+/**
+ * Eliminar (deslizar a la izquierda, botón o selección; 2026-10-18): correos por petición. Se MUEVEN a
+ * «Elementos eliminados» (Graph `move` a `deleteditems`); nunca se borran de forma permanente.
+ */
+export const CORREO_MAX_ELIMINAR_SELECCION = 100;
+/** Vigencia del comprobante firmado de «Deshacer» (el aviso dura ~7 s; el margen cubre una red lenta). */
+export const CORREO_DESHACER_VIGENCIA_MS = 5 * 60_000;
 
 /**
  * «Consultar a un agente» (diseño aprobado por Nicolás Rivera, 2026-10-16 09:24–09:27): la persona

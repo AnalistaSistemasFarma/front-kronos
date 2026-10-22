@@ -1,0 +1,65 @@
+{
+  "formato": 1,
+  "codigo": "SST-REPORTE-ACTOS",
+  "titulo": "REPORTE DE ACTOS Y CONDICIONES INSEGURAS SST",
+  "descripcion": "El objetivo de este formulario es reportar ante seguridad y salud en el trabajo los actos y las condiciones inseguras que identifique un colaborador en su área de trabajo con el fin de prevenir accidentes de trabajo. Enviar imagen del reporte al siguiente número: 310 2480499.",
+  "preguntas": [
+    {
+      "id": "r01",
+      "texto": "Nombres y Apellidos de quién reporta",
+      "tipo": "texto",
+      "obligatoria": true,
+      "prellenar": "nombre"
+    },
+    {
+      "id": "r02",
+      "texto": "Número de identificación",
+      "tipo": "texto",
+      "obligatoria": true
+    },
+    {
+      "id": "r03",
+      "texto": "Sede en la que se genera el reporte",
+      "tipo": "seleccion",
+      "obligatoria": true,
+      "opciones": ["Planta", "Sede administrativa", "Finales de línea"]
+    },
+    {
+      "id": "r04",
+      "texto": "Área en la que se genera el reporte",
+      "tipo": "seleccion",
+      "obligatoria": true,
+      "opciones": [
+        "ADMINISTRACIÓN",
+        "CONTABILIDAD",
+        "DIRECCIÓN COMERCIAL",
+        "DIRECCIÓN TECNICA",
+        "GERENCIA",
+        "GTIA CALIDAD-CONTROL DE CALIDAD",
+        "LOGISTICA/COMPRAS",
+        "MANTENIMIENTO",
+        "PRODUCCIÓN ADMINISTRACIÓN",
+        "PRODUCCIÓN OPERACIONES",
+        "SEGURIDAD Y SALUD EN EL TRABAJO",
+        "TALENTO HUMANO",
+        "TECNOLOGIA"
+      ]
+    },
+    {
+      "id": "r05",
+      "texto": "Seleccione lo que va a reportar",
+      "tipo": "seleccion",
+      "obligatoria": true,
+      "opciones": [
+        "Acto Inseguro: Todas las acciones y decisiones humanas que pueden causar una situación insegura",
+        "Condición Insegura: Es toda condición en el entorno e instalaciones que este en mal estado y que se puede convertir en un peligro."
+      ]
+    },
+    {
+      "id": "r06",
+      "texto": "Describa su Reporte especificando el lugar exacto donde identificó la condición o el acto inseguro, si es en la sede administrativa especificar el piso, si es en la sede operativa especificar si es planta 1 o 2, y demás lugares de trabajo (etiquetado, empaque, taller de mantenimiento, laboratorio, piso técnico, etc)",
+      "tipo": "texto_largo",
+      "obligatoria": true
+    }
+  ]
+}

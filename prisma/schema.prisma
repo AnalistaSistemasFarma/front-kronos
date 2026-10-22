@@ -84,6 +84,18 @@ model User {
   chatParticipations      ChatParticipant[]
   chatMessagesAuthored    ChatMessage[]            @relation("ChatMessageUserAuthor")
   chatPins                ChatPin[]
+  // Proyectos (hilos de agente) del chat — F1 piloto 2026-10-17.
+  chatProjectsCreated     ChatProject[]            @relation("ChatProjectCreator")
+  chatProjectMemberships  ChatProjectMember[]
+  // Módulo «Proyectos» (2026-10-18): vínculos que hizo esta persona.
+  chatProjectEmailsLinked   ChatProjectEmail[]   @relation("ChatProjectEmailLinker")
+  chatProjectRequestsLinked ChatProjectRequest[] @relation("ChatProjectRequestLinker")
+  // Reacciones y stickers del chat (2026-10-20).
+  chatReactions             ChatMessageReaction[]
+  chatStickersCreated       ChatSticker[]        @relation("ChatStickerCreator")
+  /// «Mis stickers» (2026-10-21).
+  chatStickersPersonales    ChatStickerPersonal[] @relation("ChatStickerPersonalOwner")
+  chatStickersRevisados     ChatStickerPersonal[] @relation("ChatStickerPersonalReviewer")
 
   @@map("user")
   @@schema("dbo")
@@ -110,6 +122,12 @@ model Company {
   // Modulo "Asistentes IA" (chat de agentes) — back-relations requeridas por Prisma.
   agentCompanies  AgentCompany[]
   chatGroups      ChatConversation[]
+  chatProjects    ChatProject[]
+  // Configuración de «Proyectos» por empresa (2026-10-20): qué agentes trabajan en proyectos.
+  chatProjectAgentConfigs ChatProjectAgentConfig[]
+  // Stickers propios de la empresa en el chat (2026-10-20; la pantalla de carga queda para después).
+  chatStickers    ChatSticker[]
+  chatStickersPropuestos ChatStickerPersonal[]
   // SGC documental — configuración de activación por empresa (esquema `sgc`).
   sgcCompanyConfig SgcCompanyConfig?
   // Órdenes de Trabajo (bitácora de proceso de planta, 2026-10-13).
@@ -127,11 +145,55 @@ model CompanyUser {
   id_company_user Int                     @id @default(autoincrement())
   id_company      Int
   id_user         String
+  /// Perfil del usuario en el SAPSEND de ESTA empresa (cada tenant numera los suyos). Compras: U_SEND_UserId.
+  id_user_sapsend       Int?
+  /// Departamento del usuario en el SAPSEND de ESTA empresa. Compras: U_SEND_Dep (texto en SAP).
+  id_department_sapsend Int?
   company         Company                 @relation(fields: [id_company], references: [id_company], onDelete: Cascade)
   user            User                    @relation(fields: [id_user], references: [id], onDelete: Cascade)
   subprocesses    SubprocessUserCompany[]
 
   @@map("company_user")
+  @@schema("dbo")
+}
+
+/// Compras: enlace entre un borrador de solicitud (Drafts en SAP) y la solicitud
+/// del workflow (requests_general) que lo autoriza. Sin FK a requests_general (no
+/// está en este esquema). Estados: pending | publishing | approved | rejected |
+/// quoted (enviada a cotización) | cancelled | publish_error (reintentable) |
+/// reject_error. Solo una fila
+/// 'pending'/'publishing'/'publish_error' por borrador.
+model PurchaseAuthorization {
+  id                 Int      @id @default(autoincrement())
+  id_company         Int
+  doc_entry          Int
+  id_request_general Int      @unique
+  status             String   @db.NVarChar(20)
+  firm_doc_entry     Int?
+  error              String?  @db.NVarChar(500)
+  created_by         String   @db.NVarChar(50)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @default(now()) @updatedAt
+
+  @@index([id_company, doc_entry])
+  @@map("purchase_authorization")
+  @@schema("dbo")
+}
+
+/// Compras: configuración por empresa. id_process_category_auth = plantilla del
+/// workflow (process_category) con la tarea de autorización por departamento.
+model PurchaseCompanyConfig {
+  id_company               Int     @id
+  id_process_category_auth Int
+  /// Correos de Compras (separados por coma) a avisar cuando una solicitud pasa a
+  /// cotización. Equivale a SENDEMAILTOCOMPRAS del .env de cada SAPSEND.
+  compras_emails           String? @db.NVarChar(500)
+  /// Moneda de línea por defecto (SAPSEND: 'COP'; Ryan: vacía) y bodega por
+  /// defecto en la carga masiva (SAPSEND: 'MPR01' solo en Ryan). NULL = no se envía.
+  default_currency         String? @db.NVarChar(3)
+  default_warehouse        String? @db.NVarChar(8)
+
+  @@map("purchase_company_config")
   @@schema("dbo")
 }
 
@@ -665,6 +727,8 @@ model Agent {
   deliveries       ChatMessageDelivery[]
   statuses         ChatAgentStatus[]
   turnUsage        ChatAgentTurnUsage[]
+  // Medidor del consumo de Anthropic (2026-10-22): último cupo reportado por el puente.
+  quota            ChatAgentQuota?
   // Auditoría de agentes → Inventario (F1): back-relations requeridas por Prisma.
   inventories      AgentInventory[]
   auditFindings    AgentAuditFinding[]
@@ -673,6 +737,16 @@ model Agent {
   metricsDaily     AgentMetricsDaily[]
   cvEntries        AgentCvEntry[]
   cvSummaries      AgentCvSummary[]
+  // Hoja de vida completa (incremento 1, 2026-10-20): back-relations requeridas por Prisma.
+  governance       AgentGovernance?
+  cvCases          AgentCvCase[]
+  externalFindings AgentExternalFinding[]
+  // Proyectos (hilos de agente) del chat — F1 piloto 2026-10-17.
+  projects         ChatProject[]
+  // Módulo «Proyectos» (2026-10-18): proyectos donde está designado.
+  projectDesignations ChatProjectAgent[]
+  // Configuración de «Proyectos» por empresa (2026-10-20).
+  projectConfigs      ChatProjectAgentConfig[]
 
   @@unique([code])
   @@map("agent")
@@ -721,7 +795,7 @@ model ChatConversation {
   id_user         String    @db.NVarChar(1000)
   id_agent        Int
   title           String?   @db.NVarChar(300)
-  /// 'direct' | 'group' | 'people'. Texto y no enum porque el provider
+  /// 'direct' | 'group' | 'people' | 'project'. Texto y no enum porque el provider
   /// sqlserver de Prisma no soporta enums nativos. Hay un CHECK en la base
   /// que solo admite esos valores. 'people' = hilo privado entre DOS personas,
   /// sin agentes (lib/chat/people-rules.ts).
@@ -743,20 +817,29 @@ model ChatConversation {
   /// Denormalizado para ordenar la bandeja sin agregar sobre chat_message.
   last_message_at DateTime?
   archived        Boolean   @default(false)
+  /// Solo en 'project': el PROYECTO (hilo de agente) al que pertenece esta
+  /// conversación. NULL en todas las demás clases. NO ACTION y no Cascade:
+  /// chat_conversation ya tiene un camino de borrado en cascada desde `user`,
+  /// y SQL Server rechaza dos caminos. Un proyecto no se borra: se archiva.
+  id_project      Int?
 
   user         User                 @relation("ChatConversationUser", fields: [id_user], references: [id], onDelete: Cascade)
   agent        Agent                @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
   company      Company?             @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   creator      User?                @relation("ChatConversationCreator", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  project      ChatProject?         @relation(fields: [id_project], references: [id_project], onDelete: NoAction, onUpdate: NoAction)
   messages     ChatMessage[]
   participants ChatParticipant[]
   /// Un indicador POR AGENTE: en un grupo hay varios trabajando a la vez.
   statuses     ChatAgentStatus[]
   turnUsage    ChatAgentTurnUsage[]
+  /// Solo en 'project': hasta dónde leyó cada miembro (icono de la cabecera).
+  projectReads ChatProjectRead[]
 
   @@index([id_user, archived, last_message_at(sort: Desc)])
   @@index([id_agent])
   @@index([kind, archived, last_message_at(sort: Desc)])
+  @@index([id_project])
   @@map("chat_conversation")
   @@schema("dbo")
 }
@@ -782,6 +865,646 @@ model ChatPin {
 
   @@unique([id_user, target_key], map: "chat_pin_user_target_key")
   @@map("chat_pin")
+  @@schema("dbo")
+}
+
+// ===================================================================
+// PROYECTOS (HILOS DE AGENTE) — F1 piloto, aprobado por Nicolás 2026-10-17
+// ===================================================================
+// Pedido de Comex (reunión del 2026-10-16): un mismo agente atendía a varias
+// personas y empresas en UNA sola sesión y mezclaba el contexto. Un PROYECTO
+// es un espacio aislado de UN agente, al estilo de los proyectos de ChatGPT
+// y de Claude: nombre, empresa, instrucciones propias, archivos propios y
+// miembros que administra el dueño. Cada conversación del proyecto
+// (chat_conversation.kind = 'project') tiene SU sesión del modelo, que
+// mantiene el PUENTE de hilos (puente-hilos/), nunca la sesión viva del bot.
+//
+// AISLAMIENTO RESPECTO AL BOT VIVO: la bandeja de siempre
+// (/api/chat/agent/inbox) solo lee hilos 'direct' y entregas de grupo, así que
+// un mensaje de proyecto NUNCA le llega a la sesión viva del agente. Solo lo
+// ve una llave con `scope: "projects"` (lib/chat/agent-keys.ts), que es la del
+// puente — y esa llave, a su vez, no ve nada fuera de los proyectos.
+//
+// PERMISO: la pertenencia se lee SOLO de chat_project_member (el dueño es la
+// fila con role = 'owner'). Además, cada vez se exige que la persona siga
+// teniendo el permiso del agente en la empresa del proyecto
+// (lib/chat/projects.ts): un permiso revocado cierra también el proyecto.
+//
+// FEATURE FLAG: CHAT_PROJECTS_AGENTS decide qué agentes tienen proyectos y con
+// qué perfiles de conectores. Sin la variable, el módulo está apagado.
+//
+// MÓDULO «PROYECTOS» (2026-10-18, pedido de Nicolás Rivera del 2026-10-17):
+// deja de ser un botón del chat y pasa a ser un módulo propio del menú
+// (subproceso /process/proyectos). Cambios sobre la F1, todos aditivos:
+//   - el proyecto tiene VARIOS agentes designados (chat_project_agent); cada
+//     conversación es de UNO (chat_conversation.id_agent) y usa su plan.
+//     chat_project.id_agent queda como «agente con el que se creó».
+//   - roles owner / editor / reader (el 'member' de la F1 pasa a 'editor').
+//   - la PUERTA es: miembro + permiso del módulo en la empresa del proyecto.
+//     Para ESCRIBIRLE a un agente, además, el permiso de ese agente en la
+//     empresa (lib/chat/projects.ts).
+//   - correos (chat_project_email) y solicitudes (chat_project_request)
+//     vinculados, con una copia mínima que ven los miembros y el agente.
+// ===================================================================
+
+/// Proyecto (hilo de agente). No se borra: se archiva.
+model ChatProject {
+  id_project   Int      @id @default(autoincrement())
+  name         String   @db.NVarChar(120)
+  id_agent     Int
+  /// Empresa del proyecto. Es la del PERMISO: dueño y miembros deben tener el
+  /// agente habilitado en esta empresa.
+  id_company   Int
+  /// Perfil de CONECTORES del puente (clave del catálogo de
+  /// lib/chat/projects-rules.ts, p. ej. 'farmalogica'). Se fija al crear el
+  /// proyecto y no cambia: cambiar el alcance de datos a mitad de un hilo
+  /// dejaría una sesión con contexto de otra empresa.
+  profile      String   @db.NVarChar(40)
+  /// Instrucciones del proyecto (Markdown crudo). El puente las escribe en el
+  /// CLAUDE.md de la carpeta del hilo.
+  instructions String?  @db.NVarChar(Max)
+  /// Una o dos líneas de qué se trata (la ven todos los miembros en la lista).
+  description  String?  @db.NVarChar(1000)
+  created_by   String   @db.NVarChar(1000)
+  archived     Boolean  @default(false)
+  /// Equipo de subagentes (F2, 2026-10-18): el dueño lo apaga sin borrar el equipo.
+  team_enabled      Boolean @default(true)
+  /// Subagentes a la vez en un turno (1 a 5). El puente lo acota con su propio tope.
+  team_max_parallel Int     @default(3) @db.TinyInt
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  agent         Agent                 @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+  company       Company               @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  creator       User                  @relation("ChatProjectCreator", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  members       ChatProjectMember[]
+  files         ChatProjectFile[]
+  conversations ChatConversation[]
+  agents        ChatProjectAgent[]
+  emails        ChatProjectEmail[]
+  requests      ChatProjectRequest[]
+  tasks         ChatProjectTask[]
+  proposals     ChatProjectProposal[]
+  grants        ChatProjectGrant[]
+  subagents     ChatProjectSubagent[]
+  teamRequests  ChatProjectTeamRequest[]
+  subagentRuns  ChatProjectSubagentRun[]
+  // Permisos de los agentes (2026-10-20): nivel de código, repos y autorizadores de pases.
+  agentPolicy   ChatProjectAgentPolicy?
+  policyRepos   ChatProjectAgentPolicyRepo[]
+
+  @@index([id_agent, archived])
+  @@index([id_company])
+  @@map("chat_project")
+  @@schema("dbo")
+}
+
+/// CONFIGURACIÓN de «Proyectos» por empresa (2026-10-20, pedido de Nicolás
+/// Rivera: «los permisos y la configuración de Proyectos se manejan desde la
+/// interfaz, no por detrás»). Una fila por (empresa, agente): si el agente
+/// puede trabajar en proyectos de ESA empresa y con qué perfiles de conectores.
+///
+/// COMPATIBILIDAD HACIA ATRÁS (lib/proyectos/config-agentes-rules.ts):
+///   - empresa SIN filas  → manda CHAT_PROJECTS_AGENTS del .env, como antes;
+///   - empresa CON filas  → manda la tabla (sin fila = no habilitado).
+/// Al guardar el PRIMER cambio de una empresa, lo que decía el .env para los
+/// agentes de esa empresa se copia a la tabla en la misma transacción, para
+/// que nada cambie sin que alguien lo decida.
+///
+/// Tabla NUEVA y aparte: si el código sale antes que el DDL, todo sigue con el
+/// .env (la lectura reconoce «la tabla no existe» y cae al .env).
+model ChatProjectAgentConfig {
+  id_config  Int      @id @default(autoincrement())
+  id_company Int
+  id_agent   Int
+  enabled    Boolean  @default(false)
+  /// Claves del catálogo de perfiles separadas por coma (lib/chat/projects-rules.ts).
+  /// NULL = los del .env para ese agente.
+  profiles   String?  @db.NVarChar(400)
+  /// Motivo del ÚLTIMO cambio (el historial completo está en chat_project_agent_config_log).
+  reason     String?  @db.NVarChar(500)
+  updated_by String?  @db.NVarChar(1000)
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now())
+
+  company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  agent   Agent   @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_company, id_agent], map: "chat_project_agent_config_company_agent")
+  @@index([id_agent], map: "chat_project_agent_config_id_agent_idx")
+  @@map("chat_project_agent_config")
+  @@schema("dbo")
+}
+
+/// REGISTRO de cambios de la configuración de «Proyectos» (2026-10-20). Una
+/// fila por cambio, con el antes, el después y el motivo. Inmutable (trigger
+/// TR_chat_project_agent_config_log_inmutable). Sin llaves foráneas a
+/// propósito: el historial sobrevive a lo que pase con agentes y usuarios.
+model ChatProjectAgentConfigLog {
+  id_log          Int      @id @default(autoincrement())
+  id_company      Int
+  id_agent        Int
+  /// 'cambio' (desde la pantalla) | 'copia_env' (copia inicial del .env).
+  action          String   @db.NVarChar(20)
+  enabled_before  Boolean?
+  enabled_after   Boolean
+  profiles_before String?  @db.NVarChar(400)
+  profiles_after  String?  @db.NVarChar(400)
+  reason          String   @db.NVarChar(500)
+  changed_by      String?  @db.NVarChar(1000)
+  changed_at      DateTime @default(now())
+
+  @@index([id_company, changed_at], map: "chat_project_agent_config_log_company_idx")
+  @@map("chat_project_agent_config_log")
+  @@schema("dbo")
+}
+
+/// LECTURA de una conversación de proyecto por persona (icono «Proyectos» de la
+/// cabecera, pedido de Nicolás Rivera del 2026-10-19). Es la MISMA marca de agua
+/// del chat (chat_participant.last_read_message_id), pero en tabla aparte: los
+/// miembros de un proyecto no son filas de chat_participant, y agregarlas haría
+/// que las conversaciones de proyecto se colaran en las consultas del chat que
+/// leen participantes. Sin fila = nunca la ha abierto (todo cuenta como nuevo).
+/// La marca solo avanza. Tabla NUEVA y aparte: si el código sale antes que el
+/// DDL, solo falla el contador (el icono no se pinta), no el módulo.
+model ChatProjectRead {
+  id_project_read      Int      @id @default(autoincrement())
+  id_conversation      Int
+  /// Sin llave foránea a propósito (como added_by): un usuario desactivado no
+  /// debe bloquear nada, y la fila no da acceso — la puerta es la del proyecto.
+  id_user              String   @db.NVarChar(1000)
+  /// Id del último mensaje que esta persona ya vio en esta conversación.
+  last_read_message_id Int
+  updated_at           DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [id_conversation], references: [id], onDelete: Cascade)
+
+  @@unique([id_conversation, id_user], map: "chat_project_read_conversation_user")
+  @@index([id_user], map: "chat_project_read_id_user_idx")
+  @@map("chat_project_read")
+  @@schema("dbo")
+}
+
+/// Miembro de un proyecto. ÚNICA fuente de verdad de quién entra.
+/// 'owner'  = dueño (uno solo): administra miembros, agentes, instrucciones y archiva.
+/// 'editor' = conversa con los agentes, vincula y sube archivos.
+/// 'reader' = solo lee. ('member' es el valor de la F1 y se lee como 'editor'.)
+model ChatProjectMember {
+  id_project_member Int      @id @default(autoincrement())
+  id_project        Int
+  id_user           String   @db.NVarChar(1000)
+  role              String   @default("editor") @db.NVarChar(20)
+  /// Quién lo agregó (auditoría). Sin llave foránea a propósito: un usuario
+  /// desactivado no debe bloquear el historial.
+  added_by          String?  @db.NVarChar(1000)
+  added_at          DateTime @default(now())
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+  user    User        @relation(fields: [id_user], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_project, id_user], map: "chat_project_member_project_user")
+  @@index([id_user])
+  @@map("chat_project_member")
+  @@schema("dbo")
+}
+
+/// Archivo del proyecto (base de conocimiento). Vive en OneDrive, como los
+/// adjuntos del chat; aquí solo queda la referencia. El puente lo baja a la
+/// carpeta del hilo con la llave del agente.
+model ChatProjectFile {
+  id_project_file  Int      @id @default(autoincrement())
+  id_project       Int
+  file_name        String   @db.NVarChar(400)
+  content_type     String?  @db.NVarChar(200)
+  size_bytes       Int?
+  onedrive_item_id String?  @db.NVarChar(300)
+  uploaded_by      String?  @db.NVarChar(1000)
+  created_at       DateTime @default(now())
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+
+  @@index([id_project])
+  @@map("chat_project_file")
+  @@schema("dbo")
+}
+
+/// Agente DESIGNADO en un proyecto (módulo, 2026-10-18). Solo estos agentes
+/// pueden tener conversaciones en el proyecto, y la bandeja del puente
+/// (llave scope 'projects') solo entrega mensajes de proyectos donde el agente
+/// de la llave está designado. Retirarlo deja sus conversaciones en solo lectura.
+model ChatProjectAgent {
+  id_project_agent Int      @id @default(autoincrement())
+  id_project       Int
+  id_agent         Int
+  added_by         String?  @db.NVarChar(1000)
+  added_at         DateTime @default(now())
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+  agent   Agent       @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_project, id_agent], map: "chat_project_agent_project_agent")
+  @@index([id_agent])
+  @@map("chat_project_agent")
+  @@schema("dbo")
+}
+
+/// Hilo de CORREO vinculado a un proyecto. Solo se vincula un hilo del buzón
+/// de quien lo vincula (`mailbox` = su correo, lo pone el servidor desde la
+/// sesión). Se guarda la referencia y una COPIA MÍNIMA: es lo que ven los demás
+/// miembros y el agente. El cuerpo no se copia (decisión de mínimo privilegio,
+/// ver lib/chat/projects-links.ts).
+model ChatProjectEmail {
+  id_project_email Int       @id @default(autoincrement())
+  id_project       Int
+  mailbox          String    @db.NVarChar(254)
+  conversation_id  String    @db.NVarChar(512)
+  subject          String    @db.NVarChar(400)
+  sender_name      String?   @db.NVarChar(200)
+  sender_email     String?   @db.NVarChar(254)
+  last_message_at  DateTime?
+  message_count    Int?
+  summary          String?   @db.NVarChar(500)
+  linked_by        String    @db.NVarChar(1000)
+  linked_at        DateTime  @default(now())
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+  linker  User        @relation("ChatProjectEmailLinker", fields: [linked_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_project, mailbox, conversation_id], map: "chat_project_email_project_thread")
+  @@index([linked_by])
+  @@map("chat_project_email")
+  @@schema("dbo")
+}
+
+/// SOLICITUD de SynerLink (requests_general) vinculada a un proyecto. Sin llave
+/// foránea a requests_general (no está en este esquema), igual que
+/// email_thread_link. Quien la vincula debe participar en el caso.
+model ChatProjectRequest {
+  id_project_request Int      @id @default(autoincrement())
+  id_project         Int
+  id_request         Int
+  id_company         Int
+  subject            String   @db.NVarChar(400)
+  process_name       String?  @db.NVarChar(200)
+  linked_by          String   @db.NVarChar(1000)
+  linked_at          DateTime @default(now())
+  /// Cronograma (2026-10-18): fecha OBJETIVO que el proyecto le pone a la
+  /// solicitud (SynerLink no tiene fecha de vencimiento por caso). La fijan el
+  /// dueño o un editor; el cambio queda en chat_project_event.
+  target_date        DateTime? @db.Date
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+  linker  User        @relation("ChatProjectRequestLinker", fields: [linked_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_project, id_request], map: "chat_project_request_project_request")
+  @@index([id_request])
+  @@map("chat_project_request")
+  @@schema("dbo")
+}
+
+/// TAREA del cronograma de un proyecto (2026-10-18, pedido de Nicolás Rivera).
+/// La crean y editan el dueño y los editores; el lector solo la ve. Fechas de
+/// CALENDARIO (sin hora). Quién la creó y quién la cambió por última vez queda
+/// aquí; el historial completo, en chat_project_event. Sin llave foránea a
+/// [user] a propósito (igual que added_by): una persona desactivada o retirada
+/// no debe bloquear el historial. Ver lib/proyectos/cronograma-rules.ts.
+model ChatProjectTask {
+  id_project_task Int       @id @default(autoincrement())
+  id_project      Int
+  title           String    @db.NVarChar(200)
+  description     String?   @db.NVarChar(2000)
+  /// Responsable: un MIEMBRO del proyecto cuando se asignó (user.id).
+  id_responsible  String?   @db.NVarChar(1000)
+  start_date      DateTime  @db.Date
+  end_date        DateTime  @db.Date
+  /// 'pendiente' | 'en_curso' | 'hecha' | 'bloqueada' (CHECK en la base).
+  status          String    @default("pendiente") @db.NVarChar(20)
+  /// Avance 0–100 (opcional).
+  progress        Int?
+  /// Hito: un día (start_date = end_date), se pinta como rombo.
+  is_milestone    Boolean   @default(false)
+  /// 'persona' | 'agente' (la propuso un agente y una persona la confirmó).
+  origin          String    @default("persona") @db.NVarChar(20)
+  created_by      String    @db.NVarChar(1000)
+  created_at      DateTime  @default(now())
+  updated_by      String?   @db.NVarChar(1000)
+  updated_at      DateTime?
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+
+  @@index([id_project, start_date])
+  @@map("chat_project_task")
+  @@schema("dbo")
+}
+
+/// AUDITORÍA del cronograma y de lo que los agentes proponen (2026-10-18).
+/// Solo se inserta (un trigger impide UPDATE y DELETE). Sin llave foránea: el
+/// historial sobrevive a la tarea, la propuesta o la persona.
+model ChatProjectEvent {
+  id_event   Int      @id @default(autoincrement())
+  id_project Int
+  /// 'tarea' | 'solicitud' | 'propuesta' | 'concesion'
+  entity     String   @db.NVarChar(20)
+  id_entity  Int?
+  /// p. ej. 'crear', 'editar', 'borrar', 'fecha_objetivo', 'proponer', 'confirmar', 'rechazar'
+  action     String   @db.NVarChar(30)
+  detail     String   @db.NVarChar(1000)
+  /// JSON { campo: [antes, después] } cuando aplica.
+  changes    String?  @db.NVarChar(Max)
+  id_user    String?  @db.NVarChar(1000)
+  id_agent   Int?
+  /// 'web' | 'puente' | 'mcp'
+  via        String   @db.NVarChar(20)
+  created_at DateTime @default(now())
+
+  @@index([id_project, created_at])
+  @@index([entity, id_entity])
+  @@map("chat_project_event")
+  @@schema("dbo")
+}
+
+/// PROPUESTA de un agente sobre un proyecto (2026-10-18). NUNCA se ejecuta
+/// sola: queda 'pendiente' hasta que una persona la confirma con un clic en
+/// SynerLink, y entonces se ejecuta con los permisos de ESA persona (su rol y
+/// su visibilidad de solicitudes, revalidados en ese momento).
+///   source 'puente' — la escribió el modelo en una conversación del proyecto;
+///                     la confirma cualquier dueño o editor.
+///   source 'mcp'    — la hizo un agente por kronos-mcp con la concesión
+///                     (chat_project_grant) de UNA persona; solo ella confirma.
+model ChatProjectProposal {
+  id_proposal     Int       @id @default(autoincrement())
+  id_project      Int
+  /// 'tarea_crear' | 'tarea_editar' | 'solicitud_vincular' | 'solicitud_desvincular' | 'conversacion_crear' | 'miembro_invitar'
+  kind            String    @db.NVarChar(30)
+  /// JSON validado con lib/proyectos/propuestas-rules.ts.
+  payload         String    @db.NVarChar(Max)
+  summary         String    @db.NVarChar(500)
+  /// 'pendiente' | 'ejecutando' | 'confirmada' | 'rechazada' | 'vencida' | 'fallida'
+  status          String    @default("pendiente") @db.NVarChar(20)
+  source          String    @db.NVarChar(20)
+  id_agent        Int
+  /// puente: la conversación del proyecto; mcp: el chat directo de la concesión.
+  id_conversation Int?
+  id_grant        Int?
+  /// mcp: la persona a cuyo nombre actuó el agente (la única que confirma).
+  requested_for   String?   @db.NVarChar(1000)
+  created_at      DateTime  @default(now())
+  expires_at      DateTime
+  decided_by      String?   @db.NVarChar(1000)
+  decided_at      DateTime?
+  result          String?   @db.NVarChar(500)
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+
+  @@index([id_project, status])
+  @@map("chat_project_proposal")
+  @@schema("dbo")
+}
+
+/// CONCESIÓN de 24 h para gestionar Proyectos desde un agente por kronos-mcp
+/// (2026-10-18; mismo patrón que email_agent_share del Correo). La crea la
+/// PERSONA desde su sesión; el agente solo recibe el `token` opaco en el
+/// mensaje de contexto de su chat directo. Con ella el MCP lee lo que ESA
+/// persona ve y deja PROPUESTAS que solo ella confirma. id_project NULL =
+/// todos los proyectos de la persona.
+model ChatProjectGrant {
+  id_grant             Int       @id @default(autoincrement())
+  token                String    @unique(map: "UQ_chat_project_grant_token") @db.NVarChar(80)
+  id_user              String    @db.NVarChar(1000)
+  id_agent             Int
+  id_project           Int?
+  id_chat_conversation Int
+  created_at           DateTime  @default(now())
+  expires_at           DateTime
+  revoked_at           DateTime?
+  revoked_by           String?   @db.NVarChar(1000)
+
+  project ChatProject? @relation(fields: [id_project], references: [id_project], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_user, id_agent])
+  @@map("chat_project_grant")
+  @@schema("dbo")
+}
+
+// ===================================================================
+// EQUIPO DE SUBAGENTES de un proyecto (F2, orquestador) — pedido de Nicolás
+// Rivera del 2026-10-18: «para el tema de proyectos quiero que puedas, de
+// primeras, sugerir subagentes especializados para hacer las actividades que
+// ellos requieran».
+//
+//   - El agente del proyecto PROPONE de 3 a 6 subagentes (pedido «Sugerir
+//     equipo»: chat_project_team_request, que atiende el puente de hilos).
+//   - El dueño (y el editor, solo si PROYECTOS_EQUIPO_EDITOR_APRUEBA=1)
+//     aprueba, edita o descarta cada uno. Solo lo APROBADO llega al puente.
+//   - Herramientas de un catálogo CERRADO (lib/proyectos/equipo-rules.ts);
+//     el puente las cruza con el perfil del proyecto. Nunca Bash ni Agent:
+//     un subagente no lanza otros.
+//   - Lo que hace cada subagente en un turno queda en chat_project_subagent_run
+//     (consumo por subagente) y los cambios del equipo, en una auditoría
+//     INMUTABLE (chat_project_team_event, con trigger).
+// ===================================================================
+
+/// Un subagente del equipo del proyecto.
+model ChatProjectSubagent {
+  id_subagent  Int       @id @default(autoincrement())
+  id_project   Int
+  /// Identificador para Claude Code (`subagent_type`): [a-z0-9-], 3 a 40. Único por proyecto entre los no descartados.
+  slug         String    @db.NVarChar(40)
+  name         String    @db.NVarChar(60)
+  purpose      String    @db.NVarChar(300)
+  instructions String?   @db.NVarChar(4000)
+  /// Catálogo cerrado, separado por comas: archivos,trabajo,web,conectores.
+  tools        String    @db.NVarChar(100)
+  /// null = el del agente principal; 'haiku' | 'sonnet' | 'opus'.
+  model        String?   @db.NVarChar(20)
+  /// 'propuesto' | 'aprobado' | 'descartado'
+  status       String    @default("propuesto") @db.NVarChar(20)
+  /// 'agente' (salió de «Sugerir equipo») | 'persona'
+  origin       String    @db.NVarChar(20)
+  id_request   Int?
+  /// Agente que lo sugirió.
+  id_agent     Int?
+  created_at   DateTime  @default(now())
+  updated_by   String?   @db.NVarChar(1000)
+  updated_at   DateTime?
+  reviewed_by  String?   @db.NVarChar(1000)
+  reviewed_at  DateTime?
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+
+  @@index([id_project, status])
+  @@map("chat_project_subagent")
+  @@schema("dbo")
+}
+
+/// Pedido de «Sugerir equipo». Lo reclama y lo responde el puente del agente.
+model ChatProjectTeamRequest {
+  id_request   Int       @id @default(autoincrement())
+  id_project   Int
+  id_agent     Int
+  requested_by String    @db.NVarChar(1000)
+  requested_at DateTime  @default(now())
+  /// 'pendiente' | 'en_curso' | 'lista' | 'fallida' | 'vencida'
+  status       String    @default("pendiente") @db.NVarChar(20)
+  claimed_at   DateTime?
+  finished_at  DateTime?
+  error        String?   @db.NVarChar(300)
+  suggested    Int       @default(0)
+  total_tokens Int       @default(0)
+  models       String?   @db.NVarChar(300)
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+
+  @@index([id_agent, status])
+  @@index([id_project, requested_at])
+  @@map("chat_project_team_request")
+  @@schema("dbo")
+}
+
+/// Lo que hizo UN subagente en UN turno (lo reporta el puente; dato declarado, como el consumo).
+model ChatProjectSubagentRun {
+  id_run          Int       @id @default(autoincrement())
+  id_project      Int
+  id_conversation Int
+  id_agent        Int
+  id_subagent     Int?
+  slug            String    @db.NVarChar(40)
+  description     String    @db.NVarChar(200)
+  /// 'ok' | 'error' | 'cancelado'
+  status          String    @db.NVarChar(20)
+  session_id      String?   @db.NVarChar(120)
+  turn_started_at DateTime?
+  started_at      DateTime?
+  ended_at        DateTime?
+  duration_ms     Int?
+  total_tokens    Int       @default(0)
+  tool_uses       Int       @default(0)
+  model           String?   @db.NVarChar(80)
+  created_at      DateTime  @default(now())
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+
+  @@index([id_project, created_at])
+  @@index([id_conversation])
+  @@map("chat_project_subagent_run")
+  @@schema("dbo")
+}
+
+/// Auditoría INMUTABLE del equipo (un trigger impide UPDATE y DELETE).
+model ChatProjectTeamEvent {
+  id_event    Int      @id @default(autoincrement())
+  id_project  Int
+  id_subagent Int?
+  /// 'pedir' | 'sugerir' | 'aprobar' | 'editar' | 'descartar' | 'restaurar' | 'configurar' | 'bloqueo' | 'fallar'
+  action      String   @db.NVarChar(30)
+  detail      String   @db.NVarChar(1000)
+  /// JSON { campo: [antes, después] } cuando aplica.
+  changes     String?  @db.NVarChar(Max)
+  id_user     String?  @db.NVarChar(1000)
+  id_agent    Int?
+  /// 'web' | 'puente'
+  via         String   @db.NVarChar(20)
+  created_at  DateTime @default(now())
+
+  @@index([id_project, created_at])
+  @@map("chat_project_team_event")
+  @@schema("dbo")
+}
+
+/// PERMISOS DE LOS AGENTES de un proyecto (2026-10-20, pedido de Nicolás
+/// Rivera: «cuando creemos el proyecto podamos elegir qué permisos tienen»).
+/// UNA fila por proyecto; la comparten todos sus agentes. Reglas en
+/// lib/proyectos/permisos-agentes-rules.ts.
+///
+/// SIN FILA = nivel «ninguno» (o, en el puente, lo que diga su archivo manual
+/// repos-por-proyecto.json mientras exista). Tabla NUEVA: si el código sale
+/// antes que el DDL, todos los proyectos siguen en «ninguno».
+model ChatProjectAgentPolicy {
+  id_policy        Int      @id @default(autoincrement())
+  id_project       Int      @unique(map: "chat_project_agent_policy_project")
+  /// 'ninguno' | 'lectura' | 'desarrollo' | 'desarrollo_pases' (CHECK en la base).
+  code_level       String   @default("ninguno") @db.NVarChar(20)
+  /// Correos de quienes autorizan pases, separados por coma. Solo en 'desarrollo_pases'.
+  deploy_approvers String?  @db.NVarChar(2000)
+  /// Conectores adicionales (fase 2, diseñado): JSON. Hoy siempre NULL.
+  connectors       String?  @db.NVarChar(2000)
+  /// Motivo del ÚLTIMO cambio (el historial está en chat_project_agent_policy_log).
+  reason           String?  @db.NVarChar(500)
+  updated_by       String?  @db.NVarChar(1000)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @default(now())
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("chat_project_agent_policy")
+  @@schema("dbo")
+}
+
+/// CATÁLOGO de repositorios que se pueden vincular a un proyecto (2026-10-20).
+/// Lo administra SOLO la administración de SynerLink. No se borra: se desactiva
+/// (un repo desactivado deja de ofrecerse y el API del puente lo omite).
+/// Dónde está el CLON en cada Mac no vive aquí: es del puente (repos-por-proyecto.json).
+model ChatProjectRepoCatalog {
+  id_repo           Int      @id @default(autoincrement())
+  slug              String   @unique(map: "chat_project_repo_catalog_slug") @db.NVarChar(40)
+  name              String   @db.NVarChar(120)
+  /// «dueño/repositorio» en GitHub.
+  github            String   @db.NVarChar(200)
+  branch_testing    String   @db.NVarChar(100)
+  branch_production String   @db.NVarChar(100)
+  description       String?  @db.NVarChar(500)
+  active            Boolean  @default(true)
+  created_by        String?  @db.NVarChar(1000)
+  updated_by        String?  @db.NVarChar(1000)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @default(now())
+
+  projects ChatProjectAgentPolicyRepo[]
+
+  @@map("chat_project_repo_catalog")
+  @@schema("dbo")
+}
+
+/// Repositorios vinculados a la política de un proyecto (2026-10-20).
+model ChatProjectAgentPolicyRepo {
+  id_policy_repo Int      @id @default(autoincrement())
+  id_project     Int
+  id_repo        Int
+  added_by       String?  @db.NVarChar(1000)
+  added_at       DateTime @default(now())
+
+  project ChatProject            @relation(fields: [id_project], references: [id_project], onDelete: NoAction, onUpdate: NoAction)
+  repo    ChatProjectRepoCatalog @relation(fields: [id_repo], references: [id_repo], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_project, id_repo], map: "chat_project_agent_policy_repo_project_repo")
+  @@index([id_repo], map: "chat_project_agent_policy_repo_id_repo_idx")
+  @@map("chat_project_agent_policy_repo")
+  @@schema("dbo")
+}
+
+/// REGISTRO de cambios de los permisos de los agentes y del catálogo de repos
+/// (2026-10-20): quién, cuándo, antes, después y motivo. Inmutable (trigger
+/// TR_chat_project_agent_policy_log_inmutable). Sin llaves foráneas a propósito:
+/// el historial sobrevive a lo que pase con proyectos, repos y usuarios.
+model ChatProjectAgentPolicyLog {
+  id_log           Int      @id @default(autoincrement())
+  /// 'proyecto' | 'catalogo'
+  scope            String   @db.NVarChar(20)
+  id_project       Int?
+  id_repo          Int?
+  /// 'crear' | 'cambiar' | 'activar' | 'desactivar'
+  action           String   @db.NVarChar(20)
+  /// JSON con los valores ANTES (NULL al crear).
+  before_value     String?  @db.NVarChar(Max)
+  /// JSON con los valores DESPUÉS.
+  after_value      String   @db.NVarChar(Max)
+  reason           String   @db.NVarChar(500)
+  changed_by       String?  @db.NVarChar(1000)
+  changed_by_email String?  @db.NVarChar(320)
+  changed_at       DateTime @default(now())
+
+  @@index([id_project, changed_at], map: "chat_project_agent_policy_log_project_idx")
+  @@map("chat_project_agent_policy_log")
   @@schema("dbo")
 }
 
@@ -909,6 +1632,13 @@ model PortalCourse {
   /// Carpeta del curso dentro de FORMACION en SharePoint (`<slug>-<id>`).
   /// Se fija en la primera subida y no cambia si el curso se renombra.
   sp_folder_name String? @db.NVarChar(200)
+  /// Curso ELIMINADO por un formador (borrado LÓGICO; Cristian, 2026-10-22):
+  /// deja de aparecer en todas las listas, pero sus inscripciones, intentos y
+  /// certificados se conservan (los certificados siguen verificándose). Sus
+  /// archivos de SharePoint NO se tocan: la carpeta FORMACION es compartida
+  /// entre pruebas y producción. Quién y cuándo queda aquí como auditoría.
+  eliminado_at   DateTime?
+  eliminado_por  String? @db.NVarChar(255)
 
   materials    PortalCourseMaterial[]
   enrollments  PortalCourseEnrollment[]
@@ -1229,11 +1959,23 @@ model ChatMessage {
   agentAuthor  Agent?                @relation("ChatMessageAgentAuthor", fields: [id_agent_author], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
   deliveries   ChatMessageDelivery[]
   voiceEvent   ChatVoiceEvent?
+  /// Reacciones con emoji (2026-10-20). Tabla APARTE: el mensaje no cambia.
+  reactions    ChatMessageReaction[]
+  /// GIF o sticker (2026-10-20). Tabla APARTE: el mensaje no cambia.
+  media        ChatMessageMedia?
 
   @@index([id_conversation, id(sort: Desc)])
   @@index([id_conversation, created_at])
   @@index([id_agent_author])
   @@index([id_reply_to])
+  /// ÍNDICE FUERA DE PRISMA: IX_chat_message_bandeja_agentes — no clúster,
+  /// FILTRADO (WHERE delivered_at IS NULL) y CUBRIENTE, para la bandeja de los
+  /// agentes (app/api/chat/agent/inbox, fetchDirectos). Prisma no soporta
+  /// índices filtrados ni INCLUDE en SQL Server, así que vive solo en
+  /// prisma/migrations/20261020120000_ix_chat_message_bandeja.
+  /// ⚠️ Si agrega una columna a este modelo, agréguela también al INCLUDE de
+  /// ese índice: si deja de cubrir la consulta, el plan vuelve a recorrer el
+  /// clúster cada 400 ms por agente.
   @@map("chat_message")
   @@schema("dbo")
 }
@@ -1281,6 +2023,141 @@ model ChatAttachment {
 
   @@index([id_message])
   @@map("chat_attachment")
+  @@schema("dbo")
+}
+
+/// REACCIÓN con emoji a un mensaje del chat (2026-10-20). Una fila por
+/// (mensaje, persona, emoji). Tabla NUEVA y aparte: chat_message no cambia, y si
+/// el código sale antes que el DDL solo fallan las reacciones, no el chat.
+///
+/// CAMBIOS EN VIVO SIN SONDEO NUEVO: cada cambio (poner o quitar) BORRA la fila
+/// de esa llave y crea otra, así que el `id` (IDENTITY) solo crece. Quitar deja
+/// una fila con `active = false` (lápida) para que el cambio también tenga id.
+/// El sondeo del hilo abierto pregunta «¿hay un id mayor que el último que vi
+/// en esta conversación?» con un seek por (id_conversation, id), y el pulso
+/// global hace lo mismo con el MAX(id) de la clave primaria.
+///
+/// `id_conversation` va copiado del mensaje para ese seek y para filtrar por
+/// acceso sin unir con chat_message. Sin llave foránea a propósito: el mensaje
+/// ya cuelga en cascada de la conversación y SQL Server rechaza dos caminos.
+///
+/// Las reacciones NO despiertan al agente: no crean entregas ni pasan por la
+/// bandeja (decisión pendiente de Nicolás; ver lib/chat/reactions.ts).
+model ChatMessageReaction {
+  id              Int      @id @default(autoincrement())
+  id_message      Int
+  id_conversation Int
+  id_user         String   @db.NVarChar(1000)
+  /// Un emoji del catálogo cerrado (lib/chat/reactions-catalog.ts). El
+  /// servidor rechaza cualquier otro texto.
+  emoji           String   @db.NVarChar(32)
+  /// false = lápida de una reacción quitada (ver arriba).
+  active          Boolean  @default(true)
+  created_at      DateTime @default(now())
+
+  message ChatMessage @relation(fields: [id_message], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user    User        @relation(fields: [id_user], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_message, id_user, emoji], map: "chat_message_reaction_message_user_emoji")
+  @@index([id_conversation, id], map: "chat_message_reaction_conversation_id_idx")
+  @@index([id_user], map: "chat_message_reaction_id_user_idx")
+  @@map("chat_message_reaction")
+  @@schema("dbo")
+}
+
+/// GIF o STICKER de un mensaje (2026-10-20). Una fila por mensaje como máximo.
+///
+/// El mensaje se guarda como siempre en chat_message, con un `body` DESCRIPTIVO
+/// («[Sticker: Pulgar arriba]», «[GIF: gato aplaudiendo]»): eso es lo que leen
+/// los agentes, los conectores, la bandeja, el buscador y los avisos, sin que
+/// ninguno tenga que cambiar. Esta tabla solo le dice a la interfaz que lo
+/// pinte como imagen.
+///
+/// `media_url` es la URL del PROVEEDOR (GIPHY) y nunca viaja al navegador: la
+/// imagen se sirve por /api/chat/gifs/proxy con URL firmada, para no exponer la
+/// IP ni la sesión de nadie ante el proveedor.
+model ChatMessageMedia {
+  id_message  Int      @id
+  /// 'gif' | 'sticker'. CHECK en la base.
+  kind        String   @db.NVarChar(20)
+  /// 'giphy' (GIF) | 'gss' (paquete propio, archivo en /public) | 'empresa' (chat_sticker).
+  provider    String   @db.NVarChar(20)
+  /// Id del GIF en el proveedor o código del sticker del paquete propio.
+  external_id String?  @db.NVarChar(100)
+  /// Sticker cargado por la empresa (chat_sticker). NULL en los demás.
+  id_sticker  Int?
+  title       String?  @db.NVarChar(200)
+  media_url   String?  @db.NVarChar(1000)
+  width       Int?
+  height      Int?
+  created_at  DateTime @default(now())
+
+  message ChatMessage  @relation(fields: [id_message], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  sticker ChatSticker? @relation(fields: [id_sticker], references: [id_sticker], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_sticker], map: "chat_message_media_id_sticker_idx")
+  @@map("chat_message_media")
+  @@schema("dbo")
+}
+
+/// STICKER cargado por un administrador (2026-10-20). La tabla queda lista; la
+/// pantalla de administración queda para después. `id_company` NULL = sirve en
+/// todas las empresas. Solo PNG, WebP o GIF (nunca SVG subido: podría llevar
+/// script) y hasta 512 KB, con CHECK en la base. El paquete propio de GSS NO
+/// vive aquí: son archivos versionados en public/chat/stickers.
+model ChatSticker {
+  id_sticker   Int      @id @default(autoincrement())
+  id_company   Int?
+  label        String   @db.NVarChar(80)
+  keywords     String?  @db.NVarChar(300)
+  content_type String   @db.NVarChar(50)
+  image_data   Bytes    @db.VarBinary(Max)
+  size_bytes   Int
+  sort_order   Int      @default(0)
+  active       Boolean  @default(true)
+  created_by   String   @db.NVarChar(1000)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @default(now())
+
+  company  Company?           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  creator  User               @relation("ChatStickerCreator", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  messages ChatMessageMedia[]
+  /// Si es un sticker PERSONAL («Mis stickers», 2026-10-21). Sin esta fila es de empresa (o de todas).
+  personal   ChatStickerPersonal? @relation("ChatStickerPersonalSticker")
+  /// Propuestas personales que se aprobaron como ESTE sticker de empresa.
+  aprobadoDe ChatStickerPersonal[] @relation("ChatStickerPersonalAprobado")
+
+  @@index([id_company, active, sort_order], map: "chat_sticker_company_active_idx")
+  @@map("chat_sticker")
+  @@schema("dbo")
+}
+
+/// «MIS STICKERS» del chat (2026-10-21): marca un sticker de chat_sticker como de UNA persona.
+/// La imagen sigue en chat_sticker (mismo CHECK de tipo y tamaño). Ver lib/chat/stickers-personales.ts.
+model ChatStickerPersonal {
+  id_sticker         Int       @id
+  id_user            String    @db.NVarChar(1000)
+  /// Lo quitó de «Mis stickers». Los mensajes ya enviados lo siguen mostrando.
+  removed_at         DateTime?
+  /// Empresa a la que se propuso. NULL = sin propuesta.
+  proposed_company   Int?
+  /// 'propuesto' | 'aprobado' | 'rechazado' (CHECK en la base).
+  proposal_state     String?   @db.NVarChar(20)
+  proposed_at        DateTime?
+  reviewed_by        String?   @db.NVarChar(1000)
+  reviewed_at        DateTime?
+  /// Copia aprobada como sticker de la empresa.
+  id_sticker_company Int?
+
+  sticker        ChatSticker  @relation("ChatStickerPersonalSticker", fields: [id_sticker], references: [id_sticker], onDelete: NoAction, onUpdate: NoAction)
+  owner          User         @relation("ChatStickerPersonalOwner", fields: [id_user], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  company        Company?     @relation(fields: [proposed_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  reviewer       User?        @relation("ChatStickerPersonalReviewer", fields: [reviewed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  stickerEmpresa ChatSticker? @relation("ChatStickerPersonalAprobado", fields: [id_sticker_company], references: [id_sticker], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_user, removed_at], map: "chat_sticker_personal_user_idx")
+  @@index([proposal_state, proposed_company], map: "chat_sticker_personal_propuesta_idx")
+  @@map("chat_sticker_personal")
   @@schema("dbo")
 }
 
@@ -1379,6 +2256,31 @@ model ChatAgentStatus {
 
   @@id([id_conversation, id_agent])
   @@map("chat_agent_status")
+  @@schema("dbo")
+}
+
+/// CUPO DE ANTHROPIC DEL TOKEN DEL AGENTE (2026-10-22) — cupo semanal y
+/// ventana de 5 h, tal como los reporta el puente de hilos (stream del turno o
+/// consulta mínima). UNA fila por agente que se sobrescribe: es el último
+/// estado conocido, no un histórico. Alimenta el medidor del encabezado de
+/// cada proyecto (components/proyectos/MedidorConsumo.tsx).
+model ChatAgentQuota {
+  id_agent       Int       @id
+  /// Porcentaje usado (0–100; puede pasar de 100 con excedente). NULL = no vino.
+  utilization_7d Float?
+  reset_7d       DateTime?
+  utilization_5h Float?
+  reset_5h       DateTime?
+  /// overageStatus de Anthropic ('allowed', 'rejected', …). Solo informativo.
+  overage        String?   @db.NVarChar(40)
+  /// Cuándo se midió (reloj del puente) y de dónde salió: 'turno' | 'sonda'.
+  measured_at    DateTime
+  source         String    @db.NVarChar(20)
+  updated_at     DateTime  @updatedAt
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("chat_agent_quota")
   @@schema("dbo")
 }
 
@@ -1657,6 +2559,9 @@ model SgcDocumentType {
   draft_extensions   String? @db.NVarChar(100)
   /// S19 (R34): tipo de PLANTILLAS GUÍA del Generador (lo generado no lleva código documental).
   generator_guide    Boolean @default(false, map: "document_type_generator_guide_df")
+  /// 2026-10-19 (documentos padre e hijos): tipo «padre» (el procedimiento): sus documentos no tienen padre y de ellos se desprenden los hijos.
+  /// Sin ningún tipo marcado en la empresa, el código trata como padre al procedimiento (PR). Ver lib/sgc/hierarchy.ts.
+  is_parent_type     Boolean @default(false, map: "document_type_is_parent_type_df")
 
   companyConfig  SgcCompanyConfig   @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   headerTemplate SgcHeaderTemplate? @relation(fields: [id_header_template], references: [id_header_template], onDelete: NoAction, onUpdate: NoAction)
@@ -3088,6 +3993,7 @@ model AgentInventory {
   agent       Agent               @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
   scanRequest AgentScanRequest    @relation(fields: [id_scan_request], references: [id], onDelete: NoAction, onUpdate: NoAction)
   mcps        AgentInventoryMcp[]
+  runtime     AgentInventoryRuntime?
 
   @@index([id_agent, scanned_at])
   @@index([id_scan_request])
@@ -3257,6 +4163,107 @@ model AgentCvSummary {
 }
 
 // ---------------------------------------------------------------------------
+// Auditoría de agentes → HOJA DE VIDA COMPLETA (incremento 1, 2026-10-20).
+// Migración 20261020120000_auditoria_hoja_de_vida_completa: SOLO cuatro tablas
+// nuevas; no altera ninguna existente.
+// ---------------------------------------------------------------------------
+
+/// Gobierno DECLARADO del agente: director del área (aval del flujo de Gobierno
+/// IA), plantilla de mínimo privilegio aplicada, fecha y notas. Lo edita quien
+/// tenga el permiso de configurar; cada cambio queda en la línea de tiempo.
+model AgentGovernance {
+  id_agent             Int       @id
+  director_name        String?   @db.NVarChar(160)
+  director_email       String?   @db.NVarChar(255)
+  privilege_template   String?   @db.NVarChar(120)
+  privilege_applied_on DateTime? @db.Date
+  notes                String?   @db.NVarChar(1000)
+  updated_by           String?   @db.NVarChar(255)
+  updated_at           DateTime  @default(now())
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("agent_governance")
+  @@schema("dbo")
+}
+
+/// Caso de SynerLink (requests_general.id) vinculado al agente. Sin FK a
+/// requests_general a propósito: los números de caso de producción no existen
+/// en KRONOSDB_PRUEBAS. El estado y las tareas se leen en vivo al abrir la ficha.
+model AgentCvCase {
+  id             Int      @id @default(autoincrement())
+  id_agent       Int
+  id_request     Int
+  /// 'gobierno-ia' | 'incidente' | 'cambio' | 'otro'
+  relation       String   @db.NVarChar(30)
+  title_snapshot String?  @db.NVarChar(300)
+  linked_by      String?  @db.NVarChar(255)
+  linked_at      DateTime @default(now())
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_agent, id_request])
+  @@map("agent_cv_case")
+  @@schema("dbo")
+}
+
+/// Lo que el recolector ve del agente en marcha, una fila por inventario.
+/// NUNCA secretos: de la credencial solo el modo y su HUELLA (12 hex del sha256).
+model AgentInventoryRuntime {
+  id_inventory         Int       @id
+  /// 'token' | 'api-key' | 'oauth-llavero' | 'perfil-openclaw' | 'desconocido'
+  auth_mode            String?   @db.NVarChar(30)
+  auth_detail          String?   @db.NVarChar(120)
+  token_fingerprint    String?   @db.NVarChar(16)
+  process_started_at   DateTime?
+  last_rotation_at     DateTime?
+  last_rotation_status String?   @db.NVarChar(30)
+  last_rotation_detail String?   @db.NVarChar(300)
+  /// Huella de los archivos de personalidad (CLAUDE.md, AGENTS.md, SOUL.md…).
+  persona_fingerprint  String?   @db.NVarChar(16)
+  persona_files        String?   @db.NVarChar(500)
+  /// Bloques de gobierno detectados (<!-- GOBIERNO-IA-… -->), con su texto.
+  governance_json      String?   @db.NVarChar(Max)
+  /// Si el agente tiene el hook que reporta su consumo a SynerLink.
+  usage_hook           Boolean?
+
+  inventory AgentInventory @relation(fields: [id_inventory], references: [id], onDelete: Cascade)
+
+  @@index([token_fingerprint])
+  @@map("agent_inventory_runtime")
+  @@schema("dbo")
+}
+
+/// Hallazgo de una auditoría externa (Gobierno IA, Iván Gutiérrez). A
+/// diferencia de agent_audit_finding, el recolector no lo abre ni lo cierra:
+/// lo registra y lo cierra una persona con el permiso de configurar.
+model AgentExternalFinding {
+  id             Int       @id @default(autoincrement())
+  id_agent       Int
+  source         String    @db.NVarChar(120)
+  ref_code       String    @db.NVarChar(40)
+  severity       String    @db.NVarChar(20)
+  title          String    @db.NVarChar(300)
+  detail         String?   @db.NVarChar(2000)
+  recommendation String?   @db.NVarChar(1000)
+  /// 'abierto' | 'resuelto' | 'aceptado'
+  status         String    @db.NVarChar(20)
+  reported_on    DateTime  @db.Date
+  resolved_on    DateTime? @db.Date
+  id_request     Int?
+  created_by     String?   @db.NVarChar(255)
+  created_at     DateTime  @default(now())
+  updated_by     String?   @db.NVarChar(255)
+  updated_at     DateTime?
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_agent, source, ref_code])
+  @@map("agent_external_finding")
+  @@schema("dbo")
+}
+
+// ---------------------------------------------------------------------------
 // SGC documental — Sprint 11: COPIAS NO CONTROLADAS. Solicitud con
 // justificación, destino y días; decide SOLO el grupo SGC-COPIA-NC (nunca el
 // jefe del área), con motivo; autorizada, se imprime (o, si es para un tercero,
@@ -3409,6 +4416,8 @@ model OtActividad {
   id_company        Int
   nombre            String   @db.NVarChar(120)
   exige_observacion Boolean  @default(false)
+  // Actividad de TEXTO LIBRE (2026-10-17): al registrarla, el operario escribe un texto obligatorio.
+  texto_libre       Boolean  @default(false)
   orden             Int      @default(0)
   activo            Boolean  @default(true)
   // Clave de un ícono de la lista cerrada OT_ICONOS (lib/bitacora-proceso/constants.ts); opcional.
@@ -3498,6 +4507,8 @@ model OtRegistro {
   // Operario (sin usuario) que eligió su nombre en la tablet (A1). `id_user` es el usuario de la SESIÓN.
   id_operador      Int?
   operador_nombre  String?  @db.NVarChar(120)
+  // La actividad era de TEXTO LIBRE al registrar (2026-10-17): `observacion` es el texto escrito (obligatorio).
+  es_texto_libre   Boolean  @default(false)
 
   orden     OtOrdenTrabajo @relation(fields: [id_orden_trabajo], references: [id_orden_trabajo], onDelete: NoAction, onUpdate: NoAction)
   actividad OtActividad    @relation(fields: [id_actividad], references: [id_actividad], onDelete: NoAction, onUpdate: NoAction)
@@ -3986,5 +4997,72 @@ model EmailAgentAction {
   @@index([id_share], map: "IX_email_agent_action_share")
   @@index([id_chat_message], map: "IX_email_agent_action_mensaje")
   @@map("email_agent_action")
+  @@schema("dbo")
+}
+
+/// «Crear ticket» desde un hilo del Correo (2026-10-21, pedido de Nicolás Rivera: «solo para
+/// los de TI»). Relación hilo ↔ ticket de mesa de ayuda ([case].id_case), aparte del vínculo
+/// hilo ↔ solicitud (email_thread_link): un hilo puede tener su solicitud Y su ticket. Un solo
+/// ticket por hilo y persona (se reserva antes de crear). Migración:
+/// prisma/migrations/20261021200000_correo_ticket (a mano en prod).
+model EmailThreadCase {
+  id                  Int      @id @default(autoincrement())
+  id_user             String   @db.NVarChar(50)
+  mailbox             String   @db.NVarChar(320)
+  conversation_id     String   @db.NVarChar(512)
+  // Correo de origen del ticket (el primero del hilo).
+  internet_message_id String?  @db.NVarChar(512)
+  // NULL mientras el ticket se está creando (estado CREANDO).
+  id_case             Int?
+  // CREANDO | ACTIVO
+  estado              String   @default("ACTIVO") @db.NVarChar(10)
+  asunto              String?  @db.NVarChar(255)
+  created_by          String   @db.NVarChar(50)
+  created_at          DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  @@unique([id_user, conversation_id], map: "UQ_email_thread_case_hilo")
+  @@index([id_case], map: "IX_email_thread_case_case")
+  @@map("email_thread_case")
+  @@schema("dbo")
+}
+
+// ---------------------------------------------------------------------------
+// Auditoría de INICIOS DE SESIÓN (2026-10-16, pedido de Nicolás Rivera: «ver los
+// logins que van haciendo los usuarios, de qué IP y país, por auditoría de
+// seguridad»). Una fila por intento, exitoso o fallido, por correo/contraseña,
+// NIT de proveedor o Microsoft (Entra ID). La escribe lib/auth/login-audit/recorder.ts
+// sin frenar el login. NUNCA guarda contraseñas, PIN ni tokens.
+// Migración: prisma/migrations/20261016200000_user_login_audit (a mano en prod).
+// ---------------------------------------------------------------------------
+model UserLoginAudit {
+  id             Int      @id @default(autoincrement())
+  attempted_at   DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  // credentials | supplier-nit | azure-ad
+  provider       String   @db.NVarChar(20)
+  /// Correo o NIT TAL COMO SE ESCRIBIÓ (minúsculas, recortado). Null si Microsoft falló antes de identificar.
+  identifier     String?  @db.NVarChar(320)
+  id_user        String?  @db.NVarChar(50)
+  user_name      String?  @db.NVarChar(255)
+  success        Boolean
+  /// Clave de lib/auth/login-audit/constants.ts (LOGIN_FAILURE_REASONS). Null si entró.
+  failure_reason String?  @db.NVarChar(40)
+  client_ip      String?  @db.NVarChar(64)
+  // PUBLICA | INTERNA | DESCONOCIDA
+  ip_scope       String   @db.NVarChar(12)
+  country_code   String?  @db.NVarChar(2)
+  country_name   String?  @db.NVarChar(100)
+  region         String?  @db.NVarChar(120)
+  city           String?  @db.NVarChar(120)
+  user_agent     String?  @db.NVarChar(400)
+  browser        String?  @db.NVarChar(60)
+  os             String?  @db.NVarChar(60)
+  device         String?  @db.NVarChar(20)
+  /// Empresas del usuario al momento del intento (foto, separadas por coma).
+  companies      String?  @db.NVarChar(400)
+
+  @@index([attempted_at(sort: Desc)], map: "IX_user_login_audit_fecha")
+  @@index([identifier, attempted_at], map: "IX_user_login_audit_identificador")
+  @@index([id_user, attempted_at], map: "IX_user_login_audit_usuario")
+  @@map("user_login_audit")
   @@schema("dbo")
 }

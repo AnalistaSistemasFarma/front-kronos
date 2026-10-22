@@ -63,3 +63,6 @@ dbconfig.js
 
 CLAUDE.md
 .gitignore
+
+# base local de geolocalización (auditoría de inicios de sesión; se descarga con scripts/geoip/descargar-dbip.mjs)
+/data/geoip/

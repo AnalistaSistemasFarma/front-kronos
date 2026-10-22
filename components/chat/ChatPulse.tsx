@@ -20,6 +20,9 @@ import {
   prepararAudioZumbido,
   zumbidoFresco,
 } from '../../lib/chat/nudge-fx';
+import { avisarMensajeEntrante, mensajeFresco } from '../../lib/chat/message-sound';
+import { avisarActividadProyectos } from '../../lib/proyectos/iconoHeader';
+import { avisarEstadoProyectos, type EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente';
 
 /**
  * PULSO GLOBAL del chat entre personas. No pinta nada: vive en la cabecera de
@@ -34,12 +37,29 @@ import {
  *                       zumbido · Abrir", sonido, vibración y título
  *                       parpadeante si la pestaña está oculta.
  *
+ *   - Mensaje en un PROYECTO (2026-10-19) -> avisa al icono «Proyectos» de la
+ *                       cabecera para que vuelva a contar, le pide al hilo
+ *                       abierto que sondee y suena el tono del chat si la
+ *                       persona no lo está viendo (misma preferencia).
+ *
+ *   - Estado de un AGENTE en un proyecto (2026-10-20) -> «Orus está trabajando…»
+ *                       en la lista de conversaciones, la de proyectos y el
+ *                       panel del icono. Llega en el MISMO long-poll (`st`, ver
+ *                       app/api/chat/pulse) y se reparte con
+ *                       EVENTO_ESTADO_PROYECTOS. No abre ninguna conexión nueva.
+ *
  * Se PAUSA con la pestaña oculta (no se sostiene una conexión para nadie) y
  * retoma al volver con el mismo cursor, así que lo que llegó mientras tanto
  * se entrega al volver — los zumbidos viejos ya no hacen ruido (NUDGE_FRESH_MS).
  * Sin el módulo de Chat el servidor responde 403 y el pulso se apaga.
  */
-type PulseDto = { cursor: number; events: ChatPulseEvent[] };
+type PulseDto = {
+  cursor: number;
+  events: ChatPulseEvent[];
+  statusCursor?: string;
+  statuses?: EstadoAgenteProyectoDto[];
+  rcursor?: number;
+};
 
 export default function ChatPulse() {
   const { status } = useSession();
@@ -52,6 +72,12 @@ export default function ChatPulse() {
 
     let vivo = true;
     let cursor = 0;
+    // Cursor de los estados de agentes en proyectos: '0' = pedir el actual.
+    // null = el servidor no los entrega (sin el módulo o versión anterior).
+    let cursorEstados: string | null = '0';
+    // Cursor de REACCIONES (2026-10-20). 0 = «deme el actual»; si el servidor
+    // no lo devuelve (tabla aún sin crear), se deja de preguntar por ellas.
+    let rcursor: number | null = 0;
     let control: AbortController | null = null;
     let reintento: number | null = null;
     let espera = 0;
@@ -84,7 +110,23 @@ export default function ChatPulse() {
       efectoZumbido();
     };
 
-    const procesar = (eventos: ChatPulseEvent[]) => {
+    const procesarProyectos = (eventos: ChatPulseEvent[]) => {
+      if (eventos.length === 0) return;
+      const hilos = [...new Set(eventos.map((e) => e.idConversation))];
+      for (const id of hilos) pedirSondeoDelHilo(id);
+      avisarActividadProyectos(hilos);
+      // El antirrebote de message-sound deja sonar una sola vez por ráfaga.
+      for (const e of eventos) if (mensajeFresco(e.createdAt)) avisarMensajeEntrante(e.idConversation);
+    };
+
+    const procesar = (todos: ChatPulseEvent[]) => {
+      // Reacción de otra persona: solo que el hilo abierto (si es ese)
+      // pregunte ya. Sin sonido, sin aviso y sin reordenar la bandeja.
+      for (const id of new Set(todos.filter((e) => e.type === 'reaction').map((e) => e.idConversation))) {
+        pedirSondeoDelHilo(id);
+      }
+      procesarProyectos(todos.filter((e) => e.type === 'project'));
+      const eventos = todos.filter((e) => e.type !== 'project' && e.type !== 'reaction');
       if (eventos.length === 0) return;
       const hilos = new Set<number>();
       for (const e of eventos) {
@@ -115,7 +157,9 @@ export default function ChatPulse() {
         while (vivo && document.visibilityState === 'visible') {
           control = new AbortController();
           try {
-            const res = await chatFetch(`/api/chat/pulse?since=${cursor}`, {
+            const st = cursorEstados !== null ? `&st=${encodeURIComponent(cursorEstados)}` : '';
+            const rq = rcursor !== null ? `&rsince=${rcursor}` : '';
+            const res = await chatFetch(`/api/chat/pulse?since=${cursor}${st}${rq}`, {
               signal: control.signal,
             });
             if (!vivo) return;
@@ -138,6 +182,15 @@ export default function ChatPulse() {
             // La primera vuelta solo trae el cursor: no se repite el historial.
             if (cursor > 0) procesar(data.events ?? []);
             cursor = Math.max(cursor, data.cursor ?? 0);
+            // Estados de agentes en proyectos: se reparten siempre (también los
+            // de reposo, para que la pantalla deje de decir «trabajando»).
+            if (typeof data.statusCursor === 'string') {
+              if (Array.isArray(data.statuses) && data.statuses.length > 0) avisarEstadoProyectos(data.statuses);
+              cursorEstados = data.statusCursor;
+            } else if (cursorEstados === '0') {
+              cursorEstados = null;
+            }
+            rcursor = typeof data.rcursor === 'number' ? Math.max(rcursor ?? 0, data.rcursor) : null;
             // Base sin ningún mensaje todavía: la vuelta con since=0 responde
             // al instante, así que se espera el tiempo de una vuelta normal
             // para no girar en vacío.

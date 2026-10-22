@@ -53,13 +53,31 @@ function usageTone(
   return cpu == null && mem == null ? null : 'ok';
 }
 
+/**
+ * Errores del entorno con los mismos umbrales del resumen (1 % atención, 5 % crítico) y el
+ * mismo mínimo de peticiones: antes 5 % era solo "atención" aquí y "crítico" arriba, y con
+ * 1 error en 2 peticiones la tarjeta se pintaba.
+ */
+function errorTone(env: OverviewEnvironment): StatusTone | null {
+  const requests = (env.reqPerMin ?? 0) * OVERVIEW_WINDOW_MIN;
+  const pct = env.errorPct ?? 0;
+  if (requests < THRESHOLDS.minRequestsForRates) return null;
+  if (pct >= THRESHOLDS.errorPct.critical) return 'critical';
+  if (pct >= THRESHOLDS.errorPct.warning) return 'warning';
+  return null;
+}
+
+/** La vista general mide el tráfico de cada entorno en los últimos 15 minutos (overview.ts). */
+const OVERVIEW_WINDOW_MIN = 15;
+
 function envTone(env: OverviewEnvironment): StatusTone {
   if (env.state === 'sin-datos') return env.label === 'Producción' ? 'critical' : 'warning';
   const log = env.log?.verdict?.severity;
-  if ((env.alerts?.critical ?? 0) > 0 || log === 'critical') return 'critical';
+  const errors = errorTone(env);
+  if ((env.alerts?.critical ?? 0) > 0 || log === 'critical' || errors === 'critical') return 'critical';
   const usage = usageTone(env.host?.cpuPct ?? null, env.host?.memPct ?? null);
   if (usage === 'critical') return 'critical';
-  if (usage === 'warning' || (env.errorPct ?? 0) >= 5 || log === 'warning') return 'warning';
+  if (usage === 'warning' || errors === 'warning' || log === 'warning') return 'warning';
   return 'ok';
 }
 
@@ -74,7 +92,7 @@ function envReason(env: OverviewEnvironment): string | null {
     if ((env.host?.memPct ?? 0) >= THRESHOLDS.hostMem.warning) parts.push(`RAM de ${env.host?.name} al ${formatInt(env.host?.memPct)} %`);
     if ((env.host?.cpuPct ?? 0) >= THRESHOLDS.hostCpu.warning) parts.push(`CPU de ${env.host?.name} al ${formatInt(env.host?.cpuPct)} %`);
   }
-  if ((env.errorPct ?? 0) >= 5) parts.push(`${formatValue(env.errorPct ?? 0, 1)} % de errores`);
+  if (errorTone(env)) parts.push(`${formatValue(env.errorPct ?? 0, 1)} % de errores`);
   if ((env.alerts?.critical ?? 0) > 0) parts.push(`${formatInt(env.alerts?.critical)} alertas críticas en 24 h`);
   if (!parts.length && v) parts.push(v.short);
   return parts.length ? parts.join(' · ') : null;
@@ -110,17 +128,22 @@ export function OverviewMap({ data }: { data: SystemOverview }) {
     data.sqlServer.memTotalMb && data.sqlServer.memAvailableMb != null
       ? ((data.sqlServer.memTotalMb - data.sqlServer.memAvailableMb) / data.sqlServer.memTotalMb) * 100
       : null;
-  const sqlCpu = data.sqlServer.sqlCpuPct != null ? data.sqlServer.sqlCpuPct + (data.sqlServer.otherCpuPct ?? 0) : null;
+  // Tono de SQL Server con la CPU del proceso SQL, igual que el resumen (antes sumaba la de toda
+  // la máquina). La RAM no se juzga por % usado: SQL Server se queda con la memoria a propósito
+  // y una máquina SQL sana suele estar sobre 90 %; solo preocupa si casi no queda disponible.
+  const sqlCpu = data.sqlServer.sqlCpuPct;
+  const memAvailablePct = memUsedPct == null ? null : 100 - memUsedPct;
+  const memTone: StatusTone | null = memAvailablePct == null ? null : memAvailablePct < 2 ? 'critical' : memAvailablePct < 5 ? 'warning' : null;
   const minDiskFreePct = data.sqlServer.disks.length
     ? Math.min(...data.sqlServer.disks.map((d) => (d.totalMb ? (d.freeMb / d.totalMb) * 100 : 100)))
     : null;
   const diskTone: StatusTone | null = minDiskFreePct == null ? null : minDiskFreePct < 5 ? 'critical' : minDiskFreePct < 10 ? 'warning' : null;
-  const usage = usageTone(sqlCpu, memUsedPct, THRESHOLDS.sqlCpu);
+  const usage = usageTone(sqlCpu, null, THRESHOLDS.sqlCpu);
   const sqlTone: StatusTone = !data.sqlServer.hasServerState
     ? 'idle'
-    : usage === 'critical' || diskTone === 'critical'
+    : usage === 'critical' || diskTone === 'critical' || memTone === 'critical'
       ? 'critical'
-      : usage === 'warning' || diskTone === 'warning'
+      : usage === 'warning' || diskTone === 'warning' || memTone === 'warning'
         ? 'warning'
         : usage ?? 'info';
 
@@ -343,7 +366,8 @@ export function OverviewMap({ data }: { data: SystemOverview }) {
           })}
           {data.apps.length > apps.length && (
             <div className={styles.nodeSub} style={{ paddingLeft: 4 }}>
-              y {formatInt(data.apps.length - apps.length)} aplicaciones más con poco uso
+              y {formatInt(data.apps.length - apps.length)}{' '}
+              {data.apps.length - apps.length === 1 ? 'aplicación más' : 'aplicaciones más'}
             </div>
           )}
         </div>

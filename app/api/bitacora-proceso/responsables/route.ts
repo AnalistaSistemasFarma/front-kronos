@@ -8,7 +8,7 @@ import {
   listResponsablesEmpresa,
 } from '../../../../lib/bitacora-proceso/db';
 import { parseCambioResponsable, parseNuevoResponsable } from '../../../../lib/bitacora-proceso/rules';
-import { errorResponse, getOtRequestContext, jsonNoStore, parseCompanyParam, readJson, requireCompany } from '../_lib/context';
+import { errorResponse, getOtRequestContext, jsonNoStore, parseCompanyParam, readJson, requireCompany, requireCompanyOpen } from '../_lib/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic';
  * producción. Cada selector lista SOLO a los asignados (antes salían todos los usuarios de
  * la empresa). No se borran: se desactivan.
  *   GET ?company=1&rol=INSPECTOR — los que hoy pueden actuar con ese rol (para elegir al
- *       abrir la bitácora). Solo Gestión (quien abre).
+ *       abrir la bitácora). Quien puede abrir: Gestión o jefe de producción asignado (R3).
  *   GET ?company=1               — Catálogo → Responsables: asignaciones y candidatos (Gestión).
  *   POST  { company, id_user, rol }            — asignar (Gestión).
  *   PATCH { company, id_responsable, activo }  — activar o desactivar (Gestión).
@@ -26,13 +26,15 @@ export async function GET(request: Request) {
   try {
     const ctx = await getOtRequestContext(request);
     if (ctx instanceof Response) return ctx;
-    const access = requireCompany(ctx, parseCompanyParam(request.url), 'canManage');
-    if (access instanceof Response) return access;
     const rol = new URL(request.url).searchParams.get('rol');
     if (rol !== null) {
+      const open = await requireCompanyOpen(ctx, parseCompanyParam(request.url));
+      if (open instanceof Response) return open;
       if (!isOtResponsableRol(rol)) return jsonNoStore({ error: 'Rol no válido' }, 400);
-      return jsonNoStore({ responsables: await listResponsables(prisma, access.idCompany, rol) });
+      return jsonNoStore({ responsables: await listResponsables(prisma, open.access.idCompany, rol) });
     }
+    const access = requireCompany(ctx, parseCompanyParam(request.url), 'canManage');
+    if (access instanceof Response) return access;
     const [responsables, candidatos] = await Promise.all([listResponsablesEmpresa(prisma, access.idCompany), listCandidatosResponsable(prisma, access.idCompany)]);
     return jsonNoStore({ responsables, candidatos });
   } catch (error) {

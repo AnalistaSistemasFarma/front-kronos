@@ -18,13 +18,73 @@ export interface EstadoCorreo {
     correo: string;
     envioHabilitado: boolean;
     etiquetarHabilitado: boolean;
+    /** Eliminar (mover a Elementos eliminados con «Deshacer»): escritura y CORREO_ELIMINAR_HABILITADO. */
+    eliminarHabilitado?: boolean;
     sincronizacionAutomatica: boolean;
     /** «Consultar a un agente» encendido en el ambiente (CORREO_AGENTE_HABILITADO). */
     agenteHabilitado?: boolean;
   };
+  /** Dominios del grupo (Redactar marca en amarillo a los destinatarios externos). */
+  dominiosGrupo?: string[];
+  /** «Crear ticket» desde un hilo: solo TI (técnicos de la mesa de ayuda). El servidor lo revalida. */
+  ticketHabilitado?: boolean;
 }
 
-export type MensajeLista = MensajeResumen & { solicitud: number | null };
+/** Formulario de «Crear ticket» precargado con el hilo (GET /api/correo/ticket?preparar=1). */
+export interface PreparacionTicket {
+  conversationId: string;
+  mensajeId: string;
+  remitente: { nombre: string; correo: string };
+  solicitante: { id: string; nombre: string; empresas: number[] } | null;
+  empresas: Array<{ idCompany: number; companyName: string }>;
+  idCompany: number | null;
+  asunto: string;
+  descripcion: string;
+  adjuntos: Array<{ id: string; mensajeId: string; nombre: string; tamano: number }>;
+  categorias: Array<{ id: number; nombre: string }>;
+  departamentos: Array<{ id: number; nombre: string }>;
+  tecnicos: Array<{ id: number; nombre: string }>;
+  idTecnico: number | null;
+  ticketExistente: number | null;
+  tipos: string[];
+  prioridades: string[];
+  sitios: string[];
+}
+
+export interface ResultadoTicket {
+  idCase: number;
+  solicitante: string;
+  adjuntosSubidos: number;
+  adjuntosFallidos: string[];
+}
+
+/** Sugerencia del autocompletado de Redactar. */
+export interface SugerenciaDestinatario {
+  nombre: string;
+  correo: string;
+  origen: 'reciente' | 'directorio';
+}
+
+/** `proyectos`: proyectos del chat donde se vinculó el hilo (se avisa antes de eliminarlo). */
+export type MensajeLista = MensajeResumen & { solicitud: number | null; proyectos?: string[] };
+
+/** Hilo vinculado que se iba a eliminar (409 VINCULADO): se pide confirmación. */
+export interface VinculoEliminar {
+  mensajeId: string;
+  conversationId: string;
+  idRequest: number | null;
+  proyectos: string[];
+}
+
+export interface ResultadoEliminar {
+  /** id pedido → id nuevo en Elementos eliminados (Graph cambia el id al mover). */
+  eliminados: Array<{ id: string; nuevoId: string }>;
+  yaEnEliminados: string[];
+  fallidos: string[];
+  /** Comprobante firmado por el servidor para «Deshacer». */
+  deshacer: string | null;
+  venceEn: string | null;
+}
 
 export interface MensajeVista {
   id: string;
@@ -162,6 +222,20 @@ export const correoApi = {
   /** Un lote de «Marcar todo» (200): repetir mientras `restantes` > 0. carpeta null = Bandeja de entrada. */
   marcarCarpeta: (carpeta: string | null, leido: boolean) =>
     post<{ cambiados: number; fallidos: number; restantes: number }>('/api/correo/leido/carpeta', { carpeta, leido }),
+  /**
+   * Eliminar = MOVER a Elementos eliminados (nunca borra). Si algún hilo está vinculado y no se confirmó, el
+   * servidor responde 409 VINCULADO y aquí se devuelve `{ vinculados }` para pedir la confirmación.
+   */
+  eliminar: async (mensajesIds: string[], confirmarVinculados = false): Promise<{ resultado: ResultadoEliminar } | { vinculados: VinculoEliminar[] }> => {
+    const res = await fetch('/api/correo/eliminar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mensajesIds, confirmarVinculados }) });
+    if (res.status === 409) {
+      const b = (await res.clone().json().catch(() => ({}))) as { code?: string; vinculos?: VinculoEliminar[] };
+      if (b.code === 'VINCULADO' && Array.isArray(b.vinculos)) return { vinculados: b.vinculos };
+    }
+    return { resultado: await leer<ResultadoEliminar>(res) };
+  },
+  /** «Deshacer» del aviso: devuelve a su carpeta los correos del comprobante. */
+  deshacerEliminar: (deshacer: string) => post<{ restaurados: Array<{ id: string; nuevoId: string }>; fallidos: string[] }>('/api/correo/eliminar/deshacer', { deshacer }),
   notas: (conversationId: string) => post<{ agregadas: number; idRequest: number }>('/api/correo/hilo/notas', { conversationId }),
   vincular: (conversationId: string, idRequest: number, acuse?: OpcionesAcuse) =>
     post<{ vinculo: VinculoHilo; acuse?: ResultadoAcuse }>('/api/correo/hilo/vincular', { conversationId, idRequest, ...(acuse ? { acuse } : {}) }),
@@ -171,6 +245,11 @@ export const correoApi = {
   simular: (mensajesIds: string[], empresa: number, procesoPredeterminado: number | null) =>
     post<{ filas: FilaSimulacion[]; categorias: CategoriaCorreo[]; procesos: ProcesoCorreo[] }>('/api/correo/simular', { mensajesIds, empresa, procesoPredeterminado }),
   crear: (fila: Record<string, unknown>) => post<ResultadoCreacion>('/api/correo/crear', fila),
+  /** «Crear ticket» (solo TI): ticket ya creado desde el hilo, formulario precargado y creación. */
+  ticketDeHilo: (conversationId: string, signal?: AbortSignal) =>
+    get<{ ticket: number | null }>(`/api/correo/ticket?${new URLSearchParams({ hilo: conversationId })}`, signal),
+  prepararTicket: (conversationId: string) => get<PreparacionTicket>(`/api/correo/ticket?${new URLSearchParams({ hilo: conversationId, preparar: '1' })}`),
+  crearTicket: (entrada: Record<string, unknown>) => post<ResultadoTicket>('/api/correo/ticket', entrada),
   usuarios: (empresa: number, q: string) => get<{ usuarios: Array<{ id: string; nombre: string; correo: string }> }>(`/api/correo/usuarios?${new URLSearchParams({ empresa: String(empresa), q })}`),
   procesos: (empresa: number) => get<{ categorias: CategoriaCorreo[]; procesos: ProcesoCorreo[] }>(`/api/correo/procesos?empresa=${empresa}`),
   vinculos: (idRequest: number) => get<{ vinculos: VinculoHilo[] }>(`/api/correo/vinculos?solicitud=${idRequest}`),
@@ -186,6 +265,19 @@ export const correoApi = {
   confirmarAccion: (id: number, edicion: Record<string, unknown> = {}) =>
     post<{ estado: string; resultado: string; idRequest: number | null }>(`/api/correo/agente/acciones/${id}`, { op: 'confirmar', ...edicion }),
   descartarAccion: (id: number) => post<{ estado: string; resultado: string }>(`/api/correo/agente/acciones/${id}`, { op: 'descartar' }),
+  /** Autocompletado de Redactar: recientes de la persona y directorio de la organización. */
+  destinatarios: (q: string, signal?: AbortSignal) => get<{ destinatarios: SugerenciaDestinatario[] }>(`/api/correo/destinatarios?${new URLSearchParams({ q })}`, signal),
+  /** Correo NUEVO desde el buzón propio (el servidor usa el de la sesión; aquí no se manda remitente). */
+  redactar: async (p: { para: string[]; cc: string[]; cco: string[]; asunto: string; texto: string; archivos: File[] }) => {
+    const fd = new FormData();
+    fd.set('para', JSON.stringify(p.para));
+    fd.set('cc', JSON.stringify(p.cc));
+    fd.set('cco', JSON.stringify(p.cco));
+    fd.set('asunto', p.asunto);
+    fd.set('texto', p.texto);
+    for (const f of p.archivos) fd.append('files', f, f.name);
+    return leer<{ ok: boolean; destinatarios: number }>(await fetch('/api/correo/redactar', { method: 'POST', body: fd }));
+  },
   responder: async (p: { mensajeId: string; texto: string; todos: boolean; archivos: File[] }) => {
     const fd = new FormData();
     fd.set('mensajeId', p.mensajeId);
@@ -203,6 +295,9 @@ export const urlAdjunto = (mensajeId: string, adjuntoId: string, ver = false) =>
   `/api/correo/adjunto?${new URLSearchParams({ mensaje: mensajeId, adjunto: adjuntoId, ...(ver ? { ver: '1' } : {}) })}`;
 
 export const urlSolicitud = (id: number) => rutaSolicitud(id);
+
+/** Vista del ticket en la mesa de ayuda. */
+export const urlTicket = (id: number) => `/process/help-desk/view-ticket?id=${id}`;
 
 export const PREVISUALIZABLES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'application/pdf']);
 

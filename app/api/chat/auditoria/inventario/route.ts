@@ -20,6 +20,8 @@ import {
   vencerSolicitudesColgadas,
 } from '../../../../../lib/agent-audit/inventory-db';
 import { reconstruirHistorial } from '../../../../../lib/agent-audit/cv-db';
+import { extraerRuntimes } from '../../../../../lib/agent-audit/cv-completa';
+import { guardarRuntimes, reconstruirEventosRuntime } from '../../../../../lib/agent-audit/cv-completa-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -102,11 +104,20 @@ export async function POST(request: NextRequest) {
 
     try {
       const r = await guardarInventario(payload);
+      // Hoja de vida completa (2026-10-20): datos de ejecución de cada agente
+      // (credencial por huella, arranque, rotación, personalidad, gobierno).
+      // Si falla, el inventario ya quedó guardado: no se le devuelve error.
+      try {
+        await guardarRuntimes(r.scanRequestId, extraerRuntimes(body));
+      } catch (err) {
+        console.error('[inventario] no se pudieron guardar los datos de ejecución', err);
+      }
       // Hoja de vida (F2): los cambios de este escaneo entran de una vez a la
       // línea de tiempo. Si falla, el inventario ya quedó guardado y la
       // corrida nocturna lo completa: no se le devuelve error al recolector.
       try {
         await reconstruirHistorial({ desde: new Date(Date.now() - 2 * 86_400_000) });
+        await reconstruirEventosRuntime({ desde: new Date(Date.now() - 2 * 86_400_000) });
       } catch (err) {
         console.error('[inventario] no se pudo actualizar la hoja de vida', err);
       }

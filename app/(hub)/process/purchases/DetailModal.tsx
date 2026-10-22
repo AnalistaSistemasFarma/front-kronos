@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import TracePanel from './TracePanel';
 import {
   Modal, Button, Group, Stack, Alert, SimpleGrid, Badge, Text, Divider, Loader, Center, TextInput,
 } from '@mantine/core';
@@ -157,6 +158,10 @@ export default function DetailModal({ draft, tipo, onClose }: Props) {
                 version de solo lectura.
               </Text>
             </>
+          )}
+
+          {tipo === 'solicitudes' && draft && (
+            <TracePanel companyId={draft.companyId} docEntry={Number(draft.DocEntry)} />
           )}
 
           <Group justify="flex-end" mt="sm">

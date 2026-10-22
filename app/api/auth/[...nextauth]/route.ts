@@ -6,6 +6,8 @@ import AzureADProvider from 'next-auth/providers/azure-ad';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { prisma } from '../../../../lib/prisma';
 import { normalizeNit, SUPPLIER_ROLE } from '../../../../lib/proveedor/isolation';
+import { noteLoginAttempt, withLoginAudit } from '../../../../lib/auth/login-audit/recorder';
+import { resolveAuthRedirect } from '../../../../lib/auth/safe-redirect';
 
 const azureConfigured =
   Boolean(process.env.AZURE_AD_CLIENT_ID) &&
@@ -62,7 +64,10 @@ export const authOptions: AuthOptions = {
         password: { label: 'Password', type: 'password' },
       },
       async authorize(credentials) {
+        // Auditoría de inicios de sesión: cada salida anota el resultado (sin la
+        // contraseña). La escritura la hace withLoginAudit después de responder.
         if (!credentials?.email || !credentials?.password) {
+          noteLoginAttempt({ identifier: credentials?.email ?? null, success: false, reason: 'DATOS_INCOMPLETOS' });
           return null;
         }
         const emailInput = credentials.email.trim();
@@ -83,21 +88,27 @@ export const authOptions: AuthOptions = {
           WHERE LOWER(LTRIM(RTRIM(email))) = LOWER(LTRIM(RTRIM(${emailInput})))
         `;
         const user = rows[0];
+        const attempt = { identifier: emailInput, userId: user?.id ?? null, userName: user?.name ?? null };
         if (!user || !user.password) {
+          noteLoginAttempt({ ...attempt, success: false, reason: user ? 'SIN_CONTRASENA' : 'USUARIO_NO_EXISTE' });
           return null;
         }
         // AISLAMIENTO: un proveedor NUNCA entra por el login interno (correo),
         // aunque tenga correo registrado. El proveedor solo entra por /proveedor/login.
         if (user.role === SUPPLIER_ROLE) {
+          noteLoginAttempt({ ...attempt, success: false, reason: 'PROVEEDOR_EN_LOGIN_INTERNO' });
           return null;
         }
         if (!user.isActive) {
+          noteLoginAttempt({ ...attempt, success: false, reason: 'USUARIO_INACTIVO' });
           return null;
         }
         const isPasswordValid = await bcrypt.compare(credentials.password, user.password);
         if (!isPasswordValid) {
+          noteLoginAttempt({ ...attempt, success: false, reason: 'CONTRASENA_INCORRECTA' });
           return null;
         }
+        noteLoginAttempt({ ...attempt, success: true });
         return {
           id: user.id,
           email: user.email,
@@ -119,19 +130,24 @@ export const authOptions: AuthOptions = {
       async authorize(credentials) {
         const nit = normalizeNit(credentials?.nit);
         if (!nit || !credentials?.password) {
+          noteLoginAttempt({ identifier: nit || credentials?.nit || null, success: false, reason: 'DATOS_INCOMPLETOS' });
           return null;
         }
         // La columna nit tiene índice único filtrado: a lo sumo un proveedor por NIT.
         const user = await prisma.user.findFirst({
           where: { nit, role: SUPPLIER_ROLE, isActive: true },
         });
+        const attempt = { identifier: nit, userId: user?.id ?? null, userName: user?.name ?? null };
         if (!user || !user.password) {
+          noteLoginAttempt({ ...attempt, success: false, reason: user ? 'SIN_CONTRASENA' : 'NIT_NO_REGISTRADO' });
           return null;
         }
         const isPasswordValid = await bcrypt.compare(credentials.password, user.password);
         if (!isPasswordValid) {
+          noteLoginAttempt({ ...attempt, success: false, reason: 'CONTRASENA_INCORRECTA' });
           return null;
         }
+        noteLoginAttempt({ ...attempt, success: true });
         return {
           id: user.id,
           email: user.email,
@@ -186,6 +202,10 @@ export const authOptions: AuthOptions = {
 
       return token;
     },
+    // Solo redirige dentro del mismo sitio (OWASP H-05): rechaza `//`, `/\`, esquemas y otros hosts.
+    async redirect({ url, baseUrl }: { url: string; baseUrl: string }) {
+      return resolveAuthRedirect(url, baseUrl);
+    },
     async session({ session, token }: { session: Session; token: JWT }) {
       if (token && session.user) {
         const kronosId =
@@ -202,11 +222,28 @@ export const authOptions: AuthOptions = {
       return session;
     },
   },
+  events: {
+    // Microsoft (Entra ID): el éxito se anota aquí; si Microsoft rechaza o se
+    // cancela, NextAuth responde con ?error= y withLoginAudit lo registra como fallo.
+    // Para credenciales/NIT ya lo anotó authorize (no se sobrescribe).
+    async signIn({ user, account }) {
+      if (account?.provider === 'azure-ad') {
+        noteLoginAttempt({
+          identifier: user?.email ?? null,
+          userId: user?.id ?? null,
+          userName: user?.name ?? null,
+          success: true,
+        });
+      }
+    },
+  },
   pages: {
     signIn: '/login',
   },
 };
 
-const handler = NextAuth(authOptions);
+// withLoginAudit: registra cada intento de inicio de sesión (auditoría de seguridad)
+// sin frenar ni romper el login. Ver lib/auth/login-audit/recorder.ts.
+const handler = withLoginAudit(NextAuth(authOptions));
 
 export { handler as GET, handler as POST };

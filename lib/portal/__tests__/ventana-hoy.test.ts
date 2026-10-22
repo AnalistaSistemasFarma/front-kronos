@@ -1,10 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { cumpleanosComoEventos, type EventoDia } from '../calendario';
-import { IMAGEN_CUMPLEANOS, PREFIJO_MARCA_VENTANA_HOY, SEGUNDOS_VENTANA_HOY, claveVentanaHoy, eventosDelDia, hayCumpleanos, reiniciarVentanaHoy } from '../ventana-hoy';
+import {
+  DIAS_PROXIMOS_VENTANA_HOY,
+  IMAGEN_CUMPLEANOS,
+  MAX_PROXIMOS_VENTANA_HOY,
+  PREFIJO_MARCA_VENTANA_HOY,
+  SEGUNDOS_VENTANA_HOY,
+  claveVentanaHoy,
+  eventosDelDia,
+  finDeProximos,
+  hayCumpleanos,
+  omitirPorMarca,
+  proximosEventos,
+  reiniciarVentanaHoy,
+} from '../ventana-hoy';
 
 // Ventana emergente «Hoy» (Cristian Baldión, 2026-10-15).
 
-const cumple = (fecha: string) => cumpleanosComoEventos([{ fecha, personas: [{ nombre: 'PEREZ GOMEZ ANA', empresa: 'GSS SAS', area: 'SISTEMAS' }] }]);
+const cumple = (fecha: string) => cumpleanosComoEventos([{ fecha, personas: [{ nombre: 'PEREZ GOMEZ ANA', empresa: 'GSS SAS', cargo: 'ANALISTA DE SISTEMAS' }] }]);
 const empresa = (fecha: string, titulo: string): EventoDia => ({ id: 1, fecha, titulo, tipo: 'empresa', descripcion: 'Auditorio' });
 
 describe('constantes', () => {
@@ -17,7 +30,7 @@ describe('constantes', () => {
 });
 
 describe('eventosDelDia', () => {
-  it('un día sin nada: lista vacía (la ventana no se abre)', () => {
+  it('un día sin nada: lista vacía (la ventana sale igual, con el estado vacío y los próximos)', () => {
     expect(eventosDelDia('2026-10-15', [], [])).toEqual([]);
   });
   it('un festivo se calcula igual que en el calendario', () => {
@@ -73,11 +86,52 @@ describe('reiniciarVentanaHoy (cada inicio de sesión, Cristian 2026-10-16)', ()
   });
 });
 
+describe('omitirPorMarca (marcas viejas de la versión de una vez por día)', () => {
+  it('en un navegador REAL la marca se ignora siempre; solo un navegador automatizado la respeta', () => {
+    expect(omitirPorMarca(true, false)).toBe(false); // marca vieja en el navegador de una persona: la ventana sale
+    expect(omitirPorMarca(false, false)).toBe(false);
+    expect(omitirPorMarca(true, true)).toBe(true); // interruptor de las pruebas automáticas
+    expect(omitirPorMarca(false, true)).toBe(false);
+  });
+});
+
 describe('hayCumpleanos', () => {
   it('solo es cierto con el evento CUMPLEAÑOS y personas', () => {
     expect(hayCumpleanos(eventosDelDia('2026-10-15', [], cumple('2026-10-15')))).toBe(true);
     expect(hayCumpleanos(eventosDelDia('2026-12-25', [], []))).toBe(false);
     expect(hayCumpleanos([])).toBe(false);
     expect(hayCumpleanos([{ fecha: '2026-10-15', titulo: 'CUMPLEAÑOS', tipo: 'conmemoracion', personas: [] }])).toBe(false);
+  });
+});
+
+describe('proximosEventos (día sin nada: «que salga siempre», Cristian 2026-10-21)', () => {
+  it('rango: los próximos 30 días, máximo 5', () => {
+    expect(DIAS_PROXIMOS_VENTANA_HOY).toBe(30);
+    expect(MAX_PROXIMOS_VENTANA_HOY).toBe(5);
+    expect(finDeProximos('2026-10-15')).toBe('2026-11-14');
+    expect(finDeProximos('2026-12-20')).toBe('2027-01-19'); // cruza el año
+  });
+  it('trae festivos, eventos y cumpleaños después de hoy, en orden de fecha y sin contar hoy', () => {
+    const e = proximosEventos('2026-10-15', [empresa('2026-10-15', 'Hoy no'), empresa('2026-10-20', 'Capacitación SST')], [...cumple('2026-10-15'), ...cumple('2026-10-18')]);
+    expect(e.map((x) => [x.fecha, x.titulo])).toEqual([
+      ['2026-10-18', 'CUMPLEAÑOS'],
+      ['2026-10-20', 'Capacitación SST'],
+      ['2026-11-02', 'Día de Todos los Santos'],
+    ]); // el 16 de noviembre (Independencia de Cartagena) ya queda fuera de los 30 días
+  });
+  it('máximo 5 y nada más allá de los 30 días', () => {
+    const muchos = ['2026-10-16', '2026-10-17', '2026-10-19', '2026-10-21', '2026-10-22', '2026-10-23'].map((f) => empresa(f, `Evento ${f}`));
+    expect(proximosEventos('2026-10-15', muchos, [])).toHaveLength(5);
+    expect(proximosEventos('2026-10-15', [empresa('2026-11-20', 'Lejos')], []).some((x) => x.titulo === 'Lejos')).toBe(false);
+  });
+  it('un cumpleaños sin personas no cuenta', () => {
+    const e = proximosEventos('2026-10-15', [], [{ fecha: '2026-10-16', titulo: 'CUMPLEAÑOS', tipo: 'conmemoracion', personas: [] }]);
+    expect(e.some((x) => x.titulo === 'CUMPLEAÑOS')).toBe(false);
+  });
+  it('cruza el año: después del 20 de diciembre trae Navidad y Año Nuevo', () => {
+    const e = proximosEventos('2026-12-20', [], []);
+    expect(e.map((x) => x.titulo)).toContain('Navidad');
+    expect(e.map((x) => x.titulo)).toContain('Año Nuevo');
+    expect(e.every((x) => x.fecha > '2026-12-20' && x.fecha <= '2027-01-19')).toBe(true);
   });
 });

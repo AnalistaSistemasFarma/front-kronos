@@ -3,8 +3,11 @@
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import ExcelJS from 'exceljs';
-import { saveAs } from 'file-saver';
+import {
+  boardExportFilename,
+  buildBoardWorkbook,
+} from '@/lib/request-general/exportBoardExcel';
+import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
 import {
   Paper,
   Stack,
@@ -185,6 +188,7 @@ function RequestBoard() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [tasksByRequest, setTasksByRequest] = useState<Record<number, RequestTask[]>>({});
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [modalOpened, setModalOpened] = useState(false);
   const [formData, setFormData] = useState({
@@ -196,7 +200,16 @@ function RequestBoard() {
     url: '',
   });
   const [createLoading, setCreateLoading] = useState(false);
+  // Solicitud de compra: se captura en el formulario de Compras (lineas + SAP), no aqui.
+  const [isPurchaseProcess, setIsPurchaseProcess] = useState(false);
   const isSubmittingRef = useRef(false);
+
+  const linkedProcessParam = searchParams.get('linkedProcess');
+  const originTaskParam = searchParams.get('originTask');
+  const companyParam = searchParams.get('company');
+  const [originTaskId, setOriginTaskId] = useState<string | null>(null);
+  const [lockedLinked, setLockedLinked] = useState(false);
+  const linkedAppliedRef = useRef(false);
 
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
   const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
@@ -327,6 +340,29 @@ function RequestBoard() {
       setIdUser('');
     }
   }, []);
+
+  useEffect(() => {
+    if (linkedAppliedRef.current) return;
+    if (!linkedProcessParam) return;
+    if (processCategories.length === 0) return;
+    const proc = processCategories.find((p) => p.value === String(linkedProcessParam));
+    if (!proc) return;
+    linkedAppliedRef.current = true;
+
+    const targetCompany = companyParam || formData.company || '';
+    if (targetCompany) {
+      void fetchCategoriesByCompanyOnLoad(targetCompany);
+    }
+    setFormData((prev) => ({
+      ...prev,
+      company: targetCompany || prev.company,
+      category: String(proc.id_category_request),
+      process: String(linkedProcessParam),
+    }));
+    setOriginTaskId(originTaskParam);
+    setLockedLinked(true);
+    setModalOpened(true);
+  }, [processCategories, linkedProcessParam, companyParam, originTaskParam, formData.company]);
 
   useEffect(() => {
     if (formData.category) {
@@ -904,8 +940,29 @@ function RequestBoard() {
           : { id_field: f.id, value_text: String(v) };
       });
 
+  useEffect(() => {
+    if (!formData.company || !formData.process) {
+      setIsPurchaseProcess(false);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/purchases/entry?companyId=${formData.company}&processId=${formData.process}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) setIsPurchaseProcess(Boolean(d?.isPurchase));
+      })
+      .catch(() => {
+        if (!cancelled) setIsPurchaseProcess(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.company, formData.process]);
+
   const handleCreateTicketWithValidation = async () => {
     if (isSubmittingRef.current) return;
+    // La solicitud de compra no se crea por el formulario generico (se haria sin borrador en SAP).
+    if (isPurchaseProcess) return;
     if (!validateForm()) return;
     await handleCreateTicket();
   };
@@ -933,6 +990,7 @@ function RequestBoard() {
             process: parseInt(formData.process),
             createdby: userId,
             url: formData.url,
+            originTaskId: originTaskId || null,
             formValues: buildFormValuesPayload(),
           }),
         });
@@ -1227,58 +1285,68 @@ function RequestBoard() {
     }
   };
 
+  const CREATE_STATUS_LABELS: Record<string, string> = {
+    '1': 'Abierto',
+    '2': 'Resuelto',
+    '3': 'Cancelado',
+    '7': 'Devuelta',
+  };
+
   async function exportToExcel() {
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Datos');
+    if (exporting) return;
+    if (tickets.length === 0) {
+      toast.error('No hay solicitudes con los filtros actuales');
+      return;
+    }
+    setExporting(true);
+    try {
+      const ids = tickets.map((ticket) => ticket.id);
+      const grouped: Record<number, RequestTask[]> = {};
+      for (let i = 0; i < ids.length; i += 500) {
+        const batch = ids.slice(i, i + 500);
+        const response = await fetch(
+          `/api/requests-general/activities-requets?ids=${batch.join(',')}`
+        );
+        if (!response.ok) throw new Error('tareas');
+        const data = (await response.json()) as RequestTask[];
+        for (const task of data) {
+          (grouped[task.id_request_general] ||= []).push(task);
+        }
+      }
 
-    type TicketKeys = keyof Ticket;
-
-    const formatDate = (raw: any) => {
-      if (!raw) return '';
-      const d = new Date(raw);
-      if (isNaN(d.getTime())) return String(raw);
-      return new Intl.DateTimeFormat('es-CO', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      }).format(d);
-    };
-
-    const dateKeys: TicketKeys[] = ['created_at', 'date_resolution'];
-
-    const columnMapOrdered: { key: TicketKeys; header: string; width: number }[] = [
-      { key: 'requester', header: 'Solicitante', width: 24 },
-      { key: 'user', header: 'Asignado', width: 24 },
-      { key: 'company', header: 'Empresa', width: 24 },
-      { key: 'process', header: 'Proceso', width: 22 },
-      { key: 'category', header: 'Categoría', width: 22 },
-      { key: 'subject', header: 'Asunto', width: 30 },
-      { key: 'description', header: 'Descripción', width: 40 },
-      { key: 'status', header: 'Estado', width: 18 },
-      { key: 'executor_final', header: 'Ejecutor final', width: 24 },
-      { key: 'resolution', header: 'Resolución', width: 40 },
-      { key: 'date_resolution', header: 'Fecha de resolución', width: 20 },
-      { key: 'created_at', header: 'Fecha de creación', width: 20 },
-    ];
-
-    worksheet.columns = columnMapOrdered;
-
-    tickets.forEach(item => {
-      const row: Record<TicketKeys, any> = {} as Record<TicketKeys, any>;
-
-      columnMapOrdered.forEach(col => {
-        const value = item[col.key];
-        row[col.key] = dateKeys.includes(col.key) ? formatDate(value) : value;
+      const companyLabel =
+        companies.find((company) => company.value === filters.company)?.label || 'Todas';
+      const assignedLabel =
+        assignedUsers.find((user) => user.value === filters.assigned_to)?.label || 'Todas';
+      const workbook = await buildBoardWorkbook({
+        module: 'Mis solicitudes',
+        filters: [
+          { label: 'Estado', value: CREATE_STATUS_LABELS[filters.status] || 'Todos' },
+          { label: 'Empresa', value: companyLabel },
+          { label: 'Persona asignada', value: assignedLabel },
+          { label: 'ID', value: filters.id || 'Todos' },
+          { label: 'Fecha desde', value: filters.date_from || 'Sin límite' },
+          { label: 'Fecha hasta', value: filters.date_to || 'Sin límite' },
+        ],
+        requests: tickets.map((ticket) => ({
+          id: ticket.id,
+          subject: ticket.subject,
+          process: ticket.process,
+          category: ticket.category,
+          company: ticket.company,
+          status: ticket.status,
+          requester: ticket.requester,
+          assigned: ticket.user,
+          createdAt: ticket.created_at,
+          description: ticket.description,
+          resolution: ticket.resolution,
+          dateResolution: ticket.date_resolution,
+          executor: ticket.executor_final,
+          tasks: grouped[ticket.id] ?? [],
+        })),
       });
 
-      worksheet.addRow(row);
-    });
-
-    worksheet.getRow(1).font = { bold: true };
-
-    // Segunda hoja: "Solicitudes de Pago". Trae los campos extra (pivote de
+    // Hoja extra: "Solicitudes de Pago". Trae los campos extra (pivote de
     // request_form_value) para las solicitudes del proceso "Solicitud de Pago"
     // que estén en el panel. El endpoint filtra por proceso, así que basta con
     // mandarle los ids de los tickets cargados.
@@ -1377,12 +1445,14 @@ function RequestBoard() {
       console.error('Error generando la hoja de Solicitudes de Pago:', e);
     }
 
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
-
-    saveAs(blob, 'InformeSolicitudes.xlsx');
+      await downloadWorkbook(workbook, boardExportFilename('Mis-solicitudes'));
+      toast.success('Excel descargado');
+    } catch (err) {
+      console.error(err);
+      toast.error('No se pudo generar el informe');
+    } finally {
+      setExporting(false);
+    }
   }
 
   const globalProgress = getGlobalTasksProgress();
@@ -1403,9 +1473,10 @@ function RequestBoard() {
               variant='default'
               radius='xl'
               leftSection={<IconDownload size={16} />}
+              loading={exporting}
               onClick={() => exportToExcel()}
             >
-              Descargar XLSX
+              Descargar Excel
             </Button>
             <Button
               radius='xl'
@@ -1817,7 +1888,7 @@ function RequestBoard() {
                   error={formErrors.company}
                   required
                   leftSection={<IconBuilding size={16} />}
-                  disabled={formDataLoading}
+                  disabled={formDataLoading || lockedLinked}
                 />
               </Grid.Col>
 
@@ -1945,7 +2016,7 @@ function RequestBoard() {
                   error={formErrors.category}
                   required
                   leftSection={<IconTag size={16} />}
-                  disabled={formDataLoading}
+                  disabled={formDataLoading || lockedLinked}
                 />
               </Grid.Col>
 
@@ -1964,10 +2035,28 @@ function RequestBoard() {
                   error={formErrors.process}
                   required
                   leftSection={<IconProgress size={16} />}
-                  disabled={!formData.category || formDataLoading}
+                  disabled={!formData.category || formDataLoading || lockedLinked}
                 />
               </Grid.Col>
             </Grid>
+
+            {isPurchaseProcess && (
+              <Alert color='blue' variant='light' title='Solicitud de compra'>
+                <Text size='sm'>
+                  La solicitud de compra se diligencia en su propio formulario, con las líneas
+                  (artículo, cantidad, IVA, cuenta y norma de reparto) validadas contra SAP. Al
+                  enviarla a autorizar aparecerá aquí, en Mis solicitudes.
+                </Text>
+                <Button
+                  mt='sm'
+                  onClick={() =>
+                    router.push(`/process/purchases?nueva=1&companyId=${formData.company}`)
+                  }
+                >
+                  Abrir formulario de solicitud de compra
+                </Button>
+              </Alert>
+            )}
 
             {(() => {
               const processName = (
@@ -2292,7 +2381,7 @@ function RequestBoard() {
               <Button
                 onClick={handleCreateTicketWithValidation}
                 loading={createLoading}
-                disabled={createLoading}
+                disabled={createLoading || isPurchaseProcess}
                 size='md'
                 leftSection={<IconPlus size={16} />}
                 className='bg-blue-600 hover:bg-blue-700'

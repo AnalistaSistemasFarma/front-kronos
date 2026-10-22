@@ -20,6 +20,11 @@ import { OtError, type OtCompanyAccess } from './rules';
  *     cómo se confirmó (auth_method), usuario de la sesión, IP y huella SHA-256.
  *   - GSS Firma y el SGC NO se tocan.
  *
+ * Ajustes del 2026-10-17 (audios de Farmalógica, R3/R4): abren y cierran el supervisor o el
+ * JEFE DE PRODUCCIÓN designado; el visto bueno del operario deja de ser requisito para cerrar
+ * (si se da antes del cierre, se registra). Si el jefe cierra, la fila del cierre queda con
+ * significado «Cerró (jefe)» y su cierre cuenta como su visto bueno (no firma dos veces).
+ *
  * Las filas del modelo anterior (#606/#617) con rol INSPECTOR y significado «Verificó»
  * eran del JEFE DE PRODUCCIÓN: se LEEN como JEFE_PROD sin modificar la evidencia.
  */
@@ -30,6 +35,7 @@ import {
   OT_METODO_CONFIRMACION,
   OT_PIN_LONGITUD,
   OT_ROL_LABEL,
+  OT_SIGNIFICADO_CIERRE_JEFE,
   OT_SIGNIFICADO_VERIFICO_LEGADO,
   OT_VISTOS_BUENOS,
   isOtFirmaRol,
@@ -38,7 +44,7 @@ import {
 export { OT_CONFIRMACION_TEXTO, OT_FIRMA_SIGNIFICADO, OT_VISTOS_BUENOS, type OtFirmaRol };
 
 /** Versión de la confirmación que se guarda en ot_firma.consent_version. */
-export const OT_CONFIRMACION_VERSION = 'bitacora-visto-bueno-2026-10-15';
+export const OT_CONFIRMACION_VERSION = 'bitacora-visto-bueno-2026-10-17';
 
 export type OtMetodoConfirmacion = (typeof OT_METODO_CONFIRMACION)[keyof typeof OT_METODO_CONFIRMACION];
 
@@ -75,12 +81,32 @@ export interface OrdenActores {
   operadores: readonly number[];
 }
 
-/** Vistos buenos que EXIGE esta bitácora, en orden. */
-export function vistosRequeridos(o: Pick<OrdenActores, 'inspector' | 'jefe' | 'operadores'>): OtFirmaRol[] {
+/** Con qué rol se cerró: el del jefe de producción deja «Cerró (jefe)» (R3, 2026-10-17). */
+export type OtCierreComo = 'SUPERVISOR' | 'JEFE_PROD';
+
+/** ¿Esta fila de cierre la dio el jefe de producción? (por el significado guardado en la evidencia). */
+export function esCierreDelJefe(f: Pick<FirmaFila, 'rol' | 'significado'> | null | undefined): boolean {
+  return Boolean(f && f.rol === 'SUPERVISOR' && f.significado === OT_SIGNIFICADO_CIERRE_JEFE);
+}
+
+/** Significado que se guarda para el cierre según quién cierra. */
+export function significadoCierre(como: OtCierreComo): string {
+  return como === 'JEFE_PROD' ? OT_SIGNIFICADO_CIERRE_JEFE : OT_FIRMA_SIGNIFICADO.SUPERVISOR;
+}
+
+/**
+ * Vistos buenos que EXIGE esta bitácora, en orden.
+ *   - OPERARIO: desde el 2026-10-17 (R4) ya NO es requisito: el supervisor o el jefe cierran
+ *     desde su computador sin esperarlo. Si un operario lo da antes del cierre, se registra.
+ *   - JEFE_PROD: no se exige si el propio jefe CERRÓ la bitácora (su cierre cuenta como su
+ *     visto bueno; R3, decisión para confirmar con Nicolás).
+ */
+export function vistosRequeridos(o: Pick<OrdenActores, 'inspector' | 'jefe' | 'operadores'>, firmas: readonly FirmaFila[] = []): OtFirmaRol[] {
+  const cerroElJefe = esCierreDelJefe(vistosDados(firmas).SUPERVISOR);
   return OT_VISTOS_BUENOS.filter((r) => {
-    if (r === 'OPERARIO') return o.operadores.length > 0;
+    if (r === 'OPERARIO') return false;
     if (r === 'INSPECTOR') return Boolean(o.inspector);
-    if (r === 'JEFE_PROD') return Boolean(o.jefe);
+    if (r === 'JEFE_PROD') return Boolean(o.jefe) && !cerroElJefe;
     return true;
   });
 }
@@ -88,7 +114,7 @@ export function vistosRequeridos(o: Pick<OrdenActores, 'inspector' | 'jefe' | 'o
 /** Siguiente visto bueno pendiente (o null si ya están todos). */
 export function siguienteVistoBueno(o: OrdenActores, firmas: readonly FirmaFila[]): OtFirmaRol | null {
   const dados = vistosDados(firmas);
-  return vistosRequeridos(o).find((r) => !dados[r]) ?? null;
+  return vistosRequeridos(o, firmas).find((r) => !dados[r]) ?? null;
 }
 
 /** Bitácora completa: cerrada y con todos los vistos buenos que le corresponden. */
@@ -111,11 +137,13 @@ export interface Confirmante {
  * ¿Puede dar este visto bueno? Aplica el ORDEN, la designación y la segregación de
  * funciones. 409 = fuera de orden o ya dado; 403 = no es la persona que corresponde.
  */
-export function assertPuedeConfirmar(o: OrdenActores, firmas: readonly FirmaFila[], c: Confirmante): void {
+export function assertPuedeConfirmar(o: OrdenActores, firmas: readonly FirmaFila[], c: Confirmante): OtCierreComo | null {
   const dados = vistosDados(firmas);
   const label = OT_ROL_LABEL[c.rol];
-  if (dados[c.rol]) throw new OtError(`El visto bueno del ${label.toLowerCase()} ya se dio.`, 409);
-  const faltaAntes = (r: OtFirmaRol) => vistosRequeridos(o).includes(r) && !dados[r];
+  if (dados[c.rol]) {
+    throw new OtError(c.rol === 'SUPERVISOR' ? 'La bitácora ya está cerrada.' : `El visto bueno del ${label.toLowerCase()} ya se dio.`, 409);
+  }
+  const faltaAntes = (r: OtFirmaRol) => vistosRequeridos(o, firmas).includes(r) && !dados[r];
 
   switch (c.rol) {
     case 'OPERARIO': {
@@ -124,16 +152,24 @@ export function assertPuedeConfirmar(o: OrdenActores, firmas: readonly FirmaFila
       if (c.idOperador === null || !o.operadores.includes(c.idOperador)) {
         throw new OtError('El operario elegido no está programado en esta bitácora.', 403);
       }
-      return;
+      return null;
     }
     case 'SUPERVISOR': {
+      // CIERRE (R3/R4, 2026-10-17): lo hace el supervisor (Gestión) o el JEFE DE PRODUCCIÓN
+      // designado en esta bitácora; ya no exige el visto bueno previo del operario.
       if (o.estado !== 'ABIERTA') throw new OtError('La bitácora ya está cerrada.', 409);
-      if (!c.access?.canManage) throw new OtError('Solo un supervisor (Bitácora de Proceso: Gestión) cierra la bitácora.', 403);
-      if (c.idUser && (c.idUser === o.inspector || c.idUser === o.jefe)) {
-        throw new OtError('El inspector o el jefe de producción de esta bitácora no pueden cerrarla: la cierra el supervisor.', 403);
+      if (!c.idUser) throw new OtError('Elija su nombre para cerrar.', 400);
+      if (c.idUser === o.inspector) {
+        throw new OtError('El inspector de esta bitácora no puede cerrarla: la cierra el supervisor o el jefe de producción designado.', 403);
       }
-      if (faltaAntes('OPERARIO')) throw new OtError('Falta el visto bueno del operario: un operario del turno debe darlo antes del cierre.', 409);
-      return;
+      if (o.jefe && c.idUser === o.jefe) return 'JEFE_PROD';
+      if (!c.access?.canManage) {
+        throw new OtError(
+          'Para cerrar le falta el permiso «Bitácora de Proceso: Gestión» en esta empresa (supervisor), o ser el jefe de producción designado en esta bitácora.',
+          403
+        );
+      }
+      return 'SUPERVISOR';
     }
     case 'INSPECTOR':
     case 'JEFE_PROD': {
@@ -141,20 +177,23 @@ export function assertPuedeConfirmar(o: OrdenActores, firmas: readonly FirmaFila
       if (!designado) throw new OtError(`Esta bitácora no tiene ${label.toLowerCase()} designado.`, 409);
       if (c.idUser !== designado) throw new OtError(`Solo el ${label.toLowerCase()} designado en esta bitácora puede dar este visto bueno.`, 403);
       if (o.estado !== 'CERRADA' || !dados.SUPERVISOR) throw new OtError(`El visto bueno del ${label.toLowerCase()} se da después del cierre del supervisor.`, 409);
+      if (c.rol === 'JEFE_PROD' && esCierreDelJefe(dados.SUPERVISOR)) {
+        throw new OtError('El jefe de producción cerró esta bitácora: su cierre cuenta como su visto bueno.', 409);
+      }
       if (dados.SUPERVISOR.id_user === c.idUser) throw new OtError('Quien cerró la bitácora no puede dar este visto bueno.', 403);
       if (c.rol === 'JEFE_PROD' && faltaAntes('INSPECTOR')) throw new OtError('Falta el visto bueno del inspector.', 409);
-      return;
+      return null;
     }
   }
 }
 
 /**
- * Al abrir (B1): supervisor que abre, inspector y jefe de producción son tres personas
- * distintas (segregación de funciones).
+ * Al abrir (B1; R3 del 2026-10-17): el INSPECTOR es siempre una persona distinta de quien
+ * abre y del jefe de producción (segregación de funciones). Quien abre SÍ puede ser el jefe
+ * de producción de esa misma bitácora (abren el supervisor o el jefe).
  */
-export function assertActoresDistintos(a: { supervisor: string; inspector: string; jefe: string }): void {
-  if (a.inspector === a.supervisor) throw new OtError('El inspector debe ser una persona distinta del supervisor que abre la bitácora.', 400);
-  if (a.jefe === a.supervisor) throw new OtError('El jefe de producción debe ser una persona distinta del supervisor que abre la bitácora.', 400);
+export function assertActoresDistintos(a: { abre: string; inspector: string; jefe: string }): void {
+  if (a.inspector === a.abre) throw new OtError('El inspector debe ser una persona distinta de quien abre la bitácora.', 400);
   if (a.inspector === a.jefe) throw new OtError('El inspector y el jefe de producción deben ser personas distintas.', 400);
 }
 
@@ -232,6 +271,8 @@ export interface ContenidoFirmable {
   registros: Array<{ id: string; actividad: string; usuario: string; registradoEn: string; observacion: string | null; operador?: number | null }>;
   observacionCierre: string | null;
   cerradaPor?: string | null;
+  /** Con qué rol se cerró, solo si fue el jefe (R3); ausente = supervisor (huellas anteriores intactas). */
+  cierreComo?: OtCierreComo | null;
   cerradaEn?: string | null;
   /** Huella del cierre del supervisor (modelo anterior) — se conserva por compatibilidad. */
   firmaSupervisorSha256?: string | null;
@@ -260,6 +301,7 @@ export function huellaContenido(c: ContenidoFirmable): string {
     registros: c.registros.map((r) => ({ id: r.id, actividad: r.actividad, usuario: r.usuario, operador: r.operador ?? null, registradoEn: r.registradoEn, observacion: r.observacion })),
     observacionCierre: c.observacionCierre,
     cerradaPor: c.cerradaPor ?? null,
+    ...(c.cierreComo === 'JEFE_PROD' ? { cierreComo: c.cierreComo } : {}),
     cerradaEn: c.cerradaEn ?? null,
     firmaSupervisorSha256: c.firmaSupervisorSha256 ?? null,
     ...(c.vistosPrevios ? { vistosPrevios: c.vistosPrevios.map((v) => ({ rol: v.rol, sha256: v.sha256 })) } : {}),

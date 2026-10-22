@@ -2,9 +2,9 @@
  * PORTAL DE TALENTO HUMANO — CUMPLEAÑOS en el calendario (Cristian Baldión, 2026-10-15).
  *
  * El calendario del portal muestra, cada día, quiénes cumplen años: el evento «CUMPLEAÑOS» y, debajo, el nombre, la empresa
- * contratante y el área de cada persona. La fuente es el Excel BASE PERSONAL (SharePoint, `CONTACTOS/BASE PERSONAL.xlsx`):
- * la columna «Fecha de nacimiento» es la llave (día y mes); «Apellidos y Nombres», «Empresa contratante» y «Área / Dependencia»
- * son lo que se muestra.
+ * contratante y el cargo de cada persona (Cristian, 2026-10-19: el CARGO reemplaza al Área / Dependencia). La fuente es el Excel
+ * BASE PERSONAL (SharePoint, `CONTACTOS/BASE PERSONAL.xlsx`): la columna «Fecha de nacimiento» es la llave (día y mes);
+ * «Apellidos y Nombres», «Empresa contratante» y «Cargo» son lo que se muestra.
  *
  * SOLO LECTURA, con la misma app de Entra de Formación y Políticas (`PORTAL_TH_SP_*`), por la API de Excel de Graph:
  *
@@ -40,13 +40,18 @@ export function leerConfigCumpleanos(env: NodeJS.ProcessEnv = process.env): Conf
 export interface PersonaCumple {
   nombre: string;
   empresa: string;
-  area: string;
+  cargo: string;
 }
 
-/** Una persona con su día y mes de cumpleaños (sin año). Nunca sale de este módulo hacia el navegador con estos campos. */
-interface PersonaConDia extends PersonaCumple {
+/**
+ * Una persona con su día y mes de cumpleaños (sin año) y su correo corporativo. Nunca sale de este módulo hacia el navegador con estos
+ * campos: el correo solo lo usan los MENSAJES DE CUMPLEAÑOS (2026-10-20) para saber quién puede leer lo que le escriben.
+ */
+export interface PersonaConDia extends PersonaCumple {
   mes: number;
   dia: number;
+  /** Correo corporativo, o vacío si no tiene (en BASE PERSONAL suele venir «No Aplica»). */
+  correo: string;
 }
 
 export interface CumplesDelDia {
@@ -67,7 +72,8 @@ const texto = (v: unknown) => (v === null || v === undefined ? '' : String(v).re
 const COLUMNAS = {
   nombre: ['APELLIDOS Y NOMBRES', 'NOMBRES Y APELLIDOS', 'NOMBRE'],
   empresa: ['EMPRESA CONTRATANTE'],
-  area: ['AREA DEPENDENCIA', 'AREA'],
+  cargo: ['CARGO'],
+  correo: ['CORREO CORPORATIVO', 'CORREO'],
   nacimiento: ['FECHA DE NACIMIENTO', 'FECHA NACIMIENTO'],
   estado: ['ESTADO ACTIVO SI NO', 'ESTADO'],
 } as const;
@@ -78,7 +84,7 @@ export function ubicarColumnasCumple(encabezados: unknown[]): Record<keyof typeo
   const out = {} as Record<keyof typeof COLUMNAS, number>;
   for (const [campo, opciones] of Object.entries(COLUMNAS) as [keyof typeof COLUMNAS, readonly string[]][]) {
     const i = h.findIndex((x) => opciones.some((o) => x === o || (o.length > 5 && x.startsWith(o))));
-    if (i < 0 && campo !== 'estado') throw new FormacionStorageError(`BASE PERSONAL no tiene la columna «${opciones[0]}».`);
+    if (i < 0 && campo !== 'estado' && campo !== 'correo') throw new FormacionStorageError(`BASE PERSONAL no tiene la columna «${opciones[0]}».`);
     out[campo] = i;
   }
   return out;
@@ -135,7 +141,7 @@ export function personasDesdeHojaCumple(valores: unknown[][], hoy: Date = new Da
       sinFechaValida += 1;
       continue;
     }
-    personas.push({ nombre, empresa: texto(fila[col.empresa]), area: texto(fila[col.area]), ...dm });
+    personas.push({ nombre, empresa: texto(fila[col.empresa]), cargo: texto(fila[col.cargo]), correo: col.correo >= 0 ? texto(fila[col.correo]) : '', ...dm });
   }
   return { personas, sinFechaValida };
 }
@@ -152,7 +158,7 @@ export function cumpleanosEnRango(personas: PersonaConDia[], desde: string, hast
   const porClave = new Map<string, PersonaCumple[]>();
   for (const p of personas) {
     const k = `${String(p.mes).padStart(2, '0')}-${String(p.dia).padStart(2, '0')}`;
-    porClave.set(k, [...(porClave.get(k) ?? []), { nombre: p.nombre, empresa: p.empresa, area: p.area }]);
+    porClave.set(k, [...(porClave.get(k) ?? []), { nombre: p.nombre, empresa: p.empresa, cargo: p.cargo }]);
   }
   const salida: CumplesDelDia[] = [];
   const fin = new Date(`${hasta}T00:00:00Z`).getTime();
@@ -172,6 +178,14 @@ export function cumpleanosEnRango(personas: PersonaConDia[], desde: string, hast
     }
   }
   return salida;
+}
+
+/** Las personas (con su correo, uso interno) que cumplen años en `fecha` (AAAA-MM-DD): mismo criterio de día, mes y 29 de febrero. */
+export function cumpleanerosDeLaFecha(personas: PersonaConDia[], fecha: string): PersonaConDia[] {
+  if (!fechaEnRango(fecha)) return [];
+  const [a, m, d] = [Number(fecha.slice(0, 4)), Number(fecha.slice(5, 7)), Number(fecha.slice(8, 10))];
+  if (m < 1 || m > 12 || d < 1 || d > diasDelMes(a, m)) return [];
+  return personas.filter((p) => (p.mes === m && p.dia === d) || (m === 2 && d === 28 && !esBisiesto(a) && p.mes === 2 && p.dia === 29));
 }
 
 let cache: { clave: string; cuando: number; personas: PersonaConDia[] } | null = null;

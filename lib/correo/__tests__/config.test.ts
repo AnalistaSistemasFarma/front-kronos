@@ -31,6 +31,11 @@ describe('Correo · configuración por inquilino', () => {
     expect(agenteCorreoHabilitado({ CORREO_AGENTE_HABILITADO: 'TRUE' })).toBe(true);
   });
 
+  it('eliminar (deslizar, 2026-10-18): encendido por defecto; CORREO_ELIMINAR_HABILITADO=false lo apaga', () => {
+    expect(readCorreoConfig({}).eliminarHabilitado).toBe(true);
+    expect(readCorreoConfig({ CORREO_ELIMINAR_HABILITADO: 'false' }).eliminarHabilitado).toBe(false);
+  });
+
   it('cada correo se atiende SOLO con la app de su inquilino, si está completa', () => {
     const c = readCorreoConfig(env);
     expect(c.inquilinos.map((i) => i.clave)).toEqual(['gss', 'olp']);

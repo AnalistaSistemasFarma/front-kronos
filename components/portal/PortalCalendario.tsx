@@ -16,9 +16,13 @@ import {
   proximos,
   unirEventos,
   validarEvento,
+  TITULO_CUMPLEANOS,
   type EventoDia,
   type TipoEvento,
 } from '../../lib/portal/calendario';
+import { fechaEnVentanaMensaje } from '../../lib/portal/mensajes-cumple';
+import { MensajesRecibidos, VentanaMensaje, type DestinoMensaje } from './MensajesCumpleanos';
+import estilosMensajes from './MensajesCumpleanos.module.css';
 
 /**
  * PORTAL TH — CALENDARIO de la ventana principal (Cristian Baldión, 2026-10-09).
@@ -52,6 +56,9 @@ export default function PortalCalendario({ puedeEditar }: { puedeEditar: boolean
   const [empresa, setEmpresa] = useState<EventoDia[]>([]);
   // Cumpleaños de BASE PERSONAL (Cristian, 2026-10-15): un evento «CUMPLEAÑOS» por día con las personas que cumplen.
   const [cumples, setCumples] = useState<EventoDia[]>([]);
+  // Mensajes de cumpleaños (Cristian, 2026-10-20): a quién se le está escribiendo, y un contador para recargar los mensajes recibidos.
+  const [mensajePara, setMensajePara] = useState<DestinoMensaje | null>(null);
+  const [versionMensajes, setVersionMensajes] = useState(0);
   const [aviso, setAviso] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
   const [plegado, setPlegado] = useState(true); // solo se nota en celular (ver el CSS)
   const [nuevo, setNuevo] = useState<{ titulo: string; descripcion: string } | null>(null);
@@ -113,7 +120,7 @@ export default function PortalCalendario({ puedeEditar }: { puedeEditar: boolean
         const data = await lectura(res);
         if (control.signal.aborted) return;
         if (!res.ok) throw new Error(String(data.error ?? 'No se pudieron cargar los cumpleaños.'));
-        setCumples(cumpleanosComoEventos(Array.isArray(data.cumpleanos) ? (data.cumpleanos as { fecha: string; personas: { nombre: string; empresa: string; area: string }[] }[]) : []));
+        setCumples(cumpleanosComoEventos(Array.isArray(data.cumpleanos) ? (data.cumpleanos as { fecha: string; personas: { nombre: string; empresa: string; cargo: string }[] }[]) : []));
       } catch (e) {
         if (control.signal.aborted || (e as Error).name === 'AbortError') return;
         setCumples([]);
@@ -311,11 +318,32 @@ export default function PortalCalendario({ puedeEditar }: { puedeEditar: boolean
                       <ul className='portal-th__cal-cumples' data-testid='cumple-personas'>
                         {e.personas.map((p, k) => (
                           <li key={`${p.nombre}-${k}`} data-testid='cumple-persona'>
-                            <strong>{p.nombre}</strong>
-                            <small>{[p.empresa, p.area].filter(Boolean).join(' · ')}</small>
+                            {e.titulo === TITULO_CUMPLEANOS && hoy && fechaEnVentanaMensaje(e.fecha, hoy) ? (
+                              <button
+                                type='button'
+                                className={estilosMensajes.persona}
+                                aria-label={`Dejar un mensaje de cumpleaños a ${p.nombre}`}
+                                onClick={() => setMensajePara({ fecha: e.fecha, nombre: p.nombre, empresa: p.empresa })}
+                                data-testid='cumple-persona-mensaje'
+                              >
+                                <strong>{p.nombre}</strong>
+                              </button>
+                            ) : (
+                              <strong>{p.nombre}</strong>
+                            )}
+                            <small>{[p.empresa, p.cargo].filter(Boolean).join(' · ')}</small>
                           </li>
                         ))}
                       </ul>
+                    )}
+                    {e.titulo === TITULO_CUMPLEANOS && e.personas && e.personas.length > 0 && (
+                      <>
+                        {hoy && fechaEnVentanaMensaje(e.fecha, hoy) && <small className={estilosMensajes.pista}>Pulse un nombre para dejarle un mensaje.</small>}
+                        <MensajesRecibidos fecha={e.fecha} version={versionMensajes} />
+                        {mensajePara && mensajePara.fecha === e.fecha && (
+                          <VentanaMensaje destino={mensajePara} onCerrar={() => setMensajePara(null)} onEnviado={() => setVersionMensajes((v) => v + 1)} />
+                        )}
+                      </>
                     )}
                   </div>
                   {e.tipo === 'empresa' && editar && (

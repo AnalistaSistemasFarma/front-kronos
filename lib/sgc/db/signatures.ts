@@ -6,7 +6,7 @@ import { SGC_SIGNATURE_LABELS, type SgcSignatureMeaning } from '../flows/definit
 import type { SgcNotifier } from '../notifications';
 import type { SgcCompanyAccess } from '../permissions';
 import { buildControlledPdfWithLayout, manifestSha256, readManifest, verifyControlledPdf, type SgcManifest, type SgcManifestMinorRevision, type SgcManifestPlacement, type SgcPdfVerification } from '../pdf/controlledPdf';
-import { overflowMeanings, suggestInstitutionalPlacements } from '../pdf/institutional';
+import { overflowMeanings, SGC_A4_LANDSCAPE, SGC_A4_PORTRAIT, suggestInstitutionalPlacements } from '../pdf/institutional';
 import type { SgcDocxToHtml, SgcHtmlToPdf } from '../pdf/render';
 import { sgcSignerKey, type SgcPlacedMeaning, type SgcPlacementParticipant } from '../signature/fields';
 import { SGC_SIGNATURE_CONSENT_VERSION } from '../signature/consent';
@@ -17,7 +17,8 @@ import type { SgcActor, SgcDb } from './catalogs';
 import { resolveNewDocumentCode } from './coding';
 import { getVersionForViewer, type SgcUploader } from './documents';
 import { addInteraction, decideTask, requestOfTask } from './requests';
-import { cargoOf, composeContent, effectiveInstitutional, latestLayout, loadVerifiedDraft, personLabel } from './layout';
+import { createAutomaticParentRelation } from './hierarchy';
+import { cargoOf, composeContent, effectiveInstitutional, latestLayout, layoutIsLandscape, loadVerifiedDraft, personLabel } from './layout';
 import { isHeaderMandatory } from './companySettings';
 import { minorRevisionChain } from './drafts';
 import { withNewDocumentCodeLock, withSgcAppLock } from './lock';
@@ -386,6 +387,8 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
       changeDate: new Date(approvedAt.getTime() - 5 * 60 * 60 * 1000).toISOString().slice(0, 10),
       changeReason: changeDescription,
       emissionText: 'Al quedar vigente',
+      // 2026-10-22: los ajustes de presentación del Excel que el elaborador dejó (los que se vieron al firmar).
+      sheetSettings: draft.format === 'xlsx' ? layout.sheetSettings : null,
     });
     const contentPdf = composed.contentPdf;
     const source: { bytes: Uint8Array; ext: string; contentType: string } | null =
@@ -414,7 +417,7 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
       if (c && overflow.has(s.meaning)) registerCargos[s.signature_uid.trim()] = c;
     }
     // Con plantilla institucional, la firma que no se ubicó va en su recuadro «Firma» del encabezado.
-    const suggested = institutional ? new Map(suggestInstitutionalPlacements(signedParticipants, layout.fields).map((f) => [f.signerKey, f])) : new Map();
+    const suggested = institutional ? new Map(suggestInstitutionalPlacements(signedParticipants, layout.fields, composed.header?.template?.grid ?? null, layoutIsLandscape(draft.format, layout.sheetSettings) ? SGC_A4_LANDSCAPE : SGC_A4_PORTRAIT).map((f) => [f.signerKey, f])) : new Map();
     const placements: SgcManifestPlacement[] = [];
     for (const s of documentSignatures) {
       const key = keyOfAssignee.get(s.id_task_assignee);
@@ -501,6 +504,14 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
           },
         });
         idDocument = doc.id_document;
+        // 2026-10-19 (documentos padre e hijos): el hijo pedido por solicitud queda relacionado SOLO con su padre.
+        if (request.id_parent_document) {
+          await createAutomaticParentRelation(
+            tx,
+            { idCompany: request.id_company, idParent: request.id_parent_document, idChild: doc.id_document, childTypeCode: request.documentType!.code, origin: 'solicitud', reason: `Relación creada al aprobar la solicitud #${idRequest}: ${code} se desprende de su documento padre.` },
+            actor
+          );
+        }
       }
       const version = await tx.sgcDocumentVersion.create({
         data: {

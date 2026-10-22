@@ -319,7 +319,9 @@ describe.skipIf(!url)('SGC · Sprint 5 · relaciones, vencimientos y accesos con
     const r1 = await addDocumentRelation(prisma, cal, { idSource: doc4, idTarget: doc1, type: 'formato', note: 'Registro del control', reason: 'Formato del procedimiento de control' }, actor(E.cal));
     await expect(addDocumentRelation(prisma, cal, { idSource: doc4, targetCode: d1.code.toLowerCase(), type: 'formato', reason: 'Repetida a propósito' }, actor(E.cal))).rejects.toMatchObject({ status: 409 });
     await addDocumentRelation(prisma, cal, { idSource: doc1, targetCode: d2.code, type: 'referencia', reason: 'Referencia al plan confidencial' }, actor(E.cal));
-    await addDocumentRelation(prisma, cal, { idSource: doc3, idTarget: doc1, type: 'anexo', reason: 'Anexo de producción' }, actor(E.cal));
+    // 2026-10-19: un procedimiento es documento padre y no tiene padre (no es anexo de otro); se referencia.
+    await expect(addDocumentRelation(prisma, cal, { idSource: doc3, idTarget: doc1, type: 'anexo', reason: 'Anexo de producción' }, actor(E.cal))).rejects.toThrow(/no tiene padre/);
+    await addDocumentRelation(prisma, cal, { idSource: doc3, idTarget: doc1, type: 'referencia', reason: 'Referencia de producción' }, actor(E.cal));
     expect(await prisma.sgcAuditLog.count({ where: { id_company: CO, action: 'relacion.agregada' } })).toBe(3);
     // Calidad ve todo el grafo.
     const gCal = await getRelationGraph(prisma, cal.find((a) => a.idCompany === CO)!, await getAccessSubject(prisma, E.cal));

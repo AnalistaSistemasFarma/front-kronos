@@ -41,18 +41,22 @@ import {
   IconMail,
   IconMailOpened,
   IconPaperclip,
+  IconPencil,
   IconRefresh,
   IconSearch,
+  IconTrash,
   IconX,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import SgcSelect from '../sgc/SgcSelect';
-import { CORREO_CONFIRMAR_MARCAR_CARPETA, CORREO_MAX_MARCAR_CARPETA, CORREO_MAX_MARCAR_SELECCION } from '../../lib/correo/constants';
+import { CORREO_CONFIRMAR_MARCAR_CARPETA, CORREO_MAX_ELIMINAR_SELECCION, CORREO_MAX_MARCAR_CARPETA, CORREO_MAX_MARCAR_SELECCION } from '../../lib/correo/constants';
 import { EVENTO_NO_LEIDOS } from '../../lib/correo/iconoHeader';
 import type { Carpeta } from '../../lib/correo/types';
-import { CorreoApiError, correoApi, esCancelada, fechaCorta, fechaLarga, urlSolicitud, type EstadoCorreo, type MensajeLista } from './correoClient';
+import { CorreoApiError, correoApi, esCancelada, fechaCorta, fechaLarga, urlSolicitud, type EstadoCorreo, type MensajeLista, type VinculoEliminar } from './correoClient';
 import { EsqueletoCarpetas, EsqueletoFilas } from './Esqueletos';
+import FilaDeslizable, { type AccionDeslizar } from './FilaDeslizable';
 import HiloCorreo from './HiloCorreo';
+import RedactarCorreo from './RedactarCorreo';
 import SimulacionModal from './SimulacionModal';
 import { AvatarPersona, carpetasOrdenadas, IconoCarpeta } from './ui';
 import css from './correo.module.css';
@@ -256,6 +260,16 @@ export default function CorreoPage() {
   const [versionHilo, setVersionHilo] = useState(0);
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
   const [panelCarpetas, setPanelCarpetas] = useState(false);
+  /** Eliminar correos de hilos vinculados (solicitud o proyecto): confirmación antes de moverlos a la Papelera. */
+  /** Redactar (2026-10-19): ventana de correo nuevo y el aviso de envío (arriba, en verde, hasta cerrarlo). */
+  const [redactando, setRedactando] = useState(false);
+  const [avisoEnvio, setAvisoEnvio] = useState<string | null>(null);
+  const [confirmarEliminar, setConfirmarEliminar] = useState<{ filas: MensajeLista[]; vinculos: VinculoEliminar[] } | null>(null);
+  /** Lista y filtros VIGENTES (para «Deshacer», que llega segundos después de eliminar). */
+  const listaDeRef = useRef<Filtros | null>(null);
+  const filtrosRef = useRef<Filtros>(FILTROS_VACIOS);
+  listaDeRef.current = listaDe;
+  filtrosRef.current = filtros;
 
   const cargarEstado = useCallback(async () => {
     try {
@@ -582,6 +596,138 @@ export default function CorreoPage() {
     cargarCarpetas();
   };
 
+  /** Vínculos que la lista ya conoce (solicitud propia o proyecto del chat): se avisa ANTES de eliminar. */
+  const vinculosDeFilas = (filas: MensajeLista[]): VinculoEliminar[] =>
+    filas
+      .filter((m) => m.solicitud || (m.proyectos?.length ?? 0) > 0)
+      .map((m) => ({ mensajeId: m.id, conversationId: m.conversationId, idRequest: m.solicitud, proyectos: m.proyectos ?? [] }));
+
+  /** Vuelve a poner filas en su posición, solo si la lista sigue siendo la misma carpeta y búsqueda. */
+  const reinsertar = (lista: Filtros | null, filas: Array<{ fila: MensajeLista; indice: number }>): boolean => {
+    if (!filas.length) return true;
+    if (listaDeRef.current !== lista) return false;
+    setMensajes((prev) => {
+      const arr = prev.filter((m) => !filas.some((f) => f.fila.id === m.id));
+      for (const f of [...filas].sort((a, b) => a.indice - b.indice)) arr.splice(Math.min(f.indice, arr.length), 0, f.fila);
+      return arr;
+    });
+    return true;
+  };
+
+  /**
+   * Eliminar (deslizar a la izquierda, botón de la fila, tecla Supr o la barra de selección): el correo sale de la lista
+   * YA y el servidor lo MUEVE a «Elementos eliminados» (nunca lo borra). El aviso trae «Deshacer» por 7 segundos.
+   */
+  const eliminar = async (filas: MensajeLista[], confirmado = false) => {
+    if (!filas.length) return;
+    if (!confirmado) {
+      const vinculos = vinculosDeFilas(filas);
+      if (vinculos.length) {
+        setConfirmarEliminar({ filas, vinculos });
+        return;
+      }
+    }
+    const lista = listaDe;
+    const posiciones = filas.map((fila) => ({ fila, indice: Math.max(0, mensajes.findIndex((m) => m.id === fila.id)) }));
+    const ids = filas.map((f) => f.id);
+    const quitar = new Set(ids);
+    const carpetasAntes = carpetas;
+    setMensajes((prev) => prev.filter((m) => !quitar.has(m.id)));
+    setSeleccion((prev) => new Set([...prev].filter((id) => !quitar.has(id))));
+    ajustarNoLeidos(-filas.filter((f) => !f.leido).length);
+    const eliminados = new Map<string, string>();
+    const comprobantes: string[] = [];
+    let noMovidos = 0;
+    let error: string | null = null;
+    let pendienteConfirmar: { filas: MensajeLista[]; vinculos: VinculoEliminar[] } | null = null;
+    for (let i = 0; i < ids.length; i += CORREO_MAX_ELIMINAR_SELECCION) {
+      const lote = ids.slice(i, i + CORREO_MAX_ELIMINAR_SELECCION);
+      try {
+        const r = await correoApi.eliminar(lote, confirmado);
+        if ('vinculados' in r) {
+          // Se vinculó mientras tanto (otra pestaña): confirmación para este lote y los que faltan.
+          const resto = new Set(ids.slice(i));
+          pendienteConfirmar = { filas: filas.filter((f) => resto.has(f.id)), vinculos: r.vinculados };
+          break;
+        }
+        for (const e of r.resultado.eliminados) eliminados.set(e.id, e.nuevoId);
+        if (r.resultado.deshacer) comprobantes.push(r.resultado.deshacer);
+        noMovidos += r.resultado.fallidos.length;
+      } catch (e) {
+        error = e instanceof Error ? e.message : String(e);
+        break;
+      }
+    }
+    // Lo que no se movió vuelve a la lista.
+    reinsertar(
+      lista,
+      posiciones.filter((p) => !eliminados.has(p.fila.id))
+    );
+    if (pendienteConfirmar) setConfirmarEliminar(pendienteConfirmar);
+    if (eliminados.size === 0) {
+      setCarpetas(carpetasAntes);
+      if (error) toast.error(`No se pudo eliminar: ${error}`);
+      else if (noMovidos) toast.error('No se encontró el correo en su buzón (pudo moverse o borrarse).');
+      return;
+    }
+    cargarCarpetas();
+    if (error || noMovidos) toast.error(`${noMovidos || ids.length - eliminados.size} correo(s) no se pudieron eliminar${error ? `: ${error}` : ' (pudieron moverse o borrarse).'}`);
+    const n = eliminados.size;
+    const deshacer = async () => {
+      const restaurados = new Map<string, string>();
+      let fallo: string | null = null;
+      for (const c of comprobantes) {
+        try {
+          const r = await correoApi.deshacerEliminar(c);
+          for (const x of r.restaurados) restaurados.set(x.id, x.nuevoId);
+        } catch (e) {
+          fallo = e instanceof Error ? e.message : String(e);
+        }
+      }
+      const vuelven = posiciones.flatMap((p) => {
+        const enPapelera = eliminados.get(p.fila.id);
+        const nuevoId = enPapelera ? restaurados.get(enPapelera) : undefined;
+        return nuevoId ? [{ fila: { ...p.fila, id: nuevoId }, indice: p.indice }] : [];
+      });
+      // Si la persona ya cambió de carpeta, la lista vigente se vuelve a consultar.
+      if (vuelven.length && !reinsertar(lista, vuelven)) void cargarMensajes(filtrosRef.current, { refresco: true });
+      if (vuelven.length) {
+        cargarCarpetas();
+        toast.success(vuelven.length === 1 ? 'Correo restaurado' : `${vuelven.length} correos restaurados`);
+      }
+      if (fallo || vuelven.length < n) toast.error(`${n - vuelven.length} correo(s) no se pudieron restaurar${fallo ? `: ${fallo}` : ''}. Búsquelos en la Papelera.`);
+    };
+    toast.success(
+      (t) => (
+        <span className={css.avisoDeshacer} data-testid='correo-aviso-eliminado'>
+          <span>{n === 1 ? 'Correo movido a la Papelera.' : `${n} correos movidos a la Papelera.`}</span>
+          {/* Botón nativo: el aviso se pinta FUERA del MantineProvider (AppToaster). */}
+          <button
+            type='button'
+            className={css.botonDeshacer}
+            onClick={() => {
+              toast.dismiss(t.id);
+              void deshacer();
+            }}
+            data-testid='correo-deshacer'
+          >
+            Deshacer
+          </button>
+        </span>
+      ),
+      { duration: 7000 }
+    );
+  };
+
+  /** Deslizar a la derecha: leído ↔ no leído de UNA fila (se pinta ya; si Microsoft falla, se revierte). */
+  const alternarLeido = (m: MensajeLista) => {
+    const leido = !m.leido;
+    void optimista(
+      (x) => (x.id === m.id ? leido : null),
+      () => correoApi.marcarSeleccion([m.id], leido)
+    );
+  };
+
   if (errorEstado) {
     return (
       <Box p='md'>
@@ -602,6 +748,11 @@ export default function CorreoPage() {
   const idEmpresa = Number(empresa) || estado.empresas[0]?.idCompany;
   /** Leído / no leído escribe en el buzón (Mail.ReadWrite): mismo interruptor que las categorías (CORREO_ETIQUETAR_HABILITADO). */
   const escritura = estado.conexion.etiquetarHabilitado;
+  /**
+   * Eliminar = mover a la Papelera (CORREO_ELIMINAR_HABILITADO y la escritura encendidos). En la Papelera misma no se
+   * ofrece: el módulo nunca borra de forma permanente.
+   */
+  const puedeEliminar = Boolean(estado.conexion.eliminarHabilitado) && escritura && carpetaActual?.tipo !== 'eliminados';
   const quitarSeleccion = () => {
     setTodaCarpeta(false);
     setSeleccion(new Set());
@@ -627,6 +778,10 @@ export default function CorreoPage() {
   const abrir = (m: MensajeLista) => abrirHilo(m.conversationId);
   const teclaFila = (e: React.KeyboardEvent, m: MensajeLista) => {
     if (e.key === 'Enter') abrir(m);
+    if (e.key === 'Delete' && puedeEliminar && e.target === e.currentTarget) {
+      e.preventDefault();
+      void eliminar([m]);
+    }
     if (e.key === ' ' && e.target === e.currentTarget) {
       e.preventDefault();
       toggle(m.id);
@@ -770,6 +925,22 @@ export default function CorreoPage() {
                 </Tooltip>
               </>
             )}
+            {puedeEliminar && !todaCarpeta && (
+              <Tooltip label='Eliminar (a la Papelera)'>
+                <ActionIcon
+                  variant='subtle'
+                  color='gray'
+                  radius='xl'
+                  size='lg'
+                  onClick={() => void eliminar(mensajes.filter((m) => seleccion.has(m.id)))}
+                  disabled={Boolean(marcado)}
+                  aria-label='Eliminar'
+                  data-testid='correo-sel-eliminar'
+                >
+                  <IconTrash size={18} />
+                </ActionIcon>
+              </Tooltip>
+            )}
             {desktop && (
               <Button variant='subtle' size='compact-sm' onClick={quitarSeleccion}>
                 Quitar selección
@@ -847,55 +1018,73 @@ export default function CorreoPage() {
   ) : null;
 
   // ---------------------------------------------------------------- filas
+  /** Deslizar: a la izquierda elimina (o pide confirmación si el hilo está vinculado); a la derecha, leído / no leído. */
+  const deslizar = (m: MensajeLista): { izquierda: AccionDeslizar | null; derecha: AccionDeslizar | null } => ({
+    izquierda: puedeEliminar
+      ? { etiqueta: 'Eliminar', icono: <IconTrash size={20} />, color: 'rojo', salida: vinculosDeFilas([m]).length ? 'volver' : 'salir', alSoltar: () => void eliminar([m]) }
+      : null,
+    derecha: escritura
+      ? { etiqueta: m.leido ? 'No leído' : 'Leído', icono: m.leido ? <IconMail size={20} /> : <IconMailOpened size={20} />, color: 'azul', salida: 'volver', alSoltar: () => alternarLeido(m) }
+      : null,
+  });
+
   const filaEscritorio = (m: MensajeLista) => {
     const sel = seleccion.has(m.id);
     return (
-      <div
-        key={m.id}
-        className={css.fila}
-        data-leido={m.leido ? '1' : '0'}
-        data-seleccionado={sel ? '1' : '0'}
-        onClick={() => abrir(m)}
-        onKeyDown={(e) => teclaFila(e, m)}
-        role='row'
-        tabIndex={0}
-        aria-label={`${m.leido ? '' : 'No leído. '}${m.de.nombre}: ${m.asunto || '(Sin asunto)'}`}
-        data-testid='correo-fila'
-      >
-        <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex' }}>
-          <Checkbox aria-label={`Seleccionar ${m.asunto}`} checked={sel} onChange={() => toggle(m.id)} data-testid='correo-seleccionar' />
+      <FilaDeslizable key={m.id} {...deslizar(m)} reducirMovimiento={reducirMovimiento}>
+        <div
+          className={css.fila}
+          data-leido={m.leido ? '1' : '0'}
+          data-seleccionado={sel ? '1' : '0'}
+          onClick={() => abrir(m)}
+          onKeyDown={(e) => teclaFila(e, m)}
+          role='row'
+          tabIndex={0}
+          aria-label={`${m.leido ? '' : 'No leído. '}${m.de.nombre}: ${m.asunto || '(Sin asunto)'}`}
+          data-testid='correo-fila'
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex' }}>
+            <Checkbox aria-label={`Seleccionar ${m.asunto}`} checked={sel} onChange={() => toggle(m.id)} data-testid='correo-seleccionar' />
+          </div>
+          <div className={`${css.de} ${m.leido ? '' : css.fuerte}`} title={m.de.correo}>
+            {m.de.nombre || m.de.correo}
+          </div>
+          <div className={css.asunto}>
+            {badgeSolicitud(m)}
+            <span className={css.asuntoTexto}>
+              <span className={m.leido ? undefined : css.fuerte}>{m.asunto || '(Sin asunto)'}</span>
+              {m.extracto && <span className={css.extracto}> — {m.extracto}</span>}
+            </span>
+          </div>
+          <div className={css.meta}>
+            <span className={css.fecha}>
+              {m.conAdjuntos && <IconPaperclip size={15} aria-label='Con adjuntos' />}
+              <Tooltip label={fechaLarga(m.fecha)} openDelay={400}>
+                <span>{fechaCorta(m.fecha)}</span>
+              </Tooltip>
+            </span>
+            <span className={css.acciones} onClick={(e) => e.stopPropagation()}>
+              <Tooltip label='Abrir el hilo'>
+                <ActionIcon variant='subtle' color='gray' radius='xl' onClick={() => abrir(m)} aria-label={`Abrir ${m.asunto}`} data-testid='correo-fila-abrir'>
+                  <IconMailOpened size={18} />
+                </ActionIcon>
+              </Tooltip>
+              <Tooltip label='Convertir en solicitud'>
+                <ActionIcon variant='subtle' color='gray' radius='xl' onClick={() => setSimulacion([m.id])} aria-label={`Convertir en solicitud ${m.asunto}`} data-testid='correo-fila-crear'>
+                  <IconFlask size={18} />
+                </ActionIcon>
+              </Tooltip>
+              {puedeEliminar && (
+                <Tooltip label='Eliminar (a la Papelera)'>
+                  <ActionIcon variant='subtle' color='gray' radius='xl' onClick={() => void eliminar([m])} aria-label={`Eliminar ${m.asunto}`} data-testid='correo-fila-eliminar'>
+                    <IconTrash size={18} />
+                  </ActionIcon>
+                </Tooltip>
+              )}
+            </span>
+          </div>
         </div>
-        <div className={`${css.de} ${m.leido ? '' : css.fuerte}`} title={m.de.correo}>
-          {m.de.nombre || m.de.correo}
-        </div>
-        <div className={css.asunto}>
-          {badgeSolicitud(m)}
-          <span className={css.asuntoTexto}>
-            <span className={m.leido ? undefined : css.fuerte}>{m.asunto || '(Sin asunto)'}</span>
-            {m.extracto && <span className={css.extracto}> — {m.extracto}</span>}
-          </span>
-        </div>
-        <div className={css.meta}>
-          <span className={css.fecha}>
-            {m.conAdjuntos && <IconPaperclip size={15} aria-label='Con adjuntos' />}
-            <Tooltip label={fechaLarga(m.fecha)} openDelay={400}>
-              <span>{fechaCorta(m.fecha)}</span>
-            </Tooltip>
-          </span>
-          <span className={css.acciones} onClick={(e) => e.stopPropagation()}>
-            <Tooltip label='Abrir el hilo'>
-              <ActionIcon variant='subtle' color='gray' radius='xl' onClick={() => abrir(m)} aria-label={`Abrir ${m.asunto}`} data-testid='correo-fila-abrir'>
-                <IconMailOpened size={18} />
-              </ActionIcon>
-            </Tooltip>
-            <Tooltip label='Convertir en solicitud'>
-              <ActionIcon variant='subtle' color='gray' radius='xl' onClick={() => setSimulacion([m.id])} aria-label={`Convertir en solicitud ${m.asunto}`} data-testid='correo-fila-crear'>
-                <IconFlask size={18} />
-              </ActionIcon>
-            </Tooltip>
-          </span>
-        </div>
-      </div>
+      </FilaDeslizable>
     );
   };
 
@@ -903,50 +1092,52 @@ export default function CorreoPage() {
     const sel = seleccion.has(m.id);
     const fuerte = m.leido ? undefined : css.fuerte;
     return (
-      <div key={m.id} className={css.filaMovil} data-seleccionado={sel ? '1' : '0'} onClick={() => abrir(m)} data-testid='correo-fila'>
-        <button
-          type='button'
-          className={css.avatarSel}
-          role='checkbox'
-          aria-checked={sel}
-          aria-label={`Seleccionar ${m.asunto}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            toggle(m.id);
-          }}
-          data-testid='correo-seleccionar'
-        >
-          {sel ? (
-            <span className={css.avatarMarcado}>
-              <IconCheck size={20} />
-            </span>
-          ) : (
-            <AvatarPersona nombre={m.de.nombre} correo={m.de.correo} size={40} />
-          )}
-        </button>
-        <div className={css.cuerpoMovil}>
-          <div className={css.lineaMovil}>
+      <FilaDeslizable key={m.id} {...deslizar(m)} reducirMovimiento={reducirMovimiento}>
+        <div className={css.filaMovil} data-seleccionado={sel ? '1' : '0'} data-leido={m.leido ? '1' : '0'} onClick={() => abrir(m)} data-testid='correo-fila'>
+          <button
+            type='button'
+            className={css.avatarSel}
+            role='checkbox'
+            aria-checked={sel}
+            aria-label={`Seleccionar ${m.asunto}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggle(m.id);
+            }}
+            data-testid='correo-seleccionar'
+          >
+            {sel ? (
+              <span className={css.avatarMarcado}>
+                <IconCheck size={20} />
+              </span>
+            ) : (
+              <AvatarPersona nombre={m.de.nombre} correo={m.de.correo} size={40} />
+            )}
+          </button>
+          <div className={css.cuerpoMovil}>
+            <div className={css.lineaMovil}>
+              <Text size='sm' className={`${css.truncar} ${fuerte ?? ''}`}>
+                {m.de.nombre || m.de.correo}
+              </Text>
+              <Text size='xs' c={m.leido ? 'dimmed' : undefined} className={fuerte} style={{ flexShrink: 0 }}>
+                {fechaCorta(m.fecha)}
+              </Text>
+            </div>
             <Text size='sm' className={`${css.truncar} ${fuerte ?? ''}`}>
-              {m.de.nombre || m.de.correo}
+              {m.asunto || '(Sin asunto)'}
             </Text>
-            <Text size='xs' c={m.leido ? 'dimmed' : undefined} className={fuerte} style={{ flexShrink: 0 }}>
-              {fechaCorta(m.fecha)}
-            </Text>
-          </div>
-          <Text size='sm' className={`${css.truncar} ${fuerte ?? ''}`}>
-            {m.asunto || '(Sin asunto)'}
-          </Text>
-          <div className={css.lineaMovil}>
-            <Text size='sm' c='dimmed' className={css.truncar}>
-              {m.extracto}
-            </Text>
-            <Group gap={4} wrap='nowrap' style={{ flexShrink: 0 }}>
-              {m.conAdjuntos && <IconPaperclip size={14} aria-label='Con adjuntos' />}
-              {badgeSolicitud(m)}
-            </Group>
+            <div className={css.lineaMovil}>
+              <Text size='sm' c='dimmed' className={css.truncar}>
+                {m.extracto}
+              </Text>
+              <Group gap={4} wrap='nowrap' style={{ flexShrink: 0 }}>
+                {m.conAdjuntos && <IconPaperclip size={14} aria-label='Con adjuntos' />}
+                {badgeSolicitud(m)}
+              </Group>
+            </div>
           </div>
         </div>
-      </div>
+      </FilaDeslizable>
     );
   };
 
@@ -1023,9 +1214,53 @@ export default function CorreoPage() {
         marcarHilo={marcarHilo}
         onCambio={() => setHayCambios(true)}
         onCrearSolicitud={(ids) => setSimulacion(ids)}
+        ticketHabilitado={Boolean(estado.ticketHabilitado)}
       />
     </Card>
   ) : null;
+
+  const envio = estado.conexion.envioHabilitado;
+  const textoSinEnvio = 'Enviar correos desde SynerLink no está habilitado en este ambiente.';
+  const botonRedactar = (
+    <Tooltip label={textoSinEnvio} disabled={envio} withArrow>
+      <div>
+        <Button
+          size='md'
+          radius='lg'
+          variant='light'
+          leftSection={<IconPencil size={20} />}
+          onClick={() => setRedactando(true)}
+          disabled={!envio}
+          fullWidth
+          justify='flex-start'
+          data-testid='correo-redactar-btn'
+        >
+          Redactar
+        </Button>
+      </div>
+    </Tooltip>
+  );
+  const avisoEnviado = avisoEnvio ? (
+    <Alert color='green' variant='light' icon={<IconCheck size={18} />} withCloseButton onClose={() => setAvisoEnvio(null)} p='xs' style={{ flex: '0 0 auto' }} data-testid='correo-aviso-enviado'>
+      <Text size='sm'>{avisoEnvio}</Text>
+    </Alert>
+  ) : null;
+  const alEnviar = ({ destinatarios, asunto }: { destinatarios: number; asunto: string }) => {
+    setAvisoEnvio(`Correo ${asunto ? `«${asunto}» ` : ''}enviado desde su buzón a ${destinatarios === 1 ? '1 destinatario' : `${destinatarios} destinatarios`}. Quedó en Enviados.`);
+    // Los contadores (y la lista, si está en Enviados) se refrescan sin desmontar el aviso.
+    cargarCarpetas();
+    if (carpetaActual?.tipo === 'enviados') void cargarMensajes(filtrosRef.current, { refresco: true });
+  };
+  const redactar = (
+    <RedactarCorreo
+      abierto={redactando}
+      desktop={desktop}
+      correoOperador={estado.conexion.correo}
+      dominiosGrupo={estado.dominiosGrupo ?? []}
+      onCerrar={() => setRedactando(false)}
+      onEnviado={alEnviar}
+    />
+  );
 
   const elegirCarpeta = (id: string | null) => {
     cambiar({ carpeta: id });
@@ -1037,6 +1272,7 @@ export default function CorreoPage() {
   return (
     <div className={css.pantalla}>
       <Encabezado estado={estado} empresa={empresa} setEmpresa={setEmpresa} />
+      {listo && avisoEnviado}
 
       {!listo ? (
         <NoDisponible estado={estado} />
@@ -1044,6 +1280,7 @@ export default function CorreoPage() {
         <div className={css.layout}>
           <aside className={css.sidebar}>
             <Stack gap='md'>
+              {botonRedactar}
               <ListaCarpetas carpetas={carpetas} actual={filtros.carpeta} cargando={cargandoCarpetas} onElegir={elegirCarpeta} />
               <AvisoPrivacidad />
             </Stack>
@@ -1073,12 +1310,26 @@ export default function CorreoPage() {
           )}
           {bandeja}
           {hilo}
+          {!hiloAbierto && !redactando && envio && (
+            <Button
+              className={css.fabRedactar}
+              size='lg'
+              radius='xl'
+              leftSection={<IconPencil size={20} />}
+              onClick={() => setRedactando(true)}
+              aria-label='Redactar correo nuevo'
+              data-testid='correo-redactar-fab'
+            >
+              Redactar
+            </Button>
+          )}
           <Drawer opened={panelCarpetas} onClose={() => setPanelCarpetas(false)} position='left' size='80%' title='Carpetas' data-testid='correo-carpetas-drawer'>
             <ListaCarpetas carpetas={carpetas} actual={filtros.carpeta} cargando={cargandoCarpetas} onElegir={elegirCarpeta} />
           </Drawer>
         </div>
       )}
 
+      {listo && redactar}
       <Modal
         opened={Boolean(confirmarMarcado)}
         onClose={() => setConfirmarMarcado(null)}
@@ -1108,6 +1359,53 @@ export default function CorreoPage() {
                 data-testid='correo-confirmar-marcado-si'
               >
                 Marcar {Math.min(confirmarMarcado.total, CORREO_MAX_MARCAR_CARPETA).toLocaleString('es-CO')} correos
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
+
+      <Modal
+        opened={Boolean(confirmarEliminar)}
+        onClose={() => setConfirmarEliminar(null)}
+        title={confirmarEliminar && confirmarEliminar.filas.length > 1 ? 'Eliminar correos vinculados' : 'Eliminar un correo vinculado'}
+        centered
+        data-testid='correo-confirmar-eliminar'
+      >
+        {confirmarEliminar && (
+          <Stack gap='sm'>
+            <Alert color='yellow' icon={<IconAlertTriangle size={18} />} p='sm'>
+              <Text size='sm' fw={600} mb={4}>
+                {confirmarEliminar.vinculos.length === 1 ? 'El hilo de este correo está vinculado a:' : 'Los hilos de estos correos están vinculados a:'}
+              </Text>
+              <Stack gap={2} data-testid='correo-confirmar-eliminar-vinculos'>
+                {[...new Map(confirmarEliminar.vinculos.map((v) => [v.conversationId, v])).values()].map((v) => (
+                  <Text size='sm' key={v.conversationId}>
+                    {[v.idRequest ? `Solicitud #${v.idRequest}` : null, ...v.proyectos.map((p) => `Proyecto «${p}»`)].filter(Boolean).join(' · ')}
+                  </Text>
+                ))}
+              </Stack>
+            </Alert>
+            <Text size='sm'>
+              {confirmarEliminar.filas.length === 1 ? 'El correo se moverá' : `Los ${confirmarEliminar.filas.length} correos se moverán`} a la Papelera de Outlook; no
+              se borra. La solicitud y el proyecto conservan el vínculo, las notas y la copia que ya tienen. Podrá deshacerlo enseguida o restaurarlo desde la
+              Papelera.
+            </Text>
+            <Group justify='flex-end'>
+              <Button variant='default' onClick={() => setConfirmarEliminar(null)}>
+                Cancelar
+              </Button>
+              <Button
+                color='red'
+                leftSection={<IconTrash size={16} />}
+                onClick={() => {
+                  const c = confirmarEliminar;
+                  setConfirmarEliminar(null);
+                  void eliminar(c.filas, true);
+                }}
+                data-testid='correo-confirmar-eliminar-si'
+              >
+                Eliminar
               </Button>
             </Group>
           </Stack>

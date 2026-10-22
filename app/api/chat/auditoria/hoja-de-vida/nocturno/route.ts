@@ -7,6 +7,7 @@ import {
   reconstruirHistorial,
   VENTANA_NOCTURNA_DIAS,
 } from '../../../../../../lib/agent-audit/cv-db';
+import { reconstruirEventosRuntime } from '../../../../../../lib/agent-audit/cv-completa-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,7 +46,10 @@ export async function POST(request: NextRequest) {
     const historial = await reconstruirHistorial({
       desde: body.historialCompleto === true ? null : new Date(Date.now() - 15 * 86_400_000),
     });
-    return jsonNoStore({ ok: true, metricas, historial, ms: Date.now() - t0 });
+    const eventos = await reconstruirEventosRuntime({
+      desde: body.historialCompleto === true ? null : new Date(Date.now() - 15 * 86_400_000),
+    });
+    return jsonNoStore({ ok: true, metricas, historial, eventos, ms: Date.now() - t0 });
   } catch (error) {
     return serverError('POST /api/chat/auditoria/hoja-de-vida/nocturno', error);
   }

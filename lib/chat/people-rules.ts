@@ -223,9 +223,14 @@ export const PULSE_MAX_EVENTS = 20;
  */
 export const NUDGE_FRESH_MS = 2 * 60_000;
 
-/** Un evento del pulso: algo nuevo en un hilo entre personas. */
+/**
+ * Un evento del pulso: algo nuevo en un hilo entre personas ('message' |
+ * 'nudge') o en una conversación de PROYECTO de la que la persona es miembro
+ * ('project', 2026-10-19: icono «Proyectos» de la cabecera).
+ */
 export interface ChatPulseEvent {
-  type: 'message' | 'nudge';
+  /** 'reaction' (2026-10-20): alguien reaccionó; solo pide sondear el hilo. */
+  type: 'message' | 'nudge' | 'project' | 'reaction';
   idConversation: number;
   idMessage: number;
   /** Quién lo escribió o zumbó. */

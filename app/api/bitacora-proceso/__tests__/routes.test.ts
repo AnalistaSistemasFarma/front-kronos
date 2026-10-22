@@ -9,6 +9,7 @@ const m = vi.hoisted(() => {
     'crearRegistro', 'confirmarVistoBueno', 'prepararConfirmante', 'listActividades', 'crearActividad', 'cambiarActividad', 'listUsuariosEmpresa', 'buscarOps',
     'datosAviso', 'createAndSendNotifications', 'listOperadores', 'crearOperador', 'cambiarOperador', 'agregarOperadores', 'listAreas', 'crearArea', 'cambiarArea',
     'listSupervisoresEmpresa', 'listResponsables', 'listResponsablesEmpresa', 'listCandidatosResponsable', 'asignarResponsable', 'cambiarResponsable', 'importarOperadores', 'estadoPin', 'configurarPin', 'listPinsEmpresa', 'restablecerPin', 'verificarPassword',
+    'empresasComoJefe', 'puedeAbrirComoJefe',
   ] as const;
   return Object.fromEntries(names.map((n) => [n, vi.fn()])) as Record<(typeof names)[number], ReturnType<typeof vi.fn>>;
 });
@@ -25,6 +26,7 @@ vi.mock('../../../../lib/bitacora-proceso/db', () => ({
   agregarOperadores: m.agregarOperadores, listAreas: m.listAreas, crearArea: m.crearArea, cambiarArea: m.cambiarArea, listSupervisoresEmpresa: m.listSupervisoresEmpresa,
   listResponsables: m.listResponsables, listResponsablesEmpresa: m.listResponsablesEmpresa, listCandidatosResponsable: m.listCandidatosResponsable,
   asignarResponsable: m.asignarResponsable, cambiarResponsable: m.cambiarResponsable,
+  empresasComoJefe: m.empresasComoJefe, puedeAbrirComoJefe: m.puedeAbrirComoJefe,
 }));
 // El notificador compartido (campana + push): se simula para ver QUÉ se avisa y a QUIÉN.
 vi.mock('../../../../lib/notifications.js', () => ({ createAndSendNotifications: m.createAndSendNotifications }));
@@ -73,6 +75,8 @@ beforeEach(() => {
   for (const fn of Object.values(m)) fn.mockReset();
   m.datosAviso.mockImplementation(async (_db: unknown, idOrden: number) => ({ ...avisoBase, idOrden }));
   m.createAndSendNotifications.mockResolvedValue({ saved: 1, pushed: 1 });
+  m.empresasComoJefe.mockResolvedValue(new Set<number>());
+  m.puedeAbrirComoJefe.mockResolvedValue(false);
 });
 
 describe('Bitácora de Proceso · rutas', () => {
@@ -100,7 +104,7 @@ describe('Bitácora de Proceso · rutas', () => {
   it('listado: solo acceso o la empresa pedida; otra empresa sin permiso es 403 (aislamiento)', async () => {
     asUser([operario]);
     const acc = await lista.GET(get('?solo=acceso'));
-    expect(await acc.json()).toEqual({ companies: [operario] });
+    expect(await acc.json()).toEqual({ companies: [{ ...operario, canOpen: false }] });
     m.listOrdenes.mockResolvedValue([{ id: 1 }]);
     const res = await lista.GET(get(''));
     expect(res.status).toBe(200);
@@ -299,6 +303,7 @@ describe('Bitácora de Proceso · rutas', () => {
     expect((await lista.POST(send('POST', { ...nueva, inspector: '' }))).status).toBe(400);
     expect((await lista.POST(send('POST', { ...nueva, jefeProduccion: '' }))).status).toBe(400);
     expect(m.crearOrden.mock.calls[0][2]).toEqual({ idUser: 'u1', email: 'op@farmalogica.com', ip: '10.0.0.9' });
+    expect(m.crearOrden.mock.calls[0][3]).toBe('GESTION');
     expect((await lista.POST(send('POST', { ...nueva, lote: '' }))).status).toBe(400);
   });
 
@@ -307,7 +312,7 @@ describe('Bitácora de Proceso · rutas', () => {
     m.crearRegistro.mockResolvedValue({ id: '1', registradoEn: '2026-10-13T20:00:00.000Z', actividad: 'Refrigerio' });
     const ok = await registros.POST(send('POST', { id_actividad: 2, id_operador: 7, registrado_en: '1999-01-01T00:00:00Z', id_user: 'otro' }, '?company=1'), params('5'));
     expect(ok.status).toBe(201);
-    expect(m.crearRegistro.mock.calls[0][3]).toEqual({ idActividad: 2, idOperador: 7, observacion: null });
+    expect(m.crearRegistro.mock.calls[0][3]).toEqual({ idActividad: 2, idOperador: 7, observacion: null, texto: null });
     // El usuario que se guarda es el de la SESIÓN (aparte del operario elegido).
     expect(m.crearRegistro.mock.calls[0][4]).toMatchObject({ idUser: 'u1' });
     m.crearRegistro.mockRejectedValueOnce(new OtError('La bitácora está cerrada: ya no admite registros.', 409));
@@ -400,5 +405,65 @@ describe('Bitácora de Proceso · rutas', () => {
     expect((await fail.json()).error).toMatch(/a mano/);
     m.listUsuariosEmpresa.mockResolvedValue([]);
     expect((await usuarios.GET(get('?company=1'))).status).toBe(200);
+  });
+
+  it('R3 (2026-10-17): el JEFE DE PRODUCCIÓN asignado, sin Gestión, abre (y ve lo que pide la apertura) pero no administra el catálogo', async () => {
+    asUser([operario], 'u-jefe');
+    m.empresasComoJefe.mockResolvedValue(new Set([FARMA]));
+    m.puedeAbrirComoJefe.mockResolvedValue(true);
+    const acc = await lista.GET(get('?solo=acceso'));
+    expect(await acc.json()).toEqual({ companies: [{ ...operario, canOpen: true }] });
+
+    m.crearOrden.mockResolvedValue({ id: 9, consecutivo: 1 });
+    const res = await lista.POST(send('POST', { ...nueva, jefeProduccion: 'u-jefe' }));
+    expect(res.status).toBe(201);
+    expect(m.crearOrden.mock.calls[0][3]).toBe('JEFE_PROD');
+    expect(m.puedeAbrirComoJefe).toHaveBeenCalledWith({ tag: 'prisma' }, operario, 'u-jefe');
+
+    m.listResponsables.mockResolvedValue([]);
+    m.listOperadores.mockResolvedValue([]);
+    m.listAreas.mockResolvedValue([]);
+    m.buscarOps.mockResolvedValue([]);
+    const abrir = await Promise.all([
+      responsables.GET(get('?company=1&rol=INSPECTOR')),
+      operadores.GET(get('?company=1')),
+      areas.GET(get('?company=1')),
+      sapOp.GET(get('?company=1&q=PTCZ')),
+    ]);
+    expect(abrir.map((r) => r.status)).toEqual([200, 200, 200, 200]);
+    // El catálogo sigue siendo solo de Gestión.
+    const catalogo = await Promise.all([
+      responsables.GET(get('?company=1')),
+      operadores.GET(get('?company=1&todas=1')),
+      areas.GET(get('?company=1&todas=1')),
+      operadores.POST(send('POST', { company: FARMA, nombre: 'Pepito' })),
+      responsables.POST(send('POST', { company: FARMA, id_user: 'u9', rol: 'INSPECTOR' })),
+      operadoresOrden.POST(send('POST', { operadores: [7] }, '?company=1'), params('1')),
+    ]);
+    expect(catalogo.map((r) => r.status)).toEqual(catalogo.map(() => 403));
+  });
+
+  it('2026-10-17: el 403 dice EXACTAMENTE qué falta (permiso, Gestión o rol) y en qué empresa', async () => {
+    asUser([]);
+    expect((await (await lista.GET(get(''))).json()).error).toMatch(/le falta el permiso «Bitácora de Proceso».*Administración → Usuarios/);
+    asUser([operario], null);
+    expect((await (await lista.GET(get(''))).json()).error).toMatch(/inactivo/);
+    asUser([operario]);
+    expect((await (await lista.GET(get('?company=3'))).json()).error).toMatch(/permiso «Bitácora de Proceso» en la empresa seleccionada \(id 3\)/);
+    expect((await (await operadores.GET(get('?company=1&todas=1'))).json()).error).toMatch(/«Bitácora de Proceso: Gestión» en FARMALOGICA S\.A\./);
+    const abrir = await (await lista.POST(send('POST', nueva))).json();
+    expect(abrir.error).toMatch(/Para abrir una bitácora en FARMALOGICA S\.A\. le falta el permiso «Bitácora de Proceso: Gestión» \(supervisor\) o estar asignado como jefe de producción/);
+  });
+
+  it('TEXTO LIBRE (2026-10-17): el texto llega SANEADO a la capa de datos y el 400 de «obligatorio» pasa tal cual', async () => {
+    asUser([operario]);
+    m.crearRegistro.mockResolvedValue({ id: '1', registradoEn: '2026-10-17T20:00:00.000Z', actividad: 'Novedad', operador: 'Ana' });
+    const ok = await registros.POST(send('POST', { id_actividad: 9, id_operador: 7, texto: '  Se cayó\u202E un frasco\u0000  ' }, '?company=1'), params('5'));
+    expect(ok.status).toBe(201);
+    expect(m.crearRegistro.mock.calls[0][3]).toEqual({ idActividad: 9, idOperador: 7, observacion: null, texto: 'Se cayó un frasco' });
+    m.crearRegistro.mockRejectedValue(new OtError('«Novedad» es de texto libre: escriba qué pasó (mínimo 3 caracteres).', 400));
+    const falta = await registros.POST(send('POST', { id_actividad: 9, id_operador: 7 }, '?company=1'), params('5'));
+    expect(falta.status).toBe(400);
+    expect((await falta.json()).error).toMatch(/texto libre/);
   });
 });

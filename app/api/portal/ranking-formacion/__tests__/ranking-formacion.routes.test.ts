@@ -57,8 +57,9 @@ describe('GET /api/portal/ranking-formacion', () => {
     expect(res.status).toBe(200);
     const d = await res.json();
     expect(d.top.map((x: { nombre: string }) => x.nombre)).toEqual(['Ana Gómez', 'Luis Ruiz']);
-    expect(d.top[0]).toEqual({ puesto: 1, nombre: 'Ana Gómez', cursos: 2, nota: 90, esUsted: true });
-    expect(d.top[1]).toMatchObject({ puesto: 2, cursos: 1, nota: 100, esUsted: false });
+    // Solo puesto y nombre (pedido de Cristian, 2026-10-16): los cursos y la nota deciden el orden pero no se entregan.
+    expect(d.top[0]).toEqual({ puesto: 1, nombre: 'Ana Gómez', esUsted: true });
+    expect(d.top[1]).toEqual({ puesto: 2, nombre: 'Luis Ruiz', esUsted: false });
     expect(d.total).toBe(2);
     expect(JSON.stringify(d)).not.toMatch(/Prueba|formador@|admin@/);
     expect(res.headers.get('cache-control')).toContain('no-store');
@@ -71,9 +72,9 @@ describe('GET /api/portal/ranking-formacion', () => {
     expect(prisma.portalFormularioIntento.groupBy.mock.calls[0][0].by).toEqual(['material_id', 'student_email']);
   });
 
-  it('NO entrega correos ni la cédula: solo nombre, cursos, nota y puesto', async () => {
+  it('NO entrega correos, cédula, cursos ni nota: solo puesto y nombre', async () => {
     const texto = JSON.stringify(await (await obtener(req())).json());
-    expect(texto).not.toMatch(/@|correo|cedula/i);
+    expect(texto).not.toMatch(/@|correo|cedula|"cursos"|"nota"/i);
   });
 
   it('la lista completa se recuerda un minuto: una segunda petición no vuelve a consultar la base', async () => {

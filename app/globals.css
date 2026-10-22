@@ -2494,6 +2494,117 @@ html[data-mantine-color-scheme='dark'] .sl-pensando {
   color: var(--app-text, var(--foreground));
 }
 
+/* ── Compositor estilo Teams (escritorio, 2026-10-21) ──
+   Referencia de Nicolás: el compositor de Microsoft Teams («no debe ser igual,
+   pero similar»). Un marco con la caja arriba y la fila de íconos de línea
+   abajo a la derecha; al tener el foco, una línea de acento abajo. En el
+   celular (≤ 768 px) se queda la cápsula de una fila, con los íconos
+   agrupados dentro de la caja. Colores: los tokens --app-* de siempre, así
+   que sigue el tema claro/oscuro y la paleta del perfil. */
+.chat-composer.chat-composer--marco {
+  position: relative;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  border-radius: 12px;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  padding: 4px 6px 4px;
+  transition: border-color 160ms ease;
+}
+
+/* La línea de acento: un ::after y no un borde, para no mover nada al enfocar. */
+.chat-composer.chat-composer--marco::after {
+  content: '';
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 0 0 12px 12px;
+  background-color: transparent;
+  transition: background-color 160ms ease;
+  pointer-events: none;
+}
+
+.chat-composer.chat-composer--marco:focus-within::after {
+  background-color: var(--app-accent, #2563eb);
+}
+
+/* La caja dentro del marco: sin borde, sin fondo propio y sin halo (el foco lo
+   marca la línea de acento). El tamaño de letra sigue en 16 px (ver arriba). */
+.chat-composer--marco .chat-composer__input.chat-composer__input--marco,
+.chat-composer--marco .chat-composer__input.chat-composer__input--marco:focus,
+.chat-composer--marco .chat-composer__input.chat-composer__input--marco:focus-within {
+  background-color: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  min-height: 40px;
+  padding: 8px 8px 4px 8px;
+}
+
+.chat-composer--marco .chat-composer__preview {
+  border: 0;
+  background-color: transparent;
+  padding: 8px;
+}
+
+.chat-composer .chat-composer__acciones {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 0 0 2px;
+}
+
+.chat-composer .chat-composer__acciones .mantine-ActionIcon-root[data-variant='subtle'] {
+  color: var(--app-text-muted, #64748b);
+}
+
+.chat-composer .chat-composer__acciones .mantine-ActionIcon-root[data-variant='subtle']:hover {
+  color: var(--app-accent, #2563eb);
+}
+
+.chat-composer .chat-composer__send.chat-composer__send--marco {
+  flex: 0 0 34px;
+}
+
+.chat-composer .chat-composer__send--marco:not([data-disabled]) {
+  color: var(--app-accent, #2563eb);
+}
+
+.chat-composer .chat-composer__send--marco[data-disabled] {
+  background-color: transparent;
+}
+
+.chat-composer__separador {
+  display: inline-block;
+  flex: 0 0 1px;
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background-color: var(--app-border, var(--border-subtle));
+}
+
+.chat-composer__separador.chat-composer__separador--alto {
+  height: 24px;
+  margin: 0 6px;
+}
+
+/* Barra de formato: se despliega ARRIBA de la caja, como en Teams. */
+.chat-composer .chat-composer__formato {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 2px 6px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--app-border, var(--border-subtle));
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chat-composer .chat-composer__formato .mantine-ActionIcon-root {
+  color: var(--app-text, var(--foreground));
+}
+
 /* ── Página de chats ── */
 .chat-folder__icon {
   color: var(--app-accent, #2563eb);
@@ -2863,6 +2974,403 @@ body.chat-inmersivo .chat-page-thread--completa {
 .chat-bubble--user .chat-attachment--link:hover {
   background-color: rgba(255, 255, 255, 0.28);
   border-color: #ffffff;
+}
+
+/* ── Reacciones, GIF y stickers (2026-10-20) ──
+   Mismos tokens --app-* que las fichas de adjuntos: chips redondos con borde
+   suave; el MÍO lleva el acento. Dentro de la burbuja del usuario (fondo de
+   color) el chip se aclara, igual que la ficha de un adjunto. */
+.chat-reacciones {
+  row-gap: 4px;
+}
+
+.chat-reacciones .chat-reaccion {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  background-color: var(--app-surface, var(--surface));
+  color: var(--app-text, var(--foreground));
+  font-size: 13px;
+  line-height: 1;
+  transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+}
+
+.chat-reacciones .chat-reaccion:hover:not(:disabled) {
+  border-color: var(--app-accent, #2563eb);
+}
+
+.chat-reacciones .chat-reaccion:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.chat-reacciones .chat-reaccion--mia {
+  border-color: var(--app-accent, #2563eb);
+  background-color: color-mix(in srgb, var(--app-accent, #2563eb) 14%, var(--app-surface, #ffffff));
+}
+
+.chat-reaccion__emoji {
+  font-size: 15px;
+}
+
+.chat-reaccion__n {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-bubble--user .chat-reacciones .chat-reaccion {
+  background-color: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+}
+
+.chat-bubble--user .chat-reacciones .chat-reaccion--mia {
+  background-color: rgba(255, 255, 255, 0.34);
+  border-color: #ffffff;
+}
+
+/* Botón de reaccionar: solo al pasar el mouse (o con el foco del teclado). En
+   pantallas táctiles no aparece: ahí se reacciona con toque largo. */
+.chat-reaccionar-btn {
+  opacity: 0;
+  flex-shrink: 0;
+  margin-bottom: 4px;
+  transition: opacity 120ms ease;
+}
+
+.chat-msg:hover .chat-reaccionar-btn,
+.chat-reaccionar-btn:focus-visible,
+.chat-reaccionar-btn--abierto {
+  opacity: 1;
+}
+
+/* `.chat-msg .chat-reaccionar-btn` y no solo la clase: los estilos de Mantine
+   cargan DESPUÉS de globals.css y su `display` ganaría el empate. */
+@media (hover: none), (pointer: coarse) {
+  .chat-msg .chat-reaccionar-btn {
+    display: none;
+  }
+}
+
+/* En el celular la presión larga abre la hoja del mensaje: que no compita con
+   la selección de texto ni con el menú del sistema (la hoja trae «Copiar»). */
+@media (pointer: coarse) {
+  .chat-bubble {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
+
+.chat-reaccion-rapida .chat-reaccion-rapida__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  font-size: 22px;
+  line-height: 1;
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+
+.chat-reaccion-rapida .chat-reaccion-rapida__btn:hover,
+.chat-reaccion-rapida .chat-reaccion-rapida__btn:focus-visible {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  transform: scale(1.12);
+}
+
+.chat-emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+  gap: 2px;
+}
+
+.chat-emoji-grid .chat-emoji-grid__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  border-radius: 8px;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.chat-emoji-grid .chat-emoji-grid__btn:hover,
+.chat-emoji-grid .chat-emoji-grid__btn:focus-visible {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+/* Hoja inferior del celular (acciones del mensaje y selector de stickers).
+   Alto según el contenido (nunca la pantalla entera) y con tope. */
+.chat-hoja.chat-hoja {
+  height: auto;
+  max-height: 88dvh;
+  background-color: var(--app-surface, var(--surface));
+  color: var(--app-text, var(--foreground));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.chat-hoja__agarre {
+  width: 40px;
+  height: 4px;
+  margin: 0 auto 10px;
+  border-radius: 999px;
+  background-color: var(--app-border, var(--border-subtle));
+}
+
+.chat-hoja .chat-hoja__accion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 8px;
+  border-radius: 10px;
+  color: var(--app-text, var(--foreground));
+}
+
+.chat-hoja .chat-hoja__accion:hover,
+.chat-hoja .chat-hoja__accion:focus-visible {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+/* Mensaje de STICKER: sin globo, solo la imagen (como WhatsApp y Telegram). */
+.chat-bubble--sticker {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  padding: 0;
+}
+
+.chat-bubble--sticker .chat-bubble__author,
+.chat-bubble--sticker .chat-bubble__meta {
+  color: var(--app-text-muted, #64748b);
+}
+
+.chat-bubble--sticker .chat-reacciones .chat-reaccion {
+  background-color: var(--app-surface, var(--surface));
+  border-color: var(--app-border, var(--border-subtle));
+  color: var(--app-text, var(--foreground));
+}
+
+.chat-bubble--sticker .chat-reacciones .chat-reaccion--mia {
+  border-color: var(--app-accent, #2563eb);
+}
+
+.chat-sticker {
+  display: block;
+  width: 128px;
+  height: 128px;
+  object-fit: contain;
+}
+
+/* GIF: caja con proporción fija (ancho y alto vienen del proveedor), así el
+   hilo no salta cuando termina de cargar. */
+.chat-bubble--gif {
+  padding: 4px;
+}
+
+.chat-gif {
+  display: block;
+  max-width: min(240px, 100%);
+  height: auto;
+  border-radius: 0.75rem;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.chat-bubble--gif .chat-bubble__author,
+.chat-bubble--gif .chat-bubble__meta,
+.chat-bubble--gif .chat-reacciones {
+  padding: 0 6px;
+}
+
+.chat-sticker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 4px;
+}
+
+.chat-sticker-grid .chat-sticker-grid__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 12px;
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+
+.chat-sticker-grid .chat-sticker-grid__btn:hover,
+.chat-sticker-grid .chat-sticker-grid__btn:focus-visible {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  transform: scale(1.04);
+}
+
+.chat-sticker-grid__btn img {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+}
+
+.chat-gif-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 6px;
+}
+
+.chat-gif-grid .chat-gif-grid__btn {
+  display: block;
+  height: 110px;
+  border-radius: 10px;
+  overflow: hidden;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.chat-gif-grid__btn img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.chat-gif-grid .chat-gif-grid__btn:focus-visible {
+  outline: 2px solid var(--app-accent, #2563eb);
+  outline-offset: 2px;
+}
+
+/* ── Stickers ANIMADOS y panel Emoji | Stickers | GIF (2026-10-20) ──
+   El cuadro fijo está siempre; el WebP animado se monta encima solo mientras
+   el sticker se ve (StickerAnimado) y aparece al terminar de cargar. Cuando
+   ya se mueve, el cuadro fijo se oculta: si no, se vería a través de las
+   partes transparentes de los cuadros en movimiento. */
+.chat-sticker-anim {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.chat-sticker-anim > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.chat-sticker-anim > .chat-sticker-anim__mov {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+
+.chat-sticker-anim > .chat-sticker-anim__mov--listo {
+  opacity: 1;
+}
+
+/* `opacity` y no `visibility`: el cuadro fijo lleva el texto alternativo
+   (el animado va aria-hidden) y tiene que seguir en el árbol de accesibilidad. */
+.chat-sticker-anim[data-animando='true'] > img:first-child {
+  opacity: 0;
+}
+
+/* Globo del escritorio, encima de la caja de escribir. */
+.chat-expresiones-globo {
+  background-color: var(--app-surface, var(--surface));
+  border-color: var(--app-border, var(--border-subtle));
+  color: var(--app-text, var(--foreground));
+}
+
+/* Hoja del celular: ocupa el lugar del teclado, debajo de la caja. */
+.chat-expresiones-hoja {
+  margin-top: 8px;
+  padding: 8px 4px calc(4px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--app-border, var(--border-subtle));
+  background-color: var(--app-surface, var(--surface));
+  color: var(--app-text, var(--foreground));
+}
+
+/* Barra de paquetes de stickers (como la de Telegram). */
+.chat-paquetes {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chat-paquetes .chat-paquetes__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 3px 10px 3px 4px;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-text, var(--foreground));
+}
+
+.chat-paquetes .chat-paquetes__btn:hover,
+.chat-paquetes .chat-paquetes__btn:focus-visible {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.chat-paquetes__btn img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+/* «Mis stickers» (2026-10-21): la casilla de agregar y la ventana. */
+.chat-sticker-grid .chat-sticker-grid__btn.chat-sticker-grid__agregar {
+  flex-direction: column;
+  gap: 2px;
+  min-height: 80px;
+  border: 1px dashed var(--app-border, var(--border-subtle));
+  color: var(--app-text-muted, #64748b);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.chat-sticker-grid .chat-sticker-grid__btn.chat-sticker-grid__agregar:hover,
+.chat-sticker-grid .chat-sticker-grid__btn.chat-sticker-grid__agregar:focus-visible {
+  border-color: var(--app-accent, #2563eb);
+  color: var(--app-accent, #2563eb);
+}
+
+.chat-mis-stickers__nuevo {
+  padding: 12px;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  border-radius: 12px;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.chat-mis-stickers__vista {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  height: 96px;
+  border: 1px dashed var(--app-border, var(--border-subtle));
+  border-radius: 12px;
+  color: var(--app-text-muted, #64748b);
+}
+
+.chat-mis-stickers__vista img,
+.chat-mis-stickers__fila img {
+  object-fit: contain;
+}
+
+.chat-mis-stickers__fila {
+  padding: 6px 8px;
+  border-radius: 10px;
+}
+
+.chat-mis-stickers__fila:hover {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.chat-expresiones__credito {
+  font-size: 11px;
 }
 
 /* ── Miniatura de una imagen adjunta (2026-10-01) ──
@@ -5099,6 +5607,97 @@ html.dark .portal-th--modulo .portal-th__cal,
   --pthc-festivo: #ff8a80;
 }
 
+/* ── Portal TH en MODO OSCURO, dentro del hub (Cristian, 2026-10-21) ─────────
+   Mismo criterio que el calendario: solo en /process/portal-th (la página
+   abierta /portal sigue siempre clara) y solo con CSS, así que responde EN VIVO
+   al cambiar de tema (applyAppThemeToDocument cambia html.dark,
+   data-mantine-color-scheme y las --app-* sin recargar). En claro no cambia
+   nada: aquí solo se redefinen los tokens del portal con los de SynerLink y se
+   cambian los fondos blancos fijos por la superficie del tema. Sobre el azul
+   de acento (relleno) el texto va oscuro, como el día elegido del calendario. */
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo {
+  --pth-azul: var(--app-accent, var(--mantine-color-anchor));
+  --pth-azul-700: var(--app-accent-hover, var(--mantine-color-anchor));
+  --pth-azul-50: var(--app-surface-raised, var(--mantine-color-default-hover));
+  --pth-tinta: var(--app-text, var(--mantine-color-text));
+  --pth-tinta-2: var(--app-text, var(--mantine-color-text));
+  --pth-tinta-3: var(--app-text-muted, var(--mantine-color-dimmed));
+  --pth-linea: var(--app-border, var(--mantine-color-default-border));
+  --pth-superficie: var(--app-surface, var(--mantine-color-body));
+  --pth-sobre-azul: #0b1220;
+}
+
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__nav-boton,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__carrusel-marco,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__cargar,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__tarjeta,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-caja,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-controles,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__contactos-boton:hover,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__extensiones-buscar,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__buscador:focus,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__politicas-lista,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__politicas-item:hover,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__politicas-item--activo,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__politicas-volver,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__formacion-toggle button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__curso-tarjeta,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__formacion-gestion-barra button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__material-item,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__material-check,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__subida,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__subida button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__acceso-formacion,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__formacion-crear .portal-th__boton-secundario,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__icono-boton,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__invitar,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__invitar-acciones button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__org-zoom button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__org-muestra,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__org-lienzo,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__org-ventana,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__hoy-caja,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__top {
+  background-color: var(--pth-superficie);
+}
+
+/* Los rellenos que comparten elemento con una superficie de arriba vuelven al azul. */
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__nav-boton--activo,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__cargar:hover,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__invitar-acciones button[type='submit'] {
+  background-color: var(--pth-azul);
+}
+
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__material-check--bloqueada {
+  background-color: var(--pth-azul-50);
+}
+
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__nav-boton--activo,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__cargar:hover,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-barra,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-acciones a,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-acciones button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__politicas-tipo,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__certificado-boton,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__formacion-crear button:where(:not(.portal-th__mantine *)),
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-controles button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__cal-boton--primario,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__invitar-acciones button[type='submit'],
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__org-ventana > header,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__org-ventana > header button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__hoy-barra,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__hoy-barra button {
+  color: var(--pth-sobre-azul);
+}
+
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__formacion-toggle-activo {
+  color: var(--pth-sobre-azul) !important;
+}
+
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-acciones button {
+  background-color: rgba(11, 18, 32, 0.14);
+}
+
 .portal-th__cal-alternar {
   display: flex;
   justify-content: space-between;
@@ -6078,6 +6677,26 @@ a.portal-th__contactos-boton--enlace:focus-visible {
   flex-shrink: 0;
 }
 
+/* Día sin nada (Cristian, 2026-10-21): el aviso y, debajo, los próximos (título como el del día en el calendario). */
+.portal-th__hoy-vacio {
+  margin: 0 0 12px;
+  color: var(--pth-tinta-2);
+  font-size: 0.88rem;
+}
+
+.portal-th__hoy-vacio--pista {
+  margin: 0;
+  color: var(--pth-tinta-3);
+  font-size: 0.78rem;
+}
+
+.portal-th__hoy-subtitulo {
+  margin: 0 0 8px;
+  color: var(--pth-azul);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
 /* Barra que se vacía en 15 s. */
 .portal-th__hoy-tiempo {
   height: 4px;
@@ -6248,4 +6867,26 @@ a.portal-th__contactos-boton--enlace:focus-visible {
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+/* ─── Icono «Proyectos» de la cabecera (2026-10-19): hoja inferior en el celular.
+   Mismas superficies y textos que la campana (notification-bell-*). ─── */
+.proyectos-hoja.mantine-Drawer-content {
+  background-color: var(--app-surface, var(--surface)) !important;
+  color: var(--app-text, var(--foreground)) !important;
+  height: auto !important;
+  max-height: 85dvh;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.proyectos-hoja__cuerpo {
+  padding: 0;
+}
+
+.proyectos-hoja__asa {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  margin: 8px auto 0;
+  background-color: var(--app-border, var(--border-subtle));
 }

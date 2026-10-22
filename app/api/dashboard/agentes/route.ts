@@ -7,6 +7,7 @@ import {
 } from '../../../../lib/chat/audit-access';
 import { formatDateLocal } from '../../../../lib/dashboard/dateRange';
 import { jsonNoStore, resolveSessionUser, serverError, unauthorized, forbidden } from '../../../../lib/chat/http';
+import { consumoTurnosPor } from '../../../../lib/chat/turn-usage-sums';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,8 +38,9 @@ export const dynamic = 'force-dynamic';
  *   - actividad (ranking de usuarios, tendencia diaria, ranking de agentes por
  *     mensajes): `chat_message` — se cuentan solo los mensajes de PERSONA
  *     (role='user'), que son los que representan "uso" real del agente.
- *   - costo por agente: `chat_agent_turn_usage`, agregado con groupBy nativo
- *     (ya trae id_agent directo, no hace falta unir con la conversación).
+ *   - costo por agente: `chat_agent_turn_usage`, sumado en SQL con
+ *     `SUM(CAST(.. AS BIGINT))` (lib/chat/turn-usage-sums.ts): el groupBy de
+ *     Prisma suma el INT como INT y desbordaba (P2020, 2026-10-21).
  *
  * Se trae de `chat_message` solo {id_user_author, created_at, id_conversation
  * -> id_agent} — nunca el `body` ni los adjuntos — para poder repartir esas
@@ -90,14 +92,6 @@ export async function GET(request: NextRequest) {
       },
     } as const;
 
-    const rangoUsage = {
-      ...(desde || hasta
-        ? { created_at: { ...(desde ? { gte: desde } : {}), ...(hasta ? { lte: hasta } : {}) } }
-        : {}),
-      ...(idAgent ? { id_agent: idAgent } : {}),
-      ...(alcance.all ? {} : { conversation: conversationScopeWhere(alcance) }),
-    } as const;
-
     const [agentes, mensajes, usagePorAgente, agentCompanies, companies] = await Promise.all([
       prisma.agent.findMany({
         where: { is_active: true, ...(alcance.all ? {} : { id_agent: { in: alcance.agentIds } }) },
@@ -121,12 +115,7 @@ export async function GET(request: NextRequest) {
           },
         },
       }),
-      prisma.chatAgentTurnUsage.groupBy({
-        by: ['id_agent'],
-        where: rangoUsage,
-        _sum: { total_tokens: true },
-        _count: { id: true },
-      }),
+      consumoTurnosPor('id_agent', { desde, hasta, idAgent, alcance }),
       prisma.agentCompany.findMany({
         where: alcance.all ? {} : { id_company: { in: alcance.companyIds } },
         select: { id_agent: true, id_company: true, is_primary: true },
@@ -242,7 +231,7 @@ export async function GET(request: NextRequest) {
       .slice(0, 20);
 
     const usageByAgent = new Map(
-      usagePorAgente.map((u) => [u.id_agent, { tokens: u._sum.total_tokens ?? 0, turnos: u._count.id }])
+      usagePorAgente.map((u) => [u.clave, { tokens: u.totalTokens, turnos: u.turnos }])
     );
 
     const rankingAgentes = agentes

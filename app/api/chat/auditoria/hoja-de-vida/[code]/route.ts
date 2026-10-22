@@ -11,6 +11,7 @@ import {
   unauthorized,
 } from '../../../../../../lib/chat/http';
 import { leerHojaDeVida } from '../../../../../../lib/agent-audit/cv-db';
+import { leerHojaDeVidaCompleta } from '../../../../../../lib/agent-audit/cv-completa-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,7 +47,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cod
     }
     const ficha = await leerHojaDeVida(codigo);
     if (!ficha) return jsonNoStore({ error: 'No existe ese agente.' }, { status: 404 });
-    return jsonNoStore({ ...ficha, puedeConfigurar: await canConfigureAgents(user.email) });
+    // Incremento 1 (2026-10-20): credencial por huella, arranque, rotación,
+    // gobierno, casos vinculados, hallazgos de Gobierno IA y calidad de respuesta.
+    const completa = await leerHojaDeVidaCompleta(ficha.agente.idAgent);
+    return jsonNoStore({ ...ficha, completa, puedeConfigurar: await canConfigureAgents(user.email) });
   } catch (error) {
     return serverError('GET /api/chat/auditoria/hoja-de-vida/[code]', error);
   }

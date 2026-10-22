@@ -276,7 +276,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
               <Button
                 size='xs'
                 leftSection={<IconPlus size={14} />}
-                onClick={() => setEditing({ entity: 'document-types', form: { code: '', name: '', pluralName: '', requiresTraining: true, reviewMonths: 36, alertMonths: 2, sortOrder: 0, isActive: true, idHeaderTemplate: null, draftExtensions: 'docx', generatorGuide: false, reason: '' } })}
+                onClick={() => setEditing({ entity: 'document-types', form: { code: '', name: '', pluralName: '', requiresTraining: true, reviewMonths: 36, alertMonths: 2, sortOrder: 0, isActive: true, idHeaderTemplate: null, draftExtensions: 'docx', generatorGuide: false, isParentType: false, reason: '' } })}
               >
                 Nuevo tipo documental
               </Button>
@@ -315,6 +315,11 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                             Plantilla guía
                           </Badge>
                         )}
+                        {(data.parentTypeCodes ?? []).includes(t.code) && (
+                          <Badge ml={4} variant='light' color='blue' data-testid='sgc-tipo-padre' title={t.isParentType ? 'Marcado como tipo padre' : 'Tipo padre por defecto (procedimiento): ningún tipo está marcado'}>
+                            Documento padre
+                          </Badge>
+                        )}
                       </Table.Td>
                       <Table.Td>
                         {editButton('document-types', {
@@ -330,6 +335,7 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                           idHeaderTemplate: t.idHeaderTemplate ?? null,
                           draftExtensions: (t.draftExtensions ?? ['docx']).join(','),
                           generatorGuide: !!t.generatorGuide,
+                          isParentType: !!t.isParentType,
                         })}
                       </Table.Td>
                     </Table.Tr>
@@ -404,6 +410,14 @@ function Configuracion({ company }: { company: SgcCompanyAccess }) {
                   checked={!!editing.form.generatorGuide}
                   onChange={(e) => set('generatorGuide', e.currentTarget.checked)}
                   data-testid='sgc-tipo-generador-guia-check'
+                />
+                {/* 2026-10-19 (documentos padre e hijos): el procedimiento es padre y no tiene padre. */}
+                <Checkbox
+                  label='Tipo padre (documento padre, sin padre)'
+                  description='Sus documentos no tienen padre y de ellos se desprenden los hijos (formatos, instructivos…), que heredan su número. Si ningún tipo está marcado, el padre es el Procedimiento.'
+                  checked={!!editing.form.isParentType}
+                  onChange={(e) => set('isParentType', e.currentTarget.checked)}
+                  data-testid='sgc-tipo-padre-check'
                 />
               </>
             )}

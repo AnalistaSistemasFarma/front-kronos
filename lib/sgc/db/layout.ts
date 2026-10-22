@@ -11,13 +11,16 @@ import {
   drawInstitutionalHeaders,
   hasChangeHistoryToken,
   registerOnlyParticipants,
+  SGC_A4_LANDSCAPE,
+  SGC_A4_PORTRAIT,
   suggestInstitutionalPlacements,
   type SgcChangeHistoryRow,
   type SgcInstitutionalHeaderData,
   type SgcSystemToken,
 } from '../pdf/institutional';
 import { wrapDraftForPdf, type SgcDocxToHtml, type SgcHtmlToPdf } from '../pdf/render';
-import { xlsxToSheet } from '../pdf/viewable';
+import { inspectXlsx, xlsxToSheet, type SgcSheetInspection, type SgcSheetLayout } from '../pdf/viewable';
+import { describeSheetSettings, isDefaultSheetSettings, normalizeSheetSettings, type SgcSheetSettings } from '../sheetSettings';
 import {
   missingPlacements,
   normalizeSgcFields,
@@ -135,10 +138,45 @@ export async function layoutParticipants(db: Db, row: { id_flow_version: number;
 export interface SgcLayoutState {
   institutionalHeader: boolean;
   fields: SgcStoredField[];
+  /** 2026-10-22: ajustes de presentación del borrador en Excel (null = automático). */
+  sheetSettings: SgcSheetSettings | null;
   contentSha256: string | null;
   savedBy: string | null;
   savedAt: string | null;
   saves: number;
+}
+
+/**
+ * 2026-10-22: fields_json guarda la lista de cajas (como siempre) o, si el
+ * borrador en Excel tiene ajustes de presentación, { fields, sheetSettings }.
+ * Así no hace falta otra columna y las filas anteriores se leen igual.
+ */
+export function parseLayoutJson(raw: string | null | undefined): { fields: SgcStoredField[]; sheetSettings: SgcSheetSettings | null } {
+  const text = (raw ?? '').trim();
+  if (text.startsWith('{')) {
+    try {
+      const o = JSON.parse(text) as { fields?: unknown; sheetSettings?: unknown };
+      let sheetSettings: SgcSheetSettings | null = null;
+      try {
+        sheetSettings = o.sheetSettings ? normalizeSheetSettings(o.sheetSettings) : null;
+      } catch {
+        sheetSettings = null; // Unos ajustes ilegibles no impiden el documento: se usa el automático.
+      }
+      return { fields: parseStoredFields(JSON.stringify(Array.isArray(o.fields) ? o.fields : [])), sheetSettings: sheetSettings && !isDefaultSheetSettings(sheetSettings) ? sheetSettings : null };
+    } catch {
+      return { fields: [], sheetSettings: null };
+    }
+  }
+  return { fields: parseStoredFields(raw ?? null), sheetSettings: null };
+}
+
+export function layoutJson(fields: readonly SgcStoredField[], sheetSettings: SgcSheetSettings | null): string {
+  return sheetSettings && !isDefaultSheetSettings(sheetSettings) ? JSON.stringify({ fields, sheetSettings }) : JSON.stringify(fields);
+}
+
+/** ¿El documento compuesto sale en A4 horizontal? Solo un borrador en Excel cuyo elaborador la eligió (con encabezado institucional). */
+export function layoutIsLandscape(draftFormat: string | null | undefined, sheetSettings: SgcSheetSettings | null): boolean {
+  return draftFormat === 'xlsx' && sheetSettings?.orientation === 'horizontal';
 }
 
 /** Última composición guardada (o la de por defecto: sin encabezado institucional y sin cajas). */
@@ -147,10 +185,12 @@ export async function latestLayout(db: Db, idRequest: number): Promise<SgcLayout
     db.sgcDocumentLayout.findFirst({ where: { id_request: idRequest }, orderBy: { id_document_layout: 'desc' } }),
     db.sgcDocumentLayout.count({ where: { id_request: idRequest } }),
   ]);
-  if (!last) return { institutionalHeader: false, fields: [], contentSha256: null, savedBy: null, savedAt: null, saves: 0 };
+  if (!last) return { institutionalHeader: false, fields: [], sheetSettings: null, contentSha256: null, savedBy: null, savedAt: null, saves: 0 };
+  const parsed = parseLayoutJson(last.fields_json);
   return {
     institutionalHeader: last.institutional_header,
-    fields: parseStoredFields(last.fields_json),
+    fields: parsed.fields,
+    sheetSettings: parsed.sheetSettings,
     contentSha256: last.content_sha256?.trim() ?? null,
     savedBy: last.saved_by,
     savedAt: last.saved_at.toISOString(),
@@ -178,6 +218,8 @@ export async function getDocumentLayout(db: SgcDb, idRequest: number, viewer: Sg
   const institutionalHeader = headerMandatory ? draft?.format !== 'pdf' : layout.institutionalHeader;
   // D6 (E2E 2026-10-10): quien va solo al registro de firmas no cuenta como «sin ubicar».
   const inRegister = new Set(registerOnlyParticipants(participants, fields).map((p) => p.key));
+  // 2026-10-19: con una plantilla con grilla, las firmas sugeridas caen en sus celdas «Firma».
+  const grid = institutionalHeader ? (await headerTemplateForType(db, row.id_company, row.id_document_type ?? null)).config.grid : null;
   return {
     idRequest,
     institutionalHeader,
@@ -186,7 +228,9 @@ export async function getDocumentLayout(db: SgcDb, idRequest: number, viewer: Sg
     participants,
     missing: missingPlacements(participants, fields).filter((p) => !inRegister.has(p.key)).map((p) => p.key),
     inRegister: [...inRegister],
-    suggested: institutionalHeader ? suggestInstitutionalPlacements(participants, fields) : [],
+    suggested: institutionalHeader ? suggestInstitutionalPlacements(participants, fields, grid, layoutIsLandscape(draft?.format, layout.sheetSettings) ? SGC_A4_LANDSCAPE : SGC_A4_PORTRAIT) : [],
+    // 2026-10-22: ajustes de presentación del borrador en Excel (orientación, tamaño, área, títulos, columnas y hojas).
+    sheetSettings: draft?.format === 'xlsx' ? layout.sheetSettings : null,
     canEdit,
     draft: draft ? { name: draft.name, sha256: draft.sha256, format: draft.format } : null,
     // La firma se ubicó sobre otro borrador: conviene revisar que la caja siga en su sitio.
@@ -201,7 +245,7 @@ export async function getDocumentLayout(db: SgcDb, idRequest: number, viewer: Sg
  * Guarda la composición: encabezado institucional sí/no y cajas de firma.
  * Solo el ELABORADOR durante la Elaboración. Fila nueva (solo inserción).
  */
-export async function saveDocumentLayout(db: SgcDb, idRequest: number, input: { institutionalHeader?: unknown; fields?: unknown; reason?: unknown; pageCount?: unknown }, viewer: SgcViewer, actor: SgcActor) {
+export async function saveDocumentLayout(db: SgcDb, idRequest: number, input: { institutionalHeader?: unknown; fields?: unknown; reason?: unknown; pageCount?: unknown; sheetSettings?: unknown }, viewer: SgcViewer, actor: SgcActor) {
   const { row } = await assertCanView(db, idRequest, viewer);
   if (lower(row.elaborator_email) !== lower(actor.email)) throw new SgcError('Solo el elaborador ubica las firmas en el documento.', 403);
   if (!inElaboration(row)) throw new SgcError('Las firmas se ubican durante la elaboración (antes de enviar el documento a revisión).', 409);
@@ -214,16 +258,30 @@ export async function saveDocumentLayout(db: SgcDb, idRequest: number, input: { 
   if (institutional && draft?.format === 'pdf') {
     throw new SgcError('El encabezado institucional se aplica a documentos editados en la app o en Word: un PDF ya trae su propio formato. Ubique las firmas sobre el PDF.', 409);
   }
+  // 2026-10-22: ajustes del borrador en Excel (undefined = se conservan; null = automático). Solo presentación.
+  let sheetSettings = current.sheetSettings;
+  if (input.sheetSettings !== undefined) {
+    if (input.sheetSettings !== null && draft?.format !== 'xlsx') throw new SgcError('Los ajustes de presentación solo aplican a un borrador en Excel (.xlsx).', 409);
+    const n = input.sheetSettings === null ? null : normalizeSheetSettings(input.sheetSettings);
+    sheetSettings = n && !isDefaultSheetSettings(n) ? n : null;
+  }
+  // Si cambia la orientación de la hoja, las cajas ubicadas ya no caen en su sitio: se quitan y se vuelven a ubicar.
+  const orientationChanged = layoutIsLandscape(draft?.format, sheetSettings) !== layoutIsLandscape(draft?.format, current.sheetSettings);
   const pages = Number(input.pageCount);
   const pageCount = Number.isInteger(pages) && pages > 0 && pages <= 500 ? pages : null;
-  const normalized = input.fields === undefined ? { fields: current.fields.filter((f) => participants.some((p) => p.key === f.signerKey)), error: null } : normalizeSgcFields(input.fields, participants, pageCount);
+  const normalized =
+    input.fields === undefined
+      ? { fields: orientationChanged ? [] : current.fields.filter((f) => participants.some((p) => p.key === f.signerKey)), error: null }
+      : normalizeSgcFields(input.fields, participants, pageCount);
   if (normalized.error) throw new SgcError(normalized.error);
   const reason = typeof input.reason === 'string' ? input.reason.trim().slice(0, 1000) || null : null;
-  const fieldsJson = JSON.stringify(normalized.fields);
+  const fieldsJson = layoutJson(normalized.fields, sheetSettings);
+  const sameSheet = JSON.stringify(sheetSettings) === JSON.stringify(current.sheetSettings);
+  const removedByOrientation = orientationChanged && input.fields === undefined ? current.fields.length : 0;
   // Sin cambios (misma composición, sin contar el identificador de cada caja): no se guarda otra fila.
   const comparable = (list: readonly SgcStoredField[]) => JSON.stringify(list.map((f) => ({ ...f, id: undefined })));
-  if (current.saves > 0 && institutional === current.institutionalHeader && comparable(normalized.fields) === comparable(current.fields) && (draft?.sha256 ?? null) === current.contentSha256) {
-    return { saved: false, institutionalHeader: institutional, fields: normalized.fields };
+  if (current.saves > 0 && sameSheet && institutional === current.institutionalHeader && comparable(normalized.fields) === comparable(current.fields) && (draft?.sha256 ?? null) === current.contentSha256) {
+    return { saved: false, institutionalHeader: institutional, fields: normalized.fields, sheetSettings, removedSignatures: 0 };
   }
   const now = new Date();
   await db.$transaction(async (tx) => {
@@ -233,8 +291,10 @@ export async function saveDocumentLayout(db: SgcDb, idRequest: number, input: { 
     const placed = normalized.fields.length;
     const register = registerOnlyParticipants(participants, normalized.fields).length;
     const missing = missingPlacements(participants, normalized.fields).length - register;
-    await addInteraction(tx, idRequest, 'estado', lower(actor.email), `Ubicó las firmas en el documento: ${placed} de ${participants.length - register} firma(s) ubicada(s)${missing ? ` (faltan ${missing})` : ''}${register ? `; ${register} van solo al registro de firmas` : ''}.${institutional !== current.institutionalHeader ? `\nEncabezado institucional: ${institutional ? 'sí' : 'no'}.` : ''}${reason ? `\nMotivo: ${reason}` : ''}`, {
-      meta: { idDocumentLayout: saved.id_document_layout, institutional, placed, missing },
+    const sheetNote = sameSheet ? '' : `\nPresentación del Excel: ${sheetSettings ? describeSheetSettings(sheetSettings) : 'ajuste automático'}.${removedByOrientation ? ` Cambió la orientación de la hoja: se quitaron ${removedByOrientation} firma(s) ubicada(s) para volver a ubicarlas.` : ''}`;
+    const summary = sameSheet || input.fields !== undefined ? `Ubicó las firmas en el documento: ${placed} de ${participants.length - register} firma(s) ubicada(s)${missing ? ` (faltan ${missing})` : ''}${register ? `; ${register} van solo al registro de firmas` : ''}.` : 'Ajustó la presentación del Excel en el documento.';
+    await addInteraction(tx, idRequest, 'estado', lower(actor.email), `${summary}${institutional !== current.institutionalHeader ? `\nEncabezado institucional: ${institutional ? 'sí' : 'no'}.` : ''}${sheetNote}${reason ? `\nMotivo: ${reason}` : ''}`, {
+      meta: { idDocumentLayout: saved.id_document_layout, institutional, placed, missing, ...(sameSheet ? {} : { sheetSettings, removedSignatures: removedByOrientation }) },
     });
     await writeSgcAudit(tx, {
       idCompany: row.id_company,
@@ -242,14 +302,14 @@ export async function saveDocumentLayout(db: SgcDb, idRequest: number, input: { 
       action: SGC_AUDIT_ACTIONS.firmasUbicadas,
       entity: 'document_layout',
       entityId: saved.id_document_layout,
-      before: current.saves ? { institutional: current.institutionalHeader, fields: current.fields } : null,
-      after: { institutional, fields: normalized.fields, contentSha256: draft?.sha256 ?? null },
+      before: current.saves ? { institutional: current.institutionalHeader, fields: current.fields, ...(current.sheetSettings ? { sheetSettings: current.sheetSettings } : {}) } : null,
+      after: { institutional, fields: normalized.fields, contentSha256: draft?.sha256 ?? null, ...(sheetSettings ? { sheetSettings } : {}) },
       detail: reason,
       ip: actor.ip,
       userAgent: actor.userAgent,
     });
   });
-  return { saved: true, institutionalHeader: institutional, fields: normalized.fields };
+  return { saved: true, institutionalHeader: institutional, fields: normalized.fields, sheetSettings, removedSignatures: removedByOrientation };
 }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +372,8 @@ export interface SgcComposeInput {
   changeDate: string;
   changeReason: string;
   emissionText: string;
+  /** 2026-10-22: ajustes de presentación de un borrador en Excel (null = automático). */
+  sheetSettings?: SgcSheetSettings | null;
 }
 
 /**
@@ -331,10 +393,11 @@ export async function composeContent(
   }
   let html: string;
   let sheetCss: string | undefined;
+  let sheetLayout: SgcSheetLayout | undefined;
   if (input.draft.format === 'docx') html = await deps.docxToHtml(input.draft.bytes!);
   else if (input.draft.format === 'html') html = sanitizeDraftHtml(input.draft.html ?? '');
   // S16 (R32, D17): un FORMATO en Excel se compone desde sus hojas (tablas), sin pasar por Word.
-  else if (input.draft.format === 'xlsx') ({ html, css: sheetCss } = await xlsxToSheet(input.draft.bytes!));
+  else if (input.draft.format === 'xlsx') ({ html, css: sheetCss, layout: sheetLayout } = await xlsxToSheet(input.draft.bytes!, input.sheetSettings ?? undefined));
   else throw new SgcError('El borrador debe ser PDF, Word (.docx), Excel (.xlsx) o editado en la app.', 409);
   const history = buildChangeHistoryHtml(await changeHistoryRows(db, input.idDocument, { versionNumber: input.versionNumber, date: input.changeDate, reason: input.changeReason }));
   const values: Partial<Record<SgcSystemToken, string>> = {
@@ -350,7 +413,7 @@ export async function composeContent(
   };
   let body = applySystemFieldTokens(html, values, history);
   if (input.institutional && !hasChangeHistoryToken(html)) body += `<h2>HISTORIAL DE CAMBIOS</h2>${history}`;
-  const contentPdf = await deps.htmlToPdf(wrapDraftForPdf({ title: input.title, code: input.code, contentHtml: body, institutional: input.institutional, sheet: input.draft.format === 'xlsx', extraCss: sheetCss }));
+  const contentPdf = await deps.htmlToPdf(wrapDraftForPdf({ title: input.title, code: input.code, contentHtml: body, institutional: input.institutional, sheet: input.draft.format === 'xlsx', extraCss: sheetCss, sheetLayout }));
   let header: SgcInstitutionalHeaderData | null = null;
   let headerTemplate: { id: number; code: string; version: number } | null = null;
   if (input.institutional) {
@@ -384,7 +447,14 @@ const PREVIEW_TTL_MS = 10 * 60 * 1000;
  * el contenido compuesto como quedará en el PDF controlado, con el encabezado
  * institucional si aplica. Código provisional en un documento nuevo.
  */
-export async function buildLayoutPreview(db: SgcDb, deps: SgcLayoutDeps, idRequest: number, viewer: SgcViewer, options: { runningHeader?: boolean } = {}): Promise<Uint8Array> {
+export async function buildLayoutPreview(
+  db: SgcDb,
+  deps: SgcLayoutDeps,
+  idRequest: number,
+  viewer: SgcViewer,
+  // 2026-10-22: `sheetSettings` = ajustes del Excel AÚN SIN GUARDAR (vista previa de «Ajustar y previsualizar»); sin él, los guardados.
+  options: { runningHeader?: boolean; sheetSettings?: SgcSheetSettings | null } = {}
+): Promise<Uint8Array> {
   // 2026-10-05 («Ver documento» sin descarga): sin encabezado institucional, la
   // misma línea superior del PDF controlado (código · versión · título).
   const runningHeader = options.runningHeader === true;
@@ -400,7 +470,16 @@ export async function buildLayoutPreview(db: SgcDb, deps: SgcLayoutDeps, idReque
   const cargos = await cargoOf(db, request.id_company, people.map((p) => p.email));
   const label = (m: SgcPlacedMeaning) => participants.filter((p) => p.meaning === m).map((p) => (p.email.includes('@') ? personLabel(p.name, p.email, cargos.get(p.email)) : p.name));
   const tplRef = institutional ? (await headerTemplateForType(db, request.id_company, request.id_document_type)).ref : null;
-  const key = [idRequest, draft.sha256, institutional ? 1 : 0, runningHeader ? 1 : 0, tplRef ? `${tplRef.id}.${tplRef.version}` : 'def', sha256HexOf(JSON.stringify([label('elaboro'), label('reviso'), label('aprobo')]))].join(':');
+  const sheetSettings = draft.format === 'xlsx' ? (options.sheetSettings !== undefined ? options.sheetSettings : layout.sheetSettings) : null;
+  const key = [
+    idRequest,
+    draft.sha256,
+    institutional ? 1 : 0,
+    runningHeader ? 1 : 0,
+    tplRef ? `${tplRef.id}.${tplRef.version}` : 'def',
+    sha256HexOf(JSON.stringify([label('elaboro'), label('reviso'), label('aprobo')])),
+    sheetSettings ? sha256HexOf(JSON.stringify(sheetSettings)).slice(0, 16) : 'auto',
+  ].join(':');
   const hit = previewCache.get(key);
   if (hit && Date.now() - hit.at < PREVIEW_TTL_MS) return hit.bytes;
 
@@ -442,6 +521,7 @@ export async function buildLayoutPreview(db: SgcDb, deps: SgcLayoutDeps, idReque
     changeDate: 'Al aprobar',
     changeReason: (changeValue || request.description).slice(0, 2000),
     emissionText: 'Al quedar vigente',
+    sheetSettings,
   });
   const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
   const pdf = await PDFDocument.load(composed.contentPdf, { ignoreEncryption: true });
@@ -461,4 +541,40 @@ export async function buildLayoutPreview(db: SgcDb, deps: SgcLayoutDeps, idReque
   if (previewCache.size > 30) previewCache.delete(previewCache.keys().next().value!);
   previewCache.set(key, { bytes: out, at: Date.now() });
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// 2026-10-22: «Ajustar y previsualizar» un borrador en Excel (documentos nuevos
+// y nuevas versiones). Solo la presentación; el texto del Excel no cambia.
+// ---------------------------------------------------------------------------
+
+/**
+ * Hojas del borrador en Excel verificado (huella) de la solicitud, para quien
+ * la puede ver. La carga del borrador ya rechaza un Excel ilegible; esto solo
+ * protege si algo cambiara después.
+ */
+async function draftSheetsOf(db: SgcDb, deps: Pick<SgcLayoutDeps, 'download'>, idRequest: number, viewer: SgcViewer): Promise<SgcSheetInspection[]> {
+  await assertCanView(db, idRequest, viewer);
+  const { draft, bytes } = await loadVerifiedDraft(db, deps, idRequest);
+  if (draft.format !== 'xlsx' || !bytes) throw new SgcError('Los ajustes de presentación aplican a un borrador en Excel (.xlsx).', 409);
+  return inspectXlsx(bytes).catch(() => {
+    throw new SgcError('No se pudo leer el Excel del borrador: revise que se abra sin contraseña.', 422);
+  });
+}
+
+/** Hojas del borrador en Excel (rango, columnas y primeras filas) y los ajustes guardados. */
+export async function inspectDraftSheets(db: SgcDb, deps: Pick<SgcLayoutDeps, 'download'>, idRequest: number, viewer: SgcViewer): Promise<{ sheets: SgcSheetInspection[]; sheetSettings: SgcSheetSettings | null }> {
+  return { sheets: await draftSheetsOf(db, deps, idRequest, viewer), sheetSettings: (await latestLayout(db, idRequest)).sheetSettings };
+}
+
+/** Valida los ajustes contra las hojas reales del borrador (que existan y que salga al menos una). */
+export async function validateDraftSheetSettings(db: SgcDb, deps: Pick<SgcLayoutDeps, 'download'>, idRequest: number, viewer: SgcViewer, input: unknown): Promise<SgcSheetSettings | null> {
+  const names = (await draftSheetsOf(db, deps, idRequest, viewer)).map((x) => x.name);
+  const settings = input === null ? null : normalizeSheetSettings(input);
+  if (!settings) return null;
+  const missing = settings.sheets.map((x) => x.name).filter((n) => !names.includes(n));
+  if (missing.length) throw new SgcError(`Los ajustes mencionan hojas que no están en el Excel: ${missing.join(', ')}.`);
+  const out = new Set(settings.sheets.filter((x) => !x.include).map((x) => x.name));
+  if (names.length && names.every((n) => out.has(n))) throw new SgcError('Deje al menos una hoja en el PDF.');
+  return isDefaultSheetSettings(settings) ? null : settings;
 }

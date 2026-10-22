@@ -21,6 +21,7 @@ Si faltan, la integración queda apagada (`enabled=false`).
 - `PORTAL_TH_SP_CLIENT_SECRET`
 - `PORTAL_TH_SP_SITE_ID`
 - `PORTAL_TH_SP_FOLDER`
+- `PORTAL_TH_SP_TRAINING_FOLDER` (opcional): carpeta de la ventana CAPACITACIONES del portal. Por defecto `FORMACION/CAPACITACIONES`, la misma en pruebas y producción.
 
 ## Balances
 
@@ -32,6 +33,22 @@ Si faltan, la integración queda apagada (`enabled=false`).
 ## Inventario de agentes
 
 - `AGENT_INVENTORY_COLLECTOR_KEY`: llave del recolector, de al menos 32 caracteres.
+
+## Chat: Proyectos (hilos de agente), F1 piloto
+
+- `CHAT_PROJECTS_AGENTS`: JSON `{"<code del agente>": ["perfil", …]}` con los agentes que tienen proyectos y los perfiles de conectores que se pueden escoger (catálogo en `lib/chat/projects-rules.ts`). Desde el módulo «Proyectos» (2026-10-18) dice qué agentes se pueden **designar** en un proyecto y con qué perfiles; el acceso al módulo lo da el permiso `/process/proyectos` (Administración → Usuarios). Sin la variable, o con un JSON inválido, ningún agente se puede designar ni atiende proyectos (el puente recibe 404). **Desde el 2026-10-20 es el valor por defecto:** la pantalla Procesos → Proyectos → Configuración (`/process/proyectos/configuracion`, tabla `chat_project_agent_config`) decide por empresa qué agentes trabajan en proyectos y con qué perfiles. Una empresa sin configurar sigue con esta variable; al guardar su primer cambio, lo que dice la variable para los agentes de esa empresa se copia a la tabla y desde entonces manda la tabla. Los perfiles nuevos se siguen agregando primero en el catálogo y en el puente.
+- `PROYECTOS_OPERADORES_PASES` (opcional, 2026-10-20): JSON `[{"email":"…","name":"…"}]` con quiénes pueden autorizar pases en «Permisos de los agentes» de Proyectos. Sin la variable, o inválida, son los operadores autorizados de producción: Nicolás Rivera y Cristian Baldión. Solo se cambia cuando Nicolás lo indique.
+- `CHAT_AGENT_API_KEYS` (ya existía): ahora admite `"scope": "projects"` por llave. Esa llave es la del **puente de hilos** (`puente-hilos/`) y solo ve conversaciones de proyecto; las llaves sin `scope` (o con `"channel"`) son las de los bots vivos y **no** ven proyectos.
+
+El puente de hilos tiene sus propias variables (`HILOS_*`), que viven en el `.env` del puente y no en el de la aplicación: ver `puente-hilos/README.md`.
+
+## Chat: reacciones, GIF y stickers (2026-10-20)
+
+- `CHAT_GIPHY_API_KEY`: llave de una app de GIPHY (API, no SDK) creada en https://developers.giphy.com → *Create an App* → *API*. Solo la usa el servidor (`lib/chat/gif.ts`): el navegador nunca la ve. **Sin la variable, los GIF quedan apagados** (no aparece la pestaña y `/api/chat/gifs/*` responde 404); las reacciones y los stickers funcionan igual. La llave de prueba (*beta*) tiene un cupo bajo por hora; para producción hay que pedir la llave de producción en el mismo panel (GIPHY revisa la app y pide la atribución «Powered by GIPHY», que ya está en el selector).
+- `CHAT_GIF_RATING`: `g` (por defecto) o `pg`. Cualquier otro valor cae a `g`. Se aplica al buscar y otra vez al enviar.
+- `NEXTAUTH_SECRET` (ya existía): de él se deriva la llave que firma las URL del proxy de GIF (`/api/chat/gifs/proxy`). Sin él, los GIF también quedan apagados.
+
+Las reacciones y los stickers no necesitan variables, pero sí el SQL `prisma/manual/2026-10-20-chat-reacciones-stickers-{PRUEBAS,PROD}.sql`. Sin ese SQL el chat funciona igual y estas funciones responden «aún no están habilitadas».
 
 ## Otros
 

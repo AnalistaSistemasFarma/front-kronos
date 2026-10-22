@@ -42,8 +42,17 @@
  *   `correcta` NUNCA sale hacia el estudiante: ver `definicionPublica`.
  */
 
-export const TIPOS_PREGUNTA = ['texto', 'texto_largo', 'numero', 'fecha', 'seleccion', 'seleccion_multiple', 'si_no'] as const;
+export const TIPOS_PREGUNTA = ['texto', 'texto_largo', 'numero', 'fecha', 'seleccion', 'seleccion_multiple', 'si_no', 'escala'] as const;
 export type TipoPregunta = (typeof TIPOS_PREGUNTA)[number];
+
+/** Valores por defecto de la escala (Microsoft Forms: calificación de 0 a 10). */
+export const ESCALA_MIN_POR_DEFECTO = 0;
+export const ESCALA_MAX_POR_DEFECTO = 10;
+export const ESCALA_MAX_PERMITIDO = 20;
+/** En una selección múltiple con "Otras", la respuesta libre va como un elemento con este prefijo. */
+export const PREFIJO_OTRAS = 'Otras: ';
+/** Las imágenes de las preguntas solo pueden venir de `public/portal-th/`: nunca de otro sitio. */
+export const IMAGEN_PREGUNTA_RE = /^\/portal-th\/[A-Za-z0-9][A-Za-z0-9._-]{0,80}\.(png|jpg|jpeg|webp|svg)$/;
 
 /** Las dos opciones de `si_no`, tal como las muestra Microsoft Forms. */
 export const OPCIONES_SI_NO = ['Sí', 'No'] as const;
@@ -55,8 +64,15 @@ export interface PreguntaFormulario {
   obligatoria: boolean;
   /** Solo `seleccion` y `seleccion_multiple`. */
   opciones?: string[];
-  /** Solo `seleccion`: agrega "Otra respuesta" con texto libre. */
+  /**
+   * `seleccion` o `seleccion_multiple`: agrega "Otra respuesta" con texto libre. En la múltiple la respuesta es la lista de opciones
+   * marcadas más, si escribió algo, UN elemento `Otras: <texto>` (ver `PREFIJO_OTRAS`).
+   */
   permiteOtra?: boolean;
+  /** Solo `escala`: valores enteros de `min` a `max` (por defecto 0 a 10) con un rótulo opcional en cada extremo. */
+  escala?: { min: number; max: number; etiquetaMin?: string; etiquetaMax?: string };
+  /** Imagen que se muestra bajo el enunciado: ruta bajo `/portal-th/` (archivo en `public/portal-th/`). Solo ilustra; no se responde. */
+  imagen?: { src: string; alt: string };
   /** Solo `seleccion`: cómo se muestran las opciones. Ausente = botones de opción; `lista` = lista desplegable. */
   presentacion?: 'lista';
   /** Se prellena desde la sesión del portal. */
@@ -217,10 +233,29 @@ export function validarDefinicion(
         }
         if (new Set(opciones).size !== opciones.length) return void errores.push(`Pregunta ${n}: hay opciones repetidas.`);
         pregunta.opciones = opciones as string[];
-        if (p.permiteOtra === true) {
-          if (tipo === 'seleccion_multiple') return void errores.push(`Pregunta ${n}: una selección múltiple no admite "otra respuesta".`);
-          pregunta.permiteOtra = true;
+        if (p.permiteOtra === true) pregunta.permiteOtra = true;
+      }
+      if (tipo === 'escala') {
+        const e = (p.escala ?? {}) as Record<string, unknown>;
+        const min = e.min === undefined ? ESCALA_MIN_POR_DEFECTO : e.min;
+        const max = e.max === undefined ? ESCALA_MAX_POR_DEFECTO : e.max;
+        if (typeof min !== 'number' || typeof max !== 'number' || !Number.isInteger(min) || !Number.isInteger(max) || min < 0 || max <= min || max > ESCALA_MAX_PERMITIDO) {
+          return void errores.push(`Pregunta ${n}: la escala debe ir de un entero desde 0 hasta otro mayor, con tope ${ESCALA_MAX_PERMITIDO}.`);
         }
+        const etiquetaMin = e.etiquetaMin === undefined ? undefined : textoLimpio(e.etiquetaMin, 60);
+        const etiquetaMax = e.etiquetaMax === undefined ? undefined : textoLimpio(e.etiquetaMax, 60);
+        if (etiquetaMin === null || etiquetaMax === null) return void errores.push(`Pregunta ${n}: los rótulos de la escala no son válidos (máximo 60 caracteres).`);
+        pregunta.escala = { min, max, ...(etiquetaMin ? { etiquetaMin } : {}), ...(etiquetaMax ? { etiquetaMax } : {}) };
+      } else if (p.escala !== undefined && p.escala !== null) {
+        return void errores.push(`Pregunta ${n}: "escala" es solo para el tipo escala.`);
+      }
+      if (p.imagen !== undefined && p.imagen !== null) {
+        const im = p.imagen as Record<string, unknown>;
+        const alt = textoLimpio(im.alt, 300);
+        if (typeof im.src !== 'string' || !IMAGEN_PREGUNTA_RE.test(im.src) || !alt) {
+          return void errores.push(`Pregunta ${n}: la imagen debe traer "src" (una ruta /portal-th/<archivo>.png|jpg|webp|svg) y "alt" (descripción).`);
+        }
+        pregunta.imagen = { src: im.src, alt };
       }
       if (p.presentacion !== undefined && p.presentacion !== null) {
         if (p.presentacion !== 'lista') return void errores.push(`Pregunta ${n}: "presentacion" solo puede ser "lista".`);
@@ -338,7 +373,11 @@ export function validarPregunta(p: PreguntaFormulario, valor: ValorRespuesta | u
   if (Array.isArray(valor)) {
     if (p.tipo !== 'seleccion_multiple') return 'Respuesta no válida.';
     const marcadas = valor.map((x) => (typeof x === 'string' ? x.trim() : null));
-    if (marcadas.some((x) => x === null || !p.opciones?.includes(x))) return 'Elija solo entre las opciones.';
+    // Con "Otras": como mucho UN elemento `Otras: <texto>` (el texto libre), el resto debe ser opciones de la lista.
+    const esOtras = (x: string | null) => !!p.permiteOtra && x !== null && x.startsWith(PREFIJO_OTRAS) && x.length > PREFIJO_OTRAS.length;
+    if (marcadas.filter(esOtras).length > 1) return 'Escriba una sola otra respuesta.';
+    if (marcadas.some((x) => x === null || (!p.opciones?.includes(x) && !esOtras(x)))) return 'Elija solo entre las opciones.';
+    if (marcadas.some((x) => x !== null && esOtras(x) && x.length - PREFIJO_OTRAS.length > MAX_TEXTO_RESPUESTA)) return `Máximo ${MAX_TEXTO_RESPUESTA} caracteres.`;
     return new Set(marcadas).size === marcadas.length ? null : 'Hay opciones repetidas.';
   }
   if (p.tipo === 'seleccion_multiple') return 'Respuesta no válida.';
@@ -360,6 +399,11 @@ export function validarPregunta(p: PreguntaFormulario, valor: ValorRespuesta | u
       return p.opciones?.includes(v) ? null : 'Elija una de las opciones.';
     case 'si_no':
       return (OPCIONES_SI_NO as readonly string[]).includes(v) ? null : 'Elija Sí o No.';
+    case 'escala': {
+      const min = p.escala?.min ?? ESCALA_MIN_POR_DEFECTO;
+      const max = p.escala?.max ?? ESCALA_MAX_POR_DEFECTO;
+      return /^[0-9]{1,2}$/.test(v) && Number(v) >= min && Number(v) <= max ? null : `Elija un valor de ${min} a ${max}.`;
+    }
   }
 }
 
