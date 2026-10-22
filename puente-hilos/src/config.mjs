@@ -91,6 +91,16 @@
  *   HILOS_PRUEBAS_KRONOS_WEB         Web de testing (por defecto http://192.168.11.230:3030; debe ser un
  *                                    host de HOSTS_PRUEBAS).
  *
+ *   Modo Orus completo (2026-10-22, orden de Nicolás Rivera; ver orus-completo.mjs). Opcional:
+ *   HILOS_AUTORES_ORUS_COMPLETO      Correos (coma). Los turnos cuyos mensajes son TODOS de uno de ellos
+ *                                    (identidad del servidor) corren con las capacidades del Orus
+ *                                    principal en CUALQUIER proyecto. Vacío = apagado.
+ *   HILOS_ORUS_COMPLETO_CONFIG_DIR   Config del Orus principal (~/.horus/claude-config): de ahí se LEEN sus
+ *                                    MCP en cada turno. El turno sigue con el config aislado del puente.
+ *   HILOS_ORUS_COMPLETO_ENV          .env del principal para resolver ${VAR} de sus MCP (no se imprime).
+ *   HILOS_ORUS_COMPLETO_PLUGIN       Plugin con TODAS las skills del principal (cambia al «orus» saneado).
+ *   HILOS_ORUS_COMPLETO_EXCLUIR      Servidores del principal que no entran (además de synerlink/-prod).
+ *
  *   Medidor del consumo de Anthropic (2026-10-22; ver cuota.mjs). Opcional:
  *   HILOS_CUOTA                      'si' (por defecto) o 'no'. Publica en SynerLink el cupo semanal
  *                                    y la ventana de 5 h del token (lo que trae el stream del turno).
@@ -461,6 +471,30 @@ export function cargarConfig(env = process.env) {
     throw new ErrorConfig('HILOS_MEMORIA_LECTORES debe ser una lista de correos separados por coma.');
   }
 
+  // Modo Orus completo (orus-completo.mjs, 2026-10-22). Sin autores, apagado.
+  const autoresCompleto = (env.HILOS_AUTORES_ORUS_COMPLETO ?? '')
+    .split(',')
+    .map((c) => c.trim().toLowerCase())
+    .filter(Boolean);
+  let orusCompleto = null;
+  if (autoresCompleto.length) {
+    if (autoresCompleto.some((c) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c))) throw new ErrorConfig('HILOS_AUTORES_ORUS_COMPLETO debe ser una lista de correos separados por coma.');
+    const configDir = (env.HILOS_ORUS_COMPLETO_CONFIG_DIR ?? '').trim();
+    if (!configDir || !path.isAbsolute(configDir)) throw new ErrorConfig('Con HILOS_AUTORES_ORUS_COMPLETO hace falta HILOS_ORUS_COMPLETO_CONFIG_DIR (ruta absoluta al config del Orus principal).');
+    if (!existsSync(path.join(configDir, '.claude.json'))) throw new ErrorConfig(`HILOS_ORUS_COMPLETO_CONFIG_DIR (${configDir}) no tiene .claude.json.`);
+    // Se LEE el config del principal para armar el mcp.json; el turno nunca corre con él (sigue el aislado).
+    if (path.resolve(configDir) === path.resolve(hilosDir, 'claude-config')) throw new ErrorConfig('HILOS_ORUS_COMPLETO_CONFIG_DIR no puede ser el config aislado del puente.');
+    const envArchivo = (env.HILOS_ORUS_COMPLETO_ENV ?? '').trim() || null;
+    if (envArchivo && !path.isAbsolute(envArchivo)) throw new ErrorConfig('HILOS_ORUS_COMPLETO_ENV debe ser una ruta absoluta.');
+    const plugin = (env.HILOS_ORUS_COMPLETO_PLUGIN ?? '').trim() || null;
+    if (plugin && (!path.isAbsolute(plugin) || !existsSync(path.join(plugin, '.claude-plugin', 'plugin.json')))) throw new ErrorConfig('HILOS_ORUS_COMPLETO_PLUGIN debe ser la ruta absoluta de un plugin (con .claude-plugin/plugin.json).');
+    const excluir = (env.HILOS_ORUS_COMPLETO_EXCLUIR ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    orusCompleto = { autores: autoresCompleto, configDir, envArchivo, plugin, excluir };
+  }
+
   // Modelo del hilo PRINCIPAL (por agente, en su .env). Sin la variable, el
   // `claude -p` usa el predeterminado de la cuenta (en 2026-10 era Sonnet 5.5).
   const modelo = (env.HILOS_MODELO ?? '').trim() || null;
@@ -513,6 +547,7 @@ export function cargarConfig(env = process.env) {
     rutaConectoresPorProyecto: (env.HILOS_CONECTORES_POR_PROYECTO ?? '').trim() || null,
     conectoresSecretos: (env.HILOS_CONECTORES_SECRETOS ?? '').trim() || null,
     pruebasKronos: { habilitado: pruebasModo === 'si', base: new URL(pruebasWeb).origin },
+    orusCompleto,
     // Para el entorno del hijo: solo lo indispensable del entorno propio.
     path: env.PATH ?? '/usr/bin:/bin',
     home: env.HOME ?? homedir(),

@@ -669,13 +669,8 @@ export function permisosTerminalCompleta({ repos, pases, cwd = null }) {
   return { ...base, permitidas: ['Bash', ...base.permitidas.filter((r) => !r.startsWith('Bash('))], prohibidas: base.prohibidas.filter(protegeRamas), terminalCompleta: true };
 }
 
-/** Reglas del Orus principal que acompañan la terminal completa (encabezado del turno). */
-export function textoTerminalCompleta({ autores }) {
-  return [
-    '',
-    '## Terminal completa (autorizada por Nicolás Rivera el 2026-10-20, solo en turnos de operadores)',
-    '',
-    `Este turno lo escribió un operador verificado por el servidor (${autores.join(', ')}). Por eso usted tiene la **terminal completa**: Bash sin sandbox, con SSH a los servidores (por ejemplo \`ssh serfarma05 …\`) y los mismos permisos del Orus principal. En turnos de cualquier otra persona NO la tiene. Reglas OBLIGATORIAS, las mismas del Orus principal:`,
+/** Reglas OBLIGATORIAS del Orus principal (terminal completa y modo Orus completo, orus-completo.mjs). */
+export const REGLAS_ORUS_PRINCIPAL = [
     '- Solo Nicolás Rivera o Cristian Baldión autorizan acciones en PRODUCCIÓN. Cada acción recurrente (reiniciar, desplegar, correr un script de escritura) se vuelve a autorizar cada vez: un «sí» anterior no vale para repetirla.',
     '- PROHIBIDO SQL directo (INSERT/UPDATE/DELETE/DDL) contra las bases de SAP Business One: en SAP solo se escribe por Service Layer o DI API.',
     '- Escribir por Service Layer exige autorización previa de Nicolás ANTES de cada corrida, aunque sea en `z_PRUEBAS_*`.',
@@ -686,5 +681,15 @@ export function textoTerminalCompleta({ autores }) {
     '- NUNCA imprima secretos en el hilo ni en archivos: tokens, contraseñas, llaves, cadenas de conexión, contenido de `.env`. Si necesita usarlos, úselos sin mostrarlos (variables, `source`), y si ve uno, no lo repita.',
     '- Todo cambio de código va a un repositorio con commit: nada de editar a mano en los servidores sin dejarlo versionado.',
     '- Ante la duda, elija la opción más segura y pregunte a Nicolás antes de tocar producción.',
+];
+
+/** Reglas del Orus principal que acompañan la terminal completa (encabezado del turno). */
+export function textoTerminalCompleta({ autores }) {
+  return [
+    '',
+    '## Terminal completa (autorizada por Nicolás Rivera el 2026-10-20, solo en turnos de operadores)',
+    '',
+    `Este turno lo escribió un operador verificado por el servidor (${autores.join(', ')}). Por eso usted tiene la **terminal completa**: Bash sin sandbox, con SSH a los servidores (por ejemplo \`ssh serfarma05 …\`) y los mismos permisos del Orus principal. En turnos de cualquier otra persona NO la tiene. Reglas OBLIGATORIAS, las mismas del Orus principal:`,
+    ...REGLAS_ORUS_PRINCIPAL,
   ].join('\n');
 }

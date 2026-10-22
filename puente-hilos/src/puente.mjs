@@ -53,7 +53,8 @@ import { crearMedidorCuota } from './cuota.mjs';
 import { prepararAdjuntos } from './adjuntos-salida.mjs';
 import { archivosDelTurno, archivosModificadosDesde, crearSupervisor, duracionLegible, PROMPT_CONTINUACION, textoAvisoProgreso, textoCorte, textoTiempoTurno } from './progreso.mjs';
 import { convertirHtmlAPdf, convertirMarcasPdf, recursosDePlugins, resolverChrome, textoPdf } from './pdf.mjs';
-import { armarArgumentos, armarArgumentosSugerencia, armarEntorno, correrTurno, etiquetaHerramienta } from './claude.mjs';
+import { armarArgumentos, armarArgumentosCompleto, armarArgumentosSugerencia, armarEntorno, armarEntornoCompleto, correrTurno, etiquetaHerramienta } from './claude.mjs';
+import { borrarMcpCompleto, encabezadoMensajeCompleto, filasAuditoriaCompleto, pluginsCompletos, prepararOrusCompleto, textoOrusCompleto, turnoOrusCompleto } from './orus-completo.mjs';
 import {
   argumentosEquipo,
   armarAgentes,
@@ -124,7 +125,7 @@ export function ocultarSecreto(texto, secreto) {
  * Acceso al código del turno (nivel 2). Devuelve null si el proyecto no tiene
  * repos vinculados. Si algo falla, el turno corre SIN código (falla cerrado).
  */
-export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lote, agenteNombre, conEquipo = false, cargar = cargarReposPorProyecto, preparar = prepararWorktrees, elegirRepos = reposDelTurno, leerToken = leerTokenGithub, prepararHome = prepararHomeCodigo }) {
+export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lote, agenteNombre, conEquipo = false, completo = false, cargar = cargarReposPorProyecto, preparar = prepararWorktrees, elegirRepos = reposDelTurno, leerToken = leerTokenGithub, prepararHome = prepararHomeCodigo }) {
   if (!cfg.rutaReposPorProyecto) return null;
   const vinculos = cargar(cfg.rutaReposPorProyecto);
   const proyecto = vinculos?.proyectos.get(idProject);
@@ -137,7 +138,8 @@ export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lot
   const aMontar = elegirRepos({ proyecto, repos: vinculos.repos, lote, rutas });
   const { autorizado, autores } = turnoAutorizado(lote, vinculos.operadores);
   // Terminal completa (autorizada por Nicolás, 2026-10-20): solo turnos de operadores.
-  const terminal = proyecto.terminalCompleta && autorizado;
+  // Modo Orus completo (2026-10-22): siempre, en cualquier proyecto con repos (orus-completo.mjs).
+  const terminal = (proyecto.terminalCompleta && autorizado) || completo === true;
   if (aMontar.length === 0 && !terminal) {
     // Ningún repo nombrado todavía: el turno va SIN código (sin Bash, sin token),
     // pero con el índice para que Orus sepa qué hay y cómo pedirlo.
@@ -160,7 +162,7 @@ export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lot
     bajoDemanda: proyecto.bajoDemanda,
     bloque:
       (worktrees.length ? textoCodigo({ worktrees, autorizado, puedePasar: permisos.puedePasar, autores, operadores: vinculos.operadores, equipo: conEquipo }) : '') +
-      (terminal ? `\n${textoTerminalCompleta({ autores })}` : '') +
+      (terminal && completo !== true ? `\n${textoTerminalCompleta({ autores })}` : '') +
       (proyecto.bajoDemanda ? `\n${textoIndiceRepos({ disponibles, montados: worktrees })}` : ''),
   };
 }
@@ -201,12 +203,22 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
     } catch {}
   }
 
+  /** Auditoría del MODO ORUS COMPLETO: inicio del turno, cada herramienta y cada negación (sin secretos). */
+  function auditarCompleto(idConversation, fila, codigo = null) {
+    try {
+      const linea = JSON.stringify({ ts: new Date().toISOString(), idConversation, modo: 'orus-completo', ...fila });
+      appendFileSync(path.join(cfg.hilosDir, 'auditoria-codigo.jsonl'), `${ocultarSecreto(linea, codigo?.token)}\n`, { mode: 0o600 });
+    } catch {}
+  }
+
   async function atender(claveConv, lote) {
     const idConversation = Number(claveConv);
     const ids = lote.map((m) => m.id);
     const inicio = new Date();
     // Supervisión del turno (progreso.mjs): avisos «sigo trabajando» y latido del indicador.
     let supervisor = null;
+    // Modo Orus completo (orus-completo.mjs): el mcp.json del turno se borra siempre al final.
+    let completo = null;
     try {
       await synerlink.estado(idConversation, 'thinking', 'Preparando el proyecto…').catch(() => null);
 
@@ -226,8 +238,11 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       let comando = null;
       let catalogo = null;
       let operador = false;
+      // Turno de un autor del modo completo (identidad del servidor): plugin «orus» completo (sin exclusiones).
+      const turnoCompleto = turnoOrusCompleto(lote, cfg.orusCompleto?.autores).activo;
+      const pluginDirsTurno = turnoCompleto ? pluginsCompletos(cfg.pluginDirs ?? [], cfg.orusCompleto?.plugin) : (cfg.pluginDirs ?? []);
       if (lote.some((m) => analizarComando(m?.body))) {
-        catalogo = catalogoPlugins(cfg.pluginDirs ?? []);
+        catalogo = catalogoPlugins(pluginDirsTurno);
         operador = loteDeOperador(cfg, lote);
         comando = resolverComando({ lote, catalogo, operador });
         if (comando) log(`conversación ${idConversation}: comando ${comando.accion}${comando.nombre ? ` /${comando.nombre}` : ''}${operador ? ' (operador)' : ''}.`);
@@ -279,6 +294,22 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       const pruebas = prepararPruebasTurno({ cfg, rutas, idConversation, lote, chrome: chromePdf ?? resolverChrome({ home: cfg.home }) });
       if (pruebas.servidores.length) perfil = combinarPerfil(perfil, pruebas);
       else if (pruebas.motivo && cfg.pruebasKronos?.habilitado) log(`conversación ${idConversation}: turno sin los conectores de PRUEBAS (${pruebas.motivo}).`);
+      // MODO ORUS COMPLETO: todos los MCP del principal + los del puente, todas las herramientas, sin preguntas.
+      // Si algo falla, el turno va en el modo normal (falla cerrado) y se dice en el hilo.
+      let avisoCompleto = '';
+      if (turnoCompleto) {
+        try {
+          completo = prepararOrusCompleto({ cfg, lote, idConversation, perfilServidores: perfil.mcpServers });
+        } catch (e) {
+          completo = null;
+          log(`conversación ${idConversation}: no se pudo preparar el modo Orus completo, el turno va en el modo normal:`, e.message);
+          avisoCompleto = '_Nota: no pude preparar el modo Orus completo en este turno; respondí con los permisos normales del hilo. Tecnología quedó con el registro._\n\n';
+        }
+        if (completo) {
+          log(`conversación ${idConversation}: MODO ORUS COMPLETO (autores: ${completo.autores.join(', ')}); ${completo.servidores.length} conectores: ${completo.servidores.join(', ')}${completo.faltan.length ? `; variables sin valor: ${completo.faltan.join(', ')}` : ''}.`);
+          auditarCompleto(idConversation, { tipo: 'inicio', idProject: contexto.project.idProject, autores: completo.autores, servidores: completo.servidores, plugins: completo.pluginDirs.map((d) => path.basename(d)) });
+        }
+      }
       await sincronizarArchivos({ rutas, contexto, estado, descargar: (u) => synerlink.descargar(u) });
       const adjuntos = await bajarAdjuntos({ rutas, mensajes: lote, descargar: (u) => synerlink.descargar(u) });
       // Comando nativo: se resuelve otra vez ya con los adjuntos (una skill los recibe en sus argumentos).
@@ -307,7 +338,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       let indiceRepos = null; // proyecto bajo demanda: índice de repos y registro de los que Orus pida
       let avisoCodigo = '';
       try {
-        codigo = prepararCodigoTurno({ cfg, idProject: contexto.project.idProject, idConversation, rutas, lote, agenteNombre, conEquipo: Boolean(equipo) });
+        codigo = prepararCodigoTurno({ cfg, idProject: contexto.project.idProject, idConversation, rutas, lote, agenteNombre, conEquipo: Boolean(equipo), completo: Boolean(completo) });
         if (codigo?.soloIndice) {
           indiceRepos = codigo;
           codigo = null;
@@ -324,7 +355,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         avisoCodigo = '_Nota: no pude preparar el acceso al código del proyecto en este turno; respondí sin él. Tecnología quedó con el registro._\n\n';
       }
       // Skills incluidas que corren git al cargarse: solo con el código montado (comandos.mjs).
-      if (nativo && SKILLS_CON_GIT.has(nativo.nombre) && !codigo) {
+      if (nativo && SKILLS_CON_GIT.has(nativo.nombre) && !codigo && !completo) {
         await synerlink.responder(
           idConversation,
           `**/${nativo.nombre}** necesita el código del proyecto montado en este turno, y aquí no hay ningún repositorio montado${indiceRepos ? ' todavía. Nombre en un mensaje el repositorio que quiere revisar (se monta desde el siguiente) y vuelva a enviar el comando' : ': este proyecto no tiene repositorios vinculados (Tecnología los vincula)'}.`
@@ -361,7 +392,11 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         perfil,
         instruccionesEn: cfg.instruccionesEn,
         equipoTurno,
-        bloqueCodigo: (codigo?.bloque ?? indiceRepos?.bloque ?? '') + (bloqueGuia ? `\n${bloqueGuia}` : '') + textoGrafos(grafosTurno, { conBash: Boolean(codigo) }),
+        bloqueCodigo:
+          (codigo?.bloque ?? indiceRepos?.bloque ?? '') +
+          (bloqueGuia ? `\n${bloqueGuia}` : '') +
+          textoGrafos(grafosTurno, { conBash: Boolean(codigo || completo) }) +
+          (completo ? `\n${textoOrusCompleto({ autores: completo.autores, servidores: completo.servidores })}` : ''),
         bloqueMemoria: memoria.bloque,
         bloqueConectores: conectores?.bloque ?? '',
         bloquePruebas: pruebas.bloque,
@@ -377,9 +412,23 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       let ultimoTexto = null;
       const tocados = new Set();
 
-      const promptTurno = nativo?.prompt ?? armarPrompt(lote, adjuntos, encabezadoObjetivo(objetivo));
+      const promptTurno = nativo?.prompt ?? armarPrompt(lote, adjuntos, (completo ? encabezadoMensajeCompleto(completo.autores) : '') + encabezadoObjetivo(objetivo));
       const ejecutar = async (sesion, prompt = promptTurno) => {
-        const args = armarArgumentos({
+        const pluginsTurno = { dirs: pluginDirsTurno, dirsLectura: [...grafosTurno.map((g) => g.dir), ...recursos, ...skillsDePlugins(pluginDirsTurno)] };
+        const args = completo
+          ? armarArgumentosCompleto({
+              completo,
+              sesion,
+              rutaSistema: rutas.sistema,
+              dirArchivos: rutas.archivos,
+              modelo: cfg.modelo,
+              presupuestoUsd: cfg.presupuestoUsd,
+              codigo,
+              plugins: pluginsTurno,
+              objetivo: conObjetivo,
+              rutaAgentes: equipo ? rutas.agentes : null,
+            })
+          : armarArgumentos({
           perfil,
           sesion,
           rutaMcp: rutas.mcp,
@@ -391,7 +440,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           equipo: equipo ? argumentosEquipo({ equipo, rutaAgentes: rutas.agentes }) : null,
           codigo,
           // Las carpetas skills/ de los plugins, en solo lectura: las skills leen sus referencias.
-          plugins: { dirs: cfg.pluginDirs ?? [], dirsLectura: [...grafosTurno.map((g) => g.dir), ...recursos, ...skillsDePlugins(cfg.pluginDirs ?? [])] },
+          plugins: pluginsTurno,
           objetivo: conObjetivo,
         });
         let ultimaEtiqueta = null;
@@ -404,12 +453,13 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         return correr({
           bin: cfg.claudeBin,
           args,
-          env: armarEntorno(cfg, equipo ? topes : null, codigo?.entorno ?? null),
+          env: completo ? armarEntornoCompleto(cfg, codigo?.entorno ?? null) : armarEntorno(cfg, equipo ? topes : null, codigo?.entorno ?? null),
           cwd: rutas.cwd,
           prompt,
           perfil,
           equipo,
           codigo,
+          completo,
           vigia,
           timeoutMs: cfg.timeoutTurnoMs,
           maxRevisionesObjetivo: conObjetivo ? (cfg.objetivoMaxRevisiones ?? MAX_REVISIONES_OBJETIVO) : 0,
@@ -419,7 +469,8 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
               medidor?.registrarEvento(evento);
               return;
             }
-            if (codigo) auditarCodigo(idConversation, evento, codigo);
+            if (completo) for (const f of filasAuditoriaCompleto(evento)) auditarCompleto(idConversation, f, codigo);
+            else if (codigo) auditarCodigo(idConversation, evento, codigo);
             if (acc.ultimoTexto) ultimoTexto = acc.ultimoTexto;
             for (const f of acc.archivosTocados ?? []) tocados.add(f);
             // La tablita de sub-agentes del chat: se actualiza cuando cambia
@@ -630,7 +681,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       }
       const avisoComando = comando?.accion === 'aviso' ? comando.texto : '';
       const notas = notaObjetivo + notaPropuestas;
-      cuerpo = (avisoComando + aviso + avisoEquipo + avisoCodigo + avisoConectores + cuerpo).slice(0, MAX_RESPUESTA - notas.length) + notas;
+      cuerpo = (avisoComando + aviso + avisoCompleto + avisoEquipo + avisoCodigo + avisoConectores + cuerpo).slice(0, MAX_RESPUESTA - notas.length) + notas;
       if (codigo) cuerpo = ocultarSecreto(cuerpo, codigo.token);
       // Bajo demanda: los repos que Orus nombró en su respuesta se montan desde el siguiente turno.
       if (indiceRepos && r.resultado?.ok) {
@@ -709,6 +760,9 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         .catch(() => null);
     } finally {
       await supervisor?.detener().catch(() => null);
+      try {
+        borrarMcpCompleto(completo?.rutaMcp);
+      } catch {}
       // Se confirma SIEMPRE al final (éxito o error ya avisado): con ack=false
       // en la bandeja, si el puente se cae a mitad de turno, el mensaje vuelve
       // a llegar al reiniciar (al menos una vez).

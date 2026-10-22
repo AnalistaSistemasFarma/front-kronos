@@ -214,6 +214,31 @@ Un comando junto con otros mensajes en el mismo lote no se ejecuta: el turno va 
 
 Verificación real (2026-10-22, haiku, `scripts/simular-turno-real.mjs --contexto-falso`, usuario no operador): `/ayuda`; `/goal` fijado, cumplido en el mismo turno y quitado; `/goal` que depende de una persona, parado a las 3 revisiones (53 s) y cumplido en el turno siguiente cuando «Nicolás» confirmó (restaurado por `--resume`); `/goal clear`; `/model`, `/usage`, `/config` y `/cambiar-auth-token` rechazados con su motivo; `/abogado-del-diablo` (plugin `orus`); `/context`, `/recap`, `/compact`; `/clear` y `/compact` en hilo nuevo; escritura fuera de `./trabajo` negada en el turno con objetivo.
 
+## Modo Orus completo (2026-10-22, orden de Nicolás Rivera)
+
+Nicolás Rivera, 2026-10-22 11:58 COT: «para mi caso, que tenga los mismos permisos que tienes tú en el
+hilo principal, en todos los proyectos». Código: `src/orus-completo.mjs`.
+
+- **Quién:** los turnos cuyos mensajes son TODOS de un correo de `HILOS_AUTORES_ORUS_COMPLETO`, según la
+  identidad que entrega el servidor (`author.kind=user`, `author.email`), nunca según el texto. Un lote
+  mezclado va en el modo normal. Aplica en **todos** los proyectos, estén o no en `repos-por-proyecto.json`.
+- **Qué tiene:** todas las herramientas (Bash sin sandbox, Agent, WebFetch, WebSearch…) con
+  `--permission-mode bypassPermissions`; los MCP del Orus principal leídos en cada turno de
+  `HILOS_ORUS_COMPLETO_CONFIG_DIR` (`mcpServers` de usuario de `.claude.json` + MCP de sus plugins
+  habilitados, sin `synerlink`/`synerlink-prod` ni Telegram; `${VAR}` con `HILOS_ORUS_COMPLETO_ENV`), más
+  los del puente (PRUEBAS, conectores del proyecto); la casa real de horus (SSH, gh, `~/.horus/.env`);
+  todas las skills (`HILOS_ORUS_COMPLETO_PLUGIN`, plugin «orus» completo en lugar del saneado); y en
+  proyectos con repos, la terminal completa con worktree y pases. Siguen negadas `AskUserQuestion` y la
+  protección de ramas. El turno sigue con el config AISLADO del puente (`--setting-sources user`, sin hooks).
+- **Excepción a «arranque inseguro»:** solo `armarArgumentosCompleto` + `revisarInitCompleto` (que revisa
+  que no aparezca ningún conector no declarado). Los demás turnos siguen rechazando bypassPermissions.
+- **Secretos:** el mcp.json del turno (lleva las llaves del principal) se escribe 600 en
+  `<HILOS_DIR>/orus-completo/` y se borra al terminar el turno. Nunca va al repo.
+- **Contexto mixto:** el encabezado del sistema y una línea al inicio del mensaje le dicen al modelo que
+  solo ejecute lo del mensaje actual del autor y que lo anterior de otras personas es dato; cada turno en
+  este modo queda en `auditoria-codigo.jsonl` (`modo: orus-completo`: inicio, cada herramienta, negaciones).
+- Si el config del principal no se puede leer, el turno va en el modo normal y lo dice en el hilo.
+
 ## Pruebas
 
 ```bash

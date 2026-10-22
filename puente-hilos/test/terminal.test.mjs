@@ -53,3 +53,15 @@ test('el texto de la terminal completa trae las reglas del principal', () => {
   const t = textoTerminalCompleta({ autores: [NICO] });
   for (const r of [/Cristian Baldión/, /SQL directo/, /Service Layer/, /respaldo/, /sesión 3/, /TESTING/, /secretos/]) assert.match(t, r);
 });
+
+test('prepararCodigoTurno en modo Orus completo: terminal completa aunque el proyecto no tenga la bandera', () => {
+  const sinBandera = { ...vinculos, proyectos: new Map([[1, { repos: ['sapsend'], nivel: 2, pases: true, bajoDemanda: true, terminalCompleta: false }]]) };
+  const c = prepararCodigoTurno({ cfg: cfgFalso(), idProject: 1, idConversation: 9, rutas: {}, lote: [msg(NICO)], agenteNombre: 'Orus', ...comun, cargar: () => sinBandera, completo: true });
+  assert.equal(c.terminalCompleta, true);
+  assert.equal(c.sandbox.enabled, false);
+  assert.equal(c.entorno.HOME, '/Users/horus');
+  assert.ok(c.prohibidas.some((r) => /push/.test(r)), 'conserva la protección de ramas');
+  // Sin el modo completo, el mismo proyecto sin bandera va como antes.
+  const n = prepararCodigoTurno({ cfg: cfgFalso(), idProject: 1, idConversation: 9, rutas: {}, lote: [msg(NICO)], agenteNombre: 'Orus', ...comun, cargar: () => sinBandera });
+  assert.equal(n.soloIndice, true);
+});

@@ -74,6 +74,14 @@ const correr = (o) =>
   correrTurno({
     ...o,
     alEvento: (e, acc) => {
+      // Lo que REALMENTE arrancó (no lo que diga el modelo): modo de permisos, conectores y herramientas.
+      if (e.type === 'system' && e.subtype === 'init') {
+        const tools = e.tools ?? [];
+        const mcp = (e.mcp_servers ?? []).map((s) => `${s.name}:${s.status}`).join(', ');
+        console.log(`[init] nativas: ${tools.filter((t) => !t.startsWith('mcp__')).join(',')}`);
+        console.log(`[init] plugins: ${(e.plugins ?? []).map((p) => p.name ?? p).join(', ') || '(ninguno)'}; skills: ${(e.skills ?? []).length} (${(e.skills ?? []).filter((x) => /migrar-agente|crear-usuario|cierre-casos/.test(x)).join(', ') || 'ninguna de las sensibles'})`);
+        console.log(`[init] permisos=${e.permissionMode}; herramientas=${tools.length} (Bash ${tools.includes('Bash') ? 'sí' : 'no'}, Agent ${tools.includes('Agent') || tools.includes('Task') ? 'sí' : 'no'}, WebFetch ${tools.includes('WebFetch') ? 'sí' : 'no'}); conectores: ${mcp || '(ninguno)'}`);
+      }
       if (e.type === 'assistant')
         for (const c of e.message?.content ?? [])
           if (c.type === 'tool_use') console.log(`${e.parent_tool_use_id ? '   [sub] ' : ''}>> ${c.name}: ${String(c.input?.command ?? c.input?.file_path ?? c.input?.pattern ?? c.input?.subagent_type ?? '').slice(0, 220)}`);
