@@ -1,6 +1,6 @@
 import { concesionesDeHilo } from '../../../../../lib/correo/agente';
 import { agentePort } from '../../../../../lib/correo/agenteRuntime';
-import { errorResponse, getCorreoContext, jsonNoStore } from '../../_lib/context';
+import { agenteApagado, errorResponse, getCorreoContext, jsonNoStore } from '../../_lib/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +9,8 @@ export async function GET(request: Request) {
   try {
     const ctx = await getCorreoContext(request);
     if (ctx instanceof Response) return ctx;
+    const apagado = agenteApagado();
+    if (apagado) return apagado;
     const id = new URL(request.url).searchParams.get('conversationId') ?? '';
     return jsonNoStore({ compartidos: id ? await concesionesDeHilo(ctx.deps, agentePort(), ctx.acceso, id) : [] });
   } catch (error) {

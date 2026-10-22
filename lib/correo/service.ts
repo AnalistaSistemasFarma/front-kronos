@@ -119,6 +119,8 @@ export interface EstadoConexion {
   /** Eliminar (mover a Elementos eliminados con «Deshacer»): escritura encendida y CORREO_ELIMINAR_HABILITADO. */
   eliminarHabilitado: boolean;
   sincronizacionAutomatica: boolean;
+  /** «Consultar a un agente» (CORREO_AGENTE_HABILITADO). */
+  agenteHabilitado: boolean;
 }
 
 export function estadoConexion(d: CorreoDeps, acceso: AccesoCorreo): EstadoConexion {
@@ -131,6 +133,7 @@ export function estadoConexion(d: CorreoDeps, acceso: AccesoCorreo): EstadoConex
     etiquetarHabilitado: d.cfg.etiquetarHabilitado,
     eliminarHabilitado: d.cfg.etiquetarHabilitado && d.cfg.eliminarHabilitado,
     sincronizacionAutomatica: d.cfg.syncHabilitado,
+    agenteHabilitado: d.cfg.agenteHabilitado === true,
   };
 }
 
