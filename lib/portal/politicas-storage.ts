@@ -36,6 +36,12 @@ export const CARPETA_POLITICAS_POR_DEFECTO = 'POLITICAS Y REGLAMENTOS';
  * esta MISMA lectura (solo lectura, misma app de Entra): lo único que cambia es la carpeta. Aquí SÍ son dos niveles.
  */
 export const CARPETA_AYUDAS_POR_DEFECTO = 'FORMACION/AYUDAS';
+/**
+ * CAPACITACIONES (Cristian Baldión, 2026-10-22): espejo de AYUDAS que lee `FORMACION/CAPACITACIONES` de la misma biblioteca.
+ * La ruta la dio Cristian: pruebas y producción leen la MISMA carpeta (no la de `PORTAL_TH_SP_FOLDER`, que en pruebas es
+ * `FORMACION-PRUEBAS`).
+ */
+export const CARPETA_CAPACITACIONES_POR_DEFECTO = 'FORMACION/CAPACITACIONES';
 /** Cuánto se recuerda el listado. Corto: Talento Humano publica cuando quiere. */
 export const POLITICAS_CACHE_MS = 2 * 60_000;
 /** Niveles de subcarpetas que se recorren (la raíz es el 0). */
@@ -101,17 +107,27 @@ export function leerConfigPoliticas(env: NodeJS.ProcessEnv = process.env): Confi
 }
 
 /**
- * Configuración de la carpeta de AYUDAS: `PORTAL_TH_SP_HELP_FOLDER` (por defecto `FORMACION/AYUDAS`). Cada nivel de la ruta
- * se valida como un nombre de carpeta (sin `..`, sin caracteres prohibidos) y se admiten hasta 3 niveles.
+ * Configuración de una carpeta de VARIOS niveles (AYUDAS, CAPACITACIONES): la ruta sale de `variable` o, si está vacía, de
+ * `porDefecto`. Cada nivel se valida como un nombre de carpeta (sin `..`, sin caracteres prohibidos) y se admiten hasta 3.
  */
-export function leerConfigAyudas(env: NodeJS.ProcessEnv = process.env): ConfigPoliticas {
+function leerConfigRuta(env: NodeJS.ProcessEnv, variable: string, porDefecto: string): ConfigPoliticas {
   const base = leerConfigPoliticas({ ...env, PORTAL_TH_SP_POLICIES_FOLDER: undefined });
-  const ruta = (env.PORTAL_TH_SP_HELP_FOLDER ?? '').trim() || CARPETA_AYUDAS_POR_DEFECTO;
+  const ruta = (env[variable] ?? '').trim() || porDefecto;
   const niveles = ruta.split('/');
   if (niveles.length > 3 || !niveles.every(esSegmentoValido)) {
-    throw new FormacionStorageNoConfigurado(`PORTAL_TH_SP_HELP_FOLDER no es una ruta de carpeta válida: "${ruta}"`);
+    throw new FormacionStorageNoConfigurado(`${variable} no es una ruta de carpeta válida: "${ruta}"`);
   }
   return { ...base, carpeta: ruta };
+}
+
+/** Carpeta de AYUDAS: `PORTAL_TH_SP_HELP_FOLDER` (por defecto `FORMACION/AYUDAS`). */
+export function leerConfigAyudas(env: NodeJS.ProcessEnv = process.env): ConfigPoliticas {
+  return leerConfigRuta(env, 'PORTAL_TH_SP_HELP_FOLDER', CARPETA_AYUDAS_POR_DEFECTO);
+}
+
+/** Carpeta de CAPACITACIONES: `PORTAL_TH_SP_TRAINING_FOLDER` (por defecto `FORMACION/CAPACITACIONES`). */
+export function leerConfigCapacitaciones(env: NodeJS.ProcessEnv = process.env): ConfigPoliticas {
+  return leerConfigRuta(env, 'PORTAL_TH_SP_TRAINING_FOLDER', CARPETA_CAPACITACIONES_POR_DEFECTO);
 }
 
 /** Un driveItemId de SharePoint: letras, dígitos y `!._-`. */
@@ -135,7 +151,7 @@ const extension = (nombre: string) => {
 
 const codificarRuta = (ruta: string) => ruta.split('/').map(encodeURIComponent).join('/');
 
-/** Una entrada por carpeta (Políticas y Ayudas no se pisan la caché una a la otra). */
+/** Una entrada por carpeta (Políticas, Ayudas y Capacitaciones no se pisan la caché). */
 const cache = new Map<string, { cuando: number; listado: ListadoPoliticas }>();
 
 /** Solo para pruebas. */
