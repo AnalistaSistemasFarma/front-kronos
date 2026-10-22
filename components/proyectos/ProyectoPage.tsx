@@ -41,6 +41,7 @@ import SeccionPermisos from './permisos/SeccionPermisos';
 import { AgentesApilados, AvisoArriba, BadgeRol, CONSULTA_ESCRITORIO, Encabezado, EsqueletoFilas, type Aviso } from './ui';
 import css from './proyectos.module.css';
 import { useEstadosAgentes } from './useEstadosAgentes';
+import MedidorConsumo, { useConsumoAnthropic } from './MedidorConsumo';
 import type { EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente';
 
 /**
@@ -77,6 +78,9 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
   const { data: sesion } = useSession();
   const miId = sesion?.user?.id as string | undefined;
   const escritorio = useMediaQuery(CONSULTA_ESCRITORIO) ?? true;
+  // Cupo de Anthropic de los agentes del proyecto (2026-10-22): en el encabezado, para todos los miembros.
+  // Fijo y siempre visible para TODOS los miembros (no depende del rol ni de `capabilities`).
+  const { agentes: consumo, cargado: consumoCargado } = useConsumoAnthropic(idProject);
 
   const [proyecto, setProyecto] = useState<ProyectoDetalleDto | null>(null);
   const [sinAcceso, setSinAcceso] = useState(false);
@@ -396,6 +400,12 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
     conversacion && agenteConversacion && proyecto ? (
       <>
         {cabeceraHilo}
+        {/* Celular: el hilo va a pantalla completa y tapa el encabezado; la píldora sigue arriba, a la derecha. */}
+        {!escritorio && (
+          <div className={css.medidorMovil}>
+            <MedidorConsumo agentes={consumo} cargado={consumoCargado} />
+          </div>
+        )}
         <ChatThread
           key={conversacion.id}
           agent={agenteConversacion}
@@ -532,7 +542,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
   if (escritorio) {
     return (
       <div className={css.pantalla}>
-        <Encabezado titulo={proyecto?.name ?? 'Proyecto'} />
+        <Encabezado titulo={proyecto?.name ?? 'Proyecto'} derecha={<MedidorConsumo agentes={consumo} cargado={consumoCargado} />} />
         {aviso && <AvisoArriba aviso={aviso} onClose={() => setAviso(null)} />}
         <div className={css.layout}>
           <Card withBorder radius='md' p={0} className={css.columna}>
@@ -624,6 +634,11 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
         </Box>
         {proyecto && <BadgeRol role={proyecto.myRole} />}
       </Group>
+      {proyecto && (
+        <div className={css.medidorMovil}>
+          <MedidorConsumo agentes={consumo} cargado={consumoCargado} />
+        </div>
+      )}
       <div className={css.pestanas}>
         <Tabs value={seccion} onChange={(v) => esSeccion(v) && setSeccion(v)} variant='default'>
           <Tabs.List>

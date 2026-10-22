@@ -27,7 +27,7 @@ import {
 } from '../workflow.js';
 import { registerIaAccessTool } from './iaAccess.js';
 import { BITACORA_TOOLS, registerBitacoraTools } from './bitacoraProceso.js';
-import { registerCorreoAgenteTools } from './correoAgente.js';
+import { CORREO_AGENTE_TOOLS, correoAgenteHabilitado, registerCorreoAgenteTools } from './correoAgente.js';
 import { PROYECTOS_TOOLS_LECTURA, PROYECTOS_TOOLS_PROPUESTA, registerProyectosTools } from './proyectos.js';
 
 interface ToolContext {
@@ -349,7 +349,10 @@ export const ENTITY_METADATA = {
  * candado de solo lectura del resto del servidor.
  */
 export const TOOL_CAPABILITIES = {
-  totalTools: 49,
+  /** 49 con «Consultar a un agente» encendido (CORREO_AGENTE_HABILITADO=true); 44 si está apagado. */
+  get totalTools(): number {
+    return correoAgenteHabilitado() ? 49 : 49 - CORREO_AGENTE_TOOLS.length;
+  },
   readOnly: [
     'kronos_metadata',
     'kronos_list_requests',
@@ -432,7 +435,8 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
 
   // «Consultar a un agente» desde el Correo: 2 lecturas del hilo compartido + 3 PROPUESTAS que la
   // persona confirma en el chat (src/tools/correoAgente.ts).
-  registerCorreoAgenteTools(server, { scope: ctx.scope, audit: ctx.audit });
+  // Solo con CORREO_AGENTE_HABILITADO=true (apagado por defecto, pendiente de Gobierno IA).
+  if (correoAgenteHabilitado()) registerCorreoAgenteTools(server, { scope: ctx.scope, audit: ctx.audit });
 
   // Proyectos y su cronograma (2026-10-18): 4 lecturas + 6 PROPUESTAS a nombre de la persona de
   // la concesión, que solo ella confirma en SynerLink (src/tools/proyectos.ts).

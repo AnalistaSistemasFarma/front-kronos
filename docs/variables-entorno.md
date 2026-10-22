@@ -21,6 +21,7 @@ Si faltan, la integración queda apagada (`enabled=false`).
 - `PORTAL_TH_SP_CLIENT_SECRET`
 - `PORTAL_TH_SP_SITE_ID`
 - `PORTAL_TH_SP_FOLDER`
+- `PORTAL_TH_SP_TRAINING_FOLDER` (opcional): carpeta de la ventana CAPACITACIONES del portal. Por defecto `FORMACION/CAPACITACIONES`, la misma en pruebas y producción.
 
 ## Balances
 

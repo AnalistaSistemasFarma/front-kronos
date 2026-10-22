@@ -1,7 +1,7 @@
 import { compartirConAgente } from '../../../../../lib/correo/agente';
 import { agentePort } from '../../../../../lib/correo/agenteRuntime';
 import { readClientOrigin } from '../../../../../lib/sgc/clientOrigin';
-import { errorResponse, getCorreoContext, jsonNoStore, readJson } from '../../_lib/context';
+import { agenteApagado, errorResponse, getCorreoContext, jsonNoStore, readJson } from '../../_lib/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +14,8 @@ export async function POST(request: Request) {
   try {
     const ctx = await getCorreoContext(request, 'creacion');
     if (ctx instanceof Response) return ctx;
+    const apagado = agenteApagado();
+    if (apagado) return apagado;
     const body = await readJson(request);
     const r = await compartirConAgente(ctx.deps, agentePort(), ctx.acceso, {
       conversationId: String(body?.conversationId ?? ''),

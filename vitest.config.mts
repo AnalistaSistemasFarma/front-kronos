@@ -35,6 +35,8 @@ export default defineConfig({
       // `app/api/correo/**`: módulo Correo (sesión y permiso, aislamiento por persona, límites; Graph simulado).
       'app/api/correo/**/*.test.ts',
       'components/sgc/**/*.test.ts',
+      // Medidor del consumo de Anthropic en Proyectos (render del marcado, 2026-10-22).
+      'components/proyectos/**/*.test.ts',
     ],
     exclude: ['node_modules', '.next', 'mcp', 'dist'],
 

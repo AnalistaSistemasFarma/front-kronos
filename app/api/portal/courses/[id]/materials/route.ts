@@ -54,7 +54,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!courseId) return NextResponse.json({ error: 'Curso no válido.' }, { status: 400 });
 
   try {
-    const curso = await prisma.portalCourse.findUnique({ where: { id: courseId }, select: { id: true } });
+    const curso = await prisma.portalCourse.findUnique({ where: { id: courseId, eliminado_at: null }, select: { id: true } });
     if (!curso) return NextResponse.json({ error: 'Curso no encontrado.' }, { status: 404 });
 
     const esJson = (request.headers.get('content-type') ?? '').toLowerCase().includes('application/json');
