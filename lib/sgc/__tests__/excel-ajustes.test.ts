@@ -134,8 +134,12 @@ describe('SGC · ajustes de presentación del Excel (2026-10-21)', () => {
     expect(page({ landscape: true, tables: [], orientation: 'vertical' })).toContain('@page { size: A4; margin: 1.5cm 1.2cm; }');
     expect(page({ landscape: false, tables: [], orientation: 'horizontal' })).toContain('size: A4 landscape');
     expect(page({ landscape: true, tables: [], orientation: 'auto' })).toContain('size: A4 landscape');
-    // Con encabezado institucional sigue vertical (encabezado y firmas calculados para vertical).
-    expect(page({ landscape: false, tables: [], orientation: 'horizontal' }, true)).not.toContain('landscape');
+    // 2026-10-22: con encabezado institucional, horizontal SOLO si el elaborador la elige; en «automática» sigue vertical
+    // (así no se corren las firmas ya ubicadas en las solicitudes en curso).
+    expect(page({ landscape: true, tables: [], orientation: 'auto' }, true)).not.toContain('landscape');
+    expect(page({ landscape: false, tables: [], orientation: 'horizontal' }, true)).toContain('size: A4 landscape; margin: 2.8cm 2cm 2.2cm 2cm;');
+    // El ancho útil cambia con la hoja: 841,89 − 2 × 2 cm ≈ 728,5 pt.
+    expect(wrapDraftForPdf({ title: 'F', code: 'C', contentHtml: '<p>x</p>', sheet: true, institutional: true, sheetLayout: { landscape: false, tables: [{ cls: 'sgc-t-0', widthPt: 1457 }], orientation: 'horizontal' } })).toContain('table.sgc-t-0{zoom:0.5}');
   });
 
   it('[SGC-REQ-165] la vista previa lleva la marca «VISTA PREVIA» y quién la generó', async () => {
@@ -184,5 +188,41 @@ describe('SGC · ajustes de presentación del Excel (2026-10-21)', () => {
     const failing = { docxToHtml: async () => '', htmlToPdf: async () => Promise.reject(new Error('chrome caído')) };
     await expect(previewBulkExcel(db(true), 3, file, null, actor, failing)).rejects.toMatchObject({ status: 422 });
     expect(calls).toEqual([]);
+  });
+});
+
+describe('SGC · ajustes del Excel en el borrador de una solicitud (2026-10-22)', () => {
+  it('[SGC-REQ-164] la composición guarda los ajustes junto a las cajas sin otra columna y lee igual las filas anteriores', async () => {
+    const { parseLayoutJson, layoutJson, layoutIsLandscape } = await import('../db/layout');
+    const field = { id: 'f1', signerKey: 'elab:a@x.com', meaning: 'elaboro' as const, page: 1, x: 10, y: 10, width: 20, height: 5, label: 'Elaboró' };
+    // Fila anterior (solo la lista) y sin ajustes: la misma lista de siempre.
+    expect(layoutJson([field], null)).toBe(JSON.stringify([field]));
+    expect(parseLayoutJson(JSON.stringify([field]))).toMatchObject({ fields: [{ id: 'f1' }], sheetSettings: null });
+    expect(parseLayoutJson(null)).toEqual({ fields: [], sheetSettings: null });
+    // Con ajustes: { fields, sheetSettings }.
+    const s = normalizeSheetSettings({ orientation: 'horizontal' });
+    const raw = layoutJson([field], s);
+    expect(JSON.parse(raw)).toMatchObject({ fields: [{ id: 'f1' }], sheetSettings: { orientation: 'horizontal' } });
+    expect(parseLayoutJson(raw)).toMatchObject({ fields: [{ id: 'f1' }], sheetSettings: { orientation: 'horizontal', fit: 'ancho' } });
+    // Los automáticos no se guardan como ajustes; unos ilegibles se ignoran (el documento no se bloquea).
+    expect(layoutJson([field], normalizeSheetSettings({}))).toBe(JSON.stringify([field]));
+    expect(parseLayoutJson(JSON.stringify({ fields: [field], sheetSettings: { orientation: 'diagonal' } }))).toMatchObject({ fields: [{ id: 'f1' }], sheetSettings: null });
+    expect(parseLayoutJson('{roto')).toEqual({ fields: [], sheetSettings: null });
+    // Hoja horizontal solo con un borrador en Excel y la orientación elegida.
+    expect(layoutIsLandscape('xlsx', s)).toBe(true);
+    expect(layoutIsLandscape('docx', s)).toBe(false);
+    expect(layoutIsLandscape('xlsx', normalizeSheetSettings({ orientation: 'auto' }))).toBe(false);
+    expect(layoutIsLandscape('xlsx', null)).toBe(false);
+  });
+
+  it('[SGC-REQ-164] las firmas sugeridas se calculan sobre la hoja real (vertical u horizontal)', async () => {
+    const { suggestInstitutionalPlacements, SGC_A4_LANDSCAPE } = await import('../pdf/institutional');
+    const people = [{ key: 'elab:a@x.com', meaning: 'elaboro' as const, name: 'Ana', email: 'a@x.com', role: 'Elaboró' }];
+    const vertical = suggestInstitutionalPlacements(people as never, []);
+    const horizontal = suggestInstitutionalPlacements(people as never, [], null, SGC_A4_LANDSCAPE);
+    expect(vertical).toHaveLength(1);
+    expect(horizontal).toHaveLength(1);
+    expect(horizontal[0].height).toBeGreaterThan(vertical[0].height);
+    expect(horizontal[0].x).toBeLessThan(vertical[0].x);
   });
 });

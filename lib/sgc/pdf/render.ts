@@ -66,9 +66,11 @@ export function sheetZoomCss(layout: SgcSheetLayout | undefined, usableWidthPt: 
 export function wrapDraftForPdf(params: { title: string; code: string; contentHtml: string; institutional?: boolean; sheet?: boolean; extraCss?: string; sheetLayout?: SgcSheetLayout }): string {
   // El encabezado institucional y las casillas de firma están calculados para A4 vertical: ahí la hoja solo se escala.
   const orientation = params.sheetLayout?.orientation ?? 'auto';
-  const landscape = Boolean(params.sheet && !params.institutional && (orientation === 'horizontal' || (orientation === 'auto' && params.sheetLayout?.landscape)));
+  // Con encabezado institucional, la hoja horizontal solo si el elaborador la ELIGE (2026-10-22): en «automática» sigue
+  // vertical, así las firmas ya ubicadas en las solicitudes en curso no se corren.
+  const landscape = Boolean(params.sheet && (orientation === 'horizontal' || (orientation === 'auto' && params.sheetLayout?.landscape && !params.institutional)));
   const page = params.institutional
-    ? `@page { size: A4; margin: ${SGC_INSTITUTIONAL_OTHER_TOP_CM}cm 2cm 2.2cm 2cm; }
+    ? `@page { size: A4${landscape ? ' landscape' : ''}; margin: ${SGC_INSTITUTIONAL_OTHER_TOP_CM}cm 2cm 2.2cm 2cm; }
   @page :first { margin-top: ${SGC_INSTITUTIONAL_FIRST_TOP_CM}cm; }`
     : params.sheet
       ? `@page { size: A4${landscape ? ' landscape' : ''}; margin: 1.5cm ${SHEET_SIDE_CM}cm; }`
