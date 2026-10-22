@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import ExcelJS from 'exceljs';
+// Solo tipos: la librería (~900 KB) se descarga al exportar/importar, no al abrir la pantalla.
+import type ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import {
   Title,
@@ -132,6 +133,7 @@ export function MyTicketsBoard() {
   };
 
   async function exportToExcel() {
+    const { default: ExcelJS } = await import('exceljs');
     if (tickets.length === 0) return;
 
     const workbook = new ExcelJS.Workbook();

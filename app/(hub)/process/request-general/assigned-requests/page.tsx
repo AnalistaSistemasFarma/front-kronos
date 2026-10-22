@@ -76,11 +76,8 @@ import {
   buildTaskDisplayBadges,
   getSimplifiedTasksProgress,
 } from '@/lib/orion/taskProgress';
-import {
-  boardExportFilename,
-  buildBoardWorkbook,
-  type BoardRequest,
-} from '@/lib/request-general/exportBoardExcel';
+// Solo el tipo: exportBoardExcel (y con él exceljs, ~900 KB) se carga al tocar Exportar.
+import type { BoardRequest } from '@/lib/request-general/exportBoardExcel';
 import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
 import { createPrerenderSearchParamsForClientPage } from 'next/dist/server/request/search-params';
 
@@ -492,6 +489,10 @@ function RequestBoard() {
   };
 
   const getUserIdByName = async (userName: string): Promise<number | null> => {
+    // La sesión ya trae el id de Kronos (callback jwt, buscado por correo): sin viaje extra al
+    // servidor ni búsqueda por NOMBRE, que con dos personas homónimas podía traer el id equivocado.
+    // (El id es un cuid de texto; este archivo lo tipa como número, igual que lo que devolvía la API.)
+    if (session?.user?.id) return session.user.id as unknown as number;
     if (!session || status !== 'authenticated') {
       console.error('No hay sesión activa para realizar esta operación');
       return null;
@@ -746,6 +747,7 @@ function RequestBoard() {
 
     setExporting(true);
     try {
+      const { boardExportFilename, buildBoardWorkbook } = await import('@/lib/request-general/exportBoardExcel');
       let allTickets: Ticket[] = [];
       if (includeRequests) {
         const params = buildTicketParams(applied);

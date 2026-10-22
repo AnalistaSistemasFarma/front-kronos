@@ -34,6 +34,16 @@ describe('icono «Proyectos» de la cabecera (lógica pura)', () => {
       expect(debeMostrarIconoProyectos('ana@gsslatam.com', e)).toBe(false);
       expect(e.noLeidos).toBeNull();
     }
+    // Sin el módulo el servidor responde 200 { habilitado: false }: tampoco se pinta.
+    const sinModulo = estadoDesdeRespuesta('ana@gsslatam.com', 200, { habilitado: false }, 1);
+    expect(sinModulo).toMatchObject({ visible: false, noLeidos: null });
+    expect(debeMostrarIconoProyectos('ana@gsslatam.com', sinModulo)).toBe(false);
+  });
+
+  it('sin el módulo se vuelve a preguntar cada 30 min, no cada 3', () => {
+    const e = estadoDesdeRespuesta('a@b', 200, { habilitado: false }, 1_000);
+    expect(estadoVencido(e, 'a@b', 1_000 + 3 * 60_000)).toBe(false);
+    expect(estadoVencido(e, 'a@b', 1_000 + 30 * 60_000)).toBe(true);
   });
 
   it('descarta números raros del servidor', () => {

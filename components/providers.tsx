@@ -1,6 +1,7 @@
 'use client';
 
 import { MantineProvider } from '@mantine/core';
+import type { Session } from 'next-auth';
 import { SessionProvider, useSession } from 'next-auth/react';
 import { usePathname } from 'next/navigation';
 import {
@@ -203,9 +204,16 @@ function ThemeProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function Providers({ children }: { children: ReactNode }) {
+export function Providers({
+  children,
+  session,
+}: {
+  children: ReactNode;
+  /** Sesión leída en el servidor (app/layout.tsx): evita pedir /api/auth/session al cargar. */
+  session?: Session | null;
+}) {
   return (
-    <SessionProvider refetchOnWindowFocus={false}>
+    <SessionProvider session={session} refetchOnWindowFocus={false}>
       <ThemeProvider>
         <UserProvider>
           <SapProvider>{children}</SapProvider>

@@ -3,10 +3,7 @@
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import {
-  boardExportFilename,
-  buildBoardWorkbook,
-} from '@/lib/request-general/exportBoardExcel';
+// exportBoardExcel (y con él exceljs, ~900 KB) se carga al tocar Exportar, no al abrir la pantalla.
 import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
 import {
   Paper,
@@ -676,6 +673,9 @@ function RequestBoard() {
     userName: string,
     signal?: AbortSignal
   ): Promise<string | null> => {
+    // La sesión ya trae el id de Kronos (callback jwt, buscado por correo): sin viaje extra al
+    // servidor ni búsqueda por NOMBRE, que con dos personas homónimas podía traer el id equivocado.
+    if (session?.user?.id) return session.user.id;
     if (!session || status !== 'authenticated') {
       return null;
     }
@@ -1290,6 +1290,7 @@ function RequestBoard() {
     }
     setExporting(true);
     try {
+      const { boardExportFilename, buildBoardWorkbook } = await import('@/lib/request-general/exportBoardExcel');
       const ids = tickets.map((ticket) => ticket.id);
       const grouped: Record<number, RequestTask[]> = {};
       for (let i = 0; i < ids.length; i += 500) {

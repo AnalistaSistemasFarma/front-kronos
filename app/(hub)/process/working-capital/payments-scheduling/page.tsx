@@ -57,7 +57,8 @@ import PaymentDetailModal from './PaymentDetailModal';
 import axios from 'axios';
 import { saveAs } from 'file-saver';
 import { PDFDocument } from 'pdf-lib';
-import ExcelJS from 'exceljs';
+// Solo tipos: la librería (~900 KB) se descarga al exportar/importar, no al abrir la pantalla.
+import type ExcelJS from 'exceljs';
 import { addDataSheet, downloadWorkbook } from '../../../../../lib/dashboard/excel/excelHelpers';
 import { formatEstimatedPaymentDateShort } from '../../../../../lib/treasury/estimatedPaymentDate';
 
@@ -330,6 +331,9 @@ function PaymentSchedulingBoard() {
     const someSelectableSelected = selectableRequests.some((r) => selectedIds.has(r.id_tarea));
 
     const getUserIdByName = async (userName: string): Promise<string | null> => {
+        // La sesión ya trae el id de Kronos (callback jwt, buscado por correo): sin viaje extra al
+        // servidor ni búsqueda por NOMBRE, que con dos personas homónimas podía traer el id equivocado.
+        if (session?.user?.id) return session.user.id;
         if (!session || status !== 'authenticated') {
             console.error('No hay sesión activa para realizar esta operación');
             return null;
@@ -589,6 +593,7 @@ function PaymentSchedulingBoard() {
     };
 
     const downloadPaymentPlano = async (rows: PaymentSchedulingTask[]) => {
+        const { default: ExcelJS } = await import('exceljs');
         const columns = [
             { header: 'ID Solicitud', key: 'id', width: 12 },
             { header: 'Empresa', key: 'empresa', width: 26 },

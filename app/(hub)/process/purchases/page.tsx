@@ -1,7 +1,8 @@
 'use client';
 
 import React, { Suspense, useState, useEffect, useMemo } from 'react';
-import ExcelJS from 'exceljs';
+// Solo tipos: la librería (~900 KB) se descarga al exportar/importar, no al abrir la pantalla.
+import type ExcelJS from 'exceljs';
 import { useSession } from 'next-auth/react';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -190,6 +191,7 @@ function PurchasesPageContent() {
 
   /** Exporta lo filtrado a Excel (como la descarga completa de SAPSEND). */
   const exportExcel = async () => {
+    const { default: ExcelJS } = await import('exceljs');
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet(tipo === 'solicitudes' ? 'Solicitudes' : 'Ordenes');
     ws.columns = [

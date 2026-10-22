@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useSession } from 'next-auth/react';
-import { fetchWithRetry } from '../navigation/fetchWithRetry';
+import { fetchNavAccess } from '../navigation/navAccess';
 
 export interface DashboardAdminContextValue {
   isDashboardAdmin: boolean;
@@ -18,13 +18,11 @@ export interface DashboardAdminContextValue {
 
 const DashboardAdminContext = createContext<DashboardAdminContextValue | null>(null);
 
-async function fetchDashboardAccess(): Promise<boolean> {
-  // Con reintento: una falla temporal al entrar se tomaba como "no es admin" y mandaba a Procesos.
-  const res = await fetchWithRetry('/api/dashboard/access', { credentials: 'same-origin' });
-  if (res.status === 401) return false;
-  if (!res.ok) return false;
-  const data = await res.json();
-  return Boolean(data.allowed);
+async function fetchDashboardAccess(email: string): Promise<boolean> {
+  // Misma llamada que el menú (lib/navigation/navAccess.ts), con reintento: una falla
+  // temporal al entrar se tomaba como "no es admin" y mandaba a Procesos.
+  const result = await fetchNavAccess(email);
+  return result.ok && result.access.dashboardAdmin;
 }
 
 export function DashboardAdminProvider({ children }: { children: ReactNode }) {
@@ -44,7 +42,7 @@ export function DashboardAdminProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     setLoadingDashboardAdmin(true);
 
-    void fetchDashboardAccess().then((allowed) => {
+    void fetchDashboardAccess(session.user.email).then((allowed) => {
       if (cancelled) return;
       setIsDashboardAdmin(allowed);
       setLoadingDashboardAdmin(false);
