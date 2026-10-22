@@ -17,6 +17,7 @@ import {
 import SgcEditorSteps, { editorStepSubtitle } from './SgcEditorSteps';
 import SgcSignaturePlacementCanvas, { type SgcPlacementPerson } from './SgcSignaturePlacementCanvas';
 import SgcSignersPlacementList from './SgcSignersPlacementList';
+import type { SgcSheetSettings } from '../../../lib/sgc/sheetSettings';
 
 /**
  * «Ubicar firmas» del SGC — COPIA CONGELADA (2026-10-03) del paso 3
@@ -54,6 +55,8 @@ export interface SgcLayoutData {
   savedBy: string | null;
   savedAt: string | null;
   saves: number;
+  /** 2026-10-22: ajustes de presentación del borrador en Excel (null = automático). */
+  sheetSettings?: SgcSheetSettings | null;
 }
 
 export interface SgcDocumentLayoutModalProps {
