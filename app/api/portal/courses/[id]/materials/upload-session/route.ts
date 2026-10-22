@@ -45,7 +45,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const declaracion = validarDeclaracionMaterial(cuerpo);
     if (!declaracion.ok) return NextResponse.json({ error: declaracion.error }, { status: 400 });
 
-    const curso = await prisma.portalCourse.findUnique({ where: { id: courseId }, select: { id: true } });
+    const curso = await prisma.portalCourse.findUnique({ where: { id: courseId, eliminado_at: null }, select: { id: true } });
     if (!curso) return NextResponse.json({ error: 'Curso no encontrado.' }, { status: 404 });
 
     const sesion = await abrirSubidaDeMaterial(courseId, declaracion.valor);
