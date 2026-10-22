@@ -212,3 +212,19 @@ export function vistaCuota(dto: CuotaAgenteDto, ahora: Date = new Date()): Vista
     vieja: ahora.getTime() - medido.getTime() > MEDICION_VIEJA_MS,
   };
 }
+
+/**
+ * Detalle del tooltip de la píldora compacta (2026-10-22), en el orden en que se lee:
+ * «Semanal 42 % · se reinicia sáb 24 oct, 5:00 p. m.», «Ventana de 5 h 31 % · se libera a las
+ * 10:50 a. m.», «Token del agente (compartido)» y la hora de la medición.
+ */
+export function lineasDetalleCuota(v: VistaCuota): string[] {
+  const linea = (b: VistaBarra | null) => (b ? `${b.etiqueta} ${b.porcentaje}${b.detalle ? ` · ${b.detalle}` : ''}` : null);
+  return [
+    linea(v.semanal),
+    linea(v.cinco),
+    'Consumo del token del agente (compartido)',
+    v.medicion,
+    v.vieja ? 'La medición está desactualizada: el puente no ha reportado en los últimos minutos.' : null,
+  ].filter((l): l is string => Boolean(l));
+}

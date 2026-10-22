@@ -3,6 +3,7 @@ import {
   colorDeUso,
   diaHoraCot,
   horaCot,
+  lineasDetalleCuota,
   normalizarCuota,
   textoHace,
   textoLiberaCinco,
@@ -135,5 +136,15 @@ describe('vistaCuota', () => {
     expect(v.semanal?.valor).toBe(100);
     expect(v.semanal?.porcentaje).toBe('130 %');
     expect(v.medicion).not.toMatch(/turno/);
+  });
+
+  it('lineasDetalleCuota: lo que lleva el tooltip de la píldora', () => {
+    expect(lineasDetalleCuota(vistaCuota(dto, AHORA))).toEqual([
+      'Semanal 92 % · se reinicia vie 23 oct, 5:00 p. m.',
+      'Ventana de 5 h 71 % · se libera a las 11:30 a. m.',
+      'Consumo del token del agente (compartido)',
+      'Medido el jue 22 oct, 8:57 a. m. (hace 3 min) · durante un turno',
+    ]);
+    expect(lineasDetalleCuota(vistaCuota(dto, new Date('2026-10-22T17:00:00.000Z'))).at(-1)).toMatch(/desactualizada/);
   });
 });
