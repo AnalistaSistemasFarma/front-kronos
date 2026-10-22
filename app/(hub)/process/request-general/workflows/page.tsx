@@ -137,6 +137,7 @@ function RequestBoard() {
       costo: number;
       centroCosto: string;
       secuencial: boolean;
+      cierraSolicitud: boolean;
       esAutorizacion: boolean;
       tipoAutorizacion: string;
       esFlujoVinculado: boolean;
@@ -150,6 +151,7 @@ function RequestBoard() {
     costo: '',
     centroCosto: '',
     secuencial: false,
+    cierraSolicitud: false,
     esAutorizacion: false,
     tipoAutorizacion: '',
     esFlujoVinculado: false,
@@ -407,6 +409,7 @@ function RequestBoard() {
         costo: parseFloat(taskForm.costo) || 0,
         centroCosto: taskForm.centroCosto,
         secuencial: taskForm.secuencial,
+        cierraSolicitud: taskForm.cierraSolicitud,
         esAutorizacion: taskForm.esAutorizacion,
         tipoAutorizacion: taskForm.esAutorizacion ? taskForm.tipoAutorizacion : '',
         esFlujoVinculado: taskForm.esFlujoVinculado,
@@ -421,6 +424,7 @@ function RequestBoard() {
       costo: '',
       centroCosto: '',
       secuencial: false,
+      cierraSolicitud: false,
       esAutorizacion: false,
       tipoAutorizacion: '',
       esFlujoVinculado: false,
@@ -906,6 +910,7 @@ function RequestBoard() {
         cost: task.costo || 0,
         cost_center: task.centroCosto || null,
         is_sequential: task.secuencial,
+        closes_request: task.cierraSolicitud,
         display_order: index,
         is_authorization: task.esAutorizacion,
         type_authorization: task.esAutorizacion
@@ -998,7 +1003,7 @@ function RequestBoard() {
         isExternal: false,
       });
       setTasks([]);
-      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '', esFlujoVinculado: false, flujoVinculado: '', condition_option_temps: [] });
+      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, cierraSolicitud: false, esAutorizacion: false, tipoAutorizacion: '', esFlujoVinculado: false, flujoVinculado: '', condition_option_temps: [] });
       setRequiresFiles(false);
       setRequiredFiles([]);
       setFileForm({ file_label: '', required: true, condition_option_temps: [] });
@@ -1432,7 +1437,7 @@ function RequestBoard() {
             setCurrentStep(1);
             setFormErrors({});
             setTasks([]);
-            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '', esFlujoVinculado: false, flujoVinculado: '', condition_option_temps: [] });
+            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, cierraSolicitud: false, esAutorizacion: false, tipoAutorizacion: '', esFlujoVinculado: false, flujoVinculado: '', condition_option_temps: [] });
             setRequiresFiles(false);
             setRequiredFiles([]);
             setFileForm({ file_label: '', required: true, condition_option_temps: [] });
@@ -1926,6 +1931,13 @@ function RequestBoard() {
 
                     <Checkbox
                       mt='sm'
+                      label='Al resolver esta tarea, cerrar la solicitud'
+                      checked={taskForm.cierraSolicitud}
+                      onChange={(e) => setTaskForm({ ...taskForm, cierraSolicitud: e.currentTarget.checked })}
+                    />
+
+                    <Checkbox
+                      mt='sm'
                       label='Tarea de autorización'
                       checked={taskForm.esAutorizacion}
                       disabled={taskForm.esFlujoVinculado}
@@ -2095,10 +2107,19 @@ function RequestBoard() {
                                 </Text>
                               </Table.Td>
                               <Table.Td className='py-4 px-5 text-center'>
-                                {task.secuencial ? (
-                                  <Badge color='indigo' variant='light' size='sm'>
-                                    Secuencial
-                                  </Badge>
+                                {task.secuencial || task.cierraSolicitud ? (
+                                  <Group gap={4} justify='center' wrap='wrap'>
+                                    {task.secuencial && (
+                                      <Badge color='indigo' variant='light' size='sm'>
+                                        Secuencial
+                                      </Badge>
+                                    )}
+                                    {task.cierraSolicitud && (
+                                      <Badge color='red' variant='light' size='sm'>
+                                        Cierra solicitud
+                                      </Badge>
+                                    )}
+                                  </Group>
                                 ) : (
                                   <Text size='sm' c='dimmed'>—</Text>
                                 )}
@@ -2606,7 +2627,7 @@ function RequestBoard() {
                   setCurrentStep(1);
                   setFormErrors({});
                   setTasks([]);
-                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '', esFlujoVinculado: false, flujoVinculado: '', condition_option_temps: [] });
+                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, cierraSolicitud: false, esAutorizacion: false, tipoAutorizacion: '', esFlujoVinculado: false, flujoVinculado: '', condition_option_temps: [] });
                 }
               }}
               size='md'
