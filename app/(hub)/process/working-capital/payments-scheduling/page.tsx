@@ -520,7 +520,9 @@ function PaymentSchedulingBoard() {
     };
 
     const closeRequest = async (
-        idSolicitud: number
+        idSolicitud: number,
+        status: number,
+        resolucion: string
     ): Promise<{ ok: boolean; error?: string }> => {
         try {
             const response = await fetch('/api/requests-general/update-request', {
@@ -528,9 +530,9 @@ function PaymentSchedulingBoard() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     id: idSolicitud,
-                    status: 2,
+                    status,
                     id_technical: userId,
-                    resolucion: 'Pago Programado Correctamente',
+                    resolucion,
                 }),
             });
             const data = await response.json().catch(() => ({}));
@@ -728,7 +730,9 @@ function PaymentSchedulingBoard() {
                     new Set(executedRows.map((r) => r.id_solicitud))
                 );
                 const closeResults = await Promise.all(
-                    uniqueRequestIds.map((idSol) => closeRequest(idSol))
+                    uniqueRequestIds.map((idSol) =>
+                        closeRequest(idSol, 2, 'Pago Programado Correctamente')
+                    )
                 );
                 const notesResults = await Promise.all(
                     uniqueRequestIds.map((idSol) => addSystemNote('Programación Realizada', idSol))
@@ -773,12 +777,21 @@ function PaymentSchedulingBoard() {
         if (ids.length === 0) return;
 
         setLoading(true);
+        setRejectModalOpened(false);
         const reason = rejectReason.trim();
-        const results = await Promise.all(ids.map((id) => updateActivityStatus(id, 3, reason)));
-        const ok = results.filter((r) => r.ok).length;
+
+        const rejectedRows = payments.filter((r) => ids.includes(r.id_tarea));
+
+        const results = await Promise.all(
+            rejectedRows.map(async (row) => {
+                const updated = await updateActivityStatus(row.id_tarea, 3, reason);
+                return { ok: updated.ok, error: updated.error, row };
+            })
+        );
+        const okResults = results.filter((r) => r.ok);
+        const ok = okResults.length;
         const fail = results.length - ok;
 
-        setRejectModalOpened(false);
         setSelectedIds(new Set());
         if (ok > 0) {
             toast.success(ok > 1 ? `${ok} solicitudes rechazadas` : 'Solicitud rechazada');
@@ -786,7 +799,29 @@ function PaymentSchedulingBoard() {
         if (fail > 0) {
             toast.error(`${fail} solicitud(es) no se pudieron rechazar`);
         }
+
+        if (ok > 0) {
+            const uniqueRequestIds = Array.from(
+                new Set(okResults.map((r) => r.row.id_solicitud))
+            );
+            const closeResults = await Promise.all(
+                uniqueRequestIds.map((idSol) => closeRequest(idSol, 3, reason))
+            );
+            await Promise.all(
+                uniqueRequestIds.map((idSol) =>
+                    addSystemNote(`Solicitud Rechazada: ${reason}`, idSol)
+                )
+            );
+            const closeFail = closeResults.filter((r) => !r.ok).length;
+            if (closeFail > 0) {
+                toast.error(
+                    `Se rechazó la tarea, pero ${closeFail} solicitud(es) no se pudieron cancelar.`
+                );
+            }
+        }
+
         await fetchPayments(userId, filters);
+        setLoading(false);
     };
 
     const companySelectData = companyOptions.map((c) => ({
