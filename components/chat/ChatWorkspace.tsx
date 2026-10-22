@@ -63,6 +63,7 @@ const ChatBroadcastModal = dynamic(() => import('./ChatBroadcastModal'), { ssr: 
 const ChatGroupModal = dynamic(() => import('./ChatGroupModal'), { ssr: false });
 const ChatPeopleModal = dynamic(() => import('./ChatPeopleModal'), { ssr: false });
 const ChatMediaPanel = dynamic(() => import('./ChatMediaPanel'), { ssr: false });
+const ChatConsumoBoton = dynamic(() => import('./ChatConsumoBoton'), { ssr: false });
 import { useChatOverview } from './useChatOverview';
 import { precargarHiloDeAgente } from './useChatConversation';
 import {
@@ -1503,7 +1504,11 @@ export default function ChatWorkspace({
               </Box>
             </Group>
           </UnstyledButton>
-          {botonesDelEncabezado}
+          <Group gap={4} wrap='nowrap'>
+            {/* Consumo de Anthropic del agente (2026-10-22): solo si el agente publica cuota. */}
+            <ChatConsumoBoton key={selectedAgent.code} code={selectedAgent.code} displayName={selectedAgent.displayName} />
+            {botonesDelEncabezado}
+          </Group>
         </Group>
 
         {/* Sin `height`: el alto lo acota el contenedor, y dentro del hilo solo
