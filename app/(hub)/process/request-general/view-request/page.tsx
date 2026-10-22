@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import PurchaseRequestDetail from '../../purchases/PurchaseRequestDetail';
 import { useSearchParams, useRouter } from 'next/navigation';
 import axios from 'axios';
 import JSZip from 'jszip';
@@ -2484,6 +2485,9 @@ function ViewRequestPage() {
                     <CorreoHiloVinculado requestId={id} />
                   </Group>
                 </div>
+
+                {/* Compras: si esta solicitud autoriza un borrador de compra, se muestra con el diseño de SAPSEND. */}
+                <PurchaseRequestDetail requestId={id} />
 
                 <Divider />
 
