@@ -15,8 +15,10 @@ import 'server-only';
 import ExcelJS from 'exceljs';
 import { prisma } from '../prisma';
 import {
+  NOTA_MINIMA_POR_DEFECTO,
   celdaSegura,
   columnasDeRespuestas,
+  esEvaluacion,
   textoDeRespuesta,
   validarDefinicion,
   type DefinicionFormulario,
@@ -125,6 +127,9 @@ export async function guardarVersionNueva(formularioId: number, definicion: Defi
 
 export interface TablaDeRespuestas {
   formulario: { id: number; codigo: string; titulo: string; version: number };
+  /** true = evaluación: cada fila trae `nota` (%) e `intentos`. */
+  evaluacion: boolean;
+  notaMinima: number | null;
   columnas: { id: string; texto: string }[];
   filas: RespuestaGuardada[];
 }
@@ -152,8 +157,29 @@ export async function tablaDeRespuestas(materialId: number, formularioId: number
     const d = leerDefinicion(f.version.definicion);
     if (d) anteriores.set(f.version.id, d);
   }
+
+  // Evaluación: la nota de cada persona es la de su intento APROBADO (el que
+  // creó la respuesta) y se cuentan todos sus intentos.
+  const evaluacion = esEvaluacion(vigente.definicion);
+  const porCorreo = new Map<string, { intentos: number; nota: number | null }>();
+  if (evaluacion) {
+    const intentos = await prisma.portalFormularioIntento.findMany({
+      where: { material_id: materialId },
+      orderBy: { enviado_at: 'asc' },
+      select: { student_email: true, porcentaje: true, aprobado: true },
+    });
+    for (const i of intentos) {
+      const acc = porCorreo.get(i.student_email) ?? { intentos: 0, nota: null };
+      acc.intentos += 1;
+      if (i.aprobado) acc.nota = i.porcentaje;
+      porCorreo.set(i.student_email, acc);
+    }
+  }
+
   return {
     formulario: { id: vigente.formularioId, codigo: vigente.codigo, titulo: vigente.definicion.titulo, version: vigente.version },
+    evaluacion,
+    notaMinima: evaluacion ? (vigente.definicion.notaMinima ?? NOTA_MINIMA_POR_DEFECTO) : null,
     columnas: columnasDeRespuestas(vigente.definicion, [...anteriores.values()]),
     filas: filas.map((f) => ({
       id: f.id,
@@ -163,6 +189,9 @@ export async function tablaDeRespuestas(materialId: number, formularioId: number
       autorizacionVersion: f.autorizacion_version,
       autorizadoEl: f.autorizado_at,
       respuestas: leerRespuestas(f.respuestas),
+      ...(evaluacion
+        ? { nota: porCorreo.get(f.student_email)?.nota ?? null, intentos: porCorreo.get(f.student_email)?.intentos ?? 1 }
+        : {}),
     })),
   };
 }
@@ -181,6 +210,7 @@ export async function excelDeRespuestas(tabla: TablaDeRespuestas, curso: string)
   libro.created = new Date();
   const hoja = libro.addWorksheet('Respuestas', { views: [{ state: 'frozen', ySplit: 1 }] });
   const fijas = ['Correo (sesión)', 'Enviado', 'Versión', 'Autorización de datos', 'Autorizado el'];
+  if (tabla.evaluacion) fijas.push('Nota (%)', 'Intentos');
   hoja.addRow([...fijas, ...tabla.columnas.map((c, i) => `${i + 1}. ${c.texto}`)]);
   for (const f of tabla.filas) {
     hoja.addRow(
@@ -190,6 +220,7 @@ export async function excelDeRespuestas(tabla: TablaDeRespuestas, curso: string)
         f.version,
         f.autorizacionVersion ?? '',
         fechaHora(f.autorizadoEl),
+        ...(tabla.evaluacion ? [f.nota ?? '', f.intentos ?? ''] : []),
         ...tabla.columnas.map((c) => textoDeRespuesta(f.respuestas[c.id])),
       ].map((v) => (typeof v === 'string' ? celdaSegura(v) : v))
     );

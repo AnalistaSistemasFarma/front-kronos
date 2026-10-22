@@ -16,6 +16,8 @@ import { computeReviewDueDate, formatCalendarDate, toCalendarDate } from '../rev
 import { buildVersionFileName, buildVersionFolderSegments, getControlledPdfError, getSourceFileError, sha256Hex } from '../storage';
 import type { SgcActor, SgcDb } from './catalogs';
 import { guideInputOf, resolveNewDocumentCode } from './coding';
+import { assertParentForNewChild, createAutomaticParentRelation } from './hierarchy';
+import { withNewDocumentCodeLock } from './lock';
 
 /**
  * Repositorio de documentos del SGC (esquema `sgc`): listado maestro, ficha,
@@ -380,8 +382,11 @@ async function prepareInitialLoad(db: SgcDb, input: SgcInitialLoadInput, now: Da
   }
   const dup = await db.sgcDocument.findFirst({ where: { id_company: input.idCompany, code }, select: { id_document: true } });
   if (dup) throw new SgcError(`Ya existe un documento con el código ${code} en la empresa.`, 409);
+  // 2026-10-19 (documentos padre e hijos): el procedimiento no tiene padre; si se indica el padre, debe ser de un tipo padre.
+  const idParent = input.idParentDocument ?? null;
+  const parent = idParent ? await assertParentForNewChild(db, input.idCompany, Number(idParent), docType) : null;
 
-  return { title, effective, config, process, docType, idOwnerDepartment, code, sequence };
+  return { title, effective, config, process, docType, idOwnerDepartment, code, sequence, idParent: parent?.id_document ?? null };
 }
 
 /**
@@ -401,6 +406,12 @@ export async function createInitialDocument(
   actor: SgcActor,
   now: Date = new Date()
 ) {
+  // E2E 2026-10-10: el código (consecutivo de la guía) y la carpeta de OneDrive se reservan por empresa,
+  // para que una carga y una aprobación simultáneas no tomen el mismo código ni pisen el archivo.
+  return withNewDocumentCodeLock(db, input.idCompany, () => createInitialDocumentUnlocked(db, upload, input, actor, now));
+}
+
+async function createInitialDocumentUnlocked(db: SgcDb, upload: SgcUploader, input: SgcInitialLoadInput, actor: SgcActor, now: Date) {
   const p = await prepareInitialLoad(db, input, now);
   const segments = buildVersionFolderSegments({
     storageRoot: p.config.storage_root,
@@ -462,6 +473,13 @@ export async function createInitialDocument(
         where: { id_document: doc.id_document },
         data: { current_version_id: version.id_document_version },
       });
+      if (p.idParent) {
+        await createAutomaticParentRelation(
+          tx,
+          { idCompany: input.idCompany, idParent: p.idParent, idChild: doc.id_document, childTypeCode: p.docType.code, origin: 'carga', reason: `Relación creada en la carga inicial: ${p.code} se desprende de su documento padre.` },
+          actor
+        );
+      }
       await writeSgcAudit(tx, {
         idCompany: input.idCompany,
         actorEmail: actor.email,

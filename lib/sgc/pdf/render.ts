@@ -1,6 +1,7 @@
 import { sanitizeDraftHtml } from '../draft/html';
 import { SgcError } from '../errors';
 import { SGC_INSTITUTIONAL_FIRST_TOP_CM, SGC_INSTITUTIONAL_OTHER_TOP_CM } from './institutional';
+import type { SgcSheetLayout } from './viewable';
 
 /**
  * Conversión del borrador a PDF para el PDF controlado (servidor).
@@ -27,11 +28,54 @@ function escapeHtml(value: string): string {
  * arriba el espacio del encabezado institucional que el sistema dibuja después
  * (más alto en la primera página; ver lib/sgc/pdf/institutional.ts).
  */
-export function wrapDraftForPdf(params: { title: string; code: string; contentHtml: string; institutional?: boolean }): string {
+/** Hoja de estilos de las hojas de Excel: solo reglas «.sgc-…{…}» sin «<», «@» ni «url(» (la arma lib/sgc/pdf/viewable.ts). */
+function sheetCss(css: string | undefined): string {
+  if (!css) return '';
+  return css
+    .split('\n')
+    // 2026-10-21: «import» suelto descartaba «!important» (los bordes del Excel no salían); «@import» ya no pasa por la «@».
+    .filter((rule) => /^[a-z.,\s-]*\.sgc-[a-z0-9-]+[^{]*\{[^{}<@]*\}$/i.test(rule.trim()) && !/url\(|expression/i.test(rule))
+    .join('\n');
+}
+
+/** Ancho útil de la página en puntos (A4: 595,28 × 841,89 pt; 1 cm = 28,35 pt). */
+const A4_PT = { portrait: 595.28, landscape: 841.89 };
+const CM_PT = 28.3465;
+/** Márgenes laterales de una hoja de Excel sin encabezado institucional (más angostos que los del texto). */
+const SHEET_SIDE_CM = 1.2;
+
+/**
+ * 2026-10-21: escala de cada tabla de Excel para que quepa en el ancho útil
+ * de la página (nunca la agranda; mínimo 25 % para que siga legible).
+ */
+export function sheetZoomCss(layout: SgcSheetLayout | undefined, usableWidthPt: number): string {
+  if (!layout || layout.fit === 'real') return '';
+  const tables = layout.tables.filter((t) => /^sgc-t-\d{1,3}$/.test(t.cls) && Number.isFinite(t.widthPt));
+  // 2026-10-21 (ajustes de la carga inicial): escala fija elegida por quien carga (25 % a 150 %).
+  if (layout.fit === 'escala') {
+    const pct = Number(layout.scalePct);
+    if (!Number.isInteger(pct) || pct < 25 || pct > 150) return '';
+    return tables.map((t) => `table.${t.cls}{zoom:${pct / 100}}`).join('\n');
+  }
+  return tables
+    .filter((t) => t.widthPt > usableWidthPt)
+    .map((t) => `table.${t.cls}{zoom:${Math.max(0.25, Math.floor((usableWidthPt / t.widthPt) * 1000) / 1000)}}`)
+    .join('\n');
+}
+
+export function wrapDraftForPdf(params: { title: string; code: string; contentHtml: string; institutional?: boolean; sheet?: boolean; extraCss?: string; sheetLayout?: SgcSheetLayout }): string {
+  // El encabezado institucional y las casillas de firma están calculados para A4 vertical: ahí la hoja solo se escala.
+  const orientation = params.sheetLayout?.orientation ?? 'auto';
+  // Con encabezado institucional, la hoja horizontal solo si el elaborador la ELIGE (2026-10-22): en «automática» sigue
+  // vertical, así las firmas ya ubicadas en las solicitudes en curso no se corren.
+  const landscape = Boolean(params.sheet && (orientation === 'horizontal' || (orientation === 'auto' && params.sheetLayout?.landscape && !params.institutional)));
   const page = params.institutional
-    ? `@page { size: A4; margin: ${SGC_INSTITUTIONAL_OTHER_TOP_CM}cm 2cm 2.2cm 2cm; }
+    ? `@page { size: A4${landscape ? ' landscape' : ''}; margin: ${SGC_INSTITUTIONAL_OTHER_TOP_CM}cm 2cm 2.2cm 2cm; }
   @page :first { margin-top: ${SGC_INSTITUTIONAL_FIRST_TOP_CM}cm; }`
-    : '@page { size: A4; margin: 2.2cm 2cm; }';
+    : params.sheet
+      ? `@page { size: A4${landscape ? ' landscape' : ''}; margin: 1.5cm ${SHEET_SIDE_CM}cm; }`
+      : '@page { size: A4; margin: 2.2cm 2cm; }';
+  const usableWidthPt = (landscape ? A4_PT.landscape : A4_PT.portrait) - 2 * (params.institutional ? 2 : SHEET_SIDE_CM) * CM_PT;
   return `<!doctype html>
 <html lang="es"><head><meta charset="utf-8" /><title>${escapeHtml(params.title)}</title>
 <style>
@@ -45,7 +89,20 @@ export function wrapDraftForPdf(params: { title: string; code: string; contentHt
   th { background: #f0f0f0; font-weight: 600; }
   ul, ol { margin: 0 0 8pt 18pt; padding: 0; }
   blockquote { border-left: 3px solid #ccc; margin: 8pt 0; padding-left: 10pt; color: #444; }
-  img { max-width: 100%; height: auto; }
+  img { max-width: 100%; height: auto; }${
+    params.sheet
+      ? `
+  /* S16 (R32) y 2026-10-21: hojas de un formato en Excel — con los anchos y la letra del Excel, escaladas al ancho de la página. */
+  table.sgc-hoja { table-layout: fixed; width: auto; font-size: 11pt; line-height: 1.2; }
+  table.sgc-hoja th, table.sgc-hoja td { padding: 1pt 3pt; font-size: 11pt; overflow-wrap: break-word; }
+  table.sgc-hoja tr { break-inside: avoid; }
+  table.sgc-hoja thead { display: table-header-group; }
+  h2.sgc-hoja-nombre { font-size: 10pt; color: #555; }
+  h2.sgc-hoja-sig { break-before: page; }
+  ${sheetCss(params.extraCss)}
+  ${sheetZoomCss(params.sheetLayout, usableWidthPt)}`
+      : ''
+  }
 </style></head>
 <body>${sanitizeDraftHtml(params.contentHtml)}</body></html>`;
 }
@@ -62,7 +119,7 @@ type Page = {
   setRequestInterception(v: boolean): Promise<void>;
   on(event: 'request', cb: (req: { url(): string; abort(): Promise<void>; continue(): Promise<void>; isNavigationRequest(): boolean }) => void): void;
   setContent(html: string, opts: { waitUntil: 'load' }): Promise<void>;
-  pdf(opts: { format: 'A4'; printBackground: boolean }): Promise<Uint8Array>;
+  pdf(opts: { format: 'A4'; printBackground: boolean; preferCSSPageSize?: boolean }): Promise<Uint8Array>;
   close(): Promise<void>;
 };
 
@@ -103,7 +160,8 @@ export const htmlToPdf: SgcHtmlToPdf = async (html) => {
       else void req.abort();
     });
     await page.setContent(html, { waitUntil: 'load' });
-    return new Uint8Array(await page.pdf({ format: 'A4', printBackground: true }));
+    // 2026-10-21: manda el «@page» del documento (todos son A4; las hojas de Excel anchas, A4 horizontal).
+    return new Uint8Array(await page.pdf({ format: 'A4', printBackground: true, preferCSSPageSize: true }));
   } finally {
     await page.close().catch(() => undefined);
   }

@@ -1,0 +1,575 @@
+'use client';
+
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActionIcon,
+  Alert,
+  Badge,
+  Button,
+  Checkbox,
+  Group,
+  List,
+  NativeSelect,
+  NumberInput,
+  Paper,
+  Radio,
+  SegmentedControl,
+  Stack,
+  Switch,
+  Text,
+  TextInput,
+  Textarea,
+} from '@mantine/core';
+import {
+  IconAlertCircle,
+  IconArrowDown,
+  IconArrowUp,
+  IconDeviceFloppy,
+  IconEye,
+  IconPlus,
+  IconTrash,
+} from '@tabler/icons-react';
+import { ImportarDesdeForms } from './ImportarDesdeForms';
+import { PUNTOS_TOTAL, redondear2, type DefinicionFormulario, type TipoFormulario, type TipoPregunta } from '../../lib/portal/formulario';
+import {
+  DATOS,
+  conReparto,
+  construirDefinicion,
+  esCalificada,
+  esSeleccion,
+  estadoDesdeImportacion,
+  estadoInicial,
+  preguntaVacia,
+  type DatoClave,
+  type Estado,
+  type PreguntaEditable,
+} from '../../lib/portal/constructor-formulario';
+
+/**
+ * FORMACIÓN — CONSTRUCTOR MANUAL DE FORMULARIOS (Cristian Baldión, 2026-10-09).
+ *
+ * `Formulario` del curso → quien crea el curso elige ENCUESTA (como el
+ * SST-01-FR-001) o EVALUACIÓN, y arma las preguntas a mano, sin escribir JSON.
+ *
+ * EVALUACIÓN: enunciado, datos de la persona (nombre, correo, cédula), preguntas
+ * de selección única con la respuesta correcta marcada y puntos por pregunta;
+ * los puntos deben sumar exactamente 100. El servidor califica (las correctas
+ * nunca viajan al estudiante). Se puede guardar como BORRADOR (no se puede
+ * responder todavía) mientras falten correctas o puntos.
+ *
+ * Mismos componentes de Mantine y mismo tema que el resto de SynerLink: avisos
+ * con `Alert` de color ARRIBA, etiquetas arriba de cada campo, botones al pie.
+ * Al EDITAR una definición existente se conservan los campos que este editor
+ * no muestra (autorización de datos, "otra respuesta", ayudas, prellenado).
+ */
+
+/**
+ * Lo que elige quien arma el formulario. «Lista desplegable» no es un tipo aparte en la definición: es una selección
+ * única que se muestra como lista (`presentacion: 'lista'`).
+ */
+type TipoUi = TipoPregunta | 'lista';
+const tipoUi = (p: PreguntaEditable): TipoUi => (p.tipo === 'seleccion' && p.lista ? 'lista' : p.tipo);
+
+const TIPOS_ENCUESTA: { value: TipoUi; label: string }[] = [
+  { value: 'texto', label: 'Texto corto' },
+  { value: 'texto_largo', label: 'Texto largo' },
+  { value: 'numero', label: 'Número' },
+  { value: 'fecha', label: 'Fecha' },
+  { value: 'seleccion', label: 'Selección única (botones)' },
+  { value: 'lista', label: 'Selección única (lista desplegable)' },
+  { value: 'seleccion_multiple', label: 'Selección múltiple' },
+  { value: 'si_no', label: 'Sí / No' },
+  { value: 'escala', label: 'Escala numérica (p. ej. 0 a 10)' },
+];
+const TIPOS_EVALUACION: { value: TipoUi; label: string }[] = [
+  { value: 'seleccion', label: 'Selección única (con puntos)' },
+  { value: 'lista', label: 'Lista desplegable (con puntos)' },
+  { value: 'seleccion_multiple', label: 'Selección múltiple (con puntos)' },
+  { value: 'texto', label: 'Texto corto (dato, sin puntos)' },
+  { value: 'texto_largo', label: 'Texto largo (dato, sin puntos)' },
+  { value: 'numero', label: 'Número (dato, sin puntos)' },
+  { value: 'fecha', label: 'Fecha (dato, sin puntos)' },
+];
+
+export function ConstructorFormulario({
+  tipo,
+  definicion,
+  guardando,
+  erroresServidor,
+  onGuardar,
+  onVistaPrevia,
+  onCancelar,
+  soloEncuesta = false,
+  contexto,
+}: {
+  /**
+   * Formularios de SST (2026-10-20): solo encuestas (no hay evaluaciones), código con prefijo SST y, si piden datos sensibles, la
+   * autorización propia de Seguridad y Salud en el Trabajo.
+   */
+  soloEncuesta?: boolean;
+  contexto?: 'sst';
+  /** Tipo de un formulario NUEVO (se ignora al editar). */
+  tipo: TipoFormulario;
+  /** Presente = se está editando (guardar crea una versión nueva; el código no cambia). */
+  definicion?: DefinicionFormulario;
+  guardando: boolean;
+  /** Errores que devolvió el servidor al guardar (arriba, en rojo). */
+  erroresServidor: string[];
+  onGuardar: (d: DefinicionFormulario) => void | Promise<void>;
+  onVistaPrevia: (d: DefinicionFormulario) => void;
+  onCancelar: () => void;
+}) {
+  const editando = !!definicion;
+  const [e, setE] = useState<Estado>(() => estadoInicial(tipo, definicion, contexto));
+  const [errores, setErrores] = useState<string[]>([]);
+  const evaluacion = e.tipo === 'evaluacion';
+
+  const suma = useMemo(
+    () => redondear2(e.preguntas.reduce((s, p) => s + (esCalificada(e, p) && p.puntos !== '' ? Number(p.puntos) : 0), 0)),
+    [e]
+  );
+  const calificadas = e.preguntas.filter((p) => esCalificada(e, p)).length;
+
+  const cambiar = (parche: Partial<Estado>) => setE((x) => ({ ...x, ...parche }));
+  const activarReparto = (auto: boolean) => setE((x) => conReparto({ ...x, puntosAuto: auto }));
+  const cambiarPregunta = (i: number, parche: Partial<PreguntaEditable>) =>
+    setE((x) => ({ ...x, preguntas: x.preguntas.map((p, j) => (j === i ? { ...p, ...parche } : p)) }));
+  const mover = (i: number, delta: -1 | 1) =>
+    setE((x) => {
+      const j = i + delta;
+      if (j < 0 || j >= x.preguntas.length) return x;
+      const copia = [...x.preguntas];
+      [copia[i], copia[j]] = [copia[j], copia[i]];
+      return { ...x, preguntas: copia };
+    });
+  const quitar = (i: number) => setE((x) => conReparto({ ...x, preguntas: x.preguntas.filter((_, j) => j !== i) }));
+  const agregar = () => setE((x) => conReparto({ ...x, preguntas: [...x.preguntas, preguntaVacia(x.tipo, x.preguntas)] }));
+
+  const cambiarTipoPregunta = (i: number, elegido: TipoUi) => {
+    const t: TipoPregunta = elegido === 'lista' ? 'seleccion' : elegido;
+    setE((x) =>
+      conReparto({
+        ...x,
+        preguntas: x.preguntas.map((q, j) => {
+          if (j !== i) return q;
+          const seleccion = t === 'seleccion' || t === 'seleccion_multiple';
+          const faltan = seleccion && q.opciones.length < 2 ? 2 - q.opciones.length : 0;
+          // Al pasar de única a múltiple (o al revés) se conserva la respuesta correcta que ya estaba marcada.
+          const correcta = t === 'seleccion' ? (q.correcta ?? q.correctas[0] ?? null) : null;
+          const correctas = t === 'seleccion_multiple' ? (q.correctas.length > 0 ? q.correctas : q.correcta !== null ? [q.correcta] : []) : [];
+          return {
+            ...q,
+            tipo: t,
+            lista: elegido === 'lista',
+            opciones: [...q.opciones, ...Array(faltan).fill('')],
+            correcta,
+            correctas,
+            permiteOtra: seleccion ? q.permiteOtra : false,
+            puntos: seleccion ? q.puntos : '',
+            escala: t === 'escala' ? (q.escala ?? { min: 0, max: 10, etiquetaMin: '', etiquetaMax: '' }) : q.escala,
+          };
+        }),
+      })
+    );
+  };
+
+  const revisar = (): DefinicionFormulario | null => {
+    const r = construirDefinicion(e);
+    setErrores(r.errores);
+    return r.definicion;
+  };
+
+  const todosLosErrores = [...errores, ...erroresServidor];
+
+  // Los avisos van ARRIBA: al aparecer errores se lleva a la persona hasta ellos
+  // (el botón Guardar está al final de un formulario largo).
+  const avisoErrores = useRef<HTMLDivElement | null>(null);
+  const firmaErrores = todosLosErrores.join('|');
+  useEffect(() => {
+    if (!firmaErrores) return;
+    window.requestAnimationFrame(() => avisoErrores.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+  }, [firmaErrores]);
+
+  return (
+    <Paper withBorder radius='md' p='md' data-testid='constructor-formulario'>
+      <Stack gap='md'>
+        {/* Resultado de la revisión ARRIBA y con color (convención del equipo). */}
+        {todosLosErrores.length > 0 && (
+          <Alert ref={avisoErrores} color='red' icon={<IconAlertCircle size={18} />} title='Revise el formulario' role='alert' data-testid='errores-constructor'>
+            <List size='sm'>
+              {todosLosErrores.map((m) => (
+                <List.Item key={m}>{m}</List.Item>
+              ))}
+            </List>
+          </Alert>
+        )}
+
+        <div>
+          <Text fw={600}>{editando ? 'Editar formulario' : 'Nuevo formulario'}</Text>
+          <Text size='sm' c='dimmed'>
+            {editando
+              ? 'Al guardar se crea una versión nueva; las respuestas ya enviadas conservan la versión con la que se respondieron.'
+              : soloEncuesta
+                ? 'Arme las preguntas del formulario.'
+                : 'Elija si es una encuesta o una evaluación y arme las preguntas.'}
+          </Text>
+        </div>
+
+        {!soloEncuesta && (
+          <SegmentedControl
+            value={e.tipo}
+            disabled={editando}
+            fullWidth
+            data={[
+              { value: 'encuesta', label: 'Encuesta' },
+              { value: 'evaluacion', label: 'Evaluación' },
+            ]}
+            onChange={(v) => {
+              const t = v as TipoFormulario;
+              setE((x) => ({
+                ...estadoInicial(t, undefined, contexto),
+                titulo: x.titulo,
+                descripcion: x.descripcion,
+              }));
+            }}
+            data-testid='tipo-formulario'
+          />
+        )}
+        <Text size='xs' c='dimmed'>
+          {soloEncuesta
+            ? 'Encuesta: respuestas libres o de selección, sin calificación. Cada envío se guarda en SharePoint y lo ven solo el administrador y el equipo de SST.'
+            : evaluacion
+            ? 'Evaluación: preguntas de selección única con la respuesta correcta y puntos que suman 100. El sistema califica y muestra la nota.'
+            : 'Encuesta: respuestas libres o de selección, sin calificación (como el SST-01-FR-001 Perfil sociodemográfico).'}
+        </Text>
+
+        {!editando && (
+          <ImportarDesdeForms
+            deshabilitado={guardando}
+            hayContenido={
+              e.titulo.trim() !== '' ||
+              e.descripcion.trim() !== '' ||
+              e.preguntas.some((p) => p.texto.trim() !== '' || p.opciones.some((o) => o.trim() !== ''))
+            }
+            onImportado={(imp) => {
+              setErrores([]);
+              setE((x) => ({ ...estadoDesdeImportacion(x.tipo, imp), ...(x.contexto ? { contexto: x.contexto } : {}) }));
+            }}
+          />
+        )}
+
+        <TextInput label='Título' required value={e.titulo} maxLength={255} onChange={(ev) => cambiar({ titulo: ev.currentTarget.value })} data-testid='titulo-formulario' />
+        <TextInput
+          label='Código del formulario'
+          description={editando ? 'El código no se puede cambiar al editar.' : 'Identifica el formulario; se genera solo y puede cambiarlo.'}
+          value={e.codigo}
+          maxLength={60}
+          disabled={editando}
+          onChange={(ev) => cambiar({ codigo: ev.currentTarget.value })}
+        />
+        <Textarea
+          label={evaluacion ? 'Enunciado' : 'Descripción'}
+          description={evaluacion ? 'Instrucciones que verá la persona antes de responder.' : 'Texto de presentación (opcional).'}
+          autosize
+          minRows={2}
+          maxRows={8}
+          maxLength={4000}
+          value={e.descripcion}
+          onChange={(ev) => cambiar({ descripcion: ev.currentTarget.value })}
+        />
+
+        {evaluacion && (
+          <Group align='flex-end' gap='md' wrap='wrap'>
+            <NumberInput
+              label='Nota mínima para aprobar (%)'
+              min={1}
+              max={100}
+              decimalScale={2}
+              w={240}
+              value={e.notaMinima}
+              onChange={(v) => cambiar({ notaMinima: v === '' ? '' : Number(v) })}
+              data-testid='nota-minima'
+            />
+            <Switch
+              label='Repartir los 100 puntos por igual entre las preguntas'
+              checked={e.puntosAuto}
+              onChange={(ev) => activarReparto(ev.currentTarget.checked)}
+              data-testid='puntos-auto'
+            />
+            <Switch
+              label='Guardar como borrador (todavía no se puede responder)'
+              checked={e.borrador}
+              onChange={(ev) => cambiar({ borrador: ev.currentTarget.checked })}
+              data-testid='borrador'
+            />
+          </Group>
+        )}
+
+        <Checkbox.Group
+          label='Datos que se piden a la persona'
+          description='Se ponen al inicio del formulario. El nombre y el correo se toman de la sesión.'
+          value={clavesActivas(e.datos)}
+          onChange={(v) => cambiar({ datos: { nombre: v.includes('nombre'), correo: v.includes('correo'), cedula: v.includes('cedula') } })}
+        >
+          <Group gap='lg' mt='xs' wrap='wrap'>
+            <Checkbox value='nombre' label='Nombre completo' />
+            <Checkbox value='correo' label='Correo electrónico' />
+            <Checkbox value='cedula' label='Número de cédula' />
+          </Group>
+        </Checkbox.Group>
+        {contexto === 'sst' && (
+          <Switch
+            label='Pide datos de salud u otros datos sensibles (exige que la persona autorice su tratamiento)'
+            checked={e.datosSensibles}
+            onChange={(ev) => cambiar({ datosSensibles: ev.currentTarget.checked })}
+            data-testid='datos-sensibles'
+          />
+        )}
+        {contexto === 'sst' && (e.datosSensibles || e.datos.cedula) && (
+          <Text size='xs' c='dimmed'>
+            El formulario incluirá el aviso de tratamiento de datos de Seguridad y Salud en el Trabajo (Ley 1581 de 2012), pendiente de validación por Talento Humano o Jurídica.
+          </Text>
+        )}
+        {contexto !== 'sst' && e.datos.cedula && (
+          <Text size='xs' c='dimmed'>
+            La cédula es un dato personal: el formulario incluye el aviso de tratamiento de datos (Ley 1581 de 2012), pendiente de validación por Talento Humano o Jurídica.
+          </Text>
+        )}
+
+        <Group justify='space-between' align='center' wrap='wrap'>
+          <Text fw={600}>Preguntas ({e.preguntas.length})</Text>
+          {evaluacion && (
+            <Group gap='xs'>
+              <Badge color={redondear2(suma) === PUNTOS_TOTAL ? 'green' : 'red'} variant='light' size='lg' data-testid='suma-puntos'>
+                Puntos: {suma} / {PUNTOS_TOTAL}
+              </Badge>
+            </Group>
+          )}
+        </Group>
+
+        {e.preguntas.map((p, i) => (
+          <Paper key={p.id} withBorder radius='md' p='sm' data-testid={`pregunta-${i + 1}`}>
+            <Stack gap='sm'>
+              <Group justify='space-between' wrap='nowrap'>
+                <Text size='sm' fw={600}>
+                  Pregunta {i + 1}
+                </Text>
+                <Group gap={4} wrap='nowrap'>
+                  <ActionIcon variant='subtle' aria-label='Subir pregunta' onClick={() => mover(i, -1)} disabled={i === 0}>
+                    <IconArrowUp size={16} />
+                  </ActionIcon>
+                  <ActionIcon variant='subtle' aria-label='Bajar pregunta' onClick={() => mover(i, 1)} disabled={i === e.preguntas.length - 1}>
+                    <IconArrowDown size={16} />
+                  </ActionIcon>
+                  <ActionIcon variant='subtle' color='red' aria-label='Quitar pregunta' onClick={() => quitar(i)}>
+                    <IconTrash size={16} />
+                  </ActionIcon>
+                </Group>
+              </Group>
+
+              <Textarea
+                label='Enunciado de la pregunta'
+                required
+                autosize
+                minRows={1}
+                maxRows={6}
+                maxLength={500}
+                value={p.texto}
+                onChange={(ev) => cambiarPregunta(i, { texto: ev.currentTarget.value })}
+              />
+
+              <Group align='flex-end' gap='md' wrap='wrap'>
+                <NativeSelect
+                  label='Tipo de pregunta'
+                  w={280}
+                  value={tipoUi(p)}
+                  data={evaluacion ? TIPOS_EVALUACION : TIPOS_ENCUESTA}
+                  onChange={(ev) => cambiarTipoPregunta(i, ev.currentTarget.value as TipoUi)}
+                />
+                {evaluacion && esSeleccion(p) && (
+                  <NumberInput
+                    label='Puntos'
+                    required
+                    min={0}
+                    max={PUNTOS_TOTAL}
+                    decimalScale={2}
+                    w={140}
+                    value={p.puntos}
+                    readOnly={e.puntosAuto}
+                    variant={e.puntosAuto ? 'filled' : 'default'}
+                    description={e.puntosAuto ? 'Automático' : undefined}
+                    onChange={(v) => cambiarPregunta(i, { puntos: v === '' ? '' : Number(v) })}
+                  />
+                )}
+                {!esCalificada(e, p) && (
+                  <Switch label='Obligatoria' checked={p.obligatoria} onChange={(ev) => cambiarPregunta(i, { obligatoria: ev.currentTarget.checked })} />
+                )}
+              </Group>
+
+              {p.tipo === 'escala' && (
+                <Group align='flex-end' gap='md' wrap='wrap' data-testid={`escala-${i + 1}`}>
+                  <NumberInput
+                    label='Valor mínimo'
+                    min={0}
+                    max={19}
+                    allowDecimal={false}
+                    w={130}
+                    value={p.escala?.min ?? 0}
+                    onChange={(v) => cambiarPregunta(i, { escala: { min: v === '' ? '' : Number(v), max: p.escala?.max ?? 10, etiquetaMin: p.escala?.etiquetaMin ?? '', etiquetaMax: p.escala?.etiquetaMax ?? '' } })}
+                  />
+                  <NumberInput
+                    label='Valor máximo'
+                    min={1}
+                    max={20}
+                    allowDecimal={false}
+                    w={130}
+                    value={p.escala?.max ?? 10}
+                    onChange={(v) => cambiarPregunta(i, { escala: { min: p.escala?.min ?? 0, max: v === '' ? '' : Number(v), etiquetaMin: p.escala?.etiquetaMin ?? '', etiquetaMax: p.escala?.etiquetaMax ?? '' } })}
+                  />
+                  <TextInput
+                    label='Rótulo del mínimo (opcional)'
+                    maxLength={60}
+                    flex='1 1 180px'
+                    value={p.escala?.etiquetaMin ?? ''}
+                    onChange={(ev) => cambiarPregunta(i, { escala: { min: p.escala?.min ?? 0, max: p.escala?.max ?? 10, etiquetaMin: ev.currentTarget.value, etiquetaMax: p.escala?.etiquetaMax ?? '' } })}
+                  />
+                  <TextInput
+                    label='Rótulo del máximo (opcional)'
+                    maxLength={60}
+                    flex='1 1 180px'
+                    value={p.escala?.etiquetaMax ?? ''}
+                    onChange={(ev) => cambiarPregunta(i, { escala: { min: p.escala?.min ?? 0, max: p.escala?.max ?? 10, etiquetaMin: p.escala?.etiquetaMin ?? '', etiquetaMax: ev.currentTarget.value } })}
+                  />
+                </Group>
+              )}
+
+              {p.imagen && (
+                <Group gap='sm' wrap='wrap' data-testid={`imagen-pregunta-${i + 1}`}>
+                  <Text size='sm'>
+                    Esta pregunta muestra la imagen <Text span ff='monospace' size='xs'>{p.imagen.src}</Text>.
+                  </Text>
+                  <Button size='xs' variant='default' onClick={() => cambiarPregunta(i, { imagen: undefined })}>
+                    Quitar imagen
+                  </Button>
+                </Group>
+              )}
+
+              {esSeleccion(p) && (
+                <Stack gap='xs'>
+                  <Text size='sm' fw={500}>
+                    Opciones{' '}
+                    {evaluacion && (
+                      <Text span size='xs' c='dimmed'>
+                        {p.tipo === 'seleccion_multiple' ? '(marque TODAS las respuestas correctas; se acierta solo si la persona marca exactamente esas)' : '(marque la respuesta correcta)'}
+                      </Text>
+                    )}
+                  </Text>
+                  {p.opciones.map((o, j) => (
+                    <Group key={j} gap='xs' wrap='nowrap' align='center'>
+                      {evaluacion &&
+                        (p.tipo === 'seleccion_multiple' ? (
+                          <Checkbox
+                            checked={p.correctas.includes(j)}
+                            onChange={(ev) =>
+                              cambiarPregunta(i, { correctas: ev.currentTarget.checked ? [...p.correctas, j] : p.correctas.filter((c) => c !== j) })
+                            }
+                            aria-label={`Marcar la opción ${j + 1} como correcta`}
+                          />
+                        ) : (
+                          <Radio
+                            checked={p.correcta === j}
+                            onChange={() => cambiarPregunta(i, { correcta: j })}
+                            aria-label={`Marcar la opción ${j + 1} como correcta`}
+                            name={`correcta-${p.id}`}
+                          />
+                        ))}
+                      <Textarea
+                        flex={1}
+                        autosize
+                        minRows={1}
+                        maxRows={5}
+                        aria-label={`Opción ${j + 1}`}
+                        placeholder={`Opción ${j + 1}`}
+                        maxLength={500}
+                        value={o}
+                        onChange={(ev) => cambiarPregunta(i, { opciones: p.opciones.map((x, k) => (k === j ? ev.currentTarget.value : x)) })}
+                      />
+                      <ActionIcon
+                        variant='subtle'
+                        color='red'
+                        aria-label={`Quitar la opción ${j + 1}`}
+                        onClick={() =>
+                          cambiarPregunta(i, {
+                            opciones: p.opciones.filter((_, k) => k !== j),
+                            correcta: p.correcta === null ? null : p.correcta === j ? null : p.correcta > j ? p.correcta - 1 : p.correcta,
+                            correctas: p.correctas.filter((c) => c !== j).map((c) => (c > j ? c - 1 : c)),
+                          })
+                        }
+                      >
+                        <IconTrash size={16} />
+                      </ActionIcon>
+                    </Group>
+                  ))}
+                  <Group gap='md'>
+                    <Button size='xs' variant='default' leftSection={<IconPlus size={14} />} onClick={() => cambiarPregunta(i, { opciones: [...p.opciones, ''] })}>
+                      Agregar opción
+                    </Button>
+                    {!evaluacion && (p.tipo === 'seleccion' || p.tipo === 'seleccion_multiple') && (
+                      <Checkbox size='xs' label='Permitir "Otra respuesta"' checked={p.permiteOtra} onChange={(ev) => cambiarPregunta(i, { permiteOtra: ev.currentTarget.checked })} />
+                    )}
+                  </Group>
+                </Stack>
+              )}
+
+              <TextInput
+                label='Ayuda (opcional)'
+                maxLength={1000}
+                value={p.ayuda}
+                onChange={(ev) => cambiarPregunta(i, { ayuda: ev.currentTarget.value })}
+              />
+            </Stack>
+          </Paper>
+        ))}
+
+        <Group>
+          <Button variant='default' leftSection={<IconPlus size={16} />} onClick={agregar} data-testid='agregar-pregunta'>
+            Agregar pregunta
+          </Button>
+        </Group>
+
+        <Group gap='xs' justify='flex-end' wrap='wrap'>
+          <Button variant='default' onClick={onCancelar} disabled={guardando}>
+            Cancelar
+          </Button>
+          <Button
+            variant='default'
+            leftSection={<IconEye size={16} />}
+            disabled={guardando}
+            onClick={() => {
+              const d = revisar();
+              if (d) onVistaPrevia(d);
+            }}
+          >
+            Vista previa
+          </Button>
+          <Button
+            leftSection={<IconDeviceFloppy size={16} />}
+            loading={guardando}
+            disabled={guardando}
+            data-testid='guardar-formulario'
+            onClick={() => {
+              const d = revisar();
+              if (d) void onGuardar(d);
+            }}
+          >
+            {editando ? 'Guardar versión nueva' : evaluacion && e.borrador ? 'Guardar borrador' : 'Guardar formulario'}
+          </Button>
+        </Group>
+      </Stack>
+    </Paper>
+  );
+}
+
+function clavesActivas(d: Record<DatoClave, boolean>): string[] {
+  return (Object.keys(d) as DatoClave[]).filter((k) => d[k]);
+}

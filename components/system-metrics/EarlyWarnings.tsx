@@ -20,7 +20,7 @@ const DETAIL_BLOCKS: Array<{ field: 'happening' | 'why' | 'risk' | 'action'; lab
 
 /**
  * Historial de alertas tempranas (lib/system-metrics/earlyWarnings.ts). Cada alerta se envió por
- * campana y push a quienes tienen el módulo; aquí se lee el detalle completo.
+ * campana y push a quienes activaron «Recibir alertas»; aquí se lee el detalle completo.
  */
 export function EarlyWarnings({
   alerts,
@@ -87,7 +87,7 @@ export function EarlyWarnings({
                     <div className={styles.insightDetail}>
                       {formatDateTime(a.raisedAt)} · {formatAgo(a.raisedAt)} ·{' '}
                       {a.notified === 0
-                        ? 'nadie tiene el módulo asignado para recibirla'
+                        ? 'no se envió: nadie activó «Recibir alertas»'
                         : a.notified === 1
                           ? 'enviada a 1 persona'
                           : `enviada a ${a.notified} personas`}

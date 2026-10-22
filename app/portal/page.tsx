@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import PortalContenido, { leerJson, usePortalContenido } from '../../components/portal/PortalContenido';
+import { rutaSiguienteValida } from '../../lib/portal/formacion-navegacion';
+import { reiniciarVentanaHoy } from '../../lib/portal/ventana-hoy';
 
 /**
  * PORTAL DE TALENTO HUMANO — entrada ABIERTA, con código al correo.
@@ -62,6 +64,14 @@ export default function PortalAbierto() {
       if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo validar el código.'));
       setCodigo('');
       setPidioCodigo(false);
+      // Sesión nueva: la ventana emergente «Hoy» vuelve a salir (Cristian, 2026-10-16: cada vez que se inicie sesión).
+      reiniciarVentanaHoy();
+      // Si llegó desde una invitación a un curso, vuelve a Formación (solo esa ruta; ver rutaSiguienteValida).
+      const siguiente = rutaSiguienteValida(new URLSearchParams(window.location.search).get('siguiente'));
+      if (siguiente) {
+        window.location.assign(siguiente);
+        return;
+      }
       await recargar();
     } catch (e) {
       setError((e as Error).message);
@@ -72,6 +82,7 @@ export default function PortalAbierto() {
 
   const salir = async () => {
     await fetch('/api/portal/logout', { method: 'POST' });
+    reiniciarVentanaHoy();
     setCorreo('');
     setPidioCodigo(false);
     await recargar();

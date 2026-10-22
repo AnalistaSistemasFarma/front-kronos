@@ -93,6 +93,9 @@ export const SGC_AUDIT_ACTIONS = {
   cargaMasivaArchivos: 'listado_maestro.carga_archivos',
   relacionPropuesta: 'relacion.propuesta',
   relacionConfirmada: 'relacion.confirmada',
+  // 2026-10-19: documentos padre e hijos (relacionar con el padre por arrastre o botón, y la relación que se crea sola).
+  relacionPadreAsignado: 'relacion.padre_asignado',
+  relacionAutomatica: 'relacion.automatica',
   cargaInicialCerrada: 'carga_inicial.cerrada',
   correoResumenDiario: 'correo.resumen_diario',
   // Sprint 10: capacitación opcional por solicitud, material previo y recapacitación.
@@ -109,6 +112,18 @@ export const SGC_AUDIT_ACTIONS = {
   // Sprint 13: firma propia.
   firmaPropiaRegistrada: 'firma.propia_registrada',
   firmaPropiaValidada: 'firma.propia_validada',
+  // Generador de documentos desde plantillas aprobadas por Calidad (2026-10-10).
+  generadorPlantillaPropuesta: 'generador.plantilla_propuesta',
+  generadorPlantillaDecidida: 'generador.plantilla_decidida',
+  generadorPlantillaRetirada: 'generador.plantilla_retirada',
+  generadorVistaPrevia: 'generador.vista_previa',
+  generadorDocumento: 'generador.documento_generado',
+  generadorDocumentoAnulado: 'generador.documento_anulado',
+  // S16: plantillas de encabezado por tipo documental.
+  encabezadoPlantilla: 'encabezado.plantilla',
+  // S17–S18: evaluaciones propias en SynerLink.
+  evaluacionBanco: 'evaluacion.banco',
+  evaluacionIntento: 'evaluacion.intento',
 } as const;
 
 export type SgcAuditAction = (typeof SGC_AUDIT_ACTIONS)[keyof typeof SGC_AUDIT_ACTIONS];

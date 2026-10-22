@@ -86,6 +86,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     let requester: ChatAttachmentRequester;
     let sessionEmail: string | null = null;
+    // Alcance de la llave del agente (lib/chat/agent-keys.ts): la del puente
+    // de hilos solo baja adjuntos de PROYECTOS; la del bot vivo, nunca de uno.
+    let agentScope: 'channel' | 'projects' | null = null;
 
     if (request.headers.get('authorization')) {
       // Si trae Bearer, se resuelve como agente o no se resuelve: no se cae de
@@ -94,6 +97,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       const agent = await authenticateAgent(request);
       if (!agent) return unauthorized();
       requester = { kind: 'agent', idAgent: agent.idAgent };
+      agentScope = agent.scope;
     } else {
       const user = await resolveSessionUser();
       if (!user) return unauthorized();
@@ -119,6 +123,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (!attachment) return notFound();
 
     const conversation = attachment.message.conversation;
+
+    if (agentScope !== null && (agentScope === 'projects') !== (conversation.kind === 'project')) {
+      return notFound();
+    }
 
     if (requester.kind === 'user' && conversation.kind !== 'direct') {
       // Grupo o personas: la misma puerta del hilo (ver arriba).

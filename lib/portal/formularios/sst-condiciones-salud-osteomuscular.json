@@ -1,0 +1,116 @@
+{
+  "formato": 1,
+  "codigo": "SST-SALUD-OSTEOMUSCULAR",
+  "titulo": "CONDICIONES DE SALUD Y SINTOMATOLOGÍA OSTEOMUSCULAR",
+  "descripcion": "Esta encuesta es de carácter obligatorio y se debe diligenciar cuando presente alguna sintomatología, toda la información que nos suministre será utilizada solo con fines estadísticos. No hay respuestas buenas o malas, nos interesa poder definir con certeza su condición de salud, pensando en su seguridad y el bienestar de su familia.",
+  "datosSensibles": true,
+  "autorizacion": {
+    "version": "AUT-DATOS-SST-OSTEOMUSCULAR-2026-10-19-BORRADOR",
+    "pendienteValidacion": true,
+    "titulo": "Autorización de tratamiento de datos",
+    "texto": [
+      "La información que usted responda será totalmente confidencial. En caso de no autorizar el tratamiento, la recolección y/o el almacenamiento de la información, no continúe con el diligenciamiento de la encuesta."
+    ],
+    "casilla": "Autorizo el tratamiento, la recolección y el almacenamiento de mis datos."
+  },
+  "preguntas": [
+    { "id": "o01", "texto": "Nombres y Apellidos", "tipo": "texto", "obligatoria": true, "prellenar": "nombre" },
+    { "id": "o02", "texto": "Número de cédula", "tipo": "texto", "obligatoria": true },
+    { "id": "o03", "texto": "Número de teléfono", "tipo": "texto", "obligatoria": true },
+    { "id": "o05", "texto": "Escribe con la mano", "tipo": "seleccion", "obligatoria": true, "opciones": ["Derecha", "Izquierda", "Ambidiestro"] },
+    {
+      "id": "o06",
+      "texto": "¿Padece alguna enfermedad diagnosticada? (enfermedad confirmada por médico o especialista)",
+      "tipo": "seleccion",
+      "obligatoria": true,
+      "permiteOtra": true,
+      "opciones": [
+        "Hernia discal",
+        "Lumbalgia",
+        "Síndrome del manguito rotador",
+        "Tendinitis bicipital",
+        "Bursitis hombro",
+        "Epicondilitis",
+        "Enfermedad de Quervain o Tendinitis de Quervain",
+        "Síndrome de túnel del carpo",
+        "Tendinitis de flexo extensores",
+        "Ninguna"
+      ]
+    },
+    {
+      "id": "o07",
+      "texto": "De las siguientes opciones, seleccione si ha presentado alguno de estos síntomas en los últimos 5 días",
+      "tipo": "seleccion_multiple",
+      "obligatoria": true,
+      "permiteOtra": true,
+      "opciones": [
+        "Fiebre de 38°C o más",
+        "Tos continua y/o dificultad para respirar",
+        "Congestión nasal y/o pérdida del olfato",
+        "Dolor de garganta",
+        "Desaliento y/o dolor muscular o articular",
+        "Contacto con persona que hubiese tenido los síntomas anteriores",
+        "Ninguno"
+      ]
+    },
+    { "id": "o08", "texto": "¿Ha consumido algún medicamento para disminuir los síntomas seleccionados anteriormente?", "tipo": "seleccion", "obligatoria": true, "opciones": ["Sí", "No", "N/A"] },
+    { "id": "o09", "texto": "¿Cuántas dosis de vacuna contra el covid-19 tiene?", "tipo": "seleccion", "obligatoria": true, "opciones": ["1", "2", "3", "4"] },
+    {
+      "id": "o10",
+      "texto": "Visualice la siguiente imagen y seleccione la zona donde presenta dolor",
+      "ayuda": "Según la tabla corporal, identifique la parte del cuerpo donde presenta dolor.",
+      "tipo": "seleccion_multiple",
+      "obligatoria": true,
+      "permiteOtra": true,
+      "imagen": { "src": "/portal-th/cuerpo-dolor.png", "alt": "Figura humana de frente y de espalda con las partes del cuerpo rotuladas" },
+      "opciones": [
+        "Cabeza",
+        "Cuello",
+        "Oreja",
+        "Hombro",
+        "Espalda",
+        "Brazo",
+        "Mano y/o muñeca",
+        "Trasero y/o cadera",
+        "Rodilla",
+        "Muslo, pierna y/o pantorrilla",
+        "Pie",
+        "Tobillo"
+      ]
+    },
+    {
+      "id": "o11",
+      "texto": "Según lo seleccionado anteriormente califique de 1 a 10 donde 1 (muy poco dolor) no restringe actividades de la vida diaria ni la vida laboral; 10 (mucho dolor) el cual restringe sus actividades y concentración y/o genera incapacidades laborales",
+      "tipo": "escala",
+      "obligatoria": true,
+      "escala": { "min": 0, "max": 10, "etiquetaMin": "Muy poco dolor", "etiquetaMax": "Mucho dolor" }
+    },
+    { "id": "o12", "texto": "¿Presenta dolor en alguna otra parte del cuerpo?", "tipo": "si_no", "obligatoria": true },
+    {
+      "id": "o13",
+      "texto": "Si su respuesta anterior fue SI, mencione la parte del cuerpo donde presenta dolor e indique de 1 a 10 el nivel de dolor. Si su respuesta fue NO poner N/A",
+      "tipo": "texto",
+      "obligatoria": true
+    },
+    {
+      "id": "o14",
+      "texto": "De acuerdo a la respuesta anterior indique el tiempo de evolución de los síntomas",
+      "tipo": "seleccion",
+      "obligatoria": true,
+      "opciones": ["Menos de 8 horas", "De 1 a 30 días", "Más de 6 meses", "Más de 1 año", "N/A"]
+    },
+    { "id": "o15", "texto": "¿Tiene alguna enfermedad o condición hereditaria?", "tipo": "si_no", "obligatoria": true },
+    { "id": "o16", "texto": "Si su respuesta anterior fue afirmativa indique cual. Si la respuesta fue NO poner N/A", "tipo": "texto", "obligatoria": true },
+    { "id": "o17", "texto": "¿Consume algún medicamento?", "tipo": "si_no", "obligatoria": true },
+    { "id": "o18", "texto": "Si su respuesta anterior fue afirmativa indique cual. Si la respuesta fue No poner N/A", "tipo": "texto", "obligatoria": true },
+    { "id": "o19", "texto": "¿Presenta vómito, mareo o diarrea?", "tipo": "si_no", "obligatoria": true },
+    { "id": "o20", "texto": "¿Se encuentra en algún tratamiento médico?", "tipo": "si_no", "obligatoria": true },
+    { "id": "o21", "texto": "Si su respuesta anterior fue afirmativa, indique cual y hace cuanto tiempo. Si la respuesta fue NO poner N/A", "tipo": "texto", "obligatoria": true },
+    { "id": "o22", "texto": "¿Con qué frecuencia consume bebidas alcohólicas?", "tipo": "seleccion", "obligatoria": true, "opciones": ["Nunca", "Casi nunca", "A veces", "Casi siempre", "Siempre"] },
+    { "id": "o23", "texto": "¿Fuma?", "tipo": "si_no", "obligatoria": true },
+    { "id": "o24", "texto": "¿Con qué frecuencia consume frutas o verduras?", "tipo": "seleccion", "obligatoria": true, "opciones": ["Nunca", "Casi nunca", "A veces", "Casi siempre", "Siempre"] },
+    { "id": "o25", "texto": "¿Practica algún deporte?", "tipo": "si_no", "obligatoria": true },
+    { "id": "o26", "texto": "¿Con qué frecuencia realiza ejercicio?", "tipo": "seleccion", "obligatoria": true, "opciones": ["Nunca", "Casi nunca", "A veces", "Casi siempre", "Siempre"] },
+    { "id": "o27", "texto": "¿Toma de 4 a 8 vasos de agua al día?", "tipo": "si_no", "obligatoria": true }
+  ]
+}

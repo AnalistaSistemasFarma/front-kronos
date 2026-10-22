@@ -73,10 +73,13 @@ const HEADER_ICONS: Array<{ test: RegExp; icon: TablerIcon }> = [
   { test: /venta|purchase|compra/, icon: IconBuildingStore },
   { test: /admin|administr/, icon: IconSettings },
   { test: /solicitud/, icon: IconClipboardList },
+  { test: /producci[oó]n/, icon: IconBuildingFactory },
   { test: /gesti[oó]n|proceso/, icon: IconFolders },
 ];
 
 const SUB_RULES: Array<{ test: RegExp; icon: TablerIcon }> = [
+  // Módulo «Proyectos» (2026-10-18): sin esta regla el nombre caía por hash en el carrito de compras.
+  { test: /^proyectos?$|gesti[oó]n\s+de\s+proyectos/, icon: IconFolders },
   { test: /mis\s*ticket/, icon: IconInbox },
   { test: /^tickets?$|panel.*caso/, icon: IconTicket },
   { test: /ticket|help|soporte/, icon: IconTicket },
@@ -89,6 +92,7 @@ const SUB_RULES: Array<{ test: RegExp; icon: TablerIcon }> = [
   { test: /actividad|tarea/, icon: IconListCheck },
   { test: /dashboard|tablero/, icon: IconLayoutDashboard },
   { test: /autoriz/, icon: IconShieldCheck },
+  { test: /bit[aá]cora|[oó]rden(es)?\s+de\s+trabajo/, icon: IconListCheck },
   { test: /orden/, icon: IconReceipt },
   { test: /oferta/, icon: IconRosetteDiscount },
   { test: /inventario|stock/, icon: IconPackages },

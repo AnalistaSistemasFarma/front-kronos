@@ -173,12 +173,15 @@ export async function POST(req: Request) {
 
       // Firmantes: 1 aviso de turno (Autorizar firma). Resto: "Incluido como firmante".
       // "Documento enviado" solo a stakeholders (no al firmante en turno ni al preparador).
+      // El aviso de turno lo da createOrionSignerAuthorizations al crear la autorización;
+      // "Le toca firmar" solo sale de respaldo si no se creó ni existía ninguna.
       fireAndForgetNotification(
         notifyOrionSignerInvited({
           requestId,
           subject: ctx?.subject_request ?? null,
           signerEmails,
           currentSignerEmail: pending?.email ?? null,
+          notifyCurrent: authResult.created === 0 && authResult.skipped === 0,
           fileId,
           fileName: nextState.fileName ?? current.fileName ?? null,
         })

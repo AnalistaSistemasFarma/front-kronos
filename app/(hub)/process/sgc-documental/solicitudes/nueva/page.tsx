@@ -21,6 +21,8 @@ import { SgcCopyRequestForm } from '../../../../../../components/sgc/SgcUncontro
  */
 interface FormInfo {
   flow: { code: string; name: string; version: number };
+  /** S15: con el DOC v7 el solicitante elabora y Calidad autoriza primero la creación. */
+  roleModel?: 'calidad_asigna' | 'solicitante_elabora';
   requestTypes: { value: string; label: string }[];
   fields: SgcFormFieldDefinition[];
   steps: { key: string; name: string; isEnabled: boolean }[];
@@ -31,7 +33,7 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
   const id = company.idCompany;
   const form = useSgcFetch<FormInfo>(`/api/sgc/requests/form?company=${id}`);
   const catalogs = useSgcFetch<SgcCatalogs>(`/api/sgc/catalogs?company=${id}`);
-  const docs = useSgcFetch<{ documents: { idDocument: number; code: string; title: string; versionNumber: number | null }[] }>(`/api/sgc/documents?company=${id}`);
+  const docs = useSgcFetch<{ documents: { idDocument: number; code: string; title: string; versionNumber: number | null; documentType?: { code: string } }[] }>(`/api/sgc/documents?company=${id}`);
   // Sprint 5: «Iniciar nueva versión» desde el calendario o la ficha llega con ?tipo=nueva_version&documento=<id>.
   const [prefill] = useState(() => {
     if (typeof window === 'undefined') return { tipo: null as string | null, documento: null as string | null };
@@ -57,6 +59,12 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
   const selectedType = catalogs.data?.documentTypes.find((t) => String(t.id) === idDocumentType) ?? null;
   const guide = catalogs.data?.codingGuide ?? null;
   const inherits = Boolean(requestType === 'nuevo' && guide && selectedType && inheritsParentNumber(guide, selectedType.code));
+  // 2026-10-19 (documentos padre e hijos): el procedimiento (tipo padre) no tiene padre; los demás tipos pueden
+  // indicar su padre (obligatorio si heredan el número) y, al aprobarse, la relación padre → hijo se crea sola.
+  const parentTypeCodes = catalogs.data?.parentTypeCodes ?? [];
+  const isParentType = Boolean(selectedType && parentTypeCodes.includes(selectedType.code));
+  const canHaveParent = Boolean(requestType === 'nuevo' && selectedType && !isParentType);
+  const parentOptions = (docs.data?.documents ?? []).filter((d) => !d.documentType || parentTypeCodes.includes(d.documentType.code));
   const [subjectTouched, setSubjectTouched] = useState(false);
   const suggestedSubject = selectedDoc && requestType === 'nueva_version' ? `Nueva versión de ${selectedDoc.code} (V${(selectedDoc.versionNumber ?? 0) + 1})` : '';
 
@@ -80,7 +88,7 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
         idProcess: requestType === 'nuevo' ? Number(idProcess) : undefined,
         idDocumentType: requestType === 'nuevo' ? Number(idDocumentType) : undefined,
         idDocument: requestType !== 'nuevo' ? Number(idDocument) : undefined,
-        idParentDocument: inherits && idParentDocument ? Number(idParentDocument) : undefined,
+        idParentDocument: canHaveParent && idParentDocument ? Number(idParentDocument) : undefined,
         requiresTraining: requiresTraining === 'tipo' ? undefined : requiresTraining,
         formValues: values,
       });
@@ -101,6 +109,11 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
         <Text size='sm' c='dimmed' mb='md'>
           Flujo «{form.data.flow.name}» versión {form.data.flow.version}: {form.data.steps.map((s) => s.name + (s.isEnabled ? '' : ' (Sprint 4)')).join(' → ')}.
         </Text>
+      )}
+      {form.data?.roleModel === 'solicitante_elabora' && (
+        <Alert color='blue' variant='light' icon={<IconAlertCircle size={16} />} mb='md' data-testid='sgc-nueva-modelo-v7'>
+          Usted elaborará el documento: Aseguramiento de Calidad primero autoriza su creación (o la rechaza si ya existe un documento que cubre el tema). Luego usted carga el borrador y asigna a los revisores y aprobadores de su departamento.
+        </Alert>
       )}
       {(error || form.error) && (
         <Alert color='red' icon={<IconAlertCircle size={16} />} mb='md' data-testid='sgc-nueva-error'>
@@ -145,19 +158,31 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
                 data-testid='sgc-nueva-tipo-documental'
               />
             </Grid.Col>
-            {inherits && (
+            {canHaveParent && (
               <Grid.Col span={12}>
                 <SgcSelect
                   label='Documento padre'
-                  description={`Un ${selectedType?.name.toLowerCase() ?? 'documento'} hereda el número de su documento padre (por ejemplo, el procedimiento).`}
-                  required
+                  description={
+                    inherits
+                      ? `Un ${selectedType?.name.toLowerCase() ?? 'documento'} hereda el número de su documento padre (por ejemplo, el procedimiento). Al aprobarse, queda relacionado con él.`
+                      : 'Opcional: el procedimiento del que se desprende. Al aprobarse, el documento queda relacionado con él.'
+                  }
+                  required={inherits}
+                  clearable={!inherits}
                   searchable
-                  data={(docs.data?.documents ?? []).map((d) => ({ value: String(d.idDocument), label: `${d.code} · ${d.title}` }))}
+                  data={parentOptions.map((d) => ({ value: String(d.idDocument), label: `${d.code} · ${d.title}` }))}
                   value={idParentDocument}
                   onChange={setIdParentDocument}
-                  nothingFoundMessage='No hay documentos vigentes que usted pueda consultar'
+                  nothingFoundMessage='No hay documentos padre vigentes que usted pueda consultar'
                   data-testid='sgc-nueva-padre'
                 />
+              </Grid.Col>
+            )}
+            {requestType === 'nuevo' && isParentType && (
+              <Grid.Col span={12}>
+                <Alert color='blue' variant='light' icon={<IconAlertCircle size={16} />} data-testid='sgc-nueva-tipo-padre'>
+                  Un {selectedType?.name.toLowerCase()} es documento padre: no tiene padre. De él se desprenden sus formatos e instructivos, que heredan su número.
+                </Alert>
               </Grid.Col>
             )}
           </Grid>
@@ -175,7 +200,7 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
         )}
         <SgcSelect
           label='¿Requiere capacitación?'
-          description='Su sugerencia: la confirma quien crea el documento o Calidad. Los formatos y los manuales de uso suelen requerirla.'
+          description={form.data?.roleModel === 'solicitante_elabora' ? 'Usted la prepara y la dicta como creador del documento. Los formatos y los manuales de uso suelen requerirla.' : 'Su sugerencia: la confirma quien crea el documento o Calidad. Los formatos y los manuales de uso suelen requerirla.'}
           data={[
             { value: 'tipo', label: 'Según el tipo documental' },
             { value: 'si', label: 'Sí, requiere capacitación' },
@@ -187,7 +212,8 @@ function NewRequestForm({ company }: { company: SgcCompanyAccess }) {
           data-testid='sgc-nueva-capacitacion'
         />
         <TextInput autoComplete='off' data-1p-ignore='true' data-lpignore='true'
-          label='Asunto'
+          label='Nombre del documento'
+          description='Es el nombre con el que el documento queda en el listado maestro y en su encabezado.'
           required
           value={subjectTouched || !prefill.tipo ? subject : subject || suggestedSubject}
           onChange={(e) => {

@@ -44,6 +44,8 @@ export function agentAvatarSrc(agent: {
   return agent.avatarUrl || null;
 }
 
+/* Proyectos: los contratos del módulo están en lib/proyectos/tipos.ts. */
+
 /* ─────────────────────── Buscador de mensajes ──────────────────────────── */
 
 /** Mínimo de caracteres para buscar. Con uno o dos, todo coincide con todo. */
@@ -100,6 +102,11 @@ export interface ChatAgentDto {
    * cada quien.
    */
   busy: boolean;
+  /**
+   * El asistente tiene PROYECTOS (hilos aislados) habilitados — piloto F1,
+   * interruptor CHAT_PROJECTS_AGENTS. Opcional: un servidor viejo no lo manda.
+   */
+  projectsEnabled?: boolean;
 }
 
 export interface ChatAccessDto {
@@ -124,6 +131,8 @@ export interface ChatAccessDto {
  */
 export type { AgentTaskDto } from './status-tasks';
 import type { AgentTaskDto } from './status-tasks';
+import type { ChatMediaDto, ChatReactionDto } from './media-rules';
+export type { ChatMediaDto, ChatReactionDto } from './media-rules';
 import type { AgentMetricsDto } from './agent-metrics';
 
 export interface ChatStatusDto {
@@ -188,6 +197,10 @@ export interface ChatMessageDto {
   replyTo?: ChatReplyToDto | null;
   /** Evento de un mensaje de sistema: 'nudge' = zumbido. */
   eventType?: string | null;
+  /** Reacciones con emoji (2026-10-20). Sin el campo = ninguna. */
+  reactions?: ChatReactionDto[];
+  /** GIF o sticker (2026-10-20). Sin el campo = mensaje normal. */
+  media?: ChatMediaDto;
   /** Marca local: mensaje aún no confirmado por el servidor (envío optimista). */
   pending?: boolean;
   /** Marca local: el envío falló y el usuario puede reintentar. */
@@ -280,6 +293,11 @@ export interface ChatPollDto {
    * Ausente = este usuario no las ve (o API vieja); null = no hay reporte.
    */
   metrics?: AgentMetricsDto | null;
+  /**
+   * Reacciones que cambiaron desde `rafter` (2026-10-20). Solo viene si el
+   * cliente mandó `rafter`; por mensaje trae el resumen COMPLETO vigente.
+   */
+  reactions?: { cursor: number; changes: Record<string, ChatReactionDto[]> };
   /** Cadencia que ORDENA el servidor. El cliente la respeta tal cual. */
   nextPollMs: number;
   serverTime: string;

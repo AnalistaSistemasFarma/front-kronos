@@ -23,28 +23,39 @@ import {
 import {
   IconAlertCircle,
   IconAlertTriangle,
+  IconChecklist,
   IconCircleCheck,
+  IconClipboardList,
   IconCode,
   IconDeviceFloppy,
   IconEye,
   IconFileImport,
   IconFileSpreadsheet,
   IconInfoCircle,
+  IconPencil,
   IconRotateClockwise,
   IconSearch,
   IconSend,
   IconShieldLock,
 } from '@tabler/icons-react';
 import { leerJson } from './PortalContenido';
+import { ConstructorFormulario } from './ConstructorFormulario';
+import { COLOR_ESTADO, varColorEstado } from '@/lib/theme/estados';
 import {
+  ESCALA_MAX_POR_DEFECTO,
+  ESCALA_MIN_POR_DEFECTO,
   OPCIONES_SI_NO,
   MENSAJE_AUTORIZACION,
+  PREFIJO_OTRAS,
+  calificar,
+  esEvaluacion,
   textoDeRespuesta,
   validarPregunta,
   valoresIniciales,
   type DefinicionFormulario,
   type PreguntaFormulario,
   type Respuestas,
+  type TipoFormulario,
   type ValorRespuesta,
 } from '../../lib/portal/formulario';
 
@@ -74,7 +85,9 @@ import {
  * VENTANA es la misma `portal-th__visor` de los demás materiales de Formación
  * (Cristian pidió que el formulario se abra ahí). Nada de colores ni estilos
  * propios: el CSS que queda es solo de distribución (tamaño de la ventana y
- * zona que se desplaza).
+ * zona que se desplaza). Colores: lo informativo usa el color principal de la
+ * paleta de cada persona; aprobó/no aprobó y demás resultados usan los colores
+ * de estado del tema (`lib/theme/estados.ts`), nunca un color escrito a mano.
  */
 
 /** Respuesta de "Otra" dentro del Radio.Group (no choca con ninguna opción real). */
@@ -83,8 +96,8 @@ const VALOR_OTRA = '__otra__';
 /** Correos y respuestas largas parten línea en la celda (como `NOWRAP` en el Listado maestro del SGC). */
 const QUIEBRE = { overflowWrap: 'anywhere' } as const;
 
-/** Color del `Alert` según el tipo de aviso (verde/rojo/amarillo, convención del equipo). */
-const COLOR_AVISO = { ok: 'green', error: 'red', advertencia: 'yellow' } as const;
+/** Color del `Alert` según el tipo de aviso: colores de estado del tema (convención del equipo). */
+const COLOR_AVISO = { ok: COLOR_ESTADO.exito, error: COLOR_ESTADO.error, advertencia: COLOR_ESTADO.advertencia } as const;
 const ICONO_AVISO = {
   ok: <IconCircleCheck size={18} />,
   error: <IconAlertCircle size={18} />,
@@ -100,7 +113,19 @@ interface DatosFormulario {
   formulario: { versionId: number; version: number; definicion: DefinicionFormulario };
   prellenado: { correo: string; nombre: string };
   enviadaEl: string | null;
+  /** Solo evaluaciones: intentos que ya hizo esta persona. */
+  intentos?: { usados: number; ultimo: { porcentaje: number; aprobado: boolean; enviadoEl: string } | null };
 }
+
+/** Resultado de una evaluación calificada por el servidor. */
+interface ResultadoNota {
+  porcentaje: number;
+  notaMinima: number;
+  aprobado: boolean;
+  intentos?: number;
+}
+
+const formatoNota = (n: number) => `${n.toLocaleString('es-CO', { maximumFractionDigits: 2 })} %`;
 
 const fechaLarga = (v: string) =>
   new Date(v).toLocaleString('es-CO', { dateStyle: 'long', timeStyle: 'short', timeZone: 'America/Bogota' });
@@ -109,6 +134,7 @@ const fechaLarga = (v: string) =>
 
 export function VisorFormulario({
   materialId,
+  rutaApi,
   titulo,
   previa,
   onCerrar,
@@ -116,6 +142,11 @@ export function VisorFormulario({
 }: {
   /** Material FORM a responder. */
   materialId?: number;
+  /**
+   * Formulario INDEPENDIENTE (no de un curso; p. ej. los de SST): la ruta de la API que entrega la definición (GET) y recibe el envío
+   * (POST). Se puede enviar más de una vez y no completa ningún material.
+   */
+  rutaApi?: string;
   titulo: string;
   /** Vista previa del formador: la definición directamente, sin guardar nada. */
   previa?: DefinicionFormulario;
@@ -136,11 +167,11 @@ export function VisorFormulario({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (previa || !materialId) return;
+    if (previa || (!materialId && !rutaApi)) return;
     let vivo = true;
     void (async () => {
       try {
-        const res = await fetch(`/api/portal/materials/${materialId}/formulario`, { cache: 'no-store' });
+        const res = await fetch(rutaApi ?? `/api/portal/materials/${materialId}/formulario`, { cache: 'no-store' });
         const data = await leerJson(res);
         if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo abrir el formulario.'));
         if (vivo) setDatos(data as unknown as DatosFormulario);
@@ -151,7 +182,7 @@ export function VisorFormulario({
     return () => {
       vivo = false;
     };
-  }, [materialId, previa]);
+  }, [materialId, rutaApi, previa]);
 
   useEffect(() => {
     const alTeclear = (e: KeyboardEvent) => {
@@ -182,7 +213,7 @@ export function VisorFormulario({
           </div>
         </header>
         {error && (
-          <Alert color='red' icon={<IconAlertCircle size={18} />} m='md' role='alert'>
+          <Alert color={COLOR_ESTADO.error} icon={<IconAlertCircle size={18} />} m='md' role='alert'>
             {error}
           </Alert>
         )}
@@ -199,6 +230,7 @@ export function VisorFormulario({
             key={datos.formulario.versionId}
             datos={datos}
             previa={!!previa}
+            rutaEnvio={rutaApi}
             onCerrar={onCerrar}
             onEnviado={onEnviado}
           />
@@ -211,11 +243,14 @@ export function VisorFormulario({
 function CuerpoFormulario({
   datos,
   previa,
+  rutaEnvio,
   onCerrar,
   onEnviado,
 }: {
   datos: DatosFormulario;
   previa: boolean;
+  /** Formulario independiente: a dónde se envía (ver `VisorFormulario`). */
+  rutaEnvio?: string;
   onCerrar: () => void;
   onEnviado?: () => Promise<void> | void;
 }) {
@@ -227,7 +262,17 @@ function CuerpoFormulario({
   const [enviando, setEnviando] = useState(false);
   const [enviadaEl, setEnviadaEl] = useState<string | null>(datos.enviadaEl);
   const [recienEnviada, setRecienEnviada] = useState(false);
+  const [nota, setNota] = useState<ResultadoNota | null>(null);
+  const [vuelta, setVuelta] = useState(0);
+  const [subirAlAviso, setSubirAlAviso] = useState(0);
   const desplazable = useRef<HTMLDivElement | null>(null);
+  // Tras reprobar se limpian las respuestas (la página se acorta): subir DESPUÉS de pintar, al aviso rojo.
+  useEffect(() => {
+    if (subirAlAviso === 0) return;
+    // Instantáneo (no suave): en el celular el desplazamiento suave se interrumpía con el cambio de altura.
+    window.requestAnimationFrame(() => desplazable.current?.scrollTo({ top: 0 }));
+  }, [subirAlAviso]);
+  const evaluacion = esEvaluacion(definicion);
 
   const ponerValor = (id: string, valor: ValorRespuesta) => {
     setValores((v) => ({ ...v, [id]: valor }));
@@ -280,13 +325,22 @@ function CuerpoFormulario({
     const lista = validarTodo();
     if (Object.keys(lista).length > 0) return mostrarErrores(lista);
     if (previa) {
-      setAviso({ tipo: 'advertencia', texto: 'Vista previa: el formulario está completo. En la vista previa no se guarda nada.' });
+      if (evaluacion) {
+        // La vista previa del formador califica en el navegador con las correctas que ya conoce.
+        const r = calificar(definicion, valores);
+        setAviso({
+          tipo: r.calificadas === 0 ? 'advertencia' : r.aprobado ? 'ok' : 'error',
+          texto: `Vista previa: con estas respuestas obtendría ${formatoNota(r.porcentaje)} (${r.correctas} de ${r.calificadas} correctas) y ${r.aprobado ? 'aprobaría' : 'no aprobaría'} (mínimo ${formatoNota(r.notaMinima)}). No se guarda nada.`,
+        });
+      } else {
+        setAviso({ tipo: 'advertencia', texto: 'Vista previa: el formulario está completo. En la vista previa no se guarda nada.' });
+      }
       desplazable.current?.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
     setEnviando(true);
     try {
-      const res = await fetch(`/api/portal/materials/${datos.material.id}/formulario`, {
+      const res = await fetch(rutaEnvio ?? `/api/portal/materials/${datos.material.id}/formulario`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ versionId: datos.formulario.versionId, autorizaDatos: autoriza, respuestas: valores }),
@@ -298,6 +352,25 @@ function CuerpoFormulario({
         return mostrarErrores(delServidor);
       }
       if (!res.ok) throw new Error(String(data?.error ?? 'No se pudieron enviar las respuestas.'));
+      const resultado = (data.evaluacion ?? null) as ResultadoNota | null;
+      if (resultado && !resultado.aprobado) {
+        // Reprobó: no queda completado; se limpian las respuestas calificadas y puede intentar de nuevo.
+        setNota(resultado);
+        setErrores({});
+        setValores((v) => {
+          const datosPersona: Respuestas = {};
+          for (const p of definicion.preguntas) if (p.puntos === undefined && v[p.id] !== undefined) datosPersona[p.id] = v[p.id];
+          return { ...valoresIniciales(definicion, datos.prellenado), ...datosPersona };
+        });
+        setVuelta((n) => n + 1);
+        setAviso({
+          tipo: 'error',
+          texto: `No aprobó la evaluación: obtuvo ${formatoNota(resultado.porcentaje)} y la nota mínima es ${formatoNota(resultado.notaMinima)}. Puede intentarlo de nuevo (intentos: ${resultado.intentos ?? 1}).`,
+        });
+        setSubirAlAviso((n) => n + 1);
+        return;
+      }
+      if (resultado) setNota(resultado);
       setEnviadaEl(String(data.enviadaEl ?? new Date().toISOString()));
       setRecienEnviada(true);
       desplazable.current?.scrollTo({ top: 0 });
@@ -317,26 +390,35 @@ function CuerpoFormulario({
       <Stack align='center' justify='center' gap='md' p='xl' className='portal-th__formulario-fin' data-testid='formulario-enviado'>
         {recienEnviada ? (
           <>
-            <IconCircleCheck size={48} color='var(--mantine-color-green-6)' aria-hidden='true' />
+            <IconCircleCheck size={48} color={varColorEstado('exito')} aria-hidden='true' />
             <Text fw={700} fz='xl' ta='center' role='status'>
-              Respuestas enviadas
+              {nota ? 'Evaluación aprobada' : 'Respuestas enviadas'}
             </Text>
+            {nota && (
+              <Text fw={600} fz='lg' ta='center' c={COLOR_ESTADO.exito} data-testid='nota-obtenida'>
+                Su nota: {formatoNota(nota.porcentaje)}
+              </Text>
+            )}
             <Text ta='center' c='dimmed' maw={520}>
-              Gracias. Sus respuestas quedaron guardadas y el material quedó completado.
+              {nota
+                ? `Superó la nota mínima de ${formatoNota(nota.notaMinima)}. Sus respuestas quedaron guardadas y el material quedó completado.`
+                : rutaEnvio
+                  ? 'Gracias. Sus respuestas quedaron guardadas. Solo las ve el equipo de Seguridad y Salud en el Trabajo.'
+                  : 'Gracias. Sus respuestas quedaron guardadas y el material quedó completado.'}
             </Text>
           </>
         ) : (
           <>
-            <IconInfoCircle size={48} color='var(--mantine-color-blue-6)' aria-hidden='true' />
+            <IconInfoCircle size={48} color='var(--mantine-primary-color-filled)' aria-hidden='true' />
             <Text fw={700} fz='xl' ta='center'>
-              Ya envió este formulario
+              {evaluacion ? 'Ya aprobó esta evaluación' : 'Ya envió este formulario'}
             </Text>
             <Text ta='center' c='dimmed' maw={520}>
               Lo envió el {fechaLarga(enviadaEl)}. Las respuestas no se pueden modificar; si necesita corregir algo, pida a Talento Humano que lo reabra.
             </Text>
           </>
         )}
-        <Button onClick={onCerrar}>Volver al curso</Button>
+        <Button onClick={onCerrar}>{rutaEnvio ? 'Cerrar' : 'Volver al curso'}</Button>
       </Stack>
     );
   }
@@ -359,8 +441,20 @@ function CuerpoFormulario({
       )}
       <Stack gap='md' p='md'>
         {previa && (
-          <Alert color='blue' icon={<IconEye size={18} />}>
+          <Alert icon={<IconEye size={18} />}>
             Vista previa del formador: puede llenarlo para probarlo; no se guarda nada.
+          </Alert>
+        )}
+        {evaluacion && (
+          <Alert icon={<IconInfoCircle size={18} />} data-testid='info-evaluacion'>
+            Evaluación: para aprobar necesita al menos {formatoNota(definicion.notaMinima ?? 80)}. Cada pregunta indica cuántos puntos vale.
+            {!previa && datos.intentos && datos.intentos.usados > 0 && (
+              <>
+                {' '}
+                Intentos anteriores: {datos.intentos.usados}
+                {datos.intentos.ultimo ? ` (última nota: ${formatoNota(datos.intentos.ultimo.porcentaje)})` : ''}.
+              </>
+            )}
           </Alert>
         )}
 
@@ -375,7 +469,7 @@ function CuerpoFormulario({
           )}
           <Text size='xs' c='dimmed' mt={4}>
             Los campos marcados con{' '}
-            <Text span c='red' inherit>
+            <Text span c='var(--mantine-color-error)' inherit>
               *
             </Text>{' '}
             son obligatorios.
@@ -397,7 +491,7 @@ function CuerpoFormulario({
                 {definicion.autorizacion.titulo}
               </Text>
               {definicion.autorizacion.pendienteValidacion && (
-                <Alert color='yellow' icon={<IconAlertTriangle size={18} />} p='xs' data-testid='autorizacion-pendiente'>
+                <Alert color={COLOR_ESTADO.advertencia} icon={<IconAlertTriangle size={18} />} p='xs' data-testid='autorizacion-pendiente'>
                   Texto pendiente de validación por Talento Humano o Jurídica
                 </Alert>
               )}
@@ -417,7 +511,7 @@ function CuerpoFormulario({
                 label={
                   <>
                     {definicion.autorizacion.casilla}{' '}
-                    <Text span c='red' inherit aria-hidden='true'>
+                    <Text span c='var(--mantine-color-error)' inherit aria-hidden='true'>
                       *
                     </Text>
                   </>
@@ -432,7 +526,7 @@ function CuerpoFormulario({
         )}
 
         <Paper withBorder radius='md' p='md'>
-          <Stack gap='lg'>
+          <Stack gap='lg' key={vuelta}>
             {definicion.preguntas.map((p, i) => (
               <CampoPregunta
                 key={p.id}
@@ -480,21 +574,132 @@ function CampoPregunta({
 }) {
   const texto = typeof valor === 'string' ? valor : '';
   const opciones = p.tipo === 'si_no' ? [...OPCIONES_SI_NO] : (p.opciones ?? []);
-  const esOtra = typeof valor === 'object' && valor !== null;
+  const esOtra = typeof valor === 'object' && valor !== null && !Array.isArray(valor);
+  const marcadas = Array.isArray(valor) ? valor : [];
+  // Selección múltiple con «Otras» (formularios SST, 2026-10-19): el texto libre viaja como UN elemento `Otras: <texto>`.
+  const esElementoOtras = (x: string) => x.startsWith(PREFIJO_OTRAS);
+  const marcadasLista = marcadas.filter((x) => !esElementoOtras(x));
+  const textoOtras = (marcadas.find(esElementoOtras) ?? '').slice(PREFIJO_OTRAS.length);
+  const [otrasActiva, setOtrasActiva] = useState(() => marcadas.some(esElementoOtras));
+  // La casilla «Otras» es parte del GRUPO (Mantine: una casilla dentro de `Checkbox.Group` toma su estado del grupo e ignora su propio
+  // `checked`/`onChange`; por eso la primera versión no respondía al clic). Se identifica con un valor que ninguna opción puede tener.
+  const VALOR_OTRAS_MULTIPLE = '\u0000otras';
+  const ponerMultiple = (lista: string[], otras: string) => onCambio(otras.trim() ? [...lista, `${PREFIJO_OTRAS}${otras}`] : lista);
+  // Imagen que ilustra la pregunta (solo de /portal-th/; la definición ya lo valida). Va debajo del enunciado.
+  const imagen = p.imagen ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      className='portal-th__formulario-imagen'
+      src={p.imagen.src}
+      alt={p.imagen.alt}
+      data-testid={`imagen-${p.id}`}
+      style={{ display: 'block', width: '100%', maxWidth: 560, height: 'auto', margin: '8px 0', border: '1px solid var(--mantine-color-default-border)', borderRadius: 8, background: '#fff' }}
+    />
+  ) : null;
+  const minEscala = p.escala?.min ?? ESCALA_MIN_POR_DEFECTO;
+  const maxEscala = p.escala?.max ?? ESCALA_MAX_POR_DEFECTO;
   // Mismo patrón de campo que el resto de SynerLink: etiqueta arriba, asterisco
   // rojo si es obligatoria, ayuda como descripción y error en rojo debajo.
   // `size='md'` en los campos de texto (16 px): con menos, Safari en iPhone
   // hace zoom al enfocar — mismo arreglo que en /login (ver globals.css).
   const comun = {
-    label: `${numero}. ${p.texto}`,
-    description: p.ayuda,
+    label: `${numero}. ${p.texto}${p.puntos !== undefined ? ` (${p.puntos.toLocaleString('es-CO')} ${p.puntos === 1 ? 'punto' : 'puntos'})` : ''}`,
+    description: p.tipo === 'seleccion_multiple' ? [p.ayuda, 'Puede marcar varias opciones.'].filter(Boolean).join(' ') : p.ayuda,
     required: p.obligatoria,
     error,
   };
 
   return (
     <Box id={`fp-${p.id}`} className={`portal-th__formulario-pregunta${error ? ' portal-th__formulario-pregunta--error' : ''}`}>
-      {p.tipo === 'seleccion' || p.tipo === 'si_no' ? (
+      {/* En los tipos de texto la imagen va arriba del campo; en los de opciones va dentro del grupo, bajo el enunciado. */}
+      {(p.tipo === 'texto' || p.tipo === 'texto_largo' || p.tipo === 'numero' || p.tipo === 'fecha') && imagen}
+      {p.tipo === 'seleccion_multiple' ? (
+        <Checkbox.Group
+          {...comun}
+          size='md'
+          value={otrasActiva ? [...marcadasLista, VALOR_OTRAS_MULTIPLE] : marcadasLista}
+          onChange={(v) => {
+            const conOtras = v.includes(VALOR_OTRAS_MULTIPLE);
+            setOtrasActiva(conOtras);
+            ponerMultiple(
+              v.filter((x) => x !== VALOR_OTRAS_MULTIPLE),
+              conOtras ? textoOtras : ''
+            );
+          }}
+          data-testid={`multiple-${p.id}`}
+        >
+          {imagen}
+          <Stack gap='xs' mt='xs'>
+            {opciones.map((o) => (
+              <Checkbox key={o} value={o} label={o} size='sm' />
+            ))}
+            {p.permiteOtra && (
+              <Group gap='sm' wrap='wrap' align='center'>
+                <Checkbox label='Otras' size='sm' value={VALOR_OTRAS_MULTIPLE} data-testid={`otras-marca-${p.id}`} />
+                <TextInput
+                  aria-label={`${p.texto}: otras`}
+                  placeholder='Escriba cuál'
+                  maxLength={2000}
+                  size='md'
+                  flex='1 1 160px'
+                  disabled={!otrasActiva}
+                  value={otrasActiva ? textoOtras : ''}
+                  data-testid={`otras-texto-${p.id}`}
+                  onChange={(e) => ponerMultiple(marcadasLista, e.currentTarget.value)}
+                />
+              </Group>
+            )}
+          </Stack>
+        </Checkbox.Group>
+      ) : p.tipo === 'escala' ? (
+        <Radio.Group {...comun} size='md' name={`fp-${p.id}`} value={texto} onChange={(v) => onCambio(v)} data-testid={`escala-${p.id}`}>
+          {imagen}
+          <Group gap='md' mt='xs' wrap='wrap'>
+            {Array.from({ length: maxEscala - minEscala + 1 }, (_, i) => String(minEscala + i)).map((n) => (
+              <Radio key={n} value={n} label={n} size='sm' />
+            ))}
+          </Group>
+          {(p.escala?.etiquetaMin || p.escala?.etiquetaMax) && (
+            <Group justify='space-between' mt={6} gap='md'>
+              <Text size='xs' c='dimmed'>
+                {p.escala?.etiquetaMin ?? ''}
+              </Text>
+              <Text size='xs' c='dimmed'>
+                {p.escala?.etiquetaMax ?? ''}
+              </Text>
+            </Group>
+          )}
+        </Radio.Group>
+      ) : p.tipo === 'seleccion' && p.presentacion === 'lista' ? (
+        <Stack gap='xs'>
+          {imagen}
+          <NativeSelect
+            {...comun}
+            size='md'
+            data={[
+              { value: '', label: 'Seleccione una opción' },
+              ...opciones.map((o) => ({ value: o, label: o })),
+              ...(p.permiteOtra ? [{ value: VALOR_OTRA, label: 'Otra respuesta' }] : []),
+            ]}
+            value={esOtra ? VALOR_OTRA : texto}
+            onChange={(e) => {
+              const v = e.currentTarget.value;
+              if (v === VALOR_OTRA) onCambio({ otra: esOtra ? (valor as { otra: string }).otra : '' });
+              else onCambio(v);
+            }}
+          />
+          {p.permiteOtra && esOtra && (
+            <TextInput
+              aria-label={`${p.texto}: otra respuesta`}
+              placeholder='Escriba su otra respuesta'
+              maxLength={2000}
+              size='md'
+              value={(valor as { otra: string }).otra}
+              onChange={(e) => onCambio({ otra: e.currentTarget.value })}
+            />
+          )}
+        </Stack>
+      ) : p.tipo === 'seleccion' || p.tipo === 'si_no' ? (
         <Radio.Group
           {...comun}
           size='md'
@@ -505,6 +710,7 @@ function CampoPregunta({
             else onCambio(v);
           }}
         >
+          {imagen}
           <Stack gap='xs' mt='xs'>
             {opciones.map((o) => (
               <Radio key={o} value={o} label={o} size='sm' />
@@ -567,7 +773,10 @@ interface TablaRespuestas {
   material: { id: number; titulo: string };
   formulario: { codigo: string; titulo: string; version: number };
   columnas: { id: string; texto: string }[];
-  filas: { id: number; correo: string; enviadaEl: string; version: number; autorizacionVersion: string | null; respuestas: Respuestas }[];
+  filas: { id: number; correo: string; enviadaEl: string; version: number; autorizacionVersion: string | null; respuestas: Respuestas; nota?: number | null; intentos?: number }[];
+  /** Evaluación: la tabla trae nota e intentos por persona. */
+  evaluacion?: boolean;
+  notaMinima?: number | null;
 }
 
 /**
@@ -657,12 +866,12 @@ export function PanelRespuestas({ materialId, titulo, onCerrar, onCambio }: { ma
         {(error || aviso) && (
           <Stack gap='xs' px='md' pt='md'>
             {error && (
-              <Alert color='red' icon={<IconAlertCircle size={18} />} role='alert'>
+              <Alert color={COLOR_ESTADO.error} icon={<IconAlertCircle size={18} />} role='alert'>
                 {error}
               </Alert>
             )}
             {aviso && (
-              <Alert color='green' icon={<IconCircleCheck size={18} />} role='status'>
+              <Alert color={COLOR_ESTADO.exito} icon={<IconCircleCheck size={18} />} role='status'>
                 {aviso}
               </Alert>
             )}
@@ -690,7 +899,7 @@ export function PanelRespuestas({ materialId, titulo, onCerrar, onCambio }: { ma
           </Button>
         </Group>
         <Stack gap='xs' px='md'>
-          <Alert color='yellow' icon={<IconShieldLock size={18} />} p='xs'>
+          <Alert color={COLOR_ESTADO.advertencia} icon={<IconShieldLock size={18} />} p='xs'>
             Datos personales sensibles (Ley 1581 de 2012): uso exclusivo de Talento Humano y del SG-SST. No los reenvíe ni los publique.
           </Alert>
           <Text size='sm' c='dimmed' data-testid='conteo-respuestas'>
@@ -709,13 +918,15 @@ export function PanelRespuestas({ materialId, titulo, onCerrar, onCambio }: { ma
                 highlightOnHover
                 stickyHeader
                 verticalSpacing='sm'
-                miw={(tabla.columnas.length + 3) * 160}
+                miw={(tabla.columnas.length + (tabla.evaluacion ? 5 : 3)) * 160}
                 data-testid='tabla-respuestas'
               >
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th miw={200}>Correo</Table.Th>
                     <Table.Th miw={160}>Enviado</Table.Th>
+                    {tabla.evaluacion && <Table.Th miw={110}>Nota</Table.Th>}
+                    {tabla.evaluacion && <Table.Th miw={100}>Intentos</Table.Th>}
                     {tabla.columnas.map((c, i) => (
                       <Table.Th key={c.id} title={`${i + 1}. ${c.texto}`} miw={140} maw={280}>
                         <Text inherit lineClamp={3}>
@@ -731,6 +942,8 @@ export function PanelRespuestas({ materialId, titulo, onCerrar, onCambio }: { ma
                     <Table.Tr key={f.id}>
                       <Table.Td style={QUIEBRE}>{f.correo}</Table.Td>
                       <Table.Td>{fechaLarga(f.enviadaEl)}</Table.Td>
+                      {tabla.evaluacion && <Table.Td>{f.nota === null || f.nota === undefined ? '—' : formatoNota(f.nota)}</Table.Td>}
+                      {tabla.evaluacion && <Table.Td>{f.intentos ?? '—'}</Table.Td>}
                       {tabla.columnas.map((c) => (
                         <Table.Td key={c.id} maw={280} style={QUIEBRE}>
                           {textoDeRespuesta(f.respuestas[c.id])}
@@ -740,7 +953,7 @@ export function PanelRespuestas({ materialId, titulo, onCerrar, onCambio }: { ma
                         <Button
                           size='xs'
                           variant='light'
-                          color='red'
+                          color={COLOR_ESTADO.error}
                           leftSection={<IconRotateClockwise size={14} />}
                           onClick={() => void reabrir(f)}
                         >
@@ -770,10 +983,12 @@ export interface FormularioResumen {
 }
 
 /**
- * Selector de formulario para un material nuevo tipo "Formulario", con
- * IMPORTAR (archivo .json o pegado), VISTA PREVIA y EDITAR (el JSON de la
- * definición; guardar crea una versión nueva). El editor visual pregunta por
- * pregunta queda para una entrega posterior.
+ * Selector de formulario para un material nuevo tipo "Formulario":
+ *   - CREAR una ENCUESTA o una EVALUACIÓN a mano (constructor visual,
+ *     Cristian 2026-10-09), EDITAR de la misma forma (guardar crea una versión
+ *     nueva) y VISTA PREVIA;
+ *   - IMPORTAR (archivo .json o pegado) y EDITAR (JSON) para quien prefiera
+ *     trabajar con la definición completa.
  */
 export function SelectorFormulario({
   valor,
@@ -789,6 +1004,15 @@ export function SelectorFormulario({
   const [erroresJson, setErroresJson] = useState<string[]>([]);
   const [guardando, setGuardando] = useState(false);
   const [previa, setPrevia] = useState<DefinicionFormulario | null>(null);
+  // Constructor visual: `definicion` presente = se está editando un formulario existente.
+  const [armador, setArmador] = useState<{ tipo: TipoFormulario; id?: number; definicion?: DefinicionFormulario } | null>(null);
+  const [erroresArmador, setErroresArmador] = useState<string[]>([]);
+  // El resultado de guardar va ARRIBA: tras cerrar el constructor se lleva a la persona hasta él.
+  const avisoResultado = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!aviso) return;
+    window.requestAnimationFrame(() => avisoResultado.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+  }, [aviso]);
 
   const cargar = useCallback(async (): Promise<FormularioResumen[]> => {
     try {
@@ -835,6 +1059,50 @@ export function SelectorFormulario({
     if (d) setEditor({ modo: 'editar', id: valor, texto: JSON.stringify(d, null, 2) });
   };
 
+  const empezarEdicionVisual = async () => {
+    if (!valor) return;
+    setError(null);
+    setAviso(null);
+    setErroresArmador([]);
+    setEditor(null);
+    const d = await definicionDe(valor);
+    if (d) setArmador({ tipo: d.tipo === 'evaluacion' ? 'evaluacion' : 'encuesta', id: valor, definicion: d });
+  };
+
+  const guardarDesdeArmador = async (d: DefinicionFormulario) => {
+    if (!armador) return;
+    setGuardando(true);
+    setErroresArmador([]);
+    setError(null);
+    try {
+      const editando = armador.id !== undefined;
+      const res = await fetch(editando ? `/api/portal/formularios/${armador.id}` : '/api/portal/formularios', {
+        method: editando ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(d),
+      });
+      const data = await leerJson(res);
+      if (!res.ok) {
+        setErroresArmador(Array.isArray(data?.errores) && data.errores.length > 0 ? (data.errores as string[]) : [String(data?.error ?? 'No se pudo guardar.')]);
+        return;
+      }
+      const f = data.formulario as { id: number; titulo: string; version: number };
+      const que = d.tipo === 'evaluacion' ? 'Evaluación' : 'Encuesta';
+      setAviso(
+        editando
+          ? `Versión ${f.version} guardada: ${f.titulo}.`
+          : `${que} creada: ${f.titulo}.${d.borrador ? ' Quedó en borrador: nadie puede responderla hasta que la publique.' : ''}`
+      );
+      setArmador(null);
+      await cargar();
+      onCambio(f.id, f.titulo);
+    } catch (e) {
+      setErroresArmador([(e as Error).message]);
+    } finally {
+      setGuardando(false);
+    }
+  };
+
   const guardar = async () => {
     if (!editor) return;
     setGuardando(true);
@@ -870,18 +1138,18 @@ export function SelectorFormulario({
     <Stack gap='sm' w='100%' className='portal-th__mantine' data-testid='selector-formulario'>
       {/* Resultado de importar/guardar ARRIBA y con color (convención del equipo). */}
       {aviso && (
-        <Alert color='green' icon={<IconCircleCheck size={18} />} role='status'>
+        <Alert ref={avisoResultado} color={COLOR_ESTADO.exito} icon={<IconCircleCheck size={18} />} role='status'>
           {aviso}
         </Alert>
       )}
       {error && (
-        <Alert color='red' icon={<IconAlertCircle size={18} />} role='alert'>
+        <Alert color={COLOR_ESTADO.error} icon={<IconAlertCircle size={18} />} role='alert'>
           {error}
         </Alert>
       )}
       {lista && lista.length === 0 && (
         <Text size='sm' c='dimmed'>
-          Todavía no hay formularios: importe uno.
+          Todavía no hay formularios: cree uno o importe uno.
         </Text>
       )}
       {lista && lista.length > 0 && (
@@ -897,7 +1165,34 @@ export function SelectorFormulario({
           }}
         />
       )}
-      <Group gap='xs' wrap='wrap'>
+      <Group gap='xs' wrap='wrap' data-testid='acciones-formulario'>
+        <Button
+          variant='default'
+          leftSection={<IconClipboardList size={16} />}
+          onClick={() => {
+            setErroresArmador([]);
+            setEditor(null);
+            setArmador({ tipo: 'encuesta' });
+          }}
+          data-testid='crear-encuesta'
+        >
+          Crear encuesta
+        </Button>
+        <Button
+          variant='default'
+          leftSection={<IconChecklist size={16} />}
+          onClick={() => {
+            setErroresArmador([]);
+            setEditor(null);
+            setArmador({ tipo: 'evaluacion' });
+          }}
+          data-testid='crear-evaluacion'
+        >
+          Crear evaluación
+        </Button>
+        <Button variant='default' leftSection={<IconPencil size={16} />} onClick={() => void empezarEdicionVisual()} disabled={!valor} data-testid='editar-formulario'>
+          Editar
+        </Button>
         <Button variant='default' leftSection={<IconEye size={16} />} onClick={() => void verPrevia()} disabled={!valor}>
           Vista previa
         </Button>
@@ -909,12 +1204,25 @@ export function SelectorFormulario({
           leftSection={<IconFileImport size={16} />}
           onClick={() => {
             setErroresJson([]);
+            setArmador(null);
             setEditor({ modo: 'importar', texto: '' });
           }}
         >
           Importar formulario
         </Button>
       </Group>
+      {armador && (
+        <ConstructorFormulario
+          key={armador.id ?? `nuevo-${armador.tipo}`}
+          tipo={armador.tipo}
+          definicion={armador.definicion}
+          guardando={guardando}
+          erroresServidor={erroresArmador}
+          onGuardar={guardarDesdeArmador}
+          onVistaPrevia={(d) => setPrevia(d)}
+          onCancelar={() => setArmador(null)}
+        />
+      )}
       {editor && (
         <Paper withBorder radius='md' p='md'>
           <Stack gap='sm'>
@@ -924,7 +1232,7 @@ export function SelectorFormulario({
                 : 'Al guardar se crea una versión nueva; las respuestas ya enviadas conservan la versión con la que se respondieron.'}
             </Text>
             {erroresJson.length > 0 && (
-              <Alert color='red' icon={<IconAlertCircle size={18} />} title='Revise la definición'>
+              <Alert color={COLOR_ESTADO.error} icon={<IconAlertCircle size={18} />} title='Revise la definición'>
                 <List size='sm'>
                   {erroresJson.map((e) => (
                     <List.Item key={e}>{e}</List.Item>
@@ -1006,7 +1314,7 @@ export function PreviaDeMaterialFormulario({ formularioId, titulo, onCerrar }: {
   }, [formularioId]);
   if (error) {
     return (
-      <Alert color='red' icon={<IconAlertCircle size={18} />} role='alert' mb='sm'>
+      <Alert color={COLOR_ESTADO.error} icon={<IconAlertCircle size={18} />} role='alert' mb='sm'>
         {error}
       </Alert>
     );

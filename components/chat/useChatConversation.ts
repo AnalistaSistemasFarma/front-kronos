@@ -16,8 +16,17 @@ import {
   type ChatStatusDto,
 } from '../../lib/chat/client';
 import { MESSAGES_PAGE_DEFAULT } from '../../lib/chat/constants';
+import { proxyUploadErrorMessage } from '../../lib/attachments/uploadRules';
 import type { AgentMetricsDto } from '../../lib/chat/agent-metrics';
 import { avisarMensajeEntrante, mensajeFresco } from '../../lib/chat/message-sound';
+import { avisarProyectoLeido } from '../../lib/proyectos/iconoHeader';
+import { alternarReaccion, type ChatReactionDto } from '../../lib/chat/media-rules';
+
+/** Lo que se manda para un GIF o un sticker (POST /api/chat/conversations/[id]/media). */
+export type MediaParaEnviar =
+  | { kind: 'sticker'; code: string }
+  | { kind: 'sticker'; idSticker: number }
+  | { kind: 'gif'; id: string };
 
 /**
  * El hilo abierto —con UN agente o un GRUPO—: histórico, sondeo en vivo, envío
@@ -115,7 +124,9 @@ export type ChatTarget =
     }
   | { kind: 'group'; idConversation: number }
   /** Hilo privado entre dos personas: ya existe y se abre por su id. */
-  | { kind: 'people'; idConversation: number };
+  | { kind: 'people'; idConversation: number }
+  /** Conversación de un PROYECTO (hilo de agente): ya existe y se abre por su id. */
+  | { kind: 'project'; idConversation: number };
 
 export interface ChatThreadState {
   conversation: ChatConversationDto | null;
@@ -129,12 +140,23 @@ export interface ChatThreadState {
    */
   metrics: AgentMetricsDto | null | undefined;
   loading: boolean;
+  /**
+   * `messages` (y lo demás) todavía son del hilo ANTERIOR. Pasa en el render
+   * en que cambia el objetivo: el estado se reinicia en un efecto, después de
+   * ese render. Quien lleve cuentas por hilo (qué mensajes ya estaban, cuántos
+   * había) no debe sacarlas de ese render.
+   */
+  stale: boolean;
   sending: boolean;
   error: string | null;
   hasOlder: boolean;
   loadingOlder: boolean;
   /** `cita` = mensaje al que responde, o null. */
   send: (body: string, files?: File[], cita?: ChatReplyToDto | null) => Promise<boolean>;
+  /** Pone o quita MI reacción (optimista; 2026-10-20). */
+  react: (idMessage: number, emoji: string) => Promise<void>;
+  /** Envía un GIF o un sticker (2026-10-20). */
+  sendMedia: (media: MediaParaEnviar, cita?: ChatReplyToDto | null) => Promise<boolean>;
   loadOlder: () => Promise<void>;
   markRead: () => Promise<void>;
 }
@@ -191,6 +213,8 @@ export function useChatConversation(
   );
   const [metrics, setMetrics] = useState<AgentMetricsDto | null | undefined>(undefined);
   const [loading, setLoading] = useState(target !== null && !inicial);
+  // De qué hilo es lo que hay en el estado (ver `stale`).
+  const [claveCargada, setClaveCargada] = useState(targetKey);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasOlder, setHasOlder] = useState(inicial?.hasOlder ?? false);
@@ -198,6 +222,11 @@ export function useChatConversation(
 
   // Cursor del sondeo: id del último mensaje REAL que ya tenemos.
   const cursorRef = useRef(0);
+  // Cursor de REACCIONES (2026-10-20): el id más alto de chat_message_reaction
+  // que ya se vio en este hilo. null = todavía no se conoce (se pide con 0).
+  const reaccionCursorRef = useRef<number | null>(null);
+  // El servidor no tiene las tablas de reacciones: se deja de preguntar.
+  const sinReaccionesRef = useRef(false);
   const olderCursorRef = useRef<number | null>(null);
   const timerRef = useRef<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -275,6 +304,8 @@ export function useChatConversation(
       setHasOlder(false);
     }
     setError(null);
+    setClaveCargada(targetKey);
+    reaccionCursorRef.current = null;
 
     if (target === null) return;
 
@@ -287,6 +318,8 @@ export function useChatConversation(
       messages: ChatMessageDto[];
       hasMore: boolean;
       nextCursor: number | null;
+      /** Desde dónde preguntar por reacciones nuevas (2026-10-20). */
+      reactionCursor?: number;
     };
     const pedirHistorial = (idConversation: number) =>
       chatGetJson<Historial>(
@@ -303,6 +336,7 @@ export function useChatConversation(
       setHasOlder(Boolean(history?.hasMore));
       olderCursorRef.current = history?.nextCursor ?? null;
       cursorRef.current = ordered.length > 0 ? ordered[ordered.length - 1].id : 0;
+      if (typeof history?.reactionCursor === 'number') reaccionCursorRef.current = history.reactionCursor;
     };
 
     void (async () => {
@@ -367,7 +401,7 @@ export function useChatConversation(
           const res = await chatFetch(`/api/chat/conversations/${target.idConversation}`);
           if (!res.ok) {
             if (cancelled) return;
-            const esPersonas = target.kind === 'people';
+            const esPersonas = target.kind === 'people' || target.kind === 'project';
             setError(
               res.status === 404
                 ? esPersonas
@@ -454,8 +488,10 @@ export function useChatConversation(
     abortRef.current = controller;
 
     try {
+      const preguntaReacciones = !sinReaccionesRef.current;
+      const rq = preguntaReacciones ? `&rafter=${reaccionCursorRef.current ?? 0}` : '';
       const data = await chatGetJson<ChatPollDto>(
-        `/api/chat/conversations/${conversationId}/poll?after=${cursorRef.current}&hidden=${hidden ? 1 : 0}`,
+        `/api/chat/conversations/${conversationId}/poll?after=${cursorRef.current}&hidden=${hidden ? 1 : 0}${rq}`,
         controller.signal
       );
 
@@ -465,6 +501,22 @@ export function useChatConversation(
         // Un fallo puntual no debe matar el sondeo: se reintenta despacio.
         scheduleNext(FALLBACK_POLL_MS);
         return;
+      }
+
+      // Reacciones que cambiaron (de cualquiera, también las mías desde otra
+      // pestaña): se reemplaza el resumen de cada mensaje tocado.
+      if (preguntaReacciones) {
+        if (!data.reactions) {
+          sinReaccionesRef.current = true;
+        } else {
+          reaccionCursorRef.current = Math.max(reaccionCursorRef.current ?? 0, data.reactions.cursor);
+          const cambios = data.reactions.changes ?? {};
+          if (Object.keys(cambios).length > 0) {
+            setMessages((prev) =>
+              prev.map((m) => (cambios[m.id] !== undefined ? { ...m, reactions: cambios[m.id] } : m))
+            );
+          }
+        }
       }
 
       if (data.messages.length > 0) {
@@ -619,7 +671,12 @@ export function useChatConversation(
 
         if (!res.ok) {
           const payload = (await res.json().catch(() => null)) as { error?: string } | null;
-          setError(payload?.error ?? 'No se pudo enviar el mensaje.');
+          // Un 413 de IIS (adjuntos que pasan de 30.000.000 bytes) llega en HTML, sin JSON.
+          setError(
+            payload?.error ??
+              (files.length > 0 ? proxyUploadErrorMessage(res.status) : null) ??
+              'No se pudo enviar el mensaje.'
+          );
           setMessages((prev) =>
             prev.map((m) => (m.id === optimisticId ? { ...m, pending: false, failed: true } : m))
           );
@@ -643,6 +700,81 @@ export function useChatConversation(
         setMessages((prev) =>
           prev.map((m) => (m.id === optimisticId ? { ...m, pending: false, failed: true } : m))
         );
+        return false;
+      } finally {
+        setSending(false);
+      }
+    },
+    [poll]
+  );
+
+  /* ─────────────── Reacciones, GIF y stickers (2026-10-20) ─────────────── */
+
+  const react = useCallback(async (idMessage: number, emoji: string) => {
+    const conversationId = conversationIdRef.current;
+    if (conversationId === null || idMessage <= 0) return;
+    const yo = { id: miIdRef.current ?? 'yo', name: 'Usted' };
+    let previas: ChatReactionDto[] | undefined;
+    // Optimista: el chip cambia al tocarlo; la respuesta trae lo vigente.
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== idMessage) return m;
+        previas = m.reactions;
+        return { ...m, reactions: alternarReaccion(m.reactions, emoji, yo) };
+      })
+    );
+    const deshacer = () =>
+      setMessages((prev) => prev.map((m) => (m.id === idMessage ? { ...m, reactions: previas } : m)));
+    try {
+      const res = await chatFetch(`/api/chat/conversations/${conversationId}/messages/${idMessage}/reactions`, {
+        method: 'POST',
+        body: JSON.stringify({ emoji, action: 'toggle' }),
+      });
+      const payload = (await res.json().catch(() => null)) as { reactions?: ChatReactionDto[]; error?: string } | null;
+      if (!res.ok || !payload?.reactions) {
+        deshacer();
+        setError(payload?.error ?? 'No se pudo guardar la reacción.');
+        return;
+      }
+      const vigentes = payload.reactions;
+      setMessages((prev) => prev.map((m) => (m.id === idMessage ? { ...m, reactions: vigentes } : m)));
+    } catch (err) {
+      if (!isAbortError(err)) {
+        deshacer();
+        setError('No se pudo guardar la reacción.');
+      }
+    }
+  }, []);
+
+  const sendMedia = useCallback(
+    async (media: MediaParaEnviar, cita: ChatReplyToDto | null = null): Promise<boolean> => {
+      const conversationId = conversationIdRef.current;
+      if (conversationId === null) return false;
+      notificarActividad(conversationId, new Date().toISOString());
+      setSending(true);
+      setError(null);
+      try {
+        const res = await chatFetch(`/api/chat/conversations/${conversationId}/media`, {
+          method: 'POST',
+          body: JSON.stringify({ ...media, ...(cita ? { replyTo: cita.idMessage } : {}) }),
+        });
+        const payload = (await res.json().catch(() => null)) as { message?: ChatMessageDto; error?: string } | null;
+        if (!res.ok || !payload?.message) {
+          setError(payload?.error ?? 'No se pudo enviar.');
+          return false;
+        }
+        const creado = payload.message;
+        setMessages((prev) => [...prev.filter((m) => m.id !== creado.id), creado].sort((a, b) => {
+          if (a.pending && !b.pending) return 1;
+          if (!a.pending && b.pending) return -1;
+          return a.id - b.id;
+        }));
+        cursorRef.current = Math.max(cursorRef.current, creado.id);
+        void poll();
+        notifyChatRefresh();
+        return true;
+      } catch (err) {
+        if (!isAbortError(err)) setError('No se pudo enviar.');
         return false;
       } finally {
         setSending(false);
@@ -685,7 +817,10 @@ export function useChatConversation(
     marcadoHastaRef.current = 0;
   }, [targetKey]);
 
-  const esEntrePersonas = target?.kind === 'people';
+  // Hilos entre personas y conversaciones de PROYECTO usan marca de agua por
+  // persona (chat_participant / chat_project_read), no `read_at`.
+  const esEntrePersonas = target?.kind === 'people' || target?.kind === 'project';
+  const esProyecto = target?.kind === 'project';
 
   const markRead = useCallback(async () => {
     const conversationId = conversationIdRef.current;
@@ -705,7 +840,11 @@ export function useChatConversation(
           method: 'POST',
           body: JSON.stringify({ upToMessageId: ultimo }),
         });
-        if (res.ok) notifyChatRefresh();
+        if (res.ok) {
+          // El icono «Proyectos» de la cabecera vuelve a contar al instante.
+          if (esProyecto) avisarProyectoLeido(conversationId);
+          else notifyChatRefresh();
+        }
       } catch {
         // Se reintenta con el próximo mensaje: leer es cosmético.
         marcadoHastaRef.current = 0;
@@ -729,7 +868,7 @@ export function useChatConversation(
     } catch {
       /* leer es cosmético: si falla, se reintenta en el próximo cambio */
     }
-  }, [messages, esEntrePersonas]);
+  }, [messages, esEntrePersonas, esProyecto]);
 
   // Con el hilo a la vista, lo que llegue se marca leído solo.
   useEffect(() => {
@@ -745,11 +884,14 @@ export function useChatConversation(
     statuses,
     metrics,
     loading,
+    stale: claveCargada !== targetKey,
     sending,
     error,
     hasOlder,
     loadingOlder,
     send,
+    react,
+    sendMedia,
     loadOlder,
     markRead,
   };

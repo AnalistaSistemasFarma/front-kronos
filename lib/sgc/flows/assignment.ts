@@ -1,5 +1,6 @@
 import { SgcError } from '../errors';
-import type { SgcFlowDefinition, SgcTaskDefinition } from './definition';
+import { requesterElaborates, type SgcFlowDefinition, type SgcTaskDefinition } from './definition';
+import { roleModelAssignmentDenial } from './roleModel';
 
 /**
  * SELECCIÓN de revisores, aprobadores y alcance de divulgación — funciones PURAS.
@@ -17,17 +18,22 @@ import type { SgcFlowDefinition, SgcTaskDefinition } from './definition';
  *  - ni el solicitante ni el elaborador pueden quedar como revisores ni
  *    aprobadores de su propia solicitud (lo valida normalizeSigners); el
  *    revisor sí puede ser también aprobador (acuerdo del 2026-09-30).
+ *    EXCEPCIÓN PARA CALIDAD (2026-10-13): en la REVISIÓN sí puede quedar el
+ *    solicitante de Calidad y, si la empresa lo habilitó, el elaborador de
+ *    Calidad (lib/sgc/flows/segregation.ts). La aprobación no cambia.
  */
 
 export const SGC_ASSIGNMENT_POLICIES = ['tarea', 'calidad', 'tarea_o_calidad', 'tarea_y_calidad'] as const;
 export type SgcAssignmentPolicy = (typeof SGC_ASSIGNMENT_POLICIES)[number];
 
 /**
- * Política por defecto: la MÁS SEGURA (quien ejecuta la primera tarea Y tiene
- * el permiso de Calidad). Se cambia con la variable de entorno
- * SGC_ASIGNACION_PERMISO (tarea | calidad | tarea_o_calidad | tarea_y_calidad).
+ * Política por defecto: la de la RN del 2026-10-05 (Nicolás): seleccionan y
+ * confirman quien crea el documento (ejecuta la primera tarea) O Aseguramiento
+ * de Calidad. Confirmada el 2026-10-10 para testing y producción. Se cambia
+ * con la variable de entorno SGC_ASIGNACION_PERMISO
+ * (tarea | calidad | tarea_o_calidad | tarea_y_calidad).
  */
-export const SGC_DEFAULT_ASSIGNMENT_POLICY: SgcAssignmentPolicy = 'tarea_y_calidad';
+export const SGC_DEFAULT_ASSIGNMENT_POLICY: SgcAssignmentPolicy = 'tarea_o_calidad';
 
 export function parseAssignmentPolicy(raw: string | null | undefined): SgcAssignmentPolicy {
   const v = (raw ?? '').trim().toLowerCase();
@@ -67,6 +73,8 @@ export function executesFirstTask(def: SgcFlowDefinition, input: SgcAssignerInpu
 
 /** Motivo por el que la persona NO puede seleccionar firmantes ni alcance, o null si puede. */
 export function assignmentDenial(def: SgcFlowDefinition, input: SgcAssignerInput, policy: SgcAssignmentPolicy = SGC_DEFAULT_ASSIGNMENT_POLICY): string | null {
+  // S15 (DOC v7, R17): el elaborador (que es el solicitante) asigna; Calidad, como excepción. No aplica la política del entorno.
+  if (requesterElaborates(def)) return roleModelAssignmentDenial(input);
   const me = input.email.trim().toLowerCase();
   if (me === input.requesterEmail.trim().toLowerCase()) {
     return 'Quien hace la solicitud solo sugiere a los revisores, los aprobadores y la divulgación: los confirma o reasigna quien ejecuta la primera tarea (Aseguramiento de Calidad).';

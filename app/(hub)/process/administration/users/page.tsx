@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, Suspense, useCallback, useRef } from 'react';
+import SapsendMappingModal from './SapsendMappingModal';
 import { useSession } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   Title,
@@ -34,6 +35,7 @@ import {
   Checkbox,
   ScrollArea,
   SegmentedControl,
+  Tabs,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import {
@@ -45,11 +47,13 @@ import {
   IconPlus,
   IconDownload,
   IconSettings,
+  IconDatabase,
   IconCheck,
   IconX,
   IconUsers,
   IconShield,
   IconUsersGroup,
+  IconLogin2,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { notifySubprocessAssignmentsChanged } from '@/lib/process/subprocessAssignmentsEvents';
@@ -65,6 +69,15 @@ import {
 import { isDeleteAttachmentsSubprocess } from '@/lib/attachments/access';
 import { isValentineWallSubprocess } from '@/lib/valentine/constants';
 import { describeSgcPermissionMarker, isSgcPermissionMarkerSubprocess } from '@/lib/sgc/constants';
+import { isProjectsConfigMarkerSubprocess, PROJECTS_CONFIG_MARKER_DESCRIPTION } from '@/lib/proyectos/config-agentes-rules';
+import { describeOtPermissionMarker, isOtPermissionMarkerSubprocess } from '@/lib/bitacora-proceso/constants';
+import {
+  LOGIN_AUDIT_MARKER_DESCRIPTION,
+  isLoginAuditMarkerSubprocess,
+} from '@/lib/auth/login-audit/constants';
+import LoginAuditPanel from '@/components/users/LoginAuditPanel';
+import { isPermisosAgentesMarkerSubprocess, PERMISOS_AGENTES_MARKER_DESCRIPTION } from '@/lib/proyectos/permisos-agentes-rules';
+import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 
 const AVATAR_COLORS = ['blue', 'teal', 'violet', 'indigo', 'cyan', 'grape', 'orange'] as const;
 
@@ -130,6 +143,14 @@ function UserManagement() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const isMobile = useMediaQuery('(max-width: 768px)', true);
+  const searchParams = useSearchParams();
+
+  // Pestaña «Inicios de sesión» (auditoría de seguridad, 2026-10-16): solo se muestra si
+  // el servidor confirma el permiso (lib/auth/login-audit/access.ts). ?vista=inicios-sesion abre directo.
+  const [view, setView] = useState<'usuarios' | 'inicios-sesion'>(
+    searchParams.get('vista') === 'inicios-sesion' ? 'inicios-sesion' : 'usuarios'
+  );
+  const [canViewLoginAudit, setCanViewLoginAudit] = useState(false);
 
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -163,6 +184,11 @@ function UserManagement() {
   const [selectedSubprocessIds, setSelectedSubprocessIds] = useState<number[]>([]);
   const [subprocessSearch, setSubprocessSearch] = useState('');
   const [subprocessLoading, setSubprocessLoading] = useState(false);
+
+  const [updateMessage, setUpdateMessage] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
 
   // Bulk assignment
   const [bulkModalOpened, setBulkModalOpened] = useState(false);
@@ -215,6 +241,8 @@ function UserManagement() {
 
   // Authorization types states (submodal shown when the "Autorización" subprocess is assigned)
   const [authTypeModalOpened, setAuthTypeModalOpened] = useState(false);
+  // Mapeo SAPSEND por empresa (modulo de compras).
+  const [sapsendUser, setSapsendUser] = useState<User | null>(null);
   const [authorizationTypeOptions, setAuthorizationTypeOptions] = useState<
     { value: string; label: string }[]
   >([]);
@@ -306,6 +334,26 @@ function UserManagement() {
     void fetchUsers();
   }, [session, status, router, fetchUsers]);
 
+  useEffect(() => {
+    if (status === 'loading' || !session) return;
+    let cancelled = false;
+    fetch('/api/users/login-audit/access', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : { allowed: false }))
+      .then((body: { allowed?: boolean }) => {
+        if (cancelled) return;
+        setCanViewLoginAudit(Boolean(body?.allowed));
+        if (!body?.allowed) setView('usuarios');
+      })
+      .catch(() => {
+        if (!cancelled) setCanViewLoginAudit(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, status]);
+
+  const showLoginAudit = canViewLoginAudit && view === 'inicios-sesion';
+
   // Load department catalog for the MultiSelect (used in create/edit modals)
   useEffect(() => {
     if (status === 'loading' || !session) return;
@@ -332,6 +380,51 @@ function UserManagement() {
       [field]: value,
     }));
     setPagination((prev) => ({ ...prev, page: 1 }));
+  };
+
+  const sendEmailNotification = async (recipients: string): Promise<boolean> => {
+    if (!process.env.API_EMAIL) {
+      console.error('Error: La variable de entorno API_EMAIL no está configurada');
+      setUpdateMessage({
+        type: 'error',
+        text: 'Error de configuración: No se puede enviar la notificación por correo. Contacte al administrador.',
+      });
+      return false;
+    }
+
+    try {
+      const message = `Credenciales SynerLink  ${formData?.name}`;
+      const emails = recipients;
+
+      const table: Array<Record<string, string | number | undefined>> = [
+        {
+          'Usuario': formData?.email,
+          'Contraseña': formData?.password,
+          'Enlace de Acceso': `<a href="https://groupsharedservices.farmalogica.com:8445/login">https://groupsharedservices.farmalogica.com:8445/login</a>`,
+        },
+      ];
+
+      const outro = `Te confirmamos que tu acceso a SynerLink ya está activo con tus nuevas credenciales. Si tienes algún inconveniente al ingresar, registra un caso en la Mesa de Ayuda a través del siguiente enlace: <a href="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=kZrxWHFYXkCtzFtukGuz9Vc3GKrCGIpKi4GcZ3rlRP1UMEtFQjZYWkVTQllJMVMwNTNZRlRCWTNZWi4u&origin=QRCode">Mesa de Ayuda</a> Este mensaje y sus adjuntos son confidenciales y para uso exclusivo de su destinatario.`;
+
+      const result = await sendMessage(
+        message,
+        emails,
+        table,
+        outro,
+        'https://groupsharedservices.farmalogica.com:8445/icons/icon-192.png', 
+        []
+      );
+
+      console.log('Notificación por correo enviada exitosamente:', result);
+      return true;
+    } catch (error) {
+      console.error('Error al enviar la notificación por correo:', error);
+      setUpdateMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Error al enviar la notificación por correo',
+      });
+      return false;
+    }
   };
 
   const handleCreateUser = async () => {
@@ -363,6 +456,8 @@ function UserManagement() {
           toast.error('Usuario creado, pero no se pudieron asignar los departamentos');
         }
       }
+
+      await sendEmailNotification(formData?.email);
 
       // Add the new user to the list
       setUsers((prev) => [user, ...prev]);
@@ -1111,6 +1206,17 @@ function UserManagement() {
           <IconSettings size={15} />
         </ActionIcon>
       </Tooltip>
+      <Tooltip label='SAPSEND por empresa' withArrow>
+        <ActionIcon
+          variant='subtle'
+          color='teal'
+          size='sm'
+          onClick={() => setSapsendUser(user)}
+          aria-label='SAPSEND por empresa'
+        >
+          <IconDatabase size={15} />
+        </ActionIcon>
+      </Tooltip>
       <Tooltip label='Desactivar usuario' withArrow>
         <ActionIcon
           variant='subtle'
@@ -1149,12 +1255,15 @@ function UserManagement() {
                     Administración de Usuarios
                   </Title>
                   <Text size='xs' c='dimmed'>
-                    Gestiona accesos, roles y subprocesos · {pagination.total} usuarios
+                    {showLoginAudit
+                      ? 'Auditoría de seguridad · intentos de inicio de sesión, IP y país'
+                      : `Gestiona accesos, roles y subprocesos · ${pagination.total} usuarios`}
                   </Text>
                 </div>
               </Group>
             </div>
 
+            {!showLoginAudit && (
             <Group gap='xs' grow={!!isMobile}>
               <Button
                 size='sm'
@@ -1184,8 +1293,31 @@ function UserManagement() {
                 Exportar CSV
               </Button>
             </Group>
+            )}
           </Flex>
+
+          {canViewLoginAudit && (
+            <Tabs
+              value={view}
+              onChange={(value) => setView(value === 'inicios-sesion' ? 'inicios-sesion' : 'usuarios')}
+              mt='sm'
+            >
+              <Tabs.List>
+                <Tabs.Tab value='usuarios' leftSection={<IconUsers size={14} />}>
+                  Usuarios
+                </Tabs.Tab>
+                <Tabs.Tab value='inicios-sesion' leftSection={<IconLogin2 size={14} />}>
+                  Inicios de sesión
+                </Tabs.Tab>
+              </Tabs.List>
+            </Tabs>
+          )}
         </Card>
+
+        {showLoginAudit ? (
+          <LoginAuditPanel />
+        ) : (
+        <>
 
         {error && (
           <Alert icon={<IconAlertCircle size={16} />} title='Error' color='red' mb='sm'>
@@ -1394,6 +1526,8 @@ function UserManagement() {
             </Flex>
           )}
         </Card>
+        </>
+        )}
 
       {/* Bulk Assignment Modal */}
       <Modal
@@ -2137,8 +2271,16 @@ function UserManagement() {
                                 )}
                                 {isHubHiddenRequestDashboardSubprocess(subprocess) ? (
                                   <Badge size='xs' variant='light' color='teal' mt={4}>
-                                    {isSgcPermissionMarkerSubprocess(subprocess)
+                                    {isPermisosAgentesMarkerSubprocess(subprocess)
+                                      ? PERMISOS_AGENTES_MARKER_DESCRIPTION
+                                      : isLoginAuditMarkerSubprocess(subprocess)
+                                      ? LOGIN_AUDIT_MARKER_DESCRIPTION
+                                      : isProjectsConfigMarkerSubprocess(subprocess)
+                                      ? PROJECTS_CONFIG_MARKER_DESCRIPTION
+                                      : isSgcPermissionMarkerSubprocess(subprocess)
                                       ? describeSgcPermissionMarker(subprocess.subprocess_url)
+                                      : isOtPermissionMarkerSubprocess(subprocess)
+                                      ? describeOtPermissionMarker(subprocess.subprocess_url)
                                       : isValentineWallSubprocess(subprocess)
                                       ? 'Permiso OLP: corazón en el header (muro Dosis de Amor)'
                                       : isOrionFirmaPrepareSubprocess(subprocess)
@@ -2245,6 +2387,13 @@ function UserManagement() {
           </Group>
         </Stack>
       </Modal>
+
+      <SapsendMappingModal
+        opened={sapsendUser !== null}
+        onClose={() => setSapsendUser(null)}
+        userId={sapsendUser?.id ?? null}
+        userName={sapsendUser?.name ?? sapsendUser?.email}
+      />
       </div>
     </div>
   );

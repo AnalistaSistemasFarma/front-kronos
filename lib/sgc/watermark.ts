@@ -89,8 +89,21 @@ const MODE_TEXT: Record<SgcWatermarkInfo['mode'], string> = {
 };
 
 /** Deja el texto en el rango que soporta la fuente estándar (WinAnsi / Latin-1). */
+/**
+ * E2E 2026-10-10: la puntuación tipográfica común (raya «—», comillas curvas,
+ * puntos suspensivos, flechas…) salía como «?» en el PDF controlado (p. ej.
+ * «Elaboró ? QA SGC» en el registro de trazabilidad). Se cambia por su
+ * equivalente Latin-1 antes de filtrar.
+ */
+const TYPOGRAPHIC: Readonly<Record<string, string>> = {
+  '\u2014': '-', '\u2013': '-', '\u2012': '-', '\u2010': '-', '\u2011': '-', '\u2212': '-',
+  '\u2018': "'", '\u2019': "'", '\u201A': "'", '\u201C': '"', '\u201D': '"', '\u201E': '"',
+  '\u2026': '...', '\u2022': '·', '\u2192': '->', '\u2190': '<-', '\u2265': '>=', '\u2264': '<=', '\u2248': '~',
+  '\u2009': ' ', '\u202F': ' ', '\u2007': ' ',
+};
+
 export function toWinAnsiSafe(text: string): string {
-  return Array.from(text ?? '')
+  return Array.from(Array.from(text ?? '').map((ch) => TYPOGRAPHIC[ch] ?? ch).join(''))
     .map((ch) => {
       const code = ch.codePointAt(0) ?? 63;
       if (code === 9 || code === 10 || code === 13) return ' ';
@@ -234,5 +247,43 @@ export async function stampUncontrolledCopy(pdfBytes: Uint8Array, info: SgcUncon
     }
   }
   pdf.setProducer('SynerLink — SGC documental (copia NO controlada)');
+  return pdf.save();
+}
+
+/**
+ * 2026-10-21 (ajustes del Excel en la carga inicial): marca de la VISTA PREVIA
+ * de una conversión que todavía no se publica. Diagonal «VISTA PREVIA» y pie
+ * con quién la generó y cuándo, para que nunca se confunda con la copia
+ * controlada.
+ */
+export function buildSheetPreviewLines(info: { fileName: string; viewerEmail: string; at: Date }): { diagonal: string; footer: string } {
+  const footer = ['VISTA PREVIA: NO ES UNA COPIA CONTROLADA', info.fileName, `Generada por ${info.viewerEmail} el ${formatBogotaDateTime(info.at)} (hora Colombia)`].join(' · ');
+  return { diagonal: 'VISTA PREVIA', footer: toWinAnsiSafe(footer) };
+}
+
+export async function stampSheetPreview(pdfBytes: Uint8Array, info: { fileName: string; viewerEmail: string; at: Date }): Promise<Uint8Array> {
+  const pdf = await PDFDocument.load(pdfBytes, { ignoreEncryption: true, updateMetadata: false });
+  const font = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const small = await pdf.embedFont(StandardFonts.Helvetica);
+  const { diagonal, footer } = buildSheetPreviewLines(info);
+  for (const page of pdf.getPages()) {
+    const { width, height } = page.getSize();
+    const size = Math.min(width, height) / 8;
+    const textWidth = font.widthOfTextAtSize(diagonal, size);
+    const angle = Math.atan2(height, width);
+    page.drawText(diagonal, {
+      x: width / 2 - (Math.cos(angle) * textWidth) / 2,
+      y: height / 2 - (Math.sin(angle) * textWidth) / 2,
+      size,
+      font,
+      color: rgb(0.1, 0.35, 0.75),
+      opacity: 0.14,
+      rotate: degrees((angle * 180) / Math.PI),
+    });
+    let fs = 7;
+    while (fs > 4 && small.widthOfTextAtSize(footer, fs) > width - 24) fs -= 0.5;
+    page.drawText(footer, { x: 12, y: 8, size: fs, font: small, color: rgb(0.1, 0.3, 0.6), opacity: 0.9 });
+  }
+  pdf.setProducer('SynerLink — SGC documental (vista previa, no controlada)');
   return pdf.save();
 }

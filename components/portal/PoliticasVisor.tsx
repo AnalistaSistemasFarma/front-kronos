@@ -63,7 +63,55 @@ function fechaLegible(iso: string | null): string {
 
 const sinExtension = (nombre: string) => nombre.replace(/\.[^.]+$/, '');
 
-export default function PoliticasVisor({ onCerrar }: { onCerrar: () => void }) {
+/**
+ * La misma ventana sirve para «Políticas y reglamentos», «Ayudas» (videos de FORMACION/AYUDAS, Cristian 2026-10-15) y
+ * «Capacitaciones» (FORMACION/CAPACITACIONES, 2026-10-22): solo cambian la API que lista, los textos y el `data-testid`.
+ */
+export interface TextosVisor {
+  /** Ruta de la API que lista los archivos. */
+  api: string;
+  titulo: string;
+  /** `aria-label` de la lista (nav). */
+  etiquetaLista: string;
+  vacio: string;
+  /** Qué se dice de lo que se ve («documento» / «video»). */
+  elegir: string;
+  preparando: string;
+  testId: string;
+}
+
+export const TEXTOS_POLITICAS: TextosVisor = {
+  api: '/api/portal/politicas',
+  titulo: 'Políticas y reglamentos',
+  etiquetaLista: 'Documentos de políticas y reglamentos',
+  vacio: 'La carpeta de políticas y reglamentos está vacía por ahora.',
+  elegir: 'Elija un documento de la lista para verlo aquí.',
+  preparando: 'Preparando la vista previa…',
+  testId: 'politicas-visor',
+};
+
+export const TEXTOS_AYUDAS: TextosVisor = {
+  api: '/api/portal/ayudas',
+  titulo: 'Ayudas',
+  etiquetaLista: 'Videos de ayuda',
+  vacio: 'Todavía no hay videos de ayuda.',
+  elegir: 'Elija un video de la lista para verlo aquí.',
+  preparando: 'Preparando el video…',
+  testId: 'ayudas-visor',
+};
+
+/** CAPACITACIONES (Cristian, 2026-10-22): espejo de Ayudas sobre la carpeta FORMACION/CAPACITACIONES (videos o documentos). */
+export const TEXTOS_CAPACITACIONES: TextosVisor = {
+  api: '/api/portal/capacitaciones',
+  titulo: 'Capacitaciones',
+  etiquetaLista: 'Archivos de capacitaciones',
+  vacio: 'Todavía no hay capacitaciones publicadas.',
+  elegir: 'Elija una capacitación de la lista para verla aquí.',
+  preparando: 'Preparando la vista previa…',
+  testId: 'capacitaciones-visor',
+};
+
+export default function PoliticasVisor({ onCerrar, textos = TEXTOS_POLITICAS }: { onCerrar: () => void; textos?: TextosVisor }) {
   const [archivos, setArchivos] = useState<ArchivoPoliticaCliente[] | null>(null);
   const [truncado, setTruncado] = useState(false);
   const [cargandoLista, setCargandoLista] = useState(true);
@@ -81,9 +129,9 @@ export default function PoliticasVisor({ onCerrar }: { onCerrar: () => void }) {
     setCargandoLista(true);
     setErrorLista(null);
     try {
-      const res = await fetch('/api/portal/politicas', { cache: 'no-store' });
+      const res = await fetch(textos.api, { cache: 'no-store' });
       const data = await leerJsonSeguro(res);
-      if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo cargar la carpeta de políticas.'));
+      if (!res.ok) throw new Error(String(data?.error ?? `No se pudo cargar ${textos.titulo.toLowerCase()}.`));
       setArchivos(Array.isArray(data.archivos) ? (data.archivos as ArchivoPoliticaCliente[]) : []);
       setTruncado(data.truncado === true);
     } catch (e) {
@@ -91,7 +139,7 @@ export default function PoliticasVisor({ onCerrar }: { onCerrar: () => void }) {
     } finally {
       setCargandoLista(false);
     }
-  }, []);
+  }, [textos]);
 
   useEffect(() => {
     void cargarLista();
@@ -155,17 +203,17 @@ export default function PoliticasVisor({ onCerrar }: { onCerrar: () => void }) {
       className='portal-th__visor'
       role='dialog'
       aria-modal='true'
-      aria-label='Políticas y reglamentos'
+      aria-label={textos.titulo}
       onClick={(e) => {
         if (e.target === e.currentTarget) onCerrar();
       }}
     >
       <div
         className={`portal-th__visor-caja portal-th__politicas${seleccionado ? ' portal-th__politicas--viendo' : ''}`}
-        data-testid='politicas-visor'
+        data-testid={textos.testId}
       >
         <header className='portal-th__visor-barra'>
-          <strong>{seleccionado ? sinExtension(seleccionado.nombre) : 'Políticas y reglamentos'}</strong>
+          <strong>{seleccionado ? sinExtension(seleccionado.nombre) : textos.titulo}</strong>
           <div className='portal-th__visor-acciones'>
             {urlVista && (
               <a href={urlVista} target='_blank' rel='noopener noreferrer'>
@@ -179,7 +227,7 @@ export default function PoliticasVisor({ onCerrar }: { onCerrar: () => void }) {
         </header>
 
         <div className='portal-th__politicas-cuerpo'>
-          <nav className='portal-th__politicas-lista' aria-label='Documentos de políticas y reglamentos'>
+          <nav className='portal-th__politicas-lista' aria-label={textos.etiquetaLista}>
             {cargandoLista && <p className='portal-th__estado'>Cargando documentos…</p>}
             {errorLista && (
               <div className='portal-th__alerta portal-th__alerta--error' role='alert'>
@@ -190,7 +238,7 @@ export default function PoliticasVisor({ onCerrar }: { onCerrar: () => void }) {
               </div>
             )}
             {!cargandoLista && !errorLista && archivos?.length === 0 && (
-              <p className='portal-th__estado'>La carpeta de políticas y reglamentos está vacía por ahora.</p>
+              <p className='portal-th__estado'>{textos.vacio}</p>
             )}
             {truncado && (
               <div className='portal-th__alerta portal-th__alerta--aviso' role='status'>
@@ -235,10 +283,10 @@ export default function PoliticasVisor({ onCerrar }: { onCerrar: () => void }) {
             )}
             {!seleccionado && (
               <p className='portal-th__estado portal-th__politicas-indicacion'>
-                Elija un documento de la lista para verlo aquí.
+                {textos.elegir}
               </p>
             )}
-            {seleccionado && cargandoVista && <p className='portal-th__estado'>Preparando la vista previa…</p>}
+            {seleccionado && cargandoVista && <p className='portal-th__estado'>{textos.preparando}</p>}
             {seleccionado && errorVista && (
               <div className='portal-th__alerta portal-th__alerta--error' role='alert'>
                 <span>{errorVista}</span>

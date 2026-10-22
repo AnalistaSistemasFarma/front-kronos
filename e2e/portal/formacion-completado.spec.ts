@@ -56,7 +56,7 @@ function material(id: number, titulo: string, completado: boolean, mime: string)
 }
 
 /** 1 = video (4 s), 2 = PDF de 1 página, 3 = PDF de 5 páginas. */
-async function simular(page: Page, opciones: { puedeMarcarManual: boolean; completados: number[] }) {
+async function simular(page: Page, opciones: { puedeMarcarManual: boolean; completados: number[]; esFormador?: boolean }) {
   const estado = { completados: new Set(opciones.completados) };
   const pdf1 = await pdfDePaginas(1);
   const pdf5 = await pdfDePaginas(5);
@@ -68,7 +68,7 @@ async function simular(page: Page, opciones: { puedeMarcarManual: boolean; compl
     ];
     return {
       curso,
-      esFormador: false,
+      esFormador: opciones.esFormador === true,
       puedeMarcarManual: opciones.puedeMarcarManual,
       porcentaje: Math.round((estado.completados.size / materiales.length) * 100),
       materiales,
@@ -80,7 +80,7 @@ async function simular(page: Page, opciones: { puedeMarcarManual: boolean; compl
   await page.route('**/api/portal/courses', (r) =>
     r.fulfill({
       json: {
-        esFormador: false,
+        esFormador: opciones.esFormador === true,
         cursos: [{ ...curso, totalMateriales: 3, totalInscritos: 4, inscrito: true, porcentaje: detalle().porcentaje, certificado: null }],
       },
     })
@@ -113,11 +113,13 @@ async function simular(page: Page, opciones: { puedeMarcarManual: boolean; compl
     if (id === 1) return r.fulfill({ contentType: 'video/webm', body: VIDEO });
     return r.fulfill({ contentType: 'application/pdf', body: id === 2 ? pdf1 : pdf5 });
   });
-  await page.route('**/api/portal/materials/*/progress', (r) =>
-    opciones.puedeMarcarManual
-      ? r.fulfill({ json: { ok: true, porcentaje: 100, certificado: null } })
-      : r.fulfill({ status: 403, json: { error: 'Solo administradores y formadores.' } })
-  );
+  await page.route('**/api/portal/materials/*/progress', (r) => {
+    if (!opciones.puedeMarcarManual) return r.fulfill({ status: 403, json: { error: 'Solo administradores y formadores.' } });
+    // Con estado: marcar agrega el material a los completados y desmarcar lo quita (como el servidor real).
+    if (r.request().method() === 'DELETE') estado.completados.delete(idDe(r.request().url()));
+    else estado.completados.add(idDe(r.request().url()));
+    return r.fulfill({ json: { ok: true, porcentaje: 100, certificado: null } });
+  });
 }
 
 async function abrirCurso(page: Page) {
@@ -242,6 +244,77 @@ test.describe('Portal TH · Formación · completado automático', () => {
     await abrirCurso(page);
     await expect(page.locator('.portal-th__progreso-fila').getByTestId('insignia-completado')).toBeVisible();
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/4-curso-completado.png`, fullPage: true });
+  });
+
+  test('el ADMINISTRADOR que es formador conserva el marcado a mano en «Vista estudiante», sin bloqueos (Cristian, 2026-10-14)', async ({ page }) => {
+    await simular(page, { puedeMarcarManual: true, esFormador: true, completados: [1] });
+    await abrirCurso(page);
+    // Casillas editables: marca y desmarca a mano; ningún candado ni el aviso de «se marcan solas».
+    await expect(page.getByRole('checkbox')).toHaveCount(0);
+    await expect(page.getByText('Las casillas se marcan automáticamente cuando revisa cada material')).toHaveCount(0);
+    const marcar = page.getByRole('button', { name: 'Marcar Reglamento interno como completado' });
+    await expect(marcar).toBeEnabled();
+    await marcar.click();
+    await expect(page.getByRole('button', { name: 'Marcar Reglamento interno como pendiente' })).toBeVisible();
+    await page.getByRole('button', { name: 'Marcar Bienvenida Farmalogica como pendiente' }).click();
+    await expect(page.getByRole('button', { name: 'Marcar Bienvenida Farmalogica como completado' })).toBeVisible();
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/6-admin-vista-estudiante-editable.png`, fullPage: true });
+  });
+
+  test('administrador: restablece el curso a un estudiante (con confirmación) y el aviso verde queda arriba', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await simular(page, { puedeMarcarManual: true, esFormador: true, completados: [1] });
+    const filas = [
+      { correo: 'ana@gsslatam.com', nombre: 'Ana Gómez', inscritoEl: '2026-10-01T00:00:00Z', porcentaje: 100, materialesCompletados: [1, 2, 3], certificado: 'GSS-ABC12345' },
+      { correo: 'luis@gsslatam.com', nombre: 'Luis Mora', inscritoEl: '2026-10-02T00:00:00Z', porcentaje: 33, materialesCompletados: [1], certificado: null },
+    ];
+    const pedidos: Record<string, unknown>[] = [];
+    await page.route('**/api/portal/courses/3/roster', (r) => r.fulfill({ json: { estudiantes: filas } }));
+    await page.route('**/api/portal/courses/3/restablecer', (r) => {
+      const cuerpo = r.request().postDataJSON() as { correo: string };
+      pedidos.push(cuerpo);
+      const f = filas.find((x) => x.correo === cuerpo.correo)!;
+      f.porcentaje = 0;
+      f.materialesCompletados = [];
+      f.certificado = null;
+      return r.fulfill({ json: { ok: true, progresos: 3, respuestas: 1, certificados: 1 } });
+    });
+    await page.goto('/portal/formacion');
+    await page.getByRole('button', { name: 'Vista formador' }).click();
+    await page.getByRole('button', { name: /INDUCCIÓN FARMALOGICA/ }).click();
+
+    const fila = page.getByRole('row', { name: /Ana Gómez/ });
+    await expect(fila.getByRole('link', { name: 'Ver' })).toBeVisible(); // tiene certificado
+    await page.getByRole('button', { name: 'Restablecer el curso para Ana Gómez' }).click();
+    // Pide confirmación y dice qué se borra; «No» cancela sin tocar nada.
+    await expect(page.getByTestId('restablecer-confirmar')).toContainText('¿Borrar su progreso, sus respuestas y su certificado?');
+    await page.getByRole('button', { name: 'No', exact: true }).click();
+    expect(pedidos).toHaveLength(0);
+    await page.getByRole('button', { name: 'Restablecer el curso para Ana Gómez' }).click();
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/7-restablecer-confirmacion.png` });
+    await page.getByTestId('restablecer-si').click();
+
+    await expect(page.getByTestId('aviso-restablecer')).toContainText('Curso restablecido para Ana Gómez: se borraron 3 avances, 1 respuesta de formularios y 1 certificado.');
+    expect(pedidos).toEqual([{ correo: 'ana@gsslatam.com' }]);
+    await expect(page.getByTestId('aviso-restablecer')).toBeInViewport();
+    // El otro estudiante no se tocó, y Ana ya no tiene certificado.
+    await expect(page.getByRole('row', { name: /Ana Gómez/ }).getByRole('link', { name: 'Ver' })).toHaveCount(0);
+    await expect(page.getByRole('row', { name: /Luis Mora/ })).toContainText('33');
+    await page.waitForTimeout(700); // fin de la animación de la barra
+    await expect(page.getByRole('row', { name: /Ana Gómez/ })).toContainText('0%');
+    if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/8-restablecer-hecho.png` });
+  });
+
+  test('quien no está en el Excel de permisos no ve el botón «Restablecer»', async ({ page }) => {
+    await simular(page, { puedeMarcarManual: false, esFormador: true, completados: [] });
+    await page.route('**/api/portal/courses/3/roster', (r) =>
+      r.fulfill({ json: { estudiantes: [{ correo: 'ana@gsslatam.com', nombre: 'Ana Gómez', inscritoEl: '2026-10-01T00:00:00Z', porcentaje: 0, materialesCompletados: [], certificado: null }] } })
+    );
+    await page.goto('/portal/formacion');
+    await page.getByRole('button', { name: 'Vista formador' }).click();
+    await page.getByRole('button', { name: /INDUCCIÓN FARMALOGICA/ }).click();
+    await expect(page.getByRole('row', { name: /Ana Gómez/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Restablecer el curso/ })).toHaveCount(0);
   });
 
   test('administrador/formador: casillas editables a mano', async ({ page }) => {

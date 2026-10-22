@@ -3,179 +3,174 @@
 import { useMemo, useState } from 'react';
 import { useTheme } from '../providers';
 import { avatarColor, moduleColor, moduleSlot } from './colors';
-import { FlowLayer, flowWeights, type FlowEdge } from './FlowLayer';
 import { formatInt, formatMs, formatValue, initialsOf } from './format';
 import type { UserRow } from './types';
 import styles from './monitor.module.css';
 
-const MAX_USERS = 6;
-const MAX_MODULES = 7;
-const OTHER_USERS = 'otros-usuarios';
 const OTHER_MODULES_KEY = 'Otros módulos';
+/** Personas visibles al abrir; el resto con "Ver las N personas". */
+const VISIBLE = 15;
 
 /** Los módulos sin color fijo toman uno estable por nombre (si no, todos saldrían grises). */
-function moduleFlowColor(label: string, isDark: boolean): string {
+function moduleBarColor(label: string, isDark: boolean): string {
   if (label === OTHER_MODULES_KEY) return 'var(--sm-idle)';
   return moduleSlot(label) != null ? moduleColor(label, isDark) : avatarColor(label, isDark);
 }
 
 /**
  * Comportamiento de las personas: a qué módulos de Kronos va el tiempo de servidor de cada una.
- * Diagrama de flujo personas → módulos con los mismos datos del ranking (no consulta nada más).
- * Al pasar el mouse por una persona o un módulo se resaltan solo sus conexiones.
+ *
+ * Una barra por persona, partida en colores por módulo; su largo es el consumo frente a quien más
+ * consume. Antes era un diagrama de líneas animadas persona → módulo: con 70 personas eran cientos
+ * de curvas en movimiento y congelaba los equipos sin tarjeta gráfica. Ahora son solo cajas de
+ * colores (sin SVG ni animación) y se lee igual o mejor.
+ *
+ * Tocar un módulo arriba lo resalta en todas las barras y ordena a las personas por ese módulo.
  */
-export function UserBehavior({ users, rangeMinutes }: { users: UserRow[]; rangeMinutes: number }) {
+export function UserBehavior({ users }: { users: UserRow[] }) {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const [stage, setStage] = useState<HTMLDivElement | null>(null);
-  const [focus, setFocus] = useState<string | null>(null);
-
-  const colorOf = (label: string) => moduleFlowColor(label, isDark);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
 
   const model = useMemo(() => {
-    const top = users.slice(0, MAX_USERS);
-    const rest = users.slice(MAX_USERS);
-
-    // Módulos más usados por las personas que se muestran.
-    const moduleTotals = new Map<string, number>();
-    for (const u of users) {
-      for (const m of u.modules) moduleTotals.set(m.label, (moduleTotals.get(m.label) ?? 0) + m.totalMs);
-    }
-    const ranked = Array.from(moduleTotals.entries()).sort((a, b) => b[1] - a[1]);
-    const shown = new Set(ranked.slice(0, MAX_MODULES).map(([label]) => label));
-    const moduleOf = (label: string) => (shown.has(label) ? label : OTHER_MODULES_KEY);
-
-    type Source = { id: string; name: string; email: string | null; totalMs: number; requests: number; modules: Map<string, number> };
-    const sources: Source[] = top.map((u) => {
+    const moduleOf = (label: string) => label || OTHER_MODULES_KEY;
+    const people = users.map((u) => {
       const modules = new Map<string, number>();
       for (const m of u.modules) modules.set(moduleOf(m.label), (modules.get(moduleOf(m.label)) ?? 0) + m.totalMs);
-      return { id: u.email, name: u.name ?? u.email, email: u.email, totalMs: u.totalMs, requests: u.requests, modules };
-    });
-    if (rest.length) {
-      const modules = new Map<string, number>();
-      let totalMs = 0;
-      let requests = 0;
-      for (const u of rest) {
-        totalMs += u.totalMs;
-        requests += u.requests;
-        for (const m of u.modules) modules.set(moduleOf(m.label), (modules.get(moduleOf(m.label)) ?? 0) + m.totalMs);
-      }
-      sources.push({
-        id: OTHER_USERS,
-        name: `Otras ${formatInt(rest.length)} ${rest.length === 1 ? 'persona' : 'personas'}`,
-        email: null,
-        totalMs,
-        requests,
-        modules,
-      });
-    }
-
-    const targets = new Map<string, { label: string; totalMs: number; people: number }>();
-    for (const s of sources) {
-      for (const [label, ms] of s.modules) {
-        const t = targets.get(label) ?? { label, totalMs: 0, people: 0 };
-        t.totalMs += ms;
-        targets.set(label, t);
-      }
-    }
-    for (const u of users) {
-      for (const label of new Set(u.modules.map((m) => moduleOf(m.label)))) {
-        const t = targets.get(label);
-        if (t) t.people += 1;
-      }
-    }
-    const targetList = Array.from(targets.values()).sort((a, b) =>
-      a.label === OTHER_MODULES_KEY ? 1 : b.label === OTHER_MODULES_KEY ? -1 : b.totalMs - a.totalMs
-    );
-
-    const raw: Array<{ source: Source; label: string; ms: number }> = [];
-    for (const s of sources) for (const [label, ms] of s.modules) raw.push({ source: s, label, ms });
-    const weights = flowWeights(raw.map((r) => r.ms));
-    const edges: FlowEdge[] = raw.map((r, i) => {
-      const share = r.source.totalMs ? r.ms / r.source.totalMs : 0;
       return {
-        id: `${r.source.id}->${r.label}`,
-        from: `p:${r.source.id}`,
-        to: `m:${r.label}`,
-        weight: weights[i],
-        rate: (r.source.requests * share) / Math.max(1, rangeMinutes),
-        color: moduleFlowColor(r.label, isDark),
-        title: `${r.source.name} → ${r.label}: ${formatMs(r.ms)} de servidor (${formatValue(share * 100, 0)} % de su consumo)`,
+        email: u.email,
+        name: u.name ?? u.email,
+        totalMs: u.totalMs,
+        modules: Array.from(modules, ([label, ms]) => ({ label, ms })).sort((a, b) => b.ms - a.ms),
+        /** Datos viejos: cada ventana entera a su módulo principal, el % por módulo no es real. */
+        approximate: Boolean(u.modulesApproximate),
       };
     });
-    return { sources, targets: targetList, edges };
-  }, [users, rangeMinutes, isDark]);
 
-  if (users.length === 0 || model.targets.length === 0) {
+    const totals = new Map<string, { label: string; totalMs: number; people: number }>();
+    for (const p of people) {
+      for (const m of p.modules) {
+        const t = totals.get(m.label) ?? { label: m.label, totalMs: 0, people: 0 };
+        t.totalMs += m.ms;
+        t.people += 1;
+        totals.set(m.label, t);
+      }
+    }
+    const modules = Array.from(totals.values()).sort((a, b) =>
+      a.label === OTHER_MODULES_KEY ? 1 : b.label === OTHER_MODULES_KEY ? -1 : b.totalMs - a.totalMs
+    );
+    const maxMs = Math.max(1, ...people.map((p) => p.totalMs));
+    return { people, modules, maxMs };
+  }, [users]);
+
+  const ordered = useMemo(() => {
+    if (!selected) return model.people;
+    const msIn = (p: (typeof model.people)[number]) => p.modules.find((m) => m.label === selected)?.ms ?? 0;
+    return model.people.filter((p) => msIn(p) > 0).sort((a, b) => msIn(b) - msIn(a));
+  }, [model, selected]);
+
+  if (users.length === 0 || model.modules.length === 0) {
     return <div className={styles.empty}>Todavía no hay actividad de usuarios para dibujar su comportamiento.</div>;
   }
 
-  return (
-    <div ref={setStage} className={styles.flowStage}>
-      <FlowLayer container={stage} edges={model.edges} highlight={focus} />
-      <div className={`${styles.flowGrid} ${styles.flowGrid2}`}>
-        <div className={styles.flowColumn}>
-          <div className={styles.flowColumnTitle}>Personas</div>
-          {model.sources.map((s) => {
-            const [mainLabel, mainMs] = Array.from(s.modules.entries()).sort((a, b) => b[1] - a[1])[0] ?? ['', 0];
-            const color = s.email ? avatarColor(s.email, isDark) : 'var(--sm-idle)';
-            return (
-              <button
-                key={s.id}
-                type="button"
-                data-flow-node={`p:${s.id}`}
-                className={styles.userNode}
-                onMouseEnter={() => setFocus(`p:${s.id}`)}
-                onMouseLeave={() => setFocus(null)}
-                onFocus={() => setFocus(`p:${s.id}`)}
-                onBlur={() => setFocus(null)}
-                aria-label={`${s.name}: ${formatMs(s.totalMs)} de servidor; sobre todo ${mainLabel}`}
-              >
-                <span className={styles.userAvatar} style={{ background: `color-mix(in srgb, ${color} 26%, transparent)` }} aria-hidden>
-                  {s.email ? initialsOf(s.name === s.email ? null : s.name, s.email) : '+'}
-                </span>
-                <span style={{ minWidth: 0 }}>
-                  <div className={styles.rowTitle}>{s.name}</div>
-                  <div className={styles.rowSub} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {mainLabel ? `${formatValue(s.totalMs ? (mainMs / s.totalMs) * 100 : 0, 0)} % en ${mainLabel}` : 'sin detalle'}
-                  </div>
-                </span>
-                <span className={styles.rowMetric}>{formatMs(s.totalMs)}</span>
-              </button>
-            );
-          })}
-        </div>
+  const visible = showAll ? ordered : ordered.slice(0, VISIBLE);
+  const anyApproximate = model.people.some((p) => p.approximate);
 
-        <div className={styles.flowColumn}>
-          <div className={styles.flowColumnTitle}>Módulos</div>
-          {model.targets.map((t) => (
+  return (
+    <div>
+      <div className={styles.ubLegend} role="group" aria-label="Módulos: toque uno para resaltarlo">
+        {model.modules.map((m) => {
+          const active = selected === m.label;
+          return (
             <button
-              key={t.label}
+              key={m.label}
               type="button"
-              data-flow-node={`m:${t.label}`}
-              className={styles.userNode}
-              style={{ gridTemplateColumns: '12px minmax(0, 1fr) auto' }}
-              onMouseEnter={() => setFocus(`m:${t.label}`)}
-              onMouseLeave={() => setFocus(null)}
-              onFocus={() => setFocus(`m:${t.label}`)}
-              onBlur={() => setFocus(null)}
-              aria-label={`${t.label}: ${formatMs(t.totalMs)} de servidor de ${formatInt(t.people)} personas`}
+              className={`${styles.ubChip} ${active ? styles.ubChipActive : ''} ${selected && !active ? styles.ubChipDim : ''}`}
+              onClick={() => setSelected(active ? null : m.label)}
+              aria-pressed={active}
+              title={`${m.label}: ${formatMs(m.totalMs)} de servidor de ${formatInt(m.people)} personas`}
             >
-              <span className={styles.swatch} style={{ background: colorOf(t.label) }} aria-hidden />
-              <span style={{ minWidth: 0 }}>
-                <div className={styles.rowTitle}>{t.label}</div>
-                <div className={styles.rowSub}>
-                  {formatInt(t.people)} {t.people === 1 ? 'persona' : 'personas'}
-                </div>
+              <span className={styles.swatch} style={{ background: moduleBarColor(m.label, isDark) }} aria-hidden />
+              <span className={styles.ubChipLabel}>{m.label}</span>
+              <span className={styles.ubChipMeta}>
+                {formatMs(m.totalMs)} · {formatInt(m.people)}
               </span>
-              <span className={styles.rowMetric}>{formatMs(t.totalMs)}</span>
             </button>
-          ))}
-        </div>
+          );
+        })}
       </div>
+
+      {selected && (
+        <p className={styles.cardHint} style={{ margin: '10px 0 0' }}>
+          {formatInt(ordered.length)} {ordered.length === 1 ? 'persona usó' : 'personas usaron'} {selected}, de quien
+          más a quien menos.{' '}
+          <button type="button" className={styles.ubClear} onClick={() => setSelected(null)}>
+            Ver todos los módulos
+          </button>
+        </p>
+      )}
+
+      <div className={styles.ubList}>
+        {visible.map((p) => {
+          const main = p.modules[0];
+          const color = avatarColor(p.email, isDark);
+          const focusMs = selected ? p.modules.find((m) => m.label === selected)?.ms ?? 0 : null;
+          const sub =
+            focusMs != null
+              ? `${formatMs(focusMs)} en ${selected}`
+              : !main
+                ? 'sin detalle'
+                : p.approximate
+                  ? `sobre todo en ${main.label}`
+                  : `${formatValue(p.totalMs ? (main.ms / p.totalMs) * 100 : 0, 0)} % en ${main.label}`;
+          return (
+            <div key={p.email} className={styles.ubRow}>
+              <span className={styles.userAvatar} style={{ background: `color-mix(in srgb, ${color} 26%, transparent)` }} aria-hidden>
+                {initialsOf(p.name === p.email ? null : p.name, p.email)}
+              </span>
+              <span style={{ minWidth: 0 }}>
+                <div className={styles.rowTitle}>{p.name}</div>
+                <div className={styles.rowSub}>{sub}</div>
+              </span>
+              <span
+                className={styles.ubTrack}
+                role="img"
+                aria-label={`${p.name}: ${p.modules.map((m) => `${m.label} ${formatMs(m.ms)}`).join(', ')}`}
+              >
+                <span className={styles.ubBar} style={{ width: `${(p.totalMs / model.maxMs) * 100}%` }}>
+                  {p.modules.map((m) => (
+                    <span
+                      key={m.label}
+                      className={`${styles.ubSeg} ${selected && selected !== m.label ? styles.ubSegDim : ''}`}
+                      style={{ flexGrow: m.ms, background: moduleBarColor(m.label, isDark) }}
+                      title={
+                        p.approximate
+                          ? `${m.label}: ${formatMs(m.ms)} (aproximado)`
+                          : `${m.label}: ${formatMs(m.ms)} (${formatValue(p.totalMs ? (m.ms / p.totalMs) * 100 : 0, 0)} %)`
+                      }
+                    />
+                  ))}
+                </span>
+              </span>
+              <span className={styles.rowMetric}>{formatMs(p.totalMs)}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {ordered.length > VISIBLE && (
+        <button type="button" className={styles.linkButton} onClick={() => setShowAll((v) => !v)}>
+          {showAll ? 'Ver menos' : `Ver las ${formatInt(ordered.length)} personas`}
+        </button>
+      )}
+
       <p className={styles.cardHint} style={{ marginTop: 12, marginBottom: 0 }}>
-        Pase el mouse por una persona o un módulo para ver solo sus conexiones. El reparto por módulo es aproximado: cada
-        bloque de 5 minutos se asigna al módulo donde la persona gastó más tiempo.
+        Cada barra es el tiempo de servidor de una persona, en colores por módulo; la más larga es quien más consume.
+        Pase el mouse por un color para ver el detalle.
+        {anyApproximate
+          ? ' Para datos anteriores al cambio del monitor el reparto es aproximado (cada bloque de 5 minutos se asignaba entero al módulo principal): ahí se muestra "sobre todo en" sin porcentaje.'
+          : ''}
       </p>
     </div>
   );

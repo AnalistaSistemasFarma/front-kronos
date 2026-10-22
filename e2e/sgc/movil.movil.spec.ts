@@ -1,6 +1,6 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
-import { STORAGE_STATE_3 } from '../../playwright.config';
-import { takeElaboration, U1, U2 } from './roles';
+import { expect, test, type APIRequestContext, type Browser, type Page, type TestInfo } from '@playwright/test';
+import { STORAGE_STATE_4 } from '../../playwright.config';
+import { authorizeCreation, flowRoleModel } from './flujo-v7';
 
 /**
  * SGC documental EN CELULAR (revisión móvil del 2026-10-03: «hay muchas cosas
@@ -19,13 +19,23 @@ import { takeElaboration, U1, U2 } from './roles';
  *      Elaborador…): el valor queda guardado.
  *   5. Visor de la copia controlada: «Acercar» agranda la página también en
  *      el celular.
- * La solicitud de prueba usa solo personas QA y se cancela al final. Roles
- * (reglas del 2026-10-05, ver ./roles.ts): qa.sgc3 pide, qa.sgc (Calidad)
- * elabora y qa.sgc2 revisa y aprueba.
+ * La solicitud de prueba usa solo personas QA y se cancela al final. Desde las
+ * RN del 2026-10-05 la crea qa.sgc4 (solo solicitante) y la elabora qa.sgc
+ * (matriz de responsables GC × PR de KRONOSDB_PRUEBAS). Con el DOC v7 (S15)
+ * la pide y elabora qa.sgc y qa.sgc2 autoriza la creación (e2e/sgc/flujo-v7.ts).
  */
 const OLP = 3;
 const PW1 = process.env.E2E_USER_PASSWORD ?? '';
+const U1 = process.env.E2E_USER_EMAIL ?? '';
 const U3 = process.env.E2E_USER_EMAIL3 ?? '';
+const U4 = process.env.E2E_USER_EMAIL4 ?? '';
+
+/** Contexto del solicitante (qa.sgc4) con la misma pantalla de celular del proyecto. */
+async function requesterPage(browser: Browser, info: TestInfo): Promise<Page> {
+  const u = info.project.use;
+  const ctx = await browser.newContext({ storageState: STORAGE_STATE_4, viewport: u.viewport, deviceScaleFactor: u.deviceScaleFactor, userAgent: u.userAgent, isMobile: u.isMobile, hasTouch: u.hasTouch, locale: 'es-CO', timezoneId: 'America/Bogota' });
+  return ctx.newPage();
+}
 const TEMPLATE = '<p><strong>Nombre del documento:</strong> {{NOMBRE_DOCUMENTO}}</p><h2>1. OBJETIVO</h2><p>Prueba de la ubicación de firmas en el celular (e2e).</p><h2>10. HISTORIAL DE CAMBIOS</h2><p>{{HISTORIAL_CAMBIOS}}</p>';
 
 async function ok<T = Record<string, unknown>>(res: Awaited<ReturnType<APIRequestContext['get']>>, status = [200, 201]): Promise<T> {
@@ -84,7 +94,7 @@ async function horizontalOverflow(page: Page) {
 }
 
 test.describe.serial('SGC documental · celular', () => {
-  test.skip(!PW1 || !U3, 'Requiere los usuarios de pruebas qa.sgc y qa.sgc3 (secretos E2E_SGC_USER*/E2E_SGC_PASSWORD*).');
+  test.skip(!PW1 || !U3 || !U4, 'Requiere los usuarios de pruebas qa.sgc, qa.sgc3 y qa.sgc4 (secretos E2E_SGC_USER*/E2E_SGC_PASSWORD*).');
   test.setTimeout(240_000);
   let idRequest = 0;
 
@@ -95,18 +105,21 @@ test.describe.serial('SGC documental · celular', () => {
     await ctx.close();
   });
 
-  test('[SGC-REQ-105] «Ubicar firmas» en el celular: documento a todo el ancho, tocar para ubicar, arrastrar con el dedo y desplazar el documento', async ({ browser, page }) => {
+  test('[SGC-REQ-105] «Ubicar firmas» en el celular: documento a todo el ancho, tocar para ubicar, arrastrar con el dedo y desplazar el documento', async ({ browser, page }, testInfo) => {
     const cat = await ok<{ processes: { id: number; code: string }[]; documentTypes: { id: number; code: string }[] }>(await page.request.get(`/api/sgc/catalogs?company=${OLP}`));
-    const asker = await browser.newContext({ storageState: STORAGE_STATE_3 });
+    // S15 (DOC v7): quien pide elabora, así que la pide qa.sgc y qa.sgc2 autoriza la creación.
+    const v7 = (await flowRoleModel(page.request)) === 'solicitante_elabora';
+    const p4 = v7 ? page : await requesterPage(browser, testInfo);
     ({ idRequest } = await ok<{ idRequest: number }>(
-      await asker.request.post('/api/sgc/requests', {
+      await p4.request.post('/api/sgc/requests', {
         data: { company: OLP, requestType: 'nuevo', subject: `E2E celular · ubicar firmas ${new Date().toISOString()}`, description: 'Recorrido automático de la e2e del SGC en celular (datos de prueba).', idProcess: cat.processes.find((p) => p.code === 'GC')!.id, idDocumentType: cat.documentTypes.find((t) => t.code === 'PR')!.id, requiresTraining: 'no', formValues: { urgencia: 'Normal' } },
       }),
       [201]
     ));
-    await asker.close();
-    await takeElaboration(page.request, idRequest, U1);
-    for (const stepKey of ['revision', 'aprobacion']) await ok(await page.request.post(`/api/sgc/requests/${idRequest}/signers`, { data: { stepKey, signers: [U2], mode: 'orden' } }));
+    if (v7) await authorizeCreation(browser, idRequest);
+    else await p4.context().close();
+    expect((await ok<{ request: { elaboratorEmail: string } }>(await page.request.get(`/api/sgc/requests/${idRequest}`))).request.elaboratorEmail).toBe(U1.toLowerCase());
+    for (const stepKey of ['revision', 'aprobacion']) await ok(await page.request.post(`/api/sgc/requests/${idRequest}/signers`, { data: { stepKey, signers: [U3], mode: 'orden' } }));
     await ok(await page.request.post(`/api/sgc/requests/${idRequest}/draft`, { data: { html: TEMPLATE, origin: 'plantilla', originRef: 'Plantilla institucional de procedimiento' } }));
 
     await page.goto(`/process/sgc-documental/solicitudes/${idRequest}?empresa=${OLP}`);
@@ -129,7 +142,8 @@ test.describe.serial('SGC documental · celular', () => {
     // El documento usa casi todo el ancho (antes quedaba en ~40 px detrás de la lista «Orden de firma»).
     const vw = page.viewportSize()!.width;
     expect(img.width).toBeGreaterThan(vw * 0.75);
-    await expect(page.getByTestId('sgc-ubicar-firmante-movil')).toHaveCount(4);
+    // S14 (R20): elaboró, revisó y aprobó; la verificación de Calidad es lista de chequeo y no lleva caja.
+    await expect(page.getByTestId('sgc-ubicar-firmante-movil')).toHaveCount(3);
     await expect(page.getByTestId('sgc-ubicar-documento')).toContainText('Toque el documento para colocar');
 
     // Tocar para ubicar: con «Elaboró» elegido, un toque en el documento lleva su caja ahí.
@@ -190,7 +204,8 @@ test.describe.serial('SGC documental · celular', () => {
     await page.getByTestId('sgc-ubicar-guardar').tap();
     await expect(page.getByTestId('sgc-mensaje')).toContainText('Ubicación de firmas guardada', { timeout: 30_000 });
     const layout = await ok<{ fields: unknown[] }>(await page.request.get(`/api/sgc/requests/${idRequest}/layout`));
-    expect(layout.fields).toHaveLength(4);
+    // S14 (R20): sin caja de la verificación de Calidad → elaboró, revisó y aprobó.
+    expect(layout.fields).toHaveLength(3);
   });
 
   test('[SGC-REQ-106] la firma electrónica cabe en la pantalla del celular y se firma «Elaboró» con la contraseña', async ({ page }) => {
@@ -233,18 +248,18 @@ test.describe.serial('SGC documental · celular', () => {
       .toBe(true);
   });
 
-  test('[SGC-REQ-109] los selectores funcionan con el dedo cerca del final de la página: la nueva solicitud guarda prioridad, proceso y tipo (el elaborador sale de la configuración), y la prioridad se edita en la solicitud', async ({ browser }) => {
-    // Pide qa.sgc3 (sin permiso de Calidad): el elaborador lo fija la configuración, nunca quien pide.
-    const ctx3 = await browser.newContext({ storageState: STORAGE_STATE_3 });
-    const page = await ctx3.newPage();
+  test('[SGC-REQ-109] los selectores funcionan con el dedo cerca del final de la página: la nueva solicitud guarda prioridad, proceso, tipo y elaborador, y la prioridad se edita en la solicitud', async ({ browser, page: elaborador }, testInfo) => {
+    // 2026-10-10 (RN 2026-10-05): la solicitud la llena qa.sgc4 y ya no elige al elaborador:
+    // sale de la matriz de responsables (GC × PR → qa.sgc). S15 (DOC v7): la llena qa.sgc, que la elabora.
+    const v7 = (await flowRoleModel(elaborador.request)) === 'solicitante_elabora';
+    const page = v7 ? elaborador : await requesterPage(browser, testInfo);
     await page.goto(`/process/sgc-documental/solicitudes/nueva?empresa=${OLP}`);
     await expect(page.getByTestId('sgc-nueva-asunto')).toBeVisible({ timeout: 45_000 });
     await pick(page, 'sgc-nueva-proceso', /^GC · /);
     await pick(page, 'sgc-nueva-tipo-documental', /^PR · /);
     await page.getByTestId('sgc-nueva-asunto').fill(`E2E celular · selectores ${new Date().toISOString()}`);
     await page.getByTestId('sgc-nueva-justificacion').fill('Recorrido automático de la e2e del SGC en celular (selectores, datos de prueba).');
-    // 2026-10-05: ya no hay selector de elaborador. Al final de la página: prioridad (lista corta).
-    await expect(page.getByTestId('sgc-nueva-elaborador')).toHaveCount(0);
+    // Al final de la página: la prioridad (lista corta).
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
     await pick(page, 'sgc-campo-urgencia', /^Alta$/);
     await page.getByTestId('sgc-nueva-crear').tap();
@@ -255,8 +270,7 @@ test.describe.serial('SGC documental · celular', () => {
       const d = await ok<Detail>(await page.request.get(`/api/sgc/requests/${id}`));
       expect(d.request.process.code).toBe('GC');
       expect(d.request.documentType.code).toBe('PR');
-      expect(d.request.elaboratorEmail).toBeTruthy();
-      expect(d.request.elaboratorEmail.toLowerCase()).not.toBe(U3.toLowerCase());
+      expect(d.request.elaboratorEmail).toBe(U1.toLowerCase());
       expect(d.formFields.find((f) => f.key === 'urgencia')?.value).toBe('Alta');
       // Editar la prioridad desde la solicitud (Información adicional, al final de la página).
       await expect(page.getByTestId('sgc-info-adicional')).toBeVisible({ timeout: 45_000 });
@@ -268,8 +282,8 @@ test.describe.serial('SGC documental · celular', () => {
         .poll(async () => (await ok<Detail>(await page.request.get(`/api/sgc/requests/${id}`))).formFields.find((f) => f.key === 'urgencia')?.value, { timeout: 30_000 })
         .toBe('Requerimiento regulatorio');
     } finally {
-      await page.request.post(`/api/sgc/requests/${id}/cancel`, { data: { reason: 'Limpieza de la prueba e2e de selectores en celular.' } });
-      await ctx3.close();
+      await elaborador.request.post(`/api/sgc/requests/${id}/cancel`, { data: { reason: 'Limpieza de la prueba e2e de selectores en celular.' } });
+      if (!v7) await page.context().close();
     }
   });
 

@@ -334,6 +334,65 @@
   color: var(--sm-muted);
 }
 
+/* "Lo que va bien": primero lo positivo, después los hallazgos. */
+.highlights {
+  margin-top: 22px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+@media (min-width: 768px) {
+  .highlights {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.highlightsTitle {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tone-ink);
+}
+
+.highlight {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border-radius: var(--sm-radius-sm);
+  background: color-mix(in srgb, var(--tone) 10%, var(--sm-card));
+  border: 1px solid color-mix(in srgb, var(--tone) 24%, transparent);
+}
+
+.highlightIcon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--tone);
+}
+
+.highlightTitle {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.highlightDetail {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--sm-muted);
+}
+
 .insightList {
   margin-top: 22px;
   border-radius: var(--sm-radius-sm);
@@ -428,6 +487,151 @@
 
 .linkButton:hover {
   background: var(--sm-fill);
+}
+
+/* ---------- Comportamiento de las personas (barras por módulo, sin líneas ni animación) ---------- */
+
+.ubLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ubChip {
+  appearance: none;
+  font: inherit;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--sm-hairline);
+  background: var(--sm-card);
+  cursor: pointer;
+  transition: opacity 150ms ease, border-color 150ms ease;
+}
+
+.ubChip:hover {
+  border-color: color-mix(in srgb, var(--sm-info) 45%, var(--sm-hairline));
+}
+
+.ubChip:focus-visible {
+  outline: 2px solid var(--sm-info);
+  outline-offset: 2px;
+}
+
+.ubChipActive {
+  border-color: var(--sm-info);
+  background: color-mix(in srgb, var(--sm-info) 10%, var(--sm-card));
+}
+
+.ubChipDim {
+  opacity: 0.55;
+}
+
+.ubChipLabel {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ubChipMeta {
+  font-size: 12px;
+  color: var(--sm-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ubClear {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--sm-info-ink);
+  cursor: pointer;
+}
+
+.ubList {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+}
+
+.ubRow {
+  display: grid;
+  grid-template-columns: 30px minmax(120px, 1.1fr) minmax(0, 2fr) 72px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--sm-hairline);
+}
+
+.ubRow:last-child {
+  border-bottom: 0;
+}
+
+.ubRow .userAvatar {
+  width: 30px;
+  height: 30px;
+  font-size: 11px;
+}
+
+.ubTrack {
+  display: block;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--sm-fill);
+  overflow: hidden;
+}
+
+.ubBar {
+  display: flex;
+  height: 100%;
+  min-width: 4px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.ubSeg {
+  display: block;
+  height: 100%;
+  flex-basis: 0;
+  min-width: 2px;
+  transition: opacity 150ms ease;
+}
+
+.ubSeg + .ubSeg {
+  box-shadow: inset 1px 0 0 var(--sm-card);
+}
+
+.ubSegDim {
+  opacity: 0.18;
+}
+
+/* Celular: la barra baja debajo del nombre. */
+@media (max-width: 600px) {
+  .ubRow {
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+    row-gap: 6px;
+  }
+  .ubRow > .rowMetric {
+    grid-row: 1;
+    grid-column: 3;
+  }
+  .ubTrack {
+    grid-row: 2;
+    grid-column: 2 / -1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ubChip,
+  .ubSeg {
+    transition: none;
+  }
 }
 
 /* ---------- Alertas tempranas ---------- */
@@ -1236,6 +1440,22 @@
   min-width: 0;
 }
 
+.flowColumnSpreadBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+@media (min-width: 900px) {
+  .flowColumnSpread {
+    align-self: stretch;
+  }
+  .flowColumnSpreadBody {
+    flex: 1;
+    justify-content: space-around;
+  }
+}
+
 .flowColumnTitle {
   font-size: 11px;
   font-weight: 700;
@@ -1416,4 +1636,103 @@
   width: 30px;
   height: 30px;
   font-size: 11px;
+}
+
+/* ───────── Tablero de los mapas (MonitorBoard): muro que se arrastra y se amplía ───────── */
+
+.boardShell {
+  margin-top: 0;
+  border-radius: var(--sm-radius);
+  border: 1px solid var(--sm-hairline);
+  background: var(--sm-card); /* fondo normal, como cualquier tarjeta */
+  box-shadow: var(--sm-shadow);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.boardShellExpanded {
+  position: fixed;
+  inset: 0;
+  z-index: 190; /* debajo de la hoja de detalle (Drawer, 200) */
+  margin: 0;
+  border-radius: 0;
+  border: 0;
+  background: var(--sm-card);
+}
+
+/* Un tablero por mapa: blanco como una tarjeta, sin patrón de fondo. */
+.boardToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--sm-hairline);
+  background: var(--sm-card);
+}
+
+.boardHint {
+  font-size: 12px;
+  color: var(--sm-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.boardZoom {
+  min-width: 44px;
+  text-align: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--sm-muted);
+}
+
+/* El alto lo pone MonitorBoard según el mapa (este es solo el valor antes de medir). Si el mapa
+   cabe entero, el tablero se queda quieto: cursor normal y un dedo baja la página. */
+.boardViewport {
+  position: relative;
+  height: 480px;
+  overflow: hidden;
+  cursor: default;
+  touch-action: pan-y;
+  background: var(--sm-card);
+  transition: height 220ms ease;
+}
+
+/* Hay mapa fuera de la caja (después de acercar): se puede arrastrar. */
+.boardViewportPannable {
+  cursor: grab;
+  touch-action: none; /* un dedo mueve el tablero; dos hacen zoom */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boardViewport {
+    transition: none;
+  }
+}
+
+.boardShellExpanded .boardViewport {
+  height: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.boardViewportDragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.boardPlane {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+  display: grid;
+  grid-auto-flow: row dense;
+  align-items: start;
+  gap: 28px;
+  padding-bottom: 40px;
 }

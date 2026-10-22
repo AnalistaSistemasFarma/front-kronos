@@ -1,0 +1,698 @@
+import {
+  isOtIcono,
+  isOtResponsableRol,
+  OT_LIMITS,
+  OT_ROL_LABEL,
+  OT_TURNOS,
+  otPermissionFromUrl,
+  type OtIcono,
+  type OtEstado,
+  type OtResponsableRol,
+  type OtTurno,
+} from './constants';
+
+/**
+ * Reglas de negocio de la Bitácora de Proceso — funciones PURAS (probadas con Vitest).
+ * Las rutas las usan para decidir; la base las refuerza (CHECK y triggers).
+ */
+
+/** Error de negocio con su código HTTP (las rutas lo traducen tal cual). */
+export class OtError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number
+  ) {
+    super(message);
+    this.name = 'OtError';
+  }
+}
+
+export function isOtError(e: unknown): e is OtError {
+  return e instanceof OtError;
+}
+
+// ---------------------------------------------------------------------------
+// Acceso
+// ---------------------------------------------------------------------------
+
+export interface OtGrantRow {
+  subprocessUrl: string | null | undefined;
+  idCompany: number;
+  companyName: string;
+}
+
+/** Acceso efectivo de una persona en UNA empresa. Gestión implica operario. */
+export interface OtCompanyAccess {
+  idCompany: number;
+  companyName: string;
+  canOperate: boolean;
+  canManage: boolean;
+  /**
+   * Puede ABRIR bitácoras (R3, 2026-10-17): Gestión o jefe de producción asignado. Solo lo
+   * calcula GET /api/bitacora-proceso para la UI; el servidor lo vuelve a validar al abrir.
+   */
+  canOpen?: boolean;
+}
+
+/** Resuelve el acceso por empresa desde las filas de permiso (ignora URLs ajenas). */
+export function resolveOtAccess(rows: readonly OtGrantRow[]): OtCompanyAccess[] {
+  const byCompany = new Map<number, OtCompanyAccess>();
+  for (const row of rows) {
+    const perm = otPermissionFromUrl(row.subprocessUrl);
+    if (!perm) continue;
+    let entry = byCompany.get(row.idCompany);
+    if (!entry) {
+      entry = { idCompany: row.idCompany, companyName: row.companyName, canOperate: false, canManage: false };
+      byCompany.set(row.idCompany, entry);
+    }
+    if (perm === 'gestion') entry.canManage = true;
+    entry.canOperate = true;
+  }
+  return [...byCompany.values()].sort((a, b) => a.companyName.localeCompare(b.companyName, 'es'));
+}
+
+export function companyOtAccess(
+  access: readonly OtCompanyAccess[],
+  idCompany: number,
+  need: 'canOperate' | 'canManage' = 'canOperate'
+): OtCompanyAccess | null {
+  const entry = access.find((a) => a.idCompany === idCompany);
+  return entry && entry[need] ? entry : null;
+}
+
+/**
+ * ¿Puede esta SESIÓN registrar en la bitácora? (R3, R8)
+ * - la bitácora debe estar ABIERTA (409 si está cerrada);
+ * - un supervisor (Gestión) registra en cualquier bitácora abierta de su empresa;
+ * - bitácora con OPERARIOS programados (modelo del 2026-10-14, operarios sin usuario):
+ *   cualquier usuario con el permiso del módulo en la empresa (p. ej. la cuenta
+ *   compartida de planta en la tablet). La trazabilidad es el operario elegido
+ *   (`operadores`), que se valida aparte con assertOperadorDeLaOrden;
+ * - bitácora del modelo anterior (auxiliares con usuario): solo si la persona
+ *   figura como auxiliar o como jefe de producción de esa bitácora (403).
+ */
+export function assertPuedeRegistrar(
+  orden: { estado: string; operarios: readonly string[]; inspector?: string | null; jefe?: string | null; operadores?: readonly number[] },
+  idUser: string,
+  access: OtCompanyAccess
+): void {
+  if (orden.estado !== 'ABIERTA') {
+    throw new OtError('La bitácora está cerrada: ya no admite registros.', 409);
+  }
+  if (access.canManage) return;
+  if (orden.operadores && orden.operadores.length > 0) return;
+  if (!orden.operarios.includes(idUser) && orden.inspector !== idUser && orden.jefe !== idUser) {
+    throw new OtError(
+      'Usted no figura como auxiliar, inspector ni jefe de producción de esta bitácora. Pida al supervisor que lo incluya.',
+      403
+    );
+  }
+}
+
+/**
+ * El operario elegido en la tablet debe estar programado en la bitácora (A1).
+ * Si la bitácora tiene operarios programados, elegir uno es OBLIGATORIO; en las
+ * bitácoras del modelo anterior (sin operarios programados) no se admite.
+ */
+export function assertOperadorDeLaOrden(operadores: readonly number[], idOperador: number | null): void {
+  if (operadores.length === 0) {
+    if (idOperador !== null) throw new OtError('Esta bitácora no tiene operarios programados.', 400);
+    return;
+  }
+  if (idOperador === null) throw new OtError('Elija primero su nombre (operario).', 400);
+  if (!operadores.includes(idOperador)) {
+    throw new OtError('El operario elegido no está programado en esta bitácora. Pida al supervisor que lo agregue.', 403);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Validación de entradas
+// ---------------------------------------------------------------------------
+
+function str(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : '';
+}
+
+function optStr(v: unknown, max: number, campo: string): string | null {
+  const s = str(v);
+  if (!s) return null;
+  if (s.length > max) throw new OtError(`${campo}: máximo ${max} caracteres.`, 400);
+  return s;
+}
+
+function reqStr(v: unknown, max: number, campo: string): string {
+  const s = str(v);
+  if (!s) throw new OtError(`${campo} es obligatorio.`, 400);
+  if (s.length > max) throw new OtError(`${campo}: máximo ${max} caracteres.`, 400);
+  return s;
+}
+
+function optPositiveInt(v: unknown, campo: string): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1) throw new OtError(`${campo} no es válido.`, 400);
+  return n;
+}
+
+/** Copia de la OP de SAP que se guarda en la orden (solo los campos conocidos). */
+export interface SapOpSnapshot {
+  AbsoluteEntry: number;
+  DocumentNumber: number;
+  ItemNo: string | null;
+  ProductDescription: string | null;
+  U_Cod_Lote: string | null;
+  U_FecVen_lote: string | null;
+  PlannedQuantity: number | null;
+  Warehouse: string | null;
+  /** boposPlanned | boposReleased (B5: también las planificadas). Opcional en copias viejas. */
+  ProductionOrderStatus?: string | null;
+}
+
+export interface NuevaOrdenInput {
+  idCompany: number;
+  producto: string;
+  itemCode: string | null;
+  lote: string;
+  turno: OtTurno;
+  /** Área del catálogo de la empresa (A5); el nombre se copia en la orden. */
+  idArea: number | null;
+  /** Operarios SIN usuario del maestro de la empresa (A1; en la base, ot_orden_operador). */
+  operadores: number[];
+  /** Inspector (usuario de SynerLink, columna id_inspector; B1, 2026-10-15). */
+  inspector: string;
+  /** Jefe de producción (usuario de SynerLink, columna id_jefe_produccion; B1). */
+  jefeProduccion: string;
+  sapOp: SapOpSnapshot | null;
+}
+
+function parseIdList(v: unknown, campo: string, max: number): number[] {
+  const raw = Array.isArray(v) ? v : [];
+  const ids = [...new Set(raw.map((x) => Number(x)))];
+  if (ids.some((n) => !Number.isInteger(n) || n < 1)) throw new OtError(`${campo}: valor no válido.`, 400);
+  if (ids.length > max) throw new OtError(`${campo}: máximo ${max}.`, 400);
+  return ids;
+}
+
+function parseSapOp(v: unknown): SapOpSnapshot | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== 'object' || Array.isArray(v)) throw new OtError('La orden de producción de SAP no es válida.', 400);
+  const o = v as Record<string, unknown>;
+  const abs = optPositiveInt(o.AbsoluteEntry, 'La orden de producción de SAP');
+  const doc = optPositiveInt(o.DocumentNumber, 'La orden de producción de SAP');
+  if (!abs || !doc) throw new OtError('La orden de producción de SAP no es válida.', 400);
+  const s = (x: unknown, max: number) => (typeof x === 'string' && x.trim() ? x.trim().slice(0, max) : null);
+  const qty = typeof o.PlannedQuantity === 'number' && Number.isFinite(o.PlannedQuantity) ? o.PlannedQuantity : null;
+  return {
+    AbsoluteEntry: abs,
+    DocumentNumber: doc,
+    ItemNo: s(o.ItemNo, 50),
+    ProductDescription: s(o.ProductDescription, 200),
+    U_Cod_Lote: s(o.U_Cod_Lote, 50),
+    U_FecVen_lote: s(o.U_FecVen_lote, 40),
+    PlannedQuantity: qty,
+    Warehouse: s(o.Warehouse, 20),
+    ProductionOrderStatus: s(o.ProductionOrderStatus, 20),
+  };
+}
+
+/** Valida el cuerpo de «Nueva orden de trabajo» (R2, R3, R11). */
+export function parseNuevaOrden(body: Record<string, unknown> | null): NuevaOrdenInput {
+  if (!body) throw new OtError('Se esperaba un JSON con la bitácora.', 400);
+  const idCompany = optPositiveInt(body.company, 'La empresa');
+  if (!idCompany) throw new OtError('Falta la empresa.', 400);
+  const turno = str(body.turno).toUpperCase();
+  if (!(OT_TURNOS as readonly string[]).includes(turno)) {
+    throw new OtError('El turno es obligatorio (Mañana, Tarde o Noche).', 400);
+  }
+  const operadores = parseIdList(body.operadores, 'Operarios', OT_LIMITS.maxOperarios);
+  if (operadores.length === 0) throw new OtError('Seleccione al menos un operario.', 400);
+  const inspector = str(body.inspector);
+  if (!inspector) throw new OtError('Seleccione el inspector.', 400);
+  if (inspector.length > 50) throw new OtError('Inspector no válido.', 400);
+  const jefeProduccion = str(body.jefeProduccion);
+  if (!jefeProduccion) throw new OtError('Seleccione el jefe de producción.', 400);
+  if (jefeProduccion.length > 50) throw new OtError('Jefe de producción no válido.', 400);
+  return {
+    idCompany,
+    producto: reqStr(body.producto, OT_LIMITS.producto, 'El producto'),
+    itemCode: optStr(body.itemCode, OT_LIMITS.itemCode, 'El código del artículo'),
+    lote: reqStr(body.lote, OT_LIMITS.lote, 'El lote'),
+    turno: turno as OtTurno,
+    idArea: optPositiveInt(body.idArea ?? body.id_area, 'El área'),
+    operadores,
+    inspector,
+    jefeProduccion,
+    sapOp: parseSapOp(body.sapOp),
+  };
+}
+
+/**
+ * Sanea el TEXTO LIBRE que escribe el operario (2026-10-17): normaliza Unicode (NFC) y los
+ * saltos de línea, quita caracteres de control y los invisibles de formato o de dirección
+ * (p. ej. U+202E, que puede «voltear» lo que se ve en el informe), colapsa espacios y líneas
+ * vacías repetidas y recorta. No interpreta HTML: la pantalla y el informe lo muestran como
+ * texto (React escapa), así que < y > se guardan tal cual.
+ */
+export function sanitizarTextoLibre(v: unknown): string {
+  if (typeof v !== 'string') return '';
+  return (
+    v
+      .normalize('NFC')
+      .replace(/\r\n?/g, '\n')
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
+      .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g, '')
+      .replace(/\t/g, ' ')
+      .split('\n')
+      .map((l) => l.replace(/ {2,}/g, ' ').trim())
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  );
+}
+
+export interface NuevoRegistroInput {
+  idActividad: number;
+  /** Operario (sin usuario) que eligió su nombre en la tablet (A1). */
+  idOperador: number | null;
+  observacion: string | null;
+  /** Texto libre (solo actividades de ese tipo), ya saneado; null o ausente si no vino. */
+  texto?: string | null;
+}
+
+/**
+ * Valida el cuerpo de un registro (R4, R5, R6). Cualquier hora que envíe el
+ * cliente (`registrado_en`, `fecha`, `hora`…) se IGNORA: solo se leen la
+ * actividad y la observación; la hora la pone la base de datos.
+ */
+export function parseNuevoRegistro(body: Record<string, unknown> | null): NuevoRegistroInput {
+  if (!body) throw new OtError('Se esperaba un JSON con el registro.', 400);
+  const idActividad = optPositiveInt(body.id_actividad ?? body.idActividad, 'La actividad');
+  if (!idActividad) throw new OtError('Seleccione una actividad.', 400);
+  return {
+    idActividad,
+    idOperador: optPositiveInt(body.id_operador ?? body.idOperador, 'El operario'),
+    observacion: optStr(body.observacion, OT_LIMITS.observacion, 'La observación'),
+    texto: body.texto === undefined || body.texto === null ? null : sanitizarTextoLibre(body.texto),
+  };
+}
+
+/**
+ * Qué se guarda en `observacion` según el tipo de actividad (2026-10-17):
+ *   - TEXTO LIBRE: el texto es OBLIGATORIO (mín. 3, máx. 500 caracteres ya saneado) y es lo
+ *     que se guarda; no se admite además la observación opcional.
+ *   - El resto: la observación opcional de siempre; no se admite texto libre.
+ */
+export function textoDelRegistro(actividad: { texto_libre: boolean; nombre: string }, input: Pick<NuevoRegistroInput, 'observacion' | 'texto'>): { observacion: string | null; esTextoLibre: boolean } {
+  if (actividad.texto_libre) {
+    const t = input.texto ?? '';
+    if (t.length < OT_LIMITS.textoLibreMin) throw new OtError(`«${actividad.nombre}» es de texto libre: escriba qué pasó (mínimo ${OT_LIMITS.textoLibreMin} caracteres).`, 400);
+    if (t.length > OT_LIMITS.textoLibre) throw new OtError(`El texto libre: máximo ${OT_LIMITS.textoLibre} caracteres.`, 400);
+    if (input.observacion) throw new OtError('En una actividad de texto libre escriba todo en el texto (sin observación aparte).', 400);
+    return { observacion: t, esTextoLibre: true };
+  }
+  if (input.texto) throw new OtError(`«${actividad.nombre}» no es de texto libre: use la observación opcional.`, 400);
+  return { observacion: input.observacion, esTextoLibre: false };
+}
+
+/**
+ * La actividad debe existir y estar activa. La observación es OPCIONAL en todas
+ * (Nicolás, 2026-10-14: los operarios no escriben); `exige_observacion` del
+ * catálogo ya no se aplica.
+ */
+export function assertActividadRegistrable(actividad: { activo: boolean; nombre: string } | null): void {
+  if (!actividad || !actividad.activo) {
+    throw new OtError('La actividad no existe o está desactivada.', 400);
+  }
+}
+
+export function parseCierre(body: Record<string, unknown> | null): { observacion: string | null } {
+  return { observacion: optStr(body?.observacion, OT_LIMITS.observacionCierre, 'La observación de cierre') };
+}
+
+export interface NuevaActividadInput {
+  idCompany: number;
+  nombre: string;
+  exigeObservacion: boolean;
+  /** Actividad de texto libre (2026-10-17); ausente = no. */
+  textoLibre?: boolean;
+  orden: number;
+  icono: OtIcono | null;
+}
+
+/** Ícono opcional: clave de la lista cerrada, o null para «sin ícono». */
+function parseIcono(v: unknown): OtIcono | null {
+  if (v === null || v === undefined || v === '') return null;
+  if (!isOtIcono(v)) throw new OtError('El ícono no es válido.', 400);
+  return v;
+}
+
+function parseOrden(v: unknown): number {
+  if (v === undefined || v === null || v === '') return 0;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 0 || n > 100000) throw new OtError('El orden debe ser un número entero entre 0 y 100000.', 400);
+  return n;
+}
+
+export function parseNuevaActividad(body: Record<string, unknown> | null): NuevaActividadInput {
+  if (!body) throw new OtError('Se esperaba un JSON con la actividad.', 400);
+  const idCompany = optPositiveInt(body.company, 'La empresa');
+  if (!idCompany) throw new OtError('Falta la empresa.', 400);
+  return {
+    idCompany,
+    nombre: reqStr(body.nombre, OT_LIMITS.actividadNombre, 'El nombre de la actividad'),
+    exigeObservacion: body.exige_observacion === true,
+    textoLibre: body.texto_libre === true,
+    orden: parseOrden(body.orden),
+    icono: parseIcono(body.icono),
+  };
+}
+
+export interface CambioActividadInput {
+  idActividad: number;
+  idCompany: number;
+  activo?: boolean;
+  exigeObservacion?: boolean;
+  textoLibre?: boolean;
+  orden?: number;
+  icono?: OtIcono | null;
+}
+
+/** PATCH del catálogo: SOLO `activo`, `orden`, `exige_observacion`, `texto_libre` e `icono` (el nombre no cambia). */
+export function parseCambioActividad(body: Record<string, unknown> | null): CambioActividadInput {
+  if (!body) throw new OtError('Se esperaba un JSON con el cambio.', 400);
+  const idActividad = optPositiveInt(body.id_actividad, 'La actividad');
+  const idCompany = optPositiveInt(body.company, 'La empresa');
+  if (!idActividad || !idCompany) throw new OtError('Falta la actividad o la empresa.', 400);
+  const out: CambioActividadInput = { idActividad, idCompany };
+  if (typeof body.activo === 'boolean') out.activo = body.activo;
+  if (typeof body.exige_observacion === 'boolean') out.exigeObservacion = body.exige_observacion;
+  if (typeof body.texto_libre === 'boolean') out.textoLibre = body.texto_libre;
+  if (body.orden !== undefined) out.orden = parseOrden(body.orden);
+  if (body.icono !== undefined) out.icono = parseIcono(body.icono);
+  if (out.activo === undefined && out.exigeObservacion === undefined && out.textoLibre === undefined && out.orden === undefined && out.icono === undefined) {
+    throw new OtError('No hay cambios: solo se puede cambiar activo, orden, exige observación, texto libre e ícono.', 400);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Maestro de operarios (A1) y catálogo de áreas (A5)
+// ---------------------------------------------------------------------------
+
+export interface NuevoOperadorInput {
+  idCompany: number;
+  nombre: string;
+  documento: string | null;
+}
+
+export function parseNuevoOperador(body: Record<string, unknown> | null): NuevoOperadorInput {
+  if (!body) throw new OtError('Se esperaba un JSON con el operario.', 400);
+  const idCompany = optPositiveInt(body.company, 'La empresa');
+  if (!idCompany) throw new OtError('Falta la empresa.', 400);
+  return {
+    idCompany,
+    nombre: reqStr(body.nombre, OT_LIMITS.operadorNombre, 'El nombre del operario').replace(/\s+/g, ' '),
+    documento: optStr(body.documento, OT_LIMITS.operadorDocumento, 'El documento'),
+  };
+}
+
+export interface CambioOperadorInput {
+  idOperador: number;
+  idCompany: number;
+  nombre?: string;
+  documento?: string | null;
+  activo?: boolean;
+}
+
+/** PATCH del maestro: nombre, documento y activo (los operarios no se borran: se desactivan). */
+export function parseCambioOperador(body: Record<string, unknown> | null): CambioOperadorInput {
+  if (!body) throw new OtError('Se esperaba un JSON con el cambio.', 400);
+  const idOperador = optPositiveInt(body.id_operador, 'El operario');
+  const idCompany = optPositiveInt(body.company, 'La empresa');
+  if (!idOperador || !idCompany) throw new OtError('Falta el operario o la empresa.', 400);
+  const out: CambioOperadorInput = { idOperador, idCompany };
+  if (body.nombre !== undefined) out.nombre = reqStr(body.nombre, OT_LIMITS.operadorNombre, 'El nombre del operario').replace(/\s+/g, ' ');
+  if (body.documento !== undefined) out.documento = optStr(body.documento, OT_LIMITS.operadorDocumento, 'El documento');
+  if (typeof body.activo === 'boolean') out.activo = body.activo;
+  if (out.nombre === undefined && out.documento === undefined && out.activo === undefined) {
+    throw new OtError('No hay cambios: solo se puede cambiar el nombre, el documento y si está activo.', 400);
+  }
+  return out;
+}
+
+export interface NuevaAreaInput {
+  idCompany: number;
+  nombre: string;
+  orden: number;
+}
+
+export function parseNuevaArea(body: Record<string, unknown> | null): NuevaAreaInput {
+  if (!body) throw new OtError('Se esperaba un JSON con el área.', 400);
+  const idCompany = optPositiveInt(body.company, 'La empresa');
+  if (!idCompany) throw new OtError('Falta la empresa.', 400);
+  return { idCompany, nombre: reqStr(body.nombre, OT_LIMITS.areaNombre, 'El nombre del área'), orden: parseOrden(body.orden) };
+}
+
+export interface CambioAreaInput {
+  idArea: number;
+  idCompany: number;
+  activo?: boolean;
+  orden?: number;
+}
+
+export function parseCambioArea(body: Record<string, unknown> | null): CambioAreaInput {
+  if (!body) throw new OtError('Se esperaba un JSON con el cambio.', 400);
+  const idArea = optPositiveInt(body.id_area, 'El área');
+  const idCompany = optPositiveInt(body.company, 'La empresa');
+  if (!idArea || !idCompany) throw new OtError('Falta el área o la empresa.', 400);
+  const out: CambioAreaInput = { idArea, idCompany };
+  if (typeof body.activo === 'boolean') out.activo = body.activo;
+  if (body.orden !== undefined) out.orden = parseOrden(body.orden);
+  if (out.activo === undefined && out.orden === undefined) throw new OtError('No hay cambios: solo se puede cambiar activo y orden.', 400);
+  return out;
+}
+
+/**
+ * Área de una bitácora nueva (A5): si la empresa tiene áreas activas, es
+ * obligatoria y debe ser una de ellas (no hay texto libre). Si la empresa no
+ * tiene áreas en el catálogo, queda sin área.
+ */
+export function resolverArea(areasActivas: ReadonlyArray<{ id_area: number; nombre: string }>, idArea: number | null): { id_area: number; nombre: string } | null {
+  if (areasActivas.length === 0) {
+    if (idArea !== null) throw new OtError('El área no existe o está desactivada.', 400);
+    return null;
+  }
+  if (idArea === null) throw new OtError('Seleccione el área.', 400);
+  const a = areasActivas.find((x) => x.id_area === idArea);
+  if (!a) throw new OtError('El área no existe o está desactivada.', 400);
+  return a;
+}
+
+/** Cuerpo de «Agregar operarios» a una bitácora abierta (solo se agregan). */
+export function parseAgregarOperadores(body: Record<string, unknown> | null): number[] {
+  if (!body) throw new OtError('Se esperaba un JSON con los operarios.', 400);
+  const ids = parseIdList(body.operadores, 'Operarios', OT_LIMITS.maxOperarios);
+  if (ids.length === 0) throw new OtError('Seleccione al menos un operario.', 400);
+  return ids;
+}
+
+/** Texto seguro para un filtro OData entre comillas simples. */
+export function escapeOData(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+/**
+ * Estados de OP que se ofrecen (B5, 2026-10-15): PLANIFICADAS y LIBERADAS. Amanda:
+ * basta con que «la orden esté creada». Nunca cerradas ni canceladas.
+ */
+export const OT_SAP_OP_ESTADOS = ['boposPlanned', 'boposReleased'] as const;
+
+export const OT_SAP_OP_ESTADO_LABEL: Record<string, string> = { boposPlanned: 'Planificada', boposReleased: 'Liberada' };
+
+/**
+ * Filtro OData de búsqueda de OP planificadas o liberadas (solo lectura). Con un
+ * número busca también por DocumentNumber; con texto, por artículo, descripción y lote.
+ */
+export function buildSapOpFilter(q: string): string {
+  const term = q.trim().slice(0, 50);
+  const e = escapeOData(term);
+  const parts = [`contains(ItemNo,'${e}')`, `contains(ProductDescription,'${e}')`, `U_Cod_Lote eq '${e}'`];
+  if (/^\d{1,9}$/.test(term)) parts.push(`DocumentNumber eq ${Number(term)}`);
+  const estados = OT_SAP_OP_ESTADOS.map((x) => `ProductionOrderStatus eq '${x}'`).join(' or ');
+  return `(${estados}) and (${parts.join(' or ')})`;
+}
+
+/**
+ * B5: si se escribió un NÚMERO de OP y entre los resultados está exactamente esa OP, se
+ * elige sola (se completan producto, código y lote). Con texto no se elige nada.
+ */
+export function opPorNumero<T extends { DocumentNumber: number }>(q: string, ops: readonly T[]): T | null {
+  const t = q.trim();
+  if (!/^\d{1,9}$/.test(t)) return null;
+  const n = Number(t);
+  const hits = ops.filter((o) => o.DocumentNumber === n);
+  return hits.length === 1 ? hits[0] : null;
+}
+
+// ---------------------------------------------------------------------------
+// Importación del maestro de operarios (B8)
+// ---------------------------------------------------------------------------
+
+export const OT_IMPORTAR_MAX_FILAS = 500;
+
+export interface ImportarOperadoresInput {
+  idCompany: number;
+  filas: Array<{ linea: number; nombre: string; documento: string | null }>;
+  errores: Array<{ linea: number; motivo: string }>;
+  /** true = solo vista previa (no escribe). */
+  simular: boolean;
+}
+
+/**
+ * Pegado de una lista (B8, «Catálogo → Operarios → Importar»): una persona por línea,
+ * «Nombre completo; documento» (separador ; , o tabulador; el documento es opcional).
+ * Se ignora una primera línea de encabezado («nombre…»). Nombres repetidos en el
+ * texto cuentan una sola vez.
+ */
+export function parseImportarOperadores(body: Record<string, unknown> | null): ImportarOperadoresInput {
+  if (!body) throw new OtError('Se esperaba un JSON con la lista de operarios.', 400);
+  const idCompany = optPositiveInt(body.company, 'La empresa');
+  if (!idCompany) throw new OtError('Falta la empresa.', 400);
+  const texto = typeof body.texto === 'string' ? body.texto : '';
+  if (!texto.trim()) throw new OtError('Pegue la lista de operarios (una persona por línea).', 400);
+  const lineas = texto.replace(/\r\n?/g, '\n').split('\n');
+  const filas: ImportarOperadoresInput['filas'] = [];
+  const errores: ImportarOperadoresInput['errores'] = [];
+  const vistos = new Set<string>();
+  lineas.forEach((raw, i) => {
+    const linea = i + 1;
+    const l = raw.trim();
+    if (!l) return;
+    const [n, d] = l.split(/\t|;|,/).map((x) => x.trim());
+    const nombre = (n ?? '').replace(/\s+/g, ' ');
+    if (i === 0 && /^nombre/i.test(nombre)) return;
+    if (!nombre) return void errores.push({ linea, motivo: 'Falta el nombre.' });
+    if (nombre.length > OT_LIMITS.operadorNombre) return void errores.push({ linea, motivo: `Nombre de más de ${OT_LIMITS.operadorNombre} caracteres.` });
+    const documento = d ? d.replace(/\s+/g, '') : null;
+    if (documento && documento.length > OT_LIMITS.operadorDocumento) return void errores.push({ linea, motivo: `Documento de más de ${OT_LIMITS.operadorDocumento} caracteres.` });
+    const k = nombre.toLocaleLowerCase('es');
+    if (vistos.has(k)) return void errores.push({ linea, motivo: 'Nombre repetido en la lista.' });
+    vistos.add(k);
+    filas.push({ linea, nombre, documento: documento || null });
+  });
+  if (filas.length > OT_IMPORTAR_MAX_FILAS) throw new OtError(`Máximo ${OT_IMPORTAR_MAX_FILAS} operarios por importación.`, 400);
+  if (filas.length === 0 && errores.length === 0) throw new OtError('La lista no tiene operarios.', 400);
+  return { idCompany, filas, errores, simular: body.simular !== false };
+}
+
+export function isEstado(v: string): v is OtEstado {
+  return v === 'ABIERTA' || v === 'CERRADA';
+}
+
+// ---------------------------------------------------------------------------
+// Responsables por empresa (2026-10-16): supervisor, inspector y jefe de producción
+// ---------------------------------------------------------------------------
+
+export interface NuevoResponsableInput {
+  idCompany: number;
+  idUser: string;
+  rol: OtResponsableRol;
+}
+
+/** POST { company, id_user, rol }: asignar a una persona un rol de la bitácora. */
+export function parseNuevoResponsable(body: Record<string, unknown> | null): NuevoResponsableInput {
+  if (!body) throw new OtError('Se esperaba un JSON con el responsable.', 400);
+  const idCompany = optPositiveInt(body.company, 'La empresa');
+  if (!idCompany) throw new OtError('Falta la empresa.', 400);
+  const idUser = typeof body.id_user === 'string' ? body.id_user.trim() : '';
+  if (!idUser || idUser.length > 50) throw new OtError('Elija la persona.', 400);
+  if (!isOtResponsableRol(body.rol)) throw new OtError('Rol no válido: supervisor, inspector o jefe de producción.', 400);
+  return { idCompany, idUser, rol: body.rol };
+}
+
+export interface CambioResponsableInput {
+  idCompany: number;
+  idResponsable: number;
+  activo: boolean;
+}
+
+/** PATCH { company, id_responsable, activo }: los responsables no se borran, se desactivan. */
+export function parseCambioResponsable(body: Record<string, unknown> | null): CambioResponsableInput {
+  if (!body) throw new OtError('Se esperaba un JSON con el cambio.', 400);
+  const idCompany = optPositiveInt(body.company, 'La empresa');
+  const idResponsable = optPositiveInt(body.id_responsable, 'El responsable');
+  if (!idCompany || !idResponsable) throw new OtError('Falta el responsable o la empresa.', 400);
+  if (typeof body.activo !== 'boolean') throw new OtError('Solo se puede activar o desactivar al responsable.', 400);
+  return { idCompany, idResponsable, activo: body.activo };
+}
+
+/**
+ * ¿Puede esta persona tener el rol? Necesita el módulo en la empresa; el SUPERVISOR,
+ * además, el permiso de Gestión (es quien cierra). Lanza 400 con el motivo.
+ */
+export function assertPuedeSerResponsable(rol: OtResponsableRol, access: OtCompanyAccess | null, nombre: string): void {
+  if (!access?.canOperate) throw new OtError(`${nombre} no tiene el permiso «Bitácora de Proceso» en esta empresa.`, 400);
+  if (rol === 'SUPERVISOR' && !access.canManage) {
+    throw new OtError(`${nombre} no tiene el permiso «Bitácora de Proceso: Gestión»: sin él no puede ser supervisor.`, 400);
+  }
+}
+
+/** Mensaje cuando la persona elegida no tiene el rol en la empresa. */
+export function errorSinRol(rol: OtResponsableRol, status = 400): OtError {
+  const label = OT_ROL_LABEL[rol].toLowerCase();
+  return new OtError(`La persona elegida no está asignada como ${label} en esta empresa (Catálogo → Responsables).`, status);
+}
+
+/** Lo que se sabe de una persona para decir EXACTAMENTE qué le falta para actuar con un rol. */
+export interface EstadoRolPersona {
+  nombre: string;
+  empresa: string;
+  /** null = no tiene fila en Catálogo → Responsables; false = desactivada; true = asignada y activa. */
+  asignado: boolean | null;
+  /** Acceso al módulo de ESA persona en la empresa (null = sin ningún permiso del módulo). */
+  access: OtCompanyAccess | null;
+}
+
+/**
+ * Motivo EXACTO por el que la persona no puede actuar con el rol (null = sí puede):
+ * el rol en Responsables, el permiso del módulo o, para el supervisor, el de Gestión.
+ * (2026-10-17: antes el mensaje no decía qué faltaba.)
+ */
+export function motivoSinRol(rol: OtResponsableRol, e: EstadoRolPersona): string | null {
+  const label = OT_ROL_LABEL[rol].toLowerCase();
+  if (e.asignado === null) return `${e.nombre} no está asignado como ${label} en ${e.empresa}: asígnelo en Catálogo → Responsables.`;
+  if (e.asignado === false) return `${e.nombre} está desactivado como ${label} en ${e.empresa}: actívelo en Catálogo → Responsables.`;
+  if (!e.access?.canOperate) {
+    return `${e.nombre} está asignado como ${label}, pero le falta el permiso «Bitácora de Proceso» en ${e.empresa} (Administración → Usuarios).`;
+  }
+  if (rol === 'SUPERVISOR' && !e.access.canManage) {
+    return `${e.nombre} está asignado como supervisor, pero le falta el permiso «Bitácora de Proceso: Gestión» en ${e.empresa} (Administración → Usuarios).`;
+  }
+  return null;
+}
+
+/** Mensaje de la sesión SIN ningún permiso del módulo (dice cuál pedir y dónde). */
+export const OT_MSG_SIN_MODULO =
+  'No tiene acceso a Bitácora de Proceso: le falta el permiso «Bitácora de Proceso» (o «Bitácora de Proceso: Gestión») en alguna empresa. Lo asigna un administrador en Administración → Usuarios.';
+
+/** Mensaje de la sesión con usuario inactivo. */
+export const OT_MSG_USUARIO_INACTIVO = 'Su usuario de SynerLink está inactivo. Pida a un administrador que lo active.';
+
+/**
+ * Qué le falta EXACTAMENTE a la sesión en la empresa pedida (2026-10-17): el permiso del
+ * módulo en esa empresa o el de Gestión. `entry` = su acceso en esa empresa (null = ninguno).
+ */
+export function mensajeFaltaAcceso(need: 'canOperate' | 'canManage', entry: OtCompanyAccess | null, idCompany: number): string {
+  if (!entry) {
+    return `Le falta el permiso «Bitácora de Proceso» en la empresa seleccionada (id ${idCompany}). Lo asigna un administrador en Administración → Usuarios.`;
+  }
+  if (need === 'canManage' && !entry.canManage) {
+    return `Le falta el permiso «Bitácora de Proceso: Gestión» en ${entry.companyName.trim()}: esto solo lo hace el supervisor. Lo asigna un administrador en Administración → Usuarios.`;
+  }
+  return `Le falta el permiso «Bitácora de Proceso» en ${entry.companyName.trim()}.`;
+}
+
+/** Mensaje cuando no puede ABRIR (R3): ni Gestión ni jefe de producción asignado. */
+export function mensajeNoPuedeAbrir(entry: OtCompanyAccess): string {
+  return `Para abrir una bitácora en ${entry.companyName.trim()} le falta el permiso «Bitácora de Proceso: Gestión» (supervisor) o estar asignado como jefe de producción en Catálogo → Responsables.`;
+}

@@ -18,6 +18,7 @@ interface Item {
   id: number;
   email: string;
   idProcessMap: number | null;
+  idDepartment?: number | null;
   process: string;
   validFrom: string | null;
   validTo: string | null;
@@ -32,13 +33,16 @@ interface Item {
 interface Data {
   enforced: boolean;
   applies: boolean;
+  /** S15 (D16): la lista de líderes por departamento (DOC v7) restringe la aprobación. */
+  departmentEnforced?: boolean;
+  departmentLeaders?: number;
   items: Item[];
 }
 
 const STATUS_COLOR: Record<Item['status'], string> = { vigente: 'green', programada: 'blue', vencida: 'gray', revocada: 'red' };
 const STATUS_LABEL: Record<Item['status'], string> = { vigente: 'Vigente', programada: 'Programada', vencida: 'Vencida', revocada: 'Revocada' };
 
-export default function SgcApprovers({ idCompany, processes }: { idCompany: number; processes: { id: number; code: string; name: string }[] }) {
+export default function SgcApprovers({ idCompany, processes, departments = [] }: { idCompany: number; processes: { id: number; code: string; name: string }[]; departments?: { id: number; name: string }[] }) {
   const { data, error, reload } = useSgcFetch<Data>(`/api/sgc/approvers?company=${idCompany}`);
   const users = useSgcFetch<{ users: { email: string; name: string | null }[] }>(`/api/sgc/users?company=${idCompany}`);
   const [proc, setProc] = useState<string | null>('todos');
@@ -79,16 +83,28 @@ export default function SgcApprovers({ idCompany, processes }: { idCompany: numb
                 : 'La lista está desactivada en la configuración de la empresa: no se restringe a los aprobadores.'}
           </Alert>
         )}
+        {data && data.departmentEnforced !== undefined && (
+          <Text size='xs' c='dimmed' data-testid='sgc-aprobadores-lideres-estado'>
+            Flujo DOC v7 · líderes por departamento registrados: {data.departmentLeaders ?? 0}.{' '}
+            {data.departmentEnforced ? 'La restricción está ENCENDIDA: solo ellos aprueban los documentos de su departamento.' : 'La restricción está apagada (Configuración del SGC): por ahora aprueba cualquier persona del departamento de quien elabora.'}
+          </Text>
+        )}
         {msg && <Alert color={msg.ok ? 'green' : 'red'}>{msg.text}</Alert>}
         <Group align='flex-end' wrap='wrap'>
           <Autocomplete comboboxProps={sgcTouchComboboxProps()} autoComplete='off' data-1p-ignore='true' data-lpignore='true' label='Correo de la persona' data={options} value={email} onChange={setEmail} w={300} data-testid='sgc-aprobadores-correo' />
           <SgcSelect
             label='Proceso'
-            data={[{ value: 'todos', label: 'Todos los procesos' }, ...processes.map((p) => ({ value: String(p.id), label: `${p.code} · ${p.name}` }))]}
+            data={[
+              { value: 'todos', label: 'Todos los procesos' },
+              ...processes.map((p) => ({ value: String(p.id), label: `${p.code} · ${p.name}` })),
+              // S15 (R19, D16): líder que aprueba los documentos de su DEPARTAMENTO (flujo DOC v7).
+              ...departments.map((d) => ({ value: `dep:${d.id}`, label: `Líder del departamento ${d.name}` })),
+            ]}
             value={proc}
             onChange={setProc}
             searchable
             w={300}
+            data-testid='sgc-aprobadores-alcance'
           />
           <TextInput type='date' label='Vigente desde' value={validFrom} onChange={(e) => setValidFrom(e.currentTarget.value)} w={160} />
           <TextInput type='date' label='Vigente hasta (opcional)' value={validTo} onChange={(e) => setValidTo(e.currentTarget.value)} w={180} />
@@ -102,7 +118,8 @@ export default function SgcApprovers({ idCompany, processes }: { idCompany: numb
                   sgcSend('/api/sgc/approvers', 'POST', {
                     company: idCompany,
                     email: email.trim(),
-                    idProcessMap: proc && proc !== 'todos' ? Number(proc) : null,
+                    idProcessMap: proc && proc !== 'todos' && !proc.startsWith('dep:') ? Number(proc) : null,
+                    idDepartment: proc?.startsWith('dep:') ? Number(proc.slice(4)) : null,
                     validFrom: validFrom || null,
                     validTo: validTo || null,
                     reason: reason.trim(),
@@ -142,8 +159,9 @@ export default function SgcApprovers({ idCompany, processes }: { idCompany: numb
                       {m.validFrom} → {m.validTo ?? 'sin vencimiento'}
                     </Text>
                   </Table.Td>
-                  <Table.Td>
-                    <Badge color={STATUS_COLOR[m.status]} variant='light' size='sm'>
+                  <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                    {/* D8 (E2E 2026-10-10): la tabla encogía la columna y la etiqueta salía «VIGE…» (mismo arreglo que «Tareas documentales»). */}
+                    <Badge color={STATUS_COLOR[m.status]} variant='light' size='sm' styles={{ label: { overflow: 'visible' } }}>
                       {STATUS_LABEL[m.status]}
                     </Badge>
                     {m.revokeReason && (

@@ -24,10 +24,14 @@ import {
   IconCheck,
   IconCloudUpload,
 } from '@tabler/icons-react';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../microsoft-365/useGetMicrosoftToken';
-import { sanitizeOneDriveName } from '../../lib/onedriveName';
-import { ensureOneDriveFolderPath, uploadFileToOneDriveFolder } from '../../lib/onedrive/graphFolderUpload';
 import toast from 'react-hot-toast';
+import {
+  MAX_UPLOAD_REQUEST_BYTES,
+  REQUEST_ATTACHMENT_ACCEPT,
+  formatUploadMb,
+  isAllowedRequestAttachment,
+  proxyUploadErrorMessage,
+} from '@/lib/attachments/uploadRules';
 
 export interface UploadedFile {
   id: string;
@@ -57,26 +61,11 @@ interface FileUploadProps {
   storagePath?: string;
   entityType?: string;
   autoUpload?: boolean;
-  /**
-   * Si true (default), sube vía API servidor → OneDrive (más fiable).
-   * Si false, usa Graph directo desde el navegador (legado).
-   */
-  useServerUpload?: boolean;
 }
 
-const ALLOWED_TYPES = [
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'image/png',
-  'image/jpeg',
-  'image/jpg',
-  'text/plain',
-];
-
-const MAX_FILE_SIZE = Number.MAX_SAFE_INTEGER; // Sin límite de tamaño
+// Tipos y tope: lib/attachments/uploadRules.ts. Se valida por EXTENSIÓN o MIME (en Android y
+// en Windows sin Office `file.type` llega vacío) y el tope es el que deja pasar IIS por petición.
+const MAX_FILE_SIZE = MAX_UPLOAD_REQUEST_BYTES;
 
 const FileUpload: React.FC<FileUploadProps> = ({
   ticketId,
@@ -87,7 +76,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
   storagePath = 'MA',
   entityType = 'Ticket',
   autoUpload = true,
-  useServerUpload = true,
 }) => {
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -127,10 +115,15 @@ const FileUpload: React.FC<FileUploadProps> = ({
   };
 
   const validateFile = (file: File): string | null => {
-    if (!ALLOWED_TYPES.includes(file.type)) {
+    if (!isAllowedRequestAttachment(file)) {
       return `Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, XLS, XLSX, PNG, JPG, JPEG, TXT`;
     }
-    // Sin límite de tamaño de archivo
+    if (file.size <= 0) {
+      return 'El archivo está vacío.';
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      return `Pesa ${formatUploadMb(file.size)} y el máximo por archivo es ${formatUploadMb(MAX_FILE_SIZE)}.`;
+    }
     return null;
   };
 
@@ -150,37 +143,32 @@ const FileUpload: React.FC<FileUploadProps> = ({
         prev.map((f) => (f.id === fileId ? { ...f, status: 'uploading', progress: 0 } : f))
       );
 
-      let graphItem: UploadedFile['graphItem'];
+      // Siempre por el servidor: el token de Graph nunca llega al navegador.
+      const form = new FormData();
+      form.append('requestId', String(ticketId));
+      form.append('storagePath', storagePath);
+      form.append('entityType', entityType);
+      form.append('files', file, file.name);
 
-      if (useServerUpload) {
-        const form = new FormData();
-        form.append('requestId', String(ticketId));
-        form.append('storagePath', storagePath);
-        form.append('entityType', entityType);
-        form.append('files', file, file.name);
-
-        const res = await fetch('/api/requests-general/upload-attachments', {
-          method: 'POST',
-          body: form,
-        });
-        const data = (await res.json().catch(() => ({}))) as {
-          error?: string;
-          uploaded?: UploadedFile['graphItem'][];
-        };
-        if (!res.ok) {
-          throw new Error(data.error || `Error al subir el archivo (HTTP ${res.status})`);
-        }
-        graphItem = data.uploaded?.[0];
-        if (!graphItem?.id) {
-          throw new Error(data.error || 'El servidor no confirmó el archivo en OneDrive');
-        }
-      } else {
-        const token = await getMicrosoftToken();
-        if (!token) {
-          throw new Error('No se pudo obtener el token de acceso');
-        }
-        const folderName = `${entityType}-${ticketId}`;
-        await CheckOrCreateFolderAndUpload(folderName, [{ file }], token, storagePath);
+      const res = await fetch('/api/requests-general/upload-attachments', {
+        method: 'POST',
+        body: form,
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        uploaded?: UploadedFile['graphItem'][];
+      };
+      if (!res.ok) {
+        // Un 413/502 de IIS llega en HTML (sin JSON): se traduce a un mensaje entendible.
+        throw new Error(
+          data.error ||
+            proxyUploadErrorMessage(res.status) ||
+            `Error al subir el archivo (HTTP ${res.status})`
+        );
+      }
+      const graphItem = data.uploaded?.[0];
+      if (!graphItem?.id) {
+        throw new Error(data.error || 'El servidor no confirmó el archivo en OneDrive');
       }
 
       setFiles((prev) =>
@@ -198,9 +186,13 @@ const FileUpload: React.FC<FileUploadProps> = ({
         graphItem,
       };
       queueMicrotask(() => {
-        onUploadCompleteRef.current?.(completed);
+        const onComplete = onUploadCompleteRef.current;
+        onComplete?.(completed);
         toast.success(`Documento adjunto: ${file.name}`);
-        // Limpiar de la cola de subida tras éxito: la tabla de adjuntos es la fuente de verdad.
+        // Limpiar de la cola de subida tras éxito solo si la pantalla refresca su tabla de
+        // adjuntos (onUploadComplete): ahí la tabla es la fuente de verdad. Sin ese refresco,
+        // quitarlo de la cola hacía que el archivo "desapareciera" hasta recargar la página.
+        if (!onComplete) return;
         window.setTimeout(() => {
           setFiles((prev) => prev.filter((f) => f.id !== fileId || f.status !== 'success'));
         }, 1200);
@@ -223,42 +215,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
       );
     } finally {
       clearInterval(progressInterval);
-    }
-  };
-
-  // Ruta base histórica de este componente (tickets de SAPSEND). La lógica de
-  // "obtener o crear carpeta anidada + subir archivo" ahora vive en
-  // lib/onedrive/graphFolderUpload.ts (genérica, por segmentos de ruta), para
-  // que otros módulos (p.ej. el chat o el SGC documental) puedan reusarla sin duplicar
-  // las llamadas a Graph. El comportamiento para este componente no cambia:
-  // sigue subiendo a SAPSEND/TEC/<storagePath>/<folderName>.
-  const CheckOrCreateFolderAndUpload = async (
-    folderName: string,
-    files: { file: File }[],
-    token: string,
-    storagePath: string
-  ) => {
-    try {
-      const folderId = await ensureOneDriveFolderPath(token, ['SAPSEND', 'TEC', storagePath, folderName]);
-
-      // Subir archivos a la carpeta
-      if (files && files.length > 0) {
-        const uploadPromises = files.map((fileWrapper) => {
-          const uploadName = sanitizeOneDriveName(fileWrapper.file.name);
-          return uploadFileToOneDriveFolder(
-            token,
-            folderId,
-            uploadName,
-            fileWrapper.file,
-            fileWrapper.file.type
-          );
-        });
-
-        await Promise.all(uploadPromises);
-      }
-    } catch (error) {
-      console.error('Error en la operación:', error);
-      throw error;
     }
   };
 
@@ -406,18 +362,37 @@ const FileUpload: React.FC<FileUploadProps> = ({
               </Text>
             </Text>
             <Text size='xs' c='dimmed'>
-              Tipos permitidos: PDF, DOC, DOCX, XLS, XLSX, PNG, JPG, JPEG (sin límite de tamaño)
+              Tipos permitidos: PDF, DOC, DOCX, XLS, XLSX, PNG, JPG, JPEG, TXT (máx.{' '}
+              {formatUploadMb(MAX_FILE_SIZE)} por archivo)
             </Text>
           </Stack>
         </Stack>
 
+        {/* Mismo patrón que el compositor del chat (2026-09-08): sin `display:none`, porque
+            varios navegadores móviles no abren el selector al hacer `.click()` sobre un input
+            que no está en el layout. Y el `stopPropagation`: el clic programático del input
+            sube a la tarjeta, que volvía a llamar `.click()`; en Safari iOS ese segundo
+            llamado cancela el selector que se acababa de abrir. */}
         <input
           ref={fileInputRef}
           type='file'
           multiple
-          accept='.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.txt'
+          accept={REQUEST_ATTACHMENT_ACCEPT}
           onChange={handleFileInputChange}
-          style={{ display: 'none' }}
+          onClick={(e) => e.stopPropagation()}
+          tabIndex={-1}
+          style={{
+            position: 'absolute',
+            width: 1,
+            height: 1,
+            padding: 0,
+            margin: -1,
+            border: 0,
+            opacity: 0,
+            overflow: 'hidden',
+            clip: 'rect(0 0 0 0)',
+            pointerEvents: 'none',
+          }}
           disabled={disabled}
           aria-label='Seleccionar archivos para subir'
         />

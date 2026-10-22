@@ -4,8 +4,11 @@ import {
   buildRailItems,
   buildRailSections,
   bumpConversationActivity,
+  chatCreateHref,
+  chatCreateOptions,
   compareByActivity,
   formatUnread,
+  isChatCreateKind,
   isChatRailKey,
   railItemHref,
   railOpenDetail,
@@ -296,5 +299,39 @@ describe('bumpConversationActivity (sube al enviar o recibir)', () => {
     expect(bumpConversationActivity(lista, 1, '2026-10-01T11:00:00Z')).toBe(lista);
     expect(bumpConversationActivity(lista, 99, '2026-10-01T13:00:00Z')).toBe(lista);
     expect(bumpConversationActivity(lista, 1, 'no-es-fecha')).toBe(lista);
+  });
+});
+
+describe('botón "Nuevo" de la barra', () => {
+  const base = { canMessagePeople: false, canCreateGroups: false, canBroadcast: false, totalAgents: 1 };
+
+  it('sin ningún permiso no hay opciones (y no se pinta el botón)', () => {
+    expect(chatCreateOptions(base)).toEqual([]);
+  });
+
+  it('cada opción sale solo con su permiso, en orden persona, grupo, masivo', () => {
+    expect(chatCreateOptions({ ...base, canCreateGroups: true })).toEqual(['grupo']);
+    expect(chatCreateOptions({ ...base, canMessagePeople: true })).toEqual(['persona']);
+    expect(
+      chatCreateOptions({ canMessagePeople: true, canCreateGroups: true, canBroadcast: true, totalAgents: 3 })
+    ).toEqual(['persona', 'grupo', 'masivo']);
+  });
+
+  it('el masivo exige administrador Y más de un asistente, como "Enviar a todos"', () => {
+    expect(chatCreateOptions({ ...base, canBroadcast: true, totalAgents: 1 })).toEqual([]);
+    expect(chatCreateOptions({ ...base, canBroadcast: false, totalAgents: 5 })).toEqual([]);
+    expect(chatCreateOptions({ ...base, canBroadcast: true, totalAgents: 2 })).toEqual(['masivo']);
+  });
+
+  it('valida el tipo que llega por la URL', () => {
+    expect(isChatCreateKind('grupo')).toBe(true);
+    expect(isChatCreateKind('persona')).toBe(true);
+    expect(isChatCreateKind('masivo')).toBe(true);
+    expect(isChatCreateKind('admin')).toBe(false);
+    expect(isChatCreateKind(null)).toBe(false);
+  });
+
+  it('la URL de creación apunta a la página del chat', () => {
+    expect(chatCreateHref('grupo')).toBe('/process/chat?nuevo=grupo');
   });
 });

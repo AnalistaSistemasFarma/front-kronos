@@ -54,10 +54,13 @@ const COLLAPSED = 4;
 export function StatusHero({
   verdict,
   insights,
+  highlights = [],
   hasData,
 }: {
   verdict: Verdict;
   insights: Insight[];
+  /** Lo que va bien (buildHighlights): se muestra antes de los hallazgos. */
+  highlights?: Insight[];
   hasData: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -79,6 +82,26 @@ export function StatusHero({
           <p className={styles.heroSub}>{verdict.sub}</p>
         </div>
       </div>
+
+      {hasData && highlights.length > 0 && (
+        <div className={`${styles.highlights} ${styles['tone-ok']}`} role="list" aria-label="Lo que va bien">
+          <div className={styles.highlightsTitle}>Lo que va bien</div>
+          {highlights.map((h) => {
+            const AreaIcon = AREA_ICON[h.area];
+            return (
+              <div key={h.id} role="listitem" className={styles.highlight} title={h.detail}>
+                <span className={styles.highlightIcon} aria-hidden>
+                  <AreaIcon size={15} stroke={2} />
+                </span>
+                <span style={{ minWidth: 0 }}>
+                  <span className={styles.highlightTitle}>{h.title}</span>
+                  <span className={styles.highlightDetail}>{h.detail}</span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {insights.length > 0 && (
         <div className={styles.insightList} role="list" aria-label="Hallazgos">

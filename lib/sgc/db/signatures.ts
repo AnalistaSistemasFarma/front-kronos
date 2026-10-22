@@ -6,7 +6,7 @@ import { SGC_SIGNATURE_LABELS, type SgcSignatureMeaning } from '../flows/definit
 import type { SgcNotifier } from '../notifications';
 import type { SgcCompanyAccess } from '../permissions';
 import { buildControlledPdfWithLayout, manifestSha256, readManifest, verifyControlledPdf, type SgcManifest, type SgcManifestMinorRevision, type SgcManifestPlacement, type SgcPdfVerification } from '../pdf/controlledPdf';
-import { overflowMeanings, suggestInstitutionalPlacements } from '../pdf/institutional';
+import { overflowMeanings, SGC_A4_LANDSCAPE, SGC_A4_PORTRAIT, suggestInstitutionalPlacements } from '../pdf/institutional';
 import type { SgcDocxToHtml, SgcHtmlToPdf } from '../pdf/render';
 import { sgcSignerKey, type SgcPlacedMeaning, type SgcPlacementParticipant } from '../signature/fields';
 import { SGC_SIGNATURE_CONSENT_VERSION } from '../signature/consent';
@@ -17,10 +17,11 @@ import type { SgcActor, SgcDb } from './catalogs';
 import { resolveNewDocumentCode } from './coding';
 import { getVersionForViewer, type SgcUploader } from './documents';
 import { addInteraction, decideTask, requestOfTask } from './requests';
-import { cargoOf, composeContent, effectiveInstitutional, latestLayout, loadVerifiedDraft, personLabel } from './layout';
+import { createAutomaticParentRelation } from './hierarchy';
+import { cargoOf, composeContent, effectiveInstitutional, latestLayout, layoutIsLandscape, loadVerifiedDraft, personLabel } from './layout';
 import { isHeaderMandatory } from './companySettings';
 import { minorRevisionChain } from './drafts';
-import { withSgcAppLock } from './lock';
+import { withNewDocumentCodeLock, withSgcAppLock } from './lock';
 import { getReadSignError, type SgcReadStatus } from '../dissemination/scope';
 import type { SgcSignatureRow, SgcSignedContent } from '../signature/record';
 import { buildVerifyUrl } from '../pdf/qr';
@@ -28,6 +29,8 @@ import { signatureInkBounds } from '../pdf/controlledPdf';
 import { SGC_SELF_SIGNATURE_DISABLED, masterStatus, normalizeOwnSignature, validationDenial, type SgcCaptureMethod, type SgcMasterOrigin } from '../signature/ownSignature';
 import type { Prisma } from '../../../app/generated/prisma';
 import { latestTrainingUpload, trainingNeedsJustification, uploadSummary } from './training';
+import { trainingResultsChangedMessage } from '../training/results';
+import { isQualityVerificationSlot } from '../signature/qualityVerification';
 
 /**
  * FIRMA ELECTRÓNICA PROPIA del SGC y PDF CONTROLADO (Sprint 3).
@@ -140,6 +143,14 @@ export async function signTask(db: SgcDb, deps: SgcSignatureDeps, idTask: number
         : (await loadVerifiedDraft(db, deps, idRequest)).draft;
   const draft = content;
   if ((raw.draftRef !== undefined && raw.draftRef !== null && raw.draftRef !== draft.ref) || (raw.draftSha256 !== undefined && raw.draftSha256 !== null && raw.draftSha256 !== draft.sha256)) {
+    if (input.meaning === 'capacito') {
+      // S14 (R29): decir qué cambió (quién cargó qué y con qué resultado) en vez de un aviso genérico.
+      const latest = await latestTrainingUpload(db, idTask);
+      if (latest) {
+        const sum = uploadSummary(latest.upload);
+        throw new SgcError(trainingResultsChangedMessage({ fileName: latest.upload.file_name, uploadedBy: latest.upload.uploaded_by, uploadedAt: latest.upload.uploaded_at, passed: sum.passed, failed: sum.failed, missing: sum.missing.length }), 409);
+      }
+    }
     throw new SgcError(input.meaning === 'leyo' ? 'El documento cambió desde que lo abrió: léalo de nuevo antes de firmar.' : input.meaning === 'capacito' ? 'Los resultados cambiaron desde que abrió la tarea: revíselos de nuevo antes de firmar.' : 'El borrador cambió desde que abrió la tarea: revíselo de nuevo antes de firmar.', 409);
   }
   const user = await db.user.findFirst({ where: { email: { equals: email } }, select: { name: true } });
@@ -258,9 +269,15 @@ async function markPdfError(db: SgcDb, idRequest: number, idCompany: number, mes
 export async function generateControlledVersion(db: SgcDb, deps: SgcSignatureDeps, idRequest: number, actor: SgcActor): Promise<{ idDocument: number; idDocumentVersion: number; pdfSha256: string; created: boolean }> {
   // Sprint 6: una sola generación a la vez por solicitud (la última firma y un reintento de Calidad
   // podían correr juntas, subir el mismo archivo dos veces y dejar el PDF distinto de su huella).
-  return withSgcAppLock(db, `sgc-pdf-controlado-${idRequest}`, { waitMs: 0, busyMessage: 'El PDF controlado de esta solicitud ya se está generando. Espere un momento y recargue.', holdMs: 180_000 }, () =>
-    generateControlledVersionUnlocked(db, deps, idRequest, actor)
-  );
+  const generate = () =>
+    withSgcAppLock(db, `sgc-pdf-controlado-${idRequest}`, { waitMs: 0, busyMessage: 'El PDF controlado de esta solicitud ya se está generando. Espere un momento y recargue.', holdMs: 180_000 }, () =>
+      generateControlledVersionUnlocked(db, deps, idRequest, actor)
+    );
+  // E2E 2026-10-10: un documento NUEVO toma el siguiente código de la guía; dos aprobaciones a la vez
+  // tomaban el mismo y la segunda pisaba el PDF de la primera en OneDrive. Se serializa por empresa.
+  const head = await db.sgcRequest.findUniqueOrThrow({ where: { id_request: idRequest }, select: { id_company: true, id_document: true, controlled_pdf_status: true, id_document_version: true } });
+  if (head.id_document || (head.controlled_pdf_status === 'generado' && head.id_document_version)) return generate();
+  return withNewDocumentCodeLock(db, head.id_company, generate);
 }
 
 async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDeps, idRequest: number, actor: SgcActor): Promise<{ idDocument: number; idDocumentVersion: number; pdfSha256: string; created: boolean }> {
@@ -314,6 +331,10 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
       code = resolved.code;
       title = request.subject.slice(0, 300);
       versionNumber = 1;
+      // Defensa adicional: nunca subir a la carpeta de un código que ya es de otro documento.
+      if (await db.sgcDocument.findFirst({ where: { id_company: request.id_company, code }, select: { id_document: true } })) {
+        throw new SgcError(`El código ${code} ya está asignado a otro documento: reintente la generación del PDF controlado.`, 409);
+      }
     }
 
     const changeValue = request.formValues.find((v) => v.field.field_key === 'resumen_cambios')?.value_text ?? null;
@@ -324,14 +345,21 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
     const layout = await latestLayout(db, idRequest);
     // Sprint 8: encabezado obligatorio por configuración de la empresa (salvo un borrador PDF anterior a la regla).
     const institutional = effectiveInstitutional(layout.institutionalHeader, await isHeaderMandatory(db, request.id_company), draft.format);
-    const signerRows = await db.sgcTaskAssignee.findMany({ where: { id_task_assignee: { in: signatures.map((s) => s.id_task_assignee) } }, select: { id_task_assignee: true, user_email: true, pool_type_code: true, sign_order: true, task: { select: { task_key: true } } } });
+    const allSignerRows = await db.sgcTaskAssignee.findMany({ where: { id_task_assignee: { in: signatures.map((s) => s.id_task_assignee) } }, select: { id_task_assignee: true, user_email: true, pool_type_code: true, signature_meaning: true, sign_order: true, task: { select: { task_key: true } } } });
+    // S14 (R20, RN 2026-10-13): la verificación de Calidad (cupo de grupo SGC-VERIF-CALIDAD de la aprobación) es
+    // una lista de chequeo, no una firma del documento: conserva su registro, su lista y la auditoría, pero NO va
+    // en el PDF controlado (ni caja, ni nombre en «Aprobó», ni fila del registro). Las validaciones de arriba
+    // (contenido, huella, aprobación sobre el contenido final) siguen usando todas las firmas.
+    const verificationIds = new Set(allSignerRows.filter((a) => isQualityVerificationSlot({ ...a, signature_meaning: a.signature_meaning ?? 'aprobo' })).map((a) => a.id_task_assignee));
+    const documentSignatures = signatures.filter((s) => !(s.meaning === 'aprobo' && verificationIds.has(s.id_task_assignee)));
+    const signerRows = allSignerRows.filter((a) => !verificationIds.has(a.id_task_assignee));
     const keyOfAssignee = new Map(signerRows.map((a) => [a.id_task_assignee, sgcSignerKey(a.task.task_key, a.user_email, a.pool_type_code)]));
-    const cargos = await cargoOf(db, request.id_company, signatures.map((s) => s.signer_email));
+    const cargos = await cargoOf(db, request.id_company, documentSignatures.map((s) => s.signer_email));
     const signOrderOf = new Map(signerRows.map((a) => [a.id_task_assignee, a.user_email ? a.sign_order : Number.MAX_SAFE_INTEGER]));
     // Sprint 12: la firma de un sustituto queda «en sustitución de» el titular también en el encabezado.
     const namesFor = (m: SgcPlacedMeaning) => [
       ...new Set(
-        [...signatures]
+        [...documentSignatures]
           .sort((a, b) => (signOrderOf.get(a.id_task_assignee) ?? 0) - (signOrderOf.get(b.id_task_assignee) ?? 0))
           .filter((s) => s.meaning === m)
           .map((s) => {
@@ -344,6 +372,7 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
     const composed = await composeContent(db, deps, {
       idCompany: request.id_company,
       idDocument: request.document?.id_document ?? null,
+      idDocumentType: request.documentType.id_document_type,
       draft: { format: draft.format, bytes, html },
       institutional,
       code,
@@ -358,11 +387,15 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
       changeDate: new Date(approvedAt.getTime() - 5 * 60 * 60 * 1000).toISOString().slice(0, 10),
       changeReason: changeDescription,
       emissionText: 'Al quedar vigente',
+      // 2026-10-22: los ajustes de presentación del Excel que el elaborador dejó (los que se vieron al firmar).
+      sheetSettings: draft.format === 'xlsx' ? layout.sheetSettings : null,
     });
     const contentPdf = composed.contentPdf;
     const source: { bytes: Uint8Array; ext: string; contentType: string } | null =
       draft.format === 'docx'
         ? { bytes: bytes!, ext: 'docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }
+        : draft.format === 'xlsx'
+          ? { bytes: bytes!, ext: 'xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }
         : draft.format === 'html'
           ? { bytes: new TextEncoder().encode(html!), ext: 'html', contentType: 'text/html; charset=utf-8' }
           : null;
@@ -370,7 +403,7 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
     const signedParticipants: SgcPlacementParticipant[] = [];
     // Sprint 13: en el orden de firma que se confirmó (el cupo de grupo al final): el primero es el TITULAR del recuadro.
     const orderOf = new Map(signerRows.map((a) => [a.id_task_assignee, a.user_email ? a.sign_order : Number.MAX_SAFE_INTEGER]));
-    const inOrder = [...signatures].sort((a, b) => (orderOf.get(a.id_task_assignee) ?? 0) - (orderOf.get(b.id_task_assignee) ?? 0));
+    const inOrder = [...documentSignatures].sort((a, b) => (orderOf.get(a.id_task_assignee) ?? 0) - (orderOf.get(b.id_task_assignee) ?? 0));
     for (const s of inOrder) {
       const key = keyOfAssignee.get(s.id_task_assignee);
       if (key && !signedParticipants.some((p) => p.key === key)) signedParticipants.push({ key, meaning: s.meaning as SgcPlacedMeaning, name: s.signer_name ?? s.signer_email, email: s.signer_email, role: SGC_SIGNATURE_LABELS[s.meaning as SgcSignatureMeaning] });
@@ -384,9 +417,9 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
       if (c && overflow.has(s.meaning)) registerCargos[s.signature_uid.trim()] = c;
     }
     // Con plantilla institucional, la firma que no se ubicó va en su recuadro «Firma» del encabezado.
-    const suggested = institutional ? new Map(suggestInstitutionalPlacements(signedParticipants, layout.fields).map((f) => [f.signerKey, f])) : new Map();
+    const suggested = institutional ? new Map(suggestInstitutionalPlacements(signedParticipants, layout.fields, composed.header?.template?.grid ?? null, layoutIsLandscape(draft.format, layout.sheetSettings) ? SGC_A4_LANDSCAPE : SGC_A4_PORTRAIT).map((f) => [f.signerKey, f])) : new Map();
     const placements: SgcManifestPlacement[] = [];
-    for (const s of signatures) {
+    for (const s of documentSignatures) {
       const key = keyOfAssignee.get(s.id_task_assignee);
       const f = key ? explicit.get(key) ?? suggested.get(key) : undefined;
       if (f) placements.push({ uid: s.signature_uid.trim(), page: f.page, x: f.x, y: f.y, width: f.width, height: f.height });
@@ -407,7 +440,7 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
       generatedAt: now.toISOString(),
       changeDescription,
       signedContent: { name: draft.name, sha256: draft.sha256 },
-      signatures: signatures.map((s) => ({
+      signatures: documentSignatures.map((s) => ({
         uid: s.signature_uid.trim(),
         meaning: s.meaning,
         meaningLabel: SGC_SIGNATURE_LABELS[s.meaning as SgcSignatureMeaning] ?? s.meaning,
@@ -427,10 +460,10 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
       ...(minorRevisions.length ? { minorRevisions } : {}),
       ...(signatureRegister.length ? { signatureRegister } : {}),
     };
-    const masterIds = [...new Set(signatures.map((s) => s.id_signature_master).filter((x): x is number => !!x))];
+    const masterIds = [...new Set(documentSignatures.map((s) => s.id_signature_master).filter((x): x is number => !!x))];
     const masters = masterIds.length ? await db.sgcSignatureMaster.findMany({ where: { id_signature_master: { in: masterIds } } }) : [];
     const masterPng: Record<string, Uint8Array> = {};
-    for (const s of signatures) {
+    for (const s of documentSignatures) {
       const m = masters.find((x) => x.id_signature_master === s.id_signature_master);
       const png = m ? dataUrlToBytes(m.image_png) : null;
       if (png) masterPng[s.signature_uid.trim()] = png;
@@ -471,6 +504,14 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
           },
         });
         idDocument = doc.id_document;
+        // 2026-10-19 (documentos padre e hijos): el hijo pedido por solicitud queda relacionado SOLO con su padre.
+        if (request.id_parent_document) {
+          await createAutomaticParentRelation(
+            tx,
+            { idCompany: request.id_company, idParent: request.id_parent_document, idChild: doc.id_document, childTypeCode: request.documentType!.code, origin: 'solicitud', reason: `Relación creada al aprobar la solicitud #${idRequest}: ${code} se desprende de su documento padre.` },
+            actor
+          );
+        }
       }
       const version = await tx.sgcDocumentVersion.create({
         data: {
@@ -490,14 +531,14 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
           id_request: idRequest,
           signed_content_sha256: draft.sha256,
           manifest_json: JSON.stringify(manifest),
-          layout_json: JSON.stringify(built.layout),
+          layout_json: JSON.stringify({ ...built.layout, ...(composed.headerTemplate ? { headerTemplate: composed.headerTemplate } : {}) }),
         },
       });
       await tx.sgcRequest.update({
         where: { id_request: idRequest },
         data: { id_document: idDocument, id_document_version: version.id_document_version, controlled_pdf_status: 'generado', controlled_pdf_error: null },
       });
-      await addInteraction(tx, idRequest, 'sistema', lower(actor.email), `PDF controlado generado: ${code} V${versionNumber} (aprobado, pendiente de divulgación).\nSHA-256 del PDF: ${pdfSha256}\nFirmas en el manifiesto: ${signatures.length}.`, {
+      await addInteraction(tx, idRequest, 'sistema', lower(actor.email), `PDF controlado generado: ${code} V${versionNumber} (aprobado, pendiente de divulgación).\nSHA-256 del PDF: ${pdfSha256}\nFirmas en el manifiesto: ${manifest.signatures.length}.${signatures.length > manifest.signatures.length ? `\nLa verificación de Aseguramiento de Calidad (lista de chequeo) queda en el historial y la auditoría; no se estampa en el documento.` : ''}`, {
         meta: { idDocument, idDocumentVersion: version.id_document_version, pdfSha256, manifestSha256: manifestSha256(manifest) },
       });
       await writeSgcAudit(tx, {

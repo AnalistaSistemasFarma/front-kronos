@@ -16,6 +16,7 @@ import type { SgcCompanyAccess } from '../permissions';
 import type { SgcActor, SgcDb } from './catalogs';
 import { getPoolTypeCodes } from './authorizations';
 import { listEligibleUsers } from './requests';
+import { isDepartmentLeaderListEnforced } from './companySettings';
 
 /**
  * APROBADORES AUTORIZADOS (Sprint 12, R11). Ver lib/sgc/approvers.ts.
@@ -38,7 +39,8 @@ export interface SgcApproverPolicy {
 /** Política de la empresa: si la lista está activa y las autorizaciones registradas. */
 export async function getApproverPolicy(db: SgcDb | Tx, idCompany: number): Promise<SgcApproverPolicy> {
   const cfg = await db.sgcCompanyConfig.findUnique({ where: { id_company: idCompany }, select: { approver_list_enforced: true } });
-  const list = await db.sgcApproverAuthorization.findMany({ where: { id_company: idCompany }, select: { user_email: true, id_process_map: true, valid_from: true, valid_to: true, revoked_at: true } });
+  // S15: las filas por DEPARTAMENTO (líderes del DOC v7) no son de esta lista por proceso.
+  const list = await db.sgcApproverAuthorization.findMany({ where: { id_company: idCompany, id_department: null }, select: { user_email: true, id_process_map: true, valid_from: true, valid_to: true, revoked_at: true } });
   const enforced = cfg?.approver_list_enforced ?? true;
   return { enforced, list, applies: approverListApplies(enforced, list) };
 }
@@ -94,19 +96,24 @@ const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 /** Lista para la pantalla de Calidad (todas, con su estado). */
 export async function listApproverAuthorizations(db: SgcDb, access: SgcCompanyAccess | null, now = new Date()) {
   assertQuality(access);
-  const rows = await db.sgcApproverAuthorization.findMany({ where: { id_company: access.idCompany }, include: { process: { select: { code: true, name: true } } }, orderBy: [{ user_email: 'asc' }, { id_approver_authorization: 'desc' }] });
+  const rows = await db.sgcApproverAuthorization.findMany({ where: { id_company: access.idCompany }, include: { process: { select: { code: true, name: true } }, department: { select: { department: true } } }, orderBy: [{ user_email: 'asc' }, { id_approver_authorization: 'desc' }] });
   const cfg = await db.sgcCompanyConfig.findUnique({ where: { id_company: access.idCompany }, select: { approver_list_enforced: true } });
   const enforced = cfg?.approver_list_enforced ?? true;
+  const departmentEnforced = await isDepartmentLeaderListEnforced(db, access.idCompany);
   return {
     enforced,
-    applies: approverListApplies(enforced, rows),
+    applies: approverListApplies(enforced, rows.filter((r) => r.id_department === null)),
+    // S15 (R19, D16): lista de LÍDERES por departamento del DOC v7; solo restringe con el ajuste encendido.
+    departmentEnforced,
+    departmentLeaders: rows.filter((r) => r.id_department !== null).length,
     items: rows.map((r) => {
       const status = authorizationStatus(r, now);
       return {
         id: r.id_approver_authorization,
         email: r.user_email,
         idProcessMap: r.id_process_map,
-        process: r.process ? `${r.process.code} · ${r.process.name}` : 'Todos los procesos',
+        idDepartment: r.id_department,
+        process: r.department ? `Líder del departamento ${r.department.department}` : r.process ? `${r.process.code} · ${r.process.name}` : 'Todos los procesos',
         validFrom: iso(r.valid_from),
         validTo: iso(r.valid_to),
         reason: r.reason,
@@ -130,11 +137,17 @@ export async function grantApproverAuthorization(db: SgcDb, access: SgcCompanyAc
   const eligible = new Set((await listEligibleUsers(db, access.idCompany)).map((u) => u.email));
   if (!eligible.has(input.email)) throw new SgcError(`${input.email} no tiene permiso de gestión documental en el SGC de esta empresa.`);
   if (input.idProcessMap !== null && !(await db.sgcProcessMap.findFirst({ where: { id_process_map: input.idProcessMap, id_company: access.idCompany } }))) throw new SgcError('Proceso no encontrado.', 404);
+  // S15 (R19): líder de un DEPARTAMENTO; la persona debe pertenecer a ese departamento en SynerLink.
+  if (input.idDepartment !== null) {
+    if (!(await db.department.findUnique({ where: { id_department: input.idDepartment } }))) throw new SgcError('Departamento no encontrado.', 404);
+    const belongs = await db.departmentUser.count({ where: { id_department: input.idDepartment, user: { email: input.email } } });
+    if (!belongs) throw new SgcError(`${input.email} no pertenece a ese departamento en SynerLink: un líder aprobador es del mismo departamento.`, 409);
+  }
   return db.$transaction(async (tx) => {
-    const same = await tx.sgcApproverAuthorization.findFirst({ where: { id_company: access.idCompany, user_email: input.email, id_process_map: input.idProcessMap, revoked_at: null, OR: [{ valid_to: null }, { valid_to: { gte: input.validFrom } }] } });
-    if (same) throw new SgcError(`${input.email} ya está autorizado para ese proceso: revoque la autorización vigente antes de registrar otra.`, 409);
+    const same = await tx.sgcApproverAuthorization.findFirst({ where: { id_company: access.idCompany, user_email: input.email, id_process_map: input.idProcessMap, id_department: input.idDepartment, revoked_at: null, OR: [{ valid_to: null }, { valid_to: { gte: input.validFrom } }] } });
+    if (same) throw new SgcError(`${input.email} ya está autorizado ${input.idDepartment !== null ? 'como líder de ese departamento' : 'para ese proceso'}: revoque la autorización vigente antes de registrar otra.`, 409);
     const row = await tx.sgcApproverAuthorization.create({
-      data: { id_company: access.idCompany, user_email: input.email, id_process_map: input.idProcessMap, valid_from: input.validFrom, valid_to: input.validTo, reason: input.reason, granted_by: me, granted_at: now },
+      data: { id_company: access.idCompany, user_email: input.email, id_process_map: input.idProcessMap, id_department: input.idDepartment, valid_from: input.validFrom, valid_to: input.validTo, reason: input.reason, granted_by: me, granted_at: now },
     });
     await writeSgcAudit(tx, {
       idCompany: access.idCompany,
@@ -142,7 +155,7 @@ export async function grantApproverAuthorization(db: SgcDb, access: SgcCompanyAc
       action: SGC_AUDIT_ACTIONS.aprobadorAutorizado,
       entity: 'approver_authorization',
       entityId: row.id_approver_authorization,
-      after: { email: input.email, idProcessMap: input.idProcessMap, validFrom: iso(input.validFrom), validTo: iso(input.validTo) },
+      after: { email: input.email, idProcessMap: input.idProcessMap, idDepartment: input.idDepartment, validFrom: iso(input.validFrom), validTo: iso(input.validTo) },
       detail: input.reason,
       ip: actor.ip,
       userAgent: actor.userAgent,
@@ -170,7 +183,7 @@ export async function revokeApproverAuthorization(db: SgcDb, access: SgcCompanyA
       action: SGC_AUDIT_ACTIONS.aprobadorRevocado,
       entity: 'approver_authorization',
       entityId: id,
-      before: { email: row.user_email, idProcessMap: row.id_process_map, status: 'vigente' },
+      before: { email: row.user_email, idProcessMap: row.id_process_map, idDepartment: row.id_department, status: 'vigente' },
       after: { status: 'revocada' },
       detail: reason,
       ip: actor.ip,

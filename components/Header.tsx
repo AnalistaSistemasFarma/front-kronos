@@ -19,6 +19,8 @@ import {
 import { useState, useEffect, useContext, useMemo } from 'react';
 import { useTheme } from './providers';
 import NotificationBell from './NotificationBell';
+import CorreoHeaderIcon from './correo/CorreoHeaderIcon';
+import ProyectosHeaderIcon from './proyectos/ProyectosHeaderIcon';
 import ChatRail from './chat/ChatRail';
 import ChatPulse from './chat/ChatPulse';
 import ValentineWallRoot from './valentine/ValentineWallRoot';
@@ -51,19 +53,23 @@ export default function Header() {
   const loadingDashboardAdmin = dashboardAdmin?.loadingDashboardAdmin ?? false;
   const hasSolicitanteAccess = roleNav?.hasSolicitanteAccess ?? false;
   const hasSolicitadoAccess = roleNav?.hasSolicitadoAccess ?? false;
+  const hasEquipoAccess = roleNav?.hasEquipoAccess ?? false;
   const loadingRoleNav = roleNav?.loadingRoleNav ?? false;
   const solicitanteUrl =
     roleNav?.solicitanteUrl ?? '/process/request-general/dashboard-solicitante';
-  const solicitadoUrl =
+  const solicitadoBaseUrl =
     roleNav?.solicitadoUrl ?? '/process/request-general/dashboard-solicitado';
   const { theme, toggleTheme } = useTheme();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const showDashboardNav = !loadingDashboardAdmin && isDashboardAdmin;
   const showSolicitanteNav = !loadingRoleNav && hasSolicitanteAccess;
-  const showSolicitadoNav = !loadingRoleNav && hasSolicitadoAccess;
+  // El Dashboard personal también lo ve el líder sin el permiso: entra directo a «Mi equipo».
+  const showSolicitadoNav = !loadingRoleNav && (hasSolicitadoAccess || hasEquipoAccess);
+  const solicitadoUrl =
+    hasSolicitadoAccess || !hasEquipoAccess ? solicitadoBaseUrl : `${solicitadoBaseUrl}/equipo`;
   const [dashMenuOpen, setDashMenuOpen] = useState(false);
   const isSolicitanteActive = pathname.startsWith(solicitanteUrl);
-  const isSolicitadoActive = pathname.startsWith(solicitadoUrl);
+  const isSolicitadoActive = pathname.startsWith(solicitadoBaseUrl);
   const isRoleDashActive = isSolicitanteActive || isSolicitadoActive;
 
   const homeUrl = showSolicitadoNav
@@ -325,6 +331,11 @@ export default function Header() {
                   📳 en cualquier pantalla). No pinta nada. */}
               <ChatPulse />
               <ValentineWallRoot />
+              {/* Proyectos (2026-10-19): solo con el permiso del módulo; contador de
+                  conversaciones con mensajes nuevos y panel con lo último. */}
+              <ProyectosHeaderIcon />
+              {/* Acceso directo al Correo (2026-10-15): solo con el permiso del módulo. */}
+              <CorreoHeaderIcon />
               <NotificationBell />
               <ActionIcon
                 variant='subtle'

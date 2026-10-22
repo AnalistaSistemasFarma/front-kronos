@@ -66,26 +66,31 @@ jobs:
           rem no hay digito adyacente al operador y el valor viaja completo.
           >>"%GITHUB_ENV%" echo SCHEMA_CHANGED=%SCHEMA_CHANGED%
 
+      # PAGINA "SynerLink se esta actualizando" (deploy/iis/README.md). Desde
+      # 2026-10-10 se activa en TODO deploy, no solo con cambio de esquema: el
+      # 2026-10-09 (run 37999883505) `next build` reescribio .next mientras el
+      # proceso viejo atendia y una usuaria vio "Application error: a client-side
+      # exception has occurred". `npm install` tambien cambia node_modules bajo el
+      # proceso vivo, por eso se activa ANTES de instalar. El publico del :8445 ve
+      # la pagina (503 + Retry-After) en vez de chunks rotos. La quita el ultimo
+      # paso del job (if: always()), y solo si GSS-Front ya responde 200.
+      # continue-on-error: la pagina es cosmetica y nunca debe frenar un pase.
+      # Los agentes (directo a :3003) no se afectan.
+      - name: Activar pagina de mantenimiento en IIS
+        continue-on-error: true
+        shell: cmd
+        run: |
+          cd /d %PROJECT_DIR% || exit /b 1
+          rem Mantiene la pagina instalada al dia con la del repo.
+          copy /y deploy\iis\_mantenimiento\index.html C:\inetpub\wwwroot\GSS\_mantenimiento\index.html
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\maintenance-on.ps1 -Motivo "deploy %GITHUB_SHA% (esquema=%SCHEMA_CHANGED%)"
+
       - name: Instalar dependencias
         shell: cmd
         run: |
           cd /d %PROJECT_DIR% || exit /b 1
           echo === npm install ===
           call npm install || exit /b 1
-
-      # PAGINA "SynerLink se esta actualizando" (deploy/iis/README.md). Solo el
-      # camino de cambio de esquema detiene las apps; justo antes se crea la
-      # bandera de IIS para que el publico del :8445 vea la pagina (503 +
-      # Retry-After) en vez de un 502. La quita el ultimo paso del job, y solo si
-      # GSS-Front ya responde 200. continue-on-error: la pagina es cosmetica y
-      # nunca debe frenar un pase. Los agentes (directo a :3003) no se afectan.
-      - name: (Solo si cambio el esquema) activar pagina de mantenimiento en IIS
-        if: env.SCHEMA_CHANGED == '1'
-        continue-on-error: true
-        shell: cmd
-        run: |
-          cd /d %PROJECT_DIR% || exit /b 1
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\maintenance-on.ps1 -Motivo "deploy %GITHUB_SHA% (cambio de esquema)"
 
       - name: (Solo si cambio el esquema) detener apps y regenerar cliente Prisma
         if: env.SCHEMA_CHANGED == '1'
@@ -142,9 +147,9 @@ jobs:
           )
           call pm2 save
 
-      # Corre SIEMPRE (tambien si el job fallo) y en todo deploy, no solo en el de
-      # cambio de esquema: asi una bandera que haya quedado de un run interrumpido
-      # se limpia en el siguiente pase. maintenance-off.ps1 verifica HTTP 200 en
+      # Corre SIEMPRE (tambien si el job fallo): asi el sitio no queda en
+      # mantenimiento y una bandera que haya quedado de un run interrumpido se
+      # limpia en el siguiente pase. maintenance-off.ps1 verifica HTTP 200 en
       # http://localhost:3003/ (con reintentos ~2 min) ANTES de borrar la bandera:
       #   - app arriba  -> borra la bandera (el publico vuelve a SynerLink);
       #   - app abajo   -> la CONSERVA (la pagina es lo correcto) y sale con 1.

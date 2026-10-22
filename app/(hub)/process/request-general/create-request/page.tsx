@@ -1,21 +1,20 @@
 'use client';
 
 import { useState, useEffect, useRef, Suspense } from 'react';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useGetMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
-import ExcelJS from 'exceljs';
-import { saveAs } from 'file-saver';
-import Link from 'next/link';
 import {
-  Title,
+  boardExportFilename,
+  buildBoardWorkbook,
+} from '@/lib/request-general/exportBoardExcel';
+import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
+import {
   Paper,
   Stack,
-  Alert,
-  Breadcrumbs,
-  Anchor,
   Table,
+  Tooltip,
+  Title,
+  Alert,
   TextInput,
   NumberInput,
   Select,
@@ -30,18 +29,13 @@ import {
   Divider,
   LoadingOverlay,
   ActionIcon,
-  Tooltip,
   Collapse,
   Box,
-  Flex,
   ScrollArea,
-  Progress,
-  RingProgress,
   Loader,
 } from '@mantine/core';
 import {
   IconAlertCircle,
-  IconChevronRight,
   IconSearch,
   IconPlus,
   IconFilter,
@@ -50,14 +44,14 @@ import {
   IconRefresh,
   IconFileDescription,
   IconCalendarEvent,
-  IconUser,
   IconFlag,
+  IconUser,
   IconClock,
-  IconBuilding,
-  IconProgress,
   IconCircleCheckFilled,
   IconCircleDot,
   IconCircle,
+  IconBuilding,
+  IconProgress,
   IconUserCheck,
   IconTag,
   IconDownload,
@@ -66,11 +60,6 @@ import {
 } from '@tabler/icons-react';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
-import { sanitizeOneDriveName } from '../../../../../lib/onedriveName';
-import {
-  ensureOneDriveFolderPath,
-  uploadFileToOneDriveFolder,
-} from '../../../../../lib/onedrive/graphFolderUpload';
 import { isSapField } from '../../../../../lib/requests-general/sapSources';
 import {
   TABLE_FIELD_TYPE,
@@ -96,8 +85,20 @@ function readSelectedCompanyId(): string | null {
 }
 import SapOptionSelect from './SapOptionSelect';
 import TableFieldInput from './TableFieldInput';
-import { formatEstimatedPaymentDate } from '../../../../../lib/treasury/estimatedPaymentDate';
+import {
+  formatEstimatedPaymentDate,
+  formatEstimatedPaymentDateShort,
+} from '../../../../../lib/treasury/estimatedPaymentDate';
 import toast from 'react-hot-toast';
+import {
+  FilterPanel,
+  ProgressRingTile,
+  RequestProgressBar,
+  RequestsHeader,
+  RequestsPage,
+  StatFilterTile,
+} from '../../../../../components/request-general/list/RequestListUi';
+import { panelStyles } from '../../../../../components/ui/panel/Panel';
 import {
   buildTaskDisplayBadges,
   getSimplifiedTasksProgress,
@@ -187,6 +188,7 @@ function RequestBoard() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [tasksByRequest, setTasksByRequest] = useState<Record<number, RequestTask[]>>({});
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [modalOpened, setModalOpened] = useState(false);
   const [formData, setFormData] = useState({
@@ -198,7 +200,16 @@ function RequestBoard() {
     url: '',
   });
   const [createLoading, setCreateLoading] = useState(false);
+  // Solicitud de compra: se captura en el formulario de Compras (lineas + SAP), no aqui.
+  const [isPurchaseProcess, setIsPurchaseProcess] = useState(false);
   const isSubmittingRef = useRef(false);
+
+  const linkedProcessParam = searchParams.get('linkedProcess');
+  const originTaskParam = searchParams.get('originTask');
+  const companyParam = searchParams.get('company');
+  const [originTaskId, setOriginTaskId] = useState<string | null>(null);
+  const [lockedLinked, setLockedLinked] = useState(false);
+  const linkedAppliedRef = useRef(false);
 
   const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
   const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
@@ -329,6 +340,29 @@ function RequestBoard() {
       setIdUser('');
     }
   }, []);
+
+  useEffect(() => {
+    if (linkedAppliedRef.current) return;
+    if (!linkedProcessParam) return;
+    if (processCategories.length === 0) return;
+    const proc = processCategories.find((p) => p.value === String(linkedProcessParam));
+    if (!proc) return;
+    linkedAppliedRef.current = true;
+
+    const targetCompany = companyParam || formData.company || '';
+    if (targetCompany) {
+      void fetchCategoriesByCompanyOnLoad(targetCompany);
+    }
+    setFormData((prev) => ({
+      ...prev,
+      company: targetCompany || prev.company,
+      category: String(proc.id_category_request),
+      process: String(linkedProcessParam),
+    }));
+    setOriginTaskId(originTaskParam);
+    setLockedLinked(true);
+    setModalOpened(true);
+  }, [processCategories, linkedProcessParam, companyParam, originTaskParam, formData.company]);
 
   useEffect(() => {
     if (formData.category) {
@@ -485,6 +519,8 @@ function RequestBoard() {
   };
 
   const { visibleFields, selectedOptionIds } = computeVisibility();
+  // La firma digital se configura después de crear la solicitud; no se muestra al crearla.
+  const displayedFields = visibleFields.filter((f) => f.field_type !== ORION_SIGNATURE_FIELD_TYPE);
 
   const isFileVisible = (doc: { conditions: number[] }) =>
     doc.conditions.length === 0 || doc.conditions.some((c) => selectedOptionIds.has(c));
@@ -535,11 +571,22 @@ function RequestBoard() {
 
   const fetchTasksForTickets = async (ticketsToUse: Ticket[]) => {
     try {
-      const response = await fetch('/api/requests-general/activities-requets');
-      if (!response.ok) throw new Error('Failed to fetch request tasks');
-
-      const data: RequestTask[] = await response.json();
+      // Solo las tareas de las solicitudes listadas, en lotes de 500 ids (límite de la ruta);
+      // antes se descargaba la tabla completa de tareas.
       const ticketIds = new Set(ticketsToUse.map((t) => t.id));
+      const ids = [...ticketIds];
+      const batches: number[][] = [];
+      for (let i = 0; i < ids.length; i += 500) batches.push(ids.slice(i, i + 500));
+      const responses = await Promise.all(
+        batches.map((batch) =>
+          fetch(`/api/requests-general/activities-requets?ids=${batch.join(',')}`)
+        )
+      );
+      if (responses.some((r) => !r.ok)) throw new Error('Failed to fetch request tasks');
+
+      const data: RequestTask[] = (
+        await Promise.all(responses.map((r) => r.json() as Promise<RequestTask[]>))
+      ).flat();
       const grouped: Record<number, RequestTask[]> = {};
 
       for (const task of data) {
@@ -893,8 +940,29 @@ function RequestBoard() {
           : { id_field: f.id, value_text: String(v) };
       });
 
+  useEffect(() => {
+    if (!formData.company || !formData.process) {
+      setIsPurchaseProcess(false);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/purchases/entry?companyId=${formData.company}&processId=${formData.process}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) setIsPurchaseProcess(Boolean(d?.isPurchase));
+      })
+      .catch(() => {
+        if (!cancelled) setIsPurchaseProcess(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.company, formData.process]);
+
   const handleCreateTicketWithValidation = async () => {
     if (isSubmittingRef.current) return;
+    // La solicitud de compra no se crea por el formulario generico (se haria sin borrador en SAP).
+    if (isPurchaseProcess) return;
     if (!validateForm()) return;
     await handleCreateTicket();
   };
@@ -922,6 +990,7 @@ function RequestBoard() {
             process: parseInt(formData.process),
             createdby: userId,
             url: formData.url,
+            originTaskId: originTaskId || null,
             formValues: buildFormValuesPayload(),
           }),
         });
@@ -961,13 +1030,7 @@ function RequestBoard() {
       let uploadOk = true;
       if (filesToUpload.length > 0) {
         try {
-          const token = await getMicrosoftToken();
-          if (!token) {
-            throw new Error('No se pudo obtener el token de acceso para subir archivos.');
-          }
-
-          const folderName = `Request-${requestId}`;
-          await CheckOrCreateFolderAndUpload(folderName, filesToUpload, token);
+          await uploadRequestFiles(requestId, filesToUpload);
 
           // SAPSEND: reenviar los adjuntos (si es solicitud de tesorería). No bloquea; el servidor
           // aplica el gate y lee los archivos desde OneDrive.
@@ -1043,40 +1106,39 @@ function RequestBoard() {
     }
   };
 
-  async function CheckOrCreateFolderAndUpload(
-    folderName: string,
-    files: { file: File; label?: string }[],
-    token: string
-  ) {
+  /**
+   * Sube los adjuntos de la solicitud recién creada por el servidor (upload-attachments →
+   * <raíz>/TEC/SG/Request-<id>): el token de Graph nunca llega al navegador. Un archivo por
+   * pedido, como FileUpload; el servidor limpia el nombre y evita sobrescribir.
+   */
+  async function uploadRequestFiles(requestId: number, files: { file: File; label?: string }[]) {
     try {
-      const folderId = await ensureOneDriveFolderPath(token, [
-        'SAPSEND',
-        'TEC',
-        'SG',
-        folderName,
-      ]);
-
-      if (!files?.length) {
-        console.log('No hay archivos seleccionados para subir.');
-        return;
-      }
+      if (!files?.length) return;
 
       const uploadNames = files.map((file) =>
-        sanitizeOneDriveName(
-          file.label ? `${file.label} - ${file.file.name}` : file.file.name
-        )
+        file.label ? `${file.label} - ${file.file.name}` : file.file.name
       );
 
       const results = await Promise.allSettled(
-        files.map((file, index) =>
-          uploadFileToOneDriveFolder(
-            token,
-            folderId,
-            uploadNames[index],
-            file.file,
-            file.file.type || 'application/octet-stream'
-          )
-        )
+        files.map(async (file, index) => {
+          const form = new FormData();
+          form.append('requestId', String(requestId));
+          form.append('storagePath', 'SG');
+          form.append('entityType', 'Request');
+          form.append('files', file.file, uploadNames[index]);
+          const res = await fetch('/api/requests-general/upload-attachments', {
+            method: 'POST',
+            body: form,
+          });
+          const data = (await res.json().catch(() => ({}))) as {
+            error?: string;
+            errors?: string[];
+          };
+          if (!res.ok || data.errors?.length) {
+            throw new Error(data.errors?.[0] || data.error || `HTTP ${res.status}`);
+          }
+          return data;
+        })
       );
 
       const failed: string[] = [];
@@ -1095,7 +1157,7 @@ function RequestBoard() {
         );
       }
     } catch (error) {
-      console.error('Error en CheckOrCreateFolderAndUpload:', error);
+      console.error('Error en uploadRequestFiles:', error);
       throw error;
     }
   }
@@ -1223,268 +1285,257 @@ function RequestBoard() {
     }
   };
 
-  const breadcrumbItems = [
-    { title: 'Procesos', href: '/process' },
-    { title: 'Solicitudes Generales', href: '#' },
-    { title: 'Panel de Solicitudes', href: '#' },
-  ].map((item, index) =>
-    item.href !== '#' ? (
-      <Link key={index} href={item.href} passHref>
-        <Anchor component='span' className='hover:text-blue-600 transition-colors'>
-          {item.title}
-        </Anchor>
-      </Link>
-    ) : (
-      <Text key={index} component='span' c='dimmed'>
-        {item.title}
-      </Text>
-    )
-  );
+  const CREATE_STATUS_LABELS: Record<string, string> = {
+    '1': 'Abierto',
+    '2': 'Resuelto',
+    '3': 'Cancelado',
+    '7': 'Devuelta',
+  };
 
   async function exportToExcel() {
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Datos');
+    if (exporting) return;
+    if (tickets.length === 0) {
+      toast.error('No hay solicitudes con los filtros actuales');
+      return;
+    }
+    setExporting(true);
+    try {
+      const ids = tickets.map((ticket) => ticket.id);
+      const grouped: Record<number, RequestTask[]> = {};
+      for (let i = 0; i < ids.length; i += 500) {
+        const batch = ids.slice(i, i + 500);
+        const response = await fetch(
+          `/api/requests-general/activities-requets?ids=${batch.join(',')}`
+        );
+        if (!response.ok) throw new Error('tareas');
+        const data = (await response.json()) as RequestTask[];
+        for (const task of data) {
+          (grouped[task.id_request_general] ||= []).push(task);
+        }
+      }
 
-    type TicketKeys = keyof Ticket;
-
-    const columnMapOrdered: { key: TicketKeys; header: string }[] = [
-      { key: "requester", header: "nombre_solicitante" },
-      { key: "subject", header: "cargo" },
-      { key: "description", header: "conocimiento_experiencia_obligatoria" },
-      { key: "email", header: "correo_electronico_firmante_1" },
-      { key: "phone", header: "numero_celular_firmante_1" },
-      { key: "identification", header: "numero_documento_firmante_1" }
-    ];
-    
-    worksheet.columns = columnMapOrdered;
-
-    tickets.forEach((row) => worksheet.addRow(row));
-
-    tickets.forEach(item => {
-      const row: Record<TicketKeys, any> = {} as Record<TicketKeys, any>;
-
-      columnMapOrdered.forEach(col => {
-        row[col.key] = item[col.key];
+      const companyLabel =
+        companies.find((company) => company.value === filters.company)?.label || 'Todas';
+      const assignedLabel =
+        assignedUsers.find((user) => user.value === filters.assigned_to)?.label || 'Todas';
+      const workbook = await buildBoardWorkbook({
+        module: 'Mis solicitudes',
+        filters: [
+          { label: 'Estado', value: CREATE_STATUS_LABELS[filters.status] || 'Todos' },
+          { label: 'Empresa', value: companyLabel },
+          { label: 'Persona asignada', value: assignedLabel },
+          { label: 'ID', value: filters.id || 'Todos' },
+          { label: 'Fecha desde', value: filters.date_from || 'Sin límite' },
+          { label: 'Fecha hasta', value: filters.date_to || 'Sin límite' },
+        ],
+        requests: tickets.map((ticket) => ({
+          id: ticket.id,
+          subject: ticket.subject,
+          process: ticket.process,
+          category: ticket.category,
+          company: ticket.company,
+          status: ticket.status,
+          requester: ticket.requester,
+          assigned: ticket.user,
+          createdAt: ticket.created_at,
+          description: ticket.description,
+          resolution: ticket.resolution,
+          dateResolution: ticket.date_resolution,
+          executor: ticket.executor_final,
+          tasks: grouped[ticket.id] ?? [],
+        })),
       });
 
-      worksheet.addRow(row);
-    });
+    // Hoja extra: "Solicitudes de Pago". Trae los campos extra (pivote de
+    // request_form_value) para las solicitudes del proceso "Solicitud de Pago"
+    // que estén en el panel. El endpoint filtra por proceso, así que basta con
+    // mandarle los ids de los tickets cargados.
+    try {
+      const ids = tickets.map((t) => t.id).filter((n) => Number.isInteger(n));
+      if (ids.length > 0) {
+        const response = await fetch('/api/requests-general/payment-report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids }),
+        });
 
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
+        if (response.ok) {
+          const paymentRows: Array<{
+            id_solicitud: number;
+            asunto?: string | null;
+            empresa?: string | null;
+            subempresa?: string | null;
+            creador_solicitud?: string | null;
+            estado?: string | null;
+            fecha_creación_solicitud?: string | null;
+            tipo_solicitud?: string | null;
+            subtipo_solicitud?: string | null;
+            valor_pagar?: string | null;
+            fecha_solicitada_pago?: string | null;
+            acreedor?: string | null;
+          }> = await response.json().catch(() => []);
 
-    saveAs(blob, 'InformeSolicitudes.xlsx');
+          if (Array.isArray(paymentRows) && paymentRows.length > 0) {
+            const splitAcreedor = (value?: string | null) => {
+              const r = String(value || '').trim();
+              const idx = r.indexOf(' - ');
+              if (idx === -1) return { doc: '', name: r };
+              return { doc: r.slice(0, idx).trim(), name: r.slice(idx + 3).trim() };
+            };
+            const formatReqDate = (raw?: string | null) => {
+              if (!raw) return '';
+              const d = new Date(raw);
+              if (isNaN(d.getTime())) return String(raw);
+              return new Intl.DateTimeFormat('es-CO', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                timeZone: 'UTC',
+              }).format(d);
+            };
+
+            const paySheet = workbook.addWorksheet('Solicitudes de Pago');
+            paySheet.columns = [
+              { key: 'id', header: 'ID Solicitud', width: 12 },
+              { key: 'empresa', header: 'Empresa', width: 24 },
+              { key: 'subempresa', header: 'Subempresa', width: 22 },
+              { key: 'tipo', header: 'Tipo', width: 22 },
+              { key: 'subtipo', header: 'Subtipo', width: 24 },
+              { key: 'documento', header: 'Documento', width: 16 },
+              { key: 'acreedor', header: 'Acreedor', width: 30 },
+              { key: 'valor', header: 'Valor a Pagar', width: 16 },
+              { key: 'fecha_solicitada', header: 'Fecha Solicitada de Pago', width: 22 },
+              { key: 'fecha_estimada', header: 'Fecha Estimada de Pago', width: 24 },
+              { key: 'estado', header: 'Estado', width: 16 },
+              { key: 'solicitante', header: 'Solicitante', width: 24 },
+              { key: 'asunto', header: 'Asunto', width: 30 },
+            ];
+
+            paymentRows.forEach((r) => {
+              const a = splitAcreedor(r.acreedor);
+              const valor = Number(String(r.valor_pagar ?? '').replace(/[^\d.-]/g, ''));
+              paySheet.addRow({
+                id: r.id_solicitud,
+                empresa: r.empresa ?? '',
+                subempresa: r.subempresa ?? '',
+                tipo: r.tipo_solicitud ?? '',
+                subtipo: r.subtipo_solicitud ?? '',
+                documento: a.doc,
+                acreedor: a.name,
+                valor: Number.isFinite(valor) ? valor : '',
+                fecha_solicitada: formatReqDate(r.fecha_solicitada_pago),
+                fecha_estimada: formatEstimatedPaymentDateShort(
+                  r.empresa,
+                  r.fecha_creación_solicitud
+                ),
+                estado: r.estado ?? '',
+                solicitante: r.creador_solicitud ?? '',
+                asunto: r.asunto ?? '',
+              });
+            });
+
+            paySheet.getRow(1).font = { bold: true };
+            paySheet.getColumn('valor').numFmt = '#,##0';
+          }
+        } else {
+          console.error('No se pudo obtener el reporte de pagos:', response.status);
+        }
+      }
+    } catch (e) {
+      console.error('Error generando la hoja de Solicitudes de Pago:', e);
+    }
+
+      await downloadWorkbook(workbook, boardExportFilename('Mis-solicitudes'));
+      toast.success('Excel descargado');
+    } catch (err) {
+      console.error(err);
+      toast.error('No se pudo generar el informe');
+    } finally {
+      setExporting(false);
+    }
   }
 
+  const globalProgress = getGlobalTasksProgress();
+
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
-      <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        {/* Header Section */}
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
-          <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
-            {breadcrumbItems}
-          </Breadcrumbs>
-
-          <Flex justify='space-between' align='center' mb='4'>
-            <div>
-              <Title
-                order={1}
-                className='text-3xl font-bold mb-2 flex items-center gap-3'
-              >
-                <IconFileDescription size={32} className='text-blue-600' />
-                Solicitudes Generales
-              </Title>
-              <Text size='lg' c='dimmed'>
-                Gestión y seguimiento de solicitudes generales
-              </Text>
-            </div>
-
+    <RequestsPage>
+      <RequestsHeader
+        crumbs={[
+          { title: 'Procesos', href: '/process' },
+          { title: 'Solicitudes Generales' },
+          { title: 'Panel de Solicitudes' },
+        ]}
+        title='Solicitudes Generales'
+        subtitle='Gestión y seguimiento de solicitudes generales'
+        actions={
+          <>
             <Button
+              variant='default'
+              radius='xl'
+              leftSection={<IconDownload size={16} />}
+              loading={exporting}
+              onClick={() => exportToExcel()}
+            >
+              Descargar Excel
+            </Button>
+            <Button
+              radius='xl'
+              leftSection={<IconPlus size={16} />}
               onClick={() => setModalOpened(true)}
-              size='lg'
-              leftSection={<IconPlus size={18} />}
-              className='bg-blue-600 hover:bg-blue-700'
             >
               Crear Nueva Solicitud
             </Button>
-          </Flex>
+          </>
+        }
+      />
 
-          <Grid>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card
-                p='md'
-                radius='md'
-                withBorder
-                role='button'
-                aria-label='Mostrar todas las solicitudes'
-                onClick={() => filterByStatus('')}
-                style={{
-                  cursor: 'pointer',
-                  backgroundColor: 'var(--mantine-color-blue-light)',
-                  borderColor:
-                    filters.status === ''
-                      ? 'var(--mantine-color-blue-filled)'
-                      : 'transparent',
-                  borderWidth: 2,
-                  transition: 'border-color 150ms ease',
-                }}
-              >
-                <Group>
-                  <IconFileDescription size={24} color='var(--mantine-color-blue-light-color)' />
-                  <div>
-                    <Text size='xs' c='var(--mantine-color-blue-light-color)'>
-                      Total de Solicitudes
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {tickets.length}
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card
-                p='md'
-                radius='md'
-                withBorder
-                role='button'
-                aria-label='Filtrar solicitudes pendientes'
-                onClick={() => filterByStatus('1')}
-                style={{
-                  cursor: 'pointer',
-                  backgroundColor: 'var(--mantine-color-orange-light)',
-                  borderColor:
-                    filters.status === '1'
-                      ? 'var(--mantine-color-orange-filled)'
-                      : 'transparent',
-                  borderWidth: 2,
-                  transition: 'border-color 150ms ease',
-                }}
-              >
-                <Group>
-                  <IconProgress size={24} color='var(--mantine-color-orange-light-color)' />
-                  <div>
-                    <Text size='xs' c='var(--mantine-color-orange-light-color)'>
-                      Pendientes
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {tickets.filter((t) => t.status?.toLowerCase() === 'abierto').length}
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card
-                p='md'
-                radius='md'
-                withBorder
-                role='button'
-                aria-label='Filtrar solicitudes completadas'
-                onClick={() => filterByStatus('2')}
-                style={{
-                  cursor: 'pointer',
-                  backgroundColor: 'var(--mantine-color-green-light)',
-                  borderColor:
-                    filters.status === '2'
-                      ? 'var(--mantine-color-green-filled)'
-                      : 'transparent',
-                  borderWidth: 2,
-                  transition: 'border-color 150ms ease',
-                }}
-              >
-                <Group>
-                  <IconCheck size={24} color='var(--mantine-color-green-light-color)' />
-                  <div>
-                    <Text size='xs' c='var(--mantine-color-green-light-color)'>
-                      Completadas
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {tickets.filter((t) => t.status?.toLowerCase() === 'resuelto').length}
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder>
-                {(() => {
-                  const { total, done, percent } = getGlobalTasksProgress();
-                  return (
-                    <Group wrap='nowrap'>
-                      <RingProgress
-                        size={56}
-                        thickness={6}
-                        roundCaps
-                        sections={[
-                          { value: percent, color: percent === 100 ? 'green' : 'blue' },
-                        ]}
-                        label={
-                          <Text size='xs' ta='center' fw={700}>
-                            {percent}%
-                          </Text>
-                        }
-                      />
-                      <div>
-                        <Text size='xs' c='dimmed'>
-                          Avance de tareas
-                        </Text>
-                        <Text size='lg' fw={600}>
-                          {done}/{total}
-                        </Text>
-                      </div>
-                    </Group>
-                  );
-                })()}
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder>
-                <Group>
-                  <Button
-                    onClick={() => exportToExcel()}
-                    size='lg'
-                    leftSection={<IconDownload size={18} />}
-                    className='bg-green-500 hover:bg-green-700'
-                  >
-                    Descargar XLSX
-                  </Button>
-                </Group>
-              </Card>
-            </Grid.Col>
-          </Grid>
-        </Card>
+      <div className={panelStyles.grid4}>
+        <StatFilterTile
+          icon={<IconFileDescription size={20} />}
+          label='Total de solicitudes'
+          value={tickets.length}
+          tone='info'
+          active={filters.status === ''}
+          onClick={() => filterByStatus('')}
+          ariaLabel='Mostrar todas las solicitudes'
+        />
+        <StatFilterTile
+          icon={<IconProgress size={20} />}
+          label='Pendientes'
+          value={tickets.filter((t) => t.status?.toLowerCase() === 'abierto').length}
+          tone='warning'
+          active={filters.status === '1'}
+          onClick={() => filterByStatus('1')}
+          ariaLabel='Filtrar solicitudes pendientes'
+        />
+        <StatFilterTile
+          icon={<IconCheck size={20} />}
+          label='Completadas'
+          value={tickets.filter((t) => t.status?.toLowerCase() === 'resuelto').length}
+          tone='ok'
+          active={filters.status === '2'}
+          onClick={() => filterByStatus('2')}
+          ariaLabel='Filtrar solicitudes completadas'
+        />
+        <ProgressRingTile
+          label='Avance de tareas'
+          done={globalProgress.done}
+          total={globalProgress.total}
+          percent={globalProgress.percent}
+        />
+      </div>
 
-        {error && (
-          <Alert
-            icon={<IconAlertCircle size={20} />}
-            title='Error'
-            color='red'
-            mb='md'
-            className='border-red-200 bg-red-50'
-          >
-            {error}
-          </Alert>
-        )}
+      {error && (
+        <Alert icon={<IconAlertCircle size={20} />} title='Error' color='red' radius='lg' mt='md'>
+          {error}
+        </Alert>
+      )}
 
-        <Card shadow='sm' p='lg' radius='md' withBorder mb='6'>
-          <Group justify='space-between' mb='md'>
-            <Title order={3} className='flex items-center gap-2'>
-              <IconFilter size={20} />
-              Filtros de Búsqueda
-            </Title>
-            <ActionIcon
-              variant='subtle'
-              onClick={() => setFiltersExpanded(!filtersExpanded)}
-              aria-label={filtersExpanded ? 'Ocultar filtros' : 'Mostrar filtros'}
-              data-testid='filter-toggle'
-            >
-              {filtersExpanded ? <IconX size={16} /> : <IconFilter size={16} />}
-            </ActionIcon>
-          </Group>
-
+      <FilterPanel
+        expanded={filtersExpanded}
+        onToggle={() => setFiltersExpanded(!filtersExpanded)}
+        icon={<IconFilter size={18} />}
+      >
           <Collapse in={filtersExpanded}>
             <Box mt='md'>
               <Grid>
@@ -1598,7 +1649,7 @@ function RequestBoard() {
               </Group>
             </Box>
           </Collapse>
-        </Card>
+      </FilterPanel>
 
         {/* Enhanced Table */}
         <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
@@ -1659,25 +1710,7 @@ function RequestBoard() {
                         </Text>
                         {tasksByRequest[ticket.id]?.length ? (
                           <Stack gap={6} mt={8}>
-                            {(() => {
-                              const { total, done, percent } = getTasksProgress(
-                                tasksByRequest[ticket.id]
-                              );
-                              return (
-                                <Group gap={8} wrap='nowrap'>
-                                  <Progress
-                                    value={percent}
-                                    color={percent === 100 ? 'green' : 'blue'}
-                                    size='sm'
-                                    radius='xl'
-                                    style={{ flex: 1, maxWidth: 120 }}
-                                  />
-                                  <Text size='xs' c='dimmed' fw={500} style={{ whiteSpace: 'nowrap' }}>
-                                    {done}/{total}
-                                  </Text>
-                                </Group>
-                              );
-                            })()}
+                            <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
                             <Group gap={6} wrap='wrap'>
                               {buildTaskDisplayBadges(tasksByRequest[ticket.id]).map((badge) => {
                                 const { color, Icon } = getTaskVisual(badge.statusKey);
@@ -1855,7 +1888,7 @@ function RequestBoard() {
                   error={formErrors.company}
                   required
                   leftSection={<IconBuilding size={16} />}
-                  disabled={formDataLoading}
+                  disabled={formDataLoading || lockedLinked}
                 />
               </Grid.Col>
 
@@ -1983,7 +2016,7 @@ function RequestBoard() {
                   error={formErrors.category}
                   required
                   leftSection={<IconTag size={16} />}
-                  disabled={formDataLoading}
+                  disabled={formDataLoading || lockedLinked}
                 />
               </Grid.Col>
 
@@ -2002,10 +2035,28 @@ function RequestBoard() {
                   error={formErrors.process}
                   required
                   leftSection={<IconProgress size={16} />}
-                  disabled={!formData.category || formDataLoading}
+                  disabled={!formData.category || formDataLoading || lockedLinked}
                 />
               </Grid.Col>
             </Grid>
+
+            {isPurchaseProcess && (
+              <Alert color='blue' variant='light' title='Solicitud de compra'>
+                <Text size='sm'>
+                  La solicitud de compra se diligencia en su propio formulario, con las líneas
+                  (artículo, cantidad, IVA, cuenta y norma de reparto) validadas contra SAP. Al
+                  enviarla a autorizar aparecerá aquí, en Mis solicitudes.
+                </Text>
+                <Button
+                  mt='sm'
+                  onClick={() =>
+                    router.push(`/process/purchases?nueva=1&companyId=${formData.company}`)
+                  }
+                >
+                  Abrir formulario de solicitud de compra
+                </Button>
+              </Alert>
+            )}
 
             {(() => {
               const processName = (
@@ -2068,11 +2119,11 @@ function RequestBoard() {
 
             <Divider />
 
-            {visibleFields.length > 0 && (
+            {displayedFields.length > 0 && (
               <Stack gap='md'>
                 <Text fw={600}>Información adicional</Text>
                 <Grid>
-                  {visibleFields.map((field) => {
+                  {displayedFields.map((field) => {
                     const rawValue = fieldValues[field.id];
                     const clearFieldError = () => {
                       if (formErrors[`field_${field.id}`]) {
@@ -2095,19 +2146,9 @@ function RequestBoard() {
                       field.field_type === 'money' ||
                       /valor a pagar|monto/i.test(field.field_label);
                     const isTableField = field.field_type === TABLE_FIELD_TYPE;
-                    const isOrionSignatureField = field.field_type === ORION_SIGNATURE_FIELD_TYPE;
                     return (
-                      <Grid.Col
-                        span={{ base: 12, md: isTableField || isOrionSignatureField ? 12 : 6 }}
-                        key={field.id}
-                      >
-                        {isOrionSignatureField ? (
-                          <Alert color='blue' title={field.field_label} icon={<IconLink size={16} />}>
-                            Puede adjuntar archivos como de costumbre. Si tiene permiso “Preparar
-                            firma”, después de crear la solicitud podrá marcar PDFs para firmar o
-                            solo ver y configurar firmantes.
-                          </Alert>
-                        ) : isTableField ? (
+                      <Grid.Col span={{ base: 12, md: isTableField ? 12 : 6 }} key={field.id}>
+                        {isTableField ? (
                           <TableFieldInput
                             label={field.field_label}
                             required={field.required}
@@ -2340,7 +2381,7 @@ function RequestBoard() {
               <Button
                 onClick={handleCreateTicketWithValidation}
                 loading={createLoading}
-                disabled={createLoading}
+                disabled={createLoading || isPurchaseProcess}
                 size='md'
                 leftSection={<IconPlus size={16} />}
                 className='bg-blue-600 hover:bg-blue-700'
@@ -2350,8 +2391,7 @@ function RequestBoard() {
             </Group>
           </Stack>
         </Modal>
-      </div>
-    </div>
+    </RequestsPage>
   );
 }
 

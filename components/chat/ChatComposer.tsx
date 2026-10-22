@@ -17,20 +17,30 @@ import {
   Box,
   Group,
   Menu,
+  Popover,
   Text,
   Textarea,
   Tooltip,
   UnstyledButton,
 } from '@mantine/core';
 import {
+  IconAt,
+  IconBlockquote,
   IconBold,
   IconCode,
   IconEye,
   IconEyeOff,
   IconItalic,
+  IconKeyboard,
+  IconLink,
   IconList,
+  IconListNumbers,
+  IconMoodSmile,
   IconPaperclip,
+  IconPlus,
   IconSend,
+  IconStrikethrough,
+  IconTypography,
   IconX,
 } from '@tabler/icons-react';
 import AgentAvatar from './AgentAvatar';
@@ -42,7 +52,11 @@ import {
   formatBytes,
   getChatAttachmentError,
 } from '../../lib/chat/attachments';
+import { MAX_UPLOAD_REQUEST_BYTES } from '../../lib/attachments/uploadRules';
 import ChatVoice from './ChatVoice';
+import ChatExpresiones from './ChatExpresiones';
+import ChatMisStickers from './ChatMisStickers';
+import type { MediaParaEnviar } from './useChatConversation';
 import type { ChatReplyToDto } from '../../lib/chat/client';
 
 /**
@@ -59,6 +73,8 @@ const LETTERFX_MAX_CHARS = 600;
  * DISPOSICIÓN: una sola fila, como WhatsApp — caja (con el clip adentro) y el
  * botón de enviar al lado. El panel de emojis se quitó el 2026-09-09: el
  * teclado del sistema ya trae los suyos y ese botón solo robaba ancho.
+ * Volvió el 2026-10-20, ya como en Telegram y WhatsApp: un botón al lado del
+ * clip que abre Emoji | Stickers | GIF (ChatExpresiones), pedido de Nicolás.
  * Antes eran tres filas apiladas (barra de siete botones, caja de dos renglones
  * mínimos y el renglón del recordatorio con el botón de enviar): unos 155 px que
  * le quitaba a la conversación. Ahora son ~55 px, unos tres renglones más de
@@ -112,7 +128,11 @@ function guardarBorrador(clave: string | null, valor: string) {
   }
 }
 
-type WrapKind = 'bold' | 'italic' | 'code' | 'list';
+// 2026-10-21: tachado, lista numerada, cita y enlace para la barra de formato
+// estilo Teams. Todo es Markdown que ChatMarkdown ya pinta (del, ol,
+// blockquote, a): ni subrayado, ni color, ni tamaño, que el Markdown no tiene
+// y que los agentes, la bandeja y las notificaciones verían como marcas sueltas.
+type WrapKind = 'bold' | 'italic' | 'code' | 'list' | 'strike' | 'olist' | 'quote' | 'link';
 
 /**
  * Le pone un nombre útil a lo que llega sin él.
@@ -180,6 +200,12 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
    * Clave del borrador (persona + conversación). Sin clave no se guarda nada.
    */
   draftKey?: string | null;
+  /**
+   * Envía un sticker o un GIF (2026-10-20). Con esto aparece el botón de
+   * emoji/stickers/GIF AL LADO del clip (ChatExpresiones). Sin esto (p. ej. un
+   * proyecto de solo lectura) el botón no aparece.
+   */
+  onEnviarMedia?: (media: MediaParaEnviar) => void;
 }>(function ChatComposer(
   {
     onSend,
@@ -192,6 +218,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     onQuitarCita,
     voiceConversationId,
     draftKey = null,
+    onEnviarMedia,
   },
   ref
 ) {
@@ -245,6 +272,18 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  /*
+   * Panel de Emoji | Stickers | GIF (2026-10-20), con botón propio al lado del
+   * clip. En el celular (≤ 768 px, el mismo corte del resto del chat) es una
+   * hoja DENTRO del compositor que reemplaza al teclado, como WhatsApp y
+   * Telegram; en escritorio, un globo encima de la caja.
+   */
+  const [expresiones, setExpresiones] = useState(false);
+  // «Mis stickers» (2026-10-21): la ventana vive AQUÍ y no dentro del panel:
+  // en escritorio el panel es un globo que se cierra al tocar fuera, y se
+  // llevaría la ventana con él.
+  const [misStickersAbierto, setMisStickersAbierto] = useState(false);
+  const enCelular = Boolean(useMediaQuery('(max-width: 768px)'));
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   /* ─────────────────── Autocompletado de menciones (@) ────────────────── */
@@ -362,23 +401,36 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         accepted.push(file);
       }
 
-      setFiles((prev) => {
-        const merged = [...prev];
-        for (const file of accepted) {
-          // Mismo nombre y mismo tamaño = el usuario lo escogió dos veces.
-          if (merged.some((x) => x.name === file.name && x.size === file.size)) continue;
-          if (merged.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE) break;
-          merged.push(file);
+      // Todos los adjuntos de un mensaje viajan en UNA petición, y IIS corta las de más de
+      // 30.000.000 bytes con un 413 que la app nunca ve (se veía "No se pudo enviar el
+      // mensaje."). Con fotos o videos de celular el tope se alcanza rápido: se avisa aquí.
+      const merged = [...files];
+      let totalBytes = merged.reduce((sum, f) => sum + f.size, 0);
+      let overTotal = false;
+      for (const file of accepted) {
+        // Mismo nombre y mismo tamaño = el usuario lo escogió dos veces.
+        if (merged.some((x) => x.name === file.name && x.size === file.size)) continue;
+        if (merged.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE) break;
+        if (totalBytes + file.size > MAX_UPLOAD_REQUEST_BYTES) {
+          overTotal = true;
+          continue;
         }
-        return merged;
-      });
+        totalBytes += file.size;
+        merged.push(file);
+      }
+      setFiles(merged);
+      if (!problem && overTotal) {
+        problem = `Los adjuntos de un mensaje pueden sumar máximo ${formatBytes(
+          MAX_UPLOAD_REQUEST_BYTES
+        )}. Envíe los demás en otro mensaje.`;
+      }
 
       if (!problem && files.length + accepted.length > MAX_CHAT_ATTACHMENTS_PER_MESSAGE) {
         problem = `Puede adjuntar máximo ${MAX_CHAT_ATTACHMENTS_PER_MESSAGE} archivos por mensaje.`;
       }
       setFileError(problem);
     },
-    [files.length]
+    [files]
   );
 
   const removeFile = useCallback((index: number) => {
@@ -431,20 +483,31 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     let cursorStart: number;
     let cursorEnd: number;
 
-    if (kind === 'list') {
-      // Las viñetas van por línea, no envolviendo.
-      const block = selected || 'elemento';
-      const bulleted = block
-        .split('\n')
-        .map((line) => (line.trim().startsWith('- ') ? line : `- ${line}`))
-        .join('\n');
+    if (kind === 'list' || kind === 'olist' || kind === 'quote') {
+      // Viñetas, números y cita van por línea, no envolviendo.
+      const block = selected || (kind === 'quote' ? 'cita' : 'elemento');
+      const marcar = (line: string, i: number) => {
+        if (kind === 'list') return line.trim().startsWith('- ') ? line : `- ${line}`;
+        if (kind === 'quote') return line.startsWith('> ') ? line : `> ${line}`;
+        return /^\s*\d{1,3}\.\s/.test(line) ? line : `${i + 1}. ${line}`;
+      };
+      const bulleted = block.split('\n').map(marcar).join('\n');
       const prefix = start === 0 || value[start - 1] === '\n' ? '' : '\n';
       next = value.slice(0, start) + prefix + bulleted + value.slice(end);
       cursorStart = start + prefix.length;
       cursorEnd = cursorStart + bulleted.length;
+    } else if (kind === 'link') {
+      const texto = selected || 'texto del enlace';
+      const url = 'https://';
+      next = `${value.slice(0, start)}[${texto}](${url})${value.slice(end)}`;
+      // Queda seleccionada la dirección, lista para pegar la real.
+      cursorStart = start + texto.length + 3;
+      cursorEnd = cursorStart + url.length;
     } else {
-      const marker = kind === 'bold' ? '**' : kind === 'italic' ? '_' : '`';
-      const inner = selected || (kind === 'bold' ? 'negrita' : kind === 'italic' ? 'cursiva' : 'código');
+      const marker = kind === 'bold' ? '**' : kind === 'italic' ? '_' : kind === 'strike' ? '~~' : '`';
+      const inner =
+        selected ||
+        (kind === 'bold' ? 'negrita' : kind === 'italic' ? 'cursiva' : kind === 'strike' ? 'tachado' : 'código');
       next = value.slice(0, start) + marker + inner + marker + value.slice(end);
       cursorStart = start + marker.length;
       cursorEnd = cursorStart + inner.length;
@@ -529,19 +592,67 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
   );
 
   /*
-   * El clip vive DENTRO de la caja de escribir (`rightSection`), no al lado.
-   * Pedido de Nicolás (2026-09-09): "quita el panel de emojis y deja solo el
-   * clip dentro del input, muy similar a como lo hace WhatsApp".
-   *
-   * Se guarda en una variable porque se usa en los DOS caminos —la caja de
-   * escribir y la vista previa—: si viviera solo dentro del Textarea, al
-   * activar la vista previa se perdería la forma de adjuntar.
+   * COMPOSITOR ESTILO TEAMS (2026-10-21). Nicolás mandó de referencia el
+   * compositor de Microsoft Teams: «no debe ser igual, pero al menos, con la
+   * nueva funcionalidad de los stickers, debe ser similar».
+   *   - ESCRITORIO: marco con la caja arriba y, abajo a la derecha, una fila
+   *     de íconos de línea — formato («A», que despliega arriba la barra de
+   *     formato), emoji/stickers/GIF, clip, voz si la hay, «+» con más
+   *     acciones y, separado, enviar. Una línea de acento abajo cuando el
+   *     compositor tiene el foco.
+   *   - CELULAR: la fila de antes (caja en cápsula y enviar al lado), con los
+   *     íconos AGRUPADOS dentro de la caja: emoji/stickers y «+», que trae
+   *     adjuntar, formato y vista previa.
+   * La barra de formato reutiliza `applyFormat` (Markdown con ayudas): solo
+   * lo que el Markdown del chat sabe pintar.
    */
-  // UN SOLO botón secundario, y va DENTRO de la caja, como WhatsApp. Antes
-  // eran dos (clip y ⋯) y Nicolás lo pidió explícito: "solo hay un botón de
-  // clip y ese sí muestra todo". Adjuntar queda de primero porque es lo que la
-  // gente viene a buscar cuando toca un clip.
-  const menuClip = (
+  const [formatoAbierto, setFormatoAbierto] = useState(false);
+
+  // Nunca se roba el foco de la caja al tocar un botón de la barra.
+  const sinRobarFoco = (event: React.MouseEvent) => {
+    if (document.activeElement === textareaRef.current) event.preventDefault();
+  };
+
+  const opcionAdjuntar = (
+    /* ETIQUETA, no botón con `.click()` por programa.
+       Abrir el selector desde JavaScript es frágil en el celular: se pierde
+       el gesto del usuario, el teclado se cierra y no pasa nada más (Nicolás
+       en iPhone, 2026-09-08). Con una <label> amarrada por `htmlFor`, quien
+       abre el selector es el navegador de forma nativa.
+       `closeMenuOnClick={false}` es indispensable: si el menú se desmonta con
+       el mismo toque, la etiqueta desaparece antes de que el navegador
+       alcance a activar el input. El menú se cierra en el `onChange` del
+       input, cuando ya escogieron el archivo. */
+    <Menu.Item
+      component='label'
+      htmlFor={fileInputId}
+      closeMenuOnClick={false}
+      leftSection={<IconPaperclip size={14} />}
+      disabled={files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE}
+      style={{ cursor: 'pointer' }}
+    >
+      Adjuntar archivos
+    </Menu.Item>
+  );
+
+  const insertarArroba = () => {
+    const el = textareaRef.current;
+    const actual = valorRef.current;
+    const pos = el?.selectionStart ?? actual.length;
+    const antes = actual.slice(0, pos);
+    const separador = antes === '' || /\s$/.test(antes) ? '' : ' ';
+    const siguiente = `${antes}${separador}@${actual.slice(pos)}`;
+    setValue(siguiente);
+    const cursor = pos + separador.length + 1;
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(cursor, cursor);
+      revisarMencion(siguiente, cursor);
+    });
+  };
+
+  // «+»: más acciones. En el celular también agrupa adjuntar y formato.
+  const menuMas = (
     <Menu
       opened={menuAbierto}
       onChange={setMenuAbierto}
@@ -560,68 +671,28 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
           size={34}
           radius='xl'
           disabled={disabled}
-          aria-label='Adjuntar y más opciones'
-          title='Adjuntar y más opciones'
-          onMouseDown={(event) => {
-            if (document.activeElement === textareaRef.current) event.preventDefault();
-          }}
+          aria-label='Más opciones'
+          title='Más opciones'
+          onMouseDown={sinRobarFoco}
         >
-          <IconPaperclip size={19} />
+          <IconPlus size={19} stroke={1.6} />
         </ActionIcon>
       </Menu.Target>
       <Menu.Dropdown className='chat-surface'>
-        {/* ETIQUETA, no botón con `.click()` por programa.
-            Abrir el selector desde JavaScript es frágil en el celular: se
-            pierde el gesto del usuario, el teclado se cierra y no pasa
-            nada más (Nicolás en iPhone, 2026-09-08 — el primer intento,
-            que solo dejó de esconder el input, no bastó). Con una <label>
-            amarrada por `htmlFor`, quien abre el selector es el navegador
-            de forma nativa: no hay gesto que perder.
-            `closeMenuOnClick={false}` es indispensable: si el menú se
-            desmonta con el mismo toque, la etiqueta desaparece antes de
-            que el navegador alcance a activar el input. El menú se cierra
-            en el `onChange` del input, cuando ya escogieron el archivo. */}
-        <Menu.Item
-          component='label'
-          htmlFor={fileInputId}
-          closeMenuOnClick={false}
-          leftSection={<IconPaperclip size={14} />}
-          disabled={files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE}
-          style={{ cursor: 'pointer' }}
-        >
-          Adjuntar archivos
-        </Menu.Item>
-        <Menu.Divider />
-        <Menu.Label>Formato</Menu.Label>
-        <Menu.Item
-          leftSection={<IconBold size={14} />}
-          rightSection={
-            <Text size='xs' c='dimmed'>
-              Ctrl+B
-            </Text>
-          }
-          onClick={() => applyFormat('bold')}
-        >
-          Negrita
-        </Menu.Item>
-        <Menu.Item
-          leftSection={<IconItalic size={14} />}
-          rightSection={
-            <Text size='xs' c='dimmed'>
-              Ctrl+I
-            </Text>
-          }
-          onClick={() => applyFormat('italic')}
-        >
-          Cursiva
-        </Menu.Item>
-        <Menu.Item leftSection={<IconList size={14} />} onClick={() => applyFormat('list')}>
-          Lista
-        </Menu.Item>
+        {enCelular && opcionAdjuntar}
+        {enCelular && (
+          <Menu.Item leftSection={<IconTypography size={14} />} onClick={() => setFormatoAbierto((f) => !f)}>
+            {formatoAbierto ? 'Ocultar formato' : 'Formato'}
+          </Menu.Item>
+        )}
+        {menciones.length > 0 && (
+          <Menu.Item leftSection={<IconAt size={14} />} onClick={insertarArroba}>
+            Mencionar a un asistente
+          </Menu.Item>
+        )}
         <Menu.Item leftSection={<IconCode size={14} />} onClick={() => applyFormat('code')}>
           Código
         </Menu.Item>
-        <Menu.Divider />
         <Menu.Item
           leftSection={preview ? <IconEyeOff size={14} /> : <IconEye size={14} />}
           onClick={() => setPreview((p) => !p)}
@@ -633,8 +704,202 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
     </Menu>
   );
 
+  const botonFormato = (etiqueta: string, icono: React.ReactNode, kind: WrapKind, atajo?: string) => (
+    <Tooltip label={atajo ? `${etiqueta} (${atajo})` : etiqueta} withArrow openDelay={400}>
+      <ActionIcon
+        variant='subtle'
+        color='gray'
+        size={30}
+        radius='md'
+        aria-label={etiqueta}
+        onMouseDown={sinRobarFoco}
+        onClick={() => applyFormat(kind)}
+        disabled={disabled || preview}
+      >
+        {icono}
+      </ActionIcon>
+    </Tooltip>
+  );
+
+  // Barra de formato: se despliega ARRIBA de la caja con la «A» (como Teams).
+  const barraFormato = formatoAbierto ? (
+    <div className='chat-composer__formato' role='toolbar' aria-label='Formato del mensaje'>
+      {botonFormato('Negrita', <IconBold size={17} stroke={1.8} />, 'bold', 'Ctrl+B')}
+      {botonFormato('Cursiva', <IconItalic size={17} stroke={1.6} />, 'italic', 'Ctrl+I')}
+      {botonFormato('Tachado', <IconStrikethrough size={17} stroke={1.6} />, 'strike')}
+      <span className='chat-composer__separador' aria-hidden />
+      {botonFormato('Lista con viñetas', <IconList size={17} stroke={1.6} />, 'list')}
+      {botonFormato('Lista numerada', <IconListNumbers size={17} stroke={1.6} />, 'olist')}
+      <span className='chat-composer__separador' aria-hidden />
+      {botonFormato('Cita', <IconBlockquote size={17} stroke={1.6} />, 'quote')}
+      {botonFormato('Código', <IconCode size={17} stroke={1.6} />, 'code')}
+      {botonFormato('Enlace', <IconLink size={17} stroke={1.6} />, 'link')}
+      <span style={{ flex: 1 }} />
+      <Tooltip label='Ocultar formato' withArrow openDelay={400}>
+        <ActionIcon
+          variant='subtle'
+          color='gray'
+          size={30}
+          radius='md'
+          aria-label='Ocultar formato'
+          onMouseDown={sinRobarFoco}
+          onClick={() => setFormatoAbierto(false)}
+        >
+          <IconX size={16} stroke={1.6} />
+        </ActionIcon>
+      </Tooltip>
+    </div>
+  ) : null;
+
+  /* ───── Panel de Emoji | Stickers | GIF (2026-10-20) ───── */
+
+  // Inserta el emoji donde está el cursor (o reemplaza la selección). En el
+  // celular NO se enfoca la caja: eso abriría el teclado encima del panel.
+  const insertarEmoji = useCallback(
+    (emoji: string) => {
+      const area = textareaRef.current;
+      const actual = valorRef.current;
+      const inicio = area?.selectionStart ?? actual.length;
+      const fin = area?.selectionEnd ?? actual.length;
+      const siguiente = `${actual.slice(0, inicio)}${emoji}${actual.slice(fin)}`;
+      if (siguiente.length > MAX_USER_MESSAGE_CHARS) return;
+      setValue(siguiente);
+      const pos = inicio + emoji.length;
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        if (!enCelular) el.focus({ preventScroll: true });
+        el.setSelectionRange(pos, pos);
+      });
+    },
+    [enCelular]
+  );
+
+  const enviarMedia = useCallback(
+    (media: MediaParaEnviar) => {
+      onEnviarMedia?.(media);
+      // En escritorio el globo se cierra al enviar; en el celular la hoja
+      // queda abierta, como en WhatsApp, para mandar otro si se quiere.
+      if (!enCelular) setExpresiones(false);
+    },
+    [onEnviarMedia, enCelular]
+  );
+
+  const alternarExpresiones = useCallback(() => {
+    const abrir = !expresiones;
+    if (enCelular) {
+      if (abrir) {
+        // El panel reemplaza al teclado: se suelta el foco para cerrarlo.
+        textareaRef.current?.blur();
+      } else {
+        // Volver al teclado: el panel se va y la caja recibe el foco.
+        requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
+      }
+    }
+    setExpresiones(abrir);
+  }, [expresiones, enCelular]);
+
+  const panelAbiertoEnCelular = expresiones && enCelular;
+
+  const abrirMisStickers = useCallback(() => {
+    if (!enCelular) setExpresiones(false);
+    setMisStickersAbierto(true);
+  }, [enCelular]);
+
+  const iconoExpresiones = (
+    <ActionIcon
+      variant={expresiones ? 'light' : 'subtle'}
+      color='gray'
+      size={34}
+      radius='xl'
+      disabled={disabled}
+      aria-label={panelAbiertoEnCelular ? 'Volver al teclado' : 'Emojis, stickers y GIF'}
+      title={panelAbiertoEnCelular ? 'Volver al teclado' : 'Emojis, stickers y GIF'}
+      aria-expanded={expresiones}
+      data-testid='chat-boton-expresiones'
+      onMouseDown={(event) => {
+        // En escritorio la caja conserva el foco (y el cursor) al abrir.
+        if (!enCelular && document.activeElement === textareaRef.current) event.preventDefault();
+      }}
+      onClick={alternarExpresiones}
+    >
+      {panelAbiertoEnCelular ? <IconKeyboard size={19} /> : <IconMoodSmile size={19} />}
+    </ActionIcon>
+  );
+
+  const botonExpresiones = !onEnviarMedia ? null : enCelular ? (
+    iconoExpresiones
+  ) : (
+    <Popover
+      opened={expresiones}
+      onChange={setExpresiones}
+      position='top-end'
+      offset={10}
+      width={380}
+      shadow='md'
+      radius='md'
+      withArrow
+      trapFocus={false}
+      returnFocus={false}
+    >
+      <Popover.Target>{iconoExpresiones}</Popover.Target>
+      <Popover.Dropdown className='chat-surface chat-expresiones-globo' p='sm'>
+        {expresiones && (
+          <ChatExpresiones alto={320} onEmoji={insertarEmoji} onEnviar={enviarMedia} onMisStickers={abrirMisStickers} />
+        )}
+      </Popover.Dropdown>
+    </Popover>
+  );
+
+  // CELULAR: botones dentro de la caja (emoji/stickers si hay, «+» y voz si
+  // hay). En escritorio la caja no lleva nada adentro: los íconos van en la
+  // fila de abajo.
+  const botonesDentro = enCelular ? 1 + (onEnviarMedia ? 1 : 0) + (voiceConversationId ? 1 : 0) : 0;
+  const anchoDentro = enCelular ? 42 * botonesDentro : 12;
+
+  /* El recordatorio de Enter / Shift+Enter era un renglón entero; ahora vive
+     en el globo de este botón. En el celular es grande (46 px contra los 34
+     de los secundarios): es la acción principal y se toca con el pulgar. En
+     escritorio, como en Teams, es un ícono de línea separado del resto. */
+  const botonEnviar = (
+    <Tooltip
+      label={
+        tecladoTactil
+          ? 'Enviar · con teclado táctil, Enter salta de línea'
+          : 'Enviar · Enter envía, Shift+Enter salta de línea'
+      }
+      withArrow
+    >
+      <ActionIcon
+        className={enCelular ? 'chat-composer__send' : 'chat-composer__send chat-composer__send--marco'}
+        size={enCelular ? 46 : 34}
+        radius='xl'
+        variant={enCelular ? 'filled' : 'subtle'}
+        color='blue'
+        loading={sending}
+        disabled={!canSend}
+        // Sin esto, TOCAR el botón le quita el foco al textarea y el teclado
+        // del celular se cierra antes de que el mensaje salga. El
+        // preventDefault del mousedown/touchstart evita ese robo de foco.
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => void submit()}
+        aria-label='Enviar mensaje'
+      >
+        <IconSend size={enCelular ? 20 : 19} stroke={enCelular ? 2 : 1.6} />
+      </ActionIcon>
+    </Tooltip>
+  );
+
   return (
-    <Box className={`chat-composer${letterFxActive ? ' chat-composer--letterfx-active' : ''}`}>
+    <Box
+      className={[
+        'chat-composer',
+        letterFxActive ? 'chat-composer--letterfx-active' : '',
+        enCelular ? '' : 'chat-composer--marco',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
       {/* Lista de menciones. Va como primer hijo del compositor, así que se
           dibuja ARRIBA de la caja de escribir: en el celular, un menú que
           apareciera debajo quedaría tapado por el teclado. */}
@@ -749,6 +1014,8 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         </Text>
       )}
 
+      {barraFormato}
+
       {/* `align='center'` y no `flex-end`: la caja (min-height 42 px) y el
           botón de enviar (46 px) tienen alturas DISTINTAS a propósito (ver el
           comentario del radio en `.chat-composer__input`), pero alineándolos
@@ -761,7 +1028,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         {preview ? (
           <Box
             className='chat-composer__preview'
-            style={{ minHeight: 42, paddingRight: voiceConversationId ? 84 : 42 }}
+            style={{ minHeight: 42, paddingRight: anchoDentro }}
             onDoubleClick={() => setPreview(false)}
           >
             <ChatMarkdown content={value} />
@@ -784,6 +1051,11 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
               }
             }}
             onBlur={() => setMencionAbierta(false)}
+            // En el celular, tocar la caja con el panel abierto vuelve al
+            // teclado (el panel lo estaba reemplazando).
+            onFocus={() => {
+              if (enCelular) setExpresiones(false);
+            }}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             placeholder={placeholder}
@@ -804,14 +1076,17 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
                en 14px pese al `font-size: 16px` del CSS, y Safari le seguía
                haciendo zoom al enfocarlo. */
             size='md'
-            radius={23}
+            radius={enCelular ? 23 : 0}
             /* Arranca en UN renglón, como WhatsApp, y crece al escribir. */
             minRows={1}
             maxRows={6}
             disabled={disabled}
             autoFocus={autoFocus}
             error={tooLong ? 'El mensaje es demasiado largo.' : undefined}
-            classNames={{ root: 'chat-composer__field', input: 'chat-composer__input' }}
+            classNames={{
+              root: 'chat-composer__field',
+              input: enCelular ? 'chat-composer__input' : 'chat-composer__input chat-composer__input--marco',
+            }}
             /* El clip (y, si la conversación admite voz, el ícono de llamada)
                va DENTRO de la caja. `rightSectionPointerEvents='all'` no es
                opcional: por defecto Mantine le pone `pointer-events: none` a
@@ -820,53 +1095,97 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
                crecen de 42 a 84 px cuando hay ícono de voz, para que no se
                encimen los dos botones. */
             rightSection={
-              <Group gap={0} wrap='nowrap'>
-                {menuClip}
-                {voiceConversationId && (
-                  <ChatVoice key={voiceConversationId} conversationId={voiceConversationId} />
-                )}
-              </Group>
+              enCelular ? (
+                <Group gap={0} wrap='nowrap'>
+                  {botonExpresiones}
+                  {menuMas}
+                  {voiceConversationId && (
+                    <ChatVoice key={voiceConversationId} conversationId={voiceConversationId} />
+                  )}
+                </Group>
+              ) : undefined
             }
-            rightSectionWidth={voiceConversationId ? 84 : 42}
+            rightSectionWidth={enCelular ? anchoDentro : undefined}
             rightSectionPointerEvents='all'
-            styles={{ input: { paddingRight: voiceConversationId ? 84 : 42 } }}
+            styles={{ input: { paddingRight: anchoDentro } }}
           />
           {letterFxActive && <ComposerLetterFx textareaRef={textareaRef} value={value} />}
           </Box>
         )}
 
-        {/* El recordatorio de Enter / Shift+Enter era un renglón entero; ahora
-            vive en el globo de este botón. */}
-        {/* Grande a propósito (46 px contra los 34 de los secundarios): es la
-            acción principal y en el celular se toca con el pulgar. Es el
-            círculo verde de WhatsApp. */}
-        <Tooltip
-          label={
-            tecladoTactil
-              ? 'Enviar · con teclado táctil, Enter salta de línea'
-              : 'Enviar · Enter envía, Shift+Enter salta de línea'
-          }
-          withArrow
-        >
-          <ActionIcon
-            className='chat-composer__send'
-            size={46}
-            radius='xl'
-            variant='filled'
-            color='blue'
-            loading={sending}
-            disabled={!canSend}
-            // Sin esto, TOCAR el botón le quita el foco al textarea y el teclado
-            // del celular se cierra antes de que el mensaje salga. El
-            // preventDefault del mousedown/touchstart evita ese robo de foco.
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => void submit()}
-            aria-label='Enviar mensaje'
-          >
-            <IconSend size={20} />
-          </ActionIcon>
-        </Tooltip>
+        {enCelular && botonEnviar}
       </Group>
+
+      {/* ESCRITORIO: la fila de íconos de línea abajo a la derecha, como Teams. */}
+      {!enCelular && (
+        <div className='chat-composer__acciones'>
+          <Tooltip label={formatoAbierto ? 'Ocultar formato' : 'Formato'} withArrow openDelay={400}>
+            <ActionIcon
+              variant={formatoAbierto ? 'light' : 'subtle'}
+              color='gray'
+              size={34}
+              radius='xl'
+              disabled={disabled}
+              aria-label='Formato'
+              aria-pressed={formatoAbierto}
+              onMouseDown={sinRobarFoco}
+              onClick={() => setFormatoAbierto((f) => !f)}
+            >
+              <IconTypography size={19} stroke={1.6} />
+            </ActionIcon>
+          </Tooltip>
+          {botonExpresiones}
+          <Tooltip label='Adjuntar archivos' withArrow openDelay={400}>
+            {/* Etiqueta amarrada al input de archivos: el navegador abre el
+                selector de forma nativa (ver «Adjuntar archivos» del menú). */}
+            <ActionIcon
+              component='label'
+              htmlFor={fileInputId}
+              variant='subtle'
+              color='gray'
+              size={34}
+              radius='xl'
+              aria-label='Adjuntar archivos'
+              // Una <label> no es enfocable ni responde al teclado: se le da
+              // el papel de botón y Enter/Espacio abren el selector.
+              role='button'
+              tabIndex={0}
+              onKeyDown={(event: React.KeyboardEvent) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  fileInputRef.current?.click();
+                }
+              }}
+              aria-disabled={disabled || files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE}
+              style={{
+                cursor: 'pointer',
+                pointerEvents: disabled || files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE ? 'none' : undefined,
+                opacity: disabled || files.length >= MAX_CHAT_ATTACHMENTS_PER_MESSAGE ? 0.5 : undefined,
+              }}
+            >
+              <IconPaperclip size={19} stroke={1.6} />
+            </ActionIcon>
+          </Tooltip>
+          {voiceConversationId && <ChatVoice key={voiceConversationId} conversationId={voiceConversationId} />}
+          {menuMas}
+          <span className='chat-composer__separador chat-composer__separador--alto' aria-hidden />
+          {botonEnviar}
+        </div>
+      )}
+
+      {/* Hoja del celular: ocupa el lugar del teclado, debajo de la caja. */}
+      {panelAbiertoEnCelular && (
+        <Box className='chat-expresiones-hoja'>
+          <ChatExpresiones
+            alto='min(34dvh, 280px)'
+            onEmoji={insertarEmoji}
+            onEnviar={enviarMedia}
+            onMisStickers={abrirMisStickers}
+          />
+        </Box>
+      )}
+
+      {onEnviarMedia && <ChatMisStickers abierto={misStickersAbierto} onCerrar={() => setMisStickersAbierto(false)} />}
 
       {/* NO va con `hidden`. Con `hidden` (o sea `display:none`) el input no se
           renderiza, y varios navegadores móviles se niegan a abrir el selector

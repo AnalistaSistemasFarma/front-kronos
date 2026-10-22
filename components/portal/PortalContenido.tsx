@@ -12,7 +12,12 @@ import {
 } from '../../lib/portal/correos-datos';
 import { filtrarExtensiones, type Extension } from '../../lib/portal/extensiones-datos';
 import { urlFormacion as urlPaginaFormacion, type OrigenPortal } from '../../lib/portal/formacion-navegacion';
-import PoliticasVisor from './PoliticasVisor';
+import HeinsohnVentana from './HeinsohnVentana';
+import LinksDiligenciar from './LinksDiligenciar';
+import OrganigramaVisor from './OrganigramaVisor';
+import PoliticasVisor, { TEXTOS_AYUDAS, TEXTOS_CAPACITACIONES } from './PoliticasVisor';
+import PortalCalendario from './PortalCalendario';
+import VentanaEventosHoy from './VentanaEventosHoy';
 import PortalNavegacion, { useSeccionActiva, type SeccionNav } from './PortalNavegacion';
 
 /** Cada cuánto rota sola la imagen principal del carrusel de anuncios. */
@@ -23,11 +28,18 @@ const ID_SECCION_ANUNCIOS = 'portal-th-anuncios';
 const ID_SECCION_POLITICAS = 'portal-th-politicas';
 /** Acceso a FORMACIÓN. Desde 2026-09-30 (pedido de Cristian) Formación
  *  tiene su propia página (`/portal/formacion`) que se abre en una pestaña
- *  nueva; aquí solo queda este acceso. */
+ *  nueva; aquí solo queda este acceso. Desde el hub abre
+ *  `/process/portal-th/formacion`, dentro del layout de SynerLink. */
 const ID_SECCION_FORMACION = 'portal-th-formacion';
 /** No es una sección con scroll: es un botón del panel que abre su propia
  *  ventana de vista previa (ver `irASeccion`), igual que un documento. */
 const ID_SECCION_CONTACTOS = 'portal-th-contactos';
+/** Botón del panel, debajo de Contactos: abre la ventana de vídeos de ayuda (carpeta FORMACION/AYUDAS). Sin sección en la página. */
+const ID_SECCION_AYUDAS = 'portal-th-ayudas';
+/** Botón del panel, justo debajo de Ayudas (Cristian, 2026-10-22): espejo de Ayudas sobre la carpeta FORMACION/CAPACITACIONES. */
+const ID_SECCION_CAPACITACIONES = 'portal-th-capacitaciones';
+/** Botón del panel: abre una ventana con un botón por empresa hacia su acceso al portal de nómina de Heinsohn. Sin sección en la página. */
+const ID_SECCION_HEINSOHN = 'portal-th-heinsohn';
 
 /**
  * EL CONTENIDO DEL PORTAL DE TALENTO HUMANO — anuncios y documentos.
@@ -365,6 +377,17 @@ export default function PortalContenido({
    */
   const [politicasAbierto, setPoliticasAbierto] = useState(false);
   const cerrarPoliticas = useCallback(() => setPoliticasAbierto(false), []);
+  /** Ventana «AYUDAS» (Cristian, 2026-10-15): los videos de la carpeta FORMACION/AYUDAS, con la misma ventana de Políticas. */
+  const [ayudasAbierto, setAyudasAbierto] = useState(false);
+  const cerrarAyudas = useCallback(() => setAyudasAbierto(false), []);
+  /** Ventana «CAPACITACIONES» (Cristian, 2026-10-22): la misma de Ayudas, sobre FORMACION/CAPACITACIONES. */
+  const [capacitacionesAbierto, setCapacitacionesAbierto] = useState(false);
+  const cerrarCapacitaciones = useCallback(() => setCapacitacionesAbierto(false), []);
+  /** Ventana «HEINSOHN NÓMINA» (Cristian, 2026-10-15). */
+  const [heinsohnAbierto, setHeinsohnAbierto] = useState(false);
+  const cerrarHeinsohn = useCallback(() => setHeinsohnAbierto(false), []);
+  /** Organigrama digital (Cristian, 2026-10-15): se abre desde «Contactos» y, al cerrarlo, se vuelve a «Contactos». */
+  const [organigramaAbierto, setOrganigramaAbierto] = useState(false);
   const [contactoSeleccionado, setContactoSeleccionado] = useState<'correos' | 'extensiones' | null>(null);
   const cerrarContactos = () => {
     setContactosAbierto(false);
@@ -456,6 +479,9 @@ export default function PortalContenido({
     { id: ID_SECCION_POLITICAS, etiqueta: 'Políticas y reglamentos' },
     { id: ID_SECCION_FORMACION, etiqueta: 'Formación' },
     { id: ID_SECCION_CONTACTOS, etiqueta: 'Contactos' },
+    { id: ID_SECCION_AYUDAS, etiqueta: 'Ayudas' },
+    { id: ID_SECCION_CAPACITACIONES, etiqueta: 'Capacitaciones' },
+    { id: ID_SECCION_HEINSOHN, etiqueta: 'Heinsohn Nómina' },
     // Cuando el portal tenga más secciones, se agregan acá — el panel de
     // navegación no necesita ningún otro cambio.
   ];
@@ -466,8 +492,26 @@ export default function PortalContenido({
   const activa = useSeccionActiva(idsSecciones);
 
   const irASeccion = (id: string) => {
+    if (id === ID_SECCION_POLITICAS) {
+      // Pedido de Cristian (2026-10-14): el botón del panel abre lo mismo que VISUALIZAR (la ventana con todos los
+      // archivos y su vista previa), en vez de solo desplazar la página hasta la sección.
+      setPoliticasAbierto(true);
+      return;
+    }
     if (id === ID_SECCION_CONTACTOS) {
       setContactosAbierto(true);
+      return;
+    }
+    if (id === ID_SECCION_AYUDAS) {
+      setAyudasAbierto(true);
+      return;
+    }
+    if (id === ID_SECCION_CAPACITACIONES) {
+      setCapacitacionesAbierto(true);
+      return;
+    }
+    if (id === ID_SECCION_HEINSOHN) {
+      setHeinsohnAbierto(true);
       return;
     }
     if (id === ID_SECCION_FORMACION) {
@@ -480,8 +524,14 @@ export default function PortalContenido({
 
   return (
     <>
+      {/* Ventana emergente con los eventos de hoy (del calendario): se abre al entrar y se cierra sola a los 15 s. */}
+      <VentanaEventosHoy />
       <div className='portal-th__layout'>
-        <PortalNavegacion secciones={secciones} activa={activa} onSeleccionar={irASeccion} />
+        {/* Columna izquierda: calendario y eventos del día ARRIBA, y debajo los botones de cada sección. */}
+        <aside className='portal-th__lateral'>
+          <PortalCalendario puedeEditar={puedeEditar} />
+          <PortalNavegacion secciones={secciones} activa={activa} onSeleccionar={irASeccion} />
+        </aside>
 
         <div className='portal-th__contenido'>
           {/* La sección se pinta si hay anuncios O si esta persona los administra:
@@ -611,6 +661,9 @@ export default function PortalContenido({
               </span>
             </a>
           </section>
+
+          {/* «LINKS PARA DILIGENCIAR EN CASO DE SER REQUERIDO» (Cristian, 2026-10-20): los formularios SST, bajo Formación. */}
+          <LinksDiligenciar />
         </div>
       </div>
 
@@ -656,6 +709,17 @@ export default function PortalContenido({
       )}
 
       {politicasAbierto && <PoliticasVisor onCerrar={cerrarPoliticas} />}
+      {ayudasAbierto && <PoliticasVisor onCerrar={cerrarAyudas} textos={TEXTOS_AYUDAS} />}
+      {capacitacionesAbierto && <PoliticasVisor onCerrar={cerrarCapacitaciones} textos={TEXTOS_CAPACITACIONES} />}
+      {heinsohnAbierto && <HeinsohnVentana onCerrar={cerrarHeinsohn} />}
+      {organigramaAbierto && (
+        <OrganigramaVisor
+          onCerrar={() => {
+            setOrganigramaAbierto(false);
+            setContactosAbierto(true);
+          }}
+        />
+      )}
 
       {/* VENTANA DE CONTACTOS — mismo marco que la vista previa de documentos,
           pero con dos botones adentro en vez de un PDF. Correos: directorio de
@@ -687,6 +751,17 @@ export default function PortalContenido({
               </div>
             </header>
             <div className='portal-th__contactos'>
+              <button
+                type='button'
+                className='portal-th__contactos-boton'
+                onClick={() => {
+                  cerrarContactos();
+                  setOrganigramaAbierto(true);
+                }}
+                data-testid='abrir-organigrama'
+              >
+                Organigrama
+              </button>
               <button
                 type='button'
                 className='portal-th__contactos-boton'

@@ -4,7 +4,7 @@ import { Suspense, useState } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { Paper, Title, TextInput, Button, Stack, Group, Text, ActionIcon } from '@mantine/core';
+import { Paper, Title, TextInput, Button, Stack, Text, ActionIcon } from '@mantine/core';
 import {
   IconEye,
   IconEyeOff,
@@ -14,7 +14,6 @@ import {
   IconMoon,
   IconSun,
 } from '@tabler/icons-react';
-import Link from 'next/link';
 import { useTheme } from '../../components/providers';
 import LoginPharmacyBackground from '../../components/login/LoginPharmacyBackground';
 import { getSafeCallbackUrl } from '../../lib/auth/logout';
@@ -233,18 +232,6 @@ function LoginForm() {
               aria-label='Contraseña'
               autoComplete='current-password'
             />
-
-            <Group justify='space-between' mt='md'>
-              <Text
-                size='sm'
-                component={Link}
-                href='/forgot-password'
-                c={isDark ? '#7ec8ef' : '#113562'}
-                style={{ textDecoration: 'none' }}
-              >
-                ¿Olvidaste tu contraseña? Solicita una nueva.
-              </Text>
-            </Group>
 
             <Button
               type='submit'

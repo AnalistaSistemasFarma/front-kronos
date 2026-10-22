@@ -62,13 +62,16 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
   const pendingFiles = useSgcFetch<{ documents: { idDocument: number }[] }>(`/api/sgc/documents?company=${company.idCompany}&status=pendiente_archivo`);
   const [idParent, setIdParent] = useState<string | null>(null);
   const imports = useSgcFetch<{ imports: ImportRow[] }>(`/api/sgc/master-list?company=${company.idCompany}`);
-  const parents = useSgcFetch<{ documents: { idDocument: number; code: string; title: string; status: string }[] }>(`/api/sgc/documents?company=${company.idCompany}&status=todos`);
+  const parents = useSgcFetch<{ documents: { idDocument: number; code: string; title: string; status: string; documentType?: { code: string } }[] }>(`/api/sgc/documents?company=${company.idCompany}&status=todos`);
 
   const data = catalogs.data;
   const process = data?.processes.find((p) => String(p.id) === idProcess) ?? null;
   const docType = data?.documentTypes.find((t) => String(t.id) === idDocumentType) ?? null;
   // Sprint 8: el tipo hereda el número de su documento padre (guía de codificación de la empresa).
   const inherits = Boolean(data?.codingGuide && docType && inheritsParentNumber({ ...data.codingGuide }, docType.code));
+  // 2026-10-19: el procedimiento (tipo padre) no tiene padre; los demás pueden indicarlo y la relación se crea sola.
+  const parentTypeCodes = data?.parentTypeCodes ?? [];
+  const canHaveParent = Boolean(docType && !parentTypeCodes.includes(docType.code));
 
   const codePreview = useMemo(() => {
     if (!data?.codingGuide || !process || !docType) return null;
@@ -102,7 +105,7 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
     form.set('versionNumber', String(versionNumber || 1));
     form.set('effectiveDate', effectiveDate);
     form.set('changeDescription', changeDescription);
-    if (inherits && idParent) form.set('idParentDocument', idParent);
+    if (canHaveParent && idParent) form.set('idParentDocument', idParent);
     form.set('pdf', pdf);
     if (source) form.set('source', source);
     setBusy(true);
@@ -182,7 +185,7 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
             </Button>
             {/* Sprint 9: los PDF de los documentos «pendientes de archivo», emparejados por su código. */}
             <Button variant='light' leftSection={<IconFiles size={16} />} onClick={() => setFilesOpen(true)} disabled={(pendingFiles.data?.documents.length ?? 0) === 0} data-testid='sgc-carga-archivos-abrir'>
-              Cargar archivos (PDF){pendingFiles.data?.documents.length ? ` · ${pendingFiles.data.documents.length} pendientes` : ''}
+              Cargar archivos (PDF, Word o Excel){pendingFiles.data?.documents.length ? ` · ${pendingFiles.data.documents.length} pendientes` : ''}
             </Button>
           </Group>
         </Group>
@@ -275,13 +278,19 @@ function Carga({ company }: { company: SgcCompanyAccess }) {
               ff='monospace'
             />
           </Grid.Col>
-          {inherits && (
+          {canHaveParent && (
             <Grid.Col span={12}>
               <SgcSelect
                 label='Documento padre'
-                description={`Un ${docType?.name.toLowerCase() ?? 'documento'} hereda el número de su documento padre (guía de codificación). Obligatorio si el código se genera.`}
+                description={
+                  inherits
+                    ? `Un ${docType?.name.toLowerCase() ?? 'documento'} hereda el número de su documento padre (guía de codificación). Obligatorio si el código se genera. Queda relacionado con él.`
+                    : 'Opcional: el procedimiento del que se desprende. El documento queda relacionado con él.'
+                }
                 placeholder='Seleccione el procedimiento'
-                data={(parents.data?.documents ?? []).filter((d) => d.status === 'vigente' || d.status === 'pendiente_archivo').map((d) => ({ value: String(d.idDocument), label: `${d.code} · ${d.title}` }))}
+                data={(parents.data?.documents ?? [])
+                  .filter((d) => (d.status === 'vigente' || d.status === 'pendiente_archivo') && (!d.documentType || parentTypeCodes.includes(d.documentType.code)))
+                  .map((d) => ({ value: String(d.idDocument), label: `${d.code} · ${d.title}` }))}
                 value={idParent}
                 onChange={setIdParent}
                 searchable

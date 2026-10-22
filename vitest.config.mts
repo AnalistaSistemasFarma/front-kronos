@@ -28,7 +28,15 @@ export default defineConfig({
       'app/api/authorization/**/*.test.ts',
       // `app/api/portal/politicas/**`: Políticas y reglamentos del Portal TH (sesión obligatoria, Graph simulado).
       'app/api/portal/**/*.test.ts',
+      // `app/api/bitacora-proceso/**`: Órdenes de Trabajo (permisos en el servidor, sin edición ni borrado).
+      'app/api/bitacora-proceso/**/*.test.ts',
+      // `app/api/firma-gss/**`: «Mi firma» en GSS Firma (solo la propia, reautenticación, imagen saneada).
+      'app/api/firma-gss/**/*.test.ts',
+      // `app/api/correo/**`: módulo Correo (sesión y permiso, aislamiento por persona, límites; Graph simulado).
+      'app/api/correo/**/*.test.ts',
       'components/sgc/**/*.test.ts',
+      // Medidor del consumo de Anthropic en Proyectos (render del marcado, 2026-10-22).
+      'components/proyectos/**/*.test.ts',
     ],
     exclude: ['node_modules', '.next', 'mcp', 'dist'],
 
@@ -65,6 +73,32 @@ export default defineConfig({
         // SGC documental: reglas de negocio con umbral propio (ver abajo).
         'lib/sgc/**/*.ts',
         'app/api/sgc/**/route.ts',
+        // Órdenes de Trabajo: reglas puras y rutas (la capa de datos se prueba en integración).
+        'lib/bitacora-proceso/constants.ts',
+        'lib/bitacora-proceso/rules.ts',
+        'lib/bitacora-proceso/firmas.ts',
+        'lib/bitacora-proceso/notificaciones.ts',
+        'lib/bitacora-proceso/pin.ts',
+        'app/api/bitacora-proceso/**/route.ts',
+        // Firma GSS: saneamiento de la imagen y registro de la firma propia.
+        'lib/firma-gss/png.ts',
+        'lib/firma-gss/sniff.ts',
+        'lib/firma-gss/miFirma.ts',
+        'app/api/firma-gss/**/route.ts',
+        // Módulo Correo: reglas, saneado, Graph, OAuth, cifrado, servicio y rutas (la capa de datos, en integración).
+        'lib/correo/config.ts',
+        'lib/correo/crypto.ts',
+        'lib/correo/graph.ts',
+        'lib/correo/oauth.ts',
+        'lib/correo/rules.ts',
+        'lib/correo/sanitize.ts',
+        'lib/correo/service.ts',
+        'lib/correo/mock.ts',
+        // «Consultar a un agente» (2026-10-16): concesión, tarjetas y confirmación.
+        'lib/correo/agente.ts',
+        // Deslizar para eliminar (2026-10-18): mover a Elementos eliminados y «Deshacer» firmado.
+        'lib/correo/eliminar.ts',
+        'app/api/correo/**/route.ts',
       ],
       exclude: [
         '**/__tests__/**',

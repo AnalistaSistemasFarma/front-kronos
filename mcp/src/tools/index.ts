@@ -26,6 +26,9 @@ import {
   processOwnerEmails,
 } from '../workflow.js';
 import { registerIaAccessTool } from './iaAccess.js';
+import { BITACORA_TOOLS, registerBitacoraTools } from './bitacoraProceso.js';
+import { registerCorreoAgenteTools } from './correoAgente.js';
+import { PROYECTOS_TOOLS_LECTURA, PROYECTOS_TOOLS_PROPUESTA, registerProyectosTools } from './proyectos.js';
 
 interface ToolContext {
   scope: AuthScope;
@@ -314,6 +317,16 @@ export const ENTITY_METADATA = {
     companyColumn: 'company_user.id_company (vía relación)',
     fields: Object.keys(USER_SAFE_SELECT),
   },
+  bitacoras: {
+    description:
+      'Bitácora de Proceso (planta): una bitácora = un turno (ot_orden_trabajo) con supervisor, jefe de producción (quien verifica) y operarios sin usuario de SynerLink (ot_orden_operador, maestro ot_operador; las bitácoras anteriores al 2026-10-14 tienen auxiliares con usuario en ot_orden_operario), registros de intervenciones con hora del servidor en UTC, el operario que la hizo y el usuario de la sesión que la registró (ot_registro, inmutables), catálogo de actividades (ot_actividad) y confirmaciones «Cerró» (supervisor) / «Verificó» (jefe de producción) (ot_firma). Solo lectura vía kronos_list_bitacoras, kronos_get_bitacora, kronos_bitacora_actividad_reciente y kronos_list_bitacora_actividades. Nunca se exponen imágenes de firma, huellas ni IP.',
+    companyColumn: 'ot_orden_trabajo.id_company / ot_actividad.id_company',
+    fields: [
+      'id', 'codigo (BP-xxxx, consecutivo por empresa)', 'id_company', 'company', 'producto', 'item_code', 'lote',
+      'turno', 'area', 'orden_produccion_sap', 'estado (abierta|cerrada|verificada)', 'abierta_en', 'cerrada_en',
+      'supervisor', 'jefe_produccion', 'operarios', 'registros (operario + usuario_sesion)', 'firmas (confirmaciones Cerró/Verificó)', 'ultima_actividad_en',
+    ],
+  },
   attachments: {
     description:
       'Adjuntos/documentos de una solicitud. El CONTENIDO binario NO se guarda en la base de datos: los archivos se suben a OneDrive (MS Graph) en la carpeta determinística SAPSEND/TEC/SG/Request-<id>. kronos_list_attachments devuelve DOS cosas: (a) "required_files" = la DEFINICIÓN de qué archivos exige el proceso (file_process_category: etiqueta, obligatoriedad, condición) y (b) "files" = los archivos REALES cargados en OneDrive (name, size, tipo, fechas, file_id y download_url temporal). kronos_get_attachment resuelve el archivo real (download_url y, opcional, base64) o la definición del proceso.',
@@ -327,7 +340,8 @@ export const ENTITY_METADATA = {
 } as const;
 
 /**
- * Capacidades del servidor: 29 tools en total = 21 de LECTURA + 8 de ESCRITURA.
+ * Capacidades del servidor: 39 tools en total = 27 de LECTURA (incluye 4 de la
+ * Bitácora de Proceso y 2 del hilo de correo compartido) + 12 de ESCRITURA (3 de ellas solo PROPONEN).
  *
  * Las de escritura están acotadas (categorización, creación de solicitudes,
  * notas, resolución de tareas, adjuntos en OneDrive y formulario dinámico),
@@ -335,7 +349,7 @@ export const ENTITY_METADATA = {
  * candado de solo lectura del resto del servidor.
  */
 export const TOOL_CAPABILITIES = {
-  totalTools: 30,
+  totalTools: 49,
   readOnly: [
     'kronos_metadata',
     'kronos_list_requests',
@@ -358,6 +372,12 @@ export const TOOL_CAPABILITIES = {
     'teams_list_meetings',
     'teams_list_transcripts',
     'teams_get_transcript',
+    ...BITACORA_TOOLS,
+    // «Consultar a un agente» (Correo, 2026-10-16): lectura SOLO del hilo compartido (concesión de 24 h).
+    'correo_hilo_compartido',
+    'correo_adjunto_compartido',
+    // Proyectos (2026-10-18): lo que VE la persona de la concesión de 24 h (chat_project_grant).
+    ...PROYECTOS_TOOLS_LECTURA,
   ],
   write: [
     'kronos_categorize_case',
@@ -369,9 +389,15 @@ export const TOOL_CAPABILITIES = {
     'kronos_delete_attachment',
     'kronos_set_request_fields',
     'kronos_request_ia_access',
+    // Propuestas sobre un hilo compartido: NO ejecutan; quedan PENDIENTES hasta que la persona confirma.
+    'correo_proponer_respuesta',
+    'correo_crear_solicitud_desde_hilo',
+    'correo_agregar_nota',
+    // Proyectos: PROPUESTAS a nombre de la persona de la concesión; solo ella las confirma en SynerLink.
+    ...PROYECTOS_TOOLS_PROPUESTA,
   ],
   writeNote:
-    'El servidor tiene rutas de escritura acotadas: categorización (caso: category_case; solicitud: process_category_request_general), creación de solicitudes (kronos_create_request: inserta requests_general + workflow + notificaciones), notas de bitácora (kronos_add_note) y resolución de actividades del workflow (kronos_resolve_task: cierra task_request_general con id_status=2 + date_resolution/end_date + id_executor_final, respetando el gate secuencial y avanzando el flujo), subida de adjuntos a OneDrive (kronos_upload_attachment: carpeta SAPSEND/TEC/SG/Request-<id> o SAPSEND/TEC/MA/Ticket-<id>, sin sobrescribir archivos existentes), eliminación de adjuntos (kronos_delete_attachment: solo key admin + usuario con doble llave de la app, justificación obligatoria, rechaza documentos con flujo de firma Orion y deja nota en la bitácora) y diligenciamiento del formulario dinámico (kronos_set_request_fields: UPSERT en request_form_value, sin campos de firma Orion ni solicitudes cerradas) y radicación de solicitudes de conectores IA a nombre de una persona (kronos_request_ia_access: la empresa se deduce del permiso de la persona sobre el agente de la key, nunca GSS; tope diario y sin duplicados). Todas parametrizadas, validadas por alcance de empresa y auditadas. El candado assertReadOnlySql sigue intacto para las tools de lectura.',
+    'El servidor tiene rutas de escritura acotadas: categorización (caso: category_case; solicitud: process_category_request_general), creación de solicitudes (kronos_create_request: inserta requests_general + workflow + notificaciones), notas de bitácora (kronos_add_note) y resolución de actividades del workflow (kronos_resolve_task: cierra task_request_general con id_status=2 + date_resolution/end_date + id_executor_final, respetando el gate secuencial y avanzando el flujo), subida de adjuntos a OneDrive (kronos_upload_attachment: carpeta SAPSEND/TEC/SG/Request-<id> o SAPSEND/TEC/MA/Ticket-<id>, sin sobrescribir archivos existentes), eliminación de adjuntos (kronos_delete_attachment: solo key admin + usuario con doble llave de la app, justificación obligatoria, rechaza documentos con flujo de firma Orion y deja nota en la bitácora) y diligenciamiento del formulario dinámico (kronos_set_request_fields: UPSERT en request_form_value, sin campos de firma Orion ni solicitudes cerradas) y radicación de solicitudes de conectores IA a nombre de una persona (kronos_request_ia_access: la empresa se deduce del permiso de la persona sobre el agente de la key, nunca GSS; tope diario y sin duplicados), y PROPUESTAS sobre Proyectos (proyecto_proponer_*: solo insertan chat_project_proposal pendiente + aviso en el chat + auditoría; nada se ejecuta sin la confirmación de la persona en SynerLink). Todas parametrizadas, validadas por alcance de empresa y auditadas. El candado assertReadOnlySql sigue intacto para las tools de lectura.',
 } as const;
 
 /**
@@ -403,6 +429,24 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
 
   // Radicación de solicitudes de conectores IA a nombre de una persona.
   registerIaAccessTool(server, ctx);
+
+  // «Consultar a un agente» desde el Correo: 2 lecturas del hilo compartido + 3 PROPUESTAS que la
+  // persona confirma en el chat (src/tools/correoAgente.ts).
+  registerCorreoAgenteTools(server, { scope: ctx.scope, audit: ctx.audit });
+
+  // Proyectos y su cronograma (2026-10-18): 4 lecturas + 6 PROPUESTAS a nombre de la persona de
+  // la concesión, que solo ella confirma en SynerLink (src/tools/proyectos.ts).
+  registerProyectosTools(server, { scope: ctx.scope, audit: ctx.audit });
+
+  // Bitácora de Proceso (planta): 4 tools de SOLO LECTURA (src/tools/bitacoraProceso.ts).
+  registerBitacoraTools(server, {
+    scope: ctx.scope,
+    maxPageSize: ctx.maxPageSize,
+    defaultPageSize: ctx.defaultPageSize,
+    withAudit: (tool, params, fn) => withAudit(ctx, tool, params, fn),
+    companyClause,
+    isMissingTableError,
+  });
 
   // ---------------------------------------------------------------------------
   // Teams / transcripciones

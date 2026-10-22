@@ -4,6 +4,11 @@ import {
   notifyRequestClosed,
 } from '../../../../lib/notificationEvents.js';
 import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
+import { closeLinkedOriginTask } from '../../../../lib/workflow/closeLinkedOriginTask.js';
+import {
+  cancelOpenOrionInternalTasks,
+  orionInternalTaskSql,
+} from '../../../../lib/orion/internalTasks';
 
 export async function POST(req) {
   try {
@@ -23,7 +28,8 @@ export async function POST(req) {
 
     // Al cerrar la solicitud (Resuelto=2 / Cancelado=3) todas sus tareas deben estar
     // cerradas también. Si alguna sigue abierta, se bloquea el cierre y se informa
-    // cuáles faltan y su responsable.
+    // cuáles faltan y su responsable. El proceso interno de firma (firmar, autorizar
+    // firma, validar documento) no cuenta: se cancela junto con el cierre.
     if (isRequestClosedStatus(status)) {
       const pendingTasks = await withMssqlPool(async (pool) => {
         const result = await pool
@@ -36,6 +42,7 @@ export async function POST(req) {
             LEFT JOIN [user] u ON u.id = trg.id_assigned
             INNER JOIN status_case sc ON sc.id_status_case = trg.id_status
             WHERE trg.id_request_general = @id AND trg.id_status NOT IN (2, 3)
+              AND NOT ${orionInternalTaskSql('trg', 'tpc')}
             ORDER BY tpc.display_order, trg.id
           `);
         return result.recordset;
@@ -66,7 +73,7 @@ export async function POST(req) {
         const prevResult = await new sql.Request(transaction)
           .input('id', sql.Int, id)
           .query(`
-          SELECT rg.status_req, rg.subject_request, rg.id_requester
+          SELECT rg.status_req, rg.subject_request, rg.id_requester, rg.id_origin_task
           FROM requests_general rg
           WHERE rg.id = @id
         `);
@@ -108,6 +115,14 @@ export async function POST(req) {
           await updateCategoryRequest.query(updateCategoryQuery);
         }
 
+        if (isRequestClosedStatus(status)) {
+          await cancelOpenOrionInternalTasks(
+            transaction,
+            id,
+            'Solicitud cerrada: el proceso de firma ya no queda como tarea pendiente.'
+          );
+        }
+
         await transaction.commit();
         return { prevRow };
       } catch (dbError) {
@@ -128,6 +143,19 @@ export async function POST(req) {
           statusId: nextStatus,
         })
       );
+
+      if (prevRow?.id_origin_task) {
+        fireAndForgetNotification(
+          withMssqlPool((pool) =>
+            closeLinkedOriginTask(pool, {
+              originTaskId: prevRow.id_origin_task,
+              mirroredStatus: Number(nextStatus),
+              closedByUserId: id_technical,
+              linkedRequestId: id,
+            })
+          )
+        );
+      }
     }
 
     return new Response(

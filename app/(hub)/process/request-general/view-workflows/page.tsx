@@ -68,6 +68,7 @@ import {
 } from '../../../../../lib/requests-general/tableField';
 import TableColumnsEditor from '../_components/TableColumnsEditor';
 import WorkflowValidatorsModal from '../../../../../components/request-general/WorkflowValidatorsModal';
+import { FlowConnector } from '../../../../../components/ui/flow/FlowConnector';
 import toast from 'react-hot-toast';
 // WorkflowDiagram deshabilitado temporalmente (2026-09-02): el diagrama se veía
 // desordenado (ramas cruzadas) a criterio de producto. Pendiente rediseño.
@@ -101,6 +102,8 @@ interface Task {
   is_authorization: boolean;
   type_authorization: number | null;
   type_authorization_label?: string | null;
+  id_linked_process?: number | null;
+  linked_process_label?: string | null;
   conditions: number[];
   display_order?: number | null;
 }
@@ -227,6 +230,7 @@ function ViewWorkFlowPage() {
   const canEditActive = userId != null && ADMIN_USER_IDS.includes(String(userId));
 
   const [addTaskModalOpened, setAddTaskModalOpened] = useState(false);
+  const [linkedFlowChecked, setLinkedFlowChecked] = useState(false);
   const [observersModalOpened, setObserversModalOpened] = useState(false);
   const [observers, setObservers] = useState<string[]>([]);
   const [preparersModalOpened, setPreparersModalOpened] = useState(false);
@@ -241,9 +245,13 @@ function ViewWorkFlowPage() {
     is_sequential: false,
     is_authorization: false,
     type_authorization: '',
+    id_linked_process: '',
     conditions: [] as number[],
   });
   const [authorizationTypeOptions, setAuthorizationTypeOptions] = useState<
+    { value: string; label: string }[]
+  >([]);
+  const [linkedProcessOptions, setLinkedProcessOptions] = useState<
     { value: string; label: string }[]
   >([]);
 
@@ -372,6 +380,7 @@ function ViewWorkFlowPage() {
           is_sequential: Boolean(t.is_sequential),
           is_authorization: Boolean(t.is_authorization),
           type_authorization: t.type_authorization ?? null,
+          id_linked_process: t.id_linked_process ?? null,
           conditions: Array.isArray(t.conditions) ? t.conditions : [],
         }))
       );
@@ -478,6 +487,14 @@ function ViewWorkFlowPage() {
           }))
           );
         }
+        if (data.processCategories) {
+          setLinkedProcessOptions(
+            data.processCategories.map((p: { id_process: number; process: string }) => ({
+              value: p.id_process.toString(),
+              label: p.process,
+            }))
+          );
+        }
       }
     } catch (err) {
       console.error('Error fetching users:', err);
@@ -570,7 +587,9 @@ function ViewWorkFlowPage() {
   const handleAddTask = () => {
     if (!newTaskForm.task.trim()) return;
     if (newTaskForm.is_authorization && !newTaskForm.type_authorization) return;
+    if (newTaskForm.id_linked_process && !newTaskForm.id_assigned_user) return;
 
+    const isLinked = Boolean(newTaskForm.id_linked_process);
     const newTask: Task = {
       id: Date.now() * -1,
       task: newTaskForm.task,
@@ -587,11 +606,16 @@ function ViewWorkFlowPage() {
       type_authorization_label: newTaskForm.is_authorization
         ? authorizationTypeOptions.find((o) => o.value === newTaskForm.type_authorization)?.label ?? null
         : null,
+      id_linked_process: isLinked ? Number(newTaskForm.id_linked_process) || null : null,
+      linked_process_label: isLinked
+        ? linkedProcessOptions.find((o) => o.value === newTaskForm.id_linked_process)?.label ?? null
+        : null,
       conditions: newTaskForm.conditions,
     };
 
     setEditedTasks([...editedTasks, newTask]);
-    setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '', conditions: [] });
+    setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '', id_linked_process: '', conditions: [] });
+    setLinkedFlowChecked(false);
     setAddTaskModalOpened(false);
   };
 
@@ -805,6 +829,7 @@ function ViewWorkFlowPage() {
           Boolean(originalTask.is_sequential) !== Boolean(task.is_sequential) ||
           Boolean(originalTask.is_authorization) !== Boolean(task.is_authorization) ||
           (originalTask.type_authorization ?? null) !== (task.type_authorization ?? null) ||
+          (originalTask.id_linked_process ?? null) !== (task.id_linked_process ?? null) ||
           condKey(originalTask.conditions) !== condKey(task.conditions) ||
           originalIdx !== idx // cambió el orden
         );
@@ -913,6 +938,7 @@ function ViewWorkFlowPage() {
         display_order?: number;
         is_authorization?: boolean;
         type_authorization?: number | null;
+        id_linked_process?: number | null;
         condition_option_ids?: number[];
         action: 'create' | 'update' | 'delete';
       }
@@ -1012,6 +1038,7 @@ function ViewWorkFlowPage() {
             display_order: editedTasks.findIndex((t) => t.id === task.id),
             is_authorization: task.is_authorization,
             type_authorization: task.is_authorization ? (task.type_authorization ?? null) : null,
+            id_linked_process: task.id_linked_process ?? null,
             condition_option_ids: task.conditions,
             action: 'create' as const,
           })),
@@ -1026,6 +1053,7 @@ function ViewWorkFlowPage() {
             display_order: editedTasks.findIndex((t) => t.id === task.id),
             is_authorization: task.is_authorization,
             type_authorization: task.is_authorization ? (task.type_authorization ?? null) : null,
+            id_linked_process: task.id_linked_process ?? null,
             condition_option_ids: task.conditions,
             action: 'update' as const,
           })),
@@ -1523,7 +1551,7 @@ function ViewWorkFlowPage() {
               </Card>
 
               <Flex justify='center' align='center'>
-                <div className='w-1 h-8 bg-gradient-to-b from-indigo-300 to-teal-300 rounded-full'></div>
+                <FlowConnector height={32} tone={isEditing ? 'editing' : 'ok'} />
               </Flex>
 
               <Card
@@ -1889,6 +1917,11 @@ function ViewWorkFlowPage() {
                                             {task.type_authorization_label || 'Autorización'}
                                           </Badge>
                                         )}
+                                        {task.id_linked_process && (
+                                          <Badge color='grape' variant='light' size='sm' styles={{ root: { textTransform: 'none' } }}>
+                                            Flujo: {task.linked_process_label || linkedProcessOptions.find((o) => o.value === String(task.id_linked_process))?.label || 'Vinculado'}
+                                          </Badge>
+                                        )}
                                         {task.conditions.length > 0 && (
                                           <Badge color='grape' variant='light' size='sm' styles={{ root: { textTransform: 'none' } }}>
                                             Si: {conditionLabelsView(task.conditions)}
@@ -1949,6 +1982,7 @@ function ViewWorkFlowPage() {
                                   <Checkbox
                                     label='Tarea de autorización'
                                     checked={editedTasks[index]?.is_authorization || false}
+                                    disabled={Boolean(editedTasks[index]?.id_linked_process)}
                                     onChange={(e) => {
                                       const checked = e.currentTarget.checked;
                                       const newTasks = [...editedTasks];
@@ -1993,6 +2027,39 @@ function ViewWorkFlowPage() {
                                       editedTasks[index]?.is_authorization &&
                                       editedTasks[index]?.type_authorization == null
                                         ? 'Selecciona el tipo de autorización'
+                                        : undefined
+                                    }
+                                    maw={400}
+                                  />
+                                )}
+
+                                {isEditing && !editedTasks[index]?.is_authorization && (
+                                  <Select
+                                    mt='sm'
+                                    label='Lanza otro flujo (opcional)'
+                                    placeholder='Sin flujo vinculado'
+                                    data={linkedProcessOptions}
+                                    value={
+                                      editedTasks[index]?.id_linked_process != null
+                                        ? String(editedTasks[index].id_linked_process)
+                                        : null
+                                    }
+                                    onChange={(value) => {
+                                      const newTasks = [...editedTasks];
+                                      newTasks[index] = {
+                                        ...newTasks[index],
+                                        id_linked_process: value ? Number(value) : null,
+                                        linked_process_label:
+                                          linkedProcessOptions.find((o) => o.value === value)?.label ?? null,
+                                      };
+                                      setEditedTasks(newTasks);
+                                    }}
+                                    searchable
+                                    clearable
+                                    description='Al crearse esta tarea, su asignado deberá crear una solicitud de este flujo; la tarea se cerrará al cerrarse esa solicitud.'
+                                    error={
+                                      editedTasks[index]?.id_linked_process && !editedTasks[index]?.id_assigned_user
+                                        ? 'La tarea vinculada requiere un asignado'
                                         : undefined
                                     }
                                     maw={400}
@@ -2132,16 +2199,7 @@ function ViewWorkFlowPage() {
 
                         {index < (isEditing ? editedTasks.length : tasks.length) - 1 && (
                           <div className='flex justify-center py-3'>
-                            <div
-                              className={`
-                                w-1 h-12 rounded-full transition-all duration-300
-                                ${
-                                  task.active === 1
-                                    ? 'bg-gradient-to-b from-amber-400 to-amber-200'
-                                    : 'bg-gray-300'
-                                }
-                              `}
-                            />
+                            <FlowConnector active={task.active === 1} tone={isEditing ? 'editing' : 'ok'} />
                           </div>
                         )}
                       </div>
@@ -2817,7 +2875,7 @@ function ViewWorkFlowPage() {
           opened={addTaskModalOpened}
           onClose={() => {
             setAddTaskModalOpened(false);
-            setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '', conditions: [] });
+            setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '', id_linked_process: '', conditions: [] });
           }}
           title={
             <Group gap='sm'>
@@ -2940,6 +2998,7 @@ function ViewWorkFlowPage() {
               mt='sm'
               label='Tarea de autorización'
               checked={newTaskForm.is_authorization}
+              disabled={Boolean(newTaskForm.id_linked_process)}
               onChange={(e) =>
                 setNewTaskForm({
                   ...newTaskForm,
@@ -2970,6 +3029,42 @@ function ViewWorkFlowPage() {
               />
             )}
 
+            <Checkbox
+              mt='sm'
+              label='Lanza otro flujo (el asignado crea una solicitud de ese flujo y esta tarea se cierra cuando esa solicitud se cierre)'
+              checked={Boolean(newTaskForm.id_linked_process) || linkedFlowChecked}
+              disabled={newTaskForm.is_authorization}
+              onChange={(e) => {
+                setLinkedFlowChecked(e.currentTarget.checked);
+                if (!e.currentTarget.checked) {
+                  setNewTaskForm({ ...newTaskForm, id_linked_process: '' });
+                }
+              }}
+            />
+
+            {(Boolean(newTaskForm.id_linked_process) || linkedFlowChecked) && (
+              <Select
+                mt='sm'
+                label='Flujo a lanzar'
+                placeholder='Seleccione el proceso'
+                data={linkedProcessOptions}
+                value={newTaskForm.id_linked_process}
+                onChange={(value) =>
+                  setNewTaskForm({ ...newTaskForm, id_linked_process: value || '' })
+                }
+                searchable
+                withAsterisk
+                error={
+                  (linkedFlowChecked || newTaskForm.id_linked_process) && !newTaskForm.id_linked_process
+                    ? 'Selecciona el flujo a lanzar'
+                    : newTaskForm.id_linked_process && !newTaskForm.id_assigned_user
+                      ? 'La tarea vinculada requiere un asignado'
+                      : undefined
+                }
+                maw={400}
+              />
+            )}
+
             {allOptionsData.length > 0 && (
               <MultiSelect
                 mt='sm'
@@ -2991,7 +3086,8 @@ function ViewWorkFlowPage() {
                 variant='outline'
                 onClick={() => {
                   setAddTaskModalOpened(false);
-                  setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '', conditions: [] });
+                  setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '', id_linked_process: '', conditions: [] });
+                  setLinkedFlowChecked(false);
                 }}
                 className='cursor-pointer transition-colors duration-200'
               >
@@ -3001,7 +3097,9 @@ function ViewWorkFlowPage() {
                 onClick={handleAddTask}
                 disabled={
                   !newTaskForm.task.trim() ||
-                  (newTaskForm.is_authorization && !newTaskForm.type_authorization)
+                  (newTaskForm.is_authorization && !newTaskForm.type_authorization) ||
+                  ((linkedFlowChecked || Boolean(newTaskForm.id_linked_process)) &&
+                    (!newTaskForm.id_linked_process || !newTaskForm.id_assigned_user))
                 }
                 className='bg-blue-600 hover:bg-blue-700 cursor-pointer transition-colors duration-200'
               >

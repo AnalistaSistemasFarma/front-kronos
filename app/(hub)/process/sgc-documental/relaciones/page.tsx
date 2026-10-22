@@ -2,7 +2,11 @@
 
 import { useState } from 'react';
 import dynamic from 'next/dynamic';
-import { Group, Loader } from '@mantine/core';
+import Link from 'next/link';
+import { Button, Group, Loader } from '@mantine/core';
+import { IconHierarchy2 } from '@tabler/icons-react';
+import { sgcHref } from '../../../../../components/sgc/useSgcCompany';
+import { SGC_BASE_URL } from '../../../../../lib/sgc/constants';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import SgcRelationProposals from '../../../../../components/sgc/relations/SgcRelationProposals';
 import type { SgcCompanyAccess } from '../../../../../lib/sgc/permissions';
@@ -33,7 +37,15 @@ function Relaciones({ company }: { company: SgcCompanyAccess }) {
 
 export default function SgcRelacionesPage() {
   return (
-    <SgcShell section='Mapa de relaciones' subtitle='Documentos conectados: procedimiento padre, formatos, anexos y referencias. Arrastre, acerque y busque por código.'>
+    <SgcShell
+      section='Mapa de relaciones'
+      subtitle='Documentos conectados: procedimiento padre, formatos, anexos y referencias. Arrastre, acerque y busque por código.'
+      actions={(company) => (
+        <Button component={Link} href={sgcHref(`${SGC_BASE_URL}/arbol`, company.idCompany)} variant='light' leftSection={<IconHierarchy2 size={16} />}>
+          Árbol documental
+        </Button>
+      )}
+    >
       {(company) => <Relaciones company={company} />}
     </SgcShell>
   );

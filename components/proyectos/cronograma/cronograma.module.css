@@ -1,0 +1,342 @@
+/*
+ * Cronograma y calendario del módulo «Proyectos» (2026-10-18). Solo variables de Mantine y de la
+ * aplicación (tema claro y oscuro salen solos), como components/proyectos/proyectos.module.css.
+ * El Gantt se desplaza de lado DENTRO de su caja: la página nunca se desborda.
+ */
+
+.barra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.leyenda {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+  min-width: 0;
+}
+
+.punto {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+/* ---- Gantt ---- */
+.gantt {
+  position: relative;
+  border: 1px solid var(--app-border, var(--mantine-color-default-border));
+  border-radius: var(--mantine-radius-md);
+  background: var(--mantine-color-body);
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.lienzo {
+  position: relative;
+}
+
+.fila {
+  display: flex;
+  min-height: 44px;
+  border-bottom: 1px solid var(--app-border, var(--mantine-color-default-border));
+}
+
+.fila:last-child {
+  border-bottom: 0;
+}
+
+.filaGrupo {
+  min-height: 32px;
+  background: var(--mantine-color-default-hover);
+}
+
+.etiqueta {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  min-width: 0;
+  background: var(--mantine-color-body);
+  border-right: 1px solid var(--app-border, var(--mantine-color-default-border));
+  text-align: left;
+}
+
+.filaGrupo .etiqueta {
+  background: var(--mantine-color-default-hover);
+}
+
+.etiquetaBoton {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--mantine-radius-sm);
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.etiquetaBoton:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.etiquetaBoton:focus-visible,
+.barraItem:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 1px;
+}
+
+.pista {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.cabecera {
+  position: relative;
+  height: 24px;
+  border-bottom: 1px solid var(--app-border, var(--mantine-color-default-border));
+}
+
+.marca {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--mantine-color-dimmed);
+  white-space: nowrap;
+  overflow: hidden;
+  border-left: 1px solid var(--app-border, var(--mantine-color-default-border));
+}
+
+.marcaMayor {
+  font-weight: 600;
+  color: var(--mantine-color-text);
+  text-transform: capitalize;
+}
+
+.rejilla {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed var(--app-border, var(--mantine-color-default-border));
+  pointer-events: none;
+}
+
+.finDeSemana {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--mantine-color-default-hover);
+  pointer-events: none;
+}
+
+.hoy {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--mantine-color-red-filled);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.hoyEtiqueta {
+  position: absolute;
+  top: 2px;
+  transform: translateX(-50%);
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--mantine-color-white);
+  background: var(--mantine-color-red-filled);
+  z-index: 4;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* Una barra es un botón del ALTO de la fila (44 px táctiles); lo que se ve es la franja de adentro. */
+.zonaBarra {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.barraItem {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--color-borde, transparent);
+  background: var(--color-fondo);
+  overflow: hidden;
+}
+
+.barraSub {
+  height: 12px;
+  opacity: 0.85;
+}
+
+.zonaBarra:hover .barraItem {
+  box-shadow: 0 0 0 2px var(--color-solido);
+}
+
+.zonaBarra:focus-visible,
+.zonaRombo:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+}
+
+.relleno {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--color-solido);
+  opacity: 0.9;
+}
+
+.barraTexto {
+  position: relative;
+  display: block;
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 20px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--mantine-color-text);
+  text-align: left;
+}
+
+.rayada {
+  background-image: repeating-linear-gradient(45deg, transparent 0 6px, var(--mantine-color-default-hover) 6px 12px);
+}
+
+/* Hito: rombo dentro de un botón de 44 × 44. */
+.zonaRombo {
+  position: absolute;
+  top: 0;
+  width: 44px;
+  height: 44px;
+  transform: translateX(-50%);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.rombo {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  border-radius: 3px;
+  background: var(--color-solido);
+  border: 2px solid var(--mantine-color-body);
+  box-shadow: 0 0 0 1px var(--color-solido);
+}
+
+/* ---- Calendario ---- */
+.mesScroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-height: 24px;
+  padding: 2px 6px;
+  border: 0;
+  border-left: 3px solid var(--color-solido);
+  border-radius: 4px;
+  background: var(--color-fondo);
+  font: inherit;
+  font-size: 11px;
+  color: var(--mantine-color-text);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.filaAgenda {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 6px 10px;
+  border: 0;
+  border-left: 4px solid var(--color-solido);
+  border-radius: var(--mantine-radius-md);
+  background: var(--mantine-color-default-hover);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.filaAgenda:hover {
+  background: var(--mantine-color-default-border);
+}
+
+.truncar {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Objetivos táctiles de 44 px en celular y tableta. */
+@media (max-width: 61.99em) {
+  .chip {
+    min-height: 44px;
+    font-size: 12px;
+  }
+}

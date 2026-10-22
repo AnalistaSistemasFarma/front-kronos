@@ -5,7 +5,7 @@ import { Drawer, Loader, Group } from '@mantine/core';
 import { IconChevronRight } from '@tabler/icons-react';
 import { MetricLineChart } from './MetricLineChart';
 import { formatBucket, formatInt, formatMs, formatValue } from './format';
-import type { DetailTarget, RangeKey, RouteRow } from './types';
+import type { DetailTarget, ModuleRow, RangeKey, RouteRow } from './types';
 import styles from './monitor.module.css';
 
 type SeriesRow = {
@@ -23,6 +23,7 @@ export function DetailSheet({
   range,
   inbound,
   outbound,
+  modules = [],
   onClose,
   onSelect,
 }: {
@@ -30,6 +31,8 @@ export function DetailSheet({
   range: RangeKey;
   inbound: RouteRow[];
   outbound: RouteRow[];
+  /** Totales por módulo (todas sus rutas, no solo las 40 más pesadas). */
+  modules?: ModuleRow[];
   onClose: () => void;
   onSelect: (target: DetailTarget) => void;
 }) {
@@ -52,6 +55,7 @@ export function DetailSheet({
           <ModuleDetail
             label={target.label}
             routes={inbound.filter((r) => (r.moduleLabel ?? r.module) === target.label)}
+            totals={modules.filter((m) => m.label === target.label)}
             onSelect={onSelect}
           />
         )}
@@ -70,23 +74,30 @@ export function DetailSheet({
 function ModuleDetail({
   label,
   routes,
+  totals,
   onSelect,
 }: {
   label: string;
   routes: RouteRow[];
+  totals: ModuleRow[];
   onSelect: (target: DetailTarget) => void;
 }) {
-  const total = routes.reduce((acc, r) => acc + r.totalMs, 0);
-  const requests = routes.reduce((acc, r) => acc + r.requests, 0);
-  const errors = routes.reduce((acc, r) => acc + r.errors, 0);
+  // Totales del módulo completo (los mismos de la fila que se tocó). Antes se sumaban solo las
+  // rutas que entraban en las 40 más pesadas y quedaban por debajo de la fila.
+  const sum = (rows: Array<{ totalMs: number; requests: number; errors: number }>) => ({
+    total: rows.reduce((acc, r) => acc + r.totalMs, 0),
+    requests: rows.reduce((acc, r) => acc + r.requests, 0),
+    errors: rows.reduce((acc, r) => acc + r.errors, 0),
+  });
+  const { total, requests, errors } = totals.length ? sum(totals) : sum(routes);
 
   return (
     <>
       <div className={styles.sheetStats}>
         <Stat label="Tiempo de servidor" value={formatMs(total)} />
         <Stat label="Peticiones" value={formatInt(requests)} />
-        <Stat label="Errores 5xx" value={formatInt(errors)} />
-        <Stat label="Rutas" value={formatInt(routes.length)} />
+        <Stat label="Errores (5xx o cortadas)" value={formatInt(errors)} />
+        <Stat label="Rutas entre las más pesadas" value={formatInt(routes.length)} />
       </div>
       <h3 className={styles.cardTitle} style={{ marginBottom: 10 }}>
         Rutas de {label}

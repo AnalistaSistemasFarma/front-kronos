@@ -3,7 +3,15 @@ import { prisma } from '../../../../../../lib/prisma';
 import { identificar } from '../../../../../../lib/portal/acceso';
 import { formadoresDePortal } from '../../../../../../lib/portal/config';
 import { recalcularProgresoDeMaterial, resolverNombreEstudiante } from '../../../../../../lib/portal/formacion';
-import { MENSAJE_AUTORIZACION, MENSAJE_YA_ENVIADO, validarRespuestas } from '../../../../../../lib/portal/formulario';
+import {
+  MENSAJE_AUTORIZACION,
+  MENSAJE_EVALUACION_EN_BORRADOR,
+  MENSAJE_YA_ENVIADO,
+  calificar,
+  definicionPublica,
+  esEvaluacion,
+  validarRespuestas,
+} from '../../../../../../lib/portal/formulario';
 import { leerDefinicion, registrarErrorSinDatos, versionVigente } from '../../../../../../lib/portal/formulario-servidor';
 
 function idDesdeParametro(valor: string): number | null {
@@ -43,6 +51,13 @@ async function materialFormulario(materialId: number, correo: string) {
  *        (origen AUTO) en la misma transacción; recalcula el curso y emite el
  *        certificado si llega al 100 %, igual que los demás materiales.
  *
+ * EVALUACIONES (Cristian, 2026-10-09): el GET NUNCA devuelve las respuestas
+ * correctas (`definicionPublica`). El POST califica EN EL SERVIDOR, guarda cada
+ * intento (aprobado o no) y solo el APROBADO crea la respuesta y completa el
+ * material; quien reprueba puede volver a intentar. La respuesta del POST trae
+ * la nota y si aprobó, pero no cuáles preguntas falló. Una evaluación en
+ * borrador no se puede responder (409).
+ *
  * Se envía UNA SOLA VEZ (índice único material + correo): un segundo envío
  * responde 409. No se edita después; para corregir, un administrador/formador
  * reabre la respuesta (`DELETE .../respuestas/:id`) y la persona vuelve a
@@ -60,17 +75,35 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (!material) return NextResponse.json({ error: 'Formulario no encontrado.' }, { status: 404 });
     const vigente = await versionVigente(material.formulario_id);
     if (!vigente) return NextResponse.json({ error: 'El formulario no está disponible.' }, { status: 404 });
+    if (vigente.definicion.borrador) {
+      return NextResponse.json({ error: MENSAJE_EVALUACION_EN_BORRADOR }, { status: 409, headers: SIN_CACHE });
+    }
 
     const enviada = await prisma.portalFormularioRespuesta.findUnique({
       where: { material_id_student_email: { material_id: materialId, student_email: quien.correo } },
       select: { enviada_at: true },
     });
+    let intentos: { usados: number; ultimo: { porcentaje: number; aprobado: boolean; enviadoEl: Date } | null } | undefined;
+    if (esEvaluacion(vigente.definicion)) {
+      const previos = await prisma.portalFormularioIntento.findMany({
+        where: { material_id: materialId, student_email: quien.correo },
+        orderBy: { enviado_at: 'desc' },
+        take: 100,
+        select: { porcentaje: true, aprobado: true, enviado_at: true },
+      });
+      intentos = {
+        usados: previos.length,
+        ultimo: previos[0] ? { porcentaje: previos[0].porcentaje, aprobado: previos[0].aprobado, enviadoEl: previos[0].enviado_at } : null,
+      };
+    }
     return NextResponse.json(
       {
         material: { id: material.id, titulo: material.title },
-        formulario: { versionId: vigente.versionId, version: vigente.version, definicion: vigente.definicion },
+        // Sin las respuestas correctas: solo las ven los formadores, en otra ruta.
+        formulario: { versionId: vigente.versionId, version: vigente.version, definicion: definicionPublica(vigente.definicion) },
         prellenado: { correo: quien.correo, nombre: await resolverNombreEstudiante(quien.correo) },
         enviadaEl: enviada?.enviada_at ?? null,
+        ...(intentos ? { intentos } : {}),
       },
       { headers: SIN_CACHE }
     );
@@ -121,6 +154,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: 'La versión del formulario no corresponde. Recargue la página.' }, { status: 409 });
     }
 
+    if (definicion.borrador) return NextResponse.json({ error: MENSAJE_EVALUACION_EN_BORRADOR }, { status: 409 });
+
     if (definicion.autorizacion && cuerpo.autorizaDatos !== true) {
       return NextResponse.json(
         { error: MENSAJE_AUTORIZACION, errores: [{ id: 'autorizacion', mensaje: MENSAJE_AUTORIZACION }] },
@@ -141,8 +176,42 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const ahora = new Date();
+
+    // EVALUACIÓN: se califica aquí, con las correctas que solo conoce el servidor.
+    const nota = esEvaluacion(definicion) ? calificar(definicion, validacion.respuestas) : null;
+    const intento = nota
+      ? prisma.portalFormularioIntento.create({
+          data: {
+            material_id: materialId,
+            formulario_version_id: version.id,
+            student_email: quien.correo,
+            respuestas: JSON.stringify(validacion.respuestas),
+            puntaje: nota.puntaje,
+            puntaje_max: nota.puntajeMax,
+            porcentaje: nota.porcentaje,
+            aprobado: nota.aprobado,
+            enviado_at: ahora,
+          },
+          select: { id: true },
+        })
+      : null;
+    const resumenNota = nota
+      ? { porcentaje: nota.porcentaje, notaMinima: nota.notaMinima, aprobado: nota.aprobado, puntaje: nota.puntaje, puntajeMax: nota.puntajeMax }
+      : null;
+
+    if (nota && !nota.aprobado) {
+      // Reprobó: queda el intento; NO se crea la respuesta ni se completa el material.
+      await intento;
+      const usados = await prisma.portalFormularioIntento.count({ where: { material_id: materialId, student_email: quien.correo } });
+      return NextResponse.json(
+        { ok: true, completado: false, evaluacion: { ...resumenNota, intentos: usados } },
+        { headers: SIN_CACHE }
+      );
+    }
+
     try {
       await prisma.$transaction([
+        ...(intento ? [intento] : []),
         prisma.portalFormularioRespuesta.create({
           data: {
             material_id: materialId,
@@ -172,7 +241,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const resultado = await recalcularProgresoDeMaterial(materialId, quien.correo);
-    return NextResponse.json({ ok: true, completado: true, enviadaEl: ahora, ...(resultado ?? {}) }, { headers: SIN_CACHE });
+    return NextResponse.json(
+      { ok: true, completado: true, enviadaEl: ahora, ...(resumenNota ? { evaluacion: resumenNota } : {}), ...(resultado ?? {}) },
+      { headers: SIN_CACHE }
+    );
   } catch (error) {
     registrarErrorSinDatos('POST .../materials/[materialId]/formulario', error);
     return NextResponse.json({ error: 'No se pudieron guardar las respuestas. Intente de nuevo.' }, { status: 500 });

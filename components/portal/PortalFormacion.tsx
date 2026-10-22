@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button } from '@mantine/core';
-import { IconTable } from '@tabler/icons-react';
+import { Alert, Button, Group, Modal, Stack, Text } from '@mantine/core';
+import { IconAlertTriangle, IconTable } from '@tabler/icons-react';
 import { leerJson } from './PortalContenido';
 import {
   SubidaCancelada,
@@ -19,6 +19,7 @@ import {
   videoCompleto,
 } from '../../lib/portal/visor-revision';
 import { PanelRespuestas, PreviaDeMaterialFormulario, SelectorFormulario, VisorFormulario } from './FormularioPropio';
+import TopEstudiantes from './TopEstudiantes';
 
 /**
  * FORMACIÓN — sección "tipo Moodle" al final del portal de Talento Humano.
@@ -63,6 +64,8 @@ interface DetalleCurso {
   esFormador: boolean;
   /** Administrador/formador del Excel de permisos: puede marcar a mano. */
   puedeMarcarManual?: boolean;
+  /** Solo para formadores: lo que se muestra al confirmar «Eliminar curso». */
+  conteos?: { inscritos: number; certificados: number } | null;
   porcentaje: number;
   materiales: Material[];
   certificado: { code: string; emitidoEl: string } | null;
@@ -86,7 +89,7 @@ const certificadoUrl = (code: string) => `/api/portal/certificates/${encodeURICo
  * para que la página de Formación (que vive aparte del portal desde
  * 2026-09-30) pueda mandar a la persona a ingresar primero.
  */
-export default function PortalFormacion({ onSinSesion }: { onSinSesion?: () => void } = {}) {
+export default function PortalFormacion({ onSinSesion, cursoInicialId }: { onSinSesion?: () => void; cursoInicialId?: number | null } = {}) {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cursos, setCursos] = useState<CursoResumen[]>([]);
@@ -95,6 +98,8 @@ export default function PortalFormacion({ onSinSesion }: { onSinSesion?: () => v
   // En una ref: si se pasa como función en línea, no debe re-disparar la carga.
   const onSinSesionRef = useRef(onSinSesion);
   onSinSesionRef.current = onSinSesion;
+  // true cuando la lista de cursos llegó de verdad (no cuando se cortó por falta de sesión).
+  const cursosCargados = useRef(false);
 
   const cargarCursos = useCallback(async () => {
     setError(null);
@@ -106,6 +111,7 @@ export default function PortalFormacion({ onSinSesion }: { onSinSesion?: () => v
       }
       const data = await leerJson(res);
       if (!res.ok) throw new Error(String(data?.error ?? 'No se pudieron cargar los cursos.'));
+      cursosCargados.current = true;
       setCursos(Array.isArray(data.cursos) ? (data.cursos as CursoResumen[]) : []);
       setEsFormador(data.esFormador === true);
     } catch (e) {
@@ -121,6 +127,17 @@ export default function PortalFormacion({ onSinSesion }: { onSinSesion?: () => v
 
   const [cursoAbiertoId, setCursoAbiertoId] = useState<number | null>(null);
   const [cursoGestionId, setCursoGestionId] = useState<number | null>(null);
+  // Aviso de «curso eliminado»: arriba y con color, en la lista a la que se vuelve.
+  const [avisoEliminado, setAvisoEliminado] = useState<string | null>(null);
+
+  // Invitación a un curso (Cristian, 2026-10-14): `/portal/formacion?curso=N` abre ese curso apenas cargan los cursos, UNA vez.
+  const abrioInicial = useRef(false);
+  useEffect(() => {
+    if (cargando || abrioInicial.current || !cursoInicialId || !cursosCargados.current) return;
+    abrioInicial.current = true;
+    if (cursos.some((c) => c.id === cursoInicialId && c.activo)) setCursoAbiertoId(cursoInicialId);
+    else setError('El curso al que lo invitaron ya no está disponible.');
+  }, [cargando, cursos, cursoInicialId]);
 
   if (cargando) return <p className='portal-th__estado'>Cargando formación…</p>;
 
@@ -148,6 +165,11 @@ export default function PortalFormacion({ onSinSesion }: { onSinSesion?: () => v
       </div>
 
       {error && <p className='portal-th__error'>{error}</p>}
+      {avisoEliminado && (
+        <p className='portal-th__aviso portal-th__aviso--accion' role='status' data-testid='aviso-curso-eliminado'>
+          {avisoEliminado}
+        </p>
+      )}
 
       {vista === 'estudiante' || !esFormador ? (
         cursoAbiertoId ? (
@@ -156,9 +178,25 @@ export default function PortalFormacion({ onSinSesion }: { onSinSesion?: () => v
           <ListaCursosEstudiante cursos={cursos.filter((c) => c.activo)} onAbrir={setCursoAbiertoId} />
         )
       ) : cursoGestionId ? (
-        <VistaCursoFormador cursoId={cursoGestionId} onVolver={() => setCursoGestionId(null)} onCambio={cargarCursos} />
+        <VistaCursoFormador
+          cursoId={cursoGestionId}
+          onVolver={() => setCursoGestionId(null)}
+          onCambio={cargarCursos}
+          onEliminado={(titulo) => {
+            setCursoGestionId(null);
+            setAvisoEliminado(`Se eliminó el curso «${titulo}». Ya no aparece en Formación; sus inscripciones y certificados se conservan.`);
+            void cargarCursos();
+          }}
+        />
       ) : (
-        <ListaCursosFormador cursos={cursos} onGestionar={setCursoGestionId} onCreado={cargarCursos} />
+        <ListaCursosFormador
+          cursos={cursos}
+          onGestionar={(id) => {
+            setAvisoEliminado(null);
+            setCursoGestionId(id);
+          }}
+          onCreado={cargarCursos}
+        />
       )}
     </div>
   );
@@ -220,20 +258,25 @@ function ProgresoSubida({ subida, onCancelar }: { subida: EstadoSubida; onCancel
 }
 
 function ListaCursosEstudiante({ cursos, onAbrir }: { cursos: CursoResumen[]; onAbrir: (id: number) => void }) {
-  if (cursos.length === 0) {
-    return <p className='portal-th__estado'>Todavía no hay cursos publicados.</p>;
-  }
+  // Top 10 de estudiantes (Cristian, 2026-10-16): a la derecha de los cursos en pantallas anchas, debajo en las angostas.
   return (
-    <div className='portal-th__curso-grilla'>
-      {cursos.map((c) => (
-        <button type='button' key={c.id} className='portal-th__curso-tarjeta' onClick={() => onAbrir(c.id)}>
-          <strong>{c.titulo}</strong>
-          {c.descripcion && <p>{c.descripcion}</p>}
-          <span className='portal-th__curso-meta'>{c.totalMateriales} material(es)</span>
-          <BarraProgreso porcentaje={c.porcentaje ?? 0} mostrarCompletado />
-          {c.certificado && <span className='portal-th__curso-certificado-chip'>✅ Certificado emitido</span>}
-        </button>
-      ))}
+    <div className='portal-th__lista-top'>
+      {cursos.length === 0 ? (
+        <p className='portal-th__estado'>Todavía no hay cursos publicados.</p>
+      ) : (
+        <div className='portal-th__curso-grilla'>
+          {cursos.map((c) => (
+            <button type='button' key={c.id} className='portal-th__curso-tarjeta' onClick={() => onAbrir(c.id)}>
+              <strong>{c.titulo}</strong>
+              {c.descripcion && <p>{c.descripcion}</p>}
+              <span className='portal-th__curso-meta'>{c.totalMateriales} material(es)</span>
+              <BarraProgreso porcentaje={c.porcentaje ?? 0} mostrarCompletado />
+              {c.certificado && <span className='portal-th__curso-certificado-chip'>✅ Certificado emitido</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      <TopEstudiantes />
     </div>
   );
 }
@@ -275,10 +318,14 @@ function VistaCursoEstudiante({
   }, [cargar]);
 
   const puedeMarcar = detalle?.puedeMarcarManual === true;
+  // Quien administra el portal (hojas ADMINISTRADORES y FORMADORES del Excel de permisos) marca y desmarca a mano TAMBIÉN en
+  // «Vista estudiante»: no se le pone ningún bloqueo (Cristian, 2026-10-14, deshaciendo el cambio del 2026-10-13). El marcado
+  // manual solo afecta al progreso de quien lo usa, y el servidor sigue exigiendo el permiso (403 a los demás).
+  const casillasEditables = puedeMarcar;
 
   /** Marcado MANUAL: solo administradores/formadores (el servidor lo exige). */
   const alternarMaterial = async (materialId: number, completado: boolean) => {
-    if (!puedeMarcar) return;
+    if (!casillasEditables) return;
     setMarcando(materialId);
     setAviso(null);
     try {
@@ -301,7 +348,10 @@ function VistaCursoEstudiante({
     await cargar();
     await onCambio();
   };
-  // Respuestas de un formulario (solo administradores/formadores del Excel).
+  // «Ver respuestas» en esta vista: SOLO para quien está en las hojas ADMINISTRADORES/FORMADORES del Excel
+  // de permisos pero NO es formador del portal (`PORTAL_TH_FORMADORES`). Esa persona no tiene «Vista formador»
+  // y, sin esto, perdería el acceso a las respuestas. Los formadores las ven en su vista (Cristian, 2026-10-09).
+  const verRespuestasAqui = puedeMarcar && detalle?.esFormador !== true;
   const [respuestasDe, setRespuestasDe] = useState<Material | null>(null);
 
   /** Un ENLACE cuenta como revisado al abrirlo (lo registra el servidor). */
@@ -338,7 +388,7 @@ function VistaCursoEstudiante({
           const completado = m.completadoEl !== null;
           return (
             <li key={m.id} className='portal-th__material-item'>
-              {puedeMarcar ? (
+              {casillasEditables ? (
                 <button
                   type='button'
                   className={`portal-th__material-check${completado ? ' portal-th__material-check--hecho' : ''}`}
@@ -385,7 +435,7 @@ function VistaCursoEstudiante({
                   {!m.obligatorio && ' · opcional'}
                 </span>
               </div>
-              {m.tipo === 'FORM' && puedeMarcar && (
+              {m.tipo === 'FORM' && verRespuestasAqui && (
                 <Button size='xs' variant='default' leftSection={<IconTable size={14} />} onClick={() => setRespuestasDe(m)}>
                   Ver respuestas
                 </Button>
@@ -395,7 +445,7 @@ function VistaCursoEstudiante({
           );
         })}
       </ul>
-      {!puedeMarcar && detalle.materiales.length > 0 && (
+      {!casillasEditables && detalle.materiales.length > 0 && (
         <p className='portal-th__estado'>
           Las casillas se marcan automáticamente cuando revisa cada material: los videos hasta el final, los PDF hasta la
           última página, los formularios al enviarlos y los demás documentos y enlaces al abrirlos.
@@ -949,10 +999,12 @@ function VistaCursoFormador({
   cursoId,
   onVolver,
   onCambio,
+  onEliminado,
 }: {
   cursoId: number;
   onVolver: () => void;
   onCambio: () => Promise<void>;
+  onEliminado: (titulo: string) => void;
 }) {
   const [detalle, setDetalle] = useState<DetalleCurso | null>(null);
   const [roster, setRoster] = useState<FilaRoster[] | null>(null);
@@ -960,6 +1012,14 @@ function VistaCursoFormador({
   // Error de una ACCIÓN (guardar, quitar, reemplazar): se muestra arriba sin
   // tapar la vista, para que el formador no pierda lo que estaba editando.
   const [errorAccion, setErrorAccion] = useState<string | null>(null);
+  // Resultado de restablecer un curso a un estudiante: arriba y con color, como los demás avisos de acción.
+  const [avisoAccion, setAvisoAccion] = useState<string | null>(null);
+  const [restableciendo, setRestableciendo] = useState<string | null>(null);
+  const [trabajandoRestablecer, setTrabajandoRestablecer] = useState(false);
+  // «Eliminar curso» (Cristian, 2026-10-22): borrado lógico con confirmación.
+  const [confirmarEliminar, setConfirmarEliminar] = useState(false);
+  const [eliminando, setEliminando] = useState(false);
+  const [errorEliminar, setErrorEliminar] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
     setError(null);
@@ -1127,6 +1187,20 @@ function VistaCursoFormador({
   };
 
   const [editandoCurso, setEditandoCurso] = useState(false);
+  // Menú de edición OCULTO por defecto (Cristian, 2026-10-14): al entrar solo se ven el nombre del curso y el progreso de los
+  // estudiantes; el botón «Editar» muestra título, publicar, materiales y agregar material.
+  const [modoEdicion, setModoEdicion] = useState(false);
+  // Invitar a una persona al curso por correo.
+  const [invitando, setInvitando] = useState(false);
+  const [correoInvitar, setCorreoInvitar] = useState('');
+  const [enviandoInvitacion, setEnviandoInvitacion] = useState(false);
+  const [resultadoInvitacion, setResultadoInvitacion] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
+  const panelInvitar = useRef<HTMLFormElement | null>(null);
+  // El resultado de enviar queda a la vista: si el formulario quedó fuera de pantalla, se baja hasta él.
+  useEffect(() => {
+    if (!resultadoInvitacion) return;
+    window.requestAnimationFrame(() => panelInvitar.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+  }, [resultadoInvitacion]);
   const [tituloCurso, setTituloCurso] = useState('');
   const [descripcionCurso, setDescripcionCurso] = useState('');
   const [guardandoCurso, setGuardandoCurso] = useState(false);
@@ -1179,7 +1253,78 @@ function VistaCursoFormador({
     }
   };
 
+  const eliminarElCurso = async () => {
+    setEliminando(true);
+    setErrorEliminar(null);
+    try {
+      const res = await fetch(`/api/portal/courses/${cursoId}`, { method: 'DELETE' });
+      const data = await leerJson(res);
+      if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo eliminar el curso.'));
+      setConfirmarEliminar(false);
+      onEliminado(detalle?.curso.titulo ?? 'el curso');
+    } catch (e) {
+      setErrorEliminar((e as Error).message);
+    } finally {
+      setEliminando(false);
+    }
+  };
+
   if (error) return <p className='portal-th__error'>{error}</p>;
+  const restablecerEstudiante = async (fila: FilaRoster) => {
+    setTrabajandoRestablecer(true);
+    setErrorAccion(null);
+    setAvisoAccion(null);
+    try {
+      const res = await fetch(`/api/portal/courses/${cursoId}/restablecer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ correo: fila.correo }),
+      });
+      const data = await leerJson(res);
+      if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo restablecer el curso.'));
+      setRestableciendo(null);
+      await cargar();
+      await onCambio();
+      const n = (v: unknown, uno: string, varios: string) => `${Number(v ?? 0)} ${Number(v ?? 0) === 1 ? uno : varios}`;
+      setAvisoAccion(
+        `Curso restablecido para ${fila.nombre}: se borraron ${n(data.progresos, 'avance', 'avances')}, ${n(data.respuestas, 'respuesta de formularios', 'respuestas de formularios')} y ${n(data.certificados, 'certificado', 'certificados')}. Puede volver a hacerlo desde cero.`
+      );
+    } catch (e) {
+      setErrorAccion((e as Error).message);
+    } finally {
+      setTrabajandoRestablecer(false);
+    }
+  };
+
+  const enviarInvitacion = async () => {
+    const correo = correoInvitar.trim();
+    if (!correo) {
+      setResultadoInvitacion({ tipo: 'error', texto: 'Escriba el correo de la persona.' });
+      return;
+    }
+    setEnviandoInvitacion(true);
+    setResultadoInvitacion(null);
+    try {
+      const res = await fetch(`/api/portal/courses/${cursoId}/invitar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ correo }),
+      });
+      const data = await leerJson(res);
+      if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo enviar la invitación.'));
+      setCorreoInvitar('');
+      setResultadoInvitacion({
+        tipo: 'ok',
+        texto: `Invitación enviada a ${String(data.correo ?? correo)}. ${data.yaInscrito ? 'Ya estaba inscrita en el curso.' : 'Quedó inscrita en el curso.'}`,
+      });
+      await cargar();
+    } catch (e) {
+      setResultadoInvitacion({ tipo: 'error', texto: (e as Error).message });
+    } finally {
+      setEnviandoInvitacion(false);
+    }
+  };
+
   if (!detalle || !roster) return <p className='portal-th__estado'>Cargando…</p>;
 
   return (
@@ -1192,7 +1337,63 @@ function VistaCursoFormador({
           {errorAccion}
         </p>
       )}
+      {avisoAccion && (
+        <p className='portal-th__aviso portal-th__aviso--accion' role='status' data-testid='aviso-restablecer'>
+          {avisoAccion}
+        </p>
+      )}
       {subida && <ProgresoSubida subida={subida} onCancelar={() => cancelarSubidaRef.current?.abort()} />}
+      <Modal
+        opened={confirmarEliminar}
+        onClose={() => !eliminando && setConfirmarEliminar(false)}
+        title='Eliminar curso'
+        centered
+        data-testid='confirmar-eliminar-curso'
+      >
+        <Stack gap='sm'>
+          <Text size='sm'>
+            Va a eliminar el curso <strong>«{detalle.curso.titulo}»</strong>. Dejará de aparecer en Formación para todos,
+            estudiantes y formadores.
+          </Text>
+          {(() => {
+            const inscritos = detalle.conteos?.inscritos ?? roster.length;
+            const certificados = detalle.conteos?.certificados ?? 0;
+            const plural = (n: number, uno: string, varios: string) => `${n.toLocaleString('es-CO')} ${n === 1 ? uno : varios}`;
+            return inscritos > 0 || certificados > 0 ? (
+              <Alert color='red' icon={<IconAlertTriangle size={18} />} p='sm' data-testid='eliminar-curso-advertencia'>
+                <Text size='sm' fw={600}>
+                  Este curso tiene {plural(inscritos, 'persona inscrita', 'personas inscritas')} y{' '}
+                  {plural(certificados, 'certificado emitido', 'certificados emitidos')}.
+                </Text>
+                <Text size='sm'>
+                  Ya no podrán seguir avanzando en él. Sus inscripciones y certificados se conservan, y los certificados
+                  emitidos siguen siendo verificables.
+                </Text>
+              </Alert>
+            ) : (
+              <Text size='sm' c='dimmed'>
+                No tiene personas inscritas ni certificados emitidos.
+              </Text>
+            );
+          })()}
+          <Text size='sm' c='dimmed'>
+            Los archivos del curso en SharePoint no se borran.
+          </Text>
+          {errorEliminar && (
+            <Text size='sm' c='red' role='alert'>
+              {errorEliminar}
+            </Text>
+          )}
+          <Group justify='flex-end'>
+            <Button variant='default' onClick={() => setConfirmarEliminar(false)} disabled={eliminando}>
+              Cancelar
+            </Button>
+            <Button color='red' loading={eliminando} onClick={() => void eliminarElCurso()} data-testid='eliminar-curso-si'>
+              Sí, eliminar curso
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
       {editandoCurso ? (
         <div className='portal-th__formacion-crear portal-th__formacion-editar'>
           <input
@@ -1228,19 +1429,50 @@ function VistaCursoFormador({
         <div className='portal-th__formacion-gestion-barra'>
           <div className='portal-th__formacion-titulo'>
             <h3>{detalle.curso.titulo}</h3>
+            {modoEdicion && (
+              <button
+                type='button'
+                className='portal-th__icono-boton'
+                title='Editar título y descripción'
+                aria-label='Editar título y descripción'
+                onClick={empezarEdicionCurso}
+              >
+                ✎
+              </button>
+            )}
+          </div>
+          <div className='portal-th__formacion-gestion-acciones'>
+            {modoEdicion && (
+              <button type='button' onClick={() => void publicar(!detalle.curso.activo)}>
+                {detalle.curso.activo ? 'Pasar a borrador' : 'Publicar curso'}
+              </button>
+            )}
+            {modoEdicion && detalle.esFormador && (
+              <Button
+                color='red'
+                variant='light'
+                onClick={() => {
+                  setErrorEliminar(null);
+                  setConfirmarEliminar(true);
+                }}
+                data-testid='eliminar-curso'
+              >
+                Eliminar curso
+              </Button>
+            )}
             <button
               type='button'
-              className='portal-th__icono-boton'
-              title='Editar título y descripción'
-              aria-label='Editar título y descripción'
-              onClick={empezarEdicionCurso}
+              className={modoEdicion ? 'portal-th__formacion-toggle-activo' : ''}
+              aria-expanded={modoEdicion}
+              onClick={() => {
+                if (modoEdicion) setEditandoCurso(false);
+                setModoEdicion(!modoEdicion);
+              }}
+              data-testid='alternar-edicion'
             >
-              ✎
+              {modoEdicion ? 'Cerrar edición' : 'Editar'}
             </button>
           </div>
-          <button type='button' onClick={() => void publicar(!detalle.curso.activo)}>
-            {detalle.curso.activo ? 'Pasar a borrador' : 'Publicar curso'}
-          </button>
         </div>
       )}
       {!editandoCurso && detalle.curso.descripcion && (
@@ -1250,6 +1482,8 @@ function VistaCursoFormador({
         <p className='portal-th__aviso'>Este curso está en borrador: los estudiantes todavía no lo ven.</p>
       )}
 
+      {modoEdicion && (
+      <div data-testid='menu-edicion'>
       <h4>Materiales</h4>
       <ul className='portal-th__material-lista'>
         {detalle.materiales.map((m, i) => (
@@ -1320,6 +1554,8 @@ function VistaCursoFormador({
           {subiendo ? (subida ? 'Subiendo…' : 'Agregando…') : '+ Agregar material'}
         </button>
       </div>
+      </div>
+      )}
 
       {respuestasDe && (
         <PanelRespuestas materialId={respuestasDe.id} titulo={respuestasDe.titulo} onCerrar={() => setRespuestasDe(null)} onCambio={cargar} />
@@ -1328,11 +1564,70 @@ function VistaCursoFormador({
         <PreviaDeMaterialFormulario formularioId={previaDe.formularioId} titulo={previaDe.titulo} onCerrar={() => setPreviaDe(null)} />
       )}
 
-      <h4>Progreso de los estudiantes</h4>
+      <div className='portal-th__progreso-cabecera'>
+        <h4>Progreso de los estudiantes</h4>
+        <button
+          type='button'
+          className='portal-th__boton-secundario'
+          aria-expanded={invitando}
+          onClick={() => {
+            setResultadoInvitacion(null);
+            setInvitando(!invitando);
+          }}
+          data-testid='invitar-curso'
+        >
+          Invitar al Curso
+        </button>
+      </div>
+      {invitando && (
+        <form
+          ref={panelInvitar}
+          className='portal-th__invitar'
+          data-testid='invitar-form'
+          onSubmit={(ev) => {
+            ev.preventDefault();
+            void enviarInvitacion();
+          }}
+        >
+          {/* El resultado va ARRIBA del formulario y con color, a la vista donde se hizo clic. */}
+          {resultadoInvitacion && (
+            <p
+              className={`portal-th__invitar-aviso portal-th__invitar-aviso--${resultadoInvitacion.tipo}`}
+              role={resultadoInvitacion.tipo === 'error' ? 'alert' : 'status'}
+              data-testid='invitar-aviso'
+            >
+              {resultadoInvitacion.texto}
+            </p>
+          )}
+          <label>
+            Correo de la persona a invitar
+            <input
+              type='email'
+              inputMode='email'
+              autoComplete='off'
+              placeholder='nombre@gsslatam.com'
+              maxLength={255}
+              value={correoInvitar}
+              onChange={(e) => setCorreoInvitar(e.target.value)}
+              data-testid='invitar-correo'
+              autoFocus
+            />
+          </label>
+          <p className='portal-th__estado'>Recibirá un mensaje con el enlace al curso y quedará inscrita.</p>
+          <div className='portal-th__invitar-acciones'>
+            <button type='button' className='portal-th__boton-secundario' onClick={() => setInvitando(false)} disabled={enviandoInvitacion}>
+              Cerrar
+            </button>
+            <button type='submit' disabled={enviandoInvitacion} data-testid='invitar-enviar'>
+              {enviandoInvitacion ? 'Enviando…' : 'Enviar'}
+            </button>
+          </div>
+        </form>
+      )}
       {roster.length === 0 ? (
         <p className='portal-th__estado'>Todavía no hay estudiantes inscritos.</p>
       ) : (
-        <div className='portal-th__correos'>
+        <div className='portal-th__correos portal-th__roster-contenedor'>
           <table className='portal-th__correos-tabla portal-th__roster-tabla'>
             <thead>
               <tr>
@@ -1340,6 +1635,7 @@ function VistaCursoFormador({
                 <th>Correo</th>
                 <th>Progreso</th>
                 <th>Certificado</th>
+                {detalle.puedeMarcarManual === true && <th>Acciones</th>}
               </tr>
             </thead>
             <tbody>
@@ -1359,6 +1655,35 @@ function VistaCursoFormador({
                       '—'
                     )}
                   </td>
+                  {detalle.puedeMarcarManual === true && (
+                    <td>
+                      {restableciendo === f.correo ? (
+                        <span className='portal-th__restablecer-confirmar' data-testid='restablecer-confirmar'>
+                          <span>¿Borrar su progreso, sus respuestas y su certificado?</span>
+                          <Button size='xs' color='red' loading={trabajandoRestablecer} onClick={() => void restablecerEstudiante(f)} data-testid='restablecer-si'>
+                            Sí, restablecer
+                          </Button>
+                          <Button size='xs' variant='default' disabled={trabajandoRestablecer} onClick={() => setRestableciendo(null)}>
+                            No
+                          </Button>
+                        </span>
+                      ) : (
+                        <Button
+                          size='xs'
+                          variant='default'
+                          aria-label={`Restablecer el curso para ${f.nombre}`}
+                          onClick={() => {
+                            setAvisoAccion(null);
+                            setErrorAccion(null);
+                            setRestableciendo(f.correo);
+                          }}
+                          data-testid='restablecer-curso'
+                        >
+                          Restablecer
+                        </Button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

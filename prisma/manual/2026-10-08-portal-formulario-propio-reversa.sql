@@ -53,6 +53,18 @@ DEALLOCATE fks;
 IF COL_LENGTH(N'dbo.portal_course_material', N'formulario_id') IS NOT NULL
   ALTER TABLE [dbo].[portal_course_material] DROP COLUMN [formulario_id];
 
+-- Desde 2026-10-09 existe portal_formulario_intento (evaluaciones), que apunta a
+-- portal_formulario_version y a portal_course_material: se quita primero. Tiene
+-- datos personales: misma salvaguarda que las respuestas.
+IF OBJECT_ID(N'[dbo].[portal_formulario_intento]', N'U') IS NOT NULL
+BEGIN
+  DECLARE @intentos INT = 0;
+  EXEC sp_executesql N'SELECT @n = COUNT(*) FROM [dbo].[portal_formulario_intento]', N'@n INT OUTPUT', @n = @intentos OUTPUT;
+  IF @intentos > 0 AND TRY_CAST(SESSION_CONTEXT(N'portal_reversa_formularios') AS INT) IS NULL
+    THROW 51204, N'Hay intentos de evaluaciones (datos personales): expórtelos y declare portal_reversa_formularios = 1 antes de la reversa.', 1;
+  DROP TABLE [dbo].[portal_formulario_intento];
+END
+
 DROP TABLE IF EXISTS [dbo].[portal_formulario_respuesta];
 DROP TABLE IF EXISTS [dbo].[portal_formulario_version];
 DROP TABLE IF EXISTS [dbo].[portal_formulario];

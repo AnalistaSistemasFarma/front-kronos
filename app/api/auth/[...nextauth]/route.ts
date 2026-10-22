@@ -6,6 +6,8 @@ import AzureADProvider from 'next-auth/providers/azure-ad';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { prisma } from '../../../../lib/prisma';
 import { normalizeNit, SUPPLIER_ROLE } from '../../../../lib/proveedor/isolation';
+import { noteLoginAttempt, withLoginAudit } from '../../../../lib/auth/login-audit/recorder';
+import { resolveAuthRedirect } from '../../../../lib/auth/safe-redirect';
 
 const azureConfigured =
   Boolean(process.env.AZURE_AD_CLIENT_ID) &&
@@ -14,6 +16,41 @@ const azureConfigured =
   process.env.AZURE_AD_CLIENT_SECRET !== 'your-client-secret' &&
   Boolean(process.env.AZURE_AD_TENANT_ID) &&
   process.env.AZURE_AD_TENANT_ID !== 'your-tenant-id';
+
+type SessionUserRow = {
+  id: string;
+  role: string;
+  image: string | null;
+  themePalette: string | null;
+  colorScheme: string | null;
+  uiFont: string | null;
+  nit: string | null;
+};
+
+/**
+ * El callback jwt corre en CADA getServerSession (cada API) y antes consultaba [user] siempre.
+ * Se guarda la fila por correo unos segundos: rol, tema y foto siguen al día (máx. 60 s de
+ * retraso, o inmediato con update()) y la BD deja de recibir una consulta por llamada.
+ */
+const SESSION_USER_TTL_MS = 60_000;
+const sessionUserCache: Map<string, { row: SessionUserRow | undefined; at: number }> =
+  ((globalThis as Record<string, unknown>).__kronosSessionUserCache as never) ??
+  ((globalThis as Record<string, unknown>).__kronosSessionUserCache = new Map());
+
+async function loadSessionUser(email: string, fresh: boolean): Promise<SessionUserRow | undefined> {
+  const key = email.trim().toLowerCase();
+  const cached = sessionUserCache.get(key);
+  if (!fresh && cached && Date.now() - cached.at < SESSION_USER_TTL_MS) return cached.row;
+
+  const rows = await prisma.$queryRaw<SessionUserRow[]>`
+    SELECT TOP 1 id, role, image, themePalette, colorScheme, uiFont, nit
+    FROM [user]
+    WHERE LOWER(LTRIM(RTRIM(email))) = LOWER(LTRIM(RTRIM(${email})))
+  `;
+  const row = rows[0];
+  sessionUserCache.set(key, { row, at: Date.now() });
+  return row;
+}
 
 export const authOptions: AuthOptions = {
   adapter: PrismaAdapter(prisma),
@@ -27,7 +64,10 @@ export const authOptions: AuthOptions = {
         password: { label: 'Password', type: 'password' },
       },
       async authorize(credentials) {
+        // Auditoría de inicios de sesión: cada salida anota el resultado (sin la
+        // contraseña). La escritura la hace withLoginAudit después de responder.
         if (!credentials?.email || !credentials?.password) {
+          noteLoginAttempt({ identifier: credentials?.email ?? null, success: false, reason: 'DATOS_INCOMPLETOS' });
           return null;
         }
         const emailInput = credentials.email.trim();
@@ -48,21 +88,27 @@ export const authOptions: AuthOptions = {
           WHERE LOWER(LTRIM(RTRIM(email))) = LOWER(LTRIM(RTRIM(${emailInput})))
         `;
         const user = rows[0];
+        const attempt = { identifier: emailInput, userId: user?.id ?? null, userName: user?.name ?? null };
         if (!user || !user.password) {
+          noteLoginAttempt({ ...attempt, success: false, reason: user ? 'SIN_CONTRASENA' : 'USUARIO_NO_EXISTE' });
           return null;
         }
         // AISLAMIENTO: un proveedor NUNCA entra por el login interno (correo),
         // aunque tenga correo registrado. El proveedor solo entra por /proveedor/login.
         if (user.role === SUPPLIER_ROLE) {
+          noteLoginAttempt({ ...attempt, success: false, reason: 'PROVEEDOR_EN_LOGIN_INTERNO' });
           return null;
         }
         if (!user.isActive) {
+          noteLoginAttempt({ ...attempt, success: false, reason: 'USUARIO_INACTIVO' });
           return null;
         }
         const isPasswordValid = await bcrypt.compare(credentials.password, user.password);
         if (!isPasswordValid) {
+          noteLoginAttempt({ ...attempt, success: false, reason: 'CONTRASENA_INCORRECTA' });
           return null;
         }
+        noteLoginAttempt({ ...attempt, success: true });
         return {
           id: user.id,
           email: user.email,
@@ -84,19 +130,24 @@ export const authOptions: AuthOptions = {
       async authorize(credentials) {
         const nit = normalizeNit(credentials?.nit);
         if (!nit || !credentials?.password) {
+          noteLoginAttempt({ identifier: nit || credentials?.nit || null, success: false, reason: 'DATOS_INCOMPLETOS' });
           return null;
         }
         // La columna nit tiene índice único filtrado: a lo sumo un proveedor por NIT.
         const user = await prisma.user.findFirst({
           where: { nit, role: SUPPLIER_ROLE, isActive: true },
         });
+        const attempt = { identifier: nit, userId: user?.id ?? null, userName: user?.name ?? null };
         if (!user || !user.password) {
+          noteLoginAttempt({ ...attempt, success: false, reason: user ? 'SIN_CONTRASENA' : 'NIT_NO_REGISTRADO' });
           return null;
         }
         const isPasswordValid = await bcrypt.compare(credentials.password, user.password);
         if (!isPasswordValid) {
+          noteLoginAttempt({ ...attempt, success: false, reason: 'CONTRASENA_INCORRECTA' });
           return null;
         }
+        noteLoginAttempt({ ...attempt, success: true });
         return {
           id: user.id,
           email: user.email,
@@ -119,27 +170,15 @@ export const authOptions: AuthOptions = {
     strategy: 'jwt' as const,
   },
   callbacks: {
-    async jwt({ token, user }: { token: JWT; user?: User }) {
+    async jwt({ token, user, trigger }: { token: JWT; user?: User; trigger?: string }) {
       const email = (user?.email ?? token.email) as string | undefined;
 
       if (email) {
         try {
-          const rows = await prisma.$queryRaw<
-            Array<{
-              id: string;
-              role: string;
-              image: string | null;
-              themePalette: string | null;
-              colorScheme: string | null;
-              uiFont: string | null;
-              nit: string | null;
-            }>
-          >`
-            SELECT TOP 1 id, role, image, themePalette, colorScheme, uiFont, nit
-            FROM [user]
-            WHERE LOWER(LTRIM(RTRIM(email))) = LOWER(LTRIM(RTRIM(${email})))
-          `;
-          const dbUser = rows[0];
+          // Al iniciar sesión o con update() (cambio de perfil/tema) se lee siempre de la BD;
+          // en el resto de llamadas (cada getServerSession) se reutiliza la lectura reciente.
+          const fresh = Boolean(user) || trigger === 'update';
+          const dbUser = await loadSessionUser(email, fresh);
           token.email = email;
           // Id Kronos (cuid), no el sub de Azure/OIDC.
           if (dbUser?.id) {
@@ -163,6 +202,10 @@ export const authOptions: AuthOptions = {
 
       return token;
     },
+    // Solo redirige dentro del mismo sitio (OWASP H-05): rechaza `//`, `/\`, esquemas y otros hosts.
+    async redirect({ url, baseUrl }: { url: string; baseUrl: string }) {
+      return resolveAuthRedirect(url, baseUrl);
+    },
     async session({ session, token }: { session: Session; token: JWT }) {
       if (token && session.user) {
         const kronosId =
@@ -179,11 +222,28 @@ export const authOptions: AuthOptions = {
       return session;
     },
   },
+  events: {
+    // Microsoft (Entra ID): el éxito se anota aquí; si Microsoft rechaza o se
+    // cancela, NextAuth responde con ?error= y withLoginAudit lo registra como fallo.
+    // Para credenciales/NIT ya lo anotó authorize (no se sobrescribe).
+    async signIn({ user, account }) {
+      if (account?.provider === 'azure-ad') {
+        noteLoginAttempt({
+          identifier: user?.email ?? null,
+          userId: user?.id ?? null,
+          userName: user?.name ?? null,
+          success: true,
+        });
+      }
+    },
+  },
   pages: {
     signIn: '/login',
   },
 };
 
-const handler = NextAuth(authOptions);
+// withLoginAudit: registra cada intento de inicio de sesión (auditoría de seguridad)
+// sin frenar ni romper el login. Ver lib/auth/login-audit/recorder.ts.
+const handler = withLoginAudit(NextAuth(authOptions));
 
 export { handler as GET, handler as POST };

@@ -18,6 +18,7 @@ import {
 import {
   IconAlertCircle,
   IconDownload,
+  IconLock,
   IconMessage2,
   IconUpload,
 } from '@tabler/icons-react';
@@ -28,6 +29,8 @@ import AgentMetricsBar from './AgentMetricsBar';
 import ChatComposer, { type ChatComposerHandle } from './ChatComposer';
 import { EsqueletoHilo } from './ChatSkeletons';
 import ChatMarkdown from './ChatMarkdown';
+import TarjetaAccionCorreo from '../correo/TarjetaAccionCorreo';
+import { useAccionesCorreo } from '../correo/useAccionesCorreo';
 import { useChatConversation, type ChatTarget } from './useChatConversation';
 import { useAltoVisible, usuarioInteractuando } from './useAltoVisible';
 import {
@@ -52,6 +55,64 @@ import {
 } from '../../lib/chat/nudge-fx';
 import { registrarHiloAbierto, soltarHiloAbierto } from '../../lib/chat/message-sound';
 import type { ChatReplyToDto } from '../../lib/chat/client';
+import { BotonReaccionar, FilaReacciones, HojaMensaje } from './ChatReactions';
+import type { MediaParaEnviar } from './useChatConversation';
+import StickerAnimado from './StickerAnimado';
+
+/**
+ * GIF o STICKER de un mensaje (2026-10-20). La imagen sale SIEMPRE de la
+ * propia aplicación (sticker en /chat/stickers, de empresa en
+ * /api/chat/stickers, GIF por el proxy firmado): el navegador nunca le pide
+ * nada a GIPHY. El texto descriptivo del mensaje queda como `alt`.
+ */
+function MediaDelMensaje({ message }: { message: ChatMessageDto }) {
+  const media = message.media;
+  if (!media) return null;
+  if (media.kind === 'sticker') {
+    // Animado (2026-10-20): en bucle mientras se ve, quieto fuera de pantalla
+    // y con prefers-reduced-motion (StickerAnimado).
+    if (media.animated && media.poster) {
+      return (
+        <StickerAnimado
+          src={media.src}
+          poster={media.poster}
+          alt={`Sticker: ${media.title}`}
+          title={media.title}
+          size={128}
+          className='chat-sticker'
+        />
+      );
+    }
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- imagen local o del propio servidor
+      <img
+        src={media.src}
+        alt={`Sticker: ${media.title}`}
+        title={media.title}
+        className='chat-sticker'
+        width={128}
+        height={128}
+        loading='lazy'
+        draggable={false}
+      />
+    );
+  }
+  const ancho = media.width && media.height ? Math.min(240, media.width) : 240;
+  const alto = media.width && media.height ? Math.round((ancho * media.height) / media.width) : undefined;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- pasa por el proxy firmado de SynerLink
+    <img
+      src={media.src}
+      alt={`GIF: ${media.title}`}
+      title={media.title}
+      className='chat-gif'
+      width={ancho}
+      height={alto}
+      loading='lazy'
+      draggable={false}
+    />
+  );
+}
 
 /**
  * El hilo de conversación: burbujas con Markdown real, indicador de qué está
@@ -151,6 +212,8 @@ const MessageBubble = memo(function MessageBubble({
   nueva = false,
   onCitar,
   onIrAlCitado,
+  onReaccionar,
+  onAbrirHoja,
 }: {
   message: ChatMessageDto;
   /** El agente del hilo directo. En un grupo no hay "uno". */
@@ -168,6 +231,10 @@ const MessageBubble = memo(function MessageBubble({
   onCitar?: (message: ChatMessageDto) => void;
   /** Saltar al mensaje que este cita. */
   onIrAlCitado?: (idMessage: number) => void;
+  /** Poner o quitar MI reacción (2026-10-20). Sin esto no hay reacciones. */
+  onReaccionar?: (message: ChatMessageDto, emoji: string) => void;
+  /** Toque largo en el celular: abre la hoja de acciones del mensaje. */
+  onAbrirHoja?: (message: ChatMessageDto) => void;
 }) {
   const isSystem = message.role === 'system';
 
@@ -191,18 +258,54 @@ const MessageBubble = memo(function MessageBubble({
   const UMBRAL = 55;
 
   const puedeCitar = Boolean(onCitar) && !message.pending && !message.failed && message.id > 0;
+  const real = !message.pending && !message.failed && message.id > 0;
+  const puedeReaccionar = Boolean(onReaccionar) && real;
+
+  /*
+   * TOQUE LARGO (2026-10-20): 450 ms quieto sobre el mensaje abre la hoja de
+   * acciones (reaccionar, responder, copiar). Moverse más de 10 px lo cancela:
+   * es el desplazamiento de la conversación o el deslizar para citar.
+   * Android dispara además `contextmenu` con la presión larga; ese evento se
+   * reconoce por el toque reciente y no cita (la hoja ya ofrece Responder).
+   */
+  const largo = useRef<number | null>(null);
+  const ultimoToque = useRef(0);
+  const cancelarLargo = () => {
+    if (largo.current !== null) {
+      window.clearTimeout(largo.current);
+      largo.current = null;
+    }
+  };
+  useEffect(() => cancelarLargo, []);
 
   const alTocar = (event: React.TouchEvent) => {
-    if (!puedeCitar) return;
+    ultimoToque.current = Date.now();
+    if (!puedeCitar && !(onAbrirHoja && real)) return;
     const toque = event.touches[0];
     gesto.current = { x: toque.clientX, y: toque.clientY };
+    cancelarLargo();
+    if (onAbrirHoja && real) {
+      largo.current = window.setTimeout(() => {
+        largo.current = null;
+        gesto.current = null;
+        setArrastre(0);
+        try {
+          navigator.vibrate?.(10);
+        } catch {
+          /* sin vibración: no pasa nada */
+        }
+        onAbrirHoja(message);
+      }, 450);
+    }
   };
 
   const alMover = (event: React.TouchEvent) => {
-    if (!gesto.current || !puedeCitar) return;
+    if (!gesto.current) return;
     const toque = event.touches[0];
     const dx = toque.clientX - gesto.current.x;
     const dy = toque.clientY - gesto.current.y;
+    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) cancelarLargo();
+    if (!puedeCitar) return;
     // Solo a la derecha, y solo si el gesto es horizontal: si no, es la
     // conversación desplazándose y hay que dejarla en paz.
     if (dx <= 0 || Math.abs(dy) > Math.abs(dx)) {
@@ -213,6 +316,7 @@ const MessageBubble = memo(function MessageBubble({
   };
 
   const alSoltar = () => {
+    cancelarLargo();
     if (arrastre >= UMBRAL && puedeCitar) onCitar?.(message);
     gesto.current = null;
     setArrastre(0);
@@ -250,13 +354,20 @@ const MessageBubble = memo(function MessageBubble({
     );
   }
 
+  const esSticker = message.media?.kind === 'sticker';
+  const reaccionarBoton = puedeReaccionar ? (
+    <BotonReaccionar alLado={isUser ? 'left' : 'right'} onElegir={(e) => onReaccionar?.(message, e)} />
+  ) : null;
+
   return (
     <Group
       align='flex-end'
       gap='xs'
       justify={isUser ? 'flex-end' : 'flex-start'}
       wrap='nowrap'
+      className='chat-msg'
     >
+      {isUser && reaccionarBoton}
       {!isUser && (
         <Box style={{ flexShrink: 0 }}>
           <AgentAvatar
@@ -279,6 +390,7 @@ const MessageBubble = memo(function MessageBubble({
           nueva ? 'chat-bubble--nueva' : '',
           message.pending ? 'chat-bubble--pending' : '',
           message.failed ? 'chat-bubble--failed' : '',
+          message.media ? `chat-bubble--media chat-bubble--${message.media.kind}` : '',
         ]
           .filter(Boolean)
           .join(' ')}
@@ -286,7 +398,13 @@ const MessageBubble = memo(function MessageBubble({
         onTouchStart={alTocar}
         onTouchMove={alMover}
         onTouchEnd={alSoltar}
+        onTouchCancel={alSoltar}
         onContextMenu={(event) => {
+          // Presión larga en Android: la atiende la hoja (ver arriba).
+          if (onAbrirHoja && Date.now() - ultimoToque.current < 1500) {
+            event.preventDefault();
+            return;
+          }
           if (!puedeCitar) return;
           // Se reemplaza el menú del navegador: ofrecer "inspeccionar" sobre
           // un mensaje no le sirve a nadie, y responder sí.
@@ -321,10 +439,19 @@ const MessageBubble = memo(function MessageBubble({
           </UnstyledButton>
         )}
 
-        {message.body.trim().length > 0 && <ChatMarkdown content={message.body} />}
+        {message.media ? (
+          <MediaDelMensaje message={message} />
+        ) : (
+          message.body.trim().length > 0 && <ChatMarkdown content={message.body} />
+        )}
         <MessageAttachments message={message} />
 
-        <Text size='xs' className='chat-bubble__meta'>
+        <FilaReacciones
+          reactions={message.reactions}
+          onAlternar={puedeReaccionar ? (e) => onReaccionar?.(message, e) : undefined}
+        />
+
+        <Text size='xs' className={`chat-bubble__meta${esSticker ? ' chat-bubble__meta--media' : ''}`}>
           {message.failed
             ? 'No se pudo enviar'
             : message.pending
@@ -332,6 +459,7 @@ const MessageBubble = memo(function MessageBubble({
               : formatChatTime(message.createdAt)}
         </Text>
       </Box>
+      {!isUser && reaccionarBoton}
     </Group>
   );
 });
@@ -590,6 +718,7 @@ export default function ChatThread({
   agent,
   group,
   person,
+  project,
   currentUserId,
   active = true,
   height,
@@ -621,6 +750,21 @@ export default function ChatThread({
     /** Yo silencié los zumbidos de este hilo: llegan sin sacudida ni sonido. */
     nudgesMuted?: boolean;
   };
+  /**
+   * PROYECTO (hilo de agente, F1): la conversación ya existe y se abre por su
+   * id. Va JUNTO con `agent` (el agente del proyecto). Sin menciones: todo lo
+   * que se escriba aquí lo atiende ese agente con el contexto del proyecto.
+   */
+  project?: {
+    idConversation: number;
+    name: string;
+    /**
+     * Módulo «Proyectos»: si viene, la conversación es de SOLO LECTURA para
+     * quien mira (lector, o asistente retirado) y en lugar de la caja de
+     * escribir se muestra este motivo. El servidor también rechaza el envío.
+     */
+    readOnly?: string | null;
+  };
   /** Quién soy. En un grupo es lo que distingue mis mensajes de los ajenos. */
   currentUserId?: string;
   /** El hilo está a la vista (marca leído y arranca el sondeo). */
@@ -630,15 +774,18 @@ export default function ChatThread({
 }) {
   const enGrupo = Boolean(group);
   const enPersonas = !group && Boolean(person);
+  const enProyecto = !group && !person && Boolean(project);
   // Hilo directo = una persona con UN agente. Es lo único donde `role='user'`
   // significa "lo escribí yo".
-  const esHiloDirecto = !group && !person && Boolean(agent);
+  const esHiloDirecto = !group && !person && !project && Boolean(agent);
 
   const target: ChatTarget | null = group
     ? { kind: 'group', idConversation: group.idConversation }
     : person
       ? { kind: 'people', idConversation: person.idConversation }
-      : agent
+      : project
+        ? { kind: 'project', idConversation: project.idConversation }
+        : agent
         ? { kind: 'agent', idAgent: agent.idAgent, idConversation: idConversacion ?? null }
         : null;
 
@@ -671,6 +818,14 @@ export default function ChatThread({
     miId: currentUserId,
     onZumbido: enPersonas ? alZumbido : undefined,
   });
+
+  // «Consultar a un agente» (Correo, 2026-10-16): las propuestas del agente sobre un hilo de correo
+  // compartido se pintan como TARJETA de confirmación en lugar de su mensaje. Solo en hilos directos.
+  const ultimoMensaje = thread.messages[thread.messages.length - 1];
+  const accionesCorreo = useAccionesCorreo(
+    esHiloDirecto ? thread.conversation?.id ?? null : null,
+    `${thread.messages.length}:${ultimoMensaje?.id ?? 0}`
+  );
 
   // Sonido de mensaje nuevo: este hilo está a la vista, así que lo que llegue
   // aquí no suena mientras la ventana tenga el foco (ver message-sound.ts).
@@ -738,14 +893,16 @@ export default function ChatThread({
     ? `grupo:${group.idConversation}`
     : person
       ? `persona:${person.idConversation}`
-      : `agente:${agent?.idAgent ?? 0}`;
+      : project
+        ? `proyecto:${project.idConversation}`
+        : `agente:${agent?.idAgent ?? 0}`;
 
   // Clave del BORRADOR del compositor: persona + hilo. Sin saber quién es la
   // persona (sesión cargando) o sin hilo, no se guarda borrador.
   const { data: sesionBorrador } = useSession();
   const miIdBorrador = currentUserId ?? sesionBorrador?.user?.id ?? null;
   const claveBorrador =
-    miIdBorrador && (group || person || agent) ? `${miIdBorrador}:${claveHilo}` : null;
+    miIdBorrador && (group || person || project || agent) ? `${miIdBorrador}:${claveHilo}` : null;
 
   const participantes = thread.conversation?.participants ?? group?.participants;
   // Memorizado: es prop del compositor (en `memo`) y un arreglo nuevo en cada
@@ -834,7 +991,13 @@ export default function ChatThread({
     stickToBottomRef.current = true;
     if (!stickToBottom) setStickToBottom(true);
   }
-  if (yaEstaban.current === null && thread.messages.length > 0) {
+  // PARPADEO AL CAMBIAR DE HILO (2026-10-17, «a veces vuelve»): en el render
+  // en que cambia `claveHilo`, `thread.messages` todavía son los del hilo
+  // ANTERIOR (el hook los reinicia en un efecto, después). Si "lo que ya
+  // estaba" se tomaba de ahí, TODO el historial del hilo nuevo quedaba como
+  // «nuevo» y entraba con la animación desde opacidad 0: la conversación entera
+  // titilaba. Solo se cuenta lo que ya es de este hilo.
+  if (yaEstaban.current === null && !thread.stale && thread.messages.length > 0) {
     yaEstaban.current = new Set(thread.messages.map((m) => m.id));
   }
 
@@ -842,7 +1005,9 @@ export default function ChatThread({
   // algo, un mensaje nuevo no debe arrancarle la vista.
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
-    if (!viewport) return;
+    // Mismo motivo: la cuenta del hilo anterior no es el "primer lote" del
+    // nuevo (si no, el hilo nuevo bajaba con animación en vez de abrir abajo).
+    if (!viewport || thread.stale) return;
     const primerLote = lastCountRef.current === 0;
     const grew = thread.messages.length > lastCountRef.current;
     lastCountRef.current = thread.messages.length;
@@ -856,7 +1021,7 @@ export default function ChatThread({
       return;
     }
     viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
-  }, [thread.messages, stickToBottom]);
+  }, [thread.messages, thread.stale, stickToBottom]);
 
   // Al abrir el hilo, al fondo sin animación. useLayoutEffect (no useEffect):
   // fija el scroll ANTES de que el navegador pinte, para no dejar ver el
@@ -989,6 +1154,36 @@ export default function ChatThread({
     [enviarHilo, cita]
   );
   const quitarCita = useCallback(() => setCita(null), []);
+
+  /* ───────────── Reacciones, GIF y stickers (2026-10-20) ───────────── */
+
+  // En un proyecto de solo lectura no se reacciona (el servidor también lo niega).
+  const soloLectura = Boolean(enProyecto && project?.readOnly);
+  const reaccionarHilo = thread.react;
+  const reaccionar = useCallback(
+    (message: ChatMessageDto, emoji: string) => void reaccionarHilo(message.id, emoji),
+    [reaccionarHilo]
+  );
+  // La hoja del celular guarda el ID y lee el mensaje vivo del hilo: así ve
+  // las reacciones que lleguen mientras está abierta.
+  const [idHoja, setIdHoja] = useState<number | null>(null);
+  const abrirHoja = useCallback((message: ChatMessageDto) => setIdHoja(message.id), []);
+  const mensajeHoja = idHoja === null ? null : (thread.messages.find((m) => m.id === idHoja) ?? null);
+
+  // El panel Emoji | Stickers | GIF vive en el compositor (botón al lado del
+  // clip, 2026-10-20); aquí solo se envía.
+  const enviarMediaHilo = thread.sendMedia;
+  const enviarMedia = useCallback(
+    async (media: MediaParaEnviar) => {
+      usuarioMovioRef.current = false;
+      stickToBottomRef.current = true;
+      setStickToBottom(true);
+      const enviado = await enviarMediaHilo(media, cita);
+      if (enviado) setCita(null);
+    },
+    [enviarMediaHilo, cita]
+  );
+  const enviarMediaCompositor = useCallback((media: MediaParaEnviar) => void enviarMedia(media), [enviarMedia]);
 
   /** Solo reaccionamos si lo que se arrastra son ARCHIVOS (no texto ni enlaces). */
   const dragTraeArchivos = (event: React.DragEvent) =>
@@ -1137,25 +1332,42 @@ export default function ChatThread({
                     ? 'Escriba para empezar. Los asistentes de este grupo responden solo cuando se los menciona con @.'
                     : enPersonas
                       ? `Escríbale a ${person?.name ?? 'esta persona'}. Solo ustedes dos ven esta conversación, además de la auditoría del área de Sistemas.`
-                      : agent?.description ||
+                      : enProyecto
+                        ? `Escríbale a ${agent?.displayName ?? 'el asistente'}. En este hilo trabaja solo con las instrucciones y los archivos de «${project?.name ?? 'el proyecto'}», aparte de sus demás conversaciones. Los miembros del proyecto ven todo lo que se escriba aquí.`
+                        : agent?.description ||
                       `Escríbale a ${agent?.displayName ?? 'el asistente'} para empezar la conversación.`}
                 </Text>
               </Stack>
             </Center>
           )}
 
-          {thread.messages.map((message) => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              agent={agent}
-              currentUserId={currentUserId}
-              porAutor={!esHiloDirecto}
-              nueva={yaEstaban.current ? !yaEstaban.current.has(message.id) : false}
-              onCitar={citar}
-              onIrAlCitado={irAlMensaje}
-            />
-          ))}
+          {thread.messages.map((message) => {
+            const accion = message.role === 'agent' ? accionesCorreo.porMensaje.get(message.id) : undefined;
+            if (accion) {
+              return (
+                <Group key={message.id} id={`msg-${message.id}`} align='flex-start' gap='xs' wrap='nowrap'>
+                  <Box style={{ flexShrink: 0 }}>
+                    <AgentAvatar code={agent?.code ?? ''} displayName={agent?.displayName ?? accion.agente} avatarUrl={agent?.avatarUrl ?? null} size={28} showStatus={false} withTooltip={false} />
+                  </Box>
+                  <TarjetaAccionCorreo accion={accion} onCambio={() => void accionesCorreo.refrescar()} />
+                </Group>
+              );
+            }
+            return (
+              <MessageBubble
+                key={message.id}
+                message={message}
+                agent={agent}
+                currentUserId={currentUserId}
+                porAutor={!esHiloDirecto}
+                nueva={yaEstaban.current ? !yaEstaban.current.has(message.id) : false}
+                onCitar={citar}
+                onIrAlCitado={irAlMensaje}
+                onReaccionar={soloLectura ? undefined : reaccionar}
+                onAbrirHoja={abrirHoja}
+              />
+            );
+          })}
 
           {enGrupo ? (
             <GroupActivity statuses={thread.statuses} />
@@ -1193,9 +1405,16 @@ export default function ChatThread({
         </Alert>
       )}
 
+      {enProyecto && project?.readOnly ? (
+        <Box className='chat-thread__composer'>
+          <Alert icon={<IconLock size={16} />} color='gray' radius='md' py={8} data-testid='chat-solo-lectura'>
+            <Text size='xs'>{project.readOnly}</Text>
+          </Alert>
+        </Box>
+      ) : (
       <Box className='chat-thread__composer'>
         <ChatComposer
-          voiceConversationId={agent?.code === 'duo' ? thread.conversation?.id : undefined}
+          voiceConversationId={!enProyecto && agent?.code === 'duo' ? thread.conversation?.id : undefined}
           ref={composerRef}
           onSend={alEnviar}
           cita={cita}
@@ -1208,11 +1427,23 @@ export default function ChatThread({
               ? `Escriba en ${group?.title ?? 'el grupo'}…  (mencione con @)`
               : enPersonas
                 ? `Escríbale a ${person?.name ?? 'esta persona'}…`
-                : `Escríbale a ${agent?.displayName ?? 'el asistente'}…`
+                : enProyecto
+                  ? `Escríbale a ${agent?.displayName ?? 'el asistente'} en ${project?.name ?? 'el proyecto'}…`
+                  : `Escríbale a ${agent?.displayName ?? 'el asistente'}…`
           }
           menciones={menciones}
+          onEnviarMedia={soloLectura ? undefined : enviarMediaCompositor}
         />
       </Box>
+      )}
+
+      <HojaMensaje
+        mensaje={mensajeHoja}
+        onCerrar={() => setIdHoja(null)}
+        onReaccionar={reaccionar}
+        onCitar={soloLectura ? undefined : citar}
+        puedeReaccionar={!soloLectura}
+      />
     </Box>
   );
 }

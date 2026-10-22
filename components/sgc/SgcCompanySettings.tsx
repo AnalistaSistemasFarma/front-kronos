@@ -30,6 +30,9 @@ interface Settings {
   uncontrolledCopies?: { types: string[]; days: number; maxDays: number };
   viewerProtection?: boolean;
   approverListEnforced?: boolean;
+  qualitySelfReview?: boolean;
+  approverDepartmentEnforced?: boolean;
+  trainingClosedByQuality?: boolean;
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -54,6 +57,11 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
   const [copyMaxDays, setCopyMaxDays] = useState<number | string>(90);
   const [viewerProtection, setViewerProtection] = useState(true);
   const [approverListEnforced, setApproverListEnforced] = useState(true);
+  // Excepción de Calidad (2026-10-13, punto 3): apagada por defecto.
+  const [qualitySelfReview, setQualitySelfReview] = useState(false);
+  // S15 (DOC v7): D16 (líderes por departamento, apagado) y D18 (Calidad cierra la capacitación, encendido).
+  const [approverDepartmentEnforced, setApproverDepartmentEnforced] = useState(false);
+  const [trainingClosedByQuality, setTrainingClosedByQuality] = useState(true);
   const [closeReason, setCloseReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
@@ -70,6 +78,9 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
     }
     setViewerProtection(data.viewerProtection ?? true);
     setApproverListEnforced(data.approverListEnforced ?? true);
+    setQualitySelfReview(data.qualitySelfReview ?? false);
+    setApproverDepartmentEnforced(data.approverDepartmentEnforced ?? false);
+    setTrainingClosedByQuality(data.trainingClosedByQuality ?? true);
   }, [data]);
 
   if (error) {
@@ -91,7 +102,7 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
     setBusy(true);
     setFeedback(null);
     try {
-      const body: Record<string, unknown> = { company: idCompany, reason, disseminationDomains: domains, readThresholdPct: Number(threshold), emailMode, uncontrolledCopyTypes: copyTypes, uncontrolledCopyDays: Number(copyDays), uncontrolledCopyMaxDays: Number(copyMaxDays), viewerProtection, approverListEnforced };
+      const body: Record<string, unknown> = { company: idCompany, reason, disseminationDomains: domains, readThresholdPct: Number(threshold), emailMode, uncontrolledCopyTypes: copyTypes, uncontrolledCopyDays: Number(copyDays), uncontrolledCopyMaxDays: Number(copyMaxDays), viewerProtection, approverListEnforced, qualitySelfReview, approverDepartmentEnforced, trainingClosedByQuality };
       if (logo) body.logoDataUrl = await fileToDataUrl(logo);
       await sgcSend('/api/sgc/company-settings', 'PUT', body);
       setFeedback({ ok: true, text: 'Configuración guardada y registrada en la auditoría.' });
@@ -208,6 +219,27 @@ export default function SgcCompanySettings({ idCompany }: { idCompany: number })
           checked={approverListEnforced}
           onChange={(e) => setApproverListEnforced(e.currentTarget.checked)}
           data-testid='sgc-config-aprobadores'
+        />
+        <Switch
+          label='Aseguramiento de Calidad puede revisar el documento que elaboró'
+          description='Excepción a la segregación de funciones solo para Calidad (apagada por defecto). La aprobación no cambia: nunca la hace quien elaboró. Quien hace la solicitud, si es de Calidad, siempre puede elaborarla y revisarla.'
+          checked={qualitySelfReview}
+          onChange={(e) => setQualitySelfReview(e.currentTarget.checked)}
+          data-testid='sgc-config-calidad-revisa'
+        />
+        <Switch
+          label='Flujo DOC v7: aprueban solo los líderes autorizados del departamento de quien elabora'
+          description='Lista «Líder del departamento» en Configuración → Aprobadores autorizados. Apagado por defecto (decisión del 2026-10-13: por ahora sin restricción); al encenderlo, un departamento sin líderes cargados no puede asignar aprobadores.'
+          checked={approverDepartmentEnforced}
+          onChange={(e) => setApproverDepartmentEnforced(e.currentTarget.checked)}
+          data-testid='sgc-config-lideres-departamento'
+        />
+        <Switch
+          label='Flujo DOC v7: Aseguramiento de Calidad cierra la capacitación que dicta el creador'
+          description='El creador del documento prepara y dicta la capacitación y carga los resultados; con esto encendido (por defecto), después Calidad la cierra. Aplica a las capacitaciones que empiecen después del cambio.'
+          checked={trainingClosedByQuality}
+          onChange={(e) => setTrainingClosedByQuality(e.currentTarget.checked)}
+          data-testid='sgc-config-calidad-cierra-capacitacion'
         />
         <NumberInput label='Umbral de aviso de avance de lectura (%)' description='Al llegar a este porcentaje de lectura se avisa una vez al creador del documento y a Calidad.' min={1} max={100} value={threshold} onChange={setThreshold} w={320} data-testid='sgc-config-umbral' />
         <Textarea label='Motivo del cambio' description='Mínimo 10 caracteres: queda en el control de cambios.' autosize minRows={2} value={reason} onChange={(e) => setReason(e.currentTarget.value)} autoComplete='off' data-testid='sgc-config-empresa-motivo' />

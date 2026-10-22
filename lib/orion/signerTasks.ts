@@ -15,6 +15,7 @@ import {
   parseOrionFileIdFromResolution,
 } from './signerAuthMarkers';
 import { ensureOrionSignerWorkflowTemplates } from './workflowTemplates';
+import { isRequestClosedForOrion } from './internalTasks';
 
 export {
   buildOrionFileTaskMarker,
@@ -64,13 +65,12 @@ export async function findOrionSignatureTaskTemplate(
     FROM process_category_request_general pcr
     INNER JOIN task_process_category tpc ON tpc.id_process_category = pcr.id_process_category
     WHERE pcr.id_request_general = @id_request
-      AND tpc.active = 1
       AND ISNULL(tpc.is_authorization, 0) = 0
       AND (
         LOWER(tpc.task) LIKE '%firma%'
         OR LOWER(tpc.task) LIKE '%firmar%'
       )
-    ORDER BY ISNULL(tpc.display_order, 0), tpc.id
+    ORDER BY tpc.active DESC, ISNULL(tpc.display_order, 0), tpc.id
   `);
 
   return result.recordset[0] ?? null;
@@ -290,6 +290,11 @@ export async function syncOrionSignerTasks(
     documentStatus?: string | null;
     fileId?: string | null;
     fileName?: string | null;
+    /**
+     * false = solo cierra tareas (completadas, rechazadas…), nunca abre. Abrir o refrescar el
+     * panel de firma no debe recrear tareas que el usuario cerró.
+     */
+    allowOpen?: boolean;
   }
 ): Promise<SyncOrionSignerTasksResult> {
   await ensureOrionSignerWorkflowTemplates(pool, params.requestId);
@@ -319,6 +324,12 @@ export async function syncOrionSignerTasks(
     !documentRejected &&
     !documentReturned &&
     !documentFullySigned;
+  // Borrador: aún no se envió a firma. Solicitud cerrada: la firma ya no es tarea pendiente.
+  const canOpenTasks =
+    shouldManageTasks &&
+    params.allowOpen !== false &&
+    statusUpper !== 'BORRADOR' &&
+    !(await isRequestClosedForOrion(pool, params.requestId));
   const fileId = String(params.fileId || params.state.fileId || '').trim() || null;
   const fileName = params.fileName ?? params.state.fileName ?? null;
   const marker = buildOrionFileTaskMarker(fileId);
@@ -390,7 +401,7 @@ export async function syncOrionSignerTasks(
       continue;
     }
 
-    if (!shouldManageTasks) continue;
+    if (!canOpenTasks) continue;
 
     // Solo el firmante en turno recibe tarea + notificación (el siguiente al avanzar).
     if (!currentTurnKey || signerSlotKey(signer, index) !== currentTurnKey) continue;

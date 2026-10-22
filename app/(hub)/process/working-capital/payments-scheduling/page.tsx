@@ -59,7 +59,6 @@ import { saveAs } from 'file-saver';
 import { PDFDocument } from 'pdf-lib';
 import ExcelJS from 'exceljs';
 import { addDataSheet, downloadWorkbook } from '../../../../../lib/dashboard/excel/excelHelpers';
-import { useGetMicrosoftToken as getMicrosoftToken } from '../../../../../components/microsoft-365/useGetMicrosoftToken';
 import { formatEstimatedPaymentDateShort } from '../../../../../lib/treasury/estimatedPaymentDate';
 
 function parseOrionFileIdFromAuthResolution(resolution?: string | null): string | null {
@@ -93,6 +92,7 @@ interface PaymentSchedulingTask {
   valor_pagar?: number | null;
   fecha_solicitada_pago: string;
   acreedor?: string | null;
+  subempresa?: string | null;
 }
 
 interface CompanyRow {
@@ -304,6 +304,27 @@ function PaymentSchedulingBoard() {
         [payments]
     );
 
+    const sumValor = (rows: PaymentSchedulingTask[]) =>
+        rows.reduce((acc, r) => {
+            const n = Number(String(r.valor_pagar ?? '').replace(/[^\d.-]/g, ''));
+            return acc + (Number.isFinite(n) ? n : 0);
+        }, 0);
+
+    const groupedByType = useMemo(() => {
+        const order = TYPE_REQUEST_OPTIONS.filter((o) => o.value !== '0').map((o) => o.label);
+        const map = new Map<string, PaymentSchedulingTask[]>();
+        for (const r of filteredRequests) {
+            const key = (r.tipo_solicitud ?? '').trim() || 'Sin tipo';
+            if (!map.has(key)) map.set(key, []);
+            map.get(key)!.push(r);
+        }
+        return [...map.keys()]
+            .sort((a, b) => (order.indexOf(a) + 1 || 999) - (order.indexOf(b) + 1 || 999))
+            .map((type) => ({ type, rows: map.get(type)! }));
+    }, [filteredRequests]);
+
+    const totalGeneral = useMemo(() => sumValor(filteredRequests), [filteredRequests]);
+
     const allSelectableSelected =
         selectableRequests.length > 0 && selectableRequests.every((r) => selectedIds.has(r.id_tarea));
     const someSelectableSelected = selectableRequests.some((r) => selectedIds.has(r.id_tarea));
@@ -403,7 +424,6 @@ function PaymentSchedulingBoard() {
 
     const fetchDepartments = async (_userIdParam?: string) => {
         try {
-        // El servidor toma el usuario de la sesión; no se envía ningún id.
         const url = `/api/authorization/authorization-departments`;
 
         const response = await fetch(url);
@@ -557,10 +577,20 @@ function PaymentSchedulingBoard() {
         );
     };
 
+    const openRelatedRequestNewTab = (req: PaymentSchedulingTask) => {
+        if (!req.id_solicitud) return;
+        window.open(
+            `/process/request-general/view-activities?id=${req.id_tarea}&from=payments-scheduling`,
+            '_blank',
+            'noopener,noreferrer'
+        );
+    };
+
     const downloadPaymentPlano = async (rows: PaymentSchedulingTask[]) => {
         const columns = [
             { header: 'ID Solicitud', key: 'id', width: 12 },
             { header: 'Empresa', key: 'empresa', width: 26 },
+            { header: 'Subempresa', key: 'subempresa', width: 26 },
             { header: 'Tipo', key: 'tipo', width: 22 },
             { header: 'Subtipo', key: 'subtipo', width: 24 },
             { header: 'Documento', key: 'documento', width: 16 },
@@ -577,6 +607,7 @@ function PaymentSchedulingBoard() {
             return {
                 id: r.id_solicitud,
                 empresa: r.empresa ?? '',
+                subempresa: r.subempresa ?? '',
                 tipo: r.tipo_solicitud ?? '',
                 subtipo: r.subtipo_solicitud ?? '',
                 documento: a.doc,
@@ -601,44 +632,29 @@ function PaymentSchedulingBoard() {
     };
 
     const downloadConsolidatedPdf = async (rows: PaymentSchedulingTask[]): Promise<number> => {
-        const token = await getMicrosoftToken();
-        if (!token) throw new Error('No se pudo obtener el token de acceso a OneDrive.');
-
-        const base = process.env.MICROSOFTGRAPHUSERROUTE;
         const merged = await PDFDocument.create();
         let mergedCount = 0;
 
         for (const r of rows) {
-            const folder = `Request-${r.id_solicitud}`;
-            let children: Array<{
-                id: string;
-                name?: string;
-                file?: unknown;
-                '@microsoft.graph.downloadUrl'?: string;
-            }> = [];
-            try {
-                const res = await axios.get(
-                    `${base}root:/SAPSEND/TEC/SG/${folder}:/children`,
-                    { headers: { Authorization: `Bearer ${token}` } }
-                );
-                children = res.data?.value ?? [];
-            } catch (err) {
-                if (axios.isAxiosError(err) && err.response?.status === 404) continue;
-                throw err;
-            }
-
-            const pdfs = children.filter(
-                (it) => it.file && /\.pdf$/i.test(String(it.name || ''))
+            const listRes = await fetch(
+                `/api/requests-general/list-attachments?requestId=${encodeURIComponent(String(r.id_solicitud))}&storagePath=SG&entityType=Request`
             );
+            const listData = (await listRes.json().catch(() => ({}))) as {
+                error?: string;
+                files?: Array<{ id: string; name?: string; '@microsoft.graph.downloadUrl'?: string }>;
+            };
+            if (!listRes.ok) {
+                throw new Error(listData.error || `Error listando adjuntos (HTTP ${listRes.status})`);
+            }
+            const children = Array.isArray(listData.files) ? listData.files : [];
+
+            const pdfs = children.filter((it) => /\.pdf$/i.test(String(it.name || '')));
 
             for (const pdf of pdfs) {
-                const downloadUrl = pdf['@microsoft.graph.downloadUrl'];
-                const bytesRes = downloadUrl
-                    ? await axios.get(downloadUrl, { responseType: 'arraybuffer' })
-                    : await axios.get(`${base}items/${pdf.id}/content`, {
-                          responseType: 'arraybuffer',
-                          headers: { Authorization: `Bearer ${token}` },
-                      });
+                const downloadUrl =
+                    pdf['@microsoft.graph.downloadUrl'] ||
+                    `/api/requests-general/attachment-file?requestId=${encodeURIComponent(String(r.id_solicitud))}&fileId=${encodeURIComponent(pdf.id)}&storagePath=SG&entityType=Request&download=1`;
+                const bytesRes = await axios.get(downloadUrl, { responseType: 'arraybuffer' });
                 try {
                     const src = await PDFDocument.load(bytesRes.data, { ignoreEncryption: true });
                     const pages = await merged.copyPages(src, src.getPageIndices());
@@ -841,16 +857,21 @@ function PaymentSchedulingBoard() {
                 </Text>
             )}
             </Table.Td>
-            <Table.Td style={{ minWidth: 150, maxWidth: 220 }}>
-            <Group gap={6} wrap='nowrap'>
-                <IconBuilding size={16} className='text-gray-400' style={{ flexShrink: 0 }} />
+            <Table.Td style={{ minWidth: 170, maxWidth: 260 }}>
+            <Group gap={6} wrap='nowrap' align='flex-start'>
+                <IconBuilding size={16} className='text-gray-400' style={{ flexShrink: 0, marginTop: 2 }} />
                 <div style={{ minWidth: 0 }}>
                     <Text size='sm' fw={500} truncate>
-                        {req.usuario_asignado}
+                        {req.creador_solicitud}
                     </Text>
                     <Text size='xs' c='dimmed' truncate>
                         {req.empresa}
                     </Text>
+                    {req.subempresa && (
+                        <Text size='xs' c='dimmed' truncate>
+                            {req.subempresa}
+                        </Text>
+                    )}
                 </div>
             </Group>
             </Table.Td>
@@ -894,31 +915,38 @@ function PaymentSchedulingBoard() {
                 onClick={() => goToRelatedRequest(req)}
                 aria-label={`Ir a solicitud ${req.id_solicitud}`}
             >
-                <Badge variant='light' color={getStatusColor(req.estado_tarea)} size='sm'>
+                <Badge
+                    variant='light'
+                    color={getStatusColor(req.estado_tarea)}
+                    size='sm'
+                    styles={{ label: { overflow: 'visible' } }}
+                >
                     {getStatusLabel(req.estado_tarea)}
                 </Badge>
             </UnstyledButton>
             </Table.Td>
             <Table.Td style={{ whiteSpace: 'nowrap' }}>
-            <Group gap='xs' wrap='nowrap' justify='center'>
+            <Group gap={4} wrap='nowrap' justify='center'>
                 <Tooltip label='Ir a la solicitud'>
                 <ActionIcon
                     variant='light'
                     color='blue'
-                    onClick={() => goToRelatedRequest(req)}
+                    size='sm'
+                    onClick={() => openRelatedRequestNewTab(req)}
                     aria-label='Ir a la solicitud'
                 >
-                    <IconEye size={16} />
+                    <IconEye size={15} />
                 </ActionIcon>
                 </Tooltip>
                 <Tooltip label='Ver detalle'>
                 <ActionIcon
                     variant='subtle'
                     color='gray'
+                    size='sm'
                     onClick={() => openDetailModal(req)}
                     aria-label='Ver detalle'
                 >
-                    <IconNotes size={16} />
+                    <IconNotes size={15} />
                 </ActionIcon>
                 </Tooltip>
             </Group>
@@ -973,10 +1001,15 @@ function PaymentSchedulingBoard() {
             )}
             </UnstyledButton>
 
-            <Group gap={6} wrap='nowrap'>
-                <IconBuilding size={14} className='text-gray-400' style={{ flexShrink: 0 }} />
-                <Text size='sm' truncate>{req.empresa}</Text>
-                <Badge variant='light' color='indigo' size='xs' ml='auto' style={{ flexShrink: 0 }}>
+            <Group gap={6} wrap='nowrap' align='flex-start'>
+                <IconBuilding size={14} className='text-gray-400' style={{ flexShrink: 0, marginTop: 2 }} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                    <Text size='sm' truncate>{req.empresa}</Text>
+                    {req.subempresa && (
+                        <Text size='xs' c='dimmed' truncate>{req.subempresa}</Text>
+                    )}
+                </div>
+                <Badge variant='light' color='indigo' size='xs' style={{ flexShrink: 0 }}>
                 {req.usuario_asignado}
                 </Badge>
             </Group>
@@ -1030,7 +1063,7 @@ function PaymentSchedulingBoard() {
                 mt='xs'
                 fullWidth
                 leftSection={<IconEye size={14} />}
-                onClick={() => goToRelatedRequest(req)}
+                onClick={() => openRelatedRequestNewTab(req)}
             >
                 Ir a la solicitud
             </Button>
@@ -1284,6 +1317,15 @@ function PaymentSchedulingBoard() {
                 <IconShieldCheck size={20} />
                 Solicitudes por autorizar
                 </Title>
+                <Group gap='lg'>
+                {filteredRequests.length > 0 && (
+                    <Text size='sm' fw={600}>
+                        Total general:{' '}
+                        <Text span fw={700} c='green'>
+                            {formatCurrency(totalGeneral)}
+                        </Text>
+                    </Text>
+                )}
                 {!isMobile && selectableRequests.length > 0 && (
                 <Checkbox
                     label='Seleccionar todo'
@@ -1292,6 +1334,7 @@ function PaymentSchedulingBoard() {
                     onChange={toggleSelectAll}
                 />
                 )}
+                </Group>
             </Group>
 
             {filteredRequests.length === 0 ? (
@@ -1305,7 +1348,7 @@ function PaymentSchedulingBoard() {
                 </Text>
                 </Stack>
             ) : isMobile ? (
-                <Stack gap='sm'>
+                <Stack gap='lg'>
                 {selectableRequests.length > 0 && (
                     <Checkbox
                     label='Seleccionar todo'
@@ -1314,40 +1357,72 @@ function PaymentSchedulingBoard() {
                     onChange={toggleSelectAll}
                     />
                 )}
-                {filteredRequests.map(renderCard)}
+                {groupedByType.map((group) => (
+                    <div key={group.type}>
+                    <Group justify='space-between' mb='xs' wrap='nowrap'>
+                        <Group gap='xs' wrap='nowrap'>
+                        <Text fw={700}>{group.type}</Text>
+                        <Badge variant='light' color='gray' size='sm'>
+                            {group.rows.length}
+                        </Badge>
+                        </Group>
+                        <Text size='sm' fw={700} c='green' style={{ whiteSpace: 'nowrap' }}>
+                        {formatCurrency(sumValor(group.rows))}
+                        </Text>
+                    </Group>
+                    <Stack gap='sm'>{group.rows.map(renderCard)}</Stack>
+                    </div>
+                ))}
                 </Stack>
             ) : (
-                <div className='overflow-x-auto'>
-                <Table striped highlightOnHover verticalSpacing='sm' horizontalSpacing='md'>
-                    <Table.Thead
-                        style={{
-                            backgroundColor:
-                                'light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))',
-                        }}
+                <Stack gap='xl'>
+                {groupedByType.map((group) => (
+                    <div key={group.type}>
+                    <Group gap='xs' mb='xs'>
+                        <Title order={4}>{group.type}</Title>
+                        <Badge variant='light' color='gray'>
+                        {group.rows.length}
+                        </Badge>
+                    </Group>
+                    <Table
+                        striped
+                        highlightOnHover
+                        verticalSpacing='sm'
+                        horizontalSpacing='xs'
+                        layout='fixed'
+                        style={{ width: '100%' }}
                     >
-                    <Table.Tr>
-                        <Table.Th w={40}>
-                        <Checkbox
-                            checked={allSelectableSelected}
-                            indeterminate={someSelectableSelected && !allSelectableSelected}
-                            onChange={toggleSelectAll}
-                            disabled={selectableRequests.length === 0}
-                            aria-label='Seleccionar todo'
-                        />
-                        </Table.Th>
-                        <Table.Th>ID</Table.Th>
-                        <Table.Th>Tipo</Table.Th>
-                        <Table.Th>Solicitante</Table.Th>
-                        <Table.Th>Acreedor</Table.Th>
-                        <Table.Th>Fechas de pago</Table.Th>
-                        <Table.Th ta='right'>Valor</Table.Th>
-                        <Table.Th>Estado</Table.Th>
-                        <Table.Th ta='center'>Acciones</Table.Th>
-                    </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>{filteredRequests.map(renderRow)}</Table.Tbody>
-                </Table>
-                </div>
+                        <Table.Thead
+                            style={{
+                                backgroundColor:
+                                    'light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))',
+                            }}
+                        >
+                        <Table.Tr>
+                            <Table.Th w={36} />
+                            <Table.Th w={54}>ID</Table.Th>
+                            <Table.Th w={150}>Tipo</Table.Th>
+                            <Table.Th w={150}>Solicitante</Table.Th>
+                            <Table.Th>Acreedor</Table.Th>
+                            <Table.Th w={170}>Fechas de pago</Table.Th>
+                            <Table.Th w={128} ta='center'>Valor</Table.Th>
+                            <Table.Th w={110}>Estado</Table.Th>
+                            <Table.Th w={92} ta='center'>Acciones</Table.Th>
+                        </Table.Tr>
+                        </Table.Thead>
+                        <Table.Tbody>{group.rows.map(renderRow)}</Table.Tbody>
+                    </Table>
+                    <Group justify='flex-end' mt='xs'>
+                        <Text size='sm' c='dimmed'>
+                        Subtotal {group.type}:{' '}
+                        <Text span fw={700} c='green'>
+                            {formatCurrency(sumValor(group.rows))}
+                        </Text>
+                        </Text>
+                    </Group>
+                    </div>
+                ))}
+                </Stack>
             )}
             </Card>
         </div>

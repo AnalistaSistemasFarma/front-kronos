@@ -75,12 +75,19 @@ describe('SGC · selección de firmantes y alcance (reglas puras)', () => {
     }
   });
 
-  it('política por defecto (la más segura): quien ejecuta la primera tarea Y tiene el permiso de Calidad', () => {
-    expect(SGC_DEFAULT_ASSIGNMENT_POLICY).toBe('tarea_y_calidad');
+  it('política por defecto (RN 2026-10-05, confirmada el 2026-10-10): quien ejecuta la primera tarea O Calidad', () => {
+    expect(SGC_DEFAULT_ASSIGNMENT_POLICY).toBe('tarea_o_calidad');
     expect(canAssignParticipants(V3, who(ELAB, true))).toBe(true);
-    expect(assignmentDenial(V3, who(ELAB, false))).toMatch(/con el permiso de Aseguramiento de Calidad/);
-    expect(canAssignParticipants(V3, who(CAL, true))).toBe(false);
+    expect(canAssignParticipants(V3, who(ELAB, false))).toBe(true);
+    expect(canAssignParticipants(V3, who(CAL, true))).toBe(true);
     expect(canAssignParticipants(V3, who(REV, false))).toBe(false);
+  });
+
+  it('con tarea_y_calidad (la más estricta, por variable de entorno): quien ejecuta la primera tarea Y tiene el permiso de Calidad', () => {
+    expect(canAssignParticipants(V3, who(ELAB, true), 'tarea_y_calidad')).toBe(true);
+    expect(assignmentDenial(V3, who(ELAB, false), 'tarea_y_calidad')).toMatch(/con el permiso de Aseguramiento de Calidad/);
+    expect(canAssignParticipants(V3, who(CAL, true), 'tarea_y_calidad')).toBe(false);
+    expect(canAssignParticipants(V3, who(REV, false), 'tarea_y_calidad')).toBe(false);
   });
 
   it('la política es parametrizable: tarea, calidad, tarea_o_calidad', () => {
@@ -92,8 +99,9 @@ describe('SGC · selección de firmantes y alcance (reglas puras)', () => {
     expect(canAssignParticipants(V3, who(ELAB, false), 'tarea_o_calidad')).toBe(true);
     expect(canAssignParticipants(V3, who(REV, false), 'tarea_o_calidad')).toBe(false);
     expect(parseAssignmentPolicy('TAREA_O_CALIDAD')).toBe('tarea_o_calidad');
-    expect(parseAssignmentPolicy('cualquiera')).toBe('tarea_y_calidad');
-    expect(parseAssignmentPolicy(undefined)).toBe('tarea_y_calidad');
+    expect(parseAssignmentPolicy('TAREA_Y_CALIDAD')).toBe('tarea_y_calidad');
+    expect(parseAssignmentPolicy('cualquiera')).toBe('tarea_o_calidad');
+    expect(parseAssignmentPolicy(undefined)).toBe('tarea_o_calidad');
   });
 
   it('si la primera tarea la atiende el grupo de Calidad, ejecutarla = pertenecer al grupo (o haberla tenido)', () => {
@@ -187,11 +195,16 @@ const actor = (email: string) => ({ email, ip: '10.0.0.1', userAgent: 'vitest' }
 const notifier = vi.fn(async () => undefined);
 const requestRow = { id_request: 7, id_company: 1, id_flow_version: 3, status: 'abierta', subject: 'Procedimiento', requester_email: SOL, elaborator_email: ELAB, signing_modes_json: null, documentType: null, tasks: [] };
 const eligibleRows = [SOL, ELAB, CAL, REV, APR].map((email) => ({ companyUser: { user: { email, name: email } } }));
+// La consulta de Calidad pide UN subproceso (url de texto); la de habilitados, varios ({ in }). Calidad: Juan Mora y otra.calidad.
+const subprocessRows = (a: unknown) => {
+  const url = (a as { where?: { subprocess?: { subprocess_url?: unknown } } })?.where?.subprocess?.subprocess_url;
+  return typeof url === 'string' ? eligibleRows.filter((r) => [ELAB, CAL].includes(r.companyUser.user.email)) : eligibleRows;
+};
 
 function signersDb() {
   return fakeDb({
     sgcRequest: { findUniqueOrThrow: () => requestRow, findUnique: () => requestRow },
-    subprocessUserCompany: { findMany: () => eligibleRows },
+    subprocessUserCompany: { findMany: subprocessRows },
   });
 }
 
@@ -219,12 +232,13 @@ describe('SGC · el solicitante solo SUGIERE; quien ejecuta la primera tarea y/o
   });
 
   it('una vez confirmados, el solicitante ya no los cambia (403)', async () => {
-    const f = fakeDb({ sgcRequest: { findUniqueOrThrow: () => requestRow }, subprocessUserCompany: { findMany: () => eligibleRows }, sgcRequestSigner: { count: () => 1 } });
+    const f = fakeDb({ sgcRequest: { findUniqueOrThrow: () => requestRow }, subprocessUserCompany: { findMany: subprocessRows }, sgcRequestSigner: { count: () => 1 } });
     await expect(setSigners(f.db, notifier, 7, { stepKey: 'revision', signers: [APR] }, actor(SOL), access(true))).rejects.toMatchObject({ status: 403, message: expect.stringMatching(/ya están confirmados/) });
     expect(f.writes('sgcRequestSigner')).toEqual([]);
   });
 
   it('quien no es solicitante, elaborador ni está habilitado no sugiere ni asigna (403); con tarea_o_calidad, Calidad sí asigna', async () => {
+    vi.stubEnv('SGC_ASIGNACION_PERMISO', 'tarea_y_calidad');
     await expect(setSigners(signersDb().db, notifier, 7, { stepKey: 'revision', signers: [APR] }, actor(REV), access(false))).rejects.toMatchObject({ status: 403 });
     await expect(setSigners(signersDb().db, notifier, 7, { stepKey: 'revision', signers: [REV] }, actor(CAL), access(true))).rejects.toMatchObject({ status: 403 });
     vi.stubEnv('SGC_ASIGNACION_PERMISO', 'tarea_o_calidad');
@@ -238,7 +252,7 @@ describe('SGC · el solicitante solo SUGIERE; quien ejecuta la primera tarea y/o
     const pending = [{ id_request_signer: 50, user_email: APR, sign_order: 1, is_active: false, removed_at: null, added_by: SOL }];
     const f = fakeDb({
       sgcRequest: { findUniqueOrThrow: () => requestRow },
-      subprocessUserCompany: { findMany: () => eligibleRows },
+      subprocessUserCompany: { findMany: subprocessRows },
       sgcRequestSigner: { findMany: (a) => ((a as { where: { is_active?: boolean } }).where.is_active === false ? pending : []) },
     });
     expect(await setSigners(f.db, notifier, 7, { stepKey: 'revision', signers: [REV] }, actor(ELAB), access(true))).toEqual({ changed: true });
@@ -263,7 +277,7 @@ describe('SGC · el solicitante solo SUGIERE; quien ejecuta la primera tarea y/o
     const confirmDb = (pending = pendingRows, scope = scopeRows) =>
       fakeDb({
         sgcRequest: { findUniqueOrThrow: () => requestRow },
-        subprocessUserCompany: { findMany: () => eligibleRows },
+        subprocessUserCompany: { findMany: subprocessRows },
         sgcRequestSigner: { findMany: (a) => ((a as { where: { is_active?: boolean } }).where.is_active === false ? pending : []) },
         sgcDisseminationScope: { findMany: () => scope },
       });
@@ -362,8 +376,8 @@ describe('SGC · el solicitante solo SUGIERE; quien ejecuta la primera tarea y/o
       expect(createdData(f, 'sgcTaskAssignee')[0]).toMatchObject({ user_email: ELAB });
     });
 
-    it('el solicitante nunca queda como elaborador, aunque se envíe a sí mismo o la matriz lo nombre', async () => {
-      const f = createDb({ matrix: [{ role: 'elaborador', process: 5, email: SOL }], quality: [SOL, CAL] });
+    it('el solicitante (que no es de Calidad) nunca queda como elaborador, aunque se envíe a sí mismo o la matriz lo nombre', async () => {
+      const f = createDb({ matrix: [{ role: 'elaborador', process: 5, email: SOL }], quality: [CAL] });
       await createRequest(f.db, notifier, access(true), { ...input, elaboratorEmail: SOL }, actor(SOL));
       expect(elaboratorOf(f)).toBe(CAL);
       const note = createdData(f, 'sgcInteraction').find((i) => /Elaborador asignado/.test(String(i.body)))!;
@@ -392,6 +406,7 @@ describe('SGC · el solicitante solo SUGIERE; quien ejecuta la primera tarea y/o
     });
 
     it('con tarea_y_calidad, una persona de la matriz sin permiso de Calidad no elabora (cae al respaldo)', async () => {
+      vi.stubEnv('SGC_ASIGNACION_PERMISO', 'tarea_y_calidad');
       const f = createDb({ matrix: [{ role: 'elaborador', process: 5, email: REV }], quality: [CAL] });
       await createRequest(f.db, notifier, access(true), input, actor(SOL));
       expect(elaboratorOf(f)).toBe(CAL);
@@ -401,10 +416,16 @@ describe('SGC · el solicitante solo SUGIERE; quien ejecuta la primera tarea y/o
       expect(elaboratorOf(g)).toBe(REV);
     });
 
-    it('si nadie distinto del solicitante puede elaborar, la solicitud no nace (409) y no se escribe nada', async () => {
-      const f = createDb({ quality: [SOL] });
+    it('excepción de Calidad (2026-10-13): si el solicitante es de Calidad, puede quedar como elaborador', async () => {
+      const f = createDb({ matrix: [{ role: 'elaborador', process: 5, email: SOL }], quality: [SOL] });
+      await createRequest(f.db, notifier, access(true), input, actor(SOL));
+      expect(elaboratorOf(f)).toBe(SOL);
+    });
+
+    it('si nadie distinto del solicitante (que no es de Calidad) puede elaborar, la solicitud no nace (409) y no se escribe nada', async () => {
+      const f = createDb({ matrix: [{ role: 'elaborador', process: 5, email: SOL }], quality: [] });
       await expect(createRequest(f.db, notifier, access(true), input, actor(SOL))).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/No hay quién elabore/) });
-      expect(f.writes('sgcRequest')).toEqual([]);
+      expect(f.calls.filter((c) => c.model === 'sgcInteraction' && c.method === 'create')).toEqual([]);
     });
   });
 
@@ -414,8 +435,20 @@ describe('SGC · el solicitante solo SUGIERE; quien ejecuta la primera tarea y/o
       fakeDb({
         sgcTask: { findUnique: () => ({ id_request: 7 }), findUniqueOrThrow: () => elabTask(assignment) },
         sgcRequest: { findUniqueOrThrow: () => requestRow },
-        subprocessUserCompany: { findMany: () => eligibleRows },
+        subprocessUserCompany: { findMany: subprocessRows },
       });
+
+    it('la divulgación (alcance) NO se reasigna, ni siquiera Calidad: 409 y no se escribe nada (2026-10-13)', async () => {
+      const f = fakeDb({
+        sgcTask: { findUnique: () => ({ id_request: 7 }), findUniqueOrThrow: () => ({ ...elabTask('alcance'), name: 'Divulgación', assignees: [{ id_task_assignee: 40, user_email: REV, status: 'pendiente', sign_order: 1, signature_status: 'pendiente', signature_meaning: 'leyo' }] }) },
+        sgcRequest: { findUniqueOrThrow: () => requestRow },
+        subprocessUserCompany: { findMany: subprocessRows },
+      });
+      await expect(reassignTask(f.db, notifier, access(true), 4, { toEmail: APR, reason: 'Que lea otra persona' }, actor(CAL))).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/La divulgación no se reasigna/) });
+      await expect(reassignTask(f.db, notifier, access(true), 4, { toEmail: APR, reason: 'Que lea otra persona' }, actor(REV))).rejects.toMatchObject({ status: 409 });
+      expect(f.writes('sgcTaskAssignee')).toEqual([]);
+      expect(f.calls.filter((c) => c.model === 'sgcInteraction' && c.method === 'create')).toEqual([]);
+    });
 
     it('el solicitante no reasigna la elaboración (ni con permiso de Calidad): 403', async () => {
       const f = reassignDb();
@@ -451,7 +484,7 @@ describe('SGC · segregación y aprobador de Calidad (revisor = aprobador permit
   it('(1) setSigners permite que el revisor sea también aprobador, sin motivo adicional', async () => {
     const f = fakeDb({
       sgcRequest: { findUniqueOrThrow: () => requestRow },
-      subprocessUserCompany: { findMany: () => eligibleRows },
+      subprocessUserCompany: { findMany: subprocessRows },
       sgcRequestSigner: { findMany: (args) => (typeof (args as { where: { step_key?: unknown } }).where.step_key === 'object' ? [{ user_email: REV, step_key: 'revision' }] : []) },
     });
     expect(await setSigners(f.db, notifier, 7, { stepKey: 'aprobacion', signers: [APR, REV] }, actor(ELAB), access(true))).toEqual({ changed: true });
@@ -503,5 +536,75 @@ describe('SGC · segregación y aprobador de Calidad (revisor = aprobador permit
     await expect(assertAssignmentComplete(withSigners(0).db, requestRow as never, def, 'Elaboración')).rejects.toThrow(/al menos un aprobador de Aseguramiento de Calidad/);
     await expect(assertAssignmentComplete(withSigners(1).db, requestRow as never, def, 'Elaboración')).resolves.toBeUndefined();
     await expect(assertAssignmentComplete(fakeDb().db, requestRow as never, V3, 'Elaboración')).rejects.toThrow(/falta seleccionar los firmantes de «Revisión» y los firmantes de «Aprobación»/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [SGC-REQ-146][SGC-REQ-147] EXCEPCIÓN PARA CALIDAD (RN de Nicolás, 2026-10-13)
+// ---------------------------------------------------------------------------
+
+describe('[SGC-REQ-146][SGC-REQ-147] SGC · excepción de Calidad a la segregación (capa de base de datos)', () => {
+  beforeEach(() => {
+    h.def = V3;
+    h.pools = [];
+  });
+
+  // CAL es de Calidad y aquí es quien HIZO la solicitud; ELAB (Juan Mora) es de Calidad y elabora.
+  const calRequest = { ...requestRow, requester_email: CAL };
+  const selfReview = (on: boolean) => ({ findFirst: () => (on ? { after_json: '{"qualitySelfReview":true}' } : null) });
+  const db = (request: typeof requestRow, on = false, over: Record<string, Record<string, (args: unknown) => unknown>> = {}) =>
+    fakeDb({ sgcRequest: { findUniqueOrThrow: () => request, findUnique: () => request }, subprocessUserCompany: { findMany: subprocessRows }, sgcConfigChangeLog: selfReview(on), ...over });
+
+  it('(1) reasignar la elaboración al solicitante de Calidad: SÍ (queda como elaborador, con historial)', async () => {
+    const task = { id_task: 4, id_request: 7, name: 'Elaboración', status: 'abierta', taskDef: { multi_assignee: false, assignment: 'elaborador' }, assignees: [{ id_task_assignee: 30, user_email: ELAB, status: 'pendiente', sign_order: 1, signature_status: 'pendiente', signature_meaning: 'elaboro' }] };
+    const f = db(calRequest, false, { sgcTask: { findUnique: () => ({ id_request: 7 }), findUniqueOrThrow: () => task } });
+    await reassignTask(f.db, notifier, access(true), 4, { toEmail: CAL, reason: 'Calidad elabora su propia solicitud' }, actor(ELAB));
+    expect(f.calls.find((c) => c.model === 'sgcRequest' && c.method === 'update' && (c.args as { data: Record<string, unknown> }).data.elaborator_email)!.args).toMatchObject({ data: { elaborator_email: CAL } });
+  });
+
+  it('(1) reasignar la elaboración al solicitante que NO es de Calidad: sigue rechazado', async () => {
+    const task = { id_task: 4, id_request: 7, name: 'Elaboración', status: 'abierta', taskDef: { multi_assignee: false, assignment: 'elaborador' }, assignees: [{ id_task_assignee: 30, user_email: ELAB, status: 'pendiente', sign_order: 1, signature_status: 'pendiente', signature_meaning: 'elaboro' }] };
+    const f = db(requestRow, true, { sgcTask: { findUnique: () => ({ id_request: 7 }), findUniqueOrThrow: () => task } });
+    await expect(reassignTask(f.db, notifier, access(true), 4, { toEmail: SOL, reason: 'Que la haga quien pidió' }, actor(ELAB))).rejects.toThrow(/no puede quedar como elaborador/);
+  });
+
+  it('(1)+(3) quien ya es REVISOR pasa a elaborar solo si es de Calidad y la empresa habilitó que revise lo que elabora', async () => {
+    const task = { id_task: 4, id_request: 7, name: 'Elaboración', status: 'abierta', taskDef: { multi_assignee: false, assignment: 'elaborador' }, assignees: [{ id_task_assignee: 30, user_email: ELAB, status: 'pendiente', sign_order: 1, signature_status: 'pendiente', signature_meaning: 'elaboro' }] };
+    const over = (stepKey: string) => ({ sgcTask: { findUnique: () => ({ id_request: 7 }), findUniqueOrThrow: () => task }, sgcRequestSigner: { findMany: () => [{ step_key: stepKey }] } });
+    await expect(reassignTask(db(calRequest, false, over('revision')).db, notifier, access(true), 4, { toEmail: CAL, reason: 'Pasa a elaborar' }, actor(ELAB))).rejects.toThrow(/es firmante del documento/);
+    await expect(reassignTask(db(calRequest, true, over('revision')).db, notifier, access(true), 4, { toEmail: CAL, reason: 'Pasa a elaborar' }, actor(ELAB))).resolves.toMatchObject({ idAssignee: expect.any(Number) });
+    await expect(reassignTask(db(calRequest, true, over('aprobacion')).db, notifier, access(true), 4, { toEmail: CAL, reason: 'Pasa a elaborar' }, actor(ELAB))).rejects.toThrow(/es firmante del documento/);
+  });
+
+  it('(2) el solicitante de Calidad queda como REVISOR; como aprobador, no', async () => {
+    expect(await setSigners(db(calRequest).db, notifier, 7, { stepKey: 'revision', signers: [REV, CAL] }, actor(ELAB), access(true))).toEqual({ changed: true });
+    await expect(setSigners(db(calRequest, true).db, notifier, 7, { stepKey: 'aprobacion', signers: [CAL] }, actor(ELAB), access(true))).rejects.toThrow(/Quien hizo la solicitud no puede ser firmante de Aprobación/);
+  });
+
+  it('(2) el solicitante que no es de Calidad sigue sin poder ser revisor (también al confirmar lo sugerido)', async () => {
+    await expect(setSigners(db(requestRow, true).db, notifier, 7, { stepKey: 'revision', signers: [SOL] }, actor(ELAB), access(true))).rejects.toThrow(/Quien hizo la solicitud/);
+    const f = db(requestRow, true, { sgcRequestSigner: { findMany: (a) => ((a as { where: { is_active?: boolean } }).where.is_active === false ? [{ id_request_signer: 1, step_key: 'revision', user_email: SOL, added_by: SOL }] : []) } });
+    await expect(confirmSuggestions(f.db, notifier, 7, actor(ELAB), access(true))).rejects.toThrow(/Quien hizo la solicitud/);
+  });
+
+  it('(3) el elaborador de Calidad como revisor: rechazado con el ajuste APAGADO (por defecto) y aceptado ENCENDIDO; nunca aprobador', async () => {
+    await expect(setSigners(db(requestRow, false).db, notifier, 7, { stepKey: 'revision', signers: [ELAB] }, actor(CAL), access(true))).rejects.toThrow(/El elaborador no puede ser firmante de Revisión/);
+    expect(await setSigners(db(requestRow, true).db, notifier, 7, { stepKey: 'revision', signers: [ELAB] }, actor(CAL), access(true))).toEqual({ changed: true });
+    await expect(setSigners(db(requestRow, true).db, notifier, 7, { stepKey: 'aprobacion', signers: [ELAB] }, actor(CAL), access(true))).rejects.toThrow(/El elaborador no puede ser firmante de Aprobación/);
+  });
+
+  it('(3) el elaborador que NO es de Calidad no revisa aunque la empresa haya encendido el ajuste', async () => {
+    const r = { ...requestRow, elaborator_email: REV };
+    await expect(setSigners(db(r, true).db, notifier, 7, { stepKey: 'revision', signers: [REV] }, actor(CAL), access(true))).rejects.toThrow(/El elaborador no puede ser firmante/);
+  });
+
+  it('(3) al decidir: el elaborador de Calidad firma «Revisó» solo con el ajuste encendido; la aprobación no cambia', async () => {
+    const reviewTask = { id_task: 21, task_key: 'revision', name: 'Revisión', status: 'abierta', signing_mode: 'paralelo', assignees: [{ id_task_assignee: 50, user_email: ELAB, pool_type_code: null, sign_order: 1, status: 'pendiente', signature_meaning: 'reviso', signature_status: 'pendiente_s3' }], taskDef: { assignment: 'firmantes' } };
+    const approvalTask = { ...reviewTask, id_task: 22, task_key: 'aprobacion', name: 'Aprobación', assignees: [{ ...reviewTask.assignees[0], signature_meaning: 'aprobo' }] };
+    const decide = (task: typeof reviewTask, on: boolean) => db(requestRow, on, { sgcTask: { findUnique: () => ({ id_request: 7 }), findUniqueOrThrow: () => task } }).db;
+    await expect(decideTask(decide(reviewTask, false), notifier, 21, { decision: 'aprobar' }, actor(ELAB))).rejects.toMatchObject({ status: 403, message: expect.stringMatching(/El elaborador no puede revisar ni aprobar/) });
+    // Con el ajuste encendido pasa la segregación y llega a pedir la firma electrónica.
+    await expect(decideTask(decide(reviewTask, true), notifier, 21, { decision: 'aprobar' }, actor(ELAB))).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/firma electrónica/) });
+    await expect(decideTask(decide(approvalTask, true), notifier, 22, { decision: 'aprobar' }, actor(ELAB))).rejects.toMatchObject({ status: 403, message: expect.stringMatching(/El elaborador no puede revisar ni aprobar/) });
   });
 });
