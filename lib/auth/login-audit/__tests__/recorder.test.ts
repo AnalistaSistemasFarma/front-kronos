@@ -13,7 +13,8 @@ vi.mock('@/lib/prisma', () => ({ prisma }));
 vi.mock('../../../prisma', () => ({ prisma }));
 vi.mock('../geo', () => ({ geolocateIp }));
 
-import { noteLoginAttempt, withLoginAudit, type NextAuthRouteContext } from '../recorder';
+import { LOGIN_AUDIT_LIMITS } from '../constants';
+import { noteLoginAttempt, outcomeWithoutNote, withLoginAudit, type NextAuthRouteContext } from '../recorder';
 
 const ctx = { params: Promise.resolve({ nextauth: ['callback', 'credentials'] }) } as NextAuthRouteContext;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
@@ -107,6 +108,40 @@ describe('withLoginAudit', () => {
     expect(insertedValues()).toMatchObject({ provider: 'azure-ad', identifier: null, success: 0, reason: 'MICROSOFT_RECHAZADO' });
   });
 
+  it('POST de credenciales rechazado por CSRF (JSON ?csrf=true): FALLIDO, CSRF_INVALIDO, nunca éxito', async () => {
+    // NextAuth corta antes de llamar a authorize: nadie anota el intento.
+    const handler = vi.fn(async () => json({ url: 'https://synerlink.test/api/auth/signin?csrf=true' }));
+    await withLoginAudit(handler)(loginRequest('/api/auth/callback/credentials'), ctx);
+    await vi.waitFor(() => expect(prisma.$executeRaw).toHaveBeenCalledTimes(1));
+    expect(insertedValues()).toMatchObject({ provider: 'credentials', success: 0, reason: 'CSRF_INVALIDO' });
+    expect(JSON.stringify(insertedValues().all)).not.toContain('SuperSecreta123');
+  });
+
+  it('rechazo por CSRF con redirección 302 (Location ?csrf=true) en NIT: FALLIDO, CSRF_INVALIDO', async () => {
+    const handler = vi.fn(async () =>
+      new Response(null, { status: 302, headers: { location: 'https://synerlink.test/api/auth/signin?csrf=true' } })
+    );
+    await withLoginAudit(handler)(loginRequest('/api/auth/callback/supplier-nit'), ctx);
+    await vi.waitFor(() => expect(prisma.$executeRaw).toHaveBeenCalledTimes(1));
+    expect(insertedValues()).toMatchObject({ provider: 'supplier-nit', success: 0, reason: 'CSRF_INVALIDO' });
+  });
+
+  it('credenciales sin anotación de authorize y sin error en la respuesta: FALLIDO, SIN_AUTORIZACION', async () => {
+    const handler = vi.fn(async () => json({ url: 'https://synerlink.test/process' }));
+    await withLoginAudit(handler)(loginRequest('/api/auth/callback/credentials'), ctx);
+    await vi.waitFor(() => expect(prisma.$executeRaw).toHaveBeenCalledTimes(1));
+    expect(insertedValues()).toMatchObject({ provider: 'credentials', success: 0, reason: 'SIN_AUTORIZACION' });
+  });
+
+  it('Microsoft sin anotación y sin error sigue contando como éxito', async () => {
+    const handler = vi.fn(async () =>
+      new Response(null, { status: 302, headers: { location: 'https://synerlink.test/process' } })
+    );
+    await withLoginAudit(handler)(loginRequest('/api/auth/callback/azure-ad?code=abc', '8.8.8.8', 'GET'), ctx);
+    await vi.waitFor(() => expect(prisma.$executeRaw).toHaveBeenCalledTimes(1));
+    expect(insertedValues()).toMatchObject({ provider: 'azure-ad', success: 1, reason: null });
+  });
+
   it('si authorize aprobó pero NextAuth terminó en error, cuenta como fallo', async () => {
     const handler = vi.fn(async () => {
       noteLoginAttempt({ identifier: 'ana@x.com', success: true });
@@ -168,5 +203,22 @@ describe('withLoginAudit', () => {
 
   it('noteLoginAttempt fuera de contexto no hace nada', () => {
     expect(() => noteLoginAttempt({ identifier: 'x', success: true })).not.toThrow();
+  });
+});
+
+describe('outcomeWithoutNote', () => {
+  it('decide el resultado cuando nadie anotó el intento', () => {
+    expect(outcomeWithoutNote('credentials', null, true)).toEqual({ success: false, reason: 'CSRF_INVALIDO' });
+    expect(outcomeWithoutNote('azure-ad', null, true)).toEqual({ success: false, reason: 'CSRF_INVALIDO' });
+    expect(outcomeWithoutNote('credentials', null, false)).toEqual({ success: false, reason: 'SIN_AUTORIZACION' });
+    expect(outcomeWithoutNote('supplier-nit', 'ERROR', false)).toEqual({ success: false, reason: 'ERROR_INTERNO' });
+    expect(outcomeWithoutNote('azure-ad', 'OAuthCallback', false)).toEqual({ success: false, reason: 'MICROSOFT_RECHAZADO' });
+    expect(outcomeWithoutNote('azure-ad', null, false)).toEqual({ success: true, reason: null });
+  });
+
+  it('los motivos nuevos caben en failure_reason NVARCHAR(40) (sin CHECK en la tabla)', () => {
+    for (const code of ['CSRF_INVALIDO', 'SIN_AUTORIZACION']) {
+      expect(code.length).toBeLessThanOrEqual(LOGIN_AUDIT_LIMITS.failureReason);
+    }
   });
 });

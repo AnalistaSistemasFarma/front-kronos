@@ -41,6 +41,19 @@ export function errorFromRedirectUrl(url: string | null | undefined): string | n
   }
 }
 
+/**
+ * ¿NextAuth rechazó la petición por CSRF? Lo indica redirigiendo a
+ * `/api/auth/signin?csrf=true` (sin `error=`), y en ese caso `authorize` no corre.
+ */
+export function csrfRejectedFromRedirectUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  try {
+    return new URL(url, 'http://localhost').searchParams.get('csrf') === 'true';
+  } catch {
+    return false;
+  }
+}
+
 /** Correo o NIT tal como se intentó: sin espacios, en minúsculas, recortado. */
 export function normalizeIdentifier(value: unknown): string | null {
   if (typeof value !== 'string') return null;

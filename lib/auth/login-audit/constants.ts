@@ -55,6 +55,8 @@ export const LOGIN_FAILURE_REASONS = {
   PROVEEDOR_EN_LOGIN_INTERNO: 'Proveedor intentando entrar por el login interno',
   NIT_NO_REGISTRADO: 'NIT no registrado o proveedor inactivo',
   MICROSOFT_RECHAZADO: 'Microsoft rechazó o canceló el inicio de sesión',
+  CSRF_INVALIDO: 'Token CSRF inválido o vencido: NextAuth rechazó el envío sin validar las credenciales',
+  SIN_AUTORIZACION: 'NextAuth no llegó a validar las credenciales',
   ERROR_INTERNO: 'Error interno al validar',
 } as const;
 
