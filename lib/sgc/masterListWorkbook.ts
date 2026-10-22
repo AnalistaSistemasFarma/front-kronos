@@ -1,4 +1,5 @@
-import ExcelJS from 'exceljs';
+// Solo tipos: la librería (~900 KB) se descarga al exportar/importar, no al abrir la pantalla.
+import type ExcelJS from 'exceljs';
 import { SGC_MASTER_LIST_COLUMNS, parseMasterListTable, type SgcMasterListTable } from './masterListImport';
 
 /**
@@ -24,6 +25,7 @@ export interface SgcTemplateCatalogs {
  * «Catálogos» con los códigos de procesos y tipos documentales de la empresa.
  */
 export async function buildMasterListTemplate(catalogs: SgcTemplateCatalogs): Promise<ArrayBuffer> {
+  const { default: ExcelJS } = await import('exceljs');
   const wb = new ExcelJS.Workbook();
   wb.creator = 'SynerLink · SGC documental';
   const data = wb.addWorksheet(SGC_MASTER_LIST_SHEET);
@@ -70,6 +72,7 @@ export async function buildMasterListTemplate(catalogs: SgcTemplateCatalogs): Pr
  * convierte en filas del listado.
  */
 export async function readMasterListWorkbook(buffer: ArrayBuffer): Promise<SgcMasterListTable> {
+  const { default: ExcelJS } = await import('exceljs');
   const wb = new ExcelJS.Workbook();
   try {
     await wb.xlsx.load(buffer);

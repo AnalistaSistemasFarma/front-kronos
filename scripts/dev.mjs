@@ -159,6 +159,22 @@ function startNextDev() {
 // páginas de entrada para que ya estén compiladas. `--no-warm` lo desactiva.
 const WARM_ROUTES = ['/', '/login'];
 
+// APIs que la cabecera del hub pide al entrar. Sin sesión responden 401, pero Next ya las deja
+// compiladas: al iniciar sesión no hay que esperar ~12 compilaciones seguidas.
+// (Las páginas del hub no se pueden precompilar así: el middleware redirige al login antes.)
+const WARM_APIS = [
+  '/api/auth/session',
+  '/api/health/version',
+  '/api/processes',
+  '/api/chat/access',
+  '/api/chat/conversations',
+  '/api/chat/pins',
+  '/api/chat/pulse?since=0',
+  '/api/notifications',
+  '/api/correo/no-leidos',
+  '/api/proyectos/no-leidos',
+];
+
 async function warmUpRoutes() {
   const base = `http://localhost:${PORT}`;
   const deadline = Date.now() + 120_000;
@@ -178,6 +194,15 @@ async function warmUpRoutes() {
     }
   }
   console.log(`[dev] Páginas de entrada precompiladas: ${WARM_ROUTES.join(', ')}`);
+  // De a una: compilar en paralelo con webpack no es más rápido y dispara la RAM.
+  for (const api of WARM_APIS) {
+    try {
+      await fetch(`${base}${api}`, { signal: AbortSignal.timeout(180_000) });
+    } catch {
+      // Solo es calentamiento.
+    }
+  }
+  console.log(`[dev] APIs de la cabecera precompiladas (${WARM_APIS.length})`);
 }
 
 ensurePortAvailable();

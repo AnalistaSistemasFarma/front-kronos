@@ -851,6 +851,9 @@ function ViewRequestPage() {
   }, []);
 
   const getUserIdByName = async (userName: string): Promise<string | null> => {
+    // La sesión ya trae el id de Kronos (callback jwt, buscado por correo): sin viaje extra al
+    // servidor ni búsqueda por NOMBRE, que con dos personas homónimas podía traer el id equivocado.
+    if (session?.user?.id) return session.user.id;
     if (!session || status !== 'authenticated') {
       console.error('No hay sesión activa para realizar esta operación');
       return null;

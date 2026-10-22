@@ -45,7 +45,9 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: projectRoot,
   },
-  serverExternalPackages: ['mssql', 'tedious', 'tarn'],
+  // Paquetes de servidor que Node carga tal cual (no se empaquetan): cada API que los usa
+  // dejaba de recompilarlos en dev y el bundle del servidor queda más liviano.
+  serverExternalPackages: ['mssql', 'tedious', 'tarn', 'exceljs', 'pdf-lib', 'mammoth', 'node-cron'],
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -59,6 +61,9 @@ const nextConfig: NextConfig = {
       allowedOrigins: [...baseAllowedOrigins, ...tunnelOrigins],
     },
     viewTransition: true,
+    // Importar solo los componentes de Mantine que se usan, no el paquete entero
+    // (miles de módulos por página en dev). @tabler/icons-react ya viene en la lista de Next.
+    optimizePackageImports: ['@mantine/core', '@mantine/hooks'],
   },
   // Solo variables que el cliente necesita (sin prefijo NEXT_PUBLIC_).
   // Los secretos (p. ej. MICROSOFTCLIENTSECRET) deben quedar solo en .env y usarse en servidor.
@@ -86,16 +91,14 @@ const nextConfig: NextConfig = {
 // y next-pwa está desactivado, pero cargarlos encarece cada arranque y recompilación.
 export default async function config(phase: string): Promise<NextConfig> {
   if (phase === PHASE_DEVELOPMENT_SERVER) {
-    // En local el servidor de desarrollo crecía a 3+ GB de RAM y con el equipo sin memoria libre
-    // todo se volvía lento. Esta opción de Next reduce bastante ese consumo a cambio de
-    // compilar un poco más despacio la primera vez cada página.
+    // (webpackMemoryOptimizations se quitó: Next solo la aplica en `next build`, en dev no hacía nada.)
     return {
       ...nextConfig,
-      experimental: { ...nextConfig.experimental, webpackMemoryOptimizations: true },
-      // Aun así seguía subiendo a 4+ GB en una jornada (2026-10-15). Soltar antes las páginas
-      // compiladas que no se usan (por defecto 60 s y 5 páginas): volver a una página vieja
-      // la recompila, pero la memoria no se acumula durante el día.
-      onDemandEntries: { maxInactiveAge: 25 * 1000, pagesBufferLength: 2 },
+      // Cuánto se conservan las páginas/APIs ya compiladas. Antes 25 s y 2 páginas (2026-10-15,
+      // para frenar la RAM): cada vuelta a una pantalla la recompilaba y al entrar al hub se veía
+      // "[Fast Refresh] rebuilding" una y otra vez. Con Sentry fuera de dev y Mantine optimizado
+      // (2026-10-22) el servidor pesa menos: se conservan 10 min y 12 páginas.
+      onDemandEntries: { maxInactiveAge: 10 * 60 * 1000, pagesBufferLength: 12 },
     };
   }
 

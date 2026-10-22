@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// GET /api/correo/no-leidos (icono de la cabecera): 401 sin sesión, 403 sin el
-// permiso del módulo, 200 con solo un número, sin caché HTTP.
+// GET /api/correo/no-leidos (icono de la cabecera): 401 sin sesión, 200 { habilitado: false }
+// sin el permiso del módulo, 200 con solo un número, sin caché HTTP.
 
 const m = vi.hoisted(() => ({ getServerSession: vi.fn(), getCorreoAccess: vi.fn(), correoDeps: vi.fn() }));
 
@@ -32,11 +32,12 @@ describe('GET /api/correo/no-leidos', () => {
     expect(m.getCorreoAccess).not.toHaveBeenCalled();
   });
 
-  it('403 sin el permiso del módulo (el icono no se muestra)', async () => {
+  it('sin el permiso del módulo: 200 { habilitado: false } (el icono no se muestra, sin error en consola)', async () => {
     m.getServerSession.mockResolvedValue({ user: { email: 'sin@gsslatam.com' } });
     m.getCorreoAccess.mockResolvedValue(null);
     const res = await GET(req());
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ habilitado: false });
   });
 
   it('200 con el permiso: solo el número, sin caché HTTP', async () => {
