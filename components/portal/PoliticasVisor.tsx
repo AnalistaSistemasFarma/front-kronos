@@ -64,8 +64,8 @@ function fechaLegible(iso: string | null): string {
 const sinExtension = (nombre: string) => nombre.replace(/\.[^.]+$/, '');
 
 /**
- * La misma ventana sirve para «Políticas y reglamentos» y para «Ayudas» (videos de FORMACION/AYUDAS, Cristian
- * 2026-10-15): solo cambian la API que lista, los textos y el `data-testid`.
+ * La misma ventana sirve para «Políticas y reglamentos», «Ayudas» (videos de FORMACION/AYUDAS, Cristian 2026-10-15) y
+ * «Capacitaciones» (FORMACION/CAPACITACIONES, 2026-10-22): solo cambian la API que lista, los textos y el `data-testid`.
  */
 export interface TextosVisor {
   /** Ruta de la API que lista los archivos. */
@@ -98,6 +98,17 @@ export const TEXTOS_AYUDAS: TextosVisor = {
   elegir: 'Elija un video de la lista para verlo aquí.',
   preparando: 'Preparando el video…',
   testId: 'ayudas-visor',
+};
+
+/** CAPACITACIONES (Cristian, 2026-10-22): espejo de Ayudas sobre la carpeta FORMACION/CAPACITACIONES (videos o documentos). */
+export const TEXTOS_CAPACITACIONES: TextosVisor = {
+  api: '/api/portal/capacitaciones',
+  titulo: 'Capacitaciones',
+  etiquetaLista: 'Archivos de capacitaciones',
+  vacio: 'Todavía no hay capacitaciones publicadas.',
+  elegir: 'Elija una capacitación de la lista para verla aquí.',
+  preparando: 'Preparando la vista previa…',
+  testId: 'capacitaciones-visor',
 };
 
 export default function PoliticasVisor({ onCerrar, textos = TEXTOS_POLITICAS }: { onCerrar: () => void; textos?: TextosVisor }) {
