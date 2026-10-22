@@ -400,8 +400,12 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
     conversacion && agenteConversacion && proyecto ? (
       <>
         {cabeceraHilo}
-        {/* Celular: el hilo va a pantalla completa y tapa el encabezado; el medidor sigue a la vista. */}
-        {!escritorio && <MedidorConsumo agentes={consumo} cargado={consumoCargado} compacto />}
+        {/* Celular: el hilo va a pantalla completa y tapa el encabezado; la píldora sigue arriba, a la derecha. */}
+        {!escritorio && (
+          <div className={css.medidorMovil}>
+            <MedidorConsumo agentes={consumo} cargado={consumoCargado} />
+          </div>
+        )}
         <ChatThread
           key={conversacion.id}
           agent={agenteConversacion}
@@ -524,7 +528,6 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
               {proyecto.agents.map((a) => a.displayName).join(', ')}
             </Text>
           </Group>
-          <MedidorConsumo agentes={consumo} cargado={consumoCargado} />
         </>
       ) : (
         <Stack gap={8} mt={8}>
@@ -539,7 +542,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
   if (escritorio) {
     return (
       <div className={css.pantalla}>
-        <Encabezado titulo={proyecto?.name ?? 'Proyecto'} />
+        <Encabezado titulo={proyecto?.name ?? 'Proyecto'} derecha={<MedidorConsumo agentes={consumo} cargado={consumoCargado} />} />
         {aviso && <AvisoArriba aviso={aviso} onClose={() => setAviso(null)} />}
         <div className={css.layout}>
           <Card withBorder radius='md' p={0} className={css.columna}>
@@ -631,7 +634,11 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
         </Box>
         {proyecto && <BadgeRol role={proyecto.myRole} />}
       </Group>
-      {proyecto && <MedidorConsumo agentes={consumo} cargado={consumoCargado} compacto />}
+      {proyecto && (
+        <div className={css.medidorMovil}>
+          <MedidorConsumo agentes={consumo} cargado={consumoCargado} />
+        </div>
+      )}
       <div className={css.pestanas}>
         <Tabs value={seccion} onChange={(v) => esSeccion(v) && setSeccion(v)} variant='default'>
           <Tabs.List>
