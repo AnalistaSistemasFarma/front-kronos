@@ -19,9 +19,12 @@ interface Props {
   onSelect: (option: LookupOption) => void;
   error?: string;
   ariaLabel: string;
+  /** Etiqueta visible (opcional) y tamaño del campo. */
+  label?: React.ReactNode;
+  size?: 'xs' | 'sm' | 'md';
 }
 
-export default function SapLookupInput({ companyId, kind, value, onChange, onSelect, error, ariaLabel }: Props) {
+export default function SapLookupInput({ companyId, kind, value, onChange, onSelect, error, ariaLabel, label, size = 'xs' }: Props) {
   const [options, setOptions] = useState<LookupOption[]>([]);
   const [loading, setLoading] = useState(false);
   const lastQuery = useRef('');
@@ -49,7 +52,9 @@ export default function SapLookupInput({ companyId, kind, value, onChange, onSel
 
   return (
     <Autocomplete
-      size="xs"
+      size={size}
+      label={label}
+      placeholder="Escriba para buscar en SAP"
       value={value}
       onChange={onChange}
       data={options.map((o) => ({ value: o.value, label: o.label }))}

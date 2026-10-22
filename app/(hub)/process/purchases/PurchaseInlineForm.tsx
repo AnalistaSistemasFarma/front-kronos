@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { ActionIcon, Alert, Button, FileInput, Group, Loader, NumberInput, Stack, Table, Text, TextInput, Textarea } from '@mantine/core';
+import {
+  ActionIcon, Alert, Box, Button, FileInput, Group, Loader, NumberInput, Paper, SimpleGrid, Stack, Text, TextInput, Textarea,
+} from '@mantine/core';
 import { IconPaperclip, IconPlus, IconSend, IconTrash } from '@tabler/icons-react';
 import { COLUMNS, type FieldError, type Line, type LineField } from './RequestFormModal';
 import SapLookupInput from './SapLookupInput';
@@ -180,94 +182,91 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
         <Text fw={600} size="sm" mb={4}>
           Líneas de la solicitud
         </Text>
-        <Table.ScrollContainer minWidth={1900}>
-          <Table withTableBorder verticalSpacing={4}>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th style={{ width: 36 }}>#</Table.Th>
-                {COLUMNS.map((c) => (
-                  <Table.Th key={c.field} style={{ minWidth: c.width }}>
-                    {c.label}
-                    {c.required ? ' *' : ''}
-                  </Table.Th>
-                ))}
-                <Table.Th style={{ width: 40 }} />
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {lines.map((line, i) => (
-                <Table.Tr key={i}>
-                  <Table.Td>{i + 1}</Table.Td>
-                  {COLUMNS.map((c) => {
-                    const err = errorFor(`DocumentLines[${i}].${c.field}`);
-                    return (
-                      <Table.Td key={c.field}>
-                        {c.numeric ? (
-                          <NumberInput
-                            size="xs"
-                            min={0}
-                            allowNegative={false}
-                            thousandSeparator="."
-                            decimalSeparator=","
-                            value={line[c.field] ?? ''}
-                            onChange={(v) => setLineValue(i, c.field, v)}
-                            error={err}
-                            aria-label={`${c.label} línea ${i + 1}`}
-                          />
-                        ) : (
-                          FIELD_LOOKUP[c.field] ? (
-                            <SapLookupInput
-                              companyId={companyId}
-                              kind={FIELD_LOOKUP[c.field]!}
-                              value={String(line[c.field] ?? '')}
-                              onChange={(v) => setLineValue(i, c.field, v)}
-                              onSelect={(opt) =>
-                                setLines((prev) =>
-                                  prev.map((l, j) => (j === i ? { ...l, ...(opt.fill ?? {}), [c.field]: opt.fill?.[c.field] ?? opt.value } : l))
-                                )
-                              }
-                              error={err}
-                              ariaLabel={`${c.label} línea ${i + 1}`}
-                            />
-                          ) : (
-                            <TextInput
-                              size="xs"
-                              type={c.field === 'RequiredDate' ? 'date' : 'text'}
-                              value={String(line[c.field] ?? '')}
-                              onChange={(e) => {
-                                const v = e.currentTarget.value;
-                                setLineValue(i, c.field, c.field === 'ItemDescription' ? v.toUpperCase() : v);
-                              }}
-                              error={err}
-                              aria-label={`${c.label} línea ${i + 1}`}
-                            />
-                          )
-                        )}
-                      </Table.Td>
+        <Stack gap="sm">
+          {lines.map((line, i) => (
+            <Paper key={i} withBorder radius="md" p="md">
+              <Group justify="space-between" mb="xs">
+                <Text fw={600} size="sm">
+                  Línea {i + 1}
+                  {line.ItemDescription ? ` · ${String(line.ItemDescription)}` : ''}
+                </Text>
+                <ActionIcon
+                  variant="subtle"
+                  color="red"
+                  disabled={lines.length === 1}
+                  onClick={() => setLines((prev) => prev.filter((_, j) => j !== i))}
+                  aria-label={`Quitar línea ${i + 1}`}
+                >
+                  <IconTrash size={16} />
+                </ActionIcon>
+              </Group>
+              <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md" verticalSpacing="sm">
+                {COLUMNS.map((c) => {
+                  const err = errorFor(`DocumentLines[${i}].${c.field}`);
+                  const label = `${c.label}${c.required ? ' *' : ''}`;
+                  const aria = `${c.label} línea ${i + 1}`;
+                  let input: React.ReactNode;
+                  if (c.numeric) {
+                    input = (
+                      <NumberInput
+                        label={label}
+                        min={0}
+                        allowNegative={false}
+                        thousandSeparator="."
+                        decimalSeparator=","
+                        value={line[c.field] ?? ''}
+                        onChange={(v) => setLineValue(i, c.field, v)}
+                        error={err}
+                        aria-label={aria}
+                      />
                     );
-                  })}
-                  <Table.Td>
-                    <ActionIcon
-                      variant="subtle"
-                      color="red"
-                      size="sm"
-                      disabled={lines.length === 1}
-                      onClick={() => setLines((prev) => prev.filter((_, j) => j !== i))}
-                      aria-label={`Quitar línea ${i + 1}`}
-                    >
-                      <IconTrash size={14} />
-                    </ActionIcon>
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        </Table.ScrollContainer>
+                  } else if (FIELD_LOOKUP[c.field]) {
+                    input = (
+                      <SapLookupInput
+                        size="sm"
+                        label={label}
+                        companyId={companyId}
+                        kind={FIELD_LOOKUP[c.field]!}
+                        value={String(line[c.field] ?? '')}
+                        onChange={(v) => setLineValue(i, c.field, v)}
+                        onSelect={(opt) =>
+                          setLines((prev) =>
+                            prev.map((l, j) =>
+                              j === i ? { ...l, ...(opt.fill ?? {}), [c.field]: opt.fill?.[c.field] ?? opt.value } : l
+                            )
+                          )
+                        }
+                        error={err}
+                        ariaLabel={aria}
+                      />
+                    );
+                  } else {
+                    input = (
+                      <TextInput
+                        label={label}
+                        type={c.field === 'RequiredDate' ? 'date' : 'text'}
+                        value={String(line[c.field] ?? '')}
+                        onChange={(e) => {
+                          const v = e.currentTarget.value;
+                          setLineValue(i, c.field, c.field === 'ItemDescription' ? v.toUpperCase() : v);
+                        }}
+                        error={err}
+                        aria-label={aria}
+                      />
+                    );
+                  }
+                  return (
+                    <Box key={c.field}>{input}</Box>
+                  );
+                })}
+              </SimpleGrid>
+            </Paper>
+          ))}
+        </Stack>
         <Button
-          mt="xs"
+          mt="sm"
           variant="light"
-          size="xs"
-          leftSection={<IconPlus size={14} />}
+          leftSection={<IconPlus size={16} />}
           onClick={() => setLines((prev) => [...prev, {}])}
         >
           Agregar línea
