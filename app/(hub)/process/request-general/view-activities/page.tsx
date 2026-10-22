@@ -1186,6 +1186,13 @@ function ViewRequestPage() {
 
       setIsEditing(false);
 
+      if (result?.requestClosed) {
+        setUpdateMessage({
+          type: 'success',
+          text: 'La solicitud se cerró automáticamente al resolver esta tarea.',
+        });
+      }
+
       if (attachedFiles.length > 0) {
         setTimeout(() => fetchFolderContents(), 2000);
       }
