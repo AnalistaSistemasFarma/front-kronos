@@ -1,0 +1,69 @@
+'use client';
+
+import React, { useEffect, useRef, useState } from 'react';
+import { Autocomplete, Loader } from '@mantine/core';
+import type { LookupKind, LookupOption } from '../../../../lib/purchases/lookups';
+
+/**
+ * Celda con autocompletar contra SAP (como los buscadores de linea de SAPSEND).
+ * Consulta /api/purchases/lookup al escribir (minimo 2 caracteres, espera 300 ms).
+ * Al elegir una opcion entrega su valor y los campos extra que llena.
+ */
+
+interface Props {
+  companyId: string | number | null;
+  kind: LookupKind;
+  value: string;
+  onChange: (value: string) => void;
+  /** Al elegir una opcion: valor + campos extra (descripcion, nombre del proveedor...). */
+  onSelect: (option: LookupOption) => void;
+  error?: string;
+  ariaLabel: string;
+}
+
+export default function SapLookupInput({ companyId, kind, value, onChange, onSelect, error, ariaLabel }: Props) {
+  const [options, setOptions] = useState<LookupOption[]>([]);
+  const [loading, setLoading] = useState(false);
+  const lastQuery = useRef('');
+
+  useEffect(() => {
+    const q = value.trim();
+    if (!companyId || q.length < 2 || q === lastQuery.current) {
+      if (q.length < 2) setOptions([]);
+      return;
+    }
+    const ctrl = new AbortController();
+    const t = setTimeout(() => {
+      setLoading(true);
+      fetch(`/api/purchases/lookup?companyId=${companyId}&kind=${kind}&q=${encodeURIComponent(q)}`, { signal: ctrl.signal })
+        .then((r) => r.json())
+        .then((d) => setOptions(Array.isArray(d.options) ? d.options : []))
+        .catch(() => undefined)
+        .finally(() => setLoading(false));
+    }, 300);
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
+    };
+  }, [companyId, kind, value]);
+
+  return (
+    <Autocomplete
+      size="xs"
+      value={value}
+      onChange={onChange}
+      data={options.map((o) => ({ value: o.value, label: o.label }))}
+      filter={({ options: opts }) => opts}
+      onOptionSubmit={(v) => {
+        const opt = options.find((o) => o.value === v);
+        lastQuery.current = v;
+        if (opt) onSelect(opt);
+      }}
+      rightSection={loading ? <Loader size={12} /> : null}
+      comboboxProps={{ withinPortal: true, zIndex: 1100 }}
+      maxDropdownHeight={240}
+      error={error}
+      aria-label={ariaLabel}
+    />
+  );
+}
