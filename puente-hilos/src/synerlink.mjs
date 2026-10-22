@@ -13,6 +13,7 @@
  *                                         avisos de progreso (con el indicador aún «trabajando»)
  *   POST /api/chat/agent/projects/proposals  entregar las PROPUESTAS de tareas del turno
  *   POST /api/chat/agent/usage            consumo (tokens) del turno
+ *   POST /api/chat/agent/quota            cupo semanal y ventana de 5 h del token (cuota.mjs)
  *   POST /api/chat/agent/projects/team/requests     pedidos de «Sugerir equipo» (los reclama)
  *   POST /api/chat/agent/projects/team/suggestions  entrega de una sugerencia
  *   POST /api/chat/agent/projects/team/runs         lo que hizo cada subagente en un turno
@@ -103,6 +104,8 @@ export function crearClienteSynerLink({ url, llave, fetchImpl = globalThis.fetch
     /** Propuestas de tareas del turno: quedan PENDIENTES hasta que un dueño o editor las confirme. */
     proponer: (idConversation, items) => json('/api/chat/agent/projects/proposals', { method: 'POST', body: { idConversation, items } }),
     consumo: (reporte) => json('/api/chat/agent/usage', { method: 'POST', body: reporte }),
+    /** Cupo semanal y ventana de 5 h del token del agente (cuota.mjs). */
+    cuota: (estado) => json('/api/chat/agent/quota', { method: 'POST', body: estado, timeoutMs: 20_000 }),
     // Equipo de subagentes (F2, 2026-10-18).
     /** Reclama los pedidos de «Sugerir equipo» pendientes de los proyectos de este agente. */
     pedidosEquipo: () => json('/api/chat/agent/projects/team/requests', { method: 'POST', body: {} }),

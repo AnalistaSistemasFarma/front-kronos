@@ -82,6 +82,12 @@
  *                                    SUMAN al perfil en proyectos concretos). Se relee en cada turno.
  *   HILOS_CONECTORES_SECRETOS        Archivo 600 con las llaves Bearer de esos conectores; lo lee
  *                                    solo el headersHelper (nunca entra al mcp.json ni al modelo).
+ *
+ *   Medidor del consumo de Anthropic (2026-10-22; ver cuota.mjs). Opcional:
+ *   HILOS_CUOTA                      'si' (por defecto) o 'no'. Publica en SynerLink el cupo semanal
+ *                                    y la ventana de 5 h del token (lo que trae el stream del turno).
+ *   HILOS_CUOTA_INTERVALO_MS         Sin turnos, cada cuánto se hace la consulta mínima (haiku,
+ *                                    max_tokens 1). Por defecto 300000 (5 min); 0 = solo lo del stream.
  */
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -416,6 +422,11 @@ export function cargarConfig(env = process.env) {
   const pdfChrome = (env.HILOS_PDF_CHROME ?? '').trim() || null;
   if (pdfChrome && !path.isAbsolute(pdfChrome)) throw new ErrorConfig('HILOS_PDF_CHROME debe ser una ruta absoluta.');
 
+  // Medidor del consumo de Anthropic (cuota.mjs, 2026-10-22). Encendido por defecto.
+  const cuotaModo = (env.HILOS_CUOTA ?? 'si').trim().toLowerCase();
+  if (!['si', 'no'].includes(cuotaModo)) throw new ErrorConfig('HILOS_CUOTA debe ser «si» o «no».');
+  const cuotaIntervaloMs = (env.HILOS_CUOTA_INTERVALO_MS ?? '').trim() === '0' ? 0 : entero(env, 'HILOS_CUOTA_INTERVALO_MS', 5 * 60 * 1000, 60 * 1000, 60 * 60 * 1000);
+
   // Memoria del bot principal (solo lectura; ver memoria.mjs). Nunca dentro de HILOS_DIR.
   const memoriaDir = (env.HILOS_MEMORIA_DIR ?? '').trim() || null;
   if (memoriaDir && (path.resolve(memoriaDir) + path.sep).startsWith(path.resolve(hilosDir) + path.sep)) {
@@ -477,6 +488,7 @@ export function cargarConfig(env = process.env) {
     pluginDirs,
     grafosDir,
     pdf: { habilitado: pdfModo === 'si', chrome: pdfChrome, timeoutMs: entero(env, 'HILOS_PDF_TIMEOUT_MS', 60 * 1000, 10 * 1000, 3 * 60 * 1000) },
+    cuota: { habilitada: cuotaModo === 'si', intervaloMs: cuotaIntervaloMs },
     rutaConectoresPorProyecto: (env.HILOS_CONECTORES_POR_PROYECTO ?? '').trim() || null,
     conectoresSecretos: (env.HILOS_CONECTORES_SECRETOS ?? '').trim() || null,
     // Para el entorno del hijo: solo lo indispensable del entorno propio.

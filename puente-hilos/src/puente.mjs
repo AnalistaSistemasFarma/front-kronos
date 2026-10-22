@@ -47,6 +47,7 @@ import { guiaDesarrolloSegura } from './guia.mjs';
 import { grafosDelTurno, textoGrafos } from './grafos.mjs';
 import { prepararMemoriaTurno } from './memoria.mjs';
 import { crearClienteSynerLink } from './synerlink.mjs';
+import { crearMedidorCuota } from './cuota.mjs';
 import { prepararAdjuntos } from './adjuntos-salida.mjs';
 import { archivosDelTurno, archivosModificadosDesde, crearSupervisor, duracionLegible, PROMPT_CONTINUACION, textoAvisoProgreso, textoCorte, textoTiempoTurno } from './progreso.mjs';
 import { convertirHtmlAPdf, convertirMarcasPdf, recursosDePlugins, resolverChrome, textoPdf } from './pdf.mjs';
@@ -162,7 +163,7 @@ export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lot
   };
 }
 
-export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, convertirPdf = convertirHtmlAPdf }) {
+export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, convertirPdf = convertirHtmlAPdf, medidor = null }) {
   const enProceso = new Set();
 
   /** Auditoría local de cada comando y cada negación en turnos con código (sin el token). */
@@ -335,6 +336,11 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           vigia,
           timeoutMs: cfg.timeoutTurnoMs,
           alEvento: (evento, acc) => {
+            // Cupo semanal y ventana de 5 h: vienen gratis en el stream del turno.
+            if (evento?.type === 'rate_limit_event') {
+              medidor?.registrarEvento(evento);
+              return;
+            }
             if (codigo) auditarCodigo(idConversation, evento, codigo);
             if (acc.ultimoTexto) ultimoTexto = acc.ultimoTexto;
             for (const f of acc.archivosTocados ?? []) tocados.add(f);
@@ -703,7 +709,15 @@ async function principal() {
   cfg.agenteNombre = primera.agent.displayName;
 
   const estado = new Estado(cfg.hilosDir);
-  const puente = crearPuente({ cfg, synerlink, estado });
+  // Medidor del consumo de Anthropic (cuota.mjs): sin turnos en curso, consulta mínima cada intervalo.
+  let ocupado = () => false;
+  const medidor = cfg.cuota?.habilitada
+    ? crearMedidorCuota({ credencial: cfg.credencial, publicar: (e) => synerlink.cuota(e), ocupado: () => ocupado(), intervaloMs: cfg.cuota.intervaloMs, log })
+    : null;
+  const puente = crearPuente({ cfg, synerlink, estado, medidor });
+  ocupado = () => puente.enProceso.size > 0;
+  medidor?.iniciar();
+  log(medidor ? `medidor de consumo: stream de cada turno${cfg.cuota.intervaloMs > 0 && cfg.credencial.tipo === 'oauth-token' ? ` + consulta mínima cada ${Math.round(cfg.cuota.intervaloMs / 1000)} s sin turnos` : ''}.` : 'medidor de consumo apagado (HILOS_CUOTA=no).');
   log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}, modelo del hilo principal: ${cfg.modelo ?? 'el predeterminado de la cuenta (sin HILOS_MODELO)'}; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; gasto ${cfg.sinTopeGasto ? 'SIN TOPE' : cfg.presupuestoUsd ? `tope ${cfg.presupuestoUsd} USD` : `sin tope general (equipo ${cfg.subagentesPresupuestoUsd} USD)`}; avisos de progreso ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; continuación automática ${cfg.continuarAlAgotar ? 'sí' : 'no'}.`);
 
   let parar = false;
@@ -711,6 +725,7 @@ async function principal() {
     process.on(senal, () => {
       log(`recibí ${senal}: termino los turnos en curso y salgo.`);
       parar = true;
+      medidor?.detener();
       void puente.cola.vacia().then(() => process.exit(0));
       setTimeout(() => process.exit(0), cfg.timeoutTurnoMs).unref();
     });
