@@ -1190,6 +1190,13 @@ function ViewRequestPage() {
 
       setIsEditing(false);
 
+      if (result?.requestClosed) {
+        setUpdateMessage({
+          type: 'success',
+          text: 'La solicitud se cerró automáticamente al resolver esta tarea.',
+        });
+      }
+
       if (attachedFiles.length > 0) {
         setTimeout(() => fetchFolderContents(), 2000);
       }
@@ -1348,7 +1355,8 @@ function ViewRequestPage() {
 
     if (request?.id_status === 1) {
       return [
-        { value: '2', label: 'Resuelto' }
+        { value: '2', label: 'Resuelto' },
+        { value: '3', label: 'Cancelado' }
       ];
     }
 

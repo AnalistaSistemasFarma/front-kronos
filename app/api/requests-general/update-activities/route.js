@@ -8,6 +8,7 @@ import {
 import { syncAuthorizationToSapsend } from '../../../../lib/sapsend/authorizationStatus.js';
 import { onAuthorizationDecision as onPurchaseAuthorizationDecision } from '../../../../lib/purchases/authorization';
 import { advanceSequentialTask } from '../../../../lib/workflow/advanceSequentialTask.js';
+import { closeRequestGeneral } from '../../../../lib/workflow/closeRequestGeneral.js';
 import { resolveSessionUser } from '../../../../lib/chat/http';
 import { authorizationDecisionBlock } from '../../../../lib/request-general/workload';
 import { orionInternalTaskSql } from '../../../../lib/orion/internalTasks';
@@ -57,7 +58,7 @@ export async function POST(req) {
           SELECT trg.id_status, trg.id_request_general, trg.id_task, trg.resolution, trg.id_assigned,
                  rg.subject_request,
                  tpc.task, tpc.is_sequential, tpc.display_order, tpc.id_process_category,
-                 tpc.is_authorization, taut.type_authorization,
+                 tpc.is_authorization, tpc.closes_request, taut.type_authorization,
                  pc.process, cr.category
           FROM task_request_general trg
           INNER JOIN requests_general rg ON rg.id = trg.id_request_general
@@ -243,6 +244,15 @@ export async function POST(req) {
 
       await request.query(updateQuery);
 
+      if (isAuthorizationTask && Number(id_status) === 3) {
+        await new sql.Request(transaction)
+          .input('id_request', sql.Int, prevRow.id_request_general)
+          .query(`UPDATE requests_general SET status_req = 7 WHERE id = @id_request`);
+        console.log(
+          `${TAG} 3b) Autorización rechazada: solicitud ${prevRow.id_request_general} marcada como Devuelta (7).`
+        );
+      }
+
       await transaction.commit();
       console.log(`${TAG} 3) UPDATE + commit OK. Tarea ${id} pasó a estado ${id_status}.`);
 
@@ -319,6 +329,7 @@ export async function POST(req) {
 
       // Creación diferida de la siguiente tarea secuencial.
       // Auths Orion por firmante no avanzan el workflow Fase B.
+      let requestClosed = false;
       if (justResolved && !isFirmaAuthorization) {
         await advanceSequentialTask(pool, {
           id_request_general: prevRow.id_request_general,
@@ -327,6 +338,32 @@ export async function POST(req) {
           display_order: prevRow.display_order,
           subject_request: prevRow.subject_request,
         });
+
+        // Parametrización por tarea (closes_request): al resolver esta tarea, cerrar la
+        // solicitud SOLO si ya no quedan otras tareas abiertas (excluyendo el proceso
+        // interno de firma Orion). advanceSequentialTask ya corrió, así que si esta tarea
+        // no era la última, la siguiente ya estaría abierta y el conteo sería > 0.
+        if (prevRow.closes_request) {
+          const openResult = await new sql.Request(pool)
+            .input('id_request', sql.Int, prevRow.id_request_general)
+            .query(`
+              SELECT COUNT(*) AS n
+              FROM task_request_general trg
+              INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
+              WHERE trg.id_request_general = @id_request
+                AND trg.id_status NOT IN (2, 3)
+                AND NOT ${orionInternalTaskSql('trg', 'tpc')}
+            `);
+          const openTasks = Number(openResult.recordset[0]?.n ?? 0);
+          console.log(`${TAG} 5d) closes_request=1; tareas abiertas restantes = ${openTasks}.`);
+          if (openTasks === 0) {
+            requestClosed = await closeRequestGeneral(pool, {
+              requestId: prevRow.id_request_general,
+              closedByUserId: executorId,
+              resolution: `Cerrada automáticamente al resolver la tarea «${prevRow.task}».`,
+            });
+          }
+        }
       } else if (justResolved && isFirmaAuthorization) {
         console.log(`${TAG} 5b) Auth FIRMA/Orion: no se avanza workflow secuencial.`);
       } else if (Number(nextStatus) === 3) {
@@ -338,6 +375,7 @@ export async function POST(req) {
         JSON.stringify({
           success: true,
           message: 'Tarea actualizada correctamente',
+          requestClosed,
         }),
         { status: 200 }
       );

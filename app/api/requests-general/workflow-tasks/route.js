@@ -31,6 +31,7 @@ export async function GET(req) {
         taut.type_authorization as type_authorization_label,
         tpc.id_linked_process,
         lp.process as linked_process_label,
+        tpc.closes_request,
         u.name as assigned_user,
 		    u.id as id_assigned_user
       FROM task_process_category tpc
