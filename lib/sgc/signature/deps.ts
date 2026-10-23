@@ -1,7 +1,7 @@
 import { prisma } from '../../prisma';
 import type { SgcSignatureDeps } from '../db/signatures';
 import { sgcNotifier } from '../notifications';
-import { downloadSgcFile, uploadToSgcStorage } from '../onedrive';
+import { downloadSgcFile, sgcOfficeConverter, uploadToSgcStorage } from '../onedrive';
 import { docxToHtml, htmlToPdf } from '../pdf/render';
 import { synerlinkPasswordVerifier } from './reauth';
 
@@ -18,6 +18,7 @@ export function sgcSignatureDeps(): SgcSignatureDeps {
     download: downloadSgcFile,
     htmlToPdf,
     docxToHtml,
+    officeToPdf: sgcOfficeConverter.bytes,
     notifier: sgcNotifier,
     appUrl: process.env.NEXTAUTH_URL || 'https://synerlink',
   };

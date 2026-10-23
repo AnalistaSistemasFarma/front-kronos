@@ -1,7 +1,7 @@
 import { prisma } from '../../../../../../lib/prisma';
 import { uploadBulkFile } from '../../../../../../lib/sgc/db/bulkUpload';
 import { normalizeSheetSettings } from '../../../../../../lib/sgc/sheetSettings';
-import { uploadToSgcStorage } from '../../../../../../lib/sgc/onedrive';
+import { sgcOfficeConverter, uploadToSgcStorage } from '../../../../../../lib/sgc/onedrive';
 import { docxToHtml, htmlToPdf } from '../../../../../../lib/sgc/pdf/render';
 import { companyAccess, errorResponse, getSgcRequestContext, jsonNoStore, parseId, uploadGuard } from '../../../_lib/context';
 
@@ -33,7 +33,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const file = form.get('file');
     if (!(file instanceof File)) return jsonNoStore({ error: 'Falta el archivo' }, 400);
     const settings = form.get('settings') ? normalizeSheetSettings(form.get('settings')) : null;
-    const result = await uploadBulkFile(prisma, uploadToSgcStorage, idCompany, id, { fileName: file.name, bytes: new Uint8Array(await file.arrayBuffer()) }, ctx.actor, new Date(), { docxToHtml, htmlToPdf }, settings);
+    const result = await uploadBulkFile(prisma, uploadToSgcStorage, idCompany, id, { fileName: file.name, bytes: new Uint8Array(await file.arrayBuffer()) }, ctx.actor, new Date(), { docxToHtml, htmlToPdf, officeToPdf: sgcOfficeConverter.bytes }, settings);
     return jsonNoStore(result, 201);
   } catch (error) {
     return errorResponse(error, 'listado-maestro:archivo');

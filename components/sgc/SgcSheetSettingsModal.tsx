@@ -171,7 +171,7 @@ export default function SgcSheetSettingsModal({ opened, name, source, onClose, o
         <Stack gap='sm'>
           <Alert color='blue' icon={<IconInfoCircle size={18} />}>
             <Text size='sm'>
-              Estos ajustes solo cambian cómo se imprime el Excel en el PDF: orientación, tamaño, área de impresión, filas de título y columnas que salen. El texto del documento no cambia; si hay que corregirlo, solicite una nueva versión.
+              Estos ajustes solo cambian cómo se imprime el Excel en el PDF: orientación, tamaño, área de impresión, filas de título y columnas que salen. El texto del documento no cambia; si hay que corregirlo, solicite una nueva versión. La conversión la hace Microsoft (igual que «Guardar como PDF» en Excel) con la orientación y el tamaño elegidos; si cambia el área de impresión, las filas de título o quita hojas o columnas, la hace SynerLink.
             </Text>
           </Alert>
           {notice}

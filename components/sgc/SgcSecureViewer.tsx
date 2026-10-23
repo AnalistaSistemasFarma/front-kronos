@@ -55,6 +55,16 @@ export interface SgcSecureViewerProps {
 /** Escala inicial del visor (página al 100 % del ancho disponible). */
 const BASE_SCALE = 1.3;
 
+/**
+ * Ancho en pantalla (px) de una página: a la escala base, lo que cabe en el visor (sin pasar del tamaño natural
+ * × la escala base); cada paso de zoom lo agranda o achica en proporción.
+ */
+export function sgcViewerPageWidth(naturalPt: number, containerPx: number, scale: number): number {
+  const room = Math.max(200, (containerPx || 0) - 32);
+  const base = Math.min(room, naturalPt * BASE_SCALE);
+  return Math.max(120, base * (scale / BASE_SCALE));
+}
+
 export async function renderPdf(bytes: Uint8Array, scale: number, container: HTMLElement, isCancelled: () => boolean) {
   const pdfjs = await import('pdfjs-dist');
   pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
@@ -64,16 +74,18 @@ export async function renderPdf(bytes: Uint8Array, scale: number, container: HTM
   for (let n = 1; n <= pdf.numPages; n++) {
     if (isCancelled()) return 0;
     const page = await pdf.getPage(n);
-    const viewport = page.getViewport({ scale });
+    // 2026-10-22 (Calidad OLP: «no deja hacer zoom»): el tamaño en pantalla es el que cabe a la escala base
+    // (el ancho del visor o el natural, el menor) por el zoom elegido, y la página se dibuja con esa resolución
+    // (por la densidad de la pantalla), así «Acercar» y «Alejar» se notan en cada clic también en hojas horizontales.
+    const natural = page.getViewport({ scale: 1 }).width;
+    const cssWidth = sgcViewerPageWidth(natural, container.clientWidth, scale);
+    const dpr = typeof window !== 'undefined' ? Math.min(2, window.devicePixelRatio || 1) : 1;
+    const viewport = page.getViewport({ scale: (cssWidth / natural) * dpr });
     const canvas = document.createElement('canvas');
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    // «Acercar» debe agrandar la página también cuando el visor es angosto
-    // (celular): por encima de la escala base el ancho crece en proporción y el
-    // visor se desplaza a lo ancho. En escritorio el tope sigue siendo el
-    // tamaño natural de la página, como antes.
-    canvas.style.width = scale > BASE_SCALE ? `${Math.round((scale / BASE_SCALE) * 100)}%` : '100%';
-    canvas.style.maxWidth = `${viewport.width}px`;
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+    canvas.style.width = `${Math.round(cssWidth)}px`;
+    canvas.style.maxWidth = 'none';
     canvas.style.display = 'block';
     canvas.style.margin = '0 auto 16px';
     canvas.style.boxShadow = '0 1px 4px rgba(0,0,0,.18)';
