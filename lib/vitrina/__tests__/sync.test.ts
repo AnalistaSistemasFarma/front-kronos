@@ -21,6 +21,20 @@ const existente = (item_code: string, extra: Partial<CodigoExistente> = {}): Cod
 });
 
 describe('Vitrina · plan de sincronización con SAP', () => {
+  it('toma el país del registro sanitario de SAP, sin pisar el que puso un administrador', () => {
+    const reg = (U_Referencia: string, U_Pais: string) => ({ U_Referencia, U_Registro_Sanitario: 'R', U_Fecha_Vencimiento: '2029-01-01T00:00:00Z', U_Obsoleto: 'NO', U_Pais });
+    const plan = planSincronizacion({
+      fuente: FARMA,
+      existentes: [existente('PTMP0150'), { ...existente('PTMP0151'), id_codigo_sap: 11, pais: 'Otro' }],
+      items: [vendible('PTMP0111'), vendible('PTMP0150'), vendible('PTMP0151')],
+      registros: [reg('PTMP0111', 'COLOMBIA'), reg('PTMP0150', 'GUATEMALA'), reg('PTMP0151', 'EL SALVADOR')],
+      hoy: HOY,
+    });
+    expect(plan.crear[0].pais).toBe('Colombia');
+    expect(plan.actualizar.find((u) => u.item_code === 'PTMP0150')?.data.pais).toBe('Guatemala');
+    expect(plan.actualizar.find((u) => u.item_code === 'PTMP0151')?.data.pais).toBeUndefined();
+  });
+
   it('solo los vendibles entran a la bandeja, sin activar nada', () => {
     const plan = planSincronizacion({
       fuente: FARMA,
@@ -30,7 +44,7 @@ describe('Vitrina · plan de sincronización con SAP', () => {
       hoy: HOY,
     });
     expect(plan.crear).toEqual([
-      { item_code: 'PTMP0111', item_name: 'Nombre PTMP0111', items_group_code: 130, canal: 'SIN_DATO', sug_familia: 'Carbapenémicos', registro_estado: 'POR_VENCER', registro_sanitario: 'INVIMA X', registro_vence_en: '2026-12-01' },
+      { item_code: 'PTMP0111', item_name: 'Nombre PTMP0111', items_group_code: 130, canal: 'SIN_DATO', sug_familia: 'Carbapenémicos', registro_estado: 'POR_VENCER', registro_sanitario: 'INVIMA X', registro_vence_en: '2026-12-01', pais: null },
     ]);
     expect(plan.leidos).toEqual(['PTMP0111', 'PTMP0112']);
     expect(plan.resumen).toMatchObject({ leidosSap: 2, vendibles: 1, nuevos: 1, retirados: 0 });

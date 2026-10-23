@@ -37,6 +37,8 @@ export interface CodigoExistente {
   registro_sanitario: string | null;
   /** YYYY-MM-DD o null. */
   registro_vence_en: string | null;
+  /** País guardado; la lectura solo lo llena si está vacío (no pisa lo que edite un administrador). */
+  pais?: string | null;
   /** false = el código vino de la semilla y SAP todavía no lo ha confirmado (sin ultima_lectura). */
   leido: boolean;
 }
@@ -50,6 +52,7 @@ export interface NuevoCodigo {
   registro_estado: VitrinaRegistroEstado;
   registro_sanitario: string | null;
   registro_vence_en: string | null;
+  pais: string | null;
 }
 
 export interface CambioCodigo {
@@ -63,6 +66,7 @@ export interface CambioCodigo {
     registro_estado: VitrinaRegistroEstado;
     registro_sanitario: string | null;
     registro_vence_en: string | null;
+    pais: string | null;
   }>;
 }
 
@@ -141,6 +145,7 @@ export function planSincronizacion(input: {
         registro_estado: estado,
         registro_sanitario: reg?.numero?.slice(0, 60) ?? null,
         registro_vence_en: reg?.venceEn ?? null,
+        pais: reg?.pais ?? null,
       });
       eventos.push({ id_codigo_sap: null, item_code: code, accion: 'CREAR', anterior: null, nuevo: { item_code: code, item_name: nombre, registro_estado: estado } });
       continue;
@@ -188,6 +193,7 @@ export function planSincronizacion(input: {
         });
       }
     }
+    if (!prev.pais && reg?.pais) data.pais = reg.pais;
     const estadoFinal = data.registro_estado ?? prev.registro_estado;
     porEstado[estadoFinal] = (porEstado[estadoFinal] ?? 0) + 1;
     if (Object.keys(data).length > 0) actualizar.push({ id_codigo_sap: prev.id_codigo_sap, item_code: code, data });

@@ -44,6 +44,7 @@ export async function sincronizarEmpresa(db: VitrinaDb, idCompany: number, idUse
         registro_estado: true,
         registro_sanitario: true,
         registro_vence_en: true,
+        pais: true,
         ultima_lectura: true,
       },
     });
@@ -69,6 +70,7 @@ export async function sincronizarEmpresa(db: VitrinaDb, idCompany: number, idUse
             registro_estado: c.registro_estado,
             registro_sanitario: c.registro_sanitario,
             registro_vence_en: aFecha(c.registro_vence_en) ?? null,
+            pais: c.pais,
             activo_en_sap: true,
             activado_vitrina: false,
             ultima_lectura: ahora,

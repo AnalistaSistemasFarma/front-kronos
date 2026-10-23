@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  normalizarPais,
   agruparPorProductoRyan,
   canalDeSemilla,
   canalSugerido,
@@ -83,7 +84,7 @@ describe('Vitrina · registro sanitario', () => {
 
   it('9999-01-01 significa sin dato, no vigente', () => {
     const e = estadoRegistro(reg('9999-01-01'), HOY);
-    expect(e).toEqual({ estado: 'SIN_FECHA', numero: 'INVIMA 2020M-1', venceEn: null, dias: null });
+    expect(e).toEqual({ estado: 'SIN_FECHA', numero: 'INVIMA 2020M-1', venceEn: null, dias: null, pais: null });
   });
 
   it('vencido antes de hoy → VENCIDO; hoy mismo aún no vence', () => {
@@ -281,5 +282,14 @@ describe('Vitrina · concentración sugerida', () => {
   it('une dosis con «/» o «+»', () => {
     expect(parsePresentacionSugerida('Adrenalina 1 mg/mL x10')?.concentracion).toBe('1 mg/mL');
     expect(parsePresentacionSugerida('Ampicilina + Sulbactam 1 g + 0,5 g x10')?.concentracion).toBe('1 g+0,5 g');
+  });
+});
+
+describe('Vitrina · país del registro', () => {
+  it('normaliza los nombres de SAP', () => {
+    expect(normalizarPais('PERU')).toBe('Perú');
+    expect(normalizarPais('EL SALVADOR')).toBe('El Salvador');
+    expect(normalizarPais('  México ')).toBe('México');
+    expect(normalizarPais('')).toBeNull();
   });
 });
