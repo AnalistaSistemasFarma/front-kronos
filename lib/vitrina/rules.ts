@@ -195,6 +195,8 @@ export interface EstadoRegistro {
   venceEn: string | null;
   /** Días que faltan para el vencimiento (negativo si ya venció); null sin fecha. */
   dias: number | null;
+  /** País del registro (U_Pais de SAP) con nombre normalizado; null si no viene. */
+  pais?: string | null;
 }
 
 /**
@@ -206,14 +208,31 @@ export interface EstadoRegistro {
  *   - en otro caso                   → VIGENTE.
  */
 export function estadoRegistro(row: SapRegistroRow | null, hoy: string, diasAviso = VITRINA_DIAS_POR_VENCER): EstadoRegistro {
-  if (!row) return { estado: 'SIN_REGISTRO', numero: null, venceEn: null, dias: null };
+  if (!row) return { estado: 'SIN_REGISTRO', numero: null, venceEn: null, dias: null, pais: null };
   const numero = (row.U_Registro_Sanitario ?? '').trim() || null;
+  const pais = normalizarPais(row.U_Pais);
   const fecha = fechaSap(row.U_Fecha_Vencimiento);
-  if (esSinDato(fecha)) return { estado: 'SIN_FECHA', numero, venceEn: null, dias: null };
+  if (esSinDato(fecha)) return { estado: 'SIN_FECHA', numero, venceEn: null, dias: null, pais };
   const dias = diasEntre(hoy, fecha!);
-  if (dias < 0) return { estado: 'VENCIDO', numero, venceEn: fecha, dias };
-  if (dias <= diasAviso) return { estado: 'POR_VENCER', numero, venceEn: fecha, dias };
-  return { estado: 'VIGENTE', numero, venceEn: fecha, dias };
+  if (dias < 0) return { estado: 'VENCIDO', numero, venceEn: fecha, dias, pais };
+  if (dias <= diasAviso) return { estado: 'POR_VENCER', numero, venceEn: fecha, dias, pais };
+  return { estado: 'VIGENTE', numero, venceEn: fecha, dias, pais };
+}
+
+const PAISES_CONOCIDOS: Record<string, string> = {
+  COLOMBIA: 'Colombia', ECUADOR: 'Ecuador', PERU: 'Perú', BOLIVIA: 'Bolivia', CHILE: 'Chile',
+  GUATEMALA: 'Guatemala', 'EL SALVADOR': 'El Salvador', SALVADOR: 'El Salvador', HONDURAS: 'Honduras',
+  NICARAGUA: 'Nicaragua', 'COSTA RICA': 'Costa Rica', PANAMA: 'Panamá', MEXICO: 'México',
+  VENEZUELA: 'Venezuela', 'REPUBLICA DOMINICANA': 'República Dominicana', PARAGUAY: 'Paraguay', URUGUAY: 'Uruguay', ARGENTINA: 'Argentina',
+};
+
+/** «COLOMBIA» → «Colombia», «PERU» → «Perú». Lo desconocido se devuelve con mayúscula inicial. */
+export function normalizarPais(raw: string | null | undefined): string | null {
+  const t = (raw ?? '').trim();
+  if (!t) return null;
+  const clave = t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' ');
+  if (PAISES_CONOCIDOS[clave]) return PAISES_CONOCIDOS[clave];
+  return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
 }
 
 /** Agrupa los registros por U_Referencia (= ItemCode). */
