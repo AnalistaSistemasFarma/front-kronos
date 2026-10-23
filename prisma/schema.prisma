@@ -1076,14 +1076,19 @@ model ChatProjectMember {
 /// adjuntos del chat; aquí solo queda la referencia. El puente lo baja a la
 /// carpeta del hilo con la llave del agente.
 model ChatProjectFile {
-  id_project_file  Int      @id @default(autoincrement())
-  id_project       Int
-  file_name        String   @db.NVarChar(400)
-  content_type     String?  @db.NVarChar(200)
-  size_bytes       Int?
-  onedrive_item_id String?  @db.NVarChar(300)
-  uploaded_by      String?  @db.NVarChar(1000)
-  created_at       DateTime @default(now())
+  id_project_file   Int      @id @default(autoincrement())
+  id_project        Int
+  file_name         String   @db.NVarChar(400)
+  content_type      String?  @db.NVarChar(200)
+  size_bytes        Int?
+  onedrive_item_id  String?  @db.NVarChar(300)
+  uploaded_by       String?  @db.NVarChar(1000)
+  /// Archivo que generó un AGENTE en una conversación del proyecto (2026-10-23):
+  /// el agente de la llave del puente y la conversación (uploaded_by queda NULL).
+  /// Sin FK a propósito: la conversación ya cae en cascada con el proyecto.
+  uploaded_by_agent Int?
+  id_conversation   Int?
+  created_at        DateTime @default(now())
 
   project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
 

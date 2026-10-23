@@ -440,6 +440,8 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
           size_bytes: true,
           created_at: true,
           uploaded_by: true,
+          uploaded_by_agent: true,
+          id_conversation: true,
         },
         orderBy: { created_at: 'desc' },
       },
@@ -487,6 +489,15 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
   }
   const persona = (id: string | null) => (id ? { id, name: nombres.get(id) ?? 'Persona retirada' } : null);
 
+  // Archivos que generó un agente en una conversación (2026-10-23): su nombre visible.
+  const idsAgentes = [...new Set(p.files.map((f) => f.uploaded_by_agent).filter((x): x is number => typeof x === 'number'))];
+  const nombresAgentes = new Map<number, string>(p.agents.map((x) => [x.agent.id_agent, x.agent.display_name]));
+  const faltanAgentes = idsAgentes.filter((id) => !nombresAgentes.has(id));
+  if (faltanAgentes.length > 0) {
+    const as = await prisma.agent.findMany({ where: { id_agent: { in: faltanAgentes } }, select: { id_agent: true, display_name: true } });
+    for (const a of as) nombresAgentes.set(a.id_agent, a.display_name);
+  }
+
   return {
     idProject: p.id_project,
     name: p.name,
@@ -525,6 +536,10 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
       sizeBytes: f.size_bytes,
       createdAt: f.created_at.toISOString(),
       uploadedBy: persona(f.uploaded_by),
+      uploadedByAgent:
+        typeof f.uploaded_by_agent === 'number'
+          ? { idAgent: f.uploaded_by_agent, name: nombresAgentes.get(f.uploaded_by_agent) ?? 'Asistente', idConversation: f.id_conversation ?? null }
+          : null,
       downloadUrl: `/api/proyectos/${p.id_project}/archivos/${f.id_project_file}`,
       puedoQuitar: !p.archived && (caps.removeAny || (caps.contribute && f.uploaded_by === user.id)),
     })),
