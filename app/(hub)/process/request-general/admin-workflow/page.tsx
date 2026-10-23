@@ -15,6 +15,7 @@ import {
   Stack,
   TextInput,
   Select,
+  MultiSelect,
   Grid,
   Alert,
   LoadingOverlay,
@@ -54,6 +55,7 @@ import {
   IconClock,
   IconPlayerPlay,
   IconEdit,
+  IconCopy,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
@@ -146,6 +148,21 @@ function RequestBoard() {
   const [categoriesWF, setCategoriesWF] = useState<{ value: string; label: string }[]>([]);
   const [processesWF, setProcessWF] = useState<{ value: string; label: string }[]>([]);
   const [modalOpened, setModalOpened] = useState(false);
+
+  const [replicateModalOpened, setReplicateModalOpened] = useState(false);
+  const [replicateForm, setReplicateForm] = useState<{
+    company: string;
+    process: string;
+    empresas: string[];
+    ensayo: boolean;
+  }>({ company: '', process: '', empresas: [], ensayo: true });
+  const [replicateLoading, setReplicateLoading] = useState(false);
+  const [replicateError, setReplicateError] = useState<string | null>(null);
+  const [replicateResult, setReplicateResult] = useState<{
+    ensayo: boolean;
+    recordsets?: unknown[][];
+  } | null>(null);
+
   const [currentStep, setCurrentStep] = useState(1);
   const [createLoading, setCreateLoading] = useState(false);
   const [formDataLoading, setFormDataLoading] = useState(false);
@@ -241,6 +258,49 @@ function RequestBoard() {
     setJobForm({ ...EMPTY_JOB_FORM, startDate: new Date().toISOString().slice(0, 10) });
     setEditingJobId(null);
     setJobError(null);
+  };
+
+  const closeReplicateModal = () => {
+    setReplicateModalOpened(false);
+    setReplicateForm({ company: '', process: '', empresas: [], ensayo: true });
+    setReplicateError(null);
+    setReplicateResult(null);
+  };
+
+  const handleReplicate = async () => {
+    setReplicateError(null);
+    setReplicateResult(null);
+    if (!replicateForm.process || replicateForm.empresas.length === 0) {
+      setReplicateError('Seleccione el proceso a replicar y al menos una empresa destino.');
+      return;
+    }
+    setReplicateLoading(true);
+    try {
+      const response = await fetch('/api/requests-general/replicate-workflow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id_origen: Number(replicateForm.process),
+          empresas: replicateForm.empresas.map(Number),
+          ensayo: replicateForm.ensayo,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setReplicateError(data.error || 'No se pudo replicar el flujo.');
+        return;
+      }
+      if (replicateForm.ensayo) {
+        setReplicateResult({ ensayo: Boolean(data.ensayo), recordsets: data.recordsets });
+      } else {
+        closeReplicateModal();
+        await fetchWorkFlows();
+      }
+    } catch {
+      setReplicateError('Error de conexión al replicar el flujo.');
+    } finally {
+      setReplicateLoading(false);
+    }
   };
 
   const openEditJob = (job: ScheduledJob) => {
@@ -391,6 +451,7 @@ function RequestBoard() {
       asignado: string;
       costo: number;
       centroCosto: string;
+      cierraSolicitud: boolean;
     }>
   >([]);
   const [taskForm, setTaskForm] = useState({
@@ -398,6 +459,7 @@ function RequestBoard() {
     asignado: '',
     costo: '',
     centroCosto: '',
+    cierraSolicitud: false,
   });
 
   const [taskFormKey, setTaskFormKey] = useState(0);
@@ -413,10 +475,11 @@ function RequestBoard() {
         asignado: taskForm.asignado,
         costo: parseFloat(taskForm.costo) || 0,
         centroCosto: taskForm.centroCosto,
+        cierraSolicitud: taskForm.cierraSolicitud,
       },
     ]);
 
-    setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+    setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false });
 
     setTaskFormKey(prev => prev + 1);
   };
@@ -905,6 +968,7 @@ function RequestBoard() {
         id_user: task.asignado || null,
         cost: task.costo || 0,
         cost_center: task.centroCosto || null,
+        closes_request: task.cierraSolicitud,
       }));
 
       console.log('asignados tareas ' + tasksToSend);
@@ -945,7 +1009,7 @@ function RequestBoard() {
         isExternal: false,
       });
       setTasks([]);
-      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false });
       setAssignedCategoryInfo(null);
 
       fetchWorkFlows();
@@ -1076,6 +1140,15 @@ function RequestBoard() {
     .filter((p) => String(p.id_category_request) === jobForm.category)
     .map((p) => ({ value: p.id_process.toString(), label: p.process }));
 
+  const replicateCategoryIds = new Set(
+    crCategories
+      .filter((c) => String(c.id_company) === replicateForm.company)
+      .map((c) => c.id)
+  );
+  const replicateProcessOptions = crProcessCategories
+    .filter((p) => replicateCategoryIds.has(p.id_category_request))
+    .map((p) => ({ value: p.id_process.toString(), label: p.process }));
+
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
     { title: 'Flujos de Trabajo', href: '#' },
@@ -1116,14 +1189,24 @@ function RequestBoard() {
               </Text>
             </div>
 
-            <Button
-              onClick={() => setModalOpened(true)}
-              size='lg'
-              leftSection={<IconPlus size={18} />}
-              className='bg-blue-600 hover:bg-blue-700'
-            >
-              Crear Flujo De Trabajo
-            </Button>
+            <Group gap='sm'>
+              <Button
+                onClick={() => setReplicateModalOpened(true)}
+                size='lg'
+                variant='outline'
+                leftSection={<IconCopy size={18} />}
+              >
+                Replicar flujos
+              </Button>
+              <Button
+                onClick={() => setModalOpened(true)}
+                size='lg'
+                leftSection={<IconPlus size={18} />}
+                className='bg-blue-600 hover:bg-blue-700'
+              >
+                Crear Flujo De Trabajo
+              </Button>
+            </Group>
           </Flex>
 
           <Grid>
@@ -1733,7 +1816,7 @@ function RequestBoard() {
             setCurrentStep(1);
             setFormErrors({});
             setTasks([]);
-            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false });
             setFormData({
               company: '',
               category: '',
@@ -2205,6 +2288,16 @@ function RequestBoard() {
                           Agregar
                         </Button>
                       </Grid.Col>
+
+                      <Grid.Col span={12}>
+                        <Checkbox
+                          label='Al resolver esta tarea, cerrar la solicitud'
+                          checked={taskForm.cierraSolicitud}
+                          onChange={(e) =>
+                            setTaskForm({ ...taskForm, cierraSolicitud: e.currentTarget.checked })
+                          }
+                        />
+                      </Grid.Col>
                     </Grid>
                   </div>
 
@@ -2228,6 +2321,9 @@ function RequestBoard() {
                             </Table.Th>
                             <Table.Th className='py-4 px-5 text-sm font-semibold uppercase tracking-wider'>
                               Centro de Costo
+                            </Table.Th>
+                            <Table.Th className='py-4 px-5 text-sm font-semibold uppercase tracking-wider text-center'>
+                              Cierra solicitud
                             </Table.Th>
                             <Table.Th
                               className='py-4 px-5 text-sm font-semibold uppercase tracking-wider text-center'
@@ -2269,6 +2365,15 @@ function RequestBoard() {
                                 <Text size='base' c='dimmed'>
                                   {task.centroCosto || '-'}
                                 </Text>
+                              </Table.Td>
+                              <Table.Td className='py-4 px-5 text-center'>
+                                {task.cierraSolicitud ? (
+                                  <Badge color='red' variant='light' size='sm'>
+                                    Sí
+                                  </Badge>
+                                ) : (
+                                  <Text size='sm' c='dimmed'>—</Text>
+                                )}
                               </Table.Td>
                               <Table.Td className='py-4 px-5 text-center'>
                                 <ActionIcon
@@ -2323,7 +2428,7 @@ function RequestBoard() {
                   setCurrentStep(1);
                   setFormErrors({});
                   setTasks([]);
-                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false });
                 }
               }}
               size='md'
@@ -2560,6 +2665,133 @@ function RequestBoard() {
                 className='bg-blue-600 hover:bg-blue-700 cursor-pointer transition-colors duration-200'
               >
                 Crear Proceso
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
+
+        <Modal
+          opened={replicateModalOpened}
+          onClose={closeReplicateModal}
+          title={
+            <Group gap='sm'>
+              <IconCopy size={20} className='text-blue-600' />
+              <Text fw={600}>Replicar flujo a otras empresas</Text>
+            </Group>
+          }
+          size='lg'
+          radius='lg'
+          centered
+          classNames={{ header: 'border-b border-gray-100 pb-4', body: 'pt-4' }}
+        >
+          <Stack gap='md'>
+            <Text size='sm' c='dimmed'>
+              Copia un flujo existente a una o varias empresas. Usa el modo Ensayo para simular
+              antes de replicar en firme.
+            </Text>
+
+            {replicateError && (
+              <Alert color='red' icon={<IconAlertCircle size={16} />}>
+                {replicateError}
+              </Alert>
+            )}
+
+            <Select
+              label='Empresa origen'
+              placeholder='Seleccione la empresa del flujo'
+              data={companies}
+              value={replicateForm.company}
+              onChange={(value) =>
+                setReplicateForm({
+                  ...replicateForm,
+                  company: value || '',
+                  process: '',
+                })
+              }
+              searchable
+              leftSection={<IconBuilding size={16} />}
+            />
+
+            <Select
+              label='Proceso a replicar'
+              placeholder={
+                replicateForm.company
+                  ? 'Seleccione el proceso'
+                  : 'Seleccione primero la empresa origen'
+              }
+              data={replicateProcessOptions}
+              value={replicateForm.process}
+              onChange={(value) =>
+                setReplicateForm({ ...replicateForm, process: value || '' })
+              }
+              searchable
+              disabled={!replicateForm.company}
+              leftSection={<IconFileDescription size={16} />}
+              required
+            />
+
+            <MultiSelect
+              label='Empresas destino'
+              placeholder='Seleccione una o varias empresas'
+              data={companies}
+              value={replicateForm.empresas}
+              onChange={(value) =>
+                setReplicateForm({ ...replicateForm, empresas: value })
+              }
+              searchable
+              clearable
+              leftSection={<IconBuilding size={16} />}
+              required
+            />
+
+            <Switch
+              label='Ensayo (simulación)'
+              description='Encendido: solo simula, no replica en firme. Apágalo para replicar en firme.'
+              checked={replicateForm.ensayo}
+              onChange={(e) =>
+                setReplicateForm({ ...replicateForm, ensayo: e.currentTarget.checked })
+              }
+            />
+
+            {replicateResult && (
+              <Alert
+                color={replicateResult.ensayo ? 'blue' : 'green'}
+                icon={<IconCheck size={16} />}
+              >
+                {replicateResult.ensayo
+                  ? 'Ensayo ejecutado. No se replicó nada en firme.'
+                  : 'Flujo replicado en firme a las empresas destino.'}
+                {Array.isArray(replicateResult.recordsets) &&
+                  replicateResult.recordsets.some(
+                    (rs) => Array.isArray(rs) && rs.length > 0
+                  ) && (
+                    <ScrollArea.Autosize mah={220} mt='sm'>
+                      <pre className='text-xs whitespace-pre-wrap'>
+                        {JSON.stringify(
+                          replicateResult.recordsets.filter(
+                            (rs) => Array.isArray(rs) && rs.length > 0
+                          ),
+                          null,
+                          2
+                        )}
+                      </pre>
+                    </ScrollArea.Autosize>
+                  )}
+              </Alert>
+            )}
+
+            <Group justify='flex-end' mt='sm'>
+              <Button variant='default' onClick={closeReplicateModal}>
+                Cerrar
+              </Button>
+              <Button
+                onClick={handleReplicate}
+                loading={replicateLoading}
+                disabled={!replicateForm.process || replicateForm.empresas.length === 0}
+                leftSection={<IconCopy size={16} />}
+                className='bg-blue-600 hover:bg-blue-700'
+              >
+                {replicateForm.ensayo ? 'Ejecutar ensayo' : 'Replicar en firme'}
               </Button>
             </Group>
           </Stack>
