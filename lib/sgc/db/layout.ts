@@ -1,4 +1,5 @@
 import type { Prisma } from '../../../app/generated/prisma';
+import { PDFDocument as PDFDocumentLib } from 'pdf-lib';
 import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../audit';
 import type { SgcCurrentDraft } from '../draft/current';
 import { sanitizeDraftHtml } from '../draft/html';
@@ -20,6 +21,7 @@ import {
 } from '../pdf/institutional';
 import { wrapDraftForPdf, type SgcDocxToHtml, type SgcHtmlToPdf } from '../pdf/render';
 import { inspectXlsx, xlsxToSheet, type SgcSheetInspection, type SgcSheetLayout } from '../pdf/viewable';
+import { fitPdfIntoInstitutionalPages, microsoftCanApply, pdfIsA4, pdfPageCount, prepareXlsxForMicrosoft, xlsxPrintsLandscape } from '../pdf/officePdf';
 import { describeSheetSettings, isDefaultSheetSettings, normalizeSheetSettings, type SgcSheetSettings } from '../sheetSettings';
 import {
   missingPlacements,
@@ -71,6 +73,8 @@ export interface SgcLayoutDeps {
   download: (itemId: string) => Promise<Uint8Array>;
   htmlToPdf: SgcHtmlToPdf;
   docxToHtml: SgcDocxToHtml;
+  /** 2026-10-22: conversión de Microsoft para el borrador en Excel (sube una copia temporal, la convierte y la borra; sin ella, la de SynerLink). */
+  officeToPdf?: (storageRoot: string, fileName: string, content: Uint8Array) => Promise<Uint8Array>;
 }
 
 /** Descarga y VERIFICA el borrador vigente (lo que se firma y lo que se compone). */
@@ -179,6 +183,19 @@ export function layoutIsLandscape(draftFormat: string | null | undefined, sheetS
   return draftFormat === 'xlsx' && sheetSettings?.orientation === 'horizontal';
 }
 
+/**
+ * 2026-10-22: orientación REAL del documento con un borrador en Excel. Con
+ * ajustes propios, la que eligió el elaborador (conversión de SynerLink); sin
+ * ellos, la que el Excel tiene configurada para imprimir (la que usa la
+ * conversión de Microsoft). Es la misma regla para componer el PDF y para
+ * sugerir dónde van las firmas.
+ */
+export async function draftIsLandscape(draftFormat: string | null | undefined, sheetSettings: SgcSheetSettings | null, bytes: Uint8Array | null): Promise<boolean> {
+  if (draftFormat !== 'xlsx') return false;
+  if (sheetSettings && sheetSettings.orientation !== 'auto') return sheetSettings.orientation === 'horizontal';
+  return bytes ? xlsxPrintsLandscape(bytes) : false;
+}
+
 /** Última composición guardada (o la de por defecto: sin encabezado institucional y sin cajas). */
 export async function latestLayout(db: Db, idRequest: number): Promise<SgcLayoutState> {
   const [last, saves] = await Promise.all([
@@ -208,7 +225,13 @@ function inElaboration(row: { status: string; tasks: { status: string; taskDef: 
 }
 
 /** Composición del documento para la vista (participantes, cajas, sugerencias y si la persona puede editarla). */
-export async function getDocumentLayout(db: SgcDb, idRequest: number, viewer: SgcViewer) {
+/** Bytes del borrador en Excel (verificados) para decidir su orientación; null si no es Excel o no hay cómo bajarlo. */
+async function excelBytesFor(db: Db, deps: Pick<SgcLayoutDeps, 'download'> | undefined, idRequest: number, draftFormat: string | null | undefined): Promise<Uint8Array | null> {
+  if (draftFormat !== 'xlsx' || !deps) return null;
+  return (await loadVerifiedDraft(db, deps, idRequest).catch(() => null))?.bytes ?? null;
+}
+
+export async function getDocumentLayout(db: SgcDb, idRequest: number, viewer: SgcViewer, deps?: Pick<SgcLayoutDeps, 'download'>) {
   const { row } = await assertCanView(db, idRequest, viewer);
   const [participants, layout, draft, headerMandatory] = await Promise.all([layoutParticipants(db, row), latestLayout(db, idRequest), currentDraftInTx(db as never, idRequest), isHeaderMandatory(db, row.id_company)]);
   const keys = new Set(participants.map((p) => p.key));
@@ -228,7 +251,9 @@ export async function getDocumentLayout(db: SgcDb, idRequest: number, viewer: Sg
     participants,
     missing: missingPlacements(participants, fields).filter((p) => !inRegister.has(p.key)).map((p) => p.key),
     inRegister: [...inRegister],
-    suggested: institutionalHeader ? suggestInstitutionalPlacements(participants, fields, grid, layoutIsLandscape(draft?.format, layout.sheetSettings) ? SGC_A4_LANDSCAPE : SGC_A4_PORTRAIT) : [],
+    suggested: institutionalHeader
+      ? suggestInstitutionalPlacements(participants, fields, grid, (await draftIsLandscape(draft?.format, layout.sheetSettings, await excelBytesFor(db, deps, idRequest, draft?.format))) ? SGC_A4_LANDSCAPE : SGC_A4_PORTRAIT)
+      : [],
     // 2026-10-22: ajustes de presentación del borrador en Excel (orientación, tamaño, área, títulos, columnas y hojas).
     sheetSettings: draft?.format === 'xlsx' ? layout.sheetSettings : null,
     canEdit,
@@ -245,7 +270,14 @@ export async function getDocumentLayout(db: SgcDb, idRequest: number, viewer: Sg
  * Guarda la composición: encabezado institucional sí/no y cajas de firma.
  * Solo el ELABORADOR durante la Elaboración. Fila nueva (solo inserción).
  */
-export async function saveDocumentLayout(db: SgcDb, idRequest: number, input: { institutionalHeader?: unknown; fields?: unknown; reason?: unknown; pageCount?: unknown; sheetSettings?: unknown }, viewer: SgcViewer, actor: SgcActor) {
+export async function saveDocumentLayout(
+  db: SgcDb,
+  idRequest: number,
+  input: { institutionalHeader?: unknown; fields?: unknown; reason?: unknown; pageCount?: unknown; sheetSettings?: unknown },
+  viewer: SgcViewer,
+  actor: SgcActor,
+  deps?: Pick<SgcLayoutDeps, 'download'>
+) {
   const { row } = await assertCanView(db, idRequest, viewer);
   if (lower(row.elaborator_email) !== lower(actor.email)) throw new SgcError('Solo el elaborador ubica las firmas en el documento.', 403);
   if (!inElaboration(row)) throw new SgcError('Las firmas se ubican durante la elaboración (antes de enviar el documento a revisión).', 409);
@@ -266,7 +298,8 @@ export async function saveDocumentLayout(db: SgcDb, idRequest: number, input: { 
     sheetSettings = n && !isDefaultSheetSettings(n) ? n : null;
   }
   // Si cambia la orientación de la hoja, las cajas ubicadas ya no caen en su sitio: se quitan y se vuelven a ubicar.
-  const orientationChanged = layoutIsLandscape(draft?.format, sheetSettings) !== layoutIsLandscape(draft?.format, current.sheetSettings);
+  const excelBytes = input.sheetSettings !== undefined ? await excelBytesFor(db, deps, idRequest, draft?.format) : null;
+  const orientationChanged = input.sheetSettings !== undefined && (await draftIsLandscape(draft?.format, sheetSettings, excelBytes)) !== (await draftIsLandscape(draft?.format, current.sheetSettings, excelBytes));
   const pages = Number(input.pageCount);
   const pageCount = Number.isInteger(pages) && pages > 0 && pages <= 500 ? pages : null;
   const normalized =
@@ -358,7 +391,7 @@ export interface SgcComposeInput {
   idDocument: number | null;
   /** S16 (R31): tipo documental (su plantilla de encabezado; sin él, la por defecto de la empresa). */
   idDocumentType?: number | null;
-  draft: { format: string; bytes: Uint8Array | null; html: string | null };
+  draft: { format: string; bytes: Uint8Array | null; html: string | null; itemId?: string | null };
   institutional: boolean;
   code: string;
   title: string;
@@ -384,22 +417,50 @@ export interface SgcComposeInput {
  */
 export async function composeContent(
   db: Db,
-  deps: Pick<SgcLayoutDeps, 'htmlToPdf' | 'docxToHtml'>,
+  deps: Pick<SgcLayoutDeps, 'htmlToPdf' | 'docxToHtml' | 'officeToPdf'>,
   input: SgcComposeInput
-): Promise<{ contentPdf: Uint8Array; header: SgcInstitutionalHeaderData | null; sourceHtml: string | null; headerTemplate: { id: number; code: string; version: number } | null }> {
+): Promise<{ contentPdf: Uint8Array; header: SgcInstitutionalHeaderData | null; sourceHtml: string | null; headerTemplate: { id: number; code: string; version: number } | null; converter?: 'microsoft' | 'synerlink' }> {
   if (input.draft.format === 'pdf') {
     if (!input.draft.bytes || !isPdf(input.draft.bytes)) throw new SgcError('El borrador PDF no es un PDF válido.', 409);
     return { contentPdf: input.draft.bytes, header: null, sourceHtml: null, headerTemplate: null };
   }
+  const history = buildChangeHistoryHtml(await changeHistoryRows(db, input.idDocument, { versionNumber: input.versionNumber, date: input.changeDate, reason: input.changeReason }));
+  const custom = input.sheetSettings ?? null;
+  const landscape = input.institutional ? await draftIsLandscape(input.draft.format, custom, input.draft.bytes) : false;
+  // 2026-10-22: el borrador en Excel sin ajustes propios lo convierte MICROSOFT (fiel a Excel); si falla, la de SynerLink.
   let html: string;
   let sheetCss: string | undefined;
   let sheetLayout: SgcSheetLayout | undefined;
+  let contentPdf: Uint8Array;
+  if (input.draft.format === 'xlsx' && input.draft.bytes && microsoftCanApply(custom) && deps.officeToPdf) {
+    try {
+      const config = await db.sgcCompanyConfig.findUnique({ where: { id_company: input.idCompany }, select: { storage_root: true } });
+      if (!config?.storage_root) throw new Error('La empresa no tiene carpeta del SGC.');
+      // Copia con «ajustar al ancho» (o la orientación y el tamaño elegidos): solo cambia la configuración de página.
+      const raw = await deps.officeToPdf(config.storage_root, `${input.code || 'borrador'}.xlsx`, await prepareXlsxForMicrosoft(input.draft.bytes, custom, { institutional: input.institutional }));
+      if ((await pdfPageCount(raw)) === 0) throw new Error('Microsoft devolvió un PDF sin páginas.');
+      if (input.institutional) {
+        // El historial de cambios va en su propia página.
+        // Si Microsoft respetó la hoja A4 con el espacio del encabezado, se usa tal cual; si no, cada página a escala.
+        const fitted = await PDFDocumentLib.load((await pdfIsA4(raw, landscape)) ? raw : await fitPdfIntoInstitutionalPages(raw, landscape));
+        const historyPdf = await PDFDocumentLib.load(
+          await deps.htmlToPdf(wrapDraftForPdf({ title: input.title, code: input.code, contentHtml: `<h2>HISTORIAL DE CAMBIOS</h2>${history}`, institutional: true, sheet: true, sheetLayout: { landscape, tables: [], orientation: landscape ? 'horizontal' : 'vertical' } }))
+        );
+        for (const page of await fitted.copyPages(historyPdf, historyPdf.getPageIndices())) fitted.addPage(page);
+        contentPdf = await fitted.save();
+      } else contentPdf = raw;
+      return { contentPdf, ...(await headerFor(db, input)), sourceHtml: null, converter: 'microsoft' };
+    } catch (e) {
+      console.warn('[sgc/composicion] la conversión de Microsoft falló; se usa la de SynerLink', e);
+    }
+  }
   if (input.draft.format === 'docx') html = await deps.docxToHtml(input.draft.bytes!);
   else if (input.draft.format === 'html') html = sanitizeDraftHtml(input.draft.html ?? '');
   // S16 (R32, D17): un FORMATO en Excel se compone desde sus hojas (tablas), sin pasar por Word.
-  else if (input.draft.format === 'xlsx') ({ html, css: sheetCss, layout: sheetLayout } = await xlsxToSheet(input.draft.bytes!, input.sheetSettings ?? undefined));
+  // Respaldo de SynerLink: con encabezado, la misma orientación que el Excel (así las firmas sugeridas coinciden).
+  else if (input.draft.format === 'xlsx')
+    ({ html, css: sheetCss, layout: sheetLayout } = await xlsxToSheet(input.draft.bytes!, input.institutional ? { ...(custom ?? normalizeSheetSettings({})), orientation: landscape ? 'horizontal' : 'vertical' } : (custom ?? undefined)));
   else throw new SgcError('El borrador debe ser PDF, Word (.docx), Excel (.xlsx) o editado en la app.', 409);
-  const history = buildChangeHistoryHtml(await changeHistoryRows(db, input.idDocument, { versionNumber: input.versionNumber, date: input.changeDate, reason: input.changeReason }));
   const values: Partial<Record<SgcSystemToken, string>> = {
     CODIGO: input.code,
     VERSION: String(input.versionNumber),
@@ -413,7 +474,12 @@ export async function composeContent(
   };
   let body = applySystemFieldTokens(html, values, history);
   if (input.institutional && !hasChangeHistoryToken(html)) body += `<h2>HISTORIAL DE CAMBIOS</h2>${history}`;
-  const contentPdf = await deps.htmlToPdf(wrapDraftForPdf({ title: input.title, code: input.code, contentHtml: body, institutional: input.institutional, sheet: input.draft.format === 'xlsx', extraCss: sheetCss, sheetLayout }));
+  contentPdf = await deps.htmlToPdf(wrapDraftForPdf({ title: input.title, code: input.code, contentHtml: body, institutional: input.institutional, sheet: input.draft.format === 'xlsx', extraCss: sheetCss, sheetLayout }));
+  return { contentPdf, ...(await headerFor(db, input)), sourceHtml: input.draft.format === 'html' ? html : null, converter: 'synerlink' };
+}
+
+/** Datos del encabezado institucional (plantilla del tipo documental y logo), o null sin encabezado. */
+async function headerFor(db: Db, input: SgcComposeInput): Promise<{ header: SgcInstitutionalHeaderData | null; headerTemplate: { id: number; code: string; version: number } | null }> {
   let header: SgcInstitutionalHeaderData | null = null;
   let headerTemplate: { id: number; code: string; version: number } | null = null;
   if (input.institutional) {
@@ -436,7 +502,7 @@ export async function composeContent(
       template: tpl.config,
     };
   }
-  return { contentPdf, header, sourceHtml: input.draft.format === 'html' ? html : null, headerTemplate };
+  return { header, headerTemplate };
 }
 
 const previewCache = new Map<string, { bytes: Uint8Array; at: number }>();
@@ -507,7 +573,7 @@ export async function buildLayoutPreview(
     idCompany: request.id_company,
     idDocument: request.document?.id_document ?? null,
     idDocumentType: request.id_document_type,
-    draft: { format: draft.format, bytes, html },
+    draft: { format: draft.format, bytes, html, itemId: draft.itemId ?? null },
     institutional,
     code,
     title: request.document?.title ?? request.subject,

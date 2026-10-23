@@ -4,10 +4,11 @@ import { wrapDraftForPdf, type SgcDocxToHtml, type SgcHtmlToPdf } from '../pdf/r
 import { inspectXlsx, xlsxToSheet, type SgcSheetInspection } from '../pdf/viewable';
 import { describeSheetSettings, isDefaultSheetSettings, normalizeSheetSettings, type SgcSheetSettings } from '../sheetSettings';
 import { stampSheetPreview } from '../watermark';
+import { microsoftCanApply, prepareXlsxForMicrosoft } from '../pdf/officePdf';
 import { isXlsx as isZip } from '../training/xlsx';
 import { SgcError } from '../errors';
 import { computeReviewDueDate } from '../review';
-import { buildVersionFileName, buildVersionFolderSegments, getControlledPdfError, sha256Hex } from '../storage';
+import { buildVersionFileName, buildVersionFolderSegments, getControlledPdfError, isPdf, sha256Hex } from '../storage';
 import type { SgcActor, SgcDb } from './catalogs';
 import type { SgcUploader } from './documents';
 
@@ -35,6 +36,25 @@ import type { SgcUploader } from './documents';
 export interface SgcBulkConvertDeps {
   docxToHtml: SgcDocxToHtml;
   htmlToPdf: SgcHtmlToPdf;
+  /** 2026-10-22: conversión de Microsoft de un archivo aún no guardado (sube un temporal, convierte y lo borra). */
+  officeToPdf?: (storageRoot: string, fileName: string, content: Uint8Array) => Promise<Uint8Array>;
+}
+
+/**
+ * 2026-10-22: un Excel SIN ajustes propios lo convierte Microsoft (fiel a Excel); con ajustes propios, o si
+ * Microsoft falla, la conversión de SynerLink. Devuelve null si Microsoft no aplica o falló.
+ */
+async function excelByMicrosoft(db: SgcDb, idCompany: number, convert: SgcBulkConvertDeps, fileName: string, bytes: Uint8Array, settings: SgcSheetSettings | null): Promise<Uint8Array | null> {
+  if (!convert.officeToPdf || !microsoftCanApply(settings)) return null;
+  const config = await db.sgcCompanyConfig.findUnique({ where: { id_company: idCompany }, select: { storage_root: true } });
+  if (!config?.storage_root) return null;
+  try {
+    const pdf = await convert.officeToPdf(config.storage_root, fileName, await prepareXlsxForMicrosoft(bytes, settings));
+    return isPdf(pdf) ? pdf : null;
+  } catch (e) {
+    console.warn('[sgc/carga] la conversión de Microsoft falló; se usa la de SynerLink', e);
+    return null;
+  }
 }
 
 const SOURCE_CONTENT_TYPES = {
@@ -127,8 +147,12 @@ export async function uploadBulkFile(
       if (problem) return fail(problem, match);
     }
     try {
-      const html = kind === 'docx' ? { html: await convert.docxToHtml(file.bytes), css: undefined, layout: undefined } : await xlsxToSheet(file.bytes, sheetSettings ?? undefined);
-      pdfBytes = await convert.htmlToPdf(wrapDraftForPdf({ title: fileName, code: match.code ?? '', contentHtml: html.html, sheet: kind === 'xlsx', extraCss: html.css, sheetLayout: html.layout }));
+      const byMicrosoft = kind === 'xlsx' ? await excelByMicrosoft(db, idCompany, convert, fileName, file.bytes, sheetSettings) : null;
+      if (byMicrosoft) pdfBytes = byMicrosoft;
+      else {
+        const html = kind === 'docx' ? { html: await convert.docxToHtml(file.bytes), css: undefined, layout: undefined } : await xlsxToSheet(file.bytes, sheetSettings ?? undefined);
+        pdfBytes = await convert.htmlToPdf(wrapDraftForPdf({ title: fileName, code: match.code ?? '', contentHtml: html.html, sheet: kind === 'xlsx', extraCss: html.css, sheetLayout: html.layout }));
+      }
     } catch {
       return fail(`No se pudo convertir el ${kind === 'docx' ? 'Word' : 'Excel'} a PDF: revise que se abra sin contraseña o cargue el PDF.`, match);
     }
@@ -255,6 +279,8 @@ export async function previewBulkExcel(
   if (problem) throw new SgcError(problem);
   const match = matchBulkFile(fileName, await candidatesOf(db, idCompany));
   let pdf: Uint8Array;
+  const byMicrosoft = await excelByMicrosoft(db, idCompany, convert, fileName, file.bytes, isDefaultSheetSettings(settings) ? null : settings);
+  if (byMicrosoft) return stampSheetPreview(byMicrosoft, { fileName, viewerEmail: actor.email.toLowerCase(), at: now });
   try {
     const sheet = await xlsxToSheet(file.bytes, settings);
     pdf = await convert.htmlToPdf(wrapDraftForPdf({ title: fileName, code: match.code ?? '', contentHtml: sheet.html, sheet: true, extraCss: sheet.css, sheetLayout: sheet.layout }));

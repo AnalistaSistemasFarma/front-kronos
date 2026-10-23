@@ -88,7 +88,8 @@ export function sanitizeDraftHtml(input: string): string {
     }
     if (name === 'img') {
       const src = safeImageSrc(attrs);
-      if (src) out.push(`<img src="${src}">`);
+      // 2026-10-22: una imagen de una hoja de Excel conserva sus clases «sgc-…» (posición y tamaño sobre la celda).
+      if (src) out.push(`<img${sheetClasses(attrs)} src="${src}">`);
       continue;
     }
     if (VOID.has(name)) {

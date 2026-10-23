@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '../../../../../../lib/prisma';
 import { inspectBulkExcel, previewBulkExcel } from '../../../../../../lib/sgc/db/bulkUpload';
+import { sgcOfficeConverter } from '../../../../../../lib/sgc/onedrive';
 import { docxToHtml, htmlToPdf } from '../../../../../../lib/sgc/pdf/render';
 import { NO_STORE, companyAccess, errorResponse, getSgcRequestContext, jsonNoStore, rateLimitResponse, uploadGuard } from '../../../_lib/context';
 
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
     const action = form.get('action');
     if (action === 'inspeccionar') return jsonNoStore(await inspectBulkExcel(prisma, idCompany, payload));
     if (action !== 'previsualizar') return jsonNoStore({ error: 'Acción inválida' }, 400);
-    const pdf = await previewBulkExcel(prisma, idCompany, payload, form.get('settings'), ctx.actor, { docxToHtml, htmlToPdf });
+    const pdf = await previewBulkExcel(prisma, idCompany, payload, form.get('settings'), ctx.actor, { docxToHtml, htmlToPdf, officeToPdf: sgcOfficeConverter.bytes });
     return new NextResponse(Buffer.from(pdf), {
       status: 200,
       headers: {

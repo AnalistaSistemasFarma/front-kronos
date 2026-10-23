@@ -14,7 +14,7 @@ vi.mock('../../auth/[...nextauth]/route', () => ({ authOptions: {} }));
 vi.mock('../../../../lib/prisma', () => ({ prisma: { tag: 'prisma' } }));
 vi.mock('../../../../lib/sgc/access', () => ({ getSgcAccessForUser: m.getSgcAccessForUser }));
 vi.mock('../../../../lib/sgc/db/documents', () => ({ getAccessSubject: m.getAccessSubject }));
-vi.mock('../../../../lib/sgc/onedrive', () => ({ uploadToSgcStorage: 'subir' }));
+vi.mock('../../../../lib/sgc/onedrive', () => ({ uploadToSgcStorage: 'subir', sgcOfficeConverter: { item: 'ms-item', bytes: 'ms' } }));
 vi.mock('../../../../lib/sgc/pdf/render', () => ({ docxToHtml: 'word', htmlToPdf: 'chrome' }));
 vi.mock('../../../../lib/sgc/db/bulkUpload', () => ({ inspectBulkExcel: m.inspectBulkExcel, previewBulkExcel: m.previewBulkExcel, uploadBulkFile: m.uploadBulkFile }));
 
@@ -76,7 +76,7 @@ describe('Rutas · ajustar y previsualizar un Excel de la carga inicial', () => 
     expect(res.headers.get('content-disposition')).toMatch(/^inline;/);
     expect(res.headers.get('cache-control')).toContain('no-store');
     const [db, company, payload, s, actor, convert] = m.previewBulkExcel.mock.calls[0];
-    expect([db, company, payload.bytes.length, s, actor.email, convert]).toEqual([{ tag: 'prisma' }, 3, 4, settings, EMAIL, { docxToHtml: 'word', htmlToPdf: 'chrome' }]);
+    expect([db, company, payload.bytes.length, s, actor.email, convert]).toEqual([{ tag: 'prisma' }, 3, 4, settings, EMAIL, { docxToHtml: 'word', htmlToPdf: 'chrome', officeToPdf: 'ms' }]);
 
     m.previewBulkExcel.mockRejectedValue(new SgcError('Deje al menos una hoja en el PDF.'));
     const bad = await preview.POST(multipart({ company: '3', file: xlsx(), action: 'previsualizar', settings }));
