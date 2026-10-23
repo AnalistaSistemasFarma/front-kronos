@@ -99,7 +99,9 @@ export interface VitrinaFuenteSap {
 /** Empresas del piloto. Cada una lee el endpoint de sap_endpoints de su propio id_company. */
 export const VITRINA_FUENTES: Record<number, VitrinaFuenteSap> = {
   1: { idCompany: 1, nombre: 'Farmalógica', prefijo: 'PT', codigoRyan: false },
-  2: { idCompany: 2, nombre: 'Ryan', prefijo: '301', codigoRyan: true },
+  // Ryan: producto terminado = 3 + 2 dígitos de país/línea (301 Colombia, 302 Honduras,
+  // 303 El Salvador, 304…, 312 Ecuador) + 3 de unidades + 3 de producto. Verificado en SAP el 22-oct.
+  2: { idCompany: 2, nombre: 'Ryan', prefijo: '3', codigoRyan: true },
 };
 
 export function fuenteDeEmpresa(idCompany: number): VitrinaFuenteSap | null {
@@ -357,7 +359,7 @@ export function validarVigencia(desde: unknown, hasta: unknown): { desde: string
 }
 
 // ---------------------------------------------------------------------------
-// Código de Ryan: 301 (Colombia) + 3 dígitos de unidades + 3 dígitos de producto
+// Código de Ryan: 3 + 2 dígitos de país/línea (301 Colombia…312 Ecuador) + 3 de unidades + 3 de producto
 // ---------------------------------------------------------------------------
 
 export interface CodigoRyan {
@@ -373,7 +375,7 @@ export interface CodigoRyan {
 }
 
 export function parseCodigoRyan(itemCode: string): CodigoRyan | null {
-  const m = /^(301)(\d{3})(\d{3})(.*)$/.exec((itemCode ?? '').trim());
+  const m = /^(3\d{2})(\d{3})(\d{3})(.*)$/.exec((itemCode ?? '').trim());
   if (!m) return null;
   const unidades = Number(m[2]);
   return { pais: m[1], unidades: unidades > 0 && unidades < 999 ? unidades : null, producto: m[3], sufijo: m[4], excepcion: m[4] !== '' || unidades === 0 || unidades === 999 };
@@ -406,13 +408,14 @@ export function agruparPorProductoRyan<T extends { item_code: string }>(codigos:
     if (p.unidades === null) g.avisos.push(`${c.item_code}: unidades sin dato en el código`);
   }
   for (const g of grupos.values()) {
-    const vistos = new Map<number, string>();
+    const vistos = new Map<string, string>();
     for (const c of g.codigos) {
       const p = parseCodigoRyan(c.item_code)!;
       if (p.unidades === null || p.sufijo) continue;
-      const previo = vistos.get(p.unidades);
-      if (previo) g.avisos.push(`${previo} y ${c.item_code} tienen las mismas unidades: posible duplicado por país`);
-      else vistos.set(p.unidades, c.item_code);
+      const clave = `${p.pais}-${p.unidades}`;
+      const previo = vistos.get(clave);
+      if (previo) g.avisos.push(`${previo} y ${c.item_code} tienen el mismo prefijo y las mismas unidades: posible duplicado`);
+      else vistos.set(clave, c.item_code);
     }
   }
   return [...grupos.values()].sort((a, b) => a.producto.localeCompare(b.producto));
