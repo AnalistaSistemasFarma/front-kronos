@@ -5,17 +5,18 @@ import { Alert, Badge, Button, Group, Loader, Modal, SimpleGrid, Stack, Text, Ti
 import { useFullscreen, useHotkeys } from '@mantine/hooks';
 import { IconArrowLeft, IconArrowRight, IconInfoCircle, IconMaximize, IconMinimize, IconX } from '@tabler/icons-react';
 import { CANAL_LABEL } from '../../lib/vitrina/constants';
-import { filtrarCatalogo, indiceInicial, indiceVecino, registrosDe, tituloPresentacion, type CatalogoFiltros, type CatalogoItem } from '../../lib/vitrina/catalogo';
+import { descripcionFiltros, filtrarCatalogo, indiceInicial, indiceVecino, registrosDe, tituloPresentacion, type CatalogoFiltros } from '../../lib/vitrina/catalogo';
 import type { CompanyAccess } from './types';
 import VitrinaImagen from './VitrinaImagen';
-import { catalogoUrl, fmtFecha, useVitrinaFetch } from './vitrinaClient';
+import { catalogoUrl, fmtFecha, useVitrinaFetch, type CatalogoResp } from './vitrinaClient';
 
 /**
  * MODO PRESENTACIÓN (frente al cliente). Pantalla completa con UNA presentación a la vez.
  * Los datos llegan del servidor ya depurados (?modo=presentacion): solo «Vista al cliente»
- * u «Ofertable» con registro vigente, por vencer o sin fecha; sin códigos SAP, alertas,
+ * u «Ofertable» con registro vigente, por vencer o sin vencimiento; sin códigos SAP, alertas,
  * exclusividades ni identificadores internos. Anterior / siguiente (también con las
- * flechas del teclado) y «Salir».
+ * flechas del teclado) y «Salir». Puede arrancar filtrado (por servicio, grupo terapéutico o
+ * línea comercial): el encabezado dice qué se está presentando (p. ej. «UCI»).
  */
 export default function VitrinaModoPresentacion({
   company,
@@ -30,7 +31,8 @@ export default function VitrinaModoPresentacion({
   filtros?: CatalogoFiltros;
   idInicial?: number | null;
 }) {
-  const { data, error, loading } = useVitrinaFetch<{ presentaciones: CatalogoItem[] }>(opened ? catalogoUrl(company.idCompany, 'presentacion') : null);
+  const { data, error, loading } = useVitrinaFetch<CatalogoResp>(opened ? catalogoUrl(company.idCompany, 'presentacion') : null);
+  const contexto = descripcionFiltros(filtros ?? {});
   const lista = useMemo(() => filtrarCatalogo(data?.presentaciones ?? [], filtros ?? {}), [data, filtros]);
   const [i, setI] = useState(0);
   const { toggle, fullscreen } = useFullscreen();
@@ -59,9 +61,16 @@ export default function VitrinaModoPresentacion({
     <Modal opened={opened} onClose={salir} fullScreen withCloseButton={false} padding={0} radius={0} transitionProps={{ duration: 0 }} data-testid='vitrina-modo-presentacion'>
       <Stack gap={0} mih='100dvh'>
         <Group justify='space-between' wrap='nowrap' px={{ base: 'sm', sm: 'xl' }} py='sm' style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}>
-          <Text size='sm' c='dimmed' data-testid='vitrina-presentacion-contador'>
-            {lista.length ? `${i + 1} de ${lista.length}` : 'Modo presentación'}
-          </Text>
+          <div style={{ minWidth: 0 }}>
+            {contexto && (
+              <Text size='sm' fw={600} truncate data-testid='vitrina-presentacion-contexto'>
+                {contexto}
+              </Text>
+            )}
+            <Text size='sm' c='dimmed' data-testid='vitrina-presentacion-contador'>
+              {lista.length ? `${i + 1} de ${lista.length}` : 'Modo presentación'}
+            </Text>
+          </div>
           <Group gap='xs' wrap='nowrap'>
             <Button variant='default' size='md' onClick={() => void toggle()} leftSection={fullscreen ? <IconMinimize size={18} /> : <IconMaximize size={18} />} visibleFrom='sm'>
               {fullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
@@ -93,9 +102,9 @@ export default function VitrinaModoPresentacion({
               </SimpleGrid>
               <Stack gap='md'>
                 <div>
-                  {p.familia && (
+                  {(p.linea || p.familia) && (
                     <Text size='sm' c='dimmed' tt='uppercase' fw={600}>
-                      {p.familia}
+                      {[p.linea, p.familia].filter(Boolean).join(' · ')}
                     </Text>
                   )}
                   <Title order={1} fz={{ base: 28, sm: 40 }} data-testid='vitrina-presentacion-titulo'>
@@ -114,10 +123,24 @@ export default function VitrinaModoPresentacion({
                   <Dato etiqueta='Países' valor={p.paises.join(', ') || null} />
                   {p.canales.length > 0 && <Dato etiqueta='Canal' valor={p.canales.map((c) => CANAL_LABEL[c]).join(', ')} />}
                 </SimpleGrid>
+                {p.grupos.length > 0 && (
+                  <div>
+                    <Text size='sm' c='dimmed' mb={4}>
+                      Grupo terapéutico
+                    </Text>
+                    <Group gap={6}>
+                      {p.grupos.map((g) => (
+                        <Badge key={g} variant='outline' size='lg'>
+                          {g}
+                        </Badge>
+                      ))}
+                    </Group>
+                  </div>
+                )}
                 {p.areas.length > 0 && (
                   <div>
                     <Text size='sm' c='dimmed' mb={4}>
-                      Áreas asistenciales
+                      Servicios
                     </Text>
                     <Group gap={6}>
                       {p.areas.map((a) => (
@@ -135,7 +158,7 @@ export default function VitrinaModoPresentacion({
                   {registrosDe(p).map((r) => (
                     <Text key={`${r.numero}-${r.venceEn}`} size='lg'>
                       {r.numero ?? 'Sin número en SAP'}
-                      {r.venceEn ? ` · vigente hasta ${fmtFecha(`${r.venceEn}T12:00:00Z`)}` : ''}
+                      {r.venceEn ? ` · vigente hasta ${fmtFecha(`${r.venceEn}T12:00:00Z`)}` : r.numero ? ' · sin vencimiento' : ''}
                       {r.paises.length ? ` · ${r.paises.join(', ')}` : ''}
                     </Text>
                   ))}

@@ -119,6 +119,29 @@ export function filtroItemsSap(fuente: VitrinaFuenteSap): string {
 
 export const ITEMS_SELECT = 'ItemCode,ItemName,ItemsGroupCode,SalesItem,Valid,Frozen';
 
+/** Fila de ItemGroups del Service Layer (solo lectura): número y nombre del grupo de artículos. */
+export interface SapGrupoRow {
+  Number?: number | null;
+  GroupName?: string | null;
+}
+
+/** Número → nombre del grupo de SAP (sin vacíos; nombre recortado a 100). */
+export function mapaGruposSap(rows: readonly SapGrupoRow[]): Map<number, string> {
+  const map = new Map<number, string>();
+  for (const r of rows) {
+    const nombre = (r.GroupName ?? '').trim().slice(0, 100);
+    if (typeof r.Number === 'number' && Number.isInteger(r.Number) && nombre) map.set(r.Number, nombre);
+  }
+  return map;
+}
+
+/** Cómo se muestra el grupo de SAP en Gestión: el nombre («PT carbapenemas»); si no hay, «Grupo 130»; null sin grupo. */
+export function etiquetaGrupoSap(codigo: number | null | undefined, nombre: string | null | undefined): string | null {
+  const n = (nombre ?? '').trim();
+  if (n) return n;
+  return codigo == null ? null : `Grupo ${codigo}`;
+}
+
 export interface SapItemRow {
   ItemCode: string;
   ItemName?: string | null;
@@ -202,7 +225,8 @@ export interface EstadoRegistro {
 /**
  * Estado del registro sanitario:
  *   - sin registro activo            → SIN_REGISTRO (no se muestra al cliente; alerta);
- *   - 9999-01-01 o sin fecha         → SIN_FECHA (no es «vigente»: es falta de dato; aviso);
+ *   - 9999-01-01 o sin fecha         → SIN_FECHA («Registro sin vencimiento»: Comercial confirmó el
+ *                                      23-oct que esos registros no vencen; se muestra, solo informativo);
  *   - vencimiento anterior a hoy     → VENCIDO (no se muestra al cliente; alerta);
  *   - vence en 90 días o menos       → POR_VENCER (se muestra; aviso a los administradores);
  *   - en otro caso                   → VIGENTE.

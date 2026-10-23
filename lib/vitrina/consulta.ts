@@ -1,7 +1,8 @@
 import 'server-only';
 import type { Prisma } from '../../app/generated/prisma';
 import type { VitrinaDb } from './access';
-import { armarCatalogo, itemDeCatalogo, type CatalogoItem, type VitrinaModo } from './catalogo';
+import { VITRINA_MULTIEMPRESA_HABILITADA } from './constants';
+import { armarCatalogo, catalogoMultiempresaPorGrupo, itemDeCatalogo, ordenDeCatalogos, type CatalogoItem, type OrdenCatalogos, type VitrinaModo } from './catalogo';
 import { documentoSgcMostrable } from './medios';
 import { hoyColombia, VitrinaError } from './rules';
 
@@ -26,6 +27,8 @@ const INCLUDE = {
     },
   },
   areas: { select: { area: { select: { nombre: true, activa: true, orden: true } } } },
+  linea: { select: { nombre: true, activa: true, orden: true } },
+  grupos: { select: { grupo: { select: { nombre: true, activo: true, orden: true } } } },
   imagenes: { where: { vigente: true }, select: { id_imagen: true, tipo: true, vigente: true } },
   exclusividades: { select: { cliente_beneficiario: true, pais: true, canal: true, alcance: true, vigente_desde: true, vigente_hasta: true } },
 } satisfies Prisma.VitrinaPresentacionInclude;
@@ -37,9 +40,34 @@ const candidatas = (idCompany: number): Prisma.VitrinaPresentacionWhereInput => 
   codigos: { some: { activado_vitrina: true, activo_en_sap: true } },
 });
 
-export async function listarCatalogo(db: VitrinaDb, idCompany: number, modo: VitrinaModo): Promise<CatalogoItem[]> {
+export interface CatalogoRespuesta {
+  presentaciones: CatalogoItem[];
+  /** Orden de las líneas, grupos terapéuticos y servicios que definieron los administradores. */
+  orden: OrdenCatalogos;
+}
+
+/** Catálogo de UNA empresa (la del comercial): Farmalógica y Ryan no se mezclan. */
+export async function listarCatalogo(db: VitrinaDb, idCompany: number, modo: VitrinaModo): Promise<CatalogoRespuesta> {
   const filas = await db.vitrinaPresentacion.findMany({ where: candidatas(idCompany), include: INCLUDE });
-  return armarCatalogo(filas, modo, hoyColombia());
+  return { presentaciones: armarCatalogo(filas, modo, hoyColombia()), orden: ordenDeCatalogos(filas) };
+}
+
+/**
+ * Vista MULTIEMPRESA por grupo terapéutico: PREPARADA pero APAGADA (VITRINA_MULTIEMPRESA_HABILITADA
+ * = false). Contradice la regla vigente del 22-oct (cada comercial ve solo su empresa) y está
+ * pendiente de decisión. Si se aprueba, la ruta que la use debe pasar SOLO las empresas en las que
+ * el usuario tiene «Vitrina Comercial» (subprocess_user_company). Ninguna ruta la llama hoy.
+ */
+export async function listarCatalogoMultiempresa(
+  db: VitrinaDb,
+  empresas: readonly { idCompany: number; empresa: string }[],
+  grupo: string,
+  modo: VitrinaModo
+) {
+  if (!VITRINA_MULTIEMPRESA_HABILITADA) throw new VitrinaError('La vista de varias empresas por grupo terapéutico no está habilitada.', 403);
+  const porEmpresa = [];
+  for (const e of empresas) porEmpresa.push({ ...e, items: (await listarCatalogo(db, e.idCompany, modo)).presentaciones });
+  return catalogoMultiempresaPorGrupo(porEmpresa, grupo);
 }
 
 export interface FichaDocumento {

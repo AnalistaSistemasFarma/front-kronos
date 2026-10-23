@@ -7,10 +7,10 @@ import { useMediaQuery } from '@mantine/hooks';
 import { IconAdjustmentsHorizontal, IconSearch, IconX } from '@tabler/icons-react';
 import SgcSelect from '../sgc/SgcSelect';
 import { CANAL_LABEL } from '../../lib/vitrina/constants';
-import { FILTROS_CLAVES, filtrosDesdeParams, type CatalogoFacetas, type CatalogoFiltros } from '../../lib/vitrina/catalogo';
+import { agrupacionDesdeParams, FILTROS_CLAVES, filtrosDesdeParams, type CatalogoAgrupacion, type CatalogoFacetas, type CatalogoFiltros } from '../../lib/vitrina/catalogo';
 
 /**
- * Filtros de la Vitrina guardados en la URL (?q=&pais=&canal=&area=&forma=): se pueden
+ * Filtros de la Vitrina guardados en la URL (?q=&pais=&canal=&area=&forma=&linea=&grupo=): se pueden
  * compartir y «Presencia LATAM» abre la Biblioteca ya filtrada por país. La empresa
  * (?empresa=) se conserva.
  */
@@ -35,12 +35,31 @@ export function useFiltrosUrl(): [CatalogoFiltros, (f: CatalogoFiltros) => void]
   return [filtros, setFiltros];
 }
 
-/** Buscador + filtros combinables (país, canal, área asistencial, forma farmacéutica). */
+/** Agrupación de la Biblioteca en la URL (?agrupar=linea|grupo|area; familia por defecto). */
+export function useAgrupacionUrl(): [CatalogoAgrupacion, (a: CatalogoAgrupacion) => void] {
+  const params = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const agrupar = useMemo(() => agrupacionDesdeParams(params), [params]);
+  const setAgrupar = useCallback(
+    (a: CatalogoAgrupacion) => {
+      const qs = new URLSearchParams(params.toString());
+      if (a === 'familia') qs.delete('agrupar');
+      else qs.set('agrupar', a);
+      const s = qs.toString();
+      router.replace(s ? `${pathname}?${s}` : pathname, { scroll: false });
+    },
+    [params, pathname, router]
+  );
+  return [agrupar, setAgrupar];
+}
+
+/** Buscador + filtros combinables (línea comercial, grupo terapéutico, servicio, forma, país y canal). */
 export default function VitrinaFiltros({ facetas, filtros, onChange }: { facetas: CatalogoFacetas; filtros: CatalogoFiltros; onChange: (f: CatalogoFiltros) => void }) {
   const escritorio = useMediaQuery('(min-width: 62em)') ?? false;
   const [abierto, setAbierto] = useState(false);
   const [q, setQ] = useState(filtros.q ?? '');
-  const activos = (['pais', 'canal', 'area', 'forma'] as const).filter((k) => filtros[k]).length;
+  const activos = (['linea', 'grupo', 'area', 'pais', 'canal', 'forma'] as const).filter((k) => filtros[k]).length;
   const set = (k: keyof CatalogoFiltros, v: string | null) => onChange({ ...filtros, [k]: v ?? undefined });
 
   return (
@@ -49,7 +68,7 @@ export default function VitrinaFiltros({ facetas, filtros, onChange }: { facetas
         <TextInput
           size='md'
           style={{ flex: 1, minWidth: 0 }}
-          placeholder='Buscar molécula, marca, familia o código'
+          placeholder='Buscar molécula, marca, línea, grupo o código'
           aria-label='Buscar en la Vitrina'
           leftSection={<IconSearch size={18} />}
           value={q}
@@ -74,7 +93,14 @@ export default function VitrinaFiltros({ facetas, filtros, onChange }: { facetas
         )}
       </Group>
       <Collapse in={escritorio || abierto}>
-        <SimpleGrid cols={{ base: 1, xs: 2, md: 4 }} spacing='sm'>
+        <SimpleGrid cols={{ base: 1, xs: 2, md: 3 }} spacing='sm'>
+          {facetas.lineas.length > 0 && (
+            <SgcSelect size='md' label='Línea comercial' placeholder='Todas' data={facetas.lineas} value={filtros.linea ?? null} onChange={(v) => set('linea', v)} clearable searchable data-testid='vitrina-filtro-linea' />
+          )}
+          {facetas.grupos.length > 0 && (
+            <SgcSelect size='md' label='Grupo terapéutico' placeholder='Todos' data={facetas.grupos} value={filtros.grupo ?? null} onChange={(v) => set('grupo', v)} clearable searchable data-testid='vitrina-filtro-grupo' />
+          )}
+          <SgcSelect size='md' label='Servicio' placeholder='Todos' data={facetas.areas} value={filtros.area ?? null} onChange={(v) => set('area', v)} clearable searchable data-testid='vitrina-filtro-area' />
           <SgcSelect size='md' label='País' placeholder='Todos' data={facetas.paises} value={filtros.pais ?? null} onChange={(v) => set('pais', v)} clearable searchable data-testid='vitrina-filtro-pais' />
           <SgcSelect
             size='md'
@@ -86,7 +112,6 @@ export default function VitrinaFiltros({ facetas, filtros, onChange }: { facetas
             clearable
             data-testid='vitrina-filtro-canal'
           />
-          <SgcSelect size='md' label='Área asistencial' placeholder='Todas' data={facetas.areas} value={filtros.area ?? null} onChange={(v) => set('area', v)} clearable searchable data-testid='vitrina-filtro-area' />
           <SgcSelect size='md' label='Forma farmacéutica' placeholder='Todas' data={facetas.formas} value={filtros.forma ?? null} onChange={(v) => set('forma', v)} clearable data-testid='vitrina-filtro-forma' />
         </SimpleGrid>
       </Collapse>

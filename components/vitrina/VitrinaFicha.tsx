@@ -102,13 +102,32 @@ export default function VitrinaFicha({ company, id }: { company: CompanyAccess; 
             <Dato etiqueta='Forma farmacéutica' valor={p.formaFarmaceutica} />
             <Dato etiqueta='Unidades por caja' valor={p.unidadesCaja ? String(p.unidadesCaja) : null} />
             <Dato etiqueta='Empresa' valor={nombreEmpresaVitrina(company.idCompany, company.companyName)} />
+            <Dato etiqueta='Línea comercial' valor={p.linea} />
             {p.tallMan && <Dato etiqueta='Nombre en Tall Man' valor={p.tallMan} />}
             <Dato etiqueta='Países' valor={p.paises.join(', ') || null} />
             <Dato etiqueta='Canal' valor={p.canales.length ? p.canales.map((c) => CANAL_LABEL[c]).join(', ') : 'Sin dato'} />
           </SimpleGrid>
           <div>
             <Text size='xs' c='dimmed' tt='uppercase' fw={600} mb={4}>
-              Áreas asistenciales
+              Grupos terapéuticos
+            </Text>
+            <Group gap={6}>
+              {p.grupos.length ? (
+                p.grupos.map((g) => (
+                  <Badge key={g} variant='outline' size='md'>
+                    {g}
+                  </Badge>
+                ))
+              ) : (
+                <Text size='sm' c='dimmed'>
+                  Sin grupo terapéutico asignado
+                </Text>
+              )}
+            </Group>
+          </div>
+          <div>
+            <Text size='xs' c='dimmed' tt='uppercase' fw={600} mb={4}>
+              Servicios
             </Text>
             <Group gap={6}>
               {p.areas.length ? (
@@ -137,7 +156,7 @@ export default function VitrinaFicha({ company, id }: { company: CompanyAccess; 
               <div style={{ minWidth: 0 }}>
                 <Text fw={600}>{r.numero ?? 'Sin número en SAP'}</Text>
                 <Text size='sm' c='dimmed'>
-                  {r.venceEn ? `Vigente hasta ${fmtFecha(`${r.venceEn}T12:00:00Z`)}` : 'Sin fecha de vencimiento en SAP'}
+                  {r.venceEn ? `Vigente hasta ${fmtFecha(`${r.venceEn}T12:00:00Z`)}` : r.estado === 'SIN_FECHA' ? 'Sin vencimiento' : 'Sin fecha de vencimiento en SAP'}
                   {r.paises.length ? ` · ${r.paises.join(', ')}` : ''}
                 </Text>
               </div>
