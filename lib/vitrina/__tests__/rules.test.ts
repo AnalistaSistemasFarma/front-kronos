@@ -58,7 +58,7 @@ describe('Vitrina · acceso por empresa (subprocess_user_company)', () => {
 describe('Vitrina · fuente SAP por empresa', () => {
   it('Farmalógica lee PT y Ryan lee 301', () => {
     expect(filtroItemsSap(FARMA)).toBe("startswith(ItemCode,'PT')");
-    expect(filtroItemsSap(RYAN)).toBe("startswith(ItemCode,'301')");
+    expect(filtroItemsSap(RYAN)).toBe("startswith(ItemCode,'3')");
     expect(fuenteDeEmpresa(3)).toBeNull();
   });
 
@@ -162,7 +162,8 @@ describe('Vitrina · código de Ryan (301 + unidades + producto)', () => {
     expect(parseCodigoRyan('301010085.')).toMatchObject({ producto: '085', sufijo: '.', excepcion: true });
     expect(parseCodigoRyan('301999012')).toMatchObject({ unidades: null, excepcion: true });
     expect(parseCodigoRyan('PTRY0039')).toBeNull();
-    expect(parseCodigoRyan('302010036')).toBeNull();
+    expect(parseCodigoRyan('312100036')).toMatchObject({ pais: '312', unidades: 100, producto: '036' });
+    expect(parseCodigoRyan('101001099')).toBeNull();
   });
 
   it('agrupa por los 3 últimos dígitos y marca excepciones sin agrupar a ciegas', () => {
