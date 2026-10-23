@@ -13,6 +13,13 @@ export type TaskKind = 'normal' | 'authorization' | 'sap_executor';
 
 export type TriggerEvent = 'on_execute' | 'on_start' | 'on_approve' | 'on_final_approve' | 'on_reject' | 'on_quote';
 
+/** «Cuándo se ejecuta» de una Tarea SAP del flujo. */
+export const SAP_TASK_WHEN: { value: TriggerEvent; label: string }[] = [
+  { value: 'on_execute', label: 'Al llegarle el turno en el flujo' },
+  { value: 'on_reject', label: 'Solo si la autorización anterior se rechaza' },
+  { value: 'on_quote', label: 'Solo si la autorización anterior se envía a cotizar' },
+];
+
 export const TRIGGER_LABELS: Record<TriggerEvent, string> = {
   on_execute: 'Al ejecutar (tarea automática)',
   on_start: 'Al iniciar la tarea',
@@ -104,7 +111,7 @@ export const SAP_ACTIONS: SapActionDef[] = [
     domain: 'Compras · Solicitud de compra',
     endpoint: 'PATCH Drafts(n) · U_SEND_State = NAD',
     triggers: ['on_reject'],
-    taskKinds: ['authorization'],
+    taskKinds: ['authorization', 'sap_executor'],
     resultingState: 'NAD',
     mapping: STATE_MAPPING,
   },
@@ -114,7 +121,7 @@ export const SAP_ACTIONS: SapActionDef[] = [
     domain: 'Compras · Solicitud de compra',
     endpoint: 'PATCH Drafts(n) · U_SEND_State = ENC',
     triggers: ['on_quote'],
-    taskKinds: ['authorization'],
+    taskKinds: ['authorization', 'sap_executor'],
     resultingState: 'ENC',
     mapping: STATE_MAPPING,
   },
@@ -151,7 +158,7 @@ export function actionsFor(taskKind: TaskKind, trigger: TriggerEvent): SapAction
 
 /** Disparadores que aplican a un tipo de tarea. */
 export function triggersFor(taskKind: TaskKind): TriggerEvent[] {
-  if (taskKind === 'sap_executor') return ['on_execute'];
+  if (taskKind === 'sap_executor') return ['on_execute', 'on_reject', 'on_quote'];
   if (taskKind === 'authorization') return ['on_start', 'on_final_approve', 'on_reject', 'on_quote'];
   return [];
 }

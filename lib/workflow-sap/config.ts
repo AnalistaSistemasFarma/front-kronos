@@ -70,7 +70,10 @@ export async function isAuthorizationEffectEnabled(
       return DEFAULT_AUTHORIZATION_EFFECTS.some((d) => d.trigger === trigger && d.actionKey === actionKey);
     }
     const auth = await processActions(idProcess, 'authorization');
-    return auth.some((a) => a.trigger_event === trigger && a.action_key === actionKey);
+    if (auth.some((a) => a.trigger_event === trigger && a.action_key === actionKey)) return true;
+    // También cuando el flujo lo tiene como Tarea SAP condicionada («si se rechaza», «si se cotiza»).
+    const sapTasks = await processActions(idProcess, 'sap_executor');
+    return sapTasks.some((a) => a.trigger_event === trigger && a.action_key === actionKey);
   } catch (e) {
     // Si la configuracion no se puede leer, se conserva el comportamiento de siempre.
     console.error('[workflow-sap] no se pudo leer la configuración; se usan los efectos por defecto:', e);

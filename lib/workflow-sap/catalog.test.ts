@@ -58,6 +58,7 @@ describe('actionsFor / triggersFor', () => {
       'purchase.publish_firm',
     ]);
     expect(actionsFor('authorization', 'on_reject').map((a) => a.key)).toEqual(['purchase.state_rejected']);
+    expect(actionsFor('sap_executor', 'on_quote').map((a) => a.key)).toEqual(['purchase.state_quotation']);
     expect(triggersFor('normal')).toEqual([]);
   });
 });
