@@ -1,3 +1,4 @@
+import { shareTargetManifest } from '../lib/chat/compartir';
 import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
@@ -10,6 +11,14 @@ export default function manifest(): MetadataRoute.Manifest {
     background_color: '#ffffff',
     theme_color: '#0078D4',
     orientation: 'portrait-primary',
+    /*
+     * MENÚ «COMPARTIR» DE ANDROID (2026-10-22): con la PWA instalada desde
+     * Chrome/Edge, SynerLink aparece al compartir fotos, archivos o texto
+     * desde otras apps. El POST lo intercepta public/sw.js y abre
+     * /process/chat/compartir. iOS no soporta share_target (ver
+     * docs/compartir-en-synerlink.md).
+     */
+    share_target: shareTargetManifest(),
     /*
      * UN ARCHIVO POR TAMAÑO. Antes los tres apuntaban al mismo
      * `/iconocel.png`, que es de 2500 × 2500 y pesa 916 KB: el navegador se lo
