@@ -595,7 +595,7 @@ function GroupActivity({ statuses }: { statuses: ChatAgentStatusDto[] }) {
 }
 
 /** Indicador de "qué está haciendo el agente" — lo que evita el efecto congelado. */
-function AgentActivity({
+const AgentActivity = memo(function AgentActivity({
   agent,
   status,
 }: {
@@ -623,7 +623,7 @@ function AgentActivity({
       </Group>
     </Box>
   );
-}
+});
 
 /**
  * La caja de SUB-AGENTES EN CURSO, anclada entre la conversación y el
@@ -1054,7 +1054,11 @@ export default function ChatThread({
       viewport.scrollTop = viewport.scrollHeight;
       return;
     }
-    viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
+    // Sin `smooth`: el ResizeObserver de más abajo re-ancla el fondo dos
+    // cuadros después y cortaba la animación a medias — se veía como un
+    // tirón cada vez que llegaba un mensaje (2026-10-22). La burbuja ya trae
+    // su propia animación de entrada.
+    viewport.scrollTop = viewport.scrollHeight;
   }, [thread.messages, thread.stale, stickToBottom]);
 
   // Al abrir el hilo, al fondo sin animación. useLayoutEffect (no useEffect):
