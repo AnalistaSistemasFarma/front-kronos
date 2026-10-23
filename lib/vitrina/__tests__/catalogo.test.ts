@@ -119,7 +119,7 @@ describe('Vitrina · catálogo del comercial', () => {
   it('modo presentación oculta códigos SAP, estados del registro, exclusividades y la marca de terceros', () => {
     const p = fila({
       codigos: [codigo({ item_code: 'PTRY0082', registro_estado: 'POR_VENCER' }), codigo({ item_code: 'PTRY0083', registro_estado: 'VENCIDO' })],
-      exclusividades: [{ cliente_beneficiario: 'OLP', pais: null, canal: null, alcance: 'OFERTAR', vigente_desde: null, vigente_hasta: null }],
+      exclusividades: [{ cliente_beneficiario: 'OLP', pais: null, canal: null, alcance: 'OFERTAR', vigente_desde: null, vigente_hasta: new Date('2025-01-01T00:00:00Z') }],
     });
     const it = itemDeCatalogo(p, 'presentacion', HOY)!;
     expect(it.codigos).toHaveLength(1);
@@ -130,6 +130,15 @@ describe('Vitrina · catálogo del comercial', () => {
     expect(it.esParaTerceros).toBe(false);
     expect(JSON.stringify(it)).not.toContain('PTRY');
     expect(JSON.stringify(it)).not.toContain('OLP');
+  });
+
+  it('modo presentación nunca muestra una presentación con exclusividad activa (Vitamina C x10 de OLP)', () => {
+    const conExclusividad = (desde: Date | null, hasta: Date | null) =>
+      fila({ exclusividades: [{ cliente_beneficiario: 'OLP', pais: null, canal: null, alcance: 'EXHIBIR', vigente_desde: desde, vigente_hasta: hasta }] });
+    expect(itemDeCatalogo(conExclusividad(null, null), 'presentacion', HOY)).toBeNull();
+    expect(itemDeCatalogo(conExclusividad(new Date('2027-01-01T00:00:00Z'), null), 'presentacion', HOY)).toBeNull();
+    expect(itemDeCatalogo(conExclusividad(null, new Date('2025-01-01T00:00:00Z')), 'presentacion', HOY)).not.toBeNull();
+    expect(itemDeCatalogo(conExclusividad(null, null), 'interna', HOY)).not.toBeNull();
   });
 
   it('vista interna conserva códigos y exclusividades no vencidas', () => {

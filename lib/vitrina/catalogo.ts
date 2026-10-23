@@ -135,6 +135,11 @@ export function visibilidadEnModo(modo: VitrinaModo, presentacion: CatalogoFila,
   return v;
 }
 
+/** true si la presentación tiene alguna exclusividad que no esté vencida. */
+export function tieneExclusividadActiva(fila: Pick<CatalogoFila, 'exclusividades'>, hoy: string): boolean {
+  return fila.exclusividades.some((e) => estadoExclusividad(fechaIso(e.vigente_desde), fechaIso(e.vigente_hasta), hoy) !== 'VENCIDA');
+}
+
 function unicos(valores: (string | null | undefined)[]): string[] {
   return [...new Set(valores.map((v) => (v ?? '').trim()).filter(Boolean))].sort(compara);
 }
@@ -152,6 +157,9 @@ export function imagenesVigentes(imagenes: CatalogoFila['imagenes']): CatalogoIm
 
 /** Una presentación tal como la ve el comercial en el modo pedido, o null si no se muestra. */
 export function itemDeCatalogo(fila: CatalogoFila, modo: VitrinaModo, hoy: string): CatalogoItem | null {
+  // Principio conservador: una presentación con exclusividad vigente, por vencer o futura
+  // (p. ej. Vitamina C x10 de OLP) nunca sale en el modo presentación, aunque su visibilidad lo permita.
+  if (modo === 'presentacion' && tieneExclusividadActiva(fila, hoy)) return null;
   const codigos: CatalogoCodigo[] = [];
   for (const c of [...fila.codigos].sort((a, b) => compara(a.item_code, b.item_code))) {
     const v = visibilidadEnModo(modo, fila, c);
