@@ -48,6 +48,7 @@ import {
 } from '../../lib/chat/projects-rules';
 import type { ProyectoDetalleDto } from '../../lib/proyectos/tipos';
 import { vistaEstadoAgente, type EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente';
+import { autoriaAgente } from '../../lib/proyectos/archivos-agente';
 import { LineaEstadoAgente } from './EstadoAgente';
 import { fechaCorta } from './api';
 import { BadgeRol } from './ui';
@@ -347,7 +348,11 @@ export function SeccionArchivos({
               <Text size='xs' c='dimmed' className={css.truncar}>
                 {f.sizeBytes !== null ? `${formatBytes(f.sizeBytes)} · ` : ''}
                 {fechaCorta(f.createdAt)}
-                {f.uploadedBy ? ` · ${f.uploadedBy.name}` : ''}
+                {f.uploadedByAgent
+                  ? ` · ${autoriaAgente(f.uploadedByAgent.name, f.uploadedByAgent.idConversation)}`
+                  : f.uploadedBy
+                    ? ` · ${f.uploadedBy.name}`
+                    : ''}
               </Text>
             </div>
             {f.puedoQuitar && (
