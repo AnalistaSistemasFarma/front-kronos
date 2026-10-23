@@ -527,6 +527,25 @@ jobs:
           echo "IF OBJECT_ID(N'dbo.chat_agent_quota', N'U') IS NULL OR (SELECT COUNT(*) FROM sys.check_constraints WHERE name IN (N'chat_agent_quota_fuente_ck', N'chat_agent_quota_rango_ck')) <> 2 THROW 50000, N'La migración del medidor de consumo no dejó la tabla o los CHECK.', 1;" > /tmp/cuota-ok.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/cuota-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-22-chat-agent-quota-PROD.sql; then echo "El script de PROD del medidor de consumo debió negarse en kronos_ci"; exit 1; fi
+          # Vitrina Comercial (2026-10-22): migración, DDL de PRUEBAS y subprocesos dos veces (idempotencia), tablas y CHECK, y los de PROD que se niegan.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261022200000_vitrina_comercial/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261022200000_vitrina_comercial/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-22-vitrina-comercial-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-22-vitrina-comercial-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-22-vitrina-subprocesos-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-22-vitrina-subprocesos-PRUEBAS.sql
+          echo "IF (SELECT COUNT(*) FROM sys.tables WHERE name IN (N'vitrina_presentacion', N'vitrina_codigo_sap', N'vitrina_area', N'vitrina_presentacion_area', N'vitrina_exclusividad', N'vitrina_imagen', N'vitrina_documento', N'vitrina_historial')) <> 8 OR (SELECT COUNT(*) FROM sys.check_constraints WHERE name LIKE N'CK[_]vitrina[_]%') <> 11 OR (SELECT COUNT(*) FROM dbo.subprocess WHERE subprocess_url IN (N'/process/vitrina', N'/process/vitrina/gestion')) <> 2 OR (SELECT COUNT(*) FROM dbo.vitrina_area) <> 5 THROW 50000, N'La Vitrina no dejó sus tablas, CHECK, subprocesos o áreas.', 1;" > /tmp/vitrina-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/vitrina-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-22-vitrina-comercial-PROD.sql; then echo "El script de PROD de la Vitrina debió negarse en kronos_ci"; exit 1; fi
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-22-vitrina-subprocesos-PROD.sql; then echo "El script de PROD de subprocesos de la Vitrina debió negarse en kronos_ci"; exit 1; fi
+          # Vitrina · líneas comerciales y grupos terapéuticos (2026-10-23): migración y PRUEBAS dos veces (idempotencia, con semilla), objetos, semilla sin duplicar y PROD que se niega.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261023120000_vitrina_lineas_grupos/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261023120000_vitrina_lineas_grupos/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-23-vitrina-lineas-grupos-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-23-vitrina-lineas-grupos-PRUEBAS.sql
+          echo "IF (SELECT COUNT(*) FROM sys.tables WHERE name IN (N'vitrina_linea_comercial', N'vitrina_grupo_terapeutico', N'vitrina_presentacion_grupo')) <> 3 OR COL_LENGTH(N'dbo.vitrina_presentacion', N'id_linea') IS NULL OR COL_LENGTH(N'dbo.vitrina_codigo_sap', N'items_group_name') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'vitrina_presentacion_id_linea_fkey') OR (SELECT COUNT(*) FROM dbo.vitrina_grupo_terapeutico) <> 7 OR (SELECT COUNT(*) FROM dbo.vitrina_linea_comercial) <> (SELECT COUNT(*) FROM dbo.company WHERE id_company IN (1, 2)) THROW 50000, N'Las líneas y grupos de la Vitrina no dejaron sus tablas, columnas, llave o semilla.', 1;" > /tmp/vitrina-lineas-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/vitrina-lineas-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-23-vitrina-lineas-grupos-PROD.sql; then echo "El script de PROD de líneas y grupos de la Vitrina debió negarse en kronos_ci"; exit 1; fi
           # Bitácora · actividades de texto libre (2026-10-17): migración y PRUEBAS dos veces, reversa y otra vez PRUEBAS (idempotencia ida y vuelta).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017200000_bitacora_proceso_texto_libre/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017200000_bitacora_proceso_texto_libre/migration.sql
@@ -559,7 +578,7 @@ jobs:
         run: |
           set -e
           # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
-          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida proyectos_permisos_agentes_reversa_acepta_perdida proyectos_config_agentes_reversa_acepta_perdida chat_stickers_personales_reversa_acepta_perdida"
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida proyectos_permisos_agentes_reversa_acepta_perdida proyectos_config_agentes_reversa_acepta_perdida chat_stickers_personales_reversa_acepta_perdida vitrina_reversa_acepta_perdida vitrina_lineas_reversa_acepta_perdida"
           reversa() {
             { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
@@ -570,6 +589,18 @@ jobs:
             npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
           }
           # De la más nueva a la más antigua…
+          # Vitrina · líneas y grupos (2026-10-23): su reversa va ANTES que la del V2 (sus tablas apuntan a vitrina_presentacion); se vuelve a migrar después del V2.
+          reversa prisma/manual/2026-10-23-vitrina-lineas-grupos-reversa.sql
+          echo "IF EXISTS (SELECT 1 FROM sys.tables WHERE name IN (N'vitrina_linea_comercial', N'vitrina_grupo_terapeutico', N'vitrina_presentacion_grupo')) OR COL_LENGTH(N'dbo.vitrina_presentacion', N'id_linea') IS NOT NULL OR COL_LENGTH(N'dbo.vitrina_codigo_sap', N'items_group_name') IS NOT NULL THROW 50000, N'La reversa de líneas y grupos de la Vitrina no quitó lo suyo.', 1;" > /tmp/vitrina-lineas-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/vitrina-lineas-quitado.sql
+          # Vitrina Comercial (2026-10-22): ida y vuelta (reversa dos veces, comprobación, la migración y los subprocesos otra vez).
+          reversa prisma/manual/2026-10-22-vitrina-comercial-reversa.sql
+          echo "IF EXISTS (SELECT 1 FROM sys.tables WHERE name LIKE N'vitrina[_]%') OR EXISTS (SELECT 1 FROM dbo.subprocess WHERE subprocess_url LIKE N'/process/vitrina%') THROW 50000, N'La reversa de la Vitrina no quitó lo suyo.', 1;" > /tmp/vitrina-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/vitrina-quitado.sql
+          migra 20261022200000_vitrina_comercial
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-22-vitrina-subprocesos-PRUEBAS.sql
+          migra 20261023120000_vitrina_lineas_grupos
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-23-vitrina-lineas-grupos-PRUEBAS.sql
           # Medidor del consumo de Anthropic (2026-10-22): ida y vuelta (reversa dos veces, comprobación y la migración otra vez).
           reversa prisma/manual/2026-10-22-chat-agent-quota-reversa.sql
           echo "IF OBJECT_ID(N'dbo.chat_agent_quota', N'U') IS NOT NULL THROW 50000, N'La reversa del medidor de consumo no quitó su tabla.', 1;" > /tmp/cuota-quitado.sql

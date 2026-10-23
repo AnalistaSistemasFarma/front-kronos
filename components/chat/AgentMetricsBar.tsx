@@ -1,5 +1,6 @@
 'use client';
 
+import { memo } from 'react';
 import { Box, Group, Progress, Text, Tooltip } from '@mantine/core';
 import {
   colorContexto,
@@ -40,7 +41,7 @@ function haceCuanto(iso: string, ahora = Date.now()): string {
 
 const COLOR_MANTINE = { green: 'teal', yellow: 'yellow', red: 'red', gray: 'gray' } as const;
 
-export default function AgentMetricsBar({ metrics }: { metrics: AgentMetricsDto | null | undefined }) {
+function AgentMetricsBar({ metrics }: { metrics: AgentMetricsDto | null | undefined }) {
   if (!metrics) return null;
 
   if (metricasRancias(metrics)) {
@@ -130,3 +131,6 @@ export default function AgentMetricsBar({ metrics }: { metrics: AgentMetricsDto 
     </Box>
   );
 }
+
+// En `memo`: el hilo se redibuja con cada sondeo y estas métricas casi nunca cambian.
+export default memo(AgentMetricsBar);
