@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { buildLayoutPreview, inspectDraftSheets, saveDocumentLayout, validateDraftSheetSettings } from '@/lib/sgc/db/layout';
-import { downloadSgcFile } from '@/lib/sgc/onedrive';
+import { downloadSgcFile, sgcOfficeConverter } from '@/lib/sgc/onedrive';
 import { docxToHtml, htmlToPdf } from '@/lib/sgc/pdf/render';
 import { NO_STORE, errorResponse, getSgcRequestContext, jsonNoStore, parseId, rateLimitResponse, readJson } from '@/app/api/sgc/_lib/context';
 
@@ -44,10 +44,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const body = await readJson(request);
     if (!id || !body) return jsonNoStore({ error: 'Petición inválida' }, 400);
     const viewer = { email: ctx.email, access: ctx.access };
-    const deps = { download: downloadSgcFile, htmlToPdf, docxToHtml };
+    const deps = { download: downloadSgcFile, htmlToPdf, docxToHtml, officeToPdf: sgcOfficeConverter.bytes };
     if (body.action !== 'previsualizar' && body.action !== 'guardar') return jsonNoStore({ error: 'Acción inválida' }, 400);
     const settings = await validateDraftSheetSettings(prisma, deps, id, viewer, body.settings ?? null);
-    if (body.action === 'guardar') return jsonNoStore(await saveDocumentLayout(prisma, id, { sheetSettings: settings, reason: body.reason }, viewer, ctx.actor));
+    if (body.action === 'guardar') return jsonNoStore(await saveDocumentLayout(prisma, id, { sheetSettings: settings, reason: body.reason }, viewer, ctx.actor, deps));
     const pdf = await buildLayoutPreview(prisma, deps, id, viewer, { sheetSettings: settings });
     return new NextResponse(Buffer.from(pdf), {
       status: 200,

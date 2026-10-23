@@ -92,7 +92,7 @@ describe('SGC · S3 · OneDrive sin verificar y dependencias reales de la firma'
 
   it('[SGC-REQ-049] las dependencias reales no hablan con Orión: contraseña local, OneDrive propio, Chrome local', () => {
     const deps = sgcSignatureDeps();
-    expect(Object.keys(deps).sort()).toEqual(['appUrl', 'docxToHtml', 'download', 'htmlToPdf', 'notifier', 'upload', 'verifyPassword']);
+    expect(Object.keys(deps).sort()).toEqual(['appUrl', 'docxToHtml', 'download', 'htmlToPdf', 'notifier', 'officeToPdf', 'upload', 'verifyPassword']);
     expect(deps.download).toBe(downloadSgcFile);
     expect(deps.appUrl).toBeTruthy();
   });

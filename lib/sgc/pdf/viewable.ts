@@ -489,7 +489,8 @@ export async function xlsxToHtml(bytes: Uint8Array): Promise<string> {
 export async function attachmentToViewablePdf(
   bytes: Uint8Array,
   fileName: string,
-  deps: { docxToHtml: SgcDocxToHtml; htmlToPdf: SgcHtmlToPdf }
+  // 2026-10-22: `officeToPdf` = conversión de Microsoft del Excel ya guardado en OneDrive (si falla, la de SynerLink).
+  deps: { docxToHtml: SgcDocxToHtml; htmlToPdf: SgcHtmlToPdf; officeToPdf?: () => Promise<Uint8Array> }
 ): Promise<Uint8Array | null> {
   const name = fileName.toLowerCase();
   if (isPdf(bytes)) return bytes;
@@ -498,6 +499,14 @@ export async function attachmentToViewablePdf(
     return deps.htmlToPdf(wrapDraftForPdf({ title: fileName, code: '', contentHtml: html }));
   }
   if (name.endsWith('.xlsx') && isZip(bytes)) {
+    if (deps.officeToPdf) {
+      try {
+        const pdf = await deps.officeToPdf();
+        if (isPdf(pdf)) return pdf;
+      } catch (e) {
+        console.warn('[sgc/visor] la conversión de Microsoft falló; se usa la de SynerLink', e);
+      }
+    }
     const sheet = await xlsxToSheet(bytes);
     return deps.htmlToPdf(wrapDraftForPdf({ title: fileName, code: '', contentHtml: sheet.html, sheet: true, extraCss: sheet.css, sheetLayout: sheet.layout }));
   }
