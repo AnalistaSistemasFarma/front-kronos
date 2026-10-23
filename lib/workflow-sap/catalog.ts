@@ -43,6 +43,11 @@ export interface SapActionDef {
   /** Estado U_SEND_State que deja (solo para cambios de estado). */
   resultingState?: string | null;
   mapping: MappingField[];
+  /**
+   * false = definida en el catalogo pero aun sin ejecutor automatico (p. ej. el
+   * borrador lo crea el formulario). La pantalla la muestra deshabilitada.
+   */
+  available?: boolean;
 }
 
 const DRAFT_MAPPING: MappingField[] = [
@@ -75,13 +80,14 @@ export const SAP_ACTIONS: SapActionDef[] = [
     taskKinds: ['sap_executor'],
     resultingState: 'B',
     mapping: DRAFT_MAPPING,
+    available: false,
   },
   {
     key: 'purchase.state_to_authorize',
     label: 'Pasar a «Por autorizar»',
     endpoint: 'PATCH Drafts(n) · U_SEND_State = LA',
-    triggers: ['on_start', 'on_execute'],
-    taskKinds: ['authorization', 'sap_executor'],
+    triggers: ['on_start'],
+    taskKinds: ['authorization'],
     resultingState: 'LA',
     mapping: STATE_MAPPING,
   },
@@ -122,8 +128,32 @@ export const SAP_ACTIONS: SapActionDef[] = [
     triggers: ['on_execute'],
     taskKinds: ['sap_executor'],
     resultingState: null,
+    available: false,
     mapping: [{ source: 'Archivos de la solicitud (PDF, JPG, PNG)', target: 'Attachments2_Lines', editable: false }],
   },
+];
+
+/** Acciones que se pueden configurar hoy en un tipo de tarea y disparador. */
+export function actionsFor(taskKind: TaskKind, trigger: TriggerEvent): SapActionDef[] {
+  return SAP_ACTIONS.filter((a) => a.available !== false && a.taskKinds.includes(taskKind) && a.triggers.includes(trigger));
+}
+
+/** Disparadores que aplican a un tipo de tarea. */
+export function triggersFor(taskKind: TaskKind): TriggerEvent[] {
+  if (taskKind === 'sap_executor') return ['on_execute'];
+  if (taskKind === 'authorization') return ['on_start', 'on_final_approve', 'on_reject', 'on_quote'];
+  return [];
+}
+
+/**
+ * Efectos SAP con los que trabajaba el flujo de compras antes de ser configurable.
+ * Se usan si el proceso aun no tiene nada configurado (compatibilidad).
+ */
+export const DEFAULT_AUTHORIZATION_EFFECTS: { trigger: TriggerEvent; actionKey: string }[] = [
+  { trigger: 'on_start', actionKey: 'purchase.state_to_authorize' },
+  { trigger: 'on_final_approve', actionKey: 'purchase.publish_firm' },
+  { trigger: 'on_reject', actionKey: 'purchase.state_rejected' },
+  { trigger: 'on_quote', actionKey: 'purchase.state_quotation' },
 ];
 
 export function getSapAction(key: string): SapActionDef | undefined {
@@ -144,6 +174,7 @@ export function validateTaskAction(params: {
   const def = getSapAction(params.actionKey);
   if (!def) return [`La acción «${params.actionKey}» no existe en el catálogo.`];
   const errors: string[] = [];
+  if (def.available === false) errors.push(`«${def.label}» todavía no se puede ejecutar automáticamente.`);
   if (!def.taskKinds.includes(params.taskKind)) {
     errors.push(`«${def.label}» no se puede usar en una tarea de tipo ${params.taskKind}.`);
   }
