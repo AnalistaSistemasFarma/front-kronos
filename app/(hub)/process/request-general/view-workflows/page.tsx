@@ -69,6 +69,12 @@ import {
 import TableColumnsEditor from '../_components/TableColumnsEditor';
 import WorkflowValidatorsModal from '../../../../../components/request-general/WorkflowValidatorsModal';
 import { FlowConnector } from '../../../../../components/ui/flow/FlowConnector';
+import {
+  TaskSapBadges,
+  TaskSapConfigModal,
+  useWorkflowSapConfig,
+  type TaskSapInfo,
+} from '../../../../../components/workflow-sap/TaskSapConfig';
 import toast from 'react-hot-toast';
 // WorkflowDiagram deshabilitado temporalmente (2026-09-02): el diagrama se veía
 // desordenado (ramas cruzadas) a criterio de producto. Pendiente rediseño.
@@ -188,6 +194,9 @@ function ViewWorkFlowPage() {
   const from = searchParams.get('from') || 'workflows';
 
   const [workflow, setWorkflow] = useState<WorkFlow | null>(null);
+  // Configuracion SAP de las tareas (tareas «Ejecutora SAP» y efectos SAP de autorizaciones).
+  const sapConfig = useWorkflowSapConfig(workflow?.id ?? null);
+  const [sapTask, setSapTask] = useState<TaskSapInfo | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingTasks, setLoadingTasks] = useState(false);
@@ -1929,6 +1938,17 @@ if (session?.user?.id) return session.user.id as unknown as number;
                                             {task.type_authorization_label || 'Autorización'}
                                           </Badge>
                                         )}
+                                        <TaskSapBadges info={sapConfig.byTask.get(task.id)} />
+                                        {sapConfig.canManage && task.id > 0 && sapConfig.byTask.get(task.id) && (
+                                          <Button
+                                            size='compact-xs'
+                                            variant='subtle'
+                                            color='blue'
+                                            onClick={() => setSapTask(sapConfig.byTask.get(task.id) ?? null)}
+                                          >
+                                            Configurar SAP
+                                          </Button>
+                                        )}
                                         {task.id_linked_process && (
                                           <Badge color='grape' variant='light' size='sm' styles={{ root: { textTransform: 'none' } }}>
                                             Flujo: {task.linked_process_label || linkedProcessOptions.find((o) => o.value === String(task.id_linked_process))?.label || 'Vinculado'}
@@ -2894,7 +2914,8 @@ if (session?.user?.id) return session.user.id as unknown as number;
           </Stack>
         </Modal>
 
-        <WorkflowValidatorsModal
+        <TaskSapConfigModal info={sapTask} onClose={() => setSapTask(null)} onSaved={sapConfig.reload} />
+      <WorkflowValidatorsModal
           opened={validatorsModalOpened}
           onClose={() => setValidatorsModalOpened(false)}
           processCategoryId={Number(workflow.id)}

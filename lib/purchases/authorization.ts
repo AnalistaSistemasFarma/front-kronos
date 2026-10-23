@@ -6,7 +6,8 @@ import { createAndSendNotifications } from '../notifications.js';
 import { createGeneralRequest } from '../requests-general/createGeneralRequest';
 import { sapGet, sapLogin, sapLogout, sapPatch, SapError, type SapSession } from '../sap/serviceLayer';
 import { publishApprovedDraft, publishSap } from './publish';
-import { withStep, type TriggeredBy } from '../workflow-sap/executionLog';
+import { startStep, finishStep, withStep, type TriggeredBy } from '../workflow-sap/executionLog';
+import { isAuthorizationEffectEnabled } from '../workflow-sap/config';
 import { checkTransition, normalizeState } from './states';
 
 /**
@@ -133,7 +134,19 @@ export async function sendToAuthorize(params: {
   try {
     const etagged = await sapGet<Record<string, unknown>>(sap, `Drafts(${docEntry})?$select=DocEntry,U_SEND_State`);
     if (normalizeState(etagged.U_SEND_State) !== state) throw new SapError('El borrador cambio durante el envio', 412);
-    await withStep(
+    if (!(await isAuthorizationEffectEnabled(idRequest, 'on_start', 'purchase.state_to_authorize'))) {
+      const id = await startStep({
+        idRequest,
+        stepKind: 'sap',
+        stepName: 'Pasar a «Por autorizar»',
+        actionKey: 'purchase.state_to_authorize',
+        triggerEvent: 'on_start',
+        triggeredBy: 'user',
+        idUser: user.id,
+        idCompany: companyId,
+      });
+      await finishStep(id, { status: 'skipped', responseSummary: 'Efecto no configurado en el flujo' });
+    } else await withStep(
       {
         idRequest,
         stepKind: 'sap',
@@ -171,6 +184,9 @@ export async function sendToAuthorize(params: {
   fireAndForgetNotification(
     notifyNewRequestTyped({ requestId: idRequest, subject, processEmail, processEmails, taskEmails, creatorEmail: userEmail })
   );
+
+  // Tareas «Ejecutora SAP» no secuenciales que ya existen desde la creación. No bloquea.
+  fireAndForgetNotification(import('../workflow-sap/engine').then((m) => m.runSapExecutors(idRequest)));
 
   return { ok: true, idRequestGeneral: idRequest, state: 'LA' };
 }
@@ -220,9 +236,18 @@ export async function onAuthorizationDecision(
   idRequest: number | null | undefined,
   authorized: boolean,
   reason?: string | null,
-  triggeredBy: TriggeredBy = 'user'
+  triggeredBy: TriggeredBy = 'user',
+  /** 'executor' = lo pide una tarea «Ejecutora SAP» del flujo (no un efecto de la autorizacion). */
+  source: 'decision' | 'executor' = 'decision'
 ): Promise<{ skipped: true } | { skipped: false; status: string; error?: string }> {
   if (!idRequest) return { skipped: true };
+
+  // Efectos configurables en «Ver flujos»: si el flujo no tiene el efecto, no se ejecuta.
+  if (authorized && source === 'decision' && triggeredBy !== 'retry') {
+    if (!(await isAuthorizationEffectEnabled(Number(idRequest), 'on_final_approve', 'purchase.publish_firm'))) {
+      return { skipped: true };
+    }
+  }
 
   // El flujo se edita en «Administrar flujos de trabajo» y puede tener VARIOS niveles
   // de autorizacion: solo se publica cuando estan aprobados todos los de la plantilla.
@@ -250,7 +275,7 @@ export async function onAuthorizationDecision(
           stepKind: 'sap',
           stepName: 'Publicar solicitud en firme',
           actionKey: 'purchase.publish_firm',
-          triggerEvent: 'on_final_approve',
+          triggerEvent: source === 'executor' ? 'on_execute' : 'on_final_approve',
           triggeredBy,
           idCompany: link.id_company,
           sapEntity: 'PurchaseRequests',
@@ -275,7 +300,21 @@ export async function onAuthorizationDecision(
       return { skipped: false, status: 'publish_error', error: r.error };
     }
 
-    // Rechazo: LA -> NAD con motivo, solo si sigue en LA.
+    // Rechazo: LA -> NAD con motivo, solo si sigue en LA (y si el flujo tiene ese efecto).
+    if (!(await isAuthorizationEffectEnabled(link.id_request_general, 'on_reject', 'purchase.state_rejected'))) {
+      const id = await startStep({
+        idRequest: link.id_request_general,
+        stepKind: 'sap',
+        stepName: 'Pasar a «No aprobado»',
+        actionKey: 'purchase.state_rejected',
+        triggerEvent: 'on_reject',
+        triggeredBy,
+        idCompany: link.id_company,
+      });
+      await finishStep(id, { status: 'skipped', responseSummary: 'Efecto no configurado en el flujo' });
+      await finish(link.id_request_general, { status: 'rejected' });
+      return { skipped: false, status: 'rejected' };
+    }
     const draft = await sapGet<Record<string, unknown>>(sap, `Drafts(${link.doc_entry})?$select=DocEntry,U_SEND_State`);
     const check = checkTransition(draft.U_SEND_State, 'no_aprobar');
     if (!check.ok) {
@@ -378,6 +417,10 @@ export async function sendToQuotation(params: {
     where: { id_company: companyId, doc_entry: docEntry, status: 'pending' },
   });
   if (!link) return { ok: false, status: 404, error: 'La solicitud no tiene una autorizacion pendiente.' };
+
+  if (!(await isAuthorizationEffectEnabled(link.id_request_general, 'on_quote', 'purchase.state_quotation'))) {
+    return { ok: false, status: 409, error: 'El flujo de esta solicitud no tiene habilitado «Enviar a cotizar».' };
+  }
 
   const user = await prisma.user.findUnique({ where: { email: userEmail }, select: { id: true } });
   if (!user || !(await canDecideAuthorization(link.id_request_general, user.id))) {
