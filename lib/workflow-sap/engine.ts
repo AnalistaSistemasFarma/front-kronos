@@ -127,6 +127,18 @@ async function runAction(
       if (r.status === 'approved') return { ok: true, detail: 'Solicitud en firme publicada en SAP' };
       return { ok: false, error: r.error ?? `Estado ${r.status}` };
     }
+    case 'purchase.state_rejected':
+    case 'purchase.state_quotation': {
+      // Las aplica la decisión del autorizador (con su motivo); la tarea SAP la refleja en el flujo.
+      const want = actionKey === 'purchase.state_rejected' ? 'rejected' : 'quoted';
+      const link = await prisma.purchaseAuthorization.findUnique({ where: { id_request_general: idRequest } });
+      if (!link) return { ok: false, error: 'La solicitud no está enlazada a un borrador de compra.' };
+      if (link.status === want) {
+        return { ok: true, detail: want === 'rejected' ? 'Borrador en «No aprobado»' : 'Borrador en «En cotización»' };
+      }
+      if (link.status === 'reject_error') return { ok: false, error: link.error ?? 'No se pudo aplicar el rechazo en SAP.' };
+      return { ok: false, wait: true, error: 'Esperando que se aplique la decisión en SAP.' };
+    }
     case 'purchase.state_to_authorize': {
       const r = await moveDraftToAuthorize(idRequest, triggeredBy);
       return r.ok ? { ok: true, detail: r.detail } : { ok: false, error: r.error };
@@ -136,9 +148,81 @@ async function runAction(
   }
 }
 
+type Outcome = 'pending' | 'approved' | 'rejected' | 'quoted';
+const BRANCH_TRIGGERS = ['on_reject', 'on_quote'] as const;
+const OUTCOME_OF_TRIGGER: Record<string, Outcome> = { on_reject: 'rejected', on_quote: 'quoted' };
+const OUTCOME_LABEL: Record<Outcome, string> = {
+  pending: 'pendiente',
+  approved: 'aprobada',
+  rejected: 'rechazada',
+  quoted: 'enviada a cotizar',
+};
+
 /**
- * Ejecuta las tareas «Ejecutora SAP» pendientes de una solicitud. Repite mientras
- * una ejecucion abra la siguiente tarea secuencial y esta tambien sea ejecutora.
+ * Resultado de la autorizacion que precede a una tarea en el flujo (la de mayor
+ * orden por debajo de ella). «Cotizar» se lee del enlace de compras porque cancela
+ * la solicitud del workflow en lugar de resolver la tarea.
+ */
+async function precedingAuthorizationOutcome(idRequest: number, task: PendingExecutor): Promise<Outcome> {
+  const link = await prisma.purchaseAuthorization.findUnique({ where: { id_request_general: idRequest } });
+  if (link?.status === 'quoted') return 'quoted';
+  const pool = await sql.connect(sqlConfig);
+  const r = await pool
+    .request()
+    .input('req', sql.Int, idRequest)
+    .input('p', sql.Int, task.id_process_category)
+    .input('ord', sql.Int, task.display_order ?? 0).query(`
+      SELECT TOP 1 trg.id_status
+      FROM task_process_category tpc
+      INNER JOIN task_request_general trg ON trg.id_task = tpc.id AND trg.id_request_general = @req
+      WHERE tpc.id_process_category = @p AND tpc.is_authorization = 1 AND ISNULL(tpc.display_order, 0) < @ord
+      ORDER BY tpc.display_order DESC, trg.id DESC;`);
+  const status = Number(r.recordset[0]?.id_status ?? 4);
+  if (status === 2) return 'approved';
+  if (status === 3) return 'rejected';
+  return 'pending';
+}
+
+/** Marca como omitida una tarea SAP cuya condicion no se cumplio (no avanza el flujo). */
+async function skip(task: PendingExecutor, reason: string): Promise<void> {
+  const pool = await sql.connect(sqlConfig);
+  await pool
+    .request()
+    .input('id', sql.Int, task.id)
+    .input('res', sql.NVarChar(sql.MAX), reason)
+    .query(`UPDATE task_request_general
+            SET id_status = 3, resolution = @res, date_resolution = GETDATE(), end_date = GETDATE()
+            WHERE id = @id AND id_status = 4;`);
+}
+
+async function markError(
+  idRequest: number,
+  task: PendingExecutor,
+  actionKey: string,
+  error: string,
+  triggeredBy: TriggeredBy
+): Promise<void> {
+  const label = getSapAction(actionKey)?.label ?? actionKey;
+  const id = await startStep({
+    idRequest,
+    idTaskRequest: task.id,
+    idTask: task.id_task,
+    stepKind: 'system',
+    stepName: `Tarea «${task.task}» quedó en error`,
+    actionKey,
+    triggerEvent: 'on_execute',
+    triggeredBy,
+  });
+  await finishStep(id, { status: 'error', error: `${label}: ${error}` });
+  await release(task.id, `${ERROR_PREFIX} ${error}`.slice(0, 1000));
+}
+
+/**
+ * Ejecuta las tareas SAP pendientes de una solicitud:
+ *  - Tareas SAP condicionadas («si la autorización anterior se rechaza / se envía a
+ *    cotizar»): se evalúan primero; si se cumple se ejecutan, si no se marcan omitidas.
+ *  - Tareas SAP normales («al llegarle el turno»): se ejecutan y avanzan el flujo.
+ * Repite mientras una ejecucion abra la siguiente tarea secuencial.
  */
 export async function runSapExecutors(
   idRequest: number | null | undefined,
@@ -146,58 +230,75 @@ export async function runSapExecutors(
 ): Promise<{ executed: number; errors: number }> {
   const result = { executed: 0, errors: 0 };
   if (!idRequest) return result;
+  const req = Number(idRequest);
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
-      const pending = await pendingExecutors(Number(idRequest));
+      const pending = await pendingExecutors(req);
       if (pending.length === 0) break;
       let progressed = false;
 
-      for (const task of pending) {
-        if (!(await claim(task.id))) continue;
-        const actions = (await processActions(task.id_process_category, 'sap_executor')).filter(
-          (a) => a.id_task === task.id_task && a.trigger_event === 'on_execute'
-        );
-        if (actions.length === 0) {
-          await release(task.id, `${ERROR_PREFIX} La tarea no tiene acciones SAP configuradas.`);
-          result.errors++;
-          continue;
-        }
+      // Acciones de cada tarea; las condicionadas van primero (pueden cancelar ramas antes del cierre).
+      const withActions = await Promise.all(
+        pending.map(async (task) => {
+          const actions = (await processActions(task.id_process_category, 'sap_executor')).filter(
+            (a) => a.id_task === task.id_task
+          );
+          const branch = actions.find((a) => (BRANCH_TRIGGERS as readonly string[]).includes(a.trigger_event));
+          return { task, actions, branch };
+        })
+      );
+      withActions.sort((a, b) => Number(Boolean(b.branch)) - Number(Boolean(a.branch)));
 
-        const details: string[] = [];
-        let failure: { wait?: boolean; error: string } | null = null;
-        for (const a of actions) {
-          const r = await runAction(Number(idRequest), a.action_key, triggeredBy);
-          if (r.ok) details.push(r.detail);
-          else {
-            failure = r;
-            break;
+      for (const { task, actions, branch } of withActions) {
+        if (branch) {
+          const outcome = await precedingAuthorizationOutcome(req, task);
+          if (outcome === 'pending') continue; // aún no se decide
+          if (!(await claim(task.id))) continue;
+          if (OUTCOME_OF_TRIGGER[branch.trigger_event] !== outcome) {
+            await skip(task, `Omitida: la autorización anterior fue ${OUTCOME_LABEL[outcome]}.`);
+            progressed = true;
+            continue;
           }
-        }
-
-        if (failure) {
-          if (failure.wait) {
-            // No es error: la tarea quedo lista antes de tiempo (p. ej. flujo no secuencial).
+          const r = await runAction(req, branch.action_key, triggeredBy);
+          if (r.ok) {
+            await complete(task, req, `Ejecutada en SAP · ${r.detail}`);
+            result.executed++;
+            progressed = true;
+          } else if (r.wait) {
             await release(task.id, null);
           } else {
-            const label = getSapAction(actions[0].action_key)?.label ?? actions[0].action_key;
-            const id = await startStep({
-              idRequest: Number(idRequest),
-              idTaskRequest: task.id,
-              idTask: task.id_task,
-              stepKind: 'system',
-              stepName: `Tarea «${task.task}» quedó en error`,
-              actionKey: actions[0].action_key,
-              triggerEvent: 'on_execute',
-              triggeredBy,
-            });
-            await finishStep(id, { status: 'error', error: `${label}: ${failure.error}` });
-            await release(task.id, `${ERROR_PREFIX} ${failure.error}`.slice(0, 1000));
+            await markError(req, task, branch.action_key, r.error, triggeredBy);
             result.errors++;
           }
           continue;
         }
 
-        await complete(task, Number(idRequest), `Ejecutada en SAP · ${details.join(' · ')}`);
+        if (!(await claim(task.id))) continue;
+        const run = actions.filter((a) => a.trigger_event === 'on_execute');
+        if (run.length === 0) {
+          await release(task.id, `${ERROR_PREFIX} La tarea no tiene acciones SAP configuradas.`);
+          result.errors++;
+          continue;
+        }
+        const details: string[] = [];
+        let failure: { wait?: boolean; error: string; key: string } | null = null;
+        for (const a of run) {
+          const r = await runAction(req, a.action_key, triggeredBy);
+          if (r.ok) details.push(r.detail);
+          else {
+            failure = { ...r, key: a.action_key };
+            break;
+          }
+        }
+        if (failure) {
+          if (failure.wait) await release(task.id, null);
+          else {
+            await markError(req, task, failure.key, failure.error, triggeredBy);
+            result.errors++;
+          }
+          continue;
+        }
+        await complete(task, req, `Ejecutada en SAP · ${details.join(' · ')}`);
         result.executed++;
         progressed = true;
       }

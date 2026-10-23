@@ -290,7 +290,7 @@ export function AuthorizationSapBranches({
 }
 
 /** Encabezado del objeto «Condicional» (condiciones existentes por opciones del formulario). */
-export function ConditionalObject({ label }: { label: string }) {
+export function ConditionalObject({ label, note }: { label: string; note?: string }) {
   return (
     <Group gap={8} mb={6} wrap="nowrap">
       <Badge color="grape" variant="filled" size="sm">
@@ -300,7 +300,7 @@ export function ConditionalObject({ label }: { label: string }) {
         Si {label}
       </Text>
       <Text size="xs" c="dimmed">
-        · si no se cumple, estas tareas no se crean
+        · {note ?? 'si no se cumple, estas tareas no se crean'}
       </Text>
     </Group>
   );

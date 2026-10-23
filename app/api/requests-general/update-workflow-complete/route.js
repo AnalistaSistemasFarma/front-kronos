@@ -7,7 +7,7 @@ import { validateTaskAction } from '../../../../lib/workflow-sap/catalog';
  * tarea SAP, su acción del catálogo (disparador on_execute). Las acciones de otros
  * disparadores (efectos de autorizaciones) no se tocan aquí.
  */
-async function saveTaskKind(transaction, taskId, isAuthorization, isSapTask, sapActionKey) {
+async function saveTaskKind(transaction, taskId, isAuthorization, isSapTask, sapActionKey, sapTrigger = 'on_execute') {
   const kind = isAuthorization ? 'authorization' : isSapTask ? 'sap_executor' : 'normal';
   await new sql.Request(transaction)
     .input('id', sql.Int, taskId)
@@ -15,13 +15,15 @@ async function saveTaskKind(transaction, taskId, isAuthorization, isSapTask, sap
     .query(`UPDATE task_process_category SET task_kind = @kind WHERE id = @id`);
   await new sql.Request(transaction)
     .input('id', sql.Int, taskId)
-    .query(`DELETE FROM dbo.task_sap_action WHERE id_task = @id AND trigger_event = N'on_execute'`);
+    .input('kind', sql.NVarChar(20), kind)
+    .query(`DELETE FROM dbo.task_sap_action WHERE id_task = @id AND (trigger_event IN (N'on_execute') OR (trigger_event IN (N'on_reject', N'on_quote') AND @kind = N'sap_executor') OR @kind <> N'authorization')`);
   if (isSapTask) {
     await new sql.Request(transaction)
       .input('id', sql.Int, taskId)
       .input('action', sql.NVarChar(50), String(sapActionKey))
+      .input('trigger', sql.NVarChar(20), sapTrigger)
       .query(`INSERT INTO dbo.task_sap_action (id_task, trigger_event, action_key, display_order)
-              VALUES (@id, N'on_execute', @action, 1)`);
+              VALUES (@id, @trigger, @action, 1)`);
   }
 }
 
@@ -187,12 +189,13 @@ export async function POST(req) {
       // Actualizar tareas si es necesario
       if (shouldUpdateTasks) {
         for (const task of tasks) {
-          const { id, task: taskName, active: taskActive, cost, cost_center: taskCostCenter, id_user_assigned: taskUserAssigned, is_sequential: taskIsSequential, display_order: taskDisplayOrder, is_authorization: taskIsAuthorization, type_authorization: taskTypeAuthorization, id_linked_process: taskLinkedProcess, closes_request: taskClosesRequest, condition_option_ids: taskConditionOptionIds, task_kind: taskKindIn, sap_action_key: taskSapActionKey, action } = task;
+          const { id, task: taskName, active: taskActive, cost, cost_center: taskCostCenter, id_user_assigned: taskUserAssigned, is_sequential: taskIsSequential, display_order: taskDisplayOrder, is_authorization: taskIsAuthorization, type_authorization: taskTypeAuthorization, id_linked_process: taskLinkedProcess, closes_request: taskClosesRequest, condition_option_ids: taskConditionOptionIds, task_kind: taskKindIn, sap_action_key: taskSapActionKey, sap_trigger: taskSapTriggerIn, action } = task;
+          const taskSapTrigger = ['on_execute', 'on_reject', 'on_quote'].includes(taskSapTriggerIn) ? taskSapTriggerIn : 'on_execute';
 
           // Tarea SAP: la ejecuta el sistema con una acción del catálogo (no es autorización).
           const isSapTask = !taskIsAuthorization && taskKindIn === 'sap_executor';
           if (isSapTask && (action === 'create' || action === 'update')) {
-            const sapErrors = validateTaskAction({ taskKind: 'sap_executor', actionKey: String(taskSapActionKey || ''), trigger: 'on_execute' });
+            const sapErrors = validateTaskAction({ taskKind: 'sap_executor', actionKey: String(taskSapActionKey || ''), trigger: taskSapTrigger });
             if (sapErrors.length > 0) throw new Error(`Tarea SAP «${taskName}»: ${sapErrors.join(' ')}`);
           }
 
@@ -244,7 +247,7 @@ export async function POST(req) {
                 .query(insertUserTaskQuery);
             }
 
-            await saveTaskKind(transaction, newTaskId, taskIsAuthorization, isSapTask, taskSapActionKey);
+            await saveTaskKind(transaction, newTaskId, taskIsAuthorization, isSapTask, taskSapActionKey, taskSapTrigger);
             results.tasks.push({ action: 'create', id: newTaskId, success: true });
 
           } else if (action === 'update' && id) {
@@ -310,7 +313,7 @@ export async function POST(req) {
                 .query(insertUserTaskQuery);
             }
 
-            await saveTaskKind(transaction, id, taskIsAuthorization, isSapTask, taskSapActionKey);
+            await saveTaskKind(transaction, id, taskIsAuthorization, isSapTask, taskSapActionKey, taskSapTrigger);
             results.tasks.push({ action: 'update', id, success: true });
 
           } else if (action === 'delete' && id) {

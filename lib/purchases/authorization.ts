@@ -44,6 +44,12 @@ const createAndSendNotificationsTyped = createAndSendNotifications as unknown as
   payload: { title: string; body: string; url?: string; tag?: string }
 ) => Promise<unknown>;
 
+/** Tras una decision del autorizador, corre las Tareas SAP del flujo (no bloquea). */
+function afterDecision(idRequest: number, source: 'decision' | 'executor') {
+  if (source !== 'decision') return; // el motor ya esta corriendo
+  fireAndForgetNotification(import('../workflow-sap/engine').then((m) => m.runSapExecutors(idRequest)));
+}
+
 /** Autorizacion viva: impide otro envio del mismo borrador. */
 const ACTIVE = ['pending', 'publishing', 'publish_error'];
 
@@ -294,6 +300,7 @@ export async function onAuthorizationDecision(
       );
       if (r.ok) {
         await finish(link.id_request_general, { status: 'approved', firm_doc_entry: r.firmDocEntry });
+        afterDecision(link.id_request_general, source);
         return { skipped: false, status: 'approved' };
       }
       await finish(link.id_request_general, { status: 'publish_error', error: r.error });
@@ -313,6 +320,7 @@ export async function onAuthorizationDecision(
       });
       await finishStep(id, { status: 'skipped', responseSummary: 'Efecto no configurado en el flujo' });
       await finish(link.id_request_general, { status: 'rejected' });
+      afterDecision(link.id_request_general, source);
       return { skipped: false, status: 'rejected' };
     }
     const draft = await sapGet<Record<string, unknown>>(sap, `Drafts(${link.doc_entry})?$select=DocEntry,U_SEND_State`);
@@ -346,6 +354,7 @@ export async function onAuthorizationDecision(
       () => ({ status: 'ok', sapDocEntry: link.doc_entry })
     );
     await finish(link.id_request_general, { status: 'rejected' });
+    afterDecision(link.id_request_general, source);
     return { skipped: false, status: 'rejected' };
   } catch (error) {
     const message = error instanceof SapError ? error.friendly : error instanceof Error ? error.message : 'Error';
@@ -477,11 +486,13 @@ export async function sendToQuotation(params: {
     const draftComments = await sapGet<Record<string, unknown>>(sap, `Drafts(${docEntry})?$select=Comments`)
       .then((d) => String(d.Comments ?? ''))
       .catch(() => '');
+    const reason = (params.reason ?? '').trim();
+    await finish(link.id_request_general, { status: 'quoted', error: reason ? `Cotizar: ${reason}` : null });
+    // Tareas SAP «si se envía a cotizar» antes de cerrar la solicitud del workflow.
+    await import('../workflow-sap/engine').then((m) => m.runSapExecutors(link.id_request_general, 'user'));
     await cancelGeneralRequest(link.id_request_general).catch((e) =>
       console.error(`Compras: no se pudo cerrar la solicitud ${link.id_request_general} tras cotizar:`, e)
     );
-    const reason = (params.reason ?? '').trim();
-    await finish(link.id_request_general, { status: 'quoted', error: reason ? `Cotizar: ${reason}` : null });
 
     const config = await prisma.purchaseCompanyConfig.findUnique({ where: { id_company: companyId } });
     const compras = (config?.compras_emails ?? '').split(',').map((e) => e.trim()).filter(Boolean);
