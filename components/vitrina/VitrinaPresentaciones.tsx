@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Accordion, Alert, Badge, Button, Card, Group, Loader, Menu, Modal, SegmentedControl, Stack, Switch, Text, TextInput, ActionIcon } from '@mantine/core';
+import { Accordion, Alert, Badge, Button, Card, Group, Loader, Menu, Modal, SegmentedControl, SimpleGrid, Stack, Switch, Text, TextInput, ActionIcon } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { IconAlertTriangle, IconArrowBackUp, IconCheck, IconDots, IconEdit, IconSearch, IconArchive, IconStar, IconAdjustments } from '@tabler/icons-react';
 import SgcSelect from '../sgc/SgcSelect';
@@ -58,10 +58,10 @@ export default function VitrinaPresentaciones({ company, version, avisar }: { co
           {error}
         </Alert>
       )}
-      <Group grow wrap='wrap' gap='sm'>
-        <TextInput size='md' placeholder='Buscar por molécula, familia o código' leftSection={<IconSearch size={18} />} value={q} onChange={(e) => setQ(e.currentTarget.value)} miw={220} />
-        <SgcSelect size='md' placeholder='Estado' data={OPCIONES_ESTADO} value={estado} onChange={setEstado} clearable miw={160} />
-      </Group>
+      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
+        <TextInput size='md' placeholder='Buscar por molécula, familia o código' leftSection={<IconSearch size={18} />} value={q} onChange={(e) => setQ(e.currentTarget.value)} />
+        <SgcSelect size='md' placeholder='Estado' data={OPCIONES_ESTADO} value={estado} onChange={setEstado} clearable />
+      </SimpleGrid>
 
       {loading && !data ? (
         <Group justify='center' py='lg'>

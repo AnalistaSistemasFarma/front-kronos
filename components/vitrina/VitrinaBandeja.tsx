@@ -76,11 +76,11 @@ export default function VitrinaBandeja({ company, version, avisar }: { company: 
 
   const acciones = (
     <>
-      <Button size='md' h={desktop ? undefined : 52} leftSection={<IconPlus size={18} />} onClick={() => setCrear(true)} disabled={!barra} data-testid='vitrina-crear-presentacion'>
-        Crear presentación
+      <Button size='md' h={desktop ? undefined : 52} px={desktop ? undefined : 'xs'} leftSection={desktop ? <IconPlus size={18} /> : undefined} onClick={() => setCrear(true)} disabled={!barra} data-testid='vitrina-crear-presentacion'>
+        {desktop ? 'Crear presentación' : 'Nueva presentación'}
       </Button>
-      <Button size='md' h={desktop ? undefined : 52} variant='default' leftSection={<IconFolderPlus size={18} />} onClick={() => setAsignar(true)} disabled={!barra} data-testid='vitrina-agregar-existente'>
-        Agregar a existente
+      <Button size='md' h={desktop ? undefined : 52} px={desktop ? undefined : 'xs'} variant='default' leftSection={desktop ? <IconFolderPlus size={18} /> : undefined} onClick={() => setAsignar(true)} disabled={!barra} data-testid='vitrina-agregar-existente'>
+        {desktop ? 'Agregar a existente' : 'Agregar a otra'}
       </Button>
     </>
   );
@@ -92,14 +92,13 @@ export default function VitrinaBandeja({ company, version, avisar }: { company: 
           {error}
         </Alert>
       )}
-      <Group grow wrap='wrap' gap='sm' align='flex-end'>
+      <SimpleGrid cols={{ base: 1, sm: 3 }} spacing='sm'>
         <TextInput
           size='md'
           placeholder='Buscar por código, nombre o sugerencia'
           leftSection={<IconSearch size={18} />}
           value={q}
           onChange={(e) => setQ(e.currentTarget.value)}
-          miw={220}
           data-testid='vitrina-bandeja-buscar'
         />
         <SgcSelect
@@ -109,7 +108,6 @@ export default function VitrinaBandeja({ company, version, avisar }: { company: 
           value={grupo}
           onChange={setGrupo}
           clearable
-          miw={160}
         />
         <SgcSelect
           size='md'
@@ -119,9 +117,8 @@ export default function VitrinaBandeja({ company, version, avisar }: { company: 
           onChange={setPais}
           clearable
           searchable
-          miw={160}
         />
-      </Group>
+      </SimpleGrid>
       <Group justify='space-between' wrap='wrap' gap='sm'>
         <Title order={2} size='h4'>
           Artículos sin presentación <Badge variant='light' size='lg' ml={6}>{items.length}</Badge>
@@ -193,9 +190,9 @@ export default function VitrinaBandeja({ company, version, avisar }: { company: 
 
       {barra && !desktop && (
         <Box pos='fixed' bottom={0} left={0} right={0} p='md' bg='var(--mantine-color-body)' style={{ borderTop: '1px solid var(--mantine-color-default-border)', zIndex: 150 }}>
-          <Group grow gap='sm'>
+          <SimpleGrid cols={2} spacing='sm'>
             {acciones}
-          </Group>
+          </SimpleGrid>
         </Box>
       )}
 

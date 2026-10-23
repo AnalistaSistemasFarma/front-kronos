@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { Alert, Badge, Button, Card, FileButton, Group, List, Stack, Tabs, Text } from '@mantine/core';
+import { Alert, Badge, Button, Card, FileButton, Group, List, SimpleGrid, Stack, Tabs, Text } from '@mantine/core';
 import { IconAlertTriangle, IconCheck, IconFileImport, IconHistory, IconInbox, IconLock, IconMapPin, IconPackages, IconRefresh, IconBell } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import type { CompanyAccess, Alerta } from './types';
@@ -108,7 +108,7 @@ export default function VitrinaGestion({ company }: { company: CompanyAccess }) 
               {ultima ? `Última lectura ${haceCuanto(ultima)}. Se actualiza sola cada noche.` : 'Aún no se ha leído SAP para esta empresa. Se actualiza sola cada noche.'}
             </Text>
           </div>
-          <Group gap='sm' grow w={{ base: '100%', sm: 'auto' }}>
+          <SimpleGrid cols={{ base: 1, xs: 2 }} spacing='sm' w={{ base: '100%', sm: 'auto' }}>
             <FileButton onChange={importar} accept='.csv,text/csv'>
               {(props) => (
                 <Button {...props} variant='default' size='md' leftSection={<IconFileImport size={18} />} loading={importando} data-testid='vitrina-importar'>
@@ -119,7 +119,7 @@ export default function VitrinaGestion({ company }: { company: CompanyAccess }) 
             <Button size='md' leftSection={<IconRefresh size={18} />} onClick={actualizarAhora} loading={leyendo} data-testid='vitrina-actualizar'>
               Actualizar ahora
             </Button>
-          </Group>
+          </SimpleGrid>
         </Group>
       </Card>
 
