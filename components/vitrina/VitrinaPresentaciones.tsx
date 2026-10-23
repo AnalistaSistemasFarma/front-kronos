@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Accordion, Alert, Badge, Button, Card, Group, Loader, Menu, Modal, SegmentedControl, SimpleGrid, Stack, Switch, Text, TextInput, ActionIcon } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { IconAlertTriangle, IconArrowBackUp, IconCheck, IconDots, IconEdit, IconSearch, IconArchive, IconStar, IconAdjustments } from '@tabler/icons-react';
+import { IconAlertTriangle, IconArrowBackUp, IconCheck, IconDots, IconEdit, IconSearch, IconArchive, IconStar, IconAdjustments, IconPhoto } from '@tabler/icons-react';
 import SgcSelect from '../sgc/SgcSelect';
 import { CANAL_LABEL, VITRINA_LIMITS, type VitrinaCanal } from '../../lib/vitrina/constants';
 import type { CodigoPresentacion, CompanyAccess, Presentacion } from './types';
@@ -17,7 +17,7 @@ import { errorTexto, fmtFechaHora, nombrePresentacion, OPCIONES_CANAL, OPCIONES_
  * bandeja. «No visible» / «Interna» / «Vista al cliente» / «Ofertable» es lo que
  * resultaría HOY con las reglas (terceros, canal, registro, datos mínimos).
  */
-export default function VitrinaPresentaciones({ company, version, avisar }: { company: CompanyAccess; version: number; avisar: Avisar }) {
+export default function VitrinaPresentaciones({ company, version, avisar, onMedios }: { company: CompanyAccess; version: number; avisar: Avisar; onMedios?: (id: number) => void }) {
   const { data, error, loading, reload } = useVitrinaFetch<{ presentaciones: Presentacion[] }>(`/api/vitrina/gestion/presentaciones?company=${company.idCompany}&v=${version}`);
   const [q, setQ] = useState('');
   const [estado, setEstado] = useState<string | null>(null);
@@ -112,6 +112,11 @@ export default function VitrinaPresentaciones({ company, version, avisar }: { co
                     <Button size='sm' variant='default' leftSection={<IconEdit size={16} />} onClick={() => setEditar(p)}>
                       Editar
                     </Button>
+                    {onMedios && p.estado !== 'RETIRADA' && (
+                      <Button size='sm' variant='default' leftSection={<IconPhoto size={16} />} onClick={() => onMedios(p.id)}>
+                        Imágenes y documentos
+                      </Button>
+                    )}
                     {p.estado !== 'VALIDADA' && p.estado !== 'RETIRADA' && (
                       <Button size='sm' leftSection={<IconCheck size={16} />} loading={busy === `v${p.id}`} onClick={() => accion(`v${p.id}`, () => patchPresentacion(p, { estado: 'VALIDADA' }), `«${nombrePresentacion(p)}» validada.`)}>
                         Validar
