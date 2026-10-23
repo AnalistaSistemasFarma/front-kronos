@@ -109,6 +109,8 @@
  *   HILOS_CONECTORES_AGENTE_PROYECTO    Carpeta de trabajo del bot (su vault): elige los MCP de proyecto.
  *   HILOS_CONECTORES_AGENTE_ENV         .env del bot para resolver ${VAR} (no se imprime).
  *   HILOS_CONECTORES_AGENTE_EXCLUIR     Servidores del agente que no entran (coma).
+ *   HILOS_CONECTORES_AGENTE_ENGRAM_PROYECTO  Proyecto de engram de su chat (por defecto: el repo git de
+ *                                    HILOS_CONECTORES_AGENTE_PROYECTO). Así el hilo lee y guarda en su misma memoria.
  *
  *   Medidor del consumo de Anthropic (2026-10-22; ver cuota.mjs). Opcional:
  *   HILOS_CUOTA                      'si' (por defecto) o 'no'. Publica en SynerLink el cupo semanal
@@ -525,7 +527,11 @@ export function cargarConfig(env = process.env) {
         .split(',')
         .map((x) => x.trim())
         .filter(Boolean),
+      engramProyecto: (env.HILOS_CONECTORES_AGENTE_ENGRAM_PROYECTO ?? '').trim() || null,
     };
+    if (conectoresAgente.engramProyecto && !/^[A-Za-z0-9._-]{1,100}$/.test(conectoresAgente.engramProyecto)) {
+      throw new ErrorConfig('HILOS_CONECTORES_AGENTE_ENGRAM_PROYECTO solo admite letras, números, punto, guion y guion bajo.');
+    }
   }
 
   // Modelo del hilo PRINCIPAL (por agente, en su .env). Sin la variable, el

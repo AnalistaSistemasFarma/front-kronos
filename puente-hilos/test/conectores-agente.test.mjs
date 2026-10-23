@@ -106,7 +106,9 @@ test('config: HILOS_CONECTORES_AGENTE_* validan rutas y no aceptan el config ais
   assert.throws(() => cargarConfig({ ...base, HILOS_CONECTORES_AGENTE_CONFIG_DIR: path.join(d, 'no-existe') }), /no tiene .claude.json/);
   assert.throws(() => cargarConfig({ ...base, HILOS_CONECTORES_AGENTE_CONFIG_DIR: conf, HILOS_CONECTORES_AGENTE_ENV: 'x.env' }), /ruta absoluta/);
   const cfg = cargarConfig({ ...base, HILOS_CONECTORES_AGENTE_CONFIG_DIR: conf, HILOS_CONECTORES_AGENTE_ENV: env, HILOS_CONECTORES_AGENTE_PROYECTO: vault, HILOS_CONECTORES_AGENTE_EXCLUIR: 'a, b' });
-  assert.deepEqual(cfg.conectoresAgente, { configDir: conf, envArchivo: env, proyectoDir: vault, excluir: ['a', 'b'] });
+  assert.deepEqual(cfg.conectoresAgente, { configDir: conf, envArchivo: env, proyectoDir: vault, excluir: ['a', 'b'], engramProyecto: null });
+  assert.equal(cargarConfig({ ...base, HILOS_CONECTORES_AGENTE_CONFIG_DIR: conf, HILOS_CONECTORES_AGENTE_ENGRAM_PROYECTO: 'gsslatam-graph' }).conectoresAgente.engramProyecto, 'gsslatam-graph');
+  assert.throws(() => cargarConfig({ ...base, HILOS_CONECTORES_AGENTE_CONFIG_DIR: conf, HILOS_CONECTORES_AGENTE_ENGRAM_PROYECTO: '../x y' }), /ENGRAM_PROYECTO/);
   const listo = conectoresAgenteListo(cfg);
   assert.match(listo, /^engram, mi-api, playwright \(de /);
   assert.ok(!listo.includes('llave-secreta'), 'la línea «listo:» no lleva valores');
@@ -186,4 +188,33 @@ test('puente: si el config del agente no se puede leer, el turno va sin sus cone
   await puente.atender('70', [msg(1, OTRA)]);
   assert.equal(corridas[0].args[corridas[0].args.indexOf('--mcp-config') + 1], path.join(corridas[0].cwd, '.puente', 'mcp.json'));
   assert.match(s.llamadas.find((l) => l[0] === 'responder')[2], /no pude cargar mis conectores de siempre/);
+});
+
+test('engram: el servidor del agente queda fijado a la memoria de su chat (repo git o explícito)', async () => {
+  const { proyectoEngram, fijarProyectoEngram, esEngram } = await import('../src/conectores-agente.mjs');
+  const d = tmp();
+  const repo = path.join(d, 'gsslatam-graph');
+  mkdirSync(path.join(repo, '.git'), { recursive: true });
+  mkdirSync(path.join(repo, 'shared-brain', 'agentes', 'silvia'), { recursive: true });
+  assert.equal(proyectoEngram({ proyectoDir: path.join(repo, 'shared-brain', 'agentes', 'silvia') }), 'gsslatam-graph');
+  assert.equal(proyectoEngram({ proyectoDir: d }), null);
+  assert.equal(proyectoEngram({ proyectoDir: d, explicito: 'mi-memoria' }), 'mi-memoria');
+  assert.equal(proyectoEngram({ explicito: '../malo' }), null);
+  assert.ok(esEngram({ command: '/opt/homebrew/bin/engram' }));
+  assert.ok(!esEngram({ type: 'http', url: 'http://x' }));
+  const f = fijarProyectoEngram({ engram: { command: 'engram', args: ['mcp'] }, otro: { command: 'npx' }, ya: { command: 'engram', env: { ENGRAM_PROJECT: 'x' } } }, 'gsslatam-graph');
+  assert.deepEqual(f.engram.env, { ENGRAM_PROJECT: 'gsslatam-graph' });
+  assert.equal(f.otro.env, undefined);
+  assert.equal(f.ya.env.ENGRAM_PROJECT, 'x');
+  // De punta a punta con un config de agente: el mcp.json del turno lleva ENGRAM_PROJECT y el texto lo explica.
+  const { conf } = configAgente(d);
+  const cfg = { hilosDir: path.join(d, 'hilos'), conectoresAgente: { configDir: conf, proyectoDir: path.join(repo, 'shared-brain', 'agentes', 'silvia'), excluir: [] } };
+  const a = prepararConectoresAgente({ cfg, idConversation: 27, perfilServidores: {} });
+  assert.equal(a.engramProyecto, 'gsslatam-graph');
+  const mcp = JSON.parse(readFileSync(a.rutaMcp, 'utf8'));
+  assert.equal(mcp.mcpServers.engram.env.ENGRAM_PROJECT, 'gsslatam-graph');
+  const t = textoConectoresAgente({ agente: 'Play', servidores: a.servidores, origen: a.origen, engramProyecto: a.engramProyecto });
+  assert.match(t, /mem_save/);
+  assert.match(t, /NUNCA guarde/);
+  assert.doesNotMatch(textoConectoresAgente({ agente: 'Play', servidores: ['playwright'] }), /mem_save/);
 });
