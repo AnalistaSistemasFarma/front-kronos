@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import { Alert, Badge, Button, Card, FileButton, Group, List, SimpleGrid, Stack, Tabs, Text } from '@mantine/core';
-import { IconAlertTriangle, IconCheck, IconFileImport, IconHistory, IconInbox, IconLock, IconMapPin, IconPackages, IconRefresh, IconBell } from '@tabler/icons-react';
+import { IconAlertTriangle, IconCheck, IconFileImport, IconHistory, IconInbox, IconLock, IconMapPin, IconPackages, IconRefresh, IconBell, IconPhoto } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import type { CompanyAccess, Alerta } from './types';
 import { errorTexto, haceCuanto, useVitrinaFetch, vitrinaSend, type Aviso } from './vitrinaClient';
@@ -12,9 +12,10 @@ import VitrinaExclusividades from './VitrinaExclusividades';
 import VitrinaAlertas from './VitrinaAlertas';
 import VitrinaAreas from './VitrinaAreas';
 import VitrinaHistorial from './VitrinaHistorial';
+import VitrinaMedios from './VitrinaMedios';
 
 /**
- * «Vitrina Comercial · Gestión» (sprint V2). Arriba, el resultado de cada acción
+ * «Vitrina Comercial · Gestión» (sprint V2; V3: imágenes de empaque, destacadas y documentos del SGC). Arriba, el resultado de cada acción
  * (verde o rojo) y la lectura de SAP («Actualizar ahora» e importación de la carga
  * inicial como sugerencia). Debajo, las pestañas de trabajo. Nada se publica solo:
  * cada código se activa a mano.
@@ -26,6 +27,7 @@ export default function VitrinaGestion({ company }: { company: CompanyAccess }) 
   const [tab, setTab] = useState<string | null>('bandeja');
   const [leyendo, setLeyendo] = useState(false);
   const [importando, setImportando] = useState(false);
+  const [medio, setMedio] = useState<number | null>(null);
   const alertas = useVitrinaFetch<{ alertas: Alerta[]; ultimaLectura: string | null }>(`/api/vitrina/gestion/alertas?company=${company.idCompany}&v=${version}`);
 
   const avisar = useCallback((ok: boolean, text: string, lista: string[] = []) => {
@@ -131,6 +133,9 @@ export default function VitrinaGestion({ company }: { company: CompanyAccess }) 
           <Tabs.Tab value='presentaciones' leftSection={<IconPackages size={18} />} data-testid='vitrina-tab-presentaciones'>
             Presentaciones
           </Tabs.Tab>
+          <Tabs.Tab value='medios' leftSection={<IconPhoto size={18} />} data-testid='vitrina-tab-medios'>
+            Imágenes y documentos
+          </Tabs.Tab>
           <Tabs.Tab value='exclusividades' leftSection={<IconLock size={18} />} data-testid='vitrina-tab-exclusividades'>
             Exclusividades
           </Tabs.Tab>
@@ -153,7 +158,18 @@ export default function VitrinaGestion({ company }: { company: CompanyAccess }) 
           <VitrinaBandeja company={company} version={version} avisar={avisarYRefrescar} />
         </Tabs.Panel>
         <Tabs.Panel value='presentaciones'>
-          <VitrinaPresentaciones company={company} version={version} avisar={avisarYRefrescar} />
+          <VitrinaPresentaciones
+            company={company}
+            version={version}
+            avisar={avisarYRefrescar}
+            onMedios={(id) => {
+              setMedio(id);
+              setTab('medios');
+            }}
+          />
+        </Tabs.Panel>
+        <Tabs.Panel value='medios'>
+          <VitrinaMedios company={company} version={version} avisar={avisarYRefrescar} idPresentacion={medio} onPresentacion={setMedio} />
         </Tabs.Panel>
         <Tabs.Panel value='exclusividades'>
           <VitrinaExclusividades company={company} version={version} avisar={avisarYRefrescar} />

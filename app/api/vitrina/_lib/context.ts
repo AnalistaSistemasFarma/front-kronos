@@ -43,6 +43,23 @@ export function requireGestion(ctx: VitrinaRequestContext, idCompany: number | n
   return { idCompany, idUser: ctx.idUser };
 }
 
+/** Consulta (comercial) en la empresa pedida, o 400/403. Gestión implica consulta. */
+export function requireConsulta(ctx: VitrinaRequestContext, idCompany: number | null): VitrinaActor | NextResponse {
+  if (!idCompany) return jsonNoStore({ error: 'Falta la empresa' }, 400);
+  const a = companyVitrinaAccess(ctx.access, idCompany, 'canConsultar');
+  if (!a) {
+    return jsonNoStore({ error: `No tiene el permiso «${VITRINA_MODULE_NAME}» en esta empresa. Lo asigna un administrador en Administración → Usuarios.` }, 403);
+  }
+  return { idCompany, idUser: ctx.idUser };
+}
+
+/** Consulta con la empresa en ?company=. */
+export async function consultaDesdeUrl(request: Request): Promise<VitrinaActor | NextResponse> {
+  const ctx = await getVitrinaContext();
+  if (ctx instanceof Response) return ctx;
+  return requireConsulta(ctx, parseCompanyParam(request.url));
+}
+
 /** Gestión con la empresa en ?company=. */
 export async function gestionDesdeUrl(request: Request): Promise<VitrinaActor | NextResponse> {
   const ctx = await getVitrinaContext();
