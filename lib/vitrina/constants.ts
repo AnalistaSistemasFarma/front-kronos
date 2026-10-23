@@ -14,6 +14,15 @@
 export const VITRINA_BASE_URL = '/process/vitrina';
 export const VITRINA_GESTION_URL = '/process/vitrina/gestion';
 
+/** Pantallas de los comerciales (V3/V4). */
+export const VITRINA_URLS = {
+  inicio: VITRINA_BASE_URL,
+  biblioteca: `${VITRINA_BASE_URL}/biblioteca`,
+  portafolio: `${VITRINA_BASE_URL}/portafolio`,
+  paises: `${VITRINA_BASE_URL}/paises`,
+  ficha: `${VITRINA_BASE_URL}/ficha`,
+} as const;
+
 /** Proceso contenedor del menú (Ventas, id 4 en KRONOSDB y KRONOSDB_PRUEBAS). */
 export const VITRINA_PROCESS_NAME = 'Ventas';
 
@@ -51,7 +60,30 @@ export const VITRINA_ALCANCES = ['EXHIBIR', 'OFERTAR'] as const;
 export type VitrinaAlcance = (typeof VITRINA_ALCANCES)[number];
 
 export const VITRINA_IMAGEN_TIPOS = ['VIAL', 'ETIQUETA', 'PLEGADIZA'] as const;
+export type VitrinaImagenTipo = (typeof VITRINA_IMAGEN_TIPOS)[number];
 export const VITRINA_DOCUMENTO_TIPOS = ['FICHA', 'INSERTO', 'PROSPECTO'] as const;
+export type VitrinaDocumentoTipo = (typeof VITRINA_DOCUMENTO_TIPOS)[number];
+
+export const IMAGEN_TIPO_LABEL: Record<VitrinaImagenTipo, string> = {
+  VIAL: 'Vial',
+  ETIQUETA: 'Etiqueta',
+  PLEGADIZA: 'Plegadiza',
+};
+
+export const DOCUMENTO_TIPO_LABEL: Record<VitrinaDocumentoTipo, string> = {
+  FICHA: 'Ficha',
+  INSERTO: 'Inserto',
+  PROSPECTO: 'Prospecto',
+};
+
+/** Tope por imagen de empaque (V3). Por debajo del límite de IIS (30 MB) con margen. */
+export const VITRINA_IMAGEN_MAX_BYTES = 10 * 1024 * 1024;
+
+/** Formatos de imagen admitidos (se verifica la firma del archivo, no solo la extensión). */
+export const VITRINA_IMAGEN_ACCEPT = '.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp';
+
+/** Máximo de destacadas que muestra el Inicio de los comerciales. */
+export const VITRINA_MAX_DESTACADAS = 3;
 
 /** Formas farmacéuticas sugeridas (texto libre en la base; la lista ayuda a no escribir variantes). */
 export const VITRINA_FORMAS = ['Vial', 'Ampolla', 'Bolsa', 'Botella', 'Blíster', 'Jeringa prellenada', 'Frasco'] as const;
@@ -139,7 +171,7 @@ export const VITRINA_LIMITS = {
 } as const;
 
 /** Entidades y acciones del historial (vitrina_historial). */
-export const VITRINA_ENTIDADES = ['presentacion', 'codigo_sap', 'exclusividad', 'area', 'empresa'] as const;
+export const VITRINA_ENTIDADES = ['presentacion', 'codigo_sap', 'exclusividad', 'area', 'empresa', 'imagen', 'documento'] as const;
 export type VitrinaEntidad = (typeof VITRINA_ENTIDADES)[number];
 
 export const VITRINA_ACCIONES = [
@@ -156,6 +188,9 @@ export const VITRINA_ACCIONES = [
   'ALERTA_SAP',
   'REGISTRO',
   'SEMILLA',
+  'CARGAR',
+  'VINCULAR',
+  'DESVINCULAR',
 ] as const;
 export type VitrinaAccion = (typeof VITRINA_ACCIONES)[number];
 
@@ -173,6 +208,9 @@ export const ACCION_LABEL: Record<VitrinaAccion, string> = {
   ALERTA_SAP: 'Alerta de SAP',
   REGISTRO: 'Cambio de registro sanitario',
   SEMILLA: 'Carga de sugerencias',
+  CARGAR: 'Carga de imagen',
+  VINCULAR: 'Vínculo con el SGC',
+  DESVINCULAR: 'Vínculo retirado',
 };
 
 export const ENTIDAD_LABEL: Record<VitrinaEntidad, string> = {
@@ -181,6 +219,8 @@ export const ENTIDAD_LABEL: Record<VitrinaEntidad, string> = {
   exclusividad: 'Exclusividad',
   area: 'Área asistencial',
   empresa: 'Empresa',
+  imagen: 'Imagen',
+  documento: 'Documento del SGC',
 };
 
 /** Tipo de job del programador central (lib/scheduler/handlers.js). */
@@ -200,6 +240,10 @@ export function vitrinaPermissionFromUrl(url: string | null | undefined): Vitrin
   return null;
 }
 
-export function vitrinaHref(path: string, idCompany: number | null | undefined): string {
-  return idCompany ? `${path}?empresa=${idCompany}` : path;
+export function vitrinaHref(path: string, idCompany: number | null | undefined, extra?: Record<string, string | number | null | undefined>): string {
+  const qs = new URLSearchParams();
+  if (idCompany) qs.set('empresa', String(idCompany));
+  for (const [k, v] of Object.entries(extra ?? {})) if (v !== null && v !== undefined && v !== '') qs.set(k, String(v));
+  const s = qs.toString();
+  return s ? `${path}?${s}` : path;
 }
