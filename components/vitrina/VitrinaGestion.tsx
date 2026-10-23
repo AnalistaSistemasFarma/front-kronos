@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import { Alert, Badge, Button, Card, FileButton, Group, List, SimpleGrid, Stack, Tabs, Text } from '@mantine/core';
-import { IconAlertTriangle, IconCheck, IconFileImport, IconHistory, IconInbox, IconLock, IconMapPin, IconPackages, IconRefresh, IconBell, IconPhoto } from '@tabler/icons-react';
+import { IconAlertTriangle, IconCheck, IconFileImport, IconCategory, IconHistory, IconInbox, IconLock, IconPackages, IconRefresh, IconBell, IconPhoto } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import type { CompanyAccess, Alerta } from './types';
 import { errorTexto, haceCuanto, useVitrinaFetch, vitrinaSend, type Aviso } from './vitrinaClient';
@@ -10,7 +10,7 @@ import VitrinaBandeja from './VitrinaBandeja';
 import VitrinaPresentaciones from './VitrinaPresentaciones';
 import VitrinaExclusividades from './VitrinaExclusividades';
 import VitrinaAlertas from './VitrinaAlertas';
-import VitrinaAreas from './VitrinaAreas';
+import VitrinaClasificacion from './VitrinaClasificacion';
 import VitrinaHistorial from './VitrinaHistorial';
 import VitrinaMedios from './VitrinaMedios';
 
@@ -147,8 +147,8 @@ export default function VitrinaGestion({ company }: { company: CompanyAccess }) 
           >
             Alertas
           </Tabs.Tab>
-          <Tabs.Tab value='areas' leftSection={<IconMapPin size={18} />} data-testid='vitrina-tab-areas'>
-            Áreas
+          <Tabs.Tab value='areas' leftSection={<IconCategory size={18} />} data-testid='vitrina-tab-areas'>
+            Clasificación
           </Tabs.Tab>
           <Tabs.Tab value='historial' leftSection={<IconHistory size={18} />} data-testid='vitrina-tab-historial'>
             Historial
@@ -178,7 +178,7 @@ export default function VitrinaGestion({ company }: { company: CompanyAccess }) 
           <VitrinaAlertas alertas={alertas.data?.alertas ?? null} error={alertas.error} loading={alertas.loading} />
         </Tabs.Panel>
         <Tabs.Panel value='areas'>
-          <VitrinaAreas company={company} version={version} avisar={avisarYRefrescar} />
+          <VitrinaClasificacion company={company} version={version} avisar={avisarYRefrescar} />
         </Tabs.Panel>
         <Tabs.Panel value='historial'>
           <VitrinaHistorial company={company} version={version} />

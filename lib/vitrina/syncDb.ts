@@ -1,7 +1,7 @@
 import 'server-only';
 import type { Prisma } from '../../app/generated/prisma';
 import { getCompanySapEndpoint, type VitrinaDb } from './access';
-import { fuenteDeEmpresa, hoyColombia, VitrinaError } from './rules';
+import { fuenteDeEmpresa, hoyColombia, mapaGruposSap, VitrinaError } from './rules';
 import { leerSapEmpresa } from './sap';
 import { registrarHistorial } from './service';
 import { planSincronizacion, textoResumen, type ResumenSync } from './sync';
@@ -39,6 +39,7 @@ export async function sincronizarEmpresa(db: VitrinaDb, idCompany: number, idUse
         item_code: true,
         item_name: true,
         items_group_code: true,
+        items_group_name: true,
         activo_en_sap: true,
         activado_vitrina: true,
         registro_estado: true,
@@ -53,6 +54,7 @@ export async function sincronizarEmpresa(db: VitrinaDb, idCompany: number, idUse
       existentes: existentes.map((e) => ({ ...e, registro_vence_en: e.registro_vence_en?.toISOString().slice(0, 10) ?? null, leido: e.ultima_lectura !== null })),
       items: lectura.items,
       registros: lectura.registros,
+      gruposSap: lectura.grupos ? mapaGruposSap(lectura.grupos) : null,
       hoy: hoyColombia(),
     });
     const ahora = new Date();
@@ -65,6 +67,7 @@ export async function sincronizarEmpresa(db: VitrinaDb, idCompany: number, idUse
             item_code: c.item_code,
             item_name: c.item_name,
             items_group_code: c.items_group_code,
+            items_group_name: c.items_group_name,
             canal: c.canal,
             sug_familia: c.sug_familia,
             registro_estado: c.registro_estado,

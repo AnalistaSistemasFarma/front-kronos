@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   if (actor instanceof Response) return actor;
   const modo = new URL(request.url).searchParams.get('modo') === 'presentacion' ? 'presentacion' : 'interna';
   try {
-    return jsonNoStore({ modo, presentaciones: await listarCatalogo(prisma, actor.idCompany, modo) });
+    return jsonNoStore({ modo, ...(await listarCatalogo(prisma, actor.idCompany, modo)) });
   } catch (error) {
     return errorResponse(error, 'catalogo');
   }

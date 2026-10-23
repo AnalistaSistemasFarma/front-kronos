@@ -115,7 +115,8 @@ export const REGISTRO_LABEL: Record<VitrinaRegistroEstado, string> = {
   POR_VENCER: 'Registro por vencer',
   VENCIDO: 'Registro vencido',
   SIN_REGISTRO: 'Sin registro',
-  SIN_FECHA: 'Registro sin fecha',
+  // 9999-01-01 en SAP: Comercial confirmó (23-oct) que esos registros NO vencen (cambio normativo).
+  SIN_FECHA: 'Registro sin vencimiento',
 };
 
 export const ALCANCE_LABEL: Record<VitrinaAlcance, string> = {
@@ -129,7 +130,7 @@ export const REGISTRO_COLOR: Record<VitrinaRegistroEstado, string> = {
   POR_VENCER: 'yellow',
   VENCIDO: 'red',
   SIN_REGISTRO: 'red',
-  SIN_FECHA: 'gray',
+  SIN_FECHA: 'teal',
 };
 
 export const ESTADO_COLOR: Record<VitrinaEstado, string> = {
@@ -150,7 +151,10 @@ export const VITRINA_DIAS_POR_VENCER = 90;
 /** Días de anticipación del aviso de exclusividad por vencer. */
 export const VITRINA_DIAS_EXCLUSIVIDAD_POR_VENCER = 30;
 
-/** El valor 9999-01-01 de U_Fecha_Vencimiento significa «sin dato», no «vigente». */
+/**
+ * El valor 9999-01-01 de U_Fecha_Vencimiento: el registro NO vence (Comercial, 23-oct). Internamente
+ * sigue siendo el estado SIN_FECHA; en pantalla se muestra «Registro sin vencimiento».
+ */
 export const VITRINA_FECHA_SIN_DATO = '9999-01-01';
 
 /** Límites de texto (iguales a las columnas de la base). */
@@ -166,12 +170,14 @@ export const VITRINA_LIMITS = {
   cliente: 150,
   observacion: 500,
   areaNombre: 80,
+  lineaNombre: 100,
+  grupoNombre: 100,
   semillaBytes: 2_000_000,
   semillaFilas: 5000,
 } as const;
 
 /** Entidades y acciones del historial (vitrina_historial). */
-export const VITRINA_ENTIDADES = ['presentacion', 'codigo_sap', 'exclusividad', 'area', 'empresa', 'imagen', 'documento'] as const;
+export const VITRINA_ENTIDADES = ['presentacion', 'codigo_sap', 'exclusividad', 'area', 'linea_comercial', 'grupo_terapeutico', 'empresa', 'imagen', 'documento'] as const;
 export type VitrinaEntidad = (typeof VITRINA_ENTIDADES)[number];
 
 export const VITRINA_ACCIONES = [
@@ -217,11 +223,21 @@ export const ENTIDAD_LABEL: Record<VitrinaEntidad, string> = {
   presentacion: 'Presentación',
   codigo_sap: 'Código SAP',
   exclusividad: 'Exclusividad',
-  area: 'Área asistencial',
+  area: 'Servicio (área asistencial)',
+  linea_comercial: 'Línea comercial',
+  grupo_terapeutico: 'Grupo terapéutico',
   empresa: 'Empresa',
   imagen: 'Imagen',
   documento: 'Documento del SGC',
 };
+
+/**
+ * Vista MULTIEMPRESA por grupo terapéutico (Ricardo, 23-oct: «todo lo que tengo en antibióticos de
+ * Farmalógica, Ryan…»). Choca con la regla del 22-oct (cada comercial ve SOLO su empresa) y está
+ * pendiente de decisión: la consulta queda preparada (lib/vitrina/consulta.ts,
+ * listarCatalogoMultiempresa) pero APAGADA y sin ruta ni pantalla que la use.
+ */
+export const VITRINA_MULTIEMPRESA_HABILITADA: boolean = false;
 
 /** Tipo de job del programador central (lib/scheduler/handlers.js). */
 export const VITRINA_JOB_TYPE = 'vitrina_sincronizar_sap';

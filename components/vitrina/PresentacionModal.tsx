@@ -6,8 +6,8 @@ import { useMediaQuery } from '@mantine/hooks';
 import { IconAlertTriangle, IconInfoCircle } from '@tabler/icons-react';
 import { VITRINA_FAMILIAS, VITRINA_FORMAS, VITRINA_LIMITS } from '../../lib/vitrina/constants';
 import { parsePresentacionSugerida } from '../../lib/vitrina/rules';
-import { sgcTouchComboboxProps } from '../sgc/SgcSelect';
-import type { Area, BandejaItem, Presentacion } from './types';
+import SgcSelect, { sgcTouchComboboxProps } from '../sgc/SgcSelect';
+import type { Area, BandejaItem, Clasificacion, Presentacion } from './types';
 import { errorTexto, OPCIONES_VISIBILIDAD, useVitrinaFetch, vitrinaSend } from './vitrinaClient';
 
 /**
@@ -39,6 +39,8 @@ interface Form {
   es_para_terceros: boolean;
   destacada: boolean;
   areas: string[];
+  linea: string | null;
+  grupos: string[];
 }
 
 function formInicial(codigos: BandejaItem[] | undefined, p: Presentacion | null | undefined): Form {
@@ -55,6 +57,8 @@ function formInicial(codigos: BandejaItem[] | undefined, p: Presentacion | null 
       es_para_terceros: p.esParaTerceros,
       destacada: p.destacada,
       areas: p.areas.map((a) => String(a.id)),
+      linea: p.linea ? String(p.linea.id) : null,
+      grupos: p.grupos.map((g) => String(g.id)),
     };
   }
   const primero = codigos?.[0];
@@ -72,12 +76,16 @@ function formInicial(codigos: BandejaItem[] | undefined, p: Presentacion | null 
     es_para_terceros: terceros,
     destacada: false,
     areas: [],
+    linea: null,
+    grupos: [],
   };
 }
 
 export default function PresentacionModal({ opened, onClose, idCompany, codigos, presentacion, onSaved }: PresentacionModalProps) {
   const mobile = useMediaQuery('(max-width: 48em)') ?? false;
   const { data: areasData } = useVitrinaFetch<{ areas: Area[] }>(opened ? `/api/vitrina/gestion/areas?company=${idCompany}` : null);
+  const { data: lineasData } = useVitrinaFetch<{ lineas: Clasificacion[] }>(opened ? `/api/vitrina/gestion/lineas?company=${idCompany}` : null);
+  const { data: gruposData } = useVitrinaFetch<{ grupos: Clasificacion[] }>(opened ? `/api/vitrina/gestion/grupos-terapeuticos?company=${idCompany}` : null);
   const [form, setForm] = useState<Form>(() => formInicial(codigos, presentacion));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -93,6 +101,15 @@ export default function PresentacionModal({ opened, onClose, idCompany, codigos,
   const areas = useMemo(
     () => (areasData?.areas ?? []).filter((a) => a.activa || form.areas.includes(String(a.id))).map((a) => ({ value: String(a.id), label: a.activa ? a.nombre : `${a.nombre} (inactiva)` })),
     [areasData, form.areas]
+  );
+  // Solo se ofrecen las activas, más la que ya tenga la presentación (aunque se haya desactivado).
+  const lineas = useMemo(
+    () => (lineasData?.lineas ?? []).filter((l) => l.activa || form.linea === String(l.id)).map((l) => ({ value: String(l.id), label: l.activa ? l.nombre : `${l.nombre} (inactiva)` })),
+    [lineasData, form.linea]
+  );
+  const grupos = useMemo(
+    () => (gruposData?.grupos ?? []).filter((g) => g.activa || form.grupos.includes(String(g.id))).map((g) => ({ value: String(g.id), label: g.activa ? g.nombre : `${g.nombre} (inactivo)` })),
+    [gruposData, form.grupos]
   );
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -112,6 +129,8 @@ export default function PresentacionModal({ opened, onClose, idCompany, codigos,
       es_para_terceros: form.es_para_terceros,
       destacada: form.destacada,
       areas: form.areas.map(Number),
+      linea: form.linea ? Number(form.linea) : null,
+      grupos: form.grupos.map(Number),
     };
     try {
       if (presentacion) {
@@ -176,8 +195,32 @@ export default function PresentacionModal({ opened, onClose, idCompany, codigos,
             miw={160}
           />
         </Group>
+        <SgcSelect
+          label='Línea comercial'
+          description='Una por presentación, de esta empresa'
+          size='md'
+          placeholder={lineas.length ? 'Sin línea' : 'Cree las líneas en la pestaña Clasificación'}
+          data={lineas}
+          value={form.linea}
+          onChange={(v) => set('linea', v)}
+          clearable
+          searchable
+          data-testid='vitrina-linea'
+        />
         <MultiSelect
-          label='Áreas asistenciales'
+          label='Grupos terapéuticos'
+          size='md'
+          data={grupos}
+          value={form.grupos}
+          onChange={(v) => set('grupos', v)}
+          searchable
+          clearable
+          comboboxProps={sgcTouchComboboxProps()}
+          nothingFoundMessage='Sin grupos terapéuticos'
+          data-testid='vitrina-grupos'
+        />
+        <MultiSelect
+          label='Servicios (áreas asistenciales)'
           size='md'
           data={areas}
           value={form.areas}

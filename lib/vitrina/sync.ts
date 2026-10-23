@@ -11,7 +11,9 @@
  *   - un código que SAP inactiva, congela o ya no devuelve queda activo_en_sap = 0 y, si
  *     estaba activado, se RETIRA de la Vitrina (activado_vitrina = 0) con alerta en el historial;
  *   - si vuelve a ser vendible, NO se reactiva solo: queda para activación manual;
- *   - el registro sanitario se recalcula en cada lectura (si la empresa tiene UDO mapeado).
+ *   - el registro sanitario se recalcula en cada lectura (si la empresa tiene UDO mapeado);
+ *   - el nombre del grupo de SAP (ItemGroups.GroupName) se guarda en items_group_name; si SAP no
+ *     devolvió los grupos, se deja el que había.
  */
 import type { VitrinaAccion, VitrinaCanal, VitrinaRegistroEstado } from './constants';
 import {
@@ -31,6 +33,8 @@ export interface CodigoExistente {
   item_code: string;
   item_name: string;
   items_group_code: number | null;
+  /** Nombre del grupo de SAP guardado (undefined = no se conoce; se trata como null). */
+  items_group_name?: string | null;
   activo_en_sap: boolean;
   activado_vitrina: boolean;
   registro_estado: string;
@@ -47,6 +51,7 @@ export interface NuevoCodigo {
   item_code: string;
   item_name: string;
   items_group_code: number | null;
+  items_group_name: string | null;
   canal: VitrinaCanal;
   sug_familia: string | null;
   registro_estado: VitrinaRegistroEstado;
@@ -61,6 +66,7 @@ export interface CambioCodigo {
   data: Partial<{
     item_name: string;
     items_group_code: number | null;
+    items_group_name: string | null;
     activo_en_sap: boolean;
     activado_vitrina: boolean;
     registro_estado: VitrinaRegistroEstado;
@@ -105,9 +111,13 @@ export function planSincronizacion(input: {
   existentes: readonly CodigoExistente[];
   items: readonly SapItemRow[];
   registros: readonly SapRegistroRow[] | null;
+  /** Número → nombre de los grupos de SAP; null/undefined = SAP no los devolvió (no se tocan los nombres). */
+  gruposSap?: ReadonlyMap<number, string> | null;
   hoy: string;
 }): PlanSync {
   const { fuente, existentes, items, registros, hoy } = input;
+  const gruposSap = input.gruposSap ?? null;
+  const nombreGrupo = (grupo: number | null): string | null | undefined => (gruposSap ? (grupo === null ? null : (gruposSap.get(grupo) ?? null)) : undefined);
   const porCodigo = registros ? registrosPorCodigo(registros) : null;
   const existentesMap = new Map(existentes.map((e) => [e.item_code, e]));
   const vistos = new Set<string>();
@@ -140,6 +150,7 @@ export function planSincronizacion(input: {
         item_code: code,
         item_name: nombre,
         items_group_code: grupo,
+        items_group_name: nombreGrupo(grupo) ?? null,
         canal: canalSugerido(code, nombre),
         sug_familia: familiaSugerida(fuente, grupo),
         registro_estado: estado,
@@ -154,6 +165,8 @@ export function planSincronizacion(input: {
     const data: CambioCodigo['data'] = {};
     if (prev.item_name !== nombre) data.item_name = nombre;
     if (prev.items_group_code !== grupo) data.items_group_code = grupo;
+    const nombreG = nombreGrupo(grupo);
+    if (nombreG !== undefined && (prev.items_group_name ?? null) !== nombreG) data.items_group_name = nombreG;
     if (prev.activo_en_sap && !vendible) {
       data.activo_en_sap = false;
       if (prev.activado_vitrina) {

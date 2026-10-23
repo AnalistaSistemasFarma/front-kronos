@@ -17,6 +17,7 @@ import {
   datosFaltantes,
   enteroOpcional,
   esCanal,
+  etiquetaGrupoSap,
   esVisibilidad,
   estadoExclusividad,
   fuenteDeEmpresa,
@@ -107,15 +108,21 @@ export async function listarBandeja(db: VitrinaDb, idCompany: number, f: Bandeja
   }
   const [codigos, facetas] = await Promise.all([
     db.vitrinaCodigoSap.findMany({ where: { ...where, AND: filtros }, orderBy: { item_code: 'asc' }, take: 2000 }),
-    db.vitrinaCodigoSap.findMany({ where, select: { items_group_code: true, pais: true } }),
+    db.vitrinaCodigoSap.findMany({ where, select: { items_group_code: true, items_group_name: true, pais: true } }),
   ]);
-  const grupos = [...new Set(facetas.map((x) => x.items_group_code).filter((x): x is number => x != null))].sort((a, b) => a - b);
+  // Grupos de SAP con su nombre (ItemGroups.GroupName); si no se ha leído, «Grupo 137».
+  const nombresGrupo = new Map<number, string | null>();
+  for (const x of facetas) if (x.items_group_code != null && !nombresGrupo.get(x.items_group_code)) nombresGrupo.set(x.items_group_code, x.items_group_name);
+  const grupos = [...nombresGrupo.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([codigo, nombre]) => ({ codigo, nombre: etiquetaGrupoSap(codigo, nombre) as string }));
   const paises = [...new Set(facetas.map((x) => x.pais).filter((x): x is string => !!x))].sort((a, b) => a.localeCompare(b, 'es'));
   const items = codigos.map((c) => ({
     id: c.id_codigo_sap,
     itemCode: c.item_code,
     itemName: c.item_name,
     grupo: c.items_group_code,
+    grupoNombre: etiquetaGrupoSap(c.items_group_code, c.items_group_name),
     pais: c.pais,
     canal: c.canal,
     clienteMarca: c.cliente_marca,
@@ -158,6 +165,10 @@ export interface PresentacionInput {
   destacada?: unknown;
   estado?: unknown;
   areas?: unknown;
+  /** Id de la línea comercial de la empresa, o null para quitarla. */
+  linea?: unknown;
+  /** Ids de los grupos terapéuticos. */
+  grupos?: unknown;
   codigos?: unknown;
 }
 
@@ -187,7 +198,7 @@ function camposPresentacion(b: PresentacionInput, parcial: boolean) {
 }
 
 async function presentacionDeEmpresa(db: Tx, idCompany: number, id: number) {
-  const p = await db.vitrinaPresentacion.findFirst({ where: { id_presentacion: id, id_company: idCompany }, include: { areas: true } });
+  const p = await db.vitrinaPresentacion.findFirst({ where: { id_presentacion: id, id_company: idCompany }, include: { areas: true, grupos: true } });
   if (!p) throw new VitrinaError('La presentación no existe en esta empresa.', 404);
   return p;
 }
@@ -196,6 +207,27 @@ async function validarAreas(db: Tx, ids: number[]): Promise<void> {
   if (!ids.length) return;
   const n = await db.vitrinaArea.count({ where: { id_area: { in: ids } } });
   if (n !== ids.length) throw new VitrinaError('Alguna de las áreas asistenciales no existe.', 400);
+}
+
+async function validarGrupos(db: Tx, ids: number[]): Promise<void> {
+  if (!ids.length) return;
+  const n = await db.vitrinaGrupoTerapeutico.count({ where: { id_grupo: { in: ids } } });
+  if (n !== ids.length) throw new VitrinaError('Alguno de los grupos terapéuticos no existe.', 400);
+}
+
+/**
+ * Línea comercial pedida (id o null). Debe ser de la MISMA empresa de la presentación; una línea
+ * inactiva solo se acepta si la presentación ya la tenía. undefined = no se cambia.
+ */
+async function lineaPedida(db: Tx, idCompany: number, v: unknown, actual: number | null = null): Promise<number | null | undefined> {
+  if (v === undefined) return undefined;
+  if (v === null || v === '') return null;
+  const id = enteroOpcional(v, 'Línea comercial', 1, 2_000_000_000);
+  if (!id) return null;
+  const l = await db.vitrinaLineaComercial.findFirst({ where: { id_linea: id, id_company: idCompany } });
+  if (!l) throw new VitrinaError('La línea comercial no existe en esta empresa.', 400);
+  if (!l.activa && id !== actual) throw new VitrinaError(`La línea «${l.nombre}» está inactiva.`, 400);
+  return id;
 }
 
 /** Toma códigos de la bandeja de la empresa; 409 si alguno ya está en otra presentación. */
@@ -214,13 +246,17 @@ export async function crearPresentacion(db: VitrinaDb, actor: VitrinaActor, body
   const visibilidad = visibilidadPermitida(body.visibilidad ?? 'INTERNA', esTerceros);
   const codigos = idsDe(body.codigos, 'Códigos SAP');
   const areas = idsDe(body.areas, 'Áreas asistenciales');
+  const grupos = idsDe(body.grupos, 'Grupos terapéuticos');
   return db.$transaction(async (tx) => {
     const rows = await codigosDeBandeja(tx, actor.idCompany, codigos);
     await validarAreas(tx, areas);
+    await validarGrupos(tx, grupos);
+    const idLinea = (await lineaPedida(tx, actor.idCompany, body.linea)) ?? null;
     const p = await tx.vitrinaPresentacion.create({
       data: {
         ...(datos as { molecula: string }),
         id_company: actor.idCompany,
+        id_linea: idLinea,
         visibilidad,
         es_para_terceros: esTerceros,
         estado: 'PENDIENTE',
@@ -228,10 +264,11 @@ export async function crearPresentacion(db: VitrinaDb, actor: VitrinaActor, body
       },
     });
     if (areas.length) await tx.vitrinaPresentacionArea.createMany({ data: areas.map((id_area) => ({ id_presentacion: p.id_presentacion, id_area })) });
+    if (grupos.length) await tx.vitrinaPresentacionGrupo.createMany({ data: grupos.map((id_grupo) => ({ id_presentacion: p.id_presentacion, id_grupo })) });
     if (rows.length) {
       await tx.vitrinaCodigoSap.updateMany({ where: { id_codigo_sap: { in: codigos } }, data: { id_presentacion: p.id_presentacion } });
     }
-    await registrarHistorial(tx, { idCompany: actor.idCompany, entidad: 'presentacion', idEntidad: p.id_presentacion, accion: 'CREAR', nuevo: { ...datos, visibilidad, es_para_terceros: esTerceros, areas }, idUser: actor.idUser });
+    await registrarHistorial(tx, { idCompany: actor.idCompany, entidad: 'presentacion', idEntidad: p.id_presentacion, accion: 'CREAR', nuevo: { ...datos, visibilidad, es_para_terceros: esTerceros, areas, id_linea: idLinea, grupos }, idUser: actor.idUser });
     for (const r of rows) {
       await registrarHistorial(tx, { idCompany: actor.idCompany, entidad: 'codigo_sap', idEntidad: r.id_codigo_sap, accion: 'AGRUPAR', anterior: { id_presentacion: null }, nuevo: { id_presentacion: p.id_presentacion, item_code: r.item_code }, idUser: actor.idUser });
     }
@@ -257,7 +294,8 @@ export async function editarPresentacion(db: VitrinaDb, actor: VitrinaActor, id:
       const faltan = datosFaltantes(final as { molecula: string });
       if (faltan.length) throw new VitrinaError(`No se puede validar: faltan ${faltan.join(', ')}.`, 400);
     }
-    const cambios = { ...datos, visibilidad, es_para_terceros: esTerceros, estado };
+    const idLinea = await lineaPedida(tx, actor.idCompany, body.linea, actual.id_linea);
+    const cambios = { ...datos, visibilidad, es_para_terceros: esTerceros, estado, ...(idLinea !== undefined ? { id_linea: idLinea } : {}) };
     const d = diff(actual as unknown as Record<string, unknown>, cambios);
     let areasCambio: { antes: number[]; despues: number[] } | null = null;
     if (body.areas !== undefined) {
@@ -271,7 +309,19 @@ export async function editarPresentacion(db: VitrinaDb, actor: VitrinaActor, id:
         areasCambio = { antes, despues };
       }
     }
-    if (!d && !areasCambio) return { id, cambios: 0 };
+    let gruposCambio: { antes: number[]; despues: number[] } | null = null;
+    if (body.grupos !== undefined) {
+      const grupos = idsDe(body.grupos, 'Grupos terapéuticos');
+      await validarGrupos(tx, grupos);
+      const antes = actual.grupos.map((g) => g.id_grupo).sort((a, b) => a - b);
+      const despues = [...grupos].sort((a, b) => a - b);
+      if (JSON.stringify(antes) !== JSON.stringify(despues)) {
+        await tx.vitrinaPresentacionGrupo.deleteMany({ where: { id_presentacion: id } });
+        if (despues.length) await tx.vitrinaPresentacionGrupo.createMany({ data: despues.map((id_grupo) => ({ id_presentacion: id, id_grupo })) });
+        gruposCambio = { antes, despues };
+      }
+    }
+    if (!d && !areasCambio && !gruposCambio) return { id, cambios: 0 };
     await tx.vitrinaPresentacion.update({ where: { id_presentacion: id }, data: { ...cambios, actualizado_por: actor.idUser, actualizado_en: new Date() } });
     if (estado === 'RETIRADA' && actual.estado !== 'RETIRADA') {
       // Retirar la presentación desactiva sus códigos (nada queda visible).
@@ -283,11 +333,11 @@ export async function editarPresentacion(db: VitrinaDb, actor: VitrinaActor, id:
       entidad: 'presentacion',
       idEntidad: id,
       accion,
-      anterior: { ...(d?.anterior ?? {}), ...(areasCambio ? { areas: areasCambio.antes } : {}) },
-      nuevo: { ...(d?.nuevo ?? {}), ...(areasCambio ? { areas: areasCambio.despues } : {}) },
+      anterior: { ...(d?.anterior ?? {}), ...(areasCambio ? { areas: areasCambio.antes } : {}), ...(gruposCambio ? { grupos: gruposCambio.antes } : {}) },
+      nuevo: { ...(d?.nuevo ?? {}), ...(areasCambio ? { areas: areasCambio.despues } : {}), ...(gruposCambio ? { grupos: gruposCambio.despues } : {}) },
       idUser: actor.idUser,
     });
-    return { id, cambios: Object.keys(d?.nuevo ?? {}).length + (areasCambio ? 1 : 0) };
+    return { id, cambios: Object.keys(d?.nuevo ?? {}).length + (areasCambio ? 1 : 0) + (gruposCambio ? 1 : 0) };
   });
 }
 
@@ -365,6 +415,8 @@ export async function listarPresentaciones(db: VitrinaDb, idCompany: number) {
     include: {
       codigos: { orderBy: { item_code: 'asc' } },
       areas: { include: { area: true } },
+      grupos: { include: { grupo: true } },
+      linea: true,
       exclusividades: true,
     },
     orderBy: [{ molecula: 'asc' }, { concentracion: 'asc' }, { id_presentacion: 'asc' }],
@@ -376,6 +428,7 @@ export async function listarPresentaciones(db: VitrinaDb, idCompany: number) {
         id: c.id_codigo_sap,
         itemCode: c.item_code,
         itemName: c.item_name,
+        grupoSap: etiquetaGrupoSap(c.items_group_code, c.items_group_name),
         pais: c.pais,
         canal: c.canal,
         visibilidadCanal: c.visibilidad_canal,
@@ -404,6 +457,10 @@ export async function listarPresentaciones(db: VitrinaDb, idCompany: number) {
       esParaTerceros: p.es_para_terceros,
       destacada: p.destacada,
       areas: p.areas.map((a) => ({ id: a.id_area, nombre: a.area.nombre })),
+      linea: p.linea ? { id: p.linea.id_linea, nombre: p.linea.nombre, activa: p.linea.activa } : null,
+      grupos: [...p.grupos]
+        .sort((a, b) => a.grupo.orden - b.grupo.orden || a.grupo.nombre.localeCompare(b.grupo.nombre, 'es'))
+        .map((g) => ({ id: g.id_grupo, nombre: g.grupo.nombre })),
       codigos,
       faltantes: datosFaltantes(p),
       activos: codigos.filter((c) => c.activado).length,
@@ -552,6 +609,100 @@ export async function editarArea(db: VitrinaDb, actor: VitrinaActor, id: number,
 }
 
 // ---------------------------------------------------------------------------
+// Líneas comerciales (POR EMPRESA) y grupos terapéuticos (COMUNES). No se borran: se desactivan.
+// ---------------------------------------------------------------------------
+
+export interface ClasificacionInput {
+  nombre?: unknown;
+  orden?: unknown;
+  activa?: unknown;
+}
+
+function camposClasificacion(body: ClasificacionInput, max: number, etiqueta: string, parcial: boolean) {
+  const out: { nombre?: string; orden?: number; activa?: boolean } = {};
+  if (!parcial || body.nombre !== undefined) out.nombre = textoObligatorio(body.nombre, max, `Nombre de ${etiqueta}`);
+  if (!parcial || body.orden !== undefined) out.orden = enteroOpcional(body.orden, 'Orden', 0, 10_000) ?? 0;
+  if (body.activa !== undefined) out.activa = Boolean(body.activa);
+  return out;
+}
+
+function accionClasificacion(nuevo: Record<string, unknown>, activa: boolean | undefined): VitrinaAccion {
+  const claves = Object.keys(nuevo);
+  return claves.length === 1 && (claves[0] === 'activa' || claves[0] === 'activo') ? (activa ? 'ACTIVAR' : 'DESACTIVAR') : 'EDITAR';
+}
+
+export async function listarLineas(db: VitrinaDb, idCompany: number) {
+  const rows = await db.vitrinaLineaComercial.findMany({
+    where: { id_company: idCompany },
+    orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
+    include: { _count: { select: { presentaciones: true } } },
+  });
+  return rows.map((l) => ({ id: l.id_linea, nombre: l.nombre, activa: l.activa, orden: l.orden, presentaciones: l._count.presentaciones }));
+}
+
+export async function crearLinea(db: VitrinaDb, actor: VitrinaActor, body: ClasificacionInput) {
+  const { nombre, orden } = camposClasificacion(body, VITRINA_LIMITS.lineaNombre, 'la línea', false) as { nombre: string; orden: number };
+  return db.$transaction(async (tx) => {
+    if (await tx.vitrinaLineaComercial.findFirst({ where: { id_company: actor.idCompany, nombre } })) throw new VitrinaError(`Ya existe la línea «${nombre}» en esta empresa.`, 409);
+    const l = await tx.vitrinaLineaComercial.create({ data: { id_company: actor.idCompany, nombre, orden, activa: true } });
+    await registrarHistorial(tx, { idCompany: actor.idCompany, entidad: 'linea_comercial', idEntidad: l.id_linea, accion: 'CREAR', nuevo: { nombre, orden }, idUser: actor.idUser });
+    return { id: l.id_linea };
+  });
+}
+
+export async function editarLinea(db: VitrinaDb, actor: VitrinaActor, id: number, body: ClasificacionInput) {
+  return db.$transaction(async (tx) => {
+    const l = await tx.vitrinaLineaComercial.findFirst({ where: { id_linea: id, id_company: actor.idCompany } });
+    if (!l) throw new VitrinaError('La línea comercial no existe en esta empresa.', 404);
+    const data = camposClasificacion(body, VITRINA_LIMITS.lineaNombre, 'la línea', true);
+    if (data.nombre && data.nombre !== l.nombre && (await tx.vitrinaLineaComercial.findFirst({ where: { id_company: actor.idCompany, nombre: data.nombre } }))) {
+      throw new VitrinaError(`Ya existe la línea «${data.nombre}» en esta empresa.`, 409);
+    }
+    const d = diff(l as unknown as Record<string, unknown>, data);
+    if (!d) return { id, cambios: 0 };
+    await tx.vitrinaLineaComercial.update({ where: { id_linea: id }, data });
+    await registrarHistorial(tx, { idCompany: actor.idCompany, entidad: 'linea_comercial', idEntidad: id, accion: accionClasificacion(d.nuevo, data.activa), anterior: d.anterior, nuevo: { ...d.nuevo, nombre: data.nombre ?? l.nombre }, idUser: actor.idUser });
+    return { id, cambios: Object.keys(d.nuevo).length };
+  });
+}
+
+export async function listarGrupos(db: VitrinaDb, idCompany: number) {
+  const rows = await db.vitrinaGrupoTerapeutico.findMany({ orderBy: [{ orden: 'asc' }, { nombre: 'asc' }] });
+  // El catálogo es común; el conteo es solo de las presentaciones de ESTA empresa (no se ve el de las demás).
+  const conteo = await db.vitrinaPresentacionGrupo.groupBy({ by: ['id_grupo'], where: { presentacion: { id_company: idCompany } }, _count: { _all: true } });
+  const porGrupo = new Map(conteo.map((c) => [c.id_grupo, c._count._all]));
+  return rows.map((g) => ({ id: g.id_grupo, nombre: g.nombre, activa: g.activo, orden: g.orden, presentaciones: porGrupo.get(g.id_grupo) ?? 0 }));
+}
+
+export async function crearGrupo(db: VitrinaDb, actor: VitrinaActor, body: ClasificacionInput) {
+  const { nombre, orden } = camposClasificacion(body, VITRINA_LIMITS.grupoNombre, 'el grupo terapéutico', false) as { nombre: string; orden: number };
+  return db.$transaction(async (tx) => {
+    if (await tx.vitrinaGrupoTerapeutico.findFirst({ where: { nombre } })) throw new VitrinaError(`Ya existe el grupo terapéutico «${nombre}».`, 409);
+    const g = await tx.vitrinaGrupoTerapeutico.create({ data: { nombre, orden, activo: true } });
+    await registrarHistorial(tx, { idCompany: actor.idCompany, entidad: 'grupo_terapeutico', idEntidad: g.id_grupo, accion: 'CREAR', nuevo: { nombre, orden }, idUser: actor.idUser });
+    return { id: g.id_grupo };
+  });
+}
+
+export async function editarGrupo(db: VitrinaDb, actor: VitrinaActor, id: number, body: ClasificacionInput) {
+  return db.$transaction(async (tx) => {
+    const g = await tx.vitrinaGrupoTerapeutico.findUnique({ where: { id_grupo: id } });
+    if (!g) throw new VitrinaError('El grupo terapéutico no existe.', 404);
+    const campos = camposClasificacion(body, VITRINA_LIMITS.grupoNombre, 'el grupo terapéutico', true);
+    if (campos.nombre && campos.nombre !== g.nombre && (await tx.vitrinaGrupoTerapeutico.findFirst({ where: { nombre: campos.nombre } }))) {
+      throw new VitrinaError(`Ya existe el grupo terapéutico «${campos.nombre}».`, 409);
+    }
+    const data: { nombre?: string; orden?: number; activo?: boolean } = { nombre: campos.nombre, orden: campos.orden, activo: campos.activa };
+    for (const k of Object.keys(data) as (keyof typeof data)[]) if (data[k] === undefined) delete data[k];
+    const d = diff(g as unknown as Record<string, unknown>, data);
+    if (!d) return { id, cambios: 0 };
+    await tx.vitrinaGrupoTerapeutico.update({ where: { id_grupo: id }, data });
+    await registrarHistorial(tx, { idCompany: actor.idCompany, entidad: 'grupo_terapeutico', idEntidad: id, accion: accionClasificacion(d.nuevo, data.activo), anterior: d.anterior, nuevo: { ...d.nuevo, nombre: data.nombre ?? g.nombre }, idUser: actor.idUser });
+    return { id, cambios: Object.keys(d.nuevo).length };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Historial y alertas
 // ---------------------------------------------------------------------------
 
@@ -590,7 +741,8 @@ export async function listarHistorial(db: VitrinaDb, idCompany: number, f: { ent
 
 export interface VitrinaAlerta {
   tipo: 'REGISTRO_VENCIDO' | 'SIN_REGISTRO' | 'REGISTRO_POR_VENCER' | 'REGISTRO_SIN_FECHA' | 'INACTIVO_SAP' | 'EXCLUSIVIDAD_VENCIDA' | 'EXCLUSIVIDAD_POR_VENCER';
-  nivel: 'alerta' | 'aviso';
+  /** alerta = impide mostrar; aviso = requiere atención; info = solo informativo (no cuenta como alerta). */
+  nivel: 'alerta' | 'aviso' | 'info';
   titulo: string;
   detalle: string;
   idPresentacion: number | null;
@@ -614,7 +766,8 @@ export async function listarAlertas(db: VitrinaDb, idCompany: number): Promise<{
     if (c.registro_estado === 'VENCIDO') alertas.push({ tipo: 'REGISTRO_VENCIDO', nivel: 'alerta', titulo: `${c.item_code}: registro sanitario vencido`, detalle: `${c.registro_sanitario ?? ''} venció el ${vence}. No se muestra al cliente.`, idPresentacion: c.id_presentacion });
     if (c.registro_estado === 'SIN_REGISTRO') alertas.push({ tipo: 'SIN_REGISTRO', nivel: 'alerta', titulo: `${c.item_code}: sin registro sanitario en SAP`, detalle: 'No se muestra al cliente hasta que SAP tenga un registro no obsoleto.', idPresentacion: c.id_presentacion });
     if (c.registro_estado === 'POR_VENCER') alertas.push({ tipo: 'REGISTRO_POR_VENCER', nivel: 'aviso', titulo: `${c.item_code}: registro por vencer`, detalle: `${c.registro_sanitario ?? ''} vence el ${vence}.`, idPresentacion: c.id_presentacion });
-    if (c.registro_estado === 'SIN_FECHA' && c.activado_vitrina) alertas.push({ tipo: 'REGISTRO_SIN_FECHA', nivel: 'aviso', titulo: `${c.item_code}: registro sin fecha de vencimiento`, detalle: 'SAP trae 9999-01-01 (sin dato). Pida a Regulatorios diligenciar el vencimiento real.', idPresentacion: c.id_presentacion });
+    // 9999-01-01: el registro no vence (cambio normativo, confirmado por Comercial el 23-oct). Es información, no una falta de dato.
+    if (c.registro_estado === 'SIN_FECHA' && c.activado_vitrina) alertas.push({ tipo: 'REGISTRO_SIN_FECHA', nivel: 'info', titulo: `${c.item_code}: registro sin vencimiento`, detalle: `${c.registro_sanitario ?? 'El registro'} no tiene fecha de vencimiento (SAP trae 9999-01-01). Se muestra al cliente con normalidad.`, idPresentacion: c.id_presentacion });
   }
   for (const e of exclusividades) {
     const est = estadoExclusividad(fecha(e.vigente_desde), fecha(e.vigente_hasta), hoy);
@@ -622,7 +775,8 @@ export async function listarAlertas(db: VitrinaDb, idCompany: number): Promise<{
     if (est === 'VENCIDA') alertas.push({ tipo: 'EXCLUSIVIDAD_VENCIDA', nivel: 'alerta', titulo: `Exclusividad vencida: ${pres}`, detalle: `${e.cliente_beneficiario}, venció el ${fecha(e.vigente_hasta)}.`, idPresentacion: e.id_presentacion });
     if (est === 'POR_VENCER') alertas.push({ tipo: 'EXCLUSIVIDAD_POR_VENCER', nivel: 'aviso', titulo: `Exclusividad por vencer: ${pres}`, detalle: `${e.cliente_beneficiario}, vence el ${fecha(e.vigente_hasta)}.`, idPresentacion: e.id_presentacion });
   }
-  alertas.sort((a, b) => (a.nivel === b.nivel ? a.titulo.localeCompare(b.titulo, 'es') : a.nivel === 'alerta' ? -1 : 1));
+  const peso = { alerta: 0, aviso: 1, info: 2 } as const;
+  alertas.sort((a, b) => peso[a.nivel] - peso[b.nivel] || a.titulo.localeCompare(b.titulo, 'es'));
   return { alertas, ultimaLectura: ultima?.registrado_en.toISOString() ?? null };
 }
 
