@@ -349,4 +349,65 @@ describe.skipIf(!url)('SGC · S16 · encabezados por tipo y Excel con SQL Server
     expect((await latestLayout(prisma, id)).sheetSettings).toBeNull();
     expect(await prisma.sgcAuditLog.count({ where: { id_company: CO, action: 'documento.firmas_ubicadas', entity: 'document_layout', after_json: { contains: 'sheetSettings' } } })).toBe(1);
   });
+  it('[SGC-REQ-164] 2026-10-22: el Excel lo convierte Microsoft (copia con «ajustar al ancho»), con el encabezado a escala; si falla o hay ajustes que no aplica, la conversión de SynerLink', async () => {
+    const msCalls: { root: string; name: string; xml: string }[] = [];
+    const msPdf = await pdfOf('Contenido convertido por Microsoft');
+    const office = async (root: string, name: string, content: Uint8Array) => {
+      const JSZip = (await import('jszip')).default;
+      msCalls.push({ root, name, xml: await (await JSZip.loadAsync(content)).file('xl/worksheets/sheet1.xml')!.async('string') });
+      return msPdf;
+    };
+    const failing = async () => Promise.reject(new Error('Graph caído'));
+    const row = (n: number, values: SgcMasterListRawRow['values']): SgcMasterListRawRow => ({ rowNumber: n, values });
+    await confirmMasterListImport(prisma, CO, { fileName: 'listado-s16-ms.xlsx', rows: [row(2, { code: 'OLP-GC-07-FO03', title: 'Registro de pesaje', documentTypeCode: 'FO', processCode: 'GC', versionNumber: '1', effectiveDate: '2024-06-01' }), row(3, { code: 'OLP-GC-07-FO04', title: 'Registro de despeje', documentTypeCode: 'FO', processCode: 'GC', versionNumber: '1', effectiveDate: '2024-06-01' })] }, actor(E.cal));
+    const bytes = await xlsx();
+    const root = (await prisma.sgcCompanyConfig.findUniqueOrThrow({ where: { id_company: CO } })).storage_root;
+
+    // Carga inicial: Microsoft convierte la copia; el original guardado no cambia.
+    const { idBulkUpload } = await startBulkUpload(prisma, CO, { filesTotal: 2 }, actor(E.cal));
+    const loaded = await uploadBulkFile(prisma, upload, CO, idBulkUpload, { fileName: 'OLP-GC-07-FO03 Registro de pesaje.xlsx', bytes }, actor(E.cal), new Date(), { ...convert, officeToPdf: office });
+    expect(loaded).toMatchObject({ status: 'cargado' });
+    expect(msCalls[0]).toMatchObject({ root, name: 'OLP-GC-07-FO03 Registro de pesaje.xlsx' });
+    expect(msCalls[0].xml).toContain('fitToPage="1"');
+    const v = await prisma.sgcDocumentVersion.findUniqueOrThrow({ where: { id_document_version: loaded.idVersion! } });
+    expect(store.get(v.pdf_item_id)).toEqual(msPdf);
+    expect(store.get(v.source_item_id!)).toEqual(bytes);
+    // Microsoft caído: la conversión de SynerLink.
+    htmls.length = 0;
+    const fallback = await uploadBulkFile(prisma, upload, CO, idBulkUpload, { fileName: 'OLP-GC-07-FO04 Registro de despeje.xlsx', bytes }, actor(E.cal), new Date(), { ...convert, officeToPdf: failing });
+    expect(fallback).toMatchObject({ status: 'cargado' });
+    expect(htmls[0]).toContain('table.sgc-hoja');
+    // Vista previa de la carga: Microsoft (con la marca), y con ajustes que Microsoft no aplica, SynerLink.
+    const file = { fileName: 'OLP-GC-07-FO03 Registro de pesaje.xlsx', bytes };
+    const before = msCalls.length;
+    expect(await pdfText(await previewBulkExcel(prisma, CO, file, null, actor(E.cal), { ...convert, officeToPdf: office }), 1)).toContain('VISTA PREVIA');
+    expect(msCalls.length).toBe(before + 1);
+    htmls.length = 0;
+    await previewBulkExcel(prisma, CO, file, JSON.stringify({ sheets: [{ name: 'Registro', hiddenColumns: ['B'] }] }), actor(E.cal), { ...convert, officeToPdf: office });
+    expect(msCalls.length).toBe(before + 1);
+    expect(htmls).toHaveLength(1);
+
+    // Borrador de una solicitud con encabezado institucional: Microsoft, a escala bajo el encabezado, más el historial.
+    const id = (await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nuevo', subject: 'Registro de pesaje nuevo', description: 'Formato en Excel convertido por Microsoft.', idProcess: procGC, idDocumentType: typeFO, requiresTraining: 'no', formValues: { urgencia: 'Normal' } }, actor(E.sol))).idRequest;
+    await uploadAttachment(prisma, upload, id, { purpose: 'borrador', fileName: 'Registro de pesaje.xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', bytes }, await viewer(E.elab), actor(E.elab));
+    const elab = await viewer(E.elab);
+    await saveDocumentLayout(prisma, id, { institutionalHeader: true }, elab, actor(E.elab), layoutDeps);
+    htmls.length = 0;
+    const preview = await buildLayoutPreview(prisma, { ...layoutDeps, officeToPdf: office }, id, elab);
+    const page1 = await pdfText(preview, 1);
+    expect(page1).toContain('Contenido convertido por Microsoft');
+    expect(page1).toContain('NOMBRE DEL FORMATO');
+    expect(htmls.some((h) => h.includes('HISTORIAL DE CAMBIOS'))).toBe(true);
+    // La copia para Microsoft deja la hoja A4 con el espacio del encabezado.
+    expect(msCalls.at(-1)!.xml).toMatch(/paperSize="9"/);
+    expect(msCalls.at(-1)!.xml).toMatch(/top="2.598"/);
+    // Microsoft caído en la composición: SynerLink (vista previa sin la caché de la anterior, con otros firmantes no cambia la clave; se usa otra solicitud).
+    const id2 = (await createRequest(prisma, notifier, await accessOf(E.sol), { idCompany: CO, requestType: 'nuevo', subject: 'Registro de despeje nuevo', description: 'Microsoft caído en la composición.', idProcess: procGC, idDocumentType: typeFO, requiresTraining: 'no', formValues: { urgencia: 'Normal' } }, actor(E.sol))).idRequest;
+    await uploadAttachment(prisma, upload, id2, { purpose: 'borrador', fileName: 'Registro de despeje.xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', bytes }, elab, actor(E.elab));
+    htmls.length = 0;
+    await buildLayoutPreview(prisma, { ...layoutDeps, officeToPdf: failing }, id2, elab);
+    expect(htmls.some((h) => h.includes('table.sgc-hoja'))).toBe(true);
+    // La orientación sugerida de las firmas sale del Excel (vertical aquí).
+    expect((await getDocumentLayout(prisma, id, elab, layoutDeps)).suggested.length).toBeGreaterThan(0);
+  });
 });

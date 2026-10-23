@@ -132,7 +132,29 @@ const BASE_SHEET_CSS = [
   '.sgc-br{border-right:0.6pt solid #333 !important}',
   'tr.sgc-vacia td{height:12pt}',
   'tr.sgc-regla td{height:0;padding:0 !important;border:0 !important;line-height:0;font-size:0}',
+  '.sgc-rel{position:relative}',
+  '.sgc-img{position:absolute;max-width:none !important;z-index:1}',
 ].join('\n');
+
+/** EMU (unidad de las imágenes de Office) a puntos. */
+const EMU_PER_PT = 12700;
+/** Imagen incrustada más grande que se dibuja (el sanitizador acepta hasta ~1,5 MB). */
+const MAX_IMAGE_BYTES = 1_500_000;
+
+type XAnchor = { nativeCol?: number; nativeColOff?: number; nativeRow?: number; nativeRowOff?: number; col?: number; row?: number };
+type XImageRange = { tl?: XAnchor; br?: XAnchor; ext?: { width?: number; height?: number } };
+
+/** Columna/fila (1-based) y desplazamiento en puntos de un ancla de imagen de ExcelJS. */
+function anchorOf(a: XAnchor | undefined, sizeOf: (index: number) => number, kind: 'col' | 'row'): { index: number; offPt: number } | null {
+  if (!a) return null;
+  const native = kind === 'col' ? a.nativeCol : a.nativeRow;
+  const nativeOff = kind === 'col' ? a.nativeColOff : a.nativeRowOff;
+  if (Number.isInteger(native)) return { index: (native as number) + 1, offPt: Math.max(0, Number(nativeOff ?? 0) / EMU_PER_PT) };
+  const f = Number(kind === 'col' ? a.col : a.row);
+  if (!Number.isFinite(f) || f < 0) return null;
+  const index = Math.floor(f) + 1;
+  return { index, offPt: (f - Math.floor(f)) * sizeOf(index) };
+}
 
 /**
  * 2026-10-21 (reunión con Calidad OLP: «el Excel sale cortado y mal
@@ -296,6 +318,58 @@ export async function xlsxToSheet(bytes: Uint8Array, settings: SgcSheetSettings 
         if (r0 <= t.last && r0 + span.rowspan - 1 > t.last) titles = null;
       }
     }
+    // 2026-10-22 (Calidad OLP: «las firmas del Excel no salen»): las IMÁGENES incrustadas en la hoja (firmas
+    // escaneadas, logos, sellos) se dibujan sobre las celdas donde están ancladas, con su tamaño. Solo PNG,
+    // JPEG o GIF (lo que admite el sanitizador); las que caen fuera de lo que se imprime no salen.
+    const imagesAt = new Map<string, string[]>();
+    {
+      const colPt = (c: number) => columnWidthPt(Math.min(255, Math.max(0.5, Number(sheet.getColumn(c).width ?? defaultWidth) || defaultWidth)));
+      const rowPt = (r: number) => (Number.isFinite(Number(sheet.getRow(r).height)) && Number(sheet.getRow(r).height) > 0 ? Number(sheet.getRow(r).height) : 15);
+      // Celda maestra de cada celda cubierta por una combinación (la imagen se ancla en la maestra).
+      const masterOf = (r: number, c: number): [number, number] => {
+        for (const [key, span] of rawSpans) {
+          const [r0, c0] = key.split(',').map(Number);
+          if (r >= r0 && r < r0 + span.rowspan && c >= c0 && c < c0 + span.colspan) return [r0, c0];
+        }
+        return [r, c];
+      };
+      const images = (sheet as unknown as { getImages?: () => { imageId: string | number; range: XImageRange }[] }).getImages?.() ?? [];
+      for (const im of images.slice(0, 40)) {
+        const media = (wb as unknown as { getImage: (id: number) => { extension?: string; buffer?: Uint8Array } | undefined }).getImage(Number(im.imageId));
+        const ext = (media?.extension ?? '').toLowerCase();
+        const mime = ext === 'png' ? 'png' : ext === 'jpeg' || ext === 'jpg' ? 'jpeg' : ext === 'gif' ? 'gif' : null;
+        if (!mime || !media?.buffer || media.buffer.length > MAX_IMAGE_BYTES) continue;
+        const tlc = anchorOf(im.range?.tl, colPt, 'col');
+        const tlr = anchorOf(im.range?.tl, rowPt, 'row');
+        if (!tlc || !tlr) continue;
+        if (tlc.index < left || tlc.index > right || tlr.index < top || tlr.index > bottom || !colSet.has(tlc.index) || !rowSet.has(tlr.index)) continue;
+        let w: number;
+        let h: number;
+        if (im.range?.ext?.width && im.range.ext.height) {
+          w = im.range.ext.width * 0.75;
+          h = im.range.ext.height * 0.75;
+        } else {
+          const brc = anchorOf(im.range?.br, colPt, 'col');
+          const brr = anchorOf(im.range?.br, rowPt, 'row');
+          if (!brc || !brr) continue;
+          w = -tlc.offPt + brc.offPt;
+          for (let c = tlc.index; c < brc.index; c++) w += colPt(c);
+          h = -tlr.offPt + brr.offPt;
+          for (let r = tlr.index; r < brr.index; r++) h += rowPt(r);
+        }
+        if (!(w > 1 && h > 1)) continue;
+        const [mr, mc] = covered.has(`${tlr.index},${tlc.index}`) ? masterOf(tlr.index, tlc.index) : [tlr.index, tlc.index];
+        let x = tlc.offPt;
+        for (let c = mc; c < tlc.index; c++) if (colSet.has(c)) x += colPt(c);
+        let y = tlr.offPt;
+        for (let r = mr; r < tlr.index; r++) if (rowSet.has(r)) y += rowPt(r);
+        const icls = `sgc-img-${rules.size}`;
+        rules.set(icls, `left:${Math.round(x * 10) / 10}pt;top:${Math.round(y * 10) / 10}pt;width:${Math.round(w * 10) / 10}pt;height:${Math.round(h * 10) / 10}pt`);
+        const src = `data:image/${mime};base64,${Buffer.from(media.buffer).toString('base64')}`;
+        const key = `${mr},${mc}`;
+        imagesAt.set(key, [...(imagesAt.get(key) ?? []), `<img class="sgc-img ${icls}" src="${src}">`]);
+      }
+    }
     const head: string[] = [];
     const body: string[] = [];
     for (const r of rowsShown) {
@@ -316,7 +390,10 @@ export async function xlsxToSheet(bytes: Uint8Array, settings: SgcSheetSettings 
           rules.set(`sgc-fs-${Math.round(size)}`, `font-size:${Math.round(size)}pt`);
         }
         const attrs = `${span && span.rowspan > 1 ? ` rowspan="${span.rowspan}"` : ''}${span && span.colspan > 1 ? ` colspan="${span.colspan}"` : ''}${cls.length ? ` class="${cls.join(' ')}"` : ''}`;
-        cells.push(`<td${attrs}>${text ? escapeHtml(text) : '&nbsp;'}</td>`);
+        const imgs = imagesAt.get(key);
+        if (imgs) cls.push('sgc-rel');
+        const attrsWithImg = imgs ? `${span && span.rowspan > 1 ? ` rowspan="${span.rowspan}"` : ''}${span && span.colspan > 1 ? ` colspan="${span.colspan}"` : ''} class="${cls.join(' ')}"` : attrs;
+        cells.push(`<td${attrsWithImg}>${imgs ? imgs.join('') : ''}${text ? escapeHtml(text) : imgs ? '' : '&nbsp;'}</td>`);
       }
       const rowCls: string[] = hasText ? [] : ['sgc-vacia'];
       const height = Number(row.height);
@@ -412,7 +489,8 @@ export async function xlsxToHtml(bytes: Uint8Array): Promise<string> {
 export async function attachmentToViewablePdf(
   bytes: Uint8Array,
   fileName: string,
-  deps: { docxToHtml: SgcDocxToHtml; htmlToPdf: SgcHtmlToPdf }
+  // 2026-10-22: `officeToPdf` = conversión de Microsoft del Excel ya guardado en OneDrive (si falla, la de SynerLink).
+  deps: { docxToHtml: SgcDocxToHtml; htmlToPdf: SgcHtmlToPdf; officeToPdf?: () => Promise<Uint8Array> }
 ): Promise<Uint8Array | null> {
   const name = fileName.toLowerCase();
   if (isPdf(bytes)) return bytes;
@@ -421,6 +499,14 @@ export async function attachmentToViewablePdf(
     return deps.htmlToPdf(wrapDraftForPdf({ title: fileName, code: '', contentHtml: html }));
   }
   if (name.endsWith('.xlsx') && isZip(bytes)) {
+    if (deps.officeToPdf) {
+      try {
+        const pdf = await deps.officeToPdf();
+        if (isPdf(pdf)) return pdf;
+      } catch (e) {
+        console.warn('[sgc/visor] la conversión de Microsoft falló; se usa la de SynerLink', e);
+      }
+    }
     const sheet = await xlsxToSheet(bytes);
     return deps.htmlToPdf(wrapDraftForPdf({ title: fileName, code: '', contentHtml: sheet.html, sheet: true, extraCss: sheet.css, sheetLayout: sheet.layout }));
   }

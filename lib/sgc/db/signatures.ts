@@ -18,7 +18,7 @@ import { resolveNewDocumentCode } from './coding';
 import { getVersionForViewer, type SgcUploader } from './documents';
 import { addInteraction, decideTask, requestOfTask } from './requests';
 import { createAutomaticParentRelation } from './hierarchy';
-import { cargoOf, composeContent, effectiveInstitutional, latestLayout, layoutIsLandscape, loadVerifiedDraft, personLabel } from './layout';
+import { cargoOf, composeContent, draftIsLandscape, effectiveInstitutional, latestLayout, loadVerifiedDraft, personLabel } from './layout';
 import { isHeaderMandatory } from './companySettings';
 import { minorRevisionChain } from './drafts';
 import { withNewDocumentCodeLock, withSgcAppLock } from './lock';
@@ -56,6 +56,8 @@ export interface SgcSignatureDeps {
   download: (itemId: string) => Promise<Uint8Array>;
   htmlToPdf: SgcHtmlToPdf;
   docxToHtml: SgcDocxToHtml;
+  /** 2026-10-22: conversión de Microsoft del borrador en Excel (sin ella, la de SynerLink). */
+  officeToPdf?: (storageRoot: string, fileName: string, content: Uint8Array) => Promise<Uint8Array>;
   notifier: SgcNotifier;
   /** URL pública de SynerLink (para el enlace de verificación del PDF). */
   appUrl: string;
@@ -373,7 +375,7 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
       idCompany: request.id_company,
       idDocument: request.document?.id_document ?? null,
       idDocumentType: request.documentType.id_document_type,
-      draft: { format: draft.format, bytes, html },
+      draft: { format: draft.format, bytes, html, itemId: draft.itemId ?? null },
       institutional,
       code,
       title,
@@ -417,7 +419,7 @@ async function generateControlledVersionUnlocked(db: SgcDb, deps: SgcSignatureDe
       if (c && overflow.has(s.meaning)) registerCargos[s.signature_uid.trim()] = c;
     }
     // Con plantilla institucional, la firma que no se ubicó va en su recuadro «Firma» del encabezado.
-    const suggested = institutional ? new Map(suggestInstitutionalPlacements(signedParticipants, layout.fields, composed.header?.template?.grid ?? null, layoutIsLandscape(draft.format, layout.sheetSettings) ? SGC_A4_LANDSCAPE : SGC_A4_PORTRAIT).map((f) => [f.signerKey, f])) : new Map();
+    const suggested = institutional ? new Map(suggestInstitutionalPlacements(signedParticipants, layout.fields, composed.header?.template?.grid ?? null, (await draftIsLandscape(draft.format, layout.sheetSettings, bytes)) ? SGC_A4_LANDSCAPE : SGC_A4_PORTRAIT).map((f) => [f.signerKey, f])) : new Map();
     const placements: SgcManifestPlacement[] = [];
     for (const s of documentSignatures) {
       const key = keyOfAssignee.get(s.id_task_assignee);
