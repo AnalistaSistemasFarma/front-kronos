@@ -19,7 +19,10 @@ export function SapTaskActionPicker({ value, onChange }: { value: string; onChan
       <Select
         label="Acción en SAP"
         placeholder="Elija una acción del catálogo"
-        data={options.map((o) => ({ value: o.key, label: o.label }))}
+        data={[...new Set(options.map((o) => o.domain))].map((domain) => ({
+          group: domain,
+          items: options.filter((o) => o.domain === domain).map((o) => ({ value: o.key, label: o.label })),
+        }))}
         value={value || null}
         onChange={(v) => onChange(v ?? '')}
         required

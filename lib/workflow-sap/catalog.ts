@@ -34,6 +34,11 @@ export interface MappingField {
 export interface SapActionDef {
   key: string;
   label: string;
+  /**
+   * Proceso o documento al que pertenece (agrupa el catalogo). Nuevos procesos
+   * agregan aqui sus acciones con su propio ejecutor en lib/workflow-sap/engine.ts.
+   */
+  domain: string;
   /** Lo que se muestra en el diagrama: metodo y entidad del Service Layer. */
   endpoint: string;
   /** Disparadores en los que tiene sentido. */
@@ -75,6 +80,7 @@ export const SAP_ACTIONS: SapActionDef[] = [
   {
     key: 'purchase.create_draft',
     label: 'Crear borrador de solicitud de compra',
+    domain: 'Compras · Solicitud de compra',
     endpoint: 'POST Drafts (oPurchaseRequest)',
     triggers: ['on_execute'],
     taskKinds: ['sap_executor'],
@@ -85,6 +91,7 @@ export const SAP_ACTIONS: SapActionDef[] = [
   {
     key: 'purchase.state_to_authorize',
     label: 'Pasar a «Por autorizar»',
+    domain: 'Compras · Solicitud de compra',
     endpoint: 'PATCH Drafts(n) · U_SEND_State = LA',
     triggers: ['on_start', 'on_execute'],
     taskKinds: ['authorization', 'sap_executor'],
@@ -94,6 +101,7 @@ export const SAP_ACTIONS: SapActionDef[] = [
   {
     key: 'purchase.state_rejected',
     label: 'Pasar a «No aprobado»',
+    domain: 'Compras · Solicitud de compra',
     endpoint: 'PATCH Drafts(n) · U_SEND_State = NAD',
     triggers: ['on_reject'],
     taskKinds: ['authorization'],
@@ -103,6 +111,7 @@ export const SAP_ACTIONS: SapActionDef[] = [
   {
     key: 'purchase.state_quotation',
     label: 'Pasar a «En cotización» y avisar a Compras',
+    domain: 'Compras · Solicitud de compra',
     endpoint: 'PATCH Drafts(n) · U_SEND_State = ENC',
     triggers: ['on_quote'],
     taskKinds: ['authorization'],
@@ -112,6 +121,7 @@ export const SAP_ACTIONS: SapActionDef[] = [
   {
     key: 'purchase.publish_firm',
     label: 'Publicar solicitud en firme',
+    domain: 'Compras · Solicitud de compra',
     endpoint: 'POST PurchaseRequests',
     triggers: ['on_final_approve', 'on_execute'],
     taskKinds: ['authorization', 'sap_executor'],
@@ -124,6 +134,7 @@ export const SAP_ACTIONS: SapActionDef[] = [
   {
     key: 'purchase.attach',
     label: 'Adjuntar cotizaciones y anexos',
+    domain: 'Compras · Solicitud de compra',
     endpoint: 'POST/PATCH Attachments2',
     triggers: ['on_execute'],
     taskKinds: ['sap_executor'],

@@ -72,7 +72,8 @@ import WorkflowValidatorsModal from '../../../../../components/request-general/W
 import { FlowConnector } from '../../../../../components/ui/flow/FlowConnector';
 import { SapTaskActionPicker, SapTaskCardInfo } from '../../../../../components/workflow-sap/SapTaskObject';
 import {
-  TaskSapBadges,
+  AuthorizationSapBranches,
+  ConditionalObject,
   TaskSapConfigModal,
   useWorkflowSapConfig,
   type TaskSapInfo,
@@ -1901,8 +1902,13 @@ if (session?.user?.id) return session.user.id as unknown as number;
               ) : (
                 <ScrollArea>
                   <div className='space-y-0'>
-                    {(isEditing ? editedTasks : tasks).map((task, index) => (
-                      <div key={task.id} className='relative'>
+                    {(isEditing ? editedTasks : tasks).map((task, index, list) => {
+                      const condKey = (c: number[]) => [...(c || [])].sort((a, b) => a - b).join(',');
+                      const hasCond = task.conditions.length > 0;
+                      const startsCond = hasCond && (index === 0 || condKey(list[index - 1].conditions) !== condKey(task.conditions));
+                      return (
+                      <div key={task.id} className='relative' style={hasCond ? { marginLeft: 32, paddingLeft: 12, borderLeft: '3px solid var(--mantine-color-grape-4)' } : undefined}>
+                        {startsCond && <ConditionalObject label={conditionLabelsView(task.conditions)} />}
                         <Card
                           shadow='sm'
                           p='md'
@@ -1987,25 +1993,10 @@ if (session?.user?.id) return session.user.id as unknown as number;
                                         {task.task_kind === 'sap_executor' && (
                                           <SapTaskCardInfo actionKey={task.sap_action_key} />
                                         )}
-                                        {task.is_authorization && <TaskSapBadges info={sapConfig.byTask.get(task.id)} />}
-                                        {sapConfig.canManage && task.id > 0 && task.is_authorization && sapConfig.byTask.get(task.id) && (
-                                          <Button
-                                            size='compact-xs'
-                                            variant='subtle'
-                                            color='blue'
-                                            onClick={() => setSapTask(sapConfig.byTask.get(task.id) ?? null)}
-                                          >
-                                            Configurar SAP
-                                          </Button>
-                                        )}
+
                                         {task.id_linked_process && (
                                           <Badge color='grape' variant='light' size='sm' styles={{ root: { textTransform: 'none' } }}>
                                             Flujo: {task.linked_process_label || linkedProcessOptions.find((o) => o.value === String(task.id_linked_process))?.label || 'Vinculado'}
-                                          </Badge>
-                                        )}
-                                        {task.conditions.length > 0 && (
-                                          <Badge color='grape' variant='light' size='sm' styles={{ root: { textTransform: 'none' } }}>
-                                            Si: {conditionLabelsView(task.conditions)}
                                           </Badge>
                                         )}
                                         {task.closes_request && (
@@ -2298,13 +2289,20 @@ if (session?.user?.id) return session.user.id as unknown as number;
                           </Grid>
                         </Card>
 
+                        <AuthorizationSapBranches
+                          info={task.id > 0 ? sapConfig.byTask.get(task.id) : undefined}
+                          canManage={sapConfig.canManage}
+                          onEdit={() => setSapTask(sapConfig.byTask.get(task.id) ?? null)}
+                        />
+
                         {index < (isEditing ? editedTasks.length : tasks.length) - 1 && (
                           <div className='flex justify-center py-3'>
                             <FlowConnector active={task.active === 1} tone={isEditing ? 'editing' : 'ok'} />
                           </div>
                         )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </ScrollArea>
               )}

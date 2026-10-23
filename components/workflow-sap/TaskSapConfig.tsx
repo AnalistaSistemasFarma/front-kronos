@@ -230,3 +230,78 @@ export function TaskSapConfigModal({ info, onClose, onSaved }: ModalProps) {
     </Modal>
   );
 }
+
+/** Etiqueta corta del evento de una autorización para mostrarlo como rama. */
+const BRANCH_LABEL: Partial<Record<TriggerEvent, string>> = {
+  on_start: 'Al iniciar',
+  on_approve: 'Si se aprueba',
+  on_final_approve: 'Si se aprueba (último nivel)',
+  on_reject: 'Si se rechaza',
+  on_quote: 'Si se envía a cotizar',
+};
+
+/**
+ * Efectos SAP de una autorización dibujados como ramas debajo de su tarjeta:
+ * «◆ Si se rechaza → ⚡ Tarea SAP · Pasar a No aprobado». Solo visual; se editan con
+ * «Editar efectos SAP» (misma configuración de siempre).
+ */
+export function AuthorizationSapBranches({
+  info,
+  canManage,
+  onEdit,
+}: {
+  info?: TaskSapInfo;
+  canManage: boolean;
+  onEdit: () => void;
+}) {
+  if (!info || info.taskKind !== 'authorization') return null;
+  if (info.actions.length === 0 && !canManage) return null;
+  return (
+    <Stack gap={6} mt="xs" ml={48}>
+      {info.actions.map((a) => {
+        const def = getSapAction(a.actionKey);
+        return (
+          <Group key={`${a.trigger}-${a.actionKey}`} gap={8} wrap="nowrap">
+            <Badge color="grape" variant="light" size="sm" styles={{ root: { textTransform: 'none' } }}>
+              ◆ {BRANCH_LABEL[a.trigger] ?? a.trigger}
+            </Badge>
+            <Text size="xs" c="dimmed">
+              →
+            </Text>
+            <Badge color="blue" variant="filled" size="sm" leftSection={<IconBolt size={12} />}>
+              Tarea SAP
+            </Badge>
+            <Text size="xs" fw={600}>
+              {def?.label ?? a.actionKey}
+            </Text>
+            <Text size="xs" c="dimmed" truncate>
+              {def?.endpoint}
+            </Text>
+          </Group>
+        );
+      })}
+      {canManage && (
+        <Button size="compact-xs" variant="subtle" color="blue" onClick={onEdit} style={{ alignSelf: 'flex-start' }}>
+          Editar efectos SAP de esta autorización
+        </Button>
+      )}
+    </Stack>
+  );
+}
+
+/** Encabezado del objeto «Condicional» (condiciones existentes por opciones del formulario). */
+export function ConditionalObject({ label }: { label: string }) {
+  return (
+    <Group gap={8} mb={6} wrap="nowrap">
+      <Badge color="grape" variant="filled" size="sm">
+        ◆ Condicional
+      </Badge>
+      <Text size="sm" fw={600}>
+        Si {label}
+      </Text>
+      <Text size="xs" c="dimmed">
+        · si no se cumple, estas tareas no se crean
+      </Text>
+    </Group>
+  );
+}
