@@ -339,7 +339,6 @@ export async function POST(req) {
           display_order: prevRow.display_order,
           subject_request: prevRow.subject_request,
         });
-<<<<<<< Updated upstream
 
         // Parametrización por tarea (closes_request): al resolver esta tarea, cerrar la
         // solicitud SOLO si ya no quedan otras tareas abiertas (excluyendo el proceso
@@ -366,10 +365,9 @@ export async function POST(req) {
             });
           }
         }
-=======
+
         // Tareas «Ejecutora SAP» que quedaron listas (siguiente secuencial o en paralelo). No bloquea.
         fireAndForgetNotification(runSapExecutors(prevRow.id_request_general));
->>>>>>> Stashed changes
       } else if (justResolved && isFirmaAuthorization) {
         console.log(`${TAG} 5b) Auth FIRMA/Orion: no se avanza workflow secuencial.`);
       } else if (Number(nextStatus) === 3) {

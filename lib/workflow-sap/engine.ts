@@ -3,6 +3,8 @@ import sqlConfig from '../../dbconfig.js';
 import { onAuthorizationDecision } from '../purchases/authorization';
 import { prisma } from '../prisma';
 import { advanceSequentialTask } from '../workflow/advanceSequentialTask.js';
+import { closeRequestGeneral } from '../workflow/closeRequestGeneral.js';
+import { orionInternalTaskSql } from '../orion/internalTasks';
 import { getSapAction } from './catalog';
 import { processActions } from './config';
 import { finishStep, startStep, type TriggeredBy } from './executionLog';
@@ -31,12 +33,14 @@ interface PendingExecutor {
   display_order: number | null;
   id_process_category: number;
   subject_request: string | null;
+  closes_request: boolean | number | null;
 }
 
 async function pendingExecutors(idRequest: number): Promise<PendingExecutor[]> {
   const pool = await sql.connect(sqlConfig);
   const r = await pool.request().input('req', sql.Int, idRequest).query<PendingExecutor>(`
-    SELECT trg.id, trg.id_task, tpc.task, tpc.display_order, tpc.id_process_category, rg.subject_request
+    SELECT trg.id, trg.id_task, tpc.task, tpc.display_order, tpc.id_process_category, rg.subject_request,
+           tpc.closes_request
     FROM task_request_general trg
     INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
     INNER JOIN requests_general rg ON rg.id = trg.id_request_general
@@ -84,6 +88,24 @@ async function complete(task: PendingExecutor, idRequest: number, resolution: st
     display_order: task.display_order,
     subject_request: task.subject_request,
   });
+
+  // Igual que update-activities: si la tarea «cierra la solicitud» y ya no queda nada
+  // abierto (sin contar la firma interna de Orion), se cierra la solicitud.
+  if (task.closes_request) {
+    const open = await pool.request().input('req', sql.Int, idRequest).query(`
+      SELECT COUNT(*) AS n
+      FROM task_request_general trg
+      INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
+      WHERE trg.id_request_general = @req AND trg.id_status NOT IN (2, 3)
+        AND NOT ${orionInternalTaskSql('trg', 'tpc')};`);
+    if (Number(open.recordset[0]?.n ?? 0) === 0) {
+      await closeRequestGeneral(pool, {
+        requestId: idRequest,
+        closedByUserId: null,
+        resolution: `Cerrada automáticamente al ejecutar en SAP la tarea «${task.task}».`,
+      });
+    }
+  }
 }
 
 /** Ejecuta una accion del catalogo en el contexto de una solicitud. */
