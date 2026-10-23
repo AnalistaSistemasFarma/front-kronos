@@ -91,6 +91,10 @@
  *   HILOS_PRUEBAS_KRONOS_WEB         Web de testing (por defecto http://192.168.11.230:3030; debe ser un
  *                                    host de HOSTS_PRUEBAS).
  *
+ *   Archivos del proyecto (2026-10-23; ver archivar-proyecto.mjs). Encendido por defecto:
+ *   HILOS_ARCHIVAR_EN_PROYECTO       'si' (por defecto) o 'no'. Cada adjunto de la respuesta (MEDIA:/PDF:)
+ *                                    se sube además a la pestaña Archivos del proyecto.
+ *
  *   Modo Orus completo (2026-10-22, orden de Nicolás Rivera; ver orus-completo.mjs). Opcional:
  *   HILOS_AUTORES_ORUS_COMPLETO      Correos (coma). Los turnos cuyos mensajes son TODOS de uno de ellos
  *                                    (identidad del servidor) corren con las capacidades del Orus
@@ -464,6 +468,9 @@ export function cargarConfig(env = process.env) {
   const pdfChrome = (env.HILOS_PDF_CHROME ?? '').trim() || null;
   if (pdfChrome && !path.isAbsolute(pdfChrome)) throw new ErrorConfig('HILOS_PDF_CHROME debe ser una ruta absoluta.');
 
+  // Archivar en los Archivos del proyecto lo que el hilo adjunta (archivar-proyecto.mjs, 2026-10-23). Encendido por defecto.
+  const archivarModo = (env.HILOS_ARCHIVAR_EN_PROYECTO ?? 'si').trim().toLowerCase();
+  if (!['si', 'no'].includes(archivarModo)) throw new ErrorConfig('HILOS_ARCHIVAR_EN_PROYECTO debe ser «si» o «no».');
   // Medidor del consumo de Anthropic (cuota.mjs, 2026-10-22). Encendido por defecto.
   const cuotaModo = (env.HILOS_CUOTA ?? 'si').trim().toLowerCase();
   if (!['si', 'no'].includes(cuotaModo)) throw new ErrorConfig('HILOS_CUOTA debe ser «si» o «no».');
@@ -583,6 +590,7 @@ export function cargarConfig(env = process.env) {
     grafosDir,
     pdf: { habilitado: pdfModo === 'si', chrome: pdfChrome, timeoutMs: entero(env, 'HILOS_PDF_TIMEOUT_MS', 60 * 1000, 10 * 1000, 3 * 60 * 1000) },
     cuota: { habilitada: cuotaModo === 'si', intervaloMs: cuotaIntervaloMs },
+    archivarEnProyecto: archivarModo === 'si',
     rutaConectoresPorProyecto: (env.HILOS_CONECTORES_POR_PROYECTO ?? '').trim() || null,
     conectoresSecretos: (env.HILOS_CONECTORES_SECRETOS ?? '').trim() || null,
     pruebasKronos: { habilitado: pruebasModo === 'si', base: new URL(pruebasWeb).origin },

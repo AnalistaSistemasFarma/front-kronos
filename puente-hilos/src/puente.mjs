@@ -51,6 +51,7 @@ import { grafosDelTurno, textoGrafos } from './grafos.mjs';
 import { prepararMemoriaTurno } from './memoria.mjs';
 import { crearClienteSynerLink } from './synerlink.mjs';
 import { crearMedidorCuota } from './cuota.mjs';
+import { crearArchivador, textoArchivarProyecto } from './archivar-proyecto.mjs';
 import { prepararAdjuntos } from './adjuntos-salida.mjs';
 import { archivosDelTurno, archivosModificadosDesde, crearSupervisor, duracionLegible, PROMPT_CONTINUACION, textoAvisoProgreso, textoCorte, textoTiempoTurno } from './progreso.mjs';
 import { convertirHtmlAPdf, convertirMarcasPdf, recursosDePlugins, resolverChrome, textoPdf } from './pdf.mjs';
@@ -185,6 +186,8 @@ function autorDe(m) {
 
 export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, convertirPdf = convertirHtmlAPdf, medidor = null }) {
   const enProceso = new Set();
+  // Lo que el hilo adjunta queda también en los Archivos del proyecto (2026-10-23; HILOS_ARCHIVAR_EN_PROYECTO=no lo apaga).
+  const archivador = cfg.archivarEnProyecto === false ? null : crearArchivador({ synerlink, log });
 
   /** Auditoría local de cada comando y cada negación en turnos con código (sin el token). */
   function auditarCodigo(idConversation, evento, codigo) {
@@ -421,6 +424,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         bloquePdf: textoPdf({ disponible: Boolean(chromePdf), recursos }),
         bloqueTiempo: textoTiempoTurno({ topeMs: cfg.timeoutTurnoMs, avisoMs: cfg.avisoProgresoMs ?? 0 }),
         bloqueObjetivo: textoObjetivo(objetivo),
+        bloqueArchivar: archivador ? textoArchivarProyecto() : '',
       });
       limpiarPropuestas(rutas);
       let vigia = null;
@@ -710,6 +714,14 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         } catch (e) {
           log(`conversación ${idConversation}: no se pudieron registrar los repos pedidos:`, e.message);
         }
+      }
+
+      // Cada adjunto queda ADEMÁS en los Archivos del proyecto. Nunca frena la respuesta: si falla,
+      // la respuesta sale igual con su adjunto y lo dice en una línea (archivar-proyecto.mjs).
+      if (archivador && adjuntosSalida.length > 0) {
+        await synerlink.estado(idConversation, 'tool', 'Archivando en el proyecto…').catch(() => null);
+        const notaArchivo = await archivador.archivar(idConversation, adjuntosSalida);
+        if (notaArchivo) cuerpo = `${cuerpo.slice(0, Math.max(0, MAX_RESPUESTA - notaArchivo.length - 2))}\n\n${notaArchivo}`;
       }
 
       if (adjuntosSalida.length > 0 && synerlink.responderConArchivos) {

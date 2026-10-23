@@ -158,7 +158,7 @@ export function asegurarCarpetas(rutas) {
 }
 
 /** Encabezado de sistema de cada turno. Breve: las instrucciones del proyecto van aparte o aquí. */
-export function textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo = '', bloqueCodigo = '', bloqueMemoria = '', bloqueConectores = '', bloquePdf = '', bloqueTiempo = '', bloquePruebas = '', bloqueObjetivo = '' }) {
+export function textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo = '', bloqueCodigo = '', bloqueMemoria = '', bloqueConectores = '', bloquePdf = '', bloqueTiempo = '', bloquePruebas = '', bloqueObjetivo = '', bloqueArchivar = '' }) {
   const p = contexto.project;
   const lineas = [
     `Usted es ${agente}, asistente de inteligencia artificial de la organización Group Shared Services Latinoamérica.`,
@@ -173,6 +173,8 @@ export function textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo =
     '- PROHIBIDO enviar datos de SAP, del chat, de los archivos o de la empresa a sitios externos: no los ponga en direcciones web, parámetros de URL, búsquedas ni formularios. La navegación es solo para LEER información pública.',
     '- Si necesita producir un documento, escríbalo en ./trabajo.',
     textoAdjuntosSalida(),
+    // Lo que adjunta queda también en los Archivos del proyecto (archivar-proyecto.mjs → textoArchivarProyecto).
+    ...(bloqueArchivar ? [bloqueArchivar] : []),
     // HTML → PDF en el puente y recursos de solo lectura de los plugins (pdf.mjs → textoPdf).
     ...(bloquePdf ? [bloquePdf] : []),
     // Tiempo máximo del turno y cómo dejar el avance a salvo (progreso.mjs → textoTiempoTurno).
@@ -330,8 +332,8 @@ export function limpiarPropuestas(rutas) {
 }
 
 /** Escribe sistema.md, CLAUDE.md, mcp.json, vinculados.md y cronograma.md del hilo. */
-export function escribirContexto({ rutas, agente, contexto, perfil, instruccionesEn, equipoTurno = null, bloqueCodigo = '', bloqueMemoria = '', bloqueConectores = '', bloquePdf = '', bloqueTiempo = '', bloquePruebas = '', bloqueObjetivo = '' }) {
-  writeFileSync(rutas.sistema, textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo: equipoTurno?.bloque ?? '', bloqueCodigo, bloqueMemoria, bloqueConectores, bloquePdf, bloqueTiempo, bloquePruebas, bloqueObjetivo }), { mode: MODO_ARCHIVO });
+export function escribirContexto({ rutas, agente, contexto, perfil, instruccionesEn, equipoTurno = null, bloqueCodigo = '', bloqueMemoria = '', bloqueConectores = '', bloquePdf = '', bloqueTiempo = '', bloquePruebas = '', bloqueObjetivo = '', bloqueArchivar = '' }) {
+  writeFileSync(rutas.sistema, textoSistema({ agente, contexto, instruccionesEn, bloqueEquipo: equipoTurno?.bloque ?? '', bloqueCodigo, bloqueMemoria, bloqueConectores, bloquePdf, bloqueTiempo, bloquePruebas, bloqueObjetivo, bloqueArchivar }), { mode: MODO_ARCHIVO });
   // Sin equipo, no queda ninguna definición vieja que se pueda colar.
   if (equipoTurno) writeFileSync(rutas.agentes, JSON.stringify(equipoTurno.agentes, null, 2), { mode: MODO_ARCHIVO });
   else rmSync(rutas.agentes, { force: true });

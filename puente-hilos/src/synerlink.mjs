@@ -12,6 +12,8 @@
  *   POST /api/chat/agent/messages         publicar la respuesta (JSON, o multipart con adjuntos) y los
  *                                         avisos de progreso (con el indicador aún «trabajando»)
  *   POST /api/chat/agent/projects/proposals  entregar las PROPUESTAS de tareas del turno
+ *   POST /api/chat/agent/projects/files      ARCHIVAR en los Archivos del proyecto lo que el hilo
+ *                                            adjunta (multipart; archivar-proyecto.mjs, 2026-10-23)
  *   POST /api/chat/agent/usage            consumo (tokens) del turno
  *   POST /api/chat/agent/quota            cupo semanal y ventana de 5 h del token (cuota.mjs)
  *   POST /api/chat/agent/projects/team/requests     pedidos de «Sugerir equipo» (los reclama)
@@ -21,9 +23,17 @@
  * La llave nunca se escribe en registros ni pasa al proceso del modelo.
  */
 export class ErrorSynerLink extends Error {
-  constructor(mensaje, status) {
+  /**
+   * @param {string} mensaje
+   * @param {number} status
+   * @param {{ detalle?: string | null, rutaAusente?: boolean }} [extra] `detalle`: el `error` de la API;
+   *   `rutaAusente`: 404 SIN cuerpo JSON de la API (ese SynerLink aún no trae la ruta).
+   */
+  constructor(mensaje, status, extra = {}) {
     super(mensaje);
     this.status = status;
+    this.detalle = extra.detalle ?? null;
+    this.rutaAusente = extra.rutaAusente === true;
   }
 }
 
@@ -95,6 +105,33 @@ export function crearClienteSynerLink({ url, llave, fetchImpl = globalThis.fetch
         const data = await res.json().catch(() => null);
         if (!res.ok) {
           throw new ErrorSynerLink(`POST /api/chat/agent/messages (adjuntos) -> HTTP ${res.status}${data?.error ? ` (${data.error})` : ''}`, res.status);
+        }
+        return data;
+      } finally {
+        clearTimeout(t);
+      }
+    },
+    /**
+     * ARCHIVA en los Archivos del proyecto de la conversación los adjuntos del turno
+     * (`archivos` ya validados y leídos por adjuntos-salida.mjs). La API resuelve el
+     * proyecto por la conversación y el agente por la llave; un nombre repetido vuelve
+     * con sufijo. Devuelve { archived: [{ id, fileName, originalName, renamed }], idProject }.
+     */
+    async archivarEnProyecto(idConversation, archivos) {
+      const form = new FormData();
+      form.append('idConversation', String(idConversation));
+      for (const a of archivos) form.append('files', new Blob([a.datos], { type: a.tipo }), a.nombre);
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 120_000);
+      try {
+        const res = await fetchImpl(`${url}/api/chat/agent/projects/files`, { method: 'POST', headers: cabeceras, body: form, signal: ctrl.signal });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          const detalle = typeof data?.error === 'string' ? data.error : null;
+          throw new ErrorSynerLink(`POST /api/chat/agent/projects/files -> HTTP ${res.status}${detalle ? ` (${detalle})` : ''}`, res.status, {
+            detalle,
+            rutaAusente: res.status === 404 && !detalle,
+          });
         }
         return data;
       } finally {
