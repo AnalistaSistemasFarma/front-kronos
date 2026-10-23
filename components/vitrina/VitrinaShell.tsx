@@ -34,11 +34,13 @@ export interface VitrinaShellProps {
   title: string;
   subtitle: (company: CompanyAccess) => string;
   requireGestion?: boolean;
+  /** Eslabones intermedios de la miga (entre «Procesos» y el título), p. ej. Vitrina Comercial › Biblioteca. */
+  trail?: (company: CompanyAccess) => { label: string; href: string }[];
   actions?: (company: CompanyAccess) => ReactNode;
   children: (company: CompanyAccess) => ReactNode;
 }
 
-export default function VitrinaShell({ title, subtitle, requireGestion, actions, children }: VitrinaShellProps) {
+export default function VitrinaShell({ title, subtitle, requireGestion, trail, actions, children }: VitrinaShellProps) {
   const [estado, setEstado] = useState<Estado>({ tipo: 'cargando' });
   const [companyId, setCompanyIdState] = useState<string | null>(null);
 
@@ -112,6 +114,11 @@ export default function VitrinaShell({ title, subtitle, requireGestion, actions,
             <Anchor component={Link} href='/process'>
               Procesos
             </Anchor>
+            {trail?.(company).map((t) => (
+              <Anchor key={t.href} component={Link} href={t.href}>
+                {t.label}
+              </Anchor>
+            ))}
             <Text>{title}</Text>
           </Breadcrumbs>
           <Group justify='space-between' align='flex-end' wrap='wrap' gap='md'>
