@@ -1,6 +1,6 @@
 import sql from 'mssql';
 import sqlConfig from '../../dbconfig.js';
-import { onAuthorizationDecision } from '../purchases/authorization';
+import { moveDraftToAuthorize, onAuthorizationDecision } from '../purchases/authorization';
 import { prisma } from '../prisma';
 import { advanceSequentialTask } from '../workflow/advanceSequentialTask.js';
 import { closeRequestGeneral } from '../workflow/closeRequestGeneral.js';
@@ -126,6 +126,10 @@ async function runAction(
       if (r.skipped) return { ok: false, wait: true, error: 'Esperando que se aprueben todas las autorizaciones.' };
       if (r.status === 'approved') return { ok: true, detail: 'Solicitud en firme publicada en SAP' };
       return { ok: false, error: r.error ?? `Estado ${r.status}` };
+    }
+    case 'purchase.state_to_authorize': {
+      const r = await moveDraftToAuthorize(idRequest, triggeredBy);
+      return r.ok ? { ok: true, detail: r.detail } : { ok: false, error: r.error };
     }
     default:
       return { ok: false, error: `La acción «${actionKey}» no tiene ejecutor automático.` };
