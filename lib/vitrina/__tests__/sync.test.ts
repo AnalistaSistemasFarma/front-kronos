@@ -44,7 +44,7 @@ describe('Vitrina · plan de sincronización con SAP', () => {
       hoy: HOY,
     });
     expect(plan.crear).toEqual([
-      { item_code: 'PTMP0111', item_name: 'Nombre PTMP0111', items_group_code: 130, canal: 'SIN_DATO', sug_familia: 'Carbapenémicos', registro_estado: 'POR_VENCER', registro_sanitario: 'INVIMA X', registro_vence_en: '2026-12-01', pais: null },
+      { item_code: 'PTMP0111', item_name: 'Nombre PTMP0111', items_group_code: 130, items_group_name: null, canal: 'SIN_DATO', sug_familia: 'Carbapenémicos', registro_estado: 'POR_VENCER', registro_sanitario: 'INVIMA X', registro_vence_en: '2026-12-01', pais: null },
     ]);
     expect(plan.leidos).toEqual(['PTMP0111', 'PTMP0112']);
     expect(plan.resumen).toMatchObject({ leidosSap: 2, vendibles: 1, nuevos: 1, retirados: 0 });
