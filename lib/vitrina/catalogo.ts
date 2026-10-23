@@ -6,11 +6,12 @@
  *   - vista interna: presentaciones VALIDADAS con al menos un código activado y
  *     activo en SAP; muestra INTERNA, CLIENTE y OFERTABLE de la empresa;
  *   - modo presentación: solo códigos CLIENTE u OFERTABLE con registro VIGENTE,
- *     POR_VENCER o SIN_FECHA (nunca VENCIDO ni SIN_REGISTRO); los productos para
+ *     POR_VENCER o SIN_FECHA, «sin vencimiento» (nunca VENCIDO ni SIN_REGISTRO); los productos para
  *     terceros nunca salen; se quitan los códigos SAP, las exclusividades, las
  *     alertas y los estados internos.
- * También: filtros combinables, agrupación por familia, conteo por país y la
- * navegación del modo presentación. Sin stock ni precios (fase 1).
+ * También: filtros combinables, agrupación por familia, línea comercial, grupo terapéutico
+ * y servicio (área asistencial), conteos para el Inicio, conteo por país y la navegación del
+ * modo presentación. Sin stock ni precios (fase 1).
  */
 import {
   VITRINA_MAX_DESTACADAS,
@@ -56,6 +57,10 @@ export interface CatalogoFila {
   destacada: boolean;
   codigos: CatalogoFilaCodigo[];
   areas: { area: { nombre: string; activa: boolean; orden: number } }[];
+  /** Línea comercial de la empresa (0 o 1). */
+  linea?: { nombre: string; activa: boolean; orden: number } | null;
+  /** Grupos terapéuticos (catálogo común a las empresas). */
+  grupos?: { grupo: { nombre: string; activo: boolean; orden: number } }[];
   imagenes: { id_imagen: number; tipo: string; vigente: boolean }[];
   exclusividades: {
     cliente_beneficiario: string;
@@ -107,7 +112,12 @@ export interface CatalogoItem {
   esParaTerceros: boolean;
   /** La mayor visibilidad entre sus códigos visibles. */
   visibilidad: VitrinaVisibilidad;
+  /** Servicios (áreas asistenciales) activos, en su orden. */
   areas: string[];
+  /** Línea comercial activa de la empresa, o null. */
+  linea: string | null;
+  /** Grupos terapéuticos activos, en su orden. */
+  grupos: string[];
   paises: string[];
   canales: VitrinaCanal[];
   codigos: CatalogoCodigo[];
@@ -193,6 +203,10 @@ export function itemDeCatalogo(fila: CatalogoFila, modo: VitrinaModo, hoy: strin
     .filter((a) => a.area.activa)
     .sort((a, b) => a.area.orden - b.area.orden || compara(a.area.nombre, b.area.nombre))
     .map((a) => a.area.nombre);
+  const grupos = [...(fila.grupos ?? [])]
+    .filter((g) => g.grupo.activo)
+    .sort((a, b) => a.grupo.orden - b.grupo.orden || compara(a.grupo.nombre, b.grupo.nombre))
+    .map((g) => g.grupo.nombre);
   return {
     id: fila.id_presentacion,
     molecula: fila.molecula,
@@ -206,6 +220,8 @@ export function itemDeCatalogo(fila: CatalogoFila, modo: VitrinaModo, hoy: strin
     esParaTerceros: modo === 'interna' ? fila.es_para_terceros : false,
     visibilidad,
     areas,
+    linea: fila.linea?.activa ? fila.linea.nombre : null,
+    grupos,
     paises: unicos(codigos.map((c) => c.pais)),
     canales: [...new Set(codigos.map((c) => c.canal))].filter((c) => c !== 'SIN_DATO').sort(compara) as VitrinaCanal[],
     codigos,
@@ -239,11 +255,14 @@ export interface CatalogoFiltros {
   q?: string | null;
   pais?: string | null;
   canal?: string | null;
+  /** Servicio (área asistencial). */
   area?: string | null;
   forma?: string | null;
+  linea?: string | null;
+  grupo?: string | null;
 }
 
-export const FILTROS_CLAVES = ['q', 'pais', 'canal', 'area', 'forma'] as const;
+export const FILTROS_CLAVES = ['q', 'pais', 'canal', 'area', 'forma', 'linea', 'grupo'] as const;
 
 /** Minúsculas y sin tildes, para buscar «cefalosporinas» con «Cefalosporínas» o «CEFALO». */
 export function normalizarTexto(s: string | null | undefined): string {
@@ -252,7 +271,7 @@ export function normalizarTexto(s: string | null | undefined): string {
 
 function textoDeBusqueda(p: CatalogoItem): string {
   return normalizarTexto(
-    [p.molecula, p.concentracion, p.formaFarmaceutica, p.nombreComercial, p.tallMan, p.familia, p.unidadesCaja ? `x${p.unidadesCaja}` : null, ...p.areas, ...p.codigos.map((c) => c.itemCode)]
+    [p.molecula, p.concentracion, p.formaFarmaceutica, p.nombreComercial, p.tallMan, p.familia, p.linea, p.unidadesCaja ? `x${p.unidadesCaja}` : null, ...p.areas, ...p.grupos, ...p.codigos.map((c) => c.itemCode)]
       .filter(Boolean)
       .join(' ')
   );
@@ -269,7 +288,11 @@ export function filtrarCatalogo(items: readonly CatalogoItem[], f: CatalogoFiltr
   const canal = f.canal?.trim() || null;
   const area = f.area?.trim() || null;
   const forma = f.forma?.trim() || null;
+  const linea = f.linea?.trim() || null;
+  const grupo = f.grupo?.trim() || null;
   return items.filter((p) => {
+    if (linea && p.linea !== linea) return false;
+    if (grupo && !p.grupos.includes(grupo)) return false;
     if (area && !p.areas.includes(area)) return false;
     if (forma && normalizarTexto(p.formaFarmaceutica) !== normalizarTexto(forma)) return false;
     if ((pais || canal) && !p.codigos.some((c) => (!pais || c.pais === pais) && (!canal || c.canal === canal))) return false;
@@ -290,14 +313,24 @@ export interface CatalogoFacetas {
   canales: VitrinaCanal[];
   areas: string[];
   formas: string[];
+  lineas: string[];
+  grupos: string[];
 }
 
-export function facetasCatalogo(items: readonly CatalogoItem[]): CatalogoFacetas {
+/** Nombres en el orden que definieron los administradores; los que no estén en «orden», al final y alfabéticos. */
+export function ordenarSegun(nombres: readonly string[], orden: readonly string[] | undefined): string[] {
+  const pos = new Map((orden ?? []).map((n, i) => [n, i]));
+  return [...nombres].sort((a, b) => (pos.get(a) ?? Number.MAX_SAFE_INTEGER) - (pos.get(b) ?? Number.MAX_SAFE_INTEGER) || compara(a, b));
+}
+
+export function facetasCatalogo(items: readonly CatalogoItem[], orden?: OrdenCatalogos): CatalogoFacetas {
   return {
     paises: unicos(items.flatMap((p) => p.paises)),
     canales: [...new Set(items.flatMap((p) => p.canales))].sort(compara) as VitrinaCanal[],
-    areas: unicos(items.flatMap((p) => p.areas)),
+    areas: ordenarSegun(unicos(items.flatMap((p) => p.areas)), orden?.areas),
     formas: unicos(items.map((p) => p.formaFarmaceutica)),
+    lineas: ordenarSegun(unicos(items.map((p) => p.linea)), orden?.lineas),
+    grupos: ordenarSegun(unicos(items.flatMap((p) => p.grupos)), orden?.grupos),
   };
 }
 
@@ -346,6 +379,149 @@ export function agruparPorFamilia(items: readonly CatalogoItem[]): GrupoFamilia[
   return [...map.entries()]
     .sort(([a], [b]) => (a === SIN_FAMILIA ? 1 : b === SIN_FAMILIA ? -1 : compara(a, b)))
     .map(([familia, list]) => ({ familia, items: ordenarCatalogo(list) }));
+}
+
+// ---------------------------------------------------------------------------
+// Navegación del comercial: Línea comercial → Grupo terapéutico → Servicio (y Familia)
+// ---------------------------------------------------------------------------
+
+export const VITRINA_AGRUPACIONES = ['familia', 'linea', 'grupo', 'area'] as const;
+export type CatalogoAgrupacion = (typeof VITRINA_AGRUPACIONES)[number];
+
+export const AGRUPACION_LABEL: Record<CatalogoAgrupacion, string> = {
+  familia: 'Familia',
+  linea: 'Línea comercial',
+  grupo: 'Grupo terapéutico',
+  area: 'Servicio',
+};
+
+/** Encabezado de la estantería de lo que no tiene el dato (va al final). */
+export const SIN_DATO_AGRUPACION: Record<CatalogoAgrupacion, string> = {
+  familia: SIN_FAMILIA,
+  linea: 'Sin línea comercial',
+  grupo: 'Sin grupo terapéutico',
+  area: 'Sin servicio asignado',
+};
+
+/** Siguiente nivel al navegar: Línea → Grupo terapéutico → Servicio. */
+export const SUBNIVEL: Record<CatalogoAgrupacion, CatalogoAgrupacion | null> = {
+  familia: null,
+  linea: 'grupo',
+  grupo: 'area',
+  area: null,
+};
+
+/** Orden que definen los administradores (columna «orden») para las líneas, los grupos y los servicios. */
+export interface OrdenCatalogos {
+  lineas: string[];
+  grupos: string[];
+  areas: string[];
+}
+
+export const ORDEN_VACIO: OrdenCatalogos = { lineas: [], grupos: [], areas: [] };
+
+/** Nombres ACTIVOS ordenados por su «orden» (y luego por nombre), a partir de las filas de la base. */
+export function ordenDeCatalogos(filas: readonly Pick<CatalogoFila, 'areas' | 'linea' | 'grupos'>[]): OrdenCatalogos {
+  const ordenar = (m: Map<string, number>) => [...m.entries()].sort((a, b) => a[1] - b[1] || compara(a[0], b[0])).map(([n]) => n);
+  const lineas = new Map<string, number>();
+  const grupos = new Map<string, number>();
+  const areas = new Map<string, number>();
+  for (const f of filas) {
+    if (f.linea?.activa) lineas.set(f.linea.nombre, f.linea.orden);
+    for (const g of f.grupos ?? []) if (g.grupo.activo) grupos.set(g.grupo.nombre, g.grupo.orden);
+    for (const a of f.areas) if (a.area.activa) areas.set(a.area.nombre, a.area.orden);
+  }
+  return { lineas: ordenar(lineas), grupos: ordenar(grupos), areas: ordenar(areas) };
+}
+
+function ordenDe(orden: OrdenCatalogos, por: CatalogoAgrupacion): readonly string[] {
+  return por === 'linea' ? orden.lineas : por === 'grupo' ? orden.grupos : por === 'area' ? orden.areas : [];
+}
+
+/** Claves de una presentación en una agrupación (grupos y servicios pueden ser varios). [] = sin dato. */
+function clavesDe(p: CatalogoItem, por: CatalogoAgrupacion): string[] {
+  if (por === 'familia') return p.familia?.trim() ? [p.familia.trim()] : [];
+  if (por === 'linea') return p.linea ? [p.linea] : [];
+  if (por === 'grupo') return p.grupos;
+  return p.areas;
+}
+
+export interface GrupoCatalogo {
+  clave: string;
+  /** true = estantería de las que no tienen el dato. */
+  sinDato: boolean;
+  items: CatalogoItem[];
+}
+
+/**
+ * Estanterías por familia, línea comercial, grupo terapéutico o servicio. Una presentación con
+ * varios grupos o servicios aparece en cada uno (en UCI y en Urgencias, p. ej.). Orden: el que
+ * definieron los administradores, luego alfabético; «Sin …» al final.
+ */
+export function agruparCatalogo(items: readonly CatalogoItem[], por: CatalogoAgrupacion, orden: OrdenCatalogos = ORDEN_VACIO): GrupoCatalogo[] {
+  const map = new Map<string, CatalogoItem[]>();
+  const sin: CatalogoItem[] = [];
+  for (const p of items) {
+    const claves = clavesDe(p, por);
+    if (claves.length === 0) sin.push(p);
+    for (const c of claves) {
+      const list = map.get(c);
+      if (list) list.push(p);
+      else map.set(c, [p]);
+    }
+  }
+  const grupos: GrupoCatalogo[] = ordenarSegun([...map.keys()], ordenDe(orden, por)).map((clave) => ({ clave, sinDato: false, items: ordenarCatalogo(map.get(clave) ?? []) }));
+  if (sin.length) grupos.push({ clave: SIN_DATO_AGRUPACION[por], sinDato: true, items: ordenarCatalogo(sin) });
+  return grupos;
+}
+
+export interface ConteoCatalogo {
+  nombre: string;
+  presentaciones: number;
+}
+
+/** Accesos rápidos del Inicio («Por servicio», «Por grupo terapéutico»): cada valor con su número de presentaciones. */
+export function conteoPor(items: readonly CatalogoItem[], por: Exclude<CatalogoAgrupacion, 'familia'>, orden: OrdenCatalogos = ORDEN_VACIO): ConteoCatalogo[] {
+  return agruparCatalogo(items, por, orden)
+    .filter((g) => !g.sinDato)
+    .map((g) => ({ nombre: g.clave, presentaciones: g.items.length }));
+}
+
+/** El filtro que corresponde a una estantería (para «Presentar» o abrir la Biblioteca filtrada). */
+export function filtroDeGrupo(por: CatalogoAgrupacion, clave: string): CatalogoFiltros | null {
+  if (por === 'familia') return null;
+  return { [por]: clave } as CatalogoFiltros;
+}
+
+/** Agrupación desde la URL (?agrupar=linea); por defecto, familia. */
+export function agrupacionDesdeParams(params: URLSearchParams | { get(k: string): string | null }): CatalogoAgrupacion {
+  const v = params.get('agrupar');
+  return (VITRINA_AGRUPACIONES as readonly string[]).includes(v ?? '') ? (v as CatalogoAgrupacion) : 'familia';
+}
+
+/** Texto corto de los filtros activos, para el encabezado del modo presentación: «UCI · Antibióticos». */
+export function descripcionFiltros(f: CatalogoFiltros): string {
+  return [f.linea, f.grupo, f.area, f.forma, f.pais, f.canal ? (f.canal === 'INSTITUCIONAL' ? 'Institucional' : f.canal === 'COMERCIAL' ? 'Comercial' : null) : null, f.q ? `«${f.q.trim()}»` : null]
+    .map((x) => x?.trim())
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/**
+ * PREPARADO, NO ACTIVO (ver VITRINA_MULTIEMPRESA_HABILITADA): junta los catálogos de VARIAS
+ * empresas en un grupo terapéutico (el catálogo de grupos es común). Cada presentación lleva su
+ * empresa. Ninguna ruta ni pantalla lo usa hoy.
+ */
+export interface CatalogoEmpresa {
+  idCompany: number;
+  empresa: string;
+  items: CatalogoItem[];
+}
+
+export function catalogoMultiempresaPorGrupo(porEmpresa: readonly CatalogoEmpresa[], grupo: string): (CatalogoItem & { idCompany: number; empresa: string })[] {
+  return porEmpresa
+    .flatMap((e) => e.items.filter((p) => p.grupos.includes(grupo)).map((p) => ({ ...p, idCompany: e.idCompany, empresa: e.empresa })))
+    .sort((a, b) => compara(a.empresa, b.empresa) || compara(a.molecula, b.molecula) || a.id - b.id);
 }
 
 export interface PaisConteo {

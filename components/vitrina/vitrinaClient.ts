@@ -1,5 +1,6 @@
 'use client';
 
+import type { CatalogoItem, OrdenCatalogos } from '../../lib/vitrina/catalogo';
 import { VITRINA_CANALES, VITRINA_ESTADOS, VITRINA_VISIBILIDADES, CANAL_LABEL, ESTADO_LABEL, VISIBILIDAD_LABEL } from '../../lib/vitrina/constants';
 
 /**
@@ -35,6 +36,12 @@ export const OPCIONES_ESTADO = VITRINA_ESTADOS.map((v) => ({ value: v, label: ES
 export function nombrePresentacion(p: { molecula: string; concentracion?: string | null; unidadesCaja?: number | null; nombreComercial?: string | null }): string {
   const base = [p.molecula, p.concentracion, p.unidadesCaja ? `x${p.unidadesCaja}` : null].filter(Boolean).join(' ');
   return p.nombreComercial ? `${base} (${p.nombreComercial})` : base;
+}
+
+/** Respuesta de /api/vitrina/catalogo: presentaciones de UNA empresa y el orden de líneas, grupos y servicios. */
+export interface CatalogoResp {
+  presentaciones: CatalogoItem[];
+  orden?: OrdenCatalogos;
 }
 
 /** Catálogo del comercial (vista interna o, con modo «presentacion», la versión para el cliente armada en el servidor). */

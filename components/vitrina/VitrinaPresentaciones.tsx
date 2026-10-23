@@ -31,7 +31,7 @@ export default function VitrinaPresentaciones({ company, version, avisar, onMedi
     return all.filter(
       (p) =>
         (!estado || p.estado === estado) &&
-        (!t || [nombrePresentacion(p), p.familia ?? '', ...p.codigos.map((c) => c.itemCode)].some((v) => v.toLowerCase().includes(t)))
+        (!t || [nombrePresentacion(p), p.familia ?? '', p.linea?.nombre ?? '', ...p.grupos.map((g) => g.nombre), ...p.codigos.map((c) => c.itemCode)].some((v) => v.toLowerCase().includes(t)))
     );
   }, [data, q, estado]);
 
@@ -59,7 +59,7 @@ export default function VitrinaPresentaciones({ company, version, avisar, onMedi
         </Alert>
       )}
       <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
-        <TextInput size='md' placeholder='Buscar por molécula, familia o código' leftSection={<IconSearch size={18} />} value={q} onChange={(e) => setQ(e.currentTarget.value)} />
+        <TextInput size='md' placeholder='Buscar por molécula, familia, línea, grupo o código' leftSection={<IconSearch size={18} />} value={q} onChange={(e) => setQ(e.currentTarget.value)} />
         <SgcSelect size='md' placeholder='Estado' data={OPCIONES_ESTADO} value={estado} onChange={setEstado} clearable />
       </SimpleGrid>
 
@@ -105,9 +105,9 @@ export default function VitrinaPresentaciones({ company, version, avisar, onMedi
                   <Text size='sm'>
                     {[p.formaFarmaceutica, p.tallMan ? `Tall Man: ${p.tallMan}` : null].filter(Boolean).join(' · ') || 'Sin forma farmacéutica'}
                   </Text>
-                  <Group gap={6}>
-                    {p.areas.length ? p.areas.map((a) => <Badge key={a.id} variant='light' size='sm'>{a.nombre}</Badge>) : <Text size='sm' c='dimmed'>Sin áreas asistenciales</Text>}
-                  </Group>
+                  <Clasif etiqueta='Línea comercial' vacio='Sin línea comercial' valores={p.linea ? [{ id: p.linea.id, nombre: p.linea.activa ? p.linea.nombre : `${p.linea.nombre} (inactiva)` }] : []} />
+                  <Clasif etiqueta='Grupos terapéuticos' vacio='Sin grupos terapéuticos' valores={p.grupos} />
+                  <Clasif etiqueta='Servicios' vacio='Sin servicios (áreas asistenciales)' valores={p.areas} />
                   <Group gap='sm' wrap='wrap'>
                     <Button size='sm' variant='default' leftSection={<IconEdit size={16} />} onClick={() => setEditar(p)}>
                       Editar
@@ -189,6 +189,7 @@ export default function VitrinaPresentaciones({ company, version, avisar, onMedi
                         {c.canal !== 'SIN_DATO' && <Badge variant='outline' color='gray' size='sm'>Canal en {OPCIONES_VISIBILIDAD.find((o) => o.value === c.visibilidadCanal)?.label.toLowerCase()}</Badge>}
                         {!c.activoEnSap && <Badge variant='light' color='red' size='sm'>Inactivo en SAP</Badge>}
                         {c.clienteMarca && <Badge variant='outline' color='gray' size='sm'>{c.clienteMarca}</Badge>}
+                        {c.grupoSap && <Badge variant='outline' color='gray' size='sm' tt='none'>{c.grupoSap}</Badge>}
                       </Group>
                       {c.motivos.length > 0 && c.visibilidadEfectiva !== 'CLIENTE' && c.visibilidadEfectiva !== 'OFERTABLE' && (
                         <Text size='xs' c='dimmed' mt={6}>
@@ -235,6 +236,27 @@ export default function VitrinaPresentaciones({ company, version, avisar, onMedi
         />
       )}
     </Stack>
+  );
+}
+
+function Clasif({ etiqueta, vacio, valores }: { etiqueta: string; vacio: string; valores: { id: number; nombre: string }[] }) {
+  return (
+    <Group gap={6} wrap='wrap' align='center'>
+      <Text size='xs' c='dimmed' fw={600} w={{ base: '100%', xs: 130 }}>
+        {etiqueta}
+      </Text>
+      {valores.length ? (
+        valores.map((v) => (
+          <Badge key={v.id} variant='light' size='sm'>
+            {v.nombre}
+          </Badge>
+        ))
+      ) : (
+        <Text size='sm' c='dimmed'>
+          {vacio}
+        </Text>
+      )}
+    </Group>
   );
 }
 

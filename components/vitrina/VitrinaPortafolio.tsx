@@ -5,19 +5,19 @@ import { useRouter } from 'next/navigation';
 import { Alert, Card, Group, Loader, Stack, Table, Text } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import { VITRINA_URLS, vitrinaHref } from '../../lib/vitrina/constants';
-import { facetasCatalogo, filtrarCatalogo, type CatalogoItem } from '../../lib/vitrina/catalogo';
+import { facetasCatalogo, filtrarCatalogo } from '../../lib/vitrina/catalogo';
 import type { CompanyAccess } from './types';
 import VitrinaEnConstruccion from './VitrinaEnConstruccion';
 import VitrinaFiltros, { useFiltrosUrl } from './VitrinaFiltros';
-import { catalogoUrl, useVitrinaFetch } from './vitrinaClient';
+import { catalogoUrl, useVitrinaFetch, type CatalogoResp } from './vitrinaClient';
 
 /** Portafolio: lista densa (forma, nombre, concentración y unidades por caja). Cada fila abre la ficha. */
 export default function VitrinaPortafolio({ company }: { company: CompanyAccess }) {
   const router = useRouter();
-  const { data, error, loading } = useVitrinaFetch<{ presentaciones: CatalogoItem[] }>(catalogoUrl(company.idCompany));
+  const { data, error, loading } = useVitrinaFetch<CatalogoResp>(catalogoUrl(company.idCompany));
   const [filtros, setFiltros] = useFiltrosUrl();
   const items = useMemo(() => data?.presentaciones ?? [], [data]);
-  const facetas = useMemo(() => facetasCatalogo(items), [items]);
+  const facetas = useMemo(() => facetasCatalogo(items, data?.orden), [items, data]);
   const filtradas = useMemo(() => filtrarCatalogo(items, filtros), [items, filtros]);
 
   if (loading && !data) {

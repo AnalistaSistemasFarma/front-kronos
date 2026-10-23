@@ -104,7 +104,8 @@ export default function VitrinaBandeja({ company, version, avisar }: { company: 
         <SgcSelect
           size='md'
           placeholder='Grupo de SAP'
-          data={(data?.grupos ?? []).map((g) => ({ value: String(g), label: `Grupo ${g}` }))}
+          data={(data?.grupos ?? []).map((g) => ({ value: String(g.codigo), label: g.nombre }))}
+          searchable
           value={grupo}
           onChange={setGrupo}
           clearable
@@ -216,7 +217,11 @@ function TarjetaBandeja({ item, checked, onToggle }: { item: BandejaItem; checke
         <Checkbox checked={checked} onChange={onToggle} onClick={(e) => e.stopPropagation()} size='md' aria-label={`Elegir ${item.itemCode}`} />
       </Group>
       <Group gap={6} mt={8} wrap='wrap'>
-        {item.grupo !== null && <Badge variant='outline' color='gray' size='sm'>Grupo {item.grupo}</Badge>}
+        {item.grupoNombre && (
+          <Badge variant='outline' color='gray' size='sm' tt='none' title={item.grupo !== null ? `Grupo de SAP ${item.grupo}` : undefined}>
+            {item.grupoNombre}
+          </Badge>
+        )}
         {item.pais && <Badge variant='outline' color='gray' size='sm'>{item.pais}</Badge>}
         <CanalBadge canal={item.canal} />
         {item.leidoEnSap ? <RegistroBadge estado={item.registroEstado} venceEn={item.registroVenceEn} /> : <Badge variant='light' color='gray' size='sm'>Sin leer de SAP</Badge>}

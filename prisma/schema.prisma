@@ -140,6 +140,8 @@ model Company {
   vitrinaPresentaciones VitrinaPresentacion[]
   vitrinaCodigosSap     VitrinaCodigoSap[]
   vitrinaHistorial      VitrinaHistorial[]
+  // Vitrina Comercial (2026-10-23): líneas comerciales propias de la empresa.
+  vitrinaLineas         VitrinaLineaComercial[]
 
   @@map("company")
   @@schema("dbo")
@@ -5101,15 +5103,20 @@ model VitrinaPresentacion {
   creado_en          DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
   actualizado_por    String?   @db.NVarChar(50)
   actualizado_en     DateTime? @db.DateTime2
+  // Línea comercial de SU empresa (0 o 1). Migración 20261023120000_vitrina_lineas_grupos (columna nueva NULL).
+  id_linea           Int?
 
-  company        Company                   @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  company        Company                    @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  linea          VitrinaLineaComercial?     @relation(fields: [id_linea], references: [id_linea], onDelete: NoAction, onUpdate: NoAction)
   codigos        VitrinaCodigoSap[]
   areas          VitrinaPresentacionArea[]
+  grupos         VitrinaPresentacionGrupo[]
   exclusividades VitrinaExclusividad[]
   imagenes       VitrinaImagen[]
   documentos     VitrinaDocumento[]
 
   @@index([id_company, estado, visibilidad], map: "IX_vitrina_presentacion_company")
+  @@index([id_linea], map: "IX_vitrina_presentacion_linea")
   @@map("vitrina_presentacion")
   @@schema("dbo")
 }
@@ -5121,6 +5128,8 @@ model VitrinaCodigoSap {
   item_code          String    @db.NVarChar(50)
   item_name          String    @db.NVarChar(200)
   items_group_code   Int?
+  // Nombre del grupo de artículos en SAP (ItemGroups.GroupName, solo lectura), p. ej. «PT carbapenemas».
+  items_group_name   String?   @db.NVarChar(100)
   id_presentacion    Int?
   pais               String?   @db.NVarChar(60)
   // INSTITUCIONAL | COMERCIAL | SIN_DATO
@@ -5177,6 +5186,52 @@ model VitrinaPresentacionArea {
 
   @@id([id_presentacion, id_area])
   @@map("vitrina_presentacion_area")
+  @@schema("dbo")
+}
+
+/// Línea comercial POR EMPRESA (p. ej. Farmalógica: «Antibióticos inyectables»). No se borran: se desactivan.
+model VitrinaLineaComercial {
+  id_linea   Int      @id @default(autoincrement())
+  id_company Int
+  nombre     String   @db.NVarChar(100)
+  orden      Int      @default(0)
+  activa     Boolean  @default(true)
+  creado_en  DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  company        Company               @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  presentaciones VitrinaPresentacion[]
+
+  @@unique([id_company, nombre], map: "UQ_vitrina_linea_comercial_nombre")
+  @@map("vitrina_linea_comercial")
+  @@schema("dbo")
+}
+
+/// Grupo terapéutico: catálogo COMÚN a las empresas (Antibióticos, Analgésicos…). No se borran: se desactivan.
+model VitrinaGrupoTerapeutico {
+  id_grupo  Int      @id @default(autoincrement())
+  nombre    String   @db.NVarChar(100)
+  orden     Int      @default(0)
+  activo    Boolean  @default(true)
+  creado_en DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  presentaciones VitrinaPresentacionGrupo[]
+
+  @@unique([nombre], map: "UQ_vitrina_grupo_terapeutico_nombre")
+  @@map("vitrina_grupo_terapeutico")
+  @@schema("dbo")
+}
+
+/// Presentación × grupo terapéutico (una presentación puede tener varios, como las áreas).
+model VitrinaPresentacionGrupo {
+  id_presentacion Int
+  id_grupo        Int
+
+  presentacion VitrinaPresentacion     @relation(fields: [id_presentacion], references: [id_presentacion], onDelete: NoAction, onUpdate: NoAction)
+  grupo        VitrinaGrupoTerapeutico @relation(fields: [id_grupo], references: [id_grupo], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([id_presentacion, id_grupo])
+  @@index([id_grupo], map: "IX_vitrina_presentacion_grupo_grupo")
+  @@map("vitrina_presentacion_grupo")
   @@schema("dbo")
 }
 

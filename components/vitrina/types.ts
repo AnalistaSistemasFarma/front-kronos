@@ -13,6 +13,8 @@ export interface BandejaItem {
   itemCode: string;
   itemName: string;
   grupo: number | null;
+  /** Nombre del grupo de SAP («PT carbapenemas»); si no se ha leído, «Grupo 130». */
+  grupoNombre: string | null;
   pais: string | null;
   canal: string;
   clienteMarca: string | null;
@@ -35,7 +37,7 @@ export interface BandejaItem {
 
 export interface BandejaResp {
   items: BandejaItem[];
-  grupos: number[];
+  grupos: { codigo: number; nombre: string }[];
   paises: string[];
   gruposRyan: { producto: string; ids: number[]; avisos: string[] }[];
   totalBandeja: number;
@@ -45,6 +47,7 @@ export interface CodigoPresentacion {
   id: number;
   itemCode: string;
   itemName: string;
+  grupoSap: string | null;
   pais: string | null;
   canal: string;
   visibilidadCanal: string;
@@ -73,6 +76,8 @@ export interface Presentacion {
   esParaTerceros: boolean;
   destacada: boolean;
   areas: { id: number; nombre: string }[];
+  linea: { id: number; nombre: string; activa: boolean } | null;
+  grupos: { id: number; nombre: string }[];
   codigos: CodigoPresentacion[];
   faltantes: string[];
   activos: number;
@@ -80,13 +85,16 @@ export interface Presentacion {
   actualizadoEn: string;
 }
 
-export interface Area {
+/** Elemento de un catálogo administrable: servicio (área), línea comercial o grupo terapéutico. */
+export interface Clasificacion {
   id: number;
   nombre: string;
   activa: boolean;
   orden: number;
   presentaciones: number;
 }
+
+export type Area = Clasificacion;
 
 export interface Exclusividad {
   id: number;
@@ -104,7 +112,7 @@ export interface Exclusividad {
 
 export interface Alerta {
   tipo: string;
-  nivel: 'alerta' | 'aviso';
+  nivel: 'alerta' | 'aviso' | 'info';
   titulo: string;
   detalle: string;
   idPresentacion: number | null;
