@@ -36,3 +36,8 @@ export function nombrePresentacion(p: { molecula: string; concentracion?: string
   const base = [p.molecula, p.concentracion, p.unidadesCaja ? `x${p.unidadesCaja}` : null].filter(Boolean).join(' ');
   return p.nombreComercial ? `${base} (${p.nombreComercial})` : base;
 }
+
+/** Catálogo del comercial (vista interna o, con modo «presentacion», la versión para el cliente armada en el servidor). */
+export function catalogoUrl(idCompany: number, modo: 'interna' | 'presentacion' = 'interna'): string {
+  return `/api/vitrina/catalogo?company=${idCompany}${modo === 'presentacion' ? '&modo=presentacion' : ''}`;
+}
