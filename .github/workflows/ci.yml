@@ -538,6 +538,14 @@ jobs:
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/vitrina-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-22-vitrina-comercial-PROD.sql; then echo "El script de PROD de la Vitrina debió negarse en kronos_ci"; exit 1; fi
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-22-vitrina-subprocesos-PROD.sql; then echo "El script de PROD de subprocesos de la Vitrina debió negarse en kronos_ci"; exit 1; fi
+          # Archivos del agente en los Archivos del proyecto (2026-10-23): migración y PRUEBAS dos veces (idempotencia), columnas, y PROD que se niega.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261023150000_chat_project_file_agente/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261023150000_chat_project_file_agente/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-23-chat-project-file-agente-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-23-chat-project-file-agente-PRUEBAS.sql
+          echo "IF COL_LENGTH(N'dbo.chat_project_file', N'uploaded_by_agent') IS NULL OR COL_LENGTH(N'dbo.chat_project_file', N'id_conversation') IS NULL THROW 50000, N'La migración de archivos del agente no dejó las columnas.', 1;" > /tmp/archivos-agente-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/archivos-agente-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-23-chat-project-file-agente-PROD.sql; then echo "El script de PROD de archivos del agente debió negarse en kronos_ci"; exit 1; fi
           # Vitrina · líneas comerciales y grupos terapéuticos (2026-10-23): migración y PRUEBAS dos veces (idempotencia, con semilla), objetos, semilla sin duplicar y PROD que se niega.
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261023120000_vitrina_lineas_grupos/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261023120000_vitrina_lineas_grupos/migration.sql
@@ -578,7 +586,7 @@ jobs:
         run: |
           set -e
           # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
-          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida proyectos_permisos_agentes_reversa_acepta_perdida proyectos_config_agentes_reversa_acepta_perdida chat_stickers_personales_reversa_acepta_perdida vitrina_reversa_acepta_perdida vitrina_lineas_reversa_acepta_perdida"
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida proyectos_permisos_agentes_reversa_acepta_perdida proyectos_config_agentes_reversa_acepta_perdida chat_stickers_personales_reversa_acepta_perdida vitrina_reversa_acepta_perdida proyectos_archivos_agente_reversa_acepta_perdida vitrina_lineas_reversa_acepta_perdida"
           reversa() {
             { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
@@ -589,6 +597,17 @@ jobs:
             npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
           }
           # De la más nueva a la más antigua…
+          # Archivos del agente (2026-10-23): con una fila marcada, sin la bandera debe negarse; luego ida y vuelta (reversa dos veces, comprobación y la migración otra vez).
+          echo "UPDATE TOP (1) dbo.chat_project_file SET uploaded_by_agent = 1; IF NOT EXISTS (SELECT 1 FROM dbo.chat_project_file) INSERT INTO dbo.chat_project_file (id_project, file_name, uploaded_by_agent, id_conversation) SELECT TOP (1) id_project, N'ci-agente.pdf', 1, 1 FROM dbo.chat_project;" > /tmp/archivos-agente-dato.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/archivos-agente-dato.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-23-chat-project-file-agente-reversa.sql; then
+            echo "IF EXISTS (SELECT 1 FROM dbo.chat_project) THROW 50000, N'La reversa de archivos del agente debió negarse sin su bandera.', 1;" > /tmp/archivos-agente-nego.sql
+            npx prisma db execute --schema prisma/schema.prisma --file /tmp/archivos-agente-nego.sql
+          fi
+          reversa prisma/manual/2026-10-23-chat-project-file-agente-reversa.sql
+          echo "IF COL_LENGTH(N'dbo.chat_project_file', N'uploaded_by_agent') IS NOT NULL OR COL_LENGTH(N'dbo.chat_project_file', N'id_conversation') IS NOT NULL THROW 50000, N'La reversa de archivos del agente no quitó sus columnas.', 1;" > /tmp/archivos-agente-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/archivos-agente-quitado.sql
+          migra 20261023150000_chat_project_file_agente
           # Vitrina · líneas y grupos (2026-10-23): su reversa va ANTES que la del V2 (sus tablas apuntan a vitrina_presentacion); se vuelve a migrar después del V2.
           reversa prisma/manual/2026-10-23-vitrina-lineas-grupos-reversa.sql
           echo "IF EXISTS (SELECT 1 FROM sys.tables WHERE name IN (N'vitrina_linea_comercial', N'vitrina_grupo_terapeutico', N'vitrina_presentacion_grupo')) OR COL_LENGTH(N'dbo.vitrina_presentacion', N'id_linea') IS NOT NULL OR COL_LENGTH(N'dbo.vitrina_codigo_sap', N'items_group_name') IS NOT NULL THROW 50000, N'La reversa de líneas y grupos de la Vitrina no quitó lo suyo.', 1;" > /tmp/vitrina-lineas-quitado.sql
@@ -657,6 +676,7 @@ jobs:
           migra 20261018220000_proyectos_equipo_subagentes
           migra 20261019140000_proyectos_no_leidos
           migra 20261020190000_proyectos_permisos_agentes
+          migra 20261023150000_chat_project_file_agente
           # Padres e hijos (2026-10-19): con tipos padre marcados y relaciones creadas solas (integración), sin la bandera debe negarse.
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-19-sgc-padres-hijos-reversa.sql; then echo "La reversa de padres e hijos debió negarse sin su bandera"; exit 1; fi
           reversa prisma/manual/2026-10-19-sgc-padres-hijos-reversa.sql

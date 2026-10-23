@@ -93,6 +93,8 @@ export interface ArchivoDto {
   sizeBytes: number | null;
   createdAt: string;
   uploadedBy: PersonaDto | null;
+  /** Lo generó un agente en una conversación del proyecto (2026-10-23). */
+  uploadedByAgent: { idAgent: number; name: string; idConversation: number | null } | null;
   downloadUrl: string;
   puedoQuitar: boolean;
 }

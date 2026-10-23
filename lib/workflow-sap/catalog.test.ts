@@ -53,7 +53,10 @@ describe('validateTaskAction', () => {
 
 describe('actionsFor / triggersFor', () => {
   it('ofrece solo acciones disponibles para el tipo y disparador', () => {
-    expect(actionsFor('sap_executor', 'on_execute').map((a) => a.key)).toEqual(['purchase.publish_firm']);
+    expect(actionsFor('sap_executor', 'on_execute').map((a) => a.key)).toEqual([
+      'purchase.state_to_authorize',
+      'purchase.publish_firm',
+    ]);
     expect(actionsFor('authorization', 'on_reject').map((a) => a.key)).toEqual(['purchase.state_rejected']);
     expect(triggersFor('normal')).toEqual([]);
   });

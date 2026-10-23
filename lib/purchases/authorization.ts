@@ -501,6 +501,49 @@ export async function sendToQuotation(params: {
   }
 }
 
+/**
+ * Tarea SAP «Pasar a Por autorizar»: deja el borrador en LA. Idempotente: si ya
+ * esta en LA (porque lo dejo el envio) no hace nada. Solo desde B o ENC.
+ */
+export async function moveDraftToAuthorize(
+  idRequest: number,
+  triggeredBy: TriggeredBy
+): Promise<{ ok: true; detail: string } | { ok: false; error: string }> {
+  const link = await prisma.purchaseAuthorization.findUnique({ where: { id_request_general: idRequest } });
+  if (!link) return { ok: false, error: 'La solicitud no está enlazada a un borrador de compra.' };
+  const sap = await companySap(link.id_company);
+  try {
+    const draft = await sapGet<Record<string, unknown>>(sap, `Drafts(${link.doc_entry})?$select=DocEntry,U_SEND_State`);
+    const state = normalizeState(draft.U_SEND_State);
+    if (state === 'LA') return { ok: true, detail: `Borrador ${link.doc_entry} ya está «Por autorizar»` };
+    const check = checkTransition(state, state === 'ENC' ? 'reenviar' : 'enviar');
+    if (!check.ok) return { ok: false, error: check.error };
+    await withStep(
+      {
+        idRequest,
+        stepKind: 'sap',
+        stepName: 'Pasar a «Por autorizar»',
+        actionKey: 'purchase.state_to_authorize',
+        triggerEvent: 'on_execute',
+        triggeredBy,
+        idCompany: link.id_company,
+        sapEntity: 'Drafts',
+        requestSummary: { docEntry: link.doc_entry, de: state, a: 'LA' },
+      },
+      () =>
+        sapPatch(sap, `Drafts(${link.doc_entry})`, { U_SEND_State: 'LA' }, false, {
+          ifMatch: draft['odata.etag'] as string | undefined,
+        }),
+      () => ({ status: 'ok', sapDocEntry: link.doc_entry })
+    );
+    return { ok: true, detail: `Borrador ${link.doc_entry} pasó a «Por autorizar»` };
+  } catch (e) {
+    return { ok: false, error: e instanceof SapError ? e.friendly : (e as Error).message };
+  } finally {
+    await sapLogout(sap);
+  }
+}
+
 /** Reintenta publicar una aprobacion que quedo en error (es idempotente). */
 export function retryPublish(idRequest: number) {
   return onAuthorizationDecision(idRequest, true, null, 'retry');
