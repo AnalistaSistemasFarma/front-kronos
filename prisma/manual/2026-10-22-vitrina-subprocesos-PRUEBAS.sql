@@ -6,7 +6,7 @@
   Si falta, el script se detiene sin escribir nada.
 
   QUÉ HACE (idempotente; solo inserta lo que falta):
-    1. Proceso contenedor del menú «Ventas» (id 4 en KRONOSDB y KRONOSDB_PRUEBAS; se busca por nombre).
+    1. Proceso contenedor del menú «Ventas» (id 4; se busca por nombre).
     2. Subprocesos-permiso (iguales a lib/vitrina/constants.ts):
          /process/vitrina          Vitrina Comercial            (comerciales; catálogo en construcción en el V2)
          /process/vitrina/gestion  Vitrina Comercial · Gestión  (administradores: bandeja, presentaciones,
