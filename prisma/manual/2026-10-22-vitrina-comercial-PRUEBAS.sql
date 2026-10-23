@@ -6,7 +6,7 @@
     el MISMO bloque DDL de prisma/migrations/20261022200000_vitrina_comercial/migration.sql:
     8 tablas NUEVAS vitrina_* en dbo, con sus índices, llaves foráneas a company y CHECK.
 
-  ⚠️ ORDEN: ANTES del código (las rutas /api/vitrina/** leen estas tablas). Después de este,
+  ⚠️ ORDEN: ANTES del código (las rutas /api/vitrina/... leen estas tablas). Después de este,
   prisma/manual/2026-10-22-vitrina-subprocesos-PRUEBAS.sql (subprocesos, áreas y tarea nocturna).
 
   CÓMO CORRERLO: script Node con `mssql` (memoria «correr-sql-servidores-front-kronos») o SSMS,
