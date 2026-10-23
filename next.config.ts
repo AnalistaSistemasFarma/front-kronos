@@ -34,7 +34,25 @@ const sgcSecurityHeaders = [
 // (/api/health/version) para detectar que hay una versión nueva desplegada.
 const appBuildId = `${(process.env.GITHUB_SHA ?? 'local').slice(0, 12)}-${Date.now().toString(36)}`;
 
+// Entorno de pruebas (.230): SYNERLINK_ENTORNO=pruebas en su .env (ver lib/entorno).
+// Los navegadores piden /favicon.ico por su cuenta (y app/favicon.ico se declara
+// siempre), así que en pruebas se reescribe al ícono ámbar «TEST». En producción la
+// variable no existe y la config queda idéntica (no se define `rewrites`).
+const esEntornoPruebas = (process.env.SYNERLINK_ENTORNO ?? '').trim().toLowerCase() === 'pruebas';
+const rewritesPruebas: Pick<NextConfig, 'rewrites'> = esEntornoPruebas
+  ? {
+      async rewrites() {
+        return {
+          beforeFiles: [{ source: '/favicon.ico', destination: '/icons/pruebas/favicon-pruebas.png' }],
+          afterFiles: [],
+          fallback: [],
+        };
+      },
+    }
+  : {};
+
 const nextConfig: NextConfig = {
+  ...rewritesPruebas,
   generateBuildId: async () => appBuildId,
   async headers() {
     return [
