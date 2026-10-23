@@ -20,10 +20,17 @@
  *   - ENTORNO LIMPIO: el hijo no hereda el entorno del puente (ni la llave de
  *     SynerLink ni ningún secreto). Recibe solo PATH, HOME, el config dir
  *     AISLADO y UNA credencial del modelo.
+ *
+ * ÚNICA EXCEPCIÓN (2026-10-22, orden de Nicolás Rivera): el MODO ORUS COMPLETO
+ * (orus-completo.mjs), solo cuando TODOS los mensajes del turno son de un autor de
+ * HILOS_AUTORES_ORUS_COMPLETO según el servidor. Va por armarArgumentosCompleto
+ * (bypassPermissions, sin --restricted) y revisarInitCompleto; todo lo demás
+ * sigue por armarArgumentos/revisarInit, que rechazan bypassPermissions.
  */
 import { spawn } from 'node:child_process';
 import { HERRAMIENTAS_PROHIBIDAS } from './config.mjs';
 import { entornoTopes, HERRAMIENTAS_SUBAGENTE, revisarAgentesInit } from './equipo.mjs';
+import { NEGADAS_COMPLETO, revisarInitCompleto } from './orus-completo.mjs';
 
 /** Herramientas de archivos: lectura libre dentro del hilo, escritura solo en ./trabajo. */
 export const HERRAMIENTAS_BASE = ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'TodoWrite'];
@@ -36,6 +43,9 @@ export const SETTINGS_HIJO = {
   enabledPlugins: { 'telegram@claude-plugins-official': false },
   disableAllHooks: true,
   permissions: { disableBypassPermissionsMode: 'disable' },
+  // Sin memoria automática nativa: la memoria del agente llega en solo lectura
+  // desde el puente (memoria.mjs) y los proyectos no guardan memoria propia.
+  autoMemoryEnabled: false,
 };
 
 /**
@@ -43,7 +53,7 @@ export const SETTINGS_HIJO = {
  * fija el id con --session-id (así el puente lo conoce de antemano); después,
  * --resume con ese mismo id.
  */
-export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, presupuestoUsd, equipo = null, codigo = null }) {
+export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, presupuestoUsd, equipo = null, codigo = null, plugins = null, objetivo = false }) {
   if (!perfil) throw new Error('Falta el perfil.');
   if (!sesion?.id || !/^[0-9a-f-]{36}$/i.test(sesion.id)) throw new Error('session id inválido.');
 
@@ -54,18 +64,28 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
   // por uno. Sin equipo, Agent/Task siguen prohibidas como en la F1.
   // Acceso al código (nivel 2, 2026-10-20): Bash SOLO con las reglas de
   // codigo.mjs (git/gh/npm/npx/node) y dentro del sandbox de Claude Code.
-  const tools = [...HERRAMIENTAS_BASE, ...web, ...(equipo ? equipo.tools : []), ...(codigo ? codigo.tools : [])];
-  const permitidas = [...PERMITIDAS_BASE, ...web, ...perfil.herramientas, ...(equipo ? equipo.permitidas : []), ...(codigo ? codigo.permitidas : [])];
+  // Skills (2026-10-21): en --restricted solo entran por --plugin-dir; con plugins, la herramienta Skill.
+  const skill = plugins?.dirs?.length ? ['Skill'] : [];
+  const tools = [...HERRAMIENTAS_BASE, ...web, ...skill, ...(equipo ? equipo.tools : []), ...(codigo ? codigo.tools : [])];
+  const permitidas = [...PERMITIDAS_BASE, ...web, ...skill, ...perfil.herramientas, ...(equipo ? equipo.permitidas : []), ...(codigo ? codigo.permitidas : [])];
   const exentas = [...(equipo ? HERRAMIENTAS_SUBAGENTE : []), ...(codigo ? HERRAMIENTAS_CODIGO : [])];
   const prohibidas = [
     ...HERRAMIENTAS_PROHIBIDAS.filter((h) => !exentas.includes(h)),
     ...(equipo ? equipo.prohibidas : []),
     ...(codigo ? codigo.prohibidas : []),
   ];
-  if (codigo && !codigo.sandbox?.enabled) throw new Error('Turno con código sin sandbox: no se arma.');
+  // Sin sandbox SOLO con terminal completa (turno de operador en un proyecto con la bandera).
+  if (codigo && !codigo.sandbox?.enabled && codigo.terminalCompleta !== true) throw new Error('Turno con código sin sandbox: no se arma.');
   if (codigo && !codigo.hooks?.PreToolUse?.length) throw new Error('Turno con código sin el hook de subagentes: no se arma.');
   // Con código: sandbox y el ÚNICO hook (subagentes solo git de lectura); nada más.
-  const settings = codigo ? { ...SETTINGS_HIJO, disableAllHooks: false, hooks: codigo.hooks ?? {}, sandbox: codigo.sandbox } : SETTINGS_HIJO;
+  // /goal (comandos.mjs): Claude Code lo evalúa con un hook de sesión y se niega a correr con
+  // disableAllHooks. Solo en turnos con objetivo se prenden los hooks, y SIN ningún hook propio:
+  // --restricted ya ignora los settings de usuario/proyecto/local, así que no entra otro.
+  const settings = codigo
+    ? { ...SETTINGS_HIJO, disableAllHooks: false, hooks: codigo.hooks ?? {}, sandbox: codigo.sandbox }
+    : objetivo
+      ? { ...SETTINGS_HIJO, disableAllHooks: false, hooks: {} }
+      : SETTINGS_HIJO;
 
   const args = [
     '-p',
@@ -91,6 +111,9 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
   ];
   if (dirArchivos) args.push('--add-dir', dirArchivos);
   for (const d of codigo?.dirsExtra ?? []) args.push('--add-dir', d);
+  // Grafos de Graphify en solo lectura (Edit/Write siguen confinados a ./trabajo y ./codigo).
+  for (const d of plugins?.dirsLectura ?? []) args.push('--add-dir', d);
+  for (const d of plugins?.dirs ?? []) args.push('--plugin-dir', d);
   if (sesion.nueva) args.push('--session-id', sesion.id);
   else args.push('--resume', sesion.id);
   if (modelo) args.push('--model', modelo);
@@ -102,6 +125,80 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
     if (args.includes(prohibida)) throw new Error(`Argumento prohibido: ${prohibida}`);
   }
   return args;
+}
+
+/** Settings del turno en MODO ORUS COMPLETO: sin Telegram, sin hooks (salvo /goal) y sin memoria automática. */
+export const SETTINGS_COMPLETO = {
+  enabledPlugins: { 'telegram@claude-plugins-official': false },
+  disableAllHooks: true,
+  autoMemoryEnabled: false,
+};
+
+/**
+ * Argumentos del `claude -p` en MODO ORUS COMPLETO (orus-completo.mjs). EXCEPCIÓN documentada a la
+ * regla «nunca bypassPermissions»: solo se arma con un `completo` que preparó prepararOrusCompleto a
+ * partir de la identidad que entrega el servidor (todos los mensajes del turno de un autor de
+ * HILOS_AUTORES_ORUS_COMPLETO). Sin --restricted, sin --tools (todas), con bypassPermissions porque
+ * nadie responde preguntas en el puente. Se conservan: --strict-mcp-config (solo los conectores del
+ * principal + los del puente), --setting-sources user (el config AISLADO del puente: ningún
+ * settings de proyecto/local plantado en la carpeta del hilo), sin hooks y las negaciones de
+ * protección de ramas cuando hay repos montados.
+ */
+export function armarArgumentosCompleto({ completo, sesion, rutaSistema, dirArchivos, modelo, presupuestoUsd, codigo = null, plugins = null, objetivo = false, rutaAgentes = null }) {
+  if (completo?.activo !== true || !completo.rutaMcp) throw new Error('Modo completo sin activar: no se arma.');
+  if (!sesion?.id || !/^[0-9a-f-]{36}$/i.test(sesion.id)) throw new Error('session id inválido.');
+  const prohibidas = [...NEGADAS_COMPLETO, ...(codigo?.prohibidas ?? [])];
+  const settings = objetivo ? { ...SETTINGS_COMPLETO, disableAllHooks: false, hooks: {} } : SETTINGS_COMPLETO;
+  const args = [
+    '-p',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--setting-sources',
+    'user',
+    '--permission-mode',
+    'bypassPermissions',
+    '--disallowedTools',
+    ...prohibidas,
+    '--strict-mcp-config',
+    '--mcp-config',
+    completo.rutaMcp,
+    '--settings',
+    JSON.stringify(settings),
+    '--append-system-prompt-file',
+    rutaSistema,
+  ];
+  if (dirArchivos) args.push('--add-dir', dirArchivos);
+  for (const d of codigo?.dirsExtra ?? []) args.push('--add-dir', d);
+  for (const d of plugins?.dirsLectura ?? []) args.push('--add-dir', d);
+  for (const d of plugins?.dirs ?? []) args.push('--plugin-dir', d);
+  if (sesion.nueva) args.push('--session-id', sesion.id);
+  else args.push('--resume', sesion.id);
+  if (modelo) args.push('--model', modelo);
+  if (presupuestoUsd) args.push('--max-budget-usd', String(presupuestoUsd));
+  // Equipo aprobado del proyecto: sus definiciones quedan disponibles (sin restringir Agent).
+  if (rutaAgentes) args.push('--agents', rutaAgentes, '--forward-subagent-text');
+  for (const prohibida of ['--dangerously-skip-permissions', '--continue', '-c', '--restricted']) {
+    if (args.includes(prohibida)) throw new Error(`Argumento prohibido: ${prohibida}`);
+  }
+  return args;
+}
+
+/**
+ * Entorno del hijo en MODO COMPLETO: el de siempre (config AISLADO, una credencial), con la casa
+ * REAL de horus (llaves SSH, gh, ~/.horus/.env), sin los topes de subagentes (como el principal) y
+ * con las preguntas de git/gh apagadas. Nada más del entorno del puente.
+ */
+export function armarEntornoCompleto(cfg, extraCodigo = null) {
+  const env = armarEntorno(cfg, null, extraCodigo);
+  delete env.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS;
+  delete env.CLAUDE_CODE_DISABLE_EXPLORE_PLAN_AGENTS;
+  // Los trabajos en segundo plano sobrevivirían al turno: siguen apagados.
+  env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = '1';
+  env.HOME = cfg.home;
+  env.GIT_TERMINAL_PROMPT = '0';
+  env.GH_PROMPT_DISABLED = '1';
+  return env;
 }
 
 /**
@@ -152,6 +249,13 @@ export function armarEntorno({ path, home, configClaudeDir, credencial }, topes 
     CLAUDE_CONFIG_DIR: configClaudeDir,
     DISABLE_AUTOUPDATER: '1',
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+    // Cada comando de Bash vuelve a la carpeta del hilo: un `cd codigo/<repo>` no
+    // persiste y no rompe las reglas relativas de Edit/Write (gotcha del 2026-10-21).
+    CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: '1',
+    // Graphify SIEMPRE local: sin esto autodetecta llaves de proveedores o cae a `claude -p`.
+    GRAPHIFY_BACKEND: 'none',
+    GRAPHIFY_QUERY_LOG_DISABLE: '1',
     ...entornoTopes(topes),
   };
   // Turno con código: GH_TOKEN, HOME propio (home-codigo) y avisos de gh/npm apagados.
@@ -195,6 +299,8 @@ export function etiquetaHerramienta(nombre) {
   if (nombre.startsWith('mcp__')) {
     const [, servidor] = nombre.split('__');
     if (servidor?.startsWith('sap')) return 'Consultando SAP…';
+    if (servidor === 'kronos-pruebas-sql') return 'Trabajando en la base de PRUEBAS…';
+    if (servidor === 'synerlink-testing-web') return nombre.endsWith('testing_captura') ? 'Tomando una captura de testing…' : 'Revisando testing como usuario QA…';
     return `Consultando ${servidor}…`;
   }
   const mapa = {
@@ -206,6 +312,8 @@ export function etiquetaHerramienta(nombre) {
     WebSearch: 'Buscando en internet…',
     WebFetch: 'Leyendo una página web…',
     TodoWrite: 'Organizando la tarea…',
+    Bash: 'Ejecutando comandos…',
+    Skill: 'Usando una skill…',
     Agent: 'Repartiendo el trabajo entre el equipo…',
     Task: 'Repartiendo el trabajo entre el equipo…',
   };
@@ -226,8 +334,20 @@ export function acumularEvento(acc, evento) {
     if (evento.parent_tool_use_id) out.apiMessagesSubagents = (out.apiMessagesSubagents ?? 0) + 1;
     const modelo = evento.message?.model;
     if (modelo) out.modelos = [...new Set([...(out.modelos ?? []), modelo])];
-    const usos = (evento.message?.content ?? []).filter((c) => c?.type === 'tool_use');
+    const contenido = Array.isArray(evento.message?.content) ? evento.message.content : [];
+    const usos = contenido.filter((c) => c?.type === 'tool_use');
     if (usos.length > 0) out.ultimaHerramienta = usos[usos.length - 1].name;
+    // Para los avisos de progreso y el mensaje de corte (progreso.mjs): el último texto
+    // del hilo PRINCIPAL (lo de los subagentes no) y los archivos que tocó con Write/Edit.
+    if (!evento.parent_tool_use_id) {
+      const textos = contenido.filter((c) => c?.type === 'text' && typeof c.text === 'string' && c.text.trim());
+      if (textos.length > 0) out.ultimoTexto = textos[textos.length - 1].text.trim().slice(-2000);
+    }
+    const tocados = usos
+      .filter((u) => ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(u.name))
+      .map((u) => u.input?.file_path ?? u.input?.notebook_path)
+      .filter((f) => typeof f === 'string' && f);
+    if (tocados.length > 0) out.archivosTocados = [...new Set([...(out.archivosTocados ?? []), ...tocados])].slice(-50);
   } else if (evento?.type === 'result') {
     out.resultado = {
       ok: evento.subtype === 'success' && !evento.is_error,
@@ -267,11 +387,23 @@ export function acumularEvento(acc, evento) {
 }
 
 /**
+ * ¿Es la devolución del evaluador de /goal («Stop hook feedback: …», objetivo aún sin cumplir)?
+ * Llega como un mensaje `user` del hilo principal. En los turnos con objetivo es el único hook de
+ * parada que existe (los turnos con código solo tienen el PreToolUse de subagentes).
+ */
+export function esRevisionObjetivo(evento) {
+  if (evento?.type !== 'user' || evento.parent_tool_use_id) return false;
+  const c = evento.message?.content;
+  const textos = typeof c === 'string' ? [c] : Array.isArray(c) ? c.map((x) => (typeof x === 'string' ? x : x?.type === 'text' ? x.text : '')) : [];
+  return textos.some((t) => typeof t === 'string' && t.trimStart().startsWith('Stop hook feedback:'));
+}
+
+/**
  * Corre el proceso y devuelve el resumen del turno. `alEvento` recibe cada
  * evento (para mover el indicador). Mata el proceso si se pasa del tope o si
  * `revisarInit` encuentra un problema.
  */
-export function correrTurno({ bin, args, env, cwd, prompt, perfil, equipo = null, codigo: accesoCodigo = null, vigia = null, timeoutMs, alEvento = () => {}, spawnImpl = spawn }) {
+export function correrTurno({ bin, args, env, cwd, prompt, perfil, equipo = null, codigo: accesoCodigo = null, completo = null, vigia = null, timeoutMs, maxRevisionesObjetivo = 0, alEvento = () => {}, spawnImpl = spawn }) {
   return new Promise((resolve) => {
     const hijo = spawnImpl(bin, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
     let acc = { apiMessages: 0, apiMessagesSubagents: 0, modelos: [] };
@@ -279,6 +411,7 @@ export function correrTurno({ bin, args, env, cwd, prompt, perfil, equipo = null
     let stderr = '';
     let abortado = null;
     let terminado = false;
+    let revisionesObjetivo = 0;
 
     const matar = (motivo) => {
       if (abortado) return;
@@ -311,13 +444,20 @@ export function correrTurno({ bin, args, env, cwd, prompt, perfil, equipo = null
         }
         acc = acumularEvento(acc, evento);
         if (evento.type === 'system' && evento.subtype === 'init') {
-          const problemas = revisarInit(evento, perfil, equipo, accesoCodigo);
+          // Modo Orus completo: la excepción documentada (orus-completo.mjs); los demás turnos, la guarda de siempre.
+          const problemas = completo?.activo ? revisarInitCompleto(evento, completo) : revisarInit(evento, perfil, equipo, accesoCodigo);
           if (problemas.length > 0) matar(`arranque inseguro: ${problemas.join('; ')}`);
+        }
+        // /goal: si el evaluador sigue diciendo «no cumplido», el turno no gira sin fin (p. ej. un
+        // objetivo que depende de que una persona responda): se para y el objetivo sigue vigente.
+        if (maxRevisionesObjetivo > 0 && esRevisionObjetivo(evento)) {
+          revisionesObjetivo += 1;
+          if (revisionesObjetivo >= maxRevisionesObjetivo) matar(`objetivo sin cumplir tras ${revisionesObjetivo} revisiones`);
         }
         // Vigía del equipo: un subagente fuera de lo aprobado detiene el turno.
         if (vigia) {
           const violaciones = vigia.procesar(evento);
-          if (violaciones.length > 0) matar(`subagente fuera de lo aprobado: ${violaciones.join('; ')}`);
+          if (violaciones.length > 0 && !completo?.activo) matar(`subagente fuera de lo aprobado: ${violaciones.join('; ')}`);
         }
         try {
           alEvento(evento, acc);

@@ -259,3 +259,84 @@ test('prepararCodigoTurno bajo demanda: sin repos nombrados va sin código y con
   assert.match(b.bloque, /`front-kronos` \| AnalistaSistemasFarma\/front-kronos \| ✅ montado/);
   assert.match(b.bloque, /`sapsend` \| gsslatam\/sapsend \| disponible/);
 });
+
+import { entornoCodigo, estadoDependencias, rutaCacheNpm } from '../src/codigo.mjs';
+
+test('npm en el worktree (2026-10-20): caché compartida, npx sin descargas, Prisma y comandos del hilo principal', () => {
+  // Reglas: el hilo principal puede correr npm/npx de pruebas, tipos y lint.
+  const p = permisosCodigo({ repos: [REPO], autorizado: false, pases: true });
+  for (const r of ['Bash(npm ci)', 'Bash(npm install *)', 'Bash(npm test)', 'Bash(npm run *)', 'Bash(npx vitest *)', 'Bash(npx tsc *)', 'Bash(npx eslint *)', 'Bash(cd codigo/* && npx vitest *)']) {
+    assert.ok(p.permitidas.includes(r), r);
+  }
+  // Las prohibiciones de siempre siguen ganando.
+  for (const r of ['Bash(npx -y *)', 'Bash(npm publish *)', 'Bash(npm config *)', 'Bash(curl *)', 'Bash(ssh *)']) assert.ok(p.prohibidas.includes(r), r);
+  // Caché de npm compartida dentro de HILOS_DIR, escribible en el sandbox.
+  assert.equal(rutaCacheNpm('/p'), '/p/cache-npm');
+  const s = sandboxCodigo({ worktrees: [REPO], homeReal: '/U', homeCodigo: '/p/hc', hilosDir: '/p' });
+  assert.ok(s.filesystem.allowWrite.includes('/p/cache-npm'));
+  assert.ok(s.network.allowedDomains.includes('registry.npmjs.org'));
+  assert.ok(s.network.allowedDomains.includes('binaries.prisma.sh'));
+  assert.ok(s.filesystem.denyRead.includes('/p/.env'));
+  const e = entornoCodigo({ token: 't', homeCodigo: '/p/hc', cacheNpm: '/p/cache-npm' });
+  assert.equal(e.NPM_CONFIG_CACHE, '/p/cache-npm');
+  assert.equal(e.NPM_CONFIG_YES, 'false'); // npx no baja «tsc@2.0.4» ni otros paquetes ajenos
+  assert.equal(e.NPM_CONFIG_PREFER_OFFLINE, 'true');
+  assert.equal(e.PUPPETEER_SKIP_DOWNLOAD, '1'); // sin esto `npm ci` de front-kronos fallaba en el sandbox
+  // Estado de dependencias y texto del turno.
+  assert.equal(estadoDependencias('/w', (r) => r === '/w/package.json'), 'faltan');
+  assert.equal(estadoDependencias('/w', () => true), 'instaladas');
+  assert.equal(estadoDependencias('/w', () => false), 'sin-package');
+  const t = textoCodigo({ worktrees: [{ ...REPO, dependencias: 'faltan' }], autorizado: false, puedePasar: false, autores: ['a@x.com'], operadores: ['nicolas.rivera@gsslatam.com'] });
+  assert.match(t, /SÍ puede ejecutar comandos con la herramienta Bash/);
+  assert.match(t, /NO le pida a la persona que corra pruebas/);
+  assert.match(t, /SIN instalar: antes de probar corra `cd \/h\/p\/1\/c\/5\/codigo\/sapsend && npm ci`/);
+  assert.match(textoCodigo({ worktrees: [{ ...REPO, dependencias: 'instaladas' }], autorizado: false, puedePasar: false, autores: [], operadores: ['a@x.com'] }), /node_modules`\) instaladas/);
+});
+
+import { sembrarMotoresPrisma } from '../src/codigo.mjs';
+import { mkdtempSync, mkdirSync as mk, existsSync as ex, writeFileSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import pathMod from 'node:path';
+
+test('motores de Prisma: se siembran en el HOME de código solo las versiones que faltan', () => {
+  const real = mkdtempSync(pathMod.join(tmpdir(), 'hr-'));
+  const hc = mkdtempSync(pathMod.join(tmpdir(), 'hc-'));
+  const v1 = 'c0aafc03b8ef6cdced8654b9a817999e02457d6a';
+  const dirO = pathMod.join(real, '.cache/prisma/master', v1, 'darwin-arm64');
+  mk(dirO, { recursive: true });
+  for (const a of ['libquery-engine', 'schema-engine']) writeFileSync(pathMod.join(dirO, a), a);
+  mk(pathMod.join(real, '.cache/prisma/master', 'no-es-hash', 'x'), { recursive: true });
+  // Carpeta a medias (descarga cortada): solo se completa lo que falta.
+  const dirD = pathMod.join(hc, '.cache/prisma/master', v1, 'darwin-arm64');
+  mk(dirD, { recursive: true });
+  writeFileSync(pathMod.join(dirD, 'libquery-engine'), 'propio');
+  assert.deepEqual(sembrarMotoresPrisma(real, hc), ['c0aafc03/darwin-arm64/schema-engine']);
+  assert.equal(readFileSync(pathMod.join(dirD, 'libquery-engine'), 'utf8'), 'propio');
+  assert.equal(readFileSync(pathMod.join(dirD, 'schema-engine'), 'utf8'), 'schema-engine');
+  assert.ok(!ex(pathMod.join(hc, '.cache/prisma/master', 'no-es-hash')));
+  assert.deepEqual(sembrarMotoresPrisma(real, hc), []); // idempotente
+  assert.deepEqual(sembrarMotoresPrisma(null, hc), []);
+});
+
+import { copiarStubsPruebas } from '../src/codigo.mjs';
+
+test('stubsPruebas: valida rutas y copia el stub de CI sin sobrescribir', () => {
+  const base = { github: 'a/b', clon: '/h/r/b', ramaPruebas: 'testing', ramaProduccion: 'main' };
+  const v = validarReposPorProyecto({ repos: { b: { ...base, stubsPruebas: { 'dbconfig.js': '.github/dbconfig.ci.stub.js' } } }, proyectos: {} });
+  assert.deepEqual(v.repos.get('b').stubsPruebas, { 'dbconfig.js': '.github/dbconfig.ci.stub.js' });
+  for (const malo of [{ '../x.js': 'a.js' }, { 'x.js': '/etc/passwd' }, { '.env': 'a.js' }, { 'x.js': '.env.production' }, { 'a//b': 'c' }]) {
+    assert.throws(() => validarReposPorProyecto({ repos: { b: { ...base, stubsPruebas: malo } }, proyectos: {} }), /stubsPruebas/, JSON.stringify(malo));
+  }
+  const w = mkdtempSync(pathMod.join(tmpdir(), 'wt-'));
+  mk(pathMod.join(w, '.github'));
+  writeFileSync(pathMod.join(w, '.github/dbconfig.ci.stub.js'), 'module.exports={}');
+  assert.deepEqual(copiarStubsPruebas(w, { 'dbconfig.js': '.github/dbconfig.ci.stub.js', 'no.js': '.github/no-existe.js' }), ['dbconfig.js']);
+  assert.equal(readFileSync(pathMod.join(w, 'dbconfig.js'), 'utf8'), 'module.exports={}');
+  writeFileSync(pathMod.join(w, 'dbconfig.js'), 'propio');
+  assert.deepEqual(copiarStubsPruebas(w, { 'dbconfig.js': '.github/dbconfig.ci.stub.js' }), []);
+  assert.equal(readFileSync(pathMod.join(w, 'dbconfig.js'), 'utf8'), 'propio');
+  // prisma: solo generate/validate (nada de migrate/db push).
+  const p = permisosCodigo({ repos: [REPO], autorizado: false, pases: true });
+  assert.ok(p.permitidas.includes('Bash(npx prisma generate *)'));
+  assert.ok(!p.permitidas.some((r) => /prisma (migrate|db)/.test(r)));
+});

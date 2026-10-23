@@ -1,0 +1,20 @@
+{
+  "_nota": "Conectores MCP de SOLO LECTURA que se SUMAN al perfil en proyectos concretos. Sin cabeceras: las llaves van en HILOS_CONECTORES_SECRETOS.",
+  "lectores": ["nicolas.rivera@gsslatam.com", "cristian.baldion@gsslatam.com"],
+  "conectores": {
+    "sapbo-onelatampharma": {
+      "url": "http://192.168.10.5:3015/mcp",
+      "herramientas": ["sap_metadata", "sap_query", "sap_get", "sap_query_view"],
+      "descripcion": "SAP Business One de OLP, solo lectura y blindado."
+    },
+    "sapsend-olp": {
+      "url": "http://192.168.10.5:3030/mcp",
+      "herramientas": ["sapsend_metadata", "sapsend_list_treasury_requests"],
+      "llave": "sapsend-olp",
+      "descripcion": "Base propia de SAPSEND de OLP, solo lectura."
+    }
+  },
+  "proyectos": {
+    "1": { "conectores": ["sapbo-onelatampharma", "sapsend-olp"], "instrucciones": "Use siempre filtro de fecha." }
+  }
+}

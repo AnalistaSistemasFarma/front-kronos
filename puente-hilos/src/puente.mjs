@@ -25,8 +25,12 @@ import { appendFileSync } from 'node:fs';
 import {
   cargarReposPorProyecto,
   entornoCodigo,
+  estadoDependencias,
+  rutaCacheNpm,
   leerTokenGithub,
   permisosCodigo,
+  permisosTerminalCompleta,
+  textoTerminalCompleta,
   prepararHomeCodigo,
   hooksCodigo,
   prepararWorktrees,
@@ -38,8 +42,21 @@ import {
   turnoAutorizado,
 } from './codigo.mjs';
 import { ColaHilos } from './cola.mjs';
+import { analizarComando, catalogoPlugins, encabezadoObjetivo, MAX_REVISIONES_OBJETIVO, SKILLS_CON_GIT, estadoObjetivoSesion, resolverComando, rutaTranscripcion, skillsDePlugins, textoObjetivo } from './comandos.mjs';
+import { combinarPerfil, prepararConectoresTurno, secretosConectores } from './conectores.mjs';
+import { borrarMcpAgente, perfilConAgente, prepararConectoresAgente, secretosConectoresAgente, servidoresAgente, textoConectoresAgente } from './conectores-agente.mjs';
+import { guiaDesarrolloSegura } from './guia.mjs';
+import { prepararPruebasTurno, secretosPruebas, verificarSecretosPruebas } from './pruebas-kronos.mjs';
+import { grafosDelTurno, textoGrafos } from './grafos.mjs';
+import { prepararMemoriaTurno } from './memoria.mjs';
 import { crearClienteSynerLink } from './synerlink.mjs';
-import { armarArgumentos, armarArgumentosSugerencia, armarEntorno, correrTurno, etiquetaHerramienta } from './claude.mjs';
+import { crearMedidorCuota } from './cuota.mjs';
+import { crearArchivador, textoArchivarProyecto } from './archivar-proyecto.mjs';
+import { prepararAdjuntos } from './adjuntos-salida.mjs';
+import { archivosDelTurno, archivosModificadosDesde, crearSupervisor, duracionLegible, PROMPT_CONTINUACION, textoAvisoProgreso, textoCorte, textoTiempoTurno } from './progreso.mjs';
+import { convertirHtmlAPdf, convertirMarcasPdf, recursosDePlugins, resolverChrome, textoPdf } from './pdf.mjs';
+import { armarArgumentos, armarArgumentosCompleto, armarArgumentosSugerencia, armarEntorno, armarEntornoCompleto, correrTurno, etiquetaHerramienta } from './claude.mjs';
+import { borrarMcpCompleto, encabezadoMensajeCompleto, filasAuditoriaCompleto, pluginsCompletos, prepararOrusCompleto, textoOrusCompleto, turnoOrusCompleto } from './orus-completo.mjs';
 import {
   argumentosEquipo,
   armarAgentes,
@@ -110,44 +127,67 @@ export function ocultarSecreto(texto, secreto) {
  * Acceso al código del turno (nivel 2). Devuelve null si el proyecto no tiene
  * repos vinculados. Si algo falla, el turno corre SIN código (falla cerrado).
  */
-export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lote, agenteNombre, conEquipo = false, cargar = cargarReposPorProyecto, preparar = prepararWorktrees, elegirRepos = reposDelTurno, leerToken = leerTokenGithub, prepararHome = prepararHomeCodigo }) {
+export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lote, agenteNombre, conEquipo = false, completo = false, cargar = cargarReposPorProyecto, preparar = prepararWorktrees, elegirRepos = reposDelTurno, leerToken = leerTokenGithub, prepararHome = prepararHomeCodigo }) {
   if (!cfg.rutaReposPorProyecto) return null;
   const vinculos = cargar(cfg.rutaReposPorProyecto);
   const proyecto = vinculos?.proyectos.get(idProject);
   if (!proyecto) return null;
   const token = leerToken(cfg.githubTokenArchivo);
-  const homeCodigo = prepararHome(cfg.hilosDir, agenteNombre);
+  const homeCodigo = prepararHome(cfg.hilosDir, agenteNombre, cfg.home);
   const envGit = { PATH: cfg.path, HOME: homeCodigo, GH_TOKEN: token, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', LANG: 'en_US.UTF-8' };
   // Bajo demanda (proyectos con muchos repos): solo se montan los que hacen falta.
   const disponibles = proyecto.repos.map((n) => vinculos.repos.get(n));
   const aMontar = elegirRepos({ proyecto, repos: vinculos.repos, lote, rutas });
   const { autorizado, autores } = turnoAutorizado(lote, vinculos.operadores);
-  if (aMontar.length === 0) {
+  // Terminal completa (autorizada por Nicolás, 2026-10-20): solo turnos de operadores.
+  // Modo Orus completo (2026-10-22): siempre, en cualquier proyecto con repos (orus-completo.mjs).
+  const terminal = (proyecto.terminalCompleta && autorizado) || completo === true;
+  if (aMontar.length === 0 && !terminal) {
     // Ningún repo nombrado todavía: el turno va SIN código (sin Bash, sin token),
     // pero con el índice para que Orus sepa qué hay y cómo pedirlo.
     return { soloIndice: true, disponibles, bajoDemanda: true, bloque: textoIndiceRepos({ disponibles, montados: [] }) };
   }
-  const worktrees = preparar({ repos: aMontar, rutas, idProject, idConversation, envGit });
-  const permisos = permisosCodigo({ repos: worktrees, autorizado, pases: proyecto.pases });
+  const worktrees = preparar({ repos: aMontar, rutas, idProject, idConversation, envGit }).map((w) => ({ ...w, dependencias: w.dependencias ?? estadoDependencias(w.worktree) }));
+  const cacheNpm = rutaCacheNpm(cfg.hilosDir); // la crea prepararHomeCodigo
+  const permisos = terminal ? permisosTerminalCompleta({ repos: worktrees, pases: proyecto.pases, cwd: rutas.cwd }) : permisosCodigo({ repos: worktrees, autorizado, pases: proyecto.pases, cwd: rutas.cwd });
   return {
     ...permisos,
     autorizado,
     autores,
     worktrees,
     token,
-    sandbox: sandboxCodigo({ worktrees, homeReal: cfg.home, homeCodigo, hilosDir: cfg.hilosDir, secretos: [cfg.githubTokenArchivo] }),
-    entorno: entornoCodigo({ token, homeCodigo }),
+    // Terminal completa: sin sandbox y con la casa real (llaves SSH), como el Orus principal.
+    sandbox: terminal ? { enabled: false } : sandboxCodigo({ worktrees, homeReal: cfg.home, homeCodigo, hilosDir: cfg.hilosDir, secretos: [cfg.githubTokenArchivo, ...secretosConectores(cfg), ...secretosPruebas(cfg), ...secretosConectoresAgente(cfg)], cacheNpm }),
+    entorno: terminal ? { ...entornoCodigo({ token, homeCodigo, cacheNpm }), HOME: cfg.home } : entornoCodigo({ token, homeCodigo, cacheNpm }),
     hooks: hooksCodigo(),
     disponibles,
     bajoDemanda: proyecto.bajoDemanda,
     bloque:
-      textoCodigo({ worktrees, autorizado, puedePasar: permisos.puedePasar, autores, operadores: vinculos.operadores, equipo: conEquipo }) +
+      (worktrees.length ? textoCodigo({ worktrees, autorizado, puedePasar: permisos.puedePasar, autores, operadores: vinculos.operadores, equipo: conEquipo }) : '') +
+      (terminal && completo !== true ? `\n${textoTerminalCompleta({ autores })}` : '') +
       (proyecto.bajoDemanda ? `\n${textoIndiceRepos({ disponibles, montados: worktrees })}` : ''),
   };
 }
 
-export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
+/** ¿Todos los mensajes del lote son de un operador autorizado (operadoresPases)? Falla cerrado. */
+export function loteDeOperador(cfg, lote, cargar = cargarReposPorProyecto) {
+  try {
+    const v = cfg.rutaReposPorProyecto ? cargar(cfg.rutaReposPorProyecto) : null;
+    return turnoAutorizado(lote, v?.operadores ?? []).autorizado;
+  } catch {
+    return false;
+  }
+}
+
+/** Nombre de quien escribió el mensaje (para el registro del objetivo). */
+function autorDe(m) {
+  return m?.author?.name?.trim() || m?.author?.email || null;
+}
+
+export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, convertirPdf = convertirHtmlAPdf, medidor = null }) {
   const enProceso = new Set();
+  // Lo que el hilo adjunta queda también en los Archivos del proyecto (2026-10-23; HILOS_ARCHIVAR_EN_PROYECTO=no lo apaga).
+  const archivador = cfg.archivarEnProyecto === false ? null : crearArchivador({ synerlink, log });
 
   /** Auditoría local de cada comando y cada negación en turnos con código (sin el token). */
   function auditarCodigo(idConversation, evento, codigo) {
@@ -167,16 +207,30 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
     } catch {}
   }
 
+  /** Auditoría del MODO ORUS COMPLETO: inicio del turno, cada herramienta y cada negación (sin secretos). */
+  function auditarCompleto(idConversation, fila, codigo = null) {
+    try {
+      const linea = JSON.stringify({ ts: new Date().toISOString(), idConversation, modo: 'orus-completo', ...fila });
+      appendFileSync(path.join(cfg.hilosDir, 'auditoria-codigo.jsonl'), `${ocultarSecreto(linea, codigo?.token)}\n`, { mode: 0o600 });
+    } catch {}
+  }
+
   async function atender(claveConv, lote) {
     const idConversation = Number(claveConv);
     const ids = lote.map((m) => m.id);
     const inicio = new Date();
+    // Supervisión del turno (progreso.mjs): avisos «sigo trabajando» y latido del indicador.
+    let supervisor = null;
+    // Modo Orus completo (orus-completo.mjs): el mcp.json del turno se borra siempre al final.
+    let completo = null;
+    // Conectores del agente (conectores-agente.mjs): su mcp.json (600, fuera del hilo) se borra al final.
+    let delAgente = null;
     try {
       await synerlink.estado(idConversation, 'thinking', 'Preparando el proyecto…').catch(() => null);
 
       const contexto = await synerlink.contexto(idConversation);
-      const perfil = cfg.perfiles.get(contexto.project.profile.key);
-      if (!perfil) {
+      const perfilBase = cfg.perfiles.get(contexto.project.profile.key);
+      if (!perfilBase) {
         // Perfil que este puente no conoce: no se improvisa ningún conector.
         await synerlink.responder(
           idConversation,
@@ -185,10 +239,108 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
         return;
       }
 
+      // Comandos «/x» (comandos.mjs): lista blanca. Los que responde el puente no corren el modelo;
+      // los nativos van TAL CUAL al `claude -p`, con las MISMAS herramientas y permisos de siempre.
+      let comando = null;
+      let catalogo = null;
+      let operador = false;
+      // Turno de un autor del modo completo (identidad del servidor): plugin «orus» completo (sin exclusiones).
+      const turnoCompleto = turnoOrusCompleto(lote, cfg.orusCompleto?.autores).activo;
+      const pluginDirsTurno = turnoCompleto ? pluginsCompletos(cfg.pluginDirs ?? [], cfg.orusCompleto?.plugin) : (cfg.pluginDirs ?? []);
+      if (lote.some((m) => analizarComando(m?.body))) {
+        catalogo = catalogoPlugins(pluginDirsTurno);
+        operador = loteDeOperador(cfg, lote);
+        comando = resolverComando({ lote, catalogo, operador });
+        if (comando) log(`conversación ${idConversation}: comando ${comando.accion}${comando.nombre ? ` /${comando.nombre}` : ''}${operador ? ' (operador)' : ''}.`);
+      }
+      if (comando?.accion === 'responder') {
+        await synerlink.responder(idConversation, comando.texto);
+        return;
+      }
+      if (comando?.accion === 'limpiar') {
+        estado.reiniciarSesion(idConversation);
+        await synerlink.responder(
+          idConversation,
+          '🧹 Listo: este hilo arranca una **memoria nueva** desde el próximo mensaje. El historial del chat sigue aquí, pero el asistente ya no lo tiene presente; si hace falta algo de antes, péguelo o resúmalo. Si había un objetivo (/goal), también se quitó.'
+        );
+        return;
+      }
+      if (comando?.accion === 'objetivo-ver') {
+        const o = estado.objetivoDe(idConversation);
+        await synerlink.responder(
+          idConversation,
+          o
+            ? `🎯 **Objetivo activo** de esta conversación (/goal): «${o.condicion}»\n\nLo fijó ${o.autor ?? 'una persona del proyecto'} el ${String(o.fijado).slice(0, 10)}. El asistente sigue trabajando hacia él en cada mensaje hasta que un evaluador confirme que se cumplió. Para quitarlo: \`/goal clear\`.`
+            : 'Esta conversación no tiene un objetivo activo. Para fijar uno: `/goal <condición>` (por ejemplo, `/goal el informe queda en PDF con las cifras de septiembre`).'
+        );
+        return;
+      }
+
+      // Conectores por proyecto (bases en SOLO LECTURA): se SUMAN al perfil solo en los
+      // proyectos vinculados y en turnos de un lector autorizado. Si algo falla, el turno
+      // va con el perfil tal cual (falla cerrado).
+      let conectores = null;
+      let avisoConectores = '';
+      try {
+        conectores = prepararConectoresTurno({ cfg, idProject: contexto.project.idProject, lote });
+        if (conectores?.motivo) log(`conversación ${idConversation}: turno sin conectores del proyecto (${conectores.motivo}).`);
+        else if (conectores) log(`conversación ${idConversation}: conectores del proyecto: ${conectores.servidores.map((x) => x.nombre).join(', ')}.`);
+      } catch (e) {
+        conectores = null;
+        log(`conversación ${idConversation}: no se pudieron preparar los conectores del proyecto, el turno va sin ellos:`, e.message);
+        avisoConectores = '_Nota: no pude preparar los conectores de bases de datos del proyecto en este turno; respondí sin ellos. Tecnología quedó con el registro._\n\n';
+      }
+      let perfil = combinarPerfil(perfilBase, conectores);
+
       const rutas = rutasDelHilo(cfg.hilosDir, contexto.project.idProject, idConversation);
       asegurarCarpetas(rutas);
+      // Base de PRUEBAS (lectura y escritura) y testing como QA: TODOS los proyectos, todos los
+      // usuarios, con o sin terminal (pruebas-kronos.mjs). Si faltan credenciales, va sin ellos.
+      const chromePdf = cfg.pdf?.habilitado === false ? null : resolverChrome({ explicito: cfg.pdf?.chrome ?? null, home: cfg.home });
+      const pruebas = prepararPruebasTurno({ cfg, rutas, idConversation, lote, chrome: chromePdf ?? resolverChrome({ home: cfg.home }) });
+      if (pruebas.servidores.length) perfil = combinarPerfil(perfil, pruebas);
+      else if (pruebas.motivo && cfg.pruebasKronos?.habilitado) log(`conversación ${idConversation}: turno sin los conectores de PRUEBAS (${pruebas.motivo}).`);
+      // MODO ORUS COMPLETO: todos los MCP del principal + los del puente, todas las herramientas, sin preguntas.
+      // Si algo falla, el turno va en el modo normal (falla cerrado) y se dice en el hilo.
+      let avisoCompleto = '';
+      if (turnoCompleto) {
+        try {
+          completo = prepararOrusCompleto({ cfg, lote, idConversation, perfilServidores: perfil.mcpServers });
+        } catch (e) {
+          completo = null;
+          log(`conversación ${idConversation}: no se pudo preparar el modo Orus completo, el turno va en el modo normal:`, e.message);
+          avisoCompleto = '_Nota: no pude preparar el modo Orus completo en este turno; respondí con los permisos normales del hilo. Tecnología quedó con el registro._\n\n';
+        }
+        if (completo) {
+          log(`conversación ${idConversation}: MODO ORUS COMPLETO (autores: ${completo.autores.join(', ')}); ${completo.servidores.length} conectores: ${completo.servidores.join(', ')}${completo.faltan.length ? `; variables sin valor: ${completo.faltan.join(', ')}` : ''}.`);
+          auditarCompleto(idConversation, { tipo: 'inicio', idProject: contexto.project.idProject, autores: completo.autores, servidores: completo.servidores, plugins: completo.pluginDirs.map((d) => path.basename(d)) });
+        }
+      }
+      // CONECTORES DEL AGENTE (los mismos de su chat), en todos los proyectos y para todos los usuarios.
+      // En modo Orus completo no aplican (ese modo ya trae los del principal). Si fallan, va sin ellos.
+      let avisoAgente = '';
+      if (!completo && cfg.conectoresAgente) {
+        try {
+          delAgente = prepararConectoresAgente({ cfg, idConversation, perfilServidores: perfil.mcpServers });
+          if (delAgente?.servidores.length) log(`conversación ${idConversation}: conectores del agente: ${delAgente.servidores.join(', ')}${delAgente.engramProyecto ? ` (engram → ${delAgente.engramProyecto})` : ''}${delAgente.faltan.length ? `; variables sin valor: ${delAgente.faltan.join(', ')}` : ''}.`);
+        } catch (e) {
+          delAgente = null;
+          log(`conversación ${idConversation}: no se pudieron leer los conectores del agente, el turno va sin ellos:`, e.message);
+          avisoAgente = '_Nota: no pude cargar mis conectores de siempre en este turno; respondí sin ellos. Tecnología quedó con el registro._\n\n';
+        }
+      }
+      // Perfil del turno (permisos y revisión del init). El del proyecto sigue para el mcp.json del hilo y el equipo.
+      const perfilTurno = perfilConAgente(perfil, delAgente);
       await sincronizarArchivos({ rutas, contexto, estado, descargar: (u) => synerlink.descargar(u) });
       const adjuntos = await bajarAdjuntos({ rutas, mensajes: lote, descargar: (u) => synerlink.descargar(u) });
+      // Comando nativo: se resuelve otra vez ya con los adjuntos (una skill los recibe en sus argumentos).
+      const nativo = comando?.accion === 'nativo' ? resolverComando({ lote, catalogo, operador, adjuntos }) : null;
+      // /goal: el objetivo queda guardado POR CONVERSACIÓN (estado.json) y va en el encabezado de
+      // cada turno; mientras esté vigente, el turno corre con hooks (los exige el /goal nativo).
+      if (nativo?.objetivo?.fijar) estado.fijarObjetivo(idConversation, nativo.objetivo.fijar, autorDe(lote[0]));
+      if (nativo?.objetivo?.quitar) estado.quitarObjetivo(idConversation);
+      const objetivo = estado.objetivoDe(idConversation);
+      const conObjetivo = Boolean(objetivo) || Boolean(nativo?.objetivo);
       // Equipo de subagentes (F2): SOLO el aprobado en SynerLink, con topes. Si
       // algo del equipo no valida, el turno corre SIN equipo (falla cerrado).
       const agenteNombre = cfg.agenteNombre ?? cfg.agente;
@@ -207,7 +359,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
       let indiceRepos = null; // proyecto bajo demanda: índice de repos y registro de los que Orus pida
       let avisoCodigo = '';
       try {
-        codigo = prepararCodigoTurno({ cfg, idProject: contexto.project.idProject, idConversation, rutas, lote, agenteNombre, conEquipo: Boolean(equipo) });
+        codigo = prepararCodigoTurno({ cfg, idProject: contexto.project.idProject, idConversation, rutas, lote, agenteNombre, conEquipo: Boolean(equipo), completo: Boolean(completo) });
         if (codigo?.soloIndice) {
           indiceRepos = codigo;
           codigo = null;
@@ -215,13 +367,21 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
         } else if (codigo) {
           if (codigo.bajoDemanda) indiceRepos = codigo;
           log(
-            `conversación ${idConversation}: código ${codigo.worktrees.map((w) => `${w.nombre}@${w.rama}`).join(', ')}; pases ${codigo.puedePasar ? 'AUTORIZADOS' : 'no'} (autores: ${codigo.autores.join(', ')}).`
+            `conversación ${idConversation}: código ${codigo.worktrees.map((w) => `${w.nombre}@${w.rama}`).join(', ') || '(ningún repo montado)'}; pases ${codigo.puedePasar ? 'AUTORIZADOS' : 'no'}${codigo.terminalCompleta ? '; TERMINAL COMPLETA (sin sandbox)' : ''} (autores: ${codigo.autores.join(', ')}).`
           );
         }
       } catch (e) {
         codigo = null;
         log(`conversación ${idConversation}: no se pudo preparar el acceso al código, el turno va sin él:`, e.message);
         avisoCodigo = '_Nota: no pude preparar el acceso al código del proyecto en este turno; respondí sin él. Tecnología quedó con el registro._\n\n';
+      }
+      // Skills incluidas que corren git al cargarse: solo con el código montado (comandos.mjs).
+      if (nativo && SKILLS_CON_GIT.has(nativo.nombre) && !codigo && !completo) {
+        await synerlink.responder(
+          idConversation,
+          `**/${nativo.nombre}** necesita el código del proyecto montado en este turno, y aquí no hay ningún repositorio montado${indiceRepos ? ' todavía. Nombre en un mensaje el repositorio que quiere revisar (se monta desde el siguiente) y vuelva a enviar el comando' : ': este proyecto no tiene repositorios vinculados (Tecnología los vincula)'}.`
+        );
+        return;
       }
       // El equipo se arma DESPUÉS del código: sus subagentes leen el worktree y usan git de lectura.
       const equipoTurno = equipo
@@ -230,15 +390,71 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
             agentes: armarAgentes({ equipo, perfil, agente: agenteNombre, proyecto: contexto.project, topes, codigo }),
           }
         : null;
-      escribirContexto({ rutas, agente: agenteNombre, contexto, perfil, instruccionesEn: cfg.instruccionesEn, equipoTurno, bloqueCodigo: codigo?.bloque ?? indiceRepos?.bloque ?? '' });
+      // Memoria del bot principal, en solo lectura (copia renovada en cada turno).
+      const memoria = prepararMemoriaTurno({ cfg, rutas, lote, agenteNombre });
+      if (memoria.motivo) log(`conversación ${idConversation}: turno sin memoria (${memoria.motivo}).`);
+      else if (memoria.archivos) log(`conversación ${idConversation}: memoria ${memoria.archivos.length} archivos${memoria.excluidos.length ? `; excluidos por seguridad: ${memoria.excluidos.map((x) => `${x.archivo} (${x.motivo})`).join(', ')}` : ''}.`);
+      // Proyecto con código (nivel 2): el resumen corto del flujo de pases va con las reglas del código.
+      // Grafos de Graphify de los repos MONTADOS en este turno (solo lectura).
+      const grafosTurno = grafosDelTurno(cfg.grafosDir, codigo?.worktrees ?? []);
+      // Recursos de solo lectura de los plugins (p. ej. gss-design) y HTML → PDF en el puente (pdf.mjs).
+      // Para TODOS los turnos: con o sin código, con o sin terminal.
+      const recursos = recursosDePlugins(cfg.pluginDirs ?? []);
+      let bloqueGuia = '';
+      if (codigo || indiceRepos) {
+        const g = guiaDesarrolloSegura();
+        if (g.error) log(`conversación ${idConversation}: la guía del flujo de desarrollo no se cargó: ${g.error}`);
+        bloqueGuia = g.bloque;
+      }
+      escribirContexto({
+        rutas,
+        agente: agenteNombre,
+        contexto,
+        perfil,
+        instruccionesEn: cfg.instruccionesEn,
+        equipoTurno,
+        bloqueCodigo:
+          (codigo?.bloque ?? indiceRepos?.bloque ?? '') +
+          (bloqueGuia ? `\n${bloqueGuia}` : '') +
+          textoGrafos(grafosTurno, { conBash: Boolean(codigo || completo) }) +
+          (completo ? `\n${textoOrusCompleto({ autores: completo.autores, servidores: completo.servidores })}` : ''),
+        bloqueMemoria: memoria.bloque,
+        bloqueConectores: (conectores?.bloque ?? '') + (delAgente?.servidores.length ? textoConectoresAgente({ agente: agenteNombre, servidores: delAgente.servidores, origen: delAgente.origen, engramProyecto: delAgente.engramProyecto }) : ''),
+        bloquePruebas: pruebas.bloque,
+        bloquePdf: textoPdf({ disponible: Boolean(chromePdf), recursos }),
+        bloqueTiempo: textoTiempoTurno({ topeMs: cfg.timeoutTurnoMs, avisoMs: cfg.avisoProgresoMs ?? 0 }),
+        bloqueObjetivo: textoObjetivo(objetivo),
+        bloqueArchivar: archivador ? textoArchivarProyecto() : '',
+      });
       limpiarPropuestas(rutas);
       let vigia = null;
+      // Lo que el indicador muestra ahora (el aviso y el latido lo conservan, nunca lo apagan),
+      // y lo último que se sabe del turno para los avisos y el mensaje de corte.
+      let indicador = { state: 'thinking', label: 'Pensando…' };
+      let ultimoTexto = null;
+      const tocados = new Set();
 
-      const ejecutar = async (sesion) => {
-        const args = armarArgumentos({
-          perfil,
+      const promptTurno = nativo?.prompt ?? armarPrompt(lote, adjuntos, (completo ? encabezadoMensajeCompleto(completo.autores) : '') + encabezadoObjetivo(objetivo));
+      const ejecutar = async (sesion, prompt = promptTurno) => {
+        const pluginsTurno = { dirs: pluginDirsTurno, dirsLectura: [...grafosTurno.map((g) => g.dir), ...recursos, ...skillsDePlugins(pluginDirsTurno)] };
+        const args = completo
+          ? armarArgumentosCompleto({
+              completo,
+              sesion,
+              rutaSistema: rutas.sistema,
+              dirArchivos: rutas.archivos,
+              modelo: cfg.modelo,
+              presupuestoUsd: cfg.presupuestoUsd,
+              codigo,
+              plugins: pluginsTurno,
+              objetivo: conObjetivo,
+              rutaAgentes: equipo ? rutas.agentes : null,
+            })
+          : armarArgumentos({
+          perfil: perfilTurno,
           sesion,
-          rutaMcp: rutas.mcp,
+          // Con conectores del agente, el mcp.json COMPLETO del turno va fuera del hilo (600).
+          rutaMcp: delAgente?.rutaMcp ?? rutas.mcp,
           rutaSistema: rutas.sistema,
           dirArchivos: rutas.archivos,
           modelo: cfg.modelo,
@@ -246,6 +462,9 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
           presupuestoUsd: equipo ? topes.presupuestoUsd : cfg.presupuestoUsd,
           equipo: equipo ? argumentosEquipo({ equipo, rutaAgentes: rutas.agentes }) : null,
           codigo,
+          // Las carpetas skills/ de los plugins, en solo lectura: las skills leen sus referencias.
+          plugins: pluginsTurno,
+          objetivo: conObjetivo,
         });
         let ultimaEtiqueta = null;
         let ultimosActivos = '';
@@ -257,16 +476,26 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
         return correr({
           bin: cfg.claudeBin,
           args,
-          env: armarEntorno(cfg, equipo ? topes : null, codigo?.entorno ?? null),
+          env: completo ? armarEntornoCompleto(cfg, codigo?.entorno ?? null) : armarEntorno(cfg, equipo ? topes : null, codigo?.entorno ?? null),
           cwd: rutas.cwd,
-          prompt: armarPrompt(lote, adjuntos),
-          perfil,
+          prompt,
+          perfil: perfilTurno,
           equipo,
           codigo,
+          completo,
           vigia,
           timeoutMs: cfg.timeoutTurnoMs,
+          maxRevisionesObjetivo: conObjetivo ? (cfg.objetivoMaxRevisiones ?? MAX_REVISIONES_OBJETIVO) : 0,
           alEvento: (evento, acc) => {
-            if (codigo) auditarCodigo(idConversation, evento, codigo);
+            // Cupo semanal y ventana de 5 h: vienen gratis en el stream del turno.
+            if (evento?.type === 'rate_limit_event') {
+              medidor?.registrarEvento(evento);
+              return;
+            }
+            if (completo) for (const f of filasAuditoriaCompleto(evento)) auditarCompleto(idConversation, f, codigo);
+            else if (codigo) auditarCodigo(idConversation, evento, codigo);
+            if (acc.ultimoTexto) ultimoTexto = acc.ultimoTexto;
+            for (const f of acc.archivosTocados ?? []) tocados.add(f);
             // La tablita de sub-agentes del chat: se actualiza cuando cambia
             // el conjunto de subagentes que están trabajando.
             if (vigia) {
@@ -276,6 +505,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
                 ultimosActivos = clave;
                 const etiqueta = activos.length > 0 ? `Trabajando con ${activos.length === 1 ? '1 subagente' : `${activos.length} subagentes`}…` : 'Consolidando lo del equipo…';
                 ultimaEtiqueta = etiqueta;
+                indicador = { state: 'tool', label: etiqueta };
                 void synerlink.estado(idConversation, 'tool', etiqueta, tareasIndicador(activos)).catch(() => null);
                 return;
               }
@@ -285,13 +515,34 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
             const etiqueta = etiquetaHerramienta(acc.ultimaHerramienta);
             if (etiqueta === ultimaEtiqueta) return;
             ultimaEtiqueta = etiqueta;
+            indicador = { state: 'tool', label: etiqueta };
             void synerlink.estado(idConversation, 'tool', etiqueta).catch(() => null);
           },
         });
       };
 
       await synerlink.estado(idConversation, 'thinking', 'Pensando…').catch(() => null);
+      // Aviso intermedio en el hilo SIN apagar el indicador (synerlink.avisar deja state/label).
+      const avisar = async (texto) => {
+        if (!synerlink.avisar) return false;
+        await synerlink.avisar(idConversation, codigo ? ocultarSecreto(texto, codigo.token) : texto, indicador.state, indicador.label);
+        return true;
+      };
+      supervisor = crearSupervisor({
+        intervaloAvisoMs: cfg.avisoProgresoMs ?? 0,
+        alAviso: async (ms) => {
+          const ok = await avisar(textoAvisoProgreso({ transcurridoMs: ms, topeMs: cfg.timeoutTurnoMs, actividad: indicador.label, ultimoTexto }));
+          if (ok) log(`conversación ${idConversation}: aviso de progreso (${duracionLegible(ms)}).`);
+        },
+        alLatido: () => synerlink.estado(idConversation, indicador.state, indicador.label),
+      });
       let sesion = estado.sesionDe(idConversation);
+      // Un comando que mira la conversación (/compact, /context, /recap…) en un hilo sin conversación todavía.
+      if (nativo && !nativo.objetivo && sesion.nueva && ['compact', 'context', 'recap', 'usage', 'cost'].includes(nativo.nombre)) {
+        await supervisor.detener();
+        await synerlink.responder(idConversation, `Este hilo todavía no tiene conversación con el asistente, así que \`/${nativo.nombre}\` todavía no tiene sobre qué trabajar. Escríbale primero lo que necesita.`);
+        return;
+      }
       let r = await ejecutar(sesion);
 
       // La sesión guardada ya no existe en el config aislado: se abre una nueva
@@ -307,6 +558,36 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
         aviso = '_Nota: esta conversación arrancó una memoria nueva; la anterior no se encontró._\n\n';
       }
 
+      // Turno cortado por tiempo: la sesión YA existe (arrancó: hubo init) y conserva el avance.
+      // Se marca iniciada para que el siguiente turno («continúa») haga --resume y no abra otra.
+      const cortadoPorTiempo = (x) => x.abortado === 'tiempo agotado' && Boolean(x.init);
+      if (cortadoPorTiempo(r)) estado.marcarIniciada(idConversation, sesion.id);
+      // /goal parado por revisiones: igual, la sesión existe y guarda el avance (y el objetivo).
+      const paradoPorObjetivo = typeof r.abortado === 'string' && r.abortado.startsWith('objetivo sin cumplir') && Boolean(r.init);
+      if (paradoPorObjetivo) estado.marcarIniciada(idConversation, sesion.id);
+      // Continuación automática (HILOS_CONTINUAR_AL_AGOTAR=si): UNA vez, sobre la misma sesión.
+      let continuacion = false;
+      if (cortadoPorTiempo(r) && cfg.continuarAlAgotar) {
+        continuacion = true;
+        log(`conversación ${idConversation}: tiempo agotado; continuación automática (una vez).`);
+        await avisar(
+          `⏱️ Se cumplió el tiempo máximo de este turno (${duracionLegible(cfg.timeoutTurnoMs)}) y la tarea sigue en curso. Continúo automáticamente una vez más desde donde quedé; le aviso al terminar.`
+        ).catch(() => null);
+        sesion = estado.sesionDe(idConversation);
+        r = await ejecutar(sesion, PROMPT_CONTINUACION);
+        if (cortadoPorTiempo(r)) estado.marcarIniciada(idConversation, sesion.id);
+      }
+      // Fin del trabajo del modelo: se apagan los avisos y el latido, y se espera lo que esté en
+      // vuelo (un latido tardío no debe volver a encender el indicador tras la respuesta).
+      await supervisor.detener();
+      const transcurridoMs = Date.now() - inicio.getTime();
+      const archivosTurno = () =>
+        archivosDelTurno({
+          cwd: rutas.cwd,
+          escaneados: archivosModificadosDesde(rutas.trabajo, inicio.getTime(), { base: rutas.cwd, excluir: [path.basename(rutas.propuestas)] }),
+          tocados: [...tocados],
+        });
+
       // El id de la sesión lo fija SIEMPRE el puente (--session-id); nunca se
       // adopta el que diga el proceso. Si no coinciden, algo raro pasó.
       if (r.resultado) estado.marcarIniciada(idConversation, sesion.id);
@@ -315,21 +596,94 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
       }
 
       let cuerpo;
-      if (r.abortado) {
+      if (paradoPorObjetivo) {
+        const o = estado.objetivoDe(idConversation);
+        cuerpo =
+          `${ultimoTexto ? `${ultimoTexto}\n\n` : ''}🎯 El objetivo (/goal) **sigue sin cumplirse** después de ${cfg.objetivoMaxRevisiones ?? MAX_REVISIONES_OBJETIVO} revisiones en este mensaje, así que paré aquí para no dar vueltas` +
+          `${o ? `: «${o.condicion}»` : ''}. Sigue activo: en su próximo mensaje continúo hacia él (por ejemplo, si falta una confirmación o un dato, escríbalo). Para quitarlo: \`/goal clear\`.`;
+        log(`conversación ${idConversation}: turno parado (${r.abortado}).`);
+      } else if (r.abortado) {
         cuerpo = r.abortado.startsWith('arranque inseguro')
           ? 'No pude atender el mensaje: el proceso arrancó con permisos que este puente no admite y se detuvo por seguridad. Avísele a Tecnología.'
           : r.abortado.startsWith('subagente fuera')
             ? 'Detuve el trabajo por seguridad: un subagente intentó salirse de lo aprobado para el equipo del proyecto. Tecnología quedó con el registro; puede intentar de nuevo.'
-            : 'No alcancé a terminar dentro del tiempo permitido. Intente con una pregunta más acotada.';
-        log(`conversación ${idConversation}: turno abortado (${r.abortado})`);
+            : textoCorte({ motivo: 'tiempo', transcurridoMs, topeMs: cfg.timeoutTurnoMs, ultimoTexto, archivos: archivosTurno(), continuacion });
+        log(`conversación ${idConversation}: turno abortado (${r.abortado}) tras ${duracionLegible(transcurridoMs)}${continuacion ? ', también en la continuación automática' : ''}`);
       } else if (/budget/i.test(r.resultado?.subtipo ?? '')) {
-        cuerpo = `Llegué al tope de gasto de este pedido${equipo ? ` (${topes.presupuestoUsd} USD con el equipo de subagentes)` : ''} y me detuve antes de terminar. Intente con una pregunta más acotada o pídale menos frentes a la vez.`;
+        // Solo pasa si hay un tope configurado (con HILOS_MAX_BUDGET_USD=0/off no se pasa --max-budget-usd).
+        cuerpo = textoCorte({ motivo: 'gasto', transcurridoMs, presupuestoUsd: equipo ? topes.presupuestoUsd : cfg.presupuestoUsd, ultimoTexto, archivos: archivosTurno() });
         log(`conversación ${idConversation}: tope de gasto alcanzado (${r.resultado.subtipo})`);
       } else if (!r.resultado?.ok) {
-        cuerpo = 'No pude completar la respuesta por un error del asistente. Intente de nuevo en unos minutos.';
+        // Con avance visible, el mismo mensaje útil del corte; sin avance, el de siempre.
+        const archivos = archivosTurno();
+        cuerpo =
+          ultimoTexto || archivos.length > 0
+            ? textoCorte({ motivo: 'error', transcurridoMs, ultimoTexto, archivos })
+            : 'No pude completar la respuesta por un error del asistente. Intente de nuevo en unos minutos.';
         log(`conversación ${idConversation}: turno con error (código ${r.codigo}, ${r.resultado?.subtipo ?? 'sin resultado'})`);
+      } else if (nativo?.objetivo?.quitar) {
+        cuerpo = '🧹 Listo: quité el objetivo (/goal) de esta conversación.';
       } else {
-        cuerpo = r.resultado.texto.trim() || '_(El asistente terminó sin texto.)_';
+        const sinTexto = nativo ? (ultimoTexto ? ultimoTexto : nativo.nombre === 'compact' ? '✅ Listo: compacté la memoria de este hilo; seguimos desde el resumen.' : `✅ \`/${nativo.nombre}\` listo.`) : '_(El asistente terminó sin texto.)_';
+        cuerpo = r.resultado.texto.trim() || sinTexto;
+      }
+      // /goal: ¿el evaluador de Claude Code ya lo dio por cumplido? (adjunto goal_status de la transcripción)
+      let notaObjetivo = '';
+      if (objetivo && r.resultado && !r.abortado) {
+        const est = estadoObjetivoSesion(rutaTranscripcion(cfg.configClaudeDir, rutas.cwd, sesion.id));
+        if (est?.met) {
+          estado.quitarObjetivo(idConversation);
+          notaObjetivo = `\n\n✅ **Objetivo cumplido** (/goal): «${objetivo.condicion}». Ya no sigue activo.`;
+          log(`conversación ${idConversation}: objetivo cumplido.`);
+        } else if (est?.fallido) {
+          estado.quitarObjetivo(idConversation);
+          notaObjetivo = `\n\n⚠️ **Objetivo cerrado sin cumplir** (/goal): «${objetivo.condicion}». El evaluador concluyó que no se puede cumplir así${est.motivo ? `: ${String(est.motivo).slice(0, 400)}` : '.'} Si quiere, fije otro con \`/goal <condición>\`.`;
+          log(`conversación ${idConversation}: objetivo imposible, se quita.`);
+        } else if (nativo?.objetivo?.fijar) {
+          notaObjetivo = `\n\n🎯 **Objetivo activo** (/goal): «${objetivo.condicion}». Sigue vigente en los próximos mensajes hasta que se cumpla; \`/goal clear\` lo quita.`;
+        }
+      }
+      // Adjuntos salientes: líneas «MEDIA:trabajo/…» de la respuesta (adjuntos-salida.mjs).
+      // Solo en un turno que terminó bien, y solo archivos de ./trabajo de ESTA conversación.
+      let adjuntosSalida = [];
+      if (r.resultado?.ok && !r.abortado) {
+        // HTML → PDF (líneas «PDF:trabajo/….html» o «MEDIA:trabajo/….html»): cada una se cambia por
+        // «MEDIA:trabajo/….pdf» y sigue el camino normal de los adjuntos. Chrome va en sandbox, sin red.
+        try {
+          const conv = await convertirMarcasPdf(cuerpo, {
+            cwd: rutas.cwd,
+            trabajo: rutas.trabajo,
+            lecturas: [rutas.trabajo, rutas.adjuntos, rutas.contexto, rutas.archivos, ...recursos],
+            chrome: chromePdf,
+            timeoutMs: cfg.pdf?.timeoutMs,
+            token: codigo?.token ?? null,
+            convertir: async (o) => {
+              await synerlink.estado(idConversation, 'tool', 'Generando el PDF…').catch(() => null);
+              return convertirPdf(o);
+            },
+            log: (m) => log(`conversación ${idConversation}: ${m}`),
+          });
+          cuerpo = conv.texto;
+        } catch (e) {
+          log(`conversación ${idConversation}: error al convertir a PDF:`, e.message);
+        }
+        const prep = await prepararAdjuntos(cuerpo, {
+          cwd: rutas.cwd,
+          trabajo: rutas.trabajo,
+          excluir: [path.basename(rutas.propuestas)],
+          log: (m) => log(`conversación ${idConversation}: ${m}`),
+        });
+        cuerpo = prep.texto;
+        adjuntosSalida = prep.archivos;
+        // Un archivo que lleve el token de GitHub del turno no sale del puente.
+        if (codigo?.token) {
+          const conToken = adjuntosSalida.filter((a) => a.datos.includes(codigo.token));
+          if (conToken.length) {
+            adjuntosSalida = adjuntosSalida.filter((a) => !conToken.includes(a));
+            cuerpo += `\n\n⚠️ No adjunté ${conToken.map((a) => a.nombre).join(', ')}: contiene una credencial.`;
+            log(`conversación ${idConversation}: adjunto(s) retenidos por contener el token: ${conToken.map((a) => a.nombre).join(', ')}.`);
+          }
+        }
       }
       // Propuestas de tareas que dejó el modelo: se entregan con la llave del
       // PUENTE (el modelo nunca la ve) y quedan pendientes de confirmación.
@@ -348,7 +702,9 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
           notaPropuestas = '\n\n⚠️ No pude registrar mis propuestas en el Cronograma por un error. Intente de nuevo.';
         }
       }
-      cuerpo = (aviso + avisoEquipo + avisoCodigo + cuerpo).slice(0, MAX_RESPUESTA - notaPropuestas.length) + notaPropuestas;
+      const avisoComando = comando?.accion === 'aviso' ? comando.texto : '';
+      const notas = notaObjetivo + notaPropuestas;
+      cuerpo = (avisoComando + aviso + avisoCompleto + avisoEquipo + avisoCodigo + avisoConectores + avisoAgente + cuerpo).slice(0, MAX_RESPUESTA - notas.length) + notas;
       if (codigo) cuerpo = ocultarSecreto(cuerpo, codigo.token);
       // Bajo demanda: los repos que Orus nombró en su respuesta se montan desde el siguiente turno.
       if (indiceRepos && r.resultado?.ok) {
@@ -360,7 +716,29 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
         }
       }
 
-      await synerlink.responder(idConversation, cuerpo);
+      // Cada adjunto queda ADEMÁS en los Archivos del proyecto. Nunca frena la respuesta: si falla,
+      // la respuesta sale igual con su adjunto y lo dice en una línea (archivar-proyecto.mjs).
+      if (archivador && adjuntosSalida.length > 0) {
+        await synerlink.estado(idConversation, 'tool', 'Archivando en el proyecto…').catch(() => null);
+        const notaArchivo = await archivador.archivar(idConversation, adjuntosSalida);
+        if (notaArchivo) cuerpo = `${cuerpo.slice(0, Math.max(0, MAX_RESPUESTA - notaArchivo.length - 2))}\n\n${notaArchivo}`;
+      }
+
+      if (adjuntosSalida.length > 0 && synerlink.responderConArchivos) {
+        try {
+          await synerlink.responderConArchivos(idConversation, cuerpo, adjuntosSalida);
+          log(`conversación ${idConversation}: respuesta con ${adjuntosSalida.length} adjunto(s): ${adjuntosSalida.map((a) => `${a.nombre} (${a.bytes} B)`).join(', ')}.`);
+        } catch (e) {
+          // La respuesta NO se pierde: sale sin los archivos y lo dice.
+          log(`conversación ${idConversation}: no se pudieron subir los adjuntos, se publica sin ellos:`, e.message);
+          await synerlink.responder(
+            idConversation,
+            `${cuerpo}\n\n⚠️ No pude subir ${adjuntosSalida.length === 1 ? 'el archivo' : 'los archivos'} (${adjuntosSalida.map((a) => a.nombre).join(', ')}) por un error al guardarlos. Intente de nuevo en unos minutos.`
+          );
+        }
+      } else {
+        await synerlink.responder(idConversation, cuerpo);
+      }
 
       const fin = new Date();
       // Lo que hizo cada subagente: a SynerLink (sección Equipo) y a consumo.jsonl.
@@ -412,6 +790,13 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
         .responder(idConversation, 'No pude atender el mensaje por un error del puente. Tecnología ya quedó con el registro.')
         .catch(() => null);
     } finally {
+      await supervisor?.detener().catch(() => null);
+      try {
+        borrarMcpCompleto(completo?.rutaMcp);
+      } catch {}
+      try {
+        borrarMcpAgente(delAgente?.rutaMcp);
+      } catch {}
       // Se confirma SIEMPRE al final (éxito o error ya avisado): con ack=false
       // en la bandeja, si el puente se cae a mitad de turno, el mensaje vuelve
       // a llegar al reiniciar (al menos una vez).
@@ -512,6 +897,28 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno }) {
   return { recibir, recibirPedidos, cola, enProceso, atender, sugerirEquipo };
 }
 
+/** Conectores del agente para la línea «listo:» (solo NOMBRES; nunca su configuración). */
+export function conectoresAgenteListo(cfg) {
+  if (!cfg.conectoresAgente?.configDir) return 'apagados';
+  try {
+    const a = servidoresAgente(cfg.conectoresAgente);
+    return `${a.nombres.length ? a.nombres.join(', ') : 'ninguno'} (de ${cfg.conectoresAgente.configDir})${a.engramProyecto ? `; engram fijado a su memoria «${a.engramProyecto}»` : ''}${a.faltan.length ? `; variables sin valor: ${a.faltan.join(', ')}` : ''}`;
+  } catch (e) {
+    return `NO se pudieron leer (${e.message.slice(0, 120)}): los turnos irán sin ellos`;
+  }
+}
+
+/** Estado de los conectores de PRUEBAS para la línea «listo:» (sin valores secretos). */
+export function pruebasListo(cfg, verificar = verificarSecretosPruebas) {
+  if (!cfg.pruebasKronos?.habilitado) return 'apagado';
+  try {
+    verificar(cfg.conectoresSecretos);
+    return `kronos-pruebas-sql + synerlink-testing-web (${cfg.pruebasKronos.base})`;
+  } catch (e) {
+    return `SIN credenciales (${e.message})`;
+  }
+}
+
 async function principal() {
   const cfg = cargarConfig(process.env);
   fijarEtiquetaEntorno(cfg.entorno);
@@ -526,14 +933,23 @@ async function principal() {
   cfg.agenteNombre = primera.agent.displayName;
 
   const estado = new Estado(cfg.hilosDir);
-  const puente = crearPuente({ cfg, synerlink, estado });
-  log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}.`);
+  // Medidor del consumo de Anthropic (cuota.mjs): sin turnos en curso, consulta mínima cada intervalo.
+  let ocupado = () => false;
+  const medidor = cfg.cuota?.habilitada
+    ? crearMedidorCuota({ credencial: cfg.credencial, publicar: (e) => synerlink.cuota(e), ocupado: () => ocupado(), intervaloMs: cfg.cuota.intervaloMs, log })
+    : null;
+  const puente = crearPuente({ cfg, synerlink, estado, medidor });
+  ocupado = () => puente.enProceso.size > 0;
+  medidor?.iniciar();
+  log(medidor ? `medidor de consumo: stream de cada turno${cfg.cuota.intervaloMs > 0 && cfg.credencial.tipo === 'oauth-token' ? ` + consulta mínima cada ${Math.round(cfg.cuota.intervaloMs / 1000)} s sin turnos` : ''}.` : 'medidor de consumo apagado (HILOS_CUOTA=no).');
+  log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}, modelo del hilo principal: ${cfg.modelo ?? 'el predeterminado de la cuenta (sin HILOS_MODELO)'}; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; gasto ${cfg.sinTopeGasto ? 'SIN TOPE' : cfg.presupuestoUsd ? `tope ${cfg.presupuestoUsd} USD` : `sin tope general (equipo ${cfg.subagentesPresupuestoUsd} USD)`}; avisos de progreso ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; continuación automática ${cfg.continuarAlAgotar ? 'sí' : 'no'}; PRUEBAS para todos los hilos: ${pruebasListo(cfg)}; conectores del agente: ${conectoresAgenteListo(cfg)}.`);
 
   let parar = false;
   for (const senal of ['SIGTERM', 'SIGINT']) {
     process.on(senal, () => {
       log(`recibí ${senal}: termino los turnos en curso y salgo.`);
       parar = true;
+      medidor?.detener();
       void puente.cola.vacia().then(() => process.exit(0));
       setTimeout(() => process.exit(0), cfg.timeoutTurnoMs).unref();
     });
