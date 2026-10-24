@@ -175,7 +175,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       headers.set('Cache-Control', 'private, max-age=600');
       headers.set('Content-Security-Policy', "default-src 'none'; sandbox");
     } else {
-      headers.set('Content-Type', safeDownloadContentType(attachment.content_type));
+      headers.set('Content-Type', safeDownloadContentType(attachment.content_type, attachment.file_name));
       headers.set('Content-Disposition', buildContentDisposition(attachment.file_name));
     }
     // El navegador NO debe adivinar el tipo: con `attachment` + `nosniff`, un
