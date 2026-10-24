@@ -19,6 +19,7 @@ import {
   isBlockedAttachmentExtension,
   safeDownloadContentType,
   sanitizeChatAttachmentName,
+  tipoMimeDeAdjunto,
 } from '../attachments';
 
 /**
@@ -323,5 +324,54 @@ describe('vista previa de imágenes en línea', () => {
 
   it('la cabecera inline conserva el nombre saneado', () => {
     expect(buildContentDisposition('foto.png', 'inline')).toMatch(/^inline; filename="foto.png"/);
+  });
+});
+
+/*
+ * 2026-10-24 — los adjuntos que manda un AGENTE por el canal llegan como
+ * `application/octet-stream` (excel-prueba-visor.xlsx, adjunto 4431 de prod).
+ * El tipo se corrige por la extensión al guardar y al descargar.
+ */
+describe('tipoMimeDeAdjunto', () => {
+  const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+  it('con tipo genérico o vacío manda la extensión', () => {
+    expect(tipoMimeDeAdjunto('application/octet-stream', 'excel-prueba-visor.xlsx')).toBe(XLSX);
+    expect(tipoMimeDeAdjunto('', 'video-prueba-visor.mp4')).toBe('video/mp4');
+    expect(tipoMimeDeAdjunto(null, 'Informe.PDF')).toBe('application/pdf');
+    expect(tipoMimeDeAdjunto('binary/octet-stream', 'a.docx')).toBe('application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  });
+
+  it('un tipo concreto se respeta', () => {
+    expect(tipoMimeDeAdjunto('application/vnd.ms-excel', 'datos.csv')).toBe('application/vnd.ms-excel');
+    expect(tipoMimeDeAdjunto('image/png', 'x.jpg')).toBe('image/png');
+  });
+
+  it('nunca deduce HTML, SVG ni scripts; sin extensión conocida deja lo declarado', () => {
+    expect(tipoMimeDeAdjunto('application/octet-stream', 'pagina.html')).toBe('application/octet-stream');
+    expect(tipoMimeDeAdjunto('application/octet-stream', 'dibujo.svg')).toBe('application/octet-stream');
+    expect(tipoMimeDeAdjunto('', 'script.js')).toBeNull();
+    expect(tipoMimeDeAdjunto(null, 'sin-extension')).toBeNull();
+  });
+
+  it('la descarga usa el tipo deducido solo si está en la lista segura', () => {
+    expect(safeDownloadContentType('application/octet-stream', 'excel-prueba-visor.xlsx')).toBe(XLSX);
+    expect(safeDownloadContentType(null, 'clip.mp4')).toBe('video/mp4');
+    expect(safeDownloadContentType('application/octet-stream', 'x.html')).toBe('application/octet-stream');
+    expect(safeDownloadContentType('text/html', 'x.pdf')).toBe('application/octet-stream');
+    // Sin nombre, el comportamiento de siempre.
+    expect(safeDownloadContentType('application/octet-stream')).toBe('application/octet-stream');
+  });
+
+  it('collectChatAttachments guarda el tipo deducido cuando el envío no lo trae', () => {
+    const form = new FormData();
+    form.append('files', new File([new Uint8Array(4)], 'excel-prueba-visor.xlsx', { type: 'application/octet-stream' }));
+    form.append('files', new File([new Uint8Array(4)], 'notas.bin', { type: '' }));
+    const r = collectChatAttachments(form);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.files[0].contentType).toBe(XLSX);
+      expect(r.files[1].contentType).toBeNull();
+    }
   });
 });

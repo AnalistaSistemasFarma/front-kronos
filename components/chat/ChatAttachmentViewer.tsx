@@ -416,6 +416,8 @@ function VistaPdf({ url, zoom, convertido }: { url: string; zoom: number; conver
 interface HojasDto {
   hojas: { nombre: string; html: string }[];
   css: string;
+  /** Fórmulas sin resultado guardado (libro hecho por un programa): en «Hojas» saldrían vacías. */
+  formulasSinCalcular?: number;
 }
 
 /** Documento aislado de una hoja: sin scripts (sandbox vacío + CSP), solo estilos. */
@@ -437,6 +439,9 @@ function VistaHoja({ url }: { url: string }) {
   const [error, setError] = useState<string | null>(null);
   const [intento, setIntento] = useState(0);
   const [hoja, setHoja] = useState<string | null>('0');
+  // Libro con fórmulas sin calcular: se abre en PDF (Excel Online las calcula) y se avisa.
+  const [sinCalcular, setSinCalcular] = useState(0);
+  const avisado = useRef(false);
 
   useEffect(() => {
     if (modo !== 'hojas') return;
@@ -449,6 +454,13 @@ function VistaHoja({ url }: { url: string }) {
         if (!ctrl.signal.aborted) {
           setDatos(d);
           setHoja('0');
+          const n = d.formulasSinCalcular ?? 0;
+          if (n > 0 && !avisado.current) {
+            // Solo la primera vez: si la persona vuelve a «Hojas», se queda ahí.
+            avisado.current = true;
+            setSinCalcular(n);
+            setModo('pdf');
+          }
         }
       })
       .catch((e: unknown) => {
@@ -476,6 +488,15 @@ function VistaHoja({ url }: { url: string }) {
           aria-label='Cómo ver el Excel'
         />
       </Group>
+      {sinCalcular > 0 && (
+        <Alert color='yellow' variant='light' radius={0} py={6} icon={<IconAlertTriangle size={16} />} data-testid='chat-visor-formulas'>
+          <Text size='xs'>
+            {modo === 'pdf'
+              ? 'Este Excel trae fórmulas sin calcular (lo generó un programa). Se muestra como PDF, que sí las calcula.'
+              : 'Este Excel trae fórmulas sin calcular: en esta vista esas celdas salen vacías. Use «PDF» para ver los resultados.'}
+          </Text>
+        </Alert>
+      )}
       {modo === 'pdf' ? (
         <VistaPdfConZoom url={urlPdf} />
       ) : error ? (
