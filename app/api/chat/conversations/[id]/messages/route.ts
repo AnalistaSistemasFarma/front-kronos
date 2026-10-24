@@ -1,10 +1,9 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '../../../../../../lib/prisma';
 import { messageInclude, serializeMessage } from '../../../../../../lib/chat/conversations';
+import { publicarMensajeDePersona } from '../../../../../../lib/chat/publicar-mensaje';
 import { conExtras, cursorReacciones } from '../../../../../../lib/chat/message-extras';
-import { calcularEntregas } from '../../../../../../lib/chat/groups';
 import { readClientOrigin } from '../../../../../../lib/chat/client-origin';
-import { notifyPeopleMessage } from '../../../../../../lib/chat/notifyPeople';
 import {
   MAX_USER_MESSAGE_CHARS,
   MESSAGES_PAGE_DEFAULT,
@@ -218,69 +217,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       }
     }
 
-    // Transacción: el mensaje y la marca de tiempo de la bandeja entran juntos
-    // o no entra ninguno. Si se separan, un fallo intermedio deja la bandeja
-    // ordenada por un instante que no corresponde a ningún mensaje.
-    // A quién hay que despertar. Una PERSONA nunca choca con el tope de
-    // turnos: ese tope existe para las cadenas entre agentes.
-    const entregas =
-      guard.kind === 'group'
-        ? calcularEntregas({
-            body,
-            agentesDelGrupo: guard.groupAgents,
-            idAgentAutor: null,
-            turnosPrevios: 0,
-          })
-        : { idAgents: [], cadenaCortada: false };
-
-    const message = await prisma.$transaction(async (tx) => {
-      const created = await tx.chatMessage.create({
-        data: {
-          id_conversation: guard.conversationId,
-          role: 'user',
-          body,
-          created_at: now,
-          // El autor sale de la SESIÓN, nunca del payload.
-          id_user_author: guard.user.id,
-          // Desde dónde se escribió. Solo se guarda en los mensajes de
-          // personas: el agente entra por la API con su llave, sin navegador.
-          client_ip: clientIp,
-          user_agent: userAgent,
-          ...(idReplyTo !== null ? { id_reply_to: idReplyTo } : {}),
-          // Mensaje y adjuntos, una sola escritura: o entran los dos o ninguno.
-          ...(uploaded.length > 0 ? { attachments: { create: uploaded } } : {}),
-          // Mensaje y entregas, también: ver la nota de arriba.
-          ...(entregas.idAgents.length > 0
-            ? {
-                deliveries: {
-                  create: entregas.idAgents.map((idAgent) => ({ id_agent: idAgent })),
-                },
-              }
-            : {}),
-        },
-        include: messageInclude,
-      });
-
-      await tx.chatConversation.update({
-        where: { id: guard.conversationId },
-        data: { last_message_at: now },
-      });
-
-      return created;
+    // Mensaje + adjuntos + entregas + bandeja en una transacción, y el push
+    // entre personas: lib/chat/publicar-mensaje.ts (lo comparte «Reenviar»).
+    const { message, notifiedAgents } = await publicarMensajeDePersona(guard, {
+      body,
+      uploaded,
+      idReplyTo,
+      clientIp,
+      userAgent,
+      now,
     });
-
-    // Entre personas, push a la otra (decisión D7). Por detrás: no se espera.
-    if (guard.kind === 'people') {
-      void notifyPeopleMessage({
-        idConversation: guard.conversationId,
-        idRemitente: guard.user.id,
-        idDestino: guard.otherUserId,
-        body,
-        attachmentCount: uploaded.length,
-        idMessage: message.id,
-        createdAt: message.created_at,
-      });
-    }
 
     return jsonNoStore(
       {
@@ -290,7 +236,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         // En un PROYECTO no hay menciones: todo mensaje va al agente del
         // proyecto, que lo recoge por el PUENTE de hilos (llave 'projects');
         // la sesión viva del bot no lo ve (su bandeja solo lee 'direct').
-        notifiedAgents: guard.kind === 'project' ? [guard.idAgent] : entregas.idAgents,
+        notifiedAgents,
       },
       { status: 201 }
     );

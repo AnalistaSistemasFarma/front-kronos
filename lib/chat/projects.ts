@@ -411,6 +411,61 @@ export async function listProjectsForUser(user: ProjectUser, opciones: { archiva
   };
 }
 
+/**
+ * Conversaciones de proyecto donde la persona PUEDE ESCRIBIR (2026-10-24),
+ * para el selector de «Compartir → Reenviar por el chat» del visor de
+ * adjuntos. Misma regla de escritura que la puerta (evaluarAgente: rol con
+ * escritura, agente vigente y asignado en la empresa), resuelta en bloque:
+ * una consulta de proyectos y una de permisos, sin N+1. La puerta del POST
+ * se vuelve a pasar igual al reenviar: esto solo arma la lista.
+ */
+export async function conversacionesDeProyectoEscribibles(
+  user: ProjectUser
+): Promise<{ idConversation: number; titulo: string | null; proyecto: string; agente: string; lastMessageAt: Date | null }[]> {
+  const listado = await listProjectsForUser(user, { archivados: false });
+  if (!listado || listado.projects.length === 0) return [];
+  const conEscritura = listado.projects.filter((p) => capabilitiesFor(p.myRole).write);
+  if (conEscritura.length === 0) return [];
+
+  const filas = await prisma.chatConversation.findMany({
+    where: { kind: 'project', archived: false, id_project: { in: conEscritura.map((p) => p.idProject) } },
+    select: {
+      id: true,
+      title: true,
+      id_project: true,
+      last_message_at: true,
+      agent: { select: { id_agent: true, code: true, display_name: true, is_active: true } },
+    },
+    orderBy: [{ last_message_at: 'desc' }, { id: 'desc' }],
+    take: 200,
+  });
+  if (filas.length === 0) return [];
+
+  const [asignados, config, designados] = await Promise.all([
+    agentesAsignados(user.email),
+    cargarConfigProyectos(),
+    prisma.chatProjectAgent.findMany({
+      where: { id_project: { in: conEscritura.map((p) => p.idProject) } },
+      select: { id_project: true, id_agent: true },
+    }),
+  ]);
+  const enProyecto = new Set(designados.map((d) => `${d.id_project}:${d.id_agent}`));
+  const proyectos = new Map(conEscritura.map((p) => [p.idProject, p]));
+
+  const salida: { idConversation: number; titulo: string | null; proyecto: string; agente: string; lastMessageAt: Date | null }[] = [];
+  for (const c of filas) {
+    const p = c.id_project === null ? undefined : proyectos.get(c.id_project);
+    if (!p) continue;
+    const agente = enProyecto.has(`${p.idProject}:${c.agent.id_agent}`)
+      ? { idAgent: c.agent.id_agent, code: c.agent.code, isActive: c.agent.is_active }
+      : null;
+    const w = evaluarAgente(agente, { idCompany: p.company.idCompany, profile: p.profile.key, role: p.myRole }, asignados, config);
+    if (!w.ok) continue;
+    salida.push({ idConversation: c.id, titulo: c.title, proyecto: p.name, agente: c.agent.display_name, lastMessageAt: c.last_message_at });
+  }
+  return salida;
+}
+
 /* ───────────────────────────── Detalle ───────────────────────────────── */
 
 /** Lo que la base sabe del proyecto; los vínculos los completa projects-links. */
