@@ -116,6 +116,35 @@ export async function pdfDeAdjunto(onedriveItemId: string): Promise<Uint8Array> 
 export interface HojasDeExcel {
   hojas: { nombre: string; html: string }[];
   css: string;
+  /**
+   * Fórmulas SIN valor calculado guardado (2026-10-24). El motor de hojas
+   * toma el valor que Excel dejó en el archivo; un libro generado por un
+   * programa (openpyxl, el que usan los agentes) trae la fórmula pero no el
+   * resultado, y esas celdas salían EN BLANCO. Con > 0 el visor abre el PDF
+   * de Microsoft (Excel Online sí recalcula) y lo avisa.
+   */
+  formulasSinCalcular: number;
+}
+
+/**
+ * Cuántas celdas de las hojas visibles tienen fórmula y no traen el resultado
+ * guardado. Recorre solo celdas con valor (exceljs no materializa las vacías).
+ */
+export async function contarFormulasSinCalcular(bytes: Uint8Array): Promise<number> {
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(bytes) as unknown as ArrayBuffer);
+  let n = 0;
+  for (const hoja of wb.worksheets) {
+    if (hoja.state === 'hidden' || hoja.state === 'veryHidden') continue;
+    hoja.eachRow({ includeEmpty: false }, (fila) => {
+      fila.eachCell({ includeEmpty: false }, (celda) => {
+        const v = celda.value as { formula?: unknown; sharedFormula?: unknown; result?: unknown } | null;
+        if (v && typeof v === 'object' && (v.formula !== undefined || v.sharedFormula !== undefined) && (v.result === undefined || v.result === null)) n++;
+      });
+    });
+  }
+  return n;
 }
 
 const MARCA_HOJA = '<h2 class="sgc-hoja-nombre';
@@ -152,8 +181,11 @@ async function bytesDeGraph(onedriveItemId: string): Promise<Uint8Array> {
 export async function hojasDeAdjunto(onedriveItemId: string): Promise<HojasDeExcel> {
   const json = await cache.obtener(`hojas:${onedriveItemId}`, async () => {
     const { xlsxToSheet } = await import('../sgc/pdf/viewable');
-    const hoja = await xlsxToSheet(await bytesDeGraph(onedriveItemId));
-    const salida: HojasDeExcel = { hojas: partirHojas(hoja.html), css: hoja.css };
+    const bytes = await bytesDeGraph(onedriveItemId);
+    const hoja = await xlsxToSheet(bytes);
+    // Contar es un extra: si falla, se muestran las hojas como siempre.
+    const formulasSinCalcular = await contarFormulasSinCalcular(bytes).catch(() => 0);
+    const salida: HojasDeExcel = { hojas: partirHojas(hoja.html), css: hoja.css, formulasSinCalcular };
     return new TextEncoder().encode(JSON.stringify(salida));
   });
   return JSON.parse(new TextDecoder().decode(json)) as HojasDeExcel;

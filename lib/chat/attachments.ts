@@ -244,7 +244,10 @@ export function collectChatAttachments(
       fileName: sanitizeChatAttachmentName(file.name),
       // Se guarda lo que dice el cliente solo como PISTA para la interfaz; la
       // validación nunca depende de este campo (ver el encabezado del módulo).
-      contentType: file.type ? file.type.slice(0, 200) : null,
+      // Si no lo dice o dice el genérico `application/octet-stream` (así llegan
+      // los archivos que manda un AGENTE por el canal), se toma el de la
+      // extensión: sin eso el adjunto no se puede compartir a otras apps.
+      contentType: tipoMimeDeAdjunto(file.type, file.name),
       size: file.size,
       blob: file,
     });
@@ -329,9 +332,72 @@ const SAFE_DOWNLOAD_CONTENT_TYPES = new Set([
   'video/webm',
 ]);
 
-export function safeDownloadContentType(stored: string | null | undefined): string {
-  const value = (stored ?? '').split(';')[0].trim().toLowerCase();
+/**
+ * Con `fileName`, un tipo guardado vacío o genérico se corrige por la
+ * extensión (ver tipoMimeDeAdjunto) antes de pasar por la lista: los adjuntos
+ * que un agente mandó como `application/octet-stream` bajan con su tipo real.
+ */
+export function safeDownloadContentType(stored: string | null | undefined, fileName?: string | null): string {
+  const value = (fileName === undefined ? stored ?? '' : tipoMimeDeAdjunto(stored, fileName) ?? '').split(';')[0].trim().toLowerCase();
   return SAFE_DOWNLOAD_CONTENT_TYPES.has(value) ? value : 'application/octet-stream';
+}
+
+/* ──────────────────── Tipo MIME por la extensión ────────────────────── */
+
+/**
+ * Tipo por extensión, SOLO de formatos inertes (documentos, hojas, imágenes
+ * de mapa de bits, audio y video). Nunca HTML, SVG ni scripts: un nombre no
+ * puede convertir un archivo en algo que el navegador interprete.
+ */
+export const MIME_POR_EXTENSION: Readonly<Record<string, string>> = {
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  xlsm: 'application/vnd.ms-excel.sheet.macroEnabled.12',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  odt: 'application/vnd.oasis.opendocument.text',
+  ods: 'application/vnd.oasis.opendocument.spreadsheet',
+  odp: 'application/vnd.oasis.opendocument.presentation',
+  csv: 'text/csv',
+  txt: 'text/plain',
+  md: 'text/markdown',
+  json: 'application/json',
+  zip: 'application/zip',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  ogg: 'audio/ogg',
+  wav: 'audio/wav',
+  mp4: 'video/mp4',
+  m4v: 'video/mp4',
+  mov: 'video/quicktime',
+  webm: 'video/webm',
+};
+
+/** Tipos que no dicen nada del archivo: con ellos manda la extensión. */
+const MIME_GENERICOS = new Set(['', 'application/octet-stream', 'binary/octet-stream', 'application/x-download', 'application/force-download']);
+
+/**
+ * Tipo MIME de un adjunto: el declarado si es concreto; si viene vacío o
+ * genérico, el de la extensión (MIME_POR_EXTENSION); si tampoco, el declarado
+ * tal cual (o null). Recortado a 200 caracteres (la columna).
+ */
+export function tipoMimeDeAdjunto(declarado: string | null | undefined, fileName: string | null | undefined): string | null {
+  const base = (declarado ?? '').split(';')[0].trim().toLowerCase();
+  if (!MIME_GENERICOS.has(base)) return (declarado ?? '').slice(0, 200);
+  const ext = attachmentExtension(fileName ?? '');
+  const porExtension = MIME_POR_EXTENSION[ext];
+  if (porExtension) return porExtension;
+  return declarado ? declarado.slice(0, 200) : null;
 }
 
 /**
