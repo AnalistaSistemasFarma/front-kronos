@@ -5,6 +5,7 @@ import { ActionIcon, Alert, Button, Center, Group, Loader, Modal, SegmentedContr
 import { useMediaQuery } from '@mantine/hooks';
 import {
   IconAlertTriangle,
+  IconCheck,
   IconChevronLeft,
   IconChevronRight,
   IconDownload,
@@ -26,6 +27,7 @@ import {
   type TipoVisor,
 } from '../../lib/chat/visor';
 import ChatMarkdown from './ChatMarkdown';
+import CompartirAdjunto, { type AvisoCompartir } from './CompartirAdjunto';
 
 /** Lo mínimo de un adjunto para abrirlo en el visor. */
 export interface AdjuntoVisor {
@@ -100,6 +102,14 @@ export default function ChatAttachmentViewer({
   const conZoom = tipoEfectivo === 'imagen' || tipoEfectivo === 'pdf' || tipoEfectivo === 'office';
 
   useEffect(() => setZoom(1), [actual?.id]);
+
+  // Confirmación de «Compartir», ARRIBA del visor y con color; se va sola.
+  const [aviso, setAviso] = useState<AvisoCompartir | null>(null);
+  useEffect(() => {
+    if (!aviso) return;
+    const t = window.setTimeout(() => setAviso(null), 6000);
+    return () => window.clearTimeout(t);
+  }, [aviso]);
 
   const anterior = useCallback(() => {
     if (indice > 0) onIndice(indice - 1);
@@ -190,6 +200,7 @@ export default function ChatAttachmentViewer({
               )}
             </>
           )}
+          <CompartirAdjunto adjunto={actual} onAviso={setAviso} />
           <Tooltip label='Descargar' withArrow>
             <ActionIcon
               component='a'
@@ -209,6 +220,21 @@ export default function ChatAttachmentViewer({
         </Group>
       </Group>
 
+      {aviso && (
+        <Alert
+          color={aviso.color}
+          variant='light'
+          radius={0}
+          py={8}
+          withCloseButton
+          onClose={() => setAviso(null)}
+          icon={aviso.color === 'green' ? <IconCheck size={16} /> : <IconAlertTriangle size={16} />}
+          role='status'
+          data-testid='chat-visor-aviso'
+        >
+          <Text size='sm'>{aviso.texto}</Text>
+        </Alert>
+      )}
       <div className='chat-visor__area' data-tipo={tipoEfectivo} data-testid='chat-visor-area'>
         {tipoEfectivo === 'imagen' && (
           <VistaImagen
