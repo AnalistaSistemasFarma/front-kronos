@@ -1,6 +1,7 @@
 'use client';
 
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useSession } from 'next-auth/react';
 import {
   ActionIcon,
@@ -17,7 +18,6 @@ import {
 } from '@mantine/core';
 import {
   IconAlertCircle,
-  IconDownload,
   IconLock,
   IconMessage2,
   IconUpload,
@@ -44,7 +44,19 @@ import {
   type ChatParticipantDto,
 } from '../../lib/chat/client';
 import { esImagenAdjunta, formatBytes } from '../../lib/chat/attachments';
-import { ChatImageThumb, ChatImageViewer, type ImagenAdjunta } from './ChatImageViewer';
+import { ChatImageThumb } from './ChatImageViewer';
+import IconoAdjunto from './IconoAdjunto';
+import type { AdjuntoVisor } from './ChatAttachmentViewer';
+
+// El visor (pdf.js, tablas, reproductor) se carga solo cuando alguien abre un adjunto.
+const ChatAttachmentViewer = dynamic(() => import('./ChatAttachmentViewer'), { ssr: false });
+
+/**
+ * Abre el VISOR de un adjunto (2026-10-22). Lo provee el hilo, que conoce todas
+ * las imágenes de la conversación para navegar entre ellas; las burbujas
+ * (en `memo`) lo leen del contexto sin re-renderizarse.
+ */
+const AbrirAdjuntoContext = createContext<((adjunto: ChatAttachmentDto) => void) | null>(null);
 import {
   efectoZumbido,
   marcarZumbidoMostrado,
@@ -54,7 +66,7 @@ import {
   zumbidoFresco,
 } from '../../lib/chat/nudge-fx';
 import { registrarHiloAbierto, soltarHiloAbierto } from '../../lib/chat/message-sound';
-import type { ChatReplyToDto } from '../../lib/chat/client';
+import type { ChatAttachmentDto, ChatReplyToDto } from '../../lib/chat/client';
 import { BotonReaccionar, FilaReacciones, HojaMensaje } from './ChatReactions';
 import type { MediaParaEnviar } from './useChatConversation';
 import StickerAnimado from './StickerAnimado';
@@ -130,28 +142,30 @@ function MediaDelMensaje({ message }: { message: ChatMessageDto }) {
  */
 
 /**
- * Adjuntos de un mensaje, como fichas descargables.
+ * Adjuntos de un mensaje, como fichas que ABREN EL VISOR (2026-10-22).
  *
- * El enlace apunta SIEMPRE a /api/chat/attachments/<id> (nunca a OneDrive):
- * ahí se vuelve a comprobar el permiso en cada descarga. Mientras el mensaje
- * está en vuelo el id todavía no existe, así que la ficha se muestra sin
- * enlace en vez de ofrecer una descarga que daría 404.
+ * Pedido de Nicolás Rivera: «evitemos la descarga de archivos y tengamos
+ * previsualizadores»; y luego: «ya después de abierto, si decidimos si lo
+ * descargamos o no». Tocar la ficha (o la miniatura de una imagen) abre
+ * SIEMPRE el visor; Descargar quedó DENTRO del visor, no en la burbuja.
  *
- * Las IMÁGENES (2026-10-01) llevan además una miniatura encima de su ficha,
- * pedida a la misma ruta con `?inline=1`; al tocarla se abre el visor con
- * Descargar. El estado del visor vive aquí, no en el hilo: abrirlo no
- * re-renderiza las demás burbujas (MessageBubble está en `memo`).
+ * La URL sigue siendo /api/chat/attachments/<id> (nunca OneDrive), que
+ * revalida el permiso en cada lectura. Mientras el mensaje está en vuelo el id
+ * todavía no existe, así que la ficha se muestra sin acción.
  */
 function MessageAttachments({ message }: { message: ChatMessageDto }) {
-  const [visor, setVisor] = useState<ImagenAdjunta | null>(null);
+  const abrirEnElHilo = useContext(AbrirAdjuntoContext);
+  // Respaldo por si la burbuja se pinta fuera de un hilo: visor con solo este adjunto.
+  const [suelto, setSuelto] = useState<AdjuntoVisor | null>(null);
   if (message.attachments.length === 0) return null;
+  const abrir = (adjunto: ChatAttachmentDto) => (abrirEnElHilo ? abrirEnElHilo(adjunto) : setSuelto(adjunto));
 
   return (
     <Stack gap={4} mt={6}>
       {message.attachments.map((attachment) => {
         const content = (
           <>
-            <IconDownload size={13} />
+            <IconoAdjunto fileName={attachment.fileName} contentType={attachment.contentType} />
             <Text size='xs' lineClamp={1} className='chat-attachment__name'>
               {attachment.fileName}
             </Text>
@@ -172,27 +186,28 @@ function MessageAttachments({ message }: { message: ChatMessageDto }) {
         }
 
         const ficha = (
-          <a
+          <button
             key={attachment.id}
-            href={attachment.downloadUrl}
-            download={attachment.fileName}
+            type='button'
+            onClick={() => abrir(attachment)}
             className='chat-attachment chat-attachment--link'
-            title={`Descargar ${attachment.fileName}`}
+            title={`Ver ${attachment.fileName}`}
+            data-testid='chat-adjunto'
           >
             {content}
-          </a>
+          </button>
         );
 
         if (!esImagenAdjunta(attachment)) return ficha;
 
         return (
           <Stack key={attachment.id} gap={4}>
-            <ChatImageThumb imagen={attachment} onAbrir={setVisor} />
+            <ChatImageThumb imagen={attachment} onAbrir={() => abrir(attachment)} />
             {ficha}
           </Stack>
         );
       })}
-      {visor && <ChatImageViewer imagen={visor} onClose={() => setVisor(null)} />}
+      {suelto && <ChatAttachmentViewer adjuntos={[suelto]} indice={0} onIndice={() => undefined} onClose={() => setSuelto(null)} />}
     </Stack>
   );
 }
@@ -580,7 +595,7 @@ function GroupActivity({ statuses }: { statuses: ChatAgentStatusDto[] }) {
 }
 
 /** Indicador de "qué está haciendo el agente" — lo que evita el efecto congelado. */
-function AgentActivity({
+const AgentActivity = memo(function AgentActivity({
   agent,
   status,
 }: {
@@ -608,7 +623,7 @@ function AgentActivity({
       </Group>
     </Box>
   );
-}
+});
 
 /**
  * La caja de SUB-AGENTES EN CURSO, anclada entre la conversación y el
@@ -819,6 +834,25 @@ export default function ChatThread({
     onZumbido: enPersonas ? alZumbido : undefined,
   });
 
+  // VISOR DE ADJUNTOS (2026-10-22): una imagen abre el visor con TODAS las
+  // imágenes cargadas del hilo, en orden, para pasar de una a otra; cualquier
+  // otro archivo se abre solo. Se lee de una ref para que la función sea
+  // estable y las burbujas en `memo` no se vuelvan a pintar.
+  const mensajesParaVisor = useRef(thread.messages);
+  mensajesParaVisor.current = thread.messages;
+  const [visorAdjuntos, setVisorAdjuntos] = useState<{ lista: AdjuntoVisor[]; indice: number } | null>(null);
+  const abrirAdjunto = useCallback((adjunto: ChatAttachmentDto) => {
+    if (esImagenAdjunta(adjunto)) {
+      const lista = mensajesParaVisor.current.flatMap((m) => m.attachments).filter((a) => a.downloadUrl && esImagenAdjunta(a));
+      const indice = lista.findIndex((a) => a.id === adjunto.id);
+      if (indice >= 0) {
+        setVisorAdjuntos({ lista, indice });
+        return;
+      }
+    }
+    setVisorAdjuntos({ lista: [adjunto], indice: 0 });
+  }, []);
+
   // «Consultar a un agente» (Correo, 2026-10-16): las propuestas del agente sobre un hilo de correo
   // compartido se pintan como TARJETA de confirmación en lugar de su mensaje. Solo en hilos directos.
   const ultimoMensaje = thread.messages[thread.messages.length - 1];
@@ -1020,7 +1054,11 @@ export default function ChatThread({
       viewport.scrollTop = viewport.scrollHeight;
       return;
     }
-    viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
+    // Sin `smooth`: el ResizeObserver de más abajo re-ancla el fondo dos
+    // cuadros después y cortaba la animación a medias — se veía como un
+    // tirón cada vez que llegaba un mensaje (2026-10-22). La burbuja ya trae
+    // su propia animación de entrada.
+    viewport.scrollTop = viewport.scrollHeight;
   }, [thread.messages, thread.stale, stickToBottom]);
 
   // Al abrir el hilo, al fondo sin animación. useLayoutEffect (no useEffect):
@@ -1264,6 +1302,7 @@ export default function ChatThread({
   };
 
   return (
+    <AbrirAdjuntoContext.Provider value={abrirAdjunto}>
     <Box
       ref={raizRef}
       className={`chat-thread${dragging ? ' chat-thread--dragging' : ''}`}
@@ -1444,6 +1483,15 @@ export default function ChatThread({
         onCitar={soloLectura ? undefined : citar}
         puedeReaccionar={!soloLectura}
       />
+      {visorAdjuntos && (
+        <ChatAttachmentViewer
+          adjuntos={visorAdjuntos.lista}
+          indice={visorAdjuntos.indice}
+          onIndice={(indice) => setVisorAdjuntos((v) => (v ? { ...v, indice } : v))}
+          onClose={() => setVisorAdjuntos(null)}
+        />
+      )}
     </Box>
+    </AbrirAdjuntoContext.Provider>
   );
 }

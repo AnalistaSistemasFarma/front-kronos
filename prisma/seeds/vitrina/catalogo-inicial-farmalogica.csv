@@ -1,0 +1,263 @@
+Codigo SAP;Presentacion propuesta;Empresa;Familia (grupo SAP);Pais;Tipo;Visibilidad propuesta
+PTAB0110;Aztreonam 1 g x10 - AZBIOS;Farmalogica;Monobactamicos;Colombia;Para terceros (Bioselect);Interna
+PTAB0111;Aztreonam 1 g x1 - AZBIOS;Farmalogica;Monobactamicos;Colombia;Para terceros (Bioselect);Interna
+PTAB0120;Aztreonam 1 g x10 - AZBIOS;Farmalogica;Monobactamicos;Colombia;Para terceros (Bioselect);Interna
+PTAB0121;Aztreonam 1 g x1 - AZBIOS;Farmalogica;Monobactamicos;Colombia;Para terceros (Bioselect);Interna
+PTAM0111;Ampicilina 1 g x10;Farmalogica;Penicilinas;Colombia;Propio;Vista al cliente tras validar
+PTAM0111EXPP;Ampicilina 1 g x10;Farmalogica;Penicilinas;Ecuador;Para terceros (PISA);Interna
+PTAM0121;Ampicilina 1 g x10;Farmalogica;Penicilinas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTAM0150;Ampicilina 1 g x10;Farmalogica;Penicilinas;Guatemala;Propio;Vista al cliente tras validar
+PTAM0151P;Ampicilina 1 g x10;Farmalogica;Penicilinas;El Salvador;Para terceros (PISA);Interna
+PTAM0152;Ampicilina 1 g x10;Farmalogica;Penicilinas;Honduras;Propio;Vista al cliente tras validar
+PTAM0155;Ampicilina 1 g x10;Farmalogica;Penicilinas;Peru;Propio;Vista al cliente tras validar
+PTAM0155P;Ampicilina 1 g x10;Farmalogica;Penicilinas;Peru;Para terceros (PISA);Interna
+PTAM0156;Ampicilina 1 g x10;Farmalogica;Penicilinas;Costa Rica;Para terceros (PISA, el codigo no lleva P);Interna
+PTAM0157;Ampicilina 1 g x10;Farmalogica;Penicilinas;Nicaragua;Propio;Vista al cliente tras validar
+PTAM0160P;Ampicilina 1 g x10;Farmalogica;Penicilinas;Panama;Para terceros (PISA);Interna
+PTAM0511;Ampicilina 500 mg x10;Farmalogica;Penicilinas;Colombia;Propio;Vista al cliente tras validar
+PTAM0511EXPP;Ampicilina 500 mg x10;Farmalogica;Penicilinas;Ecuador;Para terceros (PISA);Interna
+PTAM0521;Ampicilina 500 mg x10;Farmalogica;Penicilinas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTAM0550;Ampicilina 500 mg x10;Farmalogica;Penicilinas;Guatemala;Propio;Vista al cliente tras validar
+PTAM0553;Ampicilina 500 mg x1;Farmalogica;Penicilinas;Mexico;Mexico (INST = sector salud publico, C = comercial privado);Configurable (inicia interna)
+PTAM0555;Ampicilina 500 mg x10;Farmalogica;Penicilinas;Peru;Propio;Vista al cliente tras validar
+PTAM0555P;Ampicilina 500 mg x10;Farmalogica;Penicilinas;Peru;Para terceros (PISA);Interna
+PTAZ0111;Aztreonam 1 g x10;Farmalogica;Monobactamicos;Colombia;Propio;Vista al cliente tras validar
+PTAZ0111EXP;Aztreonam 1 g x10;Farmalogica;Monobactamicos;Ecuador;Propio;Vista al cliente tras validar
+PTAZ0111EXPP;Aztreonam 1 g x10;Farmalogica;Monobactamicos;Ecuador;Para terceros (PISA);Interna
+PTAZ0121;Aztreonam 1 g x10;Farmalogica;Monobactamicos;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTAZ0150;Aztreonam 1 g x10;Farmalogica;Monobactamicos;Guatemala;Propio;Vista al cliente tras validar
+PTAZ0151P;Aztreonam 1 g x10;Farmalogica;Monobactamicos;El Salvador;Para terceros (PISA);Interna
+PTAZ0155A;Aztreonam 1 g x10;Farmalogica;Monobactamicos;Peru;Propio;Vista al cliente tras validar
+PTAZ0155P;Aztreonam 1 g x10;Farmalogica;Monobactamicos;Peru;Para terceros (PISA);Interna
+PTAZ0157;Aztreonam 1 g x10;Farmalogica;Monobactamicos;Nicaragua;Propio;Vista al cliente tras validar
+PTBM0110;Meropenem 1 g x10 - BIOSMER;Farmalogica;Carbapenemas;Colombia;Para terceros (Bioselect);Interna
+PTBM0111;Meropenem 1 g x1 - BIOSMER;Farmalogica;Carbapenemas;Colombia;Para terceros (Bioselect);Interna
+PTBM0120;Meropenem 1 g x10 - BIOSMER;Farmalogica;Carbapenemas;Colombia;Para terceros (Bioselect);Interna
+PTBM0121;Meropenem 1 g x1 - BIOSMER;Farmalogica;Carbapenemas;Colombia;Para terceros (Bioselect);Interna
+PTBS0110;Ampicilina + Sulbactam 1,5 g x10 - BIOSABACTAM;Farmalogica;Penicilinas;Colombia;Para terceros (Bioselect);Interna
+PTBS0111;Ampicilina + Sulbactam 1,5 g x1 - BIOSABACTAM;Farmalogica;Penicilinas;Colombia;Para terceros (Bioselect);Interna
+PTBS0120;Ampicilina + Sulbactam 1,5 g x10 - BIOSABACTAM;Farmalogica;Penicilinas;Colombia;Para terceros (Bioselect);Interna
+PTBS0121;Ampicilina + Sulbactam 1,5 g x1 - BIOSABACTAM;Farmalogica;Penicilinas;Colombia;Para terceros (Bioselect);Interna
+PTBT0110;Ceftriaxona 1 g x10 - BIOTRAXONA;Farmalogica;Cefalosporinas (en SAP: Articulos);Colombia;Para terceros (Bioselect);Interna
+PTBT0111;Ceftriaxona 1 g x1 - BIOTRAXONA;Farmalogica;Cefalosporinas (en SAP: Articulos);Colombia;Para terceros (Bioselect);Interna
+PTBT0120;Ceftriaxona 1 g x10 - BIOTRAXONA;Farmalogica;Cefalosporinas (en SAP: Articulos);Colombia;Para terceros (Bioselect);Interna
+PTBT0121;Ceftriaxona 1 g x1 - BIOTRAXONA;Farmalogica;Cefalosporinas (en SAP: Articulos);Colombia;Para terceros (Bioselect);Interna
+PTCD0111;Cefradina 1 g x10;Farmalogica;Cefalosporinas;Colombia;Propio;Vista al cliente tras validar
+PTCD0121;Cefradina 1 g x10;Farmalogica;Cefalosporinas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTCD0160P;Cefradina 1 g x10;Farmalogica;Cefalosporinas;Panama;Para terceros (PISA);Interna
+PTCF0111;Ceftriaxona 1 g x10;Farmalogica;Cefalosporinas;Colombia;Propio;Vista al cliente tras validar
+PTCF0111EXP;Ceftriaxona 1 g x10;Farmalogica;Cefalosporinas;Ecuador;Propio;Vista al cliente tras validar
+PTCF0121;Ceftriaxona 1 g x10;Farmalogica;Cefalosporinas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTCF0150;Ceftriaxona 1 g x10;Farmalogica;Cefalosporinas;Guatemala;Propio;Vista al cliente tras validar
+PTCF0151;Ceftriaxona 1 g x10;Farmalogica;Cefalosporinas;El Salvador;Propio;Vista al cliente tras validar
+PTCF0151P;Ceftriaxona 1 g x10;Farmalogica;Cefalosporinas;El Salvador;Para terceros (PISA);Interna
+PTCF0152;Ceftriaxona 1 g x10;Farmalogica;Cefalosporinas;Honduras;Propio;Vista al cliente tras validar
+PTCF015501;Ceftriaxona 1 g x10 - CEFTRIACOR;Farmalogica;Cefalosporinas;Peru;Marca por pais (CORVAL);Configurable (inicia interna)
+PTCF015502;Ceftriaxona 1 g x1 - CEFTRIACOR;Farmalogica;Cefalosporinas;Peru;Marca por pais (CORVAL);Configurable (inicia interna)
+PTCF0155P;Ceftriaxona 1 g x10;Farmalogica;Cefalosporinas;Peru;Para terceros (PISA);Interna
+PTCF0157;Ceftriaxona 1 g x10;Farmalogica;Cefalosporinas;Nicaragua;Propio;Vista al cliente tras validar
+PTCF0159P;Ceftriaxona 1 g x10;Farmalogica;Cefalosporinas;Chile;Para terceros (PISA);Interna
+PTCF0160P;Ceftriaxona 1 g x10;Farmalogica;Cefalosporinas;Panama;Para terceros (PISA);Interna
+PTCF0161;Ceftriaxona 1 g x10 - CEFTRIACOR;Farmalogica;Cefalosporinas;Bolivia;Marca por pais (CORVAL);Configurable (inicia interna)
+PTCF0511;Ceftriaxona 500 mg x10;Farmalogica;Cefalosporinas;Colombia;Propio (sin registro sanitario en SAP);Pendiente de validar
+PTCF0521;Ceftriaxona 500 mg x10;Farmalogica;Cefalosporinas;Colombia;Propio (codigo duplicado 01xx/02xx);Pendiente de validar
+PTCL0111;Cefalotina 1 g x10;Farmalogica;Cefalosporinas;Colombia;Propio;Vista al cliente tras validar
+PTCL0111EXP;Cefalotina 1 g x10;Farmalogica;Cefalosporinas;Ecuador;Propio;Vista al cliente tras validar
+PTCL0121;Cefalotina 1 g x10;Farmalogica;Cefalosporinas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTCL0150;Cefalotina 1 g x10;Farmalogica;Cefalosporinas;Guatemala;Propio;Vista al cliente tras validar
+PTCL0151P;Cefalotina 1 g x10;Farmalogica;Cefalosporinas;El Salvador;Para terceros (PISA);Interna
+PTCL0152;Cefalotina 1 g x10;Farmalogica;Cefalosporinas;Honduras;Propio;Vista al cliente tras validar
+PTCL0155;Cefalotina 1 g x10;Farmalogica;Cefalosporinas;Peru;Propio;Vista al cliente tras validar
+PTCL0158;Cefalotina 1 g x1;Farmalogica;Cefalosporinas;Mexico-Colombia;Mexico (INST = sector salud publico, C = comercial privado);Configurable (inicia interna)
+PTCL0160P;Cefalotina 1 g x10;Farmalogica;Cefalosporinas;Panama;Para terceros (PISA);Interna
+PTCL0553;Cefalotina 1 g x1 (INST);Farmalogica;Cefalosporinas;Mexico;Mexico (INST = sector salud publico, C = comercial privado);Configurable (inicia interna)
+PTCL0553C;Cefalotina 1 g x1 (C);Farmalogica;Cefalosporinas (en SAP: Articulos);Mexico;Mexico comercial - REGISTRO 215M2021 SSA IV VENCIDO EL 2026-10-19;Pendiente de validar
+PTCP0111;Cefepime 1 g x10;Farmalogica;Cefalosporinas;Colombia;Propio;Vista al cliente tras validar
+PTCP0111EXP;Cefepime 1 g x10;Farmalogica;Cefalosporinas;Ecuador;Propio;Vista al cliente tras validar
+PTCP0121;Cefepime 1 g x10;Farmalogica;Cefalosporinas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTCP0150;Cefepime 1 g x10;Farmalogica;Cefalosporinas;Guatemala;Propio;Vista al cliente tras validar
+PTCP0151;Cefepime 1 g x10;Farmalogica;Cefalosporinas;El Salvador;Propio;Vista al cliente tras validar
+PTCP0151P;Cefepime 1 g x10;Farmalogica;Cefalosporinas;El Salvador;Para terceros (PISA);Interna
+PTCP0153;Cefepime 1 g x1 (INST);Farmalogica;Cefalosporinas;Mexico;Mexico (INST = sector salud publico, C = comercial privado);Configurable (inicia interna)
+PTCP0153C;Cefepime 1 g x1 (C);Farmalogica;Cefalosporinas;Mexico;Mexico (INST = sector salud publico, C = comercial privado);Configurable (inicia interna)
+PTCP0155;Cefepime 1 g x10;Farmalogica;Cefalosporinas;Peru;Propio;Vista al cliente tras validar
+PTCP0155P;Cefepime 1 g x10;Farmalogica;Cefalosporinas;Peru;Para terceros (PISA);Interna
+PTCP0156P;Cefepime 1 g x10;Farmalogica;Cefalosporinas;Costa Rica;Para terceros (PISA);Interna
+PTCP0157;Cefepime 1 g x10;Farmalogica;Cefalosporinas;Nicaragua;Propio;Vista al cliente tras validar
+PTCP0158;Cefepime 1 g x1;Farmalogica;Cefalosporinas;Mexico-Colombia;Mexico (INST = sector salud publico, C = comercial privado);Configurable (inicia interna)
+PTCP0160P;Cefepime 1 g x10;Farmalogica;Cefalosporinas;Panama;Para terceros (PISA);Interna
+PTCP0511;Cefepime 500 mg x10;Farmalogica;Cefalosporinas;Colombia;Propio;Vista al cliente tras validar
+PTCP0521;Cefepime 500 mg x10;Farmalogica;Cefalosporinas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTCS0111;Cefoperazona + Sulbactam 1,5 g x10;Farmalogica;Cefalosporinas;Colombia;Propio;Vista al cliente tras validar
+PTCS0121;Cefoperazona + Sulbactam 1,5 g x10;Farmalogica;Cefalosporinas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTCZ0111;Cefazolina 1 g x10;Farmalogica;Cefalosporinas;Colombia;Propio;Vista al cliente tras validar
+PTCZ0111EXP;Cefazolina 1 g x10;Farmalogica;Cefalosporinas;Ecuador;Propio;Vista al cliente tras validar
+PTCZ0111EXPP;Cefazolina 1 g x10;Farmalogica;Cefalosporinas;Ecuador;Para terceros (PISA);Interna
+PTCZ0121;Cefazolina 1 g x10;Farmalogica;Cefalosporinas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTCZ012101;Cefazolina 1 g x1;Farmalogica;Cefalosporinas;Colombia;Propio;Vista al cliente tras validar
+PTCZ0150;Cefazolina 1 g x10;Farmalogica;Cefalosporinas;Guatemala;Propio;Vista al cliente tras validar
+PTCZ0151;Cefazolina 1 g x10;Farmalogica;Cefalosporinas;El Salvador;Propio;Vista al cliente tras validar
+PTCZ0151P;Cefazolina 1 g x10;Farmalogica;Cefalosporinas;El Salvador;Para terceros (PISA);Interna
+PTCZ0152;Cefazolina 1 g x10;Farmalogica;Cefalosporinas;Honduras;Propio;Vista al cliente tras validar
+PTCZ0155;Cefazolina 1 g x10;Farmalogica;Cefalosporinas;Peru;Propio;Vista al cliente tras validar
+PTCZ0157;Cefazolina 1 g x10;Farmalogica;Cefalosporinas;Nicaragua;Propio;Vista al cliente tras validar
+PTIB0110A;Imipenem + Cilastatina 500/500 mg x10 - IMCIBIOS;Farmalogica;Carbapenemas;Colombia;Para terceros (Bioselect);Interna
+PTIB0120A;Imipenem + Cilastatina 500/500 mg x10 - IMCIBIOS;Farmalogica;Carbapenemas;Colombia;Para terceros (Bioselect);Interna
+PTIM0111;Imipenem + Cilastatina 1 g x10;Farmalogica;Carbapenemas;Colombia;Propio;Vista al cliente tras validar
+PTIM0111EXP;Imipenem + Cilastatina 1 g x10;Farmalogica;Carbapenemas;Ecuador;Propio;Vista al cliente tras validar
+PTIM0111EXPP;Imipenem + Cilastatina 1 g x10;Farmalogica;Carbapenemas;Ecuador;Para terceros (PISA);Interna
+PTIM0121;Imipenem + Cilastatina 1 g x10;Farmalogica;Carbapenemas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTIM0150;Imipenem + Cilastatina 1 g x10;Farmalogica;Carbapenemas;Guatemala;Propio;Vista al cliente tras validar
+PTIM0151;Imipenem + Cilastatina 1 g x10;Farmalogica;Carbapenemas;El Salvador;Propio;Vista al cliente tras validar
+PTIM0151P;Imipenem + Cilastatina 500/500 mg x10;Farmalogica;Carbapenemas;El Salvador;Para terceros (PISA);Interna
+PTIM0152;Imipenem + Cilastatina 1 g x10;Farmalogica;Carbapenemas;Honduras;Propio;Vista al cliente tras validar
+PTIM0155;Imipenem + Cilastatina 1 g x10 - CISTACOR;Farmalogica;Carbapenemas (en SAP: Cefalosporinas);Peru;Marca por pais (CORVAL);Configurable (inicia interna)
+PTIM0155P;Imipenem + Cilastatina 500/500 mg x10;Farmalogica;Carbapenemas;Peru;Para terceros (PISA);Interna
+PTIM0157;Imipenem + Cilastatina 1 g x10;Farmalogica;Carbapenemas;Nicaragua;Propio;Vista al cliente tras validar
+PTIM0159P;Imipenem + Cilastatina 1 g x10;Farmalogica;Carbapenemas;Chile;Para terceros (PISA);Interna
+PTIM0161;Imipenem + Cilastatina 1 g x10 - CISTACOR;Farmalogica;Carbapenemas (en SAP: Cefalosporinas);Bolivia;Marca por pais (CORVAL);Configurable (inicia interna)
+PTMP0111;Meropenem 1 g x10;Farmalogica;Carbapenemas;Colombia;Propio;Vista al cliente tras validar
+PTMP0111EXP;Meropenem 1 g x10;Farmalogica;Carbapenemas;Ecuador;Propio;Vista al cliente tras validar
+PTMP0111EXPP;Meropenem 1 g x10;Farmalogica;Carbapenemas;Ecuador;Para terceros (PISA);Interna
+PTMP0121;Meropenem 1 g x10;Farmalogica;Carbapenemas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTMP0150;Meropenem 1 g x10;Farmalogica;Carbapenemas;Guatemala;Propio;Vista al cliente tras validar
+PTMP0151;Meropenem 1 g x10;Farmalogica;Carbapenemas;El Salvador;Propio;Vista al cliente tras validar
+PTMP0151P;Meropenem 1 g x10;Farmalogica;Carbapenemas;El Salvador;Para terceros (PISA);Interna
+PTMP0152;Meropenem 1 g x10;Farmalogica;Carbapenemas;Honduras;Propio;Vista al cliente tras validar
+PTMP0153;Meropenem 1 g x1;Farmalogica;Carbapenemas;Mexico;Mexico (INST = sector salud publico, C = comercial privado);Configurable (inicia interna)
+PTMP015301;Meropenem 1 g x10;Farmalogica;Carbapenemas;Mexico;Mexico (INST = sector salud publico, C = comercial privado);Configurable (inicia interna)
+PTMP0155;Meropenem 1 g x10 - TACBANEN;Farmalogica;Carbapenemas;Peru;Marca por pais (CORVAL);Configurable (inicia interna)
+PTMP0155P;Meropenem 1 g x10;Farmalogica;Carbapenemas;Peru;Para terceros (PISA);Interna
+PTMP0157;Meropenem 1 g x10;Farmalogica;Carbapenemas;Nicaragua;Propio;Vista al cliente tras validar
+PTMP0159P;Meropenem 1 g x10;Farmalogica;Carbapenemas;Chile;Para terceros (PISA);Interna
+PTMP0160P;Meropenem 1 g x10;Farmalogica;Carbapenemas;Panama;Para terceros (PISA);Interna
+PTMP0161;Meropenem 1 g x10 - TACBANEM;Farmalogica;Carbapenemas;Bolivia;Marca por pais (CORVAL);Configurable (inicia interna)
+PTMP0511;Meropenem 500 mg x10;Farmalogica;Carbapenemas;Colombia;Propio;Vista al cliente tras validar
+PTMP0511EXPP;Meropenem 500 mg x10;Farmalogica;Carbapenemas;Ecuador;Para terceros (PISA);Interna
+PTMP0521;Meropenem 500 mg x10;Farmalogica;Carbapenemas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTMP0550;Meropenem 500 mg x10;Farmalogica;Carbapenemas;Guatemala;Propio;Vista al cliente tras validar
+PTMP0551;Meropenem 500 mg x10;Farmalogica;Carbapenemas;El Salvador;Propio;Vista al cliente tras validar
+PTMP0551P;Meropenem 500 mg x10;Farmalogica;Carbapenemas;El Salvador;Para terceros (PISA);Interna
+PTMP0552;Meropenem 500 mg x10;Farmalogica;Carbapenemas;Honduras;Propio;Vista al cliente tras validar
+PTMP0553;Meropenem 500 mg x1 (INST);Farmalogica;Carbapenemas;Mexico;Mexico (INST = sector salud publico, C = comercial privado);Configurable (inicia interna)
+PTMP055301;Meropenem 500 mg x10;Farmalogica;Carbapenemas;Mexico;Mexico (INST = sector salud publico, C = comercial privado);Configurable (inicia interna)
+PTMP0553CA;Meropenem 500 mg x1 (C);Farmalogica;Carbapenemas;Mexico;Mexico (INST = sector salud publico, C = comercial privado);Configurable (inicia interna)
+PTMP0555;Meropenem 500 mg x10 - TACBANEN;Farmalogica;Carbapenemas;Peru;Marca por pais (CORVAL);Configurable (inicia interna)
+PTMP0557;Meropenem 500 mg x10;Farmalogica;Carbapenemas;Nicaragua;Propio;Vista al cliente tras validar
+PTMP0559P;Meropenem 500 mg x10;Farmalogica;Carbapenemas;Chile;Para terceros (PISA);Interna
+PTMP0561;Meropenem 500 mg x10 - TACBANEM;Farmalogica;Carbapenemas;Bolivia;Marca por pais (CORVAL);Configurable (inicia interna)
+PTOX0111;Oxacilina 1 g x10;Farmalogica;Penicilinas;Colombia;Propio;Vista al cliente tras validar
+PTOX0111EXP;Oxacilina 1 g x10;Farmalogica;Penicilinas;Ecuador;Propio;Vista al cliente tras validar
+PTOX0121;Oxacilina 1 g x10;Farmalogica;Penicilinas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTOX0150;Oxacilina 1 g x10;Farmalogica;Penicilinas;Guatemala;Propio;Vista al cliente tras validar
+PTOX0151;Oxacilina 1 g x10;Farmalogica;Penicilinas;El Salvador;Propio;Vista al cliente tras validar
+PTOX0151P;Oxacilina 1 g x10;Farmalogica;Penicilinas;El Salvador;Para terceros (PISA);Interna
+PTOX0152;Oxacilina 1 g x10;Farmalogica;Penicilinas;Honduras;Propio;Vista al cliente tras validar
+PTOX0155;Oxacilina 1 g x10;Farmalogica;Penicilinas;Peru;Propio;Vista al cliente tras validar
+PTOX0155P;Oxacilina 1 g x10;Farmalogica;Penicilinas;Peru;Para terceros (PISA);Interna
+PTOX0156;Oxacilina 1 g x10;Farmalogica;Penicilinas;Costa Rica;Propio;Vista al cliente tras validar
+PTPB0111;Penicilina G benzatinica 1.200.000 UI x10;Farmalogica;Penicilinas;Colombia;Propio;Vista al cliente tras validar
+PTPB0111EXPP;Penicilina G benzatinica 1.200.000 UI x10;Farmalogica;Penicilinas;Ecuador;Para terceros (PISA);Interna
+PTPB0121;Penicilina G benzatinica 1.200.000 UI x10;Farmalogica;Penicilinas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTPB0150;Penicilina G benzatinica 1.200.000 UI x10;Farmalogica;Penicilinas;Guatemala;Propio;Vista al cliente tras validar
+PTPB0151P;Penicilina G benzatinica 1.200.000 UI x10;Farmalogica;Penicilinas;El Salvador;Para terceros (PISA);Interna
+PTPB0152;Penicilina G benzatinica 1.200.000 UI x10;Farmalogica;Penicilinas;Honduras;Propio;Vista al cliente tras validar
+PTPB0153;Penicilina G benzatinica 1.200.000 UI x1;Farmalogica;Penicilinas;Mexico;Mexico (INST = sector salud publico, C = comercial privado);Configurable (inicia interna)
+PTPB0156P;Penicilina G benzatinica 1.200.000 UI x10;Farmalogica;Penicilinas;Costa Rica;Para terceros (PISA);Interna
+PTPB0157;Penicilina G benzatinica 1.200.000 UI x10;Farmalogica;Penicilinas;Nicaragua;Propio;Vista al cliente tras validar
+PTPB0160P;Penicilina G benzatinica 1.200.000 UI x10;Farmalogica;Penicilinas;Panama;Para terceros (PISA);Interna
+PTPB0211;Penicilina G benzatinica 2.400.000 UI x10;Farmalogica;Penicilinas;Colombia;Propio;Vista al cliente tras validar
+PTPB0211EXP;Penicilina G benzatinica 2.400.000 UI x10;Farmalogica;Penicilinas;Ecuador;Propio;Vista al cliente tras validar
+PTPB0221;Penicilina G benzatinica 2.400.000 UI x10;Farmalogica;Penicilinas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTPB0250;Penicilina G benzatinica 2.400.000 UI x10;Farmalogica;Penicilinas;Guatemala;Propio;Vista al cliente tras validar
+PTPB0251P;Penicilina G benzatinica 2.400.000 UI x10;Farmalogica;Penicilinas;El Salvador;Para terceros (PISA);Interna
+PTPB0252;Penicilina G benzatinica 2.400.000 UI x10;Farmalogica;Penicilinas;Honduras;Propio;Vista al cliente tras validar
+PTPN0110;Piperacilina + Tazobactam 4,5 g x10 - PENIBECTAM;Farmalogica;Penicilinas;Colombia;Para terceros (Bioselect, por confirmar);Interna
+PTPN0111;Piperacilina + Tazobactam 4,5 g x1 - PENIBECTAM;Farmalogica;Penicilinas;Colombia;Para terceros (Bioselect, por confirmar);Interna
+PTPN0120;Piperacilina + Tazobactam 4,5 g x10 - PENIBECTAM;Farmalogica;Penicilinas;Colombia;Para terceros (Bioselect, por confirmar);Interna
+PTPN0121;Piperacilina + Tazobactam 4,5 g x1 - PENIBECTAM;Farmalogica;Penicilinas;Colombia;Para terceros (Bioselect, por confirmar);Interna
+PTPS0111;Penicilina G sodica 1.000.000 UI x10;Farmalogica;Penicilinas;Colombia;Propio;Vista al cliente tras validar
+PTPS0111EXPP;Penicilina G sodica 1.000.000 UI x10;Farmalogica;Penicilinas;Ecuador;Para terceros (PISA);Interna
+PTPS0121;Penicilina G sodica 1.000.000 UI x10;Farmalogica;Penicilinas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTPS0150;Penicilina G sodica 1.000.000 UI x10;Farmalogica;Penicilinas;Guatemala;Propio;Vista al cliente tras validar
+PTPS0157;Penicilina G sodica 1.000.000 UI x10;Farmalogica;Penicilinas;Nicaragua;Propio;Vista al cliente tras validar
+PTPS0160P;Penicilina G sodica 1.000.000 UI x10;Farmalogica;Penicilinas;Panama;Para terceros (PISA);Interna
+PTPS0511;Penicilina G sodica 5.000.000 UI x10;Farmalogica;Penicilinas;Colombia;Propio;Vista al cliente tras validar
+PTPS051101;Penicilina G sodica 5.000.000 UI x1;Farmalogica;Penicilinas;Colombia;Propio;Vista al cliente tras validar
+PTPS0511EXP;Penicilina G sodica 5.000.000 UI x10;Farmalogica;Penicilinas;Ecuador;Propio;Vista al cliente tras validar
+PTPS0521;Penicilina G sodica 5.000.000 UI x10;Farmalogica;Penicilinas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTPS0551P;Penicilina G sodica 5.000.000 UI x10;Farmalogica;Penicilinas;El Salvador;Para terceros (PISA);Interna
+PTPS0553;Penicilina G sodica 5.000.000 UI x1;Farmalogica;Penicilinas;Mexico;Mexico (INST = sector salud publico, C = comercial privado);Configurable (inicia interna)
+PTPT0111;Piperacilina + Tazobactam 4,5 g x10;Farmalogica;Penicilinas;Colombia;Propio;Vista al cliente tras validar
+PTPT0111EXP;Piperacilina + Tazobactam 4,5 g x10;Farmalogica;Penicilinas;Ecuador;Propio;Vista al cliente tras validar
+PTPT0111EXPP;Piperacilina + Tazobactam 4,5 g x10;Farmalogica;Penicilinas;Ecuador;Para terceros (PISA);Interna
+PTPT0121;Piperacilina + Tazobactam 4,5 g x10;Farmalogica;Penicilinas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTPT0150;Piperacilina + Tazobactam 4,5 g x10;Farmalogica;Penicilinas;Guatemala;Propio;Vista al cliente tras validar
+PTPT0151;Piperacilina + Tazobactam 4,5 g x10;Farmalogica;Penicilinas;El Salvador;Propio;Vista al cliente tras validar
+PTPT0151P;Piperacilina + Tazobactam 4,5 g x10;Farmalogica;Penicilinas;El Salvador;Para terceros (PISA);Interna
+PTPT0152;Piperacilina + Tazobactam 4,5 g x10;Farmalogica;Penicilinas;Honduras;Propio;Vista al cliente tras validar
+PTPT0153;Piperacilina + Tazobactam 4,5 g x1 (INST);Farmalogica;Penicilinas;Mexico;Mexico (INST = sector salud publico, C = comercial privado);Configurable (inicia interna)
+PTPT0153C;Piperacilina + Tazobactam 4,5 g x1 (C);Farmalogica;Penicilinas;Mexico;Mexico (INST = sector salud publico, C = comercial privado);Configurable (inicia interna)
+PTPT0155;Piperacilina + Tazobactam 4,5 g x10 - TAZOVAL;Farmalogica;Penicilinas;Peru;Marca por pais (CORVAL);Configurable (inicia interna)
+PTPT0157;Piperacilina + Tazobactam 4,5 g x10;Farmalogica;Penicilinas;Nicaragua;Propio;Vista al cliente tras validar
+PTPT0161;Piperacilina + Tazobactam 4,5 g x10 - TAZOVAL;Farmalogica;Penicilinas;Bolivia;Marca por pais (CORVAL);Configurable (inicia interna)
+PTRY0002;Dipirona sodica 1 g x100;Farmalogica (producto de Ryan);Por asignar (SAP grupo 102);Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0008;Clindamicina 600 mg/4 mL x100;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0009;Dexametasona fosfato 4 mg/mL x100;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0010;Cloruro de potasio 2 mEq/mL x10 mL x200;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0016;Hioscina + Dipirona 20 mg + 2,5 g/5 mL x100;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0021;Atropina sulfato 1 mg/mL;Farmalogica (producto de Ryan);Por asignar;Colombia;Ryan (unidades por caja sin dato en SAP);Pendiente de validar
+PTRY0032;Hioscina N-butil bromuro simple x100;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0035;Dexametasona fosfato 8 mg/mL x100;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0038;Betametasona acetato + fosfato 3 + 3 mg/mL x25;Farmalogica (producto de Ryan);Por asignar (SAP grupo 102);Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0039;Vitamina C 500 mg/5 mL x10;Farmalogica (producto de Ryan);Vitaminas;Colombia;Ryan - EXCLUSIVA OLP;Interna (exclusividad)
+PTRY0055;Gentamicina 80 mg/2 mL x100;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0056;Labetalol clorhidrato 100 mg/20 mL x1;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0057;Nitroglicerina 50 mg/10 mL x1;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0058;Citrato de cafeina 60 mg/3 mL x10;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0059;Norepinefrina 4 mg/4 mL x5;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0060;Metoclopramida 10 mg/2 mL x100;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0061;Triamcinolona acetato 10 mg/mL x1;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0062;Adrenalina clorhidrato 1 mg/mL x100;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0063;Amiodarona clorhidrato 150 mg/3 mL x25;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0064;Bicarbonato de sodio 1 mEq/mL x200;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0065;Ciprofloxacina 100 mg/10 mL x50 (uso institucional);Farmalogica (producto de Ryan);Por asignar;Colombia;Ryan - canal institucional (mismo registro y CUM que PTRY0066);Vista al cliente tras validar
+PTRY0066;Ciprofloxacina 100 mg/10 mL x50 (comercial);Farmalogica (producto de Ryan);Por asignar;Colombia;Ryan - canal comercial;Vista al cliente tras validar
+PTRY0067;Citrato de fentanilo 0,05 mg/mL x10;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0068;Cloruro de sodio 2 mEq/mL x200;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0069;Dobutamina 250 mg/20 mL x25;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0070;Dopamina clorhidrato 200 mg/5 mL x25;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0071;Etilefrina clorhidrato 10 mg/mL x25;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0072;Furosemida 20 mg/2 mL x100;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0073;Gluconato de calcio 10% x10 mL x200;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0074;Haloperidol 5 mg/mL x25;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0075;Ketamina clorhidrato 500 mg/10 mL x10;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0076;Labetalol clorhidrato 100 mg/20 mL x10;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0077;Milrinona lactato 10 mg/10 mL x10;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0078;Naloxona 0,4 mg/mL x10 - NALOXIV;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0079;Nitroglicerina 50 mg/10 mL x25;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0080;Sulfato de magnesio 20% 2 g/10 mL x200;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0081;Trimetoprim + Sulfametoxazol 80 + 400 mg/5 mL x10;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0082;Vitamina C 500 mg/5 mL x100;Farmalogica (producto de Ryan);Por asignar (en SAP: Articulos);Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0083;Citrato de cafeina 20 mg/mL x10;Farmalogica (producto de Ryan);Por asignar;Colombia;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0084;Citrato de cafeina 20 mg/mL x10 - CITAFE;Farmalogica (producto de Ryan);Por asignar;Guatemala;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0085;Dobutamina 250 mg/20 mL x25;Farmalogica (producto de Ryan);Por asignar;Guatemala;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0086;Labetalol clorhidrato 100 mg/20 mL x10;Farmalogica (producto de Ryan);Por asignar;Guatemala;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTRY0087;Trimetoprim + Sulfametoxazol 80 + 400 mg/5 mL x10;Farmalogica (producto de Ryan);Por asignar;Guatemala;Farmalogica (producto de Ryan);Vista al cliente tras validar
+PTSB0111;Ampicilina + Sulbactam 1,5 g x10;Farmalogica;Penicilinas;Colombia;Propio;Vista al cliente tras validar
+PTSB0111EXP;Ampicilina + Sulbactam 1,5 g x10;Farmalogica;Penicilinas;Ecuador;Propio;Vista al cliente tras validar
+PTSB0111EXPP;Ampicilina + Sulbactam 1,5 g x10;Farmalogica;Penicilinas;Ecuador;Para terceros (PISA);Interna
+PTSB0121;Ampicilina + Sulbactam 1,5 g x10;Farmalogica;Penicilinas;Colombia;Propio (codigo duplicado 01xx/02xx);Vista al cliente tras validar
+PTSB0150;Ampicilina + Sulbactam 1,5 g x10;Farmalogica;Penicilinas;Guatemala;Propio;Vista al cliente tras validar
+PTSB0151;Ampicilina + Sulbactam 1,5 g x10;Farmalogica;Penicilinas;El Salvador;Propio;Vista al cliente tras validar
+PTSB0151P;Ampicilina + Sulbactam 1,5 g x10;Farmalogica;Penicilinas;El Salvador;Para terceros (PISA);Interna
+PTSB0152;Ampicilina + Sulbactam 1,5 g x10;Farmalogica;Penicilinas;Honduras;Propio;Vista al cliente tras validar
+PTSB0155;Ampicilina + Sulbactam 1,5 g x10;Farmalogica;Penicilinas;Peru;Propio;Vista al cliente tras validar
+PTSB0155P;Ampicilina + Sulbactam 1,5 g x10;Farmalogica;Penicilinas;Peru;Para terceros (PISA);Interna
+PTSB0156P;Ampicilina + Sulbactam 1,5 g x10;Farmalogica;Penicilinas;Costa Rica;Para terceros (PISA);Interna
+PTSB0157;Ampicilina + Sulbactam 1,5 g x10;Farmalogica;Penicilinas;Nicaragua;Propio;Vista al cliente tras validar
+PTSB0160P;Ampicilina + Sulbactam 1,5 g x10;Farmalogica;Penicilinas;Panama;Para terceros (PISA);Interna
+PTZB0110A;Cefazolina 1 g x10 - ZOLIBIOS;Farmalogica;Cefalosporinas (en SAP: Articulos);Colombia;Para terceros (Bioselect);Interna
+PTZB0111;Cefazolina 1 g x1 - ZOLIBIOS;Farmalogica;Cefalosporinas;Colombia;Para terceros (Bioselect);Interna
+PTZB0120;Cefazolina 1 g x10 - ZOLIBIOS;Farmalogica;Cefalosporinas (en SAP: Articulos);Colombia;Para terceros (Bioselect);Interna
+PTZB0121;Cefazolina 1 g x1 - ZOLIBIOS;Farmalogica;Cefalosporinas;Colombia;Para terceros (Bioselect);Interna

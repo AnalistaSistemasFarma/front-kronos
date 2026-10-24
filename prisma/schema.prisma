@@ -136,6 +136,12 @@ model Company {
   otOperadores     OtOperador[]
   otAreas          OtArea[]
   otResponsables   OtResponsable[]
+  // Vitrina Comercial (sprint V2, 2026-10-22): catálogo comercial por empresa.
+  vitrinaPresentaciones VitrinaPresentacion[]
+  vitrinaCodigosSap     VitrinaCodigoSap[]
+  vitrinaHistorial      VitrinaHistorial[]
+  // Vitrina Comercial (2026-10-23): líneas comerciales propias de la empresa.
+  vitrinaLineas         VitrinaLineaComercial[]
 
   @@map("company")
   @@schema("dbo")
@@ -1072,14 +1078,19 @@ model ChatProjectMember {
 /// adjuntos del chat; aquí solo queda la referencia. El puente lo baja a la
 /// carpeta del hilo con la llave del agente.
 model ChatProjectFile {
-  id_project_file  Int      @id @default(autoincrement())
-  id_project       Int
-  file_name        String   @db.NVarChar(400)
-  content_type     String?  @db.NVarChar(200)
-  size_bytes       Int?
-  onedrive_item_id String?  @db.NVarChar(300)
-  uploaded_by      String?  @db.NVarChar(1000)
-  created_at       DateTime @default(now())
+  id_project_file   Int      @id @default(autoincrement())
+  id_project        Int
+  file_name         String   @db.NVarChar(400)
+  content_type      String?  @db.NVarChar(200)
+  size_bytes        Int?
+  onedrive_item_id  String?  @db.NVarChar(300)
+  uploaded_by       String?  @db.NVarChar(1000)
+  /// Archivo que generó un AGENTE en una conversación del proyecto (2026-10-23):
+  /// el agente de la llave del puente y la conversación (uploaded_by queda NULL).
+  /// Sin FK a propósito: la conversación ya cae en cascada con el proyecto.
+  uploaded_by_agent Int?
+  id_conversation   Int?
+  created_at        DateTime @default(now())
 
   project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
 
@@ -5064,5 +5075,248 @@ model UserLoginAudit {
   @@index([identifier, attempted_at], map: "IX_user_login_audit_identificador")
   @@index([id_user, attempted_at], map: "IX_user_login_audit_usuario")
   @@map("user_login_audit")
+  @@schema("dbo")
+}
+
+// =============================================================================
+// VITRINA COMERCIAL (sprint V2, 2026-10-22) — migración 20261022200000_vitrina_comercial.
+// Catálogo comercial por empresa (Farmalógica = 1, Ryan = 2). Los códigos se leen
+// del SAP de CADA empresa en SOLO LECTURA (nada se escribe en SAP). Nada se muestra
+// sin activación manual (activado_vitrina = 0 por defecto). Las restricciones CHECK
+// (estado, visibilidad, terceros → INTERNA, canal, registro, alcance, tipos) viven
+// en la migración y se repiten en lib/vitrina/rules.ts.
+// =============================================================================
+
+/// Presentación comercial: la tarjeta que verá el comercial (V3). Si es para terceros, visibilidad fija INTERNA.
+model VitrinaPresentacion {
+  id_presentacion    Int       @id @default(autoincrement())
+  id_company         Int
+  molecula           String    @db.NVarChar(200)
+  concentracion      String?   @db.NVarChar(100)
+  forma_farmaceutica String?   @db.NVarChar(60)
+  unidades_caja      Int?
+  nombre_comercial   String?   @db.NVarChar(200)
+  tall_man           String?   @db.NVarChar(200)
+  familia            String?   @db.NVarChar(100)
+  // PENDIENTE | VALIDADA | RETIRADA
+  estado             String    @default("PENDIENTE") @db.NVarChar(20)
+  // INTERNA | CLIENTE | OFERTABLE
+  visibilidad        String    @default("INTERNA") @db.NVarChar(20)
+  es_para_terceros   Boolean   @default(false)
+  destacada          Boolean   @default(false)
+  creado_por         String    @db.NVarChar(50)
+  creado_en          DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  actualizado_por    String?   @db.NVarChar(50)
+  actualizado_en     DateTime? @db.DateTime2
+  // Línea comercial de SU empresa (0 o 1). Migración 20261023120000_vitrina_lineas_grupos (columna nueva NULL).
+  id_linea           Int?
+
+  company        Company                    @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  linea          VitrinaLineaComercial?     @relation(fields: [id_linea], references: [id_linea], onDelete: NoAction, onUpdate: NoAction)
+  codigos        VitrinaCodigoSap[]
+  areas          VitrinaPresentacionArea[]
+  grupos         VitrinaPresentacionGrupo[]
+  exclusividades VitrinaExclusividad[]
+  imagenes       VitrinaImagen[]
+  documentos     VitrinaDocumento[]
+
+  @@index([id_company, estado, visibilidad], map: "IX_vitrina_presentacion_company")
+  @@index([id_linea], map: "IX_vitrina_presentacion_linea")
+  @@map("vitrina_presentacion")
+  @@schema("dbo")
+}
+
+/// Código SAP leído del SAP de la empresa. id_presentacion NULL = está en la bandeja.
+model VitrinaCodigoSap {
+  id_codigo_sap      Int       @id @default(autoincrement())
+  id_company         Int
+  item_code          String    @db.NVarChar(50)
+  item_name          String    @db.NVarChar(200)
+  items_group_code   Int?
+  // Nombre del grupo de artículos en SAP (ItemGroups.GroupName, solo lectura), p. ej. «PT carbapenemas».
+  items_group_name   String?   @db.NVarChar(100)
+  id_presentacion    Int?
+  pais               String?   @db.NVarChar(60)
+  // INSTITUCIONAL | COMERCIAL | SIN_DATO
+  canal              String    @default("SIN_DATO") @db.NVarChar(20)
+  // Visibilidad del canal (INTERNA | CLIENTE | OFERTABLE): los canales empiezan en INTERNA.
+  visibilidad_canal  String    @default("INTERNA") @db.NVarChar(20)
+  cliente_marca      String?   @db.NVarChar(100)
+  activo_en_sap      Boolean   @default(true)
+  activado_vitrina   Boolean   @default(false)
+  registro_sanitario String?   @db.NVarChar(60)
+  // NULL si no hay registro o SAP trae 9999-01-01 (sin dato).
+  registro_vence_en  DateTime? @db.Date
+  // VIGENTE | POR_VENCER | VENCIDO | SIN_REGISTRO | SIN_FECHA
+  registro_estado    String    @default("SIN_REGISTRO") @db.NVarChar(20)
+  ultima_lectura     DateTime? @db.DateTime2
+  // Sugerencias de la carga inicial (semilla CSV): orientan al administrador, no activan nada.
+  sug_presentacion   String?   @db.NVarChar(200)
+  sug_familia        String?   @db.NVarChar(100)
+  sug_tipo           String?   @db.NVarChar(100)
+  sug_es_terceros    Boolean?
+  sug_unidades       Int?
+  sug_observacion    String?   @db.NVarChar(300)
+  creado_en          DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  company      Company              @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  presentacion VitrinaPresentacion? @relation(fields: [id_presentacion], references: [id_presentacion], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_company, item_code], map: "UQ_vitrina_codigo_sap")
+  @@index([id_presentacion], map: "IX_vitrina_codigo_sap_presentacion")
+  @@map("vitrina_codigo_sap")
+  @@schema("dbo")
+}
+
+/// Áreas asistenciales (lista cerrada que validan los administradores). No se borran: se desactivan.
+model VitrinaArea {
+  id_area Int     @id @default(autoincrement())
+  nombre  String  @db.NVarChar(80)
+  activa  Boolean @default(true)
+  orden   Int     @default(0)
+
+  presentaciones VitrinaPresentacionArea[]
+
+  @@unique([nombre], map: "UQ_vitrina_area_nombre")
+  @@map("vitrina_area")
+  @@schema("dbo")
+}
+
+model VitrinaPresentacionArea {
+  id_presentacion Int
+  id_area         Int
+
+  presentacion VitrinaPresentacion @relation(fields: [id_presentacion], references: [id_presentacion], onDelete: NoAction, onUpdate: NoAction)
+  area         VitrinaArea         @relation(fields: [id_area], references: [id_area], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([id_presentacion, id_area])
+  @@map("vitrina_presentacion_area")
+  @@schema("dbo")
+}
+
+/// Línea comercial POR EMPRESA (p. ej. Farmalógica: «Antibióticos inyectables»). No se borran: se desactivan.
+model VitrinaLineaComercial {
+  id_linea   Int      @id @default(autoincrement())
+  id_company Int
+  nombre     String   @db.NVarChar(100)
+  orden      Int      @default(0)
+  activa     Boolean  @default(true)
+  creado_en  DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  company        Company               @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  presentaciones VitrinaPresentacion[]
+
+  @@unique([id_company, nombre], map: "UQ_vitrina_linea_comercial_nombre")
+  @@map("vitrina_linea_comercial")
+  @@schema("dbo")
+}
+
+/// Grupo terapéutico: catálogo COMÚN a las empresas (Antibióticos, Analgésicos…). No se borran: se desactivan.
+model VitrinaGrupoTerapeutico {
+  id_grupo  Int      @id @default(autoincrement())
+  nombre    String   @db.NVarChar(100)
+  orden     Int      @default(0)
+  activo    Boolean  @default(true)
+  creado_en DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  presentaciones VitrinaPresentacionGrupo[]
+
+  @@unique([nombre], map: "UQ_vitrina_grupo_terapeutico_nombre")
+  @@map("vitrina_grupo_terapeutico")
+  @@schema("dbo")
+}
+
+/// Presentación × grupo terapéutico (una presentación puede tener varios, como las áreas).
+model VitrinaPresentacionGrupo {
+  id_presentacion Int
+  id_grupo        Int
+
+  presentacion VitrinaPresentacion     @relation(fields: [id_presentacion], references: [id_presentacion], onDelete: NoAction, onUpdate: NoAction)
+  grupo        VitrinaGrupoTerapeutico @relation(fields: [id_grupo], references: [id_grupo], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([id_presentacion, id_grupo])
+  @@index([id_grupo], map: "IX_vitrina_presentacion_grupo_grupo")
+  @@map("vitrina_presentacion_grupo")
+  @@schema("dbo")
+}
+
+/// Exclusividad o restricción por presentación (p. ej. Vitamina C x10 exclusiva de OLP).
+model VitrinaExclusividad {
+  id_exclusividad      Int       @id @default(autoincrement())
+  id_presentacion      Int
+  cliente_beneficiario String    @db.NVarChar(150)
+  pais                 String?   @db.NVarChar(60)
+  canal                String?   @db.NVarChar(20)
+  // EXHIBIR | OFERTAR
+  alcance              String    @db.NVarChar(20)
+  vigente_desde        DateTime? @db.Date
+  vigente_hasta        DateTime? @db.Date
+  observacion          String?   @db.NVarChar(500)
+  creado_por           String    @db.NVarChar(50)
+  creado_en            DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  actualizado_por      String?   @db.NVarChar(50)
+  actualizado_en       DateTime? @db.DateTime2
+
+  presentacion VitrinaPresentacion @relation(fields: [id_presentacion], references: [id_presentacion], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_presentacion], map: "IX_vitrina_exclusividad_presentacion")
+  @@map("vitrina_exclusividad")
+  @@schema("dbo")
+}
+
+/// Imágenes de empaque (V3: en el almacenamiento de adjuntos de SynerLink). En el V2 solo existe la tabla.
+model VitrinaImagen {
+  id_imagen       Int      @id @default(autoincrement())
+  id_presentacion Int
+  // VIAL | ETIQUETA | PLEGADIZA
+  tipo            String   @db.NVarChar(20)
+  ruta_archivo    String   @db.NVarChar(500)
+  version         String?  @db.NVarChar(20)
+  vigente         Boolean  @default(true)
+  cargado_por     String   @db.NVarChar(50)
+  cargado_en      DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  presentacion VitrinaPresentacion @relation(fields: [id_presentacion], references: [id_presentacion], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("vitrina_imagen")
+  @@schema("dbo")
+}
+
+/// Vínculo con un documento vigente del SGC (sgc.document.id_document). Se enlaza, no se copia;
+/// sin FK entre esquemas (el SGC vive aislado en `sgc`). En el V2 solo existe la tabla.
+model VitrinaDocumento {
+  id_vitrina_documento Int      @id @default(autoincrement())
+  id_presentacion      Int
+  id_document          Int
+  // FICHA | INSERTO | PROSPECTO
+  tipo                 String   @db.NVarChar(20)
+  idioma               String?  @db.NVarChar(10)
+  pais                 String?  @db.NVarChar(60)
+  vinculado_por        String   @db.NVarChar(50)
+  vinculado_en         DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  presentacion VitrinaPresentacion @relation(fields: [id_presentacion], references: [id_presentacion], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("vitrina_documento")
+  @@schema("dbo")
+}
+
+/// Historial de la Gestión y de la lectura de SAP (id_user NULL = la hizo la sincronización).
+model VitrinaHistorial {
+  id_historial   BigInt   @id @default(autoincrement())
+  id_company     Int
+  entidad        String   @db.NVarChar(40)
+  id_entidad     Int
+  accion         String   @db.NVarChar(40)
+  valor_anterior String?  @db.NVarChar(Max)
+  valor_nuevo    String?  @db.NVarChar(Max)
+  id_user        String?  @db.NVarChar(50)
+  registrado_en  DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([entidad, id_entidad], map: "IX_vitrina_historial_entidad")
+  @@index([id_company, registrado_en], map: "IX_vitrina_historial_company")
+  @@map("vitrina_historial")
   @@schema("dbo")
 }

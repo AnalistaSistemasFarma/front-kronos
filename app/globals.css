@@ -1301,6 +1301,37 @@ body.con-chat-rail.con-chat-rail--expandida .app-page-shell {
   padding-left: var(--chat-rail-w-expandida);
 }
 
+/* Reserva del ancho mientras llega el permiso del chat (ThemeInitScript la pone
+   si en la visita anterior hubo barra; ChatRail la quita al decidir). Pinta el
+   fondo de la barra vacío para que la página no salte 64–288 px después. */
+html.chat-rail-reservada .app-page-shell {
+  padding-left: var(--chat-rail-w);
+}
+
+html.chat-rail-reservada.chat-rail-reservada--expandida .app-page-shell {
+  padding-left: var(--chat-rail-w-expandida);
+}
+
+html.chat-rail-reservada body:not(.con-chat-rail):not(.chat-inmersivo)::before {
+  content: '';
+  position: fixed;
+  top: var(--app-header-height);
+  left: 0;
+  bottom: 0;
+  z-index: 45;
+  width: var(--chat-rail-w);
+  background-color: var(--app-header, var(--app-surface));
+  border-right: 1px solid var(--app-border);
+}
+
+html.chat-rail-reservada.chat-rail-reservada--expandida body:not(.con-chat-rail):not(.chat-inmersivo)::before {
+  width: var(--chat-rail-w-expandida);
+}
+
+html.chat-rail-reservada body.chat-inmersivo .app-page-shell {
+  padding-left: 0;
+}
+
 /* Modo inmersivo del chat: sin cabecera tampoco hay barra (ver más abajo). */
 body.chat-inmersivo .chat-rail--fija {
   display: none;
@@ -3453,6 +3484,148 @@ body.chat-inmersivo .chat-page-thread--completa {
   margin: 0 auto;
   object-fit: contain;
 }
+
+/* ── Visor de adjuntos del chat (2026-10-22): PDF, Office, Excel, texto, medios ── */
+/* Las fichas y la lista de archivos ahora son <button> (abren el visor). */
+button.chat-attachment,
+button.chat-galeria__archivo {
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+button.chat-galeria__archivo {
+  width: 100%;
+  background-color: transparent;
+}
+
+.chat-visor__contenido--doc {
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-visor__contenido--doc .chat-visor__cuerpo {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-visor__area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 140px);
+  overflow: hidden;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.chat-visor__area[data-tipo='audio'],
+.chat-visor__area[data-tipo='ninguno'] {
+  height: auto;
+}
+
+.chat-visor__contenido--movil .chat-visor__area {
+  height: calc(100dvh - 52px);
+}
+
+.chat-visor__marco {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  touch-action: pan-x pan-y pinch-zoom;
+  cursor: zoom-in;
+}
+
+.chat-visor__marco--zoom {
+  cursor: grab;
+}
+
+.chat-visor__marco .chat-visor__imagen {
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
+  user-select: none;
+}
+
+.chat-visor__paginas {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.chat-visor__video {
+  display: block;
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
+  background: #000;
+}
+
+.chat-visor__hoja,
+.chat-visor__pestanas {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-visor__subbarra,
+.chat-visor__pestanas-lista {
+  border-bottom: 1px solid var(--app-border, var(--border-subtle));
+  background-color: var(--app-surface, var(--surface));
+}
+
+.chat-visor__pestanas-lista {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.chat-visor__pestana {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-visor__iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+  display: block;
+}
+
+.chat-visor__texto {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  background-color: var(--app-surface, var(--surface));
+  color: var(--app-text, var(--foreground));
+}
+
+.chat-visor__codigo {
+  margin: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-visor__tk--cadena { color: #0a7d32; }
+.chat-visor__tk--numero { color: #b35900; }
+.chat-visor__tk--comentario { color: #6b7280; font-style: italic; }
+.chat-visor__tk--clave { color: #7c3aed; font-weight: 600; }
+.chat-visor__tk--literal { color: #c2410c; }
+.chat-visor__tk--etiqueta { color: #1d4ed8; }
+
+.dark .chat-visor__tk--cadena { color: #7ee2a0; }
+.dark .chat-visor__tk--numero { color: #fbbf72; }
+.dark .chat-visor__tk--comentario { color: #9ca3af; }
+.dark .chat-visor__tk--clave { color: #c4a5ff; }
+.dark .chat-visor__tk--literal { color: #fdba74; }
+.dark .chat-visor__tk--etiqueta { color: #93c5fd; }
 
 /* Markdown de los mensajes */
 .chat-md {

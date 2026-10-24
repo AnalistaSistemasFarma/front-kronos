@@ -2,6 +2,7 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { checkAdminPrivileges } from '../../../../../lib/access-control';
 import { prisma } from '../../../../../lib/prisma';
+import { invalidateChatAccessCache } from '../../../../../lib/chat/access';
 import {
   consolidateDuplicateCompanyUsers,
   getUserCompanyUsersWithSubprocesses,
@@ -75,6 +76,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       mode: 'replace',
     });
 
+    // Los permisos del chat van en caché unos segundos (lib/chat/access.ts).
+    invalidateChatAccessCache();
+
     await prisma.userAuditLog.create({
       data: {
         user_id: userId,
@@ -137,6 +141,9 @@ export async function DELETE(
         id_company_user: { in: companyUsers.map((cu) => cu.id_company_user) },
       },
     });
+
+    // Los permisos del chat van en caché unos segundos (lib/chat/access.ts).
+    invalidateChatAccessCache();
 
     await prisma.userAuditLog.create({
       data: {

@@ -50,7 +50,11 @@ import {
 } from '../../lib/chat/client';
 import {
   CHAT_RAIL_CREATE_EVENT,
+  CHAT_RAIL_EXPANDIDA_KEY,
   CHAT_RAIL_OPEN_EVENT,
+  CHAT_RAIL_RESERVA_CLASS,
+  CHAT_RAIL_RESERVA_EXPANDIDA_CLASS,
+  CHAT_RAIL_RESERVA_KEY,
   agentKey,
   chatCreateHref,
   chatCreateOptions,
@@ -95,7 +99,7 @@ import {
  * cuando de verdad cambió algo.
  */
 
-const CLAVE_EXPANDIDA = 'synerlink:chat-rail-expandida';
+const CLAVE_EXPANDIDA = CHAT_RAIL_EXPANDIDA_KEY;
 
 function leerExpandida(): boolean {
   try {
@@ -472,6 +476,31 @@ export default function ChatRail() {
       body.classList.remove('con-chat-rail', 'con-chat-rail--expandida');
     };
   }, [barraFija, expandida]);
+
+  // Cuando ya se sabe si hay barra (sesión, permiso y conversaciones resueltos), se
+  // recuerda para la próxima carga y se quita el ancho que reservó ThemeInitScript.
+  const decidida =
+    mounted &&
+    enCelular !== undefined &&
+    (status === 'unauthenticated' ||
+      (status === 'authenticated' &&
+        overview.ready &&
+        (!overview.canUseChat || overview.conversationsReady)));
+  useEffect(() => {
+    if (!decidida) return;
+    // En celular no hay barra fija: no se pisa lo aprendido en escritorio.
+    if (enCelular === false) {
+      try {
+        window.localStorage.setItem(CHAT_RAIL_RESERVA_KEY, barraFija ? '1' : '0');
+      } catch {
+        /* modo privado: sin reserva la próxima vez */
+      }
+    }
+    document.documentElement.classList.remove(
+      CHAT_RAIL_RESERVA_CLASS,
+      CHAT_RAIL_RESERVA_EXPANDIDA_CLASS
+    );
+  }, [decidida, barraFija, enCelular]);
 
   // Al cambiar de pantalla se cierra el menú del celular.
   useEffect(() => {

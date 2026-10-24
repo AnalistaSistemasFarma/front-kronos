@@ -55,6 +55,19 @@ export async function cuotasDelProyecto(idProject: number): Promise<CuotaAgenteD
     select: { agent: { select: { id_agent: true, code: true, display_name: true } } },
     orderBy: { added_at: 'asc' },
   });
+  return cuotasDe(designados.map((d) => d.agent));
+}
+
+/**
+ * Cupo de UN agente (botón de consumo del chat, 2026-10-22). Lista vacía si
+ * el agente no publica cuota o la tabla todavía no existe.
+ */
+export async function cuotaDelAgente(agente: { id_agent: number; code: string; display_name: string }): Promise<CuotaAgenteDto[]> {
+  return cuotasDe([agente]);
+}
+
+async function cuotasDe(agentes: { id_agent: number; code: string; display_name: string }[]): Promise<CuotaAgenteDto[]> {
+  const designados = agentes.map((agent) => ({ agent }));
   if (designados.length === 0) return [];
   let filas;
   try {

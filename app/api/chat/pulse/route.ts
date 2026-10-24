@@ -7,6 +7,7 @@ import { whereConversacionesVisibles, whereMensajesQueCuentan } from '../../../.
 import { MAX_ESTADOS, cursorDeEstado, type EstadoAgenteProyectoDto } from '../../../../lib/proyectos/estado-agente';
 import { estadosCambiadosVisibles, marcaGlobalEstados } from '../../../../lib/proyectos/estado-agente-servidor';
 import { tablaAusente } from '../../../../lib/chat/message-extras';
+import { marcaCompartida } from '../../../../lib/chat/marca-compartida';
 import {
   NUDGE_EVENT_TYPE,
   PULSE_MAX_EVENTS,
@@ -204,7 +205,7 @@ export async function GET(request: NextRequest) {
     let reacciones: Awaited<ReturnType<typeof buscarReacciones>> = [];
 
     for (;;) {
-      const hasta = await maxActual();
+      const hasta = await marcaCompartida('mensajes', maxActual);
       if (hasta > cursor) {
         filas = await buscar(cursor, hasta);
         // Si se llenó el tope, el cursor queda en el último devuelto para no
@@ -223,7 +224,7 @@ export async function GET(request: NextRequest) {
         }
       }
       if (rcursor !== null && ramasReaccion.length > 0) {
-        const rhasta = await maxReaccion();
+        const rhasta = await marcaCompartida('reacciones', maxReaccion);
         if (rhasta === null) {
           rcursor = null;
         } else if (rhasta > rcursor) {
