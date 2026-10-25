@@ -37,7 +37,12 @@ export const MAPEO_LINEAS_DEFECTO: FilaMapeo[] = [
 ];
 
 const CAMPO_RE = /^[A-Za-z_][A-Za-z0-9_]{0,79}$/;
-const RUTA_SAP_RE = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
+const SEGMENTO_SAP_RE = /^[A-Za-z_][A-Za-z0-9_]{0,99}$/;
+/** Ruta SAP válida: segmentos separados por punto (máx. 5), sin regex anidada. */
+function rutaSapValida(v: string): boolean {
+  const partes = v.split('.');
+  return partes.length <= 5 && partes.every((p) => SEGMENTO_SAP_RE.test(p));
+}
 
 /** Normaliza y valida un mapeo recibido del front. Lanza Error con mensaje legible. */
 export function validarMapeo(raw: unknown, nombre: string): FilaMapeo[] {
@@ -53,7 +58,7 @@ export function validarMapeo(raw: unknown, nombre: string): FilaMapeo[] {
     if (vistos.has(campo)) throw new Error(`Fila ${i + 1} de ${nombre}: el campo «${campo}» está repetido.`);
     vistos.add(campo);
     if (!origen) throw new Error(`Fila ${i + 1} de ${nombre}: el origen debe ser «fijo» o «campo_sap».`);
-    if (origen === 'campo_sap' && !RUTA_SAP_RE.test(valor)) throw new Error(`Fila ${i + 1} de ${nombre}: el campo SAP «${valor}» no es válido.`);
+    if (origen === 'campo_sap' && !rutaSapValida(valor)) throw new Error(`Fila ${i + 1} de ${nombre}: el campo SAP «${valor}» no es válido.`);
     if (valor.length > 500) throw new Error(`Fila ${i + 1} de ${nombre}: el valor supera 500 caracteres.`);
     return { campo, origen, valor };
   });

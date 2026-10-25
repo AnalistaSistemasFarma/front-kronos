@@ -488,11 +488,26 @@ export async function listarEnvios(f: FiltroEnvios, limite = 200) {
   const pool = await getPool();
   const req = pool.request().input('id_company', sql.Int, f.idCompany).input('lim', sql.Int, limite);
   const w = ['e.id_company = @id_company'];
-  if (f.idConfig) (req.input('id_config', sql.Int, f.idConfig), w.push('e.id_config = @id_config'));
-  if (f.estado) (req.input('estado', sql.NVarChar(20), f.estado), w.push('e.estado = @estado'));
-  if (f.desde) (req.input('desde', sql.Date, f.desde), w.push('e.creado >= @desde'));
-  if (f.hasta) (req.input('hasta', sql.Date, f.hasta), w.push('e.creado < DATEADD(DAY, 1, CAST(@hasta AS DATETIME2))'));
-  if (f.docNum) (req.input('doc_num', sql.Int, f.docNum), w.push('e.doc_num = @doc_num'));
+  if (f.idConfig) {
+    req.input('id_config', sql.Int, f.idConfig);
+    w.push('e.id_config = @id_config');
+  }
+  if (f.estado) {
+    req.input('estado', sql.NVarChar(20), f.estado);
+    w.push('e.estado = @estado');
+  }
+  if (f.desde) {
+    req.input('desde', sql.Date, f.desde);
+    w.push('e.creado >= @desde');
+  }
+  if (f.hasta) {
+    req.input('hasta', sql.Date, f.hasta);
+    w.push('e.creado < DATEADD(DAY, 1, CAST(@hasta AS DATETIME2))');
+  }
+  if (f.docNum) {
+    req.input('doc_num', sql.Int, f.docNum);
+    w.push('e.doc_num = @doc_num');
+  }
   const r = await req.query(`
     SELECT TOP (@lim) e.id_envio, e.id_config, c.nombre AS config_nombre, e.entidad, e.doc_entry, e.doc_num, e.estado, e.intentos,
       e.http_status, LEFT(e.error, 300) AS error, e.creado, e.ultimo_intento, e.proximo_intento, e.enviado_en, e.usuario_accion, e.fecha_accion
@@ -531,7 +546,10 @@ export async function kpis(idCompany: number, idConfig?: number | null) {
   const pool = await getPool();
   const req = pool.request().input('id_company', sql.Int, idCompany);
   let extra = '';
-  if (idConfig) (req.input('id_config', sql.Int, idConfig), (extra = ' AND id_config = @id_config'));
+  if (idConfig) {
+    req.input('id_config', sql.Int, idConfig);
+    extra = ' AND id_config = @id_config';
+  }
   const r = await req.query(`
     SELECT estado,
       SUM(CASE WHEN COALESCE(ultimo_intento, creado) >= CAST(CAST(SYSDATETIME() AS DATE) AS DATETIME2) THEN 1 ELSE 0 END) AS hoy,
