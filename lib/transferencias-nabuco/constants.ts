@@ -88,3 +88,21 @@ export const LIMITES = {
   /** Un lock de corrida más viejo que esto se considera abandonado (caída del proceso). */
   lockMinutos: 30,
 };
+
+/** Pruebas manuales (pestaña «Pruebas manuales»). */
+export const PRUEBAS_MANUALES = {
+  /** Host de PRODUCCIÓN de Nabuco: el envío manual exige confirmación explícita. */
+  hostProduccion: 'nabucoapi.azurewebsites.net',
+  /** Palabra que hay que escribir en el modal para enviar a producción. */
+  palabraProduccion: 'PRODUCCION',
+  historial: 20,
+  maxRespuesta: 100_000,
+  maxPayload: 1_000_000,
+};
+
+/** true si la URL parece la de producción de Nabuco (regla simple: contiene el host de producción). */
+export function esUrlProduccionNabuco(url: string | null | undefined): boolean {
+  return String(url ?? '')
+    .toLowerCase()
+    .includes(PRUEBAS_MANUALES.hostProduccion);
+}

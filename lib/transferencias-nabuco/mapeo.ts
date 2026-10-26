@@ -100,3 +100,22 @@ export function construirPayload(
   const docLineas = Array.isArray(doc[coleccion]) ? (doc[coleccion] as unknown[]) : [];
   return { ...aplicar(encabezado, doc), [claveLineas]: docLineas.map((l) => aplicar(lineas, l)) };
 }
+
+function valorMuestra(ruta: string): unknown {
+  const campo = ruta.split('.').pop() ?? ruta;
+  if (/^(DocNum|DocEntry|LineNum|BaseEntry|BaseLine)$/.test(campo)) return 12345;
+  if (/Date$/.test(campo)) return new Date().toISOString().slice(0, 10) + 'T00:00:00Z';
+  if (/(Quantity|Price|Total|Qty)$/i.test(campo)) return 1;
+  if (campo === 'ItemCode') return 'ART-0001';
+  if (campo === 'CardCode') return 'C0001';
+  return `Ejemplo ${campo}`;
+}
+
+/**
+ * Ejemplo de cuerpo para «Cargar ejemplo» (pruebas manuales): mismos campos del mapeo de la
+ * config; las filas «fijo» llevan su valor y las «campo_sap» un valor de muestra. Una línea.
+ */
+export function ejemploPayload(encabezado: FilaMapeo[], lineas: FilaMapeo[], claveLineas = 'items'): Record<string, unknown> {
+  const fila = (filas: FilaMapeo[]) => Object.fromEntries(filas.map((f) => [f.campo, f.origen === 'fijo' ? f.valor : valorMuestra(f.valor)]));
+  return { ...fila(encabezado), [claveLineas]: [fila(lineas)] };
+}

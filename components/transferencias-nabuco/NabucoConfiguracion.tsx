@@ -104,9 +104,10 @@ export default function NabucoConfiguracion({ company }: { company: NabucoCompan
 
   const actual = data?.configs.find((c) => String(c.id_config) === sel) ?? null;
 
+  // Con configuraciones y ninguna (válida) seleccionada se toma la primera; '' = «Nueva configuración».
   useEffect(() => {
-    if (!data) return;
-    if (sel === null && data.configs[0]) setSel(String(data.configs[0].id_config));
+    if (!data?.configs.length || sel === '') return;
+    if (!data.configs.some((c) => String(c.id_config) === sel)) setSel(String(data.configs[0].id_config));
   }, [data, sel]);
   useEffect(() => {
     setForm(actual ? formDe(actual) : formNuevo());
@@ -122,12 +123,14 @@ export default function NabucoConfiguracion({ company }: { company: NabucoCompan
       if (actual) {
         await nabucoSend(`/api/transferencias-nabuco/configs/${actual.id_config}`, 'PATCH', body);
         toast.success('Configuración guardada.');
+        void reload();
       } else {
         const r = await nabucoSend<{ id_config: number }>('/api/transferencias-nabuco/configs', 'POST', body);
         toast.success('Configuración creada en modo simulación.');
+        // Primero recarga y luego selecciona: si no, la autoselección vería un id que aún no está en la lista.
+        await reload();
         setSel(String(r.id_config));
       }
-      void reload();
     } catch (e) {
       toast.error(errorTexto(e));
     } finally {
@@ -166,8 +169,9 @@ export default function NabucoConfiguracion({ company }: { company: NabucoCompan
             label='Configuración'
             placeholder='Seleccione'
             data={(data?.configs ?? []).map((c) => ({ value: String(c.id_config), label: c.nombre }))}
-            value={sel}
+            value={sel || null}
             onChange={setSel}
+            allowDeselect={false}
             w={{ base: '100%', sm: 300 }}
           />
           <Button variant='light' leftSection={<IconPlus size={16} />} onClick={() => setSel('')}>
