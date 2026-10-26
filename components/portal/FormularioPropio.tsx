@@ -19,6 +19,7 @@ import {
   Text,
   TextInput,
   Textarea,
+  Modal,
 } from '@mantine/core';
 import {
   IconAlertCircle,
@@ -193,25 +194,19 @@ export function VisorFormulario({
   }, [onCerrar]);
 
   return (
-    <div
-      className='portal-th__visor'
-      role='dialog'
-      aria-modal='true'
+    <Modal
+      opened
+      onClose={onCerrar}
+      size='60rem'
+      centered
+      title={<Text fw={700}>{titulo}</Text>}
       aria-label={titulo}
       data-testid='visor-formulario'
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCerrar();
-      }}
+      closeButtonProps={{ 'aria-label': 'Cerrar' }}
+      padding={0}
+      styles={{ header: { padding: 'var(--mantine-spacing-md)' } }}
     >
-      <div className='portal-th__visor-caja portal-th__visor-caja--formulario'>
-        <header className='portal-th__visor-barra'>
-          <strong>{titulo}</strong>
-          <div className='portal-th__visor-acciones'>
-            <button type='button' onClick={onCerrar} aria-label='Cerrar'>
-              ✕
-            </button>
-          </div>
-        </header>
+      <div>
         {error && (
           <Alert color={COLOR_ESTADO.error} icon={<IconAlertCircle size={18} />} m='md' role='alert'>
             {error}
@@ -236,7 +231,7 @@ export function VisorFormulario({
           />
         )}
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -843,25 +838,19 @@ export function PanelRespuestas({ materialId, titulo, onCerrar, onCambio }: { ma
   }, [tabla, filtro]);
 
   return (
-    <div
-      className='portal-th__visor'
-      role='dialog'
-      aria-modal='true'
+    <Modal
+      opened
+      onClose={onCerrar}
+      size='90rem'
+      centered
+      title={<Text fw={700}>Respuestas · {titulo}</Text>}
       aria-label={`Respuestas: ${titulo}`}
       data-testid='panel-respuestas'
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCerrar();
-      }}
+      closeButtonProps={{ 'aria-label': 'Cerrar' }}
+      padding={0}
+      styles={{ header: { padding: 'var(--mantine-spacing-md)' } }}
     >
-      <div className='portal-th__visor-caja portal-th__visor-caja--respuestas'>
-        <header className='portal-th__visor-barra'>
-          <strong>Respuestas · {titulo}</strong>
-          <div className='portal-th__visor-acciones'>
-            <button type='button' onClick={onCerrar} aria-label='Cerrar'>
-              ✕
-            </button>
-          </div>
-        </header>
+      <div>
         {/* Resultado de "Reabrir" ARRIBA y con color (convención del equipo). */}
         {(error || aviso) && (
           <Stack gap='xs' px='md' pt='md'>
@@ -968,7 +957,7 @@ export function PanelRespuestas({ materialId, titulo, onCerrar, onCambio }: { ma
           )}
         </ScrollArea>
       </div>
-    </div>
+    </Modal>
   );
 }
 

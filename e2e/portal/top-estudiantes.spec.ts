@@ -54,7 +54,7 @@ test.describe('Formación · Top 10 de estudiantes', () => {
     await expect(filas.nth(1).getByRole('img', { name: 'Medalla de plata' })).toBeVisible();
     await expect(filas.nth(2).getByRole('img', { name: 'Medalla de bronce' })).toBeVisible();
     await expect(panel(page).locator('[data-testid^="medalla-"]')).toHaveCount(3);
-    for (let i = 3; i < 10; i++) await expect(filas.nth(i).locator('.portal-th__top-numero')).toHaveText(String(i + 1));
+    for (let i = 3; i < 10; i++) await expect(filas.nth(i).getByTestId('top-numero')).toHaveText(String(i + 1));
     // SOLO el nombre: dos columnas (puesto y estudiante), sin cursos ni nota
     await expect(panel(page).getByRole('columnheader')).toHaveText(['Puesto', 'Estudiante']);
     await expect(panel(page).locator('tbody td')).toHaveCount(10); // solo la celda del puesto en cada fila
@@ -62,9 +62,9 @@ test.describe('Formación · Top 10 de estudiantes', () => {
     await expect(panel(page)).not.toContainText('Cursos');
     await expect(panel(page)).not.toContainText('Nota');
     // quien mira, resaltado
-    await expect(filas.nth(2)).toHaveClass(/portal-th__top-usted/);
+    await expect(filas.nth(2)).toHaveAttribute('data-usted', 'true');
     await expect(filas.nth(2)).toContainText('(usted)');
-    await expect(panel(page).locator('.portal-th__top-usted')).toHaveCount(1);
+    await expect(panel(page).locator('[data-usted="true"]')).toHaveCount(1);
     await page.waitForTimeout(300);
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/140-top10-ancha.png` });
   });
@@ -75,7 +75,7 @@ test.describe('Formación · Top 10 de estudiantes', () => {
       await simular(page);
       await page.goto('/portal/formacion');
       await expect(panel(page)).toBeVisible();
-      const tarjetas = page.locator('.portal-th__curso-tarjeta');
+      const tarjetas = page.getByTestId('curso-tarjeta');
       await expect(tarjetas).toHaveCount(6);
       const tp = (await panel(page).boundingBox())!;
       const maxDerechaTarjetas = Math.max(...(await tarjetas.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().right))));
@@ -89,8 +89,8 @@ test.describe('Formación · Top 10 de estudiantes', () => {
     await page.setViewportSize({ width: 1920, height: 1000 });
     await simular(page);
     await page.goto('/portal/formacion');
-    const grilla = (await page.locator('.portal-th__curso-grilla').boundingBox())!;
-    const cuerpo = (await page.locator('.portal-th__cuerpo').boundingBox())!;
+    const grilla = (await page.getByTestId('curso-grilla').boundingBox())!;
+    const cuerpo = (await page.getByTestId('formacion-cuerpo').boundingBox())!;
     expect(grilla.x + grilla.width).toBeLessThanOrEqual(cuerpo.x + cuerpo.width);
     const tp = (await panel(page).boundingBox())!;
     expect(tp.x).toBeGreaterThanOrEqual(cuerpo.x + cuerpo.width - 4); // en el margen que quedaba libre
@@ -101,7 +101,7 @@ test.describe('Formación · Top 10 de estudiantes', () => {
     await simular(page);
     await page.goto('/portal/formacion');
     await expect(panel(page)).toBeVisible();
-    const ultimaTarjeta = (await page.locator('.portal-th__curso-tarjeta').last().boundingBox())!;
+    const ultimaTarjeta = (await page.getByTestId('curso-tarjeta').last().boundingBox())!;
     const tp = (await panel(page).boundingBox())!;
     expect(tp.y).toBeGreaterThanOrEqual(ultimaTarjeta.y + ultimaTarjeta.height - 1);
     expect(tp.x + tp.width).toBeLessThanOrEqual(390);
@@ -114,7 +114,7 @@ test.describe('Formación · Top 10 de estudiantes', () => {
     await simular(page, { top: { top: TOP.map((f) => ({ ...f, esUsted: false })), total: 23, usted: { puesto: 14, nombre: 'Yo', esUsted: true } } });
     await page.goto('/portal/formacion');
     await expect(panel(page).getByTestId('top-usted')).toHaveText('Su puesto: #14 de 23');
-    await expect(panel(page).locator('.portal-th__top-usted')).toHaveCount(0);
+    await expect(panel(page).locator('[data-usted="true"]')).toHaveCount(0);
   });
 
   test('sin nadie en el top: mensaje de ánimo; un error se avisa ARRIBA en rojo con «Reintentar»; sin sesión no aparece', async ({ page }) => {
@@ -130,12 +130,12 @@ test.describe('Formación · Top 10 de estudiantes', () => {
     await otra.goto('/portal/formacion');
     await expect(otra.getByTestId('top-error')).toContainText('No se pudo cargar el top de estudiantes.');
     await expect(otra.getByRole('button', { name: 'Reintentar' })).toBeVisible();
-    await expect(otra.locator('.portal-th__curso-tarjeta')).toHaveCount(6); // los cursos no se ven afectados
+    await expect(otra.getByTestId('curso-tarjeta')).toHaveCount(6); // los cursos no se ven afectados
 
     const tercera = await page.context().newPage();
     await simular(tercera, { sinSesion: true });
     await tercera.goto('/portal/formacion');
-    await expect(tercera.locator('.portal-th__curso-tarjeta')).toHaveCount(6);
+    await expect(tercera.getByTestId('curso-tarjeta')).toHaveCount(6);
     await expect(tercera.getByTestId('top-estudiantes')).toHaveCount(0);
   });
 

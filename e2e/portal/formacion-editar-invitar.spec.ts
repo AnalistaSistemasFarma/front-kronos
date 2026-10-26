@@ -111,14 +111,14 @@ test.describe('Portal TH · Formación · «Editar» e «Invitar al Curso»', ()
     // Vacío: error en rojo, sin llamar al servidor.
     await form.getByTestId('invitar-enviar').click();
     await expect(form.getByTestId('invitar-aviso')).toHaveText('Escriba el correo de la persona.');
-    await expect(form.getByTestId('invitar-aviso')).toHaveClass(/portal-th__invitar-aviso--error/);
+    await expect(form.getByTestId('invitar-aviso')).toHaveAttribute('data-tipo', 'error');
     expect(estado.invitaciones).toHaveLength(0);
 
     // Un correo que no puede entrar al portal: el servidor lo rechaza y se muestra en rojo.
     await form.getByTestId('invitar-correo').fill('alguien@gmail.com');
     await form.getByTestId('invitar-enviar').click();
     await expect(form.getByTestId('invitar-aviso')).toContainText('no está autorizado para entrar al portal');
-    await expect(form.getByTestId('invitar-aviso')).toHaveClass(/portal-th__invitar-aviso--error/);
+    await expect(form.getByTestId('invitar-aviso')).toHaveAttribute('data-tipo', 'error');
     await expect(form.getByTestId('invitar-correo')).toHaveValue('alguien@gmail.com'); // no se pierde lo escrito
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/83-invitar-error.png` });
 
@@ -126,7 +126,7 @@ test.describe('Portal TH · Formación · «Editar» e «Invitar al Curso»', ()
     await form.getByTestId('invitar-correo').fill('nueva.persona@gsslatam.com');
     await form.getByTestId('invitar-enviar').click();
     await expect(form.getByTestId('invitar-aviso')).toHaveText('Invitación enviada a nueva.persona@gsslatam.com. Quedó inscrita en el curso.');
-    await expect(form.getByTestId('invitar-aviso')).toHaveClass(/portal-th__invitar-aviso--ok/);
+    await expect(form.getByTestId('invitar-aviso')).toHaveAttribute('data-tipo', 'ok');
     await expect(form.getByTestId('invitar-correo')).toHaveValue('');
     await expect(form.getByTestId('invitar-aviso')).toBeInViewport();
     expect(estado.invitaciones).toEqual([{ correo: 'alguien@gmail.com' }, { correo: 'nueva.persona@gsslatam.com' }]);

@@ -29,7 +29,9 @@ export async function GET(request: NextRequest) {
   try {
     const ctx = esFormador ? await contextoAdmin(quien.correo).catch(() => null) : null;
     const perfil = await perfilColaborador(quien.correo).catch(() => null);
-    const empresas = await prisma.company.findMany({ select: { id_company: true, company: true } }).catch(() => []);
+    const empresas = await Promise.resolve()
+      .then(() => prisma.company.findMany({ select: { id_company: true, company: true } }))
+      .catch(() => [] as Array<{ id_company: number; company: string }>);
     const nombreEmpresa = new Map(empresas.map((e) => [e.id_company, e.company.trim()]));
     const todos = await prisma.portalCourse.findMany({
       // Los cursos ELIMINADOS (borrado lógico, 2026-10-22) no aparecen para nadie.

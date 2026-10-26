@@ -158,7 +158,7 @@ test.describe('Portal TH · Formación · completado automático', () => {
     await page.keyboard.press('Escape');
 
     await expect(page.getByText('"Reglamento interno" quedó completado.')).toBeVisible();
-    const fila = page.locator('.portal-th__material-item', { hasText: 'Reglamento interno' });
+    const fila = page.getByTestId('material-item').filter({ hasText: 'Reglamento interno' });
     await expect(fila.getByTestId('insignia-completado')).toHaveText('✓ Completado');
     await expect(fila.getByRole('checkbox')).toHaveAttribute('aria-checked', 'true');
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/3-estudiante-material-completado.png`, fullPage: true });
@@ -242,7 +242,7 @@ test.describe('Portal TH · Formación · completado automático', () => {
   test('curso al 100 %: "Completado" a la derecha de la barra', async ({ page }) => {
     await simular(page, { puedeMarcarManual: false, completados: [1, 2, 3] });
     await abrirCurso(page);
-    await expect(page.locator('.portal-th__progreso-fila').getByTestId('insignia-completado')).toBeVisible();
+    await expect(page.getByTestId('progreso-fila').getByTestId('insignia-completado')).toBeVisible();
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/4-curso-completado.png`, fullPage: true });
   });
 
