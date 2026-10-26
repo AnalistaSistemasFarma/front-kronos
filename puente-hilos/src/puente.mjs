@@ -46,6 +46,7 @@ import { analizarComando, catalogoPlugins, encabezadoObjetivo, MAX_REVISIONES_OB
 import { combinarPerfil, prepararConectoresTurno, secretosConectores } from './conectores.mjs';
 import { borrarMcpAgente, perfilConAgente, prepararConectoresAgente, secretosConectoresAgente, servidoresAgente, textoConectoresAgente } from './conectores-agente.mjs';
 import { guiaDesarrolloSegura } from './guia.mjs';
+import { esNegocio, perfilListo, textoPerfilNegocio } from './perfil-agente.mjs';
 import { prepararPruebasTurno, secretosPruebas, verificarSecretosPruebas } from './pruebas-kronos.mjs';
 import { grafosDelTurno, textoGrafos } from './grafos.mjs';
 import { prepararMemoriaTurno } from './memoria.mjs';
@@ -128,7 +129,8 @@ export function ocultarSecreto(texto, secreto) {
  * repos vinculados. Si algo falla, el turno corre SIN código (falla cerrado).
  */
 export function prepararCodigoTurno({ cfg, idProject, idConversation, rutas, lote, agenteNombre, conEquipo = false, completo = false, cargar = cargarReposPorProyecto, preparar = prepararWorktrees, elegirRepos = reposDelTurno, leerToken = leerTokenGithub, prepararHome = prepararHomeCodigo }) {
-  if (!cfg.rutaReposPorProyecto) return null;
+  // Perfil de negocio (perfil-agente.mjs): NUNCA código, aunque el proyecto tenga repos vinculados.
+  if (esNegocio(cfg) || !cfg.rutaReposPorProyecto) return null;
   const vinculos = cargar(cfg.rutaReposPorProyecto);
   const proyecto = vinculos?.proyectos.get(idProject);
   if (!proyecto) return null;
@@ -250,7 +252,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       if (lote.some((m) => analizarComando(m?.body))) {
         catalogo = catalogoPlugins(pluginDirsTurno);
         operador = loteDeOperador(cfg, lote);
-        comando = resolverComando({ lote, catalogo, operador });
+        comando = resolverComando({ lote, catalogo, operador, negocio: esNegocio(cfg), agente: cfg.agenteNombre ?? cfg.agente });
         if (comando) log(`conversación ${idConversation}: comando ${comando.accion}${comando.nombre ? ` /${comando.nombre}` : ''}${operador ? ' (operador)' : ''}.`);
       }
       if (comando?.accion === 'responder') {
@@ -334,7 +336,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       await sincronizarArchivos({ rutas, contexto, estado, descargar: (u) => synerlink.descargar(u) });
       const adjuntos = await bajarAdjuntos({ rutas, mensajes: lote, descargar: (u) => synerlink.descargar(u) });
       // Comando nativo: se resuelve otra vez ya con los adjuntos (una skill los recibe en sus argumentos).
-      const nativo = comando?.accion === 'nativo' ? resolverComando({ lote, catalogo, operador, adjuntos }) : null;
+      const nativo = comando?.accion === 'nativo' ? resolverComando({ lote, catalogo, operador, adjuntos, negocio: esNegocio(cfg), agente: cfg.agenteNombre ?? cfg.agente }) : null;
       // /goal: el objetivo queda guardado POR CONVERSACIÓN (estado.json) y va en el encabezado de
       // cada turno; mientras esté vigente, el turno corre con hooks (los exige el /goal nativo).
       if (nativo?.objetivo?.fijar) estado.fijarObjetivo(idConversation, nativo.objetivo.fijar, autorDe(lote[0]));
@@ -414,6 +416,8 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         instruccionesEn: cfg.instruccionesEn,
         equipoTurno,
         bloqueCodigo:
+          // Perfil de negocio: en lugar de código, el enfoque del agente (perfil-agente.mjs).
+          (esNegocio(cfg) ? textoPerfilNegocio({ agente: agenteNombre, enfoque: cfg.enfoque }) : '') +
           (codigo?.bloque ?? indiceRepos?.bloque ?? '') +
           (bloqueGuia ? `\n${bloqueGuia}` : '') +
           textoGrafos(grafosTurno, { conBash: Boolean(codigo || completo) }) +
@@ -942,7 +946,7 @@ async function principal() {
   ocupado = () => puente.enProceso.size > 0;
   medidor?.iniciar();
   log(medidor ? `medidor de consumo: stream de cada turno${cfg.cuota.intervaloMs > 0 && cfg.credencial.tipo === 'oauth-token' ? ` + consulta mínima cada ${Math.round(cfg.cuota.intervaloMs / 1000)} s sin turnos` : ''}.` : 'medidor de consumo apagado (HILOS_CUOTA=no).');
-  log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}, modelo del hilo principal: ${cfg.modelo ?? 'el predeterminado de la cuenta (sin HILOS_MODELO)'}; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; gasto ${cfg.sinTopeGasto ? 'SIN TOPE' : cfg.presupuestoUsd ? `tope ${cfg.presupuestoUsd} USD` : `sin tope general (equipo ${cfg.subagentesPresupuestoUsd} USD)`}; avisos de progreso ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; continuación automática ${cfg.continuarAlAgotar ? 'sí' : 'no'}; PRUEBAS para todos los hilos: ${pruebasListo(cfg)}; conectores del agente: ${conectoresAgenteListo(cfg)}.`);
+  log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}, modelo del hilo principal: ${cfg.modelo ?? 'el predeterminado de la cuenta (sin HILOS_MODELO)'}; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; gasto ${cfg.sinTopeGasto ? 'SIN TOPE' : cfg.presupuestoUsd ? `tope ${cfg.presupuestoUsd} USD` : `sin tope general (equipo ${cfg.subagentesPresupuestoUsd} USD)`}; avisos de progreso ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; continuación automática ${cfg.continuarAlAgotar ? 'sí' : 'no'}; perfil: ${perfilListo(cfg)}; PRUEBAS para todos los hilos: ${pruebasListo(cfg)}; conectores del agente: ${conectoresAgenteListo(cfg)}.`);
 
   let parar = false;
   for (const senal of ['SIGTERM', 'SIGINT']) {

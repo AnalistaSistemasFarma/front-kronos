@@ -135,12 +135,15 @@ export function recortarIndice(indice) {
 }
 
 /** Bloque del encabezado de sistema con la memoria (lo lee el modelo). */
-export function textoMemoria({ agente, indice, archivos, excluidos }) {
+export function textoMemoria({ agente, indice, archivos, excluidos, negocio = false }) {
   const l = [
     '',
     `## Su memoria (la misma de ${agente} en su bot principal; SOLO LECTURA)`,
     '',
-    `Usted tiene la memoria que ${agente} ha acumulado trabajando con Nicolás Rivera y el equipo de Tecnología de GSS: reglas de trabajo, flujos de desarrollo y despliegue, gotchas de servidores, reglas de negocio (RN) y decisiones. **Úsela como propia**: antes de preguntarle a la persona algo de cómo se trabaja en GSS (ramas, pases, avisos, SQL, servidores, autorizaciones), búsquelo en su memoria.`,
+    negocio
+      ? // Perfil de negocio (perfil-agente.mjs, 2026-10-26): sin ramas, pases ni servidores.
+        `Usted tiene la memoria que ${agente} ha acumulado en su chat con las personas de GSS: su identidad y su rol, reglas de trabajo, reglas de negocio (RN), preferencias y decisiones. **Úsela como propia**: antes de preguntarle a la persona algo de cómo se trabaja en su área, búsquelo en su memoria.`
+      : `Usted tiene la memoria que ${agente} ha acumulado trabajando con Nicolás Rivera y el equipo de Tecnología de GSS: reglas de trabajo, flujos de desarrollo y despliegue, gotchas de servidores, reglas de negocio (RN) y decisiones. **Úsela como propia**: antes de preguntarle a la persona algo de cómo se trabaja en GSS (ramas, pases, avisos, SQL, servidores, autorizaciones), búsquelo en su memoria.`,
     '',
     `- Está en \`./.puente/memoria/\` (${archivos.length} archivos). Abajo va el índice (\`MEMORY.md\`): cada línea enlaza un archivo; ábralo con Read (\`./.puente/memoria/<archivo>.md\`) cuando el tema lo necesite. Para buscar, use Grep sobre \`./.puente/memoria\`. Los enlaces \`[[nombre]]\` dentro de un archivo apuntan a \`./.puente/memoria/nombre.md\`.`,
     '- Es una COPIA de solo lectura que el puente renueva en cada turno. NO la edite ni cree archivos ahí, y NO use la memoria automática de este proceso: está apagada.',
@@ -172,7 +175,7 @@ export function prepararMemoriaTurno({ cfg, rutas, lote, agenteNombre, copiar = 
   try {
     if (!existsSync(cfg.memoriaDir)) throw new Error(`no existe ${cfg.memoriaDir}`);
     const r = copiar({ origen: cfg.memoriaDir, destino });
-    return { bloque: textoMemoria({ agente: agenteNombre, indice: r.indice, archivos: r.archivos, excluidos: r.excluidos }), archivos: r.archivos, excluidos: r.excluidos, motivo: null };
+    return { bloque: textoMemoria({ agente: agenteNombre, indice: r.indice, archivos: r.archivos, excluidos: r.excluidos, negocio: cfg.perfilAgente === 'negocio' }), archivos: r.archivos, excluidos: r.excluidos, motivo: null };
   } catch (e) {
     try {
       rmSync(destino, { recursive: true, force: true });

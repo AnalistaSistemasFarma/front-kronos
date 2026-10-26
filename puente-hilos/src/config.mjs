@@ -63,6 +63,13 @@
  *   HILOS_SUGERENCIA_PRESUPUESTO_USD Tope de gasto de «Sugerir equipo» (por defecto 0.5).
  *   HILOS_SUGERENCIA_TIMEOUT_MS      Tope de tiempo de «Sugerir equipo» (por defecto 180000 = 3 min).
  *
+ *   Perfil del agente (2026-10-26; ver perfil-agente.mjs):
+ *   HILOS_PERFIL                     'desarrollo' (por defecto) o 'negocio'. Con 'negocio' el contexto de
+ *                                    código no se activa nunca (ni repos, ni codigo/, ni guía, ni Graphify,
+ *                                    ni skills de revisión de código) y se rechazan las variables de código.
+ *   HILOS_ENFOQUE                    Opcional, una línea (máx. 400): el rol del agente de negocio (p. ej.
+ *                                    «comercio exterior y compras internacionales»). Va en el encabezado.
+ *
  *   Acceso al código (nivel 2, 2026-10-20; ver codigo.mjs). Opcional y aditivo:
  *   HILOS_REPOS_POR_PROYECTO         Ruta a repos-por-proyecto.json (repos, proyectos que los
  *                                    usan y operadores que autorizan pases). Se relee en CADA
@@ -125,6 +132,7 @@
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { MAX_ENFOQUE, PERFILES_AGENTE, PERFIL_POR_DEFECTO, VARIABLES_SOLO_DESARROLLO } from './perfil-agente.mjs';
 
 export const MAX_CONCURRENCIA_F1 = 2;
 
@@ -437,6 +445,16 @@ export function cargarConfig(env = process.env) {
     if (r && !path.isAbsolute(r)) throw new ErrorConfig(`${v} debe ser una ruta absoluta.`);
   }
 
+  // Perfil del agente (perfil-agente.mjs, 2026-10-26). Por defecto «desarrollo»: nada cambia.
+  const perfilAgente = (env.HILOS_PERFIL ?? '').trim().toLowerCase() || PERFIL_POR_DEFECTO;
+  if (!PERFILES_AGENTE.includes(perfilAgente)) throw new ErrorConfig(`HILOS_PERFIL solo admite ${PERFILES_AGENTE.join(' o ')}.`);
+  if (perfilAgente === 'negocio') {
+    const sobran = VARIABLES_SOLO_DESARROLLO.filter((v) => (env[v] ?? '').trim());
+    if (sobran.length) throw new ErrorConfig(`HILOS_PERFIL=negocio no lleva código: quite ${sobran.join(', ')} del .env (o use HILOS_PERFIL=desarrollo).`);
+  }
+  const enfoque = (env.HILOS_ENFOQUE ?? '').trim() || null;
+  if (enfoque && (enfoque.length > MAX_ENFOQUE || /[\r\n`]/.test(enfoque))) throw new ErrorConfig(`HILOS_ENFOQUE debe ser una sola línea de máximo ${MAX_ENFOQUE} caracteres, sin comillas invertidas.`);
+
   // Plugins locales (skills) por --plugin-dir, y grafos de Graphify (grafos.mjs). 2026-10-21.
   const pluginDirs = (env.HILOS_PLUGIN_DIRS ?? '')
     .split(',')
@@ -582,6 +600,8 @@ export function cargarConfig(env = process.env) {
     sugerenciaTimeoutMs: entero(env, 'HILOS_SUGERENCIA_TIMEOUT_MS', 3 * 60 * 1000, 30 * 1000, 10 * 60 * 1000),
     claudeBin,
     instruccionesEn,
+    perfilAgente,
+    enfoque,
     rutaReposPorProyecto: (env.HILOS_REPOS_POR_PROYECTO ?? '').trim() || null,
     githubTokenArchivo: (env.HILOS_GITHUB_TOKEN_ARCHIVO ?? '').trim() || null,
     memoriaDir,

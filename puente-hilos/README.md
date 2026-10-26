@@ -251,6 +251,14 @@ Nicolás Rivera, 2026-10-22 17:22 COT, al habilitar Proyectos para más agentes 
 - **Skills del agente:** `node scripts/plugin-skills-orus.mjs --fuente ~/.<bot>/claude-config/skills --destino ~/.puente-hilos/plugins/<bot> --nombre <bot> --agente "<Nombre> (@handle)"` arma SUS skills como plugin saneado; se suma a `HILOS_PLUGIN_DIRS` junto con `gss-design` (PDF).
 - **Modo Orus completo:** solo en las instancias de horus. En los puentes de otro agente, `HILOS_AUTORES_ORUS_COMPLETO` va vacío: los turnos de Nicolás en proyectos de ese agente tienen las capacidades del agente (su token, sus conectores), no las del Orus principal, cuyos secretos y llaves SSH no deben salir del Mac de horus.
 
+## Perfil del agente: desarrollo o negocio (2026-10-26, pedido de Nicolás Rivera)
+
+Play (comercio exterior) recibía en su proyecto opciones y textos de desarrollo. Regla general para todos los agentes que no son de desarrollo (`src/perfil-agente.mjs`):
+
+- `HILOS_PERFIL=desarrollo` (por defecto; Orus y Pedro): como siempre, el código solo entra en proyectos con repos vinculados.
+- `HILOS_PERFIL=negocio` (Play): el contexto de código no se activa **nunca**, aunque el proyecto tenga repos vinculados en la pantalla de Permisos. No hay carpeta `codigo/`, worktrees, token de GitHub, terminal, índice de repos, guía de desarrollo, grafos de Graphify ni las skills `/code-review`, `/simplify`, `/security-review`, `/verify` y `/claude-api`. El bloque de memoria no habla de ramas, pases ni servidores. El encabezado lleva el enfoque del agente (`HILOS_ENFOQUE`, una línea).
+- Con `negocio`, el puente no arranca si el `.env` trae `HILOS_REPOS_POR_PROYECTO`, `HILOS_GITHUB_TOKEN_ARCHIVO` o `HILOS_GRAFOS_DIR`. La línea «listo:» dice el perfil.
+
 ## Pruebas
 
 ```bash

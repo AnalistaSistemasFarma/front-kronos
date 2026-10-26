@@ -24,6 +24,7 @@
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { motivoSoloDesarrollo, SKILLS_SOLO_DESARROLLO } from './perfil-agente.mjs';
 
 /** «/nombre» o «/plugin:nombre», y lo demás son los argumentos. Una ruta («/Users/…») no es comando. */
 const RE_COMANDO = /^\/([a-z][a-z0-9_-]*(?::[a-z0-9][a-z0-9_-]*)?)(?:\s+([\s\S]*))?$/i;
@@ -180,7 +181,7 @@ export function skillsDePlugins(pluginDirs = [], existe = existsSync) {
  *   { accion: 'nativo', nombre, prompt, objetivo? } → el turno corre con `prompt` tal cual.
  *     objetivo: { fijar: condición } | { quitar: true }.
  */
-export function resolverComando({ lote, catalogo = { skills: new Map(), excluidas: new Map() }, operador = false, adjuntos = [] }) {
+export function resolverComando({ lote, catalogo = { skills: new Map(), excluidas: new Map() }, operador = false, adjuntos = [], negocio = false, agente = null }) {
   const mensajes = Array.isArray(lote) ? lote : [];
   const comandos = mensajes.map((m) => analizarComando(m?.body)).filter(Boolean);
   if (comandos.length === 0) return null;
@@ -195,7 +196,7 @@ export function resolverComando({ lote, catalogo = { skills: new Map(), excluida
   const etiqueta = `/${c.completo}`;
   const noDisponible = (motivo) => ({ accion: 'responder', texto: `**${etiqueta}** no está disponible en los hilos de proyecto porque ${motivo}.\n\nEscriba **/ayuda** para ver los comandos que sí puede usar aquí.` });
 
-  if (!c.plugin && AYUDA.has(c.nombre)) return { accion: 'responder', texto: textoAyuda({ catalogo, operador }) };
+  if (!c.plugin && AYUDA.has(c.nombre)) return { accion: 'responder', texto: textoAyuda({ catalogo, operador, negocio }) };
   if (!c.plugin && LIMPIAR.has(c.nombre)) return { accion: 'limpiar' };
   if (!c.plugin && c.nombre === 'goal') {
     if (!c.args) return { accion: 'objetivo-ver' };
@@ -218,6 +219,8 @@ export function resolverComando({ lote, catalogo = { skills: new Map(), excluida
   if (skill && (!c.plugin || c.plugin === skill.plugin.toLowerCase())) {
     return { accion: 'nativo', nombre: c.nombre, prompt: `/${skill.plugin}:${c.nombre}${argumentosSkill(c.args, adjuntos)}` };
   }
+  // Perfil de negocio (perfil-agente.mjs): las skills de revisión de código no aplican.
+  if (!c.plugin && SKILLS_INCLUIDAS[c.nombre] && negocio && SKILLS_SOLO_DESARROLLO.has(c.nombre)) return noDisponible(motivoSoloDesarrollo(agente ?? undefined));
   if (!c.plugin && SKILLS_INCLUIDAS[c.nombre]) return { accion: 'nativo', nombre: c.nombre, prompt: `/${c.nombre}${argumentosSkill(c.args, adjuntos)}` };
   if (!c.plugin && catalogo.excluidas.has(c.nombre)) return noDisponible(catalogo.excluidas.get(c.nombre));
   return { accion: 'responder', texto: `No reconozco el comando **${etiqueta}** en los hilos de proyecto.\n\nEscriba **/ayuda** para ver los comandos disponibles. Si quería escribir un texto que empieza por «/», agréguele algo antes (por ejemplo, un espacio o una palabra).` };
@@ -232,7 +235,7 @@ function argumentosSkill(args, adjuntos) {
 }
 
 /** Respuesta de /ayuda: lo disponible en los hilos y lo que no (con el porqué). */
-export function textoAyuda({ catalogo = { skills: new Map(), excluidas: new Map() }, operador = false } = {}) {
+export function textoAyuda({ catalogo = { skills: new Map(), excluidas: new Map() }, operador = false, negocio = false } = {}) {
   const l = [
     '## Comandos disponibles en los hilos de proyecto',
     '',
@@ -249,7 +252,7 @@ export function textoAyuda({ catalogo = { skills: new Map(), excluidas: new Map(
     if (n === 'goal') continue;
     l.push(`- \`${d.uso}\`: ${d.descripcion}${d.soloOperadores ? ' _(solo operadores)_' : ''}`);
   }
-  for (const [n, d] of Object.entries(SKILLS_INCLUIDAS)) l.push(`- \`/${n}\`: ${d}`);
+  for (const [n, d] of Object.entries(SKILLS_INCLUIDAS)) if (!(negocio && SKILLS_SOLO_DESARROLLO.has(n))) l.push(`- \`/${n}\`: ${d}`);
   const skills = [...catalogo.skills.entries()].sort(([a], [b]) => a.localeCompare(b));
   if (skills.length) {
     l.push('', `**Skills (${skills.length})** — escriba \`/nombre\` y, si quiere, lo que necesita después:`);
