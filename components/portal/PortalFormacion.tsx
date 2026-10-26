@@ -71,6 +71,7 @@ import {
 import { PanelRespuestas, PreviaDeMaterialFormulario, SelectorFormulario, VisorFormulario } from './FormularioPropio';
 import TopEstudiantes from './TopEstudiantes';
 import PreguntasMaterial from '../formacion/PreguntasMaterial';
+import MiniaturaVideo from '../formacion/MiniaturaVideo';
 
 /**
  * FORMACIÓN — sección "tipo Moodle" al final del portal de Talento Humano.
@@ -705,9 +706,15 @@ export function VistaCursoEstudiante({
                 >
                   <Group justify='space-between' wrap='nowrap' gap='sm'>
                     <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
-                      <ThemeIcon variant='light' size={44} radius='md' color={completado ? 'green' : 'blue'}>
-                        {iconoTipo(m)}
-                      </ThemeIcon>
+                      {etiquetaTipo(m) === 'Video' ? (
+                        <UnstyledButton onClick={() => abrir(m)} aria-label={`Ver ${m.titulo}`}>
+                          <MiniaturaVideo url={materialUrl(detalle.curso.id, m.id)} titulo={m.titulo} completado={completado} />
+                        </UnstyledButton>
+                      ) : (
+                        <ThemeIcon variant='light' size={44} radius='md' color={completado ? 'green' : 'blue'}>
+                          {iconoTipo(m)}
+                        </ThemeIcon>
+                      )}
                       <Stack gap={2} style={{ minWidth: 0 }}>
                         <Anchor
                           component='button'
@@ -2178,6 +2185,10 @@ function FilaMaterialFormador({
     return (
       <Paper component='li' withBorder radius='md' p='sm' data-testid='material-item'>
         <Group justify='space-between' wrap='nowrap' gap='sm'>
+          <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
+          {m.tipo === 'DOCUMENT' && (m.mime ?? '').toLowerCase().startsWith('video/') && (
+            <MiniaturaVideo url={materialUrl(cursoId, m.id)} titulo={m.titulo} ancho={96} />
+          )}
           <Stack gap={0} style={{ minWidth: 0 }}>
             {m.tipo === 'FORM' ? (
               <Anchor component='button' type='button' fw={600} ta='left' onClick={() => onVerPrevia?.(m)}>
@@ -2199,6 +2210,7 @@ function FilaMaterialFormador({
               {!m.obligatorio && ' · opcional'}
             </Text>
           </Stack>
+          </Group>
           <Group gap={4} wrap='nowrap'>
             {m.tipo === 'FORM' && puedeVerRespuestas && (
               <Button size='xs' variant='default' leftSection={<IconTable size={14} />} onClick={() => onVerRespuestas?.(m)}>
