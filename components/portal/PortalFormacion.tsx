@@ -5,10 +5,12 @@ import {
   ActionIcon,
   Alert,
   Anchor,
+  AspectRatio,
   Badge,
   Box,
   Button,
   Card,
+  Center,
   Checkbox,
   FileInput,
   Grid,
@@ -808,6 +810,7 @@ function VisorMaterial({
   const [segundos, setSegundos] = useState(0);
   const [duracion, setDuracion] = useState(0);
   const [reproduciendo, setReproduciendo] = useState(false);
+  const [cargandoVideo, setCargandoVideo] = useState(true);
   const [pdf, setPdf] = useState<{ pagina: number; maxima: number; total: number }>({ pagina: 1, maxima: 1, total: 0 });
   const reportado = useRef(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -974,10 +977,13 @@ function VisorMaterial({
       )}
       {tipo === 'video' ? (
         <>
+          {/* Marco 16:9 fijo desde el primer momento (Nicolás, 2026-10-26: el video se veía
+              aplastado mientras cargaba) y un indicador de carga encima hasta que hay imagen. */}
+          <AspectRatio ratio={16 / 9} maw='calc(70vh * 16 / 9)' mx='auto' w='100%' style={{ position: 'relative', background: '#000', borderRadius: 8, overflow: 'hidden' }}>
           {/* Sin `controls`: la barra nativa permite saltar. */}
           <video
             ref={videoRef}
-            style={{ width: '100%', maxHeight: '70vh', background: '#000', borderRadius: 8 }}
+            style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }}
             src={url}
             disablePictureInPicture
             playsInline
@@ -986,6 +992,10 @@ function VisorMaterial({
             onClick={alternarVideo}
             onContextMenu={(e) => e.preventDefault()}
             onLoadedMetadata={(e) => setDuracion(e.currentTarget.duration || 0)}
+            onLoadedData={() => setCargandoVideo(false)}
+            onCanPlay={() => setCargandoVideo(false)}
+            onWaiting={() => setCargandoVideo(true)}
+            onPlaying={() => setCargandoVideo(false)}
             onPlay={() => {
               video.current.ultimo = videoRef.current?.currentTime ?? 0;
               setReproduciendo(true);
@@ -1001,9 +1011,21 @@ function VisorMaterial({
               if (e.currentTarget.playbackRate !== 1) e.currentTarget.playbackRate = 1;
             }}
           />
+          {cargandoVideo && (
+            <Center style={{ position: 'absolute', inset: 0 }} data-testid='video-cargando'>
+              <Stack align='center' gap='xs'>
+                <Loader color='white' />
+                <Text size='sm' c='white'>
+                  Cargando video…
+                </Text>
+              </Stack>
+            </Center>
+          )}
+          </AspectRatio>
           <Group gap='sm' wrap='nowrap'>
             <Button
               size='xs'
+              disabled={duracion === 0}
               leftSection={reproduciendo ? <IconPlayerPause size={14} /> : <IconPlayerPlay size={14} />}
               onClick={alternarVideo}
             >
