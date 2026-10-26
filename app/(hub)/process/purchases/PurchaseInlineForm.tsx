@@ -2,9 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  ActionIcon, Alert, Button, FileInput, Group, Loader, NumberInput, ScrollArea, Select, Stack, Table, Text, TextInput, Textarea,
+  ActionIcon, Alert, Button, Group, Loader, NumberInput, Paper, ScrollArea, Select, Stack, Table, Text, TextInput, Textarea,
 } from '@mantine/core';
-import { IconPaperclip, IconPlus, IconSend, IconTrash } from '@tabler/icons-react';
+import { IconCloudUpload, IconFile, IconPlus, IconSend, IconTrash, IconX } from '@tabler/icons-react';
 import { COLUMNS, type FieldError, type Line, type LineField } from './RequestFormModal';
 import SapLookupInput from './SapLookupInput';
 import { FIELD_LOOKUP } from '../../../../lib/purchases/lookups';
@@ -40,6 +40,115 @@ export function currencyOptions(defaultCurrency: string): { value: string; label
 }
 
 const isEmpty = (v: unknown) => v == null || String(v).trim() === '';
+
+/** Adjuntos que acepta SAP para la solicitud (los mismos de SAPSEND). */
+const ALLOWED_EXT = ['pdf', 'jpg', 'jpeg', 'png'];
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+/** Zona de adjuntos: arrastrar y soltar o hacer clic para elegir. */
+function AttachmentsDrop({ files, onChange }: { files: File[]; onChange: (f: File[]) => void }) {
+  const [over, setOver] = useState(false);
+  const [rejected, setRejected] = useState<string[]>([]);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const add = (list: FileList | null) => {
+    if (!list) return;
+    const ok: File[] = [];
+    const bad: string[] = [];
+    for (const f of Array.from(list)) {
+      const ext = f.name.split('.').pop()?.toLowerCase() ?? '';
+      if (!ALLOWED_EXT.includes(ext)) bad.push(`${f.name}: solo PDF, JPG o PNG`);
+      else if (f.size > MAX_FILE_BYTES) bad.push(`${f.name}: supera 10 MB`);
+      else if (!files.some((x) => x.name === f.name && x.size === f.size)) ok.push(f);
+    }
+    setRejected(bad);
+    if (ok.length) onChange([...files, ...ok]);
+  };
+
+  return (
+    <div>
+      <Text fw={500} size="sm" mb={4}>
+        Cotizaciones y anexos
+      </Text>
+      <Paper
+        withBorder
+        radius="md"
+        p="md"
+        role="button"
+        tabIndex={0}
+        aria-label="Adjuntar cotizaciones y anexos"
+        onClick={() => inputRef.current?.click()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') inputRef.current?.click();
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setOver(true);
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setOver(false);
+          add(e.dataTransfer.files);
+        }}
+        style={{
+          borderStyle: 'dashed',
+          borderWidth: 2,
+          cursor: 'pointer',
+          textAlign: 'center',
+          borderColor: over ? 'var(--mantine-color-blue-5)' : undefined,
+          background: over ? 'var(--mantine-color-blue-light)' : undefined,
+        }}
+      >
+        <IconCloudUpload size={28} style={{ opacity: 0.6 }} />
+        <Text size="sm">Arrastre aquí los archivos o haga clic para elegirlos</Text>
+        <Text size="xs" c="dimmed">
+          PDF, JPG o PNG · máximo 10 MB cada uno
+        </Text>
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          accept=".pdf,.jpg,.jpeg,.png"
+          hidden
+          onChange={(e) => {
+            add(e.currentTarget.files);
+            e.currentTarget.value = '';
+          }}
+        />
+      </Paper>
+      {rejected.length > 0 && (
+        <Text size="xs" c="red" mt={4}>
+          No se agregaron: {rejected.join(' · ')}
+        </Text>
+      )}
+      {files.length > 0 && (
+        <Stack gap={4} mt="xs">
+          {files.map((f, i) => (
+            <Group key={`${f.name}-${i}`} gap={6} wrap="nowrap">
+              <IconFile size={14} />
+              <Text size="sm" truncate style={{ flex: 1 }}>
+                {f.name}
+              </Text>
+              <Text size="xs" c="dimmed">
+                {(f.size / 1024 / 1024).toFixed(2)} MB
+              </Text>
+              <ActionIcon
+                size="sm"
+                variant="subtle"
+                color="red"
+                aria-label={`Quitar ${f.name}`}
+                onClick={() => onChange(files.filter((_, j) => j !== i))}
+              >
+                <IconX size={14} />
+              </ActionIcon>
+            </Group>
+          ))}
+        </Stack>
+      )}
+    </div>
+  );
+}
 
 /** Ancho mínimo de cada columna de la tabla (las búsquedas en SAP necesitan más espacio). */
 function colWidth(field: LineField, base: number): number {
@@ -358,16 +467,7 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
         </Button>
       </div>
 
-      <FileInput
-        multiple
-        label="Cotizaciones y anexos"
-        placeholder="PDF, JPG o PNG (máx. 10 MB c/u)"
-        accept=".pdf,.jpg,.jpeg,.png"
-        leftSection={<IconPaperclip size={16} />}
-        value={files}
-        onChange={setFiles}
-        clearable
-      />
+      <AttachmentsDrop files={files} onChange={setFiles} />
 
       <Group justify="flex-end">
         <Button
