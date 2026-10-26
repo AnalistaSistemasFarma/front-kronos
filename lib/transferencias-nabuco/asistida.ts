@@ -3,6 +3,7 @@ import { sapGet, sapLogout, type SapSession } from '../sap/serviceLayer';
 import { ASISTIDA, coleccionLineas } from './constants';
 import { NabucoError, enviosPrevios, soltarLock, tomarLock, type NabucoConfig } from './db';
 import { problemasArmado } from './mapeo';
+import type { DiagnosticoNabuco } from './diagnostico';
 import { abrirSap, conexionNabuco, identidadToken, procesarDocumento, rutaCandidatos, type ContextoEnvio } from './motor';
 import { exigirConfirmacionProduccion } from './pruebas';
 import type { EnvioPrevio } from './seleccion';
@@ -25,6 +26,7 @@ export interface ResultadoSimular {
   ok: boolean;
   payload?: Record<string, unknown> | null;
   error?: string | null;
+  diagnostico?: DiagnosticoNabuco | null;
 }
 
 export interface ResultadoCrear {
@@ -35,6 +37,7 @@ export interface ResultadoCrear {
   respuesta?: string | null;
   error?: string | null;
   id_envio?: number | null;
+  diagnostico?: DiagnosticoNabuco | null;
 }
 
 const MENSAJE_OCUPADA = 'Hay una corrida de esta configuración en curso (automática, «Ejecutar ahora» u otra acción manual). Espere a que termine e intente de nuevo.';
@@ -112,7 +115,7 @@ export async function simularDocumentos(cfg: NabucoConfig, docEntries: number[],
         continue;
       }
       const r = await procesarDocumento(cfg, session, { DocEntry: docEntry }, { conexion: null, ident, usuario, simular: true, validar: validador(cfg) });
-      out.push({ docEntry, docNum: r.docNum, ok: r.estado === 'simulado', payload: r.payload, error: r.error });
+      out.push({ docEntry, docNum: r.docNum, ok: r.estado === 'simulado', payload: r.payload, error: r.error, diagnostico: r.diagnostico ?? null });
     }
     return out;
   });
@@ -129,11 +132,8 @@ export async function crearDocumentos(cfg: NabucoConfig, docEntries: number[], u
   const conexion = conexionNabuco(cfg);
   return conLockYSap(cfg, async (session) => {
     const ident = identidadToken(cfg);
-    try {
-      await obtenerToken(ident, conexion); // falla temprano si las credenciales no sirven
-    } catch (e) {
-      throw new NabucoError(`No se pudo obtener el token de Nabuco: ${e instanceof Error ? e.message : String(e)}`, 502);
-    }
+    // Falla temprano si las credenciales no sirven: NabucoDiagnosticoError → la ruta responde 200 ok:false con el diagnóstico.
+    await obtenerToken(ident, conexion);
     const out: ResultadoCrear[] = [];
     for (const docEntry of docEntries) {
       const [previo] = await enviosPrevios(cfg.id_company, cfg.entidad_sap, [docEntry]);
@@ -151,6 +151,7 @@ export async function crearDocumentos(cfg: NabucoConfig, docEntries: number[], u
         respuesta: r.respuesta ? r.respuesta.slice(0, 2000) : null,
         error: r.error,
         id_envio: r.id_envio,
+        diagnostico: r.diagnostico ?? null,
       });
     }
     return out;

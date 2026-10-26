@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { NabucoDiagnosticoError, diagnosticoHttp, respuestaErrorApi } from '../diagnostico';
 
 /* Dependencias simuladas: BD, SAP, token/envío a Nabuco, acceso, cifrado y alertas. */
 const m = vi.hoisted(() => ({
@@ -201,9 +202,11 @@ describe('crearDocumentos', () => {
   });
 
   it('error HTTP de Nabuco queda como error con intento', async () => {
-    m.enviarConToken.mockResolvedValue({ ok: false, status: 422, cuerpo: 'malo', tokenRenovado: false });
+    const diagnostico = diagnosticoHttp('envio', { metodo: 'POST', url: 'https://n/s', cabeceras: {} }, { http_status: 422, status_text: '', cabeceras: {}, cuerpo_crudo: 'malo' }, Date.now());
+    m.enviarConToken.mockResolvedValue({ ok: false, status: 422, cuerpo: 'malo', tokenRenovado: false, diagnostico });
     const r = await crearDocumentos(cfg, [1], 'a', undefined);
-    expect(r[0]).toMatchObject({ estado: 'error', http_status: 422 });
+    expect(r[0]).toMatchObject({ estado: 'error', http_status: 422, diagnostico: { etapa: 'envio', ok: false } });
+    expect(String(m.registrarResultado.mock.calls[0][2].respuesta)).toContain('"diagnostico_nabuco"');
     expect(m.registrarResultado.mock.calls[0][2]).toMatchObject({ estado: 'error', cuentaIntento: true });
   });
 
@@ -225,9 +228,11 @@ describe('crearDocumentos', () => {
 });
 
 describe('crearDocumentos sin token', () => {
-  it('si Nabuco no da token, 502 y no envía nada', async () => {
-    m.obtenerToken.mockRejectedValue(new Error('HTTP 401'));
-    await expect(crearDocumentos(cfg, [1], 'a', undefined)).rejects.toMatchObject({ status: 502 });
+  it('si Nabuco no da token, propaga el diagnóstico (la ruta responde 200 ok:false) y no envía nada', async () => {
+    const d = diagnosticoHttp('autenticacion', { metodo: 'POST', url: 'https://n/AuthBI', cabeceras: {} }, { http_status: 401, status_text: 'Unauthorized', cabeceras: {}, cuerpo_crudo: '' }, Date.now());
+    m.obtenerToken.mockRejectedValue(new NabucoDiagnosticoError(d));
+    await expect(crearDocumentos(cfg, [1], 'a', undefined)).rejects.toMatchObject({ name: 'NabucoDiagnosticoError', diagnostico: { etapa: 'autenticacion' } });
+    expect(respuestaErrorApi(new NabucoDiagnosticoError(d)).status).toBe(200);
     expect(m.enviarConToken).not.toHaveBeenCalled();
     expect(m.soltarLock).toHaveBeenCalledWith(7);
   });
