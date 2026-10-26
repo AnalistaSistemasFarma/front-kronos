@@ -1,5 +1,6 @@
 import 'server-only';
 import { createHash } from 'crypto';
+import type { DiagnosticoNabuco } from './diagnostico';
 import { enviarSolicitudCruda, pedirTokenDetalle, type NabucoConexion, type RespuestaNabuco } from './nabucoClient';
 
 /**
@@ -73,11 +74,11 @@ export async function obtenerToken(id: IdentidadToken, c: NabucoConexion, opts: 
 }
 
 /** «Probar conexión»: SIEMPRE pide token nuevo, actualiza la caché y devuelve el HTTP de /AuthBI. */
-export async function renovarToken(id: IdentidadToken, c: NabucoConexion, opts: OpcionesToken = {}): Promise<{ status: number }> {
+export async function renovarToken(id: IdentidadToken, c: NabucoConexion, opts: OpcionesToken = {}): Promise<{ status: number; diagnostico: DiagnosticoNabuco }> {
   const ahora = (opts.ahora ?? Date.now)();
   const r = await pedirTokenDetalle(c, opts.fetcher);
   guardar(id, r.token, ahora);
-  return { status: r.status };
+  return { status: r.status, diagnostico: r.diagnostico };
 }
 
 export function invalidarToken(id: IdentidadToken): void {
@@ -104,5 +105,7 @@ export async function enviarConToken(
   if (r.status !== 401) return { ...r, tokenRenovado: false };
   invalidarToken(id);
   const nuevo = await obtenerToken(id, c, { ...opts, forzar: true });
-  return { ...(await enviarSolicitudCruda(c, nuevo, cuerpoJson, opts.fetcher, opts.maxCuerpo)), tokenRenovado: true };
+  const r2 = await enviarSolicitudCruda(c, nuevo, cuerpoJson, opts.fetcher, opts.maxCuerpo);
+  const nota = 'El primer intento recibió HTTP 401 (token vencido): se pidió un token nuevo y se reintentó una vez.';
+  return { ...r2, diagnostico: { ...r2.diagnostico, detalle: r2.diagnostico.detalle ? `${nota} ${r2.diagnostico.detalle}` : nota }, tokenRenovado: true };
 }

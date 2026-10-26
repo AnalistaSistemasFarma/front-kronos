@@ -1,9 +1,12 @@
 import 'server-only';
 import { PRUEBAS_MANUALES, esUrlProduccionNabuco } from './constants';
 import { NabucoError, registrarPruebaManual, type NabucoConfig } from './db';
-import { conexionNabuco, identidadToken, probarConexion } from './motor';
-import { NabucoAuthError, urlSolicitudes, urlToken } from './nabucoClient';
-import { enviarConToken, type OpcionesToken } from './tokenCache';
+import { descifrarSecreto } from './cifrado';
+import { resolverConexionPrueba } from './conexionPrueba';
+import { NabucoDiagnosticoError, diagnosticoInterno, resumenDiagnostico, serializarDiagnostico, type DiagnosticoNabuco } from './diagnostico';
+import { conexionNabuco, identidadToken } from './motor';
+import { pedirTokenDetalle, urlSolicitudes, urlToken } from './nabucoClient';
+import { enviarConToken, renovarToken, type OpcionesToken } from './tokenCache';
 
 /**
  * Pruebas manuales contra Nabuco (pestaña «Pruebas manuales», solo administradores).
@@ -21,6 +24,15 @@ export interface ResultadoPrueba {
   respuesta: string | null;
   error: string | null;
   id_prueba: number | null;
+  diagnostico: DiagnosticoNabuco;
+  /** «Probar conexión»: true si se probó con datos de pantalla que difieren de lo guardado. */
+  usaCambiosSinGuardar?: boolean;
+}
+
+function diagnosticoDe(e: unknown, inicio: number): DiagnosticoNabuco {
+  if (e instanceof NabucoDiagnosticoError) return e.diagnostico;
+  if (e instanceof NabucoError) return { ok: false, etapa: 'validacion', mensaje: e.message, duracion_ms: Date.now() - inicio, cuando: new Date().toISOString() };
+  return diagnosticoInterno(e, inicio);
 }
 
 function mensaje(e: unknown): string {
@@ -66,21 +78,26 @@ export function exigirConfirmacionProduccion(url: string | null, confirmo: unkno
   }
 }
 
-/** «Probar conexión» con registro tipo 'conexion' (sin payload). Siempre pide token nuevo. */
-export async function probarConexionRegistrada(cfg: NabucoConfig, usuario: string): Promise<ResultadoPrueba> {
+/**
+ * «Probar conexión» con registro tipo 'conexion' (sin payload). Siempre pide token nuevo.
+ * `pantalla` = datos del formulario sin guardar (ver conexionPrueba.ts). La caché de token de la
+ * config SOLO se actualiza si lo probado coincide con lo guardado. Errores de validación de los
+ * datos (faltan, URL o protocolo inválidos) se lanzan (NabucoDiagnosticoError etapa 'validacion').
+ */
+export async function probarConexionRegistrada(cfg: NabucoConfig, usuario: string, pantalla: Record<string, unknown> | null = null, opts: OpcionesToken = {}): Promise<ResultadoPrueba> {
+  const { conexion, usaCambiosSinGuardar } = resolverConexionPrueba(cfg, pantalla, descifrarSecreto);
   const inicio = Date.now();
-  let http: number | null = null;
-  let error: string | null = null;
+  let diagnostico: DiagnosticoNabuco;
   try {
-    http = (await probarConexion(cfg)).status;
+    diagnostico = usaCambiosSinGuardar ? (await pedirTokenDetalle(conexion, opts.fetcher)).diagnostico : (await renovarToken(identidadToken(cfg), conexion, opts)).diagnostico;
   } catch (e) {
-    error = mensaje(e);
-    if (e instanceof NabucoAuthError) http = e.status;
+    diagnostico = diagnosticoDe(e, inicio);
   }
-  const duracion = Date.now() - inicio;
-  const url = urlSegura(() => urlToken(conexionNabuco(cfg)), cfg);
-  const id = await registrar({ idConfig: cfg.id_config, idCompany: cfg.id_company, usuario, tipo: 'conexion', docEntry: null, url, payload: null, httpStatus: http, duracionMs: duracion, respuesta: null, error });
-  return { ok: !error, url, http_status: http, duracion_ms: duracion, respuesta: null, error, id_prueba: id };
+  const http = diagnostico.respuesta?.http_status ?? null;
+  const error = diagnostico.ok ? null : resumenDiagnostico(diagnostico);
+  const url = urlSegura(() => urlToken(conexion), cfg);
+  const id = await registrar({ idConfig: cfg.id_config, idCompany: cfg.id_company, usuario, tipo: 'conexion', docEntry: null, url, payload: null, httpStatus: http, duracionMs: diagnostico.duracion_ms, respuesta: serializarDiagnostico(diagnostico), error });
+  return { ok: diagnostico.ok, url, http_status: http, duracion_ms: diagnostico.duracion_ms, respuesta: null, error, id_prueba: id, diagnostico, usaCambiosSinGuardar };
 }
 
 /** Envía el JSON TAL CUAL a la ruta de solicitudes con el token en caché (401 → token nuevo y un reintento). */
@@ -93,19 +110,18 @@ export async function enviarPruebaManual(
 ): Promise<ResultadoPrueba> {
   const url = urlSegura(() => urlSolicitudes(conexionNabuco(cfg)), cfg);
   const inicio = Date.now();
-  let http: number | null = null;
   let respuesta: string | null = null;
-  let error: string | null = null;
+  let diagnostico: DiagnosticoNabuco;
   try {
     const r = await enviarConToken(identidadToken(cfg), conexionNabuco(cfg), cuerpoJson, { ...opts, maxCuerpo: PRUEBAS_MANUALES.maxRespuesta });
-    http = r.status;
     respuesta = r.cuerpo;
-    if (!r.ok) error = `Nabuco respondió HTTP ${r.status}`;
+    diagnostico = r.diagnostico;
   } catch (e) {
-    error = mensaje(e);
-    if (e instanceof NabucoAuthError) http = e.status;
+    diagnostico = diagnosticoDe(e, inicio);
   }
+  const http = diagnostico.respuesta?.http_status ?? null;
+  const error = diagnostico.ok ? null : resumenDiagnostico(diagnostico);
   const duracion = Date.now() - inicio;
-  const id = await registrar({ idConfig: cfg.id_config, idCompany: cfg.id_company, usuario, tipo: 'envio', docEntry, url, payload: cuerpoJson, httpStatus: http, duracionMs: duracion, respuesta, error });
-  return { ok: !error, url, http_status: http, duracion_ms: duracion, respuesta, error, id_prueba: id };
+  const id = await registrar({ idConfig: cfg.id_config, idCompany: cfg.id_company, usuario, tipo: 'envio', docEntry, url, payload: cuerpoJson, httpStatus: http, duracionMs: duracion, respuesta: serializarDiagnostico(diagnostico), error });
+  return { ok: diagnostico.ok, url, http_status: http, duracion_ms: duracion, respuesta, error, id_prueba: id, diagnostico };
 }

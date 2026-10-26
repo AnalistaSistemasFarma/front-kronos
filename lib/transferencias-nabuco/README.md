@@ -18,11 +18,11 @@ y todo se parametriza desde la app (Procesos → Logística → Transferencias N
   cifrada (si cambian, la entrada vieja se descarta). Vigencia = `exp` del JWT − 60 s o 50 min si
   no hay `exp`. Ante un 401 se invalida, se pide token nuevo UNA vez y se reintenta UNA vez.
   La usan el motor automático y las pruebas manuales; «Probar conexión» SIEMPRE pide token nuevo
-  y actualiza la caché. Con varias instancias del proceso cada una tiene su caché.
+  y actualiza la caché (salvo si prueba datos de pantalla distintos de lo guardado). Con varias instancias del proceso cada una tiene su caché.
 
 ## Pruebas manuales (2026-10-26)
 Pestaña «Pruebas manuales» (solo administradores del módulo), por configuración:
-- «Probar conexión» (token nuevo; muestra OK o el HTTP y el mensaje).
+- «Probar conexión» (token nuevo; muestra el diagnóstico técnico, ver abajo).
 - «Armar solicitud» desde un DocEntry (usa la vista previa) o «Cargar ejemplo» (campos del mapeo
   con valores de muestra) → editor JSON editable → «Enviar a Nabuco» (confirmación en modal).
   Se envía TAL CUAL a `{url}{ruta_solicitudes}`, ignorando el modo simulación; muestra HTTP, ms y
@@ -62,6 +62,36 @@ Arriba de la pestaña «Pruebas manuales» (solo administradores): Buscar pendie
   `rutaCandidatos` en `motor.ts` (los usa también la corrida automática),
   `components/transferencias-nabuco/NabucoAsistida.tsx`. Pruebas: `__tests__/asistida.test.ts`.
 - Sin SQL nuevo.
+
+## Diagnóstico técnico de errores (2026-10-26)
+El módulo es técnico: todo error se muestra con detalle (`diagnostico.ts`, UI `NabucoDiagnostico.tsx`).
+- `DiagnosticoNabuco`: `ok`, `etapa` (validacion|red|autenticacion|envio|respuesta|sap|interno), `mensaje`,
+  `detalle`, `sugerencia`, `peticion` (método, URL, cabeceras con Authorization ENMASCARADA
+  `Bearer eyJ…(oculto, N caracteres)`, cuerpo; en /AuthBI el `pwd` va SIEMPRE `•••`), `respuesta` (HTTP,
+  status_text, cabeceras relevantes, `cuerpo_crudo` ≤ 20 000, `cuerpo_json`), `red` (código de
+  `err.cause.code`: ENOTFOUND, ECONNREFUSED, ETIMEDOUT, ECONNRESET, UND_ERR_CONNECT_TIMEOUT, TimeoutError,
+  CERT_*…), `duracion_ms`, `cuando`, `http_synerlink` (solo errores de nuestra API).
+- Clasificadores con sugerencias (DNS, puerto cerrado, servidor dormido/timeout, 401 AuthBI → org 0 vs 1,
+  401 solicitudes → token vencido ya reintentado, 400 con el mensaje de Nabuco, 404/405 ruta, 5xx Nabuco,
+  respuesta no JSON, token no reconocible). `sanitizarDiagnostico` borra cualquier secreto conocido.
+- `nabucoClient`: `pedirTokenDetalle` lanza `NabucoDiagnosticoError` (`.diagnostico`) y al éxito devuelve
+  `{ token, status, diagnostico }`; `enviarSolicitudCruda` devuelve `{ ok, status, cuerpo, diagnostico }` y
+  solo lanza por red/URL. La caché y el reintento ante 401 no cambian (el detalle lo anota).
+- **Contrato de la API**: fallas de Nabuco, de red o de SAP (upstream) → **HTTP 200 `{ ok: false, error,
+  diagnostico }`** (antes 502). 4xx/5xx solo para lo nuestro: 401 sesión, 403 permiso, 400 validación,
+  409 conflicto, 500 interno (con diagnóstico etapa `interno`). Todos los errores llevan `diagnostico`.
+  `simular`/`crear` devuelven `diagnostico` por documento; `pruebas` POST lo devuelve en `resultado`.
+- Persistencia (sin SQL nuevo): en `nabuco_envio` y `nabuco_prueba_manual` la columna `respuesta` guarda el
+  diagnóstico serializado (`{"diagnostico_nabuco":1,…}`; la UI lo detecta con `leerDiagnostico`) y `error`
+  un resumen ≤ 2 000 car. Un envío OK sigue guardando en `nabuco_envio.respuesta` el cuerpo de Nabuco.
+- **«Probar conexión» con datos de pantalla**: `POST configs/[id]/probar` acepta opcionalmente
+  `{ nabuco_url, nabuco_usuario, nabuco_password, nabuco_org, ruta_token, timeout_ms }`; cada campo
+  reemplaza al guardado SOLO para la prueba (contraseña vacía = la guardada). Valida protocolo y ruta
+  (`conexionPrueba.ts`). Si difiere de lo guardado responde `usaCambiosSinGuardar: true` y NO toca la caché
+  de token. Respuesta: `{ ok, mensaje, usaCambiosSinGuardar, http_status, duracion_ms, diagnostico }`.
+  Configuración manda el formulario actual (badge «Cambios sin guardar» y aviso amarillo); Pruebas
+  manuales no edita credenciales y prueba con lo guardado. Ambas validan en el cliente qué falta.
+- Pruebas: `__tests__/diagnostico.test.ts`.
 
 ## Pendiente
 1. Correr el script de PRUEBAS y asignar los permisos por empresa (Administración → Usuarios).

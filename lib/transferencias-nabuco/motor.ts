@@ -1,5 +1,7 @@
 import 'server-only';
 import { sapGet, sapGetAll, sapLogin, sapLogout, sapPatch, type SapSession } from '../sap/serviceLayer';
+import type { SapError } from '../sap/serviceLayer';
+import { NabucoDiagnosticoError, diagnosticoInterno, diagnosticoSap, diagnosticoValidacion, resumenDiagnostico, serializarDiagnostico, type DiagnosticoNabuco } from './diagnostico';
 import { getEndpointSap } from './access';
 import { descifrarSecreto } from './cifrado';
 import { enviarAlerta } from './alertas';
@@ -83,7 +85,7 @@ export async function leerDocumento(session: SapSession, entidad: string, docEnt
 }
 
 /** «Probar conexión»: SIEMPRE pide token nuevo a Nabuco (y actualiza la caché); no envía nada. */
-export async function probarConexion(cfg: NabucoConfig): Promise<{ status: number }> {
+export async function probarConexion(cfg: NabucoConfig) {
   return renovarToken(identidadToken(cfg), conexionNabuco(cfg));
 }
 
@@ -195,6 +197,18 @@ export interface ResultadoDocumento {
   respuesta: string | null;
   error: string | null;
   id_envio: number | null;
+  /** Diagnóstico técnico (fallas de SAP, Nabuco o red; y el OK del envío). */
+  diagnostico?: DiagnosticoNabuco | null;
+}
+
+/** Diagnóstico de un error capturado al procesar un documento (SAP, Nabuco/red o interno). */
+export function diagnosticoDeError(e: unknown, entidad: string, docEntry: number, inicio: number): DiagnosticoNabuco {
+  // Por `name` (no instanceof): robusto ante dobles de prueba y copias del módulo.
+  const nombre = (e as { name?: string } | null)?.name;
+  if (e instanceof NabucoDiagnosticoError || (nombre === 'NabucoDiagnosticoError' && (e as NabucoDiagnosticoError).diagnostico)) return (e as NabucoDiagnosticoError).diagnostico;
+  if (nombre === 'SapError') return diagnosticoSap(e as SapError, { entidad, docEntry }, inicio);
+  if (nombre === 'NabucoError') return diagnosticoValidacion((e as Error).message, undefined, inicio);
+  return diagnosticoInterno(e, inicio);
 }
 
 /**
@@ -217,12 +231,13 @@ export async function procesarDocumento(cfg: NabucoConfig, session: SapSession, 
     id_envio: null,
     ...extra,
   });
+  const inicio = Date.now();
   try {
     const doc = await leerDocumento(session, cfg.entidad_sap, cand.DocEntry);
     docNum = typeof doc.DocNum === 'number' ? doc.DocNum : docNum;
     payload = construirPayload(doc, cfg.entidad_sap, cfg.mapeo_encabezado, cfg.mapeo_lineas, cfg.clave_lineas);
     const invalido = c.validar?.(doc, payload) ?? null;
-    if (invalido) return res('omitido', { error: invalido });
+    if (invalido) return res('omitido', { error: invalido, diagnostico: diagnosticoValidacion(`Documento no válido para enviar: ${invalido}`, 'Revise el mapeo (campos SAP) y que el documento tenga líneas.', inicio) });
     payloadTxt = JSON.stringify(payload);
     if (c.simular || !c.conexion) {
       const r = await registrarResultado(cfg, { DocEntry: cand.DocEntry, DocNum: docNum }, { estado: 'simulado', payload: payloadTxt, respuesta: null, http_status: null, error: null, proximoEnMin: null, cuentaIntento: false }, c.usuario);
@@ -239,15 +254,19 @@ export async function procesarDocumento(cfg: NabucoConfig, session: SapSession, 
         }
       }
       const r = await registrarResultado(cfg, { DocEntry: cand.DocEntry, DocNum: docNum }, { estado: 'enviado', payload: payloadTxt, respuesta: resp.cuerpo, http_status: resp.status, error: nota, proximoEnMin: null, cuentaIntento: true }, c.usuario);
-      return res('enviado', { http_status: resp.status, respuesta: resp.cuerpo, error: nota, id_envio: r?.id_envio ?? null });
+      return res('enviado', { http_status: resp.status, respuesta: resp.cuerpo, error: nota, id_envio: r?.id_envio ?? null, diagnostico: resp.diagnostico });
     }
-    const error = `Nabuco respondió HTTP ${resp.status}`;
-    const r = await registrarFallo(cfg, { DocEntry: cand.DocEntry, DocNum: docNum }, payloadTxt, resp.cuerpo, resp.status, error, c.usuario);
-    return res('error', { http_status: resp.status, respuesta: resp.cuerpo, error, id_envio: r?.id_envio ?? null });
+    // Falla de Nabuco: en `respuesta` va el diagnóstico completo (incluye el cuerpo crudo de Nabuco).
+    const d = resp.diagnostico;
+    const error = resumenDiagnostico(d);
+    const r = await registrarFallo(cfg, { DocEntry: cand.DocEntry, DocNum: docNum }, payloadTxt, serializarDiagnostico(d), resp.status, error, c.usuario);
+    return res('error', { http_status: resp.status, respuesta: resp.cuerpo, error, id_envio: r?.id_envio ?? null, diagnostico: d });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    const r = await registrarFallo(cfg, { DocEntry: cand.DocEntry, DocNum: docNum }, payloadTxt, null, null, msg, c.usuario);
-    return res('error', { error: msg, id_envio: r?.id_envio ?? null });
+    const d = diagnosticoDeError(e, cfg.entidad_sap, cand.DocEntry, inicio);
+    const msg = resumenDiagnostico(d);
+    const http = d.respuesta?.http_status ?? null;
+    const r = await registrarFallo(cfg, { DocEntry: cand.DocEntry, DocNum: docNum }, payloadTxt, serializarDiagnostico(d), d.etapa === 'sap' ? null : http, msg, c.usuario);
+    return res('error', { error: msg, http_status: d.etapa === 'sap' ? null : http, id_envio: r?.id_envio ?? null, diagnostico: d });
   }
 }
 
