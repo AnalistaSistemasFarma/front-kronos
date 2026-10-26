@@ -2,13 +2,14 @@
 
 import { useState } from 'react';
 import { Tabs } from '@mantine/core';
-import { IconHistory, IconLayoutDashboard, IconSettings } from '@tabler/icons-react';
+import { IconFlask, IconHistory, IconLayoutDashboard, IconSettings } from '@tabler/icons-react';
 import type { NabucoCompany } from './client';
 import NabucoTablero from './NabucoTablero';
 import NabucoConfiguracion from './NabucoConfiguracion';
 import NabucoCorridas from './NabucoCorridas';
+import NabucoPruebas from './NabucoPruebas';
 
-/** Pestañas del módulo: Tablero, Configuración (solo administradores) y Corridas. */
+/** Pestañas del módulo: Tablero, Configuración y Pruebas manuales (solo administradores) y Corridas. */
 export default function NabucoModulo({ company, inicial = 'tablero' }: { company: NabucoCompany; inicial?: string }) {
   const [tab, setTab] = useState<string | null>(inicial);
   return (
@@ -22,6 +23,11 @@ export default function NabucoModulo({ company, inicial = 'tablero' }: { company
             Configuración
           </Tabs.Tab>
         )}
+        {company.canAdministrar && (
+          <Tabs.Tab value='pruebas' leftSection={<IconFlask size={16} />}>
+            Pruebas manuales
+          </Tabs.Tab>
+        )}
         <Tabs.Tab value='corridas' leftSection={<IconHistory size={16} />}>
           Corridas
         </Tabs.Tab>
@@ -32,6 +38,11 @@ export default function NabucoModulo({ company, inicial = 'tablero' }: { company
       {company.canAdministrar && (
         <Tabs.Panel value='configuracion'>
           <NabucoConfiguracion company={company} />
+        </Tabs.Panel>
+      )}
+      {company.canAdministrar && (
+        <Tabs.Panel value='pruebas'>
+          <NabucoPruebas company={company} />
         </Tabs.Panel>
       )}
       <Tabs.Panel value='corridas'>
