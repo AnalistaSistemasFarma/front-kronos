@@ -5,6 +5,7 @@ import { Alert, Badge, Button, Card, Code, Group, Loader, Modal, NumberInput, Sc
 import { IconAlertTriangle, IconEye, IconFileCode, IconPlugConnected, IconSend, IconWand } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import SgcSelect from '../sgc/SgcSelect';
+import NabucoAsistida from './NabucoAsistida';
 import { PRUEBAS_MANUALES, esUrlProduccionNabuco } from '../../lib/transferencias-nabuco/constants';
 import { ejemploPayload, type FilaMapeo } from '../../lib/transferencias-nabuco/mapeo';
 import { errorTexto, fmtFechaHora, nabucoSend, useNabucoFetch, type NabucoCompany } from './client';
@@ -192,9 +193,12 @@ export default function NabucoPruebas({ company }: { company: NabucoCompany }) {
           {esProduccion && <Badge color='red'>Producción de Nabuco</Badge>}
         </Group>
         <Text size='sm' c='dimmed' mt='xs'>
-          Las pruebas manuales envían de verdad a Nabuco aunque la configuración esté en modo simulación. No afectan el envío automático ni el tablero.
+          Las pruebas manuales envían de verdad a Nabuco aunque la configuración esté en modo simulación. «Probar conexión» y el JSON libre no afectan el
+          envío automático ni el tablero; la Transferencia asistida sí registra en el tablero (simulados y enviados) y no reenvía lo ya enviado.
         </Text>
       </Card>
+
+      {actual && <NabucoAsistida key={actual.id_config} config={actual} />}
 
       <Card shadow='sm' radius='md' withBorder p='md'>
         <Title order={4} mb='sm'>
