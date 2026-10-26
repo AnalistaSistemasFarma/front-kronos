@@ -142,6 +142,7 @@ export default function PortalFormacion({ onSinSesion, cursoInicialId }: { onSin
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cursos, setCursos] = useState<CursoResumen[]>([]);
+  const [cursosEstudiante, setCursosEstudiante] = useState<CursoResumen[]>([]);
   const [esFormador, setEsFormador] = useState(false);
   const [vista, setVista] = useState<'estudiante' | 'formador'>('estudiante');
   // En una ref: si se pasa como función en línea, no debe re-disparar la carga.
@@ -160,9 +161,19 @@ export default function PortalFormacion({ onSinSesion, cursoInicialId }: { onSin
       }
       const data = await leerJson(res);
       if (!res.ok) throw new Error(String(data?.error ?? 'No se pudieron cargar los cursos.'));
+      const formador = data.esFormador === true;
+      // El formador recibe los cursos que ADMINISTRA; en «Vista estudiante» ve los
+      // de su empresa y departamento, como cualquier estudiante (2026-10-26).
+      let comoEstudiante = Array.isArray(data.cursos) ? (data.cursos as CursoResumen[]) : [];
+      if (formador) {
+        const resE = await fetch('/api/portal/courses?vista=estudiante', { cache: 'no-store' });
+        const dataE = await leerJson(resE);
+        if (resE.ok && Array.isArray(dataE.cursos)) comoEstudiante = dataE.cursos as CursoResumen[];
+      }
       cursosCargados.current = true;
       setCursos(Array.isArray(data.cursos) ? (data.cursos as CursoResumen[]) : []);
-      setEsFormador(data.esFormador === true);
+      setCursosEstudiante(comoEstudiante);
+      setEsFormador(formador);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -184,9 +195,9 @@ export default function PortalFormacion({ onSinSesion, cursoInicialId }: { onSin
   useEffect(() => {
     if (cargando || abrioInicial.current || !cursoInicialId || !cursosCargados.current) return;
     abrioInicial.current = true;
-    if (cursos.some((c) => c.id === cursoInicialId && c.activo)) setCursoAbiertoId(cursoInicialId);
+    if (cursosEstudiante.some((c) => c.id === cursoInicialId && c.activo)) setCursoAbiertoId(cursoInicialId);
     else setError('El curso al que lo invitaron ya no está disponible.');
-  }, [cargando, cursos, cursoInicialId]);
+  }, [cargando, cursosEstudiante, cursoInicialId]);
 
   if (cargando) return <Cargando texto='Cargando formación…' />;
 
@@ -217,7 +228,7 @@ export default function PortalFormacion({ onSinSesion, cursoInicialId }: { onSin
         cursoAbiertoId ? (
           <VistaCursoEstudiante cursoId={cursoAbiertoId} onVolver={() => setCursoAbiertoId(null)} onCambio={cargarCursos} />
         ) : (
-          <ListaCursosEstudiante cursos={cursos.filter((c) => c.activo)} onAbrir={setCursoAbiertoId} />
+          <ListaCursosEstudiante cursos={cursosEstudiante.filter((c) => c.activo)} onAbrir={setCursoAbiertoId} />
         )
       ) : cursoGestionId ? (
         <VistaCursoFormador
