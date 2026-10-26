@@ -56,8 +56,8 @@ test.describe('Portal TH · Formación · «Editar» e «Invitar al Curso»', ()
     await expect(page.getByRole('heading', { name: 'Progreso de los estudiantes' })).toBeVisible();
     await expect(page.getByText('Inducción del área de tecnología')).toBeVisible();
     await expect(page.getByTestId('menu-edicion')).toHaveCount(0);
-    await expect(page.getByRole('heading', { name: 'Materiales' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Agregar material' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Clases del curso' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Agregar clase' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Pasar a borrador' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Editar título y descripción' })).toHaveCount(0);
     const editar = page.getByTestId('alternar-edicion');
@@ -70,9 +70,9 @@ test.describe('Portal TH · Formación · «Editar» e «Invitar al Curso»', ()
     await expect(editar).toHaveText('Cerrar edición');
     await expect(editar).toHaveAttribute('aria-expanded', 'true');
     await expect(page.getByTestId('menu-edicion')).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Materiales' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Clases del curso' })).toBeVisible();
     await expect(page.getByText('CAMPAÑA MALWARE', { exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Agregar material' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Agregar clase' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Pasar a borrador' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Editar título y descripción' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Progreso de los estudiantes' })).toBeVisible();

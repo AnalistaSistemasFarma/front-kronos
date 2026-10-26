@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { identificar } from '@/lib/portal/acceso';
 import { resolverNombreEstudiante } from '@/lib/portal/formacion';
-import { accesoAlCurso, esFormadorFormacion } from '@/lib/formacion/servidor';
+import { accesoAlCurso, esFormadorFormacion, puedeAdministrarCursoId } from '@/lib/formacion/servidor';
 import { armarHilo, limpiarTexto } from '@/lib/formacion/preguntas';
 
 /**
@@ -58,7 +58,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     });
     const autores = [...new Set(filas.map((f) => f.email.toLowerCase()))];
     const formadores = new Set<string>();
-    for (const a of autores) if (await esFormadorFormacion(a)) formadores.add(a);
+    // «Formador» = quien administra ESTE curso (no cualquiera con el permiso del módulo).
+    for (const a of autores) {
+      if ((await esFormadorFormacion(a)) && (await puedeAdministrarCursoId(a, r.material.course_id))) formadores.add(a);
+    }
     const preguntas = armarHilo(
       filas.map((f) => ({
         id: f.id,

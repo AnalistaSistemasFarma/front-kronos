@@ -200,7 +200,7 @@ test.describe('Portal TH · Formación · completado automático', () => {
   test('video: ventana de vista previa, sin adelantar, contador y completado al 100 %', async ({ page }) => {
     await simular(page, { puedeMarcarManual: false, completados: [] });
     await abrirCurso(page);
-    await page.getByRole('button', { name: 'Bienvenida Farmalogica' }).click();
+    await page.getByRole('button', { name: 'Bienvenida Farmalogica', exact: true }).click();
     const visor = page.getByTestId('visor-material');
     const video = visor.getByTestId('video-material');
 
