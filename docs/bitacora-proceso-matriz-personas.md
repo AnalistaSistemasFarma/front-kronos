@@ -11,14 +11,15 @@ cuatro vistos buenos (operario, supervisor, inspector y jefe de producción).
 | **Operario** | Nombre completo; documento (opcional) | **No.** Va al maestro de operarios. En la tablet toca su nombre. |
 | **Supervisor** | Nombre completo; correo corporativo | **Sí.** Abre y cierra la bitácora (permiso «Bitácora de Proceso: Gestión»). |
 | **Inspector** | Nombre completo; correo corporativo | **Sí.** Da su visto bueno después del cierre (permiso base del módulo). |
-| **Jefe de producción** | Nombre completo; correo corporativo | **Sí.** Da el último visto bueno (permiso base del módulo). |
+| **Jefe de producción** | Nombre completo; correo corporativo | **Sí.** Puede abrir y cerrar la bitácora de la que es jefe (sin Gestión, desde 2026-10-17); si la cierra el supervisor, da el último visto bueno (permiso base del módulo). |
 
 Además, por favor:
 
 - **Área(s)** donde se usa (hoy «Envase y agrafado»: confirmar la ortografía, B9).
 - **Turnos** adicionales a Mañana (06–14), Tarde (14–22) y Noche (22–06), si los hay (B6, para después).
 - Si una persona tiene dos roles (por ejemplo supervisor e inspector), indicarlo. En una
-  misma bitácora el supervisor que abre, el inspector y el jefe deben ser **tres personas distintas**.
+  misma bitácora el **inspector** debe ser distinto de quien abre y del jefe; quien abre sí puede
+  ser el jefe de producción de esa bitácora (2026-10-17).
 
 ## 2. Cómo se carga
 
@@ -31,6 +32,13 @@ Además, por favor:
   empresa Farmalógica:
   - supervisores: subprocesos «Bitácora de Proceso» y «Bitácora de Proceso: Gestión»;
   - inspectores y jefes: subproceso «Bitácora de Proceso».
+- **Asignar el rol (2026-10-16, obligatorio):** tener usuario y permiso NO basta. Cada
+  supervisor, inspector y jefe se asigna a su rol en *Bitácora de Proceso → Catálogo →
+  Responsables* (lo hace alguien con Gestión). Los selectores al abrir y al cerrar la
+  bitácora listan **solo** a las personas asignadas, y el servidor rechaza a cualquier otra.
+  El supervisor, además, debe tener el permiso de Gestión. Siembra inicial:
+  `prisma/manual/2026-10-16-bitacora-proceso-responsables-farmalogica.sql` (Judy Alvarez
+  inspectora; Karen Blanco y Tatiana Rico jefes; Amanda Casiano supervisora provisional).
 - **Cuenta compartida «Producción»** (la de la tablet): usuario de SynerLink con el
   subproceso «Bitácora de Proceso». Se crea después, con autorización de Nicolás.
 - **PIN de bitácora:** cada supervisor, inspector y jefe entra **una vez con su propia

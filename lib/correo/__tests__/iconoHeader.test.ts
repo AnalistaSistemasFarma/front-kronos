@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  conNoLeidos,
   CORREO_HREF,
   ICONO_CORREO_TTL_MS,
   ariaIconoCorreo,
@@ -31,6 +32,14 @@ describe('Icono del Correo · regla de visibilidad', () => {
     for (const status of [401, 403, 404, 500]) {
       expect(debeMostrarIconoCorreo(YO, estadoDesdeRespuesta(YO, status, { noLeidos: 3 }, T0)), String(status)).toBe(false);
     }
+    // Sin el módulo el servidor responde 200 { habilitado: false }: tampoco se muestra.
+    expect(debeMostrarIconoCorreo(YO, estadoDesdeRespuesta(YO, 200, { habilitado: false }, T0))).toBe(false);
+  });
+
+  it('sin el módulo se vuelve a preguntar cada 30 min, no cada 3', () => {
+    const e = estadoDesdeRespuesta(YO, 200, { habilitado: false }, T0);
+    expect(estadoVencido(e, YO, T0 + ICONO_CORREO_TTL_MS)).toBe(false);
+    expect(estadoVencido(e, YO, T0 + 30 * 60_000)).toBe(true);
   });
 
   it('mientras no haya respuesta del servidor, o sin sesión, no se muestra', () => {
@@ -96,5 +105,19 @@ describe('Icono del Correo · contador y caché', () => {
     expect(leerEstadoGuardado(roto)).toBeNull();
     expect(() => guardarEstado(roto, e)).not.toThrow();
     expect(leerEstadoGuardado(null)).toBeNull();
+  });
+});
+
+describe('conNoLeidos (aviso optimista del módulo Correo)', () => {
+  const base = { email: 'laura@gsslatam.com', visible: true, noLeidos: 5, en: 1 };
+  it('actualiza el contador de la misma sesión', () => {
+    expect(conNoLeidos(base, 'Laura@gsslatam.com', 2, 10)).toEqual({ ...base, noLeidos: 2, en: 10 });
+  });
+  it('ignora otra sesión, icono oculto o valores inválidos', () => {
+    expect(conNoLeidos(base, 'otro@gsslatam.com', 2, 10)).toBeNull();
+    expect(conNoLeidos({ ...base, visible: false }, 'laura@gsslatam.com', 2, 10)).toBeNull();
+    expect(conNoLeidos(base, 'laura@gsslatam.com', -1, 10)).toBeNull();
+    expect(conNoLeidos(base, 'laura@gsslatam.com', '3', 10)).toBeNull();
+    expect(conNoLeidos(null, 'laura@gsslatam.com', 3, 10)).toBeNull();
   });
 });

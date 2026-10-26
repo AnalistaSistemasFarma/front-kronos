@@ -20,19 +20,22 @@ import { useState, useEffect, useContext, useMemo } from 'react';
 import { useTheme } from './providers';
 import NotificationBell from './NotificationBell';
 import CorreoHeaderIcon from './correo/CorreoHeaderIcon';
+import ProyectosHeaderIcon from './proyectos/ProyectosHeaderIcon';
 import ChatRail from './chat/ChatRail';
 import ChatPulse from './chat/ChatPulse';
-import ValentineWallRoot from './valentine/ValentineWallRoot';
+import dynamic from 'next/dynamic';
+import { isValentineWallSeason } from '../lib/valentine/constants';
+
+// El muro de San Valentín solo existe en febrero: fuera de temporada no se descarga su código
+// (componente, CSS, animaciones) ni se pregunta /api/valentine-wall/access en cada página.
+const ValentineWallRoot = dynamic(() => import('./valentine/ValentineWallRoot'), { ssr: false });
 import {
   AppSectionContext,
   type AppSection,
   type AppSectionContextValue,
 } from '../lib/navigation/AppSectionContext';
 import { DASHBOARD_TAB_URL } from '../lib/dashboard/DashboardTabContext';
-import {
-  PROCESS_HUB_URL,
-  isHubInstantSwapRoute,
-} from '../lib/navigation/AppSectionContext';
+import { PROCESS_HUB_URL, isHubInstantSwapRoute } from '../lib/navigation/AppSectionContext';
 import { useDashboardAdminOptional } from '../lib/dashboard/DashboardAdminContext';
 import { useRequestRoleNavOptional } from '../lib/request-general/SolicitadoNavContext';
 import { buildLogoutCallbackUrl, clearClientSessionArtifacts } from '../lib/auth/logout';
@@ -155,10 +158,16 @@ export default function Header() {
   const goToSection = (section: AppSection) => {
     if (section === 'dashboard' && !isDashboardAdmin) return;
     const url = section === 'dashboard' ? DASHBOARD_TAB_URL.solicitudes : PROCESS_HUB_URL;
+    // Cambio instantáneo (sin navegar) SOLO entre Dashboard y el inicio de Procesos, donde
+    // AppHubShell ya tiene los dos paneles montados. Desde otra pantalla (una solicitud, el
+    // chat…) NO sirve: setActiveSection hace history.replaceState con el estado interno de Next
+    // (__NA) y Next ignora ese cambio, así que la barra decía /process pero la página no
+    // cambiaba ("el botón Procesos queda pegado"). Ahí se navega normal, con entrada en el
+    // historial para que "Atrás" vuelva a la pantalla anterior.
     if (sectionCtx && isHubInstantSwapRoute(pathname)) {
       sectionCtx.setActiveSection(section);
     } else {
-      router.replace(url);
+      router.push(url);
     }
     setIsMobileMenuOpen(false);
   };
@@ -329,7 +338,10 @@ export default function Header() {
               {/* Pulso del chat entre personas (mensajes directos y zumbidos
                   📳 en cualquier pantalla). No pinta nada. */}
               <ChatPulse />
-              <ValentineWallRoot />
+              {isValentineWallSeason() && <ValentineWallRoot />}
+              {/* Proyectos (2026-10-19): solo con el permiso del módulo; contador de
+                  conversaciones con mensajes nuevos y panel con lo último. */}
+              <ProyectosHeaderIcon />
               {/* Acceso directo al Correo (2026-10-15): solo con el permiso del módulo. */}
               <CorreoHeaderIcon />
               <NotificationBell />

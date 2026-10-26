@@ -254,11 +254,13 @@ describe.skipIf(!url)('SGC · Sprint 8 con SQL Server', () => {
     await expect(createInitialDocument(prisma, upload, { idCompany: CO, idProcess: procGC, idDocumentType: typeFO, title: 'Formato sin padre', confidentiality: 'publica', versionNumber: 1, effectiveDate: '2025-01-01', pdf: { bytes: await pdfOf('fo'), fileName: 'f.pdf' } }, actor(E.cal))).rejects.toThrow(/documento padre/);
     const fo = await createInitialDocument(prisma, upload, { idCompany: CO, idProcess: procGC, idDocumentType: typeFO, title: 'Formato con padre', confidentiality: 'publica', versionNumber: 1, effectiveDate: '2025-01-01', idParentDocument: parent.id_document, pdf: { bytes: await pdfOf('fo'), fileName: 'f.pdf' } }, actor(E.cal));
     expect(fo.code).toBe('OLP-GC-02-FO02');
+    // 2026-10-19: la carga con su padre deja la relación creada sola (origen «carga»).
+    expect(await prisma.sgcDocumentRelation.findFirst({ where: { id_company: CO, id_source_document: fo.idDocument, id_target_document: parent.id_document, is_active: true } })).toMatchObject({ relation_type: 'formato', origin: 'carga', status: 'confirmada' });
     const manual = await createInitialDocument(prisma, upload, { idCompany: CO, idProcess: procGC, idDocumentType: typePR, title: 'Procedimiento con código propio', code: 'OLP-GC-09', confidentiality: 'publica', versionNumber: 1, effectiveDate: '2025-01-01', pdf: { bytes: await pdfOf('pr'), fileName: 'p.pdf' } }, actor(E.cal));
     expect((await prisma.sgcDocument.findUniqueOrThrow({ where: { id_document: manual.idDocument } })).sequence_number).toBe(9);
   });
 
-  it('[SGC-REQ-111][SGC-REQ-113] una solicitud nueva de un formato exige el documento padre; el borrador PDF se rechaza y el encabezado no se puede apagar; al aprobar el código hereda el número del padre', async () => {
+  it('[SGC-REQ-111][SGC-REQ-113][SGC-REQ-180][SGC-REQ-182] una solicitud nueva de un formato exige el documento padre; el borrador PDF se rechaza y el encabezado no se puede apagar; al aprobar el código hereda el número del padre', async () => {
     const parent = await prisma.sgcDocument.findFirstOrThrow({ where: { id_company: CO, code: 'OLP-GC-09' } });
     const base = { idCompany: CO, requestType: 'nuevo', subject: 'Formato nuevo del procedimiento', description: 'Formato nuevo para la prueba del Sprint 8.', idProcess: procGC, idDocumentType: typeFO, formValues: { urgencia: 'Normal' } };
     await expect(createRequest(prisma, notifier, await accessOf(E.sol), base, actor(E.sol))).rejects.toThrow(/seleccione el documento padre/);
@@ -266,8 +268,9 @@ describe.skipIf(!url)('SGC · Sprint 8 con SQL Server', () => {
     const { idRequest } = await createRequest(prisma, notifier, await accessOf(E.sol), { ...base, idParentDocument: parent.id_document }, actor(E.sol));
     const stored = await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: idRequest } });
     expect(stored.id_parent_document).toBe(parent.id_document);
-    // Un procedimiento no hereda: el padre se ignora.
-    const pr = await createRequest(prisma, notifier, await accessOf(E.sol), { ...base, idDocumentType: typePR, subject: 'Procedimiento nuevo sin padre', idParentDocument: parent.id_document }, actor(E.sol));
+    // Un procedimiento no hereda y (2026-10-19, documentos padre e hijos) es documento padre: no tiene padre.
+    await expect(createRequest(prisma, notifier, await accessOf(E.sol), { ...base, idDocumentType: typePR, subject: 'Procedimiento nuevo con padre', idParentDocument: parent.id_document }, actor(E.sol))).rejects.toThrow(/no tiene padre/);
+    const pr = await createRequest(prisma, notifier, await accessOf(E.sol), { ...base, idDocumentType: typePR, subject: 'Procedimiento nuevo sin padre' }, actor(E.sol));
     expect((await prisma.sgcRequest.findUniqueOrThrow({ where: { id_request: pr.idRequest } })).id_parent_document).toBeNull();
 
     await setSigners(prisma, notifier, idRequest, { stepKey: 'revision', signers: [E.rev], mode: 'orden' }, actor(E.elab), await accessOf(E.elab));
@@ -302,6 +305,10 @@ describe.skipIf(!url)('SGC · Sprint 8 con SQL Server', () => {
     expect(req.document?.code).toBe('OLP-GC-09-FO01');
     const v = await prisma.sgcDocumentVersion.findUniqueOrThrow({ where: { id_document_version: req.id_document_version! } });
     expect(JSON.parse(v.layout_json!).institutionalHeader).toBe(true);
+    // 2026-10-19 (documentos padre e hijos): la relación padre → hijo se crea SOLA al aprobar el hijo pedido por solicitud.
+    const rel = await prisma.sgcDocumentRelation.findFirstOrThrow({ where: { id_company: CO, id_source_document: req.document!.id_document, id_target_document: parent.id_document, is_active: true } });
+    expect(rel).toMatchObject({ relation_type: 'formato', origin: 'solicitud', status: 'confirmada' });
+    expect(await prisma.sgcAuditLog.count({ where: { id_company: CO, action: 'relacion.automatica', entity_id: String(rel.id_document_relation) } })).toBe(1);
   });
 
   it('[SGC-REQ-111] con el encabezado opcional (configuración revertida) vuelve el comportamiento anterior: se admite el PDF y se puede apagar', async () => {

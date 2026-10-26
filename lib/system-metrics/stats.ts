@@ -67,7 +67,8 @@ export class RouteAccumulator {
   constructor(private readonly random: () => number = Math.random) {}
 
   record(input: RecordInput): void {
-    const mapKey = `${input.direction}\u0000${input.key}`;
+    // También por módulo: una misma ruta del chat (un hilo) puede ser "Chat" o "Asistentes IA".
+    const mapKey = `${input.direction}\u0000${input.key}\u0000${input.module}`;
     let bucket = this.buckets.get(mapKey);
     if (!bucket) {
       if (this.buckets.size >= MAX_KEYS && input.key !== OVERFLOW_KEY) {
@@ -150,7 +151,10 @@ type UserBucket = {
   timed: number;
   samples: number[];
   moduleMs: Map<string, number>;
+  moduleRequests: Map<string, number>;
 };
+
+export type UserModuleSummary = { module: string; requests: number; totalMs: number };
 
 export type UserSummary = {
   email: string;
@@ -163,6 +167,8 @@ export type UserSummary = {
   p95Ms: number;
   /** Módulo en el que más tiempo de servidor gastó en la ventana. */
   topModule: string | null;
+  /** Reparto real por módulo (se guarda en system_metric_user_module). */
+  modules: UserModuleSummary[];
 };
 
 /** Consumo por usuario: peticiones y tiempo de servidor que generó cada persona. */
@@ -178,6 +184,12 @@ export class UserAccumulator {
     durationMs: number | null;
     status: number | null;
   }): void {
+    // Solo cuenta lo que tuvo duración: una petición que espera (long-poll del chat, SSE) no es
+    // consumo, y si se contara bajaría el promedio y el p95 de la persona y la haría figurar
+    // "activa" solo por tener la pestaña abierta.
+    const ms = input.durationMs;
+    if (ms == null || !Number.isFinite(ms) || ms < 0) return;
+
     let user = this.users.get(input.email);
     if (!user) {
       if (this.users.size >= MAX_USERS) return;
@@ -191,6 +203,7 @@ export class UserAccumulator {
         timed: 0,
         samples: [],
         moduleMs: new Map(),
+        moduleRequests: new Map(),
       };
       this.users.set(input.email, user);
     }
@@ -199,12 +212,11 @@ export class UserAccumulator {
     const status = input.status ?? 0;
     if (status === 0 || status >= 500) user.errors += 1;
 
-    const ms = input.durationMs;
-    if (ms == null || !Number.isFinite(ms) || ms < 0) return;
     user.timed += 1;
     user.totalMs += ms;
     if (ms > user.maxMs) user.maxMs = ms;
     user.moduleMs.set(input.module, (user.moduleMs.get(input.module) ?? 0) + ms);
+    user.moduleRequests.set(input.module, (user.moduleRequests.get(input.module) ?? 0) + 1);
     if (user.samples.length < MAX_SAMPLES_PER_KEY) user.samples.push(ms);
     else {
       const slot = Math.floor(this.random() * user.timed);
@@ -237,6 +249,11 @@ export class UserAccumulator {
         maxMs: Math.round(u.maxMs),
         p95Ms: Math.round(percentile(sorted, 95)),
         topModule,
+        modules: Array.from(u.moduleMs, ([module, ms]) => ({
+          module,
+          requests: u.moduleRequests.get(module) ?? 0,
+          totalMs: Math.round(ms),
+        })),
       });
     }
     this.users.clear();
@@ -291,10 +308,15 @@ export class DurationWindow {
   }
 }
 
-/** % de CPU usado entre dos lecturas de `os.cpus()` (todos los núcleos). */
+/**
+ * % de CPU usado entre dos lecturas de `os.cpus()` (todos los núcleos).
+ * En Windows `sys` ya incluye el tiempo de interrupciones y además se reporta `irq` aparte:
+ * sumarlo lo contaría dos veces (≈1–2 puntos de más), por eso se ignora con `ignoreIrq`.
+ */
 export function hostCpuPercent(
   prev: readonly { times: Record<string, number> }[],
-  next: readonly { times: Record<string, number> }[]
+  next: readonly { times: Record<string, number> }[],
+  ignoreIrq = false
 ): number {
   let idle = 0;
   let total = 0;
@@ -303,6 +325,7 @@ export function hostCpuPercent(
     const a = prev[i].times;
     const b = next[i].times;
     for (const k of Object.keys(b)) {
+      if (ignoreIrq && k === 'irq') continue;
       const delta = (b[k] ?? 0) - (a[k] ?? 0);
       total += delta;
       if (k === 'idle') idle += delta;

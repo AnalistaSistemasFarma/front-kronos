@@ -8,6 +8,7 @@ import {
   getAuditTextScope,
 } from '../../../../lib/chat/audit-access';
 import { jsonNoStore, resolveSessionUser, serverError, unauthorized } from '../../../../lib/chat/http';
+import { consumoTurnosPor } from '../../../../lib/chat/turn-usage-sums';
 
 export const dynamic = 'force-dynamic';
 
@@ -192,18 +193,6 @@ export async function GET(request: NextRequest) {
     // Consumo del mismo rango. Se entrega sumado y aparte: no hay forma de
     // amarrar un reporte de consumo a un mensaje concreto (ver la nota de
     // arriba), pero sí de decir cuánto costó cada conversación en el período.
-    const consumoWhere = {
-      ...(desde || hasta
-        ? { created_at: { ...(desde ? { gte: desde } : {}), ...(hasta ? { lte: hasta } : {}) } }
-        : {}),
-      ...(idConversation ? { id_conversation: idConversation } : {}),
-      ...(idAgent ? { id_agent: idAgent } : {}),
-      AND: [
-        ...(alcance.all ? [] : [{ conversation: conversationScopeWhere(alcance) }]),
-        ...(filtroEmpresa ? [{ conversation: filtroEmpresa }] : []),
-      ],
-    };
-
     // Catálogo para el selector de agentes de la pantalla. Va en la misma
     // respuesta y no en un endpoint aparte: es una lista corta y así la
     // pantalla se arma con una sola llamada.
@@ -221,18 +210,15 @@ export async function GET(request: NextRequest) {
       orderBy: { company: 'asc' },
     });
 
-    const consumoPorConversacion = await prisma.chatAgentTurnUsage.groupBy({
-      by: ['id_conversation'],
-      where: consumoWhere,
-      _sum: {
-        total_tokens: true,
-        input_tokens: true,
-        cache_creation_tokens: true,
-        cache_read_tokens: true,
-        output_tokens: true,
-        thinking_tokens: true,
-      },
-      _count: { id: true },
+    // Sumado en SQL con BIGINT (lib/chat/turn-usage-sums.ts): el groupBy de
+    // Prisma suma el INT como INT y desborda cuando el total pasa de 2.147 millones.
+    const consumoPorConversacion = await consumoTurnosPor('id_conversation', {
+      desde,
+      hasta,
+      idConversation,
+      idAgent,
+      alcance,
+      idCompany,
     });
 
     return jsonNoStore({
@@ -288,16 +274,7 @@ export async function GET(request: NextRequest) {
           },
         };
       }),
-      consumo: consumoPorConversacion.map((c) => ({
-        idConversation: c.id_conversation,
-        turnos: c._count.id,
-        totalTokens: c._sum.total_tokens ?? 0,
-        inputTokens: c._sum.input_tokens ?? 0,
-        cacheCreationTokens: c._sum.cache_creation_tokens ?? 0,
-        cacheReadTokens: c._sum.cache_read_tokens ?? 0,
-        outputTokens: c._sum.output_tokens ?? 0,
-        thinkingTokens: c._sum.thinking_tokens ?? 0,
-      })),
+      consumo: consumoPorConversacion.map(({ clave, ...c }) => ({ idConversation: clave, ...c })),
     });
   } catch (error) {
     return serverError('GET /api/chat/auditoria', error);

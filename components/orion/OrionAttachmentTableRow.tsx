@@ -536,7 +536,8 @@ export default function OrionAttachmentTableRow({
                 />
               ) : null}
 
-              {d.hasOrionDoc && d.signers.length > 0 ? (
+              {/* Las URL de firma solo las comparte quien maneja el flujo, nunca el firmante. */}
+              {d.hasOrionDoc && d.signers.length > 0 && d.permissions.canManageWorkflow ? (
                 <ActionLink
                   icon={<IconUsers size={15} stroke={1.6} />}
                   label='Invitar / URL de firma'

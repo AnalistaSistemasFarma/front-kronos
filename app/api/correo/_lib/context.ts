@@ -5,6 +5,7 @@ import { prisma } from '../../../../lib/prisma';
 import { getCorreoAccess, type AccesoCorreo } from '../../../../lib/correo/db';
 import { isCorreoError } from '../../../../lib/correo/errors';
 import { correoDeps } from '../../../../lib/correo/runtime';
+import { agenteCorreoHabilitado } from '../../../../lib/correo/config';
 import type { CorreoDeps } from '../../../../lib/correo/service';
 import { SgcRateLimiter, type SgcRateRule } from '../../../../lib/sgc/rateLimit';
 import { readClientOrigin } from '../../../../lib/sgc/clientOrigin';
@@ -28,6 +29,10 @@ export const CORREO_RATE_RULES = {
   adjunto: { max: 60, windowMs: 60_000 },
   envio: { max: 10, windowMs: 60_000 },
   creacion: { max: 120, windowMs: 10 * 60_000 },
+  /** Leído / no leído (abrir un hilo lo marca; «Marcar todo» va por lotes): cuota propia, por minuto. */
+  marcado: { max: 120, windowMs: 60_000 },
+  /** Eliminar y «Deshacer» (hasta 100 correos por petición): cuota propia, por minuto. */
+  eliminar: { max: 60, windowMs: 60_000 },
 } as const satisfies Record<string, SgcRateRule>;
 export type CorreoRateBucket = keyof typeof CORREO_RATE_RULES;
 
@@ -73,4 +78,13 @@ export function empresaParam(url: string): number | null {
   const raw = new URL(url).searchParams.get('empresa');
   const n = Number(raw);
   return raw && Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * «Consultar a un agente» apagado (CORREO_AGENTE_HABILITADO distinto de «true», el valor por defecto):
+ * 403 para /api/correo/agente/**. Se evalúa DESPUÉS de la sesión, así que sin sesión sigue siendo 401.
+ */
+export function agenteApagado(): NextResponse | null {
+  if (agenteCorreoHabilitado()) return null;
+  return jsonNoStore({ error: '«Consultar a un agente» no está habilitado en este ambiente.' }, 403);
 }

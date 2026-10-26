@@ -17,9 +17,9 @@ import {
   ThemeIcon,
   LoadingOverlay,
   Box,
+  Button,
   Table,
   ScrollArea,
-  Button,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import {
@@ -43,6 +43,8 @@ import { ORION_SIGNATURE_FIELD_TYPE } from '../../../../lib/orion/fieldType';
 import {
   isFirmaAuthorizationItem,
   isOrionReviewResolution,
+  parseOrionFileIdFromAuthResolution,
+  parseOrionFileNameFromResolution,
   parseOrionReviewFileId,
   parseOrionReviewFileName,
 } from '../../../../lib/orion/signerAuthMarkers';
@@ -295,6 +297,9 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
   }, [opened, idReqGen, hideSensitiveFirmaContext]);
 
   const subject = detail?.subject_request || request?.subject || '';
+  const firmaDocName = isFirmaAuth
+    ? parseOrionFileNameFromResolution(request?.resolution)
+    : null;
   const isReview = isOrionReviewResolution(request?.resolution);
   const reviewDocName = isReview ? parseOrionReviewFileName(request?.resolution) : null;
   const reviewFileId = isReview ? parseOrionReviewFileId(request?.resolution) : null;
@@ -302,6 +307,16 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
     reviewFileId && idReqGen
       ? `/api/requests-general/attachment-file?requestId=${idReqGen}&fileId=${encodeURIComponent(reviewFileId)}`
       : null;
+  // Firma pendiente: el firmante debe poder ver el documento que va a autorizar (solo ese
+  // archivo; los demás adjuntos siguen ocultos). signed-file entrega la última versión con
+  // las firmas previas o, si aún no hay firmas, redirige al PDF original de la solicitud.
+  const firmaFileId = isFirmaAuth ? parseOrionFileIdFromAuthResolution(request?.resolution) : null;
+  const firmaPdfUrl =
+    firmaFileId && idReqGen
+      ? `/api/integrations/orion/signed-file?requestId=${idReqGen}&fileId=${encodeURIComponent(firmaFileId)}`
+      : null;
+  const previewPdfUrl = reviewPdfUrl ?? firmaPdfUrl;
+  const previewDocName = reviewPdfUrl ? reviewDocName : firmaDocName;
 
   return (
     <Modal
@@ -361,13 +376,13 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
               ) : null}
             </div>
 
-            {reviewPdfUrl ? (
+            {previewPdfUrl ? (
               <Card withBorder radius='md' p={0} style={{ overflow: 'hidden' }}>
                 <Group justify='space-between' px='sm' py={6} wrap='nowrap'>
                   <Group gap={6} wrap='nowrap' style={{ minWidth: 0 }}>
                     <IconFileDescription size={16} className='text-gray-500' />
                     <Text size='sm' fw={600} truncate>
-                      {reviewDocName || 'Documento'}
+                      {previewDocName || 'Documento'}
                     </Text>
                   </Group>
                   <Button
@@ -375,7 +390,7 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                     variant='subtle'
                     leftSection={<IconExternalLink size={12} />}
                     component='a'
-                    href={reviewPdfUrl}
+                    href={previewPdfUrl}
                     target='_blank'
                     rel='noopener noreferrer'
                   >
@@ -383,8 +398,8 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                   </Button>
                 </Group>
                 <iframe
-                  title={`Vista previa de ${reviewDocName || 'documento'}`}
-                  src={reviewPdfUrl}
+                  title={`Vista previa de ${previewDocName || 'documento'}`}
+                  src={previewPdfUrl}
                   style={{
                     display: 'block',
                     width: '100%',
@@ -648,3 +663,4 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
     </Modal>
   );
 }
+

@@ -63,6 +63,9 @@ export const OT_LIMITS = {
   lote: 50,
   area: 100,
   observacion: 500,
+  /** Texto libre de una actividad de ese tipo (2026-10-17): va en ot_registro.observacion (NVARCHAR(500)). */
+  textoLibre: 500,
+  textoLibreMin: 3,
   observacionCierre: 1000,
   actividadNombre: 120,
   maxOperarios: 50,
@@ -218,6 +221,24 @@ export const OT_FIRMA_SIGNIFICADO: Record<OtFirmaRol, string> = {
   JEFE_PROD: 'Visto bueno',
 };
 
+/**
+ * Significado del CIERRE cuando lo hace el jefe de producción designado (R3, 2026-10-17).
+ * La fila sigue en el «puesto» del cierre (`ot_firma.rol = 'SUPERVISOR'`, único por
+ * bitácora) para no tocar el esquema; el significado deja la traza de con qué rol se cerró.
+ * Cabe en ot_firma.significado (NVARCHAR(20)).
+ */
+export const OT_SIGNIFICADO_CIERRE_JEFE = 'Cerró (jefe)';
+
+/** Textos de transparencia (Nicolás, 2026-10-17: «que sea lo más transparente posible»). */
+export const OT_NOTA_CIERRE_JEFE = 'Cerró la bitácora como jefe de producción: ese cierre cuenta como su visto bueno de jefe';
+export const OT_SIN_VISTO_OPERARIO = 'Sin visto bueno del operario';
+
+/** Rol con el que se abre o se cierra, como se muestra en pantalla y en el informe. */
+export const OT_ROL_APERTURA_CIERRE: Record<'SUPERVISOR' | 'JEFE_PROD', string> = {
+  SUPERVISOR: 'Supervisor (permiso de Gestión)',
+  JEFE_PROD: 'Jefe de producción',
+};
+
 /** Significado de la verificación del modelo anterior (#606/#617): era del jefe de producción. */
 export const OT_SIGNIFICADO_VERIFICO_LEGADO = 'Verificó';
 
@@ -236,7 +257,7 @@ export const OT_JEFE_PRODUCCION_LABEL = 'Jefe de producción';
 export const OT_CONFIRMACION_TEXTO: Record<OtFirmaRol, string> = {
   OPERARIO: 'Confirmo, como operario del turno, que la cronología de esta bitácora refleja las intervenciones realizadas.',
   SUPERVISOR: 'Confirmo que revisé los registros de este turno y cierro la bitácora («Cerró»). Después ya no admite registros.',
-  INSPECTOR: 'Confirmo, como inspector, que revisé la bitácora cerrada por el supervisor.',
+  INSPECTOR: 'Confirmo, como inspector, que revisé la bitácora cerrada.',
   JEFE_PROD: 'Confirmo, como jefe de producción, que revisé la bitácora y doy mi visto bueno.',
 };
 
@@ -259,3 +280,24 @@ export const OT_METODO_LABEL: Record<string, string> = {
 /** PIN personal de la bitácora (B3). */
 export const OT_PIN_LONGITUD = 4;
 export const OT_PIN_MAX_FALLOS = 5;
+
+/**
+ * RESPONSABLES por empresa (2026-10-16, Nicolás: «desde la app me deja seleccionar más de
+ * los que son»). Cada selector de la bitácora lista SOLO a las personas asignadas a ese
+ * rol en la empresa (tabla `ot_responsable`, Catálogo → Responsables): ya no sale todo
+ * usuario de la empresa ni todo usuario con Gestión. El servidor rechaza a quien no
+ * tenga el rol. El operario no está aquí: sale del maestro `ot_operador`.
+ */
+export const OT_RESPONSABLE_ROLES = ['SUPERVISOR', 'INSPECTOR', 'JEFE_PROD'] as const;
+export type OtResponsableRol = (typeof OT_RESPONSABLE_ROLES)[number];
+
+export function isOtResponsableRol(v: unknown): v is OtResponsableRol {
+  return typeof v === 'string' && (OT_RESPONSABLE_ROLES as readonly string[]).includes(v);
+}
+
+/** Qué hace cada responsable (texto de ayuda del catálogo). */
+export const OT_RESPONSABLE_AYUDA: Record<OtResponsableRol, string> = {
+  SUPERVISOR: 'Abre y cierra la bitácora («Cerró»). Debe tener el permiso «Bitácora de Proceso: Gestión».',
+  INSPECTOR: 'Da su visto bueno después del cierre (del supervisor o del jefe de producción). No abre ni cierra.',
+  JEFE_PROD: 'Puede abrir y cerrar la bitácora de la que es jefe; si la cierra otra persona, da el último visto bueno, después del inspector.',
+};

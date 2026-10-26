@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { useTicketsSub } from '../../lib/dashboard/TicketsSubContext';
 import TicketsAnalyticsView from './TicketsAnalyticsView';
 import TicketsCategoryCompanyView from '@/components/dashboard/TicketsCategoryCompanyView';
@@ -17,6 +17,9 @@ const panelClass = (active: boolean) =>
 
 function TicketsPanels() {
   const { subView } = useTicketsSub();
+  // Cada sub-vista se monta al abrirla por primera vez (antes todas, ocultas, con sus gráficas).
+  const [visited, setVisited] = useState(() => new Set([subView]));
+  if (!visited.has(subView)) setVisited(new Set(visited).add(subView));
 
   useEffect(() => {
     requestAnimationFrame(() => {
@@ -27,22 +30,22 @@ function TicketsPanels() {
   return (
     <div className='dashboard-panels'>
       <div className={panelClass(subView === 'operativo')} aria-hidden={subView !== 'operativo'}>
-        <MemoOperativo />
+        {visited.has('operativo') ? <MemoOperativo /> : null}
       </div>
       <div className={panelClass(subView === 'categorias')} aria-hidden={subView !== 'categorias'}>
-        <MemoCategorias />
+        {visited.has('categorias') ? <MemoCategorias /> : null}
       </div>
       <div
         className={panelClass(subView === 'subcategorias')}
         aria-hidden={subView !== 'subcategorias'}
       >
-        <MemoSubcategorias />
+        {visited.has('subcategorias') ? <MemoSubcategorias /> : null}
       </div>
       <div
         className={panelClass(subView === 'actividades')}
         aria-hidden={subView !== 'actividades'}
       >
-        <MemoActividades />
+        {visited.has('actividades') ? <MemoActividades /> : null}
       </div>
     </div>
   );

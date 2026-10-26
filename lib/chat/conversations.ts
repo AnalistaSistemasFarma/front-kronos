@@ -20,6 +20,7 @@ import { getChatAccess } from './access';
 import { visiblePeopleConversationIds } from './people';
 import { toPreview } from './constants';
 import { parseAgentTasks, type AgentTaskDto } from './status-tasks';
+import type { ChatMediaDto, ChatReactionDto } from './media-rules';
 
 /**
  * Quién escribió un mensaje.
@@ -63,6 +64,10 @@ export interface ChatMessagePayload {
   replyTo: ChatReplyToPayload | null;
   /** Evento de un mensaje de sistema ('nudge' = zumbido), o null. */
   eventType: string | null;
+  /** Reacciones con emoji (2026-10-20). Solo viaja si hay alguna (lib/chat/message-extras.ts). */
+  reactions?: ChatReactionDto[];
+  /** GIF o sticker (2026-10-20). Solo viaja en esos mensajes. */
+  media?: ChatMediaDto;
 }
 
 /**
@@ -591,22 +596,24 @@ export async function listUserConversations(
     });
     const marcaPorGrupo = new Map(marcas.map((m) => [m.id_conversation, m.last_read_message_id ?? 0]));
 
-    const conteos = await Promise.all(
-      grupos.map(async (g) => {
-        const desde = marcaPorGrupo.get(g.id) ?? 0;
-        const n = await prisma.chatMessage.count({
-          where: {
-            id_conversation: g.id,
-            id: { gt: desde },
-            // Lo que yo mismo escribí nunca es un no leído.
-            NOT: { id_user_author: userId },
-            role: { not: 'system' },
-          },
-        });
-        return [g.id, n] as const;
-      })
-    );
-    for (const [id, n] of conteos) noLeidos.set(id, n);
+    // Un solo groupBy (antes un count por grupo: N+1 en cada sondeo de la bandeja). Cada
+    // conversación lleva su propia marca de agua dentro del OR. En tandas para no pasar
+    // el tope de 2100 parámetros de SQL Server.
+    const TANDA = 400;
+    for (let i = 0; i < grupos.length; i += TANDA) {
+      const tanda = grupos.slice(i, i + TANDA);
+      const conteos = await prisma.chatMessage.groupBy({
+        by: ['id_conversation'],
+        where: {
+          OR: tanda.map((g) => ({ id_conversation: g.id, id: { gt: marcaPorGrupo.get(g.id) ?? 0 } })),
+          // Lo que yo mismo escribí nunca es un no leído.
+          NOT: { id_user_author: userId },
+          role: { not: 'system' },
+        },
+        _count: { _all: true },
+      });
+      for (const c of conteos) noLeidos.set(c.id_conversation, c._count._all);
+    }
   }
 
   return rows.map((row) => serializeConversation(row, noLeidos.get(row.id) ?? 0, userId));

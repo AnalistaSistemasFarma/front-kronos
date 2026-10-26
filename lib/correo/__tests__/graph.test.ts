@@ -105,27 +105,58 @@ describe('Correo · GraphMailProvider (siempre el buzón de la sesión)', () => 
     expect(calls[1].url).toContain('$skip=25');
   });
 
-  it('hilo: filtra por conversationId, ordena del más antiguo y pasa las imágenes cid a data:', async () => {
+  it('hilo: UNA consulta (filtro + orden + adjuntos expandidos sin bytes); imágenes cid solo de los desplegados', async () => {
     const { f, calls } = fakeFetch((url) => {
       if (url.includes('/attachments')) {
-        return { body: { value: [
-          { id: 'ATT1AAAAAA', name: 'logo.png', contentType: 'image/png', size: 3, isInline: true, contentId: '<img1>', contentBytes: 'AAAA' },
-          { id: 'ATT2AAAAAA', name: 'a.pdf', contentType: 'application/pdf', size: 10, isInline: false, contentBytes: 'BBBB' },
-        ] } };
+        return { body: { value: [{ id: 'ATT1AAAAAA', name: 'logo.png', contentType: 'image/png', size: 3, isInline: true, contentId: '<img1>', contentBytes: 'AAAA' }] } };
       }
+      const logo = { id: 'ATT1AAAAAA', name: 'logo.png', contentType: 'image/png', size: 3, isInline: true, contentId: '<img1>' };
+      // Graph devuelve del más reciente al más antiguo ($orderby desc).
       return { body: { value: [
-        { id: 'M2AAAAAAAA', conversationId: 'C1AAAAAAAA', subject: 'RE', receivedDateTime: '2026-10-15T10:00:00Z', body: { contentType: 'text', content: 'b<c' } },
-        { id: 'M1AAAAAAAA', conversationId: 'C1AAAAAAAA', subject: 'Hola', receivedDateTime: '2026-10-14T10:00:00Z', hasAttachments: true, body: { contentType: 'html', content: '<img src="cid:img1">' } },
+        { id: 'M3AAAAAAAA', conversationId: 'C1AAAAAAAA', subject: 'RE', receivedDateTime: '2026-10-16T10:00:00Z', isRead: true, body: { contentType: 'html', content: '<img src="cid:img1">' }, attachments: [logo] },
+        { id: 'M2AAAAAAAA', conversationId: 'C1AAAAAAAA', subject: 'RE', receivedDateTime: '2026-10-15T10:00:00Z', isRead: true, body: { contentType: 'text', content: 'b<c' }, attachments: [] },
+        { id: 'M1AAAAAAAA', conversationId: 'C1AAAAAAAA', subject: 'Hola', receivedDateTime: '2026-10-14T10:00:00Z', isRead: true, hasAttachments: true, body: { contentType: 'html', content: '<img src="cid:img1">' },
+          attachments: [logo, { id: 'ATT2AAAAAA', name: 'a.pdf', contentType: 'application/pdf', size: 10, isInline: false }] },
       ] } };
     });
-    const hilo = await new GraphMailProvider(MB, tok, f).hilo('C1AAAAAAAA');
-    expect(hilo.map((m) => m.id)).toEqual(['M1AAAAAAAA', 'M2AAAAAAAA']);
-    expect(hilo[0].imagenesCid).toEqual({ img1: 'data:image/png;base64,AAAA' });
-    expect(hilo[0].adjuntos.map((a) => a.id)).toEqual(['ATT2AAAAAA']);
-    expect(hilo[1].html).toBe('<p>b&lt;c</p>');
-    expect(new URL(calls[0].url).searchParams.get('$filter')).toBe("conversationId eq 'C1AAAAAAAA'");
+    const hilo = await new GraphMailProvider(MB, tok, f).hilo('C1AAAAAAAA', { imagenes: 'desplegados' });
+    expect(hilo.map((m) => m.id)).toEqual(['M1AAAAAAAA', 'M2AAAAAAAA', 'M3AAAAAAAA']);
+    // Antes: 1 consulta + 1 por mensaje con adjuntos (con los bytes de TODOS). Ahora: 1 + 1 (solo el último, desplegado).
+    expect(calls).toHaveLength(2);
+    const u = new URL(calls[0].url);
+    expect(u.searchParams.get('$filter')).toBe("receivedDateTime ge 1900-01-01T00:00:00Z and conversationId eq 'C1AAAAAAAA'");
+    expect(u.searchParams.get('$orderby')).toBe('receivedDateTime desc');
+    expect(u.searchParams.get('$expand')).toBe('attachments($select=id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId)');
+    expect(u.searchParams.get('$top')).toBe('50');
     expect((calls[0].init.headers as Record<string, string>).Prefer).toContain('html');
+    expect(new URL(calls[1].url).pathname).toBe(`/v1.0/users/laura%40gsslatam.com/messages/M3AAAAAAAA/attachments`);
+    expect(new URL(calls[1].url).searchParams.get('$filter')).toBe('isInline eq true');
+    expect(hilo[2]).toMatchObject({ imagenesCid: { img1: 'data:image/png;base64,AAAA' }, imagenesPendientes: false });
+    // El más antiguo (plegado) queda pendiente: sus imágenes se piden al desplegarlo.
+    expect(hilo[0]).toMatchObject({ imagenesPendientes: true });
+    expect(hilo[0].imagenesCid).toBeUndefined();
+    expect(hilo[0].adjuntos.map((a) => a.id)).toEqual(['ATT2AAAAAA']);
+    expect(hilo[1]).toMatchObject({ html: '<p>b&lt;c</p>', imagenesPendientes: false });
     expect(calls.every((c) => c.url.startsWith(`${BASE}/`))).toBe(true);
+  });
+
+  it('hilo sin imágenes (marcar, vincular, acuse): solo la consulta del hilo', async () => {
+    const { f, calls } = fakeFetch(() => ({ body: { value: [{ id: 'M1AAAAAAAA', isRead: false, receivedDateTime: '2026-10-14T10:00:00Z', body: { contentType: 'html', content: '<img src="cid:x">' }, attachments: [{ id: 'A1AAAAAAAA', contentType: 'image/png', isInline: true, contentId: 'x' }] }] } }));
+    const hilo = await new GraphMailProvider(MB, tok, f).hilo('C1AAAAAAAA');
+    expect(calls).toHaveLength(1);
+    expect(hilo[0].imagenesPendientes).toBe(true);
+  });
+
+  it('hilo: un 429 de Graph se reintenta solo (respetando Retry-After) y la persona recibe el hilo', async () => {
+    let n = 0;
+    const esperas: number[] = [];
+    const { f, calls } = fakeFetch(() => (++n === 1 ? { status: 429, body: {}, headers: { 'retry-after': '2' } } : { body: { value: [{ id: 'M1AAAAAAAA', receivedDateTime: '2026-10-14T10:00:00Z' }] } }));
+    const p = new GraphMailProvider(MB, tok, f, { dormir: async (ms) => void esperas.push(ms) });
+    const hilo = await p.hilo('C1AAAAAAAA');
+    expect(hilo).toHaveLength(1);
+    expect(calls).toHaveLength(2);
+    expect(esperas[0]).toBeGreaterThanOrEqual(2000);
+    expect(esperas[0]).toBeLessThan(2300);
   });
 
   it('responder sin adjuntos usa /reply o /replyAll; con adjuntos: borrador → adjuntos → enviar', async () => {
@@ -134,6 +165,10 @@ describe('Correo · GraphMailProvider (siempre el buzón de la sesión)', () => 
     await p.responder(ID, { texto: 'ok <b>', todos: false, adjuntos: [] });
     expect(calls[0].url).toBe(`${BASE}/messages/${encodeURIComponent(ID)}/reply`);
     expect(JSON.parse(String(calls[0].init.body))).toEqual({ comment: 'ok &lt;b&gt;' });
+    calls.length = 0;
+    // Con el HTML ya saneado del Markdown, ese es el comentario (mismo flujo de envío).
+    await p.responder(ID, { texto: 'ok negrita', comentarioHtml: '<p>ok <strong>negrita</strong></p>', todos: false, adjuntos: [] });
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ comment: '<p>ok <strong>negrita</strong></p>' });
     calls.length = 0;
     await p.responder(ID, { texto: 'va', todos: true, adjuntos: [{ nombre: 'a.txt', tipo: 'text/plain', bytes: Buffer.from('hola') }] });
     expect(calls.map((c) => c.url.replace(`${BASE}/messages/`, ''))).toEqual([
@@ -201,12 +236,15 @@ describe('Correo · GraphMailProvider (siempre el buzón de la sesión)', () => 
       [429, { status: 429 }],
       [500, { status: 502 }],
     ];
+    const dormir = async () => undefined;
     for (const [status, esperado] of casos) {
       const { f } = fakeFetch(() => ({ status, body: {}, headers: { 'retry-after': '7' } }));
-      await expect(new GraphMailProvider(MB, tok, f).carpetas()).rejects.toMatchObject(esperado);
+      await expect(new GraphMailProvider(MB, tok, f, { dormir }).carpetas()).rejects.toMatchObject(esperado);
     }
-    const { f } = fakeFetch(() => ({ status: 429, body: {}, headers: { 'retry-after': '7' } }));
-    await expect(new GraphMailProvider(MB, tok, f).carpetas()).rejects.toThrow(/7 s/);
+    // 429 persistente: 1 intento + 3 reintentos y luego el mensaje con la espera sugerida.
+    const { f, calls } = fakeFetch(() => ({ status: 429, body: {}, headers: { 'retry-after': '7' } }));
+    await expect(new GraphMailProvider(MB, tok, f, { dormir, politica: { reintentos: 3, baseMs: 1, maxEsperaMs: 10_000, presupuestoMs: 60_000 } }).carpetas()).rejects.toThrow(/7 s/);
+    expect(calls).toHaveLength(4);
   });
 
   it('perfil: el buzón de la sesión, sin llamar a Graph', async () => {

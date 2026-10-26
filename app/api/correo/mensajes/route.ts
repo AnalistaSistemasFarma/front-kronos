@@ -1,4 +1,4 @@
-import { vinculosDeHilos } from '../../../../lib/correo/db';
+import { proyectosDeHilos, vinculosDeHilos } from '../../../../lib/correo/db';
 import { auditarLectura, proveedorDe } from '../../../../lib/correo/service';
 import { errorResponse, getCorreoContext, jsonNoStore } from '../_lib/context';
 
@@ -6,7 +6,8 @@ export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/correo/mensajes?carpeta&desde&hasta&de&noLeidos=1&conAdjuntos=1&buscar&cursor
- * Una página de la bandeja PROPIA (25), con la solicitud vinculada de cada hilo.
+ * Una página de la bandeja PROPIA (25), con la solicitud vinculada de cada hilo y los proyectos del chat donde
+ * se vinculó (para avisar antes de eliminar un correo ligado).
  */
 export async function GET(request: Request) {
   try {
@@ -34,9 +35,13 @@ export async function GET(request: Request) {
       { accion: 'LEER_BANDEJA', detalle: `${pagina.mensajes.length} correo(s)${q.get('cursor') ? ', página siguiente' : ''}${filtros ? `, filtros: ${filtros}` : ''}` },
       ctx.ip
     );
-    const vinculos = await vinculosDeHilos(ctx.deps.db, ctx.acceso.idUser, pagina.mensajes.map((m) => m.conversationId));
+    const hilos = pagina.mensajes.map((m) => m.conversationId);
+    const [vinculos, proyectos] = await Promise.all([
+      vinculosDeHilos(ctx.deps.db, ctx.acceso.idUser, hilos),
+      proyectosDeHilos(ctx.deps.db, ctx.acceso.email, hilos),
+    ]);
     return jsonNoStore({
-      mensajes: pagina.mensajes.map((m) => ({ ...m, solicitud: vinculos.get(m.conversationId)?.idRequest ?? null })),
+      mensajes: pagina.mensajes.map((m) => ({ ...m, solicitud: vinculos.get(m.conversationId)?.idRequest ?? null, proyectos: proyectos.get(m.conversationId) ?? [] })),
       siguiente: pagina.siguiente,
     });
   } catch (error) {

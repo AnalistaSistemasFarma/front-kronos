@@ -4,7 +4,7 @@ import { errorResponse, getOtRequestContext, jsonNoStore, parseCompanyParam, req
 
 export const dynamic = 'force-dynamic';
 
-/** GET /api/bitacora-proceso/usuarios?company=1 — candidatos a operario (usuarios activos de la empresa; solo Gestión). */
+/** GET /api/bitacora-proceso/usuarios?company=1 — usuarios activos de la empresa (solo Gestión). Ya NO alimenta los selectores de la bitácora: esos usan /responsables?rol=. */
 export async function GET(request: Request) {
   try {
     const ctx = await getOtRequestContext(request);

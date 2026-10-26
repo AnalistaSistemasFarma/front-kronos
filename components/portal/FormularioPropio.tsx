@@ -42,8 +42,11 @@ import { leerJson } from './PortalContenido';
 import { ConstructorFormulario } from './ConstructorFormulario';
 import { COLOR_ESTADO, varColorEstado } from '@/lib/theme/estados';
 import {
+  ESCALA_MAX_POR_DEFECTO,
+  ESCALA_MIN_POR_DEFECTO,
   OPCIONES_SI_NO,
   MENSAJE_AUTORIZACION,
+  PREFIJO_OTRAS,
   calificar,
   esEvaluacion,
   textoDeRespuesta,
@@ -131,6 +134,7 @@ const fechaLarga = (v: string) =>
 
 export function VisorFormulario({
   materialId,
+  rutaApi,
   titulo,
   previa,
   onCerrar,
@@ -138,6 +142,11 @@ export function VisorFormulario({
 }: {
   /** Material FORM a responder. */
   materialId?: number;
+  /**
+   * Formulario INDEPENDIENTE (no de un curso; p. ej. los de SST): la ruta de la API que entrega la definición (GET) y recibe el envío
+   * (POST). Se puede enviar más de una vez y no completa ningún material.
+   */
+  rutaApi?: string;
   titulo: string;
   /** Vista previa del formador: la definición directamente, sin guardar nada. */
   previa?: DefinicionFormulario;
@@ -158,11 +167,11 @@ export function VisorFormulario({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (previa || !materialId) return;
+    if (previa || (!materialId && !rutaApi)) return;
     let vivo = true;
     void (async () => {
       try {
-        const res = await fetch(`/api/portal/materials/${materialId}/formulario`, { cache: 'no-store' });
+        const res = await fetch(rutaApi ?? `/api/portal/materials/${materialId}/formulario`, { cache: 'no-store' });
         const data = await leerJson(res);
         if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo abrir el formulario.'));
         if (vivo) setDatos(data as unknown as DatosFormulario);
@@ -173,7 +182,7 @@ export function VisorFormulario({
     return () => {
       vivo = false;
     };
-  }, [materialId, previa]);
+  }, [materialId, rutaApi, previa]);
 
   useEffect(() => {
     const alTeclear = (e: KeyboardEvent) => {
@@ -221,6 +230,7 @@ export function VisorFormulario({
             key={datos.formulario.versionId}
             datos={datos}
             previa={!!previa}
+            rutaEnvio={rutaApi}
             onCerrar={onCerrar}
             onEnviado={onEnviado}
           />
@@ -233,11 +243,14 @@ export function VisorFormulario({
 function CuerpoFormulario({
   datos,
   previa,
+  rutaEnvio,
   onCerrar,
   onEnviado,
 }: {
   datos: DatosFormulario;
   previa: boolean;
+  /** Formulario independiente: a dónde se envía (ver `VisorFormulario`). */
+  rutaEnvio?: string;
   onCerrar: () => void;
   onEnviado?: () => Promise<void> | void;
 }) {
@@ -327,7 +340,7 @@ function CuerpoFormulario({
     }
     setEnviando(true);
     try {
-      const res = await fetch(`/api/portal/materials/${datos.material.id}/formulario`, {
+      const res = await fetch(rutaEnvio ?? `/api/portal/materials/${datos.material.id}/formulario`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ versionId: datos.formulario.versionId, autorizaDatos: autoriza, respuestas: valores }),
@@ -389,7 +402,9 @@ function CuerpoFormulario({
             <Text ta='center' c='dimmed' maw={520}>
               {nota
                 ? `Superó la nota mínima de ${formatoNota(nota.notaMinima)}. Sus respuestas quedaron guardadas y el material quedó completado.`
-                : 'Gracias. Sus respuestas quedaron guardadas y el material quedó completado.'}
+                : rutaEnvio
+                  ? 'Gracias. Sus respuestas quedaron guardadas. Solo las ve el equipo de Seguridad y Salud en el Trabajo.'
+                  : 'Gracias. Sus respuestas quedaron guardadas y el material quedó completado.'}
             </Text>
           </>
         ) : (
@@ -403,7 +418,7 @@ function CuerpoFormulario({
             </Text>
           </>
         )}
-        <Button onClick={onCerrar}>Volver al curso</Button>
+        <Button onClick={onCerrar}>{rutaEnvio ? 'Cerrar' : 'Volver al curso'}</Button>
       </Stack>
     );
   }
@@ -561,6 +576,28 @@ function CampoPregunta({
   const opciones = p.tipo === 'si_no' ? [...OPCIONES_SI_NO] : (p.opciones ?? []);
   const esOtra = typeof valor === 'object' && valor !== null && !Array.isArray(valor);
   const marcadas = Array.isArray(valor) ? valor : [];
+  // Selección múltiple con «Otras» (formularios SST, 2026-10-19): el texto libre viaja como UN elemento `Otras: <texto>`.
+  const esElementoOtras = (x: string) => x.startsWith(PREFIJO_OTRAS);
+  const marcadasLista = marcadas.filter((x) => !esElementoOtras(x));
+  const textoOtras = (marcadas.find(esElementoOtras) ?? '').slice(PREFIJO_OTRAS.length);
+  const [otrasActiva, setOtrasActiva] = useState(() => marcadas.some(esElementoOtras));
+  // La casilla «Otras» es parte del GRUPO (Mantine: una casilla dentro de `Checkbox.Group` toma su estado del grupo e ignora su propio
+  // `checked`/`onChange`; por eso la primera versión no respondía al clic). Se identifica con un valor que ninguna opción puede tener.
+  const VALOR_OTRAS_MULTIPLE = '\u0000otras';
+  const ponerMultiple = (lista: string[], otras: string) => onCambio(otras.trim() ? [...lista, `${PREFIJO_OTRAS}${otras}`] : lista);
+  // Imagen que ilustra la pregunta (solo de /portal-th/; la definición ya lo valida). Va debajo del enunciado.
+  const imagen = p.imagen ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      className='portal-th__formulario-imagen'
+      src={p.imagen.src}
+      alt={p.imagen.alt}
+      data-testid={`imagen-${p.id}`}
+      style={{ display: 'block', width: '100%', maxWidth: 560, height: 'auto', margin: '8px 0', border: '1px solid var(--mantine-color-default-border)', borderRadius: 8, background: '#fff' }}
+    />
+  ) : null;
+  const minEscala = p.escala?.min ?? ESCALA_MIN_POR_DEFECTO;
+  const maxEscala = p.escala?.max ?? ESCALA_MAX_POR_DEFECTO;
   // Mismo patrón de campo que el resto de SynerLink: etiqueta arriba, asterisco
   // rojo si es obligatoria, ayuda como descripción y error en rojo debajo.
   // `size='md'` en los campos de texto (16 px): con menos, Safari en iPhone
@@ -574,16 +611,68 @@ function CampoPregunta({
 
   return (
     <Box id={`fp-${p.id}`} className={`portal-th__formulario-pregunta${error ? ' portal-th__formulario-pregunta--error' : ''}`}>
+      {/* En los tipos de texto la imagen va arriba del campo; en los de opciones va dentro del grupo, bajo el enunciado. */}
+      {(p.tipo === 'texto' || p.tipo === 'texto_largo' || p.tipo === 'numero' || p.tipo === 'fecha') && imagen}
       {p.tipo === 'seleccion_multiple' ? (
-        <Checkbox.Group {...comun} size='md' value={marcadas} onChange={(v) => onCambio(v)} data-testid={`multiple-${p.id}`}>
+        <Checkbox.Group
+          {...comun}
+          size='md'
+          value={otrasActiva ? [...marcadasLista, VALOR_OTRAS_MULTIPLE] : marcadasLista}
+          onChange={(v) => {
+            const conOtras = v.includes(VALOR_OTRAS_MULTIPLE);
+            setOtrasActiva(conOtras);
+            ponerMultiple(
+              v.filter((x) => x !== VALOR_OTRAS_MULTIPLE),
+              conOtras ? textoOtras : ''
+            );
+          }}
+          data-testid={`multiple-${p.id}`}
+        >
+          {imagen}
           <Stack gap='xs' mt='xs'>
             {opciones.map((o) => (
               <Checkbox key={o} value={o} label={o} size='sm' />
             ))}
+            {p.permiteOtra && (
+              <Group gap='sm' wrap='wrap' align='center'>
+                <Checkbox label='Otras' size='sm' value={VALOR_OTRAS_MULTIPLE} data-testid={`otras-marca-${p.id}`} />
+                <TextInput
+                  aria-label={`${p.texto}: otras`}
+                  placeholder='Escriba cuál'
+                  maxLength={2000}
+                  size='md'
+                  flex='1 1 160px'
+                  disabled={!otrasActiva}
+                  value={otrasActiva ? textoOtras : ''}
+                  data-testid={`otras-texto-${p.id}`}
+                  onChange={(e) => ponerMultiple(marcadasLista, e.currentTarget.value)}
+                />
+              </Group>
+            )}
           </Stack>
         </Checkbox.Group>
+      ) : p.tipo === 'escala' ? (
+        <Radio.Group {...comun} size='md' name={`fp-${p.id}`} value={texto} onChange={(v) => onCambio(v)} data-testid={`escala-${p.id}`}>
+          {imagen}
+          <Group gap='md' mt='xs' wrap='wrap'>
+            {Array.from({ length: maxEscala - minEscala + 1 }, (_, i) => String(minEscala + i)).map((n) => (
+              <Radio key={n} value={n} label={n} size='sm' />
+            ))}
+          </Group>
+          {(p.escala?.etiquetaMin || p.escala?.etiquetaMax) && (
+            <Group justify='space-between' mt={6} gap='md'>
+              <Text size='xs' c='dimmed'>
+                {p.escala?.etiquetaMin ?? ''}
+              </Text>
+              <Text size='xs' c='dimmed'>
+                {p.escala?.etiquetaMax ?? ''}
+              </Text>
+            </Group>
+          )}
+        </Radio.Group>
       ) : p.tipo === 'seleccion' && p.presentacion === 'lista' ? (
         <Stack gap='xs'>
+          {imagen}
           <NativeSelect
             {...comun}
             size='md'
@@ -621,6 +710,7 @@ function CampoPregunta({
             else onCambio(v);
           }}
         >
+          {imagen}
           <Stack gap='xs' mt='xs'>
             {opciones.map((o) => (
               <Radio key={o} value={o} label={o} size='sm' />

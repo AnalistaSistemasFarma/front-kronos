@@ -3,14 +3,17 @@ import { errorResponse, getCorreoContext, jsonNoStore } from '../_lib/context';
 
 export const dynamic = 'force-dynamic';
 
-/** GET /api/correo/hilo?id=<conversationId>[&remotas=1] — hilo completo (HTML SANEADO) y su caso vinculado. */
+/**
+ * GET /api/correo/hilo?id=<conversationId>[&remotas=1][&fresco=1] — hilo completo (HTML SANEADO) y su caso
+ * vinculado. Una consulta a Graph (con caché corta por persona); `fresco=1` («Actualizar») la ignora.
+ */
 export async function GET(request: Request) {
   try {
     const ctx = await getCorreoContext(request);
     if (ctx instanceof Response) return ctx;
     const q = new URL(request.url).searchParams;
     const id = q.get('id') ?? '';
-    const hilo = await verHilo(ctx.deps, ctx.acceso, id, { remotas: q.get('remotas') === '1' });
+    const hilo = await verHilo(ctx.deps, ctx.acceso, id, { remotas: q.get('remotas') === '1', fresco: q.get('fresco') === '1' });
     await auditarLectura(
       ctx.deps,
       ctx.acceso,

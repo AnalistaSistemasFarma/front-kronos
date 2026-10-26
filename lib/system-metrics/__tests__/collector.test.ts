@@ -7,6 +7,7 @@ const insertRouteSummaries = vi.fn(async (..._args: unknown[]) => {});
 const insertDbSample = vi.fn(async () => {});
 const deleteOldMetrics = vi.fn(async () => 0);
 const insertUserSummaries = vi.fn(async (..._args: unknown[]) => {});
+const insertUserModuleSummaries = vi.fn(async (..._args: unknown[]) => {});
 
 // La sesión de prueba: el "token" es el correo, para no cifrar un JWT de verdad.
 vi.mock('next-auth/jwt', () => ({
@@ -22,6 +23,7 @@ vi.mock('../store', () => ({
   insertRouteSummaries,
   insertDbSample,
   insertUserSummaries,
+  insertUserModuleSummaries,
   deleteOldMetrics,
   isMissingTableError: (e: { number?: number }) => e?.number === 208,
 }));
@@ -34,10 +36,16 @@ describe('collector (peticiones reales, base simulada)', () => {
     process.env.SYSTEM_METRICS_ENABLED = 'true';
     process.env.NEXTAUTH_SECRET ??= 'secreto-de-prueba';
     globalThis.__kronosSystemMetrics = undefined;
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    // Reloj falso también para Date: la ventana de rutas se cierra al cruzar un múltiplo de 5 min.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    vi.setSystemTime(new Date('2026-10-20T15:00:30Z'));
 
     server = http.createServer((req, res) => {
       res.statusCode = req.url?.startsWith('/api/falla') ? 500 : 200;
+      if (req.url?.startsWith('/api/lenta')) {
+        setTimeout(() => res.end('tarde'), 400);
+        return;
+      }
       res.end('ok');
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -90,8 +98,30 @@ describe('collector (peticiones reales, base simulada)', () => {
       topModule: 'demo',
     });
     expect(userRows.find((u) => u.email === 'beto@gss.com')).toMatchObject({ requests: 1, errors: 1 });
+    // Ventana alineada al reloj (15:00) y reparto real por módulo en su tabla aparte.
+    expect((insertRouteSummaries.mock.calls[0][1] as Date).toISOString()).toBe('2026-10-20T15:00:00.000Z');
+    expect(insertUserModuleSummaries).toHaveBeenCalledTimes(1);
 
     // La instancia principal también toma la foto de SQL.
     expect(insertDbSample).toHaveBeenCalled();
+  });
+
+  it('cuenta la petición que el navegador corta antes de la respuesta (499, sin duración)', async () => {
+    const controller = new AbortController();
+    const pending = fetch(`${baseUrl}/api/lenta`, { signal: controller.signal }).catch(() => null);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    controller.abort();
+    await pending;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    // Cierra la ventana de 5 minutos siguiente (15:05 → 15:10).
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    const rows = insertRouteSummaries.mock.calls.at(-1)?.[4] as unknown as Array<Record<string, unknown>>;
+    expect(rows.find((r) => r.direction === 'in' && r.key === 'GET /api/lenta')).toMatchObject({
+      requests: 1,
+      clientErrors: 1,
+      errors: 0,
+      totalMs: 0,
+    });
   });
 });

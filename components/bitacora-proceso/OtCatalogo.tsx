@@ -2,14 +2,14 @@
 
 import { useState } from 'react';
 import { Alert, Badge, Button, Card, Group, Loader, NumberInput, Stack, Switch, Tabs, Text, TextInput, Title } from '@mantine/core';
-import { IconAlertTriangle, IconArrowDown, IconArrowUp, IconCheck, IconKey, IconListCheck, IconMapPin, IconPlus, IconUsers } from '@tabler/icons-react';
+import { IconAlertTriangle, IconArrowDown, IconArrowUp, IconCheck, IconKey, IconListCheck, IconMapPin, IconPlus, IconUserCheck, IconUsers } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { OT_ICONOS, OT_LIMITS } from '../../lib/bitacora-proceso/constants';
 import SgcSelect from '../sgc/SgcSelect';
 import { OtIconoActividad } from './otIconos';
 import type { OtCompanyAccess } from '../../lib/bitacora-proceso/rules';
 import { otSend, useOtFetch } from './otClient';
-import { OtAreas, OtOperadores } from './OtMaestros';
+import { OtAreas, OtOperadores, OtResponsables } from './OtMaestros';
 import { OtPinsEmpresa } from './OtImportarYPin';
 
 /**
@@ -18,6 +18,8 @@ import { OtPinsEmpresa } from './OtImportarYPin';
  *     flechas para ordenar. Las actividades NO se borran: se desactivan (el
  *     historial conserva su nombre). La observación es opcional en todas (2026-10-14).
  *   - Operarios (A1): maestro de operarios SIN usuario de SynerLink.
+ *   - Responsables (2026-10-16): supervisores, inspectores y jefes de producción de la
+ *     empresa; los selectores de la bitácora listan solo a estas personas.
  *   - Áreas (A5): áreas predefinidas de la empresa.
  *   - PIN (B3, 2026-10-15): estado del PIN de bitácora por persona y restablecimiento.
  */
@@ -27,6 +29,8 @@ interface Actividad {
   orden: number;
   activo: boolean;
   icono: string | null;
+  /** Texto libre (2026-10-17): el operario escribe un texto obligatorio al registrarla. */
+  texto_libre: boolean;
 }
 
 const ICONOS_DATA = Object.entries(OT_ICONOS).map(([value, label]) => ({ value, label }));
@@ -41,6 +45,9 @@ export default function OtCatalogo({ company }: { company: OtCompanyAccess }) {
         <Tabs.Tab value='operarios' leftSection={<IconUsers size={18} />} data-testid='ot-tab-operarios'>
           Operarios
         </Tabs.Tab>
+        <Tabs.Tab value='responsables' leftSection={<IconUserCheck size={18} />} data-testid='ot-tab-responsables'>
+          Responsables
+        </Tabs.Tab>
         <Tabs.Tab value='areas' leftSection={<IconMapPin size={18} />} data-testid='ot-tab-areas'>
           Áreas
         </Tabs.Tab>
@@ -53,6 +60,9 @@ export default function OtCatalogo({ company }: { company: OtCompanyAccess }) {
       </Tabs.Panel>
       <Tabs.Panel value='operarios'>
         <OtOperadores company={company} />
+      </Tabs.Panel>
+      <Tabs.Panel value='responsables'>
+        <OtResponsables company={company} />
       </Tabs.Panel>
       <Tabs.Panel value='areas'>
         <OtAreas company={company} />
@@ -69,6 +79,7 @@ function CatalogoActividades({ company }: { company: OtCompanyAccess }) {
   const [nombre, setNombre] = useState('');
   const [orden, setOrden] = useState<number | string>('');
   const [icono, setIcono] = useState<string | null>(null);
+  const [textoLibre, setTextoLibre] = useState(false);
   const [busy, setBusy] = useState<number | 'nueva' | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -79,13 +90,14 @@ function CatalogoActividades({ company }: { company: OtCompanyAccess }) {
     setMsg(null);
     try {
       const siguiente = orden === '' ? (lista.length ? Math.max(...lista.map((a) => a.orden)) + 10 : 10) : Number(orden);
-      await otSend('/api/bitacora-proceso/actividades', 'POST', { company: company.idCompany, nombre, orden: siguiente, icono });
+      await otSend('/api/bitacora-proceso/actividades', 'POST', { company: company.idCompany, nombre, orden: siguiente, icono, texto_libre: textoLibre });
       const text = `Actividad «${nombre.trim()}» agregada.`;
       setMsg({ ok: true, text });
       toast.success(text);
       setNombre('');
       setOrden('');
       setIcono(null);
+      setTextoLibre(false);
       await reload(true);
     } catch (e) {
       setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
@@ -94,7 +106,7 @@ function CatalogoActividades({ company }: { company: OtCompanyAccess }) {
     }
   };
 
-  const cambiar = async (a: Actividad, cambio: Partial<Pick<Actividad, 'activo' | 'orden' | 'icono'>>, text: string) => {
+  const cambiar = async (a: Actividad, cambio: Partial<Pick<Actividad, 'activo' | 'orden' | 'icono' | 'texto_libre'>>, text: string) => {
     setBusy(a.id_actividad);
     setMsg(null);
     try {
@@ -144,6 +156,13 @@ function CatalogoActividades({ company }: { company: OtCompanyAccess }) {
             leftSection={<OtIconoActividad icono={icono} size={20} />}
             data-testid='ot-catalogo-icono'
           />
+          <Switch
+            size='lg'
+            label='Texto libre: el operario escribe qué pasó (obligatorio) al registrarla'
+            checked={textoLibre}
+            onChange={(e) => setTextoLibre(e.currentTarget.checked)}
+            data-testid='ot-catalogo-texto-libre'
+          />
           <Button size='lg' leftSection={<IconPlus size={20} />} onClick={agregar} loading={busy === 'nueva'} disabled={!nombre.trim()} fullWidth data-testid='ot-catalogo-agregar'>
             Agregar al catálogo
           </Button>
@@ -154,7 +173,7 @@ function CatalogoActividades({ company }: { company: OtCompanyAccess }) {
         Actividades <Badge variant='light' ml={4}>{lista.length}</Badge>
       </Title>
       <Text size='sm' c='dimmed'>
-        Las actividades no se borran: desactive las que ya no se usan. El orden define la posición de los botones en la pantalla de planta. La observación es opcional en todas. Los íconos son de una lista fija; más adelante se podrán cargar pictogramas propios.
+        Las actividades no se borran: desactive las que ya no se usan. El orden define la posición de los botones en la pantalla de planta. La observación es opcional en todas; en las de «Texto libre» el operario escribe un texto obligatorio (máx. 500 caracteres). Los íconos son de una lista fija; más adelante se podrán cargar pictogramas propios.
       </Text>
       {loading && !data ? (
         <Loader />
@@ -171,6 +190,7 @@ function CatalogoActividades({ company }: { company: OtCompanyAccess }) {
                   <Group gap={6} mt={4}>
                     <Badge variant='light' color={a.activo ? 'green' : 'gray'}>{a.activo ? 'Activa' : 'Inactiva'}</Badge>
                     <Badge variant='outline' color='gray'>Orden {a.orden}</Badge>
+                    {a.texto_libre && <Badge variant='light' color='violet'>Texto libre</Badge>}
                   </Group>
                 </div>
                 <Group gap={6} wrap='nowrap'>
@@ -189,6 +209,16 @@ function CatalogoActividades({ company }: { company: OtCompanyAccess }) {
                   checked={a.activo}
                   disabled={busy !== null}
                   onChange={(e) => cambiar(a, { activo: e.currentTarget.checked }, `«${a.nombre}» ${e.currentTarget.checked ? 'activada' : 'desactivada'}.`)}
+                />
+                <Switch
+                  size='lg'
+                  label='Texto libre'
+                  checked={a.texto_libre}
+                  disabled={busy !== null}
+                  onChange={(e) =>
+                    cambiar(a, { texto_libre: e.currentTarget.checked }, `«${a.nombre}» ${e.currentTarget.checked ? 'ahora pide texto libre' : 'ya no pide texto libre'}.`)
+                  }
+                  data-testid='ot-catalogo-texto-libre-actividad'
                 />
               </Group>
               <SgcSelect

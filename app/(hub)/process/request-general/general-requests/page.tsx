@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import ExcelJS from 'exceljs';
+// Solo tipos: la librería (~900 KB) se descarga al exportar/importar, no al abrir la pantalla.
+import type ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import Link from 'next/link';
 import {
@@ -31,7 +32,6 @@ import {
   Collapse,
   Box,
   Flex,
-  Progress,
   RingProgress,
   Loader,
   Pagination,
@@ -64,6 +64,7 @@ import {
   buildTaskDisplayBadges,
   getSimplifiedTasksProgress,
 } from '@/lib/orion/taskProgress';
+import { RequestProgressBar } from '../../../../../components/request-general/RequestProgressBar';
 
 const ITEMS_PER_PAGE = 100;
 
@@ -377,6 +378,10 @@ function RequestGeneralPage() {
   };
 
   const getUserIdByName = async (userName: string): Promise<number | null> => {
+    // La sesión ya trae el id de Kronos (callback jwt, buscado por correo): sin viaje extra al
+    // servidor ni búsqueda por NOMBRE, que con dos personas homónimas podía traer el id equivocado.
+    // (El id es un cuid de texto; este archivo lo tipa como número, igual que lo que devolvía la API.)
+    if (session?.user?.id) return session.user.id as unknown as number;
     if (!session || status !== 'authenticated') {
       console.error('No hay sesión activa para realizar esta operación');
       return null;
@@ -570,6 +575,7 @@ function RequestGeneralPage() {
   );
 
   async function exportToExcel() {
+    const { default: ExcelJS } = await import('exceljs');
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Datos');
 
@@ -1010,25 +1016,7 @@ function RequestGeneralPage() {
                         </Text>
                         {tasksByRequest[ticket.id]?.length ? (
                           <Stack gap={6} mt={8}>
-                            {(() => {
-                              const { total, done, percent } = getTasksProgress(
-                                tasksByRequest[ticket.id]
-                              );
-                              return (
-                                <Group gap={8} wrap='nowrap'>
-                                  <Progress
-                                    value={percent}
-                                    color={percent === 100 ? 'green' : 'blue'}
-                                    size='sm'
-                                    radius='xl'
-                                    style={{ flex: 1, maxWidth: 120 }}
-                                  />
-                                  <Text size='xs' c='dimmed' fw={500} style={{ whiteSpace: 'nowrap' }}>
-                                    {done}/{total}
-                                  </Text>
-                                </Group>
-                              );
-                            })()}
+                            <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
                             <Group gap={6} wrap='wrap'>
                               {buildTaskDisplayBadges(tasksByRequest[ticket.id]).map((badge) => {
                                 const { color, Icon } = getTaskVisual(badge.statusKey);

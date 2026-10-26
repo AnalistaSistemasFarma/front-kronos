@@ -4,8 +4,9 @@ import { useState, useEffect, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import ExcelJS from 'exceljs';
-import { saveAs } from 'file-saver';
+import toast from 'react-hot-toast';
+// exportBoardExcel (y con él exceljs, ~900 KB) se carga al tocar Exportar, no al abrir la pantalla.
+import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
 import {
   Title,
   Paper,
@@ -129,6 +130,7 @@ function ViewerRequestGeneralPage() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [tasksByRequest, setTasksByRequest] = useState<Record<number, RequestTask[]>>({});
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [modalOpened, setModalOpened] = useState(false);
   const [formData, setFormData] = useState({
@@ -352,6 +354,10 @@ function ViewerRequestGeneralPage() {
   };
 
   const getUserIdByName = async (userName: string): Promise<number | null> => {
+    // La sesión ya trae el id de Kronos (callback jwt, buscado por correo): sin viaje extra al
+    // servidor ni búsqueda por NOMBRE, que con dos personas homónimas podía traer el id equivocado.
+    // (El id es un cuid de texto; este archivo lo tipa como número, igual que lo que devolvía la API.)
+    if (session?.user?.id) return session.user.id as unknown as number;
     if (!session || status !== 'authenticated') {
       console.error('No hay sesión activa para realizar esta operación');
       return null;
@@ -528,59 +534,58 @@ function ViewerRequestGeneralPage() {
     }
   };
 
+  const VIEWER_STATUS_LABELS: Record<string, string> = {
+    '0': 'Todos',
+    '1': 'Abierto',
+    '2': 'Resuelto',
+    '3': 'Cancelado',
+    '7': 'Devuelta',
+  };
+
   async function exportToExcel() {
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Solicitudes');
-
-    type TicketKeys = keyof Ticket;
-
-    const columnMapOrdered: { key: TicketKeys; header: string; width: number }[] = [
-      { key: 'id', header: 'ID', width: 10 },
-      { key: 'subject', header: 'Asunto', width: 40 },
-      { key: 'company', header: 'Empresa', width: 28 },
-      { key: 'category', header: 'Categoría', width: 22 },
-      { key: 'status', header: 'Estado', width: 16 },
-      { key: 'created_at', header: 'Fecha Creación de Solicitud', width: 24 },
-      { key: 'date_resolution', header: 'Fecha Resolución', width: 24 },
-      { key: 'created_at', header: 'Fecha de Solicitud', width: 24 },
-      { key: 'requester', header: 'Solicitante', width: 24 },
-      { key: 'user', header: 'Asignado', width: 24 },
-    ];
-
-    worksheet.columns = columnMapOrdered;
-
-    const formatDate = (raw: string) => {
-      if (!raw) return '';
-      const date = new Date(raw);
-      if (isNaN(date.getTime())) return raw;
-      const adjusted = new Date(date.getTime() + 5 * 60 * 60 * 1000);
-      return new Intl.DateTimeFormat('es-CO', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-      }).format(adjusted);
-    };
-
-    tickets.forEach((item) => {
-      const row: Record<string, unknown> = {};
-      columnMapOrdered.forEach((col) => {
-        row[col.key] =
-          col.key === 'created_at' ? formatDate(item.created_at) : item[col.key];
+    if (exporting) return;
+    if (tickets.length === 0) {
+      toast.error('No hay solicitudes con los filtros actuales');
+      return;
+    }
+    setExporting(true);
+    try {
+      const { boardExportFilename, buildBoardWorkbook } = await import('@/lib/request-general/exportBoardExcel');
+      const companyLabel =
+        companies.find((company) => company.value === filters.company)?.label || 'Todas';
+      const assignedLabel =
+        assignedUsers.find((user) => user.value === filters.assigned_to)?.label || 'Todas';
+      const workbook = await buildBoardWorkbook({
+        module: 'Mis solicitudes',
+        filters: [
+          { label: 'Estado', value: VIEWER_STATUS_LABELS[filters.status] || 'Todos' },
+          { label: 'Empresa', value: companyLabel },
+          { label: 'Persona asignada', value: assignedLabel },
+          { label: 'Fecha desde', value: filters.date_from || 'Sin límite' },
+          { label: 'Fecha hasta', value: filters.date_to || 'Sin límite' },
+        ],
+        requests: tickets.map((ticket) => ({
+          id: ticket.id,
+          subject: ticket.subject,
+          category: ticket.category,
+          company: ticket.company,
+          status: ticket.status,
+          requester: ticket.requester,
+          assigned: ticket.user,
+          createdAt: ticket.created_at,
+          description: ticket.description,
+          dateResolution: ticket.date_resolution,
+          tasks: tasksByRequest[ticket.id] ?? [],
+        })),
       });
-      worksheet.addRow(row);
-    });
-
-    worksheet.getRow(1).font = { bold: true };
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
-
-    saveAs(blob, 'InformeSolicitudesObservadas.xlsx');
+      await downloadWorkbook(workbook, boardExportFilename('Mis-solicitudes'));
+      toast.success('Excel descargado');
+    } catch (err) {
+      console.error(err);
+      toast.error('No se pudo generar el informe');
+    } finally {
+      setExporting(false);
+    }
   }
 
   const breadcrumbItems = [
@@ -761,10 +766,11 @@ function ViewerRequestGeneralPage() {
                   <Button
                     onClick={() => exportToExcel()}
                     size='lg'
+                    loading={exporting}
                     leftSection={<IconDownload size={18} />}
                     className='bg-green-500 hover:bg-green-700'
                   >
-                    Descargar XLSX
+                    Descargar Excel
                   </Button>
                 </Group>
               </Card>

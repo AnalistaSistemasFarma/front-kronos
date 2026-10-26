@@ -27,6 +27,28 @@ export interface EventoDia {
   titulo: string;
   tipo: TipoEvento;
   descripcion?: string | null;
+  /** Solo los CUMPLEAÑOS: quiénes cumplen ese día (nombre, empresa contratante y cargo). */
+  personas?: PersonaCumple[];
+}
+
+/** Lo único que se muestra de quien cumple años (nunca la edad ni la cédula). */
+export interface PersonaCumple {
+  nombre: string;
+  empresa: string;
+  cargo: string;
+}
+
+/** Título del evento de cumpleaños (Cristian Baldión, 2026-10-15). */
+export const TITULO_CUMPLEANOS = 'CUMPLEAÑOS';
+
+/**
+ * Los cumpleaños de BASE PERSONAL como eventos del calendario: UNO por día, titulado «CUMPLEAÑOS», de tipo «fecha importante»
+ * (`conmemoracion`, el punto verde) y con la lista de personas de ese día.
+ */
+export function cumpleanosComoEventos(dias: { fecha: string; personas: PersonaCumple[] }[]): EventoDia[] {
+  return dias
+    .filter((d) => fechaValida(d.fecha) && Array.isArray(d.personas) && d.personas.length > 0)
+    .map((d) => ({ fecha: d.fecha, titulo: TITULO_CUMPLEANOS, tipo: 'conmemoracion' as const, personas: d.personas }));
 }
 
 export const NOMBRE_TIPO: Record<TipoEvento, string> = {

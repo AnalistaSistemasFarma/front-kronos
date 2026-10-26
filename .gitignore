@@ -57,3 +57,9 @@ dbconfig.js
 
 # Claude Code — configuración local por-desarrollador (no versionar)
 .claude/settings.local.json
+
+# base local de geolocalización (auditoría de inicios de sesión; se descarga con scripts/geoip/descargar-dbip.mjs)
+/data/geoip/
+
+# Graphify (mapa del código generado en local)
+/graphify-out/

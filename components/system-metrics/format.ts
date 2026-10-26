@@ -42,10 +42,12 @@ export function formatAgo(iso: string | null | undefined, now = Date.now()): str
   return `hace ${Math.round(m / 60)} h`;
 }
 
+// Sin "(Kronos)": otras aplicaciones Node (SAPSEND, Orion…) usan las mismas librerías y en la
+// vista general salían como si fueran Kronos.
 const PROGRAM_NAMES: Record<string, string> = {
-  tiberius: 'Prisma (Kronos)',
-  'node-mssql': 'mssql (Kronos)',
-  tedious: 'mssql (Kronos)',
+  tiberius: 'Node.js (Prisma)',
+  'node-mssql': 'Node.js (mssql)',
+  tedious: 'Node.js (mssql)',
 };
 
 /** Nombre legible del programa que abrió una sesión en SQL Server (`program_name`). */

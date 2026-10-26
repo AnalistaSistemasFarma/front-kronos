@@ -45,23 +45,15 @@ export default function DashboardSolicitantePage() {
         setLoading(true);
         setError(null);
 
-        const accessRes = await fetch(
-          '/api/requests-general/dashboard-access?kind=solicitante',
-          { credentials: 'same-origin', cache: 'no-store' }
-        );
-        const accessData = await accessRes.json().catch(() => ({}));
-        if (!accessRes.ok || !accessData.allowed) {
-          throw new Error(
-            accessData.error ||
-              'No tienes asignado el subproceso Dashboard solicitudes'
-          );
-        }
-
+        // La API ya valida el permiso (403): no hace falta preguntarlo antes en otro viaje.
         const res = await fetch('/api/requests-general/dashboard-solicitante', {
           credentials: 'same-origin',
           cache: 'no-store',
         });
         const data = await res.json().catch(() => ({}));
+        if (res.status === 403) {
+          throw new Error('No tienes asignado el subproceso Dashboard solicitudes');
+        }
         if (!res.ok) {
           throw new Error(data.error || 'No se pudo cargar el dashboard');
         }

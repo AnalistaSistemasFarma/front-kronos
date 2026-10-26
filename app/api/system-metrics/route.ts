@@ -75,7 +75,13 @@ export async function GET(request: NextRequest) {
           if (!isMissingTableError(error)) throw error;
           alertsTableMissing = true;
         }
+        // Máximo configurado del pool (cada proceso tiene el suyo, con la misma configuración).
+        // mssql abre conexiones solo cuando hacen falta: `pool.size` son las abiertas ahora,
+        // no la capacidad, así que el anillo "Conexiones SQL" debe dividir entre este número.
+        const configuredMax = (pool as unknown as { config?: { pool?: { max?: unknown } } }).config?.pool?.max;
+        const poolMax = typeof configuredMax === 'number' && configuredMax > 0 ? configuredMax : 10;
         return {
+          poolMax,
           alerts,
           alertsTableMissing,
           processSeries,
@@ -111,6 +117,7 @@ export async function GET(request: NextRequest) {
         })),
         activeUsers: data.activeUsers,
         usersTableMissing: data.usersTableMissing,
+        poolMax: data.poolMax,
         alerts: data.alerts,
         alertsTableMissing: data.alertsTableMissing,
         alertHistoryHours: ALERT_HISTORY_HOURS,

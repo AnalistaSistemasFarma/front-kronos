@@ -36,6 +36,8 @@ export default defineConfig({
       // `app/api/correo/**`: módulo Correo (sesión y permiso, aislamiento por persona, límites; Graph simulado).
       'app/api/correo/**/*.test.ts',
       'components/sgc/**/*.test.ts',
+      // Medidor del consumo de Anthropic en Proyectos (render del marcado, 2026-10-22).
+      'components/proyectos/**/*.test.ts',
     ],
     exclude: ['node_modules', '.next', 'mcp', 'dist'],
 
@@ -93,7 +95,14 @@ export default defineConfig({
         'lib/correo/sanitize.ts',
         'lib/correo/service.ts',
         'lib/correo/mock.ts',
+        // «Consultar a un agente» (2026-10-16): concesión, tarjetas y confirmación.
+        'lib/correo/agente.ts',
+        // Deslizar para eliminar (2026-10-18): mover a Elementos eliminados y «Deshacer» firmado.
+        'lib/correo/eliminar.ts',
         'app/api/correo/**/route.ts',
+        // Visores de adjuntos del chat (2026-10-22): reglas puras y la ruta de la vista.
+        'lib/chat/visor.ts',
+        'app/api/chat/attachments/[[]id]/vista/route.ts',
       ],
       exclude: [
         '**/__tests__/**',

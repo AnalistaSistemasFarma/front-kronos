@@ -1,9 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Alert, Badge, Button, Card, Group, Stack, Switch, Text, Title } from '@mantine/core';
-import { IconAlertTriangle, IconLayoutNavbar, IconSignature } from '@tabler/icons-react';
+import { IconAdjustments, IconAlertTriangle, IconLayoutNavbar, IconSignature } from '@tabler/icons-react';
 import SgcDocumentLayoutModal, { type SgcLayoutData } from '../signature/SgcDocumentLayoutModal';
+import SgcSheetSettingsModal, { type SgcSheetSettingsSource } from '../SgcSheetSettingsModal';
+import { describeSheetSettings, type SgcSheetSettings } from '../../../lib/sgc/sheetSettings';
+import type { SgcSheetInspection } from '../../../lib/sgc/pdf/viewable';
 import { sgcSend, useSgcFetch } from '../useSgcFetch';
 import { formatDateCO } from './format';
 
@@ -14,11 +17,32 @@ import { formatDateCO } from './format';
  * versión, página x de y, elaboró/revisó/aprobó con su recuadro «Firma»,
  * fecha de emisión y proceso, y llena el historial de cambios). El elaborador
  * lo define durante la elaboración; los demás lo consultan.
+ *
+ * 2026-10-22: con un borrador en Excel, el elaborador también ajusta su
+ * PRESENTACIÓN (orientación, tamaño, área, títulos, columnas y hojas) y la
+ * previsualiza antes de guardarla («Ajustar y previsualizar el Excel»).
  */
 export default function SgcDocumentLayoutCard({ requestId, onMessage }: { requestId: number; onMessage: (type: 'success' | 'error', text: string) => void }) {
   const { data, error, reload } = useSgcFetch<SgcLayoutData>(`/api/sgc/requests/${requestId}/layout`);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const sheetSource = useMemo<SgcSheetSettingsSource>(
+    () => ({
+      load: async () => {
+        const res = await fetch(`/api/sgc/requests/${requestId}/layout/sheet`, { cache: 'no-store' });
+        const body = (await res.json().catch(() => ({}))) as { sheets?: SgcSheetInspection[]; sheetSettings?: SgcSheetSettings | null; error?: string };
+        if (!res.ok) throw new Error(body.error || `Error ${res.status}`);
+        return { sheets: body.sheets ?? [], settings: body.sheetSettings ?? null };
+      },
+      preview: async (settings) => {
+        const res = await fetch(`/api/sgc/requests/${requestId}/layout/sheet`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'previsualizar', settings }) });
+        if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error || `Error ${res.status}`);
+        return res.blob();
+      },
+    }),
+    [requestId]
+  );
   if (error || !data) return null;
   if (data.participants.length === 0 && !data.canEdit) return null;
   const placed = data.fields.length;
@@ -26,6 +50,18 @@ export default function SgcDocumentLayoutCard({ requestId, onMessage }: { reques
   const inRegister = data.inRegister?.length ?? 0;
   const total = data.participants.length - inRegister;
   const isPdf = data.draft?.format === 'pdf';
+  const isExcel = data.draft?.format === 'xlsx';
+
+  const saveSheet = async (settings: SgcSheetSettings | null) => {
+    const res = await sgcSend<{ removedSignatures?: number }>(`/api/sgc/requests/${requestId}/layout/sheet`, 'POST', { action: 'guardar', settings });
+    onMessage(
+      'success',
+      res.removedSignatures
+        ? `Presentación del Excel guardada. Cambió la orientación de la hoja: vuelva a ubicar ${res.removedSignatures} firma(s).`
+        : 'Presentación del Excel guardada.'
+    );
+    reload();
+  };
 
   const save = async (body: Record<string, unknown>, ok: string) => {
     setBusy(true);
@@ -73,6 +109,16 @@ export default function SgcDocumentLayoutCard({ requestId, onMessage }: { reques
           }}
           data-testid='sgc-encabezado-institucional'
         />
+        {isExcel && (
+          <Group justify='space-between' wrap='wrap' gap='xs' data-testid='sgc-excel-presentacion'>
+            <Text size='sm'>
+              Presentación del Excel: <b>{data.sheetSettings ? describeSheetSettings(data.sheetSettings) : 'ajuste automático'}</b>
+            </Text>
+            <Button size='xs' variant='light' leftSection={<IconAdjustments size={14} />} onClick={() => setSheetOpen(true)} disabled={!data.canEdit} data-testid='sgc-excel-ajustar-borrador'>
+              Ajustar y previsualizar el Excel
+            </Button>
+          </Group>
+        )}
         {data.stale && (
           <Alert color='yellow' icon={<IconAlertTriangle size={16} />}>
             El borrador cambió después de ubicar las firmas: revise que cada caja siga en su lugar.
@@ -104,6 +150,23 @@ export default function SgcDocumentLayoutCard({ requestId, onMessage }: { reques
           </Text>
         )}
       </Stack>
+      {isExcel && (
+        <SgcSheetSettingsModal
+          opened={sheetOpen}
+          name={data.draft?.name ?? 'Excel'}
+          source={sheetOpen ? sheetSource : null}
+          onClose={() => setSheetOpen(false)}
+          onApply={saveSheet}
+          applyLabel='Guardar en el documento'
+          notice={
+            data.fields.length > 0 ? (
+              <Alert color='yellow' icon={<IconAlertTriangle size={16} />}>
+                Si cambia la orientación de la hoja, las {data.fields.length} firma(s) ya ubicada(s) se quitan y hay que volver a ubicarlas (el encabezado y los recuadros cambian de lugar).
+              </Alert>
+            ) : null
+          }
+        />
+      )}
       {open && (
         <SgcDocumentLayoutModal
           opened={open}

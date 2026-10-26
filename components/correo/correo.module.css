@@ -1,0 +1,588 @@
+/*
+ * Bandeja del módulo Correo con la distribución y densidad de Gmail, pero con el tema de
+ * SynerLink: solo variables de Mantine (claro/oscuro salen solos) y los mismos radios y bordes.
+ */
+
+/*
+ * Pantalla completa como Gmail (2026-10-16): el módulo ocupa el alto de la ventana bajo la cabecera de
+ * SynerLink y cada zona (carpetas, lista, hilo) se desplaza por dentro; la página no se desplaza.
+ */
+.pantalla {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: calc(100dvh - var(--app-header-height, 4rem));
+  max-width: 1920px;
+  margin: 0 auto;
+  padding: 8px 8px 8px;
+  background: var(--mantine-color-body);
+  overflow: hidden;
+}
+
+@media (min-width: 62em) {
+  .pantalla {
+    padding: 10px 16px 12px 8px;
+  }
+}
+
+.encabezado {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 0 4px;
+}
+
+.layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.sidebar {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.principal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+/* Buscador y chips: alto propio (en la columna flexible no deben estirarse). */
+.fijo {
+  flex: 0 0 auto;
+  display: flex;
+  min-width: 0;
+}
+
+.bandeja {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.listaScroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ---- Hilo en el lugar de la lista ---- */
+.panelHilo {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.hilo {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.hiloScroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.hiloContenido {
+  padding: 16px 12px 24px;
+}
+
+@media (min-width: 48em) {
+  .hiloContenido {
+    padding: 18px 24px 32px 16px;
+  }
+}
+
+.separador {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--mantine-color-default-border);
+  flex-shrink: 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 48px;
+  padding: 4px 12px 4px 10px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-body);
+}
+
+.toolbarSeleccion {
+  background: var(--mantine-primary-color-light);
+}
+
+/* Aviso de selección (como Gmail: «Seleccionar los N correos de esta carpeta») y avance de «Marcar todo». */
+.avisoSeleccion {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  background: color-mix(in srgb, var(--mantine-color-yellow-1) 60%, var(--mantine-color-body));
+  flex: 0 0 auto;
+}
+
+:global([data-mantine-color-scheme='dark']) .avisoSeleccion {
+  background: color-mix(in srgb, var(--mantine-color-yellow-9) 25%, var(--mantine-color-body));
+}
+
+/* ---- Fila de escritorio ---- */
+.fila {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 42px;
+  padding: 0 14px 0 10px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  cursor: pointer;
+  font-size: 14px;
+  background: color-mix(in srgb, var(--mantine-color-gray-1) 55%, var(--mantine-color-body));
+  color: var(--mantine-color-text);
+  outline: none;
+}
+
+.fila[data-leido='0'] {
+  background: var(--mantine-color-body);
+}
+
+.fila:hover {
+  z-index: 1;
+  box-shadow: inset 1px 0 0 var(--mantine-color-default-border), inset -1px 0 0 var(--mantine-color-default-border),
+    0 1px 2px 0 rgba(60, 64, 67, 0.3), 0 1px 3px 1px rgba(60, 64, 67, 0.15);
+}
+
+.fila:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--mantine-primary-color-filled);
+}
+
+.fila[data-seleccionado='1'] {
+  background: var(--mantine-primary-color-light);
+}
+
+.de {
+  flex: 0 0 200px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.asunto {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.asuntoTexto {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extracto {
+  color: var(--mantine-color-dimmed);
+  font-weight: 400;
+}
+
+.fuerte {
+  font-weight: 700;
+}
+
+.meta {
+  flex: 0 0 auto;
+  min-width: 84px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--mantine-color-dimmed);
+}
+
+.fila[data-leido='0'] .meta {
+  color: var(--mantine-color-text);
+  font-weight: 700;
+}
+
+.acciones {
+  display: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.fila:hover .acciones,
+.fila:focus-within .acciones {
+  display: flex;
+}
+
+.fila:hover .fecha,
+.fila:focus-within .fecha {
+  display: none;
+}
+
+.fecha {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* ---- Fila de celular (lista primero, como la app de Gmail) ---- */
+.filaMovil {
+  display: flex;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-body);
+  cursor: pointer;
+}
+
+.filaMovil[data-seleccionado='1'] {
+  background: var(--mantine-primary-color-light);
+}
+
+.avatarSel {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.avatarMarcado {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mantine-primary-color-filled);
+  color: var(--mantine-color-white);
+}
+
+.cuerpoMovil {
+  flex: 1;
+  min-width: 0;
+}
+
+.lineaMovil {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.truncar {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.busqueda :global(.mantine-TextInput-input),
+.busqueda input {
+  background: color-mix(in srgb, var(--mantine-color-gray-1) 80%, var(--mantine-color-body));
+  border-color: transparent;
+}
+
+.busqueda input:focus {
+  background: var(--mantine-color-body);
+  border-color: var(--mantine-color-default-border);
+  box-shadow: 0 1px 2px rgba(60, 64, 67, 0.2);
+}
+
+.chips {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+
+.chips::-webkit-scrollbar {
+  display: none;
+}
+
+:global([data-mantine-color-scheme='dark']) .fila {
+  background: color-mix(in srgb, var(--mantine-color-dark-6) 70%, var(--mantine-color-body));
+}
+
+:global([data-mantine-color-scheme='dark']) .fila[data-leido='0'] {
+  background: var(--mantine-color-body);
+}
+
+:global([data-mantine-color-scheme='dark']) .fila[data-seleccionado='1'],
+:global([data-mantine-color-scheme='dark']) .filaMovil[data-seleccionado='1'] {
+  background: var(--mantine-primary-color-light);
+}
+
+:global([data-mantine-color-scheme='dark']) .fila:hover {
+  box-shadow: inset 0 0 0 1px var(--mantine-color-dark-3), 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+:global([data-mantine-color-scheme='dark']) .busqueda input {
+  background: var(--mantine-color-dark-6);
+}
+
+:global([data-mantine-color-scheme='dark']) .busqueda input:focus {
+  background: var(--mantine-color-dark-7);
+}
+
+/*
+ * ---- Deslizar una fila (2026-10-18): a la izquierda elimina, a la derecha leído / no leído ----
+ * El navegador conserva el desplazamiento vertical (pan-y) y el zoom; el gesto horizontal lo maneja FilaDeslizable.
+ * El fondo de color solo existe mientras se desliza, y el recorte (overflow) también, para no cortar la sombra
+ * de la fila al pasar el mouse.
+ */
+.deslizable {
+  position: relative;
+}
+
+.deslizable[data-deslizando='1'] {
+  overflow: hidden;
+}
+
+.frenteDeslizar {
+  position: relative;
+  background: var(--mantine-color-body);
+  touch-action: pan-y pinch-zoom;
+}
+
+.deslizable[data-deslizando='1'] .frenteDeslizar {
+  cursor: grabbing;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.fondoDeslizar {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  color: var(--mantine-color-white);
+  font-size: 14px;
+  font-weight: 600;
+  background: var(--mantine-color-red-5);
+  transition: background-color 120ms ease;
+}
+
+.fondoDeslizar[data-lado='izquierda'] {
+  justify-content: flex-end;
+}
+
+.fondoDeslizar[data-lado='derecha'] {
+  justify-content: flex-start;
+}
+
+.fondoDeslizar[data-color='rojo'][data-armado='1'] {
+  background: var(--mantine-color-red-7);
+}
+
+.fondoDeslizar[data-color='azul'] {
+  background: var(--mantine-color-blue-5);
+}
+
+.fondoDeslizar[data-color='azul'][data-armado='1'] {
+  background: var(--mantine-color-blue-7);
+}
+
+.accionDeslizar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0.85;
+  transform: scale(0.88);
+  transition: transform 120ms ease, opacity 120ms ease;
+}
+
+.fondoDeslizar[data-armado='1'] .accionDeslizar {
+  opacity: 1;
+  transform: scale(1.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fondoDeslizar,
+  .accionDeslizar {
+    transition: none;
+  }
+}
+
+/* ---- Carga (2026-10-16): esqueletos con la misma geometría de las filas reales ---- */
+.filaEsqueleto {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 42px;
+  padding: 0 14px 0 10px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.filaEsqueleto .meta {
+  justify-content: flex-end;
+}
+
+.filaMovilEsqueleto {
+  display: flex;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+/* Al actualizar la MISMA carpeta la lista se queda, atenuada, hasta que llegan los datos nuevos. */
+.listaAtenuada {
+  opacity: 0.45;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .listaAtenuada {
+    transition: none;
+  }
+}
+
+/*
+ * Cuerpo del correo (iframe de HtmlSeguro): superficie blanca SIEMPRE, como Gmail, para respetar los
+ * colores con que se escribió el correo. En modo oscuro se le da un margen interno blanco para que
+ * el texto no quede pegado al borde de la tarjeta.
+ */
+.cuerpoHtml {
+  color-scheme: light;
+}
+
+:global([data-mantine-color-scheme='dark']) .cuerpoHtml {
+  padding: 10px 12px;
+  box-sizing: content-box;
+  width: calc(100% - 24px) !important;
+}
+
+/* Aviso «Correo movido a la Papelera · Deshacer» (2026-10-18). */
+.avisoDeshacer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.botonDeshacer {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 4px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1f2430;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.botonDeshacer:hover {
+  background: #e5e7eb;
+}
+
+.botonDeshacer:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+/*
+ * Redactar (2026-10-19): ventana flotante abajo a la derecha en el escritorio (como Gmail) y botón flotante en el
+ * celular. Solo variables de Mantine: claro y oscuro salen solos.
+ */
+.redactarFlotante {
+  position: fixed;
+  right: 24px;
+  bottom: 0;
+  z-index: 300;
+  width: min(560px, calc(100vw - 48px));
+  max-height: calc(100dvh - var(--app-header-height, 4rem) - 24px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  background: var(--mantine-color-body);
+}
+
+.redactarFlotante[data-minimizado='1'] {
+  width: 300px;
+}
+
+.redactarCabecera {
+  flex: 0 0 auto;
+  padding: 8px 10px 8px 14px;
+  background: var(--mantine-color-default-hover);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  cursor: default;
+}
+
+.redactarFlotante[data-minimizado='1'] .redactarCabecera {
+  cursor: pointer;
+  border-bottom: 0;
+}
+
+.redactarCuerpo {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.redactarEditor {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--mantine-spacing-sm);
+}
+
+.redactarPie {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+
+/* Celular: «Redactar» flota abajo a la derecha sobre la lista, como el botón de Gmail. */
+.fabRedactar {
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: 200;
+  box-shadow: var(--mantine-shadow-lg);
+}

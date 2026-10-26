@@ -26,7 +26,10 @@ import {
   processOwnerEmails,
 } from '../workflow.js';
 import { registerIaAccessTool } from './iaAccess.js';
+import { USUARIOS_TOOLS, registerUsuariosTools } from './usuarios.js';
 import { BITACORA_TOOLS, registerBitacoraTools } from './bitacoraProceso.js';
+import { CORREO_AGENTE_TOOLS, correoAgenteHabilitado, registerCorreoAgenteTools } from './correoAgente.js';
+import { PROYECTOS_TOOLS_LECTURA, PROYECTOS_TOOLS_PROPUESTA, registerProyectosTools } from './proyectos.js';
 
 interface ToolContext {
   scope: AuthScope;
@@ -338,8 +341,8 @@ export const ENTITY_METADATA = {
 } as const;
 
 /**
- * Capacidades del servidor: 34 tools en total = 25 de LECTURA (incluye 4 de la
- * Bitácora de Proceso) + 9 de ESCRITURA.
+ * Capacidades del servidor: 39 tools en total = 27 de LECTURA (incluye 4 de la
+ * Bitácora de Proceso y 2 del hilo de correo compartido) + 12 de ESCRITURA (3 de ellas solo PROPONEN).
  *
  * Las de escritura están acotadas (categorización, creación de solicitudes,
  * notas, resolución de tareas, adjuntos en OneDrive y formulario dinámico),
@@ -347,7 +350,10 @@ export const ENTITY_METADATA = {
  * candado de solo lectura del resto del servidor.
  */
 export const TOOL_CAPABILITIES = {
-  totalTools: 34,
+  /** 49 con «Consultar a un agente» encendido (CORREO_AGENTE_HABILITADO=true); 44 si está apagado. */
+  get totalTools(): number {
+    return correoAgenteHabilitado() ? 49 : 49 - CORREO_AGENTE_TOOLS.length;
+  },
   readOnly: [
     'kronos_metadata',
     'kronos_list_requests',
@@ -371,6 +377,11 @@ export const TOOL_CAPABILITIES = {
     'teams_list_transcripts',
     'teams_get_transcript',
     ...BITACORA_TOOLS,
+    // «Consultar a un agente» (Correo, 2026-10-16): lectura SOLO del hilo compartido (concesión de 24 h).
+    'correo_hilo_compartido',
+    'correo_adjunto_compartido',
+    // Proyectos (2026-10-18): lo que VE la persona de la concesión de 24 h (chat_project_grant).
+    ...PROYECTOS_TOOLS_LECTURA,
   ],
   write: [
     'kronos_categorize_case',
@@ -382,9 +393,20 @@ export const TOOL_CAPABILITIES = {
     'kronos_delete_attachment',
     'kronos_set_request_fields',
     'kronos_request_ia_access',
+    // Propuestas sobre un hilo compartido: NO ejecutan; quedan PENDIENTES hasta que la persona confirma.
+    'correo_proponer_respuesta',
+    'correo_crear_solicitud_desde_hilo',
+    'correo_agregar_nota',
+    // Proyectos: PROPUESTAS a nombre de la persona de la concesión; solo ella las confirma en SynerLink.
+    ...PROYECTOS_TOOLS_PROPUESTA,
   ],
+  /**
+   * Administración de usuarios (2026-10-22, solicitud #6283): solo se registran para las
+   * llaves con el bloque `usuarios` en MCP_API_KEYS. No cuentan en totalTools.
+   */
+  usuarios: [...USUARIOS_TOOLS],
   writeNote:
-    'El servidor tiene rutas de escritura acotadas: categorización (caso: category_case; solicitud: process_category_request_general), creación de solicitudes (kronos_create_request: inserta requests_general + workflow + notificaciones), notas de bitácora (kronos_add_note) y resolución de actividades del workflow (kronos_resolve_task: cierra task_request_general con id_status=2 + date_resolution/end_date + id_executor_final, respetando el gate secuencial y avanzando el flujo), subida de adjuntos a OneDrive (kronos_upload_attachment: carpeta SAPSEND/TEC/SG/Request-<id> o SAPSEND/TEC/MA/Ticket-<id>, sin sobrescribir archivos existentes), eliminación de adjuntos (kronos_delete_attachment: solo key admin + usuario con doble llave de la app, justificación obligatoria, rechaza documentos con flujo de firma Orion y deja nota en la bitácora) y diligenciamiento del formulario dinámico (kronos_set_request_fields: UPSERT en request_form_value, sin campos de firma Orion ni solicitudes cerradas) y radicación de solicitudes de conectores IA a nombre de una persona (kronos_request_ia_access: la empresa se deduce del permiso de la persona sobre el agente de la key, nunca GSS; tope diario y sin duplicados). Todas parametrizadas, validadas por alcance de empresa y auditadas. El candado assertReadOnlySql sigue intacto para las tools de lectura.',
+    'El servidor tiene rutas de escritura acotadas: categorización (caso: category_case; solicitud: process_category_request_general), creación de solicitudes (kronos_create_request: inserta requests_general + workflow + notificaciones), notas de bitácora (kronos_add_note) y resolución de actividades del workflow (kronos_resolve_task: cierra task_request_general con id_status=2 + date_resolution/end_date + id_executor_final, respetando el gate secuencial y avanzando el flujo), subida de adjuntos a OneDrive (kronos_upload_attachment: carpeta SAPSEND/TEC/SG/Request-<id> o SAPSEND/TEC/MA/Ticket-<id>, sin sobrescribir archivos existentes), eliminación de adjuntos (kronos_delete_attachment: solo key admin + usuario con doble llave de la app, justificación obligatoria, rechaza documentos con flujo de firma Orion y deja nota en la bitácora) y diligenciamiento del formulario dinámico (kronos_set_request_fields: UPSERT en request_form_value, sin campos de firma Orion ni solicitudes cerradas) y radicación de solicitudes de conectores IA a nombre de una persona (kronos_request_ia_access: la empresa se deduce del permiso de la persona sobre el agente de la key, nunca GSS; tope diario y sin duplicados), y PROPUESTAS sobre Proyectos (proyecto_proponer_*: solo insertan chat_project_proposal pendiente + aviso en el chat + auditoría; nada se ejecuta sin la confirmación de la persona en SynerLink). Todas parametrizadas, validadas por alcance de empresa y auditadas. El candado assertReadOnlySql sigue intacto para las tools de lectura.',
 } as const;
 
 /**
@@ -416,6 +438,18 @@ export function registerTools(rawServer: McpServer, ctx: ToolContext): void {
 
   // Radicación de solicitudes de conectores IA a nombre de una persona.
   registerIaAccessTool(server, ctx);
+
+  // Administración de usuarios: SOLO llaves con el bloque `usuarios` (src/tools/usuarios.ts).
+  registerUsuariosTools(server, { scope: ctx.scope, audit: ctx.audit });
+
+  // «Consultar a un agente» desde el Correo: 2 lecturas del hilo compartido + 3 PROPUESTAS que la
+  // persona confirma en el chat (src/tools/correoAgente.ts).
+  // Solo con CORREO_AGENTE_HABILITADO=true (apagado por defecto, pendiente de Gobierno IA).
+  if (correoAgenteHabilitado()) registerCorreoAgenteTools(server, { scope: ctx.scope, audit: ctx.audit });
+
+  // Proyectos y su cronograma (2026-10-18): 4 lecturas + 6 PROPUESTAS a nombre de la persona de
+  // la concesión, que solo ella confirma en SynerLink (src/tools/proyectos.ts).
+  registerProyectosTools(server, { scope: ctx.scope, audit: ctx.audit });
 
   // Bitácora de Proceso (planta): 4 tools de SOLO LECTURA (src/tools/bitacoraProceso.ts).
   registerBitacoraTools(server, {

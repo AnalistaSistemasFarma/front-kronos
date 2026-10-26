@@ -1,4 +1,5 @@
 import { inheritsParentNumber, parseChildSequence, type SgcCodingGuideInput } from './coding';
+import { SGC_HIERARCHY_TYPE_BY_CHILD, findListedParent, parentChildError } from './hierarchy';
 import type { SgcRelationType } from './relations';
 
 /**
@@ -14,6 +15,12 @@ import type { SgcRelationType } from './relations';
  *                 separador (OLP-GCC-02-FO01 → OLP-GCC-02), cuando el padre no
  *                 es de un tipo que hereda.
  * Nunca se propone lo que ya está relacionado (en cualquier sentido o tipo).
+ *
+ * 2026-10-19 (documentos padre e hijos): con `parentTypeCodes` solo se propone
+ * lo que cumple las reglas (el padre es de un tipo padre, el padre no tiene
+ * padre y un hijo tiene un solo padre: `parentOf` = padres que ya existen).
+ * El código del padre del listado se acepta con o sin el sufijo de versión
+ * («OLP-GGC-01-PR» ↔ «OLP-GGC-01-PR-1»), como llega en el listado de Calidad.
  */
 
 export interface SgcProposalDoc {
@@ -39,7 +46,7 @@ export interface SgcRelationProposal {
  * un formato «es formato de» su procedimiento; un anexo «es anexo de»; el
  * resto (instructivos…) cuelga con «procedimiento padre» (padre → hijo).
  */
-export const SGC_PROPOSAL_TYPE_BY_CHILD: Readonly<Record<string, SgcRelationType>> = { FO: 'formato', FR: 'formato', AN: 'anexo' };
+export const SGC_PROPOSAL_TYPE_BY_CHILD: Readonly<Record<string, SgcRelationType>> = SGC_HIERARCHY_TYPE_BY_CHILD;
 
 /** Relación propuesta entre un padre y un hijo, con el sentido de su tipo. */
 export function proposalFor(parent: SgcProposalDoc, child: SgcProposalDoc, origin: SgcRelationProposal['origin'], reason: string): SgcRelationProposal {
@@ -59,22 +66,25 @@ const SEP = /^[-._\s]/;
  */
 export function proposeRelations(
   docs: readonly SgcProposalDoc[],
-  opts: { guide: SgcCodingGuideInput | null; listParents: ReadonlyMap<number, string>; related: ReadonlySet<string> }
+  opts: { guide: SgcCodingGuideInput | null; listParents: ReadonlyMap<number, string>; related: ReadonlySet<string>; parentTypeCodes?: readonly string[] | null; parentOf?: ReadonlyMap<number, number> | null }
 ): SgcRelationProposal[] {
   const live = docs.filter((d) => d.status !== 'anulado');
-  const byCode = new Map(live.map((d) => [d.code.toUpperCase(), d]));
   const seen = new Set(opts.related);
+  const rules = opts.parentTypeCodes ?? null;
+  const parentOf = new Map(opts.parentOf ?? []);
   const out: SgcRelationProposal[] = [];
   const push = (parent: SgcProposalDoc, child: SgcProposalDoc, origin: SgcRelationProposal['origin'], reason: string) => {
     if (parent.id === child.id) return;
     const key = pairKey(parent.id, child.id);
     if (seen.has(key)) return;
+    if (rules && parentChildError(parent, child, rules, parentOf)) return;
     seen.add(key);
+    parentOf.set(child.id, parent.id);
     out.push(proposalFor(parent, child, origin, reason));
   };
   for (const child of live) {
     const listed = opts.listParents.get(child.id);
-    const parent = listed ? byCode.get(listed.toUpperCase()) : undefined;
+    const parent = listed ? findListedParent(listed, live, rules ?? undefined) : null;
     if (parent) push(parent, child, 'listado', `El listado maestro indica que ${child.code} se desprende de ${parent.code}.`);
   }
   for (const child of live) {

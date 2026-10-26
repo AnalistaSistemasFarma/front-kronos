@@ -54,7 +54,7 @@ Los catálogos son globales (compartidos por todas las empresas), así que se ex
 
 ---
 
-## 2. Tools disponibles (34: 25 lectura + 9 escritura)
+## 2. Tools disponibles (39: 27 lectura + 12 escritura, 3 de ellas solo PROPONEN)
 
 ### 2.1 Lectura (21)
 
@@ -114,6 +114,34 @@ Ambas hacen **UPSERT** sobre su tabla puente (UPDATE; si afecta 0 filas, INSERT)
 **Sanitización:** `kronos_list_users` solo devuelve `id, name, email, isActive, role, phone, identification, createdAt`. Nunca `password`, `emailVerified`, cuentas/tokens ni sesiones.
 
 ---
+
+### 2.4 Correo · «Consultar a un agente» (2026-10-16)
+
+Diseño aprobado por Nicolás Rivera (2026-10-16 09:24–09:27): desde un hilo del módulo Correo, la
+persona COMPARTE ese hilo con uno de SUS agentes del chat (concesión `email_agent_share`, 24 h,
+revocable). El agente recibe en el chat un mensaje con el contexto y el `share_id` (`cs_…`, opaco).
+Implementación: `src/tools/correoAgente.ts` (herramientas), `src/correo/concesion.ts` (alcance,
+propuestas, auditoría) y `src/correo/graph.ts` (lectura de Graph).
+
+| Tool | Tipo | Qué hace |
+|---|---|---|
+| `correo_hilo_compartido` | Lectura | Mensajes del hilo (texto saneado, sin historial citado, con topes) y adjuntos con `attachment_id`. |
+| `correo_adjunto_compartido` | Lectura | Un adjunto del MISMO hilo (≤ 5 MB): texto, imagen o base64. |
+| `correo_proponer_respuesta` | Propuesta | NO envía: deja una acción PENDIENTE y una tarjeta en el chat. |
+| `correo_crear_solicitud_desde_hilo` | Propuesta | NO crea: la persona revisa empresa, proceso, solicitante y confirma. |
+| `correo_agregar_nota` | Propuesta | NO escribe: nota para la solicitud vinculada, si existe. |
+
+Reglas: el agente sale de la llave (`agentCode` o, si falta, `agent` = `agent.code`); la concesión
+debe ser de ESE agente, vigente y sin revocar; la persona activa, con el agente asignado
+(subproceso + empresa del agente) y el chat directo intacto. Cualquier falla da el MISMO rechazo y
+queda `AGENTE_DENEGADO` en `dbo.email_audit`. El buzón sale de la concesión, nunca del agente;
+Graph solo con GET bajo `/users/{buzón de la concesión}`. Solo el clic de la persona en SynerLink
+ejecuta (front: `lib/correo/agente.ts`). Lecturas y propuestas quedan en `email_audit`
+(`AGENTE_LEER_HILO`, `AGENTE_LEER_ADJUNTO`, `AGENTE_PROPONER`) y en el log del MCP (sin los cuerpos).
+
+Variables: las mismas `CORREO_*` del front (`CORREO_MODO`, `CORREO_INQUILINOS`, `CORREO_<K>_*`).
+`serve.mjs` las toma del `.env` del front (carpeta padre) si `mcp/.env` no las trae; ninguna otra
+variable del front entra al MCP.
 
 ## 3. Configuración de keys y alcance
 
@@ -314,3 +342,36 @@ Cubre (vitest, Prisma mockeado — no requiere DB real):
 
 El script `sql/proceso-conectores-ia.template.sql` crea el proceso por empresa (copia de 249 con otro autorizador), idempotente y con verificación de `DB_NAME()`.
 
+
+## Administración de usuarios por agente: `kronos_usuarios_consultar` y `kronos_usuarios_crear` (2026-10-22)
+
+Solicitud #6283 / tarea #7541. Solo se registran para las llaves que traen el bloque `usuarios`
+(además de `allowedTools` y `agentCode`, que son obligatorios con ese bloque). Las llaves históricas
+sin lista blanca (horus, nancy) **no** las ven.
+
+```json
+{ "key": "<secreto>", "agent": "ia-mechita", "agentCode": "mechita", "role": "agent", "companyIds": [8],
+  "allowedTools": ["kronos_usuarios_consultar", "kronos_usuarios_crear"],
+  "usuarios": {
+    "solicitantes": ["nicolas.rojas@gsslatam.com"],
+    "companyIds": [8],
+    "departmentIds": [],
+    "subprocessIds": [13],
+    "dominios": ["gsslatam.com"],
+    "maxPorHora": 3, "maxPorDia": 10, "exigirEntra": true } }
+```
+
+- **Consultar** (solo lectura, por `queryReadOnly`): nombre, correo, activo, rol, empresas (solo las de
+  `usuarios.companyIds`; las demás se cuentan), departamentos y agentes del chat. Nunca contraseña,
+  tokens, teléfono, identificación ni NIT. Incluye cuentas sin ninguna empresa (a medio crear).
+- **Crear** (escritura acotada, una transacción): solo rol `user`; solicitante en `usuarios.solicitantes`
+  y activo; correo válido, de un dominio permitido, inexistente y (con `exigirEntra`) habilitado y con
+  licencia en Entra (`GET /users/{correo}`, requiere `User.Read.All` en la app de Graph del servidor);
+  empresa, departamentos y subprocesos solo de la lista blanca. **Nunca** se asignan, aunque estén en la
+  lista: `/process/administration/*` (Usuarios, 12), `/process/chat/*` (módulo Chat, agentes, auditoría de
+  agentes, Personas), permisos de agentes en Proyectos, administración de flujos ni ningún subproceso de
+  un agente. Tope por hora y por día contado en `user_audit_log` (`performed_by` =
+  `agente:<code> (kronos-mcp) a pedido de <correo>`). Contraseña inicial aleatoria única (bcryptjs costo 12,
+  igual que `POST /api/users`), devuelta una sola vez y nunca auditada.
+- **Orden de despliegue:** primero el código y después la llave. Un servidor anterior no conoce estas
+  herramientas y, con ellas en `allowedTools`, **no arranca**.

@@ -65,7 +65,7 @@ export function avisosApertura(a: AvisoBitacora): OtNotificacion[] {
       emails: insp,
       payload: {
         title: OT_NOTIF_TITULOS.inspectorAsignado,
-        body: `${a.actorNombre} abrió ${referencia(a)} y lo designó inspector. Después del cierre del supervisor le corresponde su visto bueno.`,
+        body: `${a.actorNombre} abrió ${referencia(a)} y lo designó inspector. Después del cierre (del supervisor o del jefe de producción) le corresponde su visto bueno.`,
         url,
         tag: `ot-${a.idOrden}-inspector`,
       },
@@ -77,7 +77,7 @@ export function avisosApertura(a: AvisoBitacora): OtNotificacion[] {
       emails: jefe,
       payload: {
         title: OT_NOTIF_TITULOS.jefeAsignado,
-        body: `${a.actorNombre} abrió ${referencia(a)} y lo designó jefe de producción. Su visto bueno es el último, después del inspector.`,
+        body: `${a.actorNombre} abrió ${referencia(a)} y lo designó jefe de producción. Usted también puede cerrarla; si la cierra el supervisor, su visto bueno es el último, después del inspector.`,
         url,
         tag: `ot-${a.idOrden}-jefe`,
       },

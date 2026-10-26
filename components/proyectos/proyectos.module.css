@@ -1,0 +1,348 @@
+/*
+ * Módulo «Proyectos» — misma pantalla que el módulo Correo (components/correo/correo.module.css):
+ * ocupa el alto de la ventana bajo la barra de SynerLink, el encabezado es de UNA línea y cada
+ * zona se desplaza por dentro (la página no). Solo variables de Mantine y de la aplicación, así
+ * que el tema claro y el oscuro salen solos. Corte de celular/tableta: 62em (992 px), el mismo
+ * del chat y del Correo.
+ */
+
+.pantalla {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: calc(100vh - var(--app-header-height, 4rem));
+  height: calc(100dvh - var(--app-header-height, 4rem));
+  max-width: 1920px;
+  margin: 0 auto;
+  padding: 8px 8px 8px;
+  background: var(--mantine-color-body);
+  overflow: hidden;
+  /* Nada se sale por los lados en el celular: los textos largos se cortan con «…». */
+  min-width: 0;
+  width: 100%;
+}
+
+@media (min-width: 62em) {
+  .pantalla {
+    padding: 10px 16px 12px 16px;
+  }
+}
+
+.encabezado {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 4px;
+  min-width: 0;
+}
+
+.truncar {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Lista de proyectos ---- */
+.barra {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 0 4px;
+}
+
+.buscador {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.listaScroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 4px 16px;
+}
+
+.rejilla {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 12px;
+}
+
+.tarjeta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.tarjeta:hover,
+.tarjeta:focus-visible {
+  border-color: var(--mantine-primary-color-filled);
+  box-shadow: var(--mantine-shadow-sm);
+}
+
+/* ---- Un proyecto ---- */
+.layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 12px;
+}
+
+@media (min-width: 94em) {
+  .layout {
+    grid-template-columns: 380px minmax(0, 1fr);
+  }
+}
+
+.columna {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cabeceraProyecto {
+  flex: 0 0 auto;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--app-border, var(--mantine-color-default-border));
+  min-width: 0;
+}
+
+.desplazable {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+}
+
+@media (min-width: 62em) {
+  .panel {
+    padding: 16px 20px;
+  }
+}
+
+/* El hilo del chat (ChatThread) llena la columna derecha. */
+.hilo {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.fila {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 10px;
+  border-radius: var(--mantine-radius-md);
+  text-align: left;
+}
+
+.filaBoton {
+  cursor: pointer;
+}
+
+.filaBoton:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.filaActiva {
+  background: var(--mantine-primary-color-light);
+}
+
+.filaActiva:hover {
+  background: var(--mantine-primary-color-light-hover);
+}
+
+.item {
+  min-width: 0;
+}
+
+/* Pestañas del celular: una sola fila que se desplaza de lado (nunca dos renglones). */
+.pestanas {
+  flex: 0 0 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -8px;
+  padding: 0 8px;
+}
+
+.pestanas::-webkit-scrollbar {
+  display: none;
+}
+
+.pestanas :global(.mantine-Tabs-list) {
+  flex-wrap: nowrap;
+}
+
+.pestanas :global(.mantine-Tabs-tab) {
+  min-height: 44px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+/* Objetivos táctiles de 44 px o más en celular y tableta. */
+@media (max-width: 61.99em) {
+  .pantalla :global(.mantine-Button-root),
+  .modalTactil :global(.mantine-Button-root) {
+    min-height: 44px;
+  }
+
+  .pantalla :global(.mantine-ActionIcon-root),
+  .modalTactil :global(.mantine-ActionIcon-root) {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .pantalla :global(.mantine-SegmentedControl-control) {
+    min-height: 40px;
+  }
+
+  .pantalla :global(.mantine-TextInput-input),
+  .modalTactil :global(.mantine-TextInput-input),
+  .modalTactil :global(.mantine-Textarea-input),
+  .modalTactil :global(.mantine-Select-input),
+  .modalTactil :global(.mantine-NativeSelect-input),
+  .modalTactil :global(.mantine-NumberInput-input) {
+    min-height: 44px;
+    /* 16 px: iOS no hace zoom al enfocar. */
+    font-size: 16px;
+  }
+
+  .modalTactil :global(.mantine-Checkbox-body),
+  .modalTactil :global(.mantine-Radio-body) {
+    min-height: 44px;
+    align-items: center;
+  }
+}
+
+/* Pie fijo de los modales en celular: las acciones siempre a la vista. */
+.pieModal {
+  position: sticky;
+  bottom: 0;
+  background: var(--mantine-color-body);
+  padding-top: 8px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+  margin-top: 8px;
+  border-top: 1px solid var(--app-border, var(--mantine-color-default-border));
+}
+
+.resumen {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.opcion {
+  border: 1px solid var(--app-border, var(--mantine-color-default-border));
+  border-radius: var(--mantine-radius-md);
+  padding: 10px 12px;
+  cursor: pointer;
+  min-height: 52px;
+}
+
+.opcion[data-checked='true'] {
+  border-color: var(--mantine-primary-color-filled);
+  background: var(--mantine-primary-color-light);
+}
+
+.opcion[data-disabled='true'] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tarjeta {
+    transition: none;
+  }
+}
+
+/* ---- Estado en vivo del agente (2026-10-20): «Orus está trabajando…» ---- */
+.estadoAgente {
+  min-width: 0;
+  margin-top: 2px;
+}
+
+/* La tablita de sub-agentes del chat, alineada con el texto de la tarjeta. */
+.subagentes {
+  min-width: 0;
+}
+
+.subagentes :global(.chat-tasks) {
+  margin-left: 0;
+  margin-top: 4px;
+}
+
+/* Medidor del consumo de Anthropic (2026-10-22): píldora compacta en la barra superior. */
+.medidorFila {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.medidorPildora {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 3px 10px;
+  border: 1px solid var(--app-border, var(--mantine-color-default-border));
+  border-radius: var(--mantine-radius-xl);
+  background: var(--mantine-color-default);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.medidorPildora:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.medidorPildora:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 2px;
+}
+
+.medidorPildora[data-vieja] {
+  opacity: 0.7;
+}
+
+.medidorIndicador {
+  flex: 0 0 auto;
+}
+
+.medidorPorcentaje {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Celular: la píldora va en la barra superior, bajo el título y alineada a la derecha. */
+.medidorMovil {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 4px 4px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.medidorMovil::-webkit-scrollbar {
+  display: none;
+}

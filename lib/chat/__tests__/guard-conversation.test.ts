@@ -11,6 +11,7 @@ const findConversation = vi.hoisted(() => vi.fn());
 const ownership = vi.hoisted(() => vi.fn());
 const groupAccess = vi.hoisted(() => vi.fn());
 const peopleAccess = vi.hoisted(() => vi.fn());
+const projectAccess = vi.hoisted(() => vi.fn());
 
 vi.mock('next-auth', () => ({ getServerSession: session }));
 vi.mock('../../../app/api/auth/[...nextauth]/route', () => ({ authOptions: {} }));
@@ -23,6 +24,7 @@ vi.mock('../../prisma', () => ({
 vi.mock('../access', () => ({ assertConversationOwnership: ownership }));
 vi.mock('../groups', () => ({ assertGroupAccess: groupAccess }));
 vi.mock('../people', () => ({ assertPeopleAccess: peopleAccess }));
+vi.mock('../projects', () => ({ assertProjectConversationAccess: projectAccess }));
 
 import { guardConversation } from '../http';
 
@@ -63,6 +65,24 @@ describe('guardConversation', () => {
     findConversation.mockResolvedValue({ kind: 'people' });
     peopleAccess.mockResolvedValue(null);
     const guard = await guardConversation('11');
+    expect('response' in guard && guard.response.status).toBe(404);
+  });
+
+  it('una conversación de PROYECTO pasa solo por la puerta de proyectos', async () => {
+    findConversation.mockResolvedValue({ kind: 'project' });
+    projectAccess.mockResolvedValue({ conversationId: 40, idAgent: 21, idProject: 7, role: 'member' });
+    const guard = await guardConversation('40');
+    expect(guard).toMatchObject({ kind: 'project', conversationId: 40, idAgent: 21, idProject: 7, projectRole: 'member' });
+    expect(projectAccess).toHaveBeenCalledWith({ id: 'u1', email: 'ana@gsslatam.com' }, 40);
+    expect(ownership).not.toHaveBeenCalled();
+    expect(groupAccess).not.toHaveBeenCalled();
+    expect(peopleAccess).not.toHaveBeenCalled();
+  });
+
+  it('un NO miembro de un proyecto recibe 404 (no ve ni escribe en el hilo)', async () => {
+    findConversation.mockResolvedValue({ kind: 'project' });
+    projectAccess.mockResolvedValue(null);
+    const guard = await guardConversation('40');
     expect('response' in guard && guard.response.status).toBe(404);
   });
 

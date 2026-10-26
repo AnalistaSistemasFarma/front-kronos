@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useMemo, useState, useEffect, useRef } from 'react';
+import { Suspense, useMemo, useState, useEffect, useRef, type CSSProperties } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
@@ -31,6 +31,7 @@ import {
   Tooltip,
   ThemeIcon,
   UnstyledButton,
+  SimpleGrid,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import {
@@ -149,6 +150,15 @@ const getStatusLabel = (status: string) => {
   }
 };
 
+/** Columna Acciones fija a la derecha: Autorizar/Rechazar visibles aunque la tabla se desplace. */
+const STICKY_ACTIONS_STYLE: CSSProperties = {
+  position: 'sticky',
+  right: 0,
+  zIndex: 1,
+  backgroundColor: 'var(--mantine-color-body)',
+  boxShadow: '-8px 0 8px -8px rgba(0, 0, 0, 0.25)',
+};
+
 const DATE_CELL_FORMAT: Intl.DateTimeFormatOptions = {
   day: '2-digit',
   month: '2-digit',
@@ -196,6 +206,9 @@ function AuthorizationBoard() {
     const searchParams = useSearchParams();
     const deepLinkHandledRef = useRef(false);
     const isMobile = useMediaQuery('(max-width: 768px)');
+    // La tabla tiene muchas columnas: hasta este ancho (tablet / media pantalla) se ven
+    // tarjetas, para que Autorizar y Rechazar no queden escondidos a la derecha.
+    const useCardLayout = useMediaQuery('(max-width: 1100px)');
 
     const [loading, setLoading] = useState(false);
     /** Overlay a pantalla completa tras autorizar firma (hasta navegar al documento). */
@@ -286,6 +299,9 @@ function AuthorizationBoard() {
     const someSelectableSelected = selectableRequests.some((r) => selectedIds.has(r.id));
 
     const getUserIdByName = async (userName: string): Promise<string | null> => {
+        // La sesión ya trae el id de Kronos (callback jwt, buscado por correo): sin viaje extra al
+        // servidor ni búsqueda por NOMBRE, que con dos personas homónimas podía traer el id equivocado.
+        if (session?.user?.id) return session.user.id;
         if (!session || status !== 'authenticated') {
             console.error('No hay sesión activa para realizar esta operación');
             return null;
@@ -893,11 +909,17 @@ function AuthorizationBoard() {
                 </Group>
             ) : null}
             </Table.Td>
-            <Table.Td>
+            <Table.Td style={{ maxWidth: 220 }}>
             <Group gap={4} wrap='nowrap'>
-                <IconBuilding size={14} className='text-gray-400' />
-                <Text size='sm' className='truncate'>
+                <IconBuilding size={14} className='text-gray-400' style={{ flexShrink: 0 }} />
+                <Text size='sm' lineClamp={1} title={req.company}>
                 {req.company}
+                </Text>
+            </Group>
+            <Group gap={4} wrap='nowrap' mt={4}>
+                <IconUser size={14} className='text-gray-400' style={{ flexShrink: 0 }} />
+                <Text size='xs' c='dimmed' lineClamp={1} title={req.requester}>
+                {req.requester}
                 </Text>
             </Group>
             </Table.Td>
@@ -915,12 +937,6 @@ function AuthorizationBoard() {
                         {isDraftReviewRow(req) ? 'Validación · Word' : 'Validación'}
                     </Badge>
                 ) : null}
-            </Group>
-            </Table.Td>
-            <Table.Td>
-            <Group gap={4} wrap='nowrap'>
-                <IconUser size={14} className='text-gray-400' />
-                <Text size='sm'>{req.requester}</Text>
             </Group>
             </Table.Td>
             <Table.Td>
@@ -943,7 +959,7 @@ function AuthorizationBoard() {
                     {getStatusLabel(req.status)}
                 </Badge>
             </Table.Td>
-            <Table.Td>
+            <Table.Td style={STICKY_ACTIONS_STYLE}>
             <Group gap='xs' wrap='nowrap'>
                 {isLinked ? (
                 <Tooltip label={relatedLinkLabel(req)}>
@@ -1061,7 +1077,7 @@ function AuthorizationBoard() {
 
             <Group gap={6} wrap='nowrap'>
                 <IconBuilding size={14} className='text-gray-400' />
-                <Text size='sm'>{req.company}</Text>
+                <Text size='sm' lineClamp={1} title={req.company} style={{ minWidth: 0 }}>{req.company}</Text>
                 <Badge
                     variant='light'
                     color={isFirma ? 'violet' : 'indigo'}
@@ -1431,7 +1447,7 @@ function AuthorizationBoard() {
                 <IconShieldCheck size={20} />
                 Solicitudes por autorizar
                 </Title>
-                {!isMobile && selectableRequests.length > 0 && (
+                {!useCardLayout && selectableRequests.length > 0 && (
                 <Checkbox
                     label='Seleccionar todo'
                     checked={allSelectableSelected}
@@ -1451,7 +1467,7 @@ function AuthorizationBoard() {
                     No hay solicitudes que coincidan con los filtros
                 </Text>
                 </Stack>
-            ) : isMobile ? (
+            ) : useCardLayout ? (
                 <Stack gap='sm'>
                 {selectableRequests.length > 0 && (
                     <Checkbox
@@ -1461,7 +1477,9 @@ function AuthorizationBoard() {
                     onChange={toggleSelectAll}
                     />
                 )}
-                {filteredRequests.map((req, index) => renderCard(req, index))}
+                <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
+                    {filteredRequests.map((req, index) => renderCard(req, index))}
+                </SimpleGrid>
                 </Stack>
             ) : (
                 <div className='overflow-x-auto'>
@@ -1479,12 +1497,11 @@ function AuthorizationBoard() {
                         </Table.Th>
                         <Table.Th>ID</Table.Th>
                         <Table.Th>Asunto</Table.Th>
-                        <Table.Th>Empresa</Table.Th>
+                        <Table.Th>Empresa / Solicitante</Table.Th>
                         <Table.Th>Tipo de autorización</Table.Th>
-                        <Table.Th>Solicitante</Table.Th>
                         <Table.Th>Fecha</Table.Th>
                         <Table.Th>Estado</Table.Th>
-                        <Table.Th>Acciones</Table.Th>
+                        <Table.Th style={STICKY_ACTIONS_STYLE}>Acciones</Table.Th>
                     </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>

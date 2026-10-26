@@ -315,6 +315,10 @@ function ViewWorkFlowPage() {
   }, []);
 
   const getUserIdByName = async (userName: string): Promise<number | null> => {
+// La sesión ya trae el id de Kronos (callback jwt, buscado por correo): sin viaje extra al
+// servidor ni búsqueda por NOMBRE, que con dos personas homónimas podía traer el id equivocado.
+// (El id es un cuid de texto; este archivo lo tipa como número, igual que lo que devolvía la API.)
+if (session?.user?.id) return session.user.id as unknown as number;
 
     if (!userName || userName.trim() === '') {
       console.error('El nombre de usuario es requerido');

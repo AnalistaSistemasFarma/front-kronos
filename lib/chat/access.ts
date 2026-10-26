@@ -1,4 +1,5 @@
 import { prisma } from '../prisma';
+import { projectsEnabledFor } from './projects-rules';
 
 /**
  * Resolución de permisos del módulo "Asistentes IA" (chat de agentes).
@@ -83,6 +84,8 @@ export interface ChatAgentAccess {
    * usted"— y es lo que pinta el aro alrededor del avatar.
    */
   busy: boolean;
+  /** Tiene PROYECTOS habilitados (CHAT_PROJECTS_AGENTS, lib/chat/projects-rules.ts). */
+  projectsEnabled: boolean;
 }
 
 /** Resultado completo de la resolución de permisos del módulo. */
@@ -103,25 +106,73 @@ export interface ChatAccess {
  * agent_company para no mostrar un agente en una empresa a la que no
  * pertenece.
  */
-export async function getChatAccess(userEmail: string): Promise<ChatAccess> {
-  // Agentes activos que ya tienen su subproceso-permiso creado. Un agente sin
-  // id_subprocess es invisible para todos: no hay forma de otorgarlo.
-  const agents = await prisma.agent.findMany({
+/**
+ * CACHÉ CORTA (2026-10-22, rendimiento): getChatAccess corre en /api/chat/access, en
+ * /api/chat/conversations y en cada endpoint que valida un agente o una conversación, y
+ * cada vez eran ~8 consultas (los `include` de Prisma son consultas aparte). El catálogo
+ * de agentes y los permisos del usuario se reutilizan unos segundos; el estado «ocupado»
+ * (marcarAgentesOcupados) se sigue leyendo fresco en cada llamada.
+ * Un permiso asignado o quitado tarda como mucho CHAT_ACCESS_CACHE_MS en notarse (en el
+ * proceso que lo cambió es inmediato: invalidateChatAccessCache).
+ */
+export const CHAT_ACCESS_CACHE_MS = 30_000;
+
+type CacheEntry<T> = { at: number; promise: Promise<T> };
+
+const chatAccessCache = ((globalThis as Record<string, unknown>).__kronosChatAccessCache ??= {
+  catalog: null,
+  grants: new Map(),
+}) as {
+  catalog: CacheEntry<AgentCatalog> | null;
+  grants: Map<string, CacheEntry<GrantRow[]>>;
+};
+
+/** Olvida la caché (todo, o solo la de un usuario). Llamar tras cambiar agentes o permisos. */
+export function invalidateChatAccessCache(userEmail?: string): void {
+  if (userEmail === undefined) {
+    chatAccessCache.catalog = null;
+    chatAccessCache.grants.clear();
+    return;
+  }
+  chatAccessCache.grants.delete(userEmail.trim().toLowerCase());
+}
+
+function cached<T>(
+  get: () => CacheEntry<T> | null | undefined,
+  load: () => Promise<T>,
+  store: (e: CacheEntry<T> | null) => void
+): Promise<T> {
+  const entry = get();
+  if (entry && Date.now() - entry.at < CHAT_ACCESS_CACHE_MS) return entry.promise;
+  const promise = load();
+  store({ at: Date.now(), promise });
+  // Un error no se queda guardado: la siguiente llamada vuelve a consultar.
+  promise.catch(() => {
+    if (get()?.promise === promise) store(null);
+  });
+  return promise;
+}
+
+// Agentes activos que ya tienen su subproceso-permiso creado. Un agente sin
+// id_subprocess es invisible para todos: no hay forma de otorgarlo.
+function loadAgentCatalog() {
+  return prisma.agent.findMany({
     where: { is_active: true, id_subprocess: { not: null } },
     include: {
       companies: { include: { company: true } },
     },
     orderBy: [{ sort_order: 'asc' }, { display_name: 'asc' }],
   });
+}
+type AgentCatalog = Awaited<ReturnType<typeof loadAgentCatalog>>;
 
-  const agentBySubprocessId = new Map(agents.map((a) => [a.id_subprocess as number, a]));
-
-  const rows = await prisma.subprocessUserCompany.findMany({
+function loadGrants(userEmail: string, agentSubprocessIds: number[]) {
+  return prisma.subprocessUserCompany.findMany({
     where: {
       companyUser: { user: { email: userEmail } },
       OR: [
         { subprocess: { subprocess_url: CHAT_MODULE_URL } },
-        { id_subprocess: { in: [...agentBySubprocessId.keys()] } },
+        { id_subprocess: { in: agentSubprocessIds } },
       ],
     },
     include: {
@@ -129,6 +180,25 @@ export async function getChatAccess(userEmail: string): Promise<ChatAccess> {
       companyUser: { include: { company: true } },
     },
   });
+}
+type GrantRow = Awaited<ReturnType<typeof loadGrants>>[number];
+
+export async function getChatAccess(userEmail: string): Promise<ChatAccess> {
+  const agents = await cached(() => chatAccessCache.catalog, loadAgentCatalog, (e) => {
+    chatAccessCache.catalog = e;
+  });
+
+  const agentBySubprocessId = new Map(agents.map((a) => [a.id_subprocess as number, a]));
+
+  const grantsKey = userEmail.trim().toLowerCase();
+  const rows = await cached(
+    () => chatAccessCache.grants.get(grantsKey),
+    () => loadGrants(userEmail, [...agentBySubprocessId.keys()]),
+    (e) => {
+      if (e) chatAccessCache.grants.set(grantsKey, e);
+      else chatAccessCache.grants.delete(grantsKey);
+    }
+  );
 
   // Empresas donde el usuario tiene el acceso al módulo.
   const moduleCompanies = new Map<number, ChatAgentCompanyAccess>();
@@ -190,6 +260,7 @@ export async function getChatAccess(userEmail: string): Promise<ChatAccess> {
       companies,
       // Se llena abajo, de una sola consulta para todos.
       busy: false,
+      projectsEnabled: projectsEnabledFor(agent.code),
     });
   }
 

@@ -86,6 +86,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     let requester: ChatAttachmentRequester;
     let sessionEmail: string | null = null;
+    // Alcance de la llave del agente (lib/chat/agent-keys.ts): la del puente
+    // de hilos solo baja adjuntos de PROYECTOS; la del bot vivo, nunca de uno.
+    let agentScope: 'channel' | 'projects' | null = null;
 
     if (request.headers.get('authorization')) {
       // Si trae Bearer, se resuelve como agente o no se resuelve: no se cae de
@@ -94,6 +97,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       const agent = await authenticateAgent(request);
       if (!agent) return unauthorized();
       requester = { kind: 'agent', idAgent: agent.idAgent };
+      agentScope = agent.scope;
     } else {
       const user = await resolveSessionUser();
       if (!user) return unauthorized();
@@ -119,6 +123,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (!attachment) return notFound();
 
     const conversation = attachment.message.conversation;
+
+    if (agentScope !== null && (agentScope === 'projects') !== (conversation.kind === 'project')) {
+      return notFound();
+    }
 
     if (requester.kind === 'user' && conversation.kind !== 'direct') {
       // Grupo o personas: la misma puerta del hilo (ver arriba).
@@ -167,7 +175,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       headers.set('Cache-Control', 'private, max-age=600');
       headers.set('Content-Security-Policy', "default-src 'none'; sandbox");
     } else {
-      headers.set('Content-Type', safeDownloadContentType(attachment.content_type));
+      headers.set('Content-Type', safeDownloadContentType(attachment.content_type, attachment.file_name));
       headers.set('Content-Disposition', buildContentDisposition(attachment.file_name));
     }
     // El navegador NO debe adivinar el tipo: con `attachment` + `nosniff`, un

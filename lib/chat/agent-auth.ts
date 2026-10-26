@@ -43,8 +43,10 @@
 import { prisma } from '../prisma';
 import { extractBearer, loadAgentKeys, matchAgentKey } from './agent-keys';
 import { assertAgentGroup, type AgenteMencionable } from './groups';
+import type { ChatAgentKeyScope } from './agent-keys';
+import { assertAgentProjectConversation } from './projects';
 
-export type { ChatAgentKeyEntry } from './agent-keys';
+export type { ChatAgentKeyEntry, ChatAgentKeyScope } from './agent-keys';
 
 /** Identidad resuelta de un agente autenticado. */
 export interface ChatAgentIdentity {
@@ -59,6 +61,11 @@ export interface ChatAgentIdentity {
   avatarUrl: string | null;
   /** Etiqueta de la llave usada, para logs. Nunca es la llave. */
   keyLabel: string;
+  /**
+   * Alcance de la llave: 'channel' (bot vivo: directos y grupos) o
+   * 'projects' (puente de hilos: solo proyectos). Ver lib/chat/agent-keys.ts.
+   */
+  scope: ChatAgentKeyScope;
 }
 
 /**
@@ -91,6 +98,7 @@ export async function authenticateAgent(request: Request): Promise<ChatAgentIden
     displayName: agent.display_name,
     avatarUrl: agent.avatar_url ?? null,
     keyLabel: entry.label ?? entry.agent,
+    scope: entry.scope === 'projects' ? 'projects' : 'channel',
   };
 }
 
@@ -136,12 +144,31 @@ export async function assertAgentConversation(
  */
 export type AgentConversation =
   | { id: number; kind: 'direct'; idUser: string }
-  | { id: number; kind: 'group'; title: string | null; agentes: AgenteMencionable[] };
+  | { id: number; kind: 'group'; title: string | null; agentes: AgenteMencionable[] }
+  | { id: number; kind: 'project'; idProject: number; projectName: string };
 
+/**
+ * El ALCANCE de la llave decide qué puertas se prueban, y son excluyentes:
+ *   - 'projects' (puente de hilos): SOLO la puerta de proyectos.
+ *   - 'channel'  (bot vivo, por defecto): solo directos y grupos — nunca un
+ *     proyecto, aunque el proyecto sea de este mismo agente.
+ */
 export async function resolveAgentConversation(
   idAgent: number,
-  conversationId: unknown
+  conversationId: unknown,
+  scope: ChatAgentKeyScope = 'channel'
 ): Promise<AgentConversation | null> {
+  if (scope === 'projects') {
+    const proyecto = await assertAgentProjectConversation(idAgent, conversationId);
+    if (!proyecto) return null;
+    return {
+      id: proyecto.id,
+      kind: 'project',
+      idProject: proyecto.idProject,
+      projectName: proyecto.projectName,
+    };
+  }
+
   const directo = await assertAgentConversation(idAgent, conversationId);
   if (directo) return { id: directo.id, kind: 'direct', idUser: directo.idUser };
 

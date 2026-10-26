@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Puente de hilos de Play contra SynerLink de PRUEBAS. SERVICIO APARTE del bot
+  vivo (com.pedro.play): no comparte config, .env, llave ni sesión.
+
+  NO SE CARGA SOLO: RunAtLoad y KeepAlive en false. Se prende y se apaga a mano:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.gss.puente-hilos.play-pruebas.plist
+    launchctl kickstart gui/$(id -u)/com.gss.puente-hilos.play-pruebas     # prender
+    launchctl kill SIGTERM gui/$(id -u)/com.gss.puente-hilos.play-pruebas  # apagar (termina los turnos en curso)
+    launchctl bootout gui/$(id -u)/com.gss.puente-hilos.play-pruebas       # quitar
+
+  Reemplace __HOME__ y __REPO__ por rutas absolutas. Las variables se cargan de
+  ~/.puente-hilos/play-pruebas/.env (chmod 600) con run.sh; nada de secretos aquí.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.gss.puente-hilos.play-pruebas</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__REPO__/puente-hilos/launchd/run.sh</string>
+    <string>__HOME__/.puente-hilos/play-pruebas/.env</string>
+  </array>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>KeepAlive</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>__HOME__/.puente-hilos/play-pruebas/logs/stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.puente-hilos/play-pruebas/logs/stderr.log</string>
+</dict>
+</plist>

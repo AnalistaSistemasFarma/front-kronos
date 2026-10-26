@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button } from '@mantine/core';
-import { IconTable } from '@tabler/icons-react';
+import { Alert, Button, Group, Modal, Stack, Text } from '@mantine/core';
+import { IconAlertTriangle, IconTable } from '@tabler/icons-react';
 import { leerJson } from './PortalContenido';
 import {
   SubidaCancelada,
@@ -19,6 +19,7 @@ import {
   videoCompleto,
 } from '../../lib/portal/visor-revision';
 import { PanelRespuestas, PreviaDeMaterialFormulario, SelectorFormulario, VisorFormulario } from './FormularioPropio';
+import TopEstudiantes from './TopEstudiantes';
 
 /**
  * FORMACIÓN — sección "tipo Moodle" al final del portal de Talento Humano.
@@ -63,6 +64,8 @@ interface DetalleCurso {
   esFormador: boolean;
   /** Administrador/formador del Excel de permisos: puede marcar a mano. */
   puedeMarcarManual?: boolean;
+  /** Solo para formadores: lo que se muestra al confirmar «Eliminar curso». */
+  conteos?: { inscritos: number; certificados: number } | null;
   porcentaje: number;
   materiales: Material[];
   certificado: { code: string; emitidoEl: string } | null;
@@ -124,6 +127,8 @@ export default function PortalFormacion({ onSinSesion, cursoInicialId }: { onSin
 
   const [cursoAbiertoId, setCursoAbiertoId] = useState<number | null>(null);
   const [cursoGestionId, setCursoGestionId] = useState<number | null>(null);
+  // Aviso de «curso eliminado»: arriba y con color, en la lista a la que se vuelve.
+  const [avisoEliminado, setAvisoEliminado] = useState<string | null>(null);
 
   // Invitación a un curso (Cristian, 2026-10-14): `/portal/formacion?curso=N` abre ese curso apenas cargan los cursos, UNA vez.
   const abrioInicial = useRef(false);
@@ -160,6 +165,11 @@ export default function PortalFormacion({ onSinSesion, cursoInicialId }: { onSin
       </div>
 
       {error && <p className='portal-th__error'>{error}</p>}
+      {avisoEliminado && (
+        <p className='portal-th__aviso portal-th__aviso--accion' role='status' data-testid='aviso-curso-eliminado'>
+          {avisoEliminado}
+        </p>
+      )}
 
       {vista === 'estudiante' || !esFormador ? (
         cursoAbiertoId ? (
@@ -168,9 +178,25 @@ export default function PortalFormacion({ onSinSesion, cursoInicialId }: { onSin
           <ListaCursosEstudiante cursos={cursos.filter((c) => c.activo)} onAbrir={setCursoAbiertoId} />
         )
       ) : cursoGestionId ? (
-        <VistaCursoFormador cursoId={cursoGestionId} onVolver={() => setCursoGestionId(null)} onCambio={cargarCursos} />
+        <VistaCursoFormador
+          cursoId={cursoGestionId}
+          onVolver={() => setCursoGestionId(null)}
+          onCambio={cargarCursos}
+          onEliminado={(titulo) => {
+            setCursoGestionId(null);
+            setAvisoEliminado(`Se eliminó el curso «${titulo}». Ya no aparece en Formación; sus inscripciones y certificados se conservan.`);
+            void cargarCursos();
+          }}
+        />
       ) : (
-        <ListaCursosFormador cursos={cursos} onGestionar={setCursoGestionId} onCreado={cargarCursos} />
+        <ListaCursosFormador
+          cursos={cursos}
+          onGestionar={(id) => {
+            setAvisoEliminado(null);
+            setCursoGestionId(id);
+          }}
+          onCreado={cargarCursos}
+        />
       )}
     </div>
   );
@@ -232,20 +258,25 @@ function ProgresoSubida({ subida, onCancelar }: { subida: EstadoSubida; onCancel
 }
 
 function ListaCursosEstudiante({ cursos, onAbrir }: { cursos: CursoResumen[]; onAbrir: (id: number) => void }) {
-  if (cursos.length === 0) {
-    return <p className='portal-th__estado'>Todavía no hay cursos publicados.</p>;
-  }
+  // Top 10 de estudiantes (Cristian, 2026-10-16): a la derecha de los cursos en pantallas anchas, debajo en las angostas.
   return (
-    <div className='portal-th__curso-grilla'>
-      {cursos.map((c) => (
-        <button type='button' key={c.id} className='portal-th__curso-tarjeta' onClick={() => onAbrir(c.id)}>
-          <strong>{c.titulo}</strong>
-          {c.descripcion && <p>{c.descripcion}</p>}
-          <span className='portal-th__curso-meta'>{c.totalMateriales} material(es)</span>
-          <BarraProgreso porcentaje={c.porcentaje ?? 0} mostrarCompletado />
-          {c.certificado && <span className='portal-th__curso-certificado-chip'>✅ Certificado emitido</span>}
-        </button>
-      ))}
+    <div className='portal-th__lista-top'>
+      {cursos.length === 0 ? (
+        <p className='portal-th__estado'>Todavía no hay cursos publicados.</p>
+      ) : (
+        <div className='portal-th__curso-grilla'>
+          {cursos.map((c) => (
+            <button type='button' key={c.id} className='portal-th__curso-tarjeta' onClick={() => onAbrir(c.id)}>
+              <strong>{c.titulo}</strong>
+              {c.descripcion && <p>{c.descripcion}</p>}
+              <span className='portal-th__curso-meta'>{c.totalMateriales} material(es)</span>
+              <BarraProgreso porcentaje={c.porcentaje ?? 0} mostrarCompletado />
+              {c.certificado && <span className='portal-th__curso-certificado-chip'>✅ Certificado emitido</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      <TopEstudiantes />
     </div>
   );
 }
@@ -968,10 +999,12 @@ function VistaCursoFormador({
   cursoId,
   onVolver,
   onCambio,
+  onEliminado,
 }: {
   cursoId: number;
   onVolver: () => void;
   onCambio: () => Promise<void>;
+  onEliminado: (titulo: string) => void;
 }) {
   const [detalle, setDetalle] = useState<DetalleCurso | null>(null);
   const [roster, setRoster] = useState<FilaRoster[] | null>(null);
@@ -983,6 +1016,10 @@ function VistaCursoFormador({
   const [avisoAccion, setAvisoAccion] = useState<string | null>(null);
   const [restableciendo, setRestableciendo] = useState<string | null>(null);
   const [trabajandoRestablecer, setTrabajandoRestablecer] = useState(false);
+  // «Eliminar curso» (Cristian, 2026-10-22): borrado lógico con confirmación.
+  const [confirmarEliminar, setConfirmarEliminar] = useState(false);
+  const [eliminando, setEliminando] = useState(false);
+  const [errorEliminar, setErrorEliminar] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
     setError(null);
@@ -1216,6 +1253,22 @@ function VistaCursoFormador({
     }
   };
 
+  const eliminarElCurso = async () => {
+    setEliminando(true);
+    setErrorEliminar(null);
+    try {
+      const res = await fetch(`/api/portal/courses/${cursoId}`, { method: 'DELETE' });
+      const data = await leerJson(res);
+      if (!res.ok) throw new Error(String(data?.error ?? 'No se pudo eliminar el curso.'));
+      setConfirmarEliminar(false);
+      onEliminado(detalle?.curso.titulo ?? 'el curso');
+    } catch (e) {
+      setErrorEliminar((e as Error).message);
+    } finally {
+      setEliminando(false);
+    }
+  };
+
   if (error) return <p className='portal-th__error'>{error}</p>;
   const restablecerEstudiante = async (fila: FilaRoster) => {
     setTrabajandoRestablecer(true);
@@ -1290,6 +1343,57 @@ function VistaCursoFormador({
         </p>
       )}
       {subida && <ProgresoSubida subida={subida} onCancelar={() => cancelarSubidaRef.current?.abort()} />}
+      <Modal
+        opened={confirmarEliminar}
+        onClose={() => !eliminando && setConfirmarEliminar(false)}
+        title='Eliminar curso'
+        centered
+        data-testid='confirmar-eliminar-curso'
+      >
+        <Stack gap='sm'>
+          <Text size='sm'>
+            Va a eliminar el curso <strong>«{detalle.curso.titulo}»</strong>. Dejará de aparecer en Formación para todos,
+            estudiantes y formadores.
+          </Text>
+          {(() => {
+            const inscritos = detalle.conteos?.inscritos ?? roster.length;
+            const certificados = detalle.conteos?.certificados ?? 0;
+            const plural = (n: number, uno: string, varios: string) => `${n.toLocaleString('es-CO')} ${n === 1 ? uno : varios}`;
+            return inscritos > 0 || certificados > 0 ? (
+              <Alert color='red' icon={<IconAlertTriangle size={18} />} p='sm' data-testid='eliminar-curso-advertencia'>
+                <Text size='sm' fw={600}>
+                  Este curso tiene {plural(inscritos, 'persona inscrita', 'personas inscritas')} y{' '}
+                  {plural(certificados, 'certificado emitido', 'certificados emitidos')}.
+                </Text>
+                <Text size='sm'>
+                  Ya no podrán seguir avanzando en él. Sus inscripciones y certificados se conservan, y los certificados
+                  emitidos siguen siendo verificables.
+                </Text>
+              </Alert>
+            ) : (
+              <Text size='sm' c='dimmed'>
+                No tiene personas inscritas ni certificados emitidos.
+              </Text>
+            );
+          })()}
+          <Text size='sm' c='dimmed'>
+            Los archivos del curso en SharePoint no se borran.
+          </Text>
+          {errorEliminar && (
+            <Text size='sm' c='red' role='alert'>
+              {errorEliminar}
+            </Text>
+          )}
+          <Group justify='flex-end'>
+            <Button variant='default' onClick={() => setConfirmarEliminar(false)} disabled={eliminando}>
+              Cancelar
+            </Button>
+            <Button color='red' loading={eliminando} onClick={() => void eliminarElCurso()} data-testid='eliminar-curso-si'>
+              Sí, eliminar curso
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
       {editandoCurso ? (
         <div className='portal-th__formacion-crear portal-th__formacion-editar'>
           <input
@@ -1342,6 +1446,19 @@ function VistaCursoFormador({
               <button type='button' onClick={() => void publicar(!detalle.curso.activo)}>
                 {detalle.curso.activo ? 'Pasar a borrador' : 'Publicar curso'}
               </button>
+            )}
+            {modoEdicion && detalle.esFormador && (
+              <Button
+                color='red'
+                variant='light'
+                onClick={() => {
+                  setErrorEliminar(null);
+                  setConfirmarEliminar(true);
+                }}
+                data-testid='eliminar-curso'
+              >
+                Eliminar curso
+              </Button>
             )}
             <button
               type='button'

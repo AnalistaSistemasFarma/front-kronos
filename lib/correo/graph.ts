@@ -1,6 +1,8 @@
-import { CORREO_PAGE_SIZE, GRAPH_BASE } from './constants';
+import { CORREO_PAGE_SIZE, GRAPH_BASE, GRAPH_BATCH_MAX } from './constants';
 import type { Inquilino } from './config';
+import { esDestinatarioValido } from './destinatarios';
 import { CorreoError } from './errors';
+import { conReintentos, esReintentable, esperaReintento, leerRetryAfter, limitadorBuzones, POLITICA_GRAPH, type LimitadorConcurrencia, type PoliticaReintento } from './graphResiliencia';
 import { insertarSobreHistorial } from './plantillas/acuse.html';
 import type {
   AdjuntoInfo,
@@ -11,8 +13,10 @@ import type {
   MailProvider,
   MensajeCompleto,
   MensajeResumen,
+  NuevoCorreoEntrada,
   PaginaMensajes,
   RespuestaEntrada,
+  UbicacionMensaje,
 } from './types';
 
 /**
@@ -117,7 +121,14 @@ export async function tokenApp(inq: Inquilino, fetchFn: FetchFn = fetch, now = D
 }
 
 const SELECT_RESUMEN = 'id,conversationId,internetMessageId,subject,from,receivedDateTime,isRead,hasAttachments,bodyPreview,categories';
-const SELECT_COMPLETO = `${SELECT_RESUMEN},toRecipients,ccRecipients,body`;
+const SELECT_COMPLETO = `${SELECT_RESUMEN},toRecipients,ccRecipients,body,webLink`;
+/**
+ * Metadatos de TODOS los adjuntos en la MISMA consulta del hilo (sin bytes). contentId solo existe en
+ * fileAttachment, de ahí el «cast» (probado contra Graph v1.0 el 2026-10-16).
+ */
+export const EXPAND_ADJUNTOS = 'attachments($select=id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId)';
+/** Imágenes que se pueden incrustar como data: URI. */
+const IMAGEN_CID_RE = /^image\/(png|jpe?g|gif)$/i;
 /** Imágenes incrustadas: tope total por mensaje para pasarlas a data: URI. */
 const MAX_CID_TOTAL = 5 * 1024 * 1024;
 
@@ -202,6 +213,19 @@ function dir(a: GraphAddr): Direccion {
 }
 
 type GraphMsg = Record<string, unknown>;
+
+/** Sub-petición de `$batch` (ruta RELATIVA de rutaMensaje, siempre del buzón de la sesión). */
+interface SubPeticionLote {
+  id: string;
+  method: 'GET' | 'PATCH' | 'POST';
+  url: string;
+  body?: unknown;
+}
+interface RespuestaLote {
+  status: number;
+  retryAfter: number;
+  body: GraphMsg | null;
+}
 export function aResumen(m: GraphMsg): MensajeResumen {
   return {
     id: String(m.id ?? ''),
@@ -224,13 +248,47 @@ function aCompleto(m: GraphMsg): MensajeCompleto {
     String(body.contentType ?? '').toLowerCase() === 'html'
       ? content
       : `<p>${content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r?\n/g, '<br>')}</p>`;
+  // Adjuntos que vinieron en la misma consulta ($expand=attachments, sin bytes): los visibles van a la
+  // lista; las imágenes incrustadas (cid) quedan PENDIENTES y se piden solo para los mensajes desplegados.
+  const expandidos = Array.isArray(m.attachments) ? (m.attachments as GraphMsg[]) : [];
+  const adjuntos: AdjuntoInfo[] = [];
+  let conImagenCid = false;
+  for (const a of expandidos) {
+    const tipo = String(a.contentType ?? 'application/octet-stream');
+    if (typeof a.contentId === 'string' && a.contentId && IMAGEN_CID_RE.test(tipo)) conImagenCid = true;
+    if (a.isInline) continue;
+    adjuntos.push({ id: String(a.id), nombre: String(a.name ?? 'adjunto'), tipo, tamano: Number(a.size) || 0, enLinea: false });
+  }
   return {
     ...aResumen(m),
     para: Array.isArray(m.toRecipients) ? (m.toRecipients as GraphAddr[]).map(dir) : [],
     cc: Array.isArray(m.ccRecipients) ? (m.ccRecipients as GraphAddr[]).map(dir) : [],
     html,
-    adjuntos: [],
+    adjuntos,
+    imagenesPendientes: conImagenCid && /\bcid:/i.test(html),
+    ...(typeof m.webLink === 'string' && m.webLink ? { webLink: m.webLink } : {}),
   };
+}
+
+/** Mensajes que se ven DESPLEGADOS al abrir el hilo (como Gmail): el último y los no leídos. */
+export function idsDesplegados(mensajes: Array<{ id: string; leido: boolean }>): Set<string> {
+  const ids = new Set(mensajes.filter((m) => !m.leido).map((m) => m.id));
+  const ultimo = mensajes[mensajes.length - 1];
+  if (ultimo) ids.add(ultimo.id);
+  return ids;
+}
+
+/** Opciones del hilo: qué imágenes incrustadas (cid) se descargan en la misma apertura. */
+export interface OpcionesHilo {
+  /** 'desplegados' = el último y los no leídos (vista del hilo); 'ninguna' = solo metadatos (marcar, vincular, acuse…). */
+  imagenes?: 'desplegados' | 'ninguna';
+}
+
+export interface OpcionesProveedorGraph {
+  /** Pruebas: espera entre reintentos (por defecto, setTimeout real). */
+  dormir?: (ms: number) => Promise<void>;
+  politica?: PoliticaReintento;
+  limitador?: LimitadorConcurrencia;
 }
 
 function escHtml(s: string): string {
@@ -242,16 +300,84 @@ export function textoAHtml(texto: string): string {
   return escHtml(texto).replace(/\r?\n/g, '<br>');
 }
 
+/**
+ * Directorio de la organización (autocompletado de «Redactar», 2026-10-19). Es la ÚNICA ruta de Graph fuera de
+ * /users/{buzón} además de `$batch`: la colección `/v1.0/users`, SOLO con GET, solo `displayName`, `mail` y
+ * `userType`, y solo miembros con la cuenta activa. No lee buzones ni perfiles: nombre y correo, nada más.
+ */
+const DIRECTORIO_URL = `${GRAPH_BASE}/users`;
+/** Búsqueda admitida: letras, números, espacio, punto, guion, guion bajo, «@» y apóstrofo (nombres como O'Neil). */
+const BUSQUEDA_RE = /^[\p{L}\p{N} .@_'-]{2,60}$/u;
+
+export function normalizarBusquedaDirectorio(q: string): string | null {
+  const v = String(q ?? '').replace(/\s+/g, ' ').trim();
+  return BUSQUEDA_RE.test(v) ? v : null;
+}
+
+/** URL de la búsqueda en el directorio (función pura, probada aparte). */
+export function urlDirectorio(q: string, max: number): string {
+  const v = normalizarBusquedaDirectorio(q);
+  if (!v) throw new CorreoError('Búsqueda de destinatarios inválida.', 400);
+  const t = odataString(v);
+  const u = new URL(DIRECTORIO_URL);
+  u.searchParams.set(
+    '$filter',
+    `accountEnabled eq true and userType eq 'Member' and (startswith(displayName,${t}) or startswith(mail,${t}) or startswith(givenName,${t}) or startswith(surname,${t}))`
+  );
+  u.searchParams.set('$select', 'displayName,mail,userType');
+  u.searchParams.set('$top', String(Math.min(Math.max(1, max * 2), 25)));
+  u.searchParams.set('$count', 'true');
+  return u.toString();
+}
+
+/** ¿La URL es EXACTAMENTE la colección del directorio? (sin /users/{alguien}, sin otra ruta). */
+export function esUrlDirectorio(url: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  return u.protocol === 'https:' && u.host === 'graph.microsoft.com' && !u.username && !u.password && !u.port && u.pathname === '/v1.0/users';
+}
+
+function destinatarios(lista: string[]): Array<{ emailAddress: { address: string } }> {
+  return lista.map((address) => ({ emailAddress: { address } }));
+}
+
+/** 429 que sigue después de los reintentos automáticos: mensaje para la persona con la espera sugerida. */
+function errorLimitado(res: Response): CorreoError {
+  const ms = leerRetryAfter(res.headers.get('retry-after'));
+  const s = ms == null ? 10 : Math.max(1, Math.ceil(ms / 1000));
+  return new CorreoError(`Microsoft limitó las consultas a su buzón. Intente de nuevo en ${s} s.`, 429, 'LIMITADO');
+}
+
 export class GraphMailProvider implements MailProvider {
   private readonly me: string;
 
   constructor(
     private readonly mailbox: Mailbox,
     private readonly token: () => Promise<string>,
-    private readonly fetchFn: FetchFn = fetch
+    private readonly fetchFn: FetchFn = fetch,
+    private readonly opciones: OpcionesProveedorGraph = {}
   ) {
     if (mailbox?.__marca !== 'mailbox-de-sesion') throw new CorreoError('Buzón no permitido.', 500);
     this.me = mailbox.base;
+  }
+
+  /**
+   * Toda salida a Graph pasa por aquí: máximo 3 llamadas simultáneas por buzón (cola en memoria) y
+   * reintento automático de 429/503 respetando Retry-After. La espera NO ocupa cupo de la cola.
+   */
+  private async enviar(url: string, init: RequestInit, idempotente: boolean): Promise<Response> {
+    const limitador = this.opciones.limitador ?? limitadorBuzones;
+    return conReintentos(() => limitador.correr(this.mailbox.correo, () => this.fetchFn(url, init)), {
+      idempotente,
+      politica: this.opciones.politica,
+      dormir: this.opciones.dormir,
+      // Sin buzón ni contenido: solo la señal para diagnosticar el throttling en el registro de PM2.
+      alReintentar: (i) => console.warn(`[correo/graph] Microsoft respondió ${i.status}; reintento ${i.intento} en ${i.esperaMs} ms`),
+    });
   }
 
   private async call(url: string, init: RequestInit = {}, prefer?: string): Promise<Response> {
@@ -260,15 +386,13 @@ export class GraphMailProvider implements MailProvider {
     const token = await this.token();
     const headers: Record<string, string> = { Authorization: `Bearer ${token}`, ...(init.headers as Record<string, string>) };
     if (prefer) headers.Prefer = prefer;
-    const res = await this.fetchFn(url, { ...init, headers });
+    const metodo = String(init.method ?? 'GET').toUpperCase();
+    const res = await this.enviar(url, { ...init, headers }, metodo === 'GET' || metodo === 'PATCH' || metodo === 'DELETE');
     if (res.ok) return res;
     if (res.status === 401) throw new CorreoError('Microsoft rechazó la autenticación del módulo Correo. Avise a Tecnología.', 502);
     if (res.status === 403) throw new CorreoError('Microsoft no autorizó la operación (permiso de la app o política del buzón). Avise a Tecnología.', 403);
     if (res.status === 404) throw new CorreoError('No se encontró el correo en su buzón (pudo moverse o borrarse).', 404);
-    if (res.status === 429) {
-      const ra = Number(res.headers.get('retry-after')) || 10;
-      throw new CorreoError(`Microsoft limitó las consultas. Intente de nuevo en ${ra} s.`, 429);
-    }
+    if (res.status === 429) throw errorLimitado(res);
     throw new CorreoError(`Microsoft respondió con un error (${res.status}).`, 502);
   }
 
@@ -305,54 +429,59 @@ export class GraphMailProvider implements MailProvider {
     return { mensajes: (data.value ?? []).map(aResumen), siguiente: codificarCursor(data['@odata.nextLink']) };
   }
 
-  private async adjuntosDe(m: MensajeCompleto): Promise<MensajeCompleto> {
-    if (!m.conAdjuntos && !/\bcid:/i.test(m.html)) return m;
-    const base = `${this.me}/messages/${encodeURIComponent(m.id)}/attachments`;
-    const conCid = /\bcid:/i.test(m.html);
-    // Sin imágenes incrustadas basta la lista liviana (sin bytes).
-    const data = await this.json<{ value?: GraphMsg[] }>(conCid ? base : `${base}?$select=id,name,contentType,size,isInline`);
-    const adjuntos: AdjuntoInfo[] = [];
-    const imagenesCid: Record<string, string> = {};
+  /**
+   * Imágenes incrustadas (cid) de UN mensaje como data: URI: una sola consulta, solo de los adjuntos en
+   * línea (antes se bajaban los bytes de TODOS los adjuntos, PDF incluidos). Tope total MAX_CID_TOTAL.
+   */
+  async imagenesCid(mensajeId: string): Promise<Record<string, string>> {
+    const url = `${this.me}/messages/${encodeURIComponent(assertGraphId(mensajeId))}/attachments?$filter=${encodeURIComponent('isInline eq true')}`;
+    const data = await this.json<{ value?: GraphMsg[] }>(url);
+    const imagenes: Record<string, string> = {};
     let total = 0;
     for (const a of data.value ?? []) {
-      const info: AdjuntoInfo = {
-        id: String(a.id),
-        nombre: String(a.name ?? 'adjunto'),
-        tipo: String(a.contentType ?? 'application/octet-stream'),
-        tamano: Number(a.size) || 0,
-        enLinea: Boolean(a.isInline),
-      };
+      const tipo = String(a.contentType ?? '');
       const cid = typeof a.contentId === 'string' ? a.contentId.replace(/^<|>$/g, '') : '';
       const bytes = typeof a.contentBytes === 'string' ? a.contentBytes : '';
-      if (conCid && cid && bytes && /^image\/(png|jpe?g|gif)$/i.test(info.tipo) && total + bytes.length <= MAX_CID_TOTAL) {
-        imagenesCid[cid.toLowerCase()] = `data:${info.tipo.toLowerCase()};base64,${bytes}`;
+      if (cid && bytes && IMAGEN_CID_RE.test(tipo) && total + bytes.length <= MAX_CID_TOTAL) {
+        imagenes[cid.toLowerCase()] = `data:${tipo.toLowerCase()};base64,${bytes}`;
         total += bytes.length;
       }
-      if (!info.enLinea) adjuntos.push(info);
     }
-    return { ...m, adjuntos, imagenesCid };
+    return imagenes;
   }
 
-  async hilo(conversationId: string): Promise<MensajeCompleto[]> {
+  /**
+   * Hilo en UNA consulta: mensajes con cuerpo y metadatos de adjuntos ($expand, sin bytes), ordenados en
+   * Graph (el más reciente primero, para que $top conserve los 50 últimos) y devueltos del más antiguo al
+   * más reciente. Las imágenes cid solo se piden para los mensajes desplegados (una consulta por mensaje);
+   * las de los demás, al desplegarlos (imagenesPendientes).
+   */
+  async hilo(conversationId: string, opciones: OpcionesHilo = {}): Promise<MensajeCompleto[]> {
     const id = assertGraphId(conversationId, 'identificador del hilo');
     const u = new URL(`${this.me}/messages`);
-    u.searchParams.set('$filter', `conversationId eq ${odataString(id)}`);
+    // Graph exige que la propiedad de $orderby esté primero en $filter (si no: InefficientFilter).
+    u.searchParams.set('$filter', `receivedDateTime ge 1900-01-01T00:00:00Z and conversationId eq ${odataString(id)}`);
+    u.searchParams.set('$orderby', 'receivedDateTime desc');
     u.searchParams.set('$select', SELECT_COMPLETO);
+    u.searchParams.set('$expand', EXPAND_ADJUNTOS);
     u.searchParams.set('$top', '50');
     const data = await this.json<{ value?: GraphMsg[] }>(u.toString(), undefined, 'outlook.body-content-type="html"');
-    // Graph no admite $orderby con este $filter: se ordena aquí (más antiguo primero).
     const msgs = (data.value ?? []).map(aCompleto).sort((a, b) => a.fecha.localeCompare(b.fecha));
-    return Promise.all(msgs.map((m) => this.adjuntosDe(m)));
+    if (opciones.imagenes !== 'desplegados') return msgs;
+    const desplegados = idsDesplegados(msgs);
+    return Promise.all(
+      msgs.map(async (m) => (m.imagenesPendientes && desplegados.has(m.id) ? { ...m, imagenesCid: await this.imagenesCid(m.id), imagenesPendientes: false } : m))
+    );
   }
 
   async mensaje(id: string): Promise<MensajeCompleto> {
     const mid = assertGraphId(id);
     const m = await this.json<GraphMsg>(
-      `${this.me}/messages/${encodeURIComponent(mid)}?$select=${SELECT_COMPLETO}`,
+      `${this.me}/messages/${encodeURIComponent(mid)}?$select=${SELECT_COMPLETO}&$expand=${encodeURIComponent(EXPAND_ADJUNTOS)}`,
       undefined,
       'outlook.body-content-type="html"'
     );
-    return this.adjuntosDe(aCompleto(m));
+    return aCompleto(m);
   }
 
   async adjunto(mensajeId: string, adjuntoId: string): Promise<ArchivoAdjunto> {
@@ -376,7 +505,7 @@ export class GraphMailProvider implements MailProvider {
       await this.responderConHtml(mid, entrada, entrada.html);
       return;
     }
-    const comment = textoAHtml(entrada.texto);
+    const comment = entrada.comentarioHtml || textoAHtml(entrada.texto);
     if (entrada.adjuntos.length === 0) {
       await this.call(`${this.me}/messages/${mid}/${entrada.todos ? 'replyAll' : 'reply'}`, {
         method: 'POST',
@@ -450,6 +579,238 @@ export class GraphMailProvider implements MailProvider {
       throw e;
     }
     await this.call(`${url}/send`, { method: 'POST' });
+  }
+
+  /** Ruta RELATIVA (para `$batch`) de un mensaje del buzón de la sesión; se valida igual que una URL completa. */
+  private rutaMensaje(mensajeId: string): string {
+    const abs = `${this.me}/messages/${encodeURIComponent(assertGraphId(mensajeId))}`;
+    if (!urlDelBuzon(abs, this.mailbox)) throw new CorreoError('Destino de Graph no permitido.', 500);
+    return abs.slice(GRAPH_BASE.length);
+  }
+
+  /**
+   * Graph `$batch` (POST /v1.0/$batch). Es la ÚNICA llamada fuera de /users/{buzón}: por eso solo acepta
+   * sub-peticiones armadas con rutaMensaje (todas del buzón de la sesión) y vuelve a validarlas aquí.
+   * `idempotente`: un lote de GET o PATCH se puede repetir ante un 503; uno de `move` (POST) no.
+   */
+  private async lote(peticiones: SubPeticionLote[], idempotente: boolean): Promise<Map<string, RespuestaLote>> {
+    if (peticiones.length === 0 || peticiones.length > GRAPH_BATCH_MAX) throw new CorreoError('Lote de Graph inválido.', 500);
+    for (const p of peticiones) if (!urlDelBuzon(`${GRAPH_BASE}${p.url}`, this.mailbox)) throw new CorreoError('Destino de Graph no permitido.', 500);
+    const token = await this.token();
+    const res = await this.enviar(
+      `${GRAPH_BASE}/$batch`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requests: peticiones.map((p) => (p.body === undefined ? { id: p.id, method: p.method, url: p.url } : { ...p, headers: { 'Content-Type': 'application/json' } })),
+        }),
+      },
+      idempotente
+    );
+    if (res.status === 401) throw new CorreoError('Microsoft rechazó la autenticación del módulo Correo. Avise a Tecnología.', 502);
+    if (res.status === 403) throw new CorreoError('Microsoft no autorizó la operación (permiso de la app o política del buzón). Avise a Tecnología.', 403);
+    if (res.status === 429) throw errorLimitado(res);
+    if (!res.ok) throw new CorreoError(`Microsoft respondió con un error (${res.status}).`, 502);
+    const data = (await res.json()) as { responses?: Array<{ id?: string; status?: number; headers?: Record<string, string>; body?: unknown }> };
+    const out = new Map<string, RespuestaLote>();
+    for (const r of data.responses ?? []) {
+      const ra = Number(r.headers?.['Retry-After'] ?? r.headers?.['retry-after']) || 0;
+      out.set(String(r.id), { status: Number(r.status) || 0, retryAfter: ra, body: r.body && typeof r.body === 'object' ? (r.body as GraphMsg) : null });
+    }
+    return out;
+  }
+
+  /**
+   * Sub-peticiones en lotes de 20; las limitadas (429, y 503 si es idempotente; Exchange admite 4 simultáneas por
+   * buzón) se reintentan con la misma política que el resto (hasta 3 veces, respetando Retry-After con retroceso y
+   * jitter). Devuelve la respuesta FINAL de cada sub-petición por su id.
+   */
+  private async lotes(peticiones: SubPeticionLote[], idempotente: boolean): Promise<Map<string, RespuestaLote>> {
+    const politica = this.opciones.politica ?? POLITICA_GRAPH;
+    const dormir = this.opciones.dormir ?? ((ms: number) => new Promise<void>((x) => setTimeout(x, ms)));
+    const finales = new Map<string, RespuestaLote>();
+    for (let i = 0; i < peticiones.length; i += GRAPH_BATCH_MAX) {
+      let pendientes = peticiones.slice(i, i + GRAPH_BATCH_MAX);
+      for (let intento = 0; pendientes.length; intento++) {
+        const ultimo = intento >= politica.reintentos;
+        const r = await this.lote(pendientes, idempotente);
+        const limitadas = ultimo ? [] : pendientes.filter((p) => esReintentable(r.get(p.id)?.status ?? 0, idempotente));
+        for (const p of pendientes) if (!limitadas.includes(p)) finales.set(p.id, r.get(p.id) ?? { status: 0, retryAfter: 0, body: null });
+        if (!limitadas.length) break;
+        const ra = Math.max(0, ...limitadas.map((p) => r.get(p.id)?.retryAfter ?? 0));
+        await dormir(Math.min(politica.maxEsperaMs, esperaReintento(intento, ra ? ra * 1000 : null, politica)));
+        pendientes = limitadas;
+      }
+    }
+    return finales;
+  }
+
+  async marcarLeido(mensajesIds: string[], leido: boolean): Promise<{ cambiados: number; fallidos: number }> {
+    const subs = [...new Set(mensajesIds)].map((id, j) => ({ id: String(j + 1), method: 'PATCH' as const, url: this.rutaMensaje(id), body: { isRead: leido } }));
+    const r = await this.lotes(subs, true);
+    let cambiados = 0;
+    for (const p of subs) {
+      const st = r.get(p.id)?.status ?? 0;
+      if (st >= 200 && st < 300) cambiados++;
+    }
+    return { cambiados, fallidos: subs.length - cambiados };
+  }
+
+  /**
+   * Eliminar · pertenencia: cada id se consulta en /users/{buzón de la sesión}/messages/{id} (por `$batch`). Un id
+   * de otro buzón no existe ahí (404 → null): nunca se mueve un correo que no sea de la persona.
+   */
+  async ubicarMensajes(mensajesIds: string[]): Promise<Map<string, UbicacionMensaje | null>> {
+    const unicos = [...new Set(mensajesIds)];
+    const subs = unicos.map((id, j) => ({ id: String(j + 1), method: 'GET' as const, url: `${this.rutaMensaje(id)}?$select=id,parentFolderId,conversationId,internetMessageId,isRead` }));
+    const r = await this.lotes(subs, true);
+    const out = new Map<string, UbicacionMensaje | null>();
+    unicos.forEach((id, j) => {
+      const res = r.get(String(j + 1));
+      const b = res?.body;
+      const ok = res && res.status >= 200 && res.status < 300 && b && typeof b.parentFolderId === 'string' && String(b.id ?? id) === id;
+      out.set(
+        id,
+        ok
+          ? { carpetaId: String(b.parentFolderId), conversationId: String(b.conversationId ?? ''), internetMessageId: String(b.internetMessageId ?? ''), leido: Boolean(b.isRead) }
+          : null
+      );
+    });
+    return out;
+  }
+
+  async idCarpetaEliminados(): Promise<string> {
+    const c = await this.json<{ id?: string }>(`${this.me}/mailFolders/deleteditems?$select=id`);
+    return assertGraphId(String(c.id ?? ''), 'identificador de carpeta');
+  }
+
+  /**
+   * Graph `POST /messages/{id}/move` por `$batch`: el destino es una carpeta DEL MISMO BUZÓN (`deleteditems` o el
+   * id de la carpeta de origen al deshacer). No se reintenta un 503 (podría haberse movido ya); un 429 sí (no se
+   * procesó). Graph responde el mensaje movido con su id NUEVO.
+   */
+  async moverMensajes(mensajesIds: string[], destinoId: string): Promise<Map<string, string | null>> {
+    const destino = destinoId === 'deleteditems' ? destinoId : assertGraphId(destinoId, 'identificador de carpeta');
+    const unicos = [...new Set(mensajesIds)];
+    const subs = unicos.map((id, j) => ({ id: String(j + 1), method: 'POST' as const, url: `${this.rutaMensaje(id)}/move`, body: { destinationId: destino } }));
+    const r = await this.lotes(subs, false);
+    const out = new Map<string, string | null>();
+    unicos.forEach((id, j) => {
+      const res = r.get(String(j + 1));
+      const nuevo = res && res.status >= 200 && res.status < 300 && typeof res.body?.id === 'string' ? res.body.id : null;
+      out.set(id, nuevo && ID_RE.test(nuevo) ? nuevo : null);
+    });
+    return out;
+  }
+
+  private urlCarpeta(carpetaId: string | null): string {
+    return carpetaId ? `${this.me}/mailFolders/${encodeURIComponent(assertGraphId(carpetaId, 'identificador de carpeta'))}` : `${this.me}/mailFolders/inbox`;
+  }
+
+  async idsPorLeido(carpetaId: string | null, leido: boolean, max: number): Promise<string[]> {
+    const u = new URL(`${this.urlCarpeta(carpetaId)}/messages`);
+    // Los que NO están en el estado pedido (para «leído», los no leídos).
+    u.searchParams.set('$filter', `isRead eq ${leido ? 'false' : 'true'}`);
+    u.searchParams.set('$select', 'id');
+    u.searchParams.set('$top', String(Math.min(Math.max(1, max), 100)));
+    const ids: string[] = [];
+    let url: string | undefined = u.toString();
+    while (url && ids.length < max) {
+      const data: { value?: GraphMsg[]; '@odata.nextLink'?: string } = await this.json(url);
+      for (const m of data.value ?? []) if (ids.length < max && m.id) ids.push(String(m.id));
+      // El nextLink se valida en call() (urlDelBuzon) antes de seguirlo.
+      url = data['@odata.nextLink'];
+    }
+    return ids;
+  }
+
+  async contadoresCarpeta(carpetaId: string | null): Promise<{ total: number; noLeidos: number }> {
+    const c = await this.json<{ totalItemCount?: number; unreadItemCount?: number }>(`${this.urlCarpeta(carpetaId)}?$select=totalItemCount,unreadItemCount`);
+    return { total: Math.max(0, Number(c.totalItemCount) || 0), noLeidos: Math.max(0, Number(c.unreadItemCount) || 0) };
+  }
+
+  /**
+   * Redactar (2026-10-19). Sin adjuntos: `POST /users/{buzón de la sesión}/sendMail` (queda en Enviados). Con
+   * adjuntos: borrador (`POST /messages`) → un `POST /attachments` por archivo (≤ 3 MB c/u, el tope de la llamada
+   * simple) → `send`; si algo falla antes de enviar, el borrador se borra para no dejarlo en Borradores. Ninguno de
+   * los dos pasos se reintenta solo ante un 503 (podría haberse enviado ya).
+   */
+  async enviarNuevo(entrada: NuevoCorreoEntrada): Promise<void> {
+    const json = { 'Content-Type': 'application/json' };
+    const message = {
+      subject: entrada.asunto,
+      body: { contentType: 'HTML', content: entrada.html },
+      toRecipients: destinatarios(entrada.para),
+      ccRecipients: destinatarios(entrada.cc),
+      bccRecipients: destinatarios(entrada.cco),
+    };
+    if (entrada.adjuntos.length === 0) {
+      await this.call(`${this.me}/sendMail`, { method: 'POST', headers: json, body: JSON.stringify({ message, saveToSentItems: true }) });
+      return;
+    }
+    const draft = await this.json<{ id?: string }>(`${this.me}/messages`, { method: 'POST', headers: json, body: JSON.stringify(message) });
+    const url = `${this.me}/messages/${encodeURIComponent(assertGraphId(String(draft.id ?? '')))}`;
+    try {
+      for (const a of entrada.adjuntos) {
+        await this.call(`${url}/attachments`, {
+          method: 'POST',
+          headers: json,
+          body: JSON.stringify({ '@odata.type': '#microsoft.graph.fileAttachment', name: a.nombre, contentType: a.tipo, contentBytes: a.bytes.toString('base64') }),
+        });
+      }
+    } catch (e) {
+      await this.call(url, { method: 'DELETE' }).catch(() => undefined);
+      throw e;
+    }
+    await this.call(`${url}/send`, { method: 'POST' });
+  }
+
+  /** Destinatarios de los últimos correos ENVIADOS del buzón propio (solo direcciones; sin asunto ni cuerpo). */
+  async contactosRecientes(max: number): Promise<Direccion[]> {
+    const u = new URL(`${this.me}/mailFolders/sentitems/messages`);
+    u.searchParams.set('$select', 'toRecipients,ccRecipients,sentDateTime');
+    u.searchParams.set('$orderby', 'sentDateTime desc');
+    u.searchParams.set('$top', String(Math.min(Math.max(1, max), 100)));
+    const data = await this.json<{ value?: GraphMsg[] }>(u.toString());
+    const vistos = new Map<string, Direccion>();
+    for (const m of data.value ?? []) {
+      for (const lista of [m.toRecipients, m.ccRecipients]) {
+        if (!Array.isArray(lista)) continue;
+        for (const a of lista as GraphAddr[]) {
+          const d = dir(a);
+          if (d.correo && d.correo !== this.mailbox.correo && !vistos.has(d.correo)) vistos.set(d.correo, d);
+        }
+      }
+    }
+    return [...vistos.values()];
+  }
+
+  /**
+   * Directorio: GET a la colección /v1.0/users (consulta avanzada: ConsistencyLevel eventual). Solo miembros
+   * activos con correo de los dominios del inquilino; devuelve nombre y correo. Se valida la URL exacta antes de salir.
+   */
+  async buscarDirectorio(q: string, dominios: string[], max: number): Promise<Direccion[]> {
+    const url = urlDirectorio(q, max);
+    if (!esUrlDirectorio(url)) throw new CorreoError('Destino de Graph no permitido.', 500);
+    const token = await this.token();
+    const res = await this.enviar(url, { method: 'GET', headers: { Authorization: `Bearer ${token}`, ConsistencyLevel: 'eventual' } }, true);
+    if (res.status === 401) throw new CorreoError('Microsoft rechazó la autenticación del módulo Correo. Avise a Tecnología.', 502);
+    if (res.status === 403) throw new CorreoError('Microsoft no autorizó la consulta del directorio (permiso de la app). Avise a Tecnología.', 403);
+    if (res.status === 429) throw errorLimitado(res);
+    if (!res.ok) throw new CorreoError(`Microsoft respondió con un error (${res.status}).`, 502);
+    const data = (await res.json()) as { value?: GraphMsg[] };
+    const permitidos = new Set(dominios.map((d) => d.toLowerCase()));
+    const out: Direccion[] = [];
+    for (const u of data.value ?? []) {
+      const correo = String(u.mail ?? '').trim().toLowerCase();
+      if (!correo || String(u.userType ?? 'Member') !== 'Member' || !esDestinatarioValido(correo)) continue;
+      if (!permitidos.has(correo.split('@')[1] ?? '')) continue;
+      if (out.some((x) => x.correo === correo)) continue;
+      out.push({ nombre: String(u.displayName ?? '').trim() || correo, correo });
+      if (out.length >= max) break;
+    }
+    return out;
   }
 
   async categorizar(mensajeId: string, categoria: string): Promise<void> {

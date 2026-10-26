@@ -5,7 +5,7 @@ import { errorResponse, getOtRequestContext, jsonNoStore, parseCompanyParam, req
 export const dynamic = 'force-dynamic';
 
 /**
- * GET /api/bitacora-proceso/supervisores?company=1 — supervisores (Gestión) de la empresa:
+ * GET /api/bitacora-proceso/supervisores?company=1 — supervisores ASIGNADOS de la empresa (Catálogo → Responsables, con Gestión):
  * la lista de la que quien cierra elige SU nombre en la tablet (A4). Solo nombres e ids.
  */
 export async function GET(request: Request) {
