@@ -5,7 +5,9 @@ import { Accordion, Alert, Badge, Button, Card, Checkbox, Code, Group, Modal, Nu
 import { IconAlertTriangle, IconEye, IconPlayerPlay, IconSearch, IconSend } from '@tabler/icons-react';
 import { ASISTIDA, ESTADO_COLOR, ESTADO_LABEL, PRUEBAS_MANUALES, esUrlProduccionNabuco, type NabucoEstado } from '../../lib/transferencias-nabuco/constants';
 import type { DocPendiente } from '../../lib/transferencias-nabuco/asistidaReglas';
-import { errorTexto, nabucoSend } from './client';
+import type { DiagnosticoNabuco } from '../../lib/transferencias-nabuco/diagnostico';
+import { diagnosticoDe, leerRespuesta, nabucoSend } from './client';
+import NabucoDiagnostico, { RespuestaGuardada } from './NabucoDiagnostico';
 
 interface ConfigAsistida {
   id_config: number;
@@ -19,6 +21,7 @@ interface Simulado {
   ok: boolean;
   payload?: Record<string, unknown> | null;
   error?: string | null;
+  diagnostico?: DiagnosticoNabuco | null;
 }
 
 interface Creado {
@@ -28,6 +31,7 @@ interface Creado {
   http_status?: number | null;
   respuesta?: string | null;
   error?: string | null;
+  diagnostico?: DiagnosticoNabuco | null;
   id_envio?: number | null;
 }
 
@@ -98,7 +102,7 @@ export default function NabucoAsistida({ config }: { config: ConfigAsistida }) {
   const [creados, setCreados] = useState<Creado[] | null>(null);
   const [ocupado, setOcupado] = useState<null | 'buscar' | 'simular' | 'crear'>(null);
   const [progreso, setProgreso] = useState<{ hechos: number; total: number } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<DiagnosticoNabuco | null>(null);
   const [confirmar, setConfirmar] = useState(false);
   const [palabra, setPalabra] = useState('');
   const [detalle, setDetalle] = useState<DetalleEnvio | null>(null);
@@ -118,14 +122,12 @@ export default function NabucoAsistida({ config }: { config: ConfigAsistida }) {
     setSimulados(null);
     setCreados(null);
     try {
-      const res = await fetch(`${base}/pendientes?limite=${Number(limite) || ASISTIDA.limiteDefecto}`, { cache: 'no-store' });
-      const b = (await res.json().catch(() => ({}))) as { documentos?: DocPendiente[]; hayMas?: boolean; error?: string };
-      if (!res.ok || !b.documentos) throw new Error(b.error ?? `Error ${res.status}`);
+      const b = await leerRespuesta<{ documentos: DocPendiente[]; hayMas?: boolean }>(await fetch(`${base}/pendientes?limite=${Number(limite) || ASISTIDA.limiteDefecto}`, { cache: 'no-store' }));
       setDocs(b.documentos);
       setHayMas(Boolean(b.hayMas));
       setSel(new Set(b.documentos.map((d) => d.DocEntry)));
     } catch (e) {
-      setError(errorTexto(e));
+      setError(diagnosticoDe(e));
     } finally {
       setOcupado(null);
     }
@@ -145,7 +147,8 @@ export default function NabucoAsistida({ config }: { config: ConfigAsistida }) {
         setProgreso({ hechos: acumulado.length, total: lista.length });
       }
     } catch (e) {
-      setError(`${accion === 'simular' ? 'Simular' : 'Crear'} se detuvo tras ${acumulado.length} de ${lista.length}: ${errorTexto(e)}`);
+      const d = diagnosticoDe(e);
+      setError({ ...d, mensaje: `${accion === 'simular' ? 'Simular' : 'Crear'} se detuvo tras ${acumulado.length} de ${lista.length}: ${d.mensaje}` });
     } finally {
       setOcupado(null);
       setProgreso(null);
@@ -168,12 +171,10 @@ export default function NabucoAsistida({ config }: { config: ConfigAsistida }) {
 
   const abrir = async (id: number) => {
     try {
-      const res = await fetch(`/api/transferencias-nabuco/envios/${id}`, { cache: 'no-store' });
-      const b = (await res.json().catch(() => ({}))) as { envio?: DetalleEnvio; error?: string };
-      if (!res.ok || !b.envio) throw new Error(b.error ?? `Error ${res.status}`);
+      const b = await leerRespuesta<{ envio: DetalleEnvio }>(await fetch(`/api/transferencias-nabuco/envios/${id}`, { cache: 'no-store' }));
       setDetalle(b.envio);
     } catch (e) {
-      setError(errorTexto(e));
+      setError(diagnosticoDe(e));
     }
   };
 
@@ -188,9 +189,14 @@ export default function NabucoAsistida({ config }: { config: ConfigAsistida }) {
         {`Busca en SAP los documentos de ${config.entidad_sap} que cumplen el filtro de la configuración y aún no se han enviado. «Simular» arma las solicitudes sin enviarlas; «Crear» las envía de verdad a Nabuco aunque la configuración esté en modo simulación.`}
       </Text>
       {error && (
-        <Alert color='red' mb='sm' withCloseButton onClose={() => setError(null)}>
-          {error}
-        </Alert>
+        <Stack mb='sm' gap={4}>
+          <NabucoDiagnostico diagnostico={error} />
+          <Group justify='flex-end'>
+            <Button size='compact-xs' variant='subtle' onClick={() => setError(null)}>
+              Cerrar
+            </Button>
+          </Group>
+        </Stack>
       )}
       <Group align='flex-end' wrap='wrap'>
         <NumberInput label='Máximo de documentos' min={1} max={ASISTIDA.limiteMax} value={limite} onChange={setLimite} w={180} disabled={Boolean(ocupado)} />
@@ -307,10 +313,16 @@ export default function NabucoAsistida({ config }: { config: ConfigAsistida }) {
                   </Group>
                 </Accordion.Control>
                 <Accordion.Panel>
-                  {s.error && (
-                    <Alert color='red' mb='xs'>
-                      {s.error}
-                    </Alert>
+                  {s.diagnostico ? (
+                    <Stack mb='xs'>
+                      <NabucoDiagnostico diagnostico={s.diagnostico} />
+                    </Stack>
+                  ) : (
+                    s.error && (
+                      <Alert color='red' mb='xs'>
+                        {s.error}
+                      </Alert>
+                    )
                   )}
                   {s.payload && (
                     <ScrollArea.Autosize mah={360}>
@@ -373,6 +385,20 @@ export default function NabucoAsistida({ config }: { config: ConfigAsistida }) {
               </Table.Tbody>
             </Table>
           </Table.ScrollContainer>
+          {creados.some((c) => c.diagnostico && !c.diagnostico.ok) && (
+            <Accordion variant='separated' multiple>
+              {creados
+                .filter((c) => c.diagnostico && !c.diagnostico.ok)
+                .map((c) => (
+                  <Accordion.Item key={c.docEntry} value={String(c.docEntry)}>
+                    <Accordion.Control>{`Diagnóstico · DocNum ${c.docNum ?? '—'} · DocEntry ${c.docEntry}`}</Accordion.Control>
+                    <Accordion.Panel>
+                      <NabucoDiagnostico diagnostico={c.diagnostico as DiagnosticoNabuco} />
+                    </Accordion.Panel>
+                  </Accordion.Item>
+                ))}
+            </Accordion>
+          )}
         </Stack>
       )}
 
@@ -406,14 +432,10 @@ export default function NabucoAsistida({ config }: { config: ConfigAsistida }) {
               <Text size='sm'>{`Intentos: ${detalle.intentos}`}</Text>
               {detalle.http_status && <Text size='sm'>{`HTTP ${detalle.http_status}`}</Text>}
             </Group>
-            {detalle.error && <Alert color='red'>{detalle.error}</Alert>}
+            <RespuestaGuardada error={detalle.error} respuesta={detalle.respuesta} />
             <Text fw={600}>Payload</Text>
             <ScrollArea.Autosize mah={260}>
               <Code block>{bonito(detalle.payload)}</Code>
-            </ScrollArea.Autosize>
-            <Text fw={600}>Respuesta de Nabuco</Text>
-            <ScrollArea.Autosize mah={260}>
-              <Code block>{bonito(detalle.respuesta)}</Code>
             </ScrollArea.Autosize>
           </Stack>
         )}
