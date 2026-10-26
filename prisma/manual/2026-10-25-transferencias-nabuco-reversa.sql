@@ -35,6 +35,8 @@ JOIN [dbo].[subprocess] s ON s.id_subprocess = suc.id_subprocess
 WHERE s.subprocess_url IN (N'/process/transferencias-nabuco', N'/process/transferencias-nabuco/admin');
 DELETE FROM [dbo].[subprocess] WHERE subprocess_url IN (N'/process/transferencias-nabuco', N'/process/transferencias-nabuco/admin');
 
+-- 2026-10-26: si existe el historial de pruebas manuales (FK a nabuco_config), se borra primero.
+IF OBJECT_ID(N'dbo.nabuco_prueba_manual', N'U') IS NOT NULL DROP TABLE [dbo].[nabuco_prueba_manual];
 IF OBJECT_ID(N'dbo.nabuco_envio', N'U') IS NOT NULL DROP TABLE [dbo].[nabuco_envio];
 IF OBJECT_ID(N'dbo.nabuco_config', N'U') IS NOT NULL DROP TABLE [dbo].[nabuco_config];
 

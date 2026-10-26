@@ -600,3 +600,55 @@ export async function pendientesDeConfig(idConfig: number, limite = 500): Promis
     WHERE id_config = @id AND estado IN (N'pendiente', N'error') ORDER BY doc_entry`);
   return r.recordset;
 }
+
+/* ── Pruebas manuales (tabla nabuco_prueba_manual). NUNCA toca nabuco_envio ni guarda token/contraseña. ── */
+
+export interface NuevaPruebaManual {
+  idConfig: number;
+  idCompany: number;
+  usuario: string;
+  tipo: 'conexion' | 'envio';
+  docEntry: number | null;
+  url: string;
+  payload: string | null;
+  httpStatus: number | null;
+  duracionMs: number | null;
+  respuesta: string | null;
+  error: string | null;
+}
+
+export async function registrarPruebaManual(p: NuevaPruebaManual): Promise<number> {
+  const pool = await getPool();
+  const r = await pool
+    .request()
+    .input('id_config', sql.Int, p.idConfig)
+    .input('id_company', sql.Int, p.idCompany)
+    .input('usuario', sql.NVarChar(255), p.usuario.slice(0, 255))
+    .input('tipo', sql.NVarChar(20), p.tipo)
+    .input('doc_entry', sql.Int, p.docEntry)
+    .input('url', sql.NVarChar(500), p.url.slice(0, 500))
+    .input('payload', sql.NVarChar(sql.MAX), p.payload)
+    .input('http_status', sql.Int, p.httpStatus)
+    .input('duracion_ms', sql.Int, p.duracionMs)
+    .input('respuesta', sql.NVarChar(sql.MAX), p.respuesta === null ? null : p.respuesta.slice(0, 100_000))
+    .input('error', sql.NVarChar(2000), p.error === null ? null : p.error.slice(0, 2000)).query(`
+      INSERT INTO dbo.nabuco_prueba_manual (id_config, id_company, usuario, tipo, doc_entry, url, payload, http_status, duracion_ms, respuesta, error)
+      OUTPUT INSERTED.id_prueba
+      VALUES (@id_config, @id_company, @usuario, @tipo, @doc_entry, @url, @payload, @http_status, @duracion_ms, @respuesta, @error)`);
+  return Number(r.recordset[0]?.id_prueba);
+}
+
+/** Últimas pruebas de la config (sin payload ni respuesta: se piden en el detalle). */
+export async function listarPruebasManuales(idConfig: number, limite = 20) {
+  const pool = await getPool();
+  const r = await pool.request().input('id', sql.Int, idConfig).input('lim', sql.Int, limite).query(`
+    SELECT TOP (@lim) id_prueba, tipo, usuario, doc_entry, url, http_status, duracion_ms, error, creado
+    FROM dbo.nabuco_prueba_manual WHERE id_config = @id ORDER BY creado DESC, id_prueba DESC`);
+  return r.recordset;
+}
+
+export async function obtenerPruebaManual(idPrueba: number) {
+  const pool = await getPool();
+  const r = await pool.request().input('id', sql.BigInt, idPrueba).query('SELECT * FROM dbo.nabuco_prueba_manual WHERE id_prueba = @id');
+  return r.recordset[0] ?? null;
+}
