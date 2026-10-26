@@ -37,6 +37,32 @@ Pestaña «Pruebas manuales» (solo administradores del módulo), por configurac
 - Endpoints: `POST configs/[id]/probar`, `GET|POST configs/[id]/pruebas`,
   `GET configs/[id]/pruebas/[idPrueba]` (todos con permiso de Administración en la empresa).
 
+## Transferencia asistida (2026-10-26)
+Arriba de la pestaña «Pruebas manuales» (solo administradores): Buscar pendientes → Simular → Crear.
+- **Buscar pendientes** (`GET configs/[id]/pendientes?limite=50`, máx. 200): consulta SAP con el MISMO
+  filtro del motor (`rutaCandidatos`: `desde_fecha` + `filtro_odata`), `$select` acotado
+  (DocEntry, DocNum, DocDate, CardName y DocTotal si la entidad usa DocumentLines),
+  `$orderby=DocDate desc,DocEntry desc`, por páginas, quitando lo que en `nabuco_envio` está
+  `enviado` o `descartado`. Revisa como máximo 5 000 documentos; `hayMas` avisa si quedaron más.
+  Sin columna de # líneas (exigiría traer las líneas de cada documento).
+- **Simular** (`POST configs/[id]/simular { docEntries }`, máx. 200): lee cada documento, arma el
+  payload con el mapeo y lo valida (`problemasArmado`: campo SAP inexistente o documento sin líneas).
+  Los válidos quedan `simulado` en `nabuco_envio` (como el motor en simulación; nunca pisa un
+  `enviado`); los inválidos NO se registran. Un fallo leyendo SAP se registra como `error` (igual que el motor).
+- **Crear** (`POST configs/[id]/crear { docEntries, confirmoProduccion? }`, máx. 200): solo los que
+  salieron bien en Simular. Envía DE VERDAD (ignora el modo simulación, solo desde este botón), uno por
+  uno con el token en caché, por `procesarDocumento` del motor (mismo registro `enviado`/`error`,
+  intentos, marca UDF y alertas). Vuelve a leer y validar en SAP y revisa el log justo antes de cada
+  envío: si ya está `enviado` lo reporta `ya_enviado` sin reenviar (`descartado` → `omitido`).
+  Producción de Nabuco: modal con PRODUCCION y el servidor exige `confirmoProduccion: true` (409).
+- Simular y Crear toman el lock de la config (`en_ejecucion_desde`): si hay una corrida automática,
+  «Ejecutar ahora» u otra acción manual en curso → 409. Quién y cuándo: `usuario_accion`/`fecha_accion`.
+- La pantalla manda Simular/Crear en tandas de 10 (barra de progreso; cada tanda toma y suelta el lock).
+- Código: `asistida.ts` (servidor), `asistidaReglas.ts` (reglas puras), `procesarDocumento` y
+  `rutaCandidatos` en `motor.ts` (los usa también la corrida automática),
+  `components/transferencias-nabuco/NabucoAsistida.tsx`. Pruebas: `__tests__/asistida.test.ts`.
+- Sin SQL nuevo.
+
 ## Pendiente
 1. Correr el script de PRUEBAS y asignar los permisos por empresa (Administración → Usuarios).
 2. Probar contra el Nabuco real: confirmar la forma de la respuesta de `/AuthBI` (hoy se acepta
@@ -51,3 +77,5 @@ Pestaña «Pruebas manuales» (solo administradores del módulo), por configurac
    desactive la tarea en `scheduled_job` (y borre su historial en `nabuco_prueba_manual`).
 7. Correr `2026-10-26-nabuco-pruebas-manuales-PRUEBAS.sql` y probar la pestaña «Pruebas manuales»
    contra el ambiente de pruebas de Nabuco. La reversa del 25 ya borra también `nabuco_prueba_manual`.
+8. Probar la Transferencia asistida contra SAP de pruebas y el Nabuco de pruebas (verificar que
+   `CardName` exista en el `$select` de StockTransfers/InventoryTransferRequests en ese Service Layer).

@@ -60,7 +60,7 @@ export function identidadToken(cfg: NabucoConfig): IdentidadToken {
   return { idConfig: cfg.id_config, url: cfg.nabuco_url ?? '', usuario: cfg.nabuco_usuario ?? '', passwordEnc: cfg.nabuco_password_enc ?? '' };
 }
 
-async function abrirSap(cfg: NabucoConfig): Promise<SapSession> {
+export async function abrirSap(cfg: NabucoConfig): Promise<SapSession> {
   const ep = await getEndpointSap(cfg.id_company, cfg.id_sap_endpoint);
   if (!ep) throw new NabucoError('La empresa no tiene una conexión SAP (sap_endpoints) válida para esta configuración.');
   return sapLogin(ep);
@@ -72,7 +72,13 @@ function q(params: Record<string, string>): string {
     .join('&');
 }
 
-async function leerDocumento(session: SapSession, entidad: string, docEntry: number): Promise<Record<string, unknown>> {
+/** Ruta OData de candidatos de la config: MISMO filtro del motor (desde_fecha + filtro_odata) + parámetros extra. */
+export function rutaCandidatos(cfg: Pick<NabucoConfig, 'entidad_sap' | 'desde_fecha' | 'filtro_odata'>, params: Record<string, string>): string {
+  const filtro = filtroCandidatos(cfg.desde_fecha, cfg.filtro_odata);
+  return `${cfg.entidad_sap}?${q(filtro ? { ...params, $filter: filtro } : params)}`;
+}
+
+export async function leerDocumento(session: SapSession, entidad: string, docEntry: number): Promise<Record<string, unknown>> {
   return sapGet<Record<string, unknown>>(session, `${entidad}(${Math.trunc(docEntry)})`);
 }
 
@@ -132,10 +138,7 @@ export async function correrConfig(idConfig: number, opts: OpcionesCorrida = {})
     if (opts.soloDocEntry) {
       candidatos = [{ DocEntry: opts.soloDocEntry }];
     } else {
-      const params: Record<string, string> = { $select: 'DocEntry,DocNum', $orderby: 'DocEntry asc' };
-      const filtro = filtroCandidatos(cfg.desde_fecha, cfg.filtro_odata);
-      if (filtro) params.$filter = filtro;
-      candidatos = await sapGetAll<DocCandidato>(session, `${cfg.entidad_sap}?${q(params)}`, { cap: 20000 });
+      candidatos = await sapGetAll<DocCandidato>(session, rutaCandidatos(cfg, { $select: 'DocEntry,DocNum', $orderby: 'DocEntry asc' }), { cap: 20000 });
       // Los pendientes/errores del log se reintentan aunque ya no salgan en la consulta.
       candidatos.push(...(await pendientesDeConfig(cfg.id_config)));
     }
@@ -159,44 +162,92 @@ export async function correrConfig(idConfig: number, opts: OpcionesCorrida = {})
 
     for (const cand of seleccion) {
       base.procesados += 1;
-      let payloadTxt: string | null = null;
-      let docNum = cand.DocNum ?? null;
-      try {
-        const doc = await leerDocumento(session, cfg.entidad_sap, cand.DocEntry);
-        docNum = typeof doc.DocNum === 'number' ? doc.DocNum : docNum;
-        const payload = construirPayload(doc, cfg.entidad_sap, cfg.mapeo_encabezado, cfg.mapeo_lineas, cfg.clave_lineas);
-        payloadTxt = JSON.stringify(payload);
-        if (cfg.modo_simulacion || !conexion) {
-          await registrarResultado(cfg, { DocEntry: cand.DocEntry, DocNum: docNum }, { estado: 'simulado', payload: payloadTxt, respuesta: null, http_status: null, error: null, proximoEnMin: null, cuentaIntento: false }, opts.usuario ?? null);
-          base.simulados += 1;
-          continue;
-        }
-        const resp = await enviarConToken(ident, conexion, payloadTxt);
-        if (resp.ok) {
-          let nota: string | null = null;
-          if (cfg.marcar_udf && cfg.udf_campo && cfg.udf_valor) {
-            try {
-              await sapPatch(session, `${cfg.entidad_sap}(${cand.DocEntry})`, { [cfg.udf_campo]: cfg.udf_valor });
-            } catch (e) {
-              nota = `Enviado a Nabuco, pero no se pudo marcar ${cfg.udf_campo} en SAP: ${e instanceof Error ? e.message : String(e)}`;
-            }
-          }
-          await registrarResultado(cfg, { DocEntry: cand.DocEntry, DocNum: docNum }, { estado: 'enviado', payload: payloadTxt, respuesta: resp.cuerpo, http_status: resp.status, error: nota, proximoEnMin: null, cuentaIntento: true }, opts.usuario ?? null);
-          base.enviados += 1;
-        } else {
-          await registrarFallo(cfg, { DocEntry: cand.DocEntry, DocNum: docNum }, payloadTxt, resp.cuerpo, resp.status, `Nabuco respondió HTTP ${resp.status}`, opts.usuario ?? null);
-          base.errores += 1;
-        }
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        await registrarFallo(cfg, { DocEntry: cand.DocEntry, DocNum: docNum }, payloadTxt, null, null, msg, opts.usuario ?? null);
-        base.errores += 1;
-      }
+      const r = await procesarDocumento(cfg, session, cand, { conexion, ident, usuario: opts.usuario ?? null, simular: cfg.modo_simulacion || !conexion });
+      if (r.estado === 'enviado') base.enviados += 1;
+      else if (r.estado === 'simulado') base.simulados += 1;
+      else base.errores += 1;
     }
     return base;
   } finally {
     if (session) await sapLogout(session).catch(() => undefined);
     await soltarLock(idConfig);
+  }
+}
+
+export interface ContextoEnvio {
+  conexion: NabucoConexion | null;
+  ident: IdentidadToken;
+  usuario: string | null;
+  /** true = solo registra 'simulado' (no envía). */
+  simular: boolean;
+  /**
+   * Validación opcional del documento ya armado (Transferencia asistida). Si devuelve un texto,
+   * el documento se OMITE: no se envía ni se registra nada en nabuco_envio.
+   */
+  validar?: (doc: Record<string, unknown>, payload: Record<string, unknown>) => string | null;
+}
+
+export interface ResultadoDocumento {
+  estado: 'enviado' | 'error' | 'simulado' | 'omitido';
+  docNum: number | null;
+  payload: Record<string, unknown> | null;
+  http_status: number | null;
+  respuesta: string | null;
+  error: string | null;
+  id_envio: number | null;
+}
+
+/**
+ * Procesa UN documento por el camino único del motor: lee de SAP, arma el payload con el mapeo y
+ * lo registra como 'simulado' o lo envía (token en caché, 401 → token nuevo una vez), marca la UDF
+ * si aplica y deja el resultado en nabuco_envio (que nunca pisa un 'enviado'); los fallos cuentan
+ * intento y alertan al agotar reintentos. Lo usan la corrida automática y la Transferencia asistida.
+ */
+export async function procesarDocumento(cfg: NabucoConfig, session: SapSession, cand: DocCandidato, c: ContextoEnvio): Promise<ResultadoDocumento> {
+  let payloadTxt: string | null = null;
+  let payload: Record<string, unknown> | null = null;
+  let docNum = cand.DocNum ?? null;
+  const res = (estado: ResultadoDocumento['estado'], extra: Partial<ResultadoDocumento> = {}): ResultadoDocumento => ({
+    estado,
+    docNum,
+    payload,
+    http_status: null,
+    respuesta: null,
+    error: null,
+    id_envio: null,
+    ...extra,
+  });
+  try {
+    const doc = await leerDocumento(session, cfg.entidad_sap, cand.DocEntry);
+    docNum = typeof doc.DocNum === 'number' ? doc.DocNum : docNum;
+    payload = construirPayload(doc, cfg.entidad_sap, cfg.mapeo_encabezado, cfg.mapeo_lineas, cfg.clave_lineas);
+    const invalido = c.validar?.(doc, payload) ?? null;
+    if (invalido) return res('omitido', { error: invalido });
+    payloadTxt = JSON.stringify(payload);
+    if (c.simular || !c.conexion) {
+      const r = await registrarResultado(cfg, { DocEntry: cand.DocEntry, DocNum: docNum }, { estado: 'simulado', payload: payloadTxt, respuesta: null, http_status: null, error: null, proximoEnMin: null, cuentaIntento: false }, c.usuario);
+      return res('simulado', { id_envio: r?.id_envio ?? null });
+    }
+    const resp = await enviarConToken(c.ident, c.conexion, payloadTxt);
+    if (resp.ok) {
+      let nota: string | null = null;
+      if (cfg.marcar_udf && cfg.udf_campo && cfg.udf_valor) {
+        try {
+          await sapPatch(session, `${cfg.entidad_sap}(${cand.DocEntry})`, { [cfg.udf_campo]: cfg.udf_valor });
+        } catch (e) {
+          nota = `Enviado a Nabuco, pero no se pudo marcar ${cfg.udf_campo} en SAP: ${e instanceof Error ? e.message : String(e)}`;
+        }
+      }
+      const r = await registrarResultado(cfg, { DocEntry: cand.DocEntry, DocNum: docNum }, { estado: 'enviado', payload: payloadTxt, respuesta: resp.cuerpo, http_status: resp.status, error: nota, proximoEnMin: null, cuentaIntento: true }, c.usuario);
+      return res('enviado', { http_status: resp.status, respuesta: resp.cuerpo, error: nota, id_envio: r?.id_envio ?? null });
+    }
+    const error = `Nabuco respondió HTTP ${resp.status}`;
+    const r = await registrarFallo(cfg, { DocEntry: cand.DocEntry, DocNum: docNum }, payloadTxt, resp.cuerpo, resp.status, error, c.usuario);
+    return res('error', { http_status: resp.status, respuesta: resp.cuerpo, error, id_envio: r?.id_envio ?? null });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const r = await registrarFallo(cfg, { DocEntry: cand.DocEntry, DocNum: docNum }, payloadTxt, null, null, msg, c.usuario);
+    return res('error', { error: msg, id_envio: r?.id_envio ?? null });
   }
 }
 
@@ -206,4 +257,5 @@ async function registrarFallo(cfg: NabucoConfig, doc: DocCandidato, payload: str
   if (r && reintentosAgotados(r.intentos, cfg.max_reintentos)) {
     await alertarFallo(cfg, doc, r.id_envio, r.intentos, error).catch((e) => console.warn('[transferencias-nabuco] alerta:', e instanceof Error ? e.message : e));
   }
+  return r;
 }
