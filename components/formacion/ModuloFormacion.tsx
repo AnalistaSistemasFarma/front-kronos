@@ -78,7 +78,8 @@ export default function ModuloFormacion() {
   const [cursos, setCursos] = useState<CursoModulo[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [seccion, setSeccion] = useState<Seccion>('cursos');
+  // «Mi formación» primero: lo que la persona tiene pendiente por terminar (Nicolás, 2026-10-26).
+  const [seccion, setSeccion] = useState<Seccion>('mi-formacion');
   const [estado, setEstado] = useState<FiltroEstado>('todos');
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
   const [busqueda, setBusqueda] = useState('');
@@ -281,58 +282,62 @@ export default function ModuloFormacion() {
         </Stack>
       ) : (
         <>
-          <div className={requestListStyles.statGrid}>
-            <StatFilterTile
-              icon={<IconBook size={20} />}
-              label='Cursos'
-              value={cursos.length}
-              hint={`${publicados} publicados · ${cursos.length - publicados} borradores`}
-              tone='info'
-              active={estado === 'todos'}
-              onClick={() => setEstado('todos')}
-              ariaLabel='Mostrar todos los cursos'
-            />
-            <StatFilterTile
-              icon={<IconChecks size={20} />}
-              label='Publicados'
-              value={publicados}
-              tone='ok'
-              active={estado === 'publicados'}
-              onClick={() => setEstado('publicados')}
-              ariaLabel='Filtrar cursos publicados'
-            />
-            <StatFilterTile
-              icon={<IconPencil size={20} />}
-              label='Borradores'
-              value={cursos.length - publicados}
-              tone='warning'
-              active={estado === 'borradores'}
-              onClick={() => setEstado('borradores')}
-              ariaLabel='Filtrar cursos en borrador'
-            />
-            <StatFilterTile icon={<IconUsers size={20} />} label='Inscritos' value={inscritos} tone='violet' />
-            <ProgressRingTile
-              label='Con alcance por departamento'
-              done={conAlcance}
-              total={cursos.length}
-              percent={cursos.length ? Math.round((conAlcance / cursos.length) * 100) : 0}
-            />
-          </div>
+          {seccion === 'cursos' && (
+            <>
+            <div className={requestListStyles.statGrid}>
+              <StatFilterTile
+                icon={<IconBook size={20} />}
+                label='Cursos'
+                value={cursos.length}
+                hint={`${publicados} publicados · ${cursos.length - publicados} borradores`}
+                tone='info'
+                active={estado === 'todos'}
+                onClick={() => setEstado('todos')}
+                ariaLabel='Mostrar todos los cursos'
+              />
+              <StatFilterTile
+                icon={<IconChecks size={20} />}
+                label='Publicados'
+                value={publicados}
+                tone='ok'
+                active={estado === 'publicados'}
+                onClick={() => setEstado('publicados')}
+                ariaLabel='Filtrar cursos publicados'
+              />
+              <StatFilterTile
+                icon={<IconPencil size={20} />}
+                label='Borradores'
+                value={cursos.length - publicados}
+                tone='warning'
+                active={estado === 'borradores'}
+                onClick={() => setEstado('borradores')}
+                ariaLabel='Filtrar cursos en borrador'
+              />
+              <StatFilterTile icon={<IconUsers size={20} />} label='Inscritos' value={inscritos} tone='violet' />
+              <ProgressRingTile
+                label='Con alcance por departamento'
+                done={conAlcance}
+                total={cursos.length}
+                percent={cursos.length ? Math.round((conAlcance / cursos.length) * 100) : 0}
+              />
+            </div>
 
-          <FilterPanel expanded={filtrosAbiertos} onToggle={() => setFiltrosAbiertos((v) => !v)} icon={<IconFilter size={18} />}>
-            {filtrosAbiertos && (
-              <Box p='md' pt={0}>
-                <Grid>
-                  <Grid.Col span={{ base: 12, md: 6 }}>
-                    <TextInput label='Buscar' placeholder='Curso, descripción o formador' value={busqueda} onChange={(e) => setBusqueda(e.currentTarget.value)} />
-                  </Grid.Col>
-                  <Grid.Col span={{ base: 12, md: 6 }}>
-                    <Select label='Empresa' placeholder='Todas' value={empresaFiltro} onChange={setEmpresaFiltro} data={empresasFiltro} clearable searchable />
-                  </Grid.Col>
-                </Grid>
-              </Box>
-            )}
-          </FilterPanel>
+            <FilterPanel expanded={filtrosAbiertos} onToggle={() => setFiltrosAbiertos((v) => !v)} icon={<IconFilter size={18} />}>
+              {filtrosAbiertos && (
+                <Box p='md' pt={0}>
+                  <Grid>
+                    <Grid.Col span={{ base: 12, md: 6 }}>
+                      <TextInput label='Buscar' placeholder='Curso, descripción o formador' value={busqueda} onChange={(e) => setBusqueda(e.currentTarget.value)} />
+                    </Grid.Col>
+                    <Grid.Col span={{ base: 12, md: 6 }}>
+                      <Select label='Empresa' placeholder='Todas' value={empresaFiltro} onChange={setEmpresaFiltro} data={empresasFiltro} clearable searchable />
+                    </Grid.Col>
+                  </Grid>
+                </Box>
+              )}
+            </FilterPanel>
+            </>
+          )}
 
           <Card shadow='sm' radius='md' withBorder className='overflow-hidden' mt='md'>
             <LoadingOverlay visible={false} />
@@ -340,7 +345,7 @@ export default function ModuloFormacion() {
               <Title order={3} className='flex items-center gap-2 text-lg sm:text-xl'>
                 <IconSchool size={20} />
                 {seccion === 'cursos'
-                  ? 'Lista de Cursos'
+                  ? 'Cursos que administro'
                   : seccion === 'departamentos'
                     ? 'Departamentos por empresa'
                     : seccion === 'colaboradores'
@@ -354,10 +359,10 @@ export default function ModuloFormacion() {
                 value={seccion}
                 onChange={(v) => setSeccion(v as Seccion)}
                 data={[
+                  { value: 'mi-formacion', label: 'Mi formación' },
                   { value: 'cursos', label: `Cursos (${filtrados.length})` },
                   { value: 'departamentos', label: 'Departamentos' },
                   { value: 'colaboradores', label: 'Colaboradores' },
-                  { value: 'mi-formacion', label: 'Mi formación' },
                 ]}
               />
             </Group>
@@ -504,7 +509,7 @@ function EstadoCurso({ activo }: { activo: boolean }) {
 
 /** Los cursos de quien administra, como estudiante (los de su empresa y departamento). */
 function ListaMiFormacion() {
-  return <PortalFormacion />;
+  return <PortalFormacion soloEstudiante />;
 }
 
 function NuevoCurso({

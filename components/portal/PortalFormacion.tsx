@@ -140,7 +140,16 @@ const certificadoUrl = (code: string) => `/api/portal/certificates/${encodeURICo
  * para que la página de Formación (que vive aparte del portal desde
  * 2026-09-30) pueda mandar a la persona a ingresar primero.
  */
-export default function PortalFormacion({ onSinSesion, cursoInicialId }: { onSinSesion?: () => void; cursoInicialId?: number | null } = {}) {
+export default function PortalFormacion({
+  onSinSesion,
+  cursoInicialId,
+  soloEstudiante = false,
+}: {
+  onSinSesion?: () => void;
+  cursoInicialId?: number | null;
+  /** En «Mi formación» del módulo: solo la vista de estudiante (la administración está al lado). */
+  soloEstudiante?: boolean;
+} = {}) {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cursos, setCursos] = useState<CursoResumen[]>([]);
@@ -205,7 +214,7 @@ export default function PortalFormacion({ onSinSesion, cursoInicialId }: { onSin
 
   return (
     <Stack gap='md'>
-      {esFormador && (
+      {esFormador && !soloEstudiante && (
         <Group>
           <SegmentedControl
             aria-label='Vista de Formación'
@@ -226,7 +235,7 @@ export default function PortalFormacion({ onSinSesion, cursoInicialId }: { onSin
         </Alert>
       )}
 
-      {vista === 'estudiante' || !esFormador ? (
+      {vista === 'estudiante' || !esFormador || soloEstudiante ? (
         cursoAbiertoId ? (
           <VistaCursoEstudiante cursoId={cursoAbiertoId} onVolver={() => setCursoAbiertoId(null)} onCambio={cargarCursos} />
         ) : (
@@ -348,53 +357,76 @@ function ProgresoSubida({ subida, onCancelar }: { subida: EstadoSubida; onCancel
 }
 
 export function ListaCursosEstudiante({ cursos, onAbrir }: { cursos: CursoResumen[]; onAbrir: (id: number) => void }) {
+  // «Mi formación» (Nicolás, 2026-10-26): primero lo pendiente por terminar y después lo ya completado.
   // Top 10 de estudiantes (Cristian, 2026-10-16): a la derecha de los cursos en pantallas anchas, debajo en las angostas.
+  const pendientes = cursos.filter((c) => (c.porcentaje ?? 0) < 100);
+  const completados = cursos.filter((c) => (c.porcentaje ?? 0) >= 100);
+  const tarjeta = (c: CursoResumen) => (
+    <Card
+      key={c.id}
+      data-testid='curso-tarjeta'
+      withBorder
+      radius='md'
+      shadow='sm'
+      padding='md'
+      component='button'
+      type='button'
+      onClick={() => onAbrir(c.id)}
+      style={{ textAlign: 'left', cursor: 'pointer' }}
+    >
+      <Stack gap={6}>
+        <Text fw={700}>{c.titulo}</Text>
+        {c.descripcion && (
+          <Text size='sm' c='dimmed' lineClamp={3}>
+            {c.descripcion}
+          </Text>
+        )}
+        <Text size='xs' c='dimmed'>
+          {c.totalMateriales} clase(s)
+        </Text>
+        <BarraProgreso porcentaje={c.porcentaje ?? 0} mostrarCompletado />
+        {c.certificado && (
+          <Group>
+            <Badge color='teal' variant='light' leftSection={<IconCertificate size={12} />}>
+              Certificado emitido
+            </Badge>
+          </Group>
+        )}
+      </Stack>
+    </Card>
+  );
   return (
     <SimpleGrid cols={{ base: 1, lg: 3 }} spacing='md'>
-      <Box style={{ gridColumn: 'span 2' }}>
+      <Stack gap='lg' style={{ gridColumn: 'span 2' }} data-testid='curso-grilla'>
         {cursos.length === 0 ? (
           <Text size='sm' c='dimmed' ta='center' py='xl'>
             Todavía no hay cursos publicados.
           </Text>
         ) : (
-          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='md' data-testid='curso-grilla'>
-            {cursos.map((c) => (
-              <Card
-                key={c.id}
-                data-testid='curso-tarjeta'
-                withBorder
-                radius='md'
-                shadow='sm'
-                padding='md'
-                component='button'
-                type='button'
-                onClick={() => onAbrir(c.id)}
-                style={{ textAlign: 'left', cursor: 'pointer' }}
-              >
-                <Stack gap={6}>
-                  <Text fw={700}>{c.titulo}</Text>
-                  {c.descripcion && (
-                    <Text size='sm' c='dimmed' lineClamp={3}>
-                      {c.descripcion}
-                    </Text>
-                  )}
-                  <Text size='xs' c='dimmed'>
-                    {c.totalMateriales} material(es)
-                  </Text>
-                  <BarraProgreso porcentaje={c.porcentaje ?? 0} mostrarCompletado />
-                  {c.certificado && (
-                    <Group>
-                      <Badge color='teal' variant='light' leftSection={<IconCertificate size={12} />}>
-                        Certificado emitido
-                      </Badge>
-                    </Group>
-                  )}
-                </Stack>
-              </Card>
-            ))}
-          </SimpleGrid>
+          <>
+            <Stack gap='sm' data-testid='cursos-pendientes'>
+              <Title order={4}>Pendiente por terminar ({pendientes.length})</Title>
+              {pendientes.length === 0 ? (
+                <Text size='sm' c='dimmed'>
+                  ¡Está al día! No tiene cursos pendientes.
+                </Text>
+              ) : (
+                <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='md'>
+                  {pendientes.map(tarjeta)}
+                </SimpleGrid>
+              )}
+            </Stack>
+            {completados.length > 0 && (
+              <Stack gap='sm' data-testid='cursos-completados'>
+                <Title order={4}>Mis cursos completados ({completados.length})</Title>
+                <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='md'>
+                  {completados.map(tarjeta)}
+                </SimpleGrid>
+              </Stack>
+            )}
+          </>
         )}
-      </Box>
+      </Stack>
       <TopEstudiantes />
     </SimpleGrid>
   );
@@ -1396,7 +1428,8 @@ export function VistaCursoFormador({
   const mensajeDeSubida = (e: unknown, porDefecto: string) =>
     e instanceof SubidaCancelada ? 'Subida cancelada. No se agregó nada al curso.' : (e as Error)?.message || porDefecto;
 
-  const [tipoNuevo, setTipoNuevo] = useState<'DOCUMENT' | 'LINK' | 'FORM'>('DOCUMENT');
+  // «Video» es un DOCUMENTO de video (MP4): va aparte porque así lo buscan los formadores (Nicolás, 2026-10-26).
+  const [tipoNuevo, setTipoNuevo] = useState<'VIDEO' | 'DOCUMENT' | 'LINK' | 'FORM'>('DOCUMENT');
   const [formularioNuevo, setFormularioNuevo] = useState<{ id: number | null; titulo: string }>({ id: null, titulo: '' });
   const [respuestasDe, setRespuestasDe] = useState<Material | null>(null);
   const [previaDe, setPreviaDe] = useState<Material | null>(null);
@@ -1410,13 +1443,17 @@ export function VistaCursoFormador({
     if (!tituloNuevo.trim() && tipoNuevo !== 'FORM') return;
     if (tipoNuevo === 'FORM' && !formularioNuevo.id) return;
     if (tipoNuevo === 'LINK' && !urlNueva.trim()) return;
-    if (tipoNuevo === 'DOCUMENT' && !archivoNuevo) return;
+    if ((tipoNuevo === 'DOCUMENT' || tipoNuevo === 'VIDEO') && !archivoNuevo) return;
+    if (tipoNuevo === 'VIDEO' && archivoNuevo && !archivoNuevo.type.startsWith('video/')) {
+      setErrorAccion('El archivo no es un video. Use un archivo MP4.');
+      return;
+    }
 
     setSubiendo(true);
     setErrorAccion(null);
     try {
       const cuerpo: Record<string, unknown> = {
-        type: tipoNuevo,
+        type: tipoNuevo === 'VIDEO' ? 'DOCUMENT' : tipoNuevo,
         title: tituloNuevo,
         required: String(obligatorioNuevo),
       };
@@ -1777,6 +1814,21 @@ export function VistaCursoFormador({
                     Eliminar curso
                   </Button>
                 )}
+                {!modoEdicion && (
+                  <Button
+                    leftSection={<IconPlus size={16} />}
+                    onClick={() => {
+                      setModoEdicion(true);
+                      setTipoNuevo('VIDEO');
+                      window.requestAnimationFrame(() =>
+                        document.querySelector('[data-testid="agregar-clase"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                      );
+                    }}
+                    data-testid='agregar-video'
+                  >
+                    Agregar video o clase
+                  </Button>
+                )}
                 <Button
                   variant={modoEdicion ? 'filled' : 'default'}
                   leftSection={<IconPencil size={16} />}
@@ -1806,7 +1858,11 @@ export function VistaCursoFormador({
       {modoEdicion && (
         <Card withBorder radius='md' shadow='sm' padding='lg' data-testid='menu-edicion'>
           <Stack gap='sm'>
-            <Title order={4}>Materiales</Title>
+            <Title order={4}>Clases del curso</Title>
+            <Text size='sm' c='dimmed'>
+              Cada clase es un video, un documento, un enlace o un formulario. Ordénelas con las flechas; así aparecen en el
+              temario.
+            </Text>
             <Stack gap='xs' component='ul' style={{ listStyle: 'none', padding: 0, margin: 0 }}>
               {detalle.materiales.map((m, i) => (
                 <FilaMaterialFormador
@@ -1827,24 +1883,39 @@ export function VistaCursoFormador({
               ))}
               {detalle.materiales.length === 0 && (
                 <Text size='sm' c='dimmed'>
-                  Todavía no hay materiales.
+                  Todavía no hay clases. Agregue la primera abajo.
                 </Text>
               )}
             </Stack>
 
-            <Paper withBorder radius='md' p='md'>
+            <Paper withBorder radius='md' p='md' data-testid='agregar-clase'>
               <Stack gap='sm'>
+                <Title order={5}>Agregar una clase</Title>
                 <SegmentedControl
                   value={tipoNuevo}
-                  onChange={(v) => setTipoNuevo(v as 'DOCUMENT' | 'LINK' | 'FORM')}
+                  onChange={(v) => {
+                    setTipoNuevo(v as 'VIDEO' | 'DOCUMENT' | 'LINK' | 'FORM');
+                    setArchivoNuevo(null);
+                  }}
                   data={[
+                    { value: 'VIDEO', label: 'Video' },
                     { value: 'DOCUMENT', label: 'Documento' },
                     { value: 'LINK', label: 'Enlace' },
                     { value: 'FORM', label: 'Formulario' },
                   ]}
                 />
+                <Text size='xs' c='dimmed'>
+                  {tipoNuevo === 'VIDEO'
+                    ? 'Suba el video en MP4. Se guarda en SharePoint (carpeta FORMACION) y el estudiante lo ve dentro del curso, sin poder adelantarlo.'
+                    : tipoNuevo === 'DOCUMENT'
+                      ? 'PDF, Word, Excel, PowerPoint o imagen. Los PDF se leen página por página dentro del curso.'
+                      : tipoNuevo === 'LINK'
+                        ? 'Un enlace externo (por ejemplo, un video de YouTube o una página). Se abre en otra pestaña.'
+                        : 'Una evaluación o encuesta propia de SynerLink, o importada de Microsoft Forms.'}
+                </Text>
                 <TextInput
-                  placeholder={tipoNuevo === 'FORM' ? 'Título (opcional)' : 'Título del material'}
+                  label='Título de la clase'
+                  placeholder={tipoNuevo === 'FORM' ? 'Título (opcional)' : tipoNuevo === 'VIDEO' ? 'Ej.: Bienvenida a la compañía' : 'Título del material'}
                   value={tituloNuevo}
                   onChange={(e) => setTituloNuevo(e.currentTarget.value)}
                 />
@@ -1853,7 +1924,14 @@ export function VistaCursoFormador({
                 ) : tipoNuevo === 'LINK' ? (
                   <TextInput placeholder='https://…' value={urlNueva} onChange={(e) => setUrlNueva(e.currentTarget.value)} />
                 ) : (
-                  <FileInput placeholder='Seleccione el archivo' value={archivoNuevo} onChange={setArchivoNuevo} clearable />
+                  <FileInput
+                    label={tipoNuevo === 'VIDEO' ? 'Archivo de video' : 'Archivo'}
+                    placeholder={tipoNuevo === 'VIDEO' ? 'Seleccione el video (MP4)' : 'Seleccione el archivo'}
+                    accept={tipoNuevo === 'VIDEO' ? 'video/mp4' : undefined}
+                    value={archivoNuevo}
+                    onChange={setArchivoNuevo}
+                    clearable
+                  />
                 )}
                 <Checkbox
                   checked={obligatorioNuevo}
@@ -1862,7 +1940,7 @@ export function VistaCursoFormador({
                 />
                 <Group>
                   <Button leftSection={<IconPlus size={16} />} onClick={() => void agregarMaterial()} loading={subiendo}>
-                    {subiendo ? (subida ? 'Subiendo…' : 'Agregando…') : 'Agregar material'}
+                    {subiendo ? (subida ? 'Subiendo…' : 'Agregando…') : 'Agregar clase'}
                   </Button>
                 </Group>
               </Stack>
