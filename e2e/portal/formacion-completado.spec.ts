@@ -140,12 +140,9 @@ test.describe('Portal TH · Formación · completado automático', () => {
     await simular(page, { puedeMarcarManual: false, completados: [] });
     await abrirCurso(page);
 
-    const casillas = page.getByRole('checkbox');
-    await expect(casillas).toHaveCount(3);
-    for (const c of await casillas.all()) {
-      await expect(c).toHaveAttribute('aria-disabled', 'true');
-      await expect(c).toHaveAttribute('title', 'Se marca automáticamente al revisar el material');
-    }
+    // Temario (2026-10-26): el estudiante no tiene casillas; cada clase se marca sola al revisarla.
+    await expect(page.getByRole('checkbox')).toHaveCount(0);
+    await expect(page.getByText('Cada clase se marca sola cuando la revisa')).toBeVisible();
     await expect(page.getByTestId('insignia-completado')).toHaveCount(0);
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/1-estudiante-casillas-bloqueadas.png`, fullPage: true });
 
@@ -155,12 +152,11 @@ test.describe('Portal TH · Formación · completado automático', () => {
     // Una sola página: sin barra ni botones.
     await expect(visor.getByTestId('lectura-pdf')).toHaveCount(0);
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/2-visor-pdf-una-pagina-completado.png` });
-    await page.keyboard.press('Escape');
-
     await expect(page.getByText('"Reglamento interno" quedó completado.')).toBeVisible();
+    // Vista de la lección → vuelve a la portada del curso.
+    await page.getByTestId('volver-curso').click();
     const fila = page.getByTestId('material-item').filter({ hasText: 'Reglamento interno' });
-    await expect(fila.getByTestId('insignia-completado')).toHaveText('✓ Completado');
-    await expect(fila.getByRole('checkbox')).toHaveAttribute('aria-checked', 'true');
+    await expect(fila.getByTestId('insignia-completado')).toHaveText('Completado');
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/3-estudiante-material-completado.png`, fullPage: true });
   });
 
@@ -212,7 +208,7 @@ test.describe('Portal TH · Formación · completado automático', () => {
     await expect(video).not.toHaveAttribute('controls', /.*/);
     await expect(visor.getByTestId('contador-video')).toHaveText(`00:00 / 00:0${DURACION_VIDEO}`);
 
-    await visor.getByRole('button', { name: '▶ Reproducir' }).click();
+    await visor.getByRole('button', { name: 'Reproducir' }).click();
     await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime), { timeout: 5_000 }).toBeGreaterThan(0.5);
 
     // Intento de adelantar: bloqueado, vuelve a lo ya visto.
@@ -249,15 +245,15 @@ test.describe('Portal TH · Formación · completado automático', () => {
   test('el ADMINISTRADOR que es formador conserva el marcado a mano en «Vista estudiante», sin bloqueos (Cristian, 2026-10-14)', async ({ page }) => {
     await simular(page, { puedeMarcarManual: true, esFormador: true, completados: [1] });
     await abrirCurso(page);
-    // Casillas editables: marca y desmarca a mano; ningún candado ni el aviso de «se marcan solas».
-    await expect(page.getByRole('checkbox')).toHaveCount(0);
-    await expect(page.getByText('Las casillas se marcan automáticamente cuando revisa cada material')).toHaveCount(0);
-    const marcar = page.getByRole('button', { name: 'Marcar Reglamento interno como completado' });
+    // Casillas editables: marca y desmarca a mano; sin el aviso de «se marcan solas».
+    await expect(page.getByRole('checkbox')).toHaveCount(3);
+    await expect(page.getByText('Cada clase se marca sola cuando la revisa')).toHaveCount(0);
+    const marcar = page.getByRole('checkbox', { name: 'Marcar Reglamento interno como completado' });
     await expect(marcar).toBeEnabled();
     await marcar.click();
-    await expect(page.getByRole('button', { name: 'Marcar Reglamento interno como pendiente' })).toBeVisible();
-    await page.getByRole('button', { name: 'Marcar Bienvenida Farmalogica como pendiente' }).click();
-    await expect(page.getByRole('button', { name: 'Marcar Bienvenida Farmalogica como completado' })).toBeVisible();
+    await expect(page.getByRole('checkbox', { name: 'Marcar Reglamento interno como pendiente' })).toBeVisible();
+    await page.getByRole('checkbox', { name: 'Marcar Bienvenida Farmalogica como pendiente' }).click();
+    await expect(page.getByRole('checkbox', { name: 'Marcar Bienvenida Farmalogica como completado' })).toBeVisible();
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/6-admin-vista-estudiante-editable.png`, fullPage: true });
   });
 
@@ -280,7 +276,7 @@ test.describe('Portal TH · Formación · completado automático', () => {
       return r.fulfill({ json: { ok: true, progresos: 3, respuestas: 1, certificados: 1 } });
     });
     await page.goto('/portal/formacion');
-    await page.getByRole('button', { name: 'Vista formador' }).click();
+    await page.locator('label').filter({ hasText: /^Vista formador$/ }).click();
     await page.getByRole('button', { name: /INDUCCIÓN FARMALOGICA/ }).click();
 
     const fila = page.getByRole('row', { name: /Ana Gómez/ });
@@ -311,7 +307,7 @@ test.describe('Portal TH · Formación · completado automático', () => {
       r.fulfill({ json: { estudiantes: [{ correo: 'ana@gsslatam.com', nombre: 'Ana Gómez', inscritoEl: '2026-10-01T00:00:00Z', porcentaje: 0, materialesCompletados: [], certificado: null }] } })
     );
     await page.goto('/portal/formacion');
-    await page.getByRole('button', { name: 'Vista formador' }).click();
+    await page.locator('label').filter({ hasText: /^Vista formador$/ }).click();
     await page.getByRole('button', { name: /INDUCCIÓN FARMALOGICA/ }).click();
     await expect(page.getByRole('row', { name: /Ana Gómez/ })).toBeVisible();
     await expect(page.getByRole('button', { name: /Restablecer el curso/ })).toHaveCount(0);
@@ -320,10 +316,10 @@ test.describe('Portal TH · Formación · completado automático', () => {
   test('administrador/formador: casillas editables a mano', async ({ page }) => {
     await simular(page, { puedeMarcarManual: true, completados: [1] });
     await abrirCurso(page);
-    await expect(page.getByRole('checkbox')).toHaveCount(0);
-    const boton = page.getByRole('button', { name: 'Marcar Reglamento interno como completado' });
+    await expect(page.getByRole('checkbox')).toHaveCount(3);
+    const boton = page.getByRole('checkbox', { name: 'Marcar Reglamento interno como completado' });
     await expect(boton).toBeEnabled();
-    await expect(page.getByRole('button', { name: 'Marcar Bienvenida Farmalogica como pendiente' })).toBeEnabled();
+    await expect(page.getByRole('checkbox', { name: 'Marcar Bienvenida Farmalogica como pendiente' })).toBeEnabled();
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/5-formador-casillas-editables.png`, fullPage: true });
   });
 });

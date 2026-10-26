@@ -85,15 +85,15 @@ test.describe('Formación · Top 10 de estudiantes', () => {
     }
   });
 
-  test('muy ancha (1920) los cursos conservan su lugar de siempre: el top ocupa el margen libre', async ({ page }) => {
+  test('muy ancha (1920): cursos y top caben en el contenido, el top a la derecha de la grilla', async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 1000 });
     await simular(page);
     await page.goto('/portal/formacion');
     const grilla = (await page.getByTestId('curso-grilla').boundingBox())!;
     const cuerpo = (await page.getByTestId('formacion-cuerpo').boundingBox())!;
-    expect(grilla.x + grilla.width).toBeLessThanOrEqual(cuerpo.x + cuerpo.width);
     const tp = (await panel(page).boundingBox())!;
-    expect(tp.x).toBeGreaterThanOrEqual(cuerpo.x + cuerpo.width - 4); // en el margen que quedaba libre
+    expect(tp.x).toBeGreaterThanOrEqual(grilla.x + grilla.width - 1);
+    expect(tp.x + tp.width).toBeLessThanOrEqual(cuerpo.x + cuerpo.width + 1);
   });
 
   test('en pantalla angosta (celular) el top va DEBAJO de los cursos y cabe en la pantalla', async ({ page }) => {
@@ -148,7 +148,7 @@ test.describe('Formación · Top 10 de estudiantes', () => {
     await page.goto('/portal/formacion');
     await expect(panel(page)).toBeVisible();
     await page.getByRole('button', { name: /INDUCCIÓN SISTEMAS/ }).click();
-    await expect(page.getByRole('button', { name: '← Volver a Formación' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Volver a Formación' })).toBeVisible();
     await expect(panel(page)).toHaveCount(0);
   });
 });

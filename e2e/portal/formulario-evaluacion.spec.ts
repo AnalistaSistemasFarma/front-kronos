@@ -192,10 +192,10 @@ test.describe('Portal TH · Formación · evaluación', () => {
     });
 
     await page.goto('/portal/formacion');
-    await page.getByRole('button', { name: 'Vista formador' }).click();
+    await page.locator('label').filter({ hasText: /^Vista formador$/ }).click();
     await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
     await page.getByTestId('alternar-edicion').click();
-    await page.getByRole('button', { name: 'Formulario', exact: true }).click();
+    await page.locator('label').filter({ hasText: /^Formulario$/ }).click();
     const selector = page.getByTestId('selector-formulario');
     await expect(selector.getByTestId('crear-encuesta')).toBeVisible();
     await expect(selector.getByTestId('crear-evaluacion')).toBeVisible();
@@ -269,10 +269,10 @@ test.describe('Portal TH · Formación · evaluación', () => {
     await page.route('**/api/portal/courses/2/roster', (r) => r.fulfill({ json: { estudiantes: [] } }));
     await page.route('**/api/portal/formularios', (r) => r.fulfill({ json: { formularios: [] } }));
     await page.goto('/portal/formacion');
-    await page.getByRole('button', { name: 'Vista formador' }).click();
+    await page.locator('label').filter({ hasText: /^Vista formador$/ }).click();
     await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
     await page.getByTestId('alternar-edicion').click();
-    await page.getByRole('button', { name: 'Formulario', exact: true }).click();
+    await page.locator('label').filter({ hasText: /^Formulario$/ }).click();
 
     const selector = page.getByTestId('selector-formulario');
     await selector.getByTestId('crear-encuesta').click();

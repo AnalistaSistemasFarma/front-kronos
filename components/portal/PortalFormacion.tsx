@@ -510,7 +510,7 @@ export function VistaCursoEstudiante({
     return (
       <Stack gap='md' data-testid='leccion'>
         <Group justify='space-between' wrap='wrap'>
-          <Button variant='subtle' leftSection={<IconArrowLeft size={16} />} onClick={() => setLeccion(null)}>
+          <Button variant='subtle' leftSection={<IconArrowLeft size={16} />} onClick={() => setLeccion(null)} data-testid='volver-curso'>
             {detalle.curso.titulo}
           </Button>
           <Group gap='xs'>
@@ -1078,10 +1078,9 @@ function VisorMaterial({
       centered
       title={<Text fw={700}>{material.titulo}</Text>}
       aria-label={material.titulo}
-      data-testid='visor-material'
       closeButtonProps={{ 'aria-label': 'Cerrar' }}
     >
-      {contenido}
+      <div data-testid='visor-material'>{contenido}</div>
     </Modal>
   );
 }
