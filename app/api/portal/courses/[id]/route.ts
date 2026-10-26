@@ -104,6 +104,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           descripcion: curso.description,
           activo: curso.active,
           creadoPor: curso.created_by,
+          creadoEl: curso.created_at,
         },
         esFormador,
         puedeMarcarManual: marcadoManual,

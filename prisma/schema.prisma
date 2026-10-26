@@ -1713,6 +1713,8 @@ model PortalCourseMaterial {
   intentos   PortalFormularioIntento[]
 
   @@index([course_id, orden])
+  preguntas FormacionPregunta[]
+
   @@map("portal_course_material")
   @@schema("dbo")
 }
@@ -5401,5 +5403,40 @@ model FormacionDivulgacionDestinatario {
   @@unique([divulgacion_id, email], map: "formacion_divulgacion_destinatario_uq")
   @@index([email, visto_at], map: "formacion_divulgacion_destinatario_email_visto_idx")
   @@map("formacion_divulgacion_destinatario")
+  @@schema("dbo")
+}
+
+/// Preguntas y respuestas de un material (video) del curso (Nicolás Rivera,
+/// 2026-10-26). parent_id = respuesta a otra pregunta. Borrado lógico.
+model FormacionPregunta {
+  id            Int                  @id @default(autoincrement())
+  material_id   Int
+  material      PortalCourseMaterial @relation(fields: [material_id], references: [id], onDelete: Cascade, map: "formacion_pregunta_material_fkey")
+  course_id     Int
+  parent_id     Int?
+  parent        FormacionPregunta?   @relation("FormacionPreguntaRespuestas", fields: [parent_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "formacion_pregunta_parent_fkey")
+  respuestas    FormacionPregunta[]  @relation("FormacionPreguntaRespuestas")
+  email         String               @db.NVarChar(255)
+  nombre        String               @db.NVarChar(255)
+  texto         String               @db.NVarChar(2000)
+  created_at    DateTime             @default(now())
+  eliminado_at  DateTime?
+  eliminado_por String?              @db.NVarChar(255)
+  likes         FormacionPreguntaLike[]
+
+  @@index([material_id, parent_id], map: "formacion_pregunta_material_idx")
+  @@map("formacion_pregunta")
+  @@schema("dbo")
+}
+
+model FormacionPreguntaLike {
+  id          Int               @id @default(autoincrement())
+  pregunta_id Int
+  pregunta    FormacionPregunta @relation(fields: [pregunta_id], references: [id], onDelete: Cascade, map: "formacion_pregunta_like_pregunta_fkey")
+  email       String            @db.NVarChar(255)
+  created_at  DateTime          @default(now())
+
+  @@unique([pregunta_id, email], map: "formacion_pregunta_like_uq")
+  @@map("formacion_pregunta_like")
   @@schema("dbo")
 }

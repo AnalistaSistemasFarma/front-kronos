@@ -7,6 +7,7 @@ import { prisma } from '../prisma';
 import { formadoresDePortal } from '../portal/config';
 import {
   EMPRESA_GLOBAL,
+  cursoVisiblePara,
   SUBPROCESO_FORMACION,
   normalizarCorreo,
   par,
@@ -220,4 +221,27 @@ export async function puedeAdministrarCursoId(correo: string, courseId: number):
     console.warn('[formacion] no se pudo validar el permiso sobre el curso', (error as Error).message);
     return false;
   }
+}
+
+/**
+ * ¿Puede ver (y preguntar en) este curso? El formador que lo administra sí,
+ * siempre; un estudiante si el curso está publicado y está inscrito o en su
+ * alcance. `modera` = puede borrar preguntas de otros (formador del curso).
+ */
+export async function accesoAlCurso(correo: string, courseId: number): Promise<{ puede: boolean; modera: boolean }> {
+  const curso = await prisma.portalCourse.findFirst({
+    where: { id: courseId, eliminado_at: null },
+    select: { active: true, alcances: { select: { id_company: true, id_department: true, activo: true } } },
+  });
+  if (!curso) return { puede: false, modera: false };
+  if (await puedeAdministrarCursoId(correo, courseId)) {
+    if (await esFormadorFormacion(correo)) return { puede: true, modera: true };
+  }
+  if (!curso.active) return { puede: false, modera: false };
+  const inscrito = await prisma.portalCourseEnrollment.findUnique({
+    where: { course_id_student_email: { course_id: courseId, student_email: correo } },
+    select: { id: true },
+  });
+  if (inscrito || curso.alcances.length === 0) return { puede: true, modera: false };
+  return { puede: cursoVisiblePara(curso.alcances, await perfilColaborador(correo)), modera: false };
 }

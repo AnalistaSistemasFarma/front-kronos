@@ -11,6 +11,7 @@ import {
   Card,
   Checkbox,
   FileInput,
+  Grid,
   Group,
   Loader,
   Modal,
@@ -23,6 +24,8 @@ import {
   Text,
   TextInput,
   Textarea,
+  ThemeIcon,
+  Timeline,
   Title,
   Tooltip,
   UnstyledButton,
@@ -34,11 +37,16 @@ import {
   IconArrowUp,
   IconCertificate,
   IconCheck,
+  IconClipboardCheck,
+  IconFileText,
+  IconLink,
+  IconListNumbers,
   IconPencil,
   IconPlayerPause,
   IconPlayerPlay,
   IconPlus,
   IconRewindBackward10,
+  IconSchool,
   IconTable,
   IconUserPlus,
   IconX,
@@ -60,6 +68,7 @@ import {
 } from '../../lib/portal/visor-revision';
 import { PanelRespuestas, PreviaDeMaterialFormulario, SelectorFormulario, VisorFormulario } from './FormularioPropio';
 import TopEstudiantes from './TopEstudiantes';
+import PreguntasMaterial from '../formacion/PreguntasMaterial';
 
 /**
  * FORMACIÓN — sección "tipo Moodle" al final del portal de Talento Humano.
@@ -100,7 +109,7 @@ interface Material {
 }
 
 interface DetalleCurso {
-  curso: { id: number; titulo: string; descripcion: string | null; activo: boolean; creadoPor: string };
+  curso: { id: number; titulo: string; descripcion: string | null; activo: boolean; creadoPor: string; creadoEl?: string };
   esFormador: boolean;
   /** Administrador/formador del Excel de permisos: puede marcar a mano. */
   puedeMarcarManual?: boolean;
@@ -395,6 +404,8 @@ export function VistaCursoEstudiante({
   const [detalle, setDetalle] = useState<DetalleCurso | null>(null);
   const [marcando, setMarcando] = useState<number | null>(null);
   const [abierto, setAbierto] = useState<Material | null>(null);
+  // Clase abierta en la vista de lección (video, PDF, imagen o documento).
+  const [leccion, setLeccion] = useState<Material | null>(null);
 
   const cargar = useCallback(async () => {
     setError(null);
@@ -466,6 +477,87 @@ export function VistaCursoEstudiante({
   if (error) return <AvisoError texto={error} />;
   if (!detalle) return null;
 
+  const materiales = detalle.materiales;
+  const hechos = materiales.filter((m) => m.completadoEl !== null).length;
+  const conteo = (tipo: string) => materiales.filter((m) => etiquetaTipo(m) === tipo).length;
+  const abrir = (m: Material) => {
+    setAviso(null);
+    if (m.tipo === 'FORM') setAbierto(m);
+    else if (m.tipo === 'LINK') window.open(m.url ?? '#', '_blank', 'noopener,noreferrer');
+    else setLeccion(m);
+    if (m.tipo === 'LINK') abrirEnlace(m);
+  };
+
+  const casilla = (m: Material) => {
+    const completado = m.completadoEl !== null;
+    return casillasEditables ? (
+      <Checkbox
+        checked={completado}
+        disabled={marcando === m.id}
+        onChange={() => void alternarMaterial(m.id, completado)}
+        aria-label={completado ? `Marcar ${m.titulo} como pendiente` : `Marcar ${m.titulo} como completado`}
+        title='Puede marcar o desmarcar a mano (administrador/formador)'
+      />
+    ) : null;
+  };
+
+  // ── Vista de la LECCIÓN (2026-10-26): el material grande y, al lado, sus preguntas y respuestas. ──
+  if (leccion) {
+    const actual = materiales.find((m) => m.id === leccion.id) ?? leccion;
+    const i = materiales.findIndex((m) => m.id === actual.id);
+    const anterior = i > 0 ? materiales[i - 1] : null;
+    const siguiente = i >= 0 && i < materiales.length - 1 ? materiales[i + 1] : null;
+    return (
+      <Stack gap='md' data-testid='leccion'>
+        <Group justify='space-between' wrap='wrap'>
+          <Button variant='subtle' leftSection={<IconArrowLeft size={16} />} onClick={() => setLeccion(null)}>
+            {detalle.curso.titulo}
+          </Button>
+          <Group gap='xs'>
+            <Button variant='default' disabled={!anterior} onClick={() => anterior && abrir(anterior)}>
+              ← Clase anterior
+            </Button>
+            <Button disabled={!siguiente} onClick={() => siguiente && abrir(siguiente)}>
+              Clase siguiente →
+            </Button>
+          </Group>
+        </Group>
+        {aviso && (
+          <Alert color={aviso.tipo === 'error' ? 'red' : 'green'} role={aviso.tipo === 'error' ? 'alert' : 'status'}>
+            {aviso.texto}
+          </Alert>
+        )}
+        <Grid gutter='md'>
+          <Grid.Col span={{ base: 12, lg: 8 }}>
+            <Stack gap='sm'>
+              <VisorMaterial
+                key={actual.id}
+                enLinea
+                cursoId={detalle.curso.id}
+                material={actual}
+                onCerrar={() => setLeccion(null)}
+                onCompletado={() => alCompletar(actual.titulo)}
+              />
+              <Group gap='xs' wrap='nowrap'>
+                <Badge variant='light' size='lg' circle>
+                  {i + 1}
+                </Badge>
+                <Title order={3} style={{ overflowWrap: 'anywhere' }}>
+                  {actual.titulo}
+                </Title>
+                {actual.completadoEl !== null && <InsigniaCompletado />}
+              </Group>
+            </Stack>
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, lg: 4 }}>
+            <PreguntasMaterial materialId={actual.id} />
+          </Grid.Col>
+        </Grid>
+      </Stack>
+    );
+  }
+
+  // ── PORTADA del curso (2026-10-26): encabezado, datos y temario numerado. ──
   return (
     <Stack gap='md'>
       <Group>
@@ -473,11 +565,41 @@ export function VistaCursoEstudiante({
           Volver a Formación
         </Button>
       </Group>
-      <Card withBorder radius='md' shadow='sm' padding='lg'>
-        <Stack gap='sm'>
-          <Title order={3}>{detalle.curso.titulo}</Title>
-          {detalle.curso.descripcion && (
+      <Card withBorder radius='md' shadow='sm' padding='xl' data-testid='portada-curso'>
+        <Stack gap='md'>
+          <ThemeIcon size={56} radius='md' variant='light'>
+            <IconSchool size={32} />
+          </ThemeIcon>
+          <Title order={1} style={{ overflowWrap: 'anywhere' }}>
+            {detalle.curso.titulo}
+          </Title>
+          {detalle.curso.creadoEl && (
             <Text size='sm' c='dimmed'>
+              Publicado el {new Date(detalle.curso.creadoEl).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })}
+            </Text>
+          )}
+          <Group gap='xs'>
+            <Badge variant='outline' color='gray' size='lg' leftSection={<IconListNumbers size={14} />} style={{ textTransform: 'none' }}>
+              {materiales.length} clase(s)
+            </Badge>
+            {conteo('Video') > 0 && (
+              <Badge variant='outline' color='gray' size='lg' leftSection={<IconPlayerPlay size={14} />} style={{ textTransform: 'none' }}>
+                {conteo('Video')} video(s)
+              </Badge>
+            )}
+            {conteo('Documento') > 0 && (
+              <Badge variant='outline' color='gray' size='lg' leftSection={<IconFileText size={14} />} style={{ textTransform: 'none' }}>
+                {conteo('Documento')} documento(s)
+              </Badge>
+            )}
+            {conteo('Formulario') > 0 && (
+              <Badge variant='outline' color='gray' size='lg' leftSection={<IconClipboardCheck size={14} />} style={{ textTransform: 'none' }}>
+                {conteo('Formulario')} evaluación(es)
+              </Badge>
+            )}
+          </Group>
+          {detalle.curso.descripcion && (
+            <Text size='md' style={{ whiteSpace: 'pre-wrap' }}>
               {detalle.curso.descripcion}
             </Text>
           )}
@@ -486,76 +608,12 @@ export function VistaCursoEstudiante({
               {aviso.texto}
             </Alert>
           )}
-          <BarraProgreso porcentaje={detalle.porcentaje} mostrarCompletado />
-
-          <Stack gap='xs' component='ul' style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {detalle.materiales.map((m) => {
-              const completado = m.completadoEl !== null;
-              return (
-                <Paper key={m.id} component='li' withBorder radius='md' p='sm' data-testid='material-item'>
-                  <Group justify='space-between' wrap='nowrap' gap='sm'>
-                    <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
-                      {casillasEditables ? (
-                        <Checkbox
-                          checked={completado}
-                          disabled={marcando === m.id}
-                          onChange={() => void alternarMaterial(m.id, completado)}
-                          aria-label={completado ? `Marcar ${m.titulo} como pendiente` : `Marcar ${m.titulo} como completado`}
-                          title='Puede marcar o desmarcar a mano (administrador/formador)'
-                        />
-                      ) : (
-                        <Tooltip label={AYUDA_CASILLA_BLOQUEADA} withArrow>
-                          <Checkbox
-                            checked={completado}
-                            readOnly
-                            disabled
-                            aria-label={`${m.titulo}: ${AYUDA_CASILLA_BLOQUEADA.toLowerCase()}`}
-                          />
-                        </Tooltip>
-                      )}
-                      <Stack gap={0} style={{ minWidth: 0 }}>
-                        {m.tipo === 'LINK' ? (
-                          <Anchor href={m.url ?? '#'} target='_blank' rel='noopener noreferrer' onClick={() => abrirEnlace(m)} fw={600}>
-                            {m.titulo}
-                          </Anchor>
-                        ) : (
-                          <Anchor
-                            component='button'
-                            type='button'
-                            fw={600}
-                            ta='left'
-                            onClick={() => setAbierto(m)}
-                            data-testid={m.tipo === 'FORM' ? `abrir-formulario-${m.id}` : undefined}
-                          >
-                            {m.titulo}
-                          </Anchor>
-                        )}
-                        <Text size='xs' c='dimmed'>
-                          {etiquetaTipo(m)}
-                          {!m.obligatorio && ' · opcional'}
-                        </Text>
-                      </Stack>
-                    </Group>
-                    <Group gap='xs' wrap='nowrap'>
-                      {m.tipo === 'FORM' && verRespuestasAqui && (
-                        <Button size='xs' variant='default' leftSection={<IconTable size={14} />} onClick={() => setRespuestasDe(m)}>
-                          Ver respuestas
-                        </Button>
-                      )}
-                      {completado && <InsigniaCompletado />}
-                    </Group>
-                  </Group>
-                </Paper>
-              );
-            })}
-          </Stack>
-          {!casillasEditables && detalle.materiales.length > 0 && (
-            <Text size='xs' c='dimmed'>
-              Las casillas se marcan automáticamente cuando revisa cada material: los videos hasta el final, los PDF hasta la
-              última página, los formularios al enviarlos y los demás documentos y enlaces al abrirlos.
+          <Stack gap={4}>
+            <Text size='sm' fw={600}>
+              Su avance: {hechos} de {materiales.length} clase(s)
             </Text>
-          )}
-
+            <BarraProgreso porcentaje={detalle.porcentaje} mostrarCompletado />
+          </Stack>
           {detalle.certificado ? (
             <Group>
               <Button
@@ -578,20 +636,85 @@ export function VistaCursoEstudiante({
         </Stack>
       </Card>
 
+      <Card withBorder radius='md' shadow='sm' padding='xl'>
+        <Title order={4} mb='md'>
+          Temario
+        </Title>
+        {materiales.length === 0 ? (
+          <Text size='sm' c='dimmed'>
+            Este curso todavía no tiene clases.
+          </Text>
+        ) : (
+          <Timeline active={hechos - 1} bulletSize={28} lineWidth={3} color='green'>
+            {materiales.map((m, i) => {
+              const completado = m.completadoEl !== null;
+              return (
+                <Timeline.Item
+                  key={m.id}
+                  bullet={
+                    <Text size='xs' fw={700}>
+                      {i + 1}
+                    </Text>
+                  }
+                  data-testid='material-item'
+                >
+                  <Group justify='space-between' wrap='nowrap' gap='sm'>
+                    <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
+                      <ThemeIcon variant='light' size={44} radius='md' color={completado ? 'green' : 'blue'}>
+                        {iconoTipo(m)}
+                      </ThemeIcon>
+                      <Stack gap={2} style={{ minWidth: 0 }}>
+                        <Anchor
+                          component='button'
+                          type='button'
+                          fw={700}
+                          ta='left'
+                          c='var(--mantine-color-text)'
+                          onClick={() => abrir(m)}
+                          data-testid={m.tipo === 'FORM' ? `abrir-formulario-${m.id}` : undefined}
+                        >
+                          {m.titulo}
+                        </Anchor>
+                        <Group gap='xs'>
+                          {completado ? (
+                            <InsigniaCompletado />
+                          ) : (
+                            <Text size='xs' c='dimmed'>
+                              {etiquetaTipo(m)}
+                              {!m.obligatorio && ' · opcional'}
+                            </Text>
+                          )}
+                        </Group>
+                      </Stack>
+                    </Group>
+                    <Group gap='xs' wrap='nowrap'>
+                      {m.tipo === 'FORM' && verRespuestasAqui && (
+                        <Button size='xs' variant='default' leftSection={<IconTable size={14} />} onClick={() => setRespuestasDe(m)}>
+                          Ver respuestas
+                        </Button>
+                      )}
+                      {casilla(m)}
+                    </Group>
+                  </Group>
+                </Timeline.Item>
+              );
+            })}
+          </Timeline>
+        )}
+        {!casillasEditables && materiales.length > 0 && (
+          <Text size='xs' c='dimmed' mt='md'>
+            Cada clase se marca sola cuando la revisa: los videos hasta el final, los PDF hasta la última página, los
+            formularios al enviarlos y los demás documentos y enlaces al abrirlos.
+          </Text>
+        )}
+      </Card>
+
       {abierto && abierto.tipo === 'FORM' && (
         <VisorFormulario
           materialId={abierto.id}
           titulo={abierto.titulo}
           onCerrar={() => setAbierto(null)}
           onEnviado={() => alCompletar(abierto.titulo, `Respuestas enviadas: "${abierto.titulo}" quedó completado.`)}
-        />
-      )}
-      {abierto && abierto.tipo !== 'FORM' && (
-        <VisorMaterial
-          cursoId={detalle.curso.id}
-          material={abierto}
-          onCerrar={() => setAbierto(null)}
-          onCompletado={() => alCompletar(abierto.titulo)}
         />
       )}
       {respuestasDe && (
@@ -607,6 +730,14 @@ export function VistaCursoEstudiante({
       )}
     </Stack>
   );
+}
+
+function iconoTipo(m: Material) {
+  const t = etiquetaTipo(m);
+  if (t === 'Video') return <IconPlayerPlay size={22} />;
+  if (t === 'Formulario') return <IconClipboardCheck size={22} />;
+  if (t === 'Enlace') return <IconLink size={22} />;
+  return <IconFileText size={22} />;
 }
 
 function etiquetaTipo(m: Material): string {
@@ -648,11 +779,14 @@ function VisorMaterial({
   material,
   onCerrar,
   onCompletado,
+  enLinea = false,
 }: {
   cursoId: number;
   material: Material;
   onCerrar: () => void;
   onCompletado: () => Promise<void> | void;
+  /** Dentro de la página (vista de la lección) en vez de ventana emergente. */
+  enLinea?: boolean;
 }) {
   const url = materialUrl(cursoId, material.id);
   const [regla, setRegla] = useState<ReglaRevision | null>(null);
@@ -692,14 +826,6 @@ function VisorMaterial({
     };
     // Solo al abrir; `onCompletado` y `completadoEl` no deben reabrir la vista.
   }, [material.id]);
-
-  useEffect(() => {
-    const alTeclear = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCerrar();
-    };
-    window.addEventListener('keydown', alTeclear);
-    return () => window.removeEventListener('keydown', alTeclear);
-  }, [onCerrar]);
 
   const reportar = useCallback(
     async (cuerpo: { segundosVistos: number; duracion?: number; paginaMaxima?: number; paginasTotales?: number }) => {
@@ -809,6 +935,141 @@ function VisorMaterial({
     estadoTexto = `Revisando… ${reloj(Math.min(segundos, regla.segundosMinimos))} de ${reloj(regla.segundosMinimos)}`;
   }
 
+  const contenido = (
+    <Stack gap='sm'>
+      <Group justify='space-between' wrap='wrap' gap='xs'>
+        <Badge
+          size='lg'
+          variant='light'
+          color={completado ? 'green' : 'blue'}
+          role='status'
+          data-testid='estado-revision'
+          style={{ textTransform: 'none', whiteSpace: 'normal', height: 'auto' }}
+        >
+          {estadoTexto}
+        </Badge>
+        {/* Video y PDF se revisan aquí; abrirlos aparte saltaría el control. */}
+        {tipo !== 'video' && tipo !== 'pdf' && (
+          <Anchor href={url} target='_blank' rel='noopener noreferrer' size='sm'>
+            Abrir aparte
+          </Anchor>
+        )}
+      </Group>
+      {error && <AvisoError texto={error} />}
+      {aviso && (
+        <Alert color='yellow' role='alert'>
+          {aviso}
+        </Alert>
+      )}
+      {tipo === 'video' ? (
+        <>
+          {/* Sin `controls`: la barra nativa permite saltar. */}
+          <video
+            ref={videoRef}
+            style={{ width: '100%', maxHeight: '70vh', background: '#000', borderRadius: 8 }}
+            src={url}
+            disablePictureInPicture
+            playsInline
+            preload='metadata'
+            data-testid='video-material'
+            onClick={alternarVideo}
+            onContextMenu={(e) => e.preventDefault()}
+            onLoadedMetadata={(e) => setDuracion(e.currentTarget.duration || 0)}
+            onPlay={() => {
+              video.current.ultimo = videoRef.current?.currentTime ?? 0;
+              setReproduciendo(true);
+            }}
+            onPause={() => setReproduciendo(false)}
+            onEnded={(e) => {
+              setReproduciendo(false);
+              alAvanzarVideo(e.currentTarget);
+            }}
+            onTimeUpdate={(e) => alAvanzarVideo(e.currentTarget)}
+            onSeeking={(e) => alBuscarVideo(e.currentTarget)}
+            onRateChange={(e) => {
+              if (e.currentTarget.playbackRate !== 1) e.currentTarget.playbackRate = 1;
+            }}
+          />
+          <Group gap='sm' wrap='nowrap'>
+            <Button
+              size='xs'
+              leftSection={reproduciendo ? <IconPlayerPause size={14} /> : <IconPlayerPlay size={14} />}
+              onClick={alternarVideo}
+            >
+              {reproduciendo ? 'Pausar' : 'Reproducir'}
+            </Button>
+            <Button size='xs' variant='default' onClick={retrocederVideo} aria-label='Retroceder 10 segundos' leftSection={<IconRewindBackward10 size={14} />}>
+              10 s
+            </Button>
+            <Progress
+              style={{ flex: 1 }}
+              radius='xl'
+              value={duracion > 0 ? Math.min(100, (segundos / duracion) * 100) : 0}
+              role='progressbar'
+              aria-label='Tiempo visto del video'
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={duracion > 0 ? Math.min(100, Math.floor((segundos / duracion) * 100)) : 0}
+            />
+            <Text size='sm' fw={600} data-testid='contador-video'>
+              {contadorVideo(segundos, duracion)}
+            </Text>
+          </Group>
+        </>
+      ) : tipo === 'imagen' ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img style={{ maxWidth: '100%', maxHeight: '70vh', margin: '0 auto', display: 'block' }} src={url} alt={material.titulo} />
+      ) : tipo === 'pdf' ? (
+        <>
+          <PdfPaginado url={url} pagina={pdf.pagina} onCargado={alCargarPdf} onError={setError} />
+          {pdf.total > 1 && (
+            <Group gap='sm' wrap='wrap'>
+              <Button size='xs' variant='default' onClick={() => irAPagina(pdf.pagina - 1)} disabled={pdf.pagina <= 1}>
+                ← Página anterior
+              </Button>
+              <Text size='sm' fw={600} data-testid='pagina-pdf'>
+                Página {pdf.pagina} de {pdf.total}
+              </Text>
+              <Button size='xs' onClick={() => irAPagina(pdf.pagina + 1)} disabled={pdf.pagina >= pdf.total}>
+                Página siguiente →
+              </Button>
+              <Progress
+                style={{ flex: 1, minWidth: 120 }}
+                radius='xl'
+                value={lectura}
+                role='progressbar'
+                aria-label='Lectura del documento'
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={lectura}
+                data-testid='lectura-pdf'
+              />
+              <Text size='sm' fw={600}>
+                {lectura} %
+              </Text>
+            </Group>
+          )}
+        </>
+      ) : tipo === 'documento' ? (
+        <Stack gap='sm' align='flex-start'>
+          <Text size='sm'>Este documento se abre con su programa (Word, Excel o PowerPoint).</Text>
+          <Button component='a' href={url} target='_blank' rel='noopener noreferrer'>
+            Abrir documento
+          </Button>
+        </Stack>
+      ) : null}
+    </Stack>
+  );
+
+  // En la vista de la lección (2026-10-26) el visor va en la página, junto a las preguntas.
+  if (enLinea) {
+    return (
+      <Card withBorder radius='md' shadow='sm' padding='md' data-testid='visor-material' aria-label={material.titulo}>
+        {contenido}
+      </Card>
+    );
+  }
+
   return (
     <Modal
       opened
@@ -820,129 +1081,7 @@ function VisorMaterial({
       data-testid='visor-material'
       closeButtonProps={{ 'aria-label': 'Cerrar' }}
     >
-      <Stack gap='sm'>
-        <Group justify='space-between' wrap='wrap' gap='xs'>
-          <Badge
-            size='lg'
-            variant='light'
-            color={completado ? 'green' : 'blue'}
-            role='status'
-            data-testid='estado-revision'
-            style={{ textTransform: 'none', whiteSpace: 'normal', height: 'auto' }}
-          >
-            {estadoTexto}
-          </Badge>
-          {/* Video y PDF se revisan aquí; abrirlos aparte saltaría el control. */}
-          {tipo !== 'video' && tipo !== 'pdf' && (
-            <Anchor href={url} target='_blank' rel='noopener noreferrer' size='sm'>
-              Abrir aparte
-            </Anchor>
-          )}
-        </Group>
-        {error && <AvisoError texto={error} />}
-        {aviso && (
-          <Alert color='yellow' role='alert'>
-            {aviso}
-          </Alert>
-        )}
-        {tipo === 'video' ? (
-          <>
-            {/* Sin `controls`: la barra nativa permite saltar. */}
-            <video
-              ref={videoRef}
-              style={{ width: '100%', maxHeight: '70vh', background: '#000', borderRadius: 8 }}
-              src={url}
-              disablePictureInPicture
-              playsInline
-              preload='metadata'
-              data-testid='video-material'
-              onClick={alternarVideo}
-              onContextMenu={(e) => e.preventDefault()}
-              onLoadedMetadata={(e) => setDuracion(e.currentTarget.duration || 0)}
-              onPlay={() => {
-                video.current.ultimo = videoRef.current?.currentTime ?? 0;
-                setReproduciendo(true);
-              }}
-              onPause={() => setReproduciendo(false)}
-              onEnded={(e) => {
-                setReproduciendo(false);
-                alAvanzarVideo(e.currentTarget);
-              }}
-              onTimeUpdate={(e) => alAvanzarVideo(e.currentTarget)}
-              onSeeking={(e) => alBuscarVideo(e.currentTarget)}
-              onRateChange={(e) => {
-                if (e.currentTarget.playbackRate !== 1) e.currentTarget.playbackRate = 1;
-              }}
-            />
-            <Group gap='sm' wrap='nowrap'>
-              <Button
-                size='xs'
-                leftSection={reproduciendo ? <IconPlayerPause size={14} /> : <IconPlayerPlay size={14} />}
-                onClick={alternarVideo}
-              >
-                {reproduciendo ? 'Pausar' : 'Reproducir'}
-              </Button>
-              <Button size='xs' variant='default' onClick={retrocederVideo} aria-label='Retroceder 10 segundos' leftSection={<IconRewindBackward10 size={14} />}>
-                10 s
-              </Button>
-              <Progress
-                style={{ flex: 1 }}
-                radius='xl'
-                value={duracion > 0 ? Math.min(100, (segundos / duracion) * 100) : 0}
-                role='progressbar'
-                aria-label='Tiempo visto del video'
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={duracion > 0 ? Math.min(100, Math.floor((segundos / duracion) * 100)) : 0}
-              />
-              <Text size='sm' fw={600} data-testid='contador-video'>
-                {contadorVideo(segundos, duracion)}
-              </Text>
-            </Group>
-          </>
-        ) : tipo === 'imagen' ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img style={{ maxWidth: '100%', maxHeight: '70vh', margin: '0 auto', display: 'block' }} src={url} alt={material.titulo} />
-        ) : tipo === 'pdf' ? (
-          <>
-            <PdfPaginado url={url} pagina={pdf.pagina} onCargado={alCargarPdf} onError={setError} />
-            {pdf.total > 1 && (
-              <Group gap='sm' wrap='wrap'>
-                <Button size='xs' variant='default' onClick={() => irAPagina(pdf.pagina - 1)} disabled={pdf.pagina <= 1}>
-                  ← Página anterior
-                </Button>
-                <Text size='sm' fw={600} data-testid='pagina-pdf'>
-                  Página {pdf.pagina} de {pdf.total}
-                </Text>
-                <Button size='xs' onClick={() => irAPagina(pdf.pagina + 1)} disabled={pdf.pagina >= pdf.total}>
-                  Página siguiente →
-                </Button>
-                <Progress
-                  style={{ flex: 1, minWidth: 120 }}
-                  radius='xl'
-                  value={lectura}
-                  role='progressbar'
-                  aria-label='Lectura del documento'
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={lectura}
-                  data-testid='lectura-pdf'
-                />
-                <Text size='sm' fw={600}>
-                  {lectura} %
-                </Text>
-              </Group>
-            )}
-          </>
-        ) : tipo === 'documento' ? (
-          <Stack gap='sm' align='flex-start'>
-            <Text size='sm'>Este documento se abre con su programa (Word, Excel o PowerPoint).</Text>
-            <Button component='a' href={url} target='_blank' rel='noopener noreferrer'>
-              Abrir documento
-            </Button>
-          </Stack>
-        ) : null}
-      </Stack>
+      {contenido}
     </Modal>
   );
 }
