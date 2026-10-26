@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { Alert, Button, Card, Group, Loader, Stack, Table, Text, Title } from '@mantine/core';
+import { IconTrophy } from '@tabler/icons-react';
 import { medallaDelPuesto, type FilaTop, type VistaRanking } from '../../lib/portal/ranking-formacion';
 
 /**
@@ -20,7 +22,7 @@ const COLORES = {
 export function Medalla({ tipo, puesto }: { tipo: 'oro' | 'plata' | 'bronce'; puesto: number }) {
   const c = COLORES[tipo];
   return (
-    <svg className={`portal-th__top-medalla portal-th__top-medalla--${tipo}`} viewBox='0 0 32 40' width='28' height='35' role='img' aria-label={NOMBRE_MEDALLA[tipo]} data-testid={`medalla-${tipo}`}>
+    <svg viewBox='0 0 32 40' width='28' height='35' role='img' aria-label={NOMBRE_MEDALLA[tipo]} data-testid={`medalla-${tipo}`}>
       <path d='M8 0h6l4 14h-7z' fill={c.cinta} />
       <path d='M24 0h-6l-4 14h7z' fill={c.cinta} opacity='.82' />
       <circle cx='16' cy='26' r='12.5' fill={c.anillo} stroke={c.borde} strokeWidth='1.6' />
@@ -34,7 +36,13 @@ export function Medalla({ tipo, puesto }: { tipo: 'oro' | 'plata' | 'bronce'; pu
 
 function Puesto({ fila }: { fila: FilaTop }) {
   const medalla = medallaDelPuesto(fila.puesto);
-  return medalla ? <Medalla tipo={medalla} puesto={fila.puesto} /> : <span className='portal-th__top-numero'>{fila.puesto}</span>;
+  return medalla ? (
+    <Medalla tipo={medalla} puesto={fila.puesto} />
+  ) : (
+    <Text component='span' fw={700} c='dimmed' data-testid='top-numero' style={{ display: 'inline-block', width: 28, textAlign: 'center' }}>
+      {fila.puesto}
+    </Text>
+  );
 }
 
 export default function TopEstudiantes() {
@@ -73,60 +81,79 @@ export default function TopEstudiantes() {
   if (oculto) return null;
 
   return (
-    <aside className='portal-th__top' aria-labelledby='portal-th-top-titulo' data-testid='top-estudiantes'>
-      <h3 id='portal-th-top-titulo'>
-        <span aria-hidden='true'>🏆</span> Top 10 de estudiantes
-      </h3>
-      <p className='portal-th__top-explica'>Más cursos completados y, a igual número, mejor nota promedio.</p>
+    <Card withBorder radius='md' shadow='sm' padding='md' component='aside' aria-labelledby='formacion-top-titulo' data-testid='top-estudiantes'>
+      <Stack gap='sm'>
+        <Title order={4} id='formacion-top-titulo' style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <IconTrophy size={20} aria-hidden /> Top 10 de estudiantes
+        </Title>
+        <Text size='xs' c='dimmed'>
+          Más cursos completados y, a igual número, mejor nota promedio.
+        </Text>
 
-      {/* Avisos ARRIBA y con color. */}
-      {error && (
-        <div className='portal-th__alerta portal-th__alerta--error' role='alert' data-testid='top-error'>
-          <span>{error}</span>
-          <button type='button' onClick={() => void cargar()}>
-            Reintentar
-          </button>
-        </div>
-      )}
-      {cargando && <p className='portal-th__estado'>Cargando…</p>}
+        {/* Avisos ARRIBA y con color. */}
+        {error && (
+          <Alert color='red' role='alert' data-testid='top-error'>
+            <Group justify='space-between' gap='xs'>
+              <Text size='sm'>{error}</Text>
+              <Button size='xs' variant='default' onClick={() => void cargar()}>
+                Reintentar
+              </Button>
+            </Group>
+          </Alert>
+        )}
+        {cargando && <Loader size='sm' />}
 
-      {datos && datos.top.length === 0 && (
-        <p className='portal-th__estado' data-testid='top-vacio'>
-          Todavía nadie ha completado un curso. ¡Sea la primera persona del top!
-        </p>
-      )}
+        {datos && datos.top.length === 0 && (
+          <Text size='sm' c='dimmed' data-testid='top-vacio'>
+            Todavía nadie ha completado un curso. ¡Sea la primera persona del top!
+          </Text>
+        )}
 
-      {datos && datos.top.length > 0 && (
-        <>
-          <table className='portal-th__top-tabla'>
-            <caption className='portal-th__top-solo-lectores'>Los {datos.top.length} mejores estudiantes de Formación</caption>
-            <thead>
-              <tr>
-                <th scope='col'>Puesto</th>
-                <th scope='col'>Estudiante</th>
-              </tr>
-            </thead>
-            <tbody>
-              {datos.top.map((f) => (
-                <tr key={f.puesto} className={f.esUsted ? 'portal-th__top-usted' : undefined} data-testid='top-fila' data-puesto={f.puesto}>
-                  <td className='portal-th__top-puesto'>
-                    <Puesto fila={f} />
-                  </td>
-                  <th scope='row' className='portal-th__top-nombre'>
-                    {f.nombre}
-                    {f.esUsted && <span className='portal-th__top-tu'> (usted)</span>}
-                  </th>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {datos.usted && (
-            <p className='portal-th__top-suposicion' data-testid='top-usted'>
-              Su puesto: <strong>#{datos.usted.puesto}</strong> de {datos.total}
-            </p>
-          )}
-        </>
-      )}
-    </aside>
+        {datos && datos.top.length > 0 && (
+          <>
+            <Table striped highlightOnHover>
+              <Table.Caption style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>
+                Los {datos.top.length} mejores estudiantes de Formación
+              </Table.Caption>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th scope='col'>Puesto</Table.Th>
+                  <Table.Th scope='col'>Estudiante</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {datos.top.map((f) => (
+                  <Table.Tr
+                    key={f.puesto}
+                    data-testid='top-fila'
+                    data-puesto={f.puesto}
+                    data-usted={f.esUsted ? 'true' : undefined}
+                    bg={f.esUsted ? 'var(--mantine-color-blue-light)' : undefined}
+                  >
+                    <Table.Td>
+                      <Puesto fila={f} />
+                    </Table.Td>
+                    <Table.Th scope='row' fw={f.esUsted ? 700 : 500}>
+                      {f.nombre}
+                      {f.esUsted && (
+                        <Text component='span' size='sm' c='dimmed'>
+                          {' '}
+                          (usted)
+                        </Text>
+                      )}
+                    </Table.Th>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+            {datos.usted && (
+              <Text size='sm' data-testid='top-usted'>
+                Su puesto: <strong>#{datos.usted.puesto}</strong> de {datos.total}
+              </Text>
+            )}
+          </>
+        )}
+      </Stack>
+    </Card>
   );
 }
