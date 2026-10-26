@@ -71,6 +71,8 @@ test('el hijo NO hereda el entorno del puente: solo config aislado y una credenc
   // Los topes de subagentes van SIEMPRE (F2): sin equipo, tope 1 y Agent prohibida.
   assert.deepEqual(Object.keys(env).sort(), [
     'ANTHROPIC_API_KEY',
+    'CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR',
+    'CLAUDE_CODE_DISABLE_AUTO_MEMORY',
     'CLAUDE_CODE_DISABLE_BACKGROUND_TASKS',
     'CLAUDE_CODE_DISABLE_EXPLORE_PLAN_AGENTS',
     'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
@@ -78,6 +80,8 @@ test('el hijo NO hereda el entorno del puente: solo config aislado y una credenc
     'CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH',
     'CLAUDE_CONFIG_DIR',
     'DISABLE_AUTOUPDATER',
+    'GRAPHIFY_BACKEND',
+    'GRAPHIFY_QUERY_LOG_DISABLE',
     'HOME',
     'LANG',
     'PATH',
@@ -85,6 +89,8 @@ test('el hijo NO hereda el entorno del puente: solo config aislado y una credenc
   assert.ok(!('HILOS_SYNERLINK_KEY' in env));
   assert.equal(env.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS, '1');
   assert.equal(env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH, '1');
+  // Sin memoria automática nativa: la memoria llega en solo lectura desde el puente.
+  assert.equal(env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, '1');
   const conToken = armarEntorno({ path: '/usr/bin', home: '/h', configClaudeDir: '/c', credencial: { tipo: 'oauth-token', valor: 't' } });
   assert.equal(conToken.CLAUDE_CODE_OAUTH_TOKEN, 't');
   assert.ok(!('ANTHROPIC_API_KEY' in conToken));

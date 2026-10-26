@@ -9,9 +9,13 @@
  *   GET  /api/chat/agent/projects/files/N descarga de un archivo del proyecto
  *   GET  /api/chat/attachments/N          descarga de un adjunto del hilo
  *   POST /api/chat/agent/status           indicador «trabajando»
- *   POST /api/chat/agent/messages         publicar la respuesta
+ *   POST /api/chat/agent/messages         publicar la respuesta (JSON, o multipart con adjuntos) y los
+ *                                         avisos de progreso (con el indicador aún «trabajando»)
  *   POST /api/chat/agent/projects/proposals  entregar las PROPUESTAS de tareas del turno
+ *   POST /api/chat/agent/projects/files      ARCHIVAR en los Archivos del proyecto lo que el hilo
+ *                                            adjunta (multipart; archivar-proyecto.mjs, 2026-10-23)
  *   POST /api/chat/agent/usage            consumo (tokens) del turno
+ *   POST /api/chat/agent/quota            cupo semanal y ventana de 5 h del token (cuota.mjs)
  *   POST /api/chat/agent/projects/team/requests     pedidos de «Sugerir equipo» (los reclama)
  *   POST /api/chat/agent/projects/team/suggestions  entrega de una sugerencia
  *   POST /api/chat/agent/projects/team/runs         lo que hizo cada subagente en un turno
@@ -19,9 +23,17 @@
  * La llave nunca se escribe en registros ni pasa al proceso del modelo.
  */
 export class ErrorSynerLink extends Error {
-  constructor(mensaje, status) {
+  /**
+   * @param {string} mensaje
+   * @param {number} status
+   * @param {{ detalle?: string | null, rutaAusente?: boolean }} [extra] `detalle`: el `error` de la API;
+   *   `rutaAusente`: 404 SIN cuerpo JSON de la API (ese SynerLink aún no trae la ruta).
+   */
+  constructor(mensaje, status, extra = {}) {
     super(mensaje);
     this.status = status;
+    this.detalle = extra.detalle ?? null;
+    this.rutaAusente = extra.rutaAusente === true;
   }
 }
 
@@ -67,9 +79,70 @@ export function crearClienteSynerLink({ url, llave, fetchImpl = globalThis.fetch
       }),
     responder: (idConversation, body) =>
       json('/api/chat/agent/messages', { method: 'POST', body: { idConversation, body, state: 'idle' } }),
+    /**
+     * Mensaje INTERMEDIO (aviso de progreso, 2026-10-22): se publica en el hilo pero el
+     * indicador queda como estaba («trabajando»), no en reposo. La ruta acepta state/label
+     * y no toca la tablita de subagentes (`tasks`).
+     */
+    avisar: (idConversation, body, state = 'thinking', label = null) =>
+      json('/api/chat/agent/messages', { method: 'POST', body: { idConversation, body, state: state === 'tool' ? 'tool' : 'thinking', label } }),
+    /**
+     * Publica la respuesta CON adjuntos: misma ruta, en multipart/form-data
+     * (campos idConversation, body, state y un `files` por archivo). `archivos`
+     * ya viene validado y leído por adjuntos-salida.mjs ({ nombre, datos, tipo }).
+     */
+    async responderConArchivos(idConversation, body, archivos) {
+      const form = new FormData();
+      form.append('idConversation', String(idConversation));
+      form.append('body', body ?? '');
+      form.append('state', 'idle');
+      for (const a of archivos) form.append('files', new Blob([a.datos], { type: a.tipo }), a.nombre);
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 180_000);
+      try {
+        // Sin Content-Type: fetch pone el multipart con su boundary.
+        const res = await fetchImpl(`${url}/api/chat/agent/messages`, { method: 'POST', headers: cabeceras, body: form, signal: ctrl.signal });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new ErrorSynerLink(`POST /api/chat/agent/messages (adjuntos) -> HTTP ${res.status}${data?.error ? ` (${data.error})` : ''}`, res.status);
+        }
+        return data;
+      } finally {
+        clearTimeout(t);
+      }
+    },
+    /**
+     * ARCHIVA en los Archivos del proyecto de la conversación los adjuntos del turno
+     * (`archivos` ya validados y leídos por adjuntos-salida.mjs). La API resuelve el
+     * proyecto por la conversación y el agente por la llave; un nombre repetido vuelve
+     * con sufijo. Devuelve { archived: [{ id, fileName, originalName, renamed }], idProject }.
+     */
+    async archivarEnProyecto(idConversation, archivos) {
+      const form = new FormData();
+      form.append('idConversation', String(idConversation));
+      for (const a of archivos) form.append('files', new Blob([a.datos], { type: a.tipo }), a.nombre);
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 120_000);
+      try {
+        const res = await fetchImpl(`${url}/api/chat/agent/projects/files`, { method: 'POST', headers: cabeceras, body: form, signal: ctrl.signal });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          const detalle = typeof data?.error === 'string' ? data.error : null;
+          throw new ErrorSynerLink(`POST /api/chat/agent/projects/files -> HTTP ${res.status}${detalle ? ` (${detalle})` : ''}`, res.status, {
+            detalle,
+            rutaAusente: res.status === 404 && !detalle,
+          });
+        }
+        return data;
+      } finally {
+        clearTimeout(t);
+      }
+    },
     /** Propuestas de tareas del turno: quedan PENDIENTES hasta que un dueño o editor las confirme. */
     proponer: (idConversation, items) => json('/api/chat/agent/projects/proposals', { method: 'POST', body: { idConversation, items } }),
     consumo: (reporte) => json('/api/chat/agent/usage', { method: 'POST', body: reporte }),
+    /** Cupo semanal y ventana de 5 h del token del agente (cuota.mjs). */
+    cuota: (estado) => json('/api/chat/agent/quota', { method: 'POST', body: estado, timeoutMs: 20_000 }),
     // Equipo de subagentes (F2, 2026-10-18).
     /** Reclama los pedidos de «Sugerir equipo» pendientes de los proyectos de este agente. */
     pedidosEquipo: () => json('/api/chat/agent/projects/team/requests', { method: 'POST', body: {} }),

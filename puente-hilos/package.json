@@ -10,5 +10,8 @@
   "scripts": {
     "start": "node src/puente.mjs",
     "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "mssql": "^11.0.2"
   }
 }

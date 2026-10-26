@@ -30,8 +30,9 @@
  * Los secretos `.env` del repo NO se copian al worktree: el worktree solo trae
  * lo versionado (los `.env` están en .gitignore).
  */
+import { permisosGrafos } from './grafos.mjs';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ErrorConfig } from './config.mjs';
@@ -54,13 +55,49 @@ export const DOMINIOS_PERMITIDOS = [
   'objects.githubusercontent.com',
   'raw.githubusercontent.com',
   'registry.npmjs.org',
+  // Motores de Prisma: el postinstall de @prisma/client/@prisma/engines los baja de
+  // aquí en `npm ci`; sin ellos no hay cliente generado y `tsc` falla (2026-10-20).
+  'binaries.prisma.sh',
 ];
+
+/** Caché de npm COMPARTIDA por todas las conversaciones del puente (dentro de HILOS_DIR). */
+export function rutaCacheNpm(hilosDir) {
+  return path.join(hilosDir, 'cache-npm');
+}
+
+/** ¿El worktree ya tiene dependencias instaladas? (para avisarle al modelo en el turno). */
+export function estadoDependencias(worktree, existe = existsSync) {
+  if (!existe(path.join(worktree, 'package.json'))) return 'sin-package';
+  return existe(path.join(worktree, 'node_modules')) ? 'instaladas' : 'faltan';
+}
 
 const RE_NOMBRE = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const RE_GITHUB = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const RE_RAMA = /^[A-Za-z0-9._/-]{1,100}$/;
 const RE_WORKFLOW = /^[A-Za-z0-9._-]+\.ya?ml$/;
 const RE_CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Ruta relativa dentro del repo: sin «..», sin absoluta, caracteres simples. */
+function rutaRelativaSegura(r) {
+  return typeof r === 'string' && /^[A-Za-z0-9._/-]{1,200}$/.test(r) && !path.isAbsolute(r) && !r.split('/').some((p) => p === '..' || p === '');
+}
+
+/**
+ * Copia en el worktree los stubs sin secretos que el CI usa para compilar (solo si el
+ * destino no existe y el origen está versionado en el worktree). Nunca sobrescribe.
+ */
+export function copiarStubsPruebas(worktree, stubs = {}) {
+  const copiados = [];
+  for (const [d, o] of Object.entries(stubs)) {
+    const origen = path.join(worktree, o);
+    const destino = path.join(worktree, d);
+    if (!existsSync(origen) || existsSync(destino)) continue;
+    mkdirSync(path.dirname(destino), { recursive: true });
+    writeFileSync(destino, readFileSync(origen), { mode: 0o600 });
+    copiados.push(d);
+  }
+  return copiados;
+}
 
 /**
  * Valida repos-por-proyecto.json. Todo falla cerrado.
@@ -97,6 +134,13 @@ export function validarReposPorProyecto(json) {
     if (!Array.isArray(extra) || extra.some((b) => !RE_RAMA.test(b) || b.startsWith(PREFIJO_RAMA))) {
       throw new ErrorConfig(`Repo ${nombre}: ramasProtegidas inválidas.`);
     }
+    // stubsPruebas: { "<destino sin versionar>": "<archivo VERSIONADO del repo>" }, lo mismo
+    // que hace el CI (p. ej. front-kronos: dbconfig.js ← .github/dbconfig.ci.stub.js).
+    const stubs = r.stubsPruebas ?? {};
+    if (!stubs || typeof stubs !== 'object' || Array.isArray(stubs)) throw new ErrorConfig(`Repo ${nombre}: stubsPruebas debe ser un objeto.`);
+    for (const [d, o] of Object.entries(stubs)) {
+      if (!rutaRelativaSegura(d) || !rutaRelativaSegura(o) || /(^|\/)\.env/i.test(d) || /(^|\/)\.env/i.test(o)) throw new ErrorConfig(`Repo ${nombre}: stubsPruebas inválido (${d}).`);
+    }
     const workflows = r.workflowsProduccion ?? [];
     if (!Array.isArray(workflows) || workflows.some((w) => !RE_WORKFLOW.test(w))) {
       throw new ErrorConfig(`Repo ${nombre}: workflowsProduccion inválidos.`);
@@ -109,6 +153,7 @@ export function validarReposPorProyecto(json) {
       ramaProduccion: r.ramaProduccion,
       ramasProtegidas: [...new Set([...RAMAS_PROTEGIDAS_BASE, r.ramaPruebas, r.ramaProduccion, ...extra])],
       workflowsProduccion: [...new Set(workflows)],
+      stubsPruebas: { ...stubs },
       despliegue: typeof r.despliegue === 'string' ? r.despliegue.slice(0, 2000) : '',
       descripcion: typeof r.descripcion === 'string' ? r.descripcion.replace(/\s+/g, ' ').trim().slice(0, 200) : '',
     });
@@ -120,7 +165,8 @@ export function validarReposPorProyecto(json) {
     for (const n of p.repos) if (!repos.has(n)) throw new ErrorConfig(`Proyecto ${id}: el repo ${n} no está declarado.`);
     if (p.nivel !== 2) throw new ErrorConfig(`Proyecto ${id}: solo se admite nivel 2 (desarrollo).`);
     if (p.bajoDemanda !== undefined && typeof p.bajoDemanda !== 'boolean') throw new ErrorConfig(`Proyecto ${id}: bajoDemanda debe ser true o false.`);
-    proyectos.set(Number(id), { repos: [...new Set(p.repos)], nivel: 2, pases: p.pases === true, bajoDemanda: p.bajoDemanda === true });
+    if (p.terminalCompleta !== undefined && typeof p.terminalCompleta !== 'boolean') throw new ErrorConfig(`Proyecto ${id}: terminalCompleta debe ser true o false.`);
+    proyectos.set(Number(id), { repos: [...new Set(p.repos)], nivel: 2, pases: p.pases === true, bajoDemanda: p.bajoDemanda === true, terminalCompleta: p.terminalCompleta === true });
   }
   return { operadores: operadores.map((c) => c.toLowerCase()), repos, proyectos };
 }
@@ -330,6 +376,7 @@ export function prepararWorktrees({ repos, rutas, idProject, idConversation, env
         : ['worktree', 'add', '--no-track', '-b', rama, destino, `origin/${r.ramaPruebas}`];
       ejecutarGit(args, { cwd: r.clon, env: envGit });
     }
+    copiarStubsPruebas(destino, r.stubsPruebas);
     listos.push({ ...r, worktree: destino, rama, gitComun: path.join(r.clon, '.git') });
   }
   return listos;
@@ -345,7 +392,7 @@ const GH_LECTURA = [
   'pr view', 'pr list', 'pr diff', 'pr checks', 'pr status', 'pr create', 'pr comment', 'pr edit',
   'run list', 'run view', 'run watch', 'workflow list', 'workflow view', 'repo view', 'issue view', 'issue list', 'status',
 ];
-const NPM = ['npm test', 'npm run', 'npm ci', 'npm install', 'npm ls', 'npm --version', 'npx tsc', 'npx eslint', 'npx jest', 'npx prettier', 'npx next lint', 'npx vitest', 'node'];
+const NPM = ['npm test', 'npm run', 'npm ci', 'npm install', 'npm ls', 'npm --version', 'npx tsc', 'npx eslint', 'npx jest', 'npx prettier', 'npx next lint', 'npx vitest', 'npx prisma generate', 'npx prisma validate', 'node'];
 
 /** Siempre prohibido (gana sobre cualquier permiso). */
 export const BASH_PROHIBIDO = [
@@ -360,10 +407,30 @@ export const BASH_PROHIBIDO = [
 ];
 
 /**
+ * Reglas Edit/Write con la ruta ABSOLUTA de la carpeta del hilo para `codigo/**` y
+ * `trabajo/**` («//» = raíz del sistema de archivos en las reglas de Claude Code).
+ * Si la ruta no es absoluta o trae caracteres que el patrón interpretaría (comodines,
+ * paréntesis, espacios…), no se agrega nada: falla cerrado y quedan las relativas.
+ */
+export function reglasEscrituraAbsolutas(cwd) {
+  if (!cwd || !path.isAbsolute(cwd)) return [];
+  const rutas = new Set([path.resolve(cwd)]);
+  try {
+    rutas.add(realpathSync(cwd));
+  } catch {}
+  const reglas = [];
+  for (const r of rutas) {
+    if (!/^\/[A-Za-z0-9._\/-]+$/.test(r) || r.split('/').includes('..')) continue;
+    for (const sub of ['codigo', 'trabajo']) reglas.push(`Edit(/${r}/${sub}/**)`, `Write(/${r}/${sub}/**)`);
+  }
+  return reglas;
+}
+
+/**
  * Herramientas y reglas del turno con código. `autorizado` agrega SOLO el merge
  * de PR y el despliegue por workflow de producción de los repos del proyecto.
  */
-export function permisosCodigo({ repos, autorizado, pases }) {
+export function permisosCodigo({ repos, autorizado, pases, cwd = null }) {
   // Claude Code 2.1.299 NIEGA `cd <dir> && git …` (protección contra repos
   // plantados), así que git va SIEMPRE con `git -C codigo/<repo> …`, y las reglas
   // se arman por repo con esa ruta exacta. Ojo con la sintaxis: un patrón que
@@ -380,8 +447,17 @@ export function permisosCodigo({ repos, autorizado, pases }) {
   }
   for (const c of GH_LECTURA) permitidas.push(`Bash(gh ${c} *)`, `Bash(gh ${c})`, `Bash(cd codigo/* && gh ${c} *)`);
   for (const c of NPM) permitidas.push(`Bash(${c} *)`, `Bash(${c})`, `Bash(cd codigo/* && ${c} *)`, `Bash(cd codigo/* && ${c})`);
+  // Graphify: solo consultas de lectura sobre los grafos (grafos.mjs); update/label/install negados.
+  const g = permisosGrafos();
+  permitidas.push(...g.permitidas);
+  prohibidas.push(...g.prohibidas);
   // Edición del código: solo dentro de ./codigo (el worktree) y ./trabajo.
   permitidas.push('Edit(./codigo/**)', 'Write(./codigo/**)');
+  // Además, con la ruta ABSOLUTA de la carpeta del hilo (gotcha del 2026-10-21,
+  // conversación 123): Claude Code 2.1.299 resuelve «./» contra la carpeta ACTUAL
+  // de la sesión, así que tras un `cd codigo/<repo>` las reglas relativas dejan de
+  // coincidir y el Write queda negado. «//ruta» es la sintaxis de ruta absoluta.
+  permitidas.push(...reglasEscrituraAbsolutas(cwd));
 
   for (const c of BASH_PROHIBIDO) prohibidas.push(`Bash(${c} *)`, `Bash(${c})`, `Bash(* && ${c} *)`, `Bash(* ; ${c} *)`, `Bash(* | ${c} *)`);
   // Un refspec «origen:destino» puede empujar a OTRA rama remota
@@ -414,7 +490,7 @@ export function permisosCodigo({ repos, autorizado, pases }) {
  * escritura solo en la carpeta del hilo, el .git común del clon y la caché de npm;
  * sin lectura de secretos. Si el sandbox no está disponible, el turno NO corre.
  */
-export function sandboxCodigo({ worktrees, homeReal, homeCodigo, hilosDir, secretos = [] }) {
+export function sandboxCodigo({ worktrees, homeReal, homeCodigo, hilosDir, secretos = [], cacheNpm = rutaCacheNpm(hilosDir) }) {
   // Rutas ABSOLUTAS: en el turno, HOME es homeCodigo y «~» ya no sería la casa real.
   const casa = (r) => path.join(homeReal, r);
   return {
@@ -426,7 +502,7 @@ export function sandboxCodigo({ worktrees, homeReal, homeCodigo, hilosDir, secre
     enableWeakerNetworkIsolation: true,
     network: { allowedDomains: DOMINIOS_PERMITIDOS, allowLocalBinding: false },
     filesystem: {
-      allowWrite: [...new Set(worktrees.map((w) => w.gitComun)), homeCodigo],
+      allowWrite: [...new Set(worktrees.map((w) => w.gitComun)), homeCodigo, cacheNpm],
       denyRead: [
         path.join(hilosDir, '.env'),
         path.join(hilosDir, 'claude-config'),
@@ -448,9 +524,11 @@ export function textoCodigo({ worktrees, autorizado, puedePasar, autores, operad
     'Repositorios vinculados a este proyecto:',
   ];
   for (const w of worktrees) {
+    const deps = w.dependencias === 'instaladas' ? 'dependencias (`node_modules`) instaladas' : w.dependencias === 'faltan' ? `dependencias SIN instalar: antes de probar corra \`cd ${w.worktree} && npm ci\`` : null;
     l.push(
-      `- **${w.nombre}** (GitHub ${w.github}): carpeta \`./codigo/${w.nombre}\` (ruta completa \`${w.worktree}\`), rama de trabajo \`${w.rama}\` (salió de \`origin/${w.ramaPruebas}\`). Rama de pruebas: \`${w.ramaPruebas}\`; rama de producción: \`${w.ramaProduccion}\`.`,
+      `- **${w.nombre}** (GitHub ${w.github}): carpeta \`./codigo/${w.nombre}\` (ruta completa \`${w.worktree}\`), rama de trabajo \`${w.rama}\` (salió de \`origin/${w.ramaPruebas}\`). Rama de pruebas: \`${w.ramaPruebas}\`; rama de producción: \`${w.ramaProduccion}\`.${deps ? ` Estado: ${deps}.` : ''}`,
       ...(w.despliegue ? [`  - Despliegue: ${w.despliegue}`] : []),
+      ...(Object.keys(w.stubsPruebas ?? {}).length ? [`  - Stubs SIN secretos para compilar, copiados como en el CI: ${Object.entries(w.stubsPruebas).map(([d, o]) => `\`${d}\` ← \`${o}\``).join(', ')}. No los suba al repo.`] : []),
       ...(w.workflowsProduccion.length ? [`  - Workflows de producción: ${w.workflowsProduccion.map((x) => `\`${x}\``).join(', ')}`] : [])
     );
   }
@@ -461,7 +539,9 @@ export function textoCodigo({ worktrees, autorizado, puedePasar, autores, operad
     '- git SIEMPRE con `git -C codigo/<repo> …` desde la carpeta del hilo (por ejemplo `git -C codigo/sapsend status`, `git -C codigo/sapsend log --oneline -5`, `git -C codigo/sapsend ls-files`), o con la ruta completa del worktree. `cd codigo/<repo> && git …` y `--git-dir` están bloqueados. Para gh y npm sí puede usar `cd codigo/<repo> && gh …` / `cd codigo/<repo> && npm test`.',
     `- Trabajar en su rama \`${PREFIJO_RAMA}…\`: editar, \`git add\`/\`commit\`, correr \`npm test\`, \`npx tsc --noEmit\`, \`npm run lint\`; empujar SOLO ramas \`${PREFIJO_RAMA}…\` (\`git -C codigo/<repo> push -u origin ${PREFIJO_RAMA}…\`) y abrir PR con \`gh pr create --base <rama de pruebas>\`.`,
     '- Los `.env` NO están en el worktree y no se leen ni se crean con secretos reales. Si una prueba necesita variables, use un `.env.test` sin secretos de producción.',
-    '- Si `npm ci` hace falta para probar, córralo dentro del worktree.',
+    '- **Usted (el hilo principal) SÍ puede ejecutar comandos con la herramienta Bash en este turno**: git, gh, npm y npx dentro del worktree. NO le pida a la persona que corra pruebas, `tsc` o el lint: córralos usted y reporte el resultado real. Si un comando se bloquea, diga cuál y con qué mensaje.',
+    '- Cada comando de Bash arranca en la carpeta del hilo (el `cd` no se conserva de un comando a otro). Comandos de npm/npx SIEMPRE con la ruta completa del worktree: `cd <ruta completa del worktree> && npx vitest run <archivo>`, `cd <ruta completa> && npx tsc --noEmit`, `cd <ruta completa> && npx eslint <rutas>`, `cd <ruta completa> && npm test`, `cd <ruta completa> && npm run lint`.',
+    '- Si el worktree no tiene `node_modules`, corra primero `cd <ruta completa del worktree> && npm ci` (con `timeout` de 600000 en Bash). La caché de npm es compartida y no pide nada a la persona. `npx` no descarga paquetes que no estén en `node_modules`: si dice que falta, es que falta `npm ci`. Si el repo usa Prisma y `tsc` no encuentra el cliente, corra `npx prisma generate` (como en el CI).',
     '',
     'Qué NO puede (está bloqueado y además está prohibido intentarlo):',
     `- push a \`main\`, \`testing\`, \`production\` u otra rama que no sea \`${PREFIJO_RAMA}…\`; push forzado; borrar ramas.`,
@@ -492,7 +572,7 @@ export function textoCodigo({ worktrees, autorizado, puedePasar, autores, operad
 }
 
 /** Entorno extra del hijo en un turno con código. El token SOLO entra aquí. */
-export function entornoCodigo({ token, homeCodigo }) {
+export function entornoCodigo({ token, homeCodigo, cacheNpm = null }) {
   return {
     GH_TOKEN: token,
     HOME: homeCodigo,
@@ -502,15 +582,114 @@ export function entornoCodigo({ token, homeCodigo }) {
     GH_NO_UPDATE_NOTIFIER: '1',
     GIT_TERMINAL_PROMPT: '0',
     NPM_CONFIG_UPDATE_NOTIFIER: 'false',
+    // Caché compartida: el primer `npm ci` de un repo la llena y los siguientes
+    // (otras conversaciones, otros worktrees) instalan casi sin red.
+    ...(cacheNpm ? { NPM_CONFIG_CACHE: cacheNpm } : {}),
+    NPM_CONFIG_PREFER_OFFLINE: 'true',
+    NPM_CONFIG_AUDIT: 'false',
+    NPM_CONFIG_FUND: 'false',
+    // npx NUNCA instala de la red un paquete que no esté en node_modules: sin esto,
+    // `npx tsc` sin dependencias bajó el paquete falso «tsc@2.0.4» (prueba del 2026-10-20).
+    NPM_CONFIG_YES: 'false',
+    // Navegadores de puppeteer/playwright: su postinstall los baja de hosts que el
+    // sandbox no permite y `npm ci` fallaba entero (prueba del 2026-10-20). No hacen falta
+    // para vitest, tsc ni eslint.
+    PUPPETEER_SKIP_DOWNLOAD: '1',
+    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: '1',
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
+    CHECKPOINT_DISABLE: '1',
+    NEXT_TELEMETRY_DISABLED: '1',
   };
 }
 
 /** HOME propio de los turnos con código: .gitconfig con identidad y nada más. */
-export function prepararHomeCodigo(hilosDir, agenteNombre) {
+/**
+ * Motores de Prisma: el postinstall de @prisma/engines los descarga, pero dentro del
+ * sandbox la descarga se corta (ECONNRESET, prueba del 2026-10-20) y `npm ci` falla.
+ * Se siembran en el HOME de código desde la caché del propio equipo (binarios públicos
+ * de Prisma, sin secretos), clonando con APFS (`cp -c`) solo las versiones que falten.
+ * Prisma los encuentra en ~/.cache/prisma/master/<hash>/<plataforma> y no descarga.
+ */
+export function sembrarMotoresPrisma(homeReal, homeCodigo, { copiar = (o, d) => execFileSync('cp', ['-c', '-p', o, d], { stdio: 'ignore', timeout: 120_000 }) } = {}) {
+  const origen = path.join(homeReal ?? '', '.cache', 'prisma', 'master');
+  const destino = path.join(homeCodigo, '.cache', 'prisma', 'master');
+  const sembrados = [];
+  if (!homeReal || !existsSync(origen)) return sembrados;
+  // Archivo por archivo: una descarga cortada en el sandbox deja la carpeta de la
+  // versión a medias (pasó con schema-engine) y hay que completar lo que falte.
+  for (const v of readdirSync(origen)) {
+    if (!/^[0-9a-f]{40}$/.test(v)) continue;
+    for (const plataforma of readdirSync(path.join(origen, v))) {
+      if (!/^[a-z0-9._-]{1,60}$/.test(plataforma)) continue;
+      const dirO = path.join(origen, v, plataforma);
+      const dirD = path.join(destino, v, plataforma);
+      let archivos;
+      try {
+        archivos = readdirSync(dirO);
+      } catch {
+        continue;
+      }
+      for (const a of archivos) {
+        if (existsSync(path.join(dirD, a))) continue;
+        try {
+          mkdirSync(dirD, { recursive: true, mode: 0o700 });
+          copiar(path.join(dirO, a), path.join(dirD, a));
+          sembrados.push(`${v.slice(0, 8)}/${plataforma}/${a}`);
+        } catch {}
+      }
+    }
+  }
+  return sembrados;
+}
+
+export function prepararHomeCodigo(hilosDir, agenteNombre, homeReal = null) {
   const home = path.join(hilosDir, 'home-codigo');
   mkdirSync(home, { recursive: true, mode: 0o700 });
+  mkdirSync(rutaCacheNpm(hilosDir), { recursive: true, mode: 0o700 });
+  sembrarMotoresPrisma(homeReal, home);
   const gitconfig = path.join(home, '.gitconfig');
   const texto = `[user]\n\tname = ${agenteNombre} (asistente IA GSS)\n\temail = orus-proyectos@noreply.gsslatam.com\n[init]\n\tdefaultBranch = main\n[push]\n\tautoSetupRemote = false\n`;
   if (!existsSync(gitconfig) || readFileSync(gitconfig, 'utf8') !== texto) writeFileSync(gitconfig, texto, { mode: 0o600 });
   return home;
+}
+
+/**
+ * TERMINAL COMPLETA (autorizada por Nicolás Rivera el 2026-10-20, SynerLink prod,
+ * conversación 1: 17:41 «actívale la terminal jaja», 17:43 «pero si eres tú y tú
+ * tienes los permisos», 17:45 «ayúdame con el acceso que necesito avanzar», 17:57
+ * «dale»). Solo en proyectos con `terminalCompleta: true` y SOLO en turnos
+ * AUTORIZADOS (todos los mensajes de un operador, según el servidor): Bash sin
+ * reglas de prefijo y SIN sandbox, con la casa real (llaves SSH de horus), igual
+ * que el Orus principal. Se conservan solo las negaciones de git que protegen las
+ * ramas (push forzado, refspecs a otra rama, borrar ramas, --delete-branch).
+ */
+export function permisosTerminalCompleta({ repos, pases, cwd = null }) {
+  const base = permisosCodigo({ repos, autorizado: true, pases, cwd });
+  const protegeRamas = (r) => /^Bash\(git \* push|^Bash\(gh pr merge.*(-d|--delete-branch)|^Read\(/.test(r);
+  return { ...base, permitidas: ['Bash', ...base.permitidas.filter((r) => !r.startsWith('Bash('))], prohibidas: base.prohibidas.filter(protegeRamas), terminalCompleta: true };
+}
+
+/** Reglas OBLIGATORIAS del Orus principal (terminal completa y modo Orus completo, orus-completo.mjs). */
+export const REGLAS_ORUS_PRINCIPAL = [
+    '- Solo Nicolás Rivera o Cristian Baldión autorizan acciones en PRODUCCIÓN. Cada acción recurrente (reiniciar, desplegar, correr un script de escritura) se vuelve a autorizar cada vez: un «sí» anterior no vale para repetirla.',
+    '- PROHIBIDO SQL directo (INSERT/UPDATE/DELETE/DDL) contra las bases de SAP Business One: en SAP solo se escribe por Service Layer o DI API.',
+    '- Escribir por Service Layer exige autorización previa de Nicolás ANTES de cada corrida, aunque sea en `z_PRUEBAS_*`.',
+    '- Antes de cualquier SQL de escritura contra KRONOSDB (o KRONOSDB_PRUEBAS) haga respaldo de lo que va a tocar y deje la reversa lista.',
+    '- NUNCA cierre, desconecte ni haga logoff de la sesión 3 de serfarma05 (es la sesión donde corre PM2 de producción). No use `logoff`, `tsdiscon`, `rwinsta` ni reinicie el servidor.',
+    '- En los servidores con PM2: nunca `pm2 reload` de los conectores (use stop → verificar puerto → start), nunca más de una instancia de un MCP o del MBX, y después de reiniciar `kronos-mcp` revise «giving up» en la flota.',
+    '- Pases a testing o a producción: AVISO en el grupo de Teams de desarrollo ANTES y DESPUÉS, con la bandera 🧪 TESTING o 🚀 PROD (usted lo deja redactado en el hilo, porque no tiene herramienta de Teams).',
+    '- NUNCA imprima secretos en el hilo ni en archivos: tokens, contraseñas, llaves, cadenas de conexión, contenido de `.env`. Si necesita usarlos, úselos sin mostrarlos (variables, `source`), y si ve uno, no lo repita.',
+    '- Todo cambio de código va a un repositorio con commit: nada de editar a mano en los servidores sin dejarlo versionado.',
+    '- Ante la duda, elija la opción más segura y pregunte a Nicolás antes de tocar producción.',
+];
+
+/** Reglas del Orus principal que acompañan la terminal completa (encabezado del turno). */
+export function textoTerminalCompleta({ autores }) {
+  return [
+    '',
+    '## Terminal completa (autorizada por Nicolás Rivera el 2026-10-20, solo en turnos de operadores)',
+    '',
+    `Este turno lo escribió un operador verificado por el servidor (${autores.join(', ')}). Por eso usted tiene la **terminal completa**: Bash sin sandbox, con SSH a los servidores (por ejemplo \`ssh serfarma05 …\`) y los mismos permisos del Orus principal. En turnos de cualquier otra persona NO la tiene. Reglas OBLIGATORIAS, las mismas del Orus principal:`,
+    ...REGLAS_ORUS_PRINCIPAL,
+  ].join('\n');
 }
