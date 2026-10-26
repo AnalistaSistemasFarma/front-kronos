@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  ActionIcon, Alert, Box, Button, FileInput, Group, Loader, NumberInput, Paper, SimpleGrid, Stack, Text, TextInput, Textarea,
+  ActionIcon, Alert, Button, FileInput, Group, Loader, NumberInput, ScrollArea, Select, Stack, Table, Text, TextInput, Textarea,
 } from '@mantine/core';
 import { IconPaperclip, IconPlus, IconSend, IconTrash } from '@tabler/icons-react';
 import { COLUMNS, type FieldError, type Line, type LineField } from './RequestFormModal';
@@ -29,6 +29,27 @@ interface Props {
 
 type Readiness = 'loading' | 'ready' | 'no-write' | 'no-sap';
 
+/** Valor interno de «moneda local» (Ryan guarda la moneda vacía, como en SAPSEND). */
+const LOCAL = '__local';
+
+/** Opciones de moneda de la empresa: la de por defecto + USD (igual que SAPSEND). */
+export function currencyOptions(defaultCurrency: string): { value: string; label: string }[] {
+  const def = defaultCurrency.trim().toUpperCase();
+  const first = def ? { value: def, label: def } : { value: LOCAL, label: 'COP (moneda local)' };
+  return def === 'USD' ? [first] : [first, { value: 'USD', label: 'USD' }];
+}
+
+const isEmpty = (v: unknown) => v == null || String(v).trim() === '';
+
+/** Ancho mínimo de cada columna de la tabla (las búsquedas en SAP necesitan más espacio). */
+function colWidth(field: LineField, base: number): number {
+  if (field === 'ItemDescription' || field === 'U_NombreProveedor') return 240;
+  if (FIELD_LOOKUP[field]) return 170;
+  if (field === 'Currency') return 130;
+  if (field === 'RequiredDate') return 140;
+  return Math.max(base, 110);
+}
+
 export default function PurchaseInlineForm({ companyId, subject, onDone }: Props) {
   const [readiness, setReadiness] = useState<Readiness>('loading');
   const [comments, setComments] = useState('');
@@ -38,6 +59,9 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
+  /** Tras el primer intento de envío, los obligatorios vacíos se marcan en rojo. */
+  const [tried, setTried] = useState(false);
+  const [defaultCurrency, setDefaultCurrency] = useState('');
 
   // ¿El usuario puede crear solicitudes de compra en esta empresa?
   useEffect(() => {
@@ -48,6 +72,7 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
       .then((d) => {
         if (cancelled) return;
         const c = (d.companies ?? []).find((x: { idCompany: number }) => String(x.idCompany) === companyId);
+        setDefaultCurrency(String(c?.defaultCurrency ?? ''));
         if (!c?.canWrite) setReadiness('no-write');
         else if (!c.ready) setReadiness('no-sap');
         else setReadiness('ready');
@@ -64,11 +89,29 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
     setLines((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
   };
   const errorFor = (field: string) => fieldErrors.find((e) => e.field === field)?.error;
+  const currencyData = currencyOptions(defaultCurrency);
+  const lineCurrency = (line: Line) => {
+    const v = String(line.Currency ?? '');
+    if (v) return v;
+    return currencyData[0].value;
+  };
+  const newLine = (): Line => ({});
+  /** Obligatorios vacíos (cliente), con el mismo texto para cada línea. */
+  const missing = (i: number, field: LineField) =>
+    tried && COLUMNS.find((c) => c.field === field)?.required && isEmpty(lines[i]?.[field]);
+  const missingList = lines.flatMap((l, i) =>
+    COLUMNS.filter((c) => c.required && isEmpty(l[c.field])).map((c) => `Línea ${i + 1} · ${c.label}`)
+  );
 
   const submit = async () => {
-    setSaving(true);
+    setTried(true);
     setError(null);
     setFieldErrors([]);
+    if (missingList.length > 0) {
+      setError('Complete los campos obligatorios marcados en rojo.');
+      return;
+    }
+    setSaving(true);
     try {
       // 1) Borrador en SAP
       const res = await fetch('/api/purchases/drafts', {
@@ -77,7 +120,11 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
         body: JSON.stringify({
           companyId: Number(companyId),
           header: { Comments: comments || subject.toUpperCase(), ...(requiredDate ? { RequriedDate: requiredDate } : {}) },
-          lines,
+          // Moneda: la elegida o la de la empresa; «moneda local» viaja vacía (como SAPSEND en Ryan).
+          lines: lines.map((l) => {
+            const cur = lineCurrency(l);
+            return { ...l, Currency: cur === LOCAL ? '' : cur };
+          }),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -141,6 +188,7 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
   }
 
   const generalErrors = fieldErrors.filter((e) => !e.field.startsWith('DocumentLines['));
+  const showMissing = tried && missingList.length > 0;
 
   return (
     <Stack gap="md">
@@ -153,6 +201,11 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
                 <li key={e.field}>{e.error}</li>
               ))}
             </ul>
+          )}
+          {showMissing && (
+            <Text size="xs" mt={4}>
+              Faltan: {missingList.join(' · ')}
+            </Text>
           )}
         </Alert>
       )}
@@ -182,92 +235,124 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
         <Text fw={600} size="sm" mb={4}>
           Líneas de la solicitud
         </Text>
-        <Stack gap="sm">
-          {lines.map((line, i) => (
-            <Paper key={i} withBorder radius="md" p="md">
-              <Group justify="space-between" mb="xs">
-                <Text fw={600} size="sm">
-                  Línea {i + 1}
-                  {line.ItemDescription ? ` · ${String(line.ItemDescription)}` : ''}
-                </Text>
-                <ActionIcon
-                  variant="subtle"
-                  color="red"
-                  disabled={lines.length === 1}
-                  onClick={() => setLines((prev) => prev.filter((_, j) => j !== i))}
-                  aria-label={`Quitar línea ${i + 1}`}
-                >
-                  <IconTrash size={16} />
-                </ActionIcon>
-              </Group>
-              <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md" verticalSpacing="sm">
-                {COLUMNS.map((c) => {
-                  const err = errorFor(`DocumentLines[${i}].${c.field}`);
-                  const label = `${c.label}${c.required ? ' *' : ''}`;
-                  const aria = `${c.label} línea ${i + 1}`;
-                  let input: React.ReactNode;
-                  if (c.numeric) {
-                    input = (
-                      <NumberInput
-                        label={label}
-                        min={0}
-                        allowNegative={false}
-                        thousandSeparator="."
-                        decimalSeparator=","
-                        value={line[c.field] ?? ''}
-                        onChange={(v) => setLineValue(i, c.field, v)}
-                        error={err}
-                        aria-label={aria}
-                      />
-                    );
-                  } else if (FIELD_LOOKUP[c.field]) {
-                    input = (
-                      <SapLookupInput
-                        size="sm"
-                        label={label}
-                        companyId={companyId}
-                        kind={FIELD_LOOKUP[c.field]!}
-                        value={String(line[c.field] ?? '')}
-                        onChange={(v) => setLineValue(i, c.field, v)}
-                        onSelect={(opt) =>
-                          setLines((prev) =>
-                            prev.map((l, j) =>
-                              j === i ? { ...l, ...(opt.fill ?? {}), [c.field]: opt.fill?.[c.field] ?? opt.value } : l
+        <ScrollArea type="auto" offsetScrollbars>
+          <Table withTableBorder withColumnBorders verticalSpacing={4} horizontalSpacing={6} style={{ minWidth: 1900 }}>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th style={{ width: 36 }}>#</Table.Th>
+                {COLUMNS.map((c) => (
+                  <Table.Th key={c.field} style={{ minWidth: colWidth(c.field, c.width), whiteSpace: 'nowrap' }}>
+                    {c.label}
+                    {c.required && (
+                      <Text span c="red" fw={700}>
+                        {' '}*
+                      </Text>
+                    )}
+                  </Table.Th>
+                ))}
+                <Table.Th style={{ width: 40 }} />
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {lines.map((line, i) => (
+                <Table.Tr key={i}>
+                  <Table.Td>
+                    <Text size="xs" fw={600}>
+                      {i + 1}
+                    </Text>
+                  </Table.Td>
+                  {COLUMNS.map((c) => {
+                    const serverErr = errorFor(`DocumentLines[${i}].${c.field}`);
+                    const err: React.ReactNode = serverErr ?? (missing(i, c.field) ? 'Obligatorio' : undefined);
+                    const aria = `${c.label} línea ${i + 1}`;
+                    let input: React.ReactNode;
+                    if (c.field === 'Currency') {
+                      input = (
+                        <Select
+                          size="xs"
+                          data={currencyData}
+                          value={lineCurrency(line)}
+                          onChange={(v) => setLineValue(i, 'Currency', v ?? currencyData[0].value)}
+                          allowDeselect={false}
+                          comboboxProps={{ withinPortal: true, zIndex: 1100 }}
+                          aria-label={aria}
+                        />
+                      );
+                    } else if (c.numeric) {
+                      input = (
+                        <NumberInput
+                          size="xs"
+                          min={0}
+                          allowNegative={false}
+                          thousandSeparator="."
+                          decimalSeparator=","
+                          value={line[c.field] ?? ''}
+                          onChange={(v) => setLineValue(i, c.field, v)}
+                          error={err}
+                          aria-label={aria}
+                        />
+                      );
+                    } else if (FIELD_LOOKUP[c.field]) {
+                      input = (
+                        <SapLookupInput
+                          size="xs"
+                          companyId={companyId}
+                          kind={FIELD_LOOKUP[c.field]!}
+                          value={String(line[c.field] ?? '')}
+                          onChange={(v) => setLineValue(i, c.field, v)}
+                          onSelect={(opt) =>
+                            setLines((prev) =>
+                              prev.map((l, j) =>
+                                j === i ? { ...l, ...(opt.fill ?? {}), [c.field]: opt.fill?.[c.field] ?? opt.value } : l
+                              )
                             )
-                          )
-                        }
-                        error={err}
-                        ariaLabel={aria}
-                      />
+                          }
+                          error={typeof err === 'string' ? err : undefined}
+                          ariaLabel={aria}
+                        />
+                      );
+                    } else {
+                      input = (
+                        <TextInput
+                          size="xs"
+                          type={c.field === 'RequiredDate' ? 'date' : 'text'}
+                          value={String(line[c.field] ?? '')}
+                          onChange={(e) => {
+                            const v = e.currentTarget.value;
+                            setLineValue(i, c.field, c.field === 'ItemDescription' ? v.toUpperCase() : v);
+                          }}
+                          error={err}
+                          aria-label={aria}
+                        />
+                      );
+                    }
+                    return (
+                      <Table.Td key={c.field} style={{ verticalAlign: 'top' }}>
+                        {input}
+                      </Table.Td>
                     );
-                  } else {
-                    input = (
-                      <TextInput
-                        label={label}
-                        type={c.field === 'RequiredDate' ? 'date' : 'text'}
-                        value={String(line[c.field] ?? '')}
-                        onChange={(e) => {
-                          const v = e.currentTarget.value;
-                          setLineValue(i, c.field, c.field === 'ItemDescription' ? v.toUpperCase() : v);
-                        }}
-                        error={err}
-                        aria-label={aria}
-                      />
-                    );
-                  }
-                  return (
-                    <Box key={c.field}>{input}</Box>
-                  );
-                })}
-              </SimpleGrid>
-            </Paper>
-          ))}
-        </Stack>
+                  })}
+                  <Table.Td style={{ verticalAlign: 'top' }}>
+                    <ActionIcon
+                      variant="subtle"
+                      color="red"
+                      disabled={lines.length === 1}
+                      onClick={() => setLines((prev) => prev.filter((_, j) => j !== i))}
+                      aria-label={`Quitar línea ${i + 1}`}
+                    >
+                      <IconTrash size={16} />
+                    </ActionIcon>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </ScrollArea>
         <Button
           mt="sm"
           variant="light"
           leftSection={<IconPlus size={16} />}
-          onClick={() => setLines((prev) => [...prev, {}])}
+          onClick={() => setLines((prev) => [...prev, newLine()])}
         >
           Agregar línea
         </Button>
