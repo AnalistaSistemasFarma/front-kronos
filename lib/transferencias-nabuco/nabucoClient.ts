@@ -1,4 +1,23 @@
 import 'server-only';
+import {
+  NabucoDiagnosticoError,
+  PWD_OCULTO,
+  diagnosticoHttp,
+  diagnosticoRed,
+  diagnosticoValidacion,
+  enmascararCabeceras,
+  enmascararToken,
+  pareceToken,
+  parsearJson,
+  recortar,
+  respuestaDiagnostico,
+  sanitizarDiagnostico,
+  type ContextoHttp,
+  type DiagnosticoNabuco,
+  type PeticionDiagnostico,
+} from './diagnostico';
+
+export { NabucoDiagnosticoError };
 
 /**
  * Cliente del API de Nabuco WMS. Usa el fetch nativo: valida TLS SIEMPRE
@@ -19,6 +38,7 @@ export interface RespuestaNabuco {
   ok: boolean;
   status: number;
   cuerpo: string;
+  diagnostico: DiagnosticoNabuco;
 }
 
 /**
@@ -33,18 +53,21 @@ export function protocoloNabucoPermitido(u: URL, env: Record<string, string | un
 export const MENSAJE_PROTOCOLO_NABUCO = 'La URL de Nabuco debe ser https (HTTP solo se permite en el ambiente de pruebas de SynerLink).';
 
 function unir(base: string, ruta: string): string {
-  const u = new URL(base);
-  if (!protocoloNabucoPermitido(u)) throw new Error(MENSAJE_PROTOCOLO_NABUCO);
+  let u: URL;
+  try {
+    u = new URL(base);
+  } catch {
+    throw new NabucoDiagnosticoError(diagnosticoValidacion(`La URL de Nabuco «${base}» no es válida.`, 'Escriba la URL completa con protocolo, p. ej. https://servidor:puerto'));
+  }
+  if (!protocoloNabucoPermitido(u)) throw new NabucoDiagnosticoError(diagnosticoValidacion(MENSAJE_PROTOCOLO_NABUCO, 'Use https; http solo con NABUCO_PERMITIR_HTTP=1 en el servidor de pruebas.'));
   return `${base.replace(/\/+$/, '')}/${ruta.replace(/^\/+/, '')}`;
 }
 
 /** Error de autenticación con el HTTP que devolvió Nabuco (sin credenciales en el mensaje). */
-export class NabucoAuthError extends Error {
-  status: number | null;
-  constructor(message: string, status: number | null) {
-    super(message);
-    this.name = 'NabucoAuthError';
-    this.status = status;
+export class NabucoAuthError extends NabucoDiagnosticoError {
+  constructor(d: DiagnosticoNabuco) {
+    super(d);
+    this.name = 'NabucoDiagnosticoError';
   }
 }
 
@@ -56,32 +79,74 @@ export function urlSolicitudes(c: NabucoConexion): string {
   return unir(c.url, c.rutaSolicitudes);
 }
 
-/**
- * Pide el token (POST {ruta_token} con {usr, pwd, org}) y devuelve también el HTTP.
- * El API devuelve el token como cuerpo JSON (string entre comillas) o como {token|accessToken}.
- */
-export async function pedirTokenDetalle(c: NabucoConexion, fetcher: typeof fetch = fetch): Promise<{ token: string; status: number }> {
-  const res = await fetcher(urlToken(c), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ usr: c.usuario, pwd: c.password, org: c.org }),
-    signal: AbortSignal.timeout(c.timeoutMs),
-  });
-  const texto = await res.text().catch(() => '');
-  if (!res.ok) throw new NabucoAuthError(`Nabuco rechazó la autenticación (HTTP ${res.status}).`, res.status);
-  let token: unknown = texto;
+/** Llama a fetch y convierte una falla de red/timeout en NabucoDiagnosticoError (etapa 'red'). */
+async function llamar(
+  contexto: ContextoHttp,
+  c: NabucoConexion,
+  peticion: PeticionDiagnostico,
+  init: RequestInit,
+  fetcher: typeof fetch,
+  inicio: number,
+  secretos: string[]
+): Promise<{ res: Response; texto: string }> {
+  let res: Response;
   try {
-    token = JSON.parse(texto);
-  } catch {
-    /* texto plano */
+    res = await fetcher(peticion.url, { ...init, signal: AbortSignal.timeout(c.timeoutMs) });
+  } catch (e) {
+    throw new NabucoDiagnosticoError(sanitizarDiagnostico(diagnosticoRed(e, contexto, peticion, inicio, c.timeoutMs), secretos));
   }
+  const texto = await res.text().catch(() => '');
+  return { res, texto };
+}
+
+export interface TokenDetalle {
+  token: string;
+  status: number;
+  diagnostico: DiagnosticoNabuco;
+}
+
+/**
+ * Pide el token (POST {ruta_token} con {usr, pwd, org}) y devuelve el HTTP y el diagnóstico.
+ * El API devuelve el token como cuerpo JSON (string entre comillas) o como {token|accessToken}.
+ * Falla → NabucoAuthError (un NabucoDiagnosticoError) con el diagnóstico (pwd SIEMPRE '•••').
+ */
+export async function pedirTokenDetalle(c: NabucoConexion, fetcher: typeof fetch = fetch): Promise<TokenDetalle> {
+  const inicio = Date.now();
+  const url = urlToken(c);
+  const cabeceras = { 'Content-Type': 'application/json', Accept: 'application/json' };
+  const peticion: PeticionDiagnostico = { metodo: 'POST', url, cabeceras, cuerpo: JSON.stringify({ usr: c.usuario, pwd: PWD_OCULTO, org: c.org }) };
+  const secretos = [c.password];
+  const { res, texto } = await llamar('autenticacion', c, peticion, { method: 'POST', headers: cabeceras, body: JSON.stringify({ usr: c.usuario, pwd: c.password, org: c.org }) }, fetcher, inicio, secretos);
+  // El cuerpo de /AuthBI ES el token: nunca se guarda completo en el diagnóstico.
+  const crudoSeguro = (t: string) => (pareceToken(t) ? enmascararToken(t.trim().replace(/^"|"$/g, '')) : t);
+  const respuesta = respuestaDiagnostico(res.status, res.statusText, res.headers, '');
+  respuesta.cuerpo_crudo = recortar(crudoSeguro(texto));
+  if (!res.ok) {
+    const j = parsearJson(texto);
+    if (j.ok) respuesta.cuerpo_json = j.valor;
+    throw new NabucoAuthError(sanitizarDiagnostico(diagnosticoHttp('autenticacion', peticion, respuesta, inicio), secretos));
+  }
+  let token: unknown = texto;
+  const j = parsearJson(texto);
+  if (j.ok) token = j.valor;
   if (token && typeof token === 'object') {
     const o = token as Record<string, unknown>;
     token = o.token ?? o.accessToken ?? o.access_token ?? null;
   }
   const t = typeof token === 'string' ? token.trim() : '';
-  if (!t) throw new NabucoAuthError('Nabuco no devolvió un token.', res.status);
-  return { token: t, status: res.status };
+  // Un token no lleva espacios ni marcas HTML: una página de login/error no es un token.
+  if (!t || /[\s<>]/.test(t)) {
+    const d: DiagnosticoNabuco = {
+      ...diagnosticoHttp('autenticacion', peticion, respuesta, inicio),
+      ok: false,
+      etapa: 'respuesta',
+      mensaje: `Nabuco respondió HTTP ${res.status} pero no devolvió un token reconocible.`,
+      detalle: `Se esperaba un string JSON o un objeto {token|accessToken|access_token}. Llegó (${texto.length} caracteres): ${recortar(crudoSeguro(texto), 500) || '(vacío)'}`,
+      sugerencia: 'Revise que la ruta de token sea la de autenticación (p. ej. /AuthBI) y no otra página del servidor.',
+    };
+    throw new NabucoAuthError(sanitizarDiagnostico(d, secretos));
+  }
+  return { token: t, status: res.status, diagnostico: sanitizarDiagnostico(diagnosticoHttp('autenticacion', peticion, respuesta, inicio), [...secretos, t]) };
 }
 
 /** Pide el token. Preferir obtenerToken() de tokenCache.ts (no pedir AuthBI en cada llamada). */
@@ -89,7 +154,10 @@ export async function pedirToken(c: NabucoConexion, fetcher: typeof fetch = fetc
   return (await pedirTokenDetalle(c, fetcher)).token;
 }
 
-/** Envía un cuerpo JSON YA serializado tal cual. No lanza por HTTP != 2xx: devuelve status y cuerpo. */
+/**
+ * Envía un cuerpo JSON YA serializado tal cual. No lanza por HTTP != 2xx: devuelve status, cuerpo y
+ * diagnóstico. Lanza NabucoDiagnosticoError solo por falla de red/timeout o URL inválida.
+ */
 export async function enviarSolicitudCruda(
   c: NabucoConexion,
   token: string,
@@ -97,14 +165,15 @@ export async function enviarSolicitudCruda(
   fetcher: typeof fetch = fetch,
   maxCuerpo = 20000
 ): Promise<RespuestaNabuco> {
-  const res = await fetcher(urlSolicitudes(c), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${token}` },
-    body: cuerpoJson,
-    signal: AbortSignal.timeout(c.timeoutMs),
-  });
-  const cuerpo = (await res.text().catch(() => '')).slice(0, maxCuerpo);
-  return { ok: res.ok, status: res.status, cuerpo };
+  const inicio = Date.now();
+  const url = urlSolicitudes(c);
+  const cabeceras = { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${token}` };
+  const peticion: PeticionDiagnostico = { metodo: 'POST', url, cabeceras: enmascararCabeceras(cabeceras), cuerpo: recortar(cuerpoJson) };
+  const secretos = [token, c.password];
+  const { res, texto } = await llamar('envio', c, peticion, { method: 'POST', headers: cabeceras, body: cuerpoJson }, fetcher, inicio, secretos);
+  const cuerpo = texto.slice(0, maxCuerpo);
+  const diagnostico = sanitizarDiagnostico(diagnosticoHttp('envio', peticion, respuestaDiagnostico(res.status, res.statusText, res.headers, texto), inicio), secretos);
+  return { ok: res.ok, status: res.status, cuerpo, diagnostico };
 }
 
 /** Envía una solicitud de alistamiento. No lanza por HTTP != 2xx: devuelve status y cuerpo. */
