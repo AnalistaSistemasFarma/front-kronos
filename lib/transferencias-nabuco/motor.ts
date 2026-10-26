@@ -15,7 +15,8 @@ import {
   type NabucoConfig,
 } from './db';
 import { construirPayload } from './mapeo';
-import { enviarSolicitud, pedirToken, type NabucoConexion } from './nabucoClient';
+import { type NabucoConexion } from './nabucoClient';
+import { enviarConToken, obtenerToken, renovarToken, type IdentidadToken } from './tokenCache';
 import { filtroCandidatos, reintentosAgotados, seleccionarDocumentos, type DocCandidato } from './seleccion';
 
 /**
@@ -39,7 +40,7 @@ export function textoResumen(r: ResumenCorrida, simulacion: boolean): string {
   return `${simulacion ? '[SIMULACIÓN] ' : ''}Encontrados ${r.encontrados}, procesados ${r.procesados}: enviados ${r.enviados}, errores ${r.errores}, simulados ${r.simulados}.`;
 }
 
-function conexionNabuco(cfg: NabucoConfig): NabucoConexion {
+export function conexionNabuco(cfg: NabucoConfig): NabucoConexion {
   if (!cfg.nabuco_url || !cfg.nabuco_usuario || !cfg.nabuco_password_enc) {
     throw new NabucoError('Faltan la URL, el usuario o la contraseña de Nabuco en la configuración.');
   }
@@ -52,6 +53,11 @@ function conexionNabuco(cfg: NabucoConfig): NabucoConexion {
     rutaSolicitudes: cfg.ruta_solicitudes,
     timeoutMs: cfg.timeout_ms,
   };
+}
+
+/** Identidad del token en caché (id_config + URL + usuario + hash de la contraseña cifrada). */
+export function identidadToken(cfg: NabucoConfig): IdentidadToken {
+  return { idConfig: cfg.id_config, url: cfg.nabuco_url ?? '', usuario: cfg.nabuco_usuario ?? '', passwordEnc: cfg.nabuco_password_enc ?? '' };
 }
 
 async function abrirSap(cfg: NabucoConfig): Promise<SapSession> {
@@ -70,9 +76,9 @@ async function leerDocumento(session: SapSession, entidad: string, docEntry: num
   return sapGet<Record<string, unknown>>(session, `${entidad}(${Math.trunc(docEntry)})`);
 }
 
-/** «Probar conexión»: solo pide el token a Nabuco; no envía nada. */
-export async function probarConexion(cfg: NabucoConfig): Promise<void> {
-  await pedirToken(conexionNabuco(cfg));
+/** «Probar conexión»: SIEMPRE pide token nuevo a Nabuco (y actualiza la caché); no envía nada. */
+export async function probarConexion(cfg: NabucoConfig): Promise<{ status: number }> {
+  return renovarToken(identidadToken(cfg), conexionNabuco(cfg));
 }
 
 /** Vista previa del payload de un DocEntry (sin enviar nada). */
@@ -143,12 +149,12 @@ export async function correrConfig(idConfig: number, opts: OpcionesCorrida = {})
     });
     if (!seleccion.length) return base;
 
-    // Token solo en memoria durante esta corrida.
+    // Token en la caché del proceso (tokenCache.ts): /AuthBI solo si no hay uno vigente o tras un 401.
     let conexion: NabucoConexion | null = null;
-    let token: string | null = null;
+    const ident = identidadToken(cfg);
     if (!cfg.modo_simulacion) {
       conexion = conexionNabuco(cfg);
-      token = await pedirToken(conexion);
+      await obtenerToken(ident, conexion); // falla temprano si las credenciales no sirven
     }
 
     for (const cand of seleccion) {
@@ -160,12 +166,12 @@ export async function correrConfig(idConfig: number, opts: OpcionesCorrida = {})
         docNum = typeof doc.DocNum === 'number' ? doc.DocNum : docNum;
         const payload = construirPayload(doc, cfg.entidad_sap, cfg.mapeo_encabezado, cfg.mapeo_lineas, cfg.clave_lineas);
         payloadTxt = JSON.stringify(payload);
-        if (cfg.modo_simulacion || !conexion || !token) {
+        if (cfg.modo_simulacion || !conexion) {
           await registrarResultado(cfg, { DocEntry: cand.DocEntry, DocNum: docNum }, { estado: 'simulado', payload: payloadTxt, respuesta: null, http_status: null, error: null, proximoEnMin: null, cuentaIntento: false }, opts.usuario ?? null);
           base.simulados += 1;
           continue;
         }
-        const resp = await enviarSolicitud(conexion, token, payload);
+        const resp = await enviarConToken(ident, conexion, payloadTxt);
         if (resp.ok) {
           let nota: string | null = null;
           if (cfg.marcar_udf && cfg.udf_campo && cfg.udf_valor) {
