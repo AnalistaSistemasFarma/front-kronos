@@ -21,6 +21,7 @@ import {
   IconInbox,
   IconLayoutDashboard,
   IconListCheck,
+  IconSchool,
   IconPackages,
   IconReceipt,
   IconRosetteDiscount,
@@ -80,6 +81,8 @@ const HEADER_ICONS: Array<{ test: RegExp; icon: TablerIcon }> = [
 const SUB_RULES: Array<{ test: RegExp; icon: TablerIcon }> = [
   // Módulo «Proyectos» (2026-10-18): sin esta regla el nombre caía por hash en el carrito de compras.
   { test: /^proyectos?$|gesti[oó]n\s+de\s+proyectos/, icon: IconFolders },
+  // Módulo «Formación» (2026-10-26): cursos y capacitaciones.
+  { test: /^formaci[oó]n$|capacitaci/, icon: IconSchool },
   { test: /mis\s*ticket/, icon: IconInbox },
   { test: /^tickets?$|panel.*caso/, icon: IconTicket },
   { test: /ticket|help|soporte/, icon: IconTicket },

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { esFormadorFormacion } from '@/lib/formacion/servidor';
 import { prisma } from '../../../../lib/prisma';
 import { identificar } from '../../../../lib/portal/acceso';
-import { formadoresDePortal } from '../../../../lib/portal/config';
 import { MAX_BYTES_DEFINICION, validarDefinicion } from '../../../../lib/portal/formulario';
 import { CodigoDeFormularioRepetido, crearFormulario, registrarErrorSinDatos } from '../../../../lib/portal/formulario-servidor';
 
@@ -21,7 +21,7 @@ import { CodigoDeFormularioRepetido, crearFormulario, registrarErrorSinDatos } f
 export async function GET(request: NextRequest) {
   const quien = await identificar(request);
   if (!quien) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
-  if (!formadoresDePortal().includes(quien.correo.toLowerCase())) {
+  if (!(await esFormadorFormacion(quien.correo))) {
     return NextResponse.json({ error: 'Solo un formador puede ver los formularios.' }, { status: 403 });
   }
   try {
@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const quien = await identificar(request);
   if (!quien) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
-  if (!formadoresDePortal().includes(quien.correo.toLowerCase())) {
+  if (!(await esFormadorFormacion(quien.correo))) {
     return NextResponse.json({ error: 'Solo un formador puede crear formularios.' }, { status: 403 });
   }
   const crudo = await request.text().catch(() => '');

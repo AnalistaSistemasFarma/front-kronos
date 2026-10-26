@@ -37,7 +37,7 @@ async function simularFormador(page: Page) {
 
 async function abrirCursoFormador(page: Page) {
   await page.goto('/portal/formacion');
-  await page.getByRole('button', { name: 'Vista formador' }).click();
+  await page.locator('label').filter({ hasText: /^Vista formador$/ }).click();
   await page.getByRole('button', { name: /INDUCCIÓN SISTEMAS/ }).click();
   await expect(page.getByRole('heading', { name: 'INDUCCIÓN SISTEMAS' })).toBeVisible();
 }
@@ -57,7 +57,7 @@ test.describe('Portal TH · Formación · «Editar» e «Invitar al Curso»', ()
     await expect(page.getByText('Inducción del área de tecnología')).toBeVisible();
     await expect(page.getByTestId('menu-edicion')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Materiales' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: '+ Agregar material' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Agregar material' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Pasar a borrador' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Editar título y descripción' })).toHaveCount(0);
     const editar = page.getByTestId('alternar-edicion');
@@ -72,7 +72,7 @@ test.describe('Portal TH · Formación · «Editar» e «Invitar al Curso»', ()
     await expect(page.getByTestId('menu-edicion')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Materiales' })).toBeVisible();
     await expect(page.getByText('CAMPAÑA MALWARE', { exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: '+ Agregar material' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Agregar material' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Pasar a borrador' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Editar título y descripción' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Progreso de los estudiantes' })).toBeVisible();
@@ -111,14 +111,14 @@ test.describe('Portal TH · Formación · «Editar» e «Invitar al Curso»', ()
     // Vacío: error en rojo, sin llamar al servidor.
     await form.getByTestId('invitar-enviar').click();
     await expect(form.getByTestId('invitar-aviso')).toHaveText('Escriba el correo de la persona.');
-    await expect(form.getByTestId('invitar-aviso')).toHaveClass(/portal-th__invitar-aviso--error/);
+    await expect(form.getByTestId('invitar-aviso')).toHaveAttribute('data-tipo', 'error');
     expect(estado.invitaciones).toHaveLength(0);
 
     // Un correo que no puede entrar al portal: el servidor lo rechaza y se muestra en rojo.
     await form.getByTestId('invitar-correo').fill('alguien@gmail.com');
     await form.getByTestId('invitar-enviar').click();
     await expect(form.getByTestId('invitar-aviso')).toContainText('no está autorizado para entrar al portal');
-    await expect(form.getByTestId('invitar-aviso')).toHaveClass(/portal-th__invitar-aviso--error/);
+    await expect(form.getByTestId('invitar-aviso')).toHaveAttribute('data-tipo', 'error');
     await expect(form.getByTestId('invitar-correo')).toHaveValue('alguien@gmail.com'); // no se pierde lo escrito
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/83-invitar-error.png` });
 
@@ -126,7 +126,7 @@ test.describe('Portal TH · Formación · «Editar» e «Invitar al Curso»', ()
     await form.getByTestId('invitar-correo').fill('nueva.persona@gsslatam.com');
     await form.getByTestId('invitar-enviar').click();
     await expect(form.getByTestId('invitar-aviso')).toHaveText('Invitación enviada a nueva.persona@gsslatam.com. Quedó inscrita en el curso.');
-    await expect(form.getByTestId('invitar-aviso')).toHaveClass(/portal-th__invitar-aviso--ok/);
+    await expect(form.getByTestId('invitar-aviso')).toHaveAttribute('data-tipo', 'ok');
     await expect(form.getByTestId('invitar-correo')).toHaveValue('');
     await expect(form.getByTestId('invitar-aviso')).toBeInViewport();
     expect(estado.invitaciones).toEqual([{ correo: 'alguien@gmail.com' }, { correo: 'nueva.persona@gsslatam.com' }]);
@@ -158,7 +158,7 @@ test.describe('Portal TH · Formación · «Editar» e «Invitar al Curso»', ()
     );
     await page.goto('/portal/formacion?curso=2');
     // Entra directo al curso: sin pasar por la lista.
-    await expect(page.getByRole('button', { name: '← Volver a Formación' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Volver a Formación' })).toBeVisible();
     await expect(page.getByText('INDUCCIÓN SISTEMAS').first()).toBeVisible();
     await expect(page.getByText('CAMPAÑA MALWARE', { exact: true })).toBeVisible();
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/86-enlace-abre-el-curso.png` });
