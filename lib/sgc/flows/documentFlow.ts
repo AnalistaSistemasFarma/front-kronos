@@ -34,6 +34,21 @@ export const SGC_DOCUMENT_REQUEST_TYPE_LABELS: Record<SgcDocumentRequestType, st
   modificacion: 'Modificación de un documento vigente',
 };
 
+/**
+ * 2026-10-26 (Nicolás Rivera): REDIVULGACIÓN de un documento vigente. Es otra
+ * solicitud, con su propio flujo (REDIV: solicitud → divulgación), sobre la
+ * versión VIGENTE: no crea versión, no se firma de nuevo y al cerrarse no
+ * publica nada. La siembra el SQL 2026-10-26-sgc-redivulgacion-flujo-olp-*.sql.
+ */
+export const SGC_REDISSEMINATION_FLOW_CODE = 'REDIV';
+export const SGC_REDISSEMINATION_REQUEST_TYPE = 'redivulgacion';
+
+/** Rótulo de cualquier tipo de solicitud (los del flujo documental y la redivulgación). */
+export function sgcRequestTypeLabel(type: string): string {
+  if (type === SGC_REDISSEMINATION_REQUEST_TYPE) return 'Redivulgación de un documento vigente';
+  return SGC_DOCUMENT_REQUEST_TYPE_LABELS[type as SgcDocumentRequestType] ?? type;
+}
+
 export function isSgcDocumentRequestType(value: unknown): value is SgcDocumentRequestType {
   return typeof value === 'string' && (SGC_DOCUMENT_REQUEST_TYPES as readonly string[]).includes(value);
 }
