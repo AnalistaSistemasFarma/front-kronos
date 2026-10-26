@@ -21,9 +21,20 @@ export interface RespuestaNabuco {
   cuerpo: string;
 }
 
+/**
+ * HTTPS siempre. HTTP solo si el servidor tiene NABUCO_PERMITIR_HTTP=1: el ambiente de
+ * pruebas de Nabuco solo publica por HTTP (puerto 90). Esa variable va únicamente en testing.
+ */
+export function protocoloNabucoPermitido(u: URL, env: Record<string, string | undefined> = process.env): boolean {
+  if (u.protocol === 'https:') return true;
+  return u.protocol === 'http:' && env.NABUCO_PERMITIR_HTTP === '1';
+}
+
+export const MENSAJE_PROTOCOLO_NABUCO = 'La URL de Nabuco debe ser https (HTTP solo se permite en el ambiente de pruebas de SynerLink).';
+
 function unir(base: string, ruta: string): string {
   const u = new URL(base);
-  if (u.protocol !== 'https:') throw new Error('La URL de Nabuco debe ser https.');
+  if (!protocoloNabucoPermitido(u)) throw new Error(MENSAJE_PROTOCOLO_NABUCO);
   return `${base.replace(/\/+$/, '')}/${ruta.replace(/^\/+/, '')}`;
 }
 

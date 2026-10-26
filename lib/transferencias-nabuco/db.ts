@@ -4,6 +4,7 @@ import { DEFAULTS, LIMITES, NABUCO_JOB_TYPE, NABUCO_SOURCE_MODULE, esEntidadVali
 import { MAPEO_ENCABEZADO_DEFECTO, MAPEO_LINEAS_DEFECTO, validarMapeo, type FilaMapeo } from './mapeo';
 import { cifrarSecreto } from './cifrado';
 import type { EnvioPrevio } from './seleccion';
+import { MENSAJE_PROTOCOLO_NABUCO, protocoloNabucoPermitido } from './nabucoClient';
 
 /**
  * Acceso a KRONOSDB del módulo (tablas nabuco_config / nabuco_envio y la tarea
@@ -182,7 +183,7 @@ export function validarEntradaConfig(b: Record<string, unknown>, esNueva: boolea
     } catch {
       throw new NabucoError('La URL de Nabuco no es válida.');
     }
-    if (u.protocol !== 'https:') throw new NabucoError('La URL de Nabuco debe ser https.');
+    if (!protocoloNabucoPermitido(u)) throw new NabucoError(MENSAJE_PROTOCOLO_NABUCO);
   }
   const ruta_token = texto(b.ruta_token, 200, 'La ruta de token') ?? DEFAULTS.rutaToken;
   const ruta_solicitudes = texto(b.ruta_solicitudes, 200, 'La ruta de solicitudes') ?? DEFAULTS.rutaSolicitudes;
