@@ -118,6 +118,14 @@ describe('tipos', () => {
     expect((await res.json()).error).toMatch(/vista previa/);
   });
 
+  it('Excel demasiado grande para PDF (XLSPageLimitExceeded de Office): 422 que no invita a reintentar', async () => {
+    r.adjunto.mockResolvedValue(fila('META CARTERA OCTUBRE 2026.xlsx'));
+    r.pdf.mockRejectedValue(new Error('OneDrive no pudo convertir el archivo a PDF (HTTP 406, XLSPageLimitExceeded)'));
+    const res = await pedir('42', '?como=pdf');
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toMatch(/límite de páginas/);
+  });
+
   it('Excel: las hojas en JSON; con ?como=pdf, el PDF de Graph', async () => {
     r.adjunto.mockResolvedValue(fila('libro.xlsx'));
     r.hojas.mockResolvedValue({ hojas: [{ nombre: 'H1', html: '<table></table>' }], css: '' });
