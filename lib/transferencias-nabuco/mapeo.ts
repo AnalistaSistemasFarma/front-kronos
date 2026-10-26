@@ -119,3 +119,27 @@ export function ejemploPayload(encabezado: FilaMapeo[], lineas: FilaMapeo[], cla
   const fila = (filas: FilaMapeo[]) => Object.fromEntries(filas.map((f) => [f.campo, f.origen === 'fijo' ? f.valor : valorMuestra(f.valor)]));
   return { ...fila(encabezado), [claveLineas]: [fila(lineas)] };
 }
+
+/**
+ * Validación del armado (Transferencia asistida): el documento debe tener líneas y cada campo
+ * SAP del mapeo debe EXISTIR en el documento (o en sus líneas). Un valor null de SAP es válido;
+ * lo que falla es una ruta cuyo primer segmento no viene en el documento (campo mal escrito).
+ * Devuelve la lista de problemas (vacía = ok).
+ */
+export function problemasArmado(doc: Record<string, unknown>, entidad: string, encabezado: FilaMapeo[], lineas: FilaMapeo[]): string[] {
+  const out: string[] = [];
+  const coleccion = coleccionLineas(entidad);
+  const docLineas = Array.isArray(doc[coleccion]) ? (doc[coleccion] as unknown[]) : [];
+  for (const f of encabezado) {
+    if (f.origen === 'campo_sap' && !(f.valor.split('.')[0] in doc)) out.push(`El campo SAP «${f.valor}» (→ ${f.campo}) no existe en el documento.`);
+  }
+  if (!docLineas.length) {
+    out.push(`El documento no tiene líneas (${coleccion}).`);
+  } else {
+    const primera = (docLineas[0] ?? {}) as Record<string, unknown>;
+    for (const f of lineas) {
+      if (f.origen === 'campo_sap' && !(f.valor.split('.')[0] in primera)) out.push(`El campo SAP de línea «${f.valor}» (→ ${f.campo}) no existe en las líneas.`);
+    }
+  }
+  return out;
+}
