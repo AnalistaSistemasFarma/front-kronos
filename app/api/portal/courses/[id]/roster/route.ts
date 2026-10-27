@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { esFormadorFormacion, puedeAdministrarCursoId } from '@/lib/formacion/servidor';
 import { prisma } from '../../../../../../lib/prisma';
 import { identificar } from '../../../../../../lib/portal/acceso';
-import { formadoresDePortal } from '../../../../../../lib/portal/config';
 import { calcularProgreso, nombreDesdeCorreo } from '../../../../../../lib/portal/formacion';
 
 function idDesdeParametro(valor: string): number | null {
@@ -23,11 +23,14 @@ function idDesdeParametro(valor: string): number | null {
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const quien = await identificar(request);
   if (!quien) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
-  if (!formadoresDePortal().includes(quien.correo.toLowerCase())) {
+  if (!(await esFormadorFormacion(quien.correo))) {
     return NextResponse.json({ error: 'Solo un formador puede ver este listado.' }, { status: 403 });
   }
 
   const courseId = idDesdeParametro((await params).id);
+  if (courseId && !(await puedeAdministrarCursoId(quien.correo, courseId))) {
+    return NextResponse.json({ error: 'Este curso es de otra empresa: no tiene el permiso de Formación para configurarlo.' }, { status: 403 });
+  }
   if (!courseId) return NextResponse.json({ error: 'Curso no válido.' }, { status: 400 });
 
   try {

@@ -37,6 +37,7 @@ export default defineConfig({
       'components/sgc/**/*.test.ts',
       // Medidor del consumo de Anthropic en Proyectos (render del marcado, 2026-10-22).
       'components/proyectos/**/*.test.ts',
+      'components/formacion/**/*.test.ts',
     ],
     exclude: ['node_modules', '.next', 'mcp', 'dist'],
 

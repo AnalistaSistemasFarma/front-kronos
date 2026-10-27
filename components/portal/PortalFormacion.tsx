@@ -1,8 +1,58 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Group, Modal, Stack, Text } from '@mantine/core';
-import { IconAlertTriangle, IconTable } from '@tabler/icons-react';
+import {
+  ActionIcon,
+  Alert,
+  Anchor,
+  AspectRatio,
+  Badge,
+  Box,
+  Button,
+  Card,
+  Center,
+  Checkbox,
+  FileInput,
+  Grid,
+  Group,
+  Loader,
+  Modal,
+  Paper,
+  Progress,
+  SegmentedControl,
+  SimpleGrid,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Textarea,
+  ThemeIcon,
+  Timeline,
+  Title,
+  Tooltip,
+  UnstyledButton,
+} from '@mantine/core';
+import {
+  IconAlertTriangle,
+  IconArrowDown,
+  IconArrowLeft,
+  IconArrowUp,
+  IconCertificate,
+  IconCheck,
+  IconClipboardCheck,
+  IconFileText,
+  IconLink,
+  IconListNumbers,
+  IconPencil,
+  IconPlayerPause,
+  IconPlayerPlay,
+  IconPlus,
+  IconRewindBackward10,
+  IconSchool,
+  IconTable,
+  IconUserPlus,
+  IconX,
+} from '@tabler/icons-react';
 import { leerJson } from './PortalContenido';
 import {
   SubidaCancelada,
@@ -20,6 +70,8 @@ import {
 } from '../../lib/portal/visor-revision';
 import { PanelRespuestas, PreviaDeMaterialFormulario, SelectorFormulario, VisorFormulario } from './FormularioPropio';
 import TopEstudiantes from './TopEstudiantes';
+import PreguntasMaterial from '../formacion/PreguntasMaterial';
+import MiniaturaVideo from '../formacion/MiniaturaVideo';
 
 /**
  * FORMACIÓN — sección "tipo Moodle" al final del portal de Talento Humano.
@@ -60,7 +112,7 @@ interface Material {
 }
 
 interface DetalleCurso {
-  curso: { id: number; titulo: string; descripcion: string | null; activo: boolean; creadoPor: string };
+  curso: { id: number; titulo: string; descripcion: string | null; activo: boolean; creadoPor: string; creadoEl?: string };
   esFormador: boolean;
   /** Administrador/formador del Excel de permisos: puede marcar a mano. */
   puedeMarcarManual?: boolean;
@@ -89,10 +141,20 @@ const certificadoUrl = (code: string) => `/api/portal/certificates/${encodeURICo
  * para que la página de Formación (que vive aparte del portal desde
  * 2026-09-30) pueda mandar a la persona a ingresar primero.
  */
-export default function PortalFormacion({ onSinSesion, cursoInicialId }: { onSinSesion?: () => void; cursoInicialId?: number | null } = {}) {
+export default function PortalFormacion({
+  onSinSesion,
+  cursoInicialId,
+  soloEstudiante = false,
+}: {
+  onSinSesion?: () => void;
+  cursoInicialId?: number | null;
+  /** En «Mi formación» del módulo: solo la vista de estudiante (la administración está al lado). */
+  soloEstudiante?: boolean;
+} = {}) {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cursos, setCursos] = useState<CursoResumen[]>([]);
+  const [cursosEstudiante, setCursosEstudiante] = useState<CursoResumen[]>([]);
   const [esFormador, setEsFormador] = useState(false);
   const [vista, setVista] = useState<'estudiante' | 'formador'>('estudiante');
   // En una ref: si se pasa como función en línea, no debe re-disparar la carga.
@@ -111,9 +173,19 @@ export default function PortalFormacion({ onSinSesion, cursoInicialId }: { onSin
       }
       const data = await leerJson(res);
       if (!res.ok) throw new Error(String(data?.error ?? 'No se pudieron cargar los cursos.'));
+      const formador = data.esFormador === true;
+      // El formador recibe los cursos que ADMINISTRA; en «Vista estudiante» ve los
+      // de su empresa y departamento, como cualquier estudiante (2026-10-26).
+      let comoEstudiante = Array.isArray(data.cursos) ? (data.cursos as CursoResumen[]) : [];
+      if (formador) {
+        const resE = await fetch('/api/portal/courses?vista=estudiante', { cache: 'no-store' });
+        const dataE = await leerJson(resE);
+        if (resE.ok && Array.isArray(dataE.cursos)) comoEstudiante = dataE.cursos as CursoResumen[];
+      }
       cursosCargados.current = true;
       setCursos(Array.isArray(data.cursos) ? (data.cursos as CursoResumen[]) : []);
-      setEsFormador(data.esFormador === true);
+      setCursosEstudiante(comoEstudiante);
+      setEsFormador(formador);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -135,47 +207,40 @@ export default function PortalFormacion({ onSinSesion, cursoInicialId }: { onSin
   useEffect(() => {
     if (cargando || abrioInicial.current || !cursoInicialId || !cursosCargados.current) return;
     abrioInicial.current = true;
-    if (cursos.some((c) => c.id === cursoInicialId && c.activo)) setCursoAbiertoId(cursoInicialId);
+    if (cursosEstudiante.some((c) => c.id === cursoInicialId && c.activo)) setCursoAbiertoId(cursoInicialId);
     else setError('El curso al que lo invitaron ya no está disponible.');
-  }, [cargando, cursos, cursoInicialId]);
+  }, [cargando, cursosEstudiante, cursoInicialId]);
 
-  if (cargando) return <p className='portal-th__estado'>Cargando formación…</p>;
+  if (cargando) return <Cargando texto='Cargando formación…' />;
 
   return (
-    <div className='portal-th__formacion'>
-      <div className='portal-th__formacion-barra'>
-        {esFormador && (
-          <div className='portal-th__formacion-toggle' role='tablist' aria-label='Vista de Formación'>
-            <button
-              type='button'
-              className={vista === 'estudiante' ? 'portal-th__formacion-toggle-activo' : ''}
-              onClick={() => setVista('estudiante')}
-            >
-              Vista estudiante
-            </button>
-            <button
-              type='button'
-              className={vista === 'formador' ? 'portal-th__formacion-toggle-activo' : ''}
-              onClick={() => setVista('formador')}
-            >
-              Vista formador
-            </button>
-          </div>
-        )}
-      </div>
-
-      {error && <p className='portal-th__error'>{error}</p>}
-      {avisoEliminado && (
-        <p className='portal-th__aviso portal-th__aviso--accion' role='status' data-testid='aviso-curso-eliminado'>
-          {avisoEliminado}
-        </p>
+    <Stack gap='md'>
+      {esFormador && !soloEstudiante && (
+        <Group>
+          <SegmentedControl
+            aria-label='Vista de Formación'
+            value={vista}
+            onChange={(v) => setVista(v as 'estudiante' | 'formador')}
+            data={[
+              { value: 'estudiante', label: 'Vista estudiante' },
+              { value: 'formador', label: 'Vista formador' },
+            ]}
+          />
+        </Group>
       )}
 
-      {vista === 'estudiante' || !esFormador ? (
+      {error && <AvisoError texto={error} />}
+      {avisoEliminado && (
+        <Alert color='green' role='status' data-testid='aviso-curso-eliminado'>
+          {avisoEliminado}
+        </Alert>
+      )}
+
+      {vista === 'estudiante' || !esFormador || soloEstudiante ? (
         cursoAbiertoId ? (
           <VistaCursoEstudiante cursoId={cursoAbiertoId} onVolver={() => setCursoAbiertoId(null)} onCambio={cargarCursos} />
         ) : (
-          <ListaCursosEstudiante cursos={cursos.filter((c) => c.activo)} onAbrir={setCursoAbiertoId} />
+          <ListaCursosEstudiante cursos={cursosEstudiante.filter((c) => c.activo)} onAbrir={setCursoAbiertoId} />
         )
       ) : cursoGestionId ? (
         <VistaCursoFormador
@@ -198,34 +263,67 @@ export default function PortalFormacion({ onSinSesion, cursoInicialId }: { onSin
           onCreado={cargarCursos}
         />
       )}
-    </div>
+    </Stack>
   );
 }
 
 /* ─────────────────────────────── Estudiante ────────────────────────────── */
 
+/** Mensajes de estado y error con las mismas piezas de Mantine que el resto de SynerLink. */
+export function Cargando({ texto }: { texto: string }) {
+  return (
+    <Group gap='xs' py='md'>
+      <Loader size='sm' />
+      <Text size='sm' c='dimmed'>
+        {texto}
+      </Text>
+    </Group>
+  );
+}
+
+export function AvisoError({ texto }: { texto: string }) {
+  return (
+    <Alert color='red' icon={<IconAlertTriangle size={18} />} role='alert'>
+      {texto}
+    </Alert>
+  );
+}
+
 function BarraProgreso({ porcentaje, mostrarCompletado = false }: { porcentaje: number; mostrarCompletado?: boolean }) {
+  const valor = Math.min(100, Math.max(0, porcentaje));
   const barra = (
-    <div className='portal-th__curso-progreso' role='progressbar' aria-valuenow={porcentaje} aria-valuemin={0} aria-valuemax={100}>
-      <div className='portal-th__curso-progreso-barra' style={{ width: `${Math.min(100, Math.max(0, porcentaje))}%` }} />
-      <span>{porcentaje}%</span>
-    </div>
+    <Group gap='xs' wrap='nowrap' style={{ flex: 1, minWidth: 120 }}>
+      <Progress
+        value={valor}
+        color={valor >= 100 ? 'green' : 'blue'}
+        radius='xl'
+        size='md'
+        style={{ flex: 1 }}
+        role='progressbar'
+        aria-valuenow={porcentaje}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      />
+      <Text size='xs' fw={600}>
+        {porcentaje}%
+      </Text>
+    </Group>
   );
   if (!mostrarCompletado) return barra;
   // Cristian (2026-10-08): al quedar completo, "Completado" a la derecha de la barra.
   return (
-    <div className='portal-th__progreso-fila'>
+    <Group gap='sm' wrap='nowrap' data-testid='progreso-fila'>
       {barra}
       {porcentaje >= 100 && <InsigniaCompletado />}
-    </div>
+    </Group>
   );
 }
 
 function InsigniaCompletado() {
   return (
-    <span className='portal-th__completado' data-testid='insignia-completado'>
-      ✓ Completado
-    </span>
+    <Badge color='green' variant='light' leftSection={<IconCheck size={12} />} data-testid='insignia-completado'>
+      Completado
+    </Badge>
   );
 }
 
@@ -242,46 +340,100 @@ interface EstadoSubida {
 function ProgresoSubida({ subida, onCancelar }: { subida: EstadoSubida; onCancelar: () => void }) {
   const porcentaje = subida.total > 0 ? Math.floor((subida.subidos / subida.total) * 100) : 0;
   return (
-    <div className='portal-th__subida' role='status' aria-live='polite' data-testid='progreso-subida'>
-      <div className='portal-th__subida-texto'>
-        <strong>Subiendo a SharePoint:</strong> {subida.nombre}
-        <span>
-          {formatearBytes(subida.subidos)} de {formatearBytes(subida.total)} ({porcentaje}%)
-        </span>
-      </div>
-      <BarraProgreso porcentaje={porcentaje} />
-      <button type='button' className='portal-th__boton-secundario' onClick={onCancelar}>
-        Cancelar subida
-      </button>
-    </div>
+    <Alert color='blue' role='status' aria-live='polite' data-testid='progreso-subida'>
+      <Stack gap='xs'>
+        <Text size='sm'>
+          <strong>Subiendo a SharePoint:</strong> {subida.nombre} · {formatearBytes(subida.subidos)} de{' '}
+          {formatearBytes(subida.total)} ({porcentaje}%)
+        </Text>
+        <BarraProgreso porcentaje={porcentaje} />
+        <Group>
+          <Button size='xs' variant='default' onClick={onCancelar}>
+            Cancelar subida
+          </Button>
+        </Group>
+      </Stack>
+    </Alert>
   );
 }
 
-function ListaCursosEstudiante({ cursos, onAbrir }: { cursos: CursoResumen[]; onAbrir: (id: number) => void }) {
+export function ListaCursosEstudiante({ cursos, onAbrir }: { cursos: CursoResumen[]; onAbrir: (id: number) => void }) {
+  // «Mi formación» (Nicolás, 2026-10-26): primero lo pendiente por terminar y después lo ya completado.
   // Top 10 de estudiantes (Cristian, 2026-10-16): a la derecha de los cursos en pantallas anchas, debajo en las angostas.
+  const pendientes = cursos.filter((c) => (c.porcentaje ?? 0) < 100);
+  const completados = cursos.filter((c) => (c.porcentaje ?? 0) >= 100);
+  const tarjeta = (c: CursoResumen) => (
+    <Card
+      key={c.id}
+      data-testid='curso-tarjeta'
+      withBorder
+      radius='md'
+      shadow='sm'
+      padding='md'
+      component='button'
+      type='button'
+      onClick={() => onAbrir(c.id)}
+      style={{ textAlign: 'left', cursor: 'pointer' }}
+    >
+      <Stack gap={6}>
+        <Text fw={700}>{c.titulo}</Text>
+        {c.descripcion && (
+          <Text size='sm' c='dimmed' lineClamp={3}>
+            {c.descripcion}
+          </Text>
+        )}
+        <Text size='xs' c='dimmed'>
+          {c.totalMateriales} clase(s)
+        </Text>
+        <BarraProgreso porcentaje={c.porcentaje ?? 0} mostrarCompletado />
+        {c.certificado && (
+          <Group>
+            <Badge color='teal' variant='light' leftSection={<IconCertificate size={12} />}>
+              Certificado emitido
+            </Badge>
+          </Group>
+        )}
+      </Stack>
+    </Card>
+  );
   return (
-    <div className='portal-th__lista-top'>
-      {cursos.length === 0 ? (
-        <p className='portal-th__estado'>Todavía no hay cursos publicados.</p>
-      ) : (
-        <div className='portal-th__curso-grilla'>
-          {cursos.map((c) => (
-            <button type='button' key={c.id} className='portal-th__curso-tarjeta' onClick={() => onAbrir(c.id)}>
-              <strong>{c.titulo}</strong>
-              {c.descripcion && <p>{c.descripcion}</p>}
-              <span className='portal-th__curso-meta'>{c.totalMateriales} material(es)</span>
-              <BarraProgreso porcentaje={c.porcentaje ?? 0} mostrarCompletado />
-              {c.certificado && <span className='portal-th__curso-certificado-chip'>✅ Certificado emitido</span>}
-            </button>
-          ))}
-        </div>
-      )}
+    <SimpleGrid cols={{ base: 1, lg: 3 }} spacing='md'>
+      <Stack gap='lg' style={{ gridColumn: 'span 2' }} data-testid='curso-grilla'>
+        {cursos.length === 0 ? (
+          <Text size='sm' c='dimmed' ta='center' py='xl'>
+            Todavía no hay cursos publicados.
+          </Text>
+        ) : (
+          <>
+            <Stack gap='sm' data-testid='cursos-pendientes'>
+              <Title order={4}>Pendiente por terminar ({pendientes.length})</Title>
+              {pendientes.length === 0 ? (
+                <Text size='sm' c='dimmed'>
+                  ¡Está al día! No tiene cursos pendientes.
+                </Text>
+              ) : (
+                <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='md'>
+                  {pendientes.map(tarjeta)}
+                </SimpleGrid>
+              )}
+            </Stack>
+            {completados.length > 0 && (
+              <Stack gap='sm' data-testid='cursos-completados'>
+                <Title order={4}>Mis cursos completados ({completados.length})</Title>
+                <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='md'>
+                  {completados.map(tarjeta)}
+                </SimpleGrid>
+              </Stack>
+            )}
+          </>
+        )}
+      </Stack>
       <TopEstudiantes />
-    </div>
+    </SimpleGrid>
   );
 }
 
-function VistaCursoEstudiante({
+export function VistaCursoEstudiante({
   cursoId,
   onVolver,
   onCambio,
@@ -298,6 +450,8 @@ function VistaCursoEstudiante({
   const [detalle, setDetalle] = useState<DetalleCurso | null>(null);
   const [marcando, setMarcando] = useState<number | null>(null);
   const [abierto, setAbierto] = useState<Material | null>(null);
+  // Clase abierta en la vista de lección (video, PDF, imagen o documento).
+  const [leccion, setLeccion] = useState<Material | null>(null);
 
   const cargar = useCallback(async () => {
     setError(null);
@@ -365,109 +519,247 @@ function VistaCursoEstudiante({
       .catch((e) => setAviso({ tipo: 'error', texto: (e as Error).message }));
   };
 
-  if (cargando) return <p className='portal-th__estado'>Cargando curso…</p>;
-  if (error) return <p className='portal-th__error'>{error}</p>;
+  if (cargando) return <Cargando texto='Cargando curso…' />;
+  if (error) return <AvisoError texto={error} />;
   if (!detalle) return null;
 
+  const materiales = detalle.materiales;
+  const hechos = materiales.filter((m) => m.completadoEl !== null).length;
+  const conteo = (tipo: string) => materiales.filter((m) => etiquetaTipo(m) === tipo).length;
+  const abrir = (m: Material) => {
+    setAviso(null);
+    if (m.tipo === 'FORM') setAbierto(m);
+    else if (m.tipo === 'LINK') window.open(m.url ?? '#', '_blank', 'noopener,noreferrer');
+    else setLeccion(m);
+    if (m.tipo === 'LINK') abrirEnlace(m);
+  };
+
+  const casilla = (m: Material) => {
+    const completado = m.completadoEl !== null;
+    return casillasEditables ? (
+      <Checkbox
+        checked={completado}
+        disabled={marcando === m.id}
+        onChange={() => void alternarMaterial(m.id, completado)}
+        aria-label={completado ? `Marcar ${m.titulo} como pendiente` : `Marcar ${m.titulo} como completado`}
+        title='Puede marcar o desmarcar a mano (administrador/formador)'
+      />
+    ) : null;
+  };
+
+  // ── Vista de la LECCIÓN (2026-10-26): el material grande y, al lado, sus preguntas y respuestas. ──
+  if (leccion) {
+    const actual = materiales.find((m) => m.id === leccion.id) ?? leccion;
+    const i = materiales.findIndex((m) => m.id === actual.id);
+    const anterior = i > 0 ? materiales[i - 1] : null;
+    const siguiente = i >= 0 && i < materiales.length - 1 ? materiales[i + 1] : null;
+    return (
+      <Stack gap='md' data-testid='leccion'>
+        <Group justify='space-between' wrap='wrap'>
+          <Button variant='subtle' leftSection={<IconArrowLeft size={16} />} onClick={() => setLeccion(null)} data-testid='volver-curso'>
+            {detalle.curso.titulo}
+          </Button>
+          <Group gap='xs'>
+            <Button variant='default' disabled={!anterior} onClick={() => anterior && abrir(anterior)}>
+              ← Clase anterior
+            </Button>
+            <Button disabled={!siguiente} onClick={() => siguiente && abrir(siguiente)}>
+              Clase siguiente →
+            </Button>
+          </Group>
+        </Group>
+        {aviso && (
+          <Alert color={aviso.tipo === 'error' ? 'red' : 'green'} role={aviso.tipo === 'error' ? 'alert' : 'status'}>
+            {aviso.texto}
+          </Alert>
+        )}
+        <Grid gutter='md'>
+          <Grid.Col span={{ base: 12, lg: 8 }}>
+            <Stack gap='sm'>
+              <VisorMaterial
+                key={actual.id}
+                enLinea
+                cursoId={detalle.curso.id}
+                material={actual}
+                onCerrar={() => setLeccion(null)}
+                onCompletado={() => alCompletar(actual.titulo)}
+              />
+              <Group gap='xs' wrap='nowrap'>
+                <Badge variant='light' size='lg' circle>
+                  {i + 1}
+                </Badge>
+                <Title order={3} style={{ overflowWrap: 'anywhere' }}>
+                  {actual.titulo}
+                </Title>
+                {actual.completadoEl !== null && <InsigniaCompletado />}
+              </Group>
+            </Stack>
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, lg: 4 }}>
+            <PreguntasMaterial materialId={actual.id} />
+          </Grid.Col>
+        </Grid>
+      </Stack>
+    );
+  }
+
+  // ── PORTADA del curso (2026-10-26): encabezado, datos y temario numerado. ──
   return (
-    <div className='portal-th__curso-detalle'>
-      <button type='button' className='portal-th__volver' onClick={onVolver}>
-        ← Volver a Formación
-      </button>
-      <h3>{detalle.curso.titulo}</h3>
-      {detalle.curso.descripcion && <p className='portal-th__curso-descripcion'>{detalle.curso.descripcion}</p>}
-      {aviso && (
-        <p className={`portal-th__resultado portal-th__resultado--${aviso.tipo}`} role={aviso.tipo === 'error' ? 'alert' : 'status'}>
-          {aviso.texto}
-        </p>
-      )}
-      <BarraProgreso porcentaje={detalle.porcentaje} mostrarCompletado />
+    <Stack gap='md'>
+      <Group>
+        <Button variant='subtle' leftSection={<IconArrowLeft size={16} />} onClick={onVolver}>
+          Volver a Formación
+        </Button>
+      </Group>
+      <Card withBorder radius='md' shadow='sm' padding='xl' data-testid='portada-curso'>
+        <Stack gap='md'>
+          <ThemeIcon size={56} radius='md' variant='light'>
+            <IconSchool size={32} />
+          </ThemeIcon>
+          <Title order={1} style={{ overflowWrap: 'anywhere' }}>
+            {detalle.curso.titulo}
+          </Title>
+          {detalle.curso.creadoEl && (
+            <Text size='sm' c='dimmed'>
+              Publicado el {new Date(detalle.curso.creadoEl).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })}
+            </Text>
+          )}
+          <Group gap='xs'>
+            <Badge variant='outline' color='gray' size='lg' leftSection={<IconListNumbers size={14} />} style={{ textTransform: 'none' }}>
+              {materiales.length} clase(s)
+            </Badge>
+            {conteo('Video') > 0 && (
+              <Badge variant='outline' color='gray' size='lg' leftSection={<IconPlayerPlay size={14} />} style={{ textTransform: 'none' }}>
+                {conteo('Video')} video(s)
+              </Badge>
+            )}
+            {conteo('Documento') > 0 && (
+              <Badge variant='outline' color='gray' size='lg' leftSection={<IconFileText size={14} />} style={{ textTransform: 'none' }}>
+                {conteo('Documento')} documento(s)
+              </Badge>
+            )}
+            {conteo('Formulario') > 0 && (
+              <Badge variant='outline' color='gray' size='lg' leftSection={<IconClipboardCheck size={14} />} style={{ textTransform: 'none' }}>
+                {conteo('Formulario')} evaluación(es)
+              </Badge>
+            )}
+          </Group>
+          {detalle.curso.descripcion && (
+            <Text size='md' style={{ whiteSpace: 'pre-wrap' }}>
+              {detalle.curso.descripcion}
+            </Text>
+          )}
+          {aviso && (
+            <Alert color={aviso.tipo === 'error' ? 'red' : 'green'} role={aviso.tipo === 'error' ? 'alert' : 'status'}>
+              {aviso.texto}
+            </Alert>
+          )}
+          <Stack gap={4}>
+            <Text size='sm' fw={600}>
+              Su avance: {hechos} de {materiales.length} clase(s)
+            </Text>
+            <BarraProgreso porcentaje={detalle.porcentaje} mostrarCompletado />
+          </Stack>
+          {detalle.certificado ? (
+            <Group>
+              <Button
+                component='a'
+                href={certificadoUrl(detalle.certificado.code)}
+                target='_blank'
+                rel='noopener noreferrer'
+                leftSection={<IconCertificate size={16} />}
+              >
+                Descargar certificado
+              </Button>
+            </Group>
+          ) : (
+            detalle.porcentaje < 100 && (
+              <Text size='sm' c='dimmed'>
+                Complete los materiales obligatorios para obtener su certificado de finalización.
+              </Text>
+            )
+          )}
+        </Stack>
+      </Card>
 
-      <ul className='portal-th__material-lista'>
-        {detalle.materiales.map((m) => {
-          const completado = m.completadoEl !== null;
-          return (
-            <li key={m.id} className='portal-th__material-item'>
-              {casillasEditables ? (
-                <button
-                  type='button'
-                  className={`portal-th__material-check${completado ? ' portal-th__material-check--hecho' : ''}`}
-                  disabled={marcando === m.id}
-                  onClick={() => void alternarMaterial(m.id, completado)}
-                  aria-label={completado ? `Marcar ${m.titulo} como pendiente` : `Marcar ${m.titulo} como completado`}
-                  title='Puede marcar o desmarcar a mano (administrador/formador)'
+      <Card withBorder radius='md' shadow='sm' padding='xl'>
+        <Title order={4} mb='md'>
+          Temario
+        </Title>
+        {materiales.length === 0 ? (
+          <Text size='sm' c='dimmed'>
+            Este curso todavía no tiene clases.
+          </Text>
+        ) : (
+          <Timeline active={hechos - 1} bulletSize={28} lineWidth={3} color='green'>
+            {materiales.map((m, i) => {
+              const completado = m.completadoEl !== null;
+              return (
+                <Timeline.Item
+                  key={m.id}
+                  bullet={
+                    <Text size='xs' fw={700}>
+                      {i + 1}
+                    </Text>
+                  }
+                  data-testid='material-item'
                 >
-                  {completado ? '✓' : ''}
-                </button>
-              ) : (
-                <span
-                  role='checkbox'
-                  aria-checked={completado}
-                  aria-disabled='true'
-                  aria-label={`${m.titulo}: ${AYUDA_CASILLA_BLOQUEADA.toLowerCase()}`}
-                  title={AYUDA_CASILLA_BLOQUEADA}
-                  className={`portal-th__material-check portal-th__material-check--bloqueada${completado ? ' portal-th__material-check--hecho' : ''}`}
-                >
-                  {completado ? '✓' : ''}
-                </span>
-              )}
-              <div className='portal-th__material-info'>
-                {m.tipo === 'LINK' ? (
-                  <a href={m.url ?? '#'} target='_blank' rel='noopener noreferrer' onClick={() => abrirEnlace(m)}>
-                    {m.titulo}
-                  </a>
-                ) : m.tipo === 'FORM' ? (
-                  <button
-                    type='button'
-                    className='portal-th__material-abrir'
-                    onClick={() => setAbierto(m)}
-                    data-testid={`abrir-formulario-${m.id}`}
-                  >
-                    {m.titulo}
-                  </button>
-                ) : (
-                  <button type='button' className='portal-th__material-abrir' onClick={() => setAbierto(m)}>
-                    {m.titulo}
-                  </button>
-                )}
-                <span className='portal-th__material-tipo'>
-                  {etiquetaTipo(m)}
-                  {!m.obligatorio && ' · opcional'}
-                </span>
-              </div>
-              {m.tipo === 'FORM' && verRespuestasAqui && (
-                <Button size='xs' variant='default' leftSection={<IconTable size={14} />} onClick={() => setRespuestasDe(m)}>
-                  Ver respuestas
-                </Button>
-              )}
-              {completado && <InsigniaCompletado />}
-            </li>
-          );
-        })}
-      </ul>
-      {!casillasEditables && detalle.materiales.length > 0 && (
-        <p className='portal-th__estado'>
-          Las casillas se marcan automáticamente cuando revisa cada material: los videos hasta el final, los PDF hasta la
-          última página, los formularios al enviarlos y los demás documentos y enlaces al abrirlos.
-        </p>
-      )}
-
-      {detalle.certificado ? (
-        <a
-          className='portal-th__certificado-boton'
-          href={certificadoUrl(detalle.certificado.code)}
-          target='_blank'
-          rel='noopener noreferrer'
-        >
-          🎓 Descargar certificado
-        </a>
-      ) : (
-        detalle.porcentaje < 100 && (
-          <p className='portal-th__estado'>
-            Complete los materiales obligatorios para obtener su certificado de finalización.
-          </p>
-        )
-      )}
+                  <Group justify='space-between' wrap='nowrap' gap='sm'>
+                    <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
+                      {etiquetaTipo(m) === 'Video' ? (
+                        <UnstyledButton onClick={() => abrir(m)} aria-label={`Ver ${m.titulo}`}>
+                          <MiniaturaVideo url={materialUrl(detalle.curso.id, m.id)} titulo={m.titulo} completado={completado} />
+                        </UnstyledButton>
+                      ) : (
+                        <ThemeIcon variant='light' size={44} radius='md' color={completado ? 'green' : 'blue'}>
+                          {iconoTipo(m)}
+                        </ThemeIcon>
+                      )}
+                      <Stack gap={2} style={{ minWidth: 0 }}>
+                        <Anchor
+                          component='button'
+                          type='button'
+                          fw={700}
+                          ta='left'
+                          c='var(--mantine-color-text)'
+                          onClick={() => abrir(m)}
+                          data-testid={m.tipo === 'FORM' ? `abrir-formulario-${m.id}` : undefined}
+                        >
+                          {m.titulo}
+                        </Anchor>
+                        <Group gap='xs'>
+                          {completado ? (
+                            <InsigniaCompletado />
+                          ) : (
+                            <Text size='xs' c='dimmed'>
+                              {etiquetaTipo(m)}
+                              {!m.obligatorio && ' · opcional'}
+                            </Text>
+                          )}
+                        </Group>
+                      </Stack>
+                    </Group>
+                    <Group gap='xs' wrap='nowrap'>
+                      {m.tipo === 'FORM' && verRespuestasAqui && (
+                        <Button size='xs' variant='default' leftSection={<IconTable size={14} />} onClick={() => setRespuestasDe(m)}>
+                          Ver respuestas
+                        </Button>
+                      )}
+                      {casilla(m)}
+                    </Group>
+                  </Group>
+                </Timeline.Item>
+              );
+            })}
+          </Timeline>
+        )}
+        {!casillasEditables && materiales.length > 0 && (
+          <Text size='xs' c='dimmed' mt='md'>
+            Cada clase se marca sola cuando la revisa: los videos hasta el final, los PDF hasta la última página, los
+            formularios al enviarlos y los demás documentos y enlaces al abrirlos.
+          </Text>
+        )}
+      </Card>
 
       {abierto && abierto.tipo === 'FORM' && (
         <VisorFormulario
@@ -475,14 +767,6 @@ function VistaCursoEstudiante({
           titulo={abierto.titulo}
           onCerrar={() => setAbierto(null)}
           onEnviado={() => alCompletar(abierto.titulo, `Respuestas enviadas: "${abierto.titulo}" quedó completado.`)}
-        />
-      )}
-      {abierto && abierto.tipo !== 'FORM' && (
-        <VisorMaterial
-          cursoId={detalle.curso.id}
-          material={abierto}
-          onCerrar={() => setAbierto(null)}
-          onCompletado={() => alCompletar(abierto.titulo)}
         />
       )}
       {respuestasDe && (
@@ -496,8 +780,16 @@ function VistaCursoEstudiante({
           }}
         />
       )}
-    </div>
+    </Stack>
   );
+}
+
+function iconoTipo(m: Material) {
+  const t = etiquetaTipo(m);
+  if (t === 'Video') return <IconPlayerPlay size={22} />;
+  if (t === 'Formulario') return <IconClipboardCheck size={22} />;
+  if (t === 'Enlace') return <IconLink size={22} />;
+  return <IconFileText size={22} />;
 }
 
 function etiquetaTipo(m: Material): string {
@@ -539,11 +831,14 @@ function VisorMaterial({
   material,
   onCerrar,
   onCompletado,
+  enLinea = false,
 }: {
   cursoId: number;
   material: Material;
   onCerrar: () => void;
   onCompletado: () => Promise<void> | void;
+  /** Dentro de la página (vista de la lección) en vez de ventana emergente. */
+  enLinea?: boolean;
 }) {
   const url = materialUrl(cursoId, material.id);
   const [regla, setRegla] = useState<ReglaRevision | null>(null);
@@ -554,6 +849,7 @@ function VisorMaterial({
   const [segundos, setSegundos] = useState(0);
   const [duracion, setDuracion] = useState(0);
   const [reproduciendo, setReproduciendo] = useState(false);
+  const [cargandoVideo, setCargandoVideo] = useState(true);
   const [pdf, setPdf] = useState<{ pagina: number; maxima: number; total: number }>({ pagina: 1, maxima: 1, total: 0 });
   const reportado = useRef(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -583,14 +879,6 @@ function VisorMaterial({
     };
     // Solo al abrir; `onCompletado` y `completadoEl` no deben reabrir la vista.
   }, [material.id]);
-
-  useEffect(() => {
-    const alTeclear = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCerrar();
-    };
-    window.addEventListener('keydown', alTeclear);
-    return () => window.removeEventListener('keydown', alTeclear);
-  }, [onCerrar]);
 
   const reportar = useCallback(
     async (cuerpo: { segundosVistos: number; duracion?: number; paginaMaxima?: number; paginasTotales?: number }) => {
@@ -700,142 +988,172 @@ function VisorMaterial({
     estadoTexto = `Revisando… ${reloj(Math.min(segundos, regla.segundosMinimos))} de ${reloj(regla.segundosMinimos)}`;
   }
 
-  return (
-    <div
-      className='portal-th__visor'
-      role='dialog'
-      aria-modal='true'
-      aria-label={material.titulo}
-      data-testid='visor-material'
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCerrar();
-      }}
-    >
-      <div className='portal-th__visor-caja'>
-        <header className='portal-th__visor-barra'>
-          <strong>{material.titulo}</strong>
-          <div className='portal-th__visor-acciones'>
-            {/* Video y PDF se revisan aquí; abrirlos aparte saltaría el control. */}
-            {tipo !== 'video' && tipo !== 'pdf' && (
-              <a href={url} target='_blank' rel='noopener noreferrer'>
-                Abrir aparte
-              </a>
-            )}
-            <button type='button' onClick={onCerrar} aria-label='Cerrar'>
-              ✕
-            </button>
-          </div>
-        </header>
-        <div
-          className={`portal-th__visor-revision${completado ? ' portal-th__visor-revision--hecho' : ''}`}
+  const contenido = (
+    <Stack gap='sm'>
+      <Group justify='space-between' wrap='wrap' gap='xs'>
+        <Badge
+          size='lg'
+          variant='light'
+          color={completado ? 'green' : 'blue'}
           role='status'
           data-testid='estado-revision'
+          style={{ textTransform: 'none', whiteSpace: 'normal', height: 'auto' }}
         >
           {estadoTexto}
-        </div>
-        {error && (
-          <p className='portal-th__resultado portal-th__resultado--error' role='alert'>
-            {error}
-          </p>
+        </Badge>
+        {/* Video y PDF se revisan aquí; abrirlos aparte saltaría el control. */}
+        {tipo !== 'video' && tipo !== 'pdf' && (
+          <Anchor href={url} target='_blank' rel='noopener noreferrer' size='sm'>
+            Abrir aparte
+          </Anchor>
         )}
-        {aviso && (
-          <p className='portal-th__resultado portal-th__resultado--advertencia' role='alert'>
-            {aviso}
-          </p>
-        )}
-        {tipo === 'video' ? (
-          <>
-            {/* Sin `controls`: la barra nativa permite saltar. */}
-            <video
-              ref={videoRef}
-              className='portal-th__visor-video'
-              src={url}
-              disablePictureInPicture
-              playsInline
-              preload='metadata'
-              data-testid='video-material'
+      </Group>
+      {error && <AvisoError texto={error} />}
+      {aviso && (
+        <Alert color='yellow' role='alert'>
+          {aviso}
+        </Alert>
+      )}
+      {tipo === 'video' ? (
+        <>
+          {/* Marco 16:9 fijo desde el primer momento (Nicolás, 2026-10-26: el video se veía
+              aplastado mientras cargaba) y un indicador de carga encima hasta que hay imagen. */}
+          <AspectRatio ratio={16 / 9} maw='calc(70vh * 16 / 9)' mx='auto' w='100%' style={{ position: 'relative', background: '#000', borderRadius: 8, overflow: 'hidden' }}>
+          {/* Sin `controls`: la barra nativa permite saltar. */}
+          <video
+            ref={videoRef}
+            style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }}
+            src={url}
+            disablePictureInPicture
+            playsInline
+            preload='metadata'
+            data-testid='video-material'
+            onClick={alternarVideo}
+            onContextMenu={(e) => e.preventDefault()}
+            onLoadedMetadata={(e) => setDuracion(e.currentTarget.duration || 0)}
+            onLoadedData={() => setCargandoVideo(false)}
+            onCanPlay={() => setCargandoVideo(false)}
+            onWaiting={() => setCargandoVideo(true)}
+            onPlaying={() => setCargandoVideo(false)}
+            onPlay={() => {
+              video.current.ultimo = videoRef.current?.currentTime ?? 0;
+              setReproduciendo(true);
+            }}
+            onPause={() => setReproduciendo(false)}
+            onEnded={(e) => {
+              setReproduciendo(false);
+              alAvanzarVideo(e.currentTarget);
+            }}
+            onTimeUpdate={(e) => alAvanzarVideo(e.currentTarget)}
+            onSeeking={(e) => alBuscarVideo(e.currentTarget)}
+            onRateChange={(e) => {
+              if (e.currentTarget.playbackRate !== 1) e.currentTarget.playbackRate = 1;
+            }}
+          />
+          {cargandoVideo && (
+            <Center style={{ position: 'absolute', inset: 0 }} data-testid='video-cargando'>
+              <Stack align='center' gap='xs'>
+                <Loader color='white' />
+                <Text size='sm' c='white'>
+                  Cargando video…
+                </Text>
+              </Stack>
+            </Center>
+          )}
+          </AspectRatio>
+          <Group gap='sm' wrap='nowrap'>
+            <Button
+              size='xs'
+              disabled={duracion === 0}
+              leftSection={reproduciendo ? <IconPlayerPause size={14} /> : <IconPlayerPlay size={14} />}
               onClick={alternarVideo}
-              onContextMenu={(e) => e.preventDefault()}
-              onLoadedMetadata={(e) => setDuracion(e.currentTarget.duration || 0)}
-              onPlay={() => {
-                video.current.ultimo = videoRef.current?.currentTime ?? 0;
-                setReproduciendo(true);
-              }}
-              onPause={() => setReproduciendo(false)}
-              onEnded={(e) => {
-                setReproduciendo(false);
-                alAvanzarVideo(e.currentTarget);
-              }}
-              onTimeUpdate={(e) => alAvanzarVideo(e.currentTarget)}
-              onSeeking={(e) => alBuscarVideo(e.currentTarget)}
-              onRateChange={(e) => {
-                if (e.currentTarget.playbackRate !== 1) e.currentTarget.playbackRate = 1;
-              }}
+            >
+              {reproduciendo ? 'Pausar' : 'Reproducir'}
+            </Button>
+            <Button size='xs' variant='default' onClick={retrocederVideo} aria-label='Retroceder 10 segundos' leftSection={<IconRewindBackward10 size={14} />}>
+              10 s
+            </Button>
+            <Progress
+              style={{ flex: 1 }}
+              radius='xl'
+              value={duracion > 0 ? Math.min(100, (segundos / duracion) * 100) : 0}
+              role='progressbar'
+              aria-label='Tiempo visto del video'
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={duracion > 0 ? Math.min(100, Math.floor((segundos / duracion) * 100)) : 0}
             />
-            <div className='portal-th__visor-controles'>
-              <button type='button' onClick={alternarVideo}>
-                {reproduciendo ? '❚❚ Pausar' : '▶ Reproducir'}
-              </button>
-              <button type='button' onClick={retrocederVideo} aria-label='Retroceder 10 segundos'>
-                ↺ 10 s
-              </button>
-              <div
-                className='portal-th__visor-avance'
+            <Text size='sm' fw={600} data-testid='contador-video'>
+              {contadorVideo(segundos, duracion)}
+            </Text>
+          </Group>
+        </>
+      ) : tipo === 'imagen' ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img style={{ maxWidth: '100%', maxHeight: '70vh', margin: '0 auto', display: 'block' }} src={url} alt={material.titulo} />
+      ) : tipo === 'pdf' ? (
+        <>
+          <PdfPaginado url={url} pagina={pdf.pagina} onCargado={alCargarPdf} onError={setError} />
+          {pdf.total > 1 && (
+            <Group gap='sm' wrap='wrap'>
+              <Button size='xs' variant='default' onClick={() => irAPagina(pdf.pagina - 1)} disabled={pdf.pagina <= 1}>
+                ← Página anterior
+              </Button>
+              <Text size='sm' fw={600} data-testid='pagina-pdf'>
+                Página {pdf.pagina} de {pdf.total}
+              </Text>
+              <Button size='xs' onClick={() => irAPagina(pdf.pagina + 1)} disabled={pdf.pagina >= pdf.total}>
+                Página siguiente →
+              </Button>
+              <Progress
+                style={{ flex: 1, minWidth: 120 }}
+                radius='xl'
+                value={lectura}
                 role='progressbar'
-                aria-label='Tiempo visto del video'
+                aria-label='Lectura del documento'
                 aria-valuemin={0}
                 aria-valuemax={100}
-                aria-valuenow={duracion > 0 ? Math.min(100, Math.floor((segundos / duracion) * 100)) : 0}
-              >
-                <span style={{ width: `${duracion > 0 ? Math.min(100, (segundos / duracion) * 100) : 0}%` }} />
-              </div>
-              <span className='portal-th__visor-contador' data-testid='contador-video'>
-                {contadorVideo(segundos, duracion)}
-              </span>
-            </div>
-          </>
-        ) : tipo === 'imagen' ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img className='portal-th__visor-imagen' src={url} alt={material.titulo} />
-        ) : tipo === 'pdf' ? (
-          <>
-            <PdfPaginado url={url} pagina={pdf.pagina} onCargado={alCargarPdf} onError={setError} />
-            {pdf.total > 1 && (
-              <div className='portal-th__visor-controles'>
-                <button type='button' onClick={() => irAPagina(pdf.pagina - 1)} disabled={pdf.pagina <= 1}>
-                  ← Página anterior
-                </button>
-                <span className='portal-th__visor-contador' data-testid='pagina-pdf'>
-                  Página {pdf.pagina} de {pdf.total}
-                </span>
-                <button type='button' onClick={() => irAPagina(pdf.pagina + 1)} disabled={pdf.pagina >= pdf.total}>
-                  Página siguiente →
-                </button>
-                <div
-                  className='portal-th__visor-avance'
-                  role='progressbar'
-                  aria-label='Lectura del documento'
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={lectura}
-                  data-testid='lectura-pdf'
-                >
-                  <span style={{ width: `${lectura}%` }} />
-                </div>
-                <span className='portal-th__visor-contador'>{lectura} %</span>
-              </div>
-            )}
-          </>
-        ) : tipo === 'documento' ? (
-          <div className='portal-th__visor-documento'>
-            <p>Este documento se abre con su programa (Word, Excel o PowerPoint).</p>
-            <a className='portal-th__certificado-boton' href={url} target='_blank' rel='noopener noreferrer'>
-              Abrir documento
-            </a>
-          </div>
-        ) : null}
-      </div>
-    </div>
+                aria-valuenow={lectura}
+                data-testid='lectura-pdf'
+              />
+              <Text size='sm' fw={600}>
+                {lectura} %
+              </Text>
+            </Group>
+          )}
+        </>
+      ) : tipo === 'documento' ? (
+        <Stack gap='sm' align='flex-start'>
+          <Text size='sm'>Este documento se abre con su programa (Word, Excel o PowerPoint).</Text>
+          <Button component='a' href={url} target='_blank' rel='noopener noreferrer'>
+            Abrir documento
+          </Button>
+        </Stack>
+      ) : null}
+    </Stack>
+  );
+
+  // En la vista de la lección (2026-10-26) el visor va en la página, junto a las preguntas.
+  if (enLinea) {
+    return (
+      <Card withBorder radius='md' shadow='sm' padding='md' data-testid='visor-material' aria-label={material.titulo}>
+        {contenido}
+      </Card>
+    );
+  }
+
+  return (
+    <Modal
+      opened
+      onClose={onCerrar}
+      size='80rem'
+      centered
+      title={<Text fw={700}>{material.titulo}</Text>}
+      aria-label={material.titulo}
+      closeButtonProps={{ 'aria-label': 'Cerrar' }}
+    >
+      <div data-testid='visor-material'>{contenido}</div>
+    </Modal>
   );
 }
 
@@ -914,10 +1232,16 @@ function PdfPaginado({
   }, [documento, pagina]);
 
   return (
-    <div className='portal-th__visor-pdf' ref={marco} data-testid='pdf-material' data-pagina-pintada={pintada}>
-      {!documento && <p className='portal-th__estado'>Cargando documento…</p>}
+    <Box
+      ref={marco}
+      data-testid='pdf-material'
+      data-pagina-pintada={pintada}
+      h='70vh'
+      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+    >
+      {!documento && <Cargando texto='Cargando documento…' />}
       <canvas ref={lienzo} aria-label={`Página ${pagina}`} />
-    </div>
+    </Box>
   );
 }
 
@@ -960,42 +1284,75 @@ function ListaCursosFormador({
   };
 
   return (
-    <div>
-      <div className='portal-th__formacion-crear'>
-        <input placeholder='Título del curso nuevo' value={titulo} onChange={(e) => setTitulo(e.target.value)} />
-        <input
-          placeholder='Descripción (opcional)'
-          value={descripcion}
-          onChange={(e) => setDescripcion(e.target.value)}
-        />
-        <button type='button' onClick={() => void crear()} disabled={creando || !titulo.trim()}>
-          {creando ? 'Creando…' : '+ Crear curso'}
-        </button>
-      </div>
-      {error && <p className='portal-th__error'>{error}</p>}
+    <Stack gap='md'>
+      <Card withBorder radius='md' shadow='sm' padding='md'>
+        <Group align='flex-end' wrap='wrap' gap='sm'>
+          <TextInput
+            label='Curso nuevo'
+            placeholder='Título del curso nuevo'
+            value={titulo}
+            onChange={(e) => setTitulo(e.currentTarget.value)}
+            style={{ flex: 1, minWidth: 200 }}
+          />
+          <TextInput
+            label='Descripción'
+            placeholder='Descripción (opcional)'
+            value={descripcion}
+            onChange={(e) => setDescripcion(e.currentTarget.value)}
+            style={{ flex: 2, minWidth: 200 }}
+          />
+          <Button leftSection={<IconPlus size={16} />} onClick={() => void crear()} loading={creando} disabled={!titulo.trim()}>
+            Crear curso
+          </Button>
+        </Group>
+      </Card>
+      {error && <AvisoError texto={error} />}
 
       {cursos.length === 0 ? (
-        <p className='portal-th__estado'>Todavía no ha creado ningún curso.</p>
+        <Text size='sm' c='dimmed' ta='center' py='xl'>
+          Todavía no ha creado ningún curso.
+        </Text>
       ) : (
-        <div className='portal-th__curso-grilla'>
+        <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing='md'>
           {cursos.map((c) => (
-            <button type='button' key={c.id} className='portal-th__curso-tarjeta' onClick={() => onGestionar(c.id)}>
-              <strong>
-                {c.titulo} {!c.activo && <span className='portal-th__curso-borrador'>(borrador)</span>}
-              </strong>
-              {c.descripcion && <p>{c.descripcion}</p>}
-              <span className='portal-th__curso-meta'>
-                {c.totalMateriales} material(es) · {c.totalInscritos} inscrito(s)
-              </span>
-            </button>
+            <Card
+              key={c.id}
+              withBorder
+              radius='md'
+              shadow='sm'
+              padding='md'
+              component='button'
+              type='button'
+              onClick={() => onGestionar(c.id)}
+              style={{ textAlign: 'left', cursor: 'pointer' }}
+            >
+              <Stack gap={6}>
+                <Group gap='xs'>
+                  <Text fw={700}>{c.titulo}</Text>
+                  {!c.activo && (
+                    <Badge color='gray' variant='light'>
+                      Borrador
+                    </Badge>
+                  )}
+                </Group>
+                {c.descripcion && (
+                  <Text size='sm' c='dimmed' lineClamp={3}>
+                    {c.descripcion}
+                  </Text>
+                )}
+                <Text size='xs' c='dimmed'>
+                  {c.totalMateriales} material(es) · {c.totalInscritos} inscrito(s)
+                </Text>
+              </Stack>
+            </Card>
           ))}
-        </div>
+        </SimpleGrid>
       )}
-    </div>
+    </Stack>
   );
 }
 
-function VistaCursoFormador({
+export function VistaCursoFormador({
   cursoId,
   onVolver,
   onCambio,
@@ -1078,7 +1435,8 @@ function VistaCursoFormador({
   const mensajeDeSubida = (e: unknown, porDefecto: string) =>
     e instanceof SubidaCancelada ? 'Subida cancelada. No se agregó nada al curso.' : (e as Error)?.message || porDefecto;
 
-  const [tipoNuevo, setTipoNuevo] = useState<'DOCUMENT' | 'LINK' | 'FORM'>('DOCUMENT');
+  // «Video» es un DOCUMENTO de video (MP4): va aparte porque así lo buscan los formadores (Nicolás, 2026-10-26).
+  const [tipoNuevo, setTipoNuevo] = useState<'VIDEO' | 'DOCUMENT' | 'LINK' | 'FORM'>('DOCUMENT');
   const [formularioNuevo, setFormularioNuevo] = useState<{ id: number | null; titulo: string }>({ id: null, titulo: '' });
   const [respuestasDe, setRespuestasDe] = useState<Material | null>(null);
   const [previaDe, setPreviaDe] = useState<Material | null>(null);
@@ -1092,13 +1450,17 @@ function VistaCursoFormador({
     if (!tituloNuevo.trim() && tipoNuevo !== 'FORM') return;
     if (tipoNuevo === 'FORM' && !formularioNuevo.id) return;
     if (tipoNuevo === 'LINK' && !urlNueva.trim()) return;
-    if (tipoNuevo === 'DOCUMENT' && !archivoNuevo) return;
+    if ((tipoNuevo === 'DOCUMENT' || tipoNuevo === 'VIDEO') && !archivoNuevo) return;
+    if (tipoNuevo === 'VIDEO' && archivoNuevo && !archivoNuevo.type.startsWith('video/')) {
+      setErrorAccion('El archivo no es un video. Use un archivo MP4.');
+      return;
+    }
 
     setSubiendo(true);
     setErrorAccion(null);
     try {
       const cuerpo: Record<string, unknown> = {
-        type: tipoNuevo,
+        type: tipoNuevo === 'VIDEO' ? 'DOCUMENT' : tipoNuevo,
         title: tituloNuevo,
         required: String(obligatorioNuevo),
       };
@@ -1269,7 +1631,7 @@ function VistaCursoFormador({
     }
   };
 
-  if (error) return <p className='portal-th__error'>{error}</p>;
+  if (error) return <AvisoError texto={error} />;
   const restablecerEstudiante = async (fila: FilaRoster) => {
     setTrabajandoRestablecer(true);
     setErrorAccion(null);
@@ -1325,22 +1687,20 @@ function VistaCursoFormador({
     }
   };
 
-  if (!detalle || !roster) return <p className='portal-th__estado'>Cargando…</p>;
+  if (!detalle || !roster) return <Cargando texto='Cargando…' />;
 
   return (
-    <div className='portal-th__curso-detalle'>
-      <button type='button' className='portal-th__volver' onClick={onVolver}>
-        ← Volver a Formación
-      </button>
-      {errorAccion && (
-        <p className='portal-th__error portal-th__error--accion' role='alert'>
-          {errorAccion}
-        </p>
-      )}
+    <Stack gap='md'>
+      <Group>
+        <Button variant='subtle' leftSection={<IconArrowLeft size={16} />} onClick={onVolver}>
+          Volver a Formación
+        </Button>
+      </Group>
+      {errorAccion && <AvisoError texto={errorAccion} />}
       {avisoAccion && (
-        <p className='portal-th__aviso portal-th__aviso--accion' role='status' data-testid='aviso-restablecer'>
+        <Alert color='green' role='status' data-testid='aviso-restablecer'>
           {avisoAccion}
-        </p>
+        </Alert>
       )}
       {subida && <ProgresoSubida subida={subida} onCancelar={() => cancelarSubidaRef.current?.abort()} />}
       <Modal
@@ -1394,167 +1754,206 @@ function VistaCursoFormador({
           </Group>
         </Stack>
       </Modal>
-      {editandoCurso ? (
-        <div className='portal-th__formacion-crear portal-th__formacion-editar'>
-          <input
-            aria-label='Título del curso'
-            placeholder='Título del curso'
-            value={tituloCurso}
-            maxLength={255}
-            onChange={(e) => setTituloCurso(e.target.value)}
-          />
-          <textarea
-            aria-label='Descripción del curso'
-            placeholder='Descripción (opcional)'
-            value={descripcionCurso}
-            maxLength={4000}
-            rows={3}
-            onChange={(e) => setDescripcionCurso(e.target.value)}
-          />
-          <div className='portal-th__formacion-editar-acciones'>
-            <button type='button' onClick={() => void guardarCurso()} disabled={guardandoCurso}>
-              {guardandoCurso ? 'Guardando…' : 'Guardar'}
-            </button>
-            <button
-              type='button'
-              className='portal-th__boton-secundario'
-              onClick={() => setEditandoCurso(false)}
-              disabled={guardandoCurso}
-            >
-              Cancelar
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className='portal-th__formacion-gestion-barra'>
-          <div className='portal-th__formacion-titulo'>
-            <h3>{detalle.curso.titulo}</h3>
-            {modoEdicion && (
-              <button
-                type='button'
-                className='portal-th__icono-boton'
-                title='Editar título y descripción'
-                aria-label='Editar título y descripción'
-                onClick={empezarEdicionCurso}
-              >
-                ✎
-              </button>
-            )}
-          </div>
-          <div className='portal-th__formacion-gestion-acciones'>
-            {modoEdicion && (
-              <button type='button' onClick={() => void publicar(!detalle.curso.activo)}>
-                {detalle.curso.activo ? 'Pasar a borrador' : 'Publicar curso'}
-              </button>
-            )}
-            {modoEdicion && detalle.esFormador && (
-              <Button
-                color='red'
-                variant='light'
-                onClick={() => {
-                  setErrorEliminar(null);
-                  setConfirmarEliminar(true);
-                }}
-                data-testid='eliminar-curso'
-              >
-                Eliminar curso
-              </Button>
-            )}
-            <button
-              type='button'
-              className={modoEdicion ? 'portal-th__formacion-toggle-activo' : ''}
-              aria-expanded={modoEdicion}
-              onClick={() => {
-                if (modoEdicion) setEditandoCurso(false);
-                setModoEdicion(!modoEdicion);
-              }}
-              data-testid='alternar-edicion'
-            >
-              {modoEdicion ? 'Cerrar edición' : 'Editar'}
-            </button>
-          </div>
-        </div>
-      )}
-      {!editandoCurso && detalle.curso.descripcion && (
-        <p className='portal-th__formacion-descripcion'>{detalle.curso.descripcion}</p>
-      )}
-      {!detalle.curso.activo && (
-        <p className='portal-th__aviso'>Este curso está en borrador: los estudiantes todavía no lo ven.</p>
-      )}
+
+      <Card withBorder radius='md' shadow='sm' padding='lg'>
+        <Stack gap='sm'>
+          {editandoCurso ? (
+            <Stack gap='sm'>
+              <TextInput
+                aria-label='Título del curso'
+                label='Título del curso'
+                value={tituloCurso}
+                maxLength={255}
+                onChange={(e) => setTituloCurso(e.currentTarget.value)}
+              />
+              <Textarea
+                aria-label='Descripción del curso'
+                label='Descripción'
+                placeholder='Descripción (opcional)'
+                value={descripcionCurso}
+                maxLength={4000}
+                autosize
+                minRows={3}
+                onChange={(e) => setDescripcionCurso(e.currentTarget.value)}
+              />
+              <Group gap='sm'>
+                <Button onClick={() => void guardarCurso()} loading={guardandoCurso}>
+                  Guardar
+                </Button>
+                <Button variant='default' onClick={() => setEditandoCurso(false)} disabled={guardandoCurso}>
+                  Cancelar
+                </Button>
+              </Group>
+            </Stack>
+          ) : (
+            <Group justify='space-between' wrap='wrap' gap='sm'>
+              <Group gap='xs' wrap='nowrap' style={{ minWidth: 0 }}>
+                <Title order={3}>{detalle.curso.titulo}</Title>
+                {!detalle.curso.activo && (
+                  <Badge color='gray' variant='light'>
+                    Borrador
+                  </Badge>
+                )}
+                {modoEdicion && (
+                  <Tooltip label='Editar título y descripción' withArrow>
+                    <ActionIcon variant='subtle' color='gray' aria-label='Editar título y descripción' onClick={empezarEdicionCurso}>
+                      <IconPencil size={16} />
+                    </ActionIcon>
+                  </Tooltip>
+                )}
+              </Group>
+              <Group gap='xs'>
+                {modoEdicion && (
+                  <Button variant='light' onClick={() => void publicar(!detalle.curso.activo)}>
+                    {detalle.curso.activo ? 'Pasar a borrador' : 'Publicar curso'}
+                  </Button>
+                )}
+                {modoEdicion && detalle.esFormador && (
+                  <Button
+                    color='red'
+                    variant='light'
+                    onClick={() => {
+                      setErrorEliminar(null);
+                      setConfirmarEliminar(true);
+                    }}
+                    data-testid='eliminar-curso'
+                  >
+                    Eliminar curso
+                  </Button>
+                )}
+                {!modoEdicion && (
+                  <Button
+                    leftSection={<IconPlus size={16} />}
+                    onClick={() => {
+                      setModoEdicion(true);
+                      setTipoNuevo('VIDEO');
+                      window.requestAnimationFrame(() =>
+                        document.querySelector('[data-testid="agregar-clase"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                      );
+                    }}
+                    data-testid='agregar-video'
+                  >
+                    Agregar video o clase
+                  </Button>
+                )}
+                <Button
+                  variant={modoEdicion ? 'filled' : 'default'}
+                  leftSection={<IconPencil size={16} />}
+                  aria-expanded={modoEdicion}
+                  onClick={() => {
+                    if (modoEdicion) setEditandoCurso(false);
+                    setModoEdicion(!modoEdicion);
+                  }}
+                  data-testid='alternar-edicion'
+                >
+                  {modoEdicion ? 'Cerrar edición' : 'Editar'}
+                </Button>
+              </Group>
+            </Group>
+          )}
+          {!editandoCurso && detalle.curso.descripcion && (
+            <Text size='sm' c='dimmed'>
+              {detalle.curso.descripcion}
+            </Text>
+          )}
+          {!detalle.curso.activo && (
+            <Alert color='yellow'>Este curso está en borrador: los estudiantes todavía no lo ven.</Alert>
+          )}
+        </Stack>
+      </Card>
 
       {modoEdicion && (
-      <div data-testid='menu-edicion'>
-      <h4>Materiales</h4>
-      <ul className='portal-th__material-lista'>
-        {detalle.materiales.map((m, i) => (
-          <FilaMaterialFormador
-            key={m.id}
-            cursoId={detalle.curso.id}
-            material={m}
-            esPrimero={i === 0}
-            esUltimo={i === detalle.materiales.length - 1}
-            onGuardar={guardarMaterial}
-            onReemplazar={reemplazarArchivo}
-            onMover={moverMaterial}
-            onQuitar={quitarMaterial}
-            onRecargar={cargar}
-            puedeVerRespuestas={detalle.puedeMarcarManual === true}
-            onVerRespuestas={setRespuestasDe}
-            onVerPrevia={setPreviaDe}
-          />
-        ))}
-        {detalle.materiales.length === 0 && <p className='portal-th__estado'>Todavía no hay materiales.</p>}
-      </ul>
+        <Card withBorder radius='md' shadow='sm' padding='lg' data-testid='menu-edicion'>
+          <Stack gap='sm'>
+            <Title order={4}>Clases del curso</Title>
+            <Text size='sm' c='dimmed'>
+              Cada clase es un video, un documento, un enlace o un formulario. Ordénelas con las flechas; así aparecen en el
+              temario.
+            </Text>
+            <Stack gap='xs' component='ul' style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+              {detalle.materiales.map((m, i) => (
+                <FilaMaterialFormador
+                  key={m.id}
+                  cursoId={detalle.curso.id}
+                  material={m}
+                  esPrimero={i === 0}
+                  esUltimo={i === detalle.materiales.length - 1}
+                  onGuardar={guardarMaterial}
+                  onReemplazar={reemplazarArchivo}
+                  onMover={moverMaterial}
+                  onQuitar={quitarMaterial}
+                  onRecargar={cargar}
+                  puedeVerRespuestas={detalle.puedeMarcarManual === true}
+                  onVerRespuestas={setRespuestasDe}
+                  onVerPrevia={setPreviaDe}
+                />
+              ))}
+              {detalle.materiales.length === 0 && (
+                <Text size='sm' c='dimmed'>
+                  Todavía no hay clases. Agregue la primera abajo.
+                </Text>
+              )}
+            </Stack>
 
-      <div className='portal-th__formacion-crear'>
-        <div className='portal-th__formacion-toggle'>
-          <button
-            type='button'
-            className={tipoNuevo === 'DOCUMENT' ? 'portal-th__formacion-toggle-activo' : ''}
-            onClick={() => setTipoNuevo('DOCUMENT')}
-          >
-            Documento
-          </button>
-          <button
-            type='button'
-            className={tipoNuevo === 'LINK' ? 'portal-th__formacion-toggle-activo' : ''}
-            onClick={() => setTipoNuevo('LINK')}
-          >
-            Enlace
-          </button>
-          <button
-            type='button'
-            className={tipoNuevo === 'FORM' ? 'portal-th__formacion-toggle-activo' : ''}
-            onClick={() => setTipoNuevo('FORM')}
-          >
-            Formulario
-          </button>
-        </div>
-        <input
-          placeholder={tipoNuevo === 'FORM' ? 'Título (opcional)' : 'Título del material'}
-          value={tituloNuevo}
-          onChange={(e) => setTituloNuevo(e.target.value)}
-        />
-        {tipoNuevo === 'FORM' ? (
-          <SelectorFormulario valor={formularioNuevo.id} onCambio={(id, titulo) => setFormularioNuevo({ id, titulo })} />
-        ) : tipoNuevo === 'LINK' ? (
-          <input
-            placeholder='https://…'
-            value={urlNueva}
-            onChange={(e) => setUrlNueva(e.target.value)}
-          />
-        ) : (
-          <input type='file' onChange={(e) => setArchivoNuevo(e.currentTarget.files?.[0] ?? null)} />
-        )}
-        <label className='portal-th__formacion-obligatorio'>
-          <input type='checkbox' checked={obligatorioNuevo} onChange={(e) => setObligatorioNuevo(e.target.checked)} />
-          Obligatorio para completar el curso
-        </label>
-        <button type='button' onClick={() => void agregarMaterial()} disabled={subiendo}>
-          {subiendo ? (subida ? 'Subiendo…' : 'Agregando…') : '+ Agregar material'}
-        </button>
-      </div>
-      </div>
+            <Paper withBorder radius='md' p='md' data-testid='agregar-clase'>
+              <Stack gap='sm'>
+                <Title order={5}>Agregar una clase</Title>
+                <SegmentedControl
+                  value={tipoNuevo}
+                  onChange={(v) => {
+                    setTipoNuevo(v as 'VIDEO' | 'DOCUMENT' | 'LINK' | 'FORM');
+                    setArchivoNuevo(null);
+                  }}
+                  data={[
+                    { value: 'VIDEO', label: 'Video' },
+                    { value: 'DOCUMENT', label: 'Documento' },
+                    { value: 'LINK', label: 'Enlace' },
+                    { value: 'FORM', label: 'Formulario' },
+                  ]}
+                />
+                <Text size='xs' c='dimmed'>
+                  {tipoNuevo === 'VIDEO'
+                    ? 'Suba el video en MP4. Se guarda en SharePoint (carpeta FORMACION) y el estudiante lo ve dentro del curso, sin poder adelantarlo.'
+                    : tipoNuevo === 'DOCUMENT'
+                      ? 'PDF, Word, Excel, PowerPoint o imagen. Los PDF se leen página por página dentro del curso.'
+                      : tipoNuevo === 'LINK'
+                        ? 'Un enlace externo (por ejemplo, un video de YouTube o una página). Se abre en otra pestaña.'
+                        : 'Una evaluación o encuesta propia de SynerLink, o importada de Microsoft Forms.'}
+                </Text>
+                <TextInput
+                  label='Título de la clase'
+                  placeholder={tipoNuevo === 'FORM' ? 'Título (opcional)' : tipoNuevo === 'VIDEO' ? 'Ej.: Bienvenida a la compañía' : 'Título del material'}
+                  value={tituloNuevo}
+                  onChange={(e) => setTituloNuevo(e.currentTarget.value)}
+                />
+                {tipoNuevo === 'FORM' ? (
+                  <SelectorFormulario valor={formularioNuevo.id} onCambio={(id, titulo) => setFormularioNuevo({ id, titulo })} />
+                ) : tipoNuevo === 'LINK' ? (
+                  <TextInput placeholder='https://…' value={urlNueva} onChange={(e) => setUrlNueva(e.currentTarget.value)} />
+                ) : (
+                  <FileInput
+                    label={tipoNuevo === 'VIDEO' ? 'Archivo de video' : 'Archivo'}
+                    placeholder={tipoNuevo === 'VIDEO' ? 'Seleccione el video (MP4)' : 'Seleccione el archivo'}
+                    accept={tipoNuevo === 'VIDEO' ? 'video/mp4' : undefined}
+                    value={archivoNuevo}
+                    onChange={setArchivoNuevo}
+                    clearable
+                  />
+                )}
+                <Checkbox
+                  checked={obligatorioNuevo}
+                  onChange={(e) => setObligatorioNuevo(e.currentTarget.checked)}
+                  label='Obligatorio para completar el curso'
+                />
+                <Group>
+                  <Button leftSection={<IconPlus size={16} />} onClick={() => void agregarMaterial()} loading={subiendo}>
+                    {subiendo ? (subida ? 'Subiendo…' : 'Agregando…') : 'Agregar clase'}
+                  </Button>
+                </Group>
+              </Stack>
+            </Paper>
+          </Stack>
+        </Card>
       )}
 
       {respuestasDe && (
@@ -1564,133 +1963,143 @@ function VistaCursoFormador({
         <PreviaDeMaterialFormulario formularioId={previaDe.formularioId} titulo={previaDe.titulo} onCerrar={() => setPreviaDe(null)} />
       )}
 
-      <div className='portal-th__progreso-cabecera'>
-        <h4>Progreso de los estudiantes</h4>
-        <button
-          type='button'
-          className='portal-th__boton-secundario'
-          aria-expanded={invitando}
-          onClick={() => {
-            setResultadoInvitacion(null);
-            setInvitando(!invitando);
-          }}
-          data-testid='invitar-curso'
-        >
-          Invitar al Curso
-        </button>
-      </div>
-      {invitando && (
-        <form
-          ref={panelInvitar}
-          className='portal-th__invitar'
-          data-testid='invitar-form'
-          onSubmit={(ev) => {
-            ev.preventDefault();
-            void enviarInvitacion();
-          }}
-        >
-          {/* El resultado va ARRIBA del formulario y con color, a la vista donde se hizo clic. */}
-          {resultadoInvitacion && (
-            <p
-              className={`portal-th__invitar-aviso portal-th__invitar-aviso--${resultadoInvitacion.tipo}`}
-              role={resultadoInvitacion.tipo === 'error' ? 'alert' : 'status'}
-              data-testid='invitar-aviso'
+      <Card withBorder radius='md' shadow='sm' padding='lg'>
+        <Stack gap='sm'>
+          <Group justify='space-between' wrap='wrap'>
+            <Title order={4}>Progreso de los estudiantes</Title>
+            <Button
+              variant='default'
+              leftSection={<IconUserPlus size={16} />}
+              aria-expanded={invitando}
+              onClick={() => {
+                setResultadoInvitacion(null);
+                setInvitando(!invitando);
+              }}
+              data-testid='invitar-curso'
             >
-              {resultadoInvitacion.texto}
-            </p>
+              Invitar al Curso
+            </Button>
+          </Group>
+          {invitando && (
+            <Paper
+              withBorder
+              radius='md'
+              p='md'
+              component='form'
+              ref={panelInvitar}
+              data-testid='invitar-form'
+              onSubmit={(ev: React.FormEvent<HTMLFormElement>) => {
+                ev.preventDefault();
+                void enviarInvitacion();
+              }}
+            >
+              <Stack gap='sm'>
+                {/* El resultado va ARRIBA del formulario y con color, a la vista donde se hizo clic. */}
+                {resultadoInvitacion && (
+                  <Alert
+                    color={resultadoInvitacion.tipo === 'error' ? 'red' : 'green'}
+                    role={resultadoInvitacion.tipo === 'error' ? 'alert' : 'status'}
+                    data-tipo={resultadoInvitacion.tipo}
+                    data-testid='invitar-aviso'
+                  >
+                    {resultadoInvitacion.texto}
+                  </Alert>
+                )}
+                <TextInput
+                  label='Correo de la persona a invitar'
+                  type='email'
+                  inputMode='email'
+                  autoComplete='off'
+                  placeholder='nombre@gsslatam.com'
+                  maxLength={255}
+                  value={correoInvitar}
+                  onChange={(e) => setCorreoInvitar(e.currentTarget.value)}
+                  data-testid='invitar-correo'
+                  description='Recibirá un mensaje con el enlace al curso y quedará inscrita.'
+                  autoFocus
+                />
+                <Group justify='flex-end' gap='sm'>
+                  <Button variant='default' onClick={() => setInvitando(false)} disabled={enviandoInvitacion}>
+                    Cerrar
+                  </Button>
+                  <Button type='submit' loading={enviandoInvitacion} data-testid='invitar-enviar'>
+                    Enviar
+                  </Button>
+                </Group>
+              </Stack>
+            </Paper>
           )}
-          <label>
-            Correo de la persona a invitar
-            <input
-              type='email'
-              inputMode='email'
-              autoComplete='off'
-              placeholder='nombre@gsslatam.com'
-              maxLength={255}
-              value={correoInvitar}
-              onChange={(e) => setCorreoInvitar(e.target.value)}
-              data-testid='invitar-correo'
-              autoFocus
-            />
-          </label>
-          <p className='portal-th__estado'>Recibirá un mensaje con el enlace al curso y quedará inscrita.</p>
-          <div className='portal-th__invitar-acciones'>
-            <button type='button' className='portal-th__boton-secundario' onClick={() => setInvitando(false)} disabled={enviandoInvitacion}>
-              Cerrar
-            </button>
-            <button type='submit' disabled={enviandoInvitacion} data-testid='invitar-enviar'>
-              {enviandoInvitacion ? 'Enviando…' : 'Enviar'}
-            </button>
-          </div>
-        </form>
-      )}
-      {roster.length === 0 ? (
-        <p className='portal-th__estado'>Todavía no hay estudiantes inscritos.</p>
-      ) : (
-        <div className='portal-th__correos portal-th__roster-contenedor'>
-          <table className='portal-th__correos-tabla portal-th__roster-tabla'>
-            <thead>
-              <tr>
-                <th>Nombre</th>
-                <th>Correo</th>
-                <th>Progreso</th>
-                <th>Certificado</th>
-                {detalle.puedeMarcarManual === true && <th>Acciones</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {roster.map((f) => (
-                <tr key={f.correo}>
-                  <td>{f.nombre}</td>
-                  <td>{f.correo}</td>
-                  <td>
-                    <BarraProgreso porcentaje={f.porcentaje} />
-                  </td>
-                  <td>
-                    {f.certificado ? (
-                      <a href={certificadoUrl(f.certificado)} target='_blank' rel='noopener noreferrer'>
-                        Ver
-                      </a>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                  {detalle.puedeMarcarManual === true && (
-                    <td>
-                      {restableciendo === f.correo ? (
-                        <span className='portal-th__restablecer-confirmar' data-testid='restablecer-confirmar'>
-                          <span>¿Borrar su progreso, sus respuestas y su certificado?</span>
-                          <Button size='xs' color='red' loading={trabajandoRestablecer} onClick={() => void restablecerEstudiante(f)} data-testid='restablecer-si'>
-                            Sí, restablecer
-                          </Button>
-                          <Button size='xs' variant='default' disabled={trabajandoRestablecer} onClick={() => setRestableciendo(null)}>
-                            No
-                          </Button>
-                        </span>
-                      ) : (
-                        <Button
-                          size='xs'
-                          variant='default'
-                          aria-label={`Restablecer el curso para ${f.nombre}`}
-                          onClick={() => {
-                            setAvisoAccion(null);
-                            setErrorAccion(null);
-                            setRestableciendo(f.correo);
-                          }}
-                          data-testid='restablecer-curso'
-                        >
-                          Restablecer
-                        </Button>
+          {roster.length === 0 ? (
+            <Text size='sm' c='dimmed' ta='center' py='md'>
+              Todavía no hay estudiantes inscritos.
+            </Text>
+          ) : (
+            <Box className='overflow-x-auto'>
+              <Table striped highlightOnHover>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Nombre</Table.Th>
+                    <Table.Th>Correo</Table.Th>
+                    <Table.Th>Progreso</Table.Th>
+                    <Table.Th>Certificado</Table.Th>
+                    {detalle.puedeMarcarManual === true && <Table.Th>Acciones</Table.Th>}
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {roster.map((f) => (
+                    <Table.Tr key={f.correo}>
+                      <Table.Td>{f.nombre}</Table.Td>
+                      <Table.Td>{f.correo}</Table.Td>
+                      <Table.Td style={{ minWidth: 160 }}>
+                        <BarraProgreso porcentaje={f.porcentaje} />
+                      </Table.Td>
+                      <Table.Td>
+                        {f.certificado ? (
+                          <Anchor href={certificadoUrl(f.certificado)} target='_blank' rel='noopener noreferrer' size='sm'>
+                            Ver
+                          </Anchor>
+                        ) : (
+                          '—'
+                        )}
+                      </Table.Td>
+                      {detalle.puedeMarcarManual === true && (
+                        <Table.Td>
+                          {restableciendo === f.correo ? (
+                            <Group gap='xs' wrap='wrap' data-testid='restablecer-confirmar'>
+                              <Text size='xs'>¿Borrar su progreso, sus respuestas y su certificado?</Text>
+                              <Button size='xs' color='red' loading={trabajandoRestablecer} onClick={() => void restablecerEstudiante(f)} data-testid='restablecer-si'>
+                                Sí, restablecer
+                              </Button>
+                              <Button size='xs' variant='default' disabled={trabajandoRestablecer} onClick={() => setRestableciendo(null)}>
+                                No
+                              </Button>
+                            </Group>
+                          ) : (
+                            <Button
+                              size='xs'
+                              variant='default'
+                              aria-label={`Restablecer el curso para ${f.nombre}`}
+                              onClick={() => {
+                                setAvisoAccion(null);
+                                setErrorAccion(null);
+                                setRestableciendo(f.correo);
+                              }}
+                              data-testid='restablecer-curso'
+                            >
+                              Restablecer
+                            </Button>
+                          )}
+                        </Table.Td>
                       )}
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Box>
+          )}
+        </Stack>
+      </Card>
+    </Stack>
   );
 }
 
@@ -1774,138 +2183,121 @@ function FilaMaterialFormador({
 
   if (!editando) {
     return (
-      <li className='portal-th__material-item'>
-        <div className='portal-th__material-info'>
-          {m.tipo === 'FORM' ? (
-            <button type='button' className='portal-th__material-abrir' onClick={() => onVerPrevia?.(m)}>
-              {m.titulo}
-            </button>
-          ) : (
-            <a
-              href={m.tipo === 'LINK' ? (m.url ?? '#') : materialUrl(cursoId, m.id)}
-              target='_blank'
-              rel='noopener noreferrer'
-            >
-              {m.titulo}
-            </a>
+      <Paper component='li' withBorder radius='md' p='sm' data-testid='material-item'>
+        <Group justify='space-between' wrap='nowrap' gap='sm'>
+          <Group gap='sm' wrap='nowrap' style={{ minWidth: 0 }}>
+          {m.tipo === 'DOCUMENT' && (m.mime ?? '').toLowerCase().startsWith('video/') && (
+            <MiniaturaVideo url={materialUrl(cursoId, m.id)} titulo={m.titulo} ancho={96} />
           )}
-          <span className='portal-th__material-tipo'>
-            {m.tipo === 'LINK' ? 'Enlace' : m.tipo === 'FORM' ? 'Formulario propio' : 'Documento'}
-            {m.tipo === 'DOCUMENT' && m.nombreArchivo && ` · ${m.nombreArchivo}`}
-            {!m.obligatorio && ' · opcional'}
-          </span>
-        </div>
-        <div className='portal-th__material-acciones'>
-          {m.tipo === 'FORM' && puedeVerRespuestas && (
-            <Button size='xs' variant='default' leftSection={<IconTable size={14} />} onClick={() => onVerRespuestas?.(m)}>
-              Respuestas
-            </Button>
-          )}
-          <button
-            type='button'
-            className='portal-th__icono-boton'
-            title='Subir'
-            aria-label='Subir un puesto'
-            disabled={esPrimero}
-            onClick={() => void onMover(m.id, 'arriba')}
-          >
-            ↑
-          </button>
-          <button
-            type='button'
-            className='portal-th__icono-boton'
-            title='Bajar'
-            aria-label='Bajar un puesto'
-            disabled={esUltimo}
-            onClick={() => void onMover(m.id, 'abajo')}
-          >
-            ↓
-          </button>
-          <button type='button' className='portal-th__icono-boton' title='Editar' aria-label='Editar material' onClick={empezar}>
-            ✎
-          </button>
-          <button
-            type='button'
-            className='portal-th__icono-boton'
-            title='Quitar'
-            aria-label='Quitar material'
-            onClick={() => void onQuitar(m.id)}
-          >
-            ✕
-          </button>
-        </div>
-      </li>
+          <Stack gap={0} style={{ minWidth: 0 }}>
+            {m.tipo === 'FORM' ? (
+              <Anchor component='button' type='button' fw={600} ta='left' onClick={() => onVerPrevia?.(m)}>
+                {m.titulo}
+              </Anchor>
+            ) : (
+              <Anchor
+                href={m.tipo === 'LINK' ? (m.url ?? '#') : materialUrl(cursoId, m.id)}
+                target='_blank'
+                rel='noopener noreferrer'
+                fw={600}
+              >
+                {m.titulo}
+              </Anchor>
+            )}
+            <Text size='xs' c='dimmed'>
+              {m.tipo === 'LINK' ? 'Enlace' : m.tipo === 'FORM' ? 'Formulario propio' : 'Documento'}
+              {m.tipo === 'DOCUMENT' && m.nombreArchivo && ` · ${m.nombreArchivo}`}
+              {!m.obligatorio && ' · opcional'}
+            </Text>
+          </Stack>
+          </Group>
+          <Group gap={4} wrap='nowrap'>
+            {m.tipo === 'FORM' && puedeVerRespuestas && (
+              <Button size='xs' variant='default' leftSection={<IconTable size={14} />} onClick={() => onVerRespuestas?.(m)}>
+                Respuestas
+              </Button>
+            )}
+            <Tooltip label='Subir' withArrow>
+              <ActionIcon variant='subtle' color='gray' aria-label='Subir un puesto' disabled={esPrimero} onClick={() => void onMover(m.id, 'arriba')}>
+                <IconArrowUp size={16} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label='Bajar' withArrow>
+              <ActionIcon variant='subtle' color='gray' aria-label='Bajar un puesto' disabled={esUltimo} onClick={() => void onMover(m.id, 'abajo')}>
+                <IconArrowDown size={16} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label='Editar' withArrow>
+              <ActionIcon variant='subtle' color='gray' aria-label='Editar material' onClick={empezar}>
+                <IconPencil size={16} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label='Quitar' withArrow>
+              <ActionIcon variant='subtle' color='red' aria-label='Quitar material' onClick={() => void onQuitar(m.id)}>
+                <IconX size={16} />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
+        </Group>
+      </Paper>
     );
   }
 
   return (
-    <li className='portal-th__material-item portal-th__material-item--editando'>
-      <div className='portal-th__formacion-crear portal-th__formacion-editar'>
-        <div className='portal-th__formacion-toggle' hidden={m.tipo === 'FORM'}>
-          <button
-            type='button'
-            className={tipo === 'DOCUMENT' ? 'portal-th__formacion-toggle-activo' : ''}
-            onClick={() => setTipo('DOCUMENT')}
-          >
-            Documento
-          </button>
-          <button
-            type='button'
-            className={tipo === 'LINK' ? 'portal-th__formacion-toggle-activo' : ''}
-            onClick={() => setTipo('LINK')}
-          >
-            Enlace
-          </button>
-        </div>
-        <input
+    <Paper component='li' withBorder radius='md' p='md' data-testid='material-item'>
+      <Stack gap='sm'>
+        {m.tipo !== 'FORM' && (
+          <SegmentedControl
+            value={tipo}
+            onChange={(v) => setTipo(v as 'DOCUMENT' | 'LINK')}
+            data={[
+              { value: 'DOCUMENT', label: 'Documento' },
+              { value: 'LINK', label: 'Enlace' },
+            ]}
+          />
+        )}
+        <TextInput
           aria-label='Título del material'
           placeholder='Título del material'
           value={titulo}
           maxLength={255}
-          onChange={(e) => setTitulo(e.target.value)}
+          onChange={(e) => setTitulo(e.currentTarget.value)}
         />
         {m.tipo === 'FORM' ? (
-          <p className='portal-th__estado'>Formulario propio: las preguntas se editan en «Formularios» al agregar un material.</p>
+          <Text size='sm' c='dimmed'>
+            Formulario propio: las preguntas se editan en «Formularios» al agregar un material.
+          </Text>
         ) : tipo === 'LINK' ? (
-          <input aria-label='Enlace' placeholder='https://…' value={url} onChange={(e) => setUrl(e.target.value)} />
+          <TextInput aria-label='Enlace' placeholder='https://…' value={url} onChange={(e) => setUrl(e.currentTarget.value)} />
         ) : (
-          <label className='portal-th__formacion-archivo'>
-            <span>
-              {m.tipo === 'DOCUMENT'
-                ? `Reemplazar archivo (actual: ${m.nombreArchivo ?? 'sin nombre'})`
-                : 'Archivo del documento'}
-            </span>
-            <input type='file' onChange={(e) => setArchivo(e.currentTarget.files?.[0] ?? null)} />
-          </label>
+          <FileInput
+            label={m.tipo === 'DOCUMENT' ? `Reemplazar archivo (actual: ${m.nombreArchivo ?? 'sin nombre'})` : 'Archivo del documento'}
+            placeholder='Seleccione el archivo'
+            value={archivo}
+            onChange={setArchivo}
+            clearable
+          />
         )}
-        <label className='portal-th__formacion-obligatorio'>
-          <input type='checkbox' checked={obligatorio} onChange={(e) => setObligatorio(e.target.checked)} />
-          Obligatorio para completar el curso
-        </label>
+        <Checkbox
+          checked={obligatorio}
+          onChange={(e) => setObligatorio(e.currentTarget.checked)}
+          label='Obligatorio para completar el curso'
+        />
         {(archivo || (tipo === 'LINK' && m.tipo === 'DOCUMENT')) && (
-          <p className='portal-th__aviso'>
-            El archivo anterior se moverá a la carpeta FORMACION/ELIMINADOS de SharePoint (no se borra). Quien ya
-            había completado este material conserva su avance.
-          </p>
+          <Alert color='yellow'>
+            El archivo anterior se moverá a la carpeta FORMACION/ELIMINADOS de SharePoint (no se borra). Quien ya había
+            completado este material conserva su avance.
+          </Alert>
         )}
-        <div className='portal-th__formacion-editar-acciones'>
-          <button
-            type='button'
-            onClick={() => void guardar()}
-            disabled={guardando || !titulo.trim() || faltaArchivo || faltaUrl}
-          >
-            {guardando ? 'Guardando…' : 'Guardar'}
-          </button>
-          <button
-            type='button'
-            className='portal-th__boton-secundario'
-            onClick={() => setEditando(false)}
-            disabled={guardando}
-          >
+        <Group gap='sm'>
+          <Button onClick={() => void guardar()} loading={guardando} disabled={!titulo.trim() || faltaArchivo || faltaUrl}>
+            Guardar
+          </Button>
+          <Button variant='default' onClick={() => setEditando(false)} disabled={guardando}>
             Cancelar
-          </button>
-        </div>
-      </div>
-    </li>
+          </Button>
+        </Group>
+      </Stack>
+    </Paper>
   );
 }

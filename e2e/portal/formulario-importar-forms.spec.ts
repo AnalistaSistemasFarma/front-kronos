@@ -51,10 +51,10 @@ async function preparar(page: Page, opciones: { terminar: 'listo' | 'error' }) {
 
 async function abrirConstructor(page: Page, tipo: 'encuesta' | 'evaluacion') {
   await page.goto('/portal/formacion');
-  await page.getByRole('button', { name: 'Vista formador' }).click();
+  await page.locator('label').filter({ hasText: /^Vista formador$/ }).click();
   await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
   await page.getByTestId('alternar-edicion').click();
-  await page.getByRole('button', { name: 'Formulario', exact: true }).click();
+  await page.locator('label').filter({ hasText: /^Formulario$/ }).click();
   await page.getByTestId(tipo === 'evaluacion' ? 'crear-evaluacion' : 'crear-encuesta').click();
   const c = page.getByTestId('constructor-formulario');
   await expect(c).toBeVisible();

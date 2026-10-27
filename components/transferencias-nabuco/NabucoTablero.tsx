@@ -6,7 +6,9 @@ import { IconBan, IconRefresh, IconSend } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import SgcSelect from '../sgc/SgcSelect';
 import { ESTADO_COLOR, ESTADO_LABEL, NABUCO_ESTADOS, type NabucoEstado } from '../../lib/transferencias-nabuco/constants';
-import { errorTexto, fmtFechaHora, nabucoSend, useNabucoFetch, type NabucoCompany } from './client';
+import type { DiagnosticoNabuco } from '../../lib/transferencias-nabuco/diagnostico';
+import { diagnosticoDe, errorTexto, fmtFechaHora, leerRespuesta, nabucoSend, useNabucoFetch, type NabucoCompany } from './client';
+import NabucoDiagnostico, { RespuestaGuardada } from './NabucoDiagnostico';
 
 interface Envio {
   id_envio: number;
@@ -58,6 +60,7 @@ export default function NabucoTablero({ company }: { company: NabucoCompany }) {
   const [hasta, setHasta] = useState('');
   const [detalle, setDetalle] = useState<Detalle | null>(null);
   const [ocupado, setOcupado] = useState(false);
+  const [fallo, setFallo] = useState<DiagnosticoNabuco | null>(null);
   const qs = new URLSearchParams({ company: String(company.idCompany) });
   if (estado) qs.set('estado', estado);
   if (config) qs.set('config', config);
@@ -69,9 +72,8 @@ export default function NabucoTablero({ company }: { company: NabucoCompany }) {
 
   const abrir = async (id: number) => {
     try {
-      const r = await fetch(`/api/transferencias-nabuco/envios/${id}`, { cache: 'no-store' });
-      const b = await r.json();
-      if (!r.ok) throw new Error(b.error);
+      const b = await leerRespuesta<{ envio: Detalle }>(await fetch(`/api/transferencias-nabuco/envios/${id}`, { cache: 'no-store' }));
+      setFallo(null);
       setDetalle(b.envio);
     } catch (e) {
       toast.error(errorTexto(e));
@@ -87,6 +89,7 @@ export default function NabucoTablero({ company }: { company: NabucoCompany }) {
       void reload();
     } catch (e) {
       toast.error(errorTexto(e));
+      setFallo(diagnosticoDe(e));
     } finally {
       setOcupado(false);
     }
@@ -192,14 +195,11 @@ export default function NabucoTablero({ company }: { company: NabucoCompany }) {
               {detalle.proximo_intento && <Text size='sm' c='dimmed'>{`Próximo intento: ${fmtFechaHora(detalle.proximo_intento)}`}</Text>}
               {detalle.usuario_accion && <Text size='sm' c='dimmed'>{`Última acción manual: ${detalle.usuario_accion}`}</Text>}
             </Group>
-            {detalle.error && <Alert color='red'>{detalle.error}</Alert>}
+            <RespuestaGuardada error={detalle.error} respuesta={detalle.respuesta} />
+            {fallo && <NabucoDiagnostico diagnostico={fallo} titulo='La acción falló' />}
             <Text fw={600}>Payload</Text>
             <ScrollArea.Autosize mah={260}>
               <Code block>{bonito(detalle.payload)}</Code>
-            </ScrollArea.Autosize>
-            <Text fw={600}>Respuesta de Nabuco</Text>
-            <ScrollArea.Autosize mah={200}>
-              <Code block>{bonito(detalle.respuesta)}</Code>
             </ScrollArea.Autosize>
             {company.canAdministrar && detalle.estado !== 'enviado' && (
               <Group justify='flex-end'>

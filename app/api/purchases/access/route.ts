@@ -24,10 +24,14 @@ export async function GET() {
       select: { id_company: true, id_user_sapsend: true, id_department_sapsend: true },
     });
     const byCompany = new Map(mappings.map((m) => [m.id_company, m]));
+    // Moneda por defecto de compras por empresa (purchase_company_config), como en SAPSEND.
+    const configs = await prisma.purchaseCompanyConfig.findMany({ select: { id_company: true, default_currency: true } });
+    const currencyBy = new Map(configs.map((c) => [c.id_company, c.default_currency ?? '']));
     const companies = toPublicAccess(access).map((c) => ({
       ...c,
       sapsendUserId: byCompany.get(c.idCompany)?.id_user_sapsend ?? null,
       sapsendDepartmentId: byCompany.get(c.idCompany)?.id_department_sapsend ?? null,
+      defaultCurrency: currencyBy.get(c.idCompany) ?? '',
     }));
     return NextResponse.json({ companies });
   } catch (error) {

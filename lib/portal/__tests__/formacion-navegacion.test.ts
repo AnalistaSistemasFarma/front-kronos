@@ -5,8 +5,8 @@ describe('navegación de la página de Formación', () => {
   it('desde el portal abierto lleva a /portal/formacion; desde el hub, a Formación DENTRO del hub', () => {
     expect(urlFormacion('abierto')).toBe('/portal/formacion');
     // Con el encabezado y el menú de SynerLink (Nicolás, 2026-10-09).
-    expect(urlFormacion('hub')).toBe('/process/portal-th/formacion');
-    expect(RUTA_FORMACION_HUB).toBe('/process/portal-th/formacion');
+    expect(urlFormacion('hub')).toBe('/process/formacion');
+    expect(RUTA_FORMACION_HUB).toBe('/process/formacion');
   });
 
   it('"Volver al portal" vuelve al portal por el que se entró', () => {
