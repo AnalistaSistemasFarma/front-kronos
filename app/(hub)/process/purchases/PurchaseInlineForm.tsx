@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import {
   ActionIcon, Alert, Button, Group, Loader, NumberInput, Paper, ScrollArea, Select, Stack, Table, Text, TextInput, Textarea,
 } from '@mantine/core';
-import { IconAlertTriangle, IconCloudUpload, IconFile, IconPlus, IconSend, IconTrash, IconX } from '@tabler/icons-react';
+import { IconCloudUpload, IconFile, IconPlus, IconSend, IconTrash, IconX } from '@tabler/icons-react';
 import { COLUMNS, type FieldError, type Line, type LineField } from './RequestFormModal';
 import SapLookupInput from './SapLookupInput';
 import { FIELD_LOOKUP } from '../../../../lib/purchases/lookups';
@@ -171,7 +171,6 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
   const [lines, setLines] = useState<Line[]>([{}]);
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
   /** Tras el primer intento de envío, los obligatorios vacíos se marcan en rojo. */
   const [tried, setTried] = useState(false);
@@ -229,10 +228,9 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
 
   const submit = async () => {
     setTried(true);
-    setError(null);
     setFieldErrors([]);
     if (missingList.length > 0) {
-      setError('Complete los campos obligatorios marcados en rojo.');
+      toast.error(`Complete los campos obligatorios marcados en rojo: ${missingList.join(' · ')}.`);
       return;
     }
     if (notFromList.size > 0) {
@@ -240,7 +238,7 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
         const [i, f] = k.split('-');
         return `Línea ${Number(i) + 1} · ${COLUMNS.find((c) => c.field === f)?.label ?? f}`;
       });
-      setError(`Estos campos se escribieron pero no se eligieron de la lista de SAP: ${labels.join(' · ')}.`);
+      toast.error(`Elija de la lista de SAP: ${labels.join(' · ')}.`);
       return;
     }
     setSaving(true);
@@ -261,8 +259,7 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || 'No se pudo crear la solicitud de compra');
-        if (data.error) notifySapError(String(data.error));
+        notifySapError(String(data.error || 'No se pudo crear la solicitud de compra'));
         setFieldErrors(Array.isArray(data.errors) ? data.errors : []);
         return;
       }
@@ -300,7 +297,6 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
       }
       onDone({ ok: !attachWarning, message: `Solicitud de compra #${docEntry} enviada a autorizar.${attachWarning}` });
     } catch {
-      setError('Error de red al crear la solicitud de compra');
       toast.error('Error de red al crear la solicitud de compra');
     } finally {
       setSaving(false);
@@ -323,8 +319,6 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
     );
   }
 
-  const generalErrors = fieldErrors.filter((e) => !e.field.startsWith('DocumentLines['));
-  const showMissing = tried && missingList.length > 0;
 
   return (
     <Stack gap="md">
@@ -482,7 +476,7 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
 
       <AttachmentsDrop files={files} onChange={setFiles} />
 
-      {/* Pie fijo: el error de SAP queda junto al botón y siempre a la vista (pantalla completa). */}
+      {/* Pie fijo: el botón de enviar siempre a la vista (pantalla completa); los errores salen en el aviso flotante. */}
       <Stack
         gap="xs"
         style={{
@@ -495,31 +489,6 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
           borderTop: '1px solid var(--mantine-color-default-border)',
         }}
       >
-        {error && (
-          <Alert
-            color="red"
-            variant="filled"
-            title="No se pudo crear la solicitud"
-            icon={<IconAlertTriangle size={20} />}
-            withCloseButton
-            onClose={() => setError(null)}
-            style={{ whiteSpace: 'pre-line' }}
-          >
-            {sapErrorText(error)}
-            {generalErrors.length > 0 && (
-              <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
-                {generalErrors.map((e) => (
-                  <li key={e.field}>{e.error}</li>
-                ))}
-              </ul>
-            )}
-            {showMissing && (
-              <Text size="xs" mt={4}>
-                Faltan: {missingList.join(' · ')}
-              </Text>
-            )}
-          </Alert>
-        )}
         <Group justify="flex-end">
           <Button
             leftSection={<IconSend size={16} />}
