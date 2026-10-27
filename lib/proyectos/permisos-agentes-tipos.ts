@@ -47,6 +47,13 @@ export interface PermisosProyectoDto {
   policy: PoliticaAgentesDto;
   /** ¿Puede ESTA persona cambiarlos? (administración o el subproceso en la empresa del proyecto). */
   canEdit: boolean;
+  /**
+   * ¿Se le puede dar código? (2026-10-27) Solo si TODOS los agentes designados
+   * son de desarrollo. Opcional: una respuesta vieja no lo trae y vale `true`.
+   */
+  codeAllowed?: boolean;
+  /** Nombres de los agentes designados que NO son de desarrollo. */
+  nonDevAgents?: string[];
   /** Repos ACTIVOS que se pueden vincular (solo si canEdit). */
   catalog: RepoCatalogoDto[];
   operators: OperadorPases[];

@@ -33,6 +33,8 @@ export interface AgenteMiniDto {
 /** Agente que el dueño PUEDE designar en una empresa, con los perfiles que admite. */
 export interface AgenteDesignableDto extends AgenteMiniDto {
   profiles: string[];
+  /** Agente de DESARROLLO (2026-10-27): solo a estos se les ofrece código y repos. */
+  esDesarrollo?: boolean;
 }
 
 /** Agente designado en un proyecto, visto por ESTA persona. */
