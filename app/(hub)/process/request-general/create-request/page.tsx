@@ -1874,6 +1874,8 @@ function RequestBoard() {
              (ScrollArea en TableFieldInput), así que con el ancho extra las
              columnas se ven sin pelear. */
           size='90%'
+          // Solicitud de compra: pantalla completa para que la tabla de líneas se vea entera.
+          fullScreen={isPurchaseProcess}
           radius='md'
           overlayProps={{ blur: 4 }}
         >

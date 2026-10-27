@@ -6,7 +6,9 @@ describe('lookupPath', () => {
     expect(lookupPath('item', "o'neil")).toContain("contains(ItemCode,'o''neil')");
   });
   it('agrupa el or de niveles de cuenta (defecto de SAPSEND)', () => {
-    expect(lookupPath('account', '5135')).toContain("startswith(Code,'5135') and (AccountLevel eq 5 or AccountLevel eq 8)");
+    expect(lookupPath('account', '5135')).toContain(
+      "(startswith(Code,'5135') or contains(Name,'5135')) and (AccountLevel eq 5 or AccountLevel eq 8) and ActiveAccount eq 'tYES'"
+    );
   });
   it('normas de reparto: lista completa (SAP ignora el filtro)', () => {
     expect(lookupPath('costing', 'adm')).toBe('DistributionRulesService_GetDistributionRuleList');

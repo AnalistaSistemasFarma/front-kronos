@@ -56,7 +56,12 @@ export default function SapLookupInput({ companyId, kind, value, onChange, onSel
       label={label}
       placeholder="Escriba para buscar en SAP"
       value={value}
-      onChange={onChange}
+      onChange={(v) => {
+        // Al elegir una opción, Mantine escribe en el campo su ETIQUETA («51953005 · UTILES…»).
+        // Ese texto no se guarda: el valor real (el código) lo pone onSelect.
+        if (options.some((o) => o.label === v && o.label !== o.value)) return;
+        onChange(v);
+      }}
       data={options.map((o) => ({ value: o.value, label: o.label }))}
       filter={({ options: opts }) => opts}
       onOptionSubmit={(v) => {

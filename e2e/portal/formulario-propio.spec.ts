@@ -158,9 +158,8 @@ test.describe('Portal TH · Formación · formulario propio', () => {
     // Volver: la casilla y "Completado" ya están actualizados en la lista.
     await page.getByRole('button', { name: 'Volver al curso' }).click();
     await expect(page.getByTestId('visor-formulario')).toHaveCount(0);
-    const fila = page.locator('.portal-th__material-item', { hasText: 'PERFIL SOCIODEMOGRÁFICO SST' });
-    await expect(fila.getByRole('checkbox')).toHaveAttribute('aria-checked', 'true');
-    await expect(fila.getByTestId('insignia-completado')).toHaveText('✓ Completado');
+    const fila = page.getByTestId('material-item').filter({ hasText: 'PERFIL SOCIODEMOGRÁFICO SST' });
+    await expect(fila.getByTestId('insignia-completado')).toHaveText('Completado');
     await expect(page.getByText('Respuestas enviadas: "PERFIL SOCIODEMOGRÁFICO SST" quedó completado.')).toBeVisible();
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/04-escritorio-lista-completado.png`, fullPage: true });
 
@@ -197,7 +196,7 @@ test.describe('Portal TH · Formación · formulario propio', () => {
     await expect(page.getByTestId('formulario-enviado')).toContainText('Respuestas enviadas');
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/09-celular-respuestas-enviadas.png` });
     await page.getByRole('button', { name: 'Volver al curso' }).click();
-    await expect(page.locator('.portal-th__material-item', { hasText: 'PERFIL SOCIODEMOGRÁFICO SST' }).getByTestId('insignia-completado')).toBeVisible();
+    await expect(page.getByTestId('material-item').filter({ hasText: 'PERFIL SOCIODEMOGRÁFICO SST' }).getByTestId('insignia-completado')).toBeVisible();
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/10-celular-lista-completado.png`, fullPage: true });
   });
 
@@ -234,7 +233,7 @@ test.describe('Portal TH · Formación · formulario propio', () => {
     });
     await page.goto('/portal/formacion');
     // Las respuestas se ven en la «Vista formador», no en la de estudiante (Cristian, 2026-10-09).
-    await page.getByRole('button', { name: 'Vista formador' }).click();
+    await page.locator('label').filter({ hasText: /^Vista formador$/ }).click();
     await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
     await page.getByTestId('alternar-edicion').click();
     await page.getByRole('button', { name: 'Respuestas', exact: true }).first().click();
@@ -258,12 +257,12 @@ test.describe('Portal TH · Formación · formulario propio', () => {
     await page.setViewportSize({ width: 1366, height: 860 });
     await simular(page, { puedeMarcarManual: true, esFormador: true });
     await page.goto('/portal/formacion');
-    await page.getByRole('button', { name: 'Vista estudiante' }).click();
+    await page.locator('label').filter({ hasText: /^Vista estudiante$/ }).click();
     await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
     await expect(page.getByTestId('abrir-formulario-4')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Ver respuestas' })).toHaveCount(0);
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/15-vista-estudiante-sin-ver-respuestas.png` });
-    await page.getByRole('button', { name: 'Vista formador' }).click();
+    await page.locator('label').filter({ hasText: /^Vista formador$/ }).click();
     await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
     await page.getByTestId('alternar-edicion').click();
     await expect(page.getByRole('button', { name: 'Respuestas', exact: true }).first()).toBeVisible();
@@ -293,10 +292,10 @@ test.describe('Portal TH · Formación · formulario propio', () => {
     );
     await page.route('**/api/portal/formularios/1', (r) => r.fulfill({ json: { formulario: { id: 1, versionId: 10, version: 1, definicion: SST } } }));
     await page.goto('/portal/formacion');
-    await page.getByRole('button', { name: 'Vista formador' }).click();
+    await page.locator('label').filter({ hasText: /^Vista formador$/ }).click();
     await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
     await page.getByTestId('alternar-edicion').click();
-    await page.getByRole('button', { name: 'Formulario', exact: true }).click();
+    await page.locator('label').filter({ hasText: /^Formulario$/ }).click();
     const selector = page.getByTestId('selector-formulario');
     await expect(selector.getByRole('combobox', { name: 'Formulario' })).toHaveValue('1');
     if (CAPTURAS) await page.screenshot({ path: `${CAPTURAS}/13-formador-agregar-formulario.png`, fullPage: true });

@@ -414,7 +414,12 @@ export async function convertOneDriveItemToPdf(token: string, itemId: string): P
     pdfResponse = await fetch(location, { cache: 'no-store' });
   }
   if (!pdfResponse.ok) {
-    throw new Error(`OneDrive no pudo convertir el archivo a PDF (HTTP ${pdfResponse.status})`);
+    // El motivo de Office viene en el cuerpo (p. ej. «ErrorCode=XLSPageLimitExceeded»
+    // cuando el Excel daría demasiadas páginas): se agrega al mensaje para poder
+    // distinguirlo; nunca lleva datos del archivo.
+    const cuerpo = await pdfResponse.text().catch(() => '');
+    const codigo = /ErrorCode=([A-Za-z]+)/.exec(cuerpo)?.[1];
+    throw new Error(`OneDrive no pudo convertir el archivo a PDF (HTTP ${pdfResponse.status}${codigo ? `, ${codigo}` : ''})`);
   }
   const buffer = Buffer.from(await pdfResponse.arrayBuffer());
   if (buffer.subarray(0, 5).toString('latin1') !== '%PDF-') {
