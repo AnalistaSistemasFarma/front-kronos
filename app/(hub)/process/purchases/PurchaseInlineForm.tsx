@@ -176,6 +176,16 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
   /** Tras el primer intento de envío, los obligatorios vacíos se marcan en rojo. */
   const [tried, setTried] = useState(false);
   const [defaultCurrency, setDefaultCurrency] = useState('');
+  /** Campos de búsqueda con texto escrito pero sin elegir de la lista («línea-campo»). */
+  const [notFromList, setNotFromList] = useState<Set<string>>(new Set());
+  const markNotFromList = (key: string, invalid: boolean) =>
+    setNotFromList((prev) => {
+      if (prev.has(key) === invalid) return prev;
+      const next = new Set(prev);
+      if (invalid) next.add(key);
+      else next.delete(key);
+      return next;
+    });
 
   // ¿El usuario puede crear solicitudes de compra en esta empresa?
   useEffect(() => {
@@ -223,6 +233,14 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
     setFieldErrors([]);
     if (missingList.length > 0) {
       setError('Complete los campos obligatorios marcados en rojo.');
+      return;
+    }
+    if (notFromList.size > 0) {
+      const labels = [...notFromList].map((k) => {
+        const [i, f] = k.split('-');
+        return `Línea ${Number(i) + 1} · ${COLUMNS.find((c) => c.field === f)?.label ?? f}`;
+      });
+      setError(`Estos campos se escribieron pero no se eligieron de la lista de SAP: ${labels.join(' · ')}.`);
       return;
     }
     setSaving(true);
@@ -409,6 +427,7 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
                           }
                           error={typeof err === 'string' ? err : undefined}
                           ariaLabel={aria}
+                          onInvalidChange={(bad) => markNotFromList(`${i}-${c.field}`, bad)}
                         />
                       );
                     } else {
@@ -437,7 +456,10 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
                       variant="subtle"
                       color="red"
                       disabled={lines.length === 1}
-                      onClick={() => setLines((prev) => prev.filter((_, j) => j !== i))}
+                      onClick={() => {
+                        setLines((prev) => prev.filter((_, j) => j !== i));
+                        setNotFromList(new Set());
+                      }}
                       aria-label={`Quitar línea ${i + 1}`}
                     >
                       <IconTrash size={16} />

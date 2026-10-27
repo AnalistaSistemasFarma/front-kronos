@@ -22,12 +22,43 @@ interface Props {
   /** Etiqueta visible (opcional) y tamaño del campo. */
   label?: React.ReactNode;
   size?: 'xs' | 'sm' | 'md';
+  /** Avisa si el usuario escribió algo sin elegirlo de la lista (no sirve para SAP). */
+  onInvalidChange?: (invalid: boolean) => void;
 }
 
-export default function SapLookupInput({ companyId, kind, value, onChange, onSelect, error, ariaLabel, label, size = 'xs' }: Props) {
+/** Mensaje cuando se escribe algo que no se eligió de la lista. */
+export const NOT_FROM_LIST = 'Seleccione un valor de la lista';
+
+export default function SapLookupInput({
+  companyId,
+  kind,
+  value,
+  onChange,
+  onSelect,
+  error,
+  ariaLabel,
+  label,
+  size = 'xs',
+  onInvalidChange,
+}: Props) {
   const [options, setOptions] = useState<LookupOption[]>([]);
   const [loading, setLoading] = useState(false);
   const lastQuery = useRef('');
+  /** true = el texto lo escribió el usuario y aún no eligió una opción de la lista. */
+  const [typed, setTyped] = useState(false);
+  /** Se marca al salir del campo (Tab o clic afuera), no mientras escribe. */
+  const [blurred, setBlurred] = useState(false);
+  const invalid = typed && blurred && value.trim() !== '';
+
+  /** Último texto escrito por el usuario: si el valor cambia por fuera (otra búsqueda lo llenó), ya es válido. */
+  const lastTyped = useRef<string | null>(null);
+  useEffect(() => {
+    if (typed && value !== lastTyped.current) setTyped(false);
+  }, [typed, value]);
+
+  useEffect(() => {
+    onInvalidChange?.(typed && value.trim() !== '');
+  }, [typed, value, onInvalidChange]);
 
   useEffect(() => {
     const q = value.trim();
@@ -60,19 +91,26 @@ export default function SapLookupInput({ companyId, kind, value, onChange, onSel
         // Al elegir una opción, Mantine escribe en el campo su ETIQUETA («51953005 · UTILES…»).
         // Ese texto no se guarda: el valor real (el código) lo pone onSelect.
         if (options.some((o) => o.label === v && o.label !== o.value)) return;
+        lastTyped.current = v;
+        setTyped(true);
+        setBlurred(false);
         onChange(v);
       }}
+      onBlur={() => setBlurred(true)}
       data={options.map((o) => ({ value: o.value, label: o.label }))}
       filter={({ options: opts }) => opts}
       onOptionSubmit={(v) => {
         const opt = options.find((o) => o.value === v);
         lastQuery.current = v;
-        if (opt) onSelect(opt);
+        if (opt) {
+          setTyped(false);
+          onSelect(opt);
+        }
       }}
       rightSection={loading ? <Loader size={12} /> : null}
       comboboxProps={{ withinPortal: true, zIndex: 1100 }}
       maxDropdownHeight={240}
-      error={error}
+      error={error ?? (invalid ? NOT_FROM_LIST : undefined)}
       aria-label={ariaLabel}
     />
   );
