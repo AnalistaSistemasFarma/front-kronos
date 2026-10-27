@@ -545,7 +545,7 @@ export async function POST(req: Request) {
       }
       if (!current?.orionDocumentId || newVersion) {
         const hasValidators = await flowHasOrionValidators(pool, requestId);
-        if (hasValidators && newVersion) {
+        if (hasValidators && newVersion && !current?.skipValidation) {
           throw Object.assign(
             new Error(
               'Este flujo tiene validadores: suba la versión corregida desde "Validación" para reiniciar la aprobación.'

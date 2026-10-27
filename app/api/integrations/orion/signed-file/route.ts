@@ -21,6 +21,7 @@ import { isOrionProtectedFileUrl, isAllowedServerPdfFetchUrl, orionDocumentHasSi
 import { stampSynerlinkWatermark } from '@/lib/orion/stampSynerlinkWatermark';
 import { applyValidatorMarks } from '@/lib/orion/validatorMarks';
 import { buildValidatorMarks } from '@/lib/orion/validatorStamp';
+import { buildSynerLinkAttachmentFileUrl } from '@/lib/attachments/fileUrl';
 
 function normalizeEmail(email?: string | null): string {
   return String(email || '')
@@ -129,13 +130,17 @@ export async function GET(req: Request) {
       });
     };
 
-    const redirectToSynerLinkAttachment = () => {
-      const dest = new URL('/api/requests-general/attachment-file', req.url);
-      dest.searchParams.set('requestId', String(requestId));
-      dest.searchParams.set('fileId', fileId);
-      if (forceDownload) dest.searchParams.set('download', '1');
-      return NextResponse.redirect(dest, 307);
-    };
+    // Redirección RELATIVA: detrás del proxy, req.url trae el origen interno del
+    // proceso (p. ej. https://localhost:3030) y el navegador no puede llegar a él.
+    // Con Location relativo el navegador usa el mismo dominio público por el que entró.
+    const redirectToSynerLinkAttachment = () =>
+      new NextResponse(null, {
+        status: 307,
+        headers: {
+          Location: buildSynerLinkAttachmentFileUrl({ requestId, fileId, download: forceDownload }),
+          'Cache-Control': 'private, no-store',
+        },
+      });
 
     if (!auth) {
       // Sin bag Orion: el adjunto vive en OneDrive SynerLink, no en este proxy.

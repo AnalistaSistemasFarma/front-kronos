@@ -142,6 +142,11 @@ export type OrionSignatureState = {
   /** Versión del documento (v1.0, v1.1…). Nueva subversión por cada corrección. */
   versionLabel?: string | null;
   review?: OrionReviewState | null;
+  /**
+   * true = el preparador eligió "Sin validación" para este documento: va directo a firma
+   * aunque el flujo tenga validadores. Ausente/false = con validación (si el flujo tiene).
+   */
+  skipValidation?: boolean | null;
   supersededDocuments?: OrionSupersededDocument[];
   orionDocumentId?: string | null;
   externalRef?: string;
