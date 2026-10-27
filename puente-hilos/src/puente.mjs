@@ -56,6 +56,9 @@ import { crearArchivador, textoArchivarProyecto } from './archivar-proyecto.mjs'
 import { prepararAdjuntos } from './adjuntos-salida.mjs';
 import { archivosDelTurno, archivosModificadosDesde, crearSupervisor, duracionLegible, PROMPT_CONTINUACION, textoAvisoProgreso, textoCorte, textoTiempoTurno } from './progreso.mjs';
 import { convertirHtmlAPdf, convertirMarcasPdf, recursosDePlugins, resolverChrome, textoPdf } from './pdf.mjs';
+import { crearAtenderOpenclaw } from './atender-openclaw.mjs';
+import { observarActividad } from './openclaw/actividad.mjs';
+import { anunciosPendientes, conGateway, leerSesion } from './openclaw/seguimiento.mjs';
 import { armarArgumentos, armarArgumentosCompleto, armarArgumentosSugerencia, armarEntorno, armarEntornoCompleto, correrTurno, etiquetaHerramienta } from './claude.mjs';
 import { borrarMcpCompleto, encabezadoMensajeCompleto, filasAuditoriaCompleto, pluginsCompletos, prepararOrusCompleto, textoOrusCompleto, turnoOrusCompleto } from './orus-completo.mjs';
 import {
@@ -103,6 +106,13 @@ export function verificarClaude(bin, ayuda) {
     (b) => !texto.includes(b)
   );
   if (faltan.length > 0) throw new ErrorConfig(`El claude instalado no soporta: ${faltan.join(', ')}. Actualícelo.`);
+}
+
+/** El `openclaw` instalado debe soportar lo que el runner usa; si no, no arranca. */
+export function verificarOpenclaw(bin, ayuda) {
+  const texto = ayuda ?? execFileSync(bin, ['agent', '--help'], { encoding: 'utf8', timeout: 30_000 });
+  const faltan = ['--session-key', '--message-file', '--json', '--timeout', '--agent'].filter((b) => !texto.includes(b));
+  if (faltan.length > 0) throw new ErrorConfig(`El openclaw instalado no soporta: ${faltan.join(', ')}.`);
 }
 
 /**
@@ -186,7 +196,7 @@ function autorDe(m) {
   return m?.author?.name?.trim() || m?.author?.email || null;
 }
 
-export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, convertirPdf = convertirHtmlAPdf, medidor = null }) {
+export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, convertirPdf = convertirHtmlAPdf, medidor = null, fabricaOpenclaw = null }) {
   const enProceso = new Set();
   // Lo que el hilo adjunta queda también en los Archivos del proyecto (2026-10-23; HILOS_ARCHIVAR_EN_PROYECTO=no lo apaga).
   const archivador = cfg.archivarEnProyecto === false ? null : crearArchivador({ synerlink, log });
@@ -859,10 +869,35 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
     }
   }
 
+  // Runner openclaw (2026-10-27): el turno lo atiende el agente de openclaw (atender-openclaw.mjs).
+  // El camino de Claude Code de arriba no cambia.
+  const deOpenclaw =
+    cfg.runner === 'openclaw'
+      ? (fabricaOpenclaw ?? crearAtenderOpenclaw)({
+          cfg,
+          synerlink,
+          estado,
+          archivador,
+          log,
+          observar: observarActividad,
+          leerSesionGateway: (clave) => conGateway((pedir) => leerSesion(pedir, clave, 60), { openclawBin: cfg.openclaw.bin }),
+          anunciosPendientes,
+        })
+      : null;
+  const atenderTurno = async (clave, lote) => {
+    if (!deOpenclaw) return atender(clave, lote);
+    try {
+      return await deOpenclaw.atender(clave, lote);
+    } finally {
+      for (const m of lote) enProceso.delete(m.id);
+    }
+  };
+  const sugerirTurno = deOpenclaw ? deOpenclaw.sugerirEquipo : sugerirEquipo;
+
   const PREFIJO_EQUIPO = 'equipo:';
   const cola = new ColaHilos({
     maxConcurrencia: cfg.maxConcurrencia,
-    ejecutar: (clave, lote) => (clave.startsWith(PREFIJO_EQUIPO) ? sugerirEquipo(lote[0]).finally(() => enProceso.delete(clave)) : atender(clave, lote)),
+    ejecutar: (clave, lote) => (clave.startsWith(PREFIJO_EQUIPO) ? sugerirTurno(lote[0]).finally(() => enProceso.delete(clave)) : atenderTurno(clave, lote)),
     alEsperar: (clave) =>
       clave.startsWith(PREFIJO_EQUIPO)
         ? undefined
@@ -898,7 +933,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
     return nuevos;
   }
 
-  return { recibir, recibirPedidos, cola, enProceso, atender, sugerirEquipo };
+  return { recibir, recibirPedidos, cola, enProceso, atender: deOpenclaw ? atenderTurno : atender, sugerirEquipo: sugerirTurno };
 }
 
 /** Conectores del agente para la línea «listo:» (solo NOMBRES; nunca su configuración). */
@@ -926,10 +961,12 @@ export function pruebasListo(cfg, verificar = verificarSecretosPruebas) {
 async function principal() {
   const cfg = cargarConfig(process.env);
   fijarEtiquetaEntorno(cfg.entorno);
-  verificarClaude(cfg.claudeBin);
+  if (cfg.runner === 'openclaw') verificarOpenclaw(cfg.openclaw.bin);
+  else verificarClaude(cfg.claudeBin);
   mkdirSync(cfg.hilosDir, { recursive: true, mode: 0o700 });
   if (sellarEntorno(cfg)) log(`carpeta ${cfg.hilosDir} sellada como ${cfg.entorno} (${cfg.url}).`);
-  mkdirSync(cfg.configClaudeDir, { recursive: true, mode: 0o700 });
+  if (cfg.runner !== 'openclaw') mkdirSync(cfg.configClaudeDir, { recursive: true, mode: 0o700 });
+  else mkdirSync(cfg.areaDir, { recursive: true, mode: 0o700 });
 
   const synerlink = crearClienteSynerLink({ url: cfg.url, llave: cfg.llave });
   const primera = await synerlink.bandeja(0);
@@ -946,6 +983,10 @@ async function principal() {
   ocupado = () => puente.enProceso.size > 0;
   medidor?.iniciar();
   log(medidor ? `medidor de consumo: stream de cada turno${cfg.cuota.intervaloMs > 0 && cfg.credencial.tipo === 'oauth-token' ? ` + consulta mínima cada ${Math.round(cfg.cuota.intervaloMs / 1000)} s sin turnos` : ''}.` : 'medidor de consumo apagado (HILOS_CUOTA=no).');
+  if (cfg.runner === 'openclaw') {
+    const oc = cfg.openclaw;
+    log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, RUNNER OPENCLAW: agente «${oc.agente}»${oc.perfil ? `, perfil ${oc.perfil}` : ''}${oc.local ? ', --local' : ', por el Gateway'}; sesiones «${oc.prefijo}c<conv>-<gen>»; área ${cfg.areaDir}; outbox ${oc.outbox ?? 'no'}; indicador fino ${oc.actividad && !oc.local ? 'sí' : 'no'}; tope ${cfg.maxConcurrencia} hilos; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; avisos ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; perfil: ${perfilListo(cfg)}; sin capacidades del puente (conectores, PRUEBAS, código, equipo, plugins, PDF, cuota): el agente usa SOLO las suyas.`);
+  } else
   log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}, modelo del hilo principal: ${cfg.modelo ?? 'el predeterminado de la cuenta (sin HILOS_MODELO)'}; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; gasto ${cfg.sinTopeGasto ? 'SIN TOPE' : cfg.presupuestoUsd ? `tope ${cfg.presupuestoUsd} USD` : `sin tope general (equipo ${cfg.subagentesPresupuestoUsd} USD)`}; avisos de progreso ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; continuación automática ${cfg.continuarAlAgotar ? 'sí' : 'no'}; perfil: ${perfilListo(cfg)}; PRUEBAS para todos los hilos: ${pruebasListo(cfg)}; conectores del agente: ${conectoresAgenteListo(cfg)}.`);
 
   let parar = false;
