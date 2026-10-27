@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import {
   ActionIcon, Alert, Button, Group, Loader, NumberInput, Paper, ScrollArea, Select, Stack, Table, Text, TextInput, Textarea,
 } from '@mantine/core';
-import { IconCloudUpload, IconFile, IconPlus, IconSend, IconTrash, IconX } from '@tabler/icons-react';
+import { IconAlertTriangle, IconCloudUpload, IconFile, IconPlus, IconSend, IconTrash, IconX } from '@tabler/icons-react';
 import { COLUMNS, type FieldError, type Line, type LineField } from './RequestFormModal';
 import SapLookupInput from './SapLookupInput';
 import { FIELD_LOOKUP } from '../../../../lib/purchases/lookups';
@@ -310,24 +310,6 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
 
   return (
     <Stack gap="md">
-      {error && (
-        <Alert color="red" style={{ whiteSpace: 'pre-line' }}>
-          {sapErrorText(error)}
-          {generalErrors.length > 0 && (
-            <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
-              {generalErrors.map((e) => (
-                <li key={e.field}>{e.error}</li>
-              ))}
-            </ul>
-          )}
-          {showMissing && (
-            <Text size="xs" mt={4}>
-              Faltan: {missingList.join(' · ')}
-            </Text>
-          )}
-        </Alert>
-      )}
-
       <Group grow align="flex-start">
         <TextInput
           label="Fecha requerida"
@@ -478,16 +460,55 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
 
       <AttachmentsDrop files={files} onChange={setFiles} />
 
-      <Group justify="flex-end">
-        <Button
-          leftSection={<IconSend size={16} />}
-          onClick={submit}
-          loading={saving}
-          disabled={!subject.trim() && !comments.trim()}
-        >
-          Crear y enviar a autorizar
-        </Button>
-      </Group>
+      {/* Pie fijo: el error de SAP queda junto al botón y siempre a la vista (pantalla completa). */}
+      <Stack
+        gap="xs"
+        style={{
+          position: 'sticky',
+          bottom: 0,
+          zIndex: 5,
+          background: 'var(--mantine-color-body)',
+          paddingTop: 8,
+          paddingBottom: 8,
+          borderTop: '1px solid var(--mantine-color-default-border)',
+        }}
+      >
+        {error && (
+          <Alert
+            color="red"
+            variant="filled"
+            title="No se pudo crear la solicitud"
+            icon={<IconAlertTriangle size={20} />}
+            withCloseButton
+            onClose={() => setError(null)}
+            style={{ whiteSpace: 'pre-line' }}
+          >
+            {sapErrorText(error)}
+            {generalErrors.length > 0 && (
+              <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                {generalErrors.map((e) => (
+                  <li key={e.field}>{e.error}</li>
+                ))}
+              </ul>
+            )}
+            {showMissing && (
+              <Text size="xs" mt={4}>
+                Faltan: {missingList.join(' · ')}
+              </Text>
+            )}
+          </Alert>
+        )}
+        <Group justify="flex-end">
+          <Button
+            leftSection={<IconSend size={16} />}
+            onClick={submit}
+            loading={saving}
+            disabled={!subject.trim() && !comments.trim()}
+          >
+            Crear y enviar a autorizar
+          </Button>
+        </Group>
+      </Stack>
     </Stack>
   );
 }
