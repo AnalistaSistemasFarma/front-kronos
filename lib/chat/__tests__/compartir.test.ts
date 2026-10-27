@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  accionTrasErrorCompartir,
+  elegirEstrategiaCompartir,
   enlaceWhatsApp,
+  enlaceWhatsAppWeb,
+  esEscritorio,
+  type EntornoDispositivo,
   filtrarDestinos,
   mensajeReenviado,
   normalizarBusqueda,
@@ -95,5 +100,90 @@ describe('mensajeReenviado y normalizarBusqueda', () => {
     expect(mensajeReenviado('a.pdf', { tipo: 'persona', titulo: 'Laura' })).toBe('Se reenvió «a.pdf» a Laura.');
     expect(mensajeReenviado('a.pdf', { tipo: 'grupo', titulo: 'Cierre' })).toBe('Se reenvió «a.pdf» a grupo «Cierre».');
     expect(normalizarBusqueda('  Ñandú ÁRBOL ')).toBe('nandu arbol');
+  });
+});
+
+/* Bug 2026-10-27: en Windows la hoja nativa salía vacía. Escritorio → Descargar + WhatsApp Web. */
+
+const UA = {
+  windowsChrome: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+  windowsEdge: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0',
+  macSafari: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
+  linuxFirefox: 'Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0',
+  android: 'Mozilla/5.0 (Linux; Android 14; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36',
+  androidTablet: 'Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+  iphone: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+};
+
+const entorno = (p: Partial<EntornoDispositivo> & { userAgent: string }): EntornoDispositivo => ({
+  punteroGrueso: false,
+  maxTouchPoints: 0,
+  ...p,
+});
+
+describe('esEscritorio', () => {
+  it('Windows (Chrome y Edge), macOS y Linux con mouse: escritorio', () => {
+    expect(esEscritorio(entorno({ userAgent: UA.windowsChrome, uaDataMobile: false, uaDataPlatform: 'Windows' }))).toBe(true);
+    expect(esEscritorio(entorno({ userAgent: UA.windowsEdge, uaDataMobile: false }))).toBe(true);
+    expect(esEscritorio(entorno({ userAgent: UA.macSafari }))).toBe(true);
+    expect(esEscritorio(entorno({ userAgent: UA.linuxFirefox }))).toBe(true);
+  });
+
+  it('Windows con pantalla táctil sigue siendo escritorio (la hoja de Windows es la que falla)', () => {
+    expect(esEscritorio(entorno({ userAgent: UA.windowsEdge, uaDataMobile: false, punteroGrueso: true, maxTouchPoints: 10 }))).toBe(true);
+  });
+
+  it('celulares y tabletas: no', () => {
+    expect(esEscritorio(entorno({ userAgent: UA.android, uaDataMobile: true, punteroGrueso: true, maxTouchPoints: 5 }))).toBe(false);
+    expect(esEscritorio(entorno({ userAgent: UA.iphone, punteroGrueso: true, maxTouchPoints: 5 }))).toBe(false);
+    // Tableta Android: Chrome dice mobile=false, pero el UA es Android.
+    expect(esEscritorio(entorno({ userAgent: UA.androidTablet, uaDataMobile: false, uaDataPlatform: 'Android', punteroGrueso: true }))).toBe(false);
+    // iPad con iPadOS se presenta como Macintosh, pero con pantalla táctil.
+    expect(esEscritorio(entorno({ userAgent: UA.macSafari, punteroGrueso: true, maxTouchPoints: 5 }))).toBe(false);
+  });
+
+  it('userAgentData.mobile = true manda aunque el UA parezca de escritorio', () => {
+    expect(esEscritorio(entorno({ userAgent: UA.linuxFirefox, uaDataMobile: true }))).toBe(false);
+  });
+
+  it('UA desconocido: decide el puntero', () => {
+    expect(esEscritorio(entorno({ userAgent: 'Raro/1.0' }))).toBe(true);
+    expect(esEscritorio(entorno({ userAgent: 'Raro/1.0', punteroGrueso: true }))).toBe(false);
+  });
+});
+
+describe('elegirEstrategiaCompartir', () => {
+  it('escritorio: siempre Descargar + WhatsApp, aunque canShare diga que sí', () => {
+    expect(elegirEstrategiaCompartir({ escritorio: true, puedeArchivo: true })).toBe('descargar-whatsapp');
+    expect(elegirEstrategiaCompartir({ escritorio: true, puedeArchivo: false })).toBe('descargar-whatsapp');
+  });
+
+  it('celular: hoja nativa si el archivo se puede compartir; si no, respaldo', () => {
+    expect(elegirEstrategiaCompartir({ escritorio: false, puedeArchivo: true })).toBe('hoja-nativa');
+    expect(elegirEstrategiaCompartir({ escritorio: false, puedeArchivo: false })).toBe('descargar-whatsapp');
+  });
+});
+
+describe('accionTrasErrorCompartir', () => {
+  it('cancelar la hoja (AbortError) no hace nada', () => {
+    expect(accionTrasErrorCompartir(new DOMException('cancelado', 'AbortError'))).toBe('nada');
+  });
+
+  it('cualquier otro error cae a Descargar + WhatsApp', () => {
+    expect(accionTrasErrorCompartir(new DOMException('no permitido', 'NotAllowedError'))).toBe('respaldo');
+    expect(accionTrasErrorCompartir(new DOMException('falló', 'DataError'))).toBe('respaldo');
+    expect(accionTrasErrorCompartir(new TypeError('x'))).toBe('respaldo');
+    expect(accionTrasErrorCompartir(undefined)).toBe('respaldo');
+    expect(accionTrasErrorCompartir('texto')).toBe('respaldo');
+  });
+});
+
+describe('enlaceWhatsAppWeb', () => {
+  it('abre WhatsApp Web con solo el nombre del archivo', () => {
+    const url = enlaceWhatsAppWeb('Acta 1.pdf');
+    expect(url.startsWith('https://web.whatsapp.com/send?text=')).toBe(true);
+    const texto = decodeURIComponent(url.slice('https://web.whatsapp.com/send?text='.length));
+    expect(texto).toBe('Le comparto el archivo «Acta 1.pdf».');
+    expect(texto).not.toMatch(/https?:|sharepoint|onedrive/i);
   });
 });
