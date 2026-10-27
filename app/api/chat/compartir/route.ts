@@ -4,7 +4,7 @@ import {
   normalizarTextoCompartido,
   SHARE_PAGE_PATH,
   type TextoCompartido,
-} from '../../../../lib/chat/compartir';
+} from '../../../../lib/chat/compartir-share-target';
 
 export const dynamic = 'force-dynamic';
 

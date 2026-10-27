@@ -8,7 +8,7 @@
  * Después de enviar (o descartar) el lote se borra; los que nadie envía los
  * barre el service worker a las 24 horas.
  */
-import { SHARE_IDB_NAME, SHARE_IDB_STORE, SHARE_IDB_VERSION, SHARE_LOTE_TTL_MS } from './compartir';
+import { SHARE_IDB_NAME, SHARE_IDB_STORE, SHARE_IDB_VERSION, SHARE_LOTE_TTL_MS } from './compartir-share-target';
 
 export interface ArchivoDeLote {
   name: string;

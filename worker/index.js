@@ -116,8 +116,8 @@ self.addEventListener('notificationclick', (event) => {
 // sube al servidor hasta que la persona elige la conversación y confirma; el
 // envío usa la ruta normal del chat, que valida sesión, permisos y archivos.
 //
-// ⚠️ Constantes repetidas de lib/chat/compartir.ts (este archivo no importa
-// TypeScript). lib/chat/compartir.test.ts verifica que coincidan.
+// ⚠️ Constantes repetidas de lib/chat/compartir-share-target.ts (este archivo no importa
+// TypeScript). lib/chat/compartir-share-target.test.ts verifica que coincidan.
 // Solo se toca ESTE POST: cualquier otra petición sigue a la red sin cambios.
 const SHARE_TARGET_ACTION = '/api/chat/compartir';
 const SHARE_PAGE_PATH = '/process/chat/compartir';

@@ -1,7 +1,7 @@
 import { prisma } from '../../../../../lib/prisma';
 import { jsonNoStore, resolveSessionUser, serverError, unauthorized } from '../../../../../lib/chat/http';
 import { projectModuleCompanies } from '../../../../../lib/chat/projects';
-import type { DestinoCompartir } from '../../../../../lib/chat/compartir';
+import type { DestinoCompartir } from '../../../../../lib/chat/compartir-share-target';
 
 export const dynamic = 'force-dynamic';
 

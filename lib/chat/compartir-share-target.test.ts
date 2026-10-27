@@ -18,7 +18,7 @@ import {
   shareTargetManifest,
   validarCompartido,
   type DestinoCompartir,
-} from './compartir';
+} from './compartir-share-target';
 import { MAX_CHAT_ATTACHMENT_BYTES } from './attachments';
 
 const MB = 1024 * 1024;
@@ -46,7 +46,7 @@ describe('service worker: constantes en espejo', () => {
     'worker/index.js': () => readFileSync(fileURLToPath(new URL('../../worker/index.js', import.meta.url)), 'utf8'),
   };
   for (const [archivo, leer] of Object.entries(fuentes)) {
-    it(`${archivo} usa las mismas constantes que lib/chat/compartir.ts`, () => {
+    it(`${archivo} usa las mismas constantes que lib/chat/compartir-share-target.ts`, () => {
       const sw = leer();
       expect(sw).toContain(`const SHARE_TARGET_ACTION = '${SHARE_TARGET_ACTION}';`);
       expect(sw).toContain(`const SHARE_PAGE_PATH = '${SHARE_PAGE_PATH}';`);

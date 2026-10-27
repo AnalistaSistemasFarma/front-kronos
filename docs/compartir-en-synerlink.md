@@ -8,7 +8,7 @@ Android ni en iOS.
 
 Funciona con la PWA **instalada desde Chrome o Edge** y abierta por **HTTPS**.
 
-1. `app/manifest.ts` declara `share_target` (`lib/chat/compartir.ts`,
+1. `app/manifest.ts` declara `share_target` (`lib/chat/compartir-share-target.ts`,
    `shareTargetManifest`): `POST multipart/form-data` a `/api/chat/compartir`
    con `title`, `text`, `url` y `files` (imágenes, video, audio, PDF, Office,
    texto, CSV, zip, HEIC).

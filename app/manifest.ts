@@ -1,4 +1,4 @@
-import { shareTargetManifest } from '../lib/chat/compartir';
+import { shareTargetManifest } from '../lib/chat/compartir-share-target';
 import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {

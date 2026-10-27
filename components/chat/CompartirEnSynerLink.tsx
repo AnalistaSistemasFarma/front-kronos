@@ -39,14 +39,14 @@ import {
   validarCompartido,
   type DestinoCompartir,
   type TipoDestino,
-} from '../../lib/chat/compartir';
+} from '../../lib/chat/compartir-share-target';
 import { borrarLoteCompartido, leerLoteCompartido } from '../../lib/chat/compartir-idb';
 
 /**
  * Pantalla «COMPARTIR EN SYNERLINK» (2026-10-22).
  *
  * Llega aquí lo que se comparte desde otra app del celular (ver
- * lib/chat/compartir.ts). Pedido de Nicolás: «para que pueda compartir
+ * lib/chat/compartir-share-target.ts). Pedido de Nicolás: «para que pueda compartir
  * archivos a Orus desde otras apps» de UN toque. Por eso:
  *
  *   - los AGENTES van primero, con Orus arriba si la persona lo tiene;
