@@ -39,8 +39,11 @@ import {
   MARGEN_TIMEOUT_OPENCLAW_S,
   recogerOutbox,
   textoEncabezadoOpenclaw,
+  textoDelTurno,
   textoPdfOpenclaw,
+  unirConMedios,
 } from './openclaw.mjs';
+import { textoDeMensaje } from './openclaw/seguimiento.mjs';
 import { convertirHtmlAPdf, convertirMarcasPdf, resolverChrome } from './pdf.mjs';
 import { archivosDelTurno, archivosModificadosDesde, crearSupervisor, duracionLegible, textoAvisoProgreso, textoCorte } from './progreso.mjs';
 
@@ -216,6 +219,16 @@ export function crearAtenderOpenclaw({
         else {
           abortado = 'tiempo agotado';
           await abortar({ bin: oc.bin, perfil: oc.perfil, clave: completa }).catch(() => null);
+        }
+      }
+      // Texto COMPLETO del turno (lo escrito antes de cada herramienta también), por el Gateway.
+      if (!abortado && s.ok && leerSesionGateway && !oc.local) {
+        try {
+          const ses = await leerSesionGateway(completa);
+          const completo = textoDelTurno(ses.messages, textoDeMensaje);
+          if (completo && completo.length > (s.texto ?? '').replace(/^\s*MEDIA:.*$/gm, '').trim().length) s = { ...s, texto: unirConMedios(completo, s.texto) };
+        } catch (e) {
+          log(`conversación ${idConversation}: no se pudo leer el turno completo (queda el texto final): ${e.message}`);
         }
       }
       // La sesión existe en openclaw desde que el turno arrancó: «continúa» retoma la misma.

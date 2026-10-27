@@ -14,12 +14,14 @@ import {
   esperarAnuncio,
   leerSalidaOpenclaw,
   recogerOutbox,
+  textoDelTurno,
   textoEncabezadoOpenclaw,
+  unirConMedios,
 } from '../src/openclaw.mjs';
 import { comandoOpenclaw, crearAtenderOpenclaw } from '../src/atender-openclaw.mjs';
 import { crearPuente, verificarOpenclaw } from '../src/puente.mjs';
 import { Estado, rutasDelHilo } from '../src/hilos.mjs';
-import { anunciosPendientes } from '../src/openclaw/seguimiento.mjs';
+import { anunciosPendientes, textoDeMensaje } from '../src/openclaw/seguimiento.mjs';
 import { crearArchivador } from '../src/archivar-proyecto.mjs';
 
 const tmp = () => mkdtempSync(path.join(tmpdir(), 'puente-oc-'));
@@ -478,4 +480,32 @@ test('turno openclaw con PDF sin Chrome: el encabezado lo dice y no se convierte
   });
   await atender('48', [{ id: 1, body: 'x', author: { name: 'N' } }]);
   assert.match(encabezado, /no puede convertir HTML a PDF/);
+});
+
+test('texto del turno: une lo que el agente escribió antes de las herramientas (solo del turno actual)', () => {
+  const msgs = [
+    { role: 'user', content: 'turno anterior' },
+    { role: 'assistant', content: [{ type: 'text', text: 'respuesta vieja' }] },
+    { role: 'user', content: 'turno actual' },
+    { role: 'assistant', content: [{ type: 'text', text: '1) Soy Mercurio.' }] },
+    { role: 'toolResult', content: [{ type: 'text', text: 'Successfully wrote' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'Listo.\nMEDIA:/t/a.csv' }] },
+  ];
+  const t = textoDelTurno(msgs, textoDeMensaje);
+  assert.equal(t, '1) Soy Mercurio.\n\nListo.\nMEDIA:/t/a.csv');
+  assert.equal(unirConMedios(t, 'Listo.\nMEDIA:/t/a.csv\nMEDIA:/t/b.pdf'), `${t}\n\nMEDIA:/t/b.pdf`);
+  assert.equal(unirConMedios('', 'x'), 'x');
+});
+
+test('turno openclaw: la respuesta lleva el texto completo del turno (Gateway), no solo el último mensaje', async () => {
+  const dir = tmp();
+  const s = synerlinkFalso();
+  const { atender } = crearAtenderOpenclaw({
+    cfg: cfgOc(dir), synerlink: s, estado: new Estado(dir),
+    correr: async () => ({ codigo: 0, abortado: null, stderr: '', salida: { status: 'ok', result: { payloads: [{ text: 'Listo.' }], meta: { finalAssistantVisibleText: 'Listo.' } } } }),
+    leerSesionGateway: async () => ({ messages: [{ role: 'user', content: 'x' }, { role: 'assistant', content: '1) Soy Mercurio, de Compras.' }, { role: 'assistant', content: 'Listo.' }] }),
+    anunciosPendientes,
+  });
+  await atender('48', [{ id: 1, body: 'x', author: { name: 'N' } }]);
+  assert.match(s.llamadas.find((l) => l[0] === 'responder')[2], /Soy Mercurio, de Compras\.[\s\S]*Listo\./);
 });

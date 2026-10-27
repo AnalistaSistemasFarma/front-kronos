@@ -133,6 +133,34 @@ export function leerSalidaOpenclaw(d) {
 }
 
 /**
+ * Texto COMPLETO del turno a partir del transcript (chat.history del Gateway). openclaw solo
+ * devuelve en `finalAssistantVisibleText` el ÚLTIMO mensaje del asistente: lo que el agente
+ * escribió antes de una herramienta (p. ej. «1) Soy Mercurio…» antes de crear un archivo) se
+ * perdía y la persona solo veía «Listo.» (piloto OLP, 2026-10-27). Se unen los mensajes del
+ * asistente posteriores al último mensaje `user` (el de este turno). Pura.
+ */
+export function textoDelTurno(messages, textoDeMensaje) {
+  const lista = Array.isArray(messages) ? messages : [];
+  let i = lista.length - 1;
+  while (i >= 0 && lista[i]?.role !== 'user') i -= 1;
+  const partes = [];
+  for (const m of lista.slice(i + 1)) {
+    if (m?.role !== 'assistant') continue;
+    const t = textoDeMensaje(m);
+    if (t && !/^(NO_REPLY|ANNOUNCE_SKIP)$/.test(t)) partes.push(t);
+  }
+  return partes.join('\n\n').trim();
+}
+
+/** Une el texto completo del turno con las líneas MEDIA: de la salida que no estén ya. */
+export function unirConMedios(completo, salida) {
+  if (!completo) return salida ?? '';
+  const ya = new Set(extraerMedia(completo).rutas);
+  const faltan = extraerMedia(salida ?? '').rutas.filter((r) => !ya.has(r));
+  return faltan.length ? `${completo}\n\n${faltan.map((r) => `MEDIA:${r}`).join('\n')}` : completo;
+}
+
+/**
  * Corre UN turno de openclaw. Nunca rechaza: devuelve { codigo, salida, stderr, abortado }.
  * Al vencer `timeoutMs` mata el CLI (SIGTERM y, a los 5 s, SIGKILL) y llama `alAbortar()` para
  * que el turno no siga corriendo dentro del Gateway.
