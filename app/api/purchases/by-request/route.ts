@@ -43,6 +43,23 @@ export async function GET(request: NextRequest) {
           rg.id_requester = @u
           OR EXISTS (SELECT 1 FROM task_request_general t
                      WHERE t.id_request_general = rg.id AND (t.id_assigned = @u OR t.id_executor_final = @u))
+          -- Pool de Autorizaciones (mismo criterio que authorization-activities): tipo de autorización
+          -- del usuario + mismo departamento del solicitante + empresa accesible.
+          OR EXISTS (
+            SELECT 1 FROM task_request_general t
+            INNER JOIN task_process_category tpc ON tpc.id = t.id_task
+            WHERE t.id_request_general = rg.id AND t.id_assigned IS NULL
+              AND tpc.is_authorization = 1 AND tpc.type_authorization IS NOT NULL
+              AND tpc.type_authorization IN (SELECT ut.type_authorization FROM user_types_authorization ut WHERE ut.id_user = @u)
+              AND rg.id_company IN (
+                SELECT cu.id_company FROM company_user cu
+                INNER JOIN subprocess_user_company suc ON suc.id_company_user = cu.id_company_user
+                WHERE cu.id_user = @u)
+              AND EXISTS (
+                SELECT 1 FROM department_user du_c
+                INNER JOIN department_user du_a ON du_a.id_department = du_c.id_department
+                WHERE du_c.id_user = rg.id_requester AND du_a.id_user = @u)
+          )
         );`);
     const canRead =
       involved.recordset.length > 0 ||
