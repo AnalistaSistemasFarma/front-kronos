@@ -6,6 +6,7 @@ import { getCompanyEndpointForUser } from '../../../../lib/purchases/access';
 import { mimeFor, uniqueSapFilename, validateAttachments } from '../../../../lib/purchases/attachments';
 import { EDITABLE_STATES } from '../../../../lib/purchases/drafts';
 import { sapGet, sapLogin, sapLogout, sapPatch, sapUploadFiles, SapError } from '../../../../lib/sap/serviceLayer';
+import { readPurchaseSession } from '../../../../lib/purchases/requestAccess';
 
 /**
  * Adjuntos (cotizaciones y anexos) de un borrador de solicitud de compra, en el
@@ -42,10 +43,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Falta companyId o docEntry' }, { status: 400 });
     }
 
-    const company = await getCompanyEndpointForUser(session.user.email, companyId);
-    if (!company?.endpoint) return NextResponse.json({ error: 'Sin acceso a esta empresa' }, { status: 403 });
-
-    const sap = await sapLogin(company.endpoint);
+    const requestId = Number(searchParams.get('requestId')) || null;
+    const sap = await readPurchaseSession(session.user.email, companyId, docEntry, requestId);
+    if (!sap) return NextResponse.json({ error: 'Sin acceso a esta empresa' }, { status: 403 });
     try {
       const draft = await sapGet<{ AttachmentEntry?: number | null }>(sap, `Drafts(${docEntry})?$select=AttachmentEntry`);
       if (!draft.AttachmentEntry) return NextResponse.json({ attachmentEntry: null, files: [] });

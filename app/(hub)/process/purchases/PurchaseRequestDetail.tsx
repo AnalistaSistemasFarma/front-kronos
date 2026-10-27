@@ -63,7 +63,8 @@ export default function PurchaseRequestDetail({
   const [purchase, setPurchase] = useState<Purchase | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [panel, setPanel] = useState<'anexos' | 'estado' | 'historial' | null>(null);
+  // Los anexos se ven de entrada: es lo primero que revisa el autorizador.
+  const [panel, setPanel] = useState<'anexos' | 'estado' | 'historial' | null>('anexos');
 
   useEffect(() => {
     if (!requestId) {
@@ -141,7 +142,7 @@ export default function PurchaseRequestDetail({
       </Group>
 
       {panel === 'anexos' && (
-        <AttachmentsPanel companyId={purchase.companyId} docEntry={purchase.docEntry} canUpload={false} />
+        <AttachmentsPanel companyId={purchase.companyId} docEntry={purchase.docEntry} canUpload={false} requestId={requestId} />
       )}
       {panel === 'estado' && <TracePanel companyId={purchase.companyId} docEntry={purchase.docEntry} />}
       {panel === 'historial' && requestId != null && <ExecutionHistoryPanel requestId={requestId} />}

@@ -1,9 +1,7 @@
-import sql from 'mssql';
 import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import sqlConfig from '../../../../dbconfig.js';
 import { authOptions } from '../../auth/[...nextauth]/route';
-import { getPurchasesAccess } from '../../../../lib/purchases/access';
+import { canReadLinkedPurchase } from '../../../../lib/purchases/requestAccess';
 import { companySap } from '../../../../lib/purchases/authorization';
 import { prisma } from '../../../../lib/prisma';
 import { sapGet, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
@@ -29,41 +27,7 @@ export async function GET(request: NextRequest) {
     const link = await prisma.purchaseAuthorization.findUnique({ where: { id_request_general: requestId } });
     if (!link) return NextResponse.json({ purchase: null });
 
-    const user = await prisma.user.findUnique({ where: { email: session.user.email }, select: { id: true } });
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const pool = await sql.connect(sqlConfig);
-    const involved = await pool
-      .request()
-      .input('req', sql.Int, requestId)
-      .input('u', sql.NVarChar(50), user.id)
-      .query(`
-        SELECT TOP 1 1 AS ok FROM requests_general rg
-        WHERE rg.id = @req AND (
-          rg.id_requester = @u
-          OR EXISTS (SELECT 1 FROM task_request_general t
-                     WHERE t.id_request_general = rg.id AND (t.id_assigned = @u OR t.id_executor_final = @u))
-          -- Pool de Autorizaciones (mismo criterio que authorization-activities): tipo de autorización
-          -- del usuario + mismo departamento del solicitante + empresa accesible.
-          OR EXISTS (
-            SELECT 1 FROM task_request_general t
-            INNER JOIN task_process_category tpc ON tpc.id = t.id_task
-            WHERE t.id_request_general = rg.id AND t.id_assigned IS NULL
-              AND tpc.is_authorization = 1 AND tpc.type_authorization IS NOT NULL
-              AND tpc.type_authorization IN (SELECT ut.type_authorization FROM user_types_authorization ut WHERE ut.id_user = @u)
-              AND rg.id_company IN (
-                SELECT cu.id_company FROM company_user cu
-                INNER JOIN subprocess_user_company suc ON suc.id_company_user = cu.id_company_user
-                WHERE cu.id_user = @u)
-              AND EXISTS (
-                SELECT 1 FROM department_user du_c
-                INNER JOIN department_user du_a ON du_a.id_department = du_c.id_department
-                WHERE du_c.id_user = rg.id_requester AND du_a.id_user = @u)
-          )
-        );`);
-    const canRead =
-      involved.recordset.length > 0 ||
-      (await getPurchasesAccess(session.user.email)).some((a) => a.idCompany === link.id_company && a.canRead);
+    const canRead = await canReadLinkedPurchase(session.user.email, requestId, link.id_company);
     if (!canRead) return NextResponse.json({ error: 'Sin acceso a esta solicitud de compra' }, { status: 403 });
 
     const sap = await companySap(link.id_company);

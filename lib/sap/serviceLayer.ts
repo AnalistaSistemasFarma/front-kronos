@@ -24,6 +24,9 @@ interface SapFetchResponse {
   ok: boolean;
   status: number;
   text: () => Promise<string>;
+  /** Cuerpo crudo (archivos de Attachments2). */
+  buffer: () => Promise<Buffer>;
+  contentType: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- espeja la firma de Response.json() del fetch nativo
   json: () => Promise<any>;
 }
@@ -57,12 +60,15 @@ function sapFetch(url: string, init: SapFetchInit): Promise<SapFetchResponse> {
         const chunks: Buffer[] = [];
         res.on('data', (chunk) => chunks.push(chunk));
         res.on('end', () => {
-          const bodyText = Buffer.concat(chunks).toString('utf8');
+          const raw = Buffer.concat(chunks);
+          const bodyText = raw.toString('utf8');
           const status = res.statusCode ?? 0;
           resolve({
             ok: status >= 200 && status < 300,
             status,
             text: async () => bodyText,
+            buffer: async () => raw,
+            contentType: String(res.headers['content-type'] ?? 'application/octet-stream'),
             json: async () => JSON.parse(bodyText),
           });
         });
@@ -211,6 +217,18 @@ export async function sapGet<T = unknown>(
   }
 
   return response.json() as Promise<T>;
+}
+
+/** GET de un archivo (p. ej. `Attachments2(n)/$value?filename='x.pdf'`): devuelve el contenido crudo. */
+export async function sapGetBinary(session: SapSession, path: string): Promise<{ data: Buffer; contentType: string }> {
+  const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
+  const response = await sapFetch(url, { method: 'GET', headers: { Cookie: `B1SESSION=${session.sessionId}` } });
+  if (response.status === 401) throw new SapError('Sesion SAP expirada o invalida', 401);
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new SapError(sapErrorMessage(`SAP GET ${path} fallo (${response.status})`, detail), response.status, detail);
+  }
+  return { data: await response.buffer(), contentType: response.contentType };
 }
 
 /**
