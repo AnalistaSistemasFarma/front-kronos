@@ -4,6 +4,8 @@ import { badRequest, forbidden, jsonNoStore, readJsonBody, serverError } from '.
 import { designableAgents } from '../../../../../lib/chat/projects';
 import { guardProject } from '../../../../../lib/chat/projects-guard';
 import { capabilitiesFor, MAX_PROJECT_AGENTS, normalizeAgentCodes } from '../../../../../lib/chat/projects-rules';
+import { politicaGuardadaConCodigo } from '../../../../../lib/proyectos/permisos-agentes';
+import { mensajeSoloDesarrollo } from '../../../../../lib/proyectos/agentes-desarrollo-rules';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,7 +14,8 @@ export const dynamic = 'force-dynamic';
  *
  *   GET    agentes que puede agregar: los que el dueño tiene asignados en la
  *          empresa del proyecto, con proyectos habilitados y con el perfil.
- *   POST   { agentCodes: [...] }  designa.
+ *   POST   { agentCodes: [...] }  designa. Si el proyecto tiene acceso a código,
+ *          solo se agregan agentes de desarrollo (400; regla del 2026-10-27).
  *   DELETE ?code=<agente>  retira (sus conversaciones quedan de solo lectura;
  *          el último agente no se puede retirar).
  */
@@ -58,6 +61,12 @@ export async function POST(request: NextRequest, { params }: Ctx) {
     }
     if (actuales + codigos.value.length > MAX_PROJECT_AGENTS) {
       return badRequest(`Un proyecto puede tener hasta ${MAX_PROJECT_AGENTS} asistentes.`);
+    }
+    const negocio = codigos.value.map((c) => porCodigo.get(c)!).filter((a) => !a.esDesarrollo);
+    if (negocio.length > 0 && (await politicaGuardadaConCodigo(guard.project.idProject))) {
+      return badRequest(
+        `${mensajeSoloDesarrollo(negocio.map((a) => a.displayName))} Para agregarlo, primero deje los permisos del proyecto en «Ninguno».`
+      );
     }
     await prisma.chatProjectAgent.createMany({
       data: codigos.value.map((c) => ({ id_project: guard.project.idProject, id_agent: porCodigo.get(c)!.idAgent, added_by: guard.user.id })),

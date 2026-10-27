@@ -715,6 +715,12 @@ model Agent {
   description       String?   @db.NVarChar(500)
   is_active         Boolean   @default(true)
   sort_order        Int       @default(0)
+  /// AGENTE DE DESARROLLO (2026-10-27, regla de Nicolás Rivera: «el tema de
+  /// los proyectos de desarrollo … solo debería ser de los agentes que
+  /// desarrollan»). Solo a estos se les puede dar nivel de código y repos en
+  /// los Proyectos (lib/proyectos/agentes-desarrollo.ts). Hoy: horus y pedro.
+  /// Columna NOT NULL DEFAULT 0: un agente nuevo nace «de negocio».
+  es_desarrollo     Boolean   @default(false)
   /// Subproceso que ES el permiso para hablar con este agente (fuente de
   /// verdad única del permiso; ver la nota de módulo arriba). NULL = agente
   /// del catálogo todavía sin subproceso creado, y por tanto invisible para

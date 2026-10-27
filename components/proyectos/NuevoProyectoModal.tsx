@@ -17,7 +17,9 @@ import {
 import type { ListaProyectosDto } from '../../lib/proyectos/tipos';
 import type { OpcionesPermisosDto } from '../../lib/proyectos/permisos-agentes-tipos';
 import { MAX_MOTIVO, MIN_MOTIVO } from '../../lib/proyectos/permisos-agentes-rules';
-import FormPermisosAgentes, { BadgeNivel, PERMISOS_POR_DEFECTO, permisosListos, type ValorPermisos } from './permisos/FormPermisosAgentes';
+import { BadgeNivel, PERMISOS_POR_DEFECTO, permisosListos, type ValorPermisos } from './permisos/FormPermisosAgentes';
+import PermisosSegunAgentes from './permisos/PermisosSegunAgentes';
+import { agentesDeNegocio, codigoPermitido } from '../../lib/proyectos/agentes-desarrollo-rules';
 import css from './proyectos.module.css';
 
 /**
@@ -84,8 +86,20 @@ export default function NuevoProyectoModal({
     setPermisos(PERMISOS_POR_DEFECTO);
     setMotivoPermisos('');
   }, [empresa]);
-  const conCodigo = puedeEscogerPermisos && permisos.codeLevel !== 'ninguno';
-  const permisosOk = !puedeEscogerPermisos || (permisosListos(permisos) && (!conCodigo || motivoPermisos.trim().length >= MIN_MOTIVO));
+  // Código y repos SOLO si todos los asistentes escogidos son de desarrollo (regla del 2026-10-27).
+  const marcados = useMemo(
+    () => designables.filter((a) => agentes.includes(a.code)).map((a) => ({ displayName: a.displayName, esDesarrollo: a.esDesarrollo === true })),
+    [designables, agentes]
+  );
+  const codigoOk = codigoPermitido(marcados);
+  // Si deja de poder tener código (agregó un agente de negocio), vuelve al valor seguro.
+  useEffect(() => {
+    if (codigoOk) return;
+    setPermisos(PERMISOS_POR_DEFECTO);
+    setMotivoPermisos('');
+  }, [codigoOk]);
+  const conCodigo = puedeEscogerPermisos && codigoOk && permisos.codeLevel !== 'ninguno';
+  const permisosOk = !puedeEscogerPermisos || !codigoOk || (permisosListos(permisos) && (!conCodigo || motivoPermisos.trim().length >= MIN_MOTIVO));
 
   // Al cambiar de empresa se reinicia la elección: un asistente de otra empresa no sirve.
   useEffect(() => {
@@ -120,7 +134,8 @@ export default function NuevoProyectoModal({
         instructions: instrucciones,
         suggestTeam: sugerirEquipo,
         // Solo quien puede escogerlos los envía; los demás quedan en «ninguno».
-        ...(puedeEscogerPermisos ? { agentPolicy: { ...permisos, reason: conCodigo ? motivoPermisos : undefined } } : {}),
+        // Con algún agente de negocio no se envía nada: el proyecto queda en «ninguno».
+        ...(puedeEscogerPermisos && codigoOk ? { agentPolicy: { ...permisos, reason: conCodigo ? motivoPermisos : undefined } } : {}),
       },
       'No se pudo crear el proyecto.'
     );
@@ -256,7 +271,15 @@ export default function NuevoProyectoModal({
           </Group>
           {puedeEscogerPermisos && opcionesPermisos ? (
             <>
-              <FormPermisosAgentes valor={permisos} onChange={setPermisos} catalogo={opcionesPermisos.catalog} operadores={opcionesPermisos.operators} />
+              <PermisosSegunAgentes
+                codigoPermitido={codigoOk}
+                sinAgentes={marcados.length === 0}
+                agentesNegocio={agentesDeNegocio(marcados).map((a) => a.displayName)}
+                valor={permisos}
+                onChange={setPermisos}
+                catalogo={opcionesPermisos.catalog}
+                operadores={opcionesPermisos.operators}
+              />
               {conCodigo && (
                 <Textarea
                   label='Motivo'

@@ -46,6 +46,7 @@ import {
   type ProjectRole,
 } from './projects-rules';
 import { cargarConfigProyectos } from '../proyectos/config-agentes';
+import { idsDesarrollo } from '../proyectos/agentes-desarrollo';
 import type { ConfigProyectos } from '../proyectos/config-agentes-rules';
 
 /** Proyecto resuelto para una persona que SÍ puede entrar. */
@@ -293,6 +294,8 @@ export interface AgenteDesignable {
   avatarUrl: string | null;
   avatarVersion: number | null;
   profiles: string[];
+  /** Agente de DESARROLLO (2026-10-27): solo a estos se les ofrece código y repos. */
+  esDesarrollo: boolean;
 }
 
 /**
@@ -305,6 +308,7 @@ export async function designableAgents(email: string, profile?: string): Promise
   const out = new Map<number, AgenteDesignable[]>();
   if (!acceso.canUseChat) return out;
   const config = await cargarConfigProyectos();
+  const desarrollo = await idsDesarrollo(acceso.agents.map((a) => a.idAgent));
   for (const a of acceso.agents) {
     // Habilitado y perfiles POR EMPRESA (configuración del módulo; sin configurar, el .env).
     for (const c of a.companies) {
@@ -320,6 +324,7 @@ export async function designableAgents(email: string, profile?: string): Promise
         avatarUrl: a.avatarUrl,
         avatarVersion: a.avatarVersion,
         profiles: perfiles,
+        esDesarrollo: desarrollo.has(a.idAgent),
       });
       out.set(c.idCompany, lista);
     }

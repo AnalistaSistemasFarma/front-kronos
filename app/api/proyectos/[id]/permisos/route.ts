@@ -12,6 +12,8 @@ import {
   tablaNoExiste,
 } from '../../../../../lib/proyectos/permisos-agentes';
 import type { PermisosProyectoDto } from '../../../../../lib/proyectos/permisos-agentes-tipos';
+import { agentesDelProyecto } from '../../../../../lib/proyectos/agentes-desarrollo';
+import { agentesDeNegocio, codigoPermitido, mensajeSoloDesarrollo, pideCodigo } from '../../../../../lib/proyectos/agentes-desarrollo-rules';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +26,8 @@ export const dynamic = 'force-dynamic';
  *   PATCH { codeLevel, repos[], deployApprovers[], reason } — SOLO la
  *        administración o quien tenga el subproceso /process/proyectos/permisos-agentes
  *        en la empresa del proyecto. Ser dueño NO alcanza. Queda en el registro.
+ *        Código o repos con algún agente que NO es de desarrollo: 400 (regla del
+ *        2026-10-27, lib/proyectos/agentes-desarrollo-rules.ts). «Ninguno» sí pasa.
  *
  * La puerta del proyecto va primero: quien no es miembro recibe 404 aunque sea
  * administrador (no se confirma que el proyecto exista).
@@ -36,12 +40,23 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
     const guard = await guardProject(id, { allowArchived: true });
     if ('response' in guard) return guard.response;
     const canEdit = !guard.project.archived && (await puedeGestionarPermisos(guard.user.email, guard.project.idCompany));
-    const [policy, log, catalog] = await Promise.all([
+    const [policy, log, agentes] = await Promise.all([
       leerPolitica(guard.project.idProject),
       registroPolitica(guard.project.idProject),
-      canEdit ? catalogoActivo() : Promise.resolve([]),
+      agentesDelProyecto(guard.project.idProject),
     ]);
-    const dto: PermisosProyectoDto = { policy, canEdit, catalog, operators: cargarOperadoresPases(), log };
+    const codeAllowed = codigoPermitido(agentes);
+    // Sin agentes de desarrollo no se ofrece el catálogo: no hay repos que escoger.
+    const catalog = canEdit && codeAllowed ? await catalogoActivo() : [];
+    const dto: PermisosProyectoDto = {
+      policy,
+      canEdit,
+      codeAllowed,
+      nonDevAgents: agentesDeNegocio(agentes).map((a) => a.displayName),
+      catalog,
+      operators: cargarOperadoresPases(),
+      log,
+    };
     return jsonNoStore(dto);
   } catch (error) {
     return serverError('GET /api/proyectos/[id]/permisos', error);
@@ -62,6 +77,10 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     if (!payload) return badRequest('El cuerpo debe ser un objeto JSON.');
     const motivo = normalizarMotivo(payload.reason);
     if (!motivo.ok) return badRequest(motivo.error);
+    if (pideCodigo(payload)) {
+      const agentes = await agentesDelProyecto(guard.project.idProject);
+      if (!codigoPermitido(agentes)) return badRequest(mensajeSoloDesarrollo(agentesDeNegocio(agentes).map((a) => a.displayName)));
+    }
     const catalogo = await catalogoActivo();
     const politica = normalizarPolitica(payload, { catalogoActivo: catalogo.map((r) => r.slug), operadores: cargarOperadoresPases() });
     if (!politica.ok) return badRequest(politica.error);
