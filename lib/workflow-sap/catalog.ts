@@ -13,6 +13,13 @@ export type TaskKind = 'normal' | 'authorization' | 'sap_executor';
 
 export type TriggerEvent = 'on_execute' | 'on_start' | 'on_approve' | 'on_final_approve' | 'on_reject' | 'on_quote';
 
+/** «Cuándo se ejecuta» de una Tarea SAP del flujo. */
+export const SAP_TASK_WHEN: { value: TriggerEvent; label: string }[] = [
+  { value: 'on_execute', label: 'Al llegarle el turno en el flujo' },
+  { value: 'on_reject', label: 'Solo si la autorización anterior se rechaza' },
+  { value: 'on_quote', label: 'Solo si la autorización anterior se envía a cotizar' },
+];
+
 export const TRIGGER_LABELS: Record<TriggerEvent, string> = {
   on_execute: 'Al ejecutar (tarea automática)',
   on_start: 'Al iniciar la tarea',
@@ -34,6 +41,11 @@ export interface MappingField {
 export interface SapActionDef {
   key: string;
   label: string;
+  /**
+   * Proceso o documento al que pertenece (agrupa el catalogo). Nuevos procesos
+   * agregan aqui sus acciones con su propio ejecutor en lib/workflow-sap/engine.ts.
+   */
+  domain: string;
   /** Lo que se muestra en el diagrama: metodo y entidad del Service Layer. */
   endpoint: string;
   /** Disparadores en los que tiene sentido. */
@@ -43,6 +55,11 @@ export interface SapActionDef {
   /** Estado U_SEND_State que deja (solo para cambios de estado). */
   resultingState?: string | null;
   mapping: MappingField[];
+  /**
+   * false = definida en el catalogo pero aun sin ejecutor automatico (p. ej. el
+   * borrador lo crea el formulario). La pantalla la muestra deshabilitada.
+   */
+  available?: boolean;
 }
 
 const DRAFT_MAPPING: MappingField[] = [
@@ -70,15 +87,18 @@ export const SAP_ACTIONS: SapActionDef[] = [
   {
     key: 'purchase.create_draft',
     label: 'Crear borrador de solicitud de compra',
+    domain: 'Compras · Solicitud de compra',
     endpoint: 'POST Drafts (oPurchaseRequest)',
     triggers: ['on_execute'],
     taskKinds: ['sap_executor'],
     resultingState: 'B',
     mapping: DRAFT_MAPPING,
+    available: false,
   },
   {
     key: 'purchase.state_to_authorize',
     label: 'Pasar a «Por autorizar»',
+    domain: 'Compras · Solicitud de compra',
     endpoint: 'PATCH Drafts(n) · U_SEND_State = LA',
     triggers: ['on_start', 'on_execute'],
     taskKinds: ['authorization', 'sap_executor'],
@@ -88,24 +108,27 @@ export const SAP_ACTIONS: SapActionDef[] = [
   {
     key: 'purchase.state_rejected',
     label: 'Pasar a «No aprobado»',
+    domain: 'Compras · Solicitud de compra',
     endpoint: 'PATCH Drafts(n) · U_SEND_State = NAD',
     triggers: ['on_reject'],
-    taskKinds: ['authorization'],
+    taskKinds: ['authorization', 'sap_executor'],
     resultingState: 'NAD',
     mapping: STATE_MAPPING,
   },
   {
     key: 'purchase.state_quotation',
     label: 'Pasar a «En cotización» y avisar a Compras',
+    domain: 'Compras · Solicitud de compra',
     endpoint: 'PATCH Drafts(n) · U_SEND_State = ENC',
     triggers: ['on_quote'],
-    taskKinds: ['authorization'],
+    taskKinds: ['authorization', 'sap_executor'],
     resultingState: 'ENC',
     mapping: STATE_MAPPING,
   },
   {
     key: 'purchase.publish_firm',
     label: 'Publicar solicitud en firme',
+    domain: 'Compras · Solicitud de compra',
     endpoint: 'POST PurchaseRequests',
     triggers: ['on_final_approve', 'on_execute'],
     taskKinds: ['authorization', 'sap_executor'],
@@ -118,12 +141,37 @@ export const SAP_ACTIONS: SapActionDef[] = [
   {
     key: 'purchase.attach',
     label: 'Adjuntar cotizaciones y anexos',
+    domain: 'Compras · Solicitud de compra',
     endpoint: 'POST/PATCH Attachments2',
     triggers: ['on_execute'],
     taskKinds: ['sap_executor'],
     resultingState: null,
+    available: false,
     mapping: [{ source: 'Archivos de la solicitud (PDF, JPG, PNG)', target: 'Attachments2_Lines', editable: false }],
   },
+];
+
+/** Acciones que se pueden configurar hoy en un tipo de tarea y disparador. */
+export function actionsFor(taskKind: TaskKind, trigger: TriggerEvent): SapActionDef[] {
+  return SAP_ACTIONS.filter((a) => a.available !== false && a.taskKinds.includes(taskKind) && a.triggers.includes(trigger));
+}
+
+/** Disparadores que aplican a un tipo de tarea. */
+export function triggersFor(taskKind: TaskKind): TriggerEvent[] {
+  if (taskKind === 'sap_executor') return ['on_execute', 'on_reject', 'on_quote'];
+  if (taskKind === 'authorization') return ['on_start', 'on_final_approve', 'on_reject', 'on_quote'];
+  return [];
+}
+
+/**
+ * Efectos SAP con los que trabajaba el flujo de compras antes de ser configurable.
+ * Se usan si el proceso aun no tiene nada configurado (compatibilidad).
+ */
+export const DEFAULT_AUTHORIZATION_EFFECTS: { trigger: TriggerEvent; actionKey: string }[] = [
+  { trigger: 'on_start', actionKey: 'purchase.state_to_authorize' },
+  { trigger: 'on_final_approve', actionKey: 'purchase.publish_firm' },
+  { trigger: 'on_reject', actionKey: 'purchase.state_rejected' },
+  { trigger: 'on_quote', actionKey: 'purchase.state_quotation' },
 ];
 
 export function getSapAction(key: string): SapActionDef | undefined {
@@ -144,6 +192,7 @@ export function validateTaskAction(params: {
   const def = getSapAction(params.actionKey);
   if (!def) return [`La acción «${params.actionKey}» no existe en el catálogo.`];
   const errors: string[] = [];
+  if (def.available === false) errors.push(`«${def.label}» todavía no se puede ejecutar automáticamente.`);
   if (!def.taskKinds.includes(params.taskKind)) {
     errors.push(`«${def.label}» no se puede usar en una tarea de tipo ${params.taskKind}.`);
   }

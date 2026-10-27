@@ -87,6 +87,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         pdf = await pdfDeAdjunto(itemId);
       } catch (error) {
         console.error('[chat/visor] conversión a PDF fallida', error);
+        if (esLimiteDePaginas(error)) {
+          // No es una falla pasajera: reintentar no sirve (2026-10-26, prod).
+          return NextResponse.json(
+            { error: 'Este archivo es demasiado grande para verlo como PDF (supera el límite de páginas de Microsoft).' },
+            { status: 422, headers: NO_STORE }
+          );
+        }
         return NextResponse.json(
           { error: 'No se pudo preparar la vista previa de este archivo.' },
           { status: 502, headers: NO_STORE }
@@ -182,6 +189,15 @@ async function leerHasta(stream: ReadableStream<Uint8Array>, max: number): Promi
     o += p.byteLength;
   }
   return { bytes, recortado };
+}
+
+/**
+ * Microsoft no convierte a PDF un Excel que daría demasiadas páginas
+ * (`ErrorCode=XLSPageLimitExceeded`, HTTP 406): pasó con libros de 4 MB y con
+ * hojas anchas de 450 KB. Se distingue para no decir «intente de nuevo».
+ */
+function esLimiteDePaginas(error: unknown): boolean {
+  return error instanceof Error && /PageLimitExceeded/i.test(error.message);
 }
 
 /** 404 sin pistas: mismo cuerpo tanto si no existe como si es de otra persona. */

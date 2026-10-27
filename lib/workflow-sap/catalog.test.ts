@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SAP_ACTIONS, getSapAction, validateTaskAction } from './catalog';
+import { SAP_ACTIONS, actionsFor, getSapAction, triggersFor, validateTaskAction } from './catalog';
 
 describe('catálogo de acciones SAP', () => {
   it('tiene claves únicas y cada acción con disparadores y mapeo', () => {
@@ -45,8 +45,20 @@ describe('validateTaskAction', () => {
       trigger: 'on_execute',
       mapping: { Comments: 'Asunto', U_SEND_Dep: '10', Inventado: 'x' },
     });
-    expect(errs).toHaveLength(2);
+    expect(errs).toHaveLength(3); // no disponible aún + campo bloqueado + campo inventado
     expect(errs.join(' ')).toContain('U_SEND_Dep');
     expect(errs.join(' ')).toContain('Inventado');
+  });
+});
+
+describe('actionsFor / triggersFor', () => {
+  it('ofrece solo acciones disponibles para el tipo y disparador', () => {
+    expect(actionsFor('sap_executor', 'on_execute').map((a) => a.key)).toEqual([
+      'purchase.state_to_authorize',
+      'purchase.publish_firm',
+    ]);
+    expect(actionsFor('authorization', 'on_reject').map((a) => a.key)).toEqual(['purchase.state_rejected']);
+    expect(actionsFor('sap_executor', 'on_quote').map((a) => a.key)).toEqual(['purchase.state_quotation']);
+    expect(triggersFor('normal')).toEqual([]);
   });
 });

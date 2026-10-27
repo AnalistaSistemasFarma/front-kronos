@@ -16,7 +16,7 @@ vi.mock('@/lib/prisma', () => ({ prisma: { tag: 'prisma' } }));
 vi.mock('../../../../lib/prisma', () => ({ prisma: { tag: 'prisma' } }));
 vi.mock('../../../../lib/sgc/access', () => ({ getSgcAccessForUser: m.getSgcAccessForUser }));
 vi.mock('../../../../lib/sgc/db/documents', () => ({ getAccessSubject: m.getAccessSubject }));
-vi.mock('@/lib/sgc/onedrive', () => ({ downloadSgcFile: 'bajar' }));
+vi.mock('@/lib/sgc/onedrive', () => ({ downloadSgcFile: 'bajar', sgcOfficeConverter: { item: 'ms-item', bytes: 'ms' } }));
 vi.mock('@/lib/sgc/pdf/render', () => ({ docxToHtml: 'word', htmlToPdf: 'chrome' }));
 vi.mock('@/lib/sgc/db/layout', () => ({ inspectDraftSheets: m.inspectDraftSheets, validateDraftSheetSettings: m.validateDraftSheetSettings, buildLayoutPreview: m.buildLayoutPreview, saveDocumentLayout: m.saveDocumentLayout }));
 

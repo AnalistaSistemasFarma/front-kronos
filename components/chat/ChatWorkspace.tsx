@@ -635,6 +635,17 @@ export default function ChatWorkspace({
     [overview.agents, selectedCode]
   );
 
+  // Ficha del agente para el HILO, sin `busy`: ese campo cambia cada vez que
+  // CUALQUIER agente empieza o termina de trabajar y, con un objeto nuevo,
+  // se caía el `memo` de todas las burbujas del hilo (se redibujaban todas
+  // justo cuando el agente responde). El hilo no usa `busy`; la cabecera sí,
+  // y sigue leyendo `selectedAgent` (2026-10-22).
+  const claveAgenteHilo = selectedAgent ? JSON.stringify({ ...selectedAgent, busy: undefined }) : null;
+  const agenteHilo = useMemo<ChatAgentDto | null>(
+    () => (claveAgenteHilo ? (JSON.parse(claveAgenteHilo) as ChatAgentDto) : null),
+    [claveAgenteHilo]
+  );
+
   const selectAgent = (agent: ChatAgentDto) => {
     setSeleccion({ tipo: 'agente', code: agent.code });
     verEnLaUrl(`/process/chat?agent=${encodeURIComponent(agent.code)}`);
@@ -1514,7 +1525,7 @@ export default function ChatWorkspace({
         {/* Sin `height`: el alto lo acota el contenedor, y dentro del hilo solo
             scrollea la lista de mensajes — el compositor queda fijo abajo. */}
         <ChatThread
-          agent={selectedAgent}
+          agent={agenteHilo ?? selectedAgent}
           idConversacion={overview.conversationByAgent.get(selectedAgent.idAgent)?.id ?? null}
           active
         />

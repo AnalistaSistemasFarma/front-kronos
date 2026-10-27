@@ -411,6 +411,61 @@ export async function listProjectsForUser(user: ProjectUser, opciones: { archiva
   };
 }
 
+/**
+ * Conversaciones de proyecto donde la persona PUEDE ESCRIBIR (2026-10-24),
+ * para el selector de «Compartir → Reenviar por el chat» del visor de
+ * adjuntos. Misma regla de escritura que la puerta (evaluarAgente: rol con
+ * escritura, agente vigente y asignado en la empresa), resuelta en bloque:
+ * una consulta de proyectos y una de permisos, sin N+1. La puerta del POST
+ * se vuelve a pasar igual al reenviar: esto solo arma la lista.
+ */
+export async function conversacionesDeProyectoEscribibles(
+  user: ProjectUser
+): Promise<{ idConversation: number; titulo: string | null; proyecto: string; agente: string; lastMessageAt: Date | null }[]> {
+  const listado = await listProjectsForUser(user, { archivados: false });
+  if (!listado || listado.projects.length === 0) return [];
+  const conEscritura = listado.projects.filter((p) => capabilitiesFor(p.myRole).write);
+  if (conEscritura.length === 0) return [];
+
+  const filas = await prisma.chatConversation.findMany({
+    where: { kind: 'project', archived: false, id_project: { in: conEscritura.map((p) => p.idProject) } },
+    select: {
+      id: true,
+      title: true,
+      id_project: true,
+      last_message_at: true,
+      agent: { select: { id_agent: true, code: true, display_name: true, is_active: true } },
+    },
+    orderBy: [{ last_message_at: 'desc' }, { id: 'desc' }],
+    take: 200,
+  });
+  if (filas.length === 0) return [];
+
+  const [asignados, config, designados] = await Promise.all([
+    agentesAsignados(user.email),
+    cargarConfigProyectos(),
+    prisma.chatProjectAgent.findMany({
+      where: { id_project: { in: conEscritura.map((p) => p.idProject) } },
+      select: { id_project: true, id_agent: true },
+    }),
+  ]);
+  const enProyecto = new Set(designados.map((d) => `${d.id_project}:${d.id_agent}`));
+  const proyectos = new Map(conEscritura.map((p) => [p.idProject, p]));
+
+  const salida: { idConversation: number; titulo: string | null; proyecto: string; agente: string; lastMessageAt: Date | null }[] = [];
+  for (const c of filas) {
+    const p = c.id_project === null ? undefined : proyectos.get(c.id_project);
+    if (!p) continue;
+    const agente = enProyecto.has(`${p.idProject}:${c.agent.id_agent}`)
+      ? { idAgent: c.agent.id_agent, code: c.agent.code, isActive: c.agent.is_active }
+      : null;
+    const w = evaluarAgente(agente, { idCompany: p.company.idCompany, profile: p.profile.key, role: p.myRole }, asignados, config);
+    if (!w.ok) continue;
+    salida.push({ idConversation: c.id, titulo: c.title, proyecto: p.name, agente: c.agent.display_name, lastMessageAt: c.last_message_at });
+  }
+  return salida;
+}
+
 /* ───────────────────────────── Detalle ───────────────────────────────── */
 
 /** Lo que la base sabe del proyecto; los vínculos los completa projects-links. */
@@ -440,6 +495,8 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
           size_bytes: true,
           created_at: true,
           uploaded_by: true,
+          uploaded_by_agent: true,
+          id_conversation: true,
         },
         orderBy: { created_at: 'desc' },
       },
@@ -487,6 +544,15 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
   }
   const persona = (id: string | null) => (id ? { id, name: nombres.get(id) ?? 'Persona retirada' } : null);
 
+  // Archivos que generó un agente en una conversación (2026-10-23): su nombre visible.
+  const idsAgentes = [...new Set(p.files.map((f) => f.uploaded_by_agent).filter((x): x is number => typeof x === 'number'))];
+  const nombresAgentes = new Map<number, string>(p.agents.map((x) => [x.agent.id_agent, x.agent.display_name]));
+  const faltanAgentes = idsAgentes.filter((id) => !nombresAgentes.has(id));
+  if (faltanAgentes.length > 0) {
+    const as = await prisma.agent.findMany({ where: { id_agent: { in: faltanAgentes } }, select: { id_agent: true, display_name: true } });
+    for (const a of as) nombresAgentes.set(a.id_agent, a.display_name);
+  }
+
   return {
     idProject: p.id_project,
     name: p.name,
@@ -525,6 +591,10 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
       sizeBytes: f.size_bytes,
       createdAt: f.created_at.toISOString(),
       uploadedBy: persona(f.uploaded_by),
+      uploadedByAgent:
+        typeof f.uploaded_by_agent === 'number'
+          ? { idAgent: f.uploaded_by_agent, name: nombresAgentes.get(f.uploaded_by_agent) ?? 'Asistente', idConversation: f.id_conversation ?? null }
+          : null,
       downloadUrl: `/api/proyectos/${p.id_project}/archivos/${f.id_project_file}`,
       puedoQuitar: !p.archived && (caps.removeAny || (caps.contribute && f.uploaded_by === user.id)),
     })),

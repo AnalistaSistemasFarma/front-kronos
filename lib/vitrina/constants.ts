@@ -1,0 +1,265 @@
+/**
+ * Vitrina Comercial — constantes del módulo (sprint V2, 2026-10-22).
+ *
+ * Archivo PURO (sin BD ni `server-only`): lo usan los componentes cliente, las
+ * rutas y las pruebas. Brief: «brief-desarrollo-vitrina-v2.md» del hilo del
+ * proyecto «Vitrina Virtual Synerlink».
+ *
+ * El V2 construye el catálogo (tablas vitrina_*), la lectura de SAP por empresa
+ * (SOLO LECTURA) y el submódulo «Vitrina Comercial · Gestión». Las pantallas de
+ * los comerciales van en el V3/V4.
+ */
+
+/** Raíz de las páginas del módulo. */
+export const VITRINA_BASE_URL = '/process/vitrina';
+export const VITRINA_GESTION_URL = '/process/vitrina/gestion';
+
+/** Pantallas de los comerciales (V3/V4). */
+export const VITRINA_URLS = {
+  inicio: VITRINA_BASE_URL,
+  biblioteca: `${VITRINA_BASE_URL}/biblioteca`,
+  portafolio: `${VITRINA_BASE_URL}/portafolio`,
+  paises: `${VITRINA_BASE_URL}/paises`,
+  ficha: `${VITRINA_BASE_URL}/ficha`,
+} as const;
+
+/** Proceso contenedor del menú (Ventas, id 4 en KRONOSDB y KRONOSDB_PRUEBAS). */
+export const VITRINA_PROCESS_NAME = 'Ventas';
+
+/** Subprocesos-permiso (subprocess × company_user). Ambos son tarjetas del menú. */
+export const VITRINA_SUBPROCESS_URLS = {
+  consulta: VITRINA_BASE_URL,
+  gestion: VITRINA_GESTION_URL,
+} as const;
+
+export const VITRINA_SUBPROCESS_NAMES = {
+  consulta: 'Vitrina Comercial',
+  gestion: 'Vitrina Comercial · Gestión',
+} as const;
+
+export const VITRINA_MODULE_NAME = 'Vitrina Comercial';
+export const VITRINA_GESTION_NAME = 'Vitrina Comercial · Gestión';
+
+// ---------------------------------------------------------------------------
+// Dominios cerrados (iguales a los CHECK de la migración 20261022200000_vitrina_comercial)
+// ---------------------------------------------------------------------------
+
+export const VITRINA_ESTADOS = ['PENDIENTE', 'VALIDADA', 'RETIRADA'] as const;
+export type VitrinaEstado = (typeof VITRINA_ESTADOS)[number];
+
+export const VITRINA_VISIBILIDADES = ['INTERNA', 'CLIENTE', 'OFERTABLE'] as const;
+export type VitrinaVisibilidad = (typeof VITRINA_VISIBILIDADES)[number];
+
+export const VITRINA_CANALES = ['INSTITUCIONAL', 'COMERCIAL', 'SIN_DATO'] as const;
+export type VitrinaCanal = (typeof VITRINA_CANALES)[number];
+
+export const VITRINA_REGISTRO_ESTADOS = ['VIGENTE', 'POR_VENCER', 'VENCIDO', 'SIN_REGISTRO', 'SIN_FECHA'] as const;
+export type VitrinaRegistroEstado = (typeof VITRINA_REGISTRO_ESTADOS)[number];
+
+export const VITRINA_ALCANCES = ['EXHIBIR', 'OFERTAR'] as const;
+export type VitrinaAlcance = (typeof VITRINA_ALCANCES)[number];
+
+export const VITRINA_IMAGEN_TIPOS = ['VIAL', 'ETIQUETA', 'PLEGADIZA'] as const;
+export type VitrinaImagenTipo = (typeof VITRINA_IMAGEN_TIPOS)[number];
+export const VITRINA_DOCUMENTO_TIPOS = ['FICHA', 'INSERTO', 'PROSPECTO'] as const;
+export type VitrinaDocumentoTipo = (typeof VITRINA_DOCUMENTO_TIPOS)[number];
+
+export const IMAGEN_TIPO_LABEL: Record<VitrinaImagenTipo, string> = {
+  VIAL: 'Vial',
+  ETIQUETA: 'Etiqueta',
+  PLEGADIZA: 'Plegadiza',
+};
+
+export const DOCUMENTO_TIPO_LABEL: Record<VitrinaDocumentoTipo, string> = {
+  FICHA: 'Ficha',
+  INSERTO: 'Inserto',
+  PROSPECTO: 'Prospecto',
+};
+
+/** Tope por imagen de empaque (V3). Por debajo del límite de IIS (30 MB) con margen. */
+export const VITRINA_IMAGEN_MAX_BYTES = 10 * 1024 * 1024;
+
+/** Formatos de imagen admitidos (se verifica la firma del archivo, no solo la extensión). */
+export const VITRINA_IMAGEN_ACCEPT = '.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp';
+
+/** Máximo de destacadas que muestra el Inicio de los comerciales. */
+export const VITRINA_MAX_DESTACADAS = 3;
+
+/** Formas farmacéuticas sugeridas (texto libre en la base; la lista ayuda a no escribir variantes). */
+export const VITRINA_FORMAS = ['Vial', 'Ampolla', 'Bolsa', 'Botella', 'Blíster', 'Jeringa prellenada', 'Frasco'] as const;
+
+/** Familias sugeridas (texto libre en la base). */
+export const VITRINA_FAMILIAS = ['Carbapenémicos', 'Cefalosporinas', 'Monobactámicos', 'Penicilinas', 'Vitaminas', 'Cuidado crítico'] as const;
+
+/** Etiquetas visibles. */
+export const ESTADO_LABEL: Record<VitrinaEstado, string> = {
+  PENDIENTE: 'Pendiente de validar',
+  VALIDADA: 'Validada',
+  RETIRADA: 'Retirada',
+};
+
+export const VISIBILIDAD_LABEL: Record<VitrinaVisibilidad, string> = {
+  INTERNA: 'Interna',
+  CLIENTE: 'Vista al cliente',
+  OFERTABLE: 'Ofertable',
+};
+
+export const CANAL_LABEL: Record<VitrinaCanal, string> = {
+  INSTITUCIONAL: 'Institucional',
+  COMERCIAL: 'Comercial',
+  SIN_DATO: 'Sin dato',
+};
+
+export const REGISTRO_LABEL: Record<VitrinaRegistroEstado, string> = {
+  VIGENTE: 'Registro vigente',
+  POR_VENCER: 'Registro por vencer',
+  VENCIDO: 'Registro vencido',
+  SIN_REGISTRO: 'Sin registro',
+  // 9999-01-01 en SAP: Comercial confirmó (23-oct) que esos registros NO vencen (cambio normativo).
+  SIN_FECHA: 'Registro sin vencimiento',
+};
+
+export const ALCANCE_LABEL: Record<VitrinaAlcance, string> = {
+  EXHIBIR: 'Exhibir',
+  OFERTAR: 'Ofertar',
+};
+
+/** Colores de Mantine (tema activo) para las etiquetas de estado. Nada de colores fijos. */
+export const REGISTRO_COLOR: Record<VitrinaRegistroEstado, string> = {
+  VIGENTE: 'green',
+  POR_VENCER: 'yellow',
+  VENCIDO: 'red',
+  SIN_REGISTRO: 'red',
+  SIN_FECHA: 'teal',
+};
+
+export const ESTADO_COLOR: Record<VitrinaEstado, string> = {
+  PENDIENTE: 'yellow',
+  VALIDADA: 'green',
+  RETIRADA: 'gray',
+};
+
+export const VISIBILIDAD_COLOR: Record<VitrinaVisibilidad, string> = {
+  INTERNA: 'gray',
+  CLIENTE: 'blue',
+  OFERTABLE: 'violet',
+};
+
+/** Días de anticipación del aviso «por vencer» del registro sanitario (decisión 8.1-3). */
+export const VITRINA_DIAS_POR_VENCER = 90;
+
+/** Días de anticipación del aviso de exclusividad por vencer. */
+export const VITRINA_DIAS_EXCLUSIVIDAD_POR_VENCER = 30;
+
+/**
+ * El valor 9999-01-01 de U_Fecha_Vencimiento: el registro NO vence (Comercial, 23-oct). Internamente
+ * sigue siendo el estado SIN_FECHA; en pantalla se muestra «Registro sin vencimiento».
+ */
+export const VITRINA_FECHA_SIN_DATO = '9999-01-01';
+
+/** Límites de texto (iguales a las columnas de la base). */
+export const VITRINA_LIMITS = {
+  molecula: 200,
+  concentracion: 100,
+  forma: 60,
+  nombreComercial: 200,
+  tallMan: 200,
+  familia: 100,
+  pais: 60,
+  clienteMarca: 100,
+  cliente: 150,
+  observacion: 500,
+  areaNombre: 80,
+  lineaNombre: 100,
+  grupoNombre: 100,
+  semillaBytes: 2_000_000,
+  semillaFilas: 5000,
+} as const;
+
+/** Entidades y acciones del historial (vitrina_historial). */
+export const VITRINA_ENTIDADES = ['presentacion', 'codigo_sap', 'exclusividad', 'area', 'linea_comercial', 'grupo_terapeutico', 'empresa', 'imagen', 'documento'] as const;
+export type VitrinaEntidad = (typeof VITRINA_ENTIDADES)[number];
+
+export const VITRINA_ACCIONES = [
+  'CREAR',
+  'EDITAR',
+  'AGRUPAR',
+  'DESAGRUPAR',
+  'ACTIVAR',
+  'DESACTIVAR',
+  'VALIDAR',
+  'RETIRAR',
+  'ELIMINAR',
+  'SINCRONIZAR',
+  'ALERTA_SAP',
+  'REGISTRO',
+  'SEMILLA',
+  'CARGAR',
+  'VINCULAR',
+  'DESVINCULAR',
+] as const;
+export type VitrinaAccion = (typeof VITRINA_ACCIONES)[number];
+
+export const ACCION_LABEL: Record<VitrinaAccion, string> = {
+  CREAR: 'Creación',
+  EDITAR: 'Edición',
+  AGRUPAR: 'Agrupación',
+  DESAGRUPAR: 'Devuelto a la bandeja',
+  ACTIVAR: 'Activación',
+  DESACTIVAR: 'Desactivación',
+  VALIDAR: 'Validación',
+  RETIRAR: 'Retiro',
+  ELIMINAR: 'Eliminación',
+  SINCRONIZAR: 'Lectura de SAP',
+  ALERTA_SAP: 'Alerta de SAP',
+  REGISTRO: 'Cambio de registro sanitario',
+  SEMILLA: 'Carga de sugerencias',
+  CARGAR: 'Carga de imagen',
+  VINCULAR: 'Vínculo con el SGC',
+  DESVINCULAR: 'Vínculo retirado',
+};
+
+export const ENTIDAD_LABEL: Record<VitrinaEntidad, string> = {
+  presentacion: 'Presentación',
+  codigo_sap: 'Código SAP',
+  exclusividad: 'Exclusividad',
+  area: 'Servicio (área asistencial)',
+  linea_comercial: 'Línea comercial',
+  grupo_terapeutico: 'Grupo terapéutico',
+  empresa: 'Empresa',
+  imagen: 'Imagen',
+  documento: 'Documento del SGC',
+};
+
+/**
+ * Vista MULTIEMPRESA por grupo terapéutico (Ricardo, 23-oct: «todo lo que tengo en antibióticos de
+ * Farmalógica, Ryan…»). Choca con la regla del 22-oct (cada comercial ve SOLO su empresa) y está
+ * pendiente de decisión: la consulta queda preparada (lib/vitrina/consulta.ts,
+ * listarCatalogoMultiempresa) pero APAGADA y sin ruta ni pantalla que la use.
+ */
+export const VITRINA_MULTIEMPRESA_HABILITADA: boolean = false;
+
+/** Tipo de job del programador central (lib/scheduler/handlers.js). */
+export const VITRINA_JOB_TYPE = 'vitrina_sincronizar_sap';
+
+function normalizeUrl(url: string | null | undefined): string {
+  return (url ?? '').trim().toLowerCase().replace(/\/+$/, '');
+}
+
+export type VitrinaPermission = keyof typeof VITRINA_SUBPROCESS_URLS;
+
+/** Permiso del módulo que representa una URL de subproceso, o null. */
+export function vitrinaPermissionFromUrl(url: string | null | undefined): VitrinaPermission | null {
+  const u = normalizeUrl(url);
+  if (u === VITRINA_SUBPROCESS_URLS.gestion) return 'gestion';
+  if (u === VITRINA_SUBPROCESS_URLS.consulta) return 'consulta';
+  return null;
+}
+
+export function vitrinaHref(path: string, idCompany: number | null | undefined, extra?: Record<string, string | number | null | undefined>): string {
+  const qs = new URLSearchParams();
+  if (idCompany) qs.set('empresa', String(idCompany));
+  for (const [k, v] of Object.entries(extra ?? {})) if (v !== null && v !== undefined && v !== '') qs.set(k, String(v));
+  const s = qs.toString();
+  return s ? `${path}?${s}` : path;
+}

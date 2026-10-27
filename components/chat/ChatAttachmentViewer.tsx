@@ -5,6 +5,7 @@ import { ActionIcon, Alert, Button, Center, Group, Loader, Modal, SegmentedContr
 import { useMediaQuery } from '@mantine/hooks';
 import {
   IconAlertTriangle,
+  IconCheck,
   IconChevronLeft,
   IconChevronRight,
   IconDownload,
@@ -26,6 +27,7 @@ import {
   type TipoVisor,
 } from '../../lib/chat/visor';
 import ChatMarkdown from './ChatMarkdown';
+import CompartirAdjunto, { type AvisoCompartir } from './CompartirAdjunto';
 
 /** Lo mínimo de un adjunto para abrirlo en el visor. */
 export interface AdjuntoVisor {
@@ -100,6 +102,14 @@ export default function ChatAttachmentViewer({
   const conZoom = tipoEfectivo === 'imagen' || tipoEfectivo === 'pdf' || tipoEfectivo === 'office';
 
   useEffect(() => setZoom(1), [actual?.id]);
+
+  // Confirmación de «Compartir», ARRIBA del visor y con color; se va sola.
+  const [aviso, setAviso] = useState<AvisoCompartir | null>(null);
+  useEffect(() => {
+    if (!aviso) return;
+    const t = window.setTimeout(() => setAviso(null), 6000);
+    return () => window.clearTimeout(t);
+  }, [aviso]);
 
   const anterior = useCallback(() => {
     if (indice > 0) onIndice(indice - 1);
@@ -190,6 +200,7 @@ export default function ChatAttachmentViewer({
               )}
             </>
           )}
+          <CompartirAdjunto adjunto={actual} onAviso={setAviso} />
           <Tooltip label='Descargar' withArrow>
             <ActionIcon
               component='a'
@@ -209,6 +220,21 @@ export default function ChatAttachmentViewer({
         </Group>
       </Group>
 
+      {aviso && (
+        <Alert
+          color={aviso.color}
+          variant='light'
+          radius={0}
+          py={8}
+          withCloseButton
+          onClose={() => setAviso(null)}
+          icon={aviso.color === 'green' ? <IconCheck size={16} /> : <IconAlertTriangle size={16} />}
+          role='status'
+          data-testid='chat-visor-aviso'
+        >
+          <Text size='sm'>{aviso.texto}</Text>
+        </Alert>
+      )}
       <div className='chat-visor__area' data-tipo={tipoEfectivo} data-testid='chat-visor-area'>
         {tipoEfectivo === 'imagen' && (
           <VistaImagen
@@ -227,11 +253,7 @@ export default function ChatAttachmentViewer({
         {(tipoEfectivo === 'markdown' || tipoEfectivo === 'csv' || tipoEfectivo === 'texto') && vista && (
           <VistaTexto key={actual.id} url={vista} tipo={tipoEfectivo} fileName={actual.fileName} />
         )}
-        {tipoEfectivo === 'video' && vista && (
-          <video key={actual.id} className='chat-visor__video' src={vista} controls playsInline preload='metadata' data-testid='chat-visor-video'>
-            Su navegador no puede reproducir este video.
-          </video>
-        )}
+        {tipoEfectivo === 'video' && vista && <VistaVideo key={actual.id} url={vista} />}
         {tipoEfectivo === 'audio' && vista && (
           <Center p='lg'>
             <audio key={actual.id} src={vista} controls preload='metadata' style={{ width: '100%' }} data-testid='chat-visor-audio' />
@@ -240,6 +262,56 @@ export default function ChatAttachmentViewer({
         {tipoEfectivo === 'ninguno' && <SinVista adjunto={actual} />}
       </div>
     </Modal>
+  );
+}
+
+/* ─────────────────────────────── Video ──────────────────────────────── */
+
+const ERROR_MEDIO: Record<number, string> = {
+  1: 'se interrumpió la carga',
+  2: 'se cortó la conexión',
+  3: 'el navegador no pudo decodificarlo',
+  4: 'el navegador no admite este formato',
+};
+
+/**
+ * El reproductor del navegador. Si el video no se puede reproducir (formato
+ * o códec que el navegador no admite, conexión cortada), antes quedaba un
+ * cuadro gris sin explicación: ahora se dice qué pasó y se ofrece reintentar
+ * (Descargar sigue en la barra del visor). El código queda en la consola
+ * para diagnosticar (2026-10-26).
+ */
+function VistaVideo({ url }: { url: string }) {
+  const [fallo, setFallo] = useState<string | null>(null);
+  const [intento, setIntento] = useState(0);
+  if (fallo) {
+    return (
+      <ErrorVista
+        mensaje={`No se pudo reproducir el video: ${fallo}. Puede descargarlo desde la barra del visor.`}
+        onReintentar={() => {
+          setFallo(null);
+          setIntento((n) => n + 1);
+        }}
+      />
+    );
+  }
+  return (
+    <video
+      key={intento}
+      className='chat-visor__video'
+      src={url}
+      controls
+      playsInline
+      preload='metadata'
+      data-testid='chat-visor-video'
+      onError={(e) => {
+        const err = e.currentTarget.error;
+        console.warn('[chat/visor] video', url, err?.code, err?.message);
+        setFallo(ERROR_MEDIO[err?.code ?? 0] ?? 'error desconocido');
+      }}
+    >
+      Su navegador no puede reproducir este video.
+    </video>
   );
 }
 
@@ -357,12 +429,25 @@ function VistaImagen({
 
 /* ──────────────────────────── PDF y Office ──────────────────────────── */
 
-function VistaPdf({ url, zoom, convertido }: { url: string; zoom: number; convertido: boolean }) {
+function VistaPdf({
+  url,
+  zoom,
+  convertido,
+  onFallo,
+}: {
+  url: string;
+  zoom: number;
+  convertido: boolean;
+  /** Si se pasa, quien lo usa decide qué mostrar cuando el PDF no se puede preparar. */
+  onFallo?: (mensaje: string) => void;
+}) {
   const paginasRef = useRef<HTMLDivElement>(null);
   const bytesRef = useRef<Uint8Array | null>(null);
   const generacion = useRef(0);
   const [estado, setEstado] = useState<{ tipo: 'cargando' } | { tipo: 'listo' } | { tipo: 'error'; mensaje: string }>({ tipo: 'cargando' });
   const [intento, setIntento] = useState(0);
+  const onFalloRef = useRef(onFallo);
+  onFalloRef.current = onFallo;
 
   const dibujar = useCallback(async (escala: number) => {
     const bytes = bytesRef.current;
@@ -385,7 +470,9 @@ function VistaPdf({ url, zoom, convertido }: { url: string; zoom: number; conver
       })
       .catch((e: unknown) => {
         if (ctrl.signal.aborted) return;
-        setEstado({ tipo: 'error', mensaje: e instanceof Error ? e.message : String(e) });
+        const mensaje = e instanceof Error ? e.message : String(e);
+        setEstado({ tipo: 'error', mensaje });
+        onFalloRef.current?.(mensaje);
       });
     return () => ctrl.abort();
   }, [url, intento, dibujar]);
@@ -416,6 +503,8 @@ function VistaPdf({ url, zoom, convertido }: { url: string; zoom: number; conver
 interface HojasDto {
   hojas: { nombre: string; html: string }[];
   css: string;
+  /** Fórmulas sin resultado guardado (libro hecho por un programa): en «Hojas» saldrían vacías. */
+  formulasSinCalcular?: number;
 }
 
 /** Documento aislado de una hoja: sin scripts (sandbox vacío + CSP), solo estilos. */
@@ -437,6 +526,19 @@ function VistaHoja({ url }: { url: string }) {
   const [error, setError] = useState<string | null>(null);
   const [intento, setIntento] = useState(0);
   const [hoja, setHoja] = useState<string | null>('0');
+  // Libro con fórmulas sin calcular: se abre en PDF (Excel Online las calcula) y se avisa.
+  const [sinCalcular, setSinCalcular] = useState(0);
+  const avisado = useRef(false);
+  // El PDF que se abrió SOLO (por las fórmulas) no se pudo preparar: se vuelve a «Hojas» y se avisa.
+  const [pdfFallido, setPdfFallido] = useState<string | null>(null);
+  const alFallarPdf = useCallback(
+    (mensaje: string) => {
+      if (!sinCalcular) return; // La persona eligió «PDF» o el libro no se lee: se queda el error con Reintentar.
+      setPdfFallido(mensaje);
+      setModo('hojas');
+    },
+    [sinCalcular]
+  );
 
   useEffect(() => {
     if (modo !== 'hojas') return;
@@ -449,6 +551,13 @@ function VistaHoja({ url }: { url: string }) {
         if (!ctrl.signal.aborted) {
           setDatos(d);
           setHoja('0');
+          const n = d.formulasSinCalcular ?? 0;
+          if (n > 0 && !avisado.current) {
+            // Solo la primera vez: si la persona vuelve a «Hojas», se queda ahí.
+            avisado.current = true;
+            setSinCalcular(n);
+            setModo('pdf');
+          }
         }
       })
       .catch((e: unknown) => {
@@ -476,8 +585,22 @@ function VistaHoja({ url }: { url: string }) {
           aria-label='Cómo ver el Excel'
         />
       </Group>
+      {pdfFallido && (
+        <Alert color='orange' variant='light' radius={0} py={6} icon={<IconAlertTriangle size={16} />} data-testid='chat-visor-pdf-fallido'>
+          <Text size='xs'>{pdfFallido} Se muestran las hojas: las fórmulas sin calcular salen vacías; descargue el archivo para ver los resultados.</Text>
+        </Alert>
+      )}
+      {sinCalcular > 0 && !pdfFallido && (
+        <Alert color='yellow' variant='light' radius={0} py={6} icon={<IconAlertTriangle size={16} />} data-testid='chat-visor-formulas'>
+          <Text size='xs'>
+            {modo === 'pdf'
+              ? 'Este Excel trae fórmulas sin calcular (lo generó un programa). Se muestra como PDF, que sí las calcula.'
+              : 'Este Excel trae fórmulas sin calcular: en esta vista esas celdas salen vacías. Use «PDF» para ver los resultados.'}
+          </Text>
+        </Alert>
+      )}
       {modo === 'pdf' ? (
-        <VistaPdfConZoom url={urlPdf} />
+        <VistaPdfConZoom url={urlPdf} onFallo={alFallarPdf} />
       ) : error ? (
         <ErrorVista mensaje={error} onReintentar={() => setIntento((n) => n + 1)} />
       ) : !datos ? (
@@ -517,7 +640,7 @@ function VistaHoja({ url }: { url: string }) {
 }
 
 /** El PDF del Excel con su propio zoom (la barra del visor no lo maneja en modo hoja). */
-function VistaPdfConZoom({ url }: { url: string }) {
+function VistaPdfConZoom({ url, onFallo }: { url: string; onFallo?: (mensaje: string) => void }) {
   const [zoom, setZoom] = useState(1);
   return (
     <>
@@ -529,7 +652,7 @@ function VistaPdfConZoom({ url }: { url: string }) {
           <IconZoomIn size={16} />
         </ActionIcon>
       </Group>
-      <VistaPdf url={url} zoom={zoom} convertido />
+      <VistaPdf url={url} zoom={zoom} convertido onFallo={onFallo} />
     </>
   );
 }

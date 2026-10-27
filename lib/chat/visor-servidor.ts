@@ -116,6 +116,35 @@ export async function pdfDeAdjunto(onedriveItemId: string): Promise<Uint8Array> 
 export interface HojasDeExcel {
   hojas: { nombre: string; html: string }[];
   css: string;
+  /**
+   * Fórmulas SIN valor calculado guardado (2026-10-24). El motor de hojas
+   * toma el valor que Excel dejó en el archivo; un libro generado por un
+   * programa (openpyxl, el que usan los agentes) trae la fórmula pero no el
+   * resultado, y esas celdas salían EN BLANCO. Con > 0 el visor abre el PDF
+   * de Microsoft (Excel Online sí recalcula) y lo avisa.
+   */
+  formulasSinCalcular: number;
+}
+
+/**
+ * Cuántas celdas de las hojas visibles tienen fórmula y no traen el resultado
+ * guardado. Recorre solo celdas con valor (exceljs no materializa las vacías).
+ */
+export async function contarFormulasSinCalcular(bytes: Uint8Array): Promise<number> {
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(bytes) as unknown as ArrayBuffer);
+  let n = 0;
+  for (const hoja of wb.worksheets) {
+    if (hoja.state === 'hidden' || hoja.state === 'veryHidden') continue;
+    hoja.eachRow({ includeEmpty: false }, (fila) => {
+      fila.eachCell({ includeEmpty: false }, (celda) => {
+        const v = celda.value as { formula?: unknown; sharedFormula?: unknown; result?: unknown } | null;
+        if (v && typeof v === 'object' && (v.formula !== undefined || v.sharedFormula !== undefined) && (v.result === undefined || v.result === null)) n++;
+      });
+    });
+  }
+  return n;
 }
 
 const MARCA_HOJA = '<h2 class="sgc-hoja-nombre';
@@ -148,13 +177,42 @@ async function bytesDeGraph(onedriveItemId: string): Promise<Uint8Array> {
   return new Uint8Array(await new Response(contenido.stream).arrayBuffer());
 }
 
+/**
+ * Las hojas de un libro ya descargado. Si exceljs no puede leer el original
+ * (los libros que generan los agentes con openpyxl, ver ./xlsx-reparar.ts),
+ * lo intenta con una copia reparada; si tampoco, lanza el error ORIGINAL y la
+ * ruta responde 422 para que el visor caiga al PDF.
+ */
+export async function leerHojasDeExcel(bytes: Uint8Array): Promise<HojasDeExcel & { reparado: boolean }> {
+  const { xlsxToSheet } = await import('../sgc/pdf/viewable');
+  let libro = bytes;
+  let reparado = false;
+  let hoja: Awaited<ReturnType<typeof xlsxToSheet>>;
+  try {
+    hoja = await xlsxToSheet(libro);
+  } catch (error) {
+    const { repararXlsxParaExceljs } = await import('./xlsx-reparar');
+    const copia = await repararXlsxParaExceljs(bytes).catch(() => null);
+    if (!copia?.cambios) throw error;
+    try {
+      hoja = await xlsxToSheet(copia.bytes);
+    } catch {
+      throw error;
+    }
+    libro = copia.bytes;
+    reparado = true;
+  }
+  // Contar es un extra: si falla, se muestran las hojas como siempre.
+  const formulasSinCalcular = await contarFormulasSinCalcular(libro).catch(() => 0);
+  return { hojas: partirHojas(hoja.html), css: hoja.css, formulasSinCalcular, reparado };
+}
+
 /** Las hojas de un .xlsx (con caché). Lanza si el libro no se puede leer. */
 export async function hojasDeAdjunto(onedriveItemId: string): Promise<HojasDeExcel> {
   const json = await cache.obtener(`hojas:${onedriveItemId}`, async () => {
-    const { xlsxToSheet } = await import('../sgc/pdf/viewable');
-    const hoja = await xlsxToSheet(await bytesDeGraph(onedriveItemId));
-    const salida: HojasDeExcel = { hojas: partirHojas(hoja.html), css: hoja.css };
-    return new TextEncoder().encode(JSON.stringify(salida));
+    const { reparado, ...salida } = await leerHojasDeExcel(await bytesDeGraph(onedriveItemId));
+    if (reparado) console.info(`[chat/visor] Excel ${onedriveItemId} leído con la copia reparada (formato de openpyxl)`);
+    return new TextEncoder().encode(JSON.stringify(salida satisfies HojasDeExcel));
   });
   return JSON.parse(new TextDecoder().decode(json)) as HojasDeExcel;
 }

@@ -5,7 +5,8 @@ import { odataString } from './drafts';
  * PURAS: arman la consulta y proyectan el resultado. Replican las de SAPSEND
  * (ModalCreatePurchaseRequest.jsx:220-398) con dos correcciones:
  *  - el texto del usuario se escapa (SAPSEND lo interpolaba sin escapar);
- *  - en cuentas, el and/or va entre parentesis (SAPSEND devolvia cualquier cuenta de nivel 8).
+ *  - en cuentas, el and/or va entre parentesis (SAPSEND devolvia cualquier cuenta de nivel 8),
+ *    se busca por codigo O por nombre y solo cuentas activas.
  * Normas de reparto: SAP ignora $filter en esa lista, asi que se filtra en memoria.
  */
 
@@ -31,7 +32,7 @@ export function lookupPath(kind: LookupKind, q: string): string {
     case 'vendor':
       return `BusinessPartners?$top=${TOP}&$select=CardCode,CardName&$filter=(startswith(CardName,${t}) or startswith(CardCode,${t})) and CardType eq 'cSupplier' and Frozen eq 'tNO'`;
     case 'account':
-      return `ChartOfAccounts?$top=${TOP}&$select=Code,Name&$filter=startswith(Code,${t}) and (AccountLevel eq 5 or AccountLevel eq 8)`;
+      return `ChartOfAccounts?$top=${TOP}&$select=Code,Name&$filter=(startswith(Code,${t}) or contains(Name,${t})) and (AccountLevel eq 5 or AccountLevel eq 8) and ActiveAccount eq 'tYES'`;
     case 'tax':
       return `SalesTaxCodes?$top=${TOP}&$select=Code,Name&$filter=contains(Code,${t}) and Inactive eq 'tNO' and ValidForAP eq 'tYES'`;
     case 'warehouse':

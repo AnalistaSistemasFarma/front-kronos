@@ -44,7 +44,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     const headers = new Headers(NO_STORE);
-    headers.set('Content-Type', safeDownloadContentType(archivo.content_type));
+    headers.set('Content-Type', safeDownloadContentType(archivo.content_type, archivo.file_name));
     headers.set('Content-Disposition', buildContentDisposition(archivo.file_name));
     headers.set('X-Content-Type-Options', 'nosniff');
     if (content.contentLength) headers.set('Content-Length', content.contentLength);

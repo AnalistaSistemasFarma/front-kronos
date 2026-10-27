@@ -9,20 +9,43 @@ import { FONT_FACE_VARIABLES } from '../lib/theme/fontFaces';
 import AppToaster from '../components/ui/AppToaster';
 import ServiceWorkerRegistrar from '../components/ServiceWorkerRegistrar';
 import RecuperacionActualizacion from '../components/errors/RecuperacionActualizacion';
+import { ICONOS_PRUEBAS, esEntornoPruebas, tituloSegunEntorno } from '../lib/entorno';
+import FranjaEntornoPruebas from '../components/entorno/FranjaEntornoPruebas';
 
-export const metadata: Metadata = {
+const appleWebAppBase = {
+  capable: true,
+  statusBarStyle: 'default',
+  title: 'SynerLink',
+} as const;
+
+const metadataBase: Metadata = {
   title: 'SynerLink',
   description: 'Sistema de gestión de solicitudes',
   manifest: '/manifest.webmanifest',
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: 'default',
-    title: 'SynerLink',
-  },
+  appleWebApp: appleWebAppBase,
   icons: {
     apple: '/iconocel.png',
   },
 };
+
+// En producción devuelve `metadataBase` tal cual. Solo con SYNERLINK_ENTORNO=pruebas
+// (servidor de la .230) cambia el título y los íconos para distinguir la pestaña.
+export function generateMetadata(): Metadata {
+  if (!esEntornoPruebas()) return metadataBase;
+  return {
+    ...metadataBase,
+    title: tituloSegunEntorno('SynerLink', true),
+    appleWebApp: { ...appleWebAppBase, title: tituloSegunEntorno('SynerLink', true) },
+    icons: {
+      icon: [
+        { url: ICONOS_PRUEBAS.svg, type: 'image/svg+xml' },
+        { url: ICONOS_PRUEBAS.png, type: 'image/png', sizes: '256x256' },
+      ],
+      shortcut: ICONOS_PRUEBAS.png,
+      apple: ICONOS_PRUEBAS.apple,
+    },
+  };
+}
 
 export const viewport: Viewport = {
   themeColor: '#0078D4',
@@ -46,6 +69,7 @@ export default async function RootLayout({
         className='antialiased min-h-screen'
         style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)' }}
       >
+        {esEntornoPruebas() && <FranjaEntornoPruebas />}
         <Providers session={session}>{children}</Providers>
         <AppToaster />
         <ServiceWorkerRegistrar />
