@@ -106,3 +106,15 @@ export function esUrlProduccionNabuco(url: string | null | undefined): boolean {
     .toLowerCase()
     .includes(PRUEBAS_MANUALES.hostProduccion);
 }
+
+/** Transferencia asistida (pestaña «Pruebas manuales»: Buscar pendientes → Simular → Crear). */
+export const ASISTIDA = {
+  limiteDefecto: 50,
+  limiteMax: 200,
+  /** Máximo de DocEntry por llamada a simular/crear. */
+  maxDocs: 200,
+  /** Tope de documentos de SAP que se recorren buscando pendientes (más recientes primero). */
+  escaneoMax: 5000,
+  /** La pantalla manda Simular/Crear en tandas de este tamaño (progreso y tiempo por petición). */
+  tanda: 10,
+};

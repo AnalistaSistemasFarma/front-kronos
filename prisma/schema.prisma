@@ -1650,10 +1650,15 @@ model PortalCourse {
   /// entre pruebas y producción. Quién y cuándo queda aquí como auditoría.
   eliminado_at   DateTime?
   eliminado_por  String? @db.NVarChar(255)
+  /// Empresa dueña del curso (módulo Formación, 2026-10-26). NULL = GSS: lo
+  /// administra quien tenga el permiso de Formación en GSS.
+  id_company_owner Int?
 
   materials    PortalCourseMaterial[]
   enrollments  PortalCourseEnrollment[]
   certificates PortalCertificate[]
+  alcances     FormacionCursoAlcance[]
+  divulgaciones FormacionDivulgacion[]
 
   @@index([active, id(sort: Desc)])
   @@map("portal_course")
@@ -1708,6 +1713,8 @@ model PortalCourseMaterial {
   intentos   PortalFormularioIntento[]
 
   @@index([course_id, orden])
+  preguntas FormacionPregunta[]
+
   @@map("portal_course_material")
   @@schema("dbo")
 }
@@ -5318,5 +5325,118 @@ model VitrinaHistorial {
   @@index([entidad, id_entidad], map: "IX_vitrina_historial_entidad")
   @@index([id_company, registrado_en], map: "IX_vitrina_historial_company")
   @@map("vitrina_historial")
+  @@schema("dbo")
+}
+
+/// MÓDULO FORMACIÓN (2026-10-26, Nicolás Rivera) — departamentos de SynerLink
+/// que aplican en cada empresa. Administrable desde /process/formacion.
+model FormacionEmpresaDepartamento {
+  id            Int      @id @default(autoincrement())
+  id_company    Int
+  id_department Int
+  activo        Boolean  @default(true)
+  updated_by    String   @db.NVarChar(255)
+  updated_at    DateTime @default(now())
+
+  @@unique([id_company, id_department], map: "formacion_empresa_departamento_uq")
+  @@map("formacion_empresa_departamento")
+  @@schema("dbo")
+}
+
+/// Colaborador -> empresa -> departamento, para quien no tiene el
+/// departamento en SynerLink (entra a Formación con código al correo).
+model FormacionColaborador {
+  id            Int      @id @default(autoincrement())
+  email         String   @db.NVarChar(255)
+  nombre        String?  @db.NVarChar(255)
+  id_company    Int
+  id_department Int
+  updated_by    String   @db.NVarChar(255)
+  updated_at    DateTime @default(now())
+
+  @@unique([email, id_company], map: "formacion_colaborador_uq")
+  @@map("formacion_colaborador")
+  @@schema("dbo")
+}
+
+/// Alcance de un curso por empresa y departamento (NULL = todos los
+/// departamentos de esa empresa). Un curso SIN filas es para todos.
+model FormacionCursoAlcance {
+  id            Int          @id @default(autoincrement())
+  course_id     Int
+  course        PortalCourse @relation(fields: [course_id], references: [id], onDelete: Cascade, map: "formacion_curso_alcance_course_fkey")
+  id_company    Int
+  id_department Int?
+  activo        Boolean      @default(true)
+  updated_by    String       @db.NVarChar(255)
+  updated_at    DateTime     @default(now())
+
+  @@unique([course_id, id_company, id_department], map: "formacion_curso_alcance_uq")
+  @@map("formacion_curso_alcance")
+  @@schema("dbo")
+}
+
+/// Divulgación de un curso o de un material (video) nuevo: deja a cada
+/// destinatario un pendiente que se ve en el ícono de Formación del header.
+model FormacionDivulgacion {
+  id            Int          @id @default(autoincrement())
+  course_id     Int
+  course        PortalCourse @relation(fields: [course_id], references: [id], onDelete: Cascade, map: "formacion_divulgacion_course_fkey")
+  material_id   Int?
+  mensaje       String?      @db.NVarChar(1000)
+  divulgado_por String       @db.NVarChar(255)
+  divulgado_at  DateTime     @default(now())
+
+  destinatarios FormacionDivulgacionDestinatario[]
+
+  @@map("formacion_divulgacion")
+  @@schema("dbo")
+}
+
+model FormacionDivulgacionDestinatario {
+  id             Int                  @id @default(autoincrement())
+  divulgacion_id Int
+  divulgacion    FormacionDivulgacion @relation(fields: [divulgacion_id], references: [id], onDelete: Cascade, map: "formacion_divulgacion_destinatario_div_fkey")
+  email          String               @db.NVarChar(255)
+  visto_at       DateTime?
+
+  @@unique([divulgacion_id, email], map: "formacion_divulgacion_destinatario_uq")
+  @@index([email, visto_at], map: "formacion_divulgacion_destinatario_email_visto_idx")
+  @@map("formacion_divulgacion_destinatario")
+  @@schema("dbo")
+}
+
+/// Preguntas y respuestas de un material (video) del curso (Nicolás Rivera,
+/// 2026-10-26). parent_id = respuesta a otra pregunta. Borrado lógico.
+model FormacionPregunta {
+  id            Int                  @id @default(autoincrement())
+  material_id   Int
+  material      PortalCourseMaterial @relation(fields: [material_id], references: [id], onDelete: Cascade, map: "formacion_pregunta_material_fkey")
+  course_id     Int
+  parent_id     Int?
+  parent        FormacionPregunta?   @relation("FormacionPreguntaRespuestas", fields: [parent_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "formacion_pregunta_parent_fkey")
+  respuestas    FormacionPregunta[]  @relation("FormacionPreguntaRespuestas")
+  email         String               @db.NVarChar(255)
+  nombre        String               @db.NVarChar(255)
+  texto         String               @db.NVarChar(2000)
+  created_at    DateTime             @default(now())
+  eliminado_at  DateTime?
+  eliminado_por String?              @db.NVarChar(255)
+  likes         FormacionPreguntaLike[]
+
+  @@index([material_id, parent_id], map: "formacion_pregunta_material_idx")
+  @@map("formacion_pregunta")
+  @@schema("dbo")
+}
+
+model FormacionPreguntaLike {
+  id          Int               @id @default(autoincrement())
+  pregunta_id Int
+  pregunta    FormacionPregunta @relation(fields: [pregunta_id], references: [id], onDelete: Cascade, map: "formacion_pregunta_like_pregunta_fkey")
+  email       String            @db.NVarChar(255)
+  created_at  DateTime          @default(now())
+
+  @@unique([pregunta_id, email], map: "formacion_pregunta_like_uq")
+  @@map("formacion_pregunta_like")
   @@schema("dbo")
 }

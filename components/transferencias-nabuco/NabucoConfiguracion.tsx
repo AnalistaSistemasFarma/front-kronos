@@ -8,8 +8,52 @@ import SgcSelect from '../sgc/SgcSelect';
 import { CRON_OPCIONES, DEFAULTS, ENTIDAD_LABEL, NABUCO_ENTIDADES } from '../../lib/transferencias-nabuco/constants';
 import { MAPEO_ENCABEZADO_DEFECTO, MAPEO_LINEAS_DEFECTO, type FilaMapeo } from '../../lib/transferencias-nabuco/mapeo';
 import { describeCron } from '../../lib/scheduler/presets';
-import { errorTexto, nabucoSend, useNabucoFetch, type NabucoCompany } from './client';
+import type { DiagnosticoNabuco } from '../../lib/transferencias-nabuco/diagnostico';
+import { diagnosticoDe, errorTexto, nabucoSend, useNabucoFetch, type NabucoCompany } from './client';
 import NabucoMapeo from './NabucoMapeo';
+import NabucoDiagnostico from './NabucoDiagnostico';
+
+/** Resultado de «Probar conexión» (también lo usa la pestaña Pruebas manuales). */
+export interface ResultadoProbar {
+  diagnostico: DiagnosticoNabuco;
+  usaCambiosSinGuardar: boolean;
+}
+
+/** Datos de conexión de pantalla que se mandan a «Probar conexión» (no se guardan). */
+export interface DatosConexionPantalla {
+  nabuco_url: string;
+  nabuco_usuario: string;
+  nabuco_password: string;
+  nabuco_org: string;
+  ruta_token: string;
+  timeout_ms: number;
+}
+
+/** Valida en el cliente qué falta (ni escrito ni guardado). null = se puede probar. */
+export function faltanParaProbar(d: Partial<DatosConexionPantalla>, passwordGuardada: boolean): string | null {
+  const faltan = [!d.nabuco_url?.trim() && 'la URL', !d.nabuco_usuario?.trim() && 'el usuario', !d.nabuco_password && !passwordGuardada && 'la contraseña'].filter(Boolean);
+  return faltan.length ? `Falta ${faltan.join(', ')} de Nabuco (no está escrito en pantalla ni guardado).` : null;
+}
+
+/** Llama a «Probar conexión» de la config con los datos de pantalla y devuelve el diagnóstico (nunca lanza). */
+export async function probarConexionApi(idConfig: number, datos: Partial<DatosConexionPantalla>): Promise<ResultadoProbar> {
+  try {
+    const res = await fetch(`/api/transferencias-nabuco/configs/${idConfig}/probar`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(datos) });
+    const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; diagnostico?: DiagnosticoNabuco; usaCambiosSinGuardar?: boolean };
+    if (b.diagnostico) return { diagnostico: res.ok ? b.diagnostico : { ...b.diagnostico, http_synerlink: b.diagnostico.http_synerlink ?? res.status }, usaCambiosSinGuardar: Boolean(b.usaCambiosSinGuardar) };
+    return { diagnostico: diagnosticoDe(new Error(`SynerLink respondió HTTP ${res.status}: ${b.error ?? 'sin mensaje'}`)), usaCambiosSinGuardar: false };
+  } catch (e) {
+    return { diagnostico: { ...diagnosticoDe(e), etapa: 'red', mensaje: `No se pudo llamar a SynerLink: ${errorTexto(e)}` }, usaCambiosSinGuardar: false };
+  }
+}
+
+export function AvisoSinGuardar() {
+  return (
+    <Alert color='yellow' variant='light'>
+      Probado con los datos de pantalla, que aún NO están guardados. Guarde para que el envío use estas credenciales.
+    </Alert>
+  );
+}
 
 /** Configuración tal como la devuelve la API (nunca trae la contraseña). */
 interface ConfigPublica {
@@ -101,6 +145,8 @@ export default function NabucoConfiguracion({ company }: { company: NabucoCompan
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [docEntry, setDocEntry] = useState<number | string>('');
   const [preview, setPreview] = useState<string | null>(null);
+  const [prueba, setPrueba] = useState<ResultadoProbar | null>(null);
+  const [fallo, setFallo] = useState<DiagnosticoNabuco | null>(null);
 
   const actual = data?.configs.find((c) => String(c.id_config) === sel) ?? null;
 
@@ -112,12 +158,38 @@ export default function NabucoConfiguracion({ company }: { company: NabucoCompan
   useEffect(() => {
     setForm(actual ? formDe(actual) : formNuevo());
     setPreview(null);
+    setPrueba(null);
   }, [actual]);
+
+  // «Cambios sin guardar»: el formulario difiere de lo cargado (o hay una contraseña escrita).
+  const sinGuardar = actual ? JSON.stringify(form) !== JSON.stringify(formDe(actual)) : false;
+
+  const probar = async () => {
+    if (!actual) return;
+    const datos: DatosConexionPantalla = {
+      nabuco_url: form.nabuco_url ?? '',
+      nabuco_usuario: form.nabuco_usuario ?? '',
+      nabuco_password: form.nabuco_password,
+      nabuco_org: form.nabuco_org,
+      ruta_token: form.ruta_token,
+      timeout_ms: form.timeout_ms,
+    };
+    const falta = faltanParaProbar(datos, actual.password_configurada);
+    if (falta) {
+      setPrueba({ diagnostico: { ok: false, etapa: 'validacion', mensaje: falta, sugerencia: 'Complete el dato en el formulario (puede probar sin guardar). No se llamó al servidor.', duracion_ms: 0, cuando: new Date().toISOString() }, usaCambiosSinGuardar: false });
+      return;
+    }
+    setOcupado('probar');
+    setPrueba(null);
+    setPrueba(await probarConexionApi(actual.id_config, datos));
+    setOcupado(null);
+  };
 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   const guardar = async () => {
     setGuardando(true);
+    setFallo(null);
     try {
       const body = { ...form, company: company.idCompany, nabuco_password: form.nabuco_password || undefined };
       if (actual) {
@@ -133,14 +205,16 @@ export default function NabucoConfiguracion({ company }: { company: NabucoCompan
       }
     } catch (e) {
       toast.error(errorTexto(e));
+      setFallo(diagnosticoDe(e));
     } finally {
       setGuardando(false);
     }
   };
 
-  const ejecutar = async (que: 'probar' | 'ejecutar' | 'vista-previa') => {
+  const ejecutar = async (que: 'ejecutar' | 'vista-previa') => {
     if (!actual) return;
     setOcupado(que);
+    setFallo(null);
     try {
       if (que === 'vista-previa') {
         const r = await nabucoSend<{ payload: unknown }>(`/api/transferencias-nabuco/configs/${actual.id_config}/vista-previa`, 'POST', { docEntry: Number(docEntry) });
@@ -151,6 +225,7 @@ export default function NabucoConfiguracion({ company }: { company: NabucoCompan
       }
     } catch (e) {
       toast.error(errorTexto(e));
+      setFallo(diagnosticoDe(e));
     } finally {
       setOcupado(null);
     }
@@ -177,6 +252,7 @@ export default function NabucoConfiguracion({ company }: { company: NabucoCompan
           <Button variant='light' leftSection={<IconPlus size={16} />} onClick={() => setSel('')}>
             Nueva configuración
           </Button>
+          {sinGuardar && <Badge color='yellow'>Cambios sin guardar</Badge>}
           {actual && (
             <>
               <Badge color={actual.activo ? 'green' : 'gray'}>{actual.activo ? 'Activa' : 'Pausada'}</Badge>
@@ -229,11 +305,18 @@ export default function NabucoConfiguracion({ company }: { company: NabucoCompan
           <NumberInput label='Timeout (ms)' min={1000} max={120000} step={1000} value={form.timeout_ms} onChange={(v) => set('timeout_ms', Number(v) || DEFAULTS.timeoutMs)} />
         </SimpleGrid>
         <Group mt='sm'>
-          <Button variant='light' leftSection={<IconPlugConnected size={16} />} disabled={!actual} loading={ocupado === 'probar'} onClick={() => void ejecutar('probar')}>
+          <Button variant='light' leftSection={<IconPlugConnected size={16} />} disabled={!actual} loading={ocupado === 'probar'} onClick={() => void probar()}>
             Probar conexión
           </Button>
           {!actual && <Text size='sm' c='dimmed'>Guarde la configuración para probar la conexión.</Text>}
+          {actual && <Text size='sm' c='dimmed'>Prueba con los datos que están en pantalla (sin guardarlos).</Text>}
         </Group>
+        {prueba && (
+          <Stack gap='xs' mt='sm'>
+            {prueba.usaCambiosSinGuardar && <AvisoSinGuardar />}
+            <NabucoDiagnostico diagnostico={prueba.diagnostico} />
+          </Stack>
+        )}
       </Card>
 
       <Card shadow='sm' radius='md' withBorder p='md'>
@@ -304,6 +387,7 @@ export default function NabucoConfiguracion({ company }: { company: NabucoCompan
         </SimpleGrid>
       </Card>
 
+      {fallo && <NabucoDiagnostico diagnostico={fallo} />}
       <Group justify='flex-end'>
         {actual && (
           <Button variant='light' leftSection={<IconPlayerPlay size={16} />} loading={ocupado === 'ejecutar'} onClick={() => void ejecutar('ejecutar')}>

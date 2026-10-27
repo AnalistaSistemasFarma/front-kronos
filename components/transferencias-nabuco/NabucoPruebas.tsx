@@ -5,15 +5,24 @@ import { Alert, Badge, Button, Card, Code, Group, Loader, Modal, NumberInput, Sc
 import { IconAlertTriangle, IconEye, IconFileCode, IconPlugConnected, IconSend, IconWand } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import SgcSelect from '../sgc/SgcSelect';
+import NabucoAsistida from './NabucoAsistida';
 import { PRUEBAS_MANUALES, esUrlProduccionNabuco } from '../../lib/transferencias-nabuco/constants';
 import { ejemploPayload, type FilaMapeo } from '../../lib/transferencias-nabuco/mapeo';
-import { errorTexto, fmtFechaHora, nabucoSend, useNabucoFetch, type NabucoCompany } from './client';
+import { leerDiagnostico, type DiagnosticoNabuco } from '../../lib/transferencias-nabuco/diagnostico';
+import { diagnosticoDe, errorTexto, fmtFechaHora, nabucoSend, useNabucoFetch, type NabucoCompany } from './client';
+import { AvisoSinGuardar, faltanParaProbar, probarConexionApi, type ResultadoProbar } from './NabucoConfiguracion';
+import NabucoDiagnostico from './NabucoDiagnostico';
 
 interface ConfigResumen {
   id_config: number;
   nombre: string;
   modo_simulacion: boolean;
   nabuco_url: string | null;
+  nabuco_usuario: string | null;
+  password_configurada: boolean;
+  nabuco_org: string;
+  ruta_token: string;
+  timeout_ms: number;
   ruta_solicitudes: string;
   entidad_sap: string;
   clave_lineas: string;
@@ -42,6 +51,7 @@ interface Resultado {
   duracion_ms: number;
   respuesta: string | null;
   error: string | null;
+  diagnostico?: DiagnosticoNabuco;
 }
 
 function bonito(t: string | null | undefined): string {
@@ -66,7 +76,8 @@ export default function NabucoPruebas({ company }: { company: NabucoCompany }) {
   const hist = useNabucoFetch<{ pruebas: Prueba[] }>(historialUrl);
 
   const [ocupado, setOcupado] = useState<string | null>(null);
-  const [conexion, setConexion] = useState<{ ok: boolean; texto: string } | null>(null);
+  const [conexion, setConexion] = useState<ResultadoProbar | null>(null);
+  const [fallo, setFallo] = useState<DiagnosticoNabuco | null>(null);
   const [docEntry, setDocEntry] = useState<number | string>('');
   const [origenDoc, setOrigenDoc] = useState<number | null>(null);
   const [cuerpo, setCuerpo] = useState('');
@@ -83,6 +94,7 @@ export default function NabucoPruebas({ company }: { company: NabucoCompany }) {
   useEffect(() => {
     setConexion(null);
     setResultado(null);
+    setFallo(null);
     setCuerpo('');
     setOrigenDoc(null);
   }, [sel]);
@@ -93,20 +105,20 @@ export default function NabucoPruebas({ company }: { company: NabucoCompany }) {
 
   const esProduccion = esUrlProduccionNabuco(actual?.nabuco_url);
 
+  /** Esta pestaña no edita credenciales: prueba con lo GUARDADO (la de Configuración manda lo de pantalla). */
   const probar = async () => {
     if (!actual) return;
+    const datos = { nabuco_url: actual.nabuco_url ?? '', nabuco_usuario: actual.nabuco_usuario ?? '', nabuco_org: actual.nabuco_org, ruta_token: actual.ruta_token, timeout_ms: actual.timeout_ms };
+    const falta = faltanParaProbar(datos, actual.password_configurada);
+    if (falta) {
+      setConexion({ diagnostico: { ok: false, etapa: 'validacion', mensaje: falta, sugerencia: 'Complete y guarde los datos de Nabuco en la pestaña Configuración (allí también puede probar sin guardar). No se llamó al servidor.', duracion_ms: 0, cuando: new Date().toISOString() }, usaCambiosSinGuardar: false });
+      return;
+    }
     setOcupado('probar');
     setConexion(null);
-    try {
-      const res = await fetch(`/api/transferencias-nabuco/configs/${actual.id_config}/probar`, { method: 'POST' });
-      const b = (await res.json().catch(() => ({}))) as { mensaje?: string; error?: string };
-      setConexion({ ok: res.ok, texto: res.ok ? (b.mensaje ?? 'Conexión correcta.') : (b.error ?? `Error ${res.status}`) });
-      void hist.reload();
-    } catch (e) {
-      setConexion({ ok: false, texto: errorTexto(e) });
-    } finally {
-      setOcupado(null);
-    }
+    setConexion(await probarConexionApi(actual.id_config, datos));
+    void hist.reload();
+    setOcupado(null);
   };
 
   const armar = async () => {
@@ -116,8 +128,10 @@ export default function NabucoPruebas({ company }: { company: NabucoCompany }) {
       const r = await nabucoSend<{ payload: unknown }>(`/api/transferencias-nabuco/configs/${actual.id_config}/vista-previa`, 'POST', { docEntry: Number(docEntry) });
       setCuerpo(JSON.stringify(r.payload, null, 2));
       setOrigenDoc(Number(docEntry));
+      setFallo(null);
     } catch (e) {
       toast.error(errorTexto(e));
+      setFallo(diagnosticoDe(e));
     } finally {
       setOcupado(null);
     }
@@ -151,10 +165,13 @@ export default function NabucoPruebas({ company }: { company: NabucoCompany }) {
         confirmoProduccion: esProduccion ? palabra === PRUEBAS_MANUALES.palabraProduccion : undefined,
       });
       setResultado(r.resultado);
+      setFallo(null);
       setConfirmar(false);
       void hist.reload();
     } catch (e) {
       toast.error(errorTexto(e));
+      setFallo(diagnosticoDe(e));
+      setConfirmar(false);
     } finally {
       setOcupado(null);
     }
@@ -192,9 +209,12 @@ export default function NabucoPruebas({ company }: { company: NabucoCompany }) {
           {esProduccion && <Badge color='red'>Producción de Nabuco</Badge>}
         </Group>
         <Text size='sm' c='dimmed' mt='xs'>
-          Las pruebas manuales envían de verdad a Nabuco aunque la configuración esté en modo simulación. No afectan el envío automático ni el tablero.
+          Las pruebas manuales envían de verdad a Nabuco aunque la configuración esté en modo simulación. «Probar conexión» y el JSON libre no afectan el
+          envío automático ni el tablero; la Transferencia asistida sí registra en el tablero (simulados y enviados) y no reenvía lo ya enviado.
         </Text>
       </Card>
+
+      {actual && <NabucoAsistida key={actual.id_config} config={actual} />}
 
       <Card shadow='sm' radius='md' withBorder p='md'>
         <Title order={4} mb='sm'>
@@ -206,9 +226,10 @@ export default function NabucoPruebas({ company }: { company: NabucoCompany }) {
           </Button>
         </Group>
         {conexion && (
-          <Alert mt='sm' color={conexion.ok ? 'green' : 'red'} title={conexion.ok ? 'OK' : 'Falló'}>
-            {conexion.texto}
-          </Alert>
+          <Stack gap='xs' mt='sm'>
+            {conexion.usaCambiosSinGuardar && <AvisoSinGuardar />}
+            <NabucoDiagnostico diagnostico={conexion.diagnostico} />
+          </Stack>
         )}
       </Card>
 
@@ -242,6 +263,11 @@ export default function NabucoPruebas({ company }: { company: NabucoCompany }) {
             Enviar a Nabuco
           </Button>
         </Group>
+        {fallo && (
+          <Stack mt='sm'>
+            <NabucoDiagnostico diagnostico={fallo} />
+          </Stack>
+        )}
         {resultado && (
           <Stack gap='xs' mt='sm'>
             <Group gap='xs'>
@@ -251,7 +277,7 @@ export default function NabucoPruebas({ company }: { company: NabucoCompany }) {
                 {resultado.url}
               </Text>
             </Group>
-            {resultado.error && <Alert color='red'>{resultado.error}</Alert>}
+            {resultado.diagnostico ? <NabucoDiagnostico diagnostico={resultado.diagnostico} /> : resultado.error && <Alert color='red'>{resultado.error}</Alert>}
             <Text fw={600}>Respuesta de Nabuco</Text>
             <ScrollArea.Autosize mah={360}>
               <Code block>{bonito(resultado.respuesta)}</Code>
@@ -351,19 +377,30 @@ export default function NabucoPruebas({ company }: { company: NabucoCompany }) {
                 {`${detalle.usuario} · ${detalle.url}`}
               </Text>
             </Group>
-            {detalle.error && <Alert color='red'>{detalle.error}</Alert>}
-            {detalle.tipo === 'envio' && (
-              <>
-                <Text fw={600}>Payload</Text>
-                <ScrollArea.Autosize mah={260}>
-                  <Code block>{bonito(detalle.payload)}</Code>
-                </ScrollArea.Autosize>
-                <Text fw={600}>Respuesta de Nabuco</Text>
-                <ScrollArea.Autosize mah={260}>
-                  <Code block>{bonito(detalle.respuesta)}</Code>
-                </ScrollArea.Autosize>
-              </>
-            )}
+            {(() => {
+              const diag = leerDiagnostico(detalle.respuesta);
+              return (
+                <>
+                  {diag ? <NabucoDiagnostico diagnostico={diag} /> : detalle.error && <Alert color='red'>{detalle.error}</Alert>}
+                  {detalle.tipo === 'envio' && (
+                    <>
+                      <Text fw={600}>Payload</Text>
+                      <ScrollArea.Autosize mah={260}>
+                        <Code block>{bonito(detalle.payload)}</Code>
+                      </ScrollArea.Autosize>
+                      {!diag && (
+                        <>
+                          <Text fw={600}>Respuesta de Nabuco</Text>
+                          <ScrollArea.Autosize mah={260}>
+                            <Code block>{bonito(detalle.respuesta)}</Code>
+                          </ScrollArea.Autosize>
+                        </>
+                      )}
+                    </>
+                  )}
+                </>
+              );
+            })()}
           </Stack>
         )}
       </Modal>

@@ -3,8 +3,7 @@ import { NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { getActiveUserId, getNabucoAccessForUser, type NabucoCompanyAccess } from '../../../../lib/transferencias-nabuco/access';
 import { NABUCO_ADMIN_NAME, NABUCO_MODULE_NAME } from '../../../../lib/transferencias-nabuco/constants';
-import { NabucoError } from '../../../../lib/transferencias-nabuco/db';
-import { SapError } from '../../../../lib/sap/serviceLayer';
+import { respuestaErrorApi } from '../../../../lib/transferencias-nabuco/diagnostico';
 
 /**
  * Contexto común de /api/transferencias-nabuco/** (mismo patrón que Vitrina): sesión,
@@ -51,10 +50,14 @@ export async function readJson(request: Request): Promise<Record<string, unknown
   return body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
 }
 
-/** Errores de negocio con su mensaje; el resto, 500 sin detalle (nunca credenciales). */
+/**
+ * Errores con diagnóstico técnico (ver lib/transferencias-nabuco/diagnostico.ts):
+ * - Falla de Nabuco, de red o de SAP (upstream) → HTTP 200 con { ok: false, error, diagnostico }.
+ * - Nuestros: validación/conflicto (NabucoError) con su status; el resto 500 etapa 'interno'.
+ * Nunca credenciales (el diagnóstico ya viene enmascarado).
+ */
 export function errorResponse(error: unknown, tag: string): NextResponse {
-  if (error instanceof NabucoError) return jsonNoStore({ error: error.message }, error.status);
-  if (error instanceof SapError) return jsonNoStore({ error: `SAP: ${error.message}` }, 502);
-  console.error(`[transferencias-nabuco/${tag}]`, error instanceof Error ? error.message : error);
-  return jsonNoStore({ error: `Error interno de ${NABUCO_MODULE_NAME}` }, 500);
+  const r = respuestaErrorApi(error);
+  if (r.status >= 500) console.error(`[transferencias-nabuco/${tag}]`, error instanceof Error ? error.message : error);
+  return jsonNoStore(r.body, r.status);
 }
