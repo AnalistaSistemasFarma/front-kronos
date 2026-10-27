@@ -8,6 +8,11 @@ import { IconCloudUpload, IconFile, IconPlus, IconSend, IconTrash, IconX } from 
 import { COLUMNS, type FieldError, type Line, type LineField } from './RequestFormModal';
 import SapLookupInput from './SapLookupInput';
 import { FIELD_LOOKUP } from '../../../../lib/purchases/lookups';
+import { sapErrorText } from '../../../../lib/purchases/sapErrorHint';
+import toast from 'react-hot-toast';
+
+/** Aviso flotante con el error de SAP (como el NotifyError de SAPSEND). */
+const notifySapError = (msg: string) => toast.error(sapErrorText(msg), { duration: 12000, style: { whiteSpace: 'pre-line', maxWidth: 520 } });
 
 /**
  * Campos de la solicitud de compra DENTRO de «Crear Nueva Solicitud» (Mis solicitudes),
@@ -239,6 +244,7 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data.error || 'No se pudo crear la solicitud de compra');
+        if (data.error) notifySapError(String(data.error));
         setFieldErrors(Array.isArray(data.errors) ? data.errors : []);
         return;
       }
@@ -255,6 +261,7 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
         if (!up.ok) {
           const u = await up.json().catch(() => ({}));
           attachWarning = ` Los adjuntos no se cargaron: ${u.error || 'error'}.`;
+          if (u.error) notifySapError(String(u.error));
         }
       }
 
@@ -266,6 +273,7 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
       });
       const sentData = await sent.json().catch(() => ({}));
       if (!sent.ok) {
+        if (sentData.error) notifySapError(String(sentData.error));
         onDone({
           ok: false,
           message: `Se creó el borrador #${docEntry}, pero no se pudo enviar a autorizar: ${sentData.error || 'error'}.${attachWarning} Envíelo desde Compras.`,
@@ -275,6 +283,7 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
       onDone({ ok: !attachWarning, message: `Solicitud de compra #${docEntry} enviada a autorizar.${attachWarning}` });
     } catch {
       setError('Error de red al crear la solicitud de compra');
+      toast.error('Error de red al crear la solicitud de compra');
     } finally {
       setSaving(false);
     }
@@ -302,8 +311,8 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
   return (
     <Stack gap="md">
       {error && (
-        <Alert color="red">
-          {error}
+        <Alert color="red" style={{ whiteSpace: 'pre-line' }}>
+          {sapErrorText(error)}
           {generalErrors.length > 0 && (
             <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
               {generalErrors.map((e) => (
