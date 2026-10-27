@@ -39,6 +39,8 @@ IF NOT EXISTS (SELECT 1 FROM [sgc].[company_config] WHERE id_company = @IdCompan
   THROW 51191, N'La empresa no tiene el SGC configurado.', 1;
 IF NOT EXISTS (SELECT 1 FROM [sgc].[authorization_type] WHERE id_company = @IdCompany AND code = N'SGC-VERIF-CALIDAD' AND is_active = 1)
   THROW 51192, N'Falta el tipo de autorización SGC-VERIF-CALIDAD activo (grupo de Calidad).', 1;
+IF COL_LENGTH(N'sgc.flow_version', N'role_model') IS NULL
+  THROW 51193, N'Falta la columna sgc.flow_version.role_model (migración 20261014100000_sgc_s15_modelo_roles).', 1;
 
 SELECT 'antes' AS momento, p.code, p.is_active, v.version_number, v.status
 FROM [sgc].[flow_process] p LEFT JOIN [sgc].[flow_version] v ON v.id_flow_process = p.id_flow_process
@@ -55,8 +57,10 @@ BEGIN
     SET @IdProcess = SCOPE_IDENTITY();
 
     DECLARE @IdVersion INT;
-    INSERT INTO [sgc].[flow_version] (id_flow_process, version_number, status, change_reason, created_by, created_at, updated_at, published_by, published_at)
-    VALUES (@IdProcess, 1, N'vigente', @Motivo, @Actor, @Now, @Now, @Actor, @Now);
+    -- role_model «solicitante_elabora» (el del DOC v7): quien pide la redivulgación (Aseguramiento de Calidad)
+    -- define y amplía el alcance; con el modelo antiguo el solicitante solo podía SUGERIRLO.
+    INSERT INTO [sgc].[flow_version] (id_flow_process, version_number, status, change_reason, created_by, created_at, updated_at, published_by, published_at, role_model)
+    VALUES (@IdProcess, 1, N'vigente', @Motivo, @Actor, @Now, @Now, @Actor, @Now, N'solicitante_elabora');
     SET @IdVersion = SCOPE_IDENTITY();
 
     INSERT INTO [sgc].[flow_task_def] (id_flow_version, task_key, name, step_order, role, assignment, multi_assignee, signing_mode_default, signature_meaning, target_days, condition_key, is_authorization, authorization_type_code, pool_authorization_type_code, is_enabled, description)
