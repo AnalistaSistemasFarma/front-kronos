@@ -250,7 +250,8 @@ export async function deleteRequestDocumentCompletely(
     await insertRequestNote(
       pool,
       requestId,
-      `🗑️ Documento eliminado: ${fileName} — por ${actorDisplay} — Justificación: ${justification}`,
+      // Sin emoji: notes.note es TEXT (no Unicode) y lo guardaba como "???".
+      `Documento eliminado: ${fileName} — por ${actorDisplay} — Justificación: ${justification}`,
       params.actorUserId
     );
   } catch (err) {
