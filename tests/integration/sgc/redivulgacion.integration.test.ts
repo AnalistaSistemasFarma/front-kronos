@@ -32,6 +32,8 @@ describe.skipIf(!url)('SGC · redivulgación de un documento vigente con SQL Ser
   const PW = 'Clave-Rediv-ci#2026';
   const E = {
     cal: 'calidad.rediv@onelatampharma.com',
+    // Otra persona del grupo de Calidad: el aviso no le llega a quien lanza la redivulgación (recipients la excluye).
+    cal2: 'calidad2.rediv@onelatampharma.com',
     gestor: 'gestor.rediv@onelatampharma.com',
     l1: 'lector1.rediv@onelatampharma.com',
     l2: 'lector2.rediv@onelatampharma.com',
@@ -100,6 +102,7 @@ describe.skipIf(!url)('SGC · redivulgación de un documento vigente con SQL Ser
     const hash = bcrypt.hashSync(PW, 4);
     const grants: [string, string[], boolean][] = [
       [E.cal, ['calidad'], false],
+      [E.cal2, ['calidad'], false],
       [E.gestor, ['gestion'], false],
       [E.l1, ['lectura'], true],
       [E.l2, ['lectura'], true],
@@ -116,6 +119,7 @@ describe.skipIf(!url)('SGC · redivulgación de un documento vigente con SQL Ser
     await prisma.$executeRawUnsafe(seed('2026-09-30-sgc-s3-firma-calidad-olp.sql'));
     const calType = (await listAuthorizationTypes(prisma, CO)).find((t) => t.code === 'SGC-VERIF-CALIDAD')!;
     await grantAuthorizationTypeUser(prisma, CO, calType.id, { email: E.cal, reason: 'Calidad de la prueba de redivulgación' }, actor('ci@x.co'));
+    await grantAuthorizationTypeUser(prisma, CO, calType.id, { email: E.cal2, reason: 'Calidad de la prueba de redivulgación' }, actor('ci@x.co'));
     const cat = await getCatalogs(prisma, CO);
     const doc = await createInitialDocument(
       prisma,
@@ -196,7 +200,8 @@ describe.skipIf(!url)('SGC · redivulgación de un documento vigente con SQL Ser
     const again = await createRedissemination(prisma, notifier, cal, { idDocument: idDoc, entries, reason: 'Reinducción anual del área', confirmRepeat: true }, actor(E.cal));
     expect(again).toMatchObject({ readers: 2, alreadyRead: 1 });
     expect((await taskOf(again.idRequest, 'divulgacion')).assignees.find((a) => a.user_email === E.l1)).toMatchObject({ status: 'pendiente' });
-    expect(sent.some((x) => x.emails.includes(E.cal) && /vuelve a aparecer/.test(x.payload.body))).toBe(true);
+    expect(sent.some((x) => x.emails.includes(E.cal2) && /vuelve a aparecer/.test(x.payload.body))).toBe(true);
+    expect(sent.some((x) => x.emails.includes(E.cal) && /vuelve a aparecer/.test(x.payload.body))).toBe(false);
     const audit = await prisma.sgcAuditLog.findFirstOrThrow({ where: { id_company: CO, entity: 'request', entity_id: String(again.idRequest) } });
     expect(JSON.parse(audit.after_json!)).toMatchObject({ requestType: 'redivulgacion', alreadyRead: 1, confirmRepeat: true });
     await cancelRequest(prisma, notifier, cal, again.idRequest, { reason: 'Fin de la prueba de redivulgación' }, actor(E.cal));
