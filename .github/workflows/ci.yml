@@ -546,6 +546,15 @@ jobs:
           echo "IF COL_LENGTH(N'dbo.chat_project_file', N'uploaded_by_agent') IS NULL OR COL_LENGTH(N'dbo.chat_project_file', N'id_conversation') IS NULL THROW 50000, N'La migración de archivos del agente no dejó las columnas.', 1;" > /tmp/archivos-agente-ok.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/archivos-agente-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-23-chat-project-file-agente-PROD.sql; then echo "El script de PROD de archivos del agente debió negarse en kronos_ci"; exit 1; fi
+          # Agente de desarrollo en Proyectos (2026-10-27): migración y PRUEBAS dos veces (idempotencia), columna NOT NULL, PROD que se niega y la corrección de proyectos en modo LISTAR (no escribe).
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261027170000_agent_es_desarrollo/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261027170000_agent_es_desarrollo/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-27-agente-desarrollo-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-27-agente-desarrollo-PRUEBAS.sql
+          echo "IF COL_LENGTH(N'dbo.agent', N'es_desarrollo') IS NULL OR EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.agent') AND name = N'es_desarrollo' AND is_nullable = 1) THROW 50000, N'La migración de agente de desarrollo no dejó la columna NOT NULL.', 1;" > /tmp/agente-desarrollo-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/agente-desarrollo-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-27-agente-desarrollo-PROD.sql; then echo "El script de PROD de agente de desarrollo debió negarse en kronos_ci"; exit 1; fi
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-27-proyectos-codigo-no-desarrollo.sql
           # Vitrina · líneas comerciales y grupos terapéuticos (2026-10-23): migración y PRUEBAS dos veces (idempotencia, con semilla), objetos, semilla sin duplicar y PROD que se niega.
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261023120000_vitrina_lineas_grupos/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261023120000_vitrina_lineas_grupos/migration.sql
@@ -597,6 +606,11 @@ jobs:
             npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
           }
           # De la más nueva a la más antigua…
+          # Agente de desarrollo (2026-10-27): ida y vuelta (reversa dos veces, comprobación y la migración otra vez).
+          reversa prisma/manual/2026-10-27-agente-desarrollo-reversa.sql
+          echo "IF COL_LENGTH(N'dbo.agent', N'es_desarrollo') IS NOT NULL THROW 50000, N'La reversa de agente de desarrollo no quitó la columna.', 1;" > /tmp/agente-desarrollo-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/agente-desarrollo-quitado.sql
+          migra 20261027170000_agent_es_desarrollo
           # Archivos del agente (2026-10-23): con una fila marcada, sin la bandera debe negarse; luego ida y vuelta (reversa dos veces, comprobación y la migración otra vez).
           echo "UPDATE TOP (1) dbo.chat_project_file SET uploaded_by_agent = 1; IF NOT EXISTS (SELECT 1 FROM dbo.chat_project_file) INSERT INTO dbo.chat_project_file (id_project, file_name, uploaded_by_agent, id_conversation) SELECT TOP (1) id_project, N'ci-agente.pdf', 1, 1 FROM dbo.chat_project;" > /tmp/archivos-agente-dato.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/archivos-agente-dato.sql

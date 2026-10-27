@@ -16,6 +16,7 @@ import { pedirSugerencia } from '../../../lib/proyectos/equipo';
 import { estadosTrabajandoVisibles } from '../../../lib/proyectos/estado-agente-servidor';
 import { cargarOperadoresPases, normalizarMotivo, normalizarPolitica, type PoliticaEntrada } from '../../../lib/proyectos/permisos-agentes-rules';
 import { catalogoActivo, ErrorPermisos, guardarPolitica, puedeGestionarPermisos, tablaNoExiste } from '../../../lib/proyectos/permisos-agentes';
+import { agentesDeNegocio, codigoPermitido, mensajeSoloDesarrollo, pideCodigo } from '../../../lib/proyectos/agentes-desarrollo-rules';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,6 +34,8 @@ export const dynamic = 'force-dynamic';
  *        cambiarlos en esa empresa (administración o el subproceso
  *        /process/proyectos/permisos-agentes); si no puede y pide algo distinto
  *        de «ninguno», 403. Sin agentPolicy, el proyecto queda en «ninguno».
+ *        Código o repos con algún asistente que NO es de desarrollo: 400 y no se
+ *        crea nada (regla del 2026-10-27, lib/proyectos/agentes-desarrollo-rules.ts).
  *
  * SEGURIDAD
  *   - La persona sale de la SESIÓN; el dueño es SIEMPRE quien crea.
@@ -138,6 +141,10 @@ export async function POST(request: NextRequest) {
           { error: 'Solo la administración o quien tenga el permiso «Permisos de agentes en Proyectos» en esa empresa puede dar acceso a código.' },
           { status: 403 }
         );
+      }
+      // Código o repos solo con agentes de desarrollo (2026-10-27): TODOS los escogidos.
+      if (puede && pideCodigo(pedida) && !codigoPermitido(agentes)) {
+        return badRequest(mensajeSoloDesarrollo(agentesDeNegocio(agentes).map((a) => a.displayName)));
       }
       if (puede) {
         const catalogo = await catalogoActivo();
