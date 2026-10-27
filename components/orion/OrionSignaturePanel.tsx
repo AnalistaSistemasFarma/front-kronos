@@ -796,6 +796,8 @@ export default function OrionSignaturePanel({
         }
         if (data.signerCompleted) {
           // Cerrar UI de inmediato; el consentimiento persona puede persistir en paralelo.
+          // complete-sign ya cerró la autorización FIRMA de este PDF.
+          setPendingAuthorizationByFile((prev) => ({ ...prev, [file.fileId]: false }));
           setIdentityModalOpen(false);
           setIdentityError(null);
           setAcceptLoading(false);
@@ -1141,7 +1143,6 @@ export default function OrionSignaturePanel({
         setAcceptLoading(false);
         return;
       }
-      const skipAuthRedirect = Boolean(opts?.skipAuthRedirect || fromAuthorization);
       try {
         const qs = new URLSearchParams({
           requestId: String(requestId),
@@ -1176,47 +1177,8 @@ export default function OrionSignaturePanel({
             }));
           }
 
-          // Auth FIRMA pendiente de ESTE PDF: consumir y seguir a firmar.
-          // Si closed=0 (ya no había abierta), continuar — no redirigir a Autorizaciones
-          // (evita el bucle cuando la auth ya estaba AUTORIZADA).
-          const pendingForFile =
-            data.pendingAuthorizationByFile &&
-            typeof data.pendingAuthorizationByFile === 'object'
-              ? Boolean(
-                  (data.pendingAuthorizationByFile as Record<string, boolean>)[file.fileId]
-                )
-              : Boolean(data.pendingAuthorization);
-
-          if (pendingForFile) {
-            try {
-              const consumeRes = await fetch('/api/integrations/orion/consume-auth', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  requestId,
-                  fileId: file.fileId,
-                }),
-              });
-              if (consumeRes.ok) {
-                setPendingAuthorizationByFile((prev) => ({
-                  ...prev,
-                  [file.fileId]: false,
-                }));
-                // closed > 0 o 0: en ambos casos ya no hay pendiente usable → firmar.
-              } else if (!skipAuthRedirect) {
-                setError(
-                  'Primero debe autorizar la firma. Después volverá a la solicitud para firmar.'
-                );
-                window.location.href = '/process/authorization';
-                return;
-              }
-            } catch {
-              if (!skipAuthRedirect) {
-                window.location.href = '/process/authorization';
-                return;
-              }
-            }
-          }
+          // La auth FIRMA pendiente NO se consume aquí: abrir el documento no es firmar.
+          // complete-sign la cierra cuando la firma queda registrada.
         }
 
         const syncedDocs =
