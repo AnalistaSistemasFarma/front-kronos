@@ -8,6 +8,8 @@ import { IconPlus, IconTrash } from '@tabler/icons-react';
 import AttachmentsPanel from './AttachmentsPanel';
 import SapLookupInput from './SapLookupInput';
 import { FIELD_LOOKUP } from '../../../../lib/purchases/lookups';
+import { sapErrorText } from '../../../../lib/purchases/sapErrorHint';
+import toast from 'react-hot-toast';
 
 /**
  * Crear / editar una solicitud de compra (borrador oPurchaseRequest en SAP).
@@ -185,6 +187,9 @@ export default function RequestFormModal({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data.error || 'No se pudo guardar la solicitud');
+        if (data.error) {
+          toast.error(sapErrorText(String(data.error)), { duration: 12000, style: { whiteSpace: 'pre-line', maxWidth: 520 } });
+        }
         setFieldErrors(Array.isArray(data.errors) ? data.errors : []);
         return;
       }
