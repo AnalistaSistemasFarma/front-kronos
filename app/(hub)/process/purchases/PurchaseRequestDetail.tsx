@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Alert, Box, Button, Group, Loader, Stack, Table, Text, Title } from '@mantine/core';
+import { Alert, Badge, Button, Group, Loader, Stack, Table, Text } from '@mantine/core';
 import { IconHierarchy2, IconHistory, IconPaperclip } from '@tabler/icons-react';
 import { stateColor, stateLabel } from '../../../../lib/purchases/fields';
 import AttachmentsPanel from './AttachmentsPanel';
@@ -9,11 +9,12 @@ import TracePanel from './TracePanel';
 import ExecutionHistoryPanel from './ExecutionHistoryPanel';
 
 /**
- * Vista interna de la solicitud de compra con el MISMO diseño que SAPSEND
- * (ModalViewPurchaseRequest.jsx): botones Anexos y Estado, titulo con numero,
- * estado y creador, bloque de fechas, tabla de lineas, comentarios y motivo de
- * cancelacion. Se muestra dentro del detalle de la solicitud en «Mis solicitudes»
- * cuando esa solicitud autoriza un borrador de compra. Solo lectura.
+ * Bloque «Solicitud de compra en SAP» dentro del detalle de la solicitud (Mis
+ * solicitudes y Autorizaciones). Toma de SAPSEND (ModalViewPurchaseRequest.jsx)
+ * solo lo que el detalle de SynerLink no muestra ya: número y estado en SAP,
+ * fecha requerida, anexos, trazabilidad, historial, líneas, totales y motivo de
+ * rechazo. El asunto, el solicitante y la descripción (comentarios) ya están en
+ * el detalle general, así que no se repiten. Solo lectura.
  */
 
 interface Purchase {
@@ -32,24 +33,30 @@ const money = (v: unknown) => {
 const txt = (v: unknown) => (v == null ? '' : String(v));
 
 /** Columnas de la tabla de lineas, en el orden de SAPSEND. */
-const LINE_COLUMNS: { label: string; render: (l: Record<string, unknown>, i: number) => React.ReactNode; align?: 'right' }[] = [
+const LINE_COLUMNS: {
+  label: string;
+  render: (l: Record<string, unknown>, i: number) => React.ReactNode;
+  align?: 'right';
+  /** Se oculta si ninguna línea trae el dato (proyecto, destino, versión… casi siempre vacíos). */
+  optional?: boolean;
+}[] = [
   { label: 'Línea', render: (_l, i) => i + 1 },
-  { label: 'Artículo', render: (l) => txt(l.ItemCode) },
+  { label: 'Artículo', render: (l) => txt(l.ItemCode) , optional: true },
   { label: 'Descripción', render: (l) => txt(l.ItemDescription) },
   { label: 'Proveedor', render: (l) => txt(l.U_NombreProveedor ?? l.LineVendor) },
   { label: 'Fecha', render: (l) => day(l.RequiredDate) },
   { label: 'Cantidad', render: (l) => money(l.Quantity), align: 'right' },
   { label: 'Precio', render: (l) => `${money(l.UnitPrice ?? l.Price)} ${txt(l.Currency)}`.trim(), align: 'right' },
-  { label: 'Descuento', render: (l) => `${money(l.DiscountPercent ?? 0)}%`, align: 'right' },
+  { label: 'Descuento', render: (l) => `${money(l.DiscountPercent ?? 0)}%`, align: 'right' , optional: true },
   { label: 'IVA', render: (l) => txt(l.TaxCode) },
   { label: 'Total línea', render: (l) => money(l.LineTotal), align: 'right' },
   { label: 'Norma R', render: (l) => txt(l.CostingCode) },
-  { label: 'Bodega', render: (l) => txt(l.WarehouseCode) },
-  { label: 'Proyecto', render: (l) => txt(l.ProjectCode) },
-  { label: 'Destino', render: (l) => txt(l.U_Dest_compra) },
-  { label: 'Código', render: (l) => txt(l.AccountCode) },
-  { label: 'Versión', render: (l) => txt(l.U_version) },
-  { label: 'U de medida', render: (l) => txt(l.U_HBT_UndMedida) },
+  { label: 'Bodega', render: (l) => txt(l.WarehouseCode) , optional: true },
+  { label: 'Proyecto', render: (l) => txt(l.ProjectCode) , optional: true },
+  { label: 'Destino', render: (l) => txt(l.U_Dest_compra) , optional: true },
+  { label: 'Cuenta', render: (l) => txt(l.AccountCode) },
+  { label: 'Versión', render: (l) => txt(l.U_version) , optional: true },
+  { label: 'U de medida', render: (l) => txt(l.U_HBT_UndMedida) , optional: true },
 ];
 
 export default function PurchaseRequestDetail({
@@ -99,18 +106,31 @@ export default function PurchaseRequestDetail({
   const d = purchase.draft;
   const lines = d.DocumentLines ?? [];
   const numero = purchase.firmDocNum ?? purchase.firmDocEntry;
-  const titulo = numero ? `Solicitud de compra ${numero}` : `Solicitud de compra · Borrador #${purchase.docEntry}`;
-  const motivo = txt(d.U_Motivo_Can_Solicitud);
-
-  const dates: [string, unknown][] = [
-    ['FECHA DE CONTABILIZACIÓN', d.DocDate],
-    ['FECHA DE ENTREGA', d.DocDueDate],
-    ['FECHA DE DOCUMENTO', d.TaxDate],
-    ['FECHA REQUERIDA', d.RequriedDate],
-  ];
+  const motivo = txt(d.U_Motivo_Can_Solicitud).trim();
+  const columns = LINE_COLUMNS.filter(
+    (c) => !c.optional || lines.some((l, i) => String(c.render(l, i) ?? '').trim() !== '')
+  );
 
   return (
-    <Stack gap="md">
+    <Stack gap="sm">
+      <div>
+        <Text size="sm" c="gray.6" fw={500}>
+          Solicitud de compra en SAP
+        </Text>
+        <Group gap="xs" mt={4}>
+          <Badge variant="light" color={stateColor(d.U_SEND_State)} styles={{ root: { textTransform: 'none' } }}>
+            {stateLabel(d.U_SEND_State)}
+          </Badge>
+          <Text size="sm">Borrador #{purchase.docEntry}</Text>
+          {numero ? <Text size="sm">· En firme N.º {numero}</Text> : null}
+          {d.RequriedDate ? (
+            <Text size="sm" c="dimmed">
+              · Fecha requerida {day(d.RequriedDate)}
+            </Text>
+          ) : null}
+        </Group>
+      </div>
+
       <Group gap="xs">
         <Button
           size="xs"
@@ -147,33 +167,11 @@ export default function PurchaseRequestDetail({
       {panel === 'estado' && <TracePanel companyId={purchase.companyId} docEntry={purchase.docEntry} />}
       {panel === 'historial' && requestId != null && <ExecutionHistoryPanel requestId={requestId} />}
 
-      <div>
-        <Title order={2}>{titulo}</Title>
-        <Group gap={6} mt={4}>
-          <Box w={8} h={8} style={{ borderRadius: 8 }} bg={`${stateColor(d.U_SEND_State)}.6`} />
-          <Text size="sm" fw={500}>
-            {stateLabel(d.U_SEND_State)}
-          </Text>
-        </Group>
-        <Text size="sm">Creada por {txt(d.U_SEND_UserName)}</Text>
-      </div>
-
-      <Box py="xs" style={{ borderTop: '1px solid var(--mantine-color-gray-3)' }}>
-        {dates.map(([label, value]) => (
-          <Group key={label} gap="md" wrap="nowrap">
-            <Text size="sm" fw={600} w={210}>
-              {label}:
-            </Text>
-            <Text size="sm">{day(value)}</Text>
-          </Group>
-        ))}
-      </Box>
-
-      <Table.ScrollContainer minWidth={1500}>
+      <Table.ScrollContainer minWidth={Math.max(600, columns.length * 95)}>
         <Table striped verticalSpacing="xs" fz="xs">
           <Table.Thead>
             <Table.Tr>
-              {LINE_COLUMNS.map((c) => (
+              {columns.map((c) => (
                 <Table.Th key={c.label} style={{ textTransform: 'uppercase', textAlign: c.align ?? 'left' }}>
                   {c.label}
                 </Table.Th>
@@ -183,7 +181,7 @@ export default function PurchaseRequestDetail({
           <Table.Tbody>
             {lines.map((l, i) => (
               <Table.Tr key={i}>
-                {LINE_COLUMNS.map((c) => (
+                {columns.map((c) => (
                   <Table.Td key={c.label} style={{ textAlign: c.align ?? 'left' }}>
                     {c.render(l, i)}
                   </Table.Td>
@@ -205,18 +203,11 @@ export default function PurchaseRequestDetail({
         )}
       </Group>
 
-      <div>
-        <Text fw={700} size="sm">
-          COMENTARIOS:
-        </Text>
-        <Text size="sm">{txt(d.Comments)}</Text>
-      </div>
-      <div>
-        <Text fw={700} size="sm">
-          MOTIVOS DE CANCELACIÓN:
-        </Text>
-        <Text size="sm">{motivo}</Text>
-      </div>
+      {motivo ? (
+        <Alert color="red" variant="light" title="Motivo de rechazo o anulación">
+          {motivo}
+        </Alert>
+      ) : null}
     </Stack>
   );
 }
