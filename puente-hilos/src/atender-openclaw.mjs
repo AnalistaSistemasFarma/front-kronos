@@ -8,7 +8,8 @@
  * (progreso.mjs), mensaje de corte, sesión por conversación (Estado) y consumo.
  *
  * NO suma capacidades al agente: sin conectores del proyecto ni del agente, sin PRUEBAS, sin
- * código, sin equipo de subagentes, sin plugins, sin PDF del puente (config.mjs lo exige).
+ * código, sin equipo de subagentes, sin plugins (config.mjs lo exige). El PDF del puente (HTML → PDF
+ * con Chrome en sandbox) sí aplica desde 2026-10-27 (Nicolás Rivera: «sí, claro, con todos»).
  */
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -38,7 +39,9 @@ import {
   MARGEN_TIMEOUT_OPENCLAW_S,
   recogerOutbox,
   textoEncabezadoOpenclaw,
+  textoPdfOpenclaw,
 } from './openclaw.mjs';
+import { convertirHtmlAPdf, convertirMarcasPdf, resolverChrome } from './pdf.mjs';
 import { archivosDelTurno, archivosModificadosDesde, crearSupervisor, duracionLegible, textoAvisoProgreso, textoCorte } from './progreso.mjs';
 
 const MAX_RESPUESTA = 40_000;
@@ -79,9 +82,14 @@ export function crearAtenderOpenclaw({
   observar = null,
   leerSesionGateway = null,
   anunciosPendientes = null,
+  convertirPdf = convertirHtmlAPdf,
+  chrome = undefined,
   ahora = Date.now,
 }) {
   const oc = cfg.openclaw;
+  // HTML → PDF en el puente (pdf.mjs), igual que con Claude Code: Chrome en sandbox, sin red.
+  const chromePdf = cfg.pdf?.habilitado ? (chrome !== undefined ? chrome : resolverChrome({ explicito: cfg.pdf?.chrome ?? null, home: process.env.HOME })) : null;
+  const recursos = oc.recursos ?? [];
 
   async function atender(claveConv, lote) {
     const idConversation = Number(claveConv);
@@ -137,6 +145,7 @@ export function crearAtenderOpenclaw({
         avisoMs: cfg.avisoProgresoMs ?? 0,
         archivar: Boolean(archivador),
         outbox: oc.outbox,
+        bloquePdf: cfg.pdf?.habilitado ? textoPdfOpenclaw({ disponible: Boolean(chromePdf), recursos, trabajo: rutas.trabajo }) : '',
       });
       mkdirSync(rutas.puente, { recursive: true, mode: 0o700 });
       archivoMensaje = path.join(rutas.puente, `mensaje-${process.pid}-${idConversation}.txt`);
@@ -226,6 +235,25 @@ export function crearAtenderOpenclaw({
         log(`conversación ${idConversation}: turno con error (código ${r.codigo}; ${s.error ?? 'sin salida JSON'}; ${String(r.stderr ?? '').slice(-300).replace(/\s+/g, ' ')}).`);
       } else {
         cuerpo = s.texto || '_(El asistente terminó sin texto.)_';
+        if (cfg.pdf?.habilitado) {
+          try {
+            const conv = await convertirMarcasPdf(cuerpo, {
+              cwd: rutas.cwd,
+              trabajo: rutas.trabajo,
+              lecturas: [rutas.trabajo, rutas.adjuntos, rutas.contexto, rutas.archivos, ...recursos],
+              chrome: chromePdf,
+              timeoutMs: cfg.pdf?.timeoutMs,
+              convertir: async (o) => {
+                await synerlink.estado(idConversation, 'tool', 'Generando el PDF…').catch(() => null);
+                return convertirPdf(o);
+              },
+              log: (m) => log(`conversación ${idConversation}: ${m}`),
+            });
+            cuerpo = conv.texto;
+          } catch (e) {
+            log(`conversación ${idConversation}: error al convertir a PDF:`, e.message);
+          }
+        }
         // Lo que dejó en el outbox de su chat pasa a ./trabajo; luego la validación de siempre.
         cuerpo = recogerOutbox(cuerpo, { outbox: oc.outbox, trabajo: rutas.trabajo, log: (m) => log(`conversación ${idConversation}: ${m}`) });
         const prep = await prepararAdjuntos(cuerpo, { cwd: rutas.cwd, trabajo: rutas.trabajo, excluir: [path.basename(rutas.propuestas)], log: (m) => log(`conversación ${idConversation}: ${m}`) });

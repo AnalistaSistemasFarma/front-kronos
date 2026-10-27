@@ -20,6 +20,7 @@ import { comandoOpenclaw, crearAtenderOpenclaw } from '../src/atender-openclaw.m
 import { crearPuente, verificarOpenclaw } from '../src/puente.mjs';
 import { Estado, rutasDelHilo } from '../src/hilos.mjs';
 import { anunciosPendientes } from '../src/openclaw/seguimiento.mjs';
+import { crearArchivador } from '../src/archivar-proyecto.mjs';
 
 const tmp = () => mkdtempSync(path.join(tmpdir(), 'puente-oc-'));
 
@@ -232,7 +233,8 @@ test('config openclaw válida: sin credencial, prefijo por entorno, capacidades 
   assert.equal(cfg.openclaw.agente, 'duo');
   assert.equal(cfg.pruebasKronos.habilitado, false);
   assert.equal(cfg.cuota.habilitada, false);
-  assert.equal(cfg.pdf.habilitado, false);
+  assert.equal(cfg.pdf.habilitado, true, 'PDF del puente también con openclaw (2026-10-27)');
+  assert.deepEqual(cfg.openclaw.recursos, []);
   assert.equal(cfg.subagentes, false);
   assert.equal(cfg.areaDir, cfg.hilosDir);
   assert.equal(cfg.maxConcurrencia, 2);
@@ -255,7 +257,10 @@ test('config openclaw: falla cerrado si se intenta sumar capacidades o mezclar s
     assert.throws(() => cargarConfig(envOc(tmp(), { [v]: v.endsWith('ORUS_COMPLETO') ? 'a@b.co' : v === 'HILOS_MODELO' ? 'opus' : '/abs' })), /no suma capacidades|quite/, v);
   }
   assert.throws(() => cargarConfig(envOc(tmp(), { HILOS_PRUEBAS_KRONOS: 'si' })), /quedan apagados/);
-  assert.throws(() => cargarConfig(envOc(tmp(), { HILOS_PDF: 'si' })), /quedan apagados/);
+  assert.doesNotThrow(() => cargarConfig(envOc(tmp(), { HILOS_PDF: 'si' })));
+  assert.equal(cargarConfig(envOc(tmp(), { HILOS_PDF: 'no' })).pdf.habilitado, false);
+  assert.throws(() => cargarConfig(envOc(tmp(), { HILOS_OPENCLAW_RECURSOS: 'rel/x' })), /absolutas/);
+  assert.throws(() => cargarConfig(envOc(tmp(), { HILOS_OPENCLAW_RECURSOS: '/no/existe/gss-design' })), /no existe/);
   assert.doesNotThrow(() => cargarConfig(envOc(tmp(), { HILOS_PRUEBAS_KRONOS: 'no', HILOS_CUOTA: 'no' })));
   assert.throws(() => cargarConfig(envOc(tmp(), { HILOS_OPENCLAW_SESION_PREFIJO: 'synerlink-testing-' })), /synerlink/);
   assert.throws(() => cargarConfig(envOc(tmp(), { HILOS_OPENCLAW_SESION_PREFIJO: 'proyecto-' })), /entorno/);
@@ -307,7 +312,7 @@ function synerlinkFalso() {
 function cfgOc(dir, extra = {}) {
   return {
     hilosDir: dir, areaDir: dir, agente: 'duo', agenteNombre: 'Duo', enfoque: null, maxConcurrencia: 2, timeoutTurnoMs: 60_000, avisoProgresoMs: 0,
-    perfiles: validarPerfiles({}), runner: 'openclaw', perfilAgente: 'negocio',
+    perfiles: validarPerfiles({}), runner: 'openclaw', perfilAgente: 'negocio', pdf: { habilitado: false },
     openclaw: { bin: '/opt/homebrew/bin/openclaw', agente: 'duo', perfil: null, local: false, actividad: false, prefijo: 'proyecto-pruebas-', outbox: null, area: dir },
     ...extra,
   };
@@ -429,4 +434,48 @@ test('turno openclaw: perfil de conectores desconocido → no corre; «Sugerir e
   assert.match(s.llamadas.find((l) => l[0] === 'responder')[2], /no está configurado/);
   await sugerirEquipo({ idRequest: 7 });
   assert.match(s.llamadas.find((l) => l[0] === 'sugerencia')[2].error, /openclaw/);
+});
+
+test('turno openclaw con PDF: convierte el HTML de ./trabajo (lecturas: hilo + recursos), adjunta el PDF y lo archiva', async () => {
+  const dir = tmp();
+  const recursos = path.join(dir, 'gss-design', 'recursos');
+  mkdirSync(recursos, { recursive: true });
+  const s = synerlinkFalso();
+  const conversiones = [];
+  let encabezado = '';
+  const cfg = cfgOc(dir, { pdf: { habilitado: true, timeoutMs: 1000 } });
+  cfg.openclaw = { ...cfg.openclaw, recursos: [recursos] };
+  const { atender } = crearAtenderOpenclaw({
+    cfg, synerlink: s, estado: new Estado(dir), chrome: '/chrome-falso', archivador: crearArchivador({ synerlink: s }),
+    convertirPdf: async (o) => { conversiones.push(o); return { ok: true, datos: Buffer.from('%PDF-1.7 prueba'), ms: 5 }; },
+    correr: async (op) => {
+      encabezado = readFileSync(op.args[op.args.indexOf('--message-file') + 1], 'utf8');
+      const rutas = rutasDelHilo(dir, 21, 48);
+      writeFileSync(path.join(rutas.trabajo, 'informe.html'), '<html><body>x</body></html>');
+      return { codigo: 0, abortado: null, stderr: '', salida: { status: 'ok', result: { payloads: [], meta: { finalAssistantVisibleText: `Le adjunto el informe.\nPDF:${path.join(rutas.trabajo, 'informe.html')}` } } } };
+    },
+  });
+  await atender('48', [{ id: 1, body: 'informe en PDF', author: { name: 'N' } }]);
+  assert.match(encabezado, /Documentos en PDF/);
+  assert.ok(encabezado.includes(recursos));
+  assert.match(encabezado, /Group Shared Services Latinoamérica \(gss-design\)/);
+  assert.equal(conversiones.length, 1);
+  assert.ok(conversiones[0].lecturas.includes(recursos));
+  assert.equal(conversiones[0].chrome, '/chrome-falso');
+  const r = s.llamadas.find((l) => l[0] === 'responderConArchivos');
+  assert.deepEqual(r[3], ['informe.pdf']);
+  assert.ok(!/PDF:|MEDIA:/.test(r[2]));
+  assert.deepEqual(s.llamadas.find((l) => l[0] === 'archivar')[2], ['informe.pdf']);
+});
+
+test('turno openclaw con PDF sin Chrome: el encabezado lo dice y no se convierte', async () => {
+  const dir = tmp();
+  const s = synerlinkFalso();
+  let encabezado = '';
+  const { atender } = crearAtenderOpenclaw({
+    cfg: cfgOc(dir, { pdf: { habilitado: true } }), synerlink: s, estado: new Estado(dir), chrome: null,
+    correr: async (op) => { encabezado = readFileSync(op.args[op.args.indexOf('--message-file') + 1], 'utf8'); return { codigo: 0, abortado: null, stderr: '', salida: { status: 'ok', result: { payloads: [{ text: 'ok' }], meta: {} } } }; },
+  });
+  await atender('48', [{ id: 1, body: 'x', author: { name: 'N' } }]);
+  assert.match(encabezado, /no puede convertir HTML a PDF/);
 });

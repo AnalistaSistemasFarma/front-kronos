@@ -408,6 +408,7 @@ export const VARIABLES_NO_OPENCLAW = [
  *   HILOS_OPENCLAW_OUTBOX          outbox del chat del agente (opcional): lo que deje ahí se recoge
  *   HILOS_OPENCLAW_AREA            dónde van proyectos/<id>/… (por defecto HILOS_DIR)
  *   HILOS_OPENCLAW_ACTIVIDAD       'si' (por defecto) o 'no': indicador fino por el Gateway
+ *   HILOS_OPENCLAW_RECURSOS        carpetas de solo lectura para los PDF (marca: gss-design, olp-design), separadas por coma
  */
 export function configOpenclaw(env, { entorno, hilosDir, perfiles, perfilAgente, pruebasModo, cuotaModo, pdfModo, subagentes }) {
   if (perfilAgente !== 'negocio') throw new ErrorConfig('HILOS_RUNNER=openclaw exige HILOS_PERFIL=negocio (sin código).');
@@ -416,7 +417,6 @@ export function configOpenclaw(env, { entorno, hilosDir, perfiles, perfilAgente,
   const explicitas = [
     ['HILOS_PRUEBAS_KRONOS', pruebasModo],
     ['HILOS_CUOTA', cuotaModo],
-    ['HILOS_PDF', pdfModo],
     ['HILOS_SUBAGENTES', subagentes],
   ].filter(([v, modo]) => (env[v] ?? '').trim() && modo === 'si');
   if (explicitas.length) throw new ErrorConfig(`Con HILOS_RUNNER=openclaw quedan apagados: ${explicitas.map(([v]) => v).join(', ')} (ponga «no» o quítelos).`);
@@ -448,7 +448,16 @@ export function configOpenclaw(env, { entorno, hilosDir, perfiles, perfilAgente,
   const outbox = ruta('HILOS_OPENCLAW_OUTBOX');
   const area = ruta('HILOS_OPENCLAW_AREA') ?? hilosDir;
   if (outbox && (area + path.sep).startsWith(outbox + path.sep)) throw new ErrorConfig('HILOS_OPENCLAW_AREA no puede estar dentro del outbox del agente.');
-  return { bin, agente, perfil, local: localRaw === 'si', actividad: actRaw === 'si', prefijo, outbox, area };
+  // Recursos de SOLO LECTURA para los PDF (p. ej. gss-design/recursos u olp-design): datos de marca, no herramientas.
+  const recursos = (env.HILOS_OPENCLAW_RECURSOS ?? '')
+    .split(',')
+    .map((d) => d.trim())
+    .filter(Boolean);
+  for (const d of recursos) {
+    if (!path.isAbsolute(d)) throw new ErrorConfig('HILOS_OPENCLAW_RECURSOS debe ser una lista de rutas absolutas separadas por coma.');
+    if (!existsSync(d)) throw new ErrorConfig(`HILOS_OPENCLAW_RECURSOS: ${d} no existe.`);
+  }
+  return { bin, agente, perfil, local: localRaw === 'si', actividad: actRaw === 'si', prefijo, outbox, area, recursos: recursos.map((d) => path.resolve(d)) };
 }
 
 export function cargarConfig(env = process.env) {
@@ -701,7 +710,8 @@ export function cargarConfig(env = process.env) {
     memoriaLectores,
     pluginDirs,
     grafosDir,
-    pdf: { habilitado: pdfModo === 'si' && runner === 'claude', chrome: pdfChrome, timeoutMs: entero(env, 'HILOS_PDF_TIMEOUT_MS', 60 * 1000, 10 * 1000, 3 * 60 * 1000) },
+    // PDF también con openclaw (decisión de Nicolás Rivera, 2026-10-27: «sí, claro, con todos»).
+    pdf: { habilitado: pdfModo === 'si', chrome: pdfChrome, timeoutMs: entero(env, 'HILOS_PDF_TIMEOUT_MS', 60 * 1000, 10 * 1000, 3 * 60 * 1000) },
     cuota: { habilitada: cuotaModo === 'si' && runner === 'claude', intervaloMs: cuotaIntervaloMs },
     archivarEnProyecto: archivarModo === 'si',
     rutaConectoresPorProyecto: (env.HILOS_CONECTORES_POR_PROYECTO ?? '').trim() || null,
