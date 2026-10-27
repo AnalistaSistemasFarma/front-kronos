@@ -52,7 +52,14 @@ const LINE_COLUMNS: { label: string; render: (l: Record<string, unknown>, i: num
   { label: 'U de medida', render: (l) => txt(l.U_HBT_UndMedida) },
 ];
 
-export default function PurchaseRequestDetail({ requestId }: { requestId: string | number | null }) {
+export default function PurchaseRequestDetail({
+  requestId,
+  onLoaded,
+}: {
+  requestId: string | number | null;
+  /** Avisa si la solicitud es de compra (p. ej. para agrandar la ventana que la contiene). */
+  onLoaded?: (isPurchase: boolean) => void;
+}) {
   const [purchase, setPurchase] = useState<Purchase | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -68,7 +75,10 @@ export default function PurchaseRequestDetail({ requestId }: { requestId: string
       .then(async (r) => {
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d.error || 'No se pudo cargar la solicitud de compra');
-        if (!cancelled) setPurchase(d.purchase ?? null);
+        if (!cancelled) {
+          setPurchase(d.purchase ?? null);
+          onLoaded?.(Boolean(d.purchase));
+        }
       })
       .catch((e: Error) => {
         if (!cancelled) setError(e.message);
