@@ -33,10 +33,16 @@ import {
 } from '@tabler/icons-react';
 import { chatFetch } from '../../lib/chat/client';
 import {
+  AVISO_HOJA_FALLO,
   ETIQUETA_TIPO,
   MAX_NOTA_REENVIO,
+  accionTrasErrorCompartir,
+  elegirEstrategiaCompartir,
   enlaceWhatsApp,
+  enlaceWhatsAppWeb,
+  esEscritorio,
   filtrarDestinos,
+  leerEntornoDispositivo,
   mensajeReenviado,
   puedeCompartirArchivo,
   tipoParaCompartir,
@@ -55,6 +61,12 @@ function hayHojaNativa(): boolean {
   return typeof navigator !== 'undefined' && typeof navigator.share === 'function' && typeof navigator.canShare === 'function';
 }
 
+/** ¿Computador (Windows, macOS, Linux)? Ahí nunca se usa la hoja nativa con archivos (2026-10-27). */
+function enEscritorio(): boolean {
+  const entorno = leerEntornoDispositivo();
+  return entorno ? esEscritorio(entorno) : true;
+}
+
 /**
  * «COMPARTIR» del visor de adjuntos (2026-10-24). Pedido de Nicolás Rivera:
  * «quiero que podamos enviar por chat interno de SynerLink los adjuntos o por
@@ -67,11 +79,19 @@ function hayHojaNativa(): boolean {
  *     Share nivel 2). El archivo se prepara al abrir el menú, para que el
  *     toque llame a `navigator.share` sin esperas: Safari solo abre la hoja
  *     si se pide dentro del mismo gesto. Donde no se pueden compartir
- *     archivos (escritorio), Descargar + abrir WhatsApp con el nombre.
+ *     archivos, Descargar + abrir WhatsApp con el nombre.
+ *   - En el ESCRITORIO (2026-10-27) nunca la hoja nativa: en Windows salía
+ *     vacía («No fue posible enseñarte todas las maneras…»). Directo a
+ *     Descargar + WhatsApp Web. Si la hoja del celular falla por algo que no
+ *     sea cancelar, el mismo respaldo con un aviso arriba.
  */
 export default function CompartirAdjunto({ adjunto, onAviso }: { adjunto: AdjuntoVisor; onAviso: (aviso: AvisoCompartir) => void }) {
   const [reenviar, setReenviar] = useState(false);
   const [sinHoja, setSinHoja] = useState(false);
+  // Respaldo abierto porque la hoja del celular falló (aviso arriba).
+  const [hojaFallo, setHojaFallo] = useState(false);
+  // Se decide en el navegador al tocar; en el servidor se asume escritorio.
+  const [escritorio, setEscritorio] = useState(true);
   // El archivo listo para la hoja nativa (se prepara al abrir el menú).
   const [archivo, setArchivo] = useState<File | null>(null);
   const [preparando, setPreparando] = useState(false);
@@ -87,7 +107,8 @@ export default function CompartirAdjunto({ adjunto, onAviso }: { adjunto: Adjunt
   useEffect(() => () => pedido.current?.abort(), []);
 
   const preparar = useCallback(() => {
-    if (!hayHojaNativa() || archivo || pedido.current) return;
+    // En el escritorio no se usa la hoja nativa: no hace falta bajar el archivo.
+    if (enEscritorio() || !hayHojaNativa() || archivo || pedido.current) return;
     const ctrl = new AbortController();
     pedido.current = ctrl;
     setPreparando(true);
@@ -107,16 +128,34 @@ export default function CompartirAdjunto({ adjunto, onAviso }: { adjunto: Adjunt
       });
   }, [adjunto.downloadUrl, adjunto.fileName, adjunto.contentType, archivo]);
 
+  const abrirRespaldo = (porFallo: boolean) => {
+    setHojaFallo(porFallo);
+    setSinHoja(true);
+  };
+
   const compartirFuera = () => {
-    if (archivo && puedeCompartirArchivo(navigator, archivo)) {
-      navigator.share({ files: [archivo], title: adjunto.fileName }).catch((e: unknown) => {
+    const esc = enEscritorio();
+    setEscritorio(esc);
+    const estrategia = elegirEstrategiaCompartir({
+      escritorio: esc,
+      puedeArchivo: !!archivo && puedeCompartirArchivo(navigator, archivo),
+    });
+    if (estrategia === 'hoja-nativa' && archivo) {
+      // Se llama en el mismo gesto (Safari solo abre la hoja así).
+      let promesa: Promise<void>;
+      try {
+        promesa = navigator.share({ files: [archivo], title: adjunto.fileName });
+      } catch (e) {
+        if (accionTrasErrorCompartir(e) === 'respaldo') abrirRespaldo(true);
+        return;
+      }
+      promesa.catch((e: unknown) => {
         // Cerrar la hoja sin elegir app no es un error.
-        if (e instanceof Error && e.name === 'AbortError') return;
-        setSinHoja(true);
+        if (accionTrasErrorCompartir(e) === 'respaldo') abrirRespaldo(true);
       });
       return;
     }
-    setSinHoja(true);
+    abrirRespaldo(false);
   };
 
   return (
@@ -164,10 +203,25 @@ export default function CompartirAdjunto({ adjunto, onAviso }: { adjunto: Adjunt
         zIndex={Z_COMPARTIR}
         size='sm'
       >
-        <Stack gap='sm'>
-          <Text size='sm'>
-            Este dispositivo no puede enviar el archivo directamente a otra app. Descárguelo y luego adjúntelo en WhatsApp.
-          </Text>
+        <Stack gap='sm' data-testid='chat-compartir-respaldo'>
+          {/* El aviso va ARRIBA, donde se ve sin desplazarse. */}
+          {hojaFallo && (
+            <Alert color='orange' variant='light' icon={<IconAlertCircle size={16} />} py={8} data-testid='chat-compartir-hoja-fallo'>
+              <Text size='sm'>{AVISO_HOJA_FALLO}</Text>
+            </Alert>
+          )}
+          {escritorio ? (
+            <Text size='sm'>
+              1. Descargue el archivo. 2. Abra WhatsApp Web (o la app de WhatsApp del computador), elija el chat y adjunte el archivo
+              descargado con el clip.
+            </Text>
+          ) : (
+            !hojaFallo && (
+              <Text size='sm'>
+                Este dispositivo no puede enviar el archivo directamente a otra app. Descárguelo y luego adjúntelo en WhatsApp.
+              </Text>
+            )
+          )}
           <Text size='xs' className='chat-text-muted'>
             Por seguridad no se genera ningún enlace público: el archivo solo se abre con una sesión de SynerLink.
           </Text>
@@ -177,14 +231,14 @@ export default function CompartirAdjunto({ adjunto, onAviso }: { adjunto: Adjunt
             </Button>
             <Button
               component='a'
-              href={enlaceWhatsApp(adjunto.fileName)}
+              href={escritorio ? enlaceWhatsAppWeb(adjunto.fileName) : enlaceWhatsApp(adjunto.fileName)}
               target='_blank'
               rel='noopener noreferrer'
               color='green'
               leftSection={<IconBrandWhatsapp size={16} />}
               data-testid='chat-compartir-whatsapp'
             >
-              Abrir WhatsApp
+              {escritorio ? 'Abrir WhatsApp Web' : 'Abrir WhatsApp'}
             </Button>
           </Group>
         </Stack>
