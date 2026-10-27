@@ -9,6 +9,8 @@ import {
 } from '@/lib/orion/client';
 import { orionErrorResponse } from '@/lib/orion/httpError';
 import { finalizeSignerTurn } from '@/lib/orion/service';
+import { closePendingOrionSignerAuth } from '@/lib/orion/signerAuthorizations';
+import { findUserIdByEmail } from '@/lib/orion/signerTasks';
 import { normalizeSignerIdentity } from '@/lib/orion/signerIdentity';
 import {
   BIOMETRIC_CONSENT_REQUIRED_MESSAGE,
@@ -130,8 +132,8 @@ export async function POST(req: Request) {
         )
       : { acceptedTerms: true, acceptedBiometric: acceptedBiometric ? true : undefined };
 
-    const result = await withMssqlPool((pool) =>
-      finalizeSignerTurn(pool, {
+    const result = await withMssqlPool(async (pool) => {
+      const outcome = await finalizeSignerTurn(pool, {
         requestId,
         userId: String(userId),
         userEmail: email,
@@ -143,8 +145,24 @@ export async function POST(req: Request) {
           hasSigningLegalConsent: personHasSigning || acceptedTerms,
           hasBiometricConsent: personHasBiometric || acceptedBiometric,
         },
-      })
-    );
+      });
+
+      // La autorización FIRMA se cierra solo cuando la firma quedó registrada; abrir o
+      // revisar el documento y salir sin firmar la deja pendiente.
+      if (outcome.signerCompleted) {
+        try {
+          const byEmail = await findUserIdByEmail(pool, email);
+          await closePendingOrionSignerAuth(pool, {
+            requestId,
+            userId: String(byEmail?.id || userId),
+            fileId: outcome.fileId || fileId || '',
+          });
+        } catch (err) {
+          console.error('[complete-sign] No se pudo cerrar la autorización de firma', err);
+        }
+      }
+      return outcome;
+    });
 
     return NextResponse.json(
       {
