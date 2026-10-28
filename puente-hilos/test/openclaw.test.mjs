@@ -425,15 +425,15 @@ test('turno openclaw que cede el turno: espera el resultado dentro del mismo tur
   assert.match(s.llamadas.find((l) => l[0] === 'responder')[2], /Terminé en segundo plano\./);
 });
 
-test('turno openclaw: perfil de conectores desconocido → no corre; «Sugerir equipo» → error claro', async () => {
+test('turno openclaw: proyecto de otro perfil de conectores → corre igual (usa sus herramientas); «Sugerir equipo» → error claro', async () => {
   const dir = tmp();
   const s = synerlinkFalso();
   s.contexto = async () => ({ ...contexto, project: { ...contexto.project, profile: { key: 'olp', label: 'OLP' } } });
   let corrio = false;
   const { atender, sugerirEquipo } = crearAtenderOpenclaw({ cfg: cfgOc(dir), synerlink: s, estado: new Estado(dir), correr: async () => { corrio = true; return {}; } });
   await atender('48', [{ id: 1, body: 'x', author: { name: 'N' } }]);
-  assert.equal(corrio, false);
-  assert.match(s.llamadas.find((l) => l[0] === 'responder')[2], /no está configurado/);
+  assert.equal(corrio, true);
+  assert.ok(!s.llamadas.some((l) => l[0] === 'responder' && /no está configurado/.test(l[2] ?? '')));
   await sugerirEquipo({ idRequest: 7 });
   assert.match(s.llamadas.find((l) => l[0] === 'sugerencia')[2].error, /openclaw/);
 });

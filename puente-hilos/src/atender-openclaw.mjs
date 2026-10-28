@@ -104,13 +104,11 @@ export function crearAtenderOpenclaw({
     try {
       await synerlink.estado(idConversation, 'thinking', 'Preparando el proyecto…').catch(() => null);
       const contexto = await synerlink.contexto(idConversation);
-      if (!cfg.perfiles.get(contexto.project.profile.key)) {
-        await synerlink.responder(
-          idConversation,
-          `No puedo atender este proyecto: su perfil de conectores («${contexto.project.profile.label}») no está configurado en el puente de este asistente (solo trabaja con «Sin conectores» y sus propias herramientas). Avísele a Tecnología.`
-        );
-        return;
-      }
+      // Con openclaw el perfil de conectores del proyecto no cambia nada: el
+      // agente siempre trabaja con SUS herramientas (los perfiles van vacíos).
+      // Por eso no se rechaza un proyecto de otro perfil (Farmalógica, OLP…):
+      // antes Duo devolvía «no está configurado» en proyectos de Farmalógica
+      // (Nicolás, 2026-10-28).
 
       const comando = comandoOpenclaw(lote);
       if (comando?.accion === 'responder') {
