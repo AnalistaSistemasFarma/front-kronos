@@ -409,6 +409,8 @@ export const VARIABLES_NO_OPENCLAW = [
  *   HILOS_OPENCLAW_AREA            dónde van proyectos/<id>/… (por defecto HILOS_DIR)
  *   HILOS_OPENCLAW_ACTIVIDAD       'si' (por defecto) o 'no': indicador fino por el Gateway
  *   HILOS_OPENCLAW_RECURSOS        carpetas de solo lectura para los PDF (marca: gss-design, olp-design), separadas por coma
+ *   HILOS_OPENCLAW_CUOTA           'si' (por defecto) o 'no': cupo semanal/5 h con la credencial del agente en openclaw
+ *   HILOS_OPENCLAW_DIR_AGENTE      carpeta del agente en openclaw (por defecto <estado>/agents/<agente>/agent)
  */
 export function configOpenclaw(env, { entorno, hilosDir, perfiles, perfilAgente, pruebasModo, cuotaModo, pdfModo, subagentes }) {
   if (perfilAgente !== 'negocio') throw new ErrorConfig('HILOS_RUNNER=openclaw exige HILOS_PERFIL=negocio (sin código).');
@@ -457,7 +459,13 @@ export function configOpenclaw(env, { entorno, hilosDir, perfiles, perfilAgente,
     if (!path.isAbsolute(d)) throw new ErrorConfig('HILOS_OPENCLAW_RECURSOS debe ser una lista de rutas absolutas separadas por coma.');
     if (!existsSync(d)) throw new ErrorConfig(`HILOS_OPENCLAW_RECURSOS: ${d} no existe.`);
   }
-  return { bin, agente, perfil, local: localRaw === 'si', actividad: actRaw === 'si', prefijo, outbox, area, recursos: recursos.map((d) => path.resolve(d)) };
+  // Cupo de Anthropic del agente (2026-10-28): sonda con la credencial que el agente tiene en
+  // openclaw (openclaw/credencial.mjs, solo lectura). Encendido por defecto; HILOS_CUOTA sigue
+  // siendo el medidor de Claude Code y con openclaw debe quedar en «no».
+  const cuotaRaw = (env.HILOS_OPENCLAW_CUOTA ?? 'si').trim().toLowerCase();
+  if (!['si', 'no'].includes(cuotaRaw)) throw new ErrorConfig('HILOS_OPENCLAW_CUOTA debe ser «si» o «no».');
+  const dirAgente = ruta('HILOS_OPENCLAW_DIR_AGENTE');
+  return { bin, agente, perfil, local: localRaw === 'si', actividad: actRaw === 'si', prefijo, outbox, area, recursos: recursos.map((d) => path.resolve(d)), cuota: cuotaRaw === 'si', dirAgente };
 }
 
 export function cargarConfig(env = process.env) {
@@ -712,7 +720,7 @@ export function cargarConfig(env = process.env) {
     grafosDir,
     // PDF también con openclaw (decisión de Nicolás Rivera, 2026-10-27: «sí, claro, con todos»).
     pdf: { habilitado: pdfModo === 'si', chrome: pdfChrome, timeoutMs: entero(env, 'HILOS_PDF_TIMEOUT_MS', 60 * 1000, 10 * 1000, 3 * 60 * 1000) },
-    cuota: { habilitada: cuotaModo === 'si' && runner === 'claude', intervaloMs: cuotaIntervaloMs },
+    cuota: { habilitada: runner === 'claude' ? cuotaModo === 'si' : openclaw.cuota, intervaloMs: cuotaIntervaloMs },
     archivarEnProyecto: archivarModo === 'si',
     rutaConectoresPorProyecto: (env.HILOS_CONECTORES_POR_PROYECTO ?? '').trim() || null,
     conectoresSecretos: (env.HILOS_CONECTORES_SECRETOS ?? '').trim() || null,

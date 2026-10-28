@@ -234,7 +234,7 @@ test('config openclaw válida: sin credencial, prefijo por entorno, capacidades 
   assert.equal(cfg.openclaw.prefijo, 'proyecto-pruebas-');
   assert.equal(cfg.openclaw.agente, 'duo');
   assert.equal(cfg.pruebasKronos.habilitado, false);
-  assert.equal(cfg.cuota.habilitada, false);
+  assert.equal(cfg.cuota.habilitada, true, 'cupo con la credencial del agente en openclaw (2026-10-28)');
   assert.equal(cfg.pdf.habilitado, true, 'PDF del puente también con openclaw (2026-10-27)');
   assert.deepEqual(cfg.openclaw.recursos, []);
   assert.equal(cfg.subagentes, false);
@@ -324,10 +324,12 @@ test('turno openclaw: contexto en el mensaje, sesión propia, adjunta + archiva,
   const dir = tmp();
   const s = synerlinkFalso();
   const corridas = [];
+  let sondasTrasTurno = 0;
   const puente = crearPuente({
     cfg: cfgOc(dir),
     synerlink: s,
     estado: new Estado(dir),
+    medidor: { registrarEvento: () => false, trasTurno: async () => { sondasTrasTurno += 1; } },
     fabricaOpenclaw: (o) =>
       crearAtenderOpenclaw({
         ...o,
@@ -377,6 +379,7 @@ test('turno openclaw: contexto en el mensaje, sesión propia, adjunta + archiva,
   assert.equal(puente.enProceso.size, 0);
   const local = readFileSync(path.join(dir, 'consumo.jsonl'), 'utf8');
   assert.match(local, /"runner":"openclaw"/);
+  assert.equal(sondasTrasTurno, 1, 'cupo del token del agente: sonda al cerrar el turno (2026-10-28)');
   assert.ok(!existsSync(c.args[c.args.indexOf('--message-file') + 1]), 'el archivo del mensaje se borra');
 
   // Segundo turno: MISMA clave (la sesión ya existe). /clear → clave nueva.

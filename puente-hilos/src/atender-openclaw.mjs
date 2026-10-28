@@ -85,6 +85,7 @@ export function crearAtenderOpenclaw({
   observar = null,
   leerSesionGateway = null,
   anunciosPendientes = null,
+  medidor = null,
   convertirPdf = convertirHtmlAPdf,
   chrome = undefined,
   ahora = Date.now,
@@ -322,6 +323,8 @@ export function crearAtenderOpenclaw({
         const total = s.tokens.input + s.tokens.cacheCreation + s.tokens.cacheRead + s.tokens.output;
         if (total > 0) await synerlink.consumo(reporte).catch((e) => log('no se pudo reportar el consumo:', e.message));
       }
+      // Cupo del token del agente (cuota.mjs): openclaw no trae rate_limit_event, se sondea al cerrar el turno.
+      if (medidor?.trasTurno) void medidor.trasTurno().catch(() => null);
     } catch (err) {
       log(`conversación ${idConversation}: error atendiendo el turno:`, err?.message ?? err);
       await synerlink.responder(idConversation, 'No pude atender el mensaje por un error del puente. Tecnología ya quedó con el registro.').catch(() => null);

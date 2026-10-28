@@ -52,6 +52,7 @@ import { grafosDelTurno, textoGrafos } from './grafos.mjs';
 import { prepararMemoriaTurno } from './memoria.mjs';
 import { crearClienteSynerLink } from './synerlink.mjs';
 import { crearMedidorCuota } from './cuota.mjs';
+import { carpetaAgenteOpenclaw, crearLectorCredencialOpenclaw } from './openclaw/credencial.mjs';
 import { crearArchivador, textoArchivarProyecto } from './archivar-proyecto.mjs';
 import { prepararAdjuntos } from './adjuntos-salida.mjs';
 import { archivosDelTurno, archivosModificadosDesde, crearSupervisor, duracionLegible, PROMPT_CONTINUACION, textoAvisoProgreso, textoCorte, textoTiempoTurno } from './progreso.mjs';
@@ -882,6 +883,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           observar: observarActividad,
           leerSesionGateway: (clave) => conGateway((pedir) => leerSesion(pedir, clave, 60), { openclawBin: cfg.openclaw.bin }),
           anunciosPendientes,
+          medidor,
         })
       : null;
   const atenderTurno = async (clave, lote) => {
@@ -976,16 +978,25 @@ async function principal() {
   const estado = new Estado(cfg.hilosDir);
   // Medidor del consumo de Anthropic (cuota.mjs): sin turnos en curso, consulta mínima cada intervalo.
   let ocupado = () => false;
+  // Runner openclaw (2026-10-28): la credencial es la del agente en openclaw, releída en cada sonda.
+  const lectorOc =
+    cfg.runner === 'openclaw' && cfg.cuota?.habilitada
+      ? crearLectorCredencialOpenclaw({ carpetaAgente: cfg.openclaw.dirAgente ?? carpetaAgenteOpenclaw({ perfil: cfg.openclaw.perfil, agente: cfg.openclaw.agente }), log })
+      : null;
   const medidor = cfg.cuota?.habilitada
-    ? crearMedidorCuota({ credencial: cfg.credencial, publicar: (e) => synerlink.cuota(e), ocupado: () => ocupado(), intervaloMs: cfg.cuota.intervaloMs, log })
+    ? crearMedidorCuota({ credencial: lectorOc ? () => lectorOc.leer() : cfg.credencial, publicar: (e) => synerlink.cuota(e), ocupado: () => ocupado(), intervaloMs: cfg.cuota.intervaloMs, log })
     : null;
+  if (lectorOc) {
+    await lectorOc.leer();
+    log(`medidor de consumo (openclaw): credencial del agente: ${lectorOc.describir()}; sonda al terminar cada turno${cfg.cuota.intervaloMs > 0 ? ` y cada ${Math.round(cfg.cuota.intervaloMs / 1000)} s sin turnos` : ''}.`);
+  }
   const puente = crearPuente({ cfg, synerlink, estado, medidor });
   ocupado = () => puente.enProceso.size > 0;
   medidor?.iniciar();
-  log(medidor ? `medidor de consumo: stream de cada turno${cfg.cuota.intervaloMs > 0 && cfg.credencial.tipo === 'oauth-token' ? ` + consulta mínima cada ${Math.round(cfg.cuota.intervaloMs / 1000)} s sin turnos` : ''}.` : 'medidor de consumo apagado (HILOS_CUOTA=no).');
+  if (!lectorOc) log(medidor ? `medidor de consumo: stream de cada turno${cfg.cuota.intervaloMs > 0 && cfg.credencial.tipo === 'oauth-token' ? ` + consulta mínima cada ${Math.round(cfg.cuota.intervaloMs / 1000)} s sin turnos` : ''}.` : `medidor de consumo apagado (${cfg.runner === 'openclaw' ? 'HILOS_OPENCLAW_CUOTA' : 'HILOS_CUOTA'}=no).`);
   if (cfg.runner === 'openclaw') {
     const oc = cfg.openclaw;
-    log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, RUNNER OPENCLAW: agente «${oc.agente}»${oc.perfil ? `, perfil ${oc.perfil}` : ''}${oc.local ? ', --local' : ', por el Gateway'}; sesiones «${oc.prefijo}c<conv>-<gen>»; área ${cfg.areaDir}; outbox ${oc.outbox ?? 'no'}; indicador fino ${oc.actividad && !oc.local ? 'sí' : 'no'}; tope ${cfg.maxConcurrencia} hilos; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; avisos ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; perfil: ${perfilListo(cfg)}; PDF del puente ${cfg.pdf?.habilitado ? `sí${oc.recursos?.length ? ` (recursos: ${oc.recursos.join(', ')})` : ''}` : 'no'}; sin capacidades del puente (conectores, PRUEBAS, código, equipo, plugins, cuota): el agente usa SOLO las suyas.`);
+    log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, RUNNER OPENCLAW: agente «${oc.agente}»${oc.perfil ? `, perfil ${oc.perfil}` : ''}${oc.local ? ', --local' : ', por el Gateway'}; sesiones «${oc.prefijo}c<conv>-<gen>»; área ${cfg.areaDir}; outbox ${oc.outbox ?? 'no'}; indicador fino ${oc.actividad && !oc.local ? 'sí' : 'no'}; tope ${cfg.maxConcurrencia} hilos; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; avisos ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; perfil: ${perfilListo(cfg)}; PDF del puente ${cfg.pdf?.habilitado ? `sí${oc.recursos?.length ? ` (recursos: ${oc.recursos.join(', ')})` : ''}` : 'no'}; sin capacidades del puente (conectores, PRUEBAS, código, equipo, plugins): el agente usa SOLO las suyas.`);
   } else
   log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}, modelo del hilo principal: ${cfg.modelo ?? 'el predeterminado de la cuenta (sin HILOS_MODELO)'}; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; gasto ${cfg.sinTopeGasto ? 'SIN TOPE' : cfg.presupuestoUsd ? `tope ${cfg.presupuestoUsd} USD` : `sin tope general (equipo ${cfg.subagentesPresupuestoUsd} USD)`}; avisos de progreso ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; continuación automática ${cfg.continuarAlAgotar ? 'sí' : 'no'}; perfil: ${perfilListo(cfg)}; PRUEBAS para todos los hilos: ${pruebasListo(cfg)}; conectores del agente: ${conectoresAgenteListo(cfg)}.`);
 
