@@ -376,6 +376,98 @@ export function sellarEntorno(cfg, ahora = new Date()) {
   return true;
 }
 
+/** Runners del turno: `claude -p` (por defecto) u openclaw (2026-10-27). */
+export const RUNNERS = ['claude', 'openclaw'];
+
+/**
+ * Variables que SUMAN capacidades al turno de Claude Code. Con el runner openclaw NO se admiten:
+ * el agente trabaja con sus propias herramientas y permisos, sin ampliarlos (auditoría de Iván).
+ */
+export const VARIABLES_NO_OPENCLAW = [
+  'HILOS_AUTORES_ORUS_COMPLETO',
+  'HILOS_ORUS_COMPLETO_CONFIG_DIR',
+  'HILOS_CONECTORES_AGENTE_CONFIG_DIR',
+  'HILOS_CONECTORES_POR_PROYECTO',
+  'HILOS_CONECTORES_SECRETOS',
+  'HILOS_PLUGIN_DIRS',
+  'HILOS_MEMORIA_DIR',
+  'HILOS_GRAFOS_DIR',
+  'HILOS_REPOS_POR_PROYECTO',
+  'HILOS_GITHUB_TOKEN_ARCHIVO',
+  'HILOS_MODELO',
+  'HILOS_MAX_BUDGET_USD',
+];
+
+/**
+ * Configuración del runner openclaw (openclaw.mjs). Falla cerrado.
+ *   HILOS_OPENCLAW_BIN             binario (por defecto /opt/homebrew/bin/openclaw)
+ *   HILOS_OPENCLAW_AGENTE          id del agente en openclaw (p. ej. duo; Lunaris = main)
+ *   HILOS_OPENCLAW_PERFIL          perfil de openclaw (p. ej. lunaris); vacío = instalación compartida
+ *   HILOS_OPENCLAW_LOCAL           'si' = --local (sin Gateway; 1 hilo a la vez)
+ *   HILOS_OPENCLAW_SESION_PREFIJO  por defecto `proyecto-<entorno>-`; nunca `synerlink…` (es el del chat)
+ *   HILOS_OPENCLAW_OUTBOX          outbox del chat del agente (opcional): lo que deje ahí se recoge
+ *   HILOS_OPENCLAW_AREA            dónde van proyectos/<id>/… (por defecto HILOS_DIR)
+ *   HILOS_OPENCLAW_ACTIVIDAD       'si' (por defecto) o 'no': indicador fino por el Gateway
+ *   HILOS_OPENCLAW_RECURSOS        carpetas de solo lectura para los PDF (marca: gss-design, olp-design), separadas por coma
+ *   HILOS_OPENCLAW_CUOTA           'si' (por defecto) o 'no': cupo semanal/5 h con la credencial del agente en openclaw
+ *   HILOS_OPENCLAW_DIR_AGENTE      carpeta del agente en openclaw (por defecto <estado>/agents/<agente>/agent)
+ */
+export function configOpenclaw(env, { entorno, hilosDir, perfiles, perfilAgente, pruebasModo, cuotaModo, pdfModo, subagentes }) {
+  if (perfilAgente !== 'negocio') throw new ErrorConfig('HILOS_RUNNER=openclaw exige HILOS_PERFIL=negocio (sin código).');
+  const sobran = VARIABLES_NO_OPENCLAW.filter((v) => (env[v] ?? '').trim());
+  if (sobran.length) throw new ErrorConfig(`HILOS_RUNNER=openclaw no suma capacidades al agente: quite ${sobran.join(', ')} del .env.`);
+  const explicitas = [
+    ['HILOS_PRUEBAS_KRONOS', pruebasModo],
+    ['HILOS_CUOTA', cuotaModo],
+    ['HILOS_SUBAGENTES', subagentes],
+  ].filter(([v, modo]) => (env[v] ?? '').trim() && modo === 'si');
+  if (explicitas.length) throw new ErrorConfig(`Con HILOS_RUNNER=openclaw quedan apagados: ${explicitas.map(([v]) => v).join(', ')} (ponga «no» o quítelos).`);
+  for (const [clave, p] of perfiles) {
+    if (Object.keys(p.mcpServers).length || p.herramientas.length || p.web) {
+      throw new ErrorConfig(`Con HILOS_RUNNER=openclaw los perfiles no llevan conectores ni web (el agente usa los suyos): revise «${clave}» en perfiles.json.`);
+    }
+  }
+  const bin = (env.HILOS_OPENCLAW_BIN ?? '').trim() || '/opt/homebrew/bin/openclaw';
+  if (!path.isAbsolute(bin)) throw new ErrorConfig('HILOS_OPENCLAW_BIN debe ser una ruta absoluta.');
+  if (!existsSync(bin)) throw new ErrorConfig(`HILOS_OPENCLAW_BIN no existe: ${bin}.`);
+  const agente = (env.HILOS_OPENCLAW_AGENTE ?? '').trim();
+  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(agente)) throw new ErrorConfig('Falta HILOS_OPENCLAW_AGENTE (id del agente en openclaw, p. ej. duo).');
+  const perfil = (env.HILOS_OPENCLAW_PERFIL ?? '').trim() || null;
+  if (perfil && !/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(perfil)) throw new ErrorConfig('HILOS_OPENCLAW_PERFIL inválido.');
+  const localRaw = (env.HILOS_OPENCLAW_LOCAL ?? 'no').trim().toLowerCase();
+  if (!['si', 'no'].includes(localRaw)) throw new ErrorConfig('HILOS_OPENCLAW_LOCAL debe ser «si» o «no».');
+  const actRaw = (env.HILOS_OPENCLAW_ACTIVIDAD ?? 'si').trim().toLowerCase();
+  if (!['si', 'no'].includes(actRaw)) throw new ErrorConfig('HILOS_OPENCLAW_ACTIVIDAD debe ser «si» o «no».');
+  const prefijo = (env.HILOS_OPENCLAW_SESION_PREFIJO ?? '').trim() || `proyecto-${entorno}-`;
+  if (!/^[a-z0-9][a-z0-9-]{0,40}-$/.test(prefijo)) throw new ErrorConfig('HILOS_OPENCLAW_SESION_PREFIJO: minúsculas, números y guiones, terminado en «-».');
+  if (/^synerlink/.test(prefijo)) throw new ErrorConfig('HILOS_OPENCLAW_SESION_PREFIJO no puede empezar por «synerlink»: es el espacio de sesiones del chat del agente.');
+  if ((entorno === 'pruebas') !== /pruebas|testing/.test(prefijo)) throw new ErrorConfig(`HILOS_OPENCLAW_SESION_PREFIJO debe decir de qué entorno es (${entorno}): pruebas y producción no comparten sesiones.`);
+  const ruta = (nombre) => {
+    const v = (env[nombre] ?? '').trim() || null;
+    if (v && !path.isAbsolute(v)) throw new ErrorConfig(`${nombre} debe ser una ruta absoluta.`);
+    return v ? path.resolve(v) : null;
+  };
+  const outbox = ruta('HILOS_OPENCLAW_OUTBOX');
+  const area = ruta('HILOS_OPENCLAW_AREA') ?? hilosDir;
+  if (outbox && (area + path.sep).startsWith(outbox + path.sep)) throw new ErrorConfig('HILOS_OPENCLAW_AREA no puede estar dentro del outbox del agente.');
+  // Recursos de SOLO LECTURA para los PDF (p. ej. gss-design/recursos u olp-design): datos de marca, no herramientas.
+  const recursos = (env.HILOS_OPENCLAW_RECURSOS ?? '')
+    .split(',')
+    .map((d) => d.trim())
+    .filter(Boolean);
+  for (const d of recursos) {
+    if (!path.isAbsolute(d)) throw new ErrorConfig('HILOS_OPENCLAW_RECURSOS debe ser una lista de rutas absolutas separadas por coma.');
+    if (!existsSync(d)) throw new ErrorConfig(`HILOS_OPENCLAW_RECURSOS: ${d} no existe.`);
+  }
+  // Cupo de Anthropic del agente (2026-10-28): sonda con la credencial que el agente tiene en
+  // openclaw (openclaw/credencial.mjs, solo lectura). Encendido por defecto; HILOS_CUOTA sigue
+  // siendo el medidor de Claude Code y con openclaw debe quedar en «no».
+  const cuotaRaw = (env.HILOS_OPENCLAW_CUOTA ?? 'si').trim().toLowerCase();
+  if (!['si', 'no'].includes(cuotaRaw)) throw new ErrorConfig('HILOS_OPENCLAW_CUOTA debe ser «si» o «no».');
+  const dirAgente = ruta('HILOS_OPENCLAW_DIR_AGENTE');
+  return { bin, agente, perfil, local: localRaw === 'si', actividad: actRaw === 'si', prefijo, outbox, area, recursos: recursos.map((d) => path.resolve(d)), cuota: cuotaRaw === 'si', dirAgente };
+}
+
 export function cargarConfig(env = process.env) {
   const entorno = requerida(env, 'HILOS_ENTORNO');
   if (!ENTORNOS.includes(entorno)) {
@@ -390,16 +482,27 @@ export function cargarConfig(env = process.env) {
 
   const agente = requerida(env, 'HILOS_AGENTE').toLowerCase();
 
+  // Runner del turno (2026-10-27): `claude` (por defecto, `claude -p`) u `openclaw` (openclaw.mjs).
+  const runner = (env.HILOS_RUNNER ?? '').trim().toLowerCase() || 'claude';
+  if (!RUNNERS.includes(runner)) throw new ErrorConfig(`HILOS_RUNNER solo admite ${RUNNERS.join(' u ')}.`);
+
   const apiKey = (env.HILOS_ANTHROPIC_API_KEY ?? '').trim();
   const oauthDirecto = (env.HILOS_CLAUDE_CODE_OAUTH_TOKEN ?? '').trim();
   const envAgente = (env.HILOS_TOKEN_ENV_AGENTE ?? '').trim();
   const fuentes = [apiKey, oauthDirecto, envAgente].filter(Boolean).length;
-  if (fuentes !== 1) {
+  if (runner === 'openclaw') {
+    const sobran = VARIABLES_NO_OPENCLAW.filter((v) => (env[v] ?? '').trim());
+    if (sobran.length) throw new ErrorConfig(`HILOS_RUNNER=openclaw no suma capacidades al agente: quite ${sobran.join(', ')} del .env.`);
+  }
+  if (runner === 'openclaw' && fuentes > 0) {
+    throw new ErrorConfig('Con HILOS_RUNNER=openclaw no se define credencial de Anthropic: el agente usa la suya (models auth de openclaw).');
+  }
+  if (runner === 'claude' && fuentes !== 1) {
     throw new ErrorConfig(
       'Defina EXACTAMENTE una credencial: HILOS_TOKEN_ENV_AGENTE, HILOS_CLAUDE_CODE_OAUTH_TOKEN o HILOS_ANTHROPIC_API_KEY.'
     );
   }
-  const oauth = envAgente ? leerTokenDeEnv(envAgente) : oauthDirecto;
+  const oauth = runner === 'claude' && envAgente ? leerTokenDeEnv(envAgente) : oauthDirecto;
 
   const hilosDir = validarAislamiento(requerida(env, 'HILOS_DIR'));
   const ancestros = claudeMdEnAncestros(hilosDir);
@@ -575,24 +678,31 @@ export function cargarConfig(env = process.env) {
     }
   }
 
+  const openclaw = runner === 'openclaw' ? configOpenclaw(env, { entorno, hilosDir, perfiles, perfilAgente, pruebasModo, cuotaModo, pdfModo, subagentes }) : null;
+
   return {
     entorno,
     url,
     llave,
     agente,
-    credencial: apiKey ? { tipo: 'api-key', valor: apiKey } : { tipo: 'oauth-token', valor: oauth },
-    origenCredencial: apiKey ? 'llave de API' : envAgente ? 'token del propio agente (leído de su .env)' : 'token en el .env del puente',
+    runner,
+    openclaw,
+    // Dónde van proyectos/<id>/… (openclaw: HILOS_OPENCLAW_AREA; si no, HILOS_DIR).
+    areaDir: openclaw?.area ?? hilosDir,
+    credencial: runner === 'openclaw' ? null : apiKey ? { tipo: 'api-key', valor: apiKey } : { tipo: 'oauth-token', valor: oauth },
+    origenCredencial: runner === 'openclaw' ? 'la del agente en openclaw (el puente no la ve)' : apiKey ? 'llave de API' : envAgente ? 'token del propio agente (leído de su .env)' : 'token en el .env del puente',
     hilosDir,
     configClaudeDir: path.join(hilosDir, 'claude-config'),
     perfiles,
-    maxConcurrencia: entero(env, 'HILOS_MAX_CONCURRENCIA', MAX_CONCURRENCIA_F1, 1, MAX_CONCURRENCIA_F1),
+    // --local de openclaw (Lunaris): un hilo a la vez, para no chocar con el candado de su perfil.
+    maxConcurrencia: openclaw?.local ? 1 : entero(env, 'HILOS_MAX_CONCURRENCIA', MAX_CONCURRENCIA_F1, 1, MAX_CONCURRENCIA_F1),
     timeoutTurnoMs: entero(env, 'HILOS_TIMEOUT_TURNO_MS', TIMEOUT_TURNO_DEFECTO_MS, 60 * 1000, 60 * 60 * 1000),
     avisoProgresoMs,
     continuarAlAgotar: continuar === 'si',
     modelo,
     presupuestoUsd: presupuesto && !sinTopeGasto ? Number(presupuesto) : null,
     sinTopeGasto,
-    subagentes: subagentes === 'si',
+    subagentes: subagentes === 'si' && runner === 'claude',
     subagentesMaxSimultaneos: entero(env, 'HILOS_SUBAGENTES_MAX_SIMULTANEOS', 3, 1, 5),
     subagentesMaxTurnos: entero(env, 'HILOS_SUBAGENTES_MAX_TURNOS', 30, 5, 100),
     subagentesPresupuestoUsd: numero(env, 'HILOS_SUBAGENTES_PRESUPUESTO_USD', 3, 50),
@@ -608,12 +718,13 @@ export function cargarConfig(env = process.env) {
     memoriaLectores,
     pluginDirs,
     grafosDir,
+    // PDF también con openclaw (decisión de Nicolás Rivera, 2026-10-27: «sí, claro, con todos»).
     pdf: { habilitado: pdfModo === 'si', chrome: pdfChrome, timeoutMs: entero(env, 'HILOS_PDF_TIMEOUT_MS', 60 * 1000, 10 * 1000, 3 * 60 * 1000) },
-    cuota: { habilitada: cuotaModo === 'si', intervaloMs: cuotaIntervaloMs },
+    cuota: { habilitada: runner === 'claude' ? cuotaModo === 'si' : openclaw.cuota, intervaloMs: cuotaIntervaloMs },
     archivarEnProyecto: archivarModo === 'si',
     rutaConectoresPorProyecto: (env.HILOS_CONECTORES_POR_PROYECTO ?? '').trim() || null,
     conectoresSecretos: (env.HILOS_CONECTORES_SECRETOS ?? '').trim() || null,
-    pruebasKronos: { habilitado: pruebasModo === 'si', base: new URL(pruebasWeb).origin },
+    pruebasKronos: { habilitado: pruebasModo === 'si' && runner === 'claude', base: new URL(pruebasWeb).origin },
     orusCompleto,
     conectoresAgente,
     // Para el entorno del hijo: solo lo indispensable del entorno propio.

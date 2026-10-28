@@ -337,3 +337,21 @@ Orden de Nicolás Rivera (2026-10-22 10:09 COT). Todos los hilos de proyecto, en
 - **Credenciales**: clave `kronos-pruebas` de `HILOS_CONECTORES_SECRETOS` (`{ sql: {server, port, database, user, password, encrypt}, qa: {email, password} }`, archivo 600). La sesión del QA se guarda en `<HILOS_DIR>/pruebas-kronos-sesion-qa.json` (600, negada al sandbox). Auditoría: `<HILOS_DIR>/auditoria-pruebas-kronos.jsonl`.
 - `HILOS_PRUEBAS_KRONOS=no` lo apaga; `HILOS_PRUEBAS_KRONOS_WEB` cambia la web (solo hosts de pruebas).
 - Requiere `npm ci` en `puente-hilos/` (dependencia `mssql`). Verificación real: `node scripts/verificar-pruebas-kronos.mjs --secretos <archivo>`.
+
+## Agentes de openclaw (`HILOS_RUNNER=openclaw`, 2026-10-27)
+
+Autorizado por Nicolás Rivera el 2026-10-27 (15:36 COT). Diseño completo: `migrar-agente-synerlink/traspasos/puente-proyectos-openclaw-20261027/DISENO.md`.
+
+Con `HILOS_RUNNER=openclaw` la instancia atiende los proyectos de un agente de **openclaw** (Duo, Lunaris, Senhatsumi, los de OLP y UNIDOSSIS). En vez de `claude -p`, cada turno corre `openclaw agent --agent <id> --session-key proyecto-<entorno>-c<conv>-<gen> --json --timeout <s> --message-file <f>` (`src/openclaw.mjs`, `src/atender-openclaw.mjs`). El camino de Claude Code no cambia.
+
+- **Sesión:** una por conversación, en un espacio de nombres distinto del chat del agente (`synerlink-…`). `/clear` abre otra (cambia `<gen>`).
+- **Contexto:** viaja en el mensaje de cada turno, con rutas absolutas (ficha, miembros, Archivos, vinculados, cronograma, instrucciones). El texto de las personas va entre marcas aleatorias.
+- **Se reutiliza:** bandeja `projects`, cola por hilo, Archivos, adjuntos de entrada, `MEDIA:` (incluidos los `payloads[].mediaUrl` de openclaw y lo que el agente deje en su outbox, `HILOS_OPENCLAW_OUTBOX`), archivado en la pestaña Archivos, propuestas del cronograma, avisos de progreso y latido, mensaje de corte, consumo (`meta.agentMeta.usage`) y ack al final.
+- **Indicador fino** por el Gateway (`src/openclaw/actividad.mjs`, copia del skill). Si el agente cede el turno (`sessions_yield`), el puente espera el anuncio dentro del mismo turno (`src/openclaw/seguimiento.mjs`).
+- **Tope:** al vencer, mata el CLI y llama `chat.abort` de la sesión en el Gateway.
+- **Sin ampliar permisos:** el puente no pasa `--model`/`--thinking`/herramientas ni toca la configuración de openclaw. La configuración **no arranca** si se define una credencial de Anthropic, `HILOS_PERFIL` distinto de `negocio`, conectores, plugins, memoria, PRUEBAS, `HILOS_CUOTA=si`, equipo, modelo o tope de gasto, o un perfil de `perfiles.json` con conectores o web.
+- **Medidor de consumo** (2026-10-28, reporte de Nicolás Rivera: «los agentes de openclaw no me aparece el consumo»): openclaw no emite `rate_limit_event` ni expone los encabezados `anthropic-ratelimit-unified-*`, y su `status --usage` usa `/api/oauth/usage`, que responde 403 con un setup-token. El puente lee **en solo lectura** la credencial de Anthropic que el agente usa en openclaw (`<estado>/agents/<agente>/agent/openclaw-agent.sqlite`, perfil según `order`/`lastGood`; `src/openclaw/credencial.mjs`) y hace la misma sonda mínima de `cuota.mjs` al cerrar cada turno y cada `HILOS_CUOTA_INTERVALO_MS` sin turnos; publica en `/api/chat/agent/quota`. Con llave de API no hay cupo: no se sondea y el gasto queda por turno en `/api/chat/agent/usage` y `consumo.jsonl` (`costoUsd`). `HILOS_OPENCLAW_CUOTA=no` lo apaga; `HILOS_CUOTA` sigue en `no` (es el medidor de Claude Code). El valor del token nunca va al log.
+- **PDF** (decisión de Nicolás Rivera, 2026-10-27: «sí, claro, con todos»): igual que con Claude Code, el agente escribe HTML en `trabajo/` y termina con `PDF:<ruta>`; el puente lo convierte con Chrome en sandbox (sin red). `HILOS_OPENCLAW_RECURSOS` da las carpetas de marca de solo lectura (gss-design u olp-design).
+- **Comandos:** `/ayuda` y `/clear`; los demás responden «no disponible» sin correr el modelo. «Sugerir equipo» devuelve un error claro.
+
+Variables: `HILOS_RUNNER`, `HILOS_OPENCLAW_BIN`, `HILOS_OPENCLAW_AGENTE`, `HILOS_OPENCLAW_PERFIL`, `HILOS_OPENCLAW_LOCAL`, `HILOS_OPENCLAW_SESION_PREFIJO`, `HILOS_OPENCLAW_OUTBOX`, `HILOS_OPENCLAW_AREA`, `HILOS_OPENCLAW_ACTIVIDAD` (ver `src/config.mjs → configOpenclaw`).

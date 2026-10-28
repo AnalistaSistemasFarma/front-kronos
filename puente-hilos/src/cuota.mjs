@@ -27,6 +27,10 @@
  * la primera publicación exitosa tras arrancar y la primera tras un fallo,
  * para que haya evidencia sin llenar el log con cada envío.
  *
+ * Runner openclaw (2026-10-28): no hay stream de cuota; la credencial es la del agente en
+ * openclaw (openclaw/credencial.mjs, solo lectura) y se sondea al terminar cada turno
+ * (trasTurno) y cada intervalo sin turnos. Con llave de API no hay cupo: no se publica.
+ *
  * El token jamás se registra ni se publica. Nada de aquí puede tumbar el puente:
  * todo error se registra y se sigue.
  */
@@ -224,12 +228,31 @@ export function crearMedidorCuota({
     return true;
   }
 
+  // `credencial` puede ser el objeto { tipo, valor } o una función (sync o async) que lo
+  // devuelve: el runner openclaw lo relee del almacén del agente en cada sonda (2026-10-28).
+  let tipoAnunciado = null;
+  async function credencialActual() {
+    const c = typeof credencial === 'function' ? await credencial() : credencial;
+    const tipo = c?.tipo ?? 'ninguna';
+    if (tipo !== tipoAnunciado) {
+      tipoAnunciado = tipo;
+      if (tipo === 'api-key') log('cuota: el agente usa llave de API: no hay cupo semanal ni de 5 h que medir; el gasto queda por turno (consumo).');
+      else if (tipo === 'ninguna') log('cuota: el agente no tiene credencial de Anthropic que medir: sin datos de cupo para este agente.');
+    }
+    return c;
+  }
+
   async function revisar({ forzar = false } = {}) {
     if (sondeando || intervaloMs <= 0) return null;
     if (!forzar && (ocupado() || ahora().getTime() - ultimaMedicion < intervaloMs)) return null;
     sondeando = true;
     try {
-      const estado = await sondear({ credencial });
+      const c = await credencialActual();
+      if (c?.tipo !== 'oauth-token') {
+        ultimaMedicion = ahora().getTime();
+        return null;
+      }
+      const estado = await sondear({ credencial: c });
       if (!estado) return null;
       await enviar(estado, true);
       return estado;
@@ -240,6 +263,15 @@ export function crearMedidorCuota({
     } finally {
       sondeando = false;
     }
+  }
+
+  /**
+   * Al terminar un turno de un runner SIN stream de cuota (openclaw): una sonda, salvo que la
+   * última medición tenga menos de `minEntrePublicacionesMs` (varios hilos terminando a la vez).
+   */
+  async function trasTurno() {
+    if (ahora().getTime() - ultimaMedicion < minEntrePublicacionesMs) return null;
+    return revisar({ forzar: true });
   }
 
   function iniciar() {
@@ -254,5 +286,5 @@ export function crearMedidorCuota({
     temporizador = null;
   }
 
-  return { registrarEvento, revisar, iniciar, detener, ultimo: () => ultimoPublicado };
+  return { registrarEvento, revisar, trasTurno, iniciar, detener, ultimo: () => ultimoPublicado };
 }
