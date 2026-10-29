@@ -86,6 +86,7 @@ const TIPO_ENTRADA: Record<string, string> = {
   perfil: 'Hoja de vida',
   reinicio: 'Reinicio',
   rotacion: 'Rotación de sesión',
+  contexto: 'Limpiar contexto',
   gobierno: 'Gobierno',
   credencial: 'Credencial',
   personalidad: 'Personalidad',
