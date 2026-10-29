@@ -36,6 +36,9 @@ export const dynamic = "force-dynamic";
  *        En ambos casos va el mapa sin el contenido de cada memoria: el
  *        contenido se pide de a una en /api/chat/auditoria/memorias/[id].
  *
+ *   GET  /api/chat/auditoria/memorias?agente=<código> → la memoria de UN
+ *        agente: su dueño si es personal; si no, quien lo audita o lo opera.
+ *
  *   POST /api/chat/auditoria/memorias → SOLO el recolector, con la misma llave
  *        del inventario (AGENT_INVENTORY_COLLECTOR_KEY). Publica las memorias
  *        de un equipo; todo pasa por parseMemoriesPayload, que oculta secretos.
@@ -60,7 +63,23 @@ export async function GET(request: NextRequest) {
       request.nextUrl.searchParams.get("mapa") === "personal"
         ? "personal"
         : "general";
+    const codigo = (request.nextUrl.searchParams.get("agente") ?? "")
+      .trim()
+      .toLowerCase();
     try {
+      // Memoria de UN agente (botón «Memoria del agente» del chat): la ven su
+      // dueño si es personal, o quien lo audita o lo opera. 404 sin pistas.
+      if (codigo) {
+        if (!/^[a-z0-9._-]{1,60}$/.test(codigo))
+          return jsonNoStore({ error: "No encontrado." }, { status: 404 });
+        const alcance = (await canAuditAgents(user.email))
+          ? await getAuditScope(user.email)
+          : null;
+        const dto = await leerMapa("agente", user.email, alcance, codigo);
+        if (dto.agentes.length === 0)
+          return jsonNoStore({ error: "No encontrado." }, { status: 404 });
+        return jsonNoStore(dto);
+      }
       if (mapa === "personal") {
         if (!(await tieneMapaPersonal(user.email))) {
           return jsonNoStore(
