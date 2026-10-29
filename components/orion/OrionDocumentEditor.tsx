@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActionIcon,
   Alert,
   Box,
   Button,
+  FileButton,
   Group,
   Loader,
   Paper,
@@ -21,10 +23,14 @@ import {
   IconCertificate,
   IconCheck,
   IconDeviceFloppy,
+  IconEye,
   IconFileText,
   IconSend,
+  IconStack2,
+  IconTrash,
   IconWriting,
 } from '@tabler/icons-react';
+import { SEAL_MAX_BYTES } from '../../lib/orion/annotations';
 import type { SignatureFieldPlacement, SignatureFieldKind } from '../../lib/orion/signatureFields';
 import {
   isValidatorPlacementOrder,
@@ -45,7 +51,8 @@ import OrionEditorSteps, { editorStepSubtitle } from './OrionEditorSteps';
 import OrionSignerAssignment from './OrionSignerAssignment';
 import OrionSignersList from './OrionSignersList';
 import PdfInlineViewer from './PdfInlineViewer';
-import SignaturePlacementCanvas from './SignaturePlacementCanvas';
+import SignaturePlacementCanvas, { type PlacementSeal } from './SignaturePlacementCanvas';
+import { openAnnotatedPdfPreview } from './annotatedPdfPreview';
 import { usePdfBlobPreview } from './usePdfBlobPreview';
 import { showEmailSentNotification } from '../../lib/notifications/showEmailSentNotification';
 
@@ -87,6 +94,21 @@ function clampStep(step: number): EditorStep {
 
 function normalizeEmail(email?: string | null): string {
   return String(email || '').trim().toLowerCase();
+}
+
+function sealsFromState(state: OrionSignatureState): PlacementSeal[] {
+  return (state.annotations ?? [])
+    .filter((a) => a.kind === 'seal' && a.sealItemId)
+    .map((a) => ({
+      id: a.id,
+      page: a.page,
+      x: a.x,
+      y: a.y,
+      width: a.width,
+      height: a.height,
+      sealItemId: String(a.sealItemId),
+      sealFileName: a.sealFileName ?? null,
+    }));
 }
 
 function reindexParticipants(list: OrionParticipant[]): OrionParticipant[] {
@@ -139,8 +161,16 @@ export default function OrionDocumentEditor({
     setEditorStep(clampStep(initialStep));
   }, [initialStep, openNonce, documentId, fileId]);
   // Una sola carga de blob compartida entre preview (paso 0) y canvas (paso 2).
-  const { blobUrl: sharedPdfBlob } = usePdfBlobPreview(pdfSrc, Boolean(pdfSrc));
-  const sharedPdfSrc = sharedPdfBlob || pdfSrc;
+  // Sin los sellos ya estampados por SynerLink: aquí se dibujan como cajas movibles.
+  const editorPdfSrc = useMemo(
+    () =>
+      pdfSrc && pdfSrc.startsWith('/api/')
+        ? `${pdfSrc}${pdfSrc.includes('?') ? '&' : '?'}annotations=0`
+        : pdfSrc,
+    [pdfSrc]
+  );
+  const { blobUrl: sharedPdfBlob } = usePdfBlobPreview(editorPdfSrc, Boolean(editorPdfSrc));
+  const sharedPdfSrc = sharedPdfBlob || editorPdfSrc;
   const [orderedParticipants, setOrderedParticipants] = useState<OrionParticipant[]>(() =>
     buildInitialParticipants(participants, state)
   );
@@ -197,6 +227,95 @@ export default function OrionDocumentEditor({
   }, []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Sellos del documento (imagen en OneDrive). Se guardan como datos de SynerLink, no van a Orion.
+  const [seals, setSeals] = useState<PlacementSeal[]>(() => sealsFromState(state));
+  const [placingSeal, setPlacingSeal] = useState<{ sealItemId: string; sealFileName: string } | null>(null);
+  const [sealUploading, setSealUploading] = useState(false);
+
+  useEffect(() => {
+    setSeals(sealsFromState(state));
+    setPlacingSeal(null);
+    // Solo al abrir otro documento: no pisar los sellos que se están ubicando.
+  }, [openNonce, fileId]);
+
+  const sealImageSrc = useCallback(
+    (itemId: string) =>
+      `/api/integrations/orion/annotations/seal?${new URLSearchParams({ requestId: String(requestId), fileId, itemId })}`,
+    [fileId, requestId]
+  );
+
+  const uploadSeal = useCallback(
+    async (file: File | null) => {
+      if (!file) return;
+      if (!['image/png', 'image/jpeg'].includes(file.type)) {
+        setError('El sello debe ser una imagen PNG o JPG.');
+        return;
+      }
+      if (file.size > SEAL_MAX_BYTES) {
+        setError('La imagen del sello debe pesar máximo 2 MB.');
+        return;
+      }
+      setSealUploading(true);
+      setError(null);
+      try {
+        const form = new FormData();
+        form.append('requestId', String(requestId));
+        form.append('fileId', fileId);
+        form.append('file', file);
+        const res = await fetch('/api/integrations/orion/annotations/seal', { method: 'POST', body: form });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'No se pudo cargar el sello');
+        setPlacingSeal({ sealItemId: String(data.sealItemId), sealFileName: String(data.sealFileName || '') });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'No se pudo cargar el sello');
+      } finally {
+        setSealUploading(false);
+      }
+    },
+    [fileId, requestId]
+  );
+
+  const [previewLoading, setPreviewLoading] = useState(false);
+  /** PDF tal como quedará con los sellos (y datos ya guardados) que hay en pantalla. */
+  const previewPdf = useCallback(async () => {
+    if (!sharedPdfSrc) return;
+    setPreviewLoading(true);
+    setError(null);
+    try {
+      await openAnnotatedPdfPreview({
+        pdfUrl: sharedPdfSrc,
+        annotations: [
+          ...(state.annotations ?? []).filter((a) => a.kind !== 'seal'),
+          ...seals.map((s) => ({ ...s, kind: 'seal' as const })),
+        ],
+        sealImageSrc,
+        viewerName: currentUserName || currentUserEmail || 'Usted',
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo armar la vista previa');
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [currentUserEmail, currentUserName, sealImageSrc, seals, sharedPdfSrc, state.annotations]);
+
+  /** Guarda los sellos junto con los demás datos del documento (los de después de firmar se conservan). */
+  const persistSeals = useCallback(async () => {
+    const others = (state.annotations ?? []).filter((a) => a.kind !== 'seal');
+    const hadSeals = (state.annotations ?? []).some((a) => a.kind === 'seal');
+    if (seals.length === 0 && !hadSeals) return;
+    const res = await fetch('/api/integrations/orion/annotations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestId,
+        fileId,
+        annotations: [...others, ...seals.map((s) => ({ ...s, kind: 'seal' as const }))],
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'No se guardaron los sellos');
+    if (data.state) onStateUpdate(data.state as OrionSignatureState);
+  }, [fileId, onStateUpdate, requestId, seals, state.annotations]);
   const [signatureKind, setSignatureKind] = useState<OrionDocumentSignatureKind>(
     () => state.signatureKind || 'electronic'
   );
@@ -597,12 +716,13 @@ export default function OrionDocumentEditor({
     try {
       await assignSigners();
       await persistFields();
+      await persistSeals();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al guardar');
     } finally {
       setSaving(false);
     }
-  }, [assignSigners, persistFields]);
+  }, [assignSigners, persistFields, persistSeals]);
 
   const handleSend = useCallback(async () => {
     if (!allPlaced) {
@@ -616,6 +736,7 @@ export default function OrionDocumentEditor({
     try {
       await assignSigners();
       await persistFields();
+      await persistSeals();
       const res = await fetch('/api/integrations/orion/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -647,7 +768,7 @@ export default function OrionDocumentEditor({
     } finally {
       setSaving(false);
     }
-  }, [allPlaced, assignSigners, fileId, fileName, onClose, onStateUpdate, persistFields, requestId]);
+  }, [allPlaced, assignSigners, fileId, fileName, onClose, onStateUpdate, persistFields, persistSeals, requestId]);
 
   const goNext = useCallback(async () => {
     if (editorStep === 1) {
@@ -1095,6 +1216,48 @@ export default function OrionDocumentEditor({
                     variant='placement'
                     sequential={sequential}
                   />
+
+                  <Box mt='md' pt='md' style={{ borderTop: '1px solid var(--app-border-subtle)' }}>
+                    <Text size='xs' fw={700} c='dimmed' tt='uppercase' style={{ letterSpacing: 0.4 }}>
+                      Sellos ({seals.length})
+                    </Text>
+                    <Text size='xs' c='dimmed' mt={4}>
+                      Cargue la imagen del sello (PNG o JPG, máx. 2 MB; mejor con fondo transparente) y
+                      haga clic en el PDF donde va.
+                    </Text>
+                    <FileButton onChange={(f) => void uploadSeal(f)} accept='image/png,image/jpeg'>
+                      {(props) => (
+                        <Button
+                          {...props}
+                          mt='xs'
+                          size='xs'
+                          variant={placingSeal ? 'filled' : 'light'}
+                          color='grape'
+                          leftSection={<IconStack2 size={14} />}
+                          loading={sealUploading}
+                          disabled={!assignmentsEditable}
+                          fullWidth
+                        >
+                          {placingSeal ? 'Haga clic en el PDF…' : 'Cargar sello'}
+                        </Button>
+                      )}
+                    </FileButton>
+                    {seals.map((seal) => (
+                      <Group key={seal.id} justify='space-between' gap={4} mt={6} wrap='nowrap'>
+                        <Text size='xs'>Sello · página {seal.page}</Text>
+                        <ActionIcon
+                          size='sm'
+                          color='red'
+                          variant='subtle'
+                          aria-label='Quitar sello'
+                          disabled={!assignmentsEditable}
+                          onClick={() => setSeals((prev) => prev.filter((s) => s.id !== seal.id))}
+                        >
+                          <IconTrash size={14} />
+                        </ActionIcon>
+                      </Group>
+                    ))}
+                  </Box>
                 </Box>
               </ScrollArea>
             </Box>
@@ -1120,6 +1283,11 @@ export default function OrionDocumentEditor({
                 activeKind={activeFieldKind}
                 fields={placementFields}
                 onChange={handlePlacementChange}
+                seals={seals}
+                onSealsChange={setSeals}
+                placingSeal={placingSeal}
+                onSealPlaced={() => setPlacingSeal(null)}
+                sealImageSrc={sealImageSrc}
               />
             </Box>
           </Box>
@@ -1166,6 +1334,16 @@ export default function OrionDocumentEditor({
             </Button>
           ) : (
             <>
+              <Button
+                variant='subtle'
+                radius='md'
+                leftSection={<IconEye size={16} />}
+                loading={previewLoading}
+                onClick={() => void previewPdf()}
+                disabled={saving || !sharedPdfSrc}
+              >
+                Vista previa (PDF)
+              </Button>
               <Button
                 variant='default'
                 radius='md'

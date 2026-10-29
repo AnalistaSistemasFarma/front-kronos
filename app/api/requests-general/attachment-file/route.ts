@@ -13,6 +13,7 @@ import { withMssqlPool } from '@/lib/mssqlPool';
 import { getOrionDocumentFromBag } from '@/lib/orion/formValue';
 import { loadOrionFormBag } from '@/lib/orion/service';
 import { applyValidatorMarks } from '@/lib/orion/validatorMarks';
+import { applyDocumentAnnotations } from '@/lib/orion/annotationService';
 import { getOrionDraftInfo } from '@/lib/orion/draftService';
 import { findDraftForOneDriveItem } from '@/lib/orion/draftState';
 import { getDraftSessionActor } from '@/lib/orion/draftRouteAuth';
@@ -23,11 +24,12 @@ function safePathSegment(value: string, fallback: string): string {
   return fallback;
 }
 
-/** Ya enviado a firma: el adjunto se ve con el visto bueno de los validadores. */
+/** Ya enviado a firma: el adjunto se ve con el visto bueno de los validadores y los sellos. */
 async function withValidatorMarks(
   requestId: number,
   fileId: string,
-  pdf: Uint8Array
+  pdf: Uint8Array,
+  withAnnotations: boolean
 ): Promise<Uint8Array> {
   try {
     const loaded = await withMssqlPool((pool) => loadOrionFormBag(pool, requestId));
@@ -35,7 +37,8 @@ async function withValidatorMarks(
     const state = getOrionDocumentFromBag(loaded.bag, fileId);
     const status = String(state.status || '').toUpperCase();
     if (!['PENDIENTE_FIRMA', 'EN_PROCESO', 'FIRMADO'].includes(status)) return pdf;
-    return await applyValidatorMarks(pdf, state, { final: status === 'FIRMADO' });
+    const marked = await applyValidatorMarks(pdf, state, { final: status === 'FIRMADO' });
+    return withAnnotations ? await applyDocumentAnnotations(marked, state) : marked;
   } catch {
     return pdf;
   }
@@ -110,6 +113,8 @@ export async function GET(req: Request) {
     const storagePath = safePathSegment(searchParams.get('storagePath') || 'SG', 'SG');
     const entityType = safePathSegment(searchParams.get('entityType') || 'Request', 'Request');
     const forceDownload = searchParams.get('download') === '1';
+    // annotations=0: sin sellos/datos de SynerLink (el editor de firmas los dibuja aparte).
+    const withAnnotations = searchParams.get('annotations') !== '0';
 
     if (!Number.isInteger(requestId) || requestId <= 0 || !fileId) {
       return NextResponse.json(
@@ -153,7 +158,7 @@ export async function GET(req: Request) {
 
     let body: Uint8Array = downloaded.buffer;
     if (/pdf/i.test(downloaded.contentType || '') || /\.pdf$/i.test(downloaded.fileName || '')) {
-      body = await withValidatorMarks(requestId, fileId, body);
+      body = await withValidatorMarks(requestId, fileId, body, withAnnotations);
     }
 
     // Headers solo ASCII: si Content-Type o el nombre traen tildes, Node lanza ByteString.
