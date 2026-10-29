@@ -18,6 +18,7 @@ import { analizarComando, AYUDA, LIMPIAR } from './comandos.mjs';
 import {
   asegurarCarpetas,
   bajarAdjuntos,
+  escribirHilo,
   leerPropuestas,
   limpiarPropuestas,
   registrarConsumoLocal,
@@ -132,6 +133,8 @@ export function crearAtenderOpenclaw({
       const adjuntos = adjuntosRel.map((r) => path.join(rutas.cwd, r));
       writeFileSync(rutas.vinculados, textoVinculados(contexto), { mode: 0o600 });
       writeFileSync(rutas.cronograma, textoCronograma(contexto), { mode: 0o600 });
+      // Multiagente (2026-10-29): historial del hilo (también lo de otros asistentes).
+      escribirHilo(rutas, contexto, 0o600);
       limpiarPropuestas(rutas);
 
       const sesion = estado.sesionDe(idConversation);
@@ -326,8 +329,13 @@ export function crearAtenderOpenclaw({
       // Cupo del token del agente (cuota.mjs): openclaw no trae rate_limit_event, se sondea al cerrar el turno.
       if (medidor?.trasTurno) void medidor.trasTurno().catch(() => null);
     } catch (err) {
-      log(`conversación ${idConversation}: error atendiendo el turno:`, err?.message ?? err);
-      await synerlink.responder(idConversation, 'No pude atender el mensaje por un error del puente. Tecnología ya quedó con el registro.').catch(() => null);
+      if (err?.status === 404) {
+        // Conversación eliminada (2026-10-29), proyecto archivado o agente retirado: se deja de atender.
+        log(`conversación ${idConversation}: ya no está disponible (404): se deja de atender.`);
+      } else {
+        log(`conversación ${idConversation}: error atendiendo el turno:`, err?.message ?? err);
+        await synerlink.responder(idConversation, 'No pude atender el mensaje por un error del puente. Tecnología ya quedó con el registro.').catch(() => null);
+      }
     } finally {
       await supervisor?.detener().catch(() => null);
       if (archivoMensaje) rmSync(archivoMensaje, { force: true });
