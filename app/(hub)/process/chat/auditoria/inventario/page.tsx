@@ -631,6 +631,12 @@ export default function AuditoriaInventarioPage() {
               <span>Volver a Auditoría de agentes</span>
             </Group>
           </Link>
+          <Text size='xs' c='dimmed'>
+            ·
+          </Text>
+          <Link href='/process/chat/auditoria/memorias' className='chat-text-muted' style={{ fontSize: 13 }}>
+            Ver memorias de los agentes
+          </Link>
         </Group>
 
         <Group gap='sm' mb={2} wrap='nowrap'>
