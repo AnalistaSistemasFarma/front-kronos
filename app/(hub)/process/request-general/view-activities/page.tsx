@@ -120,6 +120,7 @@ import OrionDraftTableRow from '../../../../../components/orion/OrionDraftTableR
 import { nestDraftPdfRows } from '../../../../../lib/orion/attachmentNesting';
 import { isWordDraftFileName } from '../../../../../lib/orion/draftState';
 import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
+import { RequestFlowHeader } from '../../../../../components/request-general/RequestFlow';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
 import { partitionTasksForDisplay } from '@/lib/orion/taskProgress';
@@ -1605,6 +1606,9 @@ function ViewRequestPage() {
               Esta tarea ha sido resuelta y no se puede modificar.
             </Alert>
           )}
+
+          {/* En qué va la solicitud completa y dónde está esta tarea (sin las tareas de firma). */}
+          <RequestFlowHeader requestId={request.id_request_general} highlightTask={request.task} />
         </Card>
 
         <div className='flex flex-col lg:flex-row gap-6'>

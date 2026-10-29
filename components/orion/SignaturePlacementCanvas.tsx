@@ -29,6 +29,18 @@ import {
 import type { OrionParticipant } from '../../lib/orion/participants';
 import { usePdfPageImages } from './usePdfPageImages';
 
+/** Sello (imagen) ubicado en el PDF; no es una caja de firma ni va a Orion. */
+export type PlacementSeal = {
+  id: string;
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  sealItemId: string;
+  sealFileName?: string | null;
+};
+
 type Props = {
   pdfSrc: string | null;
   documentId: string;
@@ -38,7 +50,17 @@ type Props = {
   activeKind?: SignatureFieldKind;
   fields: SignatureFieldPlacement[];
   onChange: (fields: SignatureFieldPlacement[]) => void;
+  /** Sellos del documento (opcional): se mueven y redimensionan igual que las cajas. */
+  seals?: PlacementSeal[];
+  onSealsChange?: (seals: PlacementSeal[]) => void;
+  /** Sello recién cargado: el próximo clic en la página lo ubica (en vez de una firma). */
+  placingSeal?: { sealItemId: string; sealFileName?: string | null } | null;
+  onSealPlaced?: () => void;
+  sealImageSrc?: (sealItemId: string) => string;
 };
+
+const SEAL_DEFAULT_SIZE = { width: 16, height: 11 };
+const SEAL_MIN_SIZE = 3;
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
@@ -85,6 +107,8 @@ function autoPlaceApprovalFields(
 
 type DragState = {
   mode: 'move' | 'resize';
+  /** Qué se arrastra: caja de firma o sello. */
+  target: 'field' | 'seal';
   fieldId: string;
   page: number;
   offsetX: number;
@@ -123,8 +147,19 @@ export default function SignaturePlacementCanvas({
   activeKind = 'signature',
   fields,
   onChange,
+  seals = [],
+  onSealsChange,
+  placingSeal = null,
+  onSealPlaced,
+  sealImageSrc,
 }: Props) {
   const { pages, loading, error } = usePdfPageImages(pdfSrc, PDF_RENDER_SCALE);
+  const sealsRef = useRef(seals);
+  const onSealsChangeRef = useRef(onSealsChange);
+  useEffect(() => {
+    sealsRef.current = seals;
+    onSealsChangeRef.current = onSealsChange;
+  }, [seals, onSealsChange]);
   const [zoom, setZoom] = useState(1);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   // Centro visible (fracción del contenido) que se conserva al cambiar el zoom.
@@ -241,6 +276,24 @@ export default function SignaturePlacementCanvas({
     if (dragRef.current) return;
     const pct = clientToPct(page, e.clientX, e.clientY);
     if (!pct) return;
+    if (placingSeal && onSealsChangeRef.current) {
+      const { width, height } = SEAL_DEFAULT_SIZE;
+      onSealsChangeRef.current([
+        ...sealsRef.current,
+        {
+          id: createFieldId(),
+          page,
+          x: clamp(pct.x - width / 2, 0, 100 - width),
+          y: clamp(pct.y - height / 2, 0, 100 - height),
+          width,
+          height,
+          sealItemId: placingSeal.sealItemId,
+          sealFileName: placingSeal.sealFileName ?? null,
+        },
+      ]);
+      onSealPlaced?.();
+      return;
+    }
     placeAt(page, pct.x, pct.y);
   };
 
@@ -250,6 +303,27 @@ export default function SignaturePlacementCanvas({
       if (!drag) return;
       const pct = clientToPct(drag.page, clientX, clientY);
       if (!pct) return;
+      if (drag.target === 'seal') {
+        const currentSeals = sealsRef.current;
+        onSealsChangeRef.current?.(
+          currentSeals.map((s) => {
+            if (s.id !== drag.fieldId) return s;
+            if (drag.mode === 'move') {
+              return {
+                ...s,
+                x: clamp(pct.x - drag.offsetX, 0, 100 - s.width),
+                y: clamp(pct.y - drag.offsetY, 0, 100 - s.height),
+              };
+            }
+            return {
+              ...s,
+              width: clamp(pct.x - s.x, SEAL_MIN_SIZE, 100 - s.x),
+              height: clamp(pct.y - s.y, SEAL_MIN_SIZE, 100 - s.y),
+            };
+          })
+        );
+        return;
+      }
       const currentFields = fieldsRef.current;
       const field = currentFields.find((f) => f.id === drag.fieldId);
       if (!field) return;
@@ -372,6 +446,7 @@ export default function SignaturePlacementCanvas({
     }
     dragRef.current = {
       mode: 'move',
+      target: 'field',
       fieldId: field.id,
       page,
       offsetX: pct.x - field.x,
@@ -398,10 +473,40 @@ export default function SignaturePlacementCanvas({
     }
     dragRef.current = {
       mode: 'resize',
+      target: 'field',
       fieldId: field.id,
       page,
       offsetX: 0,
       offsetY: 0,
+      pointerId: e.pointerId,
+      moved: false,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+    };
+    setInteractionTick((n) => n + 1);
+  };
+
+  const startSealDrag = (
+    e: ReactPointerEvent<HTMLDivElement>,
+    seal: PlacementSeal,
+    mode: DragState['mode']
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const pct = clientToPct(seal.page, e.clientX, e.clientY);
+    if (!pct) return;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    dragRef.current = {
+      mode,
+      target: 'seal',
+      fieldId: seal.id,
+      page: seal.page,
+      offsetX: pct.x - seal.x,
+      offsetY: pct.y - seal.y,
       pointerId: e.pointerId,
       moved: false,
       startClientX: e.clientX,
@@ -447,13 +552,15 @@ export default function SignaturePlacementCanvas({
         }}
       >
         <Text size='sm' fw={700} style={{ color: 'var(--app-accent)' }}>
-          {activeIsValidator
+          {placingSeal
+            ? 'Haga clic en la página donde va el sello'
+            : activeIsValidator
             ? `Ubique el visto bueno de ${activePerson?.name ?? 'validador'}`
             : `Ubique la firma de ${activePerson?.name ?? 'firmante'}`}
         </Text>
         {activeIsValidator ? (
           <Text size='xs' c='dimmed' mt={2}>
-            Es su rúbrica: se repite en todas las páginas, en la misma posición. Mientras se firma
+            Es su rúbrica: sale solo en la hoja donde la ubique. Mientras se firma
             se ve un chulito; en la versión final se reemplaza por su firma guardada, en pequeño.
           </Text>
         ) : null}
@@ -539,41 +646,19 @@ export default function SignaturePlacementCanvas({
                 ref={(el) => {
                   imgRefs.current[page.page] = el;
                 }}
-                src={page.dataUrl}
+                src={page.dataUrl ?? undefined}
                 alt={`Página ${page.page}`}
-                style={{ display: 'block', width: '100%', height: 'auto', pointerEvents: 'none' }}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  height: 'auto',
+                  // Mientras se dibuja, la hoja ya ocupa su tamaño (las cajas no saltan).
+                  aspectRatio: `${page.width} / ${page.height}`,
+                  background: '#fff',
+                  pointerEvents: 'none',
+                }}
                 draggable={false}
               />
-              {/* La rúbrica del validador se repite en todas las páginas: copia tenue (no se mueve aquí). */}
-              {fields
-                .filter((f) => f.page !== page.page && normalizeFieldKind(f.kind) === 'approval')
-                .map((field) => (
-                  <Box
-                    key={`ghost-${field.id}`}
-                    aria-hidden
-                    title='Rúbrica del validador: se repite en todas las páginas'
-                    style={{
-                      position: 'absolute',
-                      left: `${field.x}%`,
-                      top: `${field.y}%`,
-                      width: `${field.width}%`,
-                      height: `${field.height}%`,
-                      border: '1.5px dashed color-mix(in srgb, var(--mantine-color-teal-6) 55%, transparent)',
-                      borderRadius: 4,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      opacity: 0.55,
-                      pointerEvents: 'none',
-                      boxSizing: 'border-box',
-                    }}
-                  >
-                    <IconCircleCheckFilled
-                      size={isTinyField(field) ? '70%' : 12}
-                      style={{ color: 'var(--mantine-color-teal-6)', maxHeight: '100%' }}
-                    />
-                  </Box>
-                ))}
               {fields
                 .filter((f) => f.page === page.page)
                 .map((field) => {
@@ -689,6 +774,54 @@ export default function SignaturePlacementCanvas({
                     </Box>
                   );
                 })}
+              {seals
+                .filter((s) => s.page === page.page)
+                .map((seal) => (
+                  <Box
+                    key={seal.id}
+                    title='Sello: arrastre para mover · esquina para redimensionar'
+                    onPointerDown={(e) => startSealDrag(e, seal, 'move')}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      position: 'absolute',
+                      left: `${seal.x}%`,
+                      top: `${seal.y}%`,
+                      width: `${seal.width}%`,
+                      height: `${seal.height}%`,
+                      border: '2px dashed var(--mantine-color-grape-6)',
+                      borderRadius: 6,
+                      cursor: interacting ? 'grabbing' : 'grab',
+                      boxSizing: 'border-box',
+                      touchAction: 'none',
+                    }}
+                  >
+                    {sealImageSrc ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={sealImageSrc(seal.sealItemId)}
+                        alt='Sello'
+                        draggable={false}
+                        style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }}
+                      />
+                    ) : null}
+                    <Box
+                      onPointerDown={(e) => startSealDrag(e, seal, 'resize')}
+                      style={{
+                        position: 'absolute',
+                        right: 2,
+                        bottom: 2,
+                        width: 14,
+                        height: 14,
+                        borderRadius: 2,
+                        background: 'var(--mantine-color-grape-6)',
+                        cursor: 'nwse-resize',
+                        border: '1px solid #fff',
+                        touchAction: 'none',
+                      }}
+                      title='Redimensionar'
+                    />
+                  </Box>
+                ))}
             </Box>
           ))}
         </Stack>

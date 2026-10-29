@@ -95,6 +95,7 @@ import {
   RequestsPage,
   StatFilterTile,
 } from '../../../../../components/request-general/list/RequestListUi';
+import { RequestFlowBar, useRequestFlows } from '../../../../../components/request-general/RequestFlow';
 import { panelStyles } from '../../../../../components/ui/panel/Panel';
 import {
   buildTaskDisplayBadges,
@@ -184,6 +185,8 @@ function RequestBoard() {
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [tasksByRequest, setTasksByRequest] = useState<Record<number, RequestTask[]>>({});
+  // Flujo completo (en qué paso va) de las solicitudes de la página.
+  const { flows: requestFlows } = useRequestFlows(tickets.map((t) => Number(t.id)));
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1699,9 +1702,16 @@ function RequestBoard() {
                         <Text size='sm' fw={500} lineClamp={2}>
                           {ticket.subject}
                         </Text>
+                        {requestFlows[ticket.id] ? (
+                          <div style={{ marginTop: 8 }}>
+                            <RequestFlowBar flow={requestFlows[ticket.id]} />
+                          </div>
+                        ) : null}
                         {tasksByRequest[ticket.id]?.length ? (
                           <Stack gap={6} mt={8}>
-                            <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
+                            {requestFlows[ticket.id] ? null : (
+                              <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
+                            )}
                             <Group gap={6} wrap='wrap'>
                               {buildTaskDisplayBadges(tasksByRequest[ticket.id]).map((badge) => {
                                 const { color, Icon } = getTaskVisual(badge.statusKey);
