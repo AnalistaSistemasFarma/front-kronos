@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { esFormadorFormacion } from '@/lib/formacion/servidor';
 import { prisma } from '../../../../../lib/prisma';
 import { identificar } from '../../../../../lib/portal/acceso';
 import { generarCertificadoPdf } from '../../../../../lib/portal/certificado-pdf';
-import { formadoresDePortal } from '../../../../../lib/portal/config';
 import { archivarCertificadoEnSharePoint } from '../../../../../lib/portal/formacion';
 import { descargarArchivoFormacion } from '../../../../../lib/portal/formacion-storage';
 
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { code } = await params;
   if (!code || code.length > 40) return NextResponse.json({ error: 'Código no válido.' }, { status: 400 });
 
-  const esFormador = formadoresDePortal().includes(quien.correo.toLowerCase());
+  const esFormador = (await esFormadorFormacion(quien.correo));
 
   try {
     const certificado = await prisma.portalCertificate.findUnique({ where: { code } });
