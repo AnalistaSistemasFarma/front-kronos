@@ -85,6 +85,61 @@ export async function tieneMapaPersonal(email: string): Promise<boolean> {
 }
 
 /**
+ * Departamento de cada agente según sus OPERADORES (Nicolás, 2026-10-29: «mira
+ * los operadores de cada agente; cada uno tiene un departamento asignado»).
+ * Operador = usuario con el subproceso-permiso del agente. Se ignora a quien
+ * opera más de 5 agentes (administración: saldría en todos). Gana el
+ * departamento más repetido; el ajuste manual (agent_memory_setting) manda.
+ */
+export const MAX_AGENTES_OPERADOR = 5;
+async function departamentosPorOperadores(): Promise<Map<number, string>> {
+  const r = await withMssqlPool((pool) =>
+    pool.request().input("max", sql.Int, MAX_AGENTES_OPERADOR).query(`
+      WITH op AS (
+        SELECT DISTINCT a.id_agent, cu.id_user
+        FROM dbo.agent a
+        JOIN dbo.subprocess_user_company suc ON suc.id_subprocess = a.id_subprocess
+        JOIN dbo.company_user cu ON cu.id_company_user = suc.id_company_user
+        WHERE a.is_active = 1),
+      amplios AS (SELECT id_user FROM op GROUP BY id_user HAVING COUNT(*) > @max),
+      dep AS (
+        SELECT op.id_agent, d.department, COUNT(DISTINCT op.id_user) AS n
+        FROM op
+        JOIN dbo.department_user du ON du.id_user = op.id_user
+        JOIN dbo.department d ON d.id_department = du.id_department
+        WHERE op.id_user NOT IN (SELECT id_user FROM amplios)
+        GROUP BY op.id_agent, d.department),
+      r AS (SELECT id_agent, department,
+                   ROW_NUMBER() OVER (PARTITION BY id_agent ORDER BY n DESC, department) AS rn
+            FROM dep)
+      SELECT id_agent, department FROM r WHERE rn = 1;
+    `),
+  );
+  const m = new Map<number, string>();
+  for (const f of r.recordset as Fila[])
+    if (f.department) m.set(Number(f.id_agent), String(f.department).trim());
+  return m;
+}
+
+/** ¿El correo opera ese agente (tiene su subproceso-permiso en alguna empresa)? */
+export async function esOperador(email: string, idAgent: number): Promise<boolean> {
+  const r = await withMssqlPool((pool) =>
+    pool
+      .request()
+      .input("id", sql.Int, idAgent)
+      .input("email", sql.NVarChar(200), email.trim()).query(`
+        SELECT TOP 1 1 AS si
+        FROM dbo.agent a
+        JOIN dbo.subprocess_user_company suc ON suc.id_subprocess = a.id_subprocess
+        JOIN dbo.company_user cu ON cu.id_company_user = suc.id_company_user
+        JOIN dbo.[user] u ON u.id = cu.id_user
+        WHERE a.id_agent = @id AND u.email = @email;
+      `),
+  );
+  return (r.recordset as Fila[]).length > 0;
+}
+
+/**
  * Agentes que entran en un mapa para ese usuario.
  *   general  → activos, dentro del alcance de auditoría; los personales solo
  *              para su dueño.
@@ -96,10 +151,12 @@ async function agentesDelMapa(
   email: string,
   alcance: AuditScope | null,
   ajustes: Map<number, Ajuste>,
+  codigo?: string,
 ): Promise<MapAgentDto[]> {
   const yo = normEmail(email);
+  const deptos = await departamentosPorOperadores();
   const agentes = await prisma.agent.findMany({
-    where: { is_active: true },
+    where: codigo ? { is_active: true, code: codigo } : { is_active: true },
     select: {
       id_agent: true,
       code: true,
@@ -118,6 +175,7 @@ async function agentesDelMapa(
     .filter((a) => {
       const owner = ajustes.get(a.id_agent)?.owner ?? null;
       if (mapa === "personal") return owner === yo;
+      if (mapa === "agente") return true; // el permiso se revisa abajo
       // General: todo lo del alcance. Los agentes personales solo para su
       // dueño (Nicolás, 2026-10-29: «el general debe mostrar todo de todos»).
       if (owner !== null) return owner === yo;
@@ -132,21 +190,46 @@ async function agentesDelMapa(
         displayName: a.display_name,
         companyId: principal?.id_company ?? null,
         companyName: principal?.company.company.trim() ?? null,
-        department: ajustes.get(a.id_agent)?.department ?? null,
+        department:
+          ajustes.get(a.id_agent)?.department ?? deptos.get(a.id_agent) ?? null,
       };
     });
+}
+
+/**
+ * ¿Puede ver la memoria de ESE agente? Personal: solo su dueño. Los demás:
+ * quien lo audita (dentro de su alcance) o quien lo opera.
+ */
+export async function puedeVerAgente(
+  idAgent: number,
+  email: string,
+  alcance: AuditScope | null,
+): Promise<boolean> {
+  return conTablas(async () => {
+    const owner = (await leerAjustes()).get(idAgent)?.owner ?? null;
+    if (owner !== null) return owner === normEmail(email);
+    if (alcance !== null && agentInScope(alcance, idAgent)) return true;
+    return esOperador(email, idAgent);
+  });
 }
 
 export async function leerMapa(
   mapa: MemoryMap,
   email: string,
   alcance: AuditScope | null,
+  codigo?: string,
 ): Promise<MemoryMapDto> {
   return conTablas(async () => {
     const ajustes = await leerAjustes();
     const yo = normEmail(email);
     const tienePersonal = [...ajustes.values()].some((a) => a.owner === yo);
-    const agentes = await agentesDelMapa(mapa, email, alcance, ajustes);
+    let agentes = await agentesDelMapa(mapa, email, alcance, ajustes, codigo);
+    if (mapa === "agente") {
+      const visibles: MapAgentDto[] = [];
+      for (const a of agentes)
+        if (await puedeVerAgente(a.idAgent, email, alcance)) visibles.push(a);
+      agentes = visibles;
+    }
     const ids = JSON.stringify(agentes.map((a) => a.idAgent));
 
     const r = await withMssqlPool((pool) =>
@@ -224,7 +307,8 @@ export async function leerDetalle(
     const permitido =
       owner !== null
         ? owner === normEmail(email)
-        : alcance !== null && agentInScope(alcance, idAgent);
+        : (alcance !== null && agentInScope(alcance, idAgent)) ||
+          (await esOperador(email, idAgent));
     if (!permitido) return null;
     return {
       id: Number(f.id_memory),

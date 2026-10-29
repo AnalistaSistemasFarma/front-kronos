@@ -608,6 +608,10 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
         } else if (l.k === "own") {
           if (!verPropios) continue;
           p = trazos.own;
+        } else if (l.k === "x" && l.s.tipo === "memoria" && vista.k < 0.5) {
+          // Enlaces entre memorias de distintos grupos: de lejos son una
+          // maraña; se ven al acercar o al enfocar un nodo.
+          continue;
         } else p = l.k === "x" ? trazos.x : trazos.mm;
         p.moveTo(x1, y1);
         if (l.k === "x" && !vec) {
