@@ -7183,3 +7183,40 @@ a.portal-th__contactos-boton--enlace:focus-visible {
   margin: 8px auto 0;
   background-color: var(--app-border, var(--border-subtle));
 }
+
+/* ── Chat en el celular: burbujas anchas y tablas legibles, como WhatsApp ──
+   (pedido de Nicolás 2026-10-28). En móvil el avatar al lado de cada mensaje
+   le quita ~36 px a la burbuja y las tablas terminaban partiendo palabras
+   letra por letra («Pr/io/ri/da/d»). El autor ya va en .chat-bubble__author.
+   En escritorio no cambia nada. */
+@media (max-width: 767px) {
+  .chat-msg__avatar {
+    display: none;
+  }
+  .chat-bubble {
+    max-width: 92%;
+  }
+  .chat-bubble--system {
+    max-width: 96%;
+  }
+  /* La tabla toma el ancho de su contenido y, si no cabe, se desliza dentro
+     de la burbuja; nunca parte palabras cortas. */
+  .chat-md__table-wrap {
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+  .chat-md__table {
+    width: max-content;
+    min-width: 100%;
+  }
+  .chat-md__th,
+  .chat-md__td {
+    overflow-wrap: normal;
+    word-break: normal;
+    min-width: 7ch;
+    max-width: 70vw;
+  }
+  .chat-md__th {
+    white-space: nowrap;
+  }
+}
