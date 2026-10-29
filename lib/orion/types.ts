@@ -212,7 +212,60 @@ export type OrionSignatureState = {
   }>;
   /** PDF generado desde una preparación en Word (fileId del .docx). */
   sourceDraftFileId?: string | null;
+  /**
+   * Datos y sellos agregados DESPUÉS de firmar (p. ej. consecutivo, tipo de cambio y fecha
+   * del giro). No van a Orion: SynerLink los estampa encima del PDF firmado al servirlo.
+   */
+  annotations?: OrionDocumentAnnotation[] | null;
+  /**
+   * Copias congeladas "Datos N": PDF firmado (sin marca de agua) + datos y sellos, guardado en
+   * OneDrive cada vez que se guardan datos con todas las firmas. La última es la vigente.
+   * Aparte de `versions` (que se reconstruye desde Orion).
+   */
+  annotatedCopies?: OrionAnnotatedCopy[] | null;
   updatedAt?: string;
+};
+
+export type OrionAnnotatedCopy = {
+  /** datos-<n>-<timestamp>; también es el versionId en signed-file. */
+  id: string;
+  /** 1, 2, 3… */
+  round: number;
+  /** p. ej. "v1.0 · Datos 1". */
+  label: string;
+  oneDriveItemId: string;
+  fileName: string;
+  /** SHA-256 del PDF guardado (prueba de que no cambió después). */
+  sha256: string;
+  createdAt: string;
+  createdByEmail: string;
+  createdByName?: string | null;
+};
+
+/** Dato (texto) o sello (imagen) agregado sobre el PDF ya firmado. */
+export type OrionDocumentAnnotation = {
+  id: string;
+  kind: 'text' | 'seal';
+  /** Página (1 = primera). */
+  page: number;
+  /** % de la página, origen arriba-izquierda (igual que las cajas de firma). */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** kind text: el valor escrito. */
+  text?: string | null;
+  /** kind text: nombre del dato (p. ej. "Tipo de cambio"). Solo para la pantalla y el historial; no se estampa. */
+  label?: string | null;
+  /** kind seal: imagen en OneDrive (subcarpeta _sellos de la solicitud). */
+  sealItemId?: string | null;
+  sealFileName?: string | null;
+  createdByEmail: string;
+  createdByName?: string | null;
+  createdAt: string;
+  updatedByEmail?: string | null;
+  updatedByName?: string | null;
+  updatedAt?: string | null;
 };
 
 /** Contenedor persistido en request_form_value (campo orion_signature). */

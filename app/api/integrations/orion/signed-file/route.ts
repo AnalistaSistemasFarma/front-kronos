@@ -20,6 +20,9 @@ import {
 import { isOrionProtectedFileUrl, isAllowedServerPdfFetchUrl, orionDocumentHasSignedCopy } from '@/lib/orion/signedFileAccess';
 import { stampSynerlinkWatermark } from '@/lib/orion/stampSynerlinkWatermark';
 import { applyValidatorMarks } from '@/lib/orion/validatorMarks';
+import { applyDocumentAnnotations, loadAnnotatedCopyPdf } from '@/lib/orion/annotationService';
+import { latestAnnotatedCopy } from '@/lib/orion/annotations';
+import type { OrionAnnotatedCopy } from '@/lib/orion/types';
 import { buildValidatorMarks } from '@/lib/orion/validatorStamp';
 import { buildSynerLinkAttachmentFileUrl } from '@/lib/attachments/fileUrl';
 
@@ -56,6 +59,8 @@ export async function GET(req: Request) {
     const fileId = String(searchParams.get('fileId') || '').trim();
     const versionId = searchParams.get('versionId');
     const forceDownload = searchParams.get('download') === '1';
+    // annotations=0: sin los datos/sellos posteriores a la firma (el editor los dibuja aparte).
+    const withAnnotations = searchParams.get('annotations') !== '0';
 
     if (!Number.isInteger(requestId) || requestId <= 0 || !fileId) {
       return NextResponse.json({ error: 'requestId y fileId son obligatorios' }, { status: 400 });
@@ -119,6 +124,7 @@ export async function GET(req: Request) {
       let pdf: Uint8Array = Buffer.from(resolved.base64, 'base64');
       if (validatorMode !== 'none') {
         pdf = await applyValidatorMarks(pdf, state, { final: validatorMode === 'final' });
+        if (withAnnotations) pdf = await applyDocumentAnnotations(pdf, state);
       }
       return new NextResponse(Buffer.from(pdf), {
         status: 200,
@@ -161,12 +167,26 @@ export async function GET(req: Request) {
     let targetUrl: string | null = null;
     let maxSignerOrder: number | null = null;
     let wantValidated = false;
+    /** Copia congelada "Datos N" a servir (ya trae visto bueno, datos y sellos). */
+    let annotatedCopy: OrionAnnotatedCopy | null = null;
     const selectedVersion = versionId
       ? orderedVersions.find((v) => v.id === versionId) ?? null
       : null;
 
     // Historial / original: solicitante, preparador documento o admin.
-    if (versionId === 'original') {
+    if (versionId && versionId.startsWith('datos-')) {
+      if (!canViewVersions) {
+        return NextResponse.json(
+          { error: 'Solo el solicitante o un preparador documento del flujo puede descargar versiones' },
+          { status: 403 }
+        );
+      }
+      annotatedCopy = (state.annotatedCopies ?? []).find((c) => c.id === versionId) ?? null;
+      if (!annotatedCopy) {
+        return NextResponse.json({ error: 'Versión no encontrada' }, { status: 404 });
+      }
+      validatorMode = 'none';
+    } else if (versionId === 'original') {
       validatorMode = 'none';
       if (!canViewVersions) {
         return NextResponse.json(
@@ -229,11 +249,13 @@ export async function GET(req: Request) {
       ) {
         wantValidated = true;
         validatorMode = 'final';
+        // Con datos guardados después de firmar, lo vigente es su última copia congelada.
+        if (withAnnotations) annotatedCopy = latestAnnotatedCopy(state);
       }
     }
 
     // Sin URL Orion (p. ej. Solo ver / aún sin firmas): PDF original desde OneDrive.
-    if (!targetUrl) {
+    if (!targetUrl && !annotatedCopy) {
       const fromDrive = await servePdfFromOneDrive(state);
       if (fromDrive) return fromDrive;
       return NextResponse.json(
@@ -247,7 +269,8 @@ export async function GET(req: Request) {
     const statusUpper = String(state.status || '').toUpperCase();
     const isSealed = statusUpper === 'FIRMADO';
     // Cache corta cuando el PDF ya está firmado (keyed por doc/versión vía URL).
-    const cacheControl = isSealed
+    // La copia "Datos N" vigente cambia en cada guardado: sin caché.
+    const cacheControl = isSealed && !annotatedCopy
       ? 'private, max-age=60'
       : 'private, no-store';
 
@@ -267,6 +290,7 @@ export async function GET(req: Request) {
             ...buildValidatorMarks(state).map((m) => m.field),
             ...(state.signatureFields ?? []),
             ...(state.validatorFields ?? []),
+            ...(state.annotations ?? []),
           ];
           const stamped = await stampSynerlinkWatermark(body, avoid);
           body = Buffer.from(stamped);
@@ -281,6 +305,8 @@ export async function GET(req: Request) {
         body = Buffer.from(
           await applyValidatorMarks(body, state, { final: validatorMode === 'final' })
         );
+        // Datos y sellos posteriores a la firma: encima de todo, nunca en el original.
+        if (withAnnotations) body = Buffer.from(await applyDocumentAnnotations(body, state));
       }
 
       const safeType = String(contentType || 'application/pdf').split(';')[0].trim() || 'application/pdf';
@@ -320,6 +346,25 @@ export async function GET(req: Request) {
         wantValidated
       );
     };
+
+    if (annotatedCopy) {
+      const copyPdf = await loadAnnotatedCopyPdf(annotatedCopy);
+      if (copyPdf) {
+        // Ya trae visto bueno, datos y sellos: solo falta la marca de agua (vista vigente).
+        validatorMode = 'none';
+        return await serveBuffer(copyPdf, 'application/pdf', wantValidated);
+      }
+      if (versionId) {
+        return NextResponse.json(
+          { error: 'La copia con los datos ya no está disponible en OneDrive' },
+          { status: 404 }
+        );
+      }
+      // Vigente sin la copia en OneDrive: se sigue con el PDF firmado y la capa en vivo.
+    }
+    if (!targetUrl) {
+      return NextResponse.json({ error: 'No hay PDF disponible para este archivo' }, { status: 404 });
+    }
 
     if (!isOrionProtectedFileUrl(targetUrl)) {
       if (!isAllowedServerPdfFetchUrl(targetUrl)) {

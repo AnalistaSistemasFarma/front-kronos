@@ -16,8 +16,12 @@ import {
   ensureOriginalOrionVersion,
   listOrionDocumentVersionsForViewer,
 } from '../../lib/orion/documentVersions';
-import { resolveOrionVersionAccessUrl } from '../../lib/orion/signedFileAccess';
+import {
+  buildOrionSignedFileProxyUrl,
+  resolveOrionVersionAccessUrl,
+} from '../../lib/orion/signedFileAccess';
 import { useOrionSignatureApi } from './OrionSignatureContext';
+import ViewOnlineButton from './ViewOnlineButton';
 
 type Props = {
   state?: OrionSignatureState | null;
@@ -34,11 +38,20 @@ type Props = {
   fileId: string;
 };
 
+/** Versión del historial o copia "Datos N" (datos agregados después de firmar). */
+type TimelineItem = Omit<OrionDocumentVersion, 'kind'> & {
+  kind: OrionDocumentVersion['kind'] | 'datos';
+  sha256?: string | null;
+};
+
 function kindMeta(kind: string): {
   label: string;
   color: string;
   tone: 'original' | 'partial' | 'final';
 } {
+  if (kind === 'datos') {
+    return { label: 'Con datos', color: 'var(--mantine-color-grape-6)', tone: 'final' };
+  }
   if (kind === 'original') {
     return { label: 'Original', color: 'var(--mantine-color-gray-6)', tone: 'original' };
   }
@@ -104,22 +117,43 @@ export default function OrionDocumentVersionsButton({
       ? Boolean(api.canViewVersions)
       : Boolean(canViewProp);
 
-  const versions = listOrionDocumentVersionsForViewer(
+  const signedVersions = listOrionDocumentVersionsForViewer(
     ensureOriginalOrionVersion(state ?? {}, fallbackOriginalUrl),
     { fullHistory: true }
   );
+  // Las copias "Datos N" van después de la versión final, en orden.
+  const versions: TimelineItem[] = [
+    ...signedVersions,
+    ...[...(state?.annotatedCopies ?? [])]
+      .sort((a, b) => a.round - b.round)
+      .map((c) => ({
+        id: c.id,
+        kind: 'datos' as const,
+        label: c.label,
+        url: '',
+        createdAt: c.createdAt,
+        signerEmail: c.createdByEmail,
+        signerName: c.createdByName ?? null,
+        sha256: c.sha256,
+      })),
+  ];
 
-  const handleDownload = async (version: OrionDocumentVersion) => {
-    const href = resolveOrionVersionAccessUrl({
-      requestId,
-      fileId,
-      versionId: version.id,
-      url: version.url,
-      kind: version.kind,
-    });
+  const handleDownload = async (version: TimelineItem) => {
+    const href =
+      version.kind === 'datos'
+        ? buildOrionSignedFileProxyUrl({ requestId, fileId, versionId: version.id, download: true })
+        : resolveOrionVersionAccessUrl({
+            requestId,
+            fileId,
+            versionId: version.id,
+            url: version.url,
+            kind: version.kind,
+          });
     const baseName = (fileName || state?.fileName || 'documento').replace(/\.pdf$/i, '');
     const suffix =
-      version.kind === 'original'
+      version.kind === 'datos'
+        ? `-${version.label.replace(/[^A-Za-z0-9.]+/g, '-').toLowerCase()}`
+        : version.kind === 'original'
         ? '-original'
         : version.kind === 'final'
           ? '-firmado'
@@ -248,7 +282,9 @@ export default function OrionDocumentVersionsButton({
             {docTitle}
           </Text>
           <Text size='sm' c='dimmed' mb='lg'>
-            {`${versions.length} versión(es) · original → firmas acumuladas`}
+            {`${versions.length} versión(es) · original → firmas acumuladas${
+              versions.some((v) => v.kind === 'datos') ? ' → datos después de firmar' : ''
+            }`}
           </Text>
 
           <Stack gap={0} mb='lg'>
@@ -307,11 +343,24 @@ export default function OrionDocumentVersionsButton({
                           {[version.signerName, version.signerEmail].filter(Boolean).join(' · ')}
                         </Text>
                       )}
+                      {version.sha256 ? (
+                        <Text size='xs' c='dimmed' ff='monospace' lineClamp={1} title={version.sha256}>
+                          SHA-256 {version.sha256.slice(0, 16)}…
+                        </Text>
+                      ) : null}
+                      <Group gap={10} mt={6} wrap='nowrap'>
+                      {/* Ver en línea (sin descargar): misma ruta que el ojito, con el visto bueno solo en su hoja. */}
+                      <ViewOnlineButton
+                        fileName={`${(fileName || state?.fileName || 'documento').replace(/\.pdf$/i, '')} - ${version.label}.pdf`}
+                        href={buildOrionSignedFileProxyUrl({ requestId, fileId, versionId: version.id })}
+                        inlineSrc={buildOrionSignedFileProxyUrl({ requestId, fileId, versionId: version.id })}
+                        downloadUrl={buildOrionSignedFileProxyUrl({ requestId, fileId, versionId: version.id, download: true })}
+                        iconSize={16}
+                      />
                       <UnstyledButton
                         onClick={() => void handleDownload(version)}
                         disabled={downloadingId === version.id}
                         style={{
-                          marginTop: 6,
                           fontSize: 13,
                           fontWeight: 600,
                           color: 'var(--mantine-color-blue-6)',
@@ -326,6 +375,7 @@ export default function OrionDocumentVersionsButton({
                         <IconDownload size={13} />
                         {downloadingId === version.id ? 'Descargando…' : 'Descargar'}
                       </UnstyledButton>
+                      </Group>
                     </Box>
                     <Text size='sm' fw={600} style={{ color: meta.color, whiteSpace: 'nowrap' }}>
                       {meta.label}
