@@ -20,6 +20,7 @@ import {
   TextInput,
   Title,
   Tooltip,
+  useComputedColorScheme,
 } from "@mantine/core";
 import {
   IconAffiliate,
@@ -280,6 +281,9 @@ export default function MemoriasAgentesPage() {
   const [cargandoDetalle, setCargandoDetalle] = useState(false);
   const [completa, setCompleta] = useState(false);
   const [sinGeneral, setSinGeneral] = useState(false);
+  const esquema = useComputedColorScheme("light", {
+    getInitialValueInEffect: true,
+  });
   const [version, setVersion] = useState(0);
   const lienzo = useRef<MapaMemoriasHandle>(null);
   const contenedor = useRef<HTMLDivElement>(null);
@@ -1169,6 +1173,7 @@ export default function MemoriasAgentesPage() {
                     mostrarZonas={verZonas}
                     onSeleccionar={elegir}
                     version={version}
+                    oscuro={esquema === "dark"}
                   />
                 )}
                 <Group
@@ -1183,7 +1188,7 @@ export default function MemoriasAgentesPage() {
                     right: 0,
                     zIndex: 2,
                     background:
-                      "linear-gradient(#fff 70%, rgba(255,255,255,0))",
+                      "linear-gradient(var(--app-surface, var(--surface)) 70%, transparent)",
                   }}
                 >
                   <Text size="sm" fw={600} style={{ whiteSpace: "nowrap" }}>
@@ -1254,7 +1259,7 @@ export default function MemoriasAgentesPage() {
                     position: "absolute",
                     left: 14,
                     bottom: 12,
-                    background: "rgba(255,255,255,.9)",
+                    background: "var(--app-surface, var(--surface))",
                     padding: "4px 8px",
                     borderRadius: 4,
                   }}

@@ -56,6 +56,34 @@ export interface MapaMemoriasHandle {
   enfocar: (ids: string[]) => void;
 }
 
+/** Colores del lienzo para cada tema (fondos = --surface de app/globals.css). */
+const TEMAS = {
+  claro: {
+    fondo: "#ffffff",
+    punto: "rgba(26,29,33,.07)",
+    tenue: "rgba(26,29,33,.03)",
+    cruce: "rgba(26,29,33,.16)",
+    lazo: "rgba(26,29,33,.09)",
+    tinta: "#1a1d21",
+    tinta2: "#343a40",
+    halo: "rgba(255,255,255,.95)",
+    relleno: "#ffffff",
+    mini: "rgba(255,255,255,.92)",
+  },
+  oscuro: {
+    fondo: "#28292e",
+    punto: "rgba(255,255,255,.06)",
+    tenue: "rgba(255,255,255,.03)",
+    cruce: "rgba(255,255,255,.2)",
+    lazo: "rgba(255,255,255,.1)",
+    tinta: "#f3f4f6",
+    tinta2: "#d0d4da",
+    halo: "rgba(40,41,46,.95)",
+    relleno: "#303238",
+    mini: "rgba(40,41,46,.92)",
+  },
+} as const;
+
 interface Props {
   nodos: NodoMapa[];
   enlaces: EnlaceMapa[];
@@ -67,6 +95,8 @@ interface Props {
   onSeleccionar: (id: string | null) => void;
   /** Cambia cuando el contenedor cambia de tamaño (pantalla completa). */
   version: number;
+  /** Tema de SynerLink (modo oscuro del usuario). */
+  oscuro: boolean;
 }
 
 const FUENTE = '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
@@ -285,14 +315,16 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
         seleccionado: selId,
         mostrarZonas: zonas,
         grupos: gs,
+        oscuro,
       } = props$.current;
+      const T = oscuro ? TEMAS.oscuro : TEMAS.claro;
       const dpr = Math.max(1, window.devicePixelRatio || 1);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = T.fondo;
       ctx.fillRect(0, 0, W, H);
       const paso = 32 * vista.k;
       if (paso > 8) {
-        ctx.fillStyle = "rgba(26,29,33,.07)";
+        ctx.fillStyle = T.punto;
         const [ox, oy] = toS(0, 0);
         const sx = ((ox % paso) + paso) % paso;
         const sy = ((oy % paso) + paso) % paso;
@@ -338,7 +370,7 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
           const bx = sx - tw / 2;
           const by = sy - sr - 10;
           ctx.globalAlpha = dim;
-          ctx.fillStyle = "#fff";
+          ctx.fillStyle = T.relleno;
           redondeo(ctx, bx, by, tw, 20, 10);
           ctx.fill();
           ctx.strokeStyle = hexA(g.color, 0.6);
@@ -362,12 +394,12 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
           if (l.s === foco || l.t === foco) {
             col = hexA(foco!.color, 0.8);
             w = 1.6;
-          } else col = "rgba(26,29,33,.03)";
-        } else if (l.k === "x") col = "rgba(26,29,33,.16)";
+          } else col = T.tenue;
+        } else if (l.k === "x") col = T.cruce;
         else if (l.k === "h") {
           col = hexA(l.s.color, 0.5);
           w = 1.5;
-        } else col = "rgba(26,29,33,.09)";
+        } else col = T.lazo;
         ctx.strokeStyle = col;
         ctx.lineWidth = w;
         ctx.beginPath();
@@ -405,12 +437,12 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
             ctx.arc(x, y, r, 0, Math.PI * 2);
             ctx.fill();
             if (n === sel || q?.has(n.id)) {
-              ctx.strokeStyle = "#1a1d21";
+              ctx.strokeStyle = T.tinta;
               ctx.lineWidth = 1.6;
               ctx.stroke();
             }
           } else if (n.tipo === "depto") {
-            ctx.fillStyle = "#fff";
+            ctx.fillStyle = T.relleno;
             ctx.strokeStyle = n.color;
             ctx.lineWidth = 2;
             redondeo(ctx, x - r, y - r, r * 2, r * 2, r * 0.4);
@@ -420,7 +452,7 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
             ctx.shadowColor = "rgba(0,0,0,.12)";
             ctx.shadowBlur = 6;
             ctx.shadowOffsetY = 1;
-            ctx.fillStyle = "#fff";
+            ctx.fillStyle = T.relleno;
             ctx.beginPath();
             ctx.arc(x, y, r, 0, Math.PI * 2);
             ctx.fill();
@@ -450,7 +482,7 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
             ctx.arc(x, y, r, 0, Math.PI * 2);
             ctx.fill();
             ctx.shadowBlur = 0;
-            ctx.strokeStyle = "#fff";
+            ctx.strokeStyle = T.fondo;
             ctx.lineWidth = 3;
             ctx.stroke();
           }
@@ -492,14 +524,14 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
                 ty += Math.sin(an) > 0 ? fs * 0.6 : -fs * 0.3;
             }
             ctx.lineWidth = 4;
-            ctx.strokeStyle = "rgba(255,255,255,.95)";
+            ctx.strokeStyle = T.halo;
             ctx.strokeText(txt, tx, ty);
             ctx.fillStyle =
               n.tipo === "depto"
                 ? n.color
                 : n.tipo === "memoria"
-                  ? "#343a40"
-                  : "#1a1d21";
+                  ? T.tinta2
+                  : T.tinta;
             ctx.fillText(txt, tx, ty);
           }
           ctx.globalAlpha = 1;
@@ -632,7 +664,14 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
     // Redibujar cuando cambian filtros, selección o zonas.
     useEffect(() => {
       dibujar();
-    }, [visible, resaltados, seleccionado, mostrarZonas, dibujar]);
+    }, [
+      visible,
+      resaltados,
+      seleccionado,
+      mostrarZonas,
+      props.oscuro,
+      dibujar,
+    ]);
 
     // Tamaño (ventana y pantalla completa).
     useEffect(() => {
@@ -792,7 +831,7 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
             bottom: 12,
             width: 180,
             height: 116,
-            background: "rgba(255,255,255,.92)",
+            background: (props.oscuro ? TEMAS.oscuro : TEMAS.claro).mini,
             border: "1px solid var(--mantine-color-default-border)",
             borderRadius: 8,
           }}
