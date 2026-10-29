@@ -56,7 +56,7 @@ import {
  * AUDITORÍA DE AGENTES → MEMORIAS — lo que cada agente ha aprendido, en un mapa
  * tipo vista gráfica de Obsidian (Nicolás, 2026-10-29):
  *   - Mapa general: empresa → departamento → agente → memorias, coloreado por
- *     empresa. Con el alcance de la auditoría y sin los agentes personales.
+ *     empresa. Con el alcance de la auditoría; los agentes personales solo los ve su dueño.
  *   - Mapa personal: solo para el dueño de los agentes personales, coloreado
  *     por tema.
  * Mismo diseño que Inventario y Skills: es otra pestaña del mismo módulo.
@@ -206,10 +206,11 @@ function grafoPersonal(d: MemoryMapDto): Grafo {
   const conteo = new Map<string, number>();
   for (const m of d.memorias)
     conteo.set(temaPrincipal(m), (conteo.get(temaPrincipal(m)) ?? 0) + 1);
-  // Los 12 temas más grandes; el resto va a «otros».
+  // Temas con al menos 3 memorias (hasta 20); los sueltos van a «otros».
   const top = [...conteo.entries()]
+    .filter(([, n]) => n >= 3)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 12)
+    .slice(0, 20)
     .map(([t]) => t);
   const temaDe = (m: { topic: string | null; type: MemoryType }) => {
     const t = temaPrincipal(m);
@@ -967,9 +968,9 @@ export default function MemoriasAgentesPage() {
             icon={<IconLock size={18} />}
             title="Vista privada"
           >
-            Este mapa solo lo ve usted. Sus agentes personales no aparecen en el
-            mapa general y ningún otro usuario, ni la administración, puede
-            abrirlo. El color aquí es por tema.
+            Este mapa solo lo ve usted. Sus agentes personales también aparecen
+            en su mapa general, pero ningún otro usuario, ni la administración,
+            los ve. El color aquí es por tema.
           </Alert>
         )}
 
