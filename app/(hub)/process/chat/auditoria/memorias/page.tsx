@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import ChatMarkdown from "../../../../../../components/chat/ChatMarkdown";
 import {
   ActionIcon,
   Alert,
@@ -63,7 +64,7 @@ import {
  * LA REJA ESTÁ EN EL ENDPOINT (/api/chat/auditoria/memorias).
  */
 
-type Mapa = "general" | "personal";
+type Mapa = "general" | "personal" | "agente";
 type Respuesta = MemoryMapDto & { soloPersonal?: boolean };
 
 /** Colores de Mantine por empresa (mismos tonos que las insignias). */
@@ -289,45 +290,68 @@ export default function MemoriasAgentesPage() {
   const lienzo = useRef<MapaMemoriasHandle>(null);
   const contenedor = useRef<HTMLDivElement>(null);
 
-  const cargar = useCallback(async (m: Mapa) => {
-    setCargando(true);
-    setError(null);
-    try {
-      const r = await fetch(`/api/chat/auditoria/memorias?mapa=${m}`, {
-        cache: "no-store",
-      });
-      const j = await r.json();
-      if (!r.ok)
-        throw new Error(j?.error ?? "No se pudieron cargar las memorias.");
-      setDatos(j);
-      if (j.soloPersonal) {
-        setSinGeneral(true);
-        setMapa("personal");
-      }
-    } catch (e) {
-      setDatos(null);
-      setError(
-        e instanceof Error ? e.message : "No se pudieron cargar las memorias.",
-      );
-    } finally {
-      setCargando(false);
+  // ?agente=<código>: la memoria de UN agente (botón del chat).
+  const [codigoAgente, setCodigoAgente] = useState<string | null>(null);
+  const [listo, setListo] = useState(false);
+  useEffect(() => {
+    const c = new URLSearchParams(window.location.search).get("agente");
+    if (c) {
+      setCodigoAgente(c);
+      setMapa("agente");
     }
+    setListo(true);
   }, []);
 
+  const cargar = useCallback(
+    async (m: Mapa) => {
+      setCargando(true);
+      setError(null);
+      try {
+        const consulta =
+          m === "agente" && codigoAgente
+            ? `agente=${encodeURIComponent(codigoAgente)}`
+            : `mapa=${m}`;
+        const r = await fetch(`/api/chat/auditoria/memorias?${consulta}`, {
+          cache: "no-store",
+        });
+        const j = await r.json();
+        if (!r.ok)
+          throw new Error(j?.error ?? "No se pudieron cargar las memorias.");
+        setDatos(j);
+        if (j.soloPersonal) {
+          setSinGeneral(true);
+          setMapa("personal");
+        }
+      } catch (e) {
+        setDatos(null);
+        setError(
+          e instanceof Error
+            ? e.message
+            : "No se pudieron cargar las memorias.",
+        );
+      } finally {
+        setCargando(false);
+      }
+    },
+    [codigoAgente],
+  );
+
   useEffect(() => {
+    if (!listo) return;
     setSel(null);
     setDetalle(null);
     setFGrupo(null);
     setFDepto(null);
     setQ("");
     void cargar(mapa);
-  }, [mapa, cargar]);
+  }, [mapa, cargar, listo]);
 
   const grafo = useMemo<Grafo | null>(() => {
     if (!datos) return null;
-    return datos.mapa === "personal"
-      ? grafoPersonal(datos)
-      : grafoGeneral(datos);
+    // Personal y «agente» se agrupan por tema; el general, por empresa.
+    return datos.mapa === "general"
+      ? grafoGeneral(datos)
+      : grafoPersonal(datos);
   }, [datos]);
 
   const porId = useMemo(
@@ -353,7 +377,7 @@ export default function MemoriasAgentesPage() {
       if (
         fGrupo &&
         n.grupo !== fGrupo &&
-        !(mapa === "personal" && n.tipo === "agente")
+        !(mapa !== "general" && n.tipo === "agente")
       )
         return false;
       if (
@@ -677,18 +701,11 @@ export default function MemoriasAgentesPage() {
           {cargandoDetalle ? (
             <Loader size="xs" mt={6} />
           ) : (
-            <Text
-              size="sm"
-              mt={4}
-              style={{
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                maxHeight: 280,
-                overflow: "auto",
-              }}
-            >
-              {detalle?.content ?? "Sin contenido."}
-            </Text>
+            <div style={{ marginTop: 4, wordBreak: "break-word" }}>
+              {/* Las memorias son Markdown: se muestran formateadas con el
+                  mismo render seguro de los mensajes del chat. */}
+              <ChatMarkdown content={detalle?.content ?? "Sin contenido."} />
+            </div>
           )}
           <Text
             fw={600}
@@ -887,78 +904,96 @@ export default function MemoriasAgentesPage() {
   return (
     <div className="app-page-shell app-page-shell--fill ios-process-hub min-h-screen">
       <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-        <Group gap="xs" mb={4}>
-          <Link
-            href="/process/chat/auditoria"
-            className="chat-text-muted"
-            style={{ fontSize: 13 }}
-          >
-            <Group gap={4} wrap="nowrap">
-              <IconArrowLeft size={14} />
-              <span>Volver a Auditoría de agentes</span>
-            </Group>
-          </Link>
-          <Text size="xs" c="dimmed">
-            ·
-          </Text>
-          <Link
-            href="/process/chat/auditoria/inventario"
-            className="chat-text-muted"
-            style={{ fontSize: 13 }}
-          >
-            Ver inventario de agentes
-          </Link>
-          <Text size="xs" c="dimmed">
-            ·
-          </Text>
-          <Link
-            href="/process/chat/auditoria/skills"
-            className="chat-text-muted"
-            style={{ fontSize: 13 }}
-          >
-            Ver skills de la flota
-          </Link>
-        </Group>
+        {mapa === "agente" ? (
+          <Group gap="xs" mb={4}>
+            <Link
+              href={`/process/chat?agent=${encodeURIComponent(codigoAgente ?? "")}`}
+              className="chat-text-muted"
+              style={{ fontSize: 13 }}
+            >
+              <Group gap={4} wrap="nowrap">
+                <IconArrowLeft size={14} />
+                <span>Volver al chat</span>
+              </Group>
+            </Link>
+          </Group>
+        ) : (
+          <Group gap="xs" mb={4}>
+            <Link
+              href="/process/chat/auditoria"
+              className="chat-text-muted"
+              style={{ fontSize: 13 }}
+            >
+              <Group gap={4} wrap="nowrap">
+                <IconArrowLeft size={14} />
+                <span>Volver a Auditoría de agentes</span>
+              </Group>
+            </Link>
+            <Text size="xs" c="dimmed">
+              ·
+            </Text>
+            <Link
+              href="/process/chat/auditoria/inventario"
+              className="chat-text-muted"
+              style={{ fontSize: 13 }}
+            >
+              Ver inventario de agentes
+            </Link>
+            <Text size="xs" c="dimmed">
+              ·
+            </Text>
+            <Link
+              href="/process/chat/auditoria/skills"
+              className="chat-text-muted"
+              style={{ fontSize: 13 }}
+            >
+              Ver skills de la flota
+            </Link>
+          </Group>
+        )}
 
         <Group gap="sm" mb={2} wrap="nowrap">
           <IconBrain size={26} className="chat-folder__icon" />
           <Title order={1} className="ios-process-hub__title text-3xl">
-            Memorias de los agentes
+            {mapa === "agente"
+              ? `Memoria de ${datos?.agentes[0]?.displayName ?? codigoAgente ?? "…"}`
+              : "Memorias de los agentes"}
           </Title>
         </Group>
         <Text className="ios-process-hub__subtitle" mb="lg">
-          Lo que cada agente ha aprendido, en un mapa: por empresa, departamento
-          y agente, con los enlaces entre memorias. Se recoge desde los equipos
-          de la flota, en solo lectura y con los secretos ocultos antes de
-          publicarse. Última recolección:{" "}
-          {fechaHora(datos?.ultimaRecoleccion ?? null)}.
+          {mapa === "agente"
+            ? "Lo que este agente ha aprendido, agrupado por tema y con los enlaces entre sus notas. Solo lectura; los secretos se ocultan antes de publicarse. "
+            : "Lo que cada agente ha aprendido, en un mapa: por empresa, departamento y agente, con los enlaces entre memorias. Se recoge desde los equipos de la flota, en solo lectura y con los secretos ocultos antes de publicarse. "}
+          Última recolección: {fechaHora(datos?.ultimaRecoleccion ?? null)}.
         </Text>
 
-        <Tabs value={mapa} onChange={(v) => v && setMapa(v as Mapa)} mb="md">
-          <Tabs.List>
-            {!sinGeneral && (
-              <Tabs.Tab
-                value="general"
-                leftSection={<IconAffiliate size={16} />}
-              >
-                Mapa general
-              </Tabs.Tab>
-            )}
-            {(datos?.tieneMapaPersonal || mapa === "personal") && (
-              <Tabs.Tab
-                value="personal"
-                leftSection={<IconLock size={16} />}
-                rightSection={
-                  <Badge size="xs" variant="light" color="yellow">
-                    Solo usted
-                  </Badge>
-                }
-              >
-                Mapa personal
-              </Tabs.Tab>
-            )}
-          </Tabs.List>
-        </Tabs>
+        {mapa !== "agente" && (
+          <Tabs value={mapa} onChange={(v) => v && setMapa(v as Mapa)} mb="md">
+            <Tabs.List>
+              {!sinGeneral && (
+                <Tabs.Tab
+                  value="general"
+                  leftSection={<IconAffiliate size={16} />}
+                >
+                  Mapa general
+                </Tabs.Tab>
+              )}
+              {(datos?.tieneMapaPersonal || mapa === "personal") && (
+                <Tabs.Tab
+                  value="personal"
+                  leftSection={<IconLock size={16} />}
+                  rightSection={
+                    <Badge size="xs" variant="light" color="yellow">
+                      Solo usted
+                    </Badge>
+                  }
+                >
+                  Mapa personal
+                </Tabs.Tab>
+              )}
+            </Tabs.List>
+          </Tabs>
+        )}
 
         {mapa === "personal" && (
           <Alert
@@ -1198,7 +1233,11 @@ export default function MemoriasAgentesPage() {
                   }}
                 >
                   <Text size="sm" fw={600} style={{ whiteSpace: "nowrap" }}>
-                    {mapa === "general" ? "Mapa general" : "Mapa personal"}
+                    {mapa === "general"
+                      ? "Mapa general"
+                      : mapa === "agente"
+                        ? "Memoria por tema"
+                        : "Mapa personal"}
                   </Text>
                   <Group gap={6} style={{ flex: 1, minWidth: 0 }}>
                     {(grafo?.grupos ?? []).slice(0, 12).map((g) => (
