@@ -3,8 +3,8 @@ import * as https from 'https';
 /**
  * Cliente server-side del SAP Service Layer (OData v1).
  *
- * Centraliza Login / GET / Logout para no repetir el patron en cada route
- * (hoy esta suelto en app/api/purchase-request/*). Pensado para uso EXCLUSIVO
+ * Centraliza Login / GET / Logout para no repetir el patron en cada route.
+ * Pensado para uso EXCLUSIVO
  * en el servidor: las credenciales nunca deben viajar al navegador.
  *
  * Los Service Layer de las empresas usan certificados autofirmados, por eso el
