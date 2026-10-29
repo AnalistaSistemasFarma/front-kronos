@@ -16,9 +16,12 @@ import {
   UnstyledButton,
 } from '@mantine/core';
 import { useDebouncedValue, useMediaQuery } from '@mantine/hooks';
-import { IconAlertCircle, IconMail, IconMessagePlus, IconRobot, IconSearch, IconTicket, IconUserPlus } from '@tabler/icons-react';
+import { IconAlertCircle, IconMail, IconMessagePlus, IconPencil, IconRobot, IconSearch, IconTicket, IconUserPlus } from '@tabler/icons-react';
 import AgentAvatar from '../chat/AgentAvatar';
 import { MAX_LINK_SUMMARY_CHARS } from '../../lib/chat/projects-rules';
+
+/** Tope del nombre de una conversación (igual a MAX_TITULO_HILO_CHARS de lib/proyectos/hilos-rules.ts). */
+const MAX_TITULO_HILO = 120;
 import type {
   AgenteDesignableDto,
   CandidatoDto,
@@ -657,6 +660,82 @@ export function DesignarAgenteModal({
           </Stack>
         </Checkbox.Group>
       )}
+    </Marco>
+  );
+}
+
+/* ─────────────────────────── Renombrar conversación ─────────────────────────── */
+
+export function RenombrarConversacionModal({
+  opened,
+  idProject,
+  conversacion,
+  onClose,
+  onRenombrada,
+}: {
+  opened: boolean;
+  idProject: number;
+  conversacion: { id: number; title: string | null } | null;
+  onClose: () => void;
+  onRenombrada: (title: string) => void;
+}) {
+  const [titulo, setTitulo] = useState('');
+  const [enviando, setEnviando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!opened) return;
+    setTitulo(conversacion?.title ?? '');
+    setError(null);
+  }, [opened, conversacion]);
+
+  const limpio = titulo.replace(/\s+/g, ' ').trim();
+  const guardar = async () => {
+    if (!conversacion) return;
+    setEnviando(true);
+    setError(null);
+    const r = await apiSend<{ title: string }>(
+      'PATCH',
+      `/api/proyectos/${idProject}/conversaciones/${conversacion.id}`,
+      { title: limpio },
+      'No se pudo renombrar la conversación.'
+    );
+    setEnviando(false);
+    if (r.ok) onRenombrada(r.data.title);
+    else setError(r.error);
+  };
+
+  return (
+    <Marco
+      opened={opened}
+      onClose={onClose}
+      titulo='Renombrar conversación'
+      icono={<IconPencil size={20} />}
+      testId='proyecto-modal-renombrar'
+      pie={
+        <>
+          <Button variant='default' onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button onClick={() => void guardar()} loading={enviando} disabled={!limpio || limpio === (conversacion?.title ?? '')}>
+            Guardar
+          </Button>
+        </>
+      }
+    >
+      <ErrorArriba error={error} onClose={() => setError(null)} />
+      <TextInput
+        label='Nombre de la conversación'
+        description='Lo ven todos los miembros del proyecto. El cambio queda registrado.'
+        value={titulo}
+        onChange={(e) => setTitulo(e.currentTarget.value)}
+        maxLength={MAX_TITULO_HILO}
+        data-autofocus
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && limpio && !enviando) void guardar();
+        }}
+        data-testid='proyecto-renombrar-titulo'
+      />
     </Marco>
   );
 }
