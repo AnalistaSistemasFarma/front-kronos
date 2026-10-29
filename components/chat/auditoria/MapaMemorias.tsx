@@ -595,6 +595,13 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
           if (l.s === foco || l.t === foco) p = trazos.foco;
           else if (l.k === "own" && !verPropios) continue;
           else p = trazos.tenue;
+        } else if (
+          l.k === "x" &&
+          l.s.tipo === "agente" &&
+          l.t.tipo === "memoria"
+        ) {
+          // Mapa personal: agente→memoria solo al enfocar (eran cientos de líneas).
+          continue;
         } else if (l.k === "h") {
           p = jerarquia.get(l.s.color) ?? new Path2D();
           jerarquia.set(l.s.color, p);
