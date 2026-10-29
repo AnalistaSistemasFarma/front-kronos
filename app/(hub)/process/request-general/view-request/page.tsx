@@ -364,6 +364,7 @@ function ViewRequestPage() {
       field_label: string;
       field_type?: string | null;
       editable?: boolean;
+      locked?: boolean;
       config_json?: string | null;
       id_option?: number | null;
       option_label: string | null;
@@ -2682,7 +2683,7 @@ function ViewRequestPage() {
               {requestFormValues
                 .filter((fv) => fv.field_type !== ORION_SIGNATURE_FIELD_TYPE)
                 .map((fv, fvIndex) => {
-                const canEditField = Boolean(fv.editable) && !isRequestResolved();
+                const canEditField = Boolean(fv.editable) && !isRequestResolved() && !fv.locked;
                 const isEditingThis = editingFieldId === fv.id_form_field;
                 const editButton = canEditField && !isEditingThis && (
                   <ActionIcon
@@ -2694,6 +2695,13 @@ function ViewRequestPage() {
                     <IconPencil size={16} />
                   </ActionIcon>
                 );
+                const lockedBadge = fv.locked ? (
+                  <Tooltip label='Este campo ya se editó y quedó bloqueado'>
+                    <Badge color='gray' variant='light' size='sm' leftSection={<IconLock size={12} />}>
+                      Bloqueado
+                    </Badge>
+                  </Tooltip>
+                ) : null;
                 const editActions = (
                   <Group justify='flex-end' gap='xs'>
                     <Button
@@ -2734,7 +2742,10 @@ function ViewRequestPage() {
                           <Text size='xs' c='dimmed' fw={500} className='uppercase'>
                             {fv.field_label}
                           </Text>
-                          {editButton}
+                          <Group gap='xs'>
+                            {lockedBadge}
+                            {editButton}
+                          </Group>
                         </Group>
                         {isEditingThis ? (
                           <Stack gap='sm'>
@@ -2790,7 +2801,10 @@ function ViewRequestPage() {
                         <Text size='xs' c='dimmed' fw={500} className='uppercase'>
                           {fv.field_label}
                         </Text>
-                        {editButton}
+                        <Group gap='xs'>
+                          {lockedBadge}
+                          {editButton}
+                        </Group>
                       </Group>
                       {isEditingThis ? (
                         <Stack gap='xs' mt={4}>
