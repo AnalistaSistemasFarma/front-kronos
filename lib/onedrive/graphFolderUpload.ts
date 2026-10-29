@@ -184,6 +184,8 @@ export type OneDriveItemMeta = {
   parentPath?: string;
   mimeType?: string;
   downloadUrl?: string;
+  /** Cambia cada vez que cambia el contenido (sirve para cachear lo descargado). */
+  cTag?: string;
 };
 
 /** Metadatos de un driveItem (nombre, padre, downloadUrl). */
@@ -207,6 +209,7 @@ export async function getOneDriveItemMeta(
     file?: { mimeType?: string };
     parentReference?: { name?: string; path?: string };
     '@microsoft.graph.downloadUrl'?: string;
+    cTag?: string;
   };
   const resolvedId = String(data.id || id).trim();
   const name = String(data.name || '').trim();
@@ -222,6 +225,7 @@ export async function getOneDriveItemMeta(
       typeof data['@microsoft.graph.downloadUrl'] === 'string'
         ? data['@microsoft.graph.downloadUrl']
         : undefined,
+    cTag: typeof data.cTag === 'string' ? data.cTag : undefined,
   };
 }
 

@@ -243,6 +243,9 @@ export type OrionAnnotatedCopy = {
 };
 
 /** Dato (texto) o sello (imagen) agregado sobre el PDF ya firmado. */
+/** Letras estándar de PDF (no hay que incrustar archivos de fuente). */
+export type OrionAnnotationFont = 'helvetica' | 'times' | 'courier';
+
 export type OrionDocumentAnnotation = {
   id: string;
   kind: 'text' | 'seal';
@@ -257,6 +260,10 @@ export type OrionDocumentAnnotation = {
   text?: string | null;
   /** kind text: nombre del dato (p. ej. "Tipo de cambio"). Solo para la pantalla y el historial; no se estampa. */
   label?: string | null;
+  /** kind text: letra y tamaño (puntos de PDF) elegidos. Sin tamaño, el texto se ajusta a la caja (datos viejos). */
+  fontFamily?: OrionAnnotationFont | null;
+  fontSize?: number | null;
+  bold?: boolean | null;
   /** kind seal: imagen en OneDrive (subcarpeta _sellos de la solicitud). */
   sealItemId?: string | null;
   sealFileName?: string | null;

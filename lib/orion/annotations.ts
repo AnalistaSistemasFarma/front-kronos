@@ -1,10 +1,18 @@
 import { isSignerCompleted } from './signerStatus';
-import type { OrionAnnotatedCopy, OrionDocumentAnnotation, OrionSignatureState } from './types';
+import type {
+  OrionAnnotatedCopy,
+  OrionAnnotationFont,
+  OrionDocumentAnnotation,
+  OrionSignatureState,
+} from './types';
 
 /** Límites de los datos y sellos agregados después de firmar. */
 export const ANNOTATION_MAX_ITEMS = 30;
 export const ANNOTATION_MAX_TEXT = 200;
 export const ANNOTATION_MAX_LABEL = 60;
+export const ANNOTATION_FONTS: readonly OrionAnnotationFont[] = ['helvetica', 'times', 'courier'];
+export const ANNOTATION_FONT_SIZE_MIN = 6;
+export const ANNOTATION_FONT_SIZE_MAX = 48;
 export const ANNOTATION_MIN_SIZE = 1;
 export const SEAL_MAX_BYTES = 2 * 1024 * 1024;
 export const SEAL_MIME_TYPES = ['image/png', 'image/jpeg'] as const;
@@ -118,6 +126,9 @@ export function normalizeAnnotationsInput(
 
     let text: string | null = null;
     let label: string | null = null;
+    let fontFamily: OrionAnnotationFont | null = null;
+    let fontSize: number | null = null;
+    let bold: boolean | null = null;
     let sealItemId: string | null = null;
     let sealFileName: string | null = null;
     if (kind === 'text') {
@@ -131,6 +142,14 @@ export function normalizeAnnotationsInput(
           .replace(/[\r\n\t]+/g, ' ')
           .trim()
           .slice(0, ANNOTATION_MAX_LABEL) || null;
+      const size = Number(item.fontSize);
+      if (item.fontSize != null && Number.isFinite(size) && size > 0) {
+        fontSize = Math.round(clamp(size, ANNOTATION_FONT_SIZE_MIN, ANNOTATION_FONT_SIZE_MAX) * 2) / 2;
+        fontFamily = ANNOTATION_FONTS.includes(item.fontFamily as OrionAnnotationFont)
+          ? (item.fontFamily as OrionAnnotationFont)
+          : 'helvetica';
+        bold = item.bold === true;
+      }
     } else {
       sealItemId = String(item.sealItemId || '').trim();
       if (!sealItemId) throw httpError('Falta la imagen del sello.', 400);
@@ -147,6 +166,9 @@ export function normalizeAnnotationsInput(
       height: round2(height),
       text,
       label,
+      fontFamily,
+      fontSize,
+      bold,
       sealItemId,
       sealFileName,
     } as const;
@@ -164,6 +186,7 @@ export function normalizeAnnotationsInput(
       prev.height !== base.height ||
       (prev.text ?? null) !== base.text ||
       (prev.label ?? null) !== base.label ||
+      fontChanged(prev, base) ||
       (prev.sealItemId ?? null) !== base.sealItemId;
     return {
       ...base,
@@ -175,6 +198,17 @@ export function normalizeAnnotationsInput(
       updatedAt: changed ? now : (prev.updatedAt ?? null),
     };
   });
+}
+
+function fontChanged(
+  a: Pick<OrionDocumentAnnotation, 'fontFamily' | 'fontSize' | 'bold'>,
+  b: Pick<OrionDocumentAnnotation, 'fontFamily' | 'fontSize' | 'bold'>
+): boolean {
+  return (
+    (a.fontFamily ?? null) !== (b.fontFamily ?? null) ||
+    (a.fontSize ?? null) !== (b.fontSize ?? null) ||
+    Boolean(a.bold) !== Boolean(b.bold)
+  );
 }
 
 function quote(text?: string | null): string {
@@ -204,6 +238,8 @@ export function describeAnnotationChanges(
       parts.push(`cambió ${named(item, prev.text)} por ${quote(item.text)}`);
     } else if (item.kind === 'text' && (prev.label ?? '') !== (item.label ?? '')) {
       parts.push(`llamó ${quote(item.text)} "${item.label || 'sin nombre'}"`);
+    } else if (item.kind === 'text' && fontChanged(prev, item)) {
+      parts.push(`cambió la letra de ${named(item, item.text)}`);
     } else if (item.kind === 'seal' && prev.sealItemId !== item.sealItemId) {
       parts.push('cambió un sello');
     } else if (item.updatedAt && item.updatedAt !== prev.updatedAt) {

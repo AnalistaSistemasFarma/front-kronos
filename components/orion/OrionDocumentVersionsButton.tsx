@@ -278,7 +278,8 @@ export default function OrionDocumentVersionsButton({
             </Box>
           </Group>
 
-          <Text fw={800} style={{ fontSize: 22, lineHeight: 1.2, letterSpacing: -0.3 }} mb={4}>
+          {/* Nombres de archivo largos y sin espacios: se parten en varias líneas en vez de cortarse. */}
+          <Text fw={700} style={{ fontSize: 17, lineHeight: 1.3, overflowWrap: 'anywhere' }} mb={4}>
             {docTitle}
           </Text>
           <Text size='sm' c='dimmed' mb='lg'>

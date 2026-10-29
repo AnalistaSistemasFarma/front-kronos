@@ -17,6 +17,14 @@ import { applyDocumentAnnotations } from '@/lib/orion/annotationService';
 import { getOrionDraftInfo } from '@/lib/orion/draftService';
 import { findDraftForOneDriveItem } from '@/lib/orion/draftState';
 import { getDraftSessionActor } from '@/lib/orion/draftRouteAuth';
+import {
+  getCachedPdf,
+  pdfCacheKey,
+  PDF_CACHE_TTL_ACTIVE_MS,
+  PDF_CACHE_TTL_SEALED_MS,
+  setCachedPdf,
+} from '@/lib/orion/pdfResponseCache';
+import type { OrionSignatureState } from '@/lib/orion/types';
 
 function safePathSegment(value: string, fallback: string): string {
   const v = String(value || '').trim();
@@ -24,20 +32,29 @@ function safePathSegment(value: string, fallback: string): string {
   return fallback;
 }
 
-/** Ya enviado a firma: el adjunto se ve con el visto bueno de los validadores y los sellos. */
-async function withValidatorMarks(
-  requestId: number,
-  fileId: string,
-  pdf: Uint8Array,
-  withAnnotations: boolean
-): Promise<Uint8Array> {
+/** Estado de firma si el adjunto ya se envió a firma (lleva visto bueno y sellos); si no, null. */
+async function loadSigningState(requestId: number, fileId: string): Promise<OrionSignatureState | null> {
   try {
     const loaded = await withMssqlPool((pool) => loadOrionFormBag(pool, requestId));
-    if (!loaded) return pdf;
+    if (!loaded) return null;
     const state = getOrionDocumentFromBag(loaded.bag, fileId);
     const status = String(state.status || '').toUpperCase();
-    if (!['PENDIENTE_FIRMA', 'EN_PROCESO', 'FIRMADO'].includes(status)) return pdf;
-    const marked = await applyValidatorMarks(pdf, state, { final: status === 'FIRMADO' });
+    return ['PENDIENTE_FIRMA', 'EN_PROCESO', 'FIRMADO'].includes(status) ? state : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Ya enviado a firma: el adjunto se ve con el visto bueno de los validadores y los sellos. */
+async function withValidatorMarks(
+  pdf: Uint8Array,
+  state: OrionSignatureState | null,
+  withAnnotations: boolean
+): Promise<Uint8Array> {
+  if (!state) return pdf;
+  try {
+    const final = String(state.status || '').toUpperCase() === 'FIRMADO';
+    const marked = await applyValidatorMarks(pdf, state, { final });
     return withAnnotations ? await applyDocumentAnnotations(marked, state) : marked;
   } catch {
     return pdf;
@@ -151,26 +168,47 @@ export async function GET(req: Request) {
       if (blocked) return NextResponse.json({ error: blocked }, { status: 403 });
     }
 
+    const respond = (body: Uint8Array, contentType: string | null | undefined, fileName: string) => {
+      // Headers solo ASCII: si Content-Type o el nombre traen tildes, Node lanza ByteString.
+      const headers = new Headers();
+      headers.set('Content-Type', safeContentType(contentType));
+      headers.set('Content-Disposition', contentDisposition(fileName, forceDownload));
+      headers.set('Cache-Control', 'private, no-store');
+      return new NextResponse(body as unknown as BodyInit, { status: 200, headers });
+    };
+
+    // PDF ya armado hace poco: mismo contenido en OneDrive (cTag) y mismo estado de firma.
+    const looksPdf = /\.pdf$/i.test(meta.name) || /pdf/i.test(meta.mimeType || '');
+    const signingState = looksPdf ? await loadSigningState(requestId, fileId) : null;
+    const cacheKey =
+      looksPdf && meta.cTag
+        ? pdfCacheKey({ route: 'attachment-file', fileId, cTag: meta.cTag, withAnnotations, state: signingState })
+        : null;
+    const cached = cacheKey ? getCachedPdf(cacheKey) : null;
+    if (cached) return respond(cached.body, cached.contentType, meta.name);
+
     const downloaded = await downloadOneDriveItemContent(token, fileId, meta);
     if (!downloaded) {
       return NextResponse.json({ error: 'No se pudo leer el archivo en OneDrive' }, { status: 404 });
     }
 
     let body: Uint8Array = downloaded.buffer;
-    if (/pdf/i.test(downloaded.contentType || '') || /\.pdf$/i.test(downloaded.fileName || '')) {
-      body = await withValidatorMarks(requestId, fileId, body, withAnnotations);
+    const isPdf = /pdf/i.test(downloaded.contentType || '') || /\.pdf$/i.test(downloaded.fileName || '');
+    if (isPdf) {
+      const state = looksPdf ? signingState : await loadSigningState(requestId, fileId);
+      body = await withValidatorMarks(body, state, withAnnotations);
+      if (cacheKey) {
+        const active = state != null && String(state.status || '').toUpperCase() !== 'FIRMADO';
+        setCachedPdf(
+          cacheKey,
+          Buffer.from(body.buffer, body.byteOffset, body.byteLength),
+          safeContentType(downloaded.contentType),
+          active ? PDF_CACHE_TTL_ACTIVE_MS : PDF_CACHE_TTL_SEALED_MS
+        );
+      }
     }
 
-    // Headers solo ASCII: si Content-Type o el nombre traen tildes, Node lanza ByteString.
-    const headers = new Headers();
-    headers.set('Content-Type', safeContentType(downloaded.contentType));
-    headers.set('Content-Disposition', contentDisposition(downloaded.fileName, forceDownload));
-    headers.set('Cache-Control', 'private, no-store');
-
-    return new NextResponse(body as unknown as BodyInit, {
-      status: 200,
-      headers,
-    });
+    return respond(body, downloaded.contentType, downloaded.fileName);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Error interno';
     console.error('[attachment-file]', err);

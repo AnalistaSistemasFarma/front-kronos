@@ -542,7 +542,7 @@ export default function OrionAttachmentTableRow({
               {canAnnotate && props.requestId && props.fileId ? (
                 <ActionLink
                   icon={<IconFilePencil size={15} stroke={1.6} />}
-                  label={annotationCount > 0 ? `Datos y sellos (${annotationCount})` : 'Datos y sellos'}
+                  label={annotationCount > 0 ? `Texto y sellos (${annotationCount})` : 'Texto y sellos'}
                   onClick={() => setAnnotationsOpen(true)}
                 />
               ) : null}
