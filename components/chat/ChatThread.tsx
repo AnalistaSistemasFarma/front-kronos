@@ -384,7 +384,7 @@ const MessageBubble = memo(function MessageBubble({
     >
       {isUser && reaccionarBoton}
       {!isUser && (
-        <Box style={{ flexShrink: 0 }}>
+        <Box className='chat-msg__avatar' style={{ flexShrink: 0 }}>
           <AgentAvatar
             code={codigoAutor}
             displayName={nombreAutor}
