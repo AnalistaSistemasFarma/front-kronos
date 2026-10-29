@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { withAuth } from 'next-auth/middleware';
 import { isInternalApiPath, isSupplierProtectedPath, SUPPLIER_ROLE } from './lib/proveedor/isolation';
+import { isRetiredApiPath } from './lib/security/retiredRoutes';
 
 const INTERNAL_PAGES = ['/home', '/dashboard', '/process', '/profile'];
 
@@ -25,6 +26,11 @@ function requiresSessionApi(pathname: string, authorization: string | null): boo
 export default withAuth(
   function middleware(req) {
     const { pathname } = req.nextUrl;
+
+    // Rutas retiradas por seguridad (ver lib/security/retiredRoutes.ts): 410 para todos.
+    if (isRetiredApiPath(pathname)) {
+      return NextResponse.json({ error: 'Ruta retirada' }, { status: 410 });
+    }
 
     if (!req.nextauth.token && requiresSessionApi(pathname, req.headers.get('authorization'))) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
