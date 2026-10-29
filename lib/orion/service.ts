@@ -804,6 +804,9 @@ export function buildNextVersionBaseState(
       extensionRequestedAt: null,
     })),
     review: resetReviewForNewVersion(current.review, opts.versionLabel),
+    // Datos y sellos posteriores a la firma eran del PDF anterior (otras posiciones).
+    annotations: [],
+    annotatedCopies: [],
   };
 }
 
