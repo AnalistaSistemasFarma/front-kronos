@@ -64,6 +64,7 @@ const ALIAS_TIPO: Record<string, MemoryType> = {
   bug: "correccion",
   solution: "correccion",
   feedback: "preferencia",
+  user: "preferencia",
   preference: "preferencia",
   architecture: "arquitectura",
   config: "configuracion",

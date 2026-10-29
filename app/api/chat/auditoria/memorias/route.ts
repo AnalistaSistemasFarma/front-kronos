@@ -29,7 +29,7 @@ export const dynamic = "force-dynamic";
  * MEMORIAS DE LOS AGENTES — pestaña «Memorias» de la Auditoría de agentes.
  *
  *   GET  /api/chat/auditoria/memorias?mapa=general   → sesión + permiso de
- *        auditoría, con su alcance por empresa. Sin los agentes personales.
+ *        auditoría, con su alcance por empresa. Los personales, solo para su dueño.
  *   GET  /api/chat/auditoria/memorias?mapa=personal  → sesión. Solo los agentes
  *        personales cuyo dueño es el usuario (agent_memory_setting); nadie más
  *        los ve, ni la administración.

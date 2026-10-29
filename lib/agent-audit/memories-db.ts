@@ -86,7 +86,8 @@ export async function tieneMapaPersonal(email: string): Promise<boolean> {
 
 /**
  * Agentes que entran en un mapa para ese usuario.
- *   general  → activos, dentro del alcance de auditoría y NO personales.
+ *   general  → activos, dentro del alcance de auditoría; los personales solo
+ *              para su dueño.
  *   personal → los personales cuyo dueño es ese correo (sin mirar el alcance:
  *              son suyos y de nadie más).
  */
@@ -117,9 +118,10 @@ async function agentesDelMapa(
     .filter((a) => {
       const owner = ajustes.get(a.id_agent)?.owner ?? null;
       if (mapa === "personal") return owner === yo;
-      return (
-        owner === null && alcance !== null && agentInScope(alcance, a.id_agent)
-      );
+      // General: todo lo del alcance. Los agentes personales solo para su
+      // dueño (Nicolás, 2026-10-29: «el general debe mostrar todo de todos»).
+      if (owner !== null) return owner === yo;
+      return alcance !== null && agentInScope(alcance, a.id_agent);
     })
     .map((a) => {
       const principal =
