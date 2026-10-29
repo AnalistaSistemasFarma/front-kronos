@@ -9,10 +9,18 @@ import {
 } from "react";
 
 /**
- * Lienzo del mapa de memorias (vista gráfica tipo Obsidian), sin dependencias:
- * canvas 2D + una simulación de fuerzas con rejilla espacial (sirve para unos
- * miles de nodos). Recibe el grafo ya armado; la página decide qué es cada
- * grupo (empresa en el mapa general, tema en el personal).
+ * Lienzo del mapa de memorias (vista gráfica tipo Obsidian), sin dependencias.
+ *
+ * RENDIMIENTO (2026-10-29: la primera versión tardaba ~3 min en acomodar 1.700
+ * nodos y congelaba el equipo):
+ *   - La simulación de fuerzas corre SOLO sobre la estructura (grupos,
+ *     departamentos y agentes: decenas de nodos). Cada estructura ocupa un
+ *     círculo del tamaño de su nube de memorias, así no se pisan.
+ *   - Las memorias se ubican en espiral de girasol alrededor de su dueño:
+ *     costo lineal, sin simulación.
+ *   - Dibujo con requestAnimationFrame (máximo uno por cuadro), memorias y
+ *     enlaces agrupados en un solo trazo por color, sin sombras por nodo,
+ *     minimapa en caché y tope de rótulos.
  */
 
 export type TipoNodo = "grupo" | "depto" | "agente" | "memoria";
@@ -32,7 +40,7 @@ export interface NodoMapa {
 export interface EnlaceMapa {
   s: string;
   t: string;
-  /** h = jerarquía; own = agente→memoria; mm = entre memorias del mismo grupo; x = entre grupos. */
+  /** h = jerarquía; own = dueño→memoria; mm = entre memorias del mismo grupo; x = entre grupos. */
   k: "h" | "own" | "mm" | "x";
 }
 export interface GrupoMapa {
@@ -46,7 +54,16 @@ interface Sim extends NodoMapa {
   y: number;
   vx: number;
   vy: number;
+  /** Radio que ocupa (su nube de memorias incluida). */
+  r: number;
   vecinos: Sim[];
+  /** Memorias que cuelgan de este nodo (espiral). */
+  hijos: Sim[];
+}
+interface Lazo {
+  s: Sim;
+  t: Sim;
+  k: EnlaceMapa["k"];
 }
 
 export interface MapaMemoriasHandle {
@@ -61,9 +78,9 @@ const TEMAS = {
   claro: {
     fondo: "#ffffff",
     punto: "rgba(26,29,33,.07)",
-    tenue: "rgba(26,29,33,.03)",
-    cruce: "rgba(26,29,33,.16)",
-    lazo: "rgba(26,29,33,.09)",
+    tenue: "rgba(26,29,33,.035)",
+    cruce: "rgba(26,29,33,.18)",
+    lazo: "rgba(26,29,33,.08)",
     tinta: "#1a1d21",
     tinta2: "#343a40",
     halo: "rgba(255,255,255,.95)",
@@ -73,9 +90,9 @@ const TEMAS = {
   oscuro: {
     fondo: "#28292e",
     punto: "rgba(255,255,255,.06)",
-    tenue: "rgba(255,255,255,.03)",
-    cruce: "rgba(255,255,255,.2)",
-    lazo: "rgba(255,255,255,.1)",
+    tenue: "rgba(255,255,255,.035)",
+    cruce: "rgba(255,255,255,.22)",
+    lazo: "rgba(255,255,255,.09)",
     tinta: "#f3f4f6",
     tinta2: "#d0d4da",
     halo: "rgba(40,41,46,.95)",
@@ -100,6 +117,11 @@ interface Props {
 }
 
 const FUENTE = '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+/** Separación entre memorias en la espiral (unidades del mundo). */
+const PASO_ESPIRAL = 11;
+const ANGULO_DORADO = Math.PI * (3 - Math.sqrt(5));
+/** Tope de rótulos de memorias por cuadro (más no se leen y cuestan). */
+const MAX_ROTULOS = 140;
 
 function hexA(h: string, a: number): string {
   const n = parseInt(h.slice(1), 16);
@@ -118,182 +140,258 @@ function aleatorio(semilla: number) {
   };
 }
 
-function disponer(
-  nodos: Sim[],
-  enlaces: { s: Sim; t: Sim; k: EnlaceMapa["k"] }[],
-  grupos: GrupoMapa[],
-) {
-  const rnd = aleatorio(nodos.length * 31 + enlaces.length);
-  // Anclas de los grupos: el más grande al centro, los demás en anillo.
-  const tam = new Map<string, number>();
-  for (const n of nodos) tam.set(n.grupo, (tam.get(n.grupo) ?? 0) + 1);
-  const orden = [...grupos].sort(
-    (a, b) => (tam.get(b.id) ?? 0) - (tam.get(a.id) ?? 0),
+const radioBase = (n: Sim) =>
+  n.tipo === "grupo" ? 26 : n.tipo === "depto" ? 12 : 16;
+
+/** Ubica las memorias de un dueño en espiral de girasol a su alrededor. */
+function espiral(dueno: Sim) {
+  const r0 = radioBase(dueno) + 12;
+  dueno.hijos.forEach((m, i) => {
+    const rr = r0 + PASO_ESPIRAL * Math.sqrt(i + 0.5);
+    const a = i * ANGULO_DORADO;
+    m.x = dueno.x + Math.cos(a) * rr;
+    m.y = dueno.y + Math.sin(a) * rr;
+  });
+}
+
+/**
+ * Disposición en dos pasos: fuerzas sobre la estructura (decenas de nodos) y
+ * espirales para las memorias. Costo ~ O(E² · iteraciones + N), E = estructura.
+ */
+export function disponer(nodos: Sim[], lazos: Lazo[], grupos: GrupoMapa[]) {
+  const rnd = aleatorio(nodos.length * 31 + lazos.length);
+  for (const n of nodos) n.hijos = [];
+  const hubDe = new Map<string, Sim>();
+  for (const n of nodos) if (n.tipo === "grupo") hubDe.set(n.grupo, n);
+  const conDueno = new Set<Sim>();
+  for (const l of lazos) {
+    if (l.k !== "own" || l.t.tipo !== "memoria" || l.s.tipo === "memoria")
+      continue;
+    if (conDueno.has(l.t)) continue;
+    l.s.hijos.push(l.t);
+    conDueno.add(l.t);
+  }
+  for (const n of nodos) {
+    if (n.tipo !== "memoria" || conDueno.has(n)) continue;
+    hubDe.get(n.grupo)?.hijos.push(n);
+  }
+  // Ordenar cada nube por tipo y título: lo parecido queda junto.
+  for (const n of nodos)
+    n.hijos.sort(
+      (a, b) =>
+        (a.tipoMemoria ?? "").localeCompare(b.tipoMemoria ?? "") ||
+        a.etiqueta.localeCompare(b.etiqueta),
+    );
+
+  const est = nodos.filter((n) => n.tipo !== "memoria");
+  for (const n of est)
+    n.r =
+      radioBase(n) +
+      (n.hijos.length ? 12 + PASO_ESPIRAL * Math.sqrt(n.hijos.length) : 0);
+  const lazosEst = lazos.filter(
+    (l) => l.s.tipo !== "memoria" && l.t.tipo !== "memoria",
   );
+
+  // Anclas de los grupos según su área: el más grande al centro, los demás en
+  // anillo. Si hay nodos fuera de los grupos (los agentes del mapa personal),
+  // el centro es para ellos.
+  const area = new Map<string, number>();
+  for (const n of est)
+    area.set(n.grupo, (area.get(n.grupo) ?? 0) + (n.r + 30) ** 2);
+  const radioGrupo = (g: string) => Math.sqrt(area.get(g) ?? 900) * 1.2;
+  const ids = new Set(grupos.map((g) => g.id));
+  const centroLibre = est.some((n) => !ids.has(n.grupo));
+  const orden = [...grupos]
+    .filter((g) => area.has(g.id))
+    .sort((a, b) => radioGrupo(b.id) - radioGrupo(a.id));
   const anclas = new Map<string, { x: number; y: number }>();
-  const radio = 650 + Math.sqrt(nodos.length) * 22;
-  orden.forEach((g, i) => {
-    if (i === 0 && orden.length > 2) return anclas.set(g.id, { x: 0, y: 0 });
-    const j = orden.length > 2 ? i - 1 : i;
-    const total = orden.length > 2 ? orden.length - 1 : orden.length;
-    const a = (j / Math.max(1, total)) * Math.PI * 2 - Math.PI / 2;
+  const central = centroLibre ? null : orden[0];
+  const anillo = orden.filter((g) => g !== central);
+  const rCentro = central
+    ? radioGrupo(central.id)
+    : Math.sqrt(
+        est
+          .filter((n) => !ids.has(n.grupo))
+          .reduce((s, n) => s + (n.r + 30) ** 2, 0),
+      ) * 1.2;
+  const rAnillo =
+    rCentro +
+    Math.max(0, ...anillo.map((g) => radioGrupo(g.id))) +
+    Math.max(160, (anillo.length * 140) / Math.PI);
+  if (central) anclas.set(central.id, { x: 0, y: 0 });
+  anillo.forEach((g, i) => {
+    const a = (i / Math.max(1, anillo.length)) * Math.PI * 2 - Math.PI / 2;
     anclas.set(g.id, {
-      x: Math.cos(a) * radio * 1.25,
-      y: Math.sin(a) * radio * 0.85,
+      x: Math.cos(a) * rAnillo * 1.15,
+      y: Math.sin(a) * rAnillo * 0.85,
     });
   });
-  for (const n of nodos) {
-    const a = anclas.get(n.grupo) ?? { x: 0, y: 0 };
-    const r =
-      n.tipo === "grupo"
-        ? 0
-        : n.tipo === "depto"
-          ? 120
-          : n.tipo === "agente"
-            ? 200
-            : 260;
+  const anclaDe = (n: Sim) => anclas.get(n.grupo) ?? { x: 0, y: 0 };
+  for (const n of est) {
+    const a = anclaDe(n);
     const ang = rnd() * Math.PI * 2;
-    n.x = a.x + Math.cos(ang) * r * rnd();
-    n.y = a.y + Math.sin(ang) * r * rnd();
+    const d = rnd() * radioGrupo(n.grupo) * 0.5;
+    n.x = a.x + Math.cos(ang) * d;
+    n.y = a.y + Math.sin(ang) * d;
+    n.vx = 0;
+    n.vy = 0;
   }
-  const L = { h: 170, own: 80, mm: 90, x: 420 };
-  const S = { h: 0.06, own: 0.1, mm: 0.02, x: 0.003 };
-  const carga = (n: Sim) =>
-    n.tipo === "grupo"
-      ? -9000
-      : n.tipo === "depto"
-        ? -5000
-        : n.tipo === "agente"
-          ? -4200
-          : -420;
-  const CELDA = 260;
-  const ITER = nodos.length > 1500 ? 220 : 320;
+
+  const ITER = 360;
   for (let it = 0; it < ITER; it++) {
     const alfa = 1 - it / ITER;
-    const rejilla = new Map<string, Sim[]>();
-    for (const n of nodos) {
-      const k = `${Math.floor(n.x / CELDA)},${Math.floor(n.y / CELDA)}`;
-      const c = rejilla.get(k);
-      if (c) c.push(n);
-      else rejilla.set(k, [n]);
-    }
-    for (const a of nodos) {
-      const cx = Math.floor(a.x / CELDA);
-      const cy = Math.floor(a.y / CELDA);
-      for (let dx = -2; dx <= 2; dx++)
-        for (let dy = -2; dy <= 2; dy++) {
-          const c = rejilla.get(`${cx + dx},${cy + dy}`);
-          if (!c) continue;
-          for (const b of c) {
-            if (b === a) continue;
-            let ex = b.x - a.x;
-            let ey = b.y - a.y;
-            let d2 = ex * ex + ey * ey;
-            if (d2 < 1) {
-              ex = rnd() - 0.5;
-              ey = rnd() - 0.5;
-              d2 = 1;
-            }
-            const d = Math.sqrt(d2);
-            // carga negativa: empuja a «a» lejos de «b» (el par se visita dos veces, una por nodo).
-            const f = ((carga(a) + carga(b)) / 2 / d2) * alfa * 0.5;
-            a.vx += (ex / d) * f;
-            a.vy += (ey / d) * f;
-          }
+    for (let i = 0; i < est.length; i++) {
+      const a = est[i];
+      for (let j = i + 1; j < est.length; j++) {
+        const b = est[j];
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        let d = Math.sqrt(dx * dx + dy * dy);
+        if (d < 0.01) {
+          dx = rnd() - 0.5;
+          dy = rnd() - 0.5;
+          d = 0.5;
         }
-    }
-    for (const l of enlaces) {
-      const ex = l.t.x - l.s.x;
-      const ey = l.t.y - l.s.y;
-      const d = Math.sqrt(ex * ex + ey * ey) || 1;
-      const k = ((d - L[l.k]) / d) * S[l.k] * alfa;
-      l.s.vx += ex * k;
-      l.s.vy += ey * k;
-      l.t.vx -= ex * k;
-      l.t.vy -= ey * k;
-    }
-    for (const n of nodos) {
-      const a = anclas.get(n.grupo);
-      if (a) {
-        const g = n.tipo === "grupo" ? 0.08 : 0.0035;
-        n.vx += (a.x - n.x) * g * alfa;
-        n.vy += (a.y - n.y) * g * alfa;
+        const ux = dx / d;
+        const uy = dy / d;
+        // Repulsión suave + choque duro entre círculos.
+        let f = (900 * alfa) / d;
+        const min = a.r + b.r + 26;
+        if (d < min) f += (min - d) * 0.5;
+        a.vx -= ux * f;
+        a.vy -= uy * f;
+        b.vx += ux * f;
+        b.vy += uy * f;
       }
-      n.vx *= 0.55;
-      n.vy *= 0.55;
+    }
+    for (const l of lazosEst) {
+      const dx = l.t.x - l.s.x;
+      const dy = l.t.y - l.s.y;
+      const d = Math.sqrt(dx * dx + dy * dy) || 1;
+      const largo = l.s.r + l.t.r + 50;
+      const k = ((d - largo) / d) * 0.08;
+      l.s.vx += dx * k;
+      l.s.vy += dy * k;
+      l.t.vx -= dx * k;
+      l.t.vy -= dy * k;
+    }
+    for (const n of est) {
+      const a = anclaDe(n);
+      const g = n.tipo === "grupo" ? 0.06 : 0.012;
+      n.vx += (a.x - n.x) * g * (0.3 + alfa);
+      n.vy += (a.y - n.y) * g * (0.3 + alfa);
+      n.vx *= 0.5;
+      n.vy *= 0.5;
       n.x += n.vx;
       n.y += n.vy;
     }
   }
+  // Pasadas finales solo de choque: que ninguna nube pise a otra.
+  for (let it = 0; it < 40; it++)
+    for (let i = 0; i < est.length; i++)
+      for (let j = i + 1; j < est.length; j++) {
+        const a = est[i];
+        const b = est[j];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
+        const min = a.r + b.r + 20;
+        if (d >= min) continue;
+        const e = (min - d) / 2;
+        a.x -= (dx / d) * e;
+        a.y -= (dy / d) * e;
+        b.x += (dx / d) * e;
+        b.y += (dy / d) * e;
+      }
+  // Separar zonas: ninguna empresa (o tema) pisa a otra. Se mueve el grupo
+  // entero; son pocas zonas, así que es barato.
+  const miembros = new Map<string, Sim[]>();
+  for (const n of est) {
+    const l = miembros.get(n.grupo);
+    if (l) l.push(n);
+    else miembros.set(n.grupo, [n]);
+  }
+  const zonas = [...miembros.values()];
+  const circulo = (ns: Sim[]) => {
+    let cx = 0;
+    let cy = 0;
+    for (const n of ns) {
+      cx += n.x;
+      cy += n.y;
+    }
+    cx /= ns.length;
+    cy /= ns.length;
+    let r = 60;
+    for (const n of ns)
+      r = Math.max(r, Math.hypot(n.x - cx, n.y - cy) + n.r + 30);
+    return { cx, cy, r };
+  };
+  for (let it = 0; it < 60; it++) {
+    let movio = false;
+    const cs = zonas.map(circulo);
+    for (let i = 0; i < zonas.length; i++)
+      for (let j = i + 1; j < zonas.length; j++) {
+        const a = cs[i];
+        const b = cs[j];
+        let dx = b.cx - a.cx;
+        let dy = b.cy - a.cy;
+        let d = Math.sqrt(dx * dx + dy * dy);
+        if (d < 0.01) {
+          dx = 1;
+          dy = 0;
+          d = 1;
+        }
+        const min = a.r + b.r + 70;
+        if (d >= min) continue;
+        movio = true;
+        const e = (min - d) / 2;
+        const ux = dx / d;
+        const uy = dy / d;
+        for (const n of zonas[i]) {
+          n.x -= ux * e;
+          n.y -= uy * e;
+        }
+        for (const n of zonas[j]) {
+          n.x += ux * e;
+          n.y += uy * e;
+        }
+        a.cx -= ux * e;
+        a.cy -= uy * e;
+        b.cx += ux * e;
+        b.cy += uy * e;
+      }
+    if (!movio) break;
+  }
+  for (const n of est) espiral(n);
 }
 
 export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
   function MapaMemorias(props, ref) {
-    const {
-      nodos,
-      enlaces,
-      grupos,
-      visible,
-      resaltados,
-      seleccionado,
-      mostrarZonas,
-      onSeleccionar,
-      version,
-    } = props;
+    const { nodos, enlaces, grupos, version } = props;
     const lienzo = useRef<HTMLCanvasElement>(null);
     const mini = useRef<HTMLCanvasElement>(null);
     const estado = useRef({
       sim: [] as Sim[],
       porId: new Map<string, Sim>(),
-      lazos: [] as { s: Sim; t: Sim; k: EnlaceMapa["k"] }[],
+      lazos: [] as Lazo[],
       vista: { x: 0, y: 0, k: 0.4 },
       W: 0,
       H: 0,
       hover: null as Sim | null,
+      cuadro: 0,
+      miniBase: null as HTMLCanvasElement | null,
+      /** Geometría del minimapa: origen del mundo, escala y corrimiento. */
+      miniGeo: { a: 0, b: 0, s: 1, ox: 0, oy: 0 },
     });
     const props$ = useRef(props);
     props$.current = props;
 
-    // ── Construir y disponer cuando cambia el grafo ──
-    useEffect(() => {
-      const sim: Sim[] = nodos.map((n) => ({
-        ...n,
-        x: 0,
-        y: 0,
-        vx: 0,
-        vy: 0,
-        vecinos: [],
-      }));
-      const porId = new Map(sim.map((n) => [n.id, n]));
-      const lazos: { s: Sim; t: Sim; k: EnlaceMapa["k"] }[] = [];
-      for (const e of enlaces) {
-        const s = porId.get(e.s);
-        const t = porId.get(e.t);
-        if (!s || !t || s === t) continue;
-        lazos.push({ s, t, k: e.k });
-        s.vecinos.push(t);
-        t.vecinos.push(s);
-      }
-      disponer(sim, lazos, grupos);
-      estado.current.sim = sim;
-      estado.current.porId = porId;
-      estado.current.lazos = lazos;
-      estado.current.hover = null;
-      medir();
-      ajustar();
-    }, [nodos, enlaces, grupos]);
-
-    const radio = (n: Sim) =>
-      n.tipo === "grupo"
-        ? 26
-        : n.tipo === "depto"
-          ? 10
-          : n.tipo === "agente"
-            ? 15
-            : 3.4 + Math.min(6, n.vecinos.length * 0.9);
-    const escala = () =>
-      Math.max(0.6, Math.min(1.5, estado.current.vista.k * 1.6));
-
+    const radio = (n: Sim) => {
+      const esc = Math.max(0.6, Math.min(1.5, estado.current.vista.k * 1.6));
+      return n.tipo === "memoria"
+        ? Math.max(1.6, (3 + Math.min(4, n.vecinos.length * 0.6)) * esc)
+        : radioBase(n) * esc;
+    };
     const toS = (x: number, y: number): [number, number] => {
       const { vista: v, W, H } = estado.current;
       return [(x - v.x) * v.k + W / 2, (y - v.y) * v.k + H / 2];
@@ -303,12 +401,78 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
       return [(sx - W / 2) / v.k + v.x, (sy - H / 2) / v.k + v.y];
     };
 
+    function limites(): [number, number, number, number] {
+      let a = 1e9;
+      let b = 1e9;
+      let c = -1e9;
+      let d = -1e9;
+      for (const n of estado.current.sim) {
+        if (n.tipo === "memoria" || !props$.current.visible(n)) continue;
+        a = Math.min(a, n.x - n.r);
+        b = Math.min(b, n.y - n.r);
+        c = Math.max(c, n.x + n.r);
+        d = Math.max(d, n.y + n.r);
+      }
+      if (a > c) return [-100, -100, 100, 100];
+      return [a, b, c, d];
+    }
+
+    /** Minimapa: los puntos se pintan una vez; cada cuadro solo el recuadro. */
+    function armarMini() {
+      const base = document.createElement("canvas");
+      base.width = 360;
+      base.height = 232;
+      const mx = base.getContext("2d");
+      if (!mx) return;
+      const [a, b, c, d] = limites();
+      const pad = 60;
+      const s = Math.min(360 / (c - a + pad * 2), 232 / (d - b + pad * 2));
+      const ox = (360 - (c - a + pad * 2) * s) / 2;
+      const oy = (232 - (d - b + pad * 2) * s) / 2;
+      const porColor = new Map<string, Path2D>();
+      for (const n of estado.current.sim) {
+        if (!props$.current.visible(n)) continue;
+        const p = porColor.get(n.color) ?? new Path2D();
+        porColor.set(n.color, p);
+        const r = n.tipo === "memoria" ? 1.4 : n.tipo === "grupo" ? 4.5 : 2.6;
+        const x = ox + (n.x - a + pad) * s;
+        const y = oy + (n.y - b + pad) * s;
+        p.moveTo(x + r, y);
+        p.arc(x, y, r, 0, Math.PI * 2);
+      }
+      for (const [color, p] of porColor) {
+        mx.fillStyle = hexA(color, 0.8);
+        mx.fill(p);
+      }
+      estado.current.miniBase = base;
+      estado.current.miniGeo = { a: a - pad, b: b - pad, s, ox, oy };
+    }
+
+    function dibujarMini() {
+      const mc = mini.current;
+      const mx = mc?.getContext("2d");
+      if (!mc || !mx) return;
+      if (!estado.current.miniBase) armarMini();
+      mx.clearRect(0, 0, 360, 232);
+      if (estado.current.miniBase) mx.drawImage(estado.current.miniBase, 0, 0);
+      const { a, b, s, ox, oy } = estado.current.miniGeo;
+      const [wx1, wy1] = toW(0, 0);
+      const [wx2, wy2] = toW(estado.current.W, estado.current.H);
+      mx.strokeStyle = "#228be6";
+      mx.lineWidth = 2;
+      mx.strokeRect(
+        ox + (wx1 - a) * s,
+        oy + (wy1 - b) * s,
+        (wx2 - wx1) * s,
+        (wy2 - wy1) * s,
+      );
+    }
+
     const dibujar = useCallback(() => {
       const cv = lienzo.current;
-      if (!cv) return;
-      const ctx = cv.getContext("2d");
-      if (!ctx) return;
-      const { sim, lazos, vista, W, H, hover } = estado.current;
+      const ctx = cv?.getContext("2d");
+      if (!cv || !ctx) return;
+      const { sim, lazos, vista, W, H, hover, porId } = estado.current;
       const {
         visible: vis,
         resaltados: q,
@@ -323,7 +487,7 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
       ctx.fillStyle = T.fondo;
       ctx.fillRect(0, 0, W, H);
       const paso = 32 * vista.k;
-      if (paso > 8) {
+      if (paso > 10) {
         ctx.fillStyle = T.punto;
         const [ox, oy] = toS(0, 0);
         const sx = ((ox % paso) + paso) % paso;
@@ -331,29 +495,34 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
         for (let x = sx; x < W; x += paso)
           for (let y = sy; y < H; y += paso) ctx.fillRect(x, y, 1.3, 1.3);
       }
-      const sel = selId ? (estado.current.porId.get(selId) ?? null) : null;
+      const sel = selId ? (porId.get(selId) ?? null) : null;
       const foco = hover ?? sel;
       const vec = foco ? new Set<Sim>([foco, ...foco.vecinos]) : null;
-      const esVis = (n: Sim) => vis(n);
+      const enPantalla = (x: number, y: number, m = 40) =>
+        x > -m && y > -m && x < W + m && y < H + m;
 
+      // Zonas: círculo que envuelve las nubes de la estructura del grupo.
       if (zonas)
         for (const g of gs) {
-          const ns = sim.filter((n) => n.grupo === g.id && esVis(n));
-          if (!ns.length) continue;
           let cx = 0;
           let cy = 0;
-          for (const n of ns) {
-            cx += n.x;
-            cy += n.y;
-          }
-          cx /= ns.length;
-          cy /= ns.length;
-          const ds = ns
-            .map((n) => Math.hypot(n.x - cx, n.y - cy))
-            .sort((a, b) => a - b);
-          const r = (ds[Math.floor(ds.length * 0.92)] ?? 80) + 70;
+          let n0 = 0;
+          for (const n of sim)
+            if (n.grupo === g.id && n.tipo !== "memoria" && vis(n)) {
+              cx += n.x;
+              cy += n.y;
+              n0++;
+            }
+          if (!n0) continue;
+          cx /= n0;
+          cy /= n0;
+          let r = 60;
+          for (const n of sim)
+            if (n.grupo === g.id && n.tipo !== "memoria" && vis(n))
+              r = Math.max(r, Math.hypot(n.x - cx, n.y - cy) + n.r + 30);
           const [sx, sy] = toS(cx, cy);
           const sr = r * vista.k;
+          if (!enPantalla(sx, sy, sr + 40)) continue;
           const dim = foco && foco.grupo !== g.id ? 0.4 : 1;
           ctx.fillStyle = hexA(g.color, 0.06 * dim);
           ctx.beginPath();
@@ -367,11 +536,10 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
           ctx.font = `700 11px ${FUENTE}`;
           const nombre = g.nombre.toUpperCase();
           const tw = ctx.measureText(nombre).width + 16;
-          const bx = sx - tw / 2;
           const by = sy - sr - 10;
           ctx.globalAlpha = dim;
           ctx.fillStyle = T.relleno;
-          redondeo(ctx, bx, by, tw, 20, 10);
+          redondeo(ctx, sx - tw / 2, by, tw, 20, 10);
           ctx.fill();
           ctx.strokeStyle = hexA(g.color, 0.6);
           ctx.lineWidth = 1;
@@ -384,64 +552,106 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
           ctx.globalAlpha = 1;
         }
 
+      // Enlaces: un trazo por estilo. Los dueño→memoria solo de cerca (de
+      // lejos la espiral ya dice de quién es cada memoria).
+      const trazos = {
+        own: new Path2D(),
+        mm: new Path2D(),
+        x: new Path2D(),
+        tenue: new Path2D(),
+        foco: new Path2D(),
+      };
+      const jerarquia = new Map<string, Path2D>();
+      const verPropios = vista.k > 0.45;
       for (const l of lazos) {
-        if (!esVis(l.s) || !esVis(l.t)) continue;
+        if (!vis(l.s) || !vis(l.t)) continue;
         const [x1, y1] = toS(l.s.x, l.s.y);
         const [x2, y2] = toS(l.t.x, l.t.y);
-        let col: string;
-        let w = 1;
+        if (!enPantalla(x1, y1, 400) && !enPantalla(x2, y2, 400)) continue;
+        let p: Path2D;
         if (vec) {
-          if (l.s === foco || l.t === foco) {
-            col = hexA(foco!.color, 0.8);
-            w = 1.6;
-          } else col = T.tenue;
-        } else if (l.k === "x") col = T.cruce;
-        else if (l.k === "h") {
-          col = hexA(l.s.color, 0.5);
-          w = 1.5;
-        } else col = T.lazo;
-        ctx.strokeStyle = col;
-        ctx.lineWidth = w;
-        ctx.beginPath();
+          // Un dueño con muchas memorias: la espiral ya dice cuáles son suyas.
+          if (l.k === "own" && l.s === foco && foco.hijos.length > 30) continue;
+          if (l.s === foco || l.t === foco) p = trazos.foco;
+          else if (l.k === "own" && !verPropios) continue;
+          else p = trazos.tenue;
+        } else if (l.k === "h") {
+          p = jerarquia.get(l.s.color) ?? new Path2D();
+          jerarquia.set(l.s.color, p);
+        } else if (l.k === "own") {
+          if (!verPropios) continue;
+          p = trazos.own;
+        } else p = l.k === "x" ? trazos.x : trazos.mm;
+        p.moveTo(x1, y1);
         if (l.k === "x" && !vec) {
           const mx = (x1 + x2) / 2 + (y2 - y1) * 0.15;
           const my = (y1 + y2) / 2 - (x2 - x1) * 0.15;
-          ctx.moveTo(x1, y1);
-          ctx.quadraticCurveTo(mx, my, x2, y2);
-        } else {
-          ctx.moveTo(x1, y1);
-          ctx.lineTo(x2, y2);
-        }
-        ctx.stroke();
+          p.quadraticCurveTo(mx, my, x2, y2);
+        } else p.lineTo(x2, y2);
+      }
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = T.tenue;
+      ctx.stroke(trazos.tenue);
+      ctx.strokeStyle = T.lazo;
+      ctx.stroke(trazos.own);
+      ctx.stroke(trazos.mm);
+      ctx.strokeStyle = T.cruce;
+      ctx.stroke(trazos.x);
+      ctx.lineWidth = 1.5;
+      for (const [color, p] of jerarquia) {
+        ctx.strokeStyle = hexA(color, 0.5);
+        ctx.stroke(p);
+      }
+      if (foco) {
+        ctx.strokeStyle = hexA(foco.color, 0.8);
+        ctx.lineWidth = 1.6;
+        ctx.stroke(trazos.foco);
       }
 
-      const esc = escala();
-      for (const tipo of [
-        "memoria",
-        "depto",
-        "agente",
-        "grupo",
-      ] as TipoNodo[]) {
+      // Memorias: un trazo por color (y por nivel de atenuación).
+      const llenos = new Map<string, Path2D>();
+      const marcadas: [number, number, number][] = [];
+      for (const n of sim) {
+        if (n.tipo !== "memoria" || !vis(n)) continue;
+        const [x, y] = toS(n.x, n.y);
+        if (!enPantalla(x, y)) continue;
+        const r = radio(n);
+        const apagada = (vec && !vec.has(n)) || (q && !q.has(n.id));
+        const clave = `${n.color}|${apagada ? 1 : 0}`;
+        const p = llenos.get(clave) ?? new Path2D();
+        llenos.set(clave, p);
+        p.moveTo(x + r, y);
+        p.arc(x, y, r, 0, Math.PI * 2);
+        if (n === sel || q?.has(n.id)) marcadas.push([x, y, r]);
+      }
+      for (const [clave, p] of llenos) {
+        const [color, apagada] = clave.split("|");
+        ctx.globalAlpha = apagada === "1" ? 0.16 : 1;
+        ctx.fillStyle = color;
+        ctx.fill(p);
+      }
+      ctx.globalAlpha = 1;
+      if (marcadas.length) {
+        ctx.strokeStyle = T.tinta;
+        ctx.lineWidth = 1.5;
+        const p = new Path2D();
+        for (const [x, y, r] of marcadas) {
+          p.moveTo(x + r, y);
+          p.arc(x, y, r, 0, Math.PI * 2);
+        }
+        ctx.stroke(p);
+      }
+
+      // Estructura (decenas de nodos): de a uno.
+      for (const tipo of ["depto", "agente", "grupo"] as TipoNodo[])
         for (const n of sim) {
-          if (n.tipo !== tipo || !esVis(n)) continue;
+          if (n.tipo !== tipo || !vis(n)) continue;
           const [x, y] = toS(n.x, n.y);
-          const r = radio(n) * esc;
-          if (x < -120 || y < -80 || x > W + 120 || y > H + 80) continue;
-          let a = 1;
-          if (vec && !vec.has(n)) a = 0.16;
-          if (q && !q.has(n.id)) a = Math.min(a, 0.16);
-          ctx.globalAlpha = a;
-          if (n.tipo === "memoria") {
-            ctx.fillStyle = n.color;
-            ctx.beginPath();
-            ctx.arc(x, y, r, 0, Math.PI * 2);
-            ctx.fill();
-            if (n === sel || q?.has(n.id)) {
-              ctx.strokeStyle = T.tinta;
-              ctx.lineWidth = 1.6;
-              ctx.stroke();
-            }
-          } else if (n.tipo === "depto") {
+          const r = radio(n);
+          if (!enPantalla(x, y, 60)) continue;
+          ctx.globalAlpha =
+            (vec && !vec.has(n)) || (q && !q.has(n.id)) ? 0.25 : 1;
+          if (n.tipo === "depto") {
             ctx.fillStyle = T.relleno;
             ctx.strokeStyle = n.color;
             ctx.lineWidth = 2;
@@ -449,15 +659,10 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
             ctx.fill();
             ctx.stroke();
           } else if (n.tipo === "agente") {
-            ctx.shadowColor = "rgba(0,0,0,.12)";
-            ctx.shadowBlur = 6;
-            ctx.shadowOffsetY = 1;
             ctx.fillStyle = T.relleno;
             ctx.beginPath();
             ctx.arc(x, y, r, 0, Math.PI * 2);
             ctx.fill();
-            ctx.shadowBlur = 0;
-            ctx.shadowOffsetY = 0;
             ctx.strokeStyle = n.color;
             ctx.lineWidth = 2.5;
             ctx.stroke();
@@ -475,125 +680,102 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
               ctx.stroke();
             }
           } else {
-            ctx.shadowColor = hexA(n.color, 0.35);
-            ctx.shadowBlur = 14;
             ctx.fillStyle = n.color;
             ctx.beginPath();
             ctx.arc(x, y, r, 0, Math.PI * 2);
             ctx.fill();
-            ctx.shadowBlur = 0;
             ctx.strokeStyle = T.fondo;
             ctx.lineWidth = 3;
             ctx.stroke();
           }
-          let rotulo =
-            (n.tipo === "grupo" && !zonas) ||
-            (n.tipo === "agente" && vista.k > 0.3) ||
-            (n.tipo === "depto" && vista.k > 0.42) ||
-            (n.tipo === "memoria" &&
-              (vec ? vec.has(n) : q ? q.has(n.id) : vista.k > 1.5));
-          if (vec && vec.has(n) && n.tipo === "agente") rotulo = true;
-          if (vec && !vec.has(n) && n.tipo !== "grupo") rotulo = false;
-          if (rotulo) {
-            const fs =
-              n.tipo === "grupo"
-                ? 13
-                : n.tipo === "agente"
-                  ? 12
-                  : n.tipo === "depto"
-                    ? 10.5
-                    : 11.5;
-            ctx.font = `${n.tipo === "memoria" ? 400 : n.tipo === "depto" ? 700 : 600} ${fs}px ${FUENTE}`;
-            ctx.textAlign = "center";
-            const txt =
-              n.tipo === "depto" ? n.etiqueta.toUpperCase() : corta(n.etiqueta);
-            let tx = x;
-            let ty = y + r + fs + 3;
-            if (vec && foco && n !== foco && n.tipo === "memoria") {
-              const [fx, fy] = toS(foco.x, foco.y);
-              const an = Math.atan2(y - fy, x - fx);
-              tx = x + Math.cos(an) * (r + 5);
-              ty = y + Math.sin(an) * (r + 5) + fs * 0.35;
-              ctx.textAlign =
-                Math.cos(an) > 0.25
-                  ? "left"
-                  : Math.cos(an) < -0.25
-                    ? "right"
-                    : "center";
-              if (ctx.textAlign === "center")
-                ty += Math.sin(an) > 0 ? fs * 0.6 : -fs * 0.3;
-            }
-            ctx.lineWidth = 4;
-            ctx.strokeStyle = T.halo;
-            ctx.strokeText(txt, tx, ty);
-            ctx.fillStyle =
-              n.tipo === "depto"
-                ? n.color
-                : n.tipo === "memoria"
-                  ? T.tinta2
-                  : T.tinta;
-            ctx.fillText(txt, tx, ty);
-          }
-          ctx.globalAlpha = 1;
         }
+      ctx.globalAlpha = 1;
+
+      // Rótulos: estructura según el zoom; memorias solo las del foco o la
+      // búsqueda (o todas de muy cerca), con tope.
+      let cuenta = 0;
+      ctx.lineWidth = 4;
+      // Rótulos de memorias sin solaparse (colocación ávida, con tope).
+      const ocupados: [number, number, number, number][] = [];
+      const libre = (x0: number, y0: number, x1: number, y1: number) => {
+        for (const [a, b, c, d] of ocupados)
+          if (x0 < c && x1 > a && y0 < d && y1 > b) return false;
+        ocupados.push([x0, y0, x1, y1]);
+        return true;
+      };
+      for (const n of sim) {
+        if (!vis(n)) continue;
+        let rotulo =
+          (n.tipo === "grupo" && !zonas) ||
+          n.tipo === "agente" ||
+          (n.tipo === "depto" && vista.k > 0.4) ||
+          (n.tipo === "memoria" &&
+            (vec ? vec.has(n) : q ? q.has(n.id) : vista.k > 1.6));
+        if (vec && !vec.has(n) && n.tipo !== "grupo") rotulo = false;
+        if (!rotulo) continue;
+        const [x, y] = toS(n.x, n.y);
+        if (!enPantalla(x, y, 10)) continue;
+        if (n.tipo === "memoria" && cuenta >= MAX_ROTULOS) continue;
+        const r = radio(n);
+        const fs =
+          n.tipo === "grupo"
+            ? 13
+            : n.tipo === "agente"
+              ? 12
+              : n.tipo === "depto"
+                ? 10.5
+                : 11.5;
+        ctx.font = `${n.tipo === "memoria" ? 400 : n.tipo === "depto" ? 700 : 600} ${fs}px ${FUENTE}`;
+        ctx.textAlign = "center";
+        const txt =
+          n.tipo === "depto" ? n.etiqueta.toUpperCase() : corta(n.etiqueta);
+        let tx = x;
+        let ty = y + r + fs + 3;
+        if (foco && n !== foco && n.tipo === "memoria") {
+          const [fx, fy] = toS(foco.x, foco.y);
+          const an = Math.atan2(y - fy, x - fx);
+          tx = x + Math.cos(an) * (r + 5);
+          ty = y + Math.sin(an) * (r + 5) + fs * 0.35;
+          ctx.textAlign =
+            Math.cos(an) > 0.25
+              ? "left"
+              : Math.cos(an) < -0.25
+                ? "right"
+                : "center";
+        }
+        if (n.tipo === "memoria") {
+          const w = ctx.measureText(txt).width;
+          const x0 =
+            ctx.textAlign === "left"
+              ? tx
+              : ctx.textAlign === "right"
+                ? tx - w
+                : tx - w / 2;
+          if (!libre(x0 - 2, ty - fs, x0 + w + 2, ty + 3)) continue;
+          cuenta++;
+        }
+        ctx.strokeStyle = T.halo;
+        ctx.strokeText(txt, tx, ty);
+        ctx.fillStyle =
+          n.tipo === "depto"
+            ? n.color
+            : n.tipo === "memoria"
+              ? T.tinta2
+              : T.tinta;
+        ctx.fillText(txt, tx, ty);
       }
       dibujarMini();
+       
     }, []);
 
-    function limites(): [number, number, number, number] {
-      let a = 1e9;
-      let b = 1e9;
-      let c = -1e9;
-      let d = -1e9;
-      for (const n of estado.current.sim) {
-        if (!props$.current.visible(n)) continue;
-        a = Math.min(a, n.x);
-        b = Math.min(b, n.y);
-        c = Math.max(c, n.x);
-        d = Math.max(d, n.y);
-      }
-      if (a > c) return [-100, -100, 100, 100];
-      return [a, b, c, d];
-    }
-
-    function dibujarMini() {
-      const mc = mini.current;
-      if (!mc) return;
-      const mx = mc.getContext("2d");
-      if (!mx) return;
-      const [a, b, c, d] = limites();
-      const pad = 60;
-      const w = c - a + pad * 2;
-      const h = d - b + pad * 2;
-      const s = Math.min(360 / w, 232 / h);
-      const ox = (360 - w * s) / 2;
-      const oy = (232 - h * s) / 2;
-      mx.clearRect(0, 0, 360, 232);
-      for (const n of estado.current.sim) {
-        if (!props$.current.visible(n)) continue;
-        mx.fillStyle = hexA(n.color, n.tipo === "memoria" ? 0.75 : 1);
-        const r = n.tipo === "memoria" ? 1.8 : n.tipo === "grupo" ? 5 : 3;
-        mx.beginPath();
-        mx.arc(
-          ox + (n.x - a + pad) * s,
-          oy + (n.y - b + pad) * s,
-          r,
-          0,
-          Math.PI * 2,
-        );
-        mx.fill();
-      }
-      const [wx1, wy1] = toW(0, 0);
-      const [wx2, wy2] = toW(estado.current.W, estado.current.H);
-      mx.strokeStyle = "#228be6";
-      mx.lineWidth = 2;
-      mx.strokeRect(
-        ox + (wx1 - a + pad) * s,
-        oy + (wy1 - b + pad) * s,
-        (wx2 - wx1) * s,
-        (wy2 - wy1) * s,
-      );
-    }
+    /** Como mucho un dibujo por cuadro de pantalla. */
+    const pedirDibujo = useCallback(() => {
+      if (estado.current.cuadro) return;
+      estado.current.cuadro = requestAnimationFrame(() => {
+        estado.current.cuadro = 0;
+        dibujar();
+      });
+    }, [dibujar]);
 
     function medir() {
       const cv = lienzo.current;
@@ -602,8 +784,8 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
       const dpr = Math.max(1, window.devicePixelRatio || 1);
       estado.current.W = r.width;
       estado.current.H = r.height;
-      cv.width = r.width * dpr;
-      cv.height = r.height * dpr;
+      cv.width = Math.round(r.width * dpr);
+      cv.height = Math.round(r.height * dpr);
     }
 
     function ajustar() {
@@ -611,12 +793,15 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
       const v = estado.current.vista;
       const { W, H } = estado.current;
       v.x = (a + c) / 2;
-      v.y = (b + d) / 2 + 30;
+      v.y = (b + d) / 2 - 20;
       v.k = Math.max(
-        0.05,
-        Math.min(1.6, Math.min(W / (c - a + 420), (H - 60) / (d - b + 480))),
+        0.03,
+        Math.min(
+          1.6,
+          Math.min((W - 40) / (c - a + 120), (H - 110) / (d - b + 160)),
+        ),
       );
-      dibujar();
+      pedirDibujo();
     }
 
     function enfocar(ids: string[]) {
@@ -629,61 +814,109 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
       let c = -1e9;
       let d = -1e9;
       for (const n of ns) {
-        a = Math.min(a, n.x);
-        b = Math.min(b, n.y);
-        c = Math.max(c, n.x);
-        d = Math.max(d, n.y);
+        const r = n.tipo === "memoria" ? 10 : n.r;
+        a = Math.min(a, n.x - r);
+        b = Math.min(b, n.y - r);
+        c = Math.max(c, n.x + r);
+        d = Math.max(d, n.y + r);
       }
       const v = estado.current.vista;
       const { W, H } = estado.current;
       v.x = (a + c) / 2;
       v.y = (b + d) / 2;
       v.k = Math.max(
-        0.05,
+        0.03,
         Math.min(
-          1.8,
-          Math.min((W - 80) / (c - a + 700), (H - 120) / (d - b + 700)),
+          2.2,
+          Math.min((W - 80) / (c - a + 260), (H - 140) / (d - b + 260)),
         ),
       );
-      dibujar();
+      pedirDibujo();
     }
 
-    useImperativeHandle(ref, () => ({
-      acercar: () => {
-        estado.current.vista.k = Math.min(4, estado.current.vista.k * 1.3);
-        dibujar();
-      },
-      alejar: () => {
-        estado.current.vista.k = Math.max(0.05, estado.current.vista.k / 1.3);
-        dibujar();
-      },
-      ajustar,
-      enfocar,
-    }));
-
-    // Redibujar cuando cambian filtros, selección o zonas.
+    // Construir y disponer cuando cambia el grafo.
     useEffect(() => {
-      dibujar();
+      const sim: Sim[] = nodos.map((n) => ({
+        ...n,
+        x: 0,
+        y: 0,
+        vx: 0,
+        vy: 0,
+        r: 0,
+        vecinos: [],
+        hijos: [],
+      }));
+      const porId = new Map(sim.map((n) => [n.id, n]));
+      const lazos: Lazo[] = [];
+      for (const e of enlaces) {
+        const s = porId.get(e.s);
+        const t = porId.get(e.t);
+        if (!s || !t || s === t) continue;
+        lazos.push({ s, t, k: e.k });
+        s.vecinos.push(t);
+        t.vecinos.push(s);
+      }
+      disponer(sim, lazos, grupos);
+      Object.assign(estado.current, {
+        sim,
+        porId,
+        lazos,
+        hover: null,
+        miniBase: null,
+      });
+      medir();
+      ajustar();
+       
+    }, [nodos, enlaces, grupos]);
+
+    // Filtros, selección, zonas o tema: redibujar (el minimapa se rehace si
+    // cambia qué se ve).
+    useEffect(() => {
+      estado.current.miniBase = null;
+      pedirDibujo();
+    }, [props.visible, pedirDibujo]);
+    useEffect(() => {
+      pedirDibujo();
     }, [
-      visible,
-      resaltados,
-      seleccionado,
-      mostrarZonas,
+      props.resaltados,
+      props.seleccionado,
+      props.mostrarZonas,
       props.oscuro,
-      dibujar,
+      pedirDibujo,
     ]);
 
     // Tamaño (ventana y pantalla completa).
     useEffect(() => {
       const alCambiar = () => {
         medir();
-        dibujar();
+        pedirDibujo();
       };
       alCambiar();
       const ro = new ResizeObserver(alCambiar);
       if (lienzo.current) ro.observe(lienzo.current);
       return () => ro.disconnect();
+       
     }, [version]);
+
+    useEffect(
+      () => () => {
+        if (estado.current.cuadro) cancelAnimationFrame(estado.current.cuadro);
+      },
+      [],
+    );
+
+    useImperativeHandle(ref, () => ({
+      acercar: () => {
+        estado.current.vista.k = Math.min(4, estado.current.vista.k * 1.3);
+        pedirDibujo();
+      },
+      alejar: () => {
+        estado.current.vista.k = Math.max(0.03, estado.current.vista.k / 1.3);
+        pedirDibujo();
+      },
+      ajustar,
+      enfocar,
+    }));
 
     // Ratón: arrastrar el lienzo o un nodo, rueda para acercar, clic para elegir.
     useEffect(() => {
@@ -703,15 +936,35 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
         let mejor: Sim | null = null;
         let md = 1e9;
         for (const n of estado.current.sim) {
+          const dx = n.x - wx;
+          const dy = n.y - wy;
+          const lim = (radio(n) + 3) / k;
+          if (dx > lim || dx < -lim || dy > lim || dy < -lim) continue;
           if (!props$.current.visible(n)) continue;
-          const r = (radio(n) * escala()) / k + 3 / k;
-          const d = Math.hypot(n.x - wx, n.y - wy);
-          if (d < r && d < md) {
+          const d = Math.sqrt(dx * dx + dy * dy);
+          if (d < lim && d < md) {
             md = d;
             mejor = n;
           }
         }
         return mejor;
+      };
+      /** Mueve un nodo con todo lo que cuelga de él. */
+      const mover = (n: Sim, dx: number, dy: number) => {
+        n.x += dx;
+        n.y += dy;
+        for (const m of n.hijos) {
+          m.x += dx;
+          m.y += dy;
+        }
+        if (n.tipo === "grupo" || n.tipo === "depto")
+          for (const v of n.vecinos)
+            if (
+              v.grupo === n.grupo &&
+              ((n.tipo === "grupo" && v.tipo === "depto") ||
+                (n.tipo === "depto" && v.tipo === "agente"))
+            )
+              mover(v, dx, dy);
       };
       const pos = (e: MouseEvent) => {
         const r = cv.getBoundingClientRect();
@@ -724,42 +977,20 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
         movio = false;
         cv.style.cursor = "grabbing";
       };
-      const mover = (e: MouseEvent) => {
+      const alMover = (e: MouseEvent) => {
         const [sx, sy] = pos(e);
         if (arrastre) {
           if (Math.hypot(sx - arrastre.sx, sy - arrastre.sy) > 3) movio = true;
-          if (arrastre.n) {
-            const n = arrastre.n;
+          if (arrastre.n && arrastre.n.tipo !== "memoria") {
             const [wx, wy] = toW(sx, sy);
-            const dx = wx - n.x;
-            const dy = wy - n.y;
-            n.x = wx;
-            n.y = wy;
-            if (n.tipo !== "memoria")
-              for (const m of n.vecinos) {
-                const arrastra =
-                  m.tipo === "memoria" ||
-                  (n.tipo === "grupo" && m.tipo === "depto") ||
-                  (n.tipo === "depto" && m.tipo === "agente");
-                if (!arrastra) continue;
-                m.x += dx * 0.85;
-                m.y += dy * 0.85;
-                if (m.tipo !== "memoria")
-                  for (const z of m.vecinos)
-                    if (
-                      z.tipo === "memoria" ||
-                      (m.tipo === "depto" && z.tipo === "agente")
-                    ) {
-                      z.x += dx * 0.8;
-                      z.y += dy * 0.8;
-                    }
-              }
-          } else {
+            mover(arrastre.n, wx - arrastre.n.x, wy - arrastre.n.y);
+            estado.current.miniBase = null;
+          } else if (!arrastre.n) {
             const v = estado.current.vista;
             v.x = arrastre.vx - (sx - arrastre.sx) / v.k;
             v.y = arrastre.vy - (sy - arrastre.sy) / v.k;
           }
-          dibujar();
+          pedirDibujo();
           return;
         }
         if (e.target !== cv) return;
@@ -767,7 +998,7 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
         if (n !== estado.current.hover) {
           estado.current.hover = n;
           cv.style.cursor = n ? "pointer" : "grab";
-          dibujar();
+          pedirDibujo();
         }
       };
       const arriba = () => {
@@ -777,8 +1008,9 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
         cv.style.cursor = "grab";
       };
       const salir = () => {
+        if (!estado.current.hover) return;
         estado.current.hover = null;
-        dibujar();
+        pedirDibujo();
       };
       const rueda = (e: WheelEvent) => {
         e.preventDefault();
@@ -788,25 +1020,26 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
         const { W, H } = estado.current;
         const k = Math.min(
           4,
-          Math.max(0.05, v.k * Math.exp(-e.deltaY * 0.0015)),
+          Math.max(0.03, v.k * Math.exp(-e.deltaY * 0.0015)),
         );
         v.k = k;
         v.x = wx - (sx - W / 2) / k;
         v.y = wy - (sy - H / 2) / k;
-        dibujar();
+        pedirDibujo();
       };
       cv.addEventListener("mousedown", abajo);
-      window.addEventListener("mousemove", mover);
+      window.addEventListener("mousemove", alMover);
       window.addEventListener("mouseup", arriba);
       cv.addEventListener("mouseleave", salir);
       cv.addEventListener("wheel", rueda, { passive: false });
       return () => {
         cv.removeEventListener("mousedown", abajo);
-        window.removeEventListener("mousemove", mover);
+        window.removeEventListener("mousemove", alMover);
         window.removeEventListener("mouseup", arriba);
         cv.removeEventListener("mouseleave", salir);
         cv.removeEventListener("wheel", rueda);
       };
+       
     }, []);
 
     return (

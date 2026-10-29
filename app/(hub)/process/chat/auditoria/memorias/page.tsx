@@ -336,8 +336,13 @@ export default function MemoriasAgentesPage() {
   const vecinos = useMemo(() => {
     const v = new Map<string, string[]>();
     for (const e of grafo?.enlaces ?? []) {
-      v.set(e.s, [...(v.get(e.s) ?? []), e.t]);
-      v.set(e.t, [...(v.get(e.t) ?? []), e.s]);
+      // push, no copiar el arreglo: un agente tiene más de mil vecinos.
+      const a = v.get(e.s);
+      if (a) a.push(e.t);
+      else v.set(e.s, [e.t]);
+      const b = v.get(e.t);
+      if (b) b.push(e.s);
+      else v.set(e.t, [e.s]);
     }
     return v;
   }, [grafo]);
