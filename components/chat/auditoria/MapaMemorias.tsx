@@ -116,6 +116,26 @@ interface Props {
   oscuro: boolean;
 }
 
+/**
+ * Colores del tema con el fondo REAL de la tarjeta: la paleta de cada usuario
+ * cambia --app-surface (p. ej. duo-turquesa en oscuro), así que no sirve un gris fijo.
+ */
+function colores(oscuro: boolean) {
+  const base = oscuro ? TEMAS.oscuro : TEMAS.claro;
+  if (typeof window === "undefined") return base;
+  const css = getComputedStyle(document.documentElement);
+  const fondo = css.getPropertyValue("--app-surface").trim();
+  const elevado = css.getPropertyValue("--app-surface-raised").trim();
+  if (!/^#[0-9a-f]{6}$/i.test(fondo)) return base;
+  return {
+    ...base,
+    fondo,
+    relleno: /^#[0-9a-f]{6}$/i.test(elevado) ? elevado : fondo,
+    halo: hexA(fondo, 0.95),
+    mini: hexA(fondo, 0.92),
+  };
+}
+
 const FUENTE = '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
 /** Separación entre memorias en la espiral (unidades del mundo). */
 const PASO_ESPIRAL = 11;
@@ -481,7 +501,7 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
         grupos: gs,
         oscuro,
       } = props$.current;
-      const T = oscuro ? TEMAS.oscuro : TEMAS.claro;
+      const T = colores(oscuro);
       const dpr = Math.max(1, window.devicePixelRatio || 1);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.fillStyle = T.fondo;
@@ -765,7 +785,6 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
         ctx.fillText(txt, tx, ty);
       }
       dibujarMini();
-       
     }, []);
 
     /** Como mucho un dibujo por cuadro de pantalla. */
@@ -866,7 +885,6 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
       });
       medir();
       ajustar();
-       
     }, [nodos, enlaces, grupos]);
 
     // Filtros, selección, zonas o tema: redibujar (el minimapa se rehace si
@@ -895,7 +913,6 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
       const ro = new ResizeObserver(alCambiar);
       if (lienzo.current) ro.observe(lienzo.current);
       return () => ro.disconnect();
-       
     }, [version]);
 
     useEffect(
@@ -1039,7 +1056,6 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
         cv.removeEventListener("mouseleave", salir);
         cv.removeEventListener("wheel", rueda);
       };
-       
     }, []);
 
     return (
@@ -1064,7 +1080,7 @@ export const MapaMemorias = forwardRef<MapaMemoriasHandle, Props>(
             bottom: 12,
             width: 180,
             height: 116,
-            background: (props.oscuro ? TEMAS.oscuro : TEMAS.claro).mini,
+            background: colores(props.oscuro).mini,
             border: "1px solid var(--mantine-color-default-border)",
             borderRadius: 8,
           }}
