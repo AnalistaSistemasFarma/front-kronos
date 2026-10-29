@@ -231,7 +231,8 @@ export function parseMemoriesPayload(body: unknown): MemoriesPayload {
 
 // ── Lo que viaja a la pantalla ───────────────────────────────────────────────
 
-export type MemoryMap = "general" | "personal";
+/** general / personal = mapas de la Auditoría; agente = la memoria de UN agente (botón del chat). */
+export type MemoryMap = "general" | "personal" | "agente";
 
 export interface MapAgentDto {
   idAgent: number;
