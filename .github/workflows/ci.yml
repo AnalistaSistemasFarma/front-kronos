@@ -555,6 +555,12 @@ jobs:
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/agente-desarrollo-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-27-agente-desarrollo-PROD.sql; then echo "El script de PROD de agente de desarrollo debió negarse en kronos_ci"; exit 1; fi
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-27-proyectos-codigo-no-desarrollo.sql
+          # Contexto de la sesión de los agentes y «Limpiar contexto» (2026-10-29): PRUEBAS dos veces (idempotencia), tablas, CHECK e índice único filtrado, y PROD que se niega.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-29-chat-agent-contexto-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-29-chat-agent-contexto-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.chat_agent_context', N'U') IS NULL OR OBJECT_ID(N'dbo.chat_agent_command', N'U') IS NULL OR (SELECT COUNT(*) FROM sys.check_constraints WHERE name IN (N'chat_agent_context_runtime_ck', N'chat_agent_context_pct_ck', N'chat_agent_command_command_ck', N'chat_agent_command_status_ck', N'chat_agent_command_runtime_ck')) <> 5 OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_chat_agent_command_activa' AND is_unique = 1 AND has_filter = 1) THROW 50000, N'El pase de contexto de agentes no dejó las tablas, los CHECK o el índice único filtrado.', 1;" > /tmp/contexto-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/contexto-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-29-chat-agent-contexto-PROD.sql; then echo "El script de PROD de contexto de agentes debió negarse en kronos_ci"; exit 1; fi
           # Vitrina · líneas comerciales y grupos terapéuticos (2026-10-23): migración y PRUEBAS dos veces (idempotencia, con semilla), objetos, semilla sin duplicar y PROD que se niega.
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261023120000_vitrina_lineas_grupos/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261023120000_vitrina_lineas_grupos/migration.sql
@@ -606,6 +612,11 @@ jobs:
             npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
           }
           # De la más nueva a la más antigua…
+          # Contexto de los agentes (2026-10-29): ida y vuelta (reversa dos veces, comprobación y PRUEBAS otra vez).
+          reversa prisma/manual/2026-10-29-chat-agent-contexto-reversa.sql
+          echo "IF OBJECT_ID(N'dbo.chat_agent_context', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.chat_agent_command', N'U') IS NOT NULL THROW 50000, N'La reversa de contexto de agentes no quitó sus tablas.', 1;" > /tmp/contexto-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/contexto-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-29-chat-agent-contexto-PRUEBAS.sql
           # Agente de desarrollo (2026-10-27): ida y vuelta (reversa dos veces, comprobación y la migración otra vez).
           reversa prisma/manual/2026-10-27-agente-desarrollo-reversa.sql
           echo "IF COL_LENGTH(N'dbo.agent', N'es_desarrollo') IS NOT NULL THROW 50000, N'La reversa de agente de desarrollo no quitó la columna.', 1;" > /tmp/agente-desarrollo-quitado.sql

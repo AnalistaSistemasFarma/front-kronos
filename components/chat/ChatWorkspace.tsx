@@ -1519,8 +1519,14 @@ export default function ChatWorkspace({
             </Group>
           </UnstyledButton>
           <Group gap={4} wrap='nowrap'>
-            {/* Consumo de Anthropic del agente (2026-10-22): solo si el agente publica cuota. */}
-            <ChatConsumoBoton key={selectedAgent.code} code={selectedAgent.code} displayName={selectedAgent.displayName} />
+            {/* Consumo de Anthropic del agente (2026-10-22) y contexto de su sesión (2026-10-29):
+                solo si el agente publica alguno de los dos. */}
+            <ChatConsumoBoton
+              key={selectedAgent.code}
+              code={selectedAgent.code}
+              displayName={selectedAgent.displayName}
+              idConversacion={overview.conversationByAgent.get(selectedAgent.idAgent)?.id ?? null}
+            />
             {botonesDelEncabezado}
           </Group>
         </Group>
