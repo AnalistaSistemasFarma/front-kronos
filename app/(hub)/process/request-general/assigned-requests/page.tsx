@@ -72,6 +72,7 @@ import {
 } from '../../../../../components/request-general/list/RequestListUi';
 import requestListStyles from '../../../../../components/request-general/list/requestList.module.css';
 import WorkloadDistribution from '../../../../../components/request-general/WorkloadDistribution';
+import { RequestFlowBar, useRequestFlows } from '../../../../../components/request-general/RequestFlow';
 import {
   buildTaskDisplayBadges,
   getSimplifiedTasksProgress,
@@ -261,6 +262,12 @@ function RequestBoard() {
         : [...requestPageItems, ...taskPageItems].sort(byCreatedAtDesc);
   const totalItemsCount = totalTickets + assignedTasks.length;
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  // Flujo completo (en qué paso va) de las solicitudes de la página, también las de cada tarea.
+  const { flows: requestFlows } = useRequestFlows(
+    pageItems.map((item) =>
+      item.kind === 'task' ? Number((item.data as AssignedTask).id_request_general) : Number((item.data as Ticket).id)
+    )
+  );
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -922,6 +929,9 @@ function RequestBoard() {
         <Text size='xs' c='dimmed' lineClamp={2}>
           {task.subject_request}
         </Text>
+        <div style={{ marginTop: 6 }}>
+          <RequestFlowBar flow={requestFlows[Number(task.id_request_general)]} />
+        </div>
       </Table.Td>
       <Table.Td>
         <Stack gap={2}>
@@ -1196,8 +1206,9 @@ function RequestBoard() {
                       : `/process/request-general/view-request?id=${r!.id}&from=assigned-requests`
                   );
                 };
+                const flow = requestFlows[isTask ? Number(t!.id_request_general) : Number(r!.id)];
                 const progress =
-                  r && tasksByRequest[r.id]?.length ? getTasksProgress(tasksByRequest[r.id]) : null;
+                  !flow && r && tasksByRequest[r.id]?.length ? getTasksProgress(tasksByRequest[r.id]) : null;
                 return (
                   <Paper
                     key={item.key}
@@ -1229,11 +1240,15 @@ function RequestBoard() {
                         {t!.subject_request}
                       </Text>
                     )}
-                    {progress && (
+                    {flow ? (
+                      <div style={{ marginTop: 6 }}>
+                        <RequestFlowBar flow={flow} />
+                      </div>
+                    ) : progress ? (
                       <div style={{ marginTop: 6 }}>
                         <RequestProgressBar {...progress} />
                       </div>
-                    )}
+                    ) : null}
                     <Text size='xs' c='dimmed' mt={6} style={{ overflowWrap: 'anywhere' }}>
                       {[isTask ? null : r!.process, isTask ? t!.company : r!.company, formatAssignedDate(isTask ? t!.created_at : r!.created_at)]
                         .filter(Boolean)
@@ -1305,9 +1320,16 @@ function RequestBoard() {
                         <Text size='sm' fw={500} lineClamp={2}>
                           {ticket.subject}
                         </Text>
+                        {requestFlows[ticket.id] ? (
+                          <div style={{ marginTop: 8 }}>
+                            <RequestFlowBar flow={requestFlows[ticket.id]} />
+                          </div>
+                        ) : null}
                         {tasksByRequest[ticket.id]?.length ? (
                           <Stack gap={6} mt={8}>
-                            <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
+                            {requestFlows[ticket.id] ? null : (
+                              <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
+                            )}
                             <Group gap={6} wrap='wrap'>
                               {buildTaskDisplayBadges(tasksByRequest[ticket.id]).map((badge) => {
                                 const { color, Icon } = getTaskVisual(badge.statusKey);

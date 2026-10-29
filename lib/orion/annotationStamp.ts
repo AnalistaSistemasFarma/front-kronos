@@ -1,5 +1,5 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib';
-import type { OrionDocumentAnnotation } from './types';
+import type { OrionAnnotationFont, OrionDocumentAnnotation } from './types';
 import { fitText, formatValidatorDate, safeText } from './validatorStamp';
 
 const TEXT = rgb(0.05, 0.08, 0.15);
@@ -38,6 +38,27 @@ function boxOnPage(page: PDFPage, a: OrionDocumentAnnotation) {
 function drawCaption(page: PDFPage, font: PDFFont, a: OrionDocumentAnnotation, bx: number, by: number, bw: number) {
   const caption = fitText(font, annotationCaption(a), CAPTION_SIZE, Math.max(1, bw));
   page.drawText(caption, { x: bx, y: by + 0.5, size: CAPTION_SIZE, font, color: MUTED });
+}
+
+/** Línea base respecto al borde de arriba (igual que se ve en pantalla con line-height 1). */
+const TEXT_BASELINE_RATIO = 0.85;
+
+const STANDARD_FONT: Record<OrionAnnotationFont, { regular: StandardFonts; bold: StandardFonts }> = {
+  helvetica: { regular: StandardFonts.Helvetica, bold: StandardFonts.HelveticaBold },
+  times: { regular: StandardFonts.TimesRoman, bold: StandardFonts.TimesRomanBold },
+  courier: { regular: StandardFonts.Courier, bold: StandardFonts.CourierBold },
+};
+
+/** Texto con letra y tamaño elegidos: sale tal cual, desde la esquina de arriba de la caja. */
+function drawStyledText(page: PDFPage, a: OrionDocumentAnnotation, font: PDFFont) {
+  const { width: pw, height: ph } = page.getSize();
+  const size = Number(a.fontSize);
+  const bx = (a.x / 100) * pw;
+  const top = ph - (a.y / 100) * ph;
+  const text = safeText(font, String(a.text || ''));
+  // Solo se recorta si se saldría de la hoja.
+  const value = fitText(font, text, size, Math.max(1, pw - bx));
+  page.drawText(value, { x: bx, y: top - size * TEXT_BASELINE_RATIO, size, font, color: TEXT });
 }
 
 function drawTextAnnotation(page: PDFPage, a: OrionDocumentAnnotation, fonts: { regular: PDFFont; bold: PDFFont }) {
@@ -85,12 +106,21 @@ export async function stampAnnotations(
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const embedded = new Map<string, PDFImage | null>();
+  const styledFonts = new Map<StandardFonts, PDFFont>();
+  const styledFont = async (a: OrionDocumentAnnotation) => {
+    const family = STANDARD_FONT[a.fontFamily ?? 'helvetica'] ?? STANDARD_FONT.helvetica;
+    const name = a.bold ? family.bold : family.regular;
+    if (!styledFonts.has(name)) styledFonts.set(name, await pdf.embedFont(name));
+    return styledFonts.get(name)!;
+  };
 
   for (const a of annotations) {
     const page = pages[a.page - 1];
     if (!page) continue;
     if (a.kind === 'text') {
-      if (String(a.text || '').trim()) drawTextAnnotation(page, a, { regular, bold });
+      if (!String(a.text || '').trim()) continue;
+      if (a.fontSize) drawStyledText(page, a, await styledFont(a));
+      else drawTextAnnotation(page, a, { regular, bold });
       continue;
     }
     const itemId = String(a.sealItemId || '');

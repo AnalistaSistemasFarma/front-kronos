@@ -646,9 +646,17 @@ export default function SignaturePlacementCanvas({
                 ref={(el) => {
                   imgRefs.current[page.page] = el;
                 }}
-                src={page.dataUrl}
+                src={page.dataUrl ?? undefined}
                 alt={`Página ${page.page}`}
-                style={{ display: 'block', width: '100%', height: 'auto', pointerEvents: 'none' }}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  height: 'auto',
+                  // Mientras se dibuja, la hoja ya ocupa su tamaño (las cajas no saltan).
+                  aspectRatio: `${page.width} / ${page.height}`,
+                  background: '#fff',
+                  pointerEvents: 'none',
+                }}
                 draggable={false}
               />
               {fields

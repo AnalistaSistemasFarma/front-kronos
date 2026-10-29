@@ -97,6 +97,42 @@ describe('nota del historial', () => {
   });
 });
 
+describe('letra y tamaño del texto', () => {
+  it('guarda letra, tamaño y negrita válidos; lo demás cae a Helvetica y a los límites', () => {
+    const [a] = normalizeAnnotationsInput([{ ...rawText, fontFamily: 'times', fontSize: 12.3, bold: true }], [], odette, T1);
+    expect(a).toMatchObject({ fontFamily: 'times', fontSize: 12.5, bold: true });
+    const [b] = normalizeAnnotationsInput([{ ...rawText, fontFamily: 'comic', fontSize: 500 }], [], odette, T1);
+    expect(b).toMatchObject({ fontFamily: 'helvetica', fontSize: 48, bold: false });
+    const [old] = normalizeAnnotationsInput([rawText], [], odette, T1);
+    expect(old).toMatchObject({ fontFamily: null, fontSize: null, bold: null });
+  });
+
+  it('cambiar la letra queda en el historial', () => {
+    const prev = normalizeAnnotationsInput([{ ...rawText, fontSize: 11 }], [], odette, T1);
+    const next = normalizeAnnotationsInput([{ ...rawText, fontSize: 14 }], prev, camila, T2);
+    expect(describeAnnotationChanges(prev, next)).toBe('cambió la letra de "4.123,45"');
+  });
+
+  it('estampa con cada letra sin romper el PDF', async () => {
+    const input = await blankPdf(1);
+    const list = normalizeAnnotationsInput(
+      (['helvetica', 'times', 'courier'] as const).map((f, i) => ({
+        ...rawText,
+        id: `sf-${f}`,
+        y: 10 + i * 5,
+        fontFamily: f,
+        fontSize: 14,
+        bold: i === 1,
+      })),
+      [],
+      odette,
+      T1
+    );
+    const out = await stampAnnotations(input, list);
+    expect((await PDFDocument.load(out)).getPageCount()).toBe(1);
+  });
+});
+
 describe('quién puede agregar', () => {
   const state: OrionSignatureState = {
     signers: [

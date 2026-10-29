@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionIcon,
   Alert,
@@ -232,9 +232,16 @@ export default function OrionDocumentEditor({
   const [placingSeal, setPlacingSeal] = useState<{ sealItemId: string; sealFileName: string } | null>(null);
   const [sealUploading, setSealUploading] = useState(false);
 
+  // Lo último que se guardó con éxito (firmantes y ubicaciones): "Enviar a firma" no lo repite
+  // si no cambió, porque cada guardado es una llamada a Orion.
+  const lastSignersJsonRef = useRef<string | null>(null);
+  const lastFieldsJsonRef = useRef<string | null>(null);
+
   useEffect(() => {
     setSeals(sealsFromState(state));
     setPlacingSeal(null);
+    lastSignersJsonRef.current = null;
+    lastFieldsJsonRef.current = null;
     // Solo al abrir otro documento: no pisar los sellos que se están ubicando.
   }, [openNonce, fileId]);
 
@@ -303,6 +310,8 @@ export default function OrionDocumentEditor({
     const others = (state.annotations ?? []).filter((a) => a.kind !== 'seal');
     const hadSeals = (state.annotations ?? []).some((a) => a.kind === 'seal');
     if (seals.length === 0 && !hadSeals) return;
+    // Sin cambios en los sellos: no hay nada que guardar.
+    if (JSON.stringify(seals) === JSON.stringify(sealsFromState(state))) return;
     const res = await fetch('/api/integrations/orion/annotations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -315,7 +324,7 @@ export default function OrionDocumentEditor({
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'No se guardaron los sellos');
     if (data.state) onStateUpdate(data.state as OrionSignatureState);
-  }, [fileId, onStateUpdate, requestId, seals, state.annotations]);
+  }, [fileId, onStateUpdate, requestId, seals, state]);
   const [signatureKind, setSignatureKind] = useState<OrionDocumentSignatureKind>(
     () => state.signatureKind || 'electronic'
   );
@@ -588,32 +597,37 @@ export default function OrionDocumentEditor({
     const validationError = validateAssignments();
     if (validationError) throw new Error(validationError);
 
+    const body = JSON.stringify({
+      requestId,
+      fileId,
+      mode: sequential ? 'sequential' : 'parallel',
+      signers: orderedParticipants
+        .filter((p) => p.email)
+        .map((p) => ({
+          email: p.email,
+          name: p.name,
+          order: p.order,
+          type: p.type === 'external' ? 'external' : 'internal',
+          ...(p.cardCode ? { cardCode: p.cardCode } : {}),
+          notifyByEmail: true,
+          requireFingerprint: Boolean(p.requireFingerprint),
+          signatureMarkId:
+            Number.isFinite(Number(p.signatureMarkId)) && Number(p.signatureMarkId) >= 1
+              ? Math.trunc(Number(p.signatureMarkId))
+              : p.order,
+        })),
+    });
+    // Ya guardados así (p. ej. al pasar del paso 1 al 2): no se repite la llamada a Orion.
+    if (lastSignersJsonRef.current === body) return;
+
     const res = await fetch('/api/integrations/orion/signers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        requestId,
-        fileId,
-        mode: sequential ? 'sequential' : 'parallel',
-        signers: orderedParticipants
-          .filter((p) => p.email)
-          .map((p) => ({
-            email: p.email,
-            name: p.name,
-            order: p.order,
-            type: p.type === 'external' ? 'external' : 'internal',
-            ...(p.cardCode ? { cardCode: p.cardCode } : {}),
-            notifyByEmail: true,
-            requireFingerprint: Boolean(p.requireFingerprint),
-            signatureMarkId:
-              Number.isFinite(Number(p.signatureMarkId)) && Number(p.signatureMarkId) >= 1
-                ? Math.trunc(Number(p.signatureMarkId))
-                : p.order,
-          })),
-      }),
+      body,
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'No se pudieron asignar los firmantes');
+    lastSignersJsonRef.current = body;
     if (data.state) {
       const next = data.state as OrionSignatureState;
       // Preserva type/cardCode/flags locales (mismo email puede repetirse → clave por orden).
@@ -657,15 +671,18 @@ export default function OrionDocumentEditor({
   ]);
 
   const persistFields = useCallback(async () => {
+    const body = JSON.stringify({
+      requestId,
+      fileId,
+      signatureFields: [...fields, ...validatorFields],
+    });
+    // Mismas ubicaciones que el último guardado: no se repite la llamada a Orion.
+    if (lastFieldsJsonRef.current === body) return;
     const postFields = () =>
       fetch('/api/integrations/orion/signature-fields', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requestId,
-          fileId,
-          signatureFields: [...fields, ...validatorFields],
-        }),
+        body,
       });
 
     let res = await postFields();
@@ -700,6 +717,7 @@ export default function OrionDocumentEditor({
     if (!res.ok) {
       throw new Error(data.error || 'No se guardaron las ubicaciones en Orion');
     }
+    lastFieldsJsonRef.current = body;
     if (data.state) {
       onStateUpdate(data.state as OrionSignatureState);
     } else {

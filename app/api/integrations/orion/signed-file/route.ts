@@ -25,6 +25,13 @@ import { latestAnnotatedCopy } from '@/lib/orion/annotations';
 import type { OrionAnnotatedCopy } from '@/lib/orion/types';
 import { buildValidatorMarks } from '@/lib/orion/validatorStamp';
 import { buildSynerLinkAttachmentFileUrl } from '@/lib/attachments/fileUrl';
+import {
+  getCachedPdf,
+  pdfCacheKey,
+  PDF_CACHE_TTL_ACTIVE_MS,
+  PDF_CACHE_TTL_SEALED_MS,
+  setCachedPdf,
+} from '@/lib/orion/pdfResponseCache';
 
 function normalizeEmail(email?: string | null): string {
   return String(email || '')
@@ -61,6 +68,8 @@ export async function GET(req: Request) {
     const forceDownload = searchParams.get('download') === '1';
     // annotations=0: sin los datos/sellos posteriores a la firma (el editor los dibuja aparte).
     const withAnnotations = searchParams.get('annotations') !== '0';
+    // watermark=0: el firmado limpio, sin "SYNERLINK VALIDADO" (pantalla de texto y sellos).
+    const withWatermark = searchParams.get('watermark') !== '0';
 
     if (!Number.isInteger(requestId) || requestId <= 0 || !fileId) {
       return NextResponse.json({ error: 'requestId y fileId son obligatorios' }, { status: 400 });
@@ -106,6 +115,14 @@ export async function GET(req: Request) {
       return { state, canViewVersions };
     });
 
+    /** Llave del PDF ya armado en memoria (se fija después de revisar permisos). */
+    let responseCacheKey: string | null = null;
+    const rememberPdf = (body: Buffer, contentType: string) => {
+      if (!responseCacheKey || !/pdf/i.test(contentType)) return;
+      const sealed = String(auth?.state.status || '').toUpperCase() === 'FIRMADO';
+      setCachedPdf(responseCacheKey, body, contentType, sealed ? PDF_CACHE_TTL_SEALED_MS : PDF_CACHE_TTL_ACTIVE_MS);
+    };
+
     const servePdfFromOneDrive = async (
       stateLike: {
         fileName?: string | null;
@@ -126,7 +143,9 @@ export async function GET(req: Request) {
         pdf = await applyValidatorMarks(pdf, state, { final: validatorMode === 'final' });
         if (withAnnotations) pdf = await applyDocumentAnnotations(pdf, state);
       }
-      return new NextResponse(Buffer.from(pdf), {
+      const out = Buffer.from(pdf);
+      rememberPdf(out, 'application/pdf');
+      return new NextResponse(out, {
         status: 200,
         headers: {
           'Content-Type': 'application/pdf',
@@ -247,11 +266,33 @@ export async function GET(req: Request) {
         statusUpperLive === 'SIGNED' ||
         statusUpperLive === 'COMPLETED'
       ) {
-        wantValidated = true;
+        wantValidated = withWatermark;
         validatorMode = 'final';
         // Con datos guardados después de firmar, lo vigente es su última copia congelada.
         if (withAnnotations) annotatedCopy = latestAnnotatedCopy(state);
       }
+    }
+
+    // Ya armado hace poco con este mismo estado de firma: se entrega sin ir a Orion/OneDrive.
+    responseCacheKey = pdfCacheKey({
+      route: 'signed-file',
+      requestId,
+      fileId,
+      versionId: versionId ?? '',
+      withAnnotations,
+      withWatermark,
+      state,
+    });
+    const cachedPdf = getCachedPdf(responseCacheKey);
+    if (cachedPdf) {
+      return new NextResponse(cachedPdf.body as unknown as BodyInit, {
+        status: 200,
+        headers: {
+          'Content-Type': cachedPdf.contentType,
+          'Content-Disposition': `${forceDownload ? 'attachment' : 'inline'}; filename="${asciiFileName(state.fileName || 'documento.pdf')}"`,
+          'Cache-Control': 'private, no-store',
+        },
+      });
     }
 
     // Sin URL Orion (p. ej. Solo ver / aún sin firmas): PDF original desde OneDrive.
@@ -310,10 +351,12 @@ export async function GET(req: Request) {
       }
 
       const safeType = String(contentType || 'application/pdf').split(';')[0].trim() || 'application/pdf';
+      const responseType = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i.test(safeType) ? safeType : 'application/pdf';
+      rememberPdf(body, responseType);
       return new NextResponse(body as unknown as BodyInit, {
         status: 200,
         headers: {
-          'Content-Type': /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i.test(safeType) ? safeType : 'application/pdf',
+          'Content-Type': responseType,
           'Content-Disposition': `${disposition}; filename="${asciiFileName(fileName)}"`,
           'Cache-Control': cacheControl,
         },

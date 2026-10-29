@@ -120,6 +120,7 @@ import OrionDraftTableRow from '../../../../../components/orion/OrionDraftTableR
 import { nestDraftPdfRows } from '../../../../../lib/orion/attachmentNesting';
 import { isWordDraftFileName } from '../../../../../lib/orion/draftState';
 import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
+import { RequestFlowHeader } from '../../../../../components/request-general/RequestFlow';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import TableFieldInput from '../create-request/TableFieldInput';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
@@ -2204,6 +2205,9 @@ function ViewRequestPage() {
           )}
 
           {renderSapsendStatus()}
+
+          {/* Avance del flujo arriba: en qué paso va y qué falta (sin las tareas de firma). */}
+          <RequestFlowHeader requestId={request.id} />
         </Card>
 
         <div className='flex flex-col lg:flex-row gap-6'>
