@@ -289,8 +289,8 @@ export default function FichaIndicadorPage() {
           </Title>
         </Group>
         <Text className="ios-process-hub__subtitle" mb="lg">
-          Tiempo humano antes vs después de cada tarea que hace este agente, y
-          las horas que libera.
+          Cuánto tiempo gasta una persona en cada tarea de este agente sin IA y
+          con IA, y las horas que libera.
           {datos?.corte
             ? ` Periodo: ${fechaCorta(datos.periodoDesde)} a ${fechaCorta(datos.corte)}.`
             : ""}
