@@ -25,6 +25,7 @@ import {
 } from '@mantine/core';
 import {
   IconArrowLeft,
+  IconBrain,
   IconBuilding,
   IconFolderOff,
   IconLayoutGrid,
@@ -1317,6 +1318,24 @@ export default function ChatWorkspace({
   // lo que uno abrió se siente como dos pantallas distintas.
   const botonesDelEncabezado = (
     <Group gap={4} wrap='nowrap'>
+      {/* Memoria del agente (2026-10-29): abre en otra pestaña lo que ESTE
+          agente ha aprendido. La API decide si se puede ver (dueño, auditoría
+          u operador del agente). */}
+      {selectedAgent && (
+        <Tooltip label='Memoria del agente' withArrow>
+          <ActionIcon
+            variant='subtle'
+            color='gray'
+            component='a'
+            href={`/process/chat/auditoria/memorias?agente=${encodeURIComponent(selectedAgent.code)}`}
+            target='_blank'
+            rel='noopener'
+            aria-label={`Ver la memoria de ${selectedAgent.displayName}`}
+          >
+            <IconBrain size={18} />
+          </ActionIcon>
+        </Tooltip>
+      )}
       {idConversacionAbierta !== null && (
         <Tooltip label='Multimedia y archivos' withArrow>
           <ActionIcon
@@ -1519,8 +1538,14 @@ export default function ChatWorkspace({
             </Group>
           </UnstyledButton>
           <Group gap={4} wrap='nowrap'>
-            {/* Consumo de Anthropic del agente (2026-10-22): solo si el agente publica cuota. */}
-            <ChatConsumoBoton key={selectedAgent.code} code={selectedAgent.code} displayName={selectedAgent.displayName} />
+            {/* Consumo de Anthropic del agente (2026-10-22) y contexto de su sesión (2026-10-29):
+                solo si el agente publica alguno de los dos. */}
+            <ChatConsumoBoton
+              key={selectedAgent.code}
+              code={selectedAgent.code}
+              displayName={selectedAgent.displayName}
+              idConversacion={overview.conversationByAgent.get(selectedAgent.idAgent)?.id ?? null}
+            />
             {botonesDelEncabezado}
           </Group>
         </Group>

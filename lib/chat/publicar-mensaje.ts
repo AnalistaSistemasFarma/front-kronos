@@ -1,6 +1,8 @@
 import { prisma } from '../prisma';
 import { messageInclude } from './conversations';
 import { calcularEntregas } from './groups';
+import { mencionablesDelHilo } from './projects';
+import { entregasHiloProyecto } from '../proyectos/hilos-rules';
 import { notifyPeopleMessage } from './notifyPeople';
 import type { ConversationGuard } from './http';
 import type { UploadedChatAttachment } from './attachmentStorage';
@@ -46,6 +48,21 @@ export async function publicarMensajeDePersona(
         })
       : { idAgents: [], cadenaCortada: false };
 
+  // PROYECTO (2026-10-29, multiagente): una persona puede mencionar con @ a
+  // otro agente designado en el proyecto al que ella misma le escribe. Ese
+  // agente recibe el mensaje por SU puente (fila de entrega, como en un
+  // grupo). Si mencionó solo a otros, el principal no lo atiende: el mensaje
+  // nace entregado para él (lo verá en el historial de su próximo turno).
+  let principalAtiende = true;
+  if (guard.kind === 'project' && body.includes('@')) {
+    const { principal, mencionables } = await mencionablesDelHilo(guard.user, guard.idProject, guard.projectRole, guard.idAgent);
+    if (principal && mencionables.length > 0) {
+      const r = entregasHiloProyecto({ body, mencionables, principal });
+      entregas.idAgents = r.invitados;
+      principalAtiende = r.principalAtiende;
+    }
+  }
+
   // Transacción: el mensaje y la marca de tiempo de la bandeja entran juntos
   // o no entra ninguno. Si se separan, un fallo intermedio deja la bandeja
   // ordenada por un instante que no corresponde a ningún mensaje.
@@ -62,6 +79,8 @@ export async function publicarMensajeDePersona(
         // personas: el agente entra por la API con su llave, sin navegador.
         client_ip: datos.clientIp,
         user_agent: datos.userAgent,
+        // Proyecto con menciones solo a otros agentes: el principal no lo recoge.
+        ...(guard.kind === 'project' && !principalAtiende ? { delivered_at: now } : {}),
         ...(idReplyTo !== null ? { id_reply_to: idReplyTo } : {}),
         // Mensaje y adjuntos, una sola escritura: o entran los dos o ninguno.
         ...(uploaded.length > 0 ? { attachments: { create: uploaded } } : {}),
@@ -98,8 +117,10 @@ export async function publicarMensajeDePersona(
     });
   }
 
-  // En un PROYECTO no hay menciones: todo mensaje va al agente del proyecto,
-  // que lo recoge por el PUENTE de hilos (llave 'projects').
-  const notifiedAgents = guard.kind === 'project' ? [guard.idAgent] : entregas.idAgents;
+  // En un PROYECTO el mensaje va al agente principal (salvo que solo se haya
+  // mencionado a otros) y a los mencionados; todos lo recogen por SU puente
+  // de hilos (llave 'projects').
+  const notifiedAgents =
+    guard.kind === 'project' ? [...(principalAtiende ? [guard.idAgent] : []), ...entregas.idAgents] : entregas.idAgents;
   return { message, notifiedAgents };
 }

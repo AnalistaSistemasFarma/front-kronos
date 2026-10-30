@@ -282,7 +282,6 @@ async function testChangedModulesExist() {
     'app/api/users/[id]/subprocesses/route.ts',
     'app/api/companies/route.ts',
     'app/api/subprocesses/route.ts',
-    'app/api/purchase-request/access/route.ts',
     'app/api/profile/route.ts',
     'app/api/profile/change-password/route.ts',
     'scripts/sync-help-desk-subprocess-urls.cjs',

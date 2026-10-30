@@ -1525,6 +1525,34 @@ model ChatProjectAgentPolicyLog {
   @@schema("dbo")
 }
 
+/// REGISTRO de cambios de las CONVERSACIONES de un proyecto (2026-10-29, pedido
+/// de Nicolás Rivera: renombrar y eliminar los hilos). Una fila por cambio:
+///   'renombrar' — title_before → title_after;
+///   'eliminar'  — borrado LÓGICO: la conversación queda con archived = 1 (deja
+///                 de verse y los agentes dejan de atenderla). Mensajes y
+///                 adjuntos NO se borran. Quién y cuándo quedan AQUÍ.
+/// Inmutable (trigger TR_chat_project_conversation_log_inmutable). Sin llaves
+/// foráneas a propósito, como chat_project_agent_config_log: el historial
+/// sobrevive a lo que pase con conversaciones y usuarios.
+/// Tabla NUEVA y aparte: si el código sale antes que el DDL, solo fallan
+/// renombrar y eliminar (sin registro no se cambia nada); el chat sigue igual.
+model ChatProjectConversationLog {
+  id_log          Int      @id @default(autoincrement())
+  id_project      Int
+  id_conversation Int
+  /// 'renombrar' | 'eliminar' (CHECK en la base).
+  action          String   @db.NVarChar(20)
+  title_before    String?  @db.NVarChar(300)
+  title_after     String?  @db.NVarChar(300)
+  changed_by      String   @db.NVarChar(1000)
+  changed_at      DateTime @default(now())
+
+  @@index([id_conversation, changed_at], map: "chat_project_conversation_log_conv_idx")
+  @@index([id_project, changed_at], map: "chat_project_conversation_log_project_idx")
+  @@map("chat_project_conversation_log")
+  @@schema("dbo")
+}
+
 /// Integrante de un grupo: una PERSONA o un AGENTE, nunca los dos.
 /// Es la ÚNICA fuente de verdad de quién está en un grupo — un CHECK en la
 /// base garantiza que exactamente una de las dos columnas venga con valor,
