@@ -16,10 +16,28 @@ import {
   Stack,
   Text,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { IconAlertCircle, IconBold, IconEye, IconStack2, IconTextSize, IconTrash, IconX } from '@tabler/icons-react';
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import {
+  IconAlertCircle,
+  IconBold,
+  IconEye,
+  IconStack2,
+  IconTextSize,
+  IconTrash,
+  IconX,
+  IconZoomIn,
+  IconZoomOut,
+} from '@tabler/icons-react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import toast from 'react-hot-toast';
 import {
   ANNOTATION_FONT_SIZE_MAX,
@@ -66,8 +84,13 @@ type DragState = {
   moved: boolean;
 };
 
-/** Escala a la que se dibujan las hojas: ancho en pantalla (px) = puntos del PDF × escala. */
-const PDF_SCALE = 1.2;
+/** Escala a la que se dibujan las hojas (más que la vista base, para que se lea al hacer zoom). */
+const PDF_SCALE = 2;
+/** Ancho de la hoja al 100%; el zoom lo multiplica (igual que al ubicar firmas). */
+const PAGE_BASE_WIDTH = 900;
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 4;
+const ZOOM_STEP = 0.25;
 const DEFAULT_STYLE: TextStyle = { fontFamily: 'helvetica', fontSize: 11, bold: false };
 const FONT_OPTIONS: Array<{ value: OrionAnnotationFont; label: string }> = [
   { value: 'helvetica', label: 'Helvetica (Arial)' },
@@ -89,6 +112,10 @@ const MIN_SIZE = 1.5;
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
+}
+
+function clampZoom(z: number) {
+  return Math.round(clamp(z, ZOOM_MIN, ZOOM_MAX) * 100) / 100;
 }
 
 function toDraft(a: OrionDocumentAnnotation): Draft {
@@ -171,6 +198,10 @@ export default function OrionAnnotationsModal({
   const dragRef = useRef<DragState | null>(null);
   const lastDragMovedRef = useRef(false);
   const initialJsonRef = useRef('[]');
+  const [zoom, setZoom] = useState(1);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  // Centro visible (fracción del contenido) que se conserva al cambiar el zoom.
+  const pendingScrollRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (!opened) return;
@@ -180,8 +211,47 @@ export default function OrionAnnotationsModal({
     setPlacing(null);
     setSelectedId(null);
     setEditingId(null);
+    setZoom(1);
     // Solo al abrir: mientras edita no se pisan sus cambios.
   }, [opened]);
+
+  const changeZoom = useCallback((next: (current: number) => number) => {
+    setZoom((current) => {
+      const target = clampZoom(next(current));
+      if (target === current) return current;
+      const vp = viewportRef.current;
+      if (vp && vp.scrollWidth > 0 && vp.scrollHeight > 0) {
+        pendingScrollRef.current = {
+          x: (vp.scrollLeft + vp.clientWidth / 2) / vp.scrollWidth,
+          y: (vp.scrollTop + vp.clientHeight / 2) / vp.scrollHeight,
+        };
+      }
+      return target;
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    const vp = viewportRef.current;
+    const anchor = pendingScrollRef.current;
+    if (!vp || !anchor) return;
+    pendingScrollRef.current = null;
+    vp.scrollLeft = anchor.x * vp.scrollWidth - vp.clientWidth / 2;
+    vp.scrollTop = anchor.y * vp.scrollHeight - vp.clientHeight / 2;
+  }, [zoom]);
+
+  // Ctrl + rueda (o pellizco en el touchpad): zoom de la hoja, no de toda la página.
+  const hasPages = pages.length > 0;
+  useEffect(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    function onWheel(e: WheelEvent) {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      changeZoom((z) => z + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP));
+    }
+    vp.addEventListener('wheel', onWheel, { passive: false });
+    return () => vp.removeEventListener('wheel', onWheel);
+  }, [changeZoom, hasPages, loading, opened]);
 
   const dirty = JSON.stringify(items) !== initialJsonRef.current;
   const selected = selectedId ? items.find((it) => it.id === selectedId) ?? null : null;
@@ -554,6 +624,42 @@ export default function OrionAnnotationsModal({
                 </Button>
               </>
             ) : null}
+
+            <Group gap={4} wrap='nowrap' ml='auto'>
+              <Tooltip label='Alejar (Ctrl + rueda)' withArrow>
+                <ActionIcon
+                  variant='default'
+                  size='lg'
+                  aria-label='Alejar'
+                  disabled={zoom <= ZOOM_MIN}
+                  onClick={() => changeZoom((z) => z - ZOOM_STEP)}
+                >
+                  <IconZoomOut size={18} />
+                </ActionIcon>
+              </Tooltip>
+              <Tooltip label='Volver al 100%' withArrow>
+                <UnstyledButton
+                  onClick={() => changeZoom(() => 1)}
+                  aria-label='Volver al 100%'
+                  style={{ minWidth: 44, textAlign: 'center' }}
+                >
+                  <Text size='xs' fw={600}>
+                    {Math.round(zoom * 100)}%
+                  </Text>
+                </UnstyledButton>
+              </Tooltip>
+              <Tooltip label='Acercar (Ctrl + rueda)' withArrow>
+                <ActionIcon
+                  variant='default'
+                  size='lg'
+                  aria-label='Acercar'
+                  disabled={zoom >= ZOOM_MAX}
+                  onClick={() => changeZoom((z) => z + ZOOM_STEP)}
+                >
+                  <IconZoomIn size={18} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
           </Group>
 
           {placingMessage ? (
@@ -583,7 +689,7 @@ export default function OrionAnnotationsModal({
           )}
         </Paper>
 
-        <ScrollArea h={isMobile ? '62vh' : '66vh'} offsetScrollbars>
+        <ScrollArea h={isMobile ? '62vh' : '66vh'} offsetScrollbars viewportRef={viewportRef}>
           {loading ? (
             <Stack align='center' py='xl'>
               <Loader />
@@ -613,8 +719,10 @@ export default function OrionAnnotationsModal({
                       onPointerUp={endDrag}
                       style={{
                         position: 'relative',
-                        width: '100%',
-                        maxWidth: 900,
+                        // Centrada si cabe; con zoom se desborda y se recorre con el scroll.
+                        width: zoom <= 1 ? '100%' : PAGE_BASE_WIDTH * zoom,
+                        maxWidth: zoom <= 1 ? PAGE_BASE_WIDTH * zoom : 'none',
+                        flexShrink: 0,
                         marginInline: 'auto',
                         // El tamaño de letra se calcula sobre el ancho de la hoja (cqw).
                         containerType: 'inline-size',

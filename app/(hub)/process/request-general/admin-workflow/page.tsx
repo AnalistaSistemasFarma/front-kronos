@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import {
@@ -59,6 +59,10 @@ import {
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
+import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
+import IosSearchField from '../../../../../components/ui/IosSearchField';
+import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
+import { filterWorkflows } from '../../../../../lib/requests-general/workflowSearch';
 import {
   SCHEDULE_PRESETS,
   PRESET_LABELS,
@@ -181,6 +185,15 @@ function RequestBoard() {
   });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  // Buscador libre (empresa, categoría, proceso, asignado…) sobre la lista ya cargada.
+  const [searchInput, setSearchInput] = useState('');
+  const deferredSearch = useDeferredValue(searchInput);
+  const visibleWorkFlows = useMemo(
+    () => filterWorkflows(workFlows, deferredSearch),
+    [workFlows, deferredSearch]
+  );
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   // ── Tareas Periódicas (cliente del scheduler central) ─────────────────────
   // Listas crudas de consult-request para el cascadeo Empresa → Categoría → Proceso
@@ -742,9 +755,15 @@ function RequestBoard() {
     await fetchWorkFlowsWithUserId(userId, filters);
   };
 
-  const fetchWorkFlowsWithUserId = async (userIdToUse: number, filtersToUse?: typeof filters) => {
+  /** `silent`: refresca la tabla sin tapar la pantalla con el cargador (refresco automático). */
+  const fetchWorkFlowsWithUserId = async (
+    userIdToUse: number,
+    filtersToUse?: typeof filters,
+    silent = false
+  ) => {
     try {
-      setLoading(true);
+      if (silent) setRefreshing(true);
+      else setLoading(true);
 
       const params = new URLSearchParams();
 
@@ -769,13 +788,21 @@ function RequestBoard() {
         'workFlows'
       );
       setWorkFlow(data);
+      setLastUpdated(new Date());
     } catch (err) {
       console.error('Error fetching assigned workflows:', err);
-      setError('Unable to load assigned workflows. Please try again.');
+      // En el refresco automático un fallo de red no tapa la tabla; se reintenta en el siguiente.
+      if (!silent) setError('Unable to load assigned workflows. Please try again.');
     } finally {
-      setLoading(false);
+      if (silent) setRefreshing(false);
+      else setLoading(false);
     }
   };
+
+  // Refresco automático: cada 30 s y al volver a la pestaña, con los filtros vigentes.
+  useAutoRefresh(() => {
+    if (userId) void fetchWorkFlowsWithUserId(userId, filters, true);
+  });
 
   const getUserIdByName = async (userName: string): Promise<number | null> => {
     // La sesión ya trae el id de Kronos (callback jwt, buscado por correo): sin viaje extra al
@@ -1074,11 +1101,11 @@ function RequestBoard() {
     }
   };
 
+  // Al elegir un filtro la tabla se actualiza sola (sin "Aplicar Filtros").
   const handleFilterChange = (field: string, value: string) => {
-    setFilters((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
+    const next = { ...filters, [field]: value };
+    setFilters(next);
+    if (userId) void fetchWorkFlowsWithUserId(userId, next, true);
   };
 
   if (status === 'loading' || loading) {
@@ -1397,8 +1424,9 @@ function RequestBoard() {
                       active: '',
                     };
                     setFilters(clearedFilters);
+                    setSearchInput('');
                     if (userId) {
-                      fetchWorkFlowsWithUserId(userId, clearedFilters);
+                      fetchWorkFlowsWithUserId(userId, clearedFilters, true);
                     }
                   }}
                   leftSection={<IconX size={16} />}
@@ -1416,10 +1444,27 @@ function RequestBoard() {
         <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
           <LoadingOverlay visible={loading} />
 
-          <Title order={3} mb='md' className='flex items-center gap-2'>
-            <IconTicket size={20} />
-            Lista de Flujos de Trabajo Asignados
-          </Title>
+          <Group justify='space-between' align='center' mb='xs' wrap='wrap'>
+            <Title order={3} className='flex items-center gap-2'>
+              <IconTicket size={20} />
+              Lista de Flujos de Trabajo Asignados
+            </Title>
+            <AutoRefreshNote refreshing={refreshing} lastUpdated={lastUpdated} />
+          </Group>
+
+          <Box mb='md'>
+            <IosSearchField
+              value={searchInput}
+              onChange={setSearchInput}
+              placeholder='Buscar empresa, categoría, proceso, asignado o ID'
+              ariaLabel='Buscar flujos'
+              meta={
+                searchInput.trim()
+                  ? `${visibleWorkFlows.length} de ${workFlows.length} flujo(s)`
+                  : 'Una o varias palabras; no importan tildes ni mayúsculas'
+              }
+            />
+          </Box>
 
           <div className='overflow-x-auto'>
             <Table striped highlightOnHover>
@@ -1434,7 +1479,7 @@ function RequestBoard() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {workFlows.length === 0 ? (
+                {visibleWorkFlows.length === 0 ? (
                   <Table.Tr>
                     <Table.Td colSpan={8} className='text-center py-12 text-[var(--mantine-color-dimmed)]'>
                       <div className='flex flex-col items-center gap-3'>
@@ -1443,13 +1488,15 @@ function RequestBoard() {
                           No se encontraron flujos de trabajo asignados
                         </Text>
                         <Text size='sm' c='dimmed'>
-                          No tienes flujos de trabajo asignados actualmente
+                          {workFlows.length > 0
+                            ? `Ningún flujo coincide con “${searchInput.trim()}”`
+                            : 'No tienes flujos de trabajo asignados actualmente'}
                         </Text>
                       </div>
                     </Table.Td>
                   </Table.Tr>
                 ) : (
-                  workFlows.map((workflow) => (
+                  visibleWorkFlows.map((workflow) => (
                     <Table.Tr
                       key={workflow.id}
                       className='cursor-pointer transition-colors'

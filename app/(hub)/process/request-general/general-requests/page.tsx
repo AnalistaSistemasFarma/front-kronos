@@ -60,6 +60,9 @@ import {
 } from '@tabler/icons-react';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
+import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
+import IosSearchField from '../../../../../components/ui/IosSearchField';
+import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
 import {
   buildTaskDisplayBadges,
   getSimplifiedTasksProgress,
@@ -189,6 +192,11 @@ function RequestGeneralPage() {
   const pageItems = tickets;
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  // Buscador libre: busca en toda la base (el servidor filtra antes de paginar), no solo en esta página.
+  const [searchInput, setSearchInput] = useState('');
+  const appliedSearchRef = useRef('');
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -290,13 +298,16 @@ function RequestGeneralPage() {
     }
   };
 
+  /** `silent`: refresca la tabla sin tapar la pantalla con el cargador (búsqueda y refresco automático). */
   const fetchTicketsWithUserId = async (
     userIdToUse: number,
     filtersToUse: typeof filters = filters,
-    page = 1
+    page = 1,
+    silent = false
   ) => {
     try {
-      setLoading(true);
+      if (silent) setRefreshing(true);
+      else setLoading(true);
       appliedFiltersRef.current = filtersToUse;
 
       const params = new URLSearchParams();
@@ -312,6 +323,7 @@ function RequestGeneralPage() {
       if (filtersToUse.process) params.append('process', filtersToUse.process);
       if (filtersToUse.category) params.append('category', filtersToUse.category);
       if (filtersToUse.id) params.append('id', filtersToUse.id);
+      if (appliedSearchRef.current) params.append('search', appliedSearchRef.current);
       const url = `/api/requests-general/general-requests?${params.toString()}`;
 
       const response = await fetch(url);
@@ -331,14 +343,36 @@ function RequestGeneralPage() {
         resolved: Number(data.counts?.resolved) || 0,
       });
       setCurrentPage(page);
+      setLastUpdated(new Date());
       fetchTasksForTickets(rows);
     } catch (err) {
       console.error('Error fetching tickets:', err);
-      setError('Unable to load tickets. Please try again.');
+      // En el refresco automático un fallo de red no tapa la tabla; se reintenta en el siguiente.
+      if (!silent) setError('Unable to load tickets. Please try again.');
     } finally {
-      setLoading(false);
+      if (silent) setRefreshing(false);
+      else setLoading(false);
     }
   };
+
+  // Al escribir en el buscador: espera a que deje de teclear y consulta desde la página 1.
+  useEffect(() => {
+    const next = searchInput.trim();
+    if (next === appliedSearchRef.current) return;
+    const timer = window.setTimeout(() => {
+      appliedSearchRef.current = next;
+      if (userId) void fetchTicketsWithUserId(userId, appliedFiltersRef.current ?? filters, 1, true);
+    }, 350);
+    return () => window.clearTimeout(timer);
+    // Solo cuando cambia el texto; los filtros vigentes se leen del ref.
+  }, [searchInput, userId]);
+
+  // Refresco automático cada 30 s (y al volver a la pestaña): misma página, filtros y búsqueda.
+  useAutoRefresh(() => {
+    if (userId && appliedFiltersRef.current) {
+      void fetchTicketsWithUserId(userId, appliedFiltersRef.current, currentPage, true);
+    }
+  });
 
   const validateFilters = () => {
     const errors: string[] = [];
@@ -961,10 +995,27 @@ function RequestGeneralPage() {
         <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
           <LoadingOverlay visible={loading} />
 
-          <Title order={3} mb='md' className='flex items-center gap-2'>
-            <IconFileDescription size={20} />
-            Lista de Solicitudes
-          </Title>
+          <Group justify='space-between' align='center' mb='xs' wrap='wrap'>
+            <Title order={3} className='flex items-center gap-2'>
+              <IconFileDescription size={20} />
+              Lista de Solicitudes
+            </Title>
+            <AutoRefreshNote refreshing={refreshing} lastUpdated={lastUpdated} />
+          </Group>
+
+          <Box mb='md'>
+            <IosSearchField
+              value={searchInput}
+              onChange={setSearchInput}
+              placeholder='Buscar ID, asunto, empresa, categoría, proceso, estado o persona'
+              ariaLabel='Buscar solicitudes'
+              meta={
+                searchInput.trim()
+                  ? `Buscando en todas las solicitudes · ${totalTickets} resultado(s)`
+                  : 'Busca en toda la base, no solo en esta página; no importan tildes ni mayúsculas'
+              }
+            />
+          </Box>
 
           <div className='overflow-x-auto'>
             <Table striped highlightOnHover>
@@ -988,7 +1039,9 @@ function RequestGeneralPage() {
                           No se encontraron solicitudes
                         </Text>
                         <Text size='sm' c='gray.5'>
-                          Intenta ajustar los filtros o crea una nueva solicitud
+                          {searchInput.trim()
+                            ? `Ninguna solicitud coincide con “${searchInput.trim()}”`
+                            : 'Intenta ajustar los filtros o crea una nueva solicitud'}
                         </Text>
                       </div>
                     </Table.Td>
