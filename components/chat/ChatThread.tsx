@@ -779,6 +779,12 @@ export default function ChatThread({
      * escribir se muestra este motivo. El servidor también rechaza el envío.
      */
     readOnly?: string | null;
+    /**
+     * Multiagente (2026-10-29): OTROS asistentes del proyecto que la persona
+     * puede mencionar con @ en este hilo. Lo mencionado lo atiende ese
+     * asistente con el historial del hilo; el servidor vuelve a validar.
+     */
+    mencionables?: { valor: string; nombre: string; avatarUrl: string | null }[];
   };
   /** Quién soy. En un grupo es lo que distingue mis mensajes de los ajenos. */
   currentUserId?: string;
@@ -941,9 +947,12 @@ export default function ChatThread({
   const participantes = thread.conversation?.participants ?? group?.participants;
   // Memorizado: es prop del compositor (en `memo`) y un arreglo nuevo en cada
   // render lo obligaría a re-renderizarse en cada vuelta del sondeo.
+  const mencionablesProyecto = project?.mencionables;
   const menciones = useMemo(
     () =>
-      (participantes ?? [])
+      mencionablesProyecto && mencionablesProyecto.length > 0
+        ? mencionablesProyecto
+        : (participantes ?? [])
         .filter((p) => p.kind === 'agent')
         .map((p) => ({
           // Se sugiere el handle sin arroba cuando existe (es el nombre que
@@ -952,7 +961,7 @@ export default function ChatThread({
           nombre: p.name,
           avatarUrl: p.avatarUrl,
         })),
-    [participantes]
+    [participantes, mencionablesProyecto]
   );
 
   // Mantiene `--alto-visible` al día: es lo que permite que el compositor no
@@ -1413,6 +1422,8 @@ export default function ChatThread({
           ) : (
             !enPersonas && agent && <AgentActivity agent={agent} status={thread.status} />
           )}
+          {/* Proyecto con varios asistentes (2026-10-29): los MENCIONADOS que estén trabajando. */}
+          {enProyecto && agent && <GroupActivity statuses={thread.statuses.filter((s) => s.idAgent !== agent.idAgent)} />}
 
           {/* El aviso de "nadie ha contestado" NO va en los grupos: allí un
               mensaje sin menciones no espera respuesta de nadie, así que el
@@ -1467,7 +1478,9 @@ export default function ChatThread({
               : enPersonas
                 ? `Escríbale a ${person?.name ?? 'esta persona'}…`
                 : enProyecto
-                  ? `Escríbale a ${agent?.displayName ?? 'el asistente'} en ${project?.name ?? 'el proyecto'}…`
+                  ? project?.mencionables && project.mencionables.length > 0
+                    ? `Escríbale a ${agent?.displayName ?? 'el asistente'}… (con @ consulta a otro asistente del proyecto)`
+                    : `Escríbale a ${agent?.displayName ?? 'el asistente'} en ${project?.name ?? 'el proyecto'}…`
                   : `Escríbale a ${agent?.displayName ?? 'el asistente'}…`
           }
           menciones={menciones}

@@ -193,22 +193,47 @@ describe('assertProjectConversationAccess (conversación)', () => {
 });
 
 describe('assertAgentProjectConversation (llave del puente)', () => {
-  it('anclada al agente de la llave: SU conversación, en un proyecto activo donde está designado', async () => {
-    findConversation.mockResolvedValue({ id: 40, agent: { code: 'play' }, project: { id_project: 7, name: 'Comex', profile: 'comex-latam' } });
-    expect(await assertAgentProjectConversation(PLAY, 40)).toEqual({ id: 40, idProject: 7, projectName: 'Comex' });
+  const fila = (over: Record<string, unknown> = {}, code = 'play') => ({
+    id: 40,
+    id_agent: PLAY,
+    project: { id_project: 7, name: 'Comex', profile: 'comex-latam', id_company: EMPRESA, agents: [{ agent: { code } }] },
+    ...over,
+  });
+
+  it('anclada al agente de la llave: SU conversación o una donde lo MENCIONARON, en un proyecto activo donde está designado', async () => {
+    findConversation.mockResolvedValue(fila());
+    expect(await assertAgentProjectConversation(PLAY, 40)).toEqual({
+      id: 40,
+      idProject: 7,
+      projectName: 'Comex',
+      invitado: false,
+      idAgentPrincipal: PLAY,
+    });
     expect(findConversation.mock.calls[0][0].where).toEqual({
       id: 40,
       kind: 'project',
       archived: false,
-      id_agent: PLAY,
+      OR: [{ id_agent: PLAY }, { messages: { some: { deliveries: { some: { id_agent: PLAY } } } } }],
       project: { archived: false, agents: { some: { id_agent: PLAY } } },
     });
   });
 
+  it('multiagente: en el hilo de OTRO agente queda como invitado y el perfil se valida con SU código', async () => {
+    findConversation.mockResolvedValue(fila({ id_agent: 5 }));
+    expect(await assertAgentProjectConversation(PLAY, 40)).toMatchObject({ invitado: true, idAgentPrincipal: 5 });
+  });
+
+  it('eliminada (archived) o sin designación: nada', async () => {
+    findConversation.mockResolvedValue(null);
+    expect(await assertAgentProjectConversation(PLAY, 40)).toBeNull();
+    findConversation.mockResolvedValue(fila({ project: { id_project: 7, name: 'X', profile: 'comex-latam', id_company: EMPRESA, agents: [] } }));
+    expect(await assertAgentProjectConversation(PLAY, 40)).toBeNull();
+  });
+
   it('sin interruptor para el agente, o sin el perfil del proyecto: nada', async () => {
-    findConversation.mockResolvedValue({ id: 40, agent: { code: 'horus' }, project: { id_project: 7, name: 'X', profile: 'comex-latam' } });
+    findConversation.mockResolvedValue(fila({}, 'horus'));
     expect(await assertAgentProjectConversation(99, 40)).toBeNull();
-    findConversation.mockResolvedValue({ id: 40, agent: { code: 'play' }, project: { id_project: 7, name: 'X', profile: 'gss' } });
+    findConversation.mockResolvedValue(fila({ project: { id_project: 7, name: 'X', profile: 'gss', id_company: EMPRESA, agents: [{ agent: { code: 'play' } }] } }));
     expect(await assertAgentProjectConversation(PLAY, 40)).toBeNull();
   });
 });
