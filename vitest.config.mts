@@ -108,6 +108,7 @@ export default defineConfig({
         // Ventas (2026-10-30): máquina de estados y motor de reglas de la oferta de venta.
         'lib/sales/states.ts',
         'lib/sales/rules.ts',
+        'lib/sales/publish.ts',
       ],
       exclude: [
         '**/__tests__/**',
