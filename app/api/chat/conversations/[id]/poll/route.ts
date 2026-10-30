@@ -147,15 +147,22 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // dejó trabajo en segundo plano): se sondea como si estuviera trabajando,
     // para que la caja anclada de sub-agentes se actualice —y se quite— a
     // tiempo en vez de esperar la cadencia de un hilo quieto.
+    // PROYECTO con varios agentes (2026-10-29): si el principal está quieto
+    // pero un agente MENCIONADO trabaja, la cadencia sigue la de ese otro. El
+    // `status` que se devuelve sigue siendo el del principal.
+    const estadoCadencia =
+      guard.kind === 'project' && (!status || status.state === 'idle')
+        ? statuses.find((s) => s.state !== 'idle') ?? status
+        : status;
     const estadosDeCadencia =
-      guard.kind === 'direct' || guard.kind === 'project' ? (status ? [status] : []) : statuses;
+      guard.kind === 'direct' ? (status ? [status] : []) : statuses;
     const conSubagentes = estadosDeCadencia.some((s) => subagentesEnCurso(s).length > 0);
 
     const nextPollMs = computeNextPollMs({
       // Una reacción nueva también es actividad: se sigue en vivo un momento.
       hasNewMessages: page.length > 0 || hayCambiosDeReacciones,
       agentState:
-        (!status || status.state === 'idle') && conSubagentes ? 'tool' : (status?.state ?? null),
+        (!estadoCadencia || estadoCadencia.state === 'idle') && conSubagentes ? 'tool' : (estadoCadencia?.state ?? null),
       msSinceLastActivity,
       hidden,
       awaitingAgent,

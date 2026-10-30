@@ -7,6 +7,7 @@ import { profileLabel } from '../../../../../../lib/chat/projects-rules';
 import { vinculosDelProyecto } from '../../../../../../lib/chat/projects-links';
 import { cronogramaParaAgente } from '../../../../../../lib/proyectos/cronograma';
 import { equipoParaAgente } from '../../../../../../lib/proyectos/equipo';
+import { historialParaAgente, MAX_HISTORIAL_MENSAJES } from '../../../../../../lib/proyectos/hilos-rules';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,6 +36,12 @@ export const dynamic = 'force-dynamic';
  * Equipo de subagentes (F2, 2026-10-18): trae además `team` con SOLO los
  * subagentes APROBADOS por el dueño, el interruptor y el tope de simultáneos.
  * El puente los convierte en la definición `--agents` (puente-hilos/src/equipo.mjs).
+ *
+ * Multiagente (2026-10-29): trae además `conversation.history` (los últimos
+ * mensajes del hilo, recortados), `conversation.mainAgent` y
+ * `conversation.invited`. El puente escribe el historial en
+ * ./contexto/hilo.md: así un agente MENCIONADO en el hilo de otro tiene la
+ * conversación completa, y el principal ve lo que respondieron los demás.
  *
  * Solo con la llave del puente: la del bot vivo responde 404 aquí, igual que
  * una conversación que no es de un proyecto de ESTE agente.
@@ -69,10 +76,36 @@ export async function GET(request: NextRequest) {
           select: { id_project_file: true, file_name: true, content_type: true, size_bytes: true },
           orderBy: { id_project_file: 'asc' },
         },
-        conversations: { where: { id: idConversation }, select: { title: true } },
+        conversations: {
+          where: { id: idConversation },
+          select: { title: true, agent: { select: { id_agent: true, code: true, display_name: true } } },
+        },
       },
     });
     if (!p) return jsonNoStore({ error: 'Conversación no encontrada.' }, { status: 404 });
+
+    // Historial del hilo (los más recientes, en orden). Si falla, el turno sigue sin él.
+    let history: ReturnType<typeof historialParaAgente> = [];
+    try {
+      const filas = await prisma.chatMessage.findMany({
+        where: { id_conversation: idConversation },
+        orderBy: { id: 'desc' },
+        take: MAX_HISTORIAL_MENSAJES,
+        select: {
+          id: true,
+          role: true,
+          body: true,
+          created_at: true,
+          userAuthor: { select: { name: true, email: true } },
+          agentAuthor: { select: { id_agent: true, code: true, display_name: true } },
+          attachments: { select: { file_name: true } },
+        },
+      });
+      history = historialParaAgente([...filas].reverse());
+    } catch (err) {
+      console.error('[agent/projects/context] historial:', (err as Error).message);
+    }
+    const principal = p.conversations[0]?.agent ?? null;
 
     const vinculos = await vinculosDelProyecto(p.id_project, null);
     // Sin equipo si falla: el turno sigue, y sin subagentes (falla cerrado).
@@ -131,7 +164,14 @@ export async function GET(request: NextRequest) {
           downloadUrl: `/api/chat/agent/projects/files/${f.id_project_file}`,
         })),
       },
-      conversation: { id: idConversation, title: p.conversations[0]?.title ?? null },
+      conversation: {
+        id: idConversation,
+        title: p.conversations[0]?.title ?? null,
+        // Multiagente (2026-10-29): de quién es el hilo y si a ESTE agente lo invitaron por mención.
+        mainAgent: principal ? { idAgent: principal.id_agent, code: principal.code, name: principal.display_name } : null,
+        invited: conv.invitado,
+        history,
+      },
     });
   } catch (error) {
     return serverError('GET /api/chat/agent/projects/context', error);
