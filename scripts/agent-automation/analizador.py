@@ -108,7 +108,13 @@ def calcular(catalogo, ts, corte):
         clase = 'Recurrente' if len(fechas) >= 3 and semanas >= 3 else 'Ocasional' if len(fechas) >= 2 else 'Puntual' if fechas else 'Sin evidencia en el chat'
         dur = [(x['fin'] - x['inicio']).total_seconds() / 60 for x in hits]
         dur = [d for d in dur if d < 240]
-        casos.append(dict(c, clase=clase, ocurrencias=len(hits), minAgente=round(st.median(dur), 1) if dur else None))
+        por_semana = {}
+        for x in hits:
+            local = x['inicio'].astimezone(dt.timezone(dt.timedelta(hours=-5)))  # hora de Colombia
+            lunes = (local - dt.timedelta(days=local.weekday())).date().isoformat()
+            por_semana[lunes] = por_semana.get(lunes, 0) + 1
+        casos.append(dict(c, clase=clase, ocurrencias=len(hits), minAgente=round(st.median(dur), 1) if dur else None,
+                          semanas=[{'inicio': k, 'ocurrencias': v} for k, v in sorted(por_semana.items())]))
     sin = sum(1 for x in ts if id(x) not in usadas)
     return casos, sin
 

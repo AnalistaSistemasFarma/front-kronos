@@ -35,6 +35,7 @@ ap.add_argument('--desde', required=True)
 ap.add_argument('--recientes', required=True)
 ap.add_argument('--base', required=True, choices=['KRONOSDB_PRUEBAS', 'KRONOSDB'])
 ap.add_argument('--salida', required=True)
+ap.add_argument('--fichas', help='r3.json: ficha de cada agente en producción (departamento según sus operadores)')
 a = ap.parse_args()
 
 mat = []
@@ -45,6 +46,10 @@ horas = {f[0]: (f[3], f[4], f[5]) for f in json.load(open(a.resumen))['filas']}
 tareas = [e for e in json.load(open(a.tareas)) if e['agente'] and e['agente_msgs'] > 0]
 n = collections.Counter(e['agente'] for e in tareas)
 nr = collections.Counter(e['agente'] for e in tareas if e['inicio'] >= a.recientes)
+depto_op = {}
+if a.fichas:
+    for f in json.load(open(a.fichas))[0]:
+        depto_op[f['code']] = f.get('departamento')
 pers = collections.defaultdict(set)
 for e in tareas:
     pers[e['agente']].add(e['persona'])
@@ -61,7 +66,7 @@ for m in mat:
     c = m['code']; h = horas.get(c, (None, None, None))
     INS.append(
         "INSERT INTO dbo.agent_use_summary (id_agent, corte, periodo_desde, rol_resumen, nivel_uso, departamento, tareas, tareas_recientes, personas, horas_bajo, horas_base, horas_alto, observaciones) "
-        f"SELECT id_agent, '{a.corte}', '{a.desde}', {q(m.get('rol_resumen'), 1000)}, {q(m.get('nivel_uso') or 'bajo', 20)}, {q(m.get('departamento'), 120)}, "
+        f"SELECT id_agent, '{a.corte}', '{a.desde}', {q(m.get('rol_resumen'), 1000)}, {q(m.get('nivel_uso') or 'bajo', 20)}, {q(depto_op.get(c) if a.fichas else m.get('departamento'), 120)}, "
         f"{n.get(c, 0)}, {nr.get(c, 0)}, {len(pers.get(c, ()))}, {num(h[0])}, {num(h[1])}, {num(h[2])}, {q(m.get('observaciones'), 2000)} "
         f"FROM dbo.agent WHERE code = {q(c)};")
     for t in m.get('en_curso', []):
