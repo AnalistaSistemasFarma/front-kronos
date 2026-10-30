@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
+import { requestSearchWhere } from '../../../../lib/requests-general/requestSearchSql';
 
 const MAX_PAGE_SIZE = 500;
 
@@ -114,6 +115,10 @@ export async function GET(req) {
       where += ` AND pc.process LIKE '%' + @process + '%'`;
       inputs.push(['process', sql.VarChar, process]);
     }
+    // Buscador libre (id, asunto, empresa, categoría, proceso, estado, personas).
+    const search = requestSearchWhere(searchParams.get('search'));
+    where += search.clause;
+    for (const [name, value] of search.params) inputs.push([name, sql.NVarChar, value]);
 
     const selectRows = `
       SELECT

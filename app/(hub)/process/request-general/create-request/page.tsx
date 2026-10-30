@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense, useDeferredValue, useMemo } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 // exportBoardExcel (y con él exceljs, ~900 KB) se carga al tocar Exportar, no al abrir la pantalla.
@@ -98,6 +98,10 @@ import {
 } from '../../../../../components/request-general/list/RequestListUi';
 import { RequestFlowBar, useRequestFlows } from '../../../../../components/request-general/RequestFlow';
 import { panelStyles } from '../../../../../components/ui/panel/Panel';
+import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
+import IosSearchField from '../../../../../components/ui/IosSearchField';
+import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
+import { filterByText, requestSearchParts } from '../../../../../lib/requests-general/textSearch';
 import {
   buildTaskDisplayBadges,
   getSimplifiedTasksProgress,
@@ -281,6 +285,17 @@ function RequestBoard() {
   });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  // Buscador libre (id, asunto, empresa, categoría, proceso, estado, personas) sobre la lista cargada.
+  const [searchInput, setSearchInput] = useState('');
+  const deferredSearch = useDeferredValue(searchInput);
+  const visibleTickets = useMemo(
+    () => filterByText(tickets, deferredSearch, requestSearchParts),
+    [tickets, deferredSearch]
+  );
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  // Filtros de la última consulta: el refresco automático no aplica los que aún no se aplicaron.
+  const appliedFiltersRef = useRef<typeof filters | null>(null);
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -602,12 +617,16 @@ function RequestBoard() {
     }
   };
 
+  /** `silent`: refresca la tabla sin tapar la pantalla con el cargador (refresco automático). */
   const fetchTicketsWithUserId = async (
     userIdToUse: string,
-    filtersToUse: typeof filters = filters
+    filtersToUse: typeof filters = filters,
+    silent = false
   ) => {
     try {
-      setLoading(true);
+      if (silent) setRefreshing(true);
+      else setLoading(true);
+      appliedFiltersRef.current = filtersToUse;
 
       const params = new URLSearchParams();
       params.append('idUser', userIdToUse.toString());
@@ -626,16 +645,25 @@ function RequestBoard() {
       if (!response.ok) throw new Error('Failed to fetch tickets');
 
       const data = await response.json();
-      console.log('fetchTicketsWithUserId: Tickets recibidos:', data.length, 'tickets');
       setTickets(data);
+      setLastUpdated(new Date());
       fetchTasksForTickets(data);
     } catch (err) {
       console.error('Error fetching tickets:', err);
-      setError('Unable to load tickets. Please try again.');
+      // En el refresco automático un fallo de red no tapa la tabla; se reintenta en el siguiente.
+      if (!silent) setError('Unable to load tickets. Please try again.');
     } finally {
-      setLoading(false);
+      if (silent) setRefreshing(false);
+      else setLoading(false);
     }
   };
+
+  // Refresco automático cada 30 s (y al volver a la pestaña) con los filtros ya aplicados.
+  useAutoRefresh(() => {
+    if (userId && appliedFiltersRef.current) {
+      void fetchTicketsWithUserId(userId, appliedFiltersRef.current, true);
+    }
+  });
 
   const validateFilters = () => {
     const errors: string[] = [];
@@ -1661,10 +1689,27 @@ function RequestBoard() {
         <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
           <LoadingOverlay visible={loading} />
 
-          <Title order={3} mb='md' className='flex items-center gap-2'>
-            <IconFileDescription size={20} />
-            Lista de Solicitudes
-          </Title>
+          <Group justify='space-between' align='center' mb='xs' wrap='wrap'>
+            <Title order={3} className='flex items-center gap-2'>
+              <IconFileDescription size={20} />
+              Lista de Solicitudes
+            </Title>
+            <AutoRefreshNote refreshing={refreshing} lastUpdated={lastUpdated} />
+          </Group>
+
+          <Box mb='md'>
+            <IosSearchField
+              value={searchInput}
+              onChange={setSearchInput}
+              placeholder='Buscar ID, asunto, empresa, categoría, estado o persona'
+              ariaLabel='Buscar solicitudes'
+              meta={
+                searchInput.trim()
+                  ? `${visibleTickets.length} de ${tickets.length} solicitud(es)`
+                  : 'Una o varias palabras; no importan tildes ni mayúsculas'
+              }
+            />
+          </Box>
 
           <div className='overflow-x-auto'>
             <Table striped highlightOnHover>
@@ -1679,7 +1724,7 @@ function RequestBoard() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {tickets.length === 0 ? (
+                {visibleTickets.length === 0 ? (
                   <Table.Tr>
                     <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
                       <div className='flex flex-col items-center gap-3'>
@@ -1688,13 +1733,15 @@ function RequestBoard() {
                           No se encontraron solicitudes
                         </Text>
                         <Text size='sm' c='gray.5'>
-                          Intenta ajustar los filtros o crea una nueva solicitud
+                          {tickets.length > 0
+                            ? `Ninguna solicitud coincide con “${searchInput.trim()}”`
+                            : 'Intenta ajustar los filtros o crea una nueva solicitud'}
                         </Text>
                       </div>
                     </Table.Td>
                   </Table.Tr>
                 ) : (
-                  tickets.map((ticket) => (
+                  visibleTickets.map((ticket) => (
                     <Table.Tr
                       key={ticket.id}
                       className='cursor-pointer transition-colors'
