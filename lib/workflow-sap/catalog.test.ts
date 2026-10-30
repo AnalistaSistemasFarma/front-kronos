@@ -56,8 +56,14 @@ describe('actionsFor / triggersFor', () => {
     expect(actionsFor('sap_executor', 'on_execute').map((a) => a.key)).toEqual([
       'purchase.state_to_authorize',
       'purchase.publish_firm',
+      'sales.evaluate_rules',
+      'sales.reevaluate_credit',
+      'sales.state_ap',
+      'sales.state_ae',
+      'sales.state_aeda',
+      'sales.create_order',
     ]);
-    expect(actionsFor('authorization', 'on_reject').map((a) => a.key)).toEqual(['purchase.state_rejected']);
+    expect(actionsFor('authorization', 'on_reject').map((a) => a.key)).toEqual(['purchase.state_rejected', 'sales.state_rejected']);
     expect(actionsFor('sap_executor', 'on_quote').map((a) => a.key)).toEqual(['purchase.state_quotation']);
     expect(triggersFor('normal')).toEqual([]);
   });

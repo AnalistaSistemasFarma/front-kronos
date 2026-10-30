@@ -70,7 +70,7 @@ BEGIN TRY
       [id_company]             INT            NOT NULL,
       [doc_entry]              INT            NOT NULL,
       [id_request_general]     INT            NOT NULL,
-      [etapa]                  NVARCHAR(20)   NOT NULL,
+      [etapa]                  NVARCHAR(20)   NOT NULL CONSTRAINT [sales_authorization_etapa_df] DEFAULT N'oferta',
       [id_authorization_previa] INT           NULL,
       [status]                 NVARCHAR(20)   NOT NULL,
       [evaluacion]             NVARCHAR(MAX)  NULL,
@@ -81,11 +81,22 @@ BEGIN TRY
       [updated_at]             DATETIME2      NOT NULL CONSTRAINT [sales_authorization_updated_at_df] DEFAULT sysutcdatetime(),
       CONSTRAINT [sales_authorization_pkey] PRIMARY KEY CLUSTERED ([id]),
       CONSTRAINT [sales_authorization_id_request_general_key] UNIQUE ([id_request_general]),
-      CONSTRAINT [CK_sales_authorization_etapa] CHECK ([etapa] IN (N'precios', N'extracupo')),
+      CONSTRAINT [CK_sales_authorization_etapa] CHECK ([etapa] IN (N'oferta', N'precios', N'extracupo')),
       CONSTRAINT [CK_sales_authorization_status] CHECK ([status] IN
         (N'pending', N'publishing', N'approved', N'rejected', N'cancelled', N'publish_error', N'reject_error'))
     );
   END
+
+  /* v2 (flujo diagramado, una solicitud por oferta): la etapa admite «oferta». */
+  IF EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'CK_sales_authorization_etapa'
+             AND definition NOT LIKE N'%oferta%')
+  BEGIN
+    ALTER TABLE [dbo].[sales_authorization] DROP CONSTRAINT [CK_sales_authorization_etapa];
+    ALTER TABLE [dbo].[sales_authorization] ADD CONSTRAINT [CK_sales_authorization_etapa]
+      CHECK ([etapa] IN (N'oferta', N'precios', N'extracupo'));
+  END
+  IF NOT EXISTS (SELECT 1 FROM sys.default_constraints WHERE name = N'sales_authorization_etapa_df')
+    ALTER TABLE [dbo].[sales_authorization] ADD CONSTRAINT [sales_authorization_etapa_df] DEFAULT N'oferta' FOR [etapa];
 
   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'sales_authorization_id_company_doc_entry_idx')
     CREATE NONCLUSTERED INDEX [sales_authorization_id_company_doc_entry_idx]
