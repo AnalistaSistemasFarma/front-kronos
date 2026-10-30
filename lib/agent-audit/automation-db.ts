@@ -96,6 +96,22 @@ export interface CorridaDto {
   tareasSinClasificar: number | null;
   error: string | null;
 }
+/** Mapa de calor (% de mejora por departamento y semana) y barras por departamento. */
+export interface GraficosDto {
+  semanas: string[];
+  departamentos: {
+    departamento: string;
+    horasSinIA: number;
+    horasConIA: number;
+    mejora: number | null;
+    celdas: {
+      semana: string;
+      horasSinIA: number;
+      horasConIA: number;
+      mejora: number | null;
+    }[];
+  }[];
+}
 export interface IndicadorDto {
   corte: string | null;
   periodoDesde: string | null;
@@ -103,6 +119,7 @@ export interface IndicadorDto {
   agentes: AgenteIndicadorDto[];
   ultima: CorridaDto | null;
   pendiente: CorridaDto | null;
+  graficos: GraficosDto;
 }
 
 function aCorrida(f: Fila | undefined): CorridaDto | null {
@@ -154,6 +171,11 @@ export async function leerIndicador(
           ORDER BY COALESCE(finished_at, requested_at) DESC;
         SELECT TOP 1 * FROM dbo.agent_automation_run WHERE status IN ('pendiente','en_curso')
           ORDER BY requested_at DESC;
+
+        -- Casos válidos con su detalle por semana (gráficos).
+        SELECT c.id_agent, c.min_humano, c.min_despues, c.semanas_json
+        FROM dbo.agent_automation_case c
+        WHERE c.corte = @corte AND c.valido = 1;
       `),
     );
     const sets = r.recordsets as unknown as Fila[][];
@@ -198,8 +220,95 @@ export async function leerIndicador(
       agentes,
       ultima: aCorrida(sets[1]?.[0]),
       pendiente: aCorrida(sets[2]?.[0]),
+      graficos: armarGraficos(agentes, sets[3] ?? []),
     };
   });
+}
+
+const SIN_DEPTO = "Sin departamento";
+
+/** «SISTEMAS 🖥️» → «SISTEMAS»; vacío o «Pendiente…» → «Sin departamento». */
+function nombreDepto(v: string | null): string {
+  const t = (v ?? "")
+    .replace(/[^\p{L}\p{N} .,&()/-]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t || /^pendiente|^sin dato|^sin departamento/i.test(t)) return SIN_DEPTO;
+  return t.toUpperCase();
+}
+
+/**
+ * Mapa de calor y barras por departamento. El departamento es el del agente
+ * (el más repetido entre sus operadores). % de mejora = 1 − horas con IA /
+ * horas sin IA, por departamento y semana (lunes de cada semana).
+ */
+function armarGraficos(
+  agentes: AgenteIndicadorDto[],
+  casos: Fila[],
+): GraficosDto {
+  const depto = new Map(
+    agentes.map((a) => [a.idAgent, nombreDepto(a.departamento)]),
+  );
+  const tot = new Map<string, { sin: number; con: number }>();
+  for (const a of agentes) {
+    const d = depto.get(a.idAgent)!;
+    const t = tot.get(d) ?? { sin: 0, con: 0 };
+    t.sin += a.horasAntes;
+    t.con += a.horasDespues;
+    tot.set(d, t);
+  }
+  const celdas = new Map<string, Map<string, { sin: number; con: number }>>();
+  const semanas = new Set<string>();
+  for (const c of casos) {
+    const d = depto.get(Number(c.id_agent));
+    if (!d) continue; // fuera del alcance o personal de otro
+    let ws: { inicio?: unknown; ocurrencias?: unknown }[] = [];
+    try {
+      const v = JSON.parse(String(c.semanas_json ?? "[]"));
+      if (Array.isArray(v)) ws = v;
+    } catch {
+      ws = [];
+    }
+    const mh = Number(c.min_humano ?? 0);
+    const md = Number(c.min_despues ?? 0);
+    for (const w of ws) {
+      const s = String(w.inicio ?? "");
+      const n = Number(w.ocurrencias ?? 0);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || !n) continue;
+      semanas.add(s);
+      const porSemana = celdas.get(d) ?? new Map();
+      const x = porSemana.get(s) ?? { sin: 0, con: 0 };
+      x.sin += (n * mh) / 60;
+      x.con += (n * md) / 60;
+      porSemana.set(s, x);
+      celdas.set(d, porSemana);
+    }
+  }
+  const lista = [...semanas].sort();
+  const pct = (sin: number, con: number) =>
+    sin > 0 ? Math.round((1 - con / sin) * 1000) / 10 : null;
+  const r1 = (v: number) => Math.round(v * 10) / 10;
+  return {
+    semanas: lista,
+    departamentos: [...tot.entries()]
+      .map(([departamento, t]) => ({
+        departamento,
+        horasSinIA: r1(t.sin),
+        horasConIA: r1(t.con),
+        mejora: pct(t.sin, t.con),
+        celdas: lista.map((semana) => {
+          const x = celdas.get(departamento)?.get(semana) ?? { sin: 0, con: 0 };
+          return {
+            semana,
+            horasSinIA: r1(x.sin),
+            horasConIA: r1(x.con),
+            mejora: pct(x.sin, x.con),
+          };
+        }),
+      }))
+      .filter((d) => d.horasSinIA > 0)
+      .sort((a, b) => b.horasSinIA - a.horasSinIA),
+  };
 }
 
 /** Casos de UN agente (su ficha). null si no existe o no está en el alcance. */
@@ -334,6 +443,8 @@ export interface CasoEntrada {
   supuestos: string | null;
   confianza: string | null;
   valido: boolean;
+  /** Veces por semana: [{inicio:"AAAA-MM-DD", ocurrencias}] (mapa de calor). */
+  semanas: { inicio: string; ocurrencias: number }[];
 }
 export interface PublicacionIndicador {
   idRun: number | null;
@@ -418,6 +529,18 @@ export function parsePublicacion(body: unknown): PublicacionIndicador {
         ? String(c.confianza)
         : null,
       valido: c.valido !== false && minHumano > 0,
+      semanas: Array.isArray(c.semanas)
+        ? c.semanas
+            .slice(0, 120)
+            .map((w) => {
+              const x = (w ?? {}) as Record<string, unknown>;
+              return {
+                inicio: String(x.inicio ?? ""),
+                ocurrencias: entero(x.ocurrencias, 0, 1_000_000) ?? 0,
+              };
+            })
+            .filter((w) => esFecha(w.inicio))
+        : [],
     });
   }
   return {
@@ -456,6 +579,7 @@ export async function publicarIndicador(
         horasAhorradas: Math.round((antes - despues) * 10) / 10,
         horasMes: Math.round((antes - despues) * factorMes * 10) / 10,
         pasosJson: JSON.stringify(c.pasos),
+        semanasJson: JSON.stringify(c.semanas),
       };
     });
     const r = await withMssqlPool((pool) =>
@@ -481,10 +605,10 @@ export async function publicarIndicador(
           INSERT INTO dbo.agent_automation_case (id_run, corte, periodo_desde, id_agent, clave, caso, descripcion,
                  clase, area, entregable, terminos, ocurrencias, min_humano, min_humano_min, min_humano_max,
                  min_despues, min_agente, horas_antes, horas_despues, horas_ahorradas, horas_mes, pasos_json,
-                 supuestos, confianza, valido)
+                 supuestos, confianza, valido, semanas_json)
           SELECT @run, @corte, @desde, a.id_agent, j.clave, j.caso, j.descripcion, j.clase, j.area, j.entregable,
                  j.terminos, j.ocurrencias, j.minHumano, j.minHumanoMin, j.minHumanoMax, j.minDespues, j.minAgente,
-                 j.horasAntes, j.horasDespues, j.horasAhorradas, j.horasMes, j.pasosJson, j.supuestos, j.confianza, j.valido
+                 j.horasAntes, j.horasDespues, j.horasAhorradas, j.horasMes, j.pasosJson, j.supuestos, j.confianza, j.valido, j.semanasJson
           FROM OPENJSON(@casos) WITH (
                  code NVARCHAR(60) '$.code', clave NVARCHAR(40) '$.clave', caso NVARCHAR(300) '$.caso',
                  descripcion NVARCHAR(1000) '$.descripcion', clase NVARCHAR(30) '$.clase', area NVARCHAR(120) '$.area',
@@ -494,7 +618,8 @@ export async function publicarIndicador(
                  horasAntes DECIMAL(10,1) '$.horasAntes', horasDespues DECIMAL(10,1) '$.horasDespues',
                  horasAhorradas DECIMAL(10,1) '$.horasAhorradas', horasMes DECIMAL(10,1) '$.horasMes',
                  pasosJson NVARCHAR(MAX) '$.pasosJson', supuestos NVARCHAR(600) '$.supuestos',
-                 confianza NVARCHAR(10) '$.confianza', valido BIT '$.valido') j
+                 confianza NVARCHAR(10) '$.confianza', valido BIT '$.valido',
+                 semanasJson NVARCHAR(MAX) '$.semanasJson') j
           JOIN dbo.agent a ON a.code = j.code;
           DECLARE @n INT = @@ROWCOUNT;
           UPDATE dbo.agent_automation_run SET status = CASE WHEN @error IS NULL THEN N'terminado' ELSE N'fallido' END,
