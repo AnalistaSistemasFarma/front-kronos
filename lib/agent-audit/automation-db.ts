@@ -463,6 +463,9 @@ const limpio = (v: unknown, max: number): string | null => {
   return t ? t.slice(0, max) : null;
 };
 const entero = (v: unknown, min = 0, max = 100_000): number | null => {
+  // null/undefined/"" son «sin dato», no 0 (Number(null) === 0 convertía un
+  // idRun vacío en la corrida #1 y la sobrescribía).
+  if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n)
     ? Math.min(max, Math.max(min, Math.round(n)))
