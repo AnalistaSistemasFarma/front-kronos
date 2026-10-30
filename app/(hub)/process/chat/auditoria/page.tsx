@@ -389,6 +389,16 @@ export default function AuditoriaAgentesPage() {
           <Link href='/process/chat/auditoria/memorias' className='chat-text-muted' style={{ fontSize: 13 }}>
             Ver memorias de los agentes
           </Link>
+          <Text size='xs' c='dimmed'>
+            ·
+          </Text>
+          <Link
+            href='/process/chat/auditoria/casos-de-uso'
+            className='chat-text-muted'
+            style={{ fontSize: 13 }}
+          >
+            Ver casos de uso
+          </Link>
         </Group>
 
         <Group gap='sm' mb={2} wrap='nowrap'>

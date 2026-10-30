@@ -949,6 +949,16 @@ export default function MemoriasAgentesPage() {
             >
               Ver skills de la flota
             </Link>
+            <Text size="xs" c="dimmed">
+              ·
+            </Text>
+            <Link
+              href="/process/chat/auditoria/casos-de-uso"
+              className="chat-text-muted"
+              style={{ fontSize: 13 }}
+            >
+              Ver casos de uso
+            </Link>
           </Group>
         )}
 
