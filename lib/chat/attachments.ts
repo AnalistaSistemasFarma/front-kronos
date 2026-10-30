@@ -49,6 +49,23 @@ export const MAX_CHAT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 /** Cuántos archivos admite UN mensaje. */
 export const MAX_CHAT_ATTACHMENTS_PER_MESSAGE = 5;
 
+/**
+ * Tope del CUERPO COMPLETO de una petición (texto + todos los adjuntos + la
+ * envoltura multipart): 30 MB.
+ *
+ * Next.js copia el cuerpo de toda petición que pasa por `middleware.ts` (el
+ * matcher incluye `/api/:path*`) y, pasado `experimental.middlewareClientMaxBodySize`
+ * (10 MB por defecto), lo TRUNCA en silencio: `request.formData()` revienta y la
+ * ruta respondía un 400 genérico. Se midió en pruebas el 2026-10-30: con
+ * 10.485.760 bytes pasaba y con 10.485.761 fallaba. Un archivo de 25 MB (el tope
+ * por archivo) cabe holgado en 30 MB.
+ *
+ * DEBE coincidir con `experimental.middlewareClientMaxBodySize` de next.config.ts
+ * (lo verifica attachments.test.ts) y quedar por debajo de `maxAllowedContentLength`
+ * de IIS (deploy/iis/web.config).
+ */
+export const MAX_CHAT_REQUEST_BODY_BYTES = 30 * 1024 * 1024;
+
 /** Tope de longitud del nombre guardado (la columna es NVARCHAR(400)). */
 export const MAX_CHAT_ATTACHMENT_NAME_CHARS = 200;
 
@@ -164,6 +181,24 @@ export function getChatAttachmentError(file: { name: string; size: number }): st
 }
 
 /** Tamaño legible para los mensajes de error y la interfaz. */
+/**
+ * Error de tamaño del cuerpo COMPLETO de la petición, a partir de su
+ * `Content-Length`. Devuelve null si cabe o si la cabecera no viene (en ese caso
+ * decide el parseo). Se revisa ANTES de leer el cuerpo: así quien manda de más
+ * recibe un 413 que dice qué pasó, y no el 400 genérico de un cuerpo truncado.
+ */
+export function getRequestBodySizeError(
+  contentLength: string | null | undefined,
+  maxBytes: number = MAX_CHAT_REQUEST_BODY_BYTES
+): string | null {
+  if (!contentLength || !/^\d+$/.test(contentLength.trim())) return null;
+  const size = Number(contentLength.trim());
+  if (!Number.isFinite(size) || size <= maxBytes) return null;
+  return `El mensaje con sus adjuntos pesa ${formatBytes(size)} y el máximo por mensaje son ${formatBytes(
+    maxBytes
+  )} (suma de todos los archivos). Envíe archivos más livianos o repártalos en varios mensajes.`;
+}
+
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '';
   if (bytes < 1024) return `${bytes} B`;

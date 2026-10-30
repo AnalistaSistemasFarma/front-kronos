@@ -17,6 +17,7 @@ import {
   badRequest,
   jsonNoStore,
   readMessageRequest,
+  rejectOversizedBody,
   serverError,
   unauthorized,
 } from '../../../../../lib/chat/http';
@@ -92,6 +93,9 @@ export async function POST(request: NextRequest) {
   try {
     const agent = await authenticateAgent(request);
     if (!agent) return unauthorized();
+
+    const oversized = rejectOversizedBody(request);
+    if (oversized) return oversized;
 
     const payload = await readMessageRequest(request);
     if (!payload) {
