@@ -18,6 +18,7 @@ import {
   guardConversation,
   jsonNoStore,
   readMessageRequest,
+  rejectOversizedBody,
   serverError,
 } from '../../../../../../lib/chat/http';
 import {
@@ -149,6 +150,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (guard.kind === 'project' && !guard.projectWritable.ok) {
       return forbidden(guard.projectWritable.motivo);
     }
+
+    const oversized = rejectOversizedBody(request);
+    if (oversized) return oversized;
 
     const payload = await readMessageRequest(request);
     if (!payload) {
