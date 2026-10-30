@@ -395,6 +395,16 @@ export default function CasosDeUsoPage() {
           >
             Ver memorias de los agentes
           </Link>
+          <Text size="xs" c="dimmed">
+            ·
+          </Text>
+          <Link
+            href="/process/chat/auditoria/automatizaciones"
+            className="chat-text-muted"
+            style={{ fontSize: 13 }}
+          >
+            Ver indicador de automatizaciones
+          </Link>
         </Group>
 
         <Group gap="sm" mb={2} wrap="nowrap">
