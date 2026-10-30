@@ -638,7 +638,8 @@ export default function SignaturePlacementCanvas({
                 overflow: 'hidden',
                 background: '#fff',
                 userSelect: 'none',
-                touchAction: 'none',
+                // La hoja deja desplazarse con el dedo; las cajas de firma y sellos bloquean el gesto para arrastrarlas.
+                touchAction: 'pan-x pan-y pinch-zoom',
               }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
