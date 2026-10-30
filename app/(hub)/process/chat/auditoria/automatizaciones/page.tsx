@@ -326,13 +326,13 @@ export default function IndicadorAutomatizacionesPage() {
               <Group gap="xl" wrap="wrap">
                 <div>
                   <Text size="xs" c="dimmed">
-                    Horas antes (sin IA)
+                    Horas de la persona sin IA
                   </Text>
                   <Text fw={700}>{h(tot.antes)}</Text>
                 </div>
                 <div>
                   <Text size="xs" c="dimmed">
-                    Horas después (con agente)
+                    Horas de la persona con IA
                   </Text>
                   <Text fw={700}>{h(tot.despues)}</Text>
                 </div>
@@ -398,9 +398,9 @@ export default function IndicadorAutomatizacionesPage() {
                   <Table.Thead>
                     <Table.Tr>
                       <Table.Th>Agente</Table.Th>
-                      <Table.Th>Antes vs después (horas)</Table.Th>
-                      <Table.Th ta="right">Antes</Table.Th>
-                      <Table.Th ta="right">Después</Table.Th>
+                      <Table.Th>Sin IA vs con IA (horas)</Table.Th>
+                      <Table.Th ta="right">Sin IA</Table.Th>
+                      <Table.Th ta="right">Con IA</Table.Th>
                       <Table.Th ta="right">Ahorradas</Table.Th>
                       <Table.Th ta="right">Al mes</Table.Th>
                       <Table.Th ta="right">Reducción</Table.Th>
@@ -476,8 +476,9 @@ export default function IndicadorAutomatizacionesPage() {
                 </Table>
               </ScrollArea>
               <Text size="xs" c="dimmed" mt={6}>
-                Barra gris: horas antes · barra verde: horas después, en la
-                misma escala.
+                Barra gris: horas que la persona gastaría sin IA · barra verde:
+                horas que gasta con el agente (pedir y revisar), en la misma
+                escala.
               </Text>
             </Card>
           </>
