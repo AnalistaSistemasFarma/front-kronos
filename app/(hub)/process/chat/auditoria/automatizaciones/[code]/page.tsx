@@ -143,7 +143,15 @@ function FilaCaso({ c, maxMin }: { c: CasoIndicadorDto; maxMin: number }) {
         <Table.Td ta="right" style={{ whiteSpace: "nowrap" }}>
           {minutos(c.minDespues)}
         </Table.Td>
-        <Table.Td ta="right" style={{ whiteSpace: "nowrap" }}>
+        <Table.Td
+          ta="right"
+          fw={700}
+          c={c.minHumano - c.minDespues > 0 ? "green" : undefined}
+          style={{ whiteSpace: "nowrap" }}
+        >
+          {minutos(c.minHumano - c.minDespues)}
+        </Table.Td>
+        <Table.Td ta="right" c="dimmed" style={{ whiteSpace: "nowrap" }}>
           {minutos(c.minAgente)}
         </Table.Td>
         <Table.Td ta="right">{h(c.ocurrencias)}</Table.Td>
@@ -157,12 +165,12 @@ function FilaCaso({ c, maxMin }: { c: CasoIndicadorDto; maxMin: number }) {
         <Table.Td ta="right">{h(c.horasMes, 1)}</Table.Td>
       </Table.Tr>
       <Table.Tr>
-        <Table.Td colSpan={8} p={0} style={{ borderTop: 0 }}>
+        <Table.Td colSpan={9} p={0} style={{ borderTop: 0 }}>
           <Collapse in={abierto}>
             <SimpleGrid cols={{ base: 1, md: 2 }} spacing="sm" p="sm">
               <div>
                 <Text size="xs" fw={600} mb={4}>
-                  Cómo se hacía antes (una ocurrencia)
+                  Cómo lo hace una persona sin IA (una vez)
                 </Text>
                 {c.pasos.length ? (
                   c.pasos.map((p, i) => (
@@ -281,8 +289,8 @@ export default function FichaIndicadorPage() {
           </Title>
         </Group>
         <Text className="ios-process-hub__subtitle" mb="lg">
-          Tiempo humano antes vs después de cada tarea que hace este agente, y
-          las horas que libera.
+          Cuánto tiempo gasta una persona en cada tarea de este agente sin IA y
+          con IA, y las horas que libera.
           {datos?.corte
             ? ` Periodo: ${fechaCorta(datos.periodoDesde)} a ${fechaCorta(datos.corte)}.`
             : ""}
@@ -341,8 +349,8 @@ export default function FichaIndicadorPage() {
               </Group>
               <SimpleGrid cols={{ base: 2, sm: 3, lg: 6 }} spacing="sm" mt="sm">
                 {[
-                  ["Horas antes (sin IA)", h(a.horasAntes)],
-                  ["Horas después (con agente)", h(a.horasDespues)],
+                  ["Horas de la persona sin IA", h(a.horasAntes)],
+                  ["Horas de la persona con IA", h(a.horasDespues)],
                   ["Horas ahorradas", h(a.horasAhorradas)],
                   ["Ahorro al mes", `${h(a.horasMes)} h`],
                   [
@@ -375,8 +383,21 @@ export default function FichaIndicadorPage() {
               <Text fw={600} size="sm" mb={2}>
                 Casos de uso ({datos.casos.length})
               </Text>
+              <Alert color="blue" variant="light" radius="md" mb="sm" p="xs">
+                <Text size="xs">
+                  <b>Cómo leer cada fila</b> (tiempos de UNA vez que se hace la
+                  tarea): <b>Persona sin IA</b> = lo que le toma a una persona
+                  hacerla a mano. <b>Persona con IA</b> = lo que la persona
+                  gasta ahora: escribir el pedido y revisar o corregir lo que
+                  entrega el agente. <b>Ahorro por vez</b> = la diferencia.{" "}
+                  <b>Respuesta del agente</b> = lo que tarda el agente en
+                  contestar (tiempo de máquina, medido en el chat; no se resta
+                  del de la persona). <b>Horas ahorradas</b> = ahorro por vez ×
+                  veces pedida en el periodo.
+                </Text>
+              </Alert>
               <Text size="xs" c="dimmed" mb="sm">
-                Abra cada caso para ver cómo se hacía antes, paso a paso, y el
+                Abra cada caso para ver cómo se hacía sin IA, paso a paso, y el
                 supuesto de la estimación. Los marcados «sin ahorro real»
                 (pruebas, configuración del propio agente) no suman.
               </Text>
@@ -385,13 +406,14 @@ export default function FichaIndicadorPage() {
                   <Table.Thead>
                     <Table.Tr>
                       <Table.Th>Caso de uso</Table.Th>
-                      <Table.Th>Antes vs después</Table.Th>
-                      <Table.Th ta="right">Antes</Table.Th>
-                      <Table.Th ta="right">Después</Table.Th>
-                      <Table.Th ta="right">Agente</Table.Th>
-                      <Table.Th ta="right">Veces</Table.Th>
+                      <Table.Th>Sin IA vs con IA</Table.Th>
+                      <Table.Th ta="right">Persona sin IA</Table.Th>
+                      <Table.Th ta="right">Persona con IA</Table.Th>
+                      <Table.Th ta="right">Ahorro por vez</Table.Th>
+                      <Table.Th ta="right">Respuesta del agente</Table.Th>
+                      <Table.Th ta="right">Veces pedida</Table.Th>
                       <Table.Th ta="right">Horas ahorradas</Table.Th>
-                      <Table.Th ta="right">Al mes</Table.Th>
+                      <Table.Th ta="right">Ahorro al mes (h)</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
