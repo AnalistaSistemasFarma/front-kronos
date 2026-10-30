@@ -16,6 +16,7 @@ import { assertGroupAccess, type AgenteMencionable, type ParticipantRole } from 
 import { assertPeopleAccess } from './people';
 import { assertProjectConversationAccess, type WriteAccess } from './projects';
 import type { ProjectRole } from './projects-rules';
+import { getRequestBodySizeError } from './attachments';
 
 /** El chat nunca se cachea: es una bandeja en vivo. */
 export const NO_STORE = { 'Cache-Control': 'no-store, max-age=0' } as const;
@@ -34,6 +35,22 @@ export function forbidden(message = 'No tiene permiso sobre este recurso.') {
 
 export function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400, headers: NO_STORE });
+}
+
+/** 413: el cuerpo excede el tope (ver MAX_CHAT_REQUEST_BODY_BYTES). */
+export function payloadTooLarge(message: string) {
+  return NextResponse.json({ error: message }, { status: 413, headers: NO_STORE });
+}
+
+/**
+ * Corta con 413 una petición cuyo `Content-Length` excede el tope del chat,
+ * ANTES de leer el cuerpo. Sin esto, Next.js trunca el cuerpo pasado el límite
+ * del middleware y la ruta respondía «El cuerpo debe ser un objeto JSON o un
+ * formulario multipart/form-data.», que no dice que el problema es el tamaño.
+ */
+export function rejectOversizedBody(request: Request) {
+  const error = getRequestBodySizeError(request.headers.get('content-length'));
+  return error ? payloadTooLarge(error) : null;
 }
 
 export function serverError(context: string, error: unknown) {
