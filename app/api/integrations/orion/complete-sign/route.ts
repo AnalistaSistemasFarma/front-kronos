@@ -57,80 +57,89 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'requestId inválido' }, { status: 400 });
     }
 
-    // Consentimiento guardado en el perfil Orion (abarca a la persona).
-    let personHasSigning = false;
-    let personHasBiometric = false;
-    try {
-      const consentRes = await getOrionPersonConsent(email);
-      if (consentRes.ok && consentRes.data) {
-        personHasSigning = Boolean(consentRes.data.hasSigningLegalConsent);
-        personHasBiometric = Boolean(consentRes.data.hasBiometricConsent);
+    // Consentimiento guardado en el perfil Orion (abarca a la persona). La consulta corre
+    // mientras se carga el documento; la firma la espera antes de aplicarse y, si falta el
+    // consentimiento, no se firma (422).
+    const consentCheck = (async () => {
+      let personHasSigning = false;
+      let personHasBiometric = false;
+      try {
+        const consentRes = await getOrionPersonConsent(email);
+        if (consentRes.ok && consentRes.data) {
+          personHasSigning = Boolean(consentRes.data.hasSigningLegalConsent);
+          personHasBiometric = Boolean(consentRes.data.hasBiometricConsent);
+        }
+      } catch {
+        /* si falla la consulta, exigir checkbox de esta sesión */
       }
-    } catch {
-      /* si falla la consulta, exigir checkbox de esta sesión */
-    }
 
-    const acceptedTerms = body.acceptedTerms === true || personHasSigning;
-    const acceptedBiometric = body.acceptedBiometric === true || personHasBiometric;
-    if (!acceptedTerms) {
-      return NextResponse.json(
-        { error: SIGNING_LEGAL_CONSENT_REQUIRED_MESSAGE },
-        { status: 422 }
-      );
-    }
-    if (providesFingerprint && !acceptedBiometric) {
-      return NextResponse.json(
-        { error: BIOMETRIC_CONSENT_REQUIRED_MESSAGE },
-        { status: 422 }
-      );
-    }
+      const acceptedTerms = body.acceptedTerms === true || personHasSigning;
+      const acceptedBiometric = body.acceptedBiometric === true || personHasBiometric;
+      if (!acceptedTerms) {
+        throw Object.assign(new Error(SIGNING_LEGAL_CONSENT_REQUIRED_MESSAGE), { status: 422 });
+      }
+      if (providesFingerprint && !acceptedBiometric) {
+        throw Object.assign(new Error(BIOMETRIC_CONSENT_REQUIRED_MESSAGE), { status: 422 });
+      }
 
-    // Primera aceptación: persistir en perfil sin bloquear accept-sign.
-    if (
-      (!personHasSigning && body.acceptedTerms === true) ||
-      (!personHasBiometric && body.acceptedBiometric === true && providesFingerprint)
-    ) {
-      const now = new Date().toISOString();
-      void saveOrionPersonConsent(email, {
-        ...(!personHasSigning && body.acceptedTerms === true
-          ? {
-              legalConsentAccepted: true,
-              legalConsentKind: 'ELECTRONIC' as const,
-              legalConsentVersion: SIGNING_LEGAL_CONSENT_VERSION,
-              legalConsentAcceptedAt: now,
-            }
-          : {}),
-        ...(!personHasBiometric && body.acceptedBiometric === true && providesFingerprint
-          ? {
-              biometricConsentAccepted: true,
-              biometricConsentVersion: BIOMETRIC_CONSENT_VERSION,
-              biometricConsentAcceptedAt: now,
-            }
-          : {}),
-      }).catch(() => {
-        /* no bloquear firma; el panel también intenta persistir */
-      });
-    }
+      // Primera aceptación: persistir en perfil sin bloquear accept-sign.
+      if (
+        (!personHasSigning && body.acceptedTerms === true) ||
+        (!personHasBiometric && body.acceptedBiometric === true && providesFingerprint)
+      ) {
+        const now = new Date().toISOString();
+        void saveOrionPersonConsent(email, {
+          ...(!personHasSigning && body.acceptedTerms === true
+            ? {
+                legalConsentAccepted: true,
+                legalConsentKind: 'ELECTRONIC' as const,
+                legalConsentVersion: SIGNING_LEGAL_CONSENT_VERSION,
+                legalConsentAcceptedAt: now,
+              }
+            : {}),
+          ...(!personHasBiometric && body.acceptedBiometric === true && providesFingerprint
+            ? {
+                biometricConsentAccepted: true,
+                biometricConsentVersion: BIOMETRIC_CONSENT_VERSION,
+                biometricConsentAcceptedAt: now,
+              }
+            : {}),
+        }).catch(() => {
+          /* no bloquear firma; el panel también intenta persistir */
+        });
+      }
+      return {
+        hasSigningLegalConsent: personHasSigning || acceptedTerms,
+        hasBiometricConsent: personHasBiometric || acceptedBiometric,
+      };
+    })();
+    // Si la firma falla antes de esperar el consentimiento, que su error no quede suelto.
+    consentCheck.catch(() => {});
 
-    // Identidad: Orion es la fuente. Solo se reenvía lo que el usuario completó
-    // porque faltaba en su perfil Orion (Orion ignora lo que ya tiene).
+    // Identidad del turno: cédula y cargo vienen del modal (editables).
+    // Orion puede rellenar perfil vacío; el sello de esta firma usa estos valores.
     const hasIdentityFields =
-      typeof body.fullName === 'string' && body.fullName.trim().length > 0;
+      (typeof body.fullName === 'string' && body.fullName.trim().length > 0) ||
+      (typeof body.idNumber === 'string' && body.idNumber.trim().length > 0) ||
+      typeof body.jobTitle === 'string';
     const identity = hasIdentityFields
       ? normalizeSignerIdentity(
           {
-            fullName: body.fullName,
+            fullName:
+              typeof body.fullName === 'string' && body.fullName.trim()
+                ? body.fullName
+                : session.user.name || email,
             idDocumentType: body.idDocumentType,
             idNumber: typeof body.idNumber === 'string' ? body.idNumber : '',
             companyName: typeof body.companyName === 'string' ? body.companyName : null,
             companyNit: typeof body.companyNit === 'string' ? body.companyNit : null,
             jobTitle: typeof body.jobTitle === 'string' ? body.jobTitle : null,
             acceptedTerms: true,
-            acceptedBiometric: acceptedBiometric ? true : undefined,
+            acceptedBiometric: body.acceptedBiometric === true ? true : undefined,
           },
           session.user.name || email
         )
-      : { acceptedTerms: true, acceptedBiometric: acceptedBiometric ? true : undefined };
+      : { acceptedTerms: true, acceptedBiometric: body.acceptedBiometric === true ? true : undefined };
 
     const result = await withMssqlPool(async (pool) => {
       const outcome = await finalizeSignerTurn(pool, {
@@ -141,10 +150,7 @@ export async function POST(req: Request) {
         signatureDataUrl,
         fingerprintDataUrl,
         identity,
-        personConsent: {
-          hasSigningLegalConsent: personHasSigning || acceptedTerms,
-          hasBiometricConsent: personHasBiometric || acceptedBiometric,
-        },
+        personConsent: consentCheck,
       });
 
       // La autorización FIRMA se cierra solo cuando la firma quedó registrada; abrir o

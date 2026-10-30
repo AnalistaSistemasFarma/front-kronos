@@ -1,5 +1,6 @@
 import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
+import { forgetSessionUser } from '../../../lib/auth/sessionUserCache';
 import { AVATAR_URL_PREFIX } from '../../../lib/avatar/urls';
 import { prisma } from '../../../lib/prisma';
 import { isValidFontKey } from '../../../lib/theme/fonts';
@@ -142,6 +143,8 @@ export async function PUT(request: NextRequest) {
         uiFont: true,
       },
     });
+    // La próxima sesión del servidor lee el perfil nuevo (sin esperar los 60 s de la copia).
+    forgetSessionUser(session.user.email);
 
     // Log the action
     const changes = [];
