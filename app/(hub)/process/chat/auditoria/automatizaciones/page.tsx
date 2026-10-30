@@ -19,6 +19,7 @@ import {
   TextInput,
   Title,
   Tooltip,
+  useComputedColorScheme,
 } from "@mantine/core";
 import {
   IconAlertCircle,
@@ -29,6 +30,7 @@ import {
   IconSearch,
 } from "@tabler/icons-react";
 import type { IndicadorDto } from "../../../../../../lib/agent-audit/automation-db";
+import { GraficosMejora } from "../../../../../../components/chat/auditoria/GraficosMejora";
 
 /**
  * AUDITORÍA DE AGENTES → INDICADOR DE AUTOMATIZACIONES (Nicolás, 2026-10-30).
@@ -70,6 +72,9 @@ export default function IndicadorAutomatizacionesPage() {
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [pidiendo, setPidiendo] = useState(false);
+  const esquema = useComputedColorScheme("light", {
+    getInitialValueInEffect: true,
+  });
   const [q, setQ] = useState("");
   const [empresa, setEmpresa] = useState<string | null>(null);
 
@@ -382,6 +387,13 @@ export default function IndicadorAutomatizacionesPage() {
                 (licencias, consumo ni horas de TI).
               </Text>
             </Card>
+
+            {datos.graficos && (
+              <GraficosMejora
+                graficos={datos.graficos}
+                oscuro={esquema === "dark"}
+              />
+            )}
 
             <Card withBorder radius="md" padding="md" className="chat-surface">
               <Text fw={600} size="sm" mb={6}>
