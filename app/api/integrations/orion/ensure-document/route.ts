@@ -337,12 +337,14 @@ export async function GET(req: Request) {
           fileId && documents[fileId]
             ? [[fileId, documents[fileId]]]
             : Object.entries(documents);
+        // El contexto de la solicitud es el mismo para todos sus PDF: se consulta una sola vez.
+        let ctx: Awaited<ReturnType<typeof getRequestOrionContext>> | undefined;
         for (const [fid, doc] of entries) {
           if (!doc) continue;
           const statusUpper = String(doc.status || '').toUpperCase();
           const terminal = statusUpper === 'FIRMADO' || statusUpper === 'RECHAZADO';
           if (!terminal && doc.orionDocumentId && (doc.signers?.length ?? 0) > 0) {
-            const ctx = await getRequestOrionContext(pool, requestId);
+            if (ctx === undefined) ctx = await getRequestOrionContext(pool, requestId);
             await syncOrionSignerTasks(pool, {
               requestId,
               state: doc,

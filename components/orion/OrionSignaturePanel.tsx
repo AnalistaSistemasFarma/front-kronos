@@ -731,16 +731,27 @@ export default function OrionSignaturePanel({
                       personHasBiometricConsent || confirmation.acceptedBiometric === true,
                   }
                 : {}),
-              // Solo completa campos vacíos en Orion; lo que Orion ya tiene no se pisa.
-              ...(supplement
-                ? {
-                    fullName:
-                      supplement.fullName || signerPreview?.fullName || currentUserName || '',
-                    idDocumentType: 'CC',
-                    idNumber: supplement.idNumber ?? '',
-                    jobTitle: supplement.jobTitle ?? null,
-                  }
-                : {}),
+              // Identidad del turno (cédula/cargo editables en el modal).
+              ...(() => {
+                const identity = confirmation.identity || supplement;
+                if (!identity && !signerPreview?.fullName && !currentUserName) return {};
+                return {
+                  fullName:
+                    identity?.fullName ||
+                    signerPreview?.fullName ||
+                    currentUserName ||
+                    '',
+                  idDocumentType: 'CC',
+                  idNumber:
+                    identity?.idNumber ??
+                    signerPreview?.idNumber ??
+                    '',
+                  jobTitle:
+                    identity && 'jobTitle' in identity
+                      ? identity.jobTitle
+                      : signerPreview?.jobTitle ?? null,
+                };
+              })(),
             }),
           });
         } finally {

@@ -8,6 +8,7 @@ import { prisma } from '../../../../lib/prisma';
 import { normalizeNit, SUPPLIER_ROLE } from '../../../../lib/proveedor/isolation';
 import { noteLoginAttempt, withLoginAudit } from '../../../../lib/auth/login-audit/recorder';
 import { resolveAuthRedirect } from '../../../../lib/auth/safe-redirect';
+import { sessionUserCache, type SessionUserRow } from '../../../../lib/auth/sessionUserCache';
 
 const azureConfigured =
   Boolean(process.env.AZURE_AD_CLIENT_ID) &&
@@ -17,25 +18,13 @@ const azureConfigured =
   Boolean(process.env.AZURE_AD_TENANT_ID) &&
   process.env.AZURE_AD_TENANT_ID !== 'your-tenant-id';
 
-type SessionUserRow = {
-  id: string;
-  role: string;
-  image: string | null;
-  themePalette: string | null;
-  colorScheme: string | null;
-  uiFont: string | null;
-  nit: string | null;
-};
-
 /**
  * El callback jwt corre en CADA getServerSession (cada API) y antes consultaba [user] siempre.
  * Se guarda la fila por correo unos segundos: rol, tema y foto siguen al día (máx. 60 s de
- * retraso, o inmediato con update()) y la BD deja de recibir una consulta por llamada.
+ * retraso; inmediato con update() o cuando /api/profile la olvida) y la BD deja de recibir
+ * una consulta por llamada.
  */
 const SESSION_USER_TTL_MS = 60_000;
-const sessionUserCache: Map<string, { row: SessionUserRow | undefined; at: number }> =
-  ((globalThis as Record<string, unknown>).__kronosSessionUserCache as never) ??
-  ((globalThis as Record<string, unknown>).__kronosSessionUserCache = new Map());
 
 async function loadSessionUser(email: string, fresh: boolean): Promise<SessionUserRow | undefined> {
   const key = email.trim().toLowerCase();

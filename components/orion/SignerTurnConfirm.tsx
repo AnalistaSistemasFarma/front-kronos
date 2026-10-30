@@ -17,7 +17,6 @@ import {
 } from '@mantine/core';
 import { IconCheck, IconFingerprint, IconPencil } from '@tabler/icons-react';
 import { FINGERPRINT_NOT_REGISTERED_MESSAGE } from '../../lib/orion/errorCodes';
-import { formatSignerIdLabel } from '../../lib/orion/signerIdentity';
 import {
   BIOMETRIC_CONSENT_COPY,
   BIOMETRIC_CONSENT_REQUIRED_MESSAGE,
@@ -47,8 +46,13 @@ export type SignerTurnPreview = {
 export type SignerTurnConfirmation = {
   acceptedTerms: boolean;
   acceptedBiometric?: boolean;
-  /** Solo lo que falta en el perfil Orion; Orion lo guarda y no pisa lo existente. */
-  supplement?: { fullName?: string; idNumber?: string; jobTitle?: string };
+  /**
+   * Identidad del turno. Cédula y cargo son editables siempre; se envían a
+   * complete-sign para el sello de esta firma. Nombre solo se pide si falta en Orion.
+   */
+  identity?: { fullName?: string; idNumber?: string; jobTitle?: string | null };
+  /** @deprecated Use identity. Se mantiene por compatibilidad con callers viejos. */
+  supplement?: { fullName?: string; idNumber?: string; jobTitle?: string | null };
 };
 
 type Props = {
@@ -123,8 +127,12 @@ export default function SignerTurnConfirm({
 
   useEffect(() => {
     if (!preview) return;
-    setSupplementName((v) => v || preview.suggested.fullName || '');
-    setSupplementIdNumber((v) => v || preview.suggested.idNumber || '');
+    setSupplementName((v) => v || preview.fullName || preview.suggested.fullName || '');
+    // Preferir cédula de SynerLink (suggested) si está; si no, la de Orion.
+    setSupplementIdNumber(
+      (v) => v || preview.suggested.idNumber || preview.idNumber || ''
+    );
+    // Cargo no se precarga: el firmante lo escribe solo si quiere estamparlo.
   }, [preview]);
 
   const missing = new Set(preview?.missingInOrion ?? []);
@@ -151,19 +159,34 @@ export default function SignerTurnConfirm({
       setFormError(BIOMETRIC_CONSENT_REQUIRED_MESSAGE);
       return;
     }
-    if (missing.has('fullName') && supplementName.trim().length < 3) {
+    const resolvedName =
+      (missing.has('fullName') ? supplementName : preview?.fullName || supplementName)?.trim() ||
+      '';
+    if (resolvedName.length < 3) {
       setFormError('Indique su nombre completo (mínimo 3 caracteres).');
       return;
     }
+    const idNumber = supplementIdNumber.trim();
+    if (idNumber && idNumber.length < 4) {
+      setFormError('Si indica número de documento, use al menos 4 caracteres.');
+      return;
+    }
+    const jobTitle = supplementJobTitle.trim();
+    if (jobTitle && jobTitle.length < 2) {
+      setFormError('Si indica cargo, use al menos 2 caracteres.');
+      return;
+    }
     setFormError(null);
-    const supplement: SignerTurnConfirmation['supplement'] = {};
-    if (missing.has('fullName') && supplementName.trim()) supplement.fullName = supplementName.trim();
-    if (missing.has('idNumber') && supplementIdNumber.trim()) supplement.idNumber = supplementIdNumber.trim();
-    if (missing.has('jobTitle') && supplementJobTitle.trim()) supplement.jobTitle = supplementJobTitle.trim();
+    const identity = {
+      fullName: resolvedName,
+      idNumber,
+      jobTitle: jobTitle || null,
+    };
     await onConfirm({
       acceptedTerms: true,
       acceptedBiometric: requireFingerprint ? true : undefined,
-      supplement: Object.keys(supplement).length > 0 ? supplement : undefined,
+      identity,
+      supplement: identity,
     });
   };
 
@@ -193,22 +216,19 @@ export default function SignerTurnConfirm({
             Datos de su perfil en GSS Firma (Orion)
           </Text>
           <Stack gap={4}>
-            <ReadOnlyRow label='Nombre' value={preview?.fullName ?? null} />
-            <ReadOnlyRow
-              label='Documento'
-              value={formatSignerIdLabel(preview?.idDocumentType, preview?.idNumber)}
-            />
-            <ReadOnlyRow label='Cargo' value={preview?.jobTitle ?? null} />
+            {preview?.fullName && !missing.has('fullName') ? (
+              <ReadOnlyRow label='Nombre' value={preview.fullName} />
+            ) : null}
+            <Text size='xs' c='dimmed' mt={2}>
+              Puede ajustar cédula y cargo para esta firma (opcional).
+            </Text>
           </Stack>
         </Box>
       )}
 
-      {!previewLoading && missing.size > 0 ? (
+      {!previewLoading ? (
         <Stack gap={6}>
-          <Text size='xs' c='dimmed'>
-            Su perfil en Orion no tiene estos datos. Lo que indique se guardará allí una sola vez.
-          </Text>
-          {missing.has('fullName') ? (
+          {missing.has('fullName') || !preview?.fullName ? (
             <TextInput
               label='Nombre completo'
               value={supplementName}
@@ -217,24 +237,20 @@ export default function SignerTurnConfirm({
               required
             />
           ) : null}
-          {missing.has('idNumber') ? (
-            <TextInput
-              label='Número de cédula'
-              description='Opcional'
-              value={supplementIdNumber}
-              onChange={(e) => setSupplementIdNumber(e.currentTarget.value)}
-              disabled={confirming}
-            />
-          ) : null}
-          {missing.has('jobTitle') ? (
-            <TextInput
-              label='Cargo'
-              description='Opcional'
-              value={supplementJobTitle}
-              onChange={(e) => setSupplementJobTitle(e.currentTarget.value)}
-              disabled={confirming}
-            />
-          ) : null}
+          <TextInput
+            label='Número de cédula'
+            description='Editable para esta firma. Déjelo vacío si no desea estamparlo.'
+            value={supplementIdNumber}
+            onChange={(e) => setSupplementIdNumber(e.currentTarget.value)}
+            disabled={confirming}
+          />
+          <TextInput
+            label='Cargo'
+            description='Opcional. Déjelo vacío si no desea estampar cargo.'
+            value={supplementJobTitle}
+            onChange={(e) => setSupplementJobTitle(e.currentTarget.value)}
+            disabled={confirming}
+          />
         </Stack>
       ) : null}
 

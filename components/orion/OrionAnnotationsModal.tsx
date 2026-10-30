@@ -33,6 +33,7 @@ import { createFieldId, pctFromClientPoint } from '../../lib/orion/signatureFiel
 import type { OrionAnnotationFont, OrionDocumentAnnotation, OrionSignatureState } from '../../lib/orion/types';
 import { usePdfPageImages } from './usePdfPageImages';
 import { openAnnotatedPdfPreview } from './annotatedPdfPreview';
+import { removeSealBackground } from './sealBackground';
 
 type Draft = Pick<
   OrionDocumentAnnotation,
@@ -363,18 +364,19 @@ export default function OrionAnnotationsModal({
       return { ...it, width: Math.round(width * 100) / 100, height: Math.round(height * 100) / 100 };
     });
 
-  const uploadSeal = async (file: File | null) => {
-    if (!file) return;
-    if (!['image/png', 'image/jpeg'].includes(file.type)) {
+  const uploadSeal = async (picked: File | null) => {
+    if (!picked) return;
+    if (!['image/png', 'image/jpeg'].includes(picked.type)) {
       toast.error('El sello debe ser una imagen PNG o JPG.');
-      return;
-    }
-    if (file.size > SEAL_MAX_BYTES) {
-      toast.error('La imagen del sello debe pesar máximo 2 MB.');
       return;
     }
     setUploading(true);
     try {
+      const file = await removeSealBackground(picked);
+      if (file.size > SEAL_MAX_BYTES) {
+        toast.error('La imagen del sello debe pesar máximo 2 MB.');
+        return;
+      }
       const form = new FormData();
       form.append('requestId', String(requestId));
       form.append('fileId', fileId);
@@ -621,7 +623,8 @@ export default function OrionAnnotationsModal({
                           ? '0 0 0 2px var(--mantine-color-blue-5), 0 2px 12px rgba(0,0,0,0.08)'
                           : '0 2px 12px rgba(0,0,0,0.08)',
                         userSelect: 'none',
-                        touchAction: 'none',
+                        // La hoja deja desplazarse con el dedo; solo las cajas (abajo) bloquean el gesto para arrastrarlas.
+                        touchAction: 'pan-x pan-y pinch-zoom',
                       }}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -680,6 +683,7 @@ export default function OrionAnnotationsModal({
                                 background: editing ? 'color-mix(in srgb, var(--mantine-color-blue-1) 60%, transparent)' : 'transparent',
                                 cursor: editing ? 'text' : 'move',
                                 zIndex: isSelected || editing ? 2 : 1,
+                                touchAction: 'none',
                               }}
                             >
                               {isText ? (
