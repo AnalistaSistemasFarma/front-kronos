@@ -64,11 +64,6 @@ const minutos = (m: number | null | undefined) => {
   const mm = Math.round(m % 60);
   return mm ? `${hh} h ${mm} min` : `${hh} h`;
 };
-const COLOR_CONF: Record<string, string> = {
-  alta: "green",
-  media: "blue",
-  baja: "yellow",
-};
 const COLOR_CLASE: Record<string, string> = {
   Recurrente: "green",
   Ocasional: "yellow",
@@ -103,20 +98,6 @@ function FilaCaso({ c, maxMin }: { c: CasoIndicadorDto; maxMin: number }) {
                       color={COLOR_CLASE[c.clase] ?? "gray"}
                     >
                       {c.clase}
-                    </Badge>
-                  )}
-                  {c.confianza && (
-                    <Badge
-                      size="xs"
-                      variant="outline"
-                      color={COLOR_CONF[c.confianza] ?? "gray"}
-                    >
-                      Confianza {c.confianza}
-                    </Badge>
-                  )}
-                  {!c.valido && (
-                    <Badge size="xs" variant="outline" color="gray">
-                      Sin ahorro real
                     </Badge>
                   )}
                 </Group>
@@ -210,13 +191,6 @@ function FilaCaso({ c, maxMin }: { c: CasoIndicadorDto; maxMin: number }) {
                     Supuesto: {c.supuestos}
                   </Text>
                 )}
-                <Text size="xs" c="dimmed">
-                  Después = la persona escribe el pedido y revisa o corrige lo
-                  que entrega el agente. El tiempo del agente es la mediana
-                  medida desde el pedido hasta su última respuesta.
-                  {c.area ? ` Área: ${c.area}.` : ""}
-                  {c.entregable ? ` Entregable: ${c.entregable}.` : ""}
-                </Text>
               </div>
             </SimpleGrid>
           </Collapse>
@@ -256,6 +230,11 @@ export default function FichaIndicadorPage() {
     [datos],
   );
   const a = datos?.agente;
+  // Las pruebas y la configuración del propio agente no generan ahorro: no se muestran.
+  const casosValidos = useMemo(
+    () => (datos?.casos ?? []).filter((c) => c.valido),
+    [datos],
+  );
 
   return (
     <div className="app-page-shell app-page-shell--fill ios-process-hub min-h-screen">
@@ -381,25 +360,12 @@ export default function FichaIndicadorPage() {
 
             <Card withBorder radius="md" padding="md" className="chat-surface">
               <Text fw={600} size="sm" mb={2}>
-                Casos de uso ({datos.casos.length})
+                Casos de uso ({casosValidos.length})
               </Text>
-              <Alert color="blue" variant="light" radius="md" mb="sm" p="xs">
-                <Text size="xs">
-                  <b>Cómo leer cada fila</b> (tiempos de UNA vez que se hace la
-                  tarea): <b>Persona sin IA</b> = lo que le toma a una persona
-                  hacerla a mano. <b>Persona con IA</b> = lo que la persona
-                  gasta ahora: escribir el pedido y revisar o corregir lo que
-                  entrega el agente. <b>Ahorro por vez</b> = la diferencia.{" "}
-                  <b>Respuesta del agente</b> = lo que tarda el agente en
-                  contestar (tiempo de máquina, medido en el chat; no se resta
-                  del de la persona). <b>Horas ahorradas</b> = ahorro por vez ×
-                  veces pedida en el periodo.
-                </Text>
-              </Alert>
               <Text size="xs" c="dimmed" mb="sm">
-                Abra cada caso para ver cómo se hacía sin IA, paso a paso, y el
-                supuesto de la estimación. Los marcados «sin ahorro real»
-                (pruebas, configuración del propio agente) no suman.
+                Tiempos de una vez que se hace la tarea. Ahorro por vez =
+                persona sin IA − persona con IA. Abra un caso para ver cómo se
+                hace a mano, paso a paso.
               </Text>
               <ScrollArea type="auto">
                 <Table verticalSpacing={6} fz="sm" miw={900}>
@@ -417,7 +383,7 @@ export default function FichaIndicadorPage() {
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
-                    {datos.casos.map((c) => (
+                    {casosValidos.map((c) => (
                       <FilaCaso key={c.clave} c={c} maxMin={maxMin} />
                     ))}
                   </Table.Tbody>

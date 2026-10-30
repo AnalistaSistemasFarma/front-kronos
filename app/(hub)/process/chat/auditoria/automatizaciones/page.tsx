@@ -203,10 +203,9 @@ export default function IndicadorAutomatizacionesPage() {
           </Title>
         </Group>
         <Text className="ios-process-hub__subtitle" mb="lg">
-          Cuánto tiempo de trabajo humano tomaban las tareas que hoy hacen los
-          agentes (antes) y cuánto toma ahora pedirlas y revisarlas (después).
-          El «antes» es una estimación realista por caso de uso, con sus pasos y
-          supuestos; las ocurrencias y el tiempo del agente se miden en el chat.
+          Horas que una persona gastaría haciendo a mano las tareas que hoy
+          hacen los agentes, frente a las que gasta ahora pidiéndolas y
+          revisándolas.
           {datos?.corte
             ? ` Periodo: ${fechaCorta(datos.periodoDesde)} a ${fechaCorta(datos.corte)}${datos.semanas ? ` (${h(datos.semanas, 1)} semanas)` : ""}.`
             : ""}
@@ -286,9 +285,7 @@ export default function IndicadorAutomatizacionesPage() {
             )}
           </SimpleGrid>
           <Text size="xs" c="dimmed" mt={8}>
-            El análisis corre solo cada semana y cuando se pulsa «Analizar
-            ahora»: recuenta en el chat cuántas veces se pidió cada caso de uso
-            y cuánto tardó el agente, en solo lectura. Último análisis:{" "}
+            Se actualiza cada lunes o con «Analizar ahora». Último análisis:{" "}
             {fechaHora(datos?.ultima?.finishedAt ?? null)}
             {datos?.ultima?.tareas
               ? ` · ${h(datos.ultima.tareas)} tareas revisadas`
@@ -379,12 +376,8 @@ export default function IndicadorAutomatizacionesPage() {
                 </div>
               </Group>
               <Text size="xs" c="dimmed" mt={8}>
-                Las horas «antes» son estimaciones conservadoras de un empleado
-                competente con plantillas y acceso a los sistemas, sin esperas
-                de terceros; deben validarse con cada dueño de proceso. Solo se
-                cuentan las ocurrencias que el análisis reconoce en el chat, así
-                que el ahorro real puede ser mayor. No incluye costos
-                (licencias, consumo ni horas de TI).
+                Estimación conservadora, por validar con cada área. No incluye
+                costos.
               </Text>
             </Card>
 
