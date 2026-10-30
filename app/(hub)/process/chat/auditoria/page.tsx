@@ -409,6 +409,16 @@ export default function AuditoriaAgentesPage() {
           >
             Ver indicador de automatizaciones
           </Link>
+          <Text size='xs' c='dimmed'>
+            ·
+          </Text>
+          <Link
+            href='/process/chat/auditoria/respaldos'
+            className='chat-text-muted'
+            style={{ fontSize: 13 }}
+          >
+            Ver copias de seguridad
+          </Link>
         </Group>
 
         <Group gap='sm' mb={2} wrap='nowrap'>
