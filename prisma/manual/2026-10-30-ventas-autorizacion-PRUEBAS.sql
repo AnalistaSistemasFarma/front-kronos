@@ -52,6 +52,10 @@ BEGIN TRY
       CONSTRAINT [sales_company_config_pkey] PRIMARY KEY CLUSTERED ([id_company])
     );
 
+  /* v2: flujo diagramado único por oferta. */
+  IF COL_LENGTH(N'dbo.sales_company_config', N'id_process_category_oferta') IS NULL
+    ALTER TABLE [dbo].[sales_company_config] ADD [id_process_category_oferta] INT NULL;
+
   IF OBJECT_ID(N'dbo.sales_stage_department', N'U') IS NULL
     CREATE TABLE [dbo].[sales_stage_department] (
       [id]            INT IDENTITY(1,1) NOT NULL,
