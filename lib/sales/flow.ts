@@ -100,10 +100,10 @@ async function markOption(idRequest: number, optionLabel: string): Promise<void>
     .input('field', sql.NVarChar(200), EVAL_FIELD_LABEL)
     .input('opt', sql.NVarChar(200), optionLabel).query(`
       SELECT TOP 1 f.id AS id_field, o.id AS id_option
-      FROM requests_general rg
-      INNER JOIN process_form_field f ON f.id_process_category = rg.id_process_category AND f.field_label = @field
+      FROM process_category_request_general pcr
+      INNER JOIN process_form_field f ON f.id_process_category = pcr.id_process_category AND f.field_label = @field
       INNER JOIN process_form_field_option o ON o.id_form_field = f.id AND o.option_label = @opt AND ISNULL(o.active, 1) = 1
-      WHERE rg.id = @req;`);
+      WHERE pcr.id_request_general = @req;`);
   const hit = r.recordset[0];
   if (!hit) {
     throw new Error(`El flujo no tiene el campo «${EVAL_FIELD_LABEL}» con la opción «${optionLabel}». Revise la configuración del proceso.`);
