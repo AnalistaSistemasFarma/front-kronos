@@ -66,6 +66,14 @@ async function guard<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
+/** Reto base64url → bytes, que es lo que esperan las opciones de WebAuthn. */
+function challengeBytes(challenge: string): Uint8Array<ArrayBuffer> {
+  const buffer = Buffer.from(challenge, 'base64url');
+  const bytes = new Uint8Array(new ArrayBuffer(buffer.length));
+  bytes.set(buffer);
+  return bytes;
+}
+
 export interface PasskeySummary {
   id: number;
   name: string;
@@ -116,7 +124,9 @@ export async function registrationOptions(user: PasskeyUser, challenge: string) 
     userID: new TextEncoder().encode(user.id),
     userName: user.email,
     userDisplayName: user.name || user.email,
-    challenge,
+    // El reto viaja en base64url: se pasan sus BYTES (si se pasa el texto, la librería lo
+    // vuelve a codificar y el reto esperado no coincide).
+    challenge: challengeBytes(challenge),
     timeout: PASSKEY_TIMEOUT_MS,
     attestationType: 'none',
     excludeCredentials: existing.map((c) => ({ id: c.credential_id, transports: parseTransports(c.transports) as never })),
@@ -202,7 +212,7 @@ export async function loginOptions(challenge: string) {
   // (la persona no escribe su correo).
   return generateAuthenticationOptions({
     rpID: rp.rpID,
-    challenge,
+    challenge: challengeBytes(challenge),
     timeout: PASSKEY_TIMEOUT_MS,
     userVerification: 'required',
   });
