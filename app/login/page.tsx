@@ -1,10 +1,11 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { Paper, Title, TextInput, Button, Stack, Text, ActionIcon } from '@mantine/core';
+import { Paper, Title, TextInput, Button, Stack, Text, ActionIcon, Divider } from '@mantine/core';
+import { browserSupportsWebAuthn, startAuthentication } from '@simplewebauthn/browser';
 import {
   IconEye,
   IconEyeOff,
@@ -13,6 +14,7 @@ import {
   IconArrowRight,
   IconMoon,
   IconSun,
+  IconFingerprint,
 } from '@tabler/icons-react';
 import { useTheme } from '../../components/providers';
 import LoginPharmacyBackground from '../../components/login/LoginPharmacyBackground';
@@ -26,8 +28,52 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [visible, setVisible] = useState(false);
   const [focusedField, setFocusedField] = useState<string | null>(null);
+  const [passkeySupported, setPasskeySupported] = useState(false);
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  useEffect(() => {
+    setPasskeySupported(browserSupportsWebAuthn());
+  }, []);
+
+  const goAfterLogin = () => {
+    const callbackUrl = getSafeCallbackUrl(
+      searchParams.get('callbackUrl'),
+      typeof window !== 'undefined' ? window.location.origin : undefined
+    );
+    router.push(callbackUrl);
+  };
+
+  // Acceso con biométrico (passkeys): Face ID, huella o Windows Hello. La persona no
+  // escribe el correo: el dispositivo ofrece la llave que tenga para SynerLink.
+  const handlePasskey = async () => {
+    setPasskeyLoading(true);
+    try {
+      const optRes = await fetch('/api/passkeys/login/options', { method: 'POST' });
+      const optionsJSON = await optRes.json().catch(() => ({}));
+      if (!optRes.ok) {
+        toast.error(optionsJSON.error || 'El acceso con biométrico no está disponible en este momento.');
+        return;
+      }
+      const response = await startAuthentication({ optionsJSON });
+      const result = await signIn('passkey', { response: JSON.stringify(response), redirect: false });
+      if (result?.error) {
+        toast.error('No se pudo entrar con el biométrico. Si es la primera vez, actívelo en Mi perfil después de entrar con su contraseña.');
+      } else {
+        goAfterLogin();
+      }
+    } catch (err) {
+      const name = (err as { name?: string } | null)?.name;
+      toast.error(
+        name === 'NotAllowedError'
+          ? 'Se canceló el ingreso con biométrico.'
+          : 'No se pudo entrar con el biométrico. Si es la primera vez, actívelo en Mi perfil después de entrar con su contraseña.'
+      );
+    } finally {
+      setPasskeyLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,11 +89,7 @@ function LoginForm() {
       if (result?.error) {
         toast.error('Credenciales inválidas. Por favor, inténtalo de nuevo.');
       } else {
-        const callbackUrl = getSafeCallbackUrl(
-          searchParams.get('callbackUrl'),
-          typeof window !== 'undefined' ? window.location.origin : undefined
-        );
-        router.push(callbackUrl);
+        goAfterLogin();
       }
     } catch {
       toast.error('Ocurrió un error. Por favor, inténtalo más tarde.');
@@ -251,6 +293,24 @@ function LoginForm() {
             </Button>
           </Stack>
         </form>
+
+        {passkeySupported && (
+          <>
+            <Divider label='o' labelPosition='center' my='md' />
+            <Button
+              type='button'
+              variant='default'
+              fullWidth
+              size='md'
+              loading={passkeyLoading}
+              disabled={loading}
+              leftSection={<IconFingerprint size={18} />}
+              onClick={() => void handlePasskey()}
+            >
+              Entrar con Face ID o huella
+            </Button>
+          </>
+        )}
       </Paper>
 
       <Text
