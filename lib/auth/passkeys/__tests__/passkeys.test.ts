@@ -134,3 +134,25 @@ describe('passkeys — scripts SQL', async () => {
     expect(leer('prisma/manual/2026-10-31-passkeys-PROD.sql')).toMatch(/IF DB_NAME\(\) NOT IN \(N'KRONOSDB'\)/);
   });
 });
+
+describe('passkeys — opciones con el reto exacto', () => {
+  it('las opciones de login y de registro devuelven el MISMO reto que se guarda en la cookie', async () => {
+    vi.resetModules();
+    const prismaMock = { userPasskey: { findMany: vi.fn().mockResolvedValue([]) } };
+    vi.doMock('../../../prisma', () => ({ prisma: prismaMock }));
+    const previous = process.env.NEXTAUTH_URL;
+    process.env.NEXTAUTH_URL = 'https://synerlink.test';
+    try {
+      const { loginOptions, registrationOptions } = await import('../service');
+      const reto = 'PBGw7HGG5PZjyMCKb6FyM6oUGkYHLFGu4LuU7NVKgSk';
+      expect((await loginOptions(reto)).challenge).toBe(reto);
+      const reg = await registrationOptions({ id: 'u1', email: 'a@b.co', name: 'Ana' }, reto);
+      expect(reg.challenge).toBe(reto);
+      expect(reg.rp.id).toBe('synerlink.test');
+      expect(reg.authenticatorSelection).toMatchObject({ residentKey: 'required', userVerification: 'required' });
+    } finally {
+      process.env.NEXTAUTH_URL = previous;
+      vi.doUnmock('../../../prisma');
+    }
+  });
+});
