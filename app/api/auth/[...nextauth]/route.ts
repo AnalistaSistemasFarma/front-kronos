@@ -8,6 +8,8 @@ import { prisma } from '../../../../lib/prisma';
 import { normalizeNit, SUPPLIER_ROLE } from '../../../../lib/proveedor/isolation';
 import { noteLoginAttempt, withLoginAudit } from '../../../../lib/auth/login-audit/recorder';
 import { resolveAuthRedirect } from '../../../../lib/auth/safe-redirect';
+import { PASSKEY_CHALLENGE_COOKIE, consumeChallenge, readCookie } from '../../../../lib/auth/passkeys/challenge';
+import { PasskeysUnavailableError, verifyLogin } from '../../../../lib/auth/passkeys/service';
 
 const azureConfigured =
   Boolean(process.env.AZURE_AD_CLIENT_ID) &&
@@ -154,6 +156,54 @@ export const authOptions: AuthOptions = {
           name: user.name,
           image: user.image,
         };
+      },
+    }),
+    // Acceso con biométrico (passkeys / WebAuthn, 2026-10-31): Face ID, huella o Windows Hello.
+    // El dispositivo firma el reto de /api/passkeys/login/options (cookie cifrada, un solo
+    // uso); aquí se verifica la firma con la llave pública guardada en dbo.user_passkey.
+    CredentialsProvider({
+      id: 'passkey',
+      name: 'passkey',
+      credentials: {
+        response: { label: 'Respuesta del dispositivo', type: 'text' },
+      },
+      async authorize(credentials, req) {
+        let response: unknown = null;
+        try {
+          response = credentials?.response ? JSON.parse(credentials.response) : null;
+        } catch {
+          response = null;
+        }
+        if (!response || typeof response !== 'object') {
+          noteLoginAttempt({ identifier: null, success: false, reason: 'DATOS_INCOMPLETOS' });
+          return null;
+        }
+        const headers = (req?.headers ?? {}) as Record<string, string | string[] | undefined>;
+        const rawCookie = Array.isArray(headers.cookie) ? headers.cookie.join('; ') : headers.cookie;
+        const challenge = await consumeChallenge(readCookie(rawCookie, PASSKEY_CHALLENGE_COOKIE), 'login');
+        if (!challenge) {
+          noteLoginAttempt({ identifier: null, success: false, reason: 'PASSKEY_RETO_VENCIDO' });
+          return null;
+        }
+        try {
+          const result = await verifyLogin(response as Parameters<typeof verifyLogin>[0], challenge);
+          if (!result.ok) {
+            noteLoginAttempt({
+              identifier: result.identifier,
+              userId: result.userId ?? null,
+              userName: result.userName ?? null,
+              success: false,
+              reason: result.reason,
+            });
+            return null;
+          }
+          noteLoginAttempt({ identifier: result.user.email, userId: result.user.id, userName: result.user.name, success: true });
+          return result.user;
+        } catch (error) {
+          if (!(error instanceof PasskeysUnavailableError)) console.error('[passkey] authorize:', error);
+          noteLoginAttempt({ identifier: null, success: false, reason: 'ERROR_INTERNO' });
+          return null;
+        }
       },
     }),
     ...(azureConfigured
