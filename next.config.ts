@@ -79,6 +79,13 @@ const nextConfig: NextConfig = {
       allowedOrigins: [...baseAllowedOrigins, ...tunnelOrigins],
     },
     viewTransition: true,
+    // Tope del cuerpo de las peticiones que pasan por middleware.ts (su matcher
+    // incluye /api/:path*). Por defecto son 10 MB y Next TRUNCA en silencio lo que
+    // pase de ahí: los adjuntos de más de ~10 MB del chat fallaban con un 400
+    // genérico (medido en pruebas el 2026-10-30). Debe coincidir con
+    // MAX_CHAT_REQUEST_BODY_BYTES (lib/chat/attachments.ts) y quedar por debajo de
+    // maxAllowedContentLength de IIS (deploy/iis/web.config).
+    middlewareClientMaxBodySize: 30 * 1024 * 1024,
     // Importar solo los componentes de Mantine que se usan, no el paquete entero
     // (miles de módulos por página en dev). @tabler/icons-react ya viene en la lista de Next.
     optimizePackageImports: ['@mantine/core', '@mantine/hooks'],
