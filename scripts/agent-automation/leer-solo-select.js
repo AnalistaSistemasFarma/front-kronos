@@ -1,8 +1,9 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- script CommonJS que se copia y corre suelto con node en el servidor */
 // SOLO LECTURA (SELECT). Lee DATABASE_URL del .env del proyecto sin imprimirla.
 const fs = require('fs'); const sql = require('mssql');
 const env = fs.readFileSync('.env', 'utf8').split(/\r?\n/).find(l => l.startsWith('DATABASE_URL='));
 const url = env.slice('DATABASE_URL='.length).replace(/^"|"$/g, '');
-const m = url.match(/^sqlserver:\/\/([^:;]+):?(\d+)?;(.*)$/); const kv = {};
+const m = url.match(/^sqlserver:\/\/([^:;]+):?(\d*);(.*)$/); const kv = {};
 for (const p of m[3].split(';')) { const i = p.indexOf('='); if (i > 0) kv[p.slice(0, i).toLowerCase()] = p.slice(i + 1); }
 const cfg = { server: m[1], port: +(m[2] || 1433), database: kv.database, user: kv.user, password: kv.password,
   options: { encrypt: kv.encrypt === 'true', trustServerCertificate: true }, requestTimeout: 300000 };
