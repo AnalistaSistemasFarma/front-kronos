@@ -6,8 +6,6 @@ import {
   Button,
   Collapse,
   Group,
-  Progress,
-  ScrollArea,
   Stack,
   Text,
   ThemeIcon,
@@ -15,16 +13,32 @@ import {
   Tooltip,
 } from '@mantine/core';
 import {
+  IconCalendarEvent,
+  IconCash,
   IconCheck,
+  IconChecklist,
   IconChevronDown,
   IconChevronUp,
-  IconClockHour4,
-  IconPlayerPlayFilled,
-  IconX,
+  IconDatabase,
+  IconFileSearch,
+  IconFileText,
+  IconFlag,
+  IconMessage,
+  IconSchool,
+  IconSend,
+  IconShieldCheck,
+  IconShoppingCart,
+  IconSignature,
+  IconTool,
+  IconTruck,
+  IconUpload,
+  IconUsers,
 } from '@tabler/icons-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { FlowStep, RequestFlow } from '@/lib/requests-general/flowProgress';
+import { flowStepKind, type FlowStepKind } from '@/lib/requests-general/flowStepKind';
 import { RequestProgressBar } from './RequestProgressBar';
+import styles from './requestFlow.module.css';
 
 /** Flujos ya consultados en esta pestaña (se refrescan al volver a pedir). */
 const flowCache = new Map<number, RequestFlow>();
@@ -102,11 +116,11 @@ export function RequestFlowBar({ flow }: { flow: RequestFlow | null | undefined 
   );
 }
 
-const STEP_META: Record<FlowStep['status'], { color: string; label: string; icon: React.ReactNode }> = {
-  done: { color: 'teal', label: 'Resuelta', icon: <IconCheck size={13} /> },
-  current: { color: 'blue', label: 'En curso', icon: <IconPlayerPlayFilled size={11} /> },
-  pending: { color: 'gray', label: 'Por hacer', icon: <IconClockHour4 size={13} /> },
-  cancelled: { color: 'gray', label: 'Cancelada', icon: <IconX size={13} /> },
+const STEP_META: Record<FlowStep['status'], { color: string; label: string }> = {
+  done: { color: 'teal', label: 'Resuelta' },
+  current: { color: 'blue', label: 'En curso' },
+  pending: { color: 'gray', label: 'Por hacer' },
+  cancelled: { color: 'gray', label: 'Cancelada' },
 };
 
 /** Secuencia completa: qué se hizo, en qué va y qué falta. */
@@ -123,7 +137,10 @@ export function RequestFlowSteps({ flow, highlightTask }: { flow: RequestFlow; h
             key={step.key}
             bullet={
               <ThemeIcon size={24} radius='xl' color={meta.color} variant={step.status === 'pending' ? 'light' : 'filled'}>
-                {meta.icon}
+                {(() => {
+                  const Icon = KIND_ICON[flowStepKind(step.name)];
+                  return <Icon size={13} stroke={2.2} />;
+                })()}
               </ThemeIcon>
             }
             title={
@@ -164,79 +181,120 @@ export function RequestFlowSteps({ flow, highlightTask }: { flow: RequestFlow; h
   );
 }
 
-/** Pasos en fila (1 → 2 → 3), con el actual resaltado. Se desplaza de lado si son muchos. */
+function isMineStep(step: FlowStep, mine: string): boolean {
+  return Boolean(mine) && step.name.trim().toLowerCase() === mine;
+}
+
+const KIND_ICON: Record<FlowStepKind, typeof IconChecklist> = {
+  upload: IconUpload,
+  review: IconFileSearch,
+  approve: IconShieldCheck,
+  sign: IconSignature,
+  payment: IconCash,
+  purchase: IconShoppingCart,
+  send: IconSend,
+  delivery: IconTruck,
+  schedule: IconCalendarEvent,
+  people: IconUsers,
+  training: IconSchool,
+  register: IconDatabase,
+  fix: IconTool,
+  comment: IconMessage,
+  document: IconFileText,
+  close: IconFlag,
+  task: IconChecklist,
+};
+
+/**
+ * Ícono redondo del paso: dibuja lo que se hace en esa tarea (subir, revisar, aprobar…) y el
+ * color dice el estado. Hecho = verde con chulito en la esquina; en curso = azul que late.
+ */
+function StepIcon({ step }: { step: FlowStep }) {
+  const Icon = KIND_ICON[flowStepKind(step.name)];
+  return (
+    <span className={styles.icon} aria-hidden>
+      <Icon size={13} stroke={2.2} />
+      {step.status === 'done' ? (
+        <span className={styles.doneBadge}>
+          <IconCheck size={8} stroke={4} />
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/** Globo del paso (al pasar el mouse o tocarlo): estado y responsables. */
+function FlowStepTip({ step, index, total, isMine }: { step: FlowStep; index: number; total: number; isMine: boolean }) {
+  const meta = STEP_META[step.status];
+  return (
+    <Stack gap={2} maw={260}>
+      <Text size='xs' opacity={0.75}>
+        Paso {index + 1} de {total} · {meta.label}
+        {step.totalCount > 1 ? ` · ${step.doneCount}/${step.totalCount}` : ''}
+        {isMine ? ' · Su tarea' : ''}
+      </Text>
+      <Text size='sm' fw={700} style={{ overflowWrap: 'anywhere' }}>
+        {step.name}
+      </Text>
+      <Text size='xs' opacity={0.75}>
+        {step.assignees.length > 0
+          ? step.assignees.join(', ')
+          : step.status === 'pending'
+            ? step.sequential
+              ? 'Se asigna cuando termine el paso anterior'
+              : 'Aún sin responsable'
+            : 'Sin responsable'}
+      </Text>
+    </Stack>
+  );
+}
+
+/** Pasos como cápsulas que reparten el ancho de la pantalla (sin desplazarse de lado). */
 function FlowStepsRow({ flow, highlightTask }: { flow: RequestFlow; highlightTask?: string | null }) {
   const mine = String(highlightTask || '').trim().toLowerCase();
-  const steps = flow.steps.filter((s) => s.status !== 'cancelled');
+  const steps = useMemo(() => flow.steps.filter((s) => s.status !== 'cancelled'), [flow]);
+
   return (
-    <ScrollArea type='auto' offsetScrollbars scrollbarSize={6}>
-      <Group gap={0} wrap='nowrap' align='flex-start' py={4}>
+    <div className={styles.flow}>
+      <div className={styles.steps} style={{ ['--steps' as string]: steps.length }} role='group' aria-label='Pasos del flujo'>
         {steps.map((step, i) => {
           const meta = STEP_META[step.status];
-          const isMine = Boolean(mine) && step.name.trim().toLowerCase() === mine;
+          const isMine = isMineStep(step, mine);
           return (
-            <Group key={step.key} gap={0} wrap='nowrap' align='flex-start'>
-              {i > 0 ? (
-                <Box
-                  mt={11}
-                  w={28}
-                  h={2}
-                  style={{
-                    flexShrink: 0,
-                    background:
-                      step.status === 'pending' ? 'var(--mantine-color-gray-3)' : 'var(--mantine-color-teal-5)',
-                  }}
-                />
-              ) : null}
-              <Tooltip
-                withArrow
-                multiline
-                maw={260}
-                label={`${step.name} · ${meta.label}${step.assignees.length ? ` · ${step.assignees.join(', ')}` : ''}`}
+            <Tooltip
+              key={step.key}
+              withArrow
+              openDelay={150}
+              events={{ hover: true, focus: true, touch: true }}
+              label={<FlowStepTip step={step} index={i} total={steps.length} isMine={isMine} />}
+            >
+              <button
+                type='button'
+                className={styles.step}
+                data-status={step.status}
+                data-mine={isMine}
+                aria-label={`Paso ${i + 1}: ${step.name}, ${meta.label}`}
+                style={{ ['--i' as string]: i }}
               >
-                <Stack gap={4} align='center' w={112} style={{ flexShrink: 0 }}>
-                  <ThemeIcon
-                    size={24}
-                    radius='xl'
-                    color={meta.color}
-                    variant={step.status === 'pending' ? 'light' : 'filled'}
-                    style={isMine ? { boxShadow: '0 0 0 3px var(--mantine-color-violet-3)' } : undefined}
-                  >
-                    {step.status === 'pending' ? (
-                      <Text size='11px' fw={700}>
-                        {i + 1}
-                      </Text>
-                    ) : (
-                      meta.icon
-                    )}
-                  </ThemeIcon>
-                  <Text
-                    size='xs'
-                    ta='center'
-                    lineClamp={2}
-                    fw={step.status === 'current' || isMine ? 700 : 500}
-                    c={step.status === 'pending' ? 'dimmed' : undefined}
-                  >
-                    {step.name}
-                  </Text>
-                  {isMine ? (
-                    <Badge size='xs' variant='light' color='violet'>
-                      Su tarea
-                    </Badge>
-                  ) : null}
-                </Stack>
-              </Tooltip>
-            </Group>
+                <span className={styles.capsule}>
+                  <span className={styles.capsuleFill} />
+                </span>
+                <span className={styles.head}>
+                  <StepIcon step={step} />
+                  <span className={styles.label}>{step.name}</span>
+                </span>
+              </button>
+            </Tooltip>
           );
         })}
-      </Group>
-    </ScrollArea>
+      </div>
+    </div>
   );
 }
 
 /**
- * Avance arriba, en el encabezado de la solicitud o tarea: barra, pasos en fila y, si se
- * despliega, el detalle con los responsables. Solo tareas del flujo (las de firma no cuentan).
+ * Avance arriba, en el encabezado de la solicitud o tarea: cápsulas por paso, detalle del paso
+ * tocado y, si se despliega, la lista completa. Solo tareas del flujo (las de firma no cuentan).
  */
 export function RequestFlowHeader({ requestId, highlightTask }: { requestId: number | null | undefined; highlightTask?: string | null }) {
   const ids = useMemo(() => (requestId ? [requestId] : []), [requestId]);
@@ -247,26 +305,28 @@ export function RequestFlowHeader({ requestId, highlightTask }: { requestId: num
   const finished = flow.done >= flow.total;
   return (
     <Box mt='md' pt='md' style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
-      <Group justify='space-between' wrap='wrap' gap='xs' mb={6}>
+      <Group justify='space-between' wrap='wrap' gap='xs' mb={8} align='baseline'>
         <Text size='sm' fw={700}>
           Avance de la solicitud
         </Text>
-        <Text size='sm' c={finished ? 'teal.7' : 'dimmed'} fw={finished ? 700 : 500}>
-          {finished
-            ? 'Flujo completo'
-            : `Paso ${flow.currentIndex} de ${flow.total} · ${flow.currentName} · ${flow.percent} %`}
-        </Text>
+        <Group gap={8} align='baseline' wrap='nowrap'>
+          <Text size='sm' c={finished ? 'teal.7' : 'dimmed'} fw={finished ? 700 : 500}>
+            {finished ? 'Flujo completo' : `${flow.done} de ${flow.total} tareas`}
+          </Text>
+          <Text size='lg' fw={700} c={finished ? 'teal.7' : undefined} style={{ fontVariantNumeric: 'tabular-nums' }}>
+            {flow.percent}%
+          </Text>
+        </Group>
       </Group>
-      <Progress value={flow.percent} color={finished ? 'teal' : 'blue'} size='md' radius='xl' mb='sm' />
       <FlowStepsRow flow={flow} highlightTask={highlightTask} />
       <Button
         variant='subtle'
         size='compact-sm'
-        mt={4}
+        mt={6}
         rightSection={open ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
         onClick={() => setOpen((v) => !v)}
       >
-        {open ? 'Ocultar detalle' : 'Ver responsables de cada paso'}
+        {open ? 'Ocultar lista' : 'Ver todos los pasos'}
       </Button>
       <Collapse in={open}>
         <Box mt='sm'>

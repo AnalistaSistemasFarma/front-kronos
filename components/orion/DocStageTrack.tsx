@@ -2,18 +2,30 @@
 
 import { Group, Stack, Text, Tooltip } from '@mantine/core';
 
+const CURRENT_COLOR = {
+  normal: 'var(--mantine-color-blue-6)',
+  returned: 'var(--mantine-color-orange-6)',
+  rejected: 'var(--mantine-color-red-6)',
+} as const;
+
 /**
  * Cuadritos de proceso de un documento en la tabla de adjuntos: cumplidas en verde, la actual en
- * azul y las que faltan en gris. `stage` >= etapas.length = todo listo.
+ * azul (naranja si se devolvió, rojo si se rechazó) y las que faltan en gris.
+ * `stage` >= etapas.length = todo listo.
  */
 export default function DocStageTrack({
   stages,
   stage,
   doneLabel,
+  tone = 'normal',
+  note = null,
 }: {
   stages: readonly string[];
   stage: number;
   doneLabel: string;
+  tone?: keyof typeof CURRENT_COLOR;
+  /** Reemplaza "Etapa X de N · nombre" (p. ej. "Devuelto para corrección"). */
+  note?: string | null;
 }) {
   const done = stage >= stages.length;
   return (
@@ -30,15 +42,15 @@ export default function DocStageTrack({
                   i < stage
                     ? 'var(--mantine-color-teal-6)'
                     : i === stage
-                      ? 'var(--mantine-color-blue-6)'
+                      ? CURRENT_COLOR[tone]
                       : 'var(--mantine-color-default-border)',
               }}
             />
           </Tooltip>
         ))}
       </Group>
-      <Text size='10px' c='dimmed'>
-        {done ? doneLabel : `Etapa ${stage + 1} de ${stages.length} · ${stages[stage]}`}
+      <Text size='10px' c={tone === 'rejected' ? 'red.7' : tone === 'returned' ? 'orange.7' : 'dimmed'}>
+        {done ? doneLabel : note || `Etapa ${stage + 1} de ${stages.length} · ${stages[stage]}`}
       </Text>
     </Stack>
   );

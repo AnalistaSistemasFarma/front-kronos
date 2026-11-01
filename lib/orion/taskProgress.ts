@@ -120,13 +120,13 @@ export type TaskDisplayBadge = {
 };
 
 /**
- * Badges para listados de solicitudes: tareas de negocio + 1 badge por archivo Orion
- * (en lugar de N×“Firmar documento” / “Autorizar firma digital”).
+ * Badges para listados de solicitudes: solo tareas del flujo. La firma de documentos NO es
+ * una tarea ("Firmar documento", "Autorizar firma digital", validar): no sale ni cuenta.
  */
 export function buildTaskDisplayBadges<
   T extends OrionTaskLike & { status_task?: string | null },
 >(tasks: T[]): TaskDisplayBadge[] {
-  const { businessTasks, orionByFile } = partitionTasksForDisplay(tasks);
+  const { businessTasks } = partitionTasksForDisplay(tasks);
   const badges: TaskDisplayBadge[] = [];
 
   for (const t of businessTasks) {
@@ -143,31 +143,10 @@ export function buildTaskDisplayBadges<
     });
   }
 
-  for (const g of orionByFile) {
-    const statusLabel = g.allDone
-      ? 'Resuelto'
-      : g.completedSignTasks > 0
-        ? `En progreso (${g.completedSignTasks}/${g.totalSignTasks})`
-        : 'Pendiente';
-    badges.push({
-      key: `orion-${g.fileId}`,
-      label: g.label.startsWith('Firma') ? g.label : `Firma · ${g.label}`,
-      statusLabel,
-      statusKey: g.allDone
-        ? 'Resuelto'
-        : g.completedSignTasks > 0
-          ? 'Abierto'
-          : 'Sin empezar',
-      done: g.allDone,
-      percent: g.percent,
-      kind: 'orion-file',
-    });
-  }
-
   return badges;
 }
 
-/** Progreso agregado (negocio + un ítem por archivo de firma). */
+/** Progreso agregado de las tareas del flujo (sin firmas). */
 export function getSimplifiedTasksProgress<
   T extends OrionTaskLike & { status_task?: string | null },
 >(tasks: T[]): { total: number; done: number; percent: number } {

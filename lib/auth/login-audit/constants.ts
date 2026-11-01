@@ -33,12 +33,13 @@ export const LOGIN_PROVIDERS = {
   credentials: 'Correo y contraseña',
   'supplier-nit': 'Proveedor (NIT)',
   'azure-ad': 'Microsoft (Entra ID)',
+  passkey: 'Biométrico (passkey)',
 } as const;
 
 export type LoginProvider = keyof typeof LOGIN_PROVIDERS;
 
 export function isLoginProvider(value: string | null | undefined): value is LoginProvider {
-  return value === 'credentials' || value === 'supplier-nit' || value === 'azure-ad';
+  return value === 'credentials' || value === 'supplier-nit' || value === 'azure-ad' || value === 'passkey';
 }
 
 /**
@@ -58,6 +59,9 @@ export const LOGIN_FAILURE_REASONS = {
   CSRF_INVALIDO: 'Token CSRF inválido o vencido: NextAuth rechazó el envío sin validar las credenciales',
   SIN_AUTORIZACION: 'NextAuth no llegó a validar las credenciales',
   ERROR_INTERNO: 'Error interno al validar',
+  PASSKEY_NO_REGISTRADA: 'Biométrico: la llave del dispositivo no está registrada o fue eliminada',
+  PASSKEY_RETO_VENCIDO: 'Biométrico: el reto venció o ya se usó (vuelva a intentarlo)',
+  PASSKEY_INVALIDA: 'Biométrico: la firma del dispositivo no es válida',
 } as const;
 
 export type LoginFailureReason = keyof typeof LOGIN_FAILURE_REASONS;
