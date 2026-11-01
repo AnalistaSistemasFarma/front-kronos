@@ -53,6 +53,7 @@ import OrionSignersList from './OrionSignersList';
 import PdfInlineViewer from './PdfInlineViewer';
 import SignaturePlacementCanvas, { type PlacementSeal } from './SignaturePlacementCanvas';
 import { openAnnotatedPdfPreview } from './annotatedPdfPreview';
+import { removeSealBackground } from './sealBackground';
 import { usePdfBlobPreview } from './usePdfBlobPreview';
 import { showEmailSentNotification } from '../../lib/notifications/showEmailSentNotification';
 
@@ -252,19 +253,20 @@ export default function OrionDocumentEditor({
   );
 
   const uploadSeal = useCallback(
-    async (file: File | null) => {
-      if (!file) return;
-      if (!['image/png', 'image/jpeg'].includes(file.type)) {
+    async (picked: File | null) => {
+      if (!picked) return;
+      if (!['image/png', 'image/jpeg'].includes(picked.type)) {
         setError('El sello debe ser una imagen PNG o JPG.');
-        return;
-      }
-      if (file.size > SEAL_MAX_BYTES) {
-        setError('La imagen del sello debe pesar máximo 2 MB.');
         return;
       }
       setSealUploading(true);
       setError(null);
       try {
+        const file = await removeSealBackground(picked);
+        if (file.size > SEAL_MAX_BYTES) {
+          setError('La imagen del sello debe pesar máximo 2 MB.');
+          return;
+        }
         const form = new FormData();
         form.append('requestId', String(requestId));
         form.append('fileId', fileId);
