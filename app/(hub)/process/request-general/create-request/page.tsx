@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 // exportBoardExcel (y con él exceljs, ~900 KB) se carga al tocar Exportar, no al abrir la pantalla.
 import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
 import PurchaseInlineForm from '../../purchases/PurchaseInlineForm';
+import SalesInlineForm from '../../sales/SalesInlineForm';
 import {
   Paper,
   Stack,
@@ -203,6 +204,9 @@ function RequestBoard() {
   const [createLoading, setCreateLoading] = useState(false);
   // Solicitud de compra: se captura en el formulario de Compras (lineas + SAP), no aqui.
   const [isPurchaseProcess, setIsPurchaseProcess] = useState(false);
+  // Oferta de venta (sales_company_config.id_process_category_oferta): formulario propio, como Compras.
+  const [isSalesProcess, setIsSalesProcess] = useState(false);
+  const isSapFormProcess = isPurchaseProcess || isSalesProcess;
   const [purchaseNotice, setPurchaseNotice] = useState<{ ok: boolean; message: string } | null>(null);
   const isSubmittingRef = useRef(false);
 
@@ -964,10 +968,29 @@ function RequestBoard() {
     };
   }, [formData.company, formData.process]);
 
+  useEffect(() => {
+    if (!formData.company || !formData.process) {
+      setIsSalesProcess(false);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/sales/entry?companyId=${formData.company}&processId=${formData.process}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) setIsSalesProcess(Boolean(d?.isSales));
+      })
+      .catch(() => {
+        if (!cancelled) setIsSalesProcess(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.company, formData.process]);
+
   const handleCreateTicketWithValidation = async () => {
     if (isSubmittingRef.current) return;
     // La solicitud de compra no se crea por el formulario generico (se haria sin borrador en SAP).
-    if (isPurchaseProcess) return;
+    if (isSapFormProcess) return;
     if (!validateForm()) return;
     await handleCreateTicket();
   };
@@ -1885,7 +1908,7 @@ function RequestBoard() {
              columnas se ven sin pelear. */
           size='90%'
           // Solicitud de compra: pantalla completa para que la tabla de líneas se vea entera.
-          fullScreen={isPurchaseProcess}
+          fullScreen={isSapFormProcess}
           radius='md'
           overlayProps={{ blur: 4 }}
         >
@@ -2079,7 +2102,20 @@ function RequestBoard() {
               />
             )}
 
-            {!isPurchaseProcess && (
+            {isSalesProcess && (
+              <SalesInlineForm
+                companyId={formData.company}
+                subject={formData.subject}
+                onDone={({ ok, message }) => {
+                  setModalOpened(false);
+                  setFormData({ company: '', subject: '', category: '', process: '', descripcion: '', url: '' });
+                  setPurchaseNotice({ ok, message });
+                  fetchTickets();
+                }}
+              />
+            )}
+
+            {!isSapFormProcess && (
               <>
             {(() => {
               const processName = (
@@ -2404,7 +2440,7 @@ function RequestBoard() {
               >
                 Cancelar
               </Button>
-              {!isPurchaseProcess && (
+              {!isSapFormProcess && (
               <Button
                 onClick={handleCreateTicketWithValidation}
                 loading={createLoading}

@@ -6,6 +6,7 @@ import { advanceSequentialTask } from '../workflow/advanceSequentialTask.js';
 import { closeRequestGeneral } from '../workflow/closeRequestGeneral.js';
 import { orionInternalTaskSql } from '../orion/internalTasks';
 import { getSapAction } from './catalog';
+import { createOrder, evaluateRules, moveToStage, reevaluateCredit, salesLinkOf } from '../sales/flow';
 import { processActions } from './config';
 import { finishStep, startStep, type TriggeredBy } from './executionLog';
 
@@ -142,6 +143,27 @@ async function runAction(
     case 'purchase.state_to_authorize': {
       const r = await moveDraftToAuthorize(idRequest, triggeredBy);
       return r.ok ? { ok: true, detail: r.detail } : { ok: false, error: r.error };
+    }
+    // ── Ventas · Oferta de venta (lib/sales/flow.ts) ──
+    case 'sales.evaluate_rules':
+      return evaluateRules(idRequest, triggeredBy);
+    case 'sales.reevaluate_credit':
+      return reevaluateCredit(idRequest, triggeredBy);
+    case 'sales.state_ap':
+      return moveToStage(idRequest, 'AP', triggeredBy);
+    case 'sales.state_ae':
+      return moveToStage(idRequest, 'AE', triggeredBy);
+    case 'sales.state_aeda':
+      return moveToStage(idRequest, 'AEDA', triggeredBy);
+    case 'sales.create_order':
+      return createOrder(idRequest, triggeredBy);
+    case 'sales.state_rejected': {
+      // Lo aplica la decisión del autorizador (onSalesAuthorizationDecision); aquí solo se refleja.
+      const link = await salesLinkOf(idRequest);
+      if (!link) return { ok: false, error: 'La solicitud no está enlazada a una oferta de venta.' };
+      if (link.status === 'rejected') return { ok: true, detail: 'Oferta devuelta con el rechazo aplicado en SAP' };
+      if (link.status === 'reject_error') return { ok: false, error: 'No se pudo aplicar el rechazo en SAP.' };
+      return { ok: false, wait: true, error: 'Esperando que se aplique el rechazo en SAP.' };
     }
     default:
       return { ok: false, error: `La acción «${actionKey}» no tiene ejecutor automático.` };

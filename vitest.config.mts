@@ -105,6 +105,10 @@ export default defineConfig({
         // Visores de adjuntos del chat (2026-10-22): reglas puras y la ruta de la vista.
         'lib/chat/visor.ts',
         'app/api/chat/attachments/[[]id]/vista/route.ts',
+        // Ventas (2026-10-30): máquina de estados y motor de reglas de la oferta de venta.
+        'lib/sales/states.ts',
+        'lib/sales/rules.ts',
+        'lib/sales/publish.ts',
       ],
       exclude: [
         '**/__tests__/**',
