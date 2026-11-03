@@ -74,15 +74,14 @@ export const INBOX_WAIT_DEFAULT_SECONDS = 0;
 /**
  * Cada cuánto revisa la base el long-poll mientras espera.
  *
- * 400 ms es un compromiso: es el PRIMER tramo de la demora que percibe el
- * usuario —el mensaje ya está escrito en `chat_message` pero el agente no se
- * entera hasta el siguiente tick—, así que bajarlo se nota de inmediato en la
- * pantalla. Al mismo tiempo, cada tick es un `SELECT TOP (n)` por el índice
- * (delivered_at, id) de UN agente: barato, pero no gratis. Por debajo de ~250 ms
- * el usuario ya no distingue la diferencia y solo se multiplican las consultas
- * contra SQL Server; por encima de 1 s la respuesta se siente tardía.
+ * Era 400 ms; se subió a 1 s el 2026-11-03 (incidente de CPU de KRONOSDB):
+ * cada tick son DOS consultas por agente conectado (hilos directos + entregas
+ * de grupo) y con la flota completa en long-poll eso daba ~175 consultas por
+ * segundo contra SQL Server. A 1 s son ~2,5 veces menos, y la demora extra
+ * que percibe el usuario es de 0,3 s en promedio (0,6 s en el peor caso),
+ * bajo el tiempo que el bot tarda en publicar su primer «Pensando…».
  */
-export const INBOX_WAIT_TICK_MS = 400;
+export const INBOX_WAIT_TICK_MS = 1000;
 
 /** Longitud del extracto del último mensaje que se muestra en la bandeja. */
 export const PREVIEW_CHARS = 160;

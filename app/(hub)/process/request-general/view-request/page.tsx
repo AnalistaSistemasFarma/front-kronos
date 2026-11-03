@@ -318,6 +318,7 @@ function ViewRequestPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [loadingUserId, setLoadingUserId] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
+  const [isRequester, setIsRequester] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loadingPermissions, setLoadingPermissions] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -924,13 +925,16 @@ function ViewRequestPage() {
 
       if (isRequester) {
         setCanEdit(false);
-        console.log('Permission check: solicitante — edición bloqueada', {
+        setIsRequester(true);
+        console.log('Permission check: solicitante — edición bloqueada, cierre permitido', {
           userName,
           requester: request.requester,
           id_requester: request.id_requester,
         });
         return;
       }
+
+      setIsRequester(false);
 
       // El "solicitado" (asignado al proceso) es quien gestiona y puede editar.
       const assignedCandidates = [request.user, request.assignedUserName].map(normalize);
@@ -951,6 +955,7 @@ function ViewRequestPage() {
     } catch (error) {
       console.error('Error checking permissions:', error);
       setCanEdit(false);
+      setIsRequester(false);
       setIsAdmin(false);
     } finally {
       setLoadingPermissions(false);
@@ -982,6 +987,10 @@ function ViewRequestPage() {
       checkEditPermissions();
     }
   }, [request?.id, request?.id_requester, request?.requester, request?.user, request?.assignedUserName, session, userName, session?.user?.id]);
+
+  // El solicitante puede CERRAR su solicitud (Resuelto/Cancelado/Devolver) aunque no
+  // pueda editar los campos. Quien gestiona (canEdit) también puede.
+  const canClose = canEdit || isRequester;
 
   useEffect(() => {
     const processId = Number(request?.id_process_category);
@@ -2595,7 +2604,7 @@ function ViewRequestPage() {
                     </Title>
                   </Group>
 
-                  {!isRequestResolved() && isEditing && canEdit && (
+                  {!isRequestResolved() && isEditing && canClose && (
                     <Stack>
                       <Select
                         label='Estado de la solicitud'
@@ -3294,9 +3303,9 @@ function ViewRequestPage() {
                   color='blue'
                   onClick={handleStartEditing}
                   leftSection={<IconTicket size={16} />}
-                  disabled={isRequestResolved() || !canEdit || loadingPermissions}
+                  disabled={isRequestResolved() || !canClose || loadingPermissions}
                 >
-                  Editar Solicitud
+                  {canEdit ? 'Editar Solicitud' : 'Cerrar Solicitud'}
                 </Button>
               ) : (
                 <>
