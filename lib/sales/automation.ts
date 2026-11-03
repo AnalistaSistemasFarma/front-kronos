@@ -225,9 +225,9 @@ async function recordDoc(idCompany: number, c: Partial<Candidate> & { DocEntry: 
 async function sendToFlow(sap: SapSession, cfg: AutomationConfig, c: Candidate, usuario: string | null): Promise<DocResult> {
   const p = await pool();
   const conf = await p.request().input('c', sql.Int, cfg.id_company).query(
-    `SELECT TOP 1 id_process_category_oferta AS proc FROM dbo.sales_company_config WHERE id_company = @c AND activo = 1;`
+    `SELECT TOP 1 id_process_category_oferta AS id_proceso FROM dbo.sales_company_config WHERE id_company = @c AND activo = 1;`
   );
-  const processId = Number(conf.recordset[0]?.proc ?? 0);
+  const processId = Number(conf.recordset[0]?.id_proceso ?? 0);
   if (!processId) throw new Error('La empresa no tiene configurado el flujo «Oferta de venta» (sales_company_config).');
   if (!cfg.id_user_solicitante) throw new Error('Falta el solicitante en SynerLink en la configuración.');
 
