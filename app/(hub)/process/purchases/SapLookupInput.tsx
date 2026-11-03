@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Autocomplete, Loader } from '@mantine/core';
+import { ActionIcon, Autocomplete, Loader } from '@mantine/core';
+import { IconSearch } from '@tabler/icons-react';
 import type { LookupKind, LookupOption } from '../../../../lib/purchases/lookups';
 
 /**
@@ -26,6 +27,11 @@ interface Props {
   size?: 'xs' | 'sm' | 'md';
   /** Avisa si el usuario escribió algo sin elegirlo de la lista (no sirve para SAP). */
   onInvalidChange?: (invalid: boolean) => void;
+  /**
+   * Búsqueda ampliada (como «*» + Enter en SAP): si se pasa, «*» + Enter la abre con el texto
+   * escrito sin los asteriscos, y aparece una lupa al lado del campo.
+   */
+  onExpand?: (query: string) => void;
 }
 
 /** Mensaje cuando se escribe algo que no se eligió de la lista. */
@@ -43,6 +49,7 @@ export default function SapLookupInput({
   label,
   size = 'xs',
   onInvalidChange,
+  onExpand,
 }: Props) {
   const [options, setOptions] = useState<LookupOption[]>([]);
   const [loading, setLoading] = useState(false);
@@ -110,7 +117,22 @@ export default function SapLookupInput({
           onSelect(opt);
         }
       }}
-      rightSection={loading ? <Loader size={12} /> : null}
+      onKeyDown={(e) => {
+        if (onExpand && e.key === 'Enter' && value.includes('*')) {
+          e.preventDefault();
+          onExpand(value.replace(/\*/g, '').trim());
+        }
+      }}
+      rightSection={
+        loading ? (
+          <Loader size={12} />
+        ) : onExpand ? (
+          <ActionIcon size="sm" variant="subtle" aria-label={`Búsqueda ampliada: ${ariaLabel}`} onClick={() => onExpand(value.replace(/\*/g, '').trim())}>
+            <IconSearch size={14} />
+          </ActionIcon>
+        ) : null
+      }
+      rightSectionPointerEvents={onExpand && !loading ? 'all' : 'none'}
       comboboxProps={{ withinPortal: true, zIndex: 1100 }}
       maxDropdownHeight={240}
       error={error ?? (invalid ? NOT_FROM_LIST : undefined)}
