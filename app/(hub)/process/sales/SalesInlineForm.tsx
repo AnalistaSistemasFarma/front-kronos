@@ -5,6 +5,7 @@ import { ActionIcon, Alert, Button, Group, Loader, NumberInput, ScrollArea, Stac
 import { IconPlus, IconSend, IconTrash } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import SapLookupInput from '../purchases/SapLookupInput';
+import SalesSearchModal, { type SearchKind } from './SalesSearchModal';
 import { sapErrorText } from '../../../../lib/purchases/sapErrorHint';
 
 /**
@@ -45,6 +46,8 @@ export default function SalesInlineForm({ companyId, subject, onDone }: Props) {
   const [comments, setComments] = useState('');
   const [lines, setLines] = useState<Line[]>([{}]);
   const [saving, setSaving] = useState(false);
+  /** Búsqueda ampliada abierta («*» + Enter o lupa): tipo, línea y texto. */
+  const [search, setSearch] = useState<{ kind: SearchKind; line?: number; q?: string; itemCode?: string; cardCode?: string } | null>(null);
   const [tried, setTried] = useState(false);
   const [errors, setErrors] = useState<{ field: string; error: string }[]>([]);
 
@@ -160,6 +163,7 @@ export default function SalesInlineForm({ companyId, subject, onDone }: Props) {
           }}
           error={errorFor('CardCode') ?? (tried && !cardCode ? 'Obligatorio' : undefined)}
           ariaLabel="Cliente"
+          onExpand={(q) => setSearch({ kind: 'customer', q })}
         />
         <TextInput
           label={<>Fecha de entrega <Text span c="red">*</Text></>}
@@ -172,10 +176,18 @@ export default function SalesInlineForm({ companyId, subject, onDone }: Props) {
         <TextInput label="Orden de compra del cliente" value={numAtCard} maxLength={100} onChange={(e) => setNumAtCard(e.currentTarget.value)} />
       </Group>
       {cardName && (
-        <Text size="sm" c="dimmed">
-          {cardName}
-        </Text>
+        <Group gap="xs">
+          <Text size="sm" c="dimmed">
+            {cardName}
+          </Text>
+          <Button size="compact-xs" variant="subtle" onClick={() => setSearch({ kind: 'recent_orders', cardCode })}>
+            Pedidos recientes
+          </Button>
+        </Group>
       )}
+      <Text size="xs" c="dimmed">
+        Consejo: escriba «*» y Enter (o use la lupa) en cliente, artículo o bodega para abrir la búsqueda ampliada, como en SAP.
+      </Text>
       <Textarea label="Comentarios" description="Si lo deja vacío se usa el asunto." autosize minRows={2} maxLength={254} value={comments} onChange={(e) => setComments(e.currentTarget.value)} />
 
       <div>
@@ -217,10 +229,21 @@ export default function SalesInlineForm({ companyId, subject, onDone }: Props) {
                       }}
                       error={errorFor(`DocumentLines[${i}].ItemCode`) ?? (tried && empty(l.ItemCode) ? 'Obligatorio' : undefined)}
                       ariaLabel={`Artículo línea ${i + 1}`}
+                      onExpand={(q) => setSearch({ kind: 'item', line: i, q })}
                     />
                   </Table.Td>
                   <Table.Td>
                     <Text size="xs">{l.ItemDescription ?? ''}</Text>
+                    {l.ItemCode && l.ItemDescription && (
+                      <Group gap={4}>
+                        <Button size="compact-xs" variant="subtle" onClick={() => setSearch({ kind: 'warehouse_stock', line: i, itemCode: l.ItemCode })}>
+                          Stock por bodega
+                        </Button>
+                        <Button size="compact-xs" variant="subtle" onClick={() => setSearch({ kind: 'batches', line: i, itemCode: l.ItemCode })}>
+                          Lotes
+                        </Button>
+                      </Group>
+                    )}
                   </Table.Td>
                   <Table.Td style={{ verticalAlign: 'top' }}>
                     <NumberInput size="xs" min={0} allowNegative={false} thousandSeparator="." decimalSeparator="," value={l.Quantity ?? ''} onChange={(v) => setLine(i, { Quantity: v })}
@@ -239,7 +262,8 @@ export default function SalesInlineForm({ companyId, subject, onDone }: Props) {
                   <Table.Td style={{ verticalAlign: 'top' }}>
                     <SapLookupInput size="xs" companyId={companyId} endpoint="/api/sales/lookup" kind="warehouse" value={String(l.WarehouseCode ?? '')}
                       onChange={(v) => setLine(i, { WarehouseCode: v })} onSelect={(o) => setLine(i, { WarehouseCode: o.value })}
-                      error={errorFor(`DocumentLines[${i}].WarehouseCode`) ?? (tried && empty(l.WarehouseCode) ? 'Obligatorio' : undefined)} ariaLabel={`Bodega línea ${i + 1}`} />
+                      error={errorFor(`DocumentLines[${i}].WarehouseCode`) ?? (tried && empty(l.WarehouseCode) ? 'Obligatorio' : undefined)} ariaLabel={`Bodega línea ${i + 1}`}
+                      onExpand={() => (l.ItemCode ? setSearch({ kind: 'warehouse_stock', line: i, itemCode: l.ItemCode }) : toast.error('Elija primero el artículo para ver su stock por bodega.'))} />
                   </Table.Td>
                   <Table.Td style={{ verticalAlign: 'top' }}>
                     <SapLookupInput size="xs" companyId={companyId} endpoint="/api/sales/lookup" kind="tax" value={String(l.TaxCode ?? '')}
@@ -268,6 +292,29 @@ export default function SalesInlineForm({ companyId, subject, onDone }: Props) {
           Crear oferta y enviar
         </Button>
       </Group>
+      {search && (
+        <SalesSearchModal
+          opened
+          onClose={() => setSearch(null)}
+          companyId={companyId}
+          kind={search.kind}
+          initialQuery={search.q ?? ''}
+          itemCode={search.itemCode}
+          cardCode={search.cardCode}
+          onSelect={(r) => {
+            if (search.kind === 'customer') {
+              setCardCode(String(r.CardCode));
+              setCardName(String(r.CardName ?? ''));
+            } else if (search.kind === 'item' && search.line != null) {
+              const i = search.line;
+              setLine(i, { ItemCode: String(r.ItemCode), ItemDescription: String(r.ItemName ?? ''), ...(r.DefaultWarehouse ? { WarehouseCode: String(r.DefaultWarehouse) } : {}), UnitPrice: undefined });
+              loadPrice(i, String(r.ItemCode));
+            } else if (search.kind === 'warehouse_stock' && search.line != null) {
+              setLine(search.line, { WarehouseCode: String(r.WarehouseCode) });
+            }
+          }}
+        />
+      )}
     </Stack>
   );
 }
