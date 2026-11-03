@@ -55,20 +55,23 @@ describe('GET /api/chat/agent/inbox', () => {
       delivered_at: null,
       conversation: { kind: 'project', archived: false, id_agent: 21, project: { archived: false, agents: { some: { id_agent: 21 } } } },
     });
-    // Multiagente (2026-10-29): además, SUS menciones en hilos de proyecto de otros agentes.
+    // Multiagente (2026-10-29): además, SUS menciones en hilos de proyecto de
+    // otros agentes. Desde 2026-11-03 en dos pasos: primero SOLO el índice de
+    // entregas (sin JOIN a chat_message), y los mensajes después por id.
     expect(findDeliveries).toHaveBeenCalledTimes(1);
-    expect(findDeliveries.mock.calls[0][0].where).toMatchObject({
-      id_agent: 21,
-      delivered_at: null,
-      message: { role: 'user', conversation: { kind: 'project', archived: false, project: { archived: false, agents: { some: { id_agent: 21 } } } } },
-    });
+    expect(findDeliveries.mock.calls[0][0].where).toEqual({ id_agent: 21, delivered_at: null });
+    expect(findDeliveries.mock.calls[0][0].select).toEqual({ id_message: true });
     expect((await res.json()).scope).toBe('projects');
   });
 
   it("llave 'channel': sus entregas de grupo NO incluyen menciones de proyectos", async () => {
     auth.mockResolvedValue({ idAgent: 21, code: 'play', displayName: 'Play', scope: 'channel' });
+    findDeliveries.mockResolvedValueOnce([{ id_message: 5 }, { id_message: 8 }]);
     await GET(pedir());
-    expect(findDeliveries.mock.calls[0][0].where).toMatchObject({ id_agent: 21, message: { conversation: { kind: 'group' } } });
+    expect(findDeliveries.mock.calls[0][0].where).toEqual({ id_agent: 21, delivered_at: null });
+    // El filtro de tipo va sobre los ids de SUS entregas, por la PK.
+    const grupos = findMessages.mock.calls.find((c) => c[0].where.id);
+    expect(grupos?.[0].where).toEqual({ id: { in: [5, 8] }, conversation: { kind: 'group' } });
   });
 
   it("llave 'projects': una mención en el hilo de otro agente llega una sola vez y se marca en SU fila", async () => {
@@ -78,7 +81,8 @@ describe('GET /api/chat/agent/inbox', () => {
       userAuthor: { id: 'u', name: 'Ana', email: 'a@x' },
       conversation: { id: 41, title: 't', kind: 'project', project: { id_project: 7, name: 'Comex' } },
     };
-    findDeliveries.mockResolvedValue([{ message: m }]);
+    findDeliveries.mockResolvedValueOnce([{ id_message: 9 }]);
+    findMessages.mockImplementation(async (args) => (args.where.id ? [m] : []));
     const res = await GET(pedir('wait=0&ack=true'));
     const data = await res.json();
     expect(data.messages).toHaveLength(1);
