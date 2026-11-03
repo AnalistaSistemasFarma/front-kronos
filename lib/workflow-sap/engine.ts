@@ -57,7 +57,9 @@ async function claim(idTaskRequest: number): Promise<boolean> {
     .request()
     .input('id', sql.Int, idTaskRequest)
     .input('running', sql.NVarChar(50), RUNNING)
-    .input('err', sql.NVarChar(50), `${ERROR_PREFIX}%`).query(`
+    // En LIKE los corchetes son comodín: «[sap:error]%» nunca coincidía y las tareas en error no se
+    // podían reintentar. Se escapa el «[».
+    .input('err', sql.NVarChar(50), `${ERROR_PREFIX.replace('[', '[[]')}%`).query(`
       UPDATE task_request_general SET resolution = @running
       WHERE id = @id AND id_status = 4 AND (resolution IS NULL OR resolution = N'' OR resolution LIKE @err);`);
   return (r.rowsAffected[0] ?? 0) === 1;
