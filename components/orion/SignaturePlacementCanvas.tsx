@@ -9,7 +9,6 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { ActionIcon, Box, Group, Loader, ScrollArea, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
 import {
   IconCircleCheckFilled,
   IconFingerprint,
@@ -162,8 +161,6 @@ export default function SignaturePlacementCanvas({
     onSealsChangeRef.current = onSealsChange;
   }, [seals, onSealsChange]);
   const [zoom, setZoom] = useState(1);
-  // Con el dedo la hoja se desplaza y se pellizca; con mouse no hace falta (igual que el SGC).
-  const coarse = useMediaQuery('(pointer: coarse)') ?? false;
   const viewportRef = useRef<HTMLDivElement | null>(null);
   // Centro visible (fracción del contenido) que se conserva al cambiar el zoom.
   const pendingScrollRef = useRef<{ x: number; y: number } | null>(null);
@@ -642,7 +639,7 @@ export default function SignaturePlacementCanvas({
                 background: '#fff',
                 userSelect: 'none',
                 // La hoja deja desplazarse con el dedo; las cajas de firma y sellos bloquean el gesto para arrastrarlas.
-                touchAction: coarse ? 'pan-x pan-y pinch-zoom' : 'none',
+                touchAction: 'pan-x pan-y pinch-zoom',
               }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
