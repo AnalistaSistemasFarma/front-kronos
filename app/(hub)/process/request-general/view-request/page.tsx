@@ -175,7 +175,8 @@ interface Option {
 interface Note {
   id_note: number;
   note: string;
-  createdBy: string;
+  /** null cuando la nota la deja el sistema (p. ej. cierre automático por una Tarea SAP). */
+  createdBy: string | null;
   creation_date?: string;
 }
 
@@ -2265,10 +2266,10 @@ function ViewRequestPage() {
                           >
                             <Group gap={8} mb={6} wrap='nowrap'>
                               <Avatar size={24} radius='xl' color={isCurrentUser ? 'blue' : 'gray'}>
-                                {note.createdBy.charAt(0).toUpperCase()}
+                                {(note.createdBy || 'S').charAt(0).toUpperCase()}
                               </Avatar>
                               <Text size='xs' fw={600} lineClamp={1}>
-                                {note.createdBy}
+                                {note.createdBy || 'SynerLink'}
                               </Text>
                               {note.creation_date && (
                                 <Text size='10px' c='dimmed' ml='auto' style={{ whiteSpace: 'nowrap' }}>
