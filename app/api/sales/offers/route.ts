@@ -5,7 +5,7 @@ import sqlConfig from '../../../../dbconfig.js';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { prisma } from '../../../../lib/prisma';
 import { salesEndpointForUser } from '../../../../lib/sales/access';
-import { buildOfferDraftPayload, buildQuotationPayload, sanitizeOfferLine, validateOffer, type OfferHeader } from '../../../../lib/sales/offer';
+import { buildOfferDraftPayload, buildQuotationPayload, offerSubject, sanitizeOfferLine, validateOffer, type OfferHeader } from '../../../../lib/sales/offer';
 import { todayBogota } from '../../../../lib/purchases/drafts';
 import { createGeneralRequest } from '../../../../lib/requests-general/createGeneralRequest';
 import { fireAndForgetNotification } from '../../../../lib/notificationEvents';
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
     const trace = `${new Intl.DateTimeFormat('es-CO', { timeZone: 'America/Bogota', dateStyle: 'short', timeStyle: 'medium' }).format(new Date())} | Oferta creada por ${user.name ?? email} en SynerLink`;
     const sap = await sapLogin(access.endpoint);
     let quotation: { DocEntry: number; DocNum?: number; DocumentLines?: { LineNum: number }[] };
-    let draft: { DocEntry: number; DocTotal?: number };
+    let draft: { DocEntry: number; DocTotal?: number; CardCode?: string; CardName?: string; DocumentLines?: { ItemDescription?: string; ItemCode?: string }[] };
     try {
       quotation = await sapPost(sap, 'Quotations', buildQuotationPayload(header, lines, today, trace));
       draft = await sapPost(sap, 'Drafts', buildOfferDraftPayload(header, lines, quotation, today, trace));
@@ -61,8 +61,8 @@ export async function POST(request: NextRequest) {
       await sapLogout(sap);
     }
 
-    const userSubject = String(body.subject ?? '').trim().slice(0, 200);
-    const subject = `${userSubject ? `${userSubject} · ` : ''}Oferta de venta #${draft.DocEntry} · ${header.CardCode}`;
+    const first = draft.DocumentLines?.[0];
+    const subject = offerSubject(draft.CardName, draft.CardCode ?? header.CardCode, first?.ItemDescription ?? first?.ItemCode ?? lines[0]?.ItemCode);
     const { id_request: idRequest } = await createGeneralRequest({
       company: companyId,
       subject,

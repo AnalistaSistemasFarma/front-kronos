@@ -1988,6 +1988,8 @@ function RequestBoard() {
                 />
               </Grid.Col>
 
+              {/* Oferta de venta: el asunto se arma solo (OV - cliente - NIT - primera línea). */}
+              {!isSalesProcess && (
               <Grid.Col span={{ base: 12, md: 12 }}>
                 <TextInput
                   label={parseInt(formData.process) == 4 ? 'Cargo' : 'Asunto'}
@@ -2005,6 +2007,7 @@ function RequestBoard() {
                   leftSection={<IconFileDescription size={16} />}
                 />
               </Grid.Col>
+              )}
             </Grid>
 
             {/* Activity Search Section */}

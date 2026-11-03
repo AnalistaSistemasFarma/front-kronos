@@ -8,8 +8,8 @@ import { odataString } from '../purchases/drafts';
  * O por nombre en la misma caja.
  */
 
-export type SearchKind = 'customer' | 'item' | 'warehouse_stock' | 'batches' | 'recent_orders';
-export const SEARCH_KINDS: SearchKind[] = ['customer', 'item', 'warehouse_stock', 'batches', 'recent_orders'];
+export type SearchKind = 'customer' | 'item' | 'warehouse_stock' | 'batches' | 'recent_orders' | 'customer_detail';
+export const SEARCH_KINDS: SearchKind[] = ['customer', 'item', 'warehouse_stock', 'batches', 'recent_orders', 'customer_detail'];
 export const PAGE_SIZE = 50;
 
 const key = (v: string) => `'${v.replace(/'/g, "''")}'`;
@@ -36,6 +36,8 @@ export function searchPath(kind: SearchKind, p: { q?: string; page?: number; ite
       const today = p.today ?? new Date().toISOString().slice(0, 10);
       return `BatchNumberDetails?$select=Batch,ItemCode,ItemDescription,ExpirationDate,ManufacturingDate,Status&$filter=ItemCode eq ${key(p.itemCode ?? '')} and ExpirationDate ge '${today}'&$orderby=ExpirationDate${page}`;
     }
+    case 'customer_detail':
+      return `BusinessPartners(${key(p.cardCode ?? '')})?$select=CardCode,CardName,ShipToDefault,BilltoDefault,BPAddresses`;
     case 'recent_orders':
       return `Orders?$select=DocEntry,DocNum,DocDate,DocTotal,DocumentStatus,NumAtCard&$filter=CardCode eq ${key(p.cardCode ?? '')}&$orderby=DocEntry desc&$top=20`;
   }
@@ -46,6 +48,14 @@ const s = (v: unknown) => (v == null ? '' : String(v));
 
 /** Filas para la ventana (columnas ya calculadas). */
 export function searchRows(kind: SearchKind, data: Record<string, unknown>): Record<string, unknown>[] {
+  if (kind === 'customer_detail') {
+    // Puntos de entrega (direcciones de envío) del cliente, como ModalLogistic de SAPSEND.
+    const addrs = ((data.BPAddresses as Record<string, unknown>[] | undefined) ?? []).filter((a) => s(a.AddressType) === 'bo_ShipTo');
+    return addrs.map((a) => ({
+      AddressName: s(a.AddressName), Street: s(a.Street), Block: s(a.Block), City: s(a.City), County: s(a.County), Country: s(a.Country), ZipCode: s(a.ZipCode),
+      isDefault: s(a.AddressName) === s(data.ShipToDefault), BilltoDefault: s(data.BilltoDefault),
+    }));
+  }
   if (kind === 'warehouse_stock') {
     const rows = (data.ItemWarehouseInfoCollection as Record<string, unknown>[] | undefined) ?? [];
     return rows

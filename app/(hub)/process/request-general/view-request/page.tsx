@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import PurchaseRequestDetail from '../../purchases/PurchaseRequestDetail';
+import SalesOfferDetail from '../../sales/SalesOfferDetail';
 import { useSearchParams, useRouter } from 'next/navigation';
 import axios from 'axios';
 import JSZip from 'jszip';
@@ -2496,6 +2497,9 @@ function ViewRequestPage() {
 
                 {/* Compras: si esta solicitud autoriza un borrador de compra, se muestra con el diseño de SAPSEND. */}
                 <PurchaseRequestDetail requestId={id} />
+
+                {/* Ventas: si esta solicitud es una oferta de venta, el borrador, sus líneas y el mapa de relaciones en SAP. */}
+                <SalesOfferDetail requestId={id} />
 
                 <Divider />
 

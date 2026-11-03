@@ -31,3 +31,11 @@ describe('payloads de SAP', () => {
     expect(q.DocumentLines[0].U_SEND_PriceLP).toBe(10);
   });
 });
+
+import { offerSubject } from './offer';
+describe('asunto automático', () => {
+  it('OV - nombre - NIT - primera línea', () => {
+    expect(offerSubject('DISTRIBUCIONES AXA SAS', '800052534R', 'EPINEFRINA 1MG/1ML  AMP')).toBe('OV - DISTRIBUCIONES AXA SAS - 800052534R - EPINEFRINA 1MG/1ML AMP');
+    expect(offerSubject(null, 'C1', '')).toBe('OV - C1');
+  });
+});
