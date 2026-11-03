@@ -290,15 +290,19 @@ export async function moveToStage(idRequest: number, target: 'AP' | 'AE' | 'AEDA
     if (!state || !FROM[target].includes(state)) {
       return { ok: false, error: `No se puede pasar a ${target} desde ${state ?? 'sin estado'}.` };
     }
+    // Al pasar de etapa queda también la traza de la aprobación anterior (como SAPSEND), así no
+    // depende de que la escritura de la decisión del autorizador haya entrado primero.
     const extra: Record<string, string> =
       target === 'AE'
-        ? { U_SEND_TraStateAE: 'SI', U_SEND_TraStateAETime: nowTrace() }
+        ? { U_SEND_TraStateAE: 'SI', U_SEND_TraStateAETime: nowTrace(), ...(state === 'AP' ? { U_SEND_TraAproAP: `${nowTrace()} | Precios autorizados en SynerLink` } : {}) }
         : target === 'AEDA'
-          ? { U_SEND_TraStateAEDA: 'SI', U_SEND_TraStateAEDATime: nowTrace() }
+          ? { U_SEND_TraStateAEDA: 'SI', U_SEND_TraStateAEDATime: nowTrace(), U_SEND_TraAproAE: `${nowTrace()} | Extracupo autorizado por dirección comercial en SynerLink` }
           : {};
     await withStep(
       { idRequest, stepKind: 'sap', stepName: `Pasar a «${STATE_LABEL[target]}»`, actionKey: `sales.state_${target.toLowerCase()}`, triggerEvent: 'on_execute', triggeredBy, idCompany: link.id_company, sapEntity: 'Drafts', requestSummary: { docEntry: link.doc_entry, de: state, a: target } },
-      () => sapPatch(s, `Drafts(${link.doc_entry})`, { U_SEND_State: target, ...extra }, false, { ifMatch: draft['odata.etag'] as string | undefined }),
+      // Sin If-Match: el Service Layer devuelve en los borradores un etag que no cambia y, desde la segunda
+      // escritura, SAP responde -2039 («Another user … modified data»). El estado se validó justo arriba.
+      () => sapPatch(s, `Drafts(${link.doc_entry})`, { U_SEND_State: target, ...extra }),
       () => ({ status: 'ok', sapDocEntry: link.doc_entry })
     );
     return { ok: true, detail: `Oferta pasó a «${STATE_LABEL[target]}»` };
@@ -379,7 +383,8 @@ export async function onSalesAuthorizationDecision(
     if (!approved) body.U_SEND_State = rejectedStateFor(state) as string;
     await withStep(
       { idRequest: Number(idRequest), stepKind: 'sap', stepName: approved ? 'Registrar autorización en SAP' : 'Aplicar rechazo en SAP', actionKey: approved ? null : 'sales.state_rejected', triggerEvent: approved ? 'on_approve' : 'on_reject', triggeredBy: 'user', idCompany: link.id_company, sapEntity: 'Drafts', requestSummary: { docEntry: link.doc_entry, de: state, a: body.U_SEND_State ?? state } },
-      () => sapPatch(s, `Drafts(${link.doc_entry})`, body, false, { ifMatch: draft['odata.etag'] as string | undefined }),
+      // Sin If-Match (ver moveToStage). El estado se validó justo arriba.
+      () => sapPatch(s, `Drafts(${link.doc_entry})`, body),
       () => ({ status: 'ok', sapDocEntry: link.doc_entry })
     );
     if (!approved) await updateLink(link.id, { status: 'rejected', error: null });
