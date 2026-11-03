@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Alert, Badge, Card, Group, Loader, ScrollArea, Stack, Table, Text, ThemeIcon } from '@mantine/core';
+import { Alert, Badge, Card, Group, ScrollArea, Stack, Table, Text, ThemeIcon } from '@mantine/core';
 import { IconArrowRight, IconFileInvoice, IconFileText, IconHierarchy2, IconPencil, IconReceipt, IconTruckDelivery } from '@tabler/icons-react';
 import { STATE_LABELS } from '../../../../lib/sales/states';
+import SalesCreditPanel from './SalesCreditPanel';
 
 /**
  * Bloque «Oferta de venta en SAP» dentro del detalle de la solicitud: datos del borrador,
@@ -62,7 +63,7 @@ function DocCard({ d }: { d: RelDoc }) {
   );
 }
 
-export default function SalesOfferDetail({ requestId }: { requestId: number | string | null | undefined }) {
+export default function SalesOfferDetail({ requestId, onLoaded, mb }: { requestId: number | string | null | undefined; onLoaded?: (isSale: boolean) => void; mb?: string }) {
   const [sale, setSale] = useState<Sale | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,6 +76,7 @@ export default function SalesOfferDetail({ requestId }: { requestId: number | st
         if (cancelled) return;
         if (!r.ok) throw new Error(d.error || 'No se pudo consultar la oferta en SAP');
         setSale(d.sale ?? null);
+        onLoaded?.(Boolean(d.sale));
       })
       .catch((e) => !cancelled && setError((e as Error).message));
     return () => {
@@ -82,8 +84,9 @@ export default function SalesOfferDetail({ requestId }: { requestId: number | st
     };
   }, [requestId]);
 
-  if (error) return <Alert color='yellow' title='Oferta de venta en SAP'>{error}</Alert>;
-  if (sale === undefined) return requestId ? <Loader size='sm' /> : null;
+  if (error) return <Alert color='yellow' title='Oferta de venta en SAP' mb={mb}>{error}</Alert>;
+  // Mientras carga no se muestra nada: la mayoría de las solicitudes no son de ventas.
+  if (sale === undefined) return null;
   if (sale === null) return null;
 
   const d = sale.draft;
@@ -92,7 +95,7 @@ export default function SalesOfferDetail({ requestId }: { requestId: number | st
   const columns: Kind[] = ['quotation', 'draft', 'order', 'delivery', 'invoice'];
 
   return (
-    <Card withBorder radius='md' p='md'>
+    <Card withBorder radius='md' p='md' mb={mb} shadow='sm'>
       <Group justify='space-between' mb='sm' wrap='wrap'>
         <Group gap={8}>
           <IconFileInvoice size={20} />
@@ -112,6 +115,9 @@ export default function SalesOfferDetail({ requestId }: { requestId: number | st
         <div><Text size='xs' c='dimmed'>Fecha / entrega</Text><Text size='sm'>{day(d.DocDate)} · {day(d.DocDueDate)}</Text></div>
         <div><Text size='xs' c='dimmed'>Total</Text><Text size='sm' fw={700}>{money(d.DocTotal)}</Text><Text size='xs' c='dimmed'>IVA {money(d.VatSum)}</Text></div>
       </Group>
+
+      {/* Decisión de cartera: cupo, % de extracupo y cartera por edades del cliente. */}
+      {requestId ? <div style={{ marginBottom: 16 }}><SalesCreditPanel requestId={requestId} /></div> : null}
 
       <Group gap={6} mb='xs'>
         <IconHierarchy2 size={18} />
