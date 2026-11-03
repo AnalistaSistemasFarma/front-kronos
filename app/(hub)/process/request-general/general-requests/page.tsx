@@ -270,9 +270,11 @@ function RequestGeneralPage() {
         setTasksByRequest({});
         return;
       }
-      const response = await fetch(
-        `/api/requests-general/activities-requets?ids=${ids.join(',')}`
-      );
+      const response = await fetch('/api/requests-general/activities-requets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
       if (!response.ok) throw new Error('Failed to fetch request tasks');
 
       const data: RequestTask[] = await response.json();
