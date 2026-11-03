@@ -554,7 +554,8 @@ export default function SgcSignaturePlacementCanvas({
                 overflow: 'hidden',
                 background: '#fff',
                 userSelect: 'none',
-                touchAction: coarse ? 'pan-x pan-y pinch-zoom' : 'none',
+                // La hoja deja desplazarse con el dedo; las cajas de firma bloquean el gesto para arrastrarlas (igual que SynerLink, PR #814).
+                touchAction: 'pan-x pan-y pinch-zoom',
               }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}

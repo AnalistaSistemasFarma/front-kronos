@@ -78,6 +78,7 @@ model User {
   userTypesAuthorizations UserTypesAuthorization[]
   sessions                Session[]
   auditLogs               UserAuditLog[]
+  passkeys                UserPasskey[]
   // Modulo "Asistentes IA" (chat de agentes) — back-relations requeridas por Prisma.
   chatConversations       ChatConversation[]       @relation("ChatConversationUser")
   chatGroupsCreated       ChatConversation[]       @relation("ChatConversationCreator")
@@ -5086,6 +5087,34 @@ model EmailThreadCase {
 // sin frenar el login. NUNCA guarda contraseñas, PIN ni tokens.
 // Migración: prisma/migrations/20261016200000_user_login_audit (a mano en prod).
 // ---------------------------------------------------------------------------
+/// Acceso con biométrico (passkeys / WebAuthn), 2026-10-31. Cada fila es la llave PÚBLICA de un
+/// dispositivo (iPhone con Face ID, Android con huella, Windows Hello…). La cara o la huella NUNCA
+/// salen del dispositivo: aquí no hay datos biométricos. Ver lib/auth/passkeys.
+model UserPasskey {
+  id_passkey    Int       @id @default(autoincrement())
+  id_user       String
+  /// Id de la credencial (base64url), único en todo SynerLink.
+  credential_id String    @unique(map: "UQ_user_passkey_credential") @db.NVarChar(512)
+  public_key    Bytes
+  counter       BigInt    @default(0)
+  /// Separados por coma: internal, hybrid, usb…
+  transports    String?   @db.NVarChar(200)
+  /// singleDevice | multiDevice (sincronizada por iCloud / Google)
+  device_type   String    @db.NVarChar(20)
+  backed_up     Boolean   @default(false)
+  aaguid        String?   @db.NVarChar(36)
+  /// Nombre que ve la persona en su perfil (p. ej. «iPhone · Safari»).
+  name          String    @db.NVarChar(100)
+  created_at    DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  created_ip    String?   @db.NVarChar(64)
+  last_used_at  DateTime? @db.DateTime2
+  user          User      @relation(fields: [id_user], references: [id], onDelete: Cascade, map: "FK_user_passkey_user")
+
+  @@index([id_user], map: "IX_user_passkey_usuario")
+  @@map("user_passkey")
+  @@schema("dbo")
+}
+
 model UserLoginAudit {
   id             Int      @id @default(autoincrement())
   attempted_at   DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2

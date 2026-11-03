@@ -8,6 +8,7 @@ import {
 import { syncAuthorizationToSapsend } from '../../../../lib/sapsend/authorizationStatus.js';
 import { onAuthorizationDecision as onPurchaseAuthorizationDecision } from '../../../../lib/purchases/authorization';
 import { runSapExecutors } from '../../../../lib/workflow-sap/engine';
+import { onSalesAuthorizationDecision } from '../../../../lib/sales/flow';
 import { advanceSequentialTask } from '../../../../lib/workflow/advanceSequentialTask.js';
 import { closeRequestGeneral } from '../../../../lib/workflow/closeRequestGeneral.js';
 import { resolveSessionUser } from '../../../../lib/chat/http';
@@ -288,6 +289,11 @@ export async function POST(req) {
         // en SAP. No bloquea; el gate (¿es de compras?) vive dentro (purchase_authorization).
         fireAndForgetNotification(
           onPurchaseAuthorizationDecision(prevRow?.id_request_general, Number(nextStatus) === 2, resolution)
+        );
+        // VENTAS: registra la decisión en el borrador de venta y, si es rechazo, lo deja en
+        // NAP / NADC / NADA según la etapa. El gate (¿es de ventas?) vive dentro (sales_authorization).
+        fireAndForgetNotification(
+          onSalesAuthorizationDecision(prevRow?.id_request_general, Number(nextStatus) === 2, resolution)
         );
       }
 

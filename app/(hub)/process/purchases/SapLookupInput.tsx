@@ -12,7 +12,9 @@ import type { LookupKind, LookupOption } from '../../../../lib/purchases/lookups
 
 interface Props {
   companyId: string | number | null;
-  kind: LookupKind;
+  kind: LookupKind | 'customer';
+  /** Ruta de la búsqueda (por defecto la de Compras; Ventas usa /api/sales/lookup). */
+  endpoint?: string;
   value: string;
   onChange: (value: string) => void;
   /** Al elegir una opcion: valor + campos extra (descripcion, nombre del proveedor...). */
@@ -32,6 +34,7 @@ export const NOT_FROM_LIST = 'Seleccione un valor de la lista';
 export default function SapLookupInput({
   companyId,
   kind,
+  endpoint = '/api/purchases/lookup',
   value,
   onChange,
   onSelect,
@@ -69,7 +72,7 @@ export default function SapLookupInput({
     const ctrl = new AbortController();
     const t = setTimeout(() => {
       setLoading(true);
-      fetch(`/api/purchases/lookup?companyId=${companyId}&kind=${kind}&q=${encodeURIComponent(q)}`, { signal: ctrl.signal })
+      fetch(`${endpoint}?companyId=${companyId}&kind=${kind}&q=${encodeURIComponent(q)}`, { signal: ctrl.signal })
         .then((r) => r.json())
         .then((d) => setOptions(Array.isArray(d.options) ? d.options : []))
         .catch(() => undefined)
