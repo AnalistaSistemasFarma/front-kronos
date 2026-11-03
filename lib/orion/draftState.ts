@@ -10,6 +10,7 @@ import type {
 import {
   buildPendingApprovals,
   currentPendingApproval,
+  SELF_REVIEW_COMMENT,
   type OrionReviewValidator,
 } from './reviewState';
 
@@ -414,6 +415,43 @@ export function applyDraftNewVersion(
   throw draftError(
     `El documento está "${ORION_DRAFT_STATUS_LABEL[state.status]}": no se pueden subir versiones.`
   );
+}
+
+/**
+ * La preparadora que también es validadora no se crea una tarea a sí misma: al enviar la
+ * subversión su aprobación queda registrada sobre esa misma subversión. Si era la única que
+ * faltaba, el Word queda validado internamente. Solo toca a quien envía; el resto sigue igual.
+ */
+export function applyDraftSelfApproval(
+  state: OrionDraftState,
+  actor: DraftActor,
+  now = new Date().toISOString()
+): OrionDraftState {
+  const review = state.internalReview;
+  if (state.status !== 'EN_VALIDACION_INTERNA' || !review) return state;
+  let changed = false;
+  const approvals = review.approvals.map((a) => {
+    if (a.decision !== 'PENDIENTE' || !isSameValidator(a, actor.email, actor.userId)) return a;
+    changed = true;
+    return {
+      ...a,
+      decision: 'APROBADO' as const,
+      decidedAt: now,
+      comment: SELF_REVIEW_COMMENT,
+      approvedVersion: state.versionLabel,
+      name: a.name || actor.name || null,
+    };
+  });
+  if (!changed) return state;
+  const allApproved = approvals.every((a) => a.decision === 'APROBADO');
+  return {
+    ...state,
+    status: allApproved ? 'VALIDADO_INTERNO' : 'EN_VALIDACION_INTERNA',
+    internalReview: allApproved
+      ? { ...review, approvals, status: 'APROBADO', approvedAt: now }
+      : { ...review, approvals },
+    updatedAt: now,
+  };
 }
 
 /**

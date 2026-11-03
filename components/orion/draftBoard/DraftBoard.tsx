@@ -288,6 +288,9 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
   }, [requestId, fileId, typingBlock, boardReady]);
 
   const me = board?.currentUserEmail ?? '';
+  // La preparadora que también es validadora: su aprobación queda al enviar (sin tarea propia).
+  const selfValidatorId =
+    (board?.validators ?? []).find((v) => v.email.trim().toLowerCase() === me.trim().toLowerCase())?.userId ?? null;
   const typing = useMemo(() => {
     const map: Record<number, string> = {};
     for (const p of presence) {
@@ -1269,8 +1272,18 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
               onChange={setValidatorIds}
               disabled={busy}
               parallel
+              selfUserId={selfValidatorId}
             />
           )}
+          {selfValidatorId && validatorIds.includes(selfValidatorId) ? (
+            <Alert color='teal' variant='light' icon={<IconCheck size={16} />} p='xs'>
+              <Text size='xs'>
+                {validatorIds.length === 1
+                  ? `Solo usted valida este documento: al enviar queda validado internamente con la ${draft.versionLabel}, sin crearle una tarea.`
+                  : `Usted también valida este documento: su aprobación de la ${draft.versionLabel} queda al enviar y no se le crea una tarea. Los demás revisan como siempre.`}
+              </Text>
+            </Alert>
+          ) : null}
           <Group justify='flex-end'>
             <Button variant='default' onClick={() => setValidatorsOpen(null)}>
               Cancelar
