@@ -13,6 +13,8 @@ export interface OfferHeader {
   Comments?: string;
   U_SEND_InterComments?: string;
   ShipToCode?: string;
+  /** Dirección de facturación (la del cliente por defecto, como SAPSEND). */
+  PayToCode?: string;
 }
 
 export interface OfferLine {
@@ -68,6 +70,7 @@ function header(h: OfferHeader) {
   if (h.Comments) out.Comments = txt(h.Comments, 254);
   if (h.U_SEND_InterComments) out.U_SEND_InterComments = txt(h.U_SEND_InterComments, 254);
   if (h.ShipToCode) out.ShipToCode = txt(h.ShipToCode, 50);
+  if (h.PayToCode) out.PayToCode = txt(h.PayToCode, 50);
   return out;
 }
 
@@ -110,4 +113,10 @@ export function buildOfferDraftPayload(
       BaseLine: qLines[i]?.LineNum ?? i,
     })),
   };
+}
+
+/** Asunto de la solicitud: «OV - NOMBRE DEL CLIENTE - NIT - primera línea» (Nicolás Rivera, 2026-11-03). PURA. */
+export function offerSubject(cardName: unknown, cardCode: unknown, firstLine: unknown): string {
+  const clean = (v: unknown) => String(v ?? '').replace(/\s+/g, ' ').trim();
+  return ['OV', clean(cardName), clean(cardCode), clean(firstLine)].filter(Boolean).join(' - ').slice(0, 250);
 }
