@@ -86,3 +86,11 @@ export async function GET(req) {
     );
   }
 }
+
+export async function POST(req) {
+  const body = await req.json().catch(() => ({}));
+  const ids = Array.isArray(body?.ids) ? body.ids.join(',') : '';
+  const url = new URL(req.url);
+  url.searchParams.set('ids', ids);
+  return GET(new Request(url, { headers: req.headers }));
+}
