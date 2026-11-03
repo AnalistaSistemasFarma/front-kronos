@@ -84,6 +84,8 @@ import {
 // Solo el tipo: exportBoardExcel (y con él exceljs, ~900 KB) se carga al tocar Exportar.
 import type { BoardRequest } from '@/lib/request-general/exportBoardExcel';
 import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
+import { formatEstimatedPaymentDateShort } from '@/lib/treasury/estimatedPaymentDate';
+import { parseTableValue, parseTableConfig } from '@/lib/requests-general/tableField';
 import { createPrerenderSearchParamsForClientPage } from 'next/dist/server/request/search-params';
 
 const ITEMS_PER_PAGE = 100;
@@ -820,42 +822,23 @@ function RequestBoard() {
   async function exportToExcel() {
     if (exporting) return;
     const applied = appliedFiltersRef.current ?? filters;
-    const includeRequests = typeFilter !== 'tasks' && includesRequests(applied);
-    const includeTasks =
-      typeFilter !== 'requests' && !REQUEST_ONLY_STATUSES.includes(applied.status || '');
 
     setExporting(true);
     try {
       const { boardExportFilename, buildBoardWorkbook } = await import('@/lib/request-general/exportBoardExcel');
-      let allTickets: Ticket[] = [];
-      if (includeRequests) {
-        const params = buildTicketParams(applied);
-        const response = await fetch(`/api/requests-general/request-assigned?${params.toString()}`);
-        if (!response.ok) throw new Error('solicitudes');
-        const data = await response.json();
-        allTickets = Array.isArray(data) ? data : [];
-      }
 
-      let tasks: AssignedTask[] = [];
-      if (includeTasks && userId) {
-        const taskParams = buildTicketParams(applied);
-        taskParams.append('idUser', String(userId));
-        const response = await fetch(
-          `/api/requests-general/activities-assigned?${taskParams.toString()}`
-        );
-        if (!response.ok) throw new Error('tareas');
-        const data = await response.json();
-        tasks = Array.isArray(data) ? data : [];
-      }
+      const params = buildTicketParams(applied);
+      const response = await fetch(`/api/requests-general/request-assigned?${params.toString()}`);
+      if (!response.ok) throw new Error('solicitudes');
+      const data = await response.json();
+      const allTickets: Ticket[] = Array.isArray(data) ? data : [];
 
-      if (allTickets.length === 0 && tasks.length === 0) {
+      if (allTickets.length === 0) {
         toast.error('No hay registros con los filtros actuales');
         return;
       }
 
-      const tasksById = allTickets.length
-        ? await loadTasksByRequest(allTickets.map((ticket) => ticket.id))
-        : {};
+      const tasksById = await loadTasksByRequest(allTickets.map((ticket) => ticket.id));
 
       const requests: BoardRequest[] = allTickets.map((ticket) => ({
         id: ticket.id,
@@ -876,15 +859,6 @@ function RequestBoard() {
       const workbook = await buildBoardWorkbook({
         module: 'Solicitudes y Tareas Asignadas',
         filters: [
-          {
-            label: 'Vista',
-            value:
-              typeFilter === 'tasks'
-                ? 'Solo tareas'
-                : typeFilter === 'requests'
-                  ? 'Solo solicitudes'
-                  : 'Solicitudes y tareas',
-          },
           { label: 'Estado', value: STATUS_LABELS[applied.status] || 'Todos' },
           { label: 'Empresa', value: companyLabel },
           { label: 'Proceso', value: applied.process || 'Todos' },
@@ -893,20 +867,222 @@ function RequestBoard() {
           { label: 'Fecha hasta', value: applied.date_to || 'Sin límite' },
         ],
         requests,
-        assignedTasks: tasks.map((task) => ({
-          requestId: task.id_request_general,
-          taskId: task.id_task ?? task.id,
-          task: task.task,
-          subject: task.subject_request,
-          process: task.process,
-          company: task.company,
-          status: task.status_task,
-          createdAt: task.created_at,
-          requester: task.name_requester,
-          assigned: task.assigned,
-          description: task.description,
-        })),
       });
+
+      // Hoja extra: "Solicitudes de Pago". Trae los campos extra (pivote de
+      // request_form_value) para las solicitudes del proceso "Solicitud de Pago"
+      // que estén en el panel. El endpoint filtra por proceso, así que basta con
+      // mandarle los ids de los tickets cargados.
+      try {
+        const ids = allTickets.map((t) => t.id).filter((n) => Number.isInteger(n));
+        if (ids.length > 0) {
+          const payResponse = await fetch('/api/requests-general/payment-report', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids }),
+          });
+
+          if (payResponse.ok) {
+            const paymentRows: Array<{
+              id_solicitud: number;
+              asunto?: string | null;
+              empresa?: string | null;
+              subempresa?: string | null;
+              creador_solicitud?: string | null;
+              estado?: string | null;
+              fecha_creación_solicitud?: string | null;
+              tipo_solicitud?: string | null;
+              subtipo_solicitud?: string | null;
+              valor_pagar?: string | null;
+              fecha_solicitada_pago?: string | null;
+              acreedor?: string | null;
+            }> = await payResponse.json().catch(() => []);
+
+            if (Array.isArray(paymentRows) && paymentRows.length > 0) {
+              const splitAcreedor = (value?: string | null) => {
+                const r = String(value || '').trim();
+                const idx = r.indexOf(' - ');
+                if (idx === -1) return { doc: '', name: r };
+                return { doc: r.slice(0, idx).trim(), name: r.slice(idx + 3).trim() };
+              };
+              const formatReqDate = (raw?: string | null) => {
+                if (!raw) return '';
+                const d = new Date(raw);
+                if (isNaN(d.getTime())) return String(raw);
+                return new Intl.DateTimeFormat('es-CO', {
+                  day: '2-digit',
+                  month: '2-digit',
+                  year: 'numeric',
+                  timeZone: 'UTC',
+                }).format(d);
+              };
+
+              const paySheet = workbook.addWorksheet('Solicitudes de Pago');
+              paySheet.columns = [
+                { key: 'id', header: 'ID Solicitud', width: 12 },
+                { key: 'empresa', header: 'Empresa', width: 24 },
+                { key: 'subempresa', header: 'Subempresa', width: 22 },
+                { key: 'tipo', header: 'Tipo', width: 22 },
+                { key: 'subtipo', header: 'Subtipo', width: 24 },
+                { key: 'documento', header: 'Documento', width: 16 },
+                { key: 'acreedor', header: 'Acreedor', width: 30 },
+                { key: 'valor', header: 'Valor a Pagar', width: 16 },
+                { key: 'fecha_solicitada', header: 'Fecha Solicitada de Pago', width: 22 },
+                { key: 'fecha_estimada', header: 'Fecha Estimada de Pago', width: 24 },
+                { key: 'estado', header: 'Estado', width: 16 },
+                { key: 'solicitante', header: 'Solicitante', width: 24 },
+                { key: 'asunto', header: 'Asunto', width: 30 },
+              ];
+
+              paymentRows.forEach((r) => {
+                const a = splitAcreedor(r.acreedor);
+                const valor = Number(String(r.valor_pagar ?? '').replace(/[^\d.-]/g, ''));
+                paySheet.addRow({
+                  id: r.id_solicitud,
+                  empresa: r.empresa ?? '',
+                  subempresa: r.subempresa ?? '',
+                  tipo: r.tipo_solicitud ?? '',
+                  subtipo: r.subtipo_solicitud ?? '',
+                  documento: a.doc,
+                  acreedor: a.name,
+                  valor: Number.isFinite(valor) ? valor : '',
+                  fecha_solicitada: formatReqDate(r.fecha_solicitada_pago),
+                  fecha_estimada: formatEstimatedPaymentDateShort(
+                    r.empresa,
+                    r.fecha_creación_solicitud
+                  ),
+                  estado: r.estado ?? '',
+                  solicitante: r.creador_solicitud ?? '',
+                  asunto: r.asunto ?? '',
+                });
+              });
+
+              paySheet.getRow(1).font = { bold: true };
+              paySheet.getColumn('valor').numFmt = '#,##0';
+            }
+          } else {
+            console.error('No se pudo obtener el reporte de pagos:', payResponse.status);
+          }
+        }
+      } catch (e) {
+        console.error('Error generando la hoja de Solicitudes de Pago:', e);
+      }
+
+      try {
+        const ids = allTickets.map((t) => t.id).filter((n) => Number.isInteger(n));
+        if (ids.length > 0) {
+          const messagingResponse = await fetch('/api/requests-general/messaging-report', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids }),
+          });
+
+          if (messagingResponse.ok) {
+            const messagingRows: Array<{
+              id_solicitud: number;
+              descripcion?: string | null;
+              empresa?: string | null;
+              nombre_solicitante?: string | null;
+              estado_solicitud?: string | null;
+              fecha_creación?: string | null;
+              proceso?: string | null;
+              destinatario?: string | null;
+              destinatario_config?: string | null;
+              remitente?: string | null;
+              remitente_config?: string | null;
+              observacion?: string | null;
+            }> = await messagingResponse.json().catch(() => []);
+
+            if (Array.isArray(messagingRows) && messagingRows.length > 0) {
+              const formatReqDate = (raw?: string | null) => {
+                if (!raw) return '';
+                const d = new Date(raw);
+                if (isNaN(d.getTime())) return String(raw);
+                return new Intl.DateTimeFormat('es-CO', {
+                  day: '2-digit',
+                  month: '2-digit',
+                  year: 'numeric',
+                  timeZone: 'UTC',
+                }).format(d);
+              };
+
+              // Destinatario/Remitente son campos de tipo "tabla": su value_text es
+              // un JSON { rows: [...] }. Se aplana a texto legible usando las
+              // etiquetas de columna (config_json). Si no es JSON de tabla, se
+              // devuelve el texto tal cual.
+              const formatTableValue = (
+                valueText?: string | null,
+                configJson?: string | null
+              ) => {
+                const txt = String(valueText ?? '').trim();
+                if (!txt || (txt[0] !== '{' && txt[0] !== '[')) return txt;
+                const { rows } = parseTableValue(txt);
+                if (rows.length === 0) return txt;
+                const labelByKey = new Map(
+                  parseTableConfig(configJson).columns.map((c) => [c.key, c.label])
+                );
+                return rows
+                  .map((row) =>
+                    Object.entries(row)
+                      .filter(
+                        ([, v]) => v !== null && v !== undefined && String(v).trim() !== ''
+                      )
+                      .map(([k, v]) => {
+                        const label = labelByKey.get(k);
+                        return label ? `${label}: ${String(v)}` : String(v);
+                      })
+                      .join(' · ')
+                  )
+                  .filter((line) => line.length > 0)
+                  .join('\n');
+              };
+
+              const messagingSheet = workbook.addWorksheet('Solicitudes de Mensajería');
+              messagingSheet.columns = [
+                { key: 'id', header: 'ID Solicitud', width: 12 },
+                { key: 'empresa', header: 'Empresa', width: 24 },
+                { key: 'descripcion', header: 'Descripción', width: 22 },
+                { key: 'nombre_solicitante', header: 'Nombre del Solicitante', width: 22 },
+                { key: 'estado_solicitud', header: 'Estado de la Solicitud', width: 24 },
+                { key: 'fecha_creación', header: 'Fecha de Creación', width: 16 },
+                { key: 'proceso', header: 'Proceso', width: 30 },
+                { key: 'destinatario', header: 'Destinatario', width: 30 },
+                { key: 'remitente', header: 'Remitente', width: 30 },
+                { key: 'observacion', header: 'Observación', width: 30 },
+              ];
+
+              messagingRows.forEach((r) => {
+                messagingSheet.addRow({
+                  id: r.id_solicitud,
+                  empresa: r.empresa ?? '',
+                  descripcion: r.descripcion ?? '',
+                  nombre_solicitante: r.nombre_solicitante ?? '',
+                  estado_solicitud: r.estado_solicitud ?? '',
+                  fecha_creación: formatReqDate(r.fecha_creación),
+                  proceso: r.proceso ?? '',
+                  destinatario: formatTableValue(r.destinatario, r.destinatario_config),
+                  remitente: formatTableValue(r.remitente, r.remitente_config),
+                  observacion: r.observacion ?? '',
+                });
+              });
+
+              messagingSheet.getRow(1).font = { bold: true };
+              messagingSheet.getColumn('destinatario').alignment = {
+                wrapText: true,
+                vertical: 'top',
+              };
+              messagingSheet.getColumn('remitente').alignment = {
+                wrapText: true,
+                vertical: 'top',
+              };
+            }
+          } else {
+            console.error('No se pudo obtener el reporte de mensajería:', messagingResponse.status);
+          }
+        }
+      } catch (e) {
+        console.error('Error generando la hoja de Solicitudes de Mensajería:', e);
+      }
 
       await downloadWorkbook(workbook, boardExportFilename('Solicitudes-y-tareas-asignadas'));
       toast.success('Excel descargado');
