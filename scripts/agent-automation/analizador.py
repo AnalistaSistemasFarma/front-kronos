@@ -5,7 +5,9 @@ ANALIZADOR DEL INDICADOR DE AUTOMATIZACIONES (Auditoría de agentes).
 Recalcula, en SOLO LECTURA, cuántas veces se pidió cada caso de uso a cada agente
 y cuánto tardó el agente, y publica el corte en SynerLink
 (POST /api/chat/auditoria/automatizaciones) con la llave del recolector del
-inventario (~/.horus/agent-inventory/collector.env).
+inventario. Destinos (2026-11-01): ~/.horus/agent-inventory/collector.env (PRUEBAS)
+y, si existe, collector-prod.env (PRODUCCIÓN); o --conf (repetible) / AUTOMATION_CONF
+(rutas separadas por «:»). El cálculo se hace UNA vez y se publica en cada destino; en --ronda, cada destino atiende sus propias solicitudes de «Analizar ahora».
 
   python3 analizador.py --ronda      # cada 5 min: solo trabaja si alguien pulsó «Analizar ahora»
   python3 analizador.py --programado # semanal
@@ -23,7 +25,8 @@ el tiempo medido del agente.
 import datetime as dt, json, os, pathlib, re, statistics as st, subprocess, sys, tempfile, unicodedata, urllib.error, urllib.request
 
 AQUI = pathlib.Path(__file__).resolve().parent
-CONF = pathlib.Path(os.path.expanduser('~/.horus/agent-inventory/collector.env'))
+CONF = pathlib.Path(os.path.expanduser('~/.horus/agent-inventory/collector.env'))            # PRUEBAS
+CONF_PROD = pathlib.Path(os.path.expanduser('~/.horus/agent-inventory/collector-prod.env'))  # PRODUCCIÓN (opcional)
 CATALOGO = pathlib.Path(os.path.expanduser('~/.horus/agent-automation/catalogo.json'))
 DESDE = '2026-09-07'          # primer día con conversaciones en SynerLink
 SSH = 'serfarma05'
@@ -41,14 +44,22 @@ ORDER BY m.id_conversation, m.id;
 
 def log(m): print('%s %s' % (dt.datetime.now().isoformat(timespec='seconds'), m), flush=True)
 
-def conf():
+def conf(ruta=CONF):
     c = {}
-    for l in CONF.read_text().splitlines():
+    for l in ruta.read_text().splitlines():
         if '=' in l and not l.lstrip().startswith('#'):
             k, v = l.split('=', 1); c[k.strip()] = v.strip().strip('"')
     url, key = c.get('SYNERLINK_INVENTORY_URL', '').rstrip('/'), c.get('SYNERLINK_INVENTORY_KEY', '')
-    if not url or len(key) < 32: sys.exit('Falta configurar %s' % CONF)
+    if not url or len(key) < 32: sys.exit('Falta configurar %s' % ruta)
     return url, key
+
+def destinos(a):
+    """--conf (repetible) > AUTOMATION_CONF > collector.env + collector-prod.env si existe."""
+    rutas = [a[i + 1] for i, x in enumerate(a) if x == '--conf' and i + 1 < len(a)]
+    if not rutas and os.environ.get('AUTOMATION_CONF'):
+        rutas = [r for r in os.environ['AUTOMATION_CONF'].split(':') if r]
+    rutas = [pathlib.Path(os.path.expanduser(r)) for r in rutas] or [CONF] + ([CONF_PROD] if CONF_PROD.exists() else [])
+    return [conf(r) for r in rutas]
 
 def llamar(url, key, ruta, cuerpo):
     req = urllib.request.Request(url + ruta, data=json.dumps(cuerpo).encode(), method='POST',
@@ -58,6 +69,9 @@ def llamar(url, key, ruta, cuerpo):
     except urllib.error.HTTPError as e:
         try: return e.code, json.loads(e.read() or b'{}')
         except Exception: return e.code, {}
+    except (urllib.error.URLError, OSError) as e:
+        # Un destino caído no frena a los demás.
+        return 'sin conexión', {'error': str(getattr(e, 'reason', e))[:200]}
 
 def leer_produccion():
     """Corre la consulta SOLO SELECT en serfarma05 y borra los archivos al terminar."""
@@ -121,15 +135,18 @@ def calcular(catalogo, ts, corte):
 def main():
     a = sys.argv[1:]
     ensayo, ronda = '--ensayo' in a, '--ronda' in a
-    url = key = None
-    id_run = None
+    # (url, key, idRun): en --ronda solo los destinos con una solicitud pendiente, cada uno con la suya;
+    # en --programado todos, con idRun vacío (el servidor crea una corrida nueva: no pisa la #1).
+    trabajo = []
     if not ensayo:
-        url, key = conf()
-        if ronda:
+        for url, key in destinos(a):
+            if not ronda:
+                trabajo.append((url, key, None)); continue
             code, body = llamar(url, key, '/api/chat/auditoria/automatizaciones/solicitudes', {})
-            if code != 200: log('no se pudo consultar solicitudes: HTTP %s' % code); return
-            if not body.get('corrida'): return  # nada pendiente
-            id_run = body['corrida']['id']; log('tomé la corrida #%s' % id_run)
+            if code != 200: log('%s: no se pudo consultar solicitudes: HTTP %s' % (url, code)); continue
+            if not body.get('corrida'): continue  # nada pendiente en ese destino
+            trabajo.append((url, key, body['corrida']['id'])); log('%s: tomé la corrida #%s' % (url, body['corrida']['id']))
+        if not trabajo: return
     try:
         catalogo = json.loads(CATALOGO.read_text())
         ts = tareas(leer_produccion())
@@ -138,14 +155,16 @@ def main():
         log('tareas %d · casos %d · sin caso conocido %d' % (len(ts), len(casos), sin))
         if ensayo:
             print(json.dumps(sorted(((c['code'], c['caso'][:50], c['ocurrencias'], c['clase']) for c in casos), key=lambda x: -x[2])[:20], ensure_ascii=False, indent=0)); return
-        cuerpo = {'idRun': id_run, 'origen': 'manual' if ronda else 'programado', 'corte': corte, 'periodoDesde': DESDE,
-                  'tareas': len(ts), 'tareasSinClasificar': sin, 'casos': casos}
-        code, body = llamar(url, key, '/api/chat/auditoria/automatizaciones', cuerpo)
-        log('publicado HTTP %s %s' % (code, json.dumps(body, ensure_ascii=False)[:200]))
+        for url, key, id_run in trabajo:
+            cuerpo = {'idRun': id_run, 'origen': 'manual' if ronda else 'programado', 'corte': corte, 'periodoDesde': DESDE,
+                      'tareas': len(ts), 'tareasSinClasificar': sin, 'casos': casos}
+            code, body = llamar(url, key, '/api/chat/auditoria/automatizaciones', cuerpo)
+            log('%s: publicado HTTP %s %s' % (url, code, json.dumps(body, ensure_ascii=False)[:200]))
     except Exception as e:
         log('falló: %s' % str(e)[:300])
-        if id_run and url:
-            llamar(url, key, '/api/chat/auditoria/automatizaciones/solicitudes', {'fallo': id_run, 'error': str(e)[:300]})
+        for url, key, id_run in trabajo:
+            if id_run:
+                llamar(url, key, '/api/chat/auditoria/automatizaciones/solicitudes', {'fallo': id_run, 'error': str(e)[:300]})
 
 if __name__ == '__main__':
     main()

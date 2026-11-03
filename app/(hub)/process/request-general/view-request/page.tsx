@@ -989,8 +989,16 @@ function ViewRequestPage() {
   }, [request?.id, request?.id_requester, request?.requester, request?.user, request?.assignedUserName, session, userName, session?.user?.id]);
 
   // El solicitante puede CERRAR su solicitud (Resuelto/Cancelado/Devolver) aunque no
-  // pueda editar los campos. Quien gestiona (canEdit) también puede.
-  const canClose = canEdit || isRequester;
+  // pueda editar los campos, PERO solo cuando él mismo es el asignado de la solicitud
+  // (id del creador == id del asignado). Si el asignado es otra persona, no puede cerrar.
+  // Quien gestiona (canEdit) siempre puede.
+  const assignedId =
+    request?.id_assigned_process_category || request?.id_assigned_category;
+  const isSelfAssigned =
+    !!request?.id_requester &&
+    !!assignedId &&
+    String(request.id_requester) === String(assignedId);
+  const canClose = canEdit || (isRequester && isSelfAssigned);
 
   useEffect(() => {
     const processId = Number(request?.id_process_category);

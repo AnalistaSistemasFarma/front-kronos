@@ -1,0 +1,150 @@
+/*
+ * Buscador estilo iOS / macOS (UISearchBar): cápsula gris translúcida, lupa y X redonda
+ * dentro, y "Cancelar" que entra deslizándose al enfocar. Trae sus colores claro/oscuro.
+ */
+
+.root {
+  --fill: rgba(118, 118, 128, 0.12);
+  --fill-focus: rgba(118, 118, 128, 0.16);
+  --glyph: rgba(60, 60, 67, 0.6);
+  --clear: rgba(60, 60, 67, 0.3);
+  --text: #000;
+  --accent: #007aff;
+
+  display: flex;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', var(--font-sans, system-ui), sans-serif;
+}
+
+:global([data-mantine-color-scheme='dark']) .root {
+  --fill: rgba(118, 118, 128, 0.24);
+  --fill-focus: rgba(118, 118, 128, 0.32);
+  --glyph: rgba(235, 235, 245, 0.6);
+  --clear: rgba(235, 235, 245, 0.3);
+  --text: #fff;
+  --accent: #0a84ff;
+}
+
+.field {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: var(--fill);
+  transition:
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.root[data-focused] .field {
+  background: var(--fill-focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.glyph {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--glyph);
+}
+
+.input {
+  all: unset;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0 6px;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  caret-color: var(--accent);
+}
+
+/* La X propia del navegador sobra: ya hay una redonda. */
+.input::-webkit-search-cancel-button,
+.input::-webkit-search-decoration {
+  appearance: none;
+}
+
+.input::placeholder {
+  color: var(--glyph);
+  opacity: 1;
+}
+
+/* X redonda rellena, como en iOS. */
+.clear {
+  all: unset;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--clear);
+  color: #fff;
+  cursor: pointer;
+  animation: pop 0.18s ease-out;
+}
+
+:global([data-mantine-color-scheme='dark']) .clear {
+  color: #1c1c1e;
+}
+
+.clear:focus-visible,
+.cancel:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* "Cancelar" entra desde la derecha al enfocar o cuando hay texto. */
+.cancel {
+  all: unset;
+  flex: none;
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 15px;
+  color: var(--accent);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    max-width 0.25s ease,
+    margin 0.25s ease,
+    opacity 0.2s ease;
+}
+
+.root[data-active] .cancel {
+  max-width: 90px;
+  margin-left: 10px;
+  opacity: 1;
+}
+
+.meta {
+  margin-top: 6px;
+  padding-left: 4px;
+  font-size: 12px;
+  color: var(--mantine-color-dimmed);
+}
+
+@keyframes pop {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .field,
+  .cancel {
+    transition: none;
+  }
+  .clear {
+    animation: none;
+  }
+}
