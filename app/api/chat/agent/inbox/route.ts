@@ -14,6 +14,7 @@ import { jsonNoStore, serverError, unauthorized } from '../../../../../lib/chat/
 import type { ChatAgentIdentity } from '../../../../../lib/chat/agent-auth';
 import { cargarConfigProyectos } from '../../../../../lib/proyectos/config-agentes';
 import { whereProyectoDelAgente } from '../../../../../lib/chat/projects';
+import { mensajesConEntregaPendiente } from '../../../../../lib/chat/entregas-pendientes';
 
 // El long-poll obliga a que la ruta sea dinámica: nada de esto se cachea.
 export const dynamic = 'force-dynamic';
@@ -42,7 +43,7 @@ export const dynamic = 'force-dynamic';
  *
  * Parámetros:
  *   wait   segundos de long-poll (0..30, por defecto 0 = responde ya). Mientras
- *          espera revisa la base cada segundo y devuelve en cuanto haya algo.
+ *          espera revisa la base cada INBOX_WAIT_TICK_MS (1 s) y devuelve en cuanto haya algo.
  *   limit  cuántos mensajes por vuelta (1..50).
  *   ack    'true' (por defecto) marca los mensajes entregados en la misma
  *          vuelta. 'false' los deja pendientes y obliga a confirmarlos con
@@ -116,31 +117,26 @@ export async function GET(request: NextRequest) {
         include: { attachments: true, conversation: { select: conversationSelect }, ...autorSelect },
       });
 
-    /** Pendientes de GRUPOS: sus menciones sin recoger. */
+    /**
+     * Pendientes de GRUPOS: sus menciones sin recoger. En dos pasos (entregas
+     * del agente por índice → mensajes por PK); ver lib/chat/entregas-pendientes.ts
+     * (incidente de CPU 2026-11-03).
+     */
     const fetchGrupos = () =>
-      prisma.chatMessageDelivery.findMany({
-        where: {
-          // ANCLA DE SEGURIDAD: las entregas son de ESTE agente, y la fila
-          // solo existe si lo mencionaron.
-          id_agent: agent.idAgent,
-          delivered_at: null,
-          // Solo GRUPOS (2026-10-29): desde el multiagente de Proyectos también
-          // hay entregas en conversaciones de proyecto, y esas son del PUENTE
-          // (llave 'projects'), nunca de la sesión viva del bot.
-          message: { conversation: { kind: 'group' } },
-        },
-        orderBy: { id_message: 'asc' },
-        take: limit,
-        select: {
-          message: {
-            include: {
-              attachments: true,
-              conversation: { select: conversationSelect },
-              ...autorSelect,
-            },
+      mensajesConEntregaPendiente(agent.idAgent, limit, (ids, take) =>
+        prisma.chatMessage.findMany({
+          where: {
+            id: { in: ids },
+            // Solo GRUPOS (2026-10-29): desde el multiagente de Proyectos también
+            // hay entregas en conversaciones de proyecto, y esas son del PUENTE
+            // (llave 'projects'), nunca de la sesión viva del bot.
+            conversation: { kind: 'group' },
           },
-        },
-      });
+          orderBy: { id: 'asc' },
+          take,
+          include: { attachments: true, conversation: { select: conversationSelect }, ...autorSelect },
+        }),
+      );
 
     type Pendiente = Awaited<ReturnType<typeof fetchDirectos>>[number];
 
@@ -148,14 +144,14 @@ export async function GET(request: NextRequest) {
       const [directos, grupos] = await Promise.all([fetchDirectos(), fetchGrupos()]);
       // Se mezclan por id (que es monótono) para que el bot los reciba en el
       // orden en que se escribieron, sin importar de qué fuente vengan.
-      return [...directos, ...grupos.map((g) => g.message)]
+      return [...directos, ...grupos]
         .sort((a, b) => a.id - b.id)
         .slice(0, limit);
     };
 
     let pending = await fetchPending();
 
-    // Long-poll: revisa cada segundo hasta la fecha límite. Se aborta de
+    // Long-poll: revisa cada INBOX_WAIT_TICK_MS hasta la fecha límite. Se aborta de
     // inmediato si el cliente cuelga (request.signal), para no dejar la
     // consulta girando contra la base sin nadie al otro lado.
     while (pending.length === 0 && Date.now() < deadline && !request.signal.aborted) {
@@ -309,11 +305,12 @@ async function bandejaDeProyectos(opciones: {
    * recogerla no se la esconde al principal ni a otros mencionados.
    */
   const fetchMenciones = () =>
-    prisma.chatMessageDelivery.findMany({
-      where: {
-        id_agent: agent.idAgent,
-        delivered_at: null,
-        message: {
+    // En dos pasos (entregas del agente por índice → mensajes por PK); ver
+    // lib/chat/entregas-pendientes.ts (incidente de CPU 2026-11-03).
+    mensajesConEntregaPendiente(agent.idAgent, limit, (ids, take) =>
+      prisma.chatMessage.findMany({
+        where: {
+          id: { in: ids },
           role: 'user',
           conversation: {
             kind: 'project',
@@ -321,16 +318,16 @@ async function bandejaDeProyectos(opciones: {
             project: { ...whereProyectoDelAgente(agent.idAgent), ...empresas },
           },
         },
-      },
-      orderBy: { id_message: 'asc' },
-      take: limit,
-      select: { message: { include: includeProyecto } },
-    });
+        orderBy: { id: 'asc' },
+        take,
+        include: includeProyecto,
+      }),
+    );
 
   const fetchPending = async () => {
     const [propios, menciones] = await Promise.all([fetchPropios(), fetchMenciones()]);
     const vistos = new Set<number>();
-    return [...propios, ...menciones.map((m) => m.message)]
+    return [...propios, ...menciones]
       .sort((a, b) => a.id - b.id)
       .filter((m) => (vistos.has(m.id) ? false : (vistos.add(m.id), true)))
       .slice(0, limit);
