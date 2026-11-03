@@ -78,6 +78,7 @@ model User {
   userTypesAuthorizations UserTypesAuthorization[]
   sessions                Session[]
   auditLogs               UserAuditLog[]
+  passkeys                UserPasskey[]
   // Modulo "Asistentes IA" (chat de agentes) — back-relations requeridas por Prisma.
   chatConversations       ChatConversation[]       @relation("ChatConversationUser")
   chatGroupsCreated       ChatConversation[]       @relation("ChatConversationCreator")
@@ -1522,6 +1523,34 @@ model ChatProjectAgentPolicyLog {
 
   @@index([id_project, changed_at], map: "chat_project_agent_policy_log_project_idx")
   @@map("chat_project_agent_policy_log")
+  @@schema("dbo")
+}
+
+/// REGISTRO de cambios de las CONVERSACIONES de un proyecto (2026-10-29, pedido
+/// de Nicolás Rivera: renombrar y eliminar los hilos). Una fila por cambio:
+///   'renombrar' — title_before → title_after;
+///   'eliminar'  — borrado LÓGICO: la conversación queda con archived = 1 (deja
+///                 de verse y los agentes dejan de atenderla). Mensajes y
+///                 adjuntos NO se borran. Quién y cuándo quedan AQUÍ.
+/// Inmutable (trigger TR_chat_project_conversation_log_inmutable). Sin llaves
+/// foráneas a propósito, como chat_project_agent_config_log: el historial
+/// sobrevive a lo que pase con conversaciones y usuarios.
+/// Tabla NUEVA y aparte: si el código sale antes que el DDL, solo fallan
+/// renombrar y eliminar (sin registro no se cambia nada); el chat sigue igual.
+model ChatProjectConversationLog {
+  id_log          Int      @id @default(autoincrement())
+  id_project      Int
+  id_conversation Int
+  /// 'renombrar' | 'eliminar' (CHECK en la base).
+  action          String   @db.NVarChar(20)
+  title_before    String?  @db.NVarChar(300)
+  title_after     String?  @db.NVarChar(300)
+  changed_by      String   @db.NVarChar(1000)
+  changed_at      DateTime @default(now())
+
+  @@index([id_conversation, changed_at], map: "chat_project_conversation_log_conv_idx")
+  @@index([id_project, changed_at], map: "chat_project_conversation_log_project_idx")
+  @@map("chat_project_conversation_log")
   @@schema("dbo")
 }
 
@@ -5058,6 +5087,34 @@ model EmailThreadCase {
 // sin frenar el login. NUNCA guarda contraseñas, PIN ni tokens.
 // Migración: prisma/migrations/20261016200000_user_login_audit (a mano en prod).
 // ---------------------------------------------------------------------------
+/// Acceso con biométrico (passkeys / WebAuthn), 2026-10-31. Cada fila es la llave PÚBLICA de un
+/// dispositivo (iPhone con Face ID, Android con huella, Windows Hello…). La cara o la huella NUNCA
+/// salen del dispositivo: aquí no hay datos biométricos. Ver lib/auth/passkeys.
+model UserPasskey {
+  id_passkey    Int       @id @default(autoincrement())
+  id_user       String
+  /// Id de la credencial (base64url), único en todo SynerLink.
+  credential_id String    @unique(map: "UQ_user_passkey_credential") @db.NVarChar(512)
+  public_key    Bytes
+  counter       BigInt    @default(0)
+  /// Separados por coma: internal, hybrid, usb…
+  transports    String?   @db.NVarChar(200)
+  /// singleDevice | multiDevice (sincronizada por iCloud / Google)
+  device_type   String    @db.NVarChar(20)
+  backed_up     Boolean   @default(false)
+  aaguid        String?   @db.NVarChar(36)
+  /// Nombre que ve la persona en su perfil (p. ej. «iPhone · Safari»).
+  name          String    @db.NVarChar(100)
+  created_at    DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  created_ip    String?   @db.NVarChar(64)
+  last_used_at  DateTime? @db.DateTime2
+  user          User      @relation(fields: [id_user], references: [id], onDelete: Cascade, map: "FK_user_passkey_user")
+
+  @@index([id_user], map: "IX_user_passkey_usuario")
+  @@map("user_passkey")
+  @@schema("dbo")
+}
+
 model UserLoginAudit {
   id             Int      @id @default(autoincrement())
   attempted_at   DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2

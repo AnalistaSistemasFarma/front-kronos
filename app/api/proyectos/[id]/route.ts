@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { prisma } from '../../../../lib/prisma';
 import { badRequest, forbidden, jsonNoStore, readJsonBody, serverError } from '../../../../lib/chat/http';
 import { getProjectDetail } from '../../../../lib/chat/projects';
+import { checkAdminPrivileges } from '../../../../lib/access-control';
 import { vinculosDelProyecto } from '../../../../lib/chat/projects-links';
 import type { ProyectoDetalleDto } from '../../../../lib/proyectos/tipos';
 import { archivedProject, guardProject, notFoundProject } from '../../../../lib/chat/projects-guard';
@@ -34,7 +35,10 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
     const guard = await guardProject(id, { allowArchived: true });
     if ('response' in guard) return guard.response;
 
-    const detalle = await getProjectDetail(guard.user, guard.project);
+    // Administrador de SynerLink (2026-10-29): también renombra y elimina conversaciones. Al dueño no
+    // hace falta preguntarle; si la consulta falla, se trata como no administrador (falla cerrado).
+    const esAdmin = guard.project.role === 'owner' ? false : await checkAdminPrivileges(guard.user.email).catch(() => false);
+    const detalle = await getProjectDetail(guard.user, guard.project, { esAdmin });
     if (!detalle) return notFoundProject();
     const links = await vinculosDelProyecto(guard.project.idProject, {
       user: guard.user,

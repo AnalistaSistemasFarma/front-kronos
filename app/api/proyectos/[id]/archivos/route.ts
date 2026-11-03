@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
-import { badRequest, forbidden, jsonNoStore, readMessageRequest, serverError } from '../../../../../lib/chat/http';
+import { badRequest, forbidden, jsonNoStore, readMessageRequest, rejectOversizedBody, serverError } from '../../../../../lib/chat/http';
 import { collectChatAttachments } from '../../../../../lib/chat/attachments';
 import { uploadProjectFiles } from '../../../../../lib/chat/attachmentStorage';
 import { archivedProject, guardProject } from '../../../../../lib/chat/projects-guard';
@@ -27,6 +27,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!capabilitiesFor(guard.project.role).contribute) {
       return forbidden('Su rol en el proyecto no permite cargar archivos.');
     }
+
+    const oversized = rejectOversizedBody(request);
+    if (oversized) return oversized;
 
     const payload = await readMessageRequest(request);
     if (!payload?.form) return badRequest('Envíe los archivos como multipart/form-data (campo files).');
