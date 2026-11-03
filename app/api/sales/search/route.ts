@@ -2,7 +2,7 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { salesEndpointForUser } from '../../../../lib/sales/access';
-import { SEARCH_KINDS, searchPath, searchRows, type SearchKind } from '../../../../lib/sales/search';
+import { PAGE_SIZE, SEARCH_KINDS, searchPath, searchRows, type SearchKind } from '../../../../lib/sales/search';
 import { sapGet, sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
@@ -27,10 +27,11 @@ export async function GET(request: NextRequest) {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
     const sap = await sapLogin(a.endpoint);
     try {
-      const data = await sapGet<Record<string, unknown>>(sap, searchPath(kind, { q: (sp.get('q') ?? '').slice(0, 60), page, itemCode, cardCode, today }));
+      // SAP pagina a 20 por defecto e ignora $top mayor: se pide el tamaño de página explícito.
+      const data = await sapGet<Record<string, unknown>>(sap, searchPath(kind, { q: (sp.get('q') ?? '').slice(0, 60), page, itemCode, cardCode, today }), { Prefer: `odata.maxpagesize=${PAGE_SIZE}` });
       const rows = searchRows(kind, data);
       const paged = kind === 'customer' || kind === 'item' || kind === 'batches';
-      return NextResponse.json({ rows, page, hasMore: paged && rows.length >= 50 }, { headers: { 'Cache-Control': 'no-store' } });
+      return NextResponse.json({ rows, page, hasMore: paged && rows.length >= PAGE_SIZE }, { headers: { 'Cache-Control': 'no-store' } });
     } finally {
       await sapLogout(sap);
     }
