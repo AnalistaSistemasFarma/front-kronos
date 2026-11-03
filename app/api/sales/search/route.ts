@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
     const itemCode = (sp.get('itemCode') ?? '').slice(0, 50);
     const cardCode = (sp.get('cardCode') ?? '').slice(0, 50);
     if ((kind === 'warehouse_stock' || kind === 'batches') && !itemCode) return NextResponse.json({ rows: [], page, hasMore: false });
-    if (kind === 'recent_orders' && !cardCode) return NextResponse.json({ rows: [], page, hasMore: false });
+    if ((kind === 'recent_orders' || kind === 'customer_detail') && !cardCode) return NextResponse.json({ rows: [], page, hasMore: false });
     const a = await salesEndpointForUser(session.user.email, companyId);
     if (!a?.endpoint) return NextResponse.json({ error: 'Sin acceso a ventas en esta empresa' }, { status: 403 });
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
