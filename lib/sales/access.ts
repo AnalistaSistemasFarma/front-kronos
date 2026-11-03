@@ -56,3 +56,14 @@ export async function salesEndpointForUser(userEmail: string, companyId: number,
   if (!a || (mode === 'read' ? !a.canRead : !a.canWrite) || !isReady(a)) return null;
   return a;
 }
+
+/** Empresas donde el usuario administra la automatización de Ventas (/process/sales/automatizacion). */
+export async function salesAdminCompanies(userEmail: string): Promise<{ idCompany: number; companyName: string }[]> {
+  const rows = await prisma.subprocessUserCompany.findMany({
+    where: { companyUser: { user: { email: userEmail } }, subprocess: { subprocess_url: SALES_ADMIN_URL } },
+    include: { companyUser: { include: { company: true } } },
+  });
+  const seen = new Map<number, string>();
+  for (const r of rows) seen.set(r.companyUser.company.id_company, r.companyUser.company.company);
+  return [...seen.entries()].map(([idCompany, companyName]) => ({ idCompany, companyName }));
+}

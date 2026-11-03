@@ -185,6 +185,28 @@ async function loadEvaluationInput(sap: SapSession, docEntry: number, estadosSum
 
 const money = (n: number) => Math.round(n).toLocaleString('es-CO');
 
+/**
+ * Simulación (sin escribir nada): qué haría el flujo con un borrador. La usan la
+ * automatización de Salesforce y su panel («Simular»).
+ */
+export async function simulateDraft(
+  sap: SapSession,
+  idCompany: number,
+  docEntry: number
+): Promise<{ destino: 'AP' | 'AE' | 'PEDIDO'; detalle: string; state: string | null }> {
+  const rules = await rulesFor(idCompany);
+  const { draft, lines, cupo } = await loadEvaluationInput(sap, docEntry, rules.estadosSumaCupo, rules.validaPrecio);
+  const ev = evaluarEnvio(lines, cupo, rules);
+  const cupoTxt = `cupo ${money(ev.cupo.comprometido)} de ${money(ev.cupo.limite)}`;
+  const detalle =
+    ev.destino === 'AP'
+      ? `Pediría autorización de precio (${ev.lineasConPrecio.length} línea(s)); ${cupoTxt}`
+      : ev.destino === 'AE'
+        ? `Pediría autorización de extracupo: ${cupoTxt}`
+        : `Crearía el pedido directo: ${cupoTxt}`;
+  return { destino: ev.destino, detalle, state: normalizeState(draft.U_SEND_State) };
+}
+
 /** ⚡ Evaluar reglas de venta: decide la rama del flujo y la marca en la solicitud. */
 export async function evaluateRules(idRequest: number, triggeredBy: TriggeredBy): Promise<ExecResult> {
   const link = await salesLinkOf(idRequest);
