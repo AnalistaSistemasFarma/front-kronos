@@ -580,6 +580,14 @@ jobs:
           echo "IF COL_LENGTH(N'dbo.ot_actividad', N'texto_libre') IS NULL OR COL_LENGTH(N'dbo.ot_registro', N'es_texto_libre') IS NULL THROW 50000, N'Faltan las columnas de texto libre de la bitácora.', 1;" > /tmp/texto-libre-ok.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/texto-libre-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-17-bitacora-proceso-texto-libre-PROD.sql; then echo "El script de PROD de texto libre debió negarse en kronos_ci"; exit 1; fi
+          # Errores de IA (Auditoría de agentes, 2026-11-03): PRUEBAS dos veces, reversa y otra vez PRUEBAS (idempotencia ida y vuelta) y PROD que se niega. La lógica se prueba en tests/integration/auditoria.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-03-errores-ia-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-03-errores-ia-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-03-errores-ia-reversa.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-03-errores-ia-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.agent_error_issue', N'U') IS NULL OR OBJECT_ID(N'dbo.agent_error_event', N'U') IS NULL OR (SELECT COUNT(*) FROM sys.check_constraints WHERE name IN (N'CK_agent_error_issue_estado', N'CK_agent_error_issue_severidad', N'CK_agent_error_issue_ambiente')) <> 3 THROW 50000, N'El pase de errores de IA no dejó las tablas o los CHECK.', 1;" > /tmp/errores-ia-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/errores-ia-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-03-errores-ia-PROD.sql; then echo "El script de PROD de errores de IA debió negarse en kronos_ci"; exit 1; fi
 
       - name: Pruebas de integración + cobertura de lib/sgc/db (vitest)
         run: npm run test:integration -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/integracion/junit.xml
