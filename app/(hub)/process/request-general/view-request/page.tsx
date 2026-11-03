@@ -2212,6 +2212,9 @@ function ViewRequestPage() {
           <RequestFlowHeader requestId={request.id} />
         </Card>
 
+        {/* Ventas: oferta en SAP (datos, cupo y cartera, mapa de relaciones y líneas), encima de la información de la solicitud. */}
+        <SalesOfferDetail requestId={request.id} mb='lg' />
+
         <div className='flex flex-col lg:flex-row gap-6'>
           <div className='flex-1 order-2 lg:order-1 min-w-0 space-y-5'>
             <Card
@@ -2497,9 +2500,6 @@ function ViewRequestPage() {
 
                 {/* Compras: si esta solicitud autoriza un borrador de compra, se muestra con el diseño de SAPSEND. */}
                 <PurchaseRequestDetail requestId={id} />
-
-                {/* Ventas: si esta solicitud es una oferta de venta, el borrador, sus líneas y el mapa de relaciones en SAP. */}
-                <SalesOfferDetail requestId={id} />
 
                 <Divider />
 
