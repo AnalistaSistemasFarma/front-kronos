@@ -549,9 +549,11 @@ function RequestBoard() {
         setTasksByRequest({});
         return;
       }
-      const response = await fetch(
-        `/api/requests-general/activities-requets?ids=${ids.join(',')}`
-      );
+      const response = await fetch('/api/requests-general/activities-requets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
       if (!response.ok) throw new Error('Failed to fetch request tasks');
 
       const data: RequestTask[] = await response.json();
@@ -807,9 +809,11 @@ function RequestBoard() {
     for (let i = 0; i < ids.length; i += 500) {
       const batch = ids.slice(i, i + 500);
       if (batch.length === 0) continue;
-      const response = await fetch(
-        `/api/requests-general/activities-requets?ids=${batch.join(',')}`
-      );
+      const response = await fetch('/api/requests-general/activities-requets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: batch }),
+      });
       if (!response.ok) throw new Error('No se pudieron leer las tareas');
       const data = (await response.json()) as RequestTask[];
       for (const task of data) {
@@ -979,7 +983,7 @@ function RequestBoard() {
 
           if (messagingResponse.ok) {
             const messagingRows: Array<{
-              id_solicitud: number;
+              id: number;
               descripcion?: string | null;
               empresa?: string | null;
               nombre_solicitante?: string | null;
@@ -1053,7 +1057,7 @@ function RequestBoard() {
 
               messagingRows.forEach((r) => {
                 messagingSheet.addRow({
-                  id: r.id_solicitud,
+                  id: r.id,
                   empresa: r.empresa ?? '',
                   descripcion: r.descripcion ?? '',
                   nombre_solicitante: r.nombre_solicitante ?? '',
