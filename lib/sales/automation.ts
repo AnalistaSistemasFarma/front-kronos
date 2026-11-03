@@ -6,6 +6,7 @@ import { sapGet, sapGetAll, sapLogout, SapError, type SapSession } from '../sap/
 import { runSapExecutors } from '../workflow-sap/engine';
 import { withStep } from '../workflow-sap/executionLog';
 import { simulateDraft } from './flow';
+import { offerSubject } from './offer';
 import { normalizeState } from './states';
 
 /**
@@ -232,12 +233,13 @@ async function sendToFlow(sap: SapSession, cfg: AutomationConfig, c: Candidate, 
   if (!cfg.id_user_solicitante) throw new Error('Falta el solicitante en SynerLink en la configuración.');
 
   // Releer el borrador justo antes: debe seguir en B y sin enlace vivo.
-  const draft = await sapGet<Record<string, unknown>>(sap, `Drafts(${c.DocEntry})?$select=DocEntry,U_SEND_State,DocumentStatus,Comments,DocTotal,CardCode`);
+  const draft = await sapGet<Record<string, unknown>>(sap, `Drafts(${c.DocEntry})?$select=DocEntry,U_SEND_State,DocumentStatus,Comments,DocTotal,CardCode,CardName,DocumentLines`);
   const state = normalizeState(draft.U_SEND_State);
   if (state !== 'B' || draft.DocumentStatus !== 'bost_Open') {
     return { docEntry: c.DocEntry, estado: 'omitido', detalle: `El borrador ya no está en borrador abierto (estado ${state ?? 'sin estado'}).` };
   }
-  const subject = `Oferta de venta #${c.DocEntry} · ${c.CardCode} · Salesforce`;
+  const first = ((draft.DocumentLines as Record<string, unknown>[] | undefined) ?? [])[0];
+  const subject = offerSubject(draft.CardName ?? c.CardName, draft.CardCode ?? c.CardCode, first?.ItemDescription ?? first?.ItemCode);
   const { id_request: idRequest } = await createGeneralRequest({
     company: cfg.id_company,
     subject,

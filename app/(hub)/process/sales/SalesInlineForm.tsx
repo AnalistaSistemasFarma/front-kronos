@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { ActionIcon, Alert, Button, Group, Loader, NumberInput, ScrollArea, Stack, Table, Text, TextInput, Textarea } from '@mantine/core';
+import { ActionIcon, Alert, Button, Group, Loader, NumberInput, ScrollArea, Select, Stack, Table, Text, TextInput, Textarea } from '@mantine/core';
 import { IconPlus, IconSend, IconTrash } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import SapLookupInput from '../purchases/SapLookupInput';
@@ -17,7 +17,8 @@ import { sapErrorText } from '../../../../lib/purchases/sapErrorHint';
 
 interface Props {
   companyId: string;
-  subject: string;
+  /** Ya no se usa: el asunto se arma solo (se conserva por compatibilidad). */
+  subject?: string;
   onDone: (result: { ok: boolean; message: string }) => void;
 }
 
@@ -37,13 +38,17 @@ const notifySapError = (msg: string) => toast.error(sapErrorText(msg), { duratio
 const empty = (v: unknown) => v == null || String(v).trim() === '';
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
 
-export default function SalesInlineForm({ companyId, subject, onDone }: Props) {
+export default function SalesInlineForm({ companyId, onDone }: Props) {
   const [readiness, setReadiness] = useState<Readiness>('loading');
   const [cardCode, setCardCode] = useState('');
   const [cardName, setCardName] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [numAtCard, setNumAtCard] = useState('');
   const [comments, setComments] = useState('');
+  /** Puntos de entrega (direcciones de envío del cliente), como ModalLogistic de SAPSEND. */
+  const [addresses, setAddresses] = useState<{ AddressName: string; Street: string; Block: string; City: string; County: string; Country: string; isDefault: boolean }[]>([]);
+  const [shipTo, setShipTo] = useState('');
+  const [payTo, setPayTo] = useState('');
   const [lines, setLines] = useState<Line[]>([{}]);
   const [saving, setSaving] = useState(false);
   /** Búsqueda ampliada abierta («*» + Enter o lupa): tipo, línea y texto. */
@@ -84,6 +89,29 @@ export default function SalesInlineForm({ companyId, subject, onDone }: Props) {
     }
   };
 
+  /** Al elegir el cliente: sus puntos de entrega y la dirección de facturación por defecto. */
+  const loadCustomer = async (code: string) => {
+    setAddresses([]);
+    setShipTo('');
+    setPayTo('');
+    if (!code) return;
+    try {
+      const r = await fetch(`/api/sales/search?companyId=${companyId}&kind=customer_detail&cardCode=${encodeURIComponent(code)}`);
+      const d = await r.json();
+      if (!r.ok) return;
+      const rows = (d.rows ?? []) as typeof addresses & { BilltoDefault?: string }[];
+      setAddresses(rows);
+      const def = rows.find((a) => a.isDefault) ?? (rows.length === 1 ? rows[0] : undefined);
+      if (def) setShipTo(def.AddressName);
+      setPayTo(String((rows[0] as { BilltoDefault?: string } | undefined)?.BilltoDefault ?? ''));
+    } catch {
+      /* el usuario puede seguir; SAP usa la dirección por defecto */
+    }
+  };
+  const selectedAddress = addresses.find((a) => a.AddressName === shipTo);
+  /** Asunto automático: «OV - NOMBRE DEL CLIENTE - NIT - primera línea». */
+  const autoSubject = ['OV', cardName, cardCode, lines[0]?.ItemDescription ?? lines[0]?.ItemCode ?? ''].map((x) => String(x ?? '').trim()).filter(Boolean).join(' - ');
+
   const total = lines.reduce((a, l) => a + Number(l.Quantity || 0) * Number(l.UnitPrice || 0), 0);
 
   const submit = async () => {
@@ -92,6 +120,7 @@ export default function SalesInlineForm({ companyId, subject, onDone }: Props) {
     const missing: string[] = [];
     if (!cardCode) missing.push('Cliente');
     if (!dueDate) missing.push('Fecha de entrega');
+    if (addresses.length > 0 && !shipTo) missing.push('Punto de entrega');
     lines.forEach((l, i) => {
       if (empty(l.ItemCode)) missing.push(`Línea ${i + 1} · Artículo`);
       if (!(Number(l.Quantity) > 0)) missing.push(`Línea ${i + 1} · Cantidad`);
@@ -109,8 +138,8 @@ export default function SalesInlineForm({ companyId, subject, onDone }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           companyId: Number(companyId),
-          subject,
-          header: { CardCode: cardCode, DocDueDate: dueDate, NumAtCard: numAtCard, Comments: comments || subject },
+          subject: autoSubject,
+          header: { CardCode: cardCode, DocDueDate: dueDate, NumAtCard: numAtCard, Comments: comments || autoSubject, ShipToCode: shipTo || undefined, PayToCode: payTo || undefined },
           lines,
         }),
       });
@@ -156,10 +185,13 @@ export default function SalesInlineForm({ companyId, subject, onDone }: Props) {
           onChange={(v) => {
             setCardCode(v);
             setCardName('');
+            setAddresses([]);
+            setShipTo('');
           }}
           onSelect={(o) => {
             setCardCode(o.value);
             setCardName(o.fill?.CardName ?? '');
+            loadCustomer(o.value);
           }}
           error={errorFor('CardCode') ?? (tried && !cardCode ? 'Obligatorio' : undefined)}
           ariaLabel="Cliente"
@@ -185,10 +217,35 @@ export default function SalesInlineForm({ companyId, subject, onDone }: Props) {
           </Button>
         </Group>
       )}
+      {cardCode && cardName && (
+        <Group grow align="flex-start">
+          <Select
+            label={<>Punto de entrega {addresses.length > 0 && <Text span c="red">*</Text>}</>}
+            placeholder={addresses.length ? 'Elija el punto de entrega' : 'El cliente no tiene direcciones de envío en SAP'}
+            data={addresses.map((a) => ({ value: a.AddressName, label: `${a.AddressName}${a.City ? ` · ${a.City}` : ''}${a.isDefault ? ' (por defecto)' : ''}` }))}
+            value={shipTo || null}
+            onChange={(v) => setShipTo(v ?? '')}
+            disabled={!addresses.length}
+            searchable
+            comboboxProps={{ withinPortal: true, zIndex: 1100 }}
+            error={tried && addresses.length > 0 && !shipTo ? 'Obligatorio' : undefined}
+          />
+          <div>
+            <Text size="xs" c="dimmed">Dirección de entrega</Text>
+            <Text size="sm">{selectedAddress ? [selectedAddress.Street, selectedAddress.Block, selectedAddress.City, selectedAddress.County, selectedAddress.Country].filter(Boolean).join(' · ') : '—'}</Text>
+          </div>
+        </Group>
+      )}
+      {autoSubject !== 'OV' && (
+        <Text size="sm">
+          <Text span c="dimmed">Asunto de la solicitud: </Text>
+          {autoSubject}
+        </Text>
+      )}
       <Text size="xs" c="dimmed">
         Consejo: escriba «*» y Enter (o use la lupa) en cliente, artículo o bodega para abrir la búsqueda ampliada, como en SAP.
       </Text>
-      <Textarea label="Comentarios" description="Si lo deja vacío se usa el asunto." autosize minRows={2} maxLength={254} value={comments} onChange={(e) => setComments(e.currentTarget.value)} />
+      <Textarea label="Comentarios" description="Si lo deja vacío se usa el asunto automático." autosize minRows={2} maxLength={254} value={comments} onChange={(e) => setComments(e.currentTarget.value)} />
 
       <div>
         <Text fw={600} size="sm" mb={4}>
@@ -288,7 +345,7 @@ export default function SalesInlineForm({ companyId, subject, onDone }: Props) {
       </div>
 
       <Group justify="flex-end" style={{ position: 'sticky', bottom: 0, zIndex: 5, background: 'var(--mantine-color-body)', paddingTop: 8, paddingBottom: 8, borderTop: '1px solid var(--mantine-color-default-border)' }}>
-        <Button leftSection={<IconSend size={16} />} onClick={submit} loading={saving} disabled={!subject.trim() && !comments.trim()}>
+        <Button leftSection={<IconSend size={16} />} onClick={submit} loading={saving} disabled={!cardCode}>
           Crear oferta y enviar
         </Button>
       </Group>
@@ -305,6 +362,7 @@ export default function SalesInlineForm({ companyId, subject, onDone }: Props) {
             if (search.kind === 'customer') {
               setCardCode(String(r.CardCode));
               setCardName(String(r.CardName ?? ''));
+              loadCustomer(String(r.CardCode));
             } else if (search.kind === 'item' && search.line != null) {
               const i = search.line;
               setLine(i, { ItemCode: String(r.ItemCode), ItemDescription: String(r.ItemName ?? ''), ...(r.DefaultWarehouse ? { WarehouseCode: String(r.DefaultWarehouse) } : {}), UnitPrice: undefined });
