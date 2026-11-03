@@ -9,6 +9,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
  */
 const url = process.env.SGC_IT_DATABASE_URL;
 
+// errors-db usa audit-access, que importa lib/prisma (y este, dbconfig): se apunta a la base efímera.
+vi.mock('../../../lib/prisma', async () => {
+  const { PrismaClient } = await import('../../../app/generated/prisma');
+  return { prisma: new PrismaClient({ datasources: { db: { url: process.env.SGC_IT_DATABASE_URL ?? 'sqlserver://localhost:1;database=x;user=x;password=x' } } }) };
+});
+vi.mock('../../../lib/access-control', () => ({ checkAdminPrivileges: async () => false }));
+
 vi.mock('../../../lib/mssqlPool', async () => {
   const sql = (await import('mssql')).default;
   const crudo = (process.env.SGC_IT_DATABASE_URL ?? '').replace(/^sqlserver:\/\//, '');
