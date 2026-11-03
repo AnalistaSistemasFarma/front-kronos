@@ -4,8 +4,13 @@ RECOLECTOR DE MEMORIAS DE LOS AGENTES (Auditoría de agentes → Memorias).
 
 Lee en SOLO LECTURA la memoria PROPIA de cada agente —local o por SSH, igual que
 el recolector del inventario—, oculta los secretos y publica por
-POST /api/chat/auditoria/memorias con la llave del recolector del inventario
-(~/.horus/agent-inventory/collector.env).
+POST /api/chat/auditoria/memorias con la llave del recolector del inventario.
+
+Destinos (v2.1, 2026-11-01): lee la memoria UNA vez por equipo y la publica en
+CADA destino. Por defecto ~/.horus/agent-inventory/collector.env (PRUEBAS) y,
+si existe, ~/.horus/agent-inventory/collector-prod.env (PRODUCCIÓN). Se pueden
+fijar con --conf (repetible) o MEMORIES_CONF (rutas separadas por «:»).
+collector.env NO se toca: lo comparten los otros recolectores.
 
   - Claude Code: los .md de ~/.<bot>/claude-config/projects/*/memory/ (cada uno
     con su frontmatter); el índice MEMORY.md da el título de cada archivo y los
@@ -20,6 +25,7 @@ Cada corrida publica engram vacío para retirar lo que quedó de la v1.
   python3 recolector_memorias.py                  # todos los equipos
   python3 recolector_memorias.py --solo local,pedro
   python3 recolector_memorias.py --ensayo         # no publica: muestra cifras
+  python3 recolector_memorias.py --conf ~/.horus/agent-inventory/collector-prod.env   # solo prod
 """
 import datetime
 import json
@@ -31,10 +37,12 @@ import sys
 import urllib.error
 import urllib.request
 
-VERSION = '2.0.0'
+VERSION = '2.1.0'
 AQUI = pathlib.Path(__file__).resolve().parent
 FLOTA = json.loads((AQUI.parent / 'agent-inventory' / 'flota.json').read_text(encoding='utf-8'))
-CONF = pathlib.Path(os.path.expanduser('~/.horus/agent-inventory/collector.env'))
+CONF_DIR = pathlib.Path(os.path.expanduser('~/.horus/agent-inventory'))
+CONF = CONF_DIR / 'collector.env'            # PRUEBAS (compartido con los otros recolectores)
+CONF_PROD = CONF_DIR / 'collector-prod.env'  # PRODUCCIÓN (opcional)
 
 # Corre en el equipo (local o remoto). Solo lectura. Recibe los agentes del equipo.
 LECTOR = r'''
@@ -234,18 +242,28 @@ def sh_quote(s):
     return "'" + s.replace("'", "'\"'\"'") + "'"
 
 
-def leer_conf():
+def leer_conf(ruta):
     conf = {}
-    if CONF.exists():
-        for linea in CONF.read_text().splitlines():
+    if ruta.exists():
+        for linea in ruta.read_text().splitlines():
             if '=' in linea and not linea.lstrip().startswith('#'):
                 k, v = linea.split('=', 1)
                 conf[k.strip()] = v.strip().strip('"')
     url = conf.get('SYNERLINK_INVENTORY_URL', '').rstrip('/')
     key = conf.get('SYNERLINK_INVENTORY_KEY', '')
     if not url or len(key) < 32:
-        sys.exit('Falta configurar %s (URL y llave de al menos 32 caracteres).' % CONF)
+        sys.exit('Falta configurar %s (URL y llave de al menos 32 caracteres).' % ruta)
     return url, key
+
+
+def rutas_conf(args):
+    """--conf (repetible) > MEMORIES_CONF > collector.env + collector-prod.env si existe."""
+    rutas = [args[i + 1] for i, a in enumerate(args) if a == '--conf' and i + 1 < len(args)]
+    if not rutas and os.environ.get('MEMORIES_CONF'):
+        rutas = [r for r in os.environ['MEMORIES_CONF'].split(':') if r]
+    if rutas:
+        return [pathlib.Path(os.path.expanduser(r)) for r in rutas]
+    return [CONF] + ([CONF_PROD] if CONF_PROD.exists() else [])
 
 
 def publicar(url, key, cuerpo):
@@ -260,6 +278,9 @@ def publicar(url, key, cuerpo):
             return e.code, json.loads(e.read().decode('utf-8') or '{}')
         except Exception:
             return e.code, {}
+    except (urllib.error.URLError, OSError) as e:
+        # Un destino caído no frena a los demás (ni a los otros equipos).
+        return 'sin conexión', {'error': str(getattr(e, 'reason', e))[:200]}
 
 
 def log(msg):
@@ -270,9 +291,7 @@ def main():
     args = sys.argv[1:]
     solo = set(args[args.index('--solo') + 1].split(',')) if '--solo' in args else None
     ensayo = '--ensayo' in args
-    url = key = None
-    if not ensayo:
-        url, key = leer_conf()
+    destinos = [] if ensayo else [leer_conf(r) for r in rutas_conf(args)]
     por_equipo = {}
     for a in FLOTA['agentes']:
         por_equipo.setdefault(a['host'], []).append(a)
@@ -298,8 +317,9 @@ def main():
         if ensayo:
             continue
         cuerpo = {'host': etiqueta, 'collectorVersion': VERSION, 'agents': agentes, 'errors': avisos}
-        code, body = publicar(url, key, cuerpo)
-        log('%s: publicado HTTP %s %s' % (etiqueta, code, json.dumps(body, ensure_ascii=False)[:300]))
+        for url, key in destinos:
+            code, body = publicar(url, key, cuerpo)
+            log('%s → %s: publicado HTTP %s %s' % (etiqueta, url, code, json.dumps(body, ensure_ascii=False)[:300]))
 
 
 if __name__ == '__main__':
