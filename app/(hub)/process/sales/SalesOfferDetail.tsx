@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Alert, Badge, Card, Group, ScrollArea, Stack, Table, Text, ThemeIcon } from '@mantine/core';
+import { Alert, Badge, Button, Card, Group, ScrollArea, Stack, Table, Text, ThemeIcon } from '@mantine/core';
 import { IconArrowRight, IconFileInvoice, IconFileText, IconHierarchy2, IconPencil, IconReceipt, IconTruckDelivery } from '@tabler/icons-react';
 import { STATE_LABELS } from '../../../../lib/sales/states';
 import SalesCreditPanel from './SalesCreditPanel';
@@ -23,6 +23,7 @@ interface Sale {
   draft: Record<string, unknown> & { DocumentLines: Record<string, unknown>[] };
   relations: RelDoc[];
   warnings: string[];
+  sapErrors?: { task: string; error: string }[];
 }
 
 const money = (v: unknown) => (v == null || v === '' ? '—' : `$ ${Number(v).toLocaleString('es-CO', { maximumFractionDigits: 2 })}`);
@@ -66,6 +67,8 @@ function DocCard({ d }: { d: RelDoc }) {
 export default function SalesOfferDetail({ requestId, onLoaded, mb }: { requestId: number | string | null | undefined; onLoaded?: (isSale: boolean) => void; mb?: string }) {
   const [sale, setSale] = useState<Sale | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (!requestId) return;
@@ -82,7 +85,7 @@ export default function SalesOfferDetail({ requestId, onLoaded, mb }: { requestI
     return () => {
       cancelled = true;
     };
-  }, [requestId]);
+  }, [requestId, reload]);
 
   if (error) return <Alert color='yellow' title='Oferta de venta en SAP' mb={mb}>{error}</Alert>;
   // Mientras carga no se muestra nada: la mayoría de las solicitudes no son de ventas.
@@ -107,6 +110,25 @@ export default function SalesOfferDetail({ requestId, onLoaded, mb }: { requestI
         </Group>
       </Group>
       {sale.flowError && <Alert color='red' mb='sm'>{sale.flowError}</Alert>}
+      {sale.sapErrors && sale.sapErrors.length > 0 && (
+        <Alert color='red' mb='sm' title='Una tarea en SAP quedó en error'>
+          {sale.sapErrors.map((e) => (
+            <Text key={e.task} size='sm'><b>{e.task}:</b> {e.error}</Text>
+          ))}
+          <Button mt='xs' size='xs' color='red' variant='light' loading={retrying}
+            onClick={async () => {
+              setRetrying(true);
+              try {
+                await fetch('/api/sales/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId }) });
+              } finally {
+                setRetrying(false);
+                setReload((n) => n + 1);
+              }
+            }}>
+            Reintentar
+          </Button>
+        </Alert>
+      )}
 
       <Group gap='xl' mb='md' wrap='wrap'>
         <div><Text size='xs' c='dimmed'>Cliente</Text><Text size='sm' fw={600}>{String(d.CardName ?? '')}</Text><Text size='xs'>{String(d.CardCode ?? '')}</Text></div>
