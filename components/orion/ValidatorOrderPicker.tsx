@@ -16,10 +16,19 @@ type Props = {
   disabled?: boolean;
   /** Todos validan al mismo tiempo: sin orden ni flechas para reordenar. */
   parallel?: boolean;
+  /** Quien envía: si se agrega a sí misma, su paso queda validado al enviar (sin tarea). */
+  selfUserId?: string | null;
 };
 
 /** Elige, de las personas validadoras del flujo, quiénes validan este documento y en qué orden. */
-export default function ValidatorOrderPicker({ options, value, onChange, disabled, parallel = false }: Props) {
+export default function ValidatorOrderPicker({
+  options,
+  value,
+  onChange,
+  disabled,
+  parallel = false,
+  selfUserId = null,
+}: Props) {
   const byId = new Map(options.map((o) => [o.userId, o]));
   const labelOf = (id: string) => {
     const o = byId.get(id);
@@ -77,6 +86,16 @@ export default function ValidatorOrderPicker({ options, value, onChange, disable
                   <Text size='sm' fw={600} lineClamp={1}>
                     {labelOf(id)}
                   </Text>
+                  {selfUserId && id === selfUserId ? (
+                    <Badge
+                      size='xs'
+                      variant='light'
+                      color='teal'
+                      styles={{ label: { textTransform: 'none' } }}
+                    >
+                      Usted · queda validado al enviar
+                    </Badge>
+                  ) : null}
                 </Group>
                 <Group gap={2} wrap='nowrap'>
                   {parallel ? null : (

@@ -19,12 +19,14 @@ import {
 import type { CompanyAccess, Presentacion } from './types';
 import { EstadoBadge } from './VitrinaBadges';
 import VitrinaImagen from './VitrinaImagen';
+import VitrinaModelo3dGestion, { type Modelo3dMedios } from './VitrinaModelo3dGestion';
 import { errorTexto, fmtFechaHora, nombrePresentacion, useVitrinaFetch, vitrinaSend, type Avisar } from './vitrinaClient';
 
 /**
  * Gestión · Imágenes y documentos (V3). Por presentación:
  *   - imágenes de VIAL, ETIQUETA y PLEGADIZA en el almacenamiento de adjuntos de SynerLink
  *     (una nueva reemplaza la vigente del mismo tipo; la anterior queda en el historial);
+ *   - modelo 3D (GLB) con vista previa y medidas opcionales (VitrinaModelo3dGestion);
  *   - marcar como destacada (el Inicio de los comerciales muestra hasta 3);
  *   - vínculos con documentos VIGENTES del SGC (ficha, inserto, prospecto), que se ven en
  *     el visor seguro del SGC, sin descarga.
@@ -33,6 +35,7 @@ interface Medios {
   destacada: boolean;
   estado: string;
   imagenes: { tipo: VitrinaImagenTipo; vigente: { id: number; version: string | null; cargadoEn: string } | null; anteriores: number }[];
+  modelo3d: Modelo3dMedios;
   documentos: {
     id: number;
     tipo: string;
@@ -232,6 +235,17 @@ function Detalle({ company, presentacion, avisar }: { company: CompanyAccess; pr
           ))}
         </SimpleGrid>
       </Card>
+
+      <VitrinaModelo3dGestion
+        key={data.modelo3d.vigente?.id ?? 'sin-modelo'}
+        company={company}
+        idPresentacion={presentacion.id}
+        titulo={nombrePresentacion(presentacion)}
+        poster={data.imagenes.find((i) => i.tipo === 'PLEGADIZA')?.vigente?.id ?? data.imagenes.find((i) => i.tipo === 'VIAL')?.vigente?.id ?? null}
+        modelo={data.modelo3d}
+        avisar={avisar}
+        onCambio={() => reload(true)}
+      />
 
       <Card withBorder radius='md' p='md'>
         <Text fw={600}>Documentos del SGC</Text>
