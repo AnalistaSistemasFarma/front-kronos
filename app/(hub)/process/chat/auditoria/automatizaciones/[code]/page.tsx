@@ -30,6 +30,8 @@ import type {
   AgenteIndicadorDto,
   CasoIndicadorDto,
 } from "../../../../../../../lib/agent-audit/automation-db";
+import type { ProgramadaDto } from "../../../../../../../lib/agent-audit/scheduled-db";
+import { AutomatizacionesProgramadas } from "../../../../../../../components/chat/auditoria/AutomatizacionesProgramadas";
 
 /**
  * FICHA DEL INDICADOR DE AUTOMATIZACIONES DE UN AGENTE (al estilo de la Hoja de
@@ -43,6 +45,8 @@ interface Ficha {
   casos: CasoIndicadorDto[];
   corte: string | null;
   periodoDesde: string | null;
+  /** Automatizaciones que el agente corre solo (null = aún no habilitadas). */
+  programadas?: ProgramadaDto[] | null;
 }
 
 const h = (v: number | null | undefined, dec = 0) =>
@@ -358,7 +362,13 @@ export default function FichaIndicadorPage() {
               </SimpleGrid>
             </Card>
 
-            <Card withBorder radius="md" padding="md" className="chat-surface">
+            <Card
+              withBorder
+              radius="md"
+              padding="md"
+              mb="md"
+              className="chat-surface"
+            >
               <Text fw={600} size="sm" mb={2}>
                 Casos de uso ({casosValidos.length})
               </Text>
@@ -390,6 +400,11 @@ export default function FichaIndicadorPage() {
                 </Table>
               </ScrollArea>
             </Card>
+
+            <AutomatizacionesProgramadas
+              programadas={datos.programadas}
+              mostrarAgente={false}
+            />
           </>
         )}
       </div>

@@ -19,6 +19,7 @@ import {
   parsePublicacion,
   publicarIndicador,
 } from "../../../../../lib/agent-audit/automation-db";
+import { leerProgramadas } from "../../../../../lib/agent-audit/scheduled-db";
 
 export const dynamic = "force-dynamic";
 
@@ -45,8 +46,15 @@ export async function GET() {
       );
     const alcance = await getAuditScope(user.email);
     try {
+      // Las automatizaciones programadas van aparte de los casos del chat
+      // (null = su tabla aún no existe en este ambiente).
+      const [indicador, programadas] = await Promise.all([
+        leerIndicador(user.email, alcance),
+        leerProgramadas(user.email, alcance),
+      ]);
       return jsonNoStore({
-        ...(await leerIndicador(user.email, alcance)),
+        ...indicador,
+        programadas,
         puedeAnalizar: alcance.all,
       });
     } catch (e) {
