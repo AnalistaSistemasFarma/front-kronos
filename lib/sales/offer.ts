@@ -120,3 +120,40 @@ export function offerSubject(cardName: unknown, cardCode: unknown, firstLine: un
   const clean = (v: unknown) => String(v ?? '').replace(/\s+/g, ' ').trim();
   return ['OV', clean(cardName), clean(cardCode), clean(firstLine)].filter(Boolean).join(' - ').slice(0, 250);
 }
+
+/** Línea editada de una oferta en borrador: BaseLine = línea de la cotización (null si es nueva). */
+export type EditLine = OfferLine & { BaseLine?: number | null };
+
+/**
+ * Actualización de una oferta en borrador (como useEditQuotationLines de SAPSEND, corregido):
+ * 1) PATCH Quotations con TODAS las líneas (las existentes con su LineNum, las nuevas sin él) y
+ *    B1S-ReplaceCollectionsOnPatch; 2) se relee la cotización para saber el LineNum de las nuevas;
+ * 3) PATCH Drafts con todas las líneas enlazadas a su línea real (BaseType 23 / BaseLine).
+ * El cliente no cambia (como SAPSEND). PURO.
+ */
+export function buildQuotationUpdate(h: OfferHeader, lines: EditLine[]) {
+  const head = header(h);
+  delete (head as Record<string, unknown>).CardCode;
+  return {
+    ...head,
+    DocumentLines: lines.map((l) => (l.BaseLine != null ? { LineNum: l.BaseLine, ...line(l) } : line(l))),
+  };
+}
+
+/** LineNum de cada línea editada tras actualizar la cotización: las existentes conservan el suyo y
+ *  las nuevas toman, en orden, los LineNum que no existían antes. */
+export function mapQuotationLines(lines: EditLine[], before: number[], after: number[]): number[] {
+  const prev = new Set(before);
+  const fresh = after.filter((n) => !prev.has(n)).sort((a, b) => a - b);
+  let k = 0;
+  return lines.map((l) => (l.BaseLine != null ? l.BaseLine : (fresh[k++] ?? -1)));
+}
+
+export function buildDraftUpdate(h: OfferHeader, lines: EditLine[], quotationDocEntry: number, baseLines: number[]) {
+  const head = header(h);
+  delete (head as Record<string, unknown>).CardCode;
+  return {
+    ...head,
+    DocumentLines: lines.map((l, i) => ({ ...line(l), BaseType: 23, BaseEntry: quotationDocEntry, BaseLine: baseLines[i] })),
+  };
+}
