@@ -30,6 +30,7 @@ import {
   type UploadedChatAttachment,
 } from '../../../../../lib/chat/attachmentStorage';
 import { notifyAgentReply } from '../../../../../lib/chat/notifyAgentReply';
+import { alPublicarAgenteEnMesa } from '../../../../../lib/proyectos/mesas';
 
 export const dynamic = 'force-dynamic';
 
@@ -262,7 +263,22 @@ export async function POST(request: NextRequest) {
     // respuesta del agente ya está publicada y no debe quedar en vilo porque
     // un endpoint de push esté lento o una suscripción esté vencida. Los
     // errores se registran adentro; nunca se propagan al bot.
+    // MESA DE DISCUSIÓN (2026-11-04): si era el turno de este agente, la mesa
+    // pasa el turno al siguiente. En una mesa no se manda push a los miembros
+    // en cada turno (serían decenas al día): solo con la síntesis.
+    let mesaSinPush = false;
     if (conversation.kind === 'project') {
+      try {
+        const r = await alPublicarAgenteEnMesa({ idConversation: conversation.id, idAgent: agent.idAgent, idMessage: message.id, body });
+        mesaSinPush = r.esMesa && !r.esSintesis;
+      } catch (error) {
+        console.error('[mesas] al publicar', error);
+      }
+    }
+
+    if (conversation.kind === 'project' && mesaSinPush) {
+      // Mesa de discusión: sin push en cada turno (ver arriba).
+    } else if (conversation.kind === 'project') {
       // En un PROYECTO se le avisa a sus miembros (la pertenencia sale de
       // chat_project_member, nunca de chat_participant).
       const miembros = await prisma.chatProjectMember.findMany({
