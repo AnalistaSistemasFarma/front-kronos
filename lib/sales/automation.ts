@@ -2,7 +2,7 @@ import sql from 'mssql';
 import sqlConfig from '../../dbconfig.js';
 import { companySap } from '../purchases/authorization';
 import { createGeneralRequest } from '../requests-general/createGeneralRequest';
-import { sapGet, sapGetAll, sapLogout, SapError, type SapSession } from '../sap/serviceLayer';
+import { sapGet, sapGetAll, sapLogout, sapPatch, SapError, type SapSession } from '../sap/serviceLayer';
 import { runSapExecutors } from '../workflow-sap/engine';
 import { withStep } from '../workflow-sap/executionLog';
 import { simulateDraft } from './flow';
@@ -178,7 +178,8 @@ export function candidatesFilter(userSigns: number[], desde: string | null): str
   const users = userSigns.filter((u) => Number.isInteger(u) && u > 0).map((u) => `UserSign eq ${Math.trunc(u)}`);
   const parts = [
     "DocObjectCode eq 'oOrders'",
-    "U_SEND_State eq 'B'",
+    // Sin estado también: Salesforce puede crear el borrador sin U_SEND_State (el campo no tiene valor por defecto).
+    "(U_SEND_State eq 'B' or U_SEND_State eq null)",
     "DocumentStatus eq 'bost_Open'",
     users.length === 1 ? users[0] : `(${users.join(' or ')})`,
   ];
@@ -249,10 +250,13 @@ async function sendToFlow(sap: SapSession, cfg: AutomationConfig, c: Candidate, 
 
   // Releer el borrador justo antes: debe seguir en B y sin enlace vivo.
   const draft = await sapGet<Record<string, unknown>>(sap, `Drafts(${c.DocEntry})?$select=DocEntry,U_SEND_State,DocumentStatus,Comments,DocTotal,CardCode,CardName,DocumentLines`);
+  const sinEstado = draft.U_SEND_State == null || String(draft.U_SEND_State).trim() === '';
   const state = normalizeState(draft.U_SEND_State);
-  if (state !== 'B' || draft.DocumentStatus !== 'bost_Open') {
-    return { docEntry: c.DocEntry, estado: 'omitido', detalle: `El borrador ya no está en borrador abierto (estado ${state ?? 'sin estado'}).` };
+  if ((state !== 'B' && !sinEstado) || draft.DocumentStatus !== 'bost_Open') {
+    return { docEntry: c.DocEntry, estado: 'omitido', detalle: `El borrador ya no está en borrador abierto (estado ${state ?? String(draft.U_SEND_State)}).` };
   }
+  // Borrador de Salesforce sin estado: se marca en B para que el flujo lo evalúe (sin If-Match: el etag de Drafts es fijo).
+  if (sinEstado) await sapPatch(sap, `Drafts(${c.DocEntry})`, { U_SEND_State: 'B' });
   const first = ((draft.DocumentLines as Record<string, unknown>[] | undefined) ?? [])[0];
   const subject = offerSubject(draft.CardName ?? c.CardName, draft.CardCode ?? c.CardCode, first?.ItemDescription ?? first?.ItemCode);
   const { id_request: idRequest } = await createGeneralRequest({

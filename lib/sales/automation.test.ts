@@ -9,10 +9,10 @@ import { candidatesFilter, cronFor, parseUserSigns, summaryText, validateConfig 
 describe('automatización · reglas puras', () => {
   it('filtro de candidatos: borradores de pedido abiertos en B del usuario de la integración', () => {
     expect(candidatesFilter([30], '2026-11-01')).toBe(
-      "DocObjectCode eq 'oOrders' and U_SEND_State eq 'B' and DocumentStatus eq 'bost_Open' and UserSign eq 30 and DocDate ge '2026-11-01'"
+      "DocObjectCode eq 'oOrders' and (U_SEND_State eq 'B' or U_SEND_State eq null) and DocumentStatus eq 'bost_Open' and UserSign eq 30 and DocDate ge '2026-11-01'"
     );
     expect(candidatesFilter([14, 30], null)).toBe(
-      "DocObjectCode eq 'oOrders' and U_SEND_State eq 'B' and DocumentStatus eq 'bost_Open' and (UserSign eq 14 or UserSign eq 30)"
+      "DocObjectCode eq 'oOrders' and (U_SEND_State eq 'B' or U_SEND_State eq null) and DocumentStatus eq 'bost_Open' and (UserSign eq 14 or UserSign eq 30)"
     );
     expect(candidatesFilter([30], "2026-11-01' or 1 eq 1")).not.toContain('or 1');
   });
