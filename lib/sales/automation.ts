@@ -180,7 +180,10 @@ async function alreadyHandled(idCompany: number): Promise<Set<number>> {
   const r = await p.request().input('c', sql.Int, idCompany).query(`
     SELECT doc_entry FROM dbo.sales_automation_doc WHERE id_company = @c AND estado IN (N'enviado', N'descartado')
     UNION
-    SELECT doc_entry FROM dbo.sales_authorization WHERE id_company = @c AND status IN (N'pending', N'publishing', N'publish_error', N'approved');`);
+    SELECT doc_entry FROM dbo.sales_authorization WHERE id_company = @c AND status IN (N'pending', N'publishing', N'publish_error', N'approved')
+    UNION
+    -- Ofertas creadas en SynerLink y guardadas en borrador: las envía su autor, no la automatización.
+    SELECT doc_entry FROM dbo.sales_offer_draft WHERE id_company = @c;`);
   return new Set(r.recordset.map((x: { doc_entry: number }) => Number(x.doc_entry)));
 }
 

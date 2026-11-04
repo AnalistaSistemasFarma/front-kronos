@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { Anchor, Breadcrumbs, Button, Card, Group, Text, Title } from '@mantine/core';
+import MisBorradores from './MisBorradores';
 import { IconChevronRight, IconFileInvoice, IconRobot, IconPlus } from '@tabler/icons-react';
 
 /**
@@ -36,6 +37,7 @@ export default function VentasPage() {
             </Button>
           </Group>
         </Card>
+        <MisBorradores />
       </div>
     </div>
   );

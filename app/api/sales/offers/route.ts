@@ -5,12 +5,9 @@ import sqlConfig from '../../../../dbconfig.js';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { prisma } from '../../../../lib/prisma';
 import { salesEndpointForUser } from '../../../../lib/sales/access';
-import { buildOfferDraftPayload, buildQuotationPayload, offerSubject, sanitizeOfferLine, validateOffer, type OfferHeader } from '../../../../lib/sales/offer';
+import { buildOfferDraftPayload, buildQuotationPayload, sanitizeOfferLine, validateOffer, type OfferHeader } from '../../../../lib/sales/offer';
 import { todayBogota } from '../../../../lib/purchases/drafts';
-import { createGeneralRequest } from '../../../../lib/requests-general/createGeneralRequest';
-import { fireAndForgetNotification } from '../../../../lib/notificationEvents';
-import { runSapExecutors } from '../../../../lib/workflow-sap/engine';
-import { withStep } from '../../../../lib/workflow-sap/executionLog';
+import { startOfferFlow } from '../../../../lib/sales/offerFlow';
 import { sapLogin, sapLogout, sapPost, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
@@ -19,7 +16,8 @@ import { sapLogin, sapLogout, sapPost, SapError } from '../../../../lib/sap/serv
  *  2) crea la solicitud del workflow con el proceso «Oferta de venta» de la empresa;
  *  3) enlaza solicitud <-> borrador (sales_authorization) y arranca las Tareas SAP
  *     (evaluar reglas -> autorizaciones -> pedido).
- * Body: { companyId, subject, header: OfferHeader, lines: OfferLine[] }.
+ * Body: { companyId, header: OfferHeader, lines: OfferLine[], enviar?: boolean }. Con enviar=false
+ * la oferta queda en borrador (sales_offer_draft) y se envía después desde «Mis ofertas en borrador».
  * Requiere «Ventas · Gestionar ofertas» en la empresa.
  */
 export async function POST(request: NextRequest) {
@@ -40,12 +38,14 @@ export async function POST(request: NextRequest) {
     const access = await salesEndpointForUser(email, companyId, 'write');
     if (!access?.endpoint) return NextResponse.json({ error: 'No tiene permiso para crear ofertas en esta empresa («Ventas · Gestionar ofertas»).' }, { status: 403 });
 
-    const pool = await sql.connect(sqlConfig);
-    const cfg = await pool.request().input('c', sql.Int, companyId).query(
-      `SELECT TOP 1 id_process_category_oferta AS p FROM dbo.sales_company_config WHERE id_company = @c AND activo = 1;`
-    );
-    const processId = Number(cfg.recordset[0]?.p ?? 0);
-    if (!processId) return NextResponse.json({ error: 'La empresa no tiene configurado el flujo de oferta de venta.' }, { status: 422 });
+    // Antes de escribir en SAP: la empresa debe tener el flujo configurado (si se va a enviar).
+    if (body.enviar !== false) {
+      const pool0 = await sql.connect(sqlConfig);
+      const cfg = await pool0.request().input('c', sql.Int, companyId).query(
+        `SELECT TOP 1 id_process_category_oferta AS p FROM dbo.sales_company_config WHERE id_company = @c AND activo = 1;`
+      );
+      if (!Number(cfg.recordset[0]?.p ?? 0)) return NextResponse.json({ error: 'La empresa no tiene configurado el flujo de oferta de venta.' }, { status: 422 });
+    }
 
     const user = await prisma.user.findUnique({ where: { email }, select: { id: true, name: true } });
     if (!user) return NextResponse.json({ error: 'Usuario no encontrado.' }, { status: 401 });
@@ -61,35 +61,19 @@ export async function POST(request: NextRequest) {
       await sapLogout(sap);
     }
 
-    const first = draft.DocumentLines?.[0];
-    const subject = offerSubject(draft.CardName, draft.CardCode ?? header.CardCode, first?.ItemDescription ?? first?.ItemCode ?? lines[0]?.ItemCode);
-    const { id_request: idRequest } = await createGeneralRequest({
-      company: companyId,
-      subject,
-      descripcion: `${String(header.Comments ?? '').slice(0, 800)}${draft.DocTotal != null ? ` · Total ${Number(draft.DocTotal).toLocaleString('es-CO')}` : ''}`.trim(),
-      process: processId,
-      createdby: user.id,
-      url: `/process/sales?companyId=${companyId}&docEntry=${draft.DocEntry}`,
-      formValues: [],
-    });
-
-    await pool
-      .request()
-      .input('c', sql.Int, companyId)
-      .input('d', sql.Int, draft.DocEntry)
-      .input('r', sql.Int, idRequest)
-      .input('u', sql.NVarChar(50), user.id)
-      .query(`INSERT INTO dbo.sales_authorization (id_company, doc_entry, id_request_general, etapa, status, created_by)
-              VALUES (@c, @d, @r, N'oferta', N'pending', @u);`);
-
-    await withStep(
-      { idRequest, stepKind: 'sap', stepName: 'Crear oferta en SAP', actionKey: 'sales.create_offer', triggerEvent: 'on_execute', triggeredBy: 'user', idUser: user.id, idCompany: companyId, sapEntity: 'Quotations/Drafts', requestSummary: { cliente: header.CardCode, lineas: lines.length } },
-      async () => draft,
-      () => ({ status: 'ok', sapDocEntry: draft.DocEntry, responseSummary: { cotizacion: quotation.DocEntry, borrador: draft.DocEntry } })
-    );
-
-    // Tareas SAP del flujo (evaluar reglas, etc.). No bloquea la respuesta.
-    fireAndForgetNotification(runSapExecutors(idRequest, 'user'));
+    // Interruptor del formulario: «Enviar a autorización» (por defecto) o dejarla en borrador, como SAPSEND.
+    if (body.enviar === false) {
+      const pool = await sql.connect(sqlConfig);
+      await pool.request().input('c', sql.Int, companyId).input('d', sql.Int, draft.DocEntry).input('q', sql.Int, quotation.DocEntry).input('u', sql.NVarChar(50), user.id).query(
+        `INSERT INTO dbo.sales_offer_draft (id_company, doc_entry, quotation_doc_entry, id_user, status) VALUES (@c, @d, @q, @u, N'borrador');`
+      );
+      return NextResponse.json({ ok: true, saved: true, docEntry: draft.DocEntry, quotationDocEntry: quotation.DocEntry }, { status: 201 });
+    }
+    const started = await startOfferFlow({ companyId, userId: user.id, draft: { ...draft, Comments: header.Comments }, quotationDocEntry: quotation.DocEntry, linesCount: lines.length });
+    if (!started.ok) {
+      return NextResponse.json({ error: `Se creó la oferta #${draft.DocEntry} en SAP, pero no se pudo enviar al flujo: ${started.error}`, docEntry: draft.DocEntry }, { status: started.status });
+    }
+    const idRequest = started.idRequest;
     return NextResponse.json({ ok: true, idRequest, docEntry: draft.DocEntry, quotationDocEntry: quotation.DocEntry }, { status: 201 });
   } catch (error) {
     if (error instanceof SapError) return NextResponse.json({ error: error.friendly }, { status: error.status });
