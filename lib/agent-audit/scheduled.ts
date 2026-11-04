@@ -191,7 +191,7 @@ export const pctOk = (ok: number, corridas: number): number | null =>
 /**
  * Tendencia de las últimas 4 semanas frente a las 4 anteriores: primero la
  * calidad (% bien, ±10 puntos), después el volumen (±25 % de corridas).
- * null si no hay historia suficiente para comparar.
+ * null si no hay historia suficiente para comparar (p. ej. una automatización nueva).
  */
 export function tendencia(
   semanas: SemanaProgramada[],
@@ -211,8 +211,8 @@ export function tendencia(
   const ant = rango(56, 28);
   const cr = sum(rec, "corridas");
   const ca = sum(ant, "corridas");
-  if (!ca && !cr) return null;
-  if (!ca) return "sube";
+  // Sin historia anterior (automatización nueva) no hay con qué comparar.
+  if (!ca) return null;
   if (!cr) return "baja";
   const dp = (sum(rec, "ok") / cr - sum(ant, "ok") / ca) * 100;
   if (dp >= 10) return "sube";

@@ -85,7 +85,7 @@ describe("tendencia y resumen", () => {
 
   it("compara las 4 semanas recientes con las 4 anteriores", () => {
     expect(tendencia([], "2026-11-04")).toBeNull();
-    expect(tendencia([w("2026-10-27", 7, 7)], "2026-11-04")).toBe("sube");
+    expect(tendencia([w("2026-10-27", 7, 7)], "2026-11-04")).toBeNull();
     expect(tendencia([w("2026-09-22", 7, 7)], "2026-11-04")).toBe("baja");
     expect(
       tendencia([w("2026-10-27", 7, 7), w("2026-09-29", 7, 7)], "2026-11-04"),
