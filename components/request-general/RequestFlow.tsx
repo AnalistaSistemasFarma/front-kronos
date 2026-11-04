@@ -264,6 +264,8 @@ function FlowStepsRow({ flow, highlightTask }: { flow: RequestFlow; highlightTas
             <Tooltip
               key={step.key}
               withArrow
+              multiline
+              w={280}
               openDelay={150}
               events={{ hover: true, focus: true, touch: true }}
               label={<FlowStepTip step={step} index={i} total={steps.length} isMine={isMine} />}
