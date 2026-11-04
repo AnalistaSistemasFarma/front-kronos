@@ -52,7 +52,8 @@ if ((Test-Path (Join-Path $StateDir 'active.json')) -and -not $Force) {
   throw "Ya existe $StateDir\active.json: el azul/verde ya esta activado. Use -Force solo si sabe lo que hace."
 }
 if (-not (Test-Path (Join-Path $RepoDir '.git'))) { throw "No es un repo git: $RepoDir" }
-foreach ($p in $APort, $BPort) {
+$ports = @($APort, $BPort); if ($Mode -eq 'fresh') { $ports += $ProxyPort }
+foreach ($p in $ports) {
   if ((Get-PortOwners $p).Count -gt 0) { throw "El puerto $p ya esta en uso; elija otro (-APort/-BPort)." }
 }
 
