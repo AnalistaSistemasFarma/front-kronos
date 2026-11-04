@@ -8,6 +8,7 @@ import { CANAL_LABEL } from '../../lib/vitrina/constants';
 import { descripcionFiltros, filtrarCatalogo, indiceInicial, indiceVecino, registrosDe, tituloPresentacion, type CatalogoFiltros } from '../../lib/vitrina/catalogo';
 import type { CompanyAccess } from './types';
 import VitrinaImagen from './VitrinaImagen';
+import VitrinaModelo3d from './VitrinaModelo3d';
 import { catalogoUrl, fmtFecha, useVitrinaFetch, type CatalogoResp } from './vitrinaClient';
 
 /**
@@ -16,7 +17,8 @@ import { catalogoUrl, fmtFecha, useVitrinaFetch, type CatalogoResp } from './vit
  * u «Ofertable» con registro vigente, por vencer o sin vencimiento; sin códigos SAP, alertas,
  * exclusividades ni identificadores internos. Anterior / siguiente (también con las
  * flechas del teclado) y «Salir». Puede arrancar filtrado (por servicio, grupo terapéutico o
- * línea comercial): el encabezado dice qué se está presentando (p. ej. «UCI»).
+ * línea comercial): el encabezado dice qué se está presentando (p. ej. «UCI»). Si la presentación
+ * tiene modelo 3D vigente, se muestra GRANDE en lugar del vial y la etiqueta (que quedan debajo).
  */
 export default function VitrinaModoPresentacion({
   company,
@@ -52,7 +54,9 @@ export default function VitrinaModoPresentacion({
           ['ArrowLeft', () => ir(-1)],
           ['ArrowRight', () => ir(1)],
         ]
-      : []
+      : [],
+    // Con el foco en el visor 3D, las flechas giran el modelo (no cambian de presentación).
+    ['INPUT', 'TEXTAREA', 'SELECT', 'MODEL-VIEWER']
   );
 
   const p = lista[i] ?? null;
@@ -96,10 +100,20 @@ export default function VitrinaModoPresentacion({
             </Alert>
           ) : (
             <SimpleGrid cols={{ base: 1, md: 2 }} spacing='xl' p={{ base: 'md', sm: 'xl' }} maw={1400} mx='auto'>
-              <SimpleGrid cols={2} spacing='md' style={{ alignSelf: 'start' }}>
-                <VitrinaImagen id={p.imagenes.VIAL} etiqueta='Vial' />
-                <VitrinaImagen id={p.imagenes.ETIQUETA} etiqueta='Etiqueta' />
-              </SimpleGrid>
+              {p.modelo3d ? (
+                <Stack gap='md' style={{ alignSelf: 'start' }}>
+                  <VitrinaModelo3d key={p.modelo3d.id} id={p.modelo3d.id} alt={`Modelo 3D de ${tituloPresentacion(p)}`} poster={p.imagenes.PLEGADIZA ?? p.imagenes.VIAL} altura='min(62dvh, 640px)' />
+                  <SimpleGrid cols={2} spacing='md' maw={240}>
+                    <VitrinaImagen id={p.imagenes.VIAL} etiqueta='Vial' compacta />
+                    <VitrinaImagen id={p.imagenes.ETIQUETA} etiqueta='Etiqueta' compacta />
+                  </SimpleGrid>
+                </Stack>
+              ) : (
+                <SimpleGrid cols={2} spacing='md' style={{ alignSelf: 'start' }}>
+                  <VitrinaImagen id={p.imagenes.VIAL} etiqueta='Vial' />
+                  <VitrinaImagen id={p.imagenes.ETIQUETA} etiqueta='Etiqueta' />
+                </SimpleGrid>
+              )}
               <Stack gap='md'>
                 <div>
                   {(p.linea || p.familia) && (

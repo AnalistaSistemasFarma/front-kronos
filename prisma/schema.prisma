@@ -5188,6 +5188,7 @@ model VitrinaPresentacion {
   grupos         VitrinaPresentacionGrupo[]
   exclusividades VitrinaExclusividad[]
   imagenes       VitrinaImagen[]
+  modelos3d      VitrinaModelo3d[]
   documentos     VitrinaDocumento[]
 
   @@index([id_company, estado, visibilidad], map: "IX_vitrina_presentacion_company")
@@ -5349,6 +5350,30 @@ model VitrinaImagen {
   presentacion VitrinaPresentacion @relation(fields: [id_presentacion], references: [id_presentacion], onDelete: NoAction, onUpdate: NoAction)
 
   @@map("vitrina_imagen")
+  @@schema("dbo")
+}
+
+/// Modelo 3D (GLB, glTF 2.0 binario) de una presentación (2026-11-04). El archivo vive en el
+/// almacenamiento de adjuntos (OneDrive, carpeta VITRINA) igual que las imágenes; ruta_archivo
+/// guarda su id. Una carga nueva deja la anterior como no vigente. Dimensiones opcionales en cm.
+model VitrinaModelo3d {
+  id_modelo       Int      @id @default(autoincrement())
+  id_presentacion Int
+  ruta_archivo    String   @db.NVarChar(500)
+  nombre_original String   @db.NVarChar(255)
+  tamano_bytes    Int
+  version         Int
+  vigente         Boolean  @default(true)
+  ancho_cm        Decimal? @db.Decimal(7, 2)
+  alto_cm         Decimal? @db.Decimal(7, 2)
+  profundo_cm     Decimal? @db.Decimal(7, 2)
+  cargado_por     String   @db.NVarChar(50)
+  cargado_en      DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  presentacion VitrinaPresentacion @relation(fields: [id_presentacion], references: [id_presentacion], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_presentacion, vigente], map: "IX_vitrina_modelo_3d_presentacion")
+  @@map("vitrina_modelo_3d")
   @@schema("dbo")
 }
 

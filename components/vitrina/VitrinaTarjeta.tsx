@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { Badge, Card, Group, Stack, Text } from '@mantine/core';
+import { IconCube } from '@tabler/icons-react';
 import { CANAL_LABEL, VITRINA_URLS, vitrinaHref } from '../../lib/vitrina/constants';
 import { tituloPresentacion, type CatalogoItem } from '../../lib/vitrina/catalogo';
 import { VisibilidadBadge } from './VitrinaBadges';
@@ -9,7 +10,8 @@ import VitrinaImagen from './VitrinaImagen';
 
 /**
  * Tarjeta de una presentación en la Biblioteca y el Inicio. Celular primero: miniatura
- * del vial a la izquierda y los datos al lado; toda la tarjeta abre la ficha.
+ * del vial a la izquierda y los datos al lado; toda la tarjeta abre la ficha. «3D» si tiene
+ * modelo 3D vigente.
  */
 export default function VitrinaTarjeta({ item, idCompany }: { item: CatalogoItem; idCompany: number }) {
   return (
@@ -36,6 +38,11 @@ export default function VitrinaTarjeta({ item, idCompany }: { item: CatalogoItem
           )}
           <Group gap={4} wrap='wrap'>
             <VisibilidadBadge visibilidad={item.visibilidad} />
+            {item.modelo3d && (
+              <Badge variant='light' size='sm' leftSection={<IconCube size={12} />} data-testid='vitrina-tarjeta-3d'>
+                3D
+              </Badge>
+            )}
             {item.esParaTerceros && (
               <Badge variant='light' color='grape' size='sm'>
                 Para terceros
