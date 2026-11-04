@@ -99,6 +99,56 @@ export function currentPendingApproval(
   );
 }
 
+export const SELF_REVIEW_COMMENT = 'Validó al preparar el documento';
+
+function isSameUser(
+  approval: OrionReviewApproval,
+  user: { userId?: string | null; email?: string | null }
+): boolean {
+  const id = String(user.userId ?? '').trim();
+  if (id && String(approval.userId ?? '').trim() === id) return true;
+  const email = String(user.email ?? '').trim().toLowerCase();
+  return Boolean(email) && approval.email.trim().toLowerCase() === email;
+}
+
+/** ¿Quien envía a validación es también uno de los validadores elegidos? */
+export function submitterIsValidator(
+  approvals: OrionReviewApproval[],
+  submitter: { userId?: string | null; email?: string | null }
+): boolean {
+  return approvals.some((a) => isSameUser(a, submitter));
+}
+
+/**
+ * La preparadora que también valida no se crea una tarea a sí misma: su paso queda aprobado
+ * al enviar (ella preparó y validó). Si era la única que faltaba, el documento queda aprobado
+ * para firma y en la firma ubica su visto bueno como cualquier validador.
+ */
+export function autoApproveSubmitter(
+  review: OrionReviewState,
+  submitter: { userId?: string | null; email?: string | null; name?: string | null },
+  at: string
+): OrionReviewState {
+  if (review.status !== 'EN_VALIDACION') return review;
+  let changed = false;
+  const approvals = review.approvals.map((a) => {
+    if (a.decision !== 'PENDIENTE' || !isSameUser(a, submitter)) return a;
+    changed = true;
+    return {
+      ...a,
+      decision: 'APROBADO' as const,
+      decidedAt: at,
+      comment: SELF_REVIEW_COMMENT,
+      name: a.name || submitter.name || null,
+    };
+  });
+  if (!changed) return review;
+  const stillPending = approvals.some((a) => a.decision === 'PENDIENTE');
+  return stillPending
+    ? { ...review, approvals }
+    : { ...review, approvals, status: 'APROBADO', approvedAt: at };
+}
+
 export function completedApprovals(review?: OrionReviewState | null): OrionReviewApproval[] {
   return (review?.approvals ?? [])
     .filter((a) => a.decision === 'APROBADO')

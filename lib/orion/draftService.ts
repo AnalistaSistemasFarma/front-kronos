@@ -31,7 +31,9 @@ import {
   applyDraftEditValidators,
   applyDraftInternalDecision,
   applyDraftNewVersion,
+  applyDraftMarkAsCorrection,
   applyDraftResendInternal,
+  applyDraftSelfApproval,
   applyDraftReviewerInvite,
   applyDraftSendClient,
   applyDraftSubmitInternal,
@@ -81,7 +83,7 @@ import { stampDraftWatermark } from './draftWatermark';
 import { setOrionDocumentInBag } from './formValue';
 import { sendExternalSignerInviteEmail } from './inviteEmail';
 import { closeReviewTasks, listRequestValidators, openReviewTask } from './review';
-import { orderDocumentValidators, type OrionReviewValidator } from './reviewState';
+import { orderDocumentValidators, SELF_REVIEW_COMMENT, type OrionReviewValidator } from './reviewState';
 import {
   assertUserIsOrionDocumentPreparer,
   getRequestOrionContext,
@@ -193,8 +195,9 @@ async function assertElaborator(pool: SqlPool, requestId: number, actor: DraftAc
 }
 
 /**
- * Preparadora de ESTE documento: quien lo inició en Word o la solicitante. Un validador del
- * documento nunca lo es (no sube ni corrige). Sin documento iniciado basta el permiso del flujo.
+ * Preparadora de ESTE documento: quien lo inició en Word o la solicitante.
+ * Si además figura como validadora, sigue siendo dueña (puede editar validadores, corregir, etc.);
+ * un validador puro no lo es. Sin documento iniciado basta el permiso del flujo.
  */
 function isDraftOwner(
   draft: OrionDraftState | null,
@@ -202,32 +205,32 @@ function isDraftOwner(
   requesterId: string | number | null | undefined
 ): boolean {
   if (!draft) return true;
-  if (isDraftValidator(draft, actor.email, actor.userId)) return false;
   const me = normalizeEmail(actor.email);
-  return (
+  const isCreator =
     (Boolean(me) && normalizeEmail(draft.createdByEmail) === me) ||
-    (requesterId != null && String(requesterId).trim() !== '' && String(requesterId).trim() === String(actor.userId).trim())
-  );
+    (requesterId != null && String(requesterId).trim() !== '' && String(requesterId).trim() === String(actor.userId).trim());
+  if (isCreator) return true;
+  // Validador puro (no creó ni es solicitante): no prepara este documento.
+  return false;
 }
 
-/** Acciones de la preparadora (subir, enviar, convertir): permiso del flujo + dueña del documento. */
+/** Acciones de la preparadora (subir, enviar, convertir, editar validadores): permiso del flujo + dueña. */
 async function assertDraftOwner(
   pool: SqlPool,
   requestId: number,
   actor: DraftActor,
   draft: OrionDraftState
 ): Promise<void> {
-  if (isDraftValidator(draft, actor.email, actor.userId)) {
-    throw httpError('Los validadores revisan el documento, pero no suben versiones ni lo corrigen.', 403);
-  }
   const { ctx } = await assertUserIsOrionDocumentPreparer(pool, {
     requestId,
     userId: actor.userId,
     userEmail: actor.email,
   });
-  if (!isDraftOwner(draft, actor, ctx.id_requester)) {
-    throw httpError('Solo quien prepara este documento (o la solicitante) puede hacer esto.', 403);
+  if (isDraftOwner(draft, actor, ctx.id_requester)) return;
+  if (isDraftValidator(draft, actor.email, actor.userId)) {
+    throw httpError('Los validadores revisan el documento, pero no suben versiones ni lo corrigen.', 403);
   }
+  throw httpError('Solo quien prepara este documento (o la solicitante) puede hacer esto.', 403);
 }
 
 async function assertRequestOpen(pool: SqlPool, requestId: number): Promise<void> {
@@ -289,6 +292,21 @@ function notify(
     url: buildAppUrl(draftBoardPath(payload.requestId, payload.fileId)),
     tag: payload.tag,
   }).catch((err: unknown) => console.warn('[orion/draft] notificación:', err));
+}
+
+/** Texto para la nota cuando la preparadora quedó aprobada por ser también validadora. */
+function selfApprovalNote(draft: OrionDraftState, actor: DraftActor): string {
+  const mine = draft.internalReview?.approvals.some(
+    (a) =>
+      a.decision === 'APROBADO' &&
+      a.comment === SELF_REVIEW_COMMENT &&
+      a.approvedVersion === draft.versionLabel &&
+      (String(a.userId || '') === String(actor.userId) || normalizeEmail(a.email) === normalizeEmail(actor.email))
+  );
+  if (!mine) return '';
+  return draft.status === 'VALIDADO_INTERNO'
+    ? ` ${actorDisplay(actor)} también valida: quedó validado al enviarlo.`
+    : ` ${actorDisplay(actor)} también valida: su aprobación quedó registrada al enviarlo.`;
 }
 
 /** Preparadora del documento (quien lo inició y quien lo envió a validación). */
@@ -688,7 +706,11 @@ export async function submitOrionDraftInternal(
 
   const loaded = await loadDraft(pool, params.requestId, params.fileId);
   if (!loaded.draft) throw httpError('Este documento no está en preparación.', 404);
-  const draft = applyDraftSubmitInternal(loaded.draft, { actor: params.actor, validators });
+  // Si la preparadora también valida, su aprobación queda al enviar (sin tarea para sí misma).
+  const draft = applyDraftSelfApproval(
+    applyDraftSubmitInternal(loaded.draft, { actor: params.actor, validators }),
+    params.actor
+  );
   await saveDraft(pool, params.requestId, loaded.formFieldId, loaded.bag, draft);
 
   await note(
@@ -696,7 +718,7 @@ export async function submitOrionDraftInternal(
     params.requestId,
     `${actorDisplay(params.actor)} envió ${draft.fileName} (versión ${draft.versionLabel}) a validación. Validadores, al mismo tiempo: ${validators
       .map((v) => v.name || v.email)
-      .join(', ')}.`,
+      .join(', ')}.${selfApprovalNote(draft, params.actor)}`,
     params.actor
   );
   await openDraftReviewTask(pool, params.requestId, draft);
@@ -719,7 +741,10 @@ export async function resendOrionDraftInternal(
   await assertDraftOwner(pool, params.requestId, params.actor, loaded.draft);
 
   // Primero el orden de pasos (¿ya subió la versión corregida?) y después las marcas pendientes.
-  const draft = applyDraftResendInternal(loaded.draft, { actor: params.actor, baseVersion: params.baseVersion });
+  const draft = applyDraftSelfApproval(
+    applyDraftResendInternal(loaded.draft, { actor: params.actor, baseVersion: params.baseVersion }),
+    params.actor
+  );
   const open = (await listDraftMarks(pool, params.requestId, params.fileId)).filter((m) => m.status === 'abierta');
   if (open.length > 0) {
     throw httpError(
@@ -735,7 +760,7 @@ export async function resendOrionDraftInternal(
   await note(
     pool,
     params.requestId,
-    `${actorDisplay(params.actor)} envió la corrección de ${draft.fileName} (versión ${draft.versionLabel}) a los validadores.`,
+    `${actorDisplay(params.actor)} envió la corrección de ${draft.fileName} (versión ${draft.versionLabel}) a los validadores.${selfApprovalNote(draft, params.actor)}`,
     params.actor
   );
   const everyone = new Set<string>();
@@ -776,7 +801,9 @@ export async function editOrionDraftValidators(
   }
   const loaded = await loadDraft(pool, params.requestId, params.fileId);
   if (!loaded.draft) throw httpError('Este documento no está en preparación.', 404);
-  const { state: draft, added, removed } = applyDraftEditValidators(loaded.draft, { validators });
+  const edited = applyDraftEditValidators(loaded.draft, { validators });
+  const { added, removed } = edited;
+  const draft = applyDraftSelfApproval(edited.state, params.actor);
   await saveDraft(pool, params.requestId, loaded.formFieldId, loaded.bag, draft);
 
   for (const r of removed) {
@@ -1654,21 +1681,41 @@ export async function orionDraftMarkAction(
       requestId: params.requestId,
       fileId: params.fileId,
     });
-    // Quien marca algo nuevo deja de tener la aprobación vigente.
-    if (draft.internalReview?.approvals.some((a) => normalizeEmail(a.email) === me && a.decision === 'APROBADO')) {
-      const loaded = await loadDraft(pool, params.requestId, params.fileId);
-      if (loaded.draft?.internalReview) {
-        const next: OrionDraftState = {
-          ...loaded.draft,
-          internalReview: {
-            ...loaded.draft.internalReview,
-            approvals: loaded.draft.internalReview.approvals.map((a) =>
-              normalizeEmail(a.email) === me ? { ...a, decision: 'PENDIENTE' as const } : a
-            ),
-          },
-        };
-        await saveDraft(pool, params.requestId, loaded.formFieldId, loaded.bag, next);
+    // Guardar la marca cuenta como "Pedir corrección" (sin tocar el botón): su tarea se cierra y,
+    // cuando ya respondieron todos, la preparadora puede corregir.
+    const loaded = await loadDraft(pool, params.requestId, params.fileId);
+    const asCorrection = loaded.draft
+      ? applyDraftMarkAsCorrection(loaded.draft, params.actor, why)
+      : { state: null, changed: false };
+    if (asCorrection.changed && asCorrection.state) {
+      const next = asCorrection.state;
+      await saveDraft(pool, params.requestId, loaded.formFieldId, loaded.bag, next);
+      await safeCloseReviewTasks(pool, {
+        requestId: params.requestId,
+        fileId: params.fileId,
+        status: 3,
+        note: `Pidió corrección con sus marcas: ${shortText(why)}`,
+        executorId: params.actor.userId,
+        onlyUserId: params.actor.userId,
+      });
+      await note(
+        pool,
+        params.requestId,
+        `${actorDisplay(params.actor)} pidió corrección de ${next.fileName} (versión ${next.versionLabel}) con sus marcas en el tablero.`,
+        params.actor
+      );
+      if (draftReviewPhase(next) === 'correccion') {
+        notifyOthers(params.actor, draftPreparers(next), {
+          title: `Le toca corregir: ${next.fileName}`,
+          body: `Solicitud #${params.requestId} · Ya respondieron todos los validadores: suba la versión corregida, marque lo corregido y envíela a los validadores.`,
+          requestId: params.requestId,
+          fileId: params.fileId,
+        });
       }
+      await publishDraftEvent(pool, params.requestId, params.fileId, 'approval_changed', {
+        email: me,
+        decision: 'return',
+      });
     }
     await publishDraftEvent(pool, params.requestId, params.fileId, 'mark_created', { by: me });
     return;
