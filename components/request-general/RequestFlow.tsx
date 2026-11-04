@@ -174,6 +174,11 @@ export function RequestFlowSteps({ flow, highlightTask }: { flow: RequestFlow; h
                     : 'Aún sin responsable'
                   : 'Sin responsable'}
             </Text>
+            {step.detail && (
+              <Text size='xs' fw={600}>
+                {step.detail}
+              </Text>
+            )}
           </Timeline.Item>
         );
       })}
@@ -236,6 +241,11 @@ function FlowStepTip({ step, index, total, isMine }: { step: FlowStep; index: nu
       <Text size='sm' fw={700} style={{ overflowWrap: 'anywhere' }}>
         {step.name}
       </Text>
+      {step.detail && (
+        <Text size='xs' fw={600} style={{ overflowWrap: 'anywhere' }}>
+          {step.detail}
+        </Text>
+      )}
       <Text size='xs' opacity={0.75}>
         {step.assignees.length > 0
           ? step.assignees.join(', ')
@@ -283,6 +293,7 @@ function FlowStepsRow({ flow, highlightTask }: { flow: RequestFlow; highlightTas
                   <StepIcon step={step} />
                   <span className={styles.label}>{step.name}</span>
                 </span>
+                {step.detail && <span className={styles.detail}>{step.detail}</span>}
               </button>
             </Tooltip>
           );

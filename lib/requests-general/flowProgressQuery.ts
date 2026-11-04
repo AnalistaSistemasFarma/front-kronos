@@ -84,9 +84,12 @@ export async function loadRequestFlows(
     display_order: number | null;
     id_status: number | null;
     assigned: string | null;
+    sap_detail: string | null;
   }>(`
     SELECT trg.id_request_general AS id_request, trg.id_task, tpc.task, tpc.display_order, trg.id_status,
-      u.name AS assigned
+      u.name AS assigned,
+      -- Solo el resultado de las Tareas SAP (no las resoluciones escritas por personas).
+      CASE WHEN trg.resolution LIKE N'Ejecutada en SAP%' THEN LEFT(CAST(trg.resolution AS nvarchar(400)), 400) ELSE NULL END AS sap_detail
     FROM task_request_general trg
     INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
     LEFT JOIN [user] u ON u.id = trg.id_assigned
@@ -109,6 +112,7 @@ export async function loadRequestFlows(
       displayOrder: r.display_order,
       idStatus: r.id_status,
       assigned: r.assigned,
+      sapDetail: r.sap_detail,
     });
     instances.set(r.id_request, list);
   }
