@@ -1,211 +1,157 @@
 name: Deploy a PRUEBAS (.230)
 
-# Auto-deploy del entorno de PRUEBAS Kronos/SynerLink en la .230 (pce0023).
-# Se dispara al hacer push/merge a la rama `testing`, o a mano (workflow_dispatch).
+# Auto-deploy del entorno de PRUEBAS Kronos/SynerLink en la .230 (pce0023), SIN
+# CAIDA (azul/verde). Se dispara con push/merge a `testing` o a mano.
 #
-# ESTRATEGIA: NO usa actions/checkout. El runner self-hosted actua sobre el clon
-# EXISTENTE en C:\Users\nicolas.rivera\projects\front-kronos-test, donde viven
-# los .env locales (gitignored, con secretos) y la config del entorno. Un
-# checkout normal los perderia. En su lugar hacemos fetch + reset --hard a
-# origin/testing (solo afecta archivos VERSIONADOS; los .env untracked sobreviven
-# porque NO ejecutamos `git clean`).
+# ESQUEMA (activado una sola vez con scripts\bluegreen\setup-230.ps1):
+#   - Dos carpetas de release: A = C:\Users\nicolas.rivera\projects\front-kronos-test
+#     y B = ...\front-kronos-test-b (git worktree), cada una con su node_modules
+#     y su .next. Los .env / dbconfig.js de B son enlaces simbolicos a los de A.
+#   - GSS-Front-TEST-proxy escucha fijo en :3030 (tunel cf-kronos-test e IIS
+#     rp-kronos-test no cambian) y reenvia al color activo (A :3032 o B :3033),
+#     segun <estado>\active.json.
+#   - Job "build": construye la carpeta INACTIVA mientras la activa sigue
+#     atendiendo (sin mantenimiento, sin pm2 stop). Se CANCELA si llega un merge
+#     mas nuevo: solo se construye el ultimo.
+#   - Job "switch": arranca el color nuevo en su puerto, smoke test, cambia el
+#     proxy (< 0,5 s, cero peticiones perdidas), mueve kronos-mcp-test (delete +
+#     start, ~2-4 s, nunca 2 instancias) y retira el color viejo. NUNCA se cancela
+#     a mitad. Si el smoke test falla, no cambia nada (rollback automatico).
+#   - La pagina de mantenimiento del IIS queda solo como respaldo si, al final,
+#     :3030 no responde.
+# Reversa: scripts\bluegreen\revert-230.ps1 + revertir este archivo.
 
 on:
   push:
     branches: [testing]
   workflow_dispatch:
+    inputs:
+      state_dir:
+        description: 'Carpeta de estado azul/verde (vacio = la real de PRUEBAS). Otra carpeta = ensayo aislado que construye la rama elegida.'
+        required: false
+        default: ''
 
-# Evita despliegues solapados: si llega un push mientras corre, se encola.
-concurrency:
-  group: deploy-testing-230
-  cancel-in-progress: false
+env:
+  BG_STATE_DIR_REAL: C:\Users\nicolas.rivera\projects\front-kronos-test-bluegreen
+  IIS_SITE_PATH: C:\inetpub\testrp\rp-kronos-test
 
 jobs:
-  deploy:
-    name: Build y reinicio pm2 en la .230
+  build:
+    name: Build en la carpeta inactiva (la activa sigue atendiendo)
     runs-on: [self-hosted, kronos-230]
-    env:
-      PROJECT_DIR: C:\Users\nicolas.rivera\projects\front-kronos-test
-      STALE_RUN: "false"
-      IIS_SITE_PATH: C:\inetpub\testrp\rp-kronos-test
+    # Un merge nuevo cancela el build en curso: solo se construye el ultimo.
+    concurrency:
+      group: deploy-testing-230-build-${{ inputs.state_dir || 'pruebas' }}
+      cancel-in-progress: true
+    outputs:
+      skip: ${{ steps.resolve.outputs.skip }}
+      color: ${{ steps.resolve.outputs.color }}
+      dir: ${{ steps.resolve.outputs.dir }}
+      sha: ${{ steps.resolve.outputs.sha }}
+      state_dir: ${{ steps.resolve.outputs.state_dir }}
     steps:
-      - name: Mostrar contexto
+      - name: Resolver color inactivo y commit
+        id: resolve
         shell: powershell
-        run: |
-          Write-Host "Commit:  $env:GITHUB_SHA"
-          Write-Host "Rama:    $env:GITHUB_REF"
-          Write-Host "Trigger: $env:GITHUB_EVENT_NAME"
-          Write-Host "Dir:     $env:PROJECT_DIR"
-
-      - name: Omitir despliegue obsoleto
-        shell: powershell
+        env:
+          IN_STATE_DIR: ${{ inputs.state_dir }}
         run: |
           $ErrorActionPreference = "Stop"
-          Set-Location $env:PROJECT_DIR
-          # Los pushes pueden llegar más rápido que un build. Un run viejo no
-          # debe detener/recompilar apps si origin/testing ya avanzó: el run
-          # más reciente, que quedó en cola, hará el único despliegue útil.
-          git fetch origin testing
-          if ($LASTEXITCODE -ne 0) { throw "git fetch fallo" }
-          $latest = (git rev-parse origin/testing).Trim()
-          if ($env:GITHUB_SHA -ne $latest) {
-            "STALE_RUN=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-            Write-Host "::notice::Run obsoleto ($env:GITHUB_SHA); testing ya está en $latest. Se omite sin tocar PM2."
-          } else {
-            "STALE_RUN=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-            Write-Host "Run vigente para $latest."
+          $state = "$env:IN_STATE_DIR".Trim()
+          if (-not $state) { $state = $env:BG_STATE_DIR_REAL }
+          # En el entorno real siempre se despliega `testing`; un ensayo aislado
+          # (otra carpeta de estado) construye la rama desde la que se lanzo.
+          $branch = if ($state -eq $env:BG_STATE_DIR_REAL) { 'testing' } else { $env:GITHUB_REF_NAME }
+          $cfgFile = Join-Path $state 'bluegreen.json'
+          $actFile = Join-Path $state 'active.json'
+          if (-not (Test-Path $cfgFile) -or -not (Test-Path $actFile)) {
+            throw "No esta activado el azul/verde en $state. Corra scripts\bluegreen\setup-230.ps1 (ver PR). No se toco nada."
           }
-
-      - name: Actualizar codigo (fetch + reset a origin/testing)
-        if: env.STALE_RUN != 'true'
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          Set-Location $env:PROJECT_DIR
-          Write-Host "== git fetch =="
-          git fetch origin testing
+          $cfg = Get-Content $cfgFile -Raw | ConvertFrom-Json
+          $act = Get-Content $actFile -Raw | ConvertFrom-Json
+          $color = if ($act.color -eq 'A') { 'B' } else { 'A' }
+          $dir = $cfg.colors.$color.dir
+          git -C $dir fetch origin $branch
           if ($LASTEXITCODE -ne 0) { throw "git fetch fallo" }
-          git checkout testing
-          if ($LASTEXITCODE -ne 0) { throw "git checkout testing fallo" }
-          Write-Host "== git reset --hard origin/testing =="
-          # reset --hard solo toca archivos VERSIONADOS. Los .env gitignored/
-          # untracked NO se borran (no ejecutamos git clean a proposito).
-          git reset --hard origin/testing
-          if ($LASTEXITCODE -ne 0) { throw "git reset fallo" }
-          Write-Host "HEAD ahora:"
-          git rev-parse HEAD
+          $sha = (git -C $dir rev-parse "origin/$branch").Trim()
+          $skip = 'false'
+          if ($env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_SHA -ne $sha) {
+            $skip = 'true'
+            Write-Host "::notice::Run obsoleto ($env:GITHUB_SHA); $branch ya esta en $sha. El run mas nuevo hace el despliegue."
+          }
+          Write-Host "Activo: $($act.color) (:$($act.port), $($act.sha)). Se construye $color en $dir con $branch@$sha"
+          "skip=$skip"       | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "color=$color"     | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "dir=$dir"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "sha=$sha"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "state_dir=$state" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Verificar que los .env locales siguen presentes
-        if: env.STALE_RUN != 'true'
+      - name: Actualizar codigo de la carpeta inactiva
+        if: steps.resolve.outputs.skip != 'true'
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          Set-Location $env:PROJECT_DIR
-          if (-not (Test-Path ".env"))     { throw "FALTA .env (front). Abortando para no romper el entorno." }
-          if (-not (Test-Path "mcp\.env")) { throw "FALTA mcp\.env (MCP). Abortando para no romper el entorno." }
-          Write-Host "OK: .env (front) y mcp\.env presentes."
+          $dir = "${{ steps.resolve.outputs.dir }}"
+          $sha = "${{ steps.resolve.outputs.sha }}"
+          # Sello fuera ANTES de tocar el codigo: un build cancelado nunca se activa.
+          Remove-Item -LiteralPath (Join-Path $dir '.bluegreen-build.json') -Force -ErrorAction SilentlyContinue
+          # A esta en la rama testing; B es un worktree en HEAD separado. reset
+          # --hard al sha sirve para ambos. Nada corre desde esta carpeta, asi que
+          # Windows no bloquea archivos y los borrados del PR si se borran.
+          # No hay git clean: los .env (ignorados) y enlaces sobreviven.
+          git -C $dir reset --hard $sha
+          if ($LASTEXITCODE -ne 0) { throw "git reset fallo" }
+          git -C $dir rev-parse HEAD
 
-      # Pagina "SynerLink se esta actualizando" en el sitio IIS de pruebas
-      # rp-kronos-test (:8450, deploy/iis/README.md), en TODO deploy, antes de
-      # detener las apps / instalar / compilar. La quita el ultimo paso del job
-      # (if: always()) solo cuando :3030 responde 200. El tunel trycloudflare va
-      # directo a :3030 y no pasa por IIS. continue-on-error: es cosmetica.
-      - name: Activar pagina de mantenimiento (IIS rp-kronos-test)
-        if: env.STALE_RUN != 'true'
+      - name: Instalar, generar Prisma, migrar y compilar (front + MCP)
+        if: steps.resolve.outputs.skip != 'true'
+        shell: powershell
+        run: |
+          $dir = "${{ steps.resolve.outputs.dir }}"
+          powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dir 'scripts\bluegreen\build-inactive.ps1') `
+            -StateDir "${{ steps.resolve.outputs.state_dir }}" -Color "${{ steps.resolve.outputs.color }}" `
+            -Sha "${{ steps.resolve.outputs.sha }}" -RunId "$env:GITHUB_RUN_ID"
+          if ($LASTEXITCODE -ne 0) { throw "build-inactive fallo: la version activa sigue atendiendo, sin cambios." }
+
+  switch:
+    name: Cambio azul/verde (sin caida)
+    needs: build
+    if: needs.build.outputs.skip != 'true'
+    runs-on: [self-hosted, kronos-230]
+    # Nunca se cancela a mitad del cambio; los cambios se hacen de a uno.
+    concurrency:
+      group: deploy-testing-230-switch-${{ inputs.state_dir || 'pruebas' }}
+      cancel-in-progress: false
+    steps:
+      - name: Arrancar color nuevo, smoke test y cambiar el proxy
+        shell: powershell
+        run: |
+          $dir = "${{ needs.build.outputs.dir }}"
+          powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dir 'scripts\bluegreen\switch.ps1') `
+            -StateDir "${{ needs.build.outputs.state_dir }}" -Color "${{ needs.build.outputs.color }}" `
+            -Sha "${{ needs.build.outputs.sha }}" -RunId "$env:GITHUB_RUN_ID"
+          if ($LASTEXITCODE -eq 2) { Write-Host "::warning::Front nuevo en linea; el MCP volvio a la version anterior (ver log)." ; exit 0 }
+          if ($LASTEXITCODE -ne 0) { throw "switch fallo (codigo $LASTEXITCODE). Ver log: si fallo antes del cambio, la version anterior sigue atendiendo." }
+
+      # Respaldo: solo si al final el puerto publico NO responde 200 se pone la
+      # pagina de mantenimiento del IIS (en el entorno real).
+      - name: Respaldo - pagina de mantenimiento si :3030 no responde
+        if: ${{ always() && needs.build.outputs.state_dir == env.BG_STATE_DIR_REAL }}
         continue-on-error: true
         shell: powershell
         run: |
-          Set-Location $env:PROJECT_DIR
-          # Mantiene la pagina instalada al dia con la del repo.
-          Copy-Item deploy\iis\_mantenimiento\index.html (Join-Path $env:IIS_SITE_PATH '_mantenimiento\index.html') -Force
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\maintenance-on.ps1 -SitePath $env:IIS_SITE_PATH -Motivo "deploy $env:GITHUB_SHA"
-          if ($LASTEXITCODE -ne 0) { throw "maintenance-on fallo" }
-
-      - name: Detener apps del test (liberar locks de binarios nativos)
-        if: env.STALE_RUN != 'true'
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Continue"
-          # En Windows, mientras GSS-Front-TEST (next start) y kronos-mcp-test
-          # corren, mantienen ABIERTOS binarios nativos (next-swc *.node, prisma
-          # query_engine *.node). Eso hace fallar `npm ci` con EPERM al intentar
-          # borrarlos. Por eso DETENEMOS solo las apps del test antes de instalar
-          # y construir, y las arrancamos de nuevo al final.
-          # NUNCA pm2 stop all / kill: SOLO estas dos apps. cf-kronos-test (tunel)
-          # queda corriendo; el front vuelve enseguida.
-          pm2 stop GSS-Front-TEST kronos-mcp-test
-          Write-Host "Apps del test detenidas (cf-kronos-test sigue arriba)."
-
-      - name: Instalar dependencias y generar Prisma (front)
-        if: env.STALE_RUN != 'true'
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          Set-Location $env:PROJECT_DIR
-          npm install --prefer-offline --no-audit --no-fund
-          if ($LASTEXITCODE -ne 0) { throw "npm install (front) fallo" }
-          npx prisma generate
-          if ($LASTEXITCODE -ne 0) { throw "prisma generate fallo" }
-
-      - name: Aplicar migración aditiva de estado compartido de voz
-        if: env.STALE_RUN != 'true'
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          Set-Location $env:PROJECT_DIR
-          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260921193000_chat_voice_shared_state/migration.sql
-          if ($LASTEXITCODE -ne 0) { throw "migración de voz fallo" }
-
-      - name: Build front (Next.js)
-        if: env.STALE_RUN != 'true'
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          Set-Location $env:PROJECT_DIR
-          npm run build
-          if ($LASTEXITCODE -ne 0) {
-            # Reintento unico: mismo flakiness de Turbopack/filesystem lento
-            # visto en el deploy de produccion del 2026-09-22 (ver main.yml).
-            Write-Host "fallo el primer intento de build; espero y reintento una vez"
-            Start-Sleep -Seconds 5
-            npm run build
-            if ($LASTEXITCODE -ne 0) { throw "npm run build (front) fallo tras reintento" }
-          }
-
-      - name: Build MCP
-        if: env.STALE_RUN != 'true'
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          Set-Location (Join-Path $env:PROJECT_DIR "mcp")
-          npm install --prefer-offline --no-audit --no-fund
-          if ($LASTEXITCODE -ne 0) { throw "npm install (mcp) fallo" }
-          npm run build
-          if ($LASTEXITCODE -ne 0) { throw "npm run build (mcp) fallo" }
-
-      - name: Arrancar apps pm2 del entorno de pruebas
-        # always(): aunque un paso previo falle, volvemos a levantar las apps para
-        # no dejar el entorno de pruebas caido (usaria el ultimo build valido).
-        if: ${{ always() && env.STALE_RUN != 'true' }}
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          Set-Location $env:PROJECT_DIR
-          # SOLO las apps del test (las detuvimos antes). NUNCA all / kill / ajenas.
-          # restart re-arranca lo detenido y recarga el codigo nuevo.
-          pm2 restart GSS-Front-TEST kronos-mcp-test --update-env
-          if ($LASTEXITCODE -ne 0) { throw "pm2 restart fallo" }
-          pm2 save
-          Write-Host "== estado pm2 =="
-          pm2 list
-
-      - name: Smoke test (HTTP 200 en localhost:3030)
-        if: env.STALE_RUN != 'true'
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          Set-Location $env:PROJECT_DIR
+          $dir = "${{ needs.build.outputs.dir }}"
           $ok = $false
-          for ($i = 1; $i -le 12; $i++) {
-            try {
-              $r = Invoke-WebRequest -Uri "http://localhost:3030" -UseBasicParsing -TimeoutSec 10
-              Write-Host "Intento $i -> HTTP $($r.StatusCode)"
-              if ($r.StatusCode -eq 200) { $ok = $true; break }
-            } catch {
-              Write-Host "Intento $i -> aun no responde: $($_.Exception.Message)"
-            }
+          for ($i = 1; $i -le 6; $i++) {
+            try { $r = Invoke-WebRequest -Uri "http://localhost:3030" -UseBasicParsing -TimeoutSec 10; if ($r.StatusCode -eq 200) { $ok = $true; break } } catch {}
             Start-Sleep -Seconds 5
           }
-          if (-not $ok) { throw "Smoke test fallo: localhost:3030 no devolvio 200 tras varios intentos." }
-          Write-Host "OK: GSS-Front-TEST responde 200 en localhost:3030."
-
-      # Corre SIEMPRE (tambien si el job fallo) para no dejar el sitio en
-      # mantenimiento. maintenance-off.ps1 verifica HTTP 200 en :3030 (reintentos
-      # ~2 min) antes de borrar la bandera; si la app no quedo arriba la conserva.
-      - name: Quitar pagina de mantenimiento si GSS-Front-TEST responde 200
-        if: ${{ always() && env.STALE_RUN != 'true' }}
-        shell: powershell
-        run: |
-          Set-Location $env:PROJECT_DIR
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\maintenance-off.ps1 -SitePath $env:IIS_SITE_PATH -HealthUrl http://localhost:3030/
-          if ($LASTEXITCODE -ne 0) { throw "maintenance-off fallo: la bandera sigue puesta" }
+          if ($ok) {
+            Write-Host "OK: :3030 responde 200."
+            powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dir 'scripts\maintenance-off.ps1') -SitePath $env:IIS_SITE_PATH -HealthUrl http://localhost:3030/
+          } else {
+            Write-Host "::error:::3030 no responde 200: se activa la pagina de mantenimiento del IIS."
+            Copy-Item (Join-Path $dir 'deploy\iis\_mantenimiento\index.html') (Join-Path $env:IIS_SITE_PATH '_mantenimiento\index.html') -Force
+            powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dir 'scripts\maintenance-on.ps1') -SitePath $env:IIS_SITE_PATH -Motivo "deploy $env:GITHUB_SHA sin 200 en :3030"
+            exit 1
+          }
