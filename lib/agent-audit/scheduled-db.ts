@@ -61,7 +61,24 @@ export interface ProgramadaDto extends Omit<
   vistoAt: string | null;
 }
 
-const FILTRO_PERSONAL = `(ms.private_owner_email IS NULL OR LOWER(ms.private_owner_email) = @email)`;
+/**
+ * La reja de agentes personales vive en agent_memory_setting (pase de
+ * Memorias, 2026-10-29). Si ese pase no está en el ambiente, no hay agentes
+ * personales: se consulta sin la tabla en lugar de fallar (igual que errors-db).
+ */
+let conMemorias: boolean | null = null;
+async function hayMemorias(): Promise<boolean> {
+  if (conMemorias === null) {
+    const r = await withMssqlPool((pool) =>
+      pool
+        .request()
+        .query(`SELECT OBJECT_ID(N'dbo.agent_memory_setting', N'U') AS t`),
+    );
+    const t = (r.recordset as Fila[])[0]?.t;
+    conMemorias = t !== null && t !== undefined;
+  }
+  return conMemorias;
+}
 
 function aDto(f: Fila): ProgramadaDto {
   let semanas: SemanaProgramada[] = [];
@@ -131,6 +148,7 @@ export async function leerProgramadas(
   code?: string,
 ): Promise<ProgramadaDto[] | null> {
   try {
+    const memorias = await hayMemorias();
     const r = await withMssqlPool((pool) =>
       pool
         .request()
@@ -141,8 +159,10 @@ export async function leerProgramadas(
         JOIN dbo.agent a ON a.id_agent = j.id_agent
         LEFT JOIN dbo.agent_company ac ON ac.id_agent = a.id_agent AND ac.is_primary = 1
         LEFT JOIN dbo.company co ON co.id_company = ac.id_company
-        LEFT JOIN dbo.agent_memory_setting ms ON ms.id_agent = a.id_agent
-        WHERE a.is_active = 1 AND ${FILTRO_PERSONAL} AND (@code IS NULL OR a.code = @code)
+        ${memorias ? "LEFT JOIN dbo.agent_memory_setting ms ON ms.id_agent = a.id_agent" : ""}
+        WHERE a.is_active = 1
+          ${memorias ? "AND (ms.private_owner_email IS NULL OR LOWER(ms.private_owner_email) = @email)" : ""}
+          AND (@code IS NULL OR a.code = @code)
         ORDER BY a.display_name, j.nombre;
       `),
     );
