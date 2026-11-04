@@ -15,6 +15,7 @@ import type { ChatAgentIdentity } from '../../../../../lib/chat/agent-auth';
 import { cargarConfigProyectos } from '../../../../../lib/proyectos/config-agentes';
 import { whereProyectoDelAgente } from '../../../../../lib/chat/projects';
 import { mensajesConEntregaPendiente } from '../../../../../lib/chat/entregas-pendientes';
+import { cuerpoParaAgente, EVENT_TYPE_TURNO, tickMesas } from '../../../../../lib/proyectos/mesas';
 
 // El long-poll obliga a que la ruta sea dinámica: nada de esto se cachea.
 export const dynamic = 'force-dynamic';
@@ -270,6 +271,11 @@ async function bandejaDeProyectos(opciones: {
   }
   const empresas = config.filtroEmpresas(agent.code);
 
+  // MESAS DE DISCUSIÓN (2026-11-04): motor perezoso. Cualquier puente que
+  // pregunte por su bandeja empuja las mesas que tengan ronda o turno vencido
+  // (con freno en memoria; nunca lanza). Ver lib/proyectos/mesas.ts.
+  void tickMesas();
+
   const includeProyecto = {
     attachments: true,
     userAuthor: { select: { id: true, name: true, email: true } },
@@ -311,7 +317,9 @@ async function bandejaDeProyectos(opciones: {
       prisma.chatMessage.findMany({
         where: {
           id: { in: ids },
-          role: 'user',
+          // Personas que lo mencionaron, o el AVISO DE TURNO de una mesa de
+          // discusión (mensaje de sistema con su fila de entrega).
+          OR: [{ role: 'user' }, { role: 'system', event_type: EVENT_TYPE_TURNO }],
           conversation: {
             kind: 'project',
             archived: false,
@@ -358,6 +366,13 @@ async function bandejaDeProyectos(opciones: {
     ]);
   }
 
+  // Aviso de turno de una mesa: el agente recibe además las instrucciones de
+  // la mesa (no quedan guardadas en el hilo; ver mesas-rules.ts).
+  const cuerpos = new Map<number, string>();
+  for (const m of pending) {
+    if (m.event_type === EVENT_TYPE_TURNO) cuerpos.set(m.id, await cuerpoParaAgente(m));
+  }
+
   return jsonNoStore({
     agent: { idAgent: agent.idAgent, code: agent.code, displayName: agent.displayName },
     scope: 'projects',
@@ -367,11 +382,14 @@ async function bandejaDeProyectos(opciones: {
       id: m.id,
       idConversation: m.id_conversation,
       role: m.role,
-      body: m.body,
+      body: cuerpos.get(m.id) ?? m.body,
       createdAt: m.created_at.toISOString(),
       author: m.userAuthor
         ? { kind: 'user' as const, id: m.userAuthor.id, name: m.userAuthor.name, email: m.userAuthor.email }
-        : null,
+        : m.event_type === EVENT_TYPE_TURNO
+          ? // Sin correo: un aviso de turno NUNCA activa permisos de una persona.
+            { kind: 'system' as const, id: null, name: 'Mesa de discusión', email: null }
+          : null,
       conversation: {
         id: m.conversation.id,
         title: m.conversation.title,
