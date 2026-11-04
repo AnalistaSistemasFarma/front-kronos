@@ -69,3 +69,6 @@ CLAUDE.md
 
 # Graphify (mapa del código generado en local)
 /graphify-out/
+
+# Despliegue azul/verde de PRUEBAS (.230): sello de build por carpeta
+.bluegreen-build.json
