@@ -4,26 +4,35 @@ vi.mock('../purchases/authorization', () => ({ companySap: vi.fn() }));
 vi.mock('../requests-general/createGeneralRequest', () => ({ createGeneralRequest: vi.fn() }));
 vi.mock('../workflow-sap/engine', () => ({ runSapExecutors: vi.fn() }));
 vi.mock('./flow', () => ({ simulateDraft: vi.fn() }));
-import { candidatesFilter, cronFor, summaryText, validateConfig } from './automation';
+import { candidatesFilter, cronFor, parseUserSigns, summaryText, validateConfig } from './automation';
 
 describe('automatización · reglas puras', () => {
   it('filtro de candidatos: borradores de pedido abiertos en B del usuario de la integración', () => {
-    expect(candidatesFilter(30, '2026-11-01')).toBe(
+    expect(candidatesFilter([30], '2026-11-01')).toBe(
       "DocObjectCode eq 'oOrders' and U_SEND_State eq 'B' and DocumentStatus eq 'bost_Open' and UserSign eq 30 and DocDate ge '2026-11-01'"
     );
-    expect(candidatesFilter(30, null)).not.toContain('DocDate');
-    expect(candidatesFilter(30, "2026-11-01' or 1 eq 1")).not.toContain('or 1');
+    expect(candidatesFilter([14, 30], null)).toBe(
+      "DocObjectCode eq 'oOrders' and U_SEND_State eq 'B' and DocumentStatus eq 'bost_Open' and (UserSign eq 14 or UserSign eq 30)"
+    );
+    expect(candidatesFilter([30], "2026-11-01' or 1 eq 1")).not.toContain('or 1');
+  });
+  it('lista de usuarios SAP', () => {
+    expect(parseUserSigns('14, 30;30')).toEqual([14, 30]);
+    expect(parseUserSigns(30)).toEqual([30]);
+    expect(parseUserSigns('')).toEqual([]);
+    expect(parseUserSigns('14, x').some(Number.isNaN)).toBe(true);
   });
   it('cron del programador', () => {
     expect(cronFor(10)).toBe('*/10 * * * *');
     expect(cronFor(120)).toBe('0 */2 * * *');
   });
   it('valida la configuración; para activarla exige usuario SAP y solicitante', () => {
-    const base = { activo: false, simulacion: true, intervalo_min: 10, user_sign: null, desde_fecha: null, id_user_solicitante: null };
+    const base = { activo: false, simulacion: true, intervalo_min: 10, user_signs: [] as number[], desde_fecha: null, id_user_solicitante: null };
     expect(validateConfig(base)).toEqual([]);
     expect(validateConfig({ ...base, activo: true })).toHaveLength(2);
     expect(validateConfig({ ...base, intervalo_min: 2 })).toHaveLength(1);
     expect(validateConfig({ ...base, desde_fecha: '01/11/2026' })).toHaveLength(1);
+    expect(validateConfig({ ...base, user_signs: parseUserSigns('14, x') })).toHaveLength(1);
   });
   it('resumen de la corrida', () => {
     expect(summaryText({ simulacion: true, candidatos: 3, enviados: 0, simulados: 3, errores: 0 })).toBe('Simulación · 3 borrador(es) nuevos: 3 simulado(s).');
