@@ -29,6 +29,7 @@ const money = (v: unknown) => (v == null || v === '' ? '—' : `$ ${Number(v).to
 const qty = (v: unknown) => (v == null ? '' : Number(v).toLocaleString('es-CO', { maximumFractionDigits: 2 }));
 const day = (v: unknown) => (v ? String(v).slice(0, 10) : '');
 const FLOW: Record<string, { label: string; color: string }> = {
+  borrador: { label: 'En borrador (sin enviar)', color: 'gray' },
   pending: { label: 'En el flujo', color: 'yellow' },
   approved: { label: 'Pedido creado', color: 'green' },
   rejected: { label: 'Rechazada', color: 'orange' },
@@ -81,6 +82,29 @@ export default function SalesOfferDetail({ requestId, onLoaded, mb }: { requestI
         </Group>
       </Group>
       {sale.flowError && <Alert color='red' mb='sm'>{sale.flowError}</Alert>}
+      {sale.flowStatus === 'borrador' && (
+        <Alert color='gray' mb='sm' title='Oferta guardada en borrador'>
+          <Text size='sm'>Todavía no ha entrado al flujo. Revise el cupo abajo y, cuando esté lista, envíela.</Text>
+          <Group mt='xs' gap='xs'>
+            <Button size='xs' loading={retrying}
+              onClick={async () => {
+                if (!window.confirm('¿Enviar la oferta a pedido en firme? Se revisa precio y cupo: si no requiere autorización se crea el pedido; si la requiere, pasa a Autorizaciones.')) return;
+                setRetrying(true);
+                try {
+                  const r = await fetch('/api/sales/drafts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ companyId: sale.companyId, docEntry: sale.docEntry, accion: 'enviar' }) });
+                  const x = await r.json().catch(() => ({}));
+                  if (!r.ok) window.alert(x.error || 'No se pudo enviar la oferta');
+                } finally {
+                  setRetrying(false);
+                  setReload((n) => n + 1);
+                }
+              }}>
+              Enviar a pedido en firme
+            </Button>
+            <Button size='xs' variant='light' component='a' href='/process/sales'>Editar en Mis ofertas en borrador</Button>
+          </Group>
+        </Alert>
+      )}
       {sale.sapErrors && sale.sapErrors.length > 0 && (
         <Alert color='red' mb='sm' title='Una tarea en SAP quedó en error'>
           {sale.sapErrors.map((e) => (

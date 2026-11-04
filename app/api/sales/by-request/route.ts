@@ -23,9 +23,13 @@ export async function GET(request: NextRequest) {
 
     const pool = await sql.connect(sqlConfig);
     const r = await pool.request().input('r', sql.Int, requestId).query(
-      `SELECT TOP 1 id_company, doc_entry, status, order_doc_entry, error FROM dbo.sales_authorization WHERE id_request_general = @r;`
+      `SELECT TOP 1 id_company, doc_entry, status, order_doc_entry, error FROM dbo.sales_authorization WHERE id_request_general = @r
+       IF @@ROWCOUNT = 0
+         -- Oferta guardada en borrador (sin flujo todavía): su solicitud está «En Borrador».
+         SELECT TOP 1 id_company, doc_entry, N'borrador' AS status, NULL AS order_doc_entry, NULL AS error FROM dbo.sales_offer_draft WHERE id_request_general = @r AND status = N'borrador';`
     );
-    const link = r.recordset[0];
+    const sets = (r.recordsets as unknown as Record<string, unknown>[][]) ?? [];
+    const link = (sets.find((x) => x.length) ?? [])[0] as { id_company: number; doc_entry: number; status: string; order_doc_entry: number | null; error: string | null } | undefined;
     if (!link) return NextResponse.json({ sale: null });
     // Tareas SAP del flujo que quedaron en error (para el botón «Reintentar»).
     const errs = await pool.request().input('r', sql.Int, requestId).query(`

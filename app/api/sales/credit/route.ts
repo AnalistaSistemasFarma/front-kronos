@@ -22,9 +22,13 @@ export async function GET(request: NextRequest) {
     if (!requestId) return NextResponse.json({ sale: null });
     const pool = await sql.connect(sqlConfig);
     const r = await pool.request().input('r', sql.Int, requestId).query(
-      `SELECT TOP 1 id_company, doc_entry FROM dbo.sales_authorization WHERE id_request_general = @r;`
+      `SELECT TOP 1 id_company, doc_entry FROM dbo.sales_authorization WHERE id_request_general = @r
+       IF @@ROWCOUNT = 0
+         -- Oferta guardada en borrador (sin flujo todavía): su solicitud está «En Borrador».
+         SELECT TOP 1 id_company, doc_entry FROM dbo.sales_offer_draft WHERE id_request_general = @r AND status = N'borrador';`
     );
-    const link = r.recordset[0];
+    const sets = (r.recordsets as unknown as Record<string, unknown>[][]) ?? [];
+    const link = (sets.find((x) => x.length) ?? [])[0] as { id_company: number; doc_entry: number; status: string; order_doc_entry: number | null; error: string | null } | undefined;
     if (!link) return NextResponse.json({ sale: null });
     if (!(await canReadLinkedSale(session.user.email, requestId, link.id_company))) {
       return NextResponse.json({ error: 'Sin acceso a esta oferta de venta' }, { status: 403 });
