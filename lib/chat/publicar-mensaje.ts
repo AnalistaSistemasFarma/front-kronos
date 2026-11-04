@@ -63,6 +63,14 @@ export async function publicarMensajeDePersona(
     }
   }
 
+  // MESA DE DISCUSIÓN (2026-11-04): lo que escribe una persona en una mesa NO
+  // despierta al moderador fuera de turno; todos lo leen en su siguiente turno.
+  // Si mencionó a alguien con @, se respeta la mención (como en cualquier hilo).
+  if (guard.kind === 'project' && principalAtiende && entregas.idAgents.length === 0 && !body.includes('@')) {
+    const esMesa = await prisma.chatProjectMesa.findUnique({ where: { id_conversation: guard.conversationId }, select: { id_mesa: true } });
+    if (esMesa) principalAtiende = false;
+  }
+
   // Transacción: el mensaje y la marca de tiempo de la bandeja entran juntos
   // o no entra ninguno. Si se separan, un fallo intermedio deja la bandeja
   // ordenada por un instante que no corresponde a ningún mensaje.
