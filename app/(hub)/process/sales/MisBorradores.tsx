@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Alert, Anchor, Button, Card, Group, Loader, ScrollArea, Select, Table, Text } from '@mantine/core';
+import { Alert, Anchor, Button, Card, Group, Loader, Modal, ScrollArea, Select, Table, Text } from '@mantine/core';
+import SalesInlineForm from './SalesInlineForm';
 import { IconPencil, IconSend, IconX } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 
@@ -26,6 +27,7 @@ export default function MisBorradores() {
   const [drafts, setDrafts] = useState<Draft[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
+  const [editing, setEditing] = useState<Draft | null>(null);
 
   useEffect(() => {
     fetch('/api/sales/access')
@@ -59,13 +61,18 @@ export default function MisBorradores() {
   }, [load]);
 
   const act = async (d: Draft, accion: 'enviar' | 'anular') => {
+    if (
+      accion === 'enviar' &&
+      !window.confirm(`¿Enviar la oferta #${d.docNum ?? d.docEntry} a pedido en firme? Se revisa precio y cupo: si no requiere autorización se crea el pedido en SAP; si la requiere, pasa a Autorizaciones.`)
+    )
+      return;
     if (accion === 'anular' && !window.confirm(`¿Anular la oferta #${d.docNum ?? d.docEntry}? Se cancela la cotización y se cierra el borrador en SAP.`)) return;
     setBusy(d.docEntry);
     try {
       const r = await fetch('/api/sales/drafts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ companyId: Number(companyId), docEntry: d.docEntry, accion }) });
       const x = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(x.error || 'No se pudo completar la acción');
-      toast.success(accion === 'enviar' ? `Oferta enviada al flujo: solicitud #${x.idRequest}` : 'Oferta anulada');
+      toast.success(accion === 'enviar' ? `Oferta enviada a pedido en firme: solicitud #${x.idRequest}` : 'Oferta anulada');
       await load();
     } catch (e) {
       toast.error((e as Error).message);
@@ -94,7 +101,7 @@ export default function MisBorradores() {
         <Text size='sm' c='dimmed'>No tiene ofertas guardadas en borrador. Al crear una oferta, apague «Enviar a autorización al crear» para guardarla aquí.</Text>
       ) : (
         <ScrollArea type='auto'>
-          <Table striped verticalSpacing='xs' style={{ minWidth: 860 }}>
+          <Table striped verticalSpacing='xs' style={{ minWidth: 980 }}>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Borrador</Table.Th><Table.Th>Fecha</Table.Th><Table.Th>Entrega</Table.Th><Table.Th>Cliente</Table.Th>
@@ -112,7 +119,8 @@ export default function MisBorradores() {
                   <Table.Td style={{ maxWidth: 260 }}><Text size='xs' lineClamp={2}>{d.comments}</Text></Table.Td>
                   <Table.Td>
                     <Group gap={6} wrap='nowrap'>
-                      <Button size='xs' leftSection={<IconSend size={14} />} loading={busy === d.docEntry} disabled={!d.open} onClick={() => act(d, 'enviar')}>Enviar al flujo</Button>
+                      <Button size='xs' variant='light' leftSection={<IconPencil size={14} />} disabled={busy === d.docEntry || !d.open} onClick={() => setEditing(d)}>Editar</Button>
+                      <Button size='xs' leftSection={<IconSend size={14} />} loading={busy === d.docEntry} disabled={!d.open} onClick={() => act(d, 'enviar')}>Enviar a pedido en firme</Button>
                       <Button size='xs' variant='subtle' color='red' leftSection={<IconX size={14} />} disabled={busy === d.docEntry || !d.open} onClick={() => act(d, 'anular')}>Anular</Button>
                     </Group>
                   </Table.Td>
@@ -122,6 +130,19 @@ export default function MisBorradores() {
           </Table>
         </ScrollArea>
       )}
+      <Modal opened={Boolean(editing)} onClose={() => setEditing(null)} fullScreen title={<Text fw={700}>Editar borrador #{editing?.docNum ?? editing?.docEntry}</Text>}>
+        {editing && companyId && (
+          <SalesInlineForm
+            companyId={companyId}
+            editDocEntry={editing.docEntry}
+            onDone={({ ok, message }) => {
+              if (ok) toast.success(message);
+              setEditing(null);
+              load();
+            }}
+          />
+        )}
+      </Modal>
       <Text size='xs' c='dimmed' mt='sm'>
         Para crear una oferta nueva: <Anchor component={Link} href='/process/request-general/create-request' size='xs'>Mis solicitudes → Crear nueva solicitud</Anchor>.
       </Text>

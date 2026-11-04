@@ -6,8 +6,10 @@ import { authOptions } from '../../auth/[...nextauth]/route';
 import { prisma } from '../../../../lib/prisma';
 import { salesEndpointForUser } from '../../../../lib/sales/access';
 import { startOfferFlow } from '../../../../lib/sales/offerFlow';
+import { buildDraftUpdate, buildQuotationUpdate, mapQuotationLines, sanitizeOfferLine, validateOffer, type EditLine, type OfferHeader } from '../../../../lib/sales/offer';
+import { todayBogota } from '../../../../lib/purchases/drafts';
 import { normalizeState } from '../../../../lib/sales/states';
-import { sapGet, sapLogin, sapLogout, sapPost, SapError } from '../../../../lib/sap/serviceLayer';
+import { sapGet, sapLogin, sapLogout, sapPatch, sapPost, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
  * «Mis ofertas en borrador»: ofertas que el usuario guardó sin enviarlas al flujo (interruptor
@@ -15,6 +17,8 @@ import { sapGet, sapLogin, sapLogout, sapPost, SapError } from '../../../../lib/
  *  GET  ?companyId                                   -> { drafts }
  *  POST { companyId, docEntry, accion: 'enviar' }    -> pasa la oferta al flujo «Oferta de venta»
  *  POST { companyId, docEntry, accion: 'anular' }    -> cancela la cotización y cierra el borrador en SAP
+ *  GET  ?companyId&docEntry                          -> borrador completo para editarlo
+ *  POST { companyId, docEntry, accion: 'actualizar', header, lines } -> actualiza cotización y borrador
  * Solo sus propios borradores y con «Ventas · Gestionar ofertas».
  */
 async function ctx(companyIdRaw: unknown) {
@@ -35,6 +39,30 @@ export async function GET(request: NextRequest) {
     const c = await ctx(new URL(request.url).searchParams.get('companyId'));
     if ('error' in c) return c.error;
     const pool = await sql.connect(sqlConfig);
+    const one = Number(new URL(request.url).searchParams.get('docEntry'));
+    if (one) {
+      const own = await pool.request().input('c', sql.Int, c.companyId).input('d', sql.Int, one).input('u', sql.NVarChar(50), c.userId).query(
+        `SELECT TOP 1 quotation_doc_entry FROM dbo.sales_offer_draft WHERE id_company = @c AND doc_entry = @d AND id_user = @u AND status = N'borrador';`
+      );
+      if (!own.recordset[0]) return NextResponse.json({ error: 'No es un borrador suyo pendiente de enviar.' }, { status: 404 });
+      const sap1 = await sapLogin(c.endpoint);
+      try {
+        const d = await sapGet<Record<string, unknown> & { DocumentLines?: Record<string, unknown>[] }>(sap1, `Drafts(${one})`);
+        return NextResponse.json({
+          draft: {
+            docEntry: one, docNum: d.DocNum, cardCode: d.CardCode, cardName: d.CardName, dueDate: String(d.DocDueDate ?? '').slice(0, 10),
+            numAtCard: d.NumAtCard ?? '', comments: d.Comments ?? '', shipTo: d.ShipToCode ?? '', payTo: d.PayToCode ?? '',
+            state: d.U_SEND_State, open: d.DocumentStatus === 'bost_Open',
+            lines: (d.DocumentLines ?? []).map((l) => ({
+              ItemCode: l.ItemCode, ItemDescription: l.ItemDescription, Quantity: l.Quantity, UnitPrice: l.UnitPrice ?? l.Price,
+              ListPrice: l.U_SEND_PriceLP ?? null, WarehouseCode: l.WarehouseCode, TaxCode: l.TaxCode, BaseLine: l.BaseLine ?? null,
+            })),
+          },
+        }, { headers: { 'Cache-Control': 'no-store' } });
+      } finally {
+        await sapLogout(sap1);
+      }
+    }
     const r = await pool.request().input('c', sql.Int, c.companyId).input('u', sql.NVarChar(50), c.userId).query(
       `SELECT TOP 100 id, doc_entry, quotation_doc_entry, created_at FROM dbo.sales_offer_draft
        WHERE id_company = @c AND id_user = @u AND status = N'borrador' ORDER BY id DESC;`
@@ -87,7 +115,7 @@ export async function POST(request: NextRequest) {
     if ('error' in c) return c.error;
     const docEntry = Number(body.docEntry);
     const accion = String(body.accion ?? '');
-    if (!docEntry || (accion !== 'enviar' && accion !== 'anular')) return NextResponse.json({ error: 'Datos inválidos' }, { status: 400 });
+    if (!docEntry || (accion !== 'enviar' && accion !== 'anular' && accion !== 'actualizar')) return NextResponse.json({ error: 'Datos inválidos' }, { status: 400 });
     const pool = await sql.connect(sqlConfig);
     const own = await pool.request().input('c', sql.Int, c.companyId).input('d', sql.Int, docEntry).input('u', sql.NVarChar(50), c.userId).query(
       `SELECT TOP 1 id, quotation_doc_entry FROM dbo.sales_offer_draft WHERE id_company = @c AND doc_entry = @d AND id_user = @u AND status = N'borrador';`
@@ -101,6 +129,29 @@ export async function POST(request: NextRequest) {
       const state = normalizeState(draft.U_SEND_State);
       if (draft.DocumentStatus !== 'bost_Open' || state !== 'B') {
         return NextResponse.json({ error: `La oferta ya no está en borrador en SAP (estado ${state ?? String(draft.U_SEND_State ?? 'sin estado')}).` }, { status: 409 });
+      }
+      if (accion === 'actualizar') {
+        if (!row.quotation_doc_entry) return NextResponse.json({ error: 'El borrador no tiene cotización enlazada; no se puede editar.' }, { status: 409 });
+        const h = { ...(body.header ?? {}), CardCode: String(draft.CardCode ?? '') } as OfferHeader;
+        const raw = (Array.isArray(body.lines) ? body.lines : []) as Record<string, unknown>[];
+        const lines: EditLine[] = raw.map((l) => ({ ...sanitizeOfferLine(l), BaseLine: l.BaseLine == null || l.BaseLine === '' ? null : Number(l.BaseLine) }));
+        const errors = validateOffer(h, lines, todayBogota());
+        if (errors.length) return NextResponse.json({ error: 'Datos inválidos', errors }, { status: 422 });
+        const q = Number(row.quotation_doc_entry);
+        const qBefore = await sapGet<{ DocumentLines?: { LineNum: number }[]; DocumentStatus?: string }>(sap, `Quotations(${q})?$select=DocumentStatus,DocumentLines`);
+        if (qBefore.DocumentStatus !== 'bost_Open') return NextResponse.json({ error: 'La cotización de esta oferta ya no está abierta en SAP.' }, { status: 409 });
+        const before = (qBefore.DocumentLines ?? []).map((x) => Number(x.LineNum));
+        // 1) Cotización con todas las líneas (reemplaza la colección). Sin If-Match (etag fijo en el SL).
+        await sapPatch(sap, `Quotations(${q})`, buildQuotationUpdate(h, lines), true);
+        // 2) LineNum reales de la cotización ya actualizada.
+        const qAfter = await sapGet<{ DocumentLines?: { LineNum: number }[] }>(sap, `Quotations(${q})?$select=DocumentLines`);
+        const baseLines = mapQuotationLines(lines, before, (qAfter.DocumentLines ?? []).map((x) => Number(x.LineNum)));
+        if (baseLines.some((n) => n < 0)) {
+          return NextResponse.json({ error: 'Se actualizó la cotización pero no se pudo enlazar una línea nueva; vuelva a abrir el borrador y guarde de nuevo.' }, { status: 500 });
+        }
+        // 3) Borrador con las mismas líneas enlazadas a la cotización.
+        await sapPatch(sap, `Drafts(${docEntry})`, buildDraftUpdate(h, lines, q, baseLines), true);
+        return NextResponse.json({ ok: true, actualizado: true });
       }
       if (accion === 'anular') {
         const motivo = String(body.motivo ?? '').trim().slice(0, 200);

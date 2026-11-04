@@ -39,3 +39,26 @@ describe('asunto automático', () => {
     expect(offerSubject(null, 'C1', '')).toBe('OV - C1');
   });
 });
+
+import { buildDraftUpdate, buildQuotationUpdate, mapQuotationLines } from './offer';
+describe('editar oferta en borrador', () => {
+  const h = { CardCode: 'C1', DocDueDate: '2026-11-20', Comments: 'x', ShipToCode: 'BOGOTÁ' };
+  const lines = [
+    { ...sanitizeOfferLine({ ItemCode: 'A', Quantity: 2, UnitPrice: 10, WarehouseCode: 'B1' }), BaseLine: 0 },
+    { ...sanitizeOfferLine({ ItemCode: 'B', Quantity: 1, UnitPrice: 5, WarehouseCode: 'B1' }), BaseLine: null },
+  ];
+  it('cotización: existentes con su LineNum, nuevas sin él, sin cambiar el cliente', () => {
+    const q = buildQuotationUpdate(h, lines);
+    expect(q).not.toHaveProperty('CardCode');
+    expect((q as Record<string, unknown>).ShipToCode).toBe('BOGOTÁ');
+    expect(q.DocumentLines[0]).toMatchObject({ LineNum: 0, ItemCode: 'A', Quantity: 2 });
+    expect(q.DocumentLines[1]).not.toHaveProperty('LineNum');
+  });
+  it('las líneas nuevas toman los LineNum que aparecieron en la cotización', () => {
+    expect(mapQuotationLines(lines, [0, 1], [0, 2])).toEqual([0, 2]);
+  });
+  it('borrador enlazado a cada línea real de la cotización', () => {
+    const d = buildDraftUpdate(h, lines, 25, [0, 2]);
+    expect(d.DocumentLines.map((l) => [(l as Record<string, unknown>).ItemCode, l.BaseEntry, l.BaseLine])).toEqual([['A', 25, 0], ['B', 25, 2]]);
+  });
+});
