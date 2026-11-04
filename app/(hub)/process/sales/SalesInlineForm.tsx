@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { ActionIcon, Alert, Button, Group, Loader, NumberInput, ScrollArea, Select, Stack, Table, Text, TextInput, Textarea } from '@mantine/core';
+import { ActionIcon, Alert, Button, Group, Loader, NumberInput, ScrollArea, Select, Stack, Switch, Table, Text, TextInput, Textarea } from '@mantine/core';
 import { IconPlus, IconSend, IconTrash } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import SapLookupInput from '../purchases/SapLookupInput';
@@ -20,6 +20,8 @@ interface Props {
   /** Ya no se usa: el asunto se arma solo (se conserva por compatibilidad). */
   subject?: string;
   onDone: (result: { ok: boolean; message: string }) => void;
+  /** Editar una oferta guardada en borrador (DocEntry del borrador): misma ventana, ya llena. */
+  editDocEntry?: number;
 }
 
 interface Line {
@@ -30,6 +32,8 @@ interface Line {
   ListPrice?: number | null;
   WarehouseCode?: string;
   TaxCode?: string;
+  /** Línea de la cotización a la que está enlazada (solo al editar un borrador). */
+  BaseLine?: number | null;
 }
 
 type Readiness = 'loading' | 'ready' | 'no-write' | 'no-sap';
@@ -38,7 +42,9 @@ const notifySapError = (msg: string) => toast.error(sapErrorText(msg), { duratio
 const empty = (v: unknown) => v == null || String(v).trim() === '';
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
 
-export default function SalesInlineForm({ companyId, onDone }: Props) {
+export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Props) {
+  const editing = Boolean(editDocEntry);
+  const [loadingDraft, setLoadingDraft] = useState(editing);
   const [readiness, setReadiness] = useState<Readiness>('loading');
   const [cardCode, setCardCode] = useState('');
   const [cardName, setCardName] = useState('');
@@ -51,6 +57,8 @@ export default function SalesInlineForm({ companyId, onDone }: Props) {
   const [payTo, setPayTo] = useState('');
   const [lines, setLines] = useState<Line[]>([{}]);
   const [saving, setSaving] = useState(false);
+  /** Interruptor: enviar a autorización al crear (como ahora) o guardar en borrador (como SAPSEND). */
+  const [enviar, setEnviar] = useState(true);
   /** Búsqueda ampliada abierta («*» + Enter o lupa): tipo, línea y texto. */
   const [search, setSearch] = useState<{ kind: SearchKind; line?: number; q?: string; itemCode?: string; cardCode?: string } | null>(null);
   const [tried, setTried] = useState(false);
@@ -90,7 +98,7 @@ export default function SalesInlineForm({ companyId, onDone }: Props) {
   };
 
   /** Al elegir el cliente: sus puntos de entrega y la dirección de facturación por defecto. */
-  const loadCustomer = async (code: string) => {
+  const loadCustomer = async (code: string, preferShipTo?: string) => {
     setAddresses([]);
     setShipTo('');
     setPayTo('');
@@ -102,12 +110,39 @@ export default function SalesInlineForm({ companyId, onDone }: Props) {
       const rows = (d.rows ?? []) as typeof addresses & { BilltoDefault?: string }[];
       setAddresses(rows);
       const def = rows.find((a) => a.isDefault) ?? (rows.length === 1 ? rows[0] : undefined);
-      if (def) setShipTo(def.AddressName);
+      if (preferShipTo && rows.some((a) => a.AddressName === preferShipTo)) setShipTo(preferShipTo);
+      else if (def) setShipTo(def.AddressName);
       setPayTo(String((rows[0] as { BilltoDefault?: string } | undefined)?.BilltoDefault ?? ''));
     } catch {
       /* el usuario puede seguir; SAP usa la dirección por defecto */
     }
   };
+  // Editar: cargar el borrador guardado.
+  useEffect(() => {
+    if (!editDocEntry || readiness !== 'ready') return;
+    let cancelled = false;
+    setLoadingDraft(true);
+    fetch(`/api/sales/drafts?companyId=${companyId}&docEntry=${editDocEntry}`, { cache: 'no-store' })
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!r.ok) throw new Error(d.error || 'No se pudo abrir el borrador');
+        const x = d.draft;
+        setCardCode(String(x.cardCode ?? ''));
+        setCardName(String(x.cardName ?? ''));
+        setDueDate(String(x.dueDate ?? ''));
+        setNumAtCard(String(x.numAtCard ?? ''));
+        setComments(String(x.comments ?? ''));
+        setLines((x.lines ?? []).length ? x.lines : [{}]);
+        loadCustomer(String(x.cardCode ?? ''), String(x.shipTo ?? '')).then(() => x.payTo && setPayTo(String(x.payTo)));
+      })
+      .catch((e) => toast.error((e as Error).message))
+      .finally(() => !cancelled && setLoadingDraft(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [editDocEntry, readiness, companyId]);
+
   const selectedAddress = addresses.find((a) => a.AddressName === shipTo);
   /** Asunto automático: «OV - NOMBRE DEL CLIENTE - NIT - primera línea». */
   const autoSubject = ['OV', cardName, cardCode, lines[0]?.ItemDescription ?? lines[0]?.ItemCode ?? ''].map((x) => String(x ?? '').trim()).filter(Boolean).join(' - ');
@@ -133,14 +168,16 @@ export default function SalesInlineForm({ companyId, onDone }: Props) {
     }
     setSaving(true);
     try {
-      const res = await fetch('/api/sales/offers', {
+      const res = await fetch(editing ? '/api/sales/drafts' : '/api/sales/offers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          ...(editing ? { accion: 'actualizar', docEntry: editDocEntry } : {}),
           companyId: Number(companyId),
           subject: autoSubject,
           header: { CardCode: cardCode, DocDueDate: dueDate, NumAtCard: numAtCard, Comments: comments || autoSubject, ShipToCode: shipTo || undefined, PayToCode: payTo || undefined },
           lines,
+          enviar,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -149,7 +186,16 @@ export default function SalesInlineForm({ companyId, onDone }: Props) {
         setErrors(Array.isArray(data.errors) ? data.errors : []);
         return;
       }
-      onDone({ ok: true, message: `Oferta de venta #${data.docEntry} creada. El flujo revisa precio y cupo y la envía a autorización si hace falta.` });
+      if (editing) {
+        onDone({ ok: true, message: `Borrador #${editDocEntry} actualizado en SAP (cotización y borrador).` });
+        return;
+      }
+      onDone({
+        ok: true,
+        message: data.saved
+          ? `Oferta de venta #${data.docEntry} guardada en borrador: solicitud #${data.idRequest ?? '—'} «En Borrador». Ábrala en Mis solicitudes para editarla o enviarla a pedido.`
+          : `Oferta de venta #${data.docEntry} creada. El flujo revisa precio y cupo y la envía a autorización si hace falta.`,
+      });
     } catch {
       toast.error('Error de red al crear la oferta de venta');
     } finally {
@@ -157,7 +203,7 @@ export default function SalesInlineForm({ companyId, onDone }: Props) {
     }
   };
 
-  if (readiness === 'loading') return <Loader size="sm" />;
+  if (readiness === 'loading' || (readiness === 'ready' && loadingDraft)) return <Loader size="sm" />;
   if (readiness === 'no-write') {
     return (
       <Alert color="yellow" title="Oferta de venta">
@@ -176,6 +222,9 @@ export default function SalesInlineForm({ companyId, onDone }: Props) {
   return (
     <Stack gap="md">
       <Group grow align="flex-start">
+        {editing ? (
+          <TextInput label="Cliente" value={`${cardCode} · ${cardName}`} readOnly description="En un borrador no se cambia el cliente (como en SAPSEND)." />
+        ) : (
         <SapLookupInput
           label={<>Cliente <Text span c="red">*</Text></>}
           companyId={companyId}
@@ -197,6 +246,7 @@ export default function SalesInlineForm({ companyId, onDone }: Props) {
           ariaLabel="Cliente"
           onExpand={(q) => setSearch({ kind: 'customer', q })}
         />
+        )}
         <TextInput
           label={<>Fecha de entrega <Text span c="red">*</Text></>}
           type="date"
@@ -345,9 +395,24 @@ export default function SalesInlineForm({ companyId, onDone }: Props) {
       </div>
 
       <Group justify="flex-end" style={{ position: 'sticky', bottom: 0, zIndex: 5, background: 'var(--mantine-color-body)', paddingTop: 8, paddingBottom: 8, borderTop: '1px solid var(--mantine-color-default-border)' }}>
-        <Button leftSection={<IconSend size={16} />} onClick={submit} loading={saving} disabled={!cardCode}>
-          Crear oferta y enviar
+        {editing ? (
+          <Button leftSection={<IconSend size={16} />} onClick={submit} loading={saving} disabled={!cardCode}>
+            Guardar cambios del borrador
+          </Button>
+        ) : (
+          <>
+        <Switch
+          checked={enviar}
+          onChange={(e) => setEnviar(e.currentTarget.checked)}
+          label={enviar ? 'Enviar a autorización al crear' : 'Guardar como borrador (se envía después)'}
+          description={enviar ? 'Entra al flujo: revisa precio y cupo y pide las autorizaciones' : 'Queda en SAP en estado borrador, como en SAPSEND'}
+          mr='md'
+        />
+        <Button leftSection={<IconSend size={16} />} onClick={submit} loading={saving} disabled={!cardCode} color={enviar ? undefined : 'gray'}>
+          {enviar ? 'Crear oferta y enviar' : 'Guardar borrador'}
         </Button>
+          </>
+        )}
       </Group>
       {search && (
         <SalesSearchModal

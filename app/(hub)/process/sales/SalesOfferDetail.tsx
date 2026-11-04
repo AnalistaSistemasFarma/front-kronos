@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Alert, Badge, Button, Card, Group, ScrollArea, Table, Text } from '@mantine/core';
-import { IconFileInvoice } from '@tabler/icons-react';
+import { Alert, Badge, Button, Card, Group, Modal, ScrollArea, Table, Text } from '@mantine/core';
+import { IconFileInvoice, IconPencil, IconSend } from '@tabler/icons-react';
+import SalesInlineForm from './SalesInlineForm';
 import { STATE_LABELS } from '../../../../lib/sales/states';
 import SalesCreditPanel from './SalesCreditPanel';
 import RelationMap, { type RelDoc } from './RelationMap';
@@ -29,6 +30,7 @@ const money = (v: unknown) => (v == null || v === '' ? '—' : `$ ${Number(v).to
 const qty = (v: unknown) => (v == null ? '' : Number(v).toLocaleString('es-CO', { maximumFractionDigits: 2 }));
 const day = (v: unknown) => (v ? String(v).slice(0, 10) : '');
 const FLOW: Record<string, { label: string; color: string }> = {
+  borrador: { label: 'En borrador (sin enviar)', color: 'gray' },
   pending: { label: 'En el flujo', color: 'yellow' },
   approved: { label: 'Pedido creado', color: 'green' },
   rejected: { label: 'Rechazada', color: 'orange' },
@@ -42,6 +44,8 @@ export default function SalesOfferDetail({ requestId, onLoaded, mb }: { requestI
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [reload, setReload] = useState(0);
+  /** Editar la oferta en borrador dentro de la solicitud (cotización y borrador a la vez). */
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     if (!requestId) return;
@@ -81,6 +85,47 @@ export default function SalesOfferDetail({ requestId, onLoaded, mb }: { requestI
         </Group>
       </Group>
       {sale.flowError && <Alert color='red' mb='sm'>{sale.flowError}</Alert>}
+      {sale.flowStatus === 'borrador' && (
+        <Alert color='gray' mb='sm' title='Oferta en borrador'>
+          <Text size='sm'>
+            La cotización y el borrador están en SAP en estado B, como en SAPSEND. Puede editarla aquí (los cambios se aplican a los dos
+            documentos a la vez) y, cuando esté lista, envíela a pedido: entra al flujo de venta (precio, cupo, autorizaciones y pedido).
+          </Text>
+          <Group mt='xs' gap='xs'>
+            <Button size='xs' variant='light' leftSection={<IconPencil size={14} />} onClick={() => setEditing(true)}>
+              Editar oferta
+            </Button>
+            <Button size='xs' leftSection={<IconSend size={14} />} loading={retrying}
+              onClick={async () => {
+                if (!window.confirm('¿Enviar la oferta a pedido? Entra al flujo de venta: se revisa precio y cupo; si no requiere autorización se crea el pedido en SAP; si la requiere, pasa a Autorizaciones.')) return;
+                setRetrying(true);
+                try {
+                  const r = await fetch('/api/sales/drafts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ companyId: sale.companyId, docEntry: sale.docEntry, accion: 'enviar' }) });
+                  const x = await r.json().catch(() => ({}));
+                  if (!r.ok) window.alert(x.error || 'No se pudo enviar la oferta');
+                } finally {
+                  setRetrying(false);
+                  setReload((n) => n + 1);
+                }
+              }}>
+              Enviar a pedido
+            </Button>
+          </Group>
+          <Modal opened={editing} onClose={() => setEditing(false)} fullScreen title={<Text fw={700}>Editar oferta · borrador #{String(d.DocNum ?? sale.docEntry)}</Text>}>
+            {editing && (
+              <SalesInlineForm
+                companyId={String(sale.companyId)}
+                editDocEntry={sale.docEntry}
+                onDone={({ ok, message }) => {
+                  if (ok) window.alert(message);
+                  setEditing(false);
+                  setReload((n) => n + 1);
+                }}
+              />
+            )}
+          </Modal>
+        </Alert>
+      )}
       {sale.sapErrors && sale.sapErrors.length > 0 && (
         <Alert color='red' mb='sm' title='Una tarea en SAP quedó en error'>
           {sale.sapErrors.map((e) => (
