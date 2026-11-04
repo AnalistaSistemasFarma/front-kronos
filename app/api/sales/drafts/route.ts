@@ -162,6 +162,15 @@ export async function POST(request: NextRequest) {
         }
         // 3) Borrador con las mismas líneas enlazadas a la cotización.
         await sapPatch(sap, `Drafts(${docEntry})`, buildDraftUpdate(h, lines, q, baseLines), true);
+        // Verificación: la cotización y el borrador deben quedar con las mismas líneas (artículo, cantidad, precio).
+        const [qv, dv] = await Promise.all([
+          sapGet<{ DocumentLines?: Record<string, unknown>[] }>(sap, `Quotations(${q})?$select=DocumentLines`),
+          sapGet<{ DocumentLines?: Record<string, unknown>[] }>(sap, `Drafts(${docEntry})?$select=DocumentLines`),
+        ]);
+        const sig = (ls?: Record<string, unknown>[]) => (ls ?? []).map((l) => `${l.ItemCode}|${Number(l.Quantity)}|${Number(l.UnitPrice ?? l.Price)}`).join(';');
+        if (sig(qv.DocumentLines) !== sig(dv.DocumentLines)) {
+          return NextResponse.json({ error: 'Se guardó, pero la cotización y el borrador quedaron distintos en SAP. Vuelva a abrir la oferta y guarde de nuevo; si persiste, avise a soporte.' }, { status: 500 });
+        }
         if (row.id_request_general) {
           const fresh = await sapGet<Record<string, unknown> & { DocEntry: number; DocumentLines?: { ItemDescription?: string; ItemCode?: string }[] }>(sap, `Drafts(${docEntry})?$select=DocEntry,CardCode,CardName,DocTotal,Comments,DocumentLines`);
           const t = requestTexts(fresh as never);
