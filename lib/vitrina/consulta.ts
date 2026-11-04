@@ -30,6 +30,7 @@ const INCLUDE = {
   linea: { select: { nombre: true, activa: true, orden: true } },
   grupos: { select: { grupo: { select: { nombre: true, activo: true, orden: true } } } },
   imagenes: { where: { vigente: true }, select: { id_imagen: true, tipo: true, vigente: true } },
+  modelos3d: { where: { vigente: true }, select: { id_modelo: true, vigente: true, ancho_cm: true, alto_cm: true, profundo_cm: true } },
   exclusividades: { select: { cliente_beneficiario: true, pais: true, canal: true, alcance: true, vigente_desde: true, vigente_hasta: true } },
 } satisfies Prisma.VitrinaPresentacionInclude;
 
@@ -140,4 +141,10 @@ export async function obtenerFicha(db: VitrinaDb, idCompany: number, id: number)
 export async function imagenParaVer(db: VitrinaDb, idImagen: number): Promise<{ idCompany: number; itemId: string } | null> {
   const img = await db.vitrinaImagen.findUnique({ where: { id_imagen: idImagen }, select: { ruta_archivo: true, presentacion: { select: { id_company: true } } } });
   return img ? { idCompany: img.presentacion.id_company, itemId: img.ruta_archivo } : null;
+}
+
+/** Archivo de un modelo 3D, la empresa dueña y si está vigente (para validar el permiso en la ruta). */
+export async function modelo3dParaVer(db: VitrinaDb, idModelo: number): Promise<{ idCompany: number; itemId: string; vigente: boolean } | null> {
+  const m = await db.vitrinaModelo3d.findUnique({ where: { id_modelo: idModelo }, select: { ruta_archivo: true, vigente: true, presentacion: { select: { id_company: true } } } });
+  return m ? { idCompany: m.presentacion.id_company, itemId: m.ruta_archivo, vigente: m.vigente } : null;
 }
