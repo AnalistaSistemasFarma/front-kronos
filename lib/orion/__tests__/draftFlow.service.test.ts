@@ -164,7 +164,7 @@ const DOCX = Buffer.concat([Buffer.from('PK'), Buffer.alloc(100)]);
 
 const perms = async (actor: typeof ela) =>
   (await getOrionDraftInfo(pool, { requestId: REQ, fileId: FILE, actor, isAdmin: false })).permissions!;
-const draft = () => (h.bag.drafts as Record<string, { status: string; versionLabel: string; internalReview: { versionLabel: string; round: number; approvals: Array<{ email: string; decision: string; correctedIn?: string | null }> } }>)[FILE];
+const draft = () => (h.bag.drafts as Record<string, { status: string; versionLabel: string; internalReview: { versionLabel: string; round: number; approvals: Array<{ email: string; decision: string; correctedIn?: string | null; correctionVersion?: string | null }> } }>)[FILE];
 const sentTo = (email: string) => h.notifications.filter((n) => n.to.includes(email));
 
 beforeEach(() => {
@@ -210,12 +210,19 @@ describe('flujo completo de validación en Word (servicio real, BD simulada)', (
       orionDraftMarkAction(pool, { requestId: REQ, fileId: FILE, actor: ela, isAdmin: false, input: { action: 'mark-fixed', markId: 1 } })
     ).rejects.toThrow(/Primero suba la versión corregida/);
 
-    // 2. Ana pide corrección; Beto aprueba → turno de la preparadora (un solo aviso "Le toca corregir").
-    await decideOrionDraftInternal(pool, { requestId: REQ, fileId: FILE, actor: ana, decision: 'return', comment: 'Corregir la fecha' });
-    expect(sentTo('ela@x.com').map((n) => n.title)).toEqual([
-      'Ana le hizo una corrección: Contrato.docx',
-      'Corrección pedida: Contrato.docx',
+    // 2. La marca de Ana ya cuenta como "Pedir corrección" (sin tocar el botón): su tarea se cierra.
+    expect(draft().internalReview.approvals.map((a) => [a.email, a.decision, a.correctionVersion ?? null])).toEqual([
+      ['ana@x.com', 'DEVUELTO', 'v0.1'],
+      ['beto@x.com', 'PENDIENTE', null],
     ]);
+    expect(h.taskCloses).toEqual([{ userId: 'u-ana', status: 3 }]);
+    expect(sentTo('ela@x.com').map((n) => n.title)).toEqual(['Ana le hizo una corrección: Contrato.docx']);
+    // Puede seguir marcando la misma subversión; el botón ya no hace falta.
+    expect((await perms(ana)).canMark).toBe(true);
+    await expect(
+      decideOrionDraftInternal(pool, { requestId: REQ, fileId: FILE, actor: ana, decision: 'return', comment: 'Corregir la fecha' })
+    ).rejects.toThrow(/Ya pidió corrección/);
+    // Beto aprueba → turno de la preparadora (un solo aviso "Le toca corregir").
     await decideOrionDraftInternal(pool, { requestId: REQ, fileId: FILE, actor: beto, decision: 'approve' });
     expect(sentTo('ela@x.com').at(-1)?.title).toBe('Le toca corregir: Contrato.docx');
     expect(h.taskCloses).toEqual([
@@ -223,8 +230,8 @@ describe('flujo completo de validación en Word (servicio real, BD simulada)', (
       { userId: 'u-beto', status: 2 },
     ]);
 
-    // En corrección los validadores ya no marcan.
-    expect((await perms(ana)).canMark).toBe(false);
+    // Ana todavía puede agregar marcas sobre la v0.1 mientras la preparadora no suba la corregida.
+    expect((await perms(ana)).canMark).toBe(true);
     expect(await perms(ela)).toMatchObject({ canUpload: true, canMarkFixed: false, canResendInternal: false });
     await expect(resendOrionDraftInternal(pool, { requestId: REQ, fileId: FILE, actor: ela })).rejects.toThrow(
       /Primero suba la versión corregida/
@@ -235,6 +242,8 @@ describe('flujo completo de validación en Word (servicio real, BD simulada)', (
     const tasksBefore = h.taskOpens.length;
     await uploadOrionDraftVersion(pool, { requestId: REQ, fileId: FILE, actor: ela, content: DOCX, baseVersion: 'v0.1' });
     expect(draft().versionLabel).toBe('v0.2');
+    // Con la versión corregida arriba, ya no se marca hasta que la reenvíe.
+    expect((await perms(ana)).canMark).toBe(false);
     expect(h.notifications.slice(before).filter((n) => n.to.includes('ana@x.com') || n.to.includes('beto@x.com'))).toEqual([]);
     expect(h.taskOpens.length).toBe(tasksBefore);
     // Kronos detectó solo que la fecha quedó corregida (la marca pasa a "corregida").
