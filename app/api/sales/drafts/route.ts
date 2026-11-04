@@ -5,7 +5,7 @@ import sqlConfig from '../../../../dbconfig.js';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { prisma } from '../../../../lib/prisma';
 import { salesEndpointForUser } from '../../../../lib/sales/access';
-import { startOfferFlow } from '../../../../lib/sales/offerFlow';
+import { createDraftOfferRequest, requestTexts, startOfferFlow } from '../../../../lib/sales/offerFlow';
 import { buildDraftUpdate, buildQuotationUpdate, mapQuotationLines, sanitizeOfferLine, validateOffer, type EditLine, type OfferHeader } from '../../../../lib/sales/offer';
 import { todayBogota } from '../../../../lib/purchases/drafts';
 import { normalizeState } from '../../../../lib/sales/states';
@@ -64,20 +64,30 @@ export async function GET(request: NextRequest) {
       }
     }
     const r = await pool.request().input('c', sql.Int, c.companyId).input('u', sql.NVarChar(50), c.userId).query(
-      `SELECT TOP 100 id, doc_entry, quotation_doc_entry, created_at FROM dbo.sales_offer_draft
+      `SELECT TOP 100 id, doc_entry, quotation_doc_entry, created_at, id_request_general FROM dbo.sales_offer_draft
        WHERE id_company = @c AND id_user = @u AND status = N'borrador' ORDER BY id DESC;`
     );
-    const rows = r.recordset as { id: number; doc_entry: number; quotation_doc_entry: number | null; created_at: string }[];
+    const rows = r.recordset as { id: number; doc_entry: number; quotation_doc_entry: number | null; created_at: string; id_request_general: number | null }[];
     if (!rows.length) return NextResponse.json({ drafts: [] });
     const sap = await sapLogin(c.endpoint);
     try {
       const ors = rows.map((x) => `DocEntry eq ${x.doc_entry}`).join(' or ');
       const d = await sapGet<{ value?: Record<string, unknown>[] }>(
         sap,
-        `Drafts?$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,U_SEND_State,DocumentStatus,Comments&$filter=${ors}`,
+        `Drafts?$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,U_SEND_State,DocumentStatus,Comments,DocumentLines&$filter=${ors}`,
         { Prefer: 'odata.maxpagesize=100' }
       );
       const byEntry = new Map((d.value ?? []).map((x) => [Number(x.DocEntry), x]));
+      // Borradores guardados antes de que existiera su solicitud «En Borrador»: se crea una sola vez.
+      for (const x of rows) {
+        const sd = byEntry.get(x.doc_entry);
+        if (x.id_request_general || !sd || sd.DocumentStatus !== 'bost_Open') continue;
+        const idReq = await createDraftOfferRequest(c.companyId, c.userId, { ...(sd as Record<string, unknown>), DocEntry: x.doc_entry } as never).catch(() => null);
+        if (idReq) {
+          await pool.request().input('id', sql.Int, x.id).input('r', sql.Int, idReq).query(`UPDATE dbo.sales_offer_draft SET id_request_general = @r WHERE id = @id AND id_request_general IS NULL;`);
+          x.id_request_general = idReq;
+        }
+      }
       return NextResponse.json({
         drafts: rows.map((x) => {
           const s = byEntry.get(x.doc_entry);
@@ -95,6 +105,7 @@ export async function GET(request: NextRequest) {
             sendState: s?.U_SEND_State ?? null,
             open: s ? s.DocumentStatus === 'bost_Open' : false,
             missing: !s,
+            requestId: x.id_request_general,
           };
         }),
       }, { headers: { 'Cache-Control': 'no-store' } });
@@ -118,7 +129,7 @@ export async function POST(request: NextRequest) {
     if (!docEntry || (accion !== 'enviar' && accion !== 'anular' && accion !== 'actualizar')) return NextResponse.json({ error: 'Datos inválidos' }, { status: 400 });
     const pool = await sql.connect(sqlConfig);
     const own = await pool.request().input('c', sql.Int, c.companyId).input('d', sql.Int, docEntry).input('u', sql.NVarChar(50), c.userId).query(
-      `SELECT TOP 1 id, quotation_doc_entry FROM dbo.sales_offer_draft WHERE id_company = @c AND doc_entry = @d AND id_user = @u AND status = N'borrador';`
+      `SELECT TOP 1 id, quotation_doc_entry, id_request_general FROM dbo.sales_offer_draft WHERE id_company = @c AND doc_entry = @d AND id_user = @u AND status = N'borrador';`
     );
     const row = own.recordset[0];
     if (!row) return NextResponse.json({ error: 'No es un borrador suyo pendiente de enviar.' }, { status: 404 });
@@ -151,6 +162,12 @@ export async function POST(request: NextRequest) {
         }
         // 3) Borrador con las mismas líneas enlazadas a la cotización.
         await sapPatch(sap, `Drafts(${docEntry})`, buildDraftUpdate(h, lines, q, baseLines), true);
+        if (row.id_request_general) {
+          const fresh = await sapGet<Record<string, unknown> & { DocEntry: number; DocumentLines?: { ItemDescription?: string; ItemCode?: string }[] }>(sap, `Drafts(${docEntry})?$select=DocEntry,CardCode,CardName,DocTotal,Comments,DocumentLines`);
+          const t = requestTexts(fresh as never);
+          await pool.request().input('r', sql.Int, row.id_request_general).input('s', sql.NVarChar(254), t.subject).input('d', sql.NVarChar(sql.MAX), t.descripcion)
+            .query(`UPDATE requests_general SET subject_request = @s, description = @d WHERE id = @r;`);
+        }
         return NextResponse.json({ ok: true, actualizado: true });
       }
       if (accion === 'anular') {
@@ -158,6 +175,12 @@ export async function POST(request: NextRequest) {
         if (row.quotation_doc_entry) await sapPost(sap, `Quotations(${row.quotation_doc_entry})/Cancel`, {}).catch(() => undefined);
         await sapPost(sap, `Drafts(${docEntry})/Close`, {});
         await pool.request().input('id', sql.Int, row.id).query(`UPDATE dbo.sales_offer_draft SET status = N'anulado', updated_at = sysutcdatetime() WHERE id = @id;`);
+        if (row.id_request_general) {
+          await pool.request().input('r', sql.Int, row.id_request_general).input('m', sql.NVarChar(sql.MAX), `Oferta anulada en borrador${motivo ? `: ${motivo}` : ''}.`).query(
+            `UPDATE requests_general SET status_req = 3, resolution = @m, date_resolution = GETDATE() WHERE id = @r;
+             UPDATE task_request_general SET id_status = 3 WHERE id_request_general = @r AND id_status = 4;`
+          );
+        }
         return NextResponse.json({ ok: true, anulado: true, motivo });
       }
       const started = await startOfferFlow({
@@ -165,6 +188,7 @@ export async function POST(request: NextRequest) {
         userId: c.userId,
         draft: draft as never,
         quotationDocEntry: row.quotation_doc_entry,
+        existingRequestId: row.id_request_general ?? null,
       });
       if (!started.ok) return NextResponse.json({ error: started.error }, { status: started.status });
       return NextResponse.json({ ok: true, idRequest: started.idRequest });

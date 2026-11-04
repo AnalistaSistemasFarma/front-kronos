@@ -16,7 +16,7 @@ import toast from 'react-hot-toast';
 type Company = { idCompany: number; companyName: string; canWrite: boolean; ready: boolean };
 interface Draft {
   docEntry: number; docNum: number | null; docDate: string | null; dueDate: string | null; cardCode: string | null; cardName: string | null;
-  total: number | null; comments: string | null; open: boolean; missing: boolean;
+  total: number | null; comments: string | null; open: boolean; missing: boolean; requestId?: number | null;
 }
 
 const money = (v: number | null) => (v == null ? '—' : `$ ${Math.round(v).toLocaleString('es-CO')}`);
@@ -111,7 +111,10 @@ export default function MisBorradores() {
             <Table.Tbody>
               {drafts.map((d) => (
                 <Table.Tr key={d.docEntry}>
-                  <Table.Td style={{ whiteSpace: 'nowrap' }}>{d.docNum ?? d.docEntry}</Table.Td>
+                  <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                    {d.docNum ?? d.docEntry}
+                    {d.requestId ? <Text size='xs'><Anchor component={Link} href={`/process/request-general/view-request?id=${d.requestId}`}>Solicitud #{d.requestId}</Anchor></Text> : null}
+                  </Table.Td>
                   <Table.Td style={{ whiteSpace: 'nowrap' }}>{d.docDate ?? '—'}</Table.Td>
                   <Table.Td style={{ whiteSpace: 'nowrap' }}>{d.dueDate ?? '—'}</Table.Td>
                   <Table.Td><Text size='sm'>{d.cardName ?? (d.missing ? 'No se encontró en SAP' : '')}</Text><Text size='xs' c='dimmed'>{d.cardCode}</Text></Table.Td>

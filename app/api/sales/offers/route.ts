@@ -7,7 +7,7 @@ import { prisma } from '../../../../lib/prisma';
 import { salesEndpointForUser } from '../../../../lib/sales/access';
 import { buildOfferDraftPayload, buildQuotationPayload, sanitizeOfferLine, validateOffer, type OfferHeader } from '../../../../lib/sales/offer';
 import { todayBogota } from '../../../../lib/purchases/drafts';
-import { startOfferFlow } from '../../../../lib/sales/offerFlow';
+import { createDraftOfferRequest, startOfferFlow } from '../../../../lib/sales/offerFlow';
 import { sapLogin, sapLogout, sapPost, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
@@ -64,10 +64,12 @@ export async function POST(request: NextRequest) {
     // Interruptor del formulario: «Enviar a autorización» (por defecto) o dejarla en borrador, como SAPSEND.
     if (body.enviar === false) {
       const pool = await sql.connect(sqlConfig);
-      await pool.request().input('c', sql.Int, companyId).input('d', sql.Int, draft.DocEntry).input('q', sql.Int, quotation.DocEntry).input('u', sql.NVarChar(50), user.id).query(
-        `INSERT INTO dbo.sales_offer_draft (id_company, doc_entry, quotation_doc_entry, id_user, status) VALUES (@c, @d, @q, @u, N'borrador');`
+      // La solicitud se crea en «En Borrador» para que aparezca en Mis solicitudes; el flujo no arranca.
+      const idDraftRequest = await createDraftOfferRequest(companyId, user.id, { ...draft, Comments: header.Comments });
+      await pool.request().input('c', sql.Int, companyId).input('d', sql.Int, draft.DocEntry).input('q', sql.Int, quotation.DocEntry).input('u', sql.NVarChar(50), user.id).input('r', sql.Int, idDraftRequest).query(
+        `INSERT INTO dbo.sales_offer_draft (id_company, doc_entry, quotation_doc_entry, id_user, status, id_request_general) VALUES (@c, @d, @q, @u, N'borrador', @r);`
       );
-      return NextResponse.json({ ok: true, saved: true, docEntry: draft.DocEntry, quotationDocEntry: quotation.DocEntry }, { status: 201 });
+      return NextResponse.json({ ok: true, saved: true, idRequest: idDraftRequest, docEntry: draft.DocEntry, quotationDocEntry: quotation.DocEntry }, { status: 201 });
     }
     const started = await startOfferFlow({ companyId, userId: user.id, draft: { ...draft, Comments: header.Comments }, quotationDocEntry: quotation.DocEntry, linesCount: lines.length });
     if (!started.ok) {
