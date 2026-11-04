@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { ActionIcon, Alert, Button, Group, Loader, NumberInput, ScrollArea, Select, Stack, Table, Text, TextInput, Textarea } from '@mantine/core';
+import { ActionIcon, Alert, Button, Group, Loader, NumberInput, ScrollArea, Select, Stack, Switch, Table, Text, TextInput, Textarea } from '@mantine/core';
 import { IconPlus, IconSend, IconTrash } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import SapLookupInput from '../purchases/SapLookupInput';
@@ -51,6 +51,8 @@ export default function SalesInlineForm({ companyId, onDone }: Props) {
   const [payTo, setPayTo] = useState('');
   const [lines, setLines] = useState<Line[]>([{}]);
   const [saving, setSaving] = useState(false);
+  /** Interruptor: enviar a autorización al crear (como ahora) o guardar en borrador (como SAPSEND). */
+  const [enviar, setEnviar] = useState(true);
   /** Búsqueda ampliada abierta («*» + Enter o lupa): tipo, línea y texto. */
   const [search, setSearch] = useState<{ kind: SearchKind; line?: number; q?: string; itemCode?: string; cardCode?: string } | null>(null);
   const [tried, setTried] = useState(false);
@@ -141,6 +143,7 @@ export default function SalesInlineForm({ companyId, onDone }: Props) {
           subject: autoSubject,
           header: { CardCode: cardCode, DocDueDate: dueDate, NumAtCard: numAtCard, Comments: comments || autoSubject, ShipToCode: shipTo || undefined, PayToCode: payTo || undefined },
           lines,
+          enviar,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -149,7 +152,12 @@ export default function SalesInlineForm({ companyId, onDone }: Props) {
         setErrors(Array.isArray(data.errors) ? data.errors : []);
         return;
       }
-      onDone({ ok: true, message: `Oferta de venta #${data.docEntry} creada. El flujo revisa precio y cupo y la envía a autorización si hace falta.` });
+      onDone({
+        ok: true,
+        message: data.saved
+          ? `Oferta de venta #${data.docEntry} guardada en borrador en SAP. Envíela al flujo desde Procesos → Ventas → «Mis ofertas en borrador».`
+          : `Oferta de venta #${data.docEntry} creada. El flujo revisa precio y cupo y la envía a autorización si hace falta.`,
+      });
     } catch {
       toast.error('Error de red al crear la oferta de venta');
     } finally {
@@ -345,8 +353,15 @@ export default function SalesInlineForm({ companyId, onDone }: Props) {
       </div>
 
       <Group justify="flex-end" style={{ position: 'sticky', bottom: 0, zIndex: 5, background: 'var(--mantine-color-body)', paddingTop: 8, paddingBottom: 8, borderTop: '1px solid var(--mantine-color-default-border)' }}>
-        <Button leftSection={<IconSend size={16} />} onClick={submit} loading={saving} disabled={!cardCode}>
-          Crear oferta y enviar
+        <Switch
+          checked={enviar}
+          onChange={(e) => setEnviar(e.currentTarget.checked)}
+          label={enviar ? 'Enviar a autorización al crear' : 'Guardar como borrador (se envía después)'}
+          description={enviar ? 'Entra al flujo: revisa precio y cupo y pide las autorizaciones' : 'Queda en SAP en estado borrador, como en SAPSEND'}
+          mr='md'
+        />
+        <Button leftSection={<IconSend size={16} />} onClick={submit} loading={saving} disabled={!cardCode} color={enviar ? undefined : 'gray'}>
+          {enviar ? 'Crear oferta y enviar' : 'Guardar borrador'}
         </Button>
       </Group>
       {search && (
