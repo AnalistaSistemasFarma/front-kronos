@@ -65,8 +65,14 @@ function New-McpStaging($Cfg, [string]$SourceDir, [string]$Sha) {
   # Nunca se copian secretos ni logs: .env* y *.log se ENLAZAN despues.
   Invoke-Robocopy (Join-Path $SourceDir 'mcp') (Join-Path $stg 'mcp') @('/XF', '.env*', '*.log', '/XD', 'test', 'test-integracion')
   Invoke-Robocopy (Join-Path $SourceDir 'app\generated\prisma') (Join-Path $stg 'app\generated\prisma') @('/XF', '*.tmp*')
-  if (Test-Path -LiteralPath (Join-Path $SourceDir 'node_modules\@prisma\client')) {
-    Invoke-Robocopy (Join-Path $SourceDir 'node_modules\@prisma\client') (Join-Path $stg 'node_modules\@prisma\client') @()
+  # Paquetes que el MCP resuelve desde el node_modules de la RAIZ (no estan en
+  # mcp\package.json): @prisma\client y bcryptjs (tools\usuarios.js). Sin
+  # bcryptjs el MCP no arranca en la carpeta dedicada (activacion prod 2026-11-04).
+  foreach ($mod in @(Get-Opt $Cfg 'mcp.rootModules' @('@prisma\client', 'bcryptjs'))) {
+    if (-not $mod) { continue }
+    $ms = Join-Path $SourceDir "node_modules\$mod"
+    if (-not (Test-Path -LiteralPath $ms)) { throw "Falta $ms (el MCP lo resuelve desde la raiz)." }
+    Invoke-Robocopy $ms (Join-Path $stg "node_modules\$mod") @()
   }
   foreach ($rel in @(Get-Opt $Cfg 'mcp.links' @('.env', 'mcp\.env'))) {
     if (-not $rel) { continue }
@@ -94,6 +100,12 @@ await import(pathToFileURL(join(base, 'dist', 'db.js')).href);
 const req = createRequire(join(base, 'serve.mjs'));
 const { PrismaClient } = req(join(base, '..', 'app', 'generated', 'prisma', 'index.js'));
 if (typeof PrismaClient !== 'function') throw new Error('PrismaClient no es una clase');
+// Todo paquete externo que importe dist\ debe resolverse desde esta carpeta.
+import { readdirSync, readFileSync } from 'node:fs';
+const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(join(d, e.name)) : (e.name.endsWith('.js') ? [join(d, e.name)] : []));
+const pkgs = new Set();
+for (const f of walk(join(base, 'dist'))) for (const m of readFileSync(f, 'utf8').matchAll(/from\s+['"]([^'".\/][^'"]*)['"]/g)) { if (!m[1].startsWith('node:')) pkgs.add(m[1]); }
+for (const p of pkgs) import.meta.resolve(p);
 console.log('carga OK');
 process.exit(0);
 '@
