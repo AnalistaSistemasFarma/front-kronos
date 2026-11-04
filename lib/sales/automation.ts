@@ -29,7 +29,8 @@ export interface AutomationConfig {
   activo: boolean;
   simulacion: boolean;
   intervalo_min: number;
-  user_sign: number | null;
+  /** Usuarios SAP (UserSign) que crean los borradores; en BD va como lista «14,30». */
+  user_signs: number[];
   desde_fecha: string | null;
   id_user_solicitante: string | null;
   id_job: number | null;
@@ -67,25 +68,35 @@ export async function getConfig(idCompany: number): Promise<AutomationConfig | n
     FROM dbo.sales_automation_config WHERE id_company = @c;`);
   const row = r.recordset[0];
   if (!row) return null;
-  return { ...row, activo: Boolean(row.activo), simulacion: Boolean(row.simulacion) };
+  const { user_sign, ...rest } = row;
+  return { ...rest, user_signs: parseUserSigns(user_sign), activo: Boolean(row.activo), simulacion: Boolean(row.simulacion) };
 }
 
 export interface ConfigInput {
   activo: boolean;
   simulacion: boolean;
   intervalo_min: number;
-  user_sign: number | null;
+  user_signs: number[];
   desde_fecha: string | null;
   id_user_solicitante: string | null;
+}
+
+/** «14, 30» (o un número suelto) → [14, 30], sin repetidos. Lo que no sea entero positivo queda como NaN para que la validación lo rechace. PURA. */
+export function parseUserSigns(v: unknown): number[] {
+  if (v == null || v === '') return [];
+  const list = Array.isArray(v) ? v : String(v).split(/[,;\s]+/);
+  const out = list.filter((x) => String(x).trim() !== '').map((x) => (/^\d+$/.test(String(x).trim()) ? Number(String(x).trim()) : NaN));
+  return [...new Set(out)];
 }
 
 /** Valida la configuración; devuelve errores (vacío = válida). PURA. */
 export function validateConfig(c: ConfigInput): string[] {
   const e: string[] = [];
   if (!Number.isInteger(c.intervalo_min) || c.intervalo_min < 5 || c.intervalo_min > 1440) e.push('El intervalo debe estar entre 5 y 1440 minutos.');
-  if (c.user_sign != null && (!Number.isInteger(c.user_sign) || c.user_sign <= 0)) e.push('El usuario SAP de la integración debe ser un número.');
+  if (c.user_signs.some((u) => !Number.isInteger(u) || u <= 0)) e.push('Los usuarios SAP de la integración deben ser números separados por coma.');
+  if (c.user_signs.length > 10) e.push('Indique como máximo 10 usuarios SAP.');
   if (c.desde_fecha != null && !/^\d{4}-\d{2}-\d{2}$/.test(c.desde_fecha)) e.push('La fecha «desde» no es válida.');
-  if (c.activo && c.user_sign == null) e.push('Para activarla, indique el usuario SAP que crea los borradores (UserSign).');
+  if (c.activo && !c.user_signs.length) e.push('Para activarla, indique el usuario SAP que crea los borradores (UserSign).');
   if (c.activo && !c.id_user_solicitante) e.push('Para activarla, indique el solicitante en SynerLink.');
   return e;
 }
@@ -131,7 +142,7 @@ export async function saveConfig(idCompany: number, c: ConfigInput, actor: strin
       .input('activo', sql.Bit, c.activo ? 1 : 0)
       .input('sim', sql.Bit, c.simulacion ? 1 : 0)
       .input('int', sql.Int, c.intervalo_min)
-      .input('us', sql.Int, c.user_sign)
+      .input('us', sql.NVarChar(100), c.user_signs.length ? c.user_signs.join(',') : null)
       .input('desde', sql.Date, c.desde_fecha)
       .input('sol', sql.NVarChar(50), c.id_user_solicitante)
       .input('job', sql.Int, idJob)
@@ -163,12 +174,13 @@ async function releaseLock(idCompany: number) {
 }
 
 /** Filtro OData de candidatos. PURA. */
-export function candidatesFilter(userSign: number, desde: string | null): string {
+export function candidatesFilter(userSigns: number[], desde: string | null): string {
+  const users = userSigns.filter((u) => Number.isInteger(u) && u > 0).map((u) => `UserSign eq ${Math.trunc(u)}`);
   const parts = [
     "DocObjectCode eq 'oOrders'",
     "U_SEND_State eq 'B'",
     "DocumentStatus eq 'bost_Open'",
-    `UserSign eq ${Math.trunc(userSign)}`,
+    users.length === 1 ? users[0] : `(${users.join(' or ')})`,
   ];
   if (desde && /^\d{4}-\d{2}-\d{2}$/.test(desde)) parts.push(`DocDate ge '${desde}'`);
   return parts.join(' and ');
@@ -189,10 +201,10 @@ async function alreadyHandled(idCompany: number): Promise<Set<number>> {
 
 /** Pendientes en SAP (mismo filtro que la corrida). */
 export async function findPending(sap: SapSession, cfg: AutomationConfig, limit = 200): Promise<Candidate[]> {
-  if (cfg.user_sign == null) return [];
+  if (!cfg.user_signs.length) return [];
   const rows = await sapGetAll<Candidate>(
     sap,
-    `Drafts?$select=DocEntry,DocNum,CardCode,CardName,DocTotal,DocDate&$filter=${candidatesFilter(cfg.user_sign, cfg.desde_fecha)}&$orderby=DocEntry asc`,
+    `Drafts?$select=DocEntry,DocNum,CardCode,CardName,DocTotal,DocDate&$filter=${candidatesFilter(cfg.user_signs, cfg.desde_fecha)}&$orderby=DocEntry asc`,
     { cap: 2000 }
   );
   const handled = await alreadyHandled(cfg.id_company);
@@ -307,7 +319,7 @@ export async function runAutomation(params: {
   const empty = (omitido: string): RunSummary => ({ omitido, simulacion: true, candidatos: 0, enviados: 0, simulados: 0, errores: 0, resultados: [] });
   if (!cfg) return empty('La empresa no tiene configuración de automatización.');
   if (origen === 'programada' && !cfg.activo) return empty('La automatización está pausada.');
-  if (cfg.user_sign == null) return empty('Falta el usuario SAP de la integración (UserSign).');
+  if (!cfg.user_signs.length) return empty('Falta el usuario SAP de la integración (UserSign).');
   if (!(await takeLock(idCompany))) return empty('Hay otra corrida en curso; intente en unos minutos.');
 
   const simulacion = modo === 'simular' || (modo === 'auto' && cfg.simulacion);

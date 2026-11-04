@@ -10,6 +10,7 @@ import {
   findPending,
   getConfig,
   panelData,
+  parseUserSigns,
   runAutomation,
   saveConfig,
   summaryText,
@@ -81,7 +82,7 @@ export async function PUT(request: NextRequest) {
       activo: Boolean(raw.activo),
       simulacion: raw.simulacion !== false,
       intervalo_min: Number(raw.intervalo_min ?? 10),
-      user_sign: raw.user_sign === '' || raw.user_sign == null ? null : Number(raw.user_sign),
+      user_signs: parseUserSigns(raw.user_signs ?? raw.user_sign),
       desde_fecha: raw.desde_fecha ? String(raw.desde_fecha) : null,
       id_user_solicitante: solicitante,
     };
