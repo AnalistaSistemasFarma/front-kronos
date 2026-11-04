@@ -1,13 +1,15 @@
 <#
 .SYNOPSIS
-  Construye la carpeta del color INACTIVO del entorno de PRUEBAS (.230) sin
-  tocar el color que esta atendiendo.
+  Construye la carpeta del color INACTIVO (PRUEBAS en la .230 o PRODUCCION en
+  serfarma05) sin tocar el color que esta atendiendo.
 
 .DESCRIPTION
-  Lo llama .github/workflows/deploy-testing.yml (job "build") DESPUES de dejar
-  el codigo de la carpeta inactiva en el commit a desplegar. Nada corre desde
-  esta carpeta, asi que no hay binarios nativos bloqueados ni hace falta
-  detener pm2:
+  Lo llaman .github/workflows/deploy-testing.yml y main.yml (job "build")
+  DESPUES de dejar el codigo de la carpeta inactiva en el commit a desplegar.
+  Nada corre desde esta carpeta, asi que no hay binarios nativos bloqueados ni
+  hace falta detener pm2 (en produccion, con build.cleanOrphans, antes se
+  cierran los node HUERFANOS que aun retengan archivos de la carpeta; si un
+  proceso VIVO de pm2 la usa, se aborta):
     1. borra el sello de build (si este build se cancela, switch.ps1 no activa
        una carpeta a medio construir);
     2. enlaza .env y mcp\.env desde la carpeta canonica (symlink) y copia
@@ -48,9 +50,19 @@ function Step([string]$m) { Write-Host ("[{0,6:N1}s] {1}" -f ((Get-Date) - $t0).
 
 if (Test-Path -LiteralPath $stamp) { Remove-Item -LiteralPath $stamp -Force }
 
-# Procesos node vivos dentro de la carpeta (no deberia haber ninguno): solo se avisa.
-$vivos = Get-NodeProcsInDir $dir
-foreach ($p in $vivos) { Write-Host "::warning::node vivo en la carpeta inactiva: PID $($p.ProcessId) $($p.CommandLine)" }
+# Produccion: el daemon de pm2 debe ser el del servicio (sin llamar a pm2) y
+# debe haber RAM para compilar sin ahogar la version activa (incidente 2026-10-05).
+Assert-Pm2Daemon $cfg
+Assert-FreeRam ([int](Get-Opt $cfg 'guards.minFreeMbBuild' 0)) 'compilar'
+
+if ([bool](Get-Opt $cfg 'build.cleanOrphans' $false)) {
+  if (Test-Pm2App $c.name) { throw "pm2 tiene registrada la app $($c.name) (color inactivo). No se construye encima: revisar a mano." }
+  Clear-OrphansInDir $cfg $dir
+} else {
+  # Procesos node vivos dentro de la carpeta (no deberia haber ninguno): solo se avisa.
+  $vivos = Get-NodeProcsInDir $dir
+  foreach ($p in $vivos) { Write-Host "::warning::node vivo en la carpeta inactiva: PID $($p.ProcessId) $($p.CommandLine)" }
+}
 
 # ---- enlaces a los archivos con secretos (fuente unica: carpeta canonica)
 if ($cfg.linkFrom -and ($cfg.linkFrom.TrimEnd('\') -ne $dir.TrimEnd('\'))) {
@@ -118,9 +130,13 @@ try {
   npx prisma generate
   if ($LASTEXITCODE -ne 0) { throw 'prisma generate fallo' }
 
-  Step 'migracion aditiva de estado compartido de voz...'
-  npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260921193000_chat_voice_shared_state/migration.sql
-  if ($LASTEXITCODE -ne 0) { throw 'migracion de voz fallo' }
+  # Solo PRUEBAS. En produccion los SQL son manuales y previos al merge
+  # (build.voiceMigration = false); el workflow solo los verifica.
+  if ([bool](Get-Opt $cfg 'build.voiceMigration' $true)) {
+    Step 'migracion aditiva de estado compartido de voz...'
+    npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260921193000_chat_voice_shared_state/migration.sql
+    if ($LASTEXITCODE -ne 0) { throw 'migracion de voz fallo' }
+  }
 
   Step 'next build...'
   $env:GITHUB_SHA = $Sha

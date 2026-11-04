@@ -29,7 +29,8 @@ export async function GET(req) {
           pff.config_json,
           rfv.id_option,
           o.option_label,
-          rfv.value_text
+          rfv.value_text,
+          COALESCE(rfv.locked, 0) AS locked
         FROM process_category_request_general pcr
         INNER JOIN process_form_field pff
           ON pff.id_process_category = pcr.id_process_category AND pff.active = 1
@@ -70,6 +71,7 @@ export async function GET(req) {
     const response = values.map((v) => ({
       ...v,
       editable: Boolean(v.editable),
+      locked: Boolean(v.locked),
       options: optionsByField[v.id_form_field] || [],
     }));
 
