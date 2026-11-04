@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Card, Group, Modal, ScrollArea, Table, Text } from '@mantine/core';
-import { IconFileInvoice, IconPencil, IconSend } from '@tabler/icons-react';
+import { IconCalendar, IconCash, IconFileInvoice, IconFileText, IconMapPin, IconPencil, IconSend, IconUser } from '@tabler/icons-react';
 import SalesInlineForm from './SalesInlineForm';
 import { STATE_LABELS } from '../../../../lib/sales/states';
 import SalesCreditPanel from './SalesCreditPanel';
@@ -29,6 +29,16 @@ interface Sale {
 const money = (v: unknown) => (v == null || v === '' ? '—' : `$ ${Number(v).toLocaleString('es-CO', { maximumFractionDigits: 2 })}`);
 const qty = (v: unknown) => (v == null ? '' : Number(v).toLocaleString('es-CO', { maximumFractionDigits: 2 }));
 const day = (v: unknown) => (v ? String(v).slice(0, 10) : '');
+/** Etiqueta de un dato de la oferta con su ícono. */
+function Label({ icon: Icon, children }: { icon: React.ComponentType<{ size?: number }>; children: React.ReactNode }) {
+  return (
+    <Group gap={4} wrap='nowrap' c='dimmed'>
+      <Icon size={14} />
+      <Text size='xs' c='dimmed'>{children}</Text>
+    </Group>
+  );
+}
+
 const FLOW: Record<string, { label: string; color: string }> = {
   borrador: { label: 'En borrador (sin enviar)', color: 'gray' },
   pending: { label: 'En el flujo', color: 'yellow' },
@@ -147,11 +157,11 @@ export default function SalesOfferDetail({ requestId, onLoaded, mb }: { requestI
       )}
 
       <Group gap='xl' mb='md' wrap='wrap'>
-        <div><Text size='xs' c='dimmed'>Cliente</Text><Text size='sm' fw={600}>{String(d.CardName ?? '')}</Text><Text size='xs'>{String(d.CardCode ?? '')}</Text></div>
-        <div><Text size='xs' c='dimmed'>Punto de entrega</Text><Text size='sm'>{String(d.ShipToCode ?? '—')}</Text>{d.Address2 ? <Text size='xs' c='dimmed' style={{ whiteSpace: 'pre-line', maxWidth: 280 }}>{String(d.Address2)}</Text> : null}</div>
-        <div><Text size='xs' c='dimmed'>OC del cliente</Text><Text size='sm'>{String(d.NumAtCard ?? '—')}</Text></div>
-        <div><Text size='xs' c='dimmed'>Fecha / entrega</Text><Text size='sm'>{day(d.DocDate)} · {day(d.DocDueDate)}</Text></div>
-        <div><Text size='xs' c='dimmed'>Total</Text><Text size='sm' fw={700}>{money(d.DocTotal)}</Text><Text size='xs' c='dimmed'>IVA {money(d.VatSum)}</Text></div>
+        <div><Label icon={IconUser}>Cliente</Label><Text size='sm' fw={600}>{String(d.CardName ?? '')}</Text><Text size='xs'>{String(d.CardCode ?? '')}</Text></div>
+        <div><Label icon={IconMapPin}>Punto de entrega</Label><Text size='sm'>{String(d.ShipToCode ?? '—')}</Text>{d.Address2 ? <Text size='xs' c='dimmed' style={{ whiteSpace: 'pre-line', maxWidth: 280 }}>{String(d.Address2)}</Text> : null}</div>
+        <div><Label icon={IconFileText}>OC del cliente</Label><Text size='sm'>{String(d.NumAtCard ?? '—')}</Text></div>
+        <div><Label icon={IconCalendar}>Fecha / entrega</Label><Text size='sm'>{day(d.DocDate)} · {day(d.DocDueDate)}</Text></div>
+        <div><Label icon={IconCash}>Total</Label><Text size='sm' fw={700}>{money(d.DocTotal)}</Text><Text size='xs' c='dimmed'>IVA {money(d.VatSum)}</Text></div>
       </Group>
 
       {/* Decisión de cartera: cupo, % de extracupo y cartera por edades del cliente. Solo en las dos
