@@ -1,5 +1,6 @@
 import {
   canAuditAgents,
+  canConfigureAgents,
   getAuditScope,
 } from "../../../../../../lib/chat/audit-access";
 import {
@@ -37,11 +38,12 @@ export async function GET(
       return jsonNoStore({ error: "No encontrado." }, { status: 404 });
     try {
       const alcance = await getAuditScope(user.email);
-      const [d, programadas] = await Promise.all([
+      const [d, programadas, puedeAdministrar] = await Promise.all([
         leerIndicadorAgente(codigo, user.email, alcance),
         leerProgramadas(user.email, alcance, codigo),
+        canConfigureAgents(user.email).catch(() => false),
       ]);
-      if (d) return jsonNoStore({ ...d, programadas });
+      if (d) return jsonNoStore({ ...d, programadas, puedeAdministrar });
       // Agente sin casos en el chat pero con automatizaciones programadas.
       const p = programadas?.[0];
       if (!p) return jsonNoStore({ error: "No encontrado." }, { status: 404 });
@@ -65,6 +67,7 @@ export async function GET(
         corte: null,
         periodoDesde: null,
         programadas,
+        puedeAdministrar,
       });
     } catch (e) {
       if (e instanceof IndicadorNoDisponible)

@@ -407,6 +407,33 @@ export async function acusarNotificados(huellas: string[]): Promise<number> {
   );
 }
 
+/**
+ * Da por resueltos los errores ABIERTOS de esas huellas (p. ej. una
+ * automatización programada que volvió a correr bien). Si vuelve a pasar, la
+ * publicación lo reabre y avisa como nuevo. Devuelve cuántos cerró.
+ */
+export async function resolverHuellas(huellas: string[], por: string): Promise<number> {
+  const hs = [...new Set(huellas.filter((h) => /^[0-9a-f]{64}$/.test(h)))].slice(0, 1000);
+  if (hs.length === 0) return 0;
+  return conTablas(() =>
+    withMssqlPool(async (pool) => {
+      const r = await pool
+        .request()
+        .input('hs', sql.NVarChar(sql.MAX), JSON.stringify(hs))
+        .input('por', sql.NVarChar(200), por.slice(0, 200)).query(`
+          UPDATE dbo.agent_error_issue
+             SET estado = N'resuelto', estado_por = @por, estado_at = SYSUTCDATETIME()
+           WHERE estado = N'abierto' AND huella IN (SELECT value FROM OPENJSON(@hs))`);
+      return r.rowsAffected[0] ?? 0;
+    }),
+  );
+}
+
+/** Ambiente de ESTE servidor (KRONOSDB = prod). */
+export async function ambienteServidor(): Promise<Ambiente> {
+  return withMssqlPool((pool) => ambienteDe(pool));
+}
+
 export type ResultadoReintento =
   | { ok: true; idMensaje: number; idConversacion: number }
   | { ok: false; status: 404 | 409; motivo: string };

@@ -13,6 +13,7 @@ export const TIPOS_ERROR = [
   'recibe_no_envia', // recibe pero contesta en su consola, sin reply
   'puente_caido', // el puente no puede hablar con SynerLink (401 de la llave, 500 sostenido)
   'herramienta', // una herramienta (MCP) falló dentro de un turno
+  'automatizacion', // una automatización programada dejó de correr o falla (Indicador → programadas, 2026-11-04)
   'otro',
 ] as const;
 export type TipoError = (typeof TIPOS_ERROR)[number];
@@ -38,6 +39,7 @@ export const NOMBRE_TIPO: Record<TipoError, string> = {
   recibe_no_envia: 'Recibe pero no envía',
   puente_caido: 'Puente sin conexión',
   herramienta: 'Herramienta fallida',
+  automatizacion: 'Automatización programada',
   otro: 'Otro',
 };
 

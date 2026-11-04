@@ -111,9 +111,47 @@ describe("tendencia y resumen", () => {
       activas: 1,
       pausadas: 1,
       fallando: 1,
+      muertas: 0,
       corridas30: 20,
       ok30: 10,
       pctOk30: 50,
     });
+  });
+
+  it("con salud (servidor) manda la salud: muertas cuentan como problema", () => {
+    const r = resumirProgramadas([
+      { estado: "activa", salud: "muerta", corridas30: 5, ok30: 5 },
+      { estado: "activa", salud: "ok", corridas30: 5, ok30: 5 },
+      { estado: "fallando", salud: "fallando", corridas30: 5, ok30: 0 },
+    ]);
+    expect(r).toMatchObject({ activas: 1, fallando: 2, muertas: 1 });
+  });
+
+  it("parsea ref, horario y últimas corridas (nota solo en las fallidas, sin secretos)", () => {
+    const p = parseProgramadas({
+      corte: "2026-11-04",
+      automatizaciones: [
+        {
+          ...base,
+          ref: "com.jorge.carter.certificaciones",
+          horario: { cal: [{ h: 16, m: 0 }] },
+          ultimas: [
+            { ts: "2026-11-03T21:00:00Z", ok: true, nota: "no va" },
+            { ts: "2026-11-04T21:00:00Z", ok: false, nota: "Error token=sk-ant-abcdefghijklmnopqrstuvwxyz0123456789" },
+            { ts: "no es fecha", ok: false },
+          ],
+        },
+        { ...base, clave: "otra", ref: "rm -rf /", horario: "x" },
+      ],
+    });
+    const [a, b] = p.automatizaciones;
+    expect(a.ref).toBe("com.jorge.carter.certificaciones");
+    expect(a.horario).toEqual({ cal: [{ h: 16, m: 0 }] });
+    expect(a.ultimas).toHaveLength(2);
+    expect(a.ultimas[0].nota).toBeNull();
+    expect(a.ultimas[1].nota).not.toContain("sk-ant-abcdefghijklmnop");
+    expect(b.ref).toBeNull();
+    expect(b.horario).toBeNull();
+    expect(b.ultimas).toEqual([]);
   });
 });

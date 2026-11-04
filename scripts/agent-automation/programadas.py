@@ -12,6 +12,19 @@ del recolector del inventario, en los mismos destinos que el analizador:
   python3 programadas.py            # recolecta y publica en todos los destinos
   python3 programadas.py --ensayo   # recolecta y muestra el JSON; no publica
   python3 programadas.py --tabla    # recolecta y muestra una tabla Markdown; no publica
+  python3 programadas.py --sin-avisos  # publica, pero no envía el aviso de muertas/fallando
+
+ADMINISTRAR Y «MUERTAS» (2026-11-04): cada automatización lleva además
+  - ref: el Label de launchd u «openclaw:<equipo>:<id del job>» (llave del catálogo; la
+    pantalla solo deja administrar las del catálogo, y el ejecutor de cada Mac lo revalida);
+  - horario: la programación estructurada ({"cada": min} o {"cal": [{wd, d, h, m}]}), con la
+    que el servidor calcula si dejó de correr («Muerta / no corrió»);
+  - ultimas: sus últimas 10 corridas (hora, bien/falló, producción y, si falló, la línea de
+    error del log recortada; el servidor oculta secretos y solo la muestra a administradores).
+  El servidor registra las muertas o fallando en «Errores de IA» y, si tiene
+  AGENT_ERRORS_NOTIFY=1, responde avisos.notificar: este script los agrupa en UN mensaje a
+  la conversación 1 de SynerLink producción (llave del canal synerlink-prod de horus) y
+  confirma el envío (acuse) para que no se repita antes de AGENT_ERRORS_NOTIFY_HOURS.
 
 Qué lee y cómo (todo por SSH con BatchMode, sin escribir nada en los equipos):
   - ~/Library/LaunchAgents/*.plist: solo las llaves Label, ProgramArguments, Program,
@@ -42,6 +55,9 @@ COT = dt.timezone(dt.timedelta(hours=-5))  # hora de Colombia (los Mac de la flo
 MAX_LOG = 25 * 1024 * 1024
 # Muestras propias para los logs SIN fecha (se cuentan las corridas nuevas entre pasadas).
 ESTADO = pathlib.Path(os.path.expanduser('~/.horus/agent-automation/programadas-estado.json'))
+# Aviso de muertas/fallando (mismo canal que el recolector de errores de IA).
+CANAL_PROD = pathlib.Path(os.path.expanduser('~/.horus/claude-config/channels/synerlink-prod/.env'))
+CONVERSACION_AVISOS = 1
 
 # Infraestructura de la flota: no son automatizaciones de negocio.
 EXCLUIR = [
@@ -254,6 +270,61 @@ def intervalo_esperado_h(p_launchd=None, cron=None):
     return None
 
 
+def horario_launchd(p):
+    """Programación estructurada para el servidor: {"cada": min} o {"cal": [{wd, d, h, m}]}."""
+    if 'StartInterval' in p:
+        try: return {'cada': max(1, int(p['StartInterval']) // 60)}
+        except ValueError: return None
+    sci = p.get('StartCalendarInterval')
+    items = sci if isinstance(sci, list) else [sci] if sci else []
+    cal = []
+    for it in items:
+        if not isinstance(it, dict): continue
+        f = {'m': int(it.get('Minute', 0))}
+        if 'Hour' in it: f['h'] = int(it['Hour'])
+        if 'Weekday' in it: f['wd'] = int(it['Weekday']) % 7
+        if 'Day' in it: f['d'] = int(it['Day'])
+        cal.append(f)
+    return {'cal': cal} if cal else None
+
+
+def _lista_cron(campo, minimo, maximo):
+    """«1-5», «0,30», «*» → lista de enteros (None = todos)."""
+    if campo in ('*', '?'): return None
+    out = []
+    for parte in campo.split(','):
+        if '-' in parte:
+            a, b = parte.split('-', 1)
+            if not (a.isdigit() and b.isdigit()): return False
+            out += list(range(int(a), int(b) + 1))
+        elif parte.isdigit(): out.append(int(parte))
+        else: return False
+    return [x for x in out if minimo <= x <= maximo]
+
+
+def horario_cron(expr):
+    """Expresión cron de 5 campos → {"cada": min} o {"cal": [...]}; None si no se entiende."""
+    p = (expr or '').split()
+    if len(p) < 5: return None
+    m, h, dom, mon, dow = p[:5]
+    if mon != '*': return None
+    if m.startswith('*/') and h == '*' and m[2:].isdigit(): return {'cada': int(m[2:])}
+    if m == '*': return {'cada': 1}
+    ms, hs, ds, ws = _lista_cron(m, 0, 59), _lista_cron(h, 0, 23), _lista_cron(dom, 1, 31), _lista_cron(dow, 0, 7)
+    if False in (ms, hs, ds, ws) or ms is None: return None
+    cal = []
+    for mi in ms:
+        for hh in (hs if hs is not None else [None]):
+            for dd in (ds if ds is not None else [None]):
+                for ww in (ws if ws is not None else [None]):
+                    f = {'m': mi}
+                    if hh is not None: f['h'] = hh
+                    if dd is not None: f['d'] = dd
+                    if ww is not None: f['wd'] = ww % 7
+                    cal.append(f)
+    return {'cal': cal[:200]} if cal else None
+
+
 # ── Corridas a partir de los logs ─────────────────────────────────────────────
 
 def _fecha(s, fmt):
@@ -292,11 +363,13 @@ def corridas_bloques(texto, spec):
         m = ini.search(linea)
         if m:
             if cur: runs.append(cur)  # quedó sin fin
-            cur = {'ts': _fecha(m.group('ts'), fmt), 'fin': False, 'err': False, 'okm': False, 'prod': 0, 'u': set()}
+            cur = {'ts': _fecha(m.group('ts'), fmt), 'fin': False, 'err': False, 'okm': False, 'prod': 0, 'u': set(), 'nota': None}
             previa = linea; continue
         if not cur:
             previa = linea; continue
-        if err and err.search(linea): cur['err'] = True
+        if err and err.search(linea):
+            cur['err'] = True
+            cur['nota'] = cur['nota'] or linea.strip()[:200]
         if okr and okr.search(linea): cur['okm'] = True
         if rc_rx:
             r = rc_rx.search(linea)
@@ -322,7 +395,8 @@ def corridas_bloques(texto, spec):
         # La última, si empezó hace menos de 3 h, puede seguir corriendo: no se juzga.
         abierta = i == len(runs) - 1 and not r['fin'] and not r['err'] and not r['okm'] \
             and (ahora - r['ts']).total_seconds() < 3 * 3600
-        out.append({'ts': r['ts'], 'ok': ok, 'prod': r['prod'] if prod else None, 'abierta': abierta})
+        out.append({'ts': r['ts'], 'ok': ok, 'prod': r['prod'] if prod else None, 'abierta': abierta,
+                    'nota': None if ok else (r.get('nota') or ('Sin línea de cierre en el log.' if not terminada and not abierta else None))})
     return out
 
 
@@ -344,7 +418,7 @@ def corridas_lineas(texto, spec):
         if prod:
             pm = prod.search(linea)
             p = int(pm.group('n')) if pm and 'n' in pm.groupdict() and pm.group('n') else (1 if pm else 0)
-        out.append({'ts': ts, 'ok': ok, 'prod': p})
+        out.append({'ts': ts, 'ok': ok, 'prod': p, 'nota': None if ok else linea.strip()[:200]})
     if spec.get('una_por_dia'):  # varias líneas el mismo día = una corrida (la última manda)
         dia = {}
         for r in out: dia[r['ts'].astimezone(COT).date()] = r
@@ -479,6 +553,10 @@ def metricas(runs, prod_fechas, hoy):
             w = sem[lunes(r['ts']).isoformat()]
             w['produccion'] = (w['produccion'] or 0) + (r['prod'] or 0)
     m['semanas'] = [dict(v, inicio=k) for k, v in sorted(sem.items())][-26:]
+    m['ultimas'] = [{'ts': r['ts'].astimezone(dt.timezone.utc).isoformat().replace('+00:00', 'Z'),
+                     'ok': None if r.get('abierta') else bool(r['ok']),
+                     'produccion': r.get('prod'), 'nota': r.get('nota')}
+                    for r in sorted(runs, key=lambda r: r['ts'])[-10:]]
     return m
 
 
@@ -509,7 +587,8 @@ def construir(host, code, tipo, nombre, cat, extra, hoy):
     a = {'clave': '%s:%s:%s' % (host, tipo, nombre), 'code': code, 'host': host, 'tipo': tipo, 'nombre': cat.get('nombre') or nombre,
          'descripcion': cat.get('descripcion'), 'programacion': cat.get('programacion') or extra.get('programacion'),
          'cargada': extra.get('cargada'), 'habilitada': extra.get('habilitada'),
-         'produccionEtiqueta': (cat.get('produccion') or {}).get('etiqueta')}
+         'produccionEtiqueta': (cat.get('produccion') or {}).get('etiqueta'),
+         'ref': extra.get('ref'), 'horario': extra.get('horario')}
     runs = extra.get('runs')
     if runs is None:
         runs = []
@@ -596,7 +675,8 @@ def recolectar(hosts=None):
             extra = {'programacion': programacion_launchd(p), 'cargada': car is not None,
                      'habilitada': None if p.get('Disabled') in (None, '') else p.get('Disabled') != 'true',
                      'ultimaSalida': car['status'] if car else None, 'salida': p.get('StandardOutPath'),
-                     'esperado_h': intervalo_esperado_h(p_launchd=p)}
+                     'esperado_h': intervalo_esperado_h(p_launchd=p),
+                     'ref': label, 'horario': horario_launchd(p)}
             todas.append(construir(host, code, 'launchd', label, entrada, extra, hoy))
 
         for linea in datos['cron']:
@@ -609,7 +689,7 @@ def recolectar(hosts=None):
             entrada = next((v for k, v in cat.items() if k.startswith('cron:') and k[5:] in cmd), {})
             if entrada.get('excluir') or (not entrada and any(x.search(cmd) for x in excluir)): continue
             extra = {'programacion': programacion_cron(expr), 'cargada': True, 'habilitada': True,
-                     'esperado_h': intervalo_esperado_h(cron=expr)}
+                     'esperado_h': intervalo_esperado_h(cron=expr), 'ref': None, 'horario': horario_cron(expr)}
             todas.append(construir(host, code, 'cron', re.sub(r'\s*>>.*', '', nombre), entrada, extra, hoy))
 
         for job in datos['openclaw']:
@@ -628,7 +708,10 @@ def recolectar(hosts=None):
                 'Una vez' if s.get('kind') == 'at' else None
             extra = {'programacion': prog, 'cargada': True, 'habilitada': job.get('enabled') not in (False, 0),
                      'runs': corridas_openclaw(host, job['_dir'], job),
-                     'esperado_h': intervalo_esperado_h(cron=s['expr']) if s.get('expr') else None}
+                     'esperado_h': intervalo_esperado_h(cron=s['expr']) if s.get('expr') else None,
+                     'ref': 'openclaw:%s:%s' % (host, job.get('id')),
+                     'horario': horario_cron(s['expr']) if s.get('kind') == 'cron' and s.get('expr') and s.get('tz') in (None, '', 'America/Bogota')
+                     else {'cada': max(1, int(s['everyMs'] // 60000))} if s.get('everyMs') else None}
             if not entrada.get('descripcion') and job.get('description'):
                 entrada = dict(entrada, descripcion=str(job['description'])[:300])
             todas.append(construir(host, code, 'openclaw', nombre, entrada, extra, hoy))
@@ -649,6 +732,34 @@ def tabla(pub):
     return '\n'.join(filas)
 
 
+def mensaje_aviso(items, url_panel):
+    """Markdown estándar para SynerLink (viñetas con «- »)."""
+    lineas = ['⏰ **Automatizaciones de la flota con problemas** — %s' % dt.datetime.now().strftime('%Y-%m-%d %H:%M'), '']
+    for i in items[:15]:
+        amb = '' if i.get('ambiente') == 'prod' else ' (pruebas)'
+        lineas.append('- 🔴 **%s**%s — %s%s' % (i.get('agente'), amb, i.get('titulo', '')[:180],
+                                               '' if i.get('nuevo') else ' (sigue igual)'))
+    if len(items) > 15:
+        lineas.append('- … y %d más.' % (len(items) - 15))
+    lineas += ['', 'Ver, pausar, reanudar o ejecutar: %s' % url_panel]
+    return '\n'.join(lineas)
+
+
+def avisar(items, url_panel):
+    """POST directo a SynerLink PRODUCCIÓN, conversación 1, con la llave del canal synerlink-prod de horus."""
+    canal = {}
+    if CANAL_PROD.exists():
+        for l in CANAL_PROD.read_text().splitlines():
+            if '=' in l and not l.lstrip().startswith('#'):
+                k, v = l.split('=', 1); canal[k.strip()] = v.strip().strip('"').strip("'")
+    base, key = canal.get('SYNERLINK_BASE_URL', '').rstrip('/'), canal.get('SYNERLINK_AGENT_KEY', '')
+    if not base or not key:
+        return False, 'sin la configuración del canal synerlink-prod'
+    code, body = llamar(base, key, '/api/chat/agent/messages',
+                        {'idConversation': CONVERSACION_AVISOS, 'body': mensaje_aviso(items, url_panel)})
+    return code in (200, 201), 'HTTP %s %s' % (code, json.dumps(body, ensure_ascii=False)[:200])
+
+
 def main():
     a = sys.argv[1:]
     hosts = [a[i + 1] for i, x in enumerate(a) if x == '--host' and i + 1 < len(a)] or None
@@ -661,6 +772,19 @@ def main():
     for url, key in destinos(a):
         code, body = llamar(url, key, '/api/chat/auditoria/automatizaciones/programadas', pub)
         log('%s: publicado HTTP %s %s' % (url, code, json.dumps(body, ensure_ascii=False)[:200]))
+        av = (body or {}).get('avisos') or {} if code == 200 else {}
+        if av:
+            log('%s: muertas=%s fallando=%s resueltas=%s avisos=%d (notificación %s)' % (
+                url, av.get('muertas'), av.get('fallando'), av.get('resueltos'), len(av.get('notificar') or []),
+                'activa' if av.get('notificacionActiva') else 'apagada'))
+        if av.get('notificar') and '--sin-avisos' not in a:
+            ok, det = avisar(av['notificar'], url + '/process/chat/auditoria/automatizaciones')
+            log('aviso de %d automatización(es) a SynerLink prod (conv %d): %s %s' % (
+                len(av['notificar']), CONVERSACION_AVISOS, 'enviado' if ok else 'NO enviado', det))
+            if ok:
+                c2, b2 = llamar(url, key, '/api/chat/auditoria/errores',
+                                {'accion': 'acuse', 'huellas': [n['huella'] for n in av['notificar']]})
+                log('acuse → %s: HTTP %s %s' % (url, c2, (b2 or {}).get('acusados')))
     # Las muestras de los logs sin fecha se guardan solo en una pasada real (no en ensayo).
     ESTADO_PREV.update(ESTADO_NUEVO)
     ESTADO.write_text(json.dumps(ESTADO_PREV, ensure_ascii=False))

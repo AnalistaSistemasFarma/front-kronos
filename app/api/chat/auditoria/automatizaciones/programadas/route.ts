@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   canAuditAgents,
+  canConfigureAgents,
   getAuditScope,
 } from "../../../../../../lib/chat/audit-access";
 import {
@@ -21,6 +22,7 @@ import {
   ProgramadasNoDisponible,
   publicarProgramadas,
 } from "../../../../../../lib/agent-audit/scheduled-db";
+import { avisarSalud } from "../../../../../../lib/agent-audit/scheduled-avisos-db";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +31,9 @@ export const dynamic = "force-dynamic";
  *   GET  → sesión + permiso de auditoría: las del alcance de quien consulta.
  *   POST → SOLO el recolector (llave del recolector del inventario):
  *          scripts/agent-automation/programadas.py publica el inventario.
+ *          Después evalúa cuáles están «muertas» o «fallando» y las registra en
+ *          Errores de IA (tipo 'automatizacion'); `avisos.notificar` trae lo que
+ *          el recolector debe avisar (solo con AGENT_ERRORS_NOTIFY=1).
  */
 const MAX_BODY = 2 * 1024 * 1024;
 
@@ -52,7 +57,10 @@ export async function GET() {
         { error: new ProgramadasNoDisponible().message },
         { status: 503 },
       );
-    return jsonNoStore({ programadas: lista });
+    return jsonNoStore({
+      programadas: lista,
+      puedeAdministrar: await canConfigureAgents(user.email).catch(() => false),
+    });
   } catch (error) {
     return serverError(
       "GET /api/chat/auditoria/automatizaciones/programadas",
@@ -81,9 +89,12 @@ export async function POST(request: NextRequest) {
       return badRequest("El cuerpo no es JSON válido.");
     }
     try {
+      const pub = parseProgramadas(body);
+      const res = await publicarProgramadas(pub);
       return jsonNoStore({
         ok: true,
-        ...(await publicarProgramadas(parseProgramadas(body))),
+        ...res,
+        avisos: await avisarSalud(pub.hostsLeidos),
       });
     } catch (e) {
       if (e instanceof ProgramadasValidacionError) return badRequest(e.message);

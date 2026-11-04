@@ -185,6 +185,7 @@ const NOMBRE_ENTRADA: Record<string, { label: string; color: string }> = {
   reinicio: { label: 'Reinicio', color: 'gray' },
   rotacion: { label: 'Rotación de sesión', color: 'cyan' },
   contexto: { label: 'Limpiar contexto', color: 'cyan' },
+  automatizacion: { label: 'Automatización programada', color: 'orange' },
   gobierno: { label: 'Gobierno', color: 'grape' },
   credencial: { label: 'Credencial', color: 'red' },
   personalidad: { label: 'Personalidad', color: 'violet' },

@@ -433,7 +433,7 @@ NOMBRE_TIPO = {
     'limite_uso': 'Límite de uso', 'conector_caido': 'Conector caído',
     'congelado_confirmacion': 'Congelado en una confirmación', 'sin_entregar': 'Mensajes sin contestar',
     'recibe_no_envia': 'Recibe pero no envía', 'puente_caido': 'Puente sin conexión',
-    'herramienta': 'Herramienta fallida', 'otro': 'Otro',
+    'herramienta': 'Herramienta fallida', 'automatizacion': 'Automatización programada', 'otro': 'Otro',
 }
 
 

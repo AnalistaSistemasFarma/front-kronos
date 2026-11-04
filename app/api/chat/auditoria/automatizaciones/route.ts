@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   canAuditAgents,
+  canConfigureAgents,
   getAuditScope,
 } from "../../../../../lib/chat/audit-access";
 import {
@@ -48,13 +49,16 @@ export async function GET() {
     try {
       // Las automatizaciones programadas van aparte de los casos del chat
       // (null = su tabla aún no existe en este ambiente).
-      const [indicador, programadas] = await Promise.all([
+      const [indicador, programadas, puedeAdministrar] = await Promise.all([
         leerIndicador(user.email, alcance),
         leerProgramadas(user.email, alcance),
+        canConfigureAgents(user.email).catch(() => false),
       ]);
       return jsonNoStore({
         ...indicador,
         programadas,
+        // Pausar / Reanudar / Ejecutar ahora (solo «Auditoría de agentes · Configurar»).
+        puedeAdministrar,
         puedeAnalizar: alcance.all,
       });
     } catch (e) {

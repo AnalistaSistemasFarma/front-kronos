@@ -11,6 +11,14 @@ import {
   type Tendencia,
   type TipoProgramada,
 } from "./scheduled";
+import {
+  evaluarSalud,
+  parseHorario,
+  type CorridaResumen,
+  type Horario,
+  type Salud,
+} from "./scheduled-salud";
+import { esAdministrable } from "./scheduled-admin";
 
 /**
  * AUTOMATIZACIONES PROGRAMADAS de los agentes (Indicador de automatizaciones,
@@ -46,8 +54,10 @@ const bit = (v: unknown) => (v === null || v === undefined ? null : Boolean(v));
 
 export interface ProgramadaDto extends Omit<
   ProgramadaEntrada,
-  "semanas" | "tipo" | "estado"
+  "semanas" | "tipo" | "estado" | "horario" | "ultimas"
 > {
+  /** id_job: para administrar y ver sus corridas. */
+  id: number;
   idAgent: number;
   displayName: string;
   empresa: string | null;
@@ -59,6 +69,41 @@ export interface ProgramadaDto extends Omit<
   semanas: SemanaProgramada[];
   corte: string | null;
   vistoAt: string | null;
+  horario: Horario | null;
+  ultimas: CorridaResumen[];
+  /** Salud calculada a partir de la programación (2026-11-04). */
+  salud: Salud;
+  saludDetalle: string | null;
+  /** Hora programada que no se cumplió (solo si está «muerta» por calendario). */
+  esperada: string | null;
+  /** ¿Está en la lista blanca de lo que se administra desde la pantalla? */
+  administrable: boolean;
+  motivoNoAdministrable: string | null;
+}
+
+function leerJson(v: unknown): unknown {
+  if (v === null || v === undefined) return null;
+  try {
+    return JSON.parse(String(v));
+  } catch {
+    return null;
+  }
+}
+
+function leerUltimas(v: unknown): CorridaResumen[] {
+  const x = leerJson(v);
+  if (!Array.isArray(x)) return [];
+  return x
+    .map((r) => ({
+      ts: String(r?.ts ?? ""),
+      ok: typeof r?.ok === "boolean" ? r.ok : null,
+      produccion:
+        r?.produccion === null || r?.produccion === undefined
+          ? null
+          : Number(r.produccion),
+      nota: typeof r?.nota === "string" ? r.nota : null,
+    }))
+    .filter((r) => !Number.isNaN(Date.parse(r.ts)));
 }
 
 /**
@@ -67,6 +112,18 @@ export interface ProgramadaDto extends Omit<
  * personales: se consulta sin la tabla en lugar de fallar (igual que errors-db).
  */
 let conMemorias: boolean | null = null;
+let conColumnasAdmin: boolean | null = null;
+/** ¿Ya se aplicó el pase de administración (columnas ref/horario_json/ultimas_json)? */
+async function hayColumnasAdmin(pool: sql.ConnectionPool): Promise<boolean> {
+  if (conColumnasAdmin !== true) {
+    const r = await pool
+      .request()
+      .query(`SELECT COL_LENGTH(N'dbo.agent_scheduled_job', N'ultimas_json') AS c`);
+    const c = (r.recordset as Fila[])[0]?.c;
+    conColumnasAdmin = c !== null && c !== undefined;
+  }
+  return conColumnasAdmin;
+}
 async function hayMemorias(): Promise<boolean> {
   if (conMemorias === null) {
     const r = await withMssqlPool((pool) =>
@@ -80,7 +137,7 @@ async function hayMemorias(): Promise<boolean> {
   return conMemorias;
 }
 
-function aDto(f: Fila): ProgramadaDto {
+export function aDto(f: Fila, ahora: Date = new Date()): ProgramadaDto {
   let semanas: SemanaProgramada[] = [];
   try {
     const v = JSON.parse(String(f.semanas_json ?? "[]"));
@@ -104,7 +161,26 @@ function aDto(f: Fila): ProgramadaDto {
   const ok30 = Number(f.ok_30 ?? 0);
   const corridas90 = Number(f.corridas_90 ?? 0);
   const ok90 = Number(f.ok_90 ?? 0);
+  const horario = parseHorario(leerJson(f.horario_json));
+  const ultimas = leerUltimas(f.ultimas_json);
+  const ref = txt(f.ref);
+  const base = {
+    cargada: bit(f.cargada),
+    habilitada: bit(f.habilitada),
+    estado: String(f.estado),
+    estadoDetalle: txt(f.estado_detalle),
+    ultimaCorrida: fechaHora(f.ultima_corrida),
+    ultimaOk: bit(f.ultima_ok),
+    vistoAt: fechaHora(f.visto_at),
+  };
+  const salud = evaluarSalud({ ...base, horario, ultimas }, ahora);
+  const adm = esAdministrable({
+    tipo: String(f.tipo),
+    ref,
+    host: String(f.host),
+  });
   return {
+    id: Number(f.id_job),
     idAgent: Number(f.id_agent),
     code: String(f.code),
     displayName: String(f.display_name),
@@ -134,7 +210,15 @@ function aDto(f: Fila): ProgramadaDto {
     semanas,
     tendencia: corte ? tendencia(semanas, corte) : null,
     corte,
-    vistoAt: fechaHora(f.visto_at),
+    vistoAt: base.vistoAt,
+    ref,
+    horario,
+    ultimas,
+    salud: salud.salud,
+    saludDetalle: salud.detalle,
+    esperada: salud.esperada,
+    administrable: adm.ok,
+    motivoNoAdministrable: adm.motivo,
   };
 }
 
@@ -168,7 +252,7 @@ export async function leerProgramadas(
     );
     return (r.recordset as Fila[])
       .filter((f) => agentInScope(alcance, Number(f.id_agent)))
-      .map(aDto);
+      .map((f) => aDto(f));
   } catch (e) {
     if (esAusente(e)) return null;
     throw e;
@@ -189,10 +273,20 @@ export async function publicarProgramadas(
     habilitada: a.habilitada === null ? null : a.habilitada ? 1 : 0,
     ultimaOk: a.ultimaOk === null ? null : a.ultimaOk ? 1 : 0,
     semanasJson: JSON.stringify(a.semanas),
+    horarioJson: a.horario ? JSON.stringify(a.horario) : null,
+    ultimasJson: JSON.stringify(a.ultimas),
   }));
   try {
-    const r = await withMssqlPool((pool) =>
-      pool
+    const r = await withMssqlPool(async (pool) => {
+      // Columnas del pase de administración (2026-11-04-automatizaciones-admin):
+      // sin ellas se publica igual que antes.
+      const adm = await hayColumnasAdmin(pool);
+      const setAdm = adm
+        ? ", ref = j.ref, horario_json = j.horario_json, ultimas_json = j.ultimas_json"
+        : "";
+      const colAdm = adm ? ", ref, horario_json, ultimas_json" : "";
+      const valAdm = adm ? ", j.ref, j.horario_json, j.ultimas_json" : "";
+      return pool
         .request()
         .input("corte", sql.Date, p.corte)
         .input("hosts", sql.NVarChar(sql.MAX), JSON.stringify(p.hostsLeidos))
@@ -204,12 +298,14 @@ export async function publicarProgramadas(
             habilitada BIT, estado NVARCHAR(20), estado_detalle NVARCHAR(400), ultima_corrida DATETIME2(0),
             ultima_ok BIT, corridas_30 INT, ok_30 INT, corridas_90 INT, ok_90 INT,
             produccion_etiqueta NVARCHAR(120), produccion_30 INT, produccion_90 INT,
-            primera_corrida DATE, semanas_json NVARCHAR(MAX));
+            primera_corrida DATE, semanas_json NVARCHAR(MAX), ref NVARCHAR(200),
+            horario_json NVARCHAR(4000), ultimas_json NVARCHAR(MAX));
           INSERT INTO @j
           SELECT x.clave, a.id_agent, x.host, x.tipo, x.nombre, x.descripcion, x.programacion, x.cargada,
                  x.habilitada, x.estado, x.estadoDetalle, CONVERT(DATETIME2(0), x.ultimaCorrida, 127),
                  x.ultimaOk, x.corridas30, x.ok30, x.corridas90, x.ok90, x.produccionEtiqueta,
-                 x.produccion30, x.produccion90, x.primeraCorrida, x.semanasJson
+                 x.produccion30, x.produccion90, x.primeraCorrida, x.semanasJson, x.ref,
+                 x.horarioJson, x.ultimasJson
           FROM OPENJSON(@filas) WITH (
                  clave NVARCHAR(160) '$.clave', code NVARCHAR(60) '$.code', host NVARCHAR(40) '$.host',
                  tipo NVARCHAR(20) '$.tipo', nombre NVARCHAR(200) '$.nombre',
@@ -220,7 +316,8 @@ export async function publicarProgramadas(
                  corridas90 INT '$.corridas90', ok90 INT '$.ok90',
                  produccionEtiqueta NVARCHAR(120) '$.produccionEtiqueta', produccion30 INT '$.produccion30',
                  produccion90 INT '$.produccion90', primeraCorrida DATE '$.primeraCorrida',
-                 semanasJson NVARCHAR(MAX) '$.semanasJson') x
+                 semanasJson NVARCHAR(MAX) '$.semanasJson', ref NVARCHAR(200) '$.ref',
+                 horarioJson NVARCHAR(4000) '$.horarioJson', ultimasJson NVARCHAR(MAX) '$.ultimasJson') x
           JOIN dbo.agent a ON a.code = x.code;
           DECLARE @sinAgente INT = (SELECT COUNT(*) FROM OPENJSON(@filas)) - @@ROWCOUNT;
 
@@ -231,16 +328,16 @@ export async function publicarProgramadas(
                  ok_30 = j.ok_30, corridas_90 = j.corridas_90, ok_90 = j.ok_90,
                  produccion_etiqueta = j.produccion_etiqueta, produccion_30 = j.produccion_30,
                  produccion_90 = j.produccion_90, primera_corrida = j.primera_corrida,
-                 semanas_json = j.semanas_json, corte = @corte, visto_at = SYSUTCDATETIME()
+                 semanas_json = j.semanas_json, corte = @corte, visto_at = SYSUTCDATETIME()${setAdm}
           FROM dbo.agent_scheduled_job t JOIN @j j ON j.clave = t.clave;
           INSERT INTO dbo.agent_scheduled_job (clave, id_agent, host, tipo, nombre, descripcion, programacion,
                  cargada, habilitada, estado, estado_detalle, ultima_corrida, ultima_ok, corridas_30, ok_30,
                  corridas_90, ok_90, produccion_etiqueta, produccion_30, produccion_90, primera_corrida,
-                 semanas_json, corte, visto_at, creado_at)
+                 semanas_json, corte, visto_at, creado_at${colAdm})
           SELECT j.clave, j.id_agent, j.host, j.tipo, j.nombre, j.descripcion, j.programacion, j.cargada,
                  j.habilitada, j.estado, j.estado_detalle, j.ultima_corrida, j.ultima_ok, j.corridas_30, j.ok_30,
                  j.corridas_90, j.ok_90, j.produccion_etiqueta, j.produccion_30, j.produccion_90,
-                 j.primera_corrida, j.semanas_json, @corte, SYSUTCDATETIME(), SYSUTCDATETIME()
+                 j.primera_corrida, j.semanas_json, @corte, SYSUTCDATETIME(), SYSUTCDATETIME()${valAdm}
           FROM @j j WHERE NOT EXISTS (SELECT 1 FROM dbo.agent_scheduled_job t WHERE t.clave = j.clave);
           DECLARE @n INT = (SELECT COUNT(*) FROM @j);
 
@@ -250,8 +347,8 @@ export async function publicarProgramadas(
           DECLARE @borradas INT = @@ROWCOUNT;
           COMMIT TRAN;
           SELECT @n AS n, @borradas AS borradas, @sinAgente AS sin_agente;
-        `),
-    );
+        `);
+    });
     const f = (r.recordset as Fila[])[0] ?? {};
     return {
       automatizaciones: Number(f.n ?? 0),
@@ -262,4 +359,18 @@ export async function publicarProgramadas(
     if (esAusente(e)) throw new ProgramadasNoDisponible();
     throw e;
   }
+}
+
+/** Todas las automatizaciones de esos equipos, sin reja (para el aviso del recolector). */
+export async function leerParaAvisos(hosts: string[]): Promise<ProgramadaDto[]> {
+  if (hosts.length === 0) return [];
+  const r = await withMssqlPool((pool) =>
+    pool.request().input("hosts", sql.NVarChar(sql.MAX), JSON.stringify(hosts))
+      .query(`
+        SELECT j.*, a.code, a.display_name, CAST(NULL AS NVARCHAR(100)) AS empresa
+        FROM dbo.agent_scheduled_job j
+        JOIN dbo.agent a ON a.id_agent = j.id_agent
+        WHERE a.is_active = 1 AND j.host IN (SELECT LOWER(value) FROM OPENJSON(@hosts));`),
+  );
+  return (r.recordset as Fila[]).map((f) => aDto(f));
 }

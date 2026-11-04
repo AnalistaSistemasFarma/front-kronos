@@ -42,6 +42,7 @@ import {
 } from "../../../../../../lib/agent-audit/scheduled";
 import { GraficosMejora } from "../../../../../../components/chat/auditoria/GraficosMejora";
 import { AutomatizacionesProgramadas } from "../../../../../../components/chat/auditoria/AutomatizacionesProgramadas";
+import { tieneProblema } from "../../../../../../lib/agent-audit/scheduled-salud";
 
 /**
  * AUDITORÍA DE AGENTES → INDICADOR DE AUTOMATIZACIONES (Nicolás, 2026-10-30).
@@ -55,6 +56,8 @@ import { AutomatizacionesProgramadas } from "../../../../../../components/chat/a
 
 type Respuesta = IndicadorDto & {
   puedeAnalizar: boolean;
+  /** Pausar / Reanudar / Ejecutar ahora las programadas («Auditoría de agentes · Configurar»). */
+  puedeAdministrar?: boolean;
   /** null = la tabla de automatizaciones programadas aún no existe. */
   programadas?: ProgramadaDto[] | null;
 };
@@ -413,10 +416,10 @@ export default function IndicadorAutomatizacionesPage() {
                 value="programadas"
                 leftSection={<IconClockPlay size={14} />}
                 rightSection={
-                  datos.programadas?.some((p) => p.estado === "fallando") ? (
+                  datos.programadas?.some((p) => tieneProblema(p.salud)) ? (
                     <Badge size="xs" color="red" variant="filled" circle>
                       {
-                        datos.programadas.filter((p) => p.estado === "fallando")
+                        datos.programadas.filter((p) => tieneProblema(p.salud))
                           .length
                       }
                     </Badge>
@@ -430,6 +433,8 @@ export default function IndicadorAutomatizacionesPage() {
               <AutomatizacionesProgramadas
                 programadas={datos.programadas}
                 filtro={filtroProgramadas}
+                puedeAdministrar={datos.puedeAdministrar}
+                onCambio={() => void cargar()}
               />
             </Tabs.Panel>
             <Tabs.Panel value="chat">

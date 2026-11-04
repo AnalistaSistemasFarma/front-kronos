@@ -47,6 +47,7 @@ interface Ficha {
   periodoDesde: string | null;
   /** Automatizaciones que el agente corre solo (null = aún no habilitadas). */
   programadas?: ProgramadaDto[] | null;
+  puedeAdministrar?: boolean;
 }
 
 const h = (v: number | null | undefined, dec = 0) =>
@@ -209,6 +210,9 @@ export default function FichaIndicadorPage() {
   const code = decodeURIComponent(String(params?.code ?? ""));
   const [datos, setDatos] = useState<Ficha | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Sube al cerrar el detalle de una automatización tras una orden: relee sin
+  // desmontar la vista (los datos se reemplazan cuando llegan).
+  const [version, setVersion] = useState(0);
 
   useEffect(() => {
     if (!code) return;
@@ -227,7 +231,7 @@ export default function FichaIndicadorPage() {
     return () => {
       vivo = false;
     };
-  }, [code]);
+  }, [code, version]);
 
   const maxMin = useMemo(
     () => Math.max(1, ...(datos?.casos ?? []).map((c) => c.minHumano)),
@@ -404,6 +408,8 @@ export default function FichaIndicadorPage() {
             <AutomatizacionesProgramadas
               programadas={datos.programadas}
               mostrarAgente={false}
+              puedeAdministrar={datos.puedeAdministrar}
+              onCambio={() => setVersion((v) => v + 1)}
             />
           </>
         )}

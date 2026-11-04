@@ -5,12 +5,14 @@ import Link from "next/link";
 import {
   Alert,
   Badge,
+  Button,
   Card,
   Group,
   Progress,
   ScrollArea,
   Select,
   SimpleGrid,
+  Stack,
   Table,
   Text,
   Tooltip,
@@ -22,9 +24,17 @@ import {
   IconArrowUpRight,
   IconCircleCheck,
   IconCircleX,
+  IconListDetails,
+  IconSettings,
 } from "@tabler/icons-react";
 import type { ProgramadaDto } from "../../../lib/agent-audit/scheduled-db";
 import { resumirProgramadas } from "../../../lib/agent-audit/scheduled";
+import {
+  NOMBRE_SALUD,
+  ORDEN_SALUD,
+  tieneProblema,
+} from "../../../lib/agent-audit/scheduled-salud";
+import { DetalleProgramada } from "./DetalleProgramada";
 
 /**
  * AUTOMATIZACIONES PROGRAMADAS (Indicador de automatizaciones, Nicolás
@@ -53,12 +63,15 @@ const fechaHora = (iso: string | null) =>
       })
     : "—";
 
-const ESTADO: Record<string, { color: string; label: string }> = {
-  activa: { color: "green", label: "Activa" },
-  pausada: { color: "gray", label: "Pausada" },
-  fallando: { color: "red", label: "Fallando" },
-  sin_datos: { color: "yellow", label: "Sin datos" },
-};
+/** Filtro de estado: «Con problemas» = muertas + fallando (lo que hay que mirar). */
+const FILTROS: { value: string; label: string }[] = [
+  { value: "problemas", label: "Con problemas" },
+  { value: "muerta", label: "Muertas / no corrieron" },
+  { value: "fallando", label: "Fallando" },
+  { value: "ok", label: "Activas" },
+  { value: "pausada", label: "Pausadas" },
+  { value: "sin_datos", label: "Sin datos" },
+];
 const TIPO: Record<string, string> = {
   launchd: "launchd",
   cron: "cron",
@@ -164,22 +177,48 @@ export function AutomatizacionesProgramadas({
   programadas,
   mostrarAgente = true,
   filtro,
+  puedeAdministrar = false,
+  onCambio,
 }: {
   /** null = la tabla aún no está habilitada en este ambiente. */
   programadas: ProgramadaDto[] | null | undefined;
   mostrarAgente?: boolean;
   /** Filtro externo (búsqueda y empresa de la página del indicador). */
   filtro?: (p: ProgramadaDto) => boolean;
+  /** «Auditoría de agentes · Configurar»: Pausar / Reanudar / Ejecutar ahora. */
+  puedeAdministrar?: boolean;
+  /** Se pidió una orden: refrescar la lista (al cerrar el detalle). */
+  onCambio?: () => void;
 }) {
   const [estado, setEstado] = useState<string | null>(null);
+  const [abierta, setAbierta] = useState<ProgramadaDto | null>(null);
+  const filtradas = useMemo(
+    () => (programadas ?? []).filter((p) => !filtro || filtro(p)),
+    [programadas, filtro],
+  );
+  // Lo que necesita atención (muertas, fallando), ARRIBA.
   const lista = useMemo(
     () =>
-      (programadas ?? [])
-        .filter((p) => !filtro || filtro(p))
-        .filter((p) => !estado || p.estado === estado),
-    [programadas, filtro, estado],
+      filtradas
+        .filter(
+          (p) =>
+            !estado ||
+            (estado === "problemas" ? tieneProblema(p.salud) : p.salud === estado),
+        )
+        .map((p, i) => ({ p, i }))
+        .sort(
+          (a, b) =>
+            (ORDEN_SALUD[a.p.salud] ?? 9) - (ORDEN_SALUD[b.p.salud] ?? 9) ||
+            a.i - b.i,
+        )
+        .map((x) => x.p),
+    [filtradas, estado],
   );
-  const res = useMemo(() => resumirProgramadas(lista), [lista]);
+  const res = useMemo(() => resumirProgramadas(filtradas), [filtradas]);
+  const conProblema = useMemo(
+    () => filtradas.filter((p) => tieneProblema(p.salud)),
+    [filtradas],
+  );
 
   if (programadas === null || programadas === undefined)
     return (
@@ -192,6 +231,49 @@ export function AutomatizacionesProgramadas({
   const ahora = Date.now();
   return (
     <>
+      {abierta && (
+        <DetalleProgramada
+          id={abierta.id}
+          titulo={`${abierta.nombre} · ${abierta.displayName}`}
+          onClose={() => setAbierta(null)}
+          onCambio={onCambio}
+        />
+      )}
+      {conProblema.length > 0 && (
+        <Alert
+          color="red"
+          variant="light"
+          radius="md"
+          mb="md"
+          icon={<IconAlertCircle size={18} />}
+          title={`${conProblema.length} automatización(es) muerta(s) o fallando`}
+          data-testid="programadas-alerta"
+        >
+          <Stack gap={2}>
+            {conProblema.slice(0, 8).map((p) => (
+              <Text size="sm" key={p.clave}>
+                <b>{p.displayName}</b> — {p.nombre}:{" "}
+                {NOMBRE_SALUD[p.salud].label.toLowerCase()}
+                {p.saludDetalle ? `. ${p.saludDetalle}` : ""}
+              </Text>
+            ))}
+            {conProblema.length > 8 && (
+              <Text size="sm">… y {conProblema.length - 8} más.</Text>
+            )}
+            {estado !== "problemas" && (
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                color="red"
+                w="fit-content"
+                onClick={() => setEstado("problemas")}
+              >
+                Ver solo las que tienen problemas
+              </Button>
+            )}
+          </Stack>
+        </Alert>
+      )}
       <Card
         withBorder
         radius="md"
@@ -206,13 +288,18 @@ export function AutomatizacionesProgramadas({
           Tareas que los agentes corren solos, a una hora fija, sin que nadie
           las pida en el chat. Se cuentan aparte: no suman horas ahorradas.
         </Text>
-        <SimpleGrid cols={{ base: 2, sm: 3, lg: 6 }} spacing="sm">
+        <SimpleGrid cols={{ base: 2, sm: 4, lg: 7 }} spacing="sm">
           {(
             [
               ["Automatizaciones", h(res.total), undefined],
               ["Activas", h(res.activas), "green"],
               ["Pausadas", h(res.pausadas), undefined],
-              ["Fallando", h(res.fallando), res.fallando ? "red" : undefined],
+              ["Muertas", h(res.muertas), res.muertas ? "red" : undefined],
+              [
+                "Fallando",
+                h(res.fallando - res.muertas),
+                res.fallando - res.muertas ? "red" : undefined,
+              ],
               ["Corridas en 30 días", h(res.corridas30), undefined],
               [
                 "Terminadas bien (30 días)",
@@ -244,11 +331,8 @@ export function AutomatizacionesProgramadas({
             clearable
             value={estado}
             onChange={setEstado}
-            data={Object.entries(ESTADO).map(([value, e]) => ({
-              value,
-              label: e.label,
-            }))}
-            w={180}
+            data={FILTROS}
+            w={200}
           />
         </Group>
         {lista.length === 0 ? (
@@ -278,15 +362,27 @@ export function AutomatizacionesProgramadas({
                   <Table.Th>% bien (30 d)</Table.Th>
                   <Table.Th>Producción</Table.Th>
                   <Table.Th>Tendencia</Table.Th>
+                  <Table.Th />
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {lista.map((p) => {
-                  const e = ESTADO[p.estado] ?? ESTADO.sin_datos;
+                  const e = NOMBRE_SALUD[p.salud] ?? NOMBRE_SALUD.sin_datos;
                   const vieja =
                     p.vistoAt && ahora - Date.parse(p.vistoAt) > VIEJA_MS;
                   return (
-                    <Table.Tr key={p.clave}>
+                    <Table.Tr
+                      key={p.clave}
+                      data-salud={p.salud}
+                      style={
+                        tieneProblema(p.salud)
+                          ? {
+                              background:
+                                "light-dark(var(--mantine-color-red-0), rgba(250, 82, 82, 0.08))",
+                            }
+                          : undefined
+                      }
+                    >
                       {mostrarAgente && (
                         <Table.Td>
                           <Link
@@ -326,16 +422,25 @@ export function AutomatizacionesProgramadas({
                       </Table.Td>
                       <Table.Td>
                         <Tooltip
-                          label={p.estadoDetalle ?? e.label}
+                          label={p.saludDetalle ?? e.label}
                           withArrow
                           multiline
                           w={260}
-                          disabled={!p.estadoDetalle}
+                          disabled={!p.saludDetalle}
                         >
-                          <Badge size="sm" variant="light" color={e.color}>
+                          <Badge
+                            size="sm"
+                            variant={tieneProblema(p.salud) ? "filled" : "light"}
+                            color={e.color}
+                          >
                             {e.label}
                           </Badge>
                         </Tooltip>
+                        {tieneProblema(p.salud) && p.saludDetalle && (
+                          <Text size="xs" c="red" mt={2} maw={220}>
+                            {p.saludDetalle}
+                          </Text>
+                        )}
                         {vieja && (
                           <Text size="xs" c="orange" mt={2}>
                             Sin datos nuevos desde {fechaHora(p.vistoAt)}
@@ -405,6 +510,26 @@ export function AutomatizacionesProgramadas({
                           <Semanas p={p} />
                         </Group>
                       </Table.Td>
+                      <Table.Td>
+                        <Button
+                          size="compact-xs"
+                          variant="light"
+                          color={puedeAdministrar && p.administrable ? "indigo" : "gray"}
+                          leftSection={
+                            puedeAdministrar && p.administrable ? (
+                              <IconSettings size={13} />
+                            ) : (
+                              <IconListDetails size={13} />
+                            )
+                          }
+                          onClick={() => setAbierta(p)}
+                          data-testid="programada-abrir"
+                        >
+                          {puedeAdministrar && p.administrable
+                            ? "Administrar"
+                            : "Corridas"}
+                        </Button>
+                      </Table.Td>
                     </Table.Tr>
                   );
                 })}
@@ -414,8 +539,11 @@ export function AutomatizacionesProgramadas({
         )}
         <Text size="xs" c="dimmed" mt={6}>
           Barras: corridas por semana (verde = terminó bien, rojo = falló).
-          Tendencia: últimas 4 semanas frente a las 4 anteriores. El recolector
-          lee los equipos de los agentes en solo lectura.
+          Tendencia: últimas 4 semanas frente a las 4 anteriores. «Muerta / no
+          corrió»: pasó su hora (1 h de margen) o 2 veces su intervalo sin
+          correr; «Fallando»: sus últimas corridas fallaron. Se avisa en
+          Errores de IA. El recolector lee los equipos en solo lectura; pausar,
+          reanudar y ejecutar los aplica el ejecutor de cada equipo.
         </Text>
         {mostrarAgente && (
           <Text size="xs" c="dimmed" mt={2}>

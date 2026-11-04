@@ -1,4 +1,11 @@
 import { ocultarSecretos } from "./inventory";
+import {
+  parseHorario,
+  tieneProblema,
+  type CorridaResumen,
+  type Horario,
+  type Salud,
+} from "./scheduled-salud";
 
 /**
  * AUDITORÍA DE AGENTES → INDICADOR DE AUTOMATIZACIONES → AUTOMATIZACIONES
@@ -61,6 +68,15 @@ export interface ProgramadaEntrada {
   produccion90: number | null;
   primeraCorrida: string | null;
   semanas: SemanaProgramada[];
+  /**
+   * Identificador administrable (2026-11-04, Administrar): el Label de launchd
+   * o «openclaw:<equipo>:<id del job>»; null en cron. Es la llave del catálogo.
+   */
+  ref: string | null;
+  /** Programación estructurada para saber si dejó de correr (null = no se sabe). */
+  horario: Horario | null;
+  /** Últimas corridas (hasta 10), para «Ver últimas corridas». */
+  ultimas: CorridaResumen[];
 }
 
 export interface PublicacionProgramadas {
@@ -179,9 +195,33 @@ export function parseProgramadas(body: unknown): PublicacionProgramadas {
             })
             .filter((w) => esFecha(w.inicio))
         : [],
+      ref:
+        typeof a.ref === "string" && /^[A-Za-z0-9:._-]{1,200}$/.test(a.ref)
+          ? a.ref
+          : null,
+      horario: parseHorario(a.horario),
+      ultimas: parseUltimas(a.ultimas),
     });
   }
   return { corte: b.corte, hostsLeidos, automatizaciones };
+}
+
+/** Últimas corridas (máximo 10, más nuevas al final), con la nota de error sin secretos. */
+export function parseUltimas(v: unknown): CorridaResumen[] {
+  if (!Array.isArray(v)) return [];
+  const out: CorridaResumen[] = [];
+  for (const x of v.slice(-50)) {
+    const r = (x ?? {}) as Record<string, unknown>;
+    const ts = fechaHora(r.ts);
+    if (!ts) continue;
+    out.push({
+      ts,
+      ok: bool(r.ok),
+      produccion: entero(r.produccion),
+      nota: r.ok === false ? texto(r.nota, 240) : null,
+    });
+  }
+  return out.sort((a, b) => a.ts.localeCompare(b.ts)).slice(-10);
 }
 
 /** % terminado bien (una cifra decimal) o null si no corrió. */
@@ -227,22 +267,31 @@ export interface ResumenProgramadas {
   total: number;
   activas: number;
   pausadas: number;
+  /** Muertas + fallando (lo que necesita atención). */
   fallando: number;
+  muertas: number;
   corridas30: number;
   ok30: number;
   pctOk30: number | null;
 }
 
+/**
+ * Resumen. Con `salud` (servidor, 2026-11-04) manda la salud calculada a partir
+ * de la programación; sin ella, el estado del recolector.
+ */
 export function resumirProgramadas(
-  xs: { estado: string; corridas30: number; ok30: number }[],
+  xs: { estado: string; salud?: Salud; corridas30: number; ok30: number }[],
 ): ResumenProgramadas {
   const corridas30 = xs.reduce((s, x) => s + x.corridas30, 0);
   const ok30 = xs.reduce((s, x) => s + x.ok30, 0);
+  const s = (x: { estado: string; salud?: Salud }) =>
+    x.salud ?? (x.estado === "activa" ? "ok" : x.estado);
   return {
     total: xs.length,
-    activas: xs.filter((x) => x.estado === "activa").length,
-    pausadas: xs.filter((x) => x.estado === "pausada").length,
-    fallando: xs.filter((x) => x.estado === "fallando").length,
+    activas: xs.filter((x) => s(x) === "ok").length,
+    pausadas: xs.filter((x) => s(x) === "pausada").length,
+    fallando: xs.filter((x) => tieneProblema(s(x) as Salud)).length,
+    muertas: xs.filter((x) => s(x) === "muerta").length,
     corridas30,
     ok30,
     pctOk30: pctOk(ok30, corridas30),
