@@ -103,7 +103,7 @@ export default function VitrinaModoPresentacion({
               {p.modelo3d ? (
                 <Stack gap='md' style={{ alignSelf: 'start' }}>
                   <VitrinaModelo3d key={p.modelo3d.id} id={p.modelo3d.id} alt={`Modelo 3D de ${tituloPresentacion(p)}`} poster={p.imagenes.PLEGADIZA ?? p.imagenes.VIAL} altura='min(62dvh, 640px)' />
-                  <SimpleGrid cols={2} spacing='md' maw={360}>
+                  <SimpleGrid cols={2} spacing='md' maw={240}>
                     <VitrinaImagen id={p.imagenes.VIAL} etiqueta='Vial' compacta />
                     <VitrinaImagen id={p.imagenes.ETIQUETA} etiqueta='Etiqueta' compacta />
                   </SimpleGrid>
