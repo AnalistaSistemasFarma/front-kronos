@@ -8,9 +8,11 @@
 SET XACT_ABORT ON;
 
 -- Hay mesas: se pierden sus reglas, participantes y registro. Exige confirmarlo en la sesión.
-IF OBJECT_ID(N'[dbo].[chat_project_mesa]', N'U') IS NOT NULL
-   AND EXISTS (SELECT 1 FROM [dbo].[chat_project_mesa])
-   AND ISNULL(CAST(SESSION_CONTEXT(N'proyectos_mesas_reversa_acepta_perdida') AS INT), 0) <> 1
+-- (Por sys.partitions y no con SELECT a la tabla: en la segunda corrida la tabla ya no existe y
+--  SQL Server no garantiza el corto circuito del AND.)
+IF ISNULL(CAST(SESSION_CONTEXT(N'proyectos_mesas_reversa_acepta_perdida') AS INT), 0) <> 1
+   AND EXISTS (SELECT 1 FROM sys.partitions p
+               WHERE p.object_id = OBJECT_ID(N'[dbo].[chat_project_mesa]', N'U') AND p.index_id IN (0, 1) AND p.rows > 0)
   THROW 51582, N'Hay mesas de discusión que se perderían. Respáldelas y declare proyectos_mesas_reversa_acepta_perdida = 1.', 1;
 
 BEGIN TRAN;
