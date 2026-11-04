@@ -31,6 +31,12 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
+# Prioridad baja para este proceso y sus hijos (npm, prisma, next build): la .230
+# tiene 4 CPU y, a prioridad normal, la version activa llego a tardar 1-12 s por
+# peticion durante el build (ensayo 2026-11-04). En Windows los hijos heredan
+# BelowNormal.
+try { (Get-Process -Id $PID).PriorityClass = 'BelowNormal' } catch { Write-Host "::warning::No se pudo bajar la prioridad: $($_.Exception.Message)" }
+
 $cfg = Get-BgConfig $StateDir
 $active = Get-BgActive $StateDir
 if ($active.color -eq $Color) { throw "El color $Color esta ACTIVO; no se construye encima de la version que atiende." }
