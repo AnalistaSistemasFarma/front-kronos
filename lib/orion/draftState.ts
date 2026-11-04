@@ -300,13 +300,22 @@ export function resolveDraftPermissions(params: {
   const canViewBoard = params.isElaborator || isValidator;
   if (params.workflowLocked) return { ...none, canViewBoard };
 
-  // Un validador nunca sube ni corrige, aunque además tenga permiso de preparar.
-  const prepares = params.isElaborator && !isValidator;
+  // Dueña del documento (isElaborator): conserva acciones de preparadora aunque también figure
+  // como validadora. Un validador puro llega con isElaborator=false.
+  const prepares = params.isElaborator;
   const elaborating = isDraftElaborationStatus(state.status);
   const reviewing = state.status === 'EN_VALIDACION_INTERNA';
   const pendingValidator = pendingDraftValidators(state).some((a) => isSameValidator(a, me, params.actorUserId));
   const correcting = draftReviewPhase(state) === 'correccion';
   const correctionReady = prepares && draftCorrectionUploaded(state);
+  // Ya pidió corrección (con su marca) sobre la subversión vigente: puede seguir marcando hasta
+  // que la preparadora suba la versión corregida (ahí cambia la subversión).
+  const myOpenCorrection = (state.internalReview?.approvals ?? []).some(
+    (a) =>
+      isSameValidator(a, me, params.actorUserId) &&
+      a.decision === 'DEVUELTO' &&
+      a.correctionVersion === state.versionLabel
+  );
   const clientApproved = state.status === 'APROBADO_CLIENTE';
 
   return {
@@ -314,11 +323,12 @@ export function resolveDraftPermissions(params: {
     // y alguno pidió cambios); tras el cliente, la versión limpia.
     canUpload: prepares && (elaborating || correcting || clientApproved),
     canSubmitInternal: elaborating && prepares,
-    canDecideInternal: pendingValidator,
+    canDecideInternal: pendingValidator && !prepares,
     canViewBoard,
     // Comentan los validadores; la preparadora responde sus marcas pero no marca su propio documento.
-    // Solo mientras se revisa: en la fase de corrección el turno es de la preparadora.
-    canMark: reviewing && draftReviewPhase(state) === 'revision' && isValidator,
+    // Mientras se revisa; y quien ya pidió corrección sigue marcando sobre esa misma subversión.
+    canMark:
+      reviewing && isValidator && !prepares && (draftReviewPhase(state) === 'revision' || myOpenCorrection),
     canSendClient: state.status === 'VALIDADO_INTERNO' && prepares,
     canManageClientInvites: state.status === 'EN_REVISION_CLIENTE' && prepares,
     // Sin revisión del cliente se puede pasar directo a PDF al quedar validado.
@@ -630,6 +640,36 @@ export function applyDraftInternalDecision(
       : review,
     updatedAt: now,
   };
+}
+
+/**
+ * Guardar una marca cuenta como "Pedir corrección": el validador queda con su corrección pedida
+ * sobre la subversión vigente (sin tocar el botón) y la preparadora la ve en su turno de corregir.
+ * Si ya la había pedido, no cambia nada. `changed` dice si fue su primera marca de esta ronda.
+ */
+export function applyDraftMarkAsCorrection(
+  state: OrionDraftState,
+  actor: DraftActor,
+  why: string,
+  now = new Date().toISOString()
+): { state: OrionDraftState; changed: boolean } {
+  const review = state.internalReview;
+  if (state.status !== 'EN_VALIDACION_INTERNA' || !review) return { state, changed: false };
+  let changed = false;
+  const approvals = review.approvals.map((a) => {
+    if (!isSameValidator(a, actor.email, actor.userId) || a.decision === 'DEVUELTO') return a;
+    changed = true;
+    return {
+      ...a,
+      decision: 'DEVUELTO' as const,
+      decidedAt: now,
+      comment: String(why || '').trim() || 'Dejó marcas en el documento',
+      correctionVersion: state.versionLabel,
+      correctedIn: null,
+    };
+  });
+  if (!changed) return { state, changed: false };
+  return { state: { ...state, internalReview: { ...review, approvals }, updatedAt: now }, changed: true };
 }
 
 /**

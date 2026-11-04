@@ -526,8 +526,12 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
     !isElaborator
       ? permissions.canDecideInternal
         ? {
-            text: `Le toca revisar la ${draft.versionLabel}: seleccione texto en la hoja para subrayarlo y dejar su comentario. Cuando termine, apruebe o pida corrección en "Validadores".`,
+            text: `Le toca revisar la ${draft.versionLabel}: seleccione texto en la hoja para subrayarlo y dejar su comentario. Cada marca que guarde ya cuenta como pedir corrección y la preparadora la ve al instante. Si todo está bien, apruebe en "Validadores".`,
           }
+        : permissions.canMark
+          ? {
+              text: `Pidió corrección de la ${draft.versionLabel} con sus marcas. Puede seguir marcando hasta que la preparadora suba la versión corregida.`,
+            }
         : phase === 'correccion'
           ? {
               text: 'La preparadora está corrigiendo. Le llegará un aviso cuando envíe la versión nueva para que la valide.',
@@ -942,7 +946,7 @@ export default function DraftBoard({ requestId, fileId }: { requestId: number; f
                 onCreate={async (c) => {
                   const saved = await postMarks(
                     { action: 'create', type: c.type, quote: c.quote, suggest: c.suggest, why: c.why, blockIndex: c.blockIndex },
-                    'Marca creada. Los demás la ven al instante.'
+                    'Marca guardada: la preparadora ya la ve y quedó como corrección pedida.'
                   );
                   if (saved) {
                     setComposer(null);
