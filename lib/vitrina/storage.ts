@@ -7,7 +7,8 @@ import { carpetaImagenes } from './medios';
 /**
  * Puente de la Vitrina con el almacenamiento de adjuntos de SynerLink (OneDrive por
  * Microsoft Graph, token app-only). Reutiliza las utilidades compartidas
- * (lib/onedrive) y la raíz de adjuntos del entorno: nada de almacenamiento nuevo.
+ * (lib/onedrive) y la raíz de adjuntos del entorno: nada de almacenamiento nuevo. También guarda
+ * los modelos 3D (GLB, 2026-11-04) en la misma carpeta de la presentación.
  */
 export interface VitrinaImageStorage {
   subir: (idCompany: number, idPresentacion: number, nombre: string, contenido: Uint8Array, mime: string) => Promise<{ id: string }>;
