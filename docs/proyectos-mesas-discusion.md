@@ -57,6 +57,24 @@ principal es el **moderador**, más una fila en `chat_project_mesa` con el tema 
 - Si de la mesa sale algo concreto, queda como **propuesta** (`propuestas-cronograma.json`), que una
   persona confirma.
 
+## Lenguaje para el operador (Nicolás Rivera, 2026-11-04)
+
+> «Quiero que sea entendible para el operador, porque hablan muy técnico entre los dos y no se entiende
+> lo que hacen los agentes.»
+
+- **Dos textos por turno.** En el hilo se publica solo un aviso corto: «🗣️ Ronda 2 · turno 2 de 3 ·
+  le toca a Mechita — su papel: criticar las propuestas». Las instrucciones para el modelo se las agrega
+  la bandeja al entregar el turno y **no quedan en el hilo**.
+- **Cada intervención empieza con «En pocas palabras:»**: una frase que entienda cualquier persona de
+  la empresa (qué aporta y por qué importa). Después, máximo 8 líneas de detalle.
+- **Prohibido el lenguaje técnico**: nada de tablas, campos, códigos, consultas, rutas, identificadores
+  internos ni siglas sin explicar. Se habla de procesos, personas, tiempos y dinero; si una cifra
+  aparece, se dice de dónde sale en palabras simples.
+- **La síntesis del moderador** tiene un formato fijo: en qué estamos de acuerdo, qué sigue abierto y
+  qué proponemos / qué necesitamos de ustedes.
+- **El panel en vivo** muestra, por cada turno, solo la línea «En pocas palabras» (o la primera frase si
+  el agente no la escribió), para seguir la mesa de un vistazo sin leer todo el hilo.
+
 ## Lo que ve el operador
 
 - El hilo de la mesa: cada aviso de turno y cada respuesta, en orden.

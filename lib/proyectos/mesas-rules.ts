@@ -311,32 +311,99 @@ export function esSinAporte(body: string): boolean {
 
 /* ───────────────────────────── Textos ───────────────────────────── */
 
-/** El aviso de turno que se publica en el hilo (y que recibe el agente). */
+/*
+ * LENGUAJE PARA EL OPERADOR (Nicolás Rivera, 2026-11-04): «quiero que sea
+ * entendible para el operador, porque hablan muy técnico entre los dos y no se
+ * entiende lo que hacen los agentes». Por eso hay DOS textos por turno:
+ *
+ *   - textoAvisoTurno: lo que se PUBLICA en el hilo. Corto y en palabras de
+ *     todos los días: de quién es el turno y qué papel cumple. Nada de reglas
+ *     internas ni de instrucciones para el modelo.
+ *   - instruccionesTurno: lo que RECIBE el agente (la bandeja lo agrega al aviso
+ *     al entregarlo; no queda guardado en el hilo). Le exige escribir para una
+ *     persona que no es técnica y empezar con una línea «En pocas palabras».
+ *
+ * resumenParaOperador saca esa línea de cada respuesta para el panel en vivo.
+ */
+
+/** Etiqueta con la que el agente abre cada intervención. */
+export const ETIQUETA_RESUMEN = 'En pocas palabras:';
+/** Tope de la línea de resumen que se muestra en el panel. */
+export const MAX_RESUMEN_CHARS = 280;
+
+/** El aviso de turno que se publica en el hilo: corto y entendible para cualquiera. */
 export function textoAvisoTurno(opciones: {
-  tema: string;
   turno: TurnoAEntregar;
   handle: string;
   nombre: string;
   totalParticipantes: number;
-  participantes: { nombre: string; rol: string }[];
-  sintesisCada: number;
 }): string {
-  const { tema, turno, handle, nombre, participantes } = opciones;
-  const cabecera = turno.esSintesis
-    ? `🗣️ **Mesa de discusión** · Ronda ${turno.ronda} · **síntesis** de @${handle} (${nombre}, moderador)`
-    : `🗣️ **Mesa de discusión** · Ronda ${turno.ronda} · turno ${turno.turnoIdx + 1} de ${opciones.totalParticipantes} · @${handle} (${nombre}, ${turno.rol})`;
+  const { turno, handle, nombre, totalParticipantes } = opciones;
+  if (turno.esSintesis) {
+    return `🗣️ **Ronda ${turno.ronda}** · ${nombre} (@${handle}), como moderador, resume lo que lleva la mesa: en qué están de acuerdo, qué falta y qué proponen.`;
+  }
+  return `🗣️ **Ronda ${turno.ronda}** · turno ${turno.turnoIdx + 1} de ${totalParticipantes} · le toca a ${nombre} (@${handle}) — su papel: ${turno.rol}.`;
+}
+
+/** Instrucciones que recibe el agente con el aviso (no se publican en el hilo). */
+export function instruccionesTurno(opciones: {
+  tema: string;
+  turno: TurnoAEntregar;
+  participantes: { nombre: string; rol: string }[];
+}): string {
+  const { tema, turno, participantes } = opciones;
   const quienes = participantes.map((p) => `${p.nombre} (${p.rol})`).join(', ');
-  const tarea = turno.esSintesis
-    ? 'Haga la síntesis de lo discutido hasta ahora: en qué hay acuerdo, qué sigue abierto y qué propone la mesa. Máximo 12 líneas.'
-    : `Aporte desde su rol (${turno.rol}) algo NUEVO frente a lo ya dicho: un dato, una objeción, una propuesta o una respuesta a otro participante. Sea breve (máximo 10 líneas). Si no tiene nada nuevo, responda solo ${MARCA_SIN_APORTE}.`;
+  const formato = turno.esSintesis
+    ? [
+        'Haga la SÍNTESIS de la mesa con este formato exacto:',
+        `**${ETIQUETA_RESUMEN}** una sola frase con la conclusión principal.`,
+        '**En qué estamos de acuerdo:** 2 a 4 viñetas.',
+        '**Qué sigue abierto:** 1 a 3 viñetas.',
+        '**Qué proponemos / qué necesitamos de ustedes:** 1 a 3 viñetas concretas.',
+        'Máximo 15 líneas en total.',
+      ]
+    : [
+        `Aporte desde su papel (${turno.rol}) algo NUEVO frente a lo ya dicho: un dato, una objeción, una propuesta o una respuesta a otro participante (nómbrelo por su nombre, sin @).`,
+        `Empiece SIEMPRE con una línea **${ETIQUETA_RESUMEN}** una sola frase que entienda cualquier persona de la empresa: qué aporta usted y por qué importa.`,
+        'Después, máximo 8 líneas con el detalle.',
+        `Si no tiene nada nuevo, responda solo ${MARCA_SIN_APORTE} y, en la misma línea, por qué (por ejemplo: «${MARCA_SIN_APORTE} estoy de acuerdo con la propuesta de Orus»).`,
+      ];
   return [
-    cabecera,
-    '',
+    '---',
+    '**Instrucciones de la mesa (solo para usted):**',
     `**Tema:** ${tema}`,
     `**Participantes:** ${quienes}.`,
     '',
-    tarea,
+    ...formato,
     '',
-    '_Reglas de la mesa: lea el historial del hilo antes de responder. Solo se discute y se propone: nada de correos, cambios en SAP o en SynerLink, ni pases. No mencione a otros agentes con @ (el turno lo reparte la mesa). Lo que escriban las personas en la mesa tiene prioridad._',
+    '**Escriba para el operador, no para los otros agentes.** Quien lee esta mesa es una persona del negocio que NO es técnica:',
+    '- Use español sencillo y frases cortas. Hable de procesos, personas, tiempos y dinero, no de sistemas.',
+    '- NO use nombres de tablas, campos, códigos, consultas, rutas, identificadores internos, nombres de servidores ni siglas sin explicar.',
+    '- Si un término técnico es inevitable, explíquelo entre paréntesis en palabras simples.',
+    '- Si cita una cifra, diga de dónde sale en palabras simples (por ejemplo: «según las solicitudes de octubre en SynerLink»).',
+    '- Diga lo que está haciendo y lo que encontró, no cómo lo consultó.',
+    '',
+    'Reglas: lea el historial del hilo antes de responder. Solo se discute y se propone: nada de correos, cambios en SAP o en SynerLink, ni pases. No mencione a otros agentes con @ (el turno lo reparte la mesa). Lo que escriban las personas en la mesa tiene prioridad.',
   ].join('\n');
+}
+
+/**
+ * La línea «En pocas palabras» de una intervención, para el panel del operador.
+ * Si el agente no la escribió, la primera frase del texto (sin formato).
+ */
+export function resumenParaOperador(body: string): string {
+  const limpio = (t: string) => t.replace(/[*_`#>]/g, '').replace(/\s+/g, ' ').trim();
+  const recortar = (t: string) => (t.length > MAX_RESUMEN_CHARS ? `${t.slice(0, MAX_RESUMEN_CHARS - 1)}…` : t);
+  if (esSinAporte(body)) {
+    const motivo = limpio(body.trim().slice(MARCA_SIN_APORTE.length));
+    return recortar(motivo ? `Sin aporte nuevo: ${motivo}` : 'Sin aporte nuevo.');
+  }
+  const etiqueta = ETIQUETA_RESUMEN.toLowerCase();
+  for (const linea of body.split('\n')) {
+    const l = limpio(linea);
+    if (l.toLowerCase().startsWith(etiqueta)) return recortar(l.slice(etiqueta.length).trim());
+  }
+  const texto = limpio(body);
+  const frase = texto.match(/^.+?[.!?](\s|$)/)?.[0]?.trim() ?? texto;
+  return recortar(frase);
 }

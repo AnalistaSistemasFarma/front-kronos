@@ -5,6 +5,9 @@ import {
   dentroDeHorario,
   diaCOT,
   esSinAporte,
+  ETIQUETA_RESUMEN,
+  instruccionesTurno,
+  resumenParaOperador,
   MARCA_SIN_APORTE,
   MESA_TURNO_VENCE_MS,
   normalizarReglasMesa,
@@ -194,19 +197,47 @@ describe('textos', () => {
     expect(esSinAporte('Propongo hacer en paralelo…')).toBe(false);
   });
 
-  it('el aviso de turno trae ronda, agente, rol, tema y las reglas', () => {
+  it('el aviso publicado es corto y entendible: sin reglas internas', () => {
     const t = textoAvisoTurno({
-      tema: 'Demoras de Tesorería',
-      turno: { idAgent: 2, ronda: 2, turnoIdx: 1, esSintesis: false, rol: 'critica' },
+      turno: { idAgent: 2, ronda: 2, turnoIdx: 1, esSintesis: false, rol: 'criticar las propuestas' },
       handle: 'mechita',
       nombre: 'Mechita',
       totalParticipantes: 3,
-      participantes: [{ nombre: 'Orus', rol: 'propone' }, { nombre: 'Mechita', rol: 'critica' }],
-      sintesisCada: 3,
     });
-    expect(t).toContain('Ronda 2 · turno 2 de 3 · @mechita (Mechita, critica)');
+    expect(t).toBe('🗣️ **Ronda 2** · turno 2 de 3 · le toca a Mechita (@mechita) — su papel: criticar las propuestas.');
+    expect(t).not.toContain('Instrucciones');
+  });
+
+  it('las instrucciones del agente exigen lenguaje para el operador y el resumen', () => {
+    const t = instruccionesTurno({
+      tema: 'Demoras de Tesorería',
+      turno: { idAgent: 2, ronda: 2, turnoIdx: 1, esSintesis: false, rol: 'critica' },
+      participantes: [{ nombre: 'Orus', rol: 'propone' }, { nombre: 'Mechita', rol: 'critica' }],
+    });
     expect(t).toContain('Demoras de Tesorería');
-    expect(t).toContain(MARCA_SIN_APORTE);
+    expect(t).toContain(ETIQUETA_RESUMEN);
+    expect(t).toContain('NO es técnica');
     expect(t).toContain('nada de correos');
+    expect(t).toContain(MARCA_SIN_APORTE);
+  });
+
+  it('la síntesis pide acuerdos, pendientes y lo que se necesita de las personas', () => {
+    const t = instruccionesTurno({
+      tema: 'x',
+      turno: { idAgent: 1, ronda: 3, turnoIdx: 2, esSintesis: true, rol: 'moderador: síntesis' },
+      participantes: [],
+    });
+    expect(t).toContain('En qué estamos de acuerdo');
+    expect(t).toContain('Qué sigue abierto');
+    expect(t).toContain('qué necesitamos de ustedes');
+  });
+
+  it('resumenParaOperador toma la línea «En pocas palabras» o, si falta, la primera frase', () => {
+    expect(resumenParaOperador('**En pocas palabras:** las aprobaciones de Tesorería se pueden hacer a la vez.\n\nDetalle…')).toBe(
+      'las aprobaciones de Tesorería se pueden hacer a la vez.',
+    );
+    expect(resumenParaOperador('Revisé octubre. Hubo 40 casos.')).toBe('Revisé octubre.');
+    expect(resumenParaOperador('[SIN APORTE] estoy de acuerdo con Orus')).toBe('Sin aporte nuevo: estoy de acuerdo con Orus');
+    expect(resumenParaOperador(`En pocas palabras: ${'a'.repeat(400)}`).length).toBe(280);
   });
 });
