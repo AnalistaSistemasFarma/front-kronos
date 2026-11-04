@@ -79,7 +79,11 @@ $cfg = [ordered]@{
   mcp    = [ordered]@{ enabled = (-not $NoMcp); name = $McpName; port = $McpPort }
   node   = $NodeExe
   linkFrom = $RepoDir
-  links  = @('.env', 'mcp\.env', 'dbconfig.js', 'mcp\kronos-mcp-test-audit.log')
+  # .env se ENLAZAN (symlink): un cambio en A vale para ambos colores al reiniciar.
+  # dbconfig.js se COPIA en cada build: lo importa el codigo y Turbopack no
+  # resuelve modulos enlazados fuera de la carpeta del proyecto.
+  links  = @('.env', 'mcp\.env', 'mcp\kronos-mcp-test-audit.log')
+  copies = @('dbconfig.js')
   extraEnv = ($ExtraEnvJson | ConvertFrom-Json)
   drainSeconds = $DrainSeconds
 }

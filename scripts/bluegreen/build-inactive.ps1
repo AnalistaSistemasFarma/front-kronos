@@ -10,8 +10,9 @@
   detener pm2:
     1. borra el sello de build (si este build se cancela, switch.ps1 no activa
        una carpeta a medio construir);
-    2. enlaza los archivos con secretos (.env, mcp\.env, dbconfig.js) desde la
-       carpeta canonica (symlink; nunca se copian ni se imprimen);
+    2. enlaza .env y mcp\.env desde la carpeta canonica (symlink) y copia
+       dbconfig.js (Turbopack no resuelve imports enlazados fuera del proyecto);
+       nunca se imprimen;
     3. npm install del front y del MCP solo si cambiaron package.json o
        package-lock.json desde la ultima instalacion en ESTA carpeta;
     4. prisma generate, migracion aditiva, next build (con un reintento),
@@ -58,6 +59,16 @@ if ($cfg.linkFrom -and ($cfg.linkFrom.TrimEnd('\') -ne $dir.TrimEnd('\'))) {
     if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent | Out-Null }
     New-Item -ItemType SymbolicLink -Path $dst -Target $src | Out-Null
     Write-Host "Enlace $rel -> $src"
+  }
+  foreach ($rel in @($cfg.copies)) {
+    if (-not $rel) { continue }
+    $src = Join-Path $cfg.linkFrom $rel
+    $dst = Join-Path $dir $rel
+    if (-not (Test-Path -LiteralPath $src)) { Write-Host "::warning::No existe $src; no se copia $rel"; continue }
+    $item = Get-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
+    if ($item -and $item.LinkType) { Remove-Item -LiteralPath $dst -Force }
+    Copy-Item -LiteralPath $src -Destination $dst -Force
+    Write-Host "Copia $rel desde $src"
   }
 }
 if (-not (Test-Path (Join-Path $dir '.env'))) { throw "FALTA .env en $dir" }
