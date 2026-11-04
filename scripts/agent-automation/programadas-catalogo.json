@@ -1,0 +1,483 @@
+{
+ "_nota": "Catálogo de las automatizaciones programadas de NEGOCIO de la flota (2026-11-04, inventario de horus). Llave = Label de launchd, «cron:<parte del comando>» u «openclaw:<equipo>:<id del job>». descripcion = qué hace en lenguaje simple; log = cómo reconocer cada corrida (bloques con inicio/fin, una línea por corrida, o contador para logs sin fecha); produccion = qué entrega. Sin secretos: solo rutas y patrones. Las que no estén aquí igual se publican con lo que diga launchd.",
+ "_excluir": [
+  "contexto-agentes",
+  "crash-logger",
+  "fleet-",
+  "git-archive",
+  "reindex",
+  "teams-presence",
+  "\\bremind-",
+  "quake-alert",
+  "respaldo",
+  "ccmproxy",
+  "keepalive",
+  "dailyreset",
+  "vault-sync",
+  "daily-archive",
+  "kickstart",
+  "sentry-",
+  "serfarma07-watch",
+  "daily-brain-sync",
+  "daily-snapshot",
+  "talk-bridge",
+  "backup"
+ ],
+ "com.horus.email-agenda-report": {
+  "code": "horus",
+  "nombre": "Resumen diario de correos y agenda",
+  "descripcion": "Resume el correo, la agenda y los casos de SynerLink de Nicolás y lo publica en su chat de SynerLink (Telegram de respaldo).",
+  "log": {
+   "tipo": "lineas",
+   "ruta": "~/.horus/logs/email-agenda.log",
+   "linea": "^(?P<ts>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}) (OK|FALLO)\\b",
+   "formato": "%Y-%m-%d %H:%M",
+   "ok": "^\\S+ \\S+ OK\\b",
+   "produccion": "^\\S+ \\S+ OK\\b",
+   "una_por_dia": true
+  },
+  "produccion": {
+   "etiqueta": "resúmenes publicados"
+  }
+ },
+ "com.horus.pendientes-reuniones-semanal": {
+  "code": "horus",
+  "nombre": "Pendientes de reuniones de la semana",
+  "descripcion": "Lee las transcripciones de Teams de la semana anterior, extrae los compromisos, los suma al archivo maestro de pendientes y los publica en SynerLink.",
+  "log": {
+   "tipo": "bloques",
+   "ruta": "~/.horus/rutinas/pendientes-reuniones-semanal/logs/run.log",
+   "inicio": "^(?P<ts>\\S+ \\S+) INICIO rango=\\S+ dry=0",
+   "fin": "^\\S+ \\S+ FIN$",
+   "ok": "OK (synerlink|telegram-respaldo)",
+   "error": "FALLO|ERROR no se obtuvo token",
+   "produccion": "OK synerlink .*pendientes=(?P<n>\\d+)"
+  },
+  "produccion": {
+   "etiqueta": "pendientes de reuniones registrados"
+  }
+ },
+ "com.gss.predictivo.nightly": {
+  "code": "horus",
+  "nombre": "Pronóstico de ventas nocturno",
+  "descripcion": "Calcula el pronóstico de ventas de cada empresa con datos de SAP (solo lectura) y lo publica en el módulo predictivo de SynerLink, en pruebas y en producción.",
+  "log": {
+   "tipo": "bloques",
+   "ruta": "~/.horus/logs/predictivo-nightly.log",
+   "inicio": "^\\[(?P<ts>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2})\\] inicio$",
+   "fin": "\\] listo \\(fallas: (?P<rc>\\d+)\\)",
+   "produccion": "^OK snapshot",
+   "produccion_tras": "publicando snapshot en prod"
+  },
+  "produccion": {
+   "etiqueta": "pronósticos publicados en producción"
+  }
+ },
+ "com.horus.trm-sap": {
+  "code": "horus",
+  "nombre": "TRM del día en SAP — Laboratorios Ryan",
+  "descripcion": "Consulta la TRM oficial del día (dólar) y la carga en SAP Business One de Laboratorios Ryan por Service Layer, y verifica que quedó.",
+  "log": {
+   "tipo": "lineas",
+   "ruta": "~/.horus/trm-sap.log",
+   "linea": "^(?P<ts>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) \\[ryan\\] (OK|ERROR)",
+   "ok": "\\] OK ",
+   "produccion": "\\] OK ",
+   "una_por_dia": true
+  },
+  "produccion": {
+   "etiqueta": "tasas cargadas en SAP"
+  }
+ },
+ "com.horus.trm-sap-abamia": {
+  "code": "horus",
+  "nombre": "TRM del día en SAP — Abamia",
+  "descripcion": "Consulta la TRM oficial del día (dólar) y la carga en SAP Business One de Abamia por Service Layer, y verifica que quedó.",
+  "log": {
+   "tipo": "lineas",
+   "ruta": "~/.horus/trm-sap.log",
+   "linea": "^(?P<ts>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) \\[abamia\\] (OK|ERROR)",
+   "ok": "\\] OK ",
+   "produccion": "\\] OK ",
+   "una_por_dia": true
+  },
+  "produccion": {
+   "etiqueta": "tasas cargadas en SAP"
+  }
+ },
+ "com.horus.trm-sap-farmalogica": {
+  "code": "horus",
+  "nombre": "TRM del día en SAP — Farmalogica",
+  "descripcion": "Consulta la TRM oficial del día (dólar) y la carga en SAP Business One de Farmalogica por Service Layer, y verifica que quedó.",
+  "log": {
+   "tipo": "lineas",
+   "ruta": "~/.horus/trm-sap.log",
+   "linea": "^(?P<ts>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) \\[farmalogica\\] (OK|ERROR)",
+   "ok": "\\] OK ",
+   "produccion": "\\] OK ",
+   "una_por_dia": true
+  },
+  "produccion": {
+   "etiqueta": "tasas cargadas en SAP"
+  }
+ },
+ "com.horus.trm-sap-gss": {
+  "code": "horus",
+  "nombre": "TRM del día en SAP — GSS",
+  "descripcion": "Consulta la TRM oficial del día (dólar) y la carga en SAP Business One de GSS por Service Layer, y verifica que quedó.",
+  "log": {
+   "tipo": "lineas",
+   "ruta": "~/.horus/trm-sap.log",
+   "linea": "^(?P<ts>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) \\[gss\\] (OK|ERROR)",
+   "ok": "\\] OK ",
+   "produccion": "\\] OK ",
+   "una_por_dia": true
+  },
+  "produccion": {
+   "etiqueta": "tasas cargadas en SAP"
+  }
+ },
+ "com.horus.trm-sap-kelab": {
+  "code": "horus",
+  "nombre": "TRM del día en SAP — Kelab",
+  "descripcion": "Consulta la TRM oficial del día (dólar) y la carga en SAP Business One de Kelab por Service Layer, y verifica que quedó.",
+  "log": {
+   "tipo": "lineas",
+   "ruta": "~/.horus/trm-sap.log",
+   "linea": "^(?P<ts>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) \\[kelab\\] (OK|ERROR)",
+   "ok": "\\] OK ",
+   "produccion": "\\] OK ",
+   "una_por_dia": true
+  },
+  "produccion": {
+   "etiqueta": "tasas cargadas en SAP"
+  }
+ },
+ "com.horus.trm-sap-meditrack": {
+  "code": "horus",
+  "nombre": "TRM del día en SAP — Meditrack",
+  "descripcion": "Consulta la TRM oficial del día (dólar) y la carga en SAP Business One de Meditrack por Service Layer, y verifica que quedó.",
+  "log": {
+   "tipo": "lineas",
+   "ruta": "~/.horus/trm-sap.log",
+   "linea": "^(?P<ts>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) \\[meditrack\\] (OK|ERROR)",
+   "ok": "\\] OK ",
+   "produccion": "\\] OK ",
+   "una_por_dia": true
+  },
+  "produccion": {
+   "etiqueta": "tasas cargadas en SAP"
+  }
+ },
+ "com.horus.trm-sap-onelatampharma": {
+  "code": "horus",
+  "nombre": "TRM del día en SAP — OneLATAM Pharma",
+  "descripcion": "Consulta la TRM oficial del día (dólar) y la carga en SAP Business One de OneLATAM Pharma por Service Layer, y verifica que quedó.",
+  "log": {
+   "tipo": "lineas",
+   "ruta": "~/.horus/trm-sap.log",
+   "linea": "^(?P<ts>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) \\[onelatampharma\\] (OK|ERROR)",
+   "ok": "\\] OK ",
+   "produccion": "\\] OK ",
+   "una_por_dia": true
+  },
+  "produccion": {
+   "etiqueta": "tasas cargadas en SAP"
+  }
+ },
+ "com.horus.informe-cache": {
+  "code": "horus",
+  "nombre": "Caché del informe de estadísticas (OLP)",
+  "descripcion": "Copia de forma incremental los datos de SAP, SynerLink y Tesorería de OLP a una base local para que el informe de estadísticas salga rápido.",
+  "log": {
+   "tipo": "contador",
+   "ruta": "~/.horus/cache/informe-estadisticas/sync.log",
+   "ok": "^== TOTAL: \\+\\d+ filas",
+   "error": "^ERROR:|Traceback",
+   "produccion": "^== TOTAL: \\+(?P<n>\\d+) filas"
+  },
+  "produccion": {
+   "etiqueta": "filas nuevas en la caché"
+  }
+ },
+ "com.horus.cargues-masivos": {
+  "code": "horus",
+  "nombre": "Cargues masivos de artículos (OLP)",
+  "descripcion": "Busca en SynerLink los cargues masivos de OLP listos, arma el archivo para Data Transfer Workbench y lo envía.",
+  "log": {
+   "tipo": "bloques",
+   "ruta": "~/.horus/logs/cargues-masivos.log",
+   "inicio": "^(?P<ts>\\S+ \\S+) === Corrida iniciada",
+   "fin": "=== Corrida finalizada OK ===",
+   "produccion": "Documentos enviados: (?P<n>\\d+)"
+  },
+  "produccion": {
+   "etiqueta": "archivos DTW enviados"
+  }
+ },
+ "com.jorge.carter.certificaciones": {
+  "code": "carter",
+  "nombre": "Certificaciones comerciales",
+  "descripcion": "Toma las solicitudes de «Certificación Comercial» abiertas en SynerLink (OLP, Farmalogica, Ryan y Abamia), consulta SAP, genera el PDF con su consecutivo C-0xx, lo adjunta, resuelve la solicitud y avisa a Catalina y a Nicolás.",
+  "log": {
+   "tipo": "bloques",
+   "ruta": "~/.carter/logs/certificaciones.log",
+   "inicio": "^===== (?P<ts>\\S+ \\S+) -05 :: inicio cron CERTIFICACIONES",
+   "fin": ":: fin cron CERTIFICACIONES",
+   "rc": "fin corrida claude \\(exit (?P<rc>\\d+)\\)",
+   "error": ":: TIMEOUT",
+   "produccion": "^\\|.*#?(?P<u>[5-9]\\d{3})\\s*\\|.*\\bC-\\d{3}\\b"
+  },
+  "produccion": {
+   "etiqueta": "certificaciones emitidas"
+  }
+ },
+ "com.jorge.ofi.laft": {
+  "code": "ofi",
+  "nombre": "Verificación LAFT/PTEE de candidatos",
+  "descripcion": "Revisa los candidatos que llegan por correo (hurclick y Unidossis) en Informa y la Rama Judicial, deja la carpeta y el informe en LISTAS_2026 y avisa a Laura, Nicolás y Gustavo.",
+  "log": {
+   "tipo": "bloques",
+   "ruta": "~/.ofi/logs/laft.log",
+   "inicio": "^===== (?P<ts>\\S+ \\S+) -05 :: inicio cron LAFT \\(OFI\\)",
+   "fin": ":: fin cron LAFT \\(OFI\\)(?: \\(exit (?P<rc>\\d+)\\))?",
+   "error": ":: TIMEOUT|graph no disponible|\\] FALLO:"
+  },
+  "produccion": {
+   "tipo": "json_fechas",
+   "ruta": "~/.ofi/laft/procesados.json",
+   "clave": "docs",
+   "campo": "fecha",
+   "etiqueta": "candidatos verificados"
+  }
+ },
+ "com.jorge.laurabot.laft": {
+  "code": "laura",
+  "nombre": "Verificación LAFT (versión anterior)",
+  "descripcion": "La misma verificación LAFT de candidatos, versión anterior; la reemplazó la de Ofi.",
+  "log": {
+   "tipo": "bloques",
+   "ruta": "~/.laurabot/logs/laft.log",
+   "inicio": "^===== (?P<ts>\\S+ \\S+) -05 :: inicio cron LAFT",
+   "fin": ":: fin cron LAFT(?: \\(exit (?P<rc>\\d+)\\))?",
+   "error": ":: TIMEOUT"
+  }
+ },
+ "com.laurabot.documenta-flash": {
+  "code": "laura",
+  "nombre": "Viabilidad de firmas digitales (Documenta Flash)",
+  "descripcion": "Valida las solicitudes de firma abiertas en SynerLink contra la documentación societaria vigente, deja el concepto en un Excel de OneDrive y lo publica en SynerLink.",
+  "log": {
+   "tipo": "bloques",
+   "ruta": "~/.laurabot/logs/docflash.log",
+   "inicio": "^===== (?P<ts>\\S+ \\S+) -05 :: inicio cron DOCUMENTA FLASH",
+   "fin": ":: fin cron DOCUMENTA FLASH \\(exit (?P<rc>\\d+)",
+   "ok": "entrega SynerLink OK",
+   "error": ":: TIMEOUT|sin reporte",
+   "produccion": "entrega SynerLink OK"
+  },
+  "produccion": {
+   "etiqueta": "reportes entregados"
+  }
+ },
+ "cron:/.jorgebot/daily-email-summary.sh": {
+  "code": "jorge",
+  "nombre": "Resumen diario del correo (Nancy)",
+  "descripcion": "Resume el correo de Nancy para el área financiera y lo envía por Telegram.",
+  "log": {
+   "tipo": "bloques",
+   "ruta": "~/.jorgebot/logs/daily-email-summary.log",
+   "sin_duplicados": true,
+   "formato": "%Y-%m-%dT%H:%M:%S%z",
+   "inicio": "^\\[(?P<ts>\\S+)\\] === .* iniciado",
+   "ok": "=== Resumen enviado OK ===",
+   "error": "terminó con código|Not logged in",
+   "produccion": "=== Resumen enviado OK ==="
+  },
+  "produccion": {
+   "etiqueta": "resúmenes enviados"
+  }
+ },
+ "cron:/.jorgebot/weekly-informe-procesos-gss.sh": {
+  "code": "jorge",
+  "nombre": "Informe semanal de Procesos GSS (Nancy)",
+  "descripcion": "Regenera el Informe de Procesos GSS (demoras por proceso) y lo envía a Nicolás y a Jorge.",
+  "log": {
+   "tipo": "bloques",
+   "ruta": "~/.jorgebot/logs/weekly-informe-procesos-gss.log",
+   "sin_duplicados": true,
+   "formato": "%Y-%m-%dT%H:%M:%S%z",
+   "inicio": "^\\[(?P<ts>\\S+)\\] === .* iniciado",
+   "ok": "=== Informe enviado OK ===",
+   "error": "terminó con código|Not logged in",
+   "produccion": "=== Informe enviado OK ==="
+  },
+  "produccion": {
+   "etiqueta": "informes enviados"
+  }
+ },
+ "com.pedro.hiper.liberacion": {
+  "code": "hiper",
+  "nombre": "Liberación diaria de producto terminado",
+  "descripcion": "Consulta en SAP (Ryan) el producto terminado liberado el día anterior, arma el Excel y se lo envía a Leonardo.",
+  "log": {
+   "tipo": "contador",
+   "ruta": "/tmp/hiper_liberacion.log",
+   "ok": "^enviado\\. total|^sin liberaciones",
+   "error": "^Traceback",
+   "produccion": "^enviado\\. total"
+  },
+  "produccion": {
+   "etiqueta": "envíos de liberación"
+  }
+ },
+ "com.pedro.hiper.alerta-oc": {
+  "code": "hiper",
+  "nombre": "Alerta de solicitudes sin orden de compra",
+  "descripcion": "Busca en SAP (Ryan) las solicitudes de equipos y repuestos con más de 15 días sin orden de compra y envía la alerta.",
+  "log": {
+   "tipo": "contador",
+   "ruta": "/tmp/hiper_alerta_oc.log",
+   "ok": "enviada alerta|sin alertas",
+   "error": "^Traceback",
+   "produccion": "enviada alerta: (?P<n>\\d+)"
+  },
+  "produccion": {
+   "etiqueta": "solicitudes alertadas"
+  }
+ },
+ "com.pedro.hiper.pendientes": {
+  "code": "hiper",
+  "nombre": "Resumen diario de pendientes de Leonardo",
+  "descripcion": "Lee el tablero de pendientes de Leonardo y le envía el resumen del día.",
+  "log": {
+   "tipo": "lineas",
+   "ruta": "/tmp/hiper_pendientes_digest.log",
+   "formato": "%Y-%m-%dT%H:%M:%S%z",
+   "linea": "^\\[(?P<ts>\\S+)\\] ",
+   "ok": "digest diario enviado",
+   "produccion": "digest diario enviado",
+   "una_por_dia": true
+  },
+  "produccion": {
+   "etiqueta": "resúmenes enviados"
+  }
+ },
+ "com.pedro.hiper.tablero-cumplimiento": {
+  "code": "hiper",
+  "nombre": "Tablero de cumplimiento del programa de envase",
+  "descripcion": "Calcula con SAP el cumplimiento semanal del programa de envase (tablero Lean) y lo publica en SynerLink.",
+  "log": {
+   "tipo": "contador",
+   "ruta": "~/.hiper/analisis/out/tablero_cumplimiento.log",
+   "ok": "^sent status 2\\d\\d",
+   "error": "^sent status [^2]|Traceback",
+   "produccion": "^sent status 2\\d\\d"
+  },
+  "produccion": {
+   "etiqueta": "tableros publicados"
+  }
+ },
+ "com.pedro.hiper.watch-granel-pt": {
+  "code": "hiper",
+  "nombre": "Vigilancia de granel y producto terminado",
+  "descripcion": "Durante el día revisa en SAP el granel nuevo y el producto terminado liberado y avisa en SynerLink cuando hay novedades.",
+  "log": {
+   "tipo": "contador",
+   "ruta": "~/.hiper/analisis/out/watch_granel_pt.log",
+   "ok": "sin novedades|fuera de horario de vigilancia|SEED|base fijada|aviso enviado",
+   "error": "Traceback|RuntimeError",
+   "produccion": "aviso enviado"
+  },
+  "produccion": {
+   "etiqueta": "avisos enviados"
+  }
+ },
+ "com.pedro.hiper.informe-materiales": {
+  "code": "hiper",
+  "nombre": "Informe de fecha requerida de materiales",
+  "descripcion": "Informe diario de la fecha requerida de materiales (pausado desde septiembre)."
+ },
+ "openclaw:pedro:6da2fcc7-61af-4a87-b433-86b93f1da11c": {
+  "code": "pedro",
+  "nombre": "Reporte semanal LATAM para Hans",
+  "descripcion": "Arma el reporte semanal de avances de LATAM Farma para Hans (openclaw del Mac de Pedro)."
+ },
+ "openclaw:pedro:32e33b8e-b364-4e0d-8ffe-0aaf5985d08b": {
+  "excluir": true,
+  "nota": "Verificación de canales y accesos: auditoría de configuración (infraestructura)."
+ },
+ "openclaw:pedro:7a55a37b-9e53-467b-838d-452de319427b": {
+  "code": "pedro",
+  "nombre": "SCOUT — análisis de portafolios de moléculas",
+  "descripcion": "Revisa el correo y analiza los portafolios de moléculas que llegan; anuncia el resultado (openclaw del Mac de Pedro)."
+ },
+ "openclaw:lisa:74ccf9f3-8e7c-415c-84af-88d7c4ac7ef2": {
+  "code": "lisa",
+  "nombre": "Apertura semanal para don Christian",
+  "descripcion": "Prepara la apertura de la semana para don Christian: frentes abiertos y decisiones pendientes."
+ },
+ "openclaw:lisa:db0ed5b6-090b-4e9e-b8de-4f2d1a8054f0": {
+  "code": "lisa",
+  "nombre": "Cierre semanal para don Christian",
+  "descripcion": "Prepara el cierre de la semana para don Christian y actualiza el mapa de frentes."
+ },
+ "openclaw:lisa:f85f9006-e865-4fd5-bbc1-6ec4eacba934": {
+  "code": "lisa",
+  "nombre": "Pedir insumos del tablero de direcciones",
+  "descripcion": "Recordatorio mensual para pedir a las direcciones los insumos del tablero."
+ },
+ "openclaw:lisa:a77effdb-41b5-4d10-af4d-4a4e3b97145d": {
+  "code": "lisa",
+  "nombre": "Corte mensual del tablero de direcciones",
+  "descripcion": "Arma el corte mensual del tablero de direcciones con los insumos recibidos."
+ },
+ "com.cosmo.andreabot.agenda": {
+  "code": "cosmo",
+  "nombre": "Agenda del día para Andrea",
+  "descripcion": "Revisa la agenda del día de Andrea y le sugiere cómo distribuir el tiempo.",
+  "log": {
+   "tipo": "bloques",
+   "ruta": "~/brain/agentes/andrea/scripts/logs/report-agenda-diaria.log",
+   "formato": "%Y-%m-%dT%H:%M:%S%z",
+   "inicio": "^\\[(?P<ts>\\S+)\\] report-agenda-diaria starting",
+   "fin": "report-agenda-diaria finished exit=(?P<rc>\\d+)",
+   "produccion": "finished exit=0"
+  },
+  "produccion": {
+   "etiqueta": "agendas enviadas"
+  }
+ },
+ "com.cosmo.andreabot.news": {
+  "code": "cosmo",
+  "nombre": "Noticias del sector farmacéutico",
+  "descripcion": "Busca las noticias del sector farmacéutico y le envía el bloque a Andrea.",
+  "log": {
+   "tipo": "bloques",
+   "ruta": "~/brain/agentes/andrea/scripts/logs/report-news.log",
+   "formato": "%Y-%m-%dT%H:%M:%S%z",
+   "inicio": "^\\[(?P<ts>\\S+)\\] report-news starting",
+   "fin": "report-news finished exit=(?P<rc>\\d+)",
+   "produccion": "finished exit=0"
+  },
+  "produccion": {
+   "etiqueta": "boletines enviados"
+  }
+ },
+ "com.cosmo.andreabot.distribucion": {
+  "code": "cosmo",
+  "nombre": "Distribución semanal del tiempo",
+  "descripcion": "Reporte semanal de cómo se distribuyó el tiempo de Andrea frente a su meta.",
+  "log": {
+   "tipo": "bloques",
+   "ruta": "~/brain/agentes/andrea/scripts/logs/report-distribucion-semanal.log",
+   "formato": "%Y-%m-%dT%H:%M:%S%z",
+   "inicio": "^\\[(?P<ts>\\S+)\\] report-distribucion-semanal starting",
+   "fin": "report-distribucion-semanal finished exit=(?P<rc>\\d+)",
+   "produccion": "finished exit=0"
+  },
+  "produccion": {
+   "etiqueta": "reportes enviados"
+  }
+ }
+}

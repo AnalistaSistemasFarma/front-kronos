@@ -21,6 +21,11 @@ Fuentes:
     Lo arma el análisis de justificación de la IA y se revisa con los dueños de proceso.
 El tiempo humano NO lo recalcula este script: solo las ocurrencias, la recurrencia y
 el tiempo medido del agente.
+
+Automatizaciones programadas (2026-11-04): al terminar, corre el script hermano
+programadas.py (inventario de lo que cada agente corre solo: launchd, cron, openclaw cron),
+en los mismos destinos. Se publica aparte (POST .../automatizaciones/programadas) y no se
+mezcla con los casos del chat. También corre solo: python3 programadas.py [--ensayo|--tabla].
 """
 import datetime as dt, json, os, pathlib, re, statistics as st, subprocess, sys, tempfile, unicodedata, urllib.error, urllib.request
 
@@ -165,6 +170,18 @@ def main():
         for url, key, id_run in trabajo:
             if id_run:
                 llamar(url, key, '/api/chat/auditoria/automatizaciones/solicitudes', {'fallo': id_run, 'error': str(e)[:300]})
+    programadas(a)
+
+
+def programadas(a):
+    """Inventario de automatizaciones programadas (programadas.py), en los mismos destinos. Si falla, no tumba el análisis."""
+    confs = [x for i, x in enumerate(a) if i and a[i - 1] == '--conf']
+    try:
+        r = subprocess.run([sys.executable, str(AQUI / 'programadas.py')] + sum((['--conf', c] for c in confs), []),
+                           capture_output=True, text=True, timeout=1200)
+        for l in (r.stderr or '').strip().splitlines()[-8:]: log('programadas: ' + l)
+    except Exception as e:
+        log('programadas falló: %s' % str(e)[:300])
 
 if __name__ == '__main__':
     main()
