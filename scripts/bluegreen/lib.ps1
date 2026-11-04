@@ -76,6 +76,10 @@ function Remove-Pm2App([string]$Name) {
 function Start-Pm2Declared([string]$StateDir, $App) {
   $file = Join-Path $StateDir ("pm2-" + $App.name + ".json")
   Write-JsonFile $file ([ordered]@{ apps = @($App) })
+  # pm2 copia el entorno de quien lo llama a la app. Si viaja RUNNER_TRACKING_ID,
+  # el runner de GitHub trata la app como proceso huerfano del job y la MATA al
+  # terminar el job (pm2 la reinicia: ~20-35 s sin servicio). Se quita antes.
+  Remove-Item Env:RUNNER_TRACKING_ID -ErrorAction SilentlyContinue
   $rc = Invoke-Pm2 start $file
   if ($rc -ne 0) { throw "pm2 start $($App.name) fallo (codigo $rc)" }
 }

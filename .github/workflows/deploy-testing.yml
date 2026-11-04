@@ -32,6 +32,10 @@ on:
         default: ''
 
 env:
+  # Sin esto, las apps que arranca pm2 heredan RUNNER_TRACKING_ID y el runner las
+  # mata al cerrar el job ("Cleaning up orphan processes"); pm2 las revive tras
+  # ~20-35 s sin servicio. Medido en el ensayo del 2026-11-04.
+  RUNNER_TRACKING_ID: ''
   BG_STATE_DIR_REAL: C:\Users\nicolas.rivera\projects\front-kronos-test-bluegreen
   IIS_SITE_PATH: C:\inetpub\testrp\rp-kronos-test
 
