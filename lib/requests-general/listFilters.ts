@@ -1,0 +1,171 @@
+import { normalizeSearchText } from './textSearch';
+
+/**
+ * Filtros de los listados de solicitudes (Mis solicitudes y Asignadas), iguales en las dos
+ * pantallas. Todo se filtra en el navegador sobre la lista COMPLETA ya cargada (no por página),
+ * y el estado es GENERAL: "Pendientes" trae solicitudes y tareas abiertas, sin empezar o
+ * devueltas a la vez, sin importar el tipo.
+ */
+
+export type StatusGroup = 'all' | 'pending' | 'done' | 'cancelled';
+
+export const STATUS_GROUP_OPTIONS: { value: StatusGroup; label: string }[] = [
+  { value: 'all', label: 'Todos' },
+  { value: 'pending', label: 'Pendientes' },
+  { value: 'done', label: 'Completadas' },
+  { value: 'cancelled', label: 'Canceladas' },
+];
+
+export const STATUS_GROUP_LABEL: Record<StatusGroup, string> = {
+  all: 'Todos',
+  pending: 'Pendientes',
+  done: 'Completadas',
+  cancelled: 'Canceladas',
+};
+
+/**
+ * Grupo general de un estado (status_case): 2 Resuelto → completada; 3 Cancelado → cancelada;
+ * 1 Abierto, 4 Sin empezar y 7 Devuelta → pendiente. Si llega un id desconocido se decide
+ * por el nombre; lo que no está terminado ni cancelado cuenta como pendiente.
+ */
+export function statusGroupOf(
+  statusId: number | string | null | undefined,
+  statusName?: string | null
+): Exclude<StatusGroup, 'all'> {
+  const id = Number(statusId);
+  if (id === 2) return 'done';
+  if (id === 3) return 'cancelled';
+  if (id === 1 || id === 4 || id === 7) return 'pending';
+  const name = normalizeSearchText(statusName);
+  if (name.includes('cancel')) return 'cancelled';
+  if (['resuelt', 'complet', 'cerrad', 'finaliz'].some((w) => name.includes(w))) return 'done';
+  return 'pending';
+}
+
+export type ListFilters = {
+  id: string;
+  status: StatusGroup;
+  company: string;
+  process: string;
+  person: string;
+  date_from: string;
+  date_to: string;
+};
+
+export const EMPTY_LIST_FILTERS: ListFilters = {
+  id: '',
+  status: 'all',
+  company: '',
+  process: '',
+  person: '',
+  date_from: '',
+  date_to: '',
+};
+
+/** Lo que cada pantalla le entrega al filtro por fila (solicitud o tarea). */
+export type ListRow = {
+  /** ID de la solicitud (en una tarea, el de su solicitud). */
+  requestId: number | string;
+  group: Exclude<StatusGroup, 'all'>;
+  companyId: string;
+  company: string;
+  process: string;
+  people: string[];
+  createdAt: string | null | undefined;
+};
+
+/** "Ana, Luis" → ['Ana', 'Luis'] (sin vacíos ni repetidos). */
+export function splitPeople(...values: Array<string | null | undefined>): string[] {
+  const out = new Set<string>();
+  for (const value of values) {
+    for (const name of String(value ?? '').split(',')) {
+      const clean = name.trim();
+      if (clean) out.add(clean);
+    }
+  }
+  return [...out];
+}
+
+/**
+ * Día (AAAA-MM-DD) tal como lo muestra la tabla: la base guarda hora local y el texto que
+ * llega ya trae ese día al inicio, así que se compara sin pasar por zonas horarias.
+ */
+export function dateKey(value: string | null | undefined): string {
+  const s = String(value ?? '');
+  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : '';
+}
+
+/** `ignoreStatus`: para contar las tarjetas (no cambian al tocar un estado). */
+export function matchesListFilters(
+  row: ListRow,
+  filters: ListFilters,
+  { ignoreStatus = false }: { ignoreStatus?: boolean } = {}
+): boolean {
+  const id = filters.id.trim().replace(/^#/, '');
+  if (id && String(row.requestId) !== id) return false;
+  if (!ignoreStatus && filters.status !== 'all' && row.group !== filters.status) return false;
+  if (filters.company && row.companyId !== filters.company) return false;
+  if (filters.process && row.process !== filters.process) return false;
+  if (filters.person && !row.people.includes(filters.person)) return false;
+  if (filters.date_from || filters.date_to) {
+    // Si escriben las fechas al revés, se toman en el orden correcto.
+    let [from, to] = [filters.date_from, filters.date_to];
+    if (from && to && from > to) [from, to] = [to, from];
+    const day = dateKey(row.createdAt);
+    if (!day) return false;
+    if (from && day < from) return false;
+    if (to && day > to) return false; // "Hasta" incluye todo ese día.
+  }
+  return true;
+}
+
+export type StatusCounts = Record<StatusGroup, number>;
+
+export function countByStatusGroup(rows: Array<Pick<ListRow, 'group'>>): StatusCounts {
+  const counts: StatusCounts = { all: rows.length, pending: 0, done: 0, cancelled: 0 };
+  for (const row of rows) counts[row.group] += 1;
+  return counts;
+}
+
+export type Option = { value: string; label: string };
+export type ListOptions = { companies: Option[]; processes: Option[]; people: Option[] };
+
+const byLabel = (a: Option, b: Option) => a.label.localeCompare(b.label, 'es');
+
+/** Opciones de los filtros sacadas de los mismos datos: nunca sale una opción sin resultados. */
+export function buildListOptions(rows: ListRow[]): ListOptions {
+  const companies = new Map<string, string>();
+  const processes = new Set<string>();
+  const people = new Set<string>();
+  for (const row of rows) {
+    if (row.companyId && row.company) companies.set(row.companyId, row.company);
+    if (row.process) processes.add(row.process);
+    for (const p of row.people) people.add(p);
+  }
+  return {
+    companies: [...companies].map(([value, label]) => ({ value, label })).sort(byLabel),
+    processes: [...processes].map((p) => ({ value: p, label: p })).sort(byLabel),
+    people: [...people].map((p) => ({ value: p, label: p })).sort(byLabel),
+  };
+}
+
+/** Cuántos filtros del panel están puestos (el estado se maneja con las tarjetas). */
+export function activeFilterCount(filters: ListFilters): number {
+  return (['id', 'company', 'process', 'person', 'date_from', 'date_to'] as const).filter((k) =>
+    filters[k].trim()
+  ).length;
+}
+
+/** Resumen para la hoja de filtros del Excel. */
+export function describeListFilters(filters: ListFilters, options: ListOptions): { label: string; value: string }[] {
+  const companyLabel = options.companies.find((c) => c.value === filters.company)?.label;
+  return [
+    { label: 'Estado', value: STATUS_GROUP_LABEL[filters.status] },
+    { label: 'Empresa', value: companyLabel || 'Todas' },
+    { label: 'Proceso', value: filters.process || 'Todos' },
+    { label: 'Persona asignada', value: filters.person || 'Todas' },
+    { label: 'ID', value: filters.id.trim() || 'Todos' },
+    { label: 'Fecha desde', value: filters.date_from || 'Sin límite' },
+    { label: 'Fecha hasta', value: filters.date_to || 'Sin límite' },
+  ];
+}
