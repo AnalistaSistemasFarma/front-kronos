@@ -321,6 +321,7 @@ function ViewRequestPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [loadingUserId, setLoadingUserId] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
+  const [isRequester, setIsRequester] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loadingPermissions, setLoadingPermissions] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -368,6 +369,7 @@ function ViewRequestPage() {
       field_label: string;
       field_type?: string | null;
       editable?: boolean;
+      locked?: boolean;
       config_json?: string | null;
       id_option?: number | null;
       option_label: string | null;
@@ -926,13 +928,16 @@ function ViewRequestPage() {
 
       if (isRequester) {
         setCanEdit(false);
-        console.log('Permission check: solicitante — edición bloqueada', {
+        setIsRequester(true);
+        console.log('Permission check: solicitante — edición bloqueada, cierre permitido', {
           userName,
           requester: request.requester,
           id_requester: request.id_requester,
         });
         return;
       }
+
+      setIsRequester(false);
 
       // El "solicitado" (asignado al proceso) es quien gestiona y puede editar.
       const assignedCandidates = [request.user, request.assignedUserName].map(normalize);
@@ -953,6 +958,7 @@ function ViewRequestPage() {
     } catch (error) {
       console.error('Error checking permissions:', error);
       setCanEdit(false);
+      setIsRequester(false);
       setIsAdmin(false);
     } finally {
       setLoadingPermissions(false);
@@ -984,6 +990,18 @@ function ViewRequestPage() {
       checkEditPermissions();
     }
   }, [request?.id, request?.id_requester, request?.requester, request?.user, request?.assignedUserName, session, userName, session?.user?.id]);
+
+  // El solicitante puede CERRAR su solicitud (Resuelto/Cancelado/Devolver) aunque no
+  // pueda editar los campos, PERO solo cuando él mismo es el asignado de la solicitud
+  // (id del creador == id del asignado). Si el asignado es otra persona, no puede cerrar.
+  // Quien gestiona (canEdit) siempre puede.
+  const assignedId =
+    request?.id_assigned_process_category || request?.id_assigned_category;
+  const isSelfAssigned =
+    !!request?.id_requester &&
+    !!assignedId &&
+    String(request.id_requester) === String(assignedId);
+  const canClose = canEdit || (isRequester && isSelfAssigned);
 
   useEffect(() => {
     const processId = Number(request?.id_process_category);
@@ -2607,7 +2625,7 @@ function ViewRequestPage() {
                     </Title>
                   </Group>
 
-                  {!isRequestResolved() && isEditing && canEdit && (
+                  {!isRequestResolved() && isEditing && canClose && (
                     <Stack>
                       <Select
                         label='Estado de la solicitud'
@@ -2699,7 +2717,7 @@ function ViewRequestPage() {
               {requestFormValues
                 .filter((fv) => fv.field_type !== ORION_SIGNATURE_FIELD_TYPE)
                 .map((fv, fvIndex) => {
-                const canEditField = Boolean(fv.editable) && !isRequestResolved();
+                const canEditField = Boolean(fv.editable) && !isRequestResolved() && !fv.locked;
                 const isEditingThis = editingFieldId === fv.id_form_field;
                 const editButton = canEditField && !isEditingThis && (
                   <ActionIcon
@@ -2711,6 +2729,13 @@ function ViewRequestPage() {
                     <IconPencil size={16} />
                   </ActionIcon>
                 );
+                const lockedBadge = fv.locked ? (
+                  <Tooltip label='Este campo ya se editó y quedó bloqueado'>
+                    <Badge color='gray' variant='light' size='sm' leftSection={<IconLock size={12} />}>
+                      Bloqueado
+                    </Badge>
+                  </Tooltip>
+                ) : null;
                 const editActions = (
                   <Group justify='flex-end' gap='xs'>
                     <Button
@@ -2751,7 +2776,10 @@ function ViewRequestPage() {
                           <Text size='xs' c='dimmed' fw={500} className='uppercase'>
                             {fv.field_label}
                           </Text>
-                          {editButton}
+                          <Group gap='xs'>
+                            {lockedBadge}
+                            {editButton}
+                          </Group>
                         </Group>
                         {isEditingThis ? (
                           <Stack gap='sm'>
@@ -2807,7 +2835,10 @@ function ViewRequestPage() {
                         <Text size='xs' c='dimmed' fw={500} className='uppercase'>
                           {fv.field_label}
                         </Text>
-                        {editButton}
+                        <Group gap='xs'>
+                          {lockedBadge}
+                          {editButton}
+                        </Group>
                       </Group>
                       {isEditingThis ? (
                         <Stack gap='xs' mt={4}>
@@ -3293,9 +3324,9 @@ function ViewRequestPage() {
                   color='blue'
                   onClick={handleStartEditing}
                   leftSection={<IconTicket size={16} />}
-                  disabled={isRequestResolved() || !canEdit || loadingPermissions}
+                  disabled={isRequestResolved() || !canClose || loadingPermissions}
                 >
-                  Editar Solicitud
+                  {canEdit ? 'Editar Solicitud' : 'Cerrar Solicitud'}
                 </Button>
               ) : (
                 <>

@@ -634,7 +634,11 @@ function RequestBoard() {
       for (let i = 0; i < ids.length; i += 500) batches.push(ids.slice(i, i + 500));
       const responses = await Promise.all(
         batches.map((batch) =>
-          fetch(`/api/requests-general/activities-requets?ids=${batch.join(',')}`)
+          fetch('/api/requests-general/activities-requets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: batch }),
+          })
         )
       );
       if (responses.some((r) => !r.ok)) throw new Error('Failed to fetch request tasks');
@@ -1328,9 +1332,11 @@ function RequestBoard() {
       const grouped: Record<number, RequestTask[]> = {};
       for (let i = 0; i < ids.length; i += 500) {
         const batch = ids.slice(i, i + 500);
-        const response = await fetch(
-          `/api/requests-general/activities-requets?ids=${batch.join(',')}`
-        );
+        const response = await fetch('/api/requests-general/activities-requets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: batch }),
+        });
         if (!response.ok) throw new Error('tareas');
         const data = (await response.json()) as RequestTask[];
         for (const task of data) {

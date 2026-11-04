@@ -1,18 +1,26 @@
-// Proxy azul/verde del entorno de PRUEBAS (.230).
+// Proxy azul/verde de front-kronos (PRUEBAS en la .230 y PRODUCCION en serfarma05).
 //
-// Escucha fijo en el puerto publico del entorno (3030: lo usan el tunel
-// cf-kronos-test y el sitio IIS rp-kronos-test) y reenvia cada peticion al
-// color activo (GSS-Front-TEST-A o GSS-Front-TEST-B). El color activo se lee de
-// <estado>/active.json, que escribe scripts/bluegreen/switch.ps1. Cambiar ese
-// archivo cambia el destino en menos de 0,5 s sin cortar las conexiones que ya
-// estan en curso (las peticiones viejas terminan contra el color anterior).
+// Escucha fijo en el puerto publico del entorno y reenvia cada peticion al
+// color activo:
+//   - PRUEBAS: :3030 (tunel cf-kronos-test y sitio IIS rp-kronos-test) ->
+//     GSS-Front-TEST-A / -B.
+//   - PRODUCCION: :3003 (sitio IIS groupsharedservices :8445 por ARR, agentes
+//     que publican directo a http://192.168.10.5:3003, uptime-kuma) ->
+//     GSS-Front-A / -B.
+// El color activo se lee de <estado>/active.json, que escribe
+// scripts/bluegreen/switch.ps1. Cambiar ese archivo cambia el destino en menos
+// de 0,5 s sin cortar las conexiones que ya estan en curso (las peticiones
+// viejas terminan contra el color anterior).
 //
-// Sin dependencias: solo modulos de Node. No toca cabeceras (Host,
-// X-Forwarded-For, cf-connecting-ip, cookies): la app ve lo mismo que veia
-// cuando el tunel y el IIS le hablaban directo. Soporta streaming (SSE) y
-// WebSocket (upgrade).
+// Sin dependencias: solo modulos de Node. No toca Host, cookies, cf-* ni una
+// X-Forwarded-For que ya venga (la de IIS/ARR llega con el puerto pegado y la
+// app ya la sabe leer). Unico agregado: si la peticion llega SIN
+// X-Forwarded-For (un agente que llama directo al puerto), se pone la
+// direccion del socket, que es lo que Next veia antes como cliente; asi la
+// auditoria de IP no pasa a ver 127.0.0.1 (--no-add-xff lo desactiva).
+// Soporta streaming (SSE) y WebSocket (upgrade).
 //
-// Uso (pm2): node proxy.cjs --listen 3030 --state C:\...\front-kronos-test-bluegreen
+// Uso (pm2): node proxy.cjs --listen 3003 --state C:\...\front-kronos-bluegreen --label produccion
 'use strict';
 
 const http = require('node:http');
@@ -28,6 +36,8 @@ function arg(name, def) {
 const LISTEN_PORT = Number(arg('listen', process.env.BLUEGREEN_LISTEN_PORT || '3030'));
 const STATE_DIR = arg('state', process.env.BLUEGREEN_STATE_DIR || __dirname);
 const ACTIVE_FILE = path.join(STATE_DIR, 'active.json');
+const LABEL = arg('label', process.env.BLUEGREEN_LABEL || 'pruebas');
+const ADD_XFF = !process.argv.includes('--no-add-xff');
 const UPSTREAM_HOST = '127.0.0.1';
 const POLL_MS = 400;
 
@@ -67,10 +77,18 @@ function isLocalHealth(req) {
   );
 }
 
+function withClientAddress(req) {
+  // Solo si no viene ninguna: no se reescribe lo que manda IIS/ARR ni el tunel.
+  if (!ADD_XFF || req.headers['x-forwarded-for']) return req.headers;
+  const ra = req.socket.remoteAddress;
+  if (!ra) return req.headers;
+  return { ...req.headers, 'x-forwarded-for': ra };
+}
+
 function forward(req, res, attempt) {
   if (!active) {
     res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8', 'retry-after': '5' });
-    res.end('SynerLink (pruebas): sin destino activo');
+    res.end(`SynerLink (${LABEL}): sin destino activo`);
     return;
   }
   const port = active.port;
@@ -80,7 +98,7 @@ function forward(req, res, attempt) {
       port,
       method: req.method,
       path: req.url,
-      headers: req.headers,
+      headers: withClientAddress(req),
       agent,
     },
     (up) => {
@@ -103,7 +121,7 @@ function forward(req, res, attempt) {
     }
     if (!res.headersSent) {
       res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
-      res.end('SynerLink (pruebas): la aplicacion no responde');
+      res.end(`SynerLink (${LABEL}): la aplicacion no responde`);
     } else {
       res.destroy();
     }
@@ -130,6 +148,9 @@ server.on('upgrade', (req, socket, head) => {
     for (let i = 0; i < req.rawHeaders.length; i += 2) {
       raw += `${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}\r\n`;
     }
+    if (ADD_XFF && !req.headers['x-forwarded-for'] && req.socket.remoteAddress) {
+      raw += `X-Forwarded-For: ${req.socket.remoteAddress}\r\n`;
+    }
     up.write(raw + '\r\n');
     if (head && head.length) up.write(head);
     up.pipe(socket);
@@ -150,7 +171,7 @@ server.on('clientError', (err, socket) => {
 });
 
 server.listen(LISTEN_PORT, () => {
-  console.log(`[bluegreen-proxy] escuchando en :${LISTEN_PORT}; estado en ${ACTIVE_FILE}`);
+  console.log(`[bluegreen-proxy] (${LABEL}) escuchando en :${LISTEN_PORT}; estado en ${ACTIVE_FILE}`);
 });
 
 function shutdown() {

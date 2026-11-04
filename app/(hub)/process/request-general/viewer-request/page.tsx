@@ -191,7 +191,11 @@ function ViewerRequestGeneralPage() {
       for (let i = 0; i < ids.length; i += 500) batches.push(ids.slice(i, i + 500));
       const responses = await Promise.all(
         batches.map((batch) =>
-          fetch(`/api/requests-general/activities-requets?ids=${batch.join(',')}`)
+          fetch('/api/requests-general/activities-requets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: batch }),
+          })
         )
       );
       if (responses.some((r) => !r.ok)) throw new Error('Failed to fetch request tasks');

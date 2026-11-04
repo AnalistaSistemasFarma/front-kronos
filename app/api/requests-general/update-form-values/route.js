@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
+import { fireConditionalTasksForRequest } from '../../../../lib/workflow/fireConditionalTasks.js';
 
 export async function POST(req) {
   try {
@@ -71,6 +72,40 @@ export async function POST(req) {
         );
       }
 
+      const lockedCheckRequest = pool.request();
+      const lockedParams = fieldIds.map((id, i) => {
+        lockedCheckRequest.input(`l${i}`, sql.Int, id);
+        return `@l${i}`;
+      });
+      lockedCheckRequest.input('idRequestLock', sql.Int, idRequest);
+      const lockedResult = await lockedCheckRequest.query(`
+        SELECT id_form_field FROM request_form_value
+        WHERE id_request_general = @idRequestLock AND locked = 1
+          AND id_form_field IN (${lockedParams.join(', ')})
+      `);
+      if (lockedResult.recordset.length > 0) {
+        return NextResponse.json(
+          {
+            error: 'El campo ya fue editado y quedó bloqueado; no se puede volver a editar',
+            fields: lockedResult.recordset.map((r) => r.id_form_field),
+          },
+          { status: 403 }
+        );
+      }
+
+      const condRequest = pool.request();
+      const condParams = fieldIds.map((id, i) => {
+        condRequest.input(`c${i}`, sql.Int, id);
+        return `@c${i}`;
+      });
+      const condResult = await condRequest.query(`
+        SELECT DISTINCT o.id_form_field
+        FROM task_condition_option tco
+        INNER JOIN process_form_field_option o ON o.id = tco.id_option
+        WHERE o.id_form_field IN (${condParams.join(', ')})
+      `);
+      const conditionedFieldIds = new Set(condResult.recordset.map((r) => r.id_form_field));
+
       const transaction = new sql.Transaction(pool);
       try {
         await transaction.begin();
@@ -86,22 +121,25 @@ export async function POST(req) {
               ? String(value.value_text)
               : null;
 
+          const lockedValue = conditionedFieldIds.has(idField) ? 1 : 0;
+
           await new sql.Request(transaction)
             .input('idRequest', sql.Int, idRequest)
             .input('idField', sql.Int, idField)
             .input('idOption', sql.Int, idOption)
             .input('valueText', sql.NVarChar(sql.MAX), valueText)
+            .input('locked', sql.Bit, lockedValue)
             .query(`
               IF EXISTS (
                 SELECT 1 FROM request_form_value
                 WHERE id_request_general = @idRequest AND id_form_field = @idField
               )
                 UPDATE request_form_value
-                SET id_option = @idOption, value_text = @valueText
+                SET id_option = @idOption, value_text = @valueText, locked = @locked
                 WHERE id_request_general = @idRequest AND id_form_field = @idField;
               ELSE
-                INSERT INTO request_form_value (id_request_general, id_form_field, id_option, value_text)
-                VALUES (@idRequest, @idField, @idOption, @valueText);
+                INSERT INTO request_form_value (id_request_general, id_form_field, id_option, value_text, locked)
+                VALUES (@idRequest, @idField, @idOption, @valueText, @locked);
             `);
         }
 
@@ -109,6 +147,12 @@ export async function POST(req) {
       } catch (dbError) {
         await transaction.rollback();
         throw dbError;
+      }
+
+      try {
+        await fireConditionalTasksForRequest(pool, { requestId: idRequest });
+      } catch (fireErr) {
+        console.error('Error disparando tareas condicionadas:', fireErr);
       }
 
       return NextResponse.json(
