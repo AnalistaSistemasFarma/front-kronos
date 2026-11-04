@@ -3,15 +3,31 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { sql, withMssqlPool } from '../../../../lib/mssqlPool';
 import { requestSearchWhere } from '../../../../lib/requests-general/requestSearchSql';
+import { sqlDateRange } from '../../../../lib/requests-general/dateRangeSql';
 
 const MAX_PAGE_SIZE = 500;
+
+/**
+ * Grupos generales de estado (mismos que `statusGroupOf` en lib/requests-general/listFilters.ts):
+ * 1 Abierto, 4 Sin empezar y 7 Devuelta → pending; 2 Resuelto → done; 3 Cancelado → cancelled.
+ * Los ids son constantes (no vienen del usuario), por eso se pueden incrustar en el SQL.
+ */
+const STATUS_GROUP_SQL = {
+  pending: '1, 4, 7',
+  done: '2',
+  cancelled: '3',
+};
 
 /**
  * Lista de solicitudes generales con filtros.
  *
  * Sin `page`: devuelve el arreglo completo (comportamiento histórico).
  * Con `page` (y `pageSize`, por defecto 100): pagina en SQL y devuelve
- *   { rows, total, counts: { open, resolved } }, con los contadores sobre el mismo conjunto filtrado.
+ *   { rows, total, counts: { all, pending, done, cancelled } }.
+ *
+ * `status` acepta un grupo (all|0 = sin filtro, pending = 1/4/7, done = 2, cancelled = 3) o un id
+ * numérico (1, 2, 3, 7...). `counts` se calcula sobre el conjunto filtrado IGNORANDO el estado,
+ * para que las tarjetas no cambien al tocar un estado; `total` sí respeta el estado.
  *
  * Una fila por solicitud: los usuarios asignados al proceso van juntos en `user` ("A, B");
  * antes el JOIN repetía la solicitud una vez por usuario.
@@ -43,11 +59,21 @@ export async function GET(req) {
     let where = ' WHERE 1=1';
     const inputs = [];
 
-    if (status && status !== '0') {
-      where += ' AND rg.status_req = @status';
-      inputs.push(['status', sql.Int, Number.parseInt(status, 10)]);
-    } else if (!status) {
-      where += ' AND sc.id_status_case = 1';
+    // Estado: se arma aparte para poder contar las tarjetas IGNORÁNDOLO (como en Mis solicitudes).
+    let statusClause = '';
+    const statusKey = (status ?? '').trim().toLowerCase();
+    if (!statusKey) {
+      // Sin parámetro: comportamiento histórico (solo abiertas).
+      statusClause = ' AND sc.id_status_case = 1';
+    } else if (statusKey === 'all' || statusKey === '0') {
+      // Todas: sin filtro de estado.
+    } else if (Object.prototype.hasOwnProperty.call(STATUS_GROUP_SQL, statusKey)) {
+      // Grupo general: pending (1, 4, 7), done (2) o cancelled (3).
+      statusClause = ` AND rg.status_req IN (${STATUS_GROUP_SQL[statusKey]})`;
+    } else if (/^\d+$/.test(statusKey)) {
+      // Compatibilidad con ids numéricos (1, 2, 3, 7...).
+      statusClause = ' AND rg.status_req = @status';
+      inputs.push(['status', sql.Int, Number.parseInt(statusKey, 10)]);
     }
     if (id) {
       where += ' AND rg.id = @id';
@@ -57,13 +83,15 @@ export async function GET(req) {
       where += ' AND rg.id_company = @company';
       inputs.push(['company', sql.Int, Number.parseInt(company, 10)]);
     }
-    if (date_from) {
+    // Fechas como DATE: "Hasta" incluye todo ese día y nada del siguiente (sin zona horaria).
+    const dates = sqlDateRange(date_from, date_to);
+    if (dates.from) {
       where += ' AND rg.created_at >= @date_from';
-      inputs.push(['date_from', sql.DateTime, new Date(date_from)]);
+      inputs.push(['date_from', sql.Date, dates.from]);
     }
-    if (date_to) {
-      where += ' AND rg.created_at <= @date_to';
-      inputs.push(['date_to', sql.DateTime, new Date(date_to + 'T23:59:59')]);
+    if (dates.to) {
+      where += ' AND rg.created_at < DATEADD(day, 1, @date_to)';
+      inputs.push(['date_to', sql.Date, dates.to]);
     }
     if (assigned_to) {
       where += `
@@ -76,7 +104,8 @@ export async function GET(req) {
       inputs.push(['assigned_to', sql.NVarChar, assigned_to]);
     }
     if (process) {
-      where += " AND pc.process LIKE '%' + @process + '%'";
+      // Exacto (se elige de la lista): "Compras" ya no trae "Compras importación".
+      where += ' AND pc.process = @process';
       inputs.push(['process', sql.VarChar, process]);
     }
     if (category) {
@@ -115,7 +144,7 @@ export async function GET(req) {
           FOR XML PATH(''), TYPE
         ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS [user]
       ) users_proc
-      ${where}
+      ${where}${statusClause}
       ORDER BY rg.id DESC
     `;
 
@@ -134,22 +163,36 @@ export async function GET(req) {
       const rowsRequest = bind();
       rowsRequest.input('offset', sql.Int, (page - 1) * pageSize);
       rowsRequest.input('pageSize', sql.Int, pageSize);
-      const [rows, totals] = await Promise.all([
+      const [rows, totals, cardCounts] = await Promise.all([
         rowsRequest.query(`${selectRows} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+        // Total de la paginación: conjunto con el estado aplicado.
+        bind().query(`
+          SELECT COUNT(*) AS total
+          ${from}
+          ${where}${statusClause}
+        `),
+        // Tarjetas: mismo conjunto filtrado pero IGNORANDO el estado.
         bind().query(`
           SELECT
-            COUNT(*) AS total,
-            SUM(CASE WHEN LOWER(sc.status) = 'abierto' THEN 1 ELSE 0 END) AS [open],
-            SUM(CASE WHEN LOWER(sc.status) = 'resuelto' THEN 1 ELSE 0 END) AS resolved
+            COUNT(*) AS [all],
+            SUM(CASE WHEN rg.status_req IN (${STATUS_GROUP_SQL.pending}) THEN 1 ELSE 0 END) AS pending,
+            SUM(CASE WHEN rg.status_req IN (${STATUS_GROUP_SQL.done}) THEN 1 ELSE 0 END) AS done,
+            SUM(CASE WHEN rg.status_req IN (${STATUS_GROUP_SQL.cancelled}) THEN 1 ELSE 0 END) AS cancelled
           ${from}
           ${where}
         `),
       ]);
       const t = totals.recordset[0] || {};
+      const c = cardCounts.recordset[0] || {};
       return {
         rows: rows.recordset,
         total: Number(t.total) || 0,
-        counts: { open: Number(t.open) || 0, resolved: Number(t.resolved) || 0 },
+        counts: {
+          all: Number(c.all) || 0,
+          pending: Number(c.pending) || 0,
+          done: Number(c.done) || 0,
+          cancelled: Number(c.cancelled) || 0,
+        },
         page,
         pageSize,
       };
