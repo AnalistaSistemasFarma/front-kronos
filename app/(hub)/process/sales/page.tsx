@@ -28,6 +28,9 @@ export default function VentasPage() {
             <Button component={Link} href='/process/request-general/create-request' leftSection={<IconPlus size={16} />}>
               Crear oferta en Mis solicitudes
             </Button>
+            <Button component={Link} href='/process/sales/pedidos' variant='light' leftSection={<IconFileInvoice size={16} />}>
+              Pedidos de venta
+            </Button>
             <Button component={Link} href='/process/sales/automatizacion' variant='light' leftSection={<IconRobot size={16} />}>
               Automatización de Salesforce
             </Button>
