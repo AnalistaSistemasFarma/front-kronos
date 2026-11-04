@@ -994,7 +994,48 @@ html.dark .mantine-Menu-itemLabel {
   display: flex;
   align-items: center;
   gap: 14px;
+  width: 100%;
   padding: 18px 18px 12px;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  border-radius: inherit;
+}
+
+button.ios-process-card__head {
+  cursor: pointer;
+}
+
+.ios-process-card--closed .ios-process-card__head {
+  padding-bottom: 18px;
+}
+
+.ios-segments .ios-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ios-process-card__titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.ios-process-card__toggle {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--app-text) 40%, transparent);
+  transition: transform 0.18s ease;
+}
+
+.ios-process-card__toggle--open {
+  transform: rotate(180deg);
+}
+
+.dark .ios-process-card__toggle {
+  color: #c5d0e6;
 }
 
 .ios-process-card__glyph {
@@ -1142,6 +1183,10 @@ html.dark .mantine-Menu-itemLabel {
 .dark .ios-process-row__chevron {
   color: #c5d0e6;
   opacity: 0.85;
+}
+
+.ios-process-hub__grid .ios-process-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .ios-empty {

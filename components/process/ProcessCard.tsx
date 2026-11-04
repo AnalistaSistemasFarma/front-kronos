@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
-import { IconChevronRight } from '@tabler/icons-react';
+import React, { useEffect, useState } from 'react';
+import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import {
   accentForProcess,
   headerIconForProcess,
@@ -49,6 +49,10 @@ interface ProcessCardProps {
   className?: string;
   /** Índice en la grilla: rota el color al agregar más procesos. */
   colorIndex?: number;
+  /** Modo comprimir: solo título; al tocar se abre la lista. */
+  compressed?: boolean;
+  /** Si hay búsqueda activa, expandir para no ocultar coincidencias. */
+  forceExpanded?: boolean;
 }
 
 const ProcessCard: React.FC<ProcessCardProps> = ({
@@ -56,30 +60,72 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
   onSubprocessClick,
   className = '',
   colorIndex = 0,
+  compressed = false,
+  forceExpanded = false,
 }) => {
+  const [expanded, setExpanded] = useState(false);
   const accent: ProcessAccent = accentForProcess(colorIndex);
   const HeaderIcon = headerIconForProcess(process.process);
-  const rowIcons = uniqueSubprocessIcons(
-    process.subprocesses.map((s) => s.subprocess),
+  // Íconos calculados en un orden fijo (por id): si los accesos se reordenan por uso,
+  // cada uno conserva su ícono.
+  const stableOrder = [...process.subprocesses].sort((a, b) => a.id_subprocess - b.id_subprocess);
+  const stableIcons = uniqueSubprocessIcons(stableOrder.map((s) => s.subprocess));
+  const iconById = new Map(stableOrder.map((s, i) => [s.id_subprocess, stableIcons[i]]));
+  const rowIcons = process.subprocesses.map((s) => iconById.get(s.id_subprocess)!);
+
+  const total = process.subprocesses.length;
+  // Sin comprimir: lista siempre visible. Con comprimir: cerrada hasta que la abran (o búsqueda).
+  const open = !compressed || forceExpanded || expanded;
+
+  useEffect(() => {
+    if (!compressed) setExpanded(false);
+  }, [compressed]);
+
+  const headClass = 'ios-process-card__head';
+  const headInner = (
+    <>
+      <div className='ios-process-card__glyph' aria-hidden>
+        <HeaderIcon size={22} />
+      </div>
+      <div className='ios-process-card__titles'>
+        <h3 className='ios-process-card__title'>{process.process}</h3>
+        <p className='ios-process-card__meta'>
+          {total} {total === 1 ? 'acceso' : 'accesos'}
+          {compressed && !open && total > 0 ? ' · tocar para ver' : ''}
+        </p>
+      </div>
+      {compressed ? (
+        <IconChevronDown
+          size={18}
+          className={`ios-process-card__toggle ${open ? 'ios-process-card__toggle--open' : ''}`}
+          aria-hidden
+        />
+      ) : null}
+    </>
   );
 
   return (
-    <article className={`ios-process-card ios-process-card--${accent} ${className}`}>
-      <header className='ios-process-card__head'>
-        <div className='ios-process-card__glyph' aria-hidden>
-          <HeaderIcon size={22} />
-        </div>
-        <div className='ios-process-card__titles'>
-          <h3 className='ios-process-card__title'>{process.process}</h3>
-          <p className='ios-process-card__meta'>
-            {process.subprocesses.length}{' '}
-            {process.subprocesses.length === 1 ? 'acceso' : 'accesos'}
-          </p>
-        </div>
-      </header>
+    <article
+      className={`ios-process-card ios-process-card--${accent} ${
+        open ? 'ios-process-card--open' : 'ios-process-card--closed'
+      } ${compressed ? 'ios-process-card--compressible' : ''} ${className}`}
+    >
+      {compressed ? (
+        <button
+          type='button'
+          className={headClass}
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={open}
+          aria-controls={`process-list-${process.id_process}`}
+        >
+          {headInner}
+        </button>
+      ) : (
+        <header className={headClass}>{headInner}</header>
+      )}
 
-      {process.subprocesses.length > 0 && (
-        <ul className='ios-process-list'>
+      {open && total > 0 ? (
+        <ul className='ios-process-list' id={`process-list-${process.id_process}`}>
           {process.subprocesses.map((subprocess, index) => {
             const RowIcon = rowIcons[index];
             return (
@@ -99,7 +145,7 @@ const ProcessCard: React.FC<ProcessCardProps> = ({
             );
           })}
         </ul>
-      )}
+      ) : null}
     </article>
   );
 };
