@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Alert, Badge, Card, Group, ScrollArea, Stack, Table, Text, ThemeIcon } from '@mantine/core';
-import { IconArrowRight, IconFileInvoice, IconFileText, IconHierarchy2, IconPencil, IconReceipt, IconTruckDelivery } from '@tabler/icons-react';
+import { Alert, Badge, Button, Card, Group, ScrollArea, Table, Text } from '@mantine/core';
+import { IconFileInvoice } from '@tabler/icons-react';
 import { STATE_LABELS } from '../../../../lib/sales/states';
 import SalesCreditPanel from './SalesCreditPanel';
+import RelationMap, { type RelDoc } from './RelationMap';
 
 /**
  * Bloque «Oferta de venta en SAP» dentro del detalle de la solicitud: datos del borrador,
@@ -13,8 +14,6 @@ import SalesCreditPanel from './SalesCreditPanel';
  * nada si la solicitud no es de ventas.
  */
 
-type Kind = 'quotation' | 'draft' | 'order' | 'delivery' | 'invoice';
-interface RelDoc { kind: Kind; docEntry: number; docNum: number | null; docDate: string | null; total: number | null; status: string | null; sendState?: string | null }
 interface Sale {
   companyId: number;
   docEntry: number;
@@ -23,18 +22,12 @@ interface Sale {
   draft: Record<string, unknown> & { DocumentLines: Record<string, unknown>[] };
   relations: RelDoc[];
   warnings: string[];
+  sapErrors?: { task: string; error: string }[];
 }
 
 const money = (v: unknown) => (v == null || v === '' ? '—' : `$ ${Number(v).toLocaleString('es-CO', { maximumFractionDigits: 2 })}`);
 const qty = (v: unknown) => (v == null ? '' : Number(v).toLocaleString('es-CO', { maximumFractionDigits: 2 }));
 const day = (v: unknown) => (v ? String(v).slice(0, 10) : '');
-const KIND: Record<Kind, { label: string; icon: React.ReactNode; color: string }> = {
-  quotation: { label: 'Cotización', icon: <IconFileText size={16} />, color: 'gray' },
-  draft: { label: 'Borrador de pedido', icon: <IconPencil size={16} />, color: 'yellow' },
-  order: { label: 'Pedido de venta', icon: <IconFileInvoice size={16} />, color: 'blue' },
-  delivery: { label: 'Entrega', icon: <IconTruckDelivery size={16} />, color: 'teal' },
-  invoice: { label: 'Factura', icon: <IconReceipt size={16} />, color: 'green' },
-};
 const FLOW: Record<string, { label: string; color: string }> = {
   pending: { label: 'En el flujo', color: 'yellow' },
   approved: { label: 'Pedido creado', color: 'green' },
@@ -44,28 +37,11 @@ const FLOW: Record<string, { label: string; color: string }> = {
   cancelled: { label: 'Cancelada', color: 'gray' },
 };
 
-function DocCard({ d }: { d: RelDoc }) {
-  const k = KIND[d.kind];
-  const send = d.sendState ? (STATE_LABELS as Record<string, string>)[d.sendState] ?? d.sendState : null;
-  return (
-    <Card withBorder radius='md' p='sm' miw={190}>
-      <Group gap={6} mb={4} wrap='nowrap'>
-        <ThemeIcon size='sm' variant='light' color={k.color}>{k.icon}</ThemeIcon>
-        <Text size='sm' fw={600}>{k.label}</Text>
-      </Group>
-      <Text size='lg' fw={700}>#{d.docNum ?? d.docEntry}</Text>
-      <Text size='xs' c='dimmed'>{d.docDate ?? ''} · {money(d.total)}</Text>
-      <Group gap={4} mt={4}>
-        {d.status && <Badge size='xs' variant='light' color={d.status === 'Abierto' ? 'blue' : d.status === 'Cancelado' ? 'red' : 'gray'}>{d.status}</Badge>}
-        {send && <Badge size='xs' variant='outline'>{send}</Badge>}
-      </Group>
-    </Card>
-  );
-}
-
 export default function SalesOfferDetail({ requestId, onLoaded, mb }: { requestId: number | string | null | undefined; onLoaded?: (isSale: boolean) => void; mb?: string }) {
   const [sale, setSale] = useState<Sale | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (!requestId) return;
@@ -82,7 +58,7 @@ export default function SalesOfferDetail({ requestId, onLoaded, mb }: { requestI
     return () => {
       cancelled = true;
     };
-  }, [requestId]);
+  }, [requestId, reload]);
 
   if (error) return <Alert color='yellow' title='Oferta de venta en SAP' mb={mb}>{error}</Alert>;
   // Mientras carga no se muestra nada: la mayoría de las solicitudes no son de ventas.
@@ -91,8 +67,6 @@ export default function SalesOfferDetail({ requestId, onLoaded, mb }: { requestI
 
   const d = sale.draft;
   const flow = FLOW[sale.flowStatus];
-  const byKind = (k: Kind) => sale.relations.filter((x) => x.kind === k);
-  const columns: Kind[] = ['quotation', 'draft', 'order', 'delivery', 'invoice'];
 
   return (
     <Card withBorder radius='md' p='md' mb={mb} shadow='sm'>
@@ -107,6 +81,25 @@ export default function SalesOfferDetail({ requestId, onLoaded, mb }: { requestI
         </Group>
       </Group>
       {sale.flowError && <Alert color='red' mb='sm'>{sale.flowError}</Alert>}
+      {sale.sapErrors && sale.sapErrors.length > 0 && (
+        <Alert color='red' mb='sm' title='Una tarea en SAP quedó en error'>
+          {sale.sapErrors.map((e) => (
+            <Text key={e.task} size='sm'><b>{e.task}:</b> {e.error}</Text>
+          ))}
+          <Button mt='xs' size='xs' color='red' variant='light' loading={retrying}
+            onClick={async () => {
+              setRetrying(true);
+              try {
+                await fetch('/api/sales/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId }) });
+              } finally {
+                setRetrying(false);
+                setReload((n) => n + 1);
+              }
+            }}>
+            Reintentar
+          </Button>
+        </Alert>
+      )}
 
       <Group gap='xl' mb='md' wrap='wrap'>
         <div><Text size='xs' c='dimmed'>Cliente</Text><Text size='sm' fw={600}>{String(d.CardName ?? '')}</Text><Text size='xs'>{String(d.CardCode ?? '')}</Text></div>
@@ -119,31 +112,7 @@ export default function SalesOfferDetail({ requestId, onLoaded, mb }: { requestI
       {/* Decisión de cartera: cupo, % de extracupo y cartera por edades del cliente. */}
       {requestId ? <div style={{ marginBottom: 16 }}><SalesCreditPanel requestId={requestId} /></div> : null}
 
-      <Group gap={6} mb='xs'>
-        <IconHierarchy2 size={18} />
-        <Text fw={600} size='sm'>Mapa de relaciones</Text>
-      </Group>
-      <ScrollArea type='auto' mb='md'>
-        <Group align='flex-start' wrap='nowrap' gap='xs'>
-          {columns.map((k, i) => {
-            const items = byKind(k);
-            return (
-              <React.Fragment key={k}>
-                {i > 0 && <IconArrowRight size={18} style={{ marginTop: 42, flexShrink: 0, opacity: items.length ? 1 : 0.3 }} />}
-                <Stack gap='xs'>
-                  {items.length ? items.map((x) => <DocCard key={`${k}-${x.docEntry}`} d={x} />) : (
-                    <Card withBorder radius='md' p='sm' miw={160} style={{ borderStyle: 'dashed', opacity: 0.6 }}>
-                      <Text size='sm' fw={600}>{KIND[k].label}</Text>
-                      <Text size='xs' c='dimmed'>{k === 'quotation' ? 'Sin cotización (p. ej. Salesforce)' : 'Aún no existe'}</Text>
-                    </Card>
-                  )}
-                </Stack>
-              </React.Fragment>
-            );
-          })}
-        </Group>
-      </ScrollArea>
-      {sale.warnings.map((w) => <Text key={w} size='xs' c='orange' mb='xs'>{w}</Text>)}
+      <RelationMap relations={sale.relations} warnings={sale.warnings} />
 
       <ScrollArea type='auto'>
         <Table withTableBorder striped verticalSpacing={4} style={{ minWidth: 760 }}>

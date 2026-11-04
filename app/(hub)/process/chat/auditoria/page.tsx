@@ -245,7 +245,7 @@ export default function AuditoriaAgentesPage() {
   const [sinPermiso, setSinPermiso] = useState(false);
 
   const consultar = useCallback(
-    async (pagina: number) => {
+    async (pagina: number, conversacionInicial?: string) => {
       setCargando(true);
       setError(null);
       const sp = new URLSearchParams();
@@ -254,7 +254,8 @@ export default function AuditoriaAgentesPage() {
       if (agente) sp.set('agente', agente);
       if (empresa) sp.set('empresa', empresa);
       if (usuario.trim()) sp.set('usuario', usuario.trim());
-      if (conversacion.trim()) sp.set('conversacion', conversacion.trim());
+      const conv = (conversacionInicial ?? conversacion).trim();
+      if (conv) sp.set('conversacion', conv);
       if (q.trim()) sp.set('q', q.trim());
       if (conIp) sp.set('conIp', '1');
       sp.set('page', String(pagina));
@@ -280,7 +281,11 @@ export default function AuditoriaAgentesPage() {
 
   useEffect(() => {
     // Solo al abrir: después se consulta con el botón o al cambiar de página.
-    void consultar(1);
+    // ?conversacion=N llega desde «Errores de IA» (conversación afectada).
+    const desdeUrl = new URLSearchParams(window.location.search).get('conversacion') ?? '';
+    const conv = /^\d{1,10}$/.test(desdeUrl) ? desdeUrl : '';
+    if (conv) setConversacion(conv);
+    void consultar(1, conv || undefined);
   }, []);
 
   const verTexto = datos?.verConversaciones === true;
@@ -418,6 +423,16 @@ export default function AuditoriaAgentesPage() {
             style={{ fontSize: 13 }}
           >
             Ver copias de seguridad
+          </Link>
+          <Text size='xs' c='dimmed'>
+            ·
+          </Text>
+          <Link
+            href='/process/chat/auditoria/errores'
+            className='chat-text-muted'
+            style={{ fontSize: 13 }}
+          >
+            Ver errores de IA
           </Link>
         </Group>
 

@@ -27,6 +27,12 @@ export async function GET(request: NextRequest) {
     );
     const link = r.recordset[0];
     if (!link) return NextResponse.json({ sale: null });
+    // Tareas SAP del flujo que quedaron en error (para el botón «Reintentar»).
+    const errs = await pool.request().input('r', sql.Int, requestId).query(`
+      SELECT tpc.task, REPLACE(trg.resolution, N'[sap:error] ', N'') AS error
+      FROM task_request_general trg INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
+      WHERE trg.id_request_general = @r AND trg.id_status = 4 AND trg.resolution LIKE N'[[]sap:error]%';`);
+    const sapErrors = errs.recordset as { task: string; error: string }[];
     if (!(await canReadLinkedSale(session.user.email, requestId, link.id_company))) {
       return NextResponse.json({ error: 'Sin acceso a esta oferta de venta' }, { status: 403 });
     }
@@ -86,6 +92,7 @@ export async function GET(request: NextRequest) {
             },
             relations: docs,
             warnings,
+            sapErrors,
           },
         },
         { headers: { 'Cache-Control': 'no-store' } }

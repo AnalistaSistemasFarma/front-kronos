@@ -19,6 +19,8 @@ export type FlowTaskInstance = {
   displayOrder: number | null;
   idStatus: number | null;
   assigned: string | null;
+  /** Resultado de una Tarea SAP ya ejecutada (p. ej. «Excede el cupo: cupo X de Y»); null en las demás. */
+  sapDetail?: string | null;
 };
 
 export type FlowStepStatus = 'done' | 'current' | 'pending' | 'cancelled';
@@ -33,6 +35,8 @@ export type FlowStep = {
   doneCount: number;
   totalCount: number;
   sequential: boolean;
+  /** Valor que dejó la Tarea SAP de este paso (se muestra en la barra de avance). */
+  detail?: string | null;
 };
 
 export type RequestFlow = {
@@ -69,6 +73,14 @@ function compareOrder(a: [number, number], b: [number, number]): number {
  * la plantilla (firmas de documentos, tareas de una versión anterior del flujo) también salen,
  * en su posición del orden.
  */
+/** Resultado de la última Tarea SAP resuelta del paso, sin el prefijo «Ejecutada en SAP · ». */
+export function sapDetailOf(list: FlowTaskInstance[]): string | null {
+  const done = list.filter((i) => i.idStatus === STATUS_RESOLVED && i.sapDetail);
+  const last = done[done.length - 1]?.sapDetail;
+  if (!last) return null;
+  return last.replace(/^Ejecutada en SAP\s*·\s*/, '').trim().slice(0, 200) || null;
+}
+
 export function buildRequestFlow(template: FlowTemplateTask[], instances: FlowTaskInstance[]): RequestFlow {
   const byTask = new Map<number, FlowTaskInstance[]>();
   for (const inst of instances) {
@@ -87,6 +99,7 @@ export function buildRequestFlow(template: FlowTemplateTask[], instances: FlowTa
     doneCount: list.filter((i) => i.idStatus === STATUS_RESOLVED).length,
     totalCount: list.length,
     sequential,
+    detail: sapDetailOf(list),
   });
 
   for (const t of template) {
