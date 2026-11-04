@@ -154,8 +154,9 @@ export default function SalesOfferDetail({ requestId, onLoaded, mb }: { requestI
         <div><Text size='xs' c='dimmed'>Total</Text><Text size='sm' fw={700}>{money(d.DocTotal)}</Text><Text size='xs' c='dimmed'>IVA {money(d.VatSum)}</Text></div>
       </Group>
 
-      {/* Decisión de cartera: cupo, % de extracupo y cartera por edades del cliente. */}
-      {requestId ? <div style={{ marginBottom: 16 }}><SalesCreditPanel requestId={requestId} /></div> : null}
+      {/* Decisión de cartera: cupo, % de extracupo y cartera por edades del cliente. Solo mientras la
+          oferta está en el flujo de autorización; en borrador o ya resuelta no aplica. */}
+      {requestId && sale.flowStatus === 'pending' ? <div style={{ marginBottom: 16 }}><SalesCreditPanel requestId={requestId} /></div> : null}
 
       <RelationMap relations={sale.relations} warnings={sale.warnings} />
 
