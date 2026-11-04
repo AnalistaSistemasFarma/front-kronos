@@ -196,7 +196,7 @@ export default function PedidosVentaPage() {
         <Card withBorder radius='md' p='md'>
           {error && <Alert color='red' mb='sm'>{error}</Alert>}
           <ScrollArea type='auto'>
-            <Table striped highlightOnHover verticalSpacing='xs' style={{ minWidth: 1100 }}>
+            <Table striped highlightOnHover verticalSpacing='xs' style={{ minWidth: 1200 }}>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>Pedido</Table.Th><Table.Th>Fecha</Table.Th><Table.Th>Entrega</Table.Th><Table.Th>Cliente</Table.Th>
@@ -208,17 +208,17 @@ export default function PedidosVentaPage() {
                 {rows.map((r) => (
                   <Table.Tr key={r.docEntry} onClick={() => openDetail(r)} style={{ cursor: 'pointer' }}>
                     <Table.Td><Group gap={4}><Text fw={600} size='sm'>{r.docNum}</Text>{detailLoading === r.docEntry && <Loader size={12} />}</Group></Table.Td>
-                    <Table.Td>{r.docDate}</Table.Td>
-                    <Table.Td>{r.dueDate}</Table.Td>
+                    <Table.Td style={{ whiteSpace: 'nowrap' }}>{r.docDate}</Table.Td>
+                    <Table.Td style={{ whiteSpace: 'nowrap' }}>{r.dueDate}</Table.Td>
                     <Table.Td><Text size='sm'>{r.cardName}</Text><Text size='xs' c='dimmed'>{r.cardCode}</Text></Table.Td>
                     <Table.Td>{r.numAtCard}</Table.Td>
                     <Table.Td>{r.shipTo}</Table.Td>
-                    <Table.Td style={{ textAlign: 'right' }}>{money(r.total)}</Table.Td>
-                    <Table.Td><Badge variant='light' color={STATUS_COLOR[r.status]}>{r.status}</Badge></Table.Td>
+                    <Table.Td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{money(r.total)}</Table.Td>
+                    <Table.Td><Badge variant='light' color={STATUS_COLOR[r.status]} style={{ overflow: 'visible' }} miw={84}>{r.status}</Badge></Table.Td>
                     <Table.Td>
                       {r.draftDocEntry ? (
                         r.requestId ? (
-                          <Anchor size='sm' component={Link} href={`/process/request-general/view-request?id=${r.requestId}`} onClick={(e) => e.stopPropagation()}>SynerLink #{r.requestId}</Anchor>
+                          <Anchor size='sm' style={{ whiteSpace: 'nowrap' }} component={Link} href={`/process/request-general/view-request?id=${r.requestId}`} onClick={(e) => e.stopPropagation()}>SynerLink #{r.requestId}</Anchor>
                         ) : <Badge size='sm' variant='outline'>SynerLink</Badge>
                       ) : <Text size='xs' c='dimmed'>SAP / otro</Text>}
                     </Table.Td>
