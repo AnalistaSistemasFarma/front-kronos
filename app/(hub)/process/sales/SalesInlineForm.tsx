@@ -336,7 +336,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Pro
                       }}
                       error={errorFor(`DocumentLines[${i}].ItemCode`) ?? (tried && empty(l.ItemCode) ? 'Obligatorio' : undefined)}
                       ariaLabel={`Artículo línea ${i + 1}`}
-                      onExpand={(q) => setSearch({ kind: 'item', line: i, q })}
+                      onExpand={(q) => setSearch({ kind: 'item', line: i, q, cardCode: cardCode || undefined })}
                     />
                   </Table.Td>
                   <Table.Td>
