@@ -1,14 +1,16 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSession } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { Alert, Button, Group, ActionIcon, SimpleGrid } from '@mantine/core';
 import {
   IconLayoutGrid,
   IconList,
   IconX,
   IconFolderOff,
+  IconArrowsMinimize,
+  IconArrowsMaximize,
 } from '@tabler/icons-react';
 import ProcessCard from './ProcessCard';
 import ProcessSearch from './ProcessSearch';
@@ -16,6 +18,19 @@ import ProcessFilters from './ProcessFilters';
 import ProcessSkeleton from './ProcessSkeleton';
 import { useProcessData, type ProcessRecord } from '../../lib/process/ProcessDataContext';
 import { isHubHiddenRequestDashboardSubprocess } from '../../lib/request-general/dashboardRoutes';
+import {
+  buildUsageIndex,
+  normalizeUsageEntries,
+  readCompressedPreference,
+  readLocalUsage,
+  recordLocalOpen,
+  sortByRecurrence,
+  writeCompressedPreference,
+  writeLocalUsage,
+  type SubprocessUsage,
+} from '../../lib/process/processUsage';
+
+const USAGE_API = '/api/processes/usage';
 
 interface FilterOption {
   value: string;
@@ -32,12 +47,62 @@ function ProcessViewInner() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [compressed, setCompressed] = useState(false);
+  const [usage, setUsage] = useState<SubprocessUsage[]>([]);
+
+  const userKey =
+    (session?.user as { id?: string } | undefined)?.id ||
+    session?.user?.email ||
+    '';
+
+  useEffect(() => {
+    setCompressed(readCompressedPreference());
+  }, []);
+
+  const pathname = usePathname();
+
+  // Al entrar (o volver) a Procesos: primero la copia del navegador (pinta sin esperar) y
+  // luego el servidor, que es igual en cualquier equipo. Sin tabla en el servidor queda la copia.
+  useEffect(() => {
+    if (!userKey) {
+      setUsage([]);
+      return;
+    }
+    setUsage(readLocalUsage(userKey));
+    let cancelled = false;
+    fetch(USAGE_API, { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { available?: boolean; entries?: unknown } | null) => {
+        if (cancelled || !data?.available) return;
+        const entries = normalizeUsageEntries(data.entries);
+        writeLocalUsage(userKey, entries);
+        setUsage(entries);
+      })
+      .catch(() => {
+        /* sin red: queda la copia del navegador */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userKey, pathname]);
+
+  const usageIndex = useMemo(() => buildUsageIndex(usage), [usage]);
+
+  // El color de cada tarjeta va con el proceso (orden de siempre), no con su puesto:
+  // si un proceso sube por uso, conserva su color.
+  const colorIndexById = useMemo(() => {
+    const map = new Map<number, number>();
+    processes.forEach((process, index) => map.set(process.id_process, index));
+    return map;
+  }, [processes]);
 
   const enhancedProcesses = useMemo(() => {
-    return processes
+    const visible = processes
       .map((process) => {
-        const subprocesses = process.subprocesses.filter(
-          (sub) => !isHubHiddenRequestDashboardSubprocess(sub)
+        // Dentro del proceso: los accesos que más abre arriba; en empate, el orden de siempre.
+        const subprocesses = sortByRecurrence(
+          process.subprocesses.filter((sub) => !isHubHiddenRequestDashboardSubprocess(sub)),
+          (sub) => usageIndex.bySubprocess.get(sub.id_subprocess)
         );
         return {
           ...process,
@@ -48,7 +113,10 @@ function ProcessViewInner() {
         };
       })
       .filter((process) => process.subprocesses.length > 0);
-  }, [processes]);
+    // Proceso completo: el que más abre primero (desde MIN_USES_TO_PROMOTE aperturas).
+    // En empate se conserva el orden de siempre: abrir algo una vez o de último no lo sube.
+    return sortByRecurrence(visible, (process) => usageIndex.byProcess.get(process.id_process));
+  }, [processes, usageIndex]);
 
   const filteredProcesses = useMemo(() => {
     let filtered = enhancedProcesses;
@@ -113,19 +181,51 @@ function ProcessViewInner() {
     }
   };
 
-  const handleSubprocessClick = (subprocess: Subprocess) => {
-    if (subprocess.subprocess_url) {
-      router.push(subprocess.subprocess_url);
-    } else {
-      router.push(`/process/help-desk/create-ticket?subprocess_id=${subprocess.id_subprocess}`);
-    }
-  };
+  const setCompressedAndPersist = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
+    setCompressed((prev) => {
+      const value = typeof next === 'function' ? next(prev) : next;
+      writeCompressedPreference(value);
+      return value;
+    });
+  }, []);
+
+  const navigateToSubprocess = useCallback(
+    (subprocess: Subprocess) => {
+      if (subprocess.subprocess_url) {
+        router.push(subprocess.subprocess_url);
+      } else {
+        router.push(`/process/help-desk/create-ticket?subprocess_id=${subprocess.id_subprocess}`);
+      }
+    },
+    [router]
+  );
+
+  const handleSubprocessClick = useCallback(
+    (subprocess: Subprocess, parent: { id_process: number; process: string }) => {
+      // Navega primero; el uso se guarda sin reordenar la pantalla actual (si no, la tarjeta
+      // salta arriba antes de abrir). El nuevo orden se ve al volver a Procesos.
+      navigateToSubprocess(subprocess);
+      const ids = { id_subprocess: subprocess.id_subprocess, id_process: parent.id_process };
+      if (userKey) recordLocalOpen(userKey, ids);
+      // keepalive: el aviso al servidor sobrevive aunque la página cambie de inmediato.
+      fetch(USAGE_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_subprocess: ids.id_subprocess }),
+        keepalive: true,
+      }).catch(() => {
+        /* si falla, queda contado en el navegador */
+      });
+    },
+    [userKey, navigateToSubprocess]
+  );
 
   if (!session) {
     return null;
   }
 
   const firstName = session.user?.name?.split(' ')[0] || '';
+  const searching = Boolean(searchTerm.trim());
 
   if (loading && processes.length === 0) {
     return (
@@ -149,7 +249,7 @@ function ProcessViewInner() {
             {firstName ? `Hola, ${firstName}` : 'Procesos'}
           </h1>
           <p className='ios-process-hub__subtitle mb-6'>
-            Elige un módulo para empezar. Cada tarjeta agrupa los accesos de ese proceso.
+            Elige un módulo para empezar. Los procesos que más abres van quedando primero.
           </p>
 
           <ProcessSearch
@@ -173,7 +273,21 @@ function ProcessViewInner() {
             {filteredProcesses.length === 1 ? 'proceso' : 'procesos'}
           </p>
 
-          <Group gap={4}>
+          <Group gap={6}>
+            <button
+              type='button'
+              className={`ios-segment ${compressed ? 'ios-segment--active' : ''}`}
+              onClick={() => setCompressedAndPersist((v) => !v)}
+              aria-pressed={compressed}
+              title={
+                compressed
+                  ? 'Mostrar de nuevo todas las listas abiertas'
+                  : 'Comprimir procesos: solo el título; tócalo para ver los accesos'
+              }
+            >
+              {compressed ? <IconArrowsMaximize size={16} aria-hidden /> : <IconArrowsMinimize size={16} aria-hidden />}
+              {compressed ? 'Expandir' : 'Comprimir'}
+            </button>
             <ActionIcon
               variant={viewMode === 'grid' ? 'filled' : 'subtle'}
               color='gray'
@@ -241,26 +355,40 @@ function ProcessViewInner() {
             )}
           </div>
         ) : viewMode === 'list' ? (
-          <div className='flex flex-col gap-3'>
+          <div className='flex flex-col gap-3 ios-process-hub__grid'>
             {filteredProcesses.map((process, index) => (
               <ProcessCard
                 key={process.id_process}
                 process={process}
-                colorIndex={index}
+                colorIndex={colorIndexById.get(process.id_process) ?? index}
+                compressed={compressed}
+                forceExpanded={searching}
                 onProcessClick={handleProcessClick}
-                onSubprocessClick={handleSubprocessClick}
+                onSubprocessClick={(sub) =>
+                  handleSubprocessClick(sub, {
+                    id_process: process.id_process,
+                    process: process.process,
+                  })
+                }
               />
             ))}
           </div>
         ) : (
-          <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing='lg'>
+          <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing='lg' className='ios-process-hub__grid'>
             {filteredProcesses.map((process, index) => (
               <ProcessCard
                 key={process.id_process}
                 process={process}
-                colorIndex={index}
+                colorIndex={colorIndexById.get(process.id_process) ?? index}
+                compressed={compressed}
+                forceExpanded={searching}
                 onProcessClick={handleProcessClick}
-                onSubprocessClick={handleSubprocessClick}
+                onSubprocessClick={(sub) =>
+                  handleSubprocessClick(sub, {
+                    id_process: process.id_process,
+                    process: process.process,
+                  })
+                }
               />
             ))}
           </SimpleGrid>
