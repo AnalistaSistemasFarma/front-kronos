@@ -2,7 +2,7 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { salesEndpointForUser } from '../../../../lib/sales/access';
-import { PAGE_SIZE, SEARCH_KINDS, searchPath, searchRows, type SearchKind } from '../../../../lib/sales/search';
+import { itemsByCodesPath, PAGE_SIZE, RECENT_LINES, recentItems, SEARCH_KINDS, searchPath, searchRows, type SearchKind } from '../../../../lib/sales/search';
 import { sapGet, sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
@@ -21,12 +21,27 @@ export async function GET(request: NextRequest) {
     const itemCode = (sp.get('itemCode') ?? '').slice(0, 50);
     const cardCode = (sp.get('cardCode') ?? '').slice(0, 50);
     if ((kind === 'warehouse_stock' || kind === 'batches') && !itemCode) return NextResponse.json({ rows: [], page, hasMore: false });
-    if ((kind === 'recent_orders' || kind === 'customer_detail') && !cardCode) return NextResponse.json({ rows: [], page, hasMore: false });
+    if ((kind === 'recent_orders' || kind === 'customer_detail' || kind === 'recent_items') && !cardCode) return NextResponse.json({ rows: [], page, hasMore: false });
     const a = await salesEndpointForUser(session.user.email, companyId);
     if (!a?.endpoint) return NextResponse.json({ error: 'Sin acceso a ventas en esta empresa' }, { status: 403 });
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
     const sap = await sapLogin(a.endpoint);
     try {
+      if (kind === 'recent_items') {
+        // Artículos vendidos recientemente al cliente (últimas facturas) con su stock actual; solo los vendibles y activos.
+        const inv = await sapGet<Record<string, unknown>>(sap, searchPath(kind, { cardCode }), { Prefer: `odata.maxpagesize=${RECENT_LINES}` });
+        const recent = recentItems(inv);
+        if (!recent.length) return NextResponse.json({ rows: [], page: 0, hasMore: false }, { headers: { 'Cache-Control': 'no-store' } });
+        const items = await sapGet<{ value?: Record<string, unknown>[] }>(sap, itemsByCodesPath(recent.map((r) => r.ItemCode)), { Prefer: `odata.maxpagesize=${PAGE_SIZE}` });
+        const byCode = new Map((items.value ?? []).map((it) => [String(it.ItemCode), it]));
+        const rows = recent.flatMap((r) => {
+          const it = byCode.get(r.ItemCode);
+          if (!it || it.Frozen === 'tYES' || it.SalesItem !== 'tYES') return [];
+          const [row] = searchRows('item', { value: [it] });
+          return [{ ...row, recent: true, LastDate: r.LastDate, LastPrice: r.LastPrice, Times: r.Times }];
+        });
+        return NextResponse.json({ rows, page: 0, hasMore: false }, { headers: { 'Cache-Control': 'no-store' } });
+      }
       // SAP pagina a 20 por defecto e ignora $top mayor: se pide el tamaño de página explícito.
       const data = await sapGet<Record<string, unknown>>(sap, searchPath(kind, { q: (sp.get('q') ?? '').slice(0, 60), page, itemCode, cardCode, today }), { Prefer: `odata.maxpagesize=${PAGE_SIZE}` });
       const rows = searchRows(kind, data);

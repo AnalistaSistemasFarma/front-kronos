@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PAGE_SIZE, searchPath, searchRows } from './search';
+import { itemsByCodesPath, PAGE_SIZE, recentItems, searchPath, searchRows } from './search';
 
 describe('búsqueda ampliada · rutas', () => {
   it('clientes: código o nombre, solo clientes válidos, paginado', () => {
@@ -28,5 +28,28 @@ describe('búsqueda ampliada · filas', () => {
       { WarehouseCode: 'B2', InStock: 0, Committed: 0, Ordered: 0 },
     ] });
     expect(rows).toEqual([{ WarehouseCode: 'B1', InStock: 10, Committed: 3, Ordered: 0, Available: 7, Locked: false }]);
+  });
+});
+
+describe('búsqueda ampliada · artículos vendidos recientemente al cliente', () => {
+  const row = (doc: number, date: string, code: string, price: number) => ({
+    Invoices: { DocEntry: doc, DocDate: date },
+    'Invoices/DocumentLines': { ItemCode: code, ItemDescription: `Art ${code}`, UnitPrice: price },
+  });
+  it('ruta: $crossjoin de facturas del cliente, más recientes primero, código escapado', () => {
+    const p = searchPath('recent_items', { cardCode: "90'1" });
+    expect(p).toContain('$crossjoin(Invoices,Invoices/DocumentLines)');
+    expect(p).toContain("Invoices/CardCode eq '90''1'");
+    expect(p).toContain('$orderby=Invoices/DocEntry desc');
+  });
+  it('un artículo por fila, del más reciente; precio mayor de la última factura; veces = facturas', () => {
+    const r = recentItems({ value: [row(9, '2026-10-28', 'A', 104060), row(9, '2026-10-28', 'A', 1), row(9, '2026-10-28', 'B', 1), row(5, '2026-07-23', 'A', 99000)] });
+    expect(r).toEqual([
+      { ItemCode: 'A', ItemName: 'Art A', LastDate: '2026-10-28', LastPrice: 104060, Times: 2 },
+      { ItemCode: 'B', ItemName: 'Art B', LastDate: '2026-10-28', LastPrice: 1, Times: 1 },
+    ]);
+  });
+  it('stock de los recientes por código', () => {
+    expect(itemsByCodesPath(['A', "B'"])).toContain("ItemCode eq 'A' or ItemCode eq 'B'''");
   });
 });

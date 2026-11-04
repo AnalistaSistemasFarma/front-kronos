@@ -336,7 +336,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Pro
                       }}
                       error={errorFor(`DocumentLines[${i}].ItemCode`) ?? (tried && empty(l.ItemCode) ? 'Obligatorio' : undefined)}
                       ariaLabel={`Artículo línea ${i + 1}`}
-                      onExpand={(q) => setSearch({ kind: 'item', line: i, q })}
+                      onExpand={(q) => setSearch({ kind: 'item', line: i, q, cardCode: cardCode || undefined })}
                     />
                   </Table.Td>
                   <Table.Td>
@@ -373,8 +373,8 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Pro
                       onExpand={() => (l.ItemCode ? setSearch({ kind: 'warehouse_stock', line: i, itemCode: l.ItemCode }) : toast.error('Elija primero el artículo para ver su stock por bodega.'))} />
                   </Table.Td>
                   <Table.Td style={{ verticalAlign: 'top' }}>
-                    <SapLookupInput size="xs" companyId={companyId} endpoint="/api/sales/lookup" kind="tax" value={String(l.TaxCode ?? '')}
-                      onChange={(v) => setLine(i, { TaxCode: v })} onSelect={(o) => setLine(i, { TaxCode: o.value })} ariaLabel={`IVA línea ${i + 1}`} />
+                    {/* Solo lectura: el IVA viene parametrizado en SAP (artículo / socio de negocio). */}
+                    <Text size="xs" c={l.TaxCode ? undefined : 'dimmed'} pt={6}>{l.TaxCode || 'Lo asigna SAP'}</Text>
                   </Table.Td>
                   <Table.Td style={{ verticalAlign: 'top' }}>
                     <ActionIcon variant="subtle" color="red" disabled={lines.length === 1} onClick={() => setLines((p) => p.filter((_, j) => j !== i))} aria-label={`Quitar línea ${i + 1}`}>

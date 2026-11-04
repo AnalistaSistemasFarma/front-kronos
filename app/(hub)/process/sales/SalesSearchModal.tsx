@@ -8,6 +8,7 @@ import { IconSearch } from '@tabler/icons-react';
  * Ventana de búsqueda ampliada de la oferta de venta (como «*» + Enter en SAP y los
  * modales de SAPSEND). Clientes y artículos se eligen con clic o Enter; stock por
  * bodega, lotes y pedidos recientes son de consulta (bodega también se elige).
+ * En artículos, si ya hay cliente, primero salen los que se le han facturado hace poco.
  */
 
 export type SearchKind = 'customer' | 'item' | 'warehouse_stock' | 'batches' | 'recent_orders';
@@ -41,7 +42,8 @@ const COLUMNS: Record<SearchKind, { key: string; label: string; render?: (r: Row
   ],
   item: [
     { key: 'ItemCode', label: 'Código' },
-    { key: 'ItemName', label: 'Descripción' },
+    { key: 'ItemName', label: 'Descripción', render: (r) => (<>{String(r.ItemName ?? '')}{r.recent ? <Badge ml={6} size="xs" variant="light" color="teal">Vendido al cliente</Badge> : null}</>) },
+    { key: 'LastDate', label: 'Última venta', render: (r) => (r.recent ? <Text size="xs">{String(r.LastDate)} · {money(r.LastPrice)}{Number(r.Times) > 1 ? ` · ${r.Times} veces` : ''}</Text> : '') },
     { key: 'QuantityOnStock', label: 'En stock', render: (r) => num(r.QuantityOnStock, 2), align: 'right' },
     { key: 'Committed', label: 'Comprometido', render: (r) => num(r.Committed, 2), align: 'right' },
     { key: 'Available', label: 'Disponible', render: (r) => <Text size="sm" fw={600} c={Number(r.Available) <= 0 ? 'red' : undefined}>{num(r.Available, 2)}</Text>, align: 'right' },
@@ -80,6 +82,8 @@ const TITLES: Record<SearchKind, string> = {
 export default function SalesSearchModal({ opened, onClose, companyId, kind, initialQuery = '', itemCode, cardCode, title, onSelect }: Props) {
   const [q, setQ] = useState(initialQuery);
   const [rows, setRows] = useState<Row[]>([]);
+  /** Artículos facturados hace poco al cliente (solo búsqueda de artículos con cliente y sin texto). */
+  const [recent, setRecent] = useState<Row[]>([]);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -116,7 +120,20 @@ export default function SalesSearchModal({ opened, onClose, companyId, kind, ini
     if (!opened) return;
     setQ(initialQuery);
     load(initialQuery, 0, false);
+    setRecent([]);
+    if (kind === 'item' && cardCode) {
+      const params = new URLSearchParams({ companyId, kind: 'recent_items', cardCode });
+      fetch(`/api/sales/search?${params}`, { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : { rows: [] }))
+        .then((d) => setRecent(d.rows ?? []))
+        .catch(() => setRecent([]));
+    }
   }, [opened, kind, itemCode, cardCode]);
+
+  // Sin texto: primero los vendidos al cliente y luego el resto (sin repetir). Con texto: solo la búsqueda.
+  const shown = !q.trim() && recent.length
+    ? [...recent, ...rows.filter((r) => !recent.some((x) => x.ItemCode === r.ItemCode))]
+    : rows;
 
   useEffect(() => {
     if (!opened || !searchable) return;
@@ -141,9 +158,9 @@ export default function SalesSearchModal({ opened, onClose, companyId, kind, ini
           value={q}
           onChange={(e) => setQ(e.currentTarget.value.replace(/\*/g, ''))}
           onKeyDown={(e) => {
-            if (e.key === 'ArrowDown') setActive((a) => Math.min(rows.length - 1, a + 1));
+            if (e.key === 'ArrowDown') setActive((a) => Math.min(shown.length - 1, a + 1));
             if (e.key === 'ArrowUp') setActive((a) => Math.max(0, a - 1));
-            if (e.key === 'Enter' && rows[active]) choose(rows[active]);
+            if (e.key === 'Enter' && shown[active]) choose(shown[active]);
           }}
           mb="sm"
         />
@@ -159,7 +176,7 @@ export default function SalesSearchModal({ opened, onClose, companyId, kind, ini
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {rows.map((r, i) => (
+            {shown.map((r, i) => (
               <Table.Tr
                 key={i}
                 onClick={() => choose(r)}
@@ -174,11 +191,11 @@ export default function SalesSearchModal({ opened, onClose, companyId, kind, ini
             ))}
           </Table.Tbody>
         </Table>
-        {!loading && rows.length === 0 && !error && <Text c="dimmed" size="sm" ta="center" my="md">Sin resultados.</Text>}
+        {!loading && shown.length === 0 && !error && <Text c="dimmed" size="sm" ta="center" my="md">Sin resultados.</Text>}
         {loading && <Group justify="center" my="md"><Loader size="sm" /></Group>}
       </ScrollArea>
       <Group justify="space-between" mt="sm">
-        <Text size="xs" c="dimmed">{selectable ? 'Clic o Enter para elegir · flechas para moverse' : 'Consulta de SAP'} · {rows.length} registro(s)</Text>
+        <Text size="xs" c="dimmed">{selectable ? 'Clic o Enter para elegir · flechas para moverse' : 'Consulta de SAP'} · {shown.length} registro(s){!q.trim() && recent.length ? ` · ${recent.length} vendido(s) recientemente al cliente arriba` : ''}</Text>
         {hasMore && (
           <Button size="xs" variant="light" loading={loading} onClick={() => load(q, page + 1, true)}>
             Cargar más

@@ -45,7 +45,7 @@ export function sanitizeOfferLine(raw: Record<string, unknown>): OfferLine {
     UnitPrice: num(raw.UnitPrice),
     ListPrice: lp == null || lp === '' ? null : num(lp),
     WarehouseCode: txt(raw.WarehouseCode, 8) || undefined,
-    TaxCode: txt(raw.TaxCode, 8) || undefined,
+    // El IVA no lo elige el usuario: SAP aplica el parametrizado del artículo / socio de negocio.
   };
 }
 

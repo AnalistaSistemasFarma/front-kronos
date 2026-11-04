@@ -25,7 +25,7 @@ BEGIN TRY
       [activo]              BIT           NOT NULL CONSTRAINT [sales_automation_config_activo_df] DEFAULT 0,
       [simulacion]          BIT           NOT NULL CONSTRAINT [sales_automation_config_simulacion_df] DEFAULT 1,
       [intervalo_min]       INT           NOT NULL CONSTRAINT [sales_automation_config_intervalo_df] DEFAULT 10,
-      [user_sign]           INT           NULL,
+      [user_sign]           NVARCHAR(100) NULL,  -- UserSign separados por coma, p. ej. «14,30»
       [desde_fecha]         DATE          NULL,
       [id_user_solicitante] NVARCHAR(50)  NULL,
       [id_job]              INT           NULL,

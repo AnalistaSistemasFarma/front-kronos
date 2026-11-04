@@ -1825,7 +1825,7 @@ function RequestBoard() {
             {/* Activity Search Section */}
             <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
               <Group justify='space-between' mb='xs'>
-                <Text fw={600} size='sm' c='blue.9'>
+                <Text fw={600} size='sm' c='var(--app-accent, var(--mantine-color-blue-7))'>
                   ¿No sabes qué categoría elegir?
                 </Text>
                 <Button
@@ -1869,7 +1869,7 @@ function RequestBoard() {
                       className='max-h-64 overflow-y-auto'
                     >
                       <Stack gap='xs'>
-                        <Text size='xs' c='gray.5' fw={500}>
+                        <Text size='xs' c='dimmed' fw={500}>
                           {searchResults.length}{' '}
                           {searchResults.length === 1 ? 'resultado' : 'resultados'} encontrado
                           {searchResults.length === 1 ? '' : 's'}
@@ -1882,7 +1882,7 @@ function RequestBoard() {
                             p='sm'
                             radius='md'
                             withBorder
-                            className='cursor-pointer hover:bg-blue-50 hover:border-blue-300 transition-all duration-200'
+                            className='cursor-pointer hover:bg-blue-500/10 hover:border-blue-400 transition-all duration-200'
                             onClick={() => handleActivitySelect(result)}
                           >
                             <Stack gap={4}>
@@ -1890,11 +1890,11 @@ function RequestBoard() {
                                 <Badge size='xs' variant='light' color='blue'>
                                   {result.category}
                                 </Badge>
-                                <Text size='xs' c='gray.5' fw={500}>
+                                <Text size='xs' c='dimmed' fw={500}>
                                   {result.process}
                                 </Text>
                               </Group>
-                              <Text size='sm' lineClamp={2} c='gray.8'>
+                              <Text size='sm' lineClamp={2} c='var(--app-text, var(--mantine-color-gray-8))'>
                                 {result.description || result.label}
                               </Text>
                             </Stack>
@@ -1906,7 +1906,7 @@ function RequestBoard() {
                   )}
 
                   {activitySearch && searchResults.length === 0 && (
-                    <Text size='sm' c='gray.5' ta='center' py='md'>
+                    <Text size='sm' c='dimmed' ta='center' py='md'>
                       No se encontraron actividades que coincidan con tu búsqueda.
                     </Text>
                   )}

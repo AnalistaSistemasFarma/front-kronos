@@ -19,7 +19,8 @@ describe('payloads de SAP', () => {
   it('cotización en ER con precio de lista en la línea', () => {
     const q = buildQuotationPayload(h, l, '2026-10-30', 'traza');
     expect(q).toMatchObject({ CardCode: 'C001', DocDate: '2026-10-30', U_SEND_State: 'ER', U_SEND_TraCreatedBy: 'traza' });
-    expect(q.DocumentLines[0]).toEqual({ ItemCode: 'A1', Quantity: 2, UnitPrice: 1500.5, U_SEND_PriceLP: 1500, WarehouseCode: 'B1101', TaxCode: 'IVA19' });
+    // El IVA que mande el navegador se ignora: SAP aplica el parametrizado.
+    expect(q.DocumentLines[0]).toEqual({ ItemCode: 'A1', Quantity: 2, UnitPrice: 1500.5, U_SEND_PriceLP: 1500, WarehouseCode: 'B1101' });
   });
   it('borrador en B enlazado a la línea REAL de la cotización', () => {
     const d = buildOfferDraftPayload(h, l, { DocEntry: 77, DocumentLines: [{ LineNum: 3 }] }, '2026-10-30', 't');

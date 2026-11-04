@@ -17,7 +17,7 @@ import toast from 'react-hot-toast';
 
 type Company = { idCompany: number; companyName: string };
 type Config = {
-  activo: boolean; simulacion: boolean; intervalo_min: number; user_sign: number | null; desde_fecha: string | null;
+  activo: boolean; simulacion: boolean; intervalo_min: number; user_signs: number[]; desde_fecha: string | null;
   solicitanteEmail: string | null; en_ejecucion_desde: string | null; updated_at: string | null;
 } | null;
 type Doc = {
@@ -59,7 +59,7 @@ export default function VentasAutomatizacionPage() {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [form, setForm] = useState({ activo: false, simulacion: true, intervalo_min: 10, user_sign: '' as string | number, desde_fecha: '', solicitanteEmail: '' });
+  const [form, setForm] = useState({ activo: false, simulacion: true, intervalo_min: 10, user_signs: '', desde_fecha: '', solicitanteEmail: '' });
   const [pending, setPending] = useState<Pending[] | null>(null);
   const [sel, setSel] = useState<number[]>([]);
   const [simRes, setSimRes] = useState<Record<number, { destino?: string | null; detalle?: string; error?: string; estado: string }>>({});
@@ -73,7 +73,7 @@ export default function VentasAutomatizacionPage() {
       const c = d.config;
       setForm({
         activo: Boolean(c?.activo), simulacion: c ? Boolean(c.simulacion) : true, intervalo_min: c?.intervalo_min ?? 10,
-        user_sign: c?.user_sign ?? '', desde_fecha: c?.desde_fecha ?? '', solicitanteEmail: c?.solicitanteEmail ?? '',
+        user_signs: (c?.user_signs ?? []).join(', '), desde_fecha: c?.desde_fecha ?? '', solicitanteEmail: c?.solicitanteEmail ?? '',
       });
     } catch (e) {
       setError((e as Error).message);
@@ -142,7 +142,7 @@ export default function VentasAutomatizacionPage() {
               <Badge size='lg' color={cfg?.activo ? (cfg.simulacion ? 'yellow' : 'green') : 'gray'} variant='light'>
                 {cfg?.activo ? (cfg.simulacion ? 'Activa · simulación' : 'Activa') : 'Pausada'}
               </Badge>
-              <Button leftSection={<IconPlayerPlay size={16} />} loading={busy === 'ejecutar'} disabled={!cfg || cfg.user_sign == null} onClick={() => run('ejecutar')}>
+              <Button leftSection={<IconPlayerPlay size={16} />} loading={busy === 'ejecutar'} disabled={!cfg || !cfg.user_signs.length} onClick={() => run('ejecutar')}>
                 Ejecutar ahora
               </Button>
             </Group>
@@ -235,7 +235,7 @@ export default function VentasAutomatizacionPage() {
               <Group justify='space-between' mb='sm' wrap='wrap'>
                 <Text fw={600}>Buscar pendientes → Simular → Pasar al flujo</Text>
                 <Group gap='xs'>
-                  <Button variant='light' leftSection={<IconSearch size={16} />} loading={busy === 'buscar'} disabled={!cfg || cfg.user_sign == null}
+                  <Button variant='light' leftSection={<IconSearch size={16} />} loading={busy === 'buscar'} disabled={!cfg || !cfg.user_signs.length}
                     onClick={async () => {
                       setBusy('buscar');
                       try {
@@ -260,7 +260,7 @@ export default function VentasAutomatizacionPage() {
                   </Button>
                 </Group>
               </Group>
-              {cfg?.user_sign == null && <Alert color='yellow' variant='light' mb='sm'>Configure primero el usuario SAP de la integración en «Configuración».</Alert>}
+              {!cfg?.user_signs?.length && <Alert color='yellow' variant='light' mb='sm'>Configure primero el usuario SAP de la integración en «Configuración».</Alert>}
               {pending == null ? (
                 <Text c='dimmed' size='sm'>Pulse «Buscar pendientes» para ver los borradores de Salesforce que aún no pasan al flujo (máximo 30 por acción).</Text>
               ) : pending.length === 0 ? (
@@ -315,10 +315,12 @@ export default function VentasAutomatizacionPage() {
                 <Switch label='Automatización activa (corre sola según el intervalo)' checked={form.activo} onChange={(e) => setForm({ ...form, activo: e.currentTarget.checked })} />
                 <Switch label='Modo simulación (no crea solicitudes ni toca SAP)' checked={form.simulacion} onChange={(e) => setForm({ ...form, simulacion: e.currentTarget.checked })} />
                 <NumberInput label='Cada cuántos minutos corre' min={5} max={1440} value={form.intervalo_min} onChange={(v) => setForm({ ...form, intervalo_min: Number(v) || 10 })} />
-                <NumberInput label='Usuario SAP que crea los borradores (UserSign)'
-                  description='El usuario de la integración de Salesforce (ServiceLayer_01). En la base productiva de OLP es el 30; en la de pruebas puede ser otro.'
-                  min={1} value={form.user_sign} onChange={(v) => setForm({ ...form, user_sign: v === '' ? '' : Number(v) })} />
-                <TextInput label='Tomar borradores desde (fecha)' type='date' value={form.desde_fecha} onChange={(e) => setForm({ ...form, desde_fecha: e.currentTarget.value })} />
+                <TextInput label='Usuarios SAP que crean los borradores (UserSign)'
+                  description='Uno o varios, separados por coma (por ejemplo «14, 30»). Toma los borradores de cualquiera de ellos. El de la integración de Salesforce es ServiceLayer_01.'
+                  placeholder='14, 30' value={form.user_signs} onChange={(e) => setForm({ ...form, user_signs: e.currentTarget.value })} />
+                <TextInput label='Fecha del documento desde (opcional)' type='date'
+                  description='Solo toma borradores con fecha de documento igual o posterior. Vacío = sin filtro de fecha.'
+                  value={form.desde_fecha} onChange={(e) => setForm({ ...form, desde_fecha: e.currentTarget.value })} />
                 <TextInput label='Solicitante en SynerLink (correo)' description='A nombre de quién quedan las solicitudes creadas por la automatización.'
                   value={form.solicitanteEmail} onChange={(e) => setForm({ ...form, solicitanteEmail: e.currentTarget.value })} />
                 {cfg?.updated_at && <Text size='xs' c='dimmed'>Última actualización: {fmt(cfg.updated_at)}</Text>}

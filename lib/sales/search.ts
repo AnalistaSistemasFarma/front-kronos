@@ -8,8 +8,10 @@ import { odataString } from '../purchases/drafts';
  * O por nombre en la misma caja.
  */
 
-export type SearchKind = 'customer' | 'item' | 'warehouse_stock' | 'batches' | 'recent_orders' | 'customer_detail';
-export const SEARCH_KINDS: SearchKind[] = ['customer', 'item', 'warehouse_stock', 'batches', 'recent_orders', 'customer_detail'];
+export type SearchKind = 'customer' | 'item' | 'warehouse_stock' | 'batches' | 'recent_orders' | 'customer_detail' | 'recent_items';
+export const SEARCH_KINDS: SearchKind[] = ['customer', 'item', 'warehouse_stock', 'batches', 'recent_orders', 'customer_detail', 'recent_items'];
+/** Líneas de factura del cliente que se revisan para «artículos vendidos recientemente». */
+export const RECENT_LINES = 200;
 export const PAGE_SIZE = 50;
 
 const key = (v: string) => `'${v.replace(/'/g, "''")}'`;
@@ -38,6 +40,9 @@ export function searchPath(kind: SearchKind, p: { q?: string; page?: number; ite
     }
     case 'customer_detail':
       return `BusinessPartners(${key(p.cardCode ?? '')})?$select=CardCode,CardName,ShipToDefault,BilltoDefault,BPAddresses`;
+    case 'recent_items':
+      // Líneas de las facturas del cliente, de la más reciente hacia atrás (solo los campos necesarios, vía $crossjoin).
+      return `$crossjoin(Invoices,Invoices/DocumentLines)?$expand=Invoices($select=DocEntry,DocDate),Invoices/DocumentLines($select=ItemCode,ItemDescription,UnitPrice)&$filter=Invoices/DocEntry eq Invoices/DocumentLines/DocEntry and Invoices/CardCode eq ${key(p.cardCode ?? '')} and Invoices/Cancelled eq 'tNO'&$orderby=Invoices/DocEntry desc&$top=${RECENT_LINES}`;
     case 'recent_orders':
       return `Orders?$select=DocEntry,DocNum,DocDate,DocTotal,DocumentStatus,NumAtCard&$filter=CardCode eq ${key(p.cardCode ?? '')}&$orderby=DocEntry desc&$top=20`;
   }
@@ -89,4 +94,37 @@ export function searchRows(kind: SearchKind, data: Record<string, unknown>): Rec
     return value.map((r) => ({ Batch: s(r.Batch), ExpirationDate: s(r.ExpirationDate).slice(0, 10), ManufacturingDate: s(r.ManufacturingDate).slice(0, 10), Status: s(r.Status) }));
   }
   return value.map((r) => ({ DocNum: n(r.DocNum), DocDate: s(r.DocDate).slice(0, 10), DocTotal: n(r.DocTotal), DocumentStatus: s(r.DocumentStatus) === 'bost_Open' ? 'Abierto' : 'Cerrado', NumAtCard: s(r.NumAtCard) }));
+}
+
+export interface RecentItem { ItemCode: string; ItemName: string; LastDate: string; LastPrice: number | null; Times: number }
+
+/** Artículos de las últimas facturas del cliente, del más reciente al más antiguo (uno por artículo).
+ *  Recibe las filas del $crossjoin Invoices × líneas. Precio = el mayor de la última factura (las líneas en $1 son obsequios). PURA. */
+export function recentItems(data: Record<string, unknown>, max = 30): RecentItem[] {
+  const out = new Map<string, RecentItem & { docs: Set<number>; lastDoc: number }>();
+  for (const row of (data.value as Record<string, unknown>[] | undefined) ?? []) {
+    const inv = (row.Invoices ?? {}) as Record<string, unknown>;
+    const l = (row['Invoices/DocumentLines'] ?? {}) as Record<string, unknown>;
+    const code = s(l.ItemCode);
+    if (!code) continue;
+    const doc = Number(inv.DocEntry);
+    const price = n(l.UnitPrice);
+    const prev = out.get(code);
+    if (!prev) {
+      out.set(code, { ItemCode: code, ItemName: s(l.ItemDescription), LastDate: s(inv.DocDate).slice(0, 10), LastPrice: price, Times: 1, docs: new Set([doc]), lastDoc: doc });
+      continue;
+    }
+    if (doc === prev.lastDoc && price != null && (prev.LastPrice == null || price > prev.LastPrice)) prev.LastPrice = price;
+    if (!prev.docs.has(doc)) {
+      prev.docs.add(doc);
+      prev.Times = prev.docs.size;
+    }
+  }
+  return [...out.values()].slice(0, max).map(({ docs: _d, lastDoc: _l, ...r }) => r);
+}
+
+/** Stock de una lista de artículos (los recientes), con los mismos campos de la búsqueda de artículos. PURA. */
+export function itemsByCodesPath(codes: string[]): string {
+  const f = codes.map((c) => `ItemCode eq ${key(c)}`).join(' or ');
+  return `Items?$select=ItemCode,ItemName,QuantityOnStock,QuantityOrderedByCustomers,DefaultWarehouse,SalesUnit,Frozen,SalesItem&$filter=${f}`;
 }
