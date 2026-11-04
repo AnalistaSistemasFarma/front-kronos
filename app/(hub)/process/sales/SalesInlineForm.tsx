@@ -193,7 +193,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Pro
       onDone({
         ok: true,
         message: data.saved
-          ? `Oferta de venta #${data.docEntry} guardada en borrador en SAP. Envíela al flujo desde Procesos → Ventas → «Mis ofertas en borrador».`
+          ? `Oferta de venta #${data.docEntry} guardada en borrador: solicitud #${data.idRequest ?? '—'} «En Borrador». Ábrala en Mis solicitudes para editarla o enviarla a pedido.`
           : `Oferta de venta #${data.docEntry} creada. El flujo revisa precio y cupo y la envía a autorización si hace falta.`,
       });
     } catch {

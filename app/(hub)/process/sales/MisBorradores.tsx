@@ -63,7 +63,7 @@ export default function MisBorradores() {
   const act = async (d: Draft, accion: 'enviar' | 'anular') => {
     if (
       accion === 'enviar' &&
-      !window.confirm(`¿Enviar la oferta #${d.docNum ?? d.docEntry} a pedido en firme? Se revisa precio y cupo: si no requiere autorización se crea el pedido en SAP; si la requiere, pasa a Autorizaciones.`)
+      !window.confirm(`¿Enviar la oferta #${d.docNum ?? d.docEntry} a pedido? Entra al flujo de venta: se revisa precio y cupo; si no requiere autorización se crea el pedido en SAP; si la requiere, pasa a Autorizaciones.`)
     )
       return;
     if (accion === 'anular' && !window.confirm(`¿Anular la oferta #${d.docNum ?? d.docEntry}? Se cancela la cotización y se cierra el borrador en SAP.`)) return;
@@ -72,7 +72,7 @@ export default function MisBorradores() {
       const r = await fetch('/api/sales/drafts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ companyId: Number(companyId), docEntry: d.docEntry, accion }) });
       const x = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(x.error || 'No se pudo completar la acción');
-      toast.success(accion === 'enviar' ? `Oferta enviada a pedido en firme: solicitud #${x.idRequest}` : 'Oferta anulada');
+      toast.success(accion === 'enviar' ? `Oferta enviada a pedido: solicitud #${x.idRequest}` : 'Oferta anulada');
       await load();
     } catch (e) {
       toast.error((e as Error).message);
@@ -123,7 +123,7 @@ export default function MisBorradores() {
                   <Table.Td>
                     <Group gap={6} wrap='nowrap'>
                       <Button size='xs' variant='light' leftSection={<IconPencil size={14} />} disabled={busy === d.docEntry || !d.open} onClick={() => setEditing(d)}>Editar</Button>
-                      <Button size='xs' leftSection={<IconSend size={14} />} loading={busy === d.docEntry} disabled={!d.open} onClick={() => act(d, 'enviar')}>Enviar a pedido en firme</Button>
+                      <Button size='xs' leftSection={<IconSend size={14} />} loading={busy === d.docEntry} disabled={!d.open} onClick={() => act(d, 'enviar')}>Enviar a pedido</Button>
                       <Button size='xs' variant='subtle' color='red' leftSection={<IconX size={14} />} disabled={busy === d.docEntry || !d.open} onClick={() => act(d, 'anular')}>Anular</Button>
                     </Group>
                   </Table.Td>
