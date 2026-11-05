@@ -1649,7 +1649,7 @@ function ViewRequestPage() {
                                 radius='xl'
                                 color={isCurrentUser ? 'white' : 'gray'}
                               >
-                                {note.createdBy.charAt(0).toUpperCase()}
+                                {(note.createdBy || 'S').charAt(0).toUpperCase()}
                               </Avatar>
                               <Text
                                 size='xs'

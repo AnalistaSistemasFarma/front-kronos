@@ -17,7 +17,7 @@ export async function GET(req) {
     const pool = await sql.connect(sqlConfig);
 
     const query = `
-      SELECT n.id_note, n.note, u.name as 'createdBy', n.creation_date
+      SELECT n.id_note, n.note, COALESCE(u.name, n.created_by, N'SynerLink') as 'createdBy', n.creation_date
       FROM notes n
       INNER JOIN [user] u ON u.id = n.created_by
       WHERE n.id_process_category = @id_process_category

@@ -7,6 +7,9 @@ import {
 } from '../../../../lib/notificationEvents.js';
 import { syncAuthorizationToSapsend } from '../../../../lib/sapsend/authorizationStatus.js';
 import { onAuthorizationDecision as onPurchaseAuthorizationDecision } from '../../../../lib/purchases/authorization';
+import { runSapExecutors } from '../../../../lib/workflow-sap/engine';
+import { runAfterSettled } from '../../../../lib/workflow-sap/afterDecision';
+import { onSalesAuthorizationDecision } from '../../../../lib/sales/flow';
 import { advanceSequentialTask } from '../../../../lib/workflow/advanceSequentialTask.js';
 import { closeRequestGeneral } from '../../../../lib/workflow/closeRequestGeneral.js';
 import { resolveSessionUser } from '../../../../lib/chat/http';
@@ -258,6 +261,8 @@ export async function POST(req) {
 
       const prevStatus = prevRow?.id_status ?? null;
       const nextStatus = id_status ?? null;
+      /** Escrituras en SAP de la decisión del autorizador (Compras y Ventas), si las hubo. */
+      let sapDecisions = [];
 
       if (isActivityResolvedStatus(nextStatus) && !isActivityResolvedStatus(prevStatus)) {
         console.log(`${TAG} 4) Notificando "Actividad resuelta" a los interesados de la solicitud ${prevRow?.id_request_general}.`);
@@ -285,9 +290,23 @@ export async function POST(req) {
         );
         // COMPRAS: si la solicitud autoriza un borrador de compra, publicar la firme o rechazarlo
         // en SAP. No bloquea; el gate (¿es de compras?) vive dentro (purchase_authorization).
-        fireAndForgetNotification(
-          onPurchaseAuthorizationDecision(prevRow?.id_request_general, Number(nextStatus) === 2, resolution)
+        const purchaseDecision = onPurchaseAuthorizationDecision(
+          prevRow?.id_request_general,
+          Number(nextStatus) === 2,
+          resolution
         );
+        fireAndForgetNotification(purchaseDecision);
+        // VENTAS: registra la decisión en el borrador de venta y, si es rechazo, lo deja en
+        // NAP / NADC / NADA según la etapa. El gate (¿es de ventas?) vive dentro (sales_authorization).
+        const salesDecision = onSalesAuthorizationDecision(
+          prevRow?.id_request_general,
+          Number(nextStatus) === 2,
+          resolution
+        );
+        fireAndForgetNotification(salesDecision);
+        // Las Tareas SAP siguientes (paso 5) esperan a que la decisión quede escrita en SAP:
+        // ambas modifican el mismo borrador y SAP rechazaba la primera con −2039.
+        sapDecisions = [purchaseDecision, salesDecision];
       }
 
       // Nota en la bitácora de la solicitud cuando se resuelve una tarea de AUTORIZACIÓN, a nombre del
@@ -364,6 +383,11 @@ export async function POST(req) {
             });
           }
         }
+
+        // Tareas «Ejecutora SAP» que quedaron listas (siguiente secuencial o en paralelo). No bloquea.
+        fireAndForgetNotification(
+          runAfterSettled(sapDecisions, () => runSapExecutors(prevRow.id_request_general))
+        );
       } else if (justResolved && isFirmaAuthorization) {
         console.log(`${TAG} 5b) Auth FIRMA/Orion: no se avanza workflow secuencial.`);
       } else if (Number(nextStatus) === 3) {

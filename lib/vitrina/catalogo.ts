@@ -62,6 +62,8 @@ export interface CatalogoFila {
   /** Grupos terapéuticos (catálogo común a las empresas). */
   grupos?: { grupo: { nombre: string; activo: boolean; orden: number } }[];
   imagenes: { id_imagen: number; tipo: string; vigente: boolean }[];
+  /** Modelos 3D (GLB) cargados; sale el vigente más reciente. Opcional: sin la tabla, no hay modelo. */
+  modelos3d?: CatalogoFilaModelo3d[];
   exclusividades: {
     cliente_beneficiario: string;
     pais: string | null;
@@ -70,6 +72,17 @@ export interface CatalogoFila {
     vigente_desde: Date | null;
     vigente_hasta: Date | null;
   }[];
+}
+
+/** Decimal de Prisma (o número) de las dimensiones en cm. */
+export type DecimalLike = number | string | { toString(): string } | null | undefined;
+
+export interface CatalogoFilaModelo3d {
+  id_modelo: number;
+  vigente: boolean;
+  ancho_cm?: DecimalLike;
+  alto_cm?: DecimalLike;
+  profundo_cm?: DecimalLike;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,6 +112,13 @@ export interface CatalogoExclusividad {
 
 export type CatalogoImagenes = Record<VitrinaImagenTipo, number | null>;
 
+/** Modelo 3D vigente de la presentación (se sirve por /api/vitrina/modelos-3d/<id>). */
+export interface CatalogoModelo3d {
+  id: number;
+  /** Medidas del empaque en cm, si Diseño las cargó (para el comparador futuro). */
+  dimensionesCm: { ancho: number | null; alto: number | null; profundo: number | null } | null;
+}
+
 export interface CatalogoItem {
   id: number;
   molecula: string;
@@ -122,6 +142,8 @@ export interface CatalogoItem {
   canales: VitrinaCanal[];
   codigos: CatalogoCodigo[];
   imagenes: CatalogoImagenes;
+  /** Modelo 3D vigente, o null. Sale en los dos modos, igual que las imágenes de empaque. */
+  modelo3d: CatalogoModelo3d | null;
   /** Vacío en el modo presentación. */
   exclusividades: CatalogoExclusividad[];
 }
@@ -163,6 +185,24 @@ export function imagenesVigentes(imagenes: CatalogoFila['imagenes']): CatalogoIm
     if (out[t] === null || img.id_imagen > (out[t] as number)) out[t] = img.id_imagen;
   }
   return out;
+}
+
+const aNumero = (v: DecimalLike): number | null => {
+  if (v === null || v === undefined) return null;
+  const n = Number(typeof v === 'number' ? v : v.toString());
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+
+/**
+ * Modelo 3D vigente más reciente (id mayor = carga más reciente), o null. Como las imágenes:
+ * se muestra si la presentación se muestra (las reglas de visibilidad son las de la presentación).
+ */
+export function modelo3dVigente(modelos: readonly CatalogoFilaModelo3d[] | undefined): CatalogoModelo3d | null {
+  let m: CatalogoFilaModelo3d | null = null;
+  for (const x of modelos ?? []) if (x.vigente && (!m || x.id_modelo > m.id_modelo)) m = x;
+  if (!m) return null;
+  const d = { ancho: aNumero(m.ancho_cm), alto: aNumero(m.alto_cm), profundo: aNumero(m.profundo_cm) };
+  return { id: m.id_modelo, dimensionesCm: d.ancho === null && d.alto === null && d.profundo === null ? null : d };
 }
 
 /** Una presentación tal como la ve el comercial en el modo pedido, o null si no se muestra. */
@@ -226,6 +266,7 @@ export function itemDeCatalogo(fila: CatalogoFila, modo: VitrinaModo, hoy: strin
     canales: [...new Set(codigos.map((c) => c.canal))].filter((c) => c !== 'SIN_DATO').sort(compara) as VitrinaCanal[],
     codigos,
     imagenes: imagenesVigentes(fila.imagenes),
+    modelo3d: modelo3dVigente(fila.modelos3d),
     exclusividades,
   };
 }

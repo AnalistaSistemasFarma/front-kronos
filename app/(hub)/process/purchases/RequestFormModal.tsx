@@ -6,6 +6,10 @@ import {
 } from '@mantine/core';
 import { IconPlus, IconTrash } from '@tabler/icons-react';
 import AttachmentsPanel from './AttachmentsPanel';
+import SapLookupInput from './SapLookupInput';
+import { FIELD_LOOKUP } from '../../../../lib/purchases/lookups';
+import { sapErrorText } from '../../../../lib/purchases/sapErrorHint';
+import toast from 'react-hot-toast';
 
 /**
  * Crear / editar una solicitud de compra (borrador oPurchaseRequest en SAP).
@@ -25,15 +29,15 @@ export interface EditTarget {
   docEntry: number;
 }
 
-type LineField =
+export type LineField =
   | 'ItemCode' | 'ItemDescription' | 'LineVendor' | 'U_NombreProveedor' | 'Quantity' | 'UnitPrice'
   | 'TaxCode' | 'AccountCode' | 'CostingCode' | 'WarehouseCode' | 'ProjectCode' | 'Currency'
   | 'RequiredDate' | 'U_Dest_compra' | 'U_HBT_UndMedida' | 'U_version';
 
-type Line = Partial<Record<LineField, string | number>>;
+export type Line = Partial<Record<LineField, string | number>>;
 
 /** Columnas del formulario; `required` = obligatorio en el servidor. */
-const COLUMNS: { field: LineField; label: string; width: number; numeric?: boolean; required?: boolean }[] = [
+export const COLUMNS: { field: LineField; label: string; width: number; numeric?: boolean; required?: boolean }[] = [
   { field: 'ItemCode', label: 'Articulo', width: 110 },
   { field: 'ItemDescription', label: 'Descripcion', width: 220, required: true },
   { field: 'LineVendor', label: 'Cod. proveedor', width: 120 },
@@ -52,7 +56,7 @@ const COLUMNS: { field: LineField; label: string; width: number; numeric?: boole
   { field: 'U_version', label: 'Version', width: 80 },
 ];
 
-interface FieldError {
+export interface FieldError {
   field: string;
   error: string;
 }
@@ -183,6 +187,9 @@ export default function RequestFormModal({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data.error || 'No se pudo guardar la solicitud');
+        if (data.error) {
+          toast.error(sapErrorText(String(data.error)), { duration: 12000, style: { whiteSpace: 'pre-line', maxWidth: 520 } });
+        }
         setFieldErrors(Array.isArray(data.errors) ? data.errors : []);
         return;
       }
@@ -311,17 +318,33 @@ export default function RequestFormModal({
                               aria-label={`${c.label} linea ${i + 1}`}
                             />
                           ) : (
-                            <TextInput
-                              size="xs"
-                              type={c.field === 'RequiredDate' ? 'date' : 'text'}
-                              value={String(line[c.field] ?? '')}
-                              onChange={(e) => {
-                                const v = e.currentTarget.value;
-                                setLineValue(i, c.field, c.field === 'ItemDescription' ? v.toUpperCase() : v);
-                              }}
-                              error={err}
-                              aria-label={`${c.label} linea ${i + 1}`}
-                            />
+                            FIELD_LOOKUP[c.field] ? (
+                              <SapLookupInput
+                                companyId={companyId}
+                                kind={FIELD_LOOKUP[c.field]!}
+                                value={String(line[c.field] ?? '')}
+                                onChange={(v) => setLineValue(i, c.field, v)}
+                                onSelect={(opt) =>
+                                  setLines((prev) =>
+                                    prev.map((l, j) => (j === i ? { ...l, ...(opt.fill ?? {}), [c.field]: opt.fill?.[c.field] ?? opt.value } : l))
+                                  )
+                                }
+                                error={err}
+                                ariaLabel={`${c.label} línea ${i + 1}`}
+                              />
+                            ) : (
+                              <TextInput
+                                size="xs"
+                                type={c.field === 'RequiredDate' ? 'date' : 'text'}
+                                value={String(line[c.field] ?? '')}
+                                onChange={(e) => {
+                                  const v = e.currentTarget.value;
+                                  setLineValue(i, c.field, c.field === 'ItemDescription' ? v.toUpperCase() : v);
+                                }}
+                                error={err}
+                                aria-label={`${c.label} linea ${i + 1}`}
+                              />
+                            )
                           )}
                         </Table.Td>
                       );

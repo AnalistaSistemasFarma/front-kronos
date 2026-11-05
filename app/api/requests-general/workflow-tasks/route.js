@@ -32,6 +32,15 @@ export async function GET(req) {
         tpc.id_linked_process,
         lp.process as linked_process_label,
         tpc.closes_request,
+        tpc.task_kind,
+        (SELECT TOP 1 x.action_key FROM dbo.task_sap_action x
+          WHERE x.id_task = tpc.id AND x.trigger_event IN (N'on_execute', N'on_reject', N'on_quote') AND x.active = 1
+            AND tpc.task_kind = N'sap_executor'
+          ORDER BY x.display_order) AS sap_action_key,
+        (SELECT TOP 1 x.trigger_event FROM dbo.task_sap_action x
+          WHERE x.id_task = tpc.id AND x.trigger_event IN (N'on_execute', N'on_reject', N'on_quote') AND x.active = 1
+            AND tpc.task_kind = N'sap_executor'
+          ORDER BY x.display_order) AS sap_trigger,
         u.name as assigned_user,
 		    u.id as id_assigned_user
       FROM task_process_category tpc
