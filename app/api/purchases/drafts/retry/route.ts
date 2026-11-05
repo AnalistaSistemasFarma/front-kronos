@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 import { getCompanyEndpointForUser } from '../../../../../lib/purchases/access';
 import { retryPublish } from '../../../../../lib/purchases/authorization';
+import { runSapExecutors } from '../../../../../lib/workflow-sap/engine';
 import { prisma } from '../../../../../lib/prisma';
 
 /**
@@ -33,6 +34,8 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await retryPublish(link.id_request_general);
+    // Si la publicación la hace una tarea «Ejecutora SAP», cerrarla y avanzar el flujo.
+    await runSapExecutors(link.id_request_general, 'retry');
     if (result.skipped) return NextResponse.json({ error: 'La publicacion ya esta en curso.' }, { status: 409 });
     if (result.status !== 'approved') return NextResponse.json({ error: result.error }, { status: 502 });
     return NextResponse.json({ ok: true, status: result.status });

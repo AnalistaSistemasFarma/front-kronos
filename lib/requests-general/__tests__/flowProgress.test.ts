@@ -56,3 +56,17 @@ describe('flujo de la solicitud', () => {
     expect(buildRequestFlow([], [])).toMatchObject({ steps: [], total: 0, percent: 0, currentIndex: null });
   });
 });
+
+describe('valor de las Tareas SAP en la barra', () => {
+  it('muestra el resultado de la Tarea SAP resuelta, sin el prefijo', () => {
+    const flow = buildRequestFlow(
+      [{ id: 1, task: 'Evaluar reglas de venta (cupo)', displayOrder: 0, isSequential: true }, { id: 2, task: 'Autorizar', displayOrder: 1, isSequential: true }],
+      [
+        { idTask: 1, task: 'Evaluar reglas de venta (cupo)', displayOrder: 0, idStatus: 2, assigned: null, sapDetail: 'Ejecutada en SAP · Excede el cupo: cupo 297.930.377 de 288.000.000' },
+        { idTask: 2, task: 'Autorizar', displayOrder: 1, idStatus: 4, assigned: 'Ana', sapDetail: null },
+      ]
+    );
+    expect(flow.steps[0].detail).toBe('Excede el cupo: cupo 297.930.377 de 288.000.000');
+    expect(flow.steps[1].detail).toBeNull();
+  });
+});
