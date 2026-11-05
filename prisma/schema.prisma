@@ -969,6 +969,7 @@ model ChatProject {
   agentPolicy   ChatProjectAgentPolicy?
   policyRepos   ChatProjectAgentPolicyRepo[]
   mesas ChatProjectMesa[]
+  matrices ChatProjectMatrix[]
 
   @@index([id_agent, archived])
   @@index([id_company])
@@ -1127,6 +1128,82 @@ model ChatProjectAgent {
   @@unique([id_project, id_agent], map: "chat_project_agent_project_agent")
   @@index([id_agent])
   @@map("chat_project_agent")
+  @@schema("dbo")
+}
+
+/// MATRIZ de un proyecto (2026-11-05, docs/proyectos-matrices-dashboards.md): un Excel o
+/// CSV subido al proyecto, leído en el servidor y guardado como tabla para la grilla y los
+/// agentes. Permisos: los del proyecto (decisión de Nicolás Rivera).
+model ChatProjectMatrix {
+  id_matrix         Int      @id @default(autoincrement())
+  id_project        Int
+  name              String   @db.NVarChar(150)
+  description       String?  @db.NVarChar(1000)
+  id_version_actual Int?
+  archived          Boolean  @default(false)
+  created_by        String?  @db.NVarChar(1000)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @default(now())
+
+  project   ChatProject               @relation(fields: [id_project], references: [id_project], onDelete: NoAction, onUpdate: NoAction, map: "chat_project_matrix_project_fkey")
+  versiones ChatProjectMatrixVersion[]
+
+  @@index([id_project, archived], map: "chat_project_matrix_project_idx")
+  @@map("chat_project_matrix")
+  @@schema("dbo")
+}
+
+/// Cada archivo subido de una matriz (historial de versiones).
+model ChatProjectMatrixVersion {
+  id_version  Int      @id @default(autoincrement())
+  id_matrix   Int
+  version_no  Int
+  file_name   String   @db.NVarChar(400)
+  size_bytes  Int?
+  uploaded_by String?  @db.NVarChar(1000)
+  /// Si la subió un AGENTE (NULL = persona).
+  id_agent    Int?
+  /// Qué cambió frente a la versión anterior, en palabras.
+  summary     String?  @db.NVarChar(1000)
+  created_at  DateTime @default(now())
+
+  matrix ChatProjectMatrix        @relation(fields: [id_matrix], references: [id_matrix], onDelete: Cascade, map: "chat_project_matrix_version_matrix_fkey")
+  hojas  ChatProjectMatrixSheet[]
+
+  @@unique([id_matrix, version_no], map: "chat_project_matrix_version_no_key")
+  @@map("chat_project_matrix_version")
+  @@schema("dbo")
+}
+
+/// Hoja de una versión: columnas (JSON con nombre y tipo) y número de filas.
+model ChatProjectMatrixSheet {
+  id_sheet     Int    @id @default(autoincrement())
+  id_version   Int
+  sheet_index  Int
+  name         String @db.NVarChar(150)
+  /// Fila del Excel (1 = primera) donde están los encabezados.
+  header_row   Int
+  columns_json String @db.NVarChar(Max)
+  row_count    Int
+
+  version ChatProjectMatrixVersion @relation(fields: [id_version], references: [id_version], onDelete: Cascade, map: "chat_project_matrix_sheet_version_fkey")
+  bloques ChatProjectMatrixChunk[]
+
+  @@unique([id_version, sheet_index], map: "chat_project_matrix_sheet_version_key")
+  @@map("chat_project_matrix_sheet")
+  @@schema("dbo")
+}
+
+/// Filas de una hoja en bloques JSON (máx. 1000 filas por bloque).
+model ChatProjectMatrixChunk {
+  id_sheet  Int
+  chunk_no  Int
+  rows_json String @db.NVarChar(Max)
+
+  hoja ChatProjectMatrixSheet @relation(fields: [id_sheet], references: [id_sheet], onDelete: Cascade, map: "chat_project_matrix_chunk_sheet_fkey")
+
+  @@id([id_sheet, chunk_no], map: "chat_project_matrix_chunk_pkey")
+  @@map("chat_project_matrix_chunk")
   @@schema("dbo")
 }
 

@@ -16,6 +16,7 @@ import {
   IconLock,
   IconMessages,
   IconMessageChatbot,
+  IconTable,
   IconPencil,
   IconShieldLock,
   IconTimeline,
@@ -44,6 +45,7 @@ import SeccionCronograma from './cronograma/SeccionCronograma';
 import SeccionEquipo from './equipo/SeccionEquipo';
 import SeccionPermisos from './permisos/SeccionPermisos';
 import SeccionMesas from './mesas/SeccionMesas';
+import SeccionMatrices from './matrices/SeccionMatrices';
 import { AgentesApilados, AvisoArriba, BadgeRol, CONSULTA_ESCRITORIO, Encabezado, EsqueletoFilas, type Aviso } from './ui';
 import css from './proyectos.module.css';
 import { useEstadosAgentes } from './useEstadosAgentes';
@@ -69,8 +71,8 @@ import type { EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente'
 
 // «Equipo» (F2, 2026-10-18): los subagentes del proyecto, junto al cronograma.
 // «Permisos» (2026-10-20): qué pueden hacer los agentes con el código del proyecto.
-type Seccion = 'conversaciones' | 'mesas' | 'cronograma' | 'equipo' | 'vinculados' | 'archivos' | 'miembros' | 'permisos' | 'detalles';
-const SECCIONES: Seccion[] = ['conversaciones', 'mesas', 'cronograma', 'equipo', 'vinculados', 'archivos', 'miembros', 'permisos', 'detalles'];
+type Seccion = 'conversaciones' | 'mesas' | 'matrices' | 'cronograma' | 'equipo' | 'vinculados' | 'archivos' | 'miembros' | 'permisos' | 'detalles';
+const SECCIONES: Seccion[] = ['conversaciones', 'mesas', 'matrices', 'cronograma', 'equipo', 'vinculados', 'archivos', 'miembros', 'permisos', 'detalles'];
 
 function esSeccion(v: string | null): v is Seccion {
   return v !== null && (SECCIONES as string[]).includes(v);
@@ -283,6 +285,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
   const conteo: Record<Seccion, number | null> = {
     conversaciones: proyecto?.conversations.length ?? null,
     mesas: null,
+    matrices: null,
     cronograma: proyecto ? proyecto.taskCount + proyecto.links.requests.length : null,
     equipo: proyecto?.teamCount ?? null,
     vinculados: proyecto ? proyecto.links.emails.length + proyecto.links.requests.length : null,
@@ -294,6 +297,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
   const etiqueta: Record<Seccion, string> = {
     conversaciones: 'Conversaciones',
     mesas: 'Mesas',
+    matrices: 'Matrices',
     cronograma: 'Cronograma',
     equipo: 'Equipo',
     vinculados: 'Vinculados',
@@ -305,6 +309,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
   const icono: Record<Seccion, React.ReactNode> = {
     conversaciones: <IconMessages size={18} />,
     mesas: <IconMessageChatbot size={18} />,
+    matrices: <IconTable size={18} />,
     cronograma: <IconTimeline size={18} />,
     equipo: <IconUsersGroup size={18} />,
     vinculados: <IconLink size={18} />,
@@ -339,6 +344,8 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
             }}
           />
         );
+      case 'matrices':
+        return <SeccionMatrices proyecto={proyecto} version={version} avisar={avisar} />;
       case 'cronograma':
         return <SeccionCronograma proyecto={proyecto} version={version} avisar={avisar} onVincularSolicitud={() => setModal('solicitud')} />;
       case 'equipo':
