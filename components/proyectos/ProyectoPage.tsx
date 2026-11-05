@@ -338,10 +338,14 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
             proyecto={proyecto}
             version={version}
             avisar={avisar}
-            onAbrirConversacion={(id) => {
+            onAbrirConversacion={async (id) => {
+              // Una mesa recién creada todavía no está en la lista del proyecto: se recarga
+              // antes de abrirla (si no, «Ver la conversación completa» no mostraba nada).
+              if (!proyecto.conversations.some((c) => c.id === id)) await cargar();
               setSeccion('conversaciones');
               setIdConversacion(id);
             }}
+            onCambio={() => void cargar()}
           />
         );
       case 'matrices':
