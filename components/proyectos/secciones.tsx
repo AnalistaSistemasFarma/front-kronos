@@ -38,6 +38,7 @@ import {
   IconUserPlus,
 } from '@tabler/icons-react';
 import AgentAvatar from '../chat/AgentAvatar';
+import ChatAttachmentViewer from '../chat/ChatAttachmentViewer';
 import { formatBytes } from '../../lib/chat/attachments';
 import {
   MAX_PROJECT_DESCRIPTION_CHARS,
@@ -317,8 +318,25 @@ export function SeccionArchivos({
   onSubir: (archivos: File[]) => void;
   onQuitar: (id: number) => void;
 }) {
+  // Visor del chat (2026-11-05, Nicolás Rivera: «previsualizar y compartir idéntico como lo
+  // tenemos en el chat»): al tocar un archivo se abre el visor; Descargar y Compartir van adentro.
+  const [visor, setVisor] = useState<number | null>(null);
   return (
     <Stack gap={8}>
+      {visor !== null && proyecto.files.length > 0 && (
+        <ChatAttachmentViewer
+          adjuntos={proyecto.files.map((f) => ({
+            id: f.id,
+            fileName: f.fileName,
+            contentType: f.contentType,
+            sizeBytes: f.sizeBytes,
+            downloadUrl: f.downloadUrl,
+          }))}
+          indice={visor}
+          onIndice={setVisor}
+          onClose={() => setVisor(null)}
+        />
+      )}
       <Group justify='space-between' wrap='wrap' gap='xs'>
         <Text size='xs' c='dimmed' style={{ flex: '1 1 220px' }}>
           Base de conocimiento del proyecto: los asistentes los leen en todas sus conversaciones.
@@ -336,13 +354,21 @@ export function SeccionArchivos({
       {proyecto.files.length === 0 ? (
         <Vacio icono={<IconFile size={18} />} titulo='El proyecto no tiene archivos' texto='Cargue manuales, plantillas o listas de precios que los asistentes deban conocer.' />
       ) : (
-        proyecto.files.map((f) => (
+        proyecto.files.map((f, i) => (
           <Group key={f.id} gap='sm' wrap='nowrap' className={css.fila} style={{ border: '1px solid var(--mantine-color-default-border)' }}>
             <ThemeIcon variant='light' size={34} radius='md' style={{ flexShrink: 0 }}>
               <IconFile size={18} />
             </ThemeIcon>
             <div className={css.item} style={{ flex: 1 }}>
-              <Anchor href={f.downloadUrl} size='sm' className={css.truncar} style={{ display: 'block' }}>
+              <Anchor
+                component='button'
+                type='button'
+                onClick={() => setVisor(i)}
+                size='sm'
+                className={css.truncar}
+                style={{ display: 'block', textAlign: 'left', maxWidth: '100%' }}
+                data-testid='proyecto-archivo-abrir'
+              >
                 {f.fileName}
               </Anchor>
               <Text size='xs' c='dimmed' className={css.truncar}>
