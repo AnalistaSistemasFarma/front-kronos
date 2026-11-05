@@ -55,6 +55,13 @@ describe('automatización · represados (2026-11-05)', () => {
     });
     expect(represadoOf({ estado: 'enviado', estado_flujo: 'publish_error', error_flujo: null })?.mensaje).toBe('No se pudo crear el pedido en SAP.');
   });
+  it('solicitud en curso con una Tarea SAP en error (10154 / 901) → represado, reintentar la tarea', () => {
+    expect(represadoOf({ estado: 'enviado', estado_flujo: 'pending', error_tarea: `[sap:error] Unexpected token 'C', "COP" is not valid JSON` })).toEqual({
+      accion: 'tarea',
+      mensaje: `Tarea SAP en error: Unexpected token 'C', "COP" is not valid JSON`,
+    });
+    expect(represadoOf({ estado: 'enviado', estado_flujo: 'approved', error_tarea: '[sap:error] x' })).toBeNull();
+  });
   it('en curso, con pedido, simulado o descartado → no está represado', () => {
     expect(represadoOf({ estado: 'enviado', estado_flujo: 'pending' })).toBeNull();
     expect(represadoOf({ estado: 'enviado', estado_flujo: 'approved' })).toBeNull();

@@ -24,8 +24,8 @@ type Doc = {
   id: number; doc_entry: number; doc_num: number | null; card_code: string | null; card_name: string | null; doc_total: number | null;
   estado: string; destino: string | null; detalle: string | null; error: string | null; id_request_general: number | null;
   intentos: number; updated_at: string; estado_flujo: string | null; order_doc_entry: number | null; error_flujo: string | null;
-  /** «Represado»: falló el paso al flujo / «Revisar dirección» ('reenviar') o la creación del pedido ('pedido'). */
-  represado: { accion: 'reenviar' | 'pedido'; mensaje: string } | null;
+  /** «Represado»: falló el paso al flujo / «Revisar dirección» ('reenviar'), la creación del pedido ('pedido') u otra Tarea SAP ('tarea'). */
+  represado: { accion: 'reenviar' | 'pedido' | 'tarea'; mensaje: string } | null;
 };
 type Run = { id: number; origen: string; inicio: string; fin: string | null; simulacion: boolean; candidatos: number; enviados: number; simulados: number; errores: number; detalle: string | null };
 type Pending = { DocEntry: number; DocNum: number | null; CardCode: string; CardName: string; DocTotal: number; DocDate: string };
@@ -48,7 +48,7 @@ const FLUJO: Record<string, { label: string; color: string }> = {
   cancelled: { label: 'Cancelada', color: 'gray' },
 };
 const DESTINO: Record<string, string> = { PEDIDO: 'Pedido directo', AE: 'Extracupo', AP: 'Precio' };
-const REINTENTO: Record<string, string> = { reenviar: 'Reintentar el paso al flujo', pedido: 'Reintentar la creación del pedido' };
+const REINTENTO: Record<string, string> = { reenviar: 'Reintentar el paso al flujo', pedido: 'Reintentar la creación del pedido', tarea: 'Reintentar la Tarea SAP que quedó en error' };
 
 async function call(method: string, body?: unknown, qs = '') {
   const res = await fetch(`/api/sales/automatizacion${qs}`, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined, cache: 'no-store' });
