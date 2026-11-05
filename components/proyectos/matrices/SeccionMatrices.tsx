@@ -34,6 +34,7 @@ import {
   IconFileSpreadsheet,
   IconHistory,
   IconListDetails,
+  IconArrowsMaximize,
   IconMaximize,
   IconMinimize,
   IconPencil,
@@ -112,6 +113,33 @@ function textoEditable(v: Celda): string {
 
 const clave = (fila: number, col: number) => `${fila}:${col}`;
 
+/* Preferencias de este navegador (pantalla completa y matriz abierta). */
+const CLAVE_COMPLETA = 'synerlink:matrices:pantalla-completa:v1';
+const claveAbierta = (idProject: number) => `synerlink:matrices:abierta:${idProject}:v1`;
+
+function leerPreferencia(k: string): string | null {
+  try {
+    return window.localStorage.getItem(k);
+  } catch {
+    return null;
+  }
+}
+
+function guardarPreferencia(k: string, v: string | null) {
+  try {
+    if (v === null) window.localStorage.removeItem(k);
+    else window.localStorage.setItem(k, v);
+  } catch {
+    // Modo privado o almacenamiento lleno: la preferencia no se recuerda, nada más.
+  }
+}
+
+/** Pantalla completa del navegador (exige un clic de la persona; si el navegador no deja, se ignora). */
+async function entrarNavegadorCompleto() {
+  if (typeof document === 'undefined' || document.fullscreenElement || !document.documentElement.requestFullscreen) return;
+  await document.documentElement.requestFullscreen().catch(() => undefined);
+}
+
 export default function SeccionMatrices({ proyecto, version, avisar }: { proyecto: ProyectoDetalleDto; version: number; avisar: (a: Aviso) => void }) {
   const base = `/api/proyectos/${proyecto.idProject}/matrices`;
   const puedeSubir = proyecto.capabilities.contribute && !proyecto.archived;
@@ -128,7 +156,12 @@ export default function SeccionMatrices({ proyecto, version, avisar }: { proyect
   const [vista, setVista] = useState<'datos' | 'ficha' | 'versiones'>('datos');
   const [subir, setSubir] = useState<{ idMatrix: number | null } | null>(null);
   const [archivar, setArchivar] = useState(false);
+  // PANTALLA COMPLETA que se QUEDA (Nicolás Rivera, 2026-11-05: «que se pueda dejar en
+  // pantalla completa»): la elección y la matriz abierta se recuerdan en este navegador, así
+  // que al recargar o volver a la pestaña sigue igual; y al entrar se usa también la pantalla
+  // completa del navegador (sin barras). Esc solo sale de la del navegador, no de la matriz.
   const [completa, setCompleta] = useState(false);
+  const [navegadorCompleto, setNavegadorCompleto] = useState(false);
 
   // Edición (todo local hasta «Guardar»): celdas cambiadas, filas nuevas y filas borradas.
   const [editando, setEditando] = useState(false);
@@ -150,13 +183,42 @@ export default function SeccionMatrices({ proyecto, version, avisar }: { proyect
     const r = await apiGet<{ matrices: MatrizResumen[] }>(base, 'No se pudieron cargar las matrices.');
     if (r.ok) {
       setMatrices(r.data.matrices);
-      setAbierta((a) => (a && r.data.matrices.some((m) => m.idMatrix === a) ? a : (r.data.matrices[0]?.idMatrix ?? null)));
+      const guardada = Number(leerPreferencia(claveAbierta(proyecto.idProject)));
+      setAbierta((a) => {
+        if (a && r.data.matrices.some((m) => m.idMatrix === a)) return a;
+        if (guardada && r.data.matrices.some((m) => m.idMatrix === guardada)) return guardada;
+        return r.data.matrices[0]?.idMatrix ?? null;
+      });
     } else if (r.error) avisar({ tipo: 'error', texto: r.error });
-  }, [base, avisar]);
+  }, [base, avisar, proyecto.idProject]);
 
   useEffect(() => {
     void cargar();
   }, [cargar, version]);
+
+  // Al montar: si la persona dejó la matriz en pantalla completa, vuelve así.
+  useEffect(() => {
+    if (leerPreferencia(CLAVE_COMPLETA) === '1') setCompleta(true);
+  }, []);
+
+  useEffect(() => {
+    if (abierta !== null) guardarPreferencia(claveAbierta(proyecto.idProject), String(abierta));
+  }, [abierta, proyecto.idProject]);
+
+  // Pantalla completa del NAVEGADOR: seguir su estado (Esc la quita, la de SynerLink se queda).
+  useEffect(() => {
+    const alCambiar = () => setNavegadorCompleto(!!document.fullscreenElement);
+    alCambiar();
+    document.addEventListener('fullscreenchange', alCambiar);
+    return () => document.removeEventListener('fullscreenchange', alCambiar);
+  }, []);
+
+  const cambiarCompleta = (v: boolean) => {
+    setCompleta(v);
+    guardarPreferencia(CLAVE_COMPLETA, v ? '1' : null);
+    if (v) void entrarNavegadorCompleto();
+    else if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+  };
 
   const cargarDetalle = useCallback(async () => {
     if (abierta === null) return setDetalle(null);
@@ -265,11 +327,22 @@ export default function SeccionMatrices({ proyecto, version, avisar }: { proyect
               Editar
             </Button>
           )}
-          <Tooltip label={completa ? 'Salir de pantalla completa' : 'Pantalla completa'}>
-            <ActionIcon variant='light' onClick={() => setCompleta((c) => !c)} aria-label='Pantalla completa' data-testid='matriz-completa'>
-              {completa ? <IconMinimize size={16} /> : <IconMaximize size={16} />}
-            </ActionIcon>
-          </Tooltip>
+          {completa && !navegadorCompleto && (
+            <Tooltip label='Ocultar también las barras del navegador'>
+              <ActionIcon variant='light' onClick={() => void entrarNavegadorCompleto()} aria-label='Pantalla completa del navegador'>
+                <IconArrowsMaximize size={16} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+          <Button
+            size='xs'
+            variant={completa ? 'filled' : 'light'}
+            leftSection={completa ? <IconMinimize size={14} /> : <IconMaximize size={14} />}
+            onClick={() => cambiarCompleta(!completa)}
+            data-testid='matriz-completa'
+          >
+            {completa ? 'Salir de pantalla completa' : 'Pantalla completa'}
+          </Button>
           <Tooltip label='Descargar en Excel'>
             <ActionIcon
               variant='light'
@@ -662,10 +735,11 @@ export default function SeccionMatrices({ proyecto, version, avisar }: { proyect
 
       <Modal
         opened={completa && !!actual}
-        onClose={() => setCompleta(false)}
+        onClose={() => cambiarCompleta(false)}
         fullScreen
         withCloseButton={false}
-        closeOnEscape={!celda}
+        // Esc no la cierra: se queda hasta «Salir de pantalla completa» (Esc solo quita la del navegador).
+        closeOnEscape={false}
         padding='md'
         transitionProps={{ duration: 0 }}
       >
