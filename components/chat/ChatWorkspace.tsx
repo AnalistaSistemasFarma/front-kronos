@@ -25,6 +25,7 @@ import {
 } from '@mantine/core';
 import {
   IconArrowLeft,
+  IconBrain,
   IconBuilding,
   IconFolderOff,
   IconLayoutGrid,
@@ -153,6 +154,7 @@ function AgentCard({
       onPointerDown={onPrecargar}
       className={[
         'chat-agent-card',
+        'chat-agent-card--fila',
         compact ? 'chat-agent-card--compact' : '',
         selected ? 'chat-agent-card--selected' : '',
       ]
@@ -160,7 +162,7 @@ function AgentCard({
         .join(' ')}
       aria-label={`Abrir el chat con ${agent.displayName}`}
     >
-      <Group gap='sm' wrap='nowrap' align='flex-start'>
+      <Group gap='sm' wrap='nowrap' align='flex-start' className='chat-agent-card__fila'>
         <AgentAvatar
           code={agent.code}
           working={agent.busy}
@@ -172,18 +174,18 @@ function AgentCard({
           size={compact ? 34 : 42}
           withTooltip={false}
         />
-        <Box style={{ flex: 1, minWidth: 0 }}>
-          <Group gap={6} wrap='nowrap' justify='space-between'>
-            <Text size='sm' fw={600} lineClamp={1}>
+        <Box className='chat-agent-card__texto' style={{ flex: 1, minWidth: 0 }}>
+          <Group gap={6} wrap='nowrap' justify='space-between' className='chat-agent-card__cabeza'>
+            <Text size='sm' fw={600} lineClamp={1} className='chat-agent-card__nombre'>
               {agent.displayName}
             </Text>
             {lastAt && (
-              <Text size='xs' className='chat-text-muted' style={{ flexShrink: 0 }}>
+              <Text size='xs' className='chat-text-muted chat-agent-card__hora' style={{ flexShrink: 0 }}>
                 {formatChatTime(lastAt)}
               </Text>
             )}
           </Group>
-          <Text size='xs' lineClamp={compact ? 1 : 2} className='chat-text-muted'>
+          <Text size='xs' lineClamp={compact ? 1 : 2} className='chat-text-muted chat-agent-card__previa'>
             {lastPreview || (previewPendiente ? '\u00a0' : agent.description || statusLabel)}
           </Text>
           {!compact && (
@@ -240,6 +242,7 @@ function GroupCard({
       onClick={onSelect}
       className={[
         'chat-agent-card',
+        'chat-agent-card--fila',
         compact ? 'chat-agent-card--compact' : '',
         selected ? 'chat-agent-card--selected' : '',
       ]
@@ -247,7 +250,7 @@ function GroupCard({
         .join(' ')}
       aria-label={`Abrir el grupo ${grupo.title ?? ''}`}
     >
-      <Group gap='sm' wrap='nowrap' align='flex-start'>
+      <Group gap='sm' wrap='nowrap' align='flex-start' className='chat-agent-card__fila'>
         <Box className='chat-grupo__icono' style={{ flexShrink: 0 }}>
           <IconUsersGroup size={compact ? 20 : 24} />
           {grupo.unreadCount > 0 && (
@@ -257,30 +260,30 @@ function GroupCard({
           )}
         </Box>
 
-        <Box style={{ flex: 1, minWidth: 0 }}>
-          <Group gap={6} wrap='nowrap' justify='space-between'>
-            <Text size='sm' fw={600} lineClamp={1}>
+        <Box className='chat-agent-card__texto' style={{ flex: 1, minWidth: 0 }}>
+          <Group gap={6} wrap='nowrap' justify='space-between' className='chat-agent-card__cabeza'>
+            <Text size='sm' fw={600} lineClamp={1} className='chat-agent-card__nombre'>
               {grupo.title ?? 'Grupo'}
             </Text>
             {grupo.lastMessageAt && (
-              <Text size='xs' className='chat-text-muted' style={{ flexShrink: 0 }}>
+              <Text size='xs' className='chat-text-muted chat-agent-card__hora' style={{ flexShrink: 0 }}>
                 {formatChatTime(grupo.lastMessageAt)}
               </Text>
             )}
           </Group>
 
           {trabajando.length > 0 ? (
-            <Text size='xs' c='blue' lineClamp={1}>
+            <Text size='xs' c='blue' lineClamp={1} className='chat-agent-card__previa'>
               {trabajando.length === 1
                 ? `${trabajando[0].agentName ?? 'Un asistente'} está trabajando…`
                 : `${trabajando.length} asistentes trabajando…`}
             </Text>
           ) : grupo.lastMessage ? (
-            <Text size='xs' className='chat-text-muted' lineClamp={1}>
+            <Text size='xs' className='chat-text-muted chat-agent-card__previa' lineClamp={1}>
               {toPlainPreview(grupo.lastMessage.preview)}
             </Text>
           ) : (
-            <Text size='xs' className='chat-text-muted' lineClamp={1}>
+            <Text size='xs' className='chat-text-muted chat-agent-card__previa' lineClamp={1}>
               Sin mensajes todavía
             </Text>
           )}
@@ -324,6 +327,7 @@ function PersonCard({
       onClick={onSelect}
       className={[
         'chat-agent-card',
+        'chat-agent-card--fila',
         compact ? 'chat-agent-card--compact' : '',
         selected ? 'chat-agent-card--selected' : '',
       ]
@@ -331,7 +335,7 @@ function PersonCard({
         .join(' ')}
       aria-label={`Abrir la conversación con ${nombre}`}
     >
-      <Group gap='sm' wrap='nowrap' align='flex-start'>
+      <Group gap='sm' wrap='nowrap' align='flex-start' className='chat-agent-card__fila'>
         <AgentAvatar
           code={String(otra?.id ?? conversacion.id)}
           displayName={nombre}
@@ -341,18 +345,18 @@ function PersonCard({
           showStatus={false}
           withTooltip={false}
         />
-        <Box style={{ flex: 1, minWidth: 0 }}>
-          <Group gap={6} wrap='nowrap' justify='space-between'>
-            <Text size='sm' fw={600} lineClamp={1}>
+        <Box className='chat-agent-card__texto' style={{ flex: 1, minWidth: 0 }}>
+          <Group gap={6} wrap='nowrap' justify='space-between' className='chat-agent-card__cabeza'>
+            <Text size='sm' fw={600} lineClamp={1} className='chat-agent-card__nombre'>
               {nombre}
             </Text>
             {conversacion.lastMessageAt && (
-              <Text size='xs' className='chat-text-muted' style={{ flexShrink: 0 }}>
+              <Text size='xs' className='chat-text-muted chat-agent-card__hora' style={{ flexShrink: 0 }}>
                 {formatChatTime(conversacion.lastMessageAt)}
               </Text>
             )}
           </Group>
-          <Text size='xs' className='chat-text-muted' lineClamp={1}>
+          <Text size='xs' className='chat-text-muted chat-agent-card__previa' lineClamp={1}>
             {conversacion.lastMessage
               ? toPlainPreview(conversacion.lastMessage.preview)
               : 'Sin mensajes todavía'}
@@ -1314,6 +1318,24 @@ export default function ChatWorkspace({
   // lo que uno abrió se siente como dos pantallas distintas.
   const botonesDelEncabezado = (
     <Group gap={4} wrap='nowrap'>
+      {/* Memoria del agente (2026-10-29): abre en otra pestaña lo que ESTE
+          agente ha aprendido. La API decide si se puede ver (dueño, auditoría
+          u operador del agente). */}
+      {selectedAgent && (
+        <Tooltip label='Memoria del agente' withArrow>
+          <ActionIcon
+            variant='subtle'
+            color='gray'
+            component='a'
+            href={`/process/chat/auditoria/memorias?agente=${encodeURIComponent(selectedAgent.code)}`}
+            target='_blank'
+            rel='noopener'
+            aria-label={`Ver la memoria de ${selectedAgent.displayName}`}
+          >
+            <IconBrain size={18} />
+          </ActionIcon>
+        </Tooltip>
+      )}
       {idConversacionAbierta !== null && (
         <Tooltip label='Multimedia y archivos' withArrow>
           <ActionIcon
@@ -1516,8 +1538,14 @@ export default function ChatWorkspace({
             </Group>
           </UnstyledButton>
           <Group gap={4} wrap='nowrap'>
-            {/* Consumo de Anthropic del agente (2026-10-22): solo si el agente publica cuota. */}
-            <ChatConsumoBoton key={selectedAgent.code} code={selectedAgent.code} displayName={selectedAgent.displayName} />
+            {/* Consumo de Anthropic del agente (2026-10-22) y contexto de su sesión (2026-10-29):
+                solo si el agente publica alguno de los dos. */}
+            <ChatConsumoBoton
+              key={selectedAgent.code}
+              code={selectedAgent.code}
+              displayName={selectedAgent.displayName}
+              idConversacion={overview.conversationByAgent.get(selectedAgent.idAgent)?.id ?? null}
+            />
             {botonesDelEncabezado}
           </Group>
         </Group>

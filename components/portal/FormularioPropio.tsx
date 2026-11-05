@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMediaQuery } from '@mantine/hooks';
 import {
   Alert,
   Box,
@@ -19,6 +20,7 @@ import {
   Text,
   TextInput,
   Textarea,
+  Modal,
 } from '@mantine/core';
 import {
   IconAlertCircle,
@@ -58,6 +60,17 @@ import {
   type TipoFormulario,
   type ValorRespuesta,
 } from '../../lib/portal/formulario';
+
+
+/**
+ * Ventana de Mantine con alto fijo y una sola zona que se desplaza (la del
+ * formulario), para que el aviso de resultado quede pegado arriba como antes.
+ */
+const VENTANA_CON_DESPLAZAMIENTO = {
+  header: { padding: 'var(--mantine-spacing-md)' },
+  content: { display: 'flex', flexDirection: 'column' as const, height: 'min(90dvh, 100%)' },
+  body: { display: 'flex', flexDirection: 'column' as const, flex: 1, minHeight: 0 },
+};
 
 /**
  * FORMACIÓN — FORMULARIO PROPIO del curso (Cristian Baldión, 2026-10-08).
@@ -154,6 +167,8 @@ export function VisorFormulario({
   /** Se llama apenas el servidor confirma el envío (para refrescar la lista). */
   onEnviado?: () => Promise<void> | void;
 }) {
+  // En celular la ventana ocupa toda la pantalla, como antes.
+  const pantallaChica = useMediaQuery('(max-width: 759px)') ?? false;
   const [datos, setDatos] = useState<DatosFormulario | null>(
     previa
       ? {
@@ -193,25 +208,19 @@ export function VisorFormulario({
   }, [onCerrar]);
 
   return (
-    <div
-      className='portal-th__visor'
-      role='dialog'
-      aria-modal='true'
+    <Modal
+      opened
+      onClose={onCerrar}
+      size='60rem'
+      centered
+      title={<Text fw={700}>{titulo}</Text>}
       aria-label={titulo}
-      data-testid='visor-formulario'
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCerrar();
-      }}
+      closeButtonProps={{ 'aria-label': 'Cerrar' }}
+      padding={0}
+      fullScreen={pantallaChica}
+      styles={VENTANA_CON_DESPLAZAMIENTO}
     >
-      <div className='portal-th__visor-caja portal-th__visor-caja--formulario'>
-        <header className='portal-th__visor-barra'>
-          <strong>{titulo}</strong>
-          <div className='portal-th__visor-acciones'>
-            <button type='button' onClick={onCerrar} aria-label='Cerrar'>
-              ✕
-            </button>
-          </div>
-        </header>
+      <div data-testid='visor-formulario' style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
         {error && (
           <Alert color={COLOR_ESTADO.error} icon={<IconAlertCircle size={18} />} m='md' role='alert'>
             {error}
@@ -236,7 +245,7 @@ export function VisorFormulario({
           />
         )}
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -785,6 +794,8 @@ interface TablaRespuestas {
  * permisos — el servidor lo vuelve a exigir en cada ruta (403).
  */
 export function PanelRespuestas({ materialId, titulo, onCerrar, onCambio }: { materialId: number; titulo: string; onCerrar: () => void; onCambio?: () => Promise<void> | void }) {
+  // En celular la ventana ocupa toda la pantalla, como antes.
+  const pantallaChica = useMediaQuery('(max-width: 759px)') ?? false;
   const [tabla, setTabla] = useState<TablaRespuestas | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
@@ -843,25 +854,19 @@ export function PanelRespuestas({ materialId, titulo, onCerrar, onCambio }: { ma
   }, [tabla, filtro]);
 
   return (
-    <div
-      className='portal-th__visor'
-      role='dialog'
-      aria-modal='true'
+    <Modal
+      opened
+      onClose={onCerrar}
+      size='90rem'
+      centered
+      title={<Text fw={700}>Respuestas · {titulo}</Text>}
       aria-label={`Respuestas: ${titulo}`}
-      data-testid='panel-respuestas'
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCerrar();
-      }}
+      closeButtonProps={{ 'aria-label': 'Cerrar' }}
+      padding={0}
+      fullScreen={pantallaChica}
+      styles={VENTANA_CON_DESPLAZAMIENTO}
     >
-      <div className='portal-th__visor-caja portal-th__visor-caja--respuestas'>
-        <header className='portal-th__visor-barra'>
-          <strong>Respuestas · {titulo}</strong>
-          <div className='portal-th__visor-acciones'>
-            <button type='button' onClick={onCerrar} aria-label='Cerrar'>
-              ✕
-            </button>
-          </div>
-        </header>
+      <div data-testid='panel-respuestas' style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
         {/* Resultado de "Reabrir" ARRIBA y con color (convención del equipo). */}
         {(error || aviso) && (
           <Stack gap='xs' px='md' pt='md'>
@@ -968,7 +973,7 @@ export function PanelRespuestas({ materialId, titulo, onCerrar, onCambio }: { ma
           )}
         </ScrollArea>
       </div>
-    </div>
+    </Modal>
   );
 }
 

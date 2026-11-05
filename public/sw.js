@@ -21,7 +21,7 @@
 // (queda impreso en la consola del navegador al activarse).
 // =============================================================================
 
-const SW_VERSION = '2026-09-29.1';
+const SW_VERSION = '2026-10-22.1';
 
 // Toma el control de inmediato en lugar de quedarse "esperando" a que se
 // cierren todas las pestañas con la versión anterior del service worker.
@@ -165,4 +165,110 @@ self.addEventListener('notificationclick', (event) => {
       }
     })()
   );
+});
+
+// =============================================================================
+// MENÚ «COMPARTIR» DE ANDROID (share_target, 2026-10-22)
+// =============================================================================
+// El manifiesto (app/manifest.ts) declara `share_target` con POST multipart a
+// /api/chat/compartir. Aquí se intercepta ese POST ANTES de que salga a la
+// red: los archivos se guardan en IndexedDB DE ESTE CELULAR y se abre la
+// pantalla «Compartir en SynerLink» (/process/chat/compartir?lote=<id>). Nada
+// sube al servidor hasta que la persona elige la conversación y confirma; el
+// envío usa la ruta normal del chat, que valida sesión, permisos y archivos.
+//
+// ⚠️ Constantes repetidas de lib/chat/compartir-share-target.ts (este archivo no importa
+// TypeScript). lib/chat/compartir-share-target.test.ts verifica que coincidan.
+// Solo se toca ESTE POST: cualquier otra petición sigue a la red sin cambios.
+const SHARE_TARGET_ACTION = '/api/chat/compartir';
+const SHARE_PAGE_PATH = '/process/chat/compartir';
+const SHARE_IDB_NAME = 'synerlink-compartir';
+const SHARE_IDB_STORE = 'lotes';
+const SHARE_IDB_VERSION = 1;
+const SHARE_MAX_FILES_STORED = 10;
+const SHARE_MAX_FILE_BYTES = 25 * 1024 * 1024;
+const SHARE_LOTE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function abrirBdCompartir() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(SHARE_IDB_NAME, SHARE_IDB_VERSION);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(SHARE_IDB_STORE)) {
+        req.result.createObjectStore(SHARE_IDB_STORE, { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function guardarLoteCompartido(lote) {
+  const db = await abrirBdCompartir();
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(SHARE_IDB_STORE, 'readwrite');
+      const store = tx.objectStore(SHARE_IDB_STORE);
+      // De paso se barren los lotes viejos que nadie envió.
+      const limite = Date.now() - SHARE_LOTE_TTL_MS;
+      const cursor = store.openCursor();
+      cursor.onsuccess = () => {
+        const c = cursor.result;
+        if (!c) return;
+        if (!c.value || typeof c.value.createdAt !== 'number' || c.value.createdAt < limite) c.delete();
+        c.continue();
+      };
+      store.put(lote);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+function textoCampo(form, nombre) {
+  const v = form.get(nombre);
+  return typeof v === 'string' ? v.slice(0, 4000) : '';
+}
+
+async function recibirCompartido(request) {
+  const pantalla = (qs) => Response.redirect(new URL(`${SHARE_PAGE_PATH}?${qs}`, self.location.origin).href, 303);
+  try {
+    const form = await request.formData();
+    const archivos = [];
+    for (const entrada of form.getAll('files')) {
+      if (!(entrada instanceof File)) continue;
+      if (entrada.size === 0 && !entrada.name) continue; // entrada vacía de Android
+      if (archivos.length >= SHARE_MAX_FILES_STORED) break;
+      archivos.push({
+        name: entrada.name || 'archivo',
+        type: entrada.type || '',
+        size: entrada.size,
+        // Un archivo que ya pasa del tope no se guarda: solo se muestra el aviso.
+        blob: entrada.size <= SHARE_MAX_FILE_BYTES ? entrada : null,
+      });
+    }
+    const id = self.crypto.randomUUID();
+    await guardarLoteCompartido({
+      id,
+      createdAt: Date.now(),
+      title: textoCampo(form, 'title'),
+      text: textoCampo(form, 'text'),
+      url: textoCampo(form, 'url'),
+      files: archivos,
+    });
+    return pantalla(`lote=${encodeURIComponent(id)}`);
+  } catch (err) {
+    console.warn('[SW] No se pudo recibir lo compartido:', err);
+    return pantalla('aviso=recepcion');
+  }
+}
+
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (req.method !== 'POST') return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin || url.pathname !== SHARE_TARGET_ACTION) return;
+  event.respondWith(recibirCompartido(req));
 });

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { esFormadorFormacion } from '@/lib/formacion/servidor';
 import { identificar } from '../../../../../lib/portal/acceso';
-import { formadoresDePortal } from '../../../../../lib/portal/config';
 import { esAdministradorSst } from '../../../../../lib/portal/formularios-sst-permisos';
 import { validarEnlaceForms } from '../../../../../lib/portal/importar-forms';
 import { SIN_CACHE, urlImportador } from '../../../../../lib/portal/importar-forms-servidor';
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
   if (!quien) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
   // Formadores (Formación) y, desde 2026-10-20, el administrador de los formularios SST: el importador solo LEE un formulario de Forms y
   // lo entrega al constructor; no guarda nada.
-  if (!formadoresDePortal().includes(quien.correo.toLowerCase()) && !esAdministradorSst(quien.correo)) {
+  if (!(await esFormadorFormacion(quien.correo)) && !esAdministradorSst(quien.correo)) {
     return NextResponse.json({ error: 'Solo un formador puede importar formularios.' }, { status: 403 });
   }
   const base = urlImportador();

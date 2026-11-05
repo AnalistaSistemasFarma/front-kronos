@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '../../../../../../lib/prisma';
 import { authenticateAgent } from '../../../../../../lib/chat/agent-auth';
-import { badRequest, jsonNoStore, readMessageRequest, serverError, unauthorized } from '../../../../../../lib/chat/http';
+import { badRequest, jsonNoStore, readMessageRequest, rejectOversizedBody, serverError, unauthorized } from '../../../../../../lib/chat/http';
 import { collectChatAttachments } from '../../../../../../lib/chat/attachments';
 import { uploadProjectFiles } from '../../../../../../lib/chat/attachmentStorage';
 import { assertAgentProjectConversation } from '../../../../../../lib/chat/projects';
@@ -39,6 +39,9 @@ export async function POST(request: NextRequest) {
     if (!agent) return unauthorized();
     const noEncontrada = () => jsonNoStore({ error: 'Conversación no encontrada.' }, { status: 404 });
     if (agent.scope !== 'projects') return noEncontrada();
+
+    const oversized = rejectOversizedBody(request);
+    if (oversized) return oversized;
 
     const payload = await readMessageRequest(request);
     if (!payload?.form) return badRequest('Envíe los archivos como multipart/form-data (campos idConversation y files).');

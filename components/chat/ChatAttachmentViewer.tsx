@@ -253,11 +253,7 @@ export default function ChatAttachmentViewer({
         {(tipoEfectivo === 'markdown' || tipoEfectivo === 'csv' || tipoEfectivo === 'texto') && vista && (
           <VistaTexto key={actual.id} url={vista} tipo={tipoEfectivo} fileName={actual.fileName} />
         )}
-        {tipoEfectivo === 'video' && vista && (
-          <video key={actual.id} className='chat-visor__video' src={vista} controls playsInline preload='metadata' data-testid='chat-visor-video'>
-            Su navegador no puede reproducir este video.
-          </video>
-        )}
+        {tipoEfectivo === 'video' && vista && <VistaVideo key={actual.id} url={vista} />}
         {tipoEfectivo === 'audio' && vista && (
           <Center p='lg'>
             <audio key={actual.id} src={vista} controls preload='metadata' style={{ width: '100%' }} data-testid='chat-visor-audio' />
@@ -266,6 +262,56 @@ export default function ChatAttachmentViewer({
         {tipoEfectivo === 'ninguno' && <SinVista adjunto={actual} />}
       </div>
     </Modal>
+  );
+}
+
+/* ─────────────────────────────── Video ──────────────────────────────── */
+
+const ERROR_MEDIO: Record<number, string> = {
+  1: 'se interrumpió la carga',
+  2: 'se cortó la conexión',
+  3: 'el navegador no pudo decodificarlo',
+  4: 'el navegador no admite este formato',
+};
+
+/**
+ * El reproductor del navegador. Si el video no se puede reproducir (formato
+ * o códec que el navegador no admite, conexión cortada), antes quedaba un
+ * cuadro gris sin explicación: ahora se dice qué pasó y se ofrece reintentar
+ * (Descargar sigue en la barra del visor). El código queda en la consola
+ * para diagnosticar (2026-10-26).
+ */
+function VistaVideo({ url }: { url: string }) {
+  const [fallo, setFallo] = useState<string | null>(null);
+  const [intento, setIntento] = useState(0);
+  if (fallo) {
+    return (
+      <ErrorVista
+        mensaje={`No se pudo reproducir el video: ${fallo}. Puede descargarlo desde la barra del visor.`}
+        onReintentar={() => {
+          setFallo(null);
+          setIntento((n) => n + 1);
+        }}
+      />
+    );
+  }
+  return (
+    <video
+      key={intento}
+      className='chat-visor__video'
+      src={url}
+      controls
+      playsInline
+      preload='metadata'
+      data-testid='chat-visor-video'
+      onError={(e) => {
+        const err = e.currentTarget.error;
+        console.warn('[chat/visor] video', url, err?.code, err?.message);
+        setFallo(ERROR_MEDIO[err?.code ?? 0] ?? 'error desconocido');
+      }}
+    >
+      Su navegador no puede reproducir este video.
+    </video>
   );
 }
 
@@ -383,12 +429,25 @@ function VistaImagen({
 
 /* ──────────────────────────── PDF y Office ──────────────────────────── */
 
-function VistaPdf({ url, zoom, convertido }: { url: string; zoom: number; convertido: boolean }) {
+function VistaPdf({
+  url,
+  zoom,
+  convertido,
+  onFallo,
+}: {
+  url: string;
+  zoom: number;
+  convertido: boolean;
+  /** Si se pasa, quien lo usa decide qué mostrar cuando el PDF no se puede preparar. */
+  onFallo?: (mensaje: string) => void;
+}) {
   const paginasRef = useRef<HTMLDivElement>(null);
   const bytesRef = useRef<Uint8Array | null>(null);
   const generacion = useRef(0);
   const [estado, setEstado] = useState<{ tipo: 'cargando' } | { tipo: 'listo' } | { tipo: 'error'; mensaje: string }>({ tipo: 'cargando' });
   const [intento, setIntento] = useState(0);
+  const onFalloRef = useRef(onFallo);
+  onFalloRef.current = onFallo;
 
   const dibujar = useCallback(async (escala: number) => {
     const bytes = bytesRef.current;
@@ -411,7 +470,9 @@ function VistaPdf({ url, zoom, convertido }: { url: string; zoom: number; conver
       })
       .catch((e: unknown) => {
         if (ctrl.signal.aborted) return;
-        setEstado({ tipo: 'error', mensaje: e instanceof Error ? e.message : String(e) });
+        const mensaje = e instanceof Error ? e.message : String(e);
+        setEstado({ tipo: 'error', mensaje });
+        onFalloRef.current?.(mensaje);
       });
     return () => ctrl.abort();
   }, [url, intento, dibujar]);
@@ -468,6 +529,16 @@ function VistaHoja({ url }: { url: string }) {
   // Libro con fórmulas sin calcular: se abre en PDF (Excel Online las calcula) y se avisa.
   const [sinCalcular, setSinCalcular] = useState(0);
   const avisado = useRef(false);
+  // El PDF que se abrió SOLO (por las fórmulas) no se pudo preparar: se vuelve a «Hojas» y se avisa.
+  const [pdfFallido, setPdfFallido] = useState<string | null>(null);
+  const alFallarPdf = useCallback(
+    (mensaje: string) => {
+      if (!sinCalcular) return; // La persona eligió «PDF» o el libro no se lee: se queda el error con Reintentar.
+      setPdfFallido(mensaje);
+      setModo('hojas');
+    },
+    [sinCalcular]
+  );
 
   useEffect(() => {
     if (modo !== 'hojas') return;
@@ -514,7 +585,12 @@ function VistaHoja({ url }: { url: string }) {
           aria-label='Cómo ver el Excel'
         />
       </Group>
-      {sinCalcular > 0 && (
+      {pdfFallido && (
+        <Alert color='orange' variant='light' radius={0} py={6} icon={<IconAlertTriangle size={16} />} data-testid='chat-visor-pdf-fallido'>
+          <Text size='xs'>{pdfFallido} Se muestran las hojas: las fórmulas sin calcular salen vacías; descargue el archivo para ver los resultados.</Text>
+        </Alert>
+      )}
+      {sinCalcular > 0 && !pdfFallido && (
         <Alert color='yellow' variant='light' radius={0} py={6} icon={<IconAlertTriangle size={16} />} data-testid='chat-visor-formulas'>
           <Text size='xs'>
             {modo === 'pdf'
@@ -524,7 +600,7 @@ function VistaHoja({ url }: { url: string }) {
         </Alert>
       )}
       {modo === 'pdf' ? (
-        <VistaPdfConZoom url={urlPdf} />
+        <VistaPdfConZoom url={urlPdf} onFallo={alFallarPdf} />
       ) : error ? (
         <ErrorVista mensaje={error} onReintentar={() => setIntento((n) => n + 1)} />
       ) : !datos ? (
@@ -564,7 +640,7 @@ function VistaHoja({ url }: { url: string }) {
 }
 
 /** El PDF del Excel con su propio zoom (la barra del visor no lo maneja en modo hoja). */
-function VistaPdfConZoom({ url }: { url: string }) {
+function VistaPdfConZoom({ url, onFallo }: { url: string; onFallo?: (mensaje: string) => void }) {
   const [zoom, setZoom] = useState(1);
   return (
     <>
@@ -576,7 +652,7 @@ function VistaPdfConZoom({ url }: { url: string }) {
           <IconZoomIn size={16} />
         </ActionIcon>
       </Group>
-      <VistaPdf url={url} zoom={zoom} convertido />
+      <VistaPdf url={url} zoom={zoom} convertido onFallo={onFallo} />
     </>
   );
 }

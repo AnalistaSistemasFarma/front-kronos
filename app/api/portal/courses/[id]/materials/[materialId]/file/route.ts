@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { esFormadorFormacion, puedeAdministrarCursoId } from '@/lib/formacion/servidor';
 import { prisma } from '../../../../../../../../lib/prisma';
 import { identificar } from '../../../../../../../../lib/portal/acceso';
-import { formadoresDePortal } from '../../../../../../../../lib/portal/config';
 import {
   MaterialNoValido,
   moverArchivoDeMaterialAEliminados,
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const matId = idDesdeParametro(materialId);
   if (!courseId || !matId) return NextResponse.json({ error: 'Parámetros no válidos.' }, { status: 400 });
 
-  const esFormador = formadoresDePortal().includes(quien.correo.toLowerCase());
+  const esFormador = (await esFormadorFormacion(quien.correo));
 
   try {
     const material = await prisma.portalCourseMaterial.findFirst({
@@ -126,12 +126,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string; materialId: string }> }) {
   const quien = await identificar(request);
   if (!quien) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
-  if (!formadoresDePortal().includes(quien.correo.toLowerCase())) {
+  if (!(await esFormadorFormacion(quien.correo))) {
     return NextResponse.json({ error: 'Solo un formador puede reemplazar archivos.' }, { status: 403 });
   }
 
   const { id, materialId } = await params;
   const courseId = idDesdeParametro(id);
+  if (courseId && !(await puedeAdministrarCursoId(quien.correo, courseId))) {
+    return NextResponse.json({ error: 'Este curso es de otra empresa: no tiene el permiso de Formación para configurarlo.' }, { status: 403 });
+  }
   const matId = idDesdeParametro(materialId);
   if (!courseId || !matId) return NextResponse.json({ error: 'Parámetros no válidos.' }, { status: 400 });
 

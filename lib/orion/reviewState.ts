@@ -21,20 +21,21 @@ export function orionReviewStatus(state?: OrionSignatureState | null): OrionRevi
  * `null` = depende de si el flujo tiene validadores (hay que consultarlo).
  */
 export function knownReadyForSigning(state?: OrionSignatureState | null): boolean | null {
+  if (state?.skipValidation) return true;
   const status = state?.review?.status;
   if (!status || status === 'SIN_VALIDACION') return null;
   return status === 'APROBADO';
 }
 
 /**
- * Sin validadores en el flujo → se puede firmar como siempre.
+ * Sin validadores en el flujo, o documento marcado "Sin validación" → se puede firmar como siempre.
  * Con validadores → solo tras la aprobación del último validador elegido para el documento.
  */
 export function isOrionReadyForSigning(
   state: OrionSignatureState | null | undefined,
   flowHasValidators: boolean
 ): boolean {
-  if (!flowHasValidators) return true;
+  if (!flowHasValidators || state?.skipValidation) return true;
   return orionReviewStatus(state) === 'APROBADO';
 }
 

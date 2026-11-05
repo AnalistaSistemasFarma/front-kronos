@@ -509,7 +509,7 @@ describe('orion formValue', () => {
     expect(resolved.signers).toBeUndefined();
   });
 
-  it('adopta estado Orion en copia *-firmado con otro fileId (mismo stem)', () => {
+  it('una copia *-firmado subida con otro fileId no hereda el estado Orion', () => {
     const documents = {
       'file-orig': {
         orionDocumentId: 'doc-1',
@@ -524,8 +524,8 @@ describe('orion formValue', () => {
       fileName: 'contrato_ejemplo (1)-firmado.pdf',
       documents,
     });
-    expect(resolved.orionDocumentId).toBe('doc-1');
-    expect(resolved.status).toBe('FIRMADO');
+    expect(resolved.orionDocumentId).toBeUndefined();
+    expect(resolved.status).toBeUndefined();
   });
 
   it('adopta solo el documento legacy cuando no hay clave por fileId', () => {
@@ -886,7 +886,7 @@ describe('orion attachmentList', () => {
     expect(normalizeAttachmentStem('doc-parcial (2).pdf')).toBe('doc');
   });
 
-  it('oculta *-firmado de OneDrive cuando el bag Orion ya es dueño del documento', () => {
+  it('lista *-firmado / *-parcial subidos a OneDrive aunque el bag Orion tenga el original', () => {
     const merged = mergeOneDriveWithOrionDocuments(
       [
         {
@@ -914,10 +914,12 @@ describe('orion attachmentList', () => {
     );
 
     expect(merged.map((f) => f.name)).toEqual([
+      'contrato_ejemplo (1)-firmado.pdf',
       'contrato_ejemplo (1).pdf',
       'firmaas.pdf',
     ]);
-    expect(merged.find((f) => f.name.includes('contrato'))?.fromOrionBag).toBe(true);
+    expect(merged.find((f) => f.name === 'contrato_ejemplo (1).pdf')?.fromOrionBag).toBe(true);
+    expect(merged.find((f) => f.id === 'od-firmado')?.fromOrionBag).toBeUndefined();
     expect(merged.find((f) => f.name === 'firmaas.pdf')?.fromOrionBag).toBeUndefined();
   });
 
@@ -938,7 +940,7 @@ describe('orion attachmentList', () => {
         },
       }
     );
-    expect(merged.map((f) => f.name)).toEqual(['alfa.pdf', 'zeta.pdf']);
+    expect(merged.map((f) => f.name)).toEqual(['alfa-firmado.pdf', 'alfa.pdf', 'zeta.pdf']);
   });
 });
 

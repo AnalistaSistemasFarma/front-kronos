@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { useSession } from 'next-auth/react';
@@ -72,6 +72,11 @@ import {
 } from '../../../../../components/request-general/list/RequestListUi';
 import requestListStyles from '../../../../../components/request-general/list/requestList.module.css';
 import WorkloadDistribution from '../../../../../components/request-general/WorkloadDistribution';
+import { RequestFlowBar, useRequestFlows } from '../../../../../components/request-general/RequestFlow';
+import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
+import IosSearchField from '../../../../../components/ui/IosSearchField';
+import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
+import { filterByText } from '../../../../../lib/requests-general/textSearch';
 import {
   buildTaskDisplayBadges,
   getSimplifiedTasksProgress,
@@ -225,8 +230,30 @@ function RequestBoard() {
   const [statusCounts, setStatusCounts] = useState({ open: 0, resolved: 0 });
   // Filtros con los que se cargó la lista (para cambiar de página y exportar).
   const appliedFiltersRef = useRef<typeof filters | null>(null);
+  // Buscador libre: las solicitudes se buscan en el servidor (toda la base, antes de paginar);
+  // las tareas ya están completas en memoria y se filtran aquí mismo.
+  const [searchInput, setSearchInput] = useState('');
+  const deferredSearch = useDeferredValue(searchInput);
+  const appliedSearchRef = useRef('');
+  const visibleTasks = useMemo(
+    () =>
+      filterByText(assignedTasks, deferredSearch, (t) => [
+        t.id_request_general,
+        t.task,
+        t.subject_request,
+        t.description,
+        t.company,
+        t.process,
+        t.status_task,
+        t.name_requester,
+        t.assigned,
+      ]),
+    [assignedTasks, deferredSearch]
+  );
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  const byCreatedAtDesc = (a: { createdAt: string }, b: { createdAt: string }) =>
+  const byCreatedAtDesc =(a: { createdAt: string }, b: { createdAt: string }) =>
     new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
 
   const requestPageItems: AssignedItem[] = tickets.map((t) => ({
@@ -235,7 +262,7 @@ function RequestBoard() {
     data: t,
     createdAt: t.created_at,
   }));
-  const taskItems: AssignedItem[] = assignedTasks
+  const taskItems: AssignedItem[] = visibleTasks
     .map((t): AssignedItem => ({ kind: 'task', key: `task-${t.id}`, data: t, createdAt: t.created_at }))
     .sort(byCreatedAtDesc);
   const taskPageItems = taskItems.slice(
@@ -261,8 +288,14 @@ function RequestBoard() {
       : typeFilter === 'tasks'
         ? taskPageItems
         : [...requestPageItems, ...taskPageItems].sort(byCreatedAtDesc);
-  const totalItemsCount = totalTickets + assignedTasks.length;
+  const totalItemsCount = totalTickets + visibleTasks.length;
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  // Flujo completo (en qué paso va) de las solicitudes de la página, también las de cada tarea.
+  const { flows: requestFlows } = useRequestFlows(
+    pageItems.map((item) =>
+      item.kind === 'task' ? Number((item.data as AssignedTask).id_request_general) : Number((item.data as Ticket).id)
+    )
+  );
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -372,6 +405,7 @@ function RequestBoard() {
     const params = buildTicketParams(filtersToUse);
     params.append('page', String(page));
     params.append('pageSize', String(ITEMS_PER_PAGE));
+    if (appliedSearchRef.current) params.append('search', appliedSearchRef.current);
     const res = await fetch(`/api/requests-general/request-assigned?${params.toString()}`);
     if (!res.ok) throw new Error('Failed to fetch assigned tickets');
     const data = await res.json();
@@ -393,11 +427,20 @@ function RequestBoard() {
     fetchTasksForTickets(data.rows);
   };
 
-  const fetchAssignedWithUserId = async (userIdToUse: number, filtersToUse?: typeof filters) => {
+  /**
+   * `silent`: refresca sin tapar la pantalla con el cargador y, si algo falla, deja lo que ya
+   * se veía (búsqueda y refresco automático). `page`: página de solicitudes a cargar.
+   */
+  const fetchAssignedWithUserId = async (
+    userIdToUse: number,
+    filtersToUse?: typeof filters,
+    { silent = false, page = 1 }: { silent?: boolean; page?: number } = {}
+  ) => {
     try {
-      setLoading(true);
+      if (silent) setRefreshing(true);
+      else setLoading(true);
       appliedFiltersRef.current = filtersToUse ?? null;
-      setCurrentPage(1);
+      setCurrentPage(page);
 
       const statusValue = filtersToUse?.status || '';
       const includeRequests = includesRequests(filtersToUse);
@@ -408,7 +451,7 @@ function RequestBoard() {
       taskParams.append('idUser', userIdToUse.toString());
 
       const [requestResult, taskResult] = await Promise.allSettled([
-        includeRequests ? fetchRequestPage(filtersToUse, 1) : Promise.resolve(EMPTY_REQUEST_PAGE),
+        includeRequests ? fetchRequestPage(filtersToUse, page) : Promise.resolve(EMPTY_REQUEST_PAGE),
         includeTasks
           ? fetch(`/api/requests-general/activities-assigned?${taskParams.toString()}`).then((res) => {
               if (!res.ok) throw new Error('Failed to fetch assigned tasks');
@@ -417,28 +460,64 @@ function RequestBoard() {
           : Promise.resolve([]),
       ]);
 
-      applyRequestPage(
-        requestResult.status === 'fulfilled' ? requestResult.value : EMPTY_REQUEST_PAGE,
-        1
-      );
-      setAssignedTasks(
-        taskResult.status === 'fulfilled' && Array.isArray(taskResult.value)
-          ? taskResult.value
-          : []
-      );
+      // En silencio, lo que falle no borra lo que ya se veía.
+      if (!silent || requestResult.status === 'fulfilled') {
+        applyRequestPage(
+          requestResult.status === 'fulfilled' ? requestResult.value : EMPTY_REQUEST_PAGE,
+          page
+        );
+      }
+      if (!silent || taskResult.status === 'fulfilled') {
+        setAssignedTasks(
+          taskResult.status === 'fulfilled' && Array.isArray(taskResult.value)
+            ? taskResult.value
+            : []
+        );
+      }
 
       if (requestResult.status === 'rejected' && taskResult.status === 'rejected') {
-        setError('No se pudieron cargar las solicitudes y tareas asignadas. Intenta de nuevo.');
+        if (!silent) {
+          setError('No se pudieron cargar las solicitudes y tareas asignadas. Intenta de nuevo.');
+        }
       } else {
         setError(null);
+        setLastUpdated(new Date());
       }
     } catch (err) {
       console.error('Error fetching assigned tickets:', err);
-      setError('No se pudieron cargar las solicitudes y tareas asignadas. Intenta de nuevo.');
+      if (!silent) {
+        setError('No se pudieron cargar las solicitudes y tareas asignadas. Intenta de nuevo.');
+      }
     } finally {
-      setLoading(false);
+      if (silent) setRefreshing(false);
+      else setLoading(false);
     }
   };
+
+  // Al escribir en el buscador: espera a que deje de teclear y vuelve a pedir las solicitudes
+  // desde la página 1 (las tareas se filtran al instante en memoria).
+  useEffect(() => {
+    const next = searchInput.trim();
+    if (next === appliedSearchRef.current) return;
+    const timer = window.setTimeout(() => {
+      appliedSearchRef.current = next;
+      if (userId) {
+        void fetchAssignedWithUserId(userId, appliedFiltersRef.current ?? filters, { silent: true });
+      }
+    }, 350);
+    return () => window.clearTimeout(timer);
+    // Solo cuando cambia el texto; los filtros vigentes se leen del ref.
+  }, [searchInput, userId]);
+
+  // Refresco automático cada 30 s (y al volver a la pestaña): misma página, filtros y búsqueda.
+  useAutoRefresh(() => {
+    if (userId && appliedFiltersRef.current) {
+      void fetchAssignedWithUserId(userId, appliedFiltersRef.current, {
+        silent: true,
+        page: currentPage,
+      });
+    }
+  });
 
   // Las solicitudes se piden por página al servidor; las tareas ya están en memoria.
   const goToPage = async (page: number, type: TypeFilter = typeFilter) => {
@@ -1102,6 +1181,9 @@ function RequestBoard() {
         <Text size='xs' c='dimmed' lineClamp={2}>
           {task.subject_request}
         </Text>
+        <div style={{ marginTop: 6 }}>
+          <RequestFlowBar flow={requestFlows[Number(task.id_request_general)]} />
+        </div>
       </Table.Td>
       <Table.Td>
         <Stack gap={2}>
@@ -1339,6 +1421,23 @@ function RequestBoard() {
               <IconTicket size={20} />
               Lista de Solicitudes y Tareas Asignadas
             </Title>
+            <AutoRefreshNote refreshing={refreshing} lastUpdated={lastUpdated} />
+          </Group>
+
+          <Group justify='space-between' align='flex-start' mb='md' wrap='wrap' gap='sm'>
+            <Box style={{ flex: '1 1 320px', minWidth: 0 }}>
+              <IosSearchField
+                value={searchInput}
+                onChange={setSearchInput}
+                placeholder='Buscar ID, asunto, tarea, empresa, proceso, estado o persona'
+                ariaLabel='Buscar solicitudes y tareas'
+                meta={
+                  searchInput.trim()
+                    ? `${totalTickets} solicitud(es) y ${visibleTasks.length} tarea(s) coinciden`
+                    : 'Busca en todas, no solo en esta página; no importan tildes ni mayúsculas'
+                }
+              />
+            </Box>
             <SegmentedControl
               fullWidth={isMobile}
               size={isMobile ? 'xs' : 'sm'}
@@ -1348,7 +1447,7 @@ function RequestBoard() {
               data={[
                 { value: 'all', label: `Todos (${totalItemsCount})` },
                 { value: 'requests', label: `Solicitudes (${totalTickets})` },
-                { value: 'tasks', label: `Tareas (${assignedTasks.length})` },
+                { value: 'tasks', label: `Tareas (${visibleTasks.length})` },
               ]}
             />
           </Group>
@@ -1376,8 +1475,9 @@ function RequestBoard() {
                       : `/process/request-general/view-request?id=${r!.id}&from=assigned-requests`
                   );
                 };
+                const flow = requestFlows[isTask ? Number(t!.id_request_general) : Number(r!.id)];
                 const progress =
-                  r && tasksByRequest[r.id]?.length ? getTasksProgress(tasksByRequest[r.id]) : null;
+                  !flow && r && tasksByRequest[r.id]?.length ? getTasksProgress(tasksByRequest[r.id]) : null;
                 return (
                   <Paper
                     key={item.key}
@@ -1409,11 +1509,15 @@ function RequestBoard() {
                         {t!.subject_request}
                       </Text>
                     )}
-                    {progress && (
+                    {flow ? (
+                      <div style={{ marginTop: 6 }}>
+                        <RequestFlowBar flow={flow} />
+                      </div>
+                    ) : progress ? (
                       <div style={{ marginTop: 6 }}>
                         <RequestProgressBar {...progress} />
                       </div>
-                    )}
+                    ) : null}
                     <Text size='xs' c='dimmed' mt={6} style={{ overflowWrap: 'anywhere' }}>
                       {[isTask ? null : r!.process, isTask ? t!.company : r!.company, formatAssignedDate(isTask ? t!.created_at : r!.created_at)]
                         .filter(Boolean)
@@ -1455,7 +1559,9 @@ function RequestBoard() {
                               : 'No se encontraron solicitudes ni tareas asignadas'}
                         </Text>
                         <Text size='sm' c='gray.5'>
-                          No tienes elementos asignados con los filtros actuales
+                          {searchInput.trim()
+                            ? `Nada coincide con “${searchInput.trim()}”`
+                            : 'No tienes elementos asignados con los filtros actuales'}
                         </Text>
                       </div>
                     </Table.Td>
@@ -1485,9 +1591,16 @@ function RequestBoard() {
                         <Text size='sm' fw={500} lineClamp={2}>
                           {ticket.subject}
                         </Text>
+                        {requestFlows[ticket.id] ? (
+                          <div style={{ marginTop: 8 }}>
+                            <RequestFlowBar flow={requestFlows[ticket.id]} />
+                          </div>
+                        ) : null}
                         {tasksByRequest[ticket.id]?.length ? (
                           <Stack gap={6} mt={8}>
-                            <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
+                            {requestFlows[ticket.id] ? null : (
+                              <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
+                            )}
                             <Group gap={6} wrap='wrap'>
                               {buildTaskDisplayBadges(tasksByRequest[ticket.id]).map((badge) => {
                                 const { color, Icon } = getTaskVisual(badge.statusKey);

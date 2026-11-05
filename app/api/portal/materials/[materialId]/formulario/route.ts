@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { esFormadorFormacion } from '@/lib/formacion/servidor';
 import { prisma } from '../../../../../../lib/prisma';
 import { identificar } from '../../../../../../lib/portal/acceso';
-import { formadoresDePortal } from '../../../../../../lib/portal/config';
 import { recalcularProgresoDeMaterial, resolverNombreEstudiante } from '../../../../../../lib/portal/formacion';
 import {
   MENSAJE_AUTORIZACION,
@@ -31,7 +31,7 @@ async function materialFormulario(materialId: number, correo: string) {
     select: { id: true, type: true, title: true, formulario_id: true, course: { select: { active: true } } },
   });
   if (!material || material.type !== 'FORM' || !material.formulario_id) return null;
-  if (!material.course.active && !formadoresDePortal().includes(correo.toLowerCase())) return null;
+  if (!material.course.active && !(await esFormadorFormacion(correo))) return null;
   return { ...material, formulario_id: material.formulario_id };
 }
 

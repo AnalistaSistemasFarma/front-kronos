@@ -1,219 +1,225 @@
 name: Deploy to Production (Self-Hosted)
 
+# Auto-deploy de PRODUCCION de SynerLink/Kronos en serfarma05, SIN CAIDA
+# (azul/verde). Mismo esquema que PRUEBAS (deploy-testing.yml, PR #860), con las
+# diferencias de produccion. Activado una sola vez con
+# scripts\bluegreen\setup-serfarma05.ps1 (ver RUNBOOK); reversa con
+# scripts\bluegreen\revert-serfarma05.ps1 + revertir este archivo.
+#
+# ESQUEMA:
+#   - Dos carpetas de release, cada una con su node_modules y su .next:
+#       A = C:\Users\administrador.DFARUNIADM\projects\front-kronos (la de siempre)
+#       B = ...\projects\front-kronos-b (git worktree)
+#     Los .env de B son enlaces a los de A; dbconfig.js se copia.
+#   - GSS-Front-proxy escucha FIJO en :3003 (IIS/ARR del :8445, agentes que
+#     publican directo a 192.168.10.5:3003 y uptime-kuma no cambian) y reenvia
+#     al color activo: GSS-Front-A (:3041) o GSS-Front-B (:3042), cluster x2,
+#     segun <estado>\active.json.
+#   - kronos-mcp (:3020) vive en su carpeta dedicada (...\front-kronos-mcp) y
+#     SOLO se toca cuando cambian mcp/, prisma/ o la version de Prisma: hueco de
+#     segundos, delete + start, nunca 2 instancias (regla de Nicolas 2026-10-06).
+#     Si no cambian, el deploy no lo toca.
+#   - PM2 es el del SERVICIO 0pm2.exe (PM2_HOME de administrador). Los scripts
+#     comprueban por procesos (sin llamar a pm2) que el daemon vivo sea el del
+#     servicio antes de usar pm2; si no, abortan sin tocar nada (incidente
+#     2026-10-28: un pm2 sin daemon arranca otro fuera del servicio).
+#
+# JOB "build" (la version activa sigue atendiendo; sin mantenimiento, sin stop):
+#   git reset --hard en la carpeta INACTIVA -> cierra node huerfanos que aun
+#   retengan archivos de esa carpeta (doble criterio) -> exige RAM libre ->
+#   npm install SOLO si cambiaron package.json/lock -> prisma generate ->
+#   next build (prioridad BelowNormal, un reintento) -> build del MCP.
+#   Como nada corre desde esa carpeta, ya no hay EPERM de Prisma ni hace falta
+#   bajar prod por dependencias nuevas ni por cambio de esquema.
+#   ESQUEMA: los SQL de prod siguen siendo MANUALES y PREVIOS al merge. Si el
+#   commit cambia prisma/, verificar-esquema.ps1 comprueba en SOLO LECTURA que la
+#   BD ya tenga las tablas/columnas nuevas; si faltan, el deploy se detiene antes
+#   del cambio (la version activa sigue atendiendo).
+#
+# JOB "switch" (nunca se cancela a mitad):
+#   arranca el color nuevo en su puerto -> smoke test HTTP (/, /login,
+#   /api/health/version con el sha nuevo, varias veces para pasar por los 2
+#   workers) -> cambia active.json (el proxy cambia en < 0,5 s, sin cortar lo que
+#   esta en curso) -> verifica por :3003 -> MCP si hace falta -> drenaje 45 s ->
+#   retira el color viejo (su build queda en disco: rollback inmediato con
+#   switch.ps1 -Rollback). Si el smoke test falla, NO cambia nada.
+#   La pagina de mantenimiento del IIS queda solo como respaldo si al final :3003
+#   no responde.
+#
+# CONCURRENCIA: un solo deploy de prod a la vez y nunca se cancela uno en curso
+# (un build de un merge nuevo no puede pisar la carpeta que otro run esta por
+# activar). GitHub deja en cola solo el ultimo merge pendiente; un run viejo que
+# arranca cuando main ya avanzo se salta solo.
+
 on:
   push:
     branches:
       - main
-
-# Auto-deploy de PRODUCCIÓN (serfarma05, app pm2 GSS-Front en :3003).
-#
-# RUNNER FIJO: se ancla con la etiqueta `serfarma05` (además de self-hosted)
-# porque el repo tiene DOS runners self-hosted Windows (prod y la .230). Con solo
-# `self-hosted` el job podía caer en la máquina equivocada y fallar en el `cd`.
-#
-# CÓDIGO: `git fetch` + `git reset --hard origin/main` (NO `git pull`). `pull` se
-# aborta si el árbol de prod tiene cambios locales en archivos versionados (eso
-# tumbó el deploy del 2026-06-30). `reset --hard` solo toca archivos VERSIONADOS;
-# los git-ignored (dbconfig.js, app/generated/prisma, .env) sobreviven porque NO
-# ejecutamos `git clean`.
-#
-# PRISMA (2026-08-12): el deploy AHORA detecta si cambio `prisma/schema.prisma` o
-# `prisma/migrations` entre el HEAD viejo y origin/main:
-#   - Si NO cambio el esquema -> camino normal CERO DOWNTIME: npm install -> build ->
-#     `pm2 reload` (grácil, sin detener). El cliente Prisma en disco sigue vigente.
-#   - Si SI cambio el esquema -> detiene GSS-Front + kronos-mcp (para liberar el DLL
-#     query_engine-windows.dll.node, que si no da EPERM), corre `npx prisma generate`,
-#     compila y `pm2 start`. Esto implica una caida BREVE, pero evita el paso manual
-#     que antes hacia falta (prod servia codigo nuevo con cliente Prisma viejo -> 500
-#     en modelos nuevos y en el callback jwt de next-auth). Ver ventana del 2026-08-12.
-#   `migrate deploy` sigue SIN correrse (la BD de prod no esta baselined, da P3005);
-#   los cambios de tablas/columnas se aplican A MANO en la BD antes del pase.
-#
-# CERO DOWNTIME: el camino normal usa `pm2 reload` (recarga grácil instancia por
-# instancia). Si el build falla, NO se recarga: GSS-Front sigue sirviendo el build
-# anterior. Solo el camino de cambio-de-esquema hace stop/start (caida breve).
+  workflow_dispatch:
+    inputs:
+      verificar_esquema:
+        description: 'Verificacion de esquema si el commit cambia prisma/: estricto (detiene el deploy si falta algo en la BD) o aviso (solo advierte).'
+        type: choice
+        options: [estricto, aviso]
+        default: estricto
 
 concurrency:
   group: deploy-prod-serfarma05
   cancel-in-progress: false
 
+env:
+  # Sin esto, las apps que arranca pm2 heredan RUNNER_TRACKING_ID y el runner las
+  # mata al cerrar el job; pm2 las revive tras ~20-35 s sin servicio (medido en
+  # PRUEBAS el 2026-11-04). Los scripts ademas quitan GITHUB_*/ACTIONS_*/RUNNER_*
+  # del entorno al llamar a pm2.
+  RUNNER_TRACKING_ID: ''
+  BG_STATE_DIR: C:\Users\administrador.DFARUNIADM\projects\front-kronos-bluegreen
+  PM2_HOME: C:\Users\administrador.DFARUNIADM\.pm2
+  IIS_SITE_PATH: C:\inetpub\wwwroot\GSS
+
 jobs:
-  deploy:
+  build:
+    name: Build en la carpeta inactiva (la activa sigue atendiendo)
+    # RUNNER FIJO: el repo tiene dos runners self-hosted Windows (prod y la .230).
     runs-on: [self-hosted, serfarma05]
-    env:
-      PROJECT_DIR: C:\Users\administrador.DFARUNIADM\projects\front-kronos
-
+    timeout-minutes: 75
+    outputs:
+      skip: ${{ steps.resolve.outputs.skip }}
+      color: ${{ steps.resolve.outputs.color }}
+      dir: ${{ steps.resolve.outputs.dir }}
+      sha: ${{ steps.resolve.outputs.sha }}
     steps:
-      - name: Actualizar codigo y detectar cambio de esquema
-        shell: cmd
-        run: |
-          cd /d %PROJECT_DIR% || exit /b 1
-          for /f %%i in ('git rev-parse HEAD') do set "OLD_HEAD=%%i"
-          echo === git fetch origin ===
-          git fetch origin || exit /b 1
-          echo === git reset --hard origin/main ===
-          git reset --hard origin/main || exit /b 1
-          git rev-parse --short HEAD
-          echo === detectar cambio en prisma/schema.prisma o migraciones ===
-          git diff --quiet %OLD_HEAD% HEAD -- prisma/schema.prisma prisma/migrations
-          if errorlevel 1 (set "SCHEMA_CHANGED=1") else (set "SCHEMA_CHANGED=0")
-          echo SCHEMA_CHANGED=%SCHEMA_CHANGED%
-          rem OJO: la redireccion va DELANTE del echo a proposito. Escrito como
-          rem `echo SCHEMA_CHANGED=%%SCHEMA_CHANGED%%>>%%GITHUB_ENV%%`, cmd.exe lee el
-          rem digito pegado al `>>` como el NUMERO DEL FLUJO (1=salida, 0=entrada),
-          rem no como parte del valor: al archivo llegaba `SCHEMA_CHANGED=` vacio y el
-          rem paso condicional de abajo NUNCA se ejecutaba. Con la redireccion primero
-          rem no hay digito adyacente al operador y el valor viaja completo.
-          >>"%GITHUB_ENV%" echo SCHEMA_CHANGED=%SCHEMA_CHANGED%
-          echo === detectar cambio bajo mcp/ ===
-          git diff --quiet %OLD_HEAD% HEAD -- mcp
-          if errorlevel 1 (set "MCP_CHANGED=1") else (set "MCP_CHANGED=0")
-          echo MCP_CHANGED=%MCP_CHANGED%
-          rem Misma regla de arriba: la redireccion va DELANTE del echo.
-          >>"%GITHUB_ENV%" echo MCP_CHANGED=%MCP_CHANGED%
-
-      # PAGINA "SynerLink se esta actualizando" (deploy/iis/README.md). Desde
-      # 2026-10-10 se activa en TODO deploy, no solo con cambio de esquema: el
-      # 2026-10-09 (run 37999883505) `next build` reescribio .next mientras el
-      # proceso viejo atendia y una usuaria vio "Application error: a client-side
-      # exception has occurred". `npm install` tambien cambia node_modules bajo el
-      # proceso vivo, por eso se activa ANTES de instalar. El publico del :8445 ve
-      # la pagina (503 + Retry-After) en vez de chunks rotos. La quita el ultimo
-      # paso del job (if: always()), y solo si GSS-Front ya responde 200.
-      # continue-on-error: la pagina es cosmetica y nunca debe frenar un pase.
-      # Los agentes (directo a :3003) no se afectan.
-      - name: Activar pagina de mantenimiento en IIS
-        continue-on-error: true
-        shell: cmd
-        run: |
-          cd /d %PROJECT_DIR% || exit /b 1
-          rem Mantiene la pagina instalada al dia con la del repo.
-          copy /y deploy\iis\_mantenimiento\index.html C:\inetpub\wwwroot\GSS\_mantenimiento\index.html
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\maintenance-on.ps1 -Motivo "deploy %GITHUB_SHA% (esquema=%SCHEMA_CHANGED%)"
-
-      - name: Instalar dependencias
-        shell: cmd
-        run: |
-          cd /d %PROJECT_DIR% || exit /b 1
-          echo === npm install ===
-          call npm install || exit /b 1
-
-      - name: (Solo si cambio el esquema) detener apps y regenerar cliente Prisma
-        if: env.SCHEMA_CHANGED == '1'
-        shell: cmd
-        run: |
-          cd /d %PROJECT_DIR% || exit /b 1
-          echo === cambio de esquema: detengo apps para liberar el DLL de Prisma ===
-          call pm2 stop GSS-Front
-          call pm2 stop kronos-mcp
-          rem `pm2 stop` devuelve el control ANTES de que Windows libere las
-          rem bibliotecas que los procesos tenian abiertas. El pase del
-          rem 2026-09-08 se cayo aqui: `prisma generate` corrio medio segundo
-          rem despues del stop y murio con EPERM al renombrar
-          rem query_engine-windows.dll.node. Como este paso fallo, "Compilar" y
-          rem "Levantar" se saltaron y el servicio quedo ABAJO sin nada nuevo
-          rem puesto. Ver scripts/esperar-motor-prisma.cjs.
-          echo === espero a que el motor de Prisma quede libre ===
-          call node scripts\esperar-motor-prisma.cjs 20 500
-          echo === prisma generate ===
-          call npx prisma generate && goto :generado
-          echo    fallo el primer intento; espero un poco mas y reintento
-          call node scripts\esperar-motor-prisma.cjs 20 1000
-          call npx prisma generate || exit /b 1
-          :generado
-
-      - name: Compilar
-        shell: cmd
-        run: |
-          cd /d %PROJECT_DIR% || exit /b 1
-          echo === next build ===
-          call npm run build && goto :build_ok
-          rem Reintento unico: el 2026-09-22 el build fallo con
-          rem TurbopackInternalError ("failed to receive message... deadline
-          rem has elapsed") precedido de "Slow filesystem detected" en este
-          rem runner Windows -- flakiness del worker, no un error de codigo
-          rem (el mismo commit habia compilado limpio en el CI de Linux).
-          rem Antes de tumbar el deploy completo, reintentamos una vez.
-          echo    fallo el primer intento de build; espero y reintento una vez
-          timeout /t 5 /nobreak >nul
-          call npm run build || exit /b 1
-          :build_ok
-
-      - name: Levantar o recargar GSS-Front
-        shell: cmd
-        run: |
-          cd /d %PROJECT_DIR% || exit /b 1
-          if "%SCHEMA_CHANGED%"=="1" (
-            echo === cambio de esquema: levanto apps ===
-            call pm2 start GSS-Front || call pm2 restart GSS-Front || exit /b 1
-            call pm2 start kronos-mcp || call pm2 restart kronos-mcp || exit /b 1
-          ) else (
-            echo === deploy normal: reload cero downtime ===
-            call pm2 reload GSS-Front || exit /b 1
-          )
-          call pm2 save
-
-      # MCP de Kronos (kronos-mcp, :3020). Antes el deploy NUNCA compilaba mcp/:
-      # serve.mjs arranca desde mcp/dist (gitignored), asi que un cambio en
-      # mcp/src llegaba al disco pero el proceso seguia sirviendo el dist viejo
-      # hasta que alguien compilaba a mano. Aqui, si el push trae cambios bajo
-      # mcp/, se instala, se compila y se reinicia SOLO kronos-mcp (1 instancia;
-      # nunca all/kill). Va despues de "Levantar" para cubrir tambien el camino
-      # de cambio de esquema (que ya hizo pm2 start kronos-mcp con el dist viejo).
-      #
-      # PM2: el runner corre como DFARUNIADM\nicolas.rivera, pero el daemon real
-      # de produccion vive en el PM2_HOME de administrador (servicio 0pm2.exe,
-      # ver incidente 2026-10-06). Se fijan PM2_HOME y la ruta completa de
-      # pm2.cmd para no depender del PATH ni de que el servicio del runner haya
-      # heredado la variable de maquina. Sin --update-env: no se inyecta el
-      # entorno del runner al proceso del MCP (este lee su propio mcp\.env).
-      - name: (Solo si cambio mcp/) compilar y reiniciar kronos-mcp
-        if: env.MCP_CHANGED == '1'
-        shell: cmd
-        env:
-          PM2_HOME: C:\Users\administrador.DFARUNIADM\.pm2
-          PM2_CMD: C:\Users\administrador.DFARUNIADM\AppData\Roaming\npm\pm2.cmd
-        run: |
-          cd /d %PROJECT_DIR%\mcp || exit /b 1
-          echo === npm ci (mcp) ===
-          call npm ci --no-audit --no-fund || exit /b 1
-          echo === npm run build (mcp) ===
-          call npm run build || exit /b 1
-          echo === pm2 restart kronos-mcp ===
-          call "%PM2_CMD%" restart kronos-mcp || exit /b 1
-          rem `pm2 list` (no `describe`/`jlist`, que imprimen variables de entorno).
-          call "%PM2_CMD%" list
-
-      - name: (Solo si cambio mcp/) verificar que kronos-mcp responde
-        if: env.MCP_CHANGED == '1'
+      - name: Resolver color inactivo y commit
+        id: resolve
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
+          $state = $env:BG_STATE_DIR
+          $cfgFile = Join-Path $state 'bluegreen.json'
+          $actFile = Join-Path $state 'active.json'
+          if (-not (Test-Path $cfgFile) -or -not (Test-Path $actFile)) {
+            throw "El azul/verde de produccion NO esta activado ($state). Corra scripts\bluegreen\setup-serfarma05.ps1 segun el RUNBOOK. No se toco nada: prod sigue con la version anterior."
+          }
+          $cfg = Get-Content $cfgFile -Raw | ConvertFrom-Json
+          $act = Get-Content $actFile -Raw | ConvertFrom-Json
+          $color = if ($act.color -eq 'A') { 'B' } else { 'A' }
+          $dir = $cfg.colors.$color.dir
+          git -C $dir fetch origin main
+          if ($LASTEXITCODE -ne 0) { throw "git fetch fallo en $dir" }
+          $sha = (git -C $dir rev-parse origin/main).Trim()
+          $skip = 'false'
+          if ($env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_SHA -ne $sha) {
+            $skip = 'true'
+            Write-Host "::notice::Run obsoleto ($env:GITHUB_SHA); main ya esta en $sha. El run mas nuevo hace el despliegue."
+          }
+          if ($act.sha -eq $sha) {
+            $skip = 'true'
+            Write-Host "::notice::$sha ya es la version activa ($($act.color)). Nada que desplegar."
+          }
+          Write-Host "Activo: $($act.color) (:$($act.port), $($act.sha)). Se construye $color en $dir con main@$sha"
+          "skip=$skip"            | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "color=$color"          | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "dir=$dir"              | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "sha=$sha"              | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "active_sha=$($act.sha)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Actualizar codigo de la carpeta inactiva y detectar cambios
+        id: changes
+        if: steps.resolve.outputs.skip != 'true'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dir = "${{ steps.resolve.outputs.dir }}"
+          $sha = "${{ steps.resolve.outputs.sha }}"
+          $old = "${{ steps.resolve.outputs.active_sha }}"
+          # Sello fuera ANTES de tocar el codigo: un build a medias nunca se activa.
+          Remove-Item -LiteralPath (Join-Path $dir '.bluegreen-build.json') -Force -ErrorAction SilentlyContinue
+          # reset --hard solo toca archivos versionados: .env, dbconfig.js y los
+          # enlaces (ignorados) sobreviven. Sin git clean.
+          git -C $dir reset --hard $sha
+          if ($LASTEXITCODE -ne 0) { throw "git reset fallo" }
+          function Changed([string[]]$paths) {
+            git -C $dir diff --quiet $old $sha -- @paths 2>$null
+            if ($LASTEXITCODE -eq 0) { return '0' } else { return '1' }
+          }
+          $schema = Changed @('prisma')
+          $mcp = Changed @('mcp')
+          $deps = Changed @('package.json', 'package-lock.json', 'mcp/package.json', 'mcp/package-lock.json')
+          Write-Host "Cambios $old..$sha -> esquema=$schema mcp=$mcp dependencias=$deps"
+          "schema=$schema" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "| Cambio | Valor |`n|---|---|`n| prisma/ | $schema |`n| mcp/ | $mcp |`n| dependencias | $deps |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Instalar, generar Prisma y compilar (front + MCP) en la carpeta inactiva
+        if: steps.resolve.outputs.skip != 'true'
+        shell: powershell
+        run: |
+          $dir = "${{ steps.resolve.outputs.dir }}"
+          powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dir 'scripts\bluegreen\build-inactive.ps1') `
+            -StateDir "$env:BG_STATE_DIR" -Color "${{ steps.resolve.outputs.color }}" `
+            -Sha "${{ steps.resolve.outputs.sha }}" -RunId "$env:GITHUB_RUN_ID"
+          if ($LASTEXITCODE -ne 0) { throw "build-inactive fallo: la version activa sigue atendiendo, sin cambios." }
+
+      - name: (Solo si cambia prisma/) verificar que la BD ya tiene el esquema nuevo
+        if: steps.resolve.outputs.skip != 'true' && steps.changes.outputs.schema == '1'
+        shell: powershell
+        env:
+          MODO: ${{ inputs.verificar_esquema || 'estricto' }}
+        run: |
+          $dir = "${{ steps.resolve.outputs.dir }}"
+          powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dir 'scripts\bluegreen\verificar-esquema.ps1') `
+            -Dir $dir -OldSha "${{ steps.resolve.outputs.active_sha }}" -NewSha "${{ steps.resolve.outputs.sha }}"
+          $rc = $LASTEXITCODE
+          if ($rc -ne 0) {
+            if ($env:MODO -eq 'aviso') { Write-Host "::warning::Verificacion de esquema con codigo $rc (modo aviso: se sigue)."; exit 0 }
+            throw "Verificacion de esquema con codigo $rc. No se cambia de version: la activa sigue atendiendo. Aplique los SQL del pase y relance (workflow_dispatch)."
+          }
+
+  switch:
+    name: Cambio azul/verde (sin caida)
+    needs: build
+    if: needs.build.outputs.skip != 'true'
+    runs-on: [self-hosted, serfarma05]
+    timeout-minutes: 30
+    steps:
+      - name: Arrancar color nuevo, smoke test, cambiar el proxy y retirar el viejo
+        shell: powershell
+        run: |
+          $dir = "${{ needs.build.outputs.dir }}"
+          powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dir 'scripts\bluegreen\switch.ps1') `
+            -StateDir "$env:BG_STATE_DIR" -Color "${{ needs.build.outputs.color }}" `
+            -Sha "${{ needs.build.outputs.sha }}" -RunId "$env:GITHUB_RUN_ID"
+          $rc = $LASTEXITCODE
+          if ($rc -eq 2) { Write-Host "::warning::Front nuevo en linea; el MCP quedo en su version anterior (ver log)."; exit 0 }
+          if ($rc -ne 0) { throw "switch fallo (codigo $rc). Si fallo antes del cambio, la version anterior sigue atendiendo." }
+
+      # Respaldo: solo si al final :3003 NO responde 200 se pone la pagina de
+      # mantenimiento del IIS. Si responde y quedo una bandera vieja, se quita.
+      - name: Respaldo - pagina de mantenimiento solo si :3003 no responde
+        if: always()
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $dir = "${{ needs.build.outputs.dir }}"
           $ok = $false
-          for ($i = 1; $i -le 12; $i++) {
-            try {
-              $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 -Uri "http://127.0.0.1:3020/health"
-              if ($r.StatusCode -eq 200) { $ok = $true; break }
-            } catch { }
+          for ($i = 1; $i -le 6; $i++) {
+            try { $r = Invoke-WebRequest -Uri "http://localhost:3003/" -UseBasicParsing -TimeoutSec 10; if ($r.StatusCode -eq 200) { $ok = $true; break } } catch {}
             Start-Sleep -Seconds 5
           }
-          if (-not $ok) { throw "kronos-mcp no respondio /health en :3020 tras el reinicio" }
-          Write-Host "kronos-mcp OK en :3020/health"
+          if ($ok) {
+            Write-Host "OK: :3003 responde 200."
+            powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dir 'scripts\maintenance-off.ps1') -SitePath $env:IIS_SITE_PATH -HealthUrl http://localhost:3003/
+          } else {
+            Write-Host "::error:::3003 no responde 200: se activa la pagina de mantenimiento del IIS."
+            Copy-Item (Join-Path $dir 'deploy\iis\_mantenimiento\index.html') (Join-Path $env:IIS_SITE_PATH '_mantenimiento\index.html') -Force
+            powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dir 'scripts\maintenance-on.ps1') -SitePath $env:IIS_SITE_PATH -Motivo "deploy $env:GITHUB_SHA sin 200 en :3003"
+            exit 1
+          }
 
-      # Corre SIEMPRE (tambien si el job fallo): asi el sitio no queda en
-      # mantenimiento y una bandera que haya quedado de un run interrumpido se
-      # limpia en el siguiente pase. maintenance-off.ps1 verifica HTTP 200 en
-      # http://localhost:3003/ (con reintentos ~2 min) ANTES de borrar la bandera:
-      #   - app arriba  -> borra la bandera (el publico vuelve a SynerLink);
-      #   - app abajo   -> la CONSERVA (la pagina es lo correcto) y sale con 1.
-      # Sin bandera termina al instante. Tras recuperar la app a mano, correr:
-      #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\maintenance-off.ps1
-      - name: Quitar pagina de mantenimiento si GSS-Front responde 200
+      - name: Resumen
         if: always()
-        shell: cmd
+        shell: powershell
         run: |
-          cd /d %PROJECT_DIR% || exit /b 1
-          if not exist scripts\maintenance-off.ps1 (
-            echo scripts\maintenance-off.ps1 no existe en este checkout; nada que hacer
-            exit /b 0
-          )
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\maintenance-off.ps1
+          $a = Get-Content (Join-Path $env:BG_STATE_DIR 'active.json') -Raw -ErrorAction SilentlyContinue
+          $v = try { (Invoke-WebRequest -UseBasicParsing -Uri http://localhost:3003/api/health/version -TimeoutSec 10).Content } catch { "sin respuesta" }
+          $m = try { (Invoke-WebRequest -UseBasicParsing -Uri http://localhost:3020/health -TimeoutSec 10).StatusCode } catch { "sin respuesta" }
+          "### Produccion`n- active.json: ``$($a -replace '\s+',' ')```n- /api/health/version: ``$v```n- kronos-mcp /health: $m" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

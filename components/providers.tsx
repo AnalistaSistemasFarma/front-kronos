@@ -73,7 +73,7 @@ export function useTheme() {
 }
 
 function ThemeProvider({ children }: { children: ReactNode }) {
-  const { data: session, update: updateSession } = useSession();
+  const { data: session } = useSession();
   const pathname = usePathname();
   const isLanding = isPublicLandingPath(pathname);
   const [theme, setTheme] = useState<AppTheme>('light');
@@ -144,15 +144,18 @@ function ThemeProvider({ children }: { children: ReactNode }) {
     applyFontToDocument(visualFont);
   }, [font, visualFont, mounted]);
 
-  /** Persiste claro/oscuro en el perfil para que no se pierda al navegar. */
+  /**
+   * Persiste claro/oscuro en el perfil para que no se pierda al navegar. Sin update(): pone la
+   * sesión en "cargando" y el encabezado y el menú parpadean. /api/profile ya hace que el
+   * servidor lea el tema nuevo, y aquí el tema ya está aplicado.
+   */
   const persistColorScheme = (mode: AppTheme) => {
     if (!session?.user) return;
     void (async () => {
       try {
         const body = new FormData();
         body.append('colorScheme', mode);
-        const res = await fetch('/api/profile', { method: 'PUT', body });
-        if (res.ok) await updateSession();
+        await fetch('/api/profile', { method: 'PUT', body });
       } catch {
         // Si falla la red, el DOM/localStorage ya quedaron; el perfil se reintenta al próximo cambio.
       }

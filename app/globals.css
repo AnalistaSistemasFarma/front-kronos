@@ -2668,6 +2668,105 @@ html[data-mantine-color-scheme='dark'] .sl-pensando {
   background-color: color-mix(in srgb, var(--app-accent, #2563eb) 10%, var(--app-surface, #fff));
 }
 
+/* ── Lista de chats en el CELULAR, como WhatsApp (Nicolás, 2026-10-27) ──
+   "Quiero que el espaciado entre chats quede igual en mobile, similar a
+   WhatsApp". En el celular las filas de Personas, Grupos y las carpetas de
+   asistentes por empresa salían apretadas: avatar de 42 px, nombre y mensaje
+   pegados y sin separador. Aquí, SOLO por debajo de 768 px (donde la rejilla
+   ya es de una columna), cada fila pasa a ser una fila de mensajería:
+   avatar de 54 px, fila de ~76 px, nombre 17 px semibold, mensaje 15 px gris
+   en UNA línea con elipsis, la hora arriba a la derecha y un separador fino
+   que empieza después del avatar. El escritorio no cambia.
+   Va con `.chat-folder` delante porque el reset de UnstyledButton de Mantine
+   le gana a `.chat-agent-card` sola, y con !important en las variables de
+   Mantine porque esas llegan como estilo en línea (tamaño, gap, alineación). */
+@media (max-width: 767px) {
+  .chat-folder .mantine-SimpleGrid-root:has(> .chat-agent-card--fila) {
+    row-gap: 0 !important;
+  }
+
+  .chat-folder .chat-agent-card--fila {
+    min-height: 76px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background-color: transparent;
+  }
+
+  .chat-folder .chat-agent-card--fila:hover {
+    transform: none;
+    box-shadow: none;
+  }
+
+  .chat-folder .chat-agent-card--fila:active {
+    background-color: var(--app-surface-hover, rgb(0 0 0 / 6%));
+  }
+
+  .chat-folder .chat-agent-card--fila.chat-agent-card--selected {
+    background-color: color-mix(in srgb, var(--app-accent, #2563eb) 10%, transparent);
+  }
+
+  .chat-folder .chat-agent-card__fila {
+    --group-align: center !important;
+    --group-gap: 14px !important;
+    min-height: 76px;
+    align-items: stretch;
+  }
+
+  /* El avatar (o el círculo del grupo) centrado en la fila. */
+  .chat-folder .chat-agent-card__fila > .agent-avatar,
+  .chat-folder .chat-agent-card__fila > .chat-grupo__icono {
+    align-self: center;
+    width: 54px !important;
+    height: 54px !important;
+  }
+
+  .chat-folder .chat-agent-card__fila > .agent-avatar .mantine-Avatar-root {
+    --avatar-size: 54px !important;
+  }
+
+  .chat-folder .chat-agent-card__fila > .chat-grupo__icono svg {
+    width: 28px;
+    height: 28px;
+  }
+
+  /* El bloque de texto lleva el separador: así empieza DESPUÉS del avatar. */
+  .chat-folder .chat-agent-card__texto {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--app-border, var(--border-subtle));
+  }
+
+  .chat-folder .mantine-SimpleGrid-root > .chat-agent-card--fila:last-child .chat-agent-card__texto {
+    border-bottom-color: transparent;
+  }
+
+  .chat-folder .chat-agent-card__cabeza {
+    --group-align: flex-start !important;
+  }
+
+  .chat-folder .chat-agent-card__nombre {
+    --text-fz: 17px !important;
+    --text-lh: 1.3 !important;
+    font-weight: 600;
+  }
+
+  .chat-folder .chat-agent-card__hora {
+    --text-fz: 13px !important;
+    --text-lh: 1.3 !important;
+    padding-top: 2px;
+  }
+
+  .chat-folder .chat-agent-card__previa {
+    --text-fz: 15px !important;
+    --text-lh: 1.35 !important;
+    --text-line-clamp: 1 !important;
+  }
+}
+
 .chat-page-thread {
   display: flex;
   flex-direction: column;
@@ -7083,4 +7182,41 @@ a.portal-th__contactos-boton--enlace:focus-visible {
   border-radius: 2px;
   margin: 8px auto 0;
   background-color: var(--app-border, var(--border-subtle));
+}
+
+/* ── Chat en el celular: burbujas anchas y tablas legibles, como WhatsApp ──
+   (pedido de Nicolás 2026-10-28). En móvil el avatar al lado de cada mensaje
+   le quita ~36 px a la burbuja y las tablas terminaban partiendo palabras
+   letra por letra («Pr/io/ri/da/d»). El autor ya va en .chat-bubble__author.
+   En escritorio no cambia nada. */
+@media (max-width: 767px) {
+  .chat-msg__avatar {
+    display: none;
+  }
+  .chat-bubble {
+    max-width: 92%;
+  }
+  .chat-bubble--system {
+    max-width: 96%;
+  }
+  /* La tabla toma el ancho de su contenido y, si no cabe, se desliza dentro
+     de la burbuja; nunca parte palabras cortas. */
+  .chat-md__table-wrap {
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+  .chat-md__table {
+    width: max-content;
+    min-width: 100%;
+  }
+  .chat-md__th,
+  .chat-md__td {
+    overflow-wrap: normal;
+    word-break: normal;
+    min-width: 7ch;
+    max-width: 70vw;
+  }
+  .chat-md__th {
+    white-space: nowrap;
+  }
 }

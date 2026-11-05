@@ -27,7 +27,9 @@ async function sesion(context: BrowserContext, baseURL: string) {
 }
 
 const hace = (s: number) => new Date(Date.now() - s * 1000).toISOString();
-const ORUS = { idAgent: 7, code: 'horus', displayName: 'Orus', handle: 'horus_gss_bot', avatarUrl: null, avatarVersion: null };
+const ORUS = { idAgent: 7, code: 'horus', displayName: 'Orus', handle: 'horus_gss_bot', avatarUrl: null, avatarVersion: null, esDesarrollo: true };
+// Agente de NEGOCIO (2026-10-27): no se le ofrecen nivel de código ni repos.
+const PLAY = { idAgent: 16, code: 'play', displayName: 'Play', handle: 'silvia_gss_bot', avatarUrl: null, avatarVersion: null, esDesarrollo: false };
 const GSS = { idCompany: 8, companyName: 'GSS' };
 const FARMA = { idCompany: 3, companyName: 'FARMALOGICA' };
 const OPERADORES = [
@@ -79,7 +81,7 @@ type Politica = { codeLevel: string; repos: ReturnType<typeof repo>[]; deployApp
 const NINGUNA: Politica = { codeLevel: 'ninguno', repos: [], deployApprovers: [], configurada: false, reason: null, updatedAt: null, updatedBy: null };
 
 /** API simulado. Devuelve las peticiones de escritura para revisarlas. */
-async function simular(page: Page, opciones: { canEdit: boolean; editables?: number[]; catalogAdmin?: boolean }) {
+async function simular(page: Page, opciones: { canEdit: boolean; editables?: number[]; catalogAdmin?: boolean; soloPlay?: boolean }) {
   let politica: Politica = NINGUNA;
   let log: unknown[] = [];
   let catalogo = CATALOGO.map((r) => ({ ...r }));
@@ -150,7 +152,7 @@ async function simular(page: Page, opciones: { canEdit: boolean; editables?: num
     return r.fulfill({
       json: {
         companies: [FARMA, GSS],
-        designables: { '3': [{ ...ORUS, profiles: ['farmalogica'] }], '8': [{ ...ORUS, profiles: ['gss'] }] },
+        designables: { '3': [{ ...ORUS, profiles: ['farmalogica'] }], '8': [{ ...(opciones.soloPlay ? PLAY : ORUS), profiles: ['gss'] }] },
         profiles: [
           { key: 'farmalogica', label: 'Farmalógica', description: 'SAP de Farmalógica (solo lectura).' },
           { key: 'gss', label: 'GSS', description: 'SAP de GSS (solo lectura).' },
@@ -273,6 +275,26 @@ test.describe('Proyectos · permisos de los agentes', () => {
       idCompany: 8,
       agentPolicy: { codeLevel: 'lectura', repos: ['front-kronos'], deployApprovers: [], reason: 'Orus revisa el código de SynerLink para el análisis.' },
     });
+  });
+
+  test('«Nuevo proyecto» con Play (agente de negocio): ni nivel ni repos; el POST no lleva permisos', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const api = await simular(page, { canEdit: true, editables: [8], soloPlay: true });
+    await page.goto('/process/proyectos?nuevo=1');
+    const modal = page.getByRole('dialog', { name: 'Nuevo proyecto' });
+    await expect(modal).toBeVisible();
+    await modal.getByLabel('Nombre').fill('Comercio Exterior LATAM');
+    await modal.getByRole('textbox', { name: 'Empresa' }).click();
+    await page.getByRole('option', { name: 'GSS' }).click();
+    await expect(modal.getByTestId('permisos-solo-desarrollo')).toContainText('Play no es agente de desarrollo');
+    await expect(modal.getByTestId('permisos-formulario')).toHaveCount(0);
+    await expect(modal.getByTestId('permisos-nivel-lectura')).toHaveCount(0);
+    await expect(modal.getByTestId('permisos-repo-front-kronos')).toHaveCount(0);
+    await capturar(page, 'escritorio-nuevo-proyecto-agente-negocio');
+    await page.getByTestId('proyectos-crear').click();
+    await expect.poll(() => api.escrituras.length).toBe(1);
+    expect(api.escrituras[0].body).toMatchObject({ idCompany: 8, agentCodes: ['play'] });
+    expect(api.escrituras[0].body).not.toHaveProperty('agentPolicy');
   });
 
   test('«Nuevo proyecto» sin permiso: el POST no lleva permisos (queda en «Ninguno»)', async ({ page }) => {

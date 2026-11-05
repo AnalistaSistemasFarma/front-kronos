@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { esFormadorFormacion, marcarDivulgacionVista } from '@/lib/formacion/servidor';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../../lib/prisma';
 import { identificar } from '../../../../../../lib/portal/acceso';
-import { formadoresDePortal } from '../../../../../../lib/portal/config';
 import { MENSAJE_FORMULARIO_SE_COMPLETA_AL_ENVIAR } from '../../../../../../lib/portal/formulario';
 import {
   contarPaginasPdf,
@@ -62,7 +62,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (material.type === 'FORM') {
       return NextResponse.json({ error: MENSAJE_FORMULARIO_SE_COMPLETA_AL_ENVIAR }, { status: 409 });
     }
-    if (!material.course.active && !formadoresDePortal().includes(quien.correo.toLowerCase())) {
+    if (!material.course.active && !(await esFormadorFormacion(quien.correo))) {
       return NextResponse.json({ error: 'Este curso no está disponible.' }, { status: 404 });
     }
 
@@ -77,6 +77,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       paginas = await contarPaginasPdf({ ...material, contenido: conBytes?.contenido ?? null });
     }
     const regla = reglaDeRevision(material, paginas);
+
+    // Abrir el material (video) quita su pendiente del ícono de Formación del header.
+    await marcarDivulgacionVista(quien.correo, { materialId });
 
     const token = randomUUID();
     await prisma.portalMaterialVista.create({

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { esFormadorFormacion, marcarDivulgacionVista, perfilColaborador, puedeAdministrarCursoId } from '@/lib/formacion/servidor';
+import { cursoVisiblePara } from '@/lib/formacion/reglas';
 import { prisma } from '../../../../../lib/prisma';
 import { identificar } from '../../../../../lib/portal/acceso';
-import { formadoresDePortal } from '../../../../../lib/portal/config';
 import { calcularProgreso } from '../../../../../lib/portal/formacion';
 import { puedeMarcarManual } from '../../../../../lib/portal/permisos-formacion';
 import { conteosDelCurso, eliminarCurso } from '../../../../../lib/portal/eliminar-curso';
@@ -36,7 +37,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const id = idDesdeParametro((await params).id);
   if (!id) return NextResponse.json({ error: 'Curso no válido.' }, { status: 400 });
 
-  const esFormador = formadoresDePortal().includes(quien.correo.toLowerCase());
+  const esFormador = (await esFormadorFormacion(quien.correo));
 
   try {
     const curso = await prisma.portalCourse.findUnique({
@@ -47,6 +48,23 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (!curso.active && !esFormador) {
       return NextResponse.json({ error: 'Este curso no está disponible.' }, { status: 404 });
     }
+
+    // Alcance por empresa y departamento (módulo Formación, 2026-10-26): quien
+    // no está en el alcance y no estaba inscrito no lo ve.
+    if (!esFormador) {
+      const [alcances, inscrito] = await Promise.all([
+        prisma.formacionCursoAlcance.findMany({ where: { course_id: id }, select: { id_company: true, id_department: true, activo: true } }),
+        prisma.portalCourseEnrollment.findUnique({
+          where: { course_id_student_email: { course_id: id, student_email: quien.correo } },
+          select: { id: true },
+        }),
+      ]);
+      if (alcances.length > 0 && !inscrito && !cursoVisiblePara(alcances, await perfilColaborador(quien.correo))) {
+        return NextResponse.json({ error: 'Este curso no está disponible.' }, { status: 404 });
+      }
+    }
+    // Abrir el curso quita su pendiente del ícono de Formación del header.
+    await marcarDivulgacionVista(quien.correo, { courseId: id });
 
     // Autoinscripción silenciosa — ver nota arriba. `upsert` porque abrirlo
     // de nuevo no debe fallar ni duplicar la fila.
@@ -86,6 +104,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           descripcion: curso.description,
           activo: curso.active,
           creadoPor: curso.created_by,
+          creadoEl: curso.created_at,
         },
         esFormador,
         puedeMarcarManual: marcadoManual,
@@ -116,11 +135,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const quien = await identificar(request);
   if (!quien) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
-  if (!formadoresDePortal().includes(quien.correo.toLowerCase())) {
+  if (!(await esFormadorFormacion(quien.correo))) {
     return NextResponse.json({ error: 'Solo un formador puede editar cursos.' }, { status: 403 });
   }
 
   const id = idDesdeParametro((await params).id);
+  if (id && !(await puedeAdministrarCursoId(quien.correo, id))) {
+    return NextResponse.json({ error: 'Este curso es de otra empresa: no tiene el permiso de Formación para configurarlo.' }, { status: 403 });
+  }
   if (!id) return NextResponse.json({ error: 'Curso no válido.' }, { status: 400 });
 
   try {
@@ -154,11 +176,14 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const quien = await identificar(request);
   if (!quien) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
   // El mismo permiso que crear y editar cursos: la lista de formadores del portal.
-  if (!formadoresDePortal().includes(quien.correo.toLowerCase())) {
+  if (!(await esFormadorFormacion(quien.correo))) {
     return NextResponse.json({ error: 'Solo un formador puede eliminar cursos.' }, { status: 403 });
   }
 
   const id = idDesdeParametro((await params).id);
+  if (id && !(await puedeAdministrarCursoId(quien.correo, id))) {
+    return NextResponse.json({ error: 'Este curso es de otra empresa: no tiene el permiso de Formación para configurarlo.' }, { status: 403 });
+  }
   if (!id) return NextResponse.json({ error: 'Curso no válido.' }, { status: 400 });
 
   try {

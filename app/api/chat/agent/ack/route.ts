@@ -65,16 +65,29 @@ export async function POST(request: NextRequest) {
     // agente. Nunca toca la bandeja del bot vivo (ni al revés: abajo, la llave
     // de siempre sigue anclada a 'direct' y a sus entregas de grupo).
     if (agent.scope === 'projects') {
-      const proyectos = await prisma.chatMessage.updateMany({
-        where: {
-          id: { in: ids },
-          delivered_at: null,
-          role: 'user',
-          conversation: { kind: 'project', id_agent: agent.idAgent },
-        },
-        data: { delivered_at: ahora },
-      });
-      return jsonNoStore({ updated: proyectos.count, project: proyectos.count });
+      const [proyectos, menciones] = await Promise.all([
+        prisma.chatMessage.updateMany({
+          where: {
+            id: { in: ids },
+            delivered_at: null,
+            role: 'user',
+            conversation: { kind: 'project', id_agent: agent.idAgent },
+          },
+          data: { delivered_at: ahora },
+        }),
+        // Multiagente (2026-10-29): menciones en hilos de OTRO agente del
+        // proyecto. Solo SU fila de entrega, y solo en conversaciones de proyecto.
+        prisma.chatMessageDelivery.updateMany({
+          where: {
+            id_message: { in: ids },
+            id_agent: agent.idAgent,
+            delivered_at: null,
+            message: { conversation: { kind: 'project' } },
+          },
+          data: { delivered_at: ahora },
+        }),
+      ]);
+      return jsonNoStore({ updated: proyectos.count + menciones.count, project: proyectos.count + menciones.count });
     }
 
     const [directos, grupos] = await Promise.all([
@@ -91,9 +104,11 @@ export async function POST(request: NextRequest) {
       prisma.chatMessageDelivery.updateMany({
         where: {
           id_message: { in: ids },
-          // ANCLA DE SEGURIDAD: solo las entregas de ESTE agente.
+          // ANCLA DE SEGURIDAD: solo las entregas de ESTE agente, y solo de
+          // GRUPOS: las de Proyectos las confirma el puente (2026-10-29).
           id_agent: agent.idAgent,
           delivered_at: null,
+          message: { conversation: { kind: 'group' } },
         },
         data: { delivered_at: ahora },
       }),

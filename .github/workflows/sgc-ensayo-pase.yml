@@ -45,16 +45,33 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: ¿Aplica el ensayo? (el pase consolidado ya está en producción)
+        id: aplica
+        run: |
+          # El consolidado S0–S13 se aplicó en producción el 2026-10-14/15: desde
+          # entonces `main` ya trae el esquema sgc y la base efímera arrancaría
+          # con las tablas creadas (F1 falla con «se esperaban 56 tablas»). Los
+          # SQL incrementales del SGC se validan en «SGC — integración» (ci.yml).
+          if git show origin/main:prisma/schema.prisma | grep -q '@@schema("sgc")'; then
+            echo "aplica=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::main ya tiene el esquema sgc (pase consolidado aplicado el 2026-10-14/15). El ensayo F1/F2/R1/R2 no aplica; se omite."
+          else
+            echo "aplica=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Configurar Node 20
+        if: steps.aplica.outputs.aplica == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: npm
 
       - name: Instalar dependencias
+        if: steps.aplica.outputs.aplica == 'true'
         run: npm ci || npm install
 
       - name: Crear KRONOSDB efímera con el esquema de main
+        if: steps.aplica.outputs.aplica == 'true'
         run: |
           node -e "
             const sql = require('mssql');
@@ -71,6 +88,7 @@ jobs:
             scripts/sgc/pase-produccion/sql/04-programador-central.sql
 
       - name: Generar el consolidado para esta base
+        if: steps.aplica.outputs.aplica == 'true'
         run: |
           SRV=$(node -e "
             const sql = require('mssql');
@@ -84,6 +102,7 @@ jobs:
           node $G --server OTRO-SERVIDOR --out /tmp/pase-otro
 
       - name: La guardia frena en otro servidor
+        if: steps.aplica.outputs.aplica == 'true'
         run: |
           if node scripts/sgc/pase-produccion/aplicar-sql.mjs --confirmo-produccion --registro ensayo.log /tmp/pase-otro/F1-ddl-antes-del-codigo.sql; then
             echo "La guardia NO frenó"; exit 1; fi
@@ -91,6 +110,7 @@ jobs:
           echo "Guardia correcta: no se ejecutó nada."
 
       - name: F1 (dos veces) y F2 (dos veces)
+        if: steps.aplica.outputs.aplica == 'true'
         run: |
           A="node scripts/sgc/pase-produccion/aplicar-sql.mjs --confirmo-produccion --registro ensayo.log"
           $A /tmp/pase/F1-ddl-antes-del-codigo.sql
@@ -99,6 +119,7 @@ jobs:
           $A /tmp/pase/F2-despues-del-codigo.sql
 
       - name: R1 y R2 (dos veces cada una)
+        if: steps.aplica.outputs.aplica == 'true'
         run: |
           A="node scripts/sgc/pase-produccion/aplicar-sql.mjs --confirmo-produccion --registro ensayo.log"
           $A /tmp/pase-acepto/R1-reversa-sgc.sql
@@ -117,13 +138,14 @@ jobs:
           $A /tmp/verifica-reversa.sql
 
       - name: Ida y vuelta (F1 y F2 otra vez)
+        if: steps.aplica.outputs.aplica == 'true'
         run: |
           A="node scripts/sgc/pase-produccion/aplicar-sql.mjs --confirmo-produccion --registro ensayo.log"
           $A /tmp/pase/F1-ddl-antes-del-codigo.sql
           $A /tmp/pase/F2-despues-del-codigo.sql
 
       - name: Archivar registro del ensayo
-        if: always()
+        if: always() && steps.aplica.outputs.aplica == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ensayo-pase-sgc-${{ github.run_number }}

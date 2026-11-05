@@ -6,6 +6,7 @@ import {
   decideOrionReview,
   getOrionReviewInfo,
   resubmitOrionReview,
+  setOrionReviewMode,
   submitOrionReview,
   type OrionReviewActor,
 } from '@/lib/orion/review';
@@ -53,8 +54,9 @@ export async function GET(req: Request) {
 
 /**
  * POST /api/integrations/orion/review
- * { action: 'submit' | 'approve' | 'return' | 'resubmit', requestId, fileId, ... }
+ * { action: 'submit' | 'approve' | 'return' | 'resubmit' | 'set-mode', requestId, fileId, ... }
  * submit/resubmit: validatorIds = validadores del documento en orden de aprobación.
+ * set-mode: skipValidation = true (sin validación) | false (con validación).
  */
 export async function POST(req: Request) {
   try {
@@ -80,6 +82,15 @@ export async function POST(req: Request) {
             fileId,
             fileName: typeof body.fileName === 'string' ? body.fileName : null,
             validatorIds: body.validatorIds,
+            actor,
+            isAdmin,
+          });
+        case 'set-mode':
+          return setOrionReviewMode(pool, {
+            requestId,
+            fileId,
+            fileName: typeof body.fileName === 'string' ? body.fileName : null,
+            skipValidation: body.skipValidation === true,
             actor,
             isAdmin,
           });

@@ -554,7 +554,8 @@ export default function SgcSignaturePlacementCanvas({
                 overflow: 'hidden',
                 background: '#fff',
                 userSelect: 'none',
-                touchAction: coarse ? 'pan-x pan-y pinch-zoom' : 'none',
+                // La hoja deja desplazarse con el dedo; las cajas de firma bloquean el gesto para arrastrarlas (igual que SynerLink, PR #814).
+                touchAction: 'pan-x pan-y pinch-zoom',
               }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -562,9 +563,17 @@ export default function SgcSignaturePlacementCanvas({
                 ref={(el) => {
                   imgRefs.current[page.page] = el;
                 }}
-                src={page.dataUrl}
+                src={page.dataUrl ?? undefined}
                 alt={`Página ${page.page}`}
-                style={{ display: 'block', width: '100%', height: 'auto', pointerEvents: 'none' }}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  height: 'auto',
+                  // Mientras se dibuja, la hoja ya ocupa su tamaño (las cajas no saltan).
+                  aspectRatio: `${page.width} / ${page.height}`,
+                  background: '#fff',
+                  pointerEvents: 'none',
+                }}
                 draggable={false}
               />
               {fields

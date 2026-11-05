@@ -19,7 +19,8 @@ export const RUTA_FORMACION = '/portal/formacion';
  * Formación DENTRO del hub (con el encabezado y el menú de SynerLink).
  * Observación de Nicolás (2026-10-09): desde el módulo no debe salirse del hub.
  */
-export const RUTA_FORMACION_HUB = '/process/portal-th/formacion';
+// Desde 2026-10-26 Formación es un módulo propio de /process (Nicolás Rivera).
+export const RUTA_FORMACION_HUB = '/process/formacion';
 const RUTA_PORTAL_ABIERTO = '/portal';
 const RUTA_PORTAL_HUB = '/process/portal-th';
 

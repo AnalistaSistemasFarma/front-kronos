@@ -21,7 +21,8 @@ import {
 } from '@mantine/core';
 import SgcSelect from '../../../../../../components/sgc/SgcSelect';
 import { IconAlertTriangle, IconArrowLeft, IconBan, IconCheck, IconCopy,
-  IconEdit, IconEye, IconFilePlus, IconKey } from '@tabler/icons-react';
+  IconEdit, IconEye, IconFilePlus, IconKey, IconSpeakerphone } from '@tabler/icons-react';
+import SgcRedisseminationModal from '../../../../../../components/sgc/SgcRedisseminationModal';
 import SgcShell from '../../../../../../components/sgc/SgcShell';
 import SgcSecureViewer from '../../../../../../components/sgc/SgcSecureViewer';
 import SgcDocumentRelations from '../../../../../../components/sgc/relations/SgcDocumentRelations';
@@ -60,7 +61,7 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
   const catalogs = useSgcFetch<SgcCatalogs>(company.canQuality ? `/api/sgc/catalogs?company=${company.idCompany}` : null);
   const [viewVersion, setViewVersion] = useState<number | null>(null);
   const [feedback, setFeedback] = useState<Feedback>(null);
-  const [modal, setModal] = useState<'editar' | 'anular' | 'acceso' | null>(null);
+  const [modal, setModal] = useState<'editar' | 'anular' | 'acceso' | 'redivulgar' | null>(null);
   const [revokeId, setRevokeId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -160,6 +161,12 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
                 data-testid='sgc-ficha-nueva-version'
               >
                 Solicitar nueva versión
+              </Button>
+            )}
+            {/* 2026-10-26: volver a divulgar la versión vigente (solo Calidad; sin versión nueva). */}
+            {d.status === 'vigente' && company.canQuality && current && (
+              <Button variant='light' leftSection={<IconSpeakerphone size={16} />} onClick={() => setModal('redivulgar')} data-testid='sgc-ficha-redivulgar'>
+                Redivulgar
               </Button>
             )}
             {/* Sprint 11: copia no controlada (la decide Calidad; solo los tipos que la admiten). */}
@@ -536,6 +543,7 @@ function Ficha({ company, id }: { company: SgcCompanyAccess; id: string }) {
           </Button>
         </Stack>
       </Modal>
+      <SgcRedisseminationModal opened={modal === 'redivulgar'} onClose={() => setModal(null)} idCompany={company.idCompany} idDocument={d.idDocument} code={d.code} versionNumber={d.versionNumber} />
     </Stack>
   );
 }

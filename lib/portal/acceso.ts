@@ -22,6 +22,7 @@ import { authOptions } from '../../app/api/auth/[...nextauth]/route';
 import { prisma } from '../prisma';
 import { leerSesion } from './auth';
 import { COOKIE_SESION, SUBPROCESO_PORTAL } from './config';
+import { SUBPROCESO_FORMACION } from '../formacion/reglas';
 
 export interface IdentidadPortal {
   correo: string;
@@ -44,9 +45,16 @@ async function tieneElModulo(correo: string): Promise<boolean> {
     INNER JOIN [user] u ON u.id = cu.id_user
     INNER JOIN [subprocess] s ON s.id_subprocess = suc.id_subprocess
     WHERE LOWER(LTRIM(RTRIM(u.email))) = LOWER(LTRIM(RTRIM(${correo})))
-      AND LOWER(LTRIM(RTRIM(ISNULL(s.subprocess_url, '')))) = ${SUBPROCESO_PORTAL}
+      AND LOWER(LTRIM(RTRIM(ISNULL(s.subprocess_url, '')))) IN (${SUBPROCESO_PORTAL}, ${SUBPROCESO_FORMACION})
   `;
-  return filas.length > 0;
+  if (filas.length > 0) return true;
+  // Módulo Formación (2026-10-26): a quien le divulgaron un curso o un video
+  // (ícono del header) entra con su sesión de SynerLink, sin pedir código.
+  const divulgado = await prisma.formacionDivulgacionDestinatario.findFirst({
+    where: { email: correo.trim().toLowerCase() },
+    select: { id: true },
+  });
+  return divulgado !== null;
 }
 
 /**

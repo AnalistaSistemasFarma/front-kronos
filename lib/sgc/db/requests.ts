@@ -6,7 +6,8 @@ import { SgcError } from '../errors';
 import { SGC_SIGNATURE_LABELS, requesterElaborates, type SgcFlowDefinition, type SgcTaskDefinition } from '../flows/definition';
 import { assignmentStepKey, creationAuthorizationDenial, normalizeRejectionReason } from '../flows/roleModel';
 import { assertSignersAllowed, canApproveFor, signerScopeFor, substituteApproverCheck } from './roleModel';
-import { SGC_DOCUMENT_FLOW_CODE, SGC_DOCUMENT_REQUEST_TYPE_LABELS, isSgcDocumentRequestType } from '../flows/documentFlow';
+import { SGC_DOCUMENT_FLOW_CODE, SGC_DOCUMENT_REQUEST_TYPE_LABELS, SGC_REDISSEMINATION_FLOW_CODE, SGC_REDISSEMINATION_REQUEST_TYPE, isSgcDocumentRequestType, sgcRequestTypeLabel } from '../flows/documentFlow';
+import { normalizeScopeEntry, resolveReaders, scopeKey, type SgcScopeEntry } from '../dissemination/scope';
 import { isQualityVerificationSlot } from '../signature/qualityVerification';
 import {
   SGC_PENDING_SUGGESTION,
@@ -63,7 +64,7 @@ import { elaboratorMayReview, requesterMayElaborate, reviewExemptions, signerSeg
 import { guideInputOf, loadParentDocument } from './coding';
 import { assertParentForNewChild } from './hierarchy';
 import { inheritsParentNumber } from '../coding';
-import { activateReaders, checkReadThreshold, getDisseminationView, getMyReading } from './dissemination';
+import { activateReaders, buildScopeDirectory, checkReadThreshold, getDisseminationView, getMyReading } from './dissemination';
 import { getTrainingView } from './training';
 import { SGC_TRAINING_FLAG_SOURCE_LABELS, SGC_TRAINING_LOCKED_ROLES, effectiveRequiresTraining, parseTrainingChoice, trainingFlagSource } from '../training/flag';
 import { annulUnpublishedVersion, publishApprovedVersion, type SgcPublishResult } from './vigencia';
@@ -316,7 +317,8 @@ async function advanceAfterResolved(ctx: EngineCtx, fromKey: string, now: Date, 
   let published: SgcPublishResult | null = null;
   if (step.status === 'completada') {
     const fresh = await tx.sgcRequest.findUniqueOrThrow({ where: { id_request: request.id_request } });
-    if (fresh.id_document_version) published = await publishApprovedVersion(tx, fresh, ctx.actor, now);
+    // 2026-10-26: una REDIVULGACIÓN divulga la versión que ya está vigente: al cerrarse no publica nada.
+    if (fresh.id_document_version && fresh.request_type !== SGC_REDISSEMINATION_REQUEST_TYPE) published = await publishApprovedVersion(tx, fresh, ctx.actor, now);
   }
   await tx.sgcRequest.update({ where: { id_request: request.id_request }, data: { status: step.status, current_task_key: null, closed_by: me, closed_at: now } });
   const vigencia = published
@@ -458,7 +460,8 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
     const doc = Number.isInteger(idDocument) ? await db.sgcDocument.findFirst({ where: { id_document: idDocument, id_company: idCompany } }) : null;
     if (!doc) throw new SgcError('Seleccione el documento vigente sobre el que se hace la solicitud.');
     if (doc.status !== 'vigente') throw new SgcError('Solo se pide una nueva versión o modificación de un documento VIGENTE.', 409);
-    const open = await db.sgcRequest.findFirst({ where: { id_document: idDocument, status: { in: ['abierta', 'en_espera'] } } });
+    // 2026-10-26: una redivulgación en curso no impide pedir una nueva versión (son independientes).
+    const open = await db.sgcRequest.findFirst({ where: { id_document: idDocument, status: { in: ['abierta', 'en_espera'] }, request_type: { not: SGC_REDISSEMINATION_REQUEST_TYPE } } });
     if (open) throw new SgcError(`El documento ya tiene la solicitud #${open.id_request} en curso.`, 409);
     idProcess = doc.id_process_map;
     idDocumentType = doc.id_document_type;
@@ -551,6 +554,189 @@ export async function createRequest(db: SgcDb, notifier: SgcNotifier, access: Sg
       userAgent: actor.userAgent,
     });
     return { idRequest: request.id_request };
+  }, TX_OPTS);
+  await send(notifier, notifications);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// 2026-10-26: REDIVULGACIÓN de un documento vigente (flujo REDIV)
+// ---------------------------------------------------------------------------
+
+export interface SgcRedisseminationInput {
+  idDocument: unknown;
+  entries: unknown;
+  reason?: unknown;
+  /** Calidad confirma que a quienes ya leyeron la versión les vuelve a aparecer la lectura. */
+  confirmRepeat?: unknown;
+}
+
+export interface SgcRedisseminationPreview {
+  idDocument: number;
+  code: string;
+  title: string;
+  versionNumber: number;
+  /** Personas que recibirán la tarea de lectura. */
+  readers: number;
+  /** De ellas, cuántas ya leyeron y firmaron esta versión (les vuelve a aparecer). */
+  alreadyRead: number;
+  alreadyReadEmails: string[];
+  withoutAccess: string[];
+  outsideCompany: string[];
+  /** Hay una redivulgación de este documento en curso. */
+  openRequest: number | null;
+}
+
+const MAX_REDISSEMINATION_ENTRIES = 50;
+
+function redisseminationEntries(raw: unknown): SgcScopeEntry[] {
+  if (!Array.isArray(raw) || raw.length === 0) throw new SgcError('Indique a quién se redivulga: toda la empresa, departamentos, cargos o personas.');
+  if (raw.length > MAX_REDISSEMINATION_ENTRIES) throw new SgcError(`Máximo ${MAX_REDISSEMINATION_ENTRIES} entradas en el alcance.`);
+  const seen = new Set<string>();
+  const out: SgcScopeEntry[] = [];
+  for (const r of raw) {
+    const e = normalizeScopeEntry(r);
+    const key = scopeKey(e);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(e);
+  }
+  return out;
+}
+
+/** Documento VIGENTE con su versión vigente y su PDF controlado (lo que se vuelve a divulgar). */
+async function redisseminationTarget(db: SgcDb | Tx, access: SgcCompanyAccess, idDocumentRaw: unknown) {
+  const idDocument = Number(idDocumentRaw);
+  const doc = Number.isInteger(idDocument) ? await db.sgcDocument.findFirst({ where: { id_document: idDocument, id_company: access.idCompany } }) : null;
+  if (!doc) throw new SgcError('Documento no encontrado.', 404);
+  if (doc.status !== 'vigente' || !doc.current_version_id) throw new SgcError('Solo se redivulga un documento VIGENTE.', 409);
+  const version = await db.sgcDocumentVersion.findUnique({ where: { id_document_version: doc.current_version_id } });
+  if (!version || version.status !== 'vigente' || !version.pdf_item_id) throw new SgcError('La versión vigente no tiene su PDF controlado: no se puede redivulgar.', 409);
+  return { doc, version };
+}
+
+/** Lectores del alcance y quiénes de ellos ya leyeron y firmaron ESTA versión (en cualquier divulgación anterior). */
+async function redisseminationReaders(db: SgcDb | Tx, idCompany: number, idVersion: number, entries: readonly SgcScopeEntry[]) {
+  const dir = await buildScopeDirectory(db as never, idCompany, entries);
+  const res = resolveReaders(entries, dir);
+  // Sin filtrar por correo (un alcance de toda la empresa pasaría el límite de parámetros de SQL Server): se cruza aquí.
+  const signed = await db.sgcReadRecord.findMany({
+    where: { status: 'leido', OR: [{ id_document_version: idVersion }, { request: { id_document_version: idVersion } }] },
+    select: { user_email: true },
+  });
+  const signedSet = new Set(signed.map((r) => lower(r.user_email)));
+  const alreadyRead = res.readers.map((r) => r.email).filter((e) => signedSet.has(lower(e)));
+  return { res, alreadyRead };
+}
+
+/** VISTA PREVIA de la redivulgación: cuántos lectores y cuántos ya la habían leído (la alerta para Calidad). No guarda nada. */
+export async function previewRedissemination(db: SgcDb, access: SgcCompanyAccess, input: SgcRedisseminationInput): Promise<SgcRedisseminationPreview> {
+  if (!access.canQuality) throw new SgcError('Solo Aseguramiento de Calidad redivulga un documento.', 403);
+  const { doc, version } = await redisseminationTarget(db, access, input.idDocument);
+  const entries = redisseminationEntries(input.entries);
+  const { res, alreadyRead } = await redisseminationReaders(db, access.idCompany, version.id_document_version, entries);
+  const open = await db.sgcRequest.findFirst({ where: { id_document: doc.id_document, request_type: SGC_REDISSEMINATION_REQUEST_TYPE, status: { in: ['abierta', 'en_espera'] } }, select: { id_request: true } });
+  return {
+    idDocument: doc.id_document,
+    code: doc.code,
+    title: doc.title,
+    versionNumber: version.version_number,
+    readers: res.readers.length,
+    alreadyRead: alreadyRead.length,
+    alreadyReadEmails: alreadyRead.slice(0, 200),
+    withoutAccess: res.withoutAccess.map((w) => w.email),
+    outsideCompany: res.outsideCompany.map((w) => w.email),
+    openRequest: open?.id_request ?? null,
+  };
+}
+
+/**
+ * Crea la REDIVULGACIÓN: una solicitud del flujo REDIV sobre la versión vigente,
+ * con el alcance que define Calidad; la divulgación arranca de inmediato y
+ * TODAS las personas del alcance reciben su lectura, aunque ya la hubieran
+ * leído (si alguna ya la leyó, Calidad debe confirmarlo: `confirmRepeat`).
+ */
+export async function createRedissemination(db: SgcDb, notifier: SgcNotifier, access: SgcCompanyAccess, input: SgcRedisseminationInput, actor: SgcActor) {
+  if (!access.canQuality) throw new SgcError('Solo Aseguramiento de Calidad redivulga un documento.', 403);
+  const reason = text(input.reason, 'El motivo de la redivulgación', 2000, 10);
+  const entries = redisseminationEntries(input.entries);
+  const me = lower(actor.email);
+  const { process, version: flowVersion } = await getCurrentFlowVersion(db, access.idCompany, SGC_REDISSEMINATION_FLOW_CODE).catch(() => {
+    throw new SgcError('La redivulgación no está configurada en esta empresa (falta el flujo REDIV). Avise a Tecnología.', 409);
+  });
+  const def = await loadDefinition(db, flowVersion.id_flow_version);
+  const notifications: SgcNotification[] = [];
+  const result = await db.$transaction(async (tx) => {
+    const { doc, version } = await redisseminationTarget(tx, access, input.idDocument);
+    const open = await tx.sgcRequest.findFirst({ where: { id_document: doc.id_document, request_type: SGC_REDISSEMINATION_REQUEST_TYPE, status: { in: ['abierta', 'en_espera'] } } });
+    if (open) throw new SgcError(`El documento ya tiene la redivulgación #${open.id_request} en curso: amplíe su alcance o ciérrela primero.`, 409);
+    const { res, alreadyRead } = await redisseminationReaders(tx, access.idCompany, version.id_document_version, entries);
+    if (res.readers.length === 0) throw new SgcError('El alcance no tiene lectores con acceso al SGC: amplíelo (departamentos, cargos o personas).');
+    if (alreadyRead.length > 0 && input.confirmRepeat !== true) {
+      throw new SgcError(`${alreadyRead.length} persona(s) del alcance ya leyeron y firmaron la versión ${version.version_number}: a todas les volverá a aparecer la lectura. Confírmelo para continuar.`, 409);
+    }
+    const request = await tx.sgcRequest.create({
+      data: {
+        id_company: access.idCompany,
+        id_flow_process: process.id_flow_process,
+        id_flow_version: flowVersion.id_flow_version,
+        request_type: SGC_REDISSEMINATION_REQUEST_TYPE,
+        subject: doc.title.slice(0, 300),
+        description: reason,
+        id_document: doc.id_document,
+        id_document_version: version.id_document_version,
+        controlled_pdf_status: 'generado',
+        id_process_map: doc.id_process_map,
+        id_document_type: doc.id_document_type,
+        requires_training: false,
+        requester_email: me,
+        elaborator_email: me,
+        status: 'abierta',
+      },
+      include: { documentType: true },
+    });
+    for (const e of entries) {
+      await tx.sgcDisseminationScope.create({ data: { id_request: request.id_request, kind: e.kind, id_department: e.idDepartment, id_cargo: e.idCargo, user_email: e.userEmail, scope_key: scopeKey(e), added_by: me, change_reason: reason.slice(0, 1000), is_active: true } });
+    }
+    const start = firstTask(def);
+    const startDef = await tx.sgcFlowTaskDef.findUniqueOrThrow({ where: { id_flow_version_task_key: { id_flow_version: flowVersion.id_flow_version, task_key: start.key } } });
+    const now = new Date();
+    const startTask = await tx.sgcTask.create({
+      data: { id_request: request.id_request, id_flow_task_def: startDef.id_flow_task_def, task_key: start.key, name: start.name, step_order: start.stepOrder, status: 'resuelta', started_at: now, ended_at: now, resolved_by: me, resolution: 'Redivulgación registrada.' },
+    });
+    const repeatNote = alreadyRead.length
+      ? `\n${alreadyRead.length} persona(s) ya habían leído y firmado la versión ${version.version_number} y la vuelven a tener pendiente (confirmado por ${me}).`
+      : '';
+    await addInteraction(tx, request.id_request, 'estado', me, `Redivulgación de ${doc.code} V${version.version_number} (versión vigente, sin versión nueva). Flujo «${process.name}» versión ${flowVersion.version_number}.\nMotivo: ${reason}${repeatNote}`, {
+      idTask: startTask.id_task,
+      meta: { idVersion: version.id_document_version, scope: entries.map(scopeKey), readers: res.readers.length, alreadyRead: alreadyRead.length },
+    });
+    const ctx: EngineCtx = { tx, request, def, notifications, actor, subjectLabel: `${doc.code} · ${doc.title}` };
+    const next = resolveNextStep(def, start.key, 'aprobar', { requestType: SGC_REDISSEMINATION_REQUEST_TYPE, requiresTraining: false });
+    if (next.kind !== 'task') throw new SgcError('El flujo REDIV no tiene el paso de divulgación.', 500);
+    await activateTask(ctx, next.task, 1);
+    await writeSgcAudit(tx, {
+      idCompany: access.idCompany,
+      actorEmail: actor.email,
+      action: SGC_AUDIT_ACTIONS.solicitudCreada,
+      entity: 'request',
+      entityId: request.id_request,
+      after: { requestType: SGC_REDISSEMINATION_REQUEST_TYPE, idDocument: doc.id_document, code: doc.code, idVersion: version.id_document_version, versionNumber: version.version_number, scope: entries.map(scopeKey), readers: res.readers.length, alreadyRead: alreadyRead.length, confirmRepeat: alreadyRead.length > 0, flowVersion: flowVersion.version_number },
+      detail: reason.slice(0, 1000),
+      ip: actor.ip,
+      userAgent: actor.userAgent,
+    });
+    // La alerta a Calidad: a quién le vuelve a aparecer la lectura.
+    if (alreadyRead.length) {
+      const members = recipients(await getPoolMembers(tx, access.idCompany, 'SGC-VERIF-CALIDAD'), actor.email);
+      if (members.length) {
+        notifications.push({
+          emails: members,
+          payload: { title: SGC_NOTIFICATION_TITLES.avance, body: `#${request.id_request} · Redivulgación de ${doc.code} V${version.version_number}: a ${alreadyRead.length} persona(s) que ya la habían leído les vuelve a aparecer la lectura.`.slice(0, 300), url: requestUrl(request.id_request), tag: `sgc-request-${request.id_request}` },
+        });
+      }
+    }
+    return { idRequest: request.id_request, readers: res.readers.length, alreadyRead: alreadyRead.length };
   }, TX_OPTS);
   await send(notifier, notifications);
   return result;
@@ -1761,7 +1947,7 @@ export async function getRequestDetail(db: SgcDb, idRequest: number, viewer: Sgc
       subject: row.subject,
       description: row.description,
       requestType: row.request_type,
-      requestTypeLabel: SGC_DOCUMENT_REQUEST_TYPE_LABELS[row.request_type as keyof typeof SGC_DOCUMENT_REQUEST_TYPE_LABELS] ?? row.request_type,
+      requestTypeLabel: sgcRequestTypeLabel(row.request_type),
       status,
       statusLabel: SGC_REQUEST_STATUS_LABELS[status] ?? row.status,
       requesterEmail: row.requester_email,
@@ -1995,7 +2181,7 @@ export async function listMyRequests(db: SgcDb, email: string, access: readonly 
   return rows.map((r) => ({
     id: r.id_request,
     subject: r.subject,
-    requestTypeLabel: SGC_DOCUMENT_REQUEST_TYPE_LABELS[r.request_type as keyof typeof SGC_DOCUMENT_REQUEST_TYPE_LABELS] ?? r.request_type,
+    requestTypeLabel: sgcRequestTypeLabel(r.request_type),
     company: r.companyConfig.company.company,
     status: r.status,
     statusLabel: SGC_REQUEST_STATUS_LABELS[r.status as SgcRequestStatus] ?? r.status,

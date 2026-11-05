@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildPendingApprovals,
+  isOrionReadyForSigning,
   knownReadyForSigning,
   orderDocumentValidators,
   previousReviewValidatorIds,
@@ -73,5 +74,13 @@ describe('habilitar preparación sin consultar el flujo', () => {
     expect(knownReadyForSigning(withReview('SIN_VALIDACION'))).toBeNull();
     expect(knownReadyForSigning({})).toBeNull();
     expect(knownReadyForSigning(null)).toBeNull();
+  });
+
+  it('documento "Sin validación" se puede preparar aunque el flujo tenga validadores', () => {
+    expect(knownReadyForSigning({ skipValidation: true })).toBe(true);
+    expect(isOrionReadyForSigning({ skipValidation: true }, true)).toBe(true);
+    expect(isOrionReadyForSigning({ skipValidation: false }, true)).toBe(false);
+    expect(isOrionReadyForSigning({}, true)).toBe(false);
+    expect(isOrionReadyForSigning({}, false)).toBe(true);
   });
 });

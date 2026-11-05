@@ -317,6 +317,12 @@ function entradaDeFila(fila: NonNullable<Awaited<ReturnType<typeof leerFila>>> |
   return { codeLevel: nivelDesdeDb(fila.code_level), repos: fila.repos.map((r) => r.slug), deployApprovers: parsearCorreos(fila.deploy_approvers) };
 }
 
+/** ¿La política GUARDADA del proyecto da algo de código? (nivel distinto de «ninguno» o repos). */
+export async function politicaGuardadaConCodigo(idProject: number): Promise<boolean> {
+  const fila = await leerFila(idProject);
+  return !!fila && (nivelDesdeDb(fila.code_level) !== 'ninguno' || fila.repos.length > 0);
+}
+
 /** Registro de cambios de un proyecto, del más reciente al más antiguo. */
 export async function registroPolitica(idProject: number, take = 30): Promise<CambioPoliticaDto[]> {
   try {
@@ -413,7 +419,12 @@ export async function guardarPolitica(opts: {
  * `sin-politica`: el proyecto no tiene fila (o la tabla aún no existe); el
  * puente decide (su archivo manual o «ninguno»).
  */
-export async function politicaParaPuente(idProject: number): Promise<PoliticaPuenteDto> {
+export async function politicaParaPuente(idProject: number, opciones: { esDesarrollo?: boolean } = {}): Promise<PoliticaPuenteDto> {
+  // Agente de NEGOCIO (2026-10-27): «ninguno» de la base, que manda también sobre el archivo
+  // manual del puente, sin importar lo que diga la fila (p. ej. un proyecto viejo sin corregir).
+  if (opciones.esDesarrollo === false) {
+    return { idProject, source: 'bd', codeLevel: 'ninguno', level: 0, deploys: false, repos: [], deployApprovers: [], connectors: [], updatedAt: null };
+  }
   const fila = await leerFila(idProject);
   if (!fila) {
     return { idProject, source: 'sin-politica', codeLevel: 'ninguno', level: 0, deploys: false, repos: [], deployApprovers: [], connectors: [], updatedAt: null };

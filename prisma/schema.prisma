@@ -78,6 +78,7 @@ model User {
   userTypesAuthorizations UserTypesAuthorization[]
   sessions                Session[]
   auditLogs               UserAuditLog[]
+  passkeys                UserPasskey[]
   // Modulo "Asistentes IA" (chat de agentes) — back-relations requeridas por Prisma.
   chatConversations       ChatConversation[]       @relation("ChatConversationUser")
   chatGroupsCreated       ChatConversation[]       @relation("ChatConversationCreator")
@@ -715,6 +716,12 @@ model Agent {
   description       String?   @db.NVarChar(500)
   is_active         Boolean   @default(true)
   sort_order        Int       @default(0)
+  /// AGENTE DE DESARROLLO (2026-10-27, regla de Nicolás Rivera: «el tema de
+  /// los proyectos de desarrollo … solo debería ser de los agentes que
+  /// desarrollan»). Solo a estos se les puede dar nivel de código y repos en
+  /// los Proyectos (lib/proyectos/agentes-desarrollo.ts). Hoy: horus y pedro.
+  /// Columna NOT NULL DEFAULT 0: un agente nuevo nace «de negocio».
+  es_desarrollo     Boolean   @default(false)
   /// Subproceso que ES el permiso para hablar con este agente (fuente de
   /// verdad única del permiso; ver la nota de módulo arriba). NULL = agente
   /// del catálogo todavía sin subproceso creado, y por tanto invisible para
@@ -1519,6 +1526,34 @@ model ChatProjectAgentPolicyLog {
   @@schema("dbo")
 }
 
+/// REGISTRO de cambios de las CONVERSACIONES de un proyecto (2026-10-29, pedido
+/// de Nicolás Rivera: renombrar y eliminar los hilos). Una fila por cambio:
+///   'renombrar' — title_before → title_after;
+///   'eliminar'  — borrado LÓGICO: la conversación queda con archived = 1 (deja
+///                 de verse y los agentes dejan de atenderla). Mensajes y
+///                 adjuntos NO se borran. Quién y cuándo quedan AQUÍ.
+/// Inmutable (trigger TR_chat_project_conversation_log_inmutable). Sin llaves
+/// foráneas a propósito, como chat_project_agent_config_log: el historial
+/// sobrevive a lo que pase con conversaciones y usuarios.
+/// Tabla NUEVA y aparte: si el código sale antes que el DDL, solo fallan
+/// renombrar y eliminar (sin registro no se cambia nada); el chat sigue igual.
+model ChatProjectConversationLog {
+  id_log          Int      @id @default(autoincrement())
+  id_project      Int
+  id_conversation Int
+  /// 'renombrar' | 'eliminar' (CHECK en la base).
+  action          String   @db.NVarChar(20)
+  title_before    String?  @db.NVarChar(300)
+  title_after     String?  @db.NVarChar(300)
+  changed_by      String   @db.NVarChar(1000)
+  changed_at      DateTime @default(now())
+
+  @@index([id_conversation, changed_at], map: "chat_project_conversation_log_conv_idx")
+  @@index([id_project, changed_at], map: "chat_project_conversation_log_project_idx")
+  @@map("chat_project_conversation_log")
+  @@schema("dbo")
+}
+
 /// Integrante de un grupo: una PERSONA o un AGENTE, nunca los dos.
 /// Es la ÚNICA fuente de verdad de quién está en un grupo — un CHECK en la
 /// base garantiza que exactamente una de las dos columnas venga con valor,
@@ -1650,10 +1685,15 @@ model PortalCourse {
   /// entre pruebas y producción. Quién y cuándo queda aquí como auditoría.
   eliminado_at   DateTime?
   eliminado_por  String? @db.NVarChar(255)
+  /// Empresa dueña del curso (módulo Formación, 2026-10-26). NULL = GSS: lo
+  /// administra quien tenga el permiso de Formación en GSS.
+  id_company_owner Int?
 
   materials    PortalCourseMaterial[]
   enrollments  PortalCourseEnrollment[]
   certificates PortalCertificate[]
+  alcances     FormacionCursoAlcance[]
+  divulgaciones FormacionDivulgacion[]
 
   @@index([active, id(sort: Desc)])
   @@map("portal_course")
@@ -1708,6 +1748,8 @@ model PortalCourseMaterial {
   intentos   PortalFormularioIntento[]
 
   @@index([course_id, orden])
+  preguntas FormacionPregunta[]
+
   @@map("portal_course_material")
   @@schema("dbo")
 }
@@ -5045,6 +5087,34 @@ model EmailThreadCase {
 // sin frenar el login. NUNCA guarda contraseñas, PIN ni tokens.
 // Migración: prisma/migrations/20261016200000_user_login_audit (a mano en prod).
 // ---------------------------------------------------------------------------
+/// Acceso con biométrico (passkeys / WebAuthn), 2026-10-31. Cada fila es la llave PÚBLICA de un
+/// dispositivo (iPhone con Face ID, Android con huella, Windows Hello…). La cara o la huella NUNCA
+/// salen del dispositivo: aquí no hay datos biométricos. Ver lib/auth/passkeys.
+model UserPasskey {
+  id_passkey    Int       @id @default(autoincrement())
+  id_user       String
+  /// Id de la credencial (base64url), único en todo SynerLink.
+  credential_id String    @unique(map: "UQ_user_passkey_credential") @db.NVarChar(512)
+  public_key    Bytes
+  counter       BigInt    @default(0)
+  /// Separados por coma: internal, hybrid, usb…
+  transports    String?   @db.NVarChar(200)
+  /// singleDevice | multiDevice (sincronizada por iCloud / Google)
+  device_type   String    @db.NVarChar(20)
+  backed_up     Boolean   @default(false)
+  aaguid        String?   @db.NVarChar(36)
+  /// Nombre que ve la persona en su perfil (p. ej. «iPhone · Safari»).
+  name          String    @db.NVarChar(100)
+  created_at    DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  created_ip    String?   @db.NVarChar(64)
+  last_used_at  DateTime? @db.DateTime2
+  user          User      @relation(fields: [id_user], references: [id], onDelete: Cascade, map: "FK_user_passkey_user")
+
+  @@index([id_user], map: "IX_user_passkey_usuario")
+  @@map("user_passkey")
+  @@schema("dbo")
+}
+
 model UserLoginAudit {
   id             Int      @id @default(autoincrement())
   attempted_at   DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
@@ -5318,5 +5388,118 @@ model VitrinaHistorial {
   @@index([entidad, id_entidad], map: "IX_vitrina_historial_entidad")
   @@index([id_company, registrado_en], map: "IX_vitrina_historial_company")
   @@map("vitrina_historial")
+  @@schema("dbo")
+}
+
+/// MÓDULO FORMACIÓN (2026-10-26, Nicolás Rivera) — departamentos de SynerLink
+/// que aplican en cada empresa. Administrable desde /process/formacion.
+model FormacionEmpresaDepartamento {
+  id            Int      @id @default(autoincrement())
+  id_company    Int
+  id_department Int
+  activo        Boolean  @default(true)
+  updated_by    String   @db.NVarChar(255)
+  updated_at    DateTime @default(now())
+
+  @@unique([id_company, id_department], map: "formacion_empresa_departamento_uq")
+  @@map("formacion_empresa_departamento")
+  @@schema("dbo")
+}
+
+/// Colaborador -> empresa -> departamento, para quien no tiene el
+/// departamento en SynerLink (entra a Formación con código al correo).
+model FormacionColaborador {
+  id            Int      @id @default(autoincrement())
+  email         String   @db.NVarChar(255)
+  nombre        String?  @db.NVarChar(255)
+  id_company    Int
+  id_department Int
+  updated_by    String   @db.NVarChar(255)
+  updated_at    DateTime @default(now())
+
+  @@unique([email, id_company], map: "formacion_colaborador_uq")
+  @@map("formacion_colaborador")
+  @@schema("dbo")
+}
+
+/// Alcance de un curso por empresa y departamento (NULL = todos los
+/// departamentos de esa empresa). Un curso SIN filas es para todos.
+model FormacionCursoAlcance {
+  id            Int          @id @default(autoincrement())
+  course_id     Int
+  course        PortalCourse @relation(fields: [course_id], references: [id], onDelete: Cascade, map: "formacion_curso_alcance_course_fkey")
+  id_company    Int
+  id_department Int?
+  activo        Boolean      @default(true)
+  updated_by    String       @db.NVarChar(255)
+  updated_at    DateTime     @default(now())
+
+  @@unique([course_id, id_company, id_department], map: "formacion_curso_alcance_uq")
+  @@map("formacion_curso_alcance")
+  @@schema("dbo")
+}
+
+/// Divulgación de un curso o de un material (video) nuevo: deja a cada
+/// destinatario un pendiente que se ve en el ícono de Formación del header.
+model FormacionDivulgacion {
+  id            Int          @id @default(autoincrement())
+  course_id     Int
+  course        PortalCourse @relation(fields: [course_id], references: [id], onDelete: Cascade, map: "formacion_divulgacion_course_fkey")
+  material_id   Int?
+  mensaje       String?      @db.NVarChar(1000)
+  divulgado_por String       @db.NVarChar(255)
+  divulgado_at  DateTime     @default(now())
+
+  destinatarios FormacionDivulgacionDestinatario[]
+
+  @@map("formacion_divulgacion")
+  @@schema("dbo")
+}
+
+model FormacionDivulgacionDestinatario {
+  id             Int                  @id @default(autoincrement())
+  divulgacion_id Int
+  divulgacion    FormacionDivulgacion @relation(fields: [divulgacion_id], references: [id], onDelete: Cascade, map: "formacion_divulgacion_destinatario_div_fkey")
+  email          String               @db.NVarChar(255)
+  visto_at       DateTime?
+
+  @@unique([divulgacion_id, email], map: "formacion_divulgacion_destinatario_uq")
+  @@index([email, visto_at], map: "formacion_divulgacion_destinatario_email_visto_idx")
+  @@map("formacion_divulgacion_destinatario")
+  @@schema("dbo")
+}
+
+/// Preguntas y respuestas de un material (video) del curso (Nicolás Rivera,
+/// 2026-10-26). parent_id = respuesta a otra pregunta. Borrado lógico.
+model FormacionPregunta {
+  id            Int                  @id @default(autoincrement())
+  material_id   Int
+  material      PortalCourseMaterial @relation(fields: [material_id], references: [id], onDelete: Cascade, map: "formacion_pregunta_material_fkey")
+  course_id     Int
+  parent_id     Int?
+  parent        FormacionPregunta?   @relation("FormacionPreguntaRespuestas", fields: [parent_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "formacion_pregunta_parent_fkey")
+  respuestas    FormacionPregunta[]  @relation("FormacionPreguntaRespuestas")
+  email         String               @db.NVarChar(255)
+  nombre        String               @db.NVarChar(255)
+  texto         String               @db.NVarChar(2000)
+  created_at    DateTime             @default(now())
+  eliminado_at  DateTime?
+  eliminado_por String?              @db.NVarChar(255)
+  likes         FormacionPreguntaLike[]
+
+  @@index([material_id, parent_id], map: "formacion_pregunta_material_idx")
+  @@map("formacion_pregunta")
+  @@schema("dbo")
+}
+
+model FormacionPreguntaLike {
+  id          Int               @id @default(autoincrement())
+  pregunta_id Int
+  pregunta    FormacionPregunta @relation(fields: [pregunta_id], references: [id], onDelete: Cascade, map: "formacion_pregunta_like_pregunta_fkey")
+  email       String            @db.NVarChar(255)
+  created_at  DateTime          @default(now())
+
+  @@unique([pregunta_id, email], map: "formacion_pregunta_like_uq")
+  @@map("formacion_pregunta_like")
   @@schema("dbo")
 }
