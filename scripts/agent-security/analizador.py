@@ -134,9 +134,11 @@ SECRETOS_ALTA = [  # (nombre, patrón) → si aparecen en una respuesta del agen
     ('cadena_conexion', re.compile(r'(?i)\b(?:password|pwd)\s*=\s*[^;\s"\']{4,}|://[^/\s:@]+:[^/\s@]{4,}@')),
     ('token_telegram', re.compile(r'\b\d{8,12}:AA[A-Za-z0-9_-]{30,}')),
 ]
-ETIQUETA_SECRETO = re.compile(
-    r'(?i)(\b(?:contrase(?:ñ|n)a|clave|password|passwd|pass|pwd|pin|secret|token)\b[^\n:=]{0,40}?(?:[:=]|\bes\b|\bis\b)\s*["\'«]?)'
-    r'(?!\[OCULTO\])([^\s"\'»,;]{4,})')
+ETIQUETA_SECRETO = re.compile(  # «contraseña: X», «la clave de acceso es X» (solo palabras entre etiqueta y separador)
+    r'(?i)(\b(?:contrase(?:ñ|n)a|clave|password|passwd|pass|pwd|pin|secret|token)\b(?:[ \t]+[a-záéíóúñ]+){0,5}?[ \t]*(?:[:=]|\bes\b|\bis\b)[ \t]*["\'«]?)'
+    r'(?!\[OCULTO\])([^\s"\'»,;|`]{4,})')
+# Para REPORTAR (no solo ocultar): el valor debe parecer una clave (6+ caracteres con número o símbolo).
+CREDENCIAL_ETIQUETADA = re.compile(ETIQUETA_SECRETO.pattern[:-len(r'([^\s"\'»,;|`]{4,})')] + r'(?=[^\s"\'»,;|`]*[\d!@#$%^&*+?_.-])([^\s"\'»,;|`]{6,})')
 SECRETOS_MEDIA = [
     ('etiqueta_secreto', ETIQUETA_SECRETO),
     ('bearer', re.compile(r'(?i)Bearer\s+[A-Za-z0-9._\-]{16,}')),
@@ -191,9 +193,15 @@ def reglas_operador(texto):
     return tags
 
 
+def credenciales(texto):
+    """Credenciales de alta confianza en un texto (incluye «contraseña: X»)."""
+    t = texto or ''
+    return [n for n, p in SECRETOS_ALTA if p.search(t)] + (['credencial_escrita'] if CREDENCIAL_ETIQUETADA.search(t) else [])
+
+
 def reglas_agente(texto):
-    alta = [n for n, p in SECRETOS_ALTA if p.search(texto or '')]
-    media = [n for n, p in SECRETOS_MEDIA if p.search(texto or '')]
+    alta = credenciales(texto)
+    media = [n for n, p in SECRETOS_MEDIA if n != 'etiqueta_secreto' and p.search(texto or '')]
     media += [n for n, p in REGLAS_AGENTE_MEDIA if re.search(p, texto or '', re.I)]
     return alta, media
 
@@ -316,7 +324,7 @@ def lotes(items, max_chars=LOTE_CHARS):
 def analizar(msgs, aviso=lambda t: None):
     por_conv = {}
     for m in msgs: por_conv.setdefault(m['conv'], []).append(m)
-    operador, agente, idx = [], [], {}
+    operador, agente, idx, pegadas = [], [], {}, {}
     for conv, lista in por_conv.items():
         for i, m in enumerate(lista):
             idx[m['id']] = m
@@ -324,7 +332,9 @@ def analizar(msgs, aviso=lambda t: None):
             if m['role'] == 'user':
                 if len(texto.strip()) < 8: continue
                 sig = next((x for x in lista[i + 1:] if x['role'] == 'agent'), None)
-                operador.append({'id': m['id'], 'agente': m['agente'], 'reglas': reglas_operador(texto),
+                cred = credenciales(texto)
+                if cred: pegadas[m['id']] = cred
+                operador.append({'id': m['id'], 'agente': m['agente'], 'reglas': reglas_operador(texto) + cred,
                                  'texto': recorte(ocultar(texto)),
                                  'respuesta_agente': recorte(ocultar(sig['texto'] if sig else ''), 600)})
             else:
@@ -367,6 +377,17 @@ def analizar(msgs, aviso=lambda t: None):
                               'explicacion': 'La respuesta del agente contiene lo que parece un secreto (%s). Se muestra oculto.' % ', '.join(a['_alta']),
                               'recomendacion': 'Confirmar si el secreto es real y vigente; si lo es, rotarlo y revisar por qué el agente lo mostró.',
                               'agenteCumplio': 'n/a'})
+    # Credenciales que el operador pegó en el chat (quedan en la conversación y en los registros):
+    # siempre se reportan, aunque la IA no las marque.
+    for id_msg, cred in pegadas.items():
+        if any(x['idMessage'] == id_msg and x['categoria'] == 'fuga_datos' for x in hallazgos): continue
+        m = idx[id_msg]
+        hallazgos.append({'idMessage': m['id'], 'idConversation': m['conv'], 'rol': 'user', 'messageAt': m['created_at'],
+                          'categoria': 'fuga_datos', 'severidad': 'media', 'detector': 'reglas', 'reglas': ', '.join(cred),
+                          'evidencia': recorte(ocultar(recorte_alrededor(m['texto'] or '', [ETIQUETA_SECRETO] + [p for _, p in SECRETOS_ALTA], 800)), 800),
+                          'explicacion': 'El operador escribió o pegó en el chat lo que parece una credencial (%s). Queda guardada en la conversación y en los registros del agente. Se muestra oculta.' % ', '.join(cred),
+                          'recomendacion': 'Confirmar si la credencial es real; si lo es, cambiarla y recordar que las claves no se comparten por el chat.',
+                          'agenteCumplio': 'n/a'})
     convs = len({m['conv'] for m in msgs})
     return hallazgos, {'conversaciones': convs, 'mensajesOperador': sum(1 for m in msgs if m['role'] == 'user'),
                        'mensajesAgente': sum(1 for m in msgs if m['role'] == 'agent')}

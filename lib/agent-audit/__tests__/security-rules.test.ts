@@ -117,3 +117,10 @@ describe('análisis de seguridad — scripts SQL', () => {
       expect(ddl).toContain(`N'${c}'`);
   });
 });
+
+describe('análisis de seguridad — sin falsos positivos con horas', () => {
+  it('«token … a las 8:00» no se toma como clave', () => {
+    const t = 'generar un token propio para agente.plan (`claude setup-token`) | **Mañana, 7 de octubre, a las 8:00';
+    expect(ocultarSecretosTexto(t)).toBe(t);
+  });
+});

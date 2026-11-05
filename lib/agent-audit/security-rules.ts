@@ -81,7 +81,7 @@ export function periodosDisponibles(hoy = new Date(), cuantos = 6): string[] {
  * `Password=X;` de cadenas de conexión y bloques de llave privada.
  */
 const ETIQUETA_SECRETO =
-  /(\b(?:contrase(?:ñ|n)a|clave|password|passwd|pass|pwd|pin|secret|token)\b[^\n:=]{0,40}?(?:[:=]|\bes\b|\bis\b)\s*["'«]?)(?!\[OCULTO\])([^\s"'»,;]{4,})/gi;
+  /(\b(?:contrase(?:ñ|n)a|clave|password|passwd|pass|pwd|pin|secret|token)\b(?:[ \t]+[a-záéíóúñ]+){0,5}?[ \t]*(?:[:=]|\bes\b|\bis\b)[ \t]*["'«]?)(?!\[OCULTO\])([^\s"'»,;|`]{4,})/gi;
 const LLAVE_PRIVADA = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g;
 
 export function ocultarSecretosTexto(texto: string): string {
