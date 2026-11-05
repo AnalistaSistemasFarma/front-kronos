@@ -13,6 +13,8 @@ import {
   resumenCambios,
   textoANumero,
   validarLibro,
+  aplicarEdicion,
+  valorDesdeTexto,
 } from '../matrices-rules';
 
 /* Matrices integradas de Proyectos (2026-11-05). Reglas PURAS (lib/proyectos/matrices-rules.ts). */
@@ -167,3 +169,50 @@ describe('grilla e historial', () => {
     ).toBe('«H»: +2 filas (5 en total); hoja nueva «N» (2 filas); se quitó la hoja «Old».');
   });
 });
+
+describe('edición dentro de SynerLink', () => {
+  const columnas = [
+    { nombre: 'País', tipo: 'texto' as const },
+    { nombre: 'Valor', tipo: 'numero' as const },
+    { nombre: 'Activo', tipo: 'booleano' as const },
+  ];
+  const filas = [
+    ['México', 10, true],
+    ['Chile', 5, false],
+    ['Perú', 7, true],
+  ];
+
+  it('convierte lo que escribe la persona al tipo de la columna', () => {
+    expect(valorDesdeTexto('1.234,5', 'numero')).toBe(1234.5);
+    expect(valorDesdeTexto('sí', 'booleano')).toBe(true);
+    expect(valorDesdeTexto('  ', 'texto')).toBeNull();
+    expect(valorDesdeTexto('pendiente', 'numero')).toBe('pendiente');
+  });
+
+  it('aplica cambios, filas nuevas y borradas, y lo resume', () => {
+    const r = aplicarEdicion(columnas, filas, {
+      cambios: [
+        { fila: 0, col: 1, valor: '12' },
+        { fila: 2, col: 0, valor: 'Perú' }, // igual: no cuenta
+      ],
+      nuevas: [['Bolivia', '3', 'no'], ['', '', '']],
+      borrar: [1],
+    });
+    expect(r).toEqual({
+      ok: true,
+      filas: [
+        ['México', 12, true],
+        ['Perú', 7, true],
+        ['Bolivia', 3, false],
+      ],
+      resumen: '1 celda cambiada, 1 fila agregada, 1 fila borrada',
+    });
+  });
+
+  it('rechaza cambios fuera de la hoja o sin nada que guardar', () => {
+    expect(aplicarEdicion(columnas, filas, { cambios: [{ fila: 9, col: 0, valor: 'x' }], nuevas: [], borrar: [] }).ok).toBe(false);
+    expect(aplicarEdicion(columnas, filas, { cambios: [], nuevas: [], borrar: [] }).ok).toBe(false);
+    expect(aplicarEdicion(columnas, filas, { cambios: [{ fila: 0, col: 0, valor: 'México' }], nuevas: [], borrar: [] }).ok).toBe(false);
+  });
+});
+

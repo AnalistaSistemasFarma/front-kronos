@@ -23,6 +23,9 @@ import {
   MAX_NOMBRE_MATRIZ,
   nombreDesdeArchivo,
   resumenCambios,
+  aplicarEdicion,
+  type EdicionHoja,
+  type HojaMatriz,
   validarLibro,
   type Celda,
   type ColumnaMatriz,
@@ -48,6 +51,34 @@ export async function filasDeHoja(idSheet: number): Promise<Celda[][]> {
 
 function columnasDe(json: string): ColumnaMatriz[] {
   return JSON.parse(json) as ColumnaMatriz[];
+}
+
+type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+/** Escribe las hojas de una versión: columnas y filas en bloques de MATRIZ_FILAS_POR_BLOQUE. */
+async function escribirHojas(tx: Tx, idVersion: number, hojas: HojaMatriz[]) {
+  for (const [i, h] of hojas.entries()) {
+    const hoja = await tx.chatProjectMatrixSheet.create({
+      data: {
+        id_version: idVersion,
+        sheet_index: i,
+        name: h.nombre,
+        header_row: h.filaEncabezados,
+        columns_json: JSON.stringify(h.columnas),
+        row_count: h.filas.length,
+      },
+      select: { id_sheet: true },
+    });
+    const bloques = [];
+    for (let b = 0; b * MATRIZ_FILAS_POR_BLOQUE < h.filas.length; b += 1) {
+      bloques.push({
+        id_sheet: hoja.id_sheet,
+        chunk_no: b,
+        rows_json: JSON.stringify(h.filas.slice(b * MATRIZ_FILAS_POR_BLOQUE, (b + 1) * MATRIZ_FILAS_POR_BLOQUE)),
+      });
+    }
+    if (bloques.length > 0) await tx.chatProjectMatrixChunk.createMany({ data: bloques });
+  }
 }
 
 /**
@@ -148,28 +179,7 @@ export async function subirMatriz(
         },
         select: { id_version: true },
       });
-      for (const [i, h] of libro.hojas.entries()) {
-        const hoja = await tx.chatProjectMatrixSheet.create({
-          data: {
-            id_version: v.id_version,
-            sheet_index: i,
-            name: h.nombre,
-            header_row: h.filaEncabezados,
-            columns_json: JSON.stringify(h.columnas),
-            row_count: h.filas.length,
-          },
-          select: { id_sheet: true },
-        });
-        const bloques = [];
-        for (let b = 0; b * MATRIZ_FILAS_POR_BLOQUE < h.filas.length; b += 1) {
-          bloques.push({
-            id_sheet: hoja.id_sheet,
-            chunk_no: b,
-            rows_json: JSON.stringify(h.filas.slice(b * MATRIZ_FILAS_POR_BLOQUE, (b + 1) * MATRIZ_FILAS_POR_BLOQUE)),
-          });
-        }
-        if (bloques.length > 0) await tx.chatProjectMatrixChunk.createMany({ data: bloques });
-      }
+      await escribirHojas(tx, v.id_version, libro.hojas);
       await tx.chatProjectMatrix.update({
         where: { id_matrix: idMatrix },
         data: {
@@ -198,6 +208,76 @@ export async function subirMatriz(
 export async function subirMatrizPersona(user: ProjectUser, project: ProjectAccess, entrada: Parameters<typeof subirMatriz>[2]) {
   exigirContribuir(project);
   return subirMatriz(project, { idUser: user.id }, entrada);
+}
+
+/**
+ * EDITAR dentro de SynerLink (2026-11-05): aplica los cambios de UNA hoja sobre la versión
+ * de base y guarda una VERSIÓN nueva (las demás hojas se copian iguales). Si alguien guardó
+ * o subió otra versión mientras tanto, 409: no se pisa el trabajo de otra persona.
+ */
+export async function editarMatriz(
+  user: ProjectUser,
+  project: ProjectAccess,
+  idMatrix: number,
+  entrada: Record<string, unknown>
+): Promise<{ idMatrix: number; idVersion: number; versionNo: number; resumen: string }> {
+  exigirContribuir(project);
+  const m = await matrizDelProyecto(project, idMatrix);
+  if (!m.id_version_actual || Number(entrada.idVersionBase) !== m.id_version_actual) {
+    throw new ProyectoError('Alguien guardó otra versión de esta matriz mientras usted editaba. Recargue y vuelva a hacer sus cambios.', 409);
+  }
+  const hojasBase = await prisma.chatProjectMatrixSheet.findMany({ where: { id_version: m.id_version_actual }, orderBy: { sheet_index: 'asc' } });
+  const idx = Number(entrada.hoja);
+  if (!Number.isInteger(idx) || idx < 0 || idx >= hojasBase.length) throw new ProyectoError('Hoja no encontrada.', 400);
+  const edicion: EdicionHoja = {
+    cambios: Array.isArray(entrada.cambios) ? (entrada.cambios as EdicionHoja['cambios']) : [],
+    nuevas: Array.isArray(entrada.nuevas) ? (entrada.nuevas as string[][]).filter(Array.isArray) : [],
+    borrar: Array.isArray(entrada.borrar) ? (entrada.borrar as number[]) : [],
+  };
+  const hojas: HojaMatriz[] = await Promise.all(
+    hojasBase.map(async (h) => ({ nombre: h.name, filaEncabezados: h.header_row, columnas: columnasDe(h.columns_json), filas: await filasDeHoja(h.id_sheet) }))
+  );
+  const objetivo = hojas[idx];
+  const r = aplicarEdicion(objetivo.columnas, objetivo.filas, edicion);
+  if (!r.ok) throw new ProyectoError(r.error, 400);
+  objetivo.filas = r.filas;
+  const resumen = `Edición en SynerLink, hoja «${objetivo.nombre}»: ${r.resumen}.`;
+  const ahora = new Date();
+
+  return prisma.$transaction(
+    async (tx) => {
+      // Bloqueo optimista: solo una edición gana sobre la misma versión de base.
+      const marca = await tx.chatProjectMatrix.updateMany({
+        where: { id_matrix: m.id_matrix, id_version_actual: m.id_version_actual },
+        data: { updated_at: ahora },
+      });
+      if (marca.count === 0) {
+        throw new ProyectoError('Alguien guardó otra versión de esta matriz mientras usted editaba. Recargue y vuelva a hacer sus cambios.', 409);
+      }
+      const ultima = await tx.chatProjectMatrixVersion.findFirst({
+        where: { id_matrix: m.id_matrix },
+        orderBy: { version_no: 'desc' },
+        select: { version_no: true },
+      });
+      const versionNo = (ultima?.version_no ?? 0) + 1;
+      const v = await tx.chatProjectMatrixVersion.create({
+        data: {
+          id_matrix: m.id_matrix,
+          version_no: versionNo,
+          file_name: 'Edición en SynerLink',
+          uploaded_by: user.id,
+          summary: resumen.slice(0, 1000),
+          created_at: ahora,
+        },
+        select: { id_version: true },
+      });
+      await escribirHojas(tx, v.id_version, hojas);
+      await tx.chatProjectMatrix.update({ where: { id_matrix: m.id_matrix }, data: { id_version_actual: v.id_version, updated_at: ahora } });
+      await tx.chatProject.update({ where: { id_project: project.idProject }, data: { updated_at: ahora } });
+      return { idMatrix: m.id_matrix, idVersion: v.id_version, versionNo, resumen };
+    },
+    { timeout: 120_000, maxWait: 10_000 }
+  );
 }
 
 async function nombresPersonas(ids: (string | null)[]): Promise<Map<string, string>> {
@@ -316,6 +396,8 @@ export async function detalleMatriz(
     nombre: m.name,
     descripcion: m.description,
     idVersion,
+    /** Versión vigente: la base de una edición (si se mira una vieja, no se edita). */
+    idVersionActual: m.id_version_actual,
     versiones: versiones.map((v) => ({
       idVersion: v.id_version,
       version: v.version_no,
