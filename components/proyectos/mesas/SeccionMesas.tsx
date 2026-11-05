@@ -77,6 +77,17 @@ interface MesaDto {
   createdAt: string;
 }
 
+interface CandidatoDto {
+  idAgent: number;
+  code: string;
+  nombre: string;
+  avatarUrl: string | null;
+  avatarVersion: number | null;
+  designado: boolean;
+  conConectores: boolean;
+  esDesarrollo: boolean;
+}
+
 interface EventoDto {
   id: number;
   tipo: string;
@@ -424,7 +435,20 @@ function NuevaMesaModal({
   avisar: (a: Aviso) => void;
   base: string;
 }) {
-  const disponibles = proyecto.agents.filter((a) => a.disponible && a.puedoEscribir);
+  // Todos los agentes que la persona puede poner en una mesa (2026-11-05: «que pueda
+  // elegir todos los agentes que quiera»): los del proyecto y los demás que tiene
+  // asignados en la empresa. Los que no están en el proyecto se suman al crear la mesa.
+  const [disponibles, setDisponibles] = useState<CandidatoDto[] | null>(null);
+  useEffect(() => {
+    void apiGet<{ candidatos: CandidatoDto[] }>(`${base}?candidatos=1`, 'No se pudieron cargar los agentes.').then((r) => {
+      if (r.ok) setDisponibles(r.data.candidatos);
+      else {
+        setDisponibles([]);
+        if (r.error) setError(r.error);
+      }
+    });
+  }, [base]);
+  const esDueno = proyecto.capabilities.manageAgents;
   const [tema, setTema] = useState('');
   const [elegidos, setElegidos] = useState<Record<number, string>>({});
   const [moderador, setModerador] = useState<string | null>(null);
@@ -436,7 +460,11 @@ function NuevaMesaModal({
   const [guardando, setGuardando] = useState(false);
 
   const ids = Object.keys(elegidos).map(Number);
-  const opcionesModerador = disponibles.filter((a) => ids.includes(a.idAgent)).map((a) => ({ value: String(a.idAgent), label: a.displayName }));
+  const opcionesModerador = (disponibles ?? [])
+    .filter((a) => ids.includes(a.idAgent))
+    .map((a) => ({ value: String(a.idAgent), label: a.nombre }));
+  const seleccionables = (disponibles ?? []).filter((a) => a.designado || esDueno);
+  const todosMarcados = seleccionables.length > 0 && seleccionables.every((a) => a.idAgent in elegidos);
 
   const crear = async () => {
     setError(null);
@@ -483,16 +511,36 @@ function NuevaMesaModal({
           <Text size='xs' c='dimmed' mb={6}>
             El papel orienta su aporte: por ejemplo «propone soluciones», «critica las propuestas», «revisa los datos».
           </Text>
-          {disponibles.length < 2 && (
+          {disponibles === null ? (
+            <Skeleton h={80} />
+          ) : seleccionables.length < 2 ? (
             <Alert color='yellow' variant='light'>
-              El proyecto necesita al menos dos agentes designados a los que usted pueda escribirles.
+              Necesita al menos dos agentes asignados a usted en la empresa del proyecto, con Proyectos habilitado.
             </Alert>
+          ) : (
+            <Checkbox
+              mb={6}
+              label={`Seleccionar todos (${seleccionables.length})`}
+              checked={todosMarcados}
+              indeterminate={!todosMarcados && ids.length > 0}
+              onChange={(e) => {
+                const v = e.currentTarget.checked;
+                setElegidos((prev) => {
+                  if (!v) return {};
+                  const n = { ...prev };
+                  for (const a of seleccionables) if (!(a.idAgent in n)) n[a.idAgent] = '';
+                  return n;
+                });
+                if (!v) setModerador(null);
+              }}
+            />
           )}
           <Stack gap={6}>
-            {disponibles.map((a) => {
+            {seleccionables.map((a) => {
               const marcado = a.idAgent in elegidos;
+              const notas = [!a.designado ? 'se suma al proyecto' : null, !a.conConectores ? 'conversa sin conectores' : null].filter(Boolean);
               return (
-                <Group key={a.idAgent} wrap='nowrap'>
+                <Group key={a.idAgent} wrap='nowrap' align='flex-start'>
                   <Checkbox
                     checked={marcado}
                     onChange={(e) => {
@@ -505,8 +553,9 @@ function NuevaMesaModal({
                       });
                       if (!v && moderador === String(a.idAgent)) setModerador(null);
                     }}
-                    label={a.displayName}
-                    w={160}
+                    label={a.nombre}
+                    description={notas.length > 0 ? notas.join(' · ') : undefined}
+                    w={190}
                   />
                   <TextInput
                     size='xs'

@@ -128,7 +128,8 @@ export async function GET(request: NextRequest) {
         idProject: p.id_project,
         name: p.name,
         company: { idCompany: p.company.id_company, companyName: p.company.company },
-        profile: { key: p.profile, label: profileLabel(p.profile) },
+        // En una mesa, el perfil efectivo de ESTE agente (puede ser «sin conectores»).
+        profile: { key: conv.perfil, label: profileLabel(conv.perfil) },
         description: p.description,
         instructions: p.instructions,
         version: p.updated_at.toISOString(),
