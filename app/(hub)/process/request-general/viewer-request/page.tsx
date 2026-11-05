@@ -21,6 +21,8 @@ import {
   Loader,
   Pagination,
   Button,
+  Grid,
+  Select,
 } from '@mantine/core';
 import {
   IconAlertCircle,
@@ -117,6 +119,13 @@ function ViewerRequestGeneralPage() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  // Filtros extra de observadores: categoría (en el navegador) y departamento del solicitante
+  // (en el servidor: cambia el conjunto que se trae).
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [departmentFilter, setDepartmentFilter] = useState('');
+  const [departmentOptions, setDepartmentOptions] = useState<{ value: string; label: string }[]>(
+    []
+  );
   const [currentPage, setCurrentPage] = useState(1);
 
   // Filtros iguales a los de Mis solicitudes: se aplican al instante sobre TODAS las solicitudes
@@ -143,12 +152,21 @@ function ViewerRequestGeneralPage() {
   );
   const listOptions = useMemo(() => buildListOptions(ticketRows.map((x) => x.row)), [ticketRows]);
   // Búsqueda + filtros del panel; el estado se aplica aparte para que las tarjetas no cambien.
+  const categoryOptions = useMemo(
+    () =>
+      [...new Set(tickets.map((t) => t.category).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, 'es'))
+        .map((c) => ({ value: c, label: c })),
+    [tickets]
+  );
   const matchingRows = useMemo(
     () =>
-      filterByText(ticketRows, deferredSearch, (x) => requestSearchParts(x.ticket)).filter((x) =>
-        matchesListFilters(x.row, filters, { ignoreStatus: true })
+      filterByText(ticketRows, deferredSearch, (x) => requestSearchParts(x.ticket)).filter(
+        (x) =>
+          (!categoryFilter || x.ticket.category === categoryFilter) &&
+          matchesListFilters(x.row, filters, { ignoreStatus: true })
       ),
-    [ticketRows, deferredSearch, filters]
+    [ticketRows, deferredSearch, filters, categoryFilter]
   );
   const statusCounts = useMemo(() => countByStatusGroup(matchingRows.map((x) => x.row)), [matchingRows]);
   const visibleTickets = useMemo(
@@ -159,7 +177,7 @@ function ViewerRequestGeneralPage() {
   // Paginación en cliente: al cambiar filtros o búsqueda vuelve a la página 1.
   useEffect(() => {
     setCurrentPage(1);
-  }, [filters, deferredSearch, tickets]);
+  }, [filters, deferredSearch, tickets, categoryFilter]);
 
   const totalPages = Math.max(1, Math.ceil(visibleTickets.length / ITEMS_PER_PAGE));
   const pageItems = visibleTickets.slice(
@@ -170,6 +188,19 @@ function ViewerRequestGeneralPage() {
   const clearListFilters = () => {
     setFilters(EMPTY_LIST_FILTERS);
     setSearchInput('');
+    setCategoryFilter('');
+    if (departmentFilter) {
+      setDepartmentFilter('');
+      void fetchTickets(false, '');
+    }
+  };
+
+  const departmentLabel = (id: string) =>
+    id ? departmentOptions.find((d) => d.value === id)?.label || id : 'Todos';
+
+  const changeDepartment = (value: string) => {
+    setDepartmentFilter(value);
+    void fetchTickets(false, value);
   };
 
   useEffect(() => {
@@ -179,8 +210,24 @@ function ViewerRequestGeneralPage() {
       return;
     }
     void fetchTickets();
+    void fetchDepartments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, status, router]);
+
+  const fetchDepartments = async () => {
+    try {
+      const res = await fetch('/api/help-desk/departments');
+      if (!res.ok) return;
+      const deps: { id_department: number; department: string }[] = await res.json();
+      if (Array.isArray(deps)) {
+        setDepartmentOptions(
+          deps.map((d) => ({ value: String(d.id_department), label: d.department }))
+        );
+      }
+    } catch (err) {
+      console.error('Error fetching departments:', err);
+    }
+  };
 
   const fetchTasksForTickets = async (ticketsToUse: Ticket[]) => {
     try {
@@ -219,13 +266,16 @@ function ViewerRequestGeneralPage() {
   /**
    * Trae TODAS las solicitudes que puede observar la persona (status=0: todos los estados); el
    * usuario sale de la sesión en el servidor. `silent`: refresca sin tapar la pantalla.
+   * `department`: filtra por departamento del solicitante (por defecto, el elegido en pantalla).
    */
-  const fetchTickets = async (silent = false) => {
+  const fetchTickets = async (silent = false, department = departmentFilter) => {
     try {
       if (silent) setRefreshing(true);
       else setLoading(true);
 
-      const response = await fetch('/api/requests-general/viewer-request?status=0');
+      const params = new URLSearchParams({ status: '0' });
+      if (department) params.append('department', department);
+      const response = await fetch(`/api/requests-general/viewer-request?${params.toString()}`);
       if (!response.ok) throw new Error('Failed to fetch tickets');
 
       const data = (await response.json()) as Ticket[];
@@ -326,11 +376,14 @@ function ViewerRequestGeneralPage() {
         module: 'Mis solicitudes',
         filters: [
           ...describeListFilters(filters, listOptions),
+          { label: 'Categoría', value: categoryFilter || 'Todas' },
+          { label: 'Departamento del solicitante', value: departmentLabel(departmentFilter) },
           { label: 'Búsqueda', value: searchInput.trim() || 'Ninguna' },
         ],
         requests: visibleTickets.map((ticket) => ({
           id: ticket.id,
           subject: ticket.subject,
+          process: ticket.process,
           category: ticket.category,
           company: ticket.company,
           status: ticket.status,
@@ -383,6 +436,37 @@ function ViewerRequestGeneralPage() {
         options={listOptions}
         progress={globalProgress}
       />
+
+      <Grid mt='sm'>
+        <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+          <Select
+            label='Categoría'
+            placeholder='Todas las categorías'
+            clearable
+            searchable
+            data={categoryOptions}
+            value={categoryFilter || null}
+            onChange={(value) => setCategoryFilter(value || '')}
+            leftSection={<IconFileDescription size={16} />}
+            nothingFoundMessage='Sin coincidencias'
+            data-testid='category-filter'
+          />
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+          <Select
+            label='Departamento del solicitante'
+            placeholder='Todos'
+            clearable
+            searchable
+            data={departmentOptions}
+            value={departmentFilter || null}
+            onChange={(value) => changeDepartment(value || '')}
+            leftSection={<IconBuilding size={16} />}
+            nothingFoundMessage='Sin coincidencias'
+            data-testid='department-filter'
+          />
+        </Grid.Col>
+      </Grid>
 
       {error && (
         <Alert icon={<IconAlertCircle size={20} />} title='Error' color='red' radius='lg' mt='md'>
