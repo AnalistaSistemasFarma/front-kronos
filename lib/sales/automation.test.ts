@@ -42,7 +42,7 @@ describe('automatización · reglas puras', () => {
 });
 
 describe('automatización · represados (2026-11-05)', () => {
-  it('error al pasar al flujo (p. ej. «Revisar dirección») → represado, reintentar el envío', () => {
+  it('error al pasar al flujo (p. ej. un «Revisar dirección» registrado antes de la RN del 2026-11-05) → represado, reintentar el envío', () => {
     expect(represadoOf({ estado: 'error', error: 'Revisar dirección: el borrador 897 no trae dirección de envío' })).toEqual({
       accion: 'reenviar',
       mensaje: 'Revisar dirección: el borrador 897 no trae dirección de envío',
