@@ -21,6 +21,11 @@ export async function GET(req) {
     const date_from = searchParams.get('date_from');
     const date_to = searchParams.get('date_to');
     const assigned_to = searchParams.get('assigned_to');
+    const category = searchParams.get('category');
+    const processName = searchParams.get('process');
+    const departmentRaw = searchParams.get('department');
+    const department =
+      departmentRaw && Number.isInteger(Number(departmentRaw)) ? Number(departmentRaw) : null;
 
     if (!idUser) {
       return NextResponse.json(
@@ -58,6 +63,14 @@ export async function GET(req) {
         EXISTS (
           SELECT 1 FROM viewers_process_category vpc
           WHERE vpc.id_process_category = pc.id AND vpc.id_viewer = @idUser
+            AND (
+              ISNULL(vpc.scope_department, 0) = 0
+              OR EXISTS (
+                SELECT 1 FROM department_user dv
+                INNER JOIN department_user dr ON dr.id_department = dv.id_department
+                WHERE dv.id_user = @idUser AND dr.id_user = rg.id_requester
+              )
+            )
         )
         OR EXISTS (
           SELECT 1 FROM preparers_process_category ppc
@@ -82,6 +95,21 @@ export async function GET(req) {
       query += ` AND up.name = @assigned_to`;
     }
 
+    if (category) {
+      query += ` AND cr.category = @category`;
+    }
+
+    if (processName) {
+      query += ` AND pc.process = @process`;
+    }
+
+    if (department) {
+      query += ` AND EXISTS (
+        SELECT 1 FROM department_user du
+        WHERE du.id_user = rg.id_requester AND du.id_department = @department
+      )`;
+    }
+
     query += ` ORDER BY rg.id DESC`;
 
     const request = pool.request();
@@ -94,6 +122,18 @@ export async function GET(req) {
 
     if (status) {
       request.input('status', sql.NVarChar, status);
+    }
+
+    if (category) {
+      request.input('category', sql.NVarChar, category);
+    }
+
+    if (processName) {
+      request.input('process', sql.NVarChar, processName);
+    }
+
+    if (department) {
+      request.input('department', sql.Int, department);
     }
 
     if (company) {
