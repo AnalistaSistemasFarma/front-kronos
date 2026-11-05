@@ -127,6 +127,7 @@ import TableFieldInput from '../create-request/TableFieldInput';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
 import { partitionTasksForDisplay } from '@/lib/orion/taskProgress';
 import { formatEstimatedPaymentDate } from '../../../../../lib/treasury/estimatedPaymentDate';
+import { isAssignedTo, isRequesterSelfAssigned } from '@/lib/request-general/assignee';
 
 interface Request {
   id: number;
@@ -154,7 +155,8 @@ interface Request {
   executor_final: string;
   idProceso: number;
   id_assigned_category: number;
-  id_assigned_process_category: number;
+  id_assigned_process_category: number | string;
+  IDassignedUserID?: number | string | null;
   id_treasury_requests?: number | null;
   numero_sapsend?: number | null;
   sapsend_status?: string | null;
@@ -443,6 +445,10 @@ function ViewRequestPage() {
           user: data.user ?? data.assignedUserName ?? data.usuario,
           requester: data.requester,
           id_requester: data.id_requester,
+          // Asignado de la solicitud: sin él, al entrar por el enlace del correo el
+          // solicitante que es el asignado no podía cerrar (#838).
+          id_assigned_process_category: data.id_assigned_process_category ?? data.IDassignedUserID,
+          IDassignedUserID: data.IDassignedUserID,
           requester_email: data.requester_email,
           executor_final: data.executor_final,
           resolution: data.resolutioncase || null,
@@ -995,12 +1001,9 @@ function ViewRequestPage() {
   // pueda editar los campos, PERO solo cuando él mismo es el asignado de la solicitud
   // (id del creador == id del asignado). Si el asignado es otra persona, no puede cerrar.
   // Quien gestiona (canEdit) siempre puede.
-  const assignedId =
-    request?.id_assigned_process_category || request?.id_assigned_category;
-  const isSelfAssigned =
-    !!request?.id_requester &&
-    !!assignedId &&
-    String(request.id_requester) === String(assignedId);
+  // El asignado sale de la fila de la lista o, si se entró por el enlace del correo,
+  // de la API del detalle (#838).
+  const isSelfAssigned = isRequesterSelfAssigned(request);
   const canClose = canEdit || (isRequester && isSelfAssigned);
 
   useEffect(() => {
@@ -3369,9 +3372,7 @@ function ViewRequestPage() {
                   Las solicitudes completadas no se pueden modificar.
                 </Text>
               )}
-              {(String(request.id_assigned_process_category || request.id_assigned_category || '') ===
-                String(userId || '') ||
-                isDocumentPreparer) && (
+              {(isAssignedTo(request, userId) || isDocumentPreparer) && (
                 <Button
                   color='blue'
                   onClick={() => {
