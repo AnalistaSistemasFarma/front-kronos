@@ -7,7 +7,6 @@ import { runSapExecutors } from '../workflow-sap/engine';
 import { withStep } from '../workflow-sap/executionLog';
 import { simulateDraft } from './flow';
 import { offerSubject } from './offer';
-import { shipAddressProblem } from './publish';
 import { normalizeState } from './states';
 
 /**
@@ -61,8 +60,9 @@ export interface DocResult {
 /**
  * «Represado» (Nicolás Rivera, 2026-11-05: «si da error, debería quedarse represada»): el
  * borrador no siguió su camino y queda visible en el panel con el error y «Reintentar».
- *  - 'reenviar': falló el paso al flujo (antes de crear la solicitud), incluida la
- *    validación «Revisar dirección» → se vuelve a pasar el borrador al flujo.
+ *  - 'reenviar': falló el paso al flujo (antes de crear la solicitud) → se vuelve a
+ *    pasar el borrador al flujo. (Desde la RN del 2026-11-05 la dirección ya no bloquea:
+ *    un «Revisar dirección» que haya quedado registrado se reintenta y pasa.)
  *  - 'pedido': la solicitud existe pero falló la creación del pedido (publish_error) →
  *    se reintentan sus Tareas SAP (lo mismo que «Reintentar» en la oferta).
  *  - 'tarea': la solicitud existe y otra Tarea SAP quedó en error (p. ej. pasar a
@@ -299,10 +299,7 @@ async function sendToFlow(sap: SapSession, cfg: AutomationConfig, c: Candidate, 
   if ((state !== 'B' && !sinEstado) || draft.DocumentStatus !== 'bost_Open') {
     return { docEntry: c.DocEntry, estado: 'omitido', detalle: `El borrador ya no está en borrador abierto (estado ${state ?? String(draft.U_SEND_State)}).` };
   }
-  // Sin dirección de envío el pedido saldría sin municipio (factura electrónica): queda en el
-  // registro como error «Revisar dirección» y se vuelve a intentar en la próxima corrida.
-  const sinDireccion = shipAddressProblem(draft);
-  if (sinDireccion) throw new Error(sinDireccion);
+  // RN 2026-11-05: la dirección no bloquea; el pedido resuelve el ShipToCode al crearse (publish.ts).
   // Borrador de Salesforce sin estado: se marca en B para que el flujo lo evalúe (sin If-Match: el etag de Drafts es fijo).
   if (sinEstado) await sapPatch(sap, `Drafts(${c.DocEntry})`, { U_SEND_State: 'B' });
   const first = ((draft.DocumentLines as Record<string, unknown>[] | undefined) ?? [])[0];

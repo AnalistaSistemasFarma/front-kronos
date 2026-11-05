@@ -9,6 +9,8 @@ const h = vi.hoisted(() => ({
   draft: {} as Record<string, unknown>,
   rateMissing: true,
   posts: [] as string[],
+  orderBody: null as Record<string, unknown> | null,
+  bp: null as Record<string, unknown> | null,
   patches: [] as Record<string, unknown>[],
   taskRow: { id_request_general: 10117, is_authorization: true } as Record<string, unknown> | null,
   updates: [] as string[],
@@ -41,12 +43,14 @@ vi.mock('../sap/serviceLayer', async () => {
     ...actual,
     sapLogout: async () => undefined,
     sapGetAll: async () => [],
-    sapGet: async (_s: unknown, path: string) => (path.startsWith('Orders?') ? { value: [] } : { ...h.draft }),
+    sapGet: async (_s: unknown, path: string) =>
+      path.startsWith('Orders?') ? { value: [] } : path.startsWith('BusinessPartners(') ? { ...h.bp } : { ...h.draft },
     sapPatch: async (_s: unknown, _p: string, body: Record<string, unknown>) => {
       h.patches.push(body);
     },
-    sapPost: async (_s: unknown, path: string) => {
+    sapPost: async (_s: unknown, path: string, body?: Record<string, unknown>) => {
       h.posts.push(path);
+      if (path === 'Orders') h.orderBody = body ?? null;
       if (path === 'CompanyService_GetAdminInfo') return { LocalCurrency: 'COP', SystemCurrency: 'USD' };
       if (path === 'Orders') return { DocEntry: 2790, DocNum: 2790 };
       return {};
@@ -72,6 +76,11 @@ beforeEach(() => {
   __resetTrmCache();
   h.rateMissing = true;
   h.posts = [];
+  h.orderBody = null;
+  h.bp = {
+    ShipToDefault: 'ARMENIA',
+    BPAddresses: [{ AddressName: 'ARMENIA', AddressType: 'bo_ShipTo', Street: 'CR 13 1 NORTE 35', City: 'ARMENIA', ZipCode: '630001', State: '63', Country: 'CO', U_HBT_MunMed: '63001' }],
+  };
   h.patches = [];
   h.updates = [];
   h.taskRow = { id_request_general: 10117, is_authorization: true };
@@ -103,14 +112,22 @@ describe('Ventas · bloqueo por TRM', () => {
     expect(r.ok).toBe(true);
     expect(h.posts).toContain('Orders');
   });
-  it('sin dirección de envío no crea el pedido (revisar dirección)', async () => {
+  it('RN 2026-11-05: sin ShipToCode ni dirección en el borrador, crea el pedido con la dirección del cliente', async () => {
     h.rateMissing = false;
     h.draft = { ...h.draft, ShipToCode: null, AddressExtension: {} };
     const r = await createOrder(10117, 'server');
-    expect(r.ok).toBe(false);
-    expect(!r.ok && r.error).toMatch(/^Revisar dirección/);
-    expect(h.posts).not.toContain('Orders');
-    expect(h.updates).toHaveLength(1); // queda publish_error → «Represado» en el panel
+    expect(r.ok).toBe(true);
+    expect(h.posts).toContain('Orders');
+    expect(h.orderBody).toMatchObject({ ShipToCode: 'ARMENIA', AddressExtension: { ShipToZipCode: '630001', U_HBT_MunMedS: '63001' } });
+  });
+  it('RN 2026-11-05: cliente sin direcciones de envío, crea el pedido sin ShipToCode (no bloquea)', async () => {
+    h.rateMissing = false;
+    h.bp = { ShipToDefault: null, BPAddresses: [] };
+    h.draft = { ...h.draft, ShipToCode: null, AddressExtension: { ShipToStreet: 'CALLE 1', ShipToCity: 'PEREIRA' } };
+    const r = await createOrder(10117, 'server');
+    expect(r.ok).toBe(true);
+    expect(h.orderBody).not.toHaveProperty('ShipToCode');
+    expect(h.orderBody).toMatchObject({ AddressExtension: { ShipToStreet: 'CALLE 1', ShipToCity: 'PEREIRA' } });
   });
   it('la aprobación de la tarea de autorización se bloquea sin TRM', async () => {
     expect(await salesApprovalTrmBlock(555)).toBe(MSG);

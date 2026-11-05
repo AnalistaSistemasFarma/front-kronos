@@ -6,7 +6,7 @@ import { sapGet, sapGetAll, sapLogout, sapPatch, sapPost, SapError, type SapSess
 import { docKey, writeDoc } from '../sap/draftWrite';
 import { withStep, type TriggeredBy } from '../workflow-sap/executionLog';
 import { EVAL_FIELD_LABEL, optionsForCreditRecheck, optionsForSend, rejectedStateFor, traceFieldFor } from './flowOptions';
-import { buildOrderPayload, orderLookupFilter, shipAddressProblem, type SalesDraft } from './publish';
+import { buildOrderPayload, orderLookupFilter, type BpShipInfo, type SalesDraft } from './publish';
 import {
   DEFAULT_RULES,
   destinoTrasAprobarPrecios,
@@ -337,6 +337,18 @@ export async function moveToStage(idRequest: number, target: 'AP' | 'AE' | 'AEDA
   }
 }
 
+/** Direcciones de envío del cliente; si SAP no responde, null (el pedido sale con lo del borrador). */
+async function shipInfoOf(s: SapSession, cardCode: unknown): Promise<BpShipInfo | null> {
+  if (cardCode == null || String(cardCode).trim() === '') return null;
+  try {
+    const code = encodeURIComponent(String(cardCode).replace(/'/g, "''"));
+    return await sapGet<BpShipInfo>(s, `BusinessPartners('${code}')?$select=ShipToDefault,BPAddresses`);
+  } catch (e) {
+    console.error(`[sales] no se pudieron leer las direcciones del cliente ${String(cardCode)}:`, e);
+    return null;
+  }
+}
+
 /** ⚡ Crear pedido: POST Orders en A con la marca V<borrador>; borrador a A y cerrado. Idempotente. */
 export async function createOrder(idRequest: number, triggeredBy: TriggeredBy): Promise<ExecResult> {
   const link = await salesLinkOf(idRequest);
@@ -356,18 +368,18 @@ export async function createOrder(idRequest: number, triggeredBy: TriggeredBy): 
       if (state == null || !['B', 'AP', 'AE', 'AEDA'].includes(state)) {
         return { ok: false, error: `La oferta no está en un estado que permita crear el pedido (estado: ${String(draft.U_SEND_State ?? 'sin estado')}).` };
       }
-      // «Revisar dirección» y «sin TRM» también dejan la oferta en publish_error: así el borrador
-      // queda «Represado» en Ventas › Automatización con el mensaje y «Reintentar» (2026-11-05).
+      // «Sin TRM» deja la oferta en publish_error: así el borrador queda «Represado» en
+      // Ventas › Automatización con el mensaje y «Reintentar» (2026-11-05).
       const blocked = async (error: string): Promise<ExecResult> => {
         await updateLink(link.id, { status: 'publish_error', error }).catch(() => undefined);
         return { ok: false, error };
       };
-      const sinDireccion = shipAddressProblem(draft);
-      if (sinDireccion) return await blocked(sinDireccion);
       const today = todayBogota();
       const sinTrm = await trmBlock(s, link.id_company, today);
       if (sinTrm) return await blocked(sinTrm);
-      const payload = buildOrderPayload(draft, today);
+      // RN 2026-11-05: la dirección nunca bloquea. El pedido lleva el ShipToCode del borrador o el
+      // resuelto en la ficha del cliente, y lo que falte en AddressExtension sale de esa dirección.
+      const payload = buildOrderPayload(draft, today, await shipInfoOf(s, draft.CardCode));
       order = await withStep(
         { idRequest, stepKind: 'sap', stepName: 'Crear pedido de venta', actionKey: 'sales.create_order', triggerEvent: 'on_execute', triggeredBy, idCompany: link.id_company, sapEntity: 'Orders', requestSummary: { borrador: link.doc_entry, lineas: payload.DocumentLines.length } },
         () => sapPost<{ DocEntry: number; DocNum?: number }>(s, 'Orders', payload),

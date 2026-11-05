@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addressExtensionOf, buildOrderPayload, orderLookupFilter, orderMarker, parseOrderMarker, shipAddressProblem } from './publish';
+import { addressExtensionOf, buildOrderPayload, normAddr, orderLookupFilter, orderMarker, parseOrderMarker, resolveShipTo, shipFieldsFromBp } from './publish';
 
 describe('marca del pedido', () => {
   it('V<DocEntry> ida y vuelta', () => {
@@ -134,19 +134,85 @@ describe('dirección del pedido (regresión 2026-11-05, pedidos 2782/2783 de pru
   });
 });
 
-describe('shipAddressProblem', () => {
-  it('con ShipToCode no hay problema', () => {
-    expect(shipAddressProblem({ DocEntry: 1, ShipToCode: 'ARMENIA' })).toBeNull();
+// Ficha del cliente 900149596 en pruebas OLP (2026-11-05): ShipToDefault BOGOTA y otras direcciones de envío.
+const bp = {
+  ShipToDefault: 'BOGOTA',
+  BPAddresses: [
+    { AddressName: 'BOGOTA', AddressType: 'bo_ShipTo', Street: 'CR 47 91 84', City: 'BOGOTÁ', ZipCode: '111211', State: '25', Country: 'CO', County: null, U_HBT_MunMed: '11001', U_HBT_DirMM: 'N' },
+    { AddressName: 'FACTURACION', AddressType: 'bo_BillTo', Street: 'CR 47 93 58', City: 'BOGOTÁ', ZipCode: '111211', State: '25', Country: 'CO', U_HBT_MunMed: '11001', U_HBT_DirMM: 'Y' },
+    { AddressName: 'MEDELLÍN', AddressType: 'bo_ShipTo', Street: 'CL 67 A 51 B 27', City: 'MEDELLÍN', ZipCode: '050001', State: '5', Country: 'CO', U_HBT_MunMed: '05001', U_HBT_DirMM: 'N' },
+  ],
+};
+// Borrador 902 de Ceiba: sin ShipToCode y con un AddressExtension parcial (sin código postal, departamento, país ni municipio).
+const draft902 = {
+  DocEntry: 902,
+  CardCode: '900149596',
+  ShipToCode: null,
+  PayToCode: 'FACTURACION',
+  Address2: 'CL 67 A 51 B 27\rMEDELLÍN\rCOLOMBIA',
+  AddressExtension: { ShipToStreet: 'CL 67 A 51 B 27', ShipToStreetNo: '7', ShipToCity: 'MEDELLÍN', ShipToCounty: 'Antioquia', ShipToZipCode: null, U_HBT_DirMMS: 'N', U_HBT_MunMedB: '11001' },
+};
+
+describe('RN 2026-11-05: el pedido siempre lleva ShipToCode', () => {
+  it('normaliza mayúsculas, tildes y espacios', () => {
+    expect(normAddr('  Medellín   ')).toBe('MEDELLIN');
+    expect(normAddr('cl 67  a 51 b 27')).toBe('CL 67 A 51 B 27');
   });
-  it('sin ShipToCode pero con código postal y municipio no hay problema', () => {
-    expect(shipAddressProblem({ DocEntry: 1, AddressExtension: { ShipToZipCode: '630001', U_HBT_MunMedS: '63001' } })).toBeNull();
+  it('si el borrador trae ShipToCode, se usa ese', () => {
+    expect(resolveShipTo({ ...draft902, ShipToCode: 'BOGOTA' }, bp)).toMatchObject({ code: 'BOGOTA', via: 'borrador' });
   });
-  it('sin ShipToCode ni municipio: revisar dirección', () => {
-    expect(shipAddressProblem({ DocEntry: 7, ShipToCode: '', AddressExtension: { ShipToZipCode: '630001', U_HBT_MunMedS: null } })).toMatch(
-      /^Revisar dirección: el borrador 7 .*municipio/
-    );
+  it('sin ShipToCode: la dirección de envío con la misma calle y ciudad (aunque cambien tildes y mayúsculas)', () => {
+    const ext = { ...draft902.AddressExtension, ShipToStreet: 'cl 67 a  51 b 27', ShipToCity: 'Medellin' };
+    expect(resolveShipTo({ ...draft902, AddressExtension: ext }, bp)).toMatchObject({ code: 'MEDELLÍN', via: 'coincidencia' });
   });
-  it('sin ninguna dirección: revisar dirección', () => {
-    expect(shipAddressProblem({ DocEntry: 8 })).toMatch(/código postal ni municipio/);
+  it('sin coincidencia: la ShipToDefault del cliente', () => {
+    const ext = { ShipToStreet: 'CALLE NUEVA 1', ShipToCity: 'MEDELLÍN' };
+    expect(resolveShipTo({ ...draft902, AddressExtension: ext }, bp)).toMatchObject({ code: 'BOGOTA', via: 'defecto' });
+    expect(resolveShipTo({ DocEntry: 1, CardCode: 'C' }, bp)).toMatchObject({ code: 'BOGOTA', via: 'defecto' });
+  });
+  it('sin ShipToDefault: la primera dirección de envío; nunca la de facturación', () => {
+    const r = resolveShipTo({ DocEntry: 1, CardCode: 'C' }, { ShipToDefault: null, BPAddresses: bp.BPAddresses.slice(1) });
+    expect(r).toMatchObject({ code: 'MEDELLÍN', via: 'defecto' });
+  });
+  it('cliente sin direcciones de envío: sin ShipToCode', () => {
+    expect(resolveShipTo(draft902, { ShipToDefault: null, BPAddresses: [bp.BPAddresses[1]] })).toEqual({ code: null, via: 'ninguna', address: null });
+    expect(resolveShipTo(draft902, null)).toEqual({ code: null, via: 'ninguna', address: null });
+  });
+  it('mapea la dirección de la ficha a los campos de envío del documento', () => {
+    expect(shipFieldsFromBp(bp.BPAddresses[2])).toEqual({
+      ShipToStreet: 'CL 67 A 51 B 27',
+      ShipToCity: 'MEDELLÍN',
+      ShipToZipCode: '050001',
+      ShipToState: '5',
+      ShipToCountry: 'CO',
+      U_HBT_MunMedS: '05001',
+      U_HBT_DirMMS: 'N',
+    });
+  });
+  it('payload: ShipToCode resuelto; lo que llega manda y lo que falta viene de la ficha (SAP no lo completa solo)', () => {
+    const p = buildOrderPayload(draft902 as never, '2026-11-05', bp) as Record<string, unknown>;
+    expect(p.ShipToCode).toBe('MEDELLÍN');
+    expect(p.AddressExtension).toMatchObject({
+      ShipToStreet: 'CL 67 A 51 B 27',
+      ShipToStreetNo: '7',
+      ShipToCounty: 'Antioquia',
+      ShipToZipCode: '050001',
+      ShipToState: '5',
+      ShipToCountry: 'CO',
+      U_HBT_MunMedS: '05001',
+      U_HBT_MunMedB: '11001',
+    });
+    expect(p).not.toHaveProperty('Address2');
+  });
+  it('lo que llega en el borrador no se pisa con la ficha', () => {
+    const d = { ...draft902, AddressExtension: { ...draft902.AddressExtension, ShipToZipCode: '050021', U_HBT_MunMedS: '05002' } };
+    const p = buildOrderPayload(d as never, '2026-11-05', bp) as Record<string, unknown>;
+    expect(p.AddressExtension).toMatchObject({ ShipToZipCode: '050021', U_HBT_MunMedS: '05002', ShipToState: '5' });
+  });
+  it('cliente sin direcciones de envío: el pedido sale sin ShipToCode con lo que llegue (no bloquea)', () => {
+    const p = buildOrderPayload(draft902 as never, '2026-11-05', { BPAddresses: [] }) as Record<string, unknown>;
+    expect(p).not.toHaveProperty('ShipToCode');
+    expect(p.AddressExtension).toMatchObject({ ShipToStreet: 'CL 67 A 51 B 27', ShipToCity: 'MEDELLÍN' });
+    expect(p.AddressExtension).not.toHaveProperty('ShipToZipCode');
   });
 });

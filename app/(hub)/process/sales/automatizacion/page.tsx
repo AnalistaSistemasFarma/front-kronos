@@ -24,7 +24,7 @@ type Doc = {
   id: number; doc_entry: number; doc_num: number | null; card_code: string | null; card_name: string | null; doc_total: number | null;
   estado: string; destino: string | null; detalle: string | null; error: string | null; id_request_general: number | null;
   intentos: number; updated_at: string; estado_flujo: string | null; order_doc_entry: number | null; error_flujo: string | null;
-  /** «Represado»: falló el paso al flujo / «Revisar dirección» ('reenviar'), la creación del pedido ('pedido') u otra Tarea SAP ('tarea'). */
+  /** «Represado»: falló el paso al flujo ('reenviar'), la creación del pedido ('pedido') u otra Tarea SAP ('tarea'). */
   represado: { accion: 'reenviar' | 'pedido' | 'tarea'; mensaje: string } | null;
 };
 type Run = { id: number; origen: string; inicio: string; fin: string | null; simulacion: boolean; candidatos: number; enviados: number; simulados: number; errores: number; detalle: string | null };
