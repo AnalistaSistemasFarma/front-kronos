@@ -45,14 +45,18 @@ vi.mock('../sap/serviceLayer', async () => {
     },
     sapPost: async (_s: unknown, path: string) => {
       h.posts.push(path);
-      if (path === 'SBOBobService_GetSystemCurrency') return 'USD';
-      if (path === 'SBOBobService_GetLocalCurrency') return 'COP';
-      if (path === 'SBOBobService_GetCurrencyRate') {
-        if (h.rateMissing) throw new actual.SapError('Update the exchange rate', 400, '{"error":{"code":-4006,"message":{"value":"Update the exchange rate"}}}');
-        return 3221.19;
-      }
+      if (path === 'CompanyService_GetAdminInfo') return { LocalCurrency: 'COP', SystemCurrency: 'USD' };
       if (path === 'Orders') return { DocEntry: 2790, DocNum: 2790 };
       return {};
+    },
+    // El Service Layer responde la tasa en texto plano («3221.190000»).
+    sapPostText: async (_s: unknown, path: string) => {
+      h.posts.push(path);
+      if (path === 'SBOBobService_GetCurrencyRate') {
+        if (h.rateMissing) throw new actual.SapError('Update the exchange rate', 400, '{"error":{"code":-4006,"message":{"value":"Update the exchange rate"}}}');
+        return '3221.190000';
+      }
+      return '';
     },
   };
 });
