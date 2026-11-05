@@ -183,11 +183,14 @@ export default function SeccionMesas({
   version,
   avisar,
   onAbrirConversacion,
+  onCambio,
 }: {
   proyecto: ProyectoDetalleDto;
   version: number;
   avisar: (a: Aviso) => void;
-  onAbrirConversacion: (id: number) => void;
+  onAbrirConversacion: (id: number) => void | Promise<void>;
+  /** Se creó o cerró una mesa: el proyecto recarga su lista de conversaciones. */
+  onCambio?: () => void;
 }) {
   const base = `/api/proyectos/${proyecto.idProject}/mesas`;
   const puedeManejar = proyecto.capabilities.write && !proyecto.archived;
@@ -397,6 +400,7 @@ export default function SeccionMesas({
           onCreada={async (idMesa) => {
             setCreando(false);
             avisar({ tipo: 'ok', texto: 'Mesa creada. Si está en horario, la primera ronda arranca ya.' });
+            onCambio?.();
             setAbierta(idMesa);
             await cargar();
           }}
