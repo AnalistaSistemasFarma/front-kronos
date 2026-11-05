@@ -3,6 +3,7 @@ import sqlConfig from '../../dbconfig.js';
 import { companySap } from '../purchases/authorization';
 import { todayBogota } from '../purchases/drafts';
 import { sapGet, sapGetAll, sapLogout, sapPatch, sapPost, SapError, type SapSession } from '../sap/serviceLayer';
+import { docKey, writeDoc } from '../sap/draftWrite';
 import { withStep, type TriggeredBy } from '../workflow-sap/executionLog';
 import { EVAL_FIELD_LABEL, optionsForCreditRecheck, optionsForSend, rejectedStateFor, traceFieldFor } from './flowOptions';
 import { buildOrderPayload, orderLookupFilter, type SalesDraft } from './publish';
@@ -284,27 +285,46 @@ export async function moveToStage(idRequest: number, target: 'AP' | 'AE' | 'AEDA
   try {
     sap = await companySap(link.id_company);
     const s = sap;
-    const draft = await sapGet<Record<string, unknown>>(s, `Drafts(${link.doc_entry})?$select=DocEntry,U_SEND_State`);
-    const state = normalizeState(draft.U_SEND_State);
-    if (state === target) return { ok: true, detail: `Oferta ya en «${STATE_LABEL[target]}»` };
-    if (!state || !FROM[target].includes(state)) {
-      return { ok: false, error: `No se puede pasar a ${target} desde ${state ?? 'sin estado'}.` };
-    }
-    // Al pasar de etapa queda también la traza de la aprobación anterior (como SAPSEND), así no
-    // depende de que la escritura de la decisión del autorizador haya entrado primero.
-    const extra: Record<string, string> =
-      target === 'AE'
-        ? { U_SEND_TraStateAE: 'SI', U_SEND_TraStateAETime: nowTrace(), ...(state === 'AP' ? { U_SEND_TraAproAP: `${nowTrace()} | Precios autorizados en SynerLink` } : {}) }
-        : target === 'AEDA'
-          ? { U_SEND_TraStateAEDA: 'SI', U_SEND_TraStateAEDATime: nowTrace(), U_SEND_TraAproAE: `${nowTrace()} | Extracupo autorizado por dirección comercial en SynerLink` }
-          : {};
-    await withStep(
-      { idRequest, stepKind: 'sap', stepName: `Pasar a «${STATE_LABEL[target]}»`, actionKey: `sales.state_${target.toLowerCase()}`, triggerEvent: 'on_execute', triggeredBy, idCompany: link.id_company, sapEntity: 'Drafts', requestSummary: { docEntry: link.doc_entry, de: state, a: target } },
-      // Sin If-Match: el Service Layer devuelve en los borradores un etag que no cambia y, desde la segunda
-      // escritura, SAP responde -2039 («Another user … modified data»). El estado se validó justo arriba.
-      () => sapPatch(s, `Drafts(${link.doc_entry})`, { U_SEND_State: target, ...extra }),
-      () => ({ status: 'ok', sapDocEntry: link.doc_entry })
-    );
+    // Serializado por borrador y con reintento ante −2039/412: la decisión del autorizador
+    // (onSalesAuthorizationDecision) escribe en el mismo borrador (regresión 2026-11-04).
+    const outcome = await writeDoc(docKey(link.id_company, 'Drafts', link.doc_entry), async () => {
+      const draft = await sapGet<Record<string, unknown>>(
+        s,
+        `Drafts(${link.doc_entry})?$select=DocEntry,U_SEND_State,U_SEND_TraAproAP,U_SEND_TraAproAE`
+      );
+      const state = normalizeState(draft.U_SEND_State);
+      if (state === target) return { already: true as const };
+      if (!state || !FROM[target].includes(state)) {
+        return { invalid: `No se puede pasar a ${target} desde ${state ?? 'sin estado'}.` };
+      }
+      // Al pasar de etapa queda también la traza de la aprobación anterior (como SAPSEND) SOLO si
+      // la decisión del autorizador no la dejó ya: así no se pisa su registro (con el motivo).
+      const empty = (v: unknown) => v == null || String(v).trim() === '';
+      const extra: Record<string, string> =
+        target === 'AE'
+          ? {
+              U_SEND_TraStateAE: 'SI',
+              U_SEND_TraStateAETime: nowTrace(),
+              ...(state === 'AP' && empty(draft.U_SEND_TraAproAP) ? { U_SEND_TraAproAP: `${nowTrace()} | Precios autorizados en SynerLink` } : {}),
+            }
+          : target === 'AEDA'
+            ? {
+                U_SEND_TraStateAEDA: 'SI',
+                U_SEND_TraStateAEDATime: nowTrace(),
+                ...(empty(draft.U_SEND_TraAproAE) ? { U_SEND_TraAproAE: `${nowTrace()} | Extracupo autorizado por dirección comercial en SynerLink` } : {}),
+              }
+            : {};
+      await withStep(
+        { idRequest, stepKind: 'sap', stepName: `Pasar a «${STATE_LABEL[target]}»`, actionKey: `sales.state_${target.toLowerCase()}`, triggerEvent: 'on_execute', triggeredBy, idCompany: link.id_company, sapEntity: 'Drafts', requestSummary: { docEntry: link.doc_entry, de: state, a: target } },
+        // Sin If-Match: el Service Layer devuelve en los borradores un etag que no cambia y, desde la segunda
+        // escritura, SAP responde -2039 («Another user … modified data»). El estado se validó justo arriba.
+        () => sapPatch(s, `Drafts(${link.doc_entry})`, { U_SEND_State: target, ...extra }),
+        () => ({ status: 'ok', sapDocEntry: link.doc_entry })
+      );
+      return { moved: true as const };
+    });
+    if ('already' in outcome) return { ok: true, detail: `Oferta ya en «${STATE_LABEL[target]}»` };
+    if ('invalid' in outcome) return { ok: false, error: outcome.invalid as string };
     return { ok: true, detail: `Oferta pasó a «${STATE_LABEL[target]}»` };
   } catch (e) {
     return { ok: false, error: friendly(e) };
@@ -340,10 +360,13 @@ export async function createOrder(idRequest: number, triggeredBy: TriggeredBy): 
       );
     }
     if (state !== 'A') {
-      await sapPatch(s, `Drafts(${link.doc_entry})`, {
-        U_SEND_State: 'A',
-        U_SEND_TraOrdCre: `${nowTrace()} | Orden de Venta creada desde SynerLink (pedido ${order.DocNum ?? order.DocEntry})`,
-      });
+      const created = order;
+      await writeDoc(docKey(link.id_company, 'Drafts', link.doc_entry), () =>
+        sapPatch(s, `Drafts(${link.doc_entry})`, {
+          U_SEND_State: 'A',
+          U_SEND_TraOrdCre: `${nowTrace()} | Orden de Venta creada desde SynerLink (pedido ${created.DocNum ?? created.DocEntry})`,
+        })
+      );
     }
     await sapPost(s, `Drafts(${link.doc_entry})/Close`, {}).catch(() => undefined);
     await updateLink(link.id, { status: 'approved', order_doc_entry: order.DocEntry, error: null });
@@ -374,19 +397,25 @@ export async function onSalesAuthorizationDecision(
   try {
     sap = await companySap(link.id_company);
     const s = sap;
-    const draft = await sapGet<Record<string, unknown>>(s, `Drafts(${link.doc_entry})?$select=DocEntry,U_SEND_State`);
-    const state = normalizeState(draft.U_SEND_State);
-    if (state !== 'AP' && state !== 'AE' && state !== 'AEDA') return;
     const motivo = (reason ?? '').toString().trim().slice(0, 200);
-    const trace = `${nowTrace()} | ${approved ? 'Autorizado' : 'Rechazado'} en SynerLink${motivo ? `: ${motivo}` : ''}`;
-    const body: Record<string, string> = { [traceFieldFor(state, approved)]: trace };
-    if (!approved) body.U_SEND_State = rejectedStateFor(state) as string;
-    await withStep(
-      { idRequest: Number(idRequest), stepKind: 'sap', stepName: approved ? 'Registrar autorización en SAP' : 'Aplicar rechazo en SAP', actionKey: approved ? null : 'sales.state_rejected', triggerEvent: approved ? 'on_approve' : 'on_reject', triggeredBy: 'user', idCompany: link.id_company, sapEntity: 'Drafts', requestSummary: { docEntry: link.doc_entry, de: state, a: body.U_SEND_State ?? state } },
-      // Sin If-Match (ver moveToStage). El estado se validó justo arriba.
-      () => sapPatch(s, `Drafts(${link.doc_entry})`, body),
-      () => ({ status: 'ok', sapDocEntry: link.doc_entry })
-    );
+    // Serializado por borrador y con reintento ante −2039/412 (regresión 2026-11-04: la Tarea SAP
+    // siguiente escribía en el mismo borrador a la vez y SAP rechazaba esta escritura).
+    const applied = await writeDoc(docKey(link.id_company, 'Drafts', link.doc_entry), async () => {
+      const draft = await sapGet<Record<string, unknown>>(s, `Drafts(${link.doc_entry})?$select=DocEntry,U_SEND_State`);
+      const state = normalizeState(draft.U_SEND_State);
+      if (state !== 'AP' && state !== 'AE' && state !== 'AEDA') return false;
+      const trace = `${nowTrace()} | ${approved ? 'Autorizado' : 'Rechazado'} en SynerLink${motivo ? `: ${motivo}` : ''}`;
+      const body: Record<string, string> = { [traceFieldFor(state, approved)]: trace };
+      if (!approved) body.U_SEND_State = rejectedStateFor(state) as string;
+      await withStep(
+        { idRequest: Number(idRequest), stepKind: 'sap', stepName: approved ? 'Registrar autorización en SAP' : 'Aplicar rechazo en SAP', actionKey: approved ? null : 'sales.state_rejected', triggerEvent: approved ? 'on_approve' : 'on_reject', triggeredBy: 'user', idCompany: link.id_company, sapEntity: 'Drafts', requestSummary: { docEntry: link.doc_entry, de: state, a: body.U_SEND_State ?? state } },
+        // Sin If-Match (ver moveToStage). El estado se validó justo arriba.
+        () => sapPatch(s, `Drafts(${link.doc_entry})`, body),
+        () => ({ status: 'ok', sapDocEntry: link.doc_entry })
+      );
+      return true;
+    });
+    if (!applied) return;
     if (!approved) await updateLink(link.id, { status: 'rejected', error: null });
   } catch (e) {
     console.error(`[sales] no se pudo aplicar la decisión de la solicitud ${idRequest} en SAP:`, e);
