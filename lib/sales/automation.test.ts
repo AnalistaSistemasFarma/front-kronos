@@ -4,7 +4,7 @@ vi.mock('../purchases/authorization', () => ({ companySap: vi.fn() }));
 vi.mock('../requests-general/createGeneralRequest', () => ({ createGeneralRequest: vi.fn() }));
 vi.mock('../workflow-sap/engine', () => ({ runSapExecutors: vi.fn() }));
 vi.mock('./flow', () => ({ simulateDraft: vi.fn() }));
-import { candidatesFilter, cronFor, parseUserSigns, summaryText, validateConfig } from './automation';
+import { candidatesFilter, cronFor, parseUserSigns, represadoOf, summaryText, validateConfig } from './automation';
 
 describe('automatización · reglas puras', () => {
   it('filtro de candidatos: borradores de pedido abiertos en B del usuario de la integración', () => {
@@ -38,5 +38,34 @@ describe('automatización · reglas puras', () => {
     expect(summaryText({ simulacion: true, candidatos: 3, enviados: 0, simulados: 3, errores: 0 })).toBe('Simulación · 3 borrador(es) nuevos: 3 simulado(s).');
     expect(summaryText({ simulacion: false, candidatos: 2, enviados: 1, simulados: 0, errores: 1 })).toBe('2 borrador(es) nuevos: 1 pasado(s) al flujo, 1 con error.');
     expect(summaryText({ omitido: 'La automatización está pausada.', simulacion: true, candidatos: 0, enviados: 0, simulados: 0, errores: 0 })).toBe('Sin procesar: La automatización está pausada.');
+  });
+});
+
+describe('automatización · represados (2026-11-05)', () => {
+  it('error al pasar al flujo (p. ej. «Revisar dirección») → represado, reintentar el envío', () => {
+    expect(represadoOf({ estado: 'error', error: 'Revisar dirección: el borrador 897 no trae dirección de envío' })).toEqual({
+      accion: 'reenviar',
+      mensaje: 'Revisar dirección: el borrador 897 no trae dirección de envío',
+    });
+  });
+  it('solicitud creada pero falló el pedido (publish_error) → represado, reintentar el pedido', () => {
+    expect(represadoOf({ estado: 'enviado', estado_flujo: 'publish_error', error_flujo: `Unexpected token 'C', "COP" is not valid JSON` })).toEqual({
+      accion: 'pedido',
+      mensaje: `Unexpected token 'C', "COP" is not valid JSON`,
+    });
+    expect(represadoOf({ estado: 'enviado', estado_flujo: 'publish_error', error_flujo: null })?.mensaje).toBe('No se pudo crear el pedido en SAP.');
+  });
+  it('solicitud en curso con una Tarea SAP en error (10154 / 901) → represado, reintentar la tarea', () => {
+    expect(represadoOf({ estado: 'enviado', estado_flujo: 'pending', error_tarea: `[sap:error] Unexpected token 'C', "COP" is not valid JSON` })).toEqual({
+      accion: 'tarea',
+      mensaje: `Tarea SAP en error: Unexpected token 'C', "COP" is not valid JSON`,
+    });
+    expect(represadoOf({ estado: 'enviado', estado_flujo: 'approved', error_tarea: '[sap:error] x' })).toBeNull();
+  });
+  it('en curso, con pedido, simulado o descartado → no está represado', () => {
+    expect(represadoOf({ estado: 'enviado', estado_flujo: 'pending' })).toBeNull();
+    expect(represadoOf({ estado: 'enviado', estado_flujo: 'approved' })).toBeNull();
+    expect(represadoOf({ estado: 'simulado' })).toBeNull();
+    expect(represadoOf({ estado: 'descartado', error: 'x' })).toBeNull();
   });
 });

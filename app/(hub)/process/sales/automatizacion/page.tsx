@@ -5,7 +5,7 @@ import Link from 'next/link';
 import {
   Alert, Anchor, Badge, Breadcrumbs, Button, Card, Checkbox, Group, Loader, NumberInput, Select, SimpleGrid, Stack, Switch, Table, Tabs, Text, TextInput, Title,
 } from '@mantine/core';
-import { IconAlertTriangle, IconChevronRight, IconPlayerPlay, IconRobot, IconSearch, IconTestPipe, IconSend } from '@tabler/icons-react';
+import { IconAlertTriangle, IconChevronRight, IconPlayerPlay, IconRefresh, IconRobot, IconSearch, IconTestPipe, IconSend } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 
 /**
@@ -24,6 +24,8 @@ type Doc = {
   id: number; doc_entry: number; doc_num: number | null; card_code: string | null; card_name: string | null; doc_total: number | null;
   estado: string; destino: string | null; detalle: string | null; error: string | null; id_request_general: number | null;
   intentos: number; updated_at: string; estado_flujo: string | null; order_doc_entry: number | null; error_flujo: string | null;
+  /** «Represado»: falló el paso al flujo / «Revisar dirección» ('reenviar'), la creación del pedido ('pedido') u otra Tarea SAP ('tarea'). */
+  represado: { accion: 'reenviar' | 'pedido' | 'tarea'; mensaje: string } | null;
 };
 type Run = { id: number; origen: string; inicio: string; fin: string | null; simulacion: boolean; candidatos: number; enviados: number; simulados: number; errores: number; detalle: string | null };
 type Pending = { DocEntry: number; DocNum: number | null; CardCode: string; CardName: string; DocTotal: number; DocDate: string };
@@ -46,6 +48,7 @@ const FLUJO: Record<string, { label: string; color: string }> = {
   cancelled: { label: 'Cancelada', color: 'gray' },
 };
 const DESTINO: Record<string, string> = { PEDIDO: 'Pedido directo', AE: 'Extracupo', AP: 'Precio' };
+const REINTENTO: Record<string, string> = { reenviar: 'Reintentar el paso al flujo', pedido: 'Reintentar la creación del pedido', tarea: 'Reintentar la Tarea SAP que quedó en error' };
 
 async function call(method: string, body?: unknown, qs = '') {
   const res = await fetch(`/api/sales/automatizacion${qs}`, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined, cache: 'no-store' });
@@ -96,7 +99,29 @@ export default function VentasAutomatizacionPage() {
         setSimRes((p) => ({ ...p, ...m }));
       }
       await load(companyId);
-      if (accion === 'crear') setPending((p) => (p ? p.filter((x) => !(docEntries ?? []).includes(x.DocEntry)) : p));
+      if (accion === 'crear') {
+        // Solo salen de la lista los que pasaron (u omitió); los que fallaron quedan «Represado» con su error.
+        const fuera = new Set<number>((r.resultados ?? []).filter((x: { estado: string }) => x.estado !== 'error').map((x: { docEntry: number }) => Number(x.docEntry)));
+        setPending((p) => (p ? p.filter((x) => !fuera.has(x.DocEntry)) : p));
+        // El pedido se crea en segundo plano (Tareas SAP): se vuelve a leer para mostrar si quedó represado.
+        const cid = companyId;
+        window.setTimeout(() => { load(cid); }, 8000);
+      }
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const reintentar = async (d: Doc) => {
+    if (!companyId) return;
+    setBusy(`reintentar-${d.id}`);
+    try {
+      const r = await call('POST', { companyId, accion: 'reintentar', idDoc: d.id });
+      if (r.ok) toast.success(r.detalle ?? 'Reintentado');
+      else toast.error(r.detalle ?? 'Sigue represado');
+      await load(companyId);
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -147,6 +172,26 @@ export default function VentasAutomatizacionPage() {
               </Button>
             </Group>
           </Group>
+          {data.docs.some((d) => d.represado) && (
+            <Alert color='red' variant='light' mt='md' icon={<IconAlertTriangle size={18} />}
+              title={`${data.docs.filter((d) => d.represado).length} borrador(es) represado(s): no siguieron su camino`}>
+              <Stack gap={6}>
+                {data.docs.filter((d) => d.represado).map((d) => (
+                  <Group key={d.id} justify='space-between' wrap='nowrap' gap='sm' align='flex-start'>
+                    <Text size='sm' style={{ minWidth: 0 }}>
+                      <b>Borrador {d.doc_entry}</b>{d.card_name ? ` · ${d.card_name}` : ''}
+                      {d.id_request_general ? <> · <Anchor component={Link} href={`/process/request-general/view-request?id=${d.id_request_general}`} size='sm'>Solicitud #{d.id_request_general}</Anchor></> : null}
+                      {' — '}{d.represado!.mensaje}
+                    </Text>
+                    <Button size='compact-sm' color='red' leftSection={<IconRefresh size={14} />} loading={busy === `reintentar-${d.id}`} disabled={busy != null && busy !== `reintentar-${d.id}`}
+                      title={REINTENTO[d.represado!.accion]} onClick={() => reintentar(d)} style={{ flexShrink: 0 }}>
+                      Reintentar
+                    </Button>
+                  </Group>
+                ))}
+              </Stack>
+            </Alert>
+          )}
           {cfg?.simulacion && (
             <Alert color='yellow' variant='light' mt='md' icon={<IconTestPipe size={18} />}>
               Modo simulación: la automatización solo registra qué haría con cada borrador; no crea solicitudes ni toca SAP. Desde «Asistida» puede pasar al flujo los que elija.
@@ -169,7 +214,7 @@ export default function VentasAutomatizacionPage() {
                 ['En curso en el flujo', k.en_flujo, 'yellow'],
                 ['Con pedido', k.con_pedido, 'green'],
                 ['Simulados', k.simulados, 'gray'],
-                ['Con error', k.con_error, 'red'],
+                ['Represados', k.represados, 'red'],
               ].map(([label, n, color]) => (
                 <Card key={String(label)} withBorder radius='md' p='md'>
                   <Text size='sm' c='dimmed'>{label}</Text>
@@ -197,7 +242,9 @@ export default function VentasAutomatizacionPage() {
                           <Table.Td><Text size='sm'>{d.card_code}</Text><Text size='xs' c='dimmed'>{d.card_name}</Text></Table.Td>
                           <Table.Td>{money(d.doc_total)}</Table.Td>
                           <Table.Td>
-                            <Badge color={ESTADO[d.estado]?.color ?? 'gray'} variant='light'>{ESTADO[d.estado]?.label ?? d.estado}</Badge>
+                            {d.represado
+                              ? <Badge color='red' variant='filled'>Represado</Badge>
+                              : <Badge color={ESTADO[d.estado]?.color ?? 'gray'} variant='light'>{ESTADO[d.estado]?.label ?? d.estado}</Badge>}
                             {d.destino && <Text size='xs' c='dimmed'>{DESTINO[d.destino] ?? d.destino}</Text>}
                           </Table.Td>
                           <Table.Td>
@@ -206,10 +253,16 @@ export default function VentasAutomatizacionPage() {
                             {d.order_doc_entry && <Text size='xs' c='dimmed'>Pedido {d.order_doc_entry}</Text>}
                           </Table.Td>
                           <Table.Td style={{ maxWidth: 320 }}>
-                            <Text size='xs' c={d.error || d.error_flujo ? 'red' : undefined}>{d.error ?? d.error_flujo ?? d.detalle ?? ''}</Text>
+                            <Text size='xs' c={d.represado || d.error || d.error_flujo ? 'red' : undefined}>{d.represado?.mensaje ?? d.error ?? d.error_flujo ?? d.detalle ?? ''}</Text>
                           </Table.Td>
                           <Table.Td><Text size='xs'>{fmt(d.updated_at)}</Text></Table.Td>
                           <Table.Td>
+                            {d.represado && (
+                              <Button size='compact-xs' color='red' variant='light' leftSection={<IconRefresh size={12} />} loading={busy === `reintentar-${d.id}`}
+                                disabled={busy != null && busy !== `reintentar-${d.id}`} title={REINTENTO[d.represado.accion]} onClick={() => reintentar(d)}>
+                                Reintentar
+                              </Button>
+                            )}
                             {(d.estado === 'error' || d.estado === 'simulado') && (
                               <Button size='compact-xs' variant='subtle' color='gray' onClick={async () => { await call('POST', { companyId, accion: 'descartar', idDoc: d.id }).catch((e) => toast.error(e.message)); load(companyId); }}>
                                 Descartar
@@ -293,7 +346,7 @@ export default function VentasAutomatizacionPage() {
                             <Table.Td style={{ maxWidth: 360 }}>
                               {s ? (
                                 <Text size='xs' c={s.error ? 'red' : undefined}>
-                                  {s.estado === 'enviado' ? `Pasado al flujo · ${s.detalle ?? ''}` : s.error ?? `${s.destino ? `${DESTINO[s.destino] ?? s.destino}: ` : ''}${s.detalle ?? ''}`}
+                                  {s.estado === 'enviado' ? `Pasado al flujo · ${s.detalle ?? ''}` : s.error ? `Represado: ${s.error}` : `${s.destino ? `${DESTINO[s.destino] ?? s.destino}: ` : ''}${s.detalle ?? ''}`}
                                 </Text>
                               ) : (
                                 <Text size='xs' c='dimmed'>—</Text>

@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
   posts: [] as string[],
   patches: [] as Record<string, unknown>[],
   taskRow: { id_request_general: 10117, is_authorization: true } as Record<string, unknown> | null,
+  updates: [] as string[],
 }));
 
 vi.mock('../../dbconfig.js', () => ({ default: {} }));
@@ -19,6 +20,7 @@ vi.mock('mssql', () => {
     const r = {
       input: () => r,
       query: async (q: string) =>
+        (/UPDATE dbo\.sales_authorization SET/.test(q) && h.updates.push(q), false) ||
         /FROM task_request_general/.test(q)
           ? { recordset: h.taskRow ? [h.taskRow] : [] }
           : /FROM dbo\.sales_authorization/.test(q)
@@ -45,14 +47,18 @@ vi.mock('../sap/serviceLayer', async () => {
     },
     sapPost: async (_s: unknown, path: string) => {
       h.posts.push(path);
-      if (path === 'SBOBobService_GetSystemCurrency') return 'USD';
-      if (path === 'SBOBobService_GetLocalCurrency') return 'COP';
-      if (path === 'SBOBobService_GetCurrencyRate') {
-        if (h.rateMissing) throw new actual.SapError('Update the exchange rate', 400, '{"error":{"code":-4006,"message":{"value":"Update the exchange rate"}}}');
-        return 3221.19;
-      }
+      if (path === 'CompanyService_GetAdminInfo') return { LocalCurrency: 'COP', SystemCurrency: 'USD' };
       if (path === 'Orders') return { DocEntry: 2790, DocNum: 2790 };
       return {};
+    },
+    // El Service Layer responde la tasa en texto plano («3221.190000»).
+    sapPostText: async (_s: unknown, path: string) => {
+      h.posts.push(path);
+      if (path === 'SBOBobService_GetCurrencyRate') {
+        if (h.rateMissing) throw new actual.SapError('Update the exchange rate', 400, '{"error":{"code":-4006,"message":{"value":"Update the exchange rate"}}}');
+        return '3221.190000';
+      }
+      return '';
     },
   };
 });
@@ -67,6 +73,7 @@ beforeEach(() => {
   h.rateMissing = true;
   h.posts = [];
   h.patches = [];
+  h.updates = [];
   h.taskRow = { id_request_general: 10117, is_authorization: true };
   h.draft = {
     DocEntry: 878,
@@ -88,6 +95,7 @@ describe('Ventas · bloqueo por TRM', () => {
     const r = await createOrder(10117, 'server');
     expect(r).toEqual({ ok: false, error: MSG });
     expect(h.posts).not.toContain('Orders');
+    expect(h.updates).toHaveLength(1); // queda publish_error → «Represado» en el panel
   });
   it('con TRM cargada, crea el pedido', async () => {
     h.rateMissing = false;
@@ -102,6 +110,7 @@ describe('Ventas · bloqueo por TRM', () => {
     expect(r.ok).toBe(false);
     expect(!r.ok && r.error).toMatch(/^Revisar dirección/);
     expect(h.posts).not.toContain('Orders');
+    expect(h.updates).toHaveLength(1); // queda publish_error → «Represado» en el panel
   });
   it('la aprobación de la tarea de autorización se bloquea sin TRM', async () => {
     expect(await salesApprovalTrmBlock(555)).toBe(MSG);

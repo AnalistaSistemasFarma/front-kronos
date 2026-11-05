@@ -1,4 +1,4 @@
-import { sapPost, SapError, type SapSession } from '../sap/serviceLayer';
+import { sapPost, sapPostText, SapError, type SapSession } from '../sap/serviceLayer';
 
 /**
  * Regla de negocio (Nicolás Rivera, 2026-11-05): «si la TRM del día no está cargada en
@@ -35,14 +35,29 @@ export function isMissingRateError(e: unknown): boolean {
   return /update the exchange rate/i.test(`${e.message} ${e.detail ?? ''}`);
 }
 
+/**
+ * Tasa que devuelve SBOBobService_GetCurrencyRate. El Service Layer la manda como TEXTO
+ * PLANO (`3221.190000`, verificado en pruebas OLP 2026-11-05); se toleran comillas o un
+ * cuerpo JSON numérico por si una versión de SAP lo cambia. NaN si no es un número. PURA.
+ */
+export function parseRate(body: unknown): number {
+  if (typeof body === 'number') return body;
+  const t = String(body ?? '').trim().replace(/^"(.*)"$/, '$1').trim();
+  if (!t || !/^[-\d.]+$/.test(t)) return NaN;
+  return Number(t); // «1.2.3» o «-» → NaN
+}
+
+/**
+ * Monedas de la empresa. Se leen de CompanyService_GetAdminInfo (POST; responde JSON con
+ * LocalCurrency y SystemCurrency). NO se usan SBOBobService_GetSystemCurrency /
+ * GetLocalCurrency: responden texto plano (`USD`, `COP`) y rompían con «"COP" is not valid
+ * JSON» (sales_authorization 31, borrador 903, pruebas 2026-11-05).
+ */
 async function currenciesOf(sap: SapSession, idCompany: number): Promise<{ system: string; local: string }> {
   const hit = currencyCache.get(idCompany);
   if (hit && hit.exp > Date.now()) return hit;
-  const [system, local] = await Promise.all([
-    sapPost<string>(sap, 'SBOBobService_GetSystemCurrency', {}),
-    sapPost<string>(sap, 'SBOBobService_GetLocalCurrency', {}),
-  ]);
-  const v = { system: String(system ?? '').trim(), local: String(local ?? '').trim(), exp: Date.now() + CURRENCY_TTL_MS };
+  const info = await sapPost<{ LocalCurrency?: string | null; SystemCurrency?: string | null }>(sap, 'CompanyService_GetAdminInfo', {});
+  const v = { system: String(info?.SystemCurrency ?? '').trim(), local: String(info?.LocalCurrency ?? '').trim(), exp: Date.now() + CURRENCY_TTL_MS };
   currencyCache.set(idCompany, v);
   return v;
 }
@@ -59,7 +74,7 @@ export async function trmBlock(sap: SapSession, idCompany: number, isoDate: stri
   const { system, local } = await currenciesOf(sap, idCompany);
   if (!system || system === local) return null;
   try {
-    const rate = Number(await sapPost<number>(sap, 'SBOBobService_GetCurrencyRate', { Currency: system, Date: isoDate }));
+    const rate = parseRate(await sapPostText(sap, 'SBOBobService_GetCurrencyRate', { Currency: system, Date: isoDate }));
     if (!Number.isFinite(rate) || rate <= 0) return trmMissingMessage(isoDate);
     rateCache.set(key, Date.now() + RATE_TTL_MS);
     return null;

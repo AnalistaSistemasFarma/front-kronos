@@ -11,6 +11,7 @@ import {
   getConfig,
   panelData,
   parseUserSigns,
+  retryDoc,
   runAutomation,
   saveConfig,
   summaryText,
@@ -23,7 +24,8 @@ import {
  *  GET  ?companyId            -> empresas, configuración, KPIs, registro y corridas
  *  GET  ?companyId&pendientes -> borradores pendientes en SAP (mismo filtro que la corrida)
  *  PUT  { companyId, config } -> guarda la configuración y su tarea del programador
- *  POST { companyId, accion: 'ejecutar' | 'simular' | 'crear' | 'descartar' | 'reactivar', docEntries?, idDoc? }
+ *  POST { companyId, accion: 'ejecutar' | 'simular' | 'crear' | 'descartar' | 'reactivar' | 'reintentar', docEntries?, idDoc? }
+ *       'reintentar' (idDoc): repite la acción que falló en un borrador «Represado» (pedido o paso al flujo).
  */
 async function ctx(request: NextRequest, companyIdRaw: unknown) {
   const session = await getServerSession(authOptions);
@@ -106,6 +108,12 @@ export async function POST(request: NextRequest) {
     if (accion === 'descartar' || accion === 'reactivar') {
       const ok = await docAction(c.companyId, Number(body.idDoc), accion, c.userId ?? c.email);
       return ok ? NextResponse.json({ ok: true }) : NextResponse.json({ error: 'No se pudo cambiar ese registro.' }, { status: 409 });
+    }
+    if (accion === 'reintentar') {
+      const idDoc = Number(body.idDoc);
+      if (!Number.isInteger(idDoc) || idDoc <= 0) return NextResponse.json({ error: 'Falta el borrador a reintentar.' }, { status: 400 });
+      const r = await retryDoc(c.companyId, idDoc, c.userId);
+      return NextResponse.json({ ...r, resumen: r.detalle });
     }
     if (accion !== 'ejecutar' && accion !== 'simular' && accion !== 'crear') {
       return NextResponse.json({ error: 'Acción no válida.' }, { status: 400 });

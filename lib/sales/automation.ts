@@ -58,6 +58,46 @@ export interface DocResult {
   idRequest?: number;
 }
 
+/**
+ * «Represado» (Nicolás Rivera, 2026-11-05: «si da error, debería quedarse represada»): el
+ * borrador no siguió su camino y queda visible en el panel con el error y «Reintentar».
+ *  - 'reenviar': falló el paso al flujo (antes de crear la solicitud), incluida la
+ *    validación «Revisar dirección» → se vuelve a pasar el borrador al flujo.
+ *  - 'pedido': la solicitud existe pero falló la creación del pedido (publish_error) →
+ *    se reintentan sus Tareas SAP (lo mismo que «Reintentar» en la oferta).
+ *  - 'tarea': la solicitud existe y otra Tarea SAP quedó en error (p. ej. pasar a
+ *    extracupo, solicitud 10154 / borrador 901: «"COP" is not valid JSON») → igual,
+ *    se reintentan sus Tareas SAP; al pasar, aparece la autorización.
+ * Usa los datos existentes (sales_automation_doc + sales_authorization). PURA.
+ */
+export type RetryKind = 'reenviar' | 'pedido' | 'tarea';
+export const SAP_TASK_ERROR_PREFIX = '[sap:error]';
+export function represadoOf(d: {
+  estado?: string | null;
+  error?: string | null;
+  estado_flujo?: string | null;
+  error_flujo?: string | null;
+  /** resolution de una Tarea SAP abierta en error («[sap:error] …»), si la hay. */
+  error_tarea?: string | null;
+}): { accion: RetryKind; mensaje: string } | null {
+  if (d.estado === 'error') return { accion: 'reenviar', mensaje: d.error || 'No se pudo pasar el borrador al flujo.' };
+  if (d.estado !== 'enviado') return null;
+  if (d.estado_flujo === 'publish_error') return { accion: 'pedido', mensaje: d.error_flujo || 'No se pudo crear el pedido en SAP.' };
+  if ((d.estado_flujo === 'pending' || d.estado_flujo === 'publishing') && d.error_tarea) {
+    const msg = d.error_tarea.startsWith(SAP_TASK_ERROR_PREFIX) ? d.error_tarea.slice(SAP_TASK_ERROR_PREFIX.length).trim() : d.error_tarea.trim();
+    return { accion: 'tarea', mensaje: `Tarea SAP en error: ${msg || 'sin detalle'}` };
+  }
+  return null;
+}
+
+/** Primera Tarea SAP abierta (id_status 4) en error de la solicitud d (columna error_tarea). En LIKE el «[» se escapa. */
+const ERROR_TAREA_SQL = `(SELECT TOP 1 trg.resolution FROM dbo.task_request_general trg
+    WHERE trg.id_request_general = d.id_request_general AND trg.id_status = 4 AND trg.resolution LIKE N'[[]sap:error]%' ORDER BY trg.id)`;
+
+/** Condición SQL equivalente a represadoOf (alias d = sales_automation_doc, sa = sales_authorization). */
+const REPRESADO_SQL = `(d.estado = N'error' OR (d.estado = N'enviado' AND (sa.status = N'publish_error'
+    OR (sa.status IN (N'pending', N'publishing') AND ${ERROR_TAREA_SQL} IS NOT NULL))))`;
+
 const pool = () => sql.connect(sqlConfig);
 const friendly = (e: unknown) => (e instanceof SapError ? e.friendly : e instanceof Error ? e.message : String(e));
 
@@ -419,6 +459,38 @@ export async function docAction(idCompany: number, idDoc: number, accion: 'desca
   return (r.rowsAffected[0] ?? 0) === 1;
 }
 
+/**
+ * «Reintentar» un borrador represado desde el panel: repite SOLO la acción que falló.
+ *  - 'pedido'   → runSapExecutors(solicitud, 'retry'), igual que /api/sales/retry (idempotente).
+ *  - 'reenviar' → vuelve a pasar el borrador al flujo (corrida asistida de ese borrador).
+ */
+export async function retryDoc(idCompany: number, idDoc: number, usuario: string | null): Promise<{ ok: boolean; accion?: RetryKind; detalle: string }> {
+  const p = await pool();
+  const r = await p.request().input('c', sql.Int, idCompany).input('id', sql.Int, idDoc).query(`
+    SELECT TOP 1 d.doc_entry, d.estado, d.error, d.id_request_general, sa.status AS estado_flujo, sa.error AS error_flujo,
+           ${ERROR_TAREA_SQL} AS error_tarea
+    FROM dbo.sales_automation_doc d LEFT JOIN dbo.sales_authorization sa ON sa.id_request_general = d.id_request_general
+    WHERE d.id = @id AND d.id_company = @c;`);
+  const row = r.recordset[0];
+  if (!row) return { ok: false, detalle: 'No se encontró ese borrador en el registro.' };
+  const rep = represadoOf(row);
+  if (!rep) return { ok: false, detalle: 'Ese borrador ya no está represado; actualice el panel.' };
+  if (rep.accion === 'pedido' || rep.accion === 'tarea') {
+    const idRequest = Number(row.id_request_general);
+    const res = await runSapExecutors(idRequest, 'retry');
+    const after = await p.request().input('r', sql.Int, idRequest).query(`SELECT TOP 1 status, error, order_doc_entry FROM dbo.sales_authorization WHERE id_request_general = @r;`);
+    const sa = after.recordset[0];
+    if (sa?.status === 'approved') return { ok: true, accion: 'pedido', detalle: `Pedido creado en SAP${sa.order_doc_entry ? ` (DocEntry ${sa.order_doc_entry})` : ''} · solicitud #${idRequest}.` };
+    if (sa?.status === 'publish_error') return { ok: false, accion: rep.accion, detalle: sa.error || 'Sigue sin crearse el pedido.' };
+    return { ok: res.errors === 0, accion: rep.accion, detalle: res.errors ? `Solicitud #${idRequest}: una Tarea SAP sigue en error.` : `Solicitud #${idRequest}: Tareas SAP reintentadas.` };
+  }
+  const s = await runAutomation({ idCompany, origen: 'asistida', modo: 'crear', usuario, docEntries: [Number(row.doc_entry)] });
+  const res = s.resultados.find((x) => Number(x.docEntry) === Number(row.doc_entry));
+  if (!res) return { ok: false, accion: 'reenviar', detalle: s.omitido || `El borrador ${row.doc_entry} ya no está pendiente en SAP (no está en borrador abierto o ya pasó al flujo).` };
+  if (res.estado === 'enviado') return { ok: true, accion: 'reenviar', detalle: `Pasado al flujo · ${res.detalle ?? ''}`.trim() };
+  return { ok: false, accion: 'reenviar', detalle: res.error || res.detalle || 'No se pudo pasar al flujo.' };
+}
+
 /** Datos del panel: KPIs, registro y corridas. */
 export async function panelData(idCompany: number) {
   const p = await pool();
@@ -426,20 +498,24 @@ export async function panelData(idCompany: number) {
     SELECT
       (SELECT COUNT(*) FROM dbo.sales_automation_doc WHERE id_company = @c AND estado = N'enviado' AND CAST(updated_at AS date) = CAST(sysutcdatetime() AS date)) AS enviados_hoy,
       (SELECT COUNT(*) FROM dbo.sales_automation_doc WHERE id_company = @c AND estado = N'error') AS con_error,
+      (SELECT COUNT(*) FROM dbo.sales_automation_doc d LEFT JOIN dbo.sales_authorization sa ON sa.id_request_general = d.id_request_general
+         WHERE d.id_company = @c AND ${REPRESADO_SQL}) AS represados,
       (SELECT COUNT(*) FROM dbo.sales_automation_doc WHERE id_company = @c AND estado = N'simulado') AS simulados,
       (SELECT COUNT(*) FROM dbo.sales_authorization sa WHERE sa.id_company = @c AND sa.status = N'pending'
          AND EXISTS (SELECT 1 FROM dbo.sales_automation_doc d WHERE d.id_company = sa.id_company AND d.doc_entry = sa.doc_entry)) AS en_flujo,
       (SELECT COUNT(*) FROM dbo.sales_authorization sa WHERE sa.id_company = @c AND sa.status = N'approved'
          AND EXISTS (SELECT 1 FROM dbo.sales_automation_doc d WHERE d.id_company = sa.id_company AND d.doc_entry = sa.doc_entry)) AS con_pedido;
     SELECT TOP 200 d.id, d.doc_entry, d.doc_num, d.card_code, d.card_name, d.doc_total, d.estado, d.destino, d.detalle, d.error,
-           d.id_request_general, d.intentos, d.updated_at, sa.status AS estado_flujo, sa.order_doc_entry, sa.error AS error_flujo
+           d.id_request_general, d.intentos, d.updated_at, sa.status AS estado_flujo, sa.order_doc_entry, sa.error AS error_flujo,
+           ${ERROR_TAREA_SQL} AS error_tarea
     FROM dbo.sales_automation_doc d
     LEFT JOIN dbo.sales_authorization sa ON sa.id_request_general = d.id_request_general
-    WHERE d.id_company = @c ORDER BY d.updated_at DESC;
+    WHERE d.id_company = @c ORDER BY CASE WHEN ${REPRESADO_SQL} THEN 0 ELSE 1 END, d.updated_at DESC;
     SELECT TOP 50 id, origen, inicio, fin, simulacion, candidatos, enviados, simulados, errores, detalle
     FROM dbo.sales_automation_run WHERE id_company = @c ORDER BY inicio DESC;`);
   const sets = r.recordsets as unknown as Record<string, unknown>[][];
-  return { kpis: sets[0][0], docs: sets[1], runs: sets[2] };
+  const docs = sets[1].map((d) => ({ ...d, represado: represadoOf(d as Parameters<typeof represadoOf>[0]) }));
+  return { kpis: sets[0][0], docs, runs: sets[2] };
 }
 
 /** job_type 'ventas_automatizar' (lib/scheduler/handlers.js). Payload: { id_company }. */

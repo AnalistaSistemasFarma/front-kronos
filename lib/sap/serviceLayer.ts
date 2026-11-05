@@ -293,6 +293,27 @@ export async function sapPost<T = unknown>(
 }
 
 /**
+ * POST a una acción del Service Layer que responde TEXTO PLANO (`text/plain`), no JSON.
+ * Ej.: SBOBobService_GetSystemCurrency → `USD`, SBOBobService_GetLocalCurrency → `COP`,
+ * SBOBobService_GetCurrencyRate → `3221.190000` (verificado en pruebas OLP, 2026-11-05).
+ * Con `sapPost` esas respuestas fallan en JSON.parse («"COP" is not valid JSON»).
+ */
+export async function sapPostText(session: SapSession, path: string, body: unknown): Promise<string> {
+  const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
+  const response = await sapFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: `B1SESSION=${session.sessionId}` },
+    body: JSON.stringify(body),
+  });
+  if (response.status === 401) throw new SapError('Sesion SAP expirada o invalida', 401);
+  const text = await response.text().catch(() => '');
+  if (!response.ok) {
+    throw new SapError(sapErrorMessage(`SAP POST ${path} fallo (${response.status})`, text), response.status, text);
+  }
+  return text;
+}
+
+/**
  * PATCH generico al Service Layer (ej. editar un UDO o agregar lineas a una
  * coleccion hija). SAP responde 204 No Content en exito.
  *
