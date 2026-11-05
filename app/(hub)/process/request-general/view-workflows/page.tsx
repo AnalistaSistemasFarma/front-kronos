@@ -230,6 +230,7 @@ function ViewWorkFlowPage() {
   const [linkedFlowChecked, setLinkedFlowChecked] = useState(false);
   const [observersModalOpened, setObserversModalOpened] = useState(false);
   const [observers, setObservers] = useState<string[]>([]);
+  const [observerScopes, setObserverScopes] = useState<Record<string, 'all' | 'department'>>({});
   const [preparersModalOpened, setPreparersModalOpened] = useState(false);
   const [preparers, setPreparers] = useState<string[]>([]);
   const [validatorsModalOpened, setValidatorsModalOpened] = useState(false);
@@ -492,9 +493,9 @@ if (session?.user?.id) return session.user.id as unknown as number;
         }
         if (data.processCategories) {
           setLinkedProcessOptions(
-            data.processCategories.map((p: { id_process: number; process: string }) => ({
+            data.processCategories.map((p: { id_process: number; process: string; company?: string | null }) => ({
               value: p.id_process.toString(),
-              label: p.process,
+              label: p.company ? `${p.process} — ${p.company}` : p.process,
             }))
           );
         }
@@ -1208,6 +1209,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
       if (res.ok) {
         const data = await res.json();
         setObservers(Array.isArray(data.observers) ? data.observers : []);
+        setObserverScopes(data.scopes && typeof data.scopes === 'object' ? data.scopes : {});
       }
     } catch (err) {
       console.error('Error al cargar observadores:', err);
@@ -1250,7 +1252,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            observers,
+            observers: observers.map((id) => ({ id, scope: observerScopes[id] || 'all' })),
             id_process_category: workflow.id,
           }),
         });
@@ -2758,21 +2760,38 @@ if (session?.user?.id) return session.user.id as unknown as number;
             />
 
             {observers.length > 0 && (
-              <Group gap={6}>
+              <Stack gap={6}>
+                <Text size='sm' fw={500}>
+                  Alcance de cada observador
+                </Text>
                 {observers.map((id) => {
                   const u = users.find((x) => x.value === id);
                   return (
-                    <Badge
-                      key={id}
-                      variant='light'
-                      color='blue'
-                      leftSection={<IconUser size={12} />}
-                    >
-                      {u?.label ?? id}
-                    </Badge>
+                    <Group key={id} justify='space-between' wrap='nowrap' gap='sm'>
+                      <Badge variant='light' color='blue' leftSection={<IconUser size={12} />}>
+                        {u?.label ?? id}
+                      </Badge>
+                      <Select
+                        size='xs'
+                        w={280}
+                        allowDeselect={false}
+                        data={[
+                          { value: 'all', label: 'Todas las solicitudes del proceso' },
+                          { value: 'department', label: 'Solo las solicitudes de su departamento' },
+                        ]}
+                        value={observerScopes[id] || 'all'}
+                        onChange={(v) =>
+                          setObserverScopes((prev) => ({
+                            ...prev,
+                            [id]: v === 'department' ? 'department' : 'all',
+                          }))
+                        }
+                        comboboxProps={{ withinPortal: true }}
+                      />
+                    </Group>
                   );
                 })}
-              </Group>
+              </Stack>
             )}
 
             <Group justify='flex-end' gap='sm' mt='md'>

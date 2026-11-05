@@ -494,9 +494,9 @@ function RequestBoard() {
 
       if (data.processCategories && data.processCategories.length > 0) {
         setProcessWF(
-          data.processCategories.map((p: { id_process: number; process: string }) => ({
+          data.processCategories.map((p: { id_process: number; process: string; company?: string | null }) => ({
             value: p.id_process.toString(),
-            label: p.process,
+            label: p.company ? `${p.process} — ${p.company}` : p.process,
           }))
         );
       } else {
@@ -855,9 +855,9 @@ function RequestBoard() {
         }
         if (data.processCategories && Array.isArray(data.processCategories)) {
           setProcessWF(
-            data.processCategories.map((sub: { id_process: number; process: string }) => ({
+            data.processCategories.map((sub: { id_process: number; process: string; company?: string | null }) => ({
               value: sub.id_process.toString(),
-              label: sub.process,
+              label: sub.company ? `${sub.process} — ${sub.company}` : sub.process,
             }))
           );
         } else {
