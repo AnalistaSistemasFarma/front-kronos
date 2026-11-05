@@ -59,25 +59,51 @@ export function normalizarCelda(v: unknown): Celda {
   return t.length > MAX_TEXTO_CELDA ? t.slice(0, MAX_TEXTO_CELDA) : t;
 }
 
-const RE_NUMERO = /^-?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?$|^-?\d+(?:[.,]\d+)?$/;
-const RE_FECHA = /^\d{4}-\d{2}-\d{2}(?:[T ][\d:.]+Z?)?$/;
+// Expresiones simples (sin cuantificadores anidados: regla security/detect-unsafe-regex).
+const RE_SOLO_NUMERO = /^-?[\d.,]+$/;
+const RE_FECHA_INICIO = /^\d{4}-\d{2}-\d{2}/;
+const RE_HORA = /^[T ][\d:.]*Z?$/;
+
+function esFecha(t: string): boolean {
+  if (t.length > 30 || !RE_FECHA_INICIO.test(t)) return false;
+  const resto = t.slice(10);
+  return resto === '' || RE_HORA.test(resto);
+}
+
+/** Grupos de miles bien formados: «1.234.567» (el primero de 1–3 dígitos, los demás de 3). */
+function milesValidos(partes: string[]): boolean {
+  return partes[0].length >= 1 && partes[0].length <= 3 && partes.slice(1).every((p) => p.length === 3);
+}
 
 /** Número desde texto con separadores (1.234,56 · 1,234.56 · 12,5). Null si no lo es. */
 export function textoANumero(t: string): number | null {
   const s = t.trim().replace(/\s/g, '').replace(/^\$/, '');
-  if (!RE_NUMERO.test(s)) return null;
+  if (!s || s.length > 30 || !RE_SOLO_NUMERO.test(s)) return null;
+  const sinSigno = s.replace(/^-/, '');
+  if (!/\d/.test(sinSigno) || /^[.,]|[.,]$/.test(sinSigno)) return null;
   const ultimoPunto = s.lastIndexOf('.');
   const ultimaComa = s.lastIndexOf(',');
   let normal = s;
   if (ultimoPunto >= 0 && ultimaComa >= 0) {
-    normal = ultimaComa > ultimoPunto ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+    // El separador que va de último es el decimal; el otro, de miles.
+    const [miles, decimal] = ultimaComa > ultimoPunto ? ['.', ','] : [',', '.'];
+    const [entera] = sinSigno.split(decimal);
+    if (!milesValidos(entera.split(miles))) return null;
+    normal = s.split(miles).join('').replace(decimal, '.');
   } else if (ultimaComa >= 0) {
-    // Solo comas: decimal si hay 1–2 dígitos después de una sola coma; si no, miles.
-    const partes = s.split(',');
-    normal = partes.length === 2 && partes[1].length <= 2 ? s.replace(',', '.') : s.replace(/,/g, '');
+    // Solo comas: decimal si hay una sola coma con 1–2 dígitos después; si no, miles.
+    const partes = sinSigno.split(',');
+    if (partes.length === 2 && partes[1].length <= 2) normal = s.replace(',', '.');
+    else if (milesValidos(partes)) normal = s.replace(/,/g, '');
+    else return null;
   } else if (ultimoPunto >= 0) {
-    const partes = s.split('.');
-    normal = partes.length > 2 || (partes.length === 2 && partes[1].length === 3 && partes[0].length <= 3) ? s.replace(/\./g, '') : s;
+    const partes = sinSigno.split('.');
+    if (partes.length > 2) {
+      if (!milesValidos(partes)) return null;
+      normal = s.replace(/\./g, '');
+    } else if (partes[1].length === 3 && partes[0].length <= 3 && partes[0] !== '0') {
+      normal = s.replace('.', ''); // «1.500» = mil quinientos (uso colombiano)
+    }
   }
   const n = Number(normal);
   return Number.isFinite(n) ? n : null;
@@ -92,7 +118,7 @@ export function inferirTipo(valores: Celda[]): TipoColumna {
     if (typeof v === 'number') cuenta.numero += 1;
     else if (typeof v === 'boolean') cuenta.booleano += 1;
     else if (typeof v === 'string') {
-      if (RE_FECHA.test(v)) cuenta.fecha += 1;
+      if (esFecha(v)) cuenta.fecha += 1;
       else if (textoANumero(v) !== null) cuenta.numero += 1;
     }
   }
@@ -107,7 +133,7 @@ export function inferirTipo(valores: Celda[]): TipoColumna {
 function convertir(v: Celda, tipo: TipoColumna): Celda {
   if (v === null) return null;
   if (tipo === 'numero' && typeof v === 'string') return textoANumero(v) ?? v;
-  if (tipo === 'fecha' && typeof v === 'string' && RE_FECHA.test(v)) return v.slice(0, 10);
+  if (tipo === 'fecha' && typeof v === 'string' && esFecha(v)) return v.slice(0, 10);
   return v;
 }
 
