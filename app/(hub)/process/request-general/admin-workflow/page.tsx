@@ -465,6 +465,8 @@ function RequestBoard() {
       costo: number;
       centroCosto: string;
       cierraSolicitud: boolean;
+      esFlujoVinculado: boolean;
+      flujoVinculado: string;
     }>
   >([]);
   const [taskForm, setTaskForm] = useState({
@@ -473,12 +475,15 @@ function RequestBoard() {
     costo: '',
     centroCosto: '',
     cierraSolicitud: false,
+    esFlujoVinculado: false,
+    flujoVinculado: '',
   });
 
   const [taskFormKey, setTaskFormKey] = useState(0);
 
   const addTask = () => {
     if (!taskForm.tarea.trim()) return;
+    if (taskForm.esFlujoVinculado && (!taskForm.flujoVinculado || !taskForm.asignado)) return;
 
     setTasks([
       ...tasks,
@@ -489,10 +494,12 @@ function RequestBoard() {
         costo: parseFloat(taskForm.costo) || 0,
         centroCosto: taskForm.centroCosto,
         cierraSolicitud: taskForm.cierraSolicitud,
+        esFlujoVinculado: taskForm.esFlujoVinculado,
+        flujoVinculado: taskForm.esFlujoVinculado ? taskForm.flujoVinculado : '',
       },
     ]);
 
-    setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false });
+    setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false, esFlujoVinculado: false, flujoVinculado: '' });
 
     setTaskFormKey(prev => prev + 1);
   };
@@ -564,9 +571,9 @@ function RequestBoard() {
 
       if (data.processCategories && data.processCategories.length > 0) {
         setProcessWF(
-          data.processCategories.map((p: { id_process: number; process: string }) => ({
+          data.processCategories.map((p: { id_process: number; process: string; company?: string | null }) => ({
             value: p.id_process.toString(),
-            label: p.process,
+            label: p.company ? `${p.process} — ${p.company}` : p.process,
           }))
         );
       } else {
@@ -937,9 +944,9 @@ function RequestBoard() {
         }
         if (data.processCategories && Array.isArray(data.processCategories)) {
           setProcessWF(
-            data.processCategories.map((sub: { id_process: number; process: string }) => ({
+            data.processCategories.map((sub: { id_process: number; process: string; company?: string | null }) => ({
               value: sub.id_process.toString(),
-              label: sub.process,
+              label: sub.company ? `${sub.process} — ${sub.company}` : sub.process,
             }))
           );
         } else {
@@ -1000,6 +1007,7 @@ function RequestBoard() {
         cost: task.costo || 0,
         cost_center: task.centroCosto || null,
         closes_request: task.cierraSolicitud,
+        id_linked_process: task.esFlujoVinculado ? Number(task.flujoVinculado) || null : null,
       }));
 
       console.log('asignados tareas ' + tasksToSend);
@@ -1040,7 +1048,7 @@ function RequestBoard() {
         isExternal: false,
       });
       setTasks([]);
-      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false });
+      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false, esFlujoVinculado: false, flujoVinculado: '' });
       setAssignedCategoryInfo(null);
 
       fetchWorkFlows();
@@ -1867,7 +1875,7 @@ function RequestBoard() {
             setCurrentStep(1);
             setFormErrors({});
             setTasks([]);
-            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false });
+            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false, esFlujoVinculado: false, flujoVinculado: '' });
             setFormData({
               company: '',
               category: '',
@@ -2332,7 +2340,10 @@ function RequestBoard() {
                           fullWidth
                           h={48}
                           mt={26}
-                          disabled={!taskForm.tarea.trim()}
+                          disabled={
+                            !taskForm.tarea.trim() ||
+                            (taskForm.esFlujoVinculado && (!taskForm.flujoVinculado || !taskForm.asignado))
+                          }
                           className='cursor-pointer hover:bg-blue-700 transition-colors duration-200'
                           size='lg'
                         >
@@ -2348,6 +2359,39 @@ function RequestBoard() {
                             setTaskForm({ ...taskForm, cierraSolicitud: e.currentTarget.checked })
                           }
                         />
+                        <Checkbox
+                          mt='sm'
+                          label='Lanza otro flujo (el asignado crea una solicitud de ese flujo y esta tarea se cierra cuando esa solicitud se cierre)'
+                          checked={taskForm.esFlujoVinculado}
+                          onChange={(e) =>
+                            setTaskForm({
+                              ...taskForm,
+                              esFlujoVinculado: e.currentTarget.checked,
+                              flujoVinculado: e.currentTarget.checked ? taskForm.flujoVinculado : '',
+                            })
+                          }
+                        />
+                        {taskForm.esFlujoVinculado && (
+                          <Select
+                            mt='sm'
+                            label='Flujo a lanzar'
+                            placeholder='Busque el proceso o la empresa'
+                            data={processesWF}
+                            value={taskForm.flujoVinculado}
+                            onChange={(value) =>
+                              setTaskForm({ ...taskForm, flujoVinculado: value || '' })
+                            }
+                            searchable
+                            withAsterisk
+                            error={
+                              !taskForm.flujoVinculado
+                                ? 'Selecciona el flujo a lanzar'
+                                : !taskForm.asignado
+                                  ? 'La tarea vinculada requiere un asignado'
+                                  : undefined
+                            }
+                          />
+                        )}
                       </Grid.Col>
                     </Grid>
                   </div>
@@ -2394,6 +2438,17 @@ function RequestBoard() {
                                 <Text size='base' fw={500}>
                                   {task.tarea}
                                 </Text>
+                                {task.esFlujoVinculado && (
+                                  <Badge
+                                    mt={4}
+                                    color='grape'
+                                    variant='light'
+                                    size='sm'
+                                    styles={{ root: { textTransform: 'none' } }}
+                                  >
+                                    Flujo: {processesWF.find((o) => o.value === task.flujoVinculado)?.label || 'Vinculado'}
+                                  </Badge>
+                                )}
                               </Table.Td>
                               <Table.Td className='py-4 px-5'>
                                 <Group gap={4}>
@@ -2479,7 +2534,7 @@ function RequestBoard() {
                   setCurrentStep(1);
                   setFormErrors({});
                   setTasks([]);
-                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false });
+                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false, esFlujoVinculado: false, flujoVinculado: '' });
                 }
               }}
               size='md'
