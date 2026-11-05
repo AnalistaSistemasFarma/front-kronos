@@ -30,7 +30,9 @@ export async function GET(req) {
         tpc.type_authorization,
         taut.type_authorization as type_authorization_label,
         tpc.id_linked_process,
-        lp.process as linked_process_label,
+        CASE WHEN lpc.company IS NOT NULL
+             THEN lp.process + N' — ' + lpc.company
+             ELSE lp.process END as linked_process_label,
         tpc.closes_request,
         tpc.task_kind,
         (SELECT TOP 1 x.action_key FROM dbo.task_sap_action x
@@ -48,6 +50,13 @@ export async function GET(req) {
       LEFT JOIN [user] u ON u.id = utrg.id_user
       LEFT JOIN types_authorization taut ON taut.id = tpc.type_authorization
       LEFT JOIN process_category lp ON lp.id = tpc.id_linked_process
+      OUTER APPLY (
+        SELECT TOP 1 c.company
+        FROM company_category_request ccr
+        INNER JOIN company c ON c.id_company = ccr.id_company
+        WHERE ccr.id_category_request = lp.id_category_request
+        ORDER BY c.company
+      ) lpc
       WHERE tpc.active = 1 AND tpc.id_process_category = @idProcess
       ORDER BY tpc.display_order, tpc.id
     `;

@@ -36,13 +36,21 @@ export async function GET(req) {
         pc.process,
         pc.is_external,
         u.id AS id_assigned,
-        u.name AS assigned_process
+        u.name AS assigned_process,
+        comp.company
       FROM user_process_category_request_general upcrg
       INNER JOIN process_category pc
         ON pc.id = upcrg.id_process_category
-      INNER JOIN [user] u 
+      INNER JOIN [user] u
         ON u.id = upcrg.id_user
-      ORDER BY pc.process
+      OUTER APPLY (
+        SELECT TOP 1 c.company
+        FROM company_category_request ccr
+        INNER JOIN company c ON c.id_company = ccr.id_company
+        WHERE ccr.id_category_request = pc.id_category_request
+        ORDER BY c.company
+      ) comp
+      ORDER BY pc.process, comp.company
     `;
 
     const queryAssignedUsers = `
