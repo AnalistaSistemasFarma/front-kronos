@@ -208,6 +208,7 @@ describe('assertAgentProjectConversation (llave del puente)', () => {
       projectName: 'Comex',
       invitado: false,
       idAgentPrincipal: PLAY,
+      perfil: 'comex-latam',
     });
     expect(findConversation.mock.calls[0][0].where).toEqual({
       id: 40,
@@ -235,5 +236,15 @@ describe('assertAgentProjectConversation (llave del puente)', () => {
     expect(await assertAgentProjectConversation(99, 40)).toBeNull();
     findConversation.mockResolvedValue(fila({ project: { id_project: 7, name: 'X', profile: 'gss', id_company: EMPRESA, agents: [{ agent: { code: 'play' } }] } }));
     expect(await assertAgentProjectConversation(PLAY, 40)).toBeNull();
+  });
+
+  it('MESA de discusión: sin el perfil del proyecto, el agente entra SIN conectores (2026-11-05)', async () => {
+    findConversation.mockResolvedValue(
+      fila({ mesa: { id_mesa: 3 }, project: { id_project: 7, name: 'X', profile: 'gss', id_company: EMPRESA, agents: [{ agent: { code: 'play' } }] } })
+    );
+    expect(await assertAgentProjectConversation(PLAY, 40)).toMatchObject({ perfil: 'sin-conectores' });
+    // Sin Proyectos habilitado en la empresa, ni en una mesa.
+    findConversation.mockResolvedValue(fila({ mesa: { id_mesa: 3 } }, 'horus'));
+    expect(await assertAgentProjectConversation(99, 40)).toBeNull();
   });
 });

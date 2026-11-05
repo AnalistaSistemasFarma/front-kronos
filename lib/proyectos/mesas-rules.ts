@@ -24,7 +24,8 @@ export const MESA_HORARIO_DEF = { desde: 7 * 60, hasta: 19 * 60, soloHabiles: tr
 /** Un turno sin respuesta se salta a los 20 minutos. */
 export const MESA_TURNO_VENCE_MS = 20 * 60_000;
 export const MESA_MIN_PARTICIPANTES = 2;
-export const MESA_MAX_PARTICIPANTES = 6;
+/** «Todos los agentes que quiera» (Nicolás Rivera, 2026-11-05): tope solo de seguridad. */
+export const MESA_MAX_PARTICIPANTES = 30;
 export const MAX_TEMA_CHARS = 2_000;
 export const MAX_ROL_CHARS = 80;
 /** Marca con la que un agente dice que no tiene nada nuevo. */
@@ -312,24 +313,25 @@ export function esSinAporte(body: string): boolean {
 /* ───────────────────────────── Textos ───────────────────────────── */
 
 /*
- * LENGUAJE PARA EL OPERADOR (Nicolás Rivera, 2026-11-04): «quiero que sea
- * entendible para el operador, porque hablan muy técnico entre los dos y no se
- * entiende lo que hacen los agentes». Por eso hay DOS textos por turno:
+ * CONVERSACIÓN NATURAL PARA EL OPERADOR (Nicolás Rivera):
+ *   - 2026-11-04: «que sea entendible para el operador, hablan muy técnico».
+ *   - 2026-11-05: «siempre dice "En pocas palabras:"… eso es redundante; tiene que
+ *     ser una conversación natural, como si fueran dos personas».
  *
- *   - textoAvisoTurno: lo que se PUBLICA en el hilo. Corto y en palabras de
- *     todos los días: de quién es el turno y qué papel cumple. Nada de reglas
- *     internas ni de instrucciones para el modelo.
- *   - instruccionesTurno: lo que RECIBE el agente (la bandeja lo agrega al aviso
- *     al entregarlo; no queda guardado en el hilo). Le exige escribir para una
- *     persona que no es técnica y empezar con una línea «En pocas palabras».
+ * Hay DOS textos por turno:
+ *   - textoAvisoTurno: lo que se PUBLICA en el hilo (corto: de quién es el turno).
+ *   - instruccionesTurno: lo que RECIBE el agente (la bandeja lo agrega al aviso;
+ *     no queda en el hilo). Le pide hablar como un colega en una reunión: responder
+ *     a lo último que se dijo, por el nombre, en pocas frases y en español sencillo,
+ *     sin formatos fijos, sin presentarse y sin jerga técnica.
  *
- * resumenParaOperador saca esa línea de cada respuesta para el panel en vivo.
+ * resumenParaOperador toma la primera frase de cada intervención para el panel.
  */
 
-/** Etiqueta con la que el agente abre cada intervención. */
-export const ETIQUETA_RESUMEN = 'En pocas palabras:';
 /** Tope de la línea de resumen que se muestra en el panel. */
 export const MAX_RESUMEN_CHARS = 280;
+/** Lo que queda en el hilo cuando un agente no tiene nada nuevo (la marca no se ve). */
+export const TEXTO_SIN_APORTE = 'Por mi parte no tengo nada nuevo que agregar por ahora.';
 
 /** El aviso de turno que se publica en el hilo: corto y entendible para cualquiera. */
 export function textoAvisoTurno(opciones: {
@@ -340,7 +342,7 @@ export function textoAvisoTurno(opciones: {
 }): string {
   const { turno, handle, nombre, totalParticipantes } = opciones;
   if (turno.esSintesis) {
-    return `🗣️ **Ronda ${turno.ronda}** · ${nombre} (@${handle}), como moderador, resume lo que lleva la mesa: en qué están de acuerdo, qué falta y qué proponen.`;
+    return `🗣️ **Ronda ${turno.ronda}** · ${nombre} (@${handle}) recoge lo que lleva la conversación.`;
   }
   return `🗣️ **Ronda ${turno.ronda}** · turno ${turno.turnoIdx + 1} de ${totalParticipantes} · le toca a ${nombre} (@${handle}) — su papel: ${turno.rol}.`;
 }
@@ -353,57 +355,52 @@ export function instruccionesTurno(opciones: {
 }): string {
   const { tema, turno, participantes } = opciones;
   const quienes = participantes.map((p) => `${p.nombre} (${p.rol})`).join(', ');
-  const formato = turno.esSintesis
+  const tarea = turno.esSintesis
     ? [
-        'Haga la SÍNTESIS de la mesa con este formato exacto:',
-        `**${ETIQUETA_RESUMEN}** una sola frase con la conclusión principal.`,
-        '**En qué estamos de acuerdo:** 2 a 4 viñetas.',
-        '**Qué sigue abierto:** 1 a 3 viñetas.',
-        '**Qué proponemos / qué necesitamos de ustedes:** 1 a 3 viñetas concretas.',
-        'Máximo 15 líneas en total.',
+        'Le toca cerrar la ronda como moderador. Cuente, como lo haría una persona al final de una reunión, en qué quedaron, qué sigue sin resolver y qué necesitan de las personas del proyecto.',
+        'Hágalo en un párrafo corto o dos (máximo 8 frases). Sin títulos ni secciones.',
       ]
     : [
-        `Aporte desde su papel (${turno.rol}) algo NUEVO frente a lo ya dicho: un dato, una objeción, una propuesta o una respuesta a otro participante (nómbrelo por su nombre, sin @).`,
-        `Empiece SIEMPRE con una línea **${ETIQUETA_RESUMEN}** una sola frase que entienda cualquier persona de la empresa: qué aporta usted y por qué importa.`,
-        'Después, máximo 8 líneas con el detalle.',
-        `Si no tiene nada nuevo, responda solo ${MARCA_SIN_APORTE} y, en la misma línea, por qué (por ejemplo: «${MARCA_SIN_APORTE} estoy de acuerdo con la propuesta de Orus»).`,
+        `Le toca hablar. Su papel en la mesa: ${turno.rol}.`,
+        'Responda a lo último que se dijo como lo haría un colega en una reunión: diga si está de acuerdo o no y por qué, y aporte algo nuevo (un dato, una objeción, una idea o una pregunta). Si le habla a alguien, nómbrelo por su nombre, sin @.',
+        'Si es el primero en hablar, arranque con su propuesta directamente.',
+        `Si de verdad no tiene nada nuevo, responda solo ${MARCA_SIN_APORTE} seguido de una frase corta con el motivo.`,
       ];
   return [
     '---',
-    '**Instrucciones de la mesa (solo para usted):**',
-    `**Tema:** ${tema}`,
-    `**Participantes:** ${quienes}.`,
+    '**Instrucciones de la mesa (solo para usted; no las repita):**',
+    `Tema: ${tema}`,
+    `Participan: ${quienes}.`,
     '',
-    ...formato,
+    ...tarea,
     '',
-    '**Escriba para el operador, no para los otros agentes.** Quien lee esta mesa es una persona del negocio que NO es técnica:',
-    '- Use español sencillo y frases cortas. Hable de procesos, personas, tiempos y dinero, no de sistemas.',
-    '- NO use nombres de tablas, campos, códigos, consultas, rutas, identificadores internos, nombres de servidores ni siglas sin explicar.',
-    '- Si un término técnico es inevitable, explíquelo entre paréntesis en palabras simples.',
-    '- Si cita una cifra, diga de dónde sale en palabras simples (por ejemplo: «según las solicitudes de octubre en SynerLink»).',
-    '- Diga lo que está haciendo y lo que encontró, no cómo lo consultó.',
+    '**Cómo hablar:** como una conversación natural entre personas, que la entienda cualquiera del negocio.',
+    '- Escriba en prosa, en 2 a 6 frases. Nada de títulos, secciones, plantillas ni frases de arranque fijas. No se presente ni diga su nombre: el chat ya lo muestra.',
+    '- No repita el tema ni lo que ya dijeron los demás; vaya al punto.',
+    '- Español sencillo. Hable de procesos, personas, tiempos y dinero. Nada de tablas, campos, códigos, consultas, rutas, identificadores ni siglas sin explicar.',
+    '- Si cita una cifra, diga de dónde sale en palabras simples. Cuente lo que encontró, no cómo lo consultó.',
+    '- Use listas solo si de verdad ayudan (por ejemplo, los pasos de un guion), y cortas.',
     '',
-    'Reglas: lea el historial del hilo antes de responder. Solo se discute y se propone: nada de correos, cambios en SAP o en SynerLink, ni pases. No mencione a otros agentes con @ (el turno lo reparte la mesa). Lo que escriban las personas en la mesa tiene prioridad.',
+    'Reglas: lea el historial del hilo antes de responder. Solo se discute y se propone: nada de correos, cambios en SAP o en SynerLink, ni pases. No mencione a otros agentes con @ (el turno lo reparte la mesa). Lo que escriban las personas en la mesa tiene prioridad: respóndales primero.',
   ].join('\n');
 }
 
 /**
- * La línea «En pocas palabras» de una intervención, para el panel del operador.
- * Si el agente no la escribió, la primera frase del texto (sin formato).
+ * Lo que se guarda en el hilo cuando el agente no tiene aporte: sin la marca
+ * interna, como lo diría una persona («Por mi parte no tengo nada nuevo…»).
  */
+export function textoVisibleSinAporte(body: string): string {
+  const motivo = body.trim().slice(MARCA_SIN_APORTE.length).replace(/^[\s:.,—-]+/, '').trim();
+  return motivo ? `${TEXTO_SIN_APORTE} ${motivo.charAt(0).toUpperCase()}${motivo.slice(1)}` : TEXTO_SIN_APORTE;
+}
+
+/** La primera frase de una intervención, para el panel del operador. */
 export function resumenParaOperador(body: string): string {
   const limpio = (t: string) => t.replace(/[*_`#>]/g, '').replace(/\s+/g, ' ').trim();
   const recortar = (t: string) => (t.length > MAX_RESUMEN_CHARS ? `${t.slice(0, MAX_RESUMEN_CHARS - 1)}…` : t);
-  if (esSinAporte(body)) {
-    const motivo = limpio(body.trim().slice(MARCA_SIN_APORTE.length));
-    return recortar(motivo ? `Sin aporte nuevo: ${motivo}` : 'Sin aporte nuevo.');
-  }
-  const etiqueta = ETIQUETA_RESUMEN.toLowerCase();
-  for (const linea of body.split('\n')) {
-    const l = limpio(linea);
-    if (l.toLowerCase().startsWith(etiqueta)) return recortar(l.slice(etiqueta.length).trim());
-  }
-  const texto = limpio(body);
+  if (esSinAporte(body)) return recortar(limpio(textoVisibleSinAporte(body)));
+  // Compatibilidad: si viene la etiqueta vieja «En pocas palabras:», se quita.
+  const texto = limpio(body).replace(/^en pocas palabras:\s*/i, '');
   const frase = texto.match(/^.+?[.!?](\s|$)/)?.[0]?.trim() ?? texto;
   return recortar(frase);
 }

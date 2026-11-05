@@ -15,7 +15,9 @@
 import { prisma } from '../prisma';
 import { MAX_TITLE_CHARS } from '../chat/constants';
 import { capabilitiesFor, MAX_PROJECT_CONVERSATIONS } from '../chat/projects-rules';
-import { writeAccessForAgent, type ProjectAccess, type ProjectUser } from '../chat/projects';
+import { designableAgents, type ProjectAccess, type ProjectUser } from '../chat/projects';
+import { politicaGuardadaConCodigo } from './permisos-agentes';
+import { mensajeSoloDesarrollo } from './agentes-desarrollo-rules';
 import { ProyectoError } from './acciones';
 import {
   decidirTick,
@@ -25,6 +27,7 @@ import {
   instruccionesTurno,
   resumenParaOperador,
   textoAvisoTurno,
+  textoVisibleSinAporte,
   validarMesa,
   MESA_TURNO_VENCE_MS,
   type Decision,
@@ -245,7 +248,12 @@ export async function alPublicarAgenteEnMesa(opciones: {
   const d = decidirTrasRespuesta(estado, opciones.idAgent, !esSinAporte(opciones.body), ahora);
   if (d.tipo === 'nada') return { esMesa: true, esSintesis: false };
 
-  const aporte = !esSinAporte(opciones.body) && m.turno_idx < m.agentes.length;
+  const sinAporte = esSinAporte(opciones.body);
+  const aporte = !sinAporte && m.turno_idx < m.agentes.length;
+  // La marca interna no se deja ver: en el hilo queda como lo diría una persona.
+  if (sinAporte) {
+    await prisma.chatMessage.update({ where: { id: opciones.idMessage }, data: { body: textoVisibleSinAporte(opciones.body) } });
+  }
   await prisma.chatProjectMesaEvento.create({
     data: {
       id_mesa: m.id_mesa,
@@ -299,11 +307,50 @@ function exigirEscritura(project: ProjectAccess) {
 }
 
 /** Crea una mesa: una conversación del proyecto (principal = moderador) + reglas + participantes. */
+/** Agente que la persona puede poner en una mesa de este proyecto. */
+export interface CandidatoMesa {
+  idAgent: number;
+  code: string;
+  nombre: string;
+  avatarUrl: string | null;
+  avatarVersion: number | null;
+  /** Ya está designado en el proyecto. */
+  designado: boolean;
+  /** Tiene el perfil de conectores del proyecto; si no, en la mesa entra SIN conectores. */
+  conConectores: boolean;
+  esDesarrollo: boolean;
+}
+
+/**
+ * Agentes que ESTA persona puede poner en una mesa (2026-11-05, Nicolás Rivera:
+ * «que pueda elegir todos los agentes que quiera»): todos los que tiene asignados
+ * en la empresa del proyecto y con Proyectos habilitado (con CUALQUIER perfil:
+ * quien no tiene el del proyecto entra a la mesa sin conectores).
+ */
+export async function candidatosMesa(user: ProjectUser, project: ProjectAccess): Promise<CandidatoMesa[]> {
+  const [porEmpresa, actuales] = await Promise.all([
+    designableAgents(user.email),
+    prisma.chatProjectAgent.findMany({ where: { id_project: project.idProject }, select: { id_agent: true } }),
+  ]);
+  const ya = new Set(actuales.map((a) => a.id_agent));
+  return (porEmpresa.get(project.idCompany) ?? [])
+    .map((a) => ({
+      idAgent: a.idAgent,
+      code: a.code,
+      nombre: a.displayName,
+      avatarUrl: a.avatarUrl,
+      avatarVersion: a.avatarVersion,
+      designado: ya.has(a.idAgent),
+      conConectores: a.profiles.includes(project.profile),
+      esDesarrollo: a.esDesarrollo,
+    }))
+    .sort((x, y) => Number(y.designado) - Number(x.designado) || x.nombre.localeCompare(y.nombre, 'es'));
+}
+
+/** Crea una mesa: una conversación del proyecto (principal = moderador) + reglas + participantes. */
 export async function crearMesa(user: ProjectUser, project: ProjectAccess, entrada: Record<string, unknown>): Promise<{ idMesa: number; idConversation: number }> {
   exigirEscritura(project);
-  const designados = (
-    await prisma.chatProjectAgent.findMany({ where: { id_project: project.idProject }, select: { id_agent: true } })
-  ).map((a) => a.id_agent);
+  const candidatos = await candidatosMesa(user, project);
   const v = validarMesa(
     {
       tema: entrada.tema,
@@ -311,19 +358,37 @@ export async function crearMesa(user: ProjectUser, project: ProjectAccess, entra
       idAgentModerador: entrada.idAgentModerador,
       reglas: (entrada.reglas ?? {}) as Record<string, unknown>,
     },
-    designados
+    candidatos.map((c) => c.idAgent)
   );
   if (!v.ok) throw new ProyectoError(v.error, 400);
   const mesa = v.value;
 
-  // La persona debe poder escribirle a CADA agente de la mesa (la misma regla del chat).
-  for (const p of mesa.participantes) {
-    const permiso = await writeAccessForAgent(user, project, p.idAgent);
-    if (!permiso.ok) throw new ProyectoError(permiso.motivo, 403);
+  // Los que no están en el proyecto se designan al crear la mesa: solo el dueño
+  // (la misma regla de «Agregar asistentes»), y en un proyecto con acceso a
+  // código, solo agentes de desarrollo (regla del 2026-10-27).
+  const nuevos = mesa.participantes
+    .map((p) => candidatos.find((c) => c.idAgent === p.idAgent)!)
+    .filter((c) => !c.designado);
+  if (nuevos.length > 0) {
+    if (!capabilitiesFor(project.role).manageAgents) {
+      throw new ProyectoError('Solo el dueño del proyecto puede sumar a la mesa agentes que todavía no están en el proyecto.', 403);
+    }
+    const negocio = nuevos.filter((c) => !c.esDesarrollo);
+    if (negocio.length > 0 && (await politicaGuardadaConCodigo(project.idProject))) {
+      throw new ProyectoError(
+        `${mensajeSoloDesarrollo(negocio.map((c) => c.nombre))} Para agregarlo, primero deje los permisos del proyecto en «Ninguno».`,
+        400
+      );
+    }
   }
   const activas = await prisma.chatConversation.count({ where: { id_project: project.idProject, archived: false } });
   if (activas >= MAX_PROJECT_CONVERSATIONS) {
     throw new ProyectoError(`El proyecto ya tiene ${MAX_PROJECT_CONVERSATIONS} conversaciones activas.`, 409);
+  }
+  if (nuevos.length > 0) {
+    await prisma.chatProjectAgent.createMany({
+      data: nuevos.map((c) => ({ id_project: project.idProject, id_agent: c.idAgent, added_by: user.id })),
+    });
   }
 
   const agentes = await prisma.agent.findMany({

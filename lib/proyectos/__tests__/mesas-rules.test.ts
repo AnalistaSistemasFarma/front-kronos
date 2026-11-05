@@ -5,7 +5,7 @@ import {
   dentroDeHorario,
   diaCOT,
   esSinAporte,
-  ETIQUETA_RESUMEN,
+  textoVisibleSinAporte,
   instruccionesTurno,
   resumenParaOperador,
   MARCA_SIN_APORTE,
@@ -80,6 +80,9 @@ describe('validarMesa', () => {
     expect(validarMesa({ ...base, tema: '  ' }, [1, 2]).ok).toBe(false);
     expect(validarMesa({ ...base, participantes: [{ idAgent: 1 }] }, [1, 2]).ok).toBe(false);
     expect(validarMesa({ ...base, participantes: [{ idAgent: 1 }, { idAgent: 1 }] }, [1, 2]).ok).toBe(false);
+    // «Todos los que quiera»: 12 agentes es válido.
+    const doce = Array.from({ length: 12 }, (_, i) => ({ idAgent: i + 1 }));
+    expect(validarMesa({ ...base, participantes: doce }, doce.map((d) => d.idAgent)).ok).toBe(true);
     expect(validarMesa(base, [1]).ok).toBe(false); // el 2 no está designado
     expect(validarMesa({ ...base, idAgentModerador: 3 }, [1, 2, 3]).ok).toBe(false);
   });
@@ -208,36 +211,42 @@ describe('textos', () => {
     expect(t).not.toContain('Instrucciones');
   });
 
-  it('las instrucciones del agente exigen lenguaje para el operador y el resumen', () => {
+  it('las instrucciones piden una conversación natural, sin plantillas ni presentarse', () => {
     const t = instruccionesTurno({
       tema: 'Demoras de Tesorería',
       turno: { idAgent: 2, ronda: 2, turnoIdx: 1, esSintesis: false, rol: 'critica' },
       participantes: [{ nombre: 'Orus', rol: 'propone' }, { nombre: 'Mechita', rol: 'critica' }],
     });
     expect(t).toContain('Demoras de Tesorería');
-    expect(t).toContain(ETIQUETA_RESUMEN);
-    expect(t).toContain('NO es técnica');
+    expect(t).toContain('conversación natural');
+    expect(t).toContain('No se presente');
+    expect(t).not.toContain('En pocas palabras');
     expect(t).toContain('nada de correos');
     expect(t).toContain(MARCA_SIN_APORTE);
   });
 
-  it('la síntesis pide acuerdos, pendientes y lo que se necesita de las personas', () => {
+  it('la síntesis es un cierre en prosa, sin secciones', () => {
     const t = instruccionesTurno({
       tema: 'x',
       turno: { idAgent: 1, ronda: 3, turnoIdx: 2, esSintesis: true, rol: 'moderador: síntesis' },
       participantes: [],
     });
-    expect(t).toContain('En qué estamos de acuerdo');
-    expect(t).toContain('Qué sigue abierto');
-    expect(t).toContain('qué necesitamos de ustedes');
+    expect(t).toContain('en qué quedaron');
+    expect(t).toContain('Sin títulos ni secciones');
   });
 
-  it('resumenParaOperador toma la línea «En pocas palabras» o, si falta, la primera frase', () => {
-    expect(resumenParaOperador('**En pocas palabras:** las aprobaciones de Tesorería se pueden hacer a la vez.\n\nDetalle…')).toBe(
-      'las aprobaciones de Tesorería se pueden hacer a la vez.',
+  it('sin aporte: en el hilo queda una frase natural, sin la marca', () => {
+    expect(textoVisibleSinAporte('[SIN APORTE] estoy de acuerdo con Orus')).toBe(
+      'Por mi parte no tengo nada nuevo que agregar por ahora. Estoy de acuerdo con Orus',
     );
-    expect(resumenParaOperador('Revisé octubre. Hubo 40 casos.')).toBe('Revisé octubre.');
-    expect(resumenParaOperador('[SIN APORTE] estoy de acuerdo con Orus')).toBe('Sin aporte nuevo: estoy de acuerdo con Orus');
-    expect(resumenParaOperador(`En pocas palabras: ${'a'.repeat(400)}`).length).toBe(280);
+    expect(textoVisibleSinAporte('[SIN APORTE]')).toBe('Por mi parte no tengo nada nuevo que agregar por ahora.');
   });
+
+  it('resumenParaOperador toma la primera frase (y quita la etiqueta vieja si viene)', () => {
+    expect(resumenParaOperador('Estoy de acuerdo con Zoe. Pero falta el costo.')).toBe('Estoy de acuerdo con Zoe.');
+    expect(resumenParaOperador('**En pocas palabras:** hay que mostrar un caso real. Detalle…')).toBe('hay que mostrar un caso real.');
+    expect(resumenParaOperador('[SIN APORTE] de acuerdo')).toBe('Por mi parte no tengo nada nuevo que agregar por ahora. De acuerdo');
+    expect(resumenParaOperador('a'.repeat(400)).length).toBe(280);
+  });
+
 });

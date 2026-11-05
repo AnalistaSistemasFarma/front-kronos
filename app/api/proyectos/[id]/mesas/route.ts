@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { jsonNoStore, readJsonBody, serverError } from '../../../../../lib/chat/http';
 import { guardProject } from '../../../../../lib/chat/projects-guard';
 import { errorDeProyecto } from '../../../../../lib/proyectos/acciones';
-import { crearMesa, listarMesas } from '../../../../../lib/proyectos/mesas';
+import { candidatosMesa, crearMesa, listarMesas } from '../../../../../lib/proyectos/mesas';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,14 +10,18 @@ export const dynamic = 'force-dynamic';
  * MESAS DE DISCUSIÓN de un proyecto (2026-11-04, docs/proyectos-mesas-discusion.md).
  *
  *   GET                                   -> { mesas }      (cualquier miembro)
+ *   GET ?candidatos=1                     -> { candidatos }  agentes que la persona puede poner en una mesa
  *   POST { tema, participantes: [{ idAgent, rol }], idAgentModerador, reglas? }
  *                                         -> { idMesa, idConversation }   (dueño o editor)
  */
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
     const guard = await guardProject(id, { allowArchived: true });
     if ('response' in guard) return guard.response;
+    if (request.nextUrl.searchParams.get('candidatos') === '1') {
+      return jsonNoStore({ candidatos: await candidatosMesa(guard.user, guard.project) });
+    }
     return jsonNoStore({ mesas: await listarMesas(guard.project) });
   } catch (error) {
     return serverError('GET /api/proyectos/[id]/mesas', error);
