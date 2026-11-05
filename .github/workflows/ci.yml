@@ -596,6 +596,22 @@ jobs:
           echo "IF OBJECT_ID(N'dbo.agent_error_issue', N'U') IS NULL OR OBJECT_ID(N'dbo.agent_error_event', N'U') IS NULL OR (SELECT COUNT(*) FROM sys.check_constraints WHERE name IN (N'CK_agent_error_issue_estado', N'CK_agent_error_issue_severidad', N'CK_agent_error_issue_ambiente')) <> 3 THROW 50000, N'El pase de errores de IA no dejó las tablas o los CHECK.', 1;" > /tmp/errores-ia-ok.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/errores-ia-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-03-errores-ia-PROD.sql; then echo "El script de PROD de errores de IA debió negarse en kronos_ci"; exit 1; fi
+          # Automatizaciones programadas (Indicador de automatizaciones, 2026-11-04): PRUEBAS dos veces, reversa y otra vez PRUEBAS (idempotencia ida y vuelta) y PROD que se niega. La lógica se prueba en tests/integration/auditoria.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-04-automatizaciones-programadas-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-04-automatizaciones-programadas-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-04-automatizaciones-programadas-reversa.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-04-automatizaciones-programadas-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.agent_scheduled_job', N'U') IS NULL THROW 50000, N'El pase de automatizaciones programadas no dejó la tabla.', 1;" > /tmp/programadas-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/programadas-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-04-automatizaciones-programadas-PROD.sql; then echo "El script de PROD de automatizaciones programadas debió negarse en kronos_ci"; exit 1; fi
+          # Administrar automatizaciones y detectar las muertas (2026-11-04): va DESPUÉS del de programadas. PRUEBAS dos veces, reversa, otra vez PRUEBAS y PROD que se niega.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-04-automatizaciones-admin-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-04-automatizaciones-admin-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-04-automatizaciones-admin-reversa.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-04-automatizaciones-admin-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.agent_scheduled_job_command', N'U') IS NULL OR COL_LENGTH(N'dbo.agent_scheduled_job', N'ultimas_json') IS NULL OR COL_LENGTH(N'dbo.agent_scheduled_job', N'horario_json') IS NULL OR COL_LENGTH(N'dbo.agent_scheduled_job', N'ref') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_agent_scheduled_job_command_activa') THROW 50000, N'El pase de administrar automatizaciones no dejó la tabla, las columnas o el índice único.', 1;" > /tmp/programadas-admin-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/programadas-admin-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-04-automatizaciones-admin-PROD.sql; then echo "El script de PROD de administrar automatizaciones debió negarse en kronos_ci"; exit 1; fi
 
       - name: Pruebas de integración + cobertura de lib/sgc/db (vitest)
         run: npm run test:integration -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/integracion/junit.xml
