@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildOrderPayload, orderLookupFilter, orderMarker, parseOrderMarker } from './publish';
+import { addressExtensionOf, buildOrderPayload, orderLookupFilter, orderMarker, parseOrderMarker, shipAddressProblem } from './publish';
 
 describe('marca del pedido', () => {
   it('V<DocEntry> ida y vuelta', () => {
@@ -62,5 +62,91 @@ describe('buildOrderPayload', () => {
       [5, 40, 0],
       [6, 40, 3],
     ]);
+  });
+});
+
+describe('dirección del pedido (regresión 2026-11-05, pedidos 2782/2783 de pruebas OLP)', () => {
+  // AddressExtension tal como lo devuelve SAP en el borrador 892.
+  const ext = {
+    ShipToStreet: 'CR 13 1 NORTE 35',
+    ShipToStreetNo: null,
+    ShipToCity: 'ARMENIA',
+    ShipToZipCode: '630001',
+    ShipToState: '63',
+    ShipToCountry: 'CO',
+    ShipToAddressType: null,
+    BillToStreet: 'CR 13 1 NORTE 35',
+    BillToCity: 'ARMENIA',
+    BillToZipCode: '630001',
+    BillToState: '63',
+    BillToCountry: 'CO',
+    PlaceOfSupply: null,
+    DocEntry: 892,
+    GoodsIssuePlaceCity: null,
+    DeliveryPlaceCity: 'X',
+    U_HBT_MunMedS: '63001',
+    U_HBT_MunMedB: '63001',
+    U_HBT_DirMMS: 'N',
+    U_HBT_DirMMB: 'Y',
+  };
+  const texto = 'CR 13 1 NORTE 35\r630001  ARMENIA\rCOLOMBIA';
+  const draft = { DocEntry: 892, CardCode: '900848340', ShipToCode: 'ARMENIA', PayToCode: 'FACTURACION', Address2: texto, AddressExtension: ext };
+
+  it('copia AddressExtension completo de envío y facturación con las UDF de municipio', () => {
+    const p = buildOrderPayload(draft, '2026-11-05') as Record<string, unknown>;
+    expect(p.AddressExtension).toEqual({
+      ShipToStreet: 'CR 13 1 NORTE 35',
+      ShipToCity: 'ARMENIA',
+      ShipToZipCode: '630001',
+      ShipToState: '63',
+      ShipToCountry: 'CO',
+      BillToStreet: 'CR 13 1 NORTE 35',
+      BillToCity: 'ARMENIA',
+      BillToZipCode: '630001',
+      BillToState: '63',
+      BillToCountry: 'CO',
+      U_HBT_MunMedS: '63001',
+      U_HBT_MunMedB: '63001',
+      U_HBT_DirMMS: 'N',
+      U_HBT_DirMMB: 'Y',
+    });
+    expect(p).toMatchObject({ ShipToCode: 'ARMENIA', PayToCode: 'FACTURACION' });
+  });
+  it('quita nulos, DocEntry y campos ajenos (GoodsIssuePlace*, DeliveryPlace*, PlaceOfSupply)', () => {
+    const a = addressExtensionOf(draft)!;
+    expect(a).not.toHaveProperty('DocEntry');
+    expect(a).not.toHaveProperty('ShipToStreetNo');
+    expect(a).not.toHaveProperty('DeliveryPlaceCity');
+    expect(a).not.toHaveProperty('PlaceOfSupply');
+  });
+  it('con componentes de envío NO manda Address2 (SAP dejaba vacía la dirección del pedido)', () => {
+    expect(buildOrderPayload(draft, '2026-11-05')).not.toHaveProperty('Address2');
+  });
+  it('sin componentes de envío conserva el texto Address2', () => {
+    const p = buildOrderPayload({ DocEntry: 1, CardCode: 'C', Address2: texto, AddressExtension: { ShipToStreet: null } }, '2026-11-05');
+    expect(p).toMatchObject({ Address2: texto });
+    expect(p).not.toHaveProperty('AddressExtension');
+  });
+  it('borrador sin ShipToCode pero con dirección completa (893): pedido con componentes', () => {
+    const p = buildOrderPayload({ ...draft, ShipToCode: null }, '2026-11-05') as Record<string, unknown>;
+    expect(p).not.toHaveProperty('ShipToCode');
+    expect((p.AddressExtension as Record<string, unknown>).U_HBT_MunMedS).toBe('63001');
+  });
+});
+
+describe('shipAddressProblem', () => {
+  it('con ShipToCode no hay problema', () => {
+    expect(shipAddressProblem({ DocEntry: 1, ShipToCode: 'ARMENIA' })).toBeNull();
+  });
+  it('sin ShipToCode pero con código postal y municipio no hay problema', () => {
+    expect(shipAddressProblem({ DocEntry: 1, AddressExtension: { ShipToZipCode: '630001', U_HBT_MunMedS: '63001' } })).toBeNull();
+  });
+  it('sin ShipToCode ni municipio: revisar dirección', () => {
+    expect(shipAddressProblem({ DocEntry: 7, ShipToCode: '', AddressExtension: { ShipToZipCode: '630001', U_HBT_MunMedS: null } })).toMatch(
+      /^Revisar dirección: el borrador 7 .*municipio/
+    );
+  });
+  it('sin ninguna dirección: revisar dirección', () => {
+    expect(shipAddressProblem({ DocEntry: 8 })).toMatch(/código postal ni municipio/);
   });
 });
