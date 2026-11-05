@@ -53,6 +53,63 @@ export function filtrarGruposCorreo(
     .filter((g) => g.usuarios.length > 0);
 }
 
+/**
+ * Buzones que NO son una persona (soporte, notificaciones, áreas). El
+ * conector de licencias solo descarta las cuentas de servicio; los buzones
+ * compartidos con licencia llegan igual. Se reconocen por nombre exacto o por
+ * la parte local del correo (antes de la @), sin tildes ni mayúsculas.
+ *
+ * Es una lista explícita a propósito: no hay forma segura de deducirlo por
+ * forma (`director.tecnico@` y `subdireccion.reglamentaria@` son personas).
+ * Cuando aparezca un buzón nuevo, se agrega aquí.
+ */
+const NOMBRES_BUZON = new Set([
+  'admin',
+  'administrador sistemas',
+  'admin sistemas',
+  'certificados',
+  'comex',
+  'comite convivencia',
+  'devoluciones colombia',
+  'farmacovigilancia',
+  'noreply',
+  'notificaciones',
+  'notificaciones olp',
+  'pedidos colombia',
+  'pqr colombia',
+  'servicio al cliente',
+  'talento humano',
+  'tecnovigilancia',
+]);
+const LOCALES_BUZON = new Set([
+  'admin',
+  'certificados',
+  'comex',
+  'comitedeconvivencia',
+  'devolucionescolombia',
+  'farmacovigilancia',
+  'no-reply',
+  'noreply',
+  'notificaciones',
+  'pedidoscolombia',
+  'pqrcolombia',
+  'servicioalcliente',
+  'talento',
+  'tecnovigilancia',
+]);
+
+/** true si el usuario es un buzón genérico y no una persona. */
+export function esBuzonGenerico(u: { nombre: string; correo: string }): boolean {
+  if (NOMBRES_BUZON.has(normalizarBusqueda(u.nombre))) return true;
+  const local = u.correo.split('@')[0]?.trim().toLowerCase() ?? '';
+  return LOCALES_BUZON.has(local);
+}
+
+/** Deja solo personas en cada grupo (conserva el estado y el orden). */
+export function soloPersonas(grupos: GrupoCorreo[]): GrupoCorreo[] {
+  return grupos.map((g) => ({ ...g, usuarios: g.usuarios.filter((u) => !esBuzonGenerico(u)) }));
+}
+
 /** Total de correos (usuarios) en una lista de grupos. */
 export function contarCorreos(grupos: GrupoCorreo[]): number {
   return grupos.reduce((total, g) => total + g.usuarios.length, 0);
