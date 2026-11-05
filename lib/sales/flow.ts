@@ -6,7 +6,7 @@ import { sapGet, sapGetAll, sapLogout, sapPatch, sapPost, SapError, type SapSess
 import { docKey, writeDoc } from '../sap/draftWrite';
 import { withStep, type TriggeredBy } from '../workflow-sap/executionLog';
 import { EVAL_FIELD_LABEL, optionsForCreditRecheck, optionsForSend, rejectedStateFor, traceFieldFor } from './flowOptions';
-import { buildOrderPayload, orderLookupFilter, type SalesDraft } from './publish';
+import { buildOrderPayload, orderLookupFilter, shipAddressProblem, type SalesDraft } from './publish';
 import {
   DEFAULT_RULES,
   destinoTrasAprobarPrecios,
@@ -16,6 +16,7 @@ import {
   type SalesRulesConfig,
 } from './rules';
 import { normalizeState } from './states';
+import { trmBlock } from './trm';
 
 /**
  * Ejecutores de las Tareas SAP del flujo «Oferta de venta» (dominio Ventas del
@@ -285,6 +286,9 @@ export async function moveToStage(idRequest: number, target: 'AP' | 'AE' | 'AEDA
   try {
     sap = await companySap(link.id_company);
     const s = sap;
+    // RN 2026-11-05: sin la TRM del día en SAP no se autoriza (SAP no dejaría crear el pedido).
+    const sinTrm = await trmBlock(s, link.id_company, todayBogota());
+    if (sinTrm) return { ok: false, error: sinTrm };
     // Serializado por borrador y con reintento ante −2039/412: la decisión del autorizador
     // (onSalesAuthorizationDecision) escribe en el mismo borrador (regresión 2026-11-04).
     const outcome = await writeDoc(docKey(link.id_company, 'Drafts', link.doc_entry), async () => {
@@ -352,7 +356,12 @@ export async function createOrder(idRequest: number, triggeredBy: TriggeredBy): 
       if (state == null || !['B', 'AP', 'AE', 'AEDA'].includes(state)) {
         return { ok: false, error: `La oferta no está en un estado que permita crear el pedido (estado: ${String(draft.U_SEND_State ?? 'sin estado')}).` };
       }
-      const payload = buildOrderPayload(draft, todayBogota());
+      const sinDireccion = shipAddressProblem(draft);
+      if (sinDireccion) return { ok: false, error: sinDireccion };
+      const today = todayBogota();
+      const sinTrm = await trmBlock(s, link.id_company, today);
+      if (sinTrm) return { ok: false, error: sinTrm };
+      const payload = buildOrderPayload(draft, today);
       order = await withStep(
         { idRequest, stepKind: 'sap', stepName: 'Crear pedido de venta', actionKey: 'sales.create_order', triggerEvent: 'on_execute', triggeredBy, idCompany: link.id_company, sapEntity: 'Orders', requestSummary: { borrador: link.doc_entry, lineas: payload.DocumentLines.length } },
         () => sapPost<{ DocEntry: number; DocNum?: number }>(s, 'Orders', payload),
@@ -375,6 +384,33 @@ export async function createOrder(idRequest: number, triggeredBy: TriggeredBy): 
     const msg = friendly(e);
     await updateLink(link.id, { status: 'publish_error', error: msg }).catch(() => undefined);
     return { ok: false, error: msg };
+  } finally {
+    if (sap) await sapLogout(sap);
+  }
+}
+
+/**
+ * RN 2026-11-05 (TRM): antes de guardar la APROBACIÓN de una tarea de autorización, si la
+ * solicitud es de Ventas y SAP no tiene la TRM del día, devuelve el mensaje de bloqueo.
+ * Si SAP no responde, no bloquea aquí (lo registra): las Tareas SAP vuelven a validar.
+ */
+export async function salesApprovalTrmBlock(idTask: number): Promise<string | null> {
+  const p = await pool();
+  const r = await p.request().input('t', sql.Int, idTask).query<{ id_request_general: number; is_authorization: boolean | number | null }>(`
+    SELECT TOP 1 trg.id_request_general, tpc.is_authorization
+    FROM task_request_general trg LEFT JOIN task_process_category tpc ON tpc.id = trg.id_task
+    WHERE trg.id = @t;`);
+  const row = r.recordset[0];
+  if (!row || !(row.is_authorization === true || Number(row.is_authorization) === 1)) return null;
+  const link = await salesLinkOf(Number(row.id_request_general));
+  if (!link || link.status !== 'pending') return null;
+  let sap: SapSession | null = null;
+  try {
+    sap = await companySap(link.id_company);
+    return await trmBlock(sap, link.id_company, todayBogota());
+  } catch (e) {
+    console.error(`[sales] no se pudo validar la TRM de la tarea ${idTask}:`, e);
+    return null;
   } finally {
     if (sap) await sapLogout(sap);
   }

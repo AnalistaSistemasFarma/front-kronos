@@ -35,6 +35,8 @@ vi.mock('mssql', () => {
 });
 vi.mock('../purchases/authorization', () => ({ companySap: vi.fn(async () => ({ baseUrl: 'x', sessionId: 's' })) }));
 vi.mock('../purchases/drafts', () => ({ todayBogota: () => '2026-11-04' }));
+// La TRM se prueba aparte (flow.trm.test.ts); aquí siempre está cargada.
+vi.mock('./trm', () => ({ trmBlock: async () => null }));
 vi.mock('../workflow-sap/executionLog', () => ({
   withStep: async (s: { stepName: string }, fn: () => Promise<unknown>) => {
     try {
