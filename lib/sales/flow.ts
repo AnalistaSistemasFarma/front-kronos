@@ -356,11 +356,17 @@ export async function createOrder(idRequest: number, triggeredBy: TriggeredBy): 
       if (state == null || !['B', 'AP', 'AE', 'AEDA'].includes(state)) {
         return { ok: false, error: `La oferta no está en un estado que permita crear el pedido (estado: ${String(draft.U_SEND_State ?? 'sin estado')}).` };
       }
+      // «Revisar dirección» y «sin TRM» también dejan la oferta en publish_error: así el borrador
+      // queda «Represado» en Ventas › Automatización con el mensaje y «Reintentar» (2026-11-05).
+      const blocked = async (error: string): Promise<ExecResult> => {
+        await updateLink(link.id, { status: 'publish_error', error }).catch(() => undefined);
+        return { ok: false, error };
+      };
       const sinDireccion = shipAddressProblem(draft);
-      if (sinDireccion) return { ok: false, error: sinDireccion };
+      if (sinDireccion) return await blocked(sinDireccion);
       const today = todayBogota();
       const sinTrm = await trmBlock(s, link.id_company, today);
-      if (sinTrm) return { ok: false, error: sinTrm };
+      if (sinTrm) return await blocked(sinTrm);
       const payload = buildOrderPayload(draft, today);
       order = await withStep(
         { idRequest, stepKind: 'sap', stepName: 'Crear pedido de venta', actionKey: 'sales.create_order', triggerEvent: 'on_execute', triggeredBy, idCompany: link.id_company, sapEntity: 'Orders', requestSummary: { borrador: link.doc_entry, lineas: payload.DocumentLines.length } },
