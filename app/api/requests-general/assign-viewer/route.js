@@ -20,12 +20,17 @@ export async function GET(req) {
       .request()
       .input("id_process_category", sql.Int, parseInt(id_process_category))
       .query(
-        `SELECT id_viewer FROM viewers_process_category WHERE id_process_category = @id_process_category`
+        `SELECT id_viewer, ISNULL(scope_department, 0) AS scope_department
+         FROM viewers_process_category WHERE id_process_category = @id_process_category`
       );
 
     const observers = result.recordset.map((r) => String(r.id_viewer));
+    const scopes = {};
+    for (const r of result.recordset) {
+      scopes[String(r.id_viewer)] = r.scope_department ? "department" : "all";
+    }
 
-    return NextResponse.json({ observers }, { status: 200 });
+    return NextResponse.json({ observers, scopes }, { status: 200 });
   } catch (err) {
     console.error("Error al obtener observadores:", err);
     return NextResponse.json(
@@ -64,18 +69,25 @@ export async function POST(req) {
       // Inserta una fila por observador
       const insertedIds = [];
       for (const viewer of observers) {
+        // Acepta string (legacy ⇒ 'all') o { id, scope }
+        const viewerId = typeof viewer === "object" && viewer !== null ? viewer.id : viewer;
+        const scopeDepartment =
+          typeof viewer === "object" && viewer !== null && viewer.scope === "department" ? 1 : 0;
         const result = await new sql.Request(transaction)
-          .input("id_viewer", sql.NVarChar(1000), String(viewer))
+          .input("id_viewer", sql.NVarChar(1000), String(viewerId))
           .input("id_process_category", sql.Int, id_process_category)
+          .input("scope_department", sql.Bit, scopeDepartment)
           .query(`
             INSERT INTO viewers_process_category (
               id_viewer,
-              id_process_category
+              id_process_category,
+              scope_department
             )
             OUTPUT INSERTED.id
             VALUES (
               @id_viewer,
-              @id_process_category
+              @id_process_category,
+              @scope_department
             );
           `);
         insertedIds.push(result.recordset[0].id);
