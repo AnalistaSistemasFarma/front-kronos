@@ -9,7 +9,7 @@ import { syncAuthorizationToSapsend } from '../../../../lib/sapsend/authorizatio
 import { onAuthorizationDecision as onPurchaseAuthorizationDecision } from '../../../../lib/purchases/authorization';
 import { runSapExecutors } from '../../../../lib/workflow-sap/engine';
 import { runAfterSettled } from '../../../../lib/workflow-sap/afterDecision';
-import { onSalesAuthorizationDecision } from '../../../../lib/sales/flow';
+import { onSalesAuthorizationDecision, salesApprovalTrmBlock } from '../../../../lib/sales/flow';
 import { advanceSequentialTask } from '../../../../lib/workflow/advanceSequentialTask.js';
 import { closeRequestGeneral } from '../../../../lib/workflow/closeRequestGeneral.js';
 import { resolveSessionUser } from '../../../../lib/chat/http';
@@ -47,6 +47,16 @@ export async function POST(req) {
         }),
         { status: 400 }
       );
+    }
+
+    // VENTAS (RN 2026-11-05): sin la TRM del día en SAP no se permite autorizar. Se valida ANTES
+    // de abrir la transacción para no retener bloqueos de BD mientras responde SAP.
+    if (Number(id_status) === 2) {
+      const sinTrm = await salesApprovalTrmBlock(Number(id));
+      if (sinTrm) {
+        console.warn(`${TAG} ✖ Autorización de ventas bloqueada por TRM (tarea ${id}).`);
+        return new Response(JSON.stringify({ error: sinTrm, code: 'TRM_MISSING' }), { status: 409 });
+      }
     }
 
     const pool = await sql.connect(sqlConfig);

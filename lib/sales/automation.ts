@@ -7,6 +7,7 @@ import { runSapExecutors } from '../workflow-sap/engine';
 import { withStep } from '../workflow-sap/executionLog';
 import { simulateDraft } from './flow';
 import { offerSubject } from './offer';
+import { shipAddressProblem } from './publish';
 import { normalizeState } from './states';
 
 /**
@@ -249,12 +250,19 @@ async function sendToFlow(sap: SapSession, cfg: AutomationConfig, c: Candidate, 
   if (!cfg.id_user_solicitante) throw new Error('Falta el solicitante en SynerLink en la configuración.');
 
   // Releer el borrador justo antes: debe seguir en B y sin enlace vivo.
-  const draft = await sapGet<Record<string, unknown>>(sap, `Drafts(${c.DocEntry})?$select=DocEntry,U_SEND_State,DocumentStatus,Comments,DocTotal,CardCode,CardName,DocumentLines`);
+  const draft = await sapGet<Record<string, unknown>>(
+    sap,
+    `Drafts(${c.DocEntry})?$select=DocEntry,U_SEND_State,DocumentStatus,Comments,DocTotal,CardCode,CardName,ShipToCode,AddressExtension,DocumentLines`
+  );
   const sinEstado = draft.U_SEND_State == null || String(draft.U_SEND_State).trim() === '';
   const state = normalizeState(draft.U_SEND_State);
   if ((state !== 'B' && !sinEstado) || draft.DocumentStatus !== 'bost_Open') {
     return { docEntry: c.DocEntry, estado: 'omitido', detalle: `El borrador ya no está en borrador abierto (estado ${state ?? String(draft.U_SEND_State)}).` };
   }
+  // Sin dirección de envío el pedido saldría sin municipio (factura electrónica): queda en el
+  // registro como error «Revisar dirección» y se vuelve a intentar en la próxima corrida.
+  const sinDireccion = shipAddressProblem(draft);
+  if (sinDireccion) throw new Error(sinDireccion);
   // Borrador de Salesforce sin estado: se marca en B para que el flujo lo evalúe (sin If-Match: el etag de Drafts es fijo).
   if (sinEstado) await sapPatch(sap, `Drafts(${c.DocEntry})`, { U_SEND_State: 'B' });
   const first = ((draft.DocumentLines as Record<string, unknown>[] | undefined) ?? [])[0];
