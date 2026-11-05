@@ -206,6 +206,10 @@ function RequestBoard() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const isMobile = useMediaQuery('(max-width: 48em)') ?? false;
   const [assignedTasks, setAssignedTasks] = useState<AssignedTask[]>([]);
+  // «Todo lo abierto»: tareas abiertas (no Resuelto/Cancelado, incluye Sin empezar) de las
+  // solicitudes que el usuario ve aquí, aunque estén asignadas a otra persona.
+  const [openAll, setOpenAll] = useState(false);
+  const [openScopeTasks, setOpenScopeTasks] = useState<AssignedTask[]>([]);
   const initialType = searchParams.get('type');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>(
     initialType === 'tasks' || initialType === 'requests' ? initialType : 'all'
@@ -260,7 +264,11 @@ function RequestBoard() {
       },
       parts: requestSearchParts(t),
     }));
-    const tasks: AssignedEntry[] = assignedTasks.map((t) => ({
+    const ownTaskIds = new Set(assignedTasks.map((t) => t.id));
+    const taskRows = openAll
+      ? [...assignedTasks, ...openScopeTasks.filter((t) => !ownTaskIds.has(t.id))]
+      : assignedTasks;
+    const tasks: AssignedEntry[] = taskRows.map((t) => ({
       item: { kind: 'task', key: `task-${t.id}`, data: t, createdAt: t.created_at },
       row: {
         requestId: t.id_request_general,
@@ -284,7 +292,7 @@ function RequestBoard() {
       ],
     }));
     return [...requests, ...tasks].sort((a, b) => byCreatedAtDesc(a.item, b.item));
-  }, [tickets, assignedTasks]);
+  }, [tickets, assignedTasks, openAll, openScopeTasks]);
 
   const listOptions = useMemo(() => buildListOptions(allEntries.map((e) => e.row)), [allEntries]);
   // Buscador + filtros del panel (sin estado ni tipo): base de las tarjetas y las pestañas.
@@ -333,7 +341,31 @@ function RequestBoard() {
     setCurrentPage(1);
   }, [filters, deferredSearch, typeFilter]);
 
+  const fetchOpenScopeTasks = async () => {
+    try {
+      const res = await fetch('/api/requests-general/activities-assigned?status=0&scope=open');
+      if (!res.ok) throw new Error('Failed to fetch open tasks');
+      const data: unknown = await res.json();
+      setOpenScopeTasks(Array.isArray(data) ? (data as AssignedTask[]) : []);
+    } catch (err) {
+      console.error('Error fetching open tasks:', err);
+      setOpenScopeTasks([]);
+    }
+  };
+
+  // Encendido: estado «Pendientes» y se traen las tareas abiertas del alcance; la empresa se
+  // elige con el filtro Empresa del panel.
+  const toggleOpenAll = () => {
+    const next = !openAll;
+    setOpenAll(next);
+    if (next) {
+      setFilters((f) => ({ ...f, status: 'pending' }));
+      void fetchOpenScopeTasks();
+    }
+  };
+
   const clearListFilters = () => {
+    setOpenAll(false);
     setFilters(EMPTY_LIST_FILTERS);
     setSearchInput('');
     setTypeFilter('all');
@@ -1229,6 +1261,15 @@ function RequestBoard() {
                 }
               />
             </Box>
+            <Button
+              variant={openAll ? 'filled' : 'light'}
+              size={isMobile ? 'xs' : 'sm'}
+              onClick={toggleOpenAll}
+              aria-pressed={openAll}
+              data-testid='open-all-filter'
+            >
+              Todo lo abierto
+            </Button>
             <SegmentedControl
               fullWidth={isMobile}
               size={isMobile ? 'xs' : 'sm'}

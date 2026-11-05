@@ -23,6 +23,10 @@ export async function GET(req) {
     const date_to = searchParams.get('date_to');
     const assigned_to = searchParams.get('assigned_to');
     const process = searchParams.get('process');
+    // scope=open ("Todo lo abierto"): además de las tareas propias, las tareas abiertas
+    // (cualquier estado distinto de 2 Resuelto / 3 Cancelado) de las solicitudes que el usuario
+    // ya ve en Asignadas por su proceso o categoría. No amplía el alcance de solicitudes.
+    const openScope = searchParams.get('scope') === 'open';
 
     console.log('API: idUser recibido:', idUser);
 
@@ -44,7 +48,21 @@ export async function GET(req) {
         WHERE 1=1
     `;
 
-    if (idUser) {
+    if (idUser && openScope) {
+      query += `
+        AND trg.id_status NOT IN (2, 3)
+        AND (
+          trg.id_assigned = @idUser
+          OR EXISTS (
+            SELECT 1 FROM user_process_category_request_general upcrg
+            WHERE upcrg.id_process_category = pc.id AND upcrg.id_user = @idUser
+          )
+          OR EXISTS (
+            SELECT 1 FROM user_category_request_general ucrg
+            WHERE ucrg.id_category = cr.id AND ucrg.id_user = @idUser
+          )
+        )`;
+    } else if (idUser) {
       query += ` AND trg.id_assigned = @idUser`;
       console.log('API activities: Agregando filtro por assigned user:', idUser);
     } else {
