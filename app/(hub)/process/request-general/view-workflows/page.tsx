@@ -492,9 +492,9 @@ if (session?.user?.id) return session.user.id as unknown as number;
         }
         if (data.processCategories) {
           setLinkedProcessOptions(
-            data.processCategories.map((p: { id_process: number; process: string }) => ({
+            data.processCategories.map((p: { id_process: number; process: string; company?: string | null }) => ({
               value: p.id_process.toString(),
-              label: p.process,
+              label: p.company ? `${p.process} — ${p.company}` : p.process,
             }))
           );
         }
