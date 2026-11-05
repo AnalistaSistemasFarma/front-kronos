@@ -393,17 +393,18 @@ export interface ConsultaGrilla {
 export function consultarFilas(
   filas: Celda[][],
   c: ConsultaGrilla
-): { total: number; filas: Celda[][]; pagina: number; porPagina: number } {
+): { total: number; filas: Celda[][]; indices: number[]; pagina: number; porPagina: number } {
   const porPagina = Math.min(Math.max(c.porPagina ?? 100, 10), 500);
-  let res = filas;
+  // Se trabaja con el índice ORIGINAL de cada fila: la edición lo usa para saber qué fila cambió.
+  let res = filas.map((f, i) => ({ f, i }));
   const q = c.q?.trim().toLowerCase();
-  if (q) res = res.filter((f) => f.some((v) => v !== null && String(v).toLowerCase().includes(q)));
+  if (q) res = res.filter(({ f }) => f.some((v) => v !== null && String(v).toLowerCase().includes(q)));
   if (c.ordenarPor !== undefined && c.ordenarPor >= 0) {
-    const i = c.ordenarPor;
+    const col = c.ordenarPor;
     const dir = c.descendente ? -1 : 1;
     res = [...res].sort((a, b) => {
-      const x = a[i] ?? null;
-      const y = b[i] ?? null;
+      const x = a.f[col] ?? null;
+      const y = b.f[col] ?? null;
       if (x === y) return 0;
       if (x === null) return 1;
       if (y === null) return -1;
@@ -413,12 +414,73 @@ export function consultarFilas(
   }
   const paginas = Math.max(1, Math.ceil(res.length / porPagina));
   const pagina = Math.min(Math.max(c.pagina ?? 1, 1), paginas);
-  return {
-    total: res.length,
-    filas: res.slice((pagina - 1) * porPagina, pagina * porPagina),
-    pagina,
-    porPagina,
-  };
+  const trozo = res.slice((pagina - 1) * porPagina, pagina * porPagina);
+  return { total: res.length, filas: trozo.map((x) => x.f), indices: trozo.map((x) => x.i), pagina, porPagina };
+}
+
+/* ───────────────────────────── Edición ───────────────────────────── */
+
+/*
+ * EDITAR DENTRO DE SYNERLINK (2026-11-05, Nicolás Rivera: «debería poderse ver en pantalla
+ * completa incluso editar dentro, para que no tengan que hacer cosas por fuera del Excel»).
+ * Cada «Guardar» crea una VERSIÓN nueva (el historial y la trazabilidad se conservan): se
+ * aplican los cambios de celdas, las filas nuevas y las borradas sobre la versión de base.
+ */
+
+export const MAX_CAMBIOS_EDICION = 20_000;
+
+export interface EdicionHoja {
+  /** Cambios de celdas: fila = índice original en la hoja; col = índice de columna. */
+  cambios: { fila: number; col: number; valor: string }[];
+  /** Filas nuevas al final (textos en el orden de las columnas). */
+  nuevas: string[][];
+  /** Índices originales de las filas a borrar. */
+  borrar: number[];
+}
+
+/** Lo que escribió la persona → valor de la celda según el tipo de la columna. */
+export function valorDesdeTexto(texto: string, tipo: TipoColumna): Celda {
+  const v = normalizarCelda(texto);
+  if (v === null || typeof v !== 'string') return v;
+  if (tipo === 'booleano') {
+    const t = v.toLowerCase();
+    if (['sí', 'si', 'verdadero', 'true', 'x', '1'].includes(t)) return true;
+    if (['no', 'falso', 'false', '0'].includes(t)) return false;
+  }
+  return convertir(v, tipo);
+}
+
+export type ResultadoEdicion = { ok: true; filas: Celda[][]; resumen: string } | { ok: false; error: string };
+
+/** Aplica una edición a las filas de una hoja (puro). */
+export function aplicarEdicion(columnas: ColumnaMatriz[], filasBase: Celda[][], e: EdicionHoja): ResultadoEdicion {
+  const total = e.cambios.length + e.nuevas.length + e.borrar.length;
+  if (total === 0) return { ok: false, error: 'No hay cambios para guardar.' };
+  if (total > MAX_CAMBIOS_EDICION) return { ok: false, error: `Son demasiados cambios a la vez (máximo ${MAX_CAMBIOS_EDICION}).` };
+  const filas = filasBase.map((f) => [...f]);
+  let celdas = 0;
+  for (const c of e.cambios) {
+    if (!Number.isInteger(c.fila) || c.fila < 0 || c.fila >= filas.length) return { ok: false, error: 'Un cambio apunta a una fila que no existe. Recargue la matriz.' };
+    if (!Number.isInteger(c.col) || c.col < 0 || c.col >= columnas.length) return { ok: false, error: 'Un cambio apunta a una columna que no existe. Recargue la matriz.' };
+    const nuevo = valorDesdeTexto(String(c.valor ?? ''), columnas[c.col].tipo);
+    if (filas[c.fila][c.col] !== nuevo) {
+      filas[c.fila][c.col] = nuevo;
+      celdas += 1;
+    }
+  }
+  const borrar = new Set(e.borrar.filter((i) => Number.isInteger(i) && i >= 0 && i < filas.length));
+  const quedan = filas.filter((_, i) => !borrar.has(i));
+  const nuevas = e.nuevas
+    .map((f) => columnas.map((c, i) => valorDesdeTexto(String(f[i] ?? ''), c.tipo)))
+    .filter((f) => f.some((v) => v !== null));
+  const resultado = [...quedan, ...nuevas];
+  if (resultado.length > MATRIZ_MAX_FILAS_HOJA) return { ok: false, error: `La hoja no puede pasar de ${MATRIZ_MAX_FILAS_HOJA} filas.` };
+  const partes: string[] = [];
+  if (celdas > 0) partes.push(`${celdas} ${celdas === 1 ? 'celda cambiada' : 'celdas cambiadas'}`);
+  if (nuevas.length > 0) partes.push(`${nuevas.length} ${nuevas.length === 1 ? 'fila agregada' : 'filas agregadas'}`);
+  if (borrar.size > 0) partes.push(`${borrar.size} ${borrar.size === 1 ? 'fila borrada' : 'filas borradas'}`);
+  if (partes.length === 0) return { ok: false, error: 'Los valores quedaron iguales: no hay nada que guardar.' };
+  return { ok: true, filas: resultado, resumen: partes.join(', ') };
 }
 
 /** Qué cambió frente a la versión anterior, en palabras (para el historial). */

@@ -32,6 +32,7 @@ import {
   IconUsersGroup,
 } from '@tabler/icons-react';
 import { chatFetch } from '../../lib/chat/client';
+import { urlReenviarAdjunto } from '../../lib/chat/visor';
 import {
   AVISO_HOJA_FALLO,
   ETIQUETA_TIPO,
@@ -264,7 +265,7 @@ function ReenviarModal({ adjunto, onClose, onListo }: { adjunto: AdjuntoVisor; o
   const [elegido, setElegido] = useState<DestinoReenvio | null>(null);
   const [nota, setNota] = useState('');
   const [enviando, setEnviando] = useState(false);
-  const url = `/api/chat/attachments/${adjunto.id}/reenviar`;
+  const url = urlReenviarAdjunto(adjunto.downloadUrl, adjunto.id);
 
   useEffect(() => {
     const ctrl = new AbortController();

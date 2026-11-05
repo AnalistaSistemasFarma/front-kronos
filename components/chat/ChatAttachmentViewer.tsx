@@ -240,7 +240,8 @@ export default function ChatAttachmentViewer({
           <VistaImagen
             key={actual.id}
             // La misma URL de la miniatura: ya está en la caché del navegador.
-            src={urlImagenEnLinea(actual.downloadUrl)}
+            // Archivos de proyecto (2026-11-05): la imagen en línea sale de su ruta de vista.
+            src={vista && !actual.downloadUrl.startsWith('/api/chat/') ? vista : urlImagenEnLinea(actual.downloadUrl)}
             alt={actual.fileName}
             zoom={zoom}
             setZoom={setZoom}
