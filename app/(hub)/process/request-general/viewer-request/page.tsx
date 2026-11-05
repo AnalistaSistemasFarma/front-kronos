@@ -89,6 +89,7 @@ interface Ticket {
   company: string;
   subject: string;
   date_resolution: string | null;
+  process?: string | null;
 }
 
 interface CompanyData {
@@ -114,7 +115,31 @@ interface ConsultResponse {
   categories: CategoryData[];
   processCategories: ProcessCategoryData[];
   assignedUsers: { id: string; name: string }[];
+  categoriesNew?: { category: string }[];
+  processCategoriesNew?: { process: string }[];
 }
+
+type ViewerFilters = {
+  status: string;
+  company: string;
+  date_from: string;
+  date_to: string;
+  assigned_to: string;
+  category: string;
+  process: string;
+  department: string;
+};
+
+const EMPTY_FILTERS: ViewerFilters = {
+  status: '0',
+  company: '',
+  date_from: '',
+  date_to: '',
+  assigned_to: '',
+  category: '',
+  process: '',
+  department: '',
+};
 
 function ViewerRequestGeneralPage() {
   const { data: session, status } = useSession();
@@ -157,13 +182,17 @@ function ViewerRequestGeneralPage() {
   const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
   const [folderContents, setFolderContents] = useState([]);
 
-  const [filters, setFilters] = useState({
-    status: '0',
-    company: '',
-    date_from: '',
-    date_to: '',
-    assigned_to: '',
-  });
+  const [filters, setFilters] = useState<ViewerFilters>(EMPTY_FILTERS);
+  const [categoryFilterOptions, setCategoryFilterOptions] = useState<
+    { value: string; label: string }[]
+  >([]);
+  const [processFilterOptions, setProcessFilterOptions] = useState<
+    { value: string; label: string }[]
+  >([]);
+  const [departmentOptions, setDepartmentOptions] = useState<{ value: string; label: string }[]>(
+    []
+  );
+  const [appliedFilters, setAppliedFilters] = useState<ViewerFilters>(EMPTY_FILTERS);
   const [currentPage, setCurrentPage] = useState(1);
 
   // Paginación en cliente: al cambiar el conjunto de tickets (nuevo fetch / filtros) vuelve a página 1.
@@ -301,6 +330,9 @@ function ViewerRequestGeneralPage() {
       if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
       if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
       if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
+      if (filtersToUse.category) params.append('category', filtersToUse.category);
+      if (filtersToUse.process) params.append('process', filtersToUse.process);
+      if (filtersToUse.department) params.append('department', filtersToUse.department);
 
       const url = `/api/requests-general/viewer-request?${params.toString()}`;
 
@@ -309,6 +341,7 @@ function ViewerRequestGeneralPage() {
       if (!response.ok) throw new Error('Failed to fetch tickets');
 
       const data = await response.json();
+      setAppliedFilters(filtersToUse);
       console.log('fetchTicketsWithUserId: Tickets recibidos:', data.length, 'tickets');
       setTickets(data);
       fetchTasksForTickets(data);
@@ -430,6 +463,12 @@ function ViewerRequestGeneralPage() {
         if (data.assignedUsers) {
           setAssignedUsers(data.assignedUsers.map((u) => ({ value: u.name, label: u.name })));
         }
+        setCategoryFilterOptions(
+          (data.categoriesNew || []).map((c) => ({ value: c.category, label: c.category }))
+        );
+        setProcessFilterOptions(
+          (data.processCategoriesNew || []).map((p) => ({ value: p.process, label: p.process }))
+        );
       } else {
         console.error('Frontend - fetchFormData failed with status:', response.status);
         setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
@@ -439,6 +478,20 @@ function ViewerRequestGeneralPage() {
       setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
     } finally {
       setFormDataLoading(false);
+    }
+
+    try {
+      const depRes = await fetch('/api/help-desk/departments');
+      if (depRes.ok) {
+        const deps: { id_department: number; department: string }[] = await depRes.json();
+        if (Array.isArray(deps)) {
+          setDepartmentOptions(
+            deps.map((d) => ({ value: String(d.id_department), label: d.department }))
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching departments:', err);
     }
   };
 
@@ -546,6 +599,31 @@ function ViewerRequestGeneralPage() {
     '7': 'Devuelta',
   };
 
+  const departmentLabel = (id: string) =>
+    id ? departmentOptions.find((d) => d.value === id)?.label || id : 'Todos';
+
+  const appliedFilterBadges = [
+    appliedFilters.status && appliedFilters.status !== '0'
+      ? { label: 'Estado', value: VIEWER_STATUS_LABELS[appliedFilters.status] || appliedFilters.status }
+      : null,
+    appliedFilters.company
+      ? {
+          label: 'Empresa',
+          value:
+            companies.find((c) => c.value === appliedFilters.company)?.label ||
+            appliedFilters.company,
+        }
+      : null,
+    appliedFilters.category ? { label: 'Categoría', value: appliedFilters.category } : null,
+    appliedFilters.process ? { label: 'Proceso', value: appliedFilters.process } : null,
+    appliedFilters.department
+      ? { label: 'Departamento', value: departmentLabel(appliedFilters.department) }
+      : null,
+    appliedFilters.assigned_to ? { label: 'Asignado', value: appliedFilters.assigned_to } : null,
+    appliedFilters.date_from ? { label: 'Desde', value: appliedFilters.date_from } : null,
+    appliedFilters.date_to ? { label: 'Hasta', value: appliedFilters.date_to } : null,
+  ].filter((b): b is { label: string; value: string } => b !== null);
+
   async function exportToExcel() {
     if (exporting) return;
     if (tickets.length === 0) {
@@ -555,22 +633,27 @@ function ViewerRequestGeneralPage() {
     setExporting(true);
     try {
       const { boardExportFilename, buildBoardWorkbook } = await import('@/lib/request-general/exportBoardExcel');
+      const applied = appliedFilters;
       const companyLabel =
-        companies.find((company) => company.value === filters.company)?.label || 'Todas';
+        companies.find((company) => company.value === applied.company)?.label || 'Todas';
       const assignedLabel =
-        assignedUsers.find((user) => user.value === filters.assigned_to)?.label || 'Todas';
+        assignedUsers.find((user) => user.value === applied.assigned_to)?.label || 'Todas';
       const workbook = await buildBoardWorkbook({
         module: 'Mis solicitudes',
         filters: [
-          { label: 'Estado', value: VIEWER_STATUS_LABELS[filters.status] || 'Todos' },
+          { label: 'Estado', value: VIEWER_STATUS_LABELS[applied.status] || 'Todos' },
           { label: 'Empresa', value: companyLabel },
+          { label: 'Categoría', value: applied.category || 'Todas' },
+          { label: 'Proceso', value: applied.process || 'Todos' },
+          { label: 'Departamento del solicitante', value: departmentLabel(applied.department) },
           { label: 'Persona asignada', value: assignedLabel },
-          { label: 'Fecha desde', value: filters.date_from || 'Sin límite' },
-          { label: 'Fecha hasta', value: filters.date_to || 'Sin límite' },
+          { label: 'Fecha desde', value: applied.date_from || 'Sin límite' },
+          { label: 'Fecha hasta', value: applied.date_to || 'Sin límite' },
         ],
         requests: tickets.map((ticket) => ({
           id: ticket.id,
           subject: ticket.subject,
+          process: ticket.process,
           category: ticket.category,
           company: ticket.company,
           status: ticket.status,
@@ -875,28 +958,59 @@ function ViewerRequestGeneralPage() {
                     data-testid='assigned_to-filter'
                   />
                 </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <Select
+                    label='Categoría'
+                    placeholder='Todas las categorías'
+                    clearable
+                    searchable
+                    data={categoryFilterOptions}
+                    value={filters.category || null}
+                    onChange={(value) => handleFilterChange('category', value || '')}
+                    leftSection={<IconFileDescription size={16} />}
+                    data-testid='category-filter'
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <Select
+                    label='Proceso'
+                    placeholder='Todos los procesos'
+                    clearable
+                    searchable
+                    data={processFilterOptions}
+                    value={filters.process || null}
+                    onChange={(value) => handleFilterChange('process', value || '')}
+                    leftSection={<IconFileDescription size={16} />}
+                    data-testid='process-filter'
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <Select
+                    label='Departamento del solicitante'
+                    placeholder='Todos'
+                    clearable
+                    searchable
+                    data={departmentOptions}
+                    value={filters.department || null}
+                    onChange={(value) => handleFilterChange('department', value || '')}
+                    leftSection={<IconBuilding size={16} />}
+                    data-testid='department-filter'
+                  />
+                </Grid.Col>
               </Grid>
 
               <Group justify='flex-end' mt='md'>
                 <Button
                   variant='outline'
                   onClick={async () => {
-                    const clearedFilters = {
-                      status: '0',
-                      company: '',
-                      date_from: '',
-                      date_to: '',
-                      assigned_to: '',
-                    };
+                    const clearedFilters = { ...EMPTY_FILTERS };
                     setFilters(clearedFilters);
 
                     setError(null);
 
-                    setTimeout(async () => {
-                      if (userId) {
-                        await fetchTicketsWithUserId(userId);
-                      }
-                    }, 100);
+                    if (userId) {
+                      await fetchTicketsWithUserId(userId, clearedFilters);
+                    }
                   }}
                   leftSection={<IconX size={16} />}
                   data-testid='clear-filters'
@@ -923,6 +1037,19 @@ function ViewerRequestGeneralPage() {
             <IconFileDescription size={20} />
             Lista de Solicitudes
           </Title>
+
+          {appliedFilterBadges.length > 0 && (
+            <Group gap='xs' mb='md' data-testid='applied-filters'>
+              <Text size='sm' c='dimmed'>
+                Filtros aplicados:
+              </Text>
+              {appliedFilterBadges.map((b) => (
+                <Badge key={b.label} variant='light' color='blue'>
+                  {b.label}: {b.value}
+                </Badge>
+              ))}
+            </Group>
+          )}
 
           <div className='overflow-x-auto'>
             <Table striped highlightOnHover>
