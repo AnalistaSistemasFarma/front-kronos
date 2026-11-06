@@ -488,6 +488,29 @@ export async function retryDoc(idCompany: number, idDoc: number, usuario: string
   return { ok: false, accion: 'reenviar', detalle: res.error || res.detalle || 'No se pudo pasar al flujo.' };
 }
 
+/** Máximo de represados que se reintentan en una sola acción masiva. */
+export const MAX_REINTENTO_MASIVO = 30;
+
+/** «Reintentar todos»: repite, uno a uno, la acción que falló en cada borrador represado (hasta MAX_REINTENTO_MASIVO). */
+export async function retryAll(idCompany: number, usuario: string | null): Promise<{ total: number; ok: number; fallidos: number; pendientes: number; resultados: { idDoc: number; docEntry: number; ok: boolean; detalle: string }[] }> {
+  const p = await pool();
+  const r = await p.request().input('c', sql.Int, idCompany).query(`
+    SELECT d.id, d.doc_entry FROM dbo.sales_automation_doc d LEFT JOIN dbo.sales_authorization sa ON sa.id_request_general = d.id_request_general
+    WHERE d.id_company = @c AND ${REPRESADO_SQL} ORDER BY d.id;`);
+  const rows = r.recordset as { id: number; doc_entry: number }[];
+  const resultados: { idDoc: number; docEntry: number; ok: boolean; detalle: string }[] = [];
+  for (const row of rows.slice(0, MAX_REINTENTO_MASIVO)) {
+    try {
+      const x = await retryDoc(idCompany, row.id, usuario);
+      resultados.push({ idDoc: row.id, docEntry: row.doc_entry, ok: x.ok, detalle: x.detalle });
+    } catch (e) {
+      resultados.push({ idDoc: row.id, docEntry: row.doc_entry, ok: false, detalle: friendly(e) });
+    }
+  }
+  const ok = resultados.filter((x) => x.ok).length;
+  return { total: resultados.length, ok, fallidos: resultados.length - ok, pendientes: Math.max(0, rows.length - resultados.length), resultados };
+}
+
 /** Datos del panel: KPIs, registro y corridas. */
 export async function panelData(idCompany: number) {
   const p = await pool();
