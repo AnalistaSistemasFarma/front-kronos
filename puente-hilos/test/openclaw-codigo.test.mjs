@@ -205,3 +205,36 @@ test('alcance por rutas (Kepler: solo dashboards)', () => {
   for (const malo of [{}, { rutas: [] }, { rutas: ['/etc/**'] }, { rutas: ['../x'] }]) assert.throws(() => leerRutasPermitidas('/x', () => JSON.stringify(malo)), /RUTAS_PERMITIDAS/);
   assert.match(textoCodigoOpenclaw({ worktrees: [], guardia: { git: 'g', gh: 'h' }, tokenListo: true, rutasPermitidas: R }), /Alcance.*lib\/dashboards/);
 });
+
+import { motivoNoFusionar } from '../src/openclaw/guardia.mjs';
+import { leerAlcance } from '../src/openclaw/codigo.mjs';
+
+test('fusión a testing (Kepler): solo `pr merge <n> --merge --admin` y con todas las condiciones', () => {
+  const ok = (a, o = {}) => validarGh(a, { repos: REPOS, repoCwd: 'AnalistaSistemasFarma/front-kronos', mergePruebas: true, ...o });
+  const v = ok(['pr', 'merge', '12', '--merge', '--admin']);
+  assert.equal(v.ok, true);
+  assert.deepEqual(v.merge, { numero: 12, base: 'testing' });
+  assert.equal(ok(['pr', 'merge', '12', '--admin', '--merge']).ok, true);
+  for (const a of [['pr', 'merge', '12', '--merge', '--admin', '--delete-branch'], ['pr', 'merge', '12', '--squash', '--admin'], ['pr', 'merge', '12', '--rebase', '--admin'], ['pr', 'merge', '12', '--merge'], ['pr', 'merge', '--merge', '--admin'], ['pr', 'merge', '12', '--merge', '--admin', '--auto']]) {
+    assert.equal(ok(a).ok, false, a.join(' '));
+  }
+  assert.equal(ok(['pr', 'merge', '12', '--merge', '--admin'], { mergePruebas: false }).ok, false, 'sin la bandera, prohibido');
+  assert.equal(ok(['pr', 'merge', '12', '--merge', '--admin'], { repoCwd: null }).ok, false, 'fuera del worktree no');
+  const R = ['app/(hub)/process/dashboards/**', 'lib/dashboards/**'];
+  const CH = ['Front — tsc, lint, build, tests', 'MCP — build y tests'];
+  const verde = [{ name: CH[0], conclusion: 'SUCCESS' }, { name: CH[1], conclusion: 'SUCCESS' }, { name: 'otro', conclusion: 'SKIPPED' }];
+  const pr = { state: 'OPEN', baseRefName: 'testing', headRefName: 'proyecto/22-c166', isDraft: false, files: [{ path: 'lib/dashboards/a.ts' }], statusCheckRollup: verde };
+  const o = { base: 'testing', rutasPermitidas: R, checksRequeridos: CH };
+  assert.equal(motivoNoFusionar(pr, o), null);
+  assert.match(motivoNoFusionar({ ...pr, baseRefName: 'main' }, o), /solo se fusiona a testing/);
+  assert.match(motivoNoFusionar({ ...pr, headRefName: 'feat/x' }, o), /no es proyecto/);
+  assert.match(motivoNoFusionar({ ...pr, isDraft: true }, o), /borrador/);
+  assert.match(motivoNoFusionar({ ...pr, files: [{ path: 'lib/dashboards/a.ts' }, { path: 'package.json' }] }, o), /fuera de alcance: package.json/);
+  assert.match(motivoNoFusionar({ ...pr, statusCheckRollup: [verde[0]] }, o), /falta el check/);
+  assert.match(motivoNoFusionar({ ...pr, statusCheckRollup: [verde[0], { name: CH[1], status: 'IN_PROGRESS', conclusion: '' }] }, o), /no está en verde/);
+  assert.match(motivoNoFusionar({ ...pr, state: 'MERGED' }, o), /no está abierto/);
+  assert.match(motivoNoFusionar(pr, { ...o, rutasPermitidas: null }), /no hay rutas/);
+  assert.deepEqual(leerAlcance('/x', () => JSON.stringify({ rutas: R, mergePruebas: true, checksRequeridos: CH })), { rutas: R, mergePruebas: true, checksRequeridos: CH });
+  assert.throws(() => leerAlcance('/x', () => JSON.stringify({ rutas: R, mergePruebas: true })), /exige checksRequeridos/);
+  assert.match(textoCodigoOpenclaw({ worktrees: [], guardia: { git: 'g', gh: 'h' }, tokenListo: true, rutasPermitidas: R, mergePruebas: true }), /--merge --admin.*Nicolás Rivera y Horus/s);
+});

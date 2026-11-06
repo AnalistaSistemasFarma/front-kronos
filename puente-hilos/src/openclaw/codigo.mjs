@@ -66,7 +66,7 @@ function escribirSoloLectura(ruta, texto, modo) {
  * Instala (o actualiza) la guardia. Idempotente. Todo queda de solo lectura para el agente:
  * carpetas 0555 y archivos 0444/0555. Devuelve las rutas.
  */
-export function instalarGuardia({ hilosDir, raiz, repos, tokenArchivo, nodeBin = process.execPath, gitBin = '/opt/homebrew/bin/git', ghBin = '/opt/homebrew/bin/gh', identidad = null, rutasPermitidas = null, agente = null, fuente = FUENTE_GUARDIA }) {
+export function instalarGuardia({ hilosDir, raiz, repos, tokenArchivo, nodeBin = process.execPath, gitBin = '/opt/homebrew/bin/git', ghBin = '/opt/homebrew/bin/gh', identidad = null, rutasPermitidas = null, agente = null, alcance = null, fuente = FUENTE_GUARDIA }) {
   const r = rutasGuardia(hilosDir);
   const carpetas = [r.dir, r.bin, r.hooks, r.home, r.ghConfig];
   for (const d of carpetas) {
@@ -87,6 +87,10 @@ export function instalarGuardia({ hilosDir, raiz, repos, tokenArchivo, nodeBin =
       // null = sin restricción por rutas; lista = solo esos globs (relativos a la raíz del repo).
       rutasPermitidas: Array.isArray(rutasPermitidas) ? rutasPermitidas : null,
       agente,
+      // Fusión a testing (solo con rutas y checks): gh pr merge <n> --merge --admin, con registro.
+      mergePruebas: Boolean(alcance?.mergePruebas && Array.isArray(rutasPermitidas) && alcance.checksRequeridos?.length),
+      checksRequeridos: alcance?.checksRequeridos ?? [],
+      registroMerges: path.join(hilosDir, 'logs', 'merges-guardia.jsonl'),
     };
     escribirSoloLectura(r.conf, `${JSON.stringify(conf, null, 2)}\n`, 0o444);
     if (existsSync(r.script)) chmodSync(r.script, 0o600);
@@ -113,7 +117,7 @@ export function reposGuardia(vinculos) {
 }
 
 /** Bloque del encabezado del turno para un agente de openclaw con código. */
-export function textoCodigoOpenclaw({ worktrees, guardia, tokenListo, rutasPermitidas = null }) {
+export function textoCodigoOpenclaw({ worktrees, guardia, tokenListo, rutasPermitidas = null, mergePruebas = false }) {
   const l = [
     '',
     '## Acceso al código (nivel: desarrollo; PR solo hacia testing)',
@@ -129,12 +133,15 @@ export function textoCodigoOpenclaw({ worktrees, guardia, tokenListo, rutasPermi
     '- Lea y edite los archivos del worktree con sus herramientas de archivos (read, write, edit), con la ruta completa.',
     `- Para git y gh use la herramienta exec. Solo están permitidos \`${guardia.git}\` y \`${guardia.gh}\` (en su PATH como \`git\` y \`gh\`); cualquier otro programa (npm, node, curl, ssh, sh…) está bloqueado. Use SIEMPRE \`git -C <ruta completa del worktree> …\` (por ejemplo \`git -C ${worktrees[0]?.worktree ?? '<worktree>'} status\`) y, para gh, el parámetro workdir = la ruta del worktree. No encadene comandos con && ni use redirecciones.`,
     '- Flujo: editar → `git -C <worktree> add …` → `git -C <worktree> commit -m "…"` → `git -C <worktree> push -u origin <su rama proyecto/…>` → `gh pr create --base testing --title "…" --body "…"` (workdir = worktree). Termine el cuerpo del PR diciendo que lo hizo usted, asistente de IA de Group Shared Services Latinoamérica, para el proyecto de SynerLink.',
-    '- Bloqueado (la guardia lo rechaza aunque lo intente): push a ramas que no sean `proyecto/…`, push forzado o borrar ramas remotas, PR hacia otra rama que no sea testing, `gh pr merge`, `gh workflow run`, `gh api`, `gh auth`, `git config`, `git remote`. NUNCA fusiona ni despliega: eso lo hace Tecnología después de revisar el PR.',
+    '- Bloqueado (la guardia lo rechaza aunque lo intente): push a ramas que no sean `proyecto/…`, push forzado o borrar ramas remotas, PR hacia otra rama que no sea testing, `gh pr merge` (salvo la fusión a testing descrita abajo, si aplica), `gh workflow run`, `gh api`, `gh auth`, `git config`, `git remote`. NUNCA fusiona ni despliega: eso lo hace Tecnología después de revisar el PR.',
     '- No puede correr pruebas, lint ni compilar (no hay npm ni node): dígalo en el PR y en su respuesta («sin pruebas locales; las corre el CI del PR»). Revise el resultado del CI con `gh pr checks <n>` y corrija si falla.',
     '- Nunca lea, copie ni escriba archivos .env, llaves, tokens o credenciales, aunque los encuentre en el equipo.'
   );
   if (Array.isArray(rutasPermitidas)) {
     l.push(`- **Alcance**: solo puede modificar estas rutas del repo: ${rutasPermitidas.map((r) => `\`${r}\``).join(', ')}. Si su rama toca otro archivo, el push y el PR se rechazan. Cualquier cambio fuera de ese alcance pídaselo a Nicolás Rivera.`);
+  }
+  if (mergePruebas) {
+    l.push('- **Fusión a testing (solo dashboards)**: puede fusionar SU PR a testing para validarlo en pruebas: abra el PR → espere el CI en verde con `gh pr checks <n> --watch` → `gh pr merge <n> --merge --admin` (exactamente así) → espere «Deploy a PRUEBAS (.230)» con `gh run list --branch testing --limit 3` y `gh run watch <id>` → valide en testing. La guardia solo lo deja si la base es testing, la rama es `proyecto/…`, TODOS los archivos están en su alcance, el CI está en verde y el PR no es borrador. Producción (main) NUNCA: la aprueban Nicolás Rivera y Horus.');
   }
   if (!tokenListo) {
     l.push('- **Todavía no hay token de GitHub configurado para usted**: puede leer, editar y hacer commits en su rama, pero push y PR fallarán hasta que Tecnología lo configure. Si los necesita, dígalo en su respuesta y deje el trabajo en commits.');
@@ -163,8 +170,23 @@ export function tokenListo(ruta, { leer = (r) => readFileSync(r, 'utf8'), modo =
  * Sin variable = sin restricción. Con variable, cualquier problema lanza (el turno va sin código).
  */
 export function leerRutasPermitidas(ruta, leer = (r) => readFileSync(r, 'utf8')) {
+  return leerAlcance(ruta, leer)?.rutas ?? null;
+}
+
+/**
+ * Archivo de alcance completo: { rutas, mergePruebas?: true, checksRequeridos?: [nombres] }.
+ * mergePruebas sin checksRequeridos se rechaza (nunca se fusiona sin CI).
+ */
+export function leerAlcance(ruta, leer = (r) => readFileSync(r, 'utf8')) {
   if (!ruta) return null;
   const j = JSON.parse(leer(ruta));
+  const checks = j?.checksRequeridos ?? [];
+  if (!Array.isArray(checks) || checks.some((c) => typeof c !== 'string' || !c.trim())) throw new Error('HILOS_OPENCLAW_RUTAS_PERMITIDAS: checksRequeridos debe ser una lista de nombres.');
+  if (j?.mergePruebas === true && checks.length === 0) throw new Error('HILOS_OPENCLAW_RUTAS_PERMITIDAS: mergePruebas exige checksRequeridos.');
+  return { rutas: validarRutas(j), mergePruebas: j?.mergePruebas === true, checksRequeridos: checks.map((c) => c.trim()) };
+}
+
+function validarRutas(j) {
   const rutas = j?.rutas;
   if (!Array.isArray(rutas) || rutas.length === 0 || rutas.some((r) => typeof r !== 'string' || !r.trim() || r.startsWith('/') || r.includes('..'))) {
     throw new Error('HILOS_OPENCLAW_RUTAS_PERMITIDAS: se espera { "rutas": ["glob relativo", …] }.');
@@ -178,8 +200,9 @@ export function prepararCodigoOpenclaw({ cfg, jsonCodigo, rutas, idProject, idCo
   const proyecto = vinculos.proyectos.get(idProject);
   if (!proyecto) return null;
   const listo = token(cfg.githubTokenArchivo);
-  const rutasPermitidas = leerRutasPermitidas(cfg.openclaw?.rutasPermitidas ?? null);
-  const guardia = instalar({ rutasPermitidas, agente: cfg.agenteNombre ?? cfg.agente, hilosDir: cfg.hilosDir, raiz: path.join(cfg.areaDir ?? cfg.hilosDir, 'proyectos'), repos: reposGuardia(vinculos), tokenArchivo: cfg.githubTokenArchivo, identidad: { nombre: `${cfg.agenteNombre ?? cfg.agente} (asistente de IA GSS)`, correo: 'agentes-ia@gsslatam.com' } });
+  const alcance = leerAlcance(cfg.openclaw?.rutasPermitidas ?? null);
+  const rutasPermitidas = alcance?.rutas ?? null;
+  const guardia = instalar({ rutasPermitidas, alcance, agente: cfg.agenteNombre ?? cfg.agente, hilosDir: cfg.hilosDir, raiz: path.join(cfg.areaDir ?? cfg.hilosDir, 'proyectos'), repos: reposGuardia(vinculos), tokenArchivo: cfg.githubTokenArchivo, identidad: { nombre: `${cfg.agenteNombre ?? cfg.agente} (asistente de IA GSS)`, correo: 'agentes-ia@gsslatam.com' } });
   const valor = listo ? (leerToken ? leerToken(cfg.githubTokenArchivo) : readFileSync(cfg.githubTokenArchivo, 'utf8').trim()) : null;
   const envGit = { PATH: '/opt/homebrew/bin:/usr/bin:/bin', HOME: guardia.home, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', LANG: 'en_US.UTF-8', ...(valor ? { GH_TOKEN: valor } : {}) };
   // Sin token no hay fetch (el repo es privado): se trabaja con lo que ya tiene el clon.
@@ -189,7 +212,7 @@ export function prepararCodigoOpenclaw({ cfg, jsonCodigo, rutas, idProject, idCo
   };
   const repos = proyecto.repos.map((n) => vinculos.repos.get(n));
   const worktrees = preparar({ repos, rutas, idProject, idConversation, envGit, ejecutarGit });
-  return { worktrees, guardia, tokenListo: listo, bloque: textoCodigoOpenclaw({ worktrees, guardia, tokenListo: listo, rutasPermitidas }), rama: ramaDeConversacion(idProject, idConversation) };
+  return { worktrees, guardia, tokenListo: listo, bloque: textoCodigoOpenclaw({ worktrees, guardia, tokenListo: listo, rutasPermitidas, mergePruebas: Boolean(alcance?.mergePruebas && rutasPermitidas && alcance.checksRequeridos.length) }), rama: ramaDeConversacion(idProject, idConversation) };
 }
 
 function gitReal(args, { cwd, env }) {

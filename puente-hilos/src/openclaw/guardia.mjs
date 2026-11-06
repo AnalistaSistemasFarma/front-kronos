@@ -24,7 +24,7 @@
  * Este archivo se copia tal cual a la carpeta de solo lectura: no importa nada fuera de node:*.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -78,7 +78,7 @@ const AYUDANTE_CREDENCIAL = '!f(){ test -n "$GH_TOKEN" && { echo username=x-acce
 /** Subcomandos de gh permitidos («grupo acción»). */
 export const GH_PERMITIDOS = new Set([
   'pr create', 'pr view', 'pr list', 'pr diff', 'pr checks', 'pr status', 'pr comment', 'pr edit', 'pr ready',
-  'run list', 'run view', 'repo view', 'issue view', 'issue list', 'workflow list', 'workflow view',
+  'run list', 'run view', 'run watch', 'repo view', 'issue view', 'issue list', 'workflow list', 'workflow view',
 ]);
 
 function dentroDe(raiz, ruta) {
@@ -214,11 +214,25 @@ function valorOpcion(args, largos, cortos = []) {
  * Valida una llamada a gh. `repoCwd` es el repo («dueño/repo») del worktree en el que corre.
  * Devuelve { ok, motivo, args, repo, archivos } (archivos = --body-file a revisar).
  */
-export function validarGh(argv, { repos, repoCwd = null }) {
+export function validarGh(argv, { repos, repoCwd = null, mergePruebas = false }) {
   const args = [...argv];
   if (args.length < 2) return { ok: false, motivo: 'uso: gh <grupo> <acción> …' };
   const clave = `${args[0]} ${args[1]}`;
-  if (clave === 'pr merge') return { ok: false, motivo: 'gh pr merge está prohibido: los pases los hace Tecnología (deje el PR abierto hacia testing).' };
+  if (clave === 'pr merge') {
+    // Fusión a testing (2026-11-06, Nicolás Rivera, solo dashboards): `gh pr merge <n> --merge --admin`
+    // y nada más; las condiciones del PR (base, head, rutas, CI, borrador) las revisa la guardia con gh pr view.
+    if (!mergePruebas) return { ok: false, motivo: 'gh pr merge está prohibido: los pases los hace Tecnología (deje el PR abierto hacia testing).' };
+    const r = args.slice(2);
+    const n = r.filter((a) => !a.startsWith('-'));
+    const op = r.filter((a) => a.startsWith('-'));
+    if (n.length !== 1 || !/^[1-9][0-9]{0,6}$/.test(n[0]) || op.length !== 2 || !op.includes('--merge') || !op.includes('--admin')) {
+      return { ok: false, motivo: 'solo se permite exactamente: gh pr merge <número> --merge --admin (sin --delete-branch, --squash, --rebase ni otras opciones).' };
+    }
+    const repoM = repoCwd;
+    const confM = repoM && Object.entries(repos).find(([g]) => g.toLowerCase() === repoM.toLowerCase());
+    if (!confM) return { ok: false, motivo: 'gh pr merge se corre dentro del worktree (workdir = la ruta del worktree).' };
+    return { ok: true, args: ['pr', 'merge', n[0], '--merge', '--admin', '--repo', confM[0]], repo: confM[0], archivos: [], merge: { numero: Number(n[0]), base: confM[1].base } };
+  }
   if (!GH_PERMITIDOS.has(clave)) return { ok: false, motivo: `gh ${clave} no está permitido.` };
   const resto = args.slice(2);
   if (resto.some((a) => a === '--web' || a === '-w')) return { ok: false, motivo: 'gh --web no está permitido.' };
@@ -265,6 +279,31 @@ export function fueraDeAlcance(archivos, rutasPermitidas) {
 }
 
 export const MENSAJE_ALCANCE = 'solo puede modificar dashboards; pida a Nicolás Rivera cualquier cambio fuera de ese alcance';
+
+/**
+ * ¿Se puede fusionar este PR a la rama de pruebas? `pr` = salida de
+ * `gh pr view <n> --json baseRefName,headRefName,isDraft,state,files,statusCheckRollup`.
+ * Devuelve el motivo del rechazo o null.
+ */
+export function motivoNoFusionar(pr, { base, rutasPermitidas, checksRequeridos = [] }) {
+  if (!pr || typeof pr !== 'object') return 'no pude leer el PR.';
+  if (pr.state !== 'OPEN') return `el PR no está abierto (${pr.state}).`;
+  if (pr.baseRefName !== base) return `la base del PR es ${pr.baseRefName}: solo se fusiona a ${base}.`;
+  if (!String(pr.headRefName ?? '').startsWith(PREFIJO_RAMA)) return `la rama del PR (${pr.headRefName}) no es ${PREFIJO_RAMA}*.`;
+  if (pr.isDraft) return 'el PR está en borrador.';
+  const archivos = (pr.files ?? []).map((f) => f.path);
+  if (archivos.length === 0 || archivos.length >= 100) return 'no pude verificar la lista completa de archivos del PR.';
+  if (!Array.isArray(rutasPermitidas)) return 'no hay rutas permitidas configuradas: no se fusiona.';
+  const fuera = fueraDeAlcance(archivos, rutasPermitidas);
+  if (fuera.length) return `el PR toca archivos fuera de alcance: ${fuera.slice(0, 15).join(', ')}. ${MENSAJE_ALCANCE}.`;
+  const checks = pr.statusCheckRollup ?? [];
+  for (const nombre of checksRequeridos) {
+    const c = checks.filter((x) => (x.name ?? x.context) === nombre);
+    if (c.length === 0) return `falta el check «${nombre}».`;
+    if (!c.every((x) => (x.conclusion ?? x.state) === 'SUCCESS')) return `el check «${nombre}» no está en verde (${c.map((x) => x.conclusion ?? x.status ?? x.state).join(', ')}). Espere con gh pr checks <n> --watch.`;
+  }
+  return null;
+}
 
 /** «dueño/repo» a partir de la URL de origin. */
 export function repoDeUrl(url) {
@@ -388,7 +427,7 @@ function principal() {
         repoCwd = repoDeUrl(execFileSync(conf.git, ['-C', cwd, 'config', '--get', 'remote.origin.url'], { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 20_000 }));
       } catch {}
     }
-    const v = validarGh(argv, { repos: conf.repos ?? {}, repoCwd });
+    const v = validarGh(argv, { repos: conf.repos ?? {}, repoCwd, mergePruebas: conf.mergePruebas === true });
     if (!v.ok) fallar(v.motivo);
     if (!token) fallar('todavía no hay token de GitHub configurado para este agente: no se puede usar gh. Avísele a Tecnología.');
     if (argv.some((a) => a.includes(token))) fallar('el comando contiene el token de GitHub.');
@@ -408,7 +447,24 @@ function principal() {
       const head = valorOpcionPublica(argv.slice(2), ['--head'], ['-H'])[0];
       revisarAlcance(cwd, head ? `origin/${head.replace(/^[^:]+:/, '')}` : 'HEAD', baseDe(cwd));
     }
+    let registroMerge = null;
+    if (v.merge) {
+      let pr = null;
+      try {
+        pr = JSON.parse(execFileSync(conf.gh, ['pr', 'view', String(v.merge.numero), '--repo', v.repo, '--json', 'number,title,baseRefName,headRefName,isDraft,state,files,statusCheckRollup'], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 }));
+      } catch (e) {
+        fallar(`no pude leer el PR #${v.merge.numero}: ${String(e.stderr ?? e.message).trim().slice(0, 300)}`);
+      }
+      const m = motivoNoFusionar(pr, { base: v.merge.base, rutasPermitidas: conf.rutasPermitidas, checksRequeridos: conf.checksRequeridos ?? [] });
+      if (m) fallar(`no se fusiona el PR #${v.merge.numero}: ${m}`);
+      registroMerge = { pr: pr.number, titulo: pr.title, head: pr.headRefName, base: pr.baseRefName, archivos: pr.files.map((f) => f.path) };
+    }
     const r = spawnSync(conf.gh, v.args, { cwd, env, stdio: 'inherit', timeout: 600_000 });
+    if (registroMerge && conf.registroMerges) {
+      try {
+        appendFileSync(conf.registroMerges, `${JSON.stringify({ ts: new Date().toISOString(), ...registroMerge, resultado: r.status })}\n`, { mode: 0o600 });
+      } catch {}
+    }
     process.exit(r.status ?? 1);
   }
   fallar(`herramienta desconocida: ${herramienta}`);
