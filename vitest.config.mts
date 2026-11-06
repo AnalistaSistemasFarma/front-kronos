@@ -36,6 +36,8 @@ export default defineConfig({
       'app/api/correo/**/*.test.ts',
       // `app/api/chat/compartir/**`: menú Compartir de Android (sesión, tipos y tamaños).
       'app/api/chat/compartir/**/*.test.ts',
+      // `app/api/biomedica/**`: Ingeniería biomédica (permiso del módulo, PDF en línea, control de vigencia).
+      'app/api/biomedica/**/*.test.ts',
       'components/sgc/**/*.test.ts',
       // Medidor del consumo de Anthropic en Proyectos (render del marcado, 2026-10-22).
       'components/proyectos/**/*.test.ts',
