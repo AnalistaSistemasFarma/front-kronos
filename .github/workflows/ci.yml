@@ -646,7 +646,7 @@ jobs:
           reversa prisma/manual/2026-11-06-chat-project-carpetas-reversa.sql
           echo "IF COL_LENGTH(N'dbo.chat_project_file', N'folder_path') IS NOT NULL OR OBJECT_ID(N'dbo.chat_project_folder', N'U') IS NOT NULL THROW 50000, N'La reversa de carpetas no quitó la columna o la tabla.', 1;" > /tmp/carpetas-quitado.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/carpetas-quitado.sql
-          migra 20261106120000_chat_project_folders
+          # Apunta a chat_project: se vuelve a migrar al final, con la F1.
           # Matrices de Proyectos (2026-11-05): apuntan a chat_project, así que su reversa va PRIMERO; con una matriz de
           # prueba, sin la bandera debe negarse. Se vuelve a migrar al final, con la F1.
           echo "INSERT INTO dbo.chat_project_matrix (id_project, name) SELECT TOP (1) id_project, N'ci' FROM dbo.chat_project;" > /tmp/matrices-dato.sql
@@ -767,6 +767,7 @@ jobs:
           migra 20261023150000_chat_project_file_agente
           migra 20261104200000_chat_project_mesas
           migra 20261105150000_chat_project_matrices
+          migra 20261106120000_chat_project_folders
           # Padres e hijos (2026-10-19): con tipos padre marcados y relaciones creadas solas (integración), sin la bandera debe negarse.
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-19-sgc-padres-hijos-reversa.sql; then echo "La reversa de padres e hijos debió negarse sin su bandera"; exit 1; fi
           reversa prisma/manual/2026-10-19-sgc-padres-hijos-reversa.sql
