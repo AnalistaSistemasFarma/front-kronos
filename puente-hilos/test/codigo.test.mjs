@@ -298,7 +298,8 @@ import { mkdtempSync, mkdirSync as mk, existsSync as ex, writeFileSync, readFile
 import { tmpdir } from 'node:os';
 import pathMod from 'node:path';
 
-test('motores de Prisma: se siembran en el HOME de código solo las versiones que faltan', () => {
+// `cp -c` (clon APFS) solo existe en macOS, donde corren los puentes; en el CI (Linux) se omite.
+test('motores de Prisma: se siembran en el HOME de código solo las versiones que faltan', { skip: process.platform !== 'darwin' }, () => {
   const real = mkdtempSync(pathMod.join(tmpdir(), 'hr-'));
   const hc = mkdtempSync(pathMod.join(tmpdir(), 'hc-'));
   const v1 = 'c0aafc03b8ef6cdced8654b9a817999e02457d6a';

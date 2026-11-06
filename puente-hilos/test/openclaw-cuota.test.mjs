@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import {
   carpetaAgenteOpenclaw,
   carpetaEstadoOpenclaw,
@@ -17,6 +16,11 @@ import { cargarConfig } from '../src/config.mjs';
 const tmp = () => mkdtempSync(path.join(tmpdir(), 'oc-cuota-'));
 const OAT = 'sk-ant-oat01-' + 'x'.repeat(40);
 const API = 'sk-ant-api03-' + 'y'.repeat(40);
+
+// node:sqlite existe desde Node 22.5 (los Mac de los puentes); el CI corre Node 20.
+const sqlite = await import('node:sqlite').catch(() => null);
+const HAY_SQLITE = Boolean(sqlite);
+const DatabaseSync = sqlite?.DatabaseSync;
 
 test('carpetas: --profile → ~/.openclaw-<perfil>; OPENCLAW_STATE_DIR; por defecto ~/.openclaw', () => {
   assert.equal(carpetaEstadoOpenclaw({ perfil: 'lunaris', env: {}, home: '/h' }), '/h/.openclaw-lunaris');
@@ -45,7 +49,7 @@ test('elegirPerfilAnthropic: order, luego lastGood, luego el primero; ignora otr
   assert.equal(elegirPerfilAnthropic({ profiles: { 'openai:a': almacen.profiles['openai:a'] } }, {}), null);
 });
 
-test('lector: lee la base sqlite del agente en solo lectura y nunca expone el valor en describir()', async () => {
+test('lector: lee la base sqlite del agente en solo lectura y nunca expone el valor en describir()', { skip: !HAY_SQLITE }, async () => {
   const dir = path.join(tmp(), 'agents', 'duo', 'agent');
   mkdirSync(dir, { recursive: true });
   const db = new DatabaseSync(path.join(dir, 'openclaw-agent.sqlite'));
@@ -60,7 +64,7 @@ test('lector: lee la base sqlite del agente en solo lectura y nunca expone el va
   assert.match(lector.describir(), /token de suscripción \(perfil anthropic:manual\)/);
 });
 
-test('lector: almacén compartido de la base de estado (auth.sharedStore = state-db, caso Lunaris)', async () => {
+test('lector: almacén compartido de la base de estado (auth.sharedStore = state-db, caso Lunaris)', { skip: !HAY_SQLITE }, async () => {
   const estado = tmp();
   const agente = path.join(estado, 'agents', 'main', 'agent');
   mkdirSync(agente, { recursive: true });
@@ -77,7 +81,7 @@ test('lector: almacén compartido de la base de estado (auth.sharedStore = state
   assert.equal(c?.tipo, 'oauth-token');
 });
 
-test('lector: auth-profiles.json (versiones viejas); sin nada = null; un fallo devuelve la última buena sin filtrar', async () => {
+test('lector: auth-profiles.json (versiones viejas); sin nada = null; un fallo devuelve la última buena sin filtrar', { skip: !HAY_SQLITE }, async () => {
   const dir = tmp();
   writeFileSync(path.join(dir, 'auth-profiles.json'), JSON.stringify({ profiles: { 'anthropic:k': { type: 'api_key', provider: 'anthropic', key: API } } }));
   assert.equal((await crearLectorCredencialOpenclaw({ carpetaAgente: dir }).leer()).tipo, 'api-key');
