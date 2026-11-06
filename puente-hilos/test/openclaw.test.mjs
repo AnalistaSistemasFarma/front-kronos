@@ -515,3 +515,35 @@ test('turno openclaw: la respuesta lleva el texto completo del turno (Gateway), 
   await atender('48', [{ id: 1, body: 'x', author: { name: 'N' } }]);
   assert.match(s.llamadas.find((l) => l[0] === 'responder')[2], /Soy Mercurio, de Compras\.[\s\S]*Listo\./);
 });
+
+test('turno openclaw: sesión nueva en un hilo con historia → recuperación en el mensaje; segundo turno no; tras /clear no (2026-11-06)', async () => {
+  const dir = tmp();
+  const s = synerlinkFalso();
+  const base = s.contexto;
+  s.contexto = async (id) => {
+    const c = await base(id);
+    return { ...c, conversation: { ...(c.conversation ?? {}), id, title: 'x', history: [
+      { id: 10, role: 'user', author: 'Neider Navarrete', createdAt: '2026-11-05T10:00:00Z', body: 'Haga el dashboard de ventas', attachments: [] },
+      { id: 11, role: 'agent', author: 'Kepler', createdAt: '2026-11-05T11:00:00Z', body: 'Abrí el PR #898', attachments: [] },
+      { id: 601, role: 'user', author: 'Neider Navarrete', body: '¿Cómo va?', attachments: [] },
+    ] } };
+  };
+  const mensajes = [];
+  const estado = new Estado(dir);
+  const { atender } = crearAtenderOpenclaw({
+    cfg: cfgOc(dir), synerlink: s, estado,
+    correr: async (op) => {
+      mensajes.push(readFileSync(op.args[op.args.indexOf('--message-file') + 1], 'utf8'));
+      return { codigo: 0, abortado: null, stderr: '', salida: salidaGateway };
+    },
+  });
+  await atender('48', [{ id: 601, body: '¿Cómo va?', author: { name: 'Neider Navarrete' } }]);
+  assert.match(mensajes[0], /RECUPERACIÓN DE CONTEXTO[\s\S]*Haga el dashboard[\s\S]*Abrí el PR #898[\s\S]*FIN DE LA RECUPERACIÓN/);
+  assert.equal((mensajes[0].match(/¿Cómo va\?/g) ?? []).length, 1, 'el mensaje del lote no se repite en la recuperación');
+  await atender('48', [{ id: 602, body: 'gracias', author: { name: 'N' } }]);
+  assert.doesNotMatch(mensajes[1], /RECUPERACIÓN DE CONTEXTO/);
+  await atender('48', [{ id: 603, body: '/clear', author: { name: 'N' } }]);
+  await atender('48', [{ id: 604, body: 'de cero', author: { name: 'N' } }]);
+  assert.equal(mensajes.length, 3);
+  assert.doesNotMatch(mensajes[2], /RECUPERACIÓN DE CONTEXTO/);
+});

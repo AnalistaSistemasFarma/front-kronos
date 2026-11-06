@@ -81,6 +81,7 @@ import {
   armarPrompt,
   asegurarCarpetas,
   bajarAdjuntos,
+  bloqueRecuperacion,
   escribirContexto,
   leerPropuestas,
   limpiarPropuestas,
@@ -301,7 +302,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         return;
       }
       if (comando?.accion === 'limpiar') {
-        estado.reiniciarSesion(idConversation);
+        estado.reiniciarSesion(idConversation, { porPedido: true });
         await synerlink.responder(
           idConversation,
           '🧹 Listo: este hilo arranca una **memoria nueva** desde el próximo mensaje. El historial del chat sigue aquí, pero el asistente ya no lo tiene presente; si hace falta algo de antes, péguelo o resúmalo. Si había un objetivo (/goal), también se quitó.'
@@ -495,7 +496,16 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
       const tocados = new Set();
 
       const promptTurno = nativo?.prompt ?? armarPrompt(lote, adjuntos, (completo ? encabezadoMensajeCompleto(completo.autores) : '') + encabezadoObjetivo(objetivo));
-      const ejecutar = async (sesion, prompt = promptTurno) => {
+      // Recuperación al reiniciar: en una sesión NUEVA de un hilo que ya tenía mensajes, el
+      // primer turno lleva los últimos mensajes anteriores (no tras /clear ni con comandos nativos).
+      const conRecuperacion = (sesion, prompt) => {
+        if (nativo || !sesion.nueva || sesion.sinRecuperar || prompt !== promptTurno) return prompt;
+        const bloque = bloqueRecuperacion(contexto, ids);
+        if (bloque) log(`conversación ${idConversation}: sesión nueva con historial previo; se inyecta la recuperación (${bloque.length} caracteres).`);
+        return bloque ? `${bloque}\n${prompt}` : prompt;
+      };
+      const ejecutar = async (sesion, promptPedido = promptTurno) => {
+        const prompt = conRecuperacion(sesion, promptPedido);
         const pluginsTurno = { dirs: pluginDirsTurno, dirsLectura: [...grafosTurno.map((g) => g.dir), ...recursos, ...skillsDePlugins(pluginDirsTurno)] };
         const args = completo
           ? armarArgumentosCompleto({
