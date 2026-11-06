@@ -253,7 +253,10 @@ test('config openclaw: --local fuerza un hilo a la vez; área y outbox absolutos
 
 test('config openclaw: falla cerrado si se intenta sumar capacidades o mezclar sesiones', () => {
   assert.throws(() => cargarConfig(envOc(tmp(), { HILOS_ANTHROPIC_API_KEY: 'sk' })), /no se define credencial/);
-  assert.throws(() => cargarConfig(envOc(tmp(), { HILOS_PERFIL: 'desarrollo' })), /negocio/);
+  // 2026-11-06: openclaw con perfil desarrollo SÍ (código con guardia), pero el perfil debe ser explícito.
+  assert.doesNotThrow(() => cargarConfig(envOc(tmp(), { HILOS_PERFIL: 'desarrollo', HILOS_REPOS_POR_PROYECTO: '/abs/repos.json', HILOS_GITHUB_TOKEN_ARCHIVO: '/abs/token' })));
+  assert.throws(() => cargarConfig(envOc(tmp(), { HILOS_REPOS_POR_PROYECTO: '/abs/repos.json' })), /negocio|quite/);
+  assert.throws(() => cargarConfig(envOc(tmp(), { HILOS_PERFIL: 'desarrollo', HILOS_MODELO: 'opus' })), /no suma capacidades|quite/);
   assert.throws(() => cargarConfig(envOc(tmp(), { HILOS_PERFIL: '' })), /negocio/);
   for (const v of ['HILOS_AUTORES_ORUS_COMPLETO', 'HILOS_MODELO', 'HILOS_MEMORIA_DIR', 'HILOS_PLUGIN_DIRS']) {
     assert.throws(() => cargarConfig(envOc(tmp(), { [v]: v.endsWith('ORUS_COMPLETO') ? 'a@b.co' : v === 'HILOS_MODELO' ? 'opus' : '/abs' })), /no suma capacidades|quite/, v);

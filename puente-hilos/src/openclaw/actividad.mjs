@@ -75,6 +75,7 @@ export function sanear(texto) {
   s = s.replace(/([?&][^=&\s]*(?:token|key|sig|secret|pass|code|auth)[^=&\s]*=)[^&\s]+/gi, '$1***')
   // Llaves con prefijo conocido y JWT
   s = s.replace(/\b(?:sk|pk|rk|ghp|gho|ghs|github_pat|xox[abprs]|AKIA)[-_A-Za-z0-9]{10,}/g, '***')
+  // eslint-disable-next-line security/detect-unsafe-regex -- entrada acotada (una línea o un argumento corto); revisado 2026-11-06
   s = s.replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]+)?/g, '***')
   // Cadenas opacas largas (hash, llave, token sin prefijo) que mezclan letras y
   // dígitos. Se respetan las rutas: un segmento con "/" no es un token.

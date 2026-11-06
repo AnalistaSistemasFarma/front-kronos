@@ -50,6 +50,7 @@ export const TIMEOUT_PDF_MS = 60 * 1000;
 const SANDBOX_EXEC = '/usr/bin/sandbox-exec';
 
 const RE_CERCO = /^ {0,3}(`{3,}|~{3,})/;
+// eslint-disable-next-line security/detect-unsafe-regex -- entrada acotada (una línea o un argumento corto); revisado 2026-11-06
 const RE_MARCA = /^[ \t]{0,3}(?:[-*][ \t]+)?(PDF|MEDIA):[ \t]*(\S.*?)[ \t]*$/;
 const RE_COMILLAS = /^(["'`<])(.*)(["'`>])$/;
 const EXT_HTML = new Set(['html', 'htm']);

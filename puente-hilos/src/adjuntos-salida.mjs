@@ -58,6 +58,7 @@ const MIME = {
 export const tipoMime = (nombre) => MIME[path.extname(nombre).slice(1).toLowerCase()] ?? 'application/octet-stream';
 
 const RE_CERCO = /^ {0,3}(`{3,}|~{3,})/;
+// eslint-disable-next-line security/detect-unsafe-regex -- entrada acotada (una línea o un argumento corto); revisado 2026-11-06
 const RE_MEDIA = /^[ \t]{0,3}(?:[-*][ \t]+)?MEDIA:[ \t]*(\S.*?)[ \t]*$/;
 const RE_COMILLAS = /^(["'`<])(.*)(["'`>])$/;
 

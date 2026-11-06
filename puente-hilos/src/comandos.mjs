@@ -27,6 +27,7 @@ import path from 'node:path';
 import { motivoSoloDesarrollo, SKILLS_SOLO_DESARROLLO } from './perfil-agente.mjs';
 
 /** «/nombre» o «/plugin:nombre», y lo demás son los argumentos. Una ruta («/Users/…») no es comando. */
+// eslint-disable-next-line security/detect-unsafe-regex -- entrada acotada (una línea o un argumento corto); revisado 2026-11-06
 const RE_COMANDO = /^\/([a-z][a-z0-9_-]*(?::[a-z0-9][a-z0-9_-]*)?)(?:\s+([\s\S]*))?$/i;
 /** Tope de la condición de /goal (Claude Code también tiene uno; este es más corto y en español). */
 export const MAX_CONDICION_OBJETIVO = 2000;

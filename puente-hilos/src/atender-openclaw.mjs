@@ -14,6 +14,9 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { prepararAdjuntos } from './adjuntos-salida.mjs';
+import { prepararCodigoOpenclaw } from './openclaw/codigo.mjs';
+import { jsonParaCodigo } from './politica.mjs';
+import { esNegocio } from './perfil-agente.mjs';
 import { analizarComando, AYUDA, LIMPIAR } from './comandos.mjs';
 import {
   asegurarCarpetas,
@@ -87,6 +90,8 @@ export function crearAtenderOpenclaw({
   leerSesionGateway = null,
   anunciosPendientes = null,
   medidor = null,
+  politicaDelTurno = null,
+  prepararCodigo = prepararCodigoOpenclaw,
   convertirPdf = convertirHtmlAPdf,
   chrome = undefined,
   ahora = Date.now,
@@ -137,6 +142,28 @@ export function crearAtenderOpenclaw({
       escribirHilo(rutas, contexto, 0o600);
       limpiarPropuestas(rutas);
 
+      // Código (2026-11-06): solo perfil «desarrollo» y proyecto con nivel desarrollo (politica.mjs).
+      // Cualquier falla deja el turno SIN código (y se dice), nunca con más permisos.
+      let bloqueCodigo = '';
+      let avisoCodigo = '';
+      if (!esNegocio(cfg) && politicaDelTurno) {
+        try {
+          const pol = await politicaDelTurno({ cfg, synerlink, idConversation, idProject: contexto.project.idProject });
+          if (pol.api?.estado === 'error') log(`conversación ${idConversation}: no se pudo leer la política (${pol.api.error}); turno sin código.`);
+          const jsonCodigo = jsonParaCodigo(pol.politica, pol.archivo, contexto.project.idProject);
+          const codigo = jsonCodigo ? prepararCodigo({ cfg, jsonCodigo, rutas, idProject: contexto.project.idProject, idConversation }) : null;
+          if (codigo) {
+            bloqueCodigo = codigo.bloque;
+            log(`conversación ${idConversation}: código ${codigo.worktrees.map((w) => `${w.nombre}@${w.rama}`).join(', ')}; token ${codigo.tokenListo ? 'sí' : 'NO (sin push ni PR)'}; PR solo a testing, sin pases.`);
+          } else if (pol.politica?.nivel >= 1) {
+            bloqueCodigo = pol.bloque ?? '';
+          }
+        } catch (e) {
+          log(`conversación ${idConversation}: no se pudo preparar el acceso al código, el turno va sin él:`, e.message);
+          avisoCodigo = '_Nota: no pude preparar el acceso al código del proyecto en este turno; respondí sin él. Tecnología quedó con el registro._\n\n';
+        }
+      }
+
       const sesion = estado.sesionDe(idConversation);
       const clave = claveSesion({ prefijo: oc.prefijo, idConversation, sessionId: sesion.id });
       const completa = claveCompleta(oc.agente, clave);
@@ -150,7 +177,7 @@ export function crearAtenderOpenclaw({
         avisoMs: cfg.avisoProgresoMs ?? 0,
         archivar: Boolean(archivador),
         outbox: oc.outbox,
-        bloquePdf: cfg.pdf?.habilitado ? textoPdfOpenclaw({ disponible: Boolean(chromePdf), recursos, trabajo: rutas.trabajo }) : '',
+        bloquePdf: cfg.pdf?.habilitado ? textoPdfOpenclaw({ disponible: Boolean(chromePdf), recursos, trabajo: rutas.trabajo }) : '',        bloqueCodigo,
       });
       mkdirSync(rutas.puente, { recursive: true, mode: 0o700 });
       archivoMensaje = path.join(rutas.puente, `mensaje-${process.pid}-${idConversation}.txt`);
@@ -292,7 +319,7 @@ export function crearAtenderOpenclaw({
           notas = '\n\n⚠️ No pude registrar mis propuestas en el Cronograma por un error. Intente de nuevo.';
         }
       }
-      cuerpo = cuerpo.slice(0, MAX_RESPUESTA - notas.length) + notas;
+      cuerpo = avisoCodigo + cuerpo.slice(0, MAX_RESPUESTA - notas.length - avisoCodigo.length) + notas;
 
       if (archivador && adjuntosSalida.length > 0) {
         await synerlink.estado(idConversation, 'tool', 'Archivando en el proyecto…').catch(() => null);

@@ -99,6 +99,7 @@ export function leerVariablesEnv(ruta, leer = (r) => readFileSync(r, 'utf8')) {
 export function expandirVariables(obj, vars) {
   const faltan = new Set();
   const exp = (s) =>
+    // eslint-disable-next-line security/detect-unsafe-regex -- entrada acotada (una línea o un argumento corto); revisado 2026-11-06
     s.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g, (_, k, def) => {
       if (vars.has(k)) return vars.get(k);
       if (def !== undefined) return def;

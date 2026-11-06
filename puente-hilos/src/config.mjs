@@ -398,8 +398,12 @@ export const VARIABLES_NO_OPENCLAW = [
   'HILOS_MAX_BUDGET_USD',
 ];
 
+/** Variables de código que SÍ admite openclaw con HILOS_PERFIL=desarrollo (openclaw/codigo.mjs). */
+export const VARIABLES_CODIGO_OPENCLAW = ['HILOS_REPOS_POR_PROYECTO', 'HILOS_GITHUB_TOKEN_ARCHIVO'];
+
 /**
  * Configuración del runner openclaw (openclaw.mjs). Falla cerrado.
+ * HILOS_PERFIL=negocio (sin código) o desarrollo (código con guardia; PR solo a testing).
  *   HILOS_OPENCLAW_BIN             binario (por defecto /opt/homebrew/bin/openclaw)
  *   HILOS_OPENCLAW_AGENTE          id del agente en openclaw (p. ej. duo; Lunaris = main)
  *   HILOS_OPENCLAW_PERFIL          perfil de openclaw (p. ej. lunaris); vacío = instalación compartida
@@ -413,8 +417,11 @@ export const VARIABLES_NO_OPENCLAW = [
  *   HILOS_OPENCLAW_DIR_AGENTE      carpeta del agente en openclaw (por defecto <estado>/agents/<agente>/agent)
  */
 export function configOpenclaw(env, { entorno, hilosDir, perfiles, perfilAgente, pruebasModo, cuotaModo, pdfModo, subagentes }) {
-  if (perfilAgente !== 'negocio') throw new ErrorConfig('HILOS_RUNNER=openclaw exige HILOS_PERFIL=negocio (sin código).');
-  const sobran = VARIABLES_NO_OPENCLAW.filter((v) => (env[v] ?? '').trim());
+  // Perfil «desarrollo» con openclaw (2026-11-06, openclaw/codigo.mjs): solo suma el código del
+  // proyecto (worktree + guardia de git/gh, PR solo a la rama de pruebas, sin pases).
+  if (!(env.HILOS_PERFIL ?? '').trim()) throw new ErrorConfig('HILOS_RUNNER=openclaw exige HILOS_PERFIL explícito: negocio (sin código) o desarrollo (código con guardia).');
+  const permitidasDesarrollo = perfilAgente === 'desarrollo' ? VARIABLES_CODIGO_OPENCLAW : [];
+  const sobran = VARIABLES_NO_OPENCLAW.filter((v) => !permitidasDesarrollo.includes(v) && (env[v] ?? '').trim());
   if (sobran.length) throw new ErrorConfig(`HILOS_RUNNER=openclaw no suma capacidades al agente: quite ${sobran.join(', ')} del .env.`);
   const explicitas = [
     ['HILOS_PRUEBAS_KRONOS', pruebasModo],
@@ -491,7 +498,8 @@ export function cargarConfig(env = process.env) {
   const envAgente = (env.HILOS_TOKEN_ENV_AGENTE ?? '').trim();
   const fuentes = [apiKey, oauthDirecto, envAgente].filter(Boolean).length;
   if (runner === 'openclaw') {
-    const sobran = VARIABLES_NO_OPENCLAW.filter((v) => (env[v] ?? '').trim());
+    const desarrollo = (env.HILOS_PERFIL ?? '').trim().toLowerCase() === 'desarrollo';
+    const sobran = VARIABLES_NO_OPENCLAW.filter((v) => !(desarrollo && VARIABLES_CODIGO_OPENCLAW.includes(v)) && (env[v] ?? '').trim());
     if (sobran.length) throw new ErrorConfig(`HILOS_RUNNER=openclaw no suma capacidades al agente: quite ${sobran.join(', ')} del .env.`);
   }
   if (runner === 'openclaw' && fuentes > 0) {

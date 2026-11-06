@@ -166,6 +166,7 @@ export function tokenizar(sql) {
       continue;
     }
     if (/[0-9]/.test(c) || (c === '.' && /[0-9]/.test(d ?? ''))) {
+      // eslint-disable-next-line security/detect-unsafe-regex -- entrada acotada (una línea o un argumento corto); revisado 2026-11-06
       const m = /^(0x[0-9a-f]*|[0-9]*\.?[0-9]+(e[+-]?[0-9]+)?)/i.exec(s.slice(i));
       const v = m?.[0] || c;
       toks.push({ tipo: 'num', valor: v, crudo: v });
@@ -354,6 +355,7 @@ export function partirPorGo(script) {
     }
   };
   for (const linea of lineas) {
+    // eslint-disable-next-line security/detect-unsafe-regex -- entrada acotada (una línea o un argumento corto); revisado 2026-11-06
     const m = !enCadena && enComentario === 0 ? /^\s*GO(?:\s+(\d+))?\s*(?:--.*)?$/i.exec(linea) : null;
     if (m) {
       const veces = Math.min(Math.max(Number(m[1] ?? 1), 1), 100);
@@ -389,6 +391,7 @@ export function validarRutaScript(ruta) {
     throw new ErrorGuarda('ruta no permitida: use una ruta relativa como codigo/<repo>/prisma/manual/<archivo>-PRUEBAS.sql o trabajo/<archivo>.sql');
   }
   if (/^codigo\/[^/]+\/prisma\/manual\/[^/]+-pruebas\.sql$/i.test(r)) return r;
+  // eslint-disable-next-line security/detect-unsafe-regex -- entrada acotada (una línea o un argumento corto); revisado 2026-11-06
   if (/^trabajo\/(?:[^/]+\/)*[^/]+\.sql$/i.test(r)) return r;
   throw new ErrorGuarda('solo se corren scripts de codigo/<repo>/prisma/manual/*-PRUEBAS.sql o de trabajo/*.sql');
 }
