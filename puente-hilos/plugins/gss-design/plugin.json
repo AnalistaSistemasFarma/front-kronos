@@ -1,0 +1,6 @@
+{
+  "name": "gss-design",
+  "version": "{{VERSION}}",
+  "description": "Sistema de diseño GSS (Group Shared Services Latinoamérica) para Orus de Proyectos: marca, tokens, plantillas de diapositivas y logos en solo lectura, con fuentes locales para convertir a PDF sin internet.",
+  "author": { "name": "horus (@horus_gss_bot), Group Shared Services Latinoamérica" }
+}

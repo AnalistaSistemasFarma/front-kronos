@@ -28,9 +28,26 @@
  *   HILOS_CLAUDE_CODE_OAUTH_TOKEN  El mismo token, copiado al .env del puente (600).
  *   HILOS_ANTHROPIC_API_KEY    Llave de API (la vía que Anthropic indica para multiusuario).
  *   HILOS_MAX_CONCURRENCIA     1 o 2 (por defecto 2). Tope de hilos simultáneos.
- *   HILOS_TIMEOUT_TURNO_MS     Tope por turno (por defecto 900000 = 15 min).
- *   HILOS_MODELO               Opcional: modelo del `claude -p`.
- *   HILOS_MAX_BUDGET_USD       Opcional: tope de gasto por turno (solo con llave de API).
+ *   HILOS_TIMEOUT_TURNO_MS     Tope DURO por turno (por defecto 3600000 = 60 min, que es también el
+ *                              máximo; mínimo 1 min). Antes era 15 min: Nicolás Rivera (2026-10-22)
+ *                              pidió «el límite de tiempo sí, algo razonable» con supervisión.
+ *   HILOS_AVISO_PROGRESO_MS    Cada cuánto el puente publica en el hilo un aviso breve de que
+ *                              sigue trabajando (por defecto 600000 = 10 min; 60000 a 1800000;
+ *                              0 u «off» lo apaga). El aviso NO reemplaza la respuesta final y
+ *                              deja el indicador «trabajando» encendido (ver progreso.mjs).
+ *   HILOS_CONTINUAR_AL_AGOTAR  'no' (por defecto) o 'si'. Con 'si', si un turno agota el tiempo
+ *                              el puente relanza UNA continuación automática («continúe desde
+ *                              donde quedó») sobre la misma sesión antes de rendirse.
+ *   HILOS_MODELO               Opcional: modelo del hilo PRINCIPAL del `claude -p` (`--model`),
+ *                              por agente (p. ej. claude-opus-5-5 en horus-prod). Sin ella, el
+ *                              predeterminado de la cuenta. Los subagentes usan el modelo que
+ *                              fijó su equipo (null = heredan este).
+ *   HILOS_MAX_BUDGET_USD       Opcional: tope de gasto por turno (`--max-budget-usd`). Vacío = sin
+ *                              tope general (con equipo manda HILOS_SUBAGENTES_PRESUPUESTO_USD).
+ *                              «0» u «off» = SIN NINGÚN TOPE DE GASTO, ni con equipo: el puente no
+ *                              pasa `--max-budget-usd` en los turnos (decisión de Nicolás Rivera,
+ *                              2026-10-22: «que no tenga límite de dinero por ahora»). El gasto se
+ *                              sigue registrando en consumo.jsonl y en SynerLink como siempre.
  *   HILOS_CLAUDE_BIN           Opcional: ruta del ejecutable `claude` (por defecto, el del PATH).
  *   HILOS_INSTRUCCIONES_EN     'system-prompt' (por defecto) o 'claude-md'. Ver hilos.mjs.
  *
@@ -46,6 +63,13 @@
  *   HILOS_SUGERENCIA_PRESUPUESTO_USD Tope de gasto de «Sugerir equipo» (por defecto 0.5).
  *   HILOS_SUGERENCIA_TIMEOUT_MS      Tope de tiempo de «Sugerir equipo» (por defecto 180000 = 3 min).
  *
+ *   Perfil del agente (2026-10-26; ver perfil-agente.mjs):
+ *   HILOS_PERFIL                     'desarrollo' (por defecto) o 'negocio'. Con 'negocio' el contexto de
+ *                                    código no se activa nunca (ni repos, ni codigo/, ni guía, ni Graphify,
+ *                                    ni skills de revisión de código) y se rechazan las variables de código.
+ *   HILOS_ENFOQUE                    Opcional, una línea (máx. 400): el rol del agente de negocio (p. ej.
+ *                                    «comercio exterior y compras internacionales»). Va en el encabezado.
+ *
  *   Acceso al código (nivel 2, 2026-10-20; ver codigo.mjs). Opcional y aditivo:
  *   HILOS_REPOS_POR_PROYECTO         Ruta a repos-por-proyecto.json (repos, proyectos que los
  *                                    usan y operadores que autorizan pases). Se relee en CADA
@@ -53,12 +77,67 @@
  *                                    Sin esta variable, ningún proyecto tiene código.
  *   HILOS_GITHUB_TOKEN_ARCHIVO       Archivo (600) con el token de GitHub. Solo entra al proceso
  *                                    del modelo como GH_TOKEN en turnos con código.
+ *
+ *   Memoria del bot principal (2026-10-20; ver memoria.mjs). Opcional, SOLO LECTURA:
+ *   HILOS_MEMORIA_DIR                Ruta absoluta al directorio memory/ del bot (MEMORY.md +
+ *                                    archivos). Se copia en cada turno a .puente/memoria del hilo,
+ *                                    sin los archivos que parezcan tener secretos.
+ *   HILOS_MEMORIA_LECTORES           Correos (coma) cuyos turnos reciben la memoria. Vacío = todos.
+ *
+ *   Conectores por proyecto (bases en SOLO LECTURA, 2026-10-20; ver conectores.mjs). Opcional:
+ *   HILOS_CONECTORES_POR_PROYECTO    Ruta a conectores-por-proyecto.json (conectores MCP que se
+ *                                    SUMAN al perfil en proyectos concretos). Se relee en cada turno.
+ *   HILOS_CONECTORES_SECRETOS        Archivo 600 con las llaves Bearer de esos conectores; lo lee
+ *                                    solo el headersHelper (nunca entra al mcp.json ni al modelo).
+ *
+ *   PRUEBAS para todos los hilos (2026-10-22; ver pruebas-kronos.mjs). Encendido por defecto:
+ *   HILOS_PRUEBAS_KRONOS             'si' (por defecto) o 'no'. Conectores kronos-pruebas-sql (lectura y
+ *                                    escritura SOLO en KRONOSDB_PRUEBAS) y synerlink-testing-web (testing
+ *                                    como usuario QA) en TODOS los proyectos. Credenciales: clave
+ *                                    «kronos-pruebas» de HILOS_CONECTORES_SECRETOS.
+ *   HILOS_PRUEBAS_KRONOS_WEB         Web de testing (por defecto http://192.168.11.230:3030; debe ser un
+ *                                    host de HOSTS_PRUEBAS).
+ *
+ *   Archivos del proyecto (2026-10-23; ver archivar-proyecto.mjs). Encendido por defecto:
+ *   HILOS_ARCHIVAR_EN_PROYECTO       'si' (por defecto) o 'no'. Cada adjunto de la respuesta (MEDIA:/PDF:)
+ *                                    se sube además a la pestaña Archivos del proyecto.
+ *
+ *   Modo Orus completo (2026-10-22, orden de Nicolás Rivera; ver orus-completo.mjs). Opcional:
+ *   HILOS_AUTORES_ORUS_COMPLETO      Correos (coma). Los turnos cuyos mensajes son TODOS de uno de ellos
+ *                                    (identidad del servidor) corren con las capacidades del Orus
+ *                                    principal en CUALQUIER proyecto. Vacío = apagado.
+ *   HILOS_ORUS_COMPLETO_CONFIG_DIR   Config del Orus principal (~/.horus/claude-config): de ahí se LEEN sus
+ *                                    MCP en cada turno. El turno sigue con el config aislado del puente.
+ *   HILOS_ORUS_COMPLETO_ENV          .env del principal para resolver ${VAR} de sus MCP (no se imprime).
+ *   HILOS_ORUS_COMPLETO_PLUGIN       Plugin con TODAS las skills del principal (cambia al «orus» saneado).
+ *   HILOS_ORUS_COMPLETO_EXCLUIR      Servidores del principal que no entran (además de synerlink/-prod).
+ *
+ *   Conectores del agente (2026-10-22, orden de Nicolás Rivera; ver conectores-agente.mjs). Opcional:
+ *   HILOS_CONECTORES_AGENTE_CONFIG_DIR  Config dir del bot vivo (p. ej. ~/.play/claude-config): en cada
+ *                                    turno se LEEN sus MCP (usuario, proyecto de su carpeta y plugins
+ *                                    habilitados, sin synerlink/-prod ni Telegram) y se suman al perfil,
+ *                                    en todos los proyectos. El turno sigue con el config aislado.
+ *   HILOS_CONECTORES_AGENTE_PROYECTO    Carpeta de trabajo del bot (su vault): elige los MCP de proyecto.
+ *   HILOS_CONECTORES_AGENTE_ENV         .env del bot para resolver ${VAR} (no se imprime).
+ *   HILOS_CONECTORES_AGENTE_EXCLUIR     Servidores del agente que no entran (coma).
+ *   HILOS_CONECTORES_AGENTE_ENGRAM_PROYECTO  Proyecto de engram de su chat (por defecto: el repo git de
+ *                                    HILOS_CONECTORES_AGENTE_PROYECTO). Así el hilo lee y guarda en su misma memoria.
+ *
+ *   Medidor del consumo de Anthropic (2026-10-22; ver cuota.mjs). Opcional:
+ *   HILOS_CUOTA                      'si' (por defecto) o 'no'. Publica en SynerLink el cupo semanal
+ *                                    y la ventana de 5 h del token (lo que trae el stream del turno).
+ *   HILOS_CUOTA_INTERVALO_MS         Sin turnos, cada cuánto se hace la consulta mínima (haiku,
+ *                                    max_tokens 1). Por defecto 300000 (5 min); 0 = solo lo del stream.
  */
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { MAX_ENFOQUE, PERFILES_AGENTE, PERFIL_POR_DEFECTO, VARIABLES_SOLO_DESARROLLO } from './perfil-agente.mjs';
 
 export const MAX_CONCURRENCIA_F1 = 2;
+
+/** Tope duro por turno si el .env no dice otra cosa: 60 min (el máximo admitido). */
+export const TIMEOUT_TURNO_DEFECTO_MS = 60 * 60 * 1000;
 
 export const ENTORNOS = ['pruebas', 'produccion'];
 
@@ -297,6 +376,108 @@ export function sellarEntorno(cfg, ahora = new Date()) {
   return true;
 }
 
+/** Runners del turno: `claude -p` (por defecto) u openclaw (2026-10-27). */
+export const RUNNERS = ['claude', 'openclaw'];
+
+/**
+ * Variables que SUMAN capacidades al turno de Claude Code. Con el runner openclaw NO se admiten:
+ * el agente trabaja con sus propias herramientas y permisos, sin ampliarlos (auditoría de Iván).
+ */
+export const VARIABLES_NO_OPENCLAW = [
+  'HILOS_AUTORES_ORUS_COMPLETO',
+  'HILOS_ORUS_COMPLETO_CONFIG_DIR',
+  'HILOS_CONECTORES_AGENTE_CONFIG_DIR',
+  'HILOS_CONECTORES_POR_PROYECTO',
+  'HILOS_CONECTORES_SECRETOS',
+  'HILOS_PLUGIN_DIRS',
+  'HILOS_MEMORIA_DIR',
+  'HILOS_GRAFOS_DIR',
+  'HILOS_REPOS_POR_PROYECTO',
+  'HILOS_GITHUB_TOKEN_ARCHIVO',
+  'HILOS_MODELO',
+  'HILOS_MAX_BUDGET_USD',
+];
+
+/** Variables de código que SÍ admite openclaw con HILOS_PERFIL=desarrollo (openclaw/codigo.mjs). */
+export const VARIABLES_CODIGO_OPENCLAW = ['HILOS_REPOS_POR_PROYECTO', 'HILOS_GITHUB_TOKEN_ARCHIVO'];
+
+/**
+ * Configuración del runner openclaw (openclaw.mjs). Falla cerrado.
+ * HILOS_PERFIL=negocio (sin código) o desarrollo (código con guardia; PR solo a testing).
+ *   HILOS_OPENCLAW_BIN             binario (por defecto /opt/homebrew/bin/openclaw)
+ *   HILOS_OPENCLAW_AGENTE          id del agente en openclaw (p. ej. duo; Lunaris = main)
+ *   HILOS_OPENCLAW_PERFIL          perfil de openclaw (p. ej. lunaris); vacío = instalación compartida
+ *   HILOS_OPENCLAW_LOCAL           'si' = --local (sin Gateway; 1 hilo a la vez)
+ *   HILOS_OPENCLAW_SESION_PREFIJO  por defecto `proyecto-<entorno>-`; nunca `synerlink…` (es el del chat)
+ *   HILOS_OPENCLAW_OUTBOX          outbox del chat del agente (opcional): lo que deje ahí se recoge
+ *   HILOS_OPENCLAW_AREA            dónde van proyectos/<id>/… (por defecto HILOS_DIR)
+ *   HILOS_OPENCLAW_ACTIVIDAD       'si' (por defecto) o 'no': indicador fino por el Gateway
+ *   HILOS_OPENCLAW_RECURSOS        carpetas de solo lectura para los PDF (marca: gss-design, olp-design), separadas por coma
+ *   HILOS_OPENCLAW_CUOTA           'si' (por defecto) o 'no': cupo semanal/5 h con la credencial del agente en openclaw
+ *   HILOS_OPENCLAW_DIR_AGENTE      carpeta del agente en openclaw (por defecto <estado>/agents/<agente>/agent)
+ */
+export function configOpenclaw(env, { entorno, hilosDir, perfiles, perfilAgente, pruebasModo, cuotaModo, pdfModo, subagentes }) {
+  // Perfil «desarrollo» con openclaw (2026-11-06, openclaw/codigo.mjs): solo suma el código del
+  // proyecto (worktree + guardia de git/gh, PR solo a la rama de pruebas, sin pases).
+  if (!(env.HILOS_PERFIL ?? '').trim()) throw new ErrorConfig('HILOS_RUNNER=openclaw exige HILOS_PERFIL explícito: negocio (sin código) o desarrollo (código con guardia).');
+  const permitidasDesarrollo = perfilAgente === 'desarrollo' ? VARIABLES_CODIGO_OPENCLAW : [];
+  const sobran = VARIABLES_NO_OPENCLAW.filter((v) => !permitidasDesarrollo.includes(v) && (env[v] ?? '').trim());
+  if (sobran.length) throw new ErrorConfig(`HILOS_RUNNER=openclaw no suma capacidades al agente: quite ${sobran.join(', ')} del .env.`);
+  const explicitas = [
+    ['HILOS_PRUEBAS_KRONOS', pruebasModo],
+    ['HILOS_CUOTA', cuotaModo],
+    ['HILOS_SUBAGENTES', subagentes],
+  ].filter(([v, modo]) => (env[v] ?? '').trim() && modo === 'si');
+  if (explicitas.length) throw new ErrorConfig(`Con HILOS_RUNNER=openclaw quedan apagados: ${explicitas.map(([v]) => v).join(', ')} (ponga «no» o quítelos).`);
+  for (const [clave, p] of perfiles) {
+    if (Object.keys(p.mcpServers).length || p.herramientas.length || p.web) {
+      throw new ErrorConfig(`Con HILOS_RUNNER=openclaw los perfiles no llevan conectores ni web (el agente usa los suyos): revise «${clave}» en perfiles.json.`);
+    }
+  }
+  const bin = (env.HILOS_OPENCLAW_BIN ?? '').trim() || '/opt/homebrew/bin/openclaw';
+  if (!path.isAbsolute(bin)) throw new ErrorConfig('HILOS_OPENCLAW_BIN debe ser una ruta absoluta.');
+  if (!existsSync(bin)) throw new ErrorConfig(`HILOS_OPENCLAW_BIN no existe: ${bin}.`);
+  const agente = (env.HILOS_OPENCLAW_AGENTE ?? '').trim();
+  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(agente)) throw new ErrorConfig('Falta HILOS_OPENCLAW_AGENTE (id del agente en openclaw, p. ej. duo).');
+  const perfil = (env.HILOS_OPENCLAW_PERFIL ?? '').trim() || null;
+  if (perfil && !/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(perfil)) throw new ErrorConfig('HILOS_OPENCLAW_PERFIL inválido.');
+  const localRaw = (env.HILOS_OPENCLAW_LOCAL ?? 'no').trim().toLowerCase();
+  if (!['si', 'no'].includes(localRaw)) throw new ErrorConfig('HILOS_OPENCLAW_LOCAL debe ser «si» o «no».');
+  const actRaw = (env.HILOS_OPENCLAW_ACTIVIDAD ?? 'si').trim().toLowerCase();
+  if (!['si', 'no'].includes(actRaw)) throw new ErrorConfig('HILOS_OPENCLAW_ACTIVIDAD debe ser «si» o «no».');
+  const prefijo = (env.HILOS_OPENCLAW_SESION_PREFIJO ?? '').trim() || `proyecto-${entorno}-`;
+  if (!/^[a-z0-9][a-z0-9-]{0,40}-$/.test(prefijo)) throw new ErrorConfig('HILOS_OPENCLAW_SESION_PREFIJO: minúsculas, números y guiones, terminado en «-».');
+  if (/^synerlink/.test(prefijo)) throw new ErrorConfig('HILOS_OPENCLAW_SESION_PREFIJO no puede empezar por «synerlink»: es el espacio de sesiones del chat del agente.');
+  if ((entorno === 'pruebas') !== /pruebas|testing/.test(prefijo)) throw new ErrorConfig(`HILOS_OPENCLAW_SESION_PREFIJO debe decir de qué entorno es (${entorno}): pruebas y producción no comparten sesiones.`);
+  const ruta = (nombre) => {
+    const v = (env[nombre] ?? '').trim() || null;
+    if (v && !path.isAbsolute(v)) throw new ErrorConfig(`${nombre} debe ser una ruta absoluta.`);
+    return v ? path.resolve(v) : null;
+  };
+  const outbox = ruta('HILOS_OPENCLAW_OUTBOX');
+  const area = ruta('HILOS_OPENCLAW_AREA') ?? hilosDir;
+  if (outbox && (area + path.sep).startsWith(outbox + path.sep)) throw new ErrorConfig('HILOS_OPENCLAW_AREA no puede estar dentro del outbox del agente.');
+  // Recursos de SOLO LECTURA para los PDF (p. ej. gss-design/recursos u olp-design): datos de marca, no herramientas.
+  const recursos = (env.HILOS_OPENCLAW_RECURSOS ?? '')
+    .split(',')
+    .map((d) => d.trim())
+    .filter(Boolean);
+  for (const d of recursos) {
+    if (!path.isAbsolute(d)) throw new ErrorConfig('HILOS_OPENCLAW_RECURSOS debe ser una lista de rutas absolutas separadas por coma.');
+    if (!existsSync(d)) throw new ErrorConfig(`HILOS_OPENCLAW_RECURSOS: ${d} no existe.`);
+  }
+  // Cupo de Anthropic del agente (2026-10-28): sonda con la credencial que el agente tiene en
+  // openclaw (openclaw/credencial.mjs, solo lectura). Encendido por defecto; HILOS_CUOTA sigue
+  // siendo el medidor de Claude Code y con openclaw debe quedar en «no».
+  const cuotaRaw = (env.HILOS_OPENCLAW_CUOTA ?? 'si').trim().toLowerCase();
+  if (!['si', 'no'].includes(cuotaRaw)) throw new ErrorConfig('HILOS_OPENCLAW_CUOTA debe ser «si» o «no».');
+  const dirAgente = ruta('HILOS_OPENCLAW_DIR_AGENTE');
+  // Alcance por rutas del código (2026-11-06, openclaw/codigo.mjs): archivo JSON { "rutas": [globs] }.
+  const rutasPermitidas = ruta('HILOS_OPENCLAW_RUTAS_PERMITIDAS');
+  if (rutasPermitidas && perfilAgente !== 'desarrollo') throw new ErrorConfig('HILOS_OPENCLAW_RUTAS_PERMITIDAS solo aplica con HILOS_PERFIL=desarrollo.');
+  return { bin, agente, perfil, local: localRaw === 'si', actividad: actRaw === 'si', prefijo, outbox, area, recursos: recursos.map((d) => path.resolve(d)), cuota: cuotaRaw === 'si', dirAgente, rutasPermitidas };
+}
+
 export function cargarConfig(env = process.env) {
   const entorno = requerida(env, 'HILOS_ENTORNO');
   if (!ENTORNOS.includes(entorno)) {
@@ -311,16 +492,28 @@ export function cargarConfig(env = process.env) {
 
   const agente = requerida(env, 'HILOS_AGENTE').toLowerCase();
 
+  // Runner del turno (2026-10-27): `claude` (por defecto, `claude -p`) u `openclaw` (openclaw.mjs).
+  const runner = (env.HILOS_RUNNER ?? '').trim().toLowerCase() || 'claude';
+  if (!RUNNERS.includes(runner)) throw new ErrorConfig(`HILOS_RUNNER solo admite ${RUNNERS.join(' u ')}.`);
+
   const apiKey = (env.HILOS_ANTHROPIC_API_KEY ?? '').trim();
   const oauthDirecto = (env.HILOS_CLAUDE_CODE_OAUTH_TOKEN ?? '').trim();
   const envAgente = (env.HILOS_TOKEN_ENV_AGENTE ?? '').trim();
   const fuentes = [apiKey, oauthDirecto, envAgente].filter(Boolean).length;
-  if (fuentes !== 1) {
+  if (runner === 'openclaw') {
+    const desarrollo = (env.HILOS_PERFIL ?? '').trim().toLowerCase() === 'desarrollo';
+    const sobran = VARIABLES_NO_OPENCLAW.filter((v) => !(desarrollo && VARIABLES_CODIGO_OPENCLAW.includes(v)) && (env[v] ?? '').trim());
+    if (sobran.length) throw new ErrorConfig(`HILOS_RUNNER=openclaw no suma capacidades al agente: quite ${sobran.join(', ')} del .env.`);
+  }
+  if (runner === 'openclaw' && fuentes > 0) {
+    throw new ErrorConfig('Con HILOS_RUNNER=openclaw no se define credencial de Anthropic: el agente usa la suya (models auth de openclaw).');
+  }
+  if (runner === 'claude' && fuentes !== 1) {
     throw new ErrorConfig(
       'Defina EXACTAMENTE una credencial: HILOS_TOKEN_ENV_AGENTE, HILOS_CLAUDE_CODE_OAUTH_TOKEN o HILOS_ANTHROPIC_API_KEY.'
     );
   }
-  const oauth = envAgente ? leerTokenDeEnv(envAgente) : oauthDirecto;
+  const oauth = runner === 'claude' && envAgente ? leerTokenDeEnv(envAgente) : oauthDirecto;
 
   const hilosDir = validarAislamiento(requerida(env, 'HILOS_DIR'));
   const ancestros = claudeMdEnAncestros(hilosDir);
@@ -348,12 +541,143 @@ export function cargarConfig(env = process.env) {
   const subagentes = (env.HILOS_SUBAGENTES ?? 'si').trim().toLowerCase();
   if (subagentes !== 'si' && subagentes !== 'no') throw new ErrorConfig("HILOS_SUBAGENTES solo admite 'si' o 'no'.");
 
-  const presupuesto = (env.HILOS_MAX_BUDGET_USD ?? '').trim();
-  if (presupuesto && !(Number(presupuesto) > 0)) throw new ErrorConfig('HILOS_MAX_BUDGET_USD debe ser un número positivo.');
+  // «0» u «off»: sin tope de gasto en los turnos (tampoco con equipo).
+  const presupuesto = (env.HILOS_MAX_BUDGET_USD ?? '').trim().toLowerCase();
+  const sinTopeGasto = presupuesto === 'off' || (presupuesto !== '' && Number(presupuesto) === 0);
+  if (presupuesto && !sinTopeGasto && !(Number(presupuesto) > 0)) {
+    throw new ErrorConfig('HILOS_MAX_BUDGET_USD debe ser un número positivo, o 0/off para no poner tope de gasto.');
+  }
 
-  for (const v of ['HILOS_REPOS_POR_PROYECTO', 'HILOS_GITHUB_TOKEN_ARCHIVO']) {
+  // Supervisión de turnos largos (progreso.mjs, 2026-10-22).
+  const avisoRaw = (env.HILOS_AVISO_PROGRESO_MS ?? '').trim().toLowerCase();
+  const avisoProgresoMs = avisoRaw === 'off' || avisoRaw === '0' ? 0 : entero(env, 'HILOS_AVISO_PROGRESO_MS', 10 * 60 * 1000, 60 * 1000, 30 * 60 * 1000);
+  const continuar = (env.HILOS_CONTINUAR_AL_AGOTAR ?? 'no').trim().toLowerCase();
+  if (continuar !== 'si' && continuar !== 'no') throw new ErrorConfig("HILOS_CONTINUAR_AL_AGOTAR solo admite 'si' o 'no'.");
+
+  for (const v of ['HILOS_REPOS_POR_PROYECTO', 'HILOS_GITHUB_TOKEN_ARCHIVO', 'HILOS_MEMORIA_DIR', 'HILOS_CONECTORES_POR_PROYECTO', 'HILOS_CONECTORES_SECRETOS', 'HILOS_GRAFOS_DIR']) {
     const r = (env[v] ?? '').trim();
     if (r && !path.isAbsolute(r)) throw new ErrorConfig(`${v} debe ser una ruta absoluta.`);
+  }
+
+  // Perfil del agente (perfil-agente.mjs, 2026-10-26). Por defecto «desarrollo»: nada cambia.
+  const perfilAgente = (env.HILOS_PERFIL ?? '').trim().toLowerCase() || PERFIL_POR_DEFECTO;
+  if (!PERFILES_AGENTE.includes(perfilAgente)) throw new ErrorConfig(`HILOS_PERFIL solo admite ${PERFILES_AGENTE.join(' o ')}.`);
+  if (perfilAgente === 'negocio') {
+    const sobran = VARIABLES_SOLO_DESARROLLO.filter((v) => (env[v] ?? '').trim());
+    if (sobran.length) throw new ErrorConfig(`HILOS_PERFIL=negocio no lleva código: quite ${sobran.join(', ')} del .env (o use HILOS_PERFIL=desarrollo).`);
+  }
+  const enfoque = (env.HILOS_ENFOQUE ?? '').trim() || null;
+  if (enfoque && (enfoque.length > MAX_ENFOQUE || /[\r\n`]/.test(enfoque))) throw new ErrorConfig(`HILOS_ENFOQUE debe ser una sola línea de máximo ${MAX_ENFOQUE} caracteres, sin comillas invertidas.`);
+
+  // Plugins locales (skills) por --plugin-dir, y grafos de Graphify (grafos.mjs). 2026-10-21.
+  const pluginDirs = (env.HILOS_PLUGIN_DIRS ?? '')
+    .split(',')
+    .map((d) => d.trim())
+    .filter(Boolean);
+  for (const d of pluginDirs) {
+    if (!path.isAbsolute(d)) throw new ErrorConfig('HILOS_PLUGIN_DIRS debe ser una lista de rutas absolutas separadas por coma.');
+    if (d.split(path.sep).includes('claude-config')) throw new ErrorConfig('HILOS_PLUGIN_DIRS no puede apuntar al config de un bot.');
+    if (!existsSync(path.join(d, '.claude-plugin', 'plugin.json'))) throw new ErrorConfig(`HILOS_PLUGIN_DIRS: ${d} no es un plugin (falta .claude-plugin/plugin.json).`);
+  }
+  const grafosDir = (env.HILOS_GRAFOS_DIR ?? '').trim() || null;
+
+  // PRUEBAS para todos los hilos (pruebas-kronos.mjs, 2026-10-22). Encendido por defecto.
+  const pruebasModo = (env.HILOS_PRUEBAS_KRONOS ?? 'si').trim().toLowerCase();
+  if (!['si', 'no'].includes(pruebasModo)) throw new ErrorConfig('HILOS_PRUEBAS_KRONOS debe ser «si» o «no».');
+  const pruebasWeb = (env.HILOS_PRUEBAS_KRONOS_WEB ?? 'http://192.168.11.230:3030').trim();
+  {
+    let u;
+    try {
+      u = new URL(pruebasWeb);
+    } catch {
+      throw new ErrorConfig('HILOS_PRUEBAS_KRONOS_WEB no es una URL válida.');
+    }
+    if (!HOSTS_PRUEBAS.includes(u.hostname) || u.pathname !== '/' || u.username || u.search) throw new ErrorConfig('HILOS_PRUEBAS_KRONOS_WEB debe ser la web de PRUEBAS (host de HOSTS_PRUEBAS, sin ruta).');
+  }
+  // HTML → PDF en el puente (pdf.mjs, 2026-10-21). Encendido por defecto; HILOS_PDF=no lo apaga.
+  const pdfModo = (env.HILOS_PDF ?? 'si').trim().toLowerCase();
+  if (!['si', 'no'].includes(pdfModo)) throw new ErrorConfig('HILOS_PDF debe ser «si» o «no».');
+  const pdfChrome = (env.HILOS_PDF_CHROME ?? '').trim() || null;
+  if (pdfChrome && !path.isAbsolute(pdfChrome)) throw new ErrorConfig('HILOS_PDF_CHROME debe ser una ruta absoluta.');
+
+  // Archivar en los Archivos del proyecto lo que el hilo adjunta (archivar-proyecto.mjs, 2026-10-23). Encendido por defecto.
+  const archivarModo = (env.HILOS_ARCHIVAR_EN_PROYECTO ?? 'si').trim().toLowerCase();
+  if (!['si', 'no'].includes(archivarModo)) throw new ErrorConfig('HILOS_ARCHIVAR_EN_PROYECTO debe ser «si» o «no».');
+  // Medidor del consumo de Anthropic (cuota.mjs, 2026-10-22). Encendido por defecto.
+  const cuotaModo = (env.HILOS_CUOTA ?? 'si').trim().toLowerCase();
+  if (!['si', 'no'].includes(cuotaModo)) throw new ErrorConfig('HILOS_CUOTA debe ser «si» o «no».');
+  const cuotaIntervaloMs = (env.HILOS_CUOTA_INTERVALO_MS ?? '').trim() === '0' ? 0 : entero(env, 'HILOS_CUOTA_INTERVALO_MS', 5 * 60 * 1000, 60 * 1000, 60 * 60 * 1000);
+
+  // Memoria del bot principal (solo lectura; ver memoria.mjs). Nunca dentro de HILOS_DIR.
+  const memoriaDir = (env.HILOS_MEMORIA_DIR ?? '').trim() || null;
+  if (memoriaDir && (path.resolve(memoriaDir) + path.sep).startsWith(path.resolve(hilosDir) + path.sep)) {
+    throw new ErrorConfig('HILOS_MEMORIA_DIR no puede estar dentro de HILOS_DIR.');
+  }
+  const memoriaLectores = (env.HILOS_MEMORIA_LECTORES ?? '')
+    .split(',')
+    .map((c) => c.trim().toLowerCase())
+    .filter(Boolean);
+  if (memoriaLectores.some((c) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c))) {
+    throw new ErrorConfig('HILOS_MEMORIA_LECTORES debe ser una lista de correos separados por coma.');
+  }
+
+  // Modo Orus completo (orus-completo.mjs, 2026-10-22). Sin autores, apagado.
+  const autoresCompleto = (env.HILOS_AUTORES_ORUS_COMPLETO ?? '')
+    .split(',')
+    .map((c) => c.trim().toLowerCase())
+    .filter(Boolean);
+  let orusCompleto = null;
+  if (autoresCompleto.length) {
+    if (autoresCompleto.some((c) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c))) throw new ErrorConfig('HILOS_AUTORES_ORUS_COMPLETO debe ser una lista de correos separados por coma.');
+    const configDir = (env.HILOS_ORUS_COMPLETO_CONFIG_DIR ?? '').trim();
+    if (!configDir || !path.isAbsolute(configDir)) throw new ErrorConfig('Con HILOS_AUTORES_ORUS_COMPLETO hace falta HILOS_ORUS_COMPLETO_CONFIG_DIR (ruta absoluta al config del Orus principal).');
+    if (!existsSync(path.join(configDir, '.claude.json'))) throw new ErrorConfig(`HILOS_ORUS_COMPLETO_CONFIG_DIR (${configDir}) no tiene .claude.json.`);
+    // Se LEE el config del principal para armar el mcp.json; el turno nunca corre con él (sigue el aislado).
+    if (path.resolve(configDir) === path.resolve(hilosDir, 'claude-config')) throw new ErrorConfig('HILOS_ORUS_COMPLETO_CONFIG_DIR no puede ser el config aislado del puente.');
+    const envArchivo = (env.HILOS_ORUS_COMPLETO_ENV ?? '').trim() || null;
+    if (envArchivo && !path.isAbsolute(envArchivo)) throw new ErrorConfig('HILOS_ORUS_COMPLETO_ENV debe ser una ruta absoluta.');
+    const plugin = (env.HILOS_ORUS_COMPLETO_PLUGIN ?? '').trim() || null;
+    if (plugin && (!path.isAbsolute(plugin) || !existsSync(path.join(plugin, '.claude-plugin', 'plugin.json')))) throw new ErrorConfig('HILOS_ORUS_COMPLETO_PLUGIN debe ser la ruta absoluta de un plugin (con .claude-plugin/plugin.json).');
+    const excluir = (env.HILOS_ORUS_COMPLETO_EXCLUIR ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    orusCompleto = { autores: autoresCompleto, configDir, envArchivo, plugin, excluir };
+  }
+
+  // Conectores del agente (conectores-agente.mjs, 2026-10-22). Sin la variable, apagado.
+  let conectoresAgente = null;
+  const caDir = (env.HILOS_CONECTORES_AGENTE_CONFIG_DIR ?? '').trim();
+  if (caDir) {
+    if (!path.isAbsolute(caDir)) throw new ErrorConfig('HILOS_CONECTORES_AGENTE_CONFIG_DIR debe ser una ruta absoluta (config dir del bot).');
+    if (!existsSync(path.join(caDir, '.claude.json'))) throw new ErrorConfig(`HILOS_CONECTORES_AGENTE_CONFIG_DIR (${caDir}) no tiene .claude.json.`);
+    // Se LEE el config del bot para armar el mcp.json; el turno nunca corre con él (sigue el aislado).
+    if (path.resolve(caDir) === path.resolve(hilosDir, 'claude-config')) throw new ErrorConfig('HILOS_CONECTORES_AGENTE_CONFIG_DIR no puede ser el config aislado del puente.');
+    const rutaOpcional = (nombre) => {
+      const v = (env[nombre] ?? '').trim() || null;
+      if (v && !path.isAbsolute(v)) throw new ErrorConfig(`${nombre} debe ser una ruta absoluta.`);
+      return v;
+    };
+    conectoresAgente = {
+      configDir: caDir,
+      proyectoDir: rutaOpcional('HILOS_CONECTORES_AGENTE_PROYECTO'),
+      envArchivo: rutaOpcional('HILOS_CONECTORES_AGENTE_ENV'),
+      excluir: (env.HILOS_CONECTORES_AGENTE_EXCLUIR ?? '')
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean),
+      engramProyecto: (env.HILOS_CONECTORES_AGENTE_ENGRAM_PROYECTO ?? '').trim() || null,
+    };
+    if (conectoresAgente.engramProyecto && !/^[A-Za-z0-9._-]{1,100}$/.test(conectoresAgente.engramProyecto)) {
+      throw new ErrorConfig('HILOS_CONECTORES_AGENTE_ENGRAM_PROYECTO solo admite letras, números, punto, guion y guion bajo.');
+    }
+  }
+
+  // Modelo del hilo PRINCIPAL (por agente, en su .env). Sin la variable, el
+  // `claude -p` usa el predeterminado de la cuenta (en 2026-10 era Sonnet 5.5).
+  const modelo = (env.HILOS_MODELO ?? '').trim() || null;
+  if (modelo && !/^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,79}$/.test(modelo)) {
+    throw new ErrorConfig('HILOS_MODELO inválido: use un id o alias de modelo (p. ej. claude-opus-5-5).');
   }
 
   let claudeBin = (env.HILOS_CLAUDE_BIN ?? '').trim() || 'claude';
@@ -365,21 +689,31 @@ export function cargarConfig(env = process.env) {
     }
   }
 
+  const openclaw = runner === 'openclaw' ? configOpenclaw(env, { entorno, hilosDir, perfiles, perfilAgente, pruebasModo, cuotaModo, pdfModo, subagentes }) : null;
+
   return {
     entorno,
     url,
     llave,
     agente,
-    credencial: apiKey ? { tipo: 'api-key', valor: apiKey } : { tipo: 'oauth-token', valor: oauth },
-    origenCredencial: apiKey ? 'llave de API' : envAgente ? 'token del propio agente (leído de su .env)' : 'token en el .env del puente',
+    runner,
+    openclaw,
+    // Dónde van proyectos/<id>/… (openclaw: HILOS_OPENCLAW_AREA; si no, HILOS_DIR).
+    areaDir: openclaw?.area ?? hilosDir,
+    credencial: runner === 'openclaw' ? null : apiKey ? { tipo: 'api-key', valor: apiKey } : { tipo: 'oauth-token', valor: oauth },
+    origenCredencial: runner === 'openclaw' ? 'la del agente en openclaw (el puente no la ve)' : apiKey ? 'llave de API' : envAgente ? 'token del propio agente (leído de su .env)' : 'token en el .env del puente',
     hilosDir,
     configClaudeDir: path.join(hilosDir, 'claude-config'),
     perfiles,
-    maxConcurrencia: entero(env, 'HILOS_MAX_CONCURRENCIA', MAX_CONCURRENCIA_F1, 1, MAX_CONCURRENCIA_F1),
-    timeoutTurnoMs: entero(env, 'HILOS_TIMEOUT_TURNO_MS', 15 * 60 * 1000, 60 * 1000, 60 * 60 * 1000),
-    modelo: (env.HILOS_MODELO ?? '').trim() || null,
-    presupuestoUsd: presupuesto ? Number(presupuesto) : null,
-    subagentes: subagentes === 'si',
+    // --local de openclaw (Lunaris): un hilo a la vez, para no chocar con el candado de su perfil.
+    maxConcurrencia: openclaw?.local ? 1 : entero(env, 'HILOS_MAX_CONCURRENCIA', MAX_CONCURRENCIA_F1, 1, MAX_CONCURRENCIA_F1),
+    timeoutTurnoMs: entero(env, 'HILOS_TIMEOUT_TURNO_MS', TIMEOUT_TURNO_DEFECTO_MS, 60 * 1000, 60 * 60 * 1000),
+    avisoProgresoMs,
+    continuarAlAgotar: continuar === 'si',
+    modelo,
+    presupuestoUsd: presupuesto && !sinTopeGasto ? Number(presupuesto) : null,
+    sinTopeGasto,
+    subagentes: subagentes === 'si' && runner === 'claude',
     subagentesMaxSimultaneos: entero(env, 'HILOS_SUBAGENTES_MAX_SIMULTANEOS', 3, 1, 5),
     subagentesMaxTurnos: entero(env, 'HILOS_SUBAGENTES_MAX_TURNOS', 30, 5, 100),
     subagentesPresupuestoUsd: numero(env, 'HILOS_SUBAGENTES_PRESUPUESTO_USD', 3, 50),
@@ -387,8 +721,23 @@ export function cargarConfig(env = process.env) {
     sugerenciaTimeoutMs: entero(env, 'HILOS_SUGERENCIA_TIMEOUT_MS', 3 * 60 * 1000, 30 * 1000, 10 * 60 * 1000),
     claudeBin,
     instruccionesEn,
+    perfilAgente,
+    enfoque,
     rutaReposPorProyecto: (env.HILOS_REPOS_POR_PROYECTO ?? '').trim() || null,
     githubTokenArchivo: (env.HILOS_GITHUB_TOKEN_ARCHIVO ?? '').trim() || null,
+    memoriaDir,
+    memoriaLectores,
+    pluginDirs,
+    grafosDir,
+    // PDF también con openclaw (decisión de Nicolás Rivera, 2026-10-27: «sí, claro, con todos»).
+    pdf: { habilitado: pdfModo === 'si', chrome: pdfChrome, timeoutMs: entero(env, 'HILOS_PDF_TIMEOUT_MS', 60 * 1000, 10 * 1000, 3 * 60 * 1000) },
+    cuota: { habilitada: runner === 'claude' ? cuotaModo === 'si' : openclaw.cuota, intervaloMs: cuotaIntervaloMs },
+    archivarEnProyecto: archivarModo === 'si',
+    rutaConectoresPorProyecto: (env.HILOS_CONECTORES_POR_PROYECTO ?? '').trim() || null,
+    conectoresSecretos: (env.HILOS_CONECTORES_SECRETOS ?? '').trim() || null,
+    pruebasKronos: { habilitado: pruebasModo === 'si' && runner === 'claude', base: new URL(pruebasWeb).origin },
+    orusCompleto,
+    conectoresAgente,
     // Para el entorno del hijo: solo lo indispensable del entorno propio.
     path: env.PATH ?? '/usr/bin:/bin',
     home: env.HOME ?? homedir(),
