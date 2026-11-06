@@ -122,6 +122,10 @@ export interface ChatAttachmentContent {
   /** Cuerpo en streaming, tal como lo entrega Graph. */
   stream: ReadableStream<Uint8Array> | null;
   contentLength: string | null;
+  /** 206 si se pidió un rango y Graph lo respetó; 200 en los demás casos. */
+  status: number;
+  /** `Content-Range` de la respuesta parcial (visor de audio y video). */
+  contentRange: string | null;
 }
 
 /**
@@ -134,7 +138,13 @@ export interface ChatAttachmentContent {
  * al navegador, cualquiera con ese enlace bajaría el archivo sin sesión.
  */
 export async function downloadChatAttachment(
-  onedriveItemId: string
+  onedriveItemId: string,
+  /**
+   * Rango de bytes (`bytes=0-1048575`) para el reproductor de audio y video del
+   * visor (2026-10-22): así un video grande se reproduce en streaming y se
+   * puede adelantar sin bajarlo entero. La URL firmada de Graph lo respeta.
+   */
+  range?: string | null
 ): Promise<ChatAttachmentContent | null> {
   const graphBase = (process.env.MICROSOFTGRAPHUSERROUTE || '').toString();
   if (!graphBase) {
@@ -146,7 +156,7 @@ export async function downloadChatAttachment(
   if (!token) return null;
 
   const response = await fetch(`${graphBase}items/${encodeURIComponent(onedriveItemId)}/content`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: range ? { Authorization: `Bearer ${token}`, Range: range } : { Authorization: `Bearer ${token}` },
   });
 
   if (!response.ok) {
@@ -159,5 +169,7 @@ export async function downloadChatAttachment(
   return {
     stream: response.body,
     contentLength: response.headers.get('content-length'),
+    status: response.status,
+    contentRange: response.headers.get('content-range'),
   };
 }

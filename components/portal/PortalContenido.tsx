@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Group, Select, TextInput } from '@mantine/core';
-import { IconBuilding, IconSearch } from '@tabler/icons-react';
+import { Alert, Button, Group, Select, TextInput } from '@mantine/core';
+import { IconBuilding, IconDownload, IconSearch } from '@tabler/icons-react';
 import {
   TODAS_LAS_EMPRESAS,
   contarCorreos,
@@ -13,8 +13,9 @@ import {
 import { filtrarExtensiones, type Extension } from '../../lib/portal/extensiones-datos';
 import { urlFormacion as urlPaginaFormacion, type OrigenPortal } from '../../lib/portal/formacion-navegacion';
 import HeinsohnVentana from './HeinsohnVentana';
+import LinksDiligenciar from './LinksDiligenciar';
 import OrganigramaVisor from './OrganigramaVisor';
-import PoliticasVisor, { TEXTOS_AYUDAS } from './PoliticasVisor';
+import PoliticasVisor, { TEXTOS_AYUDAS, TEXTOS_CAPACITACIONES } from './PoliticasVisor';
 import PortalCalendario from './PortalCalendario';
 import VentanaEventosHoy from './VentanaEventosHoy';
 import PortalNavegacion, { useSeccionActiva, type SeccionNav } from './PortalNavegacion';
@@ -35,6 +36,8 @@ const ID_SECCION_FORMACION = 'portal-th-formacion';
 const ID_SECCION_CONTACTOS = 'portal-th-contactos';
 /** Botón del panel, debajo de Contactos: abre la ventana de vídeos de ayuda (carpeta FORMACION/AYUDAS). Sin sección en la página. */
 const ID_SECCION_AYUDAS = 'portal-th-ayudas';
+/** Botón del panel, justo debajo de Ayudas (Cristian, 2026-10-22): espejo de Ayudas sobre la carpeta FORMACION/CAPACITACIONES. */
+const ID_SECCION_CAPACITACIONES = 'portal-th-capacitaciones';
 /** Botón del panel: abre una ventana con un botón por empresa hacia su acceso al portal de nómina de Heinsohn. Sin sección en la página. */
 const ID_SECCION_HEINSOHN = 'portal-th-heinsohn';
 
@@ -377,6 +380,9 @@ export default function PortalContenido({
   /** Ventana «AYUDAS» (Cristian, 2026-10-15): los videos de la carpeta FORMACION/AYUDAS, con la misma ventana de Políticas. */
   const [ayudasAbierto, setAyudasAbierto] = useState(false);
   const cerrarAyudas = useCallback(() => setAyudasAbierto(false), []);
+  /** Ventana «CAPACITACIONES» (Cristian, 2026-10-22): la misma de Ayudas, sobre FORMACION/CAPACITACIONES. */
+  const [capacitacionesAbierto, setCapacitacionesAbierto] = useState(false);
+  const cerrarCapacitaciones = useCallback(() => setCapacitacionesAbierto(false), []);
   /** Ventana «HEINSOHN NÓMINA» (Cristian, 2026-10-15). */
   const [heinsohnAbierto, setHeinsohnAbierto] = useState(false);
   const cerrarHeinsohn = useCallback(() => setHeinsohnAbierto(false), []);
@@ -389,6 +395,7 @@ export default function PortalContenido({
     setBusquedaExtension('');
     setEmpresaCorreo(TODAS_LAS_EMPRESAS);
     setBusquedaCorreo('');
+    setAvisoExportar(null);
   };
 
   // ── "Correos Corporativos" y "Extensiones Corporativas" dentro de Contactos
@@ -421,6 +428,28 @@ export default function PortalContenido({
   // controles Mantine que la barra de filtros de Artículos.
   const [empresaCorreo, setEmpresaCorreo] = useState(TODAS_LAS_EMPRESAS);
   const [busquedaCorreo, setBusquedaCorreo] = useState('');
+  // Exportar a Excel (Cristian, 2026-11-05): todo el directorio, solo personas,
+  // una hoja por empresa. No depende del buscador ni del filtro de la pantalla.
+  const [exportandoCorreos, setExportandoCorreos] = useState(false);
+  const [avisoExportar, setAvisoExportar] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
+  const exportarCorreos = async () => {
+    if (!correosGrupos) return;
+    setAvisoExportar(null);
+    setExportandoCorreos(true);
+    try {
+      // Se carga solo al pulsar: `exceljs` pesa y casi nadie exporta.
+      const { exportarCorreosExcel } = await import('../../lib/portal/correos-exportar');
+      const r = await exportarCorreosExcel(correosGrupos);
+      setAvisoExportar({
+        tipo: 'ok',
+        texto: `Se descargó ${r.archivo} con ${r.personas} personas (${r.excluidos} buzones genéricos omitidos).`,
+      });
+    } catch {
+      setAvisoExportar({ tipo: 'error', texto: 'No se pudo generar el Excel. Intente de nuevo.' });
+    } finally {
+      setExportandoCorreos(false);
+    }
+  };
   const correosFiltrados = useMemo(
     () => (correosGrupos ? filtrarGruposCorreo(correosGrupos, empresaCorreo, busquedaCorreo) : []),
     [correosGrupos, empresaCorreo, busquedaCorreo]
@@ -474,6 +503,7 @@ export default function PortalContenido({
     { id: ID_SECCION_FORMACION, etiqueta: 'Formación' },
     { id: ID_SECCION_CONTACTOS, etiqueta: 'Contactos' },
     { id: ID_SECCION_AYUDAS, etiqueta: 'Ayudas' },
+    { id: ID_SECCION_CAPACITACIONES, etiqueta: 'Capacitaciones' },
     { id: ID_SECCION_HEINSOHN, etiqueta: 'Heinsohn Nómina' },
     // Cuando el portal tenga más secciones, se agregan acá — el panel de
     // navegación no necesita ningún otro cambio.
@@ -497,6 +527,10 @@ export default function PortalContenido({
     }
     if (id === ID_SECCION_AYUDAS) {
       setAyudasAbierto(true);
+      return;
+    }
+    if (id === ID_SECCION_CAPACITACIONES) {
+      setCapacitacionesAbierto(true);
       return;
     }
     if (id === ID_SECCION_HEINSOHN) {
@@ -650,6 +684,9 @@ export default function PortalContenido({
               </span>
             </a>
           </section>
+
+          {/* «LINKS PARA DILIGENCIAR EN CASO DE SER REQUERIDO» (Cristian, 2026-10-20): los formularios SST, bajo Formación. */}
+          <LinksDiligenciar />
         </div>
       </div>
 
@@ -696,6 +733,7 @@ export default function PortalContenido({
 
       {politicasAbierto && <PoliticasVisor onCerrar={cerrarPoliticas} />}
       {ayudasAbierto && <PoliticasVisor onCerrar={cerrarAyudas} textos={TEXTOS_AYUDAS} />}
+      {capacitacionesAbierto && <PoliticasVisor onCerrar={cerrarCapacitaciones} textos={TEXTOS_CAPACITACIONES} />}
       {heinsohnAbierto && <HeinsohnVentana onCerrar={cerrarHeinsohn} />}
       {organigramaAbierto && (
         <OrganigramaVisor
@@ -831,6 +869,17 @@ export default function PortalContenido({
                       </button>
                     </div>
                   )}
+                  {avisoExportar && (
+                    <Alert
+                      color={avisoExportar.tipo === 'ok' ? 'green' : 'red'}
+                      withCloseButton
+                      onClose={() => setAvisoExportar(null)}
+                      role={avisoExportar.tipo === 'ok' ? 'status' : 'alert'}
+                      mb='sm'
+                    >
+                      {avisoExportar.texto}
+                    </Alert>
+                  )}
                   {correosGrupos && correosGrupos.length > 0 && (
                     <Group gap='sm' wrap='wrap'>
                       <TextInput
@@ -851,6 +900,15 @@ export default function PortalContenido({
                         comboboxProps={{ withinPortal: true, zIndex: 1100 }}
                         style={{ flex: '0 1 220px', minWidth: 180 }}
                       />
+                      <Button
+                        variant='light'
+                        leftSection={<IconDownload size={16} />}
+                        loading={exportandoCorreos}
+                        onClick={() => void exportarCorreos()}
+                        data-testid='exportar-correos'
+                      >
+                        Exportar a Excel
+                      </Button>
                     </Group>
                   )}
                   {correosGrupos && busquedaCorreo.trim() && correosFiltrados.length === 0 && (

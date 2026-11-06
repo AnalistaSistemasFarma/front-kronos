@@ -2,10 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Center, Group, Loader, Modal, Stack, Tabs, Text } from '@mantine/core';
-import { IconDownload, IconFile, IconPhoto } from '@tabler/icons-react';
+import { IconFile, IconPhoto } from '@tabler/icons-react';
+import dynamic from 'next/dynamic';
 import { formatBytes } from '../../lib/chat/attachments';
 import { chatGetJson, isAbortError, type ChatSharedFileDto } from '../../lib/chat/client';
-import { ChatImageThumb, ChatImageViewer, type ImagenAdjunta } from './ChatImageViewer';
+import { ChatImageThumb } from './ChatImageViewer';
+import IconoAdjunto from './IconoAdjunto';
+import type { AdjuntoVisor } from './ChatAttachmentViewer';
+
+const ChatAttachmentViewer = dynamic(() => import('./ChatAttachmentViewer'), { ssr: false });
 
 type Pagina = { items: ChatSharedFileDto[]; nextCursor: number | null };
 
@@ -23,8 +28,9 @@ function fecha(iso: string): string {
 
 /**
  * "MULTIMEDIA Y ARCHIVOS" de una conversación: pestañas Fotos (cuadrícula con
- * el mismo visor de las burbujas) y Archivos (lista con descarga), del más
- * reciente al más antiguo.
+ * el mismo visor de las burbujas) y Archivos (lista), del más reciente al más
+ * antiguo. Desde 2026-10-22 todo se abre en el VISOR (fotos con navegación
+ * entre las cargadas); Descargar está dentro del visor.
  *
  * Se carga SOLO al abrirse (el módulo además va con `next/dynamic`), una página
  * a la vez con "Cargar más", y nada de sondeo: es una consulta, no un hilo vivo.
@@ -45,7 +51,7 @@ export default function ChatMediaPanel({
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cargado, setCargado] = useState(false);
-  const [visor, setVisor] = useState<ImagenAdjunta | null>(null);
+  const [visor, setVisor] = useState<{ lista: AdjuntoVisor[]; indice: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const cargar = useCallback(
@@ -143,11 +149,11 @@ export default function ChatMediaPanel({
                 vacio(cursor !== null ? 'Todavía no hay fotos en lo cargado.' : 'No hay fotos en esta conversación.')
               ) : (
                 <div className='chat-galeria'>
-                  {fotos.map((f) => (
+                  {fotos.map((f, i) => (
                     <ChatImageThumb
                       key={f.id}
                       imagen={f}
-                      onAbrir={setVisor}
+                      onAbrir={() => setVisor({ lista: fotos, indice: i })}
                       className='chat-imagen chat-galeria__foto'
                     />
                   ))}
@@ -166,14 +172,14 @@ export default function ChatMediaPanel({
               ) : (
                 <Stack gap={6}>
                   {archivos.map((a) => (
-                    <a
+                    <button
+                      type='button'
                       key={a.id}
-                      href={a.downloadUrl}
-                      download={a.fileName}
+                      onClick={() => setVisor({ lista: [a], indice: 0 })}
                       className='chat-galeria__archivo'
-                      title={`Descargar ${a.fileName}`}
+                      title={`Ver ${a.fileName}`}
                     >
-                      <IconFile size={20} style={{ flexShrink: 0 }} />
+                      <IconoAdjunto fileName={a.fileName} contentType={a.contentType} size={20} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <Text size='sm' fw={500} lineClamp={1}>
                           {a.fileName}
@@ -184,8 +190,7 @@ export default function ChatMediaPanel({
                             .join(' · ')}
                         </Text>
                       </div>
-                      <IconDownload size={16} style={{ flexShrink: 0 }} />
-                    </a>
+                    </button>
                   ))}
                 </Stack>
               )}
@@ -199,7 +204,14 @@ export default function ChatMediaPanel({
           </Button>
         </Group>
       </Modal>
-      {visor && <ChatImageViewer imagen={visor} onClose={() => setVisor(null)} />}
+      {visor && (
+        <ChatAttachmentViewer
+          adjuntos={visor.lista}
+          indice={visor.indice}
+          onIndice={(indice) => setVisor((v) => (v ? { ...v, indice } : v))}
+          onClose={() => setVisor(null)}
+        />
+      )}
     </>
   );
 }

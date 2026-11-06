@@ -33,6 +33,8 @@ export interface AgenteMiniDto {
 /** Agente que el dueño PUEDE designar en una empresa, con los perfiles que admite. */
 export interface AgenteDesignableDto extends AgenteMiniDto {
   profiles: string[];
+  /** Agente de DESARROLLO (2026-10-27): solo a estos se les ofrece código y repos. */
+  esDesarrollo?: boolean;
 }
 
 /** Agente designado en un proyecto, visto por ESTA persona. */
@@ -93,6 +95,8 @@ export interface ArchivoDto {
   sizeBytes: number | null;
   createdAt: string;
   uploadedBy: PersonaDto | null;
+  /** Lo generó un agente en una conversación del proyecto (2026-10-23). */
+  uploadedByAgent: { idAgent: number; name: string; idConversation: number | null } | null;
   downloadUrl: string;
   puedoQuitar: boolean;
 }
@@ -106,6 +110,12 @@ export interface ConversacionDto {
   createdBy: PersonaDto | null;
   /** Null = se puede escribir. Si no, el motivo (rol, agente retirado…). */
   soloLectura: string | null;
+  /**
+   * Puedo RENOMBRAR y ELIMINAR esta conversación (2026-10-29): la creé y sigo
+   * escribiendo, soy el dueño del proyecto o administrador. La reja real está
+   * en el servidor; esto solo dice si se pintan las acciones.
+   */
+  puedoGestionar?: boolean;
   /**
    * Estado del agente en esta conversación al cargar (2026-10-20): el mismo
    * indicador del chat. Null = nunca reportó nada. Lo que cambie después llega

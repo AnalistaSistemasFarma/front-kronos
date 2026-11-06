@@ -994,7 +994,48 @@ html.dark .mantine-Menu-itemLabel {
   display: flex;
   align-items: center;
   gap: 14px;
+  width: 100%;
   padding: 18px 18px 12px;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  border-radius: inherit;
+}
+
+button.ios-process-card__head {
+  cursor: pointer;
+}
+
+.ios-process-card--closed .ios-process-card__head {
+  padding-bottom: 18px;
+}
+
+.ios-segments .ios-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ios-process-card__titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.ios-process-card__toggle {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--app-text) 40%, transparent);
+  transition: transform 0.18s ease;
+}
+
+.ios-process-card__toggle--open {
+  transform: rotate(180deg);
+}
+
+.dark .ios-process-card__toggle {
+  color: #c5d0e6;
 }
 
 .ios-process-card__glyph {
@@ -1142,6 +1183,10 @@ html.dark .mantine-Menu-itemLabel {
 .dark .ios-process-row__chevron {
   color: #c5d0e6;
   opacity: 0.85;
+}
+
+.ios-process-hub__grid .ios-process-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .ios-empty {
@@ -1299,6 +1344,37 @@ body.con-chat-rail .app-page-shell {
 
 body.con-chat-rail.con-chat-rail--expandida .app-page-shell {
   padding-left: var(--chat-rail-w-expandida);
+}
+
+/* Reserva del ancho mientras llega el permiso del chat (ThemeInitScript la pone
+   si en la visita anterior hubo barra; ChatRail la quita al decidir). Pinta el
+   fondo de la barra vacío para que la página no salte 64–288 px después. */
+html.chat-rail-reservada .app-page-shell {
+  padding-left: var(--chat-rail-w);
+}
+
+html.chat-rail-reservada.chat-rail-reservada--expandida .app-page-shell {
+  padding-left: var(--chat-rail-w-expandida);
+}
+
+html.chat-rail-reservada body:not(.con-chat-rail):not(.chat-inmersivo)::before {
+  content: '';
+  position: fixed;
+  top: var(--app-header-height);
+  left: 0;
+  bottom: 0;
+  z-index: 45;
+  width: var(--chat-rail-w);
+  background-color: var(--app-header, var(--app-surface));
+  border-right: 1px solid var(--app-border);
+}
+
+html.chat-rail-reservada.chat-rail-reservada--expandida body:not(.con-chat-rail):not(.chat-inmersivo)::before {
+  width: var(--chat-rail-w-expandida);
+}
+
+html.chat-rail-reservada body.chat-inmersivo .app-page-shell {
+  padding-left: 0;
 }
 
 /* Modo inmersivo del chat: sin cabecera tampoco hay barra (ver más abajo). */
@@ -2494,6 +2570,117 @@ html[data-mantine-color-scheme='dark'] .sl-pensando {
   color: var(--app-text, var(--foreground));
 }
 
+/* ── Compositor estilo Teams (escritorio, 2026-10-21) ──
+   Referencia de Nicolás: el compositor de Microsoft Teams («no debe ser igual,
+   pero similar»). Un marco con la caja arriba y la fila de íconos de línea
+   abajo a la derecha; al tener el foco, una línea de acento abajo. En el
+   celular (≤ 768 px) se queda la cápsula de una fila, con los íconos
+   agrupados dentro de la caja. Colores: los tokens --app-* de siempre, así
+   que sigue el tema claro/oscuro y la paleta del perfil. */
+.chat-composer.chat-composer--marco {
+  position: relative;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  border-radius: 12px;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+  padding: 4px 6px 4px;
+  transition: border-color 160ms ease;
+}
+
+/* La línea de acento: un ::after y no un borde, para no mover nada al enfocar. */
+.chat-composer.chat-composer--marco::after {
+  content: '';
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 0 0 12px 12px;
+  background-color: transparent;
+  transition: background-color 160ms ease;
+  pointer-events: none;
+}
+
+.chat-composer.chat-composer--marco:focus-within::after {
+  background-color: var(--app-accent, #2563eb);
+}
+
+/* La caja dentro del marco: sin borde, sin fondo propio y sin halo (el foco lo
+   marca la línea de acento). El tamaño de letra sigue en 16 px (ver arriba). */
+.chat-composer--marco .chat-composer__input.chat-composer__input--marco,
+.chat-composer--marco .chat-composer__input.chat-composer__input--marco:focus,
+.chat-composer--marco .chat-composer__input.chat-composer__input--marco:focus-within {
+  background-color: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  min-height: 40px;
+  padding: 8px 8px 4px 8px;
+}
+
+.chat-composer--marco .chat-composer__preview {
+  border: 0;
+  background-color: transparent;
+  padding: 8px;
+}
+
+.chat-composer .chat-composer__acciones {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 0 0 2px;
+}
+
+.chat-composer .chat-composer__acciones .mantine-ActionIcon-root[data-variant='subtle'] {
+  color: var(--app-text-muted, #64748b);
+}
+
+.chat-composer .chat-composer__acciones .mantine-ActionIcon-root[data-variant='subtle']:hover {
+  color: var(--app-accent, #2563eb);
+}
+
+.chat-composer .chat-composer__send.chat-composer__send--marco {
+  flex: 0 0 34px;
+}
+
+.chat-composer .chat-composer__send--marco:not([data-disabled]) {
+  color: var(--app-accent, #2563eb);
+}
+
+.chat-composer .chat-composer__send--marco[data-disabled] {
+  background-color: transparent;
+}
+
+.chat-composer__separador {
+  display: inline-block;
+  flex: 0 0 1px;
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background-color: var(--app-border, var(--border-subtle));
+}
+
+.chat-composer__separador.chat-composer__separador--alto {
+  height: 24px;
+  margin: 0 6px;
+}
+
+/* Barra de formato: se despliega ARRIBA de la caja, como en Teams. */
+.chat-composer .chat-composer__formato {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 2px 6px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--app-border, var(--border-subtle));
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chat-composer .chat-composer__formato .mantine-ActionIcon-root {
+  color: var(--app-text, var(--foreground));
+}
+
 /* ── Página de chats ── */
 .chat-folder__icon {
   color: var(--app-accent, #2563eb);
@@ -2524,6 +2711,105 @@ html[data-mantine-color-scheme='dark'] .sl-pensando {
 .chat-agent-card--selected {
   border-color: var(--app-accent, #2563eb);
   background-color: color-mix(in srgb, var(--app-accent, #2563eb) 10%, var(--app-surface, #fff));
+}
+
+/* ── Lista de chats en el CELULAR, como WhatsApp (Nicolás, 2026-10-27) ──
+   "Quiero que el espaciado entre chats quede igual en mobile, similar a
+   WhatsApp". En el celular las filas de Personas, Grupos y las carpetas de
+   asistentes por empresa salían apretadas: avatar de 42 px, nombre y mensaje
+   pegados y sin separador. Aquí, SOLO por debajo de 768 px (donde la rejilla
+   ya es de una columna), cada fila pasa a ser una fila de mensajería:
+   avatar de 54 px, fila de ~76 px, nombre 17 px semibold, mensaje 15 px gris
+   en UNA línea con elipsis, la hora arriba a la derecha y un separador fino
+   que empieza después del avatar. El escritorio no cambia.
+   Va con `.chat-folder` delante porque el reset de UnstyledButton de Mantine
+   le gana a `.chat-agent-card` sola, y con !important en las variables de
+   Mantine porque esas llegan como estilo en línea (tamaño, gap, alineación). */
+@media (max-width: 767px) {
+  .chat-folder .mantine-SimpleGrid-root:has(> .chat-agent-card--fila) {
+    row-gap: 0 !important;
+  }
+
+  .chat-folder .chat-agent-card--fila {
+    min-height: 76px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background-color: transparent;
+  }
+
+  .chat-folder .chat-agent-card--fila:hover {
+    transform: none;
+    box-shadow: none;
+  }
+
+  .chat-folder .chat-agent-card--fila:active {
+    background-color: var(--app-surface-hover, rgb(0 0 0 / 6%));
+  }
+
+  .chat-folder .chat-agent-card--fila.chat-agent-card--selected {
+    background-color: color-mix(in srgb, var(--app-accent, #2563eb) 10%, transparent);
+  }
+
+  .chat-folder .chat-agent-card__fila {
+    --group-align: center !important;
+    --group-gap: 14px !important;
+    min-height: 76px;
+    align-items: stretch;
+  }
+
+  /* El avatar (o el círculo del grupo) centrado en la fila. */
+  .chat-folder .chat-agent-card__fila > .agent-avatar,
+  .chat-folder .chat-agent-card__fila > .chat-grupo__icono {
+    align-self: center;
+    width: 54px !important;
+    height: 54px !important;
+  }
+
+  .chat-folder .chat-agent-card__fila > .agent-avatar .mantine-Avatar-root {
+    --avatar-size: 54px !important;
+  }
+
+  .chat-folder .chat-agent-card__fila > .chat-grupo__icono svg {
+    width: 28px;
+    height: 28px;
+  }
+
+  /* El bloque de texto lleva el separador: así empieza DESPUÉS del avatar. */
+  .chat-folder .chat-agent-card__texto {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--app-border, var(--border-subtle));
+  }
+
+  .chat-folder .mantine-SimpleGrid-root > .chat-agent-card--fila:last-child .chat-agent-card__texto {
+    border-bottom-color: transparent;
+  }
+
+  .chat-folder .chat-agent-card__cabeza {
+    --group-align: flex-start !important;
+  }
+
+  .chat-folder .chat-agent-card__nombre {
+    --text-fz: 17px !important;
+    --text-lh: 1.3 !important;
+    font-weight: 600;
+  }
+
+  .chat-folder .chat-agent-card__hora {
+    --text-fz: 13px !important;
+    --text-lh: 1.3 !important;
+    padding-top: 2px;
+  }
+
+  .chat-folder .chat-agent-card__previa {
+    --text-fz: 15px !important;
+    --text-lh: 1.35 !important;
+    --text-line-clamp: 1 !important;
+  }
 }
 
 .chat-page-thread {
@@ -3077,8 +3363,8 @@ body.chat-inmersivo .chat-page-thread--completa {
 
 .chat-sticker-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 4px;
 }
 
 .chat-sticker-grid .chat-sticker-grid__btn {
@@ -3097,8 +3383,8 @@ body.chat-inmersivo .chat-page-thread--completa {
 }
 
 .chat-sticker-grid__btn img {
-  width: 88px;
-  height: 88px;
+  width: 72px;
+  height: 72px;
   object-fit: contain;
 }
 
@@ -3125,6 +3411,141 @@ body.chat-inmersivo .chat-page-thread--completa {
 .chat-gif-grid .chat-gif-grid__btn:focus-visible {
   outline: 2px solid var(--app-accent, #2563eb);
   outline-offset: 2px;
+}
+
+/* ── Stickers ANIMADOS y panel Emoji | Stickers | GIF (2026-10-20) ──
+   El cuadro fijo está siempre; el WebP animado se monta encima solo mientras
+   el sticker se ve (StickerAnimado) y aparece al terminar de cargar. Cuando
+   ya se mueve, el cuadro fijo se oculta: si no, se vería a través de las
+   partes transparentes de los cuadros en movimiento. */
+.chat-sticker-anim {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.chat-sticker-anim > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.chat-sticker-anim > .chat-sticker-anim__mov {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+
+.chat-sticker-anim > .chat-sticker-anim__mov--listo {
+  opacity: 1;
+}
+
+/* `opacity` y no `visibility`: el cuadro fijo lleva el texto alternativo
+   (el animado va aria-hidden) y tiene que seguir en el árbol de accesibilidad. */
+.chat-sticker-anim[data-animando='true'] > img:first-child {
+  opacity: 0;
+}
+
+/* Globo del escritorio, encima de la caja de escribir. */
+.chat-expresiones-globo {
+  background-color: var(--app-surface, var(--surface));
+  border-color: var(--app-border, var(--border-subtle));
+  color: var(--app-text, var(--foreground));
+}
+
+/* Hoja del celular: ocupa el lugar del teclado, debajo de la caja. */
+.chat-expresiones-hoja {
+  margin-top: 8px;
+  padding: 8px 4px calc(4px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--app-border, var(--border-subtle));
+  background-color: var(--app-surface, var(--surface));
+  color: var(--app-text, var(--foreground));
+}
+
+/* Barra de paquetes de stickers (como la de Telegram). */
+.chat-paquetes {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chat-paquetes .chat-paquetes__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 3px 10px 3px 4px;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-text, var(--foreground));
+}
+
+.chat-paquetes .chat-paquetes__btn:hover,
+.chat-paquetes .chat-paquetes__btn:focus-visible {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.chat-paquetes__btn img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+/* «Mis stickers» (2026-10-21): la casilla de agregar y la ventana. */
+.chat-sticker-grid .chat-sticker-grid__btn.chat-sticker-grid__agregar {
+  flex-direction: column;
+  gap: 2px;
+  min-height: 80px;
+  border: 1px dashed var(--app-border, var(--border-subtle));
+  color: var(--app-text-muted, #64748b);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.chat-sticker-grid .chat-sticker-grid__btn.chat-sticker-grid__agregar:hover,
+.chat-sticker-grid .chat-sticker-grid__btn.chat-sticker-grid__agregar:focus-visible {
+  border-color: var(--app-accent, #2563eb);
+  color: var(--app-accent, #2563eb);
+}
+
+.chat-mis-stickers__nuevo {
+  padding: 12px;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  border-radius: 12px;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.chat-mis-stickers__vista {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  height: 96px;
+  border: 1px dashed var(--app-border, var(--border-subtle));
+  border-radius: 12px;
+  color: var(--app-text-muted, #64748b);
+}
+
+.chat-mis-stickers__vista img,
+.chat-mis-stickers__fila img {
+  object-fit: contain;
+}
+
+.chat-mis-stickers__fila {
+  padding: 6px 8px;
+  border-radius: 10px;
+}
+
+.chat-mis-stickers__fila:hover {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.chat-expresiones__credito {
+  font-size: 11px;
 }
 
 /* ── Miniatura de una imagen adjunta (2026-10-01) ──
@@ -3207,6 +3628,169 @@ body.chat-inmersivo .chat-page-thread--completa {
   margin: 0 auto;
   object-fit: contain;
 }
+
+/* ── Visor de adjuntos del chat (2026-10-22): PDF, Office, Excel, texto, medios ── */
+/* Las fichas y la lista de archivos ahora son <button> (abren el visor). */
+button.chat-attachment,
+button.chat-galeria__archivo {
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+button.chat-galeria__archivo {
+  width: 100%;
+  background-color: transparent;
+}
+
+.chat-visor__contenido--doc {
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-visor__contenido--doc .chat-visor__cuerpo {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-visor__area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 140px);
+  overflow: hidden;
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.chat-visor__area[data-tipo='audio'],
+.chat-visor__area[data-tipo='ninguno'] {
+  height: auto;
+}
+
+.chat-visor__contenido--movil .chat-visor__area {
+  height: calc(100dvh - 52px);
+}
+
+.chat-visor__marco {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  touch-action: pan-x pan-y pinch-zoom;
+  cursor: zoom-in;
+}
+
+.chat-visor__marco--zoom {
+  cursor: grab;
+}
+
+.chat-visor__marco .chat-visor__imagen {
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
+  user-select: none;
+}
+
+.chat-visor__paginas {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.chat-visor__video {
+  display: block;
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
+  background: #000;
+}
+
+.chat-visor__hoja,
+.chat-visor__pestanas {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-visor__subbarra,
+.chat-visor__pestanas-lista {
+  border-bottom: 1px solid var(--app-border, var(--border-subtle));
+  background-color: var(--app-surface, var(--surface));
+}
+
+.chat-visor__pestanas-lista {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.chat-visor__pestana {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-visor__iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+  display: block;
+}
+
+/* Compartir un adjunto (2026-10-24): lista de destinos del reenvío. */
+.chat-compartir__destino {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--app-border, var(--border-subtle));
+  border-radius: 8px;
+  color: var(--app-text, inherit);
+  background-color: var(--app-surface, transparent);
+}
+
+.chat-compartir__destino:hover {
+  background-color: var(--app-surface-raised, var(--surface-muted));
+}
+
+.chat-compartir__destino--activo,
+.chat-compartir__destino--activo:hover {
+  border-color: var(--app-accent, #2563eb);
+  box-shadow: inset 0 0 0 1px var(--app-accent, #2563eb);
+}
+
+.chat-visor__texto {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  background-color: var(--app-surface, var(--surface));
+  color: var(--app-text, var(--foreground));
+}
+
+.chat-visor__codigo {
+  margin: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-visor__tk--cadena { color: #0a7d32; }
+.chat-visor__tk--numero { color: #b35900; }
+.chat-visor__tk--comentario { color: #6b7280; font-style: italic; }
+.chat-visor__tk--clave { color: #7c3aed; font-weight: 600; }
+.chat-visor__tk--literal { color: #c2410c; }
+.chat-visor__tk--etiqueta { color: #1d4ed8; }
+
+.dark .chat-visor__tk--cadena { color: #7ee2a0; }
+.dark .chat-visor__tk--numero { color: #fbbf72; }
+.dark .chat-visor__tk--comentario { color: #9ca3af; }
+.dark .chat-visor__tk--clave { color: #c4a5ff; }
+.dark .chat-visor__tk--literal { color: #fdba74; }
+.dark .chat-visor__tk--etiqueta { color: #93c5fd; }
 
 /* Markdown de los mensajes */
 .chat-md {
@@ -5361,6 +5945,97 @@ html.dark .portal-th--modulo .portal-th__cal,
   --pthc-festivo: #ff8a80;
 }
 
+/* ── Portal TH en MODO OSCURO, dentro del hub (Cristian, 2026-10-21) ─────────
+   Mismo criterio que el calendario: solo en /process/portal-th (la página
+   abierta /portal sigue siempre clara) y solo con CSS, así que responde EN VIVO
+   al cambiar de tema (applyAppThemeToDocument cambia html.dark,
+   data-mantine-color-scheme y las --app-* sin recargar). En claro no cambia
+   nada: aquí solo se redefinen los tokens del portal con los de SynerLink y se
+   cambian los fondos blancos fijos por la superficie del tema. Sobre el azul
+   de acento (relleno) el texto va oscuro, como el día elegido del calendario. */
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo {
+  --pth-azul: var(--app-accent, var(--mantine-color-anchor));
+  --pth-azul-700: var(--app-accent-hover, var(--mantine-color-anchor));
+  --pth-azul-50: var(--app-surface-raised, var(--mantine-color-default-hover));
+  --pth-tinta: var(--app-text, var(--mantine-color-text));
+  --pth-tinta-2: var(--app-text, var(--mantine-color-text));
+  --pth-tinta-3: var(--app-text-muted, var(--mantine-color-dimmed));
+  --pth-linea: var(--app-border, var(--mantine-color-default-border));
+  --pth-superficie: var(--app-surface, var(--mantine-color-body));
+  --pth-sobre-azul: #0b1220;
+}
+
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__nav-boton,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__carrusel-marco,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__cargar,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__tarjeta,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-caja,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-controles,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__contactos-boton:hover,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__extensiones-buscar,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__buscador:focus,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__politicas-lista,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__politicas-item:hover,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__politicas-item--activo,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__politicas-volver,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__formacion-toggle button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__curso-tarjeta,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__formacion-gestion-barra button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__material-item,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__material-check,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__subida,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__subida button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__acceso-formacion,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__formacion-crear .portal-th__boton-secundario,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__icono-boton,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__invitar,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__invitar-acciones button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__org-zoom button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__org-muestra,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__org-lienzo,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__org-ventana,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__hoy-caja,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__top {
+  background-color: var(--pth-superficie);
+}
+
+/* Los rellenos que comparten elemento con una superficie de arriba vuelven al azul. */
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__nav-boton--activo,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__cargar:hover,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__invitar-acciones button[type='submit'] {
+  background-color: var(--pth-azul);
+}
+
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__material-check--bloqueada {
+  background-color: var(--pth-azul-50);
+}
+
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__nav-boton--activo,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__cargar:hover,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-barra,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-acciones a,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-acciones button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__politicas-tipo,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__certificado-boton,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__formacion-crear button:where(:not(.portal-th__mantine *)),
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-controles button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__cal-boton--primario,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__invitar-acciones button[type='submit'],
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__org-ventana > header,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__org-ventana > header button,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__hoy-barra,
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__hoy-barra button {
+  color: var(--pth-sobre-azul);
+}
+
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__formacion-toggle-activo {
+  color: var(--pth-sobre-azul) !important;
+}
+
+:is(html.dark, html[data-mantine-color-scheme='dark']) .portal-th--modulo .portal-th__visor-acciones button {
+  background-color: rgba(11, 18, 32, 0.14);
+}
+
 .portal-th__cal-alternar {
   display: flex;
   justify-content: space-between;
@@ -6340,6 +7015,26 @@ a.portal-th__contactos-boton--enlace:focus-visible {
   flex-shrink: 0;
 }
 
+/* Día sin nada (Cristian, 2026-10-21): el aviso y, debajo, los próximos (título como el del día en el calendario). */
+.portal-th__hoy-vacio {
+  margin: 0 0 12px;
+  color: var(--pth-tinta-2);
+  font-size: 0.88rem;
+}
+
+.portal-th__hoy-vacio--pista {
+  margin: 0;
+  color: var(--pth-tinta-3);
+  font-size: 0.78rem;
+}
+
+.portal-th__hoy-subtitulo {
+  margin: 0 0 8px;
+  color: var(--pth-azul);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
 /* Barra que se vacía en 15 s. */
 .portal-th__hoy-tiempo {
   height: 4px;
@@ -6532,4 +7227,41 @@ a.portal-th__contactos-boton--enlace:focus-visible {
   border-radius: 2px;
   margin: 8px auto 0;
   background-color: var(--app-border, var(--border-subtle));
+}
+
+/* ── Chat en el celular: burbujas anchas y tablas legibles, como WhatsApp ──
+   (pedido de Nicolás 2026-10-28). En móvil el avatar al lado de cada mensaje
+   le quita ~36 px a la burbuja y las tablas terminaban partiendo palabras
+   letra por letra («Pr/io/ri/da/d»). El autor ya va en .chat-bubble__author.
+   En escritorio no cambia nada. */
+@media (max-width: 767px) {
+  .chat-msg__avatar {
+    display: none;
+  }
+  .chat-bubble {
+    max-width: 92%;
+  }
+  .chat-bubble--system {
+    max-width: 96%;
+  }
+  /* La tabla toma el ancho de su contenido y, si no cabe, se desliza dentro
+     de la burbuja; nunca parte palabras cortas. */
+  .chat-md__table-wrap {
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+  .chat-md__table {
+    width: max-content;
+    min-width: 100%;
+  }
+  .chat-md__th,
+  .chat-md__td {
+    overflow-wrap: normal;
+    word-break: normal;
+    min-width: 7ch;
+    max-width: 70vw;
+  }
+  .chat-md__th {
+    white-space: nowrap;
+  }
 }

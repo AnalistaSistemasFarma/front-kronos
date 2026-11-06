@@ -29,6 +29,7 @@ import { markdownAHtml, markdownATexto } from './markdown';
 import { claveAcuse, enlaceSolicitud, textoAcuse, type OpcionesAcuse } from './acuse';
 import { fragmentoAcuse, logoAcuseUrl } from './plantillas/acuse.html';
 import type { SolicitudVisible } from './kronos';
+import type { TicketPort } from './ticket';
 import type { ArchivoAdjunto, Direccion, FilaSimulacion, MailProvider, MensajeCompleto, ResultadoAcuse, ResultadoCreacion, SugerenciaDestinatario, VinculoHilo } from './types';
 
 /**
@@ -88,6 +89,8 @@ export interface CorreoDeps {
   proveedor?: (acceso: AccesoCorreo) => Promise<MailProvider>;
   /** Secreto del servidor (NEXTAUTH_SECRET) con que se firma el comprobante de «Deshacer» al eliminar. */
   secretoFirma?: string;
+  /** «Crear ticket» de mesa de ayuda (solo TI, lib/correo/ticket.ts). Sin él, la acción no existe. */
+  ticket?: TicketPort;
 }
 
 const now = (d: CorreoDeps) => (d.now ? d.now() : Date.now());
@@ -116,6 +119,8 @@ export interface EstadoConexion {
   /** Eliminar (mover a Elementos eliminados con «Deshacer»): escritura encendida y CORREO_ELIMINAR_HABILITADO. */
   eliminarHabilitado: boolean;
   sincronizacionAutomatica: boolean;
+  /** «Consultar a un agente» (CORREO_AGENTE_HABILITADO). */
+  agenteHabilitado: boolean;
 }
 
 export function estadoConexion(d: CorreoDeps, acceso: AccesoCorreo): EstadoConexion {
@@ -128,6 +133,7 @@ export function estadoConexion(d: CorreoDeps, acceso: AccesoCorreo): EstadoConex
     etiquetarHabilitado: d.cfg.etiquetarHabilitado,
     eliminarHabilitado: d.cfg.etiquetarHabilitado && d.cfg.eliminarHabilitado,
     sincronizacionAutomatica: d.cfg.syncHabilitado,
+    agenteHabilitado: d.cfg.agenteHabilitado === true,
   };
 }
 

@@ -134,10 +134,10 @@ test.describe('Portal TH · selección múltiple y lista desplegable', () => {
       return r.fulfill({ json: { formularios: [] } });
     });
     await page.goto('/portal/formacion');
-    await page.getByRole('button', { name: 'Vista formador' }).click();
+    await page.locator('label').filter({ hasText: /^Vista formador$/ }).click();
     await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
     await page.getByTestId('alternar-edicion').click();
-    await page.getByRole('button', { name: 'Formulario', exact: true }).click();
+    await page.locator('label').filter({ hasText: /^Formulario$/ }).click();
     await page.getByTestId('crear-evaluacion').click();
     const c = page.getByTestId('constructor-formulario');
     await c.getByTestId('titulo-formulario').fill('Evaluación PTEE');
@@ -194,10 +194,10 @@ test.describe('Portal TH · selección múltiple y lista desplegable', () => {
     await page.route('**/api/portal/formularios/importar-forms', (r) => r.fulfill({ status: 202, json: { id: ID } }));
     await page.route('**/api/portal/formularios/importar-forms/' + ID, (r) => r.fulfill({ json: { estado: 'listo', progreso: 100, etapa: 'Listo', resultado: normalizarImportacion(crudo) } }));
     await page.goto('/portal/formacion');
-    await page.getByRole('button', { name: 'Vista formador' }).click();
+    await page.locator('label').filter({ hasText: /^Vista formador$/ }).click();
     await page.getByRole('button', { name: /INDUCCIÓN ORGANIZACIONAL - SST/ }).click();
     await page.getByTestId('alternar-edicion').click();
-    await page.getByRole('button', { name: 'Formulario', exact: true }).click();
+    await page.locator('label').filter({ hasText: /^Formulario$/ }).click();
     await page.getByTestId('crear-evaluacion').click();
     const c = page.getByTestId('constructor-formulario');
     const imp = c.getByTestId('importar-forms');

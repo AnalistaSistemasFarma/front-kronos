@@ -342,3 +342,36 @@ Cubre (vitest, Prisma mockeado — no requiere DB real):
 
 El script `sql/proceso-conectores-ia.template.sql` crea el proceso por empresa (copia de 249 con otro autorizador), idempotente y con verificación de `DB_NAME()`.
 
+
+## Administración de usuarios por agente: `kronos_usuarios_consultar` y `kronos_usuarios_crear` (2026-10-22)
+
+Solicitud #6283 / tarea #7541. Solo se registran para las llaves que traen el bloque `usuarios`
+(además de `allowedTools` y `agentCode`, que son obligatorios con ese bloque). Las llaves históricas
+sin lista blanca (horus, nancy) **no** las ven.
+
+```json
+{ "key": "<secreto>", "agent": "ia-mechita", "agentCode": "mechita", "role": "agent", "companyIds": [8],
+  "allowedTools": ["kronos_usuarios_consultar", "kronos_usuarios_crear"],
+  "usuarios": {
+    "solicitantes": ["nicolas.rojas@gsslatam.com"],
+    "companyIds": [8],
+    "departmentIds": [],
+    "subprocessIds": [13],
+    "dominios": ["gsslatam.com"],
+    "maxPorHora": 3, "maxPorDia": 10, "exigirEntra": true } }
+```
+
+- **Consultar** (solo lectura, por `queryReadOnly`): nombre, correo, activo, rol, empresas (solo las de
+  `usuarios.companyIds`; las demás se cuentan), departamentos y agentes del chat. Nunca contraseña,
+  tokens, teléfono, identificación ni NIT. Incluye cuentas sin ninguna empresa (a medio crear).
+- **Crear** (escritura acotada, una transacción): solo rol `user`; solicitante en `usuarios.solicitantes`
+  y activo; correo válido, de un dominio permitido, inexistente y (con `exigirEntra`) habilitado y con
+  licencia en Entra (`GET /users/{correo}`, requiere `User.Read.All` en la app de Graph del servidor);
+  empresa, departamentos y subprocesos solo de la lista blanca. **Nunca** se asignan, aunque estén en la
+  lista: `/process/administration/*` (Usuarios, 12), `/process/chat/*` (módulo Chat, agentes, auditoría de
+  agentes, Personas), permisos de agentes en Proyectos, administración de flujos ni ningún subproceso de
+  un agente. Tope por hora y por día contado en `user_audit_log` (`performed_by` =
+  `agente:<code> (kronos-mcp) a pedido de <correo>`). Contraseña inicial aleatoria única (bcryptjs costo 12,
+  igual que `POST /api/users`), devuelta una sola vez y nunca auditada.
+- **Orden de despliegue:** primero el código y después la llave. Un servidor anterior no conoce estas
+  herramientas y, con ellas en `allowedTools`, **no arranca**.

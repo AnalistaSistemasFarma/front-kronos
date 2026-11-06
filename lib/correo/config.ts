@@ -26,6 +26,10 @@
  *                              (CORREO_ETIQUETAR_HABILITADO) está encendida. Nunca borra de forma permanente.
  *   CORREO_SYNC_HABILITADO     false (defecto): tarea de fondo que pasa a notas los correos nuevos
  *                              de los hilos vinculados. Se enciende solo con aprobación.
+ *   CORREO_AGENTE_HABILITADO   false (defecto): «Consultar a un agente» (compartir un hilo con un
+ *                              agente del chat). Apagado: el botón no aparece, las rutas
+ *                              /api/correo/agente/** responden 403 y kronos-mcp NO registra las
+ *                              herramientas correo_*. Se enciende solo con la aprobación de Gobierno IA.
  */
 export type CorreoModo = 'off' | 'mock' | 'graph';
 
@@ -44,6 +48,8 @@ export interface CorreoConfig {
   etiquetarHabilitado: boolean;
   eliminarHabilitado: boolean;
   syncHabilitado: boolean;
+  /** «Consultar a un agente» (CORREO_AGENTE_HABILITADO, apagado por defecto). */
+  agenteHabilitado: boolean;
 }
 
 type Env = Record<string, string | undefined>;
@@ -84,7 +90,13 @@ export function readCorreoConfig(env: Env = process.env): CorreoConfig {
     etiquetarHabilitado: bool(env.CORREO_ETIQUETAR_HABILITADO, true),
     eliminarHabilitado: bool(env.CORREO_ELIMINAR_HABILITADO, true),
     syncHabilitado: bool(env.CORREO_SYNC_HABILITADO, false),
+    agenteHabilitado: bool(env.CORREO_AGENTE_HABILITADO, false),
   };
+}
+
+/** ¿Está encendido «Consultar a un agente» en este ambiente? (se lee en cada llamada). */
+export function agenteCorreoHabilitado(env: Env = process.env): boolean {
+  return bool(env.CORREO_AGENTE_HABILITADO, false);
 }
 
 /** Qué le falta a un inquilino (nombres de variables, nunca valores). */

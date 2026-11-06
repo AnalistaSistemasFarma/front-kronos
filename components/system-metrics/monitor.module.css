@@ -489,6 +489,151 @@
   background: var(--sm-fill);
 }
 
+/* ---------- Comportamiento de las personas (barras por módulo, sin líneas ni animación) ---------- */
+
+.ubLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ubChip {
+  appearance: none;
+  font: inherit;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--sm-hairline);
+  background: var(--sm-card);
+  cursor: pointer;
+  transition: opacity 150ms ease, border-color 150ms ease;
+}
+
+.ubChip:hover {
+  border-color: color-mix(in srgb, var(--sm-info) 45%, var(--sm-hairline));
+}
+
+.ubChip:focus-visible {
+  outline: 2px solid var(--sm-info);
+  outline-offset: 2px;
+}
+
+.ubChipActive {
+  border-color: var(--sm-info);
+  background: color-mix(in srgb, var(--sm-info) 10%, var(--sm-card));
+}
+
+.ubChipDim {
+  opacity: 0.55;
+}
+
+.ubChipLabel {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ubChipMeta {
+  font-size: 12px;
+  color: var(--sm-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ubClear {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--sm-info-ink);
+  cursor: pointer;
+}
+
+.ubList {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+}
+
+.ubRow {
+  display: grid;
+  grid-template-columns: 30px minmax(120px, 1.1fr) minmax(0, 2fr) 72px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--sm-hairline);
+}
+
+.ubRow:last-child {
+  border-bottom: 0;
+}
+
+.ubRow .userAvatar {
+  width: 30px;
+  height: 30px;
+  font-size: 11px;
+}
+
+.ubTrack {
+  display: block;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--sm-fill);
+  overflow: hidden;
+}
+
+.ubBar {
+  display: flex;
+  height: 100%;
+  min-width: 4px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.ubSeg {
+  display: block;
+  height: 100%;
+  flex-basis: 0;
+  min-width: 2px;
+  transition: opacity 150ms ease;
+}
+
+.ubSeg + .ubSeg {
+  box-shadow: inset 1px 0 0 var(--sm-card);
+}
+
+.ubSegDim {
+  opacity: 0.18;
+}
+
+/* Celular: la barra baja debajo del nombre. */
+@media (max-width: 600px) {
+  .ubRow {
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+    row-gap: 6px;
+  }
+  .ubRow > .rowMetric {
+    grid-row: 1;
+    grid-column: 3;
+  }
+  .ubTrack {
+    grid-row: 2;
+    grid-column: 2 / -1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ubChip,
+  .ubSeg {
+    transition: none;
+  }
+}
+
 /* ---------- Alertas tempranas ---------- */
 
 .alertSummary {

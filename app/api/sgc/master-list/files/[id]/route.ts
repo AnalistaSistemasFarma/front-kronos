@@ -1,6 +1,7 @@
 import { prisma } from '../../../../../../lib/prisma';
 import { uploadBulkFile } from '../../../../../../lib/sgc/db/bulkUpload';
-import { uploadToSgcStorage } from '../../../../../../lib/sgc/onedrive';
+import { normalizeSheetSettings } from '../../../../../../lib/sgc/sheetSettings';
+import { sgcOfficeConverter, uploadToSgcStorage } from '../../../../../../lib/sgc/onedrive';
 import { docxToHtml, htmlToPdf } from '../../../../../../lib/sgc/pdf/render';
 import { companyAccess, errorResponse, getSgcRequestContext, jsonNoStore, parseId, uploadGuard } from '../../../_lib/context';
 
@@ -13,6 +14,8 @@ export const dynamic = 'force-dynamic';
  * para el visor y se conserva con su huella. Responde 201 con el
  * resultado del archivo, cargado o con su error (un error de negocio no corta
  * la tanda: queda registrado y el navegador sigue con el siguiente).
+ * 2026-10-21: un Excel puede traer `settings` (ajustes de presentación que
+ * Calidad previsualizó); sin ellos, el ajuste automático.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -29,7 +32,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!companyAccess(ctx, idCompany, 'canQuality')) return jsonNoStore({ error: 'Solo Aseguramiento de Calidad carga los archivos del listado' }, 403);
     const file = form.get('file');
     if (!(file instanceof File)) return jsonNoStore({ error: 'Falta el archivo' }, 400);
-    const result = await uploadBulkFile(prisma, uploadToSgcStorage, idCompany, id, { fileName: file.name, bytes: new Uint8Array(await file.arrayBuffer()) }, ctx.actor, new Date(), { docxToHtml, htmlToPdf });
+    const settings = form.get('settings') ? normalizeSheetSettings(form.get('settings')) : null;
+    const result = await uploadBulkFile(prisma, uploadToSgcStorage, idCompany, id, { fileName: file.name, bytes: new Uint8Array(await file.arrayBuffer()) }, ctx.actor, new Date(), { docxToHtml, htmlToPdf, officeToPdf: sgcOfficeConverter.bytes }, settings);
     return jsonNoStore(result, 201);
   } catch (error) {
     return errorResponse(error, 'listado-maestro:archivo');

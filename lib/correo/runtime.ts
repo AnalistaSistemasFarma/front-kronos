@@ -10,6 +10,7 @@ import { createGeneralRequest } from '../requests-general/createGeneralRequest.j
 import { syncRequestToSapsend } from '../sapsend/treasury.js';
 import { readCorreoConfig } from './config';
 import { catalogoEmpresa, insertarNota, solicitudExiste, solicitudVisible } from './kronos';
+import { casoExiste, catalogoTicket, companyUserDe, crearCaso, esTecnicoTI, validarClasificacion } from './ticketKronos';
 import type { CorreoDeps } from './service';
 import type { ArchivoAdjunto } from './types';
 
@@ -30,8 +31,16 @@ export function appBaseUrl(env: Record<string, string | undefined> = process.env
 }
 
 async function subirAdjuntos(idRequest: number, archivos: ArchivoAdjunto[]): Promise<{ subidos: number; fallidos: string[] }> {
+  return subirACarpeta([oneDriveRoot(), 'TEC', 'SG', `Request-${idRequest}`], archivos);
+}
+
+/** Adjuntos de un ticket: la carpeta que lista la vista del ticket (storagePath MA, entityType Ticket). */
+async function subirAdjuntosTicket(idCase: number, archivos: ArchivoAdjunto[]): Promise<{ subidos: number; fallidos: string[] }> {
+  return subirACarpeta([oneDriveRoot(), 'TEC', 'MA', `Ticket-${idCase}`], archivos);
+}
+
+async function subirACarpeta(segments: string[], archivos: ArchivoAdjunto[]): Promise<{ subidos: number; fallidos: string[] }> {
   const token = await getMicrosoftToken();
-  const segments = [oneDriveRoot(), 'TEC', 'SG', `Request-${idRequest}`];
   const folderId = await ensureOneDriveFolderPath(token, segments);
   const existentes = await listOneDriveFolderFileNames(token, segments);
   let subidos = 0;
@@ -66,5 +75,14 @@ export function correoDeps(): CorreoDeps {
     appBaseUrl: appBaseUrl(),
     // Firma el comprobante de «Deshacer» (lib/correo/eliminar.ts); el valor nunca sale del servidor.
     secretoFirma: process.env.NEXTAUTH_SECRET,
+    ticket: {
+      esTecnico: esTecnicoTI,
+      catalogo: catalogoTicket,
+      validarClasificacion,
+      companyUser: companyUserDe,
+      casoExiste,
+      crearCaso,
+      subirAdjuntos: subirAdjuntosTicket,
+    },
   };
 }

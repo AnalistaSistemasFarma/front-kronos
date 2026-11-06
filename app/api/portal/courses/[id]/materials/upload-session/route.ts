@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { esFormadorFormacion, puedeAdministrarCursoId } from '@/lib/formacion/servidor';
 import { prisma } from '../../../../../../../lib/prisma';
 import { identificar } from '../../../../../../../lib/portal/acceso';
-import { formadoresDePortal } from '../../../../../../../lib/portal/config';
 import { abrirSubidaDeMaterial, validarDeclaracionMaterial } from '../../../../../../../lib/portal/formacion';
 import {
   FormacionStorageNoConfigurado,
@@ -33,11 +33,14 @@ function idDesdeParametro(valor: string): number | null {
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const quien = await identificar(request);
   if (!quien) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
-  if (!formadoresDePortal().includes(quien.correo.toLowerCase())) {
+  if (!(await esFormadorFormacion(quien.correo))) {
     return NextResponse.json({ error: 'Solo un formador puede subir archivos.' }, { status: 403 });
   }
 
   const courseId = idDesdeParametro((await params).id);
+  if (courseId && !(await puedeAdministrarCursoId(quien.correo, courseId))) {
+    return NextResponse.json({ error: 'Este curso es de otra empresa: no tiene el permiso de Formación para configurarlo.' }, { status: 403 });
+  }
   if (!courseId) return NextResponse.json({ error: 'Curso no válido.' }, { status: 400 });
 
   try {
@@ -45,7 +48,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const declaracion = validarDeclaracionMaterial(cuerpo);
     if (!declaracion.ok) return NextResponse.json({ error: declaracion.error }, { status: 400 });
 
-    const curso = await prisma.portalCourse.findUnique({ where: { id: courseId }, select: { id: true } });
+    const curso = await prisma.portalCourse.findUnique({ where: { id: courseId, eliminado_at: null }, select: { id: true } });
     if (!curso) return NextResponse.json({ error: 'Curso no encontrado.' }, { status: 404 });
 
     const sesion = await abrirSubidaDeMaterial(courseId, declaracion.valor);

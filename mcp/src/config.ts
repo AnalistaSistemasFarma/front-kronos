@@ -9,6 +9,37 @@
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 
+/** Nombres de las dos herramientas de usuarios (src/tools/usuarios.ts). */
+export const USUARIOS_TOOL_NAMES = ['kronos_usuarios_consultar', 'kronos_usuarios_crear'] as const;
+
+/**
+ * Permiso de administración de usuarios de SynerLink para UNA llave (2026-10-22,
+ * solicitud #6283). Sin este bloque las herramientas kronos_usuarios_* no se
+ * registran para la llave, aunque las liste en allowedTools.
+ */
+export const usuariosConfigSchema = z
+  .object({
+    /** Correos de las personas que pueden ordenarle al agente crear usuarios (p. ej. su dueño). */
+    solicitantes: z.array(z.string().email().max(255)).min(1),
+    /** Empresas donde el agente puede crear y consultar usuarios (lista blanca). */
+    companyIds: z.array(z.number().int().positive()).min(1),
+    /** Departamentos que puede asignar (lista blanca; vacío = ninguno). */
+    departmentIds: z.array(z.number().int().positive()).default([]),
+    /** Subprocesos (permisos) que puede asignar (lista blanca; vacío = ninguno). */
+    subprocessIds: z.array(z.number().int().positive()).default([]),
+    /** Dominios de correo aceptados para usuarios nuevos (sin @), p. ej. "gsslatam.com". */
+    dominios: z.array(z.string().min(3).max(120).regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i)).min(1),
+    /** Tope de creaciones por hora para esta llave. */
+    maxPorHora: z.number().int().min(1).max(20).default(3),
+    /** Tope de creaciones por día (24 h móviles) para esta llave. */
+    maxPorDia: z.number().int().min(1).max(100).default(10),
+    /** Exigir que el correo exista en Entra, habilitado y con licencia (MS Graph). */
+    exigirEntra: z.boolean().default(true),
+  })
+  .strict();
+
+export type UsuariosConfig = z.infer<typeof usuariosConfigSchema>;
+
 const apiKeySchema = z.object({
   /** Token secreto que el agente envía como `Authorization: Bearer <key>`. */
   key: z.string().min(16, 'Cada API key debe tener al menos 16 caracteres'),
@@ -40,7 +71,27 @@ const apiKeySchema = z.object({
    * agente (kronos_request_ia_access). Nunca se toma del cliente.
    */
   agentCode: z.string().min(1).max(60).optional(),
+  /**
+   * Administración de usuarios de SynerLink (kronos_usuarios_consultar / _crear).
+   * Solo para llaves RESTRINGIDAS (con allowedTools) y con agentCode.
+   */
+  usuarios: usuariosConfigSchema.optional(),
 }).superRefine((entry, ctx) => {
+  const pideUsuarios = (entry.allowedTools ?? []).some((t) =>
+    (USUARIOS_TOOL_NAMES as readonly string[]).includes(t)
+  );
+  if (pideUsuarios && !entry.usuarios) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `La key del agente "${entry.agent}" lista herramientas kronos_usuarios_* pero no define el bloque "usuarios".`,
+    });
+  }
+  if (entry.usuarios && (!entry.allowedTools || !entry.agentCode)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `La key del agente "${entry.agent}" define "usuarios": exige allowedTools (llave restringida) y agentCode.`,
+    });
+  }
   if (entry.allowedTools?.includes('kronos_request_ia_access') && !entry.agentCode) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,

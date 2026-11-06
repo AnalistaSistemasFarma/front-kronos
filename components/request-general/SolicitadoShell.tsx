@@ -21,6 +21,7 @@ import type {
 } from './RequestRoleDashboard';
 import { PROCESS_HUB_URL } from '../../lib/navigation/AppSectionContext';
 import { fetchWithRetry } from '../../lib/navigation/fetchWithRetry';
+import { fetchNavAccess } from '../../lib/navigation/navAccess';
 import {
   SOLICITADO_TAB_URL,
   SolicitadoTabProvider,
@@ -112,16 +113,17 @@ export function useSolicitadoData(): SolicitadoDataContextValue {
 
 type AccessCheck = 'allowed' | 'denied';
 
-/** Solo un "no" definitivo del servidor cuenta como sin acceso; una falla temporal lanza error. */
-async function checkAccess(kind: 'solicitado' | 'equipo'): Promise<AccessCheck> {
-  const res = await fetchWithRetry(`/api/requests-general/dashboard-access?kind=${kind}`, {
-    credentials: 'same-origin',
-    cache: 'no-store',
-  });
-  const data = await res.json().catch(() => ({}));
-  if (res.status === 401 || res.status === 403) return 'denied';
-  if (!res.ok) throw new Error('No se pudo verificar el acceso. Intenta de nuevo.');
-  return data.allowed ? 'allowed' : 'denied';
+/**
+ * Solo un "no" definitivo del servidor cuenta como sin acceso; una falla temporal lanza error.
+ * Reutiliza la llamada del menú (lib/navigation/navAccess.ts): antes eran 2 llamadas más.
+ */
+async function checkAccess(email: string): Promise<{ personal: AccessCheck; equipo: AccessCheck }> {
+  const result = await fetchNavAccess(email);
+  if (!result.ok) throw new Error('No se pudo verificar el acceso. Intenta de nuevo.');
+  return {
+    personal: result.access.solicitado ? 'allowed' : 'denied',
+    equipo: result.access.equipo ? 'allowed' : 'denied',
+  };
 }
 
 async function fetchJson(url: string, fallbackError: string) {
@@ -150,6 +152,8 @@ export function SolicitadoShell({ children }: { children: ReactNode }) {
   const loadData = useCallback(
     async (opts?: { silent?: boolean }) => {
       const silent = opts?.silent ?? false;
+      const email = session?.user?.email;
+      if (!email) return;
       try {
         if (silent) setRefreshing(true);
         else {
@@ -157,10 +161,8 @@ export function SolicitadoShell({ children }: { children: ReactNode }) {
           setError(null);
         }
 
-        const [personal, equipo] = await Promise.all([
-          checkAccess('solicitado'),
-          checkAccess('equipo'),
-        ]);
+        // Normalmente ya está en caché (el menú la pidió al entrar): no suma un viaje.
+        const { personal, equipo } = await checkAccess(email);
         if (personal === 'denied' && equipo === 'denied') {
           router.replace(PROCESS_HUB_URL);
           return;
@@ -186,7 +188,7 @@ export function SolicitadoShell({ children }: { children: ReactNode }) {
         setRefreshing(false);
       }
     },
-    [router]
+    [router, session?.user?.email]
   );
 
   useEffect(() => {

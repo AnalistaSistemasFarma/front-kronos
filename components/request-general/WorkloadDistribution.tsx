@@ -1,10 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
   ActionIcon,
   Alert,
-  Badge,
   Box,
   Button,
   Checkbox,
@@ -12,8 +11,6 @@ import {
   Group,
   Loader,
   Modal,
-  Paper,
-  Progress,
   Select,
   SimpleGrid,
   Stack,
@@ -28,9 +25,16 @@ import {
   IconCheck,
   IconChevronDown,
   IconFilter,
+  IconListCheck,
   IconLock,
+  IconScale,
+  IconUserBolt,
   IconUsersGroup,
 } from '@tabler/icons-react';
+import { useDashboardChartPalette } from '../dashboard/useDashboardChartPalette';
+import { KpiTile, ToneChip, avatarColor, initialsOf, panelStyles as ps, type StatusTone } from '../ui/panel/Panel';
+import progressStyles from './requestProgressBar.module.css';
+import styles from './workloadDistribution.module.css';
 
 interface MemberLoad {
   id: string;
@@ -68,6 +72,9 @@ interface WorkloadResponse {
   tasks?: WorkloadTaskRow[];
 }
 
+/** Valor de `tasksFor` para ver las tareas de todo el equipo. */
+const ALL_TASKS = '__todas__';
+
 const REJECTION_TEXT: Record<string, string> = {
   NOT_FOUND: 'no existe',
   CLOSED: 'ya está cerrada',
@@ -79,11 +86,49 @@ const REJECTION_TEXT: Record<string, string> = {
   SAME_ASSIGNEE: 'ya está asignada a esa persona',
 };
 
-function loadColor(percent: number, fairShare: number) {
-  if (fairShare <= 0) return 'blue';
-  if (percent >= fairShare * 1.5) return 'red';
-  if (percent >= fairShare * 1.15) return 'orange';
-  return 'teal';
+/** Nivel de carga frente a la parte justa (100 % / personas del área). */
+function loadTone(percent: number, openTasks: number, fairShare: number): StatusTone {
+  if (openTasks === 0) return 'idle';
+  if (fairShare <= 0) return 'info';
+  if (percent >= fairShare * 1.5) return 'critical';
+  if (percent >= fairShare * 1.15) return 'warning';
+  return 'ok';
+}
+
+const LOAD_LABEL: Record<StatusTone, string> = {
+  ok: 'Equilibrada',
+  warning: 'Alta',
+  critical: 'Muy alta',
+  info: 'Carga',
+  idle: 'Sin tareas',
+};
+
+/**
+ * La barrita de las listas de solicitudes (se rellena al abrir y un destello la recorre),
+ * con el color del nivel de carga. Mismo CSS que RequestProgressBar.
+ */
+function LoadBar({ percent, tone, label }: { percent: number; tone: StatusTone; label: string }) {
+  const toneVar: Record<StatusTone, string> = {
+    ok: 'var(--pn-ok)',
+    warning: 'var(--pn-warning)',
+    critical: 'var(--pn-critical)',
+    info: 'var(--pn-info)',
+    idle: 'var(--pn-idle)',
+  };
+  return (
+    <div className={`${progressStyles.progress} ${styles.loadBar}`} style={{ '--tone': toneVar[tone] } as CSSProperties}>
+      <span
+        className={progressStyles.track}
+        role='progressbar'
+        aria-valuenow={percent}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={label}
+      >
+        <span className={progressStyles.fill} style={{ width: `${Math.min(100, Math.max(0, percent))}%` }} />
+      </span>
+    </div>
+  );
 }
 
 /**
@@ -99,7 +144,9 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
   const [success, setSuccess] = useState<string | null>(null);
   const [processFilter, setProcessFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
-  const [personFilter, setPersonFilter] = useState<string | null>(null);
+  // Ventana de tareas: id de la persona, ALL_TASKS para todas, null cerrada.
+  const [tasksFor, setTasksFor] = useState<string | null>(null);
+  const personFilter = tasksFor && tasksFor !== ALL_TASKS ? tasksFor : null;
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [toUserId, setToUserId] = useState<string | null>(null);
   const [reason, setReason] = useState('');
@@ -110,6 +157,7 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   // Mobile first: por debajo de md (62em) el panel ocupa toda la pantalla.
   const isDesktop = useMediaQuery('(min-width: 62em)') ?? false;
+  const { isDark } = useDashboardChartPalette();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -202,9 +250,16 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
       return next;
     });
 
-  const selectAllOfPerson = (personId: string) => {
-    setPersonFilter(personId);
-    setSelected(new Set(tasks.filter((t) => t.id_assigned === personId && t.reassignable && (!processFilter || String(t.id_process_category) === processFilter) && (!statusFilter || String(t.id_status) === statusFilter)).map((t) => t.id)));
+  /** Abre la ventana con las tareas de una persona (o de todos) para elegir cuáles reasignar. */
+  const openTasksOf = (personId: string) => {
+    setSelected(new Set());
+    setExpanded(new Set());
+    setTasksFor(personId);
+  };
+  const closeTasks = () => {
+    if (saving) return;
+    setTasksFor(null);
+    setSelected(new Set());
   };
 
   const submit = async () => {
@@ -228,6 +283,7 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
       setReason('');
       setConfirming(false);
       setReassignOpen(false);
+      setTasksFor(null);
       await load();
       onReassigned?.();
     } catch (e) {
@@ -240,7 +296,7 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
 
   if (!data?.isResponsible) return null;
 
-  const activeFilters = [processFilter, statusFilter, personFilter].filter(Boolean).length;
+  const activeFilters = [processFilter, statusFilter].filter(Boolean).length;
   const toggleExpanded = (id: number) =>
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -258,6 +314,9 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
     setConfirming(false);
     setReassignOpen(false);
   };
+
+  const busiest = filteredLoad.members[0];
+  const busiestTone = busiest ? loadTone(busiest.percent, busiest.openTasks, fairShare) : 'idle';
 
   return (
     <>
@@ -281,7 +340,7 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
         onClose={() => setOpened(false)}
         fullScreen={!isDesktop}
         size='min(1200px, 92vw)'
-        radius={isDesktop ? 'md' : 0}
+        radius={isDesktop ? 'lg' : 0}
         padding={0}
         transitionProps={{ transition: 'fade', duration: 150 }}
         closeButtonProps={{ size: 'lg', 'aria-label': 'Cerrar' }}
@@ -293,123 +352,174 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
         title={
           <Group gap='xs' wrap='nowrap'>
             <IconUsersGroup size={22} />
-            <Text fw={600} size='lg'>
+            <Text fw={700} size='lg'>
               Distribución de carga
             </Text>
           </Group>
         }
       >
-        <Box style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }} px={{ base: 'sm', sm: 'md' }} py='md' data-testid='workload-panel'>
-          <Stack gap='md'>
-            <Text size='sm' c='dimmed'>
-              Tareas abiertas de {data.departments?.map((d) => d.name).join(', ')}. El porcentaje es la parte de la carga del área
-              que tiene cada persona. Solo puedes reasignar tareas de solicitudes de las que eres responsable; las demás llevan candado.
-            </Text>
+        {/* panelStyles.root: colores y modo oscuro del diseño de paneles (mismo de "Mi equipo"). */}
+        <div className={ps.root} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+          <div className={styles.body} data-testid='workload-panel'>
+            <div className={styles.stack}>
+              <p className={ps.cardHint} style={{ margin: 0 }}>
+                Tareas abiertas de {data.departments?.map((d) => d.name).join(', ')}. El porcentaje es la parte de la carga del
+                área que tiene cada persona. Solo puedes reasignar tareas de solicitudes de las que eres responsable; las demás
+                llevan candado.
+              </p>
 
-            {error && (
-              <Alert color='red' icon={<IconAlertCircle size={18} />} withCloseButton onClose={() => setError(null)}>
-                {error}
-              </Alert>
-            )}
-            {success && (
-              <Alert color='teal' icon={<IconCheck size={18} />} withCloseButton onClose={() => setSuccess(null)}>
-                {success}
-              </Alert>
-            )}
-
-            {/* Filtros: cajón plegable en móvil, siempre visibles en escritorio */}
-            <Paper withBorder radius='md'>
-              <UnstyledButton
-                onClick={() => setFiltersOpen((v) => !v)}
-                w='100%'
-                px='md'
-                mih={48}
-                hiddenFrom='md'
-                aria-expanded={filtersOpen}
-                data-testid='workload-filters-toggle'
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-              >
-                <Group gap='xs'>
-                  <IconFilter size={18} />
-                  <Text fw={600} size='sm'>
-                    Filtros
-                  </Text>
-                  {activeFilters > 0 && (
-                    <Badge size='sm' variant='filled'>
-                      {activeFilters}
-                    </Badge>
-                  )}
-                </Group>
-                <IconChevronDown size={18} style={{ transform: filtersOpen ? 'rotate(180deg)' : undefined, transition: 'transform 200ms' }} />
-              </UnstyledButton>
-              <Collapse in={filtersOpen || isDesktop}>
-                <SimpleGrid cols={{ base: 1, md: 3 }} spacing='sm' p='md' pt={isDesktop ? 'md' : 0}>
-                  <Select size='md' label='Proceso' placeholder='Todos los procesos' data={processOptions} value={processFilter} onChange={setProcessFilter} clearable searchable comboboxProps={{ withinPortal: true }} />
-                  <Select size='md' label='Estado' placeholder='Todos los estados abiertos' data={statusOptions} value={statusFilter} onChange={setStatusFilter} clearable comboboxProps={{ withinPortal: true }} />
-                  <Select
-                    size='md'
-                    label='Persona'
-                    placeholder='Todas las personas'
-                    data={members.map((m) => ({ value: m.id, label: m.name }))}
-                    value={personFilter}
-                    onChange={setPersonFilter}
-                    clearable
-                    searchable
-                    comboboxProps={{ withinPortal: true }}
-                  />
-                </SimpleGrid>
-              </Collapse>
-            </Paper>
-
-            {/* Carga por persona: tarjetas apiladas, columnas en pantallas grandes */}
-            <Box>
-              <Group justify='space-between' mb='xs' gap={4}>
-                <Text fw={600}>Carga por persona</Text>
-                <Text size='sm' c='dimmed'>
-                  {filteredLoad.total} abiertas · {members.length} personas
-                </Text>
-              </Group>
-              {loading && !data.members ? (
-                <Loader size='sm' />
-              ) : (
-                <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing='sm' data-testid='workload-members'>
-                  {filteredLoad.members.map((m) => (
-                    <Paper key={m.id} withBorder radius='md' p='sm' bg={personFilter === m.id ? 'var(--mantine-color-blue-light)' : undefined}>
-                      <Group justify='space-between' wrap='nowrap' gap='xs' align='flex-start'>
-                        <Text size='sm' fw={600} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
-                          {m.name}
-                          {m.id === data.actorId ? ' (tú)' : ''}
-                        </Text>
-                        <Text size='sm' fw={700} style={{ whiteSpace: 'nowrap' }}>
-                          {m.percent}%
-                        </Text>
-                      </Group>
-                      <Progress value={m.percent} color={loadColor(m.percent, fairShare)} size='lg' radius='sm' my={8} aria-label={`Carga de ${m.name}: ${m.percent}%`} />
-                      <Group justify='space-between' wrap='nowrap' gap='xs'>
-                        <Text size='sm' c='dimmed'>
-                          {m.openTasks} {m.openTasks === 1 ? 'tarea abierta' : 'tareas abiertas'}
-                        </Text>
-                        <Button size='compact-md' h={40} variant='subtle' disabled={m.openTasks === 0} onClick={() => selectAllOfPerson(m.id)}>
-                          Seleccionar sus tareas
-                        </Button>
-                      </Group>
-                    </Paper>
-                  ))}
-                </SimpleGrid>
+              {error && (
+                <Alert color='red' radius='lg' icon={<IconAlertCircle size={18} />} withCloseButton onClose={() => setError(null)}>
+                  {error}
+                </Alert>
               )}
-            </Box>
+              {success && (
+                <Alert color='teal' radius='lg' icon={<IconCheck size={18} />} withCloseButton onClose={() => setSuccess(null)}>
+                  {success}
+                </Alert>
+              )}
 
-            {/* Tareas: tarjetas seleccionables */}
-            <Box>
-              <Group justify='space-between' mb='xs' gap='xs'>
-                <Text fw={600}>Tareas abiertas ({filteredTasks.length})</Text>
-                <Badge variant='light'>{selected.size} seleccionadas</Badge>
-              </Group>
+              <div className={ps.grid4}>
+                <KpiTile
+                  icon={<IconListCheck size={15} />}
+                  label='Tareas abiertas'
+                  value={String(filteredLoad.total)}
+                  foot={activeFilters > 0 ? 'con los filtros aplicados' : 'en tu área'}
+                />
+                <KpiTile
+                  icon={<IconUsersGroup size={15} />}
+                  label='Personas'
+                  value={String(members.length)}
+                  foot={fairShare > 0 ? `Lo equilibrado: ~${Math.round(fairShare)} % cada una` : undefined}
+                />
+                <KpiTile
+                  icon={<IconScale size={15} />}
+                  label='Reasignables'
+                  value={String(selectable.length)}
+                  foot='de solicitudes a tu cargo'
+                />
+                <KpiTile
+                  icon={<IconUserBolt size={15} />}
+                  label='Mayor carga'
+                  value={busiest && busiest.openTasks > 0 ? busiest.name : '—'}
+                  textValue
+                  tone={busiestTone}
+                  foot={busiest && busiest.openTasks > 0 ? <ToneChip tone={busiestTone} label={`${busiest.percent} % · ${LOAD_LABEL[busiestTone]}`} /> : undefined}
+                />
+              </div>
+
+              {/* Filtros: cajón plegable en móvil, siempre visibles en escritorio */}
+              <div className={ps.card} style={{ padding: 0 }}>
+                <UnstyledButton
+                  onClick={() => setFiltersOpen((v) => !v)}
+                  w='100%'
+                  px='md'
+                  mih={48}
+                  hiddenFrom='md'
+                  aria-expanded={filtersOpen}
+                  data-testid='workload-filters-toggle'
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                >
+                  <Group gap='xs'>
+                    <IconFilter size={18} />
+                    <Text fw={600} size='sm'>
+                      Filtros
+                    </Text>
+                    {activeFilters > 0 && <ToneChip tone='info' label={String(activeFilters)} />}
+                  </Group>
+                  <IconChevronDown size={18} style={{ transform: filtersOpen ? 'rotate(180deg)' : undefined, transition: 'transform 200ms' }} />
+                </UnstyledButton>
+                <Collapse in={filtersOpen || isDesktop}>
+                  <SimpleGrid cols={{ base: 1, md: 2 }} spacing='sm' p='md' pt={isDesktop ? 'md' : 0}>
+                    <Select size='md' radius='md' label='Proceso' placeholder='Todos los procesos' data={processOptions} value={processFilter} onChange={setProcessFilter} clearable searchable comboboxProps={{ withinPortal: true }} />
+                    <Select size='md' radius='md' label='Estado' placeholder='Todos los estados abiertos' data={statusOptions} value={statusFilter} onChange={setStatusFilter} clearable comboboxProps={{ withinPortal: true }} />
+                  </SimpleGrid>
+                </Collapse>
+              </div>
+
+              {/* Carga por persona: avatar · nombre + barrita · % · nivel */}
+              <section>
+                <div className={styles.blockHead}>
+                  <h3 className={styles.blockTitle}>Carga por persona</h3>
+                  <Button size='compact-sm' radius='xl' variant='subtle' disabled={filteredLoad.total === 0} onClick={() => openTasksOf(ALL_TASKS)}>
+                    Ver todas las tareas ({filteredLoad.total})
+                  </Button>
+                </div>
+                {loading && !data.members ? (
+                  <Loader size='sm' />
+                ) : (
+                  <div className={ps.list} data-testid='workload-members'>
+                    {filteredLoad.members.map((m) => {
+                      const tone = loadTone(m.percent, m.openTasks, fairShare);
+                      return (
+                        <div key={m.id} className={styles.memberRow}>
+                          <span className={ps.avatar} style={{ background: avatarColor(m.email ?? m.id, isDark) }} aria-hidden>
+                            {initialsOf(m.name)}
+                          </span>
+                          <span style={{ minWidth: 0 }}>
+                            <span className={styles.memberName}>
+                              {m.name}
+                              {m.id === data.actorId ? ' (tú)' : ''}
+                            </span>
+                            <span className={styles.memberSub}>
+                              {m.openTasks} {m.openTasks === 1 ? 'tarea abierta' : 'tareas abiertas'}
+                            </span>
+                            <LoadBar percent={m.percent} tone={tone} label={`Carga de ${m.name}: ${m.percent}%`} />
+                          </span>
+                          <span className={styles.memberPercent}>{m.percent}%</span>
+                          <span className={styles.memberSide}>
+                            <ToneChip tone={tone} label={LOAD_LABEL[tone]} />
+                            <Button size='compact-sm' radius='xl' variant='light' disabled={m.openTasks === 0} onClick={() => openTasksOf(m.id)}>
+                              Ver sus tareas
+                            </Button>
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Tareas de una persona (o de todos): se eligen aquí, sin bajar por la ventana principal. */}
+      <Modal
+        opened={tasksFor != null}
+        onClose={closeTasks}
+        fullScreen={!isDesktop}
+        size='min(900px, 92vw)'
+        radius={isDesktop ? 'lg' : 0}
+        padding={0}
+        zIndex={250}
+        transitionProps={{ transition: 'fade', duration: 150 }}
+        closeButtonProps={{ size: 'lg', 'aria-label': 'Cerrar' }}
+        styles={{
+          header: { paddingInline: 16, minHeight: 56, borderBottom: '1px solid var(--mantine-color-default-border)' },
+          content: { display: 'flex', flexDirection: 'column', maxHeight: isDesktop ? '90dvh' : '100dvh' },
+          body: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, padding: 0 },
+        }}
+        title={
+          <Group gap='xs' wrap='nowrap'>
+            <IconListCheck size={22} />
+            <Text fw={700} size='lg'>
+              {personFilter ? `Tareas de ${memberName.get(personFilter) ?? 'la persona'}` : 'Todas las tareas abiertas'}
+            </Text>
+          </Group>
+        }
+      >
+        <div className={ps.root} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+          <div className={styles.body}>
+            <div className={styles.blockHead}>
+              <h3 className={styles.blockTitle}>Tareas abiertas ({filteredTasks.length})</h3>
+              <ToneChip tone={selected.size > 0 ? 'info' : 'idle'} label={`${selected.size} seleccionadas`} />
+            </div>
+            <div className={ps.list} data-testid='workload-tasks'>
               {selectable.length > 0 && (
-                <Paper withBorder radius='md' px='sm' mb='xs'>
+                <div className={styles.selectAll}>
                   <Checkbox
                     size='md'
-                    py={10}
                     label={`Seleccionar todas las reasignables (${selectable.length})`}
                     aria-label='Seleccionar todas las tareas reasignables'
                     checked={allSelected}
@@ -422,135 +532,102 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
                       })
                     }
                   />
-                </Paper>
+                </div>
               )}
-              <SimpleGrid cols={{ base: 1, lg: 2 }} spacing='xs' data-testid='workload-tasks'>
-                {filteredTasks.map((t) => {
-                  const isSel = selected.has(t.id);
-                  const open = expanded.has(t.id);
-                  return (
-                    <Paper
-                      key={t.id}
-                      withBorder
-                      radius='md'
-                      p={0}
-                      data-testid='workload-task'
-                      style={{
-                        borderColor: isSel ? 'var(--mantine-color-blue-filled)' : undefined,
-                        background: isSel ? 'var(--mantine-color-blue-light)' : t.reassignable ? undefined : 'var(--mantine-color-default-hover)',
-                      }}
+              {filteredTasks.map((t) => {
+                const isSel = selected.has(t.id);
+                const open = expanded.has(t.id);
+                return (
+                  <div
+                    key={t.id}
+                    data-testid='workload-task'
+                    className={`${styles.taskRow} ${isSel ? styles.taskSelected : ''} ${!t.reassignable ? styles.taskLocked : ''}`}
+                  >
+                    <Box component={t.reassignable ? 'label' : 'div'} className={styles.taskMain} style={{ cursor: t.reassignable ? 'pointer' : 'default' }}>
+                      <span className={styles.taskPick}>
+                        {t.reassignable ? (
+                          <Checkbox size='md' aria-label={`Seleccionar tarea ${t.id}`} checked={isSel} onChange={() => toggle(t.id)} />
+                        ) : (
+                          <IconLock size={20} color='var(--pn-muted)' aria-hidden />
+                        )}
+                      </span>
+                      <Stack gap={4} style={{ minWidth: 0, flex: 1 }}>
+                        <Group gap={6} wrap='wrap'>
+                          <span className={styles.taskTitle}>{t.task}</span>
+                          {t.is_authorization && <ToneChip tone='info' label='Autorización' />}
+                        </Group>
+                        <Text className={styles.taskSubject} lineClamp={open ? undefined : 1}>
+                          #{t.id_request_general} {t.subject_request ?? ''}
+                        </Text>
+                        <span className={styles.taskMeta}>
+                          <span className={ps.pill}>{t.status_task}</span>
+                          <span>
+                            {t.process ?? '—'} · {memberName.get(t.id_assigned) ?? '—'}
+                          </span>
+                        </span>
+                        {!t.reassignable && (
+                          <span className={styles.taskMeta}>
+                            <IconLock size={14} style={{ flexShrink: 0 }} />
+                            {t.is_signature ? 'Autorización de firma: va ligada al firmante' : 'Solicitud de la que no eres responsable'}
+                          </span>
+                        )}
+                        <Collapse in={open}>
+                          <div className={styles.taskDetails}>
+                            <span>Tarea #{t.id}</span>
+                            {t.category && <span>Categoría: {t.category}</span>}
+                            {t.company && <span>Empresa: {t.company}</span>}
+                            {t.start_date && <span>Inicio: {new Date(t.start_date).toLocaleDateString('es-CO')}</span>}
+                            {t.is_authorization && <span>Quien la reciba queda como aprobador. No puede ir a quien creó la solicitud.</span>}
+                          </div>
+                        </Collapse>
+                      </Stack>
+                    </Box>
+                    <ActionIcon
+                      variant='subtle'
+                      color='gray'
+                      size={44}
+                      radius='xl'
+                      m={4}
+                      onClick={() => toggleExpanded(t.id)}
+                      aria-label={open ? 'Ocultar detalles' : 'Ver detalles'}
+                      aria-expanded={open}
                     >
-                      <Group wrap='nowrap' align='flex-start' gap={0}>
-                        <Box
-                          component={t.reassignable ? 'label' : 'div'}
-                          style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flex: 1, minWidth: 0, padding: 12, cursor: t.reassignable ? 'pointer' : 'default' }}
-                        >
-                          <Box w={28} pt={2} style={{ flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
-                            {t.reassignable ? (
-                              <Checkbox size='md' aria-label={`Seleccionar tarea ${t.id}`} checked={isSel} onChange={() => toggle(t.id)} />
-                            ) : (
-                              <IconLock size={20} color='var(--mantine-color-dimmed)' aria-hidden />
-                            )}
-                          </Box>
-                          <Stack gap={4} style={{ minWidth: 0, flex: 1 }}>
-                            <Group gap={6} wrap='wrap'>
-                              <Text size='sm' fw={600} style={{ overflowWrap: 'anywhere' }}>
-                                {t.task}
-                              </Text>
-                              {t.is_authorization && (
-                                <Badge size='sm' variant='light' color='blue'>
-                                  Autorización
-                                </Badge>
-                              )}
-                            </Group>
-                            <Text size='sm' c='dimmed' lineClamp={open ? undefined : 1} style={{ overflowWrap: 'anywhere' }}>
-                              #{t.id_request_general} {t.subject_request ?? ''}
-                            </Text>
-                            <Group gap={6} wrap='wrap'>
-                              <Badge variant='light' color='gray' size='sm' style={{ maxWidth: '100%' }}>
-                                {t.status_task}
-                              </Badge>
-                              <Text size='xs' c='dimmed' style={{ overflowWrap: 'anywhere' }}>
-                                {t.process ?? '—'} · {memberName.get(t.id_assigned) ?? '—'}
-                              </Text>
-                            </Group>
-                            {!t.reassignable && (
-                              <Group gap={4} wrap='nowrap' align='flex-start'>
-                                <IconLock size={14} style={{ flexShrink: 0, marginTop: 2 }} color='var(--mantine-color-dimmed)' />
-                                <Text size='xs' c='dimmed'>
-                                  {t.is_signature ? 'Autorización de firma: va ligada al firmante' : 'Solicitud de la que no eres responsable'}
-                                </Text>
-                              </Group>
-                            )}
-                            <Collapse in={open}>
-                              <Stack gap={2} pt={4}>
-                                <Text size='xs' c='dimmed'>Tarea #{t.id}</Text>
-                                {t.category && <Text size='xs' c='dimmed'>Categoría: {t.category}</Text>}
-                                {t.company && <Text size='xs' c='dimmed'>Empresa: {t.company}</Text>}
-                                {t.start_date && <Text size='xs' c='dimmed'>Inicio: {new Date(t.start_date).toLocaleDateString('es-CO')}</Text>}
-                                {t.is_authorization && (
-                                  <Text size='xs' c='dimmed'>Quien la reciba queda como aprobador. No puede ir a quien creó la solicitud.</Text>
-                                )}
-                              </Stack>
-                            </Collapse>
-                          </Stack>
-                        </Box>
-                        <ActionIcon
-                          variant='subtle'
-                          color='gray'
-                          size={44}
-                          m={4}
-                          onClick={() => toggleExpanded(t.id)}
-                          aria-label={open ? 'Ocultar detalles' : 'Ver detalles'}
-                          aria-expanded={open}
-                        >
-                          <IconChevronDown size={18} style={{ transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 200ms' }} />
-                        </ActionIcon>
-                      </Group>
-                    </Paper>
-                  );
-                })}
-              </SimpleGrid>
-              {filteredTasks.length === 0 && (
-                <Text size='sm' c='dimmed' ta='center' py='md'>
-                  No hay tareas abiertas con estos filtros
-                </Text>
-              )}
-            </Box>
-          </Stack>
-        </Box>
+                      <IconChevronDown size={18} style={{ transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 200ms' }} />
+                    </ActionIcon>
+                  </div>
+                );
+              })}
+              {filteredTasks.length === 0 && <div className={styles.empty}>No hay tareas abiertas con estos filtros</div>}
+            </div>
+          </div>
 
-        {/* Barra de acción fija abajo, al alcance del pulgar */}
-        <Box
-          px={{ base: 'sm', sm: 'md' }}
-          pt='sm'
-          style={{
-            flexShrink: 0,
-            borderTop: '1px solid var(--mantine-color-default-border)',
-            background: 'var(--mantine-color-body)',
-            paddingBottom: 'calc(var(--mantine-spacing-sm) + env(safe-area-inset-bottom))',
-          }}
-          data-testid='workload-actionbar'
-        >
-          <Group gap='sm' wrap='nowrap' justify='flex-end'>
-            <Button variant='default' size='md' onClick={() => setSelected(new Set())} disabled={selected.size === 0}>
-              Limpiar
-            </Button>
-            <Button
-              size='md'
-              leftSection={<IconArrowsShuffle size={18} />}
-              disabled={selected.size === 0}
-              onClick={() => {
-                setConfirming(false);
-                setReassignOpen(true);
-              }}
-              data-testid='workload-reassign'
-              style={{ flex: isDesktop ? undefined : 1 }}
-            >
-              Reasignar {selected.size > 0 ? `(${selected.size})` : ''}
-            </Button>
-          </Group>
-        </Box>
+          {/* Barra de acción fija abajo, al alcance del pulgar */}
+          <div className={styles.actionBar} data-testid='workload-actionbar'>
+            <span className={styles.actionCount}>
+              {selected.size > 0
+                ? `${selected.size} ${selected.size === 1 ? 'tarea seleccionada' : 'tareas seleccionadas'}`
+                : 'Selecciona tareas para reasignar'}
+            </span>
+            <Group gap='sm' wrap='nowrap'>
+              <Button variant='default' radius='xl' size='md' onClick={() => setSelected(new Set())} disabled={selected.size === 0}>
+                Limpiar
+              </Button>
+              <Button
+                size='md'
+                radius='xl'
+                leftSection={<IconArrowsShuffle size={18} />}
+                disabled={selected.size === 0}
+                onClick={() => {
+                  setConfirming(false);
+                  setReassignOpen(true);
+                }}
+                data-testid='workload-reassign'
+              >
+                Reasignar {selected.size > 0 ? `(${selected.size})` : ''}
+              </Button>
+            </Group>
+          </div>
+        </div>
       </Modal>
 
       {/* Destino, motivo y confirmación. En móvil, a pantalla completa con los botones justo debajo de los campos para que el teclado no los tape. */}
@@ -559,13 +636,13 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
         onClose={closeReassign}
         fullScreen={!isDesktop}
         centered
-        radius={isDesktop ? 'md' : 0}
+        radius={isDesktop ? 'lg' : 0}
         size={isDesktop ? 'md' : '100%'}
         zIndex={300}
         transitionProps={{ transition: 'fade', duration: 150 }}
         closeButtonProps={{ size: 'lg', 'aria-label': 'Cerrar' }}
         title={
-          <Text fw={600} size='lg'>
+          <Text fw={700} size='lg'>
             {confirming ? 'Confirmar reasignación' : `Reasignar ${selected.size} ${selected.size === 1 ? 'tarea' : 'tareas'}`}
           </Text>
         }
@@ -582,10 +659,10 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
               </Text>
             )}
             <SimpleGrid cols={2} spacing='sm'>
-              <Button variant='default' size='md' onClick={() => setConfirming(false)} disabled={saving}>
+              <Button variant='default' radius='xl' size='md' onClick={() => setConfirming(false)} disabled={saving}>
                 Volver
               </Button>
-              <Button size='md' onClick={submit} loading={saving} data-testid='workload-confirm'>
+              <Button size='md' radius='xl' onClick={submit} loading={saving} data-testid='workload-confirm'>
                 Confirmar
               </Button>
             </SimpleGrid>
@@ -594,6 +671,7 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
           <Stack>
             <Select
               size='md'
+              radius='md'
               label='Reasignar a'
               placeholder='Elige una persona de tu área'
               data={targetOptions}
@@ -607,6 +685,7 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
             />
             <Textarea
               size='md'
+              radius='md'
               label='Motivo (opcional)'
               placeholder='Queda en la bitácora de cada solicitud'
               value={reason}
@@ -617,10 +696,10 @@ export default function WorkloadDistribution({ onReassigned }: { onReassigned?: 
               maxLength={500}
             />
             <SimpleGrid cols={2} spacing='sm'>
-              <Button variant='default' size='md' onClick={closeReassign}>
+              <Button variant='default' radius='xl' size='md' onClick={closeReassign}>
                 Cancelar
               </Button>
-              <Button size='md' disabled={selected.size === 0 || !toUserId || invalidTarget} onClick={() => setConfirming(true)} data-testid='workload-continue'>
+              <Button size='md' radius='xl' disabled={selected.size === 0 || !toUserId || invalidTarget} onClick={() => setConfirming(true)} data-testid='workload-continue'>
                 Continuar
               </Button>
             </SimpleGrid>

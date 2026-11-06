@@ -1,54 +1,34 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useMemo, useDeferredValue, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
-import ExcelJS from 'exceljs';
-import { saveAs } from 'file-saver';
+import { useRouter } from 'next/navigation';
+import toast from 'react-hot-toast';
+// exportBoardExcel (y con él exceljs, ~900 KB) se carga al tocar Exportar, no al abrir la pantalla.
+import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
 import {
   Title,
-  Paper,
   Stack,
   Alert,
-  Breadcrumbs,
-  Anchor,
   Table,
-  TextInput,
-  Select,
-  Button,
   Group,
   Badge,
-  Modal,
-  Textarea,
-  Grid,
   Card,
   Text,
-  Divider,
   LoadingOverlay,
-  ActionIcon,
   Tooltip,
-  Collapse,
   Box,
-  Flex,
-  Progress,
-  RingProgress,
   Loader,
   Pagination,
+  Button,
+  Grid,
+  Select,
 } from '@mantine/core';
 import {
   IconAlertCircle,
-  IconChevronRight,
-  IconSearch,
-  IconPlus,
-  IconFilter,
   IconX,
-  IconCheck,
-  IconRefresh,
   IconFileDescription,
-  IconCalendarEvent,
   IconUser,
-  IconFlag,
   IconClock,
   IconBuilding,
   IconProgress,
@@ -58,8 +38,27 @@ import {
   IconUserCheck,
   IconDownload,
 } from '@tabler/icons-react';
-import { sendMessage } from '../../../../../components/email/utils/sendMessage';
-import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
+import {
+  RequestProgressBar,
+  RequestsHeader,
+  RequestsPage,
+} from '../../../../../components/request-general/list/RequestListUi';
+import { RequestListFilters } from '../../../../../components/request-general/list/RequestListFilters';
+import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
+import IosSearchField from '../../../../../components/ui/IosSearchField';
+import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
+import { filterByText, requestSearchParts } from '../../../../../lib/requests-general/textSearch';
+import {
+  EMPTY_LIST_FILTERS,
+  buildListOptions,
+  countByStatusGroup,
+  describeListFilters,
+  matchesListFilters,
+  splitPeople,
+  statusGroupOf,
+  type ListFilters,
+  type ListRow,
+} from '../../../../../lib/requests-general/listFilters';
 import {
   buildTaskDisplayBadges,
   getSimplifiedTasksProgress,
@@ -87,95 +86,122 @@ interface Ticket {
   requester: string;
   company: string;
   subject: string;
+  process?: string;
+  id_status_case: number;
   date_resolution: string | null;
 }
 
-interface CompanyData {
-  id_company: number;
-  company: string;
-}
-
-interface CategoryData {
-  id: number;
-  category: string;
-}
-
-interface ProcessCategoryData {
-  id_process: number;
-  process: string;
-  id_category_request: number;
-  category: string;
-  email?: string;
-}
-
-interface ConsultResponse {
-  companies: CompanyData[];
-  categories: CategoryData[];
-  processCategories: ProcessCategoryData[];
-  assignedUsers: { id: string; name: string }[];
+/**
+ * La consulta repite la solicitud una vez por cada persona asignada al proceso: se deja una sola
+ * fila por solicitud y las personas quedan juntas ("A, B").
+ */
+function mergeTicketsById(rows: Ticket[]): Ticket[] {
+  const byId = new Map<number, Ticket>();
+  for (const row of rows) {
+    const found = byId.get(row.id);
+    if (!found) {
+      byId.set(row.id, { ...row });
+      continue;
+    }
+    found.user = splitPeople(found.user, row.user).join(', ');
+  }
+  return [...byId.values()];
 }
 
 function ViewerRequestGeneralPage() {
   const { data: session, status } = useSession();
-  const userName = session?.user?.name || '';
-  const [userId, setUserId] = useState<number | null>(null);
-  const [loadingUserId, setLoadingUserId] = useState(false);
-  const [userIdInitialized, setUserIdInitialized] = useState(false);
-
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const subprocessId = searchParams.get('subprocess_id');
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [tasksByRequest, setTasksByRequest] = useState<Record<number, RequestTask[]>>({});
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [modalOpened, setModalOpened] = useState(false);
-  const [formData, setFormData] = useState({
-    company: '',
-    subject: '',
-    category: '',
-    process: '',
-    descripcion: '',
-  });
-  const [createLoading, setCreateLoading] = useState(false);
-
-  const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
-  const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
-  const [processCategories, setProcessCategories] = useState<
-    { value: string; label: string; id_category_request: number; email?: string }[]
-  >([]);
-  const [filteredProcesses, setFilteredProcesses] = useState<{ value: string; label: string }[]>(
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  // Filtros extra de observadores: categoría (en el navegador) y departamento del solicitante
+  // (en el servidor: cambia el conjunto que se trae).
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [departmentFilter, setDepartmentFilter] = useState('');
+  const [departmentOptions, setDepartmentOptions] = useState<{ value: string; label: string }[]>(
     []
   );
-  const [assignedUsers, setAssignedUsers] = useState<{ value: string; label: string }[]>([]);
-  const [formDataLoading, setFormDataLoading] = useState(false);
-  const [formDataError, setFormDataError] = useState<string | null>(null);
-  const [idUser, setIdUser] = useState('');
-  const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
-  const [folderContents, setFolderContents] = useState([]);
-
-  const [filters, setFilters] = useState({
-    status: '0',
-    company: '',
-    date_from: '',
-    date_to: '',
-    assigned_to: '',
-  });
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Paginación en cliente: al cambiar el conjunto de tickets (nuevo fetch / filtros) vuelve a página 1.
+  // Filtros iguales a los de Mis solicitudes: se aplican al instante sobre TODAS las solicitudes
+  // cargadas (la lista se pide completa una vez; nada se filtra en el servidor).
+  const [filters, setFilters] = useState<ListFilters>(EMPTY_LIST_FILTERS);
+  const [searchInput, setSearchInput] = useState('');
+  const deferredSearch = useDeferredValue(searchInput);
+
+  const ticketRows = useMemo(
+    () =>
+      tickets.map((t) => ({
+        ticket: t,
+        row: {
+          requestId: t.id,
+          group: statusGroupOf(t.id_status_case, t.status),
+          companyId: String(t.id_company ?? ''),
+          company: t.company,
+          process: t.process ?? '',
+          people: splitPeople(t.user),
+          createdAt: t.created_at,
+        } satisfies ListRow,
+      })),
+    [tickets]
+  );
+  const listOptions = useMemo(() => buildListOptions(ticketRows.map((x) => x.row)), [ticketRows]);
+  // Búsqueda + filtros del panel; el estado se aplica aparte para que las tarjetas no cambien.
+  const categoryOptions = useMemo(
+    () =>
+      [...new Set(tickets.map((t) => t.category).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, 'es'))
+        .map((c) => ({ value: c, label: c })),
+    [tickets]
+  );
+  const matchingRows = useMemo(
+    () =>
+      filterByText(ticketRows, deferredSearch, (x) => requestSearchParts(x.ticket)).filter(
+        (x) =>
+          (!categoryFilter || x.ticket.category === categoryFilter) &&
+          matchesListFilters(x.row, filters, { ignoreStatus: true })
+      ),
+    [ticketRows, deferredSearch, filters, categoryFilter]
+  );
+  const statusCounts = useMemo(() => countByStatusGroup(matchingRows.map((x) => x.row)), [matchingRows]);
+  const visibleTickets = useMemo(
+    () => matchingRows.filter((x) => matchesListFilters(x.row, filters)).map((x) => x.ticket),
+    [matchingRows, filters]
+  );
+
+  // Paginación en cliente: al cambiar filtros o búsqueda vuelve a la página 1.
   useEffect(() => {
     setCurrentPage(1);
-  }, [tickets]);
+  }, [filters, deferredSearch, tickets, categoryFilter]);
 
-  const totalPages = Math.max(1, Math.ceil(tickets.length / ITEMS_PER_PAGE));
-  const pageItems = tickets.slice(
+  const totalPages = Math.max(1, Math.ceil(visibleTickets.length / ITEMS_PER_PAGE));
+  const pageItems = visibleTickets.slice(
     (currentPage - 1) * ITEMS_PER_PAGE,
     currentPage * ITEMS_PER_PAGE
   );
-  const [filtersExpanded, setFiltersExpanded] = useState(false);
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  const clearListFilters = () => {
+    setFilters(EMPTY_LIST_FILTERS);
+    setSearchInput('');
+    setCategoryFilter('');
+    if (departmentFilter) {
+      setDepartmentFilter('');
+      void fetchTickets(false, '');
+    }
+  };
+
+  const departmentLabel = (id: string) =>
+    id ? departmentOptions.find((d) => d.value === id)?.label || id : 'Todos';
+
+  const changeDepartment = (value: string) => {
+    setDepartmentFilter(value);
+    void fetchTickets(false, value);
+  };
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -183,83 +209,40 @@ function ViewerRequestGeneralPage() {
       router.push('/login');
       return;
     }
-    fetchFormData();
+    void fetchTickets();
+    void fetchDepartments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, status, router]);
 
-  useEffect(() => {
-    if (status === 'loading') return;
-    if (!session) {
-      router.push('/login');
-      return;
-    }
-
-    if (!userIdInitialized) {
-      if (userName && !userId) {
-        getUserIdByName(userName).then((id) => {
-          if (id) {
-            setUserId(id);
-            setUserIdInitialized(true);
-            fetchTicketsWithUserId(id);
-          } else {
-            setUserIdInitialized(true);
-          }
-        });
-      } else if (!userName) {
-        setUserIdInitialized(true);
+  const fetchDepartments = async () => {
+    try {
+      const res = await fetch('/api/help-desk/departments');
+      if (!res.ok) return;
+      const deps: { id_department: number; department: string }[] = await res.json();
+      if (Array.isArray(deps)) {
+        setDepartmentOptions(
+          deps.map((d) => ({ value: String(d.id_department), label: d.department }))
+        );
       }
+    } catch (err) {
+      console.error('Error fetching departments:', err);
     }
-  }, [status, session, userName, userId, userIdInitialized, router]);
-
-  useEffect(() => {
-    const globalStore = localStorage.getItem('global-store');
-    if (globalStore) {
-      try {
-        const parsedStore = JSON.parse(globalStore);
-        const idUserValue = parsedStore?.state?.idUser || '';
-        setIdUser(idUserValue);
-      } catch (error) {
-        console.error('Error parsing global-store from localStorage:', error);
-        setIdUser('');
-      }
-    } else {
-      setIdUser('');
-    }
-  }, []);
-
-  useEffect(() => {
-    if (formData.category) {
-      const filtered = processCategories.filter(
-        (p) => p.id_category_request === parseInt(formData.category)
-      );
-      setFilteredProcesses(filtered);
-      if (!filtered.find((p) => p.value === formData.process)) {
-        setFormData((prev) => ({ ...prev, process: '' }));
-      }
-    } else {
-      setFilteredProcesses([]);
-      setFormData((prev) => ({ ...prev, process: '' }));
-    }
-  }, [formData.category, processCategories]);
-
-  const fetchTickets = async () => {
-    if (!userId) {
-      console.log('fetchTickets: No se puede ejecutar sin userId');
-      return;
-    }
-    await fetchTicketsWithUserId(userId);
   };
 
   const fetchTasksForTickets = async (ticketsToUse: Ticket[]) => {
     try {
-      // Solo las tareas de las solicitudes listadas, en lotes de 500 ids (límite de la ruta);
-      // antes se descargaba la tabla completa de tareas.
+      // Solo las tareas de las solicitudes listadas, en lotes de 500 ids (límite de la ruta).
       const ticketIds = new Set(ticketsToUse.map((t) => t.id));
       const ids = [...ticketIds];
       const batches: number[][] = [];
       for (let i = 0; i < ids.length; i += 500) batches.push(ids.slice(i, i + 500));
       const responses = await Promise.all(
         batches.map((batch) =>
-          fetch(`/api/requests-general/activities-requets?ids=${batch.join(',')}`)
+          fetch('/api/requests-general/activities-requets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: batch }),
+          })
         )
       );
       if (responses.some((r) => !r.ok)) throw new Error('Failed to fetch request tasks');
@@ -280,178 +263,40 @@ function ViewerRequestGeneralPage() {
     }
   };
 
-  const fetchTicketsWithUserId = async (
-    userIdToUse: number,
-    filtersToUse: typeof filters = filters
-  ) => {
+  /**
+   * Trae TODAS las solicitudes que puede observar la persona (status=0: todos los estados); el
+   * usuario sale de la sesión en el servidor. `silent`: refresca sin tapar la pantalla.
+   * `department`: filtra por departamento del solicitante (por defecto, el elegido en pantalla).
+   */
+  const fetchTickets = async (silent = false, department = departmentFilter) => {
     try {
-      setLoading(true);
+      if (silent) setRefreshing(true);
+      else setLoading(true);
 
-      const params = new URLSearchParams();
-      params.append('idUser', userIdToUse.toString());
-
-      if (filtersToUse.status) params.append('status', filtersToUse.status);
-      if (filtersToUse.company) params.append('company', filtersToUse.company);
-      if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
-      if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
-      if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
-
-      const url = `/api/requests-general/viewer-request?${params.toString()}`;
-
-      const response = await fetch(url);
-
+      const params = new URLSearchParams({ status: '0' });
+      if (department) params.append('department', department);
+      const response = await fetch(`/api/requests-general/viewer-request?${params.toString()}`);
       if (!response.ok) throw new Error('Failed to fetch tickets');
 
-      const data = await response.json();
-      console.log('fetchTicketsWithUserId: Tickets recibidos:', data.length, 'tickets');
-      setTickets(data);
-      fetchTasksForTickets(data);
+      const data = (await response.json()) as Ticket[];
+      const merged = mergeTicketsById(Array.isArray(data) ? data : []);
+      setTickets(merged);
+      setLastUpdated(new Date());
+      void fetchTasksForTickets(merged);
     } catch (err) {
       console.error('Error fetching tickets:', err);
-      setError('Unable to load tickets. Please try again.');
+      // En el refresco automático un fallo de red no tapa la tabla; se reintenta en el siguiente.
+      if (!silent) setError('No se pudieron cargar las solicitudes. Inténtalo de nuevo.');
     } finally {
-      setLoading(false);
+      if (silent) setRefreshing(false);
+      else setLoading(false);
     }
   };
 
-  const validateFilters = () => {
-    const errors: string[] = [];
-
-    if (filters.date_from && filters.date_to) {
-      const fromDate = new Date(filters.date_from);
-      const toDate = new Date(filters.date_to);
-      if (fromDate > toDate) {
-        errors.push('La fecha "Desde" no puede ser mayor que la fecha "Hasta"');
-      }
-    }
-
-    if (filters.company && !companies.find((c) => c.value === filters.company)) {
-      errors.push('La empresa seleccionada no es válida');
-    }
-
-    if (filters.assigned_to && !assignedUsers.find((u) => u.value === filters.assigned_to)) {
-      errors.push('La persona asignada seleccionada no es válida');
-    }
-
-    if (errors.length > 0) {
-      setError(errors.join('. '));
-      return false;
-    }
-
-    return true;
-  };
-
-  const handleApplyFilters = async () => {
-    if (!validateFilters()) {
-      return;
-    }
-
-    if (userId) {
-      await fetchTicketsWithUserId(userId);
-    }
-  };
-
-  const getUserIdByName = async (userName: string): Promise<number | null> => {
-    if (!session || status !== 'authenticated') {
-      console.error('No hay sesión activa para realizar esta operación');
-      return null;
-    }
-
-    if (!userName || userName.trim() === '') {
-      console.error('El nombre de usuario es requerido');
-      return null;
-    }
-
-    try {
-      setLoadingUserId(true);
-
-      const params = new URLSearchParams({
-        userName: userName.trim(),
-      });
-
-      const response = await fetch(`/api/requests-general/get-user-id?${params}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Error al obtener ID de usuario:', errorData.error);
-        return null;
-      }
-
-      const data = await response.json();
-      return data.success ? data.userId : null;
-    } catch (error) {
-      console.error('Error en la llamada al endpoint:', error);
-      return null;
-    } finally {
-      setLoadingUserId(false);
-    }
-  };
-
-  const fetchFormData = async () => {
-    try {
-      setFormDataLoading(true);
-      setFormDataError(null);
-
-      const response = await fetch(`/api/requests-general/consult-request`);
-
-      if (response.ok) {
-        const data: ConsultResponse = await response.json();
-        setCompany(
-          data.companies.map((c) => ({ value: c.id_company.toString(), label: c.company }))
-        );
-        setFormData((prev) => ({
-          ...prev,
-          company: "3",
-        }));
-        setCategories(data.categories.map((c) => ({ value: c.id.toString(), label: c.category })));
-        setProcessCategories(
-          data.processCategories.map((p) => ({
-            value: p.id_process.toString(),
-            label: p.process,
-            id_category_request: p.id_category_request,
-            email: p.email,
-          }))
-        );
-        if (data.assignedUsers) {
-          setAssignedUsers(data.assignedUsers.map((u) => ({ value: u.name, label: u.name })));
-        }
-      } else {
-        console.error('Frontend - fetchFormData failed with status:', response.status);
-        setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
-      }
-    } catch (err) {
-      console.error('Error fetching form data:', err);
-      setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
-    } finally {
-      setFormDataLoading(false);
-    }
-  };
-
-  const handleFormChange = (field: string, value: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-
-    if (formErrors[field]) {
-      setFormErrors((prev) => ({
-        ...prev,
-        [field]: '',
-      }));
-    }
-  };
-
-  const handleFilterChange = (field: string, value: string) => {
-    setFilters((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  };
+  // Refresco automático cada 30 s (y al volver a la pestaña); los filtros quedan como están.
+  useAutoRefresh(() => {
+    if (session) void fetchTickets(true);
+  });
 
   if (status === 'loading' || loading) {
     return (
@@ -515,599 +360,319 @@ function ViewerRequestGeneralPage() {
 
   const getTasksProgress = (tasks: RequestTask[]) => getSimplifiedTasksProgress(tasks);
 
-  const getGlobalTasksProgress = () => {
-    const allTasks = Object.values(tasksByRequest).flat();
-    return getTasksProgress(allTasks);
-  };
-
-  const filterByStatus = (value: string) => {
-    const nf = { ...filters, status: value };
-    setFilters(nf);
-    if (userId) {
-      fetchTicketsWithUserId(userId, nf);
-    }
-  };
+  const globalProgress = getTasksProgress(Object.values(tasksByRequest).flat());
 
   async function exportToExcel() {
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Solicitudes');
-
-    type TicketKeys = keyof Ticket;
-
-    const columnMapOrdered: { key: TicketKeys; header: string; width: number }[] = [
-      { key: 'id', header: 'ID', width: 10 },
-      { key: 'subject', header: 'Asunto', width: 40 },
-      { key: 'company', header: 'Empresa', width: 28 },
-      { key: 'category', header: 'Categoría', width: 22 },
-      { key: 'status', header: 'Estado', width: 16 },
-      { key: 'created_at', header: 'Fecha Creación de Solicitud', width: 24 },
-      { key: 'date_resolution', header: 'Fecha Resolución', width: 24 },
-      { key: 'created_at', header: 'Fecha de Solicitud', width: 24 },
-      { key: 'requester', header: 'Solicitante', width: 24 },
-      { key: 'user', header: 'Asignado', width: 24 },
-    ];
-
-    worksheet.columns = columnMapOrdered;
-
-    const formatDate = (raw: string) => {
-      if (!raw) return '';
-      const date = new Date(raw);
-      if (isNaN(date.getTime())) return raw;
-      const adjusted = new Date(date.getTime() + 5 * 60 * 60 * 1000);
-      return new Intl.DateTimeFormat('es-CO', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-      }).format(adjusted);
-    };
-
-    tickets.forEach((item) => {
-      const row: Record<string, unknown> = {};
-      columnMapOrdered.forEach((col) => {
-        row[col.key] =
-          col.key === 'created_at' ? formatDate(item.created_at) : item[col.key];
+    if (exporting) return;
+    // Se exporta exactamente lo que se ve (filtros + buscador), sobre toda la lista.
+    if (visibleTickets.length === 0) {
+      toast.error('No hay solicitudes con los filtros actuales');
+      return;
+    }
+    setExporting(true);
+    try {
+      const { boardExportFilename, buildBoardWorkbook } = await import('@/lib/request-general/exportBoardExcel');
+      const workbook = await buildBoardWorkbook({
+        module: 'Mis solicitudes',
+        filters: [
+          ...describeListFilters(filters, listOptions),
+          { label: 'Categoría', value: categoryFilter || 'Todas' },
+          { label: 'Departamento del solicitante', value: departmentLabel(departmentFilter) },
+          { label: 'Búsqueda', value: searchInput.trim() || 'Ninguna' },
+        ],
+        requests: visibleTickets.map((ticket) => ({
+          id: ticket.id,
+          subject: ticket.subject,
+          process: ticket.process,
+          category: ticket.category,
+          company: ticket.company,
+          status: ticket.status,
+          requester: ticket.requester,
+          assigned: ticket.user,
+          createdAt: ticket.created_at,
+          description: ticket.description,
+          dateResolution: ticket.date_resolution,
+          tasks: tasksByRequest[ticket.id] ?? [],
+        })),
       });
-      worksheet.addRow(row);
-    });
-
-    worksheet.getRow(1).font = { bold: true };
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
-
-    saveAs(blob, 'InformeSolicitudesObservadas.xlsx');
+      await downloadWorkbook(workbook, boardExportFilename('Mis-solicitudes'));
+      toast.success('Excel descargado');
+    } catch (err) {
+      console.error(err);
+      toast.error('No se pudo generar el informe');
+    } finally {
+      setExporting(false);
+    }
   }
 
-  const breadcrumbItems = [
-    { title: 'Procesos', href: '/process' },
-    { title: 'Solicitudes Generales', href: '#' },
-    { title: 'Panel de Solicitudes', href: '#' },
-  ].map((item, index) =>
-    item.href !== '#' ? (
-      <Link key={index} href={item.href} passHref>
-        <Anchor component='span' className='hover:text-blue-600 transition-colors'>
-          {item.title}
-        </Anchor>
-      </Link>
-    ) : (
-      <Text key={index} component='span' c='dimmed'>
-        {item.title}
-      </Text>
-    )
-  );
-
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
-      <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        {/* Header Section */}
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
-          <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
-            {breadcrumbItems}
-          </Breadcrumbs>
-
-          <Flex justify='space-between' align='center' mb='4'>
-            <div>
-              <Title
-                order={1}
-                className='text-3xl font-bold mb-2 flex items-center gap-3'
-              >
-                <IconFileDescription size={32} className='text-blue-600' />
-                Observar Mis Solicitudes
-              </Title>
-              <Text size='lg' c='dimmed'>
-                Observación de mis solicitudes
-              </Text>
-            </div>
-
-          </Flex>
-
-          <Grid>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card
-                p='md'
-                radius='md'
-                withBorder
-                role='button'
-                aria-label='Mostrar todas las solicitudes'
-                onClick={() => filterByStatus('0')}
-                style={{
-                  cursor: 'pointer',
-                  backgroundColor: 'var(--mantine-color-blue-light)',
-                  borderColor:
-                    filters.status === '0'
-                      ? 'var(--mantine-color-blue-filled)'
-                      : 'transparent',
-                  borderWidth: 2,
-                  transition: 'border-color 150ms ease',
-                }}
-              >
-                <Group>
-                  <IconFileDescription size={24} color='var(--mantine-color-blue-light-color)' />
-                  <div>
-                    <Text size='xs' c='var(--mantine-color-blue-light-color)'>
-                      Total de Solicitudes
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {tickets.length}
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card
-                p='md'
-                radius='md'
-                withBorder
-                role='button'
-                aria-label='Filtrar solicitudes pendientes'
-                onClick={() => filterByStatus('1')}
-                style={{
-                  cursor: 'pointer',
-                  backgroundColor: 'var(--mantine-color-orange-light)',
-                  borderColor:
-                    filters.status === '1'
-                      ? 'var(--mantine-color-orange-filled)'
-                      : 'transparent',
-                  borderWidth: 2,
-                  transition: 'border-color 150ms ease',
-                }}
-              >
-                <Group>
-                  <IconProgress size={24} color='var(--mantine-color-orange-light-color)' />
-                  <div>
-                    <Text size='xs' c='var(--mantine-color-orange-light-color)'>
-                      Pendientes
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {tickets.filter((t) => t.status?.toLowerCase() === 'abierto').length}
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card
-                p='md'
-                radius='md'
-                withBorder
-                role='button'
-                aria-label='Filtrar solicitudes completadas'
-                onClick={() => filterByStatus('2')}
-                style={{
-                  cursor: 'pointer',
-                  backgroundColor: 'var(--mantine-color-green-light)',
-                  borderColor:
-                    filters.status === '2'
-                      ? 'var(--mantine-color-green-filled)'
-                      : 'transparent',
-                  borderWidth: 2,
-                  transition: 'border-color 150ms ease',
-                }}
-              >
-                <Group>
-                  <IconCheck size={24} color='var(--mantine-color-green-light-color)' />
-                  <div>
-                    <Text size='xs' c='var(--mantine-color-green-light-color)'>
-                      Completadas
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {tickets.filter((t) => t.status?.toLowerCase() === 'resuelto').length}
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder>
-                {(() => {
-                  const { total, done, percent } = getGlobalTasksProgress();
-                  return (
-                    <Group wrap='nowrap'>
-                      <RingProgress
-                        size={56}
-                        thickness={6}
-                        roundCaps
-                        sections={[
-                          { value: percent, color: percent === 100 ? 'green' : 'blue' },
-                        ]}
-                        label={
-                          <Text size='xs' ta='center' fw={700}>
-                            {percent}%
-                          </Text>
-                        }
-                      />
-                      <div>
-                        <Text size='xs' c='dimmed'>
-                          Avance de tareas
-                        </Text>
-                        <Text size='lg' fw={600}>
-                          {done}/{total}
-                        </Text>
-                      </div>
-                    </Group>
-                  );
-                })()}
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder className='bg-green-50 border-green-200'>
-                <Group>
-                  <Button
-                    onClick={() => exportToExcel()}
-                    size='lg'
-                    leftSection={<IconDownload size={18} />}
-                    className='bg-green-500 hover:bg-green-700'
-                  >
-                    Descargar XLSX
-                  </Button>
-                </Group>
-              </Card>
-            </Grid.Col>
-          </Grid>
-        </Card>
-
-        {error && (
-          <Alert
-            icon={<IconAlertCircle size={20} />}
-            title='Error'
-            color='red'
-            mb='md'
-            className='border-red-200 bg-red-50'
+    <RequestsPage>
+      <RequestsHeader
+        crumbs={[
+          { title: 'Procesos', href: '/process' },
+          { title: 'Solicitudes Generales' },
+          { title: 'Observar Mis Solicitudes' },
+        ]}
+        title='Observar Mis Solicitudes'
+        subtitle='Seguimiento de las solicitudes que puedes observar'
+        actions={
+          <Button
+            variant='default'
+            radius='xl'
+            leftSection={<IconDownload size={16} />}
+            loading={exporting}
+            onClick={() => exportToExcel()}
           >
-            {error}
-          </Alert>
-        )}
+            Descargar Excel
+          </Button>
+        }
+      />
 
-        <Card shadow='sm' p='lg' radius='md' withBorder mb='6'>
-          <Group justify='space-between' mb='md'>
-            <Title order={3} className='flex items-center gap-2'>
-              <IconFilter size={20} />
-              Filtros de Búsqueda
-            </Title>
-            <ActionIcon
-              variant='subtle'
-              onClick={() => setFiltersExpanded(!filtersExpanded)}
-              aria-label={filtersExpanded ? 'Ocultar filtros' : 'Mostrar filtros'}
-              data-testid='filter-toggle'
-            >
-              {filtersExpanded ? <IconX size={16} /> : <IconFilter size={16} />}
-            </ActionIcon>
-          </Group>
+      <RequestListFilters
+        filters={filters}
+        onChange={setFilters}
+        onClear={clearListFilters}
+        counts={statusCounts}
+        options={listOptions}
+        progress={globalProgress}
+      />
 
-          <Collapse in={filtersExpanded}>
-            <Box mt='md'>
-              <Grid>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Estado'
-                    placeholder='Todos los estados'
-                    clearable
-                    data={[
-                      { value: '0', label: 'Todos' },
-                      { value: '1', label: 'Abierto' },
-                      { value: '3', label: 'Cancelado' },
-                      { value: '2', label: 'Resuelto' },
-                      { value: '7', label: 'Devuelta' },
-                    ]}
-                    value={filters.status}
-                    onChange={(value) => handleFilterChange('status', value || '')}
-                    leftSection={<IconFlag size={16} />}
-                    data-testid='status-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Empresa'
-                    placeholder='Todas las empresas'
-                    clearable
-                    data={companies}
-                    value={filters.company}
-                    onChange={(value) => handleFilterChange('company', value || '')}
-                    leftSection={<IconBuilding size={16} />}
-                    data-testid='company-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='Fecha Desde'
-                    type='date'
-                    value={filters.date_from}
-                    onChange={(e) => handleFilterChange('date_from', e.target.value)}
-                    leftSection={<IconCalendarEvent size={16} />}
-                    data-testid='date_from-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='Fecha Hasta'
-                    type='date'
-                    value={filters.date_to}
-                    onChange={(e) => handleFilterChange('date_to', e.target.value)}
-                    leftSection={<IconCalendarEvent size={16} />}
-                    data-testid='date_to-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Persona Asignada'
-                    placeholder='Todas las personas'
-                    clearable
-                    data={assignedUsers}
-                    value={filters.assigned_to}
-                    onChange={(value) => handleFilterChange('assigned_to', value || '')}
-                    leftSection={<IconUserCheck size={16} />}
-                    data-testid='assigned_to-filter'
-                  />
-                </Grid.Col>
-              </Grid>
+      <Grid mt='sm'>
+        <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+          <Select
+            label='Categoría'
+            placeholder='Todas las categorías'
+            clearable
+            searchable
+            data={categoryOptions}
+            value={categoryFilter || null}
+            onChange={(value) => setCategoryFilter(value || '')}
+            leftSection={<IconFileDescription size={16} />}
+            nothingFoundMessage='Sin coincidencias'
+            data-testid='category-filter'
+          />
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+          <Select
+            label='Departamento del solicitante'
+            placeholder='Todos'
+            clearable
+            searchable
+            data={departmentOptions}
+            value={departmentFilter || null}
+            onChange={(value) => changeDepartment(value || '')}
+            leftSection={<IconBuilding size={16} />}
+            nothingFoundMessage='Sin coincidencias'
+            data-testid='department-filter'
+          />
+        </Grid.Col>
+      </Grid>
 
-              <Group justify='flex-end' mt='md'>
-                <Button
-                  variant='outline'
-                  onClick={async () => {
-                    const clearedFilters = {
-                      status: '0',
-                      company: '',
-                      date_from: '',
-                      date_to: '',
-                      assigned_to: '',
-                    };
-                    setFilters(clearedFilters);
+      {error && (
+        <Alert icon={<IconAlertCircle size={20} />} title='Error' color='red' radius='lg' mt='md'>
+          {error}
+        </Alert>
+      )}
 
-                    setError(null);
+      <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
+        <LoadingOverlay visible={loading} />
 
-                    setTimeout(async () => {
-                      if (userId) {
-                        await fetchTicketsWithUserId(userId);
-                      }
-                    }, 100);
-                  }}
-                  leftSection={<IconX size={16} />}
-                  data-testid='clear-filters'
-                >
-                  Limpiar Filtros
-                </Button>
-                <Button
-                  onClick={handleApplyFilters}
-                  leftSection={<IconRefresh size={16} />}
-                  data-testid='apply-filters'
-                >
-                  Aplicar Filtros
-                </Button>
-              </Group>
-            </Box>
-          </Collapse>
-        </Card>
-
-        {/* Enhanced Table */}
-        <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
-          <LoadingOverlay visible={loading} />
-
-          <Title order={3} mb='md' className='flex items-center gap-2'>
+        <Group justify='space-between' align='center' mb='xs' wrap='wrap'>
+          <Title order={3} className='flex items-center gap-2'>
             <IconFileDescription size={20} />
             Lista de Solicitudes
           </Title>
+          <AutoRefreshNote refreshing={refreshing} lastUpdated={lastUpdated} />
+        </Group>
 
-          <div className='overflow-x-auto'>
-            <Table striped highlightOnHover>
-              <Table.Thead>
+        <Box mb='md'>
+          <IosSearchField
+            value={searchInput}
+            onChange={setSearchInput}
+            placeholder='Buscar ID, asunto, empresa, categoría, estado o persona'
+            ariaLabel='Buscar solicitudes'
+            meta={
+              visibleTickets.length !== tickets.length
+                ? `${visibleTickets.length} de ${tickets.length} solicitud(es)`
+                : 'Busca en todas las solicitudes que observas; no importan tildes ni mayúsculas'
+            }
+          />
+        </Box>
+
+        <div className='overflow-x-auto'>
+          <Table striped highlightOnHover>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>ID</Table.Th>
+                <Table.Th>Asunto</Table.Th>
+                <Table.Th>Compañía / Categoría</Table.Th>
+                <Table.Th>Estado</Table.Th>
+                <Table.Th>Fecha</Table.Th>
+                <Table.Th>Solicitante / Asignado</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {visibleTickets.length === 0 ? (
                 <Table.Tr>
-                  <Table.Th>ID</Table.Th>
-                  <Table.Th>Asunto</Table.Th>
-                  <Table.Th>Compañía / Categoría</Table.Th>
-                  <Table.Th>Estado</Table.Th>
-                  <Table.Th>Fecha</Table.Th>
-                  <Table.Th>Solicitante / Asignado</Table.Th>
+                  <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
+                    <div className='flex flex-col items-center gap-3'>
+                      <IconFileDescription size={48} className='text-gray-300' />
+                      <Text size='lg' fw={500}>
+                        No se encontraron solicitudes
+                      </Text>
+                      <Text size='sm' c='gray.5'>
+                        {tickets.length > 0
+                          ? 'Ninguna solicitud coincide con los filtros o la búsqueda'
+                          : 'Aún no tienes solicitudes para observar'}
+                      </Text>
+                    </div>
+                  </Table.Td>
                 </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {tickets.length === 0 ? (
-                  <Table.Tr>
-                    <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
-                      <div className='flex flex-col items-center gap-3'>
-                        <IconFileDescription size={48} className='text-gray-300' />
-                        <Text size='lg' fw={500}>
-                          No se encontraron solicitudes
+              ) : (
+                pageItems.map((ticket) => (
+                  <Table.Tr
+                    key={ticket.id}
+                    className='cursor-pointer transition-colors'
+                    onClick={() => {
+                      sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
+                      window.open(
+                        `/process/request-general/view-request?id=${ticket.id}&from=viewer-request`
+                      );
+                    }}
+                  >
+                    <Table.Td>
+                      <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
+                        {ticket.id}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td style={{ minWidth: 240, maxWidth: 320 }}>
+                      <Text size='sm' fw={500} lineClamp={2}>
+                        {ticket.subject}
+                      </Text>
+                      {tasksByRequest[ticket.id]?.length ? (
+                        <Stack gap={6} mt={8}>
+                          <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
+                          <Group gap={6} wrap='wrap'>
+                            {buildTaskDisplayBadges(tasksByRequest[ticket.id]).map((badge) => {
+                              const { color, Icon } = getTaskVisual(badge.statusKey);
+                              return (
+                                <Tooltip
+                                  key={badge.key}
+                                  label={`${badge.label} · ${badge.statusLabel}`}
+                                  withArrow
+                                >
+                                  <Badge
+                                    variant='light'
+                                    color={color}
+                                    size='sm'
+                                    radius='sm'
+                                    styles={{
+                                      root: {
+                                        textTransform: 'none',
+                                        fontWeight: 500,
+                                        cursor: 'default',
+                                      },
+                                      label: {
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                      },
+                                    }}
+                                    leftSection={<Icon size={13} />}
+                                  >
+                                    {badge.label}
+                                  </Badge>
+                                </Tooltip>
+                              );
+                            })}
+                          </Group>
+                        </Stack>
+                      ) : null}
+                    </Table.Td>
+                    <Table.Td>
+                      <Stack gap={2}>
+                        <Group gap={4} wrap='nowrap'>
+                          <IconBuilding size={14} className='text-gray-400' />
+                          <Text size='sm' fw={500}>
+                            {ticket.company}
+                          </Text>
+                        </Group>
+                        <Text size='xs' c='dimmed'>
+                          {ticket.category}
                         </Text>
-                        <Text size='sm' c='gray.5'>
-                          Intenta ajustar los filtros o crea una nueva solicitud
-                        </Text>
-                      </div>
+                      </Stack>
+                    </Table.Td>
+                    <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                      {(() => {
+                        const StatusIcon = getStatusIcon(ticket.status);
+                        return (
+                          <Badge
+                            color={getStatusColor(ticket.status)}
+                            variant='light'
+                            size='sm'
+                            leftSection={<StatusIcon size={12} />}
+                            styles={{ label: { overflow: 'visible' } }}
+                          >
+                            {ticket.status}
+                          </Badge>
+                        );
+                      })()}
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size='sm' c='dimmed'>
+                        {(() => {
+                          const raw = ticket.created_at;
+                          if (!raw) return 'Sin fecha';
+
+                          const date = new Date(raw);
+                          if (isNaN(date.getTime())) return 'Fecha inválida';
+
+                          const adjusted = new Date(date.getTime() + 5 * 60 * 60 * 1000);
+
+                          return new Intl.DateTimeFormat('es-CO', {
+                            day: 'numeric',
+                            month: 'long',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true,
+                          }).format(adjusted);
+                        })()}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Stack gap={4}>
+                        <Group gap={4} wrap='nowrap'>
+                          <IconUser size={14} className='text-gray-400' />
+                          <Text size='sm'>{ticket.requester}</Text>
+                        </Group>
+                        <Group gap={4} wrap='nowrap'>
+                          <IconUserCheck size={14} className='text-gray-400' />
+                          <Text size='sm' c='dimmed'>
+                            {ticket.user}
+                          </Text>
+                        </Group>
+                      </Stack>
                     </Table.Td>
                   </Table.Tr>
-                ) : (
-                  pageItems.map((ticket) => (
-                    <Table.Tr
-                      key={ticket.id}
-                      className='cursor-pointer transition-colors'
-                      onClick={() => {
-                        sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
-                        window.open(
-                          `/process/request-general/view-request?id=${ticket.id}&from=viewer-request`
-                        );
-                      }}
-                    >
-                      <Table.Td>
-                        <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
-                          {ticket.id}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td style={{ minWidth: 240, maxWidth: 320 }}>
-                        <Text size='sm' fw={500} lineClamp={2}>
-                          {ticket.subject}
-                        </Text>
-                        {tasksByRequest[ticket.id]?.length ? (
-                          <Stack gap={6} mt={8}>
-                            {(() => {
-                              const { total, done, percent } = getTasksProgress(
-                                tasksByRequest[ticket.id]
-                              );
-                              return (
-                                <Group gap={8} wrap='nowrap'>
-                                  <Progress
-                                    value={percent}
-                                    color={percent === 100 ? 'green' : 'blue'}
-                                    size='sm'
-                                    radius='xl'
-                                    style={{ flex: 1, maxWidth: 120 }}
-                                  />
-                                  <Text size='xs' c='dimmed' fw={500} style={{ whiteSpace: 'nowrap' }}>
-                                    {done}/{total}
-                                  </Text>
-                                </Group>
-                              );
-                            })()}
-                            <Group gap={6} wrap='wrap'>
-                              {buildTaskDisplayBadges(tasksByRequest[ticket.id]).map((badge) => {
-                                const { color, Icon } = getTaskVisual(badge.statusKey);
-                                return (
-                                  <Tooltip
-                                    key={badge.key}
-                                    label={`${badge.label} · ${badge.statusLabel}`}
-                                    withArrow
-                                  >
-                                    <Badge
-                                      variant='light'
-                                      color={color}
-                                      size='sm'
-                                      radius='sm'
-                                      styles={{
-                                        root: {
-                                          textTransform: 'none',
-                                          fontWeight: 500,
-                                          cursor: 'default',
-                                        },
-                                        label: {
-                                          overflow: 'hidden',
-                                          textOverflow: 'ellipsis',
-                                        },
-                                      }}
-                                      leftSection={<Icon size={13} />}
-                                    >
-                                      {badge.label}
-                                    </Badge>
-                                  </Tooltip>
-                                );
-                              })}
-                            </Group>
-                          </Stack>
-                        ) : null}
-                      </Table.Td>
-                      <Table.Td>
-                        <Stack gap={2}>
-                          <Group gap={4} wrap='nowrap'>
-                            <IconBuilding size={14} className='text-gray-400' />
-                            <Text size='sm' fw={500}>
-                              {ticket.company}
-                            </Text>
-                          </Group>
-                          <Text size='xs' c='dimmed'>
-                            {ticket.category}
-                          </Text>
-                        </Stack>
-                      </Table.Td>
-                      <Table.Td style={{ whiteSpace: 'nowrap' }}>
-                        {(() => {
-                          const StatusIcon = getStatusIcon(ticket.status);
-                          return (
-                            <Badge
-                              color={getStatusColor(ticket.status)}
-                              variant='light'
-                              size='sm'
-                              leftSection={<StatusIcon size={12} />}
-                              styles={{ label: { overflow: 'visible' } }}
-                            >
-                              {ticket.status}
-                            </Badge>
-                          );
-                        })()}
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size="sm" c="dimmed">
-                          {
-                            (() => {
-                              const raw = ticket.created_at;
-                              if (!raw) return "Sin fecha";
+                ))
+              )}
+            </Table.Tbody>
+          </Table>
+        </div>
 
-                              const date = new Date(raw);
-                              if (isNaN(date.getTime())) return "Fecha inválida";
-
-                              const adjusted = new Date(date.getTime() + 5 * 60 * 60 * 1000);
-
-                              return new Intl.DateTimeFormat("es-CO", {
-                                day: "numeric",
-                                month: "long",
-                                year: "numeric",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                                hour12: true,
-                              }).format(adjusted);
-                            })()
-                          }
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Stack gap={4}>
-                          <Group gap={4} wrap='nowrap'>
-                            <IconUser size={14} className='text-gray-400' />
-                            <Text size='sm'>{ticket.requester}</Text>
-                          </Group>
-                          <Group gap={4} wrap='nowrap'>
-                            <IconUserCheck size={14} className='text-gray-400' />
-                            <Text size='sm' c='dimmed'>
-                              {ticket.user}
-                            </Text>
-                          </Group>
-                        </Stack>
-                      </Table.Td>
-                    </Table.Tr>
-                  ))
-                )}
-              </Table.Tbody>
-            </Table>
-          </div>
-
-          {totalPages > 1 && (
-            <Group justify='center' mt='md'>
-              <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} />
-            </Group>
-          )}
-        </Card>
-
-      </div>
-    </div>
+        {totalPages > 1 && (
+          <Group justify='center' mt='md'>
+            <Pagination total={totalPages} value={currentPage} onChange={setCurrentPage} />
+          </Group>
+        )}
+      </Card>
+    </RequestsPage>
   );
 }
 
 export default function ViewerRequestsGeneralPage() {
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Suspense fallback={<div>Cargando...</div>}>
       <ViewerRequestGeneralPage />
     </Suspense>
   );

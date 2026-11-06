@@ -96,7 +96,7 @@ function SetRapido({ onElegir, onMas }: { onElegir: (emoji: string) => void; onM
  * emojis (pesan cientos de KB): el catálogo es cerrado y es el mismo que
  * valida el servidor (lib/chat/reactions-catalog.ts).
  */
-export function SelectorEmoji({ onElegir, alto = 260 }: { onElegir: (emoji: string) => void; alto?: number }) {
+export function SelectorEmoji({ onElegir, alto = 260 }: { onElegir: (emoji: string) => void; alto?: number | string }) {
   const [consulta, setConsulta] = useState('');
   const encontrados = useMemo(() => buscarEmojis(consulta), [consulta]);
   const boton = (e: string, n: string) => (

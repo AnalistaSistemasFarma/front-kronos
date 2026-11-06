@@ -14,6 +14,8 @@ import { CORREO_SUBPROCESS_URL } from './constants';
 export const CORREO_HREF = CORREO_SUBPROCESS_URL;
 /** Cuánto vale en el navegador la respuesta (permiso + contador). */
 export const ICONO_CORREO_TTL_MS = 3 * 60_000;
+/** Sin el módulo: cada cuánto se vuelve a confirmar (si se lo asignan, aparece al recargar). */
+export const ICONO_CORREO_SIN_MODULO_TTL_MS = 30 * 60_000;
 /** Espera antes de la primera consulta: no compite con la carga de la página. */
 export const ICONO_CORREO_RETRASO_MS = 1_500;
 const CLAVE_STORAGE = 'synerlink:correo-icono:v1';
@@ -29,7 +31,9 @@ export interface EstadoIconoCorreo {
 
 /** Traduce la respuesta del API al estado del icono. */
 export function estadoDesdeRespuesta(email: string, status: number, body: unknown, ahora: number): EstadoIconoCorreo {
-  const visible = status === 200;
+  // Sin el módulo el servidor responde 200 `{ habilitado: false }` (antes 403).
+  const habilitado = !(body && typeof body === 'object' && (body as { habilitado?: unknown }).habilitado === false);
+  const visible = status === 200 && habilitado;
   let noLeidos: number | null = null;
   if (visible && body && typeof body === 'object') {
     const n = (body as { noLeidos?: unknown }).noLeidos;
@@ -47,7 +51,9 @@ export function debeMostrarIconoCorreo(sesionEmail: string | null | undefined, e
 /** ¿Hay que volver a consultar? */
 export function estadoVencido(estado: EstadoIconoCorreo | null, sesionEmail: string, ahora: number, ttl = ICONO_CORREO_TTL_MS): boolean {
   if (!estado || estado.email.toLowerCase() !== sesionEmail.toLowerCase()) return true;
-  return ahora - estado.en >= ttl || ahora < estado.en;
+  // Sin el módulo casi siempre la respuesta sigue igual: se vuelve a preguntar con menos frecuencia.
+  const vigencia = estado.visible ? ttl : Math.max(ttl, ICONO_CORREO_SIN_MODULO_TTL_MS);
+  return ahora - estado.en >= vigencia || ahora < estado.en;
 }
 
 /**

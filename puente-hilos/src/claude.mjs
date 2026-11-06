@@ -53,7 +53,7 @@ export const SETTINGS_HIJO = {
  * fija el id con --session-id (así el puente lo conoce de antemano); después,
  * --resume con ese mismo id.
  */
-export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, presupuestoUsd, equipo = null, codigo = null, plugins = null, objetivo = false }) {
+export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchivos, modelo, presupuestoUsd, equipo = null, codigo = null, plugins = null, objetivo = false, lectura = null }) {
   if (!perfil) throw new Error('Falta el perfil.');
   if (!sesion?.id || !/^[0-9a-f-]{36}$/i.test(sesion.id)) throw new Error('session id inválido.');
 
@@ -73,6 +73,8 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
     ...HERRAMIENTAS_PROHIBIDAS.filter((h) => !exentas.includes(h)),
     ...(equipo ? equipo.prohibidas : []),
     ...(codigo ? codigo.prohibidas : []),
+    // Permisos del proyecto, nivel LECTURA (politica.mjs): sin secretos de los clones.
+    ...(lectura ? lectura.prohibidas : []),
   ];
   // Sin sandbox SOLO con terminal completa (turno de operador en un proyecto con la bandera).
   if (codigo && !codigo.sandbox?.enabled && codigo.terminalCompleta !== true) throw new Error('Turno con código sin sandbox: no se arma.');
@@ -114,6 +116,8 @@ export function armarArgumentos({ perfil, sesion, rutaMcp, rutaSistema, dirArchi
   // Grafos de Graphify en solo lectura (Edit/Write siguen confinados a ./trabajo y ./codigo).
   for (const d of plugins?.dirsLectura ?? []) args.push('--add-dir', d);
   for (const d of plugins?.dirs ?? []) args.push('--plugin-dir', d);
+  // Repos del proyecto en LECTURA (politica.mjs): solo se leen (Edit/Write siguen confinados a ./trabajo).
+  for (const d of lectura?.dirs ?? []) args.push('--add-dir', d);
   if (sesion.nueva) args.push('--session-id', sesion.id);
   else args.push('--resume', sesion.id);
   if (modelo) args.push('--model', modelo);

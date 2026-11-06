@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import {
@@ -15,6 +15,7 @@ import {
   Stack,
   TextInput,
   Select,
+  MultiSelect,
   Grid,
   Alert,
   LoadingOverlay,
@@ -54,9 +55,14 @@ import {
   IconClock,
   IconPlayerPlay,
   IconEdit,
+  IconCopy,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
+import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
+import IosSearchField from '../../../../../components/ui/IosSearchField';
+import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
+import { filterWorkflows } from '../../../../../lib/requests-general/workflowSearch';
 import {
   SCHEDULE_PRESETS,
   PRESET_LABELS,
@@ -146,6 +152,21 @@ function RequestBoard() {
   const [categoriesWF, setCategoriesWF] = useState<{ value: string; label: string }[]>([]);
   const [processesWF, setProcessWF] = useState<{ value: string; label: string }[]>([]);
   const [modalOpened, setModalOpened] = useState(false);
+
+  const [replicateModalOpened, setReplicateModalOpened] = useState(false);
+  const [replicateForm, setReplicateForm] = useState<{
+    company: string;
+    process: string;
+    empresas: string[];
+    ensayo: boolean;
+  }>({ company: '', process: '', empresas: [], ensayo: true });
+  const [replicateLoading, setReplicateLoading] = useState(false);
+  const [replicateError, setReplicateError] = useState<string | null>(null);
+  const [replicateResult, setReplicateResult] = useState<{
+    ensayo: boolean;
+    recordsets?: unknown[][];
+  } | null>(null);
+
   const [currentStep, setCurrentStep] = useState(1);
   const [createLoading, setCreateLoading] = useState(false);
   const [formDataLoading, setFormDataLoading] = useState(false);
@@ -164,6 +185,15 @@ function RequestBoard() {
   });
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  // Buscador libre (empresa, categoría, proceso, asignado…) sobre la lista ya cargada.
+  const [searchInput, setSearchInput] = useState('');
+  const deferredSearch = useDeferredValue(searchInput);
+  const visibleWorkFlows = useMemo(
+    () => filterWorkflows(workFlows, deferredSearch),
+    [workFlows, deferredSearch]
+  );
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   // ── Tareas Periódicas (cliente del scheduler central) ─────────────────────
   // Listas crudas de consult-request para el cascadeo Empresa → Categoría → Proceso
@@ -241,6 +271,49 @@ function RequestBoard() {
     setJobForm({ ...EMPTY_JOB_FORM, startDate: new Date().toISOString().slice(0, 10) });
     setEditingJobId(null);
     setJobError(null);
+  };
+
+  const closeReplicateModal = () => {
+    setReplicateModalOpened(false);
+    setReplicateForm({ company: '', process: '', empresas: [], ensayo: true });
+    setReplicateError(null);
+    setReplicateResult(null);
+  };
+
+  const handleReplicate = async () => {
+    setReplicateError(null);
+    setReplicateResult(null);
+    if (!replicateForm.process || replicateForm.empresas.length === 0) {
+      setReplicateError('Seleccione el proceso a replicar y al menos una empresa destino.');
+      return;
+    }
+    setReplicateLoading(true);
+    try {
+      const response = await fetch('/api/requests-general/replicate-workflow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id_origen: Number(replicateForm.process),
+          empresas: replicateForm.empresas.map(Number),
+          ensayo: replicateForm.ensayo,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setReplicateError(data.error || 'No se pudo replicar el flujo.');
+        return;
+      }
+      if (replicateForm.ensayo) {
+        setReplicateResult({ ensayo: Boolean(data.ensayo), recordsets: data.recordsets });
+      } else {
+        closeReplicateModal();
+        await fetchWorkFlows();
+      }
+    } catch {
+      setReplicateError('Error de conexión al replicar el flujo.');
+    } finally {
+      setReplicateLoading(false);
+    }
   };
 
   const openEditJob = (job: ScheduledJob) => {
@@ -391,6 +464,9 @@ function RequestBoard() {
       asignado: string;
       costo: number;
       centroCosto: string;
+      cierraSolicitud: boolean;
+      esFlujoVinculado: boolean;
+      flujoVinculado: string;
     }>
   >([]);
   const [taskForm, setTaskForm] = useState({
@@ -398,12 +474,16 @@ function RequestBoard() {
     asignado: '',
     costo: '',
     centroCosto: '',
+    cierraSolicitud: false,
+    esFlujoVinculado: false,
+    flujoVinculado: '',
   });
 
   const [taskFormKey, setTaskFormKey] = useState(0);
 
   const addTask = () => {
     if (!taskForm.tarea.trim()) return;
+    if (taskForm.esFlujoVinculado && (!taskForm.flujoVinculado || !taskForm.asignado)) return;
 
     setTasks([
       ...tasks,
@@ -413,10 +493,13 @@ function RequestBoard() {
         asignado: taskForm.asignado,
         costo: parseFloat(taskForm.costo) || 0,
         centroCosto: taskForm.centroCosto,
+        cierraSolicitud: taskForm.cierraSolicitud,
+        esFlujoVinculado: taskForm.esFlujoVinculado,
+        flujoVinculado: taskForm.esFlujoVinculado ? taskForm.flujoVinculado : '',
       },
     ]);
 
-    setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+    setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false, esFlujoVinculado: false, flujoVinculado: '' });
 
     setTaskFormKey(prev => prev + 1);
   };
@@ -488,9 +571,9 @@ function RequestBoard() {
 
       if (data.processCategories && data.processCategories.length > 0) {
         setProcessWF(
-          data.processCategories.map((p: { id_process: number; process: string }) => ({
+          data.processCategories.map((p: { id_process: number; process: string; company?: string | null }) => ({
             value: p.id_process.toString(),
-            label: p.process,
+            label: p.company ? `${p.process} — ${p.company}` : p.process,
           }))
         );
       } else {
@@ -679,9 +762,15 @@ function RequestBoard() {
     await fetchWorkFlowsWithUserId(userId, filters);
   };
 
-  const fetchWorkFlowsWithUserId = async (userIdToUse: number, filtersToUse?: typeof filters) => {
+  /** `silent`: refresca la tabla sin tapar la pantalla con el cargador (refresco automático). */
+  const fetchWorkFlowsWithUserId = async (
+    userIdToUse: number,
+    filtersToUse?: typeof filters,
+    silent = false
+  ) => {
     try {
-      setLoading(true);
+      if (silent) setRefreshing(true);
+      else setLoading(true);
 
       const params = new URLSearchParams();
 
@@ -706,15 +795,27 @@ function RequestBoard() {
         'workFlows'
       );
       setWorkFlow(data);
+      setLastUpdated(new Date());
     } catch (err) {
       console.error('Error fetching assigned workflows:', err);
-      setError('Unable to load assigned workflows. Please try again.');
+      // En el refresco automático un fallo de red no tapa la tabla; se reintenta en el siguiente.
+      if (!silent) setError('Unable to load assigned workflows. Please try again.');
     } finally {
-      setLoading(false);
+      if (silent) setRefreshing(false);
+      else setLoading(false);
     }
   };
 
+  // Refresco automático: cada 30 s y al volver a la pestaña, con los filtros vigentes.
+  useAutoRefresh(() => {
+    if (userId) void fetchWorkFlowsWithUserId(userId, filters, true);
+  });
+
   const getUserIdByName = async (userName: string): Promise<number | null> => {
+    // La sesión ya trae el id de Kronos (callback jwt, buscado por correo): sin viaje extra al
+    // servidor ni búsqueda por NOMBRE, que con dos personas homónimas podía traer el id equivocado.
+    // (El id es un cuid de texto; este archivo lo tipa como número, igual que lo que devolvía la API.)
+    if (session?.user?.id) return session.user.id as unknown as number;
     if (!session || status !== 'authenticated') {
       console.error('No hay sesión activa para realizar esta operación');
       return null;
@@ -843,9 +944,9 @@ function RequestBoard() {
         }
         if (data.processCategories && Array.isArray(data.processCategories)) {
           setProcessWF(
-            data.processCategories.map((sub: { id_process: number; process: string }) => ({
+            data.processCategories.map((sub: { id_process: number; process: string; company?: string | null }) => ({
               value: sub.id_process.toString(),
-              label: sub.process,
+              label: sub.company ? `${sub.process} — ${sub.company}` : sub.process,
             }))
           );
         } else {
@@ -905,6 +1006,8 @@ function RequestBoard() {
         id_user: task.asignado || null,
         cost: task.costo || 0,
         cost_center: task.centroCosto || null,
+        closes_request: task.cierraSolicitud,
+        id_linked_process: task.esFlujoVinculado ? Number(task.flujoVinculado) || null : null,
       }));
 
       console.log('asignados tareas ' + tasksToSend);
@@ -945,7 +1048,7 @@ function RequestBoard() {
         isExternal: false,
       });
       setTasks([]);
-      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false, esFlujoVinculado: false, flujoVinculado: '' });
       setAssignedCategoryInfo(null);
 
       fetchWorkFlows();
@@ -1006,11 +1109,11 @@ function RequestBoard() {
     }
   };
 
+  // Al elegir un filtro la tabla se actualiza sola (sin "Aplicar Filtros").
   const handleFilterChange = (field: string, value: string) => {
-    setFilters((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
+    const next = { ...filters, [field]: value };
+    setFilters(next);
+    if (userId) void fetchWorkFlowsWithUserId(userId, next, true);
   };
 
   if (status === 'loading' || loading) {
@@ -1076,6 +1179,15 @@ function RequestBoard() {
     .filter((p) => String(p.id_category_request) === jobForm.category)
     .map((p) => ({ value: p.id_process.toString(), label: p.process }));
 
+  const replicateCategoryIds = new Set(
+    crCategories
+      .filter((c) => String(c.id_company) === replicateForm.company)
+      .map((c) => c.id)
+  );
+  const replicateProcessOptions = crProcessCategories
+    .filter((p) => replicateCategoryIds.has(p.id_category_request))
+    .map((p) => ({ value: p.id_process.toString(), label: p.process }));
+
   const breadcrumbItems = [
     { title: 'Procesos', href: '/process' },
     { title: 'Flujos de Trabajo', href: '#' },
@@ -1116,14 +1228,24 @@ function RequestBoard() {
               </Text>
             </div>
 
-            <Button
-              onClick={() => setModalOpened(true)}
-              size='lg'
-              leftSection={<IconPlus size={18} />}
-              className='bg-blue-600 hover:bg-blue-700'
-            >
-              Crear Flujo De Trabajo
-            </Button>
+            <Group gap='sm'>
+              <Button
+                onClick={() => setReplicateModalOpened(true)}
+                size='lg'
+                variant='outline'
+                leftSection={<IconCopy size={18} />}
+              >
+                Replicar flujos
+              </Button>
+              <Button
+                onClick={() => setModalOpened(true)}
+                size='lg'
+                leftSection={<IconPlus size={18} />}
+                className='bg-blue-600 hover:bg-blue-700'
+              >
+                Crear Flujo De Trabajo
+              </Button>
+            </Group>
           </Flex>
 
           <Grid>
@@ -1310,8 +1432,9 @@ function RequestBoard() {
                       active: '',
                     };
                     setFilters(clearedFilters);
+                    setSearchInput('');
                     if (userId) {
-                      fetchWorkFlowsWithUserId(userId, clearedFilters);
+                      fetchWorkFlowsWithUserId(userId, clearedFilters, true);
                     }
                   }}
                   leftSection={<IconX size={16} />}
@@ -1329,10 +1452,27 @@ function RequestBoard() {
         <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
           <LoadingOverlay visible={loading} />
 
-          <Title order={3} mb='md' className='flex items-center gap-2'>
-            <IconTicket size={20} />
-            Lista de Flujos de Trabajo Asignados
-          </Title>
+          <Group justify='space-between' align='center' mb='xs' wrap='wrap'>
+            <Title order={3} className='flex items-center gap-2'>
+              <IconTicket size={20} />
+              Lista de Flujos de Trabajo Asignados
+            </Title>
+            <AutoRefreshNote refreshing={refreshing} lastUpdated={lastUpdated} />
+          </Group>
+
+          <Box mb='md'>
+            <IosSearchField
+              value={searchInput}
+              onChange={setSearchInput}
+              placeholder='Buscar empresa, categoría, proceso, asignado o ID'
+              ariaLabel='Buscar flujos'
+              meta={
+                searchInput.trim()
+                  ? `${visibleWorkFlows.length} de ${workFlows.length} flujo(s)`
+                  : 'Una o varias palabras; no importan tildes ni mayúsculas'
+              }
+            />
+          </Box>
 
           <div className='overflow-x-auto'>
             <Table striped highlightOnHover>
@@ -1347,7 +1487,7 @@ function RequestBoard() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {workFlows.length === 0 ? (
+                {visibleWorkFlows.length === 0 ? (
                   <Table.Tr>
                     <Table.Td colSpan={8} className='text-center py-12 text-[var(--mantine-color-dimmed)]'>
                       <div className='flex flex-col items-center gap-3'>
@@ -1356,13 +1496,15 @@ function RequestBoard() {
                           No se encontraron flujos de trabajo asignados
                         </Text>
                         <Text size='sm' c='dimmed'>
-                          No tienes flujos de trabajo asignados actualmente
+                          {workFlows.length > 0
+                            ? `Ningún flujo coincide con “${searchInput.trim()}”`
+                            : 'No tienes flujos de trabajo asignados actualmente'}
                         </Text>
                       </div>
                     </Table.Td>
                   </Table.Tr>
                 ) : (
-                  workFlows.map((workflow) => (
+                  visibleWorkFlows.map((workflow) => (
                     <Table.Tr
                       key={workflow.id}
                       className='cursor-pointer transition-colors'
@@ -1733,7 +1875,7 @@ function RequestBoard() {
             setCurrentStep(1);
             setFormErrors({});
             setTasks([]);
-            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false, esFlujoVinculado: false, flujoVinculado: '' });
             setFormData({
               company: '',
               category: '',
@@ -2198,12 +2340,58 @@ function RequestBoard() {
                           fullWidth
                           h={48}
                           mt={26}
-                          disabled={!taskForm.tarea.trim()}
+                          disabled={
+                            !taskForm.tarea.trim() ||
+                            (taskForm.esFlujoVinculado && (!taskForm.flujoVinculado || !taskForm.asignado))
+                          }
                           className='cursor-pointer hover:bg-blue-700 transition-colors duration-200'
                           size='lg'
                         >
                           Agregar
                         </Button>
+                      </Grid.Col>
+
+                      <Grid.Col span={12}>
+                        <Checkbox
+                          label='Al resolver esta tarea, cerrar la solicitud'
+                          checked={taskForm.cierraSolicitud}
+                          onChange={(e) =>
+                            setTaskForm({ ...taskForm, cierraSolicitud: e.currentTarget.checked })
+                          }
+                        />
+                        <Checkbox
+                          mt='sm'
+                          label='Lanza otro flujo (el asignado crea una solicitud de ese flujo y esta tarea se cierra cuando esa solicitud se cierre)'
+                          checked={taskForm.esFlujoVinculado}
+                          onChange={(e) =>
+                            setTaskForm({
+                              ...taskForm,
+                              esFlujoVinculado: e.currentTarget.checked,
+                              flujoVinculado: e.currentTarget.checked ? taskForm.flujoVinculado : '',
+                            })
+                          }
+                        />
+                        {taskForm.esFlujoVinculado && (
+                          <Select
+                            mt='sm'
+                            label='Flujo a lanzar'
+                            placeholder='Busque el proceso o la empresa'
+                            data={processesWF}
+                            value={taskForm.flujoVinculado}
+                            onChange={(value) =>
+                              setTaskForm({ ...taskForm, flujoVinculado: value || '' })
+                            }
+                            searchable
+                            withAsterisk
+                            error={
+                              !taskForm.flujoVinculado
+                                ? 'Selecciona el flujo a lanzar'
+                                : !taskForm.asignado
+                                  ? 'La tarea vinculada requiere un asignado'
+                                  : undefined
+                            }
+                          />
+                        )}
                       </Grid.Col>
                     </Grid>
                   </div>
@@ -2229,6 +2417,9 @@ function RequestBoard() {
                             <Table.Th className='py-4 px-5 text-sm font-semibold uppercase tracking-wider'>
                               Centro de Costo
                             </Table.Th>
+                            <Table.Th className='py-4 px-5 text-sm font-semibold uppercase tracking-wider text-center'>
+                              Cierra solicitud
+                            </Table.Th>
                             <Table.Th
                               className='py-4 px-5 text-sm font-semibold uppercase tracking-wider text-center'
                               style={{ width: 100 }}
@@ -2247,6 +2438,17 @@ function RequestBoard() {
                                 <Text size='base' fw={500}>
                                   {task.tarea}
                                 </Text>
+                                {task.esFlujoVinculado && (
+                                  <Badge
+                                    mt={4}
+                                    color='grape'
+                                    variant='light'
+                                    size='sm'
+                                    styles={{ root: { textTransform: 'none' } }}
+                                  >
+                                    Flujo: {processesWF.find((o) => o.value === task.flujoVinculado)?.label || 'Vinculado'}
+                                  </Badge>
+                                )}
                               </Table.Td>
                               <Table.Td className='py-4 px-5'>
                                 <Group gap={4}>
@@ -2269,6 +2471,15 @@ function RequestBoard() {
                                 <Text size='base' c='dimmed'>
                                   {task.centroCosto || '-'}
                                 </Text>
+                              </Table.Td>
+                              <Table.Td className='py-4 px-5 text-center'>
+                                {task.cierraSolicitud ? (
+                                  <Badge color='red' variant='light' size='sm'>
+                                    Sí
+                                  </Badge>
+                                ) : (
+                                  <Text size='sm' c='dimmed'>—</Text>
+                                )}
                               </Table.Td>
                               <Table.Td className='py-4 px-5 text-center'>
                                 <ActionIcon
@@ -2323,7 +2534,7 @@ function RequestBoard() {
                   setCurrentStep(1);
                   setFormErrors({});
                   setTasks([]);
-                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '' });
+                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', cierraSolicitud: false, esFlujoVinculado: false, flujoVinculado: '' });
                 }
               }}
               size='md'
@@ -2560,6 +2771,133 @@ function RequestBoard() {
                 className='bg-blue-600 hover:bg-blue-700 cursor-pointer transition-colors duration-200'
               >
                 Crear Proceso
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
+
+        <Modal
+          opened={replicateModalOpened}
+          onClose={closeReplicateModal}
+          title={
+            <Group gap='sm'>
+              <IconCopy size={20} className='text-blue-600' />
+              <Text fw={600}>Replicar flujo a otras empresas</Text>
+            </Group>
+          }
+          size='lg'
+          radius='lg'
+          centered
+          classNames={{ header: 'border-b border-gray-100 pb-4', body: 'pt-4' }}
+        >
+          <Stack gap='md'>
+            <Text size='sm' c='dimmed'>
+              Copia un flujo existente a una o varias empresas. Usa el modo Ensayo para simular
+              antes de replicar en firme.
+            </Text>
+
+            {replicateError && (
+              <Alert color='red' icon={<IconAlertCircle size={16} />}>
+                {replicateError}
+              </Alert>
+            )}
+
+            <Select
+              label='Empresa origen'
+              placeholder='Seleccione la empresa del flujo'
+              data={companies}
+              value={replicateForm.company}
+              onChange={(value) =>
+                setReplicateForm({
+                  ...replicateForm,
+                  company: value || '',
+                  process: '',
+                })
+              }
+              searchable
+              leftSection={<IconBuilding size={16} />}
+            />
+
+            <Select
+              label='Proceso a replicar'
+              placeholder={
+                replicateForm.company
+                  ? 'Seleccione el proceso'
+                  : 'Seleccione primero la empresa origen'
+              }
+              data={replicateProcessOptions}
+              value={replicateForm.process}
+              onChange={(value) =>
+                setReplicateForm({ ...replicateForm, process: value || '' })
+              }
+              searchable
+              disabled={!replicateForm.company}
+              leftSection={<IconFileDescription size={16} />}
+              required
+            />
+
+            <MultiSelect
+              label='Empresas destino'
+              placeholder='Seleccione una o varias empresas'
+              data={companies}
+              value={replicateForm.empresas}
+              onChange={(value) =>
+                setReplicateForm({ ...replicateForm, empresas: value })
+              }
+              searchable
+              clearable
+              leftSection={<IconBuilding size={16} />}
+              required
+            />
+
+            <Switch
+              label='Ensayo (simulación)'
+              description='Encendido: solo simula, no replica en firme. Apágalo para replicar en firme.'
+              checked={replicateForm.ensayo}
+              onChange={(e) =>
+                setReplicateForm({ ...replicateForm, ensayo: e.currentTarget.checked })
+              }
+            />
+
+            {replicateResult && (
+              <Alert
+                color={replicateResult.ensayo ? 'blue' : 'green'}
+                icon={<IconCheck size={16} />}
+              >
+                {replicateResult.ensayo
+                  ? 'Ensayo ejecutado. No se replicó nada en firme.'
+                  : 'Flujo replicado en firme a las empresas destino.'}
+                {Array.isArray(replicateResult.recordsets) &&
+                  replicateResult.recordsets.some(
+                    (rs) => Array.isArray(rs) && rs.length > 0
+                  ) && (
+                    <ScrollArea.Autosize mah={220} mt='sm'>
+                      <pre className='text-xs whitespace-pre-wrap'>
+                        {JSON.stringify(
+                          replicateResult.recordsets.filter(
+                            (rs) => Array.isArray(rs) && rs.length > 0
+                          ),
+                          null,
+                          2
+                        )}
+                      </pre>
+                    </ScrollArea.Autosize>
+                  )}
+              </Alert>
+            )}
+
+            <Group justify='flex-end' mt='sm'>
+              <Button variant='default' onClick={closeReplicateModal}>
+                Cerrar
+              </Button>
+              <Button
+                onClick={handleReplicate}
+                loading={replicateLoading}
+                disabled={!replicateForm.process || replicateForm.empresas.length === 0}
+                leftSection={<IconCopy size={16} />}
+                className='bg-blue-600 hover:bg-blue-700'
+              >
+                {replicateForm.ensayo ? 'Ejecutar ensayo' : 'Replicar en firme'}
               </Button>
             </Group>
           </Stack>

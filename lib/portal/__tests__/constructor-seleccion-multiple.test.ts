@@ -40,10 +40,17 @@ describe('construirDefinicion: selección múltiple', () => {
     expect(q.correctas).toEqual([0, 2]);
   });
 
-  it('una selección múltiple de una encuesta no lleva correctas, puntos ni "otra respuesta"', () => {
+  it('una selección múltiple de una encuesta no lleva correctas ni puntos; «Otras» sí se conserva (formularios SST, 2026-10-19)', () => {
     const d = construirDefinicion(encuesta([enc({ tipo: 'seleccion_multiple', opciones: ['A', 'B'], permiteOtra: true })])).definicion!;
-    expect(d.preguntas[0]).toMatchObject({ tipo: 'seleccion_multiple', opciones: ['A', 'B'] });
-    expect(JSON.stringify(d)).not.toMatch(/correctas|puntos|permiteOtra/);
+    expect(d.preguntas[0]).toMatchObject({ tipo: 'seleccion_multiple', opciones: ['A', 'B'], permiteOtra: true });
+    expect(JSON.stringify(d)).not.toMatch(/correctas|puntos/);
+    // sin marcarla, no sale
+    expect(JSON.stringify(construirDefinicion(encuesta([enc({ tipo: 'seleccion_multiple', opciones: ['A', 'B'] })])).definicion)).not.toMatch(/permiteOtra/);
+  });
+  it('en una evaluación la múltiple nunca lleva «Otras», aunque el estado lo diga', () => {
+    const m = pregunta({ tipo: 'seleccion_multiple', correcta: null, correctas: [0], permiteOtra: true });
+    const q = construirDefinicion(evaluacion([m])).definicion!.preguntas.find((p) => p.id === m.id)!;
+    expect(q.permiteOtra).toBeUndefined();
   });
 
   it('el reparto automático cuenta también las múltiples', () => {

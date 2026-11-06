@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Modal, Button, Group, Stack, Alert, Text, FileButton, Table, ScrollArea, Progress, Badge } from '@mantine/core';
-import { IconUpload, IconCircleCheck, IconAlertTriangle, IconEye } from '@tabler/icons-react';
+import { IconUpload, IconCircleCheck, IconAlertTriangle, IconEye, IconAdjustments } from '@tabler/icons-react';
 import { sgcSend } from './useSgcFetch';
+import SgcSheetSettingsModal, { bulkFileSheetSource } from './SgcSheetSettingsModal';
+import { describeSheetSettings, type SgcSheetSettings } from '../../lib/sgc/sheetSettings';
 
 /**
  * «Cargar archivos (PDF)» del listado maestro — Sprint 9. Misma pantalla del
@@ -12,6 +14,10 @@ import { sgcSend } from './useSgcFetch';
  * cada archivo y si su nombre coincide con el del listado) y «Cargar». Los
  * archivos se suben de a uno, con su avance, y cada resultado queda en la
  * tabla y en el historial de la carga.
+ *
+ * 2026-10-21 (Calidad OLP): cada Excel que se va a cargar tiene «Ajustar y
+ * previsualizar» (SgcSheetSettingsModal): se ve el PDF que saldría y se
+ * ajusta su presentación antes de cargarlo; sin ajustes, el automático.
  */
 
 interface Props {
@@ -36,11 +42,17 @@ export default function SgcBulkFilesModal({ opened, onClose, idCompany, onLoaded
   const [done, setDone] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 2026-10-21: ajustes de presentación por archivo Excel (nombre → ajustes); sin entrada = automático.
+  const [sheetSettings, setSheetSettings] = useState<Record<string, SgcSheetSettings>>({});
+  const [adjusting, setAdjusting] = useState<File | null>(null);
+  // Se arma al abrir el ajuste de un archivo (con los ajustes que ya tenía); estable mientras la ventana sigue abierta.
+  const adjustingSource = useMemo(() => (adjusting ? bulkFileSheetSource(idCompany, adjusting, sheetSettings[adjusting.name] ?? null) : null), [adjusting, idCompany]);
 
   const pick = (list: File[] | null) => {
     setError(null);
     setRows(null);
     setDone(0);
+    setSheetSettings({});
     setFiles(list ?? []);
   };
 
@@ -71,6 +83,7 @@ export default function SgcBulkFilesModal({ opened, onClose, idCompany, onLoaded
         const form = new FormData();
         form.set('company', String(idCompany));
         form.set('file', f);
+        if (sheetSettings[f.name]) form.set('settings', JSON.stringify(sheetSettings[f.name]));
         const res = await fetch(`/api/sgc/master-list/files/${idBulkUpload}`, { method: 'POST', body: form });
         const body = (await res.json().catch(() => ({}))) as Row & { error?: string };
         out.push(res.ok ? body : { fileName: f.name, code: null, status: 'error', warning: null, error: body.error || `Error ${res.status}` });
@@ -89,6 +102,7 @@ export default function SgcBulkFilesModal({ opened, onClose, idCompany, onLoaded
     setRows(null);
     setError(null);
     setDone(0);
+    setSheetSettings({});
     onLoaded();
     onClose();
   };
@@ -138,6 +152,24 @@ export default function SgcBulkFilesModal({ opened, onClose, idCompany, onLoaded
                         <Text span size='xs'>
                           {r.error ?? r.warning ?? ''}
                         </Text>
+                        {dryRun && r.status === 'cargable' && /\.xlsx$/i.test(r.fileName) && (
+                          <Group gap={6} mt={4} wrap='wrap'>
+                            <Button
+                              size='compact-xs'
+                              variant='light'
+                              leftSection={<IconAdjustments size={14} />}
+                              onClick={() => setAdjusting(files.find((f) => f.name === r.fileName) ?? null)}
+                              data-testid='sgc-archivos-ajustar'
+                            >
+                              Ajustar y previsualizar
+                            </Button>
+                            {sheetSettings[r.fileName] && (
+                              <Badge color='blue' variant='light' size='sm' title={describeSheetSettings(sheetSettings[r.fileName])} data-testid='sgc-archivos-ajustes-propios'>
+                                Ajustes propios
+                              </Badge>
+                            )}
+                          </Group>
+                        )}
                       </Table.Td>
                     </Table.Tr>
                   ))}
@@ -162,7 +194,7 @@ export default function SgcBulkFilesModal({ opened, onClose, idCompany, onLoaded
 
         {files.length > 0 && (
           <Text size='sm'>
-            Archivos: <b>{files.length}</b> seleccionados (PDF, Word o Excel). El nombre de cada archivo debe empezar con el código del documento (por ejemplo «OLP-GCC-02 Almacenamiento.pdf» o «OLP-GCC-02-FO01 Registro.xlsx»). Un Word o un Excel se convierte a PDF para el visor y el original se guarda con su huella.
+            Archivos: <b>{files.length}</b> seleccionados (PDF, Word o Excel). El nombre de cada archivo debe empezar con el código del documento (por ejemplo «OLP-GCC-02 Almacenamiento.pdf» o «OLP-GCC-02-FO01 Registro.xlsx»). Un Word o un Excel se convierte a PDF para el visor y el original se guarda con su huella. Después de «Simular», cada Excel tiene «Ajustar y previsualizar» para ver el PDF antes de cargarlo.
           </Text>
         )}
 
@@ -178,6 +210,21 @@ export default function SgcBulkFilesModal({ opened, onClose, idCompany, onLoaded
           </Button>
         </Group>
       </Stack>
+      <SgcSheetSettingsModal
+        opened={Boolean(adjusting)}
+        name={adjusting?.name ?? ''}
+        source={adjustingSource}
+        onClose={() => setAdjusting(null)}
+        onApply={(s) =>
+          setSheetSettings((prev) => {
+            if (!adjusting) return prev;
+            const next = { ...prev };
+            if (s) next[adjusting.name] = s;
+            else delete next[adjusting.name];
+            return next;
+          })
+        }
+      />
     </Modal>
   );
 }

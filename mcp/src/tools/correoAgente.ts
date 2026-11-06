@@ -50,6 +50,15 @@ export const CORREO_AGENTE_TOOLS = [
   'correo_agregar_nota',
 ] as const;
 
+/**
+ * Bandera CORREO_AGENTE_HABILITADO (apagada por defecto): sin «true» el servidor NO registra las 5
+ * herramientas correo_* (no aparecen en tools/list ni se pueden llamar). En producción se lee del
+ * .env del front (serve.mjs carga solo el prefijo CORREO_). Pendiente de la aprobación de Gobierno IA.
+ */
+export function correoAgenteHabilitado(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.CORREO_AGENTE_HABILITADO ?? '').trim().toLowerCase() === 'true';
+}
+
 export interface CorreoAgenteCtx {
   scope: AuthScope;
   audit: AuditLogger;

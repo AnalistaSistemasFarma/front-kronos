@@ -2,7 +2,9 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { Box, Button, Card, Stack, Text, Title } from '@mantine/core';
 import PortalFormacion from '../../../components/portal/PortalFormacion';
+import { RequestsHeader, RequestsPage } from '../../../components/request-general/list/RequestListUi';
 import {
   RUTA_FORMACION_HUB,
   cursoDesdeParametro,
@@ -41,55 +43,46 @@ function PaginaFormacion() {
   }, [origen, router]);
 
   return (
-    <div className='portal-th portal-th--formacion'>
-      <header className='portal-th__barra'>
-        <div className='portal-th__marca'>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className='portal-th__logo' src='/portal-th/logo-gss.png' alt='Group Shared Services Latinoamérica' />
-          <div>
-            <h1>Formación</h1>
-            <p>Portal de Talento Humano · Group Shared Services Latinoamérica</p>
-          </div>
-        </div>
-      </header>
+    <RequestsPage>
+      <RequestsHeader
+        crumbs={[{ title: 'Portal de Talento Humano', href: volver }, { title: 'Formación' }]}
+        title='Formación'
+        subtitle='Portal de Talento Humano · Group Shared Services Latinoamérica'
+      />
 
-      <main className='portal-th__cuerpo'>
-        <a className='portal-th__volver portal-th__volver-portal' href={volver}>
-          ← Volver al portal
-        </a>
-
+      <Box mt='md' data-testid='formacion-cuerpo'>
         {sinSesion ? (
-          <section className='portal-th__ingreso'>
-            <h2>Ingrese primero al portal</h2>
-            {cursoInicial ? (
-              <p>Lo invitaron a un curso de Formación. Ingrese con su correo (le enviaremos un código) y el curso se abrirá de inmediato.</p>
-            ) : (
-              <p>
-                Para ver los cursos de Formación, ingrese al Portal de Talento Humano y vuelva a abrir Formación desde
-                allí.
-              </p>
-            )}
-            {/* Con una invitación, el ingreso lo trae de vuelta a ESTE curso apenas valide el código. */}
-            <a className='portal-th__certificado-boton' href={cursoInicial ? urlIngresoYVolverAFormacion(cursoInicial) : volver} data-testid='ingresar-invitacion'>
-              {cursoInicial ? 'Ingresar al portal' : 'Ir al portal'}
-            </a>
-          </section>
+          <Card withBorder radius='md' shadow='sm' padding='lg'>
+            <Stack gap='sm' align='flex-start'>
+              <Title order={3}>Ingrese primero al portal</Title>
+              {cursoInicial ? (
+                <Text size='sm'>
+                  Lo invitaron a un curso de Formación. Ingrese con su correo (le enviaremos un código) y el curso se abrirá de
+                  inmediato.
+                </Text>
+              ) : (
+                <Text size='sm'>
+                  Para ver los cursos de Formación, ingrese al Portal de Talento Humano y vuelva a abrir Formación desde allí.
+                </Text>
+              )}
+              {/* Con una invitación, el ingreso lo trae de vuelta a ESTE curso apenas valide el código. */}
+              <Button component='a' href={cursoInicial ? urlIngresoYVolverAFormacion(cursoInicial) : volver} data-testid='ingresar-invitacion'>
+                {cursoInicial ? 'Ingresar al portal' : 'Ir al portal'}
+              </Button>
+            </Stack>
+          </Card>
         ) : (
-          <section className='portal-th__seccion'>
-            <PortalFormacion onSinSesion={() => setSinSesion(true)} cursoInicialId={cursoInicial} />
-          </section>
+          <PortalFormacion onSinSesion={() => setSinSesion(true)} cursoInicialId={cursoInicial} />
         )}
-      </main>
-
-      <footer className='portal-th__pie'>Group Shared Services Latinoamérica · Talento Humano</footer>
-    </div>
+      </Box>
+    </RequestsPage>
   );
 }
 
 export default function PaginaFormacionConParametros() {
   // `useSearchParams` exige un límite de Suspense en el build de Next 15.
   return (
-    <Suspense fallback={<p className='portal-th__estado'>Cargando…</p>}>
+    <Suspense fallback={null}>
       <PaginaFormacion />
     </Suspense>
   );

@@ -78,6 +78,7 @@ model User {
   userTypesAuthorizations UserTypesAuthorization[]
   sessions                Session[]
   auditLogs               UserAuditLog[]
+  passkeys                UserPasskey[]
   // Modulo "Asistentes IA" (chat de agentes) — back-relations requeridas por Prisma.
   chatConversations       ChatConversation[]       @relation("ChatConversationUser")
   chatGroupsCreated       ChatConversation[]       @relation("ChatConversationCreator")
@@ -93,6 +94,9 @@ model User {
   // Reacciones y stickers del chat (2026-10-20).
   chatReactions             ChatMessageReaction[]
   chatStickersCreated       ChatSticker[]        @relation("ChatStickerCreator")
+  /// «Mis stickers» (2026-10-21).
+  chatStickersPersonales    ChatStickerPersonal[] @relation("ChatStickerPersonalOwner")
+  chatStickersRevisados     ChatStickerPersonal[] @relation("ChatStickerPersonalReviewer")
 
   @@map("user")
   @@schema("dbo")
@@ -120,8 +124,11 @@ model Company {
   agentCompanies  AgentCompany[]
   chatGroups      ChatConversation[]
   chatProjects    ChatProject[]
+  // Configuración de «Proyectos» por empresa (2026-10-20): qué agentes trabajan en proyectos.
+  chatProjectAgentConfigs ChatProjectAgentConfig[]
   // Stickers propios de la empresa en el chat (2026-10-20; la pantalla de carga queda para después).
   chatStickers    ChatSticker[]
+  chatStickersPropuestos ChatStickerPersonal[]
   // SGC documental — configuración de activación por empresa (esquema `sgc`).
   sgcCompanyConfig SgcCompanyConfig?
   // Órdenes de Trabajo (bitácora de proceso de planta, 2026-10-13).
@@ -130,6 +137,12 @@ model Company {
   otOperadores     OtOperador[]
   otAreas          OtArea[]
   otResponsables   OtResponsable[]
+  // Vitrina Comercial (sprint V2, 2026-10-22): catálogo comercial por empresa.
+  vitrinaPresentaciones VitrinaPresentacion[]
+  vitrinaCodigosSap     VitrinaCodigoSap[]
+  vitrinaHistorial      VitrinaHistorial[]
+  // Vitrina Comercial (2026-10-23): líneas comerciales propias de la empresa.
+  vitrinaLineas         VitrinaLineaComercial[]
 
   @@map("company")
   @@schema("dbo")
@@ -139,11 +152,55 @@ model CompanyUser {
   id_company_user Int                     @id @default(autoincrement())
   id_company      Int
   id_user         String
+  /// Perfil del usuario en el SAPSEND de ESTA empresa (cada tenant numera los suyos). Compras: U_SEND_UserId.
+  id_user_sapsend       Int?
+  /// Departamento del usuario en el SAPSEND de ESTA empresa. Compras: U_SEND_Dep (texto en SAP).
+  id_department_sapsend Int?
   company         Company                 @relation(fields: [id_company], references: [id_company], onDelete: Cascade)
   user            User                    @relation(fields: [id_user], references: [id], onDelete: Cascade)
   subprocesses    SubprocessUserCompany[]
 
   @@map("company_user")
+  @@schema("dbo")
+}
+
+/// Compras: enlace entre un borrador de solicitud (Drafts en SAP) y la solicitud
+/// del workflow (requests_general) que lo autoriza. Sin FK a requests_general (no
+/// está en este esquema). Estados: pending | publishing | approved | rejected |
+/// quoted (enviada a cotización) | cancelled | publish_error (reintentable) |
+/// reject_error. Solo una fila
+/// 'pending'/'publishing'/'publish_error' por borrador.
+model PurchaseAuthorization {
+  id                 Int      @id @default(autoincrement())
+  id_company         Int
+  doc_entry          Int
+  id_request_general Int      @unique
+  status             String   @db.NVarChar(20)
+  firm_doc_entry     Int?
+  error              String?  @db.NVarChar(500)
+  created_by         String   @db.NVarChar(50)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @default(now()) @updatedAt
+
+  @@index([id_company, doc_entry])
+  @@map("purchase_authorization")
+  @@schema("dbo")
+}
+
+/// Compras: configuración por empresa. id_process_category_auth = plantilla del
+/// workflow (process_category) con la tarea de autorización por departamento.
+model PurchaseCompanyConfig {
+  id_company               Int     @id
+  id_process_category_auth Int
+  /// Correos de Compras (separados por coma) a avisar cuando una solicitud pasa a
+  /// cotización. Equivale a SENDEMAILTOCOMPRAS del .env de cada SAPSEND.
+  compras_emails           String? @db.NVarChar(500)
+  /// Moneda de línea por defecto (SAPSEND: 'COP'; Ryan: vacía) y bodega por
+  /// defecto en la carga masiva (SAPSEND: 'MPR01' solo en Ryan). NULL = no se envía.
+  default_currency         String? @db.NVarChar(3)
+  default_warehouse        String? @db.NVarChar(8)
+
+  @@map("purchase_company_config")
   @@schema("dbo")
 }
 
@@ -659,6 +716,12 @@ model Agent {
   description       String?   @db.NVarChar(500)
   is_active         Boolean   @default(true)
   sort_order        Int       @default(0)
+  /// AGENTE DE DESARROLLO (2026-10-27, regla de Nicolás Rivera: «el tema de
+  /// los proyectos de desarrollo … solo debería ser de los agentes que
+  /// desarrollan»). Solo a estos se les puede dar nivel de código y repos en
+  /// los Proyectos (lib/proyectos/agentes-desarrollo.ts). Hoy: horus y pedro.
+  /// Columna NOT NULL DEFAULT 0: un agente nuevo nace «de negocio».
+  es_desarrollo     Boolean   @default(false)
   /// Subproceso que ES el permiso para hablar con este agente (fuente de
   /// verdad única del permiso; ver la nota de módulo arriba). NULL = agente
   /// del catálogo todavía sin subproceso creado, y por tanto invisible para
@@ -677,6 +740,8 @@ model Agent {
   deliveries       ChatMessageDelivery[]
   statuses         ChatAgentStatus[]
   turnUsage        ChatAgentTurnUsage[]
+  // Medidor del consumo de Anthropic (2026-10-22): último cupo reportado por el puente.
+  quota            ChatAgentQuota?
   // Auditoría de agentes → Inventario (F1): back-relations requeridas por Prisma.
   inventories      AgentInventory[]
   auditFindings    AgentAuditFinding[]
@@ -693,6 +758,10 @@ model Agent {
   projects         ChatProject[]
   // Módulo «Proyectos» (2026-10-18): proyectos donde está designado.
   projectDesignations ChatProjectAgent[]
+  // Configuración de «Proyectos» por empresa (2026-10-20).
+  projectConfigs      ChatProjectAgentConfig[]
+  mesasModeradas    ChatProjectMesa[]       @relation("MesaModerador")
+  mesasParticipante ChatProjectMesaAgente[] @relation("MesaParticipante")
 
   @@unique([code])
   @@map("agent")
@@ -781,6 +850,7 @@ model ChatConversation {
   turnUsage    ChatAgentTurnUsage[]
   /// Solo en 'project': hasta dónde leyó cada miembro (icono de la cabecera).
   projectReads ChatProjectRead[]
+  mesa ChatProjectMesa?
 
   @@index([id_user, archived, last_message_at(sort: Desc)])
   @@index([id_agent])
@@ -895,10 +965,75 @@ model ChatProject {
   subagents     ChatProjectSubagent[]
   teamRequests  ChatProjectTeamRequest[]
   subagentRuns  ChatProjectSubagentRun[]
+  // Permisos de los agentes (2026-10-20): nivel de código, repos y autorizadores de pases.
+  agentPolicy   ChatProjectAgentPolicy?
+  policyRepos   ChatProjectAgentPolicyRepo[]
+  mesas ChatProjectMesa[]
+  matrices ChatProjectMatrix[]
 
   @@index([id_agent, archived])
   @@index([id_company])
   @@map("chat_project")
+  @@schema("dbo")
+}
+
+/// CONFIGURACIÓN de «Proyectos» por empresa (2026-10-20, pedido de Nicolás
+/// Rivera: «los permisos y la configuración de Proyectos se manejan desde la
+/// interfaz, no por detrás»). Una fila por (empresa, agente): si el agente
+/// puede trabajar en proyectos de ESA empresa y con qué perfiles de conectores.
+///
+/// COMPATIBILIDAD HACIA ATRÁS (lib/proyectos/config-agentes-rules.ts):
+///   - empresa SIN filas  → manda CHAT_PROJECTS_AGENTS del .env, como antes;
+///   - empresa CON filas  → manda la tabla (sin fila = no habilitado).
+/// Al guardar el PRIMER cambio de una empresa, lo que decía el .env para los
+/// agentes de esa empresa se copia a la tabla en la misma transacción, para
+/// que nada cambie sin que alguien lo decida.
+///
+/// Tabla NUEVA y aparte: si el código sale antes que el DDL, todo sigue con el
+/// .env (la lectura reconoce «la tabla no existe» y cae al .env).
+model ChatProjectAgentConfig {
+  id_config  Int      @id @default(autoincrement())
+  id_company Int
+  id_agent   Int
+  enabled    Boolean  @default(false)
+  /// Claves del catálogo de perfiles separadas por coma (lib/chat/projects-rules.ts).
+  /// NULL = los del .env para ese agente.
+  profiles   String?  @db.NVarChar(400)
+  /// Motivo del ÚLTIMO cambio (el historial completo está en chat_project_agent_config_log).
+  reason     String?  @db.NVarChar(500)
+  updated_by String?  @db.NVarChar(1000)
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now())
+
+  company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  agent   Agent   @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_company, id_agent], map: "chat_project_agent_config_company_agent")
+  @@index([id_agent], map: "chat_project_agent_config_id_agent_idx")
+  @@map("chat_project_agent_config")
+  @@schema("dbo")
+}
+
+/// REGISTRO de cambios de la configuración de «Proyectos» (2026-10-20). Una
+/// fila por cambio, con el antes, el después y el motivo. Inmutable (trigger
+/// TR_chat_project_agent_config_log_inmutable). Sin llaves foráneas a
+/// propósito: el historial sobrevive a lo que pase con agentes y usuarios.
+model ChatProjectAgentConfigLog {
+  id_log          Int      @id @default(autoincrement())
+  id_company      Int
+  id_agent        Int
+  /// 'cambio' (desde la pantalla) | 'copia_env' (copia inicial del .env).
+  action          String   @db.NVarChar(20)
+  enabled_before  Boolean?
+  enabled_after   Boolean
+  profiles_before String?  @db.NVarChar(400)
+  profiles_after  String?  @db.NVarChar(400)
+  reason          String   @db.NVarChar(500)
+  changed_by      String?  @db.NVarChar(1000)
+  changed_at      DateTime @default(now())
+
+  @@index([id_company, changed_at], map: "chat_project_agent_config_log_company_idx")
+  @@map("chat_project_agent_config_log")
   @@schema("dbo")
 }
 
@@ -955,14 +1090,19 @@ model ChatProjectMember {
 /// adjuntos del chat; aquí solo queda la referencia. El puente lo baja a la
 /// carpeta del hilo con la llave del agente.
 model ChatProjectFile {
-  id_project_file  Int      @id @default(autoincrement())
-  id_project       Int
-  file_name        String   @db.NVarChar(400)
-  content_type     String?  @db.NVarChar(200)
-  size_bytes       Int?
-  onedrive_item_id String?  @db.NVarChar(300)
-  uploaded_by      String?  @db.NVarChar(1000)
-  created_at       DateTime @default(now())
+  id_project_file   Int      @id @default(autoincrement())
+  id_project        Int
+  file_name         String   @db.NVarChar(400)
+  content_type      String?  @db.NVarChar(200)
+  size_bytes        Int?
+  onedrive_item_id  String?  @db.NVarChar(300)
+  uploaded_by       String?  @db.NVarChar(1000)
+  /// Archivo que generó un AGENTE en una conversación del proyecto (2026-10-23):
+  /// el agente de la llave del puente y la conversación (uploaded_by queda NULL).
+  /// Sin FK a propósito: la conversación ya cae en cascada con el proyecto.
+  uploaded_by_agent Int?
+  id_conversation   Int?
+  created_at        DateTime @default(now())
 
   project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
 
@@ -988,6 +1128,166 @@ model ChatProjectAgent {
   @@unique([id_project, id_agent], map: "chat_project_agent_project_agent")
   @@index([id_agent])
   @@map("chat_project_agent")
+  @@schema("dbo")
+}
+
+/// MATRIZ de un proyecto (2026-11-05, docs/proyectos-matrices-dashboards.md): un Excel o
+/// CSV subido al proyecto, leído en el servidor y guardado como tabla para la grilla y los
+/// agentes. Permisos: los del proyecto (decisión de Nicolás Rivera).
+model ChatProjectMatrix {
+  id_matrix         Int      @id @default(autoincrement())
+  id_project        Int
+  name              String   @db.NVarChar(150)
+  description       String?  @db.NVarChar(1000)
+  id_version_actual Int?
+  archived          Boolean  @default(false)
+  created_by        String?  @db.NVarChar(1000)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @default(now())
+
+  project   ChatProject               @relation(fields: [id_project], references: [id_project], onDelete: NoAction, onUpdate: NoAction, map: "chat_project_matrix_project_fkey")
+  versiones ChatProjectMatrixVersion[]
+
+  @@index([id_project, archived], map: "chat_project_matrix_project_idx")
+  @@map("chat_project_matrix")
+  @@schema("dbo")
+}
+
+/// Cada archivo subido de una matriz (historial de versiones).
+model ChatProjectMatrixVersion {
+  id_version  Int      @id @default(autoincrement())
+  id_matrix   Int
+  version_no  Int
+  file_name   String   @db.NVarChar(400)
+  size_bytes  Int?
+  uploaded_by String?  @db.NVarChar(1000)
+  /// Si la subió un AGENTE (NULL = persona).
+  id_agent    Int?
+  /// Qué cambió frente a la versión anterior, en palabras.
+  summary     String?  @db.NVarChar(1000)
+  created_at  DateTime @default(now())
+
+  matrix ChatProjectMatrix        @relation(fields: [id_matrix], references: [id_matrix], onDelete: Cascade, map: "chat_project_matrix_version_matrix_fkey")
+  hojas  ChatProjectMatrixSheet[]
+
+  @@unique([id_matrix, version_no], map: "chat_project_matrix_version_no_key")
+  @@map("chat_project_matrix_version")
+  @@schema("dbo")
+}
+
+/// Hoja de una versión: columnas (JSON con nombre y tipo) y número de filas.
+model ChatProjectMatrixSheet {
+  id_sheet     Int    @id @default(autoincrement())
+  id_version   Int
+  sheet_index  Int
+  name         String @db.NVarChar(150)
+  /// Fila del Excel (1 = primera) donde están los encabezados.
+  header_row   Int
+  columns_json String @db.NVarChar(Max)
+  row_count    Int
+
+  version ChatProjectMatrixVersion @relation(fields: [id_version], references: [id_version], onDelete: Cascade, map: "chat_project_matrix_sheet_version_fkey")
+  bloques ChatProjectMatrixChunk[]
+
+  @@unique([id_version, sheet_index], map: "chat_project_matrix_sheet_version_key")
+  @@map("chat_project_matrix_sheet")
+  @@schema("dbo")
+}
+
+/// Filas de una hoja en bloques JSON (máx. 1000 filas por bloque).
+model ChatProjectMatrixChunk {
+  id_sheet  Int
+  chunk_no  Int
+  rows_json String @db.NVarChar(Max)
+
+  hoja ChatProjectMatrixSheet @relation(fields: [id_sheet], references: [id_sheet], onDelete: Cascade, map: "chat_project_matrix_chunk_sheet_fkey")
+
+  @@id([id_sheet, chunk_no], map: "chat_project_matrix_chunk_pkey")
+  @@map("chat_project_matrix_chunk")
+  @@schema("dbo")
+}
+
+/// MESA DE DISCUSIÓN de un proyecto (2026-11-04, docs/proyectos-mesas-discusion.md):
+/// una conversación de proyecto donde varios agentes discuten un tema POR TURNOS.
+/// Solo el motor (lib/proyectos/mesas.ts) reparte los turnos; el principal de la
+/// conversación es el moderador.
+model ChatProjectMesa {
+  id_mesa            Int       @id @default(autoincrement())
+  id_project         Int
+  id_conversation    Int       @unique(map: "chat_project_mesa_conversation_key")
+  tema               String    @db.NVarChar(2000)
+  /// 'activa' | 'pausada' | 'cerrada' (CHECK en la base).
+  estado             String    @default("activa") @db.NVarChar(20)
+  /// 'manual' | 'sin_aporte' (CHECK en la base). NULL si no está pausada.
+  motivo_pausa       String?   @db.NVarChar(20)
+  id_agent_moderador Int
+  ritmo_min          Int
+  tope_dia           Int
+  sintesis_cada      Int
+  /// Minutos desde la medianoche, hora de Colombia.
+  horario_desde      Int
+  horario_hasta      Int
+  solo_habiles       Boolean
+  ronda              Int       @default(0)
+  /// Índice del participante de turno; = nº de participantes en la síntesis; -1 entre rondas.
+  turno_idx          Int       @default(-1)
+  turno_desde        DateTime?
+  id_message_turno   Int?
+  proximo_turno_at   DateTime?
+  turnos_hoy         Int       @default(0)
+  /// Día (AAAA-MM-DD, COT) del contador `turnos_hoy`.
+  turnos_dia         String?   @db.NVarChar(10)
+  aportes_ronda      Int       @default(0)
+  created_by         String    @db.NVarChar(1000)
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @default(now())
+
+  project      ChatProject             @relation(fields: [id_project], references: [id_project], onDelete: NoAction, onUpdate: NoAction, map: "chat_project_mesa_project_fkey")
+  conversation ChatConversation        @relation(fields: [id_conversation], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "chat_project_mesa_conversation_fkey")
+  moderador    Agent                   @relation("MesaModerador", fields: [id_agent_moderador], references: [id_agent], onDelete: NoAction, onUpdate: NoAction, map: "chat_project_mesa_moderador_fkey")
+  agentes      ChatProjectMesaAgente[]
+  eventos      ChatProjectMesaEvento[]
+
+  @@index([estado, proximo_turno_at], map: "chat_project_mesa_motor_idx")
+  @@index([id_project], map: "chat_project_mesa_project_idx")
+  @@map("chat_project_mesa")
+  @@schema("dbo")
+}
+
+/// Participante de una mesa, con su rol y su orden de turno.
+model ChatProjectMesaAgente {
+  id_mesa_agente Int    @id @default(autoincrement())
+  id_mesa        Int
+  id_agent       Int
+  rol            String @db.NVarChar(80)
+  orden          Int
+
+  mesa  ChatProjectMesa @relation(fields: [id_mesa], references: [id_mesa], onDelete: Cascade, map: "chat_project_mesa_agente_mesa_fkey")
+  agent Agent           @relation("MesaParticipante", fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction, map: "chat_project_mesa_agente_agent_fkey")
+
+  @@unique([id_mesa, id_agent], map: "chat_project_mesa_agente_mesa_agent_key")
+  @@map("chat_project_mesa_agente")
+  @@schema("dbo")
+}
+
+/// Registro INMUTABLE (trigger) de lo que pasa en una mesa: lo ve el operador en
+/// el panel y lo lee la auditoría.
+model ChatProjectMesaEvento {
+  id_evento  Int      @id @default(autoincrement())
+  id_mesa    Int
+  /// creada | turno | respuesta | vencido | tope | pausada | reanudada | cerrada | ronda_ahora | reglas
+  tipo       String   @db.NVarChar(30)
+  ronda      Int?
+  id_agent   Int?
+  id_user    String?  @db.NVarChar(1000)
+  id_message Int?
+  detalle    String?  @db.NVarChar(1000)
+  created_at DateTime @default(now())
+
+  mesa ChatProjectMesa @relation(fields: [id_mesa], references: [id_mesa], onDelete: NoAction, onUpdate: NoAction, map: "chat_project_mesa_evento_mesa_fkey")
+
+  @@index([id_mesa, id_evento], map: "chat_project_mesa_evento_mesa_idx")
+  @@map("chat_project_mesa_evento")
   @@schema("dbo")
 }
 
@@ -1294,6 +1594,131 @@ model ChatProjectTeamEvent {
   @@schema("dbo")
 }
 
+/// PERMISOS DE LOS AGENTES de un proyecto (2026-10-20, pedido de Nicolás
+/// Rivera: «cuando creemos el proyecto podamos elegir qué permisos tienen»).
+/// UNA fila por proyecto; la comparten todos sus agentes. Reglas en
+/// lib/proyectos/permisos-agentes-rules.ts.
+///
+/// SIN FILA = nivel «ninguno» (o, en el puente, lo que diga su archivo manual
+/// repos-por-proyecto.json mientras exista). Tabla NUEVA: si el código sale
+/// antes que el DDL, todos los proyectos siguen en «ninguno».
+model ChatProjectAgentPolicy {
+  id_policy        Int      @id @default(autoincrement())
+  id_project       Int      @unique(map: "chat_project_agent_policy_project")
+  /// 'ninguno' | 'lectura' | 'desarrollo' | 'desarrollo_pases' (CHECK en la base).
+  code_level       String   @default("ninguno") @db.NVarChar(20)
+  /// Correos de quienes autorizan pases, separados por coma. Solo en 'desarrollo_pases'.
+  deploy_approvers String?  @db.NVarChar(2000)
+  /// Conectores adicionales (fase 2, diseñado): JSON. Hoy siempre NULL.
+  connectors       String?  @db.NVarChar(2000)
+  /// Motivo del ÚLTIMO cambio (el historial está en chat_project_agent_policy_log).
+  reason           String?  @db.NVarChar(500)
+  updated_by       String?  @db.NVarChar(1000)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @default(now())
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("chat_project_agent_policy")
+  @@schema("dbo")
+}
+
+/// CATÁLOGO de repositorios que se pueden vincular a un proyecto (2026-10-20).
+/// Lo administra SOLO la administración de SynerLink. No se borra: se desactiva
+/// (un repo desactivado deja de ofrecerse y el API del puente lo omite).
+/// Dónde está el CLON en cada Mac no vive aquí: es del puente (repos-por-proyecto.json).
+model ChatProjectRepoCatalog {
+  id_repo           Int      @id @default(autoincrement())
+  slug              String   @unique(map: "chat_project_repo_catalog_slug") @db.NVarChar(40)
+  name              String   @db.NVarChar(120)
+  /// «dueño/repositorio» en GitHub.
+  github            String   @db.NVarChar(200)
+  branch_testing    String   @db.NVarChar(100)
+  branch_production String   @db.NVarChar(100)
+  description       String?  @db.NVarChar(500)
+  active            Boolean  @default(true)
+  created_by        String?  @db.NVarChar(1000)
+  updated_by        String?  @db.NVarChar(1000)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @default(now())
+
+  projects ChatProjectAgentPolicyRepo[]
+
+  @@map("chat_project_repo_catalog")
+  @@schema("dbo")
+}
+
+/// Repositorios vinculados a la política de un proyecto (2026-10-20).
+model ChatProjectAgentPolicyRepo {
+  id_policy_repo Int      @id @default(autoincrement())
+  id_project     Int
+  id_repo        Int
+  added_by       String?  @db.NVarChar(1000)
+  added_at       DateTime @default(now())
+
+  project ChatProject            @relation(fields: [id_project], references: [id_project], onDelete: NoAction, onUpdate: NoAction)
+  repo    ChatProjectRepoCatalog @relation(fields: [id_repo], references: [id_repo], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_project, id_repo], map: "chat_project_agent_policy_repo_project_repo")
+  @@index([id_repo], map: "chat_project_agent_policy_repo_id_repo_idx")
+  @@map("chat_project_agent_policy_repo")
+  @@schema("dbo")
+}
+
+/// REGISTRO de cambios de los permisos de los agentes y del catálogo de repos
+/// (2026-10-20): quién, cuándo, antes, después y motivo. Inmutable (trigger
+/// TR_chat_project_agent_policy_log_inmutable). Sin llaves foráneas a propósito:
+/// el historial sobrevive a lo que pase con proyectos, repos y usuarios.
+model ChatProjectAgentPolicyLog {
+  id_log           Int      @id @default(autoincrement())
+  /// 'proyecto' | 'catalogo'
+  scope            String   @db.NVarChar(20)
+  id_project       Int?
+  id_repo          Int?
+  /// 'crear' | 'cambiar' | 'activar' | 'desactivar'
+  action           String   @db.NVarChar(20)
+  /// JSON con los valores ANTES (NULL al crear).
+  before_value     String?  @db.NVarChar(Max)
+  /// JSON con los valores DESPUÉS.
+  after_value      String   @db.NVarChar(Max)
+  reason           String   @db.NVarChar(500)
+  changed_by       String?  @db.NVarChar(1000)
+  changed_by_email String?  @db.NVarChar(320)
+  changed_at       DateTime @default(now())
+
+  @@index([id_project, changed_at], map: "chat_project_agent_policy_log_project_idx")
+  @@map("chat_project_agent_policy_log")
+  @@schema("dbo")
+}
+
+/// REGISTRO de cambios de las CONVERSACIONES de un proyecto (2026-10-29, pedido
+/// de Nicolás Rivera: renombrar y eliminar los hilos). Una fila por cambio:
+///   'renombrar' — title_before → title_after;
+///   'eliminar'  — borrado LÓGICO: la conversación queda con archived = 1 (deja
+///                 de verse y los agentes dejan de atenderla). Mensajes y
+///                 adjuntos NO se borran. Quién y cuándo quedan AQUÍ.
+/// Inmutable (trigger TR_chat_project_conversation_log_inmutable). Sin llaves
+/// foráneas a propósito, como chat_project_agent_config_log: el historial
+/// sobrevive a lo que pase con conversaciones y usuarios.
+/// Tabla NUEVA y aparte: si el código sale antes que el DDL, solo fallan
+/// renombrar y eliminar (sin registro no se cambia nada); el chat sigue igual.
+model ChatProjectConversationLog {
+  id_log          Int      @id @default(autoincrement())
+  id_project      Int
+  id_conversation Int
+  /// 'renombrar' | 'eliminar' (CHECK en la base).
+  action          String   @db.NVarChar(20)
+  title_before    String?  @db.NVarChar(300)
+  title_after     String?  @db.NVarChar(300)
+  changed_by      String   @db.NVarChar(1000)
+  changed_at      DateTime @default(now())
+
+  @@index([id_conversation, changed_at], map: "chat_project_conversation_log_conv_idx")
+  @@index([id_project, changed_at], map: "chat_project_conversation_log_project_idx")
+  @@map("chat_project_conversation_log")
+  @@schema("dbo")
+}
+
 /// Integrante de un grupo: una PERSONA o un AGENTE, nunca los dos.
 /// Es la ÚNICA fuente de verdad de quién está en un grupo — un CHECK en la
 /// base garantiza que exactamente una de las dos columnas venga con valor,
@@ -1418,10 +1843,22 @@ model PortalCourse {
   /// Carpeta del curso dentro de FORMACION en SharePoint (`<slug>-<id>`).
   /// Se fija en la primera subida y no cambia si el curso se renombra.
   sp_folder_name String? @db.NVarChar(200)
+  /// Curso ELIMINADO por un formador (borrado LÓGICO; Cristian, 2026-10-22):
+  /// deja de aparecer en todas las listas, pero sus inscripciones, intentos y
+  /// certificados se conservan (los certificados siguen verificándose). Sus
+  /// archivos de SharePoint NO se tocan: la carpeta FORMACION es compartida
+  /// entre pruebas y producción. Quién y cuándo queda aquí como auditoría.
+  eliminado_at   DateTime?
+  eliminado_por  String? @db.NVarChar(255)
+  /// Empresa dueña del curso (módulo Formación, 2026-10-26). NULL = GSS: lo
+  /// administra quien tenga el permiso de Formación en GSS.
+  id_company_owner Int?
 
   materials    PortalCourseMaterial[]
   enrollments  PortalCourseEnrollment[]
   certificates PortalCertificate[]
+  alcances     FormacionCursoAlcance[]
+  divulgaciones FormacionDivulgacion[]
 
   @@index([active, id(sort: Desc)])
   @@map("portal_course")
@@ -1476,6 +1913,8 @@ model PortalCourseMaterial {
   intentos   PortalFormularioIntento[]
 
   @@index([course_id, orden])
+  preguntas FormacionPregunta[]
+
   @@map("portal_course_material")
   @@schema("dbo")
 }
@@ -1901,9 +2340,42 @@ model ChatSticker {
   company  Company?           @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   creator  User               @relation("ChatStickerCreator", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   messages ChatMessageMedia[]
+  /// Si es un sticker PERSONAL («Mis stickers», 2026-10-21). Sin esta fila es de empresa (o de todas).
+  personal   ChatStickerPersonal? @relation("ChatStickerPersonalSticker")
+  /// Propuestas personales que se aprobaron como ESTE sticker de empresa.
+  aprobadoDe ChatStickerPersonal[] @relation("ChatStickerPersonalAprobado")
 
   @@index([id_company, active, sort_order], map: "chat_sticker_company_active_idx")
   @@map("chat_sticker")
+  @@schema("dbo")
+}
+
+/// «MIS STICKERS» del chat (2026-10-21): marca un sticker de chat_sticker como de UNA persona.
+/// La imagen sigue en chat_sticker (mismo CHECK de tipo y tamaño). Ver lib/chat/stickers-personales.ts.
+model ChatStickerPersonal {
+  id_sticker         Int       @id
+  id_user            String    @db.NVarChar(1000)
+  /// Lo quitó de «Mis stickers». Los mensajes ya enviados lo siguen mostrando.
+  removed_at         DateTime?
+  /// Empresa a la que se propuso. NULL = sin propuesta.
+  proposed_company   Int?
+  /// 'propuesto' | 'aprobado' | 'rechazado' (CHECK en la base).
+  proposal_state     String?   @db.NVarChar(20)
+  proposed_at        DateTime?
+  reviewed_by        String?   @db.NVarChar(1000)
+  reviewed_at        DateTime?
+  /// Copia aprobada como sticker de la empresa.
+  id_sticker_company Int?
+
+  sticker        ChatSticker  @relation("ChatStickerPersonalSticker", fields: [id_sticker], references: [id_sticker], onDelete: NoAction, onUpdate: NoAction)
+  owner          User         @relation("ChatStickerPersonalOwner", fields: [id_user], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  company        Company?     @relation(fields: [proposed_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  reviewer       User?        @relation("ChatStickerPersonalReviewer", fields: [reviewed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  stickerEmpresa ChatSticker? @relation("ChatStickerPersonalAprobado", fields: [id_sticker_company], references: [id_sticker], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_user, removed_at], map: "chat_sticker_personal_user_idx")
+  @@index([proposal_state, proposed_company], map: "chat_sticker_personal_propuesta_idx")
+  @@map("chat_sticker_personal")
   @@schema("dbo")
 }
 
@@ -2002,6 +2474,31 @@ model ChatAgentStatus {
 
   @@id([id_conversation, id_agent])
   @@map("chat_agent_status")
+  @@schema("dbo")
+}
+
+/// CUPO DE ANTHROPIC DEL TOKEN DEL AGENTE (2026-10-22) — cupo semanal y
+/// ventana de 5 h, tal como los reporta el puente de hilos (stream del turno o
+/// consulta mínima). UNA fila por agente que se sobrescribe: es el último
+/// estado conocido, no un histórico. Alimenta el medidor del encabezado de
+/// cada proyecto (components/proyectos/MedidorConsumo.tsx).
+model ChatAgentQuota {
+  id_agent       Int       @id
+  /// Porcentaje usado (0–100; puede pasar de 100 con excedente). NULL = no vino.
+  utilization_7d Float?
+  reset_7d       DateTime?
+  utilization_5h Float?
+  reset_5h       DateTime?
+  /// overageStatus de Anthropic ('allowed', 'rejected', …). Solo informativo.
+  overage        String?   @db.NVarChar(40)
+  /// Cuándo se midió (reloj del puente) y de dónde salió: 'turno' | 'sonda'.
+  measured_at    DateTime
+  source         String    @db.NVarChar(20)
+  updated_at     DateTime  @updatedAt
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("chat_agent_quota")
   @@schema("dbo")
 }
 
@@ -4721,6 +5218,32 @@ model EmailAgentAction {
   @@schema("dbo")
 }
 
+/// «Crear ticket» desde un hilo del Correo (2026-10-21, pedido de Nicolás Rivera: «solo para
+/// los de TI»). Relación hilo ↔ ticket de mesa de ayuda ([case].id_case), aparte del vínculo
+/// hilo ↔ solicitud (email_thread_link): un hilo puede tener su solicitud Y su ticket. Un solo
+/// ticket por hilo y persona (se reserva antes de crear). Migración:
+/// prisma/migrations/20261021200000_correo_ticket (a mano en prod).
+model EmailThreadCase {
+  id                  Int      @id @default(autoincrement())
+  id_user             String   @db.NVarChar(50)
+  mailbox             String   @db.NVarChar(320)
+  conversation_id     String   @db.NVarChar(512)
+  // Correo de origen del ticket (el primero del hilo).
+  internet_message_id String?  @db.NVarChar(512)
+  // NULL mientras el ticket se está creando (estado CREANDO).
+  id_case             Int?
+  // CREANDO | ACTIVO
+  estado              String   @default("ACTIVO") @db.NVarChar(10)
+  asunto              String?  @db.NVarChar(255)
+  created_by          String   @db.NVarChar(50)
+  created_at          DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  @@unique([id_user, conversation_id], map: "UQ_email_thread_case_hilo")
+  @@index([id_case], map: "IX_email_thread_case_case")
+  @@map("email_thread_case")
+  @@schema("dbo")
+}
+
 // ---------------------------------------------------------------------------
 // Auditoría de INICIOS DE SESIÓN (2026-10-16, pedido de Nicolás Rivera: «ver los
 // logins que van haciendo los usuarios, de qué IP y país, por auditoría de
@@ -4729,6 +5252,34 @@ model EmailAgentAction {
 // sin frenar el login. NUNCA guarda contraseñas, PIN ni tokens.
 // Migración: prisma/migrations/20261016200000_user_login_audit (a mano en prod).
 // ---------------------------------------------------------------------------
+/// Acceso con biométrico (passkeys / WebAuthn), 2026-10-31. Cada fila es la llave PÚBLICA de un
+/// dispositivo (iPhone con Face ID, Android con huella, Windows Hello…). La cara o la huella NUNCA
+/// salen del dispositivo: aquí no hay datos biométricos. Ver lib/auth/passkeys.
+model UserPasskey {
+  id_passkey    Int       @id @default(autoincrement())
+  id_user       String
+  /// Id de la credencial (base64url), único en todo SynerLink.
+  credential_id String    @unique(map: "UQ_user_passkey_credential") @db.NVarChar(512)
+  public_key    Bytes
+  counter       BigInt    @default(0)
+  /// Separados por coma: internal, hybrid, usb…
+  transports    String?   @db.NVarChar(200)
+  /// singleDevice | multiDevice (sincronizada por iCloud / Google)
+  device_type   String    @db.NVarChar(20)
+  backed_up     Boolean   @default(false)
+  aaguid        String?   @db.NVarChar(36)
+  /// Nombre que ve la persona en su perfil (p. ej. «iPhone · Safari»).
+  name          String    @db.NVarChar(100)
+  created_at    DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  created_ip    String?   @db.NVarChar(64)
+  last_used_at  DateTime? @db.DateTime2
+  user          User      @relation(fields: [id_user], references: [id], onDelete: Cascade, map: "FK_user_passkey_user")
+
+  @@index([id_user], map: "IX_user_passkey_usuario")
+  @@map("user_passkey")
+  @@schema("dbo")
+}
+
 model UserLoginAudit {
   id             Int      @id @default(autoincrement())
   attempted_at   DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
@@ -4759,5 +5310,386 @@ model UserLoginAudit {
   @@index([identifier, attempted_at], map: "IX_user_login_audit_identificador")
   @@index([id_user, attempted_at], map: "IX_user_login_audit_usuario")
   @@map("user_login_audit")
+  @@schema("dbo")
+}
+
+// =============================================================================
+// VITRINA COMERCIAL (sprint V2, 2026-10-22) — migración 20261022200000_vitrina_comercial.
+// Catálogo comercial por empresa (Farmalógica = 1, Ryan = 2). Los códigos se leen
+// del SAP de CADA empresa en SOLO LECTURA (nada se escribe en SAP). Nada se muestra
+// sin activación manual (activado_vitrina = 0 por defecto). Las restricciones CHECK
+// (estado, visibilidad, terceros → INTERNA, canal, registro, alcance, tipos) viven
+// en la migración y se repiten en lib/vitrina/rules.ts.
+// =============================================================================
+
+/// Presentación comercial: la tarjeta que verá el comercial (V3). Si es para terceros, visibilidad fija INTERNA.
+model VitrinaPresentacion {
+  id_presentacion    Int       @id @default(autoincrement())
+  id_company         Int
+  molecula           String    @db.NVarChar(200)
+  concentracion      String?   @db.NVarChar(100)
+  forma_farmaceutica String?   @db.NVarChar(60)
+  unidades_caja      Int?
+  nombre_comercial   String?   @db.NVarChar(200)
+  tall_man           String?   @db.NVarChar(200)
+  familia            String?   @db.NVarChar(100)
+  // PENDIENTE | VALIDADA | RETIRADA
+  estado             String    @default("PENDIENTE") @db.NVarChar(20)
+  // INTERNA | CLIENTE | OFERTABLE
+  visibilidad        String    @default("INTERNA") @db.NVarChar(20)
+  es_para_terceros   Boolean   @default(false)
+  destacada          Boolean   @default(false)
+  creado_por         String    @db.NVarChar(50)
+  creado_en          DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  actualizado_por    String?   @db.NVarChar(50)
+  actualizado_en     DateTime? @db.DateTime2
+  // Línea comercial de SU empresa (0 o 1). Migración 20261023120000_vitrina_lineas_grupos (columna nueva NULL).
+  id_linea           Int?
+
+  company        Company                    @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  linea          VitrinaLineaComercial?     @relation(fields: [id_linea], references: [id_linea], onDelete: NoAction, onUpdate: NoAction)
+  codigos        VitrinaCodigoSap[]
+  areas          VitrinaPresentacionArea[]
+  grupos         VitrinaPresentacionGrupo[]
+  exclusividades VitrinaExclusividad[]
+  imagenes       VitrinaImagen[]
+  modelos3d      VitrinaModelo3d[]
+  documentos     VitrinaDocumento[]
+
+  @@index([id_company, estado, visibilidad], map: "IX_vitrina_presentacion_company")
+  @@index([id_linea], map: "IX_vitrina_presentacion_linea")
+  @@map("vitrina_presentacion")
+  @@schema("dbo")
+}
+
+/// Código SAP leído del SAP de la empresa. id_presentacion NULL = está en la bandeja.
+model VitrinaCodigoSap {
+  id_codigo_sap      Int       @id @default(autoincrement())
+  id_company         Int
+  item_code          String    @db.NVarChar(50)
+  item_name          String    @db.NVarChar(200)
+  items_group_code   Int?
+  // Nombre del grupo de artículos en SAP (ItemGroups.GroupName, solo lectura), p. ej. «PT carbapenemas».
+  items_group_name   String?   @db.NVarChar(100)
+  id_presentacion    Int?
+  pais               String?   @db.NVarChar(60)
+  // INSTITUCIONAL | COMERCIAL | SIN_DATO
+  canal              String    @default("SIN_DATO") @db.NVarChar(20)
+  // Visibilidad del canal (INTERNA | CLIENTE | OFERTABLE): los canales empiezan en INTERNA.
+  visibilidad_canal  String    @default("INTERNA") @db.NVarChar(20)
+  cliente_marca      String?   @db.NVarChar(100)
+  activo_en_sap      Boolean   @default(true)
+  activado_vitrina   Boolean   @default(false)
+  registro_sanitario String?   @db.NVarChar(60)
+  // NULL si no hay registro o SAP trae 9999-01-01 (sin dato).
+  registro_vence_en  DateTime? @db.Date
+  // VIGENTE | POR_VENCER | VENCIDO | SIN_REGISTRO | SIN_FECHA
+  registro_estado    String    @default("SIN_REGISTRO") @db.NVarChar(20)
+  ultima_lectura     DateTime? @db.DateTime2
+  // Sugerencias de la carga inicial (semilla CSV): orientan al administrador, no activan nada.
+  sug_presentacion   String?   @db.NVarChar(200)
+  sug_familia        String?   @db.NVarChar(100)
+  sug_tipo           String?   @db.NVarChar(100)
+  sug_es_terceros    Boolean?
+  sug_unidades       Int?
+  sug_observacion    String?   @db.NVarChar(300)
+  creado_en          DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  company      Company              @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  presentacion VitrinaPresentacion? @relation(fields: [id_presentacion], references: [id_presentacion], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_company, item_code], map: "UQ_vitrina_codigo_sap")
+  @@index([id_presentacion], map: "IX_vitrina_codigo_sap_presentacion")
+  @@map("vitrina_codigo_sap")
+  @@schema("dbo")
+}
+
+/// Áreas asistenciales (lista cerrada que validan los administradores). No se borran: se desactivan.
+model VitrinaArea {
+  id_area Int     @id @default(autoincrement())
+  nombre  String  @db.NVarChar(80)
+  activa  Boolean @default(true)
+  orden   Int     @default(0)
+
+  presentaciones VitrinaPresentacionArea[]
+
+  @@unique([nombre], map: "UQ_vitrina_area_nombre")
+  @@map("vitrina_area")
+  @@schema("dbo")
+}
+
+model VitrinaPresentacionArea {
+  id_presentacion Int
+  id_area         Int
+
+  presentacion VitrinaPresentacion @relation(fields: [id_presentacion], references: [id_presentacion], onDelete: NoAction, onUpdate: NoAction)
+  area         VitrinaArea         @relation(fields: [id_area], references: [id_area], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([id_presentacion, id_area])
+  @@map("vitrina_presentacion_area")
+  @@schema("dbo")
+}
+
+/// Línea comercial POR EMPRESA (p. ej. Farmalógica: «Antibióticos inyectables»). No se borran: se desactivan.
+model VitrinaLineaComercial {
+  id_linea   Int      @id @default(autoincrement())
+  id_company Int
+  nombre     String   @db.NVarChar(100)
+  orden      Int      @default(0)
+  activa     Boolean  @default(true)
+  creado_en  DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  company        Company               @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+  presentaciones VitrinaPresentacion[]
+
+  @@unique([id_company, nombre], map: "UQ_vitrina_linea_comercial_nombre")
+  @@map("vitrina_linea_comercial")
+  @@schema("dbo")
+}
+
+/// Grupo terapéutico: catálogo COMÚN a las empresas (Antibióticos, Analgésicos…). No se borran: se desactivan.
+model VitrinaGrupoTerapeutico {
+  id_grupo  Int      @id @default(autoincrement())
+  nombre    String   @db.NVarChar(100)
+  orden     Int      @default(0)
+  activo    Boolean  @default(true)
+  creado_en DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  presentaciones VitrinaPresentacionGrupo[]
+
+  @@unique([nombre], map: "UQ_vitrina_grupo_terapeutico_nombre")
+  @@map("vitrina_grupo_terapeutico")
+  @@schema("dbo")
+}
+
+/// Presentación × grupo terapéutico (una presentación puede tener varios, como las áreas).
+model VitrinaPresentacionGrupo {
+  id_presentacion Int
+  id_grupo        Int
+
+  presentacion VitrinaPresentacion     @relation(fields: [id_presentacion], references: [id_presentacion], onDelete: NoAction, onUpdate: NoAction)
+  grupo        VitrinaGrupoTerapeutico @relation(fields: [id_grupo], references: [id_grupo], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([id_presentacion, id_grupo])
+  @@index([id_grupo], map: "IX_vitrina_presentacion_grupo_grupo")
+  @@map("vitrina_presentacion_grupo")
+  @@schema("dbo")
+}
+
+/// Exclusividad o restricción por presentación (p. ej. Vitamina C x10 exclusiva de OLP).
+model VitrinaExclusividad {
+  id_exclusividad      Int       @id @default(autoincrement())
+  id_presentacion      Int
+  cliente_beneficiario String    @db.NVarChar(150)
+  pais                 String?   @db.NVarChar(60)
+  canal                String?   @db.NVarChar(20)
+  // EXHIBIR | OFERTAR
+  alcance              String    @db.NVarChar(20)
+  vigente_desde        DateTime? @db.Date
+  vigente_hasta        DateTime? @db.Date
+  observacion          String?   @db.NVarChar(500)
+  creado_por           String    @db.NVarChar(50)
+  creado_en            DateTime  @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+  actualizado_por      String?   @db.NVarChar(50)
+  actualizado_en       DateTime? @db.DateTime2
+
+  presentacion VitrinaPresentacion @relation(fields: [id_presentacion], references: [id_presentacion], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_presentacion], map: "IX_vitrina_exclusividad_presentacion")
+  @@map("vitrina_exclusividad")
+  @@schema("dbo")
+}
+
+/// Imágenes de empaque (V3: en el almacenamiento de adjuntos de SynerLink). En el V2 solo existe la tabla.
+model VitrinaImagen {
+  id_imagen       Int      @id @default(autoincrement())
+  id_presentacion Int
+  // VIAL | ETIQUETA | PLEGADIZA
+  tipo            String   @db.NVarChar(20)
+  ruta_archivo    String   @db.NVarChar(500)
+  version         String?  @db.NVarChar(20)
+  vigente         Boolean  @default(true)
+  cargado_por     String   @db.NVarChar(50)
+  cargado_en      DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  presentacion VitrinaPresentacion @relation(fields: [id_presentacion], references: [id_presentacion], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("vitrina_imagen")
+  @@schema("dbo")
+}
+
+/// Modelo 3D (GLB, glTF 2.0 binario) de una presentación (2026-11-04). El archivo vive en el
+/// almacenamiento de adjuntos (OneDrive, carpeta VITRINA) igual que las imágenes; ruta_archivo
+/// guarda su id. Una carga nueva deja la anterior como no vigente. Dimensiones opcionales en cm.
+model VitrinaModelo3d {
+  id_modelo       Int      @id @default(autoincrement())
+  id_presentacion Int
+  ruta_archivo    String   @db.NVarChar(500)
+  nombre_original String   @db.NVarChar(255)
+  tamano_bytes    Int
+  version         Int
+  vigente         Boolean  @default(true)
+  ancho_cm        Decimal? @db.Decimal(7, 2)
+  alto_cm         Decimal? @db.Decimal(7, 2)
+  profundo_cm     Decimal? @db.Decimal(7, 2)
+  cargado_por     String   @db.NVarChar(50)
+  cargado_en      DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  presentacion VitrinaPresentacion @relation(fields: [id_presentacion], references: [id_presentacion], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_presentacion, vigente], map: "IX_vitrina_modelo_3d_presentacion")
+  @@map("vitrina_modelo_3d")
+  @@schema("dbo")
+}
+
+/// Vínculo con un documento vigente del SGC (sgc.document.id_document). Se enlaza, no se copia;
+/// sin FK entre esquemas (el SGC vive aislado en `sgc`). En el V2 solo existe la tabla.
+model VitrinaDocumento {
+  id_vitrina_documento Int      @id @default(autoincrement())
+  id_presentacion      Int
+  id_document          Int
+  // FICHA | INSERTO | PROSPECTO
+  tipo                 String   @db.NVarChar(20)
+  idioma               String?  @db.NVarChar(10)
+  pais                 String?  @db.NVarChar(60)
+  vinculado_por        String   @db.NVarChar(50)
+  vinculado_en         DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  presentacion VitrinaPresentacion @relation(fields: [id_presentacion], references: [id_presentacion], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("vitrina_documento")
+  @@schema("dbo")
+}
+
+/// Historial de la Gestión y de la lectura de SAP (id_user NULL = la hizo la sincronización).
+model VitrinaHistorial {
+  id_historial   BigInt   @id @default(autoincrement())
+  id_company     Int
+  entidad        String   @db.NVarChar(40)
+  id_entidad     Int
+  accion         String   @db.NVarChar(40)
+  valor_anterior String?  @db.NVarChar(Max)
+  valor_nuevo    String?  @db.NVarChar(Max)
+  id_user        String?  @db.NVarChar(50)
+  registrado_en  DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  company Company @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([entidad, id_entidad], map: "IX_vitrina_historial_entidad")
+  @@index([id_company, registrado_en], map: "IX_vitrina_historial_company")
+  @@map("vitrina_historial")
+  @@schema("dbo")
+}
+
+/// MÓDULO FORMACIÓN (2026-10-26, Nicolás Rivera) — departamentos de SynerLink
+/// que aplican en cada empresa. Administrable desde /process/formacion.
+model FormacionEmpresaDepartamento {
+  id            Int      @id @default(autoincrement())
+  id_company    Int
+  id_department Int
+  activo        Boolean  @default(true)
+  updated_by    String   @db.NVarChar(255)
+  updated_at    DateTime @default(now())
+
+  @@unique([id_company, id_department], map: "formacion_empresa_departamento_uq")
+  @@map("formacion_empresa_departamento")
+  @@schema("dbo")
+}
+
+/// Colaborador -> empresa -> departamento, para quien no tiene el
+/// departamento en SynerLink (entra a Formación con código al correo).
+model FormacionColaborador {
+  id            Int      @id @default(autoincrement())
+  email         String   @db.NVarChar(255)
+  nombre        String?  @db.NVarChar(255)
+  id_company    Int
+  id_department Int
+  updated_by    String   @db.NVarChar(255)
+  updated_at    DateTime @default(now())
+
+  @@unique([email, id_company], map: "formacion_colaborador_uq")
+  @@map("formacion_colaborador")
+  @@schema("dbo")
+}
+
+/// Alcance de un curso por empresa y departamento (NULL = todos los
+/// departamentos de esa empresa). Un curso SIN filas es para todos.
+model FormacionCursoAlcance {
+  id            Int          @id @default(autoincrement())
+  course_id     Int
+  course        PortalCourse @relation(fields: [course_id], references: [id], onDelete: Cascade, map: "formacion_curso_alcance_course_fkey")
+  id_company    Int
+  id_department Int?
+  activo        Boolean      @default(true)
+  updated_by    String       @db.NVarChar(255)
+  updated_at    DateTime     @default(now())
+
+  @@unique([course_id, id_company, id_department], map: "formacion_curso_alcance_uq")
+  @@map("formacion_curso_alcance")
+  @@schema("dbo")
+}
+
+/// Divulgación de un curso o de un material (video) nuevo: deja a cada
+/// destinatario un pendiente que se ve en el ícono de Formación del header.
+model FormacionDivulgacion {
+  id            Int          @id @default(autoincrement())
+  course_id     Int
+  course        PortalCourse @relation(fields: [course_id], references: [id], onDelete: Cascade, map: "formacion_divulgacion_course_fkey")
+  material_id   Int?
+  mensaje       String?      @db.NVarChar(1000)
+  divulgado_por String       @db.NVarChar(255)
+  divulgado_at  DateTime     @default(now())
+
+  destinatarios FormacionDivulgacionDestinatario[]
+
+  @@map("formacion_divulgacion")
+  @@schema("dbo")
+}
+
+model FormacionDivulgacionDestinatario {
+  id             Int                  @id @default(autoincrement())
+  divulgacion_id Int
+  divulgacion    FormacionDivulgacion @relation(fields: [divulgacion_id], references: [id], onDelete: Cascade, map: "formacion_divulgacion_destinatario_div_fkey")
+  email          String               @db.NVarChar(255)
+  visto_at       DateTime?
+
+  @@unique([divulgacion_id, email], map: "formacion_divulgacion_destinatario_uq")
+  @@index([email, visto_at], map: "formacion_divulgacion_destinatario_email_visto_idx")
+  @@map("formacion_divulgacion_destinatario")
+  @@schema("dbo")
+}
+
+/// Preguntas y respuestas de un material (video) del curso (Nicolás Rivera,
+/// 2026-10-26). parent_id = respuesta a otra pregunta. Borrado lógico.
+model FormacionPregunta {
+  id            Int                  @id @default(autoincrement())
+  material_id   Int
+  material      PortalCourseMaterial @relation(fields: [material_id], references: [id], onDelete: Cascade, map: "formacion_pregunta_material_fkey")
+  course_id     Int
+  parent_id     Int?
+  parent        FormacionPregunta?   @relation("FormacionPreguntaRespuestas", fields: [parent_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "formacion_pregunta_parent_fkey")
+  respuestas    FormacionPregunta[]  @relation("FormacionPreguntaRespuestas")
+  email         String               @db.NVarChar(255)
+  nombre        String               @db.NVarChar(255)
+  texto         String               @db.NVarChar(2000)
+  created_at    DateTime             @default(now())
+  eliminado_at  DateTime?
+  eliminado_por String?              @db.NVarChar(255)
+  likes         FormacionPreguntaLike[]
+
+  @@index([material_id, parent_id], map: "formacion_pregunta_material_idx")
+  @@map("formacion_pregunta")
+  @@schema("dbo")
+}
+
+model FormacionPreguntaLike {
+  id          Int               @id @default(autoincrement())
+  pregunta_id Int
+  pregunta    FormacionPregunta @relation(fields: [pregunta_id], references: [id], onDelete: Cascade, map: "formacion_pregunta_like_pregunta_fkey")
+  email       String            @db.NVarChar(255)
+  created_at  DateTime          @default(now())
+
+  @@unique([pregunta_id, email], map: "formacion_pregunta_like_uq")
+  @@map("formacion_pregunta_like")
   @@schema("dbo")
 }

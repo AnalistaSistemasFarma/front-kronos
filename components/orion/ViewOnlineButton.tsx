@@ -57,9 +57,16 @@ function PdfPages({ src }: { src: string }) {
         // eslint-disable-next-line @next/next/no-img-element
         <img
           key={page.page}
-          src={page.dataUrl}
+          src={page.dataUrl ?? undefined}
           alt={`Página ${page.page}`}
-          style={{ width: '100%', height: 'auto', display: 'block', background: '#fff', boxShadow: 'var(--mantine-shadow-sm)' }}
+          style={{
+            width: '100%',
+            height: 'auto',
+            display: 'block',
+            aspectRatio: `${page.width} / ${page.height}`,
+            background: '#fff',
+            boxShadow: 'var(--mantine-shadow-sm)',
+          }}
         />
       ))}
     </Stack>

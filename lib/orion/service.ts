@@ -67,11 +67,7 @@ import {
   syncOrionSignerTasks,
 } from './signerTasks';
 import { openNextOrionSignerAuthorization } from './signerAuthorizations';
-import {
-  closeRequestIfNoOpenTasks,
-  isSignatureAutoCloseEnabled,
-  resolveSignatureTasksOnSigned,
-} from './autoCloseOnSigned';
+import { isSignatureTaskName, resolveSignatureTasksOnSigned } from './autoCloseOnSigned';
 import { useGetMicrosoftToken as getMicrosoftToken } from '../../components/microsoft-365/useGetMicrosoftToken.jsx';
 import type { SignerAcceptIdentity } from './signerIdentity';
 import { normalizeSignerIdentity } from './signerIdentity';
@@ -808,6 +804,9 @@ export function buildNextVersionBaseState(
       extensionRequestedAt: null,
     })),
     review: resetReviewForNewVersion(current.review, opts.versionLabel),
+    // Datos y sellos posteriores a la firma eran del PDF anterior (otras posiciones).
+    annotations: [],
+    annotatedCopies: [],
   };
 }
 
@@ -1003,7 +1002,7 @@ export async function applyOrionWebhookToRequest(
   });
 
   let tasksUpdated = 0;
-  let requestClosed = false;
+  const requestClosed = false;
 
   // Auth Kronos del siguiente firmante SOLO al avanzar de turno (alguien acaba de firmar).
   // Antes se abría en cada sync EN_PROCESO y, como findExisting ignoraba status=2,
@@ -1075,18 +1074,16 @@ export async function applyOrionWebhookToRequest(
       fileId
     );
   } else if (statusUpper === 'FIRMADO' && allSigned) {
-    // Firmas completas: avanza el workflow secuencial de firma. Por defecto NO cierra la
-    // solicitud (pueden quedar otras tareas o más PDFs); solo si el solicitante activó el
-    // cierre automático y ya no queda ninguna otra tarea abierta.
+    // Firmas completas: se cierran solas las tareas de firma (siempre, para todos) y el workflow
+    // avanza a la siguiente tarea. La solicitud NUNCA se cierra aquí: pueden quedar otras
+    // tareas o más PDFs por firmar. Un webhook repetido (sin cambio de estado ni de turno) no
+    // vuelve a tocar nada.
     const template = await findOrionSignatureTaskTemplate(pool, params.requestId);
-    const autoClose =
-      (statusChanged || turnAdvanced) &&
-      (await isSignatureAutoCloseEnabled(pool, ctx?.id_requester ?? null));
-    if (autoClose) {
+    if (statusChanged || turnAdvanced) {
       try {
         tasksUpdated += await resolveSignatureTasksOnSigned(pool, {
           requestId: params.requestId,
-          templateTaskId: template?.id ?? null,
+          templateTaskId: template && isSignatureTaskName(template.task) ? template.id : null,
           executorUserId: ctx?.id_requester ?? null,
         });
       } catch (err) {
@@ -1116,18 +1113,6 @@ export async function applyOrionWebhookToRequest(
       }
     } catch (err) {
       console.warn('[orion/applyWebhook] Watermark DOCUMENTO VALIDADO:', err);
-    }
-
-    if (autoClose) {
-      try {
-        requestClosed = await closeRequestIfNoOpenTasks(pool, {
-          requestId: params.requestId,
-          requesterUserId: ctx?.id_requester ?? null,
-          subject: ctx?.subject_request ?? null,
-        });
-      } catch (err) {
-        console.warn('[orion/applyWebhook] Cierre automático (solicitud):', err);
-      }
     }
   }
 
@@ -2324,13 +2309,15 @@ export async function finalizeSignerTurn(
     /** Consentimiento del turno. La identidad (nombre, cédula, cargo) sale de Orion. */
     identity?: Partial<SignerAcceptIdentity> | null;
     /**
-     * Consentimiento ya resuelto por el caller (evita un GET extra a Orion).
+     * Consentimiento ya resuelto por el caller (evita un GET extra a Orion). Puede venir como
+     * promesa para que la consulta a Orion corra mientras se carga el documento; se espera
+     * justo antes de firmar (si la promesa falla, no se firma).
      * Si no viene, se consulta en Orion como antes.
      */
-    personConsent?: {
-      hasSigningLegalConsent: boolean;
-      hasBiometricConsent: boolean;
-    } | null;
+    personConsent?:
+      | { hasSigningLegalConsent: boolean; hasBiometricConsent: boolean }
+      | Promise<{ hasSigningLegalConsent: boolean; hasBiometricConsent: boolean }>
+      | null;
   }
 ): Promise<{
   state: OrionSignatureState;
@@ -2343,7 +2330,18 @@ export async function finalizeSignerTurn(
   signerTasksOpened: number;
   currentSignerEmail: string | null;
 }> {
-  const canSign = await userHasOrionSignPermission(pool, params.userId, false, params.requestId);
+  const startedAt = Date.now();
+  const timings: Record<string, number> = {};
+  const mark = (step: string) => {
+    timings[step] = Date.now() - startedAt;
+  };
+
+  // Permiso y documento en paralelo (dos consultas a la BD independientes).
+  const [canSign, loaded] = await Promise.all([
+    userHasOrionSignPermission(pool, params.userId, false, params.requestId),
+    loadOrionFormBag(pool, params.requestId),
+  ]);
+  mark('permisoYDocumento');
   if (!canSign) {
     throw Object.assign(
       new Error(
@@ -2353,7 +2351,6 @@ export async function finalizeSignerTurn(
     );
   }
 
-  const loaded = await loadOrionFormBag(pool, params.requestId);
   if (!loaded) {
     throw Object.assign(new Error('Campo orion_signature no encontrado'), { status: 404 });
   }
@@ -2382,7 +2379,14 @@ export async function finalizeSignerTurn(
   }
 
   const previousSigners = current.signers;
+  // La empresa de la solicitud (para Orion) se consulta mientras se espera a Orion. El error se
+  // guarda y se lanza recién cuando se usa, como antes.
+  const signerCtxPromise = getRequestOrionContext(pool, params.requestId).then(
+    (value) => ({ value, error: null as unknown }),
+    (error: unknown) => ({ value: null, error })
+  );
   const live = await getOrionDocument(current.orionDocumentId);
+  mark('consultaOrion');
   if (!live.ok || !live.data) {
     throw Object.assign(new Error(live.error || 'No se pudo consultar Orion'), {
       status: live.status >= 500 ? 503 : 502,
@@ -2501,16 +2505,19 @@ export async function finalizeSignerTurn(
   // Aplicar firma real en Orion (rúbrica guardada o signatureDataUrl)
   {
     const consent = params.identity ?? null;
-    // Solo datos que el firmante completó porque faltaban en Orion.
-    const identity = consent?.fullName?.trim()
-      ? normalizeSignerIdentity(consent, turnSigner.name || params.userEmail)
-      : null;
+    // Identidad del turno (cédula/cargo editables en el modal de confirmación).
+    const identity =
+      consent?.fullName?.trim() ||
+      consent?.idNumber?.trim() ||
+      typeof consent?.jobTitle === 'string'
+        ? normalizeSignerIdentity(consent, turnSigner.name || params.userEmail)
+        : null;
     // Consentimiento a nivel persona (Orion users.*): no exigir checkbox por documento.
-    let personHasSigning = Boolean(
-      params.personConsent?.hasSigningLegalConsent
-    );
-    let personHasBiometric = Boolean(params.personConsent?.hasBiometricConsent);
-    if (!params.personConsent) {
+    const personConsent = await params.personConsent;
+    mark('consentimiento');
+    let personHasSigning = Boolean(personConsent?.hasSigningLegalConsent);
+    let personHasBiometric = Boolean(personConsent?.hasBiometricConsent);
+    if (!personConsent) {
       try {
         const consentRes = await getOrionPersonConsent(params.userEmail);
         if (consentRes.ok && consentRes.data) {
@@ -2550,7 +2557,9 @@ export async function finalizeSignerTurn(
     if (needsFingerprint && !biometricOk) {
       throw Object.assign(new Error(BIOMETRIC_CONSENT_REQUIRED_MESSAGE), { status: 422 });
     }
-    const signerCtx = await getRequestOrionContext(pool, params.requestId);
+    const signerCtxResult = await signerCtxPromise;
+    if (signerCtxResult.error) throw signerCtxResult.error;
+    const signerCtx = signerCtxResult.value;
     // Mapa estático ORION_TENANT_MAP; el PR de sincronización lo cambia por el registro vivo.
     const companySlug = signerCtx ? resolveOrionTenantId(signerCtx.id_company) : null;
     // La rúbrica dibujada en el turno reemplaza la guardada en Orion; sin ella se usa la guardada.
@@ -2590,6 +2599,7 @@ export async function finalizeSignerTurn(
       params.userEmail,
       acceptPayload
     );
+    mark('firmaEnOrion');
 
     // Orion a veces pierde el PDF en disco; reenviar el original desde OneDrive y reintentar.
     const needsOriginalPdf =
@@ -2769,6 +2779,9 @@ export async function finalizeSignerTurn(
     finalBag = setOrionDocumentInBag(outcome.bag, fileId, finalState);
     await upsertOrionFormBag(pool, params.requestId, loaded.field.id_form_field, finalBag);
   }
+  mark('tareasYAvisos');
+  // Para ver en la consola del servidor qué paso de la firma es el lento (milisegundos acumulados).
+  console.info(`[orion/complete-sign] solicitud ${params.requestId} tiempos (ms):`, timings);
 
   return {
     state: finalState,

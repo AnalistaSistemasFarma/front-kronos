@@ -29,6 +29,13 @@ export interface ChatMediaDto {
   src: string;
   width: number | null;
   height: number | null;
+  /**
+   * Sticker ANIMADO (2026-10-20): `src` es el WebP en movimiento y `poster` su
+   * cuadro fijo, que se muestra sin movimiento (prefers-reduced-motion), fuera
+   * de pantalla y mientras carga. Opcionales: los mensajes viejos no los traen.
+   */
+  animated?: boolean;
+  poster?: string | null;
 }
 
 /** Cuántos nombres viajan por reacción. Con más, la interfaz dice «y N más». */

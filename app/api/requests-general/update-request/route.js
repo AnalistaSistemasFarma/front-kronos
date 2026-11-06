@@ -115,6 +115,22 @@ export async function POST(req) {
           await updateCategoryRequest.query(updateCategoryQuery);
         }
 
+        if (Number(prevRow?.status_req) === 7 && Number(status) === 1) {
+          await new sql.Request(transaction)
+            .input('id', sql.Int, id)
+            .query(`
+              UPDATE trg
+              SET trg.id_status = 4,
+                  trg.resolution = NULL,
+                  trg.date_resolution = NULL
+              FROM task_request_general trg
+              INNER JOIN task_process_category tpc ON tpc.id = trg.id_task
+              WHERE trg.id_request_general = @id
+                AND trg.id_status = 3
+                AND tpc.is_authorization = 1
+            `);
+        }
+
         if (isRequestClosedStatus(status)) {
           await cancelOpenOrionInternalTasks(
             transaction,

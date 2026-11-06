@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import ExcelJS from 'exceljs';
+// Solo tipos: la librería (~900 KB) se descarga al exportar/importar, no al abrir la pantalla.
+import type ExcelJS from 'exceljs';
 import { Modal, Select, Button, Group, Stack, Alert, Text, FileButton, Divider } from '@mantine/core';
 import { IconDownload, IconUpload } from '@tabler/icons-react';
 import { TEMPLATE_COLUMNS } from '../../../../lib/articles/fields';
@@ -45,6 +46,7 @@ export default function BulkModal({ opened, onClose, companies, onLoaded }: Prop
   const [error, setError] = useState<string | null>(null);
 
   const downloadTemplate = async () => {
+    const { default: ExcelJS } = await import('exceljs');
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Articulos');
     ws.addRow(TEMPLATE_COLUMNS.map((c) => c.header));
@@ -60,6 +62,7 @@ export default function BulkModal({ opened, onClose, companies, onLoaded }: Prop
   };
 
   const readFile = async (file: File | null) => {
+    const { default: ExcelJS } = await import('exceljs');
     if (!file) return;
     setError(null);
     setReport(null);

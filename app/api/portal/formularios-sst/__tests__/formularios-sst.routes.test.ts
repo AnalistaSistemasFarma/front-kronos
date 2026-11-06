@@ -12,6 +12,15 @@ const { identificar, resolverNombreEstudiante, guardarEnvioSst, listarEnviosSst,
 vi.mock('@/lib/portal/acceso', () => ({ identificar }));
 vi.mock('@/lib/portal/formacion', () => ({ resolverNombreEstudiante }));
 vi.mock('@/lib/portal/formulario-servidor', () => ({ excelDeRespuestas, registrarErrorSinDatos: vi.fn() }));
+// El catálogo (B1 y B2 del código + los que crea el administrador) se simula con los del código; su lógica se prueba en `formularios-sst-catalogo.test.ts`.
+vi.mock('@/lib/portal/formularios-sst-catalogo', async () => {
+  const base = await import('@/lib/portal/formularios-sst');
+  const actuales = base.FORMULARIOS_SST.map((f) => ({ ...f, origen: 'base' as const, guardadoEl: null, editado: false }));
+  return {
+    listarFormulariosSst: vi.fn(async () => actuales),
+    formularioSstActual: vi.fn(async (codigo: unknown) => actuales.find((f) => f.codigo === codigo) ?? null),
+  };
+});
 vi.mock('@/lib/portal/formularios-sst-servidor', async (original) => ({
   ...(await original<typeof import('@/lib/portal/formularios-sst-servidor')>()),
   guardarEnvioSst,
@@ -67,12 +76,20 @@ describe('GET /api/portal/formularios-sst (lista)', () => {
     const d = await r.json();
     expect(d.formularios.map((f: { codigo: string }) => f.codigo)).toEqual([REPORTE.codigo, SALUD.codigo]);
     expect(d.formularios[1].datosSensibles).toBe(true);
+    expect(d.formularios.map((f: { origen: string }) => f.origen)).toEqual(['base', 'base']);
     expect(d.puedeVerRespuestas).toBe(false);
+    expect(d.puedeAdministrar).toBe(false);
     expect(r.headers.get('cache-control')).toContain('no-store');
     for (const correo of [LECTOR, ADMIN, 'SANDY.cardenal@GSSLATAM.com']) {
       identificar.mockResolvedValue({ correo, via: 'codigo' });
       expect((await (await lista(get())).json()).puedeVerRespuestas, correo).toBe(true);
     }
+  });
+  it('solo el ADMINISTRADOR ve que puede administrar: los lectores SST ven respuestas pero no crean ni editan', async () => {
+    identificar.mockResolvedValue({ correo: LECTOR, via: 'codigo' });
+    expect(await (await lista(get())).json()).toMatchObject({ puedeVerRespuestas: true, puedeAdministrar: false });
+    identificar.mockResolvedValue({ correo: 'CRISTIAN.baldion@gsslatam.com', via: 'codigo' });
+    expect(await (await lista(get())).json()).toMatchObject({ puedeVerRespuestas: true, puedeAdministrar: true });
   });
   it('no entrega las preguntas ni ninguna respuesta', async () => {
     const texto = JSON.stringify(await (await lista(get())).json());
@@ -188,7 +205,7 @@ describe('GET .../respuestas (tabla)', () => {
       expect(await r.json()).toEqual(TABLA);
       expect(r.headers.get('cache-control')).toContain('no-store');
     }
-    expect(listarEnviosSst).toHaveBeenCalledWith(REPORTE, LIMITE_TABLA_SST);
+    expect(listarEnviosSst).toHaveBeenCalledWith(expect.objectContaining({ codigo: REPORTE.codigo }), LIMITE_TABLA_SST);
     expect((await respuestas(get('/NO-EXISTE/respuestas'), con('NO-EXISTE'))).status).toBe(404);
   });
   it('errores de SharePoint: sin configurar 503; sin permiso 502; otro fallo 502 sin detalles', async () => {
@@ -223,7 +240,7 @@ describe('GET .../respuestas/excel', () => {
     expect(r.headers.get('content-disposition')).toBe(`attachment; filename="${REPORTE.codigo}-respuestas.xlsx"`);
     expect(r.headers.get('cache-control')).toContain('no-store');
     expect(Buffer.from(await r.arrayBuffer()).toString()).toBe('xlsx-falso');
-    expect(listarEnviosSst).toHaveBeenCalledWith(REPORTE, LIMITE_EXCEL_SST);
+    expect(listarEnviosSst).toHaveBeenCalledWith(expect.objectContaining({ codigo: REPORTE.codigo }), LIMITE_EXCEL_SST);
     const [tabla, etiqueta] = excelDeRespuestas.mock.calls[0];
     expect(etiqueta).toBe('Formularios SST');
     expect(tabla).toMatchObject({ evaluacion: false, columnas: TABLA.columnas, formulario: { codigo: REPORTE.codigo, version: 1 } });

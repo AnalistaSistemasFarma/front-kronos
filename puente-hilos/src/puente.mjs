@@ -24,6 +24,7 @@ import { cargarConfig, ErrorConfig, sellarEntorno } from './config.mjs';
 import { appendFileSync } from 'node:fs';
 import {
   cargarReposPorProyecto,
+  validarReposPorProyecto,
   entornoCodigo,
   estadoDependencias,
   rutaCacheNpm,
@@ -50,6 +51,7 @@ import { esNegocio, perfilListo, textoPerfilNegocio } from './perfil-agente.mjs'
 import { prepararPruebasTurno, secretosPruebas, verificarSecretosPruebas } from './pruebas-kronos.mjs';
 import { grafosDelTurno, textoGrafos } from './grafos.mjs';
 import { prepararMemoriaTurno } from './memoria.mjs';
+import { carpetasLectura, jsonParaCodigo, leerArchivoManual, obtenerPoliticaApi, prohibidasLectura, resolverPolitica, textoPolitica } from './politica.mjs';
 import { crearClienteSynerLink } from './synerlink.mjs';
 import { crearMedidorCuota } from './cuota.mjs';
 import { carpetaAgenteOpenclaw, crearLectorCredencialOpenclaw } from './openclaw/credencial.mjs';
@@ -195,6 +197,34 @@ export function loteDeOperador(cfg, lote, cargar = cargarReposPorProyecto) {
 /** Nombre de quien escribió el mensaje (para el registro del objetivo). */
 function autorDe(m) {
   return m?.author?.name?.trim() || m?.author?.email || null;
+}
+
+/**
+ * Permisos de los agentes del turno (2026-10-20, ver politica.mjs). Nunca lanza:
+ * ante cualquier duda, «ninguno». Devuelve la política resuelta, las carpetas de
+ * lectura y el bloque para el encabezado de sistema.
+ */
+export async function politicaDelTurno({ cfg, synerlink, idConversation, idProject, leerArchivo = leerArchivoManual, existe }) {
+  const api = await obtenerPoliticaApi(synerlink, idConversation, idProject);
+  let archivo = null;
+  let errorArchivo = null;
+  // El archivo manual se relee en CADA turno (vincular un repo no exige reiniciar).
+  const ruta = cfg.rutaReposPorProyecto ?? ((process.env.HILOS_REPOS_POR_PROYECTO ?? '').trim() || null);
+  try {
+    archivo = leerArchivo(ruta);
+  } catch (e) {
+    errorArchivo = e;
+  }
+  const politica = resolverPolitica({ api, archivo, idProject, errorArchivo: api.estado === 'bd' ? null : errorArchivo });
+  const lectura = carpetasLectura(politica, archivo, existe ? { existe } : undefined);
+  return {
+    politica,
+    api,
+    archivo,
+    errorArchivo,
+    lectura: lectura.dirs.length > 0 ? { dirs: lectura.dirs.map((d) => d.ruta), prohibidas: prohibidasLectura(lectura.dirs) } : null,
+    bloque: textoPolitica({ politica, lectura }),
+  };
 }
 
 export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, convertirPdf = convertirHtmlAPdf, medidor = null, fabricaOpenclaw = null }) {
@@ -366,13 +396,26 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         avisoEquipo = '_Nota: el equipo de subagentes del proyecto no se pudo cargar; respondí sin él._\n\n';
       }
       const topes = topesEfectivos(equipo, cfg);
+      // Permisos de los agentes (2026-10-20): SynerLink manda; si no hay política, el archivo manual; si no, «ninguno».
+      const politicaTurno = await politicaDelTurno({ cfg, synerlink, idConversation, idProject: contexto.project.idProject });
+      if (politicaTurno.api.estado === 'error') log(`conversación ${idConversation}: no se pudo leer la política (${politicaTurno.api.error}); turno sin código.`);
+      if (politicaTurno.errorArchivo) log(`conversación ${idConversation}: archivo de repos inválido:`, politicaTurno.errorArchivo.message);
+      if (politicaTurno.politica.nivel > 0) {
+        log(`conversación ${idConversation}: permisos ${politicaTurno.politica.codeLevel} (origen ${politicaTurno.politica.origen}; repos ${politicaTurno.politica.repos.map((r) => r.slug).join(', ')}).`);
+      }
       // Acceso al código (nivel 2): repos vinculados al proyecto, worktree propio y
       // pases solo si TODOS los mensajes del turno son de un operador autorizado.
+      // QUÉ repos y con qué pases lo dice la política resuelta (jsonParaCodigo: la
+      // misma forma de repos-por-proyecto.json); el clon y los workflows, el archivo local.
       let codigo = null;
       let indiceRepos = null; // proyecto bajo demanda: índice de repos y registro de los que Orus pida
       let avisoCodigo = '';
+      const jsonCodigo = jsonParaCodigo(politicaTurno.politica, politicaTurno.archivo, contexto.project.idProject);
       try {
-        codigo = prepararCodigoTurno({ cfg, idProject: contexto.project.idProject, idConversation, rutas, lote, agenteNombre, conEquipo: Boolean(equipo), completo: Boolean(completo) });
+        // Permisos de la base (politica.mjs) → mismo formato de repos-por-proyecto.json que valida codigo.mjs.
+        codigo = jsonCodigo
+          ? prepararCodigoTurno({ cfg, idProject: contexto.project.idProject, idConversation, rutas, lote, agenteNombre, conEquipo: Boolean(equipo), completo: Boolean(completo), cargar: () => validarReposPorProyecto(jsonCodigo) })
+          : null;
         if (codigo?.soloIndice) {
           indiceRepos = codigo;
           codigo = null;
@@ -440,6 +483,8 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         bloqueTiempo: textoTiempoTurno({ topeMs: cfg.timeoutTurnoMs, avisoMs: cfg.avisoProgresoMs ?? 0 }),
         bloqueObjetivo: textoObjetivo(objetivo),
         bloqueArchivar: archivador ? textoArchivarProyecto() : '',
+        // Con worktree (o con el índice de repos bajo demanda), las reglas del código ya dicen todo; sin él, el bloque de la política (lectura o «ninguno»).
+        politicaTurno: codigo || indiceRepos ? { ...politicaTurno, bloque: '' } : politicaTurno,
       });
       limpiarPropuestas(rutas);
       let vigia = null;
@@ -480,6 +525,8 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           // Las carpetas skills/ de los plugins, en solo lectura: las skills leen sus referencias.
           plugins: pluginsTurno,
           objetivo: conObjetivo,
+          // La lectura de los clones solo si el turno NO lleva worktree ni índice bajo demanda (el código ya lo maneja).
+          lectura: codigo || indiceRepos ? null : politicaTurno.lectura,
         });
         let ultimaEtiqueta = null;
         let ultimosActivos = '';
@@ -890,6 +937,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           leerSesionGateway: (clave) => conGateway((pedir) => leerSesion(pedir, clave, 60), { openclawBin: cfg.openclaw.bin }),
           anunciosPendientes,
           medidor,
+          politicaDelTurno,
         })
       : null;
   const atenderTurno = async (clave, lote) => {
@@ -1002,7 +1050,7 @@ async function principal() {
   if (!lectorOc) log(medidor ? `medidor de consumo: stream de cada turno${cfg.cuota.intervaloMs > 0 && cfg.credencial.tipo === 'oauth-token' ? ` + consulta mínima cada ${Math.round(cfg.cuota.intervaloMs / 1000)} s sin turnos` : ''}.` : `medidor de consumo apagado (${cfg.runner === 'openclaw' ? 'HILOS_OPENCLAW_CUOTA' : 'HILOS_CUOTA'}=no).`);
   if (cfg.runner === 'openclaw') {
     const oc = cfg.openclaw;
-    log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, RUNNER OPENCLAW: agente «${oc.agente}»${oc.perfil ? `, perfil ${oc.perfil}` : ''}${oc.local ? ', --local' : ', por el Gateway'}; sesiones «${oc.prefijo}c<conv>-<gen>»; área ${cfg.areaDir}; outbox ${oc.outbox ?? 'no'}; indicador fino ${oc.actividad && !oc.local ? 'sí' : 'no'}; tope ${cfg.maxConcurrencia} hilos; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; avisos ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; perfil: ${perfilListo(cfg)}; PDF del puente ${cfg.pdf?.habilitado ? `sí${oc.recursos?.length ? ` (recursos: ${oc.recursos.join(', ')})` : ''}` : 'no'}; sin capacidades del puente (conectores, PRUEBAS, código, equipo, plugins): el agente usa SOLO las suyas.`);
+    log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, RUNNER OPENCLAW: agente «${oc.agente}»${oc.perfil ? `, perfil ${oc.perfil}` : ''}${oc.local ? ', --local' : ', por el Gateway'}; sesiones «${oc.prefijo}c<conv>-<gen>»; área ${cfg.areaDir}; outbox ${oc.outbox ?? 'no'}; indicador fino ${oc.actividad && !oc.local ? 'sí' : 'no'}; tope ${cfg.maxConcurrencia} hilos; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; avisos ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; perfil: ${perfilListo(cfg)}; PDF del puente ${cfg.pdf?.habilitado ? `sí${oc.recursos?.length ? ` (recursos: ${oc.recursos.join(', ')})` : ''}` : 'no'}; ${esNegocio(cfg) ? 'sin capacidades del puente (conectores, PRUEBAS, código, equipo, plugins): el agente usa SOLO las suyas' : `CÓDIGO con guardia de git/gh (${cfg.rutaReposPorProyecto ?? 'sin archivo de repos'}; token ${cfg.githubTokenArchivo ? 'en archivo' : 'NO'}); PR solo a la rama de pruebas, sin pases; sin conectores, PRUEBAS, equipo ni plugins del puente`}.`);
   } else
   log(`listo: agente ${cfg.agente} (${cfg.agenteNombre}), entorno ${cfg.entorno}, tope ${cfg.maxConcurrencia} hilos, credencial: ${cfg.origenCredencial}, modelo del hilo principal: ${cfg.modelo ?? 'el predeterminado de la cuenta (sin HILOS_MODELO)'}; tope por turno ${duracionLegible(cfg.timeoutTurnoMs)}; gasto ${cfg.sinTopeGasto ? 'SIN TOPE' : cfg.presupuestoUsd ? `tope ${cfg.presupuestoUsd} USD` : `sin tope general (equipo ${cfg.subagentesPresupuestoUsd} USD)`}; avisos de progreso ${cfg.avisoProgresoMs ? `cada ${duracionLegible(cfg.avisoProgresoMs)}` : 'apagados'}; continuación automática ${cfg.continuarAlAgotar ? 'sí' : 'no'}; perfil: ${perfilListo(cfg)}; PRUEBAS para todos los hilos: ${pruebasListo(cfg)}; conectores del agente: ${conectoresAgenteListo(cfg)}.`);
 

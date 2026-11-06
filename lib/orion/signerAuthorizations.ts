@@ -142,7 +142,7 @@ export type CreateOrionSignerAuthorizationsResult = {
  * firmante pendiente actual. El siguiente se crea al cerrar el turno anterior.
  *
  * Nota de producto: en la UI el firmante ve "Firmar" (no "Autorizar a sí mismo");
- * la auth se consume al iniciar la firma o desde /process/authorization.
+ * la auth se consume al registrar la firma (complete-sign) o desde /process/authorization.
  */
 export async function createOrionSignerAuthorizations(
   pool: SqlPool,
@@ -425,7 +425,7 @@ export async function reconcileDuplicateOrionSignerAuths(
 
 /**
  * Cierra la autorización FIRMA pendiente del usuario para este PDF
- * (p. ej. al pulsar Firmar: no hace falta pasar por /process/authorization).
+ * (p. ej. cuando complete-sign registra la firma: no hace falta pasar por /process/authorization).
  */
 export async function closePendingOrionSignerAuth(
   pool: SqlPool,

@@ -325,6 +325,20 @@ export function railItemHref(item: Pick<ChatRailItem, 'kind' | 'agentCode' | 'id
  */
 export const CHAT_RAIL_OPEN_EVENT = 'synerlink:chat-rail-open';
 
+/** localStorage: la barra está expandida ('1') o contraída. */
+export const CHAT_RAIL_EXPANDIDA_KEY = 'synerlink:chat-rail-expandida';
+
+/**
+ * localStorage: en la última visita la barra fija se mostró ('1') o no ('0').
+ * El script inicial (ThemeInitScript) lo lee para reservar su ancho antes de que
+ * llegue /api/chat/access; si no, todo el contenido saltaba 64–288 px al llegar.
+ */
+export const CHAT_RAIL_RESERVA_KEY = 'synerlink:chat-rail-reserva';
+
+/** Clases en <html> que reservan el ancho (globals.css). ChatRail las quita al decidir. */
+export const CHAT_RAIL_RESERVA_CLASS = 'chat-rail-reservada';
+export const CHAT_RAIL_RESERVA_EXPANDIDA_CLASS = 'chat-rail-reservada--expandida';
+
 export type ChatRailOpenDetail =
   | { tipo: 'agente'; code: string }
   | { tipo: 'grupo'; id: number }

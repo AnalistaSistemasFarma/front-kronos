@@ -161,6 +161,16 @@ export interface ChatThreadState {
   markRead: () => Promise<void>;
 }
 
+/** Devuelve `prev` si `next` trae el mismo contenido (JSON); si no, `next`. */
+function igualQue<T>(prev: T, next: T): T {
+  if (prev === next) return prev;
+  try {
+    return JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
+  } catch {
+    return next;
+  }
+}
+
 export function useChatConversation(
   target: ChatTarget | null,
   active: boolean,
@@ -550,12 +560,18 @@ export function useChatConversation(
         // La barra de la cabecera debe enterarse del mensaje nuevo.
         notifyChatRefresh();
       }
-      setStatus(data.status);
+      // Mismo contenido ⇒ misma referencia: el sondeo corre cada segundo
+      // mientras el agente trabaja y, con un objeto nuevo en cada vuelta,
+      // redibujaba el hilo completo aunque nada hubiera cambiado (2026-10-22).
+      setStatus((prev) => igualQue(prev, data.status));
       // Un sondeo viejo (o un front por delante de la API) no trae el
       // desglose: se deja lo que había en vez de vaciar el encabezado.
-      if (data.statuses) setStatuses(data.statuses);
+      if (data.statuses) {
+        const statusesNuevos = data.statuses;
+        setStatuses((prev) => igualQue(prev, statusesNuevos));
+      }
       // Sin el campo, el usuario no ve métricas (o la API es vieja): se oculta.
-      setMetrics(data.metrics);
+      setMetrics((prev) => igualQue(prev, data.metrics));
 
       // ⬅️ La cadencia la ordena el servidor.
       scheduleNext(data.nextPollMs);

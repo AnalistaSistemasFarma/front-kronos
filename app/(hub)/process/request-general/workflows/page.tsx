@@ -137,6 +137,7 @@ function RequestBoard() {
       costo: number;
       centroCosto: string;
       secuencial: boolean;
+      cierraSolicitud: boolean;
       esAutorizacion: boolean;
       tipoAutorizacion: string;
       esFlujoVinculado: boolean;
@@ -150,6 +151,7 @@ function RequestBoard() {
     costo: '',
     centroCosto: '',
     secuencial: false,
+    cierraSolicitud: false,
     esAutorizacion: false,
     tipoAutorizacion: '',
     esFlujoVinculado: false,
@@ -407,6 +409,7 @@ function RequestBoard() {
         costo: parseFloat(taskForm.costo) || 0,
         centroCosto: taskForm.centroCosto,
         secuencial: taskForm.secuencial,
+        cierraSolicitud: taskForm.cierraSolicitud,
         esAutorizacion: taskForm.esAutorizacion,
         tipoAutorizacion: taskForm.esAutorizacion ? taskForm.tipoAutorizacion : '',
         esFlujoVinculado: taskForm.esFlujoVinculado,
@@ -421,6 +424,7 @@ function RequestBoard() {
       costo: '',
       centroCosto: '',
       secuencial: false,
+      cierraSolicitud: false,
       esAutorizacion: false,
       tipoAutorizacion: '',
       esFlujoVinculado: false,
@@ -490,9 +494,9 @@ function RequestBoard() {
 
       if (data.processCategories && data.processCategories.length > 0) {
         setProcessWF(
-          data.processCategories.map((p: { id_process: number; process: string }) => ({
+          data.processCategories.map((p: { id_process: number; process: string; company?: string | null }) => ({
             value: p.id_process.toString(),
-            label: p.process,
+            label: p.company ? `${p.process} — ${p.company}` : p.process,
           }))
         );
       } else {
@@ -733,6 +737,10 @@ function RequestBoard() {
   };
 
   const getUserIdByName = async (userName: string): Promise<number | null> => {
+    // La sesión ya trae el id de Kronos (callback jwt, buscado por correo): sin viaje extra al
+    // servidor ni búsqueda por NOMBRE, que con dos personas homónimas podía traer el id equivocado.
+    // (El id es un cuid de texto; este archivo lo tipa como número, igual que lo que devolvía la API.)
+    if (session?.user?.id) return session.user.id as unknown as number;
     if (!session || status !== 'authenticated') {
       console.error('No hay sesión activa para realizar esta operación');
       return null;
@@ -847,9 +855,9 @@ function RequestBoard() {
         }
         if (data.processCategories && Array.isArray(data.processCategories)) {
           setProcessWF(
-            data.processCategories.map((sub: { id_process: number; process: string }) => ({
+            data.processCategories.map((sub: { id_process: number; process: string; company?: string | null }) => ({
               value: sub.id_process.toString(),
-              label: sub.process,
+              label: sub.company ? `${sub.process} — ${sub.company}` : sub.process,
             }))
           );
         } else {
@@ -902,6 +910,7 @@ function RequestBoard() {
         cost: task.costo || 0,
         cost_center: task.centroCosto || null,
         is_sequential: task.secuencial,
+        closes_request: task.cierraSolicitud,
         display_order: index,
         is_authorization: task.esAutorizacion,
         type_authorization: task.esAutorizacion
@@ -994,7 +1003,7 @@ function RequestBoard() {
         isExternal: false,
       });
       setTasks([]);
-      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '', esFlujoVinculado: false, flujoVinculado: '', condition_option_temps: [] });
+      setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, cierraSolicitud: false, esAutorizacion: false, tipoAutorizacion: '', esFlujoVinculado: false, flujoVinculado: '', condition_option_temps: [] });
       setRequiresFiles(false);
       setRequiredFiles([]);
       setFileForm({ file_label: '', required: true, condition_option_temps: [] });
@@ -1428,7 +1437,7 @@ function RequestBoard() {
             setCurrentStep(1);
             setFormErrors({});
             setTasks([]);
-            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '', esFlujoVinculado: false, flujoVinculado: '', condition_option_temps: [] });
+            setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, cierraSolicitud: false, esAutorizacion: false, tipoAutorizacion: '', esFlujoVinculado: false, flujoVinculado: '', condition_option_temps: [] });
             setRequiresFiles(false);
             setRequiredFiles([]);
             setFileForm({ file_label: '', required: true, condition_option_temps: [] });
@@ -1922,6 +1931,13 @@ function RequestBoard() {
 
                     <Checkbox
                       mt='sm'
+                      label='Al resolver esta tarea, cerrar la solicitud'
+                      checked={taskForm.cierraSolicitud}
+                      onChange={(e) => setTaskForm({ ...taskForm, cierraSolicitud: e.currentTarget.checked })}
+                    />
+
+                    <Checkbox
+                      mt='sm'
                       label='Tarea de autorización'
                       checked={taskForm.esAutorizacion}
                       disabled={taskForm.esFlujoVinculado}
@@ -2091,10 +2107,19 @@ function RequestBoard() {
                                 </Text>
                               </Table.Td>
                               <Table.Td className='py-4 px-5 text-center'>
-                                {task.secuencial ? (
-                                  <Badge color='indigo' variant='light' size='sm'>
-                                    Secuencial
-                                  </Badge>
+                                {task.secuencial || task.cierraSolicitud ? (
+                                  <Group gap={4} justify='center' wrap='wrap'>
+                                    {task.secuencial && (
+                                      <Badge color='indigo' variant='light' size='sm'>
+                                        Secuencial
+                                      </Badge>
+                                    )}
+                                    {task.cierraSolicitud && (
+                                      <Badge color='red' variant='light' size='sm'>
+                                        Cierra solicitud
+                                      </Badge>
+                                    )}
+                                  </Group>
                                 ) : (
                                   <Text size='sm' c='dimmed'>—</Text>
                                 )}
@@ -2602,7 +2627,7 @@ function RequestBoard() {
                   setCurrentStep(1);
                   setFormErrors({});
                   setTasks([]);
-                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, esAutorizacion: false, tipoAutorizacion: '', esFlujoVinculado: false, flujoVinculado: '', condition_option_temps: [] });
+                  setTaskForm({ tarea: '', asignado: '', costo: '', centroCosto: '', secuencial: false, cierraSolicitud: false, esAutorizacion: false, tipoAutorizacion: '', esFlujoVinculado: false, flujoVinculado: '', condition_option_temps: [] });
                 }
               }}
               size='md'

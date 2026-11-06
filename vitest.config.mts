@@ -34,7 +34,12 @@ export default defineConfig({
       'app/api/firma-gss/**/*.test.ts',
       // `app/api/correo/**`: módulo Correo (sesión y permiso, aislamiento por persona, límites; Graph simulado).
       'app/api/correo/**/*.test.ts',
+      // `app/api/chat/compartir/**`: menú Compartir de Android (sesión, tipos y tamaños).
+      'app/api/chat/compartir/**/*.test.ts',
       'components/sgc/**/*.test.ts',
+      // Medidor del consumo de Anthropic en Proyectos (render del marcado, 2026-10-22).
+      'components/proyectos/**/*.test.ts',
+      'components/formacion/**/*.test.ts',
     ],
     exclude: ['node_modules', '.next', 'mcp', 'dist'],
 
@@ -97,6 +102,13 @@ export default defineConfig({
         // Deslizar para eliminar (2026-10-18): mover a Elementos eliminados y «Deshacer» firmado.
         'lib/correo/eliminar.ts',
         'app/api/correo/**/route.ts',
+        // Visores de adjuntos del chat (2026-10-22): reglas puras y la ruta de la vista.
+        'lib/chat/visor.ts',
+        'app/api/chat/attachments/[[]id]/vista/route.ts',
+        // Ventas (2026-10-30): máquina de estados y motor de reglas de la oferta de venta.
+        'lib/sales/states.ts',
+        'lib/sales/rules.ts',
+        'lib/sales/publish.ts',
       ],
       exclude: [
         '**/__tests__/**',

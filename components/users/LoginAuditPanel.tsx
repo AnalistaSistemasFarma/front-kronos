@@ -47,7 +47,8 @@ import {
   IconSearch,
   IconWorld,
 } from '@tabler/icons-react';
-import ExcelJS from 'exceljs';
+// Solo tipos: la librería (~900 KB) se descarga al exportar/importar, no al abrir la pantalla.
+import type ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import toast from 'react-hot-toast';
 import {
@@ -293,6 +294,7 @@ export default function LoginAuditPanel() {
   );
 
   const exportToExcel = async () => {
+    const { default: ExcelJS } = await import('exceljs');
     setExporting(true);
     try {
       const response = await fetch(`/api/users/login-audit?${buildParams({ export: '1', page: '1' }).toString()}`, {

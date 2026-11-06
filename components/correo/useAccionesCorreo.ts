@@ -20,14 +20,23 @@ export function useAccionesCorreo(idChat: number | null, senal: string) {
     try {
       const r = await correoApi.acciones(idChat, ctrl.signal);
       if (pedido.current !== ctrl) return;
-      setPorMensaje(new Map(r.acciones.filter((a) => a.idChatMessage).map((a) => [a.idChatMessage as number, a])));
+      const nuevas = r.acciones.filter((a) => a.idChatMessage);
+      // Mismo resultado ⇒ mismo Map: cada mensaje nuevo vuelve a pedir las
+      // acciones y, con un Map nuevo (casi siempre vacío), se redibujaba el
+      // hilo sin necesidad (2026-10-22).
+      setPorMensaje((prev) =>
+        prev.size === nuevas.length &&
+        nuevas.every((a) => JSON.stringify(prev.get(a.idChatMessage as number)) === JSON.stringify(a))
+          ? prev
+          : new Map(nuevas.map((a) => [a.idChatMessage as number, a]))
+      );
     } catch {
       /* sin el módulo o sin red: el mensaje del agente se muestra tal cual */
     }
   }, [idChat]);
 
   useEffect(() => {
-    setPorMensaje(new Map());
+    setPorMensaje((prev) => (prev.size === 0 ? prev : new Map()));
   }, [idChat]);
 
   useEffect(() => {

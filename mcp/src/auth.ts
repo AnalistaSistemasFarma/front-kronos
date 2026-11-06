@@ -6,7 +6,7 @@
  * sobre cualquier parámetro que el cliente envíe en las tools.
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
-import type { ApiKeyEntry } from './config.js';
+import type { ApiKeyEntry, UsuariosConfig } from './config.js';
 
 export interface AuthScope {
   agent: string;
@@ -28,6 +28,8 @@ export interface AuthScope {
   allowedTools?: string[];
   /** Código del agente (agent.code) que presenta la key, si aplica. */
   agentCode?: string;
+  /** Permiso de administración de usuarios (solo llaves que lo definen). */
+  usuarios?: UsuariosConfig;
 }
 
 /**
@@ -74,5 +76,6 @@ export function resolveScope(token: string | null, apiKeys: ApiKeyEntry[]): Auth
     companyIds: allCompanies ? [] : [...(matched.companyIds as number[])],
     ...(matched.allowedTools ? { allowedTools: [...matched.allowedTools] } : {}),
     ...(matched.agentCode ? { agentCode: matched.agentCode } : {}),
+    ...(matched.usuarios ? { usuarios: structuredClone(matched.usuarios) } : {}),
   };
 }

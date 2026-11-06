@@ -1,13 +1,20 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { Suspense, useState, useEffect, useMemo } from 'react';
+// Solo tipos: la librería (~900 KB) se descarga al exportar/importar, no al abrir la pantalla.
+import type ExcelJS from 'exceljs';
 import { useSession } from 'next-auth/react';
+import { useSearchParams } from 'next/navigation';
 import {
-  Loader, Alert, Table, TextInput, Select, Pagination, Badge, Group, SegmentedControl, ActionIcon,
+  Loader, Alert, Table, TextInput, Select, Pagination, Badge, Group, SegmentedControl, ActionIcon, Button,
 } from '@mantine/core';
-import { IconSearch, IconAlertTriangle, IconEye } from '@tabler/icons-react';
+import { IconSearch, IconAlertTriangle, IconEye, IconPencil, IconPlus, IconReceipt, IconSend, IconUpload, IconCopy, IconFileSpreadsheet, IconArrowBackUp, IconTrash } from '@tabler/icons-react';
 import { stateLabel, stateColor, type PurchaseTipo } from '../../../../lib/purchases/fields';
+import { EDITABLE_STATES } from '../../../../lib/purchases/drafts';
 import DetailModal, { type PurchaseDraft } from './DetailModal';
+import RequestFormModal, { type EditTarget } from './RequestFormModal';
+import BulkModal from './BulkModal';
+import { VARIANT_OPTIONS, matchesVariant, type PurchaseVariant } from '../../../../lib/purchases/variants';
 
 /**
  * Compras (multiempresa, SOLO LECTURA).
@@ -22,7 +29,11 @@ interface CompanyAccess {
   idCompany: number;
   companyName: string;
   canRead: boolean;
+  canWrite: boolean;
   ready: boolean;
+  /** Mapeo SAPSEND propio del usuario en la empresa (variantes «Mis solicitudes» / «Mi area»). */
+  sapsendUserId: number | null;
+  sapsendDepartmentId: number | null;
 }
 
 interface CompanyError {
@@ -48,8 +59,9 @@ function formatTotal(raw: unknown): string {
   return Number.isNaN(n) ? String(raw) : n.toLocaleString('es-CO');
 }
 
-export default function PurchasesPage() {
+function PurchasesPageContent() {
   const { data: session } = useSession();
+  const searchParams = useSearchParams();
 
   const [tipo, setTipo] = useState<PurchaseTipo>('solicitudes');
   const [companies, setCompanies] = useState<CompanyAccess[]>([]);
@@ -62,6 +74,180 @@ export default function PurchasesPage() {
   const [selectedCompany, setSelectedCompany] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [selected, setSelected] = useState<PurchaseDraft | null>(null);
+  // Formulario de solicitud: crear (edit = null) o editar un borrador B/ENC.
+  const [formOpened, setFormOpened] = useState(false);
+  const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [bulkOpened, setBulkOpened] = useState(false);
+  const [duplicateTarget, setDuplicateTarget] = useState<EditTarget | null>(null);
+  const [variant, setVariant] = useState<PurchaseVariant>('todas');
+  // Empresa preseleccionada al llegar desde «Mis solicitudes» (?nueva=1&companyId=N).
+  const [initialCompanyId, setInitialCompanyId] = useState<number | null>(null);
+  // Llegada desde «Mis solicitudes»: crear y enviar a autorizar en un solo paso.
+  const [fromRequests, setFromRequests] = useState(false);
+
+  const writableCompanies = useMemo(
+    () => companies.filter((c) => c.canWrite && c.ready),
+    [companies]
+  );
+  const [sendingKey, setSendingKey] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<{ color: string; text: string } | null>(null);
+
+  /** Envia el borrador al modulo de Autorizaciones (queda en LA). */
+  const sendToAuthorize = async (r: PurchaseDraft) => {
+    const key = `${r.companyId}-${r.DocEntry}`;
+    setSendingKey(key);
+    setActionMessage(null);
+    try {
+      const res = await fetch('/api/purchases/drafts/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId: r.companyId, docEntry: Number(r.DocEntry) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionMessage({ color: 'red', text: data.error || 'No se pudo enviar a autorizar' });
+        return;
+      }
+      setActionMessage({ color: 'green', text: `Borrador #${r.DocEntry} enviado a autorizar.` });
+      setReloadKey((k) => k + 1);
+    } catch {
+      setActionMessage({ color: 'red', text: 'Error de red al enviar a autorizar' });
+    } finally {
+      setSendingKey(null);
+    }
+  };
+
+  /** «Retomar» (NAD -> B) y «Anular» (B -> anulado, con motivo): solo el solicitante. */
+  const changeState = async (r: PurchaseDraft, action: 'retomar' | 'anular') => {
+    let reason = '';
+    if (action === 'anular') {
+      const answer = window.prompt(`Motivo para anular el borrador #${r.DocEntry} (obligatorio):`);
+      if (answer === null) return;
+      reason = answer.trim();
+      if (!reason) {
+        setActionMessage({ color: 'red', text: 'El motivo es obligatorio para anular.' });
+        return;
+      }
+    }
+    const key = `${r.companyId}-${r.DocEntry}`;
+    setSendingKey(key);
+    setActionMessage(null);
+    try {
+      const res = await fetch('/api/purchases/drafts/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId: r.companyId, docEntry: Number(r.DocEntry), action, reason }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionMessage({ color: 'red', text: data.error || 'No se pudo cambiar el estado' });
+        return;
+      }
+      setActionMessage({
+        color: 'green',
+        text: action === 'retomar' ? `Borrador #${r.DocEntry} retomado: puede editarlo y reenviarlo.` : `Borrador #${r.DocEntry} anulado.`,
+      });
+      setReloadKey((k) => k + 1);
+    } catch {
+      setActionMessage({ color: 'red', text: 'Error de red al cambiar el estado' });
+    } finally {
+      setSendingKey(null);
+    }
+  };
+
+  /** ¿La fila es del usuario (su perfil SAPSEND en esa empresa) y puede escribir alli? */
+  const isOwnRow = (r: PurchaseDraft) => {
+    const c = companies.find((x) => x.idCompany === r.companyId);
+    return Boolean(c?.canWrite && c.sapsendUserId != null && String(r.U_SEND_UserId ?? '') === String(c.sapsendUserId));
+  };
+
+  /** «Cotizar»: LA -> ENC. El servidor valida que el usuario pueda decidir la autorizacion. */
+  const sendToQuotation = async (r: PurchaseDraft) => {
+    const reason = window.prompt(`Motivo para enviar el borrador #${r.DocEntry} a cotizacion (opcional):`);
+    if (reason === null) return;
+    const key = `${r.companyId}-${r.DocEntry}`;
+    setSendingKey(key);
+    setActionMessage(null);
+    try {
+      const res = await fetch('/api/purchases/drafts/quote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId: r.companyId, docEntry: Number(r.DocEntry), reason }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionMessage({ color: 'red', text: data.error || 'No se pudo enviar a cotizacion' });
+        return;
+      }
+      setActionMessage({ color: 'green', text: `Borrador #${r.DocEntry} enviado a cotizacion.` });
+      setReloadKey((k) => k + 1);
+    } catch {
+      setActionMessage({ color: 'red', text: 'Error de red al enviar a cotizacion' });
+    } finally {
+      setSendingKey(null);
+    }
+  };
+
+  /** Exporta lo filtrado a Excel (como la descarga completa de SAPSEND). */
+  const exportExcel = async () => {
+    const { default: ExcelJS } = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet(tipo === 'solicitudes' ? 'Solicitudes' : 'Ordenes');
+    ws.columns = [
+      { header: 'Empresa', key: 'empresa', width: 20 },
+      { header: 'Borrador (DocEntry)', key: 'docEntry', width: 16 },
+      { header: 'Numero', key: 'docNum', width: 12 },
+      { header: 'Fecha', key: 'fecha', width: 12 },
+      { header: 'Proveedor', key: 'proveedor', width: 32 },
+      { header: 'Solicitante', key: 'solicitante', width: 24 },
+      { header: 'Estado', key: 'estado', width: 22 },
+      { header: 'Total', key: 'total', width: 14 },
+      { header: 'Solicitud firme', key: 'firme', width: 14 },
+      { header: 'Comentarios', key: 'comentarios', width: 48 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    for (const r of filtered) {
+      ws.addRow({
+        empresa: r.companyName,
+        docEntry: r.DocEntry,
+        docNum: r.DocNum,
+        fecha: formatDate(r.DocDate),
+        proveedor: r.CardName ?? '',
+        solicitante: r.U_SEND_UserName ?? '',
+        estado: stateLabel(r.U_SEND_State),
+        total: r.DocTotal == null ? null : Number(r.DocTotal),
+        firme: r.U_SEND_SolCom ?? '',
+        comentarios: r.Comments ?? '',
+      });
+    }
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `compras-${tipo}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  useEffect(() => {
+    if (searchParams.get('nueva') !== '1' || companies.length === 0) return;
+    const cid = Number(searchParams.get('companyId'));
+    setTipo('solicitudes');
+    setEditTarget(null);
+    setDuplicateTarget(null);
+    setInitialCompanyId(writableCompanies.some((c) => c.idCompany === cid) ? cid : null);
+    setFromRequests(true);
+    setFormOpened(true);
+    // Solo una vez por llegada: se limpia la URL para que recargar no reabra el formulario.
+    window.history.replaceState(null, '', '/process/purchases');
+  }, [searchParams, companies, writableCompanies]);
+
+  const canEditRow = (r: PurchaseDraft) =>
+    tipo === 'solicitudes' &&
+    writableCompanies.some((c) => c.idCompany === r.companyId) &&
+    (EDITABLE_STATES as readonly string[]).includes(String(r.U_SEND_State ?? ''));
 
   // Carga el acceso una vez al iniciar sesion.
   useEffect(() => {
@@ -118,25 +304,29 @@ export default function PurchasesPage() {
     return () => {
       cancelled = true;
     };
-  }, [session, companies, tipo]);
+  }, [session, companies, tipo, reloadKey]);
 
   const filtered = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     return items.filter((r) => {
       if (selectedCompany !== 'all' && String(r.companyId) !== selectedCompany) return false;
+      if (tipo === 'solicitudes') {
+        const identity = companies.find((c) => c.idCompany === r.companyId);
+        if (!matchesVariant(r, variant, identity)) return false;
+      }
       if (!term) return true;
       return [r.DocNum, r.CardName, r.CardCode, r.U_SEND_UserName, r.Comments]
         .filter((v) => v != null && v !== '')
         .some((v) => String(v).toLowerCase().includes(term));
     });
-  }, [items, searchTerm, selectedCompany]);
+  }, [items, searchTerm, selectedCompany, tipo, variant, companies]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
   const pageItems = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedCompany, tipo]);
+  }, [searchTerm, selectedCompany, tipo, variant]);
 
   if (error) {
     return (
@@ -155,17 +345,64 @@ export default function PurchasesPage() {
     <div style={{ padding: '1rem' }}>
       <Group justify="space-between" align="center" wrap="wrap">
         <h2 style={{ margin: 0 }}>Compras</h2>
-        <SegmentedControl
-          value={tipo}
-          onChange={(v) => setTipo(v as PurchaseTipo)}
-          data={[
-            { label: 'Solicitudes', value: 'solicitudes' },
-            { label: 'Ordenes de compra', value: 'ordenes' },
-          ]}
-        />
+        <Group gap="sm">
+          {tipo === 'solicitudes' && writableCompanies.length > 0 && (
+            <Button
+              leftSection={<IconPlus size={16} />}
+              onClick={() => {
+                setEditTarget(null);
+                setDuplicateTarget(null);
+                setFormOpened(true);
+              }}
+            >
+              Nueva solicitud
+            </Button>
+          )}
+          {tipo === 'solicitudes' && writableCompanies.length > 0 && (
+            <Button variant="light" leftSection={<IconUpload size={16} />} onClick={() => setBulkOpened(true)}>
+              Carga masiva
+            </Button>
+          )}
+          <SegmentedControl
+            value={tipo}
+            onChange={(v) => setTipo(v as PurchaseTipo)}
+            data={[
+              { label: 'Solicitudes', value: 'solicitudes' },
+              { label: 'Ordenes de compra', value: 'ordenes' },
+            ]}
+          />
+        </Group>
       </Group>
 
       <DetailModal draft={selected} tipo={tipo} onClose={() => setSelected(null)} />
+      <RequestFormModal
+        opened={formOpened}
+        onClose={() => {
+          setFormOpened(false);
+          setFromRequests(false);
+        }}
+        onSaved={(warning) => {
+          setReloadKey((k) => k + 1);
+          if (warning) setActionMessage({ color: 'yellow', text: warning });
+        }}
+        companies={writableCompanies}
+        edit={editTarget}
+        duplicate={duplicateTarget}
+        initialCompanyId={initialCompanyId}
+        sendOnCreate={fromRequests && !editTarget}
+      />
+      <BulkModal
+        opened={bulkOpened}
+        onClose={() => setBulkOpened(false)}
+        onDone={() => setReloadKey((k) => k + 1)}
+        companies={writableCompanies}
+      />
+
+      {actionMessage && (
+        <Alert color={actionMessage.color} mt="sm" withCloseButton onClose={() => setActionMessage(null)}>
+          {actionMessage.text}
+        </Alert>
+      )}
 
       {companyErrors.length > 0 && (
         <Alert color="yellow" icon={<IconAlertTriangle size={16} />} mt="sm" mb="sm">
@@ -189,6 +426,24 @@ export default function PurchasesPage() {
           allowDeselect={false}
           style={{ flex: '0 1 220px', minWidth: 180 }}
         />
+        {tipo === 'solicitudes' && (
+          <Select
+            data={VARIANT_OPTIONS}
+            value={variant}
+            onChange={(v) => setVariant((v as PurchaseVariant) ?? 'todas')}
+            allowDeselect={false}
+            aria-label="Vista"
+            style={{ flex: '0 1 180px', minWidth: 160 }}
+          />
+        )}
+        <Button
+          variant="default"
+          leftSection={<IconFileSpreadsheet size={16} />}
+          onClick={() => void exportExcel()}
+          disabled={filtered.length === 0}
+        >
+          Exportar Excel
+        </Button>
       </Group>
 
       {loading ? (
@@ -239,14 +494,111 @@ export default function PurchasesPage() {
                       </Table.Td>
                       <Table.Td style={{ textAlign: 'right' }}>{formatTotal(r.DocTotal)}</Table.Td>
                       <Table.Td>
-                        <ActionIcon
-                          variant="subtle"
-                          size="sm"
-                          onClick={() => setSelected(r)}
-                          aria-label="Ver detalle"
-                        >
-                          <IconEye size={16} />
-                        </ActionIcon>
+                        <Group gap={2} wrap="nowrap">
+                          <ActionIcon
+                            variant="subtle"
+                            size="sm"
+                            onClick={() => setSelected(r)}
+                            aria-label="Ver detalle"
+                          >
+                            <IconEye size={16} />
+                          </ActionIcon>
+                          {canEditRow(r) && (
+                            <ActionIcon
+                              variant="subtle"
+                              color="blue"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDuplicateTarget(null);
+                                setEditTarget({ companyId: r.companyId, docEntry: Number(r.DocEntry) });
+                                setFormOpened(true);
+                              }}
+                              aria-label="Editar solicitud"
+                            >
+                              <IconPencil size={16} />
+                            </ActionIcon>
+                          )}
+                          {canEditRow(r) && (
+                            <ActionIcon
+                              variant="subtle"
+                              color="teal"
+                              size="sm"
+                              loading={sendingKey === `${r.companyId}-${r.DocEntry}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void sendToAuthorize(r);
+                              }}
+                              aria-label="Enviar a autorizar"
+                            >
+                              <IconSend size={16} />
+                            </ActionIcon>
+                          )}
+                          {tipo === 'solicitudes' && writableCompanies.some((c) => c.idCompany === r.companyId) && (
+                            <ActionIcon
+                              variant="subtle"
+                              color="gray"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditTarget(null);
+                                setDuplicateTarget({ companyId: r.companyId, docEntry: Number(r.DocEntry) });
+                                setFormOpened(true);
+                              }}
+                              aria-label="Duplicar solicitud"
+                            >
+                              <IconCopy size={16} />
+                            </ActionIcon>
+                          )}
+                          {tipo === 'solicitudes' && String(r.U_SEND_State ?? '') === 'NAD' && isOwnRow(r) && (
+                            <ActionIcon
+                              variant="subtle"
+                              color="blue"
+                              size="sm"
+                              loading={sendingKey === `${r.companyId}-${r.DocEntry}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void changeState(r, 'retomar');
+                              }}
+                              aria-label="Retomar solicitud"
+                              title="Retomar (vuelve a borrador para corregir y reenviar)"
+                            >
+                              <IconArrowBackUp size={16} />
+                            </ActionIcon>
+                          )}
+                          {tipo === 'solicitudes' && String(r.U_SEND_State ?? '') === 'B' && isOwnRow(r) && (
+                            <ActionIcon
+                              variant="subtle"
+                              color="red"
+                              size="sm"
+                              loading={sendingKey === `${r.companyId}-${r.DocEntry}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void changeState(r, 'anular');
+                              }}
+                              aria-label="Anular borrador"
+                              title="Anular borrador (con motivo)"
+                            >
+                              <IconTrash size={16} />
+                            </ActionIcon>
+                          )}
+                          {tipo === 'solicitudes' && String(r.U_SEND_State ?? '') === 'LA' && (
+                            <ActionIcon
+                              variant="subtle"
+                              color="orange"
+                              size="sm"
+                              loading={sendingKey === `${r.companyId}-${r.DocEntry}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void sendToQuotation(r);
+                              }}
+                              aria-label="Enviar a cotizacion"
+                              title="Enviar a cotizacion (autorizador)"
+                            >
+                              <IconReceipt size={16} />
+                            </ActionIcon>
+                          )}
+                        </Group>
                       </Table.Td>
                     </Table.Tr>
                   ))
@@ -266,5 +618,20 @@ export default function PurchasesPage() {
         </>
       )}
     </div>
+  );
+}
+
+/** useSearchParams (llegada desde «Mis solicitudes») exige un limite de Suspense en Next 15. */
+export default function PurchasesPage() {
+  return (
+    <Suspense
+      fallback={
+        <Group justify="center" mt="xl">
+          <Loader />
+        </Group>
+      }
+    >
+      <PurchasesPageContent />
+    </Suspense>
   );
 }

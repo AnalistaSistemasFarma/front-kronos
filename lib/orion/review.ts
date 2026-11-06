@@ -5,8 +5,10 @@ import { createAndSendNotifications } from '../notifications.js';
 import { fireAndForgetOrionDocumentEvent, isMissingTableError } from './documentEvents';
 import { getOrionDocumentFromBag, setOrionDocumentInBag } from './formValue';
 import {
+  autoApproveSubmitter,
   buildPendingApprovals,
   completedApprovals,
+  SELF_REVIEW_COMMENT,
   currentPendingApproval,
   isOrionReadyForSigning,
   keepWordApprovalForNewVersion,
@@ -18,6 +20,7 @@ import {
   assertUserIsOrionDocumentPreparer,
   buildNextVersionBaseState,
   getRequestOrionContext,
+  insertRequestNote,
   loadOrionFormBagEnsured,
   replaceSynerlinkAttachmentContent,
   upsertOrionFormBag,
@@ -365,10 +368,16 @@ export type OrionReviewInfo = {
   validators: OrionReviewValidator[];
   review: OrionReviewState | null;
   versionLabel: string;
+  /** El preparador marcó este documento "Sin validación". */
+  skipValidation: boolean;
+  /** Puede cambiar el interruptor Con / Sin validación (aún no empezó validación ni firma). */
+  canToggleValidation: boolean;
   canSubmit: boolean;
   canDecide: boolean;
   canUploadCorrection: boolean;
   readyForSigning: boolean;
+  /** Usuario de la sesión: si se elige como validador, su paso queda aprobado al enviar. */
+  currentUserId: string | null;
 };
 
 export async function getOrionReviewInfo(
@@ -401,22 +410,24 @@ export async function getOrionReviewInfo(
 
   const inSigning = ['PENDIENTE_FIRMA', 'EN_PROCESO', 'FIRMADO'].includes(statusUpper);
   const returnedBySigner = statusUpper === 'DEVUELTO';
+  const skipValidation = Boolean(state.skipValidation);
+  const reviewNotStarted = !review || review.status === 'SIN_VALIDACION';
 
   return {
     hasValidators,
     validators,
     review,
     versionLabel: resolveOrionVersionLabel(state.versionLabel),
-    canSubmit:
-      hasValidators &&
-      isPreparer &&
-      !inSigning &&
-      (!review || review.status === 'SIN_VALIDACION'),
+    skipValidation,
+    canToggleValidation: hasValidators && isPreparer && !inSigning && reviewNotStarted,
+    canSubmit: hasValidators && !skipValidation && isPreparer && !inSigning && reviewNotStarted,
     canDecide: Boolean(pending && me && normalizeEmail(pending.email) === me),
     canUploadCorrection:
       isPreparer &&
-      (review?.status === 'DEVUELTO_CORRECCION' || (returnedBySigner && !hasValidators)),
+      (review?.status === 'DEVUELTO_CORRECCION' ||
+        (returnedBySigner && (!hasValidators || skipValidation))),
     readyForSigning: isOrionReadyForSigning(state, hasValidators),
+    currentUserId: params.actor?.userId ?? null,
   };
 }
 
@@ -455,24 +466,30 @@ export async function submitOrionReview(
 
   const versionLabel = resolveOrionVersionLabel(current.versionLabel);
   const now = new Date().toISOString();
-  const review: OrionReviewState = {
-    status: 'EN_VALIDACION',
-    approvals: buildPendingApprovals(validators),
-    versionLabel,
-    submittedAt: now,
-    submittedBy: normalizeEmail(params.actor.email),
-    approvedAt: null,
-    returnReason: null,
-    returnedBy: null,
-    returnedAt: null,
-    round: (current.review?.round ?? 0) + 1,
-  };
+  // La preparadora que también valida queda aprobada al enviar (sin tarea para sí misma).
+  const review = autoApproveSubmitter(
+    {
+      status: 'EN_VALIDACION',
+      approvals: buildPendingApprovals(validators),
+      versionLabel,
+      submittedAt: now,
+      submittedBy: normalizeEmail(params.actor.email),
+      approvedAt: null,
+      returnReason: null,
+      returnedBy: null,
+      returnedAt: null,
+      round: (current.review?.round ?? 0) + 1,
+    },
+    params.actor,
+    now
+  );
   const state: OrionSignatureState = {
     ...current,
     fileName: params.fileName ?? current.fileName ?? null,
     signatureIntent: 'sign',
     versionLabel,
     review,
+    skipValidation: false,
   };
   const bag = setOrionDocumentInBag(loaded.bag, params.fileId, state);
   await upsertOrionFormBag(pool, params.requestId, loaded.field.id_form_field, bag);
@@ -495,6 +512,108 @@ export async function submitOrionReview(
     actorName: params.actor.name ?? null,
     detail: review.approvals.map((a) => `${a.order}. ${a.name || a.email}`).join(' · '),
   });
+  recordSelfReviewEvents(pool, {
+    requestId: params.requestId,
+    fileId: params.fileId,
+    orionDocumentId: current.orionDocumentId ?? null,
+    versionLabel,
+    review,
+    actor: params.actor,
+  });
+
+  return { state: getOrionDocumentFromBag(bag, params.fileId), documents: bag.documents };
+}
+
+/** Hoja de vida: el paso que la preparadora validó al enviar y, si fue el último, la aprobación. */
+function recordSelfReviewEvents(
+  pool: SqlPool,
+  params: {
+    requestId: number;
+    fileId: string;
+    orionDocumentId: string | null;
+    versionLabel: string;
+    review: OrionReviewState;
+    actor: OrionReviewActor;
+  }
+): void {
+  const own = params.review.approvals.filter(
+    (a) => a.decision === 'APROBADO' && a.comment === SELF_REVIEW_COMMENT
+  );
+  if (own.length === 0) return;
+  const base = {
+    requestId: params.requestId,
+    fileId: params.fileId,
+    orionDocumentId: params.orionDocumentId,
+    versionLabel: params.versionLabel,
+    actorEmail: params.actor.email,
+    actorName: params.actor.name ?? null,
+  };
+  for (const a of own) {
+    fireAndForgetOrionDocumentEvent(pool, {
+      ...base,
+      eventType: 'VALIDACION_APROBADA',
+      detail: `Paso ${a.order}/${params.review.approvals.length} · ${SELF_REVIEW_COMMENT}`,
+    });
+  }
+  if (params.review.status === 'APROBADO') {
+    fireAndForgetOrionDocumentEvent(pool, {
+      ...base,
+      eventType: 'APROBADO_PARA_FIRMA',
+      detail: completedApprovals(params.review)
+        .map((a) => a.name || a.email)
+        .join(', '),
+    });
+  }
+}
+
+/**
+ * Interruptor Con / Sin validación de UN documento. Solo el preparador y solo antes de que
+ * empiece la validación o la firma; "Sin validación" deja prepararlo y enviarlo a firma directo.
+ */
+export async function setOrionReviewMode(
+  pool: SqlPool,
+  params: {
+    requestId: number;
+    fileId: string;
+    fileName?: string | null;
+    skipValidation: boolean;
+    actor: OrionReviewActor;
+    isAdmin: boolean;
+  }
+): Promise<{ state: OrionSignatureState; documents: Record<string, OrionSignatureState> }> {
+  await assertCanSubmit(pool, params.requestId, params.actor, params.isAdmin);
+  if (!(await flowHasOrionValidators(pool, params.requestId))) {
+    throw httpError('Este flujo no tiene validadores: el documento ya va directo a firma.', 409);
+  }
+  const loaded = await loadOrionFormBagEnsured(pool, params.requestId);
+  const current = getOrionDocumentFromBag(loaded.bag, params.fileId);
+  if (current.review && current.review.status !== 'SIN_VALIDACION') {
+    throw httpError('La validación de este documento ya empezó; no se puede cambiar.', 409);
+  }
+  const statusUpper = String(current.status || '').toUpperCase();
+  if (['PENDIENTE_FIRMA', 'EN_PROCESO', 'FIRMADO'].includes(statusUpper)) {
+    throw httpError('El documento ya está en firma; no se puede cambiar la validación.', 409);
+  }
+
+  const state: OrionSignatureState = {
+    ...current,
+    fileName: params.fileName ?? current.fileName ?? null,
+    skipValidation: params.skipValidation,
+  };
+  const bag = setOrionDocumentInBag(loaded.bag, params.fileId, state);
+  await upsertOrionFormBag(pool, params.requestId, loaded.field.id_form_field, bag);
+
+  const docLabel = state.fileName || 'documento';
+  try {
+    await insertRequestNote(
+      pool,
+      params.requestId,
+      `${docLabel}: ${params.skipValidation ? 'sin validación (va directo a firma)' : 'con validación'} — por ${params.actor.name || params.actor.email}`,
+      params.actor.userId
+    );
+  } catch (err) {
+    console.warn('[orion/review] nota de modo de validación:', err);
+  }
 
   return { state: getOrionDocumentFromBag(bag, params.fileId), documents: bag.documents };
 }
@@ -686,18 +805,22 @@ export async function resubmitOrionReview(
   const fromWord = current.review.source === 'word';
   const review: OrionReviewState = fromWord
     ? keepWordApprovalForNewVersion(current.review, versionLabel)
-    : {
-        status: 'EN_VALIDACION',
-        approvals: buildPendingApprovals(validators),
-        versionLabel,
-        submittedAt: now,
-        submittedBy: normalizeEmail(params.actor.email),
-        approvedAt: null,
-        returnReason: null,
-        returnedBy: null,
-        returnedAt: null,
-        round: (current.review.round ?? 1) + 1,
-      };
+    : autoApproveSubmitter(
+        {
+          status: 'EN_VALIDACION',
+          approvals: buildPendingApprovals(validators),
+          versionLabel,
+          submittedAt: now,
+          submittedBy: normalizeEmail(params.actor.email),
+          approvedAt: null,
+          returnReason: null,
+          returnedBy: null,
+          returnedAt: null,
+          round: (current.review.round ?? 1) + 1,
+        },
+        params.actor,
+        now
+      );
   const state: OrionSignatureState = {
     ...base,
     orionDocumentId: null,
@@ -728,6 +851,14 @@ export async function resubmitOrionReview(
     actorEmail: params.actor.email,
     actorName: params.actor.name ?? null,
     detail: review.approvals.map((a) => `${a.order}. ${a.name || a.email}`).join(' · '),
+  });
+  recordSelfReviewEvents(pool, {
+    requestId: params.requestId,
+    fileId: params.fileId,
+    orionDocumentId: null,
+    versionLabel,
+    review,
+    actor: params.actor,
   });
 
   const ctx = await getRequestOrionContext(pool, params.requestId);

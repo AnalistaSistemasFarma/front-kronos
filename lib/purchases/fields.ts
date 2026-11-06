@@ -17,6 +17,17 @@
  * completo. NO se usa $expand=DocumentLines (no soportado por el wrapper).
  */
 
+/**
+ * Permiso de ESCRITURA de compras (crear/editar/enviar solicitudes). Es un
+ * marcador, no una pagina: el hub no debe listarlo (dashboardRoutes.ts).
+ */
+export const PURCHASES_WRITE_MARKER_URL = '/process/purchases/manage';
+
+/** ¿Es el marcador de escritura de compras? (para ocultarlo del hub). */
+export function isPurchasesWriteMarkerSubprocess(subprocess: { subprocess_url?: string | null }): boolean {
+  return (subprocess.subprocess_url ?? '').toLowerCase().trim().replace(/\/+$/, '') === PURCHASES_WRITE_MARKER_URL;
+}
+
 /** Los dos tipos de documento de compras del MVP. */
 export type PurchaseTipo = 'solicitudes' | 'ordenes';
 
@@ -76,6 +87,8 @@ export const LIST_SELECT_FIELDS: string[] = [
   'U_SEND_UserName',
   'U_SEND_UserEmail',
   'U_SEND_Dep',
+  // Para la variante «Mis solicitudes» (SAPSEND filtra por U_SEND_UserId).
+  'U_SEND_UserId',
 ];
 
 /** El $select acotado, ya unido, listo para la query. */

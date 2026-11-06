@@ -1,53 +1,30 @@
 'use client';
 
-import { useState, useEffect, useRef, Suspense } from 'react';
+import { useState, useEffect, useMemo, useRef, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import ExcelJS from 'exceljs';
+import { useRouter } from 'next/navigation';
 import { saveAs } from 'file-saver';
-import Link from 'next/link';
 import {
   Title,
-  Paper,
   Stack,
   Alert,
-  Breadcrumbs,
-  Anchor,
   Table,
-  TextInput,
-  Select,
-  Button,
   Group,
   Badge,
-  Modal,
-  Textarea,
-  Grid,
   Card,
   Text,
-  Divider,
   LoadingOverlay,
-  ActionIcon,
   Tooltip,
-  Collapse,
   Box,
-  Flex,
-  RingProgress,
   Loader,
   Pagination,
+  Button,
 } from '@mantine/core';
 import {
   IconAlertCircle,
-  IconChevronRight,
-  IconSearch,
-  IconPlus,
-  IconFilter,
   IconX,
-  IconCheck,
-  IconRefresh,
   IconFileDescription,
-  IconCalendarEvent,
   IconUser,
-  IconFlag,
   IconClock,
   IconBuilding,
   IconProgress,
@@ -55,17 +32,30 @@ import {
   IconCircleDot,
   IconCircle,
   IconUserCheck,
-  IconTag,
+  IconDownload,
 } from '@tabler/icons-react';
-import { sendMessage } from '../../../../../components/email/utils/sendMessage';
-import FileUpload, { UploadedFile } from '../../../../../components/ui/FileUpload';
+import {
+  RequestProgressBar,
+  RequestsHeader,
+  RequestsPage,
+} from '../../../../../components/request-general/list/RequestListUi';
+import { RequestListFilters } from '../../../../../components/request-general/list/RequestListFilters';
+import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
+import IosSearchField from '../../../../../components/ui/IosSearchField';
+import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
+import {
+  EMPTY_LIST_FILTERS,
+  type ListFilters,
+  type ListOptions,
+  type StatusCounts,
+} from '../../../../../lib/requests-general/listFilters';
 import {
   buildTaskDisplayBadges,
   getSimplifiedTasksProgress,
 } from '@/lib/orion/taskProgress';
-import { RequestProgressBar } from '../../../../../components/request-general/RequestProgressBar';
 
 const ITEMS_PER_PAGE = 100;
+const EMPTY_COUNTS: StatusCounts = { all: 0, pending: 0, done: 0, cancelled: 0 };
 
 interface RequestTask {
   id: number;
@@ -94,172 +84,73 @@ interface CompanyData {
   company: string;
 }
 
-interface CategoryData {
-  id: number;
-  category: string;
-}
-
-interface CategoriesNew {
-  category: string;
-}
-
-interface ProcessCategoryData {
-  id_process: number;
-  process: string;
-  id_category_request: number;
-  category: string;
-  email?: string;
-}
-
 interface ProcessCategoriesNew {
   process: string;
 }
 
 interface ConsultResponse {
   companies: CompanyData[];
-  categories: CategoryData[];
-  processCategories: ProcessCategoryData[];
   assignedUsers: { id: string; name: string }[];
-  categoriesNew: CategoriesNew[];
   processCategoriesNew: ProcessCategoriesNew[];
 }
 
+/** Lo que se le pide al servidor: los filtros del panel + el texto del buscador. */
+type AppliedQuery = { filters: ListFilters; search: string };
+
 function RequestGeneralPage() {
   const { data: session, status } = useSession();
-  const userName = session?.user?.name || '';
-  const [userId, setUserId] = useState<number | null>(null);
-  const [loadingUserId, setLoadingUserId] = useState(false);
-  const [userIdInitialized, setUserIdInitialized] = useState(false);
-
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const subprocessId = searchParams.get('subprocess_id');
+  // El servidor identifica a la persona por la sesión; basta con que exista.
+  const canLoad = Boolean(session);
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [tasksByRequest, setTasksByRequest] = useState<Record<number, RequestTask[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [modalOpened, setModalOpened] = useState(false);
-  const [formData, setFormData] = useState({
-    company: '',
-    subject: '',
-    category: '',
-    process: '',
-    descripcion: '',
-  });
-  const [createLoading, setCreateLoading] = useState(false);
 
-  const [companies, setCompany] = useState<{ value: string; label: string }[]>([]);
-  const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
+  const [companies, setCompanies] = useState<{ value: string; label: string }[]>([]);
   const [processes, setProcesses] = useState<{ value: string; label: string }[]>([]);
-  const [processCategories, setProcessCategories] = useState<
-    { value: string; label: string; id_category_request: number; email?: string }[]
-  >([]);
-  const [filteredProcesses, setFilteredProcesses] = useState<{ value: string; label: string }[]>(
-    []
-  );
   const [assignedUsers, setAssignedUsers] = useState<{ value: string; label: string }[]>([]);
-  const [formDataLoading, setFormDataLoading] = useState(false);
-  const [formDataError, setFormDataError] = useState<string | null>(null);
-  const [idUser, setIdUser] = useState('');
-  const [attachedFiles, setAttachedFiles] = useState<UploadedFile[]>([]);
-  const [folderContents, setFolderContents] = useState([]);
 
-  const [filters, setFilters] = useState({
-    id: '',
-    status: '0',
-    company: '',
-    date_from: '',
-    date_to: '',
-    assigned_to: '',
-    category: '',
-    process: '',
-  });
+  // Filtros iguales a los de Mis solicitudes; aquí la lista se pagina en el servidor, así que
+  // cada cambio vuelve a consultar desde la página 1 (con espera corta al teclear).
+  const [filters, setFilters] = useState<ListFilters>(EMPTY_LIST_FILTERS);
+  const [searchInput, setSearchInput] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   // Paginación en el servidor: `tickets` es solo la página actual; total y contadores vienen
   // de SQL sobre el conjunto filtrado (antes se descargaba todo el historial al navegador).
   const [totalTickets, setTotalTickets] = useState(0);
-  const [statusCounts, setStatusCounts] = useState({ open: 0, resolved: 0 });
-  // Filtros con los que se cargó la lista: al cambiar de página se reutilizan (no los que
-  // el usuario esté editando sin pulsar "Aplicar").
-  const appliedFiltersRef = useRef<typeof filters | null>(null);
+  const [statusCounts, setStatusCounts] = useState<StatusCounts>(EMPTY_COUNTS);
+  // Consulta con la que se cargó la lista: al cambiar de página o refrescar se reutiliza.
+  const appliedRef = useRef<AppliedQuery | null>(null);
+  const requestSeqRef = useRef(0);
+  const loadedOnceRef = useRef(false);
+  const prevQueryRef = useRef<AppliedQuery | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(totalTickets / ITEMS_PER_PAGE));
-  const pageItems = tickets;
-  const [filtersExpanded, setFiltersExpanded] = useState(false);
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    if (status === 'loading') return;
-    if (!session) {
-      router.push('/login');
-      return;
-    }
-    fetchFormData();
-  }, [session, status, router]);
+  // Opciones de los filtros: salen de los catálogos cargados (la lista llega por páginas).
+  const listOptions = useMemo<ListOptions>(
+    () => ({ companies, processes, people: assignedUsers }),
+    [companies, processes, assignedUsers]
+  );
 
-  useEffect(() => {
-    if (status === 'loading') return;
-    if (!session) {
-      router.push('/login');
-      return;
-    }
-
-    if (!userIdInitialized) {
-      if (userName && !userId) {
-        getUserIdByName(userName).then((id) => {
-          if (id) {
-            setUserId(id);
-            setUserIdInitialized(true);
-            fetchTicketsWithUserId(id);
-          } else {
-            setUserIdInitialized(true);
-          }
-        });
-      } else if (!userName) {
-        setUserIdInitialized(true);
-      }
-    }
-  }, [status, session, userName, userId, userIdInitialized, router]);
-
-  useEffect(() => {
-    const globalStore = localStorage.getItem('global-store');
-    if (globalStore) {
-      try {
-        const parsedStore = JSON.parse(globalStore);
-        const idUserValue = parsedStore?.state?.idUser || '';
-        setIdUser(idUserValue);
-      } catch (error) {
-        console.error('Error parsing global-store from localStorage:', error);
-        setIdUser('');
-      }
-    } else {
-      setIdUser('');
-    }
-  }, []);
-
-  useEffect(() => {
-    if (formData.category) {
-      const filtered = processCategories.filter(
-        (p) => p.id_category_request === parseInt(formData.category)
-      );
-      setFilteredProcesses(filtered);
-      if (!filtered.find((p) => p.value === formData.process)) {
-        setFormData((prev) => ({ ...prev, process: '' }));
-      }
-    } else {
-      setFilteredProcesses([]);
-      setFormData((prev) => ({ ...prev, process: '' }));
-    }
-  }, [formData.category, processCategories]);
-
-  const fetchTickets = async () => {
-    if (!userId) {
-      console.log('fetchTickets: No se puede ejecutar sin userId');
-      return;
-    }
-    await fetchTicketsWithUserId(userId);
+  const clearListFilters = () => {
+    setFilters(EMPTY_LIST_FILTERS);
+    setSearchInput('');
   };
+
+  useEffect(() => {
+    if (status === 'loading') return;
+    if (!session) {
+      router.push('/login');
+      return;
+    }
+    void fetchFormData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, status, router]);
 
   const fetchTasksForTickets = async (ticketsToUse: Ticket[]) => {
     try {
@@ -269,9 +160,11 @@ function RequestGeneralPage() {
         setTasksByRequest({});
         return;
       }
-      const response = await fetch(
-        `/api/requests-general/activities-requets?ids=${ids.join(',')}`
-      );
+      const response = await fetch('/api/requests-general/activities-requets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
       if (!response.ok) throw new Error('Failed to fetch request tasks');
 
       const data: RequestTask[] = await response.json();
@@ -289,191 +182,128 @@ function RequestGeneralPage() {
     }
   };
 
-  const fetchTicketsWithUserId = async (
-    userIdToUse: number,
-    filtersToUse: typeof filters = filters,
-    page = 1
-  ) => {
+  /** `silent`: refresca la tabla sin tapar la pantalla con el cargador (filtros, búsqueda y refresco automático). */
+  const fetchTickets = async (query: AppliedQuery, page = 1, silent = false) => {
+    const seq = ++requestSeqRef.current;
     try {
-      setLoading(true);
-      appliedFiltersRef.current = filtersToUse;
+      if (silent) setRefreshing(true);
+      else setLoading(true);
+      appliedRef.current = query;
+      const { filters: f, search } = query;
 
       const params = new URLSearchParams();
-      params.append('idUser', userIdToUse.toString());
       params.append('page', String(page));
       params.append('pageSize', String(ITEMS_PER_PAGE));
+      // El estado viaja como grupo (all | pending | done | cancelled).
+      params.append('status', f.status);
+      if (f.company) params.append('company', f.company);
+      if (f.date_from) params.append('date_from', f.date_from);
+      if (f.date_to) params.append('date_to', f.date_to);
+      if (f.person) params.append('assigned_to', f.person);
+      if (f.process) params.append('process', f.process);
+      const idDigits = f.id.replace(/\D/g, '');
+      if (idDigits) params.append('id', idDigits);
+      if (search) params.append('search', search);
 
-      if (filtersToUse.status) params.append('status', filtersToUse.status);
-      if (filtersToUse.company) params.append('company', filtersToUse.company);
-      if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
-      if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
-      if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
-      if (filtersToUse.process) params.append('process', filtersToUse.process);
-      if (filtersToUse.category) params.append('category', filtersToUse.category);
-      if (filtersToUse.id) params.append('id', filtersToUse.id);
-      const url = `/api/requests-general/general-requests?${params.toString()}`;
-
-      const response = await fetch(url);
-
+      const response = await fetch(`/api/requests-general/general-requests?${params.toString()}`);
       if (!response.ok) throw new Error('Failed to fetch tickets');
 
       const data = (await response.json()) as {
         rows: Ticket[];
         total: number;
-        counts: { open: number; resolved: number };
+        counts: Partial<StatusCounts>;
       };
+      // Si mientras tanto se pidió otra consulta, esta respuesta ya no vale.
+      if (seq !== requestSeqRef.current) return;
+
       const rows = Array.isArray(data.rows) ? data.rows : [];
       setTickets(rows);
       setTotalTickets(Number(data.total) || 0);
       setStatusCounts({
-        open: Number(data.counts?.open) || 0,
-        resolved: Number(data.counts?.resolved) || 0,
+        all: Number(data.counts?.all) || 0,
+        pending: Number(data.counts?.pending) || 0,
+        done: Number(data.counts?.done) || 0,
+        cancelled: Number(data.counts?.cancelled) || 0,
       });
       setCurrentPage(page);
-      fetchTasksForTickets(rows);
+      setLastUpdated(new Date());
+      setError(null);
+      void fetchTasksForTickets(rows);
     } catch (err) {
       console.error('Error fetching tickets:', err);
-      setError('Unable to load tickets. Please try again.');
+      // En el refresco automático un fallo de red no tapa la tabla; se reintenta en el siguiente.
+      if (!silent && seq === requestSeqRef.current) {
+        setError('No se pudieron cargar las solicitudes. Inténtalo de nuevo.');
+      }
     } finally {
-      setLoading(false);
-    }
-  };
-
-  const validateFilters = () => {
-    const errors: string[] = [];
-
-    if (filters.date_from && filters.date_to) {
-      const fromDate = new Date(filters.date_from);
-      const toDate = new Date(filters.date_to);
-      if (fromDate > toDate) {
-        errors.push('La fecha "Desde" no puede ser mayor que la fecha "Hasta"');
+      if (seq === requestSeqRef.current) {
+        if (silent) setRefreshing(false);
+        else setLoading(false);
       }
     }
-
-    if (filters.company && !companies.find((c) => c.value === filters.company)) {
-      errors.push('La empresa seleccionada no es válida');
-    }
-
-    if (filters.assigned_to && !assignedUsers.find((u) => u.value === filters.assigned_to)) {
-      errors.push('La persona asignada seleccionada no es válida');
-    }
-
-    if (errors.length > 0) {
-      setError(errors.join('. '));
-      return false;
-    }
-
-    return true;
   };
 
-  const handleApplyFilters = async () => {
-    if (!validateFilters()) {
-      return;
+  // Carga inicial y cada cambio de filtros/estado/buscador: vuelve a la página 1. Solo cambiar
+  // el estado (tarjetas) consulta al instante; al teclear se espera a que deje de escribir.
+  useEffect(() => {
+    if (!canLoad) return;
+    const query: AppliedQuery = { filters, search: searchInput.trim() };
+    const prev = prevQueryRef.current;
+    prevQueryRef.current = query;
+    const onlyStatusChanged =
+      prev !== null &&
+      prev.search === query.search &&
+      prev.filters.status !== query.filters.status &&
+      (Object.keys(query.filters) as Array<keyof ListFilters>).every(
+        (k) => k === 'status' || prev.filters[k] === query.filters[k]
+      );
+    const first = !loadedOnceRef.current;
+    const timer = window.setTimeout(
+      () => {
+        loadedOnceRef.current = true;
+        void fetchTickets(query, 1, !first);
+      },
+      first || onlyStatusChanged ? 0 : 350
+    );
+    return () => window.clearTimeout(timer);
+    // fetchTickets solo usa refs y setters estables.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canLoad, filters, searchInput]);
+
+  // Refresco automático cada 30 s (y al volver a la pestaña): misma página, filtros y búsqueda.
+  useAutoRefresh(() => {
+    if (canLoad && appliedRef.current) {
+      void fetchTickets(appliedRef.current, currentPage, true);
     }
-
-    if (userId) {
-      await fetchTicketsWithUserId(userId);
-    }
-  };
-
-  const getUserIdByName = async (userName: string): Promise<number | null> => {
-    if (!session || status !== 'authenticated') {
-      console.error('No hay sesión activa para realizar esta operación');
-      return null;
-    }
-
-    if (!userName || userName.trim() === '') {
-      console.error('El nombre de usuario es requerido');
-      return null;
-    }
-
-    try {
-      setLoadingUserId(true);
-
-      const params = new URLSearchParams({
-        userName: userName.trim(),
-      });
-
-      const response = await fetch(`/api/requests-general/get-user-id?${params}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Error al obtener ID de usuario:', errorData.error);
-        return null;
-      }
-
-      const data = await response.json();
-      return data.success ? data.userId : null;
-    } catch (error) {
-      console.error('Error en la llamada al endpoint:', error);
-      return null;
-    } finally {
-      setLoadingUserId(false);
-    }
-  };
+  });
 
   const fetchFormData = async () => {
     try {
-      setFormDataLoading(true);
-      setFormDataError(null);
-
       const response = await fetch(`/api/requests-general/consult-request`);
 
       if (response.ok) {
         const data: ConsultResponse = await response.json();
-        setCompany(
-          data.companies.map((c) => ({ value: c.id_company.toString(), label: c.company }))
+        setCompanies(
+          data.companies
+            .map((c) => ({ value: c.id_company.toString(), label: c.company }))
+            .sort((a, b) => a.label.localeCompare(b.label, 'es'))
         );
-        setFormData((prev) => ({
-          ...prev,
-          company: "3",
-        }));
-        setCategories(data.categoriesNew.map((c) => ({ value: c.category, label: c.category })));
         setProcesses(
-          data.processCategoriesNew.map((p) => ({
-            value: p.process.toString(),
-            label: p.process
-          }))
+          [...new Set((data.processCategoriesNew ?? []).map((p) => String(p.process)))]
+            .map((p) => ({ value: p, label: p }))
+            .sort((a, b) => a.label.localeCompare(b.label, 'es'))
         );
-        if (data.assignedUsers) {
-          setAssignedUsers(data.assignedUsers.map((u) => ({ value: u.name, label: u.name })));
-        }
+        setAssignedUsers(
+          (data.assignedUsers ?? [])
+            .map((u) => ({ value: u.name, label: u.name }))
+            .sort((a, b) => a.label.localeCompare(b.label, 'es'))
+        );
       } else {
         console.error('Frontend - fetchFormData failed with status:', response.status);
-        setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
       }
     } catch (err) {
       console.error('Error fetching form data:', err);
-      setFormDataError('Error al cargar los datos del formulario. Inténtalo de nuevo.');
-    } finally {
-      setFormDataLoading(false);
     }
-  };
-
-  const handleFormChange = (field: string, value: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-
-    if (formErrors[field]) {
-      setFormErrors((prev) => ({
-        ...prev,
-        [field]: '',
-      }));
-    }
-  };
-
-  const handleFilterChange = (field: string, value: string) => {
-    setFilters((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
   };
 
   if (status === 'loading' || loading) {
@@ -538,38 +368,11 @@ function RequestGeneralPage() {
 
   const getTasksProgress = (tasks: RequestTask[]) => getSimplifiedTasksProgress(tasks);
 
-  const getGlobalTasksProgress = () => {
-    const allTasks = Object.values(tasksByRequest).flat();
-    return getTasksProgress(allTasks);
-  };
+  const globalProgress = getTasksProgress(Object.values(tasksByRequest).flat());
 
-  const filterByStatus = (value: string) => {
-    const nf = { ...filters, status: value };
-    setFilters(nf);
-    if (userId) {
-      fetchTicketsWithUserId(userId, nf);
-    }
-  };
-
-  const breadcrumbItems = [
-    { title: 'Procesos', href: '/process' },
-    { title: 'Solicitudes Generales', href: '#' },
-    { title: 'Panel de Solicitudes', href: '#' },
-  ].map((item, index) =>
-    item.href !== '#' ? (
-      <Link key={index} href={item.href} passHref>
-        <Anchor component='span' className='hover:text-blue-600 transition-colors'>
-          {item.title}
-        </Anchor>
-      </Link>
-    ) : (
-      <Text key={index} component='span' c='dimmed'>
-        {item.title}
-      </Text>
-    )
-  );
-
+  /** Exporta la página que se está viendo (la lista completa vive en el servidor). */
   async function exportToExcel() {
+    const { default: ExcelJS } = await import('exceljs');
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Datos');
 
@@ -603,10 +406,10 @@ function RequestGeneralPage() {
 
     worksheet.columns = columnMapOrdered;
 
-    tickets.forEach(item => {
+    tickets.forEach((item) => {
       const row: Record<TicketKeys, any> = {} as Record<TicketKeys, any>;
 
-      columnMapOrdered.forEach(col => {
+      columnMapOrdered.forEach((col) => {
         const value = item[col.key];
         row[col.key] = dateKeys.includes(col.key) ? formatDate(value) : value;
       });
@@ -625,525 +428,253 @@ function RequestGeneralPage() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: 'var(--mantine-color-body)' }}>
-      <div className='max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8'>
-        {/* Header Section */}
-        <Card shadow='sm' p='xl' radius='md' withBorder mb='6'>
-          <Breadcrumbs separator={<IconChevronRight size={16} />} className='mb-4'>
-            {breadcrumbItems}
-          </Breadcrumbs>
-
-          <Flex justify='space-between' align='center' mb='4'>
-            <div>
-              <Title
-                order={1}
-                className='text-3xl font-bold mb-2 flex items-center gap-3'
-              >
-                <IconFileDescription size={32} className='text-blue-600' />
-                Solicitudes Generales
-              </Title>
-              <Text size='lg' c='dimmed'>
-                Gestión y seguimiento de solicitudes generales
-              </Text>
-            </div>
-
-          </Flex>
-
-          <Grid>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card
-                p='md'
-                radius='md'
-                withBorder
-                role='button'
-                aria-label='Mostrar todas las solicitudes'
-                onClick={() => filterByStatus('0')}
-                style={{
-                  cursor: 'pointer',
-                  backgroundColor: 'var(--mantine-color-blue-light)',
-                  borderColor:
-                    filters.status === '0'
-                      ? 'var(--mantine-color-blue-filled)'
-                      : 'transparent',
-                  borderWidth: 2,
-                  transition: 'border-color 150ms ease',
-                }}
-              >
-                <Group>
-                  <IconFileDescription size={24} color='var(--mantine-color-blue-light-color)' />
-                  <div>
-                    <Text size='xs' c='var(--mantine-color-blue-light-color)'>
-                      Total de Solicitudes
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {totalTickets}
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card
-                p='md'
-                radius='md'
-                withBorder
-                role='button'
-                aria-label='Filtrar solicitudes pendientes'
-                onClick={() => filterByStatus('1')}
-                style={{
-                  cursor: 'pointer',
-                  backgroundColor: 'var(--mantine-color-orange-light)',
-                  borderColor:
-                    filters.status === '1'
-                      ? 'var(--mantine-color-orange-filled)'
-                      : 'transparent',
-                  borderWidth: 2,
-                  transition: 'border-color 150ms ease',
-                }}
-              >
-                <Group>
-                  <IconProgress size={24} color='var(--mantine-color-orange-light-color)' />
-                  <div>
-                    <Text size='xs' c='var(--mantine-color-orange-light-color)'>
-                      Pendientes
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {statusCounts.open}
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card
-                p='md'
-                radius='md'
-                withBorder
-                role='button'
-                aria-label='Filtrar solicitudes completadas'
-                onClick={() => filterByStatus('2')}
-                style={{
-                  cursor: 'pointer',
-                  backgroundColor: 'var(--mantine-color-green-light)',
-                  borderColor:
-                    filters.status === '2'
-                      ? 'var(--mantine-color-green-filled)'
-                      : 'transparent',
-                  borderWidth: 2,
-                  transition: 'border-color 150ms ease',
-                }}
-              >
-                <Group>
-                  <IconCheck size={24} color='var(--mantine-color-green-light-color)' />
-                  <div>
-                    <Text size='xs' c='var(--mantine-color-green-light-color)'>
-                      Completadas
-                    </Text>
-                    <Text size='lg' fw={600}>
-                      {statusCounts.resolved}
-                    </Text>
-                  </div>
-                </Group>
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Card p='md' radius='md' withBorder>
-                {(() => {
-                  const { total, done, percent } = getGlobalTasksProgress();
-                  return (
-                    <Group wrap='nowrap'>
-                      <RingProgress
-                        size={56}
-                        thickness={6}
-                        roundCaps
-                        sections={[
-                          { value: percent, color: percent === 100 ? 'green' : 'blue' },
-                        ]}
-                        label={
-                          <Text size='xs' ta='center' fw={700}>
-                            {percent}%
-                          </Text>
-                        }
-                      />
-                      <div>
-                        <Text size='xs' c='dimmed'>
-                          Avance de tareas{totalPages > 1 ? ' (esta página)' : ''}
-                        </Text>
-                        <Text size='lg' fw={600}>
-                          {done}/{total}
-                        </Text>
-                      </div>
-                    </Group>
-                  );
-                })()}
-              </Card>
-            </Grid.Col>
-          </Grid>
-        </Card>
-
-        {error && (
-          <Alert
-            icon={<IconAlertCircle size={20} />}
-            title='Error'
-            color='red'
-            mb='md'
-            className='border-red-200 bg-red-50'
-          >
-            {error}
-          </Alert>
-        )}
-
-        <Card shadow='sm' p='lg' radius='md' withBorder mb='6'>
-          <Group justify='space-between' mb='md'>
-            <Title order={3} className='flex items-center gap-2'>
-              <IconFilter size={20} />
-              Filtros de Búsqueda
-            </Title>
-            <ActionIcon
-              variant='subtle'
-              onClick={() => setFiltersExpanded(!filtersExpanded)}
-              aria-label={filtersExpanded ? 'Ocultar filtros' : 'Mostrar filtros'}
-              data-testid='filter-toggle'
+    <RequestsPage>
+      <RequestsHeader
+        crumbs={[
+          { title: 'Procesos', href: '/process' },
+          { title: 'Solicitudes Generales' },
+          { title: 'Panel de Solicitudes' },
+        ]}
+        title='Solicitudes Generales'
+        subtitle='Gestión y seguimiento de solicitudes generales'
+        actions={
+          <Tooltip label='Exporta las solicitudes de la página que estás viendo' withArrow>
+            <Button
+              variant='default'
+              radius='xl'
+              leftSection={<IconDownload size={16} />}
+              disabled={tickets.length === 0}
+              onClick={() => void exportToExcel()}
             >
-              {filtersExpanded ? <IconX size={16} /> : <IconFilter size={16} />}
-            </ActionIcon>
-          </Group>
+              Descargar Excel
+            </Button>
+          </Tooltip>
+        }
+      />
 
-          <Collapse in={filtersExpanded}>
-            <Box mt='md'>
-              <Grid>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='ID Solicitud'
-                    type='text'
-                    value={filters.id}
-                    onChange={(e) => handleFilterChange('id', e.target.value)}
-                    leftSection={<IconFilter size={16} />}
-                    data-testid='id-filter'
-                />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Estado'
-                    placeholder='Todos los estados'
-                    clearable
-                    data={[
-                      { value: '0', label: 'Todos' },
-                      { value: '1', label: 'Abierto' },
-                      { value: '3', label: 'Cancelado' },
-                      { value: '2', label: 'Resuelto' },
-                      { value: '7', label: 'Devuelta' },
-                    ]}
-                    value={filters.status}
-                    onChange={(value) => handleFilterChange('status', value || '')}
-                    leftSection={<IconFlag size={16} />}
-                    data-testid='status-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Empresa'
-                    placeholder='Todas las empresas'
-                    clearable
-                    data={companies}
-                    value={filters.company}
-                    onChange={(value) => handleFilterChange('company', value || '')}
-                    leftSection={<IconBuilding size={16} />}
-                    data-testid='company-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Categoria'
-                    placeholder='Todas las categorias'
-                    clearable
-                    data={categories}
-                    value={filters.category}
-                    onChange={(value) => handleFilterChange('category', value || '')}
-                    leftSection={<IconBuilding size={16} />}
-                    data-testid='category-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Proceso'
-                    placeholder='Todas los procesos'
-                    clearable
-                    data={processes}
-                    value={filters.process}
-                    onChange={(value) => handleFilterChange('process', value || '')}
-                    leftSection={<IconBuilding size={16} />}
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='Fecha Desde'
-                    type='date'
-                    value={filters.date_from}
-                    onChange={(e) => handleFilterChange('date_from', e.target.value)}
-                    leftSection={<IconCalendarEvent size={16} />}
-                    data-testid='date_from-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='Fecha Hasta'
-                    type='date'
-                    value={filters.date_to}
-                    onChange={(e) => handleFilterChange('date_to', e.target.value)}
-                    leftSection={<IconCalendarEvent size={16} />}
-                    data-testid='date_to-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Persona Asignada'
-                    placeholder='Todas las personas'
-                    clearable
-                    data={assignedUsers}
-                    value={filters.assigned_to}
-                    onChange={(value) => handleFilterChange('assigned_to', value || '')}
-                    leftSection={<IconUserCheck size={16} />}
-                    data-testid='assigned_to-filter'
-                  />
-                </Grid.Col>
-              </Grid>
+      <RequestListFilters
+        filters={filters}
+        onChange={setFilters}
+        onClear={clearListFilters}
+        counts={statusCounts}
+        options={listOptions}
+        progress={globalProgress}
+        progressLabel={totalPages > 1 ? 'Avance de tareas (esta página)' : 'Avance de tareas'}
+      />
 
-              <Group justify='flex-end' mt='md'>
-                <Button
-                  variant='outline'
-                  onClick={async () => {
-                    const clearedFilters = {
-                      id: '',
-                      status: '0',
-                      company: '',
-                      date_from: '',
-                      date_to: '',
-                      assigned_to: '',
-                      process: '',
-                      category: '',
-                    };
-                    setFilters(clearedFilters);
+      {error && (
+        <Alert icon={<IconAlertCircle size={20} />} title='Error' color='red' radius='lg' mt='md'>
+          {error}
+        </Alert>
+      )}
 
-                    setError(null);
+      <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
+        <LoadingOverlay visible={loading} />
 
-                    setTimeout(async () => {
-                      if (userId) {
-                        // Con los filtros limpios: el estado `filters` de este render aún es el anterior.
-                        await fetchTicketsWithUserId(userId, clearedFilters);
-                      }
-                    }, 100);
-                  }}
-                  leftSection={<IconX size={16} />}
-                  data-testid='clear-filters'
-                >
-                  Limpiar Filtros
-                </Button>
-                <Button
-                  onClick={handleApplyFilters}
-                  leftSection={<IconRefresh size={16} />}
-                  data-testid='apply-filters'
-                >
-                  Aplicar Filtros
-                </Button>
-              </Group>
-            </Box>
-          </Collapse>
-        </Card>
-
-        {/* Enhanced Table */}
-        <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
-          <LoadingOverlay visible={loading} />
-
-          <Title order={3} mb='md' className='flex items-center gap-2'>
+        <Group justify='space-between' align='center' mb='xs' wrap='wrap'>
+          <Title order={3} className='flex items-center gap-2'>
             <IconFileDescription size={20} />
             Lista de Solicitudes
           </Title>
+          <AutoRefreshNote refreshing={refreshing} lastUpdated={lastUpdated} />
+        </Group>
 
-          <div className='overflow-x-auto'>
-            <Table striped highlightOnHover>
-              <Table.Thead>
+        <Box mb='md'>
+          <IosSearchField
+            value={searchInput}
+            onChange={setSearchInput}
+            placeholder='Buscar ID, asunto, empresa, categoría, proceso, estado o persona'
+            ariaLabel='Buscar solicitudes'
+            meta={
+              searchInput.trim()
+                ? `Buscando en todas las solicitudes · ${totalTickets} resultado(s)`
+                : 'Busca en toda la base, no solo en esta página; no importan tildes ni mayúsculas'
+            }
+          />
+        </Box>
+
+        <div className='overflow-x-auto'>
+          <Table striped highlightOnHover>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>ID</Table.Th>
+                <Table.Th>Asunto</Table.Th>
+                <Table.Th>Compañía / Categoría</Table.Th>
+                <Table.Th>Estado</Table.Th>
+                <Table.Th>Fecha</Table.Th>
+                <Table.Th>Solicitante / Asignado</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {tickets.length === 0 ? (
                 <Table.Tr>
-                  <Table.Th>ID</Table.Th>
-                  <Table.Th>Asunto</Table.Th>
-                  <Table.Th>Compañía / Categoría</Table.Th>
-                  <Table.Th>Estado</Table.Th>
-                  <Table.Th>Fecha</Table.Th>
-                  <Table.Th>Solicitante / Asignado</Table.Th>
+                  <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
+                    <div className='flex flex-col items-center gap-3'>
+                      <IconFileDescription size={48} className='text-gray-300' />
+                      <Text size='lg' fw={500}>
+                        No se encontraron solicitudes
+                      </Text>
+                      <Text size='sm' c='gray.5'>
+                        {searchInput.trim()
+                          ? `Ninguna solicitud coincide con “${searchInput.trim()}”`
+                          : 'Ninguna solicitud coincide con los filtros'}
+                      </Text>
+                    </div>
+                  </Table.Td>
                 </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {tickets.length === 0 ? (
-                  <Table.Tr>
-                    <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
-                      <div className='flex flex-col items-center gap-3'>
-                        <IconFileDescription size={48} className='text-gray-300' />
-                        <Text size='lg' fw={500}>
-                          No se encontraron solicitudes
+              ) : (
+                tickets.map((ticket) => (
+                  <Table.Tr
+                    key={ticket.id}
+                    className='cursor-pointer transition-colors'
+                    onClick={() => {
+                      sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
+                      window.open(
+                        `/process/request-general/view-request?id=${ticket.id}&from=general-requests`
+                      );
+                    }}
+                  >
+                    <Table.Td>
+                      <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
+                        {ticket.id}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td style={{ minWidth: 240, maxWidth: 320 }}>
+                      <Text size='sm' fw={500} lineClamp={2}>
+                        {ticket.subject}
+                      </Text>
+                      {tasksByRequest[ticket.id]?.length ? (
+                        <Stack gap={6} mt={8}>
+                          <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
+                          <Group gap={6} wrap='wrap'>
+                            {buildTaskDisplayBadges(tasksByRequest[ticket.id]).map((badge) => {
+                              const { color, Icon } = getTaskVisual(badge.statusKey);
+                              return (
+                                <Tooltip
+                                  key={badge.key}
+                                  label={`${badge.label} · ${badge.statusLabel}`}
+                                  withArrow
+                                >
+                                  <Badge
+                                    variant='light'
+                                    color={color}
+                                    size='sm'
+                                    radius='sm'
+                                    styles={{
+                                      root: {
+                                        textTransform: 'none',
+                                        fontWeight: 500,
+                                        cursor: 'default',
+                                      },
+                                      label: {
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                      },
+                                    }}
+                                    leftSection={<Icon size={13} />}
+                                  >
+                                    {badge.label}
+                                  </Badge>
+                                </Tooltip>
+                              );
+                            })}
+                          </Group>
+                        </Stack>
+                      ) : null}
+                    </Table.Td>
+                    <Table.Td>
+                      <Stack gap={2}>
+                        <Group gap={4} wrap='nowrap'>
+                          <IconBuilding size={14} className='text-gray-400' />
+                          <Text size='sm' fw={500}>
+                            {ticket.company}
+                          </Text>
+                        </Group>
+                        <Text size='xs' c='dimmed'>
+                          {ticket.category}
                         </Text>
-                        <Text size='sm' c='gray.5'>
-                          Intenta ajustar los filtros o crea una nueva solicitud
-                        </Text>
-                      </div>
+                      </Stack>
+                    </Table.Td>
+                    <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                      {(() => {
+                        const StatusIcon = getStatusIcon(ticket.status);
+                        return (
+                          <Badge
+                            color={getStatusColor(ticket.status)}
+                            variant='light'
+                            size='sm'
+                            leftSection={<StatusIcon size={12} />}
+                            styles={{ label: { overflow: 'visible' } }}
+                          >
+                            {ticket.status}
+                          </Badge>
+                        );
+                      })()}
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size='sm' c='dimmed'>
+                        {(() => {
+                          const raw = ticket.created_at;
+                          if (!raw) return 'Sin fecha';
+
+                          const date = new Date(raw);
+                          if (isNaN(date.getTime())) return 'Fecha inválida';
+
+                          const adjusted = new Date(date.getTime() + 5 * 60 * 60 * 1000);
+
+                          return new Intl.DateTimeFormat('es-CO', {
+                            day: 'numeric',
+                            month: 'long',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true,
+                          }).format(adjusted);
+                        })()}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Stack gap={4}>
+                        <Group gap={4} wrap='nowrap'>
+                          <IconUser size={14} className='text-gray-400' />
+                          <Text size='sm'>{ticket.requester}</Text>
+                        </Group>
+                        <Group gap={4} wrap='nowrap'>
+                          <IconUserCheck size={14} className='text-gray-400' />
+                          <Text size='sm' c='dimmed'>
+                            {ticket.user}
+                          </Text>
+                        </Group>
+                      </Stack>
                     </Table.Td>
                   </Table.Tr>
-                ) : (
-                  pageItems.map((ticket) => (
-                    <Table.Tr
-                      key={ticket.id}
-                      className='cursor-pointer transition-colors'
-                      onClick={() => {
-                        sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
-                        window.open(
-                          `/process/request-general/view-request?id=${ticket.id}&from=general-requests`
-                        );
-                      }}
-                    >
-                      <Table.Td>
-                        <Text size='sm' fw={700} c='var(--mantine-color-blue-light-color)'>
-                          {ticket.id}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td style={{ minWidth: 240, maxWidth: 320 }}>
-                        <Text size='sm' fw={500} lineClamp={2}>
-                          {ticket.subject}
-                        </Text>
-                        {tasksByRequest[ticket.id]?.length ? (
-                          <Stack gap={6} mt={8}>
-                            <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
-                            <Group gap={6} wrap='wrap'>
-                              {buildTaskDisplayBadges(tasksByRequest[ticket.id]).map((badge) => {
-                                const { color, Icon } = getTaskVisual(badge.statusKey);
-                                return (
-                                  <Tooltip
-                                    key={badge.key}
-                                    label={`${badge.label} · ${badge.statusLabel}`}
-                                    withArrow
-                                  >
-                                    <Badge
-                                      variant='light'
-                                      color={color}
-                                      size='sm'
-                                      radius='sm'
-                                      styles={{
-                                        root: {
-                                          textTransform: 'none',
-                                          fontWeight: 500,
-                                          cursor: 'default',
-                                        },
-                                        label: {
-                                          overflow: 'hidden',
-                                          textOverflow: 'ellipsis',
-                                        },
-                                      }}
-                                      leftSection={<Icon size={13} />}
-                                    >
-                                      {badge.label}
-                                    </Badge>
-                                  </Tooltip>
-                                );
-                              })}
-                            </Group>
-                          </Stack>
-                        ) : null}
-                      </Table.Td>
-                      <Table.Td>
-                        <Stack gap={2}>
-                          <Group gap={4} wrap='nowrap'>
-                            <IconBuilding size={14} className='text-gray-400' />
-                            <Text size='sm' fw={500}>
-                              {ticket.company}
-                            </Text>
-                          </Group>
-                          <Text size='xs' c='dimmed'>
-                            {ticket.category}
-                          </Text>
-                        </Stack>
-                      </Table.Td>
-                      <Table.Td style={{ whiteSpace: 'nowrap' }}>
-                        {(() => {
-                          const StatusIcon = getStatusIcon(ticket.status);
-                          return (
-                            <Badge
-                              color={getStatusColor(ticket.status)}
-                              variant='light'
-                              size='sm'
-                              leftSection={<StatusIcon size={12} />}
-                              styles={{ label: { overflow: 'visible' } }}
-                            >
-                              {ticket.status}
-                            </Badge>
-                          );
-                        })()}
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size="sm" c="dimmed">
-                          {
-                            (() => {
-                              const raw = ticket.created_at;
-                              if (!raw) return "Sin fecha";
+                ))
+              )}
+            </Table.Tbody>
+          </Table>
+        </div>
 
-                              const date = new Date(raw);
-                              if (isNaN(date.getTime())) return "Fecha inválida";
-
-                              const adjusted = new Date(date.getTime() + 5 * 60 * 60 * 1000);
-
-                              return new Intl.DateTimeFormat("es-CO", {
-                                day: "numeric",
-                                month: "long",
-                                year: "numeric",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                                hour12: true,
-                              }).format(adjusted);
-                            })()
-                          }
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Stack gap={4}>
-                          <Group gap={4} wrap='nowrap'>
-                            <IconUser size={14} className='text-gray-400' />
-                            <Text size='sm'>{ticket.requester}</Text>
-                          </Group>
-                          <Group gap={4} wrap='nowrap'>
-                            <IconUserCheck size={14} className='text-gray-400' />
-                            <Text size='sm' c='dimmed'>
-                              {ticket.user}
-                            </Text>
-                          </Group>
-                        </Stack>
-                      </Table.Td>
-                    </Table.Tr>
-                  ))
-                )}
-              </Table.Tbody>
-            </Table>
-          </div>
-
-          {totalPages > 1 && (
-            <Group justify='center' mt='md'>
-              <Pagination
-                total={totalPages}
-                value={currentPage}
-                onChange={(page) => {
-                  if (userId) {
-                    void fetchTicketsWithUserId(userId, appliedFiltersRef.current ?? filters, page);
-                  }
-                }}
-              />
-            </Group>
-          )}
-        </Card>
-
-      </div>
-    </div>
+        {totalPages > 1 && (
+          <Group justify='center' mt='md'>
+            <Pagination
+              total={totalPages}
+              value={currentPage}
+              onChange={(page) => {
+                if (canLoad && appliedRef.current) {
+                  void fetchTickets(appliedRef.current, page, true);
+                }
+              }}
+            />
+          </Group>
+        )}
+      </Card>
+    </RequestsPage>
   );
 }
 
 export default function RequestsGeneralPage() {
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Suspense fallback={<div>Cargando...</div>}>
       <RequestGeneralPage />
     </Suspense>
   );

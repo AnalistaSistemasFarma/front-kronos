@@ -1,10 +1,11 @@
 /*
-  REVERSA de prisma/manual/2026-10-16-user-signature-auto-close.sql.
+  LIMPIEZA: borra dbo.user_signature_auto_close.
 
-  Borra la tabla dbo.user_signature_auto_close (y con ella la preferencia de cierre
-  automático de cada persona). Con el código nuevo en pie, el interruptor dice "aún no
-  disponible" y ninguna solicitud se cierra sola al terminar de firmar.
-  Idempotente.
+  Esa tabla guardaba el interruptor "Cerrar al terminar de firmar", que se quitó el
+  2026-10-20: ahora las tareas de firma se cierran solas siempre y para todos, y el código
+  ya no lee ni escribe la tabla (su script de creación también se borró).
+  Correr SOLO en las bases donde se haya creado (p. ej. KRONOSDB_PRUEBAS). Idempotente:
+  si la tabla no existe no hace nada.
 */
 
 SET XACT_ABORT ON;

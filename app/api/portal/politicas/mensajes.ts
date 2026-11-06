@@ -8,8 +8,8 @@ import { PoliticasError } from '@/lib/portal/politicas-storage';
 export function mensajeErrorPoliticas(
   error: unknown,
   accion: 'listar' | 'vista',
-  /** Cómo se llama lo que se lee, para el mensaje: «de políticas» (por defecto) o «de ayudas». */
-  tema: 'de políticas' | 'de ayudas' = 'de políticas'
+  /** Cómo se llama lo que se lee, para el mensaje: «de políticas» (por defecto), «de ayudas» o «de capacitaciones». */
+  tema: 'de políticas' | 'de ayudas' | 'de capacitaciones' = 'de políticas'
 ): { status: number; mensaje: string } {
   if (error instanceof FormacionStorageNoConfigurado) {
     return {

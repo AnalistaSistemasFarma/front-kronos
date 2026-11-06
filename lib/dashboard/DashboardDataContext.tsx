@@ -62,6 +62,10 @@ interface DashboardDataContextValue {
   setSelectedMonthDate: (d: Date) => void;
   fetchTasks: (opts?: { silent?: boolean }) => Promise<void>;
   fetchTickets: (opts?: { silent?: boolean }) => Promise<void>;
+  /** Una vista que usa actividades/solicitudes se mostró: desde ahí se cargan. */
+  needTasks: () => void;
+  /** Una vista de tickets se mostró: desde ahí se cargan. */
+  needTickets: () => void;
   isAdmin: boolean;
   loadingAdmin: boolean;
   appliedRange: string | null;
@@ -122,6 +126,13 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
   const [ticketsAppliedRange, setTicketsAppliedRange] = useState<string | null>(null);
   const isAdmin = isDashboardAdmin;
   const loadingAdmin = loadingDashboardAdmin;
+
+  // Los datos se piden la primera vez que una vista que los usa se monta, no al abrir el
+  // dashboard: antes entrar a "Solicitudes" pedía también los tickets (y viceversa).
+  const [tasksWanted, setTasksWanted] = useState(false);
+  const [ticketsWanted, setTicketsWanted] = useState(false);
+  const needTasks = useCallback(() => setTasksWanted(true), []);
+  const needTickets = useCallback(() => setTicketsWanted(true), []);
 
   const tasksCacheKey = useRef<string | null>(null);
   const ticketsCacheKey = useRef<string | null>(null);
@@ -290,15 +301,15 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (status !== 'authenticated' || !session?.user?.email) return;
-    if (loadingAdmin || !isAdmin) return;
+    if (loadingAdmin || !isAdmin || !ticketsWanted) return;
     void fetchTickets();
-  }, [status, session?.user?.email, dateFilter, selectedMonthDate, fetchTickets, loadingAdmin, isAdmin]);
+  }, [status, session?.user?.email, dateFilter, selectedMonthDate, fetchTickets, loadingAdmin, isAdmin, ticketsWanted]);
 
   useEffect(() => {
     if (status !== 'authenticated' || !session?.user?.email) return;
-    if (loadingAdmin || !isAdmin) return;
+    if (loadingAdmin || !isAdmin || !tasksWanted) return;
     void fetchTasks();
-  }, [status, session?.user?.email, dateFilter, selectedMonthDate, fetchTasks, loadingAdmin, isAdmin]);
+  }, [status, session?.user?.email, dateFilter, selectedMonthDate, fetchTasks, loadingAdmin, isAdmin, tasksWanted]);
 
   const activeDateRange = getDashboardDateRange(dateFilter, selectedMonthDate);
 
@@ -323,6 +334,8 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
       setSelectedMonthDate: setSelectedMonthDateSafe,
       fetchTasks,
       fetchTickets,
+      needTasks,
+      needTickets,
       isAdmin,
       loadingAdmin,
       appliedRange,
@@ -349,6 +362,8 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
       setSelectedMonthDateSafe,
       fetchTasks,
       fetchTickets,
+      needTasks,
+      needTickets,
       isAdmin,
       loadingAdmin,
       appliedRange,

@@ -31,20 +31,19 @@ export async function GET() {
     // Crear grupos, desde el 2026-10-06 (decisión de Nicolás), es de cualquiera
     // con el chat que tenga al menos un agente asignado: un grupo necesita un
     // asistente y solo puede llevar los propios.
-    const canBroadcast = access.canUseChat
-      ? await checkAdminPrivileges(session.user.email)
-      : false;
     const canCreateGroups = access.canUseChat && access.agents.length > 0;
     // Piloto "Personas" (D2): solo pinta la sección con su buscador. La reja
     // de verdad está en /api/chat/people/*.
-    let canMessagePeople = false;
-    if (access.canUseChat) {
-      const yo = await prisma.user.findUnique({
-        where: { email: session.user.email },
-        select: { id: true },
-      });
-      canMessagePeople = yo ? await canStartPeopleChats(yo.id) : false;
-    }
+    // Las dos preguntas son independientes: van en paralelo (antes en serie).
+    const email = session.user.email;
+    const [canBroadcast, canMessagePeople] = access.canUseChat
+      ? await Promise.all([
+          checkAdminPrivileges(email),
+          prisma.user
+            .findUnique({ where: { email }, select: { id: true } })
+            .then((yo) => (yo ? canStartPeopleChats(yo.id) : false)),
+        ])
+      : [false, false];
     return NextResponse.json({ ...access, canBroadcast, canCreateGroups, canMessagePeople }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });

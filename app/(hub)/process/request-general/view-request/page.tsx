@@ -1,6 +1,8 @@
 'use client';
 
 import { Suspense, useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import PurchaseRequestDetail from '../../purchases/PurchaseRequestDetail';
+import SalesOfferDetail from '../../sales/SalesOfferDetail';
 import { useSearchParams, useRouter } from 'next/navigation';
 import axios from 'axios';
 import JSZip from 'jszip';
@@ -119,11 +121,13 @@ import OrionDraftTableRow from '../../../../../components/orion/OrionDraftTableR
 import { nestDraftPdfRows } from '../../../../../lib/orion/attachmentNesting';
 import { isWordDraftFileName } from '../../../../../lib/orion/draftState';
 import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
+import { RequestFlowHeader } from '../../../../../components/request-general/RequestFlow';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import TableFieldInput from '../create-request/TableFieldInput';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
 import { partitionTasksForDisplay } from '@/lib/orion/taskProgress';
 import { formatEstimatedPaymentDate } from '../../../../../lib/treasury/estimatedPaymentDate';
+import { isAssignedTo, isRequesterSelfAssigned } from '@/lib/request-general/assignee';
 
 interface Request {
   id: number;
@@ -151,7 +155,8 @@ interface Request {
   executor_final: string;
   idProceso: number;
   id_assigned_category: number;
-  id_assigned_process_category: number;
+  id_assigned_process_category: number | string;
+  IDassignedUserID?: number | string | null;
   id_treasury_requests?: number | null;
   numero_sapsend?: number | null;
   sapsend_status?: string | null;
@@ -173,7 +178,8 @@ interface Option {
 interface Note {
   id_note: number;
   note: string;
-  createdBy: string;
+  /** null cuando la nota la deja el sistema (p. ej. cierre automático por una Tarea SAP). */
+  createdBy: string | null;
   creation_date?: string;
 }
 
@@ -317,6 +323,7 @@ function ViewRequestPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [loadingUserId, setLoadingUserId] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
+  const [isRequester, setIsRequester] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loadingPermissions, setLoadingPermissions] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -364,6 +371,7 @@ function ViewRequestPage() {
       field_label: string;
       field_type?: string | null;
       editable?: boolean;
+      locked?: boolean;
       config_json?: string | null;
       id_option?: number | null;
       option_label: string | null;
@@ -437,6 +445,10 @@ function ViewRequestPage() {
           user: data.user ?? data.assignedUserName ?? data.usuario,
           requester: data.requester,
           id_requester: data.id_requester,
+          // Asignado de la solicitud: sin él, al entrar por el enlace del correo el
+          // solicitante que es el asignado no podía cerrar (#838).
+          id_assigned_process_category: data.id_assigned_process_category ?? data.IDassignedUserID,
+          IDassignedUserID: data.IDassignedUserID,
           requester_email: data.requester_email,
           executor_final: data.executor_final,
           resolution: data.resolutioncase || null,
@@ -850,6 +862,9 @@ function ViewRequestPage() {
   }, []);
 
   const getUserIdByName = async (userName: string): Promise<string | null> => {
+    // La sesión ya trae el id de Kronos (callback jwt, buscado por correo): sin viaje extra al
+    // servidor ni búsqueda por NOMBRE, que con dos personas homónimas podía traer el id equivocado.
+    if (session?.user?.id) return session.user.id;
     if (!session || status !== 'authenticated') {
       console.error('No hay sesión activa para realizar esta operación');
       return null;
@@ -919,13 +934,16 @@ function ViewRequestPage() {
 
       if (isRequester) {
         setCanEdit(false);
-        console.log('Permission check: solicitante — edición bloqueada', {
+        setIsRequester(true);
+        console.log('Permission check: solicitante — edición bloqueada, cierre permitido', {
           userName,
           requester: request.requester,
           id_requester: request.id_requester,
         });
         return;
       }
+
+      setIsRequester(false);
 
       // El "solicitado" (asignado al proceso) es quien gestiona y puede editar.
       const assignedCandidates = [request.user, request.assignedUserName].map(normalize);
@@ -946,6 +964,7 @@ function ViewRequestPage() {
     } catch (error) {
       console.error('Error checking permissions:', error);
       setCanEdit(false);
+      setIsRequester(false);
       setIsAdmin(false);
     } finally {
       setLoadingPermissions(false);
@@ -977,6 +996,15 @@ function ViewRequestPage() {
       checkEditPermissions();
     }
   }, [request?.id, request?.id_requester, request?.requester, request?.user, request?.assignedUserName, session, userName, session?.user?.id]);
+
+  // El solicitante puede CERRAR su solicitud (Resuelto/Cancelado/Devolver) aunque no
+  // pueda editar los campos, PERO solo cuando él mismo es el asignado de la solicitud
+  // (id del creador == id del asignado). Si el asignado es otra persona, no puede cerrar.
+  // Quien gestiona (canEdit) siempre puede.
+  // El asignado sale de la fila de la lista o, si se entró por el enlace del correo,
+  // de la API del detalle (#838).
+  const isSelfAssigned = isRequesterSelfAssigned(request);
+  const canClose = canEdit || (isRequester && isSelfAssigned);
 
   useEffect(() => {
     const processId = Number(request?.id_process_category);
@@ -2200,7 +2228,13 @@ function ViewRequestPage() {
           )}
 
           {renderSapsendStatus()}
+
+          {/* Avance del flujo arriba: en qué paso va y qué falta (sin las tareas de firma). */}
+          <RequestFlowHeader requestId={request.id} />
         </Card>
+
+        {/* Ventas: oferta en SAP (datos, cupo y cartera, mapa de relaciones y líneas), encima de la información de la solicitud. */}
+        <SalesOfferDetail requestId={request.id} mb='lg' />
 
         <div className='flex flex-col lg:flex-row gap-6'>
           <div className='flex-1 order-2 lg:order-1 min-w-0 space-y-5'>
@@ -2257,10 +2291,10 @@ function ViewRequestPage() {
                           >
                             <Group gap={8} mb={6} wrap='nowrap'>
                               <Avatar size={24} radius='xl' color={isCurrentUser ? 'blue' : 'gray'}>
-                                {note.createdBy.charAt(0).toUpperCase()}
+                                {(note.createdBy || 'S').charAt(0).toUpperCase()}
                               </Avatar>
                               <Text size='xs' fw={600} lineClamp={1}>
-                                {note.createdBy}
+                                {note.createdBy || 'SynerLink'}
                               </Text>
                               {note.creation_date && (
                                 <Text size='10px' c='dimmed' ml='auto' style={{ whiteSpace: 'nowrap' }}>
@@ -2485,6 +2519,9 @@ function ViewRequestPage() {
                   </Group>
                 </div>
 
+                {/* Compras: si esta solicitud autoriza un borrador de compra, se muestra con el diseño de SAPSEND. */}
+                <PurchaseRequestDetail requestId={id} />
+
                 <Divider />
 
                 {request?.resolution && request.resolution.trim() !== '' && (
@@ -2591,7 +2628,7 @@ function ViewRequestPage() {
                     </Title>
                   </Group>
 
-                  {!isRequestResolved() && isEditing && canEdit && (
+                  {!isRequestResolved() && isEditing && canClose && (
                     <Stack>
                       <Select
                         label='Estado de la solicitud'
@@ -2683,7 +2720,7 @@ function ViewRequestPage() {
               {requestFormValues
                 .filter((fv) => fv.field_type !== ORION_SIGNATURE_FIELD_TYPE)
                 .map((fv, fvIndex) => {
-                const canEditField = Boolean(fv.editable) && !isRequestResolved();
+                const canEditField = Boolean(fv.editable) && !isRequestResolved() && !fv.locked;
                 const isEditingThis = editingFieldId === fv.id_form_field;
                 const editButton = canEditField && !isEditingThis && (
                   <ActionIcon
@@ -2695,6 +2732,13 @@ function ViewRequestPage() {
                     <IconPencil size={16} />
                   </ActionIcon>
                 );
+                const lockedBadge = fv.locked ? (
+                  <Tooltip label='Este campo ya se editó y quedó bloqueado'>
+                    <Badge color='gray' variant='light' size='sm' leftSection={<IconLock size={12} />}>
+                      Bloqueado
+                    </Badge>
+                  </Tooltip>
+                ) : null;
                 const editActions = (
                   <Group justify='flex-end' gap='xs'>
                     <Button
@@ -2735,7 +2779,10 @@ function ViewRequestPage() {
                           <Text size='xs' c='dimmed' fw={500} className='uppercase'>
                             {fv.field_label}
                           </Text>
-                          {editButton}
+                          <Group gap='xs'>
+                            {lockedBadge}
+                            {editButton}
+                          </Group>
                         </Group>
                         {isEditingThis ? (
                           <Stack gap='sm'>
@@ -2791,7 +2838,10 @@ function ViewRequestPage() {
                         <Text size='xs' c='dimmed' fw={500} className='uppercase'>
                           {fv.field_label}
                         </Text>
-                        {editButton}
+                        <Group gap='xs'>
+                          {lockedBadge}
+                          {editButton}
+                        </Group>
                       </Group>
                       {isEditingThis ? (
                         <Stack gap='xs' mt={4}>
@@ -3277,9 +3327,9 @@ function ViewRequestPage() {
                   color='blue'
                   onClick={handleStartEditing}
                   leftSection={<IconTicket size={16} />}
-                  disabled={isRequestResolved() || !canEdit || loadingPermissions}
+                  disabled={isRequestResolved() || !canClose || loadingPermissions}
                 >
-                  Editar Solicitud
+                  {canEdit ? 'Editar Solicitud' : 'Cerrar Solicitud'}
                 </Button>
               ) : (
                 <>
@@ -3322,9 +3372,7 @@ function ViewRequestPage() {
                   Las solicitudes completadas no se pueden modificar.
                 </Text>
               )}
-              {(String(request.id_assigned_process_category || request.id_assigned_category || '') ===
-                String(userId || '') ||
-                isDocumentPreparer) && (
+              {(isAssignedTo(request, userId) || isDocumentPreparer) && (
                 <Button
                   color='blue'
                   onClick={() => {

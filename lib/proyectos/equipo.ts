@@ -18,13 +18,15 @@
  * El puente (llave de scope "projects") solo ve pedidos y equipos de
  * proyectos ACTIVOS donde su agente está designado, y solo recibe lo APROBADO.
  */
-import type { Prisma } from '../../app/generated/prisma';
+import { Prisma } from '../../app/generated/prisma';
 import { prisma } from '../prisma';
-import { profileLabel, profilesFor, projectsEnabledFor } from '../chat/projects-rules';
+import { profileLabel } from '../chat/projects-rules';
+import { cargarConfigProyectos } from './config-agentes';
 import { writeAccessForAgent, type ProjectAccess, type ProjectUser } from '../chat/projects';
 import { vinculosDelProyecto } from '../chat/projects-links';
 import { cronogramaParaAgente } from './cronograma';
 import { ProyectoError } from './acciones';
+import { aNumero } from '../chat/turn-usage-sums';
 import type { AgenteMiniDto, CorridaSubagenteDto, EquipoDto, PedidoEquipoDto, PersonaDto, SubagenteDto } from './tipos';
 import {
   capacidadesEquipo,
@@ -134,13 +136,15 @@ export async function equipoDelProyecto(user: ProjectUser, project: ProjectAcces
       orderBy: [{ created_at: 'desc' }, { id_run: 'desc' }],
       take: 25,
     }),
-    prisma.chatProjectSubagentRun.groupBy({
-      by: ['slug'],
-      where: { id_project: project.idProject, created_at: { gte: desde } },
-      _count: { _all: true },
-      _sum: { total_tokens: true },
-      _max: { created_at: true },
-    }),
+    // SUM con BIGINT: `total_tokens` es INT y SQL Server suma un INT como INT;
+    // el groupBy de Prisma desborda (P2020) en cuanto el total pasa de 2.147
+    // millones, como pasó con chat_agent_turn_usage (2026-10-21).
+    prisma.$queryRaw<Array<{ slug: string; corridas: unknown; tokens: unknown; ultima: Date | null }>>(Prisma.sql`
+      SELECT slug, COUNT_BIG(*) AS corridas, SUM(CAST(total_tokens AS BIGINT)) AS tokens, MAX(created_at) AS ultima
+      FROM [chat_project_subagent_run]
+      WHERE id_project = ${project.idProject} AND created_at >= ${desde}
+      GROUP BY slug
+    `).then((filas) => filas.map((r) => ({ slug: r.slug, corridas: aNumero(r.corridas), tokens: aNumero(r.tokens), ultima: r.ultima }))),
   ]);
   if (!p) throw new ProyectoError('Proyecto no encontrado.', 404);
 
@@ -185,7 +189,7 @@ export async function equipoDelProyecto(user: ProjectUser, project: ProjectAcces
       createdAt: f.created_at.toISOString(),
       reviewedBy: persona(f.reviewed_by),
       reviewedAt: f.reviewed_at ? f.reviewed_at.toISOString() : null,
-      uso30d: { corridas: u?._count._all ?? 0, tokens: u?._sum.total_tokens ?? 0, ultima: u?._max.created_at ? u._max.created_at.toISOString() : null },
+      uso30d: { corridas: u?.corridas ?? 0, tokens: u?.tokens ?? 0, ultima: u?.ultima ? u.ultima.toISOString() : null },
     };
   });
 
@@ -233,8 +237,8 @@ export async function equipoDelProyecto(user: ProjectUser, project: ProjectAcces
     pedido: pedidoDto,
     corridas: corridasDto,
     consumo30d: {
-      corridas: usoPorSub.reduce((a, u) => a + u._count._all, 0),
-      tokens: usoPorSub.reduce((a, u) => a + (u._sum.total_tokens ?? 0), 0),
+      corridas: usoPorSub.reduce((a, u) => a + u.corridas, 0),
+      tokens: usoPorSub.reduce((a, u) => a + u.tokens, 0),
     },
   };
 }
@@ -458,8 +462,11 @@ export async function configurarEquipo(user: ProjectUser, project: ProjectAccess
 /* ─────────────────────────────── Puente ─────────────────────────────── */
 
 /** Proyectos donde ESTE agente puede atender (activo, designado y con su perfil habilitado). */
-function whereProyectoAtendible(idAgent: number, code: string): Prisma.ChatProjectWhereInput {
-  return { archived: false, agents: { some: { id_agent: idAgent } }, profile: { in: projectsEnabledFor(code) ? profilesFor(code) : [] } };
+async function whereProyectoAtendible(idAgent: number, code: string): Promise<Prisma.ChatProjectWhereInput> {
+  // Empresa y perfil habilitados para el agente (configuración del módulo; sin configurar, el .env).
+  const filtro = (await cargarConfigProyectos()).filtroAtendible(code) as Prisma.ChatProjectWhereInput;
+  // El filtro solo trae id_company / profile / OR: no pisa archived ni agents.
+  return { archived: false, agents: { some: { id_agent: idAgent } }, ...filtro };
 }
 
 /**
@@ -469,7 +476,7 @@ function whereProyectoAtendible(idAgent: number, code: string): Prisma.ChatProje
 export async function reclamarPedidos(agent: { idAgent: number; code: string }) {
   await vencerPedidos({ id_agent: agent.idAgent });
   const pendientes = await prisma.chatProjectTeamRequest.findMany({
-    where: { id_agent: agent.idAgent, status: 'pendiente', project: whereProyectoAtendible(agent.idAgent, agent.code) },
+    where: { id_agent: agent.idAgent, status: 'pendiente', project: await whereProyectoAtendible(agent.idAgent, agent.code) },
     orderBy: { requested_at: 'asc' },
     take: 3,
     select: { id_request: true, id_project: true },
@@ -536,7 +543,7 @@ export async function entregarSugerencia(agent: { idAgent: number; code: string 
   const idRequest = Number(payload.idRequest);
   if (!Number.isInteger(idRequest) || idRequest <= 0) throw new ProyectoError('Pedido no encontrado.', 404);
   const pedido = await prisma.chatProjectTeamRequest.findFirst({
-    where: { id_request: idRequest, id_agent: agent.idAgent, status: 'en_curso', project: whereProyectoAtendible(agent.idAgent, agent.code) },
+    where: { id_request: idRequest, id_agent: agent.idAgent, status: 'en_curso', project: await whereProyectoAtendible(agent.idAgent, agent.code) },
     select: { id_request: true, id_project: true, project: { select: { profile: true } } },
   });
   if (!pedido) throw new ProyectoError('Pedido no encontrado.', 404);

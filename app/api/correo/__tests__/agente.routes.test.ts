@@ -46,7 +46,36 @@ const post = (url: string, body: unknown) => new Request(`http://x${url}`, { met
 const get = (url: string) => new Request(`http://x${url}`);
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  // La suite prueba la función ENCENDIDA; el bloque «bandera apagada» prueba el valor por defecto.
+  vi.stubEnv('CORREO_AGENTE_HABILITADO', 'true');
+});
+
+describe('Correo · agente · bandera CORREO_AGENTE_HABILITADO apagada', () => {
+  beforeEach(() => vi.stubEnv('CORREO_AGENTE_HABILITADO', ''));
+
+  it('sin sesión sigue siendo 401', async () => {
+    m.getServerSession.mockResolvedValue(null);
+    expect((await agentes.GET(get('/api/correo/agente/agentes'))).status).toBe(401);
+  });
+
+  it('con sesión y permiso: 403 en todas, lista vacía en acciones y no llama a nada', async () => {
+    comoUsuario();
+    expect((await agentes.GET(get('/api/correo/agente/agentes'))).status).toBe(403);
+    expect((await compartir.POST(post('/api/correo/agente/compartir', { conversationId: 'c', idAgent: 1 }))).status).toBe(403);
+    expect((await compartidos.GET(get('/api/correo/agente/compartidos?conversationId=x'))).status).toBe(403);
+    expect((await revocar.POST(post('/api/correo/agente/revocar', { id: 1 }))).status).toBe(403);
+    expect((await accion.POST(post('/api/correo/agente/acciones/1', { op: 'confirmar' }), params('1'))).status).toBe(403);
+    expect((await preparar.GET(get('/api/correo/agente/acciones/1/preparar'), params('1'))).status).toBe(403);
+    const r = await acciones.GET(get('/api/correo/agente/acciones?chat=1'));
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ acciones: [] });
+    for (const f of [m.agentesDisponibles, m.compartirConAgente, m.concesionesDeHilo, m.revocarConcesion, m.accionesDeChat, m.confirmarAccion, m.prepararSolicitud]) {
+      expect(f).not.toHaveBeenCalled();
+    }
+  });
+});
 
 describe('Correo · agente · rutas', () => {
   it('sin sesión: 401 en todas', async () => {

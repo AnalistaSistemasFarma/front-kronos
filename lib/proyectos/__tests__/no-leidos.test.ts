@@ -214,13 +214,15 @@ describe('marcar como leída', () => {
 });
 
 describe('rutas', () => {
-  it('GET /api/proyectos/no-leidos: 401 sin sesión, 403 sin módulo, 200 sin caché', async () => {
+  it('GET /api/proyectos/no-leidos: 401 sin sesión, 200 { habilitado: false } sin módulo, 200 sin caché', async () => {
     m.sessionUser.mockResolvedValue(null);
     expect((await noLeidosGet(req('/api/proyectos/no-leidos'))).status).toBe(401);
 
     m.sessionUser.mockResolvedValue(ANA);
     m.empresas.mockResolvedValue([]);
-    expect((await noLeidosGet(req('/api/proyectos/no-leidos'))).status).toBe(403);
+    const sinModulo = await noLeidosGet(req('/api/proyectos/no-leidos'));
+    expect(sinModulo.status).toBe(200);
+    expect(await sinModulo.json()).toEqual({ habilitado: false });
 
     m.empresas.mockResolvedValue([{ idCompany: 3, companyName: 'OLP' }]);
     const res = await noLeidosGet(req('/api/proyectos/no-leidos'));

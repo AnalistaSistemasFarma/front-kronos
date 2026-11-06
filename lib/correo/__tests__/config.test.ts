@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { faltantesInquilino, inquilinoDeCorreo, readCorreoConfig } from '../config';
+import { agenteCorreoHabilitado, faltantesInquilino, inquilinoDeCorreo, readCorreoConfig } from '../config';
 
 const env = {
   CORREO_MODO: 'graph',
@@ -20,6 +20,15 @@ describe('Correo · configuración por inquilino', () => {
     const d = readCorreoConfig({ CORREO_ENVIO_HABILITADO: 'false', CORREO_ETIQUETAR_HABILITADO: 'false', CORREO_SYNC_HABILITADO: 'true', CORREO_MODO: 'MOCK' });
     expect(d).toMatchObject({ modo: 'mock', envioHabilitado: false, etiquetarHabilitado: false, syncHabilitado: true });
     expect(readCorreoConfig({ CORREO_MODO: 'otro' }).modo).toBe('off');
+  });
+
+  it('«Consultar a un agente» (CORREO_AGENTE_HABILITADO) va APAGADO por defecto; solo «true» lo enciende', () => {
+    expect(readCorreoConfig({}).agenteHabilitado).toBe(false);
+    expect(agenteCorreoHabilitado({})).toBe(false);
+    expect(agenteCorreoHabilitado({ CORREO_AGENTE_HABILITADO: 'false' })).toBe(false);
+    expect(agenteCorreoHabilitado({ CORREO_AGENTE_HABILITADO: 'si' })).toBe(false);
+    expect(readCorreoConfig({ CORREO_AGENTE_HABILITADO: 'true' }).agenteHabilitado).toBe(true);
+    expect(agenteCorreoHabilitado({ CORREO_AGENTE_HABILITADO: 'TRUE' })).toBe(true);
   });
 
   it('eliminar (deslizar, 2026-10-18): encendido por defecto; CORREO_ELIMINAR_HABILITADO=false lo apaga', () => {

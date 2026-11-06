@@ -51,6 +51,7 @@ import {
   IconRefresh,
   IconRobot,
   IconSend,
+  IconTicket,
   IconTrash,
 } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
@@ -59,8 +60,9 @@ import { ACUSE_A_TODOS, ACUSE_ETIQUETA, enlaceSolicitud } from '../../lib/correo
 import { fragmentoAcuse, logoAcuseUrl } from '../../lib/correo/plantillas/acuse.html';
 import { htmlATexto } from '../../lib/correo/sanitize';
 import type { AdjuntoInfo, ResultadoAcuse } from '../../lib/correo/types';
-import { correoApi, esCancelada, fechaCorta, fechaLarga, PREVISUALIZABLES, tamano, urlAdjunto, urlSolicitud, type ConcesionCorreo, type HiloVista, type MensajeVista } from './correoClient';
+import { correoApi, esCancelada, fechaCorta, fechaLarga, PREVISUALIZABLES, tamano, urlAdjunto, urlSolicitud, urlTicket, type ConcesionCorreo, type HiloVista, type MensajeVista } from './correoClient';
 import ConsultarAgenteModal from './ConsultarAgenteModal';
+import CrearTicketModal from './CrearTicketModal';
 import { EsqueletoHiloCorreo } from './Esqueletos';
 import EditorMarkdown from './EditorMarkdown';
 import HtmlSeguro from './HtmlSeguro';
@@ -92,10 +94,14 @@ export interface HiloCorreoProps {
   onCambio: () => void;
   /** Responder desde SynerLink (Mail.Send) habilitado en el ambiente. */
   envioHabilitado?: boolean;
+  /** «Consultar a un agente» encendido en el ambiente (CORREO_AGENTE_HABILITADO; apagado por defecto). */
+  agenteHabilitado?: boolean;
   /** Nombre de la persona (firma del texto «Informar en el hilo»). */
   nombreOperador?: string;
   /** Correo de la persona (para mostrar «para mí»). */
   correoOperador?: string;
+  /** «Crear ticket» de mesa de ayuda: solo TI (el servidor lo revalida en cada llamada). */
+  ticketHabilitado?: boolean;
 }
 
 type Resultado = { color: 'green' | 'red' | 'yellow'; texto: string; reintentarAcuse?: { confirmarExterno: boolean } } | null;
@@ -316,8 +322,10 @@ export default function HiloCorreo({
   onCrearSolicitud,
   onCambio,
   envioHabilitado = true,
+  agenteHabilitado = false,
   nombreOperador = '',
   correoOperador = '',
+  ticketHabilitado = false,
 }: HiloCorreoProps) {
   const desktop = useMediaQuery('(min-width: 48em)') ?? true;
   const [hilo, setHilo] = useState<HiloVista | null>(null);
@@ -344,6 +352,9 @@ export default function HiloCorreo({
   const [agenteAbierto, setAgenteAbierto] = useState(false);
   const [compartidos, setCompartidos] = useState<ConcesionCorreo[]>([]);
   const [revocando, setRevocando] = useState<number | null>(null);
+  /** «Crear ticket» (solo TI): ticket ya creado desde este hilo y la ventana del formulario. */
+  const [ticket, setTicket] = useState<number | null>(null);
+  const [ticketAbierto, setTicketAbierto] = useState(false);
   /** Solo vale la respuesta del ÚLTIMO hilo pedido (si se abre otro antes de que llegue, la anterior se cancela). */
   const peticion = useRef<AbortController | null>(null);
   const yo = correoOperador.toLowerCase();
@@ -395,6 +406,8 @@ export default function HiloCorreo({
     setError(null);
     setCompartidos([]);
     setAgenteAbierto(false);
+    setTicket(null);
+    setTicketAbierto(false);
     if (conversationId) void cargar(false);
     else {
       peticion.current?.abort();
@@ -406,18 +419,28 @@ export default function HiloCorreo({
   useEffect(() => () => peticion.current?.abort(), []);
 
   const cargarCompartidos = useCallback(async () => {
-    if (!conversationId) return;
+    if (!conversationId || !agenteHabilitado) return;
     try {
       const r = await correoApi.compartidos(conversationId);
       setCompartidos(r.compartidos);
     } catch {
       setCompartidos([]);
     }
-  }, [conversationId]);
+  }, [conversationId, agenteHabilitado]);
 
   useEffect(() => {
     if (hilo?.conversationId) void cargarCompartidos();
   }, [hilo?.conversationId, cargarCompartidos]);
+
+  useEffect(() => {
+    if (!ticketHabilitado || !hilo?.conversationId) return;
+    const ctrl = new AbortController();
+    correoApi
+      .ticketDeHilo(hilo.conversationId, ctrl.signal)
+      .then((r) => setTicket(r.ticket))
+      .catch(() => undefined);
+    return () => ctrl.abort();
+  }, [ticketHabilitado, hilo?.conversationId]);
 
   const revocar = async (c: ConcesionCorreo) => {
     setRevocando(c.id);
@@ -692,6 +715,14 @@ export default function HiloCorreo({
           </Popover>
         )}
         {hilo &&
+          ticketHabilitado &&
+          !ticket &&
+          accion('Crear ticket', <IconTicket size={19} />, {
+            onClick: () => setTicketAbierto(true),
+            'data-testid': 'correo-hilo-ticket',
+          })}
+        {hilo &&
+          agenteHabilitado &&
           accion('Consultar a un agente', <IconRobot size={19} />, {
             onClick: () => setAgenteAbierto(true),
             'data-testid': 'correo-hilo-agente',
@@ -750,6 +781,20 @@ export default function HiloCorreo({
                   data-testid='correo-hilo-badge-solicitud'
                 >
                   #{hilo.vinculo.idRequest}
+                </Badge>
+              )}
+              {ticket && (
+                <Badge
+                  component='a'
+                  href={urlTicket(ticket)}
+                  color='blue'
+                  variant='light'
+                  radius='sm'
+                  leftSection={<IconTicket size={12} />}
+                  style={{ cursor: 'pointer', textTransform: 'none' }}
+                  data-testid='correo-hilo-badge-ticket'
+                >
+                  Ticket #{ticket}
                 </Badge>
               )}
             </Group>
@@ -994,7 +1039,7 @@ export default function HiloCorreo({
           )}
         </Stack>
       </div>
-      {hilo && (
+      {hilo && agenteHabilitado && (
         <ConsultarAgenteModal
           opened={agenteAbierto}
           onClose={() => setAgenteAbierto(false)}
@@ -1004,6 +1049,16 @@ export default function HiloCorreo({
             setAgenteAbierto(false);
             toast.success(`Hilo compartido con ${agente.displayName}`);
             router.push(`/process/chat/${encodeURIComponent(agente.code)}`);
+          }}
+        />
+      )}
+      {hilo && ticketHabilitado && ticketAbierto && (
+        <CrearTicketModal
+          opened={ticketAbierto}
+          conversationId={hilo.conversationId}
+          onClose={(idCase) => {
+            setTicketAbierto(false);
+            if (idCase) setTicket(idCase);
           }}
         />
       )}

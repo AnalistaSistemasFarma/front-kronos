@@ -1,6 +1,6 @@
 import { prepararSolicitud } from '../../../../../../../lib/correo/agente';
 import { agentePort } from '../../../../../../../lib/correo/agenteRuntime';
-import { empresaParam, errorResponse, getCorreoContext, jsonNoStore } from '../../../../_lib/context';
+import { agenteApagado, empresaParam, errorResponse, getCorreoContext, jsonNoStore } from '../../../../_lib/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +9,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   try {
     const ctx = await getCorreoContext(request);
     if (ctx instanceof Response) return ctx;
+    const apagado = agenteApagado();
+    if (apagado) return apagado;
     const { id } = await params;
     return jsonNoStore(await prepararSolicitud(ctx.deps, agentePort(), ctx.acceso, Number(id), empresaParam(request.url), ctx.ip));
   } catch (error) {

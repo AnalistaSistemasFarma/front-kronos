@@ -4,17 +4,23 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'reac
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
-import { ActionIcon, Anchor, Badge, Box, Card, Group, NavLink, Skeleton, Stack, Tabs, Text, ThemeIcon, Title } from '@mantine/core';
+import { ActionIcon, Anchor, Badge, Box, Card, Group, Menu, NavLink, Skeleton, Stack, Tabs, Text, ThemeIcon, Title } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import {
   IconArrowLeft,
+  IconDotsVertical,
   IconFile,
   IconFolder,
   IconInfoCircle,
   IconLink,
   IconLock,
   IconMessages,
+  IconMessageChatbot,
+  IconTable,
+  IconPencil,
+  IconShieldLock,
   IconTimeline,
+  IconTrash,
   IconUsers,
   IconUsersGroup,
 } from '@tabler/icons-react';
@@ -30,15 +36,20 @@ import {
   DesignarAgenteModal,
   InvitarModal,
   NuevaConversacionModal,
+  RenombrarConversacionModal,
   VincularCorreoModal,
   VincularSolicitudModal,
 } from './modales';
 import { ListaConversaciones, SeccionArchivos, SeccionDetalles, SeccionMiembros, SeccionVinculados } from './secciones';
 import SeccionCronograma from './cronograma/SeccionCronograma';
 import SeccionEquipo from './equipo/SeccionEquipo';
+import SeccionPermisos from './permisos/SeccionPermisos';
+import SeccionMesas from './mesas/SeccionMesas';
+import SeccionMatrices from './matrices/SeccionMatrices';
 import { AgentesApilados, AvisoArriba, BadgeRol, CONSULTA_ESCRITORIO, Encabezado, EsqueletoFilas, type Aviso } from './ui';
 import css from './proyectos.module.css';
 import { useEstadosAgentes } from './useEstadosAgentes';
+import MedidorConsumo, { useConsumoAnthropic } from './MedidorConsumo';
 import type { EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente';
 
 /**
@@ -59,8 +70,9 @@ import type { EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente'
  */
 
 // «Equipo» (F2, 2026-10-18): los subagentes del proyecto, junto al cronograma.
-type Seccion = 'conversaciones' | 'cronograma' | 'equipo' | 'vinculados' | 'archivos' | 'miembros' | 'detalles';
-const SECCIONES: Seccion[] = ['conversaciones', 'cronograma', 'equipo', 'vinculados', 'archivos', 'miembros', 'detalles'];
+// «Permisos» (2026-10-20): qué pueden hacer los agentes con el código del proyecto.
+type Seccion = 'conversaciones' | 'mesas' | 'matrices' | 'cronograma' | 'equipo' | 'vinculados' | 'archivos' | 'miembros' | 'permisos' | 'detalles';
+const SECCIONES: Seccion[] = ['conversaciones', 'mesas', 'matrices', 'cronograma', 'equipo', 'vinculados', 'archivos', 'miembros', 'permisos', 'detalles'];
 
 function esSeccion(v: string | null): v is Seccion {
   return v !== null && (SECCIONES as string[]).includes(v);
@@ -74,6 +86,9 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
   const { data: sesion } = useSession();
   const miId = sesion?.user?.id as string | undefined;
   const escritorio = useMediaQuery(CONSULTA_ESCRITORIO) ?? true;
+  // Cupo de Anthropic de los agentes del proyecto (2026-10-22): en el encabezado, para todos los miembros.
+  // Fijo y siempre visible para TODOS los miembros (no depende del rol ni de `capabilities`).
+  const { agentes: consumo, cargado: consumoCargado } = useConsumoAnthropic(idProject);
 
   const [proyecto, setProyecto] = useState<ProyectoDetalleDto | null>(null);
   const [sinAcceso, setSinAcceso] = useState(false);
@@ -87,7 +102,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
     return Number.isInteger(n) && n > 0 ? n : null;
   });
   const [ocupado, setOcupado] = useState(false);
-  const [modal, setModal] = useState<'conversacion' | 'correo' | 'solicitud' | 'invitar' | 'agentes' | null>(null);
+  const [modal, setModal] = useState<'conversacion' | 'renombrar' | 'correo' | 'solicitud' | 'invitar' | 'agentes' | null>(null);
   const [confirmar, setConfirmar] = useState<Confirmacion>(null);
   // Cronograma (2026-10-18): sube cada vez que el proyecto se recarga, para que la sección se refresque.
   const [version, setVersion] = useState(0);
@@ -157,6 +172,15 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
     } as ChatAgentDto;
   }, [proyecto, conversacion]);
 
+  // Multiagente (2026-10-29): OTROS asistentes del proyecto a los que la persona
+  // les puede escribir; se mencionan con @ en el hilo (el servidor revalida).
+  const mencionables = useMemo(() => {
+    if (!proyecto || !conversacion || conversacion.soloLectura) return [];
+    return proyecto.agents
+      .filter((a) => a.puedoEscribir && a.idAgent !== conversacion.agent.idAgent)
+      .map((a) => ({ valor: a.code, nombre: a.displayName, avatarUrl: a.avatarUrl }));
+  }, [proyecto, conversacion]);
+
   // CELULAR con una conversación abierta: pantalla completa como el chat. La
   // marca se quita SIEMPRE al salir, o la aplicación quedaría sin navegación.
   const inmersivo = !escritorio && conversacion !== null && seccion === 'conversaciones';
@@ -213,6 +237,29 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
       },
     });
 
+  // Eliminar una conversación (2026-10-29): borrado LÓGICO, con confirmación.
+  const eliminarConversacion = (c: { id: number; title: string | null }) =>
+    pedirConfirmacion({
+      titulo: 'Eliminar la conversación',
+      texto:
+        `«${c.title ?? 'Conversación'}» dejará de verse en el proyecto y los asistentes dejarán de atenderla. ` +
+        'Los mensajes y los adjuntos no se borran: quedan guardados para auditoría y el cambio queda registrado con su nombre y la fecha.',
+      accion: 'Eliminar',
+      hacer: async () => {
+        setOcupado(true);
+        const r = await apiSend('DELETE', `${base}/conversaciones/${c.id}`, undefined, 'No se pudo eliminar la conversación.');
+        setOcupado(false);
+        if (!r.ok) {
+          avisar({ tipo: 'error', texto: r.error ?? 'No se pudo eliminar la conversación.' });
+          return false;
+        }
+        setIdConversacion(null);
+        avisar({ tipo: 'ok', texto: 'Conversación eliminada.' });
+        await cargar();
+        return true;
+      },
+    });
+
   /* ─────────────────────────────── Pantallas ────────────────────────────── */
 
   if (sinAcceso) {
@@ -237,29 +284,38 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
 
   const conteo: Record<Seccion, number | null> = {
     conversaciones: proyecto?.conversations.length ?? null,
+    mesas: null,
+    matrices: null,
     cronograma: proyecto ? proyecto.taskCount + proyecto.links.requests.length : null,
     equipo: proyecto?.teamCount ?? null,
     vinculados: proyecto ? proyecto.links.emails.length + proyecto.links.requests.length : null,
     archivos: proyecto?.files.length ?? null,
     miembros: proyecto?.members.length ?? null,
+    permisos: null,
     detalles: null,
   };
   const etiqueta: Record<Seccion, string> = {
     conversaciones: 'Conversaciones',
+    mesas: 'Mesas',
+    matrices: 'Matrices',
     cronograma: 'Cronograma',
     equipo: 'Equipo',
     vinculados: 'Vinculados',
     archivos: 'Archivos',
     miembros: 'Miembros',
+    permisos: 'Permisos',
     detalles: 'Detalles',
   };
   const icono: Record<Seccion, React.ReactNode> = {
     conversaciones: <IconMessages size={18} />,
+    mesas: <IconMessageChatbot size={18} />,
+    matrices: <IconTable size={18} />,
     cronograma: <IconTimeline size={18} />,
     equipo: <IconUsersGroup size={18} />,
     vinculados: <IconLink size={18} />,
     archivos: <IconFile size={18} />,
     miembros: <IconUsers size={18} />,
+    permisos: <IconShieldLock size={18} />,
     detalles: <IconInfoCircle size={18} />,
   };
 
@@ -276,10 +332,30 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
             estados={estados}
           />
         );
+      case 'mesas':
+        return (
+          <SeccionMesas
+            proyecto={proyecto}
+            version={version}
+            avisar={avisar}
+            onAbrirConversacion={async (id) => {
+              // Una mesa recién creada todavía no está en la lista del proyecto: se recarga
+              // antes de abrirla (si no, «Ver la conversación completa» no mostraba nada).
+              if (!proyecto.conversations.some((c) => c.id === id)) await cargar();
+              setSeccion('conversaciones');
+              setIdConversacion(id);
+            }}
+            onCambio={() => void cargar()}
+          />
+        );
+      case 'matrices':
+        return <SeccionMatrices proyecto={proyecto} version={version} avisar={avisar} />;
       case 'cronograma':
         return <SeccionCronograma proyecto={proyecto} version={version} avisar={avisar} onVincularSolicitud={() => setModal('solicitud')} />;
       case 'equipo':
         return <SeccionEquipo proyecto={proyecto} version={version} avisar={avisar} />;
+      case 'permisos':
+        return <SeccionPermisos proyecto={proyecto} version={version} avisar={avisar} />;
       case 'vinculados':
         return (
           <SeccionVinculados
@@ -378,9 +454,27 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
           </Text>
           <Text size='xs' c='dimmed' className={css.truncar}>
             {proyecto.name} · {agenteConversacion.displayName}
+            {mencionables.length > 0 && ` · con @: ${mencionables.map((m) => m.nombre).join(', ')}`}
           </Text>
         </Box>
       </Group>
+      {conversacion.puedoGestionar && (
+        <Menu position='bottom-end' withinPortal shadow='md'>
+          <Menu.Target>
+            <ActionIcon variant='subtle' color='gray' size={44} aria-label='Opciones de la conversación' data-testid='proyecto-hilo-opciones'>
+              <IconDotsVertical size={20} />
+            </ActionIcon>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Item leftSection={<IconPencil size={16} />} onClick={() => setModal('renombrar')} data-testid='proyecto-hilo-renombrar'>
+              Renombrar
+            </Menu.Item>
+            <Menu.Item color='red' leftSection={<IconTrash size={16} />} onClick={() => eliminarConversacion(conversacion)} data-testid='proyecto-hilo-eliminar'>
+              Eliminar
+            </Menu.Item>
+          </Menu.Dropdown>
+        </Menu>
+      )}
     </Group>
   );
 
@@ -388,10 +482,16 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
     conversacion && agenteConversacion && proyecto ? (
       <>
         {cabeceraHilo}
+        {/* Celular: el hilo va a pantalla completa y tapa el encabezado; la píldora sigue arriba, a la derecha. */}
+        {!escritorio && (
+          <div className={css.medidorMovil}>
+            <MedidorConsumo agentes={consumo} cargado={consumoCargado} />
+          </div>
+        )}
         <ChatThread
           key={conversacion.id}
           agent={agenteConversacion}
-          project={{ idConversation: conversacion.id, name: proyecto.name, readOnly: conversacion.soloLectura }}
+          project={{ idConversation: conversacion.id, name: proyecto.name, readOnly: conversacion.soloLectura, mencionables }}
           currentUserId={miId}
           active
         />
@@ -408,6 +508,17 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
           setModal(null);
           setSeccion('conversaciones');
           setIdConversacion(id);
+          void cargar();
+        }}
+      />
+      <RenombrarConversacionModal
+        opened={modal === 'renombrar'}
+        idProject={idProject}
+        conversacion={conversacion}
+        onClose={() => setModal(null)}
+        onRenombrada={() => {
+          setModal(null);
+          avisar({ tipo: 'ok', texto: 'Conversación renombrada.' });
           void cargar();
         }}
       />
@@ -524,7 +635,7 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
   if (escritorio) {
     return (
       <div className={css.pantalla}>
-        <Encabezado titulo={proyecto?.name ?? 'Proyecto'} />
+        <Encabezado titulo={proyecto?.name ?? 'Proyecto'} derecha={<MedidorConsumo agentes={consumo} cargado={consumoCargado} />} />
         {aviso && <AvisoArriba aviso={aviso} onClose={() => setAviso(null)} />}
         <div className={css.layout}>
           <Card withBorder radius='md' p={0} className={css.columna}>
@@ -616,6 +727,11 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
         </Box>
         {proyecto && <BadgeRol role={proyecto.myRole} />}
       </Group>
+      {proyecto && (
+        <div className={css.medidorMovil}>
+          <MedidorConsumo agentes={consumo} cargado={consumoCargado} />
+        </div>
+      )}
       <div className={css.pestanas}>
         <Tabs value={seccion} onChange={(v) => esSeccion(v) && setSeccion(v)} variant='default'>
           <Tabs.List>

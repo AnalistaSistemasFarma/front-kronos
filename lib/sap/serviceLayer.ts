@@ -3,8 +3,8 @@ import * as https from 'https';
 /**
  * Cliente server-side del SAP Service Layer (OData v1).
  *
- * Centraliza Login / GET / Logout para no repetir el patron en cada route
- * (hoy esta suelto en app/api/purchase-request/*). Pensado para uso EXCLUSIVO
+ * Centraliza Login / GET / Logout para no repetir el patron en cada route.
+ * Pensado para uso EXCLUSIVO
  * en el servidor: las credenciales nunca deben viajar al navegador.
  *
  * Los Service Layer de las empresas usan certificados autofirmados, por eso el
@@ -17,13 +17,16 @@ const sapAgent = new https.Agent({ rejectUnauthorized: false });
 interface SapFetchInit {
   method: string;
   headers?: Record<string, string>;
-  body?: string;
+  body?: string | Buffer;
 }
 
 interface SapFetchResponse {
   ok: boolean;
   status: number;
   text: () => Promise<string>;
+  /** Cuerpo crudo (archivos de Attachments2). */
+  buffer: () => Promise<Buffer>;
+  contentType: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- espeja la firma de Response.json() del fetch nativo
   json: () => Promise<any>;
 }
@@ -57,12 +60,15 @@ function sapFetch(url: string, init: SapFetchInit): Promise<SapFetchResponse> {
         const chunks: Buffer[] = [];
         res.on('data', (chunk) => chunks.push(chunk));
         res.on('end', () => {
-          const bodyText = Buffer.concat(chunks).toString('utf8');
+          const raw = Buffer.concat(chunks);
+          const bodyText = raw.toString('utf8');
           const status = res.statusCode ?? 0;
           resolve({
             ok: status >= 200 && status < 300,
             status,
             text: async () => bodyText,
+            buffer: async () => raw,
+            contentType: String(res.headers['content-type'] ?? 'application/octet-stream'),
             json: async () => JSON.parse(bodyText),
           });
         });
@@ -94,6 +100,11 @@ export class SapError extends Error {
    */
   get friendly(): string {
     return extractSapMessage(this.detail) ?? this.message;
+  }
+
+  /** 412: el documento cambio desde la lectura (falla de If-Match / ETag). */
+  get isPreconditionFailed(): boolean {
+    return this.status === 412;
   }
 }
 
@@ -208,6 +219,18 @@ export async function sapGet<T = unknown>(
   return response.json() as Promise<T>;
 }
 
+/** GET de un archivo (p. ej. `Attachments2(n)/$value?filename='x.pdf'`): devuelve el contenido crudo. */
+export async function sapGetBinary(session: SapSession, path: string): Promise<{ data: Buffer; contentType: string }> {
+  const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
+  const response = await sapFetch(url, { method: 'GET', headers: { Cookie: `B1SESSION=${session.sessionId}` } });
+  if (response.status === 401) throw new SapError('Sesion SAP expirada o invalida', 401);
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new SapError(sapErrorMessage(`SAP GET ${path} fallo (${response.status})`, detail), response.status, detail);
+  }
+  return { data: await response.buffer(), contentType: response.contentType };
+}
+
 /**
  * GET que recorre TODA la paginacion del Service Layer. SAP entrega por paginas
  * (PageSize por defecto = 20, sin importar el $top); este helper pide paginas
@@ -270,6 +293,27 @@ export async function sapPost<T = unknown>(
 }
 
 /**
+ * POST a una acción del Service Layer que responde TEXTO PLANO (`text/plain`), no JSON.
+ * Ej.: SBOBobService_GetSystemCurrency → `USD`, SBOBobService_GetLocalCurrency → `COP`,
+ * SBOBobService_GetCurrencyRate → `3221.190000` (verificado en pruebas OLP, 2026-11-05).
+ * Con `sapPost` esas respuestas fallan en JSON.parse («"COP" is not valid JSON»).
+ */
+export async function sapPostText(session: SapSession, path: string, body: unknown): Promise<string> {
+  const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
+  const response = await sapFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: `B1SESSION=${session.sessionId}` },
+    body: JSON.stringify(body),
+  });
+  if (response.status === 401) throw new SapError('Sesion SAP expirada o invalida', 401);
+  const text = await response.text().catch(() => '');
+  if (!response.ok) {
+    throw new SapError(sapErrorMessage(`SAP POST ${path} fallo (${response.status})`, text), response.status, text);
+  }
+  return text;
+}
+
+/**
  * PATCH generico al Service Layer (ej. editar un UDO o agregar lineas a una
  * coleccion hija). SAP responde 204 No Content en exito.
  *
@@ -281,7 +325,8 @@ export async function sapPatch(
   session: SapSession,
   path: string,
   body: unknown,
-  replaceCollections = false
+  replaceCollections = false,
+  opts: { ifMatch?: string } = {}
 ): Promise<void> {
   const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
 
@@ -290,6 +335,9 @@ export async function sapPatch(
     Cookie: `B1SESSION=${session.sessionId}`,
   };
   if (replaceCollections) headers['B1S-ReplaceCollectionsOnPatch'] = 'true';
+  // Control optimista: SAP responde 412 si el documento cambio desde que se leyo
+  // (valor de `odata.etag`). Evita que dos decisiones pisen el mismo borrador.
+  if (opts.ifMatch) headers['If-Match'] = opts.ifMatch;
 
   const response = await sapFetch(url, {
     method: 'PATCH',
@@ -304,6 +352,69 @@ export async function sapPatch(
     const detail = await response.text().catch(() => '');
     throw new SapError(sapErrorMessage(`SAP PATCH ${path} fallo (${response.status})`, detail), response.status, detail);
   }
+}
+
+/** Archivo para un envio multipart (p. ej. Attachments2). */
+export interface SapFilePart {
+  filename: string;
+  contentType: string;
+  data: Buffer;
+}
+
+/** Arma el cuerpo multipart/form-data que espera Attachments2 (mismo formato que SAPSEND). */
+export function buildMultipartBody(files: SapFilePart[], boundary: string): Buffer {
+  const chunks: Buffer[] = [];
+  const quote = (s: string) => s.replace(/["\r\n]/g, '_');
+  for (const f of files) {
+    chunks.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${quote(f.filename)}"\r\n` +
+          `Content-Type: ${f.contentType}\r\n\r\n`
+      ),
+      f.data,
+      Buffer.from('\r\n')
+    );
+  }
+  chunks.push(Buffer.from(`--${boundary}--\r\n`));
+  return Buffer.concat(chunks);
+}
+
+/**
+ * Sube archivos al Service Layer en multipart/form-data. POST crea un registro
+ * (Attachments2 -> devuelve AbsoluteEntry); PATCH Attachments2(n) agrega lineas
+ * al registro existente.
+ */
+export async function sapUploadFiles<T = unknown>(
+  session: SapSession,
+  path: string,
+  files: SapFilePart[],
+  method: 'POST' | 'PATCH' = 'POST'
+): Promise<T | null> {
+  const url = `${session.baseUrl}/b1s/v1/${path.replace(/^\/+/, '')}`;
+  const boundary = `----synerlink${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+  const body = buildMultipartBody(files, boundary);
+
+  const response = await sapFetch(url, {
+    method,
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      'Content-Length': String(body.length),
+      Cookie: `B1SESSION=${session.sessionId}`,
+    },
+    body,
+  });
+
+  if (response.status === 401) {
+    throw new SapError('Sesion SAP expirada o invalida', 401);
+  }
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new SapError(sapErrorMessage(`SAP ${method} ${path} fallo (${response.status})`, detail), response.status, detail);
+  }
+  // POST devuelve el registro creado; PATCH responde 204 sin cuerpo.
+  const text = await response.text();
+  return text ? (JSON.parse(text) as T) : null;
 }
 
 /** Elimina un recurso del Service Layer (DELETE entity(key)). */

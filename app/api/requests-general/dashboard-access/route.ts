@@ -7,9 +7,11 @@ import {
   type RequestDashboardKind,
 } from '../../../../lib/request-general/dashboardAccess';
 import { isTeamLeader } from '../../../../lib/request-general/teamDashboard';
+import { checkAdminPrivileges } from '../../../../lib/access-control';
 
 /**
- * GET /api/requests-general/dashboard-access?kind=solicitante|solicitado|equipo
+ * GET /api/requests-general/dashboard-access?kind=solicitante|solicitado|equipo|all
+ * `all` devuelve los tres más `dashboardAdmin` (misma regla que /api/dashboard/access).
  * `equipo` no es un permiso asignado: lo tiene quien es líder (ver teamDashboard.ts).
  */
 export async function GET(req: Request) {
@@ -20,7 +22,18 @@ export async function GET(req: Request) {
     }
 
     const { searchParams } = new URL(req.url);
-    const kind = (searchParams.get('kind') || '').trim() as RequestDashboardKind | 'equipo';
+    const kind = (searchParams.get('kind') || '').trim() as RequestDashboardKind | 'equipo' | 'all';
+    if (kind === 'all') {
+      // Todo lo que necesita el menú en UNA llamada y en paralelo (antes 4–6 llamadas por página).
+      const email = session.user.email;
+      const [solicitante, solicitado, equipo, dashboardAdmin] = await Promise.all([
+        hasRequestDashboardAccess(email, 'solicitante'),
+        hasRequestDashboardAccess(email, 'solicitado'),
+        resolveUserIdByEmail(email).then((userId) => (userId ? isTeamLeader(userId) : false)),
+        checkAdminPrivileges(email),
+      ]);
+      return NextResponse.json({ kind, solicitante, solicitado, equipo, dashboardAdmin });
+    }
     if (kind === 'equipo') {
       const userId = await resolveUserIdByEmail(session.user.email);
       const allowed = userId ? await isTeamLeader(userId) : false;

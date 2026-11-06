@@ -8,6 +8,9 @@ import { prisma } from '../../../../lib/prisma';
 import { normalizeNit, SUPPLIER_ROLE } from '../../../../lib/proveedor/isolation';
 import { noteLoginAttempt, withLoginAudit } from '../../../../lib/auth/login-audit/recorder';
 import { resolveAuthRedirect } from '../../../../lib/auth/safe-redirect';
+import { sessionUserCache, type SessionUserRow } from '../../../../lib/auth/sessionUserCache';
+import { PASSKEY_CHALLENGE_COOKIE, consumeChallenge, readCookie } from '../../../../lib/auth/passkeys/challenge';
+import { PasskeysUnavailableError, verifyLogin } from '../../../../lib/auth/passkeys/service';
 
 const azureConfigured =
   Boolean(process.env.AZURE_AD_CLIENT_ID) &&
@@ -17,25 +20,13 @@ const azureConfigured =
   Boolean(process.env.AZURE_AD_TENANT_ID) &&
   process.env.AZURE_AD_TENANT_ID !== 'your-tenant-id';
 
-type SessionUserRow = {
-  id: string;
-  role: string;
-  image: string | null;
-  themePalette: string | null;
-  colorScheme: string | null;
-  uiFont: string | null;
-  nit: string | null;
-};
-
 /**
  * El callback jwt corre en CADA getServerSession (cada API) y antes consultaba [user] siempre.
  * Se guarda la fila por correo unos segundos: rol, tema y foto siguen al día (máx. 60 s de
- * retraso, o inmediato con update()) y la BD deja de recibir una consulta por llamada.
+ * retraso; inmediato con update() o cuando /api/profile la olvida) y la BD deja de recibir
+ * una consulta por llamada.
  */
 const SESSION_USER_TTL_MS = 60_000;
-const sessionUserCache: Map<string, { row: SessionUserRow | undefined; at: number }> =
-  ((globalThis as Record<string, unknown>).__kronosSessionUserCache as never) ??
-  ((globalThis as Record<string, unknown>).__kronosSessionUserCache = new Map());
 
 async function loadSessionUser(email: string, fresh: boolean): Promise<SessionUserRow | undefined> {
   const key = email.trim().toLowerCase();
@@ -154,6 +145,54 @@ export const authOptions: AuthOptions = {
           name: user.name,
           image: user.image,
         };
+      },
+    }),
+    // Acceso con biométrico (passkeys / WebAuthn, 2026-10-31): Face ID, huella o Windows Hello.
+    // El dispositivo firma el reto de /api/passkeys/login/options (cookie cifrada, un solo
+    // uso); aquí se verifica la firma con la llave pública guardada en dbo.user_passkey.
+    CredentialsProvider({
+      id: 'passkey',
+      name: 'passkey',
+      credentials: {
+        response: { label: 'Respuesta del dispositivo', type: 'text' },
+      },
+      async authorize(credentials, req) {
+        let response: unknown = null;
+        try {
+          response = credentials?.response ? JSON.parse(credentials.response) : null;
+        } catch {
+          response = null;
+        }
+        if (!response || typeof response !== 'object') {
+          noteLoginAttempt({ identifier: null, success: false, reason: 'DATOS_INCOMPLETOS' });
+          return null;
+        }
+        const headers = (req?.headers ?? {}) as Record<string, string | string[] | undefined>;
+        const rawCookie = Array.isArray(headers.cookie) ? headers.cookie.join('; ') : headers.cookie;
+        const challenge = await consumeChallenge(readCookie(rawCookie, PASSKEY_CHALLENGE_COOKIE), 'login');
+        if (!challenge) {
+          noteLoginAttempt({ identifier: null, success: false, reason: 'PASSKEY_RETO_VENCIDO' });
+          return null;
+        }
+        try {
+          const result = await verifyLogin(response as Parameters<typeof verifyLogin>[0], challenge);
+          if (!result.ok) {
+            noteLoginAttempt({
+              identifier: result.identifier,
+              userId: result.userId ?? null,
+              userName: result.userName ?? null,
+              success: false,
+              reason: result.reason,
+            });
+            return null;
+          }
+          noteLoginAttempt({ identifier: result.user.email, userId: result.user.id, userName: result.user.name, success: true });
+          return result.user;
+        } catch (error) {
+          if (!(error instanceof PasskeysUnavailableError)) console.error('[passkey] authorize:', error);
+          noteLoginAttempt({ identifier: null, success: false, reason: 'ERROR_INTERNO' });
+          return null;
+        }
       },
     }),
     ...(azureConfigured

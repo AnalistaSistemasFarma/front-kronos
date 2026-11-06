@@ -1,0 +1,26 @@
+import { prisma } from '../../../../../lib/prisma';
+import { crearGrupo, listarGrupos } from '../../../../../lib/vitrina/service';
+import { errorResponse, gestionDesdeCuerpo, gestionDesdeUrl, jsonNoStore } from '../../_lib/context';
+
+export const dynamic = 'force-dynamic';
+
+/** Grupos terapéuticos: catálogo común a las empresas; el conteo es solo de la empresa pedida. */
+export async function GET(request: Request) {
+  const actor = await gestionDesdeUrl(request);
+  if (actor instanceof Response) return actor;
+  try {
+    return jsonNoStore({ grupos: await listarGrupos(prisma, actor.idCompany) });
+  } catch (error) {
+    return errorResponse(error, 'grupos');
+  }
+}
+
+export async function POST(request: Request) {
+  const r = await gestionDesdeCuerpo(request);
+  if (r instanceof Response) return r;
+  try {
+    return jsonNoStore(await crearGrupo(prisma, r.actor, r.body), 201);
+  } catch (error) {
+    return errorResponse(error, 'grupos');
+  }
+}

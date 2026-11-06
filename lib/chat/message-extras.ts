@@ -3,7 +3,7 @@ import { prisma } from '../prisma';
 import type { ChatMessagePayload } from './conversations';
 import { gifConfig, rutaProxyFirmada, urlDeGiphyValida } from './gif';
 import { resumirReacciones, type ChatMediaDto, type ChatReactionDto } from './media-rules';
-import { urlStickerGss } from './stickers-catalog';
+import { stickerPropio } from './stickers-paquetes';
 
 /**
  * REACCIONES y GIF/STICKERS de los mensajes (2026-10-20) — la parte que toca
@@ -76,7 +76,18 @@ type FilaMedia = {
 /** Convierte la fila de la base en lo que ve el navegador (sin la URL del proveedor). */
 export function serializarMedia(f: FilaMedia): ChatMediaDto | null {
   if (f.kind === 'sticker' && f.provider === 'gss' && f.external_id) {
-    return { kind: 'sticker', provider: 'gss', title: f.title ?? 'Sticker', src: urlStickerGss(f.external_id), width: 160, height: 160 };
+    // Paquete estático (SVG) o animado (WebP de Noto, código `noto-…`).
+    const propio = stickerPropio(f.external_id);
+    if (!propio) return null;
+    return {
+      kind: 'sticker',
+      provider: 'gss',
+      title: f.title ?? 'Sticker',
+      src: propio.src,
+      width: 160,
+      height: 160,
+      ...(propio.animated ? { animated: true, poster: propio.poster } : {}),
+    };
   }
   if (f.kind === 'sticker' && f.provider === 'empresa' && f.id_sticker) {
     return { kind: 'sticker', provider: 'empresa', title: f.title ?? 'Sticker', src: `/api/chat/stickers/${f.id_sticker}`, width: null, height: null };

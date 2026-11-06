@@ -92,33 +92,51 @@ export default function ComposerLetterFx({
    * desplaza por dentro y antes el espejo se quedaba quieto, mostrando otros
    * renglones que los del cursor.
    */
-  const sincronizarCaja = useCallback(() => {
-    const ta = textareaRef.current;
-    const ov = overlayRef.current;
-    const padre = ov?.parentElement;
-    if (!ta || !ov || !padre) return;
-    const cs = window.getComputedStyle(ta);
-    const estilo = ov.style as unknown as Record<string, string>;
-    for (const prop of MIRROR_PROPS) {
-      const v = cs[prop];
-      if (typeof v === 'string') estilo[prop as string] = v;
-    }
-    const rTa = ta.getBoundingClientRect();
-    const rPadre = padre.getBoundingClientRect();
-    ov.style.borderWidth = '0px';
-    ov.style.right = 'auto';
-    ov.style.bottom = 'auto';
-    ov.style.top = `${rTa.top - rPadre.top - padre.clientTop + ta.clientTop}px`;
-    ov.style.left = `${rTa.left - rPadre.left - padre.clientLeft + ta.clientLeft}px`;
-    ov.style.width = `${ta.clientWidth}px`;
-    ov.style.height = `${ta.clientHeight}px`;
-    ov.scrollTop = ta.scrollTop;
-  }, [textareaRef]);
+  const sincronizarCaja = useCallback(
+    (conTipografia = true) => {
+      const ta = textareaRef.current;
+      const ov = overlayRef.current;
+      const padre = ov?.parentElement;
+      if (!ta || !ov || !padre) return;
+      // La tipografía solo cambia al montar o al cambiar de tamaño (tema,
+      // zoom, giro): copiarla en CADA tecla obligaba a recalcular estilos
+      // (`getComputedStyle`) e invalidaba todas las letras del espejo, y era
+      // buena parte de la lentitud al escribir (2026-10-22).
+      if (conTipografia) {
+        const cs = window.getComputedStyle(ta);
+        const estilo = ov.style as unknown as Record<string, string>;
+        for (const prop of MIRROR_PROPS) {
+          const v = cs[prop];
+          if (typeof v === 'string' && estilo[prop as string] !== v) estilo[prop as string] = v;
+        }
+        ov.style.borderWidth = '0px';
+        ov.style.right = 'auto';
+        ov.style.bottom = 'auto';
+      }
+      const rTa = ta.getBoundingClientRect();
+      const rPadre = padre.getBoundingClientRect();
+      // Solo se escribe lo que cambió: una escritura igual también invalida
+      // el layout del espejo.
+      const poner = (prop: 'top' | 'left' | 'width' | 'height', v: string) => {
+        if (ov.style[prop] !== v) ov.style[prop] = v;
+      };
+      poner('top', `${rTa.top - rPadre.top - padre.clientTop + ta.clientTop}px`);
+      poner('left', `${rTa.left - rPadre.left - padre.clientLeft + ta.clientLeft}px`);
+      poner('width', `${ta.clientWidth}px`);
+      poner('height', `${ta.clientHeight}px`);
+      if (ov.scrollTop !== ta.scrollTop) ov.scrollTop = ta.scrollTop;
+    },
+    [textareaRef]
+  );
 
   // En cada actualización (cada tecla): el autosize del textarea pudo cambiar
   // su alto y su desplazamiento en este mismo cuadro.
+  // La primera vez también copia la tipografía, para que el primer cuadro ya
+  // calce con el textarea.
+  const tipografiaCopiadaRef = useRef(false);
   useLayoutEffect(() => {
-    sincronizarCaja();
+    sincronizarCaja(!tipografiaCopiadaRef.current);
+    tipografiaCopiadaRef.current = true;
   });
 
   // Y fuera de las teclas: el textarea que se desplaza con el dedo o la rueda,
@@ -127,17 +145,20 @@ export default function ComposerLetterFx({
   useEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
-    ta.addEventListener('scroll', sincronizarCaja, { passive: true });
+    const alDesplazar = () => sincronizarCaja(false);
+    ta.addEventListener('scroll', alDesplazar, { passive: true });
     const observador =
       typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => sincronizarCaja()) : null;
     observador?.observe(ta);
     return () => {
-      ta.removeEventListener('scroll', sincronizarCaja);
+      ta.removeEventListener('scroll', alDesplazar);
       observador?.disconnect();
     };
   }, [textareaRef, sincronizarCaja]);
 
-  useEffect(() => {
+  // Antes de pintar (no después): con `useEffect` quedaba un cuadro con la
+  // letra nueva invisible —el texto real va transparente— y un segundo render.
+  useLayoutEffect(() => {
     const prev = prevValueRef.current;
     prevValueRef.current = value;
     if (prev === value) return;

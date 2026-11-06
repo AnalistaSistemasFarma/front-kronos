@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { esFormadorFormacion } from '@/lib/formacion/servidor';
 import { prisma } from '../../../../../../lib/prisma';
 import { identificar } from '../../../../../../lib/portal/acceso';
 import { correoAutorizado, normalizarCorreo } from '../../../../../../lib/portal/auth';
-import { formadoresDePortal } from '../../../../../../lib/portal/config';
 import { nombreDesdeCorreo } from '../../../../../../lib/portal/formacion';
 import { puedeMarcarManual } from '../../../../../../lib/portal/permisos-formacion';
 import {
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   try {
     const invitador = quien.correo.toLowerCase();
-    if (!formadoresDePortal().includes(invitador) && !(await puedeMarcarManual(quien.correo))) {
+    if (!(await esFormadorFormacion(invitador)) && !(await puedeMarcarManual(quien.correo))) {
       return NextResponse.json({ error: SIN_PERMISO }, { status: 403 });
     }
     const courseId = Number((await params).id);

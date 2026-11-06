@@ -506,6 +506,7 @@
 
 .nodeAnchor {
   position: absolute;
+  z-index: 3;
   transform: translate(-50%, -50%);
   will-change: transform;
 }
@@ -513,24 +514,29 @@
 .node {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 12px 7px 7px;
-  border-radius: 16px;
+  gap: 6px;
+  padding: 5px 9px 5px 5px;
+  border-radius: 14px;
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid rgba(17, 53, 98, 0.06);
   box-shadow: 0 12px 28px -12px rgba(17, 53, 98, 0.45);
-  white-space: nowrap;
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   font-weight: 600;
   color: var(--ink-soft);
+}
+
+.nodeLabel {
+  max-width: 7.6rem;
+  line-height: 1.15;
 }
 
 .nodeIcon {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
   color: #fff;
   background: linear-gradient(140deg, var(--sky), var(--navy));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
@@ -538,6 +544,7 @@
 
 .hub {
   position: absolute;
+  z-index: 2;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
@@ -873,6 +880,7 @@
   padding: 1px;
   background: linear-gradient(140deg, var(--sky), transparent 45%, transparent 60%, var(--navy));
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   opacity: 0;
@@ -1038,7 +1046,7 @@
 
 .services {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 18px;
 }
 

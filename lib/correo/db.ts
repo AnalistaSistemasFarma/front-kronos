@@ -14,7 +14,7 @@ import type { VinculoHilo } from './types';
 
 export type CorreoDb = Pick<
   PrismaClient,
-  'subprocessUserCompany' | 'user' | 'emailThreadLink' | 'emailThreadMessage' | 'emailAudit' | 'chatProjectEmail' | '$transaction'
+  'subprocessUserCompany' | 'user' | 'emailThreadLink' | 'emailThreadMessage' | 'emailAudit' | 'chatProjectEmail' | 'emailThreadCase' | '$transaction'
 >;
 
 export interface EmpresaCorreo {
@@ -110,6 +110,65 @@ export async function buscarUsuariosEmpresa(db: CorreoDb, idCompany: number, q: 
     take: 20,
   });
   return rows.map((r) => ({ id: r.id, nombre: r.name?.trim() || r.email, correo: r.email.toLowerCase(), empresas: [idCompany] }));
+}
+
+// ---------------------------------------------------------------------------
+// Hilo ↔ ticket de mesa de ayuda («Crear ticket», solo TI, 2026-10-21)
+// ---------------------------------------------------------------------------
+
+/** Ticket del hilo (ACTIVO) de la persona, o null. Una reserva en curso (CREANDO) no cuenta. */
+export async function ticketDeHilo(db: CorreoDb, idUser: string, conversationId: string): Promise<{ idCase: number; creadoEn: string } | null> {
+  const r = await db.emailThreadCase.findUnique({ where: { id_user_conversation_id: { id_user: idUser, conversation_id: conversationId } } });
+  return r && r.estado === 'ACTIVO' && r.id_case ? { idCase: r.id_case, creadoEn: r.created_at.toISOString() } : null;
+}
+
+/**
+ * Reserva el hilo ANTES de insertar el ticket (un solo ticket por hilo y persona, aunque haya
+ * doble clic o dos pestañas). Si ya hay un ticket que sigue existiendo → 409 DUPLICADO con su
+ * número; si hay otra creación en curso → 409 EN_CURSO. Las reservas caídas a mitad de camino
+ * y los vínculos a tickets borrados se limpian y se permite crear.
+ */
+export async function reservarTicket(
+  db: CorreoDb,
+  p: { idUser: string; mailbox: string; conversationId: string; internetMessageId: string | null; asunto: string; casoExiste: (idCase: number) => Promise<boolean> }
+): Promise<{ idReserva: number }> {
+  const existente = await db.emailThreadCase.findUnique({ where: { id_user_conversation_id: { id_user: p.idUser, conversation_id: p.conversationId } } });
+  if (existente) {
+    if (existente.estado === 'ACTIVO' && existente.id_case && (await p.casoExiste(existente.id_case))) {
+      throw new CorreoError(`Este hilo ya tiene el ticket #${existente.id_case}.`, 409, 'DUPLICADO');
+    }
+    if (existente.estado === 'CREANDO' && Date.now() - existente.created_at.getTime() <= RESERVA_HUERFANA_MS) {
+      throw new CorreoError('El ticket de este hilo se está creando en este momento. Espere unos segundos.', 409, 'EN_CURSO');
+    }
+    await db.emailThreadCase.deleteMany({ where: { id: existente.id } });
+  }
+  try {
+    const r = await db.emailThreadCase.create({
+      data: {
+        id_user: p.idUser,
+        mailbox: p.mailbox.slice(0, 320),
+        conversation_id: p.conversationId,
+        internet_message_id: p.internetMessageId?.slice(0, 512) ?? null,
+        estado: 'CREANDO',
+        asunto: p.asunto.slice(0, 255),
+        created_by: p.idUser,
+      },
+    });
+    return { idReserva: r.id };
+  } catch (e) {
+    if (esUnico(e)) throw new CorreoError('El ticket de este hilo se está creando en este momento. Espere unos segundos.', 409, 'EN_CURSO');
+    throw e;
+  }
+}
+
+/** Activa la reserva con el ticket creado. */
+export async function activarTicket(db: CorreoDb, idReserva: number, idCase: number): Promise<void> {
+  await db.emailThreadCase.update({ where: { id: idReserva }, data: { estado: 'ACTIVO', id_case: idCase } });
+}
+
+/** Libera una reserva que no llegó a crear el ticket. */
+export async function liberarTicket(db: CorreoDb, idReserva: number): Promise<void> {
+  await db.emailThreadCase.deleteMany({ where: { id: idReserva, estado: 'CREANDO' } });
 }
 
 // ---------------------------------------------------------------------------

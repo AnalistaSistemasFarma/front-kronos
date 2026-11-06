@@ -22,6 +22,8 @@ import {
   ScrollArea,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
+import PurchaseRequestDetail from '../purchases/PurchaseRequestDetail';
+import SalesOfferDetail from '../sales/SalesOfferDetail';
 import {
   IconBuilding,
   IconUser,
@@ -209,6 +211,10 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
   const [filesError, setFilesError] = useState<string | null>(null);
 
   const idReqGen = request?.id_request_general;
+  /** Solicitud de compra: la ventana se agranda para que se vean las líneas. */
+  const [isPurchase, setIsPurchase] = useState(false);
+  const [isSale, setIsSale] = useState(false);
+  useEffect(() => setIsPurchase(false), [idReqGen]);
   const isFirmaAuth = isFirmaAuthorizationRequest(request);
   // En firma solo se muestra metadatos básicos: sin adjuntos, notas ni progreso Orion.
   const hideSensitiveFirmaContext = isFirmaAuth;
@@ -323,7 +329,7 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
       opened={opened}
       onClose={onClose}
       centered
-      size='xl'
+      size={isPurchase || isSale ? '90%' : 'xl'}
       fullScreen={isMobile}
       title={
         <Group gap='xs' wrap='nowrap'>
@@ -382,6 +388,12 @@ export default function AuthorizationDetailModal({ opened, onClose, request }: P
                 </Alert>
               ) : null}
             </div>
+
+            {/* Compras: si esta autorización es de una solicitud de compra, se muestra con el diseño de SAPSEND. */}
+            {idReqGen ? <PurchaseRequestDetail requestId={idReqGen} onLoaded={setIsPurchase} /> : null}
+
+            {/* Ventas: oferta en SAP con cupo, % de extracupo y cartera por edades para decidir. */}
+            {idReqGen ? <SalesOfferDetail requestId={idReqGen} onLoaded={setIsSale} /> : null}
 
             {previewPdfUrl ? (
               <Card withBorder radius='md' p={0} style={{ overflow: 'hidden' }}>

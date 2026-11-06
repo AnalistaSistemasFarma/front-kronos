@@ -79,7 +79,7 @@ export function buildValidatorMarks(state: OrionSignatureState): ValidatorMark[]
 }
 
 /** WinAnsi (fuente estándar) no admite todos los caracteres; se sustituyen los no soportados. */
-function safeText(font: PDFFont, value: string): string {
+export function safeText(font: PDFFont, value: string): string {
   let out = '';
   for (const ch of value.normalize('NFC')) {
     try {
@@ -92,7 +92,7 @@ function safeText(font: PDFFont, value: string): string {
   return out;
 }
 
-function fitText(font: PDFFont, value: string, size: number, maxWidth: number): string {
+export function fitText(font: PDFFont, value: string, size: number, maxWidth: number): string {
   let text = safeText(font, value);
   if (font.widthOfTextAtSize(text, size) <= maxWidth) return text;
   while (text.length > 1 && font.widthOfTextAtSize(`${text}...`, size) > maxWidth) {
@@ -155,8 +155,8 @@ async function embedDataUrl(pdf: PDFDocument, dataUrl: string): Promise<PDFImage
  * Estampa el visto bueno (rúbrica) de cada validador: chulito verde o, si se pasa `signatures`
  * (versión final), su firma guardada en pequeño. Debajo, nombre y fecha.
  *
- * Se replica en TODAS las páginas, en la misma posición (% de la página) donde se ubicó la caja,
- * como la rúbrica que se pone en cada hoja de un documento físico.
+ * Solo en la hoja donde se ubicó la caja (no en todas). Sin caja (`page` 0) o con una hoja que
+ * ya no existe, va en la última.
  */
 export async function stampValidatorMarks(
   pdfBytes: Uint8Array,
@@ -171,12 +171,13 @@ export async function stampValidatorMarks(
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
 
   for (const mark of marks) {
-    // La firma se incrusta una vez y se reutiliza en cada página (el PDF no crece por página).
     const dataUrl = signatures?.[mark.email];
     const image = dataUrl ? await embedDataUrl(pdf, dataUrl) : null;
-    for (const page of pages) {
-      drawValidatorMark(page, mark, { font, bold, image });
-    }
+    const page =
+      mark.field.page >= 1 && mark.field.page <= pages.length
+        ? pages[mark.field.page - 1]!
+        : pages[pages.length - 1]!;
+    drawValidatorMark(page, mark, { font, bold, image });
   }
 
   return pdf.save();

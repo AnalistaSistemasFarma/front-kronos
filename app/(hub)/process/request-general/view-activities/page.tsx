@@ -120,6 +120,7 @@ import OrionDraftTableRow from '../../../../../components/orion/OrionDraftTableR
 import { nestDraftPdfRows } from '../../../../../lib/orion/attachmentNesting';
 import { isWordDraftFileName } from '../../../../../lib/orion/draftState';
 import DeleteAttachmentModal from '../../../../../components/request-general/DeleteAttachmentModal';
+import { RequestFlowHeader } from '../../../../../components/request-general/RequestFlow';
 import OrionDocumentVersionsButton from '../../../../../components/orion/OrionDocumentVersionsButton';
 import { isOrionDocumentInteractionNote } from '../../../../../lib/orion/interactionNotes';
 import { partitionTasksForDisplay } from '@/lib/orion/taskProgress';
@@ -299,6 +300,7 @@ function ViewRequestPage() {
       field_label: string;
       field_type?: string | null;
       editable?: boolean;
+      locked?: boolean;
       config_json?: string | null;
       id_option?: number | null;
       option_label: string | null;
@@ -426,6 +428,10 @@ function ViewRequestPage() {
   }, [notes]);
 
   const getUserIdByName = async (userName: string): Promise<number | null> => {
+    // La sesión ya trae el id de Kronos (callback jwt, buscado por correo): sin viaje extra al
+    // servidor ni búsqueda por NOMBRE, que con dos personas homónimas podía traer el id equivocado.
+    // (El id es un cuid de texto; este archivo lo tipa como número, igual que lo que devolvía la API.)
+    if (session?.user?.id) return session.user.id as unknown as number;
     if (!session || status !== 'authenticated') {
       console.error('No hay sesión activa para realizar esta operación');
       return null;
@@ -1186,6 +1192,13 @@ function ViewRequestPage() {
 
       setIsEditing(false);
 
+      if (result?.requestClosed) {
+        setUpdateMessage({
+          type: 'success',
+          text: 'La solicitud se cerró automáticamente al resolver esta tarea.',
+        });
+      }
+
       if (attachedFiles.length > 0) {
         setTimeout(() => fetchFolderContents(), 2000);
       }
@@ -1344,7 +1357,8 @@ function ViewRequestPage() {
 
     if (request?.id_status === 1) {
       return [
-        { value: '2', label: 'Resuelto' }
+        { value: '2', label: 'Resuelto' },
+        { value: '3', label: 'Cancelado' }
       ];
     }
 
@@ -1593,6 +1607,9 @@ function ViewRequestPage() {
               Esta tarea ha sido resuelta y no se puede modificar.
             </Alert>
           )}
+
+          {/* En qué va la solicitud completa y dónde está esta tarea (sin las tareas de firma). */}
+          <RequestFlowHeader requestId={request.id_request_general} highlightTask={request.task} />
         </Card>
 
         <div className='flex flex-col lg:flex-row gap-6'>
@@ -1632,7 +1649,7 @@ function ViewRequestPage() {
                                 radius='xl'
                                 color={isCurrentUser ? 'white' : 'gray'}
                               >
-                                {note.createdBy.charAt(0).toUpperCase()}
+                                {(note.createdBy || 'S').charAt(0).toUpperCase()}
                               </Avatar>
                               <Text
                                 size='xs'
@@ -2211,7 +2228,7 @@ function ViewRequestPage() {
               {requestFormValues
                 .filter((fv) => fv.field_type !== ORION_SIGNATURE_FIELD_TYPE)
                 .map((fv, fvIndex) => {
-                const canEditField = Boolean(fv.editable) && !isRequestResolved();
+                const canEditField = Boolean(fv.editable) && !isRequestResolved() && !fv.locked;
                 const isEditingThis = editingFieldId === fv.id_form_field;
                 const editButton = canEditField && !isEditingThis && (
                   <ActionIcon
@@ -2223,6 +2240,13 @@ function ViewRequestPage() {
                     <IconPencil size={16} />
                   </ActionIcon>
                 );
+                const lockedBadge = fv.locked ? (
+                  <Tooltip label='Este campo ya se editó y quedó bloqueado'>
+                    <Badge color='gray' variant='light' size='sm' leftSection={<IconLock size={12} />}>
+                      Bloqueado
+                    </Badge>
+                  </Tooltip>
+                ) : null;
                 const editActions = (
                   <Group justify='flex-end' gap='xs'>
                     <Button
@@ -2263,7 +2287,10 @@ function ViewRequestPage() {
                           <Text size='xs' c='dimmed' fw={500} className='uppercase'>
                             {fv.field_label}
                           </Text>
-                          {editButton}
+                          <Group gap='xs'>
+                            {lockedBadge}
+                            {editButton}
+                          </Group>
                         </Group>
                         {isEditingThis ? (
                           <Stack gap='sm'>
@@ -2319,7 +2346,10 @@ function ViewRequestPage() {
                         <Text size='xs' c='dimmed' fw={500} className='uppercase'>
                           {fv.field_label}
                         </Text>
-                        {editButton}
+                        <Group gap='xs'>
+                          {lockedBadge}
+                          {editButton}
+                        </Group>
                       </Group>
                       {isEditingThis ? (
                         <Stack gap='xs' mt={4}>

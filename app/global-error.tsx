@@ -1,6 +1,5 @@
 'use client';
 
-import * as Sentry from '@sentry/nextjs';
 import { useEffect, useState } from 'react';
 import PantallaActualizacion from '../components/errors/PantallaActualizacion';
 import { isChunkLoadError, recargarUnaVez } from '../lib/chunk-recovery';
@@ -21,7 +20,10 @@ export default function GlobalError({ error }: { error: Error & { digest?: strin
         return;
       }
     }
-    Sentry.captureException(error);
+    // Sentry solo en producción; en dev no se empaqueta (ver instrumentation-client.ts).
+    if (process.env.NODE_ENV === 'production') {
+      void import('@sentry/nextjs').then((Sentry) => Sentry.captureException(error));
+    }
   }, [error, esActualizacion]);
 
   return (

@@ -11,7 +11,8 @@
  * que en los BulkModal de health-records/articles).
  */
 
-import ExcelJS from 'exceljs';
+// Solo tipos: la librería (~900 KB) se descarga al exportar/importar, no al abrir la pantalla.
+import type ExcelJS from 'exceljs';
 import {
   TABLE_COLUMN_TYPES,
   isRowEmpty,
@@ -50,6 +51,7 @@ function columnHint(col: TableColumn): string {
 
 /** Genera y descarga la plantilla .xlsx para diligenciar las filas de la tabla. */
 export async function downloadTableTemplate(fieldLabel: string, columns: TableColumn[]) {
+  const { default: ExcelJS } = await import('exceljs');
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet(DATA_SHEET);
 
@@ -182,6 +184,7 @@ export async function parseTableExcelFile(
   file: File,
   columns: TableColumn[]
 ): Promise<TableExcelResult> {
+  const { default: ExcelJS } = await import('exceljs');
   const errors: string[] = [];
   const wb = new ExcelJS.Workbook();
   try {

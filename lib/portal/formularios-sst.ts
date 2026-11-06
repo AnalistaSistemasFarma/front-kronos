@@ -21,15 +21,37 @@ export interface FormularioSst {
   definicion: DefinicionFormulario;
 }
 
-function cargar(crudo: unknown): FormularioSst {
+/** Arma un formulario SST a partir de su definición; lanza si no es válida (las mismas reglas que los formularios de Formación). */
+export function cargarFormularioSst(crudo: unknown): FormularioSst {
   const r = validarDefinicion(crudo);
   if (!r.ok) throw new Error(`Formulario SST no válido: ${r.errores.join(' | ')}`);
   const d = r.definicion;
   return { codigo: d.codigo, titulo: d.titulo, descripcion: d.descripcion ?? null, datosSensibles: d.datosSensibles === true, definicion: d };
 }
 
-/** Los formularios SST disponibles, en el orden en que se muestran. */
-export const FORMULARIOS_SST: readonly FormularioSst[] = [cargar(reporteActos), cargar(condicionesSalud)];
+/**
+ * Los formularios SST que vienen EN EL CÓDIGO (B1 y B2), en el orden en que se muestran. Los botones de la página principal dependen de
+ * ellos, así que siempre existen. Una definición guardada en SharePoint con el mismo código los reemplaza (ver `formularios-sst-catalogo.ts`).
+ */
+export const FORMULARIOS_SST: readonly FormularioSst[] = [cargarFormularioSst(reporteActos), cargarFormularioSst(condicionesSalud)];
+
+/** De dónde sale un formulario: del código (`base`) o de lo que el administrador creó o editó en el constructor (`personalizado`). */
+export type OrigenFormularioSst = 'base' | 'personalizado';
+
+export interface FormularioSstActual extends FormularioSst {
+  origen: OrigenFormularioSst;
+  /** Cuándo se guardó la versión vigente desde el constructor; null si es la del código sin cambios. */
+  guardadoEl: string | null;
+  /** Si el administrador reemplazó una de las del código. */
+  editado: boolean;
+}
+
+/** Código de un formulario NUEVO: se usa como nombre de carpeta en SharePoint, así que solo letras, números, guión y guión bajo. */
+export const CODIGO_FORMULARIO_SST = /^[A-Za-z0-9][A-Za-z0-9_-]{2,59}$/;
+/** Nombres que no se pueden usar como código: son carpetas del propio sistema. */
+export const CODIGOS_RESERVADOS_SST = ['definiciones'] as const;
+export const MAX_FORMULARIOS_SST_PERSONALIZADOS = 40;
+export const MAX_BYTES_DEFINICION_SST = 200 * 1024;
 
 /** El formulario con ese código, o null (también si el valor no es un texto). */
 export function formularioSst(codigo: unknown): FormularioSst | null {

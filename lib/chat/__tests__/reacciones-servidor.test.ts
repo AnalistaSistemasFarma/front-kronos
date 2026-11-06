@@ -110,6 +110,30 @@ describe('lectura tolerante (message-extras)', () => {
     expect(r.reaccionFindMany.mock.calls[0][0].where).toMatchObject({ active: true });
   });
 
+  it('sticker animado: WebP + cuadro fijo; un código desconocido no se pinta (queda el texto)', () => {
+    const base = { id_message: 9, kind: 'sticker', provider: 'gss', id_sticker: null, title: '¡Listo!', media_url: null, width: 160, height: 160 };
+    expect(serializarMedia({ ...base, external_id: 'noto-listo' })).toEqual({
+      kind: 'sticker',
+      provider: 'gss',
+      title: '¡Listo!',
+      src: '/chat/stickers/noto/listo.webp',
+      width: 160,
+      height: 160,
+      animated: true,
+      poster: '/chat/stickers/noto/listo.poster.webp',
+    });
+    // El estático del #698 sigue igual, sin campos nuevos.
+    expect(serializarMedia({ ...base, external_id: 'listo' })).toEqual({
+      kind: 'sticker',
+      provider: 'gss',
+      title: '¡Listo!',
+      src: '/chat/stickers/listo.svg',
+      width: 160,
+      height: 160,
+    });
+    expect(serializarMedia({ ...base, external_id: 'no-existe' })).toBeNull();
+  });
+
   it('un GIF viaja por el proxy firmado; nunca con la URL del proveedor', () => {
     const m = serializarMedia({
       id_message: 9,

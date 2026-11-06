@@ -13,8 +13,9 @@ export const dynamic = 'force-dynamic';
  *   GET  /api/proyectos/no-leidos?detalle=1  { noLeidos, mensajes, items[] }  (panel desplegable)
  *   POST /api/proyectos/no-leidos { accion: 'leer-todo' }  marca todo lo visible como leído
  *
- * 401 sin sesión · 403 sin el permiso del módulo en ninguna empresa (el icono no
- * se pinta). `noLeidos` = conversaciones de proyecto con mensajes nuevos; solo
+ * 401 sin sesión · sin el permiso del módulo en ninguna empresa: GET responde 200
+ * `{ habilitado: false }` (el icono no se pinta; antes era 403 y salía en rojo en la
+ * consola de todos los que no tienen el módulo) y POST sigue respondiendo 403. `noLeidos` = conversaciones de proyecto con mensajes nuevos; solo
  * cuenta proyectos donde la persona es miembro y conserva el módulo en la
  * empresa del proyecto (lib/proyectos/no-leidos.ts). El fragmento del último
  * mensaje viaja recortado y en texto plano, y solo de esas conversaciones.
@@ -29,7 +30,8 @@ export async function GET(request: NextRequest) {
     if (!user) return unauthorized();
     const detalle = request.nextUrl.searchParams.get('detalle') === '1';
     const r = await resumenNoLeidos(user, { detalle });
-    if (!r) return forbidden('No tiene habilitado el módulo Proyectos.');
+    // Es la pregunta "¿tengo el módulo?" del icono: un "no" es una respuesta normal, no un error.
+    if (!r) return jsonNoStore({ habilitado: false });
     if (detalle) {
       const empresas = (await projectModuleCompanies(user.id)).map((e) => e.idCompany);
       r.trabajando = await estadosTrabajandoVisibles(user.id, empresas);

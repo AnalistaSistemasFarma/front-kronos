@@ -2,6 +2,7 @@ import ExcelJS from 'exceljs';
 import { isPdf } from '../storage';
 import { isXlsx as isZip } from '../training/xlsx';
 import { wrapDraftForPdf, type SgcDocxToHtml, type SgcHtmlToPdf } from './render';
+import { columnLetter, SGC_DEFAULT_SHEET_SETTINGS, type SgcSheetFit, type SgcSheetOrientation, type SgcSheetSettings } from '../sheetSettings';
 
 /**
  * 2026-10-05 (RN de auditoría: «Ver documento» nunca descarga): convierte un
@@ -44,11 +45,6 @@ function cellText(value: unknown): string {
  * dependencias nuevas: exceljs ya estaba (resultados de Forms y listado
  * maestro). Nunca pasa por Word.
  */
-export interface SgcSheetHtml {
-  html: string;
-  css: string;
-}
-
 type XCell = { value: unknown; isMerged?: boolean; master?: { address: string }; address: string; font?: { bold?: boolean; italic?: boolean; underline?: unknown; color?: { argb?: string } }; alignment?: { horizontal?: string; vertical?: string; wrapText?: boolean }; fill?: { type?: string; pattern?: string; fgColor?: { argb?: string } }; border?: Record<string, { style?: string } | undefined> };
 
 const HEX = /^[0-9a-f]{6}$/;
@@ -121,7 +117,7 @@ export function cellClasses(cell: Pick<XCell, 'font' | 'alignment' | 'fill' | 'b
 }
 
 const BASE_SHEET_CSS = [
-  'table.sgc-hoja{border-collapse:collapse;table-layout:auto}',
+  'table.sgc-hoja{border-collapse:collapse;table-layout:fixed}',
   'table.sgc-hoja td,table.sgc-hoja th{border:0;font-weight:normal;background:transparent;vertical-align:top;white-space:pre-wrap}',
   '.sgc-b{font-weight:bold}',
   '.sgc-i{font-style:italic}',
@@ -135,53 +131,354 @@ const BASE_SHEET_CSS = [
   '.sgc-bb{border-bottom:0.6pt solid #333 !important}',
   '.sgc-br{border-right:0.6pt solid #333 !important}',
   'tr.sgc-vacia td{height:12pt}',
+  'tr.sgc-regla td{height:0;padding:0 !important;border:0 !important;line-height:0;font-size:0}',
+  '.sgc-rel{position:relative}',
+  '.sgc-img{position:absolute;max-width:none !important;z-index:1}',
 ].join('\n');
 
-/** Todas las hojas de un .xlsx como tablas HTML con su presentación (solo lectura: no evalúa macros ni fórmulas). */
-export async function xlsxToSheet(bytes: Uint8Array): Promise<SgcSheetHtml> {
+/** EMU (unidad de las imágenes de Office) a puntos. */
+const EMU_PER_PT = 12700;
+/** Imagen incrustada más grande que se dibuja (el sanitizador acepta hasta ~1,5 MB). */
+const MAX_IMAGE_BYTES = 1_500_000;
+
+type XAnchor = { nativeCol?: number; nativeColOff?: number; nativeRow?: number; nativeRowOff?: number; col?: number; row?: number };
+type XImageRange = { tl?: XAnchor; br?: XAnchor; ext?: { width?: number; height?: number } };
+
+/** Columna/fila (1-based) y desplazamiento en puntos de un ancla de imagen de ExcelJS. */
+function anchorOf(a: XAnchor | undefined, sizeOf: (index: number) => number, kind: 'col' | 'row'): { index: number; offPt: number } | null {
+  if (!a) return null;
+  const native = kind === 'col' ? a.nativeCol : a.nativeRow;
+  const nativeOff = kind === 'col' ? a.nativeColOff : a.nativeRowOff;
+  if (Number.isInteger(native)) return { index: (native as number) + 1, offPt: Math.max(0, Number(nativeOff ?? 0) / EMU_PER_PT) };
+  const f = Number(kind === 'col' ? a.col : a.row);
+  if (!Number.isFinite(f) || f < 0) return null;
+  const index = Math.floor(f) + 1;
+  return { index, offPt: (f - Math.floor(f)) * sizeOf(index) };
+}
+
+/**
+ * 2026-10-21 (reunión con Calidad OLP: «el Excel sale cortado y mal
+ * paginado»): cómo imprimir cada hoja. Cada tabla lleva la clase
+ * «sgc-t-N» y su ancho natural en puntos; wrapDraftForPdf la escala para
+ * que quepa en el ancho de la página y elige la orientación.
+ */
+export interface SgcSheetLayout {
+  /** La hoja viene en horizontal o es demasiado ancha para A4 vertical. */
+  landscape: boolean;
+  tables: { cls: string; widthPt: number }[];
+  /** 2026-10-21 (ajustes de la carga inicial): orientación y tamaño elegidos; sin ellos, automático y ajustado al ancho. */
+  orientation?: SgcSheetOrientation;
+  fit?: SgcSheetFit;
+  scalePct?: number | null;
+}
+
+export interface SgcSheetHtml {
+  html: string;
+  css: string;
+  layout: SgcSheetLayout;
+}
+
+/** Ancho de una columna de Excel (en caracteres) a puntos, como lo hace Excel (7 px por carácter + 5 px de margen). */
+export function columnWidthPt(chars: number): number {
+  return Math.round(Math.trunc(chars * 7 + 5) * 0.75 * 10) / 10;
+}
+
+/** Primer rango «A1:H40» del área de impresión de la hoja («'Hoja'!$A$1:$H$40», con varios rangos toma el primero). */
+export function parsePrintArea(area: unknown): { top: number; left: number; bottom: number; right: number } | null {
+  if (typeof area !== 'string') return null;
+  const m = /\$?([A-Za-z]{1,3})\$?(\d{1,7}):\$?([A-Za-z]{1,3})\$?(\d{1,7})/.exec(area);
+  if (!m) return null;
+  const a = addressOf(`${m[1]}${m[2]}`)!;
+  const b = addressOf(`${m[3]}${m[4]}`)!;
+  return { top: Math.min(a.row, b.row), left: Math.min(a.col, b.col), bottom: Math.max(a.row, b.row), right: Math.max(a.col, b.col) };
+}
+
+/** Filas de título que se repiten en cada página («1:3» o «$1:$3»). */
+export function parsePrintTitles(rows: unknown): { first: number; last: number } | null {
+  if (typeof rows !== 'string') return null;
+  const m = /\$?(\d{1,7}):\$?(\d{1,7})/.exec(rows);
+  if (!m) return null;
+  const first = Math.min(Number(m[1]), Number(m[2]));
+  const last = Math.max(Number(m[1]), Number(m[2]));
+  return last - first < 30 ? { first, last } : null;
+}
+
+/** A4 vertical sin márgenes laterales de la hoja (1,2 cm a cada lado): por encima de esto conviene horizontal. */
+const PORTRAIT_SHEET_WIDTH_PT = 527;
+
+type XSheet = ExcelJS.Worksheet & {
+  state?: string;
+  pageSetup?: { orientation?: string; printArea?: string; printTitlesRow?: string };
+  properties?: { defaultColWidth?: number };
+};
+
+/** Celda con algo que mostrar: texto, borde o relleno (las que solo tienen formato vacío no cuentan). */
+function cellHasContent(cell: XCell): boolean {
+  if (cellText(cell.value).trim()) return true;
+  const b = cell.border ?? {};
+  if (['top', 'left', 'bottom', 'right'].some((k) => b[k]?.style)) return true;
+  return cell.fill?.type === 'pattern' && cell.fill.pattern === 'solid' && Boolean(hexOf(cell.fill.fgColor?.argb)) && hexOf(cell.fill.fgColor?.argb) !== 'ffffff';
+}
+
+/** Rango que se imprime: el área indicada, la del Excel o, si no tiene, hasta la última celda con contenido. */
+function sheetRange(sheet: XSheet, merges: readonly string[], printArea: string | null): { top: number; left: number; bottom: number; right: number } {
+  const area = parsePrintArea(printArea ?? sheet.pageSetup?.printArea);
+  if (area) return { top: area.top, left: area.left, bottom: Math.min(area.bottom, area.top + MAX_SHEET_ROWS - 1), right: Math.min(area.right, area.left + MAX_SHEET_COLS - 1) };
+  const maxRow = Math.min(sheet.rowCount, MAX_SHEET_ROWS);
+  const maxCol = Math.min(Math.max(sheet.columnCount, sheet.actualColumnCount ?? 0), MAX_SHEET_COLS);
+  let bottom = 0;
+  let right = 0;
+  for (let r = 1; r <= maxRow; r++) {
+    const row = sheet.getRow(r);
+    for (let c = 1; c <= maxCol; c++) {
+      if (cellHasContent(row.getCell(c) as unknown as XCell)) {
+        if (r > bottom) bottom = r;
+        if (c > right) right = c;
+      }
+    }
+  }
+  for (const m of merges) {
+    const [a, b] = m.split(':');
+    const p = a ? addressOf(a) : null;
+    const q = b ? addressOf(b) : null;
+    if (!p || !q || Math.min(p.row, q.row) > bottom || Math.min(p.col, q.col) > right) continue;
+    bottom = Math.min(maxRow, Math.max(bottom, p.row, q.row));
+    right = Math.min(maxCol, Math.max(right, p.col, q.col));
+  }
+  return { top: 1, left: 1, bottom, right };
+}
+
+/**
+ * Todas las hojas de un .xlsx como tablas HTML con su presentación (solo
+ * lectura: no evalúa macros ni fórmulas). 2026-10-21: respeta el área de
+ * impresión (o recorta las filas y columnas vacías del final), los anchos
+ * reales de columna (en una fila «regla» invisible, para que las celdas
+ * combinadas de la primera fila no los pierdan), el alto de las filas, el
+ * tamaño de letra, las filas y columnas ocultas, y repite en cada página las
+ * filas de título que el Excel tenga configuradas.
+ */
+export async function xlsxToSheet(bytes: Uint8Array, settings: SgcSheetSettings = SGC_DEFAULT_SHEET_SETTINGS): Promise<SgcSheetHtml> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(Buffer.from(bytes) as unknown as ArrayBuffer);
   const parts: string[] = [];
   const rules = new Map<string, string>();
-  for (const sheet of wb.worksheets) {
-    if ((sheet as { state?: string }).state === 'hidden' || (sheet as { state?: string }).state === 'veryHidden') continue;
-    const { spans, covered } = parseMerges(((sheet.model as { merges?: string[] }).merges ?? []).filter((x) => typeof x === 'string'));
-    const lastRow = Math.min(sheet.rowCount, MAX_SHEET_ROWS);
-    const lastCol = Math.min(Math.max(sheet.columnCount, sheet.actualColumnCount ?? 0), MAX_SHEET_COLS);
-    parts.push(`<h2 class="sgc-hoja-nombre">${escapeHtml(sheet.name)}</h2>`);
-    if (lastRow === 0 || lastCol === 0) {
+  const tables: SgcSheetLayout['tables'] = [];
+  let landscape = false;
+  let shown = 0;
+  for (const sheet of wb.worksheets as XSheet[]) {
+    if (sheet.state === 'hidden' || sheet.state === 'veryHidden') continue;
+    // 2026-10-21: ajustes de presentación de la carga inicial (hoja que no sale, área, títulos, columnas).
+    const override = settings.sheets.find((x) => x.name === sheet.name.trim().slice(0, 100));
+    if (override && !override.include) continue;
+    const merges = ((sheet.model as { merges?: string[] }).merges ?? []).filter((x) => typeof x === 'string');
+    parts.push(`<h2 class="sgc-hoja-nombre${shown > 0 ? ' sgc-hoja-sig' : ''}">${escapeHtml(sheet.name)}</h2>`);
+    shown++;
+    // Rango a imprimir: el del ajuste, el área de impresión del Excel o, si no tiene, hasta la última celda con contenido.
+    const { top, left, bottom, right } = sheetRange(sheet, merges, override?.printArea ?? null);
+    const dropped = new Set(override?.hiddenColumns ?? []);
+    const cols: number[] = [];
+    for (let c = left; c <= right; c++) if (!sheet.getColumn(c).hidden && !dropped.has(columnLetter(c))) cols.push(c);
+    const rowsShown: number[] = [];
+    for (let r = top; r <= bottom; r++) if (!sheet.getRow(r).hidden) rowsShown.push(r);
+    if (!cols.length || !rowsShown.length) {
       parts.push('<p>(Hoja vacía)</p>');
       continue;
     }
-    const widths: string[] = [];
-    for (let c = 1; c <= lastCol; c++) {
-      const w = Math.round(Math.min(99, Math.max(2, Number(sheet.getColumn(c).width ?? 10))));
-      widths.push(`sgc-w-${w}`);
-      rules.set(`sgc-w-${w}`, `width:${w}ch;min-width:${Math.max(2, Math.round(w * 0.6))}ch`);
+    const colSet = new Set(cols);
+    const rowSet = new Set(rowsShown);
+    const { spans: rawSpans, covered } = parseMerges(merges);
+    // Las combinaciones cuentan solo las filas y columnas visibles.
+    const spans = new Map<string, { rowspan: number; colspan: number }>();
+    for (const [key, span] of rawSpans) {
+      const [r0, c0] = key.split(',').map(Number);
+      let rowspan = 0;
+      let colspan = 0;
+      for (let r = r0; r < r0 + span.rowspan; r++) if (rowSet.has(r) && r <= bottom) rowspan++;
+      for (let c = c0; c < c0 + span.colspan; c++) if (colSet.has(c) && c <= right) colspan++;
+      spans.set(key, { rowspan: Math.max(1, rowspan), colspan: Math.max(1, colspan) });
     }
-    const rows: string[] = [];
-    for (let r = 1; r <= lastRow; r++) {
+    const defaultWidth = Number(sheet.properties?.defaultColWidth ?? 8.43) || 8.43;
+    let widthPt = 0;
+    const regla: string[] = [];
+    for (const c of cols) {
+      const pt = columnWidthPt(Math.min(255, Math.max(0.5, Number(sheet.getColumn(c).width ?? defaultWidth) || defaultWidth)));
+      widthPt += pt;
+      const cls = `sgc-wp-${Math.round(pt * 10)}`;
+      rules.set(cls, `width:${pt}pt`);
+      regla.push(`<td class="${cls}"></td>`);
+    }
+    widthPt = Math.round(widthPt);
+    // Filas de título: van en <thead> (Chrome las repite en cada página) si ninguna combinación cruza el borde.
+    let titles = parsePrintTitles(override?.titleRows ?? sheet.pageSetup?.printTitlesRow);
+    if (titles && (titles.first !== top || titles.last >= bottom)) titles = null;
+    if (titles) {
+      const t = titles;
+      for (const [key, span] of rawSpans) {
+        const r0 = Number(key.split(',')[0]);
+        if (r0 <= t.last && r0 + span.rowspan - 1 > t.last) titles = null;
+      }
+    }
+    // 2026-10-22 (Calidad OLP: «las firmas del Excel no salen»): las IMÁGENES incrustadas en la hoja (firmas
+    // escaneadas, logos, sellos) se dibujan sobre las celdas donde están ancladas, con su tamaño. Solo PNG,
+    // JPEG o GIF (lo que admite el sanitizador); las que caen fuera de lo que se imprime no salen.
+    const imagesAt = new Map<string, string[]>();
+    {
+      const colPt = (c: number) => columnWidthPt(Math.min(255, Math.max(0.5, Number(sheet.getColumn(c).width ?? defaultWidth) || defaultWidth)));
+      const rowPt = (r: number) => (Number.isFinite(Number(sheet.getRow(r).height)) && Number(sheet.getRow(r).height) > 0 ? Number(sheet.getRow(r).height) : 15);
+      // Celda maestra de cada celda cubierta por una combinación (la imagen se ancla en la maestra).
+      const masterOf = (r: number, c: number): [number, number] => {
+        for (const [key, span] of rawSpans) {
+          const [r0, c0] = key.split(',').map(Number);
+          if (r >= r0 && r < r0 + span.rowspan && c >= c0 && c < c0 + span.colspan) return [r0, c0];
+        }
+        return [r, c];
+      };
+      const images = (sheet as unknown as { getImages?: () => { imageId: string | number; range: XImageRange }[] }).getImages?.() ?? [];
+      for (const im of images.slice(0, 40)) {
+        const media = (wb as unknown as { getImage: (id: number) => { extension?: string; buffer?: Uint8Array } | undefined }).getImage(Number(im.imageId));
+        const ext = (media?.extension ?? '').toLowerCase();
+        const mime = ext === 'png' ? 'png' : ext === 'jpeg' || ext === 'jpg' ? 'jpeg' : ext === 'gif' ? 'gif' : null;
+        if (!mime || !media?.buffer || media.buffer.length > MAX_IMAGE_BYTES) continue;
+        const tlc = anchorOf(im.range?.tl, colPt, 'col');
+        const tlr = anchorOf(im.range?.tl, rowPt, 'row');
+        if (!tlc || !tlr) continue;
+        if (tlc.index < left || tlc.index > right || tlr.index < top || tlr.index > bottom || !colSet.has(tlc.index) || !rowSet.has(tlr.index)) continue;
+        let w: number;
+        let h: number;
+        if (im.range?.ext?.width && im.range.ext.height) {
+          w = im.range.ext.width * 0.75;
+          h = im.range.ext.height * 0.75;
+        } else {
+          const brc = anchorOf(im.range?.br, colPt, 'col');
+          const brr = anchorOf(im.range?.br, rowPt, 'row');
+          if (!brc || !brr) continue;
+          w = -tlc.offPt + brc.offPt;
+          for (let c = tlc.index; c < brc.index; c++) w += colPt(c);
+          h = -tlr.offPt + brr.offPt;
+          for (let r = tlr.index; r < brr.index; r++) h += rowPt(r);
+        }
+        if (!(w > 1 && h > 1)) continue;
+        const [mr, mc] = covered.has(`${tlr.index},${tlc.index}`) ? masterOf(tlr.index, tlc.index) : [tlr.index, tlc.index];
+        let x = tlc.offPt;
+        for (let c = mc; c < tlc.index; c++) if (colSet.has(c)) x += colPt(c);
+        let y = tlr.offPt;
+        for (let r = mr; r < tlr.index; r++) if (rowSet.has(r)) y += rowPt(r);
+        const icls = `sgc-img-${rules.size}`;
+        rules.set(icls, `left:${Math.round(x * 10) / 10}pt;top:${Math.round(y * 10) / 10}pt;width:${Math.round(w * 10) / 10}pt;height:${Math.round(h * 10) / 10}pt`);
+        const src = `data:image/${mime};base64,${Buffer.from(media.buffer).toString('base64')}`;
+        const key = `${mr},${mc}`;
+        imagesAt.set(key, [...(imagesAt.get(key) ?? []), `<img class="sgc-img ${icls}" src="${src}">`]);
+      }
+    }
+    const head: string[] = [];
+    const body: string[] = [];
+    for (const r of rowsShown) {
       const row = sheet.getRow(r);
       const cells: string[] = [];
       let hasText = false;
-      for (let c = 1; c <= lastCol; c++) {
+      for (const c of cols) {
         const key = `${r},${c}`;
         if (covered.has(key)) continue;
-        const cell = row.getCell(c) as unknown as XCell;
+        const cell = row.getCell(c) as unknown as XCell & { font?: { size?: number } };
         const text = cellText(cell.value);
         if (text.trim()) hasText = true;
         const span = spans.get(key);
-        const cls = [...cellClasses(cell, rules), ...(r === 1 ? [widths[c - 1]] : [])];
+        const cls = cellClasses(cell, rules);
+        const size = Number(cell.font?.size);
+        if (Number.isFinite(size) && size >= 5 && size <= 40 && Math.round(size) !== 11) {
+          cls.push(`sgc-fs-${Math.round(size)}`);
+          rules.set(`sgc-fs-${Math.round(size)}`, `font-size:${Math.round(size)}pt`);
+        }
         const attrs = `${span && span.rowspan > 1 ? ` rowspan="${span.rowspan}"` : ''}${span && span.colspan > 1 ? ` colspan="${span.colspan}"` : ''}${cls.length ? ` class="${cls.join(' ')}"` : ''}`;
-        cells.push(`<td${attrs}>${text ? escapeHtml(text) : '&nbsp;'}</td>`);
+        const imgs = imagesAt.get(key);
+        if (imgs) cls.push('sgc-rel');
+        const attrsWithImg = imgs ? `${span && span.rowspan > 1 ? ` rowspan="${span.rowspan}"` : ''}${span && span.colspan > 1 ? ` colspan="${span.colspan}"` : ''} class="${cls.join(' ')}"` : attrs;
+        cells.push(`<td${attrsWithImg}>${imgs ? imgs.join('') : ''}${text ? escapeHtml(text) : imgs ? '' : '&nbsp;'}</td>`);
       }
-      rows.push(`<tr${hasText ? '' : ' class="sgc-vacia"'}>${cells.join('')}</tr>`);
+      const rowCls: string[] = hasText ? [] : ['sgc-vacia'];
+      const height = Number(row.height);
+      if (Number.isFinite(height) && height > 0 && height <= 400) {
+        const h = Math.round(height);
+        rowCls.push(`sgc-h-${h}`);
+        rules.set(`sgc-h-${h}`, `height:${h}pt`);
+      }
+      (titles && r <= titles.last ? head : body).push(`<tr${rowCls.length ? ` class="${rowCls.join(' ')}"` : ''}>${cells.join('')}</tr>`);
     }
-    parts.push(`<table class="sgc-hoja"><tbody>${rows.join('')}</tbody></table>`);
-    if (sheet.rowCount > MAX_SHEET_ROWS) parts.push(`<p>Se muestran las primeras ${MAX_SHEET_ROWS} filas.</p>`);
+    const tcls = `sgc-t-${tables.length}`;
+    const twcls = `sgc-tw-${widthPt}`;
+    rules.set(twcls, `width:${widthPt}pt`);
+    tables.push({ cls: tcls, widthPt });
+    if (sheet.pageSetup?.orientation === 'landscape' || widthPt > PORTRAIT_SHEET_WIDTH_PT * 1.25) landscape = true;
+    parts.push(
+      `<table class="sgc-hoja ${tcls} ${twcls}">${head.length ? `<thead>${head.join('')}</thead>` : ''}<tbody><tr class="sgc-regla">${regla.join('')}</tr>${body.join('')}</tbody></table>`
+    );
+    if (bottom - top + 1 >= MAX_SHEET_ROWS) parts.push(`<p>Se muestran las primeras ${MAX_SHEET_ROWS} filas.</p>`);
   }
-  const css = [BASE_SHEET_CSS, ...[...rules.entries()].map(([k, v]) => `.${k}{${v}}`)].join('\n');
-  return { html: parts.join(''), css };
+  // Las clases van dentro de «table.sgc-hoja» para ganarle a la regla general de las celdas (antes la negrita y el relleno no se veían).
+  const scoped = (rule: string) => (rule.startsWith('.sgc-tw-') ? `table.sgc-hoja${rule}` : rule.startsWith('.sgc-') ? `table.sgc-hoja ${rule}` : rule);
+  const css = [...BASE_SHEET_CSS.split('\n'), ...[...rules.entries()].map(([k, v]) => `.${k}{${v}}`)].map(scoped).join('\n');
+  return { html: parts.join(''), css, layout: { landscape, tables, orientation: settings.orientation, fit: settings.fit, scalePct: settings.scalePct } };
+}
+
+/** Lo que la pantalla de ajustes muestra de cada hoja visible del Excel (solo lectura, sin estilos). */
+export interface SgcSheetInspection {
+  name: string;
+  /** Rango que sale con el ajuste automático («A1:L60»), o null si la hoja está vacía. */
+  range: string | null;
+  excelPrintArea: string | null;
+  excelTitleRows: string | null;
+  excelOrientation: 'vertical' | 'horizontal';
+  rows: number;
+  columns: { letter: string; widthPt: number; hiddenInExcel: boolean; sample: string }[];
+  /** Primeras filas del rango, solo el texto (para la grilla de la pantalla). */
+  preview: string[][];
+}
+
+const PREVIEW_ROWS = 12;
+const PREVIEW_CHARS = 40;
+
+/** Estructura de las hojas visibles de un .xlsx para la pantalla de ajustes (no evalúa macros ni fórmulas). */
+export async function inspectXlsx(bytes: Uint8Array): Promise<SgcSheetInspection[]> {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(bytes) as unknown as ArrayBuffer);
+  const out: SgcSheetInspection[] = [];
+  for (const sheet of wb.worksheets as XSheet[]) {
+    if (sheet.state === 'hidden' || sheet.state === 'veryHidden') continue;
+    if (out.length >= 50) break;
+    const merges = ((sheet.model as { merges?: string[] }).merges ?? []).filter((x) => typeof x === 'string');
+    const { top, left, bottom, right } = sheetRange(sheet, merges, null);
+    const area = parsePrintArea(sheet.pageSetup?.printArea);
+    const titles = parsePrintTitles(sheet.pageSetup?.printTitlesRow);
+    const empty = bottom < top || right < left;
+    const defaultWidth = Number(sheet.properties?.defaultColWidth ?? 8.43) || 8.43;
+    const columns: SgcSheetInspection['columns'] = [];
+    const preview: string[][] = [];
+    if (!empty) {
+      for (let c = left; c <= right; c++) {
+        let sample = '';
+        for (let r = top; r <= Math.min(bottom, top + 30) && !sample; r++) sample = cellText((sheet.getRow(r).getCell(c) as unknown as XCell).value).trim();
+        columns.push({ letter: columnLetter(c), widthPt: columnWidthPt(Math.min(255, Math.max(0.5, Number(sheet.getColumn(c).width ?? defaultWidth) || defaultWidth))), hiddenInExcel: Boolean(sheet.getColumn(c).hidden), sample: sample.slice(0, PREVIEW_CHARS) });
+      }
+      for (let r = top; r <= bottom && preview.length < PREVIEW_ROWS; r++) {
+        if (sheet.getRow(r).hidden) continue;
+        const row = sheet.getRow(r);
+        const cells: string[] = [];
+        for (let c = left; c <= right; c++) cells.push(cellText((row.getCell(c) as unknown as XCell).value).trim().slice(0, PREVIEW_CHARS));
+        preview.push(cells);
+      }
+    }
+    out.push({
+      name: sheet.name.trim().slice(0, 100),
+      range: empty ? null : `${columnLetter(left)}${top}:${columnLetter(right)}${bottom}`,
+      excelPrintArea: area ? `${columnLetter(area.left)}${area.top}:${columnLetter(area.right)}${area.bottom}` : null,
+      excelTitleRows: titles ? `${titles.first}:${titles.last}` : null,
+      excelOrientation: sheet.pageSetup?.orientation === 'landscape' ? 'horizontal' : 'vertical',
+      rows: empty ? 0 : bottom - top + 1,
+      columns,
+      preview,
+    });
+  }
+  return out;
 }
 
 /** Solo el HTML de las hojas (compatibilidad: sin la hoja de estilos). */
@@ -192,7 +489,8 @@ export async function xlsxToHtml(bytes: Uint8Array): Promise<string> {
 export async function attachmentToViewablePdf(
   bytes: Uint8Array,
   fileName: string,
-  deps: { docxToHtml: SgcDocxToHtml; htmlToPdf: SgcHtmlToPdf }
+  // 2026-10-22: `officeToPdf` = conversión de Microsoft del Excel ya guardado en OneDrive (si falla, la de SynerLink).
+  deps: { docxToHtml: SgcDocxToHtml; htmlToPdf: SgcHtmlToPdf; officeToPdf?: () => Promise<Uint8Array> }
 ): Promise<Uint8Array | null> {
   const name = fileName.toLowerCase();
   if (isPdf(bytes)) return bytes;
@@ -201,8 +499,16 @@ export async function attachmentToViewablePdf(
     return deps.htmlToPdf(wrapDraftForPdf({ title: fileName, code: '', contentHtml: html }));
   }
   if (name.endsWith('.xlsx') && isZip(bytes)) {
+    if (deps.officeToPdf) {
+      try {
+        const pdf = await deps.officeToPdf();
+        if (isPdf(pdf)) return pdf;
+      } catch (e) {
+        console.warn('[sgc/visor] la conversión de Microsoft falló; se usa la de SynerLink', e);
+      }
+    }
     const sheet = await xlsxToSheet(bytes);
-    return deps.htmlToPdf(wrapDraftForPdf({ title: fileName, code: '', contentHtml: sheet.html, sheet: true, extraCss: sheet.css }));
+    return deps.htmlToPdf(wrapDraftForPdf({ title: fileName, code: '', contentHtml: sheet.html, sheet: true, extraCss: sheet.css, sheetLayout: sheet.layout }));
   }
   return null;
 }

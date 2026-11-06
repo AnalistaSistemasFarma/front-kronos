@@ -4,7 +4,7 @@ import { resolverNombreEstudiante } from '@/lib/portal/formacion';
 import { FormacionStorageError, FormacionStorageNoConfigurado } from '@/lib/portal/formacion-storage';
 import { MENSAJE_AUTORIZACION, definicionPublica, validarRespuestas } from '@/lib/portal/formulario';
 import { registrarErrorSinDatos } from '@/lib/portal/formulario-servidor';
-import { formularioSst } from '@/lib/portal/formularios-sst';
+import { formularioSstActual } from '@/lib/portal/formularios-sst-catalogo';
 import { ErrorEnvioSst, guardarEnvioSst } from '@/lib/portal/formularios-sst-servidor';
 
 /**
@@ -25,7 +25,7 @@ const SIN_CACHE = { 'Cache-Control': 'no-store' };
 export async function GET(request: NextRequest, { params }: { params: Promise<{ codigo: string }> }) {
   const quien = await identificar(request);
   if (!quien) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
-  const formulario = formularioSst((await params).codigo);
+  const formulario = await formularioSstActual((await params).codigo);
   if (!formulario) return NextResponse.json({ error: 'Formulario no encontrado.' }, { status: 404 });
   try {
     return NextResponse.json(
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ codigo: string }> }) {
   const quien = await identificar(request);
   if (!quien) return NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 });
-  const formulario = formularioSst((await params).codigo);
+  const formulario = await formularioSstActual((await params).codigo);
   if (!formulario) return NextResponse.json({ error: 'Formulario no encontrado.' }, { status: 404 });
 
   const crudo = await request.text().catch(() => '');

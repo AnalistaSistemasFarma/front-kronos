@@ -13,6 +13,7 @@ import {
 } from '@mantine/core';
 import {
   IconFile,
+  IconFilePencil,
   IconPencil,
   IconSignature,
   IconSparkles,
@@ -37,8 +38,11 @@ import OrionDocumentLifecycleModal from './OrionDocumentLifecycleModal';
 import OrionReviewPanel from './OrionReviewPanel';
 import { knownReadyForSigning } from '../../lib/orion/reviewState';
 import { esEstadoFinalOrion } from '../../lib/orion/deletePolicy';
+import { PDF_STAGES, pdfStageOf } from '../../lib/orion/pdfStage';
 import DocStageTrack from './DocStageTrack';
 import ViewOnlineButton from './ViewOnlineButton';
+import OrionAnnotationsModal from './OrionAnnotationsModal';
+import { emailHasSigned } from '../../lib/orion/annotations';
 
 type RowProps = OrionAttachmentSignActionsProps & {
   rowNumber?: number | string;
@@ -58,7 +62,6 @@ type RowProps = OrionAttachmentSignActionsProps & {
 };
 
 /** Etapas del PDF para firmar (su validación es independiente de la del Word del que salió). */
-const PDF_STAGES = ['Validación PDF', 'Ubicar firmas', 'Firmas'] as const;
 
 function ActionLink({
   icon,
@@ -137,6 +140,7 @@ export default function OrionAttachmentTableRow({
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [firmantesOpen, setFirmantesOpen] = useState(false);
   const [lifecycleOpen, setLifecycleOpen] = useState(false);
+  const [annotationsOpen, setAnnotationsOpen] = useState(false);
   // null = aún no se sabe si el flujo exige validación; hasta saberlo no se habilita preparar.
   const [readyForSigning, setReadyForSigning] = useState<boolean | null>(() =>
     knownReadyForSigning(d.state)
@@ -206,7 +210,21 @@ export default function OrionAttachmentTableRow({
   const isClosed =
     String(d.state.status || '').toUpperCase() === 'FIRMADO' ||
     (d.signers.length > 0 && d.completedCount === d.signers.length);
+  const pdfStage = pdfStageOf({
+    status: d.state.status,
+    orionDocumentId: d.state.orionDocumentId,
+    signersTotal: d.signers.length,
+    signersDone: d.completedCount,
+    readyForSigning,
+  });
   const hasSignedCopy = orionDocumentHasSignedCopy(d.state);
+  /** Datos y sellos tras firmar: quien ya firmó, el preparador o un admin (el servidor lo vuelve a validar). */
+  const canAnnotate =
+    d.completedCount > 0 &&
+    Boolean(
+      emailHasSigned(d.state, props.currentUserEmail) || d.api?.canManage || d.api?.isAdmin
+    );
+  const annotationCount = d.state.annotations?.length ?? 0;
 
   const originalFileHref =
     hasSignedCopy && d.hasOrionDoc && props.requestId && props.fileId && d.api?.canViewVersions
@@ -404,7 +422,9 @@ export default function OrionAttachmentTableRow({
           {d.forSigning ? (
             <DocStageTrack
               stages={PDF_STAGES}
-              stage={isClosed ? 3 : d.signers.length > 0 ? 2 : validationComplete ? 1 : 0}
+              stage={pdfStage.stage}
+              tone={pdfStage.tone}
+              note={pdfStage.note}
               doneLabel='Listo: firmado'
             />
           ) : null}
@@ -528,6 +548,14 @@ export default function OrionAttachmentTableRow({
               {deleteAction}
               {testDeleteSlot}
 
+              {canAnnotate && props.requestId && props.fileId ? (
+                <ActionLink
+                  icon={<IconFilePencil size={15} stroke={1.6} />}
+                  label={annotationCount > 0 ? `Texto y sellos (${annotationCount})` : 'Texto y sellos'}
+                  onClick={() => setAnnotationsOpen(true)}
+                />
+              ) : null}
+
               {canAccessOriginalFile && originalFileHref ? (
                 <ActionLink
                   icon={<IconFile size={15} stroke={1.6} />}
@@ -636,6 +664,18 @@ export default function OrionAttachmentTableRow({
           versionLabel={d.state.versionLabel ?? null}
           state={d.state}
         />
+        {canAnnotate ? (
+          <OrionAnnotationsModal
+            opened={annotationsOpen}
+            onClose={() => setAnnotationsOpen(false)}
+            requestId={props.requestId}
+            fileId={props.fileId}
+            fileName={props.fileName}
+            state={d.state}
+            onDocumentsUpdate={applyDocs}
+            currentUserName={props.currentUserEmail}
+          />
+        ) : null}
       </>
     ) : null}
     </>

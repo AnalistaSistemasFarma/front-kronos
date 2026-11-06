@@ -3,9 +3,10 @@ import { NextResponse } from 'next/server';
 import { getAttachmentForDownload } from '@/lib/sgc/db/requests';
 import { buildLayoutPreview } from '@/lib/sgc/db/layout';
 import { currentDraftInTx } from '@/lib/sgc/db/signatureRecord';
-import { downloadSgcFile, downloadVerifiedFile } from '@/lib/sgc/onedrive';
+import { downloadSgcFile, downloadVerifiedFile, sgcOfficeConverter } from '@/lib/sgc/onedrive';
 import { docxToHtml, htmlToPdf } from '@/lib/sgc/pdf/render';
 import { attachmentToViewablePdf } from '@/lib/sgc/pdf/viewable';
+import { prepareXlsxForMicrosoft } from '@/lib/sgc/pdf/officePdf';
 import { NO_STORE, errorResponse, getSgcRequestContext, jsonNoStore, parseId, rateLimitResponse } from '@/app/api/sgc/_lib/context';
 
 export const dynamic = 'force-dynamic';
@@ -40,10 +41,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const draft = att.purpose === 'borrador' ? await currentDraftInTx(prisma as never, id) : null;
     let pdf: Uint8Array | null;
     if (draft && draft.ref === `adjunto:${attachmentId}` && draft.format !== 'doc') {
-      pdf = await buildLayoutPreview(prisma, { download: downloadSgcFile, htmlToPdf, docxToHtml }, id, viewer, { runningHeader: true });
+      pdf = await buildLayoutPreview(prisma, { download: downloadSgcFile, htmlToPdf, docxToHtml, officeToPdf: sgcOfficeConverter.bytes }, id, viewer, { runningHeader: true });
     } else {
       const bytes = await downloadVerifiedFile(att.itemId, att.sha256);
-      pdf = await attachmentToViewablePdf(bytes, att.fileName, { docxToHtml, htmlToPdf });
+      const root = !/\.xlsx$/i.test(att.fileName) ? null : (await prisma.sgcRequest.findUnique({ where: { id_request: id }, select: { companyConfig: { select: { storage_root: true } } } }))?.companyConfig.storage_root;
+      // 2026-10-22: un Excel adjunto lo convierte Microsoft (copia con «ajustar al ancho»); si falla, la de SynerLink.
+      const officeToPdf = root ? async () => sgcOfficeConverter.bytes(root, att.fileName, await prepareXlsxForMicrosoft(bytes, null)) : undefined;
+      pdf = await attachmentToViewablePdf(bytes, att.fileName, { docxToHtml, htmlToPdf, officeToPdf });
     }
     if (!pdf) return jsonNoStore({ error: 'Este archivo solo es visible en la app' }, 415);
     const fileName = att.fileName.replace(/\.[^.]+$/, '') + '.pdf';

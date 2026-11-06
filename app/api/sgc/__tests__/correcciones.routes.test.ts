@@ -21,7 +21,7 @@ vi.mock('../../../../lib/prisma', () => ({ prisma: { tag: 'prisma' } }));
 vi.mock('../../../../lib/sgc/access', () => ({ getSgcAccessForUser: m.getSgcAccessForUser }));
 vi.mock('../../../../lib/sgc/db/documents', () => ({ getAccessSubject: m.getAccessSubject }));
 vi.mock('../../../../lib/sgc/notifications', () => ({ sgcNotifier: 'notificador' }));
-vi.mock('../../../../lib/sgc/onedrive', () => ({ downloadSgcFile: 'descarga' }));
+vi.mock('../../../../lib/sgc/onedrive', () => ({ downloadSgcFile: 'descarga', sgcOfficeConverter: { item: 'ms-item', bytes: 'ms' } }));
 vi.mock('../../../../lib/sgc/pdf/render', () => ({ docxToHtml: 'docx', htmlToPdf: 'html' }));
 vi.mock('../../../../lib/sgc/db/layout', () => ({ getDocumentLayout: m.getDocumentLayout, saveDocumentLayout: m.saveDocumentLayout, buildLayoutPreview: m.buildLayoutPreview }));
 vi.mock('../../../../lib/sgc/db/dissemination', () => ({ recordReadingDoubt: m.recordReadingDoubt }));
@@ -79,7 +79,7 @@ describe('Rutas de las correcciones · firmas en el documento', () => {
     const g = await layout.GET(get('/'), p);
     expect(g.status).toBe(200);
     expect(g.headers.get('cache-control')).toContain('no-store');
-    expect(m.getDocumentLayout).toHaveBeenCalledWith({ tag: 'prisma' }, 7, VIEWER);
+    expect(m.getDocumentLayout).toHaveBeenCalledWith({ tag: 'prisma' }, 7, VIEWER, { download: 'descarga' });
     const body = { institutionalHeader: true, fields: [{ signerKey: 'revision:a@b.co', page: 1, x: 1, y: 1, width: 10, height: 5 }] };
     expect((await layout.PUT(req('/', body, 'PUT'), p)).status).toBe(200);
     expect(m.saveDocumentLayout.mock.calls[0][2]).toEqual(body);
@@ -102,7 +102,7 @@ describe('Rutas de las correcciones · firmas en el documento', () => {
     expect(r.headers.get('content-type')).toBe('application/pdf');
     expect(r.headers.get('content-disposition')).toBe('inline; filename="vista-previa-SOL-7.pdf"');
     expect(r.headers.get('cache-control')).toContain('no-store');
-    expect(m.buildLayoutPreview.mock.calls[0][1]).toEqual({ download: 'descarga', htmlToPdf: 'html', docxToHtml: 'docx' });
+    expect(m.buildLayoutPreview.mock.calls[0][1]).toEqual({ download: 'descarga', htmlToPdf: 'html', docxToHtml: 'docx', officeToPdf: 'ms' });
     expect((await preview.GET(get('/'), params({ id: '0' }))).status).toBe(400);
     m.buildLayoutPreview.mockRejectedValue(new SgcError('Solicitud no encontrada.', 404));
     expect((await preview.GET(get('/'), p)).status).toBe(404);

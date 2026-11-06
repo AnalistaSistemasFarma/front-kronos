@@ -1,4 +1,3 @@
-import { isVersionCopyFileName, normalizeAttachmentStem } from './attachmentList';
 import { ORION_LEGACY_FILE_ID } from './config';
 import type {
   OrionDeletedDocument,
@@ -383,31 +382,8 @@ export function resolveOrionDocumentForAttachment(params: {
     }
   }
 
-  // Copia de versión (X-firmado.pdf) tras liberar el original: mismo stem → mismo doc Orion.
-  // Solo si hay exactamente un candidato (no cruzar PDFs distintos).
-  const lookupStem = normalizeAttachmentStem(params.fileName);
-  const isVersionCopy = isVersionCopyFileName(params.fileName);
-  if (lookupStem && isVersionCopy) {
-    const stemMatches = entries.filter(([, doc]) => {
-      if (!doc) return false;
-      if (
-        !(
-          doc.orionDocumentId ||
-          (doc.signers?.length ?? 0) > 0 ||
-          doc.status ||
-          doc.signatureIntent
-        )
-      ) {
-        return false;
-      }
-      return normalizeAttachmentStem(doc.fileName) === lookupStem;
-    });
-    if (stemMatches.length === 1) {
-      const [, doc] = stemMatches[0];
-      return { ...doc, fileId: fileId || doc.fileId };
-    }
-  }
-
+  // Un PDF subido con nombre de copia (X-parcial (3).pdf) es un adjunto nuevo: no hereda
+  // el estado Orion del documento con el mismo nombre base.
   return byId ? { ...byId, fileId } : {};
 }
 

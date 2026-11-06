@@ -1,4 +1,5 @@
-import ExcelJS from 'exceljs';
+// Solo tipos: la librería (~900 KB) se descarga al exportar/importar, no al abrir la pantalla.
+import type ExcelJS from 'exceljs';
 import { addDataSheet, downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
 
 /**
@@ -139,6 +140,7 @@ export async function exportProposalTabExcel(params: {
   companyName: string;
   tab: ProposalTab;
 }): Promise<void> {
+  const { default: ExcelJS } = await import('exceljs');
   const { groups, companyName, tab } = params;
   const rows = buildProposalRows(groups);
 

@@ -1,11 +1,14 @@
 import { SGC_AUDIT_ACTIONS, writeSgcAudit } from '../audit';
 import { bulkKindOf, matchBulkFile, matchBulkFiles, type SgcBulkCandidate, type SgcBulkMatch } from '../bulkUpload';
 import { wrapDraftForPdf, type SgcDocxToHtml, type SgcHtmlToPdf } from '../pdf/render';
-import { xlsxToSheet } from '../pdf/viewable';
+import { inspectXlsx, xlsxToSheet, type SgcSheetInspection } from '../pdf/viewable';
+import { describeSheetSettings, isDefaultSheetSettings, normalizeSheetSettings, type SgcSheetSettings } from '../sheetSettings';
+import { stampSheetPreview } from '../watermark';
+import { microsoftCanApply, prepareXlsxForMicrosoft } from '../pdf/officePdf';
 import { isXlsx as isZip } from '../training/xlsx';
 import { SgcError } from '../errors';
 import { computeReviewDueDate } from '../review';
-import { buildVersionFileName, buildVersionFolderSegments, getControlledPdfError, sha256Hex } from '../storage';
+import { buildVersionFileName, buildVersionFolderSegments, getControlledPdfError, isPdf, sha256Hex } from '../storage';
 import type { SgcActor, SgcDb } from './catalogs';
 import type { SgcUploader } from './documents';
 
@@ -22,12 +25,36 @@ import type { SgcUploader } from './documents';
  * para el visor (Word: mammoth → Chrome; Excel: sus hojas con su presentación
  * → Chrome, nunca pasa por Word) y el ORIGINAL se guarda junto a él con su
  * huella SHA-256 (document_version.source_*).
+ *
+ * 2026-10-21 (Calidad OLP): un Excel se puede INSPECCIONAR y PREVISUALIZAR
+ * con ajustes de presentación antes de cargarlo (nada se guarda); al cargarlo,
+ * los ajustes elegidos quedan en la descripción de la versión y en la
+ * auditoría. Solo presentación: el texto de las celdas nunca cambia.
  */
 
 /** Conversión a PDF de un original Word o Excel de la carga inicial. */
 export interface SgcBulkConvertDeps {
   docxToHtml: SgcDocxToHtml;
   htmlToPdf: SgcHtmlToPdf;
+  /** 2026-10-22: conversión de Microsoft de un archivo aún no guardado (sube un temporal, convierte y lo borra). */
+  officeToPdf?: (storageRoot: string, fileName: string, content: Uint8Array) => Promise<Uint8Array>;
+}
+
+/**
+ * 2026-10-22: un Excel SIN ajustes propios lo convierte Microsoft (fiel a Excel); con ajustes propios, o si
+ * Microsoft falla, la conversión de SynerLink. Devuelve null si Microsoft no aplica o falló.
+ */
+async function excelByMicrosoft(db: SgcDb, idCompany: number, convert: SgcBulkConvertDeps, fileName: string, bytes: Uint8Array, settings: SgcSheetSettings | null): Promise<Uint8Array | null> {
+  if (!convert.officeToPdf || !microsoftCanApply(settings)) return null;
+  const config = await db.sgcCompanyConfig.findUnique({ where: { id_company: idCompany }, select: { storage_root: true } });
+  if (!config?.storage_root) return null;
+  try {
+    const pdf = await convert.officeToPdf(config.storage_root, fileName, await prepareXlsxForMicrosoft(bytes, settings));
+    return isPdf(pdf) ? pdf : null;
+  } catch (e) {
+    console.warn('[sgc/carga] la conversión de Microsoft falló; se usa la de SynerLink', e);
+    return null;
+  }
 }
 
 const SOURCE_CONTENT_TYPES = {
@@ -86,7 +113,8 @@ export async function uploadBulkFile(
   file: { fileName: string; bytes: Uint8Array },
   actor: SgcActor,
   now: Date = new Date(),
-  convert: SgcBulkConvertDeps | null = null
+  convert: SgcBulkConvertDeps | null = null,
+  settings: SgcSheetSettings | null = null
 ): Promise<SgcBulkFileResult> {
   const batch = Number.isInteger(idBulkUpload) ? await db.sgcBulkUpload.findFirst({ where: { id_bulk_upload: idBulkUpload, id_company: idCompany } }) : null;
   if (!batch) throw new SgcError('La carga no existe.', 404);
@@ -107,12 +135,24 @@ export async function uploadBulkFile(
   // S16 (R33): un original Word o Excel se convierte a PDF para el visor; el original se conserva con su huella.
   let pdfBytes = file.bytes;
   let original: { bytes: Uint8Array; ext: 'docx' | 'xlsx' } | null = null;
+  // 2026-10-21: ajustes de presentación del Excel (solo si no son los automáticos).
+  const sheetSettings = kind === 'xlsx' && settings && !isDefaultSheetSettings(settings) ? settings : null;
+  if (settings && !isDefaultSheetSettings(settings) && kind !== 'xlsx') return fail('Los ajustes de presentación solo aplican a un Excel (.xlsx).', match);
   if (kind === 'docx' || kind === 'xlsx') {
     if (!isZip(file.bytes)) return fail(`El archivo no es un ${kind === 'docx' ? 'Word (.docx)' : 'Excel (.xlsx)'} válido.`, match);
     if (!convert) return fail('La conversión a PDF no está disponible en este servidor: cargue el PDF.', match);
+    if (sheetSettings) {
+      const problem = await sheetSettingsProblem(file.bytes, sheetSettings).catch(() => undefined);
+      if (problem === undefined) return fail('No se pudo leer el Excel: revise que se abra sin contraseña o cargue el PDF.', match);
+      if (problem) return fail(problem, match);
+    }
     try {
-      const html = kind === 'docx' ? { html: await convert.docxToHtml(file.bytes), css: undefined } : await xlsxToSheet(file.bytes);
-      pdfBytes = await convert.htmlToPdf(wrapDraftForPdf({ title: fileName, code: match.code ?? '', contentHtml: html.html, sheet: kind === 'xlsx', extraCss: html.css }));
+      const byMicrosoft = kind === 'xlsx' ? await excelByMicrosoft(db, idCompany, convert, fileName, file.bytes, sheetSettings) : null;
+      if (byMicrosoft) pdfBytes = byMicrosoft;
+      else {
+        const html = kind === 'docx' ? { html: await convert.docxToHtml(file.bytes), css: undefined, layout: undefined } : await xlsxToSheet(file.bytes, sheetSettings ?? undefined);
+        pdfBytes = await convert.htmlToPdf(wrapDraftForPdf({ title: fileName, code: match.code ?? '', contentHtml: html.html, sheet: kind === 'xlsx', extraCss: html.css, sheetLayout: html.layout }));
+      }
     } catch {
       return fail(`No se pudo convertir el ${kind === 'docx' ? 'Word' : 'Excel'} a PDF: revise que se abra sin contraseña o cargue el PDF.`, match);
     }
@@ -150,7 +190,10 @@ export async function uploadBulkFile(
           source_path: sourceItem && sourceName ? `${segments.join('/')}/${sourceName}` : null,
           source_file_name: sourceName,
           source_sha256: original ? sha : null,
-          change_description: original ? `Carga inicial del documento vigente (listado maestro), desde su original en ${original.ext === 'docx' ? 'Word' : 'Excel'}.` : 'Carga inicial del documento vigente (listado maestro).',
+          change_description: (original
+            ? `Carga inicial del documento vigente (listado maestro), desde su original en ${original.ext === 'docx' ? 'Word' : 'Excel'}${sheetSettings ? ` (ajustes de presentación: ${describeSheetSettings(sheetSettings)})` : ''}.`
+            : 'Carga inicial del documento vigente (listado maestro).'
+          ).slice(0, 2000),
           effective_date: listed.effective_date,
           review_due_date: reviewDue,
           created_by: actor.email,
@@ -167,8 +210,8 @@ export async function uploadBulkFile(
         entity: 'document',
         entityId: doc.id_document,
         before: { status: 'pendiente_archivo' },
-        after: { status: 'vigente', version, idVersion: v.id_document_version, file: fileName, sha256: sha, ...(original ? { original: original.ext, pdfSha256: pdfSha } : {}) },
-        detail: `Carga masiva (tanda ${idBulkUpload}): ${doc.code} V${version} desde «${fileName}» (SHA-256 ${sha})${original ? `; PDF para el visor SHA-256 ${pdfSha}` : ''}.${match.warning ? ` Aviso: ${match.warning}` : ''}`.slice(0, 1000),
+        after: { status: 'vigente', version, idVersion: v.id_document_version, file: fileName, sha256: sha, ...(original ? { original: original.ext, pdfSha256: pdfSha } : {}), ...(sheetSettings ? { sheetSettings } : {}) },
+        detail: `Carga masiva (tanda ${idBulkUpload}): ${doc.code} V${version} desde «${fileName}» (SHA-256 ${sha})${original ? `; PDF para el visor SHA-256 ${pdfSha}` : ''}${sheetSettings ? `; ajustes de presentación: ${describeSheetSettings(sheetSettings)}` : ''}.${match.warning ? ` Aviso: ${match.warning}` : ''}`.slice(0, 1000),
         ip: actor.ip,
         userAgent: actor.userAgent,
       });
@@ -178,6 +221,73 @@ export async function uploadBulkFile(
     if (error instanceof SgcError && error.status === 409) return fail(error.message, match);
     throw error;
   }
+}
+
+/** Problema de los ajustes frente a las hojas reales del Excel (hojas que no existen o ninguna que salga), o null. */
+async function sheetSettingsProblem(bytes: Uint8Array, settings: SgcSheetSettings): Promise<string | null> {
+  const names = (await inspectXlsx(bytes)).map((x) => x.name);
+  const missing = settings.sheets.map((x) => x.name).filter((n) => !names.includes(n));
+  if (missing.length) return `Los ajustes mencionan hojas que no están en el Excel: ${missing.join(', ')}.`;
+  const out = new Set(settings.sheets.filter((x) => !x.include).map((x) => x.name));
+  if (names.length && names.every((n) => out.has(n))) return 'Deje al menos una hoja en el PDF.';
+  return null;
+}
+
+/** Lee el Excel de la carga inicial sin guardarlo (Calidad, carga abierta, solo .xlsx). */
+async function readBulkExcel(db: SgcDb, idCompany: number, file: { fileName: string; bytes: Uint8Array }) {
+  await assertInitialLoadOpen(db, idCompany);
+  const fileName = (file.fileName ?? '').replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 260);
+  if (bulkKindOf(fileName) !== 'xlsx') throw new SgcError('La vista previa con ajustes es para los formatos en Excel (.xlsx).', 415);
+  if (!isZip(file.bytes)) throw new SgcError('El archivo no es un Excel (.xlsx) válido.', 415);
+  return fileName;
+}
+
+/**
+ * 2026-10-21: ESTRUCTURA del Excel para la pantalla de ajustes (hojas, rango,
+ * columnas y las primeras filas en texto). No guarda nada.
+ */
+export async function inspectBulkExcel(db: SgcDb, idCompany: number, file: { fileName: string; bytes: Uint8Array }): Promise<{ fileName: string; sheets: SgcSheetInspection[] }> {
+  const fileName = await readBulkExcel(db, idCompany, file);
+  try {
+    return { fileName, sheets: await inspectXlsx(file.bytes) };
+  } catch {
+    throw new SgcError('No se pudo leer el Excel: revise que se abra sin contraseña.', 422);
+  }
+}
+
+/**
+ * 2026-10-21: VISTA PREVIA del PDF que saldría con estos ajustes, con la marca
+ * «VISTA PREVIA» y quién la generó. No guarda nada ni cambia el documento.
+ */
+export async function previewBulkExcel(
+  db: SgcDb,
+  idCompany: number,
+  file: { fileName: string; bytes: Uint8Array },
+  settingsInput: unknown,
+  actor: SgcActor,
+  convert: SgcBulkConvertDeps,
+  now: Date = new Date()
+): Promise<Uint8Array> {
+  const fileName = await readBulkExcel(db, idCompany, file);
+  const settings = normalizeSheetSettings(settingsInput);
+  let problem: string | null;
+  try {
+    problem = await sheetSettingsProblem(file.bytes, settings);
+  } catch {
+    throw new SgcError('No se pudo leer el Excel: revise que se abra sin contraseña.', 422);
+  }
+  if (problem) throw new SgcError(problem);
+  const match = matchBulkFile(fileName, await candidatesOf(db, idCompany));
+  let pdf: Uint8Array;
+  const byMicrosoft = await excelByMicrosoft(db, idCompany, convert, fileName, file.bytes, isDefaultSheetSettings(settings) ? null : settings);
+  if (byMicrosoft) return stampSheetPreview(byMicrosoft, { fileName, viewerEmail: actor.email.toLowerCase(), at: now });
+  try {
+    const sheet = await xlsxToSheet(file.bytes, settings);
+    pdf = await convert.htmlToPdf(wrapDraftForPdf({ title: fileName, code: match.code ?? '', contentHtml: sheet.html, sheet: true, extraCss: sheet.css, sheetLayout: sheet.layout }));
+  } catch {
+    throw new SgcError('No se pudo convertir el Excel a PDF: revise que se abra sin contraseña.', 422);
+  }
+  return stampSheetPreview(pdf, { fileName, viewerEmail: actor.email.toLowerCase(), at: now });
 }
 
 /** Historial de cargas masivas con su resultado. */

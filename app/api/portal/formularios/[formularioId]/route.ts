@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { esFormadorFormacion } from '@/lib/formacion/servidor';
 import { identificar } from '../../../../../lib/portal/acceso';
-import { formadoresDePortal } from '../../../../../lib/portal/config';
 import { MAX_BYTES_DEFINICION, validarDefinicion } from '../../../../../lib/portal/formulario';
 import {
   CodigoDeFormularioRepetido,
@@ -17,7 +17,7 @@ function idDesdeParametro(valor: string): number | null {
 async function soloFormador(request: NextRequest) {
   const quien = await identificar(request);
   if (!quien) return { error: NextResponse.json({ error: 'Sesión no válida.' }, { status: 401 }) };
-  if (!formadoresDePortal().includes(quien.correo.toLowerCase())) {
+  if (!(await esFormadorFormacion(quien.correo))) {
     return { error: NextResponse.json({ error: 'Solo un formador puede gestionar formularios.' }, { status: 403 }) };
   }
   return { correo: quien.correo };

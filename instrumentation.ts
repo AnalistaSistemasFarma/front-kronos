@@ -1,10 +1,9 @@
 import type { Instrumentation } from 'next';
 
-// Sentry solo se habilita en producción (lib/sentry.ts): en `next dev` ni se carga.
-const sentryActive = process.env.NODE_ENV === 'production';
-
 export async function register() {
-  if (sentryActive && (process.env.NEXT_RUNTIME === 'nodejs' || process.env.NEXT_RUNTIME === 'edge')) {
+  // Sentry solo en producción (lib/sentry.ts). La condición va en línea (no en una constante)
+  // para que el compilador la resuelva y en `next dev` ni empaquete @sentry/nextjs.
+  if (process.env.NODE_ENV === 'production' && (process.env.NEXT_RUNTIME === 'nodejs' || process.env.NEXT_RUNTIME === 'edge')) {
     const [Sentry, { sentryBaseOptions }] = await Promise.all([
       import('@sentry/nextjs'),
       import('./lib/sentry'),
@@ -23,7 +22,7 @@ export async function register() {
 }
 
 export const onRequestError: Instrumentation.onRequestError = async (...args) => {
-  if (!sentryActive) return;
+  if (process.env.NODE_ENV !== 'production') return;
   const Sentry = await import('@sentry/nextjs');
   Sentry.captureRequestError(...args);
 };

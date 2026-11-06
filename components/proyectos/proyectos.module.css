@@ -293,3 +293,56 @@
   margin-left: 0;
   margin-top: 4px;
 }
+
+/* Medidor del consumo de Anthropic (2026-10-22): píldora compacta en la barra superior. */
+.medidorFila {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.medidorPildora {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 3px 10px;
+  border: 1px solid var(--app-border, var(--mantine-color-default-border));
+  border-radius: var(--mantine-radius-xl);
+  background: var(--mantine-color-default);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.medidorPildora:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.medidorPildora:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 2px;
+}
+
+.medidorPildora[data-vieja] {
+  opacity: 0.7;
+}
+
+.medidorIndicador {
+  flex: 0 0 auto;
+}
+
+.medidorPorcentaje {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Celular: la píldora va en la barra superior, bajo el título y alineada a la derecha. */
+.medidorMovil {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 4px 4px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.medidorMovil::-webkit-scrollbar {
+  display: none;
+}

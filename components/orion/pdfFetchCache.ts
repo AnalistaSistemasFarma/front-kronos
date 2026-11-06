@@ -27,7 +27,14 @@ export async function fetchPdfArrayBuffer(sourceUrl: string): Promise<ArrayBuffe
       credentials: isSameOrigin(sourceUrl) ? 'include' : 'omit',
       cache: 'force-cache',
     });
-    if (!res.ok) throw new Error(`No se pudo cargar el PDF (${res.status})`);
+    if (!res.ok) {
+      // El servidor explica el motivo en { error }: mostrarlo ayuda a saber qué falló.
+      const detail = await res
+        .json()
+        .then((data: { error?: unknown }) => (typeof data?.error === 'string' ? data.error.trim() : ''))
+        .catch(() => '');
+      throw new Error(`No se pudo cargar el PDF (${res.status})${detail ? `: ${detail}` : ''}`);
+    }
     const contentType = String(res.headers.get('content-type') || '').toLowerCase();
     if (contentType.includes('application/json') || contentType.includes('text/html')) {
       throw new Error('La URL no devolvió un PDF');

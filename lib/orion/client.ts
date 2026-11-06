@@ -359,8 +359,10 @@ export async function acceptOrionSignerTurn(
   if (companyName) payload.companyName = companyName;
   const companyNit = String(options?.companyNit || '').trim();
   if (companyNit) payload.companyNit = companyNit;
-  const jobTitle = String(options?.jobTitle || '').trim();
-  if (jobTitle) payload.jobTitle = jobTitle;
+  // Cargo: si viene en options (aunque vacío), se envía para permitir "sin cargo".
+  if (options && Object.prototype.hasOwnProperty.call(options, 'jobTitle')) {
+    payload.jobTitle = String(options.jobTitle || '').trim();
+  }
 
   // Orion exige legalConsent* (no acceptedTerms). SynerLink ya validó el checkbox.
   if (options?.legalConsentAccepted !== false) {

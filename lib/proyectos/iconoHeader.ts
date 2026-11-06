@@ -23,6 +23,8 @@ export { etiquetaNoLeidos };
 export const PROYECTOS_HREF = PROJECTS_MODULE_URL;
 /** Cuánto vale en el navegador la respuesta (permiso + contador) sin aviso del pulso. */
 export const ICONO_PROYECTOS_TTL_MS = 3 * 60_000;
+/** Sin el módulo: cada cuánto se vuelve a confirmar (si se lo asignan, aparece al recargar). */
+export const ICONO_PROYECTOS_SIN_MODULO_TTL_MS = 30 * 60_000;
 /** Espera antes de la primera consulta: no compite con la carga de la página. */
 export const ICONO_PROYECTOS_RETRASO_MS = 1_500;
 /** Varios avisos seguidos del pulso se juntan en una sola consulta. */
@@ -63,7 +65,9 @@ function entero(n: unknown): number | null {
 
 /** Traduce la respuesta del API al estado del icono. */
 export function estadoDesdeRespuesta(email: string, status: number, body: unknown, ahora: number): EstadoIconoProyectos {
-  const visible = status === 200;
+  // Sin el módulo el servidor responde 200 `{ habilitado: false }` (antes 403).
+  const habilitado = !(body && typeof body === 'object' && (body as { habilitado?: unknown }).habilitado === false);
+  const visible = status === 200 && habilitado;
   const b = visible && body && typeof body === 'object' ? (body as { noLeidos?: unknown; mensajes?: unknown }) : null;
   return { email, visible, noLeidos: b ? entero(b.noLeidos) : null, mensajes: b ? entero(b.mensajes) : null, en: ahora };
 }
@@ -77,7 +81,9 @@ export function debeMostrarIconoProyectos(sesionEmail: string | null | undefined
 /** ¿Hay que volver a consultar? */
 export function estadoVencido(estado: EstadoIconoProyectos | null, sesionEmail: string, ahora: number, ttl = ICONO_PROYECTOS_TTL_MS): boolean {
   if (!estado || estado.email.toLowerCase() !== sesionEmail.toLowerCase()) return true;
-  return ahora - estado.en >= ttl || ahora < estado.en;
+  // Sin el módulo casi siempre la respuesta sigue igual: se vuelve a preguntar con menos frecuencia.
+  const vigencia = estado.visible ? ttl : Math.max(ttl, ICONO_PROYECTOS_SIN_MODULO_TTL_MS);
+  return ahora - estado.en >= vigencia || ahora < estado.en;
 }
 
 /** Etiqueta accesible del botón. */

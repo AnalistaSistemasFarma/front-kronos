@@ -107,7 +107,7 @@ describe('visto bueno en el PDF', () => {
     expect(reloaded.getPageCount()).toBe(1);
   });
 
-  it('replica la rúbrica en todas las páginas (aunque la caja se haya ubicado en una sola)', async () => {
+  it('estampa la rúbrica solo en la hoja donde se ubicó la caja (no en todas)', async () => {
     const pdf = await PDFDocument.create();
     for (let i = 0; i < 3; i += 1) pdf.addPage([595, 842]);
     const bytes = await pdf.save();
@@ -118,17 +118,17 @@ describe('visto bueno en el PDF', () => {
       const contents = page.node.Contents();
       return contents ? 1 : 0;
     });
-    // Cada página recibe su propio contenido dibujado (chulito, nombre y fecha).
-    expect(drawn).toEqual([1, 1, 1]);
+    // Solo la hoja 1 recibe contenido dibujado (chulito, nombre y fecha).
+    expect(drawn).toEqual([1, 0, 0]);
   });
 
-  it('una caja ubicada en una página que ya no existe igual se estampa (todas las páginas)', async () => {
+  it('una caja ubicada en una hoja que ya no existe va en la última', async () => {
     const pdf = await PDFDocument.create();
-    pdf.addPage([595, 842]);
+    for (let i = 0; i < 2; i += 1) pdf.addPage([595, 842]);
     const bytes = await pdf.save();
     const marks = buildValidatorMarks(approvedState).map((m) => ({ ...m, field: { ...m.field, page: 5 } }));
-    const stamped = await stampValidatorMarks(bytes, marks);
-    expect(stamped.byteLength).toBeGreaterThan(bytes.byteLength);
+    const stamped = await PDFDocument.load(await stampValidatorMarks(bytes, marks));
+    expect(stamped.getPages().map((page) => (page.node.Contents() ? 1 : 0))).toEqual([0, 1]);
   });
 
   it('acepta un visto bueno diminuto (2% × 1%) y lo estampa sin texto', async () => {

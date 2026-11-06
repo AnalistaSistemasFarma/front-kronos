@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect, useRef, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense, useDeferredValue, useMemo } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import ExcelJS from 'exceljs';
-import { saveAs } from 'file-saver';
+// exportBoardExcel (y con él exceljs, ~900 KB) se carga al tocar Exportar, no al abrir la pantalla.
+import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
+import PurchaseInlineForm from '../../purchases/PurchaseInlineForm';
+import SalesInlineForm from '../../sales/SalesInlineForm';
 import {
   Paper,
   Stack,
@@ -95,8 +97,24 @@ import {
   RequestsPage,
   StatFilterTile,
 } from '../../../../../components/request-general/list/RequestListUi';
-import { SignatureAutoCloseToggle } from '../../../../../components/request-general/list/SignatureAutoCloseToggle';
+import { RequestFlowBar, useRequestFlows } from '../../../../../components/request-general/RequestFlow';
 import { panelStyles } from '../../../../../components/ui/panel/Panel';
+import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
+import IosSearchField from '../../../../../components/ui/IosSearchField';
+import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
+import { filterByText, requestSearchParts } from '../../../../../lib/requests-general/textSearch';
+import { RequestListFilters } from '../../../../../components/request-general/list/RequestListFilters';
+import {
+  EMPTY_LIST_FILTERS,
+  buildListOptions,
+  countByStatusGroup,
+  describeListFilters,
+  matchesListFilters,
+  splitPeople,
+  statusGroupOf,
+  type ListFilters,
+  type ListRow,
+} from '../../../../../lib/requests-general/listFilters';
 import {
   buildTaskDisplayBadges,
   getSimplifiedTasksProgress,
@@ -185,7 +203,10 @@ function RequestBoard() {
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [tasksByRequest, setTasksByRequest] = useState<Record<number, RequestTask[]>>({});
+  // Flujo completo (en qué paso va) de las solicitudes de la página.
+  const { flows: requestFlows } = useRequestFlows(tickets.map((t) => Number(t.id)));
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [modalOpened, setModalOpened] = useState(false);
   const [formData, setFormData] = useState({
@@ -197,6 +218,12 @@ function RequestBoard() {
     url: '',
   });
   const [createLoading, setCreateLoading] = useState(false);
+  // Solicitud de compra: se captura en el formulario de Compras (lineas + SAP), no aqui.
+  const [isPurchaseProcess, setIsPurchaseProcess] = useState(false);
+  // Oferta de venta (sales_company_config.id_process_category_oferta): formulario propio, como Compras.
+  const [isSalesProcess, setIsSalesProcess] = useState(false);
+  const isSapFormProcess = isPurchaseProcess || isSalesProcess;
+  const [purchaseNotice, setPurchaseNotice] = useState<{ ok: boolean; message: string } | null>(null);
   const isSubmittingRef = useRef(false);
 
   const linkedProcessParam = searchParams.get('linkedProcess');
@@ -264,16 +291,49 @@ function RequestBoard() {
     Record<number, number | string | TableRow[]>
   >({});
 
-  const [filters, setFilters] = useState({
-    id: '',
-    status: '',
-    company: '',
-    date_from: '',
-    date_to: '',
-    assigned_to: '',
-  });
-  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  // Filtros iguales a los de Asignadas: se aplican al instante sobre TODAS las solicitudes
+  // cargadas (la lista se pide completa una vez; nada se filtra por página).
+  const [filters, setFilters] = useState<ListFilters>(EMPTY_LIST_FILTERS);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  // Buscador libre (id, asunto, empresa, categoría, proceso, estado, personas) sobre la lista cargada.
+  const [searchInput, setSearchInput] = useState('');
+  const deferredSearch = useDeferredValue(searchInput);
+  const ticketRows = useMemo(
+    () =>
+      tickets.map((t) => ({
+        ticket: t,
+        row: {
+          requestId: t.id,
+          group: statusGroupOf(t.id_status_case, t.status),
+          companyId: String(t.id_company ?? ''),
+          company: t.company,
+          process: t.process,
+          people: splitPeople(t.user),
+          createdAt: t.created_at,
+        } satisfies ListRow,
+      })),
+    [tickets]
+  );
+  const listOptions = useMemo(() => buildListOptions(ticketRows.map((x) => x.row)), [ticketRows]);
+  // Búsqueda + filtros del panel; el estado se aplica aparte para que las tarjetas no cambien.
+  const matchingRows = useMemo(
+    () =>
+      filterByText(ticketRows, deferredSearch, (x) => requestSearchParts(x.ticket)).filter((x) =>
+        matchesListFilters(x.row, filters, { ignoreStatus: true })
+      ),
+    [ticketRows, deferredSearch, filters]
+  );
+  const statusCounts = useMemo(() => countByStatusGroup(matchingRows.map((x) => x.row)), [matchingRows]);
+  const visibleTickets = useMemo(
+    () => matchingRows.filter((x) => matchesListFilters(x.row, filters)).map((x) => x.ticket),
+    [matchingRows, filters]
+  );
+  const clearListFilters = () => {
+    setFilters(EMPTY_LIST_FILTERS);
+    setSearchInput('');
+  };
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -574,7 +634,11 @@ function RequestBoard() {
       for (let i = 0; i < ids.length; i += 500) batches.push(ids.slice(i, i + 500));
       const responses = await Promise.all(
         batches.map((batch) =>
-          fetch(`/api/requests-general/activities-requets?ids=${batch.join(',')}`)
+          fetch('/api/requests-general/activities-requets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: batch }),
+          })
         )
       );
       if (responses.some((r) => !r.ok)) throw new Error('Failed to fetch request tasks');
@@ -595,22 +659,17 @@ function RequestBoard() {
     }
   };
 
-  const fetchTicketsWithUserId = async (
-    userIdToUse: string,
-    filtersToUse: typeof filters = filters
-  ) => {
+  /**
+   * Trae TODAS las solicitudes de la persona (todos los estados); los filtros y el buscador se
+   * aplican aquí sobre la lista completa. `silent`: refresca sin tapar la pantalla (automático).
+   */
+  const fetchTicketsWithUserId = async (userIdToUse: string, silent = false) => {
     try {
-      setLoading(true);
+      if (silent) setRefreshing(true);
+      else setLoading(true);
 
       const params = new URLSearchParams();
       params.append('idUser', userIdToUse.toString());
-
-      if (filtersToUse.id) params.append('id', filtersToUse.id);
-      if (filtersToUse.status) params.append('status', filtersToUse.status);
-      if (filtersToUse.company) params.append('company', filtersToUse.company);
-      if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
-      if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
-      if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
 
       const url = `/api/requests-general?${params.toString()}`;
 
@@ -619,58 +678,32 @@ function RequestBoard() {
       if (!response.ok) throw new Error('Failed to fetch tickets');
 
       const data = await response.json();
-      console.log('fetchTicketsWithUserId: Tickets recibidos:', data.length, 'tickets');
       setTickets(data);
+      setLastUpdated(new Date());
       fetchTasksForTickets(data);
     } catch (err) {
       console.error('Error fetching tickets:', err);
-      setError('Unable to load tickets. Please try again.');
+      // En el refresco automático un fallo de red no tapa la tabla; se reintenta en el siguiente.
+      if (!silent) setError('Unable to load tickets. Please try again.');
     } finally {
-      setLoading(false);
+      if (silent) setRefreshing(false);
+      else setLoading(false);
     }
   };
 
-  const validateFilters = () => {
-    const errors: string[] = [];
+  // Refresco automático cada 30 s (y al volver a la pestaña); los filtros quedan como están.
+  useAutoRefresh(() => {
+    if (userId) void fetchTicketsWithUserId(userId, true);
+  });
 
-    if (filters.date_from && filters.date_to) {
-      const fromDate = new Date(filters.date_from);
-      const toDate = new Date(filters.date_to);
-      if (fromDate > toDate) {
-        errors.push('La fecha "Desde" no puede ser mayor que la fecha "Hasta"');
-      }
-    }
-
-    if (filters.company && !companies.find((c) => c.value === filters.company)) {
-      errors.push('La empresa seleccionada no es válida');
-    }
-
-    if (filters.assigned_to && !assignedUsers.find((u) => u.value === filters.assigned_to)) {
-      errors.push('La persona asignada seleccionada no es válida');
-    }
-
-    if (errors.length > 0) {
-      setError(errors.join('. '));
-      return false;
-    }
-
-    return true;
-  };
-
-  const handleApplyFilters = async () => {
-    if (!validateFilters()) {
-      return;
-    }
-
-    if (userId) {
-      await fetchTicketsWithUserId(userId);
-    }
-  };
 
   const getUserIdByName = async (
     userName: string,
     signal?: AbortSignal
   ): Promise<string | null> => {
+    // La sesión ya trae el id de Kronos (callback jwt, buscado por correo): sin viaje extra al
+    // servidor ni búsqueda por NOMBRE, que con dos personas homónimas podía traer el id equivocado.
+    if (session?.user?.id) return session.user.id;
     if (!session || status !== 'authenticated') {
       return null;
     }
@@ -833,13 +866,6 @@ function RequestBoard() {
     }
   };
 
-  const handleFilterChange = (field: string, value: string) => {
-    setFilters((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  };
-
   // Validación genérica de los campos dinámicos de proceso (process_form_field). Es la
   // MISMA para cualquier proceso: no sabe nada específico de ningún campo.
   const collectVisibleFieldErrors = (): Record<string, string> => {
@@ -935,8 +961,48 @@ function RequestBoard() {
           : { id_field: f.id, value_text: String(v) };
       });
 
+  useEffect(() => {
+    if (!formData.company || !formData.process) {
+      setIsPurchaseProcess(false);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/purchases/entry?companyId=${formData.company}&processId=${formData.process}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) setIsPurchaseProcess(Boolean(d?.isPurchase));
+      })
+      .catch(() => {
+        if (!cancelled) setIsPurchaseProcess(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.company, formData.process]);
+
+  useEffect(() => {
+    if (!formData.company || !formData.process) {
+      setIsSalesProcess(false);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/sales/entry?companyId=${formData.company}&processId=${formData.process}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) setIsSalesProcess(Boolean(d?.isSales));
+      })
+      .catch(() => {
+        if (!cancelled) setIsSalesProcess(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.company, formData.process]);
+
   const handleCreateTicketWithValidation = async () => {
     if (isSubmittingRef.current) return;
+    // La solicitud de compra no se crea por el formulario generico (se haria sin borrador en SAP).
+    if (isSapFormProcess) return;
     if (!validateForm()) return;
     await handleCreateTicket();
   };
@@ -1251,66 +1317,58 @@ function RequestBoard() {
     return getTasksProgress(allTasks);
   };
 
-  const filterByStatus = (value: string) => {
-    const nf = { ...filters, status: value };
-    setFilters(nf);
-    if (userId) {
-      fetchTicketsWithUserId(userId, nf);
-    }
-  };
-
   async function exportToExcel() {
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Datos');
+    if (exporting) return;
+    // Se exporta exactamente lo que se ve (filtros + buscador), sobre toda la lista.
+    const exportTickets = visibleTickets;
+    if (exportTickets.length === 0) {
+      toast.error('No hay solicitudes con los filtros actuales');
+      return;
+    }
+    setExporting(true);
+    try {
+      const { boardExportFilename, buildBoardWorkbook } = await import('@/lib/request-general/exportBoardExcel');
+      const ids = exportTickets.map((ticket) => ticket.id);
+      const grouped: Record<number, RequestTask[]> = {};
+      for (let i = 0; i < ids.length; i += 500) {
+        const batch = ids.slice(i, i + 500);
+        const response = await fetch('/api/requests-general/activities-requets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: batch }),
+        });
+        if (!response.ok) throw new Error('tareas');
+        const data = (await response.json()) as RequestTask[];
+        for (const task of data) {
+          (grouped[task.id_request_general] ||= []).push(task);
+        }
+      }
 
-    type TicketKeys = keyof Ticket;
-
-    const formatDate = (raw: any) => {
-      if (!raw) return '';
-      const d = new Date(raw);
-      if (isNaN(d.getTime())) return String(raw);
-      return new Intl.DateTimeFormat('es-CO', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      }).format(d);
-    };
-
-    const dateKeys: TicketKeys[] = ['created_at', 'date_resolution'];
-
-    const columnMapOrdered: { key: TicketKeys; header: string; width: number }[] = [
-      { key: 'requester', header: 'Solicitante', width: 24 },
-      { key: 'user', header: 'Asignado', width: 24 },
-      { key: 'company', header: 'Empresa', width: 24 },
-      { key: 'process', header: 'Proceso', width: 22 },
-      { key: 'category', header: 'Categoría', width: 22 },
-      { key: 'subject', header: 'Asunto', width: 30 },
-      { key: 'description', header: 'Descripción', width: 40 },
-      { key: 'status', header: 'Estado', width: 18 },
-      { key: 'executor_final', header: 'Ejecutor final', width: 24 },
-      { key: 'resolution', header: 'Resolución', width: 40 },
-      { key: 'date_resolution', header: 'Fecha de resolución', width: 20 },
-      { key: 'created_at', header: 'Fecha de creación', width: 20 },
-    ];
-
-    worksheet.columns = columnMapOrdered;
-
-    tickets.forEach(item => {
-      const row: Record<TicketKeys, any> = {} as Record<TicketKeys, any>;
-
-      columnMapOrdered.forEach(col => {
-        const value = item[col.key];
-        row[col.key] = dateKeys.includes(col.key) ? formatDate(value) : value;
+      const workbook = await buildBoardWorkbook({
+        module: 'Mis solicitudes',
+        filters: [
+          ...describeListFilters(filters, listOptions),
+          { label: 'Búsqueda', value: searchInput.trim() || 'Ninguna' },
+        ],
+        requests: exportTickets.map((ticket) => ({
+          id: ticket.id,
+          subject: ticket.subject,
+          process: ticket.process,
+          category: ticket.category,
+          company: ticket.company,
+          status: ticket.status,
+          requester: ticket.requester,
+          assigned: ticket.user,
+          createdAt: ticket.created_at,
+          description: ticket.description,
+          resolution: ticket.resolution,
+          dateResolution: ticket.date_resolution,
+          executor: ticket.executor_final,
+          tasks: grouped[ticket.id] ?? [],
+        })),
       });
 
-      worksheet.addRow(row);
-    });
-
-    worksheet.getRow(1).font = { bold: true };
-
-    // Segunda hoja: "Solicitudes de Pago". Trae los campos extra (pivote de
+    // Hoja extra: "Solicitudes de Pago". Trae los campos extra (pivote de
     // request_form_value) para las solicitudes del proceso "Solicitud de Pago"
     // que estén en el panel. El endpoint filtra por proceso, así que basta con
     // mandarle los ids de los tickets cargados.
@@ -1409,12 +1467,14 @@ function RequestBoard() {
       console.error('Error generando la hoja de Solicitudes de Pago:', e);
     }
 
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
-
-    saveAs(blob, 'InformeSolicitudes.xlsx');
+      await downloadWorkbook(workbook, boardExportFilename('Mis-solicitudes'));
+      toast.success('Excel descargado');
+    } catch (err) {
+      console.error(err);
+      toast.error('No se pudo generar el informe');
+    } finally {
+      setExporting(false);
+    }
   }
 
   const globalProgress = getGlobalTasksProgress();
@@ -1431,14 +1491,14 @@ function RequestBoard() {
         subtitle='Gestión y seguimiento de solicitudes generales'
         actions={
           <>
-            <SignatureAutoCloseToggle />
             <Button
               variant='default'
               radius='xl'
               leftSection={<IconDownload size={16} />}
+              loading={exporting}
               onClick={() => exportToExcel()}
             >
-              Descargar XLSX
+              Descargar Excel
             </Button>
             <Button
               radius='xl'
@@ -1451,41 +1511,14 @@ function RequestBoard() {
         }
       />
 
-      <div className={panelStyles.grid4}>
-        <StatFilterTile
-          icon={<IconFileDescription size={20} />}
-          label='Total de solicitudes'
-          value={tickets.length}
-          tone='info'
-          active={filters.status === ''}
-          onClick={() => filterByStatus('')}
-          ariaLabel='Mostrar todas las solicitudes'
-        />
-        <StatFilterTile
-          icon={<IconProgress size={20} />}
-          label='Pendientes'
-          value={tickets.filter((t) => t.status?.toLowerCase() === 'abierto').length}
-          tone='warning'
-          active={filters.status === '1'}
-          onClick={() => filterByStatus('1')}
-          ariaLabel='Filtrar solicitudes pendientes'
-        />
-        <StatFilterTile
-          icon={<IconCheck size={20} />}
-          label='Completadas'
-          value={tickets.filter((t) => t.status?.toLowerCase() === 'resuelto').length}
-          tone='ok'
-          active={filters.status === '2'}
-          onClick={() => filterByStatus('2')}
-          ariaLabel='Filtrar solicitudes completadas'
-        />
-        <ProgressRingTile
-          label='Avance de tareas'
-          done={globalProgress.done}
-          total={globalProgress.total}
-          percent={globalProgress.percent}
-        />
-      </div>
+      <RequestListFilters
+        filters={filters}
+        onChange={setFilters}
+        onClear={clearListFilters}
+        counts={statusCounts}
+        options={listOptions}
+        progress={globalProgress}
+      />
 
       {error && (
         <Alert icon={<IconAlertCircle size={20} />} title='Error' color='red' radius='lg' mt='md'>
@@ -1493,134 +1526,31 @@ function RequestBoard() {
         </Alert>
       )}
 
-      <FilterPanel
-        expanded={filtersExpanded}
-        onToggle={() => setFiltersExpanded(!filtersExpanded)}
-        icon={<IconFilter size={18} />}
-      >
-          <Collapse in={filtersExpanded}>
-            <Box mt='md'>
-              <Grid>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='ID Solicitud'
-                    type='text'
-                    value={filters.id}
-                    onChange={(e) => handleFilterChange('id', e.target.value)}
-                    leftSection={<IconFilter size={16} />}
-                    data-testid='id-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Estado'
-                    placeholder='Todos los estados'
-                    clearable
-                    data={[
-                      { value: '1', label: 'Abierto' },
-                      { value: '3', label: 'Cancelado' },
-                      { value: '2', label: 'Resuelto' },
-                      { value: '7', label: 'Devuelta' },
-                    ]}
-                    value={filters.status}
-                    onChange={(value) => handleFilterChange('status', value || '')}
-                    leftSection={<IconFlag size={16} />}
-                    data-testid='status-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Empresa'
-                    placeholder='Todas las empresas'
-                    clearable
-                    data={companies}
-                    value={filters.company}
-                    onChange={(value) => handleFilterChange('company', value || '')}
-                    leftSection={<IconBuilding size={16} />}
-                    data-testid='company-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='Fecha Desde'
-                    type='date'
-                    value={filters.date_from}
-                    onChange={(e) => handleFilterChange('date_from', e.target.value)}
-                    leftSection={<IconCalendarEvent size={16} />}
-                    data-testid='date_from-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <TextInput
-                    label='Fecha Hasta'
-                    type='date'
-                    value={filters.date_to}
-                    onChange={(e) => handleFilterChange('date_to', e.target.value)}
-                    leftSection={<IconCalendarEvent size={16} />}
-                    data-testid='date_to-filter'
-                  />
-                </Grid.Col>
-                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-                  <Select
-                    label='Persona Asignada'
-                    placeholder='Todas las personas'
-                    clearable
-                    data={assignedUsers}
-                    value={filters.assigned_to}
-                    onChange={(value) => handleFilterChange('assigned_to', value || '')}
-                    leftSection={<IconUserCheck size={16} />}
-                    data-testid='assigned_to-filter'
-                  />
-                </Grid.Col>
-              </Grid>
-
-              <Group justify='flex-end' mt='md'>
-                <Button
-                  variant='outline'
-                  onClick={async () => {
-                    const clearedFilters = {
-                      id: '',
-                      status: '',
-                      company: '',
-                      date_from: '',
-                      date_to: '',
-                      assigned_to: '',
-                    };
-                    setFilters(clearedFilters);
-
-                    setError(null);
-
-                    setTimeout(async () => {
-                      if (userId) {
-                        await fetchTicketsWithUserId(userId);
-                      }
-                    }, 100);
-                  }}
-                  leftSection={<IconX size={16} />}
-                  data-testid='clear-filters'
-                >
-                  Limpiar Filtros
-                </Button>
-                <Button
-                  onClick={handleApplyFilters}
-                  leftSection={<IconRefresh size={16} />}
-                  data-testid='apply-filters'
-                >
-                  Aplicar Filtros
-                </Button>
-              </Group>
-            </Box>
-          </Collapse>
-      </FilterPanel>
-
         {/* Enhanced Table */}
         <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
           <LoadingOverlay visible={loading} />
 
-          <Title order={3} mb='md' className='flex items-center gap-2'>
-            <IconFileDescription size={20} />
-            Lista de Solicitudes
-          </Title>
+          <Group justify='space-between' align='center' mb='xs' wrap='wrap'>
+            <Title order={3} className='flex items-center gap-2'>
+              <IconFileDescription size={20} />
+              Lista de Solicitudes
+            </Title>
+            <AutoRefreshNote refreshing={refreshing} lastUpdated={lastUpdated} />
+          </Group>
+
+          <Box mb='md'>
+            <IosSearchField
+              value={searchInput}
+              onChange={setSearchInput}
+              placeholder='Buscar ID, asunto, empresa, categoría, estado o persona'
+              ariaLabel='Buscar solicitudes'
+              meta={
+                visibleTickets.length !== tickets.length
+                  ? `${visibleTickets.length} de ${tickets.length} solicitud(es)`
+                  : 'Busca en todas tus solicitudes; no importan tildes ni mayúsculas'
+              }
+            />
+          </Box>
 
           <div className='overflow-x-auto'>
             <Table striped highlightOnHover>
@@ -1635,7 +1565,7 @@ function RequestBoard() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {tickets.length === 0 ? (
+                {visibleTickets.length === 0 ? (
                   <Table.Tr>
                     <Table.Td colSpan={6} className='text-center py-12 text-gray-500'>
                       <div className='flex flex-col items-center gap-3'>
@@ -1644,13 +1574,15 @@ function RequestBoard() {
                           No se encontraron solicitudes
                         </Text>
                         <Text size='sm' c='gray.5'>
-                          Intenta ajustar los filtros o crea una nueva solicitud
+                          {tickets.length > 0
+                            ? 'Ninguna solicitud coincide con los filtros o la búsqueda'
+                            : 'Aún no tienes solicitudes; crea una nueva'}
                         </Text>
                       </div>
                     </Table.Td>
                   </Table.Tr>
                 ) : (
-                  tickets.map((ticket) => (
+                  visibleTickets.map((ticket) => (
                     <Table.Tr
                       key={ticket.id}
                       className='cursor-pointer transition-colors'
@@ -1670,9 +1602,16 @@ function RequestBoard() {
                         <Text size='sm' fw={500} lineClamp={2}>
                           {ticket.subject}
                         </Text>
+                        {requestFlows[ticket.id] ? (
+                          <div style={{ marginTop: 8 }}>
+                            <RequestFlowBar flow={requestFlows[ticket.id]} />
+                          </div>
+                        ) : null}
                         {tasksByRequest[ticket.id]?.length ? (
                           <Stack gap={6} mt={8}>
-                            <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
+                            {requestFlows[ticket.id] ? null : (
+                              <RequestProgressBar {...getTasksProgress(tasksByRequest[ticket.id])} />
+                            )}
                             <Group gap={6} wrap='wrap'>
                               {buildTaskDisplayBadges(tasksByRequest[ticket.id]).map((badge) => {
                                 const { color, Icon } = getTaskVisual(badge.statusKey);
@@ -1782,6 +1721,17 @@ function RequestBoard() {
           </div>
         </Card>
 
+        {purchaseNotice && (
+          <Alert
+            color={purchaseNotice.ok ? 'green' : 'yellow'}
+            withCloseButton
+            onClose={() => setPurchaseNotice(null)}
+            mb='md'
+          >
+            {purchaseNotice.message}
+          </Alert>
+        )}
+
         <Modal
           opened={modalOpened}
           onClose={() => {
@@ -1822,6 +1772,8 @@ function RequestBoard() {
              (ScrollArea en TableFieldInput), así que con el ancho extra las
              columnas se ven sin pelear. */
           size='90%'
+          // Solicitud de compra: pantalla completa para que la tabla de líneas se vea entera.
+          fullScreen={isSapFormProcess}
           radius='md'
           overlayProps={{ blur: 4 }}
         >
@@ -1854,6 +1806,8 @@ function RequestBoard() {
                 />
               </Grid.Col>
 
+              {/* Oferta de venta: el asunto se arma solo (OV - cliente - NIT - primera línea). */}
+              {!isSalesProcess && (
               <Grid.Col span={{ base: 12, md: 12 }}>
                 <TextInput
                   label={parseInt(formData.process) == 4 ? 'Cargo' : 'Asunto'}
@@ -1871,12 +1825,13 @@ function RequestBoard() {
                   leftSection={<IconFileDescription size={16} />}
                 />
               </Grid.Col>
+              )}
             </Grid>
 
             {/* Activity Search Section */}
             <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
               <Group justify='space-between' mb='xs'>
-                <Text fw={600} size='sm' c='blue.9'>
+                <Text fw={600} size='sm' c='var(--app-accent, var(--mantine-color-blue-7))'>
                   ¿No sabes qué categoría elegir?
                 </Text>
                 <Button
@@ -1920,7 +1875,7 @@ function RequestBoard() {
                       className='max-h-64 overflow-y-auto'
                     >
                       <Stack gap='xs'>
-                        <Text size='xs' c='gray.5' fw={500}>
+                        <Text size='xs' c='dimmed' fw={500}>
                           {searchResults.length}{' '}
                           {searchResults.length === 1 ? 'resultado' : 'resultados'} encontrado
                           {searchResults.length === 1 ? '' : 's'}
@@ -1933,7 +1888,7 @@ function RequestBoard() {
                             p='sm'
                             radius='md'
                             withBorder
-                            className='cursor-pointer hover:bg-blue-50 hover:border-blue-300 transition-all duration-200'
+                            className='cursor-pointer hover:bg-blue-500/10 hover:border-blue-400 transition-all duration-200'
                             onClick={() => handleActivitySelect(result)}
                           >
                             <Stack gap={4}>
@@ -1941,11 +1896,11 @@ function RequestBoard() {
                                 <Badge size='xs' variant='light' color='blue'>
                                   {result.category}
                                 </Badge>
-                                <Text size='xs' c='gray.5' fw={500}>
+                                <Text size='xs' c='dimmed' fw={500}>
                                   {result.process}
                                 </Text>
                               </Group>
-                              <Text size='sm' lineClamp={2} c='gray.8'>
+                              <Text size='sm' lineClamp={2} c='var(--app-text, var(--mantine-color-gray-8))'>
                                 {result.description || result.label}
                               </Text>
                             </Stack>
@@ -1957,7 +1912,7 @@ function RequestBoard() {
                   )}
 
                   {activitySearch && searchResults.length === 0 && (
-                    <Text size='sm' c='gray.5' ta='center' py='md'>
+                    <Text size='sm' c='dimmed' ta='center' py='md'>
                       No se encontraron actividades que coincidan con tu búsqueda.
                     </Text>
                   )}
@@ -2002,6 +1957,34 @@ function RequestBoard() {
               </Grid.Col>
             </Grid>
 
+            {isPurchaseProcess && (
+              <PurchaseInlineForm
+                companyId={formData.company}
+                subject={formData.subject}
+                onDone={({ ok, message }) => {
+                  setModalOpened(false);
+                  setFormData({ company: '', subject: '', category: '', process: '', descripcion: '', url: '' });
+                  setPurchaseNotice({ ok, message });
+                  fetchTickets();
+                }}
+              />
+            )}
+
+            {isSalesProcess && (
+              <SalesInlineForm
+                companyId={formData.company}
+                subject={formData.subject}
+                onDone={({ ok, message }) => {
+                  setModalOpened(false);
+                  setFormData({ company: '', subject: '', category: '', process: '', descripcion: '', url: '' });
+                  setPurchaseNotice({ ok, message });
+                  fetchTickets();
+                }}
+              />
+            )}
+
+            {!isSapFormProcess && (
+              <>
             {(() => {
               const processName = (
                 filteredProcesses.find((p) => p.value === formData.process)?.label || ''
@@ -2304,6 +2287,9 @@ function RequestBoard() {
               />
             </div>
 
+              </>
+            )}
+
             <Divider />
 
             <Group justify='flex-end' gap='md'>
@@ -2322,6 +2308,7 @@ function RequestBoard() {
               >
                 Cancelar
               </Button>
+              {!isSapFormProcess && (
               <Button
                 onClick={handleCreateTicketWithValidation}
                 loading={createLoading}
@@ -2332,6 +2319,7 @@ function RequestBoard() {
               >
                 Crear Solicitud
               </Button>
+              )}
             </Group>
           </Stack>
         </Modal>

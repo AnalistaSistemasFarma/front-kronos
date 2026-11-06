@@ -30,7 +30,17 @@ const STATS = [
   { value: '35%', label: 'Ahorro Promedio' },
 ];
 
-const FOOTER_SERVICES = ['Recursos Humanos', 'Finanzas y Contabilidad', 'Servicios de TI', 'Compras'];
+const FOOTER_SERVICES = [
+  'GSS',
+  'Finanzas y reporte',
+  'Contabilidad',
+  'Capital de trabajo',
+  'Crédito y cartera',
+  'Talento humano',
+  'Jurídico',
+  'Tecnología',
+  'Técnica',
+];
 const FOOTER_COMPANY = ['Nosotros', 'Carreras', 'Casos de Éxito', 'Blog'];
 
 /** Las animaciones (GSAP) viven en LandingMotion y se enganchan a los atributos data-*. */

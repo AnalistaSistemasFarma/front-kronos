@@ -1,4 +1,4 @@
-import ExcelJS from 'exceljs';
+import type ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import type { DashboardDateFilter } from '../dateRange';
 import { getFilterLabel, getPeriodRangeLabel } from '../dateRange';

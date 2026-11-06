@@ -19,8 +19,9 @@
  *
  * ESCRIBIRLE A UN AGENTE (writeAccessForAgent): además de la puerta,
  *   (d) rol dueño o editor;
- *   (e) el agente sigue DESIGNADO, activo y con el módulo habilitado
- *       (CHAT_PROJECTS_AGENTS) para el perfil del proyecto;
+ *   (e) el agente sigue DESIGNADO, activo y con el módulo habilitado para
+ *       el perfil del proyecto EN LA EMPRESA DEL PROYECTO (configuración del
+ *       módulo, lib/proyectos/config-agentes.ts; sin configurar, el .env);
  *   (f) la persona tiene ESE agente asignado en la empresa del proyecto. El
  *       agente trae conectores de SAP: no debe ser una puerta a datos que la
  *       persona no tiene (opción más segura; decisión pendiente de Nicolás).
@@ -40,12 +41,15 @@ import type { EstadoAgenteProyectoDto } from '../proyectos/estado-agente';
 import {
   capabilitiesFor,
   profileLabel,
-  profilesFor,
-  projectsEnabledFor,
   PROJECTS_MODULE_URL,
   roleFromDb,
   type ProjectRole,
 } from './projects-rules';
+import { cargarConfigProyectos } from '../proyectos/config-agentes';
+import { idsDesarrollo } from '../proyectos/agentes-desarrollo';
+import type { ConfigProyectos } from '../proyectos/config-agentes-rules';
+import { agentesMencionables, puedeGestionarHilo } from '../proyectos/hilos-rules';
+import type { AgenteMencionable } from './groups';
 
 /** Proyecto resuelto para una persona que SÍ puede entrar. */
 export interface ProjectAccess {
@@ -154,13 +158,14 @@ interface AgenteDesignado {
 function evaluarAgente(
   agente: AgenteDesignado | null,
   project: Pick<ProjectAccess, 'idCompany' | 'profile' | 'role'>,
-  agentesDeLaPersona: Map<number, Set<number>>
+  agentesDeLaPersona: Map<number, Set<number>>,
+  config: ConfigProyectos
 ): WriteAccess {
   if (!capabilitiesFor(project.role).write) {
     return { ok: false, motivo: 'Usted es lector en este proyecto: puede leer las conversaciones, pero no escribir.' };
   }
   if (!agente) return { ok: false, motivo: 'Este asistente ya no está en el proyecto: la conversación quedó de solo lectura.' };
-  if (!agente.isActive || !projectsEnabledFor(agente.code) || !profilesFor(agente.code).includes(project.profile)) {
+  if (!agente.isActive || !config.perfiles(agente.code, project.idCompany).includes(project.profile)) {
     return { ok: false, motivo: 'Este asistente no tiene proyectos habilitados en este momento.' };
   }
   if (!agentesDeLaPersona.get(agente.idAgent)?.has(project.idCompany)) {
@@ -187,7 +192,7 @@ export async function writeAccessForAgent(user: ProjectUser, project: ProjectAcc
   });
   const agente = fila ? { idAgent: fila.agent.id_agent, code: fila.agent.code, isActive: fila.agent.is_active } : null;
   const asignados = capabilitiesFor(project.role).write ? await agentesAsignados(user.email) : new Map();
-  return evaluarAgente(agente, project, asignados);
+  return evaluarAgente(agente, project, asignados, await cargarConfigProyectos());
 }
 
 /**
@@ -216,13 +221,27 @@ export async function assertProjectConversationAccess(
 
 /**
  * Puerta del AGENTE (llave de alcance 'projects'): la conversación es de un
- * proyecto ACTIVO donde ESTE agente está designado, y la conversación es suya.
- * El id del agente sale de la llave, nunca del payload.
+ * proyecto ACTIVO donde ESTE agente está designado, y la conversación es suya
+ * — o lo INVITARON a ella (2026-10-29, multiagente): una persona lo mencionó
+ * en el hilo, lo que deja una fila suya en chat_message_delivery. Con eso
+ * puede leer el contexto (con el historial), poner su indicador y responder
+ * en el mismo hilo. El id del agente sale de la llave, nunca del payload.
  */
+/** Perfil sin conectores (lib/chat/projects-rules.ts). */
+const PERFIL_SIN_CONECTORES = 'sin-conectores';
+
 export async function assertAgentProjectConversation(
   idAgent: number,
   conversationId: unknown
-): Promise<{ id: number; idProject: number; projectName: string } | null> {
+): Promise<{
+  id: number;
+  idProject: number;
+  projectName: string;
+  invitado: boolean;
+  idAgentPrincipal: number;
+  /** Perfil de conectores con el que trabaja ESTE agente en la conversación. */
+  perfil: string;
+} | null> {
   if (!esIdValido(conversationId) || !esIdValido(idAgent)) return null;
 
   const conv = await prisma.chatConversation.findFirst({
@@ -230,21 +249,92 @@ export async function assertAgentProjectConversation(
       id: conversationId,
       kind: 'project',
       archived: false,
-      // ANCLA DE SEGURIDAD: la conversación es del agente de la llave y el
-      // agente sigue designado en un proyecto activo.
-      id_agent: idAgent,
+      // ANCLA DE SEGURIDAD: la conversación es del agente de la llave, o una
+      // persona lo mencionó en ella; y el agente sigue designado en un
+      // proyecto activo.
+      OR: [{ id_agent: idAgent }, { messages: { some: { deliveries: { some: { id_agent: idAgent } } } } }],
       project: { archived: false, agents: { some: { id_agent: idAgent } } },
     },
     select: {
       id: true,
-      agent: { select: { code: true } },
-      project: { select: { id_project: true, name: true, profile: true } },
+      id_agent: true,
+      mesa: { select: { id_mesa: true } },
+      project: {
+        select: {
+          id_project: true,
+          name: true,
+          profile: true,
+          id_company: true,
+          // El code del agente de la LLAVE (no el del principal): el perfil se valida para él.
+          agents: { where: { id_agent: idAgent }, select: { agent: { select: { code: true } } } },
+        },
+      },
     },
   });
   if (!conv || !conv.project) return null;
-  if (!projectsEnabledFor(conv.agent.code) || !profilesFor(conv.agent.code).includes(conv.project.profile)) return null;
+  const code = conv.project.agents[0]?.agent.code;
+  if (!code) return null;
+  const config = await cargarConfigProyectos();
+  const perfilesAgente = config.perfiles(code, conv.project.id_company);
+  let perfil = conv.project.profile;
+  if (!perfilesAgente.includes(perfil)) {
+    // MESA DE DISCUSIÓN (2026-11-05, Nicolás Rivera: «que pueda elegir todos los
+    // agentes que quiera»): un agente habilitado en la empresa pero sin el perfil
+    // del proyecto entra a la mesa SIN CONECTORES — menos permisos que cualquier
+    // perfil suyo, y en una mesa solo se conversa.
+    if (!conv.mesa || perfilesAgente.length === 0) return null;
+    perfil = PERFIL_SIN_CONECTORES;
+  }
 
-  return { id: conv.id, idProject: conv.project.id_project, projectName: conv.project.name };
+  return {
+    id: conv.id,
+    idProject: conv.project.id_project,
+    projectName: conv.project.name,
+    invitado: conv.id_agent !== idAgent,
+    idAgentPrincipal: conv.id_agent,
+    perfil,
+  };
+}
+
+/**
+ * Agentes que ESTA persona puede MENCIONAR en un hilo (2026-10-29): designados
+ * en el proyecto, que ella misma puede usar ahí (evaluarAgente) y distintos
+ * del principal. Devuelve también al principal, para resolver la mención.
+ */
+export async function mencionablesDelHilo(
+  user: ProjectUser,
+  idProject: number,
+  role: ProjectRole,
+  idAgentPrincipal: number
+): Promise<{ principal: AgenteMencionable | null; mencionables: AgenteMencionable[] }> {
+  const p = await prisma.chatProject.findUnique({
+    where: { id_project: idProject },
+    select: {
+      id_company: true,
+      profile: true,
+      archived: true,
+      agents: { select: { agent: { select: { id_agent: true, code: true, display_name: true, handle: true, is_active: true } } } },
+    },
+  });
+  if (!p || p.archived) return { principal: null, mencionables: [] };
+  const fila = p.agents.find((x) => x.agent.id_agent === idAgentPrincipal)?.agent;
+  const principal = fila ? { idAgent: fila.id_agent, code: fila.code, displayName: fila.display_name, handle: fila.handle } : null;
+  const otros = p.agents.filter((x) => x.agent.id_agent !== idAgentPrincipal);
+  if (otros.length === 0 || !capabilitiesFor(role).write) return { principal, mencionables: [] };
+
+  const [asignados, config] = await Promise.all([agentesAsignados(user.email), cargarConfigProyectos()]);
+  const acceso = { idCompany: p.id_company, profile: p.profile, role };
+  const mencionables = agentesMencionables(
+    otros.map((x) => ({
+      idAgent: x.agent.id_agent,
+      code: x.agent.code,
+      displayName: x.agent.display_name,
+      handle: x.agent.handle,
+      puedoEscribir: evaluarAgente({ idAgent: x.agent.id_agent, code: x.agent.code, isActive: x.agent.is_active }, acceso, asignados, config).ok,
+    })),
+    idAgentPrincipal
+  );
+  return { principal, mencionables };
 }
 
 /** Filtro Prisma de «proyecto activo donde el agente está designado» (bandeja, archivos). */
@@ -290,6 +380,8 @@ export interface AgenteDesignable {
   avatarUrl: string | null;
   avatarVersion: number | null;
   profiles: string[];
+  /** Agente de DESARROLLO (2026-10-27): solo a estos se les ofrece código y repos. */
+  esDesarrollo: boolean;
 }
 
 /**
@@ -301,11 +393,14 @@ export async function designableAgents(email: string, profile?: string): Promise
   const acceso = await getChatAccess(email);
   const out = new Map<number, AgenteDesignable[]>();
   if (!acceso.canUseChat) return out;
+  const config = await cargarConfigProyectos();
+  const desarrollo = await idsDesarrollo(acceso.agents.map((a) => a.idAgent));
   for (const a of acceso.agents) {
-    if (!projectsEnabledFor(a.code)) continue;
-    const perfiles = profilesFor(a.code);
-    if (profile && !perfiles.includes(profile)) continue;
+    // Habilitado y perfiles POR EMPRESA (configuración del módulo; sin configurar, el .env).
     for (const c of a.companies) {
+      const perfiles = config.perfiles(a.code, c.idCompany);
+      if (perfiles.length === 0) continue;
+      if (profile && !perfiles.includes(profile)) continue;
       const lista = out.get(c.idCompany) ?? [];
       lista.push({
         idAgent: a.idAgent,
@@ -315,6 +410,7 @@ export async function designableAgents(email: string, profile?: string): Promise
         avatarUrl: a.avatarUrl,
         avatarVersion: a.avatarVersion,
         profiles: perfiles,
+        esDesarrollo: desarrollo.has(a.idAgent),
       });
       out.set(c.idCompany, lista);
     }
@@ -406,10 +502,65 @@ export async function listProjectsForUser(user: ProjectUser, opciones: { archiva
   };
 }
 
+/**
+ * Conversaciones de proyecto donde la persona PUEDE ESCRIBIR (2026-10-24),
+ * para el selector de «Compartir → Reenviar por el chat» del visor de
+ * adjuntos. Misma regla de escritura que la puerta (evaluarAgente: rol con
+ * escritura, agente vigente y asignado en la empresa), resuelta en bloque:
+ * una consulta de proyectos y una de permisos, sin N+1. La puerta del POST
+ * se vuelve a pasar igual al reenviar: esto solo arma la lista.
+ */
+export async function conversacionesDeProyectoEscribibles(
+  user: ProjectUser
+): Promise<{ idConversation: number; titulo: string | null; proyecto: string; agente: string; lastMessageAt: Date | null }[]> {
+  const listado = await listProjectsForUser(user, { archivados: false });
+  if (!listado || listado.projects.length === 0) return [];
+  const conEscritura = listado.projects.filter((p) => capabilitiesFor(p.myRole).write);
+  if (conEscritura.length === 0) return [];
+
+  const filas = await prisma.chatConversation.findMany({
+    where: { kind: 'project', archived: false, id_project: { in: conEscritura.map((p) => p.idProject) } },
+    select: {
+      id: true,
+      title: true,
+      id_project: true,
+      last_message_at: true,
+      agent: { select: { id_agent: true, code: true, display_name: true, is_active: true } },
+    },
+    orderBy: [{ last_message_at: 'desc' }, { id: 'desc' }],
+    take: 200,
+  });
+  if (filas.length === 0) return [];
+
+  const [asignados, config, designados] = await Promise.all([
+    agentesAsignados(user.email),
+    cargarConfigProyectos(),
+    prisma.chatProjectAgent.findMany({
+      where: { id_project: { in: conEscritura.map((p) => p.idProject) } },
+      select: { id_project: true, id_agent: true },
+    }),
+  ]);
+  const enProyecto = new Set(designados.map((d) => `${d.id_project}:${d.id_agent}`));
+  const proyectos = new Map(conEscritura.map((p) => [p.idProject, p]));
+
+  const salida: { idConversation: number; titulo: string | null; proyecto: string; agente: string; lastMessageAt: Date | null }[] = [];
+  for (const c of filas) {
+    const p = c.id_project === null ? undefined : proyectos.get(c.id_project);
+    if (!p) continue;
+    const agente = enProyecto.has(`${p.idProject}:${c.agent.id_agent}`)
+      ? { idAgent: c.agent.id_agent, code: c.agent.code, isActive: c.agent.is_active }
+      : null;
+    const w = evaluarAgente(agente, { idCompany: p.company.idCompany, profile: p.profile.key, role: p.myRole }, asignados, config);
+    if (!w.ok) continue;
+    salida.push({ idConversation: c.id, titulo: c.title, proyecto: p.name, agente: c.agent.display_name, lastMessageAt: c.last_message_at });
+  }
+  return salida;
+}
+
 /* ───────────────────────────── Detalle ───────────────────────────────── */
 
 /** Lo que la base sabe del proyecto; los vínculos los completa projects-links. */
-export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess) {
+export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess, opciones: { esAdmin?: boolean } = {}) {
   const p = await prisma.chatProject.findUnique({
     where: { id_project: acceso.idProject },
     select: {
@@ -435,6 +586,8 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
           size_bytes: true,
           created_at: true,
           uploaded_by: true,
+          uploaded_by_agent: true,
+          id_conversation: true,
         },
         orderBy: { created_at: 'desc' },
       },
@@ -462,10 +615,11 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
   const caps = capabilitiesFor(acceso.role);
   const asignados = caps.write && !p.archived ? await agentesAsignados(user.email) : new Map<number, Set<number>>();
   const designados = new Map(p.agents.map((x) => [x.agent.id_agent, x.agent]));
+  const config = await cargarConfigProyectos();
   const motivoDe = (idAgent: number) => {
     if (p.archived) return { ok: false as const, motivo: 'El proyecto está archivado.' };
     const a = designados.get(idAgent);
-    return evaluarAgente(a ? { idAgent: a.id_agent, code: a.code, isActive: a.is_active } : null, acceso, asignados);
+    return evaluarAgente(a ? { idAgent: a.id_agent, code: a.code, isActive: a.is_active } : null, acceso, asignados, config);
   };
 
   // Nombres de quienes crearon conversaciones o subieron archivos (una consulta).
@@ -480,6 +634,15 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
     for (const u of us) nombres.set(u.id, u.name?.trim() || u.email);
   }
   const persona = (id: string | null) => (id ? { id, name: nombres.get(id) ?? 'Persona retirada' } : null);
+
+  // Archivos que generó un agente en una conversación (2026-10-23): su nombre visible.
+  const idsAgentes = [...new Set(p.files.map((f) => f.uploaded_by_agent).filter((x): x is number => typeof x === 'number'))];
+  const nombresAgentes = new Map<number, string>(p.agents.map((x) => [x.agent.id_agent, x.agent.display_name]));
+  const faltanAgentes = idsAgentes.filter((id) => !nombresAgentes.has(id));
+  if (faltanAgentes.length > 0) {
+    const as = await prisma.agent.findMany({ where: { id_agent: { in: faltanAgentes } }, select: { id_agent: true, display_name: true } });
+    for (const a of as) nombresAgentes.set(a.id_agent, a.display_name);
+  }
 
   return {
     idProject: p.id_project,
@@ -497,7 +660,7 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
       const w = motivoDe(x.agent.id_agent);
       return {
         ...aAgenteMini(x.agent),
-        disponible: x.agent.is_active && projectsEnabledFor(x.agent.code),
+        disponible: x.agent.is_active && config.habilitado(x.agent.code, p.company.id_company),
         puedoEscribir: w.ok,
         motivo: w.ok ? null : w.motivo,
       };
@@ -519,6 +682,10 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
       sizeBytes: f.size_bytes,
       createdAt: f.created_at.toISOString(),
       uploadedBy: persona(f.uploaded_by),
+      uploadedByAgent:
+        typeof f.uploaded_by_agent === 'number'
+          ? { idAgent: f.uploaded_by_agent, name: nombresAgentes.get(f.uploaded_by_agent) ?? 'Asistente', idConversation: f.id_conversation ?? null }
+          : null,
       downloadUrl: `/api/proyectos/${p.id_project}/archivos/${f.id_project_file}`,
       puedoQuitar: !p.archived && (caps.removeAny || (caps.contribute && f.uploaded_by === user.id)),
     })),
@@ -532,6 +699,14 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess)
         agent: aAgenteMini(c.agent),
         createdBy: persona(c.created_by),
         soloLectura: w.ok ? null : w.motivo,
+        // Renombrar y eliminar (2026-10-29): creador con escritura, dueño o administrador.
+        puedoGestionar: puedeGestionarHilo({
+          actorId: user.id,
+          role: acceso.role,
+          esAdmin: opciones.esAdmin === true,
+          creadoPor: c.created_by,
+          proyectoArchivado: p.archived,
+        }).ok,
         agentStatus: estadoDeConversacion(c, p.id_project, p.name),
       };
     }),

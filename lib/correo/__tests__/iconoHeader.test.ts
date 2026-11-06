@@ -32,6 +32,14 @@ describe('Icono del Correo · regla de visibilidad', () => {
     for (const status of [401, 403, 404, 500]) {
       expect(debeMostrarIconoCorreo(YO, estadoDesdeRespuesta(YO, status, { noLeidos: 3 }, T0)), String(status)).toBe(false);
     }
+    // Sin el módulo el servidor responde 200 { habilitado: false }: tampoco se muestra.
+    expect(debeMostrarIconoCorreo(YO, estadoDesdeRespuesta(YO, 200, { habilitado: false }, T0))).toBe(false);
+  });
+
+  it('sin el módulo se vuelve a preguntar cada 30 min, no cada 3', () => {
+    const e = estadoDesdeRespuesta(YO, 200, { habilitado: false }, T0);
+    expect(estadoVencido(e, YO, T0 + ICONO_CORREO_TTL_MS)).toBe(false);
+    expect(estadoVencido(e, YO, T0 + 30 * 60_000)).toBe(true);
   });
 
   it('mientras no haya respuesta del servidor, o sin sesión, no se muestra', () => {

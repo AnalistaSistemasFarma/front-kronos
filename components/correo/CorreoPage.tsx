@@ -1206,6 +1206,7 @@ export default function CorreoPage() {
         conversationId={hiloAbierto}
         carpeta={carpetaActual?.etiqueta ?? null}
         envioHabilitado={estado.conexion.envioHabilitado}
+        agenteHabilitado={estado.conexion.agenteHabilitado === true}
         nombreOperador={estado.usuario.nombre}
         correoOperador={estado.usuario.email}
         onVolver={cerrarHilo}
@@ -1213,6 +1214,7 @@ export default function CorreoPage() {
         marcarHilo={marcarHilo}
         onCambio={() => setHayCambios(true)}
         onCrearSolicitud={(ids) => setSimulacion(ids)}
+        ticketHabilitado={Boolean(estado.ticketHabilitado)}
       />
     </Card>
   ) : null;

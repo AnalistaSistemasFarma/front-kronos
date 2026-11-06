@@ -7,6 +7,12 @@ import {
 } from '../../lib/theme/palettes';
 import { darkTokens, lightTokens } from '../../lib/theme/tokens';
 import { FONT_STACKS, FONT_STORAGE_KEY } from '../../lib/theme/fonts';
+import {
+  CHAT_RAIL_EXPANDIDA_KEY,
+  CHAT_RAIL_RESERVA_CLASS,
+  CHAT_RAIL_RESERVA_EXPANDIDA_CLASS,
+  CHAT_RAIL_RESERVA_KEY,
+} from '../../lib/chat/rail';
 
 export function buildInitScript(): string {
   const light = JSON.stringify(lightTokens);
@@ -90,6 +96,7 @@ if(pa){
 var FS=${fontStacks};
 var fk=localStorage.getItem('${FONT_STORAGE_KEY}');
 if(typeof fk==='string'&&Object.prototype.hasOwnProperty.call(FS,fk)){r.style.setProperty('--font-sans',FS[fk]);r.setAttribute('data-font',fk);}
+if(/^\\/(dashboard|process|profile)(\\/|$)/.test(location.pathname)&&localStorage.getItem('${CHAT_RAIL_RESERVA_KEY}')==='1'&&window.matchMedia('(min-width: 769px)').matches){r.classList.add('${CHAT_RAIL_RESERVA_CLASS}');if(localStorage.getItem('${CHAT_RAIL_EXPANDIDA_KEY}')==='1')r.classList.add('${CHAT_RAIL_RESERVA_EXPANDIDA_CLASS}');}
 }
 }catch(e){}
 })();`;

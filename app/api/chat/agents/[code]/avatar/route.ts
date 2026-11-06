@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../../lib/prisma';
 import { checkAdminPrivileges } from '../../../../../../lib/access-control';
-import { getChatAccess } from '../../../../../../lib/chat/access';
+import { getChatAccess, invalidateChatAccessCache } from '../../../../../../lib/chat/access';
 import {
   badRequest,
   forbidden,
@@ -110,6 +110,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       where: { id_agent: agente.id_agent },
       data: { avatar_blob: bytes, avatar_mime: mime, avatar_updated_at: cuando },
     });
+    // El catálogo de agentes va en caché (lib/chat/access.ts): que la foto nueva se vea ya.
+    invalidateChatAccessCache();
 
     // Se devuelve la versión para que la interfaz refresque la imagen sin
     // recargar: la URL nueva (?v=…) es distinta de la que tenía en caché.

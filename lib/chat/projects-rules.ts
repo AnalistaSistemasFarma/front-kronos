@@ -20,6 +20,12 @@
  * se pueden escoger al crear un proyecto con ese agente. CERRADO POR DEFECTO:
  * sin la variable, o con un JSON inválido, ningún agente tiene proyectos y
  * todas las rutas del módulo responden 404.
+ *
+ * Desde el 2026-10-20 la variable es el VALOR POR DEFECTO: la pantalla de
+ * configuración del módulo (chat_project_agent_config) decide por empresa, y
+ * una empresa sin configurar sigue con esta variable. Las puertas del módulo
+ * leen la configuración efectiva de lib/proyectos/config-agentes.ts, no estas
+ * funciones directamente.
  */
 
 /** Un perfil de conectores. El PUENTE (puente-hilos/) decide qué MCP monta. */

@@ -1,10 +1,14 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useDashboardData } from './DashboardDataContext';
 
 /** Datos de tareas/solicitudes compartidos en todo el dashboard (sin re-fetch al cambiar de pestaña). */
 export function useDashboardTasks() {
   const ctx = useDashboardData();
+  const { needTasks } = ctx;
+  // Montar una vista que los usa es lo que dispara la primera carga.
+  useEffect(() => needTasks(), [needTasks]);
   return {
     session: ctx.session,
     status: ctx.status,

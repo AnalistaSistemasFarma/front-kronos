@@ -12,7 +12,8 @@ import { encode } from 'next-auth/jwt';
  *   - celular: TOQUE LARGO sobre el mensaje → hoja inferior → reaccionar;
  *   - en vivo: una reacción de otra persona llega por el MISMO sondeo del hilo
  *     (campo `reactions` de /poll), sin pedidos nuevos;
- *   - el selector de stickers y GIF desde el clip, y cómo se pinta lo enviado.
+ *   - el panel de stickers y GIF desde su botón al lado del clip (desde el
+ *     2026-10-20, ver stickers-animados.spec.ts), y cómo se pinta lo enviado.
  *
  * Capturas para el PR: con CAPTURAS_DIR definido se guardan ahí.
  */
@@ -291,22 +292,20 @@ test.describe('Chat · reacciones, stickers y GIF · escritorio', () => {
     await capturar(page, 'escritorio-4-reaccion-en-vivo');
   });
 
-  test('envía un sticker y un GIF desde el clip; el GIF llega por el proxy', async ({ page }) => {
+  test('envía un sticker y un GIF desde el botón de al lado del clip; el GIF llega por el proxy', async ({ page }) => {
     const estado = await simularChat(page);
     await page.goto('/process/chat?agent=horus');
     await expect(burbuja(page, 'quedó en SharePoint')).toBeVisible();
 
-    await page.getByRole('button', { name: 'Adjuntar y más opciones' }).click();
-    await page.getByRole('menuitem', { name: 'Stickers y GIF' }).click();
-    const selector = page.getByTestId('chat-media-picker');
+    await page.getByRole('button', { name: 'Emojis, stickers y GIF' }).click();
+    const selector = page.getByTestId('chat-expresiones');
     await expect(selector.getByRole('button', { name: 'Enviar sticker gracias' })).toBeVisible();
     await capturar(page, 'escritorio-5-selector-stickers');
     await selector.getByRole('button', { name: 'Enviar sticker gracias' }).click();
     await expect(hilo(page).getByRole('img', { name: 'Sticker: ¡Gracias!' })).toBeVisible();
     expect(estado.mediaEnviada.at(-1)).toEqual({ kind: 'sticker', code: 'gracias' });
 
-    await page.getByRole('button', { name: 'Adjuntar y más opciones' }).click();
-    await page.getByRole('menuitem', { name: 'Stickers y GIF' }).click();
+    await page.getByRole('button', { name: 'Emojis, stickers y GIF' }).click();
     await page.getByRole('tab', { name: 'GIF' }).click();
     await expect(selector.getByRole('button', { name: 'Enviar GIF GIF 1' })).toBeVisible();
     await expect(selector.getByText(/Con tecnología de GIPHY/)).toBeVisible();
@@ -363,14 +362,13 @@ test.describe('Chat · reacciones, stickers y GIF · celular', () => {
     await expect(page.getByText(/^Respondiendo a/)).toHaveCount(0);
     await capturar(page, 'celular-3-reaccion-puesta');
 
-    // Selector de stickers como hoja inferior.
-    await page.getByRole('button', { name: 'Adjuntar y más opciones' }).click();
-    await page.getByRole('menuitem', { name: 'Stickers y GIF' }).click();
-    const selector = page.getByTestId('chat-media-picker');
+    // Selector de stickers como hoja inferior (en el lugar del teclado).
+    await page.getByRole('button', { name: 'Emojis, stickers y GIF' }).click();
+    const selector = page.getByTestId('chat-expresiones');
     await expect(selector).toBeVisible();
-    const cajaSel = (await page.locator('.chat-hoja').last().boundingBox())!;
-    // Pegada abajo: el borde inferior coincide con el de la pantalla.
-    expect(Math.round(cajaSel.y + cajaSel.height)).toBeGreaterThanOrEqual(840);
+    const cajaSel = (await page.locator('.chat-expresiones-hoja').boundingBox())!;
+    // Pegada abajo, en el lugar del teclado (solo el margen inferior del compositor).
+    expect(Math.round(cajaSel.y + cajaSel.height)).toBeGreaterThanOrEqual(830);
     await capturar(page, 'celular-4-selector-stickers');
     await page.getByRole('tab', { name: 'GIF' }).click();
     await expect(selector.getByRole('button', { name: 'Enviar GIF GIF 1' })).toBeVisible();

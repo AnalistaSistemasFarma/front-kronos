@@ -214,6 +214,8 @@ function AuthorizationBoard() {
     /** Overlay a pantalla completa tras autorizar firma (hasta navegar al documento). */
     const [openingSignDocument, setOpeningSignDocument] = useState<false | 'sign' | 'review'>(false);
     const [error, setError] = useState<string | null>(null);
+    /** Bloqueo al autorizar que debe quedar visible (p. ej. Ventas sin TRM del día en SAP). */
+    const [authorizeBlock, setAuthorizeBlock] = useState<string | null>(null);
     const userName = session?.user?.name || '';
     const [userIdInitialized, setUserIdInitialized] = useState(false);
     const [userId, setUserId] = useState<string | null>(null);
@@ -299,6 +301,9 @@ function AuthorizationBoard() {
     const someSelectableSelected = selectableRequests.some((r) => selectedIds.has(r.id));
 
     const getUserIdByName = async (userName: string): Promise<string | null> => {
+        // La sesión ya trae el id de Kronos (callback jwt, buscado por correo): sin viaje extra al
+        // servidor ni búsqueda por NOMBRE, que con dos personas homónimas podía traer el id equivocado.
+        if (session?.user?.id) return session.user.id;
         if (!session || status !== 'authenticated') {
             console.error('No hay sesión activa para realizar esta operación');
             return null;
@@ -744,6 +749,7 @@ function AuthorizationBoard() {
             const failMessage = results.find((r) => !r.ok)?.error;
 
             setSelectedIds(new Set());
+            setAuthorizeBlock(fail > 0 ? failMessage || `${fail} solicitud(es) no se pudieron autorizar` : null);
             if (fail > 0) {
                 toast.error(failMessage || `${fail} solicitud(es) no se pudieron autorizar`);
             }
@@ -1256,6 +1262,20 @@ function AuthorizationBoard() {
                 </Grid.Col>
             </Grid>
             </Card>
+
+            {authorizeBlock && (
+            <Alert
+                icon={<IconAlertCircle size={20} />}
+                title='No se pudo autorizar'
+                color='red'
+                mb='md'
+                withCloseButton
+                onClose={() => setAuthorizeBlock(null)}
+                className='border-red-200 bg-red-50'
+            >
+                {authorizeBlock}
+            </Alert>
+            )}
 
             {error && (
             <Alert

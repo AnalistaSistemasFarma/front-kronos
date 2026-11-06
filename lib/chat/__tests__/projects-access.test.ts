@@ -14,6 +14,7 @@ const findConversation = vi.hoisted(() => vi.fn());
 const moduleCount = vi.hoisted(() => vi.fn());
 const findDesignation = vi.hoisted(() => vi.fn());
 const chatAccess = vi.hoisted(() => vi.fn());
+const configRows = vi.hoisted(() => vi.fn());
 
 vi.mock('../../prisma', () => ({
   prisma: {
@@ -21,6 +22,8 @@ vi.mock('../../prisma', () => ({
     chatConversation: { findFirst: findConversation },
     subprocessUserCompany: { count: moduleCount },
     chatProjectAgent: { findFirst: findDesignation },
+    // Configuración del módulo por empresa (2026-10-20): vacía = manda CHAT_PROJECTS_AGENTS, como antes.
+    chatProjectAgentConfig: { findMany: configRows },
   },
 }));
 vi.mock('../access', () => ({ CHAT_MODULE_URL: '/process/chat', getChatAccess: chatAccess, getChatAgentAccess: vi.fn() }));
@@ -32,6 +35,7 @@ import {
   writeAccessForAgent,
 } from '../projects';
 import { __resetProjectAgentsCache } from '../projects-rules';
+import { invalidarConfigProyectos } from '../../proyectos/config-agentes';
 
 const ANA = { id: 'u-ana', email: 'ana@gsslatam.com' };
 const EMPRESA = 3;
@@ -50,6 +54,8 @@ const conAgente = (empresas: number[]) => ({
 beforeEach(() => {
   vi.clearAllMocks();
   __resetProjectAgentsCache();
+  invalidarConfigProyectos();
+  configRows.mockResolvedValue([]);
   process.env.CHAT_PROJECTS_AGENTS = '{"play":["comex-latam","olp"]}';
   moduleCount.mockResolvedValue(1);
   findDesignation.mockResolvedValue(designado());
@@ -133,6 +139,19 @@ describe('escribirle a un agente', () => {
     expect((await writeAccessForAgent(ANA, acceso('owner'), PLAY)).ok).toBe(false);
   });
 
+  it('configuración del módulo (2026-10-20): con la empresa configurada manda la tabla, no el .env', async () => {
+    configRows.mockResolvedValue([{ id_company: EMPRESA, id_agent: PLAY, enabled: false, profiles: 'comex-latam', agent: { code: 'play' } }]);
+    expect((await writeAccessForAgent(ANA, acceso('owner'), PLAY)).ok).toBe(false);
+    invalidarConfigProyectos();
+    configRows.mockResolvedValue([{ id_company: EMPRESA, id_agent: PLAY, enabled: true, profiles: 'olp', agent: { code: 'play' } }]);
+    // Habilitado, pero sin el perfil del proyecto (comex-latam) en esta empresa.
+    expect((await writeAccessForAgent(ANA, acceso('owner'), PLAY)).ok).toBe(false);
+    invalidarConfigProyectos();
+    configRows.mockResolvedValue([{ id_company: 99, id_agent: PLAY, enabled: false, profiles: null, agent: { code: 'play' } }]);
+    // Otra empresa configurada no cambia nada en ésta: sigue el .env.
+    expect((await writeAccessForAgent(ANA, acceso('owner'), PLAY)).ok).toBe(true);
+  });
+
   it('la designación se busca en ESTE proyecto', async () => {
     await writeAccessForAgent(ANA, acceso('editor'), PLAY);
     expect(findDesignation.mock.calls[0][0].where).toEqual({ id_project: 7, id_agent: PLAY });
@@ -174,22 +193,58 @@ describe('assertProjectConversationAccess (conversación)', () => {
 });
 
 describe('assertAgentProjectConversation (llave del puente)', () => {
-  it('anclada al agente de la llave: SU conversación, en un proyecto activo donde está designado', async () => {
-    findConversation.mockResolvedValue({ id: 40, agent: { code: 'play' }, project: { id_project: 7, name: 'Comex', profile: 'comex-latam' } });
-    expect(await assertAgentProjectConversation(PLAY, 40)).toEqual({ id: 40, idProject: 7, projectName: 'Comex' });
+  const fila = (over: Record<string, unknown> = {}, code = 'play') => ({
+    id: 40,
+    id_agent: PLAY,
+    project: { id_project: 7, name: 'Comex', profile: 'comex-latam', id_company: EMPRESA, agents: [{ agent: { code } }] },
+    ...over,
+  });
+
+  it('anclada al agente de la llave: SU conversación o una donde lo MENCIONARON, en un proyecto activo donde está designado', async () => {
+    findConversation.mockResolvedValue(fila());
+    expect(await assertAgentProjectConversation(PLAY, 40)).toEqual({
+      id: 40,
+      idProject: 7,
+      projectName: 'Comex',
+      invitado: false,
+      idAgentPrincipal: PLAY,
+      perfil: 'comex-latam',
+    });
     expect(findConversation.mock.calls[0][0].where).toEqual({
       id: 40,
       kind: 'project',
       archived: false,
-      id_agent: PLAY,
+      OR: [{ id_agent: PLAY }, { messages: { some: { deliveries: { some: { id_agent: PLAY } } } } }],
       project: { archived: false, agents: { some: { id_agent: PLAY } } },
     });
   });
 
-  it('sin interruptor para el agente, o sin el perfil del proyecto: nada', async () => {
-    findConversation.mockResolvedValue({ id: 40, agent: { code: 'horus' }, project: { id_project: 7, name: 'X', profile: 'comex-latam' } });
-    expect(await assertAgentProjectConversation(99, 40)).toBeNull();
-    findConversation.mockResolvedValue({ id: 40, agent: { code: 'play' }, project: { id_project: 7, name: 'X', profile: 'gss' } });
+  it('multiagente: en el hilo de OTRO agente queda como invitado y el perfil se valida con SU código', async () => {
+    findConversation.mockResolvedValue(fila({ id_agent: 5 }));
+    expect(await assertAgentProjectConversation(PLAY, 40)).toMatchObject({ invitado: true, idAgentPrincipal: 5 });
+  });
+
+  it('eliminada (archived) o sin designación: nada', async () => {
+    findConversation.mockResolvedValue(null);
     expect(await assertAgentProjectConversation(PLAY, 40)).toBeNull();
+    findConversation.mockResolvedValue(fila({ project: { id_project: 7, name: 'X', profile: 'comex-latam', id_company: EMPRESA, agents: [] } }));
+    expect(await assertAgentProjectConversation(PLAY, 40)).toBeNull();
+  });
+
+  it('sin interruptor para el agente, o sin el perfil del proyecto: nada', async () => {
+    findConversation.mockResolvedValue(fila({}, 'horus'));
+    expect(await assertAgentProjectConversation(99, 40)).toBeNull();
+    findConversation.mockResolvedValue(fila({ project: { id_project: 7, name: 'X', profile: 'gss', id_company: EMPRESA, agents: [{ agent: { code: 'play' } }] } }));
+    expect(await assertAgentProjectConversation(PLAY, 40)).toBeNull();
+  });
+
+  it('MESA de discusión: sin el perfil del proyecto, el agente entra SIN conectores (2026-11-05)', async () => {
+    findConversation.mockResolvedValue(
+      fila({ mesa: { id_mesa: 3 }, project: { id_project: 7, name: 'X', profile: 'gss', id_company: EMPRESA, agents: [{ agent: { code: 'play' } }] } })
+    );
+    expect(await assertAgentProjectConversation(PLAY, 40)).toMatchObject({ perfil: 'sin-conectores' });
+    // Sin Proyectos habilitado en la empresa, ni en una mesa.
+    findConversation.mockResolvedValue(fila({ mesa: { id_mesa: 3 } }, 'horus'));
+    expect(await assertAgentProjectConversation(99, 40)).toBeNull();
   });
 });
