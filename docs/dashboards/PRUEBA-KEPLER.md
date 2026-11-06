@@ -1,0 +1,1 @@
+Prueba de permisos de Kepler (2026-11-06). Este archivo no se fusiona.
