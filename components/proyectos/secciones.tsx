@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionIcon,
   Alert,
@@ -22,6 +22,11 @@ import {
 import {
   IconArchive,
   IconArchiveOff,
+  IconArrowRight,
+  IconChevronRight,
+  IconFolder,
+  IconFolderPlus,
+  IconFolderUp,
   IconDots,
   IconExternalLink,
   IconFile,
@@ -48,6 +53,7 @@ import {
   type ProjectRole,
 } from '../../lib/chat/projects-rules';
 import type { ProyectoDetalleDto } from '../../lib/proyectos/tipos';
+import { carpetaDeRutaRelativa, migas, nombreCarpeta, subcarpetas, unirCarpetas } from '../../lib/proyectos/carpetas';
 import { vistaEstadoAgente, type EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente';
 import { autoriaAgente } from '../../lib/proyectos/archivos-agente';
 import { LineaEstadoAgente } from './EstadoAgente';
@@ -307,25 +313,79 @@ export function SeccionVinculados({
 
 /* ──────────────────────────────── Archivos ──────────────────────────────── */
 
+/** Un lote de carga: archivos que van a una misma carpeta (null = la raíz). */
+export interface LoteArchivos {
+  folder: string | null;
+  files: File[];
+}
+
 export function SeccionArchivos({
   proyecto,
   subiendo,
   onSubir,
   onQuitar,
+  onCrearCarpeta,
+  onQuitarCarpeta,
+  onMover,
 }: {
   proyecto: ProyectoDetalleDto;
   subiendo: boolean;
-  onSubir: (archivos: File[]) => void;
+  onSubir: (lotes: LoteArchivos[]) => void;
   onQuitar: (id: number) => void;
+  onCrearCarpeta: (path: string) => Promise<boolean>;
+  onQuitarCarpeta: (path: string) => void;
+  onMover: (id: number, folder: string | null) => void;
 }) {
   // Visor del chat (2026-11-05, Nicolás Rivera: «previsualizar y compartir idéntico como lo
   // tenemos en el chat»): al tocar un archivo se abre el visor; Descargar y Compartir van adentro.
   const [visor, setVisor] = useState<number | null>(null);
+  // 2026-11-06 (reunión con Juan Mora): CARPETAS. Se navega por carpetas; «Cargar carpeta» sube una
+  // carpeta completa con su estructura.
+  const [actual, setActual] = useState<string | null>(null);
+  const [nueva, setNueva] = useState<string | null>(null);
+  const inputCarpeta = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    // Atributos no estándar del selector de carpetas (Chrome, Edge, Safari y Firefox los admiten).
+    inputCarpeta.current?.setAttribute('webkitdirectory', '');
+    inputCarpeta.current?.setAttribute('directory', '');
+  }, []);
+  const todas = useMemo(() => {
+    const set = new Set(proyecto.folders);
+    for (const f of proyecto.files) if (f.folderPath) set.add(f.folderPath);
+    return [...set];
+  }, [proyecto.folders, proyecto.files]);
+  // Si la carpeta en la que estaba desapareció (la quitaron), se vuelve a la raíz.
+  useEffect(() => {
+    if (actual && !todas.includes(actual)) setActual(null);
+  }, [actual, todas]);
+  const hijas = subcarpetas(todas, actual);
+  const archivos = proyecto.files.filter((f) => (f.folderPath ?? null) === actual);
+  const opcionesMover = [{ value: '', label: 'Raíz del proyecto' }, ...[...todas].sort((a, b) => a.localeCompare(b, 'es')).map((r) => ({ value: r, label: r }))];
+
+  const subirCarpeta = (lista: FileList | null) => {
+    const files = Array.from(lista ?? []);
+    if (files.length === 0) return;
+    const porCarpeta = new Map<string, File[]>();
+    for (const f of files) {
+      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath ?? '';
+      let folder: string | null = actual;
+      try {
+        folder = unirCarpetas(actual, carpetaDeRutaRelativa(rel));
+      } catch {
+        folder = actual;
+      }
+      const key = folder ?? '';
+      porCarpeta.set(key, [...(porCarpeta.get(key) ?? []), f]);
+    }
+    onSubir([...porCarpeta.entries()].map(([k, v]) => ({ folder: k || null, files: v })));
+    if (inputCarpeta.current) inputCarpeta.current.value = '';
+  };
+
   return (
     <Stack gap={8}>
-      {visor !== null && proyecto.files.length > 0 && (
+      {visor !== null && archivos.length > 0 && (
         <ChatAttachmentViewer
-          adjuntos={proyecto.files.map((f) => ({
+          adjuntos={archivos.map((f) => ({
             id: f.id,
             fileName: f.fileName,
             contentType: f.contentType,
@@ -339,22 +399,105 @@ export function SeccionArchivos({
       )}
       <Group justify='space-between' wrap='wrap' gap='xs'>
         <Text size='xs' c='dimmed' style={{ flex: '1 1 220px' }}>
-          Base de conocimiento del proyecto: los asistentes los leen en todas sus conversaciones.
+          Base de conocimiento del proyecto: los asistentes los leen en todas sus conversaciones. Organícelos en carpetas.
         </Text>
         {proyecto.capabilities.contribute && (
-          <FileButton onChange={(f) => onSubir(f ?? [])} multiple>
-            {(props) => (
-              <Button {...props} variant='light' leftSection={<IconFileUpload size={18} />} loading={subiendo} data-testid='proyecto-subir-archivos'>
-                Cargar archivos
-              </Button>
-            )}
-          </FileButton>
+          <Group gap='xs'>
+            <Button variant='subtle' leftSection={<IconFolderPlus size={18} />} onClick={() => setNueva('')} data-testid='proyecto-nueva-carpeta'>
+              Nueva carpeta
+            </Button>
+            <input ref={inputCarpeta} type='file' multiple hidden onChange={(e) => subirCarpeta(e.currentTarget.files)} data-testid='proyecto-input-carpeta' />
+            <Button variant='subtle' leftSection={<IconFolderUp size={18} />} loading={subiendo} onClick={() => inputCarpeta.current?.click()} data-testid='proyecto-subir-carpeta'>
+              Cargar carpeta
+            </Button>
+            <FileButton onChange={(f) => (f && f.length ? onSubir([{ folder: actual, files: f }]) : undefined)} multiple>
+              {(props) => (
+                <Button {...props} variant='light' leftSection={<IconFileUpload size={18} />} loading={subiendo} data-testid='proyecto-subir-archivos'>
+                  Cargar archivos
+                </Button>
+              )}
+            </FileButton>
+          </Group>
         )}
       </Group>
-      {proyecto.files.length === 0 ? (
-        <Vacio icono={<IconFile size={18} />} titulo='El proyecto no tiene archivos' texto='Cargue manuales, plantillas o listas de precios que los asistentes deban conocer.' />
+
+      {/* Migas de pan de la carpeta actual. */}
+      <Group gap={4} wrap='wrap' data-testid='proyecto-migas'>
+        <Anchor component='button' type='button' size='sm' fw={actual ? 400 : 600} onClick={() => setActual(null)}>
+          Archivos
+        </Anchor>
+        {migas(actual).map((m) => (
+          <Group key={m.ruta} gap={4} wrap='nowrap'>
+            <IconChevronRight size={14} color='var(--mantine-color-dimmed)' />
+            <Anchor component='button' type='button' size='sm' fw={m.ruta === actual ? 600 : 400} onClick={() => setActual(m.ruta)}>
+              {m.nombre}
+            </Anchor>
+          </Group>
+        ))}
+      </Group>
+
+      {nueva !== null && (
+        <Group gap='xs' align='flex-end' wrap='wrap'>
+          <TextInput
+            autoComplete='off'
+            data-1p-ignore='true'
+            data-lpignore='true'
+            label={actual ? `Nueva carpeta dentro de «${nombreCarpeta(actual)}»` : 'Nueva carpeta'}
+            value={nueva}
+            onChange={(e) => setNueva(e.currentTarget.value)}
+            maxLength={100}
+            autoFocus
+            style={{ flex: '1 1 240px' }}
+            data-testid='proyecto-nueva-carpeta-nombre'
+          />
+          <Button
+            disabled={!nueva.trim()}
+            loading={subiendo}
+            onClick={async () => {
+              const ok = await onCrearCarpeta([actual ?? '', nueva.trim()].filter(Boolean).join('/'));
+              if (ok) setNueva(null);
+            }}
+            data-testid='proyecto-crear-carpeta'
+          >
+            Crear
+          </Button>
+          <Button variant='default' onClick={() => setNueva(null)}>
+            Cancelar
+          </Button>
+        </Group>
+      )}
+
+      {hijas.map((h) => (
+        <Group key={h} gap='sm' wrap='nowrap' className={css.fila} style={{ border: '1px solid var(--mantine-color-default-border)' }} data-testid='proyecto-carpeta'>
+          <ThemeIcon variant='light' color='yellow' size={34} radius='md' style={{ flexShrink: 0 }}>
+            <IconFolder size={18} />
+          </ThemeIcon>
+          <div className={css.item} style={{ flex: 1 }}>
+            <Anchor component='button' type='button' size='sm' fw={600} onClick={() => setActual(h)} className={css.truncar} style={{ display: 'block', textAlign: 'left', maxWidth: '100%' }}>
+              {nombreCarpeta(h)}
+            </Anchor>
+            <Text size='xs' c='dimmed'>
+              {proyecto.files.filter((f) => f.folderPath === h || f.folderPath?.startsWith(`${h}/`)).length} archivo(s)
+            </Text>
+          </div>
+          {proyecto.capabilities.contribute && (
+            <Tooltip label='Quitar la carpeta (solo si está vacía)' withArrow>
+              <ActionIcon variant='subtle' color='red' aria-label={`Quitar la carpeta ${nombreCarpeta(h)}`} onClick={() => onQuitarCarpeta(h)}>
+                <IconTrash size={18} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+        </Group>
+      ))}
+
+      {archivos.length === 0 && hijas.length === 0 ? (
+        <Vacio
+          icono={<IconFile size={18} />}
+          titulo={actual ? 'Esta carpeta está vacía' : 'El proyecto no tiene archivos'}
+          texto={actual ? 'Cargue archivos o una carpeta completa aquí.' : 'Cargue manuales, plantillas o documentos, o una carpeta completa con su estructura.'}
+        />
       ) : (
-        proyecto.files.map((f, i) => (
+        archivos.map((f, i) => (
           <Group key={f.id} gap='sm' wrap='nowrap' className={css.fila} style={{ border: '1px solid var(--mantine-color-default-border)' }}>
             <ThemeIcon variant='light' size={34} radius='md' style={{ flexShrink: 0 }}>
               <IconFile size={18} />
@@ -382,11 +525,28 @@ export function SeccionArchivos({
               </Text>
             </div>
             {f.puedoQuitar && (
-              <Tooltip label='Quitar del proyecto' withArrow>
-                <ActionIcon variant='subtle' color='red' aria-label={`Quitar ${f.fileName}`} onClick={() => onQuitar(f.id)}>
-                  <IconTrash size={18} />
-                </ActionIcon>
-              </Tooltip>
+              <Menu position='bottom-end' withinPortal>
+                <Menu.Target>
+                  <ActionIcon variant='subtle' aria-label={`Opciones de ${f.fileName}`} data-testid='proyecto-archivo-opciones'>
+                    <IconDots size={18} />
+                  </ActionIcon>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Label>Mover a</Menu.Label>
+                  {opcionesMover
+                    .filter((o) => (o.value || null) !== (f.folderPath ?? null))
+                    .slice(0, 30)
+                    .map((o) => (
+                      <Menu.Item key={o.value || 'raiz'} leftSection={<IconArrowRight size={14} />} onClick={() => onMover(f.id, o.value || null)}>
+                        {o.label}
+                      </Menu.Item>
+                    ))}
+                  <Menu.Divider />
+                  <Menu.Item color='red' leftSection={<IconTrash size={14} />} onClick={() => onQuitar(f.id)}>
+                    Quitar del proyecto
+                  </Menu.Item>
+                </Menu.Dropdown>
+              </Menu>
             )}
           </Group>
         ))

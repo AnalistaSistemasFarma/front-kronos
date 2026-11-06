@@ -40,7 +40,7 @@ import {
   VincularCorreoModal,
   VincularSolicitudModal,
 } from './modales';
-import { ListaConversaciones, SeccionArchivos, SeccionDetalles, SeccionMiembros, SeccionVinculados } from './secciones';
+import { ListaConversaciones, SeccionArchivos, SeccionDetalles, SeccionMiembros, SeccionVinculados, type LoteArchivos } from './secciones';
 import SeccionCronograma from './cronograma/SeccionCronograma';
 import SeccionEquipo from './equipo/SeccionEquipo';
 import SeccionPermisos from './permisos/SeccionPermisos';
@@ -216,11 +216,24 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
 
   const base = `/api/proyectos/${idProject}`;
 
-  const subirArchivos = (archivos: File[]) => {
-    if (archivos.length === 0) return;
-    const form = new FormData();
-    for (const a of archivos) form.append('files', a);
-    void accion(() => apiSend('POST', `${base}/archivos`, form, 'No se pudieron cargar los archivos.'), archivos.length === 1 ? 'Archivo cargado al proyecto.' : `${archivos.length} archivos cargados al proyecto.`);
+  // 2026-11-06: los archivos van por lotes (5 por envío, el máximo del servidor) y cada lote a su carpeta.
+  const subirArchivos = (lotes: LoteArchivos[]) => {
+    const total = lotes.reduce((n, l) => n + l.files.length, 0);
+    if (total === 0) return;
+    void accion(async () => {
+      let subidos = 0;
+      for (const lote of lotes) {
+        for (let i = 0; i < lote.files.length; i += 5) {
+          const form = new FormData();
+          if (lote.folder) form.set('folder', lote.folder);
+          for (const a of lote.files.slice(i, i + 5)) form.append('files', a);
+          const r = await apiSend('POST', `${base}/archivos`, form, 'No se pudieron cargar los archivos.');
+          if (!r.ok) return { ok: false, error: subidos ? `${r.error} (se cargaron ${subidos} de ${total}).` : r.error };
+          subidos += Math.min(5, lote.files.length - i);
+        }
+      }
+      return { ok: true };
+    }, total === 1 ? 'Archivo cargado al proyecto.' : `${total} archivos cargados al proyecto.`);
   };
 
   const pedirConfirmacion = (c: NonNullable<Confirmacion>) => setConfirmar(c);
@@ -394,6 +407,16 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
                 hacer: () => accion(() => apiSend('DELETE', `${base}/archivos/${id}`), 'Archivo quitado del proyecto.'),
               })
             }
+            onCrearCarpeta={(path) => accion(() => apiSend('POST', `${base}/carpetas`, { path }, 'No se pudo crear la carpeta.'), 'Carpeta creada.')}
+            onQuitarCarpeta={(path) =>
+              pedirConfirmacion({
+                titulo: 'Quitar la carpeta',
+                texto: 'Solo se quita si está vacía (sin archivos dentro ni en sus subcarpetas).',
+                accion: 'Quitar',
+                hacer: () => accion(() => apiSend('DELETE', `${base}/carpetas?path=${encodeURIComponent(path)}`), 'Carpeta quitada.'),
+              })
+            }
+            onMover={(id, folder) => void accion(() => apiSend('PATCH', `${base}/archivos/${id}`, { folder }, 'No se pudo mover el archivo.'), 'Archivo movido.')}
           />
         );
       case 'miembros':
