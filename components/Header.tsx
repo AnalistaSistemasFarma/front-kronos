@@ -15,6 +15,7 @@ import {
   IconChartBar,
   IconClipboardList,
   IconUserCheck,
+  IconChartLine,
 } from '@tabler/icons-react';
 import { useState, useEffect, useContext, useMemo } from 'react';
 import { useTheme } from './providers';
@@ -40,6 +41,8 @@ import { PROCESS_HUB_URL, isHubInstantSwapRoute } from '../lib/navigation/AppSec
 import { useDashboardAdminOptional } from '../lib/dashboard/DashboardAdminContext';
 import { useRequestRoleNavOptional } from '../lib/request-general/SolicitadoNavContext';
 import { buildLogoutCallbackUrl, clearClientSessionArtifacts } from '../lib/auth/logout';
+import { DASHBOARDS_REGISTRO, type DashboardKey } from '../lib/dashboards/registro';
+import { useDashboardsPermitidos } from '../lib/dashboards/useDashboardsPermitidos';
 
 function useAppSectionOptional(): AppSectionContextValue | null {
   return useContext(AppSectionContext);
@@ -73,7 +76,10 @@ export default function Header() {
   const [dashMenuOpen, setDashMenuOpen] = useState(false);
   const isSolicitanteActive = pathname.startsWith(solicitanteUrl);
   const isSolicitadoActive = pathname.startsWith(solicitadoBaseUrl);
-  const isRoleDashActive = isSolicitanteActive || isSolicitadoActive;
+  // Dashboards con permiso propio (lib/dashboards/registro.ts), por subproceso y empresa.
+  const dashboardsPermitidos = useDashboardsPermitidos();
+  const isRegistroDashActive = DASHBOARDS_REGISTRO.some((d) => pathname.startsWith(d.href));
+  const isRoleDashActive = isSolicitanteActive || isSolicitadoActive || isRegistroDashActive;
 
   const homeUrl = showSolicitadoNav
     ? solicitadoUrl
@@ -105,7 +111,7 @@ export default function Header() {
 
   const dashboardItems = useMemo(() => {
     const items: Array<{
-      key: 'admin' | 'solicitante' | 'solicitado';
+      key: 'admin' | 'solicitante' | 'solicitado' | DashboardKey;
       label: string;
       href: string;
       active: boolean;
@@ -139,8 +145,20 @@ export default function Header() {
         icon: IconUserCheck,
       });
     }
+    for (const d of DASHBOARDS_REGISTRO) {
+      if (!dashboardsPermitidos.includes(d.key)) continue;
+      items.push({
+        key: d.key,
+        label: d.label,
+        href: d.href,
+        active: pathname.startsWith(d.href),
+        icon: IconChartLine,
+      });
+    }
     return items;
   }, [
+    dashboardsPermitidos,
+    pathname,
     showDashboardNav,
     showSolicitanteNav,
     showSolicitadoNav,
