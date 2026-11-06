@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
-import { AnotacionInvalida, dibujarAnotaciones, leerAnotaciones, normalizarAnotaciones, MAX_ANOTACIONES } from '../anotaciones';
-import { closeRegistro, createRegistro, getRegistro, listFormatos, listRegistros, pdfRegistro, saveAnotaciones, saveFormato, vigenciaDe } from '../db';
+import { AnotacionInvalida, dibujarAnotaciones, leerDatos, normalizarAnotaciones, tipoDeImagen, MAX_ANOTACIONES, MAX_SELLOS } from '../anotaciones';
+import { addSello, closeRegistro, createRegistro, getRegistro, getSello, listFormatos, listRegistros, pdfRegistro, saveAnotaciones, saveFormato, vigenciaDe } from '../db';
 import { getBiomedAccessForUser, BIOMED_SUBPROCESS_URL } from '../access';
 
 /**
@@ -70,38 +70,52 @@ function fakeDb(opts: { docStatus?: string; currentVersion?: number; versionStat
       }),
     },
     biomedEvento: { create: vi.fn(async ({ data }: { data: { accion: string } }) => st.eventos.push(data)) },
+    sgcCompanyConfig: { findUnique: vi.fn(async () => ({ storage_root: 'SGC/OLP' })) },
   };
   return db;
 }
 
-describe('Ingeniería biomédica · anotaciones', () => {
-  it('valida lo que llega del navegador (texto con fuente fija o marca X, dentro de la página)', () => {
-    const ok = normalizarAnotaciones([
-      { id: 'a1', tipo: 'texto', page: 1, x: 10.123, y: 20, texto: 'Bomba de infusión\nSin novedad', negrilla: true, fuente: 'Comic Sans', tamano: 30 },
-      { id: 'a2', tipo: 'marca', page: 2, x: 50, y: 60 },
-    ]);
-    expect(ok).toEqual([
-      { id: 'a1', tipo: 'texto', page: 1, x: 10.12, y: 20, texto: 'Bomba de infusión\nSin novedad', negrilla: true },
-      { id: 'a2', tipo: 'marca', page: 2, x: 50, y: 60 },
-    ]);
-    expect(() => normalizarAnotaciones('x')).toThrow(AnotacionInvalida);
-    expect(() => normalizarAnotaciones([{ id: 'a', tipo: 'texto', page: 1, x: 120, y: 1, texto: 'x' }])).toThrow(/dentro de la página/);
-    expect(() => normalizarAnotaciones([{ id: 'a', tipo: 'firma', page: 1, x: 1, y: 1 }])).toThrow(/texto o marca/);
-    expect(() => normalizarAnotaciones([{ id: 'a', tipo: 'marca', page: 3, x: 1, y: 1 }], 2)).toThrow(/página/);
-    expect(() => normalizarAnotaciones([{ id: 'a', tipo: 'marca', page: 1, x: 1, y: 1 }, { id: 'a', tipo: 'marca', page: 1, x: 2, y: 2 }])).toThrow(/único/);
-    expect(() => normalizarAnotaciones([{ id: '<x>', tipo: 'marca', page: 1, x: 1, y: 1 }])).toThrow(/identificador/);
-    expect(() => normalizarAnotaciones(Array.from({ length: MAX_ANOTACIONES + 1 }, (_, i) => ({ id: `a${i}`, tipo: 'marca', page: 1, x: 1, y: 1 })))).toThrow(/Máximo/);
-    expect(normalizarAnotaciones([{ id: 'a', tipo: 'texto', page: 1, x: 1, y: 1, texto: 'x'.repeat(500) }])[0]).toMatchObject({ texto: 'x'.repeat(300) });
-    expect(leerAnotaciones('{roto')).toEqual([]);
-    expect(leerAnotaciones(null)).toEqual([]);
+/** Un texto como lo manda el editor de «Texto y sellos» (el de Orion). */
+const texto = (id: string, page: number, text: string, extra: Record<string, unknown> = {}) => ({ id, kind: 'text', page, x: 10, y: 20, width: 12, height: 1.5, text, fontFamily: 'helvetica', fontSize: 9, bold: false, ...extra });
+const PNG_1x1 = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'));
+
+describe('Ingeniería biomédica · anotaciones (las de «Texto y sellos» de Orion)', () => {
+  it('valida con las reglas de Orion: letra, tamaño, quién y cuándo; más elementos que Orion; sellos solo del registro', () => {
+    const now = '2026-11-06T20:00:00.000Z';
+    const [a] = normalizarAnotaciones([texto('a1', 1, 'Bomba de infusión', { fontFamily: 'Comic Sans', fontSize: 300, bold: true })], [], [], { email: 'ingeniero@olp.com' }, now);
+    expect(a).toMatchObject({ id: 'a1', kind: 'text', text: 'Bomba de infusión', fontFamily: 'helvetica', fontSize: 48, bold: true, createdByEmail: 'ingeniero@olp.com', createdAt: now });
+    // Cambiado por otra persona: conserva quién lo creó y marca quién lo cambió.
+    const [b] = normalizarAnotaciones([texto('a1', 1, 'Bomba de infusión B')], [a!], [], { email: 'calidad@olp.com' }, '2026-11-06T21:00:00.000Z');
+    expect(b).toMatchObject({ createdByEmail: 'ingeniero@olp.com', updatedByEmail: 'calidad@olp.com' });
+    expect(() => normalizarAnotaciones('x', [], [], { email: 'i@olp.com' })).toThrow(AnotacionInvalida);
+    expect(() => normalizarAnotaciones([{ id: '<x>', kind: 'text', page: 1, x: 1, y: 1, width: 1, height: 1, text: 'x' }], [], [], { email: 'i@olp.com' })).toThrow(AnotacionInvalida);
+    // Orion admite 30; un formato diligenciado, MAX_ANOTACIONES.
+    expect(normalizarAnotaciones(Array.from({ length: 31 }, (_, i) => texto(`a${i}`, 1, 'X')), [], [], { email: 'i@olp.com' })).toHaveLength(31);
+    expect(() => normalizarAnotaciones(Array.from({ length: MAX_ANOTACIONES + 1 }, (_, i) => texto(`a${i}`, 1, 'X')), [], [], { email: 'i@olp.com' })).toThrow(/Máximo/);
+    const sello = { id: 's1', kind: 'seal', page: 1, x: 10, y: 10, width: 16, height: 11, sealItemId: 'od-sello', sealFileName: 'sello.png' };
+    expect(() => normalizarAnotaciones([sello], [], [], { email: 'i@olp.com' })).toThrow(/no pertenece/);
+    const propio = { itemId: 'od-sello', fileName: 'sello.png', mime: 'image/png' as const, sha256: 'c'.repeat(64), uploadedBy: 'i@olp.com', uploadedAt: now };
+    expect(normalizarAnotaciones([sello], [], [propio], { email: 'i@olp.com' })[0]).toMatchObject({ kind: 'seal', sealItemId: 'od-sello' });
+    expect(leerDatos('{roto')).toEqual({ anotaciones: [], sellos: [] });
+    expect(leerDatos('[]')).toEqual({ anotaciones: [], sellos: [] });
+    // Lo guardado con la primera versión (texto con saltos de línea y marcas X) se sigue viendo.
+    const v1 = leerDatos(JSON.stringify([{ id: 'a1', tipo: 'texto', page: 1, x: 10, y: 20, texto: 'Línea 1\n\nLínea 3', negrilla: true }, { id: 'a2', tipo: 'marca', page: 2, x: 50, y: 60 }, { tipo: 'texto', page: 'x' }]));
+    expect(v1.anotaciones.map((a) => [a.id, a.page, a.text, a.fontSize, a.bold])).toEqual([['a1-0', 1, 'Línea 1', 9, true], ['a1-2', 1, 'Línea 3', 9, true], ['a2', 2, 'X', 11, true]]);
+    expect(v1.anotaciones[1]!.y).toBeGreaterThan(20);
+    expect(leerDatos(null)).toEqual({ anotaciones: [], sellos: [] });
+    expect(tipoDeImagen(PNG_1x1)).toBe('image/png');
+    expect(tipoDeImagen(Uint8Array.from([0xff, 0xd8, 0xff, 0xe0]))).toBe('image/jpeg');
+    expect(tipoDeImagen(new TextEncoder().encode('<svg/>'))).toBeNull();
   });
 
-  it('las dibuja encima del PDF sin cambiar sus páginas', async () => {
-    const out = await dibujarAnotaciones(await pdfVacio(), normalizarAnotaciones([
-      { id: 'a1', tipo: 'texto', page: 1, x: 10, y: 20, texto: 'Línea 1\nLínea 2 — ñ', negrilla: false },
-      { id: 'a2', tipo: 'marca', page: 2, x: 50, y: 60 },
-      { id: 'a3', tipo: 'marca', page: 9, x: 50, y: 60 },
-    ]));
+  it('las estampa encima del PDF (texto y sellos) sin cambiar sus páginas', async () => {
+    const lista = normalizarAnotaciones(
+      [texto('a1', 1, 'Línea — ñ'), texto('a2', 9, 'fuera'), { id: 's1', kind: 'seal', page: 2, x: 10, y: 10, width: 16, height: 11, sealItemId: 'od-s' }],
+      [],
+      [{ itemId: 'od-s', fileName: 's.png', mime: 'image/png', sha256: 'c'.repeat(64), uploadedBy: 'i@olp.com', uploadedAt: '2026-11-06T20:00:00Z' }],
+      { email: 'i@olp.com' }
+    );
+    const out = await dibujarAnotaciones(await pdfVacio(), lista, { 'od-s': { bytes: PNG_1x1, mime: 'image/png' } });
     const pdf = await PDFDocument.load(out);
     expect(pdf.getPageCount()).toBe(2);
     expect(out.length).toBeGreaterThan((await pdfVacio()).length);
@@ -130,8 +144,9 @@ describe('Ingeniería biomédica · formatos, registros y control de vigencia', 
     const { id } = await createRegistro(db as never, engineer, { idFormato: 1, equipo: 'Bomba de infusión Mindray', serial: 'SN-123' }, actor);
     expect(db.st.registros[0]).toMatchObject({ id_document_version: 22, equipo: 'Bomba de infusión Mindray', serial: 'SN-123', created_by: 'ingeniero@olp.com' });
     await expect(closeRegistro(db as never, engineer, id, actor)).rejects.toThrow(/vacío/);
-    expect(await saveAnotaciones(db as never, engineer, id, [{ id: 'a1', tipo: 'marca', page: 1, x: 10, y: 10 }], actor)).toEqual({ saved: 1 });
-    await expect(saveAnotaciones(db as never, engineer, id, [{ id: 'a1', tipo: 'otra' }], { email: 'otro@olp.com' })).rejects.toMatchObject({ status: 403 });
+    expect(await saveAnotaciones(db as never, engineer, id, [texto('a1', 1, 'X')], actor)).toEqual({ saved: 1 });
+    await expect(saveAnotaciones(db as never, engineer, id, [{ id: 'a1', kind: 'otra' }], actor)).rejects.toThrow(AnotacionInvalida);
+    await expect(saveAnotaciones(db as never, engineer, id, [texto('a1', 1, 'X')], { email: 'otro@olp.com' })).rejects.toMatchObject({ status: 403 });
     const det = await getRegistro(db as never, engineer, id, actor.email);
     expect(det).toMatchObject({ estado: 'borrador', puedeEditar: true, bloqueado: false, motivoBloqueo: null, anotaciones: [{ id: 'a1' }] });
     expect(await closeRegistro(db as never, engineer, id, actor)).toEqual({ closed: true });
@@ -145,7 +160,7 @@ describe('Ingeniería biomédica · formatos, registros y control de vigencia', 
   it('CONTROL: si el formato deja de estar vigente, el borrador se BLOQUEA (no se edita ni se cierra)', async () => {
     const db = fakeDb();
     const { id } = await createRegistro(db as never, engineer, { idFormato: 1, equipo: 'Monitor de signos vitales' }, actor);
-    await saveAnotaciones(db as never, engineer, id, [{ id: 'a1', tipo: 'marca', page: 1, x: 10, y: 10 }], actor);
+    await saveAnotaciones(db as never, engineer, id, [texto('a1', 1, 'X')], actor);
     // Sale la V3 del formato: la V2 queda obsoleta.
     const nueva = fakeDb({ currentVersion: 23 });
     nueva.st.registros = db.st.registros;
@@ -164,15 +179,42 @@ describe('Ingeniería biomédica · formatos, registros y control de vigencia', 
   it('el PDF diligenciado sale de la versión del registro, verificada, con la marca de copia controlada', async () => {
     const db = fakeDb();
     const { id } = await createRegistro(db as never, engineer, { idFormato: 1, equipo: 'Desfibrilador' }, actor);
-    await saveAnotaciones(db as never, engineer, id, [{ id: 'a1', tipo: 'texto', page: 1, x: 10, y: 10, texto: 'OK', negrilla: false }], actor);
+    const upload = vi.fn(async () => ({ id: 'od-sello-1' }));
+    const { sealItemId } = await addSello(db as never, engineer, id, { bytes: PNG_1x1, fileName: 'sello.png' }, actor, { upload });
+    expect(upload).toHaveBeenCalledWith(['SGC', 'OLP', '_biomedica', 'sellos', `registro-${id}`], expect.stringMatching(/^sello-\d+\.png$/), PNG_1x1, 'image/png');
+    await saveAnotaciones(db as never, engineer, id, [texto('a1', 1, 'OK'), { id: 's1', kind: 'seal', page: 1, x: 50, y: 50, width: 16, height: 11, sealItemId }], actor);
     const download = vi.fn(async () => pdfVacio());
-    const out = await pdfRegistro(db as never, engineer, id, { vacio: false, viewerEmail: 'ingeniero@olp.com', now: new Date('2026-11-06T15:00:00Z') }, { downloadVerifiedPdf: download }, actor);
+    const downloadFile = vi.fn(async () => PNG_1x1);
+    const out = await pdfRegistro(db as never, engineer, id, { vacio: false, viewerEmail: 'ingeniero@olp.com', now: new Date('2026-11-06T15:00:00Z') }, { downloadVerifiedPdf: download, downloadVerifiedFile: downloadFile }, actor);
+    expect(downloadFile).toHaveBeenCalledWith('od-sello-1', expect.stringMatching(/^[0-9a-f]{64}$/));
     expect(download).toHaveBeenCalledWith('od-22', 'a'.repeat(64));
     expect((await PDFDocument.load(out, { updateMetadata: false })).getProducer()).toMatch(/copia controlada/);
     expect(db.st.eventos.at(-1)).toMatchObject({ accion: 'registro.consultado' });
     const n = db.st.eventos.length;
-    await pdfRegistro(db as never, engineer, id, { vacio: true, viewerEmail: 'ingeniero@olp.com' }, { downloadVerifiedPdf: download }, actor);
+    await pdfRegistro(db as never, engineer, id, { vacio: true, viewerEmail: 'ingeniero@olp.com' }, { downloadVerifiedPdf: download, downloadVerifiedFile: downloadFile }, actor);
     expect(db.st.eventos.length).toBe(n);
+  });
+});
+
+describe('Ingeniería biomédica · sellos del registro', () => {
+  it('solo PNG/JPG reales de máximo 2 MB, en borrador, con tope; la imagen solo se lee si es del registro', async () => {
+    const db = fakeDb();
+    const { id } = await createRegistro(db as never, engineer, { idFormato: 1, equipo: 'Bomba' }, actor);
+    const upload = vi.fn(async () => ({ id: `od-${upload.mock.calls.length}` }));
+    await expect(addSello(db as never, engineer, id, { bytes: new TextEncoder().encode('<svg/>'), fileName: 'x.svg' }, actor, { upload })).rejects.toMatchObject({ status: 400 });
+    await expect(addSello(db as never, engineer, id, { bytes: new Uint8Array(3 * 1024 * 1024).fill(0xff), fileName: 'g.jpg' }, actor, { upload })).rejects.toThrow(/2 MB/);
+    await expect(addSello(db as never, engineer, id, { bytes: PNG_1x1, fileName: 's.png' }, { email: 'otro@olp.com' }, { upload })).rejects.toMatchObject({ status: 403 });
+    const { sealItemId } = await addSello(db as never, engineer, id, { bytes: PNG_1x1, fileName: 's.png' }, actor, { upload });
+    expect(db.st.eventos.at(-1)).toMatchObject({ accion: 'registro.sello' });
+    const downloadVerifiedFile = vi.fn(async () => PNG_1x1);
+    expect(await getSello(db as never, engineer, id, sealItemId, { downloadVerifiedFile })).toEqual({ bytes: PNG_1x1, mime: 'image/png' });
+    await expect(getSello(db as never, engineer, id, 'od-de-otro', { downloadVerifiedFile })).rejects.toMatchObject({ status: 404 });
+    for (let i = 1; i < MAX_SELLOS; i++) await addSello(db as never, engineer, id, { bytes: PNG_1x1, fileName: 's.png' }, actor, { upload });
+    await expect(addSello(db as never, engineer, id, { bytes: PNG_1x1, fileName: 's.png' }, actor, { upload })).rejects.toThrow(/Máximo/);
+    const sinRaiz = fakeDb();
+    sinRaiz.sgcCompanyConfig.findUnique = vi.fn(async () => null) as never;
+    const r2 = await createRegistro(sinRaiz as never, engineer, { idFormato: 1, equipo: 'Bomba' }, actor);
+    await expect(addSello(sinRaiz as never, engineer, r2.id, { bytes: PNG_1x1, fileName: 's.png' }, actor, { upload })).rejects.toMatchObject({ status: 409 });
   });
 });
 
