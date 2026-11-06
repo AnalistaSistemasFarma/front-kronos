@@ -549,6 +549,9 @@ jobs:
           # Ingeniería biomédica (2026-11-06): migración y PRUEBAS dos veces (idempotencia), comprobación (tablas y permiso) y PROD que se niega.
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261106150000_biomedica/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261106150000_biomedica/migration.sql
+          # kronos_ci no corre los cimientos del SGC (S0): se siembra el subproceso padre que PRUEBAS y PROD sí tienen.
+          echo "IF NOT EXISTS (SELECT 1 FROM dbo.subprocess WHERE subprocess_url = N'/process/sgc-documental') BEGIN IF NOT EXISTS (SELECT 1 FROM dbo.process WHERE process = N'SGC') INSERT INTO dbo.process (process) VALUES (N'SGC'); INSERT INTO dbo.subprocess (subprocess, id_process, subprocess_url) SELECT TOP (1) N'SGC documental', id_process, N'/process/sgc-documental' FROM dbo.process WHERE process = N'SGC' ORDER BY id_process; END;" > /tmp/biomedica-padre.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomedica-padre.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-biomedica-PRUEBAS.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-biomedica-PRUEBAS.sql
           echo "IF OBJECT_ID(N'dbo.biomed_registro', N'U') IS NULL OR OBJECT_ID(N'dbo.biomed_evento_solo_insercion', N'TR') IS NULL OR (SELECT COUNT(*) FROM dbo.subprocess WHERE subprocess_url = N'/process/sgc-documental/biomedica') <> 1 THROW 50000, N'La migración de Ingeniería biomédica no dejó sus tablas o su permiso.', 1;" > /tmp/biomedica-ok.sql
