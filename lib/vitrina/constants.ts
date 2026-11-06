@@ -82,6 +82,17 @@ export const VITRINA_IMAGEN_MAX_BYTES = 10 * 1024 * 1024;
 /** Formatos de imagen admitidos (se verifica la firma del archivo, no solo la extensión). */
 export const VITRINA_IMAGEN_ACCEPT = '.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp';
 
+/**
+ * Modelo 3D (2026-11-04): GLB (glTF 2.0 binario), el formato que exportan Blender y Adobe
+ * Dimension (la Vitrina no lee .dn). Tope 25 MB: por debajo del cuerpo máximo de las peticiones
+ * (middlewareClientMaxBodySize e IIS, 30 MB) con margen. Se verifica la cabecera, no la extensión.
+ */
+export const VITRINA_MODELO3D_MAX_BYTES = 25 * 1024 * 1024;
+export const VITRINA_MODELO3D_ACCEPT = '.glb,model/gltf-binary';
+export const VITRINA_MODELO3D_MIME = 'model/gltf-binary';
+/** Tope de cada dimensión opcional del empaque (cm), igual a la CHECK de vitrina_modelo_3d. */
+export const VITRINA_MODELO3D_DIMENSION_MAX_CM = 1000;
+
 /** Máximo de destacadas que muestra el Inicio de los comerciales. */
 export const VITRINA_MAX_DESTACADAS = 3;
 
@@ -177,7 +188,7 @@ export const VITRINA_LIMITS = {
 } as const;
 
 /** Entidades y acciones del historial (vitrina_historial). */
-export const VITRINA_ENTIDADES = ['presentacion', 'codigo_sap', 'exclusividad', 'area', 'linea_comercial', 'grupo_terapeutico', 'empresa', 'imagen', 'documento'] as const;
+export const VITRINA_ENTIDADES = ['presentacion', 'codigo_sap', 'exclusividad', 'area', 'linea_comercial', 'grupo_terapeutico', 'empresa', 'imagen', 'documento', 'modelo_3d'] as const;
 export type VitrinaEntidad = (typeof VITRINA_ENTIDADES)[number];
 
 export const VITRINA_ACCIONES = [
@@ -197,6 +208,7 @@ export const VITRINA_ACCIONES = [
   'CARGAR',
   'VINCULAR',
   'DESVINCULAR',
+  'REEMPLAZAR',
 ] as const;
 export type VitrinaAccion = (typeof VITRINA_ACCIONES)[number];
 
@@ -214,9 +226,10 @@ export const ACCION_LABEL: Record<VitrinaAccion, string> = {
   ALERTA_SAP: 'Alerta de SAP',
   REGISTRO: 'Cambio de registro sanitario',
   SEMILLA: 'Carga de sugerencias',
-  CARGAR: 'Carga de imagen',
+  CARGAR: 'Carga de archivo',
   VINCULAR: 'Vínculo con el SGC',
   DESVINCULAR: 'Vínculo retirado',
+  REEMPLAZAR: 'Reemplazo de archivo',
 };
 
 export const ENTIDAD_LABEL: Record<VitrinaEntidad, string> = {
@@ -229,6 +242,7 @@ export const ENTIDAD_LABEL: Record<VitrinaEntidad, string> = {
   empresa: 'Empresa',
   imagen: 'Imagen',
   documento: 'Documento del SGC',
+  modelo_3d: 'Modelo 3D',
 };
 
 /**
