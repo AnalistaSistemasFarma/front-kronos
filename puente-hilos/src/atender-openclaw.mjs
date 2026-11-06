@@ -21,6 +21,7 @@ import { analizarComando, AYUDA, LIMPIAR } from './comandos.mjs';
 import {
   asegurarCarpetas,
   bajarAdjuntos,
+  bloqueRecuperacion,
   escribirHilo,
   leerPropuestas,
   limpiarPropuestas,
@@ -123,7 +124,7 @@ export function crearAtenderOpenclaw({
         return;
       }
       if (comando?.accion === 'limpiar') {
-        estado.reiniciarSesion(idConversation);
+        estado.reiniciarSesion(idConversation, { porPedido: true });
         await synerlink.responder(
           idConversation,
           '🧹 Listo: esta conversación arranca una **memoria nueva** desde el próximo mensaje. El historial del chat sigue aquí, pero el asistente ya no lo tiene presente; si hace falta algo de antes, péguelo o resúmalo.'
@@ -181,7 +182,10 @@ export function crearAtenderOpenclaw({
       });
       mkdirSync(rutas.puente, { recursive: true, mode: 0o700 });
       archivoMensaje = path.join(rutas.puente, `mensaje-${process.pid}-${idConversation}.txt`);
-      writeFileSync(archivoMensaje, armarMensajeOpenclaw({ encabezado, lote, adjuntos }), { mode: 0o600 });
+      // Recuperación al reiniciar: sesión NUEVA de un hilo que ya tenía mensajes (no tras /clear).
+      const recuperacion = sesion.nueva && !sesion.sinRecuperar ? bloqueRecuperacion(contexto, ids, { rutaHilo: rutas.hilo }) : '';
+      if (recuperacion) log(`conversación ${idConversation}: sesión nueva con historial previo; se inyecta la recuperación (${recuperacion.length} caracteres).`);
+      writeFileSync(archivoMensaje, armarMensajeOpenclaw({ encabezado: recuperacion ? `${encabezado}\n\n${recuperacion}` : encabezado, lote, adjuntos }), { mode: 0o600 });
 
       // Indicador: lo que esté mostrando ahora (los avisos y el latido lo conservan).
       let indicador = { state: 'thinking', label: '🧠 Pensando su respuesta…' };

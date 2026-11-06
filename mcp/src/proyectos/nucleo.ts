@@ -31,6 +31,8 @@ import type { AuthScope } from '../auth.js';
 export const RECHAZO_CONCESION_PROYECTOS =
   'La concesión no existe, venció, fue revocada o no corresponde a este agente. Pídale a la persona que le vuelva a dar acceso desde Proyectos en SynerLink («Gestionar con un asistente»).';
 export const RECHAZO_PROYECTO = 'Proyecto no encontrado entre los que la persona puede ver con esta concesión.';
+export const RECHAZO_PROYECTO_TURNO =
+  'No autorizado: la persona que le escribe en este turno no tiene acceso a ese proyecto en SynerLink (o usted no está designado en él). No comparta nada de ese proyecto; si lo necesita, el dueño del proyecto puede agregarla como miembro.';
 
 /** Propuestas pendientes por proyecto (igual que el front: MAX_PENDING_PROPOSALS). */
 export const MAX_PENDIENTES_PROYECTO = 30;
@@ -63,6 +65,15 @@ export interface ConcesionProyectos {
   idProject: number | null;
   idChat: number;
   venceEn: string;
+  /**
+   * Lectura desde el CHAT NORMAL del agente (2026-11-06, ver ./turno.ts): además
+   * de la puerta de la persona, el proyecto debe tener a ESTE agente designado
+   * (chat_project_agent) o ser el agente con el que se creó. Sin el campo
+   * (concesión), no se filtra por agente, como antes.
+   */
+  idAgenteDesignado?: number;
+  /** 'turno' = lectura desde el chat normal (sin concesión). */
+  origen?: 'concesion' | 'turno';
 }
 
 export type Rol = 'owner' | 'editor' | 'reader';
@@ -74,6 +85,8 @@ export interface ProyectoVisible {
   idCompany: number;
   company: string;
   role: Rol;
+  /** Último mensaje en cualquiera de sus conversaciones (o la última edición del proyecto). */
+  ultimaActividad: string | null;
 }
 
 export function rolDeDb(raw: string | null | undefined): Rol {
@@ -209,12 +222,16 @@ export async function proyectosVisibles(c: ConcesionProyectos, idProject?: numbe
   const leer = q(db);
   const filtroConcesion = c.idProject ? Prisma.sql`AND p.id_project = ${c.idProject}` : Prisma.empty;
   const filtroPedido = idProject ? Prisma.sql`AND p.id_project = ${idProject}` : Prisma.empty;
-  const filas = await leer<{ id_project: number; name: string; description: string | null; id_company: number; company: string | null; role: string | null }>(Prisma.sql`
-    SELECT TOP 200 p.id_project, p.name, p.description, p.id_company, c.company, m.role
+  const filtroAgente = c.idAgenteDesignado
+    ? Prisma.sql`AND (p.id_agent = ${c.idAgenteDesignado} OR EXISTS (SELECT 1 FROM chat_project_agent pa WHERE pa.id_project = p.id_project AND pa.id_agent = ${c.idAgenteDesignado}))`
+    : Prisma.empty;
+  const filas = await leer<{ id_project: number; name: string; description: string | null; id_company: number; company: string | null; role: string | null; ultima: Date | null; updated_at: Date | null }>(Prisma.sql`
+    SELECT TOP 200 p.id_project, p.name, p.description, p.id_company, c.company, m.role, p.updated_at,
+      (SELECT MAX(cc.last_message_at) FROM chat_conversation cc WHERE cc.id_project = p.id_project AND cc.kind = N'project') AS ultima
     FROM chat_project p
     INNER JOIN chat_project_member m ON m.id_project = p.id_project AND m.id_user = ${c.idUser}
     LEFT JOIN company c ON c.id_company = p.id_company
-    WHERE p.archived = 0 ${filtroConcesion} ${filtroPedido}
+    WHERE p.archived = 0 ${filtroConcesion} ${filtroPedido} ${filtroAgente}
       AND EXISTS (
         SELECT 1 FROM subprocess_user_company suc
         INNER JOIN company_user cu ON cu.id_company_user = suc.id_company_user
@@ -230,14 +247,21 @@ export async function proyectosVisibles(c: ConcesionProyectos, idProject?: numbe
     idCompany: Number(f.id_company),
     company: String(f.company ?? '').trim(),
     role: rolDeDb(f.role),
+    ultimaActividad: masReciente(f.ultima, f.updated_at),
   }));
+}
+
+function masReciente(a: Date | string | null | undefined, b: Date | string | null | undefined): string | null {
+  const ms = [a, b].map((v) => (v ? new Date(v).getTime() : NaN)).filter((n) => !Number.isNaN(n));
+  return ms.length ? new Date(Math.max(...ms)).toISOString() : null;
 }
 
 /** Un proyecto que la persona ve, o el rechazo. */
 export async function proyectoVisible(c: ConcesionProyectos, idProject: number, db?: Lector): Promise<ProyectoVisible> {
-  if (!Number.isInteger(idProject) || idProject <= 0) throw new ProyectosRechazo(RECHAZO_PROYECTO);
+  const rechazo = c.origen === 'turno' ? RECHAZO_PROYECTO_TURNO : RECHAZO_PROYECTO;
+  if (!Number.isInteger(idProject) || idProject <= 0) throw new ProyectosRechazo(rechazo);
   const p = (await proyectosVisibles(c, idProject, db))[0];
-  if (!p) throw new ProyectosRechazo(RECHAZO_PROYECTO);
+  if (!p) throw new ProyectosRechazo(rechazo);
   return p;
 }
 
