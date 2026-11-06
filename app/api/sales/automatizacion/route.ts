@@ -11,6 +11,7 @@ import {
   getConfig,
   panelData,
   parseUserSigns,
+  retryAll,
   retryDoc,
   runAutomation,
   saveConfig,
@@ -26,6 +27,7 @@ import {
  *  PUT  { companyId, config } -> guarda la configuración y su tarea del programador
  *  POST { companyId, accion: 'ejecutar' | 'simular' | 'crear' | 'descartar' | 'reactivar' | 'reintentar', docEntries?, idDoc? }
  *       'reintentar' (idDoc): repite la acción que falló en un borrador «Represado» (pedido o paso al flujo).
+ *       'reintentar_todos': lo mismo para todos los represados de la empresa (hasta 30 por vez).
  */
 async function ctx(request: NextRequest, companyIdRaw: unknown) {
   const session = await getServerSession(authOptions);
@@ -114,6 +116,11 @@ export async function POST(request: NextRequest) {
       if (!Number.isInteger(idDoc) || idDoc <= 0) return NextResponse.json({ error: 'Falta el borrador a reintentar.' }, { status: 400 });
       const r = await retryDoc(c.companyId, idDoc, c.userId);
       return NextResponse.json({ ...r, resumen: r.detalle });
+    }
+    if (accion === 'reintentar_todos') {
+      const r = await retryAll(c.companyId, c.userId);
+      const resumen = `${r.ok} de ${r.total} represado(s) reintentado(s) con éxito${r.fallidos ? `; ${r.fallidos} siguen represados` : ''}${r.pendientes ? `; quedan ${r.pendientes} para otra tanda` : ''}.`;
+      return NextResponse.json({ ...r, resumen });
     }
     if (accion !== 'ejecutar' && accion !== 'simular' && accion !== 'crear') {
       return NextResponse.json({ error: 'Acción no válida.' }, { status: 400 });

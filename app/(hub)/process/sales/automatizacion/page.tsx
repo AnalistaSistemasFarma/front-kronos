@@ -114,6 +114,22 @@ export default function VentasAutomatizacionPage() {
     }
   };
 
+  /** Reintenta todos los represados de una vez (en el servidor, uno a uno). */
+  const reintentarTodos = async (n: number) => {
+    if (!companyId || !window.confirm(`¿Reintentar los ${n} borrador(es) represado(s)? Se repite en cada uno la acción que falló (pasar al flujo, Tarea SAP o crear el pedido).`)) return;
+    setBusy('reintentar-todos');
+    try {
+      const r = await call('POST', { companyId, accion: 'reintentar_todos' });
+      if (r.fallidos) toast.error(r.resumen);
+      else toast.success(r.resumen);
+      await load(companyId);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const reintentar = async (d: Doc) => {
     if (!companyId) return;
     setBusy(`reintentar-${d.id}`);
@@ -176,6 +192,14 @@ export default function VentasAutomatizacionPage() {
             <Alert color='red' variant='light' mt='md' icon={<IconAlertTriangle size={18} />}
               title={`${data.docs.filter((d) => d.represado).length} borrador(es) represado(s): no siguieron su camino`}>
               <Stack gap={6}>
+                {data.docs.filter((d) => d.represado).length > 1 && (
+                  <Group justify='flex-end'>
+                    <Button size='xs' color='red' leftSection={<IconRefresh size={14} />} loading={busy === 'reintentar-todos'} disabled={busy != null && busy !== 'reintentar-todos'}
+                      onClick={() => reintentarTodos(data.docs.filter((d) => d.represado).length)}>
+                      Reintentar todos ({data.docs.filter((d) => d.represado).length})
+                    </Button>
+                  </Group>
+                )}
                 {data.docs.filter((d) => d.represado).map((d) => (
                   <Group key={d.id} justify='space-between' wrap='nowrap' gap='sm' align='flex-start'>
                     <Text size='sm' style={{ minWidth: 0 }}>
