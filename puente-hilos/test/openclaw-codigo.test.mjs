@@ -184,3 +184,24 @@ test('código openclaw: worktree vía politica, sin token no hay fetch, encabeza
   writeFileSync(t, 'ghp_' + 'a'.repeat(36), { mode: 0o644 });
   assert.equal(tokenListo(t), false, 'permisos 644 no');
 });
+
+import { fueraDeAlcance, globARegex } from '../src/openclaw/guardia.mjs';
+import { leerRutasPermitidas } from '../src/openclaw/codigo.mjs';
+
+test('alcance por rutas (Kepler: solo dashboards)', () => {
+  const R = ['app/(hub)/process/dashboards/**', 'app/api/dashboards/**', 'lib/dashboards/**', 'components/Header.tsx', 'prisma/manual/*-dashboard-*.sql'];
+  assert.deepEqual(
+    fueraDeAlcance(['app/(hub)/process/dashboards/page.tsx', 'app/(hub)/process/dashboards/v/x.tsx', 'app/api/dashboards/v/route.ts', 'lib/dashboards/a.ts', 'components/Header.tsx', 'prisma/manual/2026-11-06-dashboard-permisos.sql', ''], R),
+    []
+  );
+  assert.deepEqual(
+    fueraDeAlcance(['package.json', 'components/Otro.tsx', 'lib/dashboardsX/a.ts', 'prisma/manual/x.sql', 'prisma/manual/s/a-dashboard-b.sql', 'app/(hub)/process/otro/page.tsx'], R),
+    ['package.json', 'components/Otro.tsx', 'lib/dashboardsX/a.ts', 'prisma/manual/x.sql', 'prisma/manual/s/a-dashboard-b.sql', 'app/(hub)/process/otro/page.tsx']
+  );
+  assert.deepEqual(fueraDeAlcance(['package.json'], null), [], 'sin lista = sin restricción');
+  assert.ok(globARegex('a/(b)/*.ts').test('a/(b)/c.ts'));
+  assert.equal(leerRutasPermitidas(null), null);
+  assert.deepEqual(leerRutasPermitidas('/x', () => JSON.stringify({ rutas: R })), R);
+  for (const malo of [{}, { rutas: [] }, { rutas: ['/etc/**'] }, { rutas: ['../x'] }]) assert.throws(() => leerRutasPermitidas('/x', () => JSON.stringify(malo)), /RUTAS_PERMITIDAS/);
+  assert.match(textoCodigoOpenclaw({ worktrees: [], guardia: { git: 'g', gh: 'h' }, tokenListo: true, rutasPermitidas: R }), /Alcance.*lib\/dashboards/);
+});

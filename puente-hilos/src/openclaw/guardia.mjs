@@ -190,6 +190,10 @@ export function revisarConfigGit(texto, { repos }) {
 }
 
 /** Busca un valor (--opcion valor | --opcion=valor | -x valor). */
+export function valorOpcionPublica(args, largos, cortos = []) {
+  return valorOpcion(args, largos, cortos);
+}
+
 function valorOpcion(args, largos, cortos = []) {
   const vals = [];
   for (let i = 0; i < args.length; i++) {
@@ -236,6 +240,31 @@ export function validarGh(argv, { repos, repoCwd = null }) {
   const finales = clave === 'repo view' ? [args[0], args[1], conf[0], ...resto.filter((a, i) => !(a === '--repo' || a === '-R' || resto[i - 1] === '--repo' || resto[i - 1] === '-R') && a.toLowerCase() !== conf[0].toLowerCase())] : [args[0], args[1], ...conRepo];
   return { ok: true, args: finales, repo: conf[0], archivos };
 }
+
+/** Glob simple (`**` cualquier ruta, `*` dentro de una carpeta) → RegExp anclada. */
+export function globARegex(glob) {
+  let r = '';
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === '*' && glob[i + 1] === '*') {
+      r += '.*';
+      i++;
+      if (glob[i + 1] === '/') i++;
+    } else if (c === '*') r += '[^/]*';
+    else r += c.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+  }
+  // eslint-disable-next-line security/detect-non-literal-regexp -- patrón armado aquí, escapado
+  return new RegExp(`^${r}$`);
+}
+
+/** Archivos fuera del alcance permitido (lista vacía = todo bien). Sin lista = sin restricción. */
+export function fueraDeAlcance(archivos, rutasPermitidas) {
+  if (!Array.isArray(rutasPermitidas)) return [];
+  const res = rutasPermitidas.map(globARegex);
+  return archivos.filter((f) => f && !res.some((re) => re.test(f)));
+}
+
+export const MENSAJE_ALCANCE = 'solo puede modificar dashboards; pida a Nicolás Rivera cualquier cambio fuera de ese alcance';
 
 /** «dueño/repo» a partir de la URL de origin. */
 export function repoDeUrl(url) {
@@ -315,11 +344,38 @@ function principal() {
     const m = revisarConfigGit(texto, { repos });
     if (m) fallar(m);
   };
+  // Alcance por rutas (2026-11-06, Kepler: «no se puede pasar de eso»): lo que se empuja o se
+  // propone en un PR, comparado contra origin/<rama de pruebas>, solo puede tocar rutasPermitidas.
+  const revisarAlcance = (dir, ref, base) => {
+    if (!Array.isArray(conf.rutasPermitidas)) return;
+    let salida = '';
+    try {
+      salida = execFileSync(conf.git, ['-C', dir, 'diff', '--name-only', `origin/${base}...${ref}`], { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
+    } catch (e) {
+      fallar(`no pude comparar ${ref} con origin/${base}: ${String(e.stderr ?? e.message).trim().slice(0, 300)}`);
+    }
+    const fuera = fueraDeAlcance(salida.split('\n').map((x) => x.trim()), conf.rutasPermitidas);
+    if (fuera.length) fallar(`${conf.agente ?? 'este agente'} ${MENSAJE_ALCANCE}. Archivos fuera de alcance: ${fuera.slice(0, 15).join(', ')}${fuera.length > 15 ? '…' : ''}`);
+  };
+  const baseDe = (dir) => {
+    try {
+      const r = repoDeUrl(execFileSync(conf.git, ['-C', dir, 'config', '--get', 'remote.origin.url'], { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 20_000 }));
+      const c = Object.entries(conf.repos ?? {}).find(([g]) => g.toLowerCase() === String(r).toLowerCase());
+      if (c) return c[1].base;
+    } catch {}
+    return fallar('no sé cuál es la rama de pruebas de este repositorio.');
+  };
   if (herramienta === 'git') {
     const v = validarGit(argv, { raiz: conf.raiz, cwd });
     if (!v.ok) fallar(v.motivo);
     revisar(v.dir);
     if (['push', 'fetch', 'pull'].includes(v.args.find((a) => !a.startsWith('-'))) && !token) fallar('todavía no hay token de GitHub configurado para este agente: puede trabajar y hacer commits, pero no push, fetch ni PR. Avísele a Tecnología.');
+    if (v.args.find((a) => !a.startsWith('-')) === 'push' && Array.isArray(conf.rutasPermitidas)) {
+      const pos = v.args.slice(v.args.indexOf('push') + 1).filter((a) => !a.startsWith('-'));
+      const fuentes = pos.slice(1).map((sp) => (sp.includes(':') ? sp.slice(0, sp.lastIndexOf(':')) : sp));
+      const base = baseDe(v.dir);
+      for (const ref of fuentes.length ? fuentes : ['HEAD']) revisarAlcance(v.dir, ref, base);
+    }
     const r = spawnSync(conf.git, ['-C', v.dir, ...v.args], { env, stdio: 'inherit', timeout: 600_000 });
     process.exit(r.status ?? 1);
   }
@@ -346,6 +402,11 @@ function principal() {
         fallar(`no pude leer ${f}.`);
       }
       if (contenido.includes(token)) fallar(`${f} contiene el token de GitHub.`);
+    }
+    if (argv[0] === 'pr' && argv[1] === 'create' && Array.isArray(conf.rutasPermitidas)) {
+      if (!repoCwd) fallar('gh pr create se corre dentro del worktree (workdir = la ruta del worktree).');
+      const head = valorOpcionPublica(argv.slice(2), ['--head'], ['-H'])[0];
+      revisarAlcance(cwd, head ? `origin/${head.replace(/^[^:]+:/, '')}` : 'HEAD', baseDe(cwd));
     }
     const r = spawnSync(conf.gh, v.args, { cwd, env, stdio: 'inherit', timeout: 600_000 });
     process.exit(r.status ?? 1);

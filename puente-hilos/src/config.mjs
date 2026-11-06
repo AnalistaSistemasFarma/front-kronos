@@ -472,7 +472,10 @@ export function configOpenclaw(env, { entorno, hilosDir, perfiles, perfilAgente,
   const cuotaRaw = (env.HILOS_OPENCLAW_CUOTA ?? 'si').trim().toLowerCase();
   if (!['si', 'no'].includes(cuotaRaw)) throw new ErrorConfig('HILOS_OPENCLAW_CUOTA debe ser «si» o «no».');
   const dirAgente = ruta('HILOS_OPENCLAW_DIR_AGENTE');
-  return { bin, agente, perfil, local: localRaw === 'si', actividad: actRaw === 'si', prefijo, outbox, area, recursos: recursos.map((d) => path.resolve(d)), cuota: cuotaRaw === 'si', dirAgente };
+  // Alcance por rutas del código (2026-11-06, openclaw/codigo.mjs): archivo JSON { "rutas": [globs] }.
+  const rutasPermitidas = ruta('HILOS_OPENCLAW_RUTAS_PERMITIDAS');
+  if (rutasPermitidas && perfilAgente !== 'desarrollo') throw new ErrorConfig('HILOS_OPENCLAW_RUTAS_PERMITIDAS solo aplica con HILOS_PERFIL=desarrollo.');
+  return { bin, agente, perfil, local: localRaw === 'si', actividad: actRaw === 'si', prefijo, outbox, area, recursos: recursos.map((d) => path.resolve(d)), cuota: cuotaRaw === 'si', dirAgente, rutasPermitidas };
 }
 
 export function cargarConfig(env = process.env) {

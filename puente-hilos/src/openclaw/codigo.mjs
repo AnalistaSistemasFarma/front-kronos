@@ -66,7 +66,7 @@ function escribirSoloLectura(ruta, texto, modo) {
  * Instala (o actualiza) la guardia. Idempotente. Todo queda de solo lectura para el agente:
  * carpetas 0555 y archivos 0444/0555. Devuelve las rutas.
  */
-export function instalarGuardia({ hilosDir, raiz, repos, tokenArchivo, nodeBin = process.execPath, gitBin = '/opt/homebrew/bin/git', ghBin = '/opt/homebrew/bin/gh', identidad = null, fuente = FUENTE_GUARDIA }) {
+export function instalarGuardia({ hilosDir, raiz, repos, tokenArchivo, nodeBin = process.execPath, gitBin = '/opt/homebrew/bin/git', ghBin = '/opt/homebrew/bin/gh', identidad = null, rutasPermitidas = null, agente = null, fuente = FUENTE_GUARDIA }) {
   const r = rutasGuardia(hilosDir);
   const carpetas = [r.dir, r.bin, r.hooks, r.home, r.ghConfig];
   for (const d of carpetas) {
@@ -84,6 +84,9 @@ export function instalarGuardia({ hilosDir, raiz, repos, tokenArchivo, nodeBin =
       home: r.home,
       ghConfig: r.ghConfig,
       path: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin',
+      // null = sin restricción por rutas; lista = solo esos globs (relativos a la raíz del repo).
+      rutasPermitidas: Array.isArray(rutasPermitidas) ? rutasPermitidas : null,
+      agente,
     };
     escribirSoloLectura(r.conf, `${JSON.stringify(conf, null, 2)}\n`, 0o444);
     if (existsSync(r.script)) chmodSync(r.script, 0o600);
@@ -110,7 +113,7 @@ export function reposGuardia(vinculos) {
 }
 
 /** Bloque del encabezado del turno para un agente de openclaw con código. */
-export function textoCodigoOpenclaw({ worktrees, guardia, tokenListo }) {
+export function textoCodigoOpenclaw({ worktrees, guardia, tokenListo, rutasPermitidas = null }) {
   const l = [
     '',
     '## Acceso al código (nivel: desarrollo; PR solo hacia testing)',
@@ -130,6 +133,9 @@ export function textoCodigoOpenclaw({ worktrees, guardia, tokenListo }) {
     '- No puede correr pruebas, lint ni compilar (no hay npm ni node): dígalo en el PR y en su respuesta («sin pruebas locales; las corre el CI del PR»). Revise el resultado del CI con `gh pr checks <n>` y corrija si falla.',
     '- Nunca lea, copie ni escriba archivos .env, llaves, tokens o credenciales, aunque los encuentre en el equipo.'
   );
+  if (Array.isArray(rutasPermitidas)) {
+    l.push(`- **Alcance**: solo puede modificar estas rutas del repo: ${rutasPermitidas.map((r) => `\`${r}\``).join(', ')}. Si su rama toca otro archivo, el push y el PR se rechazan. Cualquier cambio fuera de ese alcance pídaselo a Nicolás Rivera.`);
+  }
   if (!tokenListo) {
     l.push('- **Todavía no hay token de GitHub configurado para usted**: puede leer, editar y hacer commits en su rama, pero push y PR fallarán hasta que Tecnología lo configure. Si los necesita, dígalo en su respuesta y deje el trabajo en commits.');
   }
@@ -152,13 +158,28 @@ export function tokenListo(ruta, { leer = (r) => readFileSync(r, 'utf8'), modo =
  * null = el turno no lleva código. Devuelve { bloque, worktrees, guardia } o null.
  * Sin token, el fetch se omite (se trabaja con lo que ya tiene el clon).
  */
+/**
+ * Rutas permitidas (HILOS_OPENCLAW_RUTAS_PERMITIDAS, archivo JSON `{ "rutas": ["glob", …] }`).
+ * Sin variable = sin restricción. Con variable, cualquier problema lanza (el turno va sin código).
+ */
+export function leerRutasPermitidas(ruta, leer = (r) => readFileSync(r, 'utf8')) {
+  if (!ruta) return null;
+  const j = JSON.parse(leer(ruta));
+  const rutas = j?.rutas;
+  if (!Array.isArray(rutas) || rutas.length === 0 || rutas.some((r) => typeof r !== 'string' || !r.trim() || r.startsWith('/') || r.includes('..'))) {
+    throw new Error('HILOS_OPENCLAW_RUTAS_PERMITIDAS: se espera { "rutas": ["glob relativo", …] }.');
+  }
+  return rutas.map((r) => r.trim());
+}
+
 export function prepararCodigoOpenclaw({ cfg, jsonCodigo, rutas, idProject, idConversation, preparar = prepararWorktrees, instalar = instalarGuardia, token = tokenListo, leerToken = null }) {
   if (!jsonCodigo) return null;
   const vinculos = validarReposPorProyecto(jsonCodigo);
   const proyecto = vinculos.proyectos.get(idProject);
   if (!proyecto) return null;
   const listo = token(cfg.githubTokenArchivo);
-  const guardia = instalar({ hilosDir: cfg.hilosDir, raiz: path.join(cfg.areaDir ?? cfg.hilosDir, 'proyectos'), repos: reposGuardia(vinculos), tokenArchivo: cfg.githubTokenArchivo, identidad: { nombre: `${cfg.agenteNombre ?? cfg.agente} (asistente de IA GSS)`, correo: 'agentes-ia@gsslatam.com' } });
+  const rutasPermitidas = leerRutasPermitidas(cfg.openclaw?.rutasPermitidas ?? null);
+  const guardia = instalar({ rutasPermitidas, agente: cfg.agenteNombre ?? cfg.agente, hilosDir: cfg.hilosDir, raiz: path.join(cfg.areaDir ?? cfg.hilosDir, 'proyectos'), repos: reposGuardia(vinculos), tokenArchivo: cfg.githubTokenArchivo, identidad: { nombre: `${cfg.agenteNombre ?? cfg.agente} (asistente de IA GSS)`, correo: 'agentes-ia@gsslatam.com' } });
   const valor = listo ? (leerToken ? leerToken(cfg.githubTokenArchivo) : readFileSync(cfg.githubTokenArchivo, 'utf8').trim()) : null;
   const envGit = { PATH: '/opt/homebrew/bin:/usr/bin:/bin', HOME: guardia.home, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', LANG: 'en_US.UTF-8', ...(valor ? { GH_TOKEN: valor } : {}) };
   // Sin token no hay fetch (el repo es privado): se trabaja con lo que ya tiene el clon.
@@ -168,7 +189,7 @@ export function prepararCodigoOpenclaw({ cfg, jsonCodigo, rutas, idProject, idCo
   };
   const repos = proyecto.repos.map((n) => vinculos.repos.get(n));
   const worktrees = preparar({ repos, rutas, idProject, idConversation, envGit, ejecutarGit });
-  return { worktrees, guardia, tokenListo: listo, bloque: textoCodigoOpenclaw({ worktrees, guardia, tokenListo: listo }), rama: ramaDeConversacion(idProject, idConversation) };
+  return { worktrees, guardia, tokenListo: listo, bloque: textoCodigoOpenclaw({ worktrees, guardia, tokenListo: listo, rutasPermitidas }), rama: ramaDeConversacion(idProject, idConversation) };
 }
 
 function gitReal(args, { cwd, env }) {
