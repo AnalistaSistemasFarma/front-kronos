@@ -99,6 +99,8 @@ export interface ArchivoDto {
   uploadedByAgent: { idAgent: number; name: string; idConversation: number | null } | null;
   downloadUrl: string;
   puedoQuitar: boolean;
+  /** Carpeta del archivo (2026-11-06); null = la raíz. */
+  folderPath: string | null;
 }
 
 export interface ConversacionDto {
@@ -161,6 +163,8 @@ export interface ProyectoDetalleDto extends ProyectoResumenDto {
   agents: AgenteProyectoDto[];
   members: MiembroDto[];
   files: ArchivoDto[];
+  /** Carpetas de los archivos (rutas «A/B/C», incluidas las vacías). */
+  folders: string[];
   conversations: ConversacionDto[];
   links: { emails: CorreoVinculadoDto[]; requests: SolicitudVinculadaDto[] };
   /** Subagentes APROBADOS del equipo (F2, 2026-10-18). */

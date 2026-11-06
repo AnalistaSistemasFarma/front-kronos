@@ -955,6 +955,7 @@ model ChatProject {
   creator       User                  @relation("ChatProjectCreator", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   members       ChatProjectMember[]
   files         ChatProjectFile[]
+  folders       ChatProjectFolder[]
   conversations ChatConversation[]
   agents        ChatProjectAgent[]
   emails        ChatProjectEmail[]
@@ -1102,12 +1103,33 @@ model ChatProjectFile {
   /// Sin FK a propósito: la conversación ya cae en cascada con el proyecto.
   uploaded_by_agent Int?
   id_conversation   Int?
+  /// Carpeta del archivo dentro del proyecto (2026-11-06), p. ej. «Autorizaciones INVIMA/PISA».
+  /// NULL = la raíz. Las carpetas viven en chat_project_folder (también las vacías).
+  folder_path       String?  @db.NVarChar(400)
   created_at        DateTime @default(now())
 
   project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
 
   @@index([id_project])
+  @@index([id_project, folder_path])
   @@map("chat_project_file")
+  @@schema("dbo")
+}
+
+/// CARPETA de los archivos de un proyecto (2026-11-06, reunión con Juan Mora: repositorio de
+/// documentación regulatoria por carpetas). La ruta completa («A/B/C») es única por proyecto;
+/// las carpetas padre existen como filas propias. Una carpeta solo se quita vacía.
+model ChatProjectFolder {
+  id_project_folder Int      @id @default(autoincrement())
+  id_project        Int
+  path              String   @db.NVarChar(400)
+  created_by        String?  @db.NVarChar(1000)
+  created_at        DateTime @default(now())
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+
+  @@unique([id_project, path])
+  @@map("chat_project_folder")
   @@schema("dbo")
 }
 
