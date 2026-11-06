@@ -8,7 +8,9 @@ import { sapGet, sapLogin, sapLogout, sapPatch, SapError, type SapSession } from
 import { publishApprovedDraft, publishSap } from './publish';
 import { startStep, finishStep, withStep, type TriggeredBy } from '../workflow-sap/executionLog';
 import { isAuthorizationEffectEnabled } from '../workflow-sap/config';
+import { instantiateOutcomeTasks } from '../workflow-sap/outcomeTasks';
 import { checkTransition, normalizeState } from './states';
+import { purchaseDescription, purchaseSubject } from './subject';
 
 /**
  * Integracion de Compras con el modulo de Autorizaciones de SynerLink.
@@ -75,8 +77,36 @@ async function cancelGeneralRequest(idRequest: number): Promise<void> {
 }
 
 export type SendResult =
-  | { ok: true; idRequestGeneral: number; state: 'LA' }
+  | { ok: true; idRequestGeneral: number; state: 'LA' | 'B' }
   | { ok: false; status: number; error: string };
+
+/** Estado «En Borrador» de requests_general (status_case 6), el mismo de Ventas. */
+export const REQUEST_DRAFT_STATUS = 6;
+
+/** Asunto y descripción de la solicitud desde el borrador de SAP (relee las líneas). */
+async function requestTextsFromSap(sap: SapSession, docEntry: number) {
+  const d = await sapGet<Record<string, unknown> & { DocumentLines?: Record<string, unknown>[] }>(
+    sap,
+    `Drafts(${docEntry})?$select=Comments,DocTotal,DocCurrency,DocumentLines`
+  );
+  return { subject: purchaseSubject(d), descripcion: purchaseDescription(d) };
+}
+
+/** Actualiza asunto y descripción de la solicitud de un borrador (al editarlo). */
+export async function refreshRequestTexts(sap: SapSession, companyId: number, docEntry: number): Promise<void> {
+  const link = await prisma.purchaseAuthorization.findFirst({
+    where: { id_company: companyId, doc_entry: docEntry, status: { in: ['draft', ...ACTIVE] } },
+  });
+  if (!link) return;
+  const t = await requestTextsFromSap(sap, docEntry);
+  const pool = await sql.connect(sqlConfig);
+  await pool
+    .request()
+    .input('id', sql.Int, link.id_request_general)
+    .input('s', sql.NVarChar(254), t.subject)
+    .input('d', sql.NVarChar(sql.MAX), t.descripcion)
+    .query(`UPDATE requests_general SET subject_request = @s, description = @d WHERE id = @id;`);
+}
 
 /** Envia un borrador a autorizar. `sap` es la sesion abierta con el permiso del usuario. */
 export async function sendToAuthorize(params: {
@@ -84,8 +114,10 @@ export async function sendToAuthorize(params: {
   companyId: number;
   docEntry: number;
   userEmail: string;
-  /** Asunto escrito en «Mis solicitudes» (opcional): se antepone al de la solicitud del workflow. */
+  /** Ya no se usa: el asunto se arma desde el borrador («SC - proveedor - primera línea»). */
   subject?: string | null;
+  /** true = «Guardar borrador»: la solicitud queda «En Borrador» en Mis solicitudes, sin flujo. */
+  asDraft?: boolean;
 }): Promise<SendResult> {
   const { sap, companyId, docEntry, userEmail } = params;
 
@@ -99,6 +131,10 @@ export async function sendToAuthorize(params: {
   const state = normalizeState(draft.U_SEND_State);
   const check = checkTransition(state, state === 'ENC' ? 'reenviar' : 'enviar');
   if (!check.ok) return { ok: false, status: 409, error: check.error };
+  // Solicitud ya guardada «En Borrador» para este documento (se reutiliza al enviar).
+  const draftLink = await prisma.purchaseAuthorization.findFirst({
+    where: { id_company: companyId, doc_entry: docEntry, status: 'draft' },
+  });
 
   const active = await prisma.purchaseAuthorization.findFirst({
     where: { id_company: companyId, doc_entry: docEntry, status: { in: ACTIVE } },
@@ -112,29 +148,75 @@ export async function sendToAuthorize(params: {
   const user = await prisma.user.findUnique({ where: { email: userEmail }, select: { id: true } });
   if (!user) return { ok: false, status: 401, error: 'Usuario no encontrado.' };
 
-  const total = draft.DocTotal != null ? ` · Total ${Number(draft.DocTotal).toLocaleString('es-CO')} ${draft.DocCurrency ?? ''}` : '';
-  const userSubject = (params.subject ?? '').trim().slice(0, 200);
-  const subject = userSubject
-    ? `${userSubject} · Solicitud de compra #${docEntry}`
-    : `Solicitud de compra · Borrador #${docEntry}`;
-  const { id_request: idRequest, processEmail, processEmails, taskEmails } = await createGeneralRequest({
-    company: companyId,
-    subject,
-    descripcion: `${String(draft.Comments ?? '').slice(0, 900)}${total}`.trim(),
-    process: config.id_process_category_auth,
-    createdby: user.id,
-    url: `/process/purchases?companyId=${companyId}&docEntry=${docEntry}`,
-    formValues: [],
-  });
+  const texts = await requestTextsFromSap(sap, docEntry);
+  const subject = texts.subject;
+  const pool = await sql.connect(sqlConfig);
 
-  try {
-    await prisma.purchaseAuthorization.create({
-      data: { id_company: companyId, doc_entry: docEntry, id_request_general: idRequest, status: 'pending', created_by: user.id },
+  // «Guardar borrador»: solicitud en «En Borrador», sin flujo (como Ventas).
+  if (params.asDraft) {
+    if (draftLink) {
+      await refreshRequestTexts(sap, companyId, docEntry);
+      return { ok: true, idRequestGeneral: draftLink.id_request_general, state: 'B' };
+    }
+    const created = await createGeneralRequest({
+      company: companyId,
+      subject,
+      descripcion: texts.descripcion,
+      process: config.id_process_category_auth,
+      createdby: user.id,
+      url: `/process/purchases?companyId=${companyId}&docEntry=${docEntry}`,
+      formValues: [],
     });
-  } catch {
-    // Indice unico: otro envio del mismo borrador gano la carrera.
-    await cancelGeneralRequest(idRequest);
-    return { ok: false, status: 409, error: 'La solicitud ya tiene una autorizacion en curso.' };
+    await pool.request().input('id', sql.Int, created.id_request)
+      .query(`UPDATE requests_general SET status_req = ${REQUEST_DRAFT_STATUS} WHERE id = @id;`);
+    await prisma.purchaseAuthorization.create({
+      data: { id_company: companyId, doc_entry: docEntry, id_request_general: created.id_request, status: 'draft', created_by: user.id },
+    });
+    return { ok: true, idRequestGeneral: created.id_request, state: 'B' };
+  }
+
+  let idRequest: number;
+  let processEmail: string | null = null;
+  let processEmails: string[] = [];
+  let taskEmails: string[] = [];
+  if (draftLink) {
+    // Se abre la solicitud que estaba «En Borrador» (sus tareas ya existen).
+    idRequest = draftLink.id_request_general;
+    await pool
+      .request()
+      .input('id', sql.Int, idRequest)
+      .input('s', sql.NVarChar(254), subject)
+      .input('d', sql.NVarChar(sql.MAX), texts.descripcion)
+      .query(`UPDATE requests_general SET status_req = 1, subject_request = @s, description = @d
+              WHERE id = @id AND status_req = ${REQUEST_DRAFT_STATUS};`);
+    const moved = await prisma.purchaseAuthorization.updateMany({
+      where: { id: draftLink.id, status: 'draft' },
+      data: { status: 'pending' },
+    });
+    if (moved.count === 0) return { ok: false, status: 409, error: 'La solicitud ya tiene una autorizacion en curso.' };
+  } else {
+    const created = await createGeneralRequest({
+      company: companyId,
+      subject,
+      descripcion: texts.descripcion,
+      process: config.id_process_category_auth,
+      createdby: user.id,
+      url: `/process/purchases?companyId=${companyId}&docEntry=${docEntry}`,
+      formValues: [],
+    });
+    idRequest = created.id_request;
+    processEmail = created.processEmail ?? null;
+    processEmails = created.processEmails ?? [];
+    taskEmails = created.taskEmails ?? [];
+    try {
+      await prisma.purchaseAuthorization.create({
+        data: { id_company: companyId, doc_entry: docEntry, id_request_general: idRequest, status: 'pending', created_by: user.id },
+      });
+    } catch {
+      // Indice unico: otro envio del mismo borrador gano la carrera.
+      await cancelGeneralRequest(idRequest);
+      return { ok: false, status: 409, error: 'La solicitud ya tiene una autorizacion en curso.' };
+    }
   }
 
   try {
@@ -320,6 +402,7 @@ export async function onAuthorizationDecision(
       });
       await finishStep(id, { status: 'skipped', responseSummary: 'Efecto no configurado en el flujo' });
       await finish(link.id_request_general, { status: 'rejected' });
+      await instantiateOutcomeTasks(link.id_request_general, 'on_reject');
       afterDecision(link.id_request_general, source);
       return { skipped: false, status: 'rejected' };
     }
@@ -354,6 +437,7 @@ export async function onAuthorizationDecision(
       () => ({ status: 'ok', sapDocEntry: link.doc_entry })
     );
     await finish(link.id_request_general, { status: 'rejected' });
+    await instantiateOutcomeTasks(link.id_request_general, 'on_reject');
     afterDecision(link.id_request_general, source);
     return { skipped: false, status: 'rejected' };
   } catch (error) {
@@ -489,6 +573,7 @@ export async function sendToQuotation(params: {
     const reason = (params.reason ?? '').trim();
     await finish(link.id_request_general, { status: 'quoted', error: reason ? `Cotizar: ${reason}` : null });
     // Tareas SAP «si se envía a cotizar» antes de cerrar la solicitud del workflow.
+    await instantiateOutcomeTasks(link.id_request_general, 'on_quote');
     await import('../workflow-sap/engine').then((m) => m.runSapExecutors(link.id_request_general, 'user'));
     await cancelGeneralRequest(link.id_request_general).catch((e) =>
       console.error(`Compras: no se pudo cerrar la solicitud ${link.id_request_general} tras cotizar:`, e)

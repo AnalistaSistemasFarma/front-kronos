@@ -1,8 +1,22 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Alert, Badge, Button, Group, Loader, Stack, Table, Text } from '@mantine/core';
-import { IconHierarchy2, IconHistory, IconPaperclip } from '@tabler/icons-react';
+import { Alert, Badge, Button, Card, Group, Loader, Modal, Stack, Table, Text, Textarea } from '@mantine/core';
+import {
+  IconBuildingStore,
+  IconCalendar,
+  IconCash,
+  IconFileInvoice,
+  IconHierarchy2,
+  IconHistory,
+  IconPaperclip,
+  IconPencil,
+  IconSend,
+  IconTrash,
+  IconUser,
+} from '@tabler/icons-react';
+import toast from 'react-hot-toast';
+import PurchaseInlineForm from './PurchaseInlineForm';
 import { stateColor, stateLabel } from '../../../../lib/purchases/fields';
 import AttachmentsPanel from './AttachmentsPanel';
 import TracePanel from './TracePanel';
@@ -19,6 +33,8 @@ import ExecutionHistoryPanel from './ExecutionHistoryPanel';
 
 interface Purchase {
   companyId: number;
+  /** Estado del enlace con el flujo: draft (En Borrador), pending, approved, rejected, quoted… */
+  authorizationStatus?: string;
   docEntry: number;
   firmDocEntry: number | null;
   firmDocNum: number | null;
@@ -31,6 +47,30 @@ const money = (v: unknown) => {
   return v == null || v === '' || Number.isNaN(n) ? '' : n.toLocaleString('es-CO', { maximumFractionDigits: 2 });
 };
 const txt = (v: unknown) => (v == null ? '' : String(v));
+
+/** Estado del flujo en SynerLink (el de SAP va aparte, en U_SEND_State). */
+const FLOW: Record<string, { label: string; color: string }> = {
+  draft: { label: 'En borrador', color: 'gray' },
+  pending: { label: 'En autorización', color: 'yellow' },
+  publishing: { label: 'Publicando en SAP', color: 'blue' },
+  approved: { label: 'Aprobada', color: 'teal' },
+  rejected: { label: 'No aprobada', color: 'red' },
+  quoted: { label: 'En cotización', color: 'grape' },
+  cancelled: { label: 'Anulada', color: 'gray' },
+  publish_error: { label: 'Error al publicar', color: 'red' },
+  reject_error: { label: 'Error al rechazar', color: 'red' },
+};
+
+function Label({ icon: Icon, children }: { icon: React.ComponentType<{ size?: number }>; children: React.ReactNode }) {
+  return (
+    <Group gap={4} wrap="nowrap" c="dimmed">
+      <Icon size={14} />
+      <Text size="xs" c="dimmed">
+        {children}
+      </Text>
+    </Group>
+  );
+}
 
 /** Columnas de la tabla de lineas, en el orden de SAPSEND. */
 const LINE_COLUMNS: {
@@ -62,8 +102,11 @@ const LINE_COLUMNS: {
 export default function PurchaseRequestDetail({
   requestId,
   onLoaded,
+  mb,
 }: {
   requestId: string | number | null;
+  /** Margen inferior (en el detalle de la solicitud va a todo el ancho, arriba). */
+  mb?: string;
   /** Avisa si la solicitud es de compra (p. ej. para agrandar la ventana que la contiene). */
   onLoaded?: (isPurchase: boolean) => void;
 }) {
@@ -72,6 +115,11 @@ export default function PurchaseRequestDetail({
   const [error, setError] = useState<string | null>(null);
   // Los anexos se ven de entrada: es lo primero que revisa el autorizador.
   const [panel, setPanel] = useState<'anexos' | 'estado' | 'historial' | null>('anexos');
+  const [reload, setReload] = useState(0);
+  const [editing, setEditing] = useState(false);
+  const [voiding, setVoiding] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!requestId) {
@@ -97,7 +145,7 @@ export default function PurchaseRequestDetail({
     return () => {
       cancelled = true;
     };
-  }, [requestId]);
+  }, [requestId, reload]);
 
   if (loading) return <Loader size="sm" />;
   if (error) return <Alert color="red">{error}</Alert>;
@@ -107,31 +155,125 @@ export default function PurchaseRequestDetail({
   const lines = d.DocumentLines ?? [];
   const numero = purchase.firmDocNum ?? purchase.firmDocEntry;
   const motivo = txt(d.U_Motivo_Can_Solicitud).trim();
+  const flow = FLOW[purchase.authorizationStatus ?? ''];
+  const isDraft = purchase.authorizationStatus === 'draft';
+  const vendors = [...new Set(lines.map((l) => txt(l.U_NombreProveedor).trim()).filter(Boolean))];
   const columns = LINE_COLUMNS.filter(
     (c) => !c.optional || lines.some((l, i) => String(c.render(l, i) ?? '').trim() !== '')
   );
 
+  const send = async () => {
+    if (!window.confirm('¿Enviar la solicitud de compra a autorización del líder de área?')) return;
+    setBusy(true);
+    try {
+      const r = await fetch('/api/purchases/drafts/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId: purchase.companyId, docEntry: purchase.docEntry }),
+      });
+      const x = await r.json().catch(() => ({}));
+      if (!r.ok) toast.error(x.error || 'No se pudo enviar a autorización');
+      else toast.success('Solicitud enviada a autorización');
+    } finally {
+      setBusy(false);
+      setReload((n) => n + 1);
+    }
+  };
+
+  const voidDraft = async () => {
+    setBusy(true);
+    try {
+      const r = await fetch('/api/purchases/drafts/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId: purchase.companyId, docEntry: purchase.docEntry, action: 'anular', reason: voidReason.trim() }),
+      });
+      const x = await r.json().catch(() => ({}));
+      if (!r.ok) toast.error(x.error || 'No se pudo anular');
+      else {
+        toast.success('Solicitud anulada');
+        setVoiding(false);
+      }
+    } finally {
+      setBusy(false);
+      setReload((n) => n + 1);
+    }
+  };
+
   return (
-    <Stack gap="sm">
-      <div>
-        <Text size="sm" c="gray.6" fw={500}>
-          Solicitud de compra en SAP
-        </Text>
-        <Group gap="xs" mt={4}>
+    <Card withBorder radius="md" p="md" mb={mb} shadow="sm">
+      <Group justify="space-between" mb="sm" wrap="wrap">
+        <Group gap={8}>
+          <IconFileInvoice size={20} />
+          <Text fw={700}>
+            Solicitud de compra en SAP · borrador #{purchase.docEntry}
+            {numero ? ` · en firme N.º ${numero}` : ''}
+          </Text>
+        </Group>
+        <Group gap={6}>
           <Badge variant="light" color={stateColor(d.U_SEND_State)} styles={{ root: { textTransform: 'none' } }}>
             {stateLabel(d.U_SEND_State)}
           </Badge>
-          <Text size="sm">Borrador #{purchase.docEntry}</Text>
-          {numero ? <Text size="sm">· En firme N.º {numero}</Text> : null}
-          {d.RequriedDate ? (
-            <Text size="sm" c="dimmed">
-              · Fecha requerida {day(d.RequriedDate)}
-            </Text>
-          ) : null}
+          {flow && <Badge color={flow.color}>{flow.label}</Badge>}
         </Group>
-      </div>
+      </Group>
 
-      <Group gap="xs">
+      {isDraft && (
+        <Alert color="gray" mb="sm" title="Solicitud en borrador">
+          <Text size="sm">
+            El borrador está en SAP en estado B, como en SAPSEND. Puede editarlo y, cuando esté listo, enviarlo a autorización
+            del líder de área.
+          </Text>
+          <Group mt="xs" gap="xs">
+            <Button size="xs" variant="light" leftSection={<IconPencil size={14} />} onClick={() => setEditing(true)}>
+              Editar
+            </Button>
+            <Button size="xs" leftSection={<IconSend size={14} />} loading={busy} onClick={send}>
+              Enviar a autorización
+            </Button>
+            <Button size="xs" color="red" variant="subtle" leftSection={<IconTrash size={14} />} onClick={() => setVoiding(true)}>
+              Anular
+            </Button>
+          </Group>
+        </Alert>
+      )}
+      {motivo ? (
+        <Alert color="red" variant="light" mb="sm" title="Motivo de rechazo o anulación">
+          {motivo}
+        </Alert>
+      ) : null}
+
+      <Group gap="xl" mb="md" wrap="wrap">
+        <div>
+          <Label icon={IconUser}>Solicitante en SAP</Label>
+          <Text size="sm" fw={600}>
+            {txt(d.U_SEND_UserName) || '—'}
+          </Text>
+        </div>
+        <div>
+          <Label icon={IconBuildingStore}>Proveedor{vendors.length > 1 ? 'es' : ''}</Label>
+          <Text size="sm">{vendors.length ? vendors.join(' · ') : '—'}</Text>
+        </div>
+        <div>
+          <Label icon={IconCalendar}>Fecha / requerida</Label>
+          <Text size="sm">
+            {day(d.DocDate)} · {day(d.RequriedDate) || '—'}
+          </Text>
+        </div>
+        <div>
+          <Label icon={IconCash}>Total</Label>
+          <Text size="sm" fw={700}>
+            {money(d.DocTotal)} {txt(d.DocCurrency)}
+          </Text>
+          {d.DocTotalSys != null && (
+            <Text size="xs" c="dimmed">
+              USD {money(d.DocTotalSys)}
+            </Text>
+          )}
+        </div>
+      </Group>
+
+      <Group gap="xs" mb="sm">
         <Button
           size="xs"
           color="indigo"
@@ -148,7 +290,7 @@ export default function PurchaseRequestDetail({
           rightSection={<IconHierarchy2 size={14} />}
           onClick={() => setPanel((p) => (p === 'estado' ? null : 'estado'))}
         >
-          Estado
+          Trazabilidad
         </Button>
         <Button
           size="xs"
@@ -160,19 +302,20 @@ export default function PurchaseRequestDetail({
           Historial
         </Button>
       </Group>
-
-      {panel === 'anexos' && (
-        <AttachmentsPanel companyId={purchase.companyId} docEntry={purchase.docEntry} canUpload={false} requestId={requestId} />
-      )}
-      {panel === 'estado' && <TracePanel companyId={purchase.companyId} docEntry={purchase.docEntry} />}
-      {panel === 'historial' && requestId != null && <ExecutionHistoryPanel requestId={requestId} />}
+      <Stack gap="sm" mb={panel ? 'md' : 0}>
+        {panel === 'anexos' && (
+          <AttachmentsPanel companyId={purchase.companyId} docEntry={purchase.docEntry} canUpload={false} requestId={requestId} />
+        )}
+        {panel === 'estado' && <TracePanel companyId={purchase.companyId} docEntry={purchase.docEntry} />}
+        {panel === 'historial' && requestId != null && <ExecutionHistoryPanel requestId={requestId} />}
+      </Stack>
 
       <Table.ScrollContainer minWidth={Math.max(600, columns.length * 95)}>
-        <Table striped verticalSpacing="xs" fz="xs">
+        <Table withTableBorder striped verticalSpacing={4} fz="xs">
           <Table.Thead>
             <Table.Tr>
               {columns.map((c) => (
-                <Table.Th key={c.label} style={{ textTransform: 'uppercase', textAlign: c.align ?? 'left' }}>
+                <Table.Th key={c.label} style={{ textAlign: c.align ?? 'left', whiteSpace: 'nowrap' }}>
                   {c.label}
                 </Table.Th>
               ))}
@@ -192,22 +335,39 @@ export default function PurchaseRequestDetail({
         </Table>
       </Table.ScrollContainer>
 
-      <Group justify="flex-end" gap="xl">
-        <Text size="sm">
-          <b>TOTAL COP:</b> {money(d.DocTotal)}
-        </Text>
-        {d.DocTotalSys != null && (
-          <Text size="sm">
-            <b>TOTAL USD:</b> {money(d.DocTotalSys)}
-          </Text>
+      <Modal opened={editing} onClose={() => setEditing(false)} fullScreen title={<Text fw={700}>Editar solicitud de compra · borrador #{purchase.docEntry}</Text>}>
+        {editing && (
+          <PurchaseInlineForm
+            companyId={String(purchase.companyId)}
+            edit={{ docEntry: purchase.docEntry }}
+            onDone={({ ok, message }) => {
+              if (ok) toast.success(message);
+              else toast.error(message);
+              setEditing(false);
+              setReload((n) => n + 1);
+            }}
+          />
         )}
-      </Group>
-
-      {motivo ? (
-        <Alert color="red" variant="light" title="Motivo de rechazo o anulación">
-          {motivo}
-        </Alert>
-      ) : null}
-    </Stack>
+      </Modal>
+      <Modal opened={voiding} onClose={() => setVoiding(false)} title={<Text fw={700}>Anular solicitud de compra</Text>} centered>
+        <Textarea
+          label="Motivo"
+          withAsterisk
+          autosize
+          minRows={2}
+          maxLength={254}
+          value={voidReason}
+          onChange={(e) => setVoidReason(e.currentTarget.value)}
+        />
+        <Group justify="flex-end" mt="md">
+          <Button variant="default" onClick={() => setVoiding(false)}>
+            Cancelar
+          </Button>
+          <Button color="red" loading={busy} disabled={!voidReason.trim()} onClick={voidDraft}>
+            Anular
+          </Button>
+        </Group>
+      </Modal>
+    </Card>
   );
 }

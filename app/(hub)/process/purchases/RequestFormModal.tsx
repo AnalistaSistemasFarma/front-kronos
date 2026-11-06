@@ -85,7 +85,7 @@ interface Props {
 }
 
 /** Proyecta una linea del Draft de SAP a los campos del formulario. */
-function toFormLine(l: Record<string, unknown>): Line {
+export function toFormLine(l: Record<string, unknown>): Line {
   const line: Line = {};
   for (const c of COLUMNS) {
     const v = l[c.field];

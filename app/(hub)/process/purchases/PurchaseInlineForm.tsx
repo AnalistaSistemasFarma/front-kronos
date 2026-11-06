@@ -2,10 +2,13 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  ActionIcon, Alert, Button, Group, Loader, NumberInput, Paper, ScrollArea, Select, Stack, Table, Text, TextInput, Textarea,
+  ActionIcon, Alert, Button, Group, Loader, NumberInput, Paper, ScrollArea, Select, Stack, Switch, Table, Text, TextInput, Textarea,
 } from '@mantine/core';
 import { IconCloudUpload, IconFile, IconPlus, IconSend, IconTrash, IconX } from '@tabler/icons-react';
-import { COLUMNS, type FieldError, type Line, type LineField } from './RequestFormModal';
+import { COLUMNS, toFormLine, type FieldError, type Line, type LineField } from './RequestFormModal';
+import PurchaseSearchModal from './PurchaseSearchModal';
+import { purchaseSubject } from '../../../../lib/purchases/subject';
+import type { LookupKind, LookupOption } from '../../../../lib/purchases/lookups';
 import SapLookupInput from './SapLookupInput';
 import { FIELD_LOOKUP } from '../../../../lib/purchases/lookups';
 import { sapErrorText } from '../../../../lib/purchases/sapErrorHint';
@@ -26,8 +29,10 @@ const notifySapError = (msg: string) => toast.error(sapErrorText(msg), { duratio
 interface Props {
   /** id_company elegido arriba en el formulario general. */
   companyId: string;
-  /** Asunto del formulario general: se usa en la solicitud del workflow. */
-  subject: string;
+  /** Ya no se usa: el asunto se arma solo («SC - proveedor - primera línea»). */
+  subject?: string;
+  /** Editar un borrador ya creado (desde su solicitud «En Borrador»). */
+  edit?: { docEntry: number } | null;
   /** Termino (ok) o quedo el borrador creado con un aviso (warning). */
   onDone: (result: { ok: boolean; message: string }) => void;
 }
@@ -164,7 +169,7 @@ function colWidth(field: LineField, base: number): number {
   return Math.max(base, 110);
 }
 
-export default function PurchaseInlineForm({ companyId, subject, onDone }: Props) {
+export default function PurchaseInlineForm({ companyId, edit, onDone }: Props) {
   const [readiness, setReadiness] = useState<Readiness>('loading');
   const [comments, setComments] = useState('');
   const [requiredDate, setRequiredDate] = useState('');
@@ -175,6 +180,38 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
   /** Tras el primer intento de envío, los obligatorios vacíos se marcan en rojo. */
   const [tried, setTried] = useState(false);
   const [defaultCurrency, setDefaultCurrency] = useState('');
+  /** Como Ventas: enviar de una vez a autorización o guardarla en borrador («En Borrador» en Mis solicitudes). */
+  const [enviar, setEnviar] = useState(true);
+  /** Lupa: búsqueda ampliada del campo de una línea. */
+  const [search, setSearch] = useState<{ kind: LookupKind; line: number; field: LineField; q: string } | null>(null);
+  const [loadingEdit, setLoadingEdit] = useState(false);
+
+  // Edición: carga el borrador.
+  useEffect(() => {
+    if (!edit) return;
+    let cancelled = false;
+    setLoadingEdit(true);
+    fetch(`/api/purchases/item?companyId=${companyId}&docEntry=${edit.docEntry}`)
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'No se pudo cargar la solicitud');
+        if (cancelled) return;
+        const item = data.item ?? {};
+        setComments(String(item.Comments ?? ''));
+        setRequiredDate(String(item.RequriedDate ?? '').slice(0, 10));
+        const docLines: Record<string, unknown>[] = Array.isArray(item.DocumentLines) ? item.DocumentLines : [];
+        setLines(docLines.length ? docLines.map(toFormLine) : [{}]);
+      })
+      .catch((e: Error) => {
+        if (!cancelled) toast.error(e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingEdit(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [edit, companyId]);
   /** Campos de búsqueda con texto escrito pero sin elegir de la lista («línea-campo»). */
   const [notFromList, setNotFromList] = useState<Set<string>>(new Set());
   const markNotFromList = (key: string, invalid: boolean) =>
@@ -222,9 +259,19 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
   /** Obligatorios vacíos (cliente), con el mismo texto para cada línea. */
   const missing = (i: number, field: LineField) =>
     tried && COLUMNS.find((c) => c.field === field)?.required && isEmpty(lines[i]?.[field]);
-  const missingList = lines.flatMap((l, i) =>
-    COLUMNS.filter((c) => c.required && isEmpty(l[c.field])).map((c) => `Línea ${i + 1} · ${c.label}`)
-  );
+  const missingList = [
+    ...(comments.trim() ? [] : ['Comentarios']),
+    ...lines.flatMap((l, i) =>
+      COLUMNS.filter((c) => c.required && isEmpty(l[c.field])).map((c) => `Línea ${i + 1} · ${c.label}`)
+    ),
+  ];
+  /** Vista previa del asunto (el que vale lo arma el servidor desde SAP con la misma regla). */
+  const autoSubject = purchaseSubject({ DocumentLines: lines as Record<string, unknown>[] });
+  /** Aplica la opción elegida (lista o lupa) a la línea: valor + campos que llena. */
+  const applyOption = (i: number, field: LineField, opt: LookupOption) =>
+    setLines((prev) =>
+      prev.map((l, j) => (j === i ? { ...l, ...(opt.fill ?? {}), [field]: opt.fill?.[field] ?? opt.value } : l))
+    );
 
   const submit = async () => {
     setTried(true);
@@ -243,13 +290,14 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
     }
     setSaving(true);
     try {
-      // 1) Borrador en SAP
+      // 1) Borrador en SAP (crear o, si se edita, actualizar)
       const res = await fetch('/api/purchases/drafts', {
-        method: 'POST',
+        method: edit ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           companyId: Number(companyId),
-          header: { Comments: comments || subject.toUpperCase(), ...(requiredDate ? { RequriedDate: requiredDate } : {}) },
+          ...(edit ? { docEntry: edit.docEntry } : {}),
+          header: { Comments: comments, ...(requiredDate ? { RequriedDate: requiredDate } : {}) },
           // Moneda: la elegida o la de la empresa; «moneda local» viaja vacía (como SAPSEND en Ryan).
           lines: lines.map((l) => {
             const cur = lineCurrency(l);
@@ -263,7 +311,7 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
         setFieldErrors(Array.isArray(data.errors) ? data.errors : []);
         return;
       }
-      const docEntry = Number(data.docEntry);
+      const docEntry = Number(edit?.docEntry ?? data.docEntry);
 
       // 2) Adjuntos (no bloquean: si fallan, se avisa)
       let attachWarning = '';
@@ -280,22 +328,27 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
         }
       }
 
-      // 3) Enviar a autorizar (crea la solicitud del workflow en Mis solicitudes)
+      // 3) Enviar a autorización, o dejarla «En Borrador» en Mis solicitudes (sin flujo)
       const sent = await fetch('/api/purchases/drafts/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ companyId: Number(companyId), docEntry, subject }),
+        body: JSON.stringify({ companyId: Number(companyId), docEntry, borrador: !enviar }),
       });
       const sentData = await sent.json().catch(() => ({}));
       if (!sent.ok) {
         if (sentData.error) notifySapError(String(sentData.error));
         onDone({
           ok: false,
-          message: `Se creó el borrador #${docEntry}, pero no se pudo enviar a autorizar: ${sentData.error || 'error'}.${attachWarning} Envíelo desde Compras.`,
+          message: `Se guardó el borrador #${docEntry}, pero no se pudo ${enviar ? 'enviar a autorización' : 'dejar en Mis solicitudes'}: ${sentData.error || 'error'}.${attachWarning}`,
         });
         return;
       }
-      onDone({ ok: !attachWarning, message: `Solicitud de compra #${docEntry} enviada a autorizar.${attachWarning}` });
+      onDone({
+        ok: !attachWarning,
+        message: enviar
+          ? `Solicitud de compra #${docEntry} enviada a autorización.${attachWarning}`
+          : `Solicitud de compra #${docEntry} guardada en borrador; la encuentra en Mis solicitudes («En Borrador»).${attachWarning}`,
+      });
     } catch {
       toast.error('Error de red al crear la solicitud de compra');
     } finally {
@@ -321,7 +374,16 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
 
 
   return (
-    <Stack gap="md">
+    <Stack gap="md" pos="relative">
+      {loadingEdit && <Loader size="sm" />}
+      <Paper withBorder radius="md" p="sm" bg="var(--mantine-color-default-hover)">
+        <Text size="xs" c="dimmed">
+          Asunto de la solicitud (se arma solo)
+        </Text>
+        <Text size="sm" fw={600}>
+          {autoSubject}
+        </Text>
+      </Paper>
       <Group grow align="flex-start">
         <TextInput
           label="Fecha requerida"
@@ -334,13 +396,13 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
 
       <Textarea
         label="Comentarios"
-        description="Si lo deja vacío se usa el asunto."
+        withAsterisk
         autosize
         minRows={2}
         maxLength={254}
         value={comments}
         onChange={(e) => setComments(e.currentTarget.value.toUpperCase())}
-        error={errorFor('Comments')}
+        error={errorFor('Comments') ?? (tried && !comments.trim() ? 'Obligatorio' : undefined)}
       />
 
       <div>
@@ -412,13 +474,8 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
                           kind={FIELD_LOOKUP[c.field]!}
                           value={String(line[c.field] ?? '')}
                           onChange={(v) => setLineValue(i, c.field, v)}
-                          onSelect={(opt) =>
-                            setLines((prev) =>
-                              prev.map((l, j) =>
-                                j === i ? { ...l, ...(opt.fill ?? {}), [c.field]: opt.fill?.[c.field] ?? opt.value } : l
-                              )
-                            )
-                          }
+                          onSelect={(opt) => applyOption(i, c.field, opt)}
+                          onExpand={(q) => setSearch({ kind: FIELD_LOOKUP[c.field]!, line: i, field: c.field, q })}
                           error={typeof err === 'string' ? err : undefined}
                           ariaLabel={aria}
                           onInvalidChange={(bad) => markNotFromList(`${i}-${c.field}`, bad)}
@@ -489,17 +546,32 @@ export default function PurchaseInlineForm({ companyId, subject, onDone }: Props
           borderTop: '1px solid var(--mantine-color-default-border)',
         }}
       >
-        <Group justify="flex-end">
+        <Group justify="space-between">
+          <Switch
+            checked={enviar}
+            onChange={(e) => setEnviar(e.currentTarget.checked)}
+            label={enviar ? 'Enviar a autorización del líder de área' : 'Guardar en borrador (podrá editarla y enviarla después)'}
+          />
           <Button
             leftSection={<IconSend size={16} />}
             onClick={submit}
             loading={saving}
-            disabled={!subject.trim() && !comments.trim()}
+            disabled={loadingEdit}
           >
-            Crear y enviar a autorizar
+            {enviar ? (edit ? 'Guardar y enviar a autorización' : 'Crear y enviar a autorización') : edit ? 'Guardar borrador' : 'Guardar en borrador'}
           </Button>
         </Group>
       </Stack>
+      {search && (
+        <PurchaseSearchModal
+          opened
+          onClose={() => setSearch(null)}
+          companyId={companyId}
+          kind={search.kind}
+          initialQuery={search.q}
+          onSelect={(opt) => applyOption(search.line, search.field, opt)}
+        />
+      )}
     </Stack>
   );
 }

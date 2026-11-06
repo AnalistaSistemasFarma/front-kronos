@@ -1806,8 +1806,9 @@ function RequestBoard() {
                 />
               </Grid.Col>
 
-              {/* Oferta de venta: el asunto se arma solo (OV - cliente - NIT - primera línea). */}
-              {!isSalesProcess && (
+              {/* Oferta de venta y solicitud de compra: el asunto se arma solo
+                  (OV - cliente - NIT - primera línea / SC - proveedor - primera línea). */}
+              {!isSapFormProcess && (
               <Grid.Col span={{ base: 12, md: 12 }}>
                 <TextInput
                   label={parseInt(formData.process) == 4 ? 'Cargo' : 'Asunto'}
