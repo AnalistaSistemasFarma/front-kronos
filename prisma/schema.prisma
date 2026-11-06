@@ -5693,3 +5693,72 @@ model FormacionPreguntaLike {
   @@map("formacion_pregunta_like")
   @@schema("dbo")
 }
+
+// ---------------------------------------------------------------------------
+// INGENIERÍA BIOMÉDICA (2026-11-06; reunión de Nicolás Rivera con Juan Mora del 2026-11-05).
+// Módulo APARTE del SGC validado (tablas en dbo, no en el esquema `sgc`): los ingenieros
+// biomédicos diligencian, «como si lo imprimieran y lo llenaran a mano», los FORMATOS VIGENTES
+// del SGC. Solo se valida el CONTROL: si el formato deja de estar vigente, el registro se bloquea.
+// ---------------------------------------------------------------------------
+
+/// Formato del SGC habilitado en el módulo (lo elige Aseguramiento de Calidad), con su actividad.
+model BiomedFormato {
+  id_biomed_formato Int       @id @default(autoincrement())
+  id_company        Int
+  id_document       Int
+  actividad         String    @db.NVarChar(200)
+  is_active         Boolean   @default(true)
+  created_by        String    @db.NVarChar(255)
+  created_at        DateTime  @default(now())
+  updated_by        String?   @db.NVarChar(255)
+  updated_at        DateTime?
+
+  registros BiomedRegistro[]
+
+  @@unique([id_company, id_document])
+  @@map("biomed_formato")
+  @@schema("dbo")
+}
+
+/// Formato DILIGENCIADO: la versión del formato sobre la que se llenó y lo escrito encima (JSON).
+model BiomedRegistro {
+  id_biomed_registro  Int       @id @default(autoincrement())
+  id_company          Int
+  id_biomed_formato   Int
+  id_document         Int
+  id_document_version Int
+  equipo              String    @db.NVarChar(200)
+  serial              String?   @db.NVarChar(100)
+  /// borrador | cerrado | anulado
+  estado              String    @default("borrador") @db.NVarChar(20)
+  data_json           String    @default("[]") @db.NVarChar(Max)
+  created_by          String    @db.NVarChar(255)
+  created_at          DateTime  @default(now())
+  updated_by          String?   @db.NVarChar(255)
+  updated_at          DateTime?
+  closed_by           String?   @db.NVarChar(255)
+  closed_at           DateTime?
+  annul_reason        String?   @db.NVarChar(1000)
+
+  formato BiomedFormato @relation(fields: [id_biomed_formato], references: [id_biomed_formato], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_company, estado])
+  @@map("biomed_registro")
+  @@schema("dbo")
+}
+
+/// Trazabilidad del módulo (solo inserción): quién hizo qué y cuándo.
+model BiomedEvento {
+  id_biomed_evento   Int      @id @default(autoincrement())
+  id_company         Int
+  id_biomed_registro Int?
+  accion             String   @db.NVarChar(60)
+  actor_email        String   @db.NVarChar(255)
+  detalle            String?  @db.NVarChar(2000)
+  ip                 String?  @db.NVarChar(100)
+  created_at         DateTime @default(now())
+
+  @@index([id_company, created_at])
+  @@map("biomed_evento")
+  @@schema("dbo")
+}

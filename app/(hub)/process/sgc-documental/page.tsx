@@ -21,6 +21,7 @@ import {
   IconSettings,
   IconShieldCheck,
   IconSignature,
+  IconStethoscope,
 } from '@tabler/icons-react';
 import SgcModuleCard, { type SgcModuleCardProps } from '../../../../components/sgc/SgcModuleCard';
 import SgcPendingBoard from '../../../../components/sgc/SgcPendingBoard';
@@ -157,6 +158,15 @@ function accesosDocumentos(company: SgcCompanyAccess, selfSignature = false, gen
         icon: <IconSettings size={24} />,
         sprint: 'Sprint 1',
         href: sgcHref(`${SGC_BASE_URL}/configuracion`, id),
+        badge: 'Calidad',
+      },
+      {
+        // 2026-11-06: módulo aparte (los ingenieros biomédicos entran con su permiso, desde el menú de Procesos).
+        title: 'Ingeniería biomédica',
+        description: 'Formatos vigentes del SGC diligenciados por los ingenieros biomédicos; Calidad elige cuáles.',
+        icon: <IconStethoscope size={24} />,
+        sprint: 'Gestión de Calidad',
+        href: sgcHref(`${SGC_BASE_URL}/biomedica`, id),
         badge: 'Calidad',
       }
     );

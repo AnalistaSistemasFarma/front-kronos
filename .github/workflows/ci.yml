@@ -546,6 +546,14 @@ jobs:
           echo "IF COL_LENGTH(N'dbo.chat_project_file', N'uploaded_by_agent') IS NULL OR COL_LENGTH(N'dbo.chat_project_file', N'id_conversation') IS NULL THROW 50000, N'La migración de archivos del agente no dejó las columnas.', 1;" > /tmp/archivos-agente-ok.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/archivos-agente-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-23-chat-project-file-agente-PROD.sql; then echo "El script de PROD de archivos del agente debió negarse en kronos_ci"; exit 1; fi
+          # Ingeniería biomédica (2026-11-06): migración y PRUEBAS dos veces (idempotencia), comprobación (tablas y permiso) y PROD que se niega.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261106150000_biomedica/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261106150000_biomedica/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-biomedica-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-biomedica-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.biomed_registro', N'U') IS NULL OR OBJECT_ID(N'dbo.biomed_evento_solo_insercion', N'TR') IS NULL OR (SELECT COUNT(*) FROM dbo.subprocess WHERE subprocess_url = N'/process/sgc-documental/biomedica') <> 1 THROW 50000, N'La migración de Ingeniería biomédica no dejó sus tablas o su permiso.', 1;" > /tmp/biomedica-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomedica-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-biomedica-PROD.sql; then echo "El script de PROD de Ingeniería biomédica debió negarse en kronos_ci"; exit 1; fi
           # Agente de desarrollo en Proyectos (2026-10-27): migración y PRUEBAS dos veces (idempotencia), columna NOT NULL, PROD que se niega y la corrección de proyectos en modo LISTAR (no escribe).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261027170000_agent_es_desarrollo/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261027170000_agent_es_desarrollo/migration.sql
@@ -617,7 +625,7 @@ jobs:
         run: |
           set -e
           # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
-          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida proyectos_permisos_agentes_reversa_acepta_perdida proyectos_config_agentes_reversa_acepta_perdida chat_stickers_personales_reversa_acepta_perdida vitrina_reversa_acepta_perdida proyectos_archivos_agente_reversa_acepta_perdida vitrina_lineas_reversa_acepta_perdida vitrina_modelo3d_reversa_acepta_perdida proyectos_mesas_reversa_acepta_perdida proyectos_matrices_reversa_acepta_perdida"
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida proyectos_permisos_agentes_reversa_acepta_perdida proyectos_config_agentes_reversa_acepta_perdida chat_stickers_personales_reversa_acepta_perdida vitrina_reversa_acepta_perdida proyectos_archivos_agente_reversa_acepta_perdida vitrina_lineas_reversa_acepta_perdida vitrina_modelo3d_reversa_acepta_perdida proyectos_mesas_reversa_acepta_perdida proyectos_matrices_reversa_acepta_perdida biomedica_reversa_acepta_perdida"
           reversa() {
             { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
@@ -628,6 +636,14 @@ jobs:
             npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
           }
           # De la más nueva a la más antigua…
+          # Ingeniería biomédica (2026-11-06): con un evento de prueba, sin la bandera debe negarse; luego ida y vuelta.
+          echo "INSERT INTO dbo.biomed_evento (id_company, accion, actor_email) VALUES (1, N'ci', N'ci@x.co');" > /tmp/biomedica-dato.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomedica-dato.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-biomedica-reversa.sql; then echo "La reversa de Ingeniería biomédica debió negarse sin su bandera"; exit 1; fi
+          reversa prisma/manual/2026-11-06-biomedica-reversa.sql
+          echo "IF OBJECT_ID(N'dbo.biomed_registro', N'U') IS NOT NULL OR EXISTS (SELECT 1 FROM dbo.subprocess WHERE subprocess_url = N'/process/sgc-documental/biomedica') THROW 50000, N'La reversa de Ingeniería biomédica no quitó sus tablas o su permiso.', 1;" > /tmp/biomedica-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomedica-quitado.sql
+          migra 20261106150000_biomedica
           # Matrices de Proyectos (2026-11-05): apuntan a chat_project, así que su reversa va PRIMERO; con una matriz de
           # prueba, sin la bandera debe negarse. Se vuelve a migrar al final, con la F1.
           echo "INSERT INTO dbo.chat_project_matrix (id_project, name) SELECT TOP (1) id_project, N'ci' FROM dbo.chat_project;" > /tmp/matrices-dato.sql
