@@ -588,9 +588,11 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess,
           uploaded_by: true,
           uploaded_by_agent: true,
           id_conversation: true,
+          folder_path: true,
         },
         orderBy: { created_at: 'desc' },
       },
+      folders: { select: { path: true }, orderBy: { path: 'asc' } },
       _count: { select: { tasks: true, subagents: { where: { status: 'aprobado' } } } },
       conversations: {
         where: { archived: false },
@@ -688,7 +690,9 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess,
           : null,
       downloadUrl: `/api/proyectos/${p.id_project}/archivos/${f.id_project_file}`,
       puedoQuitar: !p.archived && (caps.removeAny || (caps.contribute && f.uploaded_by === user.id)),
+      folderPath: f.folder_path ?? null,
     })),
+    folders: p.folders.map((x) => x.path),
     conversations: p.conversations.map((c) => {
       const w = motivoDe(c.id_agent);
       return {

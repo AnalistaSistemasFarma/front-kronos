@@ -31,6 +31,7 @@ describe('getProjectDetail · estado del agente por conversación', () => {
       agents: [{ agent: { ...agente, is_active: true } }],
       members: [{ id_user: 'u-nr', role: 'owner', added_at: new Date(), user: { name: 'Nicolás Rivera', email: 'n@x', image: null } }],
       files: [],
+      folders: [],
       _count: { tasks: 0, subagents: 0 },
       conversations: [
         {

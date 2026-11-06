@@ -138,3 +138,36 @@ test('propuestas del turno: el puente las entrega con SU llave, borra el archivo
   // El modelo nunca recibe la llave del puente.
   assert.ok(!JSON.stringify(entornoDelModelo ?? {}).includes('Bearer'));
 });
+
+test('memoria del bot (solo lectura): el turno lleva el índice en sistema.md y la copia en .puente/memoria; otro autor, no', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'puente-mem-'));
+  const mem = mkdtempSync(path.join(tmpdir(), 'memory-'));
+  writeFileSync(path.join(mem, 'MEMORY.md'), '- [Ramas y CI](tema-front-kronos-ramas-ci.md) — testing primero\n');
+  writeFileSync(path.join(mem, 'tema-front-kronos-ramas-ci.md'), 'PR a testing; nunca --delete-branch.');
+  const cfg = {
+    hilosDir: dir, agente: 'horus', agenteNombre: 'Orus', maxConcurrencia: 2, timeoutTurnoMs: 5000,
+    perfiles: validarPerfiles({}), instruccionesEn: 'system-prompt', claudeBin: 'claude',
+    path: '/usr/bin', home: dir, configClaudeDir: path.join(dir, 'claude-config'), credencial: { tipo: 'api-key', valor: 'k' },
+    memoriaDir: mem, memoriaLectores: ['nicolas.rivera@gsslatam.com'],
+  };
+  const corridas = [];
+  const puente = crearPuente({
+    cfg, synerlink: synerlinkFalso(), estado: new Estado(dir),
+    correr: async (opts) => {
+      corridas.push({ ...opts, sistema: readFileSync(path.join(opts.cwd, '.puente', 'sistema.md'), 'utf8'), copia: existsSync(path.join(opts.cwd, '.puente', 'memoria', 'tema-front-kronos-ramas-ci.md')) });
+      return { resultado: { ok: true, texto: 'ok' }, sessionId: 's', tokens: { input: 1, cacheCreation: 0, cacheRead: 0, output: 1 }, modelos: ['m'], apiMessages: 1 };
+    },
+  });
+  puente.recibir([{ id: 1, idConversation: 50, body: '¿cómo paso un cambio a testing?', author: { kind: 'user', name: 'Nicolás', email: 'nicolas.rivera@gsslatam.com' }, conversation: { kind: 'project' } }]);
+  await puente.cola.vacia();
+  assert.match(corridas[0].sistema, /Su memoria \(la misma de Orus/);
+  assert.match(corridas[0].sistema, /tema-front-kronos-ramas-ci\.md/);
+  assert.ok(corridas[0].copia);
+  // Sin código vinculado, no va el resumen del flujo de pases.
+  assert.doesNotMatch(corridas[0].sistema, /Resumen del flujo de pases/);
+  puente.recibir([{ id: 2, idConversation: 50, body: 'hola', author: { kind: 'user', name: 'Otra', email: 'otra@gsslatam.com' }, conversation: { kind: 'project' } }]);
+  await puente.cola.vacia();
+  assert.match(corridas[1].sistema, /NO tiene su memoria/);
+  assert.doesNotMatch(corridas[1].sistema, /tema-front-kronos-ramas-ci\.md/);
+  assert.equal(corridas[1].copia, false);
+});

@@ -13,8 +13,12 @@
  * Uso (con el entorno del .env del puente, como run.sh):
  *   node scripts/simular-turno-real.mjs --contexto-de 123 --conversacion 990010 \
  *     --autor nicolas.rivera@gsslatam.com --prompt-archivo p.txt
+ *
+ * Opciones (2026-10-21): --contexto-falso (proyecto ficticio, sin llamar a SynerLink),
+ * --modelo <id> (p. ej. claude-haiku-4-5 para una verificación barata) y --adjuntos-en <dir>
+ * (guarda ahí los archivos que el puente habría adjuntado).
  */
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { cargarConfig } from '../src/config.mjs';
 import { crearClienteSynerLink } from '../src/synerlink.mjs';
@@ -33,16 +37,33 @@ if (!(idConv >= 990000)) throw new Error('La conversación debe ser ficticia (>=
 const autor = arg('autor', 'nadie@example.com');
 const prompt = readFileSync(arg('prompt-archivo'), 'utf8');
 
-const real = crearClienteSynerLink({ url: cfg.url, llave: cfg.llave });
-const cfgSim = { ...cfg, hilosDir: path.join(cfg.hilosDir, 'verificacion-codigo'), agenteNombre: arg('nombre', 'Orus') };
+const contextoFalso = process.argv.includes('--contexto-falso');
+const adjuntosEn = arg('adjuntos-en');
+const real = contextoFalso ? null : crearClienteSynerLink({ url: cfg.url, llave: cfg.llave });
+const cfgSim = { ...cfg, hilosDir: path.join(cfg.hilosDir, 'verificacion-codigo'), agenteNombre: arg('nombre', 'Orus'), ...(arg('modelo') ? { modelo: arg('modelo') } : {}) };
+const PROYECTO_FALSO = {
+  project: {
+    idProject: 990001, name: 'Verificación del puente', company: { companyName: 'GROUP SHARED SERVICES' },
+    profile: { key: 'sin-conectores', label: 'Sin conectores' }, instructions: '', version: 'v-sim', files: [],
+    links: { emails: [], requests: [] },
+  },
+  conversation: { id: idConv, title: 'Verificación' },
+};
 const nada = async (...a) => null;
 const synerlink = {
-  contexto: () => real.contexto(contextoDe),
+  contexto: () => (contextoFalso ? PROYECTO_FALSO : real.contexto(contextoDe)),
   descargar: (u) => real.descargar(u),
   estado: async (id, s, etiqueta, tareas) => {
     if (etiqueta) console.log(`[indicador] ${s}: ${etiqueta}${tareas?.length ? ` (${tareas.length} subagentes)` : ''}`);
   },
   responder: async (id, cuerpo) => console.log(`\n===== RESPUESTA (NO publicada) =====\n${cuerpo}\n===== FIN =====`),
+  responderConArchivos: async (id, cuerpo, archivos) => {
+    console.log(`\n===== RESPUESTA CON ${archivos.length} ADJUNTO(S) (NO publicada) =====\n${cuerpo}\n--- adjuntos: ${archivos.map((a) => `${a.nombre} (${a.tipo}, ${a.bytes} B)`).join(', ')}\n===== FIN =====`);
+    if (adjuntosEn) {
+      mkdirSync(adjuntosEn, { recursive: true });
+      for (const a of archivos) writeFileSync(path.join(adjuntosEn, a.nombre), a.datos);
+    }
+  },
   confirmar: nada,
   consumo: nada,
   proponer: async () => ({ creadas: [], rechazadas: [] }),
@@ -53,6 +74,14 @@ const correr = (o) =>
   correrTurno({
     ...o,
     alEvento: (e, acc) => {
+      // Lo que REALMENTE arrancó (no lo que diga el modelo): modo de permisos, conectores y herramientas.
+      if (e.type === 'system' && e.subtype === 'init') {
+        const tools = e.tools ?? [];
+        const mcp = (e.mcp_servers ?? []).map((s) => `${s.name}:${s.status}`).join(', ');
+        console.log(`[init] nativas: ${tools.filter((t) => !t.startsWith('mcp__')).join(',')}`);
+        console.log(`[init] plugins: ${(e.plugins ?? []).map((p) => p.name ?? p).join(', ') || '(ninguno)'}; skills: ${(e.skills ?? []).length} (${(e.skills ?? []).filter((x) => /migrar-agente|crear-usuario|cierre-casos/.test(x)).join(', ') || 'ninguna de las sensibles'})`);
+        console.log(`[init] permisos=${e.permissionMode}; herramientas=${tools.length} (Bash ${tools.includes('Bash') ? 'sí' : 'no'}, Agent ${tools.includes('Agent') || tools.includes('Task') ? 'sí' : 'no'}, WebFetch ${tools.includes('WebFetch') ? 'sí' : 'no'}); conectores: ${mcp || '(ninguno)'}`);
+      }
       if (e.type === 'assistant')
         for (const c of e.message?.content ?? [])
           if (c.type === 'tool_use') console.log(`${e.parent_tool_use_id ? '   [sub] ' : ''}>> ${c.name}: ${String(c.input?.command ?? c.input?.file_path ?? c.input?.pattern ?? c.input?.subagent_type ?? '').slice(0, 220)}`);

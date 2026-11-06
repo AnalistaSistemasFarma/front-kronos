@@ -546,6 +546,14 @@ jobs:
           echo "IF COL_LENGTH(N'dbo.chat_project_file', N'uploaded_by_agent') IS NULL OR COL_LENGTH(N'dbo.chat_project_file', N'id_conversation') IS NULL THROW 50000, N'La migración de archivos del agente no dejó las columnas.', 1;" > /tmp/archivos-agente-ok.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/archivos-agente-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-23-chat-project-file-agente-PROD.sql; then echo "El script de PROD de archivos del agente debió negarse en kronos_ci"; exit 1; fi
+          # Carpetas de los Archivos del proyecto (2026-11-06): migración y PRUEBAS dos veces (idempotencia), comprobación y PROD que se niega.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261106120000_chat_project_folders/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261106120000_chat_project_folders/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-chat-project-carpetas-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-chat-project-carpetas-PRUEBAS.sql
+          echo "IF COL_LENGTH(N'dbo.chat_project_file', N'folder_path') IS NULL OR OBJECT_ID(N'dbo.chat_project_folder', N'U') IS NULL THROW 50000, N'La migración de carpetas no dejó la columna o la tabla.', 1;" > /tmp/carpetas-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/carpetas-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-chat-project-carpetas-PROD.sql; then echo "El script de PROD de carpetas debió negarse en kronos_ci"; exit 1; fi
           # Ingeniería biomédica (2026-11-06): migración y PRUEBAS dos veces (idempotencia), comprobación (tablas y permiso) y PROD que se niega.
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261106150000_biomedica/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261106150000_biomedica/migration.sql
@@ -628,7 +636,7 @@ jobs:
         run: |
           set -e
           # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
-          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida proyectos_permisos_agentes_reversa_acepta_perdida proyectos_config_agentes_reversa_acepta_perdida chat_stickers_personales_reversa_acepta_perdida vitrina_reversa_acepta_perdida proyectos_archivos_agente_reversa_acepta_perdida vitrina_lineas_reversa_acepta_perdida vitrina_modelo3d_reversa_acepta_perdida proyectos_mesas_reversa_acepta_perdida proyectos_matrices_reversa_acepta_perdida biomedica_reversa_acepta_perdida"
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida proyectos_permisos_agentes_reversa_acepta_perdida proyectos_config_agentes_reversa_acepta_perdida chat_stickers_personales_reversa_acepta_perdida vitrina_reversa_acepta_perdida proyectos_archivos_agente_reversa_acepta_perdida vitrina_lineas_reversa_acepta_perdida vitrina_modelo3d_reversa_acepta_perdida proyectos_mesas_reversa_acepta_perdida proyectos_matrices_reversa_acepta_perdida proyectos_carpetas_reversa_acepta_perdida biomedica_reversa_acepta_perdida"
           reversa() {
             { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
@@ -639,6 +647,17 @@ jobs:
             npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
           }
           # De la más nueva a la más antigua…
+          # Carpetas de los Archivos del proyecto (2026-11-06): con una carpeta de prueba, sin la bandera debe negarse; luego ida y vuelta.
+          echo "IF NOT EXISTS (SELECT 1 FROM dbo.chat_project_folder) INSERT INTO dbo.chat_project_folder (id_project, path) SELECT TOP (1) id_project, N'ci' FROM dbo.chat_project;" > /tmp/carpetas-dato.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/carpetas-dato.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-chat-project-carpetas-reversa.sql; then
+            echo "IF EXISTS (SELECT 1 FROM dbo.chat_project) THROW 50000, N'La reversa de carpetas debió negarse sin su bandera.', 1;" > /tmp/carpetas-nego.sql
+            npx prisma db execute --schema prisma/schema.prisma --file /tmp/carpetas-nego.sql
+          fi
+          reversa prisma/manual/2026-11-06-chat-project-carpetas-reversa.sql
+          echo "IF COL_LENGTH(N'dbo.chat_project_file', N'folder_path') IS NOT NULL OR OBJECT_ID(N'dbo.chat_project_folder', N'U') IS NOT NULL THROW 50000, N'La reversa de carpetas no quitó la columna o la tabla.', 1;" > /tmp/carpetas-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/carpetas-quitado.sql
+          # Apunta a chat_project: se vuelve a migrar al final, con la F1.
           # Ingeniería biomédica (2026-11-06): con un evento de prueba, sin la bandera debe negarse; luego ida y vuelta.
           echo "INSERT INTO dbo.biomed_evento (id_company, accion, actor_email) VALUES (1, N'ci', N'ci@x.co');" > /tmp/biomedica-dato.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomedica-dato.sql
@@ -767,6 +786,7 @@ jobs:
           migra 20261023150000_chat_project_file_agente
           migra 20261104200000_chat_project_mesas
           migra 20261105150000_chat_project_matrices
+          migra 20261106120000_chat_project_folders
           # Padres e hijos (2026-10-19): con tipos padre marcados y relaciones creadas solas (integración), sin la bandera debe negarse.
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-19-sgc-padres-hijos-reversa.sql; then echo "La reversa de padres e hijos debió negarse sin su bandera"; exit 1; fi
           reversa prisma/manual/2026-10-19-sgc-padres-hijos-reversa.sql
