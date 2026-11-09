@@ -69,6 +69,8 @@ import {
 } from '../../../../../lib/requests-general/tableField';
 import TableColumnsEditor from '../_components/TableColumnsEditor';
 import WorkflowValidatorsModal from '../../../../../components/request-general/WorkflowValidatorsModal';
+import MejoraContinuaPanel, { BadgeSemaforo, type InfoSemaforo } from '../../../../../components/request-general/MejoraContinuaPanel';
+import type { Sugerencia } from '../../../../../lib/workflow/mejora-continua-rules';
 import { FlowConnector } from '../../../../../components/ui/flow/FlowConnector';
 import { SapTaskActionPicker, SapTaskCardInfo } from '../../../../../components/workflow-sap/SapTaskObject';
 import {
@@ -225,6 +227,9 @@ function ViewWorkFlowPage() {
   const [optionInputs, setOptionInputs] = useState<Record<number, string>>({});
 
   const [isEditing, setIsEditing] = useState(false);
+  // MEJORA CONTINUA (2026-11-09): semáforo de cada tarea y la tarea que una sugerencia resaltó.
+  const [semaforos, setSemaforos] = useState<Map<number, InfoSemaforo>>(new Map());
+  const [resaltada, setResaltada] = useState<number | null>(null);
   const [updateMessage, setUpdateMessage] = useState<{
     type: 'success' | 'error';
     text: string;
@@ -825,6 +830,25 @@ if (session?.user?.id) return session.user.id as unknown as number;
     setIsEditing(false);
     setFormErrors({});
     setUpdateMessage(null);
+  };
+
+  /**
+   * «Aplicar» una sugerencia de Mejora continua: abre la edición (si no estaba abierta), deja el
+   * cambio preparado cuando se puede (quitar «Secuencial») y resalta la tarea. La persona revisa
+   * y guarda con «Guardar cambios», como siempre.
+   */
+  const aplicarSugerencia = (s: Sugerencia): boolean => {
+    if (!isEditing) handleStartEditing();
+    if (s.accion.tipo === 'quitar_secuencial') {
+      const id = s.accion.idTarea;
+      setEditedTasks((prev) => prev.map((t) => (t.id === id ? { ...t, is_sequential: false } : t)));
+    }
+    const id = s.accion.idTarea;
+    setResaltada(id);
+    if (id !== null) {
+      window.setTimeout(() => document.getElementById(`tarea-flujo-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150);
+    }
+    return true;
   };
 
   const handleSaveChanges = async () => {
@@ -1882,6 +1906,10 @@ if (session?.user?.id) return session.user.id as unknown as number;
                 </Group>
               </Group>
 
+              {workflow?.id ? (
+                <MejoraContinuaPanel idProcessCategory={workflow.id} onSemaforos={setSemaforos} onAplicar={aplicarSugerencia} />
+              ) : null}
+
               <LoadingOverlay
                 visible={loadingTasks}
                 zIndex={1000}
@@ -1938,10 +1966,12 @@ if (session?.user?.id) return session.user.id as unknown as number;
                           />
                         )}
                         <Card
+                          id={`tarea-flujo-${task.id}`}
                           shadow='sm'
                           p='md'
                           radius='lg'
                           withBorder
+                          style={resaltada === task.id ? { outline: '3px solid var(--mantine-color-teal-5)', outlineOffset: 2 } : undefined}
                           className={`
                             transition-all duration-200 ease-in-out
                             ${
@@ -2018,6 +2048,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
                                         <Text size='md' fw={600} className='mb-1'>
                                           {task.task}
                                         </Text>
+                                        <BadgeSemaforo info={semaforos.get(task.id)} />
                                         {task.is_sequential && (
                                           <Badge color='indigo' variant='light' size='sm'>
                                             Secuencial
