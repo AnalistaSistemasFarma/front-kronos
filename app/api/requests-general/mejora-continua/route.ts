@@ -32,7 +32,11 @@ export async function GET(request: NextRequest) {
     const id = idFlujo(request.nextUrl.searchParams.get('id_process_category'));
     if (!id) return jsonNoStore({ error: 'Indique el flujo.' }, { status: 400 });
     const r = await diagnosticoDelFlujo(id, { refrescar: request.nextUrl.searchParams.get('refrescar') === '1' });
-    return jsonNoStore(r.habilitado ? { ...r, decisiones: await decisionesDelFlujo(id) } : r);
+    if (!r.habilitado) return jsonNoStore(r);
+    // Los ciclos crudos son para el indicador de la empresa; la pantalla del flujo usa la tendencia.
+    const { ciclos: _ciclos, ...diagnostico } = r.diagnostico;
+    void _ciclos;
+    return jsonNoStore({ ...r, diagnostico, decisiones: await decisionesDelFlujo(id) });
   } catch (error) {
     if (error instanceof MejoraError) return jsonNoStore({ error: error.message }, { status: error.status });
     return serverError('GET /api/requests-general/mejora-continua', error);

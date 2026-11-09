@@ -4,8 +4,9 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ActionIcon, Alert, Anchor, Badge, Card, Collapse, Group, Loader, Select, SimpleGrid, Table, Text, ThemeIcon, Tooltip } from '@mantine/core';
 import { IconChevronDown, IconChevronUp, IconRefresh, IconTrendingUp } from '@tabler/icons-react';
-import type { ResumenEmpresa, ResumenFlujo } from '../../lib/workflow/mejora-continua-rules';
-import { textoDias } from '../../lib/workflow/mejora-continua-rules';
+import type { ResumenEmpresa, ResumenFlujo, Tendencia } from '../../lib/workflow/mejora-continua-rules';
+import { textoDias, textoTendencia } from '../../lib/workflow/mejora-continua-rules';
+import GraficoTendencia, { COLOR_VEREDICTO, FlechaTendencia } from './GraficoTendencia';
 
 /**
  * INDICADOR DE AUTOMEJORA DE PROCESOS en el panel de Flujos de trabajo (2026-11-09; Nicolás
@@ -22,6 +23,7 @@ interface Respuesta {
   calculadoEn?: string;
   total?: ResumenEmpresa;
   flujos?: ResumenFlujo[];
+  tendencia?: Tendencia;
 }
 
 const MAX_FILAS = 8;
@@ -84,7 +86,7 @@ export default function IndicadorAutomejora({ from = 'workflows' }: { from?: str
               Automejora de procesos
             </Text>
             <Text size='xs' c='dimmed'>
-              Cómo funcionan los flujos en la realidad (últimos 6 meses) y qué se ha mejorado.
+              Si los flujos se han vuelto más rápidos, dónde se demoran y qué se ha mejorado (últimos 6 meses).
               {datos?.calculadoEn ? ` Calculado ${new Date(datos.calculadoEn).toLocaleString('es-CO', { hour: 'numeric', minute: '2-digit', day: 'numeric', month: 'short' })}.` : ''}
             </Text>
           </div>
@@ -130,6 +132,40 @@ export default function IndicadorAutomejora({ from = 'workflows' }: { from?: str
           </Group>
         ) : (
           <>
+            {datos?.tendencia && (
+              <Card withBorder radius='md' p='md' mt='sm' style={{ borderColor: `var(--mantine-color-${COLOR_VEREDICTO[datos.tendencia.veredicto]}-4)` }}>
+                <Group justify='space-between' align='flex-start' wrap='wrap' gap='md'>
+                  <div style={{ minWidth: 220 }}>
+                    <Text size='xs' c='dimmed'>
+                      ¿Los procesos se han vuelto más rápidos?
+                    </Text>
+                    <Text fw={800} size='xl' c={`${COLOR_VEREDICTO[datos.tendencia.veredicto]}.7`} data-testid='automejora-veredicto'>
+                      {textoTendencia(datos.tendencia)}
+                    </Text>
+                    <Text size='xs'>
+                      Duración normal de una solicitud: <b>{textoDias(datos.tendencia.reciente.medianaDias)}</b> en los últimos 30 días (
+                      {datos.tendencia.reciente.casos}) frente a <b>{textoDias(datos.tendencia.base.medianaDias)}</b> entre 1 y 4 meses atrás (
+                      {datos.tendencia.base.casos}).
+                    </Text>
+                    <Group gap={6} mt={6}>
+                      <Badge color='green' variant='light'>
+                        {t.masRapidos} flujos más rápidos
+                      </Badge>
+                      <Badge color='red' variant='light'>
+                        {t.masLentos} más lentos
+                      </Badge>
+                      <Badge color='gray' variant='light'>
+                        {t.iguales} igual
+                      </Badge>
+                    </Group>
+                  </div>
+                  <div style={{ flex: '1 1 360px', minWidth: 280 }}>
+                    <GraficoTendencia tendencia={datos.tendencia} alto={150} />
+                  </div>
+                </Group>
+              </Card>
+            )}
+
             <SimpleGrid cols={{ base: 2, sm: 3, lg: 6 }} spacing='xs' mt='sm'>
               <Cifra titulo='Flujos con movimiento' valor={`${t.flujosConMovimiento} de ${t.flujos}`} color='blue' />
               <Cifra titulo='Cuellos de botella' valor={String(t.cuellosDeBotella)} color={t.cuellosDeBotella > 0 ? 'red' : 'green'} ayuda='Tareas en rojo' />
@@ -156,6 +192,7 @@ export default function IndicadorAutomejora({ from = 'workflows' }: { from?: str
                       <Table.Th>Flujo (por prioridad)</Table.Th>
                       <Table.Th ta='right'>Solicitudes</Table.Th>
                       <Table.Th ta='right'>Duración normal</Table.Th>
+                      <Table.Th>Tendencia</Table.Th>
                       <Table.Th>Semáforo</Table.Th>
                       <Table.Th ta='right'>Por revisar</Table.Th>
                       <Table.Th ta='right'>Aplicadas</Table.Th>
@@ -171,6 +208,9 @@ export default function IndicadorAutomejora({ from = 'workflows' }: { from?: str
                         </Table.Td>
                         <Table.Td ta='right'>{f.solicitudes.toLocaleString('es-CO')}</Table.Td>
                         <Table.Td ta='right'>{textoDias(f.cicloMedianaDias)}</Table.Td>
+                        <Table.Td>
+                          <FlechaTendencia tendencia={f.tendencia} />
+                        </Table.Td>
                         <Table.Td>
                           <Group gap={4} wrap='nowrap'>
                             {f.rojas > 0 && (
