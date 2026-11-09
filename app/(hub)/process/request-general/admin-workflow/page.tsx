@@ -58,6 +58,7 @@ import {
   IconCopy,
 } from '@tabler/icons-react';
 import Link from 'next/link';
+import IndicadorAutomejora from '../../../../../components/request-general/IndicadorAutomejora';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
 import IosSearchField from '../../../../../components/ui/IosSearchField';
@@ -1320,6 +1321,9 @@ function RequestBoard() {
             </Grid.Col>
           </Grid>
         </Card>
+
+        {/* Indicador de automejora de procesos (2026-11-09): solo con permiso de flujos y empresas habilitadas. */}
+        <IndicadorAutomejora from='admin-workflow' />
 
         {error && (
           <Alert

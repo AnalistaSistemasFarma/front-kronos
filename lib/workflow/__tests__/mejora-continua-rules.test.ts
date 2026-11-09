@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { diagnosticar, percentil, textoDias, type Solicitud, type TareaDef, type TareaInstancia } from '../mejora-continua-rules';
+import { diagnosticar, percentil, resumirFlujo, textoDias, totalizar, type Solicitud, type TareaDef, type TareaInstancia } from '../mejora-continua-rules';
 
 /* Mejora continua de los flujos (2026-11-09). Reglas PURAS (lib/workflow/mejora-continua-rules.ts). */
 
@@ -115,5 +115,34 @@ describe('diagnosticar', () => {
     const d4 = diagnosticar({ ahora: AHORA, tareas, solicitudes: s4, instancias: i4, notas: [], erroresSap: [] });
     expect(d4.tareas.find((x) => x.idTarea === 1)).toMatchObject({ pendientes: 1, pendientesMedianaDias: 8 });
     expect(d4.abiertas).toBe(1);
+  });
+});
+
+describe('indicador del panel de flujos', () => {
+  const { solicitudes, instancias } = casos();
+  const d = diagnosticar({ ahora: AHORA, tareas, solicitudes, instancias, notas: [], erroresSap: [] });
+
+  it('resume un flujo: semáforos, pendientes, decisiones y días ahorrados medidos', () => {
+    // La validación tardaba 6 días cuando se aplicó la mejora; hoy, 4.
+    const r = resumirFlujo(94, 'Solicitud de Pago', d, [
+      { clave: 'paralelizar:3', estado: 'aplicada', medianaAntes: 6 },
+      { clave: 'sin_uso:4', estado: 'descartada', medianaAntes: null },
+    ]);
+    expect(r).toMatchObject({ rojas: 1, aplicadas: 1, descartadas: 1, diasAhorrados: 2 });
+    expect(r.pendientes).toBe(d.sugerencias.length - 2);
+    expect(r.prioridad).toBeGreaterThan(0);
+  });
+
+  it('si la tarea empeoró, no cuenta como ahorro', () => {
+    expect(resumirFlujo(94, 'X', d, [{ clave: 'paralelizar:3', estado: 'aplicada', medianaAntes: 2 }]).diasAhorrados).toBe(0);
+  });
+
+  it('totaliza la empresa con la adopción de sugerencias', () => {
+    const a = resumirFlujo(1, 'A', d, [{ clave: 'paralelizar:3', estado: 'aplicada', medianaAntes: 6 }]);
+    const b = resumirFlujo(2, 'B', d, [
+      { clave: 'sin_uso:4', estado: 'descartada', medianaAntes: null },
+      { clave: 'suplente:3', estado: 'aplicada', medianaAntes: 5 },
+    ]);
+    expect(totalizar([a, b])).toMatchObject({ flujos: 2, aplicadas: 2, descartadas: 1, adopcion: 67, diasAhorrados: 3 });
   });
 });

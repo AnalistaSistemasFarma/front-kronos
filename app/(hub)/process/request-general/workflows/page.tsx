@@ -55,6 +55,7 @@ import {
   IconChevronDown,
 } from '@tabler/icons-react';
 import Link from 'next/link';
+import IndicadorAutomejora from '../../../../../components/request-general/IndicadorAutomejora';
 import { sendMessage } from '../../../../../components/email/utils/sendMessage';
 import { getFileLabelError } from '../../../../../lib/onedriveName';
 import { SAP_SOURCES } from '../../../../../lib/requests-general/sapSources';
@@ -1213,6 +1214,9 @@ function RequestBoard() {
             </Grid.Col>
           </Grid>
         </Card>
+
+        {/* Indicador de automejora de procesos (2026-11-09): solo con permiso de flujos y empresas habilitadas. */}
+        <IndicadorAutomejora from='workflows' />
 
         {error && (
           <Alert
