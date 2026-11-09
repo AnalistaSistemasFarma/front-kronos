@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import {
@@ -69,8 +69,7 @@ import {
 } from '../../../../../lib/requests-general/tableField';
 import TableColumnsEditor from '../_components/TableColumnsEditor';
 import WorkflowValidatorsModal from '../../../../../components/request-general/WorkflowValidatorsModal';
-import MejoraContinuaPanel, { BadgeSemaforo, type InfoSemaforo } from '../../../../../components/request-general/MejoraContinuaPanel';
-import type { Sugerencia } from '../../../../../lib/workflow/mejora-continua-rules';
+import BotonMejoraContinua from '../../../../../components/request-general/BotonMejoraContinua';
 import { FlowConnector } from '../../../../../components/ui/flow/FlowConnector';
 import { SapTaskActionPicker, SapTaskCardInfo } from '../../../../../components/workflow-sap/SapTaskObject';
 import {
@@ -227,9 +226,9 @@ function ViewWorkFlowPage() {
   const [optionInputs, setOptionInputs] = useState<Record<number, string>>({});
 
   const [isEditing, setIsEditing] = useState(false);
-  // MEJORA CONTINUA (2026-11-09): semáforo de cada tarea y la tarea que una sugerencia resaltó.
-  const [semaforos, setSemaforos] = useState<Map<number, InfoSemaforo>>(new Map());
+  // MEJORA CONTINUA (2026-11-09): la tarea que una sugerencia aplicada resaltó (?mejora=tipo:idTarea).
   const [resaltada, setResaltada] = useState<number | null>(null);
+  const mejoraAplicada = useRef(false);
   const [updateMessage, setUpdateMessage] = useState<{
     type: 'success' | 'error';
     text: string;
@@ -295,13 +294,23 @@ function ViewWorkFlowPage() {
 
   useEffect(() => {
     const storedWorkflow = sessionStorage.getItem('selectedRequest');
-    if (storedWorkflow) {
-      const workflowData = JSON.parse(storedWorkflow);
-      setWorkflow(workflowData);
+    const guardado = storedWorkflow ? (JSON.parse(storedWorkflow) as WorkFlow) : null;
+    // El flujo guardado al tocarlo en la lista sirve solo si es EL MISMO del enlace (?id=N). Si no
+    // (enlace desde el indicador de automejora, otra pestaña, un flujo abierto antes), se pide por
+    // id: antes salía «No se encontraron datos» o se mostraba otro flujo (2026-11-09).
+    if (guardado && (!id || String(guardado.id) === id)) {
+      setWorkflow(guardado);
       setLoading(false);
     } else if (id) {
-      setError('No se encontraron datos del flujo de trabajo');
-      setLoading(false);
+      fetch(`/api/requests-general/mejora-continua/flujo?id=${encodeURIComponent(id)}`, { cache: 'no-store' })
+        .then(async (res) => {
+          const json = (await res.json().catch(() => null)) as { flujo?: WorkFlow } | null;
+          if (!res.ok || !json?.flujo) throw new Error();
+          sessionStorage.setItem('selectedRequest', JSON.stringify(json.flujo));
+          setWorkflow(json.flujo);
+        })
+        .catch(() => setError('No se encontraron datos del flujo de trabajo'))
+        .finally(() => setLoading(false));
     } else {
       setError('No se especificó un flujo de trabajo');
       setLoading(false);
@@ -833,23 +842,33 @@ if (session?.user?.id) return session.user.id as unknown as number;
   };
 
   /**
-   * «Aplicar» una sugerencia de Mejora continua: abre la edición (si no estaba abierta), deja el
-   * cambio preparado cuando se puede (quitar «Secuencial») y resalta la tarea. La persona revisa
-   * y guarda con «Guardar cambios», como siempre.
+   * «Aplicar» una sugerencia desde la página de Mejora continua: llega como ?mejora=tipo:idTarea.
+   * Abre la edición, deja el cambio preparado cuando se puede (quitar «Secuencial») y resalta la
+   * tarea. La persona revisa y guarda con «Guardar cambios», como siempre.
    */
-  const aplicarSugerencia = (s: Sugerencia): boolean => {
-    if (!isEditing) handleStartEditing();
-    if (s.accion.tipo === 'quitar_secuencial') {
-      const id = s.accion.idTarea;
-      setEditedTasks((prev) => prev.map((t) => (t.id === id ? { ...t, is_sequential: false } : t)));
+  useEffect(() => {
+    const clave = searchParams.get('mejora');
+    if (!clave || mejoraAplicada.current || loadingTasks || tasks.length === 0) return;
+    mejoraAplicada.current = true;
+    const [tipo, ref] = clave.split(':');
+    const idTarea = Number.parseInt(ref ?? '', 10);
+    handleStartEditing();
+    if (tipo === 'paralelizar' && Number.isInteger(idTarea)) {
+      setEditedTasks((prev) => prev.map((t) => (t.id === idTarea ? { ...t, is_sequential: false } : t)));
     }
-    const id = s.accion.idTarea;
-    setResaltada(id);
-    if (id !== null) {
-      window.setTimeout(() => document.getElementById(`tarea-flujo-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150);
+    if (Number.isInteger(idTarea)) {
+      setResaltada(idTarea);
+      window.setTimeout(() => document.getElementById(`tarea-flujo-${idTarea}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
     }
-    return true;
-  };
+    setUpdateMessage({
+      type: 'success',
+      text:
+        tipo === 'paralelizar'
+          ? 'Mejora continua: el cambio quedó preparado (la tarea resaltada ya no es secuencial). Revíselo y pulse «Guardar cambios».'
+          : 'Mejora continua: la edición quedó abierta en la tarea resaltada. Haga el ajuste sugerido y pulse «Guardar cambios».',
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, loadingTasks, searchParams]);
 
   const handleSaveChanges = async () => {
     if (!editedWorkflow) return;
@@ -1889,6 +1908,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
                   </Title>
                 </Group>
                 <Group>
+                  {workflow?.id ? <BotonMejoraContinua idProcessCategory={workflow.id} /> : null}
                   <Badge color='amber' size='lg' variant='light'>
                     {isEditing ? editedTasks.length : tasks.length} {((isEditing ? editedTasks.length : tasks.length) === 1) ? 'tarea' : 'tareas'}
                   </Badge>
@@ -1905,10 +1925,6 @@ if (session?.user?.id) return session.user.id as unknown as number;
                   )}
                 </Group>
               </Group>
-
-              {workflow?.id ? (
-                <MejoraContinuaPanel idProcessCategory={workflow.id} onSemaforos={setSemaforos} onAplicar={aplicarSugerencia} />
-              ) : null}
 
               <LoadingOverlay
                 visible={loadingTasks}
@@ -2048,7 +2064,6 @@ if (session?.user?.id) return session.user.id as unknown as number;
                                         <Text size='md' fw={600} className='mb-1'>
                                           {task.task}
                                         </Text>
-                                        <BadgeSemaforo info={semaforos.get(task.id)} />
                                         {task.is_sequential && (
                                           <Badge color='indigo' variant='light' size='sm'>
                                             Secuencial
