@@ -14,14 +14,11 @@ import {
 import { isLoginAuditMarkerSubprocess } from '../auth/login-audit/constants';
 import { isProjectsConfigMarkerSubprocess } from '../proyectos/config-agentes-rules';
 import { isPurchasesWriteMarkerSubprocess } from '../purchases/fields';
+import { isTeamTasksSubprocess } from './teamTasksAccess';
 
 export const DASHBOARD_SOLICITANTE_URL = '/process/request-general/dashboard-solicitante';
 export const DASHBOARD_SOLICITADO_URL = '/process/request-general/dashboard-solicitado';
 
-/**
- * Subprocesos que viven en el header o son solo permiso (no listar en el hub).
- * Función pura — segura para componentes cliente.
- */
 export function isHubHiddenRequestDashboardSubprocess(subprocess: {
   subprocess?: string | null;
   subprocess_url?: string | null;
@@ -40,7 +37,8 @@ export function isHubHiddenRequestDashboardSubprocess(subprocess: {
     isLoginAuditMarkerSubprocess(subprocess) ||
     isProjectsConfigMarkerSubprocess(subprocess) ||
     // Permiso de escritura de Compras (2026-10-22): marcador, no página.
-    isPurchasesWriteMarkerSubprocess(subprocess)
+    isPurchasesWriteMarkerSubprocess(subprocess) ||
+    isTeamTasksSubprocess(subprocess)
   ) {
     return true;
   }
