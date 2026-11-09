@@ -202,6 +202,26 @@ export function calcularTendencia(ciclos: [number, number][], ahora: Date, meses
   };
 }
 
+/**
+ * Tendencia de TODA la empresa sin el efecto mezcla: si un flujo rápido (o automatizado) gana
+ * volumen, juntar todas las solicitudes haría parecer «más rápida» a la empresa sin que ningún
+ * proceso mejore. Por eso cada flujo se compara SOLO contra sí mismo (lo reciente frente a su
+ * base) y el cambio de la empresa es el promedio de esos cambios, pesado por los casos recientes.
+ * La serie mensual y las duraciones salen de los flujos comparables, para que cuadren.
+ */
+export function tendenciaEmpresa(flujos: { tendencia: Tendencia; ciclos: [number, number][] }[], ahora: Date): Tendencia {
+  const comparables = flujos.filter((f) => f.tendencia.veredicto !== 'sin_datos' && f.tendencia.cambioPct !== null);
+  const base = calcularTendencia(
+    comparables.flatMap((f) => f.ciclos),
+    ahora
+  );
+  const peso = comparables.reduce((s, f) => s + f.tendencia.reciente.casos, 0);
+  if (comparables.length === 0 || peso === 0) return { ...base, cambioPct: null, veredicto: 'sin_datos' };
+  const cambioPct = Math.round(comparables.reduce((s, f) => s + (f.tendencia.cambioPct ?? 0) * f.tendencia.reciente.casos, 0) / peso);
+  const veredicto: Tendencia['veredicto'] = cambioPct <= -UMBRAL_CAMBIO ? 'mas_rapido' : cambioPct >= UMBRAL_CAMBIO ? 'mas_lento' : 'igual';
+  return { ...base, cambioPct, veredicto };
+}
+
 /** «12 % más rápido que antes», «8 % más lento», «Igual que antes», «Sin datos suficientes». */
 export function textoTendencia(t: Pick<Tendencia, 'veredicto' | 'cambioPct'>): string {
   if (t.veredicto === 'sin_datos' || t.cambioPct === null) return 'Sin datos suficientes';
