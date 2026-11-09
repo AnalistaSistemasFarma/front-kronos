@@ -5,6 +5,7 @@ import { salesEndpointForUser } from '../../../../lib/sales/access';
 import { salesCompanyConfig } from '../../../../lib/sales/companyConfig';
 import { MAX_IMPORT_LINES, type ImportLine } from '../../../../lib/sales/linesImport';
 import { customerPriceList, pickPrice } from '../../../../lib/sales/pricing';
+import { searchTerms } from '../../../../lib/sales/pdfOrder';
 import { sapGet, sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
@@ -13,7 +14,9 @@ import { sapGet, sapLogin, sapLogout, SapError } from '../../../../lib/sap/servi
  *  - la bodega (si viene) existe; si no viene, la bodega por defecto del artículo;
  *  - precio de lista SIEMPRE de SAP (precio especial o lista del cliente / por defecto de la empresa). El precio
  *    del Excel, si viene, es el precio de venta propuesto; si no, se usa el de lista (o 0 si no hay, como SAPSEND).
- * POST { companyId, cardCode, lines: ImportLine[] } -> { lines: [...válidas], errors: [{ row, error }] }
+ * POST { companyId, cardCode, lines: ImportLine[], matchByDescription? } -> { lines, errors, pending }
+ *  matchByDescription (PDF leído con IA): si el código no existe en SAP o no viene, se buscan artículos
+ *  por la descripción y se devuelven como candidatos («pending») para que el comercial elija.
  */
 const q = (v: string) => `'${v.replace(/'/g, "''")}'`;
 const CHUNK = 25;
@@ -35,7 +38,8 @@ export async function POST(request: NextRequest) {
     const sap = await sapLogin(access.endpoint);
     try {
       const bpList = await customerPriceList(sap, cardCode);
-      const codes = [...new Set(input.map((l) => String(l.ItemCode)))];
+      const matchByDescription = body.matchByDescription === true;
+      const codes = [...new Set(input.map((l) => String(l.ItemCode)).filter(Boolean))];
       const items = new Map<string, Record<string, unknown>>();
       const special = new Map<string, number>();
       for (let i = 0; i < codes.length; i += CHUNK) {
@@ -56,9 +60,22 @@ export async function POST(request: NextRequest) {
 
       const lines: Record<string, unknown>[] = [];
       const errors: { row: number; error: string }[] = [];
+      const pending: { row: number; input: ImportLine; candidates: { ItemCode: string; ItemName: string }[] }[] = [];
       for (const l of input) {
-        const it = items.get(String(l.ItemCode));
-        if (!it) { errors.push({ row: l.row, error: `${l.ItemCode}: el artículo no existe en SAP.` }); continue; }
+        const it = l.ItemCode ? items.get(String(l.ItemCode)) : undefined;
+        if (!it && matchByDescription && l.ItemDescription) {
+          // Candidatos por descripción (todas las palabras útiles), solo artículos de venta activos.
+          const terms = searchTerms(l.ItemDescription);
+          let candidates: { ItemCode: string; ItemName: string }[] = [];
+          if (terms.length) {
+            const f = terms.map((t) => `contains(ItemName,${q(t)})`).join(' and ');
+            const r = await sapGet<{ value?: { ItemCode: string; ItemName: string }[] }>(sap, `Items?$select=ItemCode,ItemName&$filter=${f} and Frozen eq 'tNO' and SalesItem eq 'tYES'&$top=6`, { Prefer: 'odata.maxpagesize=6' }).catch(() => ({ value: [] }));
+            candidates = (r.value ?? []).map((x) => ({ ItemCode: String(x.ItemCode), ItemName: String(x.ItemName ?? '') }));
+          }
+          pending.push({ row: l.row, input: l, candidates });
+          continue;
+        }
+        if (!it) { errors.push({ row: l.row, error: `${l.ItemCode || l.ItemDescription}: el artículo no existe en SAP.` }); continue; }
         if (it.Frozen === 'tYES' || it.SalesItem !== 'tYES') { errors.push({ row: l.row, error: `${l.ItemCode}: el artículo está inactivo o no es de venta.` }); continue; }
         const wh = String(l.WarehouseCode ?? '').trim() || String(it.DefaultWarehouse ?? '');
         if (l.WarehouseCode && !okWh.has(String(l.WarehouseCode).trim())) { errors.push({ row: l.row, error: `${l.ItemCode}: la bodega ${l.WarehouseCode} no existe en SAP.` }); continue; }
@@ -68,14 +85,15 @@ export async function POST(request: NextRequest) {
         const listPrice = lp.price ?? 0;
         lines.push({
           ItemCode: String(it.ItemCode),
-          ItemDescription: conf?.descripcionEditable && l.ItemDescription ? l.ItemDescription : String(it.ItemName ?? ''),
+          // Del PDF la descripción es la del cliente: en la oferta va la de SAP (salvo Excel con descripción editable).
+          ItemDescription: !matchByDescription && conf?.descripcionEditable && l.ItemDescription ? l.ItemDescription : String(it.ItemName ?? ''),
           Quantity: Number(l.Quantity),
           ListPrice: listPrice,
           UnitPrice: l.UnitPrice != null ? Number(l.UnitPrice) : listPrice,
           WarehouseCode: wh,
         });
       }
-      return NextResponse.json({ lines, errors });
+      return NextResponse.json({ lines, errors, pending });
     } finally {
       await sapLogout(sap);
     }

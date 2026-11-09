@@ -8,6 +8,7 @@ import { LINE_HEADERS, MAX_IMPORT_LINES, rowsToLines } from '../../../../lib/sal
 import toast from 'react-hot-toast';
 import SapLookupInput from '../purchases/SapLookupInput';
 import SalesSearchModal, { type SearchKind } from './SalesSearchModal';
+import SalesPdfImport from './SalesPdfImport';
 import { sapErrorText } from '../../../../lib/purchases/sapErrorHint';
 
 /**
@@ -506,6 +507,16 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
             <Button variant="subtle" color="gray" leftSection={<IconDownload size={16} />} onClick={downloadTemplate}>
               Plantilla
             </Button>
+            <SalesPdfImport
+              companyId={companyId}
+              cardCode={cardCode}
+              onAccept={(r) => {
+                setLines((prev) => [...prev.filter((l) => !empty(l.ItemCode)), ...(r.lines as Line[])]);
+                if (r.numeroOrdenCompra && !numAtCard.trim()) setNumAtCard(r.numeroOrdenCompra);
+                if (r.fechaEntrega && !dueDate && r.fechaEntrega >= today()) setDueDate(r.fechaEntrega);
+                toast.success(`${r.lines.length} línea(s) agregada(s) desde el PDF. Revíselas antes de crear la oferta.`);
+              }}
+            />
             <input ref={fileRef} type="file" accept=".xlsx" hidden onChange={(e) => importExcel(e.currentTarget.files?.[0] ?? null)} />
           </Group>
           <Text fw={600}>Total antes de impuestos: {total.toLocaleString('es-CO')}</Text>
