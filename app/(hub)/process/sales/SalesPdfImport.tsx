@@ -248,7 +248,7 @@ export default function SalesPdfImport({ companyId, cardCode, onLoaded }: Props)
                   <Table.Tr>
                     <Table.Th><Checkbox checked={sim.lines.every((l) => l.include)} indeterminate={sim.lines.some((l) => l.include) && !sim.lines.every((l) => l.include)}
                       onChange={(e) => { const c = e.currentTarget.checked; setSim({ ...sim, lines: sim.lines.map((l) => ({ ...l, include: c })) }); }} /></Table.Th>
-                    <Table.Th>Artículo en SAP</Table.Th><Table.Th style={{ textAlign: 'right' }}>Cantidad</Table.Th>
+                    <Table.Th title="Renglón de la OC">#</Table.Th><Table.Th>Artículo en SAP</Table.Th><Table.Th style={{ textAlign: 'right' }}>Cantidad</Table.Th>
                     <Table.Th style={{ textAlign: 'right' }}>Precio OC</Table.Th><Table.Th style={{ textAlign: 'right' }}>Precio lista</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
@@ -256,6 +256,7 @@ export default function SalesPdfImport({ companyId, cardCode, onLoaded }: Props)
                   {sim.lines.map((l, i) => (
                     <Table.Tr key={i}>
                       <Table.Td><Checkbox checked={l.include} onChange={(e) => { const c = e.currentTarget.checked; setSim({ ...sim, lines: sim.lines.map((x, j) => (j === i ? { ...x, include: c } : x)) }); }} /></Table.Td>
+                      <Table.Td><Text size="xs" c="dimmed">{String(l.row ?? i + 1)}</Text></Table.Td>
                       <Table.Td>
                         <Text size="sm">{String(l.ItemCode)} · {String(l.ItemDescription ?? '')}</Text>
                         {l.aiNote ? <Badge size="xs" variant="light" color={String(l.aiNote).startsWith('Revisar') ? 'orange' : 'violet'} style={{ whiteSpace: 'normal', height: 'auto' }}>✨ {String(l.aiNote)}</Badge> : null}
