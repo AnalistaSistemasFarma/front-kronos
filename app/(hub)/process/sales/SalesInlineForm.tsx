@@ -336,7 +336,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
     if (r.fechaEntrega && r.fechaEntrega >= today()) setDueDate(r.fechaEntrega);
     const revisar = (r.lines as Line[]).filter((l) => String(l.aiNote ?? '').startsWith('Revisar')).length;
     setPdfAvisos([
-      `Oferta montada desde el PDF: ${r.customer.CardName} · ${r.lines.length} línea(s)${r.numeroOrdenCompra ? ` · OC ${r.numeroOrdenCompra}` : ''}.`,
+      `Oferta montada desde el PDF: ${r.customer.CardName} · ${r.lines.length} línea(s)${r.leidas && r.leidas !== r.lines.length ? ` de ${r.leidas} leídas en el PDF` : ''}${r.numeroOrdenCompra ? ` · OC ${r.numeroOrdenCompra}` : ''}.`,
       ...(revisar ? [`${revisar} línea(s) marcadas «Revisar»: la IA eligió el artículo por la descripción y hay otros parecidos.`] : []),
       ...(!r.fechaEntrega || r.fechaEntrega < today() ? ['El PDF no trae una fecha de entrega válida: indíquela.'] : []),
       ...r.avisos,
