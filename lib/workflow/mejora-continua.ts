@@ -15,6 +15,7 @@ import { checkAdminPrivileges } from '../access-control';
 import { getAssignedSubprocessIdsForUser } from '../process/subprocessAssignments';
 import {
   DIAS_HISTORIA,
+  calcularTendencia,
   diagnosticar,
   resumirFlujo,
   totalizar,
@@ -229,7 +230,13 @@ export async function decidir(
 
 /* ───────────────────────────── Indicador del panel de flujos ───────────────────────────── */
 
-const cacheResumen = new Map<number, { en: number; valor: { flujos: ResumenFlujo[]; total: ReturnType<typeof totalizar> } }>();
+type Indicador = {
+  flujos: ResumenFlujo[];
+  total: ReturnType<typeof totalizar>;
+  /** Tendencia de TODA la empresa: con las solicitudes resueltas de todos sus flujos. */
+  tendencia: ReturnType<typeof calcularTendencia>;
+};
+const cacheResumen = new Map<number, { en: number; valor: Indicador }>();
 
 /** Empresas habilitadas con su nombre (para el selector del indicador). */
 export async function empresasDelIndicador(): Promise<{ idCompany: number; nombre: string }[]> {
@@ -265,6 +272,7 @@ export async function indicadorDeEmpresa(idCompany: number, opciones: { refresca
 
   // De a 3 flujos a la vez: no cargar la base con decenas de consultas simultáneas.
   const resumenes: ResumenFlujo[] = [];
+  const ciclosEmpresa: [number, number][] = [];
   for (let i = 0; i < flujos.length; i += 3) {
     const lote = await Promise.all(
       flujos.slice(i, i + 3).map(async (f) => {
@@ -277,13 +285,18 @@ export async function indicadorDeEmpresa(idCompany: number, opciones: { refresca
             estado: x.estado as DecisionResumen['estado'],
             medianaAntes: x.metrica_antes ? ((JSON.parse(x.metrica_antes) as { medianaDias?: number | null }).medianaDias ?? null) : null,
           }));
+        ciclosEmpresa.push(...r.diagnostico.ciclos);
         return resumirFlujo(f.id, f.process.trim(), r.diagnostico, dec);
       })
     );
     for (const x of lote) if (x) resumenes.push(x);
   }
   resumenes.sort((a, b) => b.prioridad - a.prioridad || b.solicitudes - a.solicitudes);
-  const valor = { flujos: resumenes, total: totalizar(resumenes) };
+  const valor: Indicador = {
+    flujos: resumenes,
+    total: totalizar(resumenes),
+    tendencia: calcularTendencia(ciclosEmpresa, new Date(Date.now() - COT_MS)),
+  };
   const en = Date.now();
   cacheResumen.set(idCompany, { en, valor });
   return { calculadoEn: new Date(en).toISOString(), ...valor };

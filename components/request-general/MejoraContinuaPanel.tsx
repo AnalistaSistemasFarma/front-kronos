@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActionIcon, Alert, Badge, Button, Card, Collapse, Group, Loader, Modal, SimpleGrid, Stack, Text, Textarea, ThemeIcon, Tooltip } from '@mantine/core';
 import { IconBulb, IconCheck, IconChevronDown, IconChevronUp, IconRefresh, IconTrendingUp, IconX } from '@tabler/icons-react';
 import type { Diagnostico, DiagnosticoTarea, Semaforo, Sugerencia } from '../../lib/workflow/mejora-continua-rules';
-import { textoDias } from '../../lib/workflow/mejora-continua-rules';
+import { textoDias, textoTendencia } from '../../lib/workflow/mejora-continua-rules';
+import GraficoTendencia, { COLOR_VEREDICTO } from './GraficoTendencia';
 
 /**
  * Panel «Mejora continua» del editor de Flujos de trabajo (2026-11-09; punto 8 del video
@@ -213,6 +214,19 @@ export default function MejoraContinuaPanel({
                   nota='notas de devolución o corrección'
                 />
               </SimpleGrid>
+              <Card withBorder radius='md' p='sm'>
+                <Text size='xs' c='dimmed'>
+                  ¿Se ha vuelto más rápido?
+                </Text>
+                <Text fw={700} c={`${COLOR_VEREDICTO[d.tendencia.veredicto]}.7`}>
+                  {textoTendencia(d.tendencia)}
+                </Text>
+                <Text size='xs' mb={6}>
+                  {textoDias(d.tendencia.reciente.medianaDias)} en los últimos 30 días ({d.tendencia.reciente.casos}) frente a{' '}
+                  {textoDias(d.tendencia.base.medianaDias)} entre 1 y 4 meses atrás ({d.tendencia.base.casos}).
+                </Text>
+                <GraficoTendencia tendencia={d.tendencia} alto={140} />
+              </Card>
               <Text size='xs' c='dimmed'>
                 Cada tarea del flujo muestra su semáforo: en verde fluye bien, en amarillo se demora y en rojo es un cuello de botella.
               </Text>

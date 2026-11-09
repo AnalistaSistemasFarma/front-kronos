@@ -101,6 +101,10 @@ export interface Diagnostico {
   devueltas: number;
   /** Solicitudes con notas que hablan de devolución, corrección o faltantes. */
   conRetrabajo: number;
+  /** ¿Se ha vuelto más rápido? Duración mes a mes y lo reciente frente a lo de antes. */
+  tendencia: Tendencia;
+  /** Duración de cada solicitud resuelta: [fecha de resolución (ms), días]. Para el indicador de la empresa. */
+  ciclos: [number, number][];
   tareas: DiagnosticoTarea[];
   sugerencias: Sugerencia[];
 }
@@ -134,6 +138,76 @@ const pct = (x: number) => `${Math.round(x * 100)} %`;
 const RE_RECHAZO = /rechaz|deneg|no aprob|no autoriz/i;
 const RE_RETRABAJO = /devuel|devolv|correg|corrij|correcci|ajust|falta|incomplet|error en|no adjunt|vuelva a/i;
 const RE_DOCUMENTO = /document|soporte|adjunt|anexo|factura|certificad|archivo/i;
+
+/* ───────────────────────────── Tendencia ───────────────────────────── */
+
+/*
+ * ¿SE HAN VUELTO MÁS RÁPIDOS? (Nicolás Rivera, 2026-11-09: «para que podamos medir si se han
+ * vuelto más rápidos o no»). Con la fecha de resolución de cada solicitud:
+ *   - la duración normal (mediana) mes a mes, últimos 6 meses;
+ *   - lo RECIENTE (resueltas en los últimos 30 días) frente a la BASE (las resueltas entre 31 y
+ *     120 días atrás): «12 % más rápido» o «8 % más lento». Cambios de menos del 10 % = «igual».
+ */
+
+export const DIAS_RECIENTE = 30;
+export const DIAS_BASE = 120;
+const UMBRAL_CAMBIO = 10;
+
+export interface PuntoTendencia {
+  mes: string; // AAAA-MM
+  medianaDias: number | null;
+  casos: number;
+}
+
+export interface Tendencia {
+  meses: PuntoTendencia[];
+  reciente: { medianaDias: number | null; casos: number };
+  base: { medianaDias: number | null; casos: number };
+  /** Cambio de la duración normal, en %: negativo = más rápido. */
+  cambioPct: number | null;
+  veredicto: 'mas_rapido' | 'mas_lento' | 'igual' | 'sin_datos';
+}
+
+export function calcularTendencia(ciclos: [number, number][], ahora: Date, meses = 6): Tendencia {
+  const t = ahora.getTime();
+  const puntos: PuntoTendencia[] = [];
+  for (let i = meses - 1; i >= 0; i -= 1) {
+    const d = new Date(Date.UTC(ahora.getUTCFullYear(), ahora.getUTCMonth() - i, 1));
+    const clave = d.toISOString().slice(0, 7);
+    const del = ciclos.filter(([r]) => new Date(r).toISOString().slice(0, 7) === clave).map(([, dias]) => dias);
+    puntos.push({ mes: clave, medianaDias: redondear(percentil(del, 0.5)), casos: del.length });
+  }
+  const rec = ciclos.filter(([r]) => r > t - DIAS_RECIENTE * DIA_MS && r <= t).map(([, d]) => d);
+  const bas = ciclos.filter(([r]) => r <= t - DIAS_RECIENTE * DIA_MS && r > t - DIAS_BASE * DIA_MS).map(([, d]) => d);
+  const mr = percentil(rec, 0.5);
+  const mb = percentil(bas, 0.5);
+  let cambioPct: number | null = null;
+  let veredicto: Tendencia['veredicto'] = 'sin_datos';
+  if (rec.length >= MIN_CASOS && bas.length >= MIN_CASOS && mr !== null && mb !== null) {
+    // Por debajo de una hora no tiene sentido hablar de porcentajes: si ambas son así, «igual».
+    if (mb < 1 / 24 && mr < 1 / 24) {
+      cambioPct = 0;
+      veredicto = 'igual';
+    } else {
+      cambioPct = Math.round(((mr - mb) / Math.max(mb, 1 / 24)) * 100);
+      veredicto = cambioPct <= -UMBRAL_CAMBIO ? 'mas_rapido' : cambioPct >= UMBRAL_CAMBIO ? 'mas_lento' : 'igual';
+    }
+  }
+  return {
+    meses: puntos,
+    reciente: { medianaDias: redondear(mr), casos: rec.length },
+    base: { medianaDias: redondear(mb), casos: bas.length },
+    cambioPct,
+    veredicto,
+  };
+}
+
+/** «12 % más rápido que antes», «8 % más lento», «Igual que antes», «Sin datos suficientes». */
+export function textoTendencia(t: Pick<Tendencia, 'veredicto' | 'cambioPct'>): string {
+  if (t.veredicto === 'sin_datos' || t.cambioPct === null) return 'Sin datos suficientes';
+  if (t.veredicto === 'igual') return 'Igual que antes';
+  return `${Math.abs(t.cambioPct)} % más ${t.veredicto === 'mas_rapido' ? 'rápido' : 'lento'}`;
+}
 
 /* ───────────────────────────── Cálculo ───────────────────────────── */
 
@@ -252,7 +326,10 @@ export function diagnosticar(entrada: {
     });
 
   // Flujo completo.
-  const ciclos = solicitudes.filter((s) => s.resuelta && s.estado !== 3).map((s) => Math.max(0, (s.resuelta!.getTime() - s.creada.getTime()) / DIA_MS));
+  const conFecha: [number, number][] = solicitudes
+    .filter((s) => s.resuelta && s.estado !== 3)
+    .map((s) => [s.resuelta!.getTime(), Math.max(0, (s.resuelta!.getTime() - s.creada.getTime()) / DIA_MS)]);
+  const ciclos = conFecha.map(([, d]) => d);
   const textosPorSol = new Map<number, string[]>();
   for (const n of notas) (textosPorSol.get(n.idSolicitud) ?? textosPorSol.set(n.idSolicitud, []).get(n.idSolicitud)!).push(n.texto);
   const conRetrabajo = [...textosPorSol.entries()].filter(([, ts]) => ts.some((x) => RE_RETRABAJO.test(x))).length;
@@ -268,6 +345,8 @@ export function diagnosticar(entrada: {
     abiertas: solicitudes.filter((s) => !s.resuelta && s.estado !== 3).length,
     devueltas,
     conRetrabajo,
+    tendencia: calcularTendencia(conFecha, ahora),
+    ciclos: conFecha.map(([r, d]) => [r, Math.round(d * 1000) / 1000] as [number, number]),
     tareas: diagTareas,
     sugerencias: [],
   };
@@ -431,6 +510,8 @@ export interface ResumenFlujo {
   diasAhorrados: number;
   /** 0–100: más alto = más urgente de revisar. */
   prioridad: number;
+  /** ¿Más rápido o más lento que antes? (lo reciente frente a la base). */
+  tendencia: Pick<Tendencia, 'veredicto' | 'cambioPct' | 'reciente' | 'base'>;
 }
 
 export function resumirFlujo(idProcessCategory: number, nombre: string, d: Diagnostico, decisiones: DecisionResumen[]): ResumenFlujo {
@@ -459,7 +540,8 @@ export function resumirFlujo(idProcessCategory: number, nombre: string, d: Diagn
     aplicadas: aplicadas.length,
     descartadas: decisiones.filter((x) => x.estado === 'descartada').length,
     diasAhorrados: Math.round(diasAhorrados * 10) / 10,
-    prioridad: d.solicitudes === 0 ? 0 : prioridad,
+    prioridad: d.solicitudes === 0 ? 0 : Math.min(100, prioridad + (d.tendencia.veredicto === 'mas_lento' ? 15 : 0)),
+    tendencia: { veredicto: d.tendencia.veredicto, cambioPct: d.tendencia.cambioPct, reciente: d.tendencia.reciente, base: d.tendencia.base },
   };
 }
 
@@ -473,6 +555,10 @@ export interface ResumenEmpresa {
   /** % de las sugerencias decididas que se aplicaron (null sin decisiones). */
   adopcion: number | null;
   diasAhorrados: number;
+  /** Flujos más rápidos / más lentos / iguales que antes. */
+  masRapidos: number;
+  masLentos: number;
+  iguales: number;
 }
 
 export function totalizar(flujos: ResumenFlujo[]): ResumenEmpresa {
@@ -487,5 +573,8 @@ export function totalizar(flujos: ResumenFlujo[]): ResumenEmpresa {
     descartadas,
     adopcion: aplicadas + descartadas > 0 ? Math.round((aplicadas / (aplicadas + descartadas)) * 100) : null,
     diasAhorrados: Math.round(flujos.reduce((s, f) => s + f.diasAhorrados, 0) * 10) / 10,
+    masRapidos: flujos.filter((f) => f.tendencia.veredicto === 'mas_rapido').length,
+    masLentos: flujos.filter((f) => f.tendencia.veredicto === 'mas_lento').length,
+    iguales: flujos.filter((f) => f.tendencia.veredicto === 'igual').length,
   };
 }
