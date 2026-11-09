@@ -305,7 +305,8 @@ function sugerir(d: Diagnostico, tareas: TareaDef[], erroresSap: ErroresSap[], c
     const pesada = t.semaforo === 'rojo' || t.semaforo === 'ambar';
 
     // 2. Una sola persona asignada en una tarea que represa: suplente.
-    if (pesada && dt.asignados <= 1 && dt.tipo !== 'sap_executor') {
+    // (En una autorización quien aprueba lo define el tipo de autorización, no «Asignado a»: no aplica.)
+    if (pesada && dt.asignados <= 1 && dt.tipo !== 'sap_executor' && !dt.autorizacion) {
       out.push({
         clave: `suplente:${t.idTarea}`,
         tipo: 'suplente',
