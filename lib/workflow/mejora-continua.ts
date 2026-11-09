@@ -107,7 +107,7 @@ export async function diagnosticoDelFlujo(idProcessCategory: number, opciones: {
       const lote = ids.slice(i, i + 1000);
       instancias = instancias.concat(
         await prisma.$queryRawUnsafe(
-          `SELECT t.id_request_general, t.id_task, t.id_status, t.date_resolution, t.id_executor_final, LEFT(t.resolution, 300) AS resolution
+          `SELECT t.id_request_general, t.id_task, t.id_status, t.date_resolution, t.id_executor_final, LEFT(CAST(t.resolution AS NVARCHAR(MAX)), 300) AS resolution
            FROM dbo.task_request_general t
            WHERE t.id_request_general IN (${lote.map((_, j) => `@P${j + 1}`).join(',')})`,
           ...lote
@@ -115,7 +115,7 @@ export async function diagnosticoDelFlujo(idProcessCategory: number, opciones: {
       );
       notas = notas.concat(
         await prisma.$queryRawUnsafe(
-          `SELECT n.id_request, LEFT(n.note, 1000) AS note FROM dbo.notes n WHERE n.id_request IN (${lote.map((_, j) => `@P${j + 1}`).join(',')})`,
+          `SELECT n.id_request, LEFT(CAST(n.note AS NVARCHAR(MAX)), 1000) AS note FROM dbo.notes n WHERE n.id_request IN (${lote.map((_, j) => `@P${j + 1}`).join(',')})`,
           ...lote
         )
       );
