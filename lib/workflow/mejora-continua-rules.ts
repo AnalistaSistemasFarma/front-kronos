@@ -502,6 +502,71 @@ function sugerir(d: Diagnostico, tareas: TareaDef[], erroresSap: ErroresSap[], c
   return out;
 }
 
+/* ───────────────────────────── Criterio del flujo ───────────────────────────── */
+
+/*
+ * ¿VA BIEN O NECESITA MEJORAS? (Nicolás Rivera, 2026-11-09: «Asignación de listas de materiales
+ * va 11 días pero el indicador dice que va bien… ¿cómo es el criterio?»). Antes el flujo salía
+ * «Fluye bien» si ninguna tarea estaba en rojo o amarillo, aunque las tareas no tuvieran casos
+ * suficientes para calificarse. Ahora el flujo se califica con reglas explícitas, que el panel
+ * muestra tal cual («¿Cómo se califica?»):
+ *
+ *   NECESITA MEJORAS  una tarea es cuello de botella, o una solicitud tarda normalmente
+ *                     10 días o más, o el flujo se volvió más lento que antes.
+ *   REVISAR           una tarea se demora, o una solicitud tarda normalmente 3 días o más,
+ *                     o hay sugerencias sin revisar.
+ *   VA BIEN           nada de lo anterior, con al menos 5 solicitudes resueltas.
+ *   POCOS DATOS       menos de 5 solicitudes resueltas y nada de lo anterior.
+ * Con menos de 5 resueltas la calificación se marca «con pocos casos».
+ */
+
+export const DIAS_REVISAR = 3;
+export const DIAS_CRITICO = 10;
+
+export type EstadoFlujo = 'necesita_mejoras' | 'revisar' | 'va_bien' | 'pocos_datos';
+
+export interface Calificacion {
+  estado: EstadoFlujo;
+  /** Por qué, en palabras (lo que se muestra al pasar el mouse y en la página del flujo). */
+  motivos: string[];
+  pocosCasos: boolean;
+}
+
+export const CRITERIO_TEXTO: { estado: EstadoFlujo; titulo: string; regla: string }[] = [
+  {
+    estado: 'necesita_mejoras',
+    titulo: 'Necesita mejoras',
+    regla: `Una tarea es cuello de botella, o una solicitud tarda normalmente ${DIAS_CRITICO} días o más, o el flujo se volvió más lento que antes.`,
+  },
+  {
+    estado: 'revisar',
+    titulo: 'Revisar',
+    regla: `Una tarea se demora, o una solicitud tarda normalmente ${DIAS_REVISAR} días o más, o hay sugerencias sin revisar.`,
+  },
+  { estado: 'va_bien', titulo: 'Va bien', regla: 'Nada de lo anterior, con al menos 5 solicitudes resueltas en 6 meses.' },
+  { estado: 'pocos_datos', titulo: 'Pocos datos', regla: 'Menos de 5 solicitudes resueltas en 6 meses y nada de lo anterior.' },
+];
+
+export function calificarFlujo(d: Diagnostico, pendientes: number): Calificacion {
+  const rojas = d.tareas.filter((t) => t.semaforo === 'rojo');
+  const amarillas = d.tareas.filter((t) => t.semaforo === 'ambar');
+  const m = d.cicloMedianaDias;
+  const pocosCasos = d.resueltas < MIN_CASOS;
+  const graves: string[] = [];
+  const leves: string[] = [];
+  for (const t of rojas) graves.push(`«${t.nombre}» es un cuello de botella (lo normal: ${textoDias(t.medianaDias)}).`);
+  if (m !== null && m >= DIAS_CRITICO) graves.push(`Una solicitud tarda normalmente ${textoDias(m)} (${DIAS_CRITICO} días o más).`);
+  if (d.tendencia.veredicto === 'mas_lento') graves.push(`Se volvió ${textoTendencia(d.tendencia).replace(' más lento', '')} más lento que antes.`);
+  for (const t of amarillas) leves.push(`«${t.nombre}» se demora (lo normal: ${textoDias(t.medianaDias)}).`);
+  if (m !== null && m >= DIAS_REVISAR && m < DIAS_CRITICO) leves.push(`Una solicitud tarda normalmente ${textoDias(m)} (${DIAS_REVISAR} días o más).`);
+  if (pendientes > 0) leves.push(`${pendientes} ${pendientes === 1 ? 'sugerencia sin revisar' : 'sugerencias sin revisar'}.`);
+  const nota = pocosCasos ? [`Con pocos casos: ${d.resueltas} ${d.resueltas === 1 ? 'solicitud resuelta' : 'solicitudes resueltas'} en 6 meses.`] : [];
+  if (graves.length > 0) return { estado: 'necesita_mejoras', motivos: [...graves, ...leves, ...nota], pocosCasos };
+  if (leves.length > 0) return { estado: 'revisar', motivos: [...leves, ...nota], pocosCasos };
+  if (pocosCasos) return { estado: 'pocos_datos', motivos: nota, pocosCasos };
+  return { estado: 'va_bien', motivos: [`${d.resueltas} solicitudes resueltas; lo normal: ${textoDias(m)}.`], pocosCasos };
+}
+
 /* ───────────────────────────── Indicador (panel de flujos) ───────────────────────────── */
 
 /*
@@ -532,6 +597,8 @@ export interface ResumenFlujo {
   prioridad: number;
   /** ¿Más rápido o más lento que antes? (lo reciente frente a la base). */
   tendencia: Pick<Tendencia, 'veredicto' | 'cambioPct' | 'reciente' | 'base'>;
+  /** Calificación del flujo con sus motivos (criterio explícito: calificarFlujo). */
+  calificacion: Calificacion;
 }
 
 export function resumirFlujo(idProcessCategory: number, nombre: string, d: Diagnostico, decisiones: DecisionResumen[]): ResumenFlujo {
@@ -548,7 +615,9 @@ export function resumirFlujo(idProcessCategory: number, nombre: string, d: Diagn
       diasAhorrados += a.medianaAntes - t.medianaDias;
     }
   }
-  const prioridad = Math.min(100, rojas * 30 + amarillas * 10 + pendientes * 8 + (d.solicitudes >= 50 ? 10 : 0));
+  const calificacion = calificarFlujo(d, pendientes);
+  const base = { necesita_mejoras: 40, revisar: 15, va_bien: 0, pocos_datos: 0 }[calificacion.estado];
+  const prioridad = Math.min(100, base + rojas * 20 + amarillas * 8 + pendientes * 5 + (d.solicitudes >= 50 ? 10 : 0));
   return {
     idProcessCategory,
     nombre,
@@ -560,8 +629,9 @@ export function resumirFlujo(idProcessCategory: number, nombre: string, d: Diagn
     aplicadas: aplicadas.length,
     descartadas: decisiones.filter((x) => x.estado === 'descartada').length,
     diasAhorrados: Math.round(diasAhorrados * 10) / 10,
-    prioridad: d.solicitudes === 0 ? 0 : Math.min(100, prioridad + (d.tendencia.veredicto === 'mas_lento' ? 15 : 0)),
+    prioridad: d.solicitudes === 0 ? 0 : prioridad,
     tendencia: { veredicto: d.tendencia.veredicto, cambioPct: d.tendencia.cambioPct, reciente: d.tendencia.reciente, base: d.tendencia.base },
+    calificacion,
   };
 }
 
@@ -575,6 +645,10 @@ export interface ResumenEmpresa {
   /** % de las sugerencias decididas que se aplicaron (null sin decisiones). */
   adopcion: number | null;
   diasAhorrados: number;
+  /** Flujos por calificación. */
+  necesitanMejoras: number;
+  aRevisar: number;
+  vanBien: number;
   /** Flujos más rápidos / más lentos / iguales que antes. */
   masRapidos: number;
   masLentos: number;
@@ -593,6 +667,9 @@ export function totalizar(flujos: ResumenFlujo[]): ResumenEmpresa {
     descartadas,
     adopcion: aplicadas + descartadas > 0 ? Math.round((aplicadas / (aplicadas + descartadas)) * 100) : null,
     diasAhorrados: Math.round(flujos.reduce((s, f) => s + f.diasAhorrados, 0) * 10) / 10,
+    necesitanMejoras: flujos.filter((f) => f.calificacion.estado === 'necesita_mejoras').length,
+    aRevisar: flujos.filter((f) => f.calificacion.estado === 'revisar').length,
+    vanBien: flujos.filter((f) => f.calificacion.estado === 'va_bien').length,
     masRapidos: flujos.filter((f) => f.tendencia.veredicto === 'mas_rapido').length,
     masLentos: flujos.filter((f) => f.tendencia.veredicto === 'mas_lento').length,
     iguales: flujos.filter((f) => f.tendencia.veredicto === 'igual').length,

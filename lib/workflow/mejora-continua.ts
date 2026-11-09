@@ -302,3 +302,28 @@ export async function indicadorDeEmpresa(idCompany: number, opciones: { refresca
   cacheResumen.set(idCompany, { en, valor });
   return { calculadoEn: new Date(en).toISOString(), ...valor };
 }
+
+/* ───────────────────────────── Flujo por id ───────────────────────────── */
+
+/**
+ * Datos de UN flujo con la misma forma que la lista de Administración de flujos
+ * (workflow-administration), para abrir el editor por enlace (?id=N). Antes el editor solo
+ * leía el flujo guardado en el navegador al tocarlo en la lista: desde otro enlace daba
+ * «No se encontraron datos del flujo» o mostraba el último flujo abierto (2026-11-09).
+ */
+export async function flujoPorId(idProcessCategory: number) {
+  const filas = await prisma.$queryRaw<Record<string, unknown>[]>`
+    SELECT TOP 1 pc.id, cr.id AS id_category, cr.category, pc.process, pc.description, pc.active,
+           pc.id_status AS id_status_process, scpc.status AS status_process,
+           upc.id AS id_assigned_process_category, upc.name AS assigned_process_category,
+           c.company, pc.webhook_url, pc.is_external
+    FROM dbo.process_category pc
+    LEFT JOIN dbo.category_request cr ON cr.id = pc.id_category_request
+    INNER JOIN dbo.status_case scpc ON scpc.id_status_case = pc.id_status
+    LEFT JOIN dbo.user_process_category_request_general upcrg ON upcrg.id_process_category = pc.id
+    LEFT JOIN dbo.[user] upc ON upc.id = upcrg.id_user
+    INNER JOIN dbo.company_category_request ccr ON ccr.id_category_request = cr.id
+    INNER JOIN dbo.company c ON c.id_company = ccr.id_company
+    WHERE pc.id = ${idProcessCategory}`;
+  return filas[0] ?? null;
+}

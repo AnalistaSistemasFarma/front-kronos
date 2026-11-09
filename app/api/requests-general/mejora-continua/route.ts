@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { forbidden, jsonNoStore, readJsonBody, resolveSessionUser, serverError, unauthorized } from '../../../../lib/chat/http';
 import { decidir, decisionesDelFlujo, diagnosticoDelFlujo, MejoraError, puedeMejorarFlujos } from '../../../../lib/workflow/mejora-continua';
+import { calificarFlujo } from '../../../../lib/workflow/mejora-continua-rules';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,7 +37,11 @@ export async function GET(request: NextRequest) {
     // Los ciclos crudos son para el indicador de la empresa; la pantalla del flujo usa la tendencia.
     const { ciclos: _ciclos, ...diagnostico } = r.diagnostico;
     void _ciclos;
-    return jsonNoStore({ ...r, diagnostico, decisiones: await decisionesDelFlujo(id) });
+    const decisiones = await decisionesDelFlujo(id);
+    // La MISMA calificación que muestra el indicador del panel de flujos (coherencia, 2026-11-09).
+    const decididas = new Set(decisiones.map((x) => x.clave));
+    const pendientes = r.diagnostico.sugerencias.filter((x) => !decididas.has(x.clave)).length;
+    return jsonNoStore({ ...r, diagnostico, decisiones, calificacion: calificarFlujo(r.diagnostico, pendientes) });
   } catch (error) {
     if (error instanceof MejoraError) return jsonNoStore({ error: error.message }, { status: error.status });
     return serverError('GET /api/requests-general/mejora-continua', error);

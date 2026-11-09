@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActionIcon, Alert, Badge, Button, Card, Collapse, Group, Loader, Modal, SimpleGrid, Stack, Text, Textarea, ThemeIcon, Tooltip } from '@mantine/core';
 import { IconBulb, IconCheck, IconChevronDown, IconChevronUp, IconRefresh, IconTrendingUp, IconX } from '@tabler/icons-react';
-import type { Diagnostico, DiagnosticoTarea, Semaforo, Sugerencia } from '../../lib/workflow/mejora-continua-rules';
+import type { Calificacion, Diagnostico, DiagnosticoTarea, Semaforo, Sugerencia } from '../../lib/workflow/mejora-continua-rules';
 import { textoDias, textoTendencia } from '../../lib/workflow/mejora-continua-rules';
 import GraficoTendencia, { COLOR_VEREDICTO } from './GraficoTendencia';
 
@@ -33,7 +33,7 @@ interface DecisionDto {
 
 type Respuesta =
   | { habilitado: false; flujo: string }
-  | { habilitado: true; flujo: string; calculadoEn: string; diagnostico: Diagnostico; decisiones: DecisionDto[] };
+  | { habilitado: true; flujo: string; calculadoEn: string; diagnostico: Diagnostico; decisiones: DecisionDto[]; calificacion?: Calificacion };
 
 const COLOR: Record<Semaforo, string> = { verde: 'green', ambar: 'yellow', rojo: 'red', sin_datos: 'gray' };
 const ETIQUETA: Record<Semaforo, string> = { verde: 'Fluye bien', ambar: 'Se demora', rojo: 'Cuello de botella', sin_datos: 'Pocos datos' };
@@ -58,11 +58,17 @@ export default function MejoraContinuaPanel({
   idProcessCategory,
   onSemaforos,
   onAplicar,
+  despuesDeAplicar,
+  onDatos,
 }: {
   idProcessCategory: number;
-  onSemaforos: (m: Map<number, InfoSemaforo>) => void;
+  onSemaforos?: (m: Map<number, InfoSemaforo>) => void;
   /** Prepara el cambio en el editor. Devuelve false si no se pudo. */
   onAplicar: (s: Sugerencia) => boolean;
+  /** Ya quedó registrada como aplicada (la página separada abre el editor aquí). */
+  despuesDeAplicar?: (s: Sugerencia) => void;
+  /** Los datos calculados (la página separada pinta la tabla de tareas y la calificación). */
+  onDatos?: (d: { diagnostico: Diagnostico; calificacion: Calificacion | null }) => void;
 }) {
   const [datos, setDatos] = useState<Respuesta | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -91,7 +97,8 @@ export default function MejoraContinuaPanel({
         }
         if (!res.ok || !json) throw new Error(json?.error || 'No se pudo calcular la mejora continua.');
         setDatos(json);
-        if (json.habilitado) {
+        if (json.habilitado) onDatos?.({ diagnostico: json.diagnostico, calificacion: json.calificacion ?? null });
+        if (json.habilitado && onSemaforos) {
           onSemaforos(
             new Map(
               json.diagnostico.tareas.map((t: DiagnosticoTarea) => [
@@ -107,7 +114,7 @@ export default function MejoraContinuaPanel({
         setCargando(false);
       }
     },
-    [idProcessCategory, onSemaforos]
+    [idProcessCategory, onSemaforos, onDatos]
   );
 
   useEffect(() => {
@@ -263,7 +270,9 @@ export default function MejoraContinuaPanel({
                             onClick={async () => {
                               if (!onAplicar(s)) return;
                               const ok = await registrar(s, 'aplicada');
-                              if (ok) {
+                              if (ok && despuesDeAplicar) {
+                                despuesDeAplicar(s);
+                              } else if (ok) {
                                 setAviso(
                                   s.accion.tipo === 'quitar_secuencial'
                                     ? 'Listo: el cambio quedó preparado en el editor (resaltado). Revíselo y pulse «Guardar cambios».'

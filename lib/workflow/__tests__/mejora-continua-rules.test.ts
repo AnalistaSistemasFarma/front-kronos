@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calcularTendencia, diagnosticar, tendenciaEmpresa, percentil, resumirFlujo, textoDias, textoTendencia, totalizar, type Solicitud, type TareaDef, type TareaInstancia } from '../mejora-continua-rules';
+import { calcularTendencia, calificarFlujo, diagnosticar, tendenciaEmpresa, percentil, resumirFlujo, textoDias, textoTendencia, totalizar, type Solicitud, type TareaDef, type TareaInstancia } from '../mejora-continua-rules';
 
 /* Mejora continua de los flujos (2026-11-09). Reglas PURAS (lib/workflow/mejora-continua-rules.ts). */
 
@@ -215,6 +215,46 @@ describe('tendencia de la empresa sin efecto mezcla', () => {
 
   it('sin flujos comparables: sin datos', () => {
     expect(tendenciaEmpresa([{ tendencia: calcularTendencia(lote(3, 1, 2), H), ciclos: lote(3, 1, 2) }], H).veredicto).toBe('sin_datos');
+  });
+});
+
+describe('criterio: ¿va bien o necesita mejoras?', () => {
+  const H = new Date('2026-11-09T12:00:00Z');
+  const vacio = (over: Partial<Parameters<typeof calificarFlujo>[0]> = {}) => ({
+    desde: '2026-05-13',
+    solicitudes: 2,
+    resueltas: 1,
+    cicloMedianaDias: 11.8,
+    cicloP90Dias: 11.8,
+    abiertas: 0,
+    devueltas: 0,
+    conRetrabajo: 0,
+    tendencia: calcularTendencia([], H),
+    ciclos: [],
+    tareas: [],
+    sugerencias: [],
+    ...over,
+  });
+
+  it('11,8 días con pocos casos = necesita mejoras (no «va bien»), y lo dice', () => {
+    const c = calificarFlujo(vacio(), 0);
+    expect(c.estado).toBe('necesita_mejoras');
+    expect(c.pocosCasos).toBe(true);
+    expect(c.motivos[0]).toContain('11,8 días');
+    expect(c.motivos.at(-1)).toContain('Con pocos casos: 1 solicitud resuelta');
+  });
+
+  it('4 días o sugerencias sin revisar = revisar; rápido y con casos = va bien; sin casos = pocos datos', () => {
+    expect(calificarFlujo(vacio({ cicloMedianaDias: 4, resueltas: 20 }), 0).estado).toBe('revisar');
+    expect(calificarFlujo(vacio({ cicloMedianaDias: 0.5, resueltas: 20 }), 2).estado).toBe('revisar');
+    expect(calificarFlujo(vacio({ cicloMedianaDias: 0.5, resueltas: 20 }), 0).estado).toBe('va_bien');
+    expect(calificarFlujo(vacio({ cicloMedianaDias: null, resueltas: 0 }), 0).estado).toBe('pocos_datos');
+  });
+
+  it('una tarea en rojo = necesita mejoras', () => {
+    const { solicitudes, instancias } = casos();
+    const d = diagnosticar({ ahora: AHORA, tareas, solicitudes, instancias, notas: [], erroresSap: [] });
+    expect(calificarFlujo(d, 0)).toMatchObject({ estado: 'necesita_mejoras', pocosCasos: false });
   });
 });
 
