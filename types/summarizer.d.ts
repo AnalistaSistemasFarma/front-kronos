@@ -85,13 +85,31 @@ interface LanguageModelCreateOptions {
   monitor?: (m: SummarizerCreateMonitor) => void;
 }
 
+/** Parte de un mensaje multimodal (texto o imagen) para la Prompt API. */
+interface LanguageModelContentPart {
+  type: 'text' | 'image';
+  value: string | Blob | HTMLCanvasElement | ImageBitmap;
+}
+
+interface LanguageModelMessage {
+  role: 'user' | 'assistant';
+  content: string | LanguageModelContentPart[];
+}
+
+interface LanguageModelPromptOptions {
+  /** Esquema JSON (o RegExp) al que se ajusta la respuesta. */
+  responseConstraint?: object | RegExp;
+  omitResponseConstraintInput?: boolean;
+  signal?: AbortSignal;
+}
+
 interface LanguageModelSession {
-  prompt(input: string): Promise<string>;
+  prompt(input: string | LanguageModelMessage[], options?: LanguageModelPromptOptions): Promise<string>;
   destroy(): void;
 }
 
 interface LanguageModelStatic {
-  availability(): Promise<SummarizerAvailability>;
+  availability(options?: Pick<LanguageModelCreateOptions, 'expectedInputs' | 'expectedOutputs'>): Promise<SummarizerAvailability>;
   create(options?: LanguageModelCreateOptions): Promise<LanguageModelSession>;
 }
 
