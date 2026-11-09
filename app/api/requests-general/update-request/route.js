@@ -9,6 +9,10 @@ import {
   cancelOpenOrionInternalTasks,
   orionInternalTaskSql,
 } from '../../../../lib/orion/internalTasks';
+import {
+  closeOpenTasksOnReturn,
+  reopenTasksClosedOnReturn,
+} from '../../../../lib/requests-general/returnedTasks.js';
 
 export async function POST(req) {
   try {
@@ -129,6 +133,11 @@ export async function POST(req) {
                 AND trg.id_status = 3
                 AND tpc.is_authorization = 1
             `);
+          await reopenTasksClosedOnReturn(transaction, id);
+        }
+
+        if (Number(status) === 7 && Number(prevRow?.status_req) !== 7) {
+          await closeOpenTasksOnReturn(transaction, id);
         }
 
         if (isRequestClosedStatus(status)) {
