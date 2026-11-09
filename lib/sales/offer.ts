@@ -15,6 +15,16 @@ export interface OfferHeader {
   ShipToCode?: string;
   /** Dirección de facturación (la del cliente por defecto, como SAPSEND). */
   PayToCode?: string;
+  /** Observaciones de empaque (como SAPSEND). */
+  PickRemark?: string;
+}
+
+/** Opciones de la empresa que cambian cómo se arma la oferta (sales_company_config). */
+export interface OfferOptions {
+  /** La descripción escrita por el usuario viaja a SAP (servicios de Meditrack, como SAPSEND). */
+  descripcionEditable?: boolean;
+  /** La OC / referencia del cliente es obligatoria (como SAPSEND). */
+  exigeOc?: boolean;
 }
 
 export interface OfferLine {
@@ -49,9 +59,10 @@ export function sanitizeOfferLine(raw: Record<string, unknown>): OfferLine {
   };
 }
 
-export function validateOffer(h: OfferHeader, lines: OfferLine[], today: string): OfferError[] {
+export function validateOffer(h: OfferHeader, lines: OfferLine[], today: string, opts: OfferOptions = {}): OfferError[] {
   const e: OfferError[] = [];
   if (!txt(h.CardCode, 50)) e.push({ field: 'CardCode', error: 'Elija el cliente.' });
+  if (opts.exigeOc && !txt(h.NumAtCard, 100)) e.push({ field: 'NumAtCard', error: 'Indique la orden de compra o referencia del cliente.' });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(h.DocDueDate ?? ''))) e.push({ field: 'DocDueDate', error: 'Indique la fecha de entrega.' });
   else if (h.DocDueDate < today) e.push({ field: 'DocDueDate', error: 'La fecha de entrega no puede ser anterior a hoy.' });
   if (!lines.length) e.push({ field: 'DocumentLines', error: 'La oferta no tiene líneas.' });
@@ -71,7 +82,13 @@ function header(h: OfferHeader) {
   if (h.U_SEND_InterComments) out.U_SEND_InterComments = txt(h.U_SEND_InterComments, 254);
   if (h.ShipToCode) out.ShipToCode = txt(h.ShipToCode, 50);
   if (h.PayToCode) out.PayToCode = txt(h.PayToCode, 50);
+  if (h.PickRemark) out.PickRemark = txt(h.PickRemark, 254);
   return out;
+}
+
+/** Quita la descripción escrita si la empresa no la permite (SAP pone la del artículo). PURA. */
+export function applyOfferOptions(lines: OfferLine[], opts: OfferOptions): OfferLine[] {
+  return opts.descripcionEditable ? lines : lines.map((l) => ({ ...l, ItemDescription: undefined }));
 }
 
 function line(l: OfferLine) {
@@ -80,7 +97,10 @@ function line(l: OfferLine) {
     Quantity: l.Quantity,
     UnitPrice: l.UnitPrice,
     U_SEND_PriceLP: l.ListPrice ?? l.UnitPrice,
+    // Cantidad solicitada (como SAPSEND: U_HBT_Cantidad = cantidad).
+    U_HBT_Cantidad: l.Quantity,
   };
+  if (l.ItemDescription) out.ItemDescription = l.ItemDescription;
   if (l.WarehouseCode) out.WarehouseCode = l.WarehouseCode;
   if (l.TaxCode) out.TaxCode = l.TaxCode;
   return out;
@@ -115,10 +135,14 @@ export function buildOfferDraftPayload(
   };
 }
 
-/** Asunto de la solicitud: «OV - NOMBRE DEL CLIENTE - NIT - primera línea» (Nicolás Rivera, 2026-11-03). PURA. */
-export function offerSubject(cardName: unknown, cardCode: unknown, firstLine: unknown): string {
+/**
+ * Asunto de la solicitud: «OV - NOMBRE DEL CLIENTE - NIT - referencia del cliente (OC)»; sin OC, la primera
+ * línea (Nicolás Rivera, 2026-11-03; la referencia, reunión del 2026-11-06). PURA.
+ */
+export function offerSubject(cardName: unknown, cardCode: unknown, firstLine: unknown, reference?: unknown): string {
   const clean = (v: unknown) => String(v ?? '').replace(/\s+/g, ' ').trim();
-  return ['OV', clean(cardName), clean(cardCode), clean(firstLine)].filter(Boolean).join(' - ').slice(0, 250);
+  const ref = clean(reference);
+  return ['OV', clean(cardName), clean(cardCode), ref ? `OC ${ref}` : clean(firstLine)].filter(Boolean).join(' - ').slice(0, 250);
 }
 
 /** Línea editada de una oferta en borrador: BaseLine = línea de la cotización (null si es nueva). */

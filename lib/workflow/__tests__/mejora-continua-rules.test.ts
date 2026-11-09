@@ -84,6 +84,8 @@ describe('diagnosticar', () => {
     expect(claves).toContain('obligatorio:flujo');
     expect(claves).toContain('sin_uso:4');
     expect(claves).not.toContain('suplente:1');
+    // La autorización (1 asignado) no recibe «suplente»: la define el tipo de autorización.
+    expect(claves).not.toContain('suplente:2');
   });
 
   it('no sugiere quitar una autorización que sí rechaza', () => {

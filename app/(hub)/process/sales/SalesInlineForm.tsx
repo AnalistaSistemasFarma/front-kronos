@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { ActionIcon, Alert, Button, Group, Loader, NumberInput, ScrollArea, Select, Stack, Switch, Table, Text, TextInput, Textarea } from '@mantine/core';
-import { IconPlus, IconSend, IconTrash } from '@tabler/icons-react';
+import React, { useEffect, useRef, useState } from 'react';
+import type ExcelJS from 'exceljs';
+import { ActionIcon, Alert, Button, Group, Loader, NumberInput, ScrollArea, SegmentedControl, Select, Stack, Table, Text, TextInput, Textarea } from '@mantine/core';
+import { IconDownload, IconFileSpreadsheet, IconPlus, IconSend, IconTrash } from '@tabler/icons-react';
+import { LINE_HEADERS, MAX_IMPORT_LINES, rowsToLines } from '../../../../lib/sales/linesImport';
 import toast from 'react-hot-toast';
 import SapLookupInput from '../purchases/SapLookupInput';
 import SalesSearchModal, { type SearchKind } from './SalesSearchModal';
@@ -37,6 +39,22 @@ interface Line {
 }
 
 type Readiness = 'loading' | 'ready' | 'no-write' | 'no-sap';
+/** Qué hace el botón al crear: enviar al flujo, guardar en borrador o pedido directo (si la empresa lo tiene). */
+type Modo = 'enviar' | 'borrador' | 'directo';
+type CompanyOptions = { pedidoDirecto: boolean; descripcionEditable: boolean; exigeOc: boolean };
+
+/** Valor de celda de ExcelJS -> valor plano. */
+function cellValue(v: ExcelJS.CellValue): unknown {
+  if (v == null) return null;
+  if (v instanceof Date) return v;
+  if (typeof v === 'object') {
+    if ('result' in v) return (v as ExcelJS.CellFormulaValue).result ?? null;
+    if ('richText' in v) return (v as ExcelJS.CellRichTextValue).richText.map((t) => t.text).join('');
+    if ('text' in v) return (v as ExcelJS.CellHyperlinkValue).text;
+    return null;
+  }
+  return v;
+}
 
 const notifySapError = (msg: string) => toast.error(sapErrorText(msg), { duration: 12000, style: { whiteSpace: 'pre-line', maxWidth: 520 } });
 const empty = (v: unknown) => v == null || String(v).trim() === '';
@@ -51,14 +69,19 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Pro
   const [dueDate, setDueDate] = useState('');
   const [numAtCard, setNumAtCard] = useState('');
   const [comments, setComments] = useState('');
+  const [pickRemark, setPickRemark] = useState('');
+  const [opts, setOpts] = useState<CompanyOptions>({ pedidoDirecto: false, descripcionEditable: false, exigeOc: true });
+  const [importing, setImporting] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   /** Puntos de entrega (direcciones de envío del cliente), como ModalLogistic de SAPSEND. */
   const [addresses, setAddresses] = useState<{ AddressName: string; Street: string; Block: string; City: string; County: string; Country: string; isDefault: boolean }[]>([]);
   const [shipTo, setShipTo] = useState('');
   const [payTo, setPayTo] = useState('');
   const [lines, setLines] = useState<Line[]>([{}]);
   const [saving, setSaving] = useState(false);
-  /** Interruptor: enviar a autorización al crear (como ahora) o guardar en borrador (como SAPSEND). */
-  const [enviar, setEnviar] = useState(true);
+  /** Al crear: enviar a autorización, guardar en borrador (como SAPSEND) o pedido directo (si la empresa lo permite). */
+  const [modo, setModo] = useState<Modo>('enviar');
+  const enviar = modo !== 'borrador';
   /** Búsqueda ampliada abierta («*» + Enter o lupa): tipo, línea y texto. */
   const [search, setSearch] = useState<{ kind: SearchKind; line?: number; q?: string; itemCode?: string; cardCode?: string } | null>(null);
   const [tried, setTried] = useState(false);
@@ -72,6 +95,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Pro
       .then((d) => {
         if (cancelled) return;
         const c = (d.companies ?? []).find((x: { idCompany: number }) => String(x.idCompany) === companyId);
+        if (c?.options) setOpts(c.options);
         if (!c?.canWrite) setReadiness('no-write');
         else if (!c.ready) setReadiness('no-sap');
         else setReadiness('ready');
@@ -132,6 +156,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Pro
         setCardName(String(x.cardName ?? ''));
         setDueDate(String(x.dueDate ?? ''));
         setNumAtCard(String(x.numAtCard ?? ''));
+        setPickRemark(String(x.pickRemark ?? ''));
         setComments(String(x.comments ?? ''));
         setLines((x.lines ?? []).length ? x.lines : [{}]);
         loadCustomer(String(x.cardCode ?? ''), String(x.shipTo ?? '')).then(() => x.payTo && setPayTo(String(x.payTo)));
@@ -144,8 +169,77 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Pro
   }, [editDocEntry, readiness, companyId]);
 
   const selectedAddress = addresses.find((a) => a.AddressName === shipTo);
-  /** Asunto automático: «OV - NOMBRE DEL CLIENTE - NIT - primera línea». */
-  const autoSubject = ['OV', cardName, cardCode, lines[0]?.ItemDescription ?? lines[0]?.ItemCode ?? ''].map((x) => String(x ?? '').trim()).filter(Boolean).join(' - ');
+  /** Asunto automático: «OV - NOMBRE DEL CLIENTE - NIT - OC del cliente» (sin OC, la primera línea). */
+  const autoSubject = ['OV', cardName, cardCode, numAtCard.trim() ? `OC ${numAtCard.trim()}` : lines[0]?.ItemDescription ?? lines[0]?.ItemCode ?? ''].map((x) => String(x ?? '').trim()).filter(Boolean).join(' - ');
+
+  /** Plantilla de líneas para el cargue desde Excel. */
+  const downloadTemplate = async () => {
+    const { default: ExcelJS } = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Lineas');
+    ws.addRow([...LINE_HEADERS]);
+    ws.addRow(['10223', 10, '', '', '']);
+    ws.getRow(1).font = { bold: true };
+    ws.columns.forEach((col) => {
+      col.width = 22;
+    });
+    const buf = await wb.xlsx.writeBuffer();
+    const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'plantilla-lineas-oferta-venta.xlsx';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  /** Lee el Excel, valida las líneas contra SAP y las agrega a la oferta (precio de lista siempre de SAP). */
+  const importExcel = async (file: File | null) => {
+    if (!file) return;
+    if (!cardCode) {
+      toast.error('Elija primero el cliente: el precio de lista depende de él.');
+      return;
+    }
+    setImporting(true);
+    try {
+      const { default: ExcelJS } = await import('exceljs');
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(await file.arrayBuffer());
+      const ws = wb.worksheets[0];
+      if (!ws) throw new Error('El archivo no tiene hojas.');
+      const heads: string[] = [];
+      ws.getRow(1).eachCell((cell, col) => {
+        heads[col] = String(cellValue(cell.value) ?? '').trim();
+      });
+      const raw: { row: number; values: Record<string, unknown> }[] = [];
+      for (let r = 2; r <= ws.rowCount && raw.length < MAX_IMPORT_LINES; r++) {
+        const values: Record<string, unknown> = {};
+        ws.getRow(r).eachCell((cell, col) => {
+          if (heads[col]) values[heads[col]] = cellValue(cell.value);
+        });
+        raw.push({ row: r, values });
+      }
+      const parsed = rowsToLines(raw);
+      if (!parsed.lines.length) throw new Error(parsed.errors[0]?.error ?? 'El archivo no tiene líneas. Use la plantilla.');
+      const res = await fetch('/api/sales/lines-validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId: Number(companyId), cardCode, lines: parsed.lines }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || 'No se pudieron validar las líneas en SAP');
+      const errs = [...parsed.errors, ...(d.errors ?? [])] as { row: number; error: string }[];
+      const ok = (d.lines ?? []) as Line[];
+      if (ok.length) setLines((prev) => [...prev.filter((l) => !empty(l.ItemCode)), ...ok]);
+      if (errs.length) {
+        toast.error(`${ok.length} línea(s) cargada(s); ${errs.length} con error:\n${errs.slice(0, 8).map((e) => `Fila ${e.row}: ${e.error}`).join('\n')}${errs.length > 8 ? '\n…' : ''}`, { duration: 15000, style: { whiteSpace: 'pre-line', maxWidth: 560 } });
+      } else toast.success(`${ok.length} línea(s) cargada(s) desde Excel.`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setImporting(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
 
   const total = lines.reduce((a, l) => a + Number(l.Quantity || 0) * Number(l.UnitPrice || 0), 0);
 
@@ -155,6 +249,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Pro
     const missing: string[] = [];
     if (!cardCode) missing.push('Cliente');
     if (!dueDate) missing.push('Fecha de entrega');
+    if (opts.exigeOc && !numAtCard.trim()) missing.push('Orden de compra del cliente');
     if (addresses.length > 0 && !shipTo) missing.push('Punto de entrega');
     lines.forEach((l, i) => {
       if (empty(l.ItemCode)) missing.push(`Línea ${i + 1} · Artículo`);
@@ -175,8 +270,9 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Pro
           ...(editing ? { accion: 'actualizar', docEntry: editDocEntry } : {}),
           companyId: Number(companyId),
           subject: autoSubject,
-          header: { CardCode: cardCode, DocDueDate: dueDate, NumAtCard: numAtCard, Comments: comments || autoSubject, ShipToCode: shipTo || undefined, PayToCode: payTo || undefined },
+          header: { CardCode: cardCode, DocDueDate: dueDate, NumAtCard: numAtCard, Comments: comments || autoSubject, PickRemark: pickRemark || undefined, ShipToCode: shipTo || undefined, PayToCode: payTo || undefined },
           lines,
+          modo,
           enviar,
         }),
       });
@@ -193,8 +289,10 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Pro
       onDone({
         ok: true,
         message: data.saved
-          ? `Oferta de venta #${data.docEntry} guardada en borrador: solicitud #${data.idRequest ?? '—'} «En Borrador». Ábrala en Mis solicitudes para editarla o enviarla a pedido.`
-          : `Oferta de venta #${data.docEntry} creada. El flujo revisa precio y cupo y la envía a autorización si hace falta.`,
+          ? `Oferta de venta #${data.docEntry} guardada en borrador: solicitud #${data.idRequest ?? '—'}. Ábrala en Mis solicitudes para editarla o enviarla a pedido.`
+          : modo === 'directo'
+            ? `Oferta #${data.docEntry} enviada a pedido directo: solicitud #${data.idRequest}. El pedido se crea en SAP sin autorizaciones.`
+            : `Oferta de venta #${data.docEntry} creada. El flujo revisa precio y cupo y la envía a autorización si hace falta.`,
       });
     } catch {
       toast.error('Error de red al crear la oferta de venta');
@@ -255,7 +353,8 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Pro
           onChange={(e) => setDueDate(e.currentTarget.value)}
           error={errorFor('DocDueDate') ?? (tried && !dueDate ? 'Obligatorio' : undefined)}
         />
-        <TextInput label="Orden de compra del cliente" value={numAtCard} maxLength={100} onChange={(e) => setNumAtCard(e.currentTarget.value)} />
+        <TextInput label={<>Orden de compra del cliente {opts.exigeOc && <Text span c="red">*</Text>}</>} description="Referencia del cliente: va en el asunto." value={numAtCard} maxLength={100}
+          onChange={(e) => setNumAtCard(e.currentTarget.value)} error={errorFor('NumAtCard') ?? (tried && opts.exigeOc && !numAtCard.trim() ? 'Obligatorio' : undefined)} />
       </Group>
       {cardName && (
         <Group gap="xs">
@@ -295,7 +394,10 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Pro
       <Text size="xs" c="dimmed">
         Consejo: escriba «*» y Enter (o use la lupa) en cliente, artículo o bodega para abrir la búsqueda ampliada, como en SAP.
       </Text>
-      <Textarea label="Comentarios" description="Si lo deja vacío se usa el asunto automático." autosize minRows={2} maxLength={254} value={comments} onChange={(e) => setComments(e.currentTarget.value)} />
+      <Group grow align="flex-start">
+        <Textarea label="Comentarios" description="Si lo deja vacío se usa el asunto automático." autosize minRows={2} maxLength={254} value={comments} onChange={(e) => setComments(e.currentTarget.value)} />
+        <Textarea label="Observaciones de empaque" description="Indicaciones para bodega y despacho (como SAPSEND)." autosize minRows={2} maxLength={254} value={pickRemark} onChange={(e) => setPickRemark(e.currentTarget.value)} />
+      </Group>
 
       <div>
         <Text fw={600} size="sm" mb={4}>
@@ -340,7 +442,12 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Pro
                     />
                   </Table.Td>
                   <Table.Td>
-                    <Text size="xs">{l.ItemDescription ?? ''}</Text>
+                    {opts.descripcionEditable && l.ItemCode ? (
+                      <TextInput size="xs" value={l.ItemDescription ?? ''} maxLength={200} onChange={(e) => setLine(i, { ItemDescription: e.currentTarget.value })}
+                        aria-label={`Descripción línea ${i + 1}`} description="Editable: así queda en la oferta y el pedido" />
+                    ) : (
+                      <Text size="xs">{l.ItemDescription ?? ''}</Text>
+                    )}
                     {l.ItemCode && l.ItemDescription && (
                       <Group gap={4}>
                         <Button size="compact-xs" variant="subtle" onClick={() => setSearch({ kind: 'warehouse_stock', line: i, itemCode: l.ItemCode })}>
@@ -387,9 +494,18 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Pro
           </Table>
         </ScrollArea>
         <Group justify="space-between" mt="sm">
-          <Button variant="light" leftSection={<IconPlus size={16} />} onClick={() => setLines((p) => [...p, {}])}>
-            Agregar artículo
-          </Button>
+          <Group gap="xs">
+            <Button variant="light" leftSection={<IconPlus size={16} />} onClick={() => setLines((p) => [...p, {}])}>
+              Agregar artículo
+            </Button>
+            <Button variant="subtle" leftSection={<IconFileSpreadsheet size={16} />} loading={importing} onClick={() => (cardCode ? fileRef.current?.click() : toast.error('Elija primero el cliente.'))}>
+              Cargar líneas desde Excel
+            </Button>
+            <Button variant="subtle" color="gray" leftSection={<IconDownload size={16} />} onClick={downloadTemplate}>
+              Plantilla
+            </Button>
+            <input ref={fileRef} type="file" accept=".xlsx" hidden onChange={(e) => importExcel(e.currentTarget.files?.[0] ?? null)} />
+          </Group>
           <Text fw={600}>Total antes de impuestos: {total.toLocaleString('es-CO')}</Text>
         </Group>
       </div>
@@ -401,15 +517,23 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Pro
           </Button>
         ) : (
           <>
-        <Switch
-          checked={enviar}
-          onChange={(e) => setEnviar(e.currentTarget.checked)}
-          label={enviar ? 'Enviar a autorización al crear' : 'Guardar como borrador (se envía después)'}
-          description={enviar ? 'Entra al flujo: revisa precio y cupo y pide las autorizaciones' : 'Queda en SAP en estado borrador, como en SAPSEND'}
-          mr='md'
-        />
-        <Button leftSection={<IconSend size={16} />} onClick={submit} loading={saving} disabled={!cardCode} color={enviar ? undefined : 'gray'}>
-          {enviar ? 'Crear oferta y enviar' : 'Guardar borrador'}
+        <Stack gap={2} mr="md">
+          <SegmentedControl
+            size="xs"
+            value={modo}
+            onChange={(v) => setModo(v as Modo)}
+            data={[
+              { value: 'enviar', label: 'Enviar a autorización' },
+              { value: 'borrador', label: 'Guardar borrador' },
+              ...(opts.pedidoDirecto ? [{ value: 'directo', label: 'Pedido directo' }] : []),
+            ]}
+          />
+          <Text size="xs" c="dimmed">
+            {modo === 'enviar' ? 'Entra al flujo: revisa precio y cupo y pide las autorizaciones' : modo === 'borrador' ? 'Queda en SAP en estado borrador, como en SAPSEND' : 'Crea el pedido en SAP sin autorizaciones'}
+          </Text>
+        </Stack>
+        <Button leftSection={<IconSend size={16} />} onClick={submit} loading={saving} disabled={!cardCode} color={modo === 'borrador' ? 'gray' : undefined}>
+          {modo === 'enviar' ? 'Crear oferta y enviar' : modo === 'borrador' ? 'Guardar borrador' : 'Crear pedido directo'}
         </Button>
           </>
         )}

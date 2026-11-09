@@ -196,6 +196,10 @@ export function buildOrderPayload(draft: SalesDraft, today: string, bp?: BpShipI
       TaxCode: l.TaxCode,
       UnitPrice: l.UnitPrice ?? l.Price,
     };
+    // Descripción (puede venir escrita por el usuario: servicios), precio de lista y cantidad solicitada, como el borrador.
+    if (present(l.ItemDescription)) out.ItemDescription = l.ItemDescription;
+    if (l.U_SEND_PriceLP != null) out.U_SEND_PriceLP = l.U_SEND_PriceLP;
+    if (l.U_HBT_Cantidad != null) out.U_HBT_Cantidad = l.U_HBT_Cantidad;
     if (l.BaseType === 23 && l.BaseEntry != null && l.BaseLine != null) {
       out.BaseType = 23;
       out.BaseEntry = l.BaseEntry;

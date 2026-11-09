@@ -5,7 +5,8 @@ import sqlConfig from '../../../../dbconfig.js';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { prisma } from '../../../../lib/prisma';
 import { salesEndpointForUser } from '../../../../lib/sales/access';
-import { buildOfferDraftPayload, buildQuotationPayload, sanitizeOfferLine, validateOffer, type OfferHeader } from '../../../../lib/sales/offer';
+import { applyOfferOptions, buildOfferDraftPayload, buildQuotationPayload, sanitizeOfferLine, validateOffer, type OfferHeader } from '../../../../lib/sales/offer';
+import { salesCompanyConfig } from '../../../../lib/sales/companyConfig';
 import { todayBogota } from '../../../../lib/purchases/drafts';
 import { createDraftOfferRequest, startOfferFlow } from '../../../../lib/sales/offerFlow';
 import { sapLogin, sapLogout, sapPost, SapError } from '../../../../lib/sap/serviceLayer';
@@ -16,8 +17,10 @@ import { sapLogin, sapLogout, sapPost, SapError } from '../../../../lib/sap/serv
  *  2) crea la solicitud del workflow con el proceso «Oferta de venta» de la empresa;
  *  3) enlaza solicitud <-> borrador (sales_authorization) y arranca las Tareas SAP
  *     (evaluar reglas -> autorizaciones -> pedido).
- * Body: { companyId, header: OfferHeader, lines: OfferLine[], enviar?: boolean }. Con enviar=false
- * la oferta queda en borrador (sales_offer_draft) y se envía después desde «Mis ofertas en borrador».
+ * Body: { companyId, header: OfferHeader, lines: OfferLine[], modo?: 'enviar' | 'borrador' | 'directo' }
+ * (compatibilidad: enviar=false equivale a 'borrador'). 'borrador': queda en SAP en B con su solicitud abierta
+ * y se envía después. 'directo': solo si la empresa tiene flujo «Pedido directo» (crea el pedido sin
+ * autorizaciones, como Kelab/Meditrack en SAPSEND).
  * Requiere «Ventas · Gestionar ofertas» en la empresa.
  */
 export async function POST(request: NextRequest) {
@@ -30,16 +33,20 @@ export async function POST(request: NextRequest) {
     const companyId = Number(body.companyId);
     if (!companyId) return NextResponse.json({ error: 'Falta companyId' }, { status: 400 });
     const header = (body.header ?? {}) as OfferHeader;
-    const lines = (Array.isArray(body.lines) ? body.lines : []).map((l: Record<string, unknown>) => sanitizeOfferLine(l));
+    const modo: 'enviar' | 'borrador' | 'directo' = body.modo === 'borrador' || body.modo === 'directo' ? body.modo : body.enviar === false ? 'borrador' : 'enviar';
+    const conf = await salesCompanyConfig(companyId);
+    const opts = { descripcionEditable: Boolean(conf?.descripcionEditable), exigeOc: conf?.exigeOc ?? true };
+    const lines = applyOfferOptions((Array.isArray(body.lines) ? body.lines : []).map((l: Record<string, unknown>) => sanitizeOfferLine(l)), opts);
     const today = todayBogota();
-    const errors = validateOffer(header, lines, today);
+    if (modo === 'directo' && !conf?.processDirecta) return NextResponse.json({ error: 'Esta empresa no tiene habilitado el pedido directo.' }, { status: 422 });
+    const errors = validateOffer(header, lines, today, opts);
     if (errors.length) return NextResponse.json({ error: 'Datos inválidos', errors }, { status: 422 });
 
     const access = await salesEndpointForUser(email, companyId, 'write');
     if (!access?.endpoint) return NextResponse.json({ error: 'No tiene permiso para crear ofertas en esta empresa («Ventas · Gestionar ofertas»).' }, { status: 403 });
 
     // Antes de escribir en SAP: la empresa debe tener el flujo configurado (si se va a enviar).
-    if (body.enviar !== false) {
+    if (modo === 'enviar') {
       const pool0 = await sql.connect(sqlConfig);
       const cfg = await pool0.request().input('c', sql.Int, companyId).query(
         `SELECT TOP 1 id_process_category_oferta AS p FROM dbo.sales_company_config WHERE id_company = @c AND activo = 1;`
@@ -62,16 +69,19 @@ export async function POST(request: NextRequest) {
     }
 
     // Interruptor del formulario: «Enviar a autorización» (por defecto) o dejarla en borrador, como SAPSEND.
-    if (body.enviar === false) {
+    if (modo === 'borrador') {
       const pool = await sql.connect(sqlConfig);
-      // La solicitud se crea en «En Borrador» para que aparezca en Mis solicitudes; el flujo no arranca.
-      const idDraftRequest = await createDraftOfferRequest(companyId, user.id, { ...draft, Comments: header.Comments });
+      // La solicitud se crea abierta (aparece en Mis solicitudes y en los reportes); el flujo no arranca hasta enviarla.
+      const idDraftRequest = await createDraftOfferRequest(companyId, user.id, { ...draft, Comments: header.Comments, NumAtCard: header.NumAtCard });
       await pool.request().input('c', sql.Int, companyId).input('d', sql.Int, draft.DocEntry).input('q', sql.Int, quotation.DocEntry).input('u', sql.NVarChar(50), user.id).input('r', sql.Int, idDraftRequest).query(
         `INSERT INTO dbo.sales_offer_draft (id_company, doc_entry, quotation_doc_entry, id_user, status, id_request_general) VALUES (@c, @d, @q, @u, N'borrador', @r);`
       );
       return NextResponse.json({ ok: true, saved: true, idRequest: idDraftRequest, docEntry: draft.DocEntry, quotationDocEntry: quotation.DocEntry }, { status: 201 });
     }
-    const started = await startOfferFlow({ companyId, userId: user.id, draft: { ...draft, Comments: header.Comments }, quotationDocEntry: quotation.DocEntry, linesCount: lines.length });
+    const started = await startOfferFlow({
+      companyId, userId: user.id, draft: { ...draft, Comments: header.Comments, NumAtCard: header.NumAtCard }, quotationDocEntry: quotation.DocEntry, linesCount: lines.length,
+      processId: modo === 'directo' ? conf?.processDirecta : null,
+    });
     if (!started.ok) {
       return NextResponse.json({ error: `Se creó la oferta #${draft.DocEntry} en SAP, pero no se pudo enviar al flujo: ${started.error}`, docEntry: draft.DocEntry }, { status: started.status });
     }
