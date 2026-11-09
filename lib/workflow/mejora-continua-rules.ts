@@ -225,9 +225,13 @@ export function diagnosticar(entrada: {
       }
       let semaforo: Semaforo = 'sin_datos';
       if (l.length >= MIN_CASOS && mediana !== null) {
+        // Un flujo rápido no tiene cuellos de botella aunque una tarea se lleve la mayor parte
+        // del poco tiempo: el rojo exige demora real (lo normal ≥ 1 día) y el amarillo, que al
+        // menos los casos lentos pasen de 2 días o lo normal de medio día.
+        const p90 = percentil(l, 0.9) ?? 0;
         const lenta = mediana >= 1 && mediana >= 2 * medianaDeMedianas;
-        if (participacion >= 0.35 || (lenta && mediana >= 3)) semaforo = 'rojo';
-        else if (participacion >= 0.2 || lenta) semaforo = 'ambar';
+        if (mediana >= 1 && (participacion >= 0.35 || (lenta && mediana >= 3))) semaforo = 'rojo';
+        else if ((mediana >= 0.5 || p90 >= 2) && (participacion >= 0.2 || lenta)) semaforo = 'ambar';
         else semaforo = 'verde';
       }
       const p = pend.get(t.id) ?? [];
@@ -397,4 +401,91 @@ function sugerir(d: Diagnostico, tareas: TareaDef[], erroresSap: ErroresSap[], c
     }
   }
   return out;
+}
+
+/* ───────────────────────────── Indicador (panel de flujos) ───────────────────────────── */
+
+/*
+ * INDICADOR DE AUTOMEJORA (Nicolás Rivera, 2026-11-09: «en el panel de flujos de trabajo voy a
+ * necesitar un indicador de automejora de procesos»): la foto de todos los flujos de una empresa.
+ */
+
+export interface DecisionResumen {
+  clave: string;
+  estado: 'aplicada' | 'descartada';
+  /** Lo normal de la tarea cuando se aplicó (para medir el antes y el después). */
+  medianaAntes: number | null;
+}
+
+export interface ResumenFlujo {
+  idProcessCategory: number;
+  nombre: string;
+  solicitudes: number;
+  cicloMedianaDias: number | null;
+  rojas: number;
+  amarillas: number;
+  pendientes: number;
+  aplicadas: number;
+  descartadas: number;
+  /** Días que bajó lo normal en las tareas donde se aplicó una mejora (suma; solo bajas). */
+  diasAhorrados: number;
+  /** 0–100: más alto = más urgente de revisar. */
+  prioridad: number;
+}
+
+export function resumirFlujo(idProcessCategory: number, nombre: string, d: Diagnostico, decisiones: DecisionResumen[]): ResumenFlujo {
+  const porClave = new Map(decisiones.map((x) => [x.clave, x]));
+  const rojas = d.tareas.filter((t) => t.semaforo === 'rojo').length;
+  const amarillas = d.tareas.filter((t) => t.semaforo === 'ambar').length;
+  const pendientes = d.sugerencias.filter((s) => !porClave.has(s.clave)).length;
+  const aplicadas = decisiones.filter((x) => x.estado === 'aplicada');
+  let diasAhorrados = 0;
+  for (const a of aplicadas) {
+    const idTarea = Number(a.clave.split(':')[1]);
+    const t = Number.isInteger(idTarea) ? d.tareas.find((x) => x.idTarea === idTarea) : null;
+    if (t && a.medianaAntes !== null && t.medianaDias !== null && t.casos >= MIN_CASOS && t.medianaDias < a.medianaAntes) {
+      diasAhorrados += a.medianaAntes - t.medianaDias;
+    }
+  }
+  const prioridad = Math.min(100, rojas * 30 + amarillas * 10 + pendientes * 8 + (d.solicitudes >= 50 ? 10 : 0));
+  return {
+    idProcessCategory,
+    nombre,
+    solicitudes: d.solicitudes,
+    cicloMedianaDias: d.cicloMedianaDias,
+    rojas,
+    amarillas,
+    pendientes,
+    aplicadas: aplicadas.length,
+    descartadas: decisiones.filter((x) => x.estado === 'descartada').length,
+    diasAhorrados: Math.round(diasAhorrados * 10) / 10,
+    prioridad: d.solicitudes === 0 ? 0 : prioridad,
+  };
+}
+
+export interface ResumenEmpresa {
+  flujos: number;
+  flujosConMovimiento: number;
+  cuellosDeBotella: number;
+  pendientes: number;
+  aplicadas: number;
+  descartadas: number;
+  /** % de las sugerencias decididas que se aplicaron (null sin decisiones). */
+  adopcion: number | null;
+  diasAhorrados: number;
+}
+
+export function totalizar(flujos: ResumenFlujo[]): ResumenEmpresa {
+  const aplicadas = flujos.reduce((s, f) => s + f.aplicadas, 0);
+  const descartadas = flujos.reduce((s, f) => s + f.descartadas, 0);
+  return {
+    flujos: flujos.length,
+    flujosConMovimiento: flujos.filter((f) => f.solicitudes > 0).length,
+    cuellosDeBotella: flujos.reduce((s, f) => s + f.rojas, 0),
+    pendientes: flujos.reduce((s, f) => s + f.pendientes, 0),
+    aplicadas,
+    descartadas,
+    adopcion: aplicadas + descartadas > 0 ? Math.round((aplicadas / (aplicadas + descartadas)) * 100) : null,
+    diasAhorrados: Math.round(flujos.reduce((s, f) => s + f.diasAhorrados, 0) * 10) / 10,
+  };
 }

@@ -16,7 +16,11 @@ import { getAssignedSubprocessIdsForUser } from '../process/subprocessAssignment
 import {
   DIAS_HISTORIA,
   diagnosticar,
+  resumirFlujo,
+  totalizar,
+  type DecisionResumen,
   type Diagnostico,
+  type ResumenFlujo,
   type ErroresSap,
   type Nota,
   type Solicitud,
@@ -221,4 +225,66 @@ export async function decidir(
     WHEN NOT MATCHED THEN INSERT (id_process_category, clave, estado, motivo, titulo, metrica_antes, decided_by)
                           VALUES (${idProcessCategory}, ${clave}, ${estado}, ${motivo}, ${titulo}, ${metrica}, ${user.id});`;
   return { ok: true as const };
+}
+
+/* ───────────────────────────── Indicador del panel de flujos ───────────────────────────── */
+
+const cacheResumen = new Map<number, { en: number; valor: { flujos: ResumenFlujo[]; total: ReturnType<typeof totalizar> } }>();
+
+/** Empresas habilitadas con su nombre (para el selector del indicador). */
+export async function empresasDelIndicador(): Promise<{ idCompany: number; nombre: string }[]> {
+  const ids = empresasHabilitadas();
+  if (ids.length === 0) return [];
+  const filas = await prisma.company.findMany({ where: { id_company: { in: ids } }, select: { id_company: true, company: true } });
+  return filas.map((f) => ({ idCompany: f.id_company, nombre: f.company.trim() }));
+}
+
+/**
+ * INDICADOR DE AUTOMEJORA de una empresa (2026-11-09): cada flujo activo con su semáforo,
+ * sugerencias pendientes, decisiones y días ahorrados; más los totales. Usa el mismo
+ * diagnóstico (con su caché) que el panel de cada flujo. Caché de 30 minutos.
+ */
+export async function indicadorDeEmpresa(idCompany: number, opciones: { refrescar?: boolean } = {}) {
+  if (!empresasHabilitadas().includes(idCompany)) throw new MejoraError('La mejora continua no está habilitada para esta empresa.', 404);
+  const hit = cacheResumen.get(idCompany);
+  if (!opciones.refrescar && hit && Date.now() - hit.en < CACHE_MS) return { calculadoEn: new Date(hit.en).toISOString(), ...hit.valor };
+
+  const flujos = await prisma.$queryRaw<{ id: number; process: string }[]>`
+    SELECT pc.id, pc.process
+    FROM dbo.process_category pc
+    JOIN dbo.company_category_request ccr ON ccr.id_category_request = pc.id_category_request
+    WHERE ccr.id_company = ${idCompany} AND pc.active = 1`;
+  const ids = flujos.map((f) => f.id);
+  const decisiones =
+    ids.length > 0
+      ? await prisma.workflowMejoraDecision.findMany({
+          where: { id_process_category: { in: ids } },
+          select: { id_process_category: true, clave: true, estado: true, metrica_antes: true },
+        })
+      : [];
+
+  // De a 3 flujos a la vez: no cargar la base con decenas de consultas simultáneas.
+  const resumenes: ResumenFlujo[] = [];
+  for (let i = 0; i < flujos.length; i += 3) {
+    const lote = await Promise.all(
+      flujos.slice(i, i + 3).map(async (f) => {
+        const r = await diagnosticoDelFlujo(f.id, opciones);
+        if (!r.habilitado) return null;
+        const dec: DecisionResumen[] = decisiones
+          .filter((x) => x.id_process_category === f.id)
+          .map((x) => ({
+            clave: x.clave,
+            estado: x.estado as DecisionResumen['estado'],
+            medianaAntes: x.metrica_antes ? ((JSON.parse(x.metrica_antes) as { medianaDias?: number | null }).medianaDias ?? null) : null,
+          }));
+        return resumirFlujo(f.id, f.process.trim(), r.diagnostico, dec);
+      })
+    );
+    for (const x of lote) if (x) resumenes.push(x);
+  }
+  resumenes.sort((a, b) => b.prioridad - a.prioridad || b.solicitudes - a.solicitudes);
+  const valor = { flujos: resumenes, total: totalizar(resumenes) };
+  const en = Date.now();
+  cacheResumen.set(idCompany, { en, valor });
+  return { calculadoEn: new Date(en).toISOString(), ...valor };
 }

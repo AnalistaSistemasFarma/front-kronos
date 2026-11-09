@@ -222,6 +222,8 @@ function RequestBoard() {
   const [isPurchaseProcess, setIsPurchaseProcess] = useState(false);
   // Oferta de venta (sales_company_config.id_process_category_oferta): formulario propio, como Compras.
   const [isSalesProcess, setIsSalesProcess] = useState(false);
+  /** «Pedido directo de venta» abre el mismo formulario de Ventas con esa opción ya elegida. */
+  const [salesModo, setSalesModo] = useState<'enviar' | 'directo'>('enviar');
   const isSapFormProcess = isPurchaseProcess || isSalesProcess;
   const [purchaseNotice, setPurchaseNotice] = useState<{ ok: boolean; message: string } | null>(null);
   const isSubmittingRef = useRef(false);
@@ -989,7 +991,10 @@ function RequestBoard() {
     fetch(`/api/sales/entry?companyId=${formData.company}&processId=${formData.process}`)
       .then((r) => r.json())
       .then((d) => {
-        if (!cancelled) setIsSalesProcess(Boolean(d?.isSales));
+        if (!cancelled) {
+          setIsSalesProcess(Boolean(d?.isSales));
+          setSalesModo(d?.modo === 'directo' ? 'directo' : 'enviar');
+        }
       })
       .catch(() => {
         if (!cancelled) setIsSalesProcess(false);
@@ -1973,8 +1978,10 @@ function RequestBoard() {
 
             {isSalesProcess && (
               <SalesInlineForm
+                key={`${formData.company}-${salesModo}`}
                 companyId={formData.company}
                 subject={formData.subject}
+                initialModo={salesModo}
                 onDone={({ ok, message }) => {
                   setModalOpened(false);
                   setFormData({ company: '', subject: '', category: '', process: '', descripcion: '', url: '' });

@@ -24,6 +24,8 @@ interface Props {
   onDone: (result: { ok: boolean; message: string }) => void;
   /** Editar una oferta guardada en borrador (DocEntry del borrador): misma ventana, ya llena. */
   editDocEntry?: number;
+  /** Opción con la que arranca el formulario (el proceso «Pedido directo de venta» llega con 'directo'). */
+  initialModo?: 'enviar' | 'borrador' | 'directo';
 }
 
 interface Line {
@@ -60,7 +62,7 @@ const notifySapError = (msg: string) => toast.error(sapErrorText(msg), { duratio
 const empty = (v: unknown) => v == null || String(v).trim() === '';
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
 
-export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Props) {
+export default function SalesInlineForm({ companyId, onDone, editDocEntry, initialModo }: Props) {
   const editing = Boolean(editDocEntry);
   const [loadingDraft, setLoadingDraft] = useState(editing);
   const [readiness, setReadiness] = useState<Readiness>('loading');
@@ -80,7 +82,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry }: Pro
   const [lines, setLines] = useState<Line[]>([{}]);
   const [saving, setSaving] = useState(false);
   /** Al crear: enviar a autorización, guardar en borrador (como SAPSEND) o pedido directo (si la empresa lo permite). */
-  const [modo, setModo] = useState<Modo>('enviar');
+  const [modo, setModo] = useState<Modo>(initialModo ?? 'enviar');
   const enviar = modo !== 'borrador';
   /** Búsqueda ampliada abierta («*» + Enter o lupa): tipo, línea y texto. */
   const [search, setSearch] = useState<{ kind: SearchKind; line?: number; q?: string; itemCode?: string; cardCode?: string } | null>(null);
