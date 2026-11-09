@@ -72,6 +72,7 @@ import {
 } from '../../../../../components/request-general/list/RequestListUi';
 import requestListStyles from '../../../../../components/request-general/list/requestList.module.css';
 import WorkloadDistribution from '../../../../../components/request-general/WorkloadDistribution';
+import TeamTasksPanel, { useTeamAccess } from '../../../../../components/request-general/TeamTasksPanel';
 import { RequestFlowBar, useRequestFlows } from '../../../../../components/request-general/RequestFlow';
 import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
 import IosSearchField from '../../../../../components/ui/IosSearchField';
@@ -190,6 +191,11 @@ function RequestBoard() {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>(
     initialType === 'tasks' || initialType === 'requests' ? initialType : 'all'
   );
+  // Pestaña "Mi equipo": solo para quien tiene el permiso "Ver tareas de mi equipo" (Líder de solicitudes).
+  const teamAccess = useTeamAccess();
+  const canViewTeam = Boolean(teamAccess?.canViewTeam);
+  const [showTeam, setShowTeam] = useState(false);
+  const [teamCount, setTeamCount] = useState<number | null>(null);
   const [tasksByRequest, setTasksByRequest] = useState<Record<number, RequestTask[]>>({});
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -1442,15 +1448,36 @@ function RequestBoard() {
               fullWidth={isMobile}
               size={isMobile ? 'xs' : 'sm'}
               w={{ base: '100%', sm: 'auto' }}
-              value={typeFilter}
-              onChange={(value) => changeTypeFilter(value as TypeFilter)}
+              value={showTeam ? 'team' : typeFilter}
+              onChange={(value) => {
+                if (value === 'team') {
+                  setShowTeam(true);
+                  return;
+                }
+                setShowTeam(false);
+                changeTypeFilter(value as TypeFilter);
+              }}
               data={[
                 { value: 'all', label: `Todos (${totalItemsCount})` },
                 { value: 'requests', label: `Solicitudes (${totalTickets})` },
                 { value: 'tasks', label: `Tareas (${visibleTasks.length})` },
+                ...(canViewTeam
+                  ? [{ value: 'team', label: teamCount == null ? 'Mi equipo' : `Mi equipo (${teamCount})` }]
+                  : []),
               ]}
             />
           </Group>
+
+          {showTeam && teamAccess && canViewTeam ? (
+            <TeamTasksPanel
+              departments={teamAccess.departments}
+              renderStatusBadge={renderStatusBadge}
+              formatDate={formatAssignedDate}
+              onReassigned={() => void fetchTickets()}
+              onMembersCount={setTeamCount}
+            />
+          ) : (
+          <>
 
           {/* Móvil: tarjetas apiladas en lugar de la tabla ancha */}
           <Stack gap='xs' hiddenFrom='md' data-testid='assigned-mobile-list'>
@@ -1693,6 +1720,8 @@ function RequestBoard() {
                 size={isMobile ? 'sm' : 'md'}
               />
             </Group>
+          )}
+          </>
           )}
         </Card>
     </RequestsPage>
