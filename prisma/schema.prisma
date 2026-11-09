@@ -5784,3 +5784,24 @@ model BiomedEvento {
   @@map("biomed_evento")
   @@schema("dbo")
 }
+
+/// MEJORA CONTINUA de los flujos de trabajo (2026-11-09, docs/flujos-mejora-continua.md):
+/// lo que decidió una persona sobre una sugerencia del panel (aplicada o descartada), con la
+/// cifra de la tarea en ese momento para medir el antes y el después.
+model WorkflowMejoraDecision {
+  id_decision         Int      @id @default(autoincrement())
+  id_process_category Int
+  /// «tipo:idTarea» o «tipo:flujo» (lib/workflow/mejora-continua-rules.ts).
+  clave               String   @db.NVarChar(80)
+  /// 'aplicada' | 'descartada' (CHECK en la base).
+  estado              String   @db.NVarChar(20)
+  motivo              String?  @db.NVarChar(1000)
+  titulo              String?  @db.NVarChar(400)
+  metrica_antes       String?  @db.NVarChar(2000)
+  decided_by          String   @db.NVarChar(1000)
+  decided_at          DateTime @default(now())
+
+  @@unique([id_process_category, clave], map: "workflow_mejora_decision_flujo_clave_key")
+  @@map("workflow_mejora_decision")
+  @@schema("dbo")
+}
