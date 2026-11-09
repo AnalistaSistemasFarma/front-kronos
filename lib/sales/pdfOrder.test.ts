@@ -39,6 +39,14 @@ describe('montar la oferta desde el PDF', () => {
     expect(b?.ItemCode).toBe('10223');
     expect(similarity('Infusor Homepump 270 ml 5ml/h', c[1].ItemName)).toBeGreaterThan(similarity('Infusor Homepump 270 ml 5ml/h', c[0].ItemName));
   });
+  it('la talla cuenta: no cambia talla M por L', () => {
+    const c = [
+      { ItemCode: 'L', ItemName: 'GUANTES DE NITRILO NO ESTERIL AZUL TALLA - L CAJA X 100' },
+      { ItemCode: 'M', ItemName: 'GUANTES DE NITRILO NO ESTERIL AZUL TALLA - M CAJA X 100' },
+    ];
+    expect(bestCandidate('GUANTES DE NITRILO TALLA M', c)?.ItemCode).toBe('M');
+    expect(bestCandidate('GUANTES DE NITRILO TALLA M', [c[0]])).toBeNull();
+  });
   it('sin parecido suficiente no elige nada', () => {
     expect(bestCandidate('GUANTES DE NITRILO', [{ ItemCode: '1', ItemName: 'EPINEFRINA 1MG' }])).toBeNull();
   });

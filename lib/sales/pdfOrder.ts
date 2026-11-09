@@ -112,6 +112,8 @@ const tokens = (s: string) =>
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/(\d)\s+(ML|MG|G|MCG|UI|L|H)\b/g, '$1$2')
+    // La talla es una medida: «TALLA M», «TALLA - L» → TALLA.M / TALLA.L (pesa como las medidas).
+    .replace(/\bTALLA\s*-?\s*(XXL|XL|XS|S|M|L|\d{1,2})\b/g, 'TALLA.$1')
     .split(/[^A-Z0-9./]+/)
     .filter((w) => w.length >= 2);
 
@@ -121,9 +123,14 @@ export function similarity(desc: string, name: string): number {
   const b = new Set(tokens(name));
   if (!a.size || !b.size) return 0;
   let hit = 0;
-  for (const t of a) if (b.has(t)) hit += /\d/.test(t) ? 2 : 1; // las medidas (270ML, 5ML/H) pesan doble
+  const peso = (t: string) => (/\d/.test(t) || t.startsWith('TALLA.') ? 2 : 1); // medidas (270ML, 5ML/H) y talla pesan doble
+  for (const t of a) if (b.has(t)) hit += peso(t);
   let total = 0;
-  for (const t of a) total += /\d/.test(t) ? 2 : 1;
+  for (const t of a) total += peso(t);
+  // Talla distinta a la pedida: no es el mismo artículo.
+  const tallaA = [...a].find((t) => t.startsWith('TALLA.'));
+  const tallaB = [...b].find((t) => t.startsWith('TALLA.'));
+  if (tallaA && tallaB && tallaA !== tallaB) return 0;
   return hit / total;
 }
 
