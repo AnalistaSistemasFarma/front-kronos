@@ -65,6 +65,8 @@ export async function validateLines(
       : pickPrice(it.ItemPrices as { PriceList: number; Price: number }[] | undefined, bpList, a.priceListDefault ?? null);
     const listPrice = lp.price ?? 0;
     lines.push({
+      // Renglón del archivo: con él se conserva el orden del documento (el humano valida de arriba abajo).
+      row: l.row,
       ItemCode: String(it.ItemCode),
       // Del PDF la descripción es la del cliente: en la oferta va la de SAP (salvo Excel con descripción editable).
       ItemDescription: !matchByDescription && a.descripcionEditable && l.ItemDescription ? l.ItemDescription : String(it.ItemName ?? ''),

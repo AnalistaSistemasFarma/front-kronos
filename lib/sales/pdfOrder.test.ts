@@ -75,3 +75,11 @@ describe('OC larga: por fragmentos (ventana de contexto pequeña)', () => {
     expect(m.lineas.map((x) => `${x.row}${x.ItemCode}`)).toEqual(['1A', '2B', '3C']);
   });
 });
+
+describe('orden de las líneas', () => {
+  it('las líneas leídas conservan el renglón del documento al unir fragmentos', () => {
+    const l = (code: string) => ({ row: 9, ItemCode: code, Quantity: 1, UnitPrice: null, WarehouseCode: '', ItemDescription: code });
+    const m = mergePdfOrders([{ numeroOrdenCompra: '', nitCliente: '', fechaEntrega: '', lineas: [l('A'), l('B')] }, { numeroOrdenCompra: '', nitCliente: '', fechaEntrega: '', lineas: [l('C')] }]);
+    expect(m.lineas.map((x) => x.row)).toEqual([1, 2, 3]);
+  });
+});

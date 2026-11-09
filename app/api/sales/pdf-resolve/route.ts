@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
         priceListDefault: conf?.priceListDefault ?? null, defaultWarehouse: conf?.defaultWarehouse ?? null,
       });
       const avisos: string[] = v.errors.map((e) => e.error);
-      const lines = v.lines.map((l) => ({ ...l, aiNote: null as string | null }));
+      const lines: Record<string, unknown>[] = v.lines.map((l) => ({ ...l, aiNote: null as string | null }));
       const elegidos: (ImportLine & { aiNote: string })[] = [];
       for (const p of v.pending) {
         const b = bestCandidate(p.input.ItemDescription, p.candidates);
@@ -80,9 +80,11 @@ export async function POST(request: NextRequest) {
           cardCode: customer.CardCode, input: elegidos, matchByDescription: false,
           priceListDefault: conf?.priceListDefault ?? null, defaultWarehouse: conf?.defaultWarehouse ?? null,
         });
-        v2.lines.forEach((l) => lines.push({ ...l, aiNote: elegidos.find((e) => e.ItemCode === l.ItemCode)?.aiNote ?? null }));
+        v2.lines.forEach((l) => lines.push({ ...l, aiNote: elegidos.find((e) => e.row === l.row)?.aiNote ?? null }));
         avisos.push(...v2.errors.map((e) => e.error));
       }
+      // Mismo orden del PDF, de arriba abajo (las emparejadas por descripción se validan aparte y quedaban al final).
+      lines.sort((x, y) => Number(x.row ?? 0) - Number(y.row ?? 0));
       return NextResponse.json({ customer, customerCandidates, lines, avisos });
     } finally {
       await sapLogout(sap);
