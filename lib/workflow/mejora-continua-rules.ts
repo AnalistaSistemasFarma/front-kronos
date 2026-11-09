@@ -225,9 +225,13 @@ export function diagnosticar(entrada: {
       }
       let semaforo: Semaforo = 'sin_datos';
       if (l.length >= MIN_CASOS && mediana !== null) {
+        // Un flujo rápido no tiene cuellos de botella aunque una tarea se lleve la mayor parte
+        // del poco tiempo: el rojo exige demora real (lo normal ≥ 1 día) y el amarillo, que al
+        // menos los casos lentos pasen de 2 días o lo normal de medio día.
+        const p90 = percentil(l, 0.9) ?? 0;
         const lenta = mediana >= 1 && mediana >= 2 * medianaDeMedianas;
-        if (participacion >= 0.35 || (lenta && mediana >= 3)) semaforo = 'rojo';
-        else if (participacion >= 0.2 || lenta) semaforo = 'ambar';
+        if (mediana >= 1 && (participacion >= 0.35 || (lenta && mediana >= 3))) semaforo = 'rojo';
+        else if ((mediana >= 0.5 || p90 >= 2) && (participacion >= 0.2 || lenta)) semaforo = 'ambar';
         else semaforo = 'verde';
       }
       const p = pend.get(t.id) ?? [];
