@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { vi } from 'vitest';
+vi.mock('../../dbconfig.js', () => ({ default: {} }));
+vi.mock('../purchases/authorization', () => ({ companySap: vi.fn() }));
+vi.mock('./offerFlow', () => ({ createDraftOfferRequest: vi.fn() }));
 import { headerField, rowsToLines } from './linesImport';
 
 describe('cargue de líneas desde Excel', () => {
@@ -22,5 +26,13 @@ describe('cargue de líneas desde Excel', () => {
       { row: 6, ItemCode: 'A3', Quantity: 3, UnitPrice: null, WarehouseCode: 'B1101', ItemDescription: '' },
     ]);
     expect(r.errors.map((e) => e.row)).toEqual([3, 4]);
+  });
+});
+
+import { quotationOf } from './rejection';
+describe('retomar oferta', () => {
+  it('encuentra la cotización de origen por las líneas del borrador', () => {
+    expect(quotationOf([{ BaseType: -1, BaseEntry: null }, { BaseType: 23, BaseEntry: 77 }])).toBe(77);
+    expect(quotationOf([])).toBeNull();
   });
 });

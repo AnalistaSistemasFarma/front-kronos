@@ -26,7 +26,8 @@ export async function GET(request: NextRequest) {
       `SELECT TOP 1 id_company, doc_entry, status, order_doc_entry, error FROM dbo.sales_authorization WHERE id_request_general = @r
        IF @@ROWCOUNT = 0
          -- Oferta guardada en borrador (sin flujo todavía): su solicitud está «En Borrador».
-         SELECT TOP 1 id_company, doc_entry, N'borrador' AS status, NULL AS order_doc_entry, NULL AS error FROM dbo.sales_offer_draft WHERE id_request_general = @r AND status = N'borrador';`
+         SELECT TOP 1 id_company, doc_entry, CASE status WHEN N'anulado' THEN N'cancelled' ELSE N'borrador' END AS status, NULL AS order_doc_entry, NULL AS error
+         FROM dbo.sales_offer_draft WHERE id_request_general = @r AND status IN (N'borrador', N'anulado');`
     );
     const sets = (r.recordsets as unknown as Record<string, unknown>[][]) ?? [];
     const link = (sets.find((x) => x.length) ?? [])[0] as { id_company: number; doc_entry: number; status: string; order_doc_entry: number | null; error: string | null } | undefined;
