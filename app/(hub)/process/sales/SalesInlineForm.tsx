@@ -331,7 +331,8 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
       setCardName(r.customer.CardName);
       loadCustomer(r.customer.CardCode);
     }
-    setLines(r.lines as Line[]);
+    // Se suman a las filas que ya tenga la oferta (las vacías se descartan).
+    setLines((prev) => [...prev.filter((l) => !empty(l.ItemCode)), ...(r.lines as Line[])]);
     if (r.numeroOrdenCompra) setNumAtCard(r.numeroOrdenCompra);
     if (r.fechaEntrega && r.fechaEntrega >= today()) setDueDate(r.fechaEntrega);
     const revisar = (r.lines as Line[]).filter((l) => String(l.aiNote ?? '').startsWith('Revisar')).length;
@@ -341,7 +342,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
       ...(!r.fechaEntrega || r.fechaEntrega < today() ? ['El PDF no trae una fecha de entrega válida: indíquela.'] : []),
       ...r.avisos,
     ]);
-    toast.success('Oferta montada desde el PDF. Revísela y créela.');
+    toast.success(`${r.lines.length} línea(s) agregada(s) desde el PDF. Revise la oferta y créela.`);
   };
 
   return (
