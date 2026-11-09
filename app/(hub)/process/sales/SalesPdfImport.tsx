@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Alert, Button, Group, Modal, Progress, Stack, Text, Tooltip } from '@mantine/core';
+import { Alert, Badge, Button, Checkbox, Group, Modal, Progress, ScrollArea, Stack, Table, Text, Tooltip } from '@mantine/core';
 import { IconAlertCircle, IconSparkles } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
 import { chunkOrderText, mergePdfOrders, PDF_ORDER_SCHEMA, PDF_ORDER_SYSTEM_PROMPT, parsePdfOrder, pdfOrderChunkPrompt, tableHeaderRow, type PdfOrderResult } from '../../../../lib/sales/pdfOrder';
@@ -16,7 +16,8 @@ import { chunkOrderText, mergePdfOrders, PDF_ORDER_SCHEMA, PDF_ORDER_SYSTEM_PROM
 
 type Line = Record<string, unknown>;
 type Support = 'checking' | 'unsupported' | 'ready';
-type Phase = 'idle' | 'leyendo' | 'descargando' | 'analizando' | 'montando' | 'error';
+type Phase = 'idle' | 'leyendo' | 'descargando' | 'analizando' | 'montando' | 'simulacion' | 'error';
+const money = (v: unknown) => (v == null || v === '' ? '—' : `$ ${Number(v).toLocaleString('es-CO')}`);
 
 export interface PdfOffer {
   customer: { CardCode: string; CardName: string };
@@ -84,6 +85,8 @@ export default function SalesPdfImport({ companyId, cardCode, onLoaded }: Props)
   const [phase, setPhase] = useState<Phase>('idle');
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
+  /** Simulación: lo que se montaría, antes de agregarlo a la oferta (Nicolás Rivera, 2026-11-09). */
+  const [sim, setSim] = useState<(Omit<PdfOffer, 'lines'> & { lines: (Line & { include: boolean })[] }) | null>(null);
   /** Avance de la lectura por fragmentos (OC de varias hojas). */
   const [step, setStep] = useState<{ k: number; n: number } | null>(null);
 
@@ -181,15 +184,28 @@ export default function SalesPdfImport({ companyId, cardCode, onLoaded }: Props)
       if (!d.customer) throw new Error((d.avisos ?? []).join(' ') || 'No se identificó el cliente del PDF.');
       if (!(d.lines ?? []).length) throw new Error(`Se identificó el cliente ${d.customer.CardName}, pero ninguna línea del PDF se encontró en SAP. ${(d.avisos ?? []).join(' ')}`);
       const avisoFallos = fallos.length ? [`La IA no pudo leer ${fallos.length === 1 ? 'la parte' : 'las partes'} ${fallos.join(', ')} del PDF: compare las líneas con el documento.`] : [];
-      onLoaded({ customer: d.customer, lines: d.lines, numeroOrdenCompra: r.numeroOrdenCompra, fechaEntrega: r.fechaEntrega, avisos: [...avisoFallos, ...(d.avisos ?? [])], leidas: r.lineas.length });
-      setPhase('idle');
+      setSim({
+        customer: d.customer, lines: (d.lines as Line[]).map((l) => ({ ...l, include: true })), numeroOrdenCompra: r.numeroOrdenCompra,
+        fechaEntrega: r.fechaEntrega, avisos: [...avisoFallos, ...(d.avisos ?? [])], leidas: r.lineas.length,
+      });
+      setPhase('simulacion');
     } catch (e) {
       setError((e as Error).message);
       setPhase('error');
     }
   };
 
-  const working = phase !== 'idle' && phase !== 'error';
+  const working = phase !== 'idle' && phase !== 'error' && phase !== 'simulacion';
+
+  /** Agrega a la oferta lo simulado (solo las líneas marcadas). */
+  const apply = () => {
+    if (!sim) return;
+    const lines = sim.lines.filter((l) => l.include).map(({ include: _i, ...l }) => l);
+    if (!lines.length) return;
+    onLoaded({ ...sim, lines });
+    setSim(null);
+    setPhase('idle');
+  };
   const inputId = `pdf-ia-${companyId}`;
 
   return (
@@ -205,7 +221,7 @@ export default function SalesPdfImport({ companyId, cardCode, onLoaded }: Props)
       </Tooltip>
       <input id={inputId} type="file" accept="application/pdf" hidden onChange={(e) => { analyze(e.currentTarget.files?.[0] ?? null); e.currentTarget.value = ''; }} />
 
-      <Modal opened={phase !== 'idle'} onClose={() => !working && setPhase('idle')} title={<Group gap={6}><IconSparkles size={18} /><Text fw={700}>Oferta desde el PDF (IA local)</Text></Group>}
+      <Modal opened={phase !== 'idle'} onClose={() => !working && setPhase('idle')} size={phase === 'simulacion' ? 'xl' : 'md'} title={<Group gap={6}><IconSparkles size={18} /><Text fw={700}>Oferta desde el PDF (IA local)</Text></Group>}
         closeOnClickOutside={!working} withCloseButton={!working} zIndex={1300}>
         {working && (
           <Stack gap="xs">
@@ -216,6 +232,53 @@ export default function SalesPdfImport({ companyId, cardCode, onLoaded }: Props)
           </Stack>
         )}
         {phase === 'error' && <Alert color="red" icon={<IconAlertCircle size={16} />} title="No se pudo montar la oferta">{error}</Alert>}
+        {phase === 'simulacion' && sim && (
+          <Stack gap="sm">
+            <Text size="sm" c="dimmed">Simulación: así quedaría la oferta con lo que la IA leyó del PDF. Nada se agrega hasta que confirme.</Text>
+            <Group gap="lg" wrap="wrap">
+              <Text size="sm"><Text span c="dimmed">Cliente: </Text><b>{sim.customer.CardName}</b> ({sim.customer.CardCode})</Text>
+              <Text size="sm"><Text span c="dimmed">OC: </Text>{sim.numeroOrdenCompra || '—'}</Text>
+              <Text size="sm"><Text span c="dimmed">Entrega: </Text>{sim.fechaEntrega || '— (indíquela)'}</Text>
+              <Text size="sm"><Text span c="dimmed">Líneas: </Text>{sim.lines.length}{sim.leidas && sim.leidas !== sim.lines.length ? ` de ${sim.leidas} leídas en el PDF` : ''}</Text>
+            </Group>
+            {sim.avisos.length > 0 && <Alert color="orange" variant="light">{sim.avisos.map((a, i) => <Text key={i} size="xs">{a}</Text>)}</Alert>}
+            <ScrollArea.Autosize mah={420}>
+              <Table striped withTableBorder verticalSpacing={4}>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th><Checkbox checked={sim.lines.every((l) => l.include)} indeterminate={sim.lines.some((l) => l.include) && !sim.lines.every((l) => l.include)}
+                      onChange={(e) => { const c = e.currentTarget.checked; setSim({ ...sim, lines: sim.lines.map((l) => ({ ...l, include: c })) }); }} /></Table.Th>
+                    <Table.Th>Artículo en SAP</Table.Th><Table.Th style={{ textAlign: 'right' }}>Cantidad</Table.Th>
+                    <Table.Th style={{ textAlign: 'right' }}>Precio OC</Table.Th><Table.Th style={{ textAlign: 'right' }}>Precio lista</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {sim.lines.map((l, i) => (
+                    <Table.Tr key={i}>
+                      <Table.Td><Checkbox checked={l.include} onChange={(e) => { const c = e.currentTarget.checked; setSim({ ...sim, lines: sim.lines.map((x, j) => (j === i ? { ...x, include: c } : x)) }); }} /></Table.Td>
+                      <Table.Td>
+                        <Text size="sm">{String(l.ItemCode)} · {String(l.ItemDescription ?? '')}</Text>
+                        {l.aiNote ? <Badge size="xs" variant="light" color={String(l.aiNote).startsWith('Revisar') ? 'orange' : 'violet'} style={{ whiteSpace: 'normal', height: 'auto' }}>✨ {String(l.aiNote)}</Badge> : null}
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: 'right' }}>{Number(l.Quantity).toLocaleString('es-CO')}</Table.Td>
+                      <Table.Td style={{ textAlign: 'right' }}>{money(l.UnitPrice)}</Table.Td>
+                      <Table.Td style={{ textAlign: 'right' }}>{money(l.ListPrice)}</Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </ScrollArea.Autosize>
+            <Group justify="space-between">
+              <Text size="xs" c="dimmed">Desmarque las líneas que no correspondan. Lo marcado «Revisar» se eligió por la descripción.</Text>
+              <Group gap="xs">
+                <Button variant="default" onClick={() => { setSim(null); setPhase('idle'); }}>Cancelar</Button>
+                <Button color="violet" disabled={!sim.lines.some((l) => l.include)} onClick={apply}>
+                  Agregar a la oferta ({sim.lines.filter((l) => l.include).length})
+                </Button>
+              </Group>
+            </Group>
+          </Stack>
+        )}
       </Modal>
     </>
   );
