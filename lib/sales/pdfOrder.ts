@@ -98,3 +98,43 @@ export function searchTerms(desc: string): string[] {
     .filter((w) => w.length >= 4 && !stop.has(w.toLowerCase()) && !/^\d+$/.test(w))
     .slice(0, 2);
 }
+
+/** NIT sin dígito de verificación ni separadores («900.123.456-7» → «900123456»). PURA. */
+export function nitBase(nit: string): string {
+  const s = String(nit ?? '').trim();
+  const sinDv = s.includes('-') ? s.slice(0, s.lastIndexOf('-')) : s;
+  return sinDv.replace(/\D/g, '');
+}
+
+const tokens = (s: string) =>
+  String(s ?? '')
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/(\d)\s+(ML|MG|G|MCG|UI|L|H)\b/g, '$1$2')
+    .split(/[^A-Z0-9./]+/)
+    .filter((w) => w.length >= 2);
+
+/** Parecido entre la descripción de la OC y el nombre del artículo en SAP (0 a 1): palabras y medidas en común. PURA. */
+export function similarity(desc: string, name: string): number {
+  const a = new Set(tokens(desc));
+  const b = new Set(tokens(name));
+  if (!a.size || !b.size) return 0;
+  let hit = 0;
+  for (const t of a) if (b.has(t)) hit += /\d/.test(t) ? 2 : 1; // las medidas (270ML, 5ML/H) pesan doble
+  let total = 0;
+  for (const t of a) total += /\d/.test(t) ? 2 : 1;
+  return hit / total;
+}
+
+/**
+ * Elige el artículo de SAP más parecido. Se toma solo si es claro: puntaje ≥ 0,5 y sin empate con el segundo
+ * (si hay empate, se deja el mejor pero marcado «a revisar»). PURA.
+ */
+export function bestCandidate(desc: string, candidates: { ItemCode: string; ItemName: string }[]): { ItemCode: string; ItemName: string; score: number; seguro: boolean } | null {
+  const scored = candidates.map((c) => ({ ...c, score: similarity(desc, c.ItemName) })).sort((x, y) => y.score - x.score);
+  const top = scored[0];
+  if (!top || top.score < 0.34) return null;
+  const second = scored[1]?.score ?? 0;
+  return { ...top, seguro: top.score >= 0.5 && top.score - second >= 0.15 };
+}

@@ -8,7 +8,7 @@ import { LINE_HEADERS, MAX_IMPORT_LINES, rowsToLines } from '../../../../lib/sal
 import toast from 'react-hot-toast';
 import SapLookupInput from '../purchases/SapLookupInput';
 import SalesSearchModal, { type SearchKind } from './SalesSearchModal';
-import SalesPdfImport from './SalesPdfImport';
+import SalesPdfImport, { type PdfOffer } from './SalesPdfImport';
 import { sapErrorText } from '../../../../lib/purchases/sapErrorHint';
 
 /**
@@ -39,6 +39,8 @@ interface Line {
   TaxCode?: string;
   /** Línea de la cotización a la que está enlazada (solo al editar un borrador). */
   BaseLine?: number | null;
+  /** Nota de la IA al montar la oferta desde el PDF (p. ej. «Revisar: emparejado por descripción»). */
+  aiNote?: string | null;
 }
 
 type Readiness = 'loading' | 'ready' | 'no-write' | 'no-sap';
@@ -75,6 +77,8 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
   const [pickRemark, setPickRemark] = useState('');
   const [opts, setOpts] = useState<CompanyOptions>({ pedidoDirecto: false, descripcionEditable: false, exigeOc: true });
   const [importing, setImporting] = useState(false);
+  /** Avisos de la oferta montada desde el PDF (lo que no se pudo y lo que hay que revisar). */
+  const [pdfAvisos, setPdfAvisos] = useState<string[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   /** Puntos de entrega (direcciones de envío del cliente), como ModalLogistic de SAPSEND. */
   const [addresses, setAddresses] = useState<{ AddressName: string; Street: string; Block: string; City: string; County: string; Country: string; isDefault: boolean }[]>([]);
@@ -320,8 +324,37 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
     );
   }
 
+  /** Oferta montada desde el PDF con la IA del navegador: llena cliente, punto de entrega, OC, fecha y líneas. */
+  const loadFromPdf = (r: PdfOffer) => {
+    if (!editing) {
+      setCardCode(r.customer.CardCode);
+      setCardName(r.customer.CardName);
+      loadCustomer(r.customer.CardCode);
+    }
+    setLines(r.lines as Line[]);
+    if (r.numeroOrdenCompra) setNumAtCard(r.numeroOrdenCompra);
+    if (r.fechaEntrega && r.fechaEntrega >= today()) setDueDate(r.fechaEntrega);
+    const revisar = (r.lines as Line[]).filter((l) => String(l.aiNote ?? '').startsWith('Revisar')).length;
+    setPdfAvisos([
+      `Oferta montada desde el PDF: ${r.customer.CardName} · ${r.lines.length} línea(s)${r.numeroOrdenCompra ? ` · OC ${r.numeroOrdenCompra}` : ''}.`,
+      ...(revisar ? [`${revisar} línea(s) marcadas «Revisar»: la IA eligió el artículo por la descripción y hay otros parecidos.`] : []),
+      ...(!r.fechaEntrega || r.fechaEntrega < today() ? ['El PDF no trae una fecha de entrega válida: indíquela.'] : []),
+      ...r.avisos,
+    ]);
+    toast.success('Oferta montada desde el PDF. Revísela y créela.');
+  };
+
   return (
     <Stack gap="md">
+      <Group justify="space-between" wrap="wrap" gap="xs">
+        <Text size="sm" c="dimmed">¿Tiene la orden de compra del cliente en PDF? La IA de su navegador la lee y monta la oferta.</Text>
+        <SalesPdfImport companyId={companyId} cardCode={editing ? cardCode : undefined} onLoaded={loadFromPdf} />
+      </Group>
+      {pdfAvisos && (
+        <Alert color="violet" variant="light" withCloseButton onClose={() => setPdfAvisos(null)} title="Revise antes de crear">
+          {pdfAvisos.map((a, i) => <Text key={i} size="sm">{a}</Text>)}
+        </Alert>
+      )}
       <Group grow align="flex-start">
         {editing ? (
           <TextInput label="Cliente" value={`${cardCode} · ${cardName}`} readOnly description="En un borrador no se cambia el cliente (como en SAPSEND)." />
@@ -451,6 +484,7 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
                     ) : (
                       <Text size="xs">{l.ItemDescription ?? ''}</Text>
                     )}
+                    {l.aiNote && <Text size="xs" c={String(l.aiNote).startsWith('Revisar') ? 'orange' : 'violet'}>✨ {l.aiNote}</Text>}
                     {l.ItemCode && l.ItemDescription && (
                       <Group gap={4}>
                         <Button size="compact-xs" variant="subtle" onClick={() => setSearch({ kind: 'warehouse_stock', line: i, itemCode: l.ItemCode })}>
@@ -507,16 +541,6 @@ export default function SalesInlineForm({ companyId, onDone, editDocEntry, initi
             <Button variant="subtle" color="gray" leftSection={<IconDownload size={16} />} onClick={downloadTemplate}>
               Plantilla
             </Button>
-            <SalesPdfImport
-              companyId={companyId}
-              cardCode={cardCode}
-              onAccept={(r) => {
-                setLines((prev) => [...prev.filter((l) => !empty(l.ItemCode)), ...(r.lines as Line[])]);
-                if (r.numeroOrdenCompra && !numAtCard.trim()) setNumAtCard(r.numeroOrdenCompra);
-                if (r.fechaEntrega && !dueDate && r.fechaEntrega >= today()) setDueDate(r.fechaEntrega);
-                toast.success(`${r.lines.length} línea(s) agregada(s) desde el PDF. Revíselas antes de crear la oferta.`);
-              }}
-            />
             <input ref={fileRef} type="file" accept=".xlsx" hidden onChange={(e) => importExcel(e.currentTarget.files?.[0] ?? null)} />
           </Group>
           <Text fw={600}>Total antes de impuestos: {total.toLocaleString('es-CO')}</Text>

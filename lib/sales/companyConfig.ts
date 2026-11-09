@@ -16,13 +16,15 @@ export interface SalesCompanyConfig {
   descripcionEditable: boolean;
   priceListDefault: number | null;
   exigeOc: boolean;
+  /** Bodega por defecto de la empresa (si el artículo no trae la suya). */
+  defaultWarehouse: string | null;
 }
 
 export async function salesCompanyConfig(idCompany: number): Promise<SalesCompanyConfig | null> {
   const pool = await sql.connect(sqlConfig);
   const r = await pool.request().input('c', sql.Int, idCompany).query(`
     SELECT id_company, activo, valida_precio, id_process_category_oferta, id_process_category_directa,
-           descripcion_editable, id_price_list_default, exige_oc
+           descripcion_editable, id_price_list_default, exige_oc, default_warehouse
     FROM dbo.sales_company_config WHERE id_company = @c;`);
   const x = r.recordset[0];
   if (!x) return null;
@@ -35,5 +37,6 @@ export async function salesCompanyConfig(idCompany: number): Promise<SalesCompan
     descripcionEditable: Boolean(x.descripcion_editable),
     priceListDefault: x.id_price_list_default ?? null,
     exigeOc: x.exige_oc == null ? true : Boolean(x.exige_oc),
+    defaultWarehouse: x.default_warehouse ? String(x.default_warehouse) : null,
   };
 }

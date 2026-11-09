@@ -22,3 +22,24 @@ describe('PDF de la OC con IA del navegador', () => {
     expect(searchTerms('INFUSOR MED HOMEPUMP 270ML')).toEqual(['INFUSOR', 'HOMEPUMP']);
   });
 });
+
+import { bestCandidate, nitBase, similarity } from './pdfOrder';
+describe('montar la oferta desde el PDF', () => {
+  it('NIT base sin dígito de verificación', () => {
+    expect(nitBase('900.123.456-7')).toBe('900123456');
+    expect(nitBase('1015435914')).toBe('1015435914');
+  });
+  it('elige el infusor con la medida correcta', () => {
+    const c = [
+      { ItemCode: '10220', ItemName: 'INFUSOR MED HOMEPUMP 270ML - 10ML/H-1D  CAJA X 6' },
+      { ItemCode: '10223', ItemName: 'INFUSOR MED HOMEPUMP 270ML - 5ML/H-2D  CAJA X 6' },
+      { ItemCode: '10605', ItemName: 'MINICANGURO PARA INFUSOR HOMEPUMP UNIDAD (4042078)' },
+    ];
+    const b = bestCandidate('Infusor Homepump 270 ml 5ml/h', c);
+    expect(b?.ItemCode).toBe('10223');
+    expect(similarity('Infusor Homepump 270 ml 5ml/h', c[1].ItemName)).toBeGreaterThan(similarity('Infusor Homepump 270 ml 5ml/h', c[0].ItemName));
+  });
+  it('sin parecido suficiente no elige nada', () => {
+    expect(bestCandidate('GUANTES DE NITRILO', [{ ItemCode: '1', ItemName: 'EPINEFRINA 1MG' }])).toBeNull();
+  });
+});
