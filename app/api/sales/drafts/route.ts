@@ -6,7 +6,8 @@ import { authOptions } from '../../auth/[...nextauth]/route';
 import { prisma } from '../../../../lib/prisma';
 import { salesEndpointForUser } from '../../../../lib/sales/access';
 import { createDraftOfferRequest, requestTexts, startOfferFlow } from '../../../../lib/sales/offerFlow';
-import { buildDraftUpdate, buildQuotationUpdate, mapQuotationLines, sanitizeOfferLine, validateOffer, type EditLine, type OfferHeader } from '../../../../lib/sales/offer';
+import { applyOfferOptions, buildDraftUpdate, buildQuotationUpdate, mapQuotationLines, sanitizeOfferLine, validateOffer, type EditLine, type OfferHeader } from '../../../../lib/sales/offer';
+import { salesCompanyConfig } from '../../../../lib/sales/companyConfig';
 import { todayBogota } from '../../../../lib/purchases/drafts';
 import { normalizeState } from '../../../../lib/sales/states';
 import { sapGet, sapLogin, sapLogout, sapPatch, sapPost, SapError } from '../../../../lib/sap/serviceLayer';
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({
           draft: {
             docEntry: one, docNum: d.DocNum, cardCode: d.CardCode, cardName: d.CardName, dueDate: String(d.DocDueDate ?? '').slice(0, 10),
-            numAtCard: d.NumAtCard ?? '', comments: d.Comments ?? '', shipTo: d.ShipToCode ?? '', payTo: d.PayToCode ?? '',
+            numAtCard: d.NumAtCard ?? '', pickRemark: d.PickRemark ?? '', comments: d.Comments ?? '', shipTo: d.ShipToCode ?? '', payTo: d.PayToCode ?? '',
             state: d.U_SEND_State, open: d.DocumentStatus === 'bost_Open',
             lines: (d.DocumentLines ?? []).map((l) => ({
               ItemCode: l.ItemCode, ItemDescription: l.ItemDescription, Quantity: l.Quantity, UnitPrice: l.UnitPrice ?? l.Price,
@@ -74,7 +75,7 @@ export async function GET(request: NextRequest) {
       const ors = rows.map((x) => `DocEntry eq ${x.doc_entry}`).join(' or ');
       const d = await sapGet<{ value?: Record<string, unknown>[] }>(
         sap,
-        `Drafts?$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,U_SEND_State,DocumentStatus,Comments,DocumentLines&$filter=${ors}`,
+        `Drafts?$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,NumAtCard,DocTotal,U_SEND_State,DocumentStatus,Comments,DocumentLines&$filter=${ors}`,
         { Prefer: 'odata.maxpagesize=100' }
       );
       const byEntry = new Map((d.value ?? []).map((x) => [Number(x.DocEntry), x]));
@@ -145,8 +146,11 @@ export async function POST(request: NextRequest) {
         if (!row.quotation_doc_entry) return NextResponse.json({ error: 'El borrador no tiene cotización enlazada; no se puede editar.' }, { status: 409 });
         const h = { ...(body.header ?? {}), CardCode: String(draft.CardCode ?? '') } as OfferHeader;
         const raw = (Array.isArray(body.lines) ? body.lines : []) as Record<string, unknown>[];
-        const lines: EditLine[] = raw.map((l) => ({ ...sanitizeOfferLine(l), BaseLine: l.BaseLine == null || l.BaseLine === '' ? null : Number(l.BaseLine) }));
-        const errors = validateOffer(h, lines, todayBogota());
+        const conf = await salesCompanyConfig(c.companyId);
+        const opts = { descripcionEditable: Boolean(conf?.descripcionEditable), exigeOc: conf?.exigeOc ?? true };
+        const clean = applyOfferOptions(raw.map((l) => sanitizeOfferLine(l)), opts);
+        const lines: EditLine[] = clean.map((l, i) => ({ ...l, BaseLine: raw[i].BaseLine == null || raw[i].BaseLine === '' ? null : Number(raw[i].BaseLine) }));
+        const errors = validateOffer(h, lines, todayBogota(), opts);
         if (errors.length) return NextResponse.json({ error: 'Datos inválidos', errors }, { status: 422 });
         const q = Number(row.quotation_doc_entry);
         const qBefore = await sapGet<{ DocumentLines?: { LineNum: number }[]; DocumentStatus?: string }>(sap, `Quotations(${q})?$select=DocumentStatus,DocumentLines`);
@@ -172,7 +176,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'Se guardó, pero la cotización y el borrador quedaron distintos en SAP. Vuelva a abrir la oferta y guarde de nuevo; si persiste, avise a soporte.' }, { status: 500 });
         }
         if (row.id_request_general) {
-          const fresh = await sapGet<Record<string, unknown> & { DocEntry: number; DocumentLines?: { ItemDescription?: string; ItemCode?: string }[] }>(sap, `Drafts(${docEntry})?$select=DocEntry,CardCode,CardName,DocTotal,Comments,DocumentLines`);
+          const fresh = await sapGet<Record<string, unknown> & { DocEntry: number; DocumentLines?: { ItemDescription?: string; ItemCode?: string }[] }>(sap, `Drafts(${docEntry})?$select=DocEntry,CardCode,CardName,NumAtCard,DocTotal,Comments,DocumentLines`);
           const t = requestTexts(fresh as never);
           await pool.request().input('r', sql.Int, row.id_request_general).input('s', sql.NVarChar(254), t.subject).input('d', sql.NVarChar(sql.MAX), t.descripcion)
             .query(`UPDATE requests_general SET subject_request = @s, description = @d WHERE id = @r;`);

@@ -11,16 +11,20 @@ import { offerSubject } from './offer';
  * crea la solicitud, el enlace sales_authorization y arranca las Tareas SAP. Lo usan la
  * creación directa (interruptor «Enviar a autorización») y «Mis ofertas en borrador».
  */
-/** Estado «En Borrador» de requests_general (status_case 6). */
+/** Estado «En Borrador» de requests_general (status_case 6): ya no se usa al crear (ver REQUEST_OPEN_STATUS),
+ *  pero se acepta al enviar las solicitudes que quedaron así antes del 2026-11-09. */
 export const REQUEST_DRAFT_STATUS = 6;
+/** La solicitud de una oferta en borrador queda «Abierta» desde que se crea, para que la tomen los reportes y
+ *  el dashboard mientras dure el proceso (reunión del 2026-11-06). El borrador se distingue por sales_offer_draft. */
+export const REQUEST_OPEN_STATUS = 1;
 
-type DraftLike = { DocEntry: number; DocTotal?: number; CardCode?: string; CardName?: string; Comments?: string; DocumentLines?: { ItemDescription?: string; ItemCode?: string }[] };
+type DraftLike = { DocEntry: number; DocTotal?: number; CardCode?: string; CardName?: string; Comments?: string; NumAtCard?: string | null; DocumentLines?: { ItemDescription?: string; ItemCode?: string }[] };
 
-/** Asunto «OV - cliente - NIT - primera línea» y descripción de la solicitud. */
+/** Asunto «OV - cliente - NIT - OC del cliente» (sin OC, la primera línea) y descripción de la solicitud. */
 export function requestTexts(d: DraftLike) {
   const first = d.DocumentLines?.[0];
   return {
-    subject: offerSubject(d.CardName, d.CardCode, first?.ItemDescription ?? first?.ItemCode),
+    subject: offerSubject(d.CardName, d.CardCode, first?.ItemDescription ?? first?.ItemCode, d.NumAtCard),
     descripcion: `${String(d.Comments ?? '').slice(0, 800)}${d.DocTotal != null ? ` · Total ${Number(d.DocTotal).toLocaleString('es-CO')}` : ''}`.trim(),
   };
 }
@@ -59,24 +63,26 @@ export async function createDraftOfferRequest(companyId: number, userId: string,
   if (!processId) return null;
   const idRequest = await createOfferRequest(companyId, userId, processId, d);
   const pool = await sql.connect(sqlConfig);
-  await pool.request().input('id', sql.Int, idRequest).query(`UPDATE requests_general SET status_req = ${REQUEST_DRAFT_STATUS} WHERE id = @id;`);
+  await pool.request().input('id', sql.Int, idRequest).query(`UPDATE requests_general SET status_req = ${REQUEST_OPEN_STATUS} WHERE id = @id;`);
   return idRequest;
 }
 
 export async function startOfferFlow(p: {
   companyId: number;
   userId: string;
-  draft: { DocEntry: number; DocTotal?: number; CardCode?: string; CardName?: string; Comments?: string; DocumentLines?: { ItemDescription?: string; ItemCode?: string }[] };
+  draft: DraftLike;
   quotationDocEntry?: number | null;
   linesCount?: number;
-  /** Solicitud ya creada en «En Borrador» (oferta guardada en borrador): se reutiliza y se abre. */
+  /** Solicitud ya creada para la oferta en borrador: se reutiliza. */
   existingRequestId?: number | null;
+  /** Flujo a usar (p. ej. «Pedido directo»); por defecto el de oferta de la empresa. */
+  processId?: number | null;
 }): Promise<{ ok: true; idRequest: number } | { ok: false; status: number; error: string }> {
   const pool = await sql.connect(sqlConfig);
   const cfg = await pool.request().input('c', sql.Int, p.companyId).query(
     `SELECT TOP 1 id_process_category_oferta AS p FROM dbo.sales_company_config WHERE id_company = @c AND activo = 1;`
   );
-  const processId = Number(cfg.recordset[0]?.p ?? 0);
+  const processId = Number(p.processId || cfg.recordset[0]?.p || 0);
   if (!processId) return { ok: false, status: 422, error: 'La empresa no tiene configurado el flujo de oferta de venta.' };
   const live = await pool.request().input('c', sql.Int, p.companyId).input('d', sql.Int, p.draft.DocEntry).query(
     `SELECT TOP 1 1 AS x FROM dbo.sales_authorization WHERE id_company = @c AND doc_entry = @d AND status IN (N'pending', N'publishing', N'publish_error', N'approved');`
@@ -90,7 +96,7 @@ export async function startOfferFlow(p: {
     idRequest = p.existingRequestId;
     const t = requestTexts(d);
     await pool.request().input('id', sql.Int, idRequest).input('s', sql.NVarChar(254), t.subject).input('d', sql.NVarChar(sql.MAX), t.descripcion)
-      .query(`UPDATE requests_general SET status_req = 1, subject_request = @s, description = @d WHERE id = @id AND status_req = ${REQUEST_DRAFT_STATUS};`);
+      .query(`UPDATE requests_general SET status_req = ${REQUEST_OPEN_STATUS}, subject_request = @s, description = @d WHERE id = @id AND status_req IN (${REQUEST_OPEN_STATUS}, ${REQUEST_DRAFT_STATUS});`);
   } else {
     idRequest = await createOfferRequest(p.companyId, p.userId, processId, d);
   }
