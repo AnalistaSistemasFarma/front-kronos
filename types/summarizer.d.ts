@@ -105,6 +105,10 @@ interface LanguageModelPromptOptions {
 
 interface LanguageModelSession {
   prompt(input: string | LanguageModelMessage[], options?: LanguageModelPromptOptions): Promise<string>;
+  /** Copia de la sesión con su contexto inicial (para preguntar fragmentos independientes). */
+  clone?(): Promise<LanguageModelSession>;
+  /** Ventana de contexto del modelo, en tokens. */
+  readonly inputQuota?: number;
   destroy(): void;
 }
 

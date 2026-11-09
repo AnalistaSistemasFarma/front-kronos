@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Group, Modal, Progress, Stack, Text, Tooltip } from '@mantine/core';
 import { IconAlertCircle, IconSparkles } from '@tabler/icons-react';
 import toast from 'react-hot-toast';
-import { PDF_ORDER_SCHEMA, PDF_ORDER_SYSTEM_PROMPT, parsePdfOrder, pdfOrderPrompt } from '../../../../lib/sales/pdfOrder';
+import { chunkOrderText, mergePdfOrders, PDF_ORDER_SCHEMA, PDF_ORDER_SYSTEM_PROMPT, parsePdfOrder, pdfOrderChunkPrompt, tableHeaderRow, type PdfOrderResult } from '../../../../lib/sales/pdfOrder';
 
 /**
  * «Montar oferta desde PDF»: lee la orden de compra del cliente con la IA NATIVA del navegador (Prompt API,
@@ -24,6 +24,8 @@ export interface PdfOffer {
   numeroOrdenCompra: string;
   fechaEntrega: string;
   avisos: string[];
+  /** Líneas que la IA leyó del PDF (para comparar con las que quedaron en la oferta). */
+  leidas?: number;
 }
 
 interface Props {
@@ -33,10 +35,11 @@ interface Props {
   onLoaded: (r: PdfOffer) => void;
 }
 
-const MAX_PAGES = 5;
+/** Páginas que se leen (una OC larga trae varias hojas). */
+const MAX_PAGES = 15;
 
 /** Texto de las páginas del PDF y, si casi no hay texto (escaneado), imágenes de las primeras páginas. */
-async function readPdf(file: File): Promise<{ text: string; images: Blob[] }> {
+async function readPdf(file: File): Promise<{ pages: string[]; images: Blob[] }> {
   const pdfjs = await import('pdfjs-dist');
   pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
   const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
@@ -59,7 +62,8 @@ async function readPdf(file: File): Promise<{ text: string; images: Blob[] }> {
   const text = parts.join('\n');
   const images: Blob[] = [];
   if (text.replace(/[\s|-]|Página \d+/g, '').length < 80) {
-    for (let i = 1; i <= Math.min(pages, 3); i++) {
+    // Escaneado: una imagen por página (cada una se pregunta aparte).
+    for (let i = 1; i <= pages; i++) {
       const page = await pdf.getPage(i);
       const viewport = page.getViewport({ scale: 1.6 });
       const canvas = document.createElement('canvas');
@@ -72,7 +76,7 @@ async function readPdf(file: File): Promise<{ text: string; images: Blob[] }> {
       if (blob) images.push(blob);
     }
   }
-  return { text, images };
+  return { pages: parts, images };
 }
 
 export default function SalesPdfImport({ companyId, cardCode, onLoaded }: Props) {
@@ -80,6 +84,8 @@ export default function SalesPdfImport({ companyId, cardCode, onLoaded }: Props)
   const [phase, setPhase] = useState<Phase>('idle');
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
+  /** Avance de la lectura por fragmentos (OC de varias hojas). */
+  const [step, setStep] = useState<{ k: number; n: number } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,31 +109,66 @@ export default function SalesPdfImport({ companyId, cardCode, onLoaded }: Props)
     setProgress(0);
     setPhase('leyendo');
     try {
-      const { text, images } = await readPdf(file);
+      const { pages, images } = await readPdf(file);
       if (typeof LanguageModel === 'undefined') throw new Error('Este navegador no tiene la IA local disponible.');
       const disp = await LanguageModel.availability();
       setPhase(disp === 'downloadable' || disp === 'downloading' ? 'descargando' : 'analizando');
-      const session = await LanguageModel.create({
+      const opts: LanguageModelCreateOptions = {
         initialPrompts: [{ role: 'system', content: PDF_ORDER_SYSTEM_PROMPT }],
         expectedInputs: [{ type: 'text', languages: ['es'] }, ...(images.length ? [{ type: 'image' as const }] : [])],
         expectedOutputs: [{ type: 'text', languages: ['es'] }],
+      };
+      const lm = LanguageModel;
+      const base = await lm.create({
+        ...opts,
         monitor(m) {
           m.addEventListener('downloadprogress', (e) => setProgress(Math.round(e.loaded * 100)));
         },
       });
-      let raw: string;
+      /** Sesión limpia por fragmento (sin el texto de los anteriores): clone() o, si no existe, una nueva. */
+      const fresh = () => (base.clone ? base.clone() : lm.create(opts));
+      // Ventana de contexto pequeña: fragmentos según la cuota real del modelo (≈ 3 caracteres por token,
+      // dejando espacio para las instrucciones y la respuesta), y una sesión nueva por fragmento.
+      const quota = Number(base.inputQuota ?? 0);
+      const maxChars = quota > 0 ? Math.min(6000, Math.max(1500, Math.floor((quota - 1200) * 1.5))) : 3000;
+      const header = tableHeaderRow(pages);
+      const parts: PdfOrderResult[] = [];
+      const fallos: number[] = [];
       try {
         setPhase('analizando');
-        raw = images.length
-          ? await session.prompt(
-              [{ role: 'user', content: [{ type: 'text', value: 'Esta es la orden de compra escaneada (imágenes de sus páginas). Devuelve el JSON pedido.' }, ...images.map((b) => ({ type: 'image' as const, value: b }))] }],
-              { responseConstraint: PDF_ORDER_SCHEMA }
-            )
-          : await session.prompt(pdfOrderPrompt(text), { responseConstraint: PDF_ORDER_SCHEMA });
+        const tasks: (() => Promise<string>)[] = images.length
+          ? images.map((b) => async () => {
+              const s = await fresh();
+              try {
+                return await s.prompt(
+                  [{ role: 'user', content: [{ type: 'text', value: 'Página escaneada de una orden de compra. Extrae todas sus líneas de producto y, si aparecen, el número de la orden, el NIT del cliente y la fecha de entrega. Devuelve el JSON pedido.' }, { type: 'image', value: b }] }],
+                  { responseConstraint: PDF_ORDER_SCHEMA }
+                );
+              } finally {
+                s.destroy();
+              }
+            })
+          : chunkOrderText(pages, maxChars).map((chunk, i, all) => async () => {
+              const s = await fresh();
+              try {
+                return await s.prompt(pdfOrderChunkPrompt(chunk, i + 1, all.length, header), { responseConstraint: PDF_ORDER_SCHEMA });
+              } finally {
+                s.destroy();
+              }
+            });
+        for (let t = 0; t < tasks.length; t++) {
+          setStep({ k: t + 1, n: tasks.length });
+          try {
+            parts.push(parsePdfOrder(await tasks[t]()));
+          } catch {
+            fallos.push(t + 1);
+          }
+        }
       } finally {
-        session.destroy();
+        base.destroy();
+        setStep(null);
       }
-      const r = parsePdfOrder(raw);
+      const r = mergePdfOrders(parts);
       if (!r.lineas.length) throw new Error('La IA no encontró líneas de productos en el PDF. Revise el archivo o use el cargue desde Excel.');
       setPhase('montando');
       const res = await fetch('/api/sales/pdf-resolve', {
@@ -139,7 +180,8 @@ export default function SalesPdfImport({ companyId, cardCode, onLoaded }: Props)
       if (!res.ok) throw new Error(d.error || 'No se pudo montar la oferta con los datos del PDF');
       if (!d.customer) throw new Error((d.avisos ?? []).join(' ') || 'No se identificó el cliente del PDF.');
       if (!(d.lines ?? []).length) throw new Error(`Se identificó el cliente ${d.customer.CardName}, pero ninguna línea del PDF se encontró en SAP. ${(d.avisos ?? []).join(' ')}`);
-      onLoaded({ customer: d.customer, lines: d.lines, numeroOrdenCompra: r.numeroOrdenCompra, fechaEntrega: r.fechaEntrega, avisos: d.avisos ?? [] });
+      const avisoFallos = fallos.length ? [`La IA no pudo leer ${fallos.length === 1 ? 'la parte' : 'las partes'} ${fallos.join(', ')} del PDF: compare las líneas con el documento.`] : [];
+      onLoaded({ customer: d.customer, lines: d.lines, numeroOrdenCompra: r.numeroOrdenCompra, fechaEntrega: r.fechaEntrega, avisos: [...avisoFallos, ...(d.avisos ?? [])], leidas: r.lineas.length });
       setPhase('idle');
     } catch (e) {
       setError((e as Error).message);
@@ -168,9 +210,9 @@ export default function SalesPdfImport({ companyId, cardCode, onLoaded }: Props)
         {working && (
           <Stack gap="xs">
             <Text size="sm" c="dimmed">
-              {phase === 'leyendo' ? 'Leyendo el PDF…' : phase === 'descargando' ? `Descargando el modelo de IA del navegador (solo la primera vez)… ${progress}%` : phase === 'analizando' ? 'La IA de su navegador está leyendo la orden de compra…' : 'Identificando el cliente y los artículos en SAP…'}
+              {phase === 'leyendo' ? 'Leyendo el PDF…' : phase === 'descargando' ? `Descargando el modelo de IA del navegador (solo la primera vez)… ${progress}%` : phase === 'analizando' ? `La IA de su navegador está leyendo la orden de compra${step ? ` (parte ${step.k} de ${step.n})` : ''}…` : 'Identificando el cliente y los artículos en SAP…'}
             </Text>
-            <Progress value={phase === 'descargando' ? progress : 100} animated color="violet" />
+            <Progress value={phase === 'descargando' ? progress : step ? Math.round((step.k / step.n) * 100) : 100} animated color="violet" />
           </Stack>
         )}
         {phase === 'error' && <Alert color="red" icon={<IconAlertCircle size={16} />} title="No se pudo montar la oferta">{error}</Alert>}

@@ -51,3 +51,27 @@ describe('montar la oferta desde el PDF', () => {
     expect(bestCandidate('GUANTES DE NITRILO', [{ ItemCode: '1', ItemName: 'EPINEFRINA 1MG' }])).toBeNull();
   });
 });
+
+import { chunkOrderText, mergePdfOrders, tableHeaderRow } from './pdfOrder';
+describe('OC larga: por fragmentos (ventana de contexto pequeña)', () => {
+  const rows = Array.from({ length: 36 }, (_, i) => `${10000 + i} | ARTICULO ${i} | ${i + 1} | 1000`);
+  const pages = [`--- Página 1 ---\nORDEN DE COMPRA 55\nCODIGO | DESCRIPCION | CANTIDAD | PRECIO\n${rows.slice(0, 20).join('\n')}`, `--- Página 2 ---\n${rows.slice(20).join('\n')}`];
+  it('parte en fragmentos de renglones completos sin perder ninguno', () => {
+    const c = chunkOrderText(pages, 3000, 15);
+    expect(c.length).toBeGreaterThan(2);
+    const all = c.join('\n');
+    rows.forEach((r) => expect(all).toContain(r));
+  });
+  it('encuentra el renglón de encabezados de la tabla', () => {
+    expect(tableHeaderRow(pages)).toBe('CODIGO | DESCRIPCION | CANTIDAD | PRECIO');
+  });
+  it('une los resultados: cabecera del primero que la traiga y todas las líneas renumeradas', () => {
+    const l = (code: string) => ({ row: 1, ItemCode: code, Quantity: 1, UnitPrice: null, WarehouseCode: '', ItemDescription: code });
+    const m = mergePdfOrders([
+      { numeroOrdenCompra: '', nitCliente: '900', fechaEntrega: '', lineas: [l('A'), l('B')] },
+      { numeroOrdenCompra: 'OC-1', nitCliente: '', fechaEntrega: '2026-12-01', lineas: [l('C')] },
+    ]);
+    expect(m).toMatchObject({ numeroOrdenCompra: 'OC-1', nitCliente: '900', fechaEntrega: '2026-12-01' });
+    expect(m.lineas.map((x) => `${x.row}${x.ItemCode}`)).toEqual(['1A', '2B', '3C']);
+  });
+});

@@ -40,6 +40,59 @@ export function pdfOrderPrompt(text: string): string {
   return `Texto de la orden de compra (puede venir desordenado por columnas):\n"""\n${text.slice(0, 12000)}\n"""\nDevuelve el JSON pedido.`;
 }
 
+/**
+ * El modelo del navegador (Gemini Nano) tiene una ventana de contexto pequeña: una OC de varias páginas no
+ * cabe en una sola pregunta y la respuesta (todas las líneas en JSON) tampoco. Se parte el texto en fragmentos
+ * de renglones completos (máx. maxChars y maxRows) y se pregunta fragmento por fragmento. PURA.
+ */
+export function chunkOrderText(pages: string[], maxChars = 3000, maxRows = 25): string[] {
+  const chunks: string[] = [];
+  let cur: string[] = [];
+  let size = 0;
+  const flush = () => {
+    if (cur.some((l) => !/^--- Página \d+ ---$/.test(l))) chunks.push(cur.join('\n'));
+    cur = [];
+    size = 0;
+  };
+  for (const page of pages) {
+    for (const row of page.split('\n')) {
+      const r = row.slice(0, maxChars);
+      if (cur.length && (size + r.length + 1 > maxChars || cur.length >= maxRows)) flush();
+      cur.push(r);
+      size += r.length + 1;
+    }
+  }
+  flush();
+  return chunks;
+}
+
+/** Renglón de encabezados de la tabla (CÓDIGO | DESCRIPCIÓN | CANTIDAD…), para darle contexto a cada fragmento. PURA. */
+export function tableHeaderRow(pages: string[]): string {
+  const rows = (pages[0] ?? '').split('\n');
+  const isHeader = (r: string) => {
+    const n = r.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return /CANT/.test(n) && /(DESCRIP|PRODUCTO|ARTICULO|REFERENCIA)/.test(n);
+  };
+  return rows.find(isHeader)?.slice(0, 300) ?? '';
+}
+
+export function pdfOrderChunkPrompt(chunk: string, k: number, n: number, header: string): string {
+  return (
+    `Fragmento ${k} de ${n} de una orden de compra (texto por renglones; las columnas van separadas por «|»).` +
+    (header ? `\nEncabezados de la tabla de productos: ${header}` : '') +
+    `\n"""\n${chunk}\n"""\n` +
+    'Extrae TODAS las líneas de producto que aparezcan en ESTE fragmento (no las de otros fragmentos). ' +
+    'Si en este fragmento aparecen el número de la orden, el NIT del cliente o la fecha de entrega, inclúyelos; si no, déjalos vacíos. Devuelve el JSON pedido.'
+  );
+}
+
+/** Une los resultados de los fragmentos: la cabecera, del primero que la traiga; las líneas, todas en orden. PURA. */
+export function mergePdfOrders(parts: PdfOrderResult[]): PdfOrderResult {
+  const first = (f: (r: PdfOrderResult) => string) => parts.map(f).find((v) => v) ?? '';
+  const lineas = parts.flatMap((r) => r.lineas).map((l, i) => ({ ...l, row: i + 1 }));
+  return { numeroOrdenCompra: first((r) => r.numeroOrdenCompra), nitCliente: first((r) => r.nitCliente), fechaEntrega: first((r) => r.fechaEntrega), lineas };
+}
+
 export interface PdfOrderResult {
   numeroOrdenCompra: string;
   nitCliente: string;
