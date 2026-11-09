@@ -2,12 +2,15 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { salesEndpointForUser } from '../../../../lib/sales/access';
-import { sapGet, sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
+import { sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
+import { salesCompanyConfig } from '../../../../lib/sales/companyConfig';
+import { customerPriceList, itemPriceFor } from '../../../../lib/sales/pricing';
 
 /**
  * Precio de lista de un articulo para un cliente: precio especial del cliente o,
- * si no hay, el de la lista de precios del cliente (como el cargue masivo de SAPSEND).
- * GET ?companyId&cardCode&itemCode -> { price: number | null }
+ * si no hay, el de la lista de precios del cliente (como el cargue masivo de SAPSEND); sin precio en esa lista,
+ * la lista por defecto de la empresa (sales_company_config.id_price_list_default).
+ * GET ?companyId&cardCode&itemCode -> { price: number | null, source, priceList }
  */
 export async function GET(request: NextRequest) {
   try {
@@ -20,19 +23,12 @@ export async function GET(request: NextRequest) {
     if (!companyId || !cardCode || !itemCode) return NextResponse.json({ error: 'Faltan datos' }, { status: 400 });
     const a = await salesEndpointForUser(session.user.email, companyId);
     if (!a?.endpoint) return NextResponse.json({ error: 'Sin acceso a ventas en esta empresa' }, { status: 403 });
-    const esc = (v: string) => encodeURIComponent(v.replace(/'/g, "''"));
+    const conf = await salesCompanyConfig(companyId);
     const sap = await sapLogin(a.endpoint);
     try {
-      try {
-        const spc = await sapGet<{ Price?: number }>(sap, `SpecialPrices(CardCode='${esc(cardCode)}',ItemCode='${esc(itemCode)}')?$select=Price`);
-        if (spc?.Price != null) return NextResponse.json({ price: Number(spc.Price), source: 'especial' });
-      } catch {
-        /* sin precio especial */
-      }
-      const bp = await sapGet<{ PriceListNum?: number }>(sap, `BusinessPartners('${esc(cardCode)}')?$select=PriceListNum`);
-      const item = await sapGet<{ ItemPrices?: { PriceList: number; Price: number }[] }>(sap, `Items('${esc(itemCode)}')?$select=ItemPrices`);
-      const p = item.ItemPrices?.find((x) => Number(x.PriceList) === Number(bp.PriceListNum));
-      return NextResponse.json({ price: p ? Number(p.Price) : null, source: 'lista' });
+      const bpList = await customerPriceList(sap, cardCode);
+      const p = await itemPriceFor(sap, cardCode, itemCode, bpList, conf?.priceListDefault ?? null);
+      return NextResponse.json(p);
     } finally {
       await sapLogout(sap);
     }

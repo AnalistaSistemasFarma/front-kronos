@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Alert, Badge, Button, Card, Group, Modal, ScrollArea, Table, Text } from '@mantine/core';
-import { IconCalendar, IconCash, IconFileInvoice, IconFileText, IconMapPin, IconPencil, IconSend, IconUser } from '@tabler/icons-react';
+import { Alert, Badge, Button, Card, Group, Modal, ScrollArea, Select, Table, Text, Textarea } from '@mantine/core';
+import { IconArrowBackUp, IconCalendar, IconCash, IconFileInvoice, IconFileText, IconMapPin, IconPencil, IconSend, IconUser, IconX } from '@tabler/icons-react';
 import SalesInlineForm from './SalesInlineForm';
 import { STATE_LABELS } from '../../../../lib/sales/states';
 import SalesCreditPanel from './SalesCreditPanel';
@@ -56,6 +56,44 @@ export default function SalesOfferDetail({ requestId, onLoaded, mb }: { requestI
   const [reload, setReload] = useState(0);
   /** Editar la oferta en borrador dentro de la solicitud (cotización y borrador a la vez). */
   const [editing, setEditing] = useState(false);
+  /** Cancelar la oferta con motivo (como SAPSEND). */
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [motivos, setMotivos] = useState<{ value: string; label: string }[]>([]);
+  const [motivo, setMotivo] = useState<string | null>(null);
+  const [comentario, setComentario] = useState('');
+  const [acting, setActing] = useState(false);
+
+  /** Retomar (devuelta/negada → borrador) o cancelar la oferta. */
+  const rejection = async (accion: 'retomar' | 'cancelar') => {
+    if (accion === 'retomar' && !window.confirm('¿Retomar la oferta? Vuelve a borrador con una solicitud nueva para corregirla y enviarla otra vez a pedido.')) return;
+    setActing(true);
+    try {
+      const r = await fetch('/api/sales/rejection', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId, accion, motivo, comentario }) });
+      const x = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        window.alert(x.error || 'No se pudo completar la acción');
+        return;
+      }
+      setCancelOpen(false);
+      if (accion === 'retomar' && x.idRequest) {
+        window.location.href = `/process/request-general/view-request?id=${x.idRequest}`;
+        return;
+      }
+      window.alert(x.detalle || 'Listo');
+      setReload((n) => n + 1);
+    } finally {
+      setActing(false);
+    }
+  };
+  const openCancel = async () => {
+    setMotivo(null);
+    setComentario('');
+    setCancelOpen(true);
+    if (!motivos.length) {
+      const r = await fetch('/api/sales/rejection').then((x) => x.json()).catch(() => ({}));
+      setMotivos(r.motivos ?? []);
+    }
+  };
 
   useEffect(() => {
     if (!requestId) return;
@@ -95,6 +133,26 @@ export default function SalesOfferDetail({ requestId, onLoaded, mb }: { requestI
         </Group>
       </Group>
       {sale.flowError && <Alert color='red' mb='sm'>{sale.flowError}</Alert>}
+      {sale.flowStatus === 'rejected' && ['NAP', 'NADC', 'NADA'].includes(String(d.U_SEND_State ?? '')) && d.DocumentStatus !== 'bost_Close' && (
+        <Alert color='orange' mb='sm' title={String(d.U_SEND_State) === 'NAP' ? 'Precio devuelto a corregir' : 'Extracupo no autorizado'}>
+          <Text size='sm'>
+            Como en SAPSEND, puede retomar la oferta: vuelve a borrador con una solicitud nueva para corregirla (precios, cantidades, artículos) y
+            enviarla otra vez a pedido. O cancelarla con su motivo.
+          </Text>
+          <Group mt='xs' gap='xs'>
+            <Button size='xs' leftSection={<IconArrowBackUp size={14} />} loading={acting} onClick={() => rejection('retomar')}>Retomar y corregir</Button>
+            <Button size='xs' variant='light' color='red' leftSection={<IconX size={14} />} disabled={acting} onClick={openCancel}>Cancelar oferta</Button>
+          </Group>
+        </Alert>
+      )}
+      <Modal opened={cancelOpen} onClose={() => setCancelOpen(false)} title={<Text fw={700}>Cancelar oferta de venta</Text>} zIndex={1300}>
+        <Select label='Motivo' placeholder='Elija el motivo' data={motivos} value={motivo} onChange={setMotivo} required comboboxProps={{ zIndex: 1400 }} />
+        <Textarea mt='sm' label='Comentario (opcional)' maxLength={150} value={comentario} onChange={(e) => setComentario(e.currentTarget.value)} />
+        <Text size='xs' c='dimmed' mt='xs'>Se cancela la cotización y se cierra el borrador en SAP, y la solicitud queda cancelada.</Text>
+        <Group justify='flex-end' mt='md'>
+          <Button color='red' disabled={!motivo} loading={acting} onClick={() => rejection('cancelar')}>Cancelar oferta</Button>
+        </Group>
+      </Modal>
       {sale.flowStatus === 'borrador' && (
         <Alert color='gray' mb='sm' title='Oferta en borrador'>
           <Text size='sm'>
@@ -119,6 +177,9 @@ export default function SalesOfferDetail({ requestId, onLoaded, mb }: { requestI
                 }
               }}>
               Enviar a pedido
+            </Button>
+            <Button size='xs' variant='subtle' color='red' leftSection={<IconX size={14} />} disabled={retrying || acting} onClick={openCancel}>
+              Cancelar oferta
             </Button>
           </Group>
           <Modal opened={editing} onClose={() => setEditing(false)} fullScreen title={<Text fw={700}>Editar oferta · borrador #{String(d.DocNum ?? sale.docEntry)}</Text>}>

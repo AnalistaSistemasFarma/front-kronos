@@ -292,7 +292,7 @@ async function sendToFlow(sap: SapSession, cfg: AutomationConfig, c: Candidate, 
   // Releer el borrador justo antes: debe seguir en B y sin enlace vivo.
   const draft = await sapGet<Record<string, unknown>>(
     sap,
-    `Drafts(${c.DocEntry})?$select=DocEntry,U_SEND_State,DocumentStatus,Comments,DocTotal,CardCode,CardName,ShipToCode,AddressExtension,DocumentLines`
+    `Drafts(${c.DocEntry})?$select=DocEntry,U_SEND_State,DocumentStatus,Comments,DocTotal,CardCode,CardName,NumAtCard,ShipToCode,AddressExtension,DocumentLines`
   );
   const sinEstado = draft.U_SEND_State == null || String(draft.U_SEND_State).trim() === '';
   const state = normalizeState(draft.U_SEND_State);
@@ -303,7 +303,7 @@ async function sendToFlow(sap: SapSession, cfg: AutomationConfig, c: Candidate, 
   // Borrador de Salesforce sin estado: se marca en B para que el flujo lo evalúe (sin If-Match: el etag de Drafts es fijo).
   if (sinEstado) await sapPatch(sap, `Drafts(${c.DocEntry})`, { U_SEND_State: 'B' });
   const first = ((draft.DocumentLines as Record<string, unknown>[] | undefined) ?? [])[0];
-  const subject = offerSubject(draft.CardName ?? c.CardName, draft.CardCode ?? c.CardCode, first?.ItemDescription ?? first?.ItemCode);
+  const subject = offerSubject(draft.CardName ?? c.CardName, draft.CardCode ?? c.CardCode, first?.ItemDescription ?? first?.ItemCode, draft.NumAtCard);
   const { id_request: idRequest } = await createGeneralRequest({
     company: cfg.id_company,
     subject,
