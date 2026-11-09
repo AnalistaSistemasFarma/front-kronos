@@ -17,6 +17,7 @@ import {
   DIAS_HISTORIA,
   calcularTendencia,
   diagnosticar,
+  tendenciaEmpresa,
   resumirFlujo,
   totalizar,
   type DecisionResumen,
@@ -233,7 +234,7 @@ export async function decidir(
 type Indicador = {
   flujos: ResumenFlujo[];
   total: ReturnType<typeof totalizar>;
-  /** Tendencia de TODA la empresa: con las solicitudes resueltas de todos sus flujos. */
+  /** Tendencia de TODA la empresa: cada flujo contra sí mismo, pesado por volumen (sin efecto mezcla). */
   tendencia: ReturnType<typeof calcularTendencia>;
 };
 const cacheResumen = new Map<number, { en: number; valor: Indicador }>();
@@ -272,7 +273,7 @@ export async function indicadorDeEmpresa(idCompany: number, opciones: { refresca
 
   // De a 3 flujos a la vez: no cargar la base con decenas de consultas simultáneas.
   const resumenes: ResumenFlujo[] = [];
-  const ciclosEmpresa: [number, number][] = [];
+  const paraEmpresa: { tendencia: ReturnType<typeof calcularTendencia>; ciclos: [number, number][] }[] = [];
   for (let i = 0; i < flujos.length; i += 3) {
     const lote = await Promise.all(
       flujos.slice(i, i + 3).map(async (f) => {
@@ -285,7 +286,7 @@ export async function indicadorDeEmpresa(idCompany: number, opciones: { refresca
             estado: x.estado as DecisionResumen['estado'],
             medianaAntes: x.metrica_antes ? ((JSON.parse(x.metrica_antes) as { medianaDias?: number | null }).medianaDias ?? null) : null,
           }));
-        ciclosEmpresa.push(...r.diagnostico.ciclos);
+        paraEmpresa.push({ tendencia: r.diagnostico.tendencia, ciclos: r.diagnostico.ciclos });
         return resumirFlujo(f.id, f.process.trim(), r.diagnostico, dec);
       })
     );
@@ -295,7 +296,7 @@ export async function indicadorDeEmpresa(idCompany: number, opciones: { refresca
   const valor: Indicador = {
     flujos: resumenes,
     total: totalizar(resumenes),
-    tendencia: calcularTendencia(ciclosEmpresa, new Date(Date.now() - COT_MS)),
+    tendencia: tendenciaEmpresa(paraEmpresa, new Date(Date.now() - COT_MS)),
   };
   const en = Date.now();
   cacheResumen.set(idCompany, { en, valor });

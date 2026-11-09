@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calcularTendencia, diagnosticar, percentil, resumirFlujo, textoDias, textoTendencia, totalizar, type Solicitud, type TareaDef, type TareaInstancia } from '../mejora-continua-rules';
+import { calcularTendencia, diagnosticar, tendenciaEmpresa, percentil, resumirFlujo, textoDias, textoTendencia, totalizar, type Solicitud, type TareaDef, type TareaInstancia } from '../mejora-continua-rules';
 
 /* Mejora continua de los flujos (2026-11-09). Reglas PURAS (lib/workflow/mejora-continua-rules.ts). */
 
@@ -188,6 +188,33 @@ describe('¿se han vuelto más rápidos? (tendencia)', () => {
     expect(d.ciclos).toHaveLength(24);
     const r = resumirFlujo(1, 'A', d, []);
     expect(totalizar([r])).toMatchObject({ masRapidos: 0, masLentos: 0 });
+  });
+});
+
+describe('tendencia de la empresa sin efecto mezcla', () => {
+  const H = new Date('2026-11-09T12:00:00Z');
+  const hace = (dias: number) => H.getTime() - dias * 86_400_000;
+  const lote = (n: number, desde: number, dur: number): [number, number][] => Array.from({ length: n }, (_, i) => [hace(desde + i), dur]);
+
+  it('un flujo automatizado que gana volumen NO hace «más rápida» a la empresa', () => {
+    // Pagos: igual (5 días antes y ahora). Ofertas: instantáneas, solo recientes (sin base).
+    const pagos = [...lote(10, 1, 5), ...lote(10, 40, 5)];
+    const ofertas = lote(30, 1, 0.001);
+    const fl = [pagos, ofertas].map((c) => ({ tendencia: calcularTendencia(c, H), ciclos: c }));
+    const mezclado = calcularTendencia([...pagos, ...ofertas], H);
+    expect(mezclado.veredicto).toBe('mas_rapido'); // lo que daba antes: engañoso
+    expect(tendenciaEmpresa(fl, H)).toMatchObject({ veredicto: 'igual', cambioPct: 0 });
+  });
+
+  it('promedia los cambios de cada flujo pesados por sus casos recientes', () => {
+    const a = [...lote(30, 0, 2), ...lote(10, 40, 4)]; // −50 %, 30 recientes (días 0 a 29)
+    const b = [...lote(10, 1, 3), ...lote(10, 40, 2)]; // +50 %, 10 recientes
+    const fl = [a, b].map((c) => ({ tendencia: calcularTendencia(c, H), ciclos: c }));
+    expect(tendenciaEmpresa(fl, H)).toMatchObject({ cambioPct: -25, veredicto: 'mas_rapido' });
+  });
+
+  it('sin flujos comparables: sin datos', () => {
+    expect(tendenciaEmpresa([{ tendencia: calcularTendencia(lote(3, 1, 2), H), ciclos: lote(3, 1, 2) }], H).veredicto).toBe('sin_datos');
   });
 });
 
