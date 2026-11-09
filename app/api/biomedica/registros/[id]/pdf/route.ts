@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '../../../../../../lib/prisma';
 import { pdfRegistro } from '../../../../../../lib/biomedica/db';
-import { downloadVerifiedPdf } from '../../../../../../lib/sgc/onedrive';
+import { downloadVerifiedFile, downloadVerifiedPdf } from '../../../../../../lib/sgc/onedrive';
 import { NO_STORE, errorResponse, jsonNoStore, parseId, rateLimitResponse } from '../../../../sgc/_lib/context';
 import { biomedContext } from '../../../_acceso';
 
@@ -25,7 +25,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
     const id = parseId((await params).id);
     if (!id) return jsonNoStore({ error: 'Registro inválido' }, 400);
-    const pdf = await pdfRegistro(prisma, c.access, id, { vacio: url.searchParams.get('vacio') === '1', viewerEmail: c.email }, { downloadVerifiedPdf }, c.actor);
+    const pdf = await pdfRegistro(prisma, c.access, id, { vacio: url.searchParams.get('vacio') === '1', viewerEmail: c.email }, { downloadVerifiedPdf, downloadVerifiedFile }, c.actor);
     return new NextResponse(Buffer.from(pdf), {
       status: 200,
       headers: { ...NO_STORE, 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="registro-${id}.pdf"`, 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'SAMEORIGIN' },

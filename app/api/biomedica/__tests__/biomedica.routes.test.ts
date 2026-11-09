@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // INGENIERÍA BIOMÉDICA (2026-11-06): rutas con la sesión y la base simuladas.
 
 const m = vi.hoisted(() => {
-  const names = ['getServerSession', 'getSgcAccessForUser', 'getAccessSubject', 'getBiomedAccessForUser', 'listFormatos', 'listRegistros', 'saveFormato', 'createRegistro', 'getRegistro', 'saveAnotaciones', 'closeRegistro', 'pdfRegistro'] as const;
+  const names = ['getServerSession', 'getSgcAccessForUser', 'getAccessSubject', 'getBiomedAccessForUser', 'listFormatos', 'listRegistros', 'saveFormato', 'createRegistro', 'getRegistro', 'saveAnotaciones', 'closeRegistro', 'pdfRegistro', 'addSello', 'getSello'] as const;
   return Object.fromEntries(names.map((n) => [n, vi.fn()])) as Record<(typeof names)[number], ReturnType<typeof vi.fn>>;
 });
 
@@ -12,9 +12,9 @@ vi.mock('../../auth/[...nextauth]/route', () => ({ authOptions: {} }));
 vi.mock('../../../../lib/prisma', () => ({ prisma: { tag: 'prisma' } }));
 vi.mock('../../../../lib/sgc/access', () => ({ getSgcAccessForUser: m.getSgcAccessForUser }));
 vi.mock('../../../../lib/sgc/db/documents', () => ({ getAccessSubject: m.getAccessSubject }));
-vi.mock('../../../../lib/sgc/onedrive', () => ({ downloadVerifiedPdf: 'bajar' }));
+vi.mock('../../../../lib/sgc/onedrive', () => ({ downloadVerifiedPdf: 'bajar', downloadVerifiedFile: 'bajarArchivo', uploadToSgcStorage: 'subir' }));
 vi.mock('../../../../lib/biomedica/access', () => ({ getBiomedAccessForUser: m.getBiomedAccessForUser }));
-vi.mock('../../../../lib/biomedica/db', () => ({ BIOMED_ACTIVIDADES: ['Visita técnica'], listFormatos: m.listFormatos, listRegistros: m.listRegistros, saveFormato: m.saveFormato, createRegistro: m.createRegistro, getRegistro: m.getRegistro, saveAnotaciones: m.saveAnotaciones, closeRegistro: m.closeRegistro, pdfRegistro: m.pdfRegistro }));
+vi.mock('../../../../lib/biomedica/db', () => ({ BIOMED_ACTIVIDADES: ['Visita técnica'], listFormatos: m.listFormatos, listRegistros: m.listRegistros, saveFormato: m.saveFormato, createRegistro: m.createRegistro, getRegistro: m.getRegistro, saveAnotaciones: m.saveAnotaciones, closeRegistro: m.closeRegistro, pdfRegistro: m.pdfRegistro, addSello: m.addSello, getSello: m.getSello }));
 
 import { SgcError } from '../../../../lib/sgc/errors';
 import * as raiz from '../route';
@@ -23,6 +23,7 @@ import * as registros from '../registros/route';
 import * as registro from '../registros/[id]/route';
 import * as cerrar from '../registros/[id]/cerrar/route';
 import * as pdf from '../registros/[id]/pdf/route';
+import * as sello from '../registros/[id]/sello/route';
 
 const EMAIL = 'ing@onelatampharma.com';
 const H = { 'x-forwarded-for': '10.0.0.9', 'user-agent': 'vitest' };
@@ -81,5 +82,27 @@ describe('Rutas de Ingeniería biomédica', () => {
     expect(res.headers.get('content-disposition')).toMatch(/^inline;/);
     expect(m.pdfRegistro.mock.calls[0][3]).toMatchObject({ vacio: true, viewerEmail: EMAIL });
     expect((await pdf.GET(get('/biomedica/registros/5/pdf?company=3', { 'sec-fetch-dest': 'document' }), params('5'))).status).toBe(415);
+  });
+
+  it('sellos del registro: se cargan (multipart, máx. 2 MB) y su imagen se lee solo con el acceso del módulo', async () => {
+    const form = new FormData();
+    form.append('company', '3');
+    form.append('file', new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'sello.png', { type: 'image/png' }));
+    m.addSello.mockResolvedValue({ sealItemId: 'od-1', sealFileName: 'sello.png' });
+    const up = await sello.POST(new Request('http://x/api', { method: 'POST', body: form, headers: H }), params('5'));
+    expect(up.status).toBe(200);
+    expect(await up.json()).toEqual({ sealItemId: 'od-1', sealFileName: 'sello.png' });
+    expect(m.addSello.mock.calls[0][2]).toBe(5);
+    expect(m.addSello.mock.calls[0][5]).toEqual({ upload: 'subir' });
+    const grande = await sello.POST(new Request('http://x/api', { method: 'POST', body: form, headers: { ...H, 'content-length': String(3 * 1024 * 1024) } }), params('5'));
+    expect(grande.status).toBe(413);
+    m.getSello.mockResolvedValue({ bytes: new Uint8Array([1, 2]), mime: 'image/png' });
+    const img = await sello.GET(get('/x?company=3&itemId=od-1'), params('5'));
+    expect(img.status).toBe(200);
+    expect(img.headers.get('content-type')).toBe('image/png');
+    expect(m.getSello.mock.calls[0][3]).toBe('od-1');
+    expect((await sello.GET(get('/x?company=3'), params('5'))).status).toBe(400);
+    m.getBiomedAccessForUser.mockResolvedValue([]);
+    expect((await sello.GET(get('/x?company=3&itemId=od-1'), params('5'))).status).toBe(403);
   });
 });

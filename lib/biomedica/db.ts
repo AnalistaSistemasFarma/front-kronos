@@ -2,7 +2,9 @@ import type { PrismaClient } from '../../app/generated/prisma';
 import { SgcError } from '../sgc/errors';
 import { stampControlledCopy } from '../sgc/watermark';
 import type { BiomedAccess } from './access';
-import { dibujarAnotaciones, leerAnotaciones, normalizarAnotaciones, type BiomedAnotacion } from './anotaciones';
+import type { SealImageBytes } from '../orion/annotationStamp';
+import { sha256Hex } from '../sgc/storage';
+import { AnotacionInvalida, MAX_SELLOS, dibujarAnotaciones, leerDatos, normalizarAnotaciones, validarImagenSello, type BiomedAnotacion, type BiomedSello } from './anotaciones';
 
 /**
  * INGENIERÍA BIOMÉDICA (2026-11-06; reunión con Juan Mora del 2026-11-05).
@@ -21,6 +23,7 @@ import { dibujarAnotaciones, leerAnotaciones, normalizarAnotaciones, type Biomed
 export type BiomedDb = PrismaClient;
 export interface BiomedActor {
   email: string;
+  name?: string | null;
   ip?: string | null;
 }
 
@@ -218,7 +221,7 @@ export async function getRegistro(db: BiomedDb, access: BiomedAccess, idRegistro
   const esAutor = lower(r.created_by) === lower(viewerEmail);
   return {
     ...base,
-    anotaciones: leerAnotaciones(r.data_json),
+    anotaciones: leerDatos(r.data_json).anotaciones,
     motivoBloqueo: r.estado === 'borrador' && !vig.vigente ? vig.motivo : null,
     puedeEditar: r.estado === 'borrador' && vig.vigente && (esAutor || access.canConfigure),
   };
@@ -236,8 +239,9 @@ async function editable(db: BiomedDb, access: BiomedAccess, idRegistro: number, 
 /** Guarda lo escrito encima del formato (borrador). */
 export async function saveAnotaciones(db: BiomedDb, access: BiomedAccess, idRegistro: number, raw: unknown, actor: BiomedActor) {
   const r = await editable(db, access, idRegistro, actor);
-  const anotaciones = normalizarAnotaciones(raw);
-  await db.biomedRegistro.update({ where: { id_biomed_registro: r.id_biomed_registro }, data: { data_json: JSON.stringify(anotaciones), updated_by: lower(actor.email), updated_at: new Date() } });
+  const datos = leerDatos(r.data_json);
+  const anotaciones = normalizarAnotaciones(raw, datos.anotaciones, datos.sellos, { email: lower(actor.email), name: actor.name ?? null });
+  await db.biomedRegistro.update({ where: { id_biomed_registro: r.id_biomed_registro }, data: { data_json: JSON.stringify({ ...datos, anotaciones }), updated_by: lower(actor.email), updated_at: new Date() } });
   await evento(db, access.idCompany, 'registro.guardado', actor, `${anotaciones.length} anotación(es)`, r.id_biomed_registro);
   return { saved: anotaciones.length };
 }
@@ -245,7 +249,7 @@ export async function saveAnotaciones(db: BiomedDb, access: BiomedAccess, idRegi
 /** Cierra el registro: queda como evidencia (no se modifica más). */
 export async function closeRegistro(db: BiomedDb, access: BiomedAccess, idRegistro: number, actor: BiomedActor) {
   const r = await editable(db, access, idRegistro, actor);
-  if (leerAnotaciones(r.data_json).length === 0) throw new SgcError('El formato está vacío: diligéncielo antes de cerrarlo.');
+  if (leerDatos(r.data_json).anotaciones.length === 0) throw new SgcError('El formato está vacío: diligéncielo antes de cerrarlo.');
   const now = new Date();
   await db.biomedRegistro.update({ where: { id_biomed_registro: r.id_biomed_registro }, data: { estado: 'cerrado', closed_by: lower(actor.email), closed_at: now, updated_by: lower(actor.email), updated_at: now } });
   await evento(db, access.idCompany, 'registro.cerrado', actor, `${r.equipo}`, r.id_biomed_registro);
@@ -262,14 +266,18 @@ export async function pdfRegistro(
   access: BiomedAccess,
   idRegistro: number,
   opts: { vacio: boolean; viewerEmail: string; now?: Date },
-  deps: { downloadVerifiedPdf: (itemId: string, sha256: string) => Promise<Uint8Array> },
+  deps: { downloadVerifiedPdf: (itemId: string, sha256: string) => Promise<Uint8Array>; downloadVerifiedFile: (itemId: string, sha256: string) => Promise<Uint8Array> },
   actor: BiomedActor
 ): Promise<Uint8Array> {
   const r = await registroDe(db, access, idRegistro);
   const version = await db.sgcDocumentVersion.findUnique({ where: { id_document_version: r.id_document_version }, include: { document: { select: { code: true } } } });
   if (!version) throw new SgcError('La versión del formato no existe.', 404);
   const original = await deps.downloadVerifiedPdf(version.pdf_item_id, version.pdf_sha256);
-  const lleno = opts.vacio ? original : await dibujarAnotaciones(original, leerAnotaciones(r.data_json));
+  let lleno = original;
+  if (!opts.vacio) {
+    const datos = leerDatos(r.data_json);
+    lleno = await dibujarAnotaciones(original, datos.anotaciones, await imagenesDeSellos(datos, deps.downloadVerifiedFile));
+  }
   const now = opts.now ?? new Date();
   const out = await stampControlledCopy(lleno, {
     code: version.document.code,
@@ -281,4 +289,65 @@ export async function pdfRegistro(
   });
   if (!opts.vacio) await evento(db, access.idCompany, 'registro.consultado', actor, `${version.document.code} V${version.version_number} · ${r.equipo}`, r.id_biomed_registro);
   return out;
+}
+
+/** Las imágenes de los sellos que se usan (verificadas por su huella); la que falle se omite. */
+async function imagenesDeSellos(datos: { anotaciones: BiomedAnotacion[]; sellos: BiomedSello[] }, download: (itemId: string, sha256: string) => Promise<Uint8Array>) {
+  const usados = new Set(datos.anotaciones.filter((a) => a.kind === 'seal').map((a) => String(a.sealItemId)));
+  const out: Record<string, SealImageBytes | null> = {};
+  for (const s of datos.sellos.filter((x) => usados.has(x.itemId))) {
+    try {
+      out[s.itemId] = { bytes: await download(s.itemId, s.sha256), mime: s.mime };
+    } catch {
+      out[s.itemId] = null;
+    }
+  }
+  return out;
+}
+
+/**
+ * Carga la imagen de un SELLO en el registro (borrador): PNG o JPG de máximo 2 MB, a la
+ * carpeta del SGC de la empresa (<raíz>/_biomedica/sellos/registro-<id>) con su huella.
+ */
+export async function addSello(
+  db: BiomedDb,
+  access: BiomedAccess,
+  idRegistro: number,
+  file: { bytes: Uint8Array; fileName: string },
+  actor: BiomedActor,
+  deps: { upload: (segments: string[], fileName: string, content: Uint8Array, contentType: string) => Promise<{ id: string }> }
+): Promise<{ sealItemId: string; sealFileName: string }> {
+  const r = await editable(db, access, idRegistro, actor);
+  let mime: BiomedSello['mime'];
+  try {
+    mime = validarImagenSello(file.bytes);
+  } catch (e) {
+    throw new SgcError(e instanceof AnotacionInvalida ? e.message : 'Imagen inválida.', 400);
+  }
+  const datos = leerDatos(r.data_json);
+  if (datos.sellos.length >= MAX_SELLOS) throw new SgcError(`Máximo ${MAX_SELLOS} sellos por registro.`, 400);
+  const config = await db.sgcCompanyConfig.findUnique({ where: { id_company: access.idCompany }, select: { storage_root: true } });
+  if (!config?.storage_root) throw new SgcError('La empresa no tiene configurada la carpeta del SGC.', 409);
+  const segments = [...config.storage_root.split('/').filter(Boolean), '_biomedica', 'sellos', `registro-${r.id_biomed_registro}`];
+  const now = new Date();
+  const fileName = `sello-${now.getTime()}.${mime === 'image/png' ? 'png' : 'jpg'}`;
+  const item = await deps.upload(segments, fileName, file.bytes, mime);
+  const sello: BiomedSello = { itemId: item.id, fileName, mime, sha256: sha256Hex(file.bytes), uploadedBy: lower(actor.email), uploadedAt: now.toISOString() };
+  await db.biomedRegistro.update({ where: { id_biomed_registro: r.id_biomed_registro }, data: { data_json: JSON.stringify({ ...datos, sellos: [...datos.sellos, sello] }), updated_by: lower(actor.email), updated_at: now } });
+  await evento(db, access.idCompany, 'registro.sello', actor, `${file.fileName || fileName} (${file.bytes.byteLength} bytes)`, r.id_biomed_registro);
+  return { sealItemId: item.id, sealFileName: file.fileName || fileName };
+}
+
+/** Imagen de un sello DEL registro (verificada por su huella), para dibujarlo en pantalla. */
+export async function getSello(
+  db: BiomedDb,
+  access: BiomedAccess,
+  idRegistro: number,
+  itemId: string,
+  deps: { downloadVerifiedFile: (itemId: string, sha256: string) => Promise<Uint8Array> }
+): Promise<{ bytes: Uint8Array; mime: BiomedSello['mime'] }> {
+  const r = await registroDe(db, access, idRegistro);
+  const sello = leerDatos(r.data_json).sellos.find((s) => s.itemId === itemId);
+  if (!sello) throw new SgcError('Sello no encontrado.', 404);
+  return { bytes: await deps.downloadVerifiedFile(sello.itemId, sello.sha256), mime: sello.mime };
 }
