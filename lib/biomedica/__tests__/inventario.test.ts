@@ -236,6 +236,22 @@ describe('Inventario biomédico · alta, edición (control de cambios), artícul
     expect(ev).toMatchObject({ accion: 'cambio_serial', justificacion: 'Error de digitación en la serie' });
     expect(JSON.parse(String(ev.antes))).toEqual({ serie: 'CM-1', modelo: null });
     await expect(editarEquipo(db as never, acceso, 99999, { serie: 'Z', justificacion: 'xxxxxx' }, actor)).rejects.toMatchObject({ status: 404 });
+    // Varias series de una vez con los mismos datos (no se escribe todo de nuevo).
+    const datos = { equipo: 'BOMBA DE INFUSION', modelo: 'BENEFUSION VP5', codigoInterno: '4053677', marca: 'MINDRAY', clasificacionRiesgo: 'IIB', sede: 'Bodega', ciudad: 'Bogotá' };
+    expect(await crearEquipo(db as never, acceso, { ...datos, series: 'N-1\nN-2; N-3,\n\n' }, actor)).toMatchObject({ creados: 3 });
+    expect(db.st.equipos.filter((e) => String(e.serie).startsWith('N-')).map((e) => [e.serie, e.modelo, e.estado])).toEqual([
+      ['N-1', 'BENEFUSION VP5', 'bodega'],
+      ['N-2', 'BENEFUSION VP5', 'bodega'],
+      ['N-3', 'BENEFUSION VP5', 'bodega'],
+    ]);
+    const lote = db.st.eventos.filter((e) => e.accion === 'alta').slice(-3).map((e) => e.lote);
+    expect(new Set(lote).size).toBe(1);
+    expect(lote[0]).toBeTruthy();
+    await expect(crearEquipo(db as never, acceso, { ...datos, series: ['N-9', 'n-9'] }, actor)).rejects.toThrow(/repetida en la lista/);
+    await expect(crearEquipo(db as never, acceso, { ...datos, series: ['N-8', 'N-2'] }, actor)).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/La serie N-2 ya está/) });
+    expect(db.st.equipos.some((e) => e.serie === 'N-8')).toBe(false);
+    await expect(crearEquipo(db as never, acceso, { ...datos, series: Array.from({ length: 501 }, (_, i) => `M-${i}`) }, actor)).rejects.toThrow(/cargue masivo/);
+    await expect(crearEquipo(db as never, acceso, { ...datos, series: ['x'.repeat(101)] }, actor)).rejects.toThrow(/máximo 100/);
     await expect(editarEquipo(db as never, acceso, id, { modelo: 'x'.repeat(151), justificacion: 'largo' }, actor)).rejects.toThrow(/máximo 150/);
   });
 
@@ -257,6 +273,9 @@ describe('Inventario biomédico · alta, edición (control de cambios), artícul
     expect(r).toMatchObject({ total: 5, porEstado: { bodega: 3, distribuido: 2, faltante: 0, danado: 0 }, bodega: { cliente: 'PISA FARMACEUTICA DE COLOMBIA SA', ciudad: 'Bogotá' } });
     expect(r.clientes).toEqual(['PISA FARMACEUTICA DE COLOMBIA SA', 'SANSMED']);
     expect(r.modelos).toEqual(['BENEFUSION VP5']);
+    // Al elegir el modelo se llenan solos sus datos (los más usados con ese modelo).
+    expect(r.plantillas['BENEFUSION VP5']).toEqual({ codigoInterno: '4053677', equipo: 'BOMBA DE INFUSION', marca: 'MINDRAY', clasificacionRiesgo: 'IIB', registroSanitario: null });
+    expect(r).toMatchObject({ equipos: ['BOMBA DE INFUSION'], marcas: ['MINDRAY'], clasificaciones: ['IIB'] });
     await expect(historialEquipo(db as never, acceso, 99999)).rejects.toMatchObject({ status: 404 });
   });
 
