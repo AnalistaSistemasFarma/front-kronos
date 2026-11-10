@@ -9,11 +9,13 @@ const MAX_PAGE_SIZE = 500;
 
 /**
  * Grupos generales de estado (mismos que `statusGroupOf` en lib/requests-general/listFilters.ts):
- * 1 Abierto, 4 Sin empezar y 7 Devuelta → pending; 2 Resuelto → done; 3 Cancelado → cancelled.
+ * 1 Abierto, 4 Sin empezar, 5 Por autorizar, 6 En borrador y 7 Devuelta → pending; 2 Resuelto → done;
+ * 3 Cancelado → cancelled. Igual que en el navegador: lo que no está resuelto ni cancelado es pendiente
+ * (antes 5 y 6 —Compras/Ventas— no caían en ninguna tarjeta y las tarjetas no sumaban el total).
  * Los ids son constantes (no vienen del usuario), por eso se pueden incrustar en el SQL.
  */
 const STATUS_GROUP_SQL = {
-  pending: '1, 4, 7',
+  pending: '1, 4, 5, 6, 7',
   done: '2',
   cancelled: '3',
 };
@@ -25,7 +27,7 @@ const STATUS_GROUP_SQL = {
  * Con `page` (y `pageSize`, por defecto 100): pagina en SQL y devuelve
  *   { rows, total, counts: { all, pending, done, cancelled } }.
  *
- * `status` acepta un grupo (all|0 = sin filtro, pending = 1/4/7, done = 2, cancelled = 3) o un id
+ * `status` acepta un grupo (all|0 = sin filtro, pending = 1/4/5/6/7, done = 2, cancelled = 3) o un id
  * numérico (1, 2, 3, 7...). `counts` se calcula sobre el conjunto filtrado IGNORANDO el estado,
  * para que las tarjetas no cambien al tocar un estado; `total` sí respeta el estado.
  *
@@ -68,7 +70,7 @@ export async function GET(req) {
     } else if (statusKey === 'all' || statusKey === '0') {
       // Todas: sin filtro de estado.
     } else if (Object.prototype.hasOwnProperty.call(STATUS_GROUP_SQL, statusKey)) {
-      // Grupo general: pending (1, 4, 7), done (2) o cancelled (3).
+      // Grupo general: pending (1, 4, 5, 6, 7), done (2) o cancelled (3).
       statusClause = ` AND rg.status_req IN (${STATUS_GROUP_SQL[statusKey]})`;
     } else if (/^\d+$/.test(statusKey)) {
       // Compatibilidad con ids numéricos (1, 2, 3, 7...).
