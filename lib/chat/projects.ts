@@ -655,7 +655,8 @@ export async function getProjectDetail(user: ProjectUser, acceso: ProjectAccess,
     company: { idCompany: p.company.id_company, companyName: p.company.company.trim() },
     myRole: acceso.role,
     archived: p.archived,
-    capabilities: p.archived ? { ...capabilitiesFor(null), archive: caps.archive } : caps,
+    // Agregar y retirar asistentes (2026-11-10): también la administración de SynerLink.
+    capabilities: p.archived ? { ...capabilitiesFor(null), archive: caps.archive } : { ...caps, manageAgents: caps.manageAgents || opciones.esAdmin === true },
     createdAt: p.created_at.toISOString(),
     updatedAt: p.updated_at.toISOString(),
     agents: p.agents.map((x) => {
