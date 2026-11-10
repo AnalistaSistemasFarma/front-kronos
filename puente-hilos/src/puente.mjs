@@ -527,7 +527,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
               if (evento.parent_tool_use_id) return; // lo de adentro de un subagente no mueve la etiqueta
             }
             if (evento.type !== 'assistant' || !acc.ultimaHerramienta) return;
-            const etiqueta = etiquetaHerramienta(acc.ultimaHerramienta);
+            const etiqueta = etiquetaHerramienta(acc.ultimaHerramienta, acc.ultimaEntrada);
             if (etiqueta === ultimaEtiqueta) return;
             ultimaEtiqueta = etiqueta;
             indicador = { state: 'tool', label: etiqueta };
@@ -800,10 +800,16 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         if (total > 0) await synerlink.consumo(reporte).catch((e) => log('no se pudo reportar el consumo:', e.message));
       }
     } catch (err) {
-      log(`conversación ${idConversation}: error atendiendo el turno:`, err?.message ?? err);
-      await synerlink
-        .responder(idConversation, 'No pude atender el mensaje por un error del puente. Tecnología ya quedó con el registro.')
-        .catch(() => null);
+      if (err?.status === 404) {
+        // Conversación ELIMINADA (borrado lógico, 2026-10-29), proyecto archivado o agente retirado:
+        // SynerLink ya no la entrega ni acepta respuestas. Se deja de atender sin insistir.
+        log(`conversación ${idConversation}: ya no está disponible (404): se deja de atender.`);
+      } else {
+        log(`conversación ${idConversation}: error atendiendo el turno:`, err?.message ?? err);
+        await synerlink
+          .responder(idConversation, 'No pude atender el mensaje por un error del puente. Tecnología ya quedó con el registro.')
+          .catch(() => null);
+      }
     } finally {
       await supervisor?.detener().catch(() => null);
       try {

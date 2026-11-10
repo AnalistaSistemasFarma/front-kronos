@@ -31,6 +31,7 @@ import { spawn } from 'node:child_process';
 import { HERRAMIENTAS_PROHIBIDAS } from './config.mjs';
 import { entornoTopes, HERRAMIENTAS_SUBAGENTE, revisarAgentesInit } from './equipo.mjs';
 import { NEGADAS_COMPLETO, revisarInitCompleto } from './orus-completo.mjs';
+import { etiquetaHerramienta as etiquetaDetallada } from './openclaw/actividad.mjs';
 
 /** Herramientas de archivos: lectura libre dentro del hilo, escritura solo en ./trabajo. */
 export const HERRAMIENTAS_BASE = ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'TodoWrite'];
@@ -293,15 +294,31 @@ export function revisarInit(evento, perfil, equipo = null, codigo = null) {
   return problemas;
 }
 
-/** Etiqueta corta y en español para el indicador, a partir de un tool_use. */
-export function etiquetaHerramienta(nombre) {
+/**
+ * Etiqueta en español para el indicador, a partir de un tool_use (nombre + entrada).
+ * Con la entrada dice QUÉ se está haciendo, igual que el chat normal y los agentes openclaw
+ * (2026-11-10, Nicolás Rivera: «eso no es tan diciente que diga ejecutando comandos… sé que
+ * estás trabajando pero no sé en qué»): la descripción del comando, el archivo o la búsqueda.
+ * Del comando de terminal solo se muestra su descripción, nunca el comando: el hilo es compartido.
+ */
+export function etiquetaHerramienta(nombre, entrada) {
   if (!nombre) return 'Trabajando…';
+  const conEntrada = entrada && typeof entrada === 'object' && Object.keys(entrada).length > 0;
   if (nombre.startsWith('mcp__')) {
     const [, servidor] = nombre.split('__');
-    if (servidor?.startsWith('sap')) return 'Consultando SAP…';
     if (servidor === 'kronos-pruebas-sql') return 'Trabajando en la base de PRUEBAS…';
     if (servidor === 'synerlink-testing-web') return nombre.endsWith('testing_captura') ? 'Tomando una captura de testing…' : 'Revisando testing como usuario QA…';
+    if (conEntrada) {
+      const detallada = etiquetaDetallada(nombre, entrada);
+      if (detallada) return detallada;
+    }
+    if (servidor?.startsWith('sap')) return 'Consultando SAP…';
     return `Consultando ${servidor}…`;
+  }
+  if (conEntrada) {
+    const args = nombre === 'Bash' ? { description: entrada.description } : entrada;
+    const detallada = nombre === 'Bash' && !entrada.description ? '' : etiquetaDetallada(nombre, args);
+    if (detallada) return detallada;
   }
   const mapa = {
     Read: 'Leyendo archivos del proyecto…',
@@ -336,7 +353,10 @@ export function acumularEvento(acc, evento) {
     if (modelo) out.modelos = [...new Set([...(out.modelos ?? []), modelo])];
     const contenido = Array.isArray(evento.message?.content) ? evento.message.content : [];
     const usos = contenido.filter((c) => c?.type === 'tool_use');
-    if (usos.length > 0) out.ultimaHerramienta = usos[usos.length - 1].name;
+    if (usos.length > 0) {
+      out.ultimaHerramienta = usos[usos.length - 1].name;
+      out.ultimaEntrada = usos[usos.length - 1].input ?? null;
+    }
     // Para los avisos de progreso y el mensaje de corte (progreso.mjs): el último texto
     // del hilo PRINCIPAL (lo de los subagentes no) y los archivos que tocó con Write/Edit.
     if (!evento.parent_tool_use_id) {

@@ -23,7 +23,7 @@ import { randomBytes } from 'node:crypto';
 import { constants as FS, copyFileSync, existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { extraerMedia, EXT_PERMITIDAS, MAX_ADJUNTOS, MAX_BYTES_ADJUNTO } from './adjuntos-salida.mjs';
-import { ARCHIVO_PROPUESTAS, nombreSeguro } from './hilos.mjs';
+import { ARCHIVO_PROPUESTAS, lineasMultiagente, nombreSeguro } from './hilos.mjs';
 
 /** Margen que se le da a openclaw por encima del tope del puente: el que corta es el puente. */
 export const MARGEN_TIMEOUT_OPENCLAW_S = 120;
@@ -372,6 +372,8 @@ export function textoEncabezadoOpenclaw({ agente, enfoque = null, contexto, ruta
     `- Cronograma (tareas y solicitudes con fechas): ${rutas.cronograma}`,
     '',
     'Reglas de este hilo:',
+    // Multiagente (2026-10-29): historial del hilo e invitación por mención.
+    ...lineasMultiagente(contexto, agente, rutas.hilo),
     `- Trabaje SOLO con la carpeta de este proyecto (${rutas.proyecto}). No abra carpetas de otros proyectos ni de otras conversaciones.`,
     `- Para entregar un archivo: créelo en ${rutas.trabajo}/ y, al final de su respuesta, escriba una línea sola \`MEDIA:${rutas.trabajo}/nombre.ext\` por archivo (máximo ${MAX_ADJUNTOS}, 25 MB, extensiones ${EXT_PERMITIDAS.join(', ')}).${archivar ? ' Lo que adjunte queda además en la pestaña Archivos del proyecto.' : ''}${outbox ? ' Si lo dejó en su outbox, también sirve.' : ''}`,
     `- El cronograma no lo cambia usted: si conviene crear o cambiar una tarea, escriba ${path.join(rutas.trabajo, ARCHIVO_PROPUESTAS)} con una lista JSON como [{"kind":"tarea_crear","tarea":{"title":"…","startDate":"AAAA-MM-DD","endDate":"AAAA-MM-DD","responsable":"miembro","status":"pendiente"}}] o [{"kind":"tarea_editar","idTask":12,"tarea":{"status":"en_curso","progress":40}}] (máx. 10). Queda pendiente hasta que un dueño o editor la confirme; dígalo así.`,
