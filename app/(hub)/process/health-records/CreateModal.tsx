@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import {
   Modal, Select, TextInput, Textarea, Button, Group, Stack, Alert, NumberInput, SimpleGrid, Loader,
+  Paper, UnstyledButton, Text, Badge,
 } from '@mantine/core';
 import { PAISES, ESTADOS, OBSOLETO } from '../../../../lib/health-records/fields';
 
@@ -140,13 +141,35 @@ export default function CreateModal({ opened, onClose, companies, onCreated }: P
           rightSection={searchingItems ? <Loader size="xs" /> : null}
         />
         {articleResults.length > 0 && (
-          <Stack gap={2} style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid #eee', padding: 4 }}>
-            {articleResults.map((it) => (
-              <Button key={it.itemCode} variant="subtle" size="xs" justify="flex-start" onClick={() => pickItem(it)}>
-                {it.itemCode} — {it.itemName}
-              </Button>
-            ))}
-          </Stack>
+          <Paper withBorder radius="sm" p={4} style={{ maxHeight: 220, overflowY: 'auto' }}>
+            <style>{`.hr-item-row{width:100%;transition:background-color .1s}.hr-item-row:hover{background-color:var(--mantine-color-default-hover)}`}</style>
+            <Stack gap={2}>
+              {articleResults.map((it) => (
+                <UnstyledButton
+                  key={it.itemCode}
+                  onClick={() => pickItem(it)}
+                  px="xs"
+                  py={6}
+                  style={{ borderRadius: 6 }}
+                  className="hr-item-row"
+                >
+                  <Group gap="xs" wrap="nowrap" align="center">
+                    <Text size="xs" fw={700} style={{ whiteSpace: 'nowrap' }}>
+                      {it.itemCode}
+                    </Text>
+                    <Text size="xs" c="dimmed" truncate style={{ flex: 1 }} title={it.itemName}>
+                      {it.itemName}
+                    </Text>
+                    {it.cum && (
+                      <Badge size="xs" variant="light" color="teal" style={{ flexShrink: 0 }}>
+                        CUM {it.cum}
+                      </Badge>
+                    )}
+                  </Group>
+                </UnstyledButton>
+              ))}
+            </Stack>
+          </Paper>
         )}
 
         <SimpleGrid cols={{ base: 1, sm: 2 }}>
