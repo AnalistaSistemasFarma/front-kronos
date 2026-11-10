@@ -5788,6 +5788,74 @@ model BiomedEvento {
   @@schema("dbo")
 }
 
+/// INGENIERÍA BIOMÉDICA · INVENTARIO (fase 2, 2026-11-10; formato OLP-GCC-04-FR-017): un equipo por
+/// serie (única por empresa). Estado: bodega, distribuido (bloqueado para otro contrato), faltante o
+/// dañado (con su valor de cobro congelado al marcarlo). Artículo de SAP opcional.
+model BiomedEquipo {
+  id_biomed_equipo     Int       @id @default(autoincrement())
+  id_company           Int
+  codigo_interno       String?   @db.NVarChar(50)
+  equipo               String    @db.NVarChar(200)
+  marca                String?   @db.NVarChar(100)
+  modelo               String?   @db.NVarChar(150)
+  serie                String    @db.NVarChar(100)
+  clasificacion_riesgo String?   @db.NVarChar(20)
+  registro_sanitario   String?   @db.NVarChar(100)
+  cliente              String?   @db.NVarChar(200)
+  sede                 String?   @db.NVarChar(200)
+  zona                 String?   @db.NVarChar(100)
+  ciudad               String?   @db.NVarChar(100)
+  estado               String    @default("bodega") @db.NVarChar(20)
+  item_code_sap        String?   @db.NVarChar(50)
+  observacion          String?   @db.NVarChar(1000)
+  valor_cobro          Decimal?  @db.Decimal(18, 2)
+  novedad_at           DateTime?
+  created_by           String    @db.NVarChar(255)
+  created_at           DateTime  @default(now())
+  updated_by           String?   @db.NVarChar(255)
+  updated_at           DateTime?
+
+  @@unique([id_company, serie])
+  @@index([id_company, estado])
+  @@index([id_company, codigo_interno])
+  @@map("biomed_equipo")
+  @@schema("dbo")
+}
+
+/// Valor unitario por código interno (para cobrar equipos faltantes o dañados).
+model BiomedValorUnitario {
+  id_biomed_valor_unitario Int      @id @default(autoincrement())
+  id_company               Int
+  codigo_interno           String   @db.NVarChar(50)
+  valor                    Decimal  @db.Decimal(18, 2)
+  updated_by               String   @db.NVarChar(255)
+  updated_at               DateTime @default(now())
+
+  @@unique([id_company, codigo_interno])
+  @@map("biomed_valor_unitario")
+  @@schema("dbo")
+}
+
+/// Historial de cada equipo (control de cambios): solo inserción (disparador en la base).
+model BiomedEquipoEvento {
+  id_biomed_equipo_evento Int      @id @default(autoincrement())
+  id_company              Int
+  id_biomed_equipo        Int?
+  accion                  String   @db.NVarChar(40)
+  antes                   String?  @db.NVarChar(Max)
+  despues                 String?  @db.NVarChar(Max)
+  justificacion           String?  @db.NVarChar(1000)
+  lote                    String?  @db.NVarChar(40)
+  actor_email             String   @db.NVarChar(255)
+  ip                      String?  @db.NVarChar(100)
+  created_at              DateTime @default(now())
+
+  @@index([id_biomed_equipo, created_at])
+  @@index([id_company, created_at])
+  @@map("biomed_equipo_evento")
+  @@schema("dbo")
+}
+
 /// MEJORA CONTINUA de los flujos de trabajo (2026-11-09, docs/flujos-mejora-continua.md):
 /// lo que decidió una persona sobre una sugerencia del panel (aplicada o descartada), con la
 /// cifra de la tarea en ese momento para medir el antes y el después.
