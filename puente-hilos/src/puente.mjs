@@ -527,7 +527,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
               if (evento.parent_tool_use_id) return; // lo de adentro de un subagente no mueve la etiqueta
             }
             if (evento.type !== 'assistant' || !acc.ultimaHerramienta) return;
-            const etiqueta = etiquetaHerramienta(acc.ultimaHerramienta);
+            const etiqueta = etiquetaHerramienta(acc.ultimaHerramienta, acc.ultimaEntrada);
             if (etiqueta === ultimaEtiqueta) return;
             ultimaEtiqueta = etiqueta;
             indicador = { state: 'tool', label: etiqueta };

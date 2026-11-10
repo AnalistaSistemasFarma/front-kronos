@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { acumularEvento, armarArgumentos, armarEntorno, correrTurno, revisarInit } from '../src/claude.mjs';
+import { acumularEvento, armarArgumentos, armarEntorno, correrTurno, etiquetaHerramienta, revisarInit } from '../src/claude.mjs';
 import { HERRAMIENTAS_PROHIBIDAS } from '../src/config.mjs';
 
 const SESION = { id: '11111111-2222-3333-4444-555555555555', nueva: false };
@@ -162,4 +162,22 @@ test('correrTurno devuelve el resultado de un turno normal', async () => {
   });
   assert.equal(r.abortado, null);
   assert.equal(r.resultado.texto, 'Listo');
+});
+
+test('indicador descriptivo: dice qué hace cada paso y nunca muestra el comando', () => {
+  const bash = etiquetaHerramienta('Bash', { command: 'source ~/.horus/.env && curl -H "Authorization: Bearer x" https://a', description: 'Publicar el corte en PRUEBAS' });
+  assert.match(bash, /Publicar el corte en PRUEBAS/);
+  assert.doesNotMatch(bash, /curl|Bearer|\.env/);
+  assert.equal(etiquetaHerramienta('Bash', { command: 'ls' }), 'Ejecutando comandos…');
+  assert.equal(etiquetaHerramienta('Bash'), 'Ejecutando comandos…');
+  assert.match(etiquetaHerramienta('Read', { file_path: '/Users/x/proyecto/informe.md' }), /informe\.md/);
+  assert.doesNotMatch(etiquetaHerramienta('Read', { file_path: '/Users/x/proyecto/informe.md' }), /Users/);
+  assert.match(etiquetaHerramienta('Agent', { description: 'Medir uso de agentes', prompt: '…' }), /Medir uso de agentes/);
+  assert.equal(etiquetaHerramienta('mcp__kronos-pruebas-sql__pruebas_sql_consultar', { sql: 'SELECT 1' }), 'Trabajando en la base de PRUEBAS…');
+});
+
+test('acumularEvento guarda la entrada de la última herramienta', () => {
+  const acc = acumularEvento({}, { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { description: 'Listar archivos' } }] } });
+  assert.equal(acc.ultimaHerramienta, 'Bash');
+  assert.deepEqual(acc.ultimaEntrada, { description: 'Listar archivos' });
 });
