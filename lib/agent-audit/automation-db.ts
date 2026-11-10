@@ -101,6 +101,8 @@ export interface GraficosDto {
   semanas: string[];
   departamentos: {
     departamento: string;
+    /** Nombre visible de los agentes que suman en esa fila (2026-11-10). */
+    agentes: string[];
     horasSinIA: number;
     horasConIA: number;
     mejora: number | null;
@@ -173,6 +175,19 @@ function aCorrida(f: Fila | undefined): CorridaDto | null {
 
 const FILTRO_PERSONAL = `(ms.private_owner_email IS NULL OR LOWER(ms.private_owner_email) = @email)`;
 
+/**
+ * DEPARTAMENTO DEL AGENTE (Nicolás, 2026-11-10: «quiero renombrar algunos departamentos de los
+ * agentes»). Manda dbo.agent_departamento (asignado a mano, prisma/manual/2026-11-10-indicador-
+ * departamentos-*.sql); si el agente no tiene fila, el del corte más reciente de Casos de uso
+ * (el más repetido entre sus operadores). La tabla se lee con EXEC para que, en un ambiente donde
+ * todavía no exista, el indicador siga funcionando con el departamento de Casos de uso.
+ */
+const SQL_DEPTO_MANUAL = `
+        DECLARE @depto TABLE (id_agent INT PRIMARY KEY, departamento NVARCHAR(120));
+        IF OBJECT_ID(N'dbo.agent_departamento', N'U') IS NOT NULL
+          INSERT INTO @depto (id_agent, departamento)
+          EXEC (N'SELECT id_agent, departamento FROM dbo.agent_departamento');`;
+
 /** Resumen por agente del corte más reciente + estado de las corridas. */
 export async function leerIndicador(
   email: string,
@@ -184,9 +199,11 @@ export async function leerIndicador(
         .request()
         .input("email", sql.NVarChar(200), email.trim().toLowerCase()).query(`
         DECLARE @corte DATE = (SELECT MAX(corte) FROM dbo.agent_automation_case);
+        ${SQL_DEPTO_MANUAL}
         SELECT c.id_agent, a.code, a.display_name, LTRIM(RTRIM(co.company)) AS empresa,
-               (SELECT TOP 1 su.departamento FROM dbo.agent_use_summary su
-                 WHERE su.id_agent = a.id_agent ORDER BY su.corte DESC) AS departamento,
+               COALESCE((SELECT dm.departamento FROM @depto dm WHERE dm.id_agent = a.id_agent),
+                        (SELECT TOP 1 su.departamento FROM dbo.agent_use_summary su
+                          WHERE su.id_agent = a.id_agent ORDER BY su.corte DESC)) AS departamento,
                COUNT(*) AS casos, SUM(CAST(c.valido AS INT)) AS validos,
                SUM(CASE WHEN c.valido = 1 THEN c.ocurrencias ELSE 0 END) AS ocurrencias,
                SUM(c.horas_antes) AS antes, SUM(c.horas_despues) AS despues,
@@ -244,7 +261,7 @@ export async function leerIndicador(
         code: String(f.code),
         displayName: String(f.display_name),
         empresa: txt(f.empresa),
-        departamento: txt(f.departamento),
+        departamento: nombreDepto(txt(f.departamento)),
         casos: Number(f.casos ?? 0),
         casosValidos: Number(f.validos ?? 0),
         ocurrencias: Number(f.ocurrencias ?? 0),
@@ -344,7 +361,7 @@ function nombreDepto(v: string | null): string {
  * (el más repetido entre sus operadores). % de mejora = 1 − horas con IA /
  * horas sin IA, por departamento y semana (lunes de cada semana).
  */
-function armarGraficos(
+export function armarGraficos(
   agentes: AgenteIndicadorDto[],
   casos: Fila[],
 ): GraficosDto {
@@ -364,19 +381,9 @@ function armarGraficos(
   for (const c of casos) {
     const d = depto.get(Number(c.id_agent));
     if (!d) continue; // fuera del alcance o personal de otro
-    let ws: { inicio?: unknown; ocurrencias?: unknown }[] = [];
-    try {
-      const v = JSON.parse(String(c.semanas_json ?? "[]"));
-      if (Array.isArray(v)) ws = v;
-    } catch {
-      ws = [];
-    }
     const mh = Number(c.min_humano ?? 0);
     const md = Number(c.min_despues ?? 0);
-    for (const w of ws) {
-      const s = String(w.inicio ?? "");
-      const n = Number(w.ocurrencias ?? 0);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || !n) continue;
+    for (const { inicio: s, ocurrencias: n } of semanasDeCaso(c.semanas_json)) {
       semanas.add(s);
       const porSemana = celdas.get(d) ?? new Map();
       const x = porSemana.get(s) ?? { sin: 0, con: 0 };
@@ -395,6 +402,10 @@ function armarGraficos(
     departamentos: [...tot.entries()]
       .map(([departamento, t]) => ({
         departamento,
+        agentes: agentes
+          .filter((a) => depto.get(a.idAgent) === departamento)
+          .sort((a, b) => b.horasAhorradas - a.horasAhorradas)
+          .map((a) => a.displayName),
         horasSinIA: r1(t.sin),
         horasConIA: r1(t.con),
         mejora: pct(t.sin, t.con),
@@ -411,6 +422,181 @@ function armarGraficos(
       .filter((d) => d.horasSinIA > 0)
       .sort((a, b) => b.horasSinIA - a.horasSinIA),
   };
+}
+
+/** Veces por semana de un caso (semanas_json): solo semanas válidas con al menos una vez. */
+function semanasDeCaso(json: unknown): { inicio: string; ocurrencias: number }[] {
+  let ws: { inicio?: unknown; ocurrencias?: unknown }[] = [];
+  try {
+    const v = JSON.parse(String(json ?? "[]"));
+    if (Array.isArray(v)) ws = v;
+  } catch {
+    ws = [];
+  }
+  return ws
+    .map((w) => ({ inicio: String(w.inicio ?? ""), ocurrencias: Number(w.ocurrencias ?? 0) }))
+    .filter((w) => /^\d{4}-\d{2}-\d{2}$/.test(w.inicio) && w.ocurrencias > 0);
+}
+
+function leerPasos(json: unknown): PasoDto[] {
+  try {
+    const p = JSON.parse(String(json ?? "[]"));
+    if (!Array.isArray(p)) return [];
+    return p
+      .map((x) => ({
+        paso: String(x?.paso ?? x?.descripcion ?? x?.nombre ?? ""),
+        minutos: Number(x?.minutos ?? x?.min ?? 0),
+      }))
+      .filter((x) => x.paso);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * DETALLE DE UNA CELDA DEL MAPA DE CALOR (Nicolás, 2026-11-10: «cuando le dé clic a uno de esos
+ * cuadritos … ver qué se hizo esa semana y por qué tanto ahorro»). Departamento × semana: cada
+ * caso de uso que sumó esa semana, con sus veces, el supuesto de minutos (sin IA → con IA), los
+ * pasos que se ahorran y las horas liberadas. Mismo cálculo que armarGraficos, así que los
+ * totales cuadran con la celda.
+ */
+export interface ItemSemanaDto {
+  code: string;
+  agente: string;
+  clave: string;
+  caso: string;
+  descripcion: string | null;
+  area: string | null;
+  entregable: string | null;
+  /** Veces que se pidió ese caso esa semana. */
+  ocurrencias: number;
+  minHumano: number;
+  minDespues: number;
+  minAgente: number | null;
+  horasSinIA: number;
+  horasConIA: number;
+  horasLiberadas: number;
+  pasos: PasoDto[];
+  supuestos: string | null;
+  confianza: string | null;
+}
+export interface DetalleSemanaDto {
+  departamento: string;
+  semana: string;
+  /** Domingo de esa semana (la semana va de lunes a domingo, hora de Colombia). */
+  semanaHasta: string;
+  corte: string | null;
+  horasSinIA: number;
+  horasConIA: number;
+  horasLiberadas: number;
+  mejora: number | null;
+  ocurrencias: number;
+  agentes: { code: string; agente: string; ocurrencias: number; horasLiberadas: number }[];
+  items: ItemSemanaDto[];
+}
+
+/** Arma el detalle con las filas de agent_automation_case (puro, para probarlo). */
+export function armarDetalleSemana(
+  agentes: AgenteIndicadorDto[],
+  casos: Fila[],
+  departamento: string,
+  semana: string,
+  corte: string | null,
+): DetalleSemanaDto {
+  const delDepto = new Map(
+    agentes.filter((a) => nombreDepto(a.departamento) === departamento).map((a) => [a.idAgent, a]),
+  );
+  let sin = 0;
+  let con = 0;
+  const items: ItemSemanaDto[] = [];
+  for (const c of casos) {
+    const ag = delDepto.get(Number(c.id_agent));
+    if (!ag || !c.valido) continue;
+    const n = semanasDeCaso(c.semanas_json)
+      .filter((w) => w.inicio === semana)
+      .reduce((acc, w) => acc + w.ocurrencias, 0);
+    if (!n) continue;
+    const mh = Number(c.min_humano ?? 0);
+    const md = Number(c.min_despues ?? 0);
+    const hs = (n * mh) / 60;
+    const hc = (n * md) / 60;
+    sin += hs;
+    con += hc;
+    items.push({
+      code: ag.code,
+      agente: ag.displayName,
+      clave: String(c.clave ?? ""),
+      caso: String(c.caso ?? ""),
+      descripcion: txt(c.descripcion),
+      area: txt(c.area),
+      entregable: txt(c.entregable),
+      ocurrencias: n,
+      minHumano: mh,
+      minDespues: md,
+      minAgente: num(c.min_agente),
+      horasSinIA: r1(hs),
+      horasConIA: r1(hc),
+      horasLiberadas: r1(hs - hc),
+      pasos: leerPasos(c.pasos_json),
+      supuestos: txt(c.supuestos),
+      confianza: txt(c.confianza),
+    });
+  }
+  items.sort((a, b) => b.horasLiberadas - a.horasLiberadas || b.ocurrencias - a.ocurrencias);
+  const porAgente = new Map<string, { code: string; agente: string; ocurrencias: number; horasLiberadas: number }>();
+  for (const it of items) {
+    const x = porAgente.get(it.code) ?? { code: it.code, agente: it.agente, ocurrencias: 0, horasLiberadas: 0 };
+    x.ocurrencias += it.ocurrencias;
+    x.horasLiberadas += it.horasLiberadas;
+    porAgente.set(it.code, x);
+  }
+  const hasta = new Date(Date.parse(semana) + 6 * 86_400_000).toISOString().slice(0, 10);
+  // Igual que la celda: horas sin IA y con IA redondeadas a 1 decimal; liberadas = la resta.
+  const hsR = r1(sin);
+  const hcR = r1(con);
+  return {
+    departamento,
+    semana,
+    semanaHasta: hasta,
+    corte,
+    horasSinIA: hsR,
+    horasConIA: hcR,
+    horasLiberadas: r1(hsR - hcR),
+    mejora: sin > 0 ? Math.round((1 - con / sin) * 1000) / 10 : null,
+    ocurrencias: items.reduce((acc, it) => acc + it.ocurrencias, 0),
+    agentes: [...porAgente.values()]
+      .map((x) => ({ ...x, horasLiberadas: r1(x.horasLiberadas) }))
+      .sort((a, b) => b.horasLiberadas - a.horasLiberadas),
+    items,
+  };
+}
+
+/** Celda del mapa de calor (departamento × semana) dentro del alcance de quien mira. */
+export async function leerDetalleSemana(
+  departamento: string,
+  semana: string,
+  email: string,
+  alcance: AuditScope,
+): Promise<DetalleSemanaDto> {
+  // Reusa el resumen general: mismo alcance, mismos agentes personales y mismo departamento.
+  const general = await leerIndicador(email, alcance);
+  const ids = general.agentes
+    .filter((a) => nombreDepto(a.departamento) === departamento)
+    .map((a) => a.idAgent);
+  if (!ids.length) return armarDetalleSemana([], [], departamento, semana, general.corte);
+  return conTablas(async () => {
+    const r = await withMssqlPool((pool) =>
+      pool.request().input("ids", sql.NVarChar(4000), JSON.stringify(ids)).query(`
+        DECLARE @corte DATE = (SELECT MAX(corte) FROM dbo.agent_automation_case);
+        SELECT c.id_agent, c.clave, c.caso, c.descripcion, c.area, c.entregable, c.min_humano,
+               c.min_despues, c.min_agente, c.pasos_json, c.supuestos, c.confianza, c.valido, c.semanas_json
+        FROM dbo.agent_automation_case c
+        WHERE c.corte = @corte AND c.valido = 1
+          AND c.id_agent IN (SELECT CAST([value] AS INT) FROM OPENJSON(@ids));
+      `),
+    );
+    return armarDetalleSemana(general.agentes, r.recordset as Fila[], departamento, semana, general.corte);
+  });
 }
 
 /** Casos de UN agente (su ficha). null si no existe o no está en el alcance. */

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Card,
   Group,
@@ -14,6 +14,10 @@ import type { ChartOptions } from "chart.js";
 import "../../../lib/charts/register";
 import { mergeChartOptionsForTheme } from "../../../lib/charts/chartColorScheme";
 import type { GraficosDto } from "../../../lib/agent-audit/automation-db";
+import {
+  DetalleSemanaModal,
+  type CeldaSeleccionada,
+} from "./DetalleSemanaModal";
 
 /**
  * Gráficos del Indicador de automatizaciones (Nicolás, 2026-10-30):
@@ -61,6 +65,7 @@ export function GraficosMejora({
 }) {
   const deptos = graficos.departamentos;
   const semanas = graficos.semanas;
+  const [celda, setCelda] = useState<CeldaSeleccionada | null>(null);
 
   const datosBarras = useMemo(
     () => ({
@@ -139,7 +144,8 @@ export function GraficosMejora({
         <Text size="xs" c="dimmed" mb="sm">
           Cada celda: horas liberadas esa semana (arriba) y % de capacidad
           liberada = 1 − horas de la persona con IA ÷ horas sin IA (abajo). El
-          color sigue el %. Vacío = esa semana no hubo tareas medidas.
+          color sigue el %. Vacío = esa semana no hubo tareas medidas. Toque
+          una celda para ver qué se hizo esa semana y por qué.
         </Text>
         {semanas.length === 0 ? (
           <Text size="xs" c="dimmed">
@@ -195,8 +201,21 @@ export function GraficosMejora({
                       }}
                     >
                       {d.departamento}
+                      {d.agentes.length > 0 && (
+                        <div
+                          style={{
+                            fontWeight: 400,
+                            fontSize: 10,
+                            opacity: 0.65,
+                            maxWidth: 180,
+                            whiteSpace: "normal",
+                          }}
+                        >
+                          {d.agentes.join(", ")}
+                        </div>
+                      )}
                     </td>
-                    {d.celdas.map((c) => (
+                    {d.celdas.map((c, i) => (
                       <Tooltip
                         key={c.semana}
                         withArrow
@@ -204,7 +223,36 @@ export function GraficosMejora({
                         label={`Sin IA ${h(c.horasSinIA, 1)} h · con IA ${h(c.horasConIA, 1)} h · liberadas ${h(c.horasSinIA - c.horasConIA, 1)} h`}
                       >
                         <td
+                          role={c.mejora === null ? undefined : "button"}
+                          tabIndex={c.mejora === null ? undefined : 0}
+                          aria-label={
+                            c.mejora === null
+                              ? undefined
+                              : `Ver detalle de ${d.departamento}, semana ${i + 1}`
+                          }
+                          onClick={
+                            c.mejora === null
+                              ? undefined
+                              : () =>
+                                  setCelda({
+                                    departamento: d.departamento,
+                                    semana: c.semana,
+                                    numero: i + 1,
+                                  })
+                          }
+                          onKeyDown={(e) => {
+                            if (c.mejora === null) return;
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              setCelda({
+                                departamento: d.departamento,
+                                semana: c.semana,
+                                numero: i + 1,
+                              });
+                            }
+                          }}
                           style={{
+                            cursor: c.mejora === null ? undefined : "pointer",
                             background: fondo(c.mejora),
                             border:
                               "1px solid var(--mantine-color-default-border)",
@@ -280,6 +328,8 @@ export function GraficosMejora({
           </Text>
         </Group>
       </Card>
+
+      <DetalleSemanaModal celda={celda} onClose={() => setCelda(null)} />
 
       <Card withBorder radius="md" padding="md" className="chat-surface">
         <Text fw={600} size="sm">
