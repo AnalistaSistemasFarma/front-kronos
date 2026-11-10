@@ -112,11 +112,44 @@ export interface GraficosDto {
     }[];
   }[];
 }
+/**
+ * CONSOLIDADO por departamento (revisión del 2026-11-09 con Nicolás Rivera): cuánta capacidad
+ * operativa se liberó en cada área, para presentarlo «no partido por gente sino como visión».
+ */
+export interface DepartamentoIndicadorDto {
+  departamento: string;
+  agentes: number;
+  horasSinIA: number;
+  horasConIA: number;
+  /** Horas liberadas en TODO el periodo analizado (acumulado). */
+  horasPeriodo: number;
+  /** Las mismas horas llevadas a un mes promedio (30,44 días). */
+  horasMes: number;
+  /** % de capacidad liberada = 1 − con IA ÷ sin IA. */
+  porcentaje: number | null;
+}
+/** Los casos de uso que más capacidad liberan (para la presentación). */
+export interface CasoRelevanteDto {
+  caso: string;
+  area: string | null;
+  agente: string;
+  code: string;
+  departamento: string;
+  ocurrencias: number;
+  minHumano: number;
+  minDespues: number;
+  horasPeriodo: number;
+  horasMes: number;
+}
 export interface IndicadorDto {
   corte: string | null;
   periodoDesde: string | null;
   semanas: number | null;
   agentes: AgenteIndicadorDto[];
+  departamentos: DepartamentoIndicadorDto[];
+  casosRelevantes: CasoRelevanteDto[];
+  /** Agentes activos (en su alcance) que todavía no tienen casos medidos en este corte. */
+  sinMedir: { code: string; displayName: string }[];
   ultima: CorridaDto | null;
   pendiente: CorridaDto | null;
   graficos: GraficosDto;
@@ -176,6 +209,23 @@ export async function leerIndicador(
         SELECT c.id_agent, c.min_humano, c.min_despues, c.semanas_json
         FROM dbo.agent_automation_case c
         WHERE c.corte = @corte AND c.valido = 1;
+
+        -- Casos más relevantes (2026-11-09): los que más horas liberan por mes.
+        SELECT TOP 40 c.id_agent, c.caso, c.area, c.ocurrencias, c.min_humano, c.min_despues,
+               c.horas_ahorradas, c.horas_mes, a.code, a.display_name
+        FROM dbo.agent_automation_case c
+        JOIN dbo.agent a ON a.id_agent = c.id_agent
+        LEFT JOIN dbo.agent_memory_setting ms ON ms.id_agent = a.id_agent
+        WHERE c.corte = @corte AND c.valido = 1 AND c.horas_mes > 0 AND a.is_active = 1 AND ${FILTRO_PERSONAL}
+        ORDER BY c.horas_mes DESC;
+
+        -- Agentes activos sin casos medidos en el corte (para decir qué falta mapear).
+        SELECT a.id_agent, a.code, a.display_name
+        FROM dbo.agent a
+        LEFT JOIN dbo.agent_memory_setting ms ON ms.id_agent = a.id_agent
+        WHERE a.is_active = 1 AND a.code <> 'personas' AND ${FILTRO_PERSONAL}
+          AND NOT EXISTS (SELECT 1 FROM dbo.agent_automation_case c WHERE c.id_agent = a.id_agent AND c.corte = @corte)
+        ORDER BY a.display_name;
       `),
     );
     const sets = r.recordsets as unknown as Fila[][];
@@ -221,8 +271,60 @@ export async function leerIndicador(
       ultima: aCorrida(sets[1]?.[0]),
       pendiente: aCorrida(sets[2]?.[0]),
       graficos: armarGraficos(agentes, sets[3] ?? []),
+      departamentos: consolidarDepartamentos(agentes),
+      casosRelevantes: casosRelevantes(agentes, sets[4] ?? [], alcance),
+      sinMedir: (sets[5] ?? [])
+        .filter((f) => agentInScope(alcance, Number(f.id_agent)))
+        .map((f) => ({ code: String(f.code), displayName: String(f.display_name) })),
     };
   });
+}
+
+const r1 = (v: number) => Math.round(v * 10) / 10;
+
+/** Consolidado por departamento (el del agente), de mayor a menor capacidad liberada por mes. */
+export function consolidarDepartamentos(agentes: AgenteIndicadorDto[]): DepartamentoIndicadorDto[] {
+  const m = new Map<string, DepartamentoIndicadorDto>();
+  for (const a of agentes) {
+    const d = nombreDepto(a.departamento);
+    const x = m.get(d) ?? { departamento: d, agentes: 0, horasSinIA: 0, horasConIA: 0, horasPeriodo: 0, horasMes: 0, porcentaje: null };
+    x.agentes += 1;
+    x.horasSinIA += a.horasAntes;
+    x.horasConIA += a.horasDespues;
+    x.horasPeriodo += a.horasAhorradas;
+    x.horasMes += a.horasMes;
+    m.set(d, x);
+  }
+  return [...m.values()]
+    .map((x) => ({
+      ...x,
+      horasSinIA: r1(x.horasSinIA),
+      horasConIA: r1(x.horasConIA),
+      horasPeriodo: r1(x.horasPeriodo),
+      horasMes: r1(x.horasMes),
+      porcentaje: x.horasSinIA > 0 ? Math.round((1 - x.horasConIA / x.horasSinIA) * 1000) / 10 : null,
+    }))
+    .sort((a, b) => b.horasMes - a.horasMes);
+}
+
+/** Los 8 casos que más horas liberan por mes, dentro del alcance de quien mira. */
+function casosRelevantes(agentes: AgenteIndicadorDto[], filas: Fila[], alcance: AuditScope): CasoRelevanteDto[] {
+  const depto = new Map(agentes.map((a) => [a.idAgent, nombreDepto(a.departamento)]));
+  return filas
+    .filter((f) => agentInScope(alcance, Number(f.id_agent)))
+    .slice(0, 8)
+    .map((f) => ({
+      caso: String(f.caso),
+      area: txt(f.area),
+      agente: String(f.display_name),
+      code: String(f.code),
+      departamento: depto.get(Number(f.id_agent)) ?? SIN_DEPTO,
+      ocurrencias: Number(f.ocurrencias ?? 0),
+      minHumano: Number(f.min_humano ?? 0),
+      minDespues: Number(f.min_despues ?? 0),
+      horasPeriodo: Number(f.horas_ahorradas ?? 0),
+      horasMes: Number(f.horas_mes ?? 0),
+    }));
 }
 
 const SIN_DEPTO = "Sin departamento";
