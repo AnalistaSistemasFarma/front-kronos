@@ -81,12 +81,14 @@ import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
 import { filterByText, requestSearchParts } from '../../../../../lib/requests-general/textSearch';
 import { RequestListFilters } from '../../../../../components/request-general/list/RequestListFilters';
 import {
+  ASSIGNED_STATE_OPTIONS,
   EMPTY_LIST_FILTERS,
   buildListOptions,
   countByStatusGroup,
   describeListFilters,
   matchesListFilters,
   splitPeople,
+  stateGroup,
   statusGroupOf,
   type ListFilters,
   type ListRow,
@@ -262,6 +264,7 @@ function RequestBoard() {
       row: {
         requestId: t.id,
         group: statusGroupOf(t.id_status_case, t.status),
+        statusId: t.id_status_case,
         companyId: String(t.id_company ?? ''),
         company: t.company,
         process: t.process,
@@ -279,6 +282,7 @@ function RequestBoard() {
       row: {
         requestId: t.id_request_general,
         group: statusGroupOf(t.id_status, t.status_task),
+        statusId: t.id_status,
         companyId: String(t.id_company ?? ''),
         company: t.company,
         process: t.process,
@@ -300,7 +304,11 @@ function RequestBoard() {
     return [...requests, ...tasks].sort((a, b) => byCreatedAtDesc(a.item, b.item));
   }, [tickets, assignedTasks, openAll, openScopeTasks]);
 
-  const listOptions = useMemo(() => buildListOptions(allEntries.map((e) => e.row)), [allEntries]);
+  // «Estado» exacto (Sin empezar, Abierto, Cancelado, Resuelto, Devuelta): el filtro que había antes del panel.
+  const listOptions = useMemo(
+    () => ({ ...buildListOptions(allEntries.map((e) => e.row)), states: ASSIGNED_STATE_OPTIONS }),
+    [allEntries]
+  );
   // Buscador + filtros del panel (sin estado ni tipo): base de las tarjetas y las pestañas.
   const matchingEntries = useMemo(
     () =>
@@ -365,7 +373,12 @@ function RequestBoard() {
     const next = !openAll;
     setOpenAll(next);
     if (next) {
-      setFilters((f) => ({ ...f, status: 'pending' }));
+      // Un estado exacto que no sea pendiente (Resuelto, Cancelado) dejaría la lista vacía.
+      setFilters((f) => ({
+        ...f,
+        status: 'pending',
+        state: f.state && stateGroup(f.state) === 'pending' ? f.state : '',
+      }));
       void fetchOpenScopeTasks();
     }
   };
