@@ -214,6 +214,14 @@ function whereDe(access: BiomedAccess, f: FiltroInventario) {
   };
 }
 
+export interface PlantillaModelo {
+  codigoInterno: string | null;
+  equipo: string | null;
+  marca: string | null;
+  clasificacionRiesgo: string | null;
+  registroSanitario: string | null;
+}
+
 export interface ResumenInventario {
   total: number;
   porEstado: Record<EstadoEquipo, number>;
@@ -222,6 +230,11 @@ export interface ResumenInventario {
   codigos: string[];
   /** Modelos ya usados (para elegir uno o escribir uno nuevo). */
   modelos: string[];
+  equipos: string[];
+  marcas: string[];
+  clasificaciones: string[];
+  /** Por modelo, los datos que se repiten (los más usados): al elegir el modelo se llenan solos. */
+  plantillas: Record<string, PlantillaModelo>;
   /** Cliente y ciudad más usados en bodega (para prellenar la devolución). */
   bodega: { cliente: string | null; ciudad: string | null };
 }
@@ -234,7 +247,7 @@ export async function resumenInventario(db: BiomedDb, access: BiomedAccess): Pro
     db.biomedEquipo.groupBy({ by: ['cliente'], where }),
     db.biomedEquipo.groupBy({ by: ['ciudad'], where }),
     db.biomedEquipo.groupBy({ by: ['codigo_interno'], where }),
-    db.biomedEquipo.groupBy({ by: ['modelo'], where }),
+    db.biomedEquipo.groupBy({ by: ['modelo', 'codigo_interno', 'equipo', 'marca', 'clasificacion_riesgo', 'registro_sanitario'], where, _count: { _all: true } }),
     db.biomedEquipo.groupBy({ by: ['cliente', 'ciudad'], where: { ...where, estado: 'bodega' }, _count: { _all: true } }),
   ]);
   const habitual = [...enBodega].sort((a, b) => b._count._all - a._count._all)[0];
@@ -247,9 +260,24 @@ export async function resumenInventario(db: BiomedDb, access: BiomedAccess): Pro
     clientes: lista(clientes.map((c) => c.cliente)),
     ciudades: lista(ciudades.map((c) => c.ciudad)),
     codigos: lista(codigos.map((c) => c.codigo_interno)),
-    modelos: lista(modelos.map((c) => c.modelo)),
+    modelos: lista([...new Set(modelos.map((c) => c.modelo))]),
+    equipos: lista([...new Set(modelos.map((c) => c.equipo))]),
+    marcas: lista([...new Set(modelos.map((c) => c.marca))]),
+    clasificaciones: lista([...new Set(modelos.map((c) => c.clasificacion_riesgo))]),
+    plantillas: plantillasDe(modelos),
     bodega: { cliente: habitual?.cliente ?? null, ciudad: habitual?.ciudad ?? null },
   };
+}
+
+function plantillasDe(grupos: { modelo: string | null; codigo_interno: string | null; equipo: string; marca: string | null; clasificacion_riesgo: string | null; registro_sanitario: string | null; _count: { _all: number } }[]) {
+  const out: Record<string, PlantillaModelo & { n: number }> = {};
+  for (const g of grupos) {
+    if (!g.modelo) continue;
+    const previo = out[g.modelo];
+    if (previo && previo.n >= g._count._all) continue;
+    out[g.modelo] = { codigoInterno: g.codigo_interno, equipo: g.equipo, marca: g.marca, clasificacionRiesgo: g.clasificacion_riesgo, registroSanitario: g.registro_sanitario, n: g._count._all };
+  }
+  return Object.fromEntries(Object.entries(out).map(([k, { n: _n, ...v }]) => [k, v]));
 }
 
 export async function listEquipos(db: BiomedDb, access: BiomedAccess, f: FiltroInventario & { page?: unknown; pageSize?: unknown }) {
@@ -322,20 +350,55 @@ export function datosDe(input: Record<string, unknown>, parcial = false): Partia
   return out;
 }
 
+export const MAX_SERIES_ALTA = 500;
+
+/** Las series del alta: una (serie) o varias (series: una por línea, o separadas por coma o punto y coma). */
+export function seriesDe(input: Record<string, unknown>): string[] {
+  const crudo = Array.isArray(input.series) ? input.series.map(String).join('\n') : typeof input.series === 'string' && input.series.trim() ? input.series : String(input.serie ?? '');
+  const series = crudo
+    .split(/[\n,;]+/)
+    .map((x) => x.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  if (series.length === 0) throw new SgcError('Escriba la serie.', 400);
+  if (series.length > MAX_SERIES_ALTA) throw new SgcError(`Máximo ${MAX_SERIES_ALTA} series por alta: use el cargue masivo.`, 400);
+  const largas = series.filter((x) => x.length > LARGO_CAMPO.serie);
+  if (largas.length) throw new SgcError(`Serie: máximo ${LARGO_CAMPO.serie} caracteres (${largas[0]}).`, 400);
+  const vistas = new Set<string>();
+  const repetidas = series.filter((x) => (vistas.has(x.toLowerCase()) ? true : (vistas.add(x.toLowerCase()), false)));
+  if (repetidas.length) throw new SgcError(`Serie repetida en la lista: ${repetidas.slice(0, 5).join(', ')}.`, 400);
+  return series;
+}
+
+/** Alta de UNO o VARIOS equipos con los mismos datos (cambia solo la serie). */
 export async function crearEquipo(db: BiomedDb, access: BiomedAccess, input: Record<string, unknown>, actor: InvActor) {
   puedeUsar(access);
-  const d = datosDe(input) as DatosEquipo;
+  const d = datosDe({ ...input, serie: null }) as DatosEquipo;
   if (!d.equipo) throw new SgcError('Escriba el equipo.', 400);
-  if (!d.serie) throw new SgcError('Escriba la serie.', 400);
-  if (await db.biomedEquipo.findFirst({ where: { id_company: access.idCompany, serie: d.serie }, select: { id_biomed_equipo: true } })) {
-    throw new SgcError(`La serie ${d.serie} ya está en el inventario.`, 409);
+  const series = seriesDe(input);
+  const ya: string[] = [];
+  for (let i = 0; i < series.length; i += LOTE_SQL) {
+    const rows = await db.biomedEquipo.findMany({ where: { id_company: access.idCompany, serie: { in: series.slice(i, i + LOTE_SQL) } }, select: { serie: true } });
+    ya.push(...rows.map((r) => r.serie));
   }
+  if (ya.length) throw new SgcError(`${ya.length === 1 ? 'La serie' : 'Las series'} ${ya.slice(0, 5).join(', ')}${ya.length > 5 ? '…' : ''} ya ${ya.length === 1 ? 'está' : 'están'} en el inventario.`, 409);
   const estado = estadoPorUbicacion(d);
-  const row = await db.biomedEquipo
-    .create({ data: { id_company: access.idCompany, ...d, equipo: d.equipo, serie: d.serie, estado, created_by: lower(actor.email) } })
-    .catch((e: unknown) => serieRepetida(e, d.serie!));
-  await eventos(db, access.idCompany, [{ id: row.id_biomed_equipo, accion: 'alta', despues: { ...d, estado }, justificacion: justificacionDe(input.justificacion, false) }], actor, null);
-  return { id: row.id_biomed_equipo };
+  const justificacion = justificacionDe(input.justificacion, false);
+  const email = lower(actor.email);
+  const creados = await db.$transaction(
+    async (tx) => {
+      const ids: number[] = [];
+      for (const serie of series) {
+        const row = await tx.biomedEquipo
+          .create({ data: { id_company: access.idCompany, ...d, equipo: d.equipo!, serie, estado, created_by: email }, select: { id_biomed_equipo: true } })
+          .catch((e: unknown) => serieRepetida(e, serie));
+        ids.push(row.id_biomed_equipo);
+      }
+      await eventos(tx, access.idCompany, ids.map((id, i) => ({ id, accion: 'alta', despues: { ...d, serie: series[i], estado }, justificacion })), actor, series.length > 1 ? randomUUID().slice(0, 18) : null);
+      return ids;
+    },
+    { timeout: 120_000, maxWait: 10_000 }
+  );
+  return { id: creados[0]!, creados: creados.length };
 }
 
 /** Cambia los datos de UN equipo (no su estado): exige justificación; cambiar la serie es «cambio de serial». */

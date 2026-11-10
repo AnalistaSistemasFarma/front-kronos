@@ -29,6 +29,7 @@ import {
   IconArrowBackUp,
   IconBox,
   IconCheck,
+  IconCopy,
   IconCurrencyDollar,
   IconFileSpreadsheet,
   IconHistory,
@@ -123,6 +124,7 @@ function Equipos({ idCompany, version, onCambio }: { idCompany: number; version:
   const ultimo = useRef<number | null>(null);
   const [accion, setAccion] = useState<AccionMovimiento | null>(null);
   const [editar, setEditar] = useState<EquipoDto | 'nuevo' | null>(null);
+  const [copiar, setCopiar] = useState<EquipoDto | null>(null);
   const [historial, setHistorial] = useState<number | null>(null);
   const [sap, setSap] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -322,6 +324,11 @@ function Equipos({ idCompany, version, onCambio }: { idCompany: number; version:
                             <IconPencil size={16} />
                           </ActionIcon>
                         </Tooltip>
+                        <Tooltip label='Nuevo equipo con estos datos'>
+                          <ActionIcon variant='subtle' aria-label='Nuevo como este' onClick={() => setCopiar(e)}>
+                            <IconCopy size={16} />
+                          </ActionIcon>
+                        </Tooltip>
                         <Tooltip label='Historial'>
                           <ActionIcon variant='subtle' aria-label='Historial' onClick={() => setHistorial(e.id)}>
                             <IconHistory size={16} />
@@ -345,6 +352,7 @@ function Equipos({ idCompany, version, onCambio }: { idCompany: number; version:
 
       {accion && <MovimientoModal idCompany={idCompany} accion={accion} ids={[...sel.keys()]} resumen={r} onClose={() => setAccion(null)} onDone={(n) => { setAccion(null); terminado(`${n.toLocaleString('es-CO')} equipo(s): ${ACCION[accion].boton.toLowerCase()}.`); }} />}
       {editar && <EquipoModal idCompany={idCompany} equipo={editar === 'nuevo' ? null : editar} resumen={r} onClose={() => setEditar(null)} onDone={(msg) => { setEditar(null); terminado(msg); }} />}
+      {copiar && <EquipoModal idCompany={idCompany} equipo={null} base={copiar} resumen={r} onClose={() => setCopiar(null)} onDone={(msg) => { setCopiar(null); terminado(msg); }} />}
       {historial !== null && <HistorialModal idCompany={idCompany} idEquipo={historial} onClose={() => setHistorial(null)} />}
       {sap && <ArticuloSapModal idCompany={idCompany} ids={[...sel.keys()]} onClose={() => setSap(false)} onDone={(n) => { setSap(false); terminado(`Artículo de SAP actualizado en ${n.toLocaleString('es-CO')} equipo(s).`); }} />}
     </Stack>
@@ -421,10 +429,10 @@ function MovimientoModal({ idCompany, accion, ids, resumen, onClose, onDone }: {
 
 const CAMPOS: { k: keyof EquipoDto; label: string; requerido?: boolean }[] = [
   { k: 'serie', label: 'Serie', requerido: true },
+  { k: 'modelo', label: 'Modelo' },
   { k: 'equipo', label: 'Equipo', requerido: true },
   { k: 'codigoInterno', label: 'Código interno' },
   { k: 'marca', label: 'Marca' },
-  { k: 'modelo', label: 'Modelo' },
   { k: 'clasificacionRiesgo', label: 'Clasificación de riesgo' },
   { k: 'registroSanitario', label: 'Registro sanitario' },
   { k: 'cliente', label: 'Cliente' },
@@ -433,12 +441,51 @@ const CAMPOS: { k: keyof EquipoDto; label: string; requerido?: boolean }[] = [
   { k: 'ciudad', label: 'Ciudad' },
 ];
 
-function EquipoModal({ idCompany, equipo, resumen, onClose, onDone }: { idCompany: number; equipo: EquipoDto | null; resumen: ResumenInventario | null; onClose: () => void; onDone: (msg: string) => void }) {
-  const [v, setV] = useState<Record<string, string>>(() => Object.fromEntries(CAMPOS.map((c) => [c.k, String(equipo?.[c.k] ?? (c.k === 'sede' && !equipo ? 'Bodega' : ''))])));
+/** Campos que se eligen de los ya usados (o se escribe uno nuevo). */
+function opcionesDe(k: keyof EquipoDto, r: ResumenInventario | null): string[] | null {
+  if (!r) return null;
+  const m: Partial<Record<keyof EquipoDto, string[] | undefined>> = {
+    modelo: r.modelos,
+    equipo: r.equipos,
+    codigoInterno: r.codigos,
+    marca: r.marcas,
+    clasificacionRiesgo: r.clasificaciones,
+    cliente: r.clientes,
+    ciudad: r.ciudades,
+  };
+  return m[k] ?? null;
+}
+
+const serieLista = (s: string) =>
+  s
+    .split(/[\n,;]+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+function EquipoModal({ idCompany, equipo, base, resumen, onClose, onDone }: { idCompany: number; equipo: EquipoDto | null; base?: EquipoDto | null; resumen: ResumenInventario | null; onClose: () => void; onDone: (msg: string) => void }) {
+  // «Nuevo como este»: los datos del equipo de base, sin su serie.
+  const origen = equipo ?? base ?? null;
+  const [v, setV] = useState<Record<string, string>>(() => Object.fromEntries(CAMPOS.map((c) => [c.k, c.k === 'serie' && !equipo ? '' : String(origen?.[c.k] ?? (c.k === 'sede' && !origen ? 'Bodega' : ''))])));
   const [justificacion, setJustificacion] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const cambiaSerie = equipo !== null && v.serie.trim() !== equipo.serie;
+  const series = equipo ? [] : serieLista(v.serie);
+
+  const cambiar = (k: keyof EquipoDto, x: string) => {
+    const next = { ...v, [k]: x };
+    // Al elegir un modelo que ya existe, se llenan solos sus datos (lo más usado con ese modelo).
+    const p = k === 'modelo' ? resumen?.plantillas?.[x] : undefined;
+    if (p) {
+      next.equipo = p.equipo ?? next.equipo;
+      next.codigoInterno = p.codigoInterno ?? '';
+      next.marca = p.marca ?? '';
+      next.clasificacionRiesgo = p.clasificacionRiesgo ?? '';
+      next.registroSanitario = p.registroSanitario ?? '';
+    }
+    setV(next);
+  };
+
   const guardar = async () => {
     setBusy(true);
     setError(null);
@@ -447,8 +494,9 @@ function EquipoModal({ idCompany, equipo, resumen, onClose, onDone }: { idCompan
         const res = await sgcSend<{ changed: boolean }>(`/api/biomedica/inventario/${equipo.id}`, 'PATCH', { company: idCompany, ...v, justificacion });
         onDone(res.changed ? (cambiaSerie ? `Serie cambiada: ${equipo.serie} → ${v.serie.trim()}.` : `Equipo ${v.serie.trim()} actualizado.`) : 'Sin cambios.');
       } else {
-        await sgcSend('/api/biomedica/inventario', 'POST', { company: idCompany, ...v, justificacion });
-        onDone(`Equipo ${v.serie.trim()} agregado al inventario.`);
+        const { serie: _s, ...datos } = v;
+        const res = await sgcSend<{ creados: number }>('/api/biomedica/inventario', 'POST', { company: idCompany, ...datos, series, justificacion });
+        onDone(res.creados === 1 ? `Equipo ${series[0]} agregado al inventario.` : `${res.creados.toLocaleString('es-CO')} equipos agregados al inventario.`);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -457,36 +505,50 @@ function EquipoModal({ idCompany, equipo, resumen, onClose, onDone }: { idCompan
     }
   };
   return (
-    <Modal opened onClose={onClose} title={<Text fw={700}>{equipo ? `Editar equipo · ${equipo.serie}` : 'Nuevo equipo'}</Text>} size='lg' data-testid='biomed-inv-equipo'>
+    <Modal opened onClose={onClose} title={<Text fw={700}>{equipo ? `Editar equipo · ${equipo.serie}` : base ? `Nuevo equipo como ${base.serie}` : 'Nuevo equipo'}</Text>} size='lg' data-testid='biomed-inv-equipo'>
       <Stack gap='sm'>
         {error && (
           <Alert color='red' icon={<IconAlertTriangle size={18} />}>
             {error}
           </Alert>
         )}
-        {equipo && (
-          <Text size='xs' c='dimmed'>
-            El estado no se cambia aquí (use Distribuir, Devolver, Faltante, Dañado o Reintegrar). Todo cambio queda en el historial con su justificación.
-          </Text>
+        <Text size='xs' c='dimmed'>
+          {equipo
+            ? 'El estado no se cambia aquí (use Distribuir, Devolver, Faltante, Dañado o Reintegrar). Todo cambio queda en el historial con su justificación.'
+            : 'Elija el modelo y se llenan solos el equipo, el código, la marca y la clasificación. Puede pegar varias series (una por línea): se crea un equipo por cada una con los mismos datos.'}
+        </Text>
+        {!equipo && (
+          <Textarea
+            label={`Series (una por línea)${series.length > 1 ? ` · ${series.length} equipos` : ''}`}
+            required
+            autosize
+            minRows={2}
+            maxRows={8}
+            value={v.serie}
+            onChange={(e) => setV({ ...v, serie: e.currentTarget.value })}
+            data-testid='biomed-inv-series'
+          />
         )}
         <SimpleGrid cols={{ base: 1, sm: 2 }}>
-          {CAMPOS.map((c) =>
-            c.k === 'cliente' || c.k === 'ciudad' || c.k === 'modelo' ? (
+          {CAMPOS.filter((c) => equipo || c.k !== 'serie').map((c) => {
+            const opciones = opcionesDe(c.k, resumen);
+            return opciones ? (
               // Elegir uno de los ya usados o escribir uno nuevo.
               <Autocomplete
                 key={c.k}
                 label={c.label}
-                placeholder={c.k === 'modelo' ? 'Elija uno o escriba uno nuevo' : undefined}
-                data={(c.k === 'cliente' ? resumen?.clientes : c.k === 'ciudad' ? resumen?.ciudades : resumen?.modelos) ?? []}
+                required={c.requerido}
+                placeholder='Elija uno o escriba uno nuevo'
+                data={opciones}
                 value={v[c.k]}
-                onChange={(x) => setV({ ...v, [c.k]: x })}
+                onChange={(x) => cambiar(c.k, x)}
                 limit={50}
                 data-testid={`biomed-inv-campo-${c.k}`}
               />
             ) : (
-              <TextInput key={c.k} label={c.label} required={c.requerido} value={v[c.k]} onChange={(e) => setV({ ...v, [c.k]: e.currentTarget.value })} />
-            )
-          )}
+              <TextInput key={c.k} label={c.label} required={c.requerido} value={v[c.k]} onChange={(e) => cambiar(c.k, e.currentTarget.value)} data-testid={`biomed-inv-campo-${c.k}`} />
+            );
+          })}
         </SimpleGrid>
         {cambiaSerie && (
           <Alert color='orange' icon={<IconAlertTriangle size={18} />}>
@@ -498,8 +560,8 @@ function EquipoModal({ idCompany, equipo, resumen, onClose, onDone }: { idCompan
           <Button variant='default' onClick={onClose} disabled={busy}>
             Cancelar
           </Button>
-          <Button loading={busy} onClick={() => void guardar()} data-testid='biomed-inv-guardar'>
-            Guardar
+          <Button loading={busy} disabled={!equipo && series.length === 0} onClick={() => void guardar()} data-testid='biomed-inv-guardar'>
+            {!equipo && series.length > 1 ? `Agregar ${series.length} equipos` : 'Guardar'}
           </Button>
         </Group>
       </Stack>
