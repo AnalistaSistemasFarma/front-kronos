@@ -80,7 +80,9 @@ export function periodosDisponibles(hoy = new Date(), cuantos = 6): string[] {
  * Segunda barrera (el analizador ya enmascara): «contraseña: X», «la clave es X», «PIN: X»,
  * `Password=X;` de cadenas de conexión y bloques de llave privada.
  */
+// Cuantificadores acotados ({0,5}, {4,}) sobre texto de un mensaje: sin retroceso catastrófico (falso positivo de la regla).
 const ETIQUETA_SECRETO =
+  // eslint-disable-next-line security/detect-unsafe-regex
   /(\b(?:contrase(?:ñ|n)a|clave|password|passwd|pass|pwd|pin|secret|token)\b(?:[ \t]+[a-záéíóúñ]+){0,5}?[ \t]*(?:[:=]|\bes\b|\bis\b)[ \t]*["'«]?)(?!\[OCULTO\])([^\s"'»,;|`]{4,})/gi;
 const LLAVE_PRIVADA = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g;
 
