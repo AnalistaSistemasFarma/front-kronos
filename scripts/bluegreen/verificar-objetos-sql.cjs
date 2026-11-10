@@ -17,6 +17,10 @@ const fs = require('fs');
 async function main() {
   const dir = path.resolve(process.argv[2] || process.cwd());
   const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'prisma', 'manual', 'objetos-requeridos.json'), 'utf8'));
+  // dbconfig.js lee SAPSENDSQL_* de process.env; en el runner nadie carga el .env (pase #924:
+  // «Failed to connect to undefined»). Se carga sin pisar variables ya definidas.
+  const envFile = path.join(dir, '.env');
+  if (!process.env.SAPSENDSQL_SERVER && fs.existsSync(envFile) && typeof process.loadEnvFile === 'function') process.loadEnvFile(envFile);
   const sql = require(require.resolve('mssql', { paths: [dir] }));
   const cfgMod = require(path.join(dir, 'dbconfig.js'));
   const cfg = typeof cfgMod.buildMssqlConfig === 'function' ? cfgMod.buildMssqlConfig() : cfgMod.default || cfgMod;
