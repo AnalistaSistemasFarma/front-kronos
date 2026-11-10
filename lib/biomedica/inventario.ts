@@ -220,6 +220,8 @@ export interface ResumenInventario {
   clientes: string[];
   ciudades: string[];
   codigos: string[];
+  /** Modelos ya usados (para elegir uno o escribir uno nuevo). */
+  modelos: string[];
   /** Cliente y ciudad más usados en bodega (para prellenar la devolución). */
   bodega: { cliente: string | null; ciudad: string | null };
 }
@@ -227,11 +229,12 @@ export interface ResumenInventario {
 export async function resumenInventario(db: BiomedDb, access: BiomedAccess): Promise<ResumenInventario> {
   puedeUsar(access);
   const where = { id_company: access.idCompany };
-  const [estados, clientes, ciudades, codigos, enBodega] = await Promise.all([
+  const [estados, clientes, ciudades, codigos, modelos, enBodega] = await Promise.all([
     db.biomedEquipo.groupBy({ by: ['estado'], where, _count: { _all: true } }),
     db.biomedEquipo.groupBy({ by: ['cliente'], where }),
     db.biomedEquipo.groupBy({ by: ['ciudad'], where }),
     db.biomedEquipo.groupBy({ by: ['codigo_interno'], where }),
+    db.biomedEquipo.groupBy({ by: ['modelo'], where }),
     db.biomedEquipo.groupBy({ by: ['cliente', 'ciudad'], where: { ...where, estado: 'bodega' }, _count: { _all: true } }),
   ]);
   const habitual = [...enBodega].sort((a, b) => b._count._all - a._count._all)[0];
@@ -244,6 +247,7 @@ export async function resumenInventario(db: BiomedDb, access: BiomedAccess): Pro
     clientes: lista(clientes.map((c) => c.cliente)),
     ciudades: lista(ciudades.map((c) => c.ciudad)),
     codigos: lista(codigos.map((c) => c.codigo_interno)),
+    modelos: lista(modelos.map((c) => c.modelo)),
     bodega: { cliente: habitual?.cliente ?? null, ciudad: habitual?.ciudad ?? null },
   };
 }

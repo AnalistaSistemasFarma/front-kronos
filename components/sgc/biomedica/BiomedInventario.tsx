@@ -471,8 +471,18 @@ function EquipoModal({ idCompany, equipo, resumen, onClose, onDone }: { idCompan
         )}
         <SimpleGrid cols={{ base: 1, sm: 2 }}>
           {CAMPOS.map((c) =>
-            c.k === 'cliente' || c.k === 'ciudad' ? (
-              <Autocomplete key={c.k} label={c.label} data={(c.k === 'cliente' ? resumen?.clientes : resumen?.ciudades) ?? []} value={v[c.k]} onChange={(x) => setV({ ...v, [c.k]: x })} limit={30} />
+            c.k === 'cliente' || c.k === 'ciudad' || c.k === 'modelo' ? (
+              // Elegir uno de los ya usados o escribir uno nuevo.
+              <Autocomplete
+                key={c.k}
+                label={c.label}
+                placeholder={c.k === 'modelo' ? 'Elija uno o escriba uno nuevo' : undefined}
+                data={(c.k === 'cliente' ? resumen?.clientes : c.k === 'ciudad' ? resumen?.ciudades : resumen?.modelos) ?? []}
+                value={v[c.k]}
+                onChange={(x) => setV({ ...v, [c.k]: x })}
+                limit={50}
+                data-testid={`biomed-inv-campo-${c.k}`}
+              />
             ) : (
               <TextInput key={c.k} label={c.label} required={c.requerido} value={v[c.k]} onChange={(e) => setV({ ...v, [c.k]: e.currentTarget.value })} />
             )
