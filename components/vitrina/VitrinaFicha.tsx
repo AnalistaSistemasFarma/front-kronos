@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Alert, Anchor, Badge, Button, Card, Group, Loader, SegmentedControl, SimpleGrid, Stack, Tabs, Text, Title } from '@mantine/core';
+import { Alert, Anchor, Badge, Box, Button, Card, Group, Loader, SegmentedControl, SimpleGrid, Stack, Tabs, Text, Title } from '@mantine/core';
 import { IconAlertTriangle, IconExternalLink, IconFileText, IconLock, IconPresentation } from '@tabler/icons-react';
 import SgcSecureViewer from '../sgc/SgcSecureViewer';
 import { SGC_BASE_URL } from '../../lib/sgc/constants';
@@ -13,11 +13,13 @@ import type { Ficha, FichaDocumento } from '../../lib/vitrina/consulta';
 import type { CompanyAccess } from './types';
 import { CanalBadge, RegistroBadge, VisibilidadBadge } from './VitrinaBadges';
 import VitrinaImagen from './VitrinaImagen';
+import VitrinaModelo3d from './VitrinaModelo3d';
 import VitrinaModoPresentacion from './VitrinaModoPresentacion';
 import { fmtFecha, useVitrinaFetch } from './vitrinaClient';
 
 /**
- * Ficha de una presentación (vista interna del comercial). Primero el vial y la etiqueta
+ * Ficha de una presentación (vista interna del comercial). Si hay modelo 3D vigente, va PRIMERO
+ * (visor interactivo, con Realidad Aumentada si el navegador la soporta). Luego el vial y la etiqueta
  * (si no hay imagen: «Imagen pendiente»); luego los datos, la empresa, los países, el
  * canal, el registro sanitario y la exclusividad si aplica. Las pestañas Ficha, Inserto y
  * Prospecto muestran SOLO documentos vigentes del SGC vinculados, en su visor seguro (sin
@@ -47,6 +49,11 @@ export default function VitrinaFicha({ company, id }: { company: CompanyAccess; 
 
   return (
     <Stack gap='md'>
+      {p.modelo3d && (
+        <Box maw={720} w='100%' data-testid='vitrina-ficha-modelo3d'>
+          <VitrinaModelo3d id={p.modelo3d.id} alt={`Modelo 3D de ${tituloPresentacion(p)}`} poster={p.imagenes.PLEGADIZA ?? p.imagenes.VIAL} />
+        </Box>
+      )}
       <SimpleGrid cols={{ base: 2, md: p.imagenes.PLEGADIZA ? 3 : 2 }} spacing='sm' maw={p.imagenes.PLEGADIZA ? undefined : 720} data-testid='vitrina-ficha-imagenes'>
         <Stack gap={4}>
           <VitrinaImagen id={p.imagenes.VIAL} etiqueta='Vial' />

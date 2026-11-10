@@ -102,10 +102,11 @@ describe('POST /api/chat/agent/projects/files', () => {
   });
 
   it('proyecto lleno: 409 con un mensaje claro', async () => {
-    db.chatProjectFile.findMany.mockResolvedValue(Array.from({ length: 20 }, (_, i) => ({ file_name: `f${i}.pdf` })));
+    // 2026-11-06: el tope subió a 1000 (los proyectos también son repositorio por carpetas).
+    db.chatProjectFile.findMany.mockResolvedValue(Array.from({ length: 1000 }, (_, i) => ({ file_name: `f${i}.pdf` })));
     const res = await archivar(peticion([{ nombre: 'a.pdf' }]));
     expect(res.status).toBe(409);
-    expect((await res.json()).error).toMatch(/máximo de 20 archivos/);
+    expect((await res.json()).error).toMatch(/máximo de 1000 archivos/);
     expect(h.subir).not.toHaveBeenCalled();
   });
 

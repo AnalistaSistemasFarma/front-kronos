@@ -6,7 +6,11 @@ import { createAndSendNotifications } from '../notifications.js';
 import { createGeneralRequest } from '../requests-general/createGeneralRequest';
 import { sapGet, sapLogin, sapLogout, sapPatch, SapError, type SapSession } from '../sap/serviceLayer';
 import { publishApprovedDraft, publishSap } from './publish';
+import { startStep, finishStep, withStep, type TriggeredBy } from '../workflow-sap/executionLog';
+import { isAuthorizationEffectEnabled } from '../workflow-sap/config';
+import { instantiateOutcomeTasks } from '../workflow-sap/outcomeTasks';
 import { checkTransition, normalizeState } from './states';
+import { purchaseDescription, purchaseSubject } from './subject';
 
 /**
  * Integracion de Compras con el modulo de Autorizaciones de SynerLink.
@@ -42,11 +46,17 @@ const createAndSendNotificationsTyped = createAndSendNotifications as unknown as
   payload: { title: string; body: string; url?: string; tag?: string }
 ) => Promise<unknown>;
 
+/** Tras una decision del autorizador, corre las Tareas SAP del flujo (no bloquea). */
+function afterDecision(idRequest: number, source: 'decision' | 'executor') {
+  if (source !== 'decision') return; // el motor ya esta corriendo
+  fireAndForgetNotification(import('../workflow-sap/engine').then((m) => m.runSapExecutors(idRequest)));
+}
+
 /** Autorizacion viva: impide otro envio del mismo borrador. */
 const ACTIVE = ['pending', 'publishing', 'publish_error'];
 
 /** Conexion SAP de la empresa para acciones del sistema (no dependen del permiso del usuario). */
-async function companySap(companyId: number): Promise<SapSession> {
+export async function companySap(companyId: number): Promise<SapSession> {
   const company = await prisma.company.findUnique({
     where: { id_company: companyId },
     include: { sap_endpoints: true },
@@ -67,8 +77,36 @@ async function cancelGeneralRequest(idRequest: number): Promise<void> {
 }
 
 export type SendResult =
-  | { ok: true; idRequestGeneral: number; state: 'LA' }
+  | { ok: true; idRequestGeneral: number; state: 'LA' | 'B' }
   | { ok: false; status: number; error: string };
+
+/** Estado «En Borrador» de requests_general (status_case 6), el mismo de Ventas. */
+export const REQUEST_DRAFT_STATUS = 6;
+
+/** Asunto y descripción de la solicitud desde el borrador de SAP (relee las líneas). */
+async function requestTextsFromSap(sap: SapSession, docEntry: number) {
+  const d = await sapGet<Record<string, unknown> & { DocumentLines?: Record<string, unknown>[] }>(
+    sap,
+    `Drafts(${docEntry})?$select=Comments,DocTotal,DocCurrency,DocumentLines`
+  );
+  return { subject: purchaseSubject(d), descripcion: purchaseDescription(d) };
+}
+
+/** Actualiza asunto y descripción de la solicitud de un borrador (al editarlo). */
+export async function refreshRequestTexts(sap: SapSession, companyId: number, docEntry: number): Promise<void> {
+  const link = await prisma.purchaseAuthorization.findFirst({
+    where: { id_company: companyId, doc_entry: docEntry, status: { in: ['draft', ...ACTIVE] } },
+  });
+  if (!link) return;
+  const t = await requestTextsFromSap(sap, docEntry);
+  const pool = await sql.connect(sqlConfig);
+  await pool
+    .request()
+    .input('id', sql.Int, link.id_request_general)
+    .input('s', sql.NVarChar(254), t.subject)
+    .input('d', sql.NVarChar(sql.MAX), t.descripcion)
+    .query(`UPDATE requests_general SET subject_request = @s, description = @d WHERE id = @id;`);
+}
 
 /** Envia un borrador a autorizar. `sap` es la sesion abierta con el permiso del usuario. */
 export async function sendToAuthorize(params: {
@@ -76,6 +114,10 @@ export async function sendToAuthorize(params: {
   companyId: number;
   docEntry: number;
   userEmail: string;
+  /** Ya no se usa: el asunto se arma desde el borrador («SC - proveedor - primera línea»). */
+  subject?: string | null;
+  /** true = «Guardar borrador»: la solicitud queda «En Borrador» en Mis solicitudes, sin flujo. */
+  asDraft?: boolean;
 }): Promise<SendResult> {
   const { sap, companyId, docEntry, userEmail } = params;
 
@@ -89,6 +131,10 @@ export async function sendToAuthorize(params: {
   const state = normalizeState(draft.U_SEND_State);
   const check = checkTransition(state, state === 'ENC' ? 'reenviar' : 'enviar');
   if (!check.ok) return { ok: false, status: 409, error: check.error };
+  // Solicitud ya guardada «En Borrador» para este documento (se reutiliza al enviar).
+  const draftLink = await prisma.purchaseAuthorization.findFirst({
+    where: { id_company: companyId, doc_entry: docEntry, status: 'draft' },
+  });
 
   const active = await prisma.purchaseAuthorization.findFirst({
     where: { id_company: companyId, doc_entry: docEntry, status: { in: ACTIVE } },
@@ -102,34 +148,111 @@ export async function sendToAuthorize(params: {
   const user = await prisma.user.findUnique({ where: { email: userEmail }, select: { id: true } });
   if (!user) return { ok: false, status: 401, error: 'Usuario no encontrado.' };
 
-  const total = draft.DocTotal != null ? ` · Total ${Number(draft.DocTotal).toLocaleString('es-CO')} ${draft.DocCurrency ?? ''}` : '';
-  const subject = `Solicitud de compra · Borrador #${docEntry}`;
-  const { id_request: idRequest, processEmail, processEmails, taskEmails } = await createGeneralRequest({
-    company: companyId,
-    subject,
-    descripcion: `${String(draft.Comments ?? '').slice(0, 900)}${total}`.trim(),
-    process: config.id_process_category_auth,
-    createdby: user.id,
-    url: `/process/purchases?companyId=${companyId}&docEntry=${docEntry}`,
-    formValues: [],
-  });
+  const texts = await requestTextsFromSap(sap, docEntry);
+  const subject = texts.subject;
+  const pool = await sql.connect(sqlConfig);
 
-  try {
-    await prisma.purchaseAuthorization.create({
-      data: { id_company: companyId, doc_entry: docEntry, id_request_general: idRequest, status: 'pending', created_by: user.id },
+  // «Guardar borrador»: solicitud en «En Borrador», sin flujo (como Ventas).
+  if (params.asDraft) {
+    if (draftLink) {
+      await refreshRequestTexts(sap, companyId, docEntry);
+      return { ok: true, idRequestGeneral: draftLink.id_request_general, state: 'B' };
+    }
+    const created = await createGeneralRequest({
+      company: companyId,
+      subject,
+      descripcion: texts.descripcion,
+      process: config.id_process_category_auth,
+      createdby: user.id,
+      url: `/process/purchases?companyId=${companyId}&docEntry=${docEntry}`,
+      formValues: [],
     });
-  } catch {
-    // Indice unico: otro envio del mismo borrador gano la carrera.
-    await cancelGeneralRequest(idRequest);
-    return { ok: false, status: 409, error: 'La solicitud ya tiene una autorizacion en curso.' };
+    await pool.request().input('id', sql.Int, created.id_request)
+      .query(`UPDATE requests_general SET status_req = ${REQUEST_DRAFT_STATUS} WHERE id = @id;`);
+    await prisma.purchaseAuthorization.create({
+      data: { id_company: companyId, doc_entry: docEntry, id_request_general: created.id_request, status: 'draft', created_by: user.id },
+    });
+    return { ok: true, idRequestGeneral: created.id_request, state: 'B' };
+  }
+
+  let idRequest: number;
+  let processEmail: string | null = null;
+  let processEmails: string[] = [];
+  let taskEmails: string[] = [];
+  if (draftLink) {
+    // Se abre la solicitud que estaba «En Borrador» (sus tareas ya existen).
+    idRequest = draftLink.id_request_general;
+    await pool
+      .request()
+      .input('id', sql.Int, idRequest)
+      .input('s', sql.NVarChar(254), subject)
+      .input('d', sql.NVarChar(sql.MAX), texts.descripcion)
+      .query(`UPDATE requests_general SET status_req = 1, subject_request = @s, description = @d
+              WHERE id = @id AND status_req = ${REQUEST_DRAFT_STATUS};`);
+    const moved = await prisma.purchaseAuthorization.updateMany({
+      where: { id: draftLink.id, status: 'draft' },
+      data: { status: 'pending' },
+    });
+    if (moved.count === 0) return { ok: false, status: 409, error: 'La solicitud ya tiene una autorizacion en curso.' };
+  } else {
+    const created = await createGeneralRequest({
+      company: companyId,
+      subject,
+      descripcion: texts.descripcion,
+      process: config.id_process_category_auth,
+      createdby: user.id,
+      url: `/process/purchases?companyId=${companyId}&docEntry=${docEntry}`,
+      formValues: [],
+    });
+    idRequest = created.id_request;
+    processEmail = created.processEmail ?? null;
+    processEmails = created.processEmails ?? [];
+    taskEmails = created.taskEmails ?? [];
+    try {
+      await prisma.purchaseAuthorization.create({
+        data: { id_company: companyId, doc_entry: docEntry, id_request_general: idRequest, status: 'pending', created_by: user.id },
+      });
+    } catch {
+      // Indice unico: otro envio del mismo borrador gano la carrera.
+      await cancelGeneralRequest(idRequest);
+      return { ok: false, status: 409, error: 'La solicitud ya tiene una autorizacion en curso.' };
+    }
   }
 
   try {
     const etagged = await sapGet<Record<string, unknown>>(sap, `Drafts(${docEntry})?$select=DocEntry,U_SEND_State`);
     if (normalizeState(etagged.U_SEND_State) !== state) throw new SapError('El borrador cambio durante el envio', 412);
-    await sapPatch(sap, `Drafts(${docEntry})`, { U_SEND_State: 'LA' }, false, {
-      ifMatch: etagged['odata.etag'] as string | undefined,
-    });
+    if (!(await isAuthorizationEffectEnabled(idRequest, 'on_start', 'purchase.state_to_authorize'))) {
+      const id = await startStep({
+        idRequest,
+        stepKind: 'sap',
+        stepName: 'Pasar a «Por autorizar»',
+        actionKey: 'purchase.state_to_authorize',
+        triggerEvent: 'on_start',
+        triggeredBy: 'user',
+        idUser: user.id,
+        idCompany: companyId,
+      });
+      await finishStep(id, { status: 'skipped', responseSummary: 'Efecto no configurado en el flujo' });
+    } else await withStep(
+      {
+        idRequest,
+        stepKind: 'sap',
+        stepName: 'Pasar a «Por autorizar»',
+        actionKey: 'purchase.state_to_authorize',
+        triggerEvent: 'on_start',
+        triggeredBy: 'user',
+        idUser: user.id,
+        idCompany: companyId,
+        sapEntity: 'Drafts',
+        requestSummary: { docEntry, de: state, a: 'LA' },
+      },
+      () =>
+        sapPatch(sap, `Drafts(${docEntry})`, { U_SEND_State: 'LA' }, false, {
+          ifMatch: etagged['odata.etag'] as string | undefined,
+        }),
+      () => ({ status: 'ok', sapDocEntry: docEntry })
+    );
   } catch (error) {
     // Sin LA no debe quedar una autorizacion viva: se revierte.
     await cancelGeneralRequest(idRequest);
@@ -149,6 +272,9 @@ export async function sendToAuthorize(params: {
   fireAndForgetNotification(
     notifyNewRequestTyped({ requestId: idRequest, subject, processEmail, processEmails, taskEmails, creatorEmail: userEmail })
   );
+
+  // Tareas «Ejecutora SAP» no secuenciales que ya existen desde la creación. No bloquea.
+  fireAndForgetNotification(import('../workflow-sap/engine').then((m) => m.runSapExecutors(idRequest)));
 
   return { ok: true, idRequestGeneral: idRequest, state: 'LA' };
 }
@@ -197,9 +323,19 @@ async function finish(idRequest: number, data: { status: string; firm_doc_entry?
 export async function onAuthorizationDecision(
   idRequest: number | null | undefined,
   authorized: boolean,
-  reason?: string | null
+  reason?: string | null,
+  triggeredBy: TriggeredBy = 'user',
+  /** 'executor' = lo pide una tarea «Ejecutora SAP» del flujo (no un efecto de la autorizacion). */
+  source: 'decision' | 'executor' = 'decision'
 ): Promise<{ skipped: true } | { skipped: false; status: string; error?: string }> {
   if (!idRequest) return { skipped: true };
+
+  // Efectos configurables en «Ver flujos»: si el flujo no tiene el efecto, no se ejecuta.
+  if (authorized && source === 'decision' && triggeredBy !== 'retry') {
+    if (!(await isAuthorizationEffectEnabled(Number(idRequest), 'on_final_approve', 'purchase.publish_firm'))) {
+      return { skipped: true };
+    }
+  }
 
   // El flujo se edita en «Administrar flujos de trabajo» y puede tener VARIOS niveles
   // de autorizacion: solo se publica cuando estan aprobados todos los de la plantilla.
@@ -220,16 +356,56 @@ export async function onAuthorizationDecision(
     sap = await companySap(link.id_company);
 
     if (authorized) {
-      const r = await publishApprovedDraft(publishSap(sap), link.doc_entry);
+      const session = sap;
+      const r = await withStep(
+        {
+          idRequest: link.id_request_general,
+          stepKind: 'sap',
+          stepName: 'Publicar solicitud en firme',
+          actionKey: 'purchase.publish_firm',
+          triggerEvent: source === 'executor' ? 'on_execute' : 'on_final_approve',
+          triggeredBy,
+          idCompany: link.id_company,
+          sapEntity: 'PurchaseRequests',
+          requestSummary: { borrador: link.doc_entry },
+        },
+        () => publishApprovedDraft(publishSap(session), link.doc_entry),
+        (res) =>
+          res.ok
+            ? {
+                status: 'ok',
+                sapDocEntry: res.firmDocEntry,
+                sapDocNum: res.firmDocNum ?? null,
+                responseSummary: res.resumed ? 'Reanudada sin duplicar' : 'Creada',
+              }
+            : { status: 'error', error: res.error, responseSummary: { estado: res.state } }
+      );
       if (r.ok) {
         await finish(link.id_request_general, { status: 'approved', firm_doc_entry: r.firmDocEntry });
+        afterDecision(link.id_request_general, source);
         return { skipped: false, status: 'approved' };
       }
       await finish(link.id_request_general, { status: 'publish_error', error: r.error });
       return { skipped: false, status: 'publish_error', error: r.error };
     }
 
-    // Rechazo: LA -> NAD con motivo, solo si sigue en LA.
+    // Rechazo: LA -> NAD con motivo, solo si sigue en LA (y si el flujo tiene ese efecto).
+    if (!(await isAuthorizationEffectEnabled(link.id_request_general, 'on_reject', 'purchase.state_rejected'))) {
+      const id = await startStep({
+        idRequest: link.id_request_general,
+        stepKind: 'sap',
+        stepName: 'Pasar a «No aprobado»',
+        actionKey: 'purchase.state_rejected',
+        triggerEvent: 'on_reject',
+        triggeredBy,
+        idCompany: link.id_company,
+      });
+      await finishStep(id, { status: 'skipped', responseSummary: 'Efecto no configurado en el flujo' });
+      await finish(link.id_request_general, { status: 'rejected' });
+      await instantiateOutcomeTasks(link.id_request_general, 'on_reject');
+      afterDecision(link.id_request_general, source);
+      return { skipped: false, status: 'rejected' };
+    }
     const draft = await sapGet<Record<string, unknown>>(sap, `Drafts(${link.doc_entry})?$select=DocEntry,U_SEND_State`);
     const check = checkTransition(draft.U_SEND_State, 'no_aprobar');
     if (!check.ok) {
@@ -237,14 +413,32 @@ export async function onAuthorizationDecision(
       return { skipped: false, status: 'reject_error', error: check.error };
     }
     const motivo = (reason ?? '').trim() || 'Rechazada en SynerLink';
-    await sapPatch(
-      sap,
-      `Drafts(${link.doc_entry})`,
-      { U_SEND_State: 'NAD', U_Motivo_Can_Solicitud: motivo.slice(0, 254) },
-      false,
-      { ifMatch: draft['odata.etag'] as string | undefined }
+    const session = sap;
+    await withStep(
+      {
+        idRequest: link.id_request_general,
+        stepKind: 'sap',
+        stepName: 'Pasar a «No aprobado»',
+        actionKey: 'purchase.state_rejected',
+        triggerEvent: 'on_reject',
+        triggeredBy,
+        idCompany: link.id_company,
+        sapEntity: 'Drafts',
+        requestSummary: { docEntry: link.doc_entry, a: 'NAD', motivo: motivo.slice(0, 254) },
+      },
+      () =>
+        sapPatch(
+          session,
+          `Drafts(${link.doc_entry})`,
+          { U_SEND_State: 'NAD', U_Motivo_Can_Solicitud: motivo.slice(0, 254) },
+          false,
+          { ifMatch: draft['odata.etag'] as string | undefined }
+        ),
+      () => ({ status: 'ok', sapDocEntry: link.doc_entry })
     );
     await finish(link.id_request_general, { status: 'rejected' });
+    await instantiateOutcomeTasks(link.id_request_general, 'on_reject');
+    afterDecision(link.id_request_general, source);
     return { skipped: false, status: 'rejected' };
   } catch (error) {
     const message = error instanceof SapError ? error.friendly : error instanceof Error ? error.message : 'Error';
@@ -317,6 +511,10 @@ export async function sendToQuotation(params: {
   });
   if (!link) return { ok: false, status: 404, error: 'La solicitud no tiene una autorizacion pendiente.' };
 
+  if (!(await isAuthorizationEffectEnabled(link.id_request_general, 'on_quote', 'purchase.state_quotation'))) {
+    return { ok: false, status: 409, error: 'El flujo de esta solicitud no tiene habilitado «Enviar a cotizar».' };
+  }
+
   const user = await prisma.user.findUnique({ where: { email: userEmail }, select: { id: true } });
   if (!user || !(await canDecideAuthorization(link.id_request_general, user.id))) {
     return { ok: false, status: 403, error: 'No puede decidir la autorizacion de esta solicitud.' };
@@ -335,9 +533,26 @@ export async function sendToQuotation(params: {
     const draft = await sapGet<Record<string, unknown>>(sap, `Drafts(${docEntry})?$select=DocEntry,U_SEND_State,Comments`);
     const check = checkTransition(draft.U_SEND_State, 'cotizar');
     if (!check.ok) throw new Error(check.error);
-    await sapPatch(sap, `Drafts(${docEntry})`, { U_SEND_State: 'ENC' }, false, {
-      ifMatch: draft['odata.etag'] as string | undefined,
-    });
+    const session = sap;
+    await withStep(
+      {
+        idRequest: link.id_request_general,
+        stepKind: 'sap',
+        stepName: 'Pasar a «En cotización»',
+        actionKey: 'purchase.state_quotation',
+        triggerEvent: 'on_quote',
+        triggeredBy: 'user',
+        idUser: user.id,
+        idCompany: companyId,
+        sapEntity: 'Drafts',
+        requestSummary: { docEntry, a: 'ENC', motivo: (params.reason ?? '').trim() || null },
+      },
+      () =>
+        sapPatch(session, `Drafts(${docEntry})`, { U_SEND_State: 'ENC' }, false, {
+          ifMatch: draft['odata.etag'] as string | undefined,
+        }),
+      () => ({ status: 'ok', sapDocEntry: docEntry })
+    );
   } catch (error) {
     // El borrador sigue en LA: se devuelve la autorizacion a pendiente.
     await prisma.purchaseAuthorization
@@ -355,11 +570,14 @@ export async function sendToQuotation(params: {
     const draftComments = await sapGet<Record<string, unknown>>(sap, `Drafts(${docEntry})?$select=Comments`)
       .then((d) => String(d.Comments ?? ''))
       .catch(() => '');
+    const reason = (params.reason ?? '').trim();
+    await finish(link.id_request_general, { status: 'quoted', error: reason ? `Cotizar: ${reason}` : null });
+    // Tareas SAP «si se envía a cotizar» antes de cerrar la solicitud del workflow.
+    await instantiateOutcomeTasks(link.id_request_general, 'on_quote');
+    await import('../workflow-sap/engine').then((m) => m.runSapExecutors(link.id_request_general, 'user'));
     await cancelGeneralRequest(link.id_request_general).catch((e) =>
       console.error(`Compras: no se pudo cerrar la solicitud ${link.id_request_general} tras cotizar:`, e)
     );
-    const reason = (params.reason ?? '').trim();
-    await finish(link.id_request_general, { status: 'quoted', error: reason ? `Cotizar: ${reason}` : null });
 
     const config = await prisma.purchaseCompanyConfig.findUnique({ where: { id_company: companyId } });
     const compras = (config?.compras_emails ?? '').split(',').map((e) => e.trim()).filter(Boolean);
@@ -379,7 +597,50 @@ export async function sendToQuotation(params: {
   }
 }
 
+/**
+ * Tarea SAP «Pasar a Por autorizar»: deja el borrador en LA. Idempotente: si ya
+ * esta en LA (porque lo dejo el envio) no hace nada. Solo desde B o ENC.
+ */
+export async function moveDraftToAuthorize(
+  idRequest: number,
+  triggeredBy: TriggeredBy
+): Promise<{ ok: true; detail: string } | { ok: false; error: string }> {
+  const link = await prisma.purchaseAuthorization.findUnique({ where: { id_request_general: idRequest } });
+  if (!link) return { ok: false, error: 'La solicitud no está enlazada a un borrador de compra.' };
+  const sap = await companySap(link.id_company);
+  try {
+    const draft = await sapGet<Record<string, unknown>>(sap, `Drafts(${link.doc_entry})?$select=DocEntry,U_SEND_State`);
+    const state = normalizeState(draft.U_SEND_State);
+    if (state === 'LA') return { ok: true, detail: `Borrador ${link.doc_entry} ya está «Por autorizar»` };
+    const check = checkTransition(state, state === 'ENC' ? 'reenviar' : 'enviar');
+    if (!check.ok) return { ok: false, error: check.error };
+    await withStep(
+      {
+        idRequest,
+        stepKind: 'sap',
+        stepName: 'Pasar a «Por autorizar»',
+        actionKey: 'purchase.state_to_authorize',
+        triggerEvent: 'on_execute',
+        triggeredBy,
+        idCompany: link.id_company,
+        sapEntity: 'Drafts',
+        requestSummary: { docEntry: link.doc_entry, de: state, a: 'LA' },
+      },
+      () =>
+        sapPatch(sap, `Drafts(${link.doc_entry})`, { U_SEND_State: 'LA' }, false, {
+          ifMatch: draft['odata.etag'] as string | undefined,
+        }),
+      () => ({ status: 'ok', sapDocEntry: link.doc_entry })
+    );
+    return { ok: true, detail: `Borrador ${link.doc_entry} pasó a «Por autorizar»` };
+  } catch (e) {
+    return { ok: false, error: e instanceof SapError ? e.friendly : (e as Error).message };
+  } finally {
+    await sapLogout(sap);
+  }
+}
+
 /** Reintenta publicar una aprobacion que quedo en error (es idempotente). */
 export function retryPublish(idRequest: number) {
-  return onAuthorizationDecision(idRequest, true);
+  return onAuthorizationDecision(idRequest, true, null, 'retry');
 }

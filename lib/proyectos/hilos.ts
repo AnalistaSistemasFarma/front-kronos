@@ -116,6 +116,17 @@ export async function eliminarHilo(
       });
       // updateMany con archived = false: si dos personas eliminan a la vez, la segunda no hace nada.
       await tx.chatConversation.updateMany({ where: { id: conv.id, archived: false }, data: { archived: true } });
+      // Si era una MESA DE DISCUSIÓN, queda cerrada (y su registro lo dice): sin hilo no hay mesa.
+      const mesa = await tx.chatProjectMesa.findUnique({ where: { id_conversation: conv.id }, select: { id_mesa: true, estado: true, ronda: true } });
+      if (mesa && mesa.estado !== 'cerrada') {
+        await tx.chatProjectMesa.update({
+          where: { id_mesa: mesa.id_mesa },
+          data: { estado: 'cerrada', motivo_pausa: null, turno_idx: -1, turno_desde: null, proximo_turno_at: null, updated_at: new Date() },
+        });
+        await tx.chatProjectMesaEvento.create({
+          data: { id_mesa: mesa.id_mesa, tipo: 'cerrada', id_user: user.id, ronda: mesa.ronda, detalle: 'Se eliminó la conversación de la mesa.' },
+        });
+      }
     });
   } catch (err) {
     if (esTablaAusente(err)) throw new ProyectoError(PENDIENTE, 503);

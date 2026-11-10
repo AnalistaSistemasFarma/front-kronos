@@ -546,6 +546,25 @@ jobs:
           echo "IF COL_LENGTH(N'dbo.chat_project_file', N'uploaded_by_agent') IS NULL OR COL_LENGTH(N'dbo.chat_project_file', N'id_conversation') IS NULL THROW 50000, N'La migración de archivos del agente no dejó las columnas.', 1;" > /tmp/archivos-agente-ok.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/archivos-agente-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-23-chat-project-file-agente-PROD.sql; then echo "El script de PROD de archivos del agente debió negarse en kronos_ci"; exit 1; fi
+          # Carpetas de los Archivos del proyecto (2026-11-06): migración y PRUEBAS dos veces (idempotencia), comprobación y PROD que se niega.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261106120000_chat_project_folders/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261106120000_chat_project_folders/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-chat-project-carpetas-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-chat-project-carpetas-PRUEBAS.sql
+          echo "IF COL_LENGTH(N'dbo.chat_project_file', N'folder_path') IS NULL OR OBJECT_ID(N'dbo.chat_project_folder', N'U') IS NULL THROW 50000, N'La migración de carpetas no dejó la columna o la tabla.', 1;" > /tmp/carpetas-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/carpetas-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-chat-project-carpetas-PROD.sql; then echo "El script de PROD de carpetas debió negarse en kronos_ci"; exit 1; fi
+          # Ingeniería biomédica (2026-11-06): migración y PRUEBAS dos veces (idempotencia), comprobación (tablas y permiso) y PROD que se niega.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261106150000_biomedica/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261106150000_biomedica/migration.sql
+          # kronos_ci no corre los cimientos del SGC (S0): se siembra el subproceso padre que PRUEBAS y PROD sí tienen.
+          echo "IF NOT EXISTS (SELECT 1 FROM dbo.subprocess WHERE subprocess_url = N'/process/sgc-documental') BEGIN IF NOT EXISTS (SELECT 1 FROM dbo.process WHERE process = N'SGC') INSERT INTO dbo.process (process) VALUES (N'SGC'); INSERT INTO dbo.subprocess (subprocess, id_process, subprocess_url) SELECT TOP (1) N'SGC documental', id_process, N'/process/sgc-documental' FROM dbo.process WHERE process = N'SGC' ORDER BY id_process; END;" > /tmp/biomedica-padre.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomedica-padre.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-biomedica-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-biomedica-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.biomed_registro', N'U') IS NULL OR OBJECT_ID(N'dbo.biomed_evento_solo_insercion', N'TR') IS NULL OR (SELECT COUNT(*) FROM dbo.subprocess WHERE subprocess_url = N'/process/sgc-documental/biomedica') <> 1 THROW 50000, N'La migración de Ingeniería biomédica no dejó sus tablas o su permiso.', 1;" > /tmp/biomedica-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomedica-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-biomedica-PROD.sql; then echo "El script de PROD de Ingeniería biomédica debió negarse en kronos_ci"; exit 1; fi
           # Agente de desarrollo en Proyectos (2026-10-27): migración y PRUEBAS dos veces (idempotencia), columna NOT NULL, PROD que se niega y la corrección de proyectos en modo LISTAR (no escribe).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261027170000_agent_es_desarrollo/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261027170000_agent_es_desarrollo/migration.sql
@@ -569,6 +588,14 @@ jobs:
           echo "IF (SELECT COUNT(*) FROM sys.tables WHERE name IN (N'vitrina_linea_comercial', N'vitrina_grupo_terapeutico', N'vitrina_presentacion_grupo')) <> 3 OR COL_LENGTH(N'dbo.vitrina_presentacion', N'id_linea') IS NULL OR COL_LENGTH(N'dbo.vitrina_codigo_sap', N'items_group_name') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'vitrina_presentacion_id_linea_fkey') OR (SELECT COUNT(*) FROM dbo.vitrina_grupo_terapeutico) <> 7 OR (SELECT COUNT(*) FROM dbo.vitrina_linea_comercial) <> (SELECT COUNT(*) FROM dbo.company WHERE id_company IN (1, 2)) THROW 50000, N'Las líneas y grupos de la Vitrina no dejaron sus tablas, columnas, llave o semilla.', 1;" > /tmp/vitrina-lineas-ok.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/vitrina-lineas-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-23-vitrina-lineas-grupos-PROD.sql; then echo "El script de PROD de líneas y grupos de la Vitrina debió negarse en kronos_ci"; exit 1; fi
+          # Vitrina · modelo 3D (2026-11-04): migración y PRUEBAS dos veces (idempotencia), tabla, índice, llave, CHECK y PROD que se niega.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261104120000_vitrina_modelo_3d/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261104120000_vitrina_modelo_3d/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-04-vitrina-modelo-3d-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-04-vitrina-modelo-3d-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.vitrina_modelo_3d', N'U') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_vitrina_modelo_3d_presentacion') OR NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'vitrina_modelo_3d_id_presentacion_fkey') OR (SELECT COUNT(*) FROM sys.check_constraints WHERE name IN (N'CK_vitrina_modelo_3d_tamano', N'CK_vitrina_modelo_3d_dimensiones')) <> 2 OR NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'CK_vitrina_imagen_tipo' AND definition LIKE N'%PLEGADIZA%') THROW 50000, N'El modelo 3D de la Vitrina no dejó su tabla, índice, llave o CHECK (o tocó la CHECK de vitrina_imagen).', 1;" > /tmp/vitrina-modelo3d-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/vitrina-modelo3d-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-04-vitrina-modelo-3d-PROD.sql; then echo "El script de PROD del modelo 3D de la Vitrina debió negarse en kronos_ci"; exit 1; fi
           # Bitácora · actividades de texto libre (2026-10-17): migración y PRUEBAS dos veces, reversa y otra vez PRUEBAS (idempotencia ida y vuelta).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017200000_bitacora_proceso_texto_libre/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261017200000_bitacora_proceso_texto_libre/migration.sql
@@ -580,6 +607,14 @@ jobs:
           echo "IF COL_LENGTH(N'dbo.ot_actividad', N'texto_libre') IS NULL OR COL_LENGTH(N'dbo.ot_registro', N'es_texto_libre') IS NULL THROW 50000, N'Faltan las columnas de texto libre de la bitácora.', 1;" > /tmp/texto-libre-ok.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/texto-libre-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-17-bitacora-proceso-texto-libre-PROD.sql; then echo "El script de PROD de texto libre debió negarse en kronos_ci"; exit 1; fi
+          # Errores de IA (Auditoría de agentes, 2026-11-03): PRUEBAS dos veces, reversa y otra vez PRUEBAS (idempotencia ida y vuelta) y PROD que se niega. La lógica se prueba en tests/integration/auditoria.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-03-errores-ia-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-03-errores-ia-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-03-errores-ia-reversa.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-03-errores-ia-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.agent_error_issue', N'U') IS NULL OR OBJECT_ID(N'dbo.agent_error_event', N'U') IS NULL OR (SELECT COUNT(*) FROM sys.check_constraints WHERE name IN (N'CK_agent_error_issue_estado', N'CK_agent_error_issue_severidad', N'CK_agent_error_issue_ambiente')) <> 3 THROW 50000, N'El pase de errores de IA no dejó las tablas o los CHECK.', 1;" > /tmp/errores-ia-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/errores-ia-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-03-errores-ia-PROD.sql; then echo "El script de PROD de errores de IA debió negarse en kronos_ci"; exit 1; fi
 
       - name: Pruebas de integración + cobertura de lib/sgc/db (vitest)
         run: npm run test:integration -- --coverage --reporter=default --reporter=junit --outputFile.junit=reports/integracion/junit.xml
@@ -601,7 +636,7 @@ jobs:
         run: |
           set -e
           # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
-          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida proyectos_permisos_agentes_reversa_acepta_perdida proyectos_config_agentes_reversa_acepta_perdida chat_stickers_personales_reversa_acepta_perdida vitrina_reversa_acepta_perdida proyectos_archivos_agente_reversa_acepta_perdida vitrina_lineas_reversa_acepta_perdida"
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida proyectos_permisos_agentes_reversa_acepta_perdida proyectos_config_agentes_reversa_acepta_perdida chat_stickers_personales_reversa_acepta_perdida vitrina_reversa_acepta_perdida proyectos_archivos_agente_reversa_acepta_perdida vitrina_lineas_reversa_acepta_perdida vitrina_modelo3d_reversa_acepta_perdida proyectos_mesas_reversa_acepta_perdida proyectos_matrices_reversa_acepta_perdida proyectos_carpetas_reversa_acepta_perdida biomedica_reversa_acepta_perdida"
           reversa() {
             { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
@@ -612,6 +647,47 @@ jobs:
             npx prisma db execute --schema prisma/schema.prisma --file "prisma/migrations/$1/migration.sql"
           }
           # De la más nueva a la más antigua…
+          # Carpetas de los Archivos del proyecto (2026-11-06): con una carpeta de prueba, sin la bandera debe negarse; luego ida y vuelta.
+          echo "IF NOT EXISTS (SELECT 1 FROM dbo.chat_project_folder) INSERT INTO dbo.chat_project_folder (id_project, path) SELECT TOP (1) id_project, N'ci' FROM dbo.chat_project;" > /tmp/carpetas-dato.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/carpetas-dato.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-chat-project-carpetas-reversa.sql; then
+            echo "IF EXISTS (SELECT 1 FROM dbo.chat_project) THROW 50000, N'La reversa de carpetas debió negarse sin su bandera.', 1;" > /tmp/carpetas-nego.sql
+            npx prisma db execute --schema prisma/schema.prisma --file /tmp/carpetas-nego.sql
+          fi
+          reversa prisma/manual/2026-11-06-chat-project-carpetas-reversa.sql
+          echo "IF COL_LENGTH(N'dbo.chat_project_file', N'folder_path') IS NOT NULL OR OBJECT_ID(N'dbo.chat_project_folder', N'U') IS NOT NULL THROW 50000, N'La reversa de carpetas no quitó la columna o la tabla.', 1;" > /tmp/carpetas-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/carpetas-quitado.sql
+          # Apunta a chat_project: se vuelve a migrar al final, con la F1.
+          # Ingeniería biomédica (2026-11-06): con un evento de prueba, sin la bandera debe negarse; luego ida y vuelta.
+          echo "INSERT INTO dbo.biomed_evento (id_company, accion, actor_email) VALUES (1, N'ci', N'ci@x.co');" > /tmp/biomedica-dato.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomedica-dato.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-biomedica-reversa.sql; then echo "La reversa de Ingeniería biomédica debió negarse sin su bandera"; exit 1; fi
+          reversa prisma/manual/2026-11-06-biomedica-reversa.sql
+          echo "IF OBJECT_ID(N'dbo.biomed_registro', N'U') IS NOT NULL OR EXISTS (SELECT 1 FROM dbo.subprocess WHERE subprocess_url = N'/process/sgc-documental/biomedica') THROW 50000, N'La reversa de Ingeniería biomédica no quitó sus tablas o su permiso.', 1;" > /tmp/biomedica-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomedica-quitado.sql
+          migra 20261106150000_biomedica
+          # Matrices de Proyectos (2026-11-05): apuntan a chat_project, así que su reversa va PRIMERO; con una matriz de
+          # prueba, sin la bandera debe negarse. Se vuelve a migrar al final, con la F1.
+          echo "INSERT INTO dbo.chat_project_matrix (id_project, name) SELECT TOP (1) id_project, N'ci' FROM dbo.chat_project;" > /tmp/matrices-dato.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/matrices-dato.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-05-chat-project-matrices-reversa.sql; then
+            echo "IF EXISTS (SELECT 1 FROM dbo.chat_project) THROW 50000, N'La reversa de las matrices debió negarse sin su bandera.', 1;" > /tmp/matrices-nego.sql
+            npx prisma db execute --schema prisma/schema.prisma --file /tmp/matrices-nego.sql
+          fi
+          reversa prisma/manual/2026-11-05-chat-project-matrices-reversa.sql
+          echo "IF OBJECT_ID(N'dbo.chat_project_matrix', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.chat_project_matrix_version', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.chat_project_matrix_sheet', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.chat_project_matrix_chunk', N'U') IS NOT NULL THROW 50000, N'La reversa de las matrices no quitó sus tablas.', 1;" > /tmp/matrices-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/matrices-quitado.sql
+          # Mesas de discusión de Proyectos (2026-11-04): sus tablas apuntan a chat_project y chat_conversation, así que su
+          # reversa va PRIMERO; con una mesa de prueba, sin la bandera debe negarse. Se vuelve a migrar al final, con la F1.
+          echo "IF NOT EXISTS (SELECT 1 FROM dbo.chat_project_mesa) INSERT INTO dbo.chat_project_mesa (id_project, id_conversation, tema, id_agent_moderador, ritmo_min, tope_dia, sintesis_cada, horario_desde, horario_hasta, solo_habiles, created_by) SELECT TOP (1) c.id_project, c.id, N'ci', c.id_agent, 30, 40, 3, 420, 1140, 1, N'ci' FROM dbo.chat_conversation c WHERE c.id_project IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.chat_project_mesa m WHERE m.id_conversation = c.id);" > /tmp/mesas-dato.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/mesas-dato.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-04-chat-project-mesas-reversa.sql; then
+            echo "IF EXISTS (SELECT 1 FROM dbo.chat_conversation WHERE id_project IS NOT NULL) THROW 50000, N'La reversa de las mesas debió negarse sin su bandera.', 1;" > /tmp/mesas-nego.sql
+            npx prisma db execute --schema prisma/schema.prisma --file /tmp/mesas-nego.sql
+          fi
+          reversa prisma/manual/2026-11-04-chat-project-mesas-reversa.sql
+          echo "IF OBJECT_ID(N'dbo.chat_project_mesa', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.chat_project_mesa_agente', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.chat_project_mesa_evento', N'U') IS NOT NULL THROW 50000, N'La reversa de las mesas no quitó sus tablas.', 1;" > /tmp/mesas-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/mesas-quitado.sql
           # Contexto de los agentes (2026-10-29): ida y vuelta (reversa dos veces, comprobación y PRUEBAS otra vez).
           reversa prisma/manual/2026-10-29-chat-agent-contexto-reversa.sql
           echo "IF OBJECT_ID(N'dbo.chat_agent_context', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.chat_agent_command', N'U') IS NOT NULL THROW 50000, N'La reversa de contexto de agentes no quitó sus tablas.', 1;" > /tmp/contexto-quitado.sql
@@ -633,6 +709,10 @@ jobs:
           echo "IF COL_LENGTH(N'dbo.chat_project_file', N'uploaded_by_agent') IS NOT NULL OR COL_LENGTH(N'dbo.chat_project_file', N'id_conversation') IS NOT NULL THROW 50000, N'La reversa de archivos del agente no quitó sus columnas.', 1;" > /tmp/archivos-agente-quitado.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/archivos-agente-quitado.sql
           migra 20261023150000_chat_project_file_agente
+          # Vitrina · modelo 3D (2026-11-04): su reversa va ANTES que las de líneas y del V2 (vitrina_modelo_3d apunta a vitrina_presentacion); se vuelve a migrar al final de la Vitrina.
+          reversa prisma/manual/2026-11-04-vitrina-modelo-3d-reversa.sql
+          echo "IF OBJECT_ID(N'dbo.vitrina_modelo_3d', N'U') IS NOT NULL THROW 50000, N'La reversa del modelo 3D de la Vitrina no quitó su tabla.', 1;" > /tmp/vitrina-modelo3d-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/vitrina-modelo3d-quitado.sql
           # Vitrina · líneas y grupos (2026-10-23): su reversa va ANTES que la del V2 (sus tablas apuntan a vitrina_presentacion); se vuelve a migrar después del V2.
           reversa prisma/manual/2026-10-23-vitrina-lineas-grupos-reversa.sql
           echo "IF EXISTS (SELECT 1 FROM sys.tables WHERE name IN (N'vitrina_linea_comercial', N'vitrina_grupo_terapeutico', N'vitrina_presentacion_grupo')) OR COL_LENGTH(N'dbo.vitrina_presentacion', N'id_linea') IS NOT NULL OR COL_LENGTH(N'dbo.vitrina_codigo_sap', N'items_group_name') IS NOT NULL THROW 50000, N'La reversa de líneas y grupos de la Vitrina no quitó lo suyo.', 1;" > /tmp/vitrina-lineas-quitado.sql
@@ -645,6 +725,8 @@ jobs:
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-22-vitrina-subprocesos-PRUEBAS.sql
           migra 20261023120000_vitrina_lineas_grupos
           npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-23-vitrina-lineas-grupos-PRUEBAS.sql
+          migra 20261104120000_vitrina_modelo_3d
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-04-vitrina-modelo-3d-PRUEBAS.sql
           # Medidor del consumo de Anthropic (2026-10-22): ida y vuelta (reversa dos veces, comprobación y la migración otra vez).
           reversa prisma/manual/2026-10-22-chat-agent-quota-reversa.sql
           echo "IF OBJECT_ID(N'dbo.chat_agent_quota', N'U') IS NOT NULL THROW 50000, N'La reversa del medidor de consumo no quitó su tabla.', 1;" > /tmp/cuota-quitado.sql
@@ -702,6 +784,9 @@ jobs:
           migra 20261019140000_proyectos_no_leidos
           migra 20261020190000_proyectos_permisos_agentes
           migra 20261023150000_chat_project_file_agente
+          migra 20261104200000_chat_project_mesas
+          migra 20261105150000_chat_project_matrices
+          migra 20261106120000_chat_project_folders
           # Padres e hijos (2026-10-19): con tipos padre marcados y relaciones creadas solas (integración), sin la bandera debe negarse.
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-10-19-sgc-padres-hijos-reversa.sql; then echo "La reversa de padres e hijos debió negarse sin su bandera"; exit 1; fi
           reversa prisma/manual/2026-10-19-sgc-padres-hijos-reversa.sql

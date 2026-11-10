@@ -5,6 +5,8 @@ import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 // exportBoardExcel (y con él exceljs, ~900 KB) se carga al tocar Exportar, no al abrir la pantalla.
 import { downloadWorkbook } from '@/lib/dashboard/excel/excelHelpers';
+import PurchaseInlineForm from '../../purchases/PurchaseInlineForm';
+import SalesInlineForm from '../../sales/SalesInlineForm';
 import {
   Paper,
   Stack,
@@ -206,6 +208,12 @@ function RequestBoard() {
   const [createLoading, setCreateLoading] = useState(false);
   // Solicitud de compra: se captura en el formulario de Compras (lineas + SAP), no aqui.
   const [isPurchaseProcess, setIsPurchaseProcess] = useState(false);
+  // Oferta de venta (sales_company_config.id_process_category_oferta): formulario propio, como Compras.
+  const [isSalesProcess, setIsSalesProcess] = useState(false);
+  /** «Pedido directo de venta» abre el mismo formulario de Ventas con esa opción ya elegida. */
+  const [salesModo, setSalesModo] = useState<'enviar' | 'directo'>('enviar');
+  const isSapFormProcess = isPurchaseProcess || isSalesProcess;
+  const [purchaseNotice, setPurchaseNotice] = useState<{ ok: boolean; message: string } | null>(null);
   const isSubmittingRef = useRef(false);
 
   const linkedProcessParam = searchParams.get('linkedProcess');
@@ -880,39 +888,17 @@ function RequestBoard() {
     }));
   };
 
-  const validateForm = () => {
+  // Validación genérica de los campos dinámicos de proceso (process_form_field). Es la
+  // MISMA para cualquier proceso: no sabe nada específico de ningún campo.
+  const collectVisibleFieldErrors = (): Record<string, string> => {
     const errors: Record<string, string> = {};
-
-    if (!formData.company) {
-      errors.company = 'La empresa es obligatoria';
-    }
-    if (!formData.subject.trim()) {
-      errors.subject = 'El asunto es obligatorio';
-    }
-    if (!formData.category) {
-      errors.category = 'La categoría es obligatoria';
-    }
-    if (!formData.process) {
-      errors.process = 'El proceso es obligatorio';
-    }
-    if (!formData.descripcion.trim()) {
-      errors.descripcion = 'La descripción es obligatoria';
-    } else if (formData.descripcion.trim().length < 10) {
-      errors.descripcion = 'La descripción debe tener al menos 10 caracteres';
-    }
-
     for (const field of visibleFields) {
       if (field.field_type === ORION_SIGNATURE_FIELD_TYPE) continue;
       const val = fieldValues[field.id];
       if (field.field_type === TABLE_FIELD_TYPE) {
         const columns = parseTableConfig(field.config_json).columns;
         const rows = Array.isArray(val) ? (val as TableRow[]) : [];
-        const tableError = validateTableRows(
-          columns,
-          rows,
-          field.required,
-          field.field_label
-        );
+        const tableError = validateTableRows(columns, rows, field.required, field.field_label);
         if (tableError) errors[`field_${field.id}`] = tableError;
         continue;
       }
@@ -932,6 +918,32 @@ function RequestBoard() {
           `${field.field_label}: ingrese una URL válida que empiece por http:// o https://`;
       }
     }
+    return errors;
+  };
+
+  const validateForm = () => {
+    const errors: Record<string, string> = {};
+
+    if (!formData.company) {
+      errors.company = 'La empresa es obligatoria';
+    }
+    if (!formData.category) {
+      errors.category = 'La categoría es obligatoria';
+    }
+    if (!formData.process) {
+      errors.process = 'El proceso es obligatorio';
+    }
+
+    if (!formData.subject.trim()) {
+      errors.subject = 'El asunto es obligatorio';
+    }
+    if (!formData.descripcion.trim()) {
+      errors.descripcion = 'La descripción es obligatoria';
+    } else if (formData.descripcion.trim().length < 10) {
+      errors.descripcion = 'La descripción debe tener al menos 10 caracteres';
+    }
+
+    Object.assign(errors, collectVisibleFieldErrors());
 
     for (const doc of visibleRequiredFiles) {
       if (doc.required && !(filesByDoc[doc.id]?.length > 0)) {
@@ -942,6 +954,34 @@ function RequestBoard() {
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
+
+  // Serializa las respuestas de los campos dinámicos de proceso al formato que espera
+  // el motor genérico ([{ id_field, id_option? | value_text? }] -- ver
+  // createGeneralRequest.js).
+  const buildFormValuesPayload = () =>
+    visibleFields
+      .filter((f) => {
+        const v = fieldValues[f.id];
+        if (f.field_type === TABLE_FIELD_TYPE) {
+          const columns = parseTableConfig(f.config_json).columns;
+          const rows = Array.isArray(v) ? (v as TableRow[]) : [];
+          return rows.some((r) => !isRowEmpty(r, columns));
+        }
+        return v !== undefined && v !== null && v !== '';
+      })
+      .map((f) => {
+        const v = fieldValues[f.id];
+        if (f.field_type === TABLE_FIELD_TYPE) {
+          const columns = parseTableConfig(f.config_json).columns;
+          const rows = (Array.isArray(v) ? (v as TableRow[]) : []).filter(
+            (r) => !isRowEmpty(r, columns)
+          );
+          return { id_field: f.id, value_text: serializeTableValue(rows) };
+        }
+        return f.field_type === 'select'
+          ? { id_field: f.id, id_option: v }
+          : { id_field: f.id, value_text: String(v) };
+      });
 
   useEffect(() => {
     if (!formData.company || !formData.process) {
@@ -962,10 +1002,32 @@ function RequestBoard() {
     };
   }, [formData.company, formData.process]);
 
+  useEffect(() => {
+    if (!formData.company || !formData.process) {
+      setIsSalesProcess(false);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/sales/entry?companyId=${formData.company}&processId=${formData.process}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) {
+          setIsSalesProcess(Boolean(d?.isSales));
+          setSalesModo(d?.modo === 'directo' ? 'directo' : 'enviar');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setIsSalesProcess(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.company, formData.process]);
+
   const handleCreateTicketWithValidation = async () => {
     if (isSubmittingRef.current) return;
     // La solicitud de compra no se crea por el formulario generico (se haria sin borrador en SAP).
-    if (isPurchaseProcess) return;
+    if (isSapFormProcess) return;
     if (!validateForm()) return;
     await handleCreateTicket();
   };
@@ -994,29 +1056,7 @@ function RequestBoard() {
             createdby: userId,
             url: formData.url,
             originTaskId: originTaskId || null,
-            formValues: visibleFields
-              .filter((f) => {
-                const v = fieldValues[f.id];
-                if (f.field_type === TABLE_FIELD_TYPE) {
-                  const columns = parseTableConfig(f.config_json).columns;
-                  const rows = Array.isArray(v) ? (v as TableRow[]) : [];
-                  return rows.some((r) => !isRowEmpty(r, columns));
-                }
-                return v !== undefined && v !== null && v !== '';
-              })
-              .map((f) => {
-                const v = fieldValues[f.id];
-                if (f.field_type === TABLE_FIELD_TYPE) {
-                  const columns = parseTableConfig(f.config_json).columns;
-                  const rows = (Array.isArray(v) ? (v as TableRow[]) : []).filter(
-                    (r) => !isRowEmpty(r, columns)
-                  );
-                  return { id_field: f.id, value_text: serializeTableValue(rows) };
-                }
-                return f.field_type === 'select'
-                  ? { id_field: f.id, id_option: v }
-                  : { id_field: f.id, value_text: String(v) };
-              }),
+            formValues: buildFormValuesPayload(),
           }),
         });
       } catch (networkErr) {
@@ -1874,6 +1914,17 @@ function RequestBoard() {
           </div>
         </Card>
 
+        {purchaseNotice && (
+          <Alert
+            color={purchaseNotice.ok ? 'green' : 'yellow'}
+            withCloseButton
+            onClose={() => setPurchaseNotice(null)}
+            mb='md'
+          >
+            {purchaseNotice.message}
+          </Alert>
+        )}
+
         <Modal
           opened={modalOpened}
           onClose={() => {
@@ -1914,6 +1965,8 @@ function RequestBoard() {
              (ScrollArea en TableFieldInput), así que con el ancho extra las
              columnas se ven sin pelear. */
           size='90%'
+          // Solicitud de compra: pantalla completa para que la tabla de líneas se vea entera.
+          fullScreen={isSapFormProcess}
           radius='md'
           overlayProps={{ blur: 4 }}
         >
@@ -1946,6 +1999,9 @@ function RequestBoard() {
                 />
               </Grid.Col>
 
+              {/* Oferta de venta y solicitud de compra: el asunto se arma solo
+                  (OV - cliente - NIT - primera línea / SC - proveedor - primera línea). */}
+              {!isSapFormProcess && (
               <Grid.Col span={{ base: 12, md: 12 }}>
                 <TextInput
                   label={parseInt(formData.process) == 4 ? 'Cargo' : 'Asunto'}
@@ -1963,12 +2019,13 @@ function RequestBoard() {
                   leftSection={<IconFileDescription size={16} />}
                 />
               </Grid.Col>
+              )}
             </Grid>
 
             {/* Activity Search Section */}
             <Card p='md' radius='md' withBorder className='bg-blue-50 border-blue-200'>
               <Group justify='space-between' mb='xs'>
-                <Text fw={600} size='sm' c='blue.9'>
+                <Text fw={600} size='sm' c='var(--app-accent, var(--mantine-color-blue-7))'>
                   ¿No sabes qué categoría elegir?
                 </Text>
                 <Button
@@ -2012,7 +2069,7 @@ function RequestBoard() {
                       className='max-h-64 overflow-y-auto'
                     >
                       <Stack gap='xs'>
-                        <Text size='xs' c='gray.5' fw={500}>
+                        <Text size='xs' c='dimmed' fw={500}>
                           {searchResults.length}{' '}
                           {searchResults.length === 1 ? 'resultado' : 'resultados'} encontrado
                           {searchResults.length === 1 ? '' : 's'}
@@ -2025,7 +2082,7 @@ function RequestBoard() {
                             p='sm'
                             radius='md'
                             withBorder
-                            className='cursor-pointer hover:bg-blue-50 hover:border-blue-300 transition-all duration-200'
+                            className='cursor-pointer hover:bg-blue-500/10 hover:border-blue-400 transition-all duration-200'
                             onClick={() => handleActivitySelect(result)}
                           >
                             <Stack gap={4}>
@@ -2033,11 +2090,11 @@ function RequestBoard() {
                                 <Badge size='xs' variant='light' color='blue'>
                                   {result.category}
                                 </Badge>
-                                <Text size='xs' c='gray.5' fw={500}>
+                                <Text size='xs' c='dimmed' fw={500}>
                                   {result.process}
                                 </Text>
                               </Group>
-                              <Text size='sm' lineClamp={2} c='gray.8'>
+                              <Text size='sm' lineClamp={2} c='var(--app-text, var(--mantine-color-gray-8))'>
                                 {result.description || result.label}
                               </Text>
                             </Stack>
@@ -2049,7 +2106,7 @@ function RequestBoard() {
                   )}
 
                   {activitySearch && searchResults.length === 0 && (
-                    <Text size='sm' c='gray.5' ta='center' py='md'>
+                    <Text size='sm' c='dimmed' ta='center' py='md'>
                       No se encontraron actividades que coincidan con tu búsqueda.
                     </Text>
                   )}
@@ -2095,23 +2152,35 @@ function RequestBoard() {
             </Grid>
 
             {isPurchaseProcess && (
-              <Alert color='blue' variant='light' title='Solicitud de compra'>
-                <Text size='sm'>
-                  La solicitud de compra se diligencia en su propio formulario, con las líneas
-                  (artículo, cantidad, IVA, cuenta y norma de reparto) validadas contra SAP. Al
-                  enviarla a autorizar aparecerá aquí, en Mis solicitudes.
-                </Text>
-                <Button
-                  mt='sm'
-                  onClick={() =>
-                    router.push(`/process/purchases?nueva=1&companyId=${formData.company}`)
-                  }
-                >
-                  Abrir formulario de solicitud de compra
-                </Button>
-              </Alert>
+              <PurchaseInlineForm
+                companyId={formData.company}
+                subject={formData.subject}
+                onDone={({ ok, message }) => {
+                  setModalOpened(false);
+                  setFormData({ company: '', subject: '', category: '', process: '', descripcion: '', url: '' });
+                  setPurchaseNotice({ ok, message });
+                  fetchTickets();
+                }}
+              />
             )}
 
+            {isSalesProcess && (
+              <SalesInlineForm
+                key={`${formData.company}-${salesModo}`}
+                companyId={formData.company}
+                subject={formData.subject}
+                initialModo={salesModo}
+                onDone={({ ok, message }) => {
+                  setModalOpened(false);
+                  setFormData({ company: '', subject: '', category: '', process: '', descripcion: '', url: '' });
+                  setPurchaseNotice({ ok, message });
+                  fetchTickets();
+                }}
+              />
+            )}
+
+            {!isSapFormProcess && (
+              <>
             {(() => {
               const processName = (
                 filteredProcesses.find((p) => p.value === formData.process)?.label || ''
@@ -2414,6 +2483,9 @@ function RequestBoard() {
               />
             </div>
 
+              </>
+            )}
+
             <Divider />
 
             <Group justify='flex-end' gap='md'>
@@ -2432,16 +2504,18 @@ function RequestBoard() {
               >
                 Cancelar
               </Button>
+              {!isSapFormProcess && (
               <Button
                 onClick={handleCreateTicketWithValidation}
                 loading={createLoading}
-                disabled={createLoading || isPurchaseProcess}
+                disabled={createLoading}
                 size='md'
                 leftSection={<IconPlus size={16} />}
                 className='bg-blue-600 hover:bg-blue-700'
               >
                 Crear Solicitud
               </Button>
+              )}
             </Group>
           </Stack>
         </Modal>

@@ -7,11 +7,15 @@ import {
 } from '../../../../lib/notificationEvents.js';
 import { syncAuthorizationToSapsend } from '../../../../lib/sapsend/authorizationStatus.js';
 import { onAuthorizationDecision as onPurchaseAuthorizationDecision } from '../../../../lib/purchases/authorization';
+import { runSapExecutors } from '../../../../lib/workflow-sap/engine';
+import { runAfterSettled } from '../../../../lib/workflow-sap/afterDecision';
+import { onSalesAuthorizationDecision, salesApprovalTrmBlock } from '../../../../lib/sales/flow';
 import { advanceSequentialTask } from '../../../../lib/workflow/advanceSequentialTask.js';
 import { closeRequestGeneral } from '../../../../lib/workflow/closeRequestGeneral.js';
 import { resolveSessionUser } from '../../../../lib/chat/http';
 import { authorizationDecisionBlock } from '../../../../lib/request-general/workload';
 import { orionInternalTaskSql } from '../../../../lib/orion/internalTasks';
+import { closeOpenTasksOnReturn } from '../../../../lib/requests-general/returnedTasks.js';
 
 export async function POST(req) {
   const TAG = '[update-activities]';
@@ -44,6 +48,16 @@ export async function POST(req) {
         }),
         { status: 400 }
       );
+    }
+
+    // VENTAS (RN 2026-11-05): sin la TRM del día en SAP no se permite autorizar. Se valida ANTES
+    // de abrir la transacción para no retener bloqueos de BD mientras responde SAP.
+    if (Number(id_status) === 2) {
+      const sinTrm = await salesApprovalTrmBlock(Number(id));
+      if (sinTrm) {
+        console.warn(`${TAG} ✖ Autorización de ventas bloqueada por TRM (tarea ${id}).`);
+        return new Response(JSON.stringify({ error: sinTrm, code: 'TRM_MISSING' }), { status: 409 });
+      }
     }
 
     const pool = await sql.connect(sqlConfig);
@@ -248,6 +262,8 @@ export async function POST(req) {
         await new sql.Request(transaction)
           .input('id_request', sql.Int, prevRow.id_request_general)
           .query(`UPDATE requests_general SET status_req = 7 WHERE id = @id_request`);
+        const closedTasks = await closeOpenTasksOnReturn(transaction, prevRow.id_request_general);
+        console.log(`${TAG} 3c) ${closedTasks} tarea(s) abiertas canceladas al devolver la solicitud.`);
         console.log(
           `${TAG} 3b) Autorización rechazada: solicitud ${prevRow.id_request_general} marcada como Devuelta (7).`
         );
@@ -258,6 +274,8 @@ export async function POST(req) {
 
       const prevStatus = prevRow?.id_status ?? null;
       const nextStatus = id_status ?? null;
+      /** Escrituras en SAP de la decisión del autorizador (Compras y Ventas), si las hubo. */
+      let sapDecisions = [];
 
       if (isActivityResolvedStatus(nextStatus) && !isActivityResolvedStatus(prevStatus)) {
         console.log(`${TAG} 4) Notificando "Actividad resuelta" a los interesados de la solicitud ${prevRow?.id_request_general}.`);
@@ -285,9 +303,23 @@ export async function POST(req) {
         );
         // COMPRAS: si la solicitud autoriza un borrador de compra, publicar la firme o rechazarlo
         // en SAP. No bloquea; el gate (¿es de compras?) vive dentro (purchase_authorization).
-        fireAndForgetNotification(
-          onPurchaseAuthorizationDecision(prevRow?.id_request_general, Number(nextStatus) === 2, resolution)
+        const purchaseDecision = onPurchaseAuthorizationDecision(
+          prevRow?.id_request_general,
+          Number(nextStatus) === 2,
+          resolution
         );
+        fireAndForgetNotification(purchaseDecision);
+        // VENTAS: registra la decisión en el borrador de venta y, si es rechazo, lo deja en
+        // NAP / NADC / NADA según la etapa. El gate (¿es de ventas?) vive dentro (sales_authorization).
+        const salesDecision = onSalesAuthorizationDecision(
+          prevRow?.id_request_general,
+          Number(nextStatus) === 2,
+          resolution
+        );
+        fireAndForgetNotification(salesDecision);
+        // Las Tareas SAP siguientes (paso 5) esperan a que la decisión quede escrita en SAP:
+        // ambas modifican el mismo borrador y SAP rechazaba la primera con −2039.
+        sapDecisions = [purchaseDecision, salesDecision];
       }
 
       // Nota en la bitácora de la solicitud cuando se resuelve una tarea de AUTORIZACIÓN, a nombre del
@@ -364,6 +396,11 @@ export async function POST(req) {
             });
           }
         }
+
+        // Tareas «Ejecutora SAP» que quedaron listas (siguiente secuencial o en paralelo). No bloquea.
+        fireAndForgetNotification(
+          runAfterSettled(sapDecisions, () => runSapExecutors(prevRow.id_request_general))
+        );
       } else if (justResolved && isFirmaAuthorization) {
         console.log(`${TAG} 5b) Auth FIRMA/Orion: no se avanza workflow secuencial.`);
       } else if (Number(nextStatus) === 3) {

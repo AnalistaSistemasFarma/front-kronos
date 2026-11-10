@@ -5,9 +5,8 @@ import { fileURLToPath } from 'node:url';
 // Solo cubrimos utilidades PURAS de `lib/` (sin dependencias de BD/red).
 // El servidor MCP tiene su propia suite en `mcp/` (no se incluye aquí).
 export default defineConfig({
-  // El tsconfig de Next usa jsx «preserve»; las pruebas del avatar importan
-  // componentes .tsx (cabezas.test.ts) y la prueba de PARIDAD del SGC renderiza
-  // el marcado de sus pantallas, así que Vitest debe transformar el JSX.
+  // El tsconfig de Next usa jsx «preserve»; para la prueba de paridad (render de
+  // componentes .tsx en Node) Vitest debe transformar el JSX.
   oxc: { jsx: { runtime: 'automatic' } },
   resolve: {
     alias: {
@@ -37,6 +36,8 @@ export default defineConfig({
       'app/api/correo/**/*.test.ts',
       // `app/api/chat/compartir/**`: menú Compartir de Android (sesión, tipos y tamaños).
       'app/api/chat/compartir/**/*.test.ts',
+      // `app/api/biomedica/**`: Ingeniería biomédica (permiso del módulo, PDF en línea, control de vigencia).
+      'app/api/biomedica/**/*.test.ts',
       'components/sgc/**/*.test.ts',
       // Medidor del consumo de Anthropic en Proyectos (render del marcado, 2026-10-22).
       'components/proyectos/**/*.test.ts',
@@ -106,6 +107,10 @@ export default defineConfig({
         // Visores de adjuntos del chat (2026-10-22): reglas puras y la ruta de la vista.
         'lib/chat/visor.ts',
         'app/api/chat/attachments/[[]id]/vista/route.ts',
+        // Ventas (2026-10-30): máquina de estados y motor de reglas de la oferta de venta.
+        'lib/sales/states.ts',
+        'lib/sales/rules.ts',
+        'lib/sales/publish.ts',
       ],
       exclude: [
         '**/__tests__/**',

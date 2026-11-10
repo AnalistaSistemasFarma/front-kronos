@@ -350,9 +350,9 @@ export const ENTITY_METADATA = {
  * candado de solo lectura del resto del servidor.
  */
 export const TOOL_CAPABILITIES = {
-  /** 49 con «Consultar a un agente» encendido (CORREO_AGENTE_HABILITADO=true); 44 si está apagado. */
+  /** 51 con «Consultar a un agente» encendido (CORREO_AGENTE_HABILITADO=true); 46 si está apagado (2026-11-06: +proyecto_historial y proyecto_prs). */
   get totalTools(): number {
-    return correoAgenteHabilitado() ? 49 : 49 - CORREO_AGENTE_TOOLS.length;
+    return correoAgenteHabilitado() ? 51 : 51 - CORREO_AGENTE_TOOLS.length;
   },
   readOnly: [
     'kronos_metadata',

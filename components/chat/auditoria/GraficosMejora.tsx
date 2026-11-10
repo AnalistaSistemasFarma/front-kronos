@@ -97,7 +97,7 @@ export function GraficosMejora({
                 afterBody: (items) => {
                   const d = deptos[items[0]?.dataIndex ?? -1];
                   return d && d.mejora !== null
-                    ? `Mejora: ${h(d.mejora, 1)} %`
+                    ? `Capacidad liberada: ${h(d.mejora, 1)} %`
                     : "";
                 },
               },
@@ -134,12 +134,12 @@ export function GraficosMejora({
     <SimpleGrid cols={1} spacing="md" mb="md">
       <Card withBorder radius="md" padding="md" className="chat-surface">
         <Text fw={600} size="sm">
-          Mapa de calor: % de mejora en tiempo
+          Mapa de calor: capacidad liberada por departamento y semana
         </Text>
         <Text size="xs" c="dimmed" mb="sm">
-          Por departamento y semana. % de mejora = 1 − horas de la persona con
-          IA ÷ horas sin IA. Pase el ratón por una celda para ver las horas.
-          Vacío = esa semana no hubo tareas medidas.
+          Cada celda: horas liberadas esa semana (arriba) y % de capacidad
+          liberada = 1 − horas de la persona con IA ÷ horas sin IA (abajo). El
+          color sigue el %. Vacío = esa semana no hubo tareas medidas.
         </Text>
         {semanas.length === 0 ? (
           <Text size="xs" c="dimmed">
@@ -201,7 +201,7 @@ export function GraficosMejora({
                         key={c.semana}
                         withArrow
                         disabled={c.mejora === null}
-                        label={`Sin IA ${h(c.horasSinIA, 1)} h · con IA ${h(c.horasConIA, 1)} h · ahorro ${h(c.horasSinIA - c.horasConIA, 1)} h`}
+                        label={`Sin IA ${h(c.horasSinIA, 1)} h · con IA ${h(c.horasConIA, 1)} h · liberadas ${h(c.horasSinIA - c.horasConIA, 1)} h`}
                       >
                         <td
                           style={{
@@ -219,7 +219,7 @@ export function GraficosMejora({
                                 : undefined,
                           }}
                         >
-                          {c.mejora === null ? "" : `${h(c.mejora)} %`}
+                          {c.mejora === null ? "" : `${h(c.horasSinIA - c.horasConIA, 1)} h`}
                           {c.mejora !== null && (
                             <div
                               style={{
@@ -228,7 +228,7 @@ export function GraficosMejora({
                                 opacity: 0.85,
                               }}
                             >
-                              {h(c.horasSinIA - c.horasConIA, 1)} h
+                              {h(c.mejora)} %
                             </div>
                           )}
                         </td>
@@ -247,7 +247,10 @@ export function GraficosMejora({
                             : undefined,
                       }}
                     >
-                      {d.mejora === null ? "—" : `${h(d.mejora)} %`}
+                      {d.mejora === null ? "—" : `${h(d.horasSinIA - d.horasConIA, 1)} h`}
+                      {d.mejora !== null && (
+                        <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.85 }}>{h(d.mejora)} %</div>
+                      )}
                     </td>
                   </tr>
                 ))}

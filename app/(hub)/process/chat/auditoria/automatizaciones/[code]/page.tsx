@@ -330,10 +330,10 @@ export default function FichaIndicadorPage() {
                 {[
                   ["Horas de la persona sin IA", h(a.horasAntes)],
                   ["Horas de la persona con IA", h(a.horasDespues)],
-                  ["Horas ahorradas", h(a.horasAhorradas)],
-                  ["Ahorro al mes", `${h(a.horasMes)} h`],
+                  ["Liberadas en el periodo", h(a.horasAhorradas)],
+                  ["Liberadas por mes", `${h(a.horasMes)} h`],
                   [
-                    "Reducción",
+                    "% liberado",
                     a.reduccion === null ? "—" : `${h(a.reduccion, 1)} %`,
                   ],
                   ["Tareas medidas", h(a.ocurrencias)],
@@ -345,8 +345,8 @@ export default function FichaIndicadorPage() {
                     <Text
                       fw={700}
                       c={
-                        l.startsWith("Horas ahorradas") ||
-                        l.startsWith("Ahorro")
+                        l.startsWith("Liberadas en") ||
+                        l.startsWith("Liberadas por")
                           ? "green"
                           : undefined
                       }
@@ -363,7 +363,7 @@ export default function FichaIndicadorPage() {
                 Casos de uso ({casosValidos.length})
               </Text>
               <Text size="xs" c="dimmed" mb="sm">
-                Tiempos de una vez que se hace la tarea. Ahorro por vez =
+                Tiempos de una vez que se hace la tarea. Liberado por vez =
                 persona sin IA − persona con IA. Abra un caso para ver cómo se
                 hace a mano, paso a paso.
               </Text>
@@ -375,11 +375,11 @@ export default function FichaIndicadorPage() {
                       <Table.Th>Sin IA vs con IA</Table.Th>
                       <Table.Th ta="right">Persona sin IA</Table.Th>
                       <Table.Th ta="right">Persona con IA</Table.Th>
-                      <Table.Th ta="right">Ahorro por vez</Table.Th>
+                      <Table.Th ta="right">Liberado por vez</Table.Th>
                       <Table.Th ta="right">Respuesta del agente</Table.Th>
                       <Table.Th ta="right">Veces pedida</Table.Th>
-                      <Table.Th ta="right">Horas ahorradas</Table.Th>
-                      <Table.Th ta="right">Ahorro al mes (h)</Table.Th>
+                      <Table.Th ta="right">Liberadas (periodo)</Table.Th>
+                      <Table.Th ta="right">Por mes (h)</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>

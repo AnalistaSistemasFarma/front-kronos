@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, FileInput, Group, List, Loader, Stack, Text } from '@mantine/core';
-import { IconPaperclip, IconUpload } from '@tabler/icons-react';
+import { Alert, Anchor, Button, FileInput, Group, List, Loader, Stack, Text } from '@mantine/core';
+import { IconDownload, IconPaperclip, IconUpload } from '@tabler/icons-react';
 
 /**
  * Adjuntos (cotizaciones y anexos) de un borrador de solicitud de compra.
@@ -21,11 +21,16 @@ interface Props {
   docEntry: number;
   /** false = solo lectura (estado distinto de B/ENC). */
   canUpload: boolean;
+  /** Solicitud de Mis solicitudes / Autorizaciones: permite verlos sin permiso de Compras. */
+  requestId?: number | string | null;
 }
 
 const ACCEPT = '.pdf,.jpg,.jpeg,.png';
 
-export default function AttachmentsPanel({ companyId, docEntry, canUpload }: Props) {
+export default function AttachmentsPanel({ companyId, docEntry, canUpload, requestId }: Props) {
+  const reqParam = requestId ? `&requestId=${requestId}` : '';
+  const fileUrl = (line: number, download = false) =>
+    `/api/purchases/attachments/file?companyId=${companyId}&docEntry=${docEntry}&line=${line}${reqParam}${download ? '&download=1' : ''}`;
   const [files, setFiles] = useState<AttachmentFile[]>([]);
   const [selected, setSelected] = useState<File[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,7 +40,7 @@ export default function AttachmentsPanel({ companyId, docEntry, canUpload }: Pro
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/purchases/attachments?companyId=${companyId}&docEntry=${docEntry}`);
+      const res = await fetch(`/api/purchases/attachments?companyId=${companyId}&docEntry=${docEntry}${reqParam}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'No se pudieron cargar los adjuntos');
       setFiles(data.files ?? []);
@@ -44,7 +49,7 @@ export default function AttachmentsPanel({ companyId, docEntry, canUpload }: Pro
     } finally {
       setLoading(false);
     }
-  }, [companyId, docEntry]);
+  }, [companyId, docEntry, reqParam]);
 
   useEffect(() => {
     void load();
@@ -90,8 +95,19 @@ export default function AttachmentsPanel({ companyId, docEntry, canUpload }: Pro
         <List size="sm" icon={<IconPaperclip size={14} />}>
           {files.map((f) => (
             <List.Item key={f.line}>
-              {f.name}
-              {f.date ? ` · ${String(f.date).slice(0, 10)}` : ''}
+              <Group gap={8} wrap="nowrap">
+                <Anchor href={fileUrl(f.line)} target="_blank" rel="noopener noreferrer" size="sm">
+                  {f.name}
+                </Anchor>
+                {f.date ? (
+                  <Text span size="xs" c="dimmed">
+                    {String(f.date).slice(0, 10)}
+                  </Text>
+                ) : null}
+                <Anchor href={fileUrl(f.line, true)} size="xs" aria-label={`Descargar ${f.name}`}>
+                  <IconDownload size={14} />
+                </Anchor>
+              </Group>
             </List.Item>
           ))}
         </List>

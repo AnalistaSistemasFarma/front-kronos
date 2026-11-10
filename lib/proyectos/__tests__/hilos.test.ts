@@ -11,12 +11,17 @@ const updateManyConv = vi.hoisted(() => vi.fn());
 const createLog = vi.hoisted(() => vi.fn());
 const deleteMessages = vi.hoisted(() => vi.fn());
 const admin = vi.hoisted(() => vi.fn());
+const findMesa = vi.hoisted(() => vi.fn());
+const updateMesa = vi.hoisted(() => vi.fn());
+const createEventoMesa = vi.hoisted(() => vi.fn());
 
 vi.mock('../../prisma', () => {
   const tx = {
     chatProjectConversationLog: { create: createLog },
     chatConversation: { update: updateConv, updateMany: updateManyConv },
     chatMessage: { deleteMany: deleteMessages },
+    chatProjectMesa: { findUnique: findMesa, update: updateMesa },
+    chatProjectMesaEvento: { create: createEventoMesa },
   };
   return {
     prisma: {
@@ -125,3 +130,15 @@ describe('eliminarHilo (borrado lógico)', () => {
     await expect(eliminarHilo(ANA, proyecto(), 'abc')).rejects.toMatchObject({ status: 400 });
   });
 });
+
+describe('eliminar la conversación de una MESA (2026-11-05)', () => {
+  it('cierra la mesa y lo deja en su registro', async () => {
+    findConv.mockResolvedValue({ id: 40, title: 'Mesa', created_by: ANA.id });
+    findMesa.mockResolvedValue({ id_mesa: 3, estado: 'activa', ronda: 2 });
+    updateManyConv.mockResolvedValue({ count: 1 });
+    await eliminarHilo(ANA, proyecto(), 40);
+    expect(updateMesa).toHaveBeenCalledWith(expect.objectContaining({ where: { id_mesa: 3 }, data: expect.objectContaining({ estado: 'cerrada' }) }));
+    expect(createEventoMesa).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ tipo: 'cerrada' }) }));
+  });
+});
+

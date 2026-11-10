@@ -67,6 +67,7 @@ import {
   isOrionFirmaSignSubprocess,
 } from '@/lib/orion/access';
 import { isDeleteAttachmentsSubprocess } from '@/lib/attachments/access';
+import { isTeamTasksSubprocess } from '@/lib/request-general/teamTasksAccess';
 import { isValentineWallSubprocess } from '@/lib/valentine/constants';
 import { describeSgcPermissionMarker, isSgcPermissionMarkerSubprocess } from '@/lib/sgc/constants';
 import { isProjectsConfigMarkerSubprocess, PROJECTS_CONFIG_MARKER_DESCRIPTION } from '@/lib/proyectos/config-agentes-rules';
@@ -1335,6 +1336,7 @@ function UserManagement() {
                   ? `Buscando en todos los usuarios · ${pagination.total} resultado(s)`
                   : 'La búsqueda aplica a toda la base, no solo a esta página'
               }
+              inputWrapperOrder={['label', 'input', 'description', 'error']}
               leftSection={<IconSearch size={14} />}
               value={searchInput}
               onChange={(e) => setSearchInput(e.currentTarget.value)}
@@ -2288,6 +2290,8 @@ function UserManagement() {
                                           ? 'Permiso obligatorio para firmar (aunque esté como firmante)'
                                           : isDeleteAttachmentsSubprocess(subprocess)
                                             ? 'Permiso: eliminar archivos adjuntos de solicitudes'
+                                            : isTeamTasksSubprocess(subprocess)
+                                            ? 'Líder de solicitudes: ve la carga de su equipo (por departamento) y reasigna sus tareas en esta empresa'
                                             : subprocess.subprocess_url ===
                                                   DASHBOARD_SOLICITADO_URL ||
                                                 (subprocess.subprocess_url ?? '').includes(
