@@ -927,7 +927,10 @@ model ChatPin {
 model ChatProject {
   id_project   Int      @id @default(autoincrement())
   name         String   @db.NVarChar(120)
-  id_agent     Int
+  /// «Agente con el que se creó». NULL = proyecto creado SIN asistente
+  /// (2026-11-10, Nicolás Rivera: «que existan los 2 caminos»); los agentes se
+  /// pueden agregar después (chat_project_agent manda el acceso, no esta columna).
+  id_agent     Int?
   /// Empresa del proyecto. Es la del PERMISO: dueño y miembros deben tener el
   /// agente habilitado en esta empresa.
   id_company   Int
@@ -950,7 +953,7 @@ model ChatProject {
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt
 
-  agent         Agent                 @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
+  agent         Agent?                @relation(fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction)
   company       Company               @relation(fields: [id_company], references: [id_company], onDelete: NoAction, onUpdate: NoAction)
   creator       User                  @relation("ChatProjectCreator", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   members       ChatProjectMember[]
