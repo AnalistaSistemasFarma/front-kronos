@@ -124,34 +124,6 @@ export default async function config(phase: string): Promise<NextConfig> {
       // "[Fast Refresh] rebuilding" una y otra vez. Con Sentry fuera de dev y Mantine optimizado
       // (2026-10-22) el servidor pesa menos: se conservan 10 min y 12 páginas.
       onDemandEntries: { maxInactiveAge: 10 * 60 * 1000, pagesBufferLength: 12 },
-      // Prisma se genera en app/generated/prisma (no en @prisma/client), así que Next no lo trata
-      // como paquete externo y webpack lo copiaba DENTRO de cada ruta y página compilada: ~4,3 MB
-      // de los ~5 MB de cada API (medido 2026-11-04). Con ~50 entradas compiladas el servidor de
-      // dev llegaba a 5 GB, al límite de memoria de Node, y quedaba al 100% de CPU liberando
-      // memoria (todo tardaba ~1 s de más). Aquí Node lo carga UNA vez desde su carpeta.
-      // Solo en `next dev`: el build de producción (turbopack) no cambia.
-      webpack: (webpackConfig, { isServer, nextRuntime }) => {
-        if (!isServer || nextRuntime === 'edge') return webpackConfig;
-        const generatedPrisma = path.join(projectRoot, 'app', 'generated', 'prisma');
-        const externalizePrisma = (
-          { context, request }: { context?: string; request?: string },
-          callback: (err?: Error | null, result?: string) => void
-        ) => {
-          if (request && context && request.includes('generated/prisma')) {
-            const resolved = path.resolve(context, request);
-            if (resolved.toLowerCase().startsWith(generatedPrisma.toLowerCase())) {
-              return callback(null, `commonjs ${resolved}`);
-            }
-          }
-          return callback();
-        };
-        const current = webpackConfig.externals;
-        webpackConfig.externals = [
-          externalizePrisma,
-          ...(Array.isArray(current) ? current : current ? [current] : []),
-        ];
-        return webpackConfig;
-      },
     };
   }
 
