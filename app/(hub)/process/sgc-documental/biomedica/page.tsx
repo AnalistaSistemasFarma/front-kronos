@@ -2,10 +2,11 @@
 
 import React, { useMemo, useState } from 'react';
 import { Alert, Badge, Button, Card, Group, Loader, Modal, Stack, Table, Tabs, Text, TextInput } from '@mantine/core';
-import { IconAlertTriangle, IconFilePlus, IconLock, IconPencil, IconPlus, IconSearch, IconSettings, IconStethoscope } from '@tabler/icons-react';
+import { IconAlertTriangle, IconDevicesPc, IconFilePlus, IconLock, IconPencil, IconPlus, IconSearch, IconSettings, IconStethoscope } from '@tabler/icons-react';
 import SgcShell from '../../../../../components/sgc/SgcShell';
 import SgcSelect from '../../../../../components/sgc/SgcSelect';
 import BiomedEditor from '../../../../../components/sgc/biomedica/BiomedEditor';
+import BiomedInventario from '../../../../../components/sgc/biomedica/BiomedInventario';
 import { sgcSend, useSgcFetch } from '../../../../../components/sgc/useSgcFetch';
 import type { BiomedAccess } from '../../../../../lib/biomedica/access';
 import type { BiomedFormatoDto, BiomedRegistroResumenDto } from '../../../../../lib/biomedica/db';
@@ -105,6 +106,9 @@ function Biomedica({ company }: { company: SgcCompanyAccess }) {
           <Tabs.Tab value='registros' leftSection={<IconStethoscope size={16} />}>
             Formatos diligenciados ({d.registros.length})
           </Tabs.Tab>
+          <Tabs.Tab value='inventario' leftSection={<IconDevicesPc size={16} />} data-testid='biomed-tab-inventario'>
+            Inventario de equipos
+          </Tabs.Tab>
           {d.access.canConfigure && (
             <Tabs.Tab value='config' leftSection={<IconSettings size={16} />}>
               Formatos del módulo
@@ -141,6 +145,10 @@ function Biomedica({ company }: { company: SgcCompanyAccess }) {
                 ))}
             </Stack>
           )}
+        </Tabs.Panel>
+
+        <Tabs.Panel value='inventario' pt='md'>
+          <BiomedInventario idCompany={company.idCompany} />
         </Tabs.Panel>
 
         <Tabs.Panel value='registros' pt='md'>
