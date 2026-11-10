@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ASSIGNED_STATE_OPTIONS,
   EMPTY_LIST_FILTERS,
+  REQUEST_STATE_OPTIONS,
   activeFilterCount,
+  describeListFilters,
+  stateGroup,
   buildListOptions,
   countByStatusGroup,
   matchesListFilters,
@@ -118,5 +122,62 @@ describe('apoyos', () => {
   it('cuenta filtros activos del panel (no el estado)', () => {
     expect(activeFilterCount(f({ status: 'done' }))).toBe(0);
     expect(activeFilterCount(f({ company: '1', date_to: '2026-11-04' }))).toBe(2);
+  });
+});
+
+describe('filtros restaurados del panel anterior (hotfix 2026-11-10)', () => {
+  it('estado exacto: Devuelta separa lo devuelto dentro de Pendientes', () => {
+    const abierta = row({ statusId: 1 });
+    const devuelta = row({ statusId: 7 });
+    const filtro = f({ status: 'pending', state: '7' });
+    expect([abierta, devuelta].filter((r) => matchesListFilters(r, filtro))).toEqual([devuelta]);
+  });
+
+  it('estado exacto: Sin empezar (solo tareas) en Asignadas', () => {
+    const tarea = row({ statusId: 4 });
+    const solicitud = row({ statusId: 1 });
+    expect(matchesListFilters(tarea, f({ state: '4' }))).toBe(true);
+    expect(matchesListFilters(solicitud, f({ state: '4' }))).toBe(false);
+  });
+
+  it('el estado exacto no cambia las tarjetas (ignoreStatus)', () => {
+    expect(matchesListFilters(row({ statusId: 2, group: 'done' }), f({ state: '7' }), { ignoreStatus: true })).toBe(true);
+  });
+
+  it('cada estado exacto cae en su tarjeta', () => {
+    expect(stateGroup('1')).toBe('pending');
+    expect(stateGroup('4')).toBe('pending');
+    expect(stateGroup('7')).toBe('pending');
+    expect(stateGroup('2')).toBe('done');
+    expect(stateGroup('3')).toBe('cancelled');
+  });
+
+  it('mismas opciones de estado que había antes', () => {
+    expect(REQUEST_STATE_OPTIONS.map((o) => o.value)).toEqual(['1', '3', '2', '7']);
+    expect(ASSIGNED_STATE_OPTIONS.map((o) => o.value)).toEqual(['4', '1', '3', '2', '7']);
+  });
+
+  it('categoría exacta', () => {
+    expect(matchesListFilters(row({ category: 'Tesorería' }), f({ category: 'Tesorería' }))).toBe(true);
+    expect(matchesListFilters(row({ category: 'Compras' }), f({ category: 'Tesorería' }))).toBe(false);
+    expect(matchesListFilters(row(), f({ category: 'Tesorería' }))).toBe(false);
+  });
+
+  it('cuenta estado exacto y categoría como filtros activos', () => {
+    expect(activeFilterCount(f({ state: '7', category: 'Compras' }))).toBe(2);
+  });
+
+  it('el Excel describe estado exacto y categoría solo donde existen', () => {
+    const base = { companies: [], processes: [], people: [] };
+    const sin = describeListFilters(f(), base).map((d) => d.label);
+    expect(sin).not.toContain('Estado exacto');
+    expect(sin).not.toContain('Categoría');
+    const con = describeListFilters(f({ state: '7', category: 'Compras' }), {
+      ...base,
+      states: REQUEST_STATE_OPTIONS,
+      categories: [{ value: 'Compras', label: 'Compras' }],
+    });
+    expect(con).toContainEqual({ label: 'Estado exacto', value: 'Devuelta' });
+    expect(con).toContainEqual({ label: 'Categoría', value: 'Compras' });
   });
 });

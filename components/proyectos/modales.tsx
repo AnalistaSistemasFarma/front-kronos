@@ -18,7 +18,8 @@ import {
 import { useDebouncedValue, useMediaQuery } from '@mantine/hooks';
 import { IconAlertCircle, IconMail, IconMessagePlus, IconPencil, IconRobot, IconSearch, IconTicket, IconUserPlus } from '@tabler/icons-react';
 import AgentAvatar from '../chat/AgentAvatar';
-import { MAX_LINK_SUMMARY_CHARS } from '../../lib/chat/projects-rules';
+import SgcSelect from '../sgc/SgcSelect';
+import { MAX_LINK_SUMMARY_CHARS, type ProjectProfile } from '../../lib/chat/projects-rules';
 
 /** Tope del nombre de una conversación (igual a MAX_TITULO_HILO_CHARS de lib/proyectos/hilos-rules.ts). */
 const MAX_TITULO_HILO = 120;
@@ -592,6 +593,9 @@ export function DesignarAgenteModal({
 }) {
   const [candidatos, setCandidatos] = useState<AgenteDesignableDto[] | null>(null);
   const [elegidos, setElegidos] = useState<string[]>([]);
+  // Proyecto creado SIN asistentes (2026-11-10): con el primero se escoge el perfil de conectores.
+  const [perfiles, setPerfiles] = useState<ProjectProfile[] | null>(null);
+  const [perfil, setPerfil] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -600,16 +604,36 @@ export function DesignarAgenteModal({
     setElegidos([]);
     setError(null);
     setCandidatos(null);
-    void apiGet<{ agents: AgenteDesignableDto[] }>(`/api/proyectos/${proyecto.idProject}/agentes`, 'No se pudo cargar la lista de asistentes.').then((r) => {
+    setPerfiles(null);
+    setPerfil(null);
+    void apiGet<{ agents: AgenteDesignableDto[]; eligePerfil?: boolean; profiles?: ProjectProfile[] }>(
+      `/api/proyectos/${proyecto.idProject}/agentes`,
+      'No se pudo cargar la lista de asistentes.'
+    ).then((r) => {
       setCandidatos(r.ok ? r.data.agents : []);
+      setPerfiles(r.ok && r.data.eligePerfil ? r.data.profiles ?? [] : null);
       if (!r.ok) setError(r.error);
     });
   }, [opened, proyecto.idProject]);
 
+  // Solo los perfiles que admiten TODOS los escogidos (igual que en «Nuevo proyecto»).
+  const comunes = (() => {
+    if (!perfiles || !candidatos) return [];
+    const marcados = candidatos.filter((a) => elegidos.includes(a.code));
+    if (marcados.length === 0) return [];
+    return perfiles.filter((p) => marcados.every((a) => a.profiles.includes(p.key)));
+  })();
+  const perfilValido = perfil !== null && comunes.some((p) => p.key === perfil) ? perfil : comunes[0]?.key ?? null;
+
   const designar = async () => {
     setEnviando(true);
     setError(null);
-    const r = await apiSend('POST', `/api/proyectos/${proyecto.idProject}/agentes`, { agentCodes: elegidos }, 'No se pudo agregar el asistente.');
+    const r = await apiSend(
+      'POST',
+      `/api/proyectos/${proyecto.idProject}/agentes`,
+      { agentCodes: elegidos, ...(perfiles ? { profile: perfilValido } : {}) },
+      'No se pudo agregar el asistente.'
+    );
     setEnviando(false);
     if (r.ok) onDesignados();
     else setError(r.error);
@@ -627,7 +651,7 @@ export function DesignarAgenteModal({
           <Button variant='default' onClick={onClose}>
             Cancelar
           </Button>
-          <Button onClick={() => void designar()} loading={enviando} disabled={elegidos.length === 0}>
+          <Button onClick={() => void designar()} loading={enviando} disabled={elegidos.length === 0 || (perfiles !== null && perfilValido === null)}>
             Agregar
           </Button>
         </>
@@ -635,7 +659,9 @@ export function DesignarAgenteModal({
     >
       <ErrorArriba error={error} onClose={() => setError(null)} />
       <Text size='xs' c='dimmed'>
-        Asistentes que usted tiene en {proyecto.company.companyName}, con proyectos habilitados y con el perfil «{proyecto.profile.label}».
+        {perfiles
+          ? `Asistentes que usted tiene en ${proyecto.company.companyName}, con proyectos habilitados. Con el primero se escogen los conectores del proyecto.`
+          : `Asistentes que usted tiene en ${proyecto.company.companyName}, con proyectos habilitados y con el perfil «${proyecto.profile.label}».`}
       </Text>
       {candidatos === null ? (
         <EsqueletoFilas n={3} />
@@ -659,6 +685,22 @@ export function DesignarAgenteModal({
             ))}
           </Stack>
         </Checkbox.Group>
+      )}
+      {perfiles && candidatos && candidatos.length > 0 && (
+        <SgcSelect
+          label='Conectores (perfil)'
+          description={
+            comunes.find((p) => p.key === perfilValido)?.description ??
+            'Escoja primero los asistentes: solo se ofrecen los perfiles que admiten todos. Quedan fijos en el proyecto.'
+          }
+          data={comunes.map((p) => ({ value: p.key, label: p.label }))}
+          value={perfilValido}
+          onChange={setPerfil}
+          allowDeselect={false}
+          disabled={comunes.length === 0}
+          required
+          data-testid='proyecto-agentes-perfil'
+        />
       )}
     </Marco>
   );
