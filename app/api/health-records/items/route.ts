@@ -2,6 +2,7 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { getCompanyEndpointForUser } from '../../../../lib/health-records/access';
+import { getCompanyCustomFields } from '../../../../lib/articles/fields';
 import { escapeOData } from '../../../../lib/health-records/records';
 import { sapGet, sapLogin, sapLogout, SapError } from '../../../../lib/sap/serviceLayer';
 
@@ -13,7 +14,9 @@ import { sapGet, sapLogin, sapLogout, SapError } from '../../../../lib/sap/servi
 interface SapItem {
   ItemCode: string;
   ItemName: string;
-  U_IT_CUM?: string;
+  // El campo CUM es un UDF cuyo nombre varia por empresa (ver COMPANY_CUSTOM_FIELDS),
+  // por eso se lee por clave dinamica y no como propiedad fija.
+  [key: string]: unknown;
 }
 
 export async function GET(request: NextRequest) {
@@ -42,18 +45,26 @@ export async function GET(request: NextRequest) {
     });
 
     try {
+      // El campo CUM se llama distinto en cada base SAP (U_IT_CUM, U_Cum, U_Lab_CUM...)
+      // y en algunas no existe. Pedir uno fijo en el $select hacia fallar toda la
+      // consulta en las empresas que no lo tienen; se resuelve el real por empresa.
+      const cumField = getCompanyCustomFields(company.companyName).find(
+        (f) => f.label === 'CUM'
+      )?.field;
+
       const e = escapeOData(q);
       const filter = encodeURIComponent(
         `(contains(ItemName,'${e}') or contains(ItemCode,'${e}')) and Frozen eq 'tNO' and InventoryItem eq 'tYES' and SalesItem eq 'tYES'`
       );
+      const select = ['ItemCode', 'ItemName', ...(cumField ? [cumField] : [])].join(',');
       const data = await sapGet<{ value?: SapItem[] }>(
         sap,
-        `Items?$filter=${filter}&$select=ItemCode,ItemName,U_IT_CUM&$top=15`
+        `Items?$filter=${filter}&$select=${select}&$top=15`
       );
       const items = (data.value ?? []).map((it) => ({
         itemCode: it.ItemCode,
         itemName: it.ItemName,
-        cum: it.U_IT_CUM ?? '',
+        cum: cumField ? String(it[cumField] ?? '') : '',
       }));
       return NextResponse.json({ items });
     } finally {
