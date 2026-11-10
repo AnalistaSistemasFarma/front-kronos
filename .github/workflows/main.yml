@@ -148,6 +148,8 @@ jobs:
           Write-Host "Cambios $old..$sha -> esquema=$schema mcp=$mcp dependencias=$deps"
           "schema=$schema" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "| Cambio | Valor |`n|---|---|`n| prisma/ | $schema |`n| mcp/ | $mcp |`n| dependencias | $deps |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          # git diff --quiet deja $LASTEXITCODE=1 cuando hay cambios; sin esto el paso falla (pase #924, 2026-11-10).
+          exit 0
 
       - name: Instalar, generar Prisma y compilar (front + MCP) en la carpeta inactiva
         if: steps.resolve.outputs.skip != 'true'
