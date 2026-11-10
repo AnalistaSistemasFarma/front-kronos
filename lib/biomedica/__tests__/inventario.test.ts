@@ -20,6 +20,7 @@ import {
   simularCargue,
 } from '../inventario';
 import { leerInventarioXlsx, textoCelda } from '../inventarioExcel';
+import { COLUMNAS_PLANTILLA, construirPlantillaInventario } from '../inventarioPlantilla';
 
 /**
  * INVENTARIO DE EQUIPOS BIOMÉDICOS (fase 2, 2026-11-10; reunión con Juan Mora y formato
@@ -306,7 +307,7 @@ describe('Inventario biomédico · lectura del Excel (formato FR-017)', () => {
         [4053677, 'BOMBA DE INFUSION', 'MINDRAY', 'BENEFUSION VP5', 'SK00706467', 'IIB', null, 'PISA FARMACEUTICA DE COLOMBIA SA', 'Bodega', null, 'Bogotá'],
         ['4058333', { richText: [{ text: 'BOMBA ' }, { text: 'DE INFUSION' }] }, 'MINDRAY', 'BENEFUSION EVP', 'SH2-1', 'IIB', null, 'SANSMED', 'Sansmed', null, 'Bogotá'],
         ['4058333', 'BOMBA', 'MINDRAY', 'X', null, 'IIB'],
-        ['4058333', null, 'MINDRAY', 'X', 'SIN-EQUIPO'],
+        ['4058333', null, 'MINDRAY', null, 'SIN-EQUIPO'],
         ['4058333', 'BOMBA', 'MINDRAY', 'X', 'sk00706467'],
         [],
       ])
@@ -316,7 +317,7 @@ describe('Inventario biomédico · lectura del Excel (formato FR-017)', () => {
       [3, '4053677', 'BOMBA DE INFUSION', 'SK00706467', null],
       [4, '4058333', 'BOMBA DE INFUSION', 'SH2-1', null],
     ]);
-    expect(out.errores.map((e) => e.motivo)).toEqual(['Sin serie.', 'Sin equipo.', 'Serie repetida (también en la fila 3).']);
+    expect(out.errores.map((e) => e.motivo)).toEqual(['Sin serie.', 'Sin equipo ni modelo.', 'Serie repetida (también en la fila 3).']);
   });
 
   it('rechaza lo que no es un Excel o no tiene los encabezados', async () => {
@@ -329,6 +330,42 @@ describe('Inventario biomédico · lectura del Excel (formato FR-017)', () => {
     expect(textoCelda({ formula: 'A1', result: 7 } as never)).toBe('7');
     expect(textoCelda(new Date('2026-10-01T00:00:00Z'))).toBe('2026-10-01');
     expect(textoCelda({ text: 'enlace', hyperlink: 'x' } as never)).toBe('enlace');
+  });
+});
+
+describe('Inventario biomédico · plantilla y creación masiva (solo serie + modelo)', () => {
+  it('la plantilla trae las columnas del FR-017 y el catálogo de modelos, y la lee el mismo lector del cargue', async () => {
+    const buf = await construirPlantillaInventario('ONELATAMPHARMA', { 'BENEFUSION VP5': { codigoInterno: '4053677', equipo: 'BOMBA DE INFUSION', marca: 'MINDRAY', clasificacionRiesgo: 'IIB', registroSanitario: null } });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
+    expect(wb.worksheets.map((w) => w.name)).toEqual(['Inventario', 'Instrucciones', 'Modelos']);
+    expect((wb.getWorksheet('Inventario')!.getRow(1).values as unknown[]).slice(1)).toEqual(COLUMNAS_PLANTILLA.map((c) => c.header));
+    expect((wb.getWorksheet('Modelos')!.getRow(2).values as unknown[]).slice(1)).toEqual(['BENEFUSION VP5', 'BOMBA DE INFUSION', '4053677', 'MINDRAY', 'IIB']);
+    // Se llena solo con serie, modelo y ubicación.
+    const ws = wb.getWorksheet('Inventario')!;
+    ws.addRow(['', '', '', 'BENEFUSION VP5', 'NUEVA-1', '', '', 'SANSMED', 'Sansmed', '', 'Bogotá']);
+    ws.addRow(['', '', '', 'BENEFUSION VP5', 'NUEVA-2', '', '', '', 'Bodega', '', 'Bogotá']);
+    ws.addRow(['', '', '', 'MODELO NUEVO', 'NUEVA-3']);
+    ws.addRow(['', 'MONITOR', 'MINDRAY', 'MODELO NUEVO', 'NUEVA-4']);
+    ws.addRow(['', '', '', '', 'NUEVA-5']);
+    const leido = await leerInventarioXlsx(new Uint8Array(await wb.xlsx.writeBuffer()));
+    expect(leido.filas.map((f) => f.datos.serie)).toEqual(['NUEVA-1', 'NUEVA-2', 'NUEVA-3', 'NUEVA-4']);
+    expect(leido.errores).toEqual([{ fila: 6, serie: 'NUEVA-5', motivo: 'Sin equipo ni modelo.' }]);
+
+    const db = await cargado(2);
+    const sim = await simularCargue(db as never, acceso, leido.filas, leido.errores);
+    expect(sim.nuevos.map((f) => [f.datos.serie, f.datos.equipo, f.datos.codigo_interno, f.datos.marca, f.datos.clasificacion_riesgo])).toEqual([
+      ['NUEVA-1', 'BOMBA DE INFUSION', '4053677', 'MINDRAY', 'IIB'],
+      ['NUEVA-2', 'BOMBA DE INFUSION', '4053677', 'MINDRAY', 'IIB'],
+      ['NUEVA-4', 'MONITOR', null, 'MINDRAY', null],
+    ]);
+    expect(sim.errores.map((e) => e.motivo)).toEqual(['Sin equipo ni modelo.', 'Sin equipo: el modelo MODELO NUEVO aún no está en el inventario, escriba el equipo.']);
+    expect(sim.leidas).toBe(5);
+    await expect(aplicarCargue(db as never, acceso, leido.filas, leido.errores, {}, actor)).rejects.toThrow(/con error/);
+    const buenas = leido.filas.filter((f) => f.datos.serie !== 'NUEVA-3');
+    expect(await aplicarCargue(db as never, acceso, buenas, [], {}, actor)).toMatchObject({ creados: 3 });
+    expect(db.st.equipos.find((e) => e.serie === 'NUEVA-1')).toMatchObject({ estado: 'distribuido', equipo: 'BOMBA DE INFUSION', codigo_interno: '4053677', cliente: 'SANSMED' });
+    expect(db.st.equipos.find((e) => e.serie === 'NUEVA-2')).toMatchObject({ estado: 'bodega' });
   });
 });
 
