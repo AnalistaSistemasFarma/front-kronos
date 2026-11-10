@@ -81,7 +81,11 @@ export function ListaConversaciones({
   return (
     <Stack gap={6}>
       {proyecto.capabilities.write && (
-        <Tooltip label='No tiene asignado ninguno de los asistentes del proyecto.' disabled={puedeAbrir} withArrow>
+        <Tooltip
+          label={proyecto.agents.length === 0 ? 'El proyecto no tiene asistentes. Agréguelos en «Detalles».' : 'No tiene asignado ninguno de los asistentes del proyecto.'}
+          disabled={puedeAbrir}
+          withArrow
+        >
           <div>
             <Button fullWidth variant='light' leftSection={<IconMessagePlus size={18} />} onClick={onNueva} disabled={!puedeAbrir} data-testid='proyecto-nueva-conversacion'>
               Nueva conversación
@@ -695,7 +699,10 @@ export function SeccionDetalles({
         />
         <Group gap={6} wrap='wrap'>
           <Text size='xs' c='dimmed'>
-            Empresa: {proyecto.company.companyName} · Conectores: {proyecto.profile.label} (fijos desde la creación)
+            Empresa: {proyecto.company.companyName} ·{' '}
+            {proyecto.agents.length === 0 && proyecto.conversationCount === 0
+              ? 'Conectores: se escogen al agregar el primer asistente'
+              : `Conectores: ${proyecto.profile.label} (fijos desde la creación)`}
           </Text>
         </Group>
         {puedeEditar && (
@@ -716,6 +723,11 @@ export function SeccionDetalles({
             </Button>
           )}
         </Group>
+        {proyecto.agents.length === 0 && (
+          <Text size='sm' c='dimmed' data-testid='proyecto-sin-asistentes'>
+            Este proyecto no tiene asistentes: es de las personas. Puede agregar uno o varios cuando los necesite.
+          </Text>
+        )}
         {proyecto.agents.map((a) => (
           <Group key={a.code} gap='sm' wrap='nowrap' className={css.fila} style={{ border: '1px solid var(--mantine-color-default-border)' }}>
             <AgentAvatar code={a.code} displayName={a.displayName} avatarUrl={a.avatarUrl} avatarVersion={a.avatarVersion} size={34} showStatus={false} withTooltip={false} />
@@ -727,7 +739,7 @@ export function SeccionDetalles({
                 {a.puedoEscribir ? a.handle ?? 'Disponible' : a.motivo ?? 'Solo lectura'}
               </Text>
             </div>
-            {proyecto.capabilities.manageAgents && !proyecto.archived && proyecto.agents.length > 1 && (
+            {proyecto.capabilities.manageAgents && !proyecto.archived && (
               <Tooltip label='Retirar del proyecto' withArrow>
                 <ActionIcon variant='subtle' color='red' aria-label={`Retirar a ${a.displayName}`} onClick={() => onRetirarAgente(a.code)}>
                   <IconTrash size={18} />
