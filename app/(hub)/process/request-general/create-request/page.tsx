@@ -106,6 +106,7 @@ import { filterByText, requestSearchParts } from '../../../../../lib/requests-ge
 import { RequestListFilters } from '../../../../../components/request-general/list/RequestListFilters';
 import {
   EMPTY_LIST_FILTERS,
+  REQUEST_STATE_OPTIONS,
   buildListOptions,
   countByStatusGroup,
   describeListFilters,
@@ -307,6 +308,7 @@ function RequestBoard() {
         row: {
           requestId: t.id,
           group: statusGroupOf(t.id_status_case, t.status),
+          statusId: t.id_status_case,
           companyId: String(t.id_company ?? ''),
           company: t.company,
           process: t.process,
@@ -316,7 +318,11 @@ function RequestBoard() {
       })),
     [tickets]
   );
-  const listOptions = useMemo(() => buildListOptions(ticketRows.map((x) => x.row)), [ticketRows]);
+  // «Estado» exacto (Abierto, Cancelado, Resuelto, Devuelta): el filtro que había antes del panel.
+  const listOptions = useMemo(
+    () => ({ ...buildListOptions(ticketRows.map((x) => x.row)), states: REQUEST_STATE_OPTIONS }),
+    [ticketRows]
+  );
   // Búsqueda + filtros del panel; el estado se aplica aparte para que las tarjetas no cambien.
   const matchingRows = useMemo(
     () =>

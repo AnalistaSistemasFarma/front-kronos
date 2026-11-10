@@ -45,6 +45,7 @@ import IosSearchField from '../../../../../components/ui/IosSearchField';
 import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
 import {
   EMPTY_LIST_FILTERS,
+  REQUEST_STATE_OPTIONS,
   type ListFilters,
   type ListOptions,
   type StatusCounts,
@@ -90,6 +91,7 @@ interface ProcessCategoriesNew {
 
 interface ConsultResponse {
   companies: CompanyData[];
+  categoriesNew?: { category: string }[];
   assignedUsers: { id: string; name: string }[];
   processCategoriesNew: ProcessCategoriesNew[];
 }
@@ -110,6 +112,7 @@ function RequestGeneralPage() {
 
   const [companies, setCompanies] = useState<{ value: string; label: string }[]>([]);
   const [processes, setProcesses] = useState<{ value: string; label: string }[]>([]);
+  const [categories, setCategories] = useState<{ value: string; label: string }[]>([]);
   const [assignedUsers, setAssignedUsers] = useState<{ value: string; label: string }[]>([]);
 
   // Filtros iguales a los de Mis solicitudes; aquí la lista se pagina en el servidor, así que
@@ -132,9 +135,10 @@ function RequestGeneralPage() {
   const totalPages = Math.max(1, Math.ceil(totalTickets / ITEMS_PER_PAGE));
 
   // Opciones de los filtros: salen de los catálogos cargados (la lista llega por páginas).
+  // «Estado» exacto y «Categoría»: los filtros que había antes del panel.
   const listOptions = useMemo<ListOptions>(
-    () => ({ companies, processes, people: assignedUsers }),
-    [companies, processes, assignedUsers]
+    () => ({ companies, processes, people: assignedUsers, categories, states: REQUEST_STATE_OPTIONS }),
+    [companies, processes, assignedUsers, categories]
   );
 
   const clearListFilters = () => {
@@ -194,13 +198,15 @@ function RequestGeneralPage() {
       const params = new URLSearchParams();
       params.append('page', String(page));
       params.append('pageSize', String(ITEMS_PER_PAGE));
-      // El estado viaja como grupo (all | pending | done | cancelled).
-      params.append('status', f.status);
+      // El estado viaja como grupo (all | pending | done | cancelled) o, si se eligió un estado
+      // exacto, como su id (la API acepta los dos).
+      params.append('status', f.state || f.status);
       if (f.company) params.append('company', f.company);
       if (f.date_from) params.append('date_from', f.date_from);
       if (f.date_to) params.append('date_to', f.date_to);
       if (f.person) params.append('assigned_to', f.person);
       if (f.process) params.append('process', f.process);
+      if (f.category) params.append('category', f.category);
       const idDigits = f.id.replace(/\D/g, '');
       if (idDigits) params.append('id', idDigits);
       if (search) params.append('search', search);
@@ -253,9 +259,9 @@ function RequestGeneralPage() {
     const onlyStatusChanged =
       prev !== null &&
       prev.search === query.search &&
-      prev.filters.status !== query.filters.status &&
+      (prev.filters.status !== query.filters.status || prev.filters.state !== query.filters.state) &&
       (Object.keys(query.filters) as Array<keyof ListFilters>).every(
-        (k) => k === 'status' || prev.filters[k] === query.filters[k]
+        (k) => k === 'status' || k === 'state' || prev.filters[k] === query.filters[k]
       );
     const first = !loadedOnceRef.current;
     const timer = window.setTimeout(
@@ -291,6 +297,11 @@ function RequestGeneralPage() {
         setProcesses(
           [...new Set((data.processCategoriesNew ?? []).map((p) => String(p.process)))]
             .map((p) => ({ value: p, label: p }))
+            .sort((a, b) => a.label.localeCompare(b.label, 'es'))
+        );
+        setCategories(
+          [...new Set((data.categoriesNew ?? []).map((c) => String(c.category)))]
+            .map((c) => ({ value: c, label: c }))
             .sort((a, b) => a.label.localeCompare(b.label, 'es'))
         );
         setAssignedUsers(
