@@ -42,9 +42,39 @@ export function statusGroupOf(
   return 'pending';
 }
 
+/**
+ * Estado EXACTO (status_case), el filtro «Estado» que había antes del panel nuevo: refina el
+ * estado general de las tarjetas (p. ej. «Devuelta» dentro de Pendientes). Mismas opciones que
+ * tenía cada pantalla.
+ */
+export const REQUEST_STATE_OPTIONS: Option[] = [
+  { value: '1', label: 'Abierto' },
+  { value: '3', label: 'Cancelado' },
+  { value: '2', label: 'Resuelto' },
+  { value: '7', label: 'Devuelta' },
+];
+
+/** Asignadas mezcla solicitudes y tareas: «Sin empezar» solo existe en tareas y «Devuelta» en solicitudes. */
+export const ASSIGNED_STATE_OPTIONS: Option[] = [
+  { value: '4', label: 'Sin empezar (solo tareas)' },
+  { value: '1', label: 'Abierto' },
+  { value: '3', label: 'Cancelado' },
+  { value: '2', label: 'Resuelto' },
+  { value: '7', label: 'Devuelta (solo solicitudes)' },
+];
+
+/** Grupo general (tarjeta) al que pertenece un estado exacto. */
+export function stateGroup(state: string): Exclude<StatusGroup, 'all'> {
+  return statusGroupOf(Number(state));
+}
+
 export type ListFilters = {
   id: string;
   status: StatusGroup;
+  /** Estado exacto (id de status_case); '' = cualquiera. */
+  state: string;
+  /** Categoría (nombre); solo en las pantallas que la muestran. */
+  category: string;
   company: string;
   process: string;
   person: string;
@@ -55,6 +85,8 @@ export type ListFilters = {
 export const EMPTY_LIST_FILTERS: ListFilters = {
   id: '',
   status: 'all',
+  state: '',
+  category: '',
   company: '',
   process: '',
   person: '',
@@ -67,6 +99,10 @@ export type ListRow = {
   /** ID de la solicitud (en una tarea, el de su solicitud). */
   requestId: number | string;
   group: Exclude<StatusGroup, 'all'>;
+  /** Id de status_case de la fila (estado exacto). */
+  statusId?: number | string | null;
+  /** Categoría de la solicitud. */
+  category?: string | null;
   companyId: string;
   company: string;
   process: string;
@@ -104,6 +140,8 @@ export function matchesListFilters(
   const id = filters.id.trim().replace(/^#/, '');
   if (id && String(row.requestId) !== id) return false;
   if (!ignoreStatus && filters.status !== 'all' && row.group !== filters.status) return false;
+  if (!ignoreStatus && filters.state && String(row.statusId ?? '') !== filters.state) return false;
+  if (filters.category && (row.category ?? '') !== filters.category) return false;
   if (filters.company && row.companyId !== filters.company) return false;
   if (filters.process && row.process !== filters.process) return false;
   if (filters.person && !row.people.includes(filters.person)) return false;
@@ -128,7 +166,15 @@ export function countByStatusGroup(rows: Array<Pick<ListRow, 'group'>>): StatusC
 }
 
 export type Option = { value: string; label: string };
-export type ListOptions = { companies: Option[]; processes: Option[]; people: Option[] };
+export type ListOptions = {
+  companies: Option[];
+  processes: Option[];
+  people: Option[];
+  /** Si viene, el panel muestra «Categoría». */
+  categories?: Option[];
+  /** Si viene, el panel muestra «Estado» (estado exacto). */
+  states?: Option[];
+};
 
 const byLabel = (a: Option, b: Option) => a.label.localeCompare(b.label, 'es');
 
@@ -149,18 +195,21 @@ export function buildListOptions(rows: ListRow[]): ListOptions {
   };
 }
 
-/** Cuántos filtros del panel están puestos (el estado se maneja con las tarjetas). */
+/** Cuántos filtros del panel están puestos (el estado general se maneja con las tarjetas). */
 export function activeFilterCount(filters: ListFilters): number {
-  return (['id', 'company', 'process', 'person', 'date_from', 'date_to'] as const).filter((k) =>
-    filters[k].trim()
-  ).length;
+  return (
+    ['id', 'state', 'category', 'company', 'process', 'person', 'date_from', 'date_to'] as const
+  ).filter((k) => filters[k].trim()).length;
 }
 
 /** Resumen para la hoja de filtros del Excel. */
 export function describeListFilters(filters: ListFilters, options: ListOptions): { label: string; value: string }[] {
   const companyLabel = options.companies.find((c) => c.value === filters.company)?.label;
+  const stateLabel = options.states?.find((s) => s.value === filters.state)?.label;
   return [
     { label: 'Estado', value: STATUS_GROUP_LABEL[filters.status] },
+    ...(options.states ? [{ label: 'Estado exacto', value: stateLabel || 'Todos' }] : []),
+    ...(options.categories ? [{ label: 'Categoría', value: filters.category || 'Todas' }] : []),
     { label: 'Empresa', value: companyLabel || 'Todas' },
     { label: 'Proceso', value: filters.process || 'Todos' },
     { label: 'Persona asignada', value: filters.person || 'Todas' },
