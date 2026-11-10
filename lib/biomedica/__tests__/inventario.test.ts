@@ -256,6 +256,7 @@ describe('Inventario biomédico · alta, edición (control de cambios), artícul
     const r = await resumenInventario(db as never, acceso);
     expect(r).toMatchObject({ total: 5, porEstado: { bodega: 3, distribuido: 2, faltante: 0, danado: 0 }, bodega: { cliente: 'PISA FARMACEUTICA DE COLOMBIA SA', ciudad: 'Bogotá' } });
     expect(r.clientes).toEqual(['PISA FARMACEUTICA DE COLOMBIA SA', 'SANSMED']);
+    expect(r.modelos).toEqual(['BENEFUSION VP5']);
     await expect(historialEquipo(db as never, acceso, 99999)).rejects.toMatchObject({ status: 404 });
   });
 
