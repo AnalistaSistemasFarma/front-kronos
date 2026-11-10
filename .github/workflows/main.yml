@@ -174,6 +174,22 @@ jobs:
             throw "Verificacion de esquema con codigo $rc. No se cambia de version: la activa sigue atendiendo. Aplique los SQL del pase y relance (workflow_dispatch)."
           }
 
+      - name: Verificar que la BD tiene las tablas y columnas que el codigo usa sin Prisma (siempre)
+        if: steps.resolve.outputs.skip != 'true'
+        shell: powershell
+        env:
+          MODO: ${{ inputs.verificar_esquema || 'estricto' }}
+        run: |
+          # prisma/manual/objetos-requeridos.json: task_kind, task_sap_action, sales_*... (bloque B, 2026-11-05).
+          # Solo lectura (OBJECT_ID / COL_LENGTH). Si falta algo, no hay cambio de color.
+          $dir = "${{ steps.resolve.outputs.dir }}"
+          node (Join-Path $dir 'scripts\bluegreen\verificar-objetos-sql.cjs') $dir
+          $rc = $LASTEXITCODE
+          if ($rc -ne 0) {
+            if ($env:MODO -eq 'aviso') { Write-Host "::warning::Verificacion de objetos SQL con codigo $rc (modo aviso: se sigue)."; exit 0 }
+            throw "Faltan tablas o columnas en la BD (codigo $rc). No se cambia de version: la activa sigue atendiendo. Aplique los SQL del pase y relance (workflow_dispatch)."
+          }
+
   switch:
     name: Cambio azul/verde (sin caida)
     needs: build
