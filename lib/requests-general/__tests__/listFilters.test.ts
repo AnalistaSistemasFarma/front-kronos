@@ -28,6 +28,9 @@ describe('estado general (solicitudes y tareas)', () => {
     expect(statusGroupOf(1, 'Abierto')).toBe('pending');
     expect(statusGroupOf(4, 'Sin empezar')).toBe('pending');
     expect(statusGroupOf(7, 'Devuelta')).toBe('pending');
+    // Compras/Ventas: igual que el grupo `pending` de /api/requests-general/general-requests.
+    expect(statusGroupOf(5, 'Por Autorizar')).toBe('pending');
+    expect(statusGroupOf(6, 'En Borrador')).toBe('pending');
   });
 
   it('resuelto es completada y cancelado es cancelada', () => {
