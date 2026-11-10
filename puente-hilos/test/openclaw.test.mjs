@@ -418,6 +418,49 @@ test('turno openclaw cortado por tiempo: mensaje de corte, sesión conservada; e
   assert.ok(s2.llamadas.some((l) => l[0] === 'confirmar'));
 });
 
+test('turno openclaw con error del asistente: UN reintento automático con nota (sin --watch); credencial: sin reintento', async () => {
+  const s = synerlinkFalso();
+  const mensajes = [];
+  let n = 0;
+  const { atender } = crearAtenderOpenclaw({
+    cfg: cfgOc(tmp(), { timeoutTurnoMs: 600_000, reintentoEsperaMs: 0 }), synerlink: s, estado: new Estado(tmp()),
+    correr: async (op) => {
+      mensajes.push(readFileSync(op.args[op.args.indexOf('--message-file') + 1], 'utf8'));
+      n += 1;
+      if (n === 1) return { codigo: 1, abortado: null, stderr: 'GatewayClientRequestError: AbortError: agent run aborted: code=OPENCLAW_DIRECT_ABORT', salida: null };
+      return { codigo: 0, abortado: null, stderr: '', salida: { status: 'ok', result: { payloads: [{ text: 'Listo: el CI está en verde.' }], meta: {} } } };
+    },
+  });
+  await atender('48', [{ id: 1, body: 'revise el PR', author: { name: 'N' } }]);
+  assert.equal(n, 2, 'reintenta una vez');
+  assert.doesNotMatch(mensajes[0], /NOTA DEL PUENTE/);
+  assert.match(mensajes[1], /NOTA DEL PUENTE \(reintento automático\)/);
+  assert.match(mensajes[1], /--watch/);
+  assert.match(mensajes[1], /revise el PR/, 'el pedido original va otra vez');
+  assert.ok(s.llamadas.some((l) => l[0] === 'avisar' && /Reintento automáticamente/.test(l[2])));
+  assert.match(s.llamadas.find((l) => l[0] === 'responder')[2], /CI está en verde/);
+
+  const s2 = synerlinkFalso();
+  let n2 = 0;
+  const { atender: a2 } = crearAtenderOpenclaw({
+    cfg: cfgOc(tmp(), { timeoutTurnoMs: 600_000, reintentoEsperaMs: 0 }), synerlink: s2, estado: new Estado(tmp()),
+    correr: async () => { n2 += 1; return { codigo: 1, abortado: null, stderr: 'HTTP 401 authentication_error', salida: null }; },
+  });
+  await a2('48', [{ id: 2, body: 'x', author: { name: 'N' } }]);
+  assert.equal(n2, 1, 'credencial: no reintenta');
+  assert.match(s2.llamadas.find((l) => l[0] === 'responder')[2], /error del asistente/);
+
+  const s3 = synerlinkFalso();
+  let n3 = 0;
+  const { atender: a3 } = crearAtenderOpenclaw({
+    cfg: cfgOc(tmp(), { timeoutTurnoMs: 600_000, reintentoEsperaMs: 0 }), synerlink: s3, estado: new Estado(tmp()),
+    correr: async () => { n3 += 1; return { codigo: 1, abortado: null, stderr: 'gateway closed', salida: null }; },
+  });
+  await a3('48', [{ id: 3, body: 'x', author: { name: 'N' } }]);
+  assert.equal(n3, 2, 'solo UNA vez');
+  assert.match(s3.llamadas.find((l) => l[0] === 'responder')[2], /reintentarlo automáticamente/);
+});
+
 test('turno openclaw que cede el turno: espera el resultado dentro del mismo turno', async () => {
   const dir = tmp();
   const s = synerlinkFalso();
