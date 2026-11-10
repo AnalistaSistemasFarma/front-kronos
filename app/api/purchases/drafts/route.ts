@@ -12,6 +12,7 @@ import {
 import { resolveRequester } from '../../../../lib/purchases/requester';
 import { prisma } from '../../../../lib/prisma';
 import { sapLookups, validateLinesInSap } from '../../../../lib/purchases/validateSap';
+import { refreshRequestTexts } from '../../../../lib/purchases/authorization';
 import { sapGet, sapLogin, sapLogout, sapPatch, sapPost, SapError } from '../../../../lib/sap/serviceLayer';
 
 /**
@@ -135,6 +136,10 @@ export async function PATCH(request: NextRequest) {
       await sapPatch(sap, `Drafts(${docEntry})`, buildUpdatePayload(header, lines), true, {
         ifMatch: current['odata.etag'] as string | undefined,
       });
+      // El asunto de la solicitud se arma con las líneas: se actualiza al editar.
+      await refreshRequestTexts(sap, companyId, docEntry).catch((e) =>
+        console.error('Compras: no se pudo actualizar el asunto de la solicitud:', e)
+      );
       return NextResponse.json({ ok: true, docEntry });
     } catch (error) {
       if (error instanceof SapError && error.isPreconditionFailed) {

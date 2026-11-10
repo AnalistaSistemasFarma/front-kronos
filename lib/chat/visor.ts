@@ -136,9 +136,20 @@ export function tipoMedioEnLinea(contentType: string | null | undefined, fileNam
  * proyecto): ese archivo se queda sin vista previa y solo ofrece Descargar.
  */
 export function urlVistaAdjunto(downloadUrl: string | null | undefined, como?: 'pdf'): string | null {
+  const sufijo = como ? `?como=${como}` : '';
   const m = /^\/api\/chat\/attachments\/(\d+)$/.exec(downloadUrl ?? '');
-  if (!m) return null;
-  return `/api/chat/attachments/${m[1]}/vista${como ? `?como=${como}` : ''}`;
+  if (m) return `/api/chat/attachments/${m[1]}/vista${sufijo}`;
+  // Archivos de un proyecto (2026-11-05): mismo visor, puerta del proyecto.
+  const p = /^\/api\/proyectos\/(\d+)\/archivos\/(\d+)$/.exec(downloadUrl ?? '');
+  if (p) return `/api/proyectos/${p[1]}/archivos/${p[2]}/vista${sufijo}`;
+  return null;
+}
+
+/** URL de «Reenviar por el chat» del mismo archivo (adjunto del chat o archivo de proyecto). */
+export function urlReenviarAdjunto(downloadUrl: string | null | undefined, id: number): string {
+  const p = /^\/api\/proyectos\/(\d+)\/archivos\/(\d+)$/.exec(downloadUrl ?? '');
+  if (p) return `/api/proyectos/${p[1]}/archivos/${p[2]}/reenviar`;
+  return `/api/chat/attachments/${id}/reenviar`;
 }
 
 /** Tope del texto que se muestra (el resto se avisa como recortado). */

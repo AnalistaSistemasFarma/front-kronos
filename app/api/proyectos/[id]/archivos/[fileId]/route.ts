@@ -5,6 +5,8 @@ import { buildContentDisposition, safeDownloadContentType } from '../../../../..
 import { downloadChatAttachment } from '../../../../../../lib/chat/attachmentStorage';
 import { archivedProject, guardProject } from '../../../../../../lib/chat/projects-guard';
 import { canRemoveContribution } from '../../../../../../lib/chat/projects-rules';
+import { CarpetaInvalida, normalizarCarpeta } from '../../../../../../lib/proyectos/carpetas';
+import { asegurarCarpetas } from '../../../../../../lib/proyectos/carpetas-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +16,7 @@ export const dynamic = 'force-dynamic';
  *          OneDrive nunca sale al navegador.
  *   DELETE quita la referencia (el dueño, o el editor que lo cargó). El archivo de OneDrive queda,
  *          como en el resto del chat.
+ *   PATCH  { folder } lo MUEVE a otra carpeta (2026-11-06; vacío = la raíz). Los mismos que lo quitan.
  */
 async function archivoDelProyecto(idProject: number, rawFileId: string) {
   const idFile = Number.parseInt(rawFileId, 10);
@@ -83,5 +86,39 @@ export async function DELETE(
     return jsonNoStore({ removed: true });
   } catch (error) {
     return serverError('DELETE /api/proyectos/[id]/archivos/[fileId]', error);
+  }
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string; fileId: string }> }
+) {
+  try {
+    const { id, fileId } = await params;
+    const guard = await guardProject(id);
+    if ('response' in guard) return guard.response;
+    if (guard.project.archived) return archivedProject();
+
+    const archivo = await archivoDelProyecto(guard.project.idProject, fileId);
+    if (!archivo) return noEncontrado();
+    if (!canRemoveContribution(guard.project.role, guard.user.id, archivo.uploaded_by)) {
+      return forbidden('Solo el dueño del proyecto o quien cargó el archivo lo puede mover.');
+    }
+    const body = (await request.json().catch(() => null)) as { folder?: unknown } | null;
+    let folder: string | null;
+    try {
+      folder = normalizarCarpeta(body?.folder ?? null);
+    } catch (error) {
+      if (error instanceof CarpetaInvalida) return jsonNoStore({ error: error.message }, { status: 400 });
+      throw error;
+    }
+    await asegurarCarpetas(prisma, guard.project.idProject, [folder], guard.user.id);
+    await prisma.$transaction([
+      prisma.chatProjectFile.update({ where: { id_project_file: archivo.id_project_file }, data: { folder_path: folder } }),
+      prisma.chatProject.update({ where: { id_project: guard.project.idProject }, data: { updated_at: new Date() } }),
+    ]);
+    return jsonNoStore({ moved: true, folder });
+  } catch (error) {
+    return serverError('PATCH /api/proyectos/[id]/archivos/[fileId]', error);
   }
 }

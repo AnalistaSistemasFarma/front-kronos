@@ -109,9 +109,10 @@ export function topesEfectivos(equipo, cfg) {
     profundidad: TOPES_DEFECTO.profundidad,
     maxTurnosSubagente: cfg?.subagentesMaxTurnos ?? TOPES_DEFECTO.maxTurnosSubagente,
     // Por PEDIDO (`--max-budget-usd`): el menor entre el general del puente y el del equipo.
-    presupuestoUsd: Math.min(
-      ...[cfg?.presupuestoUsd, cfg?.subagentesPresupuestoUsd ?? TOPES_DEFECTO.presupuestoUsd].filter((x) => typeof x === 'number' && x > 0)
-    ),
+    // Con HILOS_MAX_BUDGET_USD=0/off (cfg.sinTopeGasto) no hay tope de gasto, ni con equipo.
+    presupuestoUsd: cfg?.sinTopeGasto
+      ? null
+      : Math.min(...[cfg?.presupuestoUsd, cfg?.subagentesPresupuestoUsd ?? TOPES_DEFECTO.presupuestoUsd].filter((x) => typeof x === 'number' && x > 0)),
   };
 }
 

@@ -22,6 +22,13 @@ ORION_TENANT_MAP={"1":"farmalogica","2":"ryan","3":"farmalogica-1","5":"unidosis
 
 # Opcional: URL directa al perfil de firma embebido (por defecto vía API embed/signature-url)
 ORION_SIGNATURE_PROFILE_URL=
+
+# Opcional: pantalla "Mi huella" de Orion (por defecto {ORION_EMBED_ORIGIN}/dashboard/my-fingerprint)
+ORION_FINGERPRINT_PROFILE_URL=
+
+# Quién envía el correo de turno a los firmantes: orion (defecto, Graph) | synerlink (SAPSEND) | both
+# Con "synerlink" Orion recibe notifyByEmail:false y Kronos envía el enlace del turno por SAPSEND.
+ORION_SIGNER_EMAIL_SENDER=orion
 ```
 
 En Orion debe existir:

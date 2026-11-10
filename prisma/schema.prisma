@@ -760,6 +760,8 @@ model Agent {
   projectDesignations ChatProjectAgent[]
   // Configuración de «Proyectos» por empresa (2026-10-20).
   projectConfigs      ChatProjectAgentConfig[]
+  mesasModeradas    ChatProjectMesa[]       @relation("MesaModerador")
+  mesasParticipante ChatProjectMesaAgente[] @relation("MesaParticipante")
 
   @@unique([code])
   @@map("agent")
@@ -848,6 +850,7 @@ model ChatConversation {
   turnUsage    ChatAgentTurnUsage[]
   /// Solo en 'project': hasta dónde leyó cada miembro (icono de la cabecera).
   projectReads ChatProjectRead[]
+  mesa ChatProjectMesa?
 
   @@index([id_user, archived, last_message_at(sort: Desc)])
   @@index([id_agent])
@@ -952,6 +955,7 @@ model ChatProject {
   creator       User                  @relation("ChatProjectCreator", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   members       ChatProjectMember[]
   files         ChatProjectFile[]
+  folders       ChatProjectFolder[]
   conversations ChatConversation[]
   agents        ChatProjectAgent[]
   emails        ChatProjectEmail[]
@@ -965,6 +969,8 @@ model ChatProject {
   // Permisos de los agentes (2026-10-20): nivel de código, repos y autorizadores de pases.
   agentPolicy   ChatProjectAgentPolicy?
   policyRepos   ChatProjectAgentPolicyRepo[]
+  mesas ChatProjectMesa[]
+  matrices ChatProjectMatrix[]
 
   @@index([id_agent, archived])
   @@index([id_company])
@@ -1097,12 +1103,33 @@ model ChatProjectFile {
   /// Sin FK a propósito: la conversación ya cae en cascada con el proyecto.
   uploaded_by_agent Int?
   id_conversation   Int?
+  /// Carpeta del archivo dentro del proyecto (2026-11-06), p. ej. «Autorizaciones INVIMA/PISA».
+  /// NULL = la raíz. Las carpetas viven en chat_project_folder (también las vacías).
+  folder_path       String?  @db.NVarChar(400)
   created_at        DateTime @default(now())
 
   project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
 
   @@index([id_project])
+  @@index([id_project, folder_path])
   @@map("chat_project_file")
+  @@schema("dbo")
+}
+
+/// CARPETA de los archivos de un proyecto (2026-11-06, reunión con Juan Mora: repositorio de
+/// documentación regulatoria por carpetas). La ruta completa («A/B/C») es única por proyecto;
+/// las carpetas padre existen como filas propias. Una carpeta solo se quita vacía.
+model ChatProjectFolder {
+  id_project_folder Int      @id @default(autoincrement())
+  id_project        Int
+  path              String   @db.NVarChar(400)
+  created_by        String?  @db.NVarChar(1000)
+  created_at        DateTime @default(now())
+
+  project ChatProject @relation(fields: [id_project], references: [id_project], onDelete: Cascade)
+
+  @@unique([id_project, path])
+  @@map("chat_project_folder")
   @@schema("dbo")
 }
 
@@ -1123,6 +1150,166 @@ model ChatProjectAgent {
   @@unique([id_project, id_agent], map: "chat_project_agent_project_agent")
   @@index([id_agent])
   @@map("chat_project_agent")
+  @@schema("dbo")
+}
+
+/// MATRIZ de un proyecto (2026-11-05, docs/proyectos-matrices-dashboards.md): un Excel o
+/// CSV subido al proyecto, leído en el servidor y guardado como tabla para la grilla y los
+/// agentes. Permisos: los del proyecto (decisión de Nicolás Rivera).
+model ChatProjectMatrix {
+  id_matrix         Int      @id @default(autoincrement())
+  id_project        Int
+  name              String   @db.NVarChar(150)
+  description       String?  @db.NVarChar(1000)
+  id_version_actual Int?
+  archived          Boolean  @default(false)
+  created_by        String?  @db.NVarChar(1000)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @default(now())
+
+  project   ChatProject               @relation(fields: [id_project], references: [id_project], onDelete: NoAction, onUpdate: NoAction, map: "chat_project_matrix_project_fkey")
+  versiones ChatProjectMatrixVersion[]
+
+  @@index([id_project, archived], map: "chat_project_matrix_project_idx")
+  @@map("chat_project_matrix")
+  @@schema("dbo")
+}
+
+/// Cada archivo subido de una matriz (historial de versiones).
+model ChatProjectMatrixVersion {
+  id_version  Int      @id @default(autoincrement())
+  id_matrix   Int
+  version_no  Int
+  file_name   String   @db.NVarChar(400)
+  size_bytes  Int?
+  uploaded_by String?  @db.NVarChar(1000)
+  /// Si la subió un AGENTE (NULL = persona).
+  id_agent    Int?
+  /// Qué cambió frente a la versión anterior, en palabras.
+  summary     String?  @db.NVarChar(1000)
+  created_at  DateTime @default(now())
+
+  matrix ChatProjectMatrix        @relation(fields: [id_matrix], references: [id_matrix], onDelete: Cascade, map: "chat_project_matrix_version_matrix_fkey")
+  hojas  ChatProjectMatrixSheet[]
+
+  @@unique([id_matrix, version_no], map: "chat_project_matrix_version_no_key")
+  @@map("chat_project_matrix_version")
+  @@schema("dbo")
+}
+
+/// Hoja de una versión: columnas (JSON con nombre y tipo) y número de filas.
+model ChatProjectMatrixSheet {
+  id_sheet     Int    @id @default(autoincrement())
+  id_version   Int
+  sheet_index  Int
+  name         String @db.NVarChar(150)
+  /// Fila del Excel (1 = primera) donde están los encabezados.
+  header_row   Int
+  columns_json String @db.NVarChar(Max)
+  row_count    Int
+
+  version ChatProjectMatrixVersion @relation(fields: [id_version], references: [id_version], onDelete: Cascade, map: "chat_project_matrix_sheet_version_fkey")
+  bloques ChatProjectMatrixChunk[]
+
+  @@unique([id_version, sheet_index], map: "chat_project_matrix_sheet_version_key")
+  @@map("chat_project_matrix_sheet")
+  @@schema("dbo")
+}
+
+/// Filas de una hoja en bloques JSON (máx. 1000 filas por bloque).
+model ChatProjectMatrixChunk {
+  id_sheet  Int
+  chunk_no  Int
+  rows_json String @db.NVarChar(Max)
+
+  hoja ChatProjectMatrixSheet @relation(fields: [id_sheet], references: [id_sheet], onDelete: Cascade, map: "chat_project_matrix_chunk_sheet_fkey")
+
+  @@id([id_sheet, chunk_no], map: "chat_project_matrix_chunk_pkey")
+  @@map("chat_project_matrix_chunk")
+  @@schema("dbo")
+}
+
+/// MESA DE DISCUSIÓN de un proyecto (2026-11-04, docs/proyectos-mesas-discusion.md):
+/// una conversación de proyecto donde varios agentes discuten un tema POR TURNOS.
+/// Solo el motor (lib/proyectos/mesas.ts) reparte los turnos; el principal de la
+/// conversación es el moderador.
+model ChatProjectMesa {
+  id_mesa            Int       @id @default(autoincrement())
+  id_project         Int
+  id_conversation    Int       @unique(map: "chat_project_mesa_conversation_key")
+  tema               String    @db.NVarChar(2000)
+  /// 'activa' | 'pausada' | 'cerrada' (CHECK en la base).
+  estado             String    @default("activa") @db.NVarChar(20)
+  /// 'manual' | 'sin_aporte' (CHECK en la base). NULL si no está pausada.
+  motivo_pausa       String?   @db.NVarChar(20)
+  id_agent_moderador Int
+  ritmo_min          Int
+  tope_dia           Int
+  sintesis_cada      Int
+  /// Minutos desde la medianoche, hora de Colombia.
+  horario_desde      Int
+  horario_hasta      Int
+  solo_habiles       Boolean
+  ronda              Int       @default(0)
+  /// Índice del participante de turno; = nº de participantes en la síntesis; -1 entre rondas.
+  turno_idx          Int       @default(-1)
+  turno_desde        DateTime?
+  id_message_turno   Int?
+  proximo_turno_at   DateTime?
+  turnos_hoy         Int       @default(0)
+  /// Día (AAAA-MM-DD, COT) del contador `turnos_hoy`.
+  turnos_dia         String?   @db.NVarChar(10)
+  aportes_ronda      Int       @default(0)
+  created_by         String    @db.NVarChar(1000)
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @default(now())
+
+  project      ChatProject             @relation(fields: [id_project], references: [id_project], onDelete: NoAction, onUpdate: NoAction, map: "chat_project_mesa_project_fkey")
+  conversation ChatConversation        @relation(fields: [id_conversation], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "chat_project_mesa_conversation_fkey")
+  moderador    Agent                   @relation("MesaModerador", fields: [id_agent_moderador], references: [id_agent], onDelete: NoAction, onUpdate: NoAction, map: "chat_project_mesa_moderador_fkey")
+  agentes      ChatProjectMesaAgente[]
+  eventos      ChatProjectMesaEvento[]
+
+  @@index([estado, proximo_turno_at], map: "chat_project_mesa_motor_idx")
+  @@index([id_project], map: "chat_project_mesa_project_idx")
+  @@map("chat_project_mesa")
+  @@schema("dbo")
+}
+
+/// Participante de una mesa, con su rol y su orden de turno.
+model ChatProjectMesaAgente {
+  id_mesa_agente Int    @id @default(autoincrement())
+  id_mesa        Int
+  id_agent       Int
+  rol            String @db.NVarChar(80)
+  orden          Int
+
+  mesa  ChatProjectMesa @relation(fields: [id_mesa], references: [id_mesa], onDelete: Cascade, map: "chat_project_mesa_agente_mesa_fkey")
+  agent Agent           @relation("MesaParticipante", fields: [id_agent], references: [id_agent], onDelete: NoAction, onUpdate: NoAction, map: "chat_project_mesa_agente_agent_fkey")
+
+  @@unique([id_mesa, id_agent], map: "chat_project_mesa_agente_mesa_agent_key")
+  @@map("chat_project_mesa_agente")
+  @@schema("dbo")
+}
+
+/// Registro INMUTABLE (trigger) de lo que pasa en una mesa: lo ve el operador en
+/// el panel y lo lee la auditoría.
+model ChatProjectMesaEvento {
+  id_evento  Int      @id @default(autoincrement())
+  id_mesa    Int
+  /// creada | turno | respuesta | vencido | tope | pausada | reanudada | cerrada | ronda_ahora | reglas
+  tipo       String   @db.NVarChar(30)
+  ronda      Int?
+  id_agent   Int?
+  id_user    String?  @db.NVarChar(1000)
+  id_message Int?
+  detalle    String?  @db.NVarChar(1000)
+  created_at DateTime @default(now())
+
+  mesa ChatProjectMesa @relation(fields: [id_mesa], references: [id_mesa], onDelete: NoAction, onUpdate: NoAction, map: "chat_project_mesa_evento_mesa_fkey")
+
+  @@index([id_mesa, id_evento], map: "chat_project_mesa_evento_mesa_idx")
+  @@map("chat_project_mesa_evento")
   @@schema("dbo")
 }
 
@@ -5188,6 +5375,7 @@ model VitrinaPresentacion {
   grupos         VitrinaPresentacionGrupo[]
   exclusividades VitrinaExclusividad[]
   imagenes       VitrinaImagen[]
+  modelos3d      VitrinaModelo3d[]
   documentos     VitrinaDocumento[]
 
   @@index([id_company, estado, visibilidad], map: "IX_vitrina_presentacion_company")
@@ -5352,6 +5540,30 @@ model VitrinaImagen {
   @@schema("dbo")
 }
 
+/// Modelo 3D (GLB, glTF 2.0 binario) de una presentación (2026-11-04). El archivo vive en el
+/// almacenamiento de adjuntos (OneDrive, carpeta VITRINA) igual que las imágenes; ruta_archivo
+/// guarda su id. Una carga nueva deja la anterior como no vigente. Dimensiones opcionales en cm.
+model VitrinaModelo3d {
+  id_modelo       Int      @id @default(autoincrement())
+  id_presentacion Int
+  ruta_archivo    String   @db.NVarChar(500)
+  nombre_original String   @db.NVarChar(255)
+  tamano_bytes    Int
+  version         Int
+  vigente         Boolean  @default(true)
+  ancho_cm        Decimal? @db.Decimal(7, 2)
+  alto_cm         Decimal? @db.Decimal(7, 2)
+  profundo_cm     Decimal? @db.Decimal(7, 2)
+  cargado_por     String   @db.NVarChar(50)
+  cargado_en      DateTime @default(dbgenerated("sysutcdatetime()")) @db.DateTime2
+
+  presentacion VitrinaPresentacion @relation(fields: [id_presentacion], references: [id_presentacion], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_presentacion, vigente], map: "IX_vitrina_modelo_3d_presentacion")
+  @@map("vitrina_modelo_3d")
+  @@schema("dbo")
+}
+
 /// Vínculo con un documento vigente del SGC (sgc.document.id_document). Se enlaza, no se copia;
 /// sin FK entre esquemas (el SGC vive aislado en `sgc`). En el V2 solo existe la tabla.
 model VitrinaDocumento {
@@ -5501,5 +5713,95 @@ model FormacionPreguntaLike {
 
   @@unique([pregunta_id, email], map: "formacion_pregunta_like_uq")
   @@map("formacion_pregunta_like")
+  @@schema("dbo")
+}
+
+// ---------------------------------------------------------------------------
+// INGENIERÍA BIOMÉDICA (2026-11-06; reunión de Nicolás Rivera con Juan Mora del 2026-11-05).
+// Módulo APARTE del SGC validado (tablas en dbo, no en el esquema `sgc`): los ingenieros
+// biomédicos diligencian, «como si lo imprimieran y lo llenaran a mano», los FORMATOS VIGENTES
+// del SGC. Solo se valida el CONTROL: si el formato deja de estar vigente, el registro se bloquea.
+// ---------------------------------------------------------------------------
+
+/// Formato del SGC habilitado en el módulo (lo elige Aseguramiento de Calidad), con su actividad.
+model BiomedFormato {
+  id_biomed_formato Int       @id @default(autoincrement())
+  id_company        Int
+  id_document       Int
+  actividad         String    @db.NVarChar(200)
+  is_active         Boolean   @default(true)
+  created_by        String    @db.NVarChar(255)
+  created_at        DateTime  @default(now())
+  updated_by        String?   @db.NVarChar(255)
+  updated_at        DateTime?
+
+  registros BiomedRegistro[]
+
+  @@unique([id_company, id_document])
+  @@map("biomed_formato")
+  @@schema("dbo")
+}
+
+/// Formato DILIGENCIADO: la versión del formato sobre la que se llenó y lo escrito encima (JSON).
+model BiomedRegistro {
+  id_biomed_registro  Int       @id @default(autoincrement())
+  id_company          Int
+  id_biomed_formato   Int
+  id_document         Int
+  id_document_version Int
+  equipo              String    @db.NVarChar(200)
+  serial              String?   @db.NVarChar(100)
+  /// borrador | cerrado | anulado
+  estado              String    @default("borrador") @db.NVarChar(20)
+  data_json           String    @default("[]") @db.NVarChar(Max)
+  created_by          String    @db.NVarChar(255)
+  created_at          DateTime  @default(now())
+  updated_by          String?   @db.NVarChar(255)
+  updated_at          DateTime?
+  closed_by           String?   @db.NVarChar(255)
+  closed_at           DateTime?
+  annul_reason        String?   @db.NVarChar(1000)
+
+  formato BiomedFormato @relation(fields: [id_biomed_formato], references: [id_biomed_formato], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([id_company, estado])
+  @@map("biomed_registro")
+  @@schema("dbo")
+}
+
+/// Trazabilidad del módulo (solo inserción): quién hizo qué y cuándo.
+model BiomedEvento {
+  id_biomed_evento   Int      @id @default(autoincrement())
+  id_company         Int
+  id_biomed_registro Int?
+  accion             String   @db.NVarChar(60)
+  actor_email        String   @db.NVarChar(255)
+  detalle            String?  @db.NVarChar(2000)
+  ip                 String?  @db.NVarChar(100)
+  created_at         DateTime @default(now())
+
+  @@index([id_company, created_at])
+  @@map("biomed_evento")
+  @@schema("dbo")
+}
+
+/// MEJORA CONTINUA de los flujos de trabajo (2026-11-09, docs/flujos-mejora-continua.md):
+/// lo que decidió una persona sobre una sugerencia del panel (aplicada o descartada), con la
+/// cifra de la tarea en ese momento para medir el antes y el después.
+model WorkflowMejoraDecision {
+  id_decision         Int      @id @default(autoincrement())
+  id_process_category Int
+  /// «tipo:idTarea» o «tipo:flujo» (lib/workflow/mejora-continua-rules.ts).
+  clave               String   @db.NVarChar(80)
+  /// 'aplicada' | 'descartada' (CHECK en la base).
+  estado              String   @db.NVarChar(20)
+  motivo              String?  @db.NVarChar(1000)
+  titulo              String?  @db.NVarChar(400)
+  metrica_antes       String?  @db.NVarChar(2000)
+  decided_by          String   @db.NVarChar(1000)
+  decided_at          DateTime @default(now())
+
+  @@unique([id_process_category, clave], map: "workflow_mejora_decision_flujo_clave_key")
+  @@map("workflow_mejora_decision")
   @@schema("dbo")
 }

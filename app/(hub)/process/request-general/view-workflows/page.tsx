@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import {
@@ -31,6 +31,7 @@ import {
   Checkbox,
   MultiSelect,
   CopyButton,
+  SegmentedControl,
 } from '@mantine/core';
 import {
   IconBuilding,
@@ -68,8 +69,19 @@ import {
 } from '../../../../../lib/requests-general/tableField';
 import TableColumnsEditor from '../_components/TableColumnsEditor';
 import WorkflowValidatorsModal from '../../../../../components/request-general/WorkflowValidatorsModal';
+import BotonMejoraContinua from '../../../../../components/request-general/BotonMejoraContinua';
 import { FlowConnector } from '../../../../../components/ui/flow/FlowConnector';
+import { SapTaskActionPicker, SapTaskCardInfo } from '../../../../../components/workflow-sap/SapTaskObject';
+import {
+  ConditionalObject,
+  TaskSapConfigModal,
+  useWorkflowSapConfig,
+  type TaskSapInfo,
+} from '../../../../../components/workflow-sap/TaskSapConfig';
 import toast from 'react-hot-toast';
+// WorkflowDiagram deshabilitado temporalmente (2026-09-02): el diagrama se veía
+// desordenado (ramas cruzadas) a criterio de producto. Pendiente rediseño.
+// import WorkflowDiagram from '../../../../../components/workflow/WorkflowDiagram';
 
 interface WorkFlow {
   id: number;
@@ -103,6 +115,13 @@ interface Task {
   linked_process_label?: string | null;
   closes_request: boolean;
   conditions: number[];
+  display_order?: number | null;
+  /** Objeto del flujo: tarea de persona, autorización o tarea SAP (la ejecuta el sistema). */
+  task_kind?: 'normal' | 'authorization' | 'sap_executor';
+  /** Acción del catálogo SAP (solo tareas SAP). */
+  sap_action_key?: string | null;
+  /** Cuándo se ejecuta la tarea SAP: en su turno o solo si la autorización anterior se rechaza / se cotiza. */
+  sap_trigger?: 'on_execute' | 'on_reject' | 'on_quote' | null;
 }
 
 interface Note {
@@ -184,6 +203,9 @@ function ViewWorkFlowPage() {
   const from = searchParams.get('from') || 'workflows';
 
   const [workflow, setWorkflow] = useState<WorkFlow | null>(null);
+  // Configuracion SAP de las tareas (tareas «Ejecutora SAP» y efectos SAP de autorizaciones).
+  const sapConfig = useWorkflowSapConfig(workflow?.id ?? null);
+  const [sapTask, setSapTask] = useState<TaskSapInfo | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingTasks, setLoadingTasks] = useState(false);
@@ -204,6 +226,9 @@ function ViewWorkFlowPage() {
   const [optionInputs, setOptionInputs] = useState<Record<number, string>>({});
 
   const [isEditing, setIsEditing] = useState(false);
+  // MEJORA CONTINUA (2026-11-09): la tarea que una sugerencia aplicada resaltó (?mejora=tipo:idTarea).
+  const [resaltada, setResaltada] = useState<number | null>(null);
+  const mejoraAplicada = useRef(false);
   const [updateMessage, setUpdateMessage] = useState<{
     type: 'success' | 'error';
     text: string;
@@ -246,6 +271,9 @@ function ViewWorkFlowPage() {
     id_linked_process: '',
     closes_request: false,
     conditions: [] as number[],
+    task_kind: 'normal' as 'normal' | 'sap_executor',
+    sap_action_key: '',
+    sap_trigger: 'on_execute' as 'on_execute' | 'on_reject' | 'on_quote',
   });
   const [authorizationTypeOptions, setAuthorizationTypeOptions] = useState<
     { value: string; label: string }[]
@@ -266,13 +294,23 @@ function ViewWorkFlowPage() {
 
   useEffect(() => {
     const storedWorkflow = sessionStorage.getItem('selectedRequest');
-    if (storedWorkflow) {
-      const workflowData = JSON.parse(storedWorkflow);
-      setWorkflow(workflowData);
+    const guardado = storedWorkflow ? (JSON.parse(storedWorkflow) as WorkFlow) : null;
+    // El flujo guardado al tocarlo en la lista sirve solo si es EL MISMO del enlace (?id=N). Si no
+    // (enlace desde el indicador de automejora, otra pestaña, un flujo abierto antes), se pide por
+    // id: antes salía «No se encontraron datos» o se mostraba otro flujo (2026-11-09).
+    if (guardado && (!id || String(guardado.id) === id)) {
+      setWorkflow(guardado);
       setLoading(false);
     } else if (id) {
-      setError('No se encontraron datos del flujo de trabajo');
-      setLoading(false);
+      fetch(`/api/requests-general/mejora-continua/flujo?id=${encodeURIComponent(id)}`, { cache: 'no-store' })
+        .then(async (res) => {
+          const json = (await res.json().catch(() => null)) as { flujo?: WorkFlow } | null;
+          if (!res.ok || !json?.flujo) throw new Error();
+          sessionStorage.setItem('selectedRequest', JSON.stringify(json.flujo));
+          setWorkflow(json.flujo);
+        })
+        .catch(() => setError('No se encontraron datos del flujo de trabajo'))
+        .finally(() => setLoading(false));
     } else {
       setError('No se especificó un flujo de trabajo');
       setLoading(false);
@@ -386,6 +424,9 @@ if (session?.user?.id) return session.user.id as unknown as number;
           id_linked_process: t.id_linked_process ?? null,
           closes_request: Boolean(t.closes_request),
           conditions: Array.isArray(t.conditions) ? t.conditions : [],
+          task_kind: t.is_authorization ? 'authorization' : t.task_kind === 'sap_executor' ? 'sap_executor' : 'normal',
+          sap_action_key: t.sap_action_key ?? null,
+          sap_trigger: t.task_kind === 'sap_executor' ? (t.sap_trigger ?? 'on_execute') : null,
         }))
       );
     } catch (err) {
@@ -590,7 +631,9 @@ if (session?.user?.id) return session.user.id as unknown as number;
 
   const handleAddTask = () => {
     if (!newTaskForm.task.trim()) return;
-    if (newTaskForm.is_authorization && !newTaskForm.type_authorization) return;
+    const isSapTask = newTaskForm.task_kind === 'sap_executor';
+    if (isSapTask && !newTaskForm.sap_action_key) return;
+    if (!isSapTask && newTaskForm.is_authorization && !newTaskForm.type_authorization) return;
     if (newTaskForm.id_linked_process && !newTaskForm.id_assigned_user) return;
 
     const isLinked = Boolean(newTaskForm.id_linked_process);
@@ -616,10 +659,19 @@ if (session?.user?.id) return session.user.id as unknown as number;
         : null,
       closes_request: newTaskForm.closes_request,
       conditions: newTaskForm.conditions,
+      task_kind: isSapTask ? 'sap_executor' : newTaskForm.is_authorization ? 'authorization' : 'normal',
+      sap_action_key: isSapTask ? newTaskForm.sap_action_key : null,
+      sap_trigger: isSapTask ? newTaskForm.sap_trigger : null,
     };
+    if (isSapTask) {
+      newTask.is_authorization = false;
+      newTask.type_authorization = null;
+      newTask.id_assigned_user = '';
+      newTask.assigned_user = '';
+    }
 
     setEditedTasks([...editedTasks, newTask]);
-    setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '', id_linked_process: '', closes_request: false, conditions: [] });
+    setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '', id_linked_process: '', closes_request: false, conditions: [], task_kind: 'normal', sap_action_key: '', sap_trigger: 'on_execute' });
     setLinkedFlowChecked(false);
     setAddTaskModalOpened(false);
   };
@@ -789,6 +841,35 @@ if (session?.user?.id) return session.user.id as unknown as number;
     setUpdateMessage(null);
   };
 
+  /**
+   * «Aplicar» una sugerencia desde la página de Mejora continua: llega como ?mejora=tipo:idTarea.
+   * Abre la edición, deja el cambio preparado cuando se puede (quitar «Secuencial») y resalta la
+   * tarea. La persona revisa y guarda con «Guardar cambios», como siempre.
+   */
+  useEffect(() => {
+    const clave = searchParams.get('mejora');
+    if (!clave || mejoraAplicada.current || loadingTasks || tasks.length === 0) return;
+    mejoraAplicada.current = true;
+    const [tipo, ref] = clave.split(':');
+    const idTarea = Number.parseInt(ref ?? '', 10);
+    handleStartEditing();
+    if (tipo === 'paralelizar' && Number.isInteger(idTarea)) {
+      setEditedTasks((prev) => prev.map((t) => (t.id === idTarea ? { ...t, is_sequential: false } : t)));
+    }
+    if (Number.isInteger(idTarea)) {
+      setResaltada(idTarea);
+      window.setTimeout(() => document.getElementById(`tarea-flujo-${idTarea}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
+    }
+    setUpdateMessage({
+      type: 'success',
+      text:
+        tipo === 'paralelizar'
+          ? 'Mejora continua: el cambio quedó preparado (la tarea resaltada ya no es secuencial). Revíselo y pulse «Guardar cambios».'
+          : 'Mejora continua: la edición quedó abierta en la tarea resaltada. Haga el ajuste sugerido y pulse «Guardar cambios».',
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, loadingTasks, searchParams]);
+
   const handleSaveChanges = async () => {
     if (!editedWorkflow) return;
 
@@ -836,6 +917,9 @@ if (session?.user?.id) return session.user.id as unknown as number;
           (originalTask.type_authorization ?? null) !== (task.type_authorization ?? null) ||
           (originalTask.id_linked_process ?? null) !== (task.id_linked_process ?? null) ||
           Boolean(originalTask.closes_request) !== Boolean(task.closes_request) ||
+          (originalTask.task_kind ?? 'normal') !== (task.task_kind ?? 'normal') ||
+          (originalTask.sap_action_key ?? null) !== (task.sap_action_key ?? null) ||
+          (originalTask.sap_trigger ?? null) !== (task.sap_trigger ?? null) ||
           condKey(originalTask.conditions) !== condKey(task.conditions) ||
           originalIdx !== idx // cambió el orden
         );
@@ -947,6 +1031,9 @@ if (session?.user?.id) return session.user.id as unknown as number;
         id_linked_process?: number | null;
         closes_request?: boolean;
         condition_option_ids?: number[];
+        task_kind?: string;
+        sap_action_key?: string | null;
+        sap_trigger?: string | null;
         action: 'create' | 'update' | 'delete';
       }
 
@@ -1048,6 +1135,9 @@ if (session?.user?.id) return session.user.id as unknown as number;
             id_linked_process: task.id_linked_process ?? null,
             closes_request: task.closes_request,
             condition_option_ids: task.conditions,
+            task_kind: task.task_kind ?? 'normal',
+            sap_action_key: task.sap_action_key ?? null,
+            sap_trigger: task.sap_trigger ?? null,
             action: 'create' as const,
           })),
           ...updatedTasks.map((task) => ({
@@ -1064,6 +1154,9 @@ if (session?.user?.id) return session.user.id as unknown as number;
             id_linked_process: task.id_linked_process ?? null,
             closes_request: task.closes_request,
             condition_option_ids: task.conditions,
+            task_kind: task.task_kind ?? 'normal',
+            sap_action_key: task.sap_action_key ?? null,
+            sap_trigger: task.sap_trigger ?? null,
             action: 'update' as const,
           })),
           ...deletedTaskIds.map((id) => ({
@@ -1768,6 +1861,32 @@ if (session?.user?.id) return session.user.id as unknown as number;
           </Grid.Col>
 
           <Grid.Col span={{ base: 12, lg: 8 }}>
+            {/* Diagrama visual del flujo deshabilitado temporalmente (2026-09-02) — se veía
+                desordenado (ramas cruzadas) a criterio de producto. Pendiente rediseño.
+                La data de tareas (tasks) sigue igual; solo se quitó la renderización visual.
+            {tasks.length > 0 && (
+              <Card shadow='sm' p='xl' radius='md' withBorder mb='lg'>
+                <Group mb='md'>
+                  <Box
+                    className='bg-indigo-500 p-2 rounded-lg'
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <IconProgress size={24} color='white' />
+                  </Box>
+                  <Title order={2} className='text-indigo-700'>
+                    Diagrama del Flujo
+                  </Title>
+                </Group>
+                <WorkflowDiagram
+                  tasks={tasks.map((t, i) => ({
+                    id: t.id,
+                    task: t.task,
+                    display_order: t.display_order ?? i,
+                  }))}
+                />
+              </Card>
+            )}
+            */}
             <Card
               shadow='sm'
               p='xl'
@@ -1789,6 +1908,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
                   </Title>
                 </Group>
                 <Group>
+                  {workflow?.id ? <BotonMejoraContinua idProcessCategory={workflow.id} /> : null}
                   <Badge color='amber' size='lg' variant='light'>
                     {isEditing ? editedTasks.length : tasks.length} {((isEditing ? editedTasks.length : tasks.length) === 1) ? 'tarea' : 'tareas'}
                   </Badge>
@@ -1836,17 +1956,44 @@ if (session?.user?.id) return session.user.id as unknown as number;
               ) : (
                 <ScrollArea>
                   <div className='space-y-0'>
-                    {(isEditing ? editedTasks : tasks).map((task, index) => (
-                      <div key={task.id} className='relative'>
+                    {(isEditing ? editedTasks : tasks).map((task, index, list) => {
+                      const condKey = (c: number[]) => [...(c || [])].sort((a, b) => a - b).join(',');
+                      // Condición del objeto: opciones del formulario (lo de siempre) o, en una Tarea SAP,
+                      // el resultado de la autorización anterior («si se rechaza», «si se envía a cotizar»).
+                      const sapWhen = (t: Task) =>
+                        t.task_kind === 'sap_executor' && t.sap_trigger && t.sap_trigger !== 'on_execute' ? t.sap_trigger : '';
+                      const fullKey = (t: Task) => `${condKey(t.conditions)}|${sapWhen(t)}`;
+                      const hasCond = task.conditions.length > 0 || Boolean(sapWhen(task));
+                      const startsCond = hasCond && (index === 0 || fullKey(list[index - 1]) !== fullKey(task));
+                      const sapWhenLabel = sapWhen(task)
+                        ? task.sap_trigger === 'on_reject'
+                          ? 'la autorización anterior se rechaza'
+                          : 'la autorización anterior se envía a cotizar'
+                        : '';
+                      const condLabel = [task.conditions.length > 0 ? conditionLabelsView(task.conditions) : '', sapWhenLabel]
+                        .filter(Boolean)
+                        .join(' y ');
+                      return (
+                      <div key={task.id} className='relative' style={hasCond ? { marginLeft: 32, paddingLeft: 12, borderLeft: '3px solid var(--mantine-color-grape-4)' } : undefined}>
+                        {startsCond && (
+                          <ConditionalObject
+                            label={condLabel}
+                            note={sapWhenLabel ? 'si no se cumple, la tarea queda «Omitida»' : undefined}
+                          />
+                        )}
                         <Card
+                          id={`tarea-flujo-${task.id}`}
                           shadow='sm'
                           p='md'
                           radius='lg'
                           withBorder
+                          style={resaltada === task.id ? { outline: '3px solid var(--mantine-color-teal-5)', outlineOffset: 2 } : undefined}
                           className={`
                             transition-all duration-200 ease-in-out
                             ${
-                              task.active === 1
+                              task.active === 1 && task.task_kind === 'sap_executor'
+                                ? 'bg-[var(--mantine-color-body)] border-blue-400 hover:border-blue-500 hover:shadow-md'
+                                : task.active === 1
                                 ? 'bg-[var(--mantine-color-body)] border-amber-300 hover:border-amber-400 hover:shadow-md'
                                 : 'bg-[var(--mantine-color-default)] border-[var(--mantine-color-default-border)] opacity-75'
                             }
@@ -1860,9 +2007,11 @@ if (session?.user?.id) return session.user.id as unknown as number;
                                   w-12 h-12 rounded-full flex items-center justify-center
                                   transition-all duration-200
                                   ${
-                                    task.active === 1
-                                      ? 'bg-amber-500 text-white shadow-lg shadow-amber-200'
-                                      : 'bg-gray-300 text-gray-600'
+                                    task.active !== 1
+                                      ? 'bg-gray-300 text-gray-600'
+                                      : task.task_kind === 'sap_executor'
+                                        ? 'bg-blue-600 text-white shadow-lg shadow-blue-200'
+                                        : 'bg-amber-500 text-white shadow-lg shadow-amber-200'
                                   }
                                 `}
                               >
@@ -1877,6 +2026,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
                                 <Group justify='space-between' align='flex-start'>
                                   <div style={{ flex: 1 }}>
                                     {isEditing ? (
+                                      <>
                                       <TextInput
                                         value={editedTasks[index]?.task || ''}
                                         onChange={(e) => {
@@ -1886,6 +2036,29 @@ if (session?.user?.id) return session.user.id as unknown as number;
                                         }}
                                         placeholder='Nombre de la tarea'
                                       />
+                                      {editedTasks[index]?.task_kind === 'sap_executor' && (
+                                        <Box mt='xs'>
+                                          <SapTaskActionPicker
+                                            value={editedTasks[index]?.sap_action_key || ''}
+                                            onChange={(v) => {
+                                              setEditedTasks((prev) => {
+                                                const newTasks = [...prev];
+                                                newTasks[index] = { ...newTasks[index], sap_action_key: v };
+                                                return newTasks;
+                                              });
+                                            }}
+                                            trigger={editedTasks[index]?.sap_trigger ?? 'on_execute'}
+                                            onTriggerChange={(t) => {
+                                              setEditedTasks((prev) => {
+                                                const newTasks = [...prev];
+                                                newTasks[index] = { ...newTasks[index], sap_trigger: t as Task['sap_trigger'] };
+                                                return newTasks;
+                                              });
+                                            }}
+                                          />
+                                        </Box>
+                                      )}
+                                      </>
                                     ) : (
                                       <Group gap='xs'>
                                         <Text size='md' fw={600} className='mb-1'>
@@ -1901,14 +2074,13 @@ if (session?.user?.id) return session.user.id as unknown as number;
                                             {task.type_authorization_label || 'Autorización'}
                                           </Badge>
                                         )}
+                                        {task.task_kind === 'sap_executor' && (
+                                          <SapTaskCardInfo actionKey={task.sap_action_key} />
+                                        )}
+
                                         {task.id_linked_process && (
                                           <Badge color='grape' variant='light' size='sm' styles={{ root: { textTransform: 'none' } }}>
                                             Flujo: {task.linked_process_label || linkedProcessOptions.find((o) => o.value === String(task.id_linked_process))?.label || 'Vinculado'}
-                                          </Badge>
-                                        )}
-                                        {task.conditions.length > 0 && (
-                                          <Badge color='grape' variant='light' size='sm' styles={{ root: { textTransform: 'none' } }}>
-                                            Si: {conditionLabelsView(task.conditions)}
                                           </Badge>
                                         )}
                                         {task.closes_request && (
@@ -2207,7 +2379,8 @@ if (session?.user?.id) return session.user.id as unknown as number;
                           </div>
                         )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </ScrollArea>
               )}
@@ -2883,7 +3056,8 @@ if (session?.user?.id) return session.user.id as unknown as number;
           </Stack>
         </Modal>
 
-        <WorkflowValidatorsModal
+        <TaskSapConfigModal info={sapTask} onClose={() => setSapTask(null)} onSaved={sapConfig.reload} />
+      <WorkflowValidatorsModal
           opened={validatorsModalOpened}
           onClose={() => setValidatorsModalOpened(false)}
           processCategoryId={Number(workflow.id)}
@@ -2896,7 +3070,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
           opened={addTaskModalOpened}
           onClose={() => {
             setAddTaskModalOpened(false);
-            setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '', id_linked_process: '', closes_request: false, conditions: [] });
+            setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '', id_linked_process: '', closes_request: false, conditions: [], task_kind: 'normal', sap_action_key: '', sap_trigger: 'on_execute' });
           }}
           title={
             <Group gap='sm'>
@@ -2923,6 +3097,32 @@ if (session?.user?.id) return session.user.id as unknown as number;
           }}
         >
           <Stack gap='lg'>
+            <SegmentedControl
+              fullWidth
+              value={newTaskForm.task_kind === 'sap_executor' ? 'sap' : newTaskForm.is_authorization ? 'auth' : 'task'}
+              onChange={(v) =>
+                setNewTaskForm({
+                  ...newTaskForm,
+                  task_kind: v === 'sap' ? 'sap_executor' : 'normal',
+                  is_authorization: v === 'auth',
+                  type_authorization: v === 'auth' ? newTaskForm.type_authorization : '',
+                  sap_action_key: v === 'sap' ? newTaskForm.sap_action_key : '',
+                })
+              }
+              data={[
+                { label: 'Tarea', value: 'task' },
+                { label: 'Autorización', value: 'auth' },
+                { label: 'Tarea SAP', value: 'sap' },
+              ]}
+            />
+            {newTaskForm.task_kind === 'sap_executor' && (
+              <SapTaskActionPicker
+                value={newTaskForm.sap_action_key}
+                onChange={(v) => setNewTaskForm((f) => ({ ...f, sap_action_key: v }))}
+                trigger={newTaskForm.sap_trigger}
+                onTriggerChange={(t) => setNewTaskForm((f) => ({ ...f, sap_trigger: t as typeof f.sap_trigger }))}
+              />
+            )}
             <Grid>
               <Grid.Col span={12}>
                 <TextInput
@@ -3022,6 +3222,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
               onChange={(e) => setNewTaskForm({ ...newTaskForm, closes_request: e.currentTarget.checked })}
             />
 
+            {newTaskForm.task_kind !== 'sap_executor' && (
             <Checkbox
               mt='sm'
               label='Tarea de autorización'
@@ -3035,6 +3236,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
                 })
               }
             />
+            )}
 
             {newTaskForm.is_authorization && (
               <Select
@@ -3114,7 +3316,7 @@ if (session?.user?.id) return session.user.id as unknown as number;
                 variant='outline'
                 onClick={() => {
                   setAddTaskModalOpened(false);
-                  setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '', id_linked_process: '', closes_request: false, conditions: [] });
+                  setNewTaskForm({ task: '', id_assigned_user: '', cost: 0, cost_center: '', is_sequential: false, is_authorization: false, type_authorization: '', id_linked_process: '', closes_request: false, conditions: [], task_kind: 'normal', sap_action_key: '', sap_trigger: 'on_execute' });
                   setLinkedFlowChecked(false);
                 }}
                 className='cursor-pointer transition-colors duration-200'

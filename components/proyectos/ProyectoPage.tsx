@@ -15,6 +15,8 @@ import {
   IconLink,
   IconLock,
   IconMessages,
+  IconMessageChatbot,
+  IconTable,
   IconPencil,
   IconShieldLock,
   IconTimeline,
@@ -38,10 +40,12 @@ import {
   VincularCorreoModal,
   VincularSolicitudModal,
 } from './modales';
-import { ListaConversaciones, SeccionArchivos, SeccionDetalles, SeccionMiembros, SeccionVinculados } from './secciones';
+import { ListaConversaciones, SeccionArchivos, SeccionDetalles, SeccionMiembros, SeccionVinculados, type LoteArchivos } from './secciones';
 import SeccionCronograma from './cronograma/SeccionCronograma';
 import SeccionEquipo from './equipo/SeccionEquipo';
 import SeccionPermisos from './permisos/SeccionPermisos';
+import SeccionMesas from './mesas/SeccionMesas';
+import SeccionMatrices from './matrices/SeccionMatrices';
 import { AgentesApilados, AvisoArriba, BadgeRol, CONSULTA_ESCRITORIO, Encabezado, EsqueletoFilas, type Aviso } from './ui';
 import css from './proyectos.module.css';
 import { useEstadosAgentes } from './useEstadosAgentes';
@@ -67,8 +71,8 @@ import type { EstadoAgenteProyectoDto } from '../../lib/proyectos/estado-agente'
 
 // «Equipo» (F2, 2026-10-18): los subagentes del proyecto, junto al cronograma.
 // «Permisos» (2026-10-20): qué pueden hacer los agentes con el código del proyecto.
-type Seccion = 'conversaciones' | 'cronograma' | 'equipo' | 'vinculados' | 'archivos' | 'miembros' | 'permisos' | 'detalles';
-const SECCIONES: Seccion[] = ['conversaciones', 'cronograma', 'equipo', 'vinculados', 'archivos', 'miembros', 'permisos', 'detalles'];
+type Seccion = 'conversaciones' | 'mesas' | 'matrices' | 'cronograma' | 'equipo' | 'vinculados' | 'archivos' | 'miembros' | 'permisos' | 'detalles';
+const SECCIONES: Seccion[] = ['conversaciones', 'mesas', 'matrices', 'cronograma', 'equipo', 'vinculados', 'archivos', 'miembros', 'permisos', 'detalles'];
 
 function esSeccion(v: string | null): v is Seccion {
   return v !== null && (SECCIONES as string[]).includes(v);
@@ -212,11 +216,24 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
 
   const base = `/api/proyectos/${idProject}`;
 
-  const subirArchivos = (archivos: File[]) => {
-    if (archivos.length === 0) return;
-    const form = new FormData();
-    for (const a of archivos) form.append('files', a);
-    void accion(() => apiSend('POST', `${base}/archivos`, form, 'No se pudieron cargar los archivos.'), archivos.length === 1 ? 'Archivo cargado al proyecto.' : `${archivos.length} archivos cargados al proyecto.`);
+  // 2026-11-06: los archivos van por lotes (5 por envío, el máximo del servidor) y cada lote a su carpeta.
+  const subirArchivos = (lotes: LoteArchivos[]) => {
+    const total = lotes.reduce((n, l) => n + l.files.length, 0);
+    if (total === 0) return;
+    void accion(async () => {
+      let subidos = 0;
+      for (const lote of lotes) {
+        for (let i = 0; i < lote.files.length; i += 5) {
+          const form = new FormData();
+          if (lote.folder) form.set('folder', lote.folder);
+          for (const a of lote.files.slice(i, i + 5)) form.append('files', a);
+          const r = await apiSend('POST', `${base}/archivos`, form, 'No se pudieron cargar los archivos.');
+          if (!r.ok) return { ok: false, error: subidos ? `${r.error} (se cargaron ${subidos} de ${total}).` : r.error };
+          subidos += Math.min(5, lote.files.length - i);
+        }
+      }
+      return { ok: true };
+    }, total === 1 ? 'Archivo cargado al proyecto.' : `${total} archivos cargados al proyecto.`);
   };
 
   const pedirConfirmacion = (c: NonNullable<Confirmacion>) => setConfirmar(c);
@@ -280,6 +297,8 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
 
   const conteo: Record<Seccion, number | null> = {
     conversaciones: proyecto?.conversations.length ?? null,
+    mesas: null,
+    matrices: null,
     cronograma: proyecto ? proyecto.taskCount + proyecto.links.requests.length : null,
     equipo: proyecto?.teamCount ?? null,
     vinculados: proyecto ? proyecto.links.emails.length + proyecto.links.requests.length : null,
@@ -290,6 +309,8 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
   };
   const etiqueta: Record<Seccion, string> = {
     conversaciones: 'Conversaciones',
+    mesas: 'Mesas',
+    matrices: 'Matrices',
     cronograma: 'Cronograma',
     equipo: 'Equipo',
     vinculados: 'Vinculados',
@@ -300,6 +321,8 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
   };
   const icono: Record<Seccion, React.ReactNode> = {
     conversaciones: <IconMessages size={18} />,
+    mesas: <IconMessageChatbot size={18} />,
+    matrices: <IconTable size={18} />,
     cronograma: <IconTimeline size={18} />,
     equipo: <IconUsersGroup size={18} />,
     vinculados: <IconLink size={18} />,
@@ -322,6 +345,24 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
             estados={estados}
           />
         );
+      case 'mesas':
+        return (
+          <SeccionMesas
+            proyecto={proyecto}
+            version={version}
+            avisar={avisar}
+            onAbrirConversacion={async (id) => {
+              // Una mesa recién creada todavía no está en la lista del proyecto: se recarga
+              // antes de abrirla (si no, «Ver la conversación completa» no mostraba nada).
+              if (!proyecto.conversations.some((c) => c.id === id)) await cargar();
+              setSeccion('conversaciones');
+              setIdConversacion(id);
+            }}
+            onCambio={() => void cargar()}
+          />
+        );
+      case 'matrices':
+        return <SeccionMatrices proyecto={proyecto} version={version} avisar={avisar} />;
       case 'cronograma':
         return <SeccionCronograma proyecto={proyecto} version={version} avisar={avisar} onVincularSolicitud={() => setModal('solicitud')} />;
       case 'equipo':
@@ -366,6 +407,16 @@ export default function ProyectoPage({ idProject }: { idProject: number }) {
                 hacer: () => accion(() => apiSend('DELETE', `${base}/archivos/${id}`), 'Archivo quitado del proyecto.'),
               })
             }
+            onCrearCarpeta={(path) => accion(() => apiSend('POST', `${base}/carpetas`, { path }, 'No se pudo crear la carpeta.'), 'Carpeta creada.')}
+            onQuitarCarpeta={(path) =>
+              pedirConfirmacion({
+                titulo: 'Quitar la carpeta',
+                texto: 'Solo se quita si está vacía (sin archivos dentro ni en sus subcarpetas).',
+                accion: 'Quitar',
+                hacer: () => accion(() => apiSend('DELETE', `${base}/carpetas?path=${encodeURIComponent(path)}`), 'Carpeta quitada.'),
+              })
+            }
+            onMover={(id, folder) => void accion(() => apiSend('PATCH', `${base}/archivos/${id}`, { folder }, 'No se pudo mover el archivo.'), 'Archivo movido.')}
           />
         );
       case 'miembros':

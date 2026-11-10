@@ -41,6 +41,13 @@ export function calledToolNames(body: unknown): string[] {
   return names;
 }
 
+/**
+ * Instrucción del CHAT NORMAL (2026-11-06, caso Kepler): el agente no debe negar lo que
+ * hizo en sus proyectos; lo consulta con las herramientas de lectura en modo «turno».
+ */
+export const INSTRUCCION_PROYECTOS_CHAT =
+  'PROYECTOS: si en su chat normal le preguntan por trabajo de un proyecto de SynerLink (lo que se habló, lo que entregó, un PR), consúltelo con proyectos_listar, proyecto_historial, proyecto_detalle y proyecto_prs pasando conversation_id y message_id del mensaje que está atendiendo; no niegue lo que hizo en un proyecto. Desde el chat normal solo se lee: el código y los PR solo se hacen dentro del proyecto.';
+
 /** Construye una instancia de McpServer ya configurada para un alcance. */
 export function buildMcpServer(
   scope: AuthScope,
@@ -48,13 +55,13 @@ export function buildMcpServer(
   opts: { maxPageSize: number; defaultPageSize: number }
 ): McpServer {
   const restricted = Array.isArray(scope.allowedTools);
+  const conProyectos = !restricted || scope.allowedTools!.some((t) => t === 'proyectos_listar' || t === 'proyecto_historial');
+  const base = restricted
+    ? `Servidor de SynerLink/Kronos con acceso RESTRINGIDO para el agente ${scope.agent}. Solo dispone de: ${scope.allowedTools!.join(', ')}.`
+    : 'Servidor de SynerLink/Kronos. Las consultas SQL siguen limitadas a las empresas del alcance de la API key. Incluye herramientas de lectura de reuniones/transcripciones de Teams mediante Microsoft Graph; estas usan el usuario Graph configurado en el servidor y requieren permisos de aplicación con consentimiento de administrador.';
   const server = new McpServer(
     { name: 'kronos-mcp', version: '1.0.0' },
-    {
-      instructions: restricted
-        ? `Servidor de SynerLink/Kronos con acceso RESTRINGIDO para el agente ${scope.agent}. Solo dispone de: ${scope.allowedTools!.join(', ')}.`
-        : 'Servidor de SynerLink/Kronos. Las consultas SQL siguen limitadas a las empresas del alcance de la API key. Incluye herramientas de lectura de reuniones/transcripciones de Teams mediante Microsoft Graph; estas usan el usuario Graph configurado en el servidor y requieren permisos de aplicación con consentimiento de administrador.',
-    }
+    { instructions: conProyectos ? `${base} ${INSTRUCCION_PROYECTOS_CHAT}` : base }
   );
   registerTools(server, { scope, audit, ...opts });
   return server;

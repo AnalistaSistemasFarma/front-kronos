@@ -93,11 +93,14 @@ export function normalizeAnnotationsInput(
   input: unknown,
   previous: OrionDocumentAnnotation[] | null | undefined,
   actor: AnnotationActor,
-  now: string = new Date().toISOString()
+  now: string = new Date().toISOString(),
+  opts: { maxItems?: number } = {}
 ): OrionDocumentAnnotation[] {
   if (!Array.isArray(input)) throw httpError('Lista de datos inválida.', 400);
-  if (input.length > ANNOTATION_MAX_ITEMS) {
-    throw httpError(`Máximo ${ANNOTATION_MAX_ITEMS} datos o sellos por documento.`, 400);
+  // Orion: 30 por documento; un formato diligenciado (Ingeniería biomédica) admite más.
+  const maxItems = opts.maxItems ?? ANNOTATION_MAX_ITEMS;
+  if (input.length > maxItems) {
+    throw httpError(`Máximo ${maxItems} datos o sellos por documento.`, 400);
   }
   const prevById = new Map((previous ?? []).map((a) => [a.id, a]));
   const seen = new Set<string>();

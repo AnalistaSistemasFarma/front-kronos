@@ -29,6 +29,7 @@ import {
   IconChevronUp,
   IconDownload,
   IconLock,
+  IconShieldExclamation,
   IconShieldSearch,
 } from '@tabler/icons-react';
 
@@ -236,6 +237,23 @@ export default function AuditoriaAgentesPage() {
   const [usuario, setUsuario] = useState('');
   const [conversacion, setConversacion] = useState('');
   const [q, setQ] = useState('');
+  const [analizandoSeguridad, setAnalizandoSeguridad] = useState(false);
+
+  // «Analizar seguridad del mes»: pide la corrida (solo la administración puede) y abre la
+  // pantalla del análisis, que muestra el avance. Sin permiso para pedirla, solo se abre.
+  const analizarSeguridad = async () => {
+    setAnalizandoSeguridad(true);
+    try {
+      const r = await fetch('/api/chat/auditoria/seguridad/analizar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      window.location.href = r.ok ? '/process/chat/auditoria/seguridad?analizar=1' : '/process/chat/auditoria/seguridad';
+    } catch {
+      window.location.href = '/process/chat/auditoria/seguridad';
+    }
+  };
   const [conIp, setConIp] = useState(false);
   const [page, setPage] = useState(1);
 
@@ -245,7 +263,7 @@ export default function AuditoriaAgentesPage() {
   const [sinPermiso, setSinPermiso] = useState(false);
 
   const consultar = useCallback(
-    async (pagina: number) => {
+    async (pagina: number, conversacionInicial?: string) => {
       setCargando(true);
       setError(null);
       const sp = new URLSearchParams();
@@ -254,7 +272,8 @@ export default function AuditoriaAgentesPage() {
       if (agente) sp.set('agente', agente);
       if (empresa) sp.set('empresa', empresa);
       if (usuario.trim()) sp.set('usuario', usuario.trim());
-      if (conversacion.trim()) sp.set('conversacion', conversacion.trim());
+      const conv = (conversacionInicial ?? conversacion).trim();
+      if (conv) sp.set('conversacion', conv);
       if (q.trim()) sp.set('q', q.trim());
       if (conIp) sp.set('conIp', '1');
       sp.set('page', String(pagina));
@@ -280,7 +299,11 @@ export default function AuditoriaAgentesPage() {
 
   useEffect(() => {
     // Solo al abrir: después se consulta con el botón o al cambiar de página.
-    void consultar(1);
+    // ?conversacion=N llega desde «Errores de IA» (conversación afectada).
+    const desdeUrl = new URLSearchParams(window.location.search).get('conversacion') ?? '';
+    const conv = /^\d{1,10}$/.test(desdeUrl) ? desdeUrl : '';
+    if (conv) setConversacion(conv);
+    void consultar(1, conv || undefined);
   }, []);
 
   const verTexto = datos?.verConversaciones === true;
@@ -419,13 +442,46 @@ export default function AuditoriaAgentesPage() {
           >
             Ver copias de seguridad
           </Link>
+          <Text size='xs' c='dimmed'>
+            ·
+          </Text>
+          <Link
+            href='/process/chat/auditoria/errores'
+            className='chat-text-muted'
+            style={{ fontSize: 13 }}
+          >
+            Ver errores de IA
+          </Link>
+          <Text size='xs' c='dimmed'>
+            ·
+          </Text>
+          <Link
+            href='/process/chat/auditoria/seguridad'
+            className='chat-text-muted'
+            style={{ fontSize: 13 }}
+          >
+            Ver análisis de seguridad
+          </Link>
         </Group>
 
-        <Group gap='sm' mb={2} wrap='nowrap'>
-          <IconShieldSearch size={26} className='chat-folder__icon' />
-          <Title order={1} className='ios-process-hub__title text-3xl'>
-            Auditoría de agentes
-          </Title>
+        <Group justify='space-between' mb={2} wrap='wrap' gap='sm'>
+          <Group gap='sm' wrap='nowrap'>
+            <IconShieldSearch size={26} className='chat-folder__icon' />
+            <Title order={1} className='ios-process-hub__title text-3xl'>
+              Auditoría de agentes
+            </Title>
+          </Group>
+          {/* Análisis de seguridad de las conversaciones del mes (2026-11-05). */}
+          <Button
+            size='xs'
+            color='red'
+            variant='light'
+            leftSection={<IconShieldExclamation size={14} />}
+            loading={analizandoSeguridad}
+            onClick={() => void analizarSeguridad()}
+          >
+            Analizar seguridad del mes
+          </Button>
         </Group>
         <Text className='ios-process-hub__subtitle' mb='lg'>
           Quién le escribió a cada asistente, desde qué dirección, a qué hora, qué le dijo, qué

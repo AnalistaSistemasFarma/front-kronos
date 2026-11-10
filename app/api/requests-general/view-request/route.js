@@ -36,6 +36,8 @@ export async function GET(req) {
         pc.assigned as assignedUserId,
         assignedUser.name as assignedUserName,
         assignedUser.id as IDassignedUserID,
+        -- Mismo nombre que en las listas: la pantalla lo usa para habilitar el cierre (#838).
+        upcrg.id_user as id_assigned_process_category,
         rg.subject_request, 
         rg.resolution as resolutioncase,
         rg.date_resolution,

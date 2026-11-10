@@ -204,7 +204,8 @@ test.describe.serial('SGC documental · celular', () => {
     await page.getByTestId('sgc-ubicar-guardar').tap();
     await expect(page.getByTestId('sgc-mensaje')).toContainText('Ubicación de firmas guardada', { timeout: 30_000 });
     const layout = await ok<{ fields: unknown[] }>(await page.request.get(`/api/sgc/requests/${idRequest}/layout`));
-    expect(layout.fields).toHaveLength(4);
+    // S14 (R20): sin caja de la verificación de Calidad → elaboró, revisó y aprobó.
+    expect(layout.fields).toHaveLength(3);
   });
 
   test('[SGC-REQ-106] la firma electrónica cabe en la pantalla del celular y se firma «Elaboró» con la contraseña', async ({ page }) => {

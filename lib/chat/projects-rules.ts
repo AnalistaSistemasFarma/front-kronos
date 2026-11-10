@@ -93,8 +93,8 @@ export const MAX_PROJECT_NAME_CHARS = 120;
 export const MAX_PROJECT_INSTRUCTIONS_CHARS = 8_000;
 /** Miembros por proyecto, contando al dueño. */
 export const MAX_PROJECT_MEMBERS = 20;
-/** Archivos por proyecto. */
-export const MAX_PROJECT_FILES = 20;
+/** Archivos por proyecto (2026-11-06: 20 → 1000, el proyecto también es repositorio documental por carpetas). */
+export const MAX_PROJECT_FILES = 1000;
 /** Proyectos ACTIVOS que una persona puede ser dueña con un mismo agente. */
 export const MAX_OWNED_PROJECTS_PER_AGENT = 10;
 /** Conversaciones activas por proyecto. */

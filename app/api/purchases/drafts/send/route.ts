@@ -7,7 +7,8 @@ import { sapLogin, sapLogout, SapError } from '../../../../../lib/sap/serviceLay
 
 /**
  * Envia un borrador de solicitud de compra (B o ENC) a autorizar en el modulo de
- * Autorizaciones de SynerLink y lo deja en LA. Body: { companyId, docEntry }.
+ * Autorizaciones de SynerLink y lo deja en LA. Body: { companyId, docEntry, borrador? }.
+ * borrador=true: solo crea la solicitud «En Borrador» en Mis solicitudes (sin flujo).
  * Requiere permiso de ESCRITURA en la empresa.
  */
 export async function POST(request: NextRequest) {
@@ -29,7 +30,14 @@ export async function POST(request: NextRequest) {
 
     const sap = await sapLogin(company.endpoint);
     try {
-      const result = await sendToAuthorize({ sap, companyId, docEntry, userEmail: session.user.email });
+      const result = await sendToAuthorize({
+        sap,
+        companyId,
+        docEntry,
+        userEmail: session.user.email,
+        subject: typeof body.subject === 'string' ? body.subject : null,
+        asDraft: body.borrador === true,
+      });
       if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
       return NextResponse.json(result);
     } finally {

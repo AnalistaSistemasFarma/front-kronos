@@ -30,7 +30,7 @@ const dto = (extra = {}) => ({
 test('la base en «desarrollo» (sin pases): codigo.mjs recibe el proyecto SIN pases aunque el archivo diga pases', () => {
   const politica = resolverPolitica({ api: { estado: 'bd', politica: validarPoliticaApi(dto(), 1) }, archivo: ARCHIVO, idProject: 1 });
   const v = validarReposPorProyecto(jsonParaCodigo(politica, ARCHIVO, 1));
-  assert.deepEqual(v.proyectos.get(1), { repos: ['sapsend'], nivel: 2, pases: false, bajoDemanda: false });
+  assert.deepEqual(v.proyectos.get(1), { repos: ['sapsend'], nivel: 2, pases: false, bajoDemanda: false, terminalCompleta: false });
   assert.equal(v.repos.get('sapsend').clon, '/tmp/repos/sapsend');
   assert.deepEqual(v.repos.get('sapsend').workflowsProduccion, ['deploy-olp.yml']);
 });
@@ -47,7 +47,7 @@ test('la base en «ninguno» revoca lo del archivo: no hay código', () => {
 test('sin política en la base: el archivo manual, igual que antes (pases incluidos)', () => {
   const politica = resolverPolitica({ api: { estado: 'sin-politica' }, archivo: ARCHIVO, idProject: 1 });
   const v = validarReposPorProyecto(jsonParaCodigo(politica, ARCHIVO, 1));
-  assert.deepEqual(v.proyectos.get(1), { repos: ['sapsend'], nivel: 2, pases: true, bajoDemanda: false });
+  assert.deepEqual(v.proyectos.get(1), { repos: ['sapsend'], nivel: 2, pases: true, bajoDemanda: false, terminalCompleta: false });
   assert.deepEqual(v.operadores, ['nicolas.rivera@gsslatam.com', 'cristian.baldion@gsslatam.com']);
 });
 

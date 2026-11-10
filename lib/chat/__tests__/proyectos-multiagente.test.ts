@@ -8,10 +8,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const createMessage = vi.hoisted(() => vi.fn());
 const updateConv = vi.hoisted(() => vi.fn());
 const mencionables = vi.hoisted(() => vi.fn());
+const buscarMesa = vi.hoisted(() => vi.fn());
 
 vi.mock('../../prisma', () => {
   const tx = { chatMessage: { create: createMessage }, chatConversation: { update: updateConv } };
-  return { prisma: { $transaction: (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) } };
+  return {
+    prisma: {
+      $transaction: (fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
+      chatProjectMesa: { findUnique: buscarMesa },
+    },
+  };
 });
 vi.mock('../projects', () => ({ mencionablesDelHilo: mencionables }));
 vi.mock('../notifyPeople', () => ({ notifyPeopleMessage: vi.fn() }));
@@ -39,6 +45,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   createMessage.mockImplementation(async (a: { data: unknown }) => ({ id: 1, ...(a.data as object) }));
   mencionables.mockResolvedValue({ principal: ORUS, mencionables: [PLAY] });
+  buscarMesa.mockResolvedValue(null);
 });
 
 describe('publicarMensajeDePersona en un PROYECTO', () => {
@@ -73,5 +80,20 @@ describe('publicarMensajeDePersona en un PROYECTO', () => {
     const r = await enviar('@play hola');
     expect(createMessage.mock.calls[0][0].data.deliveries).toBeUndefined();
     expect(r.notifiedAgents).toEqual([ORUS.idAgent]);
+  });
+
+  it('MESA de discusión, sin @: nadie la atiende fuera de turno (nace entregada)', async () => {
+    buscarMesa.mockResolvedValue({ id_mesa: 3 });
+    const r = await enviar('Tengan en cuenta que el cierre es el viernes');
+    const data = createMessage.mock.calls[0][0].data;
+    expect(data.delivered_at).toEqual(new Date('2026-10-29T12:00:00Z'));
+    expect(r.notifiedAgents).toEqual([]);
+  });
+
+  it('MESA de discusión, con @play: se respeta la mención', async () => {
+    buscarMesa.mockResolvedValue({ id_mesa: 3 });
+    const r = await enviar('@play ¿qué opina?');
+    expect(r.notifiedAgents).toEqual([PLAY.idAgent]);
+    expect(buscarMesa).not.toHaveBeenCalled();
   });
 });
