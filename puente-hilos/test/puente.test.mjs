@@ -171,3 +171,42 @@ test('memoria del bot (solo lectura): el turno lleva el índice en sistema.md y 
   assert.doesNotMatch(corridas[1].sistema, /tema-front-kronos-ramas-ci\.md/);
   assert.equal(corridas[1].copia, false);
 });
+
+test('error del asistente (Claude Code): UN reintento automático; sesión arrancada → --resume con nota; credencial: sin reintento', async () => {
+  const base = (dir, extra = {}) => ({
+    hilosDir: dir, agente: 'play', agenteNombre: 'Play', maxConcurrencia: 1, timeoutTurnoMs: 600_000, reintentoEsperaMs: 0,
+    perfiles: validarPerfiles({}), instruccionesEn: 'system-prompt', claudeBin: 'claude',
+    path: '/usr/bin', home: dir, configClaudeDir: path.join(dir, 'claude-config'), credencial: { tipo: 'api-key', valor: 'k' }, ...extra,
+  });
+  const dir = mkdtempSync(path.join(tmpdir(), 'puente-'));
+  const s = synerlinkFalso();
+  s.avisar = async (...a) => s.llamadas.push(['avisar', ...a]);
+  const corridas = [];
+  const puente = crearPuente({
+    cfg: base(dir), synerlink: s, estado: new Estado(dir),
+    correr: async (opts) => {
+      corridas.push(opts);
+      if (corridas.length === 1) return { init: true, codigo: 1, resultado: { ok: false, subtipo: 'error_during_execution', texto: '' }, stderr: 'API Error: 500' };
+      return { init: true, resultado: { ok: true, texto: 'Listo tras reintentar.' }, tokens: { input: 1, cacheCreation: 0, cacheRead: 0, output: 1 }, modelos: ['m'], apiMessages: 1 };
+    },
+  });
+  puente.recibir([{ id: 1, idConversation: 40, body: 'revise el PR', author: { name: 'N' }, conversation: { kind: 'project' } }]);
+  await puente.cola.vacia();
+  assert.equal(corridas.length, 2);
+  assert.ok(corridas[1].args.includes('--resume'), 'la sesión ya arrancó: se retoma');
+  assert.match(corridas[1].prompt, /NOTA DEL PUENTE \(reintento automático\)/);
+  assert.match(corridas[1].prompt, /revise el PR/);
+  assert.ok(s.llamadas.some((l) => l[0] === 'avisar' && /Reintento automáticamente/.test(l[2])));
+  assert.match(s.llamadas.find((l) => l[0] === 'responder')[2], /Listo tras reintentar/);
+
+  const dir2 = mkdtempSync(path.join(tmpdir(), 'puente-'));
+  const s2 = synerlinkFalso();
+  let n2 = 0;
+  const p2 = crearPuente({
+    cfg: base(dir2), synerlink: s2, estado: new Estado(dir2),
+    correr: async () => { n2 += 1; return { codigo: 1, resultado: { ok: false, subtipo: 'error', texto: 'Invalid API key · Please run /login' }, stderr: '' }; },
+  });
+  p2.recibir([{ id: 2, idConversation: 41, body: 'x', author: { name: 'N' }, conversation: { kind: 'project' } }]);
+  await p2.cola.vacia();
+  assert.equal(n2, 1, 'credencial: no reintenta');
+});

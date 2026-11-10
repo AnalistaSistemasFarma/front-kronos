@@ -57,7 +57,7 @@ import { crearMedidorCuota } from './cuota.mjs';
 import { carpetaAgenteOpenclaw, crearLectorCredencialOpenclaw } from './openclaw/credencial.mjs';
 import { crearArchivador, textoArchivarProyecto } from './archivar-proyecto.mjs';
 import { prepararAdjuntos } from './adjuntos-salida.mjs';
-import { archivosDelTurno, archivosModificadosDesde, crearSupervisor, duracionLegible, PROMPT_CONTINUACION, textoAvisoProgreso, textoCorte, textoTiempoTurno } from './progreso.mjs';
+import { archivosDelTurno, archivosModificadosDesde, crearSupervisor, duracionLegible, errorSinReintento, PROMPT_CONTINUACION, PROMPT_REINTENTO_ERROR, textoAvisoProgreso, textoCorte, TEXTO_ERROR_FINAL, textoTiempoTurno } from './progreso.mjs';
 import { convertirHtmlAPdf, convertirMarcasPdf, recursosDePlugins, resolverChrome, textoPdf } from './pdf.mjs';
 import { crearAtenderOpenclaw } from './atender-openclaw.mjs';
 import { observarActividad } from './openclaw/actividad.mjs';
@@ -649,6 +649,26 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         r = await ejecutar(sesion, PROMPT_CONTINUACION);
         if (cortadoPorTiempo(r)) estado.marcarIniciada(idConversation, sesion.id);
       }
+      // Error del asistente (no corte por tiempo ni tope de gasto): UN reintento automático antes de
+      // rendirse (2026-11-10, Kepler: «No pude completar…» dos veces; Nicolás: «esto no puede pasar con
+      // ningún agente»). Sesión ya arrancada → se retoma con una nota; sin arrancar → sesión nueva.
+      const restanteMs = cfg.timeoutTurnoMs - (Date.now() - inicio.getTime());
+      const detalleError = `${r.resultado?.subtipo ?? ''} ${r.resultado?.texto ?? ''} ${String(r.stderr ?? '').slice(-600)}`;
+      if (!r.abortado && !r.resultado?.ok && !/budget/i.test(r.resultado?.subtipo ?? '') && !nativo && !errorSinReintento(detalleError) && restanteMs > 120000) {
+        log(`conversación ${idConversation}: turno con error (código ${r.codigo}, ${r.resultado?.subtipo ?? 'sin resultado'}); reintento automático (una vez).`);
+        await avisar('🔁 Tuve un error del asistente mientras trabajaba en su pedido. Reintento automáticamente una vez desde donde quedé; no tiene que volver a escribir.').catch(() => null);
+        await new Promise((res) => setTimeout(res, cfg.reintentoEsperaMs ?? 15000));
+        if (r.init || !sesion.nueva) {
+          estado.marcarIniciada(idConversation, sesion.id);
+          sesion = estado.sesionDe(idConversation);
+          r = await ejecutar(sesion, `${PROMPT_REINTENTO_ERROR}\n\nPedido original (por si no alcanzó a quedar en la sesión):\n${promptTurno}`);
+        } else {
+          estado.reiniciarSesion(idConversation);
+          sesion = estado.sesionDe(idConversation);
+          r = await ejecutar(sesion);
+        }
+        if (cortadoPorTiempo(r)) estado.marcarIniciada(idConversation, sesion.id);
+      }
       // Fin del trabajo del modelo: se apagan los avisos y el latido, y se espera lo que esté en
       // vuelo (un latido tardío no debe volver a encender el indicador tras la respuesta).
       await supervisor.detener();
@@ -691,7 +711,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
         cuerpo =
           ultimoTexto || archivos.length > 0
             ? textoCorte({ motivo: 'error', transcurridoMs, ultimoTexto, archivos })
-            : 'No pude completar la respuesta por un error del asistente. Intente de nuevo en unos minutos.';
+            : TEXTO_ERROR_FINAL;
         log(`conversación ${idConversation}: turno con error (código ${r.codigo}, ${r.resultado?.subtipo ?? 'sin resultado'})`);
       } else if (nativo?.objetivo?.quitar) {
         cuerpo = '🧹 Listo: quité el objetivo (/goal) de esta conversación.';
