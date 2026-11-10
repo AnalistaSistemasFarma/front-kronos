@@ -565,6 +565,14 @@ jobs:
           echo "IF OBJECT_ID(N'dbo.biomed_registro', N'U') IS NULL OR OBJECT_ID(N'dbo.biomed_evento_solo_insercion', N'TR') IS NULL OR (SELECT COUNT(*) FROM dbo.subprocess WHERE subprocess_url = N'/process/sgc-documental/biomedica') <> 1 THROW 50000, N'La migración de Ingeniería biomédica no dejó sus tablas o su permiso.', 1;" > /tmp/biomedica-ok.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomedica-ok.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-biomedica-PROD.sql; then echo "El script de PROD de Ingeniería biomédica debió negarse en kronos_ci"; exit 1; fi
+          # Inventario de equipos biomédicos (fase 2, 2026-11-10): migración y PRUEBAS dos veces (idempotencia), comprobación y PROD que se niega.
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261110150000_biomedica_inventario/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261110150000_biomedica_inventario/migration.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-10-biomedica-inventario-PRUEBAS.sql
+          npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-10-biomedica-inventario-PRUEBAS.sql
+          echo "IF OBJECT_ID(N'dbo.biomed_equipo', N'U') IS NULL OR OBJECT_ID(N'dbo.biomed_valor_unitario', N'U') IS NULL OR OBJECT_ID(N'dbo.biomed_equipo_evento_solo_insercion', N'TR') IS NULL OR NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'biomed_equipo_id_company_serie_key' AND is_unique = 1) THROW 50000, N'La migración del inventario biomédico no dejó sus tablas, la serie única o el disparador.', 1;" > /tmp/biomed-inv-ok.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomed-inv-ok.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-10-biomedica-inventario-PROD.sql; then echo "El script de PROD del inventario biomédico debió negarse en kronos_ci"; exit 1; fi
           # Agente de desarrollo en Proyectos (2026-10-27): migración y PRUEBAS dos veces (idempotencia), columna NOT NULL, PROD que se niega y la corrección de proyectos en modo LISTAR (no escribe).
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261027170000_agent_es_desarrollo/migration.sql
           npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261027170000_agent_es_desarrollo/migration.sql
@@ -636,7 +644,7 @@ jobs:
         run: |
           set -e
           # Banderas de sesión con las que cada reversa acepta sus pérdidas (datos de prueba).
-          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida proyectos_permisos_agentes_reversa_acepta_perdida proyectos_config_agentes_reversa_acepta_perdida chat_stickers_personales_reversa_acepta_perdida vitrina_reversa_acepta_perdida proyectos_archivos_agente_reversa_acepta_perdida vitrina_lineas_reversa_acepta_perdida vitrina_modelo3d_reversa_acepta_perdida proyectos_mesas_reversa_acepta_perdida proyectos_matrices_reversa_acepta_perdida proyectos_carpetas_reversa_acepta_perdida biomedica_reversa_acepta_perdida"
+          FLAGS="sgc_reversa_pendientes_archivo sgc_reversa_padres sgc_reversa_propuestas sgc_reversa_recapacitaciones sgc_reversa_flujo_s10 sgc_reversa_copias sgc_reversa_sustitutos sgc_reversa_firma_propia sgc_reversa_modelo_roles sgc_reversa_lideres_departamento sgc_reversa_encabezados sgc_reversa_evaluaciones sgc_reversa_generador sgc_reversa_generador_guia sgc_reversa_padres_hijos chat_proyectos_reversa_acepta_perdida proyectos_modulo_reversa_acepta_perdida proyectos_cronograma_reversa_acepta_perdida proyectos_equipo_reversa_acepta_perdida proyectos_no_leidos_reversa_acepta_perdida chat_reacciones_reversa_acepta_perdida proyectos_permisos_agentes_reversa_acepta_perdida proyectos_config_agentes_reversa_acepta_perdida chat_stickers_personales_reversa_acepta_perdida vitrina_reversa_acepta_perdida proyectos_archivos_agente_reversa_acepta_perdida vitrina_lineas_reversa_acepta_perdida vitrina_modelo3d_reversa_acepta_perdida proyectos_mesas_reversa_acepta_perdida proyectos_matrices_reversa_acepta_perdida proyectos_carpetas_reversa_acepta_perdida biomedica_reversa_acepta_perdida biomedica_inventario_reversa_acepta_perdida"
           reversa() {
             { for f in $FLAGS; do printf "EXEC sp_set_session_context N'%s', 1;\n" "$f"; done; cat "$1"; } > /tmp/reversa.sql
             npx prisma db execute --schema prisma/schema.prisma --file /tmp/reversa.sql
@@ -659,6 +667,16 @@ jobs:
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/carpetas-quitado.sql
           # Apunta a chat_project: se vuelve a migrar al final, con la F1.
           # Ingeniería biomédica (2026-11-06): con un evento de prueba, sin la bandera debe negarse; luego ida y vuelta.
+          # Inventario biomédico (2026-11-10): con un equipo de prueba, sin la bandera debe negarse; el historial no se borra; luego ida y vuelta.
+          echo "INSERT INTO dbo.biomed_equipo (id_company, equipo, serie, created_by) VALUES (1, N'BOMBA', N'CI-1', N'ci@x.co'); INSERT INTO dbo.biomed_equipo_evento (id_company, accion, actor_email) VALUES (1, N'ci', N'ci@x.co');" > /tmp/biomed-inv-dato.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomed-inv-dato.sql
+          echo "DELETE FROM dbo.biomed_equipo_evento;" > /tmp/biomed-inv-borra.sql
+          if npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomed-inv-borra.sql; then echo "El historial del inventario biomédico no debió dejarse borrar"; exit 1; fi
+          if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-10-biomedica-inventario-reversa.sql; then echo "La reversa del inventario biomédico debió negarse sin su bandera"; exit 1; fi
+          reversa prisma/manual/2026-11-10-biomedica-inventario-reversa.sql
+          echo "IF OBJECT_ID(N'dbo.biomed_equipo', N'U') IS NOT NULL OR OBJECT_ID(N'dbo.biomed_equipo_evento', N'U') IS NOT NULL THROW 50000, N'La reversa del inventario biomédico no quitó sus tablas.', 1;" > /tmp/biomed-inv-quitado.sql
+          npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomed-inv-quitado.sql
+          migra 20261110150000_biomedica_inventario
           echo "INSERT INTO dbo.biomed_evento (id_company, accion, actor_email) VALUES (1, N'ci', N'ci@x.co');" > /tmp/biomedica-dato.sql
           npx prisma db execute --schema prisma/schema.prisma --file /tmp/biomedica-dato.sql
           if npx prisma db execute --schema prisma/schema.prisma --file prisma/manual/2026-11-06-biomedica-reversa.sql; then echo "La reversa de Ingeniería biomédica debió negarse sin su bandera"; exit 1; fi
