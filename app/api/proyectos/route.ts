@@ -9,6 +9,7 @@ import {
   normalizeProjectDescription,
   normalizeProjectInstructions,
   normalizeProjectName,
+  PERFIL_PROYECTO_SIN_AGENTES,
   PROJECT_PROFILES,
 } from '../../../lib/chat/projects-rules';
 import type { ListaProyectosDto } from '../../../lib/proyectos/tipos';
@@ -36,6 +37,11 @@ export const dynamic = 'force-dynamic';
  *        de «ninguno», 403. Sin agentPolicy, el proyecto queda en «ninguno».
  *        Código o repos con algún asistente que NO es de desarrollo: 400 y no se
  *        crea nada (regla del 2026-10-27, lib/proyectos/agentes-desarrollo-rules.ts).
+ *        SIN ASISTENTES (2026-11-10, Nicolás Rivera: «que existan los 2 caminos»):
+ *        agentCodes vacío u omitido crea un proyecto solo de personas (miembros,
+ *        tareas, archivos, vínculos), con perfil «sin-conectores» y sin
+ *        sugerencia de equipo. Los asistentes se agregan después en
+ *        /api/proyectos/[id]/agentes.
  *
  * SEGURIDAD
  *   - La persona sale de la SESIÓN; el dueño es SIEMPRE quien crea.
@@ -92,10 +98,12 @@ export async function POST(request: NextRequest) {
     if (!descripcion.ok) return badRequest(descripcion.error);
     const instrucciones = normalizeProjectInstructions(payload.instructions);
     if (!instrucciones.ok) return badRequest(instrucciones.error);
-    const codigos = normalizeAgentCodes(payload.agentCodes);
+    const codigos = normalizeAgentCodes(payload.agentCodes, { permitirVacio: true });
     if (!codigos.ok) return badRequest(codigos.error);
-    if (!isKnownProfile(payload.profile)) return badRequest('Escoja el perfil de conectores.');
-    const perfil = payload.profile;
+    // Sin asistentes el perfil no aplica todavía: queda el de menos alcance.
+    const sinAgentes = codigos.value.length === 0;
+    if (!sinAgentes && !isKnownProfile(payload.profile)) return badRequest('Escoja el perfil de conectores.');
+    const perfil = sinAgentes ? PERFIL_PROYECTO_SIN_AGENTES : (payload.profile as string);
 
     const idCompany = Number(payload.idCompany);
     if (!Number.isInteger(idCompany) || idCompany <= 0) return badRequest('Escoja la empresa del proyecto.');
@@ -161,14 +169,14 @@ export async function POST(request: NextRequest) {
       name: nombre.value,
       description: descripcion.value,
       // «Agente con el que se creó» (columna de la F1). El acceso lo dan
-      // las filas de chat_project_agent.
-      id_agent: agentes[0].idAgent,
+      // las filas de chat_project_agent. NULL si se creó sin asistentes.
+      id_agent: agentes[0]?.idAgent ?? null,
       id_company: idCompany,
       profile: perfil,
       instructions: instrucciones.value,
       created_by: user.id,
       members: { create: [{ id_user: user.id, role: 'owner', added_by: user.id }] },
-      agents: { create: agentes.map((a) => ({ id_agent: a.idAgent, added_by: user.id })) },
+      ...(agentes.length > 0 ? { agents: { create: agentes.map((a) => ({ id_agent: a.idAgent, added_by: user.id })) } } : {}),
     };
     // Con permisos escogidos: proyecto, política y registro en UNA transacción
     // (si la política no se puede guardar, el proyecto no queda creado a medias).
@@ -193,7 +201,7 @@ export async function POST(request: NextRequest) {
     // «De primeras» (pedido de Nicolás, 2026-10-18): la sugerencia de equipo
     // sale con la creación. Si no se puede pedir, el proyecto queda creado igual.
     let teamRequested = false;
-    if (payload.suggestTeam === true) {
+    if (payload.suggestTeam === true && agentes.length > 0) {
       try {
         await pedirSugerencia(
           { id: user.id, email: user.email },

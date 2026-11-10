@@ -17,6 +17,7 @@ const h = vi.hoisted(() => {
     chatProjectAgentPolicyLog: { create: vi.fn(), findMany: vi.fn() },
     chatProject: { findMany: vi.fn(), create: vi.fn(), count: vi.fn() },
     chatProjectAgent: { findMany: vi.fn(), createMany: vi.fn() },
+    chatConversation: { count: vi.fn(async () => 0) },
     agent: { findMany: vi.fn() },
     user: { findMany: vi.fn() },
     $transaction: vi.fn(),
