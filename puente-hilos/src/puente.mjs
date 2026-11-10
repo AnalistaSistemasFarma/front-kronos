@@ -356,7 +356,7 @@ export function crearPuente({ cfg, synerlink, estado, correr = correrTurno, conv
           avisoCompleto = '_Nota: no pude preparar el modo Orus completo en este turno; respondí con los permisos normales del hilo. Tecnología quedó con el registro._\n\n';
         }
         if (completo) {
-          log(`conversación ${idConversation}: MODO ORUS COMPLETO (autores: ${completo.autores.join(', ')}); ${completo.servidores.length} conectores: ${completo.servidores.join(', ')}${completo.faltan.length ? `; variables sin valor: ${completo.faltan.join(', ')}` : ''}.`);
+          log(`conversación ${idConversation}: MODO ORUS COMPLETO (autores: ${completo.autores.join(', ')}); ${completo.servidores.length} conectores: ${completo.servidores.join(', ')}${completo.faltan.length ? `; variables sin valor: ${completo.faltan.join(', ')}` : ''}${completo.oauth?.conToken?.length ? `; OAuth del principal: ${completo.oauth.conToken.join(', ')}` : ''}${completo.oauth?.sinToken?.length ? `; OAuth SIN token: ${completo.oauth.sinToken.map((x) => `${x.nombre} (${x.motivo})`).join(', ')}` : ''}.`);
           auditarCompleto(idConversation, { tipo: 'inicio', idProject: contexto.project.idProject, autores: completo.autores, servidores: completo.servidores, plugins: completo.pluginDirs.map((d) => path.basename(d)) });
         }
       }
