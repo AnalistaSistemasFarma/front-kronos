@@ -103,18 +103,6 @@ import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
 import IosSearchField from '../../../../../components/ui/IosSearchField';
 import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
 import { filterByText, requestSearchParts } from '../../../../../lib/requests-general/textSearch';
-import { RequestListFilters } from '../../../../../components/request-general/list/RequestListFilters';
-import {
-  EMPTY_LIST_FILTERS,
-  buildListOptions,
-  countByStatusGroup,
-  describeListFilters,
-  matchesListFilters,
-  splitPeople,
-  statusGroupOf,
-  type ListFilters,
-  type ListRow,
-} from '../../../../../lib/requests-general/listFilters';
 import {
   buildTaskDisplayBadges,
   getSimplifiedTasksProgress,
@@ -293,49 +281,27 @@ function RequestBoard() {
     Record<number, number | string | TableRow[]>
   >({});
 
-  // Filtros iguales a los de Asignadas: se aplican al instante sobre TODAS las solicitudes
-  // cargadas (la lista se pide completa una vez; nada se filtra por página).
-  const [filters, setFilters] = useState<ListFilters>(EMPTY_LIST_FILTERS);
+  const [filters, setFilters] = useState({
+    id: '',
+    status: '',
+    company: '',
+    date_from: '',
+    date_to: '',
+    assigned_to: '',
+  });
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   // Buscador libre (id, asunto, empresa, categoría, proceso, estado, personas) sobre la lista cargada.
   const [searchInput, setSearchInput] = useState('');
   const deferredSearch = useDeferredValue(searchInput);
-  const ticketRows = useMemo(
-    () =>
-      tickets.map((t) => ({
-        ticket: t,
-        row: {
-          requestId: t.id,
-          group: statusGroupOf(t.id_status_case, t.status),
-          companyId: String(t.id_company ?? ''),
-          company: t.company,
-          process: t.process,
-          people: splitPeople(t.user),
-          createdAt: t.created_at,
-        } satisfies ListRow,
-      })),
-    [tickets]
-  );
-  const listOptions = useMemo(() => buildListOptions(ticketRows.map((x) => x.row)), [ticketRows]);
-  // Búsqueda + filtros del panel; el estado se aplica aparte para que las tarjetas no cambien.
-  const matchingRows = useMemo(
-    () =>
-      filterByText(ticketRows, deferredSearch, (x) => requestSearchParts(x.ticket)).filter((x) =>
-        matchesListFilters(x.row, filters, { ignoreStatus: true })
-      ),
-    [ticketRows, deferredSearch, filters]
-  );
-  const statusCounts = useMemo(() => countByStatusGroup(matchingRows.map((x) => x.row)), [matchingRows]);
   const visibleTickets = useMemo(
-    () => matchingRows.filter((x) => matchesListFilters(x.row, filters)).map((x) => x.ticket),
-    [matchingRows, filters]
+    () => filterByText(tickets, deferredSearch, requestSearchParts),
+    [tickets, deferredSearch]
   );
-  const clearListFilters = () => {
-    setFilters(EMPTY_LIST_FILTERS);
-    setSearchInput('');
-  };
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  // Filtros de la última consulta: el refresco automático no aplica los que aún no se aplicaron.
+  const appliedFiltersRef = useRef<typeof filters | null>(null);
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -661,17 +627,26 @@ function RequestBoard() {
     }
   };
 
-  /**
-   * Trae TODAS las solicitudes de la persona (todos los estados); los filtros y el buscador se
-   * aplican aquí sobre la lista completa. `silent`: refresca sin tapar la pantalla (automático).
-   */
-  const fetchTicketsWithUserId = async (userIdToUse: string, silent = false) => {
+  /** `silent`: refresca la tabla sin tapar la pantalla con el cargador (refresco automático). */
+  const fetchTicketsWithUserId = async (
+    userIdToUse: string,
+    filtersToUse: typeof filters = filters,
+    silent = false
+  ) => {
     try {
       if (silent) setRefreshing(true);
       else setLoading(true);
+      appliedFiltersRef.current = filtersToUse;
 
       const params = new URLSearchParams();
       params.append('idUser', userIdToUse.toString());
+
+      if (filtersToUse.id) params.append('id', filtersToUse.id);
+      if (filtersToUse.status) params.append('status', filtersToUse.status);
+      if (filtersToUse.company) params.append('company', filtersToUse.company);
+      if (filtersToUse.date_from) params.append('date_from', filtersToUse.date_from);
+      if (filtersToUse.date_to) params.append('date_to', filtersToUse.date_to);
+      if (filtersToUse.assigned_to) params.append('assigned_to', filtersToUse.assigned_to);
 
       const url = `/api/requests-general?${params.toString()}`;
 
@@ -693,11 +668,49 @@ function RequestBoard() {
     }
   };
 
-  // Refresco automático cada 30 s (y al volver a la pestaña); los filtros quedan como están.
+  // Refresco automático cada 30 s (y al volver a la pestaña) con los filtros ya aplicados.
   useAutoRefresh(() => {
-    if (userId) void fetchTicketsWithUserId(userId, true);
+    if (userId && appliedFiltersRef.current) {
+      void fetchTicketsWithUserId(userId, appliedFiltersRef.current, true);
+    }
   });
 
+  const validateFilters = () => {
+    const errors: string[] = [];
+
+    if (filters.date_from && filters.date_to) {
+      const fromDate = new Date(filters.date_from);
+      const toDate = new Date(filters.date_to);
+      if (fromDate > toDate) {
+        errors.push('La fecha "Desde" no puede ser mayor que la fecha "Hasta"');
+      }
+    }
+
+    if (filters.company && !companies.find((c) => c.value === filters.company)) {
+      errors.push('La empresa seleccionada no es válida');
+    }
+
+    if (filters.assigned_to && !assignedUsers.find((u) => u.value === filters.assigned_to)) {
+      errors.push('La persona asignada seleccionada no es válida');
+    }
+
+    if (errors.length > 0) {
+      setError(errors.join('. '));
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleApplyFilters = async () => {
+    if (!validateFilters()) {
+      return;
+    }
+
+    if (userId) {
+      await fetchTicketsWithUserId(userId);
+    }
+  };
 
   const getUserIdByName = async (
     userName: string,
@@ -866,6 +879,13 @@ function RequestBoard() {
         [field]: '',
       }));
     }
+  };
+
+  const handleFilterChange = (field: string, value: string) => {
+    setFilters((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
   };
 
   // Validación genérica de los campos dinámicos de proceso (process_form_field). Es la
@@ -1322,18 +1342,31 @@ function RequestBoard() {
     return getTasksProgress(allTasks);
   };
 
+  const filterByStatus = (value: string) => {
+    const nf = { ...filters, status: value };
+    setFilters(nf);
+    if (userId) {
+      fetchTicketsWithUserId(userId, nf);
+    }
+  };
+
+  const CREATE_STATUS_LABELS: Record<string, string> = {
+    '1': 'Abierto',
+    '2': 'Resuelto',
+    '3': 'Cancelado',
+    '7': 'Devuelta',
+  };
+
   async function exportToExcel() {
     if (exporting) return;
-    // Se exporta exactamente lo que se ve (filtros + buscador), sobre toda la lista.
-    const exportTickets = visibleTickets;
-    if (exportTickets.length === 0) {
+    if (tickets.length === 0) {
       toast.error('No hay solicitudes con los filtros actuales');
       return;
     }
     setExporting(true);
     try {
       const { boardExportFilename, buildBoardWorkbook } = await import('@/lib/request-general/exportBoardExcel');
-      const ids = exportTickets.map((ticket) => ticket.id);
+      const ids = tickets.map((ticket) => ticket.id);
       const grouped: Record<number, RequestTask[]> = {};
       for (let i = 0; i < ids.length; i += 500) {
         const batch = ids.slice(i, i + 500);
@@ -1349,13 +1382,21 @@ function RequestBoard() {
         }
       }
 
+      const companyLabel =
+        companies.find((company) => company.value === filters.company)?.label || 'Todas';
+      const assignedLabel =
+        assignedUsers.find((user) => user.value === filters.assigned_to)?.label || 'Todas';
       const workbook = await buildBoardWorkbook({
         module: 'Mis solicitudes',
         filters: [
-          ...describeListFilters(filters, listOptions),
-          { label: 'Búsqueda', value: searchInput.trim() || 'Ninguna' },
+          { label: 'Estado', value: CREATE_STATUS_LABELS[filters.status] || 'Todos' },
+          { label: 'Empresa', value: companyLabel },
+          { label: 'Persona asignada', value: assignedLabel },
+          { label: 'ID', value: filters.id || 'Todos' },
+          { label: 'Fecha desde', value: filters.date_from || 'Sin límite' },
+          { label: 'Fecha hasta', value: filters.date_to || 'Sin límite' },
         ],
-        requests: exportTickets.map((ticket) => ({
+        requests: tickets.map((ticket) => ({
           id: ticket.id,
           subject: ticket.subject,
           process: ticket.process,
@@ -1516,20 +1557,167 @@ function RequestBoard() {
         }
       />
 
-      <RequestListFilters
-        filters={filters}
-        onChange={setFilters}
-        onClear={clearListFilters}
-        counts={statusCounts}
-        options={listOptions}
-        progress={globalProgress}
-      />
+      <div className={panelStyles.grid4}>
+        <StatFilterTile
+          icon={<IconFileDescription size={20} />}
+          label='Total de solicitudes'
+          value={tickets.length}
+          tone='info'
+          active={filters.status === ''}
+          onClick={() => filterByStatus('')}
+          ariaLabel='Mostrar todas las solicitudes'
+        />
+        <StatFilterTile
+          icon={<IconProgress size={20} />}
+          label='Pendientes'
+          value={tickets.filter((t) => t.status?.toLowerCase() === 'abierto').length}
+          tone='warning'
+          active={filters.status === '1'}
+          onClick={() => filterByStatus('1')}
+          ariaLabel='Filtrar solicitudes pendientes'
+        />
+        <StatFilterTile
+          icon={<IconCheck size={20} />}
+          label='Completadas'
+          value={tickets.filter((t) => t.status?.toLowerCase() === 'resuelto').length}
+          tone='ok'
+          active={filters.status === '2'}
+          onClick={() => filterByStatus('2')}
+          ariaLabel='Filtrar solicitudes completadas'
+        />
+        <ProgressRingTile
+          label='Avance de tareas'
+          done={globalProgress.done}
+          total={globalProgress.total}
+          percent={globalProgress.percent}
+        />
+      </div>
 
       {error && (
         <Alert icon={<IconAlertCircle size={20} />} title='Error' color='red' radius='lg' mt='md'>
           {error}
         </Alert>
       )}
+
+      <FilterPanel
+        expanded={filtersExpanded}
+        onToggle={() => setFiltersExpanded(!filtersExpanded)}
+        icon={<IconFilter size={18} />}
+      >
+          <Collapse in={filtersExpanded}>
+            <Box mt='md'>
+              <Grid>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <TextInput
+                    label='ID Solicitud'
+                    type='text'
+                    value={filters.id}
+                    onChange={(e) => handleFilterChange('id', e.target.value)}
+                    leftSection={<IconFilter size={16} />}
+                    data-testid='id-filter'
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <Select
+                    label='Estado'
+                    placeholder='Todos los estados'
+                    clearable
+                    data={[
+                      { value: '1', label: 'Abierto' },
+                      { value: '3', label: 'Cancelado' },
+                      { value: '2', label: 'Resuelto' },
+                      { value: '7', label: 'Devuelta' },
+                    ]}
+                    value={filters.status}
+                    onChange={(value) => handleFilterChange('status', value || '')}
+                    leftSection={<IconFlag size={16} />}
+                    data-testid='status-filter'
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <Select
+                    label='Empresa'
+                    placeholder='Todas las empresas'
+                    clearable
+                    data={companies}
+                    value={filters.company}
+                    onChange={(value) => handleFilterChange('company', value || '')}
+                    leftSection={<IconBuilding size={16} />}
+                    data-testid='company-filter'
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <TextInput
+                    label='Fecha Desde'
+                    type='date'
+                    value={filters.date_from}
+                    onChange={(e) => handleFilterChange('date_from', e.target.value)}
+                    leftSection={<IconCalendarEvent size={16} />}
+                    data-testid='date_from-filter'
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <TextInput
+                    label='Fecha Hasta'
+                    type='date'
+                    value={filters.date_to}
+                    onChange={(e) => handleFilterChange('date_to', e.target.value)}
+                    leftSection={<IconCalendarEvent size={16} />}
+                    data-testid='date_to-filter'
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+                  <Select
+                    label='Persona Asignada'
+                    placeholder='Todas las personas'
+                    clearable
+                    data={assignedUsers}
+                    value={filters.assigned_to}
+                    onChange={(value) => handleFilterChange('assigned_to', value || '')}
+                    leftSection={<IconUserCheck size={16} />}
+                    data-testid='assigned_to-filter'
+                  />
+                </Grid.Col>
+              </Grid>
+
+              <Group justify='flex-end' mt='md'>
+                <Button
+                  variant='outline'
+                  onClick={async () => {
+                    const clearedFilters = {
+                      id: '',
+                      status: '',
+                      company: '',
+                      date_from: '',
+                      date_to: '',
+                      assigned_to: '',
+                    };
+                    setFilters(clearedFilters);
+
+                    setError(null);
+
+                    setTimeout(async () => {
+                      if (userId) {
+                        await fetchTicketsWithUserId(userId);
+                      }
+                    }, 100);
+                  }}
+                  leftSection={<IconX size={16} />}
+                  data-testid='clear-filters'
+                >
+                  Limpiar Filtros
+                </Button>
+                <Button
+                  onClick={handleApplyFilters}
+                  leftSection={<IconRefresh size={16} />}
+                  data-testid='apply-filters'
+                >
+                  Aplicar Filtros
+                </Button>
+              </Group>
+            </Box>
+          </Collapse>
+      </FilterPanel>
 
         {/* Enhanced Table */}
         <Card shadow='sm' radius='md' withBorder className='overflow-hidden'>
@@ -1550,9 +1738,9 @@ function RequestBoard() {
               placeholder='Buscar ID, asunto, empresa, categoría, estado o persona'
               ariaLabel='Buscar solicitudes'
               meta={
-                visibleTickets.length !== tickets.length
+                searchInput.trim()
                   ? `${visibleTickets.length} de ${tickets.length} solicitud(es)`
-                  : 'Busca en todas tus solicitudes; no importan tildes ni mayúsculas'
+                  : 'Una o varias palabras; no importan tildes ni mayúsculas'
               }
             />
           </Box>
@@ -1580,8 +1768,8 @@ function RequestBoard() {
                         </Text>
                         <Text size='sm' c='gray.5'>
                           {tickets.length > 0
-                            ? 'Ninguna solicitud coincide con los filtros o la búsqueda'
-                            : 'Aún no tienes solicitudes; crea una nueva'}
+                            ? `Ninguna solicitud coincide con “${searchInput.trim()}”`
+                            : 'Intenta ajustar los filtros o crea una nueva solicitud'}
                         </Text>
                       </div>
                     </Table.Td>
