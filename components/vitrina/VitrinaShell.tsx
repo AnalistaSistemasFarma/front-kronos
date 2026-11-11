@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
 import { Alert, Anchor, Breadcrumbs, Card, Group, Loader, Text, Title } from '@mantine/core';
 import { IconAlertTriangle, IconBuildingStore, IconChevronRight } from '@tabler/icons-react';
 import SgcSelect from '../sgc/SgcSelect';
 import { VITRINA_GESTION_NAME, VITRINA_MODULE_NAME } from '../../lib/vitrina/constants';
+import { FILTROS_CLAVES } from '../../lib/vitrina/catalogo';
 import type { CompanyAccess } from './types';
 
 /**
@@ -20,7 +22,8 @@ type Estado = { tipo: 'cargando' } | { tipo: 'error'; mensaje: string } | { tipo
 
 function preferida(): string | null {
   if (typeof window === 'undefined') return null;
-  const url = new URLSearchParams(window.location.search).get('empresa');
+  const qs = new URLSearchParams(window.location.search);
+  const url = qs.get('empresa') ?? qs.get('company');
   if (url) return url;
   try {
     return window.sessionStorage.getItem(STORAGE_KEY);
@@ -68,14 +71,26 @@ export default function VitrinaShell({ title, subtitle, requireGestion, trail, a
     };
   }, [requireGestion]);
 
-  const setCompanyId = useCallback((v: string | null) => {
-    setCompanyIdState(v);
-    try {
-      if (v) window.sessionStorage.setItem(STORAGE_KEY, v);
-    } catch {
-      /* sin almacenamiento */
-    }
-  }, []);
+  const router = useRouter();
+  const pathname = usePathname();
+  const setCompanyId = useCallback(
+    (v: string | null) => {
+      setCompanyIdState(v);
+      try {
+        if (v) window.sessionStorage.setItem(STORAGE_KEY, v);
+      } catch {
+        /* sin almacenamiento */
+      }
+      // Al cambiar de empresa, la búsqueda y los filtros de la otra empresa ya no aplican.
+      const qs = new URLSearchParams(window.location.search);
+      for (const k of FILTROS_CLAVES) qs.delete(k);
+      qs.delete('company');
+      if (v) qs.set('empresa', v);
+      const s = qs.toString();
+      router.replace(s ? `${pathname}?${s}` : pathname, { scroll: false });
+    },
+    [router, pathname]
+  );
 
   const company = useMemo(
     () => (estado.tipo === 'listo' ? (estado.companies.find((c) => String(c.idCompany) === companyId) ?? null) : null),
