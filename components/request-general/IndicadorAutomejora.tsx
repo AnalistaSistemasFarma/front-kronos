@@ -4,8 +4,10 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ActionIcon, Alert, Anchor, Badge, Card, Collapse, Group, Loader, Select, SimpleGrid, Table, Text, ThemeIcon, Tooltip } from '@mantine/core';
 import { IconChevronDown, IconChevronUp, IconRefresh, IconTrendingUp } from '@tabler/icons-react';
-import type { ResumenEmpresa, ResumenFlujo } from '../../lib/workflow/mejora-continua-rules';
-import { textoDias } from '../../lib/workflow/mejora-continua-rules';
+import type { ResumenEmpresa, ResumenFlujo, Tendencia } from '../../lib/workflow/mejora-continua-rules';
+import { textoDias, textoTendencia } from '../../lib/workflow/mejora-continua-rules';
+import GraficoTendencia, { COLOR_VEREDICTO, FlechaTendencia } from './GraficoTendencia';
+import { CriterioCalificacion, EstadoFlujoBadge } from './EstadoFlujo';
 
 /**
  * INDICADOR DE AUTOMEJORA DE PROCESOS en el panel de Flujos de trabajo (2026-11-09; Nicolás
@@ -22,11 +24,12 @@ interface Respuesta {
   calculadoEn?: string;
   total?: ResumenEmpresa;
   flujos?: ResumenFlujo[];
+  tendencia?: Tendencia;
 }
 
 const MAX_FILAS = 8;
 
-export default function IndicadorAutomejora({ from = 'workflows' }: { from?: string }) {
+export default function IndicadorAutomejora(_props: { from?: string }) {
   const [datos, setDatos] = useState<Respuesta | null>(null);
   const [oculto, setOculto] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,7 +87,7 @@ export default function IndicadorAutomejora({ from = 'workflows' }: { from?: str
               Automejora de procesos
             </Text>
             <Text size='xs' c='dimmed'>
-              Cómo funcionan los flujos en la realidad (últimos 6 meses) y qué se ha mejorado.
+              Si los flujos se han vuelto más rápidos, dónde se demoran y qué se ha mejorado (últimos 6 meses).
               {datos?.calculadoEn ? ` Calculado ${new Date(datos.calculadoEn).toLocaleString('es-CO', { hour: 'numeric', minute: '2-digit', day: 'numeric', month: 'short' })}.` : ''}
             </Text>
           </div>
@@ -130,9 +133,48 @@ export default function IndicadorAutomejora({ from = 'workflows' }: { from?: str
           </Group>
         ) : (
           <>
+            {datos?.tendencia && (
+              <Card withBorder radius='md' p='md' mt='sm' style={{ borderColor: `var(--mantine-color-${COLOR_VEREDICTO[datos.tendencia.veredicto]}-4)` }}>
+                <Group justify='space-between' align='flex-start' wrap='wrap' gap='md'>
+                  <div style={{ minWidth: 220 }}>
+                    <Text size='xs' c='dimmed'>
+                      ¿Los procesos se han vuelto más rápidos?
+                    </Text>
+                    <Text fw={800} size='xl' c={`${COLOR_VEREDICTO[datos.tendencia.veredicto]}.7`} data-testid='automejora-veredicto'>
+                      {textoTendencia(datos.tendencia)}
+                    </Text>
+                    <Text size='xs'>
+                      Duración normal de una solicitud: <b>{textoDias(datos.tendencia.reciente.medianaDias)}</b> en los últimos 30 días (
+                      {datos.tendencia.reciente.casos}) frente a <b>{textoDias(datos.tendencia.base.medianaDias)}</b> entre 1 y 4 meses atrás (
+                      {datos.tendencia.base.casos}).
+                    </Text>
+                    <Group gap={6} mt={6}>
+                      <Badge color='green' variant='light'>
+                        {t.masRapidos} flujos más rápidos
+                      </Badge>
+                      <Badge color='red' variant='light'>
+                        {t.masLentos} más lentos
+                      </Badge>
+                      <Badge color='gray' variant='light'>
+                        {t.iguales} igual
+                      </Badge>
+                    </Group>
+                  </div>
+                  <div style={{ flex: '1 1 360px', minWidth: 280 }}>
+                    <GraficoTendencia tendencia={datos.tendencia} alto={150} />
+                  </div>
+                </Group>
+              </Card>
+            )}
+
             <SimpleGrid cols={{ base: 2, sm: 3, lg: 6 }} spacing='xs' mt='sm'>
               <Cifra titulo='Flujos con movimiento' valor={`${t.flujosConMovimiento} de ${t.flujos}`} color='blue' />
-              <Cifra titulo='Cuellos de botella' valor={String(t.cuellosDeBotella)} color={t.cuellosDeBotella > 0 ? 'red' : 'green'} ayuda='Tareas en rojo' />
+              <Cifra
+                titulo='Necesitan mejoras'
+                valor={String(t.necesitanMejoras)}
+                color={t.necesitanMejoras > 0 ? 'red' : 'green'}
+                ayuda={`${t.aRevisar} para revisar · ${t.vanBien} van bien`}
+              />
               <Cifra titulo='Sugerencias por revisar' valor={String(t.pendientes)} color={t.pendientes > 0 ? 'yellow' : 'green'} />
               <Cifra titulo='Mejoras aplicadas' valor={String(t.aplicadas)} color='teal' />
               <Cifra
@@ -156,7 +198,8 @@ export default function IndicadorAutomejora({ from = 'workflows' }: { from?: str
                       <Table.Th>Flujo (por prioridad)</Table.Th>
                       <Table.Th ta='right'>Solicitudes</Table.Th>
                       <Table.Th ta='right'>Duración normal</Table.Th>
-                      <Table.Th>Semáforo</Table.Th>
+                      <Table.Th>Tendencia</Table.Th>
+                      <Table.Th>Estado</Table.Th>
                       <Table.Th ta='right'>Por revisar</Table.Th>
                       <Table.Th ta='right'>Aplicadas</Table.Th>
                     </Table.Tr>
@@ -165,34 +208,28 @@ export default function IndicadorAutomejora({ from = 'workflows' }: { from?: str
                     {visibles.map((f) => (
                       <Table.Tr key={f.idProcessCategory}>
                         <Table.Td>
-                          <Anchor component={Link} href={`/process/request-general/view-workflows?id=${f.idProcessCategory}&from=${from}`} size='sm'>
+                          <Anchor component={Link} href={`/process/request-general/mejora-continua?id=${f.idProcessCategory}`} size='sm'>
                             {f.nombre}
                           </Anchor>
                         </Table.Td>
                         <Table.Td ta='right'>{f.solicitudes.toLocaleString('es-CO')}</Table.Td>
                         <Table.Td ta='right'>{textoDias(f.cicloMedianaDias)}</Table.Td>
                         <Table.Td>
-                          <Group gap={4} wrap='nowrap'>
-                            {f.rojas > 0 && (
-                              <Badge size='sm' color='red' variant='light'>
-                                {f.rojas} {f.rojas === 1 ? 'cuello' : 'cuellos'}
-                              </Badge>
-                            )}
-                            {f.amarillas > 0 && (
-                              <Badge size='sm' color='yellow' variant='light'>
-                                {f.amarillas} se {f.amarillas === 1 ? 'demora' : 'demoran'}
-                              </Badge>
-                            )}
-                            {f.rojas === 0 && f.amarillas === 0 && (
-                              <Badge size='sm' color='green' variant='light'>
-                                Fluye bien
-                              </Badge>
-                            )}
-                          </Group>
+                          <FlechaTendencia tendencia={f.tendencia} />
+                        </Table.Td>
+                        <Table.Td>
+                          <EstadoFlujoBadge calificacion={f.calificacion} />
                         </Table.Td>
                         <Table.Td ta='right'>
                           {f.pendientes > 0 ? (
-                            <Badge size='sm' color='teal' variant='filled'>
+                            <Badge
+                              size='sm'
+                              color='teal'
+                              variant='filled'
+                              component={Link}
+                              href={`/process/request-general/mejora-continua?id=${f.idProcessCategory}`}
+                              style={{ cursor: 'pointer' }}
+                            >
                               {f.pendientes}
                             </Badge>
                           ) : (
@@ -206,6 +243,7 @@ export default function IndicadorAutomejora({ from = 'workflows' }: { from?: str
                     ))}
                   </Table.Tbody>
                 </Table>
+                <CriterioCalificacion />
                 {flujos.length > MAX_FILAS && (
                   <Anchor component='button' type='button' size='xs' mt='xs' onClick={() => setTodos((v) => !v)}>
                     {todos ? 'Ver menos' : `Ver los ${flujos.length} flujos`}

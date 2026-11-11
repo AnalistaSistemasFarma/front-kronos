@@ -52,6 +52,7 @@ import {
   EMPTY_LIST_FILTERS,
   buildListOptions,
   countByStatusGroup,
+  REQUEST_STATE_OPTIONS,
   describeListFilters,
   matchesListFilters,
   splitPeople,
@@ -119,9 +120,8 @@ function ViewerRequestGeneralPage() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  // Filtros extra de observadores: categoría (en el navegador) y departamento del solicitante
-  // (en el servidor: cambia el conjunto que se trae).
-  const [categoryFilter, setCategoryFilter] = useState('');
+  // Filtros extra de observadores: categoría (en el navegador, dentro de `filters`) y
+  // departamento del solicitante (en el servidor: cambia el conjunto que se trae).
   const [departmentFilter, setDepartmentFilter] = useState('');
   const [departmentOptions, setDepartmentOptions] = useState<{ value: string; label: string }[]>(
     []
@@ -141,6 +141,8 @@ function ViewerRequestGeneralPage() {
         row: {
           requestId: t.id,
           group: statusGroupOf(t.id_status_case, t.status),
+          statusId: t.id_status_case,
+          category: t.category,
           companyId: String(t.id_company ?? ''),
           company: t.company,
           process: t.process ?? '',
@@ -150,8 +152,6 @@ function ViewerRequestGeneralPage() {
       })),
     [tickets]
   );
-  const listOptions = useMemo(() => buildListOptions(ticketRows.map((x) => x.row)), [ticketRows]);
-  // Búsqueda + filtros del panel; el estado se aplica aparte para que las tarjetas no cambien.
   const categoryOptions = useMemo(
     () =>
       [...new Set(tickets.map((t) => t.category).filter(Boolean))]
@@ -159,14 +159,22 @@ function ViewerRequestGeneralPage() {
         .map((c) => ({ value: c, label: c })),
     [tickets]
   );
+  // «Estado» exacto y «Categoría» van en el mismo panel (los filtros que había antes del panel).
+  const listOptions = useMemo(
+    () => ({
+      ...buildListOptions(ticketRows.map((x) => x.row)),
+      categories: categoryOptions,
+      states: REQUEST_STATE_OPTIONS,
+    }),
+    [ticketRows, categoryOptions]
+  );
+  // Búsqueda + filtros del panel; el estado se aplica aparte para que las tarjetas no cambien.
   const matchingRows = useMemo(
     () =>
-      filterByText(ticketRows, deferredSearch, (x) => requestSearchParts(x.ticket)).filter(
-        (x) =>
-          (!categoryFilter || x.ticket.category === categoryFilter) &&
-          matchesListFilters(x.row, filters, { ignoreStatus: true })
+      filterByText(ticketRows, deferredSearch, (x) => requestSearchParts(x.ticket)).filter((x) =>
+        matchesListFilters(x.row, filters, { ignoreStatus: true })
       ),
-    [ticketRows, deferredSearch, filters, categoryFilter]
+    [ticketRows, deferredSearch, filters]
   );
   const statusCounts = useMemo(() => countByStatusGroup(matchingRows.map((x) => x.row)), [matchingRows]);
   const visibleTickets = useMemo(
@@ -177,7 +185,7 @@ function ViewerRequestGeneralPage() {
   // Paginación en cliente: al cambiar filtros o búsqueda vuelve a la página 1.
   useEffect(() => {
     setCurrentPage(1);
-  }, [filters, deferredSearch, tickets, categoryFilter]);
+  }, [filters, deferredSearch, tickets]);
 
   const totalPages = Math.max(1, Math.ceil(visibleTickets.length / ITEMS_PER_PAGE));
   const pageItems = visibleTickets.slice(
@@ -188,7 +196,6 @@ function ViewerRequestGeneralPage() {
   const clearListFilters = () => {
     setFilters(EMPTY_LIST_FILTERS);
     setSearchInput('');
-    setCategoryFilter('');
     if (departmentFilter) {
       setDepartmentFilter('');
       void fetchTickets(false, '');
@@ -376,7 +383,6 @@ function ViewerRequestGeneralPage() {
         module: 'Mis solicitudes',
         filters: [
           ...describeListFilters(filters, listOptions),
-          { label: 'Categoría', value: categoryFilter || 'Todas' },
           { label: 'Departamento del solicitante', value: departmentLabel(departmentFilter) },
           { label: 'Búsqueda', value: searchInput.trim() || 'Ninguna' },
         ],
@@ -435,38 +441,24 @@ function ViewerRequestGeneralPage() {
         counts={statusCounts}
         options={listOptions}
         progress={globalProgress}
+        extraActiveCount={departmentFilter ? 1 : 0}
+        extraFields={
+          <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+            <Select
+              label='Departamento del solicitante'
+              placeholder='Todos'
+              clearable
+              searchable
+              data={departmentOptions}
+              value={departmentFilter || null}
+              onChange={(value) => changeDepartment(value || '')}
+              leftSection={<IconBuilding size={16} />}
+              nothingFoundMessage='Sin coincidencias'
+              data-testid='department-filter'
+            />
+          </Grid.Col>
+        }
       />
-
-      <Grid mt='sm'>
-        <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-          <Select
-            label='Categoría'
-            placeholder='Todas las categorías'
-            clearable
-            searchable
-            data={categoryOptions}
-            value={categoryFilter || null}
-            onChange={(value) => setCategoryFilter(value || '')}
-            leftSection={<IconFileDescription size={16} />}
-            nothingFoundMessage='Sin coincidencias'
-            data-testid='category-filter'
-          />
-        </Grid.Col>
-        <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-          <Select
-            label='Departamento del solicitante'
-            placeholder='Todos'
-            clearable
-            searchable
-            data={departmentOptions}
-            value={departmentFilter || null}
-            onChange={(value) => changeDepartment(value || '')}
-            leftSection={<IconBuilding size={16} />}
-            nothingFoundMessage='Sin coincidencias'
-            data-testid='department-filter'
-          />
-        </Grid.Col>
-      </Grid>
 
       {error && (
         <Alert icon={<IconAlertCircle size={20} />} title='Error' color='red' radius='lg' mt='md'>

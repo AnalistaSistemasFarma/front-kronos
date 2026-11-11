@@ -15,7 +15,9 @@ import { checkAdminPrivileges } from '../access-control';
 import { getAssignedSubprocessIdsForUser } from '../process/subprocessAssignments';
 import {
   DIAS_HISTORIA,
+  calcularTendencia,
   diagnosticar,
+  tendenciaEmpresa,
   resumirFlujo,
   totalizar,
   type DecisionResumen,
@@ -229,7 +231,13 @@ export async function decidir(
 
 /* ───────────────────────────── Indicador del panel de flujos ───────────────────────────── */
 
-const cacheResumen = new Map<number, { en: number; valor: { flujos: ResumenFlujo[]; total: ReturnType<typeof totalizar> } }>();
+type Indicador = {
+  flujos: ResumenFlujo[];
+  total: ReturnType<typeof totalizar>;
+  /** Tendencia de TODA la empresa: cada flujo contra sí mismo, pesado por volumen (sin efecto mezcla). */
+  tendencia: ReturnType<typeof calcularTendencia>;
+};
+const cacheResumen = new Map<number, { en: number; valor: Indicador }>();
 
 /** Empresas habilitadas con su nombre (para el selector del indicador). */
 export async function empresasDelIndicador(): Promise<{ idCompany: number; nombre: string }[]> {
@@ -265,6 +273,7 @@ export async function indicadorDeEmpresa(idCompany: number, opciones: { refresca
 
   // De a 3 flujos a la vez: no cargar la base con decenas de consultas simultáneas.
   const resumenes: ResumenFlujo[] = [];
+  const paraEmpresa: { tendencia: ReturnType<typeof calcularTendencia>; ciclos: [number, number][] }[] = [];
   for (let i = 0; i < flujos.length; i += 3) {
     const lote = await Promise.all(
       flujos.slice(i, i + 3).map(async (f) => {
@@ -277,14 +286,44 @@ export async function indicadorDeEmpresa(idCompany: number, opciones: { refresca
             estado: x.estado as DecisionResumen['estado'],
             medianaAntes: x.metrica_antes ? ((JSON.parse(x.metrica_antes) as { medianaDias?: number | null }).medianaDias ?? null) : null,
           }));
+        paraEmpresa.push({ tendencia: r.diagnostico.tendencia, ciclos: r.diagnostico.ciclos });
         return resumirFlujo(f.id, f.process.trim(), r.diagnostico, dec);
       })
     );
     for (const x of lote) if (x) resumenes.push(x);
   }
   resumenes.sort((a, b) => b.prioridad - a.prioridad || b.solicitudes - a.solicitudes);
-  const valor = { flujos: resumenes, total: totalizar(resumenes) };
+  const valor: Indicador = {
+    flujos: resumenes,
+    total: totalizar(resumenes),
+    tendencia: tendenciaEmpresa(paraEmpresa, new Date(Date.now() - COT_MS)),
+  };
   const en = Date.now();
   cacheResumen.set(idCompany, { en, valor });
   return { calculadoEn: new Date(en).toISOString(), ...valor };
+}
+
+/* ───────────────────────────── Flujo por id ───────────────────────────── */
+
+/**
+ * Datos de UN flujo con la misma forma que la lista de Administración de flujos
+ * (workflow-administration), para abrir el editor por enlace (?id=N). Antes el editor solo
+ * leía el flujo guardado en el navegador al tocarlo en la lista: desde otro enlace daba
+ * «No se encontraron datos del flujo» o mostraba el último flujo abierto (2026-11-09).
+ */
+export async function flujoPorId(idProcessCategory: number) {
+  const filas = await prisma.$queryRaw<Record<string, unknown>[]>`
+    SELECT TOP 1 pc.id, cr.id AS id_category, cr.category, pc.process, pc.description, pc.active,
+           pc.id_status AS id_status_process, scpc.status AS status_process,
+           upc.id AS id_assigned_process_category, upc.name AS assigned_process_category,
+           c.company, pc.webhook_url, pc.is_external
+    FROM dbo.process_category pc
+    LEFT JOIN dbo.category_request cr ON cr.id = pc.id_category_request
+    INNER JOIN dbo.status_case scpc ON scpc.id_status_case = pc.id_status
+    LEFT JOIN dbo.user_process_category_request_general upcrg ON upcrg.id_process_category = pc.id
+    LEFT JOIN dbo.[user] upc ON upc.id = upcrg.id_user
+    INNER JOIN dbo.company_category_request ccr ON ccr.id_category_request = cr.id
+    INNER JOIN dbo.company c ON c.id_company = ccr.id_company
+    WHERE pc.id = ${idProcessCategory}`;
+  return filas[0] ?? null;
 }

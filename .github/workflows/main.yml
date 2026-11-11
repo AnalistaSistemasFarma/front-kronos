@@ -148,6 +148,8 @@ jobs:
           Write-Host "Cambios $old..$sha -> esquema=$schema mcp=$mcp dependencias=$deps"
           "schema=$schema" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "| Cambio | Valor |`n|---|---|`n| prisma/ | $schema |`n| mcp/ | $mcp |`n| dependencias | $deps |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          # git diff --quiet deja $LASTEXITCODE=1 cuando hay cambios; sin esto el paso falla (pase #924, 2026-11-10).
+          exit 0
 
       - name: Instalar, generar Prisma y compilar (front + MCP) en la carpeta inactiva
         if: steps.resolve.outputs.skip != 'true'
@@ -172,6 +174,22 @@ jobs:
           if ($rc -ne 0) {
             if ($env:MODO -eq 'aviso') { Write-Host "::warning::Verificacion de esquema con codigo $rc (modo aviso: se sigue)."; exit 0 }
             throw "Verificacion de esquema con codigo $rc. No se cambia de version: la activa sigue atendiendo. Aplique los SQL del pase y relance (workflow_dispatch)."
+          }
+
+      - name: Verificar que la BD tiene las tablas y columnas que el codigo usa sin Prisma (siempre)
+        if: steps.resolve.outputs.skip != 'true'
+        shell: powershell
+        env:
+          MODO: ${{ inputs.verificar_esquema || 'estricto' }}
+        run: |
+          # prisma/manual/objetos-requeridos.json: task_kind, task_sap_action, sales_*... (bloque B, 2026-11-05).
+          # Solo lectura (OBJECT_ID / COL_LENGTH). Si falta algo, no hay cambio de color.
+          $dir = "${{ steps.resolve.outputs.dir }}"
+          node (Join-Path $dir 'scripts\bluegreen\verificar-objetos-sql.cjs') $dir
+          $rc = $LASTEXITCODE
+          if ($rc -ne 0) {
+            if ($env:MODO -eq 'aviso') { Write-Host "::warning::Verificacion de objetos SQL con codigo $rc (modo aviso: se sigue)."; exit 0 }
+            throw "Faltan tablas o columnas en la BD (codigo $rc). No se cambia de version: la activa sigue atendiendo. Aplique los SQL del pase y relance (workflow_dispatch)."
           }
 
   switch:

@@ -9,17 +9,34 @@ import { evaluarHallazgos, type InventoryAgent, type InventoryPayload } from './
 /** Una solicitud 'en_curso' más vieja que esto se da por perdida. */
 export const SOLICITUD_VENCE_MS = 2 * 60 * 60 * 1000;
 
-/** Marca como fallidas las solicitudes que el recolector tomó y nunca cerró. */
+/**
+ * Marca como fallidas las solicitudes que el recolector tomó y nunca cerró, y
+ * las que siguen 'pendiente' sin que ningún recolector las tomara (en producción
+ * la #1 quedó pendiente del 2026-10-20 al 2026-11-09 porque no había recolector
+ * conectado, y la pantalla mostraba «en cola» indefinidamente).
+ */
 export async function vencerSolicitudesColgadas(ahora = new Date()): Promise<void> {
+  const limite = new Date(ahora.getTime() - SOLICITUD_VENCE_MS);
   await prisma.agentScanRequest.updateMany({
     where: {
       status: 'en_curso',
-      started_at: { lt: new Date(ahora.getTime() - SOLICITUD_VENCE_MS) },
+      started_at: { lt: limite },
     },
     data: {
       status: 'fallido',
       finished_at: ahora,
       error_summary: 'El recolector tomó la solicitud y no terminó a tiempo.',
+    },
+  });
+  await prisma.agentScanRequest.updateMany({
+    where: {
+      status: 'pendiente',
+      requested_at: { lt: limite },
+    },
+    data: {
+      status: 'fallido',
+      finished_at: ahora,
+      error_summary: 'Ningún recolector tomó la solicitud.',
     },
   });
 }

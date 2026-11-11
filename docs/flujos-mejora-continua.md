@@ -39,3 +39,17 @@ sirve: viene en otra zona horaria que `date_resolution` y a veces está vacío.
 - Historial de cambios del flujo para medir automáticamente el antes y el después.
 - Sugerencias grandes que primero se discuten en una mesa de agentes.
 - Un agente que redacte el resumen semanal de mejoras por empresa.
+
+## Ajustes del 2026-11-09 (revisión de Nicolás Rivera en testing)
+
+- **Criterio explícito del flujo** (`calificarFlujo`), igual en el indicador y en la página del flujo:
+  - *Necesita mejoras*: una tarea es cuello de botella, o una solicitud tarda normalmente 10 días o más, o el flujo se volvió más lento que antes.
+  - *Revisar*: una tarea se demora, o una solicitud tarda normalmente 3 días o más, o hay sugerencias sin revisar.
+  - *Va bien*: nada de lo anterior, con al menos 5 solicitudes resueltas.
+  - *Pocos datos*: menos de 5 resueltas y nada de lo anterior. Con menos de 5 resueltas se marca «pocos casos».
+  Antes un flujo de 11,8 días con 1 caso salía «Fluye bien» porque ninguna tarea tenía casos suficientes para calificarse.
+- **Página propia** `/process/request-general/mejora-continua?id=N` (el editor quedaba saturado): calificación con motivos,
+  tendencia, sugerencias y cada tarea con su semáforo. El editor solo muestra el botón «Mejora continua» con el estado y las
+  sugerencias por revisar. «Aplicar» registra la decisión y abre el editor con `?mejora=tipo:idTarea`.
+- **El editor abre el flujo por su id**: antes leía el último flujo guardado en el navegador, así que desde un enlace daba
+  «No se encontraron datos del flujo» o mostraba otro flujo (y por eso las sugerencias no cuadraban con el indicador).

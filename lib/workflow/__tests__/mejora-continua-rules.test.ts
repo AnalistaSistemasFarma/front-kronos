@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { diagnosticar, percentil, resumirFlujo, textoDias, totalizar, type Solicitud, type TareaDef, type TareaInstancia } from '../mejora-continua-rules';
+import { calcularTendencia, calificarFlujo, diagnosticar, tendenciaEmpresa, percentil, resumirFlujo, textoDias, textoTendencia, totalizar, type Solicitud, type TareaDef, type TareaInstancia } from '../mejora-continua-rules';
 
 /* Mejora continua de los flujos (2026-11-09). Reglas PURAS (lib/workflow/mejora-continua-rules.ts). */
 
@@ -146,3 +146,115 @@ describe('indicador del panel de flujos', () => {
     expect(totalizar([a, b])).toMatchObject({ flujos: 2, aplicadas: 2, descartadas: 1, adopcion: 67, diasAhorrados: 3 });
   });
 });
+
+describe('¿se han vuelto más rápidos? (tendencia)', () => {
+  const H = new Date('2026-11-09T12:00:00Z');
+  const hace = (dias: number) => H.getTime() - dias * 86_400_000;
+  /** n solicitudes resueltas hace `desde`..`desde+n` días, cada una de `dur` días. */
+  const lote = (n: number, desde: number, dur: number): [number, number][] => Array.from({ length: n }, (_, i) => [hace(desde + i), dur]);
+
+  it('más rápido: lo reciente tarda 2 días y antes tardaba 4 → 50 % más rápido', () => {
+    const t = calcularTendencia([...lote(10, 1, 2), ...lote(20, 40, 4)], H);
+    expect(t).toMatchObject({ cambioPct: -50, veredicto: 'mas_rapido', reciente: { medianaDias: 2, casos: 10 }, base: { medianaDias: 4, casos: 20 } });
+    expect(textoTendencia(t)).toBe('50 % más rápido');
+  });
+
+  it('más lento y casi igual', () => {
+    expect(calcularTendencia([...lote(10, 1, 3), ...lote(10, 40, 2)], H)).toMatchObject({ cambioPct: 50, veredicto: 'mas_lento' });
+    expect(calcularTendencia([...lote(10, 1, 2.1), ...lote(10, 40, 2)], H).veredicto).toBe('igual');
+  });
+
+  it('sin casos suficientes en alguno de los dos periodos: sin datos', () => {
+    const t = calcularTendencia([...lote(3, 1, 2), ...lote(20, 40, 4)], H);
+    expect(t.veredicto).toBe('sin_datos');
+    expect(textoTendencia(t)).toBe('Sin datos suficientes');
+  });
+
+  it('flujos que se resuelven en minutos: igual, sin porcentajes engañosos', () => {
+    expect(calcularTendencia([...lote(10, 1, 0.001), ...lote(10, 40, 0.02)], H)).toMatchObject({ cambioPct: 0, veredicto: 'igual' });
+  });
+
+  it('serie mensual de los últimos 6 meses', () => {
+    const t = calcularTendencia(lote(10, 1, 2), H);
+    expect(t.meses).toHaveLength(6);
+    expect(t.meses[5]).toMatchObject({ mes: '2026-11', casos: 8, medianaDias: 2 });
+    expect(t.meses[0].mes).toBe('2026-06');
+  });
+
+  it('el diagnóstico del flujo trae su tendencia y el indicador cuenta flujos más rápidos', () => {
+    const { solicitudes, instancias } = casos();
+    const d = diagnosticar({ ahora: AHORA, tareas, solicitudes, instancias, notas: [], erroresSap: [] });
+    expect(d.tendencia.meses).toHaveLength(6);
+    expect(d.ciclos).toHaveLength(24);
+    const r = resumirFlujo(1, 'A', d, []);
+    expect(totalizar([r])).toMatchObject({ masRapidos: 0, masLentos: 0 });
+  });
+});
+
+describe('tendencia de la empresa sin efecto mezcla', () => {
+  const H = new Date('2026-11-09T12:00:00Z');
+  const hace = (dias: number) => H.getTime() - dias * 86_400_000;
+  const lote = (n: number, desde: number, dur: number): [number, number][] => Array.from({ length: n }, (_, i) => [hace(desde + i), dur]);
+
+  it('un flujo automatizado que gana volumen NO hace «más rápida» a la empresa', () => {
+    // Pagos: igual (5 días antes y ahora). Ofertas: instantáneas, solo recientes (sin base).
+    const pagos = [...lote(10, 1, 5), ...lote(10, 40, 5)];
+    const ofertas = lote(30, 1, 0.001);
+    const fl = [pagos, ofertas].map((c) => ({ tendencia: calcularTendencia(c, H), ciclos: c }));
+    const mezclado = calcularTendencia([...pagos, ...ofertas], H);
+    expect(mezclado.veredicto).toBe('mas_rapido'); // lo que daba antes: engañoso
+    expect(tendenciaEmpresa(fl, H)).toMatchObject({ veredicto: 'igual', cambioPct: 0 });
+  });
+
+  it('promedia los cambios de cada flujo pesados por sus casos recientes', () => {
+    const a = [...lote(30, 0, 2), ...lote(10, 40, 4)]; // −50 %, 30 recientes (días 0 a 29)
+    const b = [...lote(10, 1, 3), ...lote(10, 40, 2)]; // +50 %, 10 recientes
+    const fl = [a, b].map((c) => ({ tendencia: calcularTendencia(c, H), ciclos: c }));
+    expect(tendenciaEmpresa(fl, H)).toMatchObject({ cambioPct: -25, veredicto: 'mas_rapido' });
+  });
+
+  it('sin flujos comparables: sin datos', () => {
+    expect(tendenciaEmpresa([{ tendencia: calcularTendencia(lote(3, 1, 2), H), ciclos: lote(3, 1, 2) }], H).veredicto).toBe('sin_datos');
+  });
+});
+
+describe('criterio: ¿va bien o necesita mejoras?', () => {
+  const H = new Date('2026-11-09T12:00:00Z');
+  const vacio = (over: Partial<Parameters<typeof calificarFlujo>[0]> = {}) => ({
+    desde: '2026-05-13',
+    solicitudes: 2,
+    resueltas: 1,
+    cicloMedianaDias: 11.8,
+    cicloP90Dias: 11.8,
+    abiertas: 0,
+    devueltas: 0,
+    conRetrabajo: 0,
+    tendencia: calcularTendencia([], H),
+    ciclos: [],
+    tareas: [],
+    sugerencias: [],
+    ...over,
+  });
+
+  it('11,8 días con pocos casos = necesita mejoras (no «va bien»), y lo dice', () => {
+    const c = calificarFlujo(vacio(), 0);
+    expect(c.estado).toBe('necesita_mejoras');
+    expect(c.pocosCasos).toBe(true);
+    expect(c.motivos[0]).toContain('11,8 días');
+    expect(c.motivos.at(-1)).toContain('Con pocos casos: 1 solicitud resuelta');
+  });
+
+  it('4 días o sugerencias sin revisar = revisar; rápido y con casos = va bien; sin casos = pocos datos', () => {
+    expect(calificarFlujo(vacio({ cicloMedianaDias: 4, resueltas: 20 }), 0).estado).toBe('revisar');
+    expect(calificarFlujo(vacio({ cicloMedianaDias: 0.5, resueltas: 20 }), 2).estado).toBe('revisar');
+    expect(calificarFlujo(vacio({ cicloMedianaDias: 0.5, resueltas: 20 }), 0).estado).toBe('va_bien');
+    expect(calificarFlujo(vacio({ cicloMedianaDias: null, resueltas: 0 }), 0).estado).toBe('pocos_datos');
+  });
+
+  it('una tarea en rojo = necesita mejoras', () => {
+    const { solicitudes, instancias } = casos();
+    const d = diagnosticar({ ahora: AHORA, tareas, solicitudes, instancias, notas: [], erroresSap: [] });
+    expect(calificarFlujo(d, 0)).toMatchObject({ estado: 'necesita_mejoras', pocosCasos: false });
+  });
+});
+

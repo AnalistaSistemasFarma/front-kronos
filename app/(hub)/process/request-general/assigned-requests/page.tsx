@@ -73,6 +73,7 @@ import {
 } from '../../../../../components/request-general/list/RequestListUi';
 import requestListStyles from '../../../../../components/request-general/list/requestList.module.css';
 import WorkloadDistribution from '../../../../../components/request-general/WorkloadDistribution';
+import TeamTasksPanel, { useTeamAccess } from '../../../../../components/request-general/TeamTasksPanel';
 import { RequestFlowBar, useRequestFlows } from '../../../../../components/request-general/RequestFlow';
 import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
 import IosSearchField from '../../../../../components/ui/IosSearchField';
@@ -80,12 +81,14 @@ import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
 import { filterByText, requestSearchParts } from '../../../../../lib/requests-general/textSearch';
 import { RequestListFilters } from '../../../../../components/request-general/list/RequestListFilters';
 import {
+  ASSIGNED_STATE_OPTIONS,
   EMPTY_LIST_FILTERS,
   buildListOptions,
   countByStatusGroup,
   describeListFilters,
   matchesListFilters,
   splitPeople,
+  stateGroup,
   statusGroupOf,
   type ListFilters,
   type ListRow,
@@ -206,10 +209,19 @@ function RequestBoard() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const isMobile = useMediaQuery('(max-width: 48em)') ?? false;
   const [assignedTasks, setAssignedTasks] = useState<AssignedTask[]>([]);
+  // «Todo lo abierto»: tareas abiertas (no Resuelto/Cancelado, incluye Sin empezar) de las
+  // solicitudes que el usuario ve aquí, aunque estén asignadas a otra persona.
+  const [openAll, setOpenAll] = useState(false);
+  const [openScopeTasks, setOpenScopeTasks] = useState<AssignedTask[]>([]);
   const initialType = searchParams.get('type');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>(
     initialType === 'tasks' || initialType === 'requests' ? initialType : 'all'
   );
+  // Pestaña "Mi equipo": solo para quien tiene el permiso "Ver tareas de mi equipo" (Líder de solicitudes).
+  const teamAccess = useTeamAccess();
+  const canViewTeam = Boolean(teamAccess?.canViewTeam);
+  const [showTeam, setShowTeam] = useState(false);
+  const [teamCount, setTeamCount] = useState<number | null>(null);
   const [tasksByRequest, setTasksByRequest] = useState<Record<number, RequestTask[]>>({});
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -252,6 +264,7 @@ function RequestBoard() {
       row: {
         requestId: t.id,
         group: statusGroupOf(t.id_status_case, t.status),
+        statusId: t.id_status_case,
         companyId: String(t.id_company ?? ''),
         company: t.company,
         process: t.process,
@@ -260,11 +273,16 @@ function RequestBoard() {
       },
       parts: requestSearchParts(t),
     }));
-    const tasks: AssignedEntry[] = assignedTasks.map((t) => ({
+    const ownTaskIds = new Set(assignedTasks.map((t) => t.id));
+    const taskRows = openAll
+      ? [...assignedTasks, ...openScopeTasks.filter((t) => !ownTaskIds.has(t.id))]
+      : assignedTasks;
+    const tasks: AssignedEntry[] = taskRows.map((t) => ({
       item: { kind: 'task', key: `task-${t.id}`, data: t, createdAt: t.created_at },
       row: {
         requestId: t.id_request_general,
         group: statusGroupOf(t.id_status, t.status_task),
+        statusId: t.id_status,
         companyId: String(t.id_company ?? ''),
         company: t.company,
         process: t.process,
@@ -284,9 +302,13 @@ function RequestBoard() {
       ],
     }));
     return [...requests, ...tasks].sort((a, b) => byCreatedAtDesc(a.item, b.item));
-  }, [tickets, assignedTasks]);
+  }, [tickets, assignedTasks, openAll, openScopeTasks]);
 
-  const listOptions = useMemo(() => buildListOptions(allEntries.map((e) => e.row)), [allEntries]);
+  // «Estado» exacto (Sin empezar, Abierto, Cancelado, Resuelto, Devuelta): el filtro que había antes del panel.
+  const listOptions = useMemo(
+    () => ({ ...buildListOptions(allEntries.map((e) => e.row)), states: ASSIGNED_STATE_OPTIONS }),
+    [allEntries]
+  );
   // Buscador + filtros del panel (sin estado ni tipo): base de las tarjetas y las pestañas.
   const matchingEntries = useMemo(
     () =>
@@ -333,7 +355,36 @@ function RequestBoard() {
     setCurrentPage(1);
   }, [filters, deferredSearch, typeFilter]);
 
+  const fetchOpenScopeTasks = async () => {
+    try {
+      const res = await fetch('/api/requests-general/activities-assigned?status=0&scope=open');
+      if (!res.ok) throw new Error('Failed to fetch open tasks');
+      const data: unknown = await res.json();
+      setOpenScopeTasks(Array.isArray(data) ? (data as AssignedTask[]) : []);
+    } catch (err) {
+      console.error('Error fetching open tasks:', err);
+      setOpenScopeTasks([]);
+    }
+  };
+
+  // Encendido: estado «Pendientes» y se traen las tareas abiertas del alcance; la empresa se
+  // elige con el filtro Empresa del panel.
+  const toggleOpenAll = () => {
+    const next = !openAll;
+    setOpenAll(next);
+    if (next) {
+      // Un estado exacto que no sea pendiente (Resuelto, Cancelado) dejaría la lista vacía.
+      setFilters((f) => ({
+        ...f,
+        status: 'pending',
+        state: f.state && stateGroup(f.state) === 'pending' ? f.state : '',
+      }));
+      void fetchOpenScopeTasks();
+    }
+  };
+
   const clearListFilters = () => {
+    setOpenAll(false);
     setFilters(EMPTY_LIST_FILTERS);
     setSearchInput('');
     setTypeFilter('all');
@@ -1229,19 +1280,49 @@ function RequestBoard() {
                 }
               />
             </Box>
+            <Button
+              variant={openAll ? 'filled' : 'light'}
+              size={isMobile ? 'xs' : 'sm'}
+              onClick={toggleOpenAll}
+              aria-pressed={openAll}
+              data-testid='open-all-filter'
+            >
+              Todo lo abierto
+            </Button>
             <SegmentedControl
               fullWidth={isMobile}
               size={isMobile ? 'xs' : 'sm'}
               w={{ base: '100%', sm: 'auto' }}
-              value={typeFilter}
-              onChange={(value) => setTypeFilter(value as TypeFilter)}
+              value={showTeam ? 'team' : typeFilter}
+              onChange={(value) => {
+                if (value === 'team') {
+                  setShowTeam(true);
+                  return;
+                }
+                setShowTeam(false);
+                setTypeFilter(value as TypeFilter);
+              }}
               data={[
                 { value: 'all', label: `Todos (${kindCounts.all})` },
                 { value: 'requests', label: `Solicitudes (${kindCounts.requests})` },
                 { value: 'tasks', label: `Tareas (${kindCounts.tasks})` },
+                ...(canViewTeam
+                  ? [{ value: 'team', label: teamCount == null ? 'Mi equipo' : `Mi equipo (${teamCount})` }]
+                  : []),
               ]}
             />
           </Group>
+
+          {showTeam && teamAccess && canViewTeam ? (
+            <TeamTasksPanel
+              departments={teamAccess.departments}
+              renderStatusBadge={renderStatusBadge}
+              formatDate={formatAssignedDate}
+              onReassigned={() => void fetchTickets()}
+              onMembersCount={setTeamCount}
+            />
+          ) : (
+          <>
 
           {/* Móvil: tarjetas apiladas en lugar de la tabla ancha */}
           <Stack gap='xs' hiddenFrom='md' data-testid='assigned-mobile-list'>
@@ -1473,6 +1554,8 @@ function RequestBoard() {
                 size={isMobile ? 'sm' : 'md'}
               />
             </Group>
+          )}
+          </>
           )}
         </Card>
     </RequestsPage>

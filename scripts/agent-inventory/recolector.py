@@ -14,9 +14,18 @@ USO:
     recolector.py --ensayo --solo horus,cosmo
 
 CONFIGURACIÓN (fuera del repo, chmod 600):
-    ~/.horus/agent-inventory/collector.env
-        SYNERLINK_INVENTORY_URL=http://192.168.11.230:3030     # PRUEBAS
+    ~/.horus/agent-inventory/collector.env                     # PRUEBAS
+        SYNERLINK_INVENTORY_URL=http://192.168.11.230:3030
         SYNERLINK_INVENTORY_KEY=<llave del recolector, ≥32 caracteres>
+    ~/.horus/agent-inventory/collector-prod.env                # PRODUCCIÓN (opcional)
+        mismas variables, con la URL y la llave de producción.
+
+DESTINOS (2026-11-09, mismo patrón que agent-automation/analizador.py):
+    --conf RUTA (repetible) > INVENTORY_CONF (rutas separadas por «:») >
+    collector.env + collector-prod.env si existe. El escaneo se hace UNA vez y
+    se publica en cada destino por separado: si uno falla (caído, 500, llave
+    vencida), los demás siguen. En --ronda, cada destino atiende su propia
+    solicitud «Re-escanear»; si ninguno tiene una pendiente, no se escanea.
 
 DATOS DE EJECUCIÓN (1.1.0, hoja de vida completa, 2026-10-20): por agente,
 `runtime` con el modo de autenticación y la HUELLA de la credencial (12 hex
@@ -56,7 +65,8 @@ import urllib.request
 
 AQUI = pathlib.Path(__file__).resolve().parent
 FLOTA = json.loads((AQUI / 'flota.json').read_text(encoding='utf-8'))
-CONF = pathlib.Path(os.path.expanduser('~/.horus/agent-inventory/collector.env'))
+CONF = pathlib.Path(os.path.expanduser('~/.horus/agent-inventory/collector.env'))            # PRUEBAS
+CONF_PROD = pathlib.Path(os.path.expanduser('~/.horus/agent-inventory/collector-prod.env'))  # PRODUCCIÓN (opcional)
 VERSION = '1.1.0'
 
 # ── Escáner remoto ──────────────────────────────────────────────────────────
@@ -480,18 +490,29 @@ def escanear(solo=None):
     return agentes, errores
 
 
-def leer_conf():
+def leer_conf(ruta=CONF):
+    """(url, llave) de un archivo de configuración; None si falta o está incompleto."""
     conf = {}
-    if CONF.exists():
-        for linea in CONF.read_text().splitlines():
+    if ruta.exists():
+        for linea in ruta.read_text().splitlines():
             if '=' in linea and not linea.lstrip().startswith('#'):
                 k, v = linea.split('=', 1)
                 conf[k.strip()] = v.strip().strip('"')
     url = conf.get('SYNERLINK_INVENTORY_URL', '').rstrip('/')
     key = conf.get('SYNERLINK_INVENTORY_KEY', '')
     if not url or len(key) < 32:
-        sys.exit('Falta configurar %s (URL y llave de al menos 32 caracteres).' % CONF)
+        log('Falta configurar %s (URL y llave de al menos 32 caracteres).' % ruta)
+        return None
     return url, key
+
+
+def destinos(args):
+    """--conf (repetible) > INVENTORY_CONF > collector.env + collector-prod.env si existe."""
+    rutas = [args[i + 1] for i, x in enumerate(args) if x == '--conf' and i + 1 < len(args)]
+    if not rutas and os.environ.get('INVENTORY_CONF'):
+        rutas = [r for r in os.environ['INVENTORY_CONF'].split(':') if r]
+    rutas = [pathlib.Path(os.path.expanduser(r)) for r in rutas] or [CONF] + ([CONF_PROD] if CONF_PROD.exists() else [])
+    return [d for d in (leer_conf(r) for r in rutas) if d]
 
 
 def llamar(url, key, ruta, cuerpo):
@@ -505,6 +526,9 @@ def llamar(url, key, ruta, cuerpo):
             return e.code, json.loads(e.read().decode('utf-8') or '{}')
         except Exception:
             return e.code, {}
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        # Un destino caído no frena a los demás.
+        return 'sin conexión', {'error': str(getattr(e, 'reason', e))[:200]}
 
 
 def log(msg):
@@ -522,33 +546,48 @@ def main():
         print(json.dumps({'agents': agentes, 'errors': errores}, ensure_ascii=False, indent=1))
         return
 
-    url, key = leer_conf()
-    scan_id = None
-    if '--ronda' in args:
+    ronda = '--ronda' in args
+    if not ronda and '--nocturno' not in args:
+        sys.exit(__doc__)
+    lista = destinos(args)
+    if not lista:
+        sys.exit('Ningún destino configurado (collector.env / collector-prod.env).')
+
+    # (url, key, scan_id): en --ronda solo los destinos con una solicitud pendiente, cada uno con la suya.
+    trabajo, fallas = [], 0
+    for url, key in lista:
+        if not ronda:
+            trabajo.append((url, key, None))
+            continue
         code, body = llamar(url, key, '/api/chat/auditoria/inventario/solicitudes', {})
         if code != 200:
-            log('no se pudo consultar solicitudes: HTTP %s' % code)
-            sys.exit(1)
+            log('%s: no se pudo consultar solicitudes: HTTP %s' % (url, code))
+            fallas += 1
+            continue
         sol = body.get('solicitud')
         if not sol:
-            return  # nada pendiente: silencio, corre cada pocos minutos
-        scan_id = sol['id']
-        log('tomada la solicitud #%s' % scan_id)
-    elif '--nocturno' not in args:
-        sys.exit(__doc__)
+            continue  # nada pendiente en ese destino: silencio, corre cada pocos minutos
+        trabajo.append((url, key, sol['id']))
+        log('%s: tomada la solicitud #%s' % (url, sol['id']))
+    if not trabajo:
+        sys.exit(1 if fallas == len(lista) else 0)
 
     inicio = datetime.datetime.now(datetime.timezone.utc).isoformat()
     agentes, errores = escanear(solo)
-    cuerpo = {'collector': {'host': socket.gethostname(), 'version': VERSION}, 'startedAt': inicio,
-              'agents': agentes, 'errors': errores}
-    if scan_id:
-        cuerpo['scanRequestId'] = scan_id
-    code, body = llamar(url, key, '/api/chat/auditoria/inventario', cuerpo)
-    if code != 200:
-        log('publicación rechazada: HTTP %s %s' % (code, body.get('error', '')))
+    for url, key, scan_id in trabajo:
+        cuerpo = {'collector': {'host': socket.gethostname(), 'version': VERSION}, 'startedAt': inicio,
+                  'agents': agentes, 'errors': errores}
+        if scan_id:
+            cuerpo['scanRequestId'] = scan_id
+        code, body = llamar(url, key, '/api/chat/auditoria/inventario', cuerpo)
+        if code != 200:
+            log('%s: publicación rechazada: HTTP %s %s' % (url, code, body.get('error', '')))
+            fallas += 1
+            continue
+        log('%s: publicado: solicitud #%s, %d agentes guardados, ignorados: %s, novedades: %s' % (
+            url, body.get('scanRequestId'), len(body.get('guardados') or []), body.get('ignorados') or 'ninguno', errores or 'ninguna'))
+    if fallas:
         sys.exit(1)
-    log('publicado: solicitud #%s, %d agentes guardados, ignorados: %s, novedades: %s' % (
-        body.get('scanRequestId'), len(body.get('guardados') or []), body.get('ignorados') or 'ninguno', errores or 'ninguna'))
 
 
 if __name__ == '__main__':
