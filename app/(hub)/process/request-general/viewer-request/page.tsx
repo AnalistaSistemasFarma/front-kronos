@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useDeferredValue, Suspense } from 'react';
+import { useState, useEffect, useMemo, useDeferredValue, useRef, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
@@ -47,6 +47,12 @@ import { RequestListFilters } from '../../../../../components/request-general/li
 import AutoRefreshNote from '../../../../../components/ui/AutoRefreshNote';
 import IosSearchField from '../../../../../components/ui/IosSearchField';
 import { useAutoRefresh } from '../../../../../components/ui/useAutoRefresh';
+import { useRequestListPersistence } from '../../../../../components/request-general/list/useRequestListPersistence';
+import {
+  loadLastViewed,
+  pageOfItem,
+  saveRequestListNav,
+} from '../../../../../lib/requests-general/requestListNav';
 import { filterByText, requestSearchParts } from '../../../../../lib/requests-general/textSearch';
 import {
   EMPTY_LIST_FILTERS,
@@ -192,6 +198,31 @@ function ViewerRequestGeneralPage() {
     (currentPage - 1) * ITEMS_PER_PAGE,
     currentPage * ITEMS_PER_PAGE
   );
+
+  // Orden exacto en pantalla para «Anterior / Siguiente» del detalle.
+  const visibleNavItems = useMemo(
+    () => visibleTickets.map((t) => ({ kind: 'request' as const, id: Number(t.id) })),
+    [visibleTickets]
+  );
+  // Filtros, búsqueda y página se conservan al volver del detalle (breadcrumb o atrás).
+  const pendingPageRef = useRef<number | null>(null);
+  const { hydrated: listHydrated } = useRequestListPersistence(
+    'viewer-request',
+    { filters, search: searchInput, page: currentPage },
+    (saved) => {
+      setFilters(saved.filters);
+      setSearchInput(saved.search);
+      pendingPageRef.current = saved.page ?? null;
+    },
+    !loading
+  );
+  useEffect(() => {
+    if (!listHydrated || loading || pendingPageRef.current === null) return;
+    const page =
+      pageOfItem(visibleNavItems, loadLastViewed('viewer-request'), ITEMS_PER_PAGE) ?? pendingPageRef.current;
+    pendingPageRef.current = null;
+    setCurrentPage(Math.min(page, totalPages));
+  }, [listHydrated, loading, visibleNavItems, totalPages]);
 
   const clearListFilters = () => {
     setFilters(EMPTY_LIST_FILTERS);
@@ -527,6 +558,10 @@ function ViewerRequestGeneralPage() {
                     className='cursor-pointer transition-colors'
                     onClick={() => {
                       sessionStorage.setItem('selectedRequest', JSON.stringify(ticket));
+                      saveRequestListNav('viewer-request', visibleNavItems, {
+                        kind: 'request',
+                        id: Number(ticket.id),
+                      });
                       window.open(
                         `/process/request-general/view-request?id=${ticket.id}&from=viewer-request`
                       );
